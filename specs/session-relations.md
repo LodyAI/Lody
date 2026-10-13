@@ -88,7 +88,18 @@ source. Desktop local operations use the local data plane and do not require clo
 connectivity. CLI archive, restore, and delete require successful synchronization
 before discovery, including when initialization continued in degraded mode.
 
-An action captures its runtime and checks it is still current before the first write.
+Manual archive offers Cancel, Archive when finished, and Archive immediately in one
+shared confirmation. The waiting choice and PR auto-archive persist a group request;
+all targets remain active while known running work, finalization, active Goals,
+attachment-held sends, or any queue entries remain. Deferred groups include new
+descendants discovered before commitment. Unknown/offline owners cannot attest idle.
+Preparation fences execution admission before owners acknowledge readiness; cancellation
+before commitment retires the request without stopping work. Explicit immediate archive
+retains interruption and held-send cancellation. Batch archive uses one union of targets.
+The protocol requires participating owners to advertise deferred-archive support; it
+never silently falls back to immediate archive.
+
+An immediate action captures its runtime and checks it is still current before the first write.
 Once writes begin, the action retains that runtime and target set. This guarantees
 the observed Repo snapshot, not completeness across disconnected replicas or an
 atomic barrier against later creation. Exact deletion and ordinary Tab closure do

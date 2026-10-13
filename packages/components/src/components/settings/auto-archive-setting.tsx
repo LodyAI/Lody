@@ -18,7 +18,7 @@ export function AutoArchiveSection() {
       title={t('settings.autoArchive.title', 'Auto-archive sessions')}
       description={t(
         'settings.autoArchive.description',
-        'Archive keeps chats and local branches, but the owning machine may remove the worktree. Files ignored by Git or changed/deleted by cleanup scripts may be lost. Save important files outside the worktree first. These rules run only here, for your sessions.'
+        'Auto-archive waits for the conversation group and all queued messages to finish. Archive keeps chats and local branches, but the owning machine may remove the worktree. Files ignored by Git or changed/deleted by cleanup scripts may be lost. Save important files outside the worktree first. These rules run only here, for your sessions.'
       )}
     >
       <CompactRow

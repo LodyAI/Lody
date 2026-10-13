@@ -15,6 +15,19 @@ CLI/MCP orchestration contract is specs/session-orchestration.md.
 | Execution        | [Execution service](session-execution-service.ts) | Owns turns, steer results, cancellation, and raw-request drain.                      |
 | Process lifetime | [Session](session.ts)                             | Owns ACP resources, confirmed termination, and bounded Codex refresh-start recovery. |
 
+## Deferred archive
+
+`session-archive-coordinator.ts` reconciles durable group requests on their owning
+machines. Each owner reads only linked target documents, checks the full queue and
+execution/persistence state, then acquires the existing rewrite barrier before
+publishing prepared readiness. The root owner records a recoverable commit decision;
+owners apply `isArchived`, using the existing runtime/worktree cleanup watchers.
+Cancellation has its own request-id tombstone so a stale request-object write cannot
+resurrect it. Offline/unsupported owners never count as ready. Metadata changes and
+dispatch completion trigger reconciliation; a bounded retry timer covers failed writes.
+Active Goal checks reuse MessageHandler's persistent Goal resolver for these explicit
+targets; this is not live-presence discovery or a scan of historical conversations.
+
 ## Files
 
 - `session-dispatch-watcher.ts` — the current dispatch entry: watches

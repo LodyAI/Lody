@@ -1,4 +1,9 @@
 import {
+  requestDeferredSessionArchive,
+  cancelSessionArchive,
+  type SessionArchivePorts,
+} from '@lody/shared';
+import {
   assertMachineFlockCacheSufficient,
   validateWithMachineFlockFreshness,
   type MachineFlockFreshness,
@@ -63,6 +68,7 @@ import {
   resolveActiveAssistantTurnId,
   getServerNow,
   getSessionRoomId,
+  getMachineRoomId,
   getSessionIdFromRoomId,
   isLoroRepoDocDeleted,
   isMachineDocRoomId,
@@ -1035,6 +1041,18 @@ export async function runSessionOperationWithSyncedMetadata(
   const [root, ...descendants] = targets;
   if (operation !== 'archive' && root.isArchived !== true) {
     throw new Error(`Session ${sessionId} is not archived.`);
+  }
+  if (operation === 'archive' || operation === 'restore') {
+    for (const target of targets) {
+      const requestRootId = target.archivePending?.rootId ?? target.id;
+      const requestRoot = (await manager.repo.getDocMeta(getSessionRoomId(requestRootId)))?.meta as
+        | SessionMeta
+        | undefined;
+      if (requestRoot?.archiveRequest)
+        await manager.repo.upsertDocMeta(getSessionRoomId(requestRootId), {
+          archiveCancelledRequestId: requestRoot.archiveRequest.id,
+        } as Partial<SessionMeta>);
+    }
   }
   // Keep the root discoverable if deleting a child fails. Writes are not a
   // transaction; each owning machine observes state and reconciles resources.
@@ -3500,6 +3518,8 @@ export async function resolveEffectiveSessionCreateDispatchConfig(args: {
 export function buildSessionArchiveMetaPatch(): Partial<SessionMeta> {
   return {
     isArchived: true,
+    archivePending: null,
+    archiveReadiness: null,
     status: SessionStatusFactory.idle(),
   };
 }
@@ -3507,6 +3527,8 @@ export function buildSessionArchiveMetaPatch(): Partial<SessionMeta> {
 export function buildSessionRestoreMetaPatch(): Partial<SessionMeta> {
   return {
     isArchived: false,
+    archivePending: null,
+    archiveReadiness: null,
   };
 }
 
@@ -5419,40 +5441,106 @@ const sessionRenameCommand = new Command('rename')
   );
 
 const sessionArchiveCommand = new Command('archive')
-  .description('Archive a session')
+  .description('Archive a session after its conversation group finishes')
+  .option('--immediate', 'Interrupt unfinished work and archive immediately')
+  .option('--cancel-pending', 'Cancel a pending archive without stopping work')
   .option('--workspace <selector>', 'Target workspace id, slug, or name')
   .option('--json', 'Print JSON output')
   .option('--debug', 'Enable debug output')
   .argument('[sessionId]', 'Session ID; falls back to LODY_SESSION_ID')
-  .action(async (sessionIdArg: string | undefined, options: CommonOptions) => {
-    await runSessionCommand(options, async () => {
-      const auth = getAuthContextOrThrow();
-      const sessionId = (normalizeCliValue(sessionIdArg) ??
-        normalizeCliValue(process.env.LODY_SESSION_ID)) as SessionId | undefined;
-      if (!sessionId) {
-        throw new Error('Missing session ID. Pass one explicitly or set LODY_SESSION_ID.');
-      }
-
-      const workspace = await resolveWorkspaceForSessionOrThrow(auth, sessionId, {
-        workspace: options.workspace,
-        reason: `session.archive:${sessionId}:resolve`,
-      });
-      await withWorkspaceManager(auth, workspace, async (manager) => {
-        const childSessionIds = await runSessionOperationWithSyncedMetadata(
-          manager,
-          sessionId,
-          'archive'
-        );
-
-        if (options.json) {
-          printJson({ ok: true, sessionId, archivedChildSessionIds: childSessionIds });
-          return;
+  .action(
+    async (
+      sessionIdArg: string | undefined,
+      options: CommonOptions & { immediate?: boolean; cancelPending?: boolean }
+    ) => {
+      await runSessionCommand(options, async () => {
+        const auth = getAuthContextOrThrow();
+        const sessionId = (normalizeCliValue(sessionIdArg) ??
+          normalizeCliValue(process.env.LODY_SESSION_ID)) as SessionId | undefined;
+        if (!sessionId) {
+          throw new Error('Missing session ID. Pass one explicitly or set LODY_SESSION_ID.');
         }
 
-        console.log(`Archived ${sessionId}`);
+        const workspace = await resolveWorkspaceForSessionOrThrow(auth, sessionId, {
+          workspace: options.workspace,
+          reason: `session.archive:${sessionId}:resolve`,
+        });
+        await withWorkspaceManager(auth, workspace, async (manager) => {
+          if (options.immediate && options.cancelPending)
+            throw new Error('Choose either --immediate or --cancel-pending.');
+          if (!options.immediate) {
+            await syncWorkspaceMetaForRead(manager, `session.archive:${sessionId}:prewrite`);
+            const targets = await readSessionOperationTargets(manager.repo, sessionId, 'archive');
+            if (!options.cancelPending && targets.every((target) => target.isArchived)) {
+              if (options.json)
+                printJson({
+                  ok: true,
+                  sessionId,
+                  state: 'archived',
+                  targetSessionIds: targets.map((target) => target.id),
+                });
+              else console.log(`Already archived ${sessionId}`);
+              return;
+            }
+            const ports: SessionArchivePorts = {
+              read: async (id) =>
+                (await manager.repo.getDocMeta(getSessionRoomId(id)))?.meta as
+                  | SessionMeta
+                  | undefined,
+              write: async (id, patch) => {
+                await manager.repo.upsertDocMeta(getSessionRoomId(id), patch);
+              },
+              readMachine: async (id) =>
+                (await manager.repo.getDocMeta(getMachineRoomId(id)))?.meta as
+                  | MachineMeta
+                  | undefined,
+            };
+            if (options.cancelPending) {
+              await cancelSessionArchive(ports, targets[0]);
+            } else {
+              await requestDeferredSessionArchive(ports, {
+                id: crypto.randomUUID(),
+                roots: [sessionId],
+                targets,
+                source: 'manual',
+              });
+            }
+            await ensureWorkspaceMetaSynced(manager, `session.archive:${sessionId}`);
+            const state = options.cancelPending ? 'cancelled' : 'pending';
+            if (options.json)
+              printJson({
+                ok: true,
+                sessionId,
+                state,
+                targetSessionIds: targets.map((target) => target.id),
+              });
+            else
+              console.log(
+                `${state === 'pending' ? 'Archive pending for' : 'Cancelled pending archive for'} ${sessionId}`
+              );
+            return;
+          }
+          const childSessionIds = await runSessionOperationWithSyncedMetadata(
+            manager,
+            sessionId,
+            'archive'
+          );
+
+          if (options.json) {
+            printJson({
+              ok: true,
+              sessionId,
+              state: 'archived',
+              archivedChildSessionIds: childSessionIds,
+            });
+            return;
+          }
+
+          console.log(`Archived ${sessionId}`);
+        });
       });
-    });
-  });
+    }
+  );
 
 const sessionRestoreCommand = new Command('restore')
   .description('Restore an archived session')

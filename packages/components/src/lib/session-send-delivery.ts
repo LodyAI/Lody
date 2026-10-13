@@ -1,3 +1,4 @@
+import { isSessionArchiveFenced } from '@lody/shared';
 import {
   getSessionRoomId,
   isLoroRepoDocDeleted,
@@ -91,6 +92,10 @@ export async function writeUserTurn(
   const found = await runtime.repo.getDocMeta(roomId);
   if (isLoroRepoDocDeleted(found)) throw new Error('Target conversation was deleted');
   const meta = found?.meta as SessionMeta | undefined;
+  if (meta?.isArchived || (meta && isSessionArchiveFenced(meta)))
+    throw new Error(
+      'Conversation is being archived. Cancel pending archive or restore it before sending.'
+    );
   throwIfSendAborted(signal);
   if (send.creation) {
     // Target routing resolves the owning machine from this metadata, so it
@@ -145,7 +150,12 @@ export async function dispatchUserTurn(
   void runtime.sendResources
     .withSessionStore(sessionId, (store, signal) => store.waitUntilSynced(signal))
     .catch((error: unknown) => {
-      log('session doc sync after dispatch request failed for %s/%s: %o', sessionId, userTurnId, error);
+      log(
+        'session doc sync after dispatch request failed for %s/%s: %o',
+        sessionId,
+        userTurnId,
+        error
+      );
     });
   const machineId = options?.machineId ?? (await readMachineId(runtime, sessionId));
   let rpc: Promise<boolean> = Promise.resolve(false);

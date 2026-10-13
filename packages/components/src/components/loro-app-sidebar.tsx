@@ -1863,8 +1863,13 @@ export function LoroAppSidebar({
     [postHog, setShowUpdatedProjectNames]
   );
   const sessionSidebarCodeChangesOnly = useAtomValue(sessionSidebarCodeChangesOnlyAtom);
-  const { archiveSession, markSessionUnread, setSessionPinned, updateSessionTitle } =
-    useSessionActions();
+  const {
+    requestArchiveSession: archiveSession,
+    requestArchiveSessions,
+    markSessionUnread,
+    setSessionPinned,
+    updateSessionTitle,
+  } = useSessionActions();
   const { removeLocalProject, preflightLocalProjectRemoval, getRemoveLocalProjectImpact } =
     useRemoveLocalProject();
   const presenceStates = useAtomValue(lodyPresenceStatesAtom);
@@ -1873,8 +1878,9 @@ export function LoroAppSidebar({
   const handleArchiveSession = useCallback(
     (sessionId: string) => {
       void archiveSession(sessionId as SessionId)
-        .then(async () => {
-          if (!workspaceSlug || selectedSessionIdRef.current !== sessionId) return;
+        .then(async (result) => {
+          if (result !== 'archived' || !workspaceSlug || selectedSessionIdRef.current !== sessionId)
+            return;
           await router.navigate({
             to: '/$workspaceName/chat',
             params: { workspaceName: workspaceSlug },
@@ -2181,10 +2187,8 @@ export function LoroAppSidebar({
   const handleArchiveProjectChats = useCallback(
     (sessionIds: string[]) => {
       void (async () => {
-        for (const sessionId of sessionIds) {
-          await archiveSession(sessionId as SessionId);
-        }
-        if (!workspaceSlug) return;
+        const result = await requestArchiveSessions(sessionIds as SessionId[]);
+        if (result !== 'archived' || !workspaceSlug) return;
         if (!selectedSessionId || !sessionIds.includes(selectedSessionId)) return;
         await router.navigate({
           to: '/$workspaceName/chat',
@@ -2194,7 +2198,7 @@ export function LoroAppSidebar({
         toast.error(error instanceof Error ? error.message : String(error));
       });
     },
-    [archiveSession, router, selectedSessionId, workspaceSlug]
+    [requestArchiveSessions, router, selectedSessionId, workspaceSlug]
   );
 
   const handleRevealProject = useCallback(

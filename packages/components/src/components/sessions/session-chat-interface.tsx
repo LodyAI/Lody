@@ -1,3 +1,4 @@
+import { SessionPendingArchiveIndicator } from '../session-pending-archive-indicator';
 import { useIosSimulatorPreviewRequest } from './ios-simulator/use-ios-simulator-preview-request';
 import { createLoroSyncErrorTools } from '@lody/shared/loro-sync-errors';
 import { RepoSyncError, RepoTransportError } from 'loro-repo';
@@ -6556,11 +6557,16 @@ export const SessionChatInterface = memo(
           />
         </div>
       ) : null;
-    const headerArchivedNode = session.isArchived === true ? <SessionArchivedBadge /> : null;
+    const headerArchivedNode =
+      session.isArchived === true ? (
+        <SessionArchivedBadge />
+      ) : (
+        <SessionPendingArchiveIndicator sessionId={session.id} />
+      );
 
     return (
       <PrLinkProvider prUrl={latestPr?.url} onOpenPrTab={prLinkHandler}>
-    <SessionLinkProvider enabled={!!onNavigateSession}>
+        <SessionLinkProvider enabled={!!onNavigateSession}>
           {isVisible &&
             !preparingWindow &&
             onOpenBrowser &&

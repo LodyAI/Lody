@@ -1030,6 +1030,11 @@ export type SessionMeta = {
   userId: string;
   status?: SessionStatus;
   isArchived?: boolean;
+  archiveRequest?: import('./session-archive').SessionArchiveRequest | null;
+  /** Separate tombstone so a late readiness/held-send update cannot resurrect cancellation. */
+  archiveCancelledRequestId?: string;
+  archivePending?: import('./session-archive').SessionArchiveLink | null;
+  archiveReadiness?: import('./session-archive').SessionArchiveReadiness | null;
   /** User-owned tree execution barrier; inherited through containment and precise opener links. */
   collaborationStopped?: boolean;
   /** Shared tab visibility only; closing never changes the session lifecycle. */

@@ -1,3 +1,4 @@
+import { SessionPendingArchiveIndicator } from './session-pending-archive-indicator';
 import {
   useId,
   useState,
@@ -688,22 +689,25 @@ export function SidebarRowEndSlot({
   return (
     // pointer-events-none so the resting PR icon area still passes clicks through to
     // the row's navigation; the Archive button re-enables pointer events on hover.
-    <div
-      data-session-row-end-slot=""
-      className={cn(
-        'relative flex h-5 shrink-0 items-center justify-center pointer-events-none',
-        reserve ? 'min-w-5' : 'w-0'
-      )}
-    >
-      {hasRest ? (
-        <span
-          className={cn('flex', archive && cn('transition-opacity duration-100', fadeClassName))}
-        >
-          {restContent}
-        </span>
-      ) : null}
-      {archive}
-    </div>
+    <>
+      {sessionId ? <SessionPendingArchiveIndicator sessionId={sessionId} /> : null}
+      <div
+        data-session-row-end-slot=""
+        className={cn(
+          'relative flex h-5 shrink-0 items-center justify-center pointer-events-none',
+          reserve ? 'min-w-5' : 'w-0'
+        )}
+      >
+        {hasRest ? (
+          <span
+            className={cn('flex', archive && cn('transition-opacity duration-100', fadeClassName))}
+          >
+            {restContent}
+          </span>
+        ) : null}
+        {archive}
+      </div>
+    </>
   );
 }
 

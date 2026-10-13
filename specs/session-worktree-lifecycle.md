@@ -7,8 +7,18 @@ Translation: current
 
 A user archives a Session that ran in its own worktree. Lody must eventually remove
 that worktree directory from the machine that owns it, keep the branch so the Session
-can be restored, and do so without any request, acknowledgement, or queue: the
-archived state of the Session is the only input.
+can be restored. Disk cleanup itself has no request, acknowledgement, or queue:
+the committed archived state of the Session is its only input.
+
+## Deferred archive admission
+
+Archive intent is separate from `isArchived`. Manual confirmation retains immediate
+archive and offers waiting for the whole conversation group; PR auto-archive always
+requests waiting. The owner coordinator waits for execution, output persistence,
+active Goals and the entire queue before committing archived metadata. Pending
+archive does not release runtime resources or trigger worktree cleanup. Canceling
+pending archive leaves execution running; immediate archive keeps the existing
+shutdown path. Once `isArchived` is committed, the cleanup contract below is unchanged.
 
 ## Scenario
 

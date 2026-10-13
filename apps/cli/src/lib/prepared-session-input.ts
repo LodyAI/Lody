@@ -1,4 +1,4 @@
-import { normalizeSessionTurnInputConfig } from '@lody/shared';
+import { isSessionArchiveFenced, normalizeSessionTurnInputConfig } from '@lody/shared';
 import { isDeepStrictEqual } from 'node:util';
 import {
   getSessionRoomId,
@@ -73,6 +73,10 @@ export async function materializePreparedSessionInput(
   if (existing && isLoroRepoDocDeleted(existing)) throw new Error('Prepared Session was deleted');
   if (existing?.meta && (existing.meta as SessionMeta).id) {
     const meta = existing.meta as SessionMeta;
+    if (meta.isArchived || isSessionArchiveFenced(meta))
+      throw new Error(
+        'Conversation is being archived; cancel pending archive or restore it before sending.'
+      );
     if (
       meta.id !== prepared.sessionId ||
       meta.machineId !== prepared.meta.machineId ||
@@ -115,6 +119,13 @@ export async function commitPreparedSessionDispatch(
   prepared: PreparedSessionInput
 ): Promise<void> {
   if (await isPreparedSessionDispatched(manager, prepared)) return;
+  const meta = (await manager.repo.getDocMeta(getSessionRoomId(prepared.sessionId)))?.meta as
+    | SessionMeta
+    | undefined;
+  if (meta?.isArchived || (meta && isSessionArchiveFenced(meta)))
+    throw new Error(
+      'Conversation is being archived; cancel pending archive or restore it before sending.'
+    );
   await manager.repo.upsertDocMeta(getSessionRoomId(prepared.sessionId), {
     latestUserMsgId: prepared.userTurn.id,
     lastMissingHistoryUserMsgId: undefined,

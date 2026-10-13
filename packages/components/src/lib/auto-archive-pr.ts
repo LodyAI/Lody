@@ -1,5 +1,6 @@
 import type { PrStatus, SessionPullRequestMeta } from '@lody/shared';
-import { getSessionPullRequestLegacyFields } from '@lody/shared';
+import { pickLatestSessionArchivePr as pickLatestPr } from '@lody/shared';
+export { pickLatestPr };
 
 export type AutoArchivePrSnapshot = {
   url: string;
@@ -10,31 +11,6 @@ export type AutoArchivePrDecision = {
   shouldArchive: boolean;
   status: PrStatus | null;
 };
-
-export function pickLatestPr(
-  prs: SessionPullRequestMeta[] | undefined
-): SessionPullRequestMeta | null {
-  if (!prs || prs.length === 0) return null;
-  let latest = prs[0];
-  if (!latest) return null;
-  for (let i = 1; i < prs.length; i++) {
-    const candidate = prs[i];
-    if (!candidate) continue;
-    // ISO 8601 timestamps sort lexicographically, so plain `>` is correct and cheaper.
-    const candidateReportedAt = getSessionPullRequestLegacyFields(candidate).reportedAt;
-    const latestReportedAt = getSessionPullRequestLegacyFields(latest).reportedAt;
-    if (candidateReportedAt || latestReportedAt) {
-      if ((candidateReportedAt ?? '') > (latestReportedAt ?? '')) {
-        latest = candidate;
-      }
-      continue;
-    }
-    if (i > 0) {
-      latest = candidate;
-    }
-  }
-  return latest;
-}
 
 export function getAutoArchivePrSnapshot(
   prs: SessionPullRequestMeta[] | undefined

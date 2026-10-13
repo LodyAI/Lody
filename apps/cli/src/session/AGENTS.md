@@ -2,20 +2,17 @@
 
 `CLAUDE.md` is a symlink to this file. Edit `AGENTS.md` only.
 
-Module map and contracts: [README.md](README.md).
-Worktree rules: [worktree/AGENTS.md](worktree/AGENTS.md).
+[Module contracts](README.md); [worktree rules](worktree/AGENTS.md).
 
 ## Authorization and identity
 
 - Authorize the target machine through the injected access capability with the source CLI token;
   MCP delegation verifies the frozen Turn requester; Operation-side rules are in
   [../mcp/AGENTS.md](../mcp/AGENTS.md).
-- Never send an untrusted requester through workspace Machine RPC: it authenticates no member
-  identity.
-- Live status is a target-daemon Machine RPC read; durable metadata is not a live-presence
-  substitute.
-- Derive the human identity from the active dispatch/execution runtime and fail closed when none
-  exists; retries and recovery never reread mutable history.
+- Workspace Machine RPC authenticates no member identity; never send untrusted requesters.
+- Read live status from target-daemon Machine RPC, never durable metadata.
+- Derive human identity from active dispatch/execution; fail closed if absent. Retries/recovery
+  never reread mutable history.
 - Machine/Provider credentials stay host-scoped. Attribution, authorization and commits
   use the frozen Turn identity; GitHub network auth uses the trusted conversation owner.
 - Git: owner uses local config, no profile query; others never read it.
@@ -24,7 +21,7 @@ Worktree rules: [worktree/AGENTS.md](worktree/AGENTS.md).
 
 ## Dispatch
 
-- Queue promotion preserves frozen fields; remove its row only after history and activation succeed.
+- Queue promotion preserves frozen fields; remove rows only after history and activation succeed.
 - Absent session meta is "unknown", not foreign: hold the TTL-bounded RPC stash until meta lands;
   drop it only on a definitive verdict.
 - Subscribe to RPC offers BEFORE awaiting Doc Room join/sync and never dispatch from the RPC
@@ -38,8 +35,7 @@ Worktree rules: [worktree/AGENTS.md](worktree/AGENTS.md).
   pointers in a consumer.
 - Never inspect historical Session documents to infer work, or publish or clear active presence
   here (`../lib/loro/session-active-presence.ts`).
-- Keep bootstrap and live reconciliation bounded as README describes; add no per-trigger scan or
-  extra throttle.
+- Keep reconciliation bounded per README; add no per-trigger scan or throttle.
 
 ## Turn execution
 
@@ -68,10 +64,13 @@ Worktree rules: [worktree/AGENTS.md](worktree/AGENTS.md).
 - A turn with no ACP updates takes `recordSilentTurnFailure`, not `setDispatchHandled`.
   Read `turnProducedVisibleOutput` before `finalizeTurn` clears it; still finalize, advance
   the pointer, and fail open.
-- Diff content comes only from the CLI-local ACP evidence store; GitHub `diffStats` use PR compare
-  semantics, and `session-diff-stats-target.ts` skips rather than overwrites a good total.
+- Diff content uses CLI-local ACP evidence only; GitHub `diffStats` use PR compare semantics.
+  `session-diff-stats-target.ts` skips rather than overwrites a good total.
 
 ## Lifecycle
+
+- Deferred archive waits for group execution, persistence, Goals and all queued/held input,
+  never `idle`; immediate archive may interrupt. [Contract](README.md#deferred-archive).
 
 - Roost: [contract](README.md#roost-history-paging). Await owner/backend meta;
   no keyring/rotation/fallback/replay. Causes local, RPC stage/code/ID.
@@ -91,7 +90,7 @@ Worktree rules: [worktree/AGENTS.md](worktree/AGENTS.md).
 - Peek/claim are synchronous; publish before `start()`. Peek never transfers ownership.
   Cold/replacement starts await same-session cleanup; failures block, including late creation.
   Before adoption: marked worktree and `newSession` only; no doc, setup, history or events.
-- Credentials are runtime leases: adopt retains, dispose releases that generation; local has none.
+- Runtime leases: adopt retains, dispose releases the generation; local has none.
 - Dispatch/claim rescan `buildSessionLaunchConfig`; await incompatible cleanup.
 - Nested child Sessions are rejected: ownership resolves one parent hop only.
 - Fork and continuation share `resolveSessionAcpTargetId`; source runtime config copies only at its matching user-turn fence.

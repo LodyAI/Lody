@@ -1,3 +1,12 @@
+import { sessionArchiveDialogAtom } from '@/atoms/session-archive';
+import {
+  requestDeferredSessionArchive,
+  cancelSessionArchive,
+  type SessionArchiveResult,
+  type SessionArchiveMode,
+  type SessionArchiveRequest,
+  type MachineMeta,
+} from '@lody/shared';
 import type { SessionAttachmentDraft } from '@/lib/session-attachment-draft';
 import { useCallback, useMemo } from 'react';
 import { useCloudMutation } from '@lody/platform/react';
@@ -263,7 +272,25 @@ export type SessionActions = {
   markSessionUnread: (sessionId: SessionId) => Promise<void>;
   /** Delete exactly the supplied Sessions without discovering related Sessions. */
   deleteSessions: (sessionIds: SessionId[]) => Promise<void>;
+  /** Low-level immediate archive, retained for explicit stop-and-archive. */
   archiveSession: (sessionId: SessionId) => Promise<void>;
+  requestArchiveSession: (
+    sessionId: SessionId,
+    options?: {
+      mode?: SessionArchiveMode;
+      source?: 'manual' | 'pr';
+      pr?: SessionArchiveRequest['pr'];
+    }
+  ) => Promise<SessionArchiveResult>;
+  requestArchiveSessions: (
+    sessionIds: SessionId[],
+    options?: {
+      mode?: SessionArchiveMode;
+      source?: 'manual' | 'pr';
+      pr?: SessionArchiveRequest['pr'];
+    }
+  ) => Promise<SessionArchiveResult>;
+  cancelPendingArchive: (sessionId: SessionId) => Promise<void>;
   setTreeCollaborationStopped: (sessionId: SessionId, stopped: boolean) => Promise<void>;
   setSessionTabClosed: (sessionId: SessionId, closed: boolean) => Promise<void>;
   restoreSession: (sessionId: SessionId) => Promise<void>;
@@ -798,11 +825,26 @@ export function useSessionActions(): SessionActions {
       }
       // Held follow-ups would otherwise be written into archived conversations.
       await runtime.pendingSends?.cancelSessions(archiveTargets.map((session) => session.id));
+      const cancelled = new Set<SessionId>();
+      for (const session of archiveTargets) {
+        const rootId = session.archivePending?.rootId ?? session.id;
+        if (cancelled.has(rootId)) continue;
+        cancelled.add(rootId);
+        const root = (await runtime.repo.getDocMeta(getSessionRoomId(rootId)))?.meta as
+          | SessionMeta
+          | undefined;
+        if (root?.archiveRequest)
+          await runtime.writer.upsertDocMeta(getSessionRoomId(rootId), {
+            archiveCancelledRequestId: root.archiveRequest.id,
+          } as Partial<SessionMeta>);
+      }
       for (const session of archiveTargets) {
         // The archived state is the whole request: the owning machine observes
         // it, releases the runtime, and reconciles the worktree directory.
         await runtime.writer.upsertDocMeta(getSessionRoomId(session.id), {
           isArchived: true,
+          archivePending: null,
+          archiveReadiness: null,
           status: SessionStatusFactory.idle(),
         } as Partial<SessionMeta>);
         if (typeof window !== 'undefined') {
@@ -823,6 +865,163 @@ export function useSessionActions(): SessionActions {
     [runtime, store]
   );
 
+  const archivePorts = useMemo(
+    () =>
+      runtime
+        ? {
+            read: async (id: SessionId) =>
+              (await runtime.repo.getDocMeta(getSessionRoomId(id)))?.meta as
+                | SessionMeta
+                | undefined,
+            write: async (id: SessionId, patch: Partial<SessionMeta>) => {
+              await runtime.writer.upsertDocMeta(getSessionRoomId(id), patch);
+            },
+            readMachine: async (id: MachineId) =>
+              (await runtime.repo.getDocMeta(getMachineRoomId(id)))?.meta as
+                | MachineMeta
+                | undefined,
+          }
+        : null,
+    [runtime]
+  );
+
+  const cancelPendingArchive = useCallback(
+    async (sessionId: SessionId) => {
+      if (!archivePorts) throw new Error('Runtime not ready');
+      const session = await archivePorts.read(sessionId);
+      if (session) await cancelSessionArchive(archivePorts, session);
+    },
+    [archivePorts]
+  );
+
+  const requestArchiveSessions = useCallback(
+    async (
+      sessionIds: SessionId[],
+      options?: {
+        mode?: SessionArchiveMode;
+        source?: 'manual' | 'pr';
+        pr?: SessionArchiveRequest['pr'];
+      }
+    ): Promise<SessionArchiveResult> => {
+      if (!runtime || !archivePorts) throw new Error('Runtime not ready');
+      if (sessionIds.length === 1) {
+        const root = await archivePorts.read(sessionIds[0]);
+        if (
+          root?.archiveRequest &&
+          root.archiveCancelledRequestId !== root.archiveRequest.id &&
+          root.archiveRequest.phase !== 'cancelled' &&
+          root.archiveRequest.phase !== 'completed'
+        ) {
+          sessionIds = root.archiveRequest.roots;
+        }
+      }
+      const targets = new Map<SessionId, SessionMeta>();
+      for (const id of new Set(sessionIds)) {
+        for (const target of await runtime.readSessionOperationTargets(id, 'archive'))
+          targets.set(target.id, target);
+      }
+      if (!targets.size) return 'cancelled';
+      if ([...targets.values()].every((target) => target.isArchived)) return 'archived';
+      let mode = options?.mode;
+      if (!mode) {
+        const choice = await new Promise<SessionArchiveMode | null>((resolve) => {
+          store.get(sessionArchiveDialogAtom)?.resolve(null);
+          store.set(sessionArchiveDialogAtom, { count: targets.size, resolve });
+        });
+        if (!choice) return 'cancelled';
+        mode = choice;
+      }
+      if (store.get(activeWorkspaceRuntimeAtom) !== runtime)
+        throw new Error('Workspace changed before archiving');
+      if (mode === 'immediate') {
+        for (const id of new Set(sessionIds)) await archiveSession(id);
+        return 'archived';
+      }
+      const pending = runtime.pendingSends;
+      const held =
+        pending
+          ?.getSnapshot()
+          .filter(
+            (send) =>
+              targets.has(send.sessionId) ||
+              Boolean(send.creation?.parentSessionId && targets.has(send.creation.parentSessionId))
+          ) ?? [];
+      const receipt = await requestDeferredSessionArchive(archivePorts, {
+        id: crypto.randomUUID(),
+        roots: [...new Set(sessionIds)],
+        targets: [...targets.values()],
+        source: options?.source ?? 'manual',
+        pr: options?.pr,
+        heldSendIds: held.map((send) => send.id),
+      });
+      // Only this accepting renderer can retire its known held sends. A restarted client
+      // must not mistake a missing in-memory send for proof of delivery/cancellation.
+      if (pending && receipt.requestId) {
+        const owned = new Set(held.map((send) => send.id));
+        let update = Promise.resolve();
+        const reconcile = () => {
+          update = update
+            .then(async () => {
+              const root = await archivePorts.read(receipt.rootId);
+              const request = root?.archiveRequest;
+              if (
+                request?.id !== receipt.requestId ||
+                root?.archiveCancelledRequestId === receipt.requestId ||
+                request.phase !== 'waiting'
+              ) {
+                unsubscribe();
+                return;
+              }
+              const snapshot = pending.getSnapshot();
+              const remaining = new Set(snapshot.map((send) => send.id));
+              const currentTargets = new Set(request.targets);
+              const newIds = snapshot
+                .filter(
+                  (send) =>
+                    currentTargets.has(send.sessionId) ||
+                    Boolean(
+                      send.creation?.parentSessionId &&
+                      currentTargets.has(send.creation.parentSessionId)
+                    )
+                )
+                .map((send) => send.id);
+              for (const id of newIds) owned.add(id);
+              const ids = [
+                ...new Set([
+                  ...request.heldSendIds.filter((id) => !owned.has(id) || remaining.has(id)),
+                  ...newIds,
+                ]),
+              ];
+              if (
+                ids.length !== request.heldSendIds.length ||
+                ids.some((id, index) => id !== request.heldSendIds[index])
+              )
+                await archivePorts.write(receipt.rootId, {
+                  archiveRequest: {
+                    ...request,
+                    heldSendIds: ids,
+                    generation: request.generation + 1,
+                  },
+                });
+            })
+            .catch((error: unknown) =>
+              log('[session-archive] held input reconciliation failed', error)
+            );
+        };
+        const unsubscribe = pending.subscribe(reconcile);
+        reconcile();
+      }
+      return 'pending';
+    },
+    [runtime, archivePorts, archiveSession, store]
+  );
+
+  const requestArchiveSession = useCallback(
+    (id: SessionId, options?: Parameters<typeof requestArchiveSessions>[1]) =>
+      requestArchiveSessions([id], options),
+    [requestArchiveSessions]
+  );
+
   const restoreSession = useCallback(
     async (sessionId: SessionId) => {
       log('[session-restore] start', { sessionId });
@@ -836,10 +1035,22 @@ export function useSessionActions(): SessionActions {
       if (store.get(activeWorkspaceRuntimeAtom) !== runtime) {
         throw new Error('Workspace changed before restoring');
       }
+      // Explicit restore overrides even a partially applied deferred commit.
+      for (const session of restoreTargets) {
+        const requestRootId = session.archivePending?.rootId ?? session.id;
+        const root = await archivePorts?.read(requestRootId);
+        if (root?.archiveRequest)
+          await archivePorts?.write(requestRootId, {
+            archiveCancelledRequestId: root.archiveRequest.id,
+          });
+      }
       // Restore is a lifecycle change only; every tab keeps its close flag.
       for (const session of restoreTargets) {
         await runtime.writer.upsertDocMeta(getSessionRoomId(session.id), {
           isArchived: false,
+          ...(session.archivePending || session.archiveReadiness
+            ? { archivePending: null, archiveReadiness: null }
+            : {}),
         } as Partial<SessionMeta>);
       }
       log('[session-restore] restored', {
@@ -847,7 +1058,7 @@ export function useSessionActions(): SessionActions {
         targetSessionIds: restoreTargets.map((session) => session.id),
       });
     },
-    [runtime, store]
+    [runtime, store, archivePorts]
   );
 
   const setSessionTabClosed = useCallback(
@@ -925,6 +1136,9 @@ export function useSessionActions(): SessionActions {
     markSessionUnread,
     deleteSessions,
     archiveSession,
+    requestArchiveSession,
+    requestArchiveSessions,
+    cancelPendingArchive,
     setTreeCollaborationStopped,
     restoreSession,
     deleteArchivedSession,
