@@ -15,20 +15,16 @@ in the send interaction. The implemented proposal accepts one frozen input into
 a local projection, saves it independently, and reconciles it with an atomic
 immutable owner receipt. Normal messages use the existing user-content renderer
 without another status badge; owner confirmation remains the execution barrier.
-Behavioral verification covers interrupted requests, retained generations,
-cancellation and mixed input/queue ordering. A packaged Cloud app also verified
-local recovery and remote retry with the published SDK: messages appeared while
-their owner was paused and converged to one owner record after it resumed. These
-device samples establish ordering, not a latency guarantee or persistence at
-first paint.
+First paint does not imply local persistence, owner acceptance or execution.
 
 ## Decision and alternatives
 
 Loro's live history document already owns local admission and asynchronous Repo
 persistence/sync. The renderer's Roost adapter has no equivalent writable replica:
 its owner still signs and stores history. The source therefore retains ready
-input, not a second history document or signing writer. The maintainer requested
-this local admission direction and the existing presentation.
+input, not a second history document or signing writer. The
+[session files draft](../../../../specs/session-files.md#7-submission-identity-and-local-writes)
+defines the separation of local admission, synchronization and execution.
 
 An ephemeral bubble alone would lose saved-input recovery. A complete writable
 Roost replica would change signing, ownership and synchronization; it is outside
@@ -90,80 +86,30 @@ ready Roost input and final attachment references.
    undo a remote history write. Closing joins started I/O and leaves saved unknown
    input for recovery by the same identity.
 
-## Verification and remaining acceptance
+## Transport and compatibility
 
-The owning sender suite uses real IndexedDB transaction behavior through
-fake-indexeddb, the actual native send resources, real Loro control/owner documents
-and the actual direct workspace writer. Explicit gates cover immediate display,
-immutable payloads, lost/absent receipts, storage recovery/FIFO, restore/account
-isolation, removed-history handling, abort-ignoring I/O, stale-window cancellation,
-non-replayed guides and control queues in one or two windows. UI coverage checks
-ordinary presentation and ready image/file content without attachment drafts.
+Each history operation resolves the fixed owner's current transport through the
+workspace router. A store must not cache the local-machine probe's initial route
+or change the recipient when that route becomes unavailable. Both Node IPC guard
+implementations must accept the declared history request/receipt contract.
 
-The production receiver suite uses the pinned native SQLite package. It covers
-receipt/content conflicts, later history changes, reopen, removed generations,
-unreadable projections and delayed-original races where either request wins or
-generation replacement intervenes. Browser and Node SDK branch fixtures cover the
-same atomic receipt boundary. These synthetic tests establish those boundaries,
-not the original production incident's cause or real-device latency.
+Immutable acceptance uses `@loro-dev/roost@0.1.3`; the native
+`@loro-dev/roost-node@0.1.2` graph is unchanged.
 
-Packaged Cloud testing exposed a local transport omission: `accept_input` was in
-the Zod protocol but absent from the lightweight Node request/receipt guards.
-The desktop rejected it before owner execution. The TS guards now admit it and
-the CJS mirror carries the history contract; the owning declared-operation suite
-also exercises every schema operation so a future addition cannot silently miss
-either direction. Immutable receipt lookup and malformed replies are covered.
+## Verification and limits
 
-The same packaged restoration round exposed a cached transport chosen while the
-desktop's local-machine probe had not yet resolved its owner. History bridges now
-resolve that fixed owner's current plane for every operation, so the existing
-store can follow local identity changes without changing backend or recipient.
-The owning bridge suite exercises lookup, acceptance, history reads and retained
-receipts across those transitions.
+Deterministic sender tests exercise IndexedDB transactions, native send resources,
+real Loro documents and the workspace writer. Coverage includes immediate display,
+immutable retries, recovery and ordering, account isolation, cancellation across
+windows, attachment handoff, guide replay prevention and human-input provenance
+before owner acceptance. Receiver tests use the pinned native SQLite package to
+cover receipt conflicts, delayed originals, reopen, retained generations and
+unreadable history. Bridge and IPC tests cover route changes, all declared history
+operations and malformed replies.
 
-Lody pins the published TypeScript SDK `@loro-dev/roost@0.1.3`; the native
-`@loro-dev/roost-node@0.1.2` graph is unchanged. A fresh-cache registry download
-matches the tested tarball and dependency-lock integrity, and all 57 installed
-package files match that download. The
-[session files draft](../../../../specs/session-files.md#7-submission-identity-and-local-writes)
-retains the separation of local admission, synchronization and execution; it has
-no new approval claim.
-
-Final validation passed `pnpm check`: 11,760 Vitest package cases plus scripts and
-Electron tests, types, lint, i18n, and public/local/Effect boundary checks. A
-43-case focused run covers attachment preparation failure, retry, owner refusal
-and same-ID retry. It asserts exactly one owner entry, no duplicate upload and
-cleared IndexedDB, and covers direct-ready image and file input. The attachment
-regressions fail when their corresponding fix is withdrawn. Integration cases
-also verify that new-conversation admission does not await store acquisition and
-that human-input provenance precedes owner acceptance and control-queue writes.
-CLI published-bundle and Storybook builds, and the seven-case immutable receipt
-suite with pinned SQLite, passed before the final attachment changes.
-
-Before the final attachment changes and operation-inbox integration, the macOS
-arm64 packaged Cloud app passed
-its embedded CLI/native smoke check. Device tests used the existing authenticated
-Nightly profile and covered:
-
-- A saved local input recovered with its original ID after the transport fixes;
-  the owner contained one user entry and one assistant reply. A following input
-  displayed while the embedded owner worker was paused, then received its reply
-  after resumption; the owner contained four entries and pending input was cleared.
-- An older remote CLI rejected input visibly without changing the Roost backend.
-  After updating that same Docker machine to the built CLI, retry retained the
-  original input ID, produced one user entry and one assistant reply, and cleared
-  the local pending record.
-- A following remote input displayed while the Docker daemon was paused, then
-  received its reply after resumption. The remote owner's actual transcript
-  contained exactly the two user entries and their two assistant replies.
-- Relaunching the app retained local and remote entries and replies without
-  duplication. A fresh local conversation then accepted its first input and
-  returned one assistant reply; its owner contained exactly those two entries.
-
-The paused-worker DOM samples were about 20 ms locally and 16 ms remotely; neither
-worker could acknowledge the input during the observation. These are single-run
-ordering checks, not a performance benchmark. These checks exercised an ad-hoc
-signed local artifact with updates disabled; notarization, publication and the
-update flow were not tested.
-The final attachment paths and operation-inbox integration were verified by the
-deterministic cases above; the packaged device tests were not rerun for them.
+Packaged macOS Cloud tests cover local and remote sends with paused owners,
+same-ID recovery after restart and visible refusal by unsupported targets. The
+final attachment changes and operation-inbox integration passed deterministic
+tests and `pnpm check`; packaged tests were not rerun for those changes. These
+checks establish the covered behavior, not the original production incident's
+cause, a latency guarantee or release/signing validation.
