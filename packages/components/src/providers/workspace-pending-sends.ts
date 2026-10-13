@@ -145,7 +145,11 @@ export function createWorkspacePendingSends(args: {
         held.enqueue(send);
       }
     },
-    retry(id: string) { if (held.has(id)) held.retry(id); else inputOwner.retry(id); },
+    retry(id: string) {
+      // Prepared sends remain held until the durable input finishes delivery.
+      if (inputOwner.getSnapshot().some(input => input.id === id)) inputOwner.retry(id);
+      else held.retry(id);
+    },
     cancel: (id: string) => Promise.all([held.cancel(id), inputOwner.cancel(id)]).then(() => undefined),
     cancelSessions: (ids: Iterable<import('@lody/shared').SessionId>) => {
       const targets = [...ids];

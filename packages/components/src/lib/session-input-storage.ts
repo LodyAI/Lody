@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { HistoryEntryWriteSchema, SessionInputBlockSchema } from '@lody/shared';
+import { HistoryEntryWriteSchema, SessionInputBlockSchema, parseHistoryWrite } from '@lody/shared';
 import type { PendingSessionSend } from './session-pending-sends';
 
 /** User data: a pending input can be the only copy and is not a recoverable cache. */
@@ -106,6 +106,7 @@ export function createSessionInputStorage(accountId: string, workspaceId: string
       const store = tx.objectStore(INPUTS);
       const existing: unknown = await request(store.get(key(send.id)));
       const clean = (sequence: number) => sendSchema.parse({ ...send, sequence,
+        entry: parseHistoryWrite(HistoryEntryWriteSchema, send.entry),
         creation: send.creation === undefined ? undefined : JSON.parse(JSON.stringify(send.creation)),
         queue: send.queue === undefined ? undefined : JSON.parse(JSON.stringify(send.queue)),
         attachments: send.attachments.map(({ source: _source, ...attachment }) => attachment),

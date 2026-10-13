@@ -7,18 +7,19 @@ import { createConversationSession } from '../src/lib/conversation-view';
 import { createDirectWorkspaceWriter } from '../src/providers/workspace-writer-impl';
 import { createWorkspacePendingSends } from '../src/providers/workspace-pending-sends';
 import { acceptSessionUserTurn } from '../src/lib/session-send-admission';
+import * as localFileSender from '../src/lib/electron-session-file-sender';
 import type { WorkspaceRuntime } from '../src/atoms/runtime';
 import { IDBFactory } from 'fake-indexeddb';
 import { createAcceptedSessionInputs, SessionInputNotSentError } from '../src/lib/session-accepted-inputs';
 import { createSessionInputStorage } from '../src/lib/session-input-storage';
 import { createSessionSendResources } from '../src/lib/session-send-resources';
 import type { PendingSessionSend } from '../src/lib/session-pending-sends';
-import type { SessionHistory, SessionId } from '@lody/shared';
-import type { SessionInputAcceptanceResult } from '@lody/shared/session-data';
+import type { SessionHistory, SessionId, SessionInputBlock } from '@lody/shared';
+import type { SessionInputAcceptanceResult, SessionTurn } from '@lody/shared/session-data';
 
 const cleanup: (() => Promise<void>)[] = [];
 const releaseOnCleanup: (() => void)[] = [];
-afterEach(async () => { for (const release of releaseOnCleanup.splice(0)) release(); for (const close of cleanup.splice(0).reverse()) await close(); vi.unstubAllGlobals(); });
+afterEach(async () => { for (const release of releaseOnCleanup.splice(0)) release(); for (const close of cleanup.splice(0).reverse()) await close(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 const gate = () => {
   let resolve!: () => void;
   const promise = new Promise<void>(done => { resolve = done; });
@@ -32,7 +33,7 @@ const send = (id = 'input-1', overrides: Partial<PendingSessionSend> = {}): Pend
     finished: true, fileDiff: [], items: [{ type: 'text', text: id }], inputConfig: { cliType: 'builtin', agentType: 'codex', inputBlocks: [{ type: 'text', text: id }] } } as SessionHistory,
   delivery: { kind: 'dispatch' }, attachments: [], ...overrides,
 });
-const when = (owner: ReturnType<typeof createAcceptedSessionInputs>, predicate: () => boolean) => new Promise<void>(resolve => {
+const when = (owner: Pick<ReturnType<typeof createAcceptedSessionInputs>, 'subscribe' | 'getSnapshot'>, predicate: () => boolean) => new Promise<void>(resolve => {
   const check = () => { if (predicate()) { unsubscribe(); resolve(); } };
   const unsubscribe = owner.subscribe(check);
   check();
@@ -71,6 +72,54 @@ function harness(options: {
   });
   cleanup.push(async () => { await owner.dispose(); await resources.dispose(); });
   return { storage, resources, owner, accepted, delivered, factory };
+}
+
+async function workspaceHarness(options: {
+  accept(entry: SessionTurn, owner: ReturnType<typeof createLoroSessionData>): Promise<SessionInputAcceptanceResult>;
+  leaseQueued?: () => void;
+  queuePublished?: () => void;
+}) {
+  vi.stubGlobal('indexedDB', new IDBFactory());
+  vi.stubGlobal('BroadcastChannel', undefined);
+  let tail = Promise.resolve();
+  let leased = false;
+  vi.stubGlobal('navigator', { locks: { request: async (_name: string, args: { signal: AbortSignal }, work: () => Promise<unknown>) => {
+    const prior = tail, done = gate(); tail = done.promise;
+    if (leased) options.leaseQueued?.();
+    await prior;
+    if (args.signal.aborted) { done.resolve(); throw new DOMException('Canceled', 'AbortError'); }
+    leased = true;
+    try { return await work(); } finally { leased = false; done.resolve(); }
+  } } });
+  const input = send('first'), sessionId = input.sessionId;
+  const repo = await LoroRepo.create({});
+  const ownerDoc = new LoroDoc();
+  const owner = createLoroSessionData({ sessionId, doc: ownerDoc, writer: createHistoryWriter(ownerDoc) });
+  await repo.upsertDocMeta(getSessionRoomId(sessionId), { id: sessionId, machineId: input.targetMachineId, historyBackend: 'roost', userId: 'source-user' });
+  await repo.upsertDocMeta(getMachineRoomId(input.targetMachineId!), { protocolCapabilities: CURRENT_MACHINE_PROTOCOL_CAPABILITIES });
+  const handle = await repo.openPersistedDoc(getSessionRoomId(sessionId));
+  const conversation = createConversationSession(handle.doc, { sessionId, backendKind: 'roost', createSessionData: () => ({
+    ...owner, inputAcceptance: {
+      targetMachineId: input.targetMachineId,
+      accept: entry => options.accept(entry, owner),
+      lookup: async entry => (await owner.history.readTurn(entry.id)).state === 'ready' ? { status: 'accepted', turnId: entry.id, active: true } : { status: 'unobserved' },
+    },
+  }) });
+  const store = { sessionData: conversation.sessionData, history: conversation.history, setState: (change: never) => conversation.mirror.setState(change), waitUntilSynced: async () => {} };
+  const delivered: string[] = [];
+  const makeRuntime = () => {
+    const resources = createSessionSendResources({ acquire: async () => store as never, releaseRef: () => {} });
+    const writer = createDirectWorkspaceWriter({ repo, acquireSessionStore: async () => store as never, releaseSessionStoreRef: () => {}, acquirePreviewVisualCommentStore: async () => { throw new Error('unused'); }, releasePreviewVisualCommentStoreRef: () => {} });
+    const enqueueQueue = writer.enqueueSessionMessage;
+    writer.enqueueSessionMessage = async (...args) => { await enqueueQueue(...args); options.queuePublished?.(); };
+    const runtime = { repo, writer, sendResources: resources, workspaceId: input.workspaceId, requestSessionDispatchTurn: async (_machineId: unknown, request: { userTurnId: string }) => { delivered.push(request.userTurnId); return { accepted: true }; } } as unknown as WorkspaceRuntime;
+    const pending = createWorkspacePendingSends({ runtime, accountId: 'input-account', workspaceId: input.workspaceId, token: () => null, localMachineId: () => input.targetMachineId ?? null });
+    runtime.pendingSends = pending;
+    cleanup.push(async () => { await pending.dispose(); await resources.dispose(); });
+    return { runtime, pending };
+  };
+  cleanup.push(async () => { conversation.dispose(); ownerDoc.free(); await repo.unloadDoc(getSessionRoomId(sessionId)); await repo.destroy(); });
+  return { input, sessionId, repo, owner, conversation, delivered, makeRuntime };
 }
 
 describe('locally accepted Roost input', () => {
@@ -299,47 +348,82 @@ describe('locally accepted Roost input', () => {
     expect((await h.storage.list()).map(row => row.id)).toEqual(['first', 'second']);
   });
 
+  it.each(['image', 'file'] as const)('accepts already prepared %s content through the shared history input parser', async kind => {
+    const fixture = await workspaceHarness({ accept: async (entry, owner) => {
+      await owner.commands.appendTurn(entry);
+      return { status: 'accepted', turnId: entry.id, active: true };
+    } });
+    const { input, sessionId, owner } = fixture;
+    const { runtime, pending } = fixture.makeRuntime();
+    const ready: SessionInputBlock = kind === 'image'
+      ? { type: 'image', imageId: 'prepared-image', mimeType: 'image/png', sizeBytes: 13 }
+      : { type: 'file', transport: 'local', fileId: 'prepared-file', fileName: 'input.txt', mimeType: 'text/plain', sizeBytes: 13,
+          machineId: input.targetMachineId!, sha256: 'a'.repeat(64), textPreview: true, uploadedAt: 1 };
+    await acceptSessionUserTurn(runtime, sessionId, input.entry, { kind: 'dispatch' }, undefined, undefined, [{
+      id: 'attachment', kind, name: kind === 'image' ? 'input.png' : 'input.txt', mimeType: ready.mimeType, lastModified: 0, ready,
+    }]);
+    await when(pending, () => pending.getSnapshot().length === 0 || Boolean(pending.getSnapshot()[0]?.error));
+    expect(pending.getSnapshot()).toEqual([]);
+    const history = await owner.history.readAll();
+    expect(history).toMatchObject([{ id: input.id, inputConfig: { inputBlocks: [ready, { type: 'text', text: input.id }] } }]);
+    expect(history).toHaveLength(1);
+    expect(history[0]?.items?.[0]).toMatchObject({ type: kind });
+    expect(history[0]?.items?.[0]).not.toHaveProperty('text');
+    expect(fixture.delivered).toEqual([input.id]);
+  });
+
+  it('retries attachment preparation and then the same durable input after an owner refusal', async () => {
+    let transferReady = false, ownerReady = false;
+    const transferred: string[] = [];
+    vi.spyOn(localFileSender, 'canUseElectronLocalFileSend').mockReturnValue(true);
+    vi.spyOn(localFileSender, 'sendSessionFileToLocalRuntime').mockImplementation(async ({ file, machineId }) => {
+      if (!transferReady) throw new Error('Synthetic local transfer unavailable');
+      transferred.push(await file.text());
+      return { ok: true, files: [{ type: 'file', transport: 'local', fileId: 'prepared-file', fileName: file.name,
+        mimeType: file.type, sizeBytes: file.size, machineId, sha256: 'a'.repeat(64), textPreview: true, uploadedAt: 1 }] };
+    });
+    const fixture = await workspaceHarness({ accept: async (entry, owner) => {
+      if (!ownerReady) throw new SessionInputNotSentError('Synthetic owner refusal');
+      await owner.commands.appendTurn(entry);
+      return { status: 'accepted', turnId: entry.id, active: true };
+    } });
+    const { input, sessionId, owner } = fixture;
+    const { runtime, pending } = fixture.makeRuntime();
+    const storage = createSessionInputStorage('input-account', input.workspaceId);
+    cleanup.push(() => storage.close());
+    await acceptSessionUserTurn(runtime, sessionId, input.entry, { kind: 'dispatch' }, undefined, undefined, [{
+      id: 'attachment', kind: 'file', source: new Blob(['synthetic attachment']), name: 'input.txt', mimeType: 'text/plain', lastModified: 0,
+    }]);
+    await when(pending, () => Boolean(pending.getSnapshot()[0]?.error));
+    expect(pending.getSnapshot()).toMatchObject([{ id: input.id, attachments: [{ error: 'Missing workspace or auth token' }] }]);
+    expect(await storage.list()).toEqual([]);
+    expect(await owner.history.count()).toBe(0);
+
+    transferReady = true;
+    pending.retry(input.id);
+    await when(pending, () => pending.getSnapshot()[0]?.error === 'Synthetic owner refusal');
+    const frozen = await storage.get(input.id);
+    expect(frozen).toMatchObject({ id: input.id, state: 'failed', send: { attachments: [{ ready: { fileId: 'prepared-file' } }] } });
+    expect(frozen?.send.attachments[0]).not.toHaveProperty('source');
+    expect(await owner.history.count()).toBe(0);
+    expect(fixture.delivered).toEqual([]);
+
+    ownerReady = true;
+    pending.retry(input.id);
+    await when(pending, () => pending.getSnapshot().length === 0);
+    expect(await owner.history.readAll()).toEqual([frozen!.send.entry]);
+    expect(fixture.delivered).toEqual([input.id]);
+    expect(transferred).toEqual(['synthetic attachment']);
+    expect(await storage.list()).toEqual([]);
+  });
+
   it.each([false, true])('holds a later control queue behind owner acceptance, including a stale second window: %s', async twoWindows => {
     const entered = gate(), release = gate(), leaseQueued = gate(), published = gate();
-    vi.stubGlobal('indexedDB', new IDBFactory());
-    vi.stubGlobal('BroadcastChannel', undefined);
-    let tail = Promise.resolve();
-    let leased = false;
-    vi.stubGlobal('navigator', { locks: { request: async (_name: string, options: { signal: AbortSignal }, work: () => Promise<unknown>) => {
-      const prior = tail, done = gate(); tail = done.promise;
-      if (leased) leaseQueued.resolve();
-      await prior;
-      if (options.signal.aborted) { done.resolve(); throw new DOMException('Canceled', 'AbortError'); }
-      leased = true;
-      try { return await work(); } finally { leased = false; done.resolve(); }
-    } } });
-    const input = send('first'), sessionId = input.sessionId;
-    const repo = await LoroRepo.create({});
-    const ownerDoc = new LoroDoc();
-    const owner = createLoroSessionData({ sessionId, doc: ownerDoc, writer: createHistoryWriter(ownerDoc) });
-    await repo.upsertDocMeta(getSessionRoomId(sessionId), { id: sessionId, machineId: input.targetMachineId, historyBackend: 'roost', userId: 'source-user' });
-    await repo.upsertDocMeta(getMachineRoomId(input.targetMachineId!), { protocolCapabilities: CURRENT_MACHINE_PROTOCOL_CAPABILITIES });
-    const handle = await repo.openPersistedDoc(getSessionRoomId(sessionId));
-    const conversation = createConversationSession(handle.doc, { sessionId, backendKind: 'roost', createSessionData: () => ({
-      ...owner, inputAcceptance: {
-        targetMachineId: input.targetMachineId,
-        accept: async entry => { entered.resolve(); await release.promise; await owner.commands.appendTurn(entry); return { status: 'accepted', turnId: entry.id, active: true }; },
-        lookup: async entry => (await owner.history.readTurn(entry.id)).state === 'ready' ? { status: 'accepted', turnId: entry.id, active: true } : { status: 'unobserved' },
-      },
-    }) });
-    const store = { sessionData: conversation.sessionData, history: conversation.history, setState: (change: never) => conversation.mirror.setState(change), waitUntilSynced: async () => {} };
-    const makeRuntime = () => {
-      const resources = createSessionSendResources({ acquire: async () => store as never, releaseRef: () => {} });
-      const writer = createDirectWorkspaceWriter({ repo, acquireSessionStore: async () => store as never, releaseSessionStoreRef: () => {}, acquirePreviewVisualCommentStore: async () => { throw new Error('unused'); }, releasePreviewVisualCommentStoreRef: () => {} });
-      const enqueueQueue = writer.enqueueSessionMessage;
-      writer.enqueueSessionMessage = async (...args) => { await enqueueQueue(...args); published.resolve(); };
-      const runtime = { repo, writer, sendResources: resources, workspaceId: input.workspaceId, requestSessionDispatchTurn: async () => ({ accepted: true }) } as unknown as WorkspaceRuntime;
-      const pending = createWorkspacePendingSends({ runtime, accountId: 'input-account', workspaceId: input.workspaceId, token: () => null, localMachineId: () => input.targetMachineId ?? null });
-      runtime.pendingSends = pending;
-      cleanup.push(async () => { await pending.dispose(); await resources.dispose(); });
-      return { runtime, pending };
-    };
-    cleanup.push(async () => { conversation.dispose(); ownerDoc.free(); await repo.unloadDoc(getSessionRoomId(sessionId)); await repo.destroy(); });
+    const { input, sessionId, repo, owner, conversation, makeRuntime } = await workspaceHarness({
+      accept: async (entry, historyOwner) => { entered.resolve(); await release.promise; await historyOwner.commands.appendTurn(entry); return { status: 'accepted', turnId: entry.id, active: true }; },
+      leaseQueued: leaseQueued.resolve,
+      queuePublished: published.resolve,
+    });
     const a = makeRuntime(), b = twoWindows ? makeRuntime() : a;
     if (twoWindows) await b.pending.resume();
     await acceptSessionUserTurn(a.runtime, sessionId, input.entry, { kind: 'dispatch' });
