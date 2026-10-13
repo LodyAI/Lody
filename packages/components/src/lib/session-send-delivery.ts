@@ -86,7 +86,20 @@ export async function writeUserTurn(
   send: UserTurnSend,
   signal?: AbortSignal
 ): Promise<void> {
-  const { sessionId, entry } = send;
+  await prepareUserTurnWrite(runtime, send, signal);
+  throwIfSendAborted(signal);
+  if (send.queue) await runtime.writer.enqueueSessionMessage(send.sessionId, send.queue);
+  else await runtime.writer.appendSessionTurn(send.sessionId, send.entry);
+  if (send.delivery.kind === 'dispatch') await activateUserTurn(runtime, send.sessionId, send.entry.id);
+}
+
+/** Only local control metadata; this does not write history or start execution. */
+export async function prepareUserTurnWrite(
+  runtime: SessionSendRuntime,
+  send: UserTurnSend,
+  signal?: AbortSignal
+): Promise<void> {
+  const { sessionId } = send;
   const roomId = getSessionRoomId(sessionId);
   const found = await runtime.repo.getDocMeta(roomId);
   if (isLoroRepoDocDeleted(found)) throw new Error('Target conversation was deleted');
@@ -102,10 +115,6 @@ export async function writeUserTurn(
   } else if (!meta?.id) {
     throw new Error('Target conversation is no longer available');
   }
-  throwIfSendAborted(signal);
-  if (send.queue) await runtime.writer.enqueueSessionMessage(sessionId, send.queue);
-  else await runtime.writer.appendSessionTurn(sessionId, entry);
-  if (send.delivery.kind === 'dispatch') await activateUserTurn(runtime, sessionId, entry.id);
 }
 
 async function readUserTurn(runtime: SessionSendRuntime, sessionId: SessionId, turnId: string) {

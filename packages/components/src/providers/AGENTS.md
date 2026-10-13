@@ -113,10 +113,9 @@ Replacement contract: [shared rules](../../../shared/AGENTS.md#session-history).
 
 ## Attachment transfer ownership
 
-Workspace `sendResources` owns preparation, cancellation and store borrows across
-React unmount. Close before transports/caches; join IPC, cancel I/O, fence late
-results and await multipart cleanup. Only the cache disposes stores.
-
-Ready sends: local commits, then best-effort RPC; no persistence or retry. Unready
-sends live only in `pendingSends`; archive/delete cancel/join them. Never
-replay uncertain steers. [Why](../../../../.agents/notes/implemented/simplification/2026-09-29-remove-session-send-journal.md).
+`sendResources` owns preparation/I/O/borrows; cancel/join before transports/caches
+close. Only caches dispose stores. Loro commits locally, then dispatches best-effort.
+Roost freezes input/target, needs owner receipts before source activation and
+shares ordered leases with queues. Archive/delete cancel durable work beyond local
+snapshots and join leases. Unready Blobs stay in memory; uncertain steers never replay.
+[Decision](../../../../.agents/notes/proposed/architecture/2026-10-13-backend-independent-send-acceptance.md).

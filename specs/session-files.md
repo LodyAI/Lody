@@ -8,7 +8,7 @@ Translation: current
 ## Abstract
 
 - **Attachments are drafts until Send, in new conversations and continuations alike.** Picking, dropping or pasting validates and previews locally only. Attachments can be removed or replaced, and existing transfer starts on Send.
-- **A ready message is accepted locally at once.** Its history turn or queue row and its activation metadata are written as local commits before any network confirmation. The dispatch or steer request is only a fast path. The daemon starts pending turns from synchronized history.
+- **A ready message is accepted locally at once.** Loro commits its local history turn or queue row and activation metadata independently of network confirmation. Roost shows and retains immutable ready input locally; owner history confirmation precedes execution activation. Normal input uses the existing message presentation, without a new acceptance badge.
 - **A message whose attachments are still preparing is held in memory only.** Nothing reaches the synchronized document until every attachment is ready. A failure keeps the whole message for retry or cancellation. Sends to the same conversation keep their order; different conversations progress independently.
 - **Losing a held message on page exit is accepted.** Closing, crashing, reloading or disposing the workspace runtime during an upload loses that message. The only protection is a leave confirmation: `beforeunload` in the page, and one native Stay/Leave confirmation in Electron for close, reload and quit.
 - **Archive, delete, logout, cache clearing and workspace switching never wait for sends.** Archive and delete cancel the held sends of their targets. The other actions are not gated.
@@ -141,6 +141,15 @@ Each send has a fixed turn ID from Send onward; queue rows carry it as `userTurn
 
 The local write is the accept boundary. Creation metadata comes first and writes absent keys only, so later edits win. The turn or queue row follows, then activation for direct sends. Repo persistence and transport upload run independently: accepting a send and issuing its RPC do not wait for a Repo-wide flush or network confirmation. Local acceptance alone does not guarantee crash durability before background persistence completes. The daemon dispatches `pending`/`seen` user turns it finds in synchronized history, so a written turn needs no renderer retry loop. A dispatch acknowledgment is acceleration, not proof of execution.
 
+For ready Roost input, the local accept boundary is the immutable source input,
+not a remote history response. The source retains it through background persistence
+and owner acceptance. Same-input retries preserve ID and content, including when
+a response was lost; a missing receipt is not proof of non-delivery. Removed owner
+history never revives. Control queues keep their Loro writer and wait behind prior
+accepted input under the same session lease. Only confirmed owner history permits
+dispatch or guide handoff. Storage and reconciliation responsibilities are recorded
+in the [owning proposal](../.agents/notes/proposed/architecture/2026-10-13-backend-independent-send-acceptance.md).
+
 Local acceptance, synchronization and daemon execution are distinct facts. UI must not present local acceptance as daemon receipt.
 
 ## 8. Presentation and leave protection
@@ -207,7 +216,7 @@ These are acceptance requirements, not tests completed by this revision. Use syn
 | A09 | Image-only, file-only, mixed, or text plus attachments, in both entry points                     | Type/count/order/text/references preserved; written only when all ready                                                 |
 | A10 | Remove/replace attachments or change target before Send; empty or oversized input                | No automatic transfer; final draft used; visible errors, no silent omission                                             |
 | A11 | Retry or cancel a failed held send, including a held first message followed by another held send | Only failed attachments retry; canceling the first hands creation data to the next; no empty session is written         |
-| A12 | Ready send while the target is offline or its RPC fails                                          | The turn and activation are written locally; the send is not reported as failed                                         |
+| A12 | Ready send while the target is offline or its RPC fails                                          | Local acceptance remains visible; Loro activation is local, while Roost waits for owner history before execution and retains the same input for recovery                                         |
 | A13 | Guide answered applied, proven non-delivery, `recoveryOwned`, or uncertain                       | Processing; follow-up with the same ID; nothing; left as written and not replayed                                       |
 | A14 | Archive or delete a conversation with a held send, a held child creation, or an in-flight write  | Held sends are canceled; nothing is written after the action resolves; no error about pending messages                  |
 | A15 | Close, reload or quit with a held send (browser and Electron, including an auxiliary window)     | One confirmation; Stay keeps everything running; Leave loses the held send                                              |

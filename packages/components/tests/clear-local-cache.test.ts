@@ -1,6 +1,9 @@
 /** @vitest-environment jsdom */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { IDBFactory } from 'fake-indexeddb';
+import { createSessionInputStorage, SESSION_INPUT_DATABASE } from '../src/lib/session-input-storage';
+import type { PendingSessionSend } from '../src/lib/session-pending-sends';
 
 import {
   markCacheClearPending,
@@ -91,6 +94,34 @@ describe('maybeClearLodyCacheOnBoot', () => {
     expect(deletedCaches).toEqual(['lody-avatars']);
     expect(localStorage.getItem('lody:auth-token')).toBe('token');
     expect(readPendingLocalClearMode()).toBeNull();
+  });
+
+  it('keeps the only saved input through cache recovery, and erases it only on explicit full reset', async () => {
+    const factory = new IDBFactory();
+    const original = globalThis.indexedDB;
+    Object.defineProperty(globalThis, 'indexedDB', { value: factory, configurable: true });
+    const input = {
+      id: 'cache-protected-input', sessionId: 'cache-session', workspaceId: 'cache-workspace', sequence: 1,
+      historyBackend: 'roost', targetMachineId: 'original-machine', delivery: { kind: 'dispatch' }, attachments: [],
+      entry: { id: 'cache-protected-input', role: 'user', userId: 'cache-account', timestamp: '2026-10-13T00:00:00.000Z',
+        items: [{ type: 'text', text: 'only-local-copy' }], status: 'pending' },
+    } as PendingSessionSend;
+    let storage = createSessionInputStorage('cache-account', 'cache-workspace', factory);
+    try {
+      await storage.save(input); await storage.close();
+      markCacheClearPending();
+      await maybeClearLodyCacheOnBoot([SESSION_INPUT_DATABASE]);
+      storage = createSessionInputStorage('cache-account', 'cache-workspace', factory);
+      expect((await storage.get(input.id))?.send.entry.items).toEqual([{ type: 'text', text: 'only-local-copy' }]);
+      await storage.close();
+      resetBootClearMemoForTests();
+      await startHardReset(); await maybeClearLodyCacheOnBoot();
+      storage = createSessionInputStorage('cache-account', 'cache-workspace', factory);
+      expect(await storage.list()).toEqual([]);
+    } finally {
+      await storage.close();
+      Object.defineProperty(globalThis, 'indexedDB', { value: original, configurable: true });
+    }
   });
 
   it('wipes everything for a hard reset, including storage and unrelated stores', async () => {

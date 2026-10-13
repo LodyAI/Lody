@@ -338,6 +338,21 @@ Web/iOS clients need no Node addon. The owning machine must be available for RPC
 reads; browser-local IndexedDB replicas and offline sync are separate work.
 Runtime packaging and verification: [native runtime note](../../../../.agents/notes/proposed/architecture/2026-10-09-roost-native-runtime.md).
 
+### Immutable input acceptance
+
+Ready renderer input uses `SessionData.inputAcceptance`: `accept_input` writes
+one immutable operation receipt with its history mutation, and the
+`inputAcceptance` history query reads that original outcome. It is advertised
+separately as `sessionInputAcceptance` version 1. Older targets require an update;
+ordinary history capability alone does not imply support.
+
+The operation freezes user, turn ID and prepared content. Its digest excludes
+mutable parent/head placement. The owner checks current and retired history
+receipts before a write, so a retry converges with a delayed original after later
+appends or generation replacement. A removed accepted turn returns `active:false`
+and is never recreated. These receipts confirm owner history only; dispatch and
+guide application retain their existing execution boundaries.
+
 ### Roost writer identity
 
 Each Node history database has a separate host-private identity database at

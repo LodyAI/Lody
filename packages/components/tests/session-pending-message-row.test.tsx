@@ -10,7 +10,7 @@ import { act, createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { SessionHistory, SessionId, WorkspaceId } from '@lody/shared';
+import { inputBlocksToHistoryItems, type SessionHistory, type SessionId, type WorkspaceId } from '@lody/shared';
 
 import { Provider, createStore } from 'jotai';
 
@@ -103,6 +103,38 @@ describe('PendingMessageRow failure presentation', () => {
   let container: HTMLDivElement | undefined;
   const onRetry = vi.fn();
   const onCancel = vi.fn();
+
+  it('renders a ready accepted input as an ordinary message without another send status or controls', () => {
+    const html = renderToStaticMarkup(createElement(PendingMessageRow, {
+      record: record({ inputState: 'sending', persisted: true, historyBackend: 'roost' }),
+      onRetry, onCancel,
+    }));
+    const content = document.createElement('div');
+    content.innerHTML = html;
+    expect(content.textContent).toContain('Take a look at these.');
+    expect(content.querySelector('[role="status"]')).toBeNull();
+    expect(content.querySelector('button')).toBeNull();
+  });
+
+  it('shows already prepared media from the immutable message without attachment drafts', async () => {
+    const identity = { workspaceId: 'pending-row-workspace' as WorkspaceId, sessionId, imageId: 'prepared-image' };
+    await seedSessionImageCache(identity, new Blob(['image']));
+    const base = record();
+    const store = createStore(); store.set(currentWorkspaceIdAtom, identity.workspaceId);
+    store.set(authTokenAtom, 'synthetic-preview-token');
+    const html = renderToStaticMarkup(createElement(Provider, { store }, createElement(PendingMessageRow, {
+      record: record({ inputState: 'sending', persisted: true, historyBackend: 'roost', attachments: [], entry: {
+        ...base.entry, items: inputBlocksToHistoryItems([
+          { type: 'image', imageId: 'prepared-image', mimeType: 'image/png', sizeBytes: 5 },
+          { type: 'file', fileId: 'prepared-file', fileName: 'prepared.txt', mimeType: 'text/plain', sizeBytes: 5 },
+        ]),
+      } }), onRetry, onCancel,
+    })));
+    const content = document.createElement('div'); content.innerHTML = html;
+    expect(content.textContent).toContain('prepared.txt');
+    expect(content.querySelector('img')?.getAttribute('src')).toBe(peekSessionImageUrl(identity));
+    expect(content.querySelector('[role="status"]')).toBeNull();
+  });
 
   beforeEach(async () => {
     await initI18n('en');

@@ -14,7 +14,7 @@ import {
 } from '@/components/ai-gui/session-file-card';
 import { formatFileSize } from '@/lib/session-file-presentation';
 import { peekSessionImageUrl } from '@/lib/session-image-cache';
-import type { SessionChatUser } from '@/components/ai-gui/view';
+import { UserChatBubble, type SessionChatUser } from '@/components/ai-gui/view';
 import { ConversationColumn } from '@/components/shared/conversation-column';
 import { UserAvatar } from '@/components/user-avatar';
 import { useIsMobile } from '@/hooks/use-mobile';
@@ -287,6 +287,7 @@ export function PendingMessageRow({
     locale: toIntlLocale(i18n?.resolvedLanguage ?? i18n?.language),
   });
   const failed = Boolean(record.error);
+  const acceptedInput = Boolean(record.inputState);
   const images = record.attachments.filter((attachment) => attachment.kind === 'image');
   const files = record.attachments.filter((attachment) => attachment.kind === 'file');
   const uploading = record.attachments.some((attachment) => !attachment.ready);
@@ -327,7 +328,7 @@ export function PendingMessageRow({
             {/* Where the delivered row shows its read mark. Neutral on purpose:
                 the icon and the word already say "not sent", and the failure
                 itself is framed below. */}
-            <span
+            {!acceptedInput ? <span
               className={cn(
                 'inline-flex items-center gap-1 text-muted-foreground',
                 stylex.props(styles.status).className
@@ -345,9 +346,9 @@ export function PendingMessageRow({
               ) : (
                 <span {...stylex.props(styles.statusLabel)}>{messageStatus}</span>
               )}
-            </span>
+            </span> : null}
           </div>
-          <div className="flex min-w-0 max-w-full flex-col items-end gap-2">
+          {acceptedInput ? <UserChatBubble message={{ id: record.id, items: record.entry.items ?? [] }} sessionId={record.sessionId} conversationFontSize={conversationFontSize} /> : <div className="flex min-w-0 max-w-full flex-col items-end gap-2">
             {images.length ? (
               <div className="flex w-full flex-wrap justify-end gap-2 px-2 pt-1">
                 {images.map((attachment) => (
@@ -385,15 +386,15 @@ export function PendingMessageRow({
                 </div>
               </div>
             ) : null}
-          </div>
+          </div>}
           {failed && !reasonOnACard ? <PendingFailureNotice reason={record.error!} clamp /> : null}
           {/* Always in the flow at the delivered row's 28px action height, so
               committing (which swaps these for hover-revealed copy/fork) does
               not move anything below. */}
           <div className="flex min-h-7 flex-wrap items-center justify-end gap-2">
-            <Button size="small" variant="ghost" disabled={busy} onClick={onCancel}>
-              {t('sessions.cancelPendingSend')}
-            </Button>
+            {!acceptedInput || failed ? <Button size="small" variant="ghost" disabled={busy} onClick={onCancel}>
+              {t(acceptedInput ? 'sessions.removeLocalInput' : 'sessions.cancelPendingSend')}
+            </Button> : null}
             {failed ? (
               <Button size="small" disabled={busy} onClick={onRetry}>
                 {t('sessions.retryPendingSend')}
@@ -444,6 +445,12 @@ export function SessionPendingMessages({
   );
   const landedKey = useSyncExternalStore(subscribeHistory, readLanded, readLanded);
   const landed = new Set(landedKey ? landedKey.split('\n') : []);
+  useEffect(() => {
+    if (!landedKey || !pendingSends?.acknowledgeLanded) return;
+    void pendingSends.acknowledgeLanded(landedKey.split('\n')).catch((error: unknown) => {
+      console.warn('Confirmed input cleanup failed', error);
+    });
+  }, [pendingSends, landedKey, sends]);
   const { t } = useTranslation();
   const [busy, setBusy] = useState<string | null>(null);
   const [failure, setFailure] = useState<string | null>(null);

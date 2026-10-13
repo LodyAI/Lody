@@ -6868,6 +6868,12 @@ export class MessageHandler {
           case 'readTurn':
             result = await history.readTurn(query.turnId);
             break;
+          case 'inputAcceptance':
+            if (!backend.inputAcceptance) throw new Error('Input acceptance is unavailable');
+            result = await backend.inputAcceptance.lookup(
+              parseHistoryWrite(HistoryEntryWriteSchema, query.entry) as never
+            );
+            break;
           case 'readRange':
             result = await history.readRange(query.from, query.to);
             break;
@@ -6976,6 +6982,12 @@ export class MessageHandler {
       const payload = rawPayload;
       let result: unknown;
       switch (operation) {
+        case 'accept_input':
+          if (!backend.inputAcceptance) throw new Error('Input acceptance is unavailable');
+          result = await backend.inputAcceptance.accept(
+            parseHistoryWrite(HistoryEntryWriteSchema, payload.entry) as never
+          );
+          break;
         case 'append':
           if (!('entry' in payload)) throw new Error('History append payload is missing entry');
           await backend.appendHistoryTurn(

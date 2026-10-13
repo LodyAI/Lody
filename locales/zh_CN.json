@@ -4947,5 +4947,11 @@
   "billing.seatRemovalConsequences": "本期费用不退，空出的席位在续费前可复用。",
   "billing.workspaceDeletionCharges": "删除后不再续费，已产生的费用仍会照常收取。",
   "billing.seatApprovalConfirm": "批准后对方立即获得访问权限。",
-  "billing.deletedWorkspaces": "已删除的工作区"
+  "billing.deletedWorkspaces": "已删除的工作区",
+  "sessions.inputTargetUnavailable": "这个对话已归档或删除，本地输入仍然保留。",
+  "sessions.inputTargetChanged": "对话的目标机器发生了变化，输入仍绑定原来的机器。",
+  "sessions.inputOwnerNeedsUpdate": "请更新会话所在的机器，再接收这条消息。",
+  "sessions.inputStorageUnavailable": "当前环境无法安全保存和投递这条消息。",
+  "sessions.inputOutcomeUnknown": "尚未收到会话所在机器对这条消息的确认，请检查原发送结果。",
+  "sessions.removeLocalInput": "移除本地记录"
 }

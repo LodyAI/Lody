@@ -37,6 +37,7 @@ import type { SessionSnapshot } from '@lody/shared/session-data';
  * projecting physical segments into the same logical history.
  */
 export interface SessionBackend {
+  readonly inputAcceptance?: import('@lody/shared/session-data').SessionInputAcceptance;
   readonly kind: SessionHistoryBackendKind;
   readonly history: SessionHistoryReader;
 

@@ -4947,5 +4947,11 @@
   "billing.seatRemovalConsequences": "This term isn't refunded; the seat can be reused until renewal.",
   "billing.workspaceDeletionCharges": "Renewal stops, but charges already accrued are still billed.",
   "billing.seatApprovalConfirm": "They get access right away.",
-  "billing.deletedWorkspaces": "Deleted workspaces"
+  "billing.deletedWorkspaces": "Deleted workspaces",
+  "sessions.inputTargetUnavailable": "This conversation was archived or deleted. The local input has been kept.",
+  "sessions.inputTargetChanged": "The conversation target changed. The input is still bound to its original machine.",
+  "sessions.inputOwnerNeedsUpdate": "Update the conversation machine to receive this message.",
+  "sessions.inputStorageUnavailable": "This environment cannot safely save and deliver the message.",
+  "sessions.inputOutcomeUnknown": "The conversation machine has not confirmed this message. Check the original send result.",
+  "sessions.removeLocalInput": "Remove local copy"
 }

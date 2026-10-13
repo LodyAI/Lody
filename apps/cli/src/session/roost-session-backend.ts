@@ -89,6 +89,10 @@ export class RoostSessionBackend implements SessionBackend {
     return this.services.sessionData.history;
   }
 
+  get inputAcceptance() {
+    return this.services.sessionData.inputAcceptance;
+  }
+
   async initialize(options: { skipAutoRead: boolean }): Promise<void> {
     await this.services.initialize?.(options);
     if (options.skipAutoRead) return;

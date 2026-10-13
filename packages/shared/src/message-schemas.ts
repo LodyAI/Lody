@@ -2047,6 +2047,7 @@ export const SessionHistoryReadQuerySchema = z
     z.object({ kind: z.literal('count') }).strict(),
     z.object({ kind: z.literal('readAt'), position: z.number().int().nonnegative() }).strict(),
     z.object({ kind: z.literal('readTurn'), turnId: z.string().trim().min(1) }).strict(),
+    z.object({ kind: z.literal('inputAcceptance'), entry: z.unknown() }).strict(),
     z
       .object({
         kind: z.literal('readRange'),
@@ -2170,6 +2171,7 @@ export const SessionHistoryReadResponseSchema = z
 
 export const SessionHistoryWriteOperationSchema = z.enum([
   'append',
+  'accept_input',
   'replace',
   'respond_permission',
   'apply_action',

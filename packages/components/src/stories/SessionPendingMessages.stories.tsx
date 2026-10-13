@@ -310,3 +310,12 @@ export const UploadToHistoryNarrow: Story = {
     </ForceMobileLayoutProvider>
   ),
 };
+
+/** Same message appearance while the owner response is delayed. */
+export const AcceptedRoostInput: Story = {
+  args: { records: [record({ historyBackend: 'roost', inputState: 'sending', persisted: true })] },
+};
+
+export const UnconfirmedRoostInput: Story = {
+  args: { records: [record({ historyBackend: 'roost', inputState: 'unknown', persisted: true, error: 'The conversation machine has not confirmed this message. Check the original send result.' })] },
+};

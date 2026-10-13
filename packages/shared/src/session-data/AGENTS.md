@@ -65,3 +65,7 @@
 - Submissions append on the live doc as local commits; transports upload only
   local events. Never author on a fork and import the export: it misses upload,
   copies the whole doc and adds a permanent peer.
+- Optional `inputAcceptance` separates an immutable owner-history receipt from
+  execution. Preserve its source identity and expose the bound target in renderer
+  adapters. Missing receipt lookup never proves non-delivery. Accepted history
+  removed from the active branch must not be resurrected by a repeated accept.

@@ -8,6 +8,7 @@ import type {
   SessionHistoryCommands,
   SessionHistoryReader,
   SessionObservation,
+  SessionInputAcceptance,
 } from './types';
 
 /**
@@ -66,6 +67,7 @@ export type RoostHistoryPort =
     };
 
 export type RoostSessionDataOptions = {
+  readonly inputAcceptance?: SessionInputAcceptance;
   readonly sessionId: SessionId;
   readonly port?: RoostHistoryPort;
   readonly history?: SessionHistoryReader;
@@ -88,6 +90,7 @@ export function createRoostSessionData(options: RoostSessionDataOptions): RoostS
     history,
     commands: options.commands,
     snapshots: options.snapshots,
+    ...(options.inputAcceptance ? { inputAcceptance: options.inputAcceptance } : {}),
     ...(options.dispose ? { dispose: options.dispose } : {}),
   };
 }

@@ -1911,7 +1911,69 @@ const createNodeServicesForLease = async (
     },
   };
 
+  const inputIdentity = (entry: SessionTurn) => {
+    const prepared = prepareTurn(undefined, entry as SessionHistoryInput);
+    if (prepared.role !== 'user' || !prepared.userId?.trim()) {
+      throw new HistoryWriteError([{ path: ['role'], code: 'invalid_user_input' }]);
+    }
+    return {
+      viewId,
+      operationId: `input:${prepared.id}`,
+      input: {
+        kind: 'message' as const,
+        businessId: prepared.id,
+        segmentId: 'primary',
+        content: encodeRoostContent(prepared),
+      },
+    };
+  };
+  const inputIsActive = async (turnId: string): Promise<boolean> => {
+    const read = await history.readTurn(turnId);
+    if (read.state === 'ready') return true;
+    if (read.state === 'missing') return false;
+    throw new Error('Accepted Roost input history is not readable');
+  };
+  const inputAcceptance: import('@lody/shared/session-data').SessionInputAcceptance = {
+    async lookup(entry) {
+      const identity = inputIdentity(entry);
+      await writeSerial;
+      await historyGeneration.resolve();
+      const prior = await historyGeneration.lookupInputAcceptance(identity);
+      return prior
+        ? {
+            status: 'accepted',
+            turnId: entry.id,
+            active: await inputIsActive(entry.id),
+          }
+        : { status: 'unobserved' };
+    },
+    async accept(entry) {
+      const identity = inputIdentity(entry);
+      await withWrites(identity.operationId, async () => {
+        // Receipts in retired generations still own this input. Do not put a
+        // removed turn back into the active branch during recovery.
+        if (await historyGeneration.lookupInputAcceptance(identity)) return false;
+        const branch = await ensureHeadSealed();
+        const accepted = await roostHistory.acceptInputToView({
+          ...identity,
+          expectedRevision: branch.state.revision,
+          expectedHead: branch.state.head,
+          input: { ...identity.input, parents: await parentForHead(branch) },
+        });
+        await refreshProjectedMessage(accepted.turnId, accepted);
+        if (entry.finished === true) await finishIfNeeded(accepted.turnId);
+        return accepted.created;
+      });
+      return {
+        status: 'accepted',
+        turnId: entry.id,
+        active: await inputIsActive(entry.id),
+      };
+    },
+  };
+
   const sessionData: RoostSessionData = createRoostSessionData({
+    inputAcceptance,
     sessionId: sessionDoc.sessionId,
     history,
     commands,

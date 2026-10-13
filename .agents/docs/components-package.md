@@ -52,6 +52,25 @@ opened before the pending clear has run.
 failure: the banner offers the cache-clear flow after 45s of continuous `loading` while
 the connection attempt completes exactly as it would without it.
 
+## Locally accepted messages
+
+Loro ready messages commit to the live local history document. A ready Roost
+input instead appears from the workspace's immutable input projection and saves
+to account/workspace-scoped IndexedDB without waiting for owner RPC. Normal rows
+reuse `UserChatBubble`, including ready media and mention spans, with no separate
+acceptance badge. First paint precedes the storage transaction and does not prove
+crash durability.
+
+The workspace owns restoration, session Web Locks and input reconciliation.
+History operations resolve the fixed owner's current local/cloud plane, including
+after a late local identity probe; cached stores do not freeze that transport.
+Unknown history outcomes query or repeat the same immutable accept operation;
+execution delivery follows only its owner receipt. The projection stays until
+the authoritative view contains the same ID. Control queues keep the Loro writer
+and wait behind earlier input under the same lease. Unprepared attachments remain
+in the existing memory queue. Cache recovery preserves saved input; full reset
+may delete it. See the [owning decision](../notes/proposed/architecture/2026-10-13-backend-independent-send-acceptance.md).
+
 ## File preview versus Code Collab
 
 File routing, cache, and caller contracts live in

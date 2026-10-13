@@ -189,6 +189,7 @@ describe('MessageHandler machine registration', () => {
       dshProviderIsolation: 1,
       memoryProviders: 1,
       sessionHistory: 2,
+      sessionInputAcceptance: 1,
       mcpToolDiscovery: 1,
       codexAuthProfiles: 1,
       ...(hostCapabilities.builtinPi ? { builtinPi: 1 } : {}),

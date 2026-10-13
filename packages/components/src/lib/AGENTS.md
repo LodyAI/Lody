@@ -5,6 +5,8 @@ Background: [components](../../../../.agents/docs/components-package.md),
 [files](../../../../.agents/docs/components-file-paths.md).
 
 - Send acceptance and RPC await local commits, never Repo-wide flush.
+- Retry immutable Roost input; missing receipts stay unknown. Refresh/cache clear
+  retain unsaved/saved input. Resolve its owner's plane per call.
 
 ## Electron IPC types
 
@@ -12,9 +14,8 @@ Background: [components](../../../../.agents/docs/components-package.md),
   registration with `import type` only. Browser/mobile bundles must erase the edge;
   never add an Electron runtime/package dependency or allow Node APIs in shared UI.
 - Keep `experimentalDecorators` and the direct catalog-pinned `@types/node` dependency
-  for the source declarations. Service classes and their single constructor list own
-  invoke signatures; never duplicate them in a handwritten contract, spec, or one-for-one
-  platform port. Fix resolution/erasure at this boundary or reconsider caller ownership.
+  for the source declarations. Service constructors own invoke signatures; never duplicate them in contracts,
+  Specs or platform ports. Fix resolution/erasure here or reconsider ownership.
   Push events and one-way sends stay in `@lody/shared/electron-ipc`.
 
 ## Crash recovery and diagnostics
@@ -33,11 +34,11 @@ Background: [components](../../../../.agents/docs/components-package.md),
   still signed in) and `startHardReset` (full wipe/sign-out with its own confirmation
   dialog). Defer asynchronous deletes to next boot; clear synchronous storage BEFORE
   writing the boot flag.
-- Cache-level clearing uses an explicit localStorage DELETE list, never a keep-allowlist.
-  Include connection caches (Streams JWT/gateway, cursor-bypass markers, workspace-info
-  map); register new `lody:*` cache keys there. Auth tokens and preferences survive.
-- Include the tail of `lib/session-render-trace.ts` in copied reports. Its module-level
-  ring records render/mount/navigation, collapsing consecutive duplicates into ×N.
+- Cache clearing uses a localStorage DELETE list, never a keep-allowlist. Include
+  connection caches (Streams JWT/gateway, cursor-bypass, workspace-info) and new
+  `lody:*` cache keys; retain auth tokens and preferences.
+- Copy the `lib/session-render-trace.ts` tail in reports. Its module ring records
+  render/mount/navigation, collapsing consecutive duplicates into ×N.
   Writers append one compact diagnostic line, never drive behavior from the trace;
   surface mount/unmount uses a layout effect.
 - `maybeClearLodyCacheOnBoot` runs once at most per page load, shared by `AppInitializer`

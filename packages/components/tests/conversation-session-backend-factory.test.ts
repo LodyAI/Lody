@@ -6,6 +6,7 @@ import { createConversationSession } from '../src/lib/conversation-view/create-c
 import {
   createLocalRoostSessionDataFactory,
   createRemoteRoostSessionDataFactory,
+  createRoostSessionDataFactoryForMachine,
 } from '../src/lib/roost-session-bridge';
 import { RoostHistoryError, SessionHistoryRequestError } from '../src/lib/roost-history-error';
 import {
@@ -15,6 +16,111 @@ import {
 import { initI18n } from '../src/i18n';
 
 describe('createConversationSession backend seam', () => {
+  it('keeps a restored owner while following local identity changes for input and history', async () => {
+    const machineId = 'synthetic-restored-owner' as MachineId;
+    const sessionId = 'synthetic-restored-session' as SessionId;
+    const entry = {
+      id: 'synthetic-restored-input',
+      role: 'user' as const,
+      userId: 'synthetic-user',
+      timestamp: '2026-10-13T00:00:00Z',
+      items: [{ type: 'text' as const, text: 'Saved input' }],
+      status: 'pending' as const,
+    };
+    let plane: 'local' | 'cloud' = 'cloud';
+    let admitted = false;
+    const receipt = () =>
+      admitted
+        ? { status: 'accepted', turnId: entry.id, active: plane === 'local' }
+        : { status: 'unobserved' };
+    const factory = createRoostSessionDataFactoryForMachine({
+      accountId: 'synthetic-account',
+      workspaceId: 'synthetic-workspace' as WorkspaceId,
+      machineId,
+      resolvePlane: async (owner) => {
+        expect(owner).toBe(machineId);
+        return plane;
+      },
+      sendControl: async (request) => {
+        expect(request.machineId).toBe(machineId);
+        expect(request.sessionId).toBe(sessionId);
+        if (request.type === 'session/history-read') {
+          return {
+            ok: true,
+            responses: [
+              {
+                type: 'session/history-read_response',
+                sessionId,
+                success: true,
+                result:
+                  request.query.kind === 'inputAcceptance' ? receipt() : admitted ? [entry] : [],
+                historyRevision: admitted ? 1 : 0,
+                historyCount: admitted ? 1 : 0,
+              },
+            ],
+          };
+        }
+        if (request.type !== 'session/history-write') throw new Error('Unexpected input transport');
+        expect(request.operation).toBe('accept_input');
+        expect(request.payload).toEqual({ entry });
+        admitted = true;
+        return {
+          ok: true,
+          responses: [
+            {
+              type: 'session/history-write_response',
+              sessionId,
+              operation: request.operation,
+              success: true,
+              result: receipt(),
+              historyRevision: 1,
+              historyCount: 1,
+              historyChange: null,
+            },
+          ],
+        };
+      },
+      requestHistoryRead: async (owner, id) => {
+        expect(owner).toBe(machineId);
+        expect(id).toBe(sessionId);
+        if (plane === 'local') throw new Error('Local history must use local control');
+        return {
+          type: 'session/history-read_response',
+          sessionId,
+          success: true,
+          result: receipt(),
+          historyRevision: admitted ? 1 : 0,
+          historyCount: admitted ? 1 : 0,
+        };
+      },
+      requestHistoryWrite: async () => {
+        throw new Error('An input for the now-local owner must not use cloud RPC');
+      },
+    });
+    const doc = new LoroDoc();
+    const session = factory({ doc, sessionId, backendKind: 'roost' });
+    try {
+      expect(await session.inputAcceptance!.lookup(entry)).toEqual({ status: 'unobserved' });
+      plane = 'local';
+      expect(await session.inputAcceptance!.accept(entry)).toEqual({
+        status: 'accepted',
+        turnId: entry.id,
+        active: true,
+      });
+      expect(await session.history.readAll()).toMatchObject([{ id: entry.id }]);
+      expect(doc.getList('history').length).toBe(0);
+      plane = 'cloud';
+      expect(await session.inputAcceptance!.lookup(entry)).toEqual({
+        status: 'accepted',
+        turnId: entry.id,
+        active: false,
+      });
+      expect(session.inputAcceptance!.targetMachineId).toBe(machineId);
+    } finally {
+      session.dispose?.();
+    }
+  });
+
   it.each([
     ['en', 'append'],
     ['zh_CN', 'append'],

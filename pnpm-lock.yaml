@@ -314,8 +314,8 @@ importers:
         specifier: 'catalog:'
         version: 0.4.3
       '@loro-dev/roost':
-        specifier: 0.1.2
-        version: 0.1.2
+        specifier: 0.1.3
+        version: 0.1.3
       '@loro-dev/streams-client':
         specifier: 'catalog:'
         version: 0.9.0
@@ -3757,8 +3757,8 @@ packages:
     resolution: {integrity: sha512-A8RiMXtmjfiI2qNzJ7AhAMsft/am9phNiXVnhnOqy4V9/oFzEYTvsAfoXua0cqq5UhaXP4Xy2R6j+QSb6Z7dtA==}
     engines: {node: '>=22.14.0'}
 
-  '@loro-dev/roost@0.1.2':
-    resolution: {integrity: sha512-j8Knm3tdWwB9PXfObhRk3qQWd/qUL79JcVMcrEKBxMTQxsyk8cV4ZuSJOESQvTRUYEhq7FA0Brqce7Wy7xMPbw==}
+  '@loro-dev/roost@0.1.3':
+    resolution: {integrity: sha512-OAXB26dAZ7w80YlKoqHFotQ07nYnWrtW0M915cIyi7LUf7UICQ4lc2ZGBlbrydmuqtyNNXtTzW0hOpHu3fBrNQ==}
 
   '@loro-dev/streams-client@0.7.0':
     resolution: {integrity: sha512-O+LphfngoJe0g0QmRV2OIQKsiytZuvHoSsQeYxiRK00UYHcpqjiZw2OmcXCU4Q5reuxI5kZJz6du24iAamBVtQ==}
@@ -16624,7 +16624,7 @@ snapshots:
       '@loro-dev/roost-node-win32-arm64-msvc': 0.1.2
       '@loro-dev/roost-node-win32-x64-msvc': 0.1.2
 
-  '@loro-dev/roost@0.1.2':
+  '@loro-dev/roost@0.1.3':
     dependencies:
       '@loro-dev/streams-client': 0.8.0
       '@noble/curves': 2.4.0

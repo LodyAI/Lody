@@ -224,7 +224,20 @@ export interface SessionHistoryCommands {
   applyHistoryImport(input: HistoryImportInput): Promise<SessionImportResult>;
 }
 
+export type SessionInputAcceptanceResult =
+  | { readonly status: 'accepted'; readonly turnId: string; readonly active: boolean }
+  | { readonly status: 'unobserved' };
+
+/** Owner receipt for immutable user input, independent of mutable history state. */
+export interface SessionInputAcceptance {
+  /** The renderer capability is bound to this owner, independently of mutable metadata. */
+  readonly targetMachineId?: string;
+  accept(entry: SessionTurn): Promise<SessionInputAcceptanceResult>;
+  lookup(entry: SessionTurn): Promise<SessionInputAcceptanceResult>;
+}
+
 export interface SessionData {
+  readonly inputAcceptance?: SessionInputAcceptance;
   readonly sessionId: SessionId;
   readonly history: SessionHistoryReader;
   readonly commands: SessionHistoryCommands;

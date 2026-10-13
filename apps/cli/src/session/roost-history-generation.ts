@@ -8,6 +8,7 @@ import {
   type HistoryIdentity,
   type ForkAndActivateInput,
   type RestoreActiveBranchInput,
+  type HistoryInputIdentity,
 } from '@loro-dev/roost/lody-history';
 import type { RoostNativeClient, RoostNodeStream } from '@loro-dev/roost-node';
 import type { SessionHistoryInput } from '@lody/shared';
@@ -352,6 +353,14 @@ export class RoostHistoryGeneration {
         if (inner.kind !== 'found') throw new Error('Roost operation receipt is incomplete');
         return toApplicationJson(decodeJson(new TextEncoder().encode(inner.turn.contentJson)));
       }
+    }
+    return undefined;
+  }
+
+  async lookupInputAcceptance(input: HistoryInputIdentity) {
+    for (const history of [this.history, ...[...this.ancestors].reverse()]) {
+      const found = await history.readInputAcceptance(input);
+      if (found) return found;
     }
     return undefined;
   }

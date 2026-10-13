@@ -28,6 +28,7 @@ import {
   type SessionSnapshot,
   type SessionTurn,
   type SessionTurnRead,
+  type SessionInputAcceptanceResult,
 } from '@lody/shared/session-data';
 import { sendLocalSessionControl } from './electron-ipc-client';
 import { RoostHistoryError, SessionHistoryRequestError } from './roost-history-error';
@@ -92,6 +93,18 @@ export type RemoteRoostSessionBridgeOptions = {
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === 'object' && !Array.isArray(value);
+
+const validateInputAcceptance = (value: unknown, turnId: string): SessionInputAcceptanceResult => {
+  if (isRecord(value) && value.status === 'unobserved') return { status: 'unobserved' };
+  if (
+    isRecord(value) &&
+    value.status === 'accepted' &&
+    value.turnId === turnId &&
+    typeof value.active === 'boolean'
+  )
+    return { status: 'accepted', turnId, active: value.active };
+  throw new Error('Roost owner returned an invalid input acceptance receipt');
+};
 
 const validateHistory = (value: unknown, source: string): readonly SessionHistoryInput[] => {
   if (!Array.isArray(value)) {
@@ -200,7 +213,8 @@ const assertSerializableHistoryPayload = (
 const createRoostSessionDataFactoryFromTransport =
   (
     createTransport: (sessionId: SessionId) => RoostHistoryTransport,
-    cacheScope: (sessionId: SessionId) => string
+    cacheScope: (sessionId: SessionId) => string,
+    targetMachineId: MachineId
   ): ConversationSessionDataFactory =>
   ({ sessionId, doc }) => {
     const transport = createTransport(sessionId);
@@ -812,6 +826,13 @@ const createRoostSessionDataFactoryFromTransport =
       history,
       commands,
       snapshots,
+      inputAcceptance: {
+        targetMachineId,
+        accept: async (entry) =>
+          validateInputAcceptance(await write('accept_input', { entry }), entry.id),
+        lookup: async (entry) =>
+          validateInputAcceptance(await readHistory({ kind: 'inputAcceptance', entry }), entry.id),
+      },
       dispose: () => {
         disposed = true;
         unsubscribeDoc();
@@ -824,113 +845,148 @@ const createRoostSessionDataFactoryFromTransport =
     return sessionData as RoostSessionData;
   };
 
-/** Renderer bridge for a Roost owner running in the local Electron process. */
+const historyCacheScope = (options: LocalRoostSessionBridgeOptions, sessionId: SessionId) =>
+  JSON.stringify([options.accountId ?? 'local', options.workspaceId, options.machineId, sessionId]);
+
+function localHistoryTransport(
+  options: LocalRoostSessionBridgeOptions,
+  sessionId: SessionId
+): RoostHistoryTransport {
+  const send = options.sendControl ?? sendLocalSessionControl;
+  return {
+    readHistory: async (query) => {
+      const request: LocalSessionControlRequest = {
+        type: 'session/history-read',
+        machineId: options.machineId,
+        workspaceId: options.workspaceId,
+        sessionId,
+        query,
+      };
+      const result = await send(request);
+      if (!result.ok) throw new Error(`Roost history read failed: ${result.error}`);
+      const response = result.responses.find(
+        (item): item is HistoryReadResponse =>
+          item.type === 'session/history-read_response' && item.sessionId === sessionId
+      );
+      if (!response) throw new Error('Roost history read returned no response');
+      if (!response.success) throw new RoostHistoryError('read', response.error ?? '');
+      return response;
+    },
+    writeHistory: async (operation, payload) => {
+      const request: LocalSessionControlRequest = {
+        type: 'session/history-write',
+        machineId: options.machineId,
+        workspaceId: options.workspaceId,
+        sessionId,
+        operation,
+        payload,
+      };
+      const result = await send(request);
+      if (!result.ok) throw new Error(`Roost history write failed: ${result.error}`);
+      const response = result.responses.find(
+        (item): item is HistoryWriteResponse =>
+          item.type === 'session/history-write_response' &&
+          item.sessionId === sessionId &&
+          item.operation === operation
+      );
+      if (!response) throw new Error(`Roost history write returned no ${operation} response`);
+      if (!response.success) throw new RoostHistoryError('write', response.error ?? '');
+      return {
+        result: response.result,
+        historyRevision: response.historyRevision,
+        historyCount: response.historyCount,
+        historyChange: response.historyChange,
+      };
+    },
+  };
+}
+
+function remoteHistoryTransport(
+  options: RemoteRoostSessionBridgeOptions,
+  sessionId: SessionId
+): RoostHistoryTransport {
+  return {
+    readHistory: async (query) => {
+      const response = await options.requestHistoryRead(options.machineId, sessionId, query);
+      if (response.sessionId !== sessionId) {
+        throw new Error('Roost history read response targeted a different session');
+      }
+      if (response.rpcFailure) {
+        throw new SessionHistoryRequestError('read', response.rpcFailure, response.error ?? '');
+      }
+      if (!response.success) throw new RoostHistoryError('read', response.error ?? '');
+      return response;
+    },
+    writeHistory: async (operation, payload) => {
+      const response = await options.requestHistoryWrite({
+        machineId: options.machineId,
+        sessionId,
+        operation,
+        payload,
+      });
+      if (response.sessionId !== sessionId || response.operation !== operation) {
+        throw new Error('Roost history write response targeted a different operation');
+      }
+      if (response.rpcFailure) {
+        throw new SessionHistoryRequestError('write', response.rpcFailure, response.error ?? '');
+      }
+      if (!response.success) throw new RoostHistoryError('write', response.error ?? '');
+      return {
+        result: response.result,
+        historyRevision: response.historyRevision,
+        historyCount: response.historyCount,
+        historyChange: response.historyChange,
+      };
+    },
+  };
+}
+
+/** Renderer bridge for an owner reached through the local Electron process. */
 export function createLocalRoostSessionDataFactory(
   options: LocalRoostSessionBridgeOptions
 ): ConversationSessionDataFactory {
-  const send = options.sendControl ?? sendLocalSessionControl;
   return createRoostSessionDataFactoryFromTransport(
-    (sessionId) => ({
-      readHistory: async (query) => {
-        const request: LocalSessionControlRequest = {
-          type: 'session/history-read',
-          machineId: options.machineId,
-          workspaceId: options.workspaceId,
-          sessionId,
-          query,
-        };
-        const result = await send(request);
-        if (!result.ok) throw new Error(`Roost history read failed: ${result.error}`);
-        const response = result.responses.find(
-          (item): item is HistoryReadResponse =>
-            item.type === 'session/history-read_response' && item.sessionId === sessionId
-        );
-        if (!response) throw new Error('Roost history read returned no response');
-        if (!response.success) throw new RoostHistoryError('read', response.error ?? '');
-        return response;
-      },
-      writeHistory: async (operation, payload) => {
-        const request: LocalSessionControlRequest = {
-          type: 'session/history-write',
-          machineId: options.machineId,
-          workspaceId: options.workspaceId,
-          sessionId,
-          operation,
-          payload,
-        };
-        const result = await send(request);
-        if (!result.ok) throw new Error(`Roost history write failed: ${result.error}`);
-        const response = result.responses.find(
-          (item): item is HistoryWriteResponse =>
-            item.type === 'session/history-write_response' &&
-            item.sessionId === sessionId &&
-            item.operation === operation
-        );
-        if (!response) throw new Error(`Roost history write returned no ${operation} response`);
-        if (!response.success) throw new RoostHistoryError('write', response.error ?? '');
-        return {
-          result: response.result,
-          historyRevision: response.historyRevision,
-          historyCount: response.historyCount,
-          historyChange: response.historyChange,
-        };
-      },
-    }),
-    (sessionId) =>
-      JSON.stringify([
-        options.accountId ?? 'local',
-        options.workspaceId,
-        options.machineId,
-        sessionId,
-      ])
+    (sessionId) => localHistoryTransport(options, sessionId),
+    (sessionId) => historyCacheScope(options, sessionId),
+    options.machineId
   );
 }
 
-/** Renderer bridge for a Roost owner reached through encrypted Machine RPC. */
+/** Renderer bridge for an owner reached through encrypted Machine RPC. */
 export function createRemoteRoostSessionDataFactory(
   options: RemoteRoostSessionBridgeOptions
 ): ConversationSessionDataFactory {
   return createRoostSessionDataFactoryFromTransport(
-    (sessionId) => ({
-      readHistory: async (query) => {
-        const response = await options.requestHistoryRead(options.machineId, sessionId, query);
-        if (response.sessionId !== sessionId) {
-          throw new Error('Roost history read response targeted a different session');
-        }
-        if (response.rpcFailure) {
-          throw new SessionHistoryRequestError('read', response.rpcFailure, response.error ?? '');
-        }
-        if (!response.success) throw new RoostHistoryError('read', response.error ?? '');
-        return response;
-      },
-      writeHistory: async (operation, payload) => {
-        const response = await options.requestHistoryWrite({
-          machineId: options.machineId,
-          sessionId,
-          operation,
-          payload,
-        });
-        if (response.sessionId !== sessionId || response.operation !== operation) {
-          throw new Error('Roost history write response targeted a different operation');
-        }
-        if (response.rpcFailure) {
-          throw new SessionHistoryRequestError('write', response.rpcFailure, response.error ?? '');
-        }
-        if (!response.success) throw new RoostHistoryError('write', response.error ?? '');
-        return {
-          result: response.result,
-          historyRevision: response.historyRevision,
-          historyCount: response.historyCount,
-          historyChange: response.historyChange,
-        };
-      },
-    }),
-    (sessionId) =>
-      JSON.stringify([
-        options.accountId ?? 'local',
-        options.workspaceId,
-        options.machineId,
-        sessionId,
-      ])
+    (sessionId) => remoteHistoryTransport(options, sessionId),
+    (sessionId) => historyCacheScope(options, sessionId),
+    options.machineId
+  );
+}
+
+/** Keep the owner fixed while resolving its current local/cloud transport per operation. */
+export function createRoostSessionDataFactoryForMachine(
+  options: LocalRoostSessionBridgeOptions &
+    RemoteRoostSessionBridgeOptions & {
+      readonly resolvePlane: (machineId: MachineId) => Promise<'local' | 'cloud'>;
+    }
+): ConversationSessionDataFactory {
+  return createRoostSessionDataFactoryFromTransport(
+    (sessionId) => {
+      const local = localHistoryTransport(options, sessionId);
+      const remote = remoteHistoryTransport(options, sessionId);
+      const transport = async () => {
+        const plane = await options.resolvePlane(options.machineId);
+        if (plane === 'local') return local;
+        if (plane === 'cloud') return remote;
+        throw new Error('Roost history target transport is unresolved');
+      };
+      return {
+        readHistory: async (query) => (await transport()).readHistory(query),
+        writeHistory: async (operation, payload) =>
+          (await transport()).writeHistory(operation, payload),
+      };
+    },
+    (sessionId) => historyCacheScope(options, sessionId),
+    options.machineId
   );
 }

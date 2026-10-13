@@ -46,6 +46,15 @@ Identical concurrent history requests share one handler; conflicting reuse of an
 rejected. Expiry and server stop are checked again after metadata readiness, before
 history handoff. Dispatched write outcomes retain their existing recovery policy.
 
+`sessionInputAcceptance` version 1 adds `accept_input` and the read-only
+`inputAcceptance` query. The source keeps the original prepared input and target;
+the owner binds its immutable fingerprint to the history mutation atomically.
+An absent query result remains unknown, but delivering that identical input
+again is safe because the receipt wins over current placement. The CLI searches
+retained history generations before accepting it, including receipts for removed
+history. Request IDs can change; input IDs and content cannot. This capability
+does not grant history access, confirm execution, or permit steer replay.
+
 ## Remote lifecycle acknowledgements
 
 For accepted restart/upgrade responses, `settleMachineLifecycleResponse` attempts

@@ -73,14 +73,14 @@ Worktree rules: [worktree/AGENTS.md](worktree/AGENTS.md).
 
 ## Lifecycle
 
-- Roost: [contract](README.md#roost-history-paging). Await owner/backend meta;
-  no keyring/rotation/fallback/replay. Causes local, RPC stage/code/ID.
+- [Roost](README.md#roost-history-paging): check owner/backend; no keyring,
+  rotation/fallback, removed-history revival or uncertain steer replay.
+  Causes local; RPC stage/code/ID.
 
-- `Session.createAgent` gates each ACP spawn; failed spawns reject JSON-RPC. Terminals spawn
-  protocol argv (`sh -c` only for unsplit commands). Managed Codex reused-refresh startup
+- `Session.createAgent` gates each ACP spawn; failed spawns reject JSON-RPC. Terminals use protocol argv (`sh -c` for unsplit commands only). Managed Codex reused-refresh startup
   retries once after process cleanup, delay, and live Provider recheck; other auth errors do not.
-- Child tabs reuse the parent workspace. Never write per-session paths into `MachineMeta`:
-  the machine publishes `['dotlodyPath']` for frontends to derive them.
+- Child tabs reuse parent workspace. No per-session paths in `MachineMeta`:
+  machines publish `['dotlodyPath']` for frontends to derive them.
 - INVARIANT: any `sandbox.spawn` whose OUTPUT is the result must pass `captureOutput: true` (ACP
   stdio deliberately does not), and the capture buffer stays capped at 4 MiB.
 - Shutdown: `cleanUp({ keepWorkspaceDocumentOpen: true })`, MessageHandler's final flush,

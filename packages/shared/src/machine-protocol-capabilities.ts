@@ -32,6 +32,7 @@ export const MACHINE_PROTOCOL_CAPABILITIES = {
   piExtensions: 'piExtensions',
   acpCapabilityRefreshCache: 'acpCapabilityRefreshCache',
   sessionHistory: 'sessionHistory',
+  sessionInputAcceptance: 'sessionInputAcceptance',
   sessionCollaborationControl: 'sessionCollaborationControl',
 } as const;
 
@@ -56,6 +57,7 @@ export const IOS_SIMULATOR_CONTROLS_PROTOCOL_VERSION = 1;
 export const PI_EXTENSIONS_PROTOCOL_VERSION = 1;
 export const ACP_CAPABILITY_REFRESH_CACHE_PROTOCOL_VERSION = 1;
 export const SESSION_HISTORY_PROTOCOL_VERSION = 2;
+export const SESSION_INPUT_ACCEPTANCE_PROTOCOL_VERSION = 1;
 
 type MachineProtocolCapabilityCarrier = {
   protocolCapabilities?: MachineProtocolCapabilities;
@@ -132,7 +134,14 @@ export const CURRENT_MACHINE_PROTOCOL_CAPABILITIES: MachineProtocolCapabilities 
   [MACHINE_PROTOCOL_CAPABILITIES.acpCapabilityRefreshCache]:
     ACP_CAPABILITY_REFRESH_CACHE_PROTOCOL_VERSION,
   [MACHINE_PROTOCOL_CAPABILITIES.sessionHistory]: SESSION_HISTORY_PROTOCOL_VERSION,
+  [MACHINE_PROTOCOL_CAPABILITIES.sessionInputAcceptance]: SESSION_INPUT_ACCEPTANCE_PROTOCOL_VERSION,
 };
+
+export function machineSupportsSessionInputAcceptance(
+  machine: MachineProtocolCapabilityCarrier | null | undefined
+): boolean {
+  return machineSupportsProtocolCapability(machine, MACHINE_PROTOCOL_CAPABILITIES.sessionInputAcceptance, SESSION_INPUT_ACCEPTANCE_PROTOCOL_VERSION);
+}
 
 /** Whether the target daemon exposes the Roost-backed session history RPC. */
 export function machineSupportsSessionHistoryProtocol(

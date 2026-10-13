@@ -109,3 +109,9 @@ record: [process tree layer](../../../../.agents/notes/implemented/architecture/
 `local-loro-writer.ts` owns the real Node turn and socket write/drain adapters.
 Applications provide one process-wide writer; never add a workspace scheduler.
 Native workflow and release rules: [writer](../local-loro-writer/AGENTS.md).
+
+## Local session control
+
+Keep history requests and receipts aligned in the Zod protocol and both lightweight
+TS/CJS guards. The declared-operation suite must admit each supported operation;
+advertising a capability alone does not prove the local IPC path accepts it.

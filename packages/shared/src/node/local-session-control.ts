@@ -49,6 +49,19 @@ function isOptionalString(value: unknown): boolean {
   return typeof value === 'undefined' || typeof value === 'string';
 }
 
+function isSessionHistoryWriteOperation(value: unknown): boolean {
+  return (
+    value === 'append' ||
+    value === 'accept_input' ||
+    value === 'replace' ||
+    value === 'respond_permission' ||
+    value === 'apply_action' ||
+    value === 'replace_editable_tail' ||
+    value === 'apply_import' ||
+    value === 'copy_history'
+  );
+}
+
 function isOptionalNonnegativeInteger(value: unknown): boolean {
   return (
     typeof value === 'undefined' ||
@@ -659,13 +672,7 @@ export function isLocalSessionControlRequest(value: unknown): value is LocalSess
       typeof value.machineId === 'string' &&
       typeof value.workspaceId === 'string' &&
       typeof value.sessionId === 'string' &&
-      (value.operation === 'append' ||
-        value.operation === 'replace' ||
-        value.operation === 'respond_permission' ||
-        value.operation === 'apply_action' ||
-        value.operation === 'replace_editable_tail' ||
-        value.operation === 'apply_import' ||
-        value.operation === 'copy_history') &&
+      isSessionHistoryWriteOperation(value.operation) &&
       isObjectRecord(value.payload)
     );
   }
@@ -1119,13 +1126,7 @@ export function isLocalSessionControlResponse(
   if (value.type === 'session/history-write_response') {
     return (
       typeof value.sessionId === 'string' &&
-      (value.operation === 'append' ||
-        value.operation === 'replace' ||
-        value.operation === 'respond_permission' ||
-        value.operation === 'apply_action' ||
-        value.operation === 'replace_editable_tail' ||
-        value.operation === 'apply_import' ||
-        value.operation === 'copy_history') &&
+      isSessionHistoryWriteOperation(value.operation) &&
       typeof value.success === 'boolean' &&
       isOptionalNonnegativeInteger(value.historyRevision) &&
       isOptionalNonnegativeInteger(value.historyCount) &&
