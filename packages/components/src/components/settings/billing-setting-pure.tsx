@@ -208,7 +208,6 @@ export interface BillingOverviewData {
   billingAccountId: string | null;
   /** Backend capability fence for rolling frontend/backend deployments. */
   giftStackingSupported: boolean;
-  seatPaymentBeforeAdmission?: boolean;
   seatBilling?: {
     policy: 'deferred';
     capacity: number;

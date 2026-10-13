@@ -121,11 +121,7 @@ export function WorkspaceJoinRequestsSettings({ workspaceId }: { workspaceId: st
       await action();
     } catch (error) {
       console.error('Workspace join request action failed:', error);
-      toast.error(
-        String(error).includes('billing_seat_payment_required')
-          ? t('billing.seatApprovalPaymentRequired')
-          : t('joinRequest.admin.actionFailed', 'Could not update join requests.')
-      );
+      toast.error(t('joinRequest.admin.actionFailed', 'Could not update join requests.'));
     } finally {
       setBusyAction(null);
     }

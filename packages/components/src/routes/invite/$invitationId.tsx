@@ -148,10 +148,7 @@ export function AcceptInvitationComponent() {
       }, 1500);
     } else if (result.error) {
       console.error('accept invitation error', result.error);
-      if (result.error.code === 'billing_seat_payment_required') {
-        setStatus('error');
-        setErrorMessage(t('billing.seatInvitePaymentRequired'));
-      } else if (isRecipientMismatchError(result.error)) {
+      if (isRecipientMismatchError(result.error)) {
         setStatus('account_mismatch');
       } else if (isEmailVerificationRequiredError(result.error)) {
         setStatus('verification_required');

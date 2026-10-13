@@ -36,3 +36,7 @@ backend covers concurrent admission, voluntary leave and bulk removal. This note
 source behavior, not a production deployment. Backend rollout must register invoice.created
 and invoice.finalized webhooks. Unsupported tax/tiered/item-discount pricing needs support
 before expansion; historical canceled subscriptions still require separate repair.
+
+The deferred policy has no pay-before-admission state. Its unused capability flag,
+unreachable payment-required response branches and old payment-first copy were
+removed; membership price preparation still returns `ready` before admission.

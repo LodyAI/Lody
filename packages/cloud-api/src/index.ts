@@ -222,7 +222,6 @@ type BillingOverview = {
   billingAccountId: string | null;
   planTier: PlanTier;
   giftStackingSupported: boolean;
-  seatPaymentBeforeAdmission?: boolean;
   seatBilling?: {
     policy: 'deferred';
     capacity: number;
@@ -512,10 +511,7 @@ export type CloudApi = {
       { workspaceId: string },
       { invoices: BillingInvoiceRecord[]; upcoming: UpcomingInvoicePreview | null }
     >;
-    purchaseWorkspaceMemberSeat: Action<
-      { workspaceId: string },
-      { status: 'ready' } | { status: 'payment_required'; invoiceId: string }
-    >;
+    purchaseWorkspaceMemberSeat: Action<{ workspaceId: string }, { status: 'ready' }>;
     getBillingInvoice: Action<{ workspaceId: string; invoiceId: string }, BillingInvoiceDetail>;
     cancelPendingSeatInvoice: Action<
       { workspaceId: string; invoiceId: string },
