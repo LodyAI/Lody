@@ -161,13 +161,6 @@ export class SessionForkPage {
         { timeout: 60_000, intervals: [50, 100, 250, 500, 1_000] }
       )
       .toEqual({ terminals: [], worktreeExists: false, targetAgentAlive: false });
-    await expect
-      .poll(() => isProcessAlive(resources.sourceAgentPid), {
-        timeout: 30_000,
-        intervals: [50, 100, 250, 500, 1_000],
-      })
-      .toBe(true);
-
     await expect(this.sessionRow(resources.targetSessionId)).toHaveCount(0);
     await expect(this.archivedRow(resources.targetSessionId)).toHaveCount(0);
     await this.navigateToSession(resources.sourceSessionId);

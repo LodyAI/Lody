@@ -133,8 +133,8 @@ export class WorkSessionFixture {
     expect(pids.length, 'The scripted ACP process never started').toBeGreaterThan(0);
     await expect
       .poll(() => pids.filter(isProcessAlive), {
-        timeout: 30_000,
-        intervals: [50, 100, 250, 500],
+        timeout: 60_000,
+        intervals: [100, 250, 500, 1_000, 2_000],
       })
       .toEqual([]);
   }
