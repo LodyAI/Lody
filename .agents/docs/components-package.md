@@ -61,6 +61,12 @@ reuse `UserChatBubble`, including ready media and mention spans, with no separat
 acceptance badge. First paint precedes the storage transaction and does not prove
 crash durability.
 
+New input uses ordinary history-write normalization before storage validation,
+including ready file/image records with `text: undefined`. Persisted records still
+decode strictly, and same-ID content conflicts still fail. After attachment
+preparation hands input to the durable owner, retry targets that owner even while
+the memory queue awaits it; preparation-only failures still retry preparation.
+
 The workspace owns restoration, session Web Locks and input reconciliation.
 History operations resolve the fixed owner's current local/cloud plane, including
 after a late local identity probe; cached stores do not freeze that transport.

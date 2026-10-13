@@ -43,6 +43,10 @@ ready Roost input and final attachment references.
    locally before the conversation can acquire its first history store. The row
    appears before owner work completes; local storage finishes in the background.
 2. Account/workspace-scoped IndexedDB retains ready input in admission order.
+   Saving new input applies `parseHistoryWrite` to its entry before storage
+   validation, so generated file/image data with `text: undefined` behaves like
+   ordinary history writes. Persisted records still decode strictly, and same-ID
+   content conflicts still fail.
    Failed saves retain the only in-memory copy through projection refresh, block
    later sends in that session and keep leave protection. Ordinary cache recovery
    preserves this user database; explicit full reset may delete it.
@@ -53,6 +57,9 @@ ready Roost input and final attachment references.
    writer but wait behind prior accepted input under the same lease; later inputs
    do not become predecessors. The merged projection preserves source order and
    persisted peer order, including the latest pending run configuration.
+   After attachment preparation hands input to the durable owner, retry targets
+   that owner even while the held queue awaits it. Preparation-only failures
+   continue through the held queue's retry path.
 4. `sessionInputAcceptance` version 1 gates `accept_input` and the read-only
    `inputAcceptance` query. Older or changed targets fail visibly without backend
    fallback. The acquired renderer port must match the frozen target, independently
@@ -112,20 +119,23 @@ receipts across those transitions.
 Lody pins the published TypeScript SDK `@loro-dev/roost@0.1.3`; the native
 `@loro-dev/roost-node@0.1.2` graph is unchanged. A fresh-cache registry download
 matches the tested tarball and dependency-lock integrity, and all 57 installed
-package files match that download. `pnpm install --frozen-lockfile` passed. The
+package files match that download. The
 [session files draft](../../../../specs/session-files.md#7-submission-identity-and-local-writes)
 retains the separation of local admission, synchronization and execution; it has
 no new approval claim.
 
-Executed verification: `pnpm check` passed (11,701 tests across the workspace,
-plus type/lint/i18n and boundary checks); CLI published-bundle build and Storybook
-build passed. After installing the published SDK, the source coordinator/UI suites
-passed 30 targeted cases and the production immutable receipt suite passed 7 cases
-with real pinned SQLite. The packaged-transport fixes passed 52 local-control and
-44 bridge/sender/UI cases before the full workspace check.
+Final validation passed `pnpm check`: 11,724 Vitest package cases plus scripts and
+Electron tests, types, lint, i18n, and public/local/Effect boundary checks. A
+31-case focused run covers the final attachment fixes, including preparation
+failure, retry, owner refusal and same-ID retry. It asserts exactly one owner
+entry, no duplicate upload and cleared IndexedDB, and covers direct-ready image
+and file input. Each regression fails when its corresponding fix is withdrawn.
+CLI published-bundle and Storybook builds, and the seven-case immutable receipt
+suite with pinned SQLite, passed before the final attachment changes.
 
-The macOS arm64 packaged Cloud app passed its embedded CLI/native smoke check.
-Device tests used the existing authenticated Nightly profile and covered:
+Before those final attachment changes, the macOS arm64 packaged Cloud app passed
+its embedded CLI/native smoke check. Device tests used the existing authenticated
+Nightly profile and covered:
 
 - A saved local input recovered with its original ID after the transport fixes;
   the owner contained one user entry and one assistant reply. A following input
@@ -147,8 +157,5 @@ worker could acknowledge the input during the observation. These are single-run
 ordering checks, not a performance benchmark. These checks exercised an ad-hoc
 signed local artifact with updates disabled; notarization, publication and the
 update flow were not tested.
-
-`docs check` has only six pre-existing links into the uninitialized isolated
-Kimi/Pi submodules; no changed note, Spec or scoped-rule errors remain. No new
-SHA-protected topic or human approval was recorded. The original working tree
-was preserved; this implementation is in the separate task clone.
+The final attachment paths were verified by the deterministic integration cases
+above; the packaged device tests were not rerun for them.
