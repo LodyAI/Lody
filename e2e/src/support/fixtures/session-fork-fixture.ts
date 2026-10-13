@@ -6,7 +6,6 @@ import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { expect } from '@playwright/test';
 import { quoteCommandArgument } from './command-line.js';
-import { isFixtureProcessAlive } from './process-liveness.js';
 export { isPidAlive as isProcessAlive } from './process-liveness.js';
 
 const execFileAsync = promisify(execFile);
