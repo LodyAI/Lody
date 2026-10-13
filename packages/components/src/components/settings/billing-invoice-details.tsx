@@ -5,31 +5,48 @@ import type { BillingInvoiceDetail } from '@lody/cloud-api';
 import { Button } from '@lody/ui/button';
 import { Spinner } from '@lody/ui/spinner';
 import { colors } from '@lody/ui/tokens/colors.stylex';
-import { space } from '@lody/ui/tokens/scales.stylex';
+import { space, text } from '@lody/ui/tokens/scales.stylex';
 import { Dialog } from '@/ui/dialog';
 import {
   formatDate,
-  formatMoney,
+  formatInvoiceAmount,
   invoiceReasonKey,
   invoiceStatusKey,
   type BillingInvoice,
 } from './billing-setting-pure';
 
+/** The receipt: one line per charge, the total under a rule. */
 const styles = stylex.create({
-  content: { display: 'flex', flexDirection: 'column', gap: space[4], minWidth: 0 },
-  row: { display: 'flex', justifyContent: 'space-between', gap: space[4], alignItems: 'baseline' },
-  list: {
+  body: { display: 'flex', flexDirection: 'column', gap: space[3], minWidth: 0 },
+  lines: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: space[2],
     margin: 0,
     padding: 0,
     listStyleType: 'none',
-    display: 'flex',
-    flexDirection: 'column',
-    gap: space[3],
   },
-  muted: { color: colors.secondaryLabel, margin: 0 },
-  amount: { whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' },
-  error: { color: colors.destructive, margin: 0 },
-  link: { color: colors.accent },
+  line: {
+    display: 'flex',
+    alignItems: 'baseline',
+    justifyContent: 'space-between',
+    gap: space[4],
+  },
+  total: {
+    paddingTop: space[3],
+    borderTopWidth: '0.5px',
+    borderTopStyle: 'solid',
+    borderTopColor: colors.separator,
+    fontWeight: 500,
+  },
+  amount: { flexShrink: 0, fontVariantNumeric: 'tabular-nums', color: colors.label },
+  note: {
+    margin: 0,
+    fontSize: text.footnoteSize,
+    lineHeight: 1.375,
+    color: colors.secondaryLabel,
+  },
+  error: { color: colors.destructive },
 });
 
 export interface BillingInvoiceDetailsProps {
@@ -49,10 +66,19 @@ export function BillingInvoiceDetails(props: BillingInvoiceDetailsProps) {
   const [confirming, setConfirming] = useState(false);
   const invoice = props.detail?.invoice ?? props.invoice;
   const money = (amount: number | null | undefined) =>
-    amount == null ? t('billing.invoiceAmountUnavailable') : formatMoney(amount, invoice.currency);
-  const canCancel = props.detail?.canCancel === true && !props.loading && !props.error;
-  const canRetryCancellation =
-    props.detail?.cancellationPending === true && !props.loading && !props.error;
+    formatInvoiceAmount(amount, invoice.currency);
+  const ready = props.detail !== null && !props.loading && !props.error;
+  const canCancel = ready && props.detail?.canCancel === true;
+  const canRetryCancellation = ready && props.detail?.cancellationPending === true;
+  const due = invoice.status === 'open' ? invoice.amountRemaining : null;
+  const url = invoice.hostedInvoiceUrl?.startsWith('https://') ? invoice.hostedInvoiceUrl : null;
+  const summary = [
+    formatDate(invoice.createdAt),
+    invoice.seatChange ? t('billing.invoiceSeatChange', invoice.seatChange) : null,
+    t(invoiceStatusKey(invoice.status)),
+  ]
+    .filter(Boolean)
+    .join(' · ');
   return (
     <Dialog.Root
       open
@@ -62,111 +88,82 @@ export function BillingInvoiceDetails(props: BillingInvoiceDetailsProps) {
     >
       <Dialog.Content>
         <Dialog.Header>
-          <Dialog.Title>{t('billing.invoiceDetails')}</Dialog.Title>
-          <Dialog.Description>
-            {t(invoiceReasonKey(invoice))} · {invoice.number ?? invoice.id}
-          </Dialog.Description>
+          <Dialog.Title>{t(invoiceReasonKey(invoice))}</Dialog.Title>
+          <Dialog.Description>{summary}</Dialog.Description>
         </Dialog.Header>
-        <div {...stylex.props(styles.content)} aria-busy={props.loading || props.cancelPending}>
-          <div {...stylex.props(styles.row)}>
-            <span>
-              {invoice.status === 'draft'
-                ? t('billing.invoiceScheduledCollection', { date: formatDate(invoice.createdAt) })
-                : formatDate(invoice.createdAt)}
-            </span>
-            <span>{t(invoiceStatusKey(invoice.status))}</span>
-          </div>
-          {invoice.seatChange ? (
-            <p {...stylex.props(styles.muted)}>
-              {t('billing.invoiceSeatChange', invoice.seatChange)}
-            </p>
-          ) : null}
+        <div {...stylex.props(styles.body)} aria-busy={props.loading || props.cancelPending}>
           {props.loading ? <Spinner size="small" /> : null}
           {props.error ? (
-            <div role="alert">
-              <p>{t('billing.invoiceDetailsError')}</p>
-              <Button variant="secondary" onClick={props.onRetry}>
+            <div role="alert" {...stylex.props(styles.line)}>
+              <p {...stylex.props(styles.note)}>{t('billing.invoiceDetailsError')}</p>
+              <Button variant="secondary" size="small" onClick={props.onRetry}>
                 {t('billing.historyRetry')}
               </Button>
             </div>
           ) : null}
-          {props.detail && !props.loading && !props.error ? (
-            <>
-              <ul {...stylex.props(styles.list)}>
-                {props.detail.lines.map((line, index) => (
-                  <li key={line.id || index}>
-                    <div {...stylex.props(styles.row)}>
-                      <span>{line.description || t('billing.invoiceLineItem')}</span>
-                      <span {...stylex.props(styles.amount)}>{money(line.amount)}</span>
-                    </div>
-                    {line.periodStart != null && line.periodEnd != null ? (
-                      <p {...stylex.props(styles.muted)}>
-                        {formatDate(line.periodStart)} – {formatDate(line.periodEnd)}
-                      </p>
-                    ) : null}
-                  </li>
-                ))}
-              </ul>
-              <div>
-                <div {...stylex.props(styles.row)}>
-                  <span>{t('billing.invoiceTotal')}</span>
-                  <span>{money(invoice.total)}</span>
-                </div>
-                <div {...stylex.props(styles.row)}>
-                  <span>{t('billing.invoicePaid')}</span>
-                  <span>{money(invoice.amountPaid)}</span>
-                </div>
-                <div {...stylex.props(styles.row)}>
+          {ready && props.detail ? (
+            <ul {...stylex.props(styles.lines)}>
+              {props.detail.lines.map((line, index) => (
+                <li key={line.id || index}>
+                  <div {...stylex.props(styles.line)}>
+                    <span>{line.description || t('billing.invoiceLineItem')}</span>
+                    <span {...stylex.props(styles.amount)}>{money(line.amount)}</span>
+                  </div>
+                  {line.periodStart != null && line.periodEnd != null ? (
+                    <p {...stylex.props(styles.note)}>
+                      {formatDate(line.periodStart)} – {formatDate(line.periodEnd)}
+                    </p>
+                  ) : null}
+                </li>
+              ))}
+              <li {...stylex.props(styles.line, styles.total)}>
+                <span>{t('billing.invoiceTotal')}</span>
+                <span {...stylex.props(styles.amount)}>{money(invoice.total)}</span>
+              </li>
+              {due != null && due !== invoice.total ? (
+                <li {...stylex.props(styles.line)}>
                   <span>{t('billing.invoiceRemaining')}</span>
-                  <span>{money(invoice.amountRemaining)}</span>
-                </div>
-              </div>
-              {invoice.status === 'open' && !canCancel ? (
-                <p {...stylex.props(styles.muted)}>{t('billing.invoiceCannotCancel')}</p>
+                  <span {...stylex.props(styles.amount)}>{money(due)}</span>
+                </li>
               ) : null}
-            </>
+            </ul>
           ) : null}
-          {confirming && canCancel ? <p>{t('billing.invoiceCancelConfirm')}</p> : null}
+          {confirming && canCancel ? (
+            <p {...stylex.props(styles.note)}>{t('billing.invoiceCancelConfirm')}</p>
+          ) : null}
           {props.cancelError ? (
-            <p role="alert" {...stylex.props(styles.error)}>
+            <p role="alert" {...stylex.props(styles.note, styles.error)}>
               {t('billing.invoiceCancelError')}
             </p>
           ) : null}
         </div>
-        <Dialog.Footer>
-          <Button variant="secondary" disabled={props.cancelPending} onClick={props.onClose}>
-            {t('common.close')}
-          </Button>
-          {invoice.hostedInvoiceUrl?.startsWith('https://') ? (
-            <a
-              href={invoice.hostedInvoiceUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              {...stylex.props(styles.link)}
-            >
-              {t(invoice.status === 'open' ? 'billing.invoicePay' : 'billing.invoiceReceipt')}
-            </a>
-          ) : null}
-          {canRetryCancellation ? (
-            <Button variant="secondary" disabled={props.cancelPending} onClick={props.onCancel}>
-              {t('billing.invoiceRetryCancellation')}
-            </Button>
-          ) : canCancel ? (
-            <Button
-              variant="destructive"
-              disabled={props.cancelPending}
-              onClick={() => (confirming ? props.onCancel() : setConfirming(true))}
-            >
-              {t(
-                props.cancelPending
-                  ? 'billing.invoiceCanceling'
-                  : confirming
-                    ? 'billing.invoiceConfirmCancel'
-                    : 'billing.invoiceCancel'
-              )}
-            </Button>
-          ) : null}
-        </Dialog.Footer>
+        {url || canCancel || canRetryCancellation ? (
+          <Dialog.Footer>
+            {canRetryCancellation ? (
+              <Button variant="secondary" disabled={props.cancelPending} onClick={props.onCancel}>
+                {t('billing.invoiceRetryCancellation')}
+              </Button>
+            ) : canCancel ? (
+              <Button
+                variant={confirming ? 'destructive' : 'secondary'}
+                disabled={props.cancelPending}
+                onClick={() => (confirming ? props.onCancel() : setConfirming(true))}
+              >
+                {props.cancelPending ? <Spinner size="small" /> : null}
+                {t(confirming ? 'billing.invoiceConfirmCancel' : 'billing.invoiceCancel')}
+              </Button>
+            ) : null}
+            {url ? (
+              <Button
+                variant={invoice.status === 'open' ? 'primary' : 'secondary'}
+                nativeButton={false}
+                render={<a href={url} target="_blank" rel="noopener noreferrer" />}
+              >
+                {t(invoice.status === 'open' ? 'billing.invoicePay' : 'billing.invoiceReceipt')}
+              </Button>
+            ) : null}
+          </Dialog.Footer>
+        ) : null}
       </Dialog.Content>
     </Dialog.Root>
   );

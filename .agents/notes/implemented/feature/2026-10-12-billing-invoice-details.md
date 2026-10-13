@@ -23,11 +23,20 @@ next monthly anniversary for service through annual expiry. Removing/leaving kee
 current-term capacity and reduces the next monthly/annual renewal. Mistaken additions
 require removal and contacting Lody within three days of invoice date for a manual refund.
 
+## Presentation
+
+Billing UI uses the settings row grammar and nothing bespoke: an invoice is a
+`CompactLinkRow` (reason; date, seat change and any non-paid status; amount) shared
+by history and deleted-workspace bills. Details are a receipt dialog titled by the
+reason, with charge lines, a ruled total, the amount due only when it differs, and
+at most a cancel and a Stripe action. Copy states the consequence once per surface.
+
 ## Ownership and validation
 
 The backend owns immutable charges, retained capacity, shared Stripe writer recovery,
 renewal-boundary corrections and reconciliation. Invite estimates share its price and
-discount calculation. Billing settings explain capacity, collection timing and refunds.
+discount calculation. Billing settings state capacity and collection timing in one
+line; the refund window lives in the pricing FAQ.
 Unknown prices remain unknown; future totals are omitted when discount lifetime is unclear.
 
 Component tests cover invoice details, confirmation, stale state and errors. Backend

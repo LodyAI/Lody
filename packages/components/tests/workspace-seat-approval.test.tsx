@@ -73,7 +73,7 @@ it('shows the deferred fee before approving membership', async () => {
   expect(refresh).toHaveBeenCalledOnce();
   expect(approve).not.toHaveBeenCalled();
   expect(document.body.textContent).toContain('$57.41');
-  expect(document.body.textContent).toContain('Approval grants access immediately');
+  expect(document.body.textContent).toContain('They get access right away');
   const confirm = [...document.querySelectorAll('button')].find(
     (button) => button.textContent === 'Approve'
   )!;

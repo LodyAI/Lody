@@ -83,7 +83,7 @@ describe('invoice details', () => {
       invoice: scheduled,
       detail: { invoice: scheduled, lines: [], canCancel: false },
     });
-    expect(document.body.textContent).toContain('Scheduled collection:');
+    expect(document.querySelector('[role="dialog"]')?.textContent).toContain('Scheduled');
     expect(document.body.textContent).toContain('$57.41');
     expect(button('Cancel order')).toBeUndefined();
     expect(invoiceDisplayAmount(scheduled)).toBe(5741);
@@ -94,7 +94,7 @@ describe('invoice details', () => {
     expect(document.body.textContent).toContain('$57.41');
     await act(async () => button('Cancel order')!.click());
     expect(cancellations).toBe(0);
-    expect(document.body.textContent).toContain('Your existing paid seats');
+    expect(document.body.textContent).toContain('Your existing seats');
     await act(async () => button('Confirm cancellation')!.click());
     expect(cancellations).toBe(1);
   });
@@ -121,7 +121,7 @@ describe('invoice details', () => {
       },
     });
     expect(button('Cancel order')).toBeUndefined();
-    await act(async () => button('Finish previous cancellation request')!.click());
+    await act(async () => button('Finish cancellation')!.click());
     expect(cancellations).toBe(1);
   });
   it.each([{ loading: true }, { error: true }, { detail: null }])(

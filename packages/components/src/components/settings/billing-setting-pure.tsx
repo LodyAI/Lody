@@ -17,7 +17,7 @@ import { withClassName } from '@/lib/stylex';
 import { PricingPageLink } from '../shared/pricing-page-link';
 import { FounderCallLink } from '../shared/founder-call-link';
 import { SubscribeConsentNotice } from '../shared/subscribe-consent-notice';
-import { CompactRow, CompactSection } from './compact-layout';
+import { CompactLinkRow, CompactRow, CompactSection } from './compact-layout';
 import { settingsSurface as surface } from './surface';
 import { settingContainerClass } from '.';
 import { settingsType as type } from './type.stylex';
@@ -168,20 +168,6 @@ const styles = stylex.create({
 
   inlineRow: { display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: space[3] },
   history: { maxHeight: '320px', overflowY: 'auto', margin: 0, padding: 0, listStyleType: 'none' },
-  invoice: {
-    display: 'flex',
-    flexWrap: 'wrap',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    columnGap: space[4],
-    rowGap: space[1],
-  },
-  invoiceText: { minWidth: 0 },
-  link: {
-    fontSize: uiText.footnoteSize,
-    color: colors.accent,
-    textDecoration: { default: 'none', ':hover': 'underline' },
-  },
 
   trailing: { display: 'flex', justifyContent: 'flex-end', paddingInline: space[4] },
   quietAction: {
@@ -389,6 +375,56 @@ export function invoiceStatusKey(status: string) {
     default:
       return 'billing.invoiceStatusUnknown';
   }
+}
+
+/** One invoice as a settings line: why it exists, when, and what it costs. */
+export function BillingInvoiceRow({
+  invoice,
+  onOpen,
+}: {
+  invoice: BillingInvoice;
+  /** Opens the invoice's details; without it the row leads to Stripe's page. */
+  onOpen?: () => void;
+}) {
+  const { t } = useTranslation();
+  const label =
+    invoice.kind === 'gift_redemption' && invoice.giftDurationMonths
+      ? t('billing.historyGiftPlusMonths', { count: invoice.giftDurationMonths })
+      : t(invoiceReasonKey(invoice));
+  const helper = [
+    formatDate(invoice.createdAt),
+    invoice.seatChange ? t('billing.invoiceSeatChange', invoice.seatChange) : null,
+    invoice.status === 'paid' ? null : t(invoiceStatusKey(invoice.status)),
+  ]
+    .filter(Boolean)
+    .join(' · ');
+  const value = formatInvoiceAmount(invoiceDisplayAmount(invoice), invoice.currency);
+  const url = invoice.hostedInvoiceUrl;
+  if (onOpen) {
+    return (
+      <CompactLinkRow to="open" label={label} helper={helper} detail={value} onClick={onOpen} />
+    );
+  }
+  if (url?.startsWith('https://')) {
+    return (
+      <CompactLinkRow
+        label={label}
+        helper={helper}
+        detail={value}
+        onClick={() => window.open(url, '_blank', 'noopener,noreferrer')}
+      />
+    );
+  }
+  return (
+    <CompactRow label={label} helper={helper}>
+      <span {...stylex.props(styles.tabular)}>{value}</span>
+    </CompactRow>
+  );
+}
+
+/** An amount the backend could not report reads as a dash, not a sentence. */
+export function formatInvoiceAmount(cents: number | null | undefined, currency: string): string {
+  return cents == null ? '—' : formatMoney(cents, currency);
 }
 
 export function formatUsd(cents: number): string {
@@ -740,28 +776,22 @@ export function BillingSettingsView({
               <p {...stylex.props(surface.rowLabel)}>{t('billing.members')}</p>
               <span {...stylex.props(styles.metricValue)}>
                 <span {...stylex.props(styles.metricStrong)}>{overview.seatCount}</span>
-                {!entitled ? ` / ${FREE_WORKSPACE_MEMBER_LIMIT}` : null}
+                {overview.seatBilling
+                  ? ` / ${overview.seatBilling.capacity}`
+                  : !entitled
+                    ? ` / ${FREE_WORKSPACE_MEMBER_LIMIT}`
+                    : null}
               </span>
             </div>
             {overview.seatBilling ? (
-              <>
-                <p {...stylex.props(styles.helper)}>
-                  {t('billing.deferredSeatCounts', {
-                    capacity: overview.seatBilling.capacity,
-                    available: overview.seatBilling.available,
-                    renewal: overview.seatBilling.renewalQuantity,
-                  })}
-                </p>
-                <p {...stylex.props(styles.helper)}>
-                  {t(
-                    overview.billingInterval === 'year'
-                      ? 'billing.deferredSeatsYearly'
-                      : 'billing.deferredSeatsMonthly'
-                  )}
-                </p>
-                <p {...stylex.props(styles.helper)}>{t('billing.deferredSeatRemoval')}</p>
-                <p {...stylex.props(styles.helper)}>{t('billing.seatRefundPolicy')}</p>
-              </>
+              <p {...stylex.props(styles.helper)}>
+                {t(
+                  overview.billingInterval === 'year'
+                    ? 'billing.deferredSeatsYearly'
+                    : 'billing.deferredSeatsMonthly',
+                  { count: overview.seatBilling.available }
+                )}
+              </p>
             ) : null}
           </div>
         </CompactSection>
@@ -976,56 +1006,11 @@ export function BillingSettingsView({
             // Cap at roughly 6 rows; older invoices scroll.
             <ul {...withClassName(stylex.props(styles.history), 'input-scrollbar')}>
               {invoices.map((invoice, index) => (
-                <li
-                  key={invoice.id}
-                  {...stylex.props(styles.block, styles.invoice, index > 0 && surface.lineRuled)}
-                >
-                  <div {...stylex.props(styles.invoiceText)}>
-                    <p {...stylex.props(surface.rowLabel)}>
-                      {invoice.status === 'draft'
-                        ? t('billing.invoiceScheduledCollection', {
-                            date: formatDate(invoice.createdAt),
-                          })
-                        : formatDate(invoice.createdAt)}
-                    </p>
-                    <p {...stylex.props(surface.rowHelper)}>
-                      {invoice.kind === 'gift_redemption' && invoice.giftDurationMonths
-                        ? t('billing.historyGiftPlusMonths', { count: invoice.giftDurationMonths })
-                        : t(invoiceReasonKey(invoice))}
-                      {invoice.kind !== 'gift_redemption' && invoice.interval
-                        ? ` · ${t(invoice.interval === 'year' ? 'billing.historyPlanYearly' : 'billing.historyPlanMonthly')}`
-                        : null}
-                      {invoice.seatChange
-                        ? ` · ${t('billing.invoiceSeatChange', invoice.seatChange)}`
-                        : null}
-                    </p>
-                  </div>
-                  <div {...stylex.props(styles.inlineRow)}>
-                    <span {...stylex.props(styles.tabular)}>
-                      {invoiceDisplayAmount(invoice) == null
-                        ? t('billing.invoiceAmountUnavailable')
-                        : formatMoney(invoiceDisplayAmount(invoice)!, invoice.currency)}
-                    </span>
-                    <Badge>{t(invoiceStatusKey(invoice.status))}</Badge>
-                    {onViewInvoice ? (
-                      <Button
-                        variant="secondary"
-                        size="small"
-                        onClick={() => onViewInvoice(invoice)}
-                      >
-                        {t('billing.invoiceDetails')}
-                      </Button>
-                    ) : invoice.hostedInvoiceUrl ? (
-                      <a
-                        href={invoice.hostedInvoiceUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        {...stylex.props(styles.link)}
-                      >
-                        {t('billing.historyView')}
-                      </a>
-                    ) : null}
-                  </div>
+                <li key={invoice.id} {...stylex.props(index > 0 && surface.lineRuled)}>
+                  <BillingInvoiceRow
+                    invoice={invoice}
+                    onOpen={onViewInvoice ? () => onViewInvoice(invoice) : undefined}
+                  />
                 </li>
               ))}
             </ul>

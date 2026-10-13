@@ -313,6 +313,8 @@ export const settingsSurface = stylex.create({
   },
   /** A link row's end holds a control's height, so it is as tall as a row with a button. */
   linkEnd: { minHeight: control.small },
+  /** A link row's answer: a figure in the label's ink, set before the mark. */
+  linkValue: { color: colors.label, fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' },
   /** A link row's end mark: a hint, in the ink of a glyph at rest. */
   linkMark: { flexShrink: 0, width: '14px', height: '14px', color: colors.tertiaryLabel },
 

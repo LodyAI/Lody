@@ -458,7 +458,16 @@ export const Enterprise: Story = {
 
 export const PendingSeatInvoice: Story = {
   args: {
-    overview: paidOverview,
+    overview: {
+      ...paidOverview,
+      seatBilling: {
+        policy: 'deferred',
+        capacity: 6,
+        available: 1,
+        renewalQuantity: 5,
+        periodEnd: paidOverview.currentPeriodEnd,
+      },
+    },
     invoices: [
       {
         ...mockInvoices[0]!,

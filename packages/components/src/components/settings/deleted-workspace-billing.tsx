@@ -6,14 +6,7 @@ import { Button } from '@lody/ui/button';
 import { cloudOperations } from '@/lib/cloud-api-operations';
 import { CompactRow, CompactSection } from './compact-layout';
 import { BillingInvoiceDetails } from './billing-invoice-details';
-import {
-  formatDate,
-  formatMoney,
-  invoiceDisplayAmount,
-  invoiceReasonKey,
-  invoiceStatusKey,
-  type BillingInvoice,
-} from './billing-setting-pure';
+import { BillingInvoiceRow, type BillingInvoice } from './billing-setting-pure';
 
 /** Billing identity survives workspace access and content deletion. Owner only. */
 export function DeletedWorkspaceBilling() {
@@ -60,37 +53,26 @@ function DeletedWorkspaceInvoices({ workspaceId, name }: { workspaceId: string; 
         label={name}
         helper={error && !selected ? t('billing.invoiceDetailsError') : undefined}
       >
-        <Button
-          variant="secondary"
-          size="small"
-          disabled={loading}
-          onClick={() => {
-            setLoading(true);
-            setError(false);
-            void list({ workspaceId })
-              .then((result) => setInvoices(result.invoices))
-              .catch(() => setError(true))
-              .finally(() => setLoading(false));
-          }}
-        >
-          {t('billing.historyTitle')}
-        </Button>
-      </CompactRow>
-      {invoices?.map((invoice) => (
-        <CompactRow
-          key={invoice.id}
-          label={`${t(invoiceReasonKey(invoice))} · ${formatDate(invoice.createdAt)}`}
-          helper={`${t(invoiceStatusKey(invoice.status))} · ${invoiceDisplayAmount(invoice) == null ? t('billing.invoiceAmountUnavailable') : formatMoney(invoiceDisplayAmount(invoice)!, invoice.currency)}`}
-        >
+        {invoices === null ? (
           <Button
             variant="secondary"
             size="small"
             disabled={loading}
-            onClick={() => void show(invoice)}
+            onClick={() => {
+              setLoading(true);
+              setError(false);
+              void list({ workspaceId })
+                .then((result) => setInvoices(result.invoices))
+                .catch(() => setError(true))
+                .finally(() => setLoading(false));
+            }}
           >
-            {t('billing.invoiceDetails')}
+            {t('billing.historyTitle')}
           </Button>
-        </CompactRow>
+        ) : null}
+      </CompactRow>
+      {invoices?.map((invoice) => (
+        <BillingInvoiceRow key={invoice.id} invoice={invoice} onOpen={() => void show(invoice)} />
       ))}
       {selected ? (
         <BillingInvoiceDetails
