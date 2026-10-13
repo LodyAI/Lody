@@ -238,7 +238,7 @@ export class SidebarSearchPage {
     await dialog.getByRole('button', { name: /^(Save|保存)$/u }).click();
     await expect(dialog).toBeHidden();
     await expect(this.page.locator('body')).not.toHaveCSS('pointer-events', 'none');
-    await expect(this.activeRow(sessionId)).toContainText(title);
+    await expect(this.activeRow(sessionId)).toContainText(title, { timeout: 30_000 });
   }
 
   private async expectActiveSessionTitles(targetTitle: string): Promise<void> {

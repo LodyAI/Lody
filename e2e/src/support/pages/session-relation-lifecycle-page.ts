@@ -145,6 +145,30 @@ export class SessionRelationLifecyclePage {
       await expect
         .poll(
           () =>
+            this.page.evaluate(() =>
+              Boolean(
+                (
+                  window as typeof window & {
+                    __LODY_E2E_META_SCAN_GATE__?: { repoAssigned: boolean };
+                  }
+                ).__LODY_E2E_META_SCAN_GATE__?.repoAssigned
+              )
+            ),
+          { timeout: 60_000, intervals: [50, 100, 250, 500] }
+        )
+        .toBe(true);
+      // Make the in-flight full metadata scans explicit; startup may complete or
+      // skip these reads before the renderer exposes its repo on some hosts.
+      await this.page.evaluate(() => {
+        (
+          window as typeof window & {
+            __LODY_E2E_META_SCAN_GATE__?: { startMetadataScans: () => void };
+          }
+        ).__LODY_E2E_META_SCAN_GATE__?.startMetadataScans();
+      });
+      await expect
+        .poll(
+          () =>
             this.page.evaluate(
               () =>
                 (
@@ -358,10 +382,40 @@ export class SessionRelationLifecyclePage {
         const gate = new Promise((resolve) => {
           releaseGate = resolve;
         });
+        const instrumentedScanners = new WeakSet();
+        const instrumentScanner = (scanner) => {
+          if (!scanner || instrumentedScanners.has(scanner)) return scanner || null;
+          instrumentedScanners.add(scanner);
+          const originalScan = scanner.scan.bind(scanner);
+          scanner.scan = (...args) => {
+            const prefix = args[0] && args[0].prefix;
+            const isFullMetadataScan =
+              Array.isArray(prefix) &&
+              prefix.length === 1 &&
+              (prefix[0] === 'm' || prefix[0] === 'e');
+            if (!isFullMetadataScan || control.released) return originalScan(...args);
+            control.blockedScans += 1;
+            return gate
+              .then(() => originalScan(...args))
+              .finally(() => {
+                control.completedScans += 1;
+              });
+          };
+          return scanner;
+        };
         const control = {
           blockedScans: 0,
           completedScans: 0,
           released: false,
+          repoAssigned: false,
+          startMetadataScans: () => {
+            const scanner = instrumentScanner(
+              repoValue && repoValue.getMeta ? repoValue.getMeta() : null
+            );
+            if (!scanner) throw new Error('Renderer metadata scanner is unavailable');
+            void scanner.scan({ prefix: ['m'] });
+            void scanner.scan({ prefix: ['e'] });
+          },
           release: () => {
             control.released = true;
             releaseGate();
@@ -372,25 +426,9 @@ export class SessionRelationLifecyclePage {
           configurable: true,
           get: () => repoValue,
           set: (repo) => {
-            const scanner = repo && repo.getMeta ? repo.getMeta() : null;
-            if (scanner) {
-              const originalScan = scanner.scan.bind(scanner);
-              scanner.scan = (...args) => {
-                const prefix = args[0] && args[0].prefix;
-                const isFullMetadataScan =
-                  Array.isArray(prefix) &&
-                  prefix.length === 1 &&
-                  (prefix[0] === 'm' || prefix[0] === 'e');
-                if (!isFullMetadataScan || control.released) return originalScan(...args);
-                control.blockedScans += 1;
-                return gate
-                  .then(() => originalScan(...args))
-                  .finally(() => {
-                    control.completedScans += 1;
-                  });
-              };
-            }
+            instrumentScanner(repo && repo.getMeta ? repo.getMeta() : null);
             repoValue = repo;
+            control.repoAssigned = true;
           },
         });
         window.__LODY_E2E_META_SCAN_GATE__ = control;
