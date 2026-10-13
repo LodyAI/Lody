@@ -48,11 +48,6 @@ const INTERACTIVE_CLAUDE_REGISTRY_AGENT = {
   },
 };
 const LOCAL_REGISTRY_AGENTS = {
-  'amp-acp': {
-    command: 'npx',
-    args: ['-y', 'amp-acp'],
-    versionArgs: ['--version'],
-  },
   cursor: {
     command: 'cursor-agent',
     args: ['acp'],

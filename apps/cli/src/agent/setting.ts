@@ -408,8 +408,7 @@ export async function resolveExpectedAcpCapabilitySourceVersion(
 
 export function resolveRegistryAgentACPSetting(agent: RegistryAcpAgent): ResolvedACPSetting {
   if (agent.distribution.local?.command) {
-    const isNpx = agent.distribution.local.command === 'npx';
-    const args = [...(isNpx ? [NPX_CACHE_MODE_ARG] : []), ...(agent.distribution.local.args ?? [])];
+    const args = [...(agent.distribution.local.args ?? [])];
     return {
       status: {
         agent: `${agent.name}@${agent.version}`,
