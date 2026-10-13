@@ -37,3 +37,5 @@ Effect feature/fix 评估发现 ACP 启动、启动 gate／transport 和 Loro �
 确定性测试覆盖无会话 initialize／query、能力声明、并发合并与退避、配置和推送竞态、清理隔离、严格本地路由、Machine RPC 响应、自定义 Provider key 和 UI 能力门控。没有使用真实凭据、额度接口或模型 prompt。
 
 checkout 原有运行时元数据冲突：Codex 0.159.2 对 0.160.1、Claude SDK 0.3.284 对 0.3.293、Grok 1.0.40 对 1.0.46。CLI 行为测试另用临时、仅替换版本元数据的测试夹具运行；生产检查和发布 pin 不变。PR 分别记录正常检查与夹具辅助测试。
+
+后续 CI 排查读取了 PR #1535 的完整 workflow 日志：此前 builtin ACP 升级更改了子模块依赖却未同步根锁文件，导致所有执行任务在 frozen install 阶段停止。重新生成根锁文件保留选定子模块版本并恢复 frozen install。七天策略配置保持不变；本次解析包含这些版本已经明确要求的依赖。Codex plan-command 证据链接改为仍存在的 adapter 测试目录。运行时 manifest 兼容性仍是独立阻塞，需要发布匹配产物或回退未完成升级。
