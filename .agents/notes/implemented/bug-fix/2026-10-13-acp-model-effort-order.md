@@ -48,6 +48,13 @@ use this applier. This complements the
 [startup-model decision](2026-10-09-codex-resume-model.md): live application remains
 necessary for agents that ignore startup metadata.
 
+Earlier fixes [#1126](https://github.com/LodyAI/Lody/pull/1126) and
+[#1310](https://github.com/LodyAI/Lody/pull/1310) already covered Role capability
+selection and editor model switches. They preserve/validate the requested values;
+this change orders the later ACP requests that apply those values.
+
+PR: [#1543](https://github.com/LodyAI/Lody/pull/1543).
+
 The Promise-based AgentClient still owns the underlying requests. An Effect
 migration would cross unfinished Lody dependencies and does not help this ordering
 fix, so it remains outside this change. Cancellation is checked after each request

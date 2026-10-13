@@ -38,6 +38,12 @@ OpenCode 的[配置源码](https://github.com/anomalyco/opencode/blob/dev/packag
 预准备、前台执行和恢复路径共用此应用器。这补充了
 [启动模型决策](2026-10-09-codex-resume-model.zh.md)：忽略启动元数据的 Agent 仍需要运行时应用。
 
+之前的 [#1126](https://github.com/LodyAI/Lody/pull/1126) 和
+[#1310](https://github.com/LodyAI/Lody/pull/1310) 已覆盖 Role 能力选择及编辑器模型切换。
+它们负责保留和校验请求值；本次修改负责后续应用这些值的 ACP 请求顺序。
+
+PR：[#1543](https://github.com/LodyAI/Lody/pull/1543)。
+
 底层请求仍由 Promise 接口的 AgentClient 管理。Effect 迁移将涉及尚未完成的 Lody
 依赖，且不能直接帮助解决本次顺序错误，因此不纳入此次修改。
 每次请求完成后、后续状态变更前继续检查取消；本修改不声称可以取消原始 ACP I/O。
