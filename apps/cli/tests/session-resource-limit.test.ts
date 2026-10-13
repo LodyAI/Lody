@@ -1,7 +1,15 @@
+import { makeApplicationRuntime } from '@lody/shared/node/application-runtime';
+import {
+  LoginShellCache,
+  LoginShellCacheLive,
+  LoginShellEnvironment,
+} from '@lody/shared/node/login-shell-env';
+import { bindLoginShellCacheLegacy } from '../src/agent/login-shell-env';
+import { Cause, Effect, Layer } from 'effect';
 import { EventEmitter } from 'events';
 import { PassThrough } from 'stream';
 
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
 import type { ChildProcess } from 'child_process';
 import type { SessionId, WorkspaceId } from '@lody/shared';
 
@@ -18,6 +26,25 @@ import {
   getCurrentCommitHash,
   type GitRunner,
 } from '../src/lib/git/git-diff-stats';
+
+// Sessions borrow the same explicit application owner as production launchers.
+let shellOwner: ReturnType<typeof makeApplicationRuntime<LoginShellCache, never>>;
+beforeEach(() => {
+  shellOwner = makeApplicationRuntime(
+    LoginShellCacheLive.pipe(
+      Layer.provide(
+        Layer.succeed(LoginShellEnvironment, {
+          probe: () => Effect.succeed({}),
+        })
+      )
+    ),
+    { recover: Effect.failCause, project: Cause.squash }
+  );
+  bindLoginShellCacheLegacy(shellOwner);
+});
+afterEach(async () => {
+  await shellOwner.closeLegacy();
+});
 
 const createSilentLogger = (): Logger => ({
   info: () => {},

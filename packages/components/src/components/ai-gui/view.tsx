@@ -226,7 +226,11 @@ import { conversationSurface } from './surface';
 import { ConversationColumn } from '@/components/shared/conversation-column';
 import type { TurnIndexRow } from '@/lib/conversation-view';
 import { TurnPlaceholderRow, estimatePlaceholderHeight } from './turn-placeholder-row';
-import { CreatedSessionOperationCard } from './created-session-operation-card';
+import {
+  CreatedSessionList,
+  getCreatedSessionCards,
+  summarizeOperationOutput,
+} from './created-session-list';
 import { OperationReplyCard } from './operation-reply-card';
 import type { SessionNavigationTarget } from '@/lib/session-navigation';
 import { AcpAuthenticationPanel } from '@/components/settings/acp-authentication-panel';
@@ -272,7 +276,7 @@ import { shouldRenderSystemRowItem } from './message-content-guards';
 import { getChatFailedDiagnosticCopy } from './chat-failed-diagnostic-copy';
 import {
   buildChatFailedErrorReport,
-  extractReadableChatFailedMessage,
+  buildChatFailedNoticeDetail,
 } from './chat-failed-error-report';
 import { DEFAULT_CONVERSATION_FONT_SIZE, type ConversationFontSize } from '@/atoms/settings';
 import {
@@ -438,6 +442,7 @@ type AssistantChatVirtualRow = {
 };
 
 type StandardChatVirtualRow = {
+  groupedItems?: SessionMessageItem[];
   type: 'standard';
   key: string;
   /** Absolute turn index (the `empty` item uses its list position). */
@@ -1076,6 +1081,7 @@ export const buildChatVirtualRows = ({
   activeSearchBlockId,
   expansionVersion,
   copyContextAvailable = false,
+  groupCreatedSessions = true,
   showThoughts = false,
   selectionLayouts,
 }: {
@@ -1088,6 +1094,7 @@ export const buildChatVirtualRows = ({
   activeSearchBlockId?: string | null;
   expansionVersion: number;
   copyContextAvailable?: boolean;
+  groupCreatedSessions?: boolean;
   showThoughts?: boolean;
 }): ChatVirtualRow[] => {
   const rows: ChatVirtualRow[] = [];
@@ -1107,11 +1114,35 @@ export const buildChatVirtualRows = ({
     // targets are independent of which turns happen to be hydrated.
     const messageIndex = item.turnIndex;
     if (item.message.role !== 'assistant') {
+      const groupedItems = [item];
+      if (groupCreatedSessions && getCreatedSessionCards(item.message)) {
+        while (position + 1 < items.length) {
+          const next = items[position + 1];
+          if (
+            next?.type !== 'message' ||
+            next.sessionId !== item.sessionId ||
+            !getCreatedSessionCards(next.message)
+          )
+            break;
+          groupedItems.push(next);
+          position += 1;
+        }
+      }
       rows.push({
         type: 'standard',
         key: item.message.id,
         messageIndex,
-        item,
+        groupedItems: groupedItems.length > 1 ? groupedItems : undefined,
+        item:
+          groupedItems.length === 1
+            ? item
+            : {
+                ...item,
+                message: {
+                  ...item.message,
+                  items: groupedItems.flatMap((entry) => entry.message.items),
+                },
+              },
       });
       continue;
     }
@@ -1765,8 +1796,10 @@ export const SessionChatStreamView = forwardRef<
         copyContextAvailable,
         showThoughts,
         selectionLayouts,
+        groupCreatedSessions: messageSelection === null,
       });
     }, [
+      messageSelection,
       showThoughts,
       selectionLayouts,
       activeSearchBlockId,
@@ -1918,7 +1951,8 @@ export const SessionChatStreamView = forwardRef<
           (row) =>
             row.type === 'standard' &&
             row.item.type === 'message' &&
-            row.item.message.id === messageId
+            (row.item.message.id === messageId ||
+              row.groupedItems?.some((entry) => entry.message.id === messageId))
         );
         return rowIndex === -1 ? -1 : rowIndex + leadingRowCount;
       },
@@ -2147,7 +2181,11 @@ export const SessionChatStreamView = forwardRef<
         vlist.findItemIndex(vlist.scrollOffset + vlist.viewportSize) - leadingRowCount
       );
       const from = rows[startRow]?.messageIndex;
-      const to = rows[endRow]?.messageIndex;
+      const end = rows[endRow];
+      const to =
+        end?.type === 'standard'
+          ? (end.groupedItems?.at(-1)?.turnIndex ?? end.messageIndex)
+          : end?.messageIndex;
       if (from === undefined || to === undefined) return;
       const next = { from: Math.min(from, to), to: Math.max(from, to) + 1 };
       const last = lastVisibleRangeRef.current;
@@ -2158,7 +2196,7 @@ export const SessionChatStreamView = forwardRef<
     useEffect(() => {
       if (!initialScrollRestored) return;
       reportVisibleTurnRange();
-    }, [initialScrollRestored, reportVisibleTurnRange, virtualRows.length]);
+    }, [initialScrollRestored, reportVisibleTurnRange, virtualRows]);
 
     // The top fade's bottom counterpart, above the info bar: shown while
     // conversation content continues past the bottom edge. The reply room under
@@ -2232,7 +2270,12 @@ export const SessionChatStreamView = forwardRef<
           }
         }
         if (virtualIndex === -1) {
-          virtualIndex = virtualRows.findIndex((row) => row.messageIndex === messageIndex);
+          virtualIndex = virtualRows.findIndex(
+            (row) =>
+              row.messageIndex === messageIndex ||
+              (row.type === 'standard' &&
+                row.groupedItems?.some((entry) => entry.turnIndex === messageIndex))
+          );
         }
         if (virtualIndex === -1) return;
         scrollRowToTop(virtualIndex, smooth ?? true);
@@ -2656,6 +2699,10 @@ const SystemMessageRowView = ({
   onNavigateSession?: (target: SessionNavigationTarget) => void;
   capacityRetry?: CapacityRetryControl;
 }) => {
+  const creationCards = getCreatedSessionCards(message);
+  if (creationCards) {
+    return <CreatedSessionList cards={creationCards} onNavigateSession={onNavigateSession} />;
+  }
   const systemItems = message.items.flatMap((item, itemIndex) =>
     shouldRenderSystemRowItem(item) ? [{ item, itemIndex }] : []
   );
@@ -2689,21 +2736,15 @@ const SystemMessageRowView = ({
             script={item}
           />
         ) : item.type === 'operation_progress' ? (
-          <div
+          <CreatedSessionList
             key={item.operationId}
-            className="flex flex-col gap-2"
-            data-session-create-progress=""
-          >
-            {item.items.map((target) => (
-              <CreatedSessionOperationCard
-                key={target.target.sessionId}
-                sessionId={target.target.sessionId}
-                fallbackTitle={target.label}
-                status={target.status}
-                onNavigateSession={onNavigateSession}
-              />
-            ))}
-          </div>
+            cards={item.items.map((target) => ({
+              sessionId: target.target.sessionId,
+              fallbackTitle: target.label,
+              status: target.status,
+            }))}
+            onNavigateSession={onNavigateSession}
+          />
         ) : (
           <OperationCompletionView
             key={`${item.deliveryId}-${itemIndex}`}
@@ -2791,22 +2832,11 @@ const OperationCompletionView = ({
     continuationNotice !== null;
 
   return (
-    <div
-      className="flex flex-col gap-2"
-      data-operation-completion={completion.operationKind}
-      {...(createsSessions && cards.length > 0 ? { 'data-session-create-completion': '' } : {})}
-    >
-      {cards.map((card) =>
-        createsSessions ? (
-          <CreatedSessionOperationCard
-            key={card.sessionId}
-            sessionId={card.sessionId}
-            fallbackTitle={card.fallbackTitle}
-            status={card.status}
-            detail={card.detail}
-            onNavigateSession={onNavigateSession}
-          />
-        ) : (
+    <div className="flex flex-col gap-2" data-operation-completion={completion.operationKind}>
+      {createsSessions ? (
+        <CreatedSessionList cards={cards} onNavigateSession={onNavigateSession} />
+      ) : (
+        cards.map((card) => (
           // A message Operation reads from the sender's side: the target replied.
           <OperationReplyCard
             key={card.sessionId}
@@ -2821,7 +2851,7 @@ const OperationCompletionView = ({
                   ? { status: 'cancelled' as const }
                   : { status: 'running' as const })}
           />
-        )
+        ))
       )}
       {showStatusCard ? (
         <div
@@ -2884,13 +2914,6 @@ const OperationCompletionView = ({
       ) : null}
     </div>
   );
-};
-
-/** One readable line from a reply preview: collapsed whitespace, capped length. */
-const summarizeOperationOutput = (text: string | undefined): string | undefined => {
-  const collapsed = text?.replace(/\s+/g, ' ').trim();
-  if (!collapsed) return undefined;
-  return collapsed.length > 240 ? `${collapsed.slice(0, 240)}…` : collapsed;
 };
 
 const DashedNoticeRule = () => (
@@ -3377,15 +3400,6 @@ const ChatFailedNoticeView = ({
     ? t(diagnosticCopy.actionKey, diagnosticCopy.action)
     : undefined;
   const rawMessage = meta?.message?.trim() ? meta.message : undefined;
-  const detailMessage = (() => {
-    if (!rawMessage) return undefined;
-    const extracted = extractReadableChatFailedMessage(rawMessage);
-    return extracted !== reasonMessage ? extracted : undefined;
-  })();
-  // Unfold whenever there is a raw message at all: even one whose readable
-  // extract equals the title, the full payload (stack, upstream JSON) is worth
-  // reading.
-  const hasDetail = Boolean(rawMessage && rawMessage.trim() !== reasonMessage);
   const isProviderOverloaded = meta?.reason === 'acp_provider_overloaded';
 
   const retryInSeconds = capacityRetry?.retryInSeconds ?? null;
@@ -3464,12 +3478,11 @@ const ChatFailedNoticeView = ({
     <AgentNoticeBanner
       tone={isProviderOverloaded ? 'muted' : 'error'}
       label={reasonMessage}
-      // The readable extract first, then the untouched payload behind it.
-      detail={
-        [actionMessage, detailMessage, hasDetail ? rawMessage : null]
-          .filter((part, index, all) => Boolean(part) && all.indexOf(part) === index)
-          .join('\n\n') || undefined
-      }
+      detail={buildChatFailedNoticeDetail({
+        title: reasonMessage,
+        action: actionMessage,
+        message: rawMessage,
+      })}
       action={retryAction}
       footer={
         <Button variant="ghost" size="medium" onClick={() => void handleCopyError()}>
@@ -5148,8 +5161,7 @@ export const AssistantTurnFooter = ({
               'flex flex-wrap items-center justify-start text-muted-foreground'
             ),
             isMobile ? 'min-h-6 gap-1' : 'min-h-7 gap-2',
-            !isMobile &&
-              'opacity-0 transition-opacity duration-150 focus-within:opacity-100',
+            !isMobile && 'opacity-0 transition-opacity duration-150 focus-within:opacity-100',
             !isMobile && (isTurnHovered || (showFinishedMetadata && isForking)) && 'opacity-100'
           )}
           data-assistant-turn-actions
@@ -7576,6 +7588,14 @@ const ToolCallCard = memo(function ToolCallCard({
         // Markdown pipeline so single-`$` math cannot eat fragments like `$(...)`.
         const verbatim =
           detectToolCallJsonText(content.text) ?? extractFencedToolText(content.text);
+        // A shell step's plain text is what the program printed (Pi histories stored
+        // it so); Markdown would fold its line breaks into one paragraph.
+        if (verbatim === null && toolCall.kind === 'execute') {
+          pushOutput(`text-${index}`, [
+            { type: 'terminal_output', output: content.text, stream: 'combined' },
+          ]);
+          continue;
+        }
         sections.push(
           isToolSearch || verbatim !== null ? (
             <ToolVerbatimSection

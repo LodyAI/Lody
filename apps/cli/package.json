@@ -69,7 +69,7 @@
     "@types/proxy-from-env": "^1.0.4",
     "@types/uuid": "^9.0.8",
     "@types/ws": "^8.18.1",
-    "@types/yauzl": "^2.10.3",
+    "@types/yauzl": "^3.4.0",
     "@vitest/coverage-v8": "5.0.2",
     "acp-extension-claude": "workspace:*",
     "acp-extension-codex": "workspace:*",
@@ -101,6 +101,7 @@
     "posthog-node": "^5.38.8",
     "proxy-from-env": "^1.1.0",
     "rimraf": "^6.1.2",
+    "smol-toml": "^1.9.0",
     "tar": "^7.5.7",
     "tsx": "^4.23.5",
     "undici": "catalog:",
@@ -114,7 +115,7 @@
     "winston-daily-rotate-file": "^5.0.0",
     "winston-transport": "^4.7.1",
     "ws": "^8.18.3",
-    "yauzl": "^2.10.0",
+    "yauzl": "^3.4.0",
     "zod": "catalog:",
     "zstd-stream": "^1.1.0"
   },
@@ -125,7 +126,8 @@
     "LICENSE"
   ],
   "dependencies": {
-    "@loro-dev/roost-node": "0.1.1",
+    "@effect/platform-node-shared": "catalog:",
+    "@loro-dev/roost-node": "0.1.2",
     "@lydell/node-pty": "1.2.0-beta.14",
     "@napi-rs/keyring": "2.1.0",
     "better-sqlite3": "catalog:",

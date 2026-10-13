@@ -143,9 +143,21 @@ backend。命令通过会话选定的 backend，使用该存储唯一的 writer�
 control metadata 与投递状态仍由 Loro 保存。本地历史接受不表示 Roost
 远端已同步。
 
+Roost 签名身份沿用现有应用数据的安全边界，与登录凭据分开。每个可写的执行副本只创建并持久保存一次自己的身份；
+正常启动不要求系统凭据存储或用户提供 seed。签名身份证明底层写入者，不代表人类发起者，也不授予权限。
+多个获授权的成员或设备可以使用同一执行副本；每轮人类身份及现有 Workspace、机器授权继续作为判断依据。
+签名私钥不进入历史同步、导出、RPC 或诊断。身份缺失或损坏时不得静默更换已有写入者。
+实验 Nightly 钥匙串身份的迁移不在本次范围内；没有配套身份的已有数据会保留并明确拒绝，不能静默接管或删除。
+
 桌面侧栏的工作区、按更新时间排列和置顶列表中，会话 hover 卡片显示该会话保存的历史
 backend，标为 Roost 或 Loro。旧会话没有 backend 字段时按 Loro 显示；当前实验开关偏好
 不决定这个标签。显示标签不读取历史正文。
+
+Roost 初始化或存储失败不得把既有会话切回 Loro，也不得重放结果未知的写入。
+保留“尚未发出请求”和“已发出但结果不确定”的区别。所属机器在本地日志记录
+Worker 原始异常、异常退出及运行时/构建信息。渲染端和远程历史 RPC 报告这些故障时只携带
+不含内容的失败阶段、稳定错误码和诊断编号；不返回原始异常、路径、凭据或历史正文。
+界面说明写入未获确认，并显示可在所属机器本地日志中查找的编号。
 
 性能优化必须保留原有 Lody 对话身份及 owner 流程。Edit & Resend 可以通过存储 SDK
 内部的分支操作复用不可变前缀，但不能创建或跳转到另一条 Lody 对话。旧 writer 必须
@@ -193,6 +205,8 @@ UI）不在本次实现；本次只是保证将来出现这类骨架轮次时不
 - `apps/cli/src/lib/local-project-history-sync-service.ts`
 - `apps/cli/src/session/{roost-node-session,roost-history-generation,roost-rpc-session}.ts`
 - `apps/cli/tests/roost-session-backend-contract.test.ts`
+- `apps/cli/src/session/roost-history-diagnostics.ts` 与 `apps/cli/tests/roost-history-local-owner.test.ts`
+- `packages/components/src/lib/roost-history-error.ts` 与 `packages/components/tests/conversation-session-backend-factory.test.ts`
 - `packages/shared/tests/history-writer.test.ts`、`history-writer.contract.ts`、
   `history-storage-policy.test.ts` 与 `session-history-import-port.test.ts`
 - `apps/cli/tests/local-project-history-sync-service.test.ts` 与 `local-project-history-sync-writer.test.ts`

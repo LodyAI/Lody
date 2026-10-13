@@ -1,3 +1,12 @@
+import { makeApplicationRuntime } from '@lody/shared/node/application-runtime'
+import {
+  LoginShellCacheLive,
+  loginShellEnvLayer,
+  recoverLoginShellCacheShutdown
+} from '@lody/shared/node/login-shell-env'
+import { squashProcessFailure } from '@lody/shared/node/process'
+import { Layer } from 'effect'
+import { bindUserShellEnvCacheLegacy } from './services/shell-env'
 import { handleWindowContentReady } from './window-target'
 import { installLocalFileResourceProtocol } from './services/local-file-resource-protocol'
 import { app, BrowserWindow, dialog, ipcMain, safeStorage } from 'electron'
@@ -80,6 +89,14 @@ type E2EGlobal = typeof globalThis & {
 }
 
 export function startApplication(executionHost?: DesktopExecutionHost): void {
+  const applicationRuntime = makeApplicationRuntime(
+    LoginShellCacheLive.pipe(Layer.provide(loginShellEnvLayer())),
+    {
+      recover: recoverLoginShellCacheShutdown,
+      project: squashProcessFailure
+    }
+  )
+  bindUserShellEnvCacheLegacy(applicationRuntime)
   if (typeof __LODY_DESKTOP_BUILD_JSON__ === 'string') {
     console.info('[desktop-build]', __LODY_DESKTOP_BUILD_JSON__)
   }
@@ -347,20 +364,25 @@ export function startApplication(executionHost?: DesktopExecutionHost): void {
         loroDataPlaneRelay.destroy()
         appUpdaterService.stop()
         publicBrowserService.destroyAll()
-        const [cliResult] = await Promise.allSettled([
+        const [cliResult, shellResult] = await Promise.allSettled([
           cliService.shutdownForQuit(),
+          applicationRuntime.closeLegacy(),
           flushElectronMainErrorReporting(),
           stopDevbarDevframeService()
         ])
-        if (cliResult.status === 'rejected') throw cliResult.reason
+        const failures = [cliResult, shellResult].flatMap((result) =>
+          result.status === 'rejected' ? [result.reason] : []
+        )
+        if (failures.length > 0)
+          throw new AggregateError(failures, 'Desktop resource cleanup failed')
       },
       quit: () => app.quit(),
       reportFailure: (error) => {
         // A timeout does not prove exit. Keep ownership until quit succeeds.
-        console.error('[Electron] Quit blocked by the embedded CLI', error)
+        console.error('[Electron] Quit blocked by owned resources', error)
         dialog.showErrorBox(
           PRODUCT_NAME,
-          'The local agent has not confirmed that it stopped. Lody will stay open to prevent ' +
+          'A local process has not confirmed that it stopped. Lody will stay open to prevent ' +
             'another desktop from using its data. Wait for the agent to stop, then quit again.'
         )
         // Quit preparation already closed every window; keep a surface to retry from.
@@ -381,9 +403,14 @@ export function startApplication(executionHost?: DesktopExecutionHost): void {
       publicBrowserService.destroyAll()
     })
   })
-  void appReady.catch((error: unknown) => {
+  void appReady.catch(async (error: unknown) => {
     recordE2EBootDiagnostic('failed', error)
     console.error('[Electron] Fatal error while creating the main window', error)
+    try {
+      await applicationRuntime.closeLegacy()
+    } catch (cleanupError) {
+      console.error('[Electron] Startup resource cleanup failed', cleanupError)
+    }
     if (!IS_E2E) app.exit(1)
   })
 

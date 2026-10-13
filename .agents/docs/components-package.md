@@ -8,6 +8,13 @@ Workspace durable synchronization is composed by `providers/workspace-streams-tr
 Its [content boundary](../../specs/workspace-streams-content.md) keeps ordinary SDK bytes
 and persistence intact while exposing protection and snapshot handling to future callers.
 The protected seam is not a product E2EE entry point or a persisted-mode resolver.
+The owning transport suite also composes merged P07 signature/AEAD and P08 current
+ledger replay through the published Repo 0.22.0 interfaces, using a synthetic
+native test signer. It checks v0 batches, compressed snapshots, safe error reasons
+and durable state/cursor retention. This [P10 preparation](../notes/implemented/testing/2026-10-11-e2ee-sdk-preparation.md)
+does not supply historical-author authorization, a production signer, host snapshot
+admission or client recovery from an unusable remote snapshot.
+
 
 ## Crash surfaces
 
@@ -112,8 +119,14 @@ against the route and the dev server answers with the SPA fallback HTML.
 request storm. Loading only when a user opens a surface, coalescing concurrent callers
 onto one in-flight request, and clamping the served `Cache-Control: max-age` to 1m–5m
 (the endpoint's CDN-shaped 4h is wrong for someone who just opened the panel) keep it to
-roughly one 304 per interaction. An always-visible composer band was rejected because it
-would have to load in the background to know whether to render at all.
+roughly one 304 per interaction. Settings puts a stable read-only remaining-quota
+summary, a flat direct Reset forecast action, and a Provider action menu in the row.
+The action opens the existing forecast dialog in one step; there is no quota-details
+interstitial repeating visible data. Forecast probabilities appear only in that
+dialog, never beside the row's remaining-quota percentages. See the
+[provider quota overview draft](../../specs/provider-quota-overview.md).
+An always-visible composer band was rejected because it would have to load in the
+background to know whether to render at all.
 
 The parser also normalizes `scheduled_reset` independently of `active_watch`. Both entry
 points and the dialog prioritize an announced schedule over the forecast probability.

@@ -1,31 +1,35 @@
-# Composer execution-machine identity
+# Composer execution-machine details
 
 Status: draft
 Translation: current
 
 [中文](composer-machine-owner.zh.md)
 
-## Scenario and intent
+A team member needs to recognize which machine will execute a message before
+sending it. On desktop, keep a monitor icon and execution-machine name above the
+composer; on mobile, keep a compact monitor button in the same single-row info bar.
+Tap opens the full machine details; desktop also supports hover and keyboard
+activation. Owner names and avatars do not occupy the resting composer row.
+This revised proposal follows the withdrawal of the earlier persistent-owner
+display; visual approval remains pending.
 
-A team member viewing a Session needs to know whose machine will execute a message
-before sending it. Above the composer, show the execution machine owner's avatar,
-display name, and machine name. This identity stays visible when other info-bar
-items change or take focus, including on narrow screens.
+Resolve ownership from the selected machine's `ownerUserId`, never the Session
+creator or transferable Session owner. The current user's machine reads “You”
+in the card; unavailable ownership reads “Unknown owner”. Offline presence keeps
+the machine control available and adds a warning tint. Unresolved presence is
+neutral and reads “Status unavailable” in the card. Unloaded or removed machine
+metadata must clear the control instead of retaining the previous machine.
 
-Resolve ownership from the Session's selected machine metadata (`ownerUserId`),
-not the Session creator or transferable Session owner. Label the current user's
-machine “You”; unresolved ownership reads “Unknown owner” rather than guessing.
-Offline presence does not erase identity. Removed/unloaded machine metadata does
-not invent a name or reuse the previous Session's identity; existing status UI
-continues to explain removal after metadata is ready.
+The machine control stays outside the canonical cluster/stage cycle. Truncate
+long machine names at narrow widths and show the full name in the card. A row
+containing only the machine control uses a transparent background. Existing
+repository/status controls and the machine entry in the Session menu remain
+available. This is display-only: no machine switching, new backend or ownership
+changes. Mobile controls stay in the 32px info bar without an extra identity row.
+On narrow mobile bars, private-access status may use its lock icon while retaining
+the full accessible description and the permitted sharing action.
 
-At narrow widths, preserve the owner first and truncate the machine name; the
-other info-bar items may take a separate line. This is display-only, with no new
-backend, cache, permissions, or machine-switch action.
-
-## Evidence and review
-
-Implementation: `session-chat-interface.tsx` and `session-info-bar.tsx` under
-`packages/components/src/components/sessions/`. Synthetic desktop/mobile previews
-live in the existing SessionConversationPage Storybook harness. Visual approval
-and live team-session verification remain pending.
+Implementation and validation evidence are recorded in the
+[proposal](../.agents/notes/proposed/feature/2026-10-11-composer-machine-info-card.md).
+The [withdrawal](../.agents/notes/implemented/simplification/2026-10-11-revert-composer-machine-owner.md)
+records the earlier decision. Live team-session verification remains pending.

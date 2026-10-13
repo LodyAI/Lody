@@ -1,3 +1,4 @@
+import { isMagpieGatewayUrl } from './magpie-import';
 import { MemoryBindingSchema } from './memory-provider';
 import { AgentRoleSnapshotSchema } from './message-author';
 import { z } from 'zod';
@@ -397,6 +398,7 @@ export const ACPTurnConfigSchema = z
 export const ACPSessionConfigSchema = ACPTurnConfigSchema.extend({
   customAcp: CustomAcpLaunchSpecSchema.optional(),
   runtimeOverrides: BuiltinRuntimeOverridesSchema.optional(),
+  magpieGatewayUrl: z.string().refine(isMagpieGatewayUrl).optional(),
 });
 
 /** Local history provenance, not an additional ACP request option. */
@@ -3592,6 +3594,7 @@ export const NonSystemNoticeMessageContentSchema = z.discriminatedUnion('type', 
               'CONFIGURATION_UNAVAILABLE',
               'DELIVERY_ATTEMPTS_EXHAUSTED',
               'DELIVERY_EXECUTION_UNCERTAIN',
+              'COLLABORATION_STOPPED',
             ]),
             message: z.string(),
           })

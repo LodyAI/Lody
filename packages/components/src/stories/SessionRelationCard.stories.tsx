@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import type { Meta, StoryObj } from '@storybook/react';
 import type { SessionHistoryParsed, SessionId } from '@lody/shared';
 import { CornerLeftUp } from 'lucide-react';
@@ -321,4 +322,53 @@ export const AllCreationStates: Story = {
       ))}
     </div>
   ),
+};
+
+/** Separate MCP create calls must share the same bounded list. */
+export const ManyCreatedSessions: Story = {
+  args: operationStoryArgs,
+  render: function ManyCreatedSessions() {
+    const [range, setRange] = useState<{ from: number; to: number } | null>(null);
+    const items: ChatStreamItem[] = Array.from({ length: 22 }, (_, index) => ({
+      type: 'message',
+      sessionId: 'storybook-opener' as SessionId,
+      turnIndex: index,
+      message: {
+        ...progressMessage(index % 3 === 0 ? 'succeeded' : 'running'),
+        id: `many-progress-${index}`,
+        items: [
+          {
+            type: 'operation_progress',
+            operationId: `create-${index}`,
+            operationKind: 'session_create',
+            items: [
+              {
+                status: index % 3 === 0 ? 'succeeded' : 'running',
+                label: `评审任务 ${index + 1}`,
+                target: {
+                  sessionId: `storybook-child-${index}` as SessionId,
+                  userTurnId: `turn-${index}`,
+                },
+              },
+            ],
+          },
+        ],
+      },
+    }));
+    return (
+      <div
+        data-visible-turn-range={range ? `${range.from}:${range.to}` : undefined}
+        style={{ width: 'min(720px, calc(100vw - 32px))', height: 680 }}
+      >
+        <SessionChatStreamView
+          sessionId={'storybook-opener' as SessionId}
+          items={items}
+          onVisibleTurnRangeChange={setRange}
+          renderMessageRow={({ message, sessionId }) => (
+            <MessageRowView message={message} sessionId={sessionId} onNavigateSession={() => {}} />
+          )}
+        />
+      </div>
+    );
+  },
 };

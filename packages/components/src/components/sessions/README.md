@@ -51,9 +51,20 @@ describes the shared parsing and persistence boundary.
 
 ## Info bar, status, and session actions
 
+`session-machine-info.tsx` shows a monitor icon and machine name on desktop,
+or a compact icon button on mobile. Tap/click (also hover on desktop) opens its
+owner, device and connection details. A machine-only info bar has no raised
+background. The
+[draft Spec](../../../../../specs/composer-machine-owner.md) and
+[proposal](../../../../../.agents/notes/proposed/feature/2026-10-11-composer-machine-info-card.md)
+record the presentation decision awaiting visual review.
+In narrow mobile bars the private-access badge keeps its lock and sharing action,
+with the full access description in its accessible name/title.
+
 | File                                                                          | Responsibility                                                   |
 | ----------------------------------------------------------------------------- | ---------------------------------------------------------------- |
 | `session-info-bar.tsx`, `session-info-chips.tsx`, `info-chip.tsx`             | Canonical cluster + fixed stage bar above the composer           |
+| `session-machine-info.tsx`                                                    | Execution target and its on-demand ownership details             |
 | `session-info-action-state.ts`                                                | Which repository action the context stage offers                 |
 | `session-status-strip.tsx`                                                    | Priority-ordered connection/machine status (story coverage only) |
 | `session-syncing-indicator.tsx`                                               | Catch-up spinner pinned to the bar's right edge                  |

@@ -5,7 +5,7 @@ import { Data, Effect } from 'effect';
 import { z } from 'zod';
 import { getServerNow } from '@lody/shared';
 import { getLocalWorkspaceCatalogPath } from '@lody/shared/node/local-workspace-catalog';
-import { withFileLock } from '@/utils/file-lock';
+import { FileLocks, withFileLock } from '@/utils/file-lock';
 
 export { getLocalWorkspaceCatalogPath };
 
@@ -114,13 +114,13 @@ export type LocalWorkspaceCatalogService = {
   listActiveWorkspaces: () => Effect.Effect<LocalCatalogWorkspace[], LocalWorkspaceCatalogError>;
   cacheRemoteWorkspaces: (
     input: CacheRemoteWorkspacesInput
-  ) => Effect.Effect<void, LocalWorkspaceCatalogError>;
+  ) => Effect.Effect<void, LocalWorkspaceCatalogError, FileLocks>;
   recordWorkspaceAccessSnapshot: (
     input: RecordWorkspaceAccessSnapshotInput
-  ) => Effect.Effect<void, LocalWorkspaceCatalogError>;
+  ) => Effect.Effect<void, LocalWorkspaceCatalogError, FileLocks>;
   upsertSession: (
     session: Omit<LocalCatalogSession, 'cachedAt'>
-  ) => Effect.Effect<void, LocalWorkspaceCatalogError>;
+  ) => Effect.Effect<void, LocalWorkspaceCatalogError, FileLocks>;
 };
 
 const emptyCatalog = (): LocalWorkspaceCatalogSnapshot => ({
@@ -217,7 +217,6 @@ export function makeLocalWorkspaceCatalog(
   const lockName = options.lockName ?? DEFAULT_CATALOG_LOCK;
   const cacheTtlMs = options.cacheTtlMs ?? 5_000;
   const clock = options.now ?? getServerNow;
-  let writeQueue: Promise<unknown> = Promise.resolve();
   let cacheRevision = 0;
   let cachedRead: { snapshot: LocalWorkspaceCatalogSnapshot; cachedAtMs: number } | null = null;
   let readInFlight: Promise<LocalWorkspaceCatalogSnapshot> | null = null;
@@ -280,25 +279,23 @@ export function makeLocalWorkspaceCatalog(
     });
 
   const mutate = (
-    fn: (
-      snapshot: LocalWorkspaceCatalogSnapshot
-    ) => LocalWorkspaceCatalogSnapshot | Promise<LocalWorkspaceCatalogSnapshot>
-  ): Effect.Effect<void, LocalWorkspaceCatalogError> =>
-    Effect.tryPromise({
-      try: async () => {
-        const run = async () =>
-          await withFileLock(lockName, async () => {
-            const snapshot = await Effect.runPromise(readRecoveringFromDisk());
-            const updated = await fn(snapshot);
-            await writeCatalogFile(filePath, updated);
-            cacheRevision += 1;
-            cachedRead = { snapshot: updated, cachedAtMs: clock() };
+    fn: (snapshot: LocalWorkspaceCatalogSnapshot) => LocalWorkspaceCatalogSnapshot
+  ): Effect.Effect<void, LocalWorkspaceCatalogError, FileLocks> =>
+    withFileLock(
+      lockName,
+      Effect.uninterruptible(
+        Effect.gen(function* () {
+          const snapshot = yield* readRecoveringFromDisk();
+          const updated = fn(snapshot);
+          yield* Effect.tryPromise({
+            try: () => writeCatalogFile(filePath, updated),
+            catch: (error) => toCatalogError(filePath, error),
           });
-        writeQueue = writeQueue.then(run, run);
-        await writeQueue;
-      },
-      catch: (error) => toCatalogError(filePath, error),
-    });
+          cacheRevision += 1;
+          cachedRead = { snapshot: updated, cachedAtMs: clock() };
+        })
+      )
+    ).pipe(Effect.mapError((error) => toCatalogError(filePath, error)));
 
   return {
     read: readCached,

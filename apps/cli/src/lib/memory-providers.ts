@@ -11,7 +11,7 @@ import {
   type MemoryProviderRequest,
   type MemoryProviderResponse,
 } from '@lody/shared';
-import { getLoginShellEnv } from '@/agent/login-shell-env';
+import { getLoginShellEnvLegacy } from '@/agent/login-shell-env';
 
 type CommandResult = { stdout: string; code?: string | number };
 export type MemoryCommandRunner = (args: string[]) => Promise<CommandResult>;
@@ -22,7 +22,7 @@ const runNmem: MemoryCommandRunner = async (args) => {
         command: 'nmem',
         args,
         check: 'none',
-        env: { ...process.env, ...(await getLoginShellEnv()) },
+        env: { ...process.env, ...(await getLoginShellEnvLegacy()) },
         timeout: 15_000,
         maxOutputBytes: 1024 * 1024,
       },

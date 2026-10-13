@@ -1,35 +1,29 @@
-import { probeLoginShellEnv } from '@lody/shared/node/login-shell-env'
+import { Effect, Exit } from 'effect'
+import { LoginShellCache, LoginShellCacheClosed } from '@lody/shared/node/login-shell-env'
+import type { ApplicationRuntime } from '@lody/shared/node/application-runtime'
+import { squashProcessFailure } from '@lody/shared/node/process'
 
-// GUI-launched apps (macOS launchd, Linux .desktop) inherit a minimal PATH that
-// usually omits /usr/local/bin, Homebrew, and editor CLIs (`code`, `cursor`,
-// ...). We probe the user's login shell once to recover their real environment
-// (most importantly PATH) and reuse it whenever we spawn user-facing commands —
-// the embedded CLI as well as "Open in" path launchers — so bare command names
-// resolve the same way they do in a terminal.
+let application: ApplicationRuntime<LoginShellCache, never> | undefined
 
-let cachedShellEnvPromise: Promise<NodeJS.ProcessEnv | null> | null = null
-
-async function loadUserShellEnv(): Promise<NodeJS.ProcessEnv | null> {
-  // Windows has no login shell; returning here also keeps the warning below meaningful.
-  if (process.platform === 'win32') return null
-  if (process.env.LODY_ELECTRON_DISABLE_SHELL_ENV === '1') return null
-  const env = await probeLoginShellEnv({})
-  if (!env) console.warn('Login shell environment unavailable; using the inherited environment')
-  return env
+/** @deprecated Application-entry binding for remaining Promise launchers. */
+export function bindUserShellEnvCacheLegacy(
+  owner: ApplicationRuntime<LoginShellCache, never>
+): void {
+  if (application && !application.isReleased())
+    throw new Error('Login-shell application owner already bound')
+  application = owner
 }
 
-/**
- * Resolve (and cache for the process lifetime) the user's login-shell
- * environment. Returns null on Windows, when disabled, or when the probe fails;
- * callers should fall back to `process.env` in that case. A failure is cached
- * too: the probe's 15 s bound already covers a slow cold login, and a shell that
- * outlives it would otherwise stall every CLI launch and launcher probe again.
- */
-export async function getUserShellEnvCached(): Promise<NodeJS.ProcessEnv | null> {
-  if (!cachedShellEnvPromise) {
-    cachedShellEnvPromise = loadUserShellEnv()
-  }
-  return await cachedShellEnvPromise
+/** @deprecated Promise boundary over the application-owned native cache. */
+export async function getUserShellEnvCachedLegacy(): Promise<NodeJS.ProcessEnv | null> {
+  if (process.platform === 'win32' || process.env.LODY_ELECTRON_DISABLE_SHELL_ENV === '1')
+    return null
+  if (!application || application.isClosing()) throw new LoginShellCacheClosed()
+  const exit = await application.runtime.runPromiseExit(
+    Effect.flatMap(LoginShellCache, (cache) => cache.get())
+  )
+  if (Exit.isFailure(exit)) throw squashProcessFailure(exit.cause)
+  return exit.value
 }
 
 /**

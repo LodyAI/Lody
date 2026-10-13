@@ -16,7 +16,7 @@ import {
 import type { LoroRepo } from 'loro-repo';
 import { StreamsTransportAdapter, createRepoStreamsPersistence } from 'loro-repo/transport/streams';
 import type { Logger } from '@/utils/logger';
-import type { LoroStreamsTokenProvider } from '@lody/platform';
+import type { LoroStreamsTokenProviderLegacy } from '@lody/platform';
 import { prepareCliStreamsGatewayBaseUrl } from './streams-access';
 
 const { getLoroSyncDiagnostic, formatLoroSyncError } = createLoroSyncErrorTools({
@@ -28,12 +28,12 @@ registerLoroSyncErrorFormatter(formatLoroSyncError);
 export type CliStreamsTransport = {
   adapter: StreamsTransportAdapter;
   gatewayBaseUrl: string;
-  tokenProvider: LoroStreamsTokenProvider;
+  tokenProvider: LoroStreamsTokenProviderLegacy;
 };
 
 export async function createCliStreamsTransport(args: {
   workspaceId: WorkspaceId;
-  tokenProvider: LoroStreamsTokenProvider;
+  tokenProvider: LoroStreamsTokenProviderLegacy;
   repo: LoroRepo;
   /**
    * LoroDoc room cursors only. Meta and named Flock cursors are replica-bound:

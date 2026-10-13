@@ -310,6 +310,7 @@ function IdentityRow({
         >
           {authorizing ? <Spinner size="small" /> : null}
           {t('settings.integrations.github.personalIdentityAuthorize', 'Authorize')}
+          {authorizing ? null : <ArrowUpRight {...stylex.props(catalog.icon)} aria-hidden="true" />}
         </Button>
       ) : null}
       {updating ? (

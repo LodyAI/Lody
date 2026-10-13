@@ -30,7 +30,7 @@ import {
   type AcpStartupTimeoutOptions,
   type AcpSessionStartTarget,
 } from './agent-client';
-import { getLoginShellEnv } from './login-shell-env';
+import { getLoginShellEnvLegacy } from './login-shell-env';
 import {
   mergeACPProcessEnv,
   mergeLoginShellEnv,
@@ -211,6 +211,7 @@ export type SpawnAcpProcessOptions = {
   agentType: string;
   customAcp?: CustomAcpLaunchSpec;
   runtimeOverrides?: BuiltinRuntimeOverrides;
+  magpieGatewayUrl?: string;
   workdir: string;
   env: NodeJS.ProcessEnv;
   args?: string[];
@@ -231,6 +232,7 @@ export const spawnAcpProcess = (options: SpawnAcpProcessOptions): ChildProcess =
       agentType: options.agentType,
       customAcp: options.customAcp,
       runtimeOverrides: options.runtimeOverrides,
+      magpieGatewayUrl: options.magpieGatewayUrl,
     });
     command = command ?? launch.command;
     args = args ?? launch.args;
@@ -261,6 +263,8 @@ export type StartLocalAcpAgentOptions = {
   agentType: string;
   customAcp?: CustomAcpLaunchSpec;
   runtimeOverrides?: BuiltinRuntimeOverrides;
+  agentConfigId?: string;
+  magpieGatewayUrl?: string;
   workdir: string;
   env?: NodeJS.ProcessEnv;
   logger: Logger;
@@ -342,6 +346,8 @@ export const startLocalAcpAgent = async (options: StartLocalAcpAgentOptions) => 
     agentType: options.agentType,
     customAcp: options.customAcp,
     runtimeOverrides: options.runtimeOverrides,
+    agentConfigId: options.agentConfigId,
+    magpieGatewayUrl: options.magpieGatewayUrl,
     env: options.env,
     extraArgs: options.extraArgs,
     onManagedRuntimeProgress: options.onManagedRuntimeProgress
@@ -383,7 +389,7 @@ export const startLocalAcpAgent = async (options: StartLocalAcpAgentOptions) => 
   // omits user tool dirs, so resolve the login-shell env and overlay it before
   // merging the agent-specific env. withDefaultAcpPathEntries still runs as a
   // last-resort fallback for environments where the shell probe yields nothing.
-  const loginShellEnv = await getLoginShellEnv();
+  const loginShellEnv = await getLoginShellEnvLegacy();
   // withLoopbackNoProxy runs outermost so a proxy contributed by the login
   // shell is covered too: the agent reaches Lody's MCP HTTP host over
   // loopback, and a proxy that intercepts that kills MCP entirely.

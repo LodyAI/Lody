@@ -69,8 +69,9 @@ import {
 import type { BootstrapSession } from './auth-service'
 import { desktopInstallationProfile, isLocalPlatform, mainPlatformKind } from '../platform'
 import { getDesktopLog } from '../desktop-log'
+import { createCliProbeTrace } from '../desktop-log-core'
 import type { DesktopExecutionHost } from './desktop-execution-host'
-import { getUserShellEnvCached, shouldUseWindowsShell } from './shell-env'
+import { getUserShellEnvCachedLegacy, shouldUseWindowsShell } from './shell-env'
 import { applyProxyEnvFallback, resolveSystemProxyEnv } from './system-proxy-env'
 import type { CliOutputEvent, CliRunResult } from '../types'
 
@@ -530,6 +531,10 @@ export class CliService {
   private readonly supervisorToken = `${randomUUID()}${randomUUID()}`
   private hostLease: LocalCliHostLease | null = null
   private lastTracedSupervisorState = ''
+  private readonly cliProbeTrace = createCliProbeTrace({
+    getLog: getDesktopLog,
+    getChildPid: () => this.supervisor?.getActiveChild()?.pid
+  })
 
   constructor(options: CliServiceOptions = {}) {
     this.resolveBootstrapSession = options.resolveBootstrapSession
@@ -553,8 +558,21 @@ export class CliService {
     this.supervisor = new CliSupervisor({
       prepareLaunch: async (signal) => await this.buildLaunchPreparation(signal),
       fetchRuntimeState: async ({ timeoutMs }) => {
+        const startedAt = performance.now()
         try {
-          return await Effect.runPromise(this.localProbeClient.state({ timeoutMs }))
+          const runtime = await Effect.runPromise(
+            this.localProbeClient
+              .state({ timeoutMs })
+              .pipe(
+                Effect.tapError((error) =>
+                  Effect.sync(() =>
+                    this.cliProbeTrace.failure(error, timeoutMs, performance.now() - startedAt)
+                  )
+                )
+              )
+          )
+          this.cliProbeTrace.success(runtime, performance.now() - startedAt)
+          return runtime
         } catch {
           return null
         }
@@ -605,14 +623,15 @@ export class CliService {
   }
 
   /**
-   * Records Supervisor transitions in the daily log. `reconnecting` while a CLI
-   * child is alive means its state probe went unanswered — the embedded CLI's
-   * event loop is blocked — which the UI shows as a disconnect.
+   * Records Supervisor transitions in the daily log. A reconnecting runtime can
+   * retain its identity; a missing snapshot needs probe or lifecycle evidence.
    */
   private traceSupervisorState(state: SupervisorState): void {
     const runtime = state.runtime
     const summary = `phase=${state.phase} desired=${state.desiredState}${
-      runtime ? ` runtimePid=${runtime.pid} ownership=${state.runtimeOwnership ?? 'unknown'}` : ''
+      runtime
+        ? ` runtimePid=${runtime.pid} ownership=${state.runtimeOwnership ?? 'unknown'} hasMachineId=${Boolean(runtime.machineId?.trim())}`
+        : ''
     }${state.retryAttempt !== undefined ? ` retryAttempt=${state.retryAttempt}` : ''}${
       state.retryInMs !== undefined ? ` retryInMs=${state.retryInMs}` : ''
     }${state.lastExitCode !== undefined ? ` lastExitCode=${state.lastExitCode}` : ''} message=${
@@ -1151,7 +1170,7 @@ export class CliService {
       )
     }
 
-    const shellEnv = await getUserShellEnvCached()
+    const shellEnv = await getUserShellEnvCachedLegacy()
     throwIfAborted(options?.signal)
     const env: NodeJS.ProcessEnv = {
       ...process.env,

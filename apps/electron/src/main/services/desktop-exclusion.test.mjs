@@ -1,3 +1,5 @@
+import { Cause, Deferred, Effect, Layer } from 'effect'
+import { makeApplicationRuntime } from '@lody/shared/node/application-runtime'
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
 import { once } from 'node:events'
@@ -162,4 +164,67 @@ void test('quit cancellation preserves services and a later attempt closes rende
   void handler({ preventDefault() {} })
   await quit.promise
   assert.deepEqual(order, ['prepare', 'prepare', 'stop', 'quit'])
+})
+
+void test('quit awaits application Scope cleanup and retries transferred ownership after failed disposal', async () => {
+  const cleaning = Deferred.makeUnsafe()
+  const gate = Deferred.makeUnsafe()
+  const resource = { held: false, denied: true }
+  const leaseFailure = { resource }
+  const owner = makeApplicationRuntime(
+    Layer.effectDiscard(
+      Effect.acquireRelease(
+        Effect.sync(() => {
+          resource.held = true
+        }),
+        () =>
+          Deferred.succeed(cleaning, undefined).pipe(
+            Effect.andThen(Deferred.await(gate)),
+            Effect.andThen(Effect.die(leaseFailure))
+          )
+      )
+    ),
+    {
+      recover: (cause) =>
+        Effect.gen(function* () {
+          assert.ok(
+            cause.reasons.some(
+              (reason) => Cause.isDieReason(reason) && reason.defect === leaseFailure
+            )
+          )
+          if (resource.denied) return yield* Effect.fail(new Error('resource still alive'))
+          resource.held = false
+          return undefined
+        }),
+      project: Cause.squash
+    }
+  )
+  await owner.runtime.runPromise(Effect.void)
+  const failure = Promise.withResolvers()
+  const quit = Promise.withResolvers()
+  const barrier = createDesktopQuitBarrier({
+    stop: () => owner.closeLegacy(),
+    quit: () => quit.resolve(),
+    reportFailure: (error) => failure.resolve(error)
+  })
+  let quitCalled = false
+  void quit.promise.then(() => {
+    quitCalled = true
+  })
+  const first = barrier({ preventDefault() {} })
+  await Effect.runPromise(Deferred.await(cleaning))
+  await barrier({ preventDefault() {} })
+  assert.equal(resource.held, true)
+  assert.equal(quitCalled, false)
+  Deferred.doneUnsafe(gate, Effect.void)
+  await first
+  assert.equal(await failure.promise, leaseFailure)
+  assert.equal(quitCalled, false)
+  await barrier({ preventDefault() {} })
+  assert.equal(resource.held, true)
+  assert.equal(quitCalled, false)
+  resource.denied = false
+  await barrier({ preventDefault() {} })
+  await quit.promise
+  assert.equal(resource.held, false)
 })

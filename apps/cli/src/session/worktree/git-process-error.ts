@@ -1,5 +1,3 @@
-import * as fs from 'node:fs';
-
 export const GIT_EXECUTABLE_NOT_FOUND_CODE = 'git_executable_not_found' as const;
 
 export class GitExecutableNotFoundError extends Error {
@@ -13,17 +11,6 @@ export class GitExecutableNotFoundError extends Error {
 
 const readErrorCode = (error: unknown): unknown =>
   error && typeof error === 'object' ? (error as { code?: unknown }).code : undefined;
-
-/**
- * `spawn` also reports ENOENT when cwd is missing. Only classify the error as a
- * missing Git executable when the requested working directory still exists.
- */
-export function mapGitSpawnError(error: unknown, cwd: string): unknown {
-  if (readErrorCode(error) === 'ENOENT' && fs.existsSync(cwd)) {
-    return new GitExecutableNotFoundError(error);
-  }
-  return error;
-}
 
 export function isGitExecutableNotFoundError(error: unknown): boolean {
   const seen = new Set<unknown>();

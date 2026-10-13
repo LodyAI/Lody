@@ -1,3 +1,4 @@
+import { closeLoginShellApplicationLegacy } from '@/agent/login-shell-env';
 import { Command } from 'commander';
 import chalk from 'chalk';
 import os from 'os';
@@ -615,10 +616,26 @@ async function startAgentService(
     foregroundHostLease = null;
     await lease?.close();
   };
+  const stopDaemonAndApplication = async () => {
+    const failures: unknown[] = [];
+    for (const stop of [
+      () => managedRuntimeUpdates.shutdown(),
+      () => fleet.shutdown(),
+      closeLoginShellApplicationLegacy,
+    ]) {
+      try {
+        await stop();
+      } catch (error) {
+        failures.push(error);
+      }
+    }
+    if (failures.length === 1) throw failures[0];
+    if (failures.length > 1)
+      throw new AggregateError(failures, 'Daemon and application cleanup failed');
+  };
   registerProcessCleanup(async () => {
     eventLoopLagMonitor.stop();
-    await managedRuntimeUpdates.shutdown();
-    await fleet.shutdown();
+    await stopDaemonAndApplication();
     await closeForegroundHostLease();
   });
   const shutdownSignals: NodeJS.Signals[] =
@@ -635,8 +652,7 @@ async function startAgentService(
       unregisterProcessCleanup();
       stopActivePing();
       eventLoopLagMonitor.stop();
-      await managedRuntimeUpdates.shutdown();
-      await fleet.shutdown();
+      await stopDaemonAndApplication();
       await closeForegroundHostLease();
     },
     flushTelemetry: async () => {
@@ -738,6 +754,7 @@ async function startAgentService(
     // 保持进程活跃
     await new Promise<void>(() => {});
   } catch (error) {
+    let failure = error;
     unregisterSupervisorControl();
     runtimeStateReporter.upsertIssue({
       code: 'agent_service_failed',
@@ -749,15 +766,16 @@ async function startAgentService(
     unregisterProcessCleanup();
     stopActivePing();
     eventLoopLagMonitor.stop();
-    await managedRuntimeUpdates.shutdown();
-    await fleet.shutdown().catch((err: unknown) => {
-      logger.error('Cleanup failed:', err);
-    });
+    try {
+      await stopDaemonAndApplication();
+    } catch (cleanupError) {
+      failure = new AggregateError([error, cleanupError], 'Startup and resource cleanup failed');
+    }
     await closeForegroundHostLease();
-    await reportError('start:agent', error, {
+    await reportError('start:agent', failure, {
       message: 'Agent service failed to start',
       logger,
     });
-    throw error;
+    throw failure;
   }
 }

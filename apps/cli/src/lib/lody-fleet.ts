@@ -21,7 +21,7 @@ import {
   type SessionId,
   type SessionMeta,
 } from '@lody/shared';
-import type { LocalLoroDataPlaneServer } from '@lody/shared/local-loro-data-plane-server';
+import type { LocalLoroDataPlaneServerLegacy } from '@lody/shared/local-loro-data-plane-server';
 import pkg from '@/pkg';
 import { Logger } from '@/utils/logger';
 import { Lody } from '@/lib/lody';
@@ -1187,7 +1187,9 @@ export class LodyFleet {
   // Resolves the push-based data-plane engine for a workspace the CLI socket
   // server can route a client connection to. Returns null when no runtime is
   // running yet (the client receives a retryable error).
-  private getWorkspaceLoroDataPlaneServer(workspaceId: string): LocalLoroDataPlaneServer | null {
+  private getWorkspaceLoroDataPlaneServer(
+    workspaceId: string
+  ): LocalLoroDataPlaneServerLegacy | null {
     const runtime = this.runtimes.get(workspaceId);
     if (!runtime) {
       return null;

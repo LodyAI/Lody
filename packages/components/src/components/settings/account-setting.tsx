@@ -34,6 +34,7 @@ import {
 } from './account-setting-pure';
 import { WorkspaceJoinRequestsSettings } from './workspace-join-requests-settings';
 import { WorkspaceOwnershipTransfer } from './workspace-ownership-transfer';
+import { DeletedWorkspaceBilling } from './deleted-workspace-billing';
 import { AccountMachinesOverview } from './account-machines-overview';
 
 const styles = stylex.create({
@@ -83,15 +84,14 @@ function CloudAccountSettings({ surface }: { surface: AccountSettingsSurface }) 
     cloudOperations.billing.getWorkspaceMemberLimitState,
     activeOrganizationId ? { workspaceId: activeOrganizationId } : 'skip'
   );
-  // Accepting an invitation adds a billed seat and Stripe invoices the
-  // prorated difference immediately, so the invite dialog quotes it up front.
+  // Admission accrues any additional seat fee; collection is deferred to the billing date.
   const seatInvitePreview = useCloudQuery(
     cloudOperations.billing.getWorkspaceSeatInvitePreview,
     activeOrganizationId ? { workspaceId: activeOrganizationId } : 'skip'
   );
   // Deleting a paid workspace needs a billing-aware guard: a live subscription
   // blocks deletion (cancel first); a cancel-scheduled one gets a warning that
-  // deleting now ends it immediately.
+  // deletion preserves its scheduled end and any accrued charges.
   const billingOverview = useCloudQuery(
     cloudOperations.billing.getBillingOverview,
     activeOrganizationId ? { workspaceId: activeOrganizationId } : 'skip'
@@ -671,7 +671,12 @@ function CloudAccountSettings({ surface }: { surface: AccountSettingsSurface }) 
   }
 
   if (!activeOrganization) {
-    return <p {...stylex.props(styles.empty)}>No organization</p>;
+    return (
+      <>
+        <p {...stylex.props(styles.empty)}>No organization</p>
+        {surface === 'account' && billingUiAvailable ? <DeletedWorkspaceBilling /> : null}
+      </>
+    );
   }
 
   return (
@@ -684,6 +689,9 @@ function CloudAccountSettings({ surface }: { surface: AccountSettingsSurface }) 
       members={sortedMembers}
       pendingInvitations={pendingInvitations}
       accountMachinesSlot={surface === 'account' ? <AccountMachinesOverview /> : undefined}
+      accountBillingSlot={
+        surface === 'account' && billingUiAvailable ? <DeletedWorkspaceBilling /> : undefined
+      }
       workspaceOwnershipSlot={
         role === 'owner' && currentUserId ? (
           <WorkspaceOwnershipTransfer

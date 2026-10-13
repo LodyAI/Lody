@@ -202,3 +202,122 @@ test('fits translated header actions in a narrow dark settings panel', async ({ 
   await expectInside(settings.getByRole('button', { name: '添加角色', exact: true }), settings);
   await expectInside(settings.getByRole('button', { name: '关闭', exact: true }), settings);
 });
+
+for (const locale of ['en', 'zh_CN']) {
+  for (const story of [
+    'active-forecast-with-actions',
+    'active-forecast-narrow-with-actions',
+    'no-active-watch-with-actions',
+  ]) {
+    test(`opens the Provider forecast directly and keeps quota separate: ${story}, ${locale}`, async ({
+      page,
+    }) => {
+      await page.goto(
+        `/iframe.html?id=codexreset-codexresetforecastentry--${story}&viewMode=story&globals=locale:${locale};theme:dark`
+      );
+      const entry = page.getByRole('button', { name: /^(Reset forecast|重置预测)$/ });
+      const manage = page.getByRole('button', { name: /Manage Codex|管理 Codex/ });
+      const row = entry.locator('xpath=../../..');
+      await expectInside(entry, row);
+      await expectInside(manage, row);
+      await expect(page.getByRole('button', { name: /quota details|额度详情/ })).toHaveCount(0);
+      await expect(page.getByRole('dialog')).toHaveCount(0);
+      const quota = row.getByRole('group', { name: /Codex (remaining quota|剩余额度)/ });
+      if (story !== 'no-active-watch-with-actions') {
+        await expect(quota).toContainText(/Remaining|剩余/);
+        await expect(quota.getByRole('meter', { name: /5h.*59%/ })).toHaveAttribute(
+          'aria-valuenow',
+          '59'
+        );
+        await expect(quota.getByRole('meter', { name: /7d.*71%/ })).toHaveAttribute(
+          'aria-valuenow',
+          '71'
+        );
+      } else {
+        await expect(quota).toHaveCount(0);
+      }
+      await expect(row).not.toContainText('65%');
+      await page.evaluate(() => document.fonts.ready);
+      if (story === 'active-forecast-with-actions') {
+        const baselines = await row.evaluate((el) => {
+          const group = el.querySelector('[role="group"]')!;
+          const button = el.querySelector('button[aria-haspopup="dialog"]')!;
+          const labels = [
+            group.firstElementChild!,
+            ...Array.from(group.querySelectorAll('[role="meter"]')).flatMap((meter) => [
+              meter.firstElementChild!,
+              meter.lastElementChild!,
+            ]),
+            button.querySelector('span')!,
+          ];
+          // A zero-size inline marker sits on the actual text baseline,
+          // unlike the center or bottom of a font's bounding rectangle.
+          return labels.map((label) => {
+            const marker = document.createElement('span');
+            marker.style.cssText =
+              'display:inline-block;width:0;height:0;padding:0;margin:0;border:0;vertical-align:baseline;';
+            label.append(marker);
+            const baseline = marker.getBoundingClientRect().top;
+            marker.remove();
+            return baseline;
+          });
+        });
+        expect(baselines).toHaveLength(6);
+        expect(Math.max(...baselines) - Math.min(...baselines)).toBeLessThan(0.25);
+      }
+      const idleEntry = await entry.boundingBox();
+      const idleManage = await manage.boundingBox();
+      await row.hover();
+      expect(await entry.boundingBox()).toEqual(idleEntry);
+      expect(await manage.boundingBox()).toEqual(idleManage);
+      await entry.focus();
+      await page.keyboard.press('Enter');
+      const forecast = page.getByRole('dialog', { name: /Codex reset forecast|Codex 重置预测/ });
+      await expect(forecast).toBeVisible();
+      await expect(page.getByRole('dialog')).toHaveCount(1);
+      await expect
+        .poll(() => forecast.evaluate((el) => el.contains(document.activeElement)))
+        .toBe(true);
+      if (story !== 'no-active-watch-with-actions') await expect(forecast).toContainText('65%');
+      await page.keyboard.press('Escape');
+      await expect(forecast).toBeHidden();
+      await expect(entry).toBeFocused();
+      await entry.click();
+      await expect(forecast).toBeVisible();
+      await page.keyboard.press('Escape');
+      await expect(forecast).toBeHidden();
+      await manage.click();
+      const menu = page.getByRole('menu');
+      await expect(menu.getByText('Codex', { exact: true })).toHaveCount(0);
+      await expect(menu.getByRole('menuitem')).toHaveCount(2);
+      await menu.getByRole('menuitem', { name: /Refresh models and modes|刷新模型和模式/ }).click();
+      await expect(page.getByRole('status', { name: 'Provider action result' })).toHaveText(
+        'Refreshed Codex'
+      );
+      await manage.click();
+      await page.getByRole('menuitem', { name: /^(Delete|删除)$/ }).click();
+      await expect(page.getByRole('alertdialog')).toBeVisible();
+      await expect(page.getByRole('alertdialog')).toContainText('Codex');
+    });
+  }
+}
+
+for (const locale of ['en', 'zh_CN']) {
+  test(`shows every Provider quota window at narrow widths: ${locale}`, async ({ page }) => {
+    await page.goto(
+      `/iframe.html?id=settings-providerrow--claude-with-rate-limit-narrow&viewMode=story&globals=locale:${locale};theme:dark`
+    );
+    const manage = page.getByRole('button', { name: /Manage Claude Code|管理 Claude Code/ });
+    await expect(manage).toBeVisible();
+    const row = manage.locator('xpath=../..');
+    const quota = row.getByRole('group', { name: /Claude Code (remaining quota|剩余额度)/ });
+    await expectInside(quota, row);
+    await expectInside(manage, row);
+    await expect(quota.getByRole('meter')).toHaveCount(3);
+    for (const meter of await quota.getByRole('meter').all()) await expectInside(meter, row);
+    await expect(quota.getByRole('meter', { name: /Fable.*33%/ })).toBeVisible();
+    await expect(
+      row.getByRole('button', { name: /quota details|额度详情|Reset forecast|重置预测/ })
+    ).toHaveCount(0);
+  });
+}

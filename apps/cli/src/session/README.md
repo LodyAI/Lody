@@ -40,8 +40,14 @@ targets; this is not live-presence discovery or a scan of historical conversatio
 - `session-dispatch-logic.ts` — pure decision functions for the watcher (testable).
 - `roost-node-session.ts` — owns Roost history reads/writes and its bounded active-branch
   page cache; `roost-session-backend.ts` joins it to the existing Loro control plane.
+- `roost-writer-identity.ts` — persists the replica's signing identity in private
+  application data, independent of login credentials and the system credential store.
 - `roost-history-generation.ts` — stages structural replacements privately and
   atomically activates them, fencing writes through superseded handles.
+- `roost-history-diagnostics.ts` — correlates local Worker causes and runtime details
+  with the safe error reference returned by history RPC.
+- `session-history-owner.ts` — native Effect readiness barrier for history RPC; waits
+  for this session's owner/backend metadata and releases its observer on every exit.
 - `roost-rpc-session.ts` — one-shot Cloud CLI history services backed by owner RPC;
   `lib/command-runtime.ts` supplies the same composition for sessions, export and MCP.
 - `turn-history-gate.ts` — ordering barrier for RPC fast-path turns. Created in
@@ -80,6 +86,11 @@ targets; this is not live-presence discovery or a scan of historical conversatio
 - `session-access-retry.ts` — remote machine access verification: bounded retries at command
   validation boundaries and interruptible unbounded retries for an already-durable dispatch.
 - `session-user-resolver.ts` + `git-identity.ts` — the requesting user's commit identity.
+- `worktree/git-execution.ts` — native WorktreeGit service: command Scope,
+  status/error distinction, environment/official filesystem and bounded helper probe.
+  `git-execution-legacy.ts` executes that kernel for the Promise manager; remove its
+  visible facade after the manager migrates. Infrastructure/release failure cannot
+  authorize fallback or force removal. Setup/GC ownership remains separate.
 - `worktree/` — repo checkouts, worktrees, branch allocation, setup scripts
   ([AGENTS.md](worktree/AGENTS.md)). `worktree-gc.ts` reconciles the Lody-managed
   worktree tree against Session state: archived or deleted root Sessions lose their
@@ -296,6 +307,12 @@ same-session replacement rather than pretending resources were released. See [th
 
 ### Commit identity
 
+`git-identity-policy.ts` bounds the complete policy lookup to 3 seconds per attempt,
+retries once, and returns personal identity disabled after two failures. Startup publishes
+`Resolving Git identity`; cancellation interrupts the waiter and fences identity updates
+and agent launch. Late policy results have no side effects. This deadline also covers
+per-turn identity refresh; it is separate from network credential fallback.
+
 The effective identity becomes `GIT_AUTHOR_*`/`GIT_COMMITTER_*` in the session env (`session.ts`
 `updateGitIdentity`, re-applied per turn via the execution service's `bindReadySession`). When
 the turn requester is the machine owner, the repository/machine Git identity is used without a cloud profile lookup; missing local
@@ -333,6 +350,68 @@ The shared renderer uses the existing local IPC or remote history RPC bridge;
 Web/iOS clients need no Node addon. The owning machine must be available for RPC
 reads; browser-local IndexedDB replicas and offline sync are separate work.
 Runtime packaging and verification: [native runtime note](../../../../.agents/notes/proposed/architecture/2026-10-09-roost-native-runtime.md).
+
+### Roost writer identity
+
+Each Node history database has a separate host-private identity database at
+`<history path>.identity.sqlite3`. Its versioned seed/public-key pair is created once
+inside an immediate SQLite transaction, committed with `synchronous=FULL`, and read
+back before the history Worker starts. Independent processes reuse the winning
+identity. On POSIX the identity file is private (`0600`); Windows relies on the
+application data directory's account ACL. Neither seed nor identity metadata enters
+history streams, exports, RPC or diagnostics. Back up the history database and its
+identity database together, using a consistent SQLite backup while writers are stopped.
+
+The execution replica signs physical Turns, while each input retains the actual
+human `userId` and `author`. Multiple users and devices access a shared execution
+machine through the existing authorized history RPC; clients do not copy its seed.
+An independently writable local machine gets its own identity. This change does
+not compose cloud history replicas or enable offline input submission.
+
+Roost never opens the system keyring or reads `LODY_ROOST_SEED_HEX`. Login credentials
+keep their existing protection. Normal logout and renderer cache clearing do not
+delete the Node writer identity. Missing, invalid or conflicting identity data
+rejects initialization without replacing the key, changing backend or replaying work.
+
+Nightly keyring migration is deliberately unsupported. An existing history database
+without the paired identity database is refused before the history Worker starts;
+its bytes and keychain entries remain untouched. To test the new format, stop the
+daemon and select a new, unused `LODY_ROOST_DB_PATH` on the execution machine. Do not
+expect old keyring-backed conversations to become available in the fresh database.
+Failures carry `identityMissing`, `identityInvalid`, `identityConflict` or
+`identityStorage` and the existing diagnostic reference. The native identity service
+owns a short-lived SQLite handle; its deprecated `loadRoostOwnerSeedLegacy` facade
+remains until the Promise owner pool receives the service from the daemon runtime.
+
+### Paging and observations
+
+History RPC requires matching session ID, owning machine and persisted Roost backend
+before opening a cold store. Local creation commits do not establish arrival at the
+target daemon: metadata and RPC use independent streams. The scoped, session-specific
+readiness barrier waits at most ten seconds; confirmed foreign/deleted identities
+still refuse access, and a readiness deadline never starts a history operation.
+Server stop/MessageHandler cleanup cancel the wait without stopping shared sync.
+Pending/ready diagnostics record ownership/backend state and elapsed wait time;
+RPC rejections correlate that context with the request ID. Transport failures retain
+client-side provenance and do not establish an owner storage fault or authorize replay.
+Compose the readiness Effect directly; only the MessageHandler entry executes it.
+
+An explicit history precondition refusal must remain terminal when the RPC stream
+replays an unexpired request after daemon restart. `session-history-rpc-rejections.ts`
+owns a separate SQLite file in the application data directory, with one scoped handle
+per operation and a FULL synchronous transaction before the refusal reply. It stores
+only the request namespace, fingerprint, expiry, code and safe message. It never stores
+history bodies or credentials. Expired records are removed on the next refusal write.
+The MessageHandler RPC callbacks execute these Effects; the transport requires this
+capability for history writes and refuses unavailable or conflicting request state.
+Storage handoff and uncertain write outcomes retain their existing owners.
+
+Initialization, Worker exit and failed writes retain their original error and outcome
+classification. The owner's local log records causes, exit status and runtime/build
+details under a diagnostic ID. For these failures, history RPC returns only the ID,
+stage and error code in its existing error string; the shared renderer explains the failure in the
+selected language. Failures neither change the stored backend nor replay a write whose
+outcome is unknown.
 
 Renderer read replies bind logical page bodies, count and history revision to
 one durable observation. The RPC waits for local writes before and after the
@@ -390,3 +469,25 @@ The synthetic [history benchmark](../../benchmarks/roost-history.mts) exercises
 these production backends and the shared view; `BENCH_STRUCTURAL=1` also measures
 the complete directory and a guarded last-user edit. Its timing excludes renderer
 transport, IndexedDB and paint.
+
+Worktree observations use the native `WorktreeObservations` service: official
+filesystem, WorktreeGit and the existing FileLocks coordinator. The Promise manager
+executes them through `runObservationLegacy`; list/inspect own repo leases, while
+mutation information reads reuse the caller's lock. Missing and unborn state remain
+distinct from repository/infrastructure failures. See the
+[decision](../../../../.agents/notes/implemented/architecture/2026-10-10-effect-worktree-observations.md).
+
+Local-shared `ensureRepo`/creation consumes `LocalWorktreePreparation`: source
+validation, directories and complete metadata publication use native FileSystem,
+WorktreeGit and Clock under the caller's existing repo lease. `runWorktreeLegacy`
+executes this and observation programs through the same FileLocks runtime; a failed
+metadata scratch release retains its path and bounded retry capability. Bare
+clone/fetch, full mutations and long-lived GC still require their own native owners.
+
+## Conversation-tree stop
+
+The related-conversations action persists `collaborationStopped` on the creation tree.
+Execution reads inherited flags before setup and ACP dispatch. Metadata updates
+cancel exact active turns with pending input preserved, while late completions are
+recorded without continuation. Users must explicitly restore collaboration; offline
+machines enforce the state after sync. See the [orchestration contract](../../../../specs/session-orchestration.md#user-controlled-conversation-tree-stop).

@@ -211,6 +211,27 @@ describe('start shutdown controller', () => {
     expect(logger.info).toHaveBeenCalledWith('\nReceived SIGINT, shutting down gracefully...');
   });
 
+  it('reports a failed application cleanup as a failed exit after telemetry flush', async () => {
+    const exits: number[] = [];
+    let flushed = false;
+    const controller = createStartShutdownController({
+      signals: [],
+      logger: createTestLogger(),
+      shutdown: async () => {
+        throw new Error('owned shell still alive');
+      },
+      flushTelemetry: async () => {
+        flushed = true;
+      },
+      exit: (code) => {
+        expect(flushed).toBe(true);
+        exits.push(code);
+      },
+    });
+    await controller.shutdown();
+    expect(exits).toEqual([1]);
+  });
+
   it('preserves explicit lifecycle exit code after graceful shutdown', async () => {
     const logger = createTestLogger();
     const exits: number[] = [];

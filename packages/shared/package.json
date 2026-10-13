@@ -92,10 +92,6 @@
       "types": "./src/local-loro-data-plane-server.ts",
       "import": "./src/local-loro-data-plane-server.ts"
     },
-    "./local-loro-data-plane-scheduler": {
-      "types": "./src/local-loro-data-plane-scheduler.ts",
-      "import": "./src/local-loro-data-plane-scheduler.ts"
-    },
     "./local-loro-transport": {
       "types": "./src/local-loro-transport.ts",
       "import": "./src/local-loro-transport.ts"
@@ -164,6 +160,14 @@
       "types": "./src/node/*.ts",
       "import": "./src/node/*.ts",
       "require": "./src/node/*.cjs"
+    },
+    "./local-loro-writer": {
+      "types": "./src/local-loro-writer/index.ts",
+      "import": "./src/local-loro-writer/index.ts"
+    },
+    "./local-loro-writer/legacy": {
+      "types": "./src/local-loro-writer/legacy.ts",
+      "import": "./src/local-loro-writer/legacy.ts"
     }
   },
   "scripts": {

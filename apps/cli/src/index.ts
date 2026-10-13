@@ -5,6 +5,25 @@
 import './utils/sqlite-runtime-support';
 import './instrument';
 import { Command } from 'commander';
+import { Cause, Effect, Layer } from 'effect';
+import { makeApplicationRuntime } from '@lody/shared/node/application-runtime';
+import {
+  LoginShellCacheLive,
+  LoginShellCacheReporter,
+  loginShellEnvLayer,
+} from '@lody/shared/node/login-shell-env';
+import {
+  bindLoginShellCacheLegacy,
+  closeLoginShellApplicationLegacy,
+} from './agent/login-shell-env';
+import { toShared } from './platform/process-options';
+import { presencePlatformLayer } from './platform/presence';
+import { WorkspacePresenceOwnersLive } from './lib/loro/workspace-presence';
+import {
+  bindWorkspacePresenceApplicationLegacy,
+  recoverCliPresenceApplicationShutdown,
+  WorkspacePresenceLegacyFailure,
+} from './lib/loro/presence-legacy';
 import { version } from '@/pkg';
 import { startCommand } from './commands/start';
 
@@ -41,6 +60,34 @@ const cliLogger = getLogger('cli');
 loadEnv();
 applyDefaultDnsResultOrder({ logger: getLogger('dns') });
 installCliHttpGlobalDispatcher({ logger: getLogger('http-transport') });
+
+const shellCache = LoginShellCacheLive.pipe(
+  Layer.provide(
+    Layer.merge(
+      loginShellEnvLayer(toShared()),
+      Layer.succeed(LoginShellCacheReporter, (cause) =>
+        Effect.sync(() => {
+          const error = Cause.squash(cause);
+          cliLogger.error('Login-shell probe failed; retaining its failure for launchers', {
+            errorName: error instanceof Error ? error.name : 'unknown',
+          });
+        })
+      )
+    )
+  )
+);
+const application = makeApplicationRuntime(
+  Layer.merge(
+    shellCache,
+    WorkspacePresenceOwnersLive.pipe(Layer.provide(presencePlatformLayer(cliLogger)))
+  ),
+  {
+    recover: recoverCliPresenceApplicationShutdown,
+    project: (cause) => new WorkspacePresenceLegacyFailure(cause),
+  }
+);
+bindLoginShellCacheLegacy(application);
+bindWorkspacePresenceApplicationLegacy(application);
 
 const program = new Command();
 
@@ -89,19 +136,30 @@ void (async () => {
     // Handle case where no command is provided
     if (!userArgs.length) {
       program.outputHelp();
+      await closeLoginShellApplicationLegacy();
       process.exit(0);
     }
 
     // Parse command line arguments. Use parseAsync so async command actions are awaited.
     await program.parseAsync(userArgs, { from: 'user' });
+    await closeLoginShellApplicationLegacy();
   } catch (error) {
+    let failure = error;
+    try {
+      await closeLoginShellApplicationLegacy();
+    } catch (cleanupError) {
+      failure = new AggregateError(
+        [error, cleanupError],
+        'CLI failed and application cleanup failed'
+      );
+    }
     // Handle Commander errors gracefully
     if (error instanceof Error && error.name === 'CommanderError') {
       // Commander errors are usually from help or invalid commands
       // Let them display normally and exit
       process.exit(1);
     } else {
-      void reportError('cli', error, {
+      await reportError('cli', failure, {
         message: 'CLI runtime error',
         logger: cliLogger,
         fatal: true,

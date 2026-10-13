@@ -1,3 +1,4 @@
+import type { SessionActivePresencePhase } from '../src/lib/loro/session-active-presence';
 import { withHistoryPort } from './history-port-fixture';
 import { describe, expect, it, vi } from 'vitest';
 import fs from 'node:fs';
@@ -43,10 +44,7 @@ import {
   type SessionStatus,
   type WorkspaceId,
 } from '@lody/shared';
-import {
-  SessionActivePresenceController,
-  type SessionActivePresencePhase,
-} from '../src/lib/loro/session-active-presence';
+import { SessionActivePresenceControllerLegacy } from '../src/lib/loro/session-active-presence-legacy';
 import type { SessionManager } from '../src/session/session-manager';
 import { MachineDocument, SessionDocument, type LoroDocumentManager } from '../src/lib/loro/doc';
 import { composeTestSessionDoc } from './session-doc-fixture';
@@ -197,8 +195,18 @@ const createGitLocalProject = (): string => {
 };
 
 const createBaseDeps = (
-  overrides: Partial<SessionExecutionServiceDeps>
-): SessionExecutionServiceDeps => {
+  overrides: Partial<SessionExecutionServiceDeps> & {
+    startSessionActivePresence?: (
+      sessionId: SessionId,
+      phase?: SessionActivePresencePhase | null
+    ) => void;
+  }
+): SessionExecutionServiceDeps & {
+  startSessionActivePresence: (
+    sessionId: SessionId,
+    phase?: SessionActivePresencePhase | null
+  ) => void;
+} => {
   const logger = createSilentLogger();
   const sessionManager = {
     getSession: vi.fn(() => null),
@@ -231,7 +239,14 @@ const createBaseDeps = (
     workspaceId: 'workspace-1' as WorkspaceId,
     preferredBaseBranch: 'main',
     touchSession: vi.fn(),
-    startSessionActivePresence: vi.fn(async () => {}),
+    startSessionActivePresence: vi.fn(() => {}),
+    holdSessionActivePresence: (id: SessionId, phase?: SessionActivePresencePhase | null) =>
+      Effect.acquireRelease(
+        Effect.sync(() => {
+          deps.startSessionActivePresence(id, phase);
+        }),
+        () => Effect.sync(() => deps.clearSessionActivePresence(id))
+      ).pipe(Effect.as({ awaitInitializationStall: Effect.never })),
     clearSessionActivePresence: vi.fn(),
     setSessionActivePresencePhase: vi.fn(),
     beginACPReplaySuppression: vi.fn(),
@@ -323,6 +338,122 @@ const createBaseDeps = (
 };
 
 describe('SessionExecutionService', () => {
+  it('cancels an active descendant and prevents late turns while the tree is stopped', async () => {
+    const sessionId = 'collaboration-child' as SessionId;
+    const rootId = 'collaboration-root' as SessionId;
+    let stopped = false;
+    let history: SessionHistoryInput[] = [
+      {
+        id: 'collaboration-user',
+        role: 'user',
+        status: 'pending',
+        items: [{ type: 'text', text: 'work' }],
+      },
+    ];
+    let started!: () => void;
+    let finish!: () => void;
+    const promptStarted = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    const promptFinished = new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+    const prompts: string[] = [];
+    const agentClient = {
+      isCreated: () => true,
+      currentModel: undefined,
+      prompt: async () => {
+        prompts.push('work');
+        started();
+        await promptFinished;
+        return {};
+      },
+      cancel: async () => {
+        finish();
+      },
+    };
+    const activeSession = {
+      sessionId,
+      acpSessionId: 'acp-collaboration' as ACPSessionId,
+      agentClient,
+      getWorkdir: () => '/tmp',
+      getHostWorkdir: () => '/tmp',
+      getParentSessionId: () => undefined,
+      exec: async () => '',
+      terminate: async () => {},
+      updateGitIdentity: () => {},
+      applyExecutionPlaneLimits: async () => {},
+      terminalManager: {},
+    };
+    const sessionDoc = withHistoryPort({
+      getMetaState: async () => ({ id: sessionId, openedBySessionId: rootId }),
+      setStatus: async () => {},
+      setLastMessageAt: async () => {},
+      getHistory: () => history,
+      updateHistory: async (update: (value: SessionHistoryInput[]) => SessionHistoryInput[]) => {
+        history = update(history);
+      },
+    });
+    const deps = createBaseDeps({
+      beginConversationTurn: (_id, userTurnId) => `assistant:${userTurnId}`,
+      sessionManager: {
+        getSession: () => activeSession,
+        getPendingSession: () => null,
+        createSession: async () => activeSession,
+        setSessionError: () => {},
+        terminateSession: async () => {},
+        validateSessionCredentials: async () => {},
+      } as unknown as SessionManager,
+      workspaceDocument: {
+        repo: {
+          getDocMeta: async (roomId: string) => ({
+            meta:
+              roomId === getSessionRoomId(rootId)
+                ? { id: rootId, collaborationStopped: stopped }
+                : { id: sessionId, openedBySessionId: rootId },
+          }),
+          upsertDocMeta: async () => {},
+        },
+        getOrCreateSessionDoc: async () => sessionDoc,
+        getOrOpenSessionCode: async () => null,
+        updateAcpCapabilities: async () => {},
+      } as unknown as LoroDocumentManager,
+    });
+    const service = new SessionExecutionService(deps);
+    const message = {
+      type: 'session/chat' as const,
+      sessionId,
+      machineId: 'machine-1' as MachineId,
+      workspaceId: 'workspace-1' as WorkspaceId,
+      acpSessionConfig: {
+        prompt: 'work',
+        cliType: 'builtin' as const,
+        agentType: 'codex',
+        chainDepth: 1,
+      },
+      userTurnId: 'collaboration-user',
+      userId: 'user-1',
+      userName: 'User',
+      userEmail: 'user@example.com',
+    };
+    const running = service.continueSession(message);
+    await promptStarted;
+    stopped = true;
+    await service.reconcileCollaborationStops();
+    await running;
+    expect(service.getExecutionSnapshot(sessionId).hasActiveTurn).toBe(false);
+    expect(history.find((turn) => turn.id === 'collaboration-user')?.status).toBe('canceled');
+    history.push({
+      id: 'late-user',
+      role: 'user',
+      status: 'pending',
+      items: [{ type: 'text', text: 'late' }],
+    });
+    await service.continueSession({ ...message, userTurnId: 'late-user' });
+    expect(history.find((turn) => turn.id === 'late-user')?.status).toBe('canceled');
+    expect(prompts).toEqual(['work']);
+  });
+
   it('scans the saved Pi profile and rejects missing or non-Pi providers', async () => {
     const deps = createBaseDeps({});
     let config: AgentConfigMeta | null = createLaunchConfig({
@@ -2385,7 +2516,7 @@ describe('SessionExecutionService', () => {
       'Teammate',
       'teammate@example.com',
       'user-2',
-      { preferMachineIdentity: false }
+      { preferMachineIdentity: false, personalIdentityEnabled: false }
     );
   });
 
@@ -2908,10 +3039,6 @@ describe('SessionExecutionService', () => {
       onAccessIndeterminate,
     });
 
-    expect(deps.startSessionActivePresence).toHaveBeenCalledWith(
-      'session-prepared-presence',
-      'initializing'
-    );
     expect(deps.beginConversationTurn).toHaveBeenCalledWith(
       'session-prepared-presence',
       'turn-prepared-presence',
@@ -3012,7 +3139,6 @@ describe('SessionExecutionService', () => {
     expect(onAccessAllowed).not.toHaveBeenCalled();
     expect(onAccessDenied).not.toHaveBeenCalled();
     expect(onAccessIndeterminate).not.toHaveBeenCalled();
-    expect(deps.clearSessionActivePresence).toHaveBeenCalledWith(sessionId);
     expect(deps.clearConversationTurn).toHaveBeenCalledWith(sessionId, turnId);
     expect(sessionDoc.setStatus).toHaveBeenCalledWith(SessionStatusFactory.idle());
     expect(history[0]).toMatchObject({ id: userTurnId, status: 'canceled' });
@@ -3254,7 +3380,7 @@ describe('SessionExecutionService', () => {
   });
 
   it.each([undefined, 'delivery'] as const)(
-    'restores a stale ACP session without repeating the start fence for %s dispatch',
+    'preserves the completion submission policy after a transport failure for %s dispatch',
     async (dispatchSource) => {
       const sessionId = 'session-stale-acp' as SessionId;
       const acpSessionId = 'acp-stale' as ACPSessionId;
@@ -3267,10 +3393,14 @@ describe('SessionExecutionService', () => {
           read: false,
         },
       ];
+      const submittedSessions: string[] = [];
+      let settledOutcome: string | undefined;
       const agentClient = {
         isCreated: vi.fn(() => true),
         cancel: vi.fn(async () => {}),
         prompt: vi.fn(async () => {
+          // Submission can succeed before the transport reports failure.
+          submittedSessions.push(acpSessionId);
           throw new Error('ACP connection closed');
         }),
         currentModel: undefined,
@@ -3278,7 +3408,10 @@ describe('SessionExecutionService', () => {
       const restoredAgentClient = {
         isCreated: vi.fn(() => true),
         cancel: vi.fn(async () => {}),
-        prompt: vi.fn(async () => ({})),
+        prompt: vi.fn(async () => {
+          submittedSessions.push(restoredAcpSessionId);
+          return {};
+        }),
         currentModel: undefined,
       };
       const exec = vi.fn(async (command: string, args: string[]) => {
@@ -3334,7 +3467,9 @@ describe('SessionExecutionService', () => {
           throw Object.assign(new Error('database is locked'), { code: 'SQLITE_BUSY' });
         })
         .mockResolvedValueOnce(true);
-      const onTurnSettled = vi.fn(async () => {});
+      const onTurnSettled = async (outcome: string) => {
+        settledOutcome = outcome;
+      };
       const service = new SessionExecutionService(deps);
       await service.continueSession(
         {
@@ -3352,27 +3487,14 @@ describe('SessionExecutionService', () => {
         dispatchSource ? { dispatchSource, onTurnStarted, onTurnSettled } : undefined
       );
 
-      expect(agentClient.prompt).toHaveBeenCalledWith(
-        'acp-stale',
-        [{ type: 'text', text: 'hello' }],
-        {
-          signal: expect.any(AbortSignal),
-        }
-      );
-      expect(sessionManager.terminateSession).toHaveBeenCalledWith(sessionId, true);
-      expect(sessionManager.createSession).toHaveBeenCalled();
-      expect(restoredAgentClient.prompt).toHaveBeenCalledWith(
-        'acp-restored',
-        [{ type: 'text', text: 'hello' }],
-        {
-          signal: expect.any(AbortSignal),
-        }
-      );
-      expect(deps.recordChatFailure).not.toHaveBeenCalled();
-      expect(history[0]?.status).toBe(dispatchSource === 'delivery' ? 'pending' : 'handled');
+      expect(service.getExecutionSnapshot(sessionId).hasActiveTurn).toBe(false);
       if (dispatchSource === 'delivery') {
-        expect(onTurnSettled).toHaveBeenCalledWith('handled');
-        expect(onTurnStarted).toHaveBeenCalledOnce();
+        expect(submittedSessions).toEqual([acpSessionId]);
+        expect(settledOutcome).toBe('uncertain');
+        expect(history[0]?.status).toBe('pending');
+      } else {
+        expect(submittedSessions).toEqual([acpSessionId, restoredAcpSessionId]);
+        expect(history[0]?.status).toBe('handled');
       }
     }
   );
@@ -7939,8 +8061,22 @@ describe('SessionExecutionService', () => {
         terminateSession: vi.fn(),
         validateSessionCredentials: vi.fn(async () => {}),
       } as unknown as SessionManager;
+      const activePresence = new Map<SessionId, SessionStatus>();
+      const presence = new SessionActivePresenceControllerLegacy(
+        {
+          publishSessionPresence: (id: SessionId, _machine: MachineId, value: SessionStatus) => {
+            activePresence.set(id, value);
+          },
+          clearSessionPresence: (id: SessionId) => activePresence.delete(id),
+        } as unknown as LoroDocumentManager,
+        'machine-1' as MachineId,
+        createSilentLogger()
+      );
       const deps = createBaseDeps({
         sessionManager,
+        holdSessionActivePresence: (id, phase) => presence.native.hold(id, phase),
+        setSessionActivePresencePhase: (id, phase, detail) => presence.setPhase(id, phase, detail),
+        clearSessionActivePresence: (id) => presence.clearUnleased(id),
         beginConversationTurn: (_id, turn) => {
           activeTurnId = `assistant:${turn}`;
           return activeTurnId;
@@ -8005,6 +8141,12 @@ describe('SessionExecutionService', () => {
           }
         ).turnRuntimeBySession.get(sessionId);
         if (!owner?.fiber) throw new Error('Expected the running turn owner');
+        const released = service
+          .waitForTurnRelease(sessionId, `assistant:${userTurnId}`)
+          .then(() => {
+            expect(activePresence.has(sessionId)).toBe(false);
+            expect(presence.has(sessionId)).toBe(false);
+          });
         // External teardown can still interrupt the owner; normal Stop no longer does.
         void Effect.runPromise(Fiber.interrupt(owner.fiber));
         await Promise.race([drainStarted.promise, running]);
@@ -8017,6 +8159,8 @@ describe('SessionExecutionService', () => {
           processingUserMsgId: undefined,
         });
         expect(service.getExecutionSnapshot(sessionId)).toMatchObject({ hasActiveTurn: true });
+        expect(activePresence.get(sessionId)?.type).toBe('running');
+        expect(presence.has(sessionId)).toBe(true);
         // The entry is already stamped finished here, so its compaction marker
         // is settled with it — a still-spinning row on a finished turn is the
         // state finalization exists to remove. A compaction that does reach a
@@ -8057,7 +8201,10 @@ describe('SessionExecutionService', () => {
           await running;
           expect(terminated).toBe(false);
         }
+        await released;
         expect(service.getExecutionSnapshot(sessionId)).toMatchObject({ hasActiveTurn: false });
+        expect(activePresence.has(sessionId)).toBe(false);
+        expect(presence.has(sessionId)).toBe(false);
         expect(deps.turnFinalization.finalizeACPState).toHaveBeenCalledTimes(2);
         expect(history[1]).toMatchObject({
           id: `assistant:${userTurnId}`,
@@ -8079,6 +8226,7 @@ describe('SessionExecutionService', () => {
       } finally {
         rawPrompt.resolve();
         termination.resolve();
+        await presence.close();
         vi.useRealTimers();
       }
     }
@@ -10028,14 +10176,12 @@ describe('SessionExecutionService initialization deadline', () => {
     | { kind: 'clear'; sessionId: string };
 
   /**
-   * Wires the REAL `SessionActivePresenceController` into the execution service
+   * Wires the REAL native session presence lease into the execution service
    * so presence is an observable output rather than a mock: the fake document
    * manager records every publish/clear exactly as production would drive it.
    *
-   * Only `setInterval` is faked. Effect's scheduler and promise microtasks stay
-   * real, so the turn fiber makes normal progress while the heartbeat clock is
-   * fully under the test's control, and `now` is injected so elapsed time never
-   * depends on wall-clock.
+   * Clock timers are fake and elapsed time is injected; timer/microtask
+   * advancement drives the real native heartbeat and visible Turn together.
    */
   const createDeadlineHarness = (options: {
     sessionId: string;
@@ -10050,13 +10196,9 @@ describe('SessionExecutionService initialization deadline', () => {
   }) => {
     const presenceEvents: PresenceEvent[] = [];
     let nowMs = 1_000_000;
-    // Only `setInterval` is faked, so a real `setTimeout(0)` still yields to
-    // Effect's scheduler: advancing the heartbeat clock and then letting the
-    // turn fiber run keeps every step ordered without a real sleep.
+    // Drain the controlled timer/microtask boundary without wall-clock sleeps.
     const settle = async () => {
-      for (let i = 0; i < 5; i += 1) {
-        await new Promise((resolve) => setTimeout(resolve, 0));
-      }
+      await vi.advanceTimersByTimeAsync(0);
     };
     const advance = async (ms: number) => {
       nowMs += ms;
@@ -10096,7 +10238,7 @@ describe('SessionExecutionService initialization deadline', () => {
     } as unknown as LoroDocumentManager;
 
     let service!: SessionExecutionService;
-    const presence = new SessionActivePresenceController(
+    const presence = new SessionActivePresenceControllerLegacy(
       workspaceDocument,
       'machine-1' as MachineId,
       { debug: () => {}, info: () => {}, warn: () => {}, error: () => {} } as unknown as Logger,
@@ -10104,8 +10246,6 @@ describe('SessionExecutionService initialization deadline', () => {
         intervalMs: 10_000,
         now: () => nowMs,
         ...(options.stallBudgetsMs ? { stallBudgetsMs: options.stallBudgetsMs } : {}),
-        onInitializationStalled: (sessionId, stall) =>
-          service.notifyInitializationStalled(sessionId, stall),
       }
     );
 
@@ -10145,16 +10285,13 @@ describe('SessionExecutionService initialization deadline', () => {
         validateSessionCredentials: vi.fn(async () => {}),
       } as unknown as SessionManager,
       workspaceDocument,
-      startSessionActivePresence: (
-        sessionId: SessionId,
-        phase?: SessionActivePresencePhase | null
-      ) => presence.start(sessionId, phase),
+      holdSessionActivePresence: (sessionId, phase) => presence.native.hold(sessionId, phase),
       setSessionActivePresencePhase: (
         sessionId: SessionId,
         phase: SessionActivePresencePhase | null,
         detail?: string
       ) => presence.setPhase(sessionId, phase, detail),
-      clearSessionActivePresence: (sessionId: SessionId) => presence.clear(sessionId),
+      clearSessionActivePresence: (sessionId: SessionId) => presence.clearUnleased(sessionId),
     });
     service = new SessionExecutionService(deps);
 
@@ -10191,7 +10328,7 @@ describe('SessionExecutionService initialization deadline', () => {
   };
 
   it('fails a turn whose initialization dependency never returns, and stops its presence', async () => {
-    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] });
     try {
       const harness = createDeadlineHarness({
         sessionId: 'session-stalled-init',
@@ -10244,19 +10381,26 @@ describe('SessionExecutionService initialization deadline', () => {
   });
 
   it('lets the retry after a stall start a fresh create instead of the wedged one', async () => {
-    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] });
     try {
+      const promptStarted = createDeferred<void>();
+      const promptDone = createDeferred<object>();
+      let staleProgress: ((phase: SessionActivePresencePhase, detail?: string) => void) | undefined;
       const agentClient = {
         isCreated: vi.fn(() => true),
         cancel: vi.fn(async () => {}),
-        prompt: vi.fn(async () => ({})),
+        prompt: vi.fn(async () => {
+          promptStarted.resolve();
+          return await promptDone.promise;
+        }),
         currentModel: undefined,
       };
       const harness = createDeadlineHarness({
         sessionId: 'session-stall-then-retry',
-        onCreateSession: (_config, attempt) =>
+        onCreateSession: (config, attempt) => {
+          if (attempt === 1) staleProgress = config.onPresencePhase;
           // First attempt wedges forever; the second is a healthy create.
-          attempt === 1
+          return attempt === 1
             ? new Promise(() => {})
             : Promise.resolve({
                 sessionId: 'session-stall-then-retry' as SessionId,
@@ -10271,7 +10415,8 @@ describe('SessionExecutionService initialization deadline', () => {
                 updateGitIdentity: vi.fn(),
                 createAgent: vi.fn(async () => 'acp-1'),
                 applyExecutionPlaneLimits: vi.fn(async () => {}),
-              }),
+              });
+        },
       });
 
       const stalledTurn = harness.start();
@@ -10288,6 +10433,12 @@ describe('SessionExecutionService initialization deadline', () => {
       harness.appendUserTurn('turn-user-2');
       const retryTurn = harness.start('turn-user-2');
       await harness.settle();
+      await promptStarted.promise;
+      staleProgress?.('managed-runtime', 'Synthetic stale progress');
+      expect(harness.heartbeatsFor('session-stall-then-retry').at(-1)?.status).toEqual({
+        type: 'running',
+      });
+      promptDone.resolve({});
       await retryTurn;
 
       expect(agentClient.prompt).toHaveBeenCalled();
@@ -10300,7 +10451,7 @@ describe('SessionExecutionService initialization deadline', () => {
   });
 
   it('keeps a stage that reports progress alive past its budget, and fails it once it goes silent', async () => {
-    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] });
     try {
       let reportProgress!: (detail: string) => void;
       const harness = createDeadlineHarness({

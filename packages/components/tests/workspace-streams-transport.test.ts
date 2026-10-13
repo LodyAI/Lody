@@ -10,6 +10,22 @@
  * against a scripted Streams server.
  */
 import 'fake-indexeddb/auto';
+import { createPrivateKey, sign } from 'node:crypto';
+import { Result } from 'effect';
+import {
+  Bytes,
+  contentSigningBytes,
+  encodeContentHeader,
+  deriveContentKey,
+  sealContentAead,
+  openContentAead,
+  verifyContentSignature,
+  type ContentScope,
+} from '@lody/e2ee-core';
+import { hashRecordBytes, recordSigningBytes, verifyLedger } from '@lody/e2ee-core/ledger';
+import { encodeCbor } from '@lody/e2ee-core';
+import { encodeStreamsRoomAdditionalData } from 'loro-repo/transport/streams';
+import { PayloadProtectionError } from '@loro-dev/streams-crdt';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Flock } from '@loro-dev/flock-wasm';
 import {
@@ -788,5 +804,421 @@ describe('workspace Streams content boundary', () => {
     expect((await tb.syncDoc('doc-a', reader)).ok).toBe(true);
     expect(reader.toJSON()).toEqual(writer.toJSON());
     expect((await cursor.load(url))?.nextOffset).not.toBe(before?.nextOffset);
+  });
+});
+
+// P10 preparation only. The native signer and pinned key are synthetic test
+// custody, not a production signer or a substitute for ledger author authority.
+const syntheticPrivateKey = createPrivateKey({
+  key: Buffer.from(
+    '302e020100300506032b6570042204209d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60',
+    'hex'
+  ),
+  format: 'der',
+  type: 'pkcs8',
+});
+const syntheticSignerBytes = Uint8Array.from(
+  Buffer.from('d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a', 'hex')
+);
+const syntheticSigner = Result.getOrThrow(Bytes.signingPublicKey(syntheticSignerBytes));
+const syntheticDevice = Buffer.from(syntheticSignerBytes).toString('hex');
+const syntheticEpochKey = Result.getOrThrow(Bytes.epochKey(new Uint8Array(32).fill(0x55)));
+// P08's public full replay establishes this synthetic *current* author only.
+// It does not expose retired-author mappings; no historical authorization is
+// implemented here and a pinned key alone is never advertised as that check.
+const syntheticGenesisBody = [
+  1,
+  syntheticSignerBytes,
+  new Uint8Array(32).fill(1),
+  new Uint8Array(16).fill(2),
+  new Uint8Array(32).fill(3),
+  new Uint8Array(32).fill(4),
+] as const;
+const syntheticGenesis = Result.getOrThrow(
+  encodeCbor([
+    syntheticGenesisBody,
+    new Uint8Array(
+      sign(
+        null,
+        recordSigningBytes(Result.getOrThrow(encodeCbor(syntheticGenesisBody))),
+        syntheticPrivateKey
+      )
+    ),
+  ])
+);
+const syntheticHead = hashRecordBytes(syntheticGenesis);
+const syntheticAuthority = Result.getOrThrow(
+  verifyLedger({
+    anchor: Result.getOrThrow(Bytes.genesisHash(syntheticHead.toBytes())),
+    records: [syntheticGenesis],
+    checkpoint: { head: syntheticHead, length: 1 },
+  })
+);
+const syntheticScope = {
+  genesis: Buffer.from(syntheticAuthority.genesis.toBytes()).toString('hex'),
+  resource: 'doc-a',
+  epoch: 0,
+  docEpoch: 0,
+} as const;
+
+type CryptoFault = 'signature' | 'tag' | 'missing-key';
+
+/** Independently compose public P07 primitives; never accept a verifier callback.
+ * Header 3/4, whole-batch v0 and encrypted snapshot offset follow the existing
+ * content contract. Missing production signing/history ports remain blockers.
+ */
+function cryptoTestProtection(
+  options: { scope?: Partial<ContentScope>; fault?: CryptoFault; snapshotOnly?: boolean } = {}
+): PayloadProtectionProvider {
+  const scopeFor = (snapshot: boolean): ContentScope => ({
+    ...syntheticScope,
+    purpose: snapshot ? 'doc-snapshot' : 'doc-update',
+    ...options.scope,
+  });
+  const unwrap = <A>(
+    value: Result.Result<A, unknown>,
+    reason: 'encrypt_failed' | 'decrypt_failed'
+  ): A => {
+    if (Result.isFailure(value))
+      throw new PayloadProtectionError(reason, 'synthetic private crypto detail');
+    return value.success;
+  };
+  return {
+    maxSealOverheadBytes: 1 + 143 + 2 + 1024,
+    seal(input) {
+      const snapshot = input.context.kind === 'snapshot';
+      const scope = scopeFor(snapshot);
+      const trustedHeader = { ...scope, docEpoch: 0 as const, device: syntheticDevice };
+      const header = Uint8Array.of(snapshot ? 4 : 3);
+      const binding = input.additionalData(header);
+      const offset = snapshot
+        ? new TextEncoder().encode(input.context.continuationOffset!)
+        : new Uint8Array();
+      const plaintext = snapshot
+        ? new Uint8Array(2 + offset.length + input.plaintext.length)
+        : input.plaintext;
+      if (snapshot) {
+        new DataView(plaintext.buffer).setUint16(0, offset.length);
+        plaintext.set(offset, 2);
+        plaintext.set(input.plaintext, 2 + offset.length);
+      }
+      const key = unwrap(deriveContentKey(syntheticEpochKey, scope), 'encrypt_failed');
+      const encrypted = unwrap(
+        sealContentAead(key, trustedHeader, plaintext, binding),
+        'encrypt_failed'
+      );
+      if (options.fault === 'tag' && (!options.snapshotOnly || snapshot))
+        encrypted.ciphertext[0] ^= 1;
+      const unsigned = new Uint8Array(39 + 24 + encrypted.ciphertext.length);
+      unsigned.set(unwrap(encodeContentHeader(trustedHeader), 'encrypt_failed'));
+      unsigned.set(encrypted.nonce, 39);
+      unsigned.set(encrypted.ciphertext, 63);
+      const signature = sign(
+        null,
+        unwrap(contentSigningBytes(scope, unsigned, binding), 'encrypt_failed'),
+        syntheticPrivateKey
+      );
+      if (options.fault === 'signature' && (!options.snapshotOnly || snapshot)) signature[0] ^= 1;
+      return { header, sealed: Uint8Array.from(Buffer.concat([unsigned, signature])) };
+    },
+    open(input) {
+      const snapshot = input.context.kind === 'snapshot';
+      if (input.header.length !== 1 || input.header[0] !== (snapshot ? 4 : 3))
+        throw new PayloadProtectionError('invalid_envelope');
+      const scope = scopeFor(snapshot);
+      expect(syntheticAuthority.inspectState().devices.has(syntheticDevice)).toBe(true);
+      // Scope and signer are supplied independently; frame metadata never
+      // selects a trusted Org, purpose, document, epoch or public key.
+      unwrap(
+        verifyContentSignature(input.sealed, scope, syntheticSigner, input.additionalData),
+        'decrypt_failed'
+      );
+      if (options.fault === 'missing-key')
+        throw new PayloadProtectionError('missing_read_key', 'synthetic key detail');
+      const key = unwrap(deriveContentKey(syntheticEpochKey, scope), 'decrypt_failed');
+      const bytes = unwrap(
+        openContentAead(
+          key,
+          { ...scope, docEpoch: 0, device: syntheticDevice },
+          input.sealed.slice(39, 63),
+          input.sealed.slice(63, -64),
+          input.additionalData
+        ),
+        'decrypt_failed'
+      );
+      if (!snapshot) return bytes;
+      const length = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).getUint16(0);
+      const offset = new TextDecoder().decode(bytes.slice(2, 2 + length));
+      if (offset !== input.context.continuationOffset)
+        throw new PayloadProtectionError('decrypt_failed');
+      return bytes.slice(2 + length);
+    },
+  };
+}
+
+const cryptoContent = (provider?: PayloadProtectionProvider): WorkspaceStreamsContent =>
+  protectedContent({
+    resolve: (room) => ({
+      mode: 'protected',
+      config: {
+        provider:
+          provider ??
+          cryptoTestProtection({
+            scope: { resource: room.kind === 'doc' ? room.docId : 'unused' },
+          }),
+      },
+    }),
+  });
+
+describe('P10 public crypto and published SDK preparation', () => {
+  it('round-trips whole v0 update batches through the renderer repo and durable storage', async () => {
+    const server = createByteServer();
+    const writer = await openTab(`v0-writer-${++sequence}` as WorkspaceId);
+    const reader = await openTab(`v0-reader-${++sequence}` as WorkspaceId);
+    reader.workspaceId = writer.workspaceId;
+    const a = (await writer.repo.openPersistedDoc('doc-a')).doc;
+    const b = (await reader.repo.openPersistedDoc('doc-a')).doc;
+    const ta = transportFor(writer, cryptoContent());
+    const tb = transportFor(reader, cryptoContent());
+    for (const value of [1, 2]) {
+      a.getMap('data').set('value', value);
+      a.commit();
+      expect((await ta.syncDoc('doc-a', a)).ok).toBe(true);
+      expect((await tb.syncDoc('doc-a', b)).ok).toBe(true);
+      expect(b.toJSON()).toEqual(a.toJSON());
+    }
+    const batches = server.room(new URL(docUrl(writer.workspaceId, 'doc-a')).pathname).batches;
+    expect(batches).toHaveLength(2);
+    // LSCE update envelope: 4-byte batch length and 10-byte prefix, one-byte provider header, v0.
+    expect(batches.map((batch) => [batch[11], batch[14], batch[15]])).toEqual([
+      [1, 3, 0],
+      [1, 3, 0],
+    ]);
+    await tb.close();
+    await reader.repo.destroy();
+    openTabs.delete(reader);
+    const restored = await openTab(`v0-reader-${sequence}` as WorkspaceId);
+    expect((await restored.repo.openPersistedDoc('doc-a')).doc.toJSON()).toEqual(a.toJSON());
+  });
+
+  it.each(['signature', 'tag', 'missing-key', 'org', 'document', 'purpose', 'epoch'] as const)(
+    'rejects %s without changing saved content/cursor or stopping another document',
+    async (failure) => {
+      createByteServer();
+      const writer = await openTab(`v0-fault-w-${++sequence}` as WorkspaceId);
+      const reader = await openTab(`v0-fault-r-${++sequence}` as WorkspaceId);
+      reader.workspaceId = writer.workspaceId;
+      const a = (await writer.repo.openPersistedDoc('doc-a')).doc;
+      const b = (await reader.repo.openPersistedDoc('doc-a')).doc;
+      const cursor = createResilientRemoteCursorStore({ dbName: reader.cursorDbName });
+      const ta = transportFor(writer, cryptoContent());
+      const good = transportFor(reader, cryptoContent(), cursor);
+      a.getMap('data').set('value', 1);
+      a.commit();
+      expect((await ta.syncDoc('doc-a', a)).ok).toBe(true);
+      expect((await good.syncDoc('doc-a', b)).ok).toBe(true);
+      const url = docUrl(writer.workspaceId, 'doc-a');
+      const checkpoint = await cursor.load(url);
+      await good.close();
+      const scope =
+        failure === 'org'
+          ? { genesis: '22'.repeat(32) }
+          : failure === 'document'
+            ? { resource: 'doc-b' }
+            : failure === 'purpose'
+              ? { purpose: 'flock-update' as const }
+              : failure === 'epoch'
+                ? { epoch: 1 }
+                : undefined;
+      const faultyWriter =
+        failure === 'signature' || failure === 'tag'
+          ? transportFor(writer, cryptoContent(cryptoTestProtection({ fault: failure })))
+          : ta;
+      a.getMap('data').set('value', 2);
+      a.commit();
+      // One-shot sync reads its own append as well: hostile bytes are stored by
+      // the byte fixture, then rejected by the writer's strict read boundary.
+      expect((await faultyWriter.syncDoc('doc-a', a)).ok).toBe(
+        failure !== 'signature' && failure !== 'tag'
+      );
+      const tb = transportFor(
+        reader,
+        protectedContent({
+          resolve: (room) => ({
+            mode: 'protected',
+            config: {
+              provider:
+                room.kind === 'doc' && room.docId === 'doc-a'
+                  ? cryptoTestProtection({
+                      scope,
+                      fault: failure === 'missing-key' ? failure : undefined,
+                    })
+                  : cryptoTestProtection({
+                      scope: { resource: room.kind === 'doc' ? room.docId : 'unused' },
+                    }),
+            },
+          }),
+        }),
+        cursor
+      );
+      const result = await tb.syncDoc('doc-a', b);
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.error).toMatchObject({
+          payloadProtectionReason:
+            failure === 'missing-key' ? 'missing_read_key' : 'decrypt_failed',
+          retryable: false,
+        });
+        expect(result.error?.message).not.toContain('synthetic');
+      }
+      expect(b.toJSON()).toEqual({ data: { value: 1 } });
+      expect(await cursor.load(url)).toEqual(checkpoint);
+      const restored = await openTab(`v0-fault-r-${sequence}` as WorkspaceId);
+      expect((await restored.repo.openPersistedDoc('doc-a')).doc.toJSON()).toEqual(b.toJSON());
+      const otherWriter = (await writer.repo.openPersistedDoc('doc-b')).doc;
+      const otherReader = (await reader.repo.openPersistedDoc('doc-b')).doc;
+      otherWriter.getMap('data').set('unaffected', true);
+      otherWriter.commit();
+      expect((await ta.syncDoc('doc-b', otherWriter)).ok).toBe(true);
+      expect((await tb.syncDoc('doc-b', otherReader)).ok).toBe(true);
+      expect(otherReader.toJSON()).toEqual({ data: { unaffected: true } });
+    }
+  );
+
+  it.each(['valid', 'signature', 'tag', 'position'] as const)(
+    'verifies the signed v0 snapshot before decompress/import/save (%s)',
+    async (fault) => {
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+      const server = createByteServer();
+      const writer = await openTab(`v0-snapshot-w-${++sequence}` as WorkspaceId);
+      const doc = (await writer.repo.openPersistedDoc('doc-a')).doc;
+      const content = protectedContent({
+        resolve: () => ({
+          mode: 'protected',
+          config: {
+            provider: cryptoTestProtection({
+              fault: fault === 'signature' || fault === 'tag' ? fault : undefined,
+              snapshotOnly: true,
+            }),
+          },
+        }),
+        snapshotUpload: { canUpload: () => true, debounceMs: 10, minBytesSinceRemoteSnapshot: 0 },
+      });
+      const subscription = transportFor(writer, content).joinDocRoom('doc-a', doc);
+      await subscription.firstSyncedWithRemote;
+      doc.getMap('data').set('snapshot', 'verified before decompression');
+      doc.commit();
+      await subscription.waitUntilSynced();
+      await vi.advanceTimersByTimeAsync(10);
+      const url = docUrl(writer.workspaceId, 'doc-a');
+      const snapshot = server.room(new URL(url).pathname).snapshot;
+      expect(snapshot).toBeDefined();
+      // Published host helper reconstructs identical room AAD. This verifies
+      // signatures only; the byte server does not implement host admission.
+      const hostBinding = encodeStreamsRoomAdditionalData(
+        'trusted-workspace-identity',
+        { kind: 'doc', docId: 'doc-a' },
+        Uint8Array.from(
+          Buffer.concat([
+            Buffer.from('loro-streams-crdt-payload-protection/v2\0'),
+            snapshot!.body.slice(0, 11),
+          ])
+        )
+      );
+      expect(
+        Result.isSuccess(
+          verifyContentSignature(
+            snapshot!.body.slice(11),
+            { ...syntheticScope, purpose: 'doc-snapshot' },
+            syntheticSigner,
+            hostBinding
+          )
+        )
+      ).toBe(fault !== 'signature');
+      // SDK prefix/header remain public; continuationOffset is encrypted.
+      expect([snapshot!.body[10], snapshot!.body[11]]).toEqual([4, 0]);
+      if (fault === 'position') snapshot!.offset = server.offset(Number(snapshot!.offset) + 1);
+      subscription.unsubscribe();
+      const readerId = `v0-snapshot-r-${sequence}` as WorkspaceId;
+      const reader = await openTab(readerId);
+      reader.workspaceId = writer.workspaceId;
+      const restored = (await reader.repo.openPersistedDoc('doc-a')).doc;
+      if (fault !== 'valid') {
+        restored.getMap('data').set('draft', 'keep local draft');
+        restored.commit();
+        await reader.repo.persistDocNow('doc-a', restored);
+      }
+      const savedBefore = restored.toJSON();
+      const postsBefore = server.requests.filter((request) => request.method === 'POST').length;
+      const cursor = createResilientRemoteCursorStore({ dbName: reader.cursorDbName });
+      const decompressed: Uint8Array[] = [];
+      const readerContent = protectedContent({
+        resolve: () => ({ mode: 'protected', config: { provider: cryptoTestProtection() } }),
+        snapshotCodec: {
+          compress: streamsSnapshotCodec.compress,
+          async decompress(bytes) {
+            const decoded = await streamsSnapshotCodec.decompress(bytes);
+            decompressed.push(decoded);
+            return decoded;
+          },
+        },
+      });
+      const result = await transportFor(reader, readerContent, {
+        load: (key) => cursor.load(key),
+        async save(value) {
+          const disk = await openTab(readerId);
+          expect((await disk.repo.openPersistedDoc('doc-a')).doc.toJSON()).toEqual(doc.toJSON());
+          await cursor.save(value);
+        },
+      }).syncDoc('doc-a', restored);
+      expect(result.ok).toBe(fault === 'valid');
+      if (fault === 'valid') {
+        expect(decompressed).toHaveLength(1);
+        const checked = new LoroDoc();
+        checked.import(decompressed[0]!);
+        expect(checked.toJSON()).toEqual(doc.toJSON());
+        expect(restored.toJSON()).toEqual(doc.toJSON());
+        expect((await cursor.load(url))?.nextOffset).toBe(snapshot!.offset);
+      } else {
+        if (!result.ok)
+          expect(result.error).toMatchObject({
+            payloadProtectionReason: 'decrypt_failed',
+            retryable: false,
+          });
+        expect(decompressed).toEqual([]);
+        expect(restored.toJSON()).toEqual(savedBefore);
+        expect(server.requests.filter((request) => request.method === 'POST')).toHaveLength(
+          postsBefore
+        );
+        expect(await cursor.load(url)).toBeNull();
+        const disk = await openTab(readerId);
+        expect((await disk.repo.openPersistedDoc('doc-a')).doc.toJSON()).toEqual(savedBefore);
+      }
+    }
+  );
+
+  it('does not upload when the real AEAD cannot obtain secure randomness', async () => {
+    const server = createByteServer();
+    const tab = await openTab(`v0-random-${++sequence}` as WorkspaceId);
+    const doc = (await tab.repo.openPersistedDoc('doc-a')).doc;
+    doc.getMap('data').set('draft', 'retained');
+    doc.commit();
+    const nativeCrypto = globalThis.crypto;
+    vi.stubGlobal('crypto', {
+      getRandomValues(bytes: Uint8Array) {
+        if (bytes.byteLength === 24) throw new Error('synthetic private random failure');
+        return nativeCrypto.getRandomValues(bytes);
+      },
+    });
+    const result = await transportFor(tab, cryptoContent())
+      .syncDoc('doc-a', doc)
+      .finally(() => vi.stubGlobal('crypto', nativeCrypto));
+    expect(result.ok).toBe(false);
+    if (!result.ok)
+      expect(result.error).toMatchObject({ payloadProtectionReason: 'encrypt_failed' });
+    expect(
+      server.requests.filter((request) => request.method === 'POST' || request.method === 'PUT')
+    ).toEqual([]);
+    expect(doc.toJSON()).toEqual({ data: { draft: 'retained' } });
   });
 });

@@ -1,3 +1,4 @@
+import { isSessionCollaborationStopped } from '@lody/shared';
 import { randomUUID } from 'node:crypto';
 import { watch, type FSWatcher } from 'node:fs';
 import path from 'node:path';
@@ -1148,6 +1149,27 @@ export class LodyOperationCoordinator {
       );
       return;
     }
+    if (
+      delivery.executionPhase === 'ready' &&
+      (await isSessionCollaborationStopped(
+        this.options.workspaceDocument.repo,
+        delivery.requesterSessionId
+      ))
+    ) {
+      await this.finalizeDeliveryWithoutExecution(
+        sessionDoc,
+        operation,
+        delivery,
+        reason,
+        'collaboration_stopped',
+        {
+          code: 'COLLABORATION_STOPPED',
+          message:
+            'The user stopped this conversation tree. The result was saved without starting another turn.',
+        }
+      );
+      return;
+    }
     if (delivery.executionPhase === 'uncertain') {
       await this.failUncertainDelivery(sessionDoc, operation, delivery, reason);
       return;
@@ -1394,6 +1416,7 @@ export class LodyOperationCoordinator {
     continuationFailure?: {
       status?: 'not_started' | 'uncertain';
       code:
+        | 'COLLABORATION_STOPPED'
         | 'CONFIGURATION_UNAVAILABLE'
         | 'DELIVERY_ATTEMPTS_EXHAUSTED'
         | 'DELIVERY_EXECUTION_UNCERTAIN';
@@ -1530,6 +1553,7 @@ export class LodyOperationCoordinator {
     continuationFailure?: {
       status?: 'not_started' | 'uncertain';
       code:
+        | 'COLLABORATION_STOPPED'
         | 'CONFIGURATION_UNAVAILABLE'
         | 'DELIVERY_ATTEMPTS_EXHAUSTED'
         | 'DELIVERY_EXECUTION_UNCERTAIN';

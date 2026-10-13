@@ -1,0 +1,37 @@
+{
+  "sourceCommit": "f1ba33a61244e2da07aaea93a30f06227311c4b6",
+  "sourceState": "actual merged origin/main, including P08 #1418; no unmerged or candidate journal code copied",
+  "hashAlgorithm": "SHA-256",
+  "implementation": "new finite Effect workflow and local SQLite adapter consuming the merged records/replay dependency closure",
+  "mergedDependencies": {
+    "src/ledger/records.ts": "7b29f9d4f086ba257e71b47615a46e182371ce913a4b8ba29742c61b6d08ea3e",
+    "src/ledger/replay.ts": "52511e8e809e0035e05ccbf6deed05dfeb59c41b2e6468efc8ae7b7e301e5a03",
+    "src/ledger/policy.ts": "560b95cd95da7b1b058f4ed3763bee97425b51a352146975cc9d7464db199b12",
+    "src/ledger/errors.ts": "7a75a2901260a26376771e3409ca4606ce26fd8ca638be1df5fec71753011b0c",
+    "src/ledger/index.ts": "1e20f7f0ff932c47c9419443bb90c596d88dfbe8df63e29909d0ad08d56b4644",
+    "src/bytes.ts": "87030179b2516c8c14365d01b6b5043dcadabe196ac0079914045b7c9ba8bb26",
+    "src/cbor.ts": "0323f14ebe715cb4d202f329f1d7092f5adab4681f62d0d92030af76d5eab425",
+    "src/signature.ts": "527e1bc3594ad4ad9edd62f6b4a0b139a600d07be16b0578f9b892711c9b4cb4"
+  },
+  "destinationFiles": {
+    "src/submission/index.ts": "4346db4aeef6d211201734caf866f58bc2ff236a28bb515ea7f0c535c66070b9",
+    "src/submission/sqlite.ts": "0542b5a9bda31192052c6566718304974b83e6e8f05f00e1e79de8abb4a219e6"
+  },
+  "destinationScopeSha256": "c4b972766680235fe22418b8261b92e7c08bd0a68cbcc7091128c40966ce5dd4",
+  "scopeHashEncoding": "UTF-8 sorted destination paths, one line: <sha256>  <path> plus newline",
+  "versions": {
+    "effect": "4.0.2",
+    "better-sqlite3": "13.0.3",
+    "vitest": "3.2.4",
+    "tsx": "4.23.7"
+  },
+  "excluded": [
+    "candidate journal and arbitrary-state restoration",
+    "checkpoint/snapshot trust import",
+    "production host or feature composition",
+    "private-key custody and signing",
+    "P12 removal encoding",
+    "recovery-vault format",
+    "Lab package"
+  ]
+}

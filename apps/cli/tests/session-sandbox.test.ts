@@ -6,7 +6,7 @@ import { it as effectIt } from '@effect/vitest';
 import { Cause, Deferred, Effect, Exit, Fiber, Option } from 'effect';
 import { TestClock } from 'effect/testing';
 import { ChildProcessSpawner } from 'effect/process';
-import { processLayer, TerminationFailed } from '@lody/shared/node/process';
+import { processLayer, ProcessReleaseFailed, TerminationFailed } from '@lody/shared/node/process';
 import { makeCgroupContainer } from '../src/platform/sandbox/cgroup-container';
 import type { ChildProcess } from 'child_process';
 import realSpawn from 'cross-spawn';
@@ -505,7 +505,7 @@ describe('session sandbox', () => {
       },
     })('failed-generation' as SessionId);
     const first = await sandbox.spawn('agent', [], {});
-    await sandbox.cleanup();
+    await expect(sandbox.cleanup()).rejects.toBeInstanceOf(ProcessReleaseFailed);
     await expect(sandbox.spawn('replacement', [], {})).rejects.toBeInstanceOf(TerminationFailed);
     expect(await sandbox.readResourceAccounting()).toMatchObject({ rootPids: [first.child.pid] });
     expect(table.isAlive(first.child.pid!)).toBe(true);

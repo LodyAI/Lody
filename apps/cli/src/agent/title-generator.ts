@@ -297,6 +297,8 @@ export type GenerateTitleOptions = {
   agentType: AgentType;
   customAcp?: CustomAcpLaunchSpec;
   runtimeOverrides?: BuiltinRuntimeOverrides;
+  agentConfigId?: string;
+  magpieGatewayUrl?: string;
   taskPrompt: string;
   logger: Logger;
   env?: Record<string, string>;
@@ -324,6 +326,8 @@ export const generateTitleIsolated = async (
       agentType: options.agentType,
       customAcp: options.customAcp,
       runtimeOverrides: options.runtimeOverrides,
+      agentConfigId: options.agentConfigId,
+      magpieGatewayUrl: options.magpieGatewayUrl,
       workdir,
       env: { ...process.env, ...options.env, LODY_TITLE_AGENT: '1' },
       logger: options.logger,

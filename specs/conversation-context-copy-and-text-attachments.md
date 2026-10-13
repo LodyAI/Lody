@@ -1,7 +1,9 @@
 # Conversation context copy
 
 Status: draft
-Translation: pending
+Translation: current
+
+[中文](conversation-context-copy-and-text-attachments.zh.md)
 
 ## Scenario
 
@@ -36,7 +38,7 @@ state until the reply is finished. Finished assistant fork buttons leave space
 before the timestamp. Sender names inherit the timestamp color.
 
 Pasting and submission retain their existing behavior for ordinary and folded
-text. A paste above 500 KiB is automatically captured as a non-editable
+text. A paste at or above 50,000 characters after line-ending normalization and trimming is automatically captured as a non-editable
 `text/plain` attachment named `pasted-text.txt`, using the existing attachment
 draft and send path. Editable text attachments and send-time upload feedback are
 excluded.

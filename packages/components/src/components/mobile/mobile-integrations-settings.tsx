@@ -24,6 +24,7 @@ import {
 } from '@/components/settings/settings-data-cache';
 import { isElectronRenderer } from '@/lib/electron';
 import { openExternalUrl } from '@/lib/native-browser';
+import { getPersonalGitHubAuthorizationUrl } from '@/components/settings/github-personal-authorization';
 import { useAuthClient } from '../../providers/convex-provider';
 import { canRunAuthedWorkspaceQuery } from '@/lib/authed-convex-query';
 import { invalidateGitHubTokensForWorkspace } from '@/lib/github-token';
@@ -77,7 +78,8 @@ function MobileCloudIntegrationsSettings() {
   const workspaceAuthReady = authedWorkspaceId !== null;
   const workspaceAuthPending =
     Boolean(currentWorkspaceId) && (isConvexAuthLoading || !isConvexAuthenticated);
-  const canAuthorizePersonalGitHub = !isElectronRenderer() && !isNativeAppShell();
+  const authorizeInBrowser = isElectronRenderer() || isNativeAppShell();
+  const canAuthorizePersonalGitHub = !authorizeInBrowser || Boolean(currentWorkspaceSlug);
 
   const [repoSearch, setRepoSearch] = useState('');
   const personalOperationSettings = useCloudQuery(
@@ -314,6 +316,18 @@ function MobileCloudIntegrationsSettings() {
 
     setAuthorizingPersonalGitHub(true);
     try {
+      if (authorizeInBrowser) {
+        const opened = await openExternalUrl(
+          getPersonalGitHubAuthorizationUrl(currentWorkspaceSlug!)
+        );
+        if (!opened) {
+          throw new Error(
+            t('settings.integrations.github.personalIdentityAuthFailed', 'Authorization failed')
+          );
+        }
+        setAuthorizingPersonalGitHub(false);
+        return;
+      }
       if (typeof authClient.linkSocial === 'function') {
         await authClient.linkSocial({ provider: 'github', callbackURL });
       } else {
@@ -327,7 +341,14 @@ function MobileCloudIntegrationsSettings() {
       toast.error(message);
       setAuthorizingPersonalGitHub(false);
     }
-  }, [authClient, authedWorkspaceId, canAuthorizePersonalGitHub, t]);
+  }, [
+    authClient,
+    authedWorkspaceId,
+    authorizeInBrowser,
+    canAuthorizePersonalGitHub,
+    currentWorkspaceSlug,
+    t,
+  ]);
 
   return (
     <div id="github" className="flex flex-col pb-6 pt-1">

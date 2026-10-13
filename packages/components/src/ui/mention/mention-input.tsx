@@ -262,7 +262,8 @@ const MentionInput = React.forwardRef<InputElement, MentionInputProps>((props, f
     mirror.appendChild(marker);
     // Measure outside zoomed/transformed app containers; the scale below
     // then maps the unscaled mirror back into the textarea's viewport rect.
-    document.documentElement.appendChild(mirror);
+    // Keep body's :last-child state stable to avoid restyling the app on every read.
+    document.documentElement.insertBefore(mirror, document.body);
     const markerRect = marker.getBoundingClientRect();
     const mirrorRect = mirror.getBoundingClientRect();
     mirror.remove();

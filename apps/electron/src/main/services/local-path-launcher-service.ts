@@ -10,7 +10,7 @@ import type {
 } from '@lody/shared/electron-ipc'
 import { formatUnknownError } from '../utils'
 import { launchCommandPathWithFallback, probePathLauncher } from './local-path-launcher-core'
-import { getUserShellEnvCached, shouldUseWindowsShell } from './shell-env'
+import { getUserShellEnvCachedLegacy, shouldUseWindowsShell } from './shell-env'
 
 const PROBE_CACHE_MS = 5 * 60 * 1000
 const probeCache = new Map<string, { available: boolean; checkedAt: number }>()
@@ -82,7 +82,7 @@ async function hasCommand(command: string, args?: readonly string[]): Promise<bo
   } else if (path.isAbsolute(command) || command.includes('/') || command.includes('\\')) {
     available = await hasPath(command)
   } else {
-    const shellEnv = await getUserShellEnvCached()
+    const shellEnv = await getUserShellEnvCachedLegacy()
     const env = shellEnv ? { ...process.env, ...shellEnv } : process.env
     const pathValue = env.PATH ? env.PATH : ''
     const pathEntries = pathValue.split(path.delimiter).filter(Boolean)
@@ -145,7 +145,7 @@ async function spawnDetached(
   // (the default a user types into a custom launcher) would never resolve. Spawn
   // with the user's login-shell env so commands resolve the same way they do in a
   // terminal; fall back to process.env when the probe is unavailable.
-  const shellEnv = await getUserShellEnvCached()
+  const shellEnv = await getUserShellEnvCachedLegacy()
   const env = shellEnv ? { ...process.env, ...shellEnv } : process.env
 
   if (

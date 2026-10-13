@@ -1,3 +1,4 @@
+import { isSessionCollaborationStopped } from '@lody/shared';
 import {
   acpOwnsSessionTitleGeneration,
   type AcpModelControls,
@@ -68,7 +69,7 @@ import {
 import type { ContentBlock } from '@agentclientprotocol/sdk';
 import { createHash, randomUUID } from 'node:crypto';
 import type { ModelInfo } from '@lody/shared';
-import { Cause, Data, Effect, Exit, Fiber, type Scope } from 'effect';
+import { Cause, Data, Effect, Exit, Fiber, Scope } from 'effect';
 import {
   captureGitWorkingTreeDiffBaseline,
   getCurrentCommitHash,
@@ -79,10 +80,8 @@ import { resolveWorkspaceLocalProjectRootPathWithRetry } from '@/lib/local-proje
 import { readTimeoutEnv, withTimeout } from '@/lib/loro/timeout-utils';
 import { ConcurrentQueue } from '@/lib/concurrent-queue';
 import {
-  checkoutLocalProjectBranchAtRootPath,
+  localProjectsLegacy,
   createLocalProjectBranchSelector,
-  getLocalProjectGitStateAtRootPath,
-  resolveLocalProjectBranchAtRootPath,
 } from '@lody/shared/node/local-project';
 import { getAcpCapabilitySourceVersion, resolveACPProcessLaunch } from '@/agent/setting';
 import { type AcpLauncher, resolveAcpLauncher } from '@/agent/acp-analytics';
@@ -108,6 +107,7 @@ import type { Logger } from '@/utils/logger';
 import { startTraceSpan, traceAsync } from '@/utils/trace-span';
 import { captureCli } from '@/lib/analytics/posthog';
 import type {
+  SessionActivePresenceLease,
   SessionActivePresencePhase,
   SessionInitializationStall,
 } from '@/lib/loro/session-active-presence';
@@ -545,10 +545,10 @@ export type SessionExecutionServiceDeps = {
   workspaceId: WorkspaceId;
   preferredBaseBranch: string;
   touchSession: (sessionId: SessionId) => void;
-  startSessionActivePresence: (
+  holdSessionActivePresence: (
     sessionId: SessionId,
     phase?: SessionActivePresencePhase | null
-  ) => void;
+  ) => Effect.Effect<SessionActivePresenceLease, unknown, Scope.Scope>;
   clearSessionActivePresence: (sessionId: SessionId) => void;
   setSessionActivePresencePhase: (
     sessionId: SessionId,
@@ -660,6 +660,7 @@ export type SessionExecutionServiceDeps = {
     agentType: string;
     customAcp?: CustomAcpLaunchSpec;
     runtimeOverrides?: BuiltinRuntimeOverrides;
+    magpieGatewayUrl?: string;
     env?: Record<string, string>;
   }) => Promise<string | undefined>;
   /** Evict idle sessions if system memory is under pressure */
@@ -740,7 +741,13 @@ type AcpAuthenticationOptions = {
 type ResolvedMachineAcpCapabilitiesRefreshRequest = MachineAcpCapabilitiesRefreshRequestValidated &
   Pick<
     AgentConfigMeta,
-    'cliType' | 'agentType' | 'customAcp' | 'runtimeOverrides' | 'env' | 'codexAuth'
+    | 'cliType'
+    | 'agentType'
+    | 'customAcp'
+    | 'runtimeOverrides'
+    | 'magpieGatewayUrl'
+    | 'env'
+    | 'codexAuth'
   >;
 
 const summarizeAcpAuthMethod = (method: unknown): MachineAcpAuthMethodSummary => {
@@ -799,15 +806,6 @@ export class SessionExecutionService {
   private readonly canceledTurnBySession = new Map<SessionId, string>();
   private readonly currentTurnBySession = new Map<SessionId, string>();
   private readonly turnRuntimeBySession = new Map<SessionId, TurnRuntimeState>();
-  /**
-   * One waiter per session while a visible turn is initializing; see
-   * {@link awaitInitializationStall}. Registered for the whole turn because the
-   * watchdog only ever fires while the published status is `initializing`.
-   */
-  private readonly initializationStallWaiters = new Map<
-    SessionId,
-    (stall: SessionInitializationStall) => void
-  >();
   private readonly rewriteBarrierSessions = new Set<SessionId>();
   private readonly rewriteConflictLeaseSessions = new Set<SessionId>();
   private readonly turnReleaseWaiters = new Map<SessionId, Map<string, Set<() => void>>>();
@@ -2798,55 +2796,19 @@ export class SessionExecutionService {
     };
   }
 
-  /**
-   * Fail a visible turn whose initialization stopped making progress.
-   *
-   * Called by `SessionActivePresenceController`'s stall watchdog. Resolving the
-   * waiter makes {@link awaitInitializationStall} win its race against the turn
-   * body, which records a user-visible `session_init_failed` and closes the turn
-   * scope — releasing presence, the ACP replay suppression, and the runtime
-   * registration that would otherwise keep the session un-collectable forever.
-   */
-  notifyInitializationStalled(sessionId: SessionId, stall: SessionInitializationStall): void {
-    const runtime = this.turnRuntimeBySession.get(sessionId);
-    if (runtime) {
-      runtime.initializationStalled = true;
-    }
-    const waiter = this.initializationStallWaiters.get(sessionId);
-    if (!waiter) {
-      // Presence is only ever started inside a visible turn, so this means the
-      // turn settled between the watchdog tick and this call. Nothing to fail.
-      this.deps.logger.debug(
-        `[${sessionId}] Initialization stall reported with no owning turn; ignoring`
-      );
-      return;
-    }
-    waiter(stall);
-  }
-
-  /**
-   * Never completes unless the initialization stall watchdog fires, at which
-   * point it records the user-visible failure and halts the turn. Raced against
-   * the turn body so a dependency that never returns — the observed case was a
-   * cloud identity lookup that hung for 1h51m — cannot pin the turn open.
-   */
+  /** The lease latches its native stall signal before observers can subscribe. */
   private awaitInitializationStall(
     sessionId: SessionId,
     sessionDoc: SessionDocument,
-    runtime: TurnRuntimeState
+    runtime: TurnRuntimeState,
+    lease: SessionActivePresenceLease
   ): Effect.Effect<never, unknown, never> {
-    return Effect.callback<SessionInitializationStall, never>((resume) => {
-      const waiter = (stall: SessionInitializationStall): void => {
-        resume(Effect.succeed(stall));
-      };
-      this.initializationStallWaiters.set(sessionId, waiter);
-      return Effect.sync(() => {
-        // A newer turn may already own the slot; only retract our own waiter.
-        if (this.initializationStallWaiters.get(sessionId) === waiter) {
-          this.initializationStallWaiters.delete(sessionId);
-        }
-      });
-    }).pipe(
+    return lease.awaitInitializationStall.pipe(
+      Effect.tap(() =>
+        Effect.sync(() => {
+          runtime.initializationStalled = true;
+        })
+      ),
       Effect.flatMap((stall) =>
         this.recordKnownChatFailureAndHaltEffect({
           sessionId,
@@ -2862,16 +2824,8 @@ export class SessionExecutionService {
   private acquireSessionActivePresence(
     sessionId: SessionId,
     phase: SessionActivePresencePhase | null
-  ): Effect.Effect<void, unknown, Scope.Scope> {
-    return Effect.acquireRelease(
-      Effect.sync(() => {
-        this.deps.startSessionActivePresence(sessionId, phase);
-      }),
-      () =>
-        Effect.sync(() => {
-          this.deps.clearSessionActivePresence(sessionId);
-        })
-    );
+  ): Effect.Effect<SessionActivePresenceLease, unknown, Scope.Scope> {
+    return this.deps.holdSessionActivePresence(sessionId, phase);
   }
 
   private async finalizeCancelledTurn(options: TurnCancellationFinalizerOptions): Promise<void> {
@@ -3231,14 +3185,18 @@ export class SessionExecutionService {
   }): Promise<{ executionBranch: string; baseRef: string }> {
     const { project, workdir, branch } = options;
 
-    const gitState = await getLocalProjectGitStateAtRootPath(workdir);
+    const gitState = await localProjectsLegacy.getLocalProjectGitStateAtRootPath(workdir);
     if (!gitState.git) {
       throw new Error(`Local project is not a git repository: ${project.localProjectId}`);
     }
 
-    const resolvedBranch = await resolveLocalProjectBranchAtRootPath(workdir, branch, {
-      preferLocalOnCollision: true,
-    });
+    const resolvedBranch = await localProjectsLegacy.resolveLocalProjectBranchAtRootPath(
+      workdir,
+      branch,
+      {
+        preferLocalOnCollision: true,
+      }
+    );
 
     // Persist the namespace decision before checkout can create a same-named
     // local tracking branch. A process exit after checkout must not make the
@@ -3257,7 +3215,7 @@ export class SessionExecutionService {
 
     return {
       executionBranch: (
-        await checkoutLocalProjectBranchAtRootPath(
+        await localProjectsLegacy.checkoutLocalProjectBranchAtRootPath(
           workdir,
           createLocalProjectBranchSelector(resolvedBranch)
         )
@@ -3751,34 +3709,53 @@ export class SessionExecutionService {
     };
 
     const program = Effect.scoped(
-      Effect.acquireRelease(Effect.succeed(runtime), (turnRuntime, exit) =>
-        Effect.gen(function* () {
-          yield* Effect.promise(() => turnRuntime.yieldedFinalization);
-          const wasInterrupted = Exit.isFailure(exit) && Cause.hasInterrupts(exit.cause);
-          const wasCancelled =
-            turnRuntime.cancelRequested ||
-            self.isTurnCancelled(sessionId, turnRuntime.turnId) ||
-            wasInterrupted;
-          if (turnRuntime.initializationStalled) {
-            yield* self.finalizeStalledInitializationEffect(turnRuntime);
-          } else if (wasCancelled) {
-            yield* self.finalizeCancelledTurnEffect({
-              sessionId,
-              sessionDoc,
-              turnId: turnRuntime.turnId,
-              userTurnId: turnRuntime.userTurnId,
-              session: turnRuntime.session,
-              pendingSession: turnRuntime.pendingSession,
-              terminateSession: turnRuntime.terminateSessionOnCancel,
-              reportTurnError: self.shouldReportCancelledTurnError(turnRuntime),
-            });
-          }
-          self.releaseTurnRuntime(sessionId, turnRuntime.turnId);
-        })
-      ).pipe(
-        Effect.flatMap(() =>
+      Effect.acquireRelease(
+        // Acquire/register the presence child and cancellation owner atomically.
+        Effect.flatMap(Scope.Scope, (scope) => Scope.fork(scope)),
+        (presenceScope, exit) =>
           Effect.gen(function* () {
-            yield* self.acquireSessionActivePresence(sessionId, 'initializing');
+            const turnRuntime = runtime;
+            yield* Effect.promise(() => turnRuntime.yieldedFinalization);
+            const wasInterrupted = Exit.isFailure(exit) && Cause.hasInterrupts(exit.cause);
+            const wasCancelled =
+              turnRuntime.cancelRequested ||
+              self.isTurnCancelled(sessionId, turnRuntime.turnId) ||
+              wasInterrupted;
+            if (turnRuntime.initializationStalled) {
+              yield* self.finalizeStalledInitializationEffect(turnRuntime);
+            } else if (wasCancelled) {
+              yield* self.finalizeCancelledTurnEffect({
+                sessionId,
+                sessionDoc,
+                turnId: turnRuntime.turnId,
+                userTurnId: turnRuntime.userTurnId,
+                session: turnRuntime.session,
+                pendingSession: turnRuntime.pendingSession,
+                terminateSession: turnRuntime.terminateSessionOnCancel,
+                reportTurnError: self.shouldReportCancelledTurnError(turnRuntime),
+              });
+            }
+            // Preserve the owner on cleanup failure. A successor starts only after
+            // both cancellation/raw ACP drain and presence release have completed.
+            yield* Scope.close(presenceScope, exit);
+            self.releaseTurnRuntime(sessionId, turnRuntime.turnId);
+          })
+      ).pipe(
+        Effect.flatMap((presenceScope) =>
+          Effect.gen(function* () {
+            if (
+              yield* self.tryPromise(() =>
+                isSessionCollaborationStopped(self.deps.workspaceDocument.repo, sessionId)
+              )
+            ) {
+              runtime.cancelRequested = true;
+              runtime.pendingInputOnCancel = 'preserve';
+              return undefined;
+            }
+            const presenceLease = yield* Scope.provide(
+              self.acquireSessionActivePresence(sessionId, 'initializing'),
+              presenceScope
+            );
 
             const setUnhandledErrorContext = (
               context: VisibleSessionTurnUnhandledErrorContext
@@ -3958,6 +3935,15 @@ export class SessionExecutionService {
                     return undefined;
                   }
                 }
+                if (
+                  yield* self.tryPromise(() =>
+                    isSessionCollaborationStopped(self.deps.workspaceDocument.repo, sessionId)
+                  )
+                ) {
+                  runtime.cancelRequested = true;
+                  runtime.pendingInputOnCancel = 'preserve';
+                }
+                yield* abortIfCancelled();
                 runtime.terminateSessionOnCancel = false;
                 self.deps.activateConversationTurnForACPUpdates(sessionId, runtime.turnId);
                 runtime.promptStarted = true;
@@ -4025,8 +4011,9 @@ export class SessionExecutionService {
                 openAssistantEntry,
                 prompt,
               }),
-              self.awaitInitializationStall(sessionId, sessionDoc, runtime)
+              self.awaitInitializationStall(sessionId, sessionDoc, runtime, presenceLease)
             );
+            return undefined;
           })
         )
       )
@@ -4088,7 +4075,12 @@ export class SessionExecutionService {
           onUnhandledError: effectiveErrorContext.onUnhandledError,
         });
         outcome = 'unhandled-error-recorded';
-        settlement = 'handled';
+        settlement =
+          options.dispatchSource === 'delivery' &&
+          runtime.promptStarted &&
+          isAgentDisconnectedError(error)
+            ? 'uncertain'
+            : 'handled';
       }
     } finally {
       if (!runtime.promptStarted) {
@@ -4817,6 +4809,8 @@ export class SessionExecutionService {
           mcpServerIds: acpSessionConfig.mcpServerIds ?? [],
           customAcp: resumeCustomAcp,
           runtimeOverrides: resumeRuntimeOverrides,
+          magpieGatewayUrl:
+            acpSessionConfig.magpieGatewayUrl ?? storedLaunchConfig.config?.magpieGatewayUrl,
           requesterUserId: userId,
           machineId: self.deps.machineId,
           assumeDocExisting: true,
@@ -4830,8 +4824,14 @@ export class SessionExecutionService {
           parentSessionId: meta?.parentSessionId,
           userName,
           userEmail,
-          onPresencePhase: (phase, detail) =>
-            self.deps.setSessionActivePresencePhase(sessionId, phase, detail),
+          onPresencePhase: (phase, detail) => {
+            if (
+              self.turnRuntimeBySession.get(sessionId) === ctx.runtime &&
+              !ctx.runtime.initializationStalled &&
+              !ctx.runtime.cancelRequested
+            )
+              self.deps.setSessionActivePresencePhase(sessionId, phase, detail);
+          },
         };
 
         const restoreAttempt = Effect.gen(function* () {
@@ -5031,12 +5031,20 @@ export class SessionExecutionService {
         let turnStartWorkingTreeDiff: GitWorkingTreeDiffBaseline | null = null;
 
         // A requester switch re-derives commit identity for this turn only;
-        // the policy lookup never blocks the turn (falls back to owner rules).
-        const gitIdentityOptions = yield* self.tryPromise(async () => {
+        // the bounded policy lookup falls back to owner rules on failure.
+        const gitIdentityOptions = yield* self.tryPromise(async (signal) => {
           try {
-            return await self.deps.sessionManager.resolveGitIdentityOptions(message.userId);
+            return await self.deps.sessionManager.resolveGitIdentityOptions(
+              message.userId,
+              signal,
+              sessionId
+            );
           } catch {
-            return { preferMachineIdentity: message.userId === self.deps.userId };
+            signal.throwIfAborted();
+            return {
+              preferMachineIdentity: message.userId === self.deps.userId,
+              personalIdentityEnabled: false,
+            };
           }
         });
         const bindReadySession = (nextSession: ISession): void => {
@@ -5185,9 +5193,9 @@ export class SessionExecutionService {
             return undefined;
           });
 
-        // A disposed ACP JSON-RPC connection means the adapter rejected the prompt before it
-        // could own the turn. Retry only once, and only while MessageHandler reports no ACP
-        // output for this assistant entry, so we never replay a prompt that may have acted.
+        // Delivery has already crossed its durable start fence before prompt submission.
+        // A disconnected transport with no observed output cannot prove non-consumption.
+        // Ordinary turns retain their existing bounded stale-connection recovery.
         const promptWithStaleACPRecovery = (
           promptBlocks: ContentBlock[]
         ): Effect.Effect<void, unknown, Scope.Scope> =>
@@ -5197,6 +5205,7 @@ export class SessionExecutionService {
                 const hasPromptOutput =
                   self.deps.hasPromptOutputForTurn?.(sessionId, runtime.turnId) ?? false;
                 if (
+                  dispatchOptions?.dispatchSource === 'delivery' ||
                   runtime.turnId !== turnId ||
                   !shouldRecoverStaleACPConnectionPrompt({
                     error,
@@ -5656,6 +5665,7 @@ export class SessionExecutionService {
       agentConfigId: existingMeta?.agentConfigId,
       customAcp: acpSessionConfig.customAcp,
       runtimeOverrides: acpSessionConfig.runtimeOverrides,
+      magpieGatewayUrl: acpSessionConfig.magpieGatewayUrl,
       requesterUserId: message.userId,
       machineId: this.deps.machineId,
       assumeDocExisting: true,
@@ -5669,8 +5679,6 @@ export class SessionExecutionService {
       parentSessionId: message.parentSessionId,
       userName: message.userName,
       userEmail: message.userEmail,
-      onPresencePhase: (phase, detail) =>
-        this.deps.setSessionActivePresencePhase(sessionId, phase, detail),
     };
 
     // Fold the dispatch-start meta fields into the status transition so the
@@ -5866,6 +5874,16 @@ export class SessionExecutionService {
             );
           };
 
+          // An abandoned startup may report after its successor has begun.
+          // Capture the exact Turn owner, not a session-id lookup at callback time.
+          sessionConfig.onPresencePhase = (phase, detail) => {
+            if (
+              self.turnRuntimeBySession.get(sessionId) === runtime &&
+              !runtime.initializationStalled &&
+              !runtime.cancelRequested
+            )
+              self.deps.setSessionActivePresencePhase(sessionId, phase, detail);
+          };
           sessionConfig.worktreeScriptHistoryInsertBeforeEntryId = turnId;
           const session = yield* trackPendingSession(
             () => self.deps.sessionManager.createSession(sessionConfig),
@@ -6090,6 +6108,24 @@ export class SessionExecutionService {
           return undefined;
         }),
     };
+  }
+
+  /** Metadata stop barriers also cover descendants created after the UI snapshot. */
+  async reconcileCollaborationStops(): Promise<void> {
+    for (const [sessionId, runtime] of this.turnRuntimeBySession) {
+      if (await isSessionCollaborationStopped(this.deps.workspaceDocument.repo, sessionId)) {
+        await this.cancelSession(
+          {
+            type: 'session/cancel',
+            sessionId,
+            turnId: runtime.turnId,
+            machineId: this.deps.machineId,
+            workspaceId: this.deps.workspaceId,
+          },
+          { pendingInput: 'preserve', prePromptSession: 'discard' }
+        );
+      }
+    }
   }
 
   async cancelSession(
@@ -6383,6 +6419,7 @@ export class SessionExecutionService {
           agentType: config.agentType,
           customAcp: config.customAcp,
           runtimeOverrides: config.runtimeOverrides,
+          magpieGatewayUrl: config.magpieGatewayUrl,
           env: config.env,
         });
       const existing = await this.deps.workspaceDocument.getAcpCapabilities(
@@ -6423,6 +6460,7 @@ export class SessionExecutionService {
           env: config.env,
           customAcp: config.customAcp,
           runtimeOverrides: config.runtimeOverrides,
+          magpieGatewayUrl: config.magpieGatewayUrl,
         })
       );
     })().catch((error: unknown) => {
@@ -6521,11 +6559,13 @@ export class SessionExecutionService {
       });
     };
     const result = await this.acpAuthenticationManager.authenticate({
+      agentConfigId: config.id,
       requestId: message.requestId,
       cliType: config.cliType,
       agentType: config.agentType,
       customAcp: config.customAcp,
       runtimeOverrides: config.runtimeOverrides,
+      magpieGatewayUrl: config.magpieGatewayUrl,
       env: config.env,
       onProgress,
       codexProfile,
@@ -6564,6 +6604,7 @@ export class SessionExecutionService {
                     config.runtimeOverrides,
                     {
                       signal,
+                      magpieGatewayUrl: config.magpieGatewayUrl,
                       codexProfile: { profile: codexProfile, candidateKey },
                       verifyCodexCredential: true,
                     }
@@ -6598,6 +6639,7 @@ export class SessionExecutionService {
             agentType: config.agentType,
             customAcp: config.customAcp,
             runtimeOverrides: config.runtimeOverrides,
+            magpieGatewayUrl: config.magpieGatewayUrl,
             env: config.env,
             codexAuth: config.codexAuth,
             // Authentication changes what the agent will advertise (models and
@@ -6678,6 +6720,7 @@ export class SessionExecutionService {
         agentType: config.agentType,
         customAcp: config.customAcp,
         runtimeOverrides: config.runtimeOverrides,
+        magpieGatewayUrl: config.magpieGatewayUrl,
         env: config.env,
         codexAuth: config.codexAuth,
       },
@@ -6720,7 +6763,8 @@ export class SessionExecutionService {
       message.agentType,
       message.env,
       message.customAcp,
-      message.runtimeOverrides
+      message.runtimeOverrides,
+      message.magpieGatewayUrl
     );
 
     this.deps.logger.debug(
@@ -6830,6 +6874,7 @@ export class SessionExecutionService {
       agentType: message.agentType,
       customAcp: message.customAcp,
       runtimeOverrides: message.runtimeOverrides,
+      magpieGatewayUrl: message.magpieGatewayUrl,
       env: message.env,
     });
     const recordedFingerprint = this.acpCapabilityLaunchInputFingerprints.get(message.configId);
@@ -6898,6 +6943,8 @@ export class SessionExecutionService {
         message.customAcp,
         message.runtimeOverrides,
         {
+          agentConfigId: message.configId,
+          magpieGatewayUrl: message.magpieGatewayUrl,
           signal: options.signal,
           codexProfile: codexProfile ? { profile: codexProfile } : undefined,
           onManagedRuntimeProgress: (event) => {
@@ -6926,6 +6973,7 @@ export class SessionExecutionService {
             agentType: message.agentType,
             customAcp: message.customAcp,
             runtimeOverrides: message.runtimeOverrides,
+            magpieGatewayUrl: message.magpieGatewayUrl,
             env: message.env,
           }),
         modelReasoningEfforts,
@@ -7354,6 +7402,7 @@ const fingerprintAcpLaunchInputs = (inputs: {
   env?: Record<string, string>;
   customAcp?: CustomAcpLaunchSpec;
   runtimeOverrides?: BuiltinRuntimeOverrides;
+  magpieGatewayUrl?: string;
 }): string =>
   createHash('sha256')
     .update(
@@ -7363,7 +7412,8 @@ const fingerprintAcpLaunchInputs = (inputs: {
         inputs.agentType,
         inputs.env,
         inputs.customAcp,
-        inputs.runtimeOverrides
+        inputs.runtimeOverrides,
+        inputs.magpieGatewayUrl
       )
     )
     .digest('hex');
@@ -7374,7 +7424,8 @@ const computeAcpRefreshDedupeKey = (
   agentType: string,
   env: Record<string, string> | undefined,
   customAcp?: CustomAcpLaunchSpec,
-  runtimeOverrides?: BuiltinRuntimeOverrides
+  runtimeOverrides?: BuiltinRuntimeOverrides,
+  magpieGatewayUrl?: string
 ): string => {
   const sortedKeys = env ? Object.keys(env).sort() : [];
   const envSerialized = sortedKeys.map((k) => `${k}=${env![k]}`).join('\x01');
@@ -7390,7 +7441,7 @@ const computeAcpRefreshDedupeKey = (
         .map(([key, value]) => `${key}=${Array.isArray(value) ? JSON.stringify(value) : value}`)
         .join('\x01')
     : '';
-  return `${configId}\x00${cliType}\x00${agentType}\x00${envSerialized}\x00${customSerialized}\x00${runtimeOverrideSerialized}`;
+  return `${configId}\x00${cliType}\x00${agentType}\x00${envSerialized}\x00${customSerialized}\x00${runtimeOverrideSerialized}\x00${magpieGatewayUrl ?? ''}`;
 };
 import { getCodexProfileStore, type ResolvedCodexProfile } from '../agent/codex-profile-store';
 import { assertManagedCodexProfileConfig } from '@lody/shared';

@@ -3,7 +3,6 @@ import test from 'node:test'
 import {
   applyResolvedWindowTheme,
   getInitialMainWindowThemeSource,
-  getMainWindowBackgroundColor,
   getMainWindowTitleBarOverlay,
   isNativeWindowThemeSource,
   resolveNativeWindowTheme
@@ -27,24 +26,41 @@ void test('maps Electron shouldUseDarkColors onto the resolved window theme', ()
   assert.equal(resolveNativeWindowTheme(false), 'light')
 })
 
-void test('retints window chrome when the OS appearance changes', () => {
-  const calls = []
+void test('keeps Windows caption backgrounds transparent through theme changes', () => {
   const window = {
-    setBackgroundColor: (color) => {
-      calls.push(['background', color])
+    backgroundColor: null,
+    overlay: getMainWindowTitleBarOverlay('light'),
+    setBackgroundColor(color) {
+      this.backgroundColor = color
     },
-    setTitleBarOverlay: (overlay) => {
-      calls.push(['overlay', overlay])
+    setTitleBarOverlay(overlay) {
+      this.overlay = overlay
     }
   }
 
-  applyResolvedWindowTheme(window, 'dark', 'darwin')
-  assert.deepEqual(calls, [['background', getMainWindowBackgroundColor('dark')]])
+  assert.deepEqual(window.overlay, {
+    color: '#00000000',
+    symbolColor: '#3C4048',
+    height: 36
+  })
 
-  calls.length = 0
+  applyResolvedWindowTheme(window, 'dark', 'win32')
+  assert.equal(window.backgroundColor, '#131416')
+  assert.deepEqual(window.overlay, {
+    color: '#00000000',
+    symbolColor: '#7A7D82',
+    height: 36
+  })
+
   applyResolvedWindowTheme(window, 'light', 'win32')
-  assert.deepEqual(calls, [
-    ['background', getMainWindowBackgroundColor('light')],
-    ['overlay', getMainWindowTitleBarOverlay('light')]
-  ])
+  assert.equal(window.backgroundColor, '#FFFFFF')
+  assert.deepEqual(window.overlay, {
+    color: '#00000000',
+    symbolColor: '#3C4048',
+    height: 36
+  })
+
+  applyResolvedWindowTheme(window, 'dark', 'darwin')
+  assert.equal(window.backgroundColor, '#131416')
+  assert.equal(window.overlay.symbolColor, '#3C4048')
 })

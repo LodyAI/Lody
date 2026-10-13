@@ -27,10 +27,7 @@ import {
   isBinaryImagePath,
 } from '@lody/shared';
 import {
-  checkoutLocalProjectBranchAtRootPath,
-  createLocalProjectId,
-  ensureLocalProjectRootPath,
-  getLocalProjectGitStateAtRootPath,
+  localProjectsLegacy,
   getLocalProjectNameFromRootPath,
 } from '@lody/shared/node/local-project';
 import {
@@ -280,7 +277,7 @@ async function runGitCommand(rootPath: string, args: string[]): Promise<GitComma
 
 function normalizeRootPath(rootPath: string): string {
   try {
-    return ensureLocalProjectRootPath(rootPath);
+    return localProjectsLegacy.ensureLocalProjectRootPath(rootPath);
   } catch {
     throw new Error('Local project path not found.');
   }
@@ -1320,8 +1317,8 @@ export class LocalProjectControlService {
       throw new Error('Project path is required');
     }
 
-    const resolvedRootPath = ensureLocalProjectRootPath(normalized);
-    const localProjectId = createLocalProjectId(resolvedRootPath);
+    const resolvedRootPath = localProjectsLegacy.ensureLocalProjectRootPath(normalized);
+    const localProjectId = localProjectsLegacy.createLocalProjectId(resolvedRootPath);
 
     this.logger.debug(`[local-project] Prepared path ${resolvedRootPath} as ${localProjectId}`);
 
@@ -1333,7 +1330,7 @@ export class LocalProjectControlService {
   }
 
   async getProjectGitState(rootPath: string): Promise<LocalProjectGitState> {
-    return await getLocalProjectGitStateAtRootPath(rootPath);
+    return await localProjectsLegacy.getLocalProjectGitStateAtRootPath(rootPath);
   }
 
   async listBrowseRoots(): Promise<LocalProjectBrowseRootsResult> {
@@ -1526,7 +1523,10 @@ export class LocalProjectControlService {
     branchName: string
   ): Promise<LocalProjectCheckoutBranchResult> {
     try {
-      const result = await checkoutLocalProjectBranchAtRootPath(rootPath, branchName);
+      const result = await localProjectsLegacy.checkoutLocalProjectBranchAtRootPath(
+        rootPath,
+        branchName
+      );
       return {
         success: true,
         currentBranch: result.currentBranch,

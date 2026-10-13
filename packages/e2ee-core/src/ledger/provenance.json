@@ -1,0 +1,23 @@
+{
+  "sourceCommit": "bd5a9c1ec71ed7fa8085e51faec4f1e8dbe985b8",
+  "sourceState": "read-only candidate working tree; fingerprints identify exact input",
+  "hashAlgorithm": "SHA-256",
+  "files": {
+    "pure/ledger-schema.ts": "f681a27f698fe65707c6dd7f10a3305d3b541f01d75c9912bbc1505d317379ae",
+    "pure/ledger-policy.ts": "91da76c0836303fa581fd9cc7841254169e22beadff91577f7695fb836a11ed7",
+    "pure/ledger-state.ts": "bc6b9d31fc7da0121c0c37643ff25ec849e500c25dcc8454af4245085517dbd4",
+    "pure/ledger-apply.ts": "3ff148ddaec3109ec42a1e94e74c314d6a068deb3a67c88d37d4c62736cee1d9",
+    "pure/operation-proofs.ts": "062011394e6c91d6716ef9984b43d8924779c5148c482e2a79221a03a9489566",
+    "pure/records.ts": "5cd94a66186e809b487b2cf55ba12e6ff61e1494c924bb9a043fc1b1e323ced5",
+    "pure/wire-crypto.ts": "0e233bd4db6b07e929f4001239fe4a9dd0f9cb586fbb0fbd185399af1f35e4ad",
+    "workflows/verification.ts": "d0ad05d6535366d31b54796346f2cf04827b7ced9f87279255ca0a1efecbd1a4"
+  },
+  "adaptations": [
+    "Preserve supported record arrays and sig/v1, rec/v1, join/v1, possess/v2 domains.",
+    "Use merged P07-a owned public byte types, bounded CBOR and fixed signature verifier.",
+    "Replace reflective class authority with closure-backed views registered in a private WeakMap.",
+    "Require caller-pinned genesis and expected head/count; suffix failure preserves the preceding view.",
+    "Omit snapshots, journal, services, content-author and history decryption APIs.",
+    "Reject obsolete tag 2 non-atomic removal; P12 owns replacement."
+  ]
+}

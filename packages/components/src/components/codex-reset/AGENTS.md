@@ -12,9 +12,9 @@ popover.
   tab AND side chat (hidden ones included) and `ProviderRow` per provider, so a
   mount-time fetch is a request storm.
 - **Nothing loads on mount.** A request happens only when a user OPENS a surface that
-  shows the forecast — the settings provider row's chip (the click that opens the
-  dialog) and the composer's usage popover (Radix mounts its content on open, so
-  `CodexResetForecastUsageRow` loads from its own mount). `useCodexResetForecast`
+  shows the forecast — the provider row's direct forecast button (the click that
+  opens its dialog) and the composer's usage popover (its content mounts
+  `CodexResetForecastUsageRow`, which loads from its own mount). `useCodexResetForecast`
   therefore has no load effect; call `revalidate()` from the interaction.
 - Concurrent callers coalesce onto one in-flight request. Freshness is the served
   `Cache-Control: max-age` clamped to 1m–5m — the endpoint's CDN-shaped 4h is wrong for
@@ -23,13 +23,16 @@ popover.
   stale-while-revalidate for free; never blank it on refresh.
 - Gate every entry point on `canShowCodexResetForecast` (built-in Codex with no custom
   key/brand, matching `canShowSubscriptionRateLimits`); a disabled entry makes no
-  request at all. The provider row always shows the entry; the usage-popover row appears
+  request at all. Eligible provider rows always offer the direct forecast action,
+  even without usage data or an active forecast. Its label carries no probability.
+  Never put forecast probabilities beside remaining-quota percentages in the
+  provider overview. The composer's usage-popover row appears
   while a watch is live or a scheduled reset awaits execution. There is deliberately NO always-visible composer band: it
   would have to load in the background to know whether to render.
-- The usage-popover row must NOT own the dialog. Opening a Radix Dialog from inside a
-  Popover dismisses the popover and unmounts a dialog rendered in its content, so
-  `SessionUsagePopover` renders `CodexResetForecastDialogHost` as a sibling of the
-  popover instead.
+- The composer's usage-popover entry must NOT own the dialog. Opening a forecast
+  dialog dismisses its popover and unmounts content, so `SessionUsagePopover` hosts
+  `CodexResetForecastDialogHost` as a sibling. Provider rows open that dialog
+  directly, without a quota-details popover.
 - The provider-row dialog is nested inside desktop settings. `@lody/ui` paints a
   nested modal's overlay itself — a lighter veil between the parent panel and the
   dialog — so no per-caller prop is needed. Mobile settings and the

@@ -8,7 +8,6 @@ import type {
   SessionHistoryReadQuery,
   SessionHistoryReadResponse,
   SessionHistoryWriteOperation,
-  SessionHistoryWriteResponse,
   SessionId,
   WorkspaceId,
 } from '@lody/shared';
@@ -31,6 +30,11 @@ import {
   type SessionTurnRead,
 } from '@lody/shared/session-data';
 import { sendLocalSessionControl } from './electron-ipc-client';
+import { RoostHistoryError, SessionHistoryRequestError } from './roost-history-error';
+import type {
+  SessionHistoryRpcReadResponse,
+  SessionHistoryRpcWriteResponse,
+} from '@lody/loro-streams-rpc';
 import {
   createRoostHistoryCache,
   parseRoostCacheCursor,
@@ -77,13 +81,13 @@ export type RemoteRoostSessionBridgeOptions = {
     machineId: MachineId,
     sessionId: SessionId,
     query: SessionHistoryReadQuery
-  ) => Promise<SessionHistoryReadResponse>;
+  ) => Promise<SessionHistoryRpcReadResponse>;
   readonly requestHistoryWrite: (args: {
     readonly machineId: MachineId;
     readonly sessionId: SessionId;
     readonly operation: SessionHistoryWriteOperation;
     readonly payload: Record<string, unknown>;
-  }) => Promise<SessionHistoryWriteResponse>;
+  }) => Promise<SessionHistoryRpcWriteResponse>;
 };
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -842,7 +846,7 @@ export function createLocalRoostSessionDataFactory(
             item.type === 'session/history-read_response' && item.sessionId === sessionId
         );
         if (!response) throw new Error('Roost history read returned no response');
-        if (!response.success) throw new Error(response.error ?? 'Roost history read failed');
+        if (!response.success) throw new RoostHistoryError('read', response.error ?? '');
         return response;
       },
       writeHistory: async (operation, payload) => {
@@ -863,7 +867,7 @@ export function createLocalRoostSessionDataFactory(
             item.operation === operation
         );
         if (!response) throw new Error(`Roost history write returned no ${operation} response`);
-        if (!response.success) throw new Error(response.error ?? `Roost ${operation} failed`);
+        if (!response.success) throw new RoostHistoryError('write', response.error ?? '');
         return {
           result: response.result,
           historyRevision: response.historyRevision,
@@ -893,7 +897,10 @@ export function createRemoteRoostSessionDataFactory(
         if (response.sessionId !== sessionId) {
           throw new Error('Roost history read response targeted a different session');
         }
-        if (!response.success) throw new Error(response.error ?? 'Roost history read failed');
+        if (response.rpcFailure) {
+          throw new SessionHistoryRequestError('read', response.rpcFailure, response.error ?? '');
+        }
+        if (!response.success) throw new RoostHistoryError('read', response.error ?? '');
         return response;
       },
       writeHistory: async (operation, payload) => {
@@ -906,7 +913,10 @@ export function createRemoteRoostSessionDataFactory(
         if (response.sessionId !== sessionId || response.operation !== operation) {
           throw new Error('Roost history write response targeted a different operation');
         }
-        if (!response.success) throw new Error(response.error ?? `Roost ${operation} failed`);
+        if (response.rpcFailure) {
+          throw new SessionHistoryRequestError('write', response.rpcFailure, response.error ?? '');
+        }
+        if (!response.success) throw new RoostHistoryError('write', response.error ?? '');
         return {
           result: response.result,
           historyRevision: response.historyRevision,

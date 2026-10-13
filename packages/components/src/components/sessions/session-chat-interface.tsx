@@ -6773,18 +6773,22 @@ export const SessionChatInterface = memo(
                       in-composer scheduled panel. */}
                     <SessionInfoBar
                       status={statusStripState}
-                      executionMachine={
+                      machine={
                         sessionMachine
                           ? {
+                              machineId: session.machineId,
                               name: sessionMachine.name,
-                              owner: workspaceMembers.find(
+                              ownerName: workspaceMembers.find(
                                 (member) => member.userId === sessionMachine.ownerUserId
-                              ),
-                              isMine:
+                              )?.name,
+                              isOwn:
                                 !!currentUser?.id && sessionMachine.ownerUserId === currentUser.id,
+                              isCurrent: localMachineId ? isLocalSession : undefined,
+                              onlineStatus: sessionMachineOnlineStatus,
                             }
-                          : undefined
+                          : null
                       }
+                      compactMachineInfo={isMobile}
                       goal={latestGoal}
                       goalCommands={goalCommands}
                       goalPendingCommand={

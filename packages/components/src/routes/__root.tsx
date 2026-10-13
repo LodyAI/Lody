@@ -1,3 +1,5 @@
+import { receiveMagpieImportAtom } from '@/atoms/magpie-import';
+import { isMagpieImportLink } from '@lody/shared';
 import {
   createRootRouteWithContext,
   Outlet,
@@ -536,6 +538,7 @@ function DesktopDeepLinkRouter() {
   const navigate = useNavigate();
   const postHog = usePostHog();
   const localMachineId = useAtomValue(localMachineIdAtom);
+  const receiveMagpieImport = useSetAtom(receiveMagpieImportAtom);
   const currentUser = useAtomValue(userAtom);
   const { isAuthenticated: isConvexAuthenticated, isLoading: isConvexAuthLoading } =
     useAuthenticatedConvex();
@@ -602,6 +605,14 @@ function DesktopDeepLinkRouter() {
       return undefined;
     }
     return onIpcEvent('app.deepLink', (url) => {
+      if (isMagpieImportLink(url)) {
+        try {
+          receiveMagpieImport(url);
+        } catch {
+          toast.error(i18next.t('magpieImport.invalidLink', 'This Magpie import link is invalid.'));
+        }
+        return;
+      }
       if (parseSessionLink(url)) {
         window.dispatchEvent(new CustomEvent(SESSION_DEEP_LINK_EVENT, { detail: url }));
         return;
@@ -667,7 +678,7 @@ function DesktopDeepLinkRouter() {
 
       navigateToResolvedPath(navigate, targetPath);
     });
-  }, [location.pathname, navigate, postHog]);
+  }, [location.pathname, navigate, postHog, receiveMagpieImport]);
 
   return null;
 }

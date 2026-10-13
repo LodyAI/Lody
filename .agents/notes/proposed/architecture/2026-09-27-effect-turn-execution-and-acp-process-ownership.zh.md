@@ -18,6 +18,12 @@ CLI 的 Turn 执行运行时与 ACP 子进程关停是近两个月生命周期�
 完成后最后完成；不改变 Stop/steer 的用户语义、历史格式与 dispatch 指针规则。各阶段的预期收益
 尚未验证，Windows 进程树与"终止失败后是否隔离会话"两项需要人工决定。
 
+## 进程基础交付状态
+
+进程基础与调用方系列 #1065、#1069、#1348 均已合并，但 AcpConnection、Session 和 Turn
+端到端取消尚未完成。后续单元和实际依赖统一维护于[路线图依赖图](2026-09-27-effect-lifecycle-migration-roadmap.zh.md#交付依赖图)。
+新工作从刷新后的 main 开始；下文原 stack 描述仅保留为历史计划。
+
 ## 问题与证据
 
 ### 缺陷记录
@@ -461,8 +467,7 @@ stale-ACP 重试路径的事件竞态、SDK 在孙进程持有管道时的关闭
 已合入 main。[#1057](https://github.com/LodyAI/Lody/pull/1057) 合入了原基础分支而非 main；
 [#1355](https://github.com/LodyAI/Lody/pull/1355) 只将这两份中英文计划恢复到 main。
 
-剩余 stack 为 #1355 → #1065 → #1069 → #1348。#1065 直接在 shared 中引入 v4 进程核心、
-sandbox 与 ACP 调用方；#1069 迁移其余 CLI 调用方和 CLI 守卫；#1348 迁移 Electron、
-supervisor、shared 辅助模块与 review helper，并扩大守卫。所有层均基于 v4，核心不再经历
-CLI 到 shared 的搬迁。使用 GitHub 原生 stack 的合并流程；合并底部 PR 后，它会 rebase
-剩余层。继续合并前，核对下一层的 base 和差异。
+旧 #1355 → #1065 → #1069 → #1348 stack 已全部合并，进程与调用方直接在 shared 使用
+Effect 4.0.2 与官方进程契约。新的独立审查单元从刷新后的 main 开始，依照路线图的实际
+依赖图推进；旧 stack 分支不再作为交付 base。ACP、Session、Turn 所有权仍属提案，
+需要各自的真实边界验证。

@@ -12,8 +12,7 @@ import {
   insertPastedTextDraft,
   isLargePastedText,
   isPastedTextTooLarge,
-  getPastedTextByteSize,
-  MAX_PASTED_TEXT_BYTE_SIZE,
+  PASTED_TEXT_FILE_MIN_CHAR_COUNT,
   normalizePastedTextDraft,
   sanitizePastedTextDrafts,
   shouldCapturePastedTextDraft,
@@ -360,28 +359,20 @@ describe('isLargePastedText', () => {
 });
 
 describe('isPastedTextTooLarge', () => {
-  it('rejects a paste whose stored text exceeds the byte ceiling', () => {
-    expect(isPastedTextTooLarge('a'.repeat(MAX_PASTED_TEXT_BYTE_SIZE + 1))).toBe(true);
-  });
-
-  it('accepts a paste exactly at the byte ceiling', () => {
-    expect(isPastedTextTooLarge('a'.repeat(MAX_PASTED_TEXT_BYTE_SIZE))).toBe(false);
-  });
-
-  it('measures UTF-8 bytes, not characters', () => {
-    // Each CJK character is three UTF-8 bytes, so a third as many characters
-    // is enough to cross a ceiling that a character count would let through.
-    const text = '\u65e5'.repeat(Math.ceil(MAX_PASTED_TEXT_BYTE_SIZE / 3));
-    expect(text.length).toBeLessThan(MAX_PASTED_TEXT_BYTE_SIZE);
-    expect(isPastedTextTooLarge(text)).toBe(true);
+  it.each(['a', '日'])('converts %s text at 50,000 characters into a file', (character) => {
+    expect(isPastedTextTooLarge(character.repeat(49_999))).toBe(false);
+    expect(isPastedTextTooLarge(character.repeat(50_000))).toBe(true);
+    expect(isPastedTextTooLarge(character.repeat(50_001))).toBe(true);
   });
 
   it('measures the normalized, trimmed text the draft would store', () => {
     const padding = ' '.repeat(1024);
-    const body = 'a'.repeat(MAX_PASTED_TEXT_BYTE_SIZE);
-    expect(getPastedTextByteSize(`${padding}${body}${padding}`)).toBe(MAX_PASTED_TEXT_BYTE_SIZE);
+    const body = 'a'.repeat(PASTED_TEXT_FILE_MIN_CHAR_COUNT - 1);
     expect(isPastedTextTooLarge(`${padding}${body}${padding}`)).toBe(false);
-    expect(getPastedTextByteSize('a\r\nb')).toBe(3);
+    expect(isPastedTextTooLarge(`${padding}${body}b${padding}`)).toBe(true);
+    // CRLF counts as one normalized newline, rather than two characters.
+    expect(isPastedTextTooLarge(`${body.slice(0, -2)}\r\nb`)).toBe(false);
+    expect(isPastedTextTooLarge(`${body.slice(0, -1)}\r\nb`)).toBe(true);
   });
 });
 

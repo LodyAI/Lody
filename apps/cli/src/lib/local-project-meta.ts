@@ -17,7 +17,7 @@ import {
 import type { MachineLegacyMetaFields } from '@lody/shared';
 import type { LoroRepo } from 'loro-repo';
 import { realpathSync, statSync } from 'node:fs';
-import { normalizeLocalProjectRootPath } from '@lody/shared/node/local-project';
+import { localProjectsLegacy } from '@lody/shared/node/local-project';
 
 import { readTimeoutEnv, withTimeout } from './loro/timeout-utils';
 
@@ -51,7 +51,9 @@ export async function withMachineCatalogWriteLock<T>(
 function canonicalLocalProjectRootPath(rootPath: string): string {
   try {
     const resolved = realpathSync.native(rootPath);
-    return statSync(resolved).isDirectory() ? normalizeLocalProjectRootPath(resolved) : rootPath;
+    return statSync(resolved).isDirectory()
+      ? localProjectsLegacy.normalizeLocalProjectRootPath(resolved)
+      : rootPath;
   } catch {
     return rootPath;
   }

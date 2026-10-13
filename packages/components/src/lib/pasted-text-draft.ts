@@ -12,14 +12,14 @@ export interface PastedTextDraft {
 export const LARGE_PASTED_TEXT_MIN_CHAR_COUNT = 1024;
 
 /**
- * Hard ceiling for keeping a paste inline, in UTF-8 bytes of the text we would store.
+ * Character threshold for converting normalized, trimmed pasted text into a file.
  *
  * Above this the collapse stops helping: the chip hides the blob in the
  * composer, but the full text still rides along in every draft save, every
  * prompt rewrite, and the turn itself. A log dump this size is captured as a
  * regular text attachment so it can use the existing file path instead.
  */
-export const MAX_PASTED_TEXT_BYTE_SIZE = 500 * 1024;
+export const PASTED_TEXT_FILE_MIN_CHAR_COUNT = 50_000;
 
 export const PASTED_TEXT_FILE_NAME = 'pasted-text.txt';
 
@@ -47,18 +47,8 @@ export const getPastedTextLineCount = (text: string): number => {
   return normalized.split('\n').length;
 };
 
-const pastedTextEncoder = new TextEncoder();
-
-/**
- * UTF-8 size of the text a paste would actually store, so the ceiling is
- * measured against the same normalized-and-trimmed string `insertPastedTextDraft`
- * keeps rather than the raw clipboard payload.
- */
-export const getPastedTextByteSize = (text: string): number =>
-  pastedTextEncoder.encode(normalizePastedTextDraft(text).trim()).length;
-
 export const isPastedTextTooLarge = (text: string): boolean =>
-  getPastedTextByteSize(text) > MAX_PASTED_TEXT_BYTE_SIZE;
+  getPastedTextCharacterCount(text) >= PASTED_TEXT_FILE_MIN_CHAR_COUNT;
 
 export const isLargePastedText = (text: string): boolean => {
   const characterCount = getPastedTextCharacterCount(text);

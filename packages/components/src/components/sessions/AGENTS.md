@@ -44,8 +44,9 @@ Read parent rules and each heading's linked context before edits.
   (`fromPageContent`) never opens private LAN; only the address bar may.
 - Preload one bounded frame after live confirmation; require atomic moves, no
   polling, and cleanup safe after Browser takeover.
-- Static HTML runs `allow-scripts`-only from a policy-owned `srcdoc`; truncated
-  documents are never executable and static frames die with their tab.
+- Static HTML requires policy-owned `srcdoc`. Scripts require credentialless and
+  `allow-scripts` only; otherwise use navigation-stripped HTML with an empty sandbox.
+  Never preview truncated text; static frames die with their tab.
 - Preview comment writes go through `runtime.writer.mutatePreviewVisualComments`, never the store's `setState`.
 
 ## [Conversation surface](../../../../../.agents/docs/sessions-surface.md)
@@ -95,8 +96,9 @@ Read parent rules and each heading's linked context before edits.
 
 ## [Composer info bar](../../../../../.agents/docs/sessions-info-bar.md)
 
-- Fixed cluster order; with items, exactly one staged item. Hide only without
-  items/identity/sync; clicks never empty or relayout the stage.
+- Keep canonical cluster order and one nonempty stage when items exist. Hide
+  the bar only without items or ambient content. Machine control stays outside
+  staging (desktop name, mobile icon); ownership appears only in its details card.
 - The stage icon is inert, colour is reserved for genuine status, and nothing
   in the bar pulses.
 - Open preview stays gated on a real reported target; repository actions are

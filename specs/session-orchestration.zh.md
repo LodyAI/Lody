@@ -6,7 +6,7 @@ Translation: current
 [English](session-orchestration.md)
 
 Agent 通过 Lody 委派异步工作时，每个委派目标都会从发起它的人类 Turn
-继续同一条因果链。Lody 最多接受 32 次这样的跳转。已经处于深度 32 的
+继续同一条因果链。Lody 最多接受 16 次这样的跳转。已经处于深度 16 的
 Turn 再发起命令时，会在创建 Operation 或目标 Session 之前被拒绝，并返回
 不可重试的 `CHAIN_DEPTH_EXCEEDED` 错误。
 
@@ -38,6 +38,11 @@ option。独立 Plan option 可以与权限共存。旧式 Plan 若占用 ACP mo
 则拒绝不同的显式 mode，不能静默覆盖。显式 Role 仍具有完整优先级：手填目标和
 配置字段在能力校验、命令身份和派发前被忽略。
 
+CLI `lody session create --agent-role <idOrName>` 按固定 id 或唯一名称解析同一
+目录中的 Role。Role 的 machine、代理配置、运行配置和 Prompt 前缀具有优先级；
+被覆盖的手填参数会以警告形式报告，`--repo`、`--local-project`、`--branch`、
+`--worktree` 等工作上下文参数仍然有效。
+
 显式权限可能宽于父会话。调用方必须遵守获得的用户授权。本接口不新增权限等级、
 升级审批政策，也不形成相对 CLI 创建路径的安全边界。通过 `lody_session_chat`
 修改已有会话不在本次范围。
@@ -45,7 +50,15 @@ option。独立 Plan option 可以与权限共存。旧式 Plan 若占用 ACP mo
 显式 selector 参与 canonical command 指纹。Map 键顺序变化仍是同一请求；已接受
 Operation id 下更改选择返回 `OPERATION_ID_REUSED`。接受时冻结各目标的有效派发
 配置。重试和恢复使用冻结配置，不重新计算 requester 默认值或 Role 配置。
-不需要 Operation 存储迁移。
+有效继承的 mode/model/options 保留内部来源；重放保留兼容值、丢弃不兼容的继承值，
+即使目录新鲜度未确认也不改变该行为。当前显式选择仍须严格校验。首次校验和冻结
+重放时，effort 与 Fast 都使用最终目标模型。
+
+内部合成的内置模式保留独立来源，避免把回退默认值误判为用户显式选择。固定
+UserTurn 写入前，根据可用能力重新推导默认值。物化中断后的重放仅保留冻结的
+继承或合成来源能够产生的已有值，不改写历史，也不放宽完整的不可变输入身份
+校验。来源字段不属于公开 MCP 输入或会话历史。旧的继承默认值标记仍可读取，
+无需存储迁移。
 
 ## 运行时拒绝模型
 
@@ -80,11 +93,53 @@ Cloud 确认远端文档追平；OSS 确认权威 daemon repo，并在已有创�
 检查固定 Turn。Cloud workspace 不能把云端断连当成本地权威。完成回传继续
 使用已有的单一所有者 Delivery 协议，不需要持久化 schema 或托管 API 变更。
 
+## 幂等消息消费
+
+A 给 B 发送任务、B 完成后，重复通知、重试和 Worker 替换不得使 A 再次消费同一条
+完成消息。身份是机器本地的 `(requesterSessionId, operationId)`，对应固定的目标输入、
+Delivery 和完成 Turn。重试保留这组 ID 以及原始来源 Turn、请求人和命令。新的 Operation
+id 表示新任务，即使文本完全相同；不能按内容相等去重。
+
+接受任务和完成任务使用 SQLite 事务。Host-lease Worker 在请求方 Session 的互斥锁下
+认领 Delivery，写入固定完成 Turn，再记录 `prepared`；提交给 ACP 之前先持久化
+`started`。确认发生在 provider 提交之前的中断可以释放准备状态并有限恢复。提交之后，
+Delivery prompt 绝不自动再次提交。连接断开时，即使尚未观察到输出，也不能证明没有被
+消费；保留完成消息和输出，并显示 `DELIVERY_EXECUTION_UNCERTAIN`。启动恢复遵守相同
+规则。成功或取消的结算消费 claim；结算写入失败只重试结算，不重新执行 provider。
+
+持久化去重和消费确认属于消息编排存储，不属于模型 provider 协议。所有运行时使用
+相同行为，不修改 ACP client、adapter 或协商能力。重复通知只协调同一条持久化 Delivery；
+成功结算持久化消费状态，结算写入失败后只继续结算同一 claim。这保证每条完成消息
+至多提交一次，不保证在持久化启动检查与提交之间崩溃时模型仍能成功执行。
+普通用户 Turn 的旧连接恢复保留原有行为。
+
+已消费结果七天后可以过期，但清理必须原子地保留不含 prompt 或输出的精简 retired-id
+记录。同一存储内不能再次接受该 ID，数据库触发器也阻止旧版写入方重新插入。
+新版调用方收到不可重试的 `OPERATION_ID_REUSED`；过期结果的查询仍返回不存在。
+记录随已完成 Operation 数量增长。删除存储会重置此保证；迁移之前已经删除的 ID 无法
+重建。降级运行的 Worker 仍保留其旧版 ACP 重试行为。
+
 ## 实现证据
 
 实现检查位于 `apps/cli/src/mcp/lody-mcp-server.ts`，共享上限位于
 `packages/shared/src/session-orchestration.ts`，可执行 Operation 模型位于
 `apps/cli/src/orchestration/operation-model.ts`。
 
-本草稿记录将上限改为 32 的请求。依赖安装后仍需补充运行时和已发布客户端
+消费和保留策略位于 `apps/cli/src/orchestration/operation-store.ts`，续接提交位于
+`apps/cli/src/session/session-execution-service.ts`，协调恢复位于
+`apps/cli/src/orchestration/operation-coordinator.ts`。对应测试覆盖连接失败、claim 和结算
+竞争、重启以及结果过期。
+
+本草稿记录将上限改为 16 的请求。依赖安装后仍需补充运行时和已发布客户端
 验收。
+
+## 用户终止整棵对话树
+
+关联对话树提供需要二次确认的整树终止操作，范围遵循创建与包含关系。
+持久化、由用户控制的停止状态阻止执行、MCP 委派和自动回传唤醒，直到用户明确恢复协作。
+运行中的回合沿用正常取消流程；待处理输入保留但不提升执行。
+晚到的完成结果保留，并记录 `COLLABORATION_STOPPED`；恢复后不重放该续接。
+快照之后创建的后代继承祖先停止状态。仅通过 MCP 联系的无关已有对话不在此范围内。
+
+界面写入状态前，所有目标机器必须声明支持此能力。离线机器收到状态后才会执行停止；
+界面不得承诺所有机器同时停止，也不回滚已经完成的操作。

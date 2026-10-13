@@ -474,7 +474,7 @@ export interface GitHubReadRequestOptions {
 }
 
 function authHeaders(token: string) {
-  return { ...GITHUB_API_HEADERS, authorization: `Bearer ${token}` };
+  return { ...GITHUB_API_HEADERS, ...(token ? { authorization: `Bearer ${token}` } : {}) };
 }
 
 const DEFAULT_GITHUB_FILE_READ_MAX_BYTES = 1024 * 1024;
@@ -1388,7 +1388,7 @@ async function githubFetchFileBodyAtCommit<T>(
   const res = await fetch(apiUrl.toString(), {
     headers: {
       accept: 'application/vnd.github.raw',
-      authorization: `Bearer ${token}`,
+      ...(token ? { authorization: `Bearer ${token}` } : {}),
       'x-github-api-version': '2022-11-28',
     },
   });
@@ -1411,7 +1411,7 @@ async function githubFetchFileBodyAtCommit<T>(
       commitHash
     )}/${encodedPath}`;
     const rawRes = await fetch(rawUrl, {
-      headers: { authorization: `Bearer ${token}` },
+      headers: token ? { authorization: `Bearer ${token}` } : {},
     });
     if (rawRes.status === 404) {
       throw new GitHubFileNotFoundError({ repoFullName, path, commitHash });

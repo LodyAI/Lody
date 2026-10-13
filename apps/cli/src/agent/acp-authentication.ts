@@ -41,7 +41,7 @@ import { startProcessLegacy } from '@lody/shared/node/process';
 import type { NodeProcessApi } from '@lody/shared/node/process';
 import type { ManagedRuntimeProgressEvent } from './managed-agent-runtime';
 import { createStdinWritableStream, createStdoutReadableStream } from '@/utils/stream';
-import { getLoginShellEnv } from './login-shell-env';
+import { getLoginShellEnvLegacy } from './login-shell-env';
 import { appendStderrTail, createAcpStartupMonitor } from './acp-startup-monitor';
 import { runNpxStartupWithRecovery } from './acp-npx-startup-policy';
 import { withLodyNpmCacheForNpx } from './npx-cache';
@@ -183,7 +183,7 @@ type AcpAuthenticationManagerOptions = {
   authenticationTimeoutMs?: number;
   terminationGraceMs?: number;
   nodeProcess?: NodeProcessApi;
-  resolveLoginShellEnv?: typeof getLoginShellEnv;
+  resolveLoginShellEnv?: typeof getLoginShellEnvLegacy;
   resolveAuthenticationProcessLaunch?: typeof resolveBuiltinAuthenticationProcessLaunch;
 };
 
@@ -196,6 +196,7 @@ type ProbeBuiltinAuthenticationOptions = {
   cliType: AgentConfigCliType;
   agentType: string;
   runtimeOverrides?: BuiltinRuntimeOverrides;
+  magpieGatewayUrl?: string;
   env?: NodeJS.ProcessEnv;
   onManagedRuntimeProgress?: Parameters<
     typeof resolveBuiltinAuthenticationProcessLaunch
@@ -204,7 +205,7 @@ type ProbeBuiltinAuthenticationOptions = {
   signal?: AbortSignal;
   statusProbeTimeoutMs?: number;
   nodeProcess?: NodeProcessApi;
-  resolveLoginShellEnv?: typeof getLoginShellEnv;
+  resolveLoginShellEnv?: typeof getLoginShellEnvLegacy;
 };
 
 const asRecord = (value: unknown): Record<string, unknown> | null =>
@@ -381,7 +382,7 @@ async function buildAuthenticationProcessEnv(options: {
   launch: ResolvedACPProcessLaunch;
   agentType: string;
   env?: NodeJS.ProcessEnv;
-  resolveLoginShellEnv: typeof getLoginShellEnv;
+  resolveLoginShellEnv: typeof getLoginShellEnvLegacy;
 }): Promise<NodeJS.ProcessEnv> {
   const loginShellEnv = await options.resolveLoginShellEnv();
   const baseEnv: NodeJS.ProcessEnv = {
@@ -421,6 +422,7 @@ export async function probeBuiltinAuthentication(
     cliType: options.cliType,
     agentType: options.agentType,
     runtimeOverrides: options.runtimeOverrides,
+    magpieGatewayUrl: options.magpieGatewayUrl,
     action: 'status',
     onManagedRuntimeProgress: options.onManagedRuntimeProgress,
     signal: options.signal,
@@ -432,7 +434,7 @@ export async function probeBuiltinAuthentication(
     launch,
     agentType: options.agentType,
     env: options.env,
-    resolveLoginShellEnv: options.resolveLoginShellEnv ?? getLoginShellEnv,
+    resolveLoginShellEnv: options.resolveLoginShellEnv ?? getLoginShellEnvLegacy,
   });
   options.signal?.throwIfAborted();
   if (hasBuiltinEnvAuthentication(options.agentType, env)) {
@@ -531,7 +533,7 @@ export class AcpAuthenticationManager {
   private readonly authenticationTimeoutMs: number;
   private readonly terminationGraceMs: number;
   private readonly nodeProcess: NodeProcessApi | undefined;
-  private readonly resolveLoginShellEnv: typeof getLoginShellEnv;
+  private readonly resolveLoginShellEnv: typeof getLoginShellEnvLegacy;
   private readonly resolveAuthenticationProcessLaunch: typeof resolveBuiltinAuthenticationProcessLaunch;
 
   constructor(
@@ -547,7 +549,7 @@ export class AcpAuthenticationManager {
       options.terminationGraceMs ?? DEFAULT_TERMINATION_GRACE_MS
     );
     this.nodeProcess = options.nodeProcess;
-    this.resolveLoginShellEnv = options.resolveLoginShellEnv ?? getLoginShellEnv;
+    this.resolveLoginShellEnv = options.resolveLoginShellEnv ?? getLoginShellEnvLegacy;
     this.resolveAuthenticationProcessLaunch =
       options.resolveAuthenticationProcessLaunch ?? resolveBuiltinAuthenticationProcessLaunch;
   }
@@ -558,6 +560,8 @@ export class AcpAuthenticationManager {
     agentType: string;
     customAcp?: CustomAcpLaunchSpec;
     runtimeOverrides?: BuiltinRuntimeOverrides;
+    agentConfigId?: string;
+    magpieGatewayUrl?: string;
     env?: Record<string, string>;
     codexProfile?: ResolvedCodexProfile;
     onProgress?: (event: AcpAuthenticationProgressEvent) => void;
@@ -670,6 +674,7 @@ export class AcpAuthenticationManager {
         cliType: options.cliType,
         agentType: options.agentType,
         runtimeOverrides: options.runtimeOverrides,
+        magpieGatewayUrl: options.magpieGatewayUrl,
         action: 'login',
         signal: running.abortController.signal,
         onManagedRuntimeProgress: (event) => {
@@ -926,6 +931,8 @@ export class AcpAuthenticationManager {
       agentType: string;
       customAcp?: CustomAcpLaunchSpec;
       runtimeOverrides?: BuiltinRuntimeOverrides;
+      agentConfigId?: string;
+      magpieGatewayUrl?: string;
       env?: Record<string, string>;
       onProgress?: (event: AcpAuthenticationProgressEvent) => void;
     },
@@ -936,6 +943,8 @@ export class AcpAuthenticationManager {
       agentType: options.agentType,
       customAcp: options.customAcp,
       runtimeOverrides: options.runtimeOverrides,
+      agentConfigId: options.agentConfigId,
+      magpieGatewayUrl: options.magpieGatewayUrl,
       signal: running.abortController.signal,
     });
     const env = await buildAuthenticationProcessEnv({
@@ -973,6 +982,7 @@ export class AcpAuthenticationManager {
               agentType: options.agentType,
               customAcp: options.customAcp,
               runtimeOverrides: options.runtimeOverrides,
+              magpieGatewayUrl: options.magpieGatewayUrl,
               workdir: process.cwd(),
               env,
               command: launch.command,

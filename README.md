@@ -164,6 +164,7 @@ action to trigger CI. Existing releases and their assets are preserved on reruns
 - `packages/platform` — Platform capabilities and integrations
 - `packages/shared` — Shared schemas, protocols, and utilities
 - `packages/cloud-api` — Optional-cloud protocol names and DTOs
+- `packages/e2ee-core` — Experimental byte formats and signature verification (no product entrypoint)
 - `packages/loro-streams-rpc` — RPC over Loro Streams
 - `packages/acp-extension-{core,kimi}` — ACP extension submodule workspaces
 - `site-docs` — Website, documentation, and blog

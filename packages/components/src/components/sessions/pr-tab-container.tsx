@@ -77,6 +77,7 @@ export function PrTabContainer({
   const postHog = usePostHog();
   const currentWorkspaceId = useAtomValue(currentWorkspaceIdAtom);
   const {
+    canWrite,
     state,
     data,
     error,
@@ -312,10 +313,10 @@ export function PrTabContainer({
       isDeletingBranch={isDeletingBranch}
       branchExists={branchExists}
       onSelectMergeMethod={handleSelectMergeMethod}
-      onMerge={handleMerge}
-      onSetState={handleSetState}
-      onMarkReadyForReview={handleMarkReadyForReview}
-      onDeleteBranch={handleDeleteBranch}
+      onMerge={canWrite ? handleMerge : undefined}
+      onSetState={canWrite ? handleSetState : undefined}
+      onMarkReadyForReview={canWrite ? handleMarkReadyForReview : undefined}
+      onDeleteBranch={canWrite ? handleDeleteBranch : undefined}
       onResolveConflicts={canResolveConflicts ? resolveConflictsAction?.run : undefined}
       // Pending only counts for an offerable action: while the session hydrates
       // or cannot offer it, the header shows the disabled merge instead.
@@ -323,7 +324,7 @@ export function PrTabContainer({
         resolveConflictsAction?.available && resolveConflictsAction.pending
       )}
       onRefresh={handleRefresh}
-      onPostComment={handlePostComment}
+      onPostComment={canWrite ? handlePostComment : undefined}
       onGrantChecksPermission={handleGrantChecksPermission}
       className={className}
     />

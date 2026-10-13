@@ -1,0 +1,26 @@
+{
+  "mainCommit": "f1ba33a61244e2da07aaea93a30f06227311c4b6",
+  "scope": "Test-only composition of merged public entries. No candidate or Lab code extracted. Native Ed25519 uses the public RFC 8032 test seed.",
+  "hashAlgorithm": "SHA-256",
+  "sources": {
+    "packages/e2ee-core/src/index.ts": "f5626c037468618404f2b99cf93d773c23ff177bf16921dd63be1b44e8ba5d45",
+    "packages/e2ee-core/src/signature.ts": "527e1bc3594ad4ad9edd62f6b4a0b139a600d07be16b0578f9b892711c9b4cb4",
+    "packages/e2ee-core/src/content-format.ts": "12d900004600030a8db248856be4e78ec1aaf4ae6144fd0e791984f4ac6025bc",
+    "packages/e2ee-core/src/crypto/content.ts": "25fc404916ac933c1b35aa076028deac80717d83c9203ccd2898cb9b9cac4340",
+    "packages/e2ee-core/src/ledger/index.ts": "1e20f7f0ff932c47c9419443bb90c596d88dfbe8df63e29909d0ad08d56b4644",
+    "packages/e2ee-core/src/ledger/replay.ts": "52511e8e809e0035e05ccbf6deed05dfeb59c41b2e6468efc8ae7b7e301e5a03",
+    "packages/e2ee-core/src/ledger/policy.ts": "560b95cd95da7b1b058f4ed3763bee97425b51a352146975cc9d7464db199b12",
+    "packages/components/src/providers/workspace-streams-transport.ts": "3ffabd0ed30961812f9d28b4c2488bf21d061ea942ea461b62689edd097cb26b"
+  },
+  "versions": {
+    "effect": "4.0.2",
+    "loro-repo": "0.22.0",
+    "@loro-dev/streams-crdt": "0.16.2",
+    "loro-crdt": "1.16.3"
+  },
+  "limits": [
+    "No production signer or historical author API",
+    "No snapshot host admission or client snapshot recovery",
+    "Candidate historical failures remain outside this test-only change"
+  ]
+}

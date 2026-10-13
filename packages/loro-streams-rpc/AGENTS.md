@@ -48,13 +48,12 @@ and the `file/preview` namespace are in
 - Control-plane methods (`machine/status`, `machine/preview-control`, `machine/ping`, `session/cancel`,
   `session/live-status`, `session/steer`, `session/terminate`, `machine/restart`,
   `machine/upgrade`, `session/dispatch-turn`)
-  bypass the shared semaphore and run on a small dedicated lane
-  (`CONTROL_METHODS` in `machine-rpc-server.ts`) so saturated code-collab
-  handlers cannot delay them at intake. Control handlers must stay fast
-  (ack-then-execute): `session/dispatch-turn` only stashes the payload and wakes the
-  dispatch watcher — never run the agent turn inside the handler. Its `expiresAt`
-  is deliberately short (== client timeout, ~15s) because a server restart replays
-  the request stream from offset `'-1'`.
+  bypass the shared semaphore through `CONTROL_METHODS`. Keep handlers fast:
+  `session/dispatch-turn` stashes and wakes the watcher; never execute the agent inline.
+  Its short TTL equals the client deadline, bounding restart replay from `'-1'`.
+- History writes require durable precondition-refusal retention before replying.
+  Replayed IDs keep that refusal until expiry; conflicting ID reuse and unavailable
+  request state fail closed. Details: [history readiness](../../.agents/docs/rpc-loro-streams-rpc.md#history-readiness-and-error-provenance).
 - Session orchestration authorization is checked source-side with the source CLI
   token because workspace RPC cannot authenticate a claimed requester identity.
   `session/live-status` reads the target

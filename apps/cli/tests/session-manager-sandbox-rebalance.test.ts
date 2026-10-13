@@ -1,4 +1,11 @@
-import { Effect } from 'effect';
+import { makeApplicationRuntime } from '@lody/shared/node/application-runtime';
+import {
+  LoginShellCache,
+  LoginShellCacheLive,
+  LoginShellEnvironment,
+} from '@lody/shared/node/login-shell-env';
+import { bindLoginShellCacheLegacy } from '../src/agent/login-shell-env';
+import { Cause, Effect, Layer } from 'effect';
 import type { SessionPreparationSpec } from '@lody/shared';
 import type { GitCredentialLease } from '../src/lib/git-credential-broker';
 import {
@@ -12,7 +19,7 @@ import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import path from 'node:path';
 import { Session } from '../src/session/session';
 
-import { describe, expect, it, vi, afterEach } from 'vitest';
+import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import type { ACPSessionId, LocalProjectId, SessionId, WorkspaceId } from '@lody/shared';
 
 import { SessionManager, type ISession } from '../src/session/session-manager';
@@ -23,6 +30,25 @@ import type { SessionSandbox, SessionSandboxLimits } from '../src/session/sessio
 import type { GitHubTokenManager } from '../src/lib/github-token-manager';
 import { GitCredentialBroker } from '../src/lib/git-credential-broker';
 import { createTestCloudPort } from './test-cloud-port';
+
+// Sessions borrow the same explicit application owner as production launchers.
+let shellOwner: ReturnType<typeof makeApplicationRuntime<LoginShellCache, never>>;
+beforeEach(() => {
+  shellOwner = makeApplicationRuntime(
+    LoginShellCacheLive.pipe(
+      Layer.provide(
+        Layer.succeed(LoginShellEnvironment, {
+          probe: () => Effect.succeed({}),
+        })
+      )
+    ),
+    { recover: Effect.failCause, project: Cause.squash }
+  );
+  bindLoginShellCacheLegacy(shellOwner);
+});
+afterEach(async () => {
+  await shellOwner.closeLegacy();
+});
 
 const GIB = 1024 * 1024 * 1024;
 
@@ -543,6 +569,109 @@ describe('SessionManager sandbox rebalance', () => {
       await manager.validateSessionCredentials(session, 'user-2');
       await stale.release();
       expect(config.env).toEqual(nativeEnv);
+    }
+  );
+});
+
+describe('SessionManager identity preflight', () => {
+  it.each(['timeout', 'rejection', 'abandon', 'cancel'] as const)(
+    '%s never leaves startup waiting on identity or revives a retired attempt',
+    async (mode) => {
+      const directory = mkdtempSync(path.join(os.tmpdir(), 'lody-identity-preflight-'));
+      vi.stubEnv('LODY_DATA_DIR', directory);
+      const entered = Promise.withResolvers<void>();
+      const answer = Promise.withResolvers<{ personalEnabled: boolean }>();
+      const doc = createWorkspaceDocument();
+      let persistedId: string | undefined;
+      vi.mocked(doc.getOrCreateSessionDoc).mockResolvedValue({
+        setRepoFullName: async () => {},
+        setACPSessionId: async (id: string) => {
+          persistedId = id;
+        },
+      } as never);
+      const manager = new SessionManager(
+        createSilentLogger(),
+        'token',
+        'machine-1',
+        'workspace-1',
+        doc,
+        {
+          cloudPort: createTestCloudPort(),
+          sessionSandboxFactory: async () => createSandbox(),
+        }
+      );
+      Object.assign(manager, {
+        githubTokenManager: {
+          getCredentialPolicy: () => {
+            if (!vi.isFakeTimers())
+              vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+            entered.resolve();
+            return mode === 'rejection' ? Promise.reject(new Error('offline')) : answer.promise;
+          },
+        },
+      });
+      // Keep this fixture on native credentials; it exercises the real manager
+      // startup and identity policy, not the unrelated credential broker.
+      const config: SessionConfig = {
+        ...createConfig('identity-preflight'),
+        assumeDocExisting: true,
+        agentCliType: 'custom',
+        agentType: 'custom-fixture',
+        customAcp: { command: 'fixture', args: [] },
+        project: { kind: 'local', localProjectId: 'fixture' as LocalProjectId },
+        workdir: directory,
+      };
+      let launched = false;
+      vi.spyOn(Session.prototype, 'createAgent').mockImplementation(async () => {
+        launched = true;
+        return 'fixture-acp';
+      });
+      const pending = manager.createSession(config);
+      // Observe rejection before cancellation to avoid an unhandled rejection.
+      const outcome = pending.then(
+        (session) => ({ session }),
+        (error: unknown) => ({ error })
+      );
+      try {
+        await entered.promise;
+        if (mode === 'abandon' || mode === 'cancel') {
+          if (mode === 'abandon')
+            manager.abandonPendingSessionCreate(config.sessionId!, 'cancelled fixture');
+          else await manager.requestSessionTerminate(config.sessionId!);
+          vi.useRealTimers();
+          expect(await outcome).toHaveProperty('error');
+          answer.resolve({ personalEnabled: true });
+          await answer.promise;
+          expect(launched).toBe(false);
+          expect(persistedId).toBeUndefined();
+          expect(manager.getSession(config.sessionId!)).toBeNull();
+          expect(manager.getPendingSession(config.sessionId!)).toBeNull();
+          // A new attempt for the same Session must have an independent lifetime.
+          Object.assign(manager, {
+            githubTokenManager: { getCredentialPolicy: async () => ({ personalEnabled: false }) },
+          });
+          const replacement = await manager.createSession({ ...config });
+          expect(manager.getSession(config.sessionId!)).toBe(replacement);
+          expect(persistedId).toBe('fixture-acp');
+          await replacement.terminate(true);
+        } else {
+          await vi.advanceTimersByTimeAsync(6_000);
+          vi.useRealTimers();
+          const result = await outcome;
+          if (!('session' in result)) throw result.error;
+          expect(launched).toBe(true);
+          expect(persistedId).toBe('fixture-acp');
+          const identity = result.session.getGitIdentityForUser('user-1');
+          answer.resolve({ personalEnabled: true });
+          await answer.promise;
+          expect(result.session.getGitIdentityForUser('user-1')).toEqual(identity);
+          await result.session.terminate(true);
+        }
+      } finally {
+        vi.useRealTimers();
+        vi.unstubAllEnvs();
+        rmSync(directory, { recursive: true, force: true });
+      }
     }
   );
 });

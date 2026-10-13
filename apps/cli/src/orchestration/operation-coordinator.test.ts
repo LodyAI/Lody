@@ -1146,6 +1146,37 @@ describe('LodyOperationCoordinator', () => {
     }
   });
 
+  it('saves late completion without waking a stopped tree and does not replay it on restore', async () => {
+    const harness = await makeHarness({ deadlineAt: '2026-07-19T23:59:59.000Z' });
+    const meta = harness.metas.get(harness.requesterSessionId)!;
+    meta.collaborationStopped = true;
+    // Any wake would fail the test; assertions below check the durable result too.
+    harness.continueSession.mockImplementation(async () => {
+      throw new Error('Stopped tree was awakened');
+    });
+    harness.coordinator.start();
+    await harness.coordinator.idle();
+    const history = harness.histories.get(harness.requesterSessionId)!;
+    expect(history).toHaveLength(1);
+    expect(history[0]?.items[0]).toMatchObject({
+      type: 'operation_completion',
+      continuation: { status: 'not_started', reason: { code: 'COLLABORATION_STOPPED' } },
+    });
+    meta.collaborationStopped = false;
+    await harness.coordinator.wake('restore');
+    await harness.coordinator.idle();
+    harness.coordinator.stop();
+    const store = new LodyOperationStore(harness.storePath, () => TEST_NOW_MS);
+    try {
+      expect(store.getDelivery(harness.requesterSessionId, 'review-round-1').state).toBe(
+        'consumed'
+      );
+      expect(history).toHaveLength(1);
+    } finally {
+      store.close();
+    }
+  });
+
   it('does not write history while archived and becomes eligible after restore', async () => {
     const harness = await makeHarness({
       requesterArchived: true,

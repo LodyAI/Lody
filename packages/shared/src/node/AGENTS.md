@@ -5,6 +5,20 @@
 Node-only helpers shared by the CLI, the desktop main process and the CLI
 supervisor. Package rules: [shared](../../AGENTS.md).
 
+## Local-project Git (`local-project.ts`)
+
+- Native workflows require `LocalProjects`, provided by `LocalProjectsLive` with
+  filesystem paths, host environment and the official process spawner. Compose
+  their Effects directly; do not call a Promise facade from an Effect workflow.
+- Expected Git statuses may represent absence. Startup, deadline, corruption,
+  filesystem and release failures must remain observable; parallel probe failure
+  interrupts and joins its siblings. Preserve exact-ref and canonical project
+  identity behavior.
+- `localProjectsLegacy` is the single deprecated execution facade for remaining
+  CLI entrypoints. Keep Legacy visible in calls; remove it after those owners
+  receive the native service. Its synchronous path/identity methods remain
+  explicitly blocking. Worktree setup/GC still need their own lifecycle migration.
+
 ## Process layer (`process.ts`)
 
 The one implementation that starts, awaits and signals OS processes for the CLI,
@@ -28,16 +42,26 @@ record: [process tree layer](../../../../.agents/notes/implemented/architecture/
   `apps/electron/src/main`, `packages/cli-supervisor`,
   `packages/code-review-helper` and this directory; its allowlist names each
   exception and its reason.
-- The login-shell environment has one probe, `login-shell-env.ts`, shared by
-  the CLI and the desktop.
+- Login-shell probes use `LoginShellEnvironment`; the shared `LoginShellCache`
+  Layer owns one producer in the application's Scope. Reader cancellation/timeout
+  does not stop siblings; application shutdown interrupts and joins the producer.
+  `makeApplicationRuntime` joins concurrent disposal and retains recovery owners
+  after failed Scope close. Only named Legacy application boundaries execute.
+  Preserve timeout/release failure owners; never cache failure as empty success. Read [the decision](../../../../.agents/notes/implemented/architecture/2026-10-10-effect-login-shell-probe.md)
+  before changing the probe or either cache consumer.
 - `process.ts` stays one module with no relative imports: Electron's
   `node --test` cannot resolve extensionless relative imports.
 - Missing a capability (a new spawn shape, a pid-only kill)? Add it to
   `process.ts` with a test and a facade; never work around the layer in a caller.
 - End processes through the official Effect handle or `terminateTree`; never add another
   SIGTERM→wait→SIGKILL loop. Every wait is bounded, and a tree that cannot be
-  proven gone fails with `TerminationFailed`, never success. A caller that
-  cannot act on it logs it at `warn`, naming the tree.
+  proven gone fails with `TerminationFailed`, never success. Scope release failure
+  is a `ProcessReleaseFailed` defect carrying the unresolved tree's recovery lease;
+  retain it until `isAlive` proves absence or `retryTermination` succeeds. Logging
+  alone cannot turn that failure into success. Promise boundaries must use
+  `squashProcessFailure` to preserve every lease alongside the primary failure.
+  Acquisition error conversions preserve the full Cause, including release
+  defects from the spawner's failed child Scope, before reaching that boundary.
 - Termination often runs in a finalizer, where nothing is interruptible: bound
   its waits by the clock (`waitUntilGone`), never by `timeout*` or a race.
 - Never signal a child without a pid (pid 0 is the caller's own group), and
@@ -54,3 +78,34 @@ record: [process tree layer](../../../../.agents/notes/implemented/architecture/
   Promise door. Tests use `@effect/vitest` with `TestClock` and
   `process-testing.ts` (the fake process table); a real-process test waits on
   explicit readiness output, never on elapsed time.
+
+## File locks (`file-lock.ts`)
+
+- Native workflows compose `withFileLock` through one owner-provided `FileLocks`
+  service. Only unmigrated application entrypoints use `fileLocksLegacy`; keep
+  Legacy visible and never execute it inside a native Effect workflow.
+- Resolve each operation using explicit locksDir, current LODY_LOCKS_DIR, then
+  current profile locks; production composition must not freeze environment paths.
+- Keep strict FIFO, fail-fast same-context reentry, profile paths and the deadline
+  that starts after local admission. A plain Semaphore does not preserve FIFO
+  on immediate reacquisition in 4.0.2. Use the owned Ref/Deferred handoff.
+- Publish complete metadata exclusively; register release before the body. Cancelled
+  tickets leave the queue immediately. Retain failed release generations, verify
+  pid plus token, and surface unreadable-lock/cleanup errors. Changed stale
+  generations must return to backoff/deadline checks. Stale cleanup also collects
+  crash-orphan scratch using ownership/age checks, preserving fresh live
+  candidates and giving unidentified preparation a 30-minute grace period. Decision and limits:
+  [file lock lifecycle](../../../../.agents/notes/implemented/architecture/2026-10-10-effect-file-lock-lifecycle.md).
+
+- Bound each release wait independently (5 seconds), retain and join the original
+  pending OS deletion, and block replacement until actual completion. A timeout
+  never proves unlink stopped. Only settled failures permit a new deletion attempt.
+- Retry acquisition only; body/release failures preserve the full Cause. Use
+  `squashFileLockFailure` at Legacy boundaries to retain every lock cleanup owner
+  alongside process leases and the original operation failure.
+
+## Local Loro writer boundary
+
+`local-loro-writer.ts` owns the real Node turn and socket write/drain adapters.
+Applications provide one process-wide writer; never add a workspace scheduler.
+Native workflow and release rules: [writer](../local-loro-writer/AGENTS.md).

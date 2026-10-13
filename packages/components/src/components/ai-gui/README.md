@@ -170,6 +170,20 @@ defines locale-specific spacing for these labels.
   a resize samples it before the scroll event. Taps, pinches, horizontal gestures,
   cancelled touches and nested scrolling do not leave momentum evidence. Model and
   adapter tests cover these orderings; iOS device behavior still needs verification.
+- **Native bottom arrival.** The controller samples elastic `scrollTop` in the
+  valid range, so overshoot/rebound does not fight a programmatic bottom reset.
+  Only conversation input can re-arm follow. An exact-edge arrival retains native
+  input; the 4px near-edge and remembered stale-bottom cases snap on `scrollend`.
+  Unconfirmed wheel/key evidence expires 100ms after the first animation callback,
+  allowing compositor-driven motion to start. Body keys require actual viewport
+  movement before releasing follow.
+  Boundary inputs, button Space and prevented bubbling keys cannot arm a new
+  sequence. Relative layout compensation uses the raw
+  elastic offset as its write baseline, while intent and anchors use bounded offsets.
+  Focus, pointer input or editing outside the viewport clears previous evidence,
+  including when the composer already has focus. Hosts without `scrollend` still
+  follow at the exact edge; near-edge recovery needs that native signal.
+  [Decision and verification](../../../../../.agents/notes/implemented/bug-fix/2026-10-11-mobile-conversation-bottom-ownership.md).
 - **`buildChatStreamItems()` filtering.** An empty assistant entry renders `null`,
   which Virtua cannot measure, and a duplicate history id produces a duplicate key
   that desyncs the list.
@@ -218,9 +232,15 @@ No `searchBlockId` is passed: search indexes the conversation, not a dialog.
 `subagent-task-panel.tsx` owns rows and the selected task;
 `subagent-task-detail.tsx` owns the dialog body and cancellation. Panel, detail and
 run-history styles each live in their adjacent `.stylex.ts` file and use shared
-conversation spacing and UI text tokens. Background command briefs use the same
-`ToolCommandSection` and `ToolDetailSheet` as tool steps, including shell highlighting
-and conversation font sizing. The brief and activity share one vertical scroller.
+conversation spacing and UI text tokens. Claude `local_bash` tasks display as `Bash`,
+including Core metadata that carries the type in `actor`. Aggregation joins their
+`toolUseId` to an execute tool's `toolCallId` within the same turn and derives the
+command from its stored `terminal_command` block. The dialog retains the description
+as Brief and shows a resolved command separately using `ToolCommandSection` and
+`ToolDetailSheet`, including shell highlighting and conversation font sizing.
+Missing tool evidence leaves only the Brief; descriptions are never guessed to be
+commands. This is a render-time association and does not rewrite stored history.
+The brief and activity share one vertical scroller.
 
 State comes from `run.snapshot.state` when present; the legacy `status` cannot
 say cancelled or unknown. `unknown` means Lody lost sight of the run, so the
@@ -247,6 +267,19 @@ so a long-running child is reachable before its Operation completes. Status come
 from the creating Operation's target Turn, not later Session activity. Completion
 rows linked by `progressMessageId` show a summary without creating a second set of
 cards. Older histories without progress rows retain successful-target cards.
+
+`created-session-list.tsx` uses the Subagent Task panel surface and ruled rows,
+with leading status marks and no repeated “Session created” labels. The header
+reports the total and expands/collapses lists longer than five rows; the default
+viewport holds five compact rows with internal scrolling. Expanded lists retain
+the Subagent Task panel’s 22rem height cap and internal scrollbar. Controls use `@lody/ui`.
+`buildChatVirtualRows` combines consecutive pure creation records (including
+separate MCP calls) under the first record's key; a different message or an
+unhydrated turn ends the group. The row retains its final turn index so visible
+range reporting keeps every grouped turn hydrated. Failure/continuation summaries
+remain outside the bounded card list, and card navigation/title/status remain live.
+Message-selection mode keeps original rows so each selected id matches one record.
+See the [decision note](../../../../../.agents/notes/implemented/feature/2026-10-11-created-session-list.md).
 
 Coverage: `SessionRelationCard.stories.tsx`, `tests/session-relation-card.test.tsx`,
 and CLI `tests/operation-progress-history.test.ts`. The latter uses real Loro Mirror

@@ -35,6 +35,7 @@ export interface SessionConfig {
   customAcp?: CustomAcpLaunchSpec;
   /** Advanced runtime binary override for builtin Claude/Codex. */
   runtimeOverrides?: BuiltinRuntimeOverrides;
+  magpieGatewayUrl?: string;
   project?: ProjectRef;
   // undefined means create a new session
   sessionId?: SessionId;

@@ -1,0 +1,36 @@
+{
+  "name": "@lody/e2ee-core",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./ledger": "./src/ledger/index.ts",
+    "./submission": "./src/submission/index.ts",
+    "./submission/sqlite": "./src/submission/sqlite.ts"
+  },
+  "scripts": {
+    "typecheck": "tsgo --noEmit",
+    "test": "vitest run",
+    "format": "oxfmt 'src/**/*.ts' 'test/**/*.ts'",
+    "format:check": "oxfmt --check 'src/**/*.ts' 'test/**/*.ts'"
+  },
+  "dependencies": {
+    "@hpke/chacha20poly1305": "1.8.0",
+    "@hpke/core": "1.9.0",
+    "@ipld/dag-cbor": "10.0.2",
+    "@noble/ciphers": "2.1.1",
+    "@noble/ed25519": "3.2.0",
+    "@noble/hashes": "2.2.0",
+    "effect": "catalog:",
+    "better-sqlite3": "catalog:"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "3.2.4",
+    "oxfmt": "^0.65.0",
+    "@types/better-sqlite3": "catalog:",
+    "tsx": "4.23.7"
+  }
+}

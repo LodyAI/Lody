@@ -427,6 +427,7 @@ describe('machine Flock helpers', () => {
         name: 'Codex',
         cliType: 'builtin',
         agentType: 'codex',
+        magpieGatewayUrl: 'http://127.0.0.1:3425',
         env: {},
         prompt: '',
       },

@@ -1,3 +1,11 @@
+import { Cause, Effect, Exit } from 'effect';
+import { makeLocalLoroWriterOwner } from './local-loro-writer';
+import { exportLocalFlock } from './local-loro-writer/sdk';
+import {
+  getProcessLocalLoroWriterLegacy,
+  LocalLoroWriterLegacyFailure,
+  type LocalLoroWriterLegacy,
+} from './local-loro-writer/legacy';
 import { LoroDoc, VersionVector } from 'loro-crdt';
 import type { TransportRoomStatus } from 'loro-repo';
 import {
@@ -22,10 +30,6 @@ import {
   type LocalLoroJoinMessage,
   type LocalLoroUpdateMessage,
 } from './local-loro-data-plane';
-import {
-  createLocalLoroDataPlaneScheduler,
-  type LocalLoroDataPlaneScheduler,
-} from './local-loro-data-plane-scheduler';
 
 /**
  * Flock-like CRDT (loro-repo Flock). Flock entries are self-contained LWW
@@ -123,7 +127,7 @@ export type LocalLoroDataPlaneServerOptions = {
   onError?: (error: unknown, context: string) => void;
   // Share one scheduler across workspace engines so no workspace's bulk export
   // can monopolize another workspace's local control path.
-  scheduler?: LocalLoroDataPlaneScheduler;
+  writerLegacy?: LocalLoroWriterLegacy;
 };
 
 type DocSubscriber = {
@@ -190,29 +194,6 @@ type WriterTask =
   | { kind: 'presence' }
   | { kind: 'machine-monitor' };
 
-type ConnectionWriter = {
-  connection: LocalLoroDataPlaneServerConnection;
-  queue: WriterTask[];
-  // Dedup for queued sync tasks (roomKey + peerId): a room that changes 100
-  // times while queued still costs one task — the write-time export sees all
-  // 100 changes at once.
-  queuedSyncKeys: Set<string>;
-  presenceQueued: boolean;
-  machineMonitorQueued: boolean;
-  // Frames built by the current task but not yet written (a chunked flock
-  // delta blocked mid-chunk resumes here before the next task runs).
-  pendingFrames: LocalLoroDataPlaneServerMessage[];
-  pumping: boolean;
-  pumpScheduled: boolean;
-  cancelScheduledPump: (() => void) | null;
-  blocked: boolean;
-  unsubscribeDrain: (() => void) | null;
-};
-
-function syncTaskKey(key: string, peerId: string): string {
-  return `${key}\n${peerId}`;
-}
-
 /**
  * Transport-agnostic server half of the local Loro data plane. It holds one
  * entry per room (shared across all peers), subscribes to the underlying CRDT
@@ -229,7 +210,9 @@ function syncTaskKey(key: string, peerId: string): string {
  * The engine performs no I/O — the CLI socket server (and the in-memory test
  * harness) drive it via `handleMessage`.
  */
-export class LocalLoroDataPlaneServer {
+/** @deprecated Room resolution/join/leave/import remains Promise orchestration.
+ * All outbound work consumes the one native LocalLoroWriter via its Legacy facade. */
+export class LocalLoroDataPlaneServerLegacy {
   private readonly rooms = new Map<string, RoomEntry>();
   // `null` resolves mean the build was superseded by an invalidation; retry.
   private readonly resolveInFlight = new Map<string, Promise<RoomEntry | null>>();
@@ -239,18 +222,21 @@ export class LocalLoroDataPlaneServer {
   // Every connected client receives workspace presence pushes.
   private readonly presenceReceivers = new Map<string, LocalLoroDataPlaneServerConnection>();
   private readonly machineMonitorReceivers = new Map<string, LocalLoroDataPlaneServerConnection>();
-  private readonly writers = new Map<string, ConnectionWriter>();
+  private readonly writerOwner = makeLocalLoroWriterOwner();
+  private readonly disconnectedIds = new Set<string>();
   private presenceUnsubscribe: (() => void) | null = null;
   private machineMonitorUnsubscribe: (() => void) | null = null;
   private docRoomJoinHandler: LocalLoroDocRoomJoinHandler | null = null;
   private docRoomLeaveHandler: LocalLoroDocRoomJoinHandler | null = null;
   private flockRoomJoinHandler: LocalLoroFlockRoomHandler | null = null;
   private flockRoomLeaveHandler: LocalLoroFlockRoomHandler | null = null;
-  private readonly scheduler: LocalLoroDataPlaneScheduler;
+  private readonly writerLegacy: LocalLoroWriterLegacy;
   private disposed = false;
+  private disposeReceipt: Promise<void> | null = null;
+  private disposeFailure: Cause.Cause<unknown> | null = null;
 
   constructor(private readonly options: LocalLoroDataPlaneServerOptions) {
-    this.scheduler = options.scheduler ?? createLocalLoroDataPlaneScheduler();
+    this.writerLegacy = options.writerLegacy ?? getProcessLocalLoroWriterLegacy();
     this.docRoomJoinHandler = options.onDocRoomJoin ?? null;
     this.docRoomLeaveHandler = options.onDocRoomLeave ?? null;
     this.flockRoomJoinHandler = options.onFlockRoomJoin ?? null;
@@ -357,16 +343,7 @@ export class LocalLoroDataPlaneServer {
 
   /** Forget queued writer work naming a room that no longer exists. */
   private dropQueuedRoomWork(key: string): void {
-    for (const writer of this.writers.values()) {
-      writer.queue = writer.queue.filter(
-        (task) => !((task.kind === 'sync' || task.kind === 'join-reply') && task.roomKey === key)
-      );
-      for (const taskKey of [...writer.queuedSyncKeys]) {
-        if (taskKey.startsWith(`${key}\n`)) {
-          writer.queuedSyncKeys.delete(taskKey);
-        }
-      }
-    }
+    this.writerLegacy.writer.dropRoom(this.writerOwner, key);
   }
 
   private get maxPayloadBytes(): number {
@@ -377,7 +354,10 @@ export class LocalLoroDataPlaneServer {
     connection: LocalLoroDataPlaneServerConnection,
     message: Exclude<LocalLoroDataPlaneClientMessage, { type: 'ping' }>
   ): Promise<void> {
-    if (this.disposed) {
+    if (this.disposed || this.disconnectedIds.has(connection.id)) {
+      return;
+    }
+    if (!this.writerOwner.active) {
       this.sendError(connection, {
         code: 'workspace_runtime_unavailable',
         peerId: message.peerId,
@@ -465,58 +445,83 @@ export class LocalLoroDataPlaneServer {
    * subscription AND every room's CRDT subscription, so a stale engine can never
    * keep pushing from a destroyed repo.
    */
-  dispose(): void {
+  disposeLegacy(): Promise<void> {
+    this.writerLegacy.writer.revoke(this.writerOwner);
     this.disposed = true;
-    this.presenceUnsubscribe?.();
-    this.presenceUnsubscribe = null;
-    this.machineMonitorUnsubscribe?.();
-    this.machineMonitorUnsubscribe = null;
-    this.presenceReceivers.clear();
-    this.machineMonitorReceivers.clear();
-    for (const entry of this.rooms.values()) {
-      entry.unsubscribe();
-      this.notifyDocRoomLeave(entry.room);
-      this.notifyFlockRoomLeave(entry.room);
-      entry.subscribers.clear();
-    }
-    this.rooms.clear();
-    this.roomGenerations.clear();
-    for (const writer of this.writers.values()) {
-      this.cancelScheduledDataPump(writer);
-      writer.unsubscribeDrain?.();
-      writer.queue.length = 0;
-      writer.pendingFrames.length = 0;
-    }
-    this.writers.clear();
+    return (this.disposeReceipt ??= Promise.resolve()
+      .then(async () => {
+        let failure: Cause.Cause<unknown> = Cause.empty;
+        const release = (cleanup: () => void) => {
+          try {
+            cleanup();
+          } catch (error) {
+            failure = Cause.combine(failure, Cause.die(error));
+          }
+        };
+        release(() => {
+          this.presenceUnsubscribe?.();
+          this.presenceUnsubscribe = null;
+        });
+        release(() => {
+          this.machineMonitorUnsubscribe?.();
+          this.machineMonitorUnsubscribe = null;
+        });
+        this.presenceReceivers.clear();
+        this.machineMonitorReceivers.clear();
+        for (const [key, entry] of this.rooms)
+          release(() => {
+            entry.unsubscribe();
+            entry.subscribers.clear();
+            this.rooms.delete(key);
+            this.notifyDocRoomLeave(entry.room);
+            this.notifyFlockRoomLeave(entry.room);
+          });
+        this.roomGenerations.clear();
+        const writer = await this.writerLegacy.executeEffect(
+          this.writerLegacy.writer.closeOwner(this.writerOwner).pipe(Effect.exit)
+        );
+        if (Exit.isFailure(writer)) failure = Cause.combine(failure, writer.cause);
+        if (failure.reasons.length > 0) {
+          this.disposeFailure ??= failure;
+          throw new LocalLoroWriterLegacyFailure(this.disposeFailure);
+        }
+        this.disposeFailure = null;
+      })
+      .finally(() => {
+        this.disposeReceipt = null;
+      }));
   }
 
-  /** Drop everything scoped to a dead socket (all peers it multiplexed). */
-  handleDisconnect(connectionId: string): void {
+  /** Synchronous revocation precedes the awaited physical-writer release. */
+  handleDisconnectLegacy(connectionId: string): Promise<void> {
+    this.disconnectedIds.add(connectionId);
     this.presenceReceivers.delete(connectionId);
     this.machineMonitorReceivers.delete(connectionId);
-    const writer = this.writers.get(connectionId);
-    if (writer) {
-      this.cancelScheduledDataPump(writer);
-      writer.unsubscribeDrain?.();
-      writer.queue.length = 0;
-      writer.pendingFrames.length = 0;
-      this.writers.delete(connectionId);
-    }
+    let failure: Cause.Cause<unknown> = Cause.empty;
     for (const key of [...this.rooms.keys()]) {
       const entry = this.rooms.get(key);
-      if (!entry) {
-        continue;
-      }
+      if (!entry) continue;
       for (const [peerId, subscriber] of [...entry.subscribers]) {
         if (subscriber.connection.id === connectionId) {
           entry.subscribers.delete(peerId);
-          if (entry.scope === 'doc') {
-            entry.uploadAssemblers.delete(peerId);
-          }
+          if (entry.scope === 'doc') entry.uploadAssemblers.delete(peerId);
         }
       }
-      this.releaseRoomIfEmpty(key, entry);
+      try {
+        this.releaseRoomIfEmptyLegacy(key, entry);
+      } catch (error) {
+        failure = Cause.combine(failure, Cause.die(error));
+      }
     }
+    return this.writerLegacy.executeEffect(
+      this.writerLegacy.writer.disconnect(connectionId).pipe(
+        Effect.exit,
+        Effect.flatMap((exit) => {
+          const combined = Exit.isFailure(exit) ? Cause.combine(failure, exit.cause) : failure;
+          return combined.reasons.length > 0 ? Effect.failCause(combined) : Effect.void;
+        })
+      )
+    );
   }
 
   /** Drop every subscription held by one peer (adapter close / dead window). */
@@ -533,6 +538,10 @@ export class LocalLoroDataPlaneServer {
     const key = roomKey(message.room);
     for (;;) {
       const entry = await this.ensureRoom(message.room);
+      if (this.disposed || this.disconnectedIds.has(connection.id)) {
+        this.releaseRoomIfEmptyLegacy(key, entry);
+        return;
+      }
       // The liveness check and the registration below MUST stay in one
       // synchronous block. `ensureRoom`'s generation check only covers the
       // window before the entry is installed, and every `await` after it —
@@ -615,6 +624,10 @@ export class LocalLoroDataPlaneServer {
   ): Promise<void> {
     const key = roomKey(message.room);
     let entry = await this.ensureRoom(message.room);
+    if (this.disposed || this.disconnectedIds.has(connection.id)) {
+      this.releaseRoomIfEmptyLegacy(key, entry);
+      return;
+    }
     // Same one-synchronous-block requirement as `handleJoin`: an invalidation
     // landing after the entry was installed but before this resumes would make
     // the import below write into the doc the repo already evicted, on an entry
@@ -789,180 +802,67 @@ export class LocalLoroDataPlaneServer {
     for (const subscriber of entry.subscribers.values()) {
       this.enqueueSync(subscriber.connection, key, subscriber.peerId);
     }
-    this.releaseRoomIfEmpty(key, entry);
+    this.releaseRoomIfEmptyLegacy(key, entry);
   }
 
-  // ---- Per-connection writer ----
-
-  private writerFor(connection: LocalLoroDataPlaneServerConnection): ConnectionWriter {
-    const existing = this.writers.get(connection.id);
-    if (existing) {
-      return existing;
-    }
-    const writer: ConnectionWriter = {
-      connection,
-      queue: [],
-      queuedSyncKeys: new Set(),
-      presenceQueued: false,
-      machineMonitorQueued: false,
-      pendingFrames: [],
-      pumping: false,
-      pumpScheduled: false,
-      cancelScheduledPump: null,
-      blocked: false,
-      unsubscribeDrain: null,
-    };
-    writer.unsubscribeDrain =
-      connection.onDrain?.(() => {
-        writer.blocked = false;
-        this.scheduleDataPump(writer);
-      }) ?? null;
-    this.writers.set(connection.id, writer);
-    return writer;
+  // Native writer admission; room resolution/import/lifecycle above remains Legacy.
+  private offer(connection: LocalLoroDataPlaneServerConnection, task: WriterTask): void {
+    if (this.disposed || this.disconnectedIds.has(connection.id)) return;
+    const room =
+      task.kind === 'sync' || task.kind === 'join-reply' ? this.rooms.get(task.roomKey) : null;
+    const subscriber =
+      room && (task.kind === 'sync' || task.kind === 'join-reply')
+        ? room.subscribers.get(task.peerId)
+        : null;
+    this.writerLegacy.writer.offer(connection, {
+      owner: this.writerOwner,
+      key:
+        task.kind === 'sync'
+          ? `sync:${task.roomKey}\n${task.peerId}`
+          : task.kind === 'presence' || task.kind === 'machine-monitor'
+            ? task.kind
+            : undefined,
+      roomKey: task.kind === 'sync' || task.kind === 'join-reply' ? task.roomKey : undefined,
+      valid: () =>
+        !this.disposed &&
+        !this.disconnectedIds.has(connection.id) &&
+        (!room ||
+          ((task.kind === 'sync' || task.kind === 'join-reply') &&
+            this.rooms.get(task.roomKey) === room &&
+            room.subscribers.get(task.peerId) === subscriber &&
+            (task.kind !== 'join-reply' || subscriber?.latestJoinRequestId === task.requestId))),
+      build: this.buildFrames(connection, task),
+      onCause: (cause) =>
+        this.options.onError?.(new LocalLoroWriterLegacyFailure(cause), `writer:${task.kind}`),
+    });
   }
 
   private enqueueMessage(
     connection: LocalLoroDataPlaneServerConnection,
     message: LocalLoroDataPlaneServerMessage
   ): void {
-    const writer = this.writerFor(connection);
-    writer.queue.push({ kind: 'message', message });
-    this.scheduleDataPump(writer);
+    this.offer(connection, { kind: 'message', message });
   }
-
   private enqueueJoinReply(
     connection: LocalLoroDataPlaneServerConnection,
     key: string,
     peerId: string,
     requestId: string
   ): void {
-    const writer = this.writerFor(connection);
-    writer.queue.push({ kind: 'join-reply', roomKey: key, peerId, requestId });
-    this.scheduleDataPump(writer);
+    this.offer(connection, { kind: 'join-reply', roomKey: key, peerId, requestId });
   }
-
   private enqueueSync(
     connection: LocalLoroDataPlaneServerConnection,
     key: string,
     peerId: string
   ): void {
-    const writer = this.writerFor(connection);
-    const taskKey = syncTaskKey(key, peerId);
-    if (writer.queuedSyncKeys.has(taskKey)) {
-      return;
-    }
-    writer.queuedSyncKeys.add(taskKey);
-    writer.queue.push({ kind: 'sync', roomKey: key, peerId });
-    this.scheduleDataPump(writer);
+    this.offer(connection, { kind: 'sync', roomKey: key, peerId });
   }
-
   private enqueuePresence(connection: LocalLoroDataPlaneServerConnection): void {
-    const writer = this.writerFor(connection);
-    if (writer.presenceQueued) {
-      return;
-    }
-    writer.presenceQueued = true;
-    writer.queue.push({ kind: 'presence' });
-    this.scheduleDataPump(writer);
+    this.offer(connection, { kind: 'presence' });
   }
-
   private enqueueMachineMonitor(connection: LocalLoroDataPlaneServerConnection): void {
-    const writer = this.writerFor(connection);
-    if (writer.machineMonitorQueued) return;
-    writer.machineMonitorQueued = true;
-    writer.queue.push({ kind: 'machine-monitor' });
-    this.scheduleDataPump(writer);
-  }
-
-  private isWriterActive(writer: ConnectionWriter): boolean {
-    return !this.disposed && this.writers.get(writer.connection.id) === writer;
-  }
-
-  private cancelScheduledDataPump(writer: ConnectionWriter): void {
-    writer.cancelScheduledPump?.();
-    writer.cancelScheduledPump = null;
-    writer.pumpScheduled = false;
-  }
-
-  private hasPendingDataWork(writer: ConnectionWriter): boolean {
-    return writer.pendingFrames.length > 0 || writer.queue.length > 0;
-  }
-
-  private scheduleDataPump(writer: ConnectionWriter): void {
-    if (
-      !this.isWriterActive(writer) ||
-      writer.blocked ||
-      writer.pumping ||
-      writer.pumpScheduled ||
-      !this.hasPendingDataWork(writer)
-    ) {
-      return;
-    }
-    writer.pumpScheduled = true;
-    writer.cancelScheduledPump = this.scheduler.scheduleDataWork(() => {
-      writer.pumpScheduled = false;
-      writer.cancelScheduledPump = null;
-      return this.pumpWriter(writer).catch((error) => {
-        this.options.onError?.(error, 'pumpWriter');
-      });
-    });
-  }
-
-  private async pumpWriter(writer: ConnectionWriter): Promise<void> {
-    if (!this.isWriterActive(writer) || writer.pumping || writer.blocked) {
-      return;
-    }
-    writer.pumping = true;
-    try {
-      // One already-materialized frame is one complete scheduling quantum.
-      // Chunked catch-ups therefore yield between frames as well as exports.
-      const pendingFrame = writer.pendingFrames.shift();
-      if (pendingFrame) {
-        this.writeFrame(writer, pendingFrame);
-        return;
-      }
-
-      const task = writer.queue.shift();
-      if (!task) {
-        return;
-      }
-      if (task.kind === 'sync') {
-        writer.queuedSyncKeys.delete(syncTaskKey(task.roomKey, task.peerId));
-      } else if (task.kind === 'presence') {
-        writer.presenceQueued = false;
-      } else if (task.kind === 'machine-monitor') {
-        writer.machineMonitorQueued = false;
-      }
-      try {
-        const frames = await this.buildFrames(writer, task);
-        if (!this.isWriterActive(writer)) return;
-        writer.pendingFrames.push(...frames);
-      } catch (error) {
-        this.options.onError?.(error, `buildFrames:${task.kind}`);
-      }
-
-      if (!this.isWriterActive(writer) || writer.blocked) {
-        return;
-      }
-      const firstFrame = writer.pendingFrames.shift();
-      if (firstFrame) {
-        this.writeFrame(writer, firstFrame);
-      }
-    } finally {
-      writer.pumping = false;
-      if (this.isWriterActive(writer)) {
-        this.scheduleDataPump(writer);
-      }
-    }
-  }
-
-  private writeFrame(writer: ConnectionWriter, frame: LocalLoroDataPlaneServerMessage): void {
-    const accepted = writer.connection.send(frame);
-    // Only a connection that can signal drain may exert backpressure; ignoring
-    // `false` otherwise keeps in-memory harness connections trivial.
-    if (accepted === false && writer.unsubscribeDrain) {
-      writer.blocked = true;
-    }
+    this.offer(connection, { kind: 'machine-monitor' });
   }
 
   /**
@@ -970,76 +870,82 @@ export class LocalLoroDataPlaneServer {
    * payloads are exported, so exports always run against the peer's live
    * frontier — everything that changed while the task waited is one delta.
    */
-  private async buildFrames(
-    writer: ConnectionWriter,
+  private buildFrames(
+    connection: LocalLoroDataPlaneServerConnection,
     task: WriterTask
-  ): Promise<LocalLoroDataPlaneServerMessage[]> {
-    switch (task.kind) {
-      case 'message':
-        return [task.message];
-      case 'presence': {
-        const source = this.options.presenceSource;
-        if (!source) {
-          return [];
+  ): Effect.Effect<LocalLoroDataPlaneServerMessage[], unknown> {
+    const self = this;
+    return Effect.gen(function* () {
+      switch (task.kind) {
+        case 'message':
+          return [task.message];
+        case 'presence': {
+          const source = self.options.presenceSource;
+          if (!source) {
+            return [];
+          }
+          const encoded = source.encodeLocalOrigin();
+          if (encoded.length === 0) {
+            return [];
+          }
+          return [
+            {
+              type: 'presence',
+              protocolVersion: LOCAL_LORO_DATA_PLANE_PROTOCOL_VERSION,
+              workspaceId: self.options.workspaceId,
+              dataBase64: bytesToBase64(encoded),
+            },
+          ];
         }
-        const encoded = source.encodeLocalOrigin();
-        if (encoded.length === 0) {
-          return [];
+        case 'machine-monitor': {
+          const source = self.options.machineMonitorSource;
+          if (!source) return [];
+          const encoded = source.encodeAll();
+          if (encoded.length === 0) return [];
+          return [
+            {
+              type: 'machine-monitor',
+              protocolVersion: LOCAL_LORO_DATA_PLANE_PROTOCOL_VERSION,
+              workspaceId: self.options.workspaceId,
+              dataBase64: bytesToBase64(encoded),
+            },
+          ];
         }
-        return [
-          {
-            type: 'presence',
-            protocolVersion: LOCAL_LORO_DATA_PLANE_PROTOCOL_VERSION,
-            workspaceId: this.options.workspaceId,
-            dataBase64: bytesToBase64(encoded),
-          },
-        ];
+        case 'join-reply':
+          return yield* self.buildJoinReplyFrames(connection, task);
+        case 'sync':
+          return yield* self.buildSyncFrames(connection, task.roomKey, task.peerId, null);
       }
-      case 'machine-monitor': {
-        const source = this.options.machineMonitorSource;
-        if (!source) return [];
-        const encoded = source.encodeAll();
-        if (encoded.length === 0) return [];
-        return [
-          {
-            type: 'machine-monitor',
-            protocolVersion: LOCAL_LORO_DATA_PLANE_PROTOCOL_VERSION,
-            workspaceId: this.options.workspaceId,
-            dataBase64: bytesToBase64(encoded),
-          },
-        ];
-      }
-      case 'join-reply':
-        return await this.buildJoinReplyFrames(writer, task);
-      case 'sync':
-        return await this.buildSyncFrames(writer, task.roomKey, task.peerId, null);
-    }
-    const exhaustive: never = task;
-    throw new Error(`Unsupported local data-plane writer task: ${String(exhaustive)}`);
+      const exhaustive: never = task;
+      throw new Error(`Unsupported local data-plane writer task: ${String(exhaustive)}`);
+    });
   }
 
-  private async buildJoinReplyFrames(
-    writer: ConnectionWriter,
+  private buildJoinReplyFrames(
+    connection: LocalLoroDataPlaneServerConnection,
     task: { roomKey: string; peerId: string; requestId: string }
-  ): Promise<LocalLoroDataPlaneServerMessage[]> {
-    const entry = this.rooms.get(task.roomKey);
-    if (!entry) {
-      return [];
-    }
-    const subscriber = entry.subscribers.get(task.peerId);
-    // Left/detached while queued, or superseded by a rejoin on another
-    // connection — the newer connection's own join-reply answers it.
-    if (!subscriber || subscriber.connection.id !== writer.connection.id) {
-      return [];
-    }
-    // Superseded by a newer join on the SAME connection (e.g. a visibility-wake
-    // force reconnect racing the relay's own rejoin). The client only accepts
-    // the reply matching its latest pending requestId, so building this one
-    // would advance the send frontier for a discarded reply.
-    if (subscriber.latestJoinRequestId !== task.requestId) {
-      return [];
-    }
-    return await this.buildSyncFrames(writer, task.roomKey, task.peerId, task.requestId);
+  ): Effect.Effect<LocalLoroDataPlaneServerMessage[], unknown> {
+    const self = this;
+    return Effect.gen(function* () {
+      const entry = self.rooms.get(task.roomKey);
+      if (!entry) {
+        return [];
+      }
+      const subscriber = entry.subscribers.get(task.peerId);
+      // Left/detached while queued, or superseded by a rejoin on another
+      // connection — the newer connection's own join-reply answers it.
+      if (!subscriber || subscriber.connection.id !== connection.id) {
+        return [];
+      }
+      // Superseded by a newer join on the SAME connection (e.g. a visibility-wake
+      // force reconnect racing the relay's own rejoin). The client only accepts
+      // the reply matching its latest pending requestId, so building this one
+      // would advance the send frontier for a discarded reply.
+      if (subscriber.latestJoinRequestId !== task.requestId) {
+        return [];
+      }
+      return yield* self.buildSyncFrames(connection, task.roomKey, task.peerId, task.requestId);
+    });
   }
 
   /**
@@ -1047,178 +953,183 @@ export class LocalLoroDataPlaneServer {
    * frame is the `joined` reply (carrying the catch-up payload when non-empty);
    * chunked flock catch-ups continue as ordinary `update` frames behind it.
    */
-  private async buildSyncFrames(
-    writer: ConnectionWriter,
+  private buildSyncFrames(
+    connection: LocalLoroDataPlaneServerConnection,
     key: string,
     peerId: string,
     joinRequestId: string | null
-  ): Promise<LocalLoroDataPlaneServerMessage[]> {
-    const entry = this.rooms.get(key);
-    if (!entry) {
-      return [];
-    }
-    const subscriber = entry.subscribers.get(peerId);
-    if (!subscriber || subscriber.connection.id !== writer.connection.id) {
-      return [];
-    }
-    if (entry.scope === 'doc') {
-      const docSubscriber = subscriber as DocSubscriber;
-      // Capture BEFORE export: ops landing in between are re-sent next pass
-      // (idempotent) instead of silently skipped.
-      const serverVV = entry.doc.oplogVersion();
-      const delta = entry.doc.export({ mode: 'update', from: docSubscriber.lastSentVV });
-      const serverVersion = bytesToBase64(serverVV.encode());
-      const dataBase64 = delta.length > 0 ? bytesToBase64(delta) : null;
-      docSubscriber.lastSentVV = serverVV;
-      if (dataBase64 && dataBase64.length > this.maxPayloadBytes) {
-        // A Loro update blob is causally dependent, so it cannot be split into
-        // independently importable pieces — but it CAN be sliced at the
-        // transport layer: the peer reassembles `doc-update-chunk` frames (in
-        // order on this connection) back into the full payload before one
-        // import. A big session doc's first catch-up export is a realistic
-        // oversize; this replaces the former terminal `payload_too_large`
-        // room failure. On join the `joined` reply goes first (no payload) so
-        // the client reconciles its up-sync against `serverVersion` while the
-        // chunked catch-up streams in behind it.
-        const chunkPayloads = buildDocUpdateChunkPayloads(
-          dataBase64,
-          this.maxPayloadBytes,
-          createDocUpdateTransferId()
-        );
-        const frames: LocalLoroDataPlaneServerMessage[] = [];
-        if (joinRequestId !== null) {
-          frames.push({
-            type: 'joined',
-            protocolVersion: LOCAL_LORO_DATA_PLANE_PROTOCOL_VERSION,
-            workspaceId: this.options.workspaceId,
-            peerId,
-            requestId: joinRequestId,
-            room: entry.room,
-            serverVersion,
-          });
-        }
-        for (const payload of chunkPayloads) {
-          frames.push({
-            type: 'update',
-            protocolVersion: LOCAL_LORO_DATA_PLANE_PROTOCOL_VERSION,
-            workspaceId: this.options.workspaceId,
-            peerId,
-            room: entry.room,
-            serverVersion,
-            payload,
-          });
-        }
-        return frames;
-      }
-      if (joinRequestId !== null) {
-        return [
-          {
-            type: 'joined',
-            protocolVersion: LOCAL_LORO_DATA_PLANE_PROTOCOL_VERSION,
-            workspaceId: this.options.workspaceId,
-            peerId,
-            requestId: joinRequestId,
-            room: entry.room,
-            serverVersion,
-            ...(dataBase64 ? { payload: { kind: 'doc-update', dataBase64 } } : {}),
-          },
-        ];
-      }
-      if (!dataBase64) {
+  ): Effect.Effect<LocalLoroDataPlaneServerMessage[], unknown> {
+    const self = this;
+    return Effect.gen(function* () {
+      const entry = self.rooms.get(key);
+      if (!entry) {
         return [];
       }
-      return [
-        {
-          type: 'update',
-          protocolVersion: LOCAL_LORO_DATA_PLANE_PROTOCOL_VERSION,
-          workspaceId: this.options.workspaceId,
-          peerId,
-          room: entry.room,
-          serverVersion,
-          payload: { kind: 'doc-update', dataBase64 },
-        },
-      ];
-    }
-    const flockSubscriber = subscriber as FlockSubscriber;
-    // Same capture-before-export contract as docs, with merge-only advance.
-    const have = entry.flock.version();
-    const bundle = await entry.flock.exportJson(flockSubscriber.lastSentVersion);
-
-    // exportJson may yield. A newer join can replace this subscriber while the
-    // export is running, including on the same connection. Do not send the old
-    // reply or advance a frontier for a response the client will discard.
-    const currentEntry = this.rooms.get(key);
-    const currentSubscriber =
-      currentEntry?.scope === 'flock'
-        ? (currentEntry.subscribers.get(peerId) as FlockSubscriber | undefined)
-        : undefined;
-    if (
-      currentEntry !== entry ||
-      currentSubscriber !== flockSubscriber ||
-      currentSubscriber.connection.id !== writer.connection.id ||
-      (joinRequestId !== null && currentSubscriber.latestJoinRequestId !== joinRequestId)
-    ) {
-      return [];
-    }
-
-    flockSubscriber.lastSentVersion = mergeFlockVersions(flockSubscriber.lastSentVersion, have);
-    // Report the server's TRUE frontier, like the doc branch does with
-    // `oplogVersion()`. `lastSentVersion` is per-peer down-sync bookkeeping
-    // seeded from the peer's own `haveVersion`; echoing it back would claim the
-    // server holds everything the client holds, poisoning the client's up-sync
-    // baseline (`exportJson(from = serverVersion)` would then skip client-ahead
-    // entries forever, e.g. after a dropped upload frame).
-    const serverVersion = encodeFlockVersion(have);
-    if (isEmptyFlockBundle(bundle)) {
-      if (joinRequestId !== null) {
+      const subscriber = entry.subscribers.get(peerId);
+      if (!subscriber || subscriber.connection.id !== connection.id) {
+        return [];
+      }
+      if (entry.scope === 'doc') {
+        const docSubscriber = subscriber as DocSubscriber;
+        // Capture BEFORE export: ops landing in between are re-sent next pass
+        // (idempotent) instead of silently skipped.
+        const serverVV = entry.doc.oplogVersion();
+        const delta = entry.doc.export({ mode: 'update', from: docSubscriber.lastSentVV });
+        const serverVersion = bytesToBase64(serverVV.encode());
+        const dataBase64 = delta.length > 0 ? bytesToBase64(delta) : null;
+        docSubscriber.lastSentVV = serverVV;
+        if (dataBase64 && dataBase64.length > self.maxPayloadBytes) {
+          // A Loro update blob is causally dependent, so it cannot be split into
+          // independently importable pieces — but it CAN be sliced at the
+          // transport layer: the peer reassembles `doc-update-chunk` frames (in
+          // order on this connection) back into the full payload before one
+          // import. A big session doc's first catch-up export is a realistic
+          // oversize; this replaces the former terminal `payload_too_large`
+          // room failure. On join the `joined` reply goes first (no payload) so
+          // the client reconciles its up-sync against `serverVersion` while the
+          // chunked catch-up streams in behind it.
+          const chunkPayloads = buildDocUpdateChunkPayloads(
+            dataBase64,
+            self.maxPayloadBytes,
+            createDocUpdateTransferId()
+          );
+          const frames: LocalLoroDataPlaneServerMessage[] = [];
+          if (joinRequestId !== null) {
+            frames.push({
+              type: 'joined',
+              protocolVersion: LOCAL_LORO_DATA_PLANE_PROTOCOL_VERSION,
+              workspaceId: self.options.workspaceId,
+              peerId,
+              requestId: joinRequestId,
+              room: entry.room,
+              serverVersion,
+            });
+          }
+          for (const payload of chunkPayloads) {
+            frames.push({
+              type: 'update',
+              protocolVersion: LOCAL_LORO_DATA_PLANE_PROTOCOL_VERSION,
+              workspaceId: self.options.workspaceId,
+              peerId,
+              room: entry.room,
+              serverVersion,
+              payload,
+            });
+          }
+          return frames;
+        }
+        if (joinRequestId !== null) {
+          return [
+            {
+              type: 'joined',
+              protocolVersion: LOCAL_LORO_DATA_PLANE_PROTOCOL_VERSION,
+              workspaceId: self.options.workspaceId,
+              peerId,
+              requestId: joinRequestId,
+              room: entry.room,
+              serverVersion,
+              ...(dataBase64 ? { payload: { kind: 'doc-update', dataBase64 } } : {}),
+            },
+          ];
+        }
+        if (!dataBase64) {
+          return [];
+        }
         return [
           {
+            type: 'update',
+            protocolVersion: LOCAL_LORO_DATA_PLANE_PROTOCOL_VERSION,
+            workspaceId: self.options.workspaceId,
+            peerId,
+            room: entry.room,
+            serverVersion,
+            payload: { kind: 'doc-update', dataBase64 },
+          },
+        ];
+      }
+      const flockSubscriber = subscriber as FlockSubscriber;
+      // Same capture-before-export contract as docs, with merge-only advance.
+      const have = entry.flock.version();
+      const bundle = yield* exportLocalFlock(entry.flock, flockSubscriber.lastSentVersion);
+
+      // exportJson may yield. A newer join can replace this subscriber while the
+      // export is running, including on the same connection. Do not send the old
+      // reply or advance a frontier for a response the client will discard.
+      const currentEntry = self.rooms.get(key);
+      const currentSubscriber =
+        currentEntry?.scope === 'flock'
+          ? (currentEntry.subscribers.get(peerId) as FlockSubscriber | undefined)
+          : undefined;
+      if (
+        self.disposed ||
+        self.disconnectedIds.has(connection.id) ||
+        currentEntry !== entry ||
+        currentSubscriber !== flockSubscriber ||
+        currentSubscriber.connection.id !== connection.id ||
+        (joinRequestId !== null && currentSubscriber.latestJoinRequestId !== joinRequestId)
+      ) {
+        return [];
+      }
+
+      flockSubscriber.lastSentVersion = mergeFlockVersions(flockSubscriber.lastSentVersion, have);
+      // Report the server's TRUE frontier, like the doc branch does with
+      // `oplogVersion()`. `lastSentVersion` is per-peer down-sync bookkeeping
+      // seeded from the peer's own `haveVersion`; echoing it back would claim the
+      // server holds everything the client holds, poisoning the client's up-sync
+      // baseline (`exportJson(from = serverVersion)` would then skip client-ahead
+      // entries forever, e.g. after a dropped upload frame).
+      const serverVersion = encodeFlockVersion(have);
+      if (isEmptyFlockBundle(bundle)) {
+        if (joinRequestId !== null) {
+          return [
+            {
+              type: 'joined',
+              protocolVersion: LOCAL_LORO_DATA_PLANE_PROTOCOL_VERSION,
+              workspaceId: self.options.workspaceId,
+              peerId,
+              requestId: joinRequestId,
+              room: entry.room,
+              serverVersion,
+            },
+          ];
+        }
+        return [];
+      }
+      const chunks = chunkFlockBundle(bundle, self.maxPayloadBytes);
+      if (!chunks) {
+        // A single flock ENTRY above the frame budget — pathological (chunking
+        // already replaced every realistic oversize). Terminal, like docs.
+        entry.subscribers.delete(peerId);
+        self.releaseRoomIfEmptyLegacy(key, entry);
+        return [self.payloadTooLargeError(peerId, entry.room, joinRequestId ?? undefined)];
+      }
+      const frames: LocalLoroDataPlaneServerMessage[] = [];
+      for (const [index, chunk] of chunks.entries()) {
+        if (joinRequestId !== null && index === 0) {
+          frames.push({
             type: 'joined',
             protocolVersion: LOCAL_LORO_DATA_PLANE_PROTOCOL_VERSION,
-            workspaceId: this.options.workspaceId,
+            workspaceId: self.options.workspaceId,
             peerId,
             requestId: joinRequestId,
             room: entry.room,
             serverVersion,
-          },
-        ];
-      }
-      return [];
-    }
-    const chunks = chunkFlockBundle(bundle, this.maxPayloadBytes);
-    if (!chunks) {
-      // A single flock ENTRY above the frame budget — pathological (chunking
-      // already replaced every realistic oversize). Terminal, like docs.
-      entry.subscribers.delete(peerId);
-      this.releaseRoomIfEmpty(key, entry);
-      return [this.payloadTooLargeError(peerId, entry.room, joinRequestId ?? undefined)];
-    }
-    const frames: LocalLoroDataPlaneServerMessage[] = [];
-    for (const [index, chunk] of chunks.entries()) {
-      if (joinRequestId !== null && index === 0) {
+            payload: { kind: 'flock-json', bundle: chunk },
+          });
+          continue;
+        }
         frames.push({
-          type: 'joined',
+          type: 'update',
           protocolVersion: LOCAL_LORO_DATA_PLANE_PROTOCOL_VERSION,
-          workspaceId: this.options.workspaceId,
+          workspaceId: self.options.workspaceId,
           peerId,
-          requestId: joinRequestId,
           room: entry.room,
           serverVersion,
           payload: { kind: 'flock-json', bundle: chunk },
         });
-        continue;
       }
-      frames.push({
-        type: 'update',
-        protocolVersion: LOCAL_LORO_DATA_PLANE_PROTOCOL_VERSION,
-        workspaceId: this.options.workspaceId,
-        peerId,
-        room: entry.room,
-        serverVersion,
-        payload: { kind: 'flock-json', bundle: chunk },
-      });
-    }
-    return frames;
+      return frames;
+    });
   }
 
   private payloadTooLargeError(
@@ -1248,10 +1159,10 @@ export class LocalLoroDataPlaneServer {
     if (entry.scope === 'doc') {
       entry.uploadAssemblers.delete(peerId);
     }
-    this.releaseRoomIfEmpty(key, entry);
+    this.releaseRoomIfEmptyLegacy(key, entry);
   }
 
-  private releaseRoomIfEmpty(key: string, entry: RoomEntry): void {
+  private releaseRoomIfEmptyLegacy(key: string, entry: RoomEntry): void {
     if (entry.subscribers.size > 0 || this.rooms.get(key) !== entry) {
       return;
     }

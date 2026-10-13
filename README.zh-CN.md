@@ -164,6 +164,7 @@ Lody 仍在走向完整的 local-first 支持。
 - `packages/ui` — Base UI 基础组件与 StyleX 设计令牌
 - `packages/platform` — 平台能力与集成
 - `packages/shared` — 共享 Schema、协议与工具
+- `packages/e2ee-core` — 实验字节格式与签名验证（无产品入口）
 - `site-docs` — 官网、文档与博客
 
 如果希望参与开发，请阅读 [CONTRIBUTING.md](./CONTRIBUTING.md)（含社区 PR 规模限制）。

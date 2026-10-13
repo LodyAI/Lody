@@ -40,6 +40,8 @@ const GLIDE_MS = 360;
 const SENT_CONTEXT_PX = 100;
 /** Differences below this are sub-pixel rounding, not movement. */
 const EPSILON_PX = 1;
+/** Bound unconfirmed input while the browser starts compositor-driven motion. */
+const INPUT_CONFIRMATION_MS = 100;
 
 const easeOutCubic = (t: number): number => 1 - (1 - t) ** 3;
 
@@ -146,6 +148,8 @@ interface Transaction {
   freezeNextPlan: boolean;
   /** The DOM offset this transaction started from. */
   sampled: number;
+  /** The same offset bounded to the scroll range, for logical compensation. */
+  logicalSampled: number;
   movement: MovementClass;
   /** Writes are relative only for layout compensation of a reading position. */
   relative: boolean;
@@ -197,6 +201,10 @@ export class ScrollController {
   private touchActive = false;
   /** Touch ended and no `scrollend` yet: any scrolling now is momentum. */
   private momentum = false;
+  /** Wheel/key input in the current native scroll sequence. */
+  private readerInput = false;
+  /** Unconfirmed input expires against the animation clock, without layout retries. */
+  private readerInputFrame: number | null = null;
   private gesture: ScrollGesture | null = null;
   private momentumStats: MomentumStats = { compensations: 0, interruptions: 0 };
   private compensationPendingCheck = false;
@@ -271,7 +279,7 @@ export class ScrollController {
     this.hidden = hidden;
     if (hidden) {
       this.tx = null;
-      this.gesture = null;
+      this.resetReaderInput();
       this.cancelGlide();
     } else {
       this.reshown = true;
@@ -367,8 +375,10 @@ export class ScrollController {
       this.run('reshow', true);
       return;
     }
-    this.refreshViewport(false);
-    const scrollTop = this.host.readScrollTop();
+    // Scroll steps precede ResizeObserver. Sample the live viewport so a
+    // keyboard/composer clamp cannot look like downward reader movement.
+    this.sampleViewportHeight();
+    const scrollTop = this.readScrollTop();
     const last = this.lastObserved;
     // Our own write's event reports the offset we accepted: not movement.
     if (last && Math.abs(scrollTop - last.scrollTop) < 0.5 && !this.pendingExternalMove) return;
@@ -378,18 +388,18 @@ export class ScrollController {
     this.applyMovement(movement, scrollTop, this.committedPlan);
     // Re-arm follow: a downward scroll reaching the real bottom.
     const maxNow = Math.max(0, this.host.readScrollHeight() - this.viewportHeight);
-    this.gesture ??= { bottoms: last ? [last.maxScrollTop] : [], down: false };
-    this.gesture.down = scrollTop > previous;
-    this.recordBottom(maxNow);
     if (
       this.intent.kind === 'read' &&
+      movement === 'reader' &&
       !this.glide &&
       scrollTop > previous &&
       !this.host.isSuppressed() &&
       this.replyRoom === 0 &&
-      maxNow - scrollTop <= REARM_DISTANCE_PX
+      maxNow - scrollTop < 0.5
     ) {
-      this.setIntent({ kind: 'follow' });
+      // Reaching the exact edge needs no correction. Keep native input alive;
+      // near-edge snapping and stale-range recovery wait for scrollend.
+      this.setIntent({ kind: 'follow' }, true);
     }
     if (this.intent.kind !== 'read') {
       // A move that was not the reader's: the mode's position wins.
@@ -431,7 +441,7 @@ export class ScrollController {
     // A reader already reading keeps their anchor, unless they interrupted a
     // smooth jump: then they read where the jump left them.
     if (this.intent.kind === 'read' && !interruptedGlide) return;
-    const scrollTop = this.host.readScrollTop();
+    const scrollTop = this.readScrollTop();
     const anchor = this.anchorAt(scrollTop, null);
     if (anchor) this.setIntent({ kind: 'read', anchor, screenY: 0 });
   }
@@ -440,11 +450,49 @@ export class ScrollController {
     this.pointerHeld = held;
   }
 
+  /** A wheel or navigation key routed to this conversation, before scrolling. */
+  onReaderInput(upward: boolean, { confirmOnly = false }: { confirmOnly?: boolean } = {}): void {
+    this.clearReaderInput();
+    this.readerInput = true;
+    let startedAt: number | null = null;
+    const expire = (time: number) => {
+      startedAt ??= time;
+      if (time - startedAt < INPUT_CONFIRMATION_MS) {
+        this.readerInputFrame = this.host.requestFrame(expire);
+        return;
+      }
+      this.readerInputFrame = null;
+      this.readerInput = false;
+    };
+    // Native wheel/key motion can start after multiple rendering callbacks.
+    // A short confirmation window handles that delay without an indefinite latch.
+    this.readerInputFrame = this.host.requestFrame(expire);
+    if (upward && !confirmOnly) this.release('reader-up');
+  }
+
+  private clearReaderInput(): void {
+    this.readerInput = false;
+    if (this.readerInputFrame !== null) this.host.cancelFrame(this.readerInputFrame);
+    this.readerInputFrame = null;
+  }
+
+  /** Focus/navigation outside the conversation supersedes its input evidence. */
+  resetReaderInput(): void {
+    this.clearReaderInput();
+    this.pointerHeld = false;
+    this.touchActive = false;
+    this.momentum = false;
+    this.gesture = null;
+    this.compensationPendingCheck = false;
+    this.momentumStats = { compensations: 0, interruptions: 0 };
+  }
+
   /** A tap, pinch or cancelled touch has no conversation momentum. */
   setTouchActive(active: boolean, continuesAfterRelease = true): void {
     this.touchActive = active;
     this.momentum = !active && continuesAfterRelease;
     if (active || !continuesAfterRelease) {
+      this.clearReaderInput();
       this.gesture = null;
       this.compensationPendingCheck = false;
       this.momentumStats = { compensations: 0, interruptions: 0 };
@@ -460,6 +508,7 @@ export class ScrollController {
       this.callbacks.onMomentumEnd?.({ ...this.momentumStats });
     }
     this.momentum = false;
+    this.clearReaderInput();
     this.compensationPendingCheck = false;
     this.momentumStats = { compensations: 0, interruptions: 0 };
     this.rearmAtGestureBottom();
@@ -469,6 +518,7 @@ export class ScrollController {
 
   scrollToBottom(): void {
     if (this.disposed) return;
+    this.resetReaderInput();
     this.cancelGlide();
     this.setIntent({ kind: 'follow' });
     this.run('scroll-to-bottom', true);
@@ -479,6 +529,7 @@ export class ScrollController {
     if (this.disposed) return;
     const row = this.rows[index];
     if (!row) return;
+    this.resetReaderInput();
     this.cancelGlide();
     const anchor = this.anchorForRow(index);
     if (!anchor) return;
@@ -496,6 +547,7 @@ export class ScrollController {
     if (this.disposed) return;
     const row = this.rows[index];
     if (!row) return;
+    this.resetReaderInput();
     this.cancelGlide();
     const settle: Intent = { kind: 'sent', rowKey: row.key };
     this.setIntent(settle);
@@ -524,6 +576,7 @@ export class ScrollController {
   /** Stop acting on the host: the list unmounted. */
   dispose(): void {
     this.disposed = true;
+    this.resetReaderInput();
     this.cancelGlide();
   }
 
@@ -554,7 +607,7 @@ export class ScrollController {
   }
 
   get scrollOffset(): number {
-    return this.lastObserved?.scrollTop ?? this.host.readScrollTop();
+    return this.lastObserved?.scrollTop ?? this.readScrollTop();
   }
 
   get viewportSize(): number {
@@ -615,7 +668,7 @@ export class ScrollController {
     this.reshown = false;
     this.refreshViewport(reshown || !this.viewportKnown);
     if (this.host.isSuppressed() && this.intent.kind === 'follow') this.release('suppressed');
-    const sampled = this.host.readScrollTop();
+    const sampled = this.readScrollTop();
     let movement: MovementClass = 'none';
     if (!reshown && this.lastObserved && Math.abs(sampled - this.lastObserved.scrollTop) >= 0.5) {
       movement = this.classify(sampled);
@@ -628,7 +681,8 @@ export class ScrollController {
       worstCase: false,
       frozen: null,
       freezeNextPlan: false,
-      sampled,
+      sampled: this.host.readScrollTop(),
+      logicalSampled: sampled,
       movement,
       relative:
         !reshown &&
@@ -707,10 +761,14 @@ export class ScrollController {
     this.host.setReplyRoom(Math.max(roomBefore, room));
     let expected: number;
     if (tx.relative) {
-      const delta = target - tx.sampled;
-      expected = tx.sampled + delta;
-      if (Math.abs(delta) >= 0.5) {
-        this.host.scrollBy(delta);
+      expected = target;
+      const elasticEnteredRange =
+        Math.abs(tx.sampled - tx.logicalSampled) >= 0.5 &&
+        Math.abs(this.readScrollTop() - target) >= 0.5;
+      if (Math.abs(target - tx.logicalSampled) >= 0.5 || elasticEnteredRange) {
+        // WebKit scrollBy starts from the raw rubber-band offset. Use it for
+        // the write baseline, but do not correct elasticity alone.
+        this.host.scrollBy(target - tx.sampled);
         if (this.momentum) {
           this.momentumStats.compensations += 1;
           this.compensationPendingCheck = true;
@@ -719,12 +777,12 @@ export class ScrollController {
       }
     } else {
       expected = target;
-      if (Math.abs(this.host.readScrollTop() - target) >= 0.5) this.host.writeScrollTop(target);
+      if (Math.abs(this.readScrollTop() - target) >= 0.5) this.host.writeScrollTop(target);
     }
     this.host.setExtent(total);
     this.host.setReplyRoom(room);
     this.extent = total;
-    const actual = this.host.readScrollTop();
+    const actual = this.readScrollTop();
     const maxNow = Math.max(0, this.host.readScrollHeight() - this.viewportHeight);
     this.recordBottom(maxNow);
     const clampedExpected = Math.min(Math.max(0, expected), maxNow);
@@ -744,6 +802,7 @@ export class ScrollController {
           frozen: null,
           freezeNextPlan: false,
           sampled: actual,
+          logicalSampled: actual,
           movement: 'unknown',
           relative: false,
         };
@@ -817,7 +876,7 @@ export class ScrollController {
       if (index < 0 || !this.geometry.isMeasured(index)) return false;
     }
     this.refreshViewport(true);
-    const scrollTop = this.host.readScrollTop();
+    const scrollTop = this.readScrollTop();
     if (Math.abs(scrollTop - last.scrollTop) >= 0.5) return false;
     if (!this.isCovered(scrollTop, plan)) return false;
     return Math.abs(this.targetScrollTop() - scrollTop) <= EPSILON_PX;
@@ -875,13 +934,23 @@ export class ScrollController {
 
   private refreshViewport(force = true): void {
     if (!force && this.viewportKnown) return;
+    this.sampleViewportHeight();
+    this.contentTop = this.host.readContentTop();
+    this.paddingBottom = this.host.readPaddingBottom();
+  }
+
+  private sampleViewportHeight(): void {
     const height = this.host.readViewportHeight();
     if (height > 0) {
       this.viewportHeight = height;
       this.viewportKnown = true;
     }
-    this.contentTop = this.host.readContentTop();
-    this.paddingBottom = this.host.readPaddingBottom();
+  }
+
+  /** WebKit elastic offsets are presentation, not a new reading position. */
+  private readScrollTop(): number {
+    const max = Math.max(0, this.host.readScrollHeight() - this.host.readViewportHeight());
+    return Math.min(max, Math.max(0, this.host.readScrollTop()));
   }
 
   private maxScrollTop(): number {
@@ -1018,7 +1087,7 @@ export class ScrollController {
     // A fast touch scroll can deliver its first offset after the finger lifts.
     // It is still the reader's movement, including when a resize samples it
     // before its scroll event. Correcting it back to follow would fight the fling.
-    if (this.pointerHeld || this.touchActive || this.momentum) return 'reader';
+    if (this.pointerHeld || this.touchActive || this.momentum || this.readerInput) return 'reader';
     return 'unknown';
   }
 
@@ -1029,6 +1098,19 @@ export class ScrollController {
   ): void {
     if (movement === 'none' || movement === 'own-write') return;
     const last = this.lastObserved;
+    if (movement === 'reader') {
+      // Scroll steps precede animation callbacks. Actual movement confirms the
+      // input for this sequence; a no-op input expires without needing scrollend.
+      if (this.readerInputFrame !== null) this.host.cancelFrame(this.readerInputFrame);
+      this.readerInputFrame = null;
+      this.gesture ??= { bottoms: last ? [last.maxScrollTop] : [], down: false };
+      this.gesture.down = scrollTop > (last?.scrollTop ?? scrollTop);
+      this.recordBottom(Math.max(0, this.host.readScrollHeight() - this.viewportHeight));
+    } else {
+      // A layout clamp or browser move cannot complete a previous downward
+      // gesture just because it lands on one of that gesture's old bottoms.
+      this.gesture = null;
+    }
     // Reader evidence includes a held pointer and post-touch momentum.
     if (
       movement === 'reader' &&
@@ -1106,12 +1188,13 @@ export class ScrollController {
       this.intent.kind !== 'read' ||
       this.glide ||
       this.pointerHeld ||
+      this.touchActive ||
       this.host.isSuppressed() ||
       this.replyRoom !== 0
     ) {
       return;
     }
-    const scrollTop = this.host.readScrollTop();
+    const scrollTop = this.readScrollTop();
     if (!gesture.bottoms.some((bottom) => Math.abs(bottom - scrollTop) <= REARM_DISTANCE_PX)) {
       return;
     }
@@ -1132,11 +1215,9 @@ export class ScrollController {
     }
   }
 
-  private setIntent(intent: Intent): void {
+  private setIntent(intent: Intent, preserveInput = false): void {
     this.intent = intent;
-    // Explicit navigation or reaching the bottom supersedes the old fling.
-    // This also bounds input evidence on hosts without `scrollend` support.
-    if (intent.kind !== 'read') this.momentum = false;
+    if (intent.kind !== 'read' && !preserveInput) this.resetReaderInput();
     const sticky = intent.kind !== 'read';
     if (sticky !== this.sticky) {
       this.sticky = sticky;
@@ -1162,7 +1243,7 @@ export class ScrollController {
       return;
     }
     this.refreshViewport(false);
-    const scrollTop = this.host.readScrollTop();
+    const scrollTop = this.readScrollTop();
     let fromScreenY = this.contentTop + this.geometry.offset(index) - scrollTop;
     // A glide covers at most one viewport: jump to that distance first.
     const limit = this.viewportHeight;

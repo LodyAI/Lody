@@ -177,6 +177,8 @@ export type AgentConfigMeta = {
    * advanced override; normal builtin agents use Lody-managed runtimes.
    */
   runtimeOverrides?: BuiltinRuntimeOverrides;
+  /** Local gateway metadata consumed by Lody before launch, outside process env. */
+  magpieGatewayUrl?: string;
   env: Record<string, string>;
   prompt?: string;
   /** Title generation settings. When set, enables automatic title generation for this agent. */
@@ -908,6 +910,7 @@ export type SessionLaunchConfig = {
   codexAuth?: import('./codex-auth-profile').CodexAuthProfile;
   customAcp?: CustomAcpLaunchSpec;
   runtimeOverrides?: BuiltinRuntimeOverrides;
+  magpieGatewayUrl?: string;
   env?: Record<string, string>;
   worktreeSetup?: WorktreeSetupScriptConfig;
   worktreeCleanup?: WorktreeCleanupScriptConfig;
@@ -1032,6 +1035,8 @@ export type SessionMeta = {
   archiveCancelledRequestId?: string;
   archivePending?: import('./session-archive').SessionArchiveLink | null;
   archiveReadiness?: import('./session-archive').SessionArchiveReadiness | null;
+  /** User-owned tree execution barrier; inherited through containment and precise opener links. */
+  collaborationStopped?: boolean;
   /** Shared tab visibility only; closing never changes the session lifecycle. */
   isTabClosed?: boolean;
   origin?: 'lody' | 'external-acp';

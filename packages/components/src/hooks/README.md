@@ -247,3 +247,14 @@ already-alerted early return.
 every desktop build would rebuild a summary it can never show. The activity id is
 derived outside that gate so the disable and unmount paths can still end an activity
 the payload no longer describes.
+
+## Public PR reads
+
+`use-github-pr-identity.ts` keeps hosted repository identity separate from public
+read access. When a session association is unresolved, an anonymous GitHub metadata
+request may establish a public repository ID for details, reviews and diffs. It
+never grants write access or mints a token. An existing numeric ID must still match;
+redirects, private repositories and failed probes retain the recoverable error.
+Public details do not hydrate or write authenticated caches; review caches and
+in-flight detail reads use a separate public key. Public CI polling runs every
+five minutes without the fast mergeability loop; manual refresh remains available.

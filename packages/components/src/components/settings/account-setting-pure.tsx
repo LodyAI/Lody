@@ -107,7 +107,7 @@ export interface AccountMember {
  * - `active-subscription`: block deletion and point the owner at billing
  *   settings to cancel first.
  * - `cancel-scheduled`: deletion is allowed, but warn that the subscription
- *   (still paid until `formattedPeriodEnd`) ends immediately on delete.
+ *   stays paid until `formattedPeriodEnd`; accrued charges remain due.
  */
 export type WorkspaceDeleteBillingGuard =
   | { kind: 'active-subscription' }
@@ -137,6 +137,7 @@ export interface AccountSettingsPureProps {
   workspaceOwnershipSlot?: ReactNode;
   /** Account-only machine overview supplied by the runtime-aware container. */
   accountMachinesSlot?: ReactNode;
+  accountBillingSlot?: ReactNode;
   memberLimit?: number | null;
   memberLimitReached?: boolean;
   billingUiAvailable?: boolean;
@@ -196,6 +197,7 @@ export function AccountSettingsPure({
   workspaceJoinRequestsSlot,
   workspaceOwnershipSlot,
   accountMachinesSlot,
+  accountBillingSlot,
   memberLimit = null,
   memberLimitReached = false,
   billingUiAvailable = true,
@@ -538,6 +540,7 @@ export function AccountSettingsPure({
         onClearGeneratedCliApiKey={onClearGeneratedCliApiKey}
         onRevokeCliApiKey={onRevokeCliApiKey}
         accountMachinesSlot={accountMachinesSlot}
+        accountBillingSlot={accountBillingSlot}
       />
     );
   }
@@ -616,7 +619,12 @@ export function AccountSettingsPure({
         </CompactSection>
       ) : null}
 
-      {surface === 'account' ? accountMachinesSlot : null}
+      {surface === 'account' ? (
+        <>
+          {accountMachinesSlot}
+          {accountBillingSlot}
+        </>
+      ) : null}
 
       {/* Workspace: name + logo. */}
       {isWorkspaceSurface ? (
@@ -1089,7 +1097,8 @@ export function AccountSettingsPure({
           <AlertDialog.Header>
             <AlertDialog.Title>{t('workspace.removeMember.title')}</AlertDialog.Title>
             <AlertDialog.Description>
-              {t('workspace.removeMember.description')}
+              {t('workspace.removeMember.description')}{' '}
+              {billingUiAvailable ? t('billing.seatRemovalConsequences') : null}
             </AlertDialog.Description>
           </AlertDialog.Header>
           <AlertDialog.Footer>
@@ -1116,7 +1125,8 @@ export function AccountSettingsPure({
             <AlertDialog.Description>
               {t('workspace.danger.leaveWorkspace.confirmDescription', {
                 workspace: organization.name,
-              })}
+              })}{' '}
+              {billingUiAvailable ? t('billing.seatRemovalConsequences') : null}
             </AlertDialog.Description>
           </AlertDialog.Header>
           <AlertDialog.Footer>
@@ -1192,7 +1202,8 @@ export function AccountSettingsPure({
             <Dialog.Description>
               {t('workspace.danger.deleteWorkspace.confirmDescription', {
                 workspace: organization.name,
-              })}
+              })}{' '}
+              {billingUiAvailable ? t('billing.workspaceDeletionCharges') : null}
             </Dialog.Description>
           </Dialog.Header>
           <div {...stylex.props(styles.dialogForm)}>

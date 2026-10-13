@@ -101,7 +101,7 @@ export function createStartShutdownController(
     reason: string
   ) => {
     options.logger.warn(reason);
-    await exitAfterTelemetry(request.exitCode || getExitCodeForSignal(request.signal));
+    await exitAfterTelemetry(request.exitCode || getExitCodeForSignal(request.signal) || 1);
   };
 
   const shutdown = async (request?: StartShutdownRequest) => {
@@ -131,14 +131,16 @@ export function createStartShutdownController(
       );
     }, timeoutMs);
 
+    let exitCode = normalized.exitCode;
     try {
       await options.shutdown();
     } catch (error) {
+      exitCode ||= 1;
       options.logger.error(
         `Shutdown error: ${error instanceof Error ? error.message : 'Unknown error'}`
       );
     } finally {
-      await exitAfterTelemetry(normalized.exitCode);
+      await exitAfterTelemetry(exitCode);
     }
   };
 

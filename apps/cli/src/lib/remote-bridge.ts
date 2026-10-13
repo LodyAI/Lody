@@ -1,4 +1,4 @@
-import { Effect } from 'effect';
+import { fileLocksLegacy } from '@/utils/file-lock';
 import type { MachineId } from '@lody/shared';
 import type { Logger } from '@/utils/logger';
 import type { LocalWorkspaceCatalogService } from '@/lib/local-workspace-catalog';
@@ -45,7 +45,7 @@ export class RemoteBridge {
     workspaces: RemoteBridgeWorkspace[];
     runningWorkspaceIds: Iterable<string>;
   }): Promise<RemoteBridgeReconcileResult> {
-    await Effect.runPromise(
+    await fileLocksLegacy.runPromise(
       this.args.catalog.cacheRemoteWorkspaces({
         identity: { userId: this.args.userId },
         machine: {

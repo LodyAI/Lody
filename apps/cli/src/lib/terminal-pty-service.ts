@@ -15,7 +15,7 @@ import {
   type TerminalTitleEvent,
   TERMINAL_MAX_PER_SESSION,
 } from '@lody/shared';
-import { getCachedLoginShellEnvSync } from '@/agent/login-shell-env';
+import { getCachedLoginShellEnvSyncLegacy } from '@/agent/login-shell-env';
 import { mergeLoginShellEnv, withDefaultAcpPathEntries } from '@/agent/setting';
 import { LODY_GIT_CRED_CONTEXT_TOKEN_ENV } from '@/lib/git-credential-broker';
 import { clearManagedGhTokenEnv, LODY_MANAGED_GH_TOKEN_SHA256_ENV } from '@/lib/gh-token-env';
@@ -124,7 +124,9 @@ function buildTerminalEnv(sessionId: string): NodeJS.ProcessEnv {
     LODY_SESSION_ID: sessionId,
     LODY_WORKSPACE_SESSION_ID: sessionId,
   };
-  const merged = withDefaultAcpPathEntries(mergeLoginShellEnv(base, getCachedLoginShellEnvSync()));
+  const merged = withDefaultAcpPathEntries(
+    mergeLoginShellEnv(base, getCachedLoginShellEnvSyncLegacy())
+  );
   clearManagedGhTokenEnv(merged);
   for (const key of TERMINAL_ENV_BLOCKLIST) {
     delete merged[key];

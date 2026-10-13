@@ -29,8 +29,7 @@ context/acp-agent-edit-evidence.md; adapter repos: [apps/cli/AGENTS.md](../../AG
   daemon process.
 - MCP HTTP: loopback bind plus bearer token; on Linux prove the peer socket's uid via
   `/proc/net/tcp{,6}`, REJECT an unprovable peer, and refuse to start when it is
-  unreadable. `LODY_MCP_HTTP_DISABLED=1` forces stdio. The stdio config is an explicit env
-  allowlist, never inheritance: keep `LODY_AUTH_URL`, `LODY_AUTH_SITE_URL`, and
+  unreadable. `LODY_MCP_HTTP_DISABLED=1` forces stdio. Stdio uses an explicit env allowlist: keep `LODY_AUTH_URL`, `LODY_AUTH_SITE_URL`, and
   `LODY_SERVER_URL` so cloud MCP orchestration uses the daemon's deployment, let local platform
   assembly clear them before agent startup, and never add CLI credentials or secrets.
 - Pass the same MCP config on initial and replacement DeepSeek Harness sessions.
@@ -48,17 +47,16 @@ context/acp-agent-edit-evidence.md; adapter repos: [apps/cli/AGENTS.md](../../AG
 - Builtins use `setting.ts`'s `resolveACPProcessLaunchAsync()`. [Codex profiles](../../../../specs/codex-account-profiles.md)
   forbid upstream keys in shared/child env. Process records delay deletion, never
   restrict same-profile concurrency.
-- `deepseek-harness-runtime.ts` is NOT managed: no download, prefetch, override, or
-  auth integration. Preserve logical npx argv for recovery; Windows uses npm's JS
-  entry without cmd.exe. Keep npm, the forwarder, DSH and native Job children
-  windowless without changing stdio, environment or containment. npx installs the
-  closure; `dsh --profile` uses `process.execPath` with inherited `ELECTRON_RUN_AS_NODE`.
-  Credentials stay in env, never config. Model/reasoning use the Agent request
-  waterfall; permissions use Harness presets; `agent_preset` uses
-  `AgentPresets.mount/recompose`, never UI-only state.
-  Presets change only before the first prompt. Per-Agent ACP stdio/HTTP MCP
-  belongs in the adapter, not host composition. JSONL encoding detection
-  is READ-ONLY: fail mixed roots naming both paths; never modify artifacts.
+- `deepseek-harness-runtime.ts` is not managed: no download/prefetch/override/auth.
+  Keep npx argv for recovery. Windows uses npm JS without cmd.exe;
+  npm, forwarder, DSH and Job children stay windowless, preserving stdio/env/containment.
+  DSH uses `process.execPath` and `ELECTRON_RUN_AS_NODE`.
+  Provider ID isolates homes; preserve user YAML/settings and legacy history:
+  [contract](../../../../specs/deepseek-harness-settings.md).
+  Credentials stay in env. Models/reasoning use the Agent request waterfall;
+  permissions use Harness presets. `agent_preset` uses `AgentPresets.mount/recompose`
+  only before the first prompt. Per-Agent ACP stdio/HTTP MCP belongs in the adapter.
+  Never modify JSONL; mixed roots fail naming both paths.
 - `managed-agent-runtime.ts`: Codex/Claude/Grok/Devin pins come only from their
   `<name>-runtime-manifest.json`; reject dependency/manifest version mismatches and never
   duplicate pins beside the manager. Do not loosen the metadata
@@ -87,11 +85,10 @@ context/acp-agent-edit-evidence.md; adapter repos: [apps/cli/AGENTS.md](../../AG
 - Claude capability refresh runs its native status command first so missing credentials surface
   as structured auth-required state before adapter startup; explicit environment-authenticated
   paths bypass it.
-- Registry/custom/Devin initialization advertises no terminal capability; only agent-driven methods
-  are runnable (`env_var` rejected as deprecated, `terminal` unsupported until Machine RPC has a
-  real interactive-terminal bridge). Method lists and elicitations stay on the original
-  long-running request with one pending interaction at a time; replies carry an interaction id
-  and use the encrypted authentication-input path on remote Machines. Bound URL schemes, sizes,
+- Registry/custom/Devin advertises no terminal capability; only agent-driven methods run.
+  Reject deprecated `env_var`; `terminal` needs a real Machine RPC interactive bridge.
+  Keep method lists/elicitations on the original request, one pending interaction at a time.
+  Replies carry interaction ids and use encrypted remote authentication-input. Bound URL schemes, sizes,
   ids, labels, options, and defaults before they enter progress, under a shared serialized-byte
   budget for the form.
 - Machine RPC may name only a persisted Provider `configId`; the daemon freezes
@@ -113,3 +110,9 @@ context/acp-agent-edit-evidence.md; adapter repos: [apps/cli/AGENTS.md](../../AG
   Strip internal instructions; preserve user titles. [Contract](../../../../specs/acp-session-titles.md).
 - NEVER derive a git ref from prompt text: refs reach the remote and no filter proves a
   prompt secret-free. Worktree sessions keep their allocated ref unless the agent renames it.
+
+## Shell
+
+LoginShellCache lives in the app root. Legacy binds it; no Promise cache/timer.
+Reader cancellation preserves siblings. Await disposal; replace only after release.
+[Decision](README.md#login-shell-cache).

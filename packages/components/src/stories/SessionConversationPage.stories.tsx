@@ -83,6 +83,7 @@ import {
 import { SessionHeaderMenu } from '@/components/sessions/session-chat-interface';
 import { SessionAccessControl } from '@/components/session-sharing';
 import { SessionInfoBar } from '@/components/sessions/session-info-bar';
+import type { SessionMachineInfo } from '@/components/sessions/session-machine-info';
 import {
   SessionConversationPage,
   SessionConversationPageBody,
@@ -1168,21 +1169,37 @@ function StoryInfoBar({
   session,
   queued,
   reading = false,
-  executionMachine,
+  machine,
+  machineOnly = false,
+  mobile = false,
 }: {
   session: SessionMeta;
-  executionMachine?: import('@/components/sessions/session-info-bar').SessionInfoBarProps['executionMachine'];
+  machine?: SessionMachineInfo | null;
+  machineOnly?: boolean;
+  mobile?: boolean;
   /** Queued turns stacked on the bar, or on the composer when the bar is empty. */
   queued?: 'with-info-bar' | 'without-info-bar';
   /** The reading review: a merged PR with passing CI and the line totals. */
   reading?: boolean;
 }) {
+  if (machineOnly)
+    return (
+      <SessionInfoBar
+        status={null}
+        machine={machine}
+        compactMachineInfo={mobile}
+        protectFromEdgeBackZone={mobile}
+      />
+    );
   if (reading) {
     return (
       <SessionInfoBar
         status={null}
+        machine={machine}
+        compactMachineInfo={mobile}
+        protectFromEdgeBackZone={mobile}
         projectName={session.repoFullName}
-        branch={session.branchName}
+        branch={mobile ? null : session.branchName}
         pr={{ url: 'https://github.com/LodyAI/Lody/pull/3656', status: 'merged' }}
         onOpenPr={action}
         prCiRuns={[
@@ -1214,8 +1231,14 @@ function StoryInfoBar({
   return (
     <SessionInfoBar
       queue={queue}
-      executionMachine={executionMachine}
-      status={null}
+      machine={machine}
+      compactMachineInfo={mobile}
+      protectFromEdgeBackZone={mobile}
+      status={
+        machine?.onlineStatus === 'offline'
+          ? { kind: 'machine-offline', machineName: machine.name }
+          : null
+      }
       goal={{
         type: 'goal',
         threadId: 'story-goal',
@@ -1234,10 +1257,11 @@ function StoryInfoBar({
         },
       ]}
       projectName={session.repoFullName}
-      branch={session.branchName}
+      branch={mobile ? null : session.branchName}
       pr={storyPullRequest}
       onOpenPr={action}
       diffStat={{ add: 128, del: 42 }}
+      onOpenAllChanges={action}
     />
   );
 }
@@ -1308,9 +1332,10 @@ export function SessionConversationStoryHarness({
   showCapacityRetry = false,
   shareImage = false,
   showCollaborators = false,
-  executionMachine,
   queued,
   wide = false,
+  machineInfo,
+  machineOnly = false,
 }: {
   state: PageState;
   frame: DeviceFrame;
@@ -1323,8 +1348,9 @@ export function SessionConversationStoryHarness({
   showCapacityRetry?: boolean;
   shareImage?: boolean;
   showCollaborators?: boolean;
-  executionMachine?: import('@/components/sessions/session-info-bar').SessionInfoBarProps['executionMachine'];
   queued?: 'with-info-bar' | 'without-info-bar';
+  machineInfo?: SessionMachineInfo;
+  machineOnly?: boolean;
   /** Mirrors the Settings > Appearance "Full width" switch. */
   wide?: boolean;
 }) {
@@ -1435,7 +1461,7 @@ export function SessionConversationStoryHarness({
       id: 'machine',
       icon: <Monitor className="h-3.5 w-3.5" />,
       label: 'Machine',
-      value: machineMeta.name,
+      value: machineInfo?.name ?? machineMeta.name,
     },
     {
       id: 'base',
@@ -1535,7 +1561,7 @@ export function SessionConversationStoryHarness({
       session={session}
       localProjectMeta={machineMeta.localProjects?.[STORY_LOCAL_PROJECT_ID]}
       workspacePath="/Users/developer/Code/lody"
-      machineName={machineMeta.name}
+      machineName={machineInfo?.name ?? machineMeta.name}
       onCopyConversationHistory={action}
       onCopyUrl={action}
       sharing={storySharing}
@@ -1680,10 +1706,20 @@ export function SessionConversationStoryHarness({
                               {/* Mirrors the production info bar (cluster + stage)
                               glued above the composer — desktop AND mobile. */}
                               <StoryInfoBar
-                                executionMachine={executionMachine}
                                 session={session}
                                 queued={queued}
                                 reading={state === 'reading'}
+                                machineOnly={machineOnly}
+                                mobile={frame === 'mobile'}
+                                machine={
+                                  machineInfo ?? {
+                                    machineId: STORY_MACHINE_ID,
+                                    name: machineMeta.name,
+                                    isOwn: true,
+                                    isCurrent: frame === 'desktop' ? true : undefined,
+                                    onlineStatus: 'online',
+                                  }
+                                }
                               />
                               <StoryComposer
                                 session={session}
@@ -1873,6 +1909,59 @@ export const DesktopIdle: Story = {
   decorators: [withDesktopViewport],
 };
 
+export const DesktopMachineOnly: Story = {
+  globals: { theme: 'dark' },
+  decorators: [withDesktopViewport],
+  args: {
+    machineOnly: true,
+    machineInfo: {
+      machineId: STORY_MACHINE_ID,
+      name: 'MacBook-Pro.local',
+      ownerName: 'Maya Chen',
+      isOwn: false,
+      isCurrent: false,
+      onlineStatus: 'online',
+    },
+  },
+};
+
+export const DesktopMachineDetails: Story = {
+  globals: { theme: 'dark', locale: 'en' },
+  decorators: [withDesktopViewport],
+  args: {
+    machineInfo: {
+      machineId: STORY_MACHINE_ID,
+      name: 'MacBook-Pro.local',
+      ownerName: 'Maya Chen',
+      isOwn: false,
+      isCurrent: false,
+      onlineStatus: 'online',
+    },
+  },
+  play: async ({ canvasElement }) => {
+    await userEvent.click(
+      await within(canvasElement).findByRole('button', {
+        name: 'Machine details: MacBook-Pro.local',
+      })
+    );
+  },
+};
+
+export const DesktopMachineOffline: Story = {
+  globals: { theme: 'dark' },
+  decorators: [withDesktopViewport],
+  args: {
+    machineInfo: {
+      machineId: STORY_MACHINE_ID,
+      name: 'Build-Server',
+      ownerName: 'Maya Chen',
+      isOwn: false,
+      isCurrent: false,
+      onlineStatus: 'offline',
+    },
+  },
+};
+
 /**
  * Reading review: every conversation reading surface in one finished turn —
  * prose at the default size, GitHub reference labels, wide and narrow tables
@@ -2009,6 +2098,25 @@ export const MobileIdle: Story = {
   decorators: [withMobileViewport],
 };
 
+export const MobileMachineOnly: Story = {
+  args: { ...DesktopMachineOnly.args, frame: 'mobile' },
+  globals: { theme: 'dark' },
+  decorators: [withMobileViewport],
+};
+
+export const MobileMachineDetails: Story = {
+  args: { ...DesktopMachineDetails.args, frame: 'mobile' },
+  globals: { theme: 'dark', locale: 'en' },
+  decorators: [withMobileViewport],
+  play: DesktopMachineDetails.play,
+};
+
+export const MobileMachineOffline: Story = {
+  args: { ...DesktopMachineOffline.args, frame: 'mobile', state: 'working' },
+  globals: { theme: 'dark' },
+  decorators: [withMobileViewport],
+};
+
 // Short-body phone: shows how much the fixed header/tab bar/composer squeeze the
 // scrollable message area. Use this when tuning mobile vertical density.
 export const MobileIdleShortDevice: Story = {
@@ -2033,23 +2141,5 @@ export const MobileAgentQuestion: Story = {
 export const MobilePlanFlow: Story = {
   args: { frame: 'mobile', state: 'plan' },
   globals: { theme: 'dark' },
-  decorators: [withMobileViewport],
-};
-
-/** Synthetic team identity; the composer and info bar are production components. */
-export const DesktopExecutionMachine: Story = {
-  args: { executionMachine: { name: 'Mac Studio', owner: { id: 'fixture-owner', name: '张三' } } },
-  globals: { theme: 'dark', locale: 'zh_CN' },
-  decorators: [withDesktopViewport],
-};
-export const MobileExecutionMachine: Story = {
-  args: {
-    frame: 'mobile',
-    executionMachine: {
-      name: 'Mac Studio · Development workstation',
-      owner: { id: 'fixture-owner', name: '张三' },
-    },
-  },
-  globals: { theme: 'dark', locale: 'zh_CN' },
   decorators: [withMobileViewport],
 };

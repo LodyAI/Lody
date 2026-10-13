@@ -137,3 +137,24 @@ it('keeps the identity gate closed when safe repair is unavailable', async () =>
   await expect(result.refresh()).resolves.toBeUndefined();
   expect(result.threads).toEqual([]);
 });
+
+it('allows anonymous review reads without allowing comment writes', async () => {
+  mocks.versions = { identityPending: true };
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(
+      async () => new Response(JSON.stringify({ id: 101, private: false, full_name: 'org/old' }))
+    )
+  );
+  await render();
+  expect(result.error).toBeNull();
+  await expect(
+    result.runWithToken('read', async (token, repo) => ({ token, repo }))
+  ).resolves.toEqual({ token: '', repo: 'org/old' });
+  await expect(
+    result.runWithToken('write', async () => {
+      writes.push('unsafe');
+    })
+  ).rejects.toThrow('repository identity');
+  expect(writes).toEqual([]);
+});

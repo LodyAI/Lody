@@ -45,6 +45,8 @@ import {
   isLoroRepoDocDeleted,
   readMachineFlockRowsFromFlock,
   sanitizeMessageTextSpans,
+  machineSupportsProtocolCapability,
+  MACHINE_PROTOCOL_CAPABILITIES,
 } from '@lody/shared';
 import { useAtomValue, useSetAtom, useStore } from 'jotai';
 import { usePostHog } from '@posthog/react';
@@ -289,6 +291,7 @@ export type SessionActions = {
     }
   ) => Promise<SessionArchiveResult>;
   cancelPendingArchive: (sessionId: SessionId) => Promise<void>;
+  setTreeCollaborationStopped: (sessionId: SessionId, stopped: boolean) => Promise<void>;
   setSessionTabClosed: (sessionId: SessionId, closed: boolean) => Promise<void>;
   restoreSession: (sessionId: SessionId) => Promise<void>;
   deleteArchivedSession: (sessionId: SessionId) => Promise<void>;
@@ -772,6 +775,36 @@ export function useSessionActions(): SessionActions {
     [runtime, deleteSessionDocuments]
   );
 
+  const setTreeCollaborationStopped = useCallback(
+    async (sessionId: SessionId, stopped: boolean) => {
+      if (!runtime) throw new Error('Runtime not ready');
+      const targets = await runtime.readSessionOperationTargets(sessionId, 'collaboration');
+      for (const machineId of new Set(targets.map((target) => target.machineId))) {
+        const machine = await runtime.repo.getDocMeta(getMachineRoomId(machineId));
+        if (
+          !machineSupportsProtocolCapability(
+            machine?.meta,
+            MACHINE_PROTOCOL_CAPABILITIES.sessionCollaborationControl
+          )
+        )
+          throw new Error(
+            'Update every machine in this conversation tree before controlling collaboration'
+          );
+      }
+      if (store.get(activeWorkspaceRuntimeAtom) !== runtime) {
+        throw new Error('Workspace changed before controlling collaboration');
+      }
+      // Stop the root first, so late descendants inherit its barrier. Restore it last.
+      for (const target of stopped ? targets : [...targets].reverse()) {
+        await runtime.writer.upsertDocMeta(getSessionRoomId(target.id), {
+          collaborationStopped: stopped,
+        } as Partial<SessionMeta>);
+      }
+      if (stopped) await runtime.pendingSends?.cancelSessions(targets.map((target) => target.id));
+    },
+    [runtime, store]
+  );
+
   const archiveSession = useCallback(
     async (sessionId: SessionId) => {
       log('[session-archive] start', { sessionId });
@@ -1106,6 +1139,7 @@ export function useSessionActions(): SessionActions {
     requestArchiveSession,
     requestArchiveSessions,
     cancelPendingArchive,
+    setTreeCollaborationStopped,
     restoreSession,
     deleteArchivedSession,
     setSessionPinned,

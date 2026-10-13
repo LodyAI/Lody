@@ -78,7 +78,12 @@ CLI `--mode` and `--config-option` validation against target capabilities.
 For example, a Grok target may use `configOptionValues: { permission_mode: "ask" }`;
 its ACP mode `default` is not a permission policy. Explicit permissions may exceed
 the parent; callers must follow their user authorization. Roles still override
-manual configuration. Merge, Plan and retry behavior: [creation contract](../../specs/session-orchestration.md#session-creation-configuration).
+manual configuration. `lody session create --agent-role <idOrName>` resolves a
+workspace Role the same way: the Role's machine, agent config, run configuration,
+and prompt prefix win over `--machine`/`--agent`/`--agent-config`/`--mode`/`--model`/
+`--config-option` (ignored flags are listed in a warning), while `--repo`/
+`--local-project`/`--branch`/`--worktree` still supply the work context.
+Merge, Plan and retry behavior: [creation contract](../../specs/session-orchestration.md#session-creation-configuration).
 
 `project list` without catalog options retains the local daemon project listing.
 Workspace project listing now spans authorized machines and enabled GitHub repositories;

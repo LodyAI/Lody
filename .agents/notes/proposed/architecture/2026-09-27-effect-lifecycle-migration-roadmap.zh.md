@@ -7,14 +7,7 @@ Translation: current
 
 ## 摘要
 
-Lody 的生命周期缺陷集中在少数几类手写机制上：定时器驱动的退避与 watchdog、代际计数器、
-手写 disposed 标志、按 key 的 promise 链和被吞掉的 `.catch`。仓库已依赖 effect 3.18，
-但只以"在类方法里构造 Effect、在边界 `runPromise`"的孤岛方式使用。本路线图确立自底向上的
-迁移原则：从平台层到入口层分为七层，一层只有在其全部依赖都已是 Effect 服务后才算完成；
-自己的 Promise 模块必须重写，只有真正的第三方 I/O 边界允许包装一次。按这一原则，Loro 同步
-栈的生命周期应在库内部解决：loro-repo 与 streams-crdt 在 Flock 持久化迁移之后改为 Effect
-内核，同时提供 Effect 与 Promise 两个入口。第一步是平台层与进程叶子层。排序依据是 fix 提交与
-issue 分类，不是运行时测量；各单元开工时需要各自的详细计划。
+Lody 的生命周期缺陷集中在手写定时器、Promise 链、取消标志和吞掉的失败。已合并的 Effect 4.0.2 基础覆盖进程所有权与若干原生叶子，上层 daemon 编排仍未完成。本路线图按真实依赖组织可独立验收的职责单元，分别记录内核、消费者、应用拥有者的完成状态；原生编排必须使用 Effect，不能包装尚未迁移的 Lody Promise 工作流。Loro 生命周期应在核实 Flock 持久化前置条件后深入库内部迁移，纯计算保持普通函数。Skill 与指南负责选择版本一致的原语、行为验收及大型混合模块的可选职责拆分，台账记录证据与局限，不估算全仓百分比。
 
 ## 运行时修订
 
@@ -23,6 +16,8 @@ issue 分类，不是运行时测量；各单元开工时需要各自的详细�
 见 [v4 迁移决定](../../implemented/architecture/2026-10-09-effect-v4-migration.zh.md)。
 
 ## 排序依据
+
+以下是历史调查计数，不是当前完成度指标。
 
 - 近三个月 511 个 fix 提交中约 116 个属于竞态、卡死、泄漏、取消、重连类；按文件统计，
   `apps/cli/src/lib/message-handler.ts`（61 个 fix 提交中 43 个与生命周期相关）与
@@ -54,14 +49,17 @@ issue 分类，不是运行时测量；各单元开工时需要各自的详细�
 
 ### 完成判定
 
-一个模块只有同时满足以下条件才算 Effect 化完成：
+按职责单元验收，不按文件名或是否导入 Effect 判断。原生内核必须满足：
 
-- 公开 API 只返回 `Effect`，失败是带标签的错误类型；
-- 依赖全部出现在 `R` 中，由 `Layer` 提供，且这些依赖本身已完成；
-- 不使用 `setTimeout`/`setInterval`、`AbortController`、生命周期 `EventEmitter` 或模块级可变单例；
-- 资源只通过 `acquireRelease`、Scope、`RcMap` 获取；
-- 内部不调用 `run*`；
-- 测试通过替换 Layer 与 TestClock 断言可观察结果。
+- 明确边界与真实消费路径；公开异步操作通过 Effect 组合，失败以有类型的错误暴露；纯计算保持普通函数。
+- 自己的等待、并发、重试与取消由 Effect 管理。依赖是原生能力或真正的外部 I/O 适配器，不能包装尚未迁移的 Lody Promise 编排。已登记的上游临时适配仍是明确例外。
+- 所需能力经 Service/Layer 提供。构建依赖可由 Layer 满足，不要求同时出现在每个方法的 `R` 中；普通输入值和纯 helper 不必成为 Service。
+- 每项资源和后台任务通过 Scope、acquire/release 或验证过的原生资源容器获得明确拥有者。取消传到下层，调用方能等待清理；验证释放顺序与有界等待，无法确认释放时保留拥有者并报告失败。
+- 失败、超时、中断及释放失败保持可观察，包括组合 Cause。本地等待取消不意味着远端请求已结束。
+- 原生内核不通过内部 `Effect.run*` 或 `ManagedRuntime.run*` 启动程序，不包含 Legacy 调用或手写 Promise/定时器生命周期；仅已登记的应用/兼容入口执行。返回 Effect 的 `Stream.runCollect` 等算子仍可组合。真实 SDK/平台适配器可以在边界桥接一次回调与取消。
+- 行为测试覆盖真实边界中适用的排队、取消、重试、替换和失败路径；依赖时钟的 workflow 使用注入时钟，真实平台回归补充测试 Layer。
+
+分别记录**内核、消费者、应用所有权**。单一内核的明确 deprecated Legacy 门面可以暂留，但必须记录具体消费者与删除条件，此时消费者迁移尚未完成。操作级 Scope 是有效拥有者，但不证明 daemon 整体关停完成。只有消费者与所需应用拥有者也完成，才算完整集成；任一维度改变都更新台账和 owning 证据。
 
 ### 自己的代码与第三方边界
 
@@ -73,15 +71,31 @@ issue 分类，不是运行时测量；各单元开工时需要各自的详细�
 
 ### 迁移期规则
 
-- 严格自底向上：下层完成前，上层不开始重写。
+- 按真实依赖自底向上：层号不是全局串行要求。ACP transport 与 Loro 可独立推进；
+  上层只等待它实际消费的能力完成。
 - 尚未迁移的上层调用方经 `runtime.runPromise` 门面使用新服务；门面标注为临时，并在对应上层
   迁移时删除。
 - 当依赖属于另一个仓库且尚未完成时，允许在本仓库先定义与其未来 Effect 接口一致的 Tag，
   用临时 Layer 适配现有 Promise 版本；上游完成后只替换该 Layer。
 
+### 随功能与修复推进的小型迁移
+
+专门的迁移系列与日常功能/修复工作都可以交付原生叶子模块。只依靠系列推进，会让已经
+具备条件的模块继续累积 Promise 机制；触及模块就全部重写，则会把任务扩展到尚未完成的
+依赖链。因此，根 [Effect 规则](../../../../AGENTS.md#effect-reference) 要求评估迁移机会，
+并在真实依赖与验证范围就绪时优先完成一个直接服务当前需求的完整单元。
+[选择指南](../../../docs/cli-effect-ts.md#small-migrations-during-feature-and-fix-work)
+负责具体流程和约 500 行的规模参考。
+
+这个参考衡量额外评审范围，不按文件净增长计算，也不新增审批门槛。迁移必须改善当前
+需求涉及的行为，接入真实消费路径，并用行为回归覆盖满足既有完成标准。较大或被依赖
+阻塞的工作仍作为独立单元安排；纯计算保持普通代码。减少复杂度、改善生命周期行为是
+需要验证的目标，选择 Effect 本身不提供这些保证。这项工作方式建议不改变产品契约，
+不需要新增 Spec 文档。
+
 ### 边界规则（使用指南已由基础 PR #1070 提供，生命周期层补充以下要求）
 
-不在 Effect 内调用 `run*`；可拒绝的 promise 用带 signal 的 `tryPromise`；中断必须被某个作用域
+`Effect.run*`/`ManagedRuntime.run*` 仅在已登记入口启动程序；可拒绝的 Promise 在 `tryPromise` 内创建并传递 signal，底层忽略取消时保留拥有者直到完成或确认终止；中断必须被某个作用域
 持有或被等待；超时放在等待者上；finalizer 内的等待必须有上限；`FiberMap` 替换不等待旧 fiber；
 作用域关闭必须记忆化，因为第二次 `Scope.close` 不等待第一次的 finalizer。finalizer 内采用在
 不可中断区域也能结束的时钟/Deferred 上限；ACP 关停由协调器先显式终止/关闭、再 join 原始
@@ -92,12 +106,12 @@ issue 分类，不是运行时测量；各单元开工时需要各自的详细�
 
 ### Lody 侧的四个服务
 
-| 服务             | Effect 概念                                                                                                                        | 取代                                                                                                          |
-| ---------------- | ---------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
-| SessionDocuments | `RcMap<SessionId, DocHandle>`，lookup 为 `acquireRelease(打开并加入 room, 先 unload 再 invalidate)`，带 idle TTL                   | `getOrCreateSessionDoc` 的 `sessions`、`pendingSessionDocs`、`withLocalDocOwnership`、`isDestroyed` 与手写 GC |
-| SessionHistory   | 执行 `HistoryAction`/`MetaPatch` 值的写入器；`commit(batch)` 在一次提交、不可中断区域内完成必须原子的序列；变化以 `Stream` 暴露    | `sessionData.commands.applyHistoryAction` 等 Promise 写入与 `subscribeSessionChanges` 回调                    |
-| SessionPresence  | `hold(sessionId, phase)` 为 `acquireRelease` 租约，心跳为作用域内的 `Effect.repeat(Schedule.spaced)`；机器三态用 `SubscriptionRef` | 分散的 start/clear 调用与十个定时器                                                                           |
-| CloudPort        | 能力接口，方法返回带标签错误的 Effect；超时与重试由调用方用 `timeout`/`Schedule` 组合；local 与 cloud 各一个 Layer                 | 接收 `timeoutMs` 的 Promise 方法                                                                              |
+| 服务             | Effect 概念                                                                                                                                                | 取代                                                                                                          |
+| ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| SessionDocuments | `RcMap<SessionId, DocHandle>`，lookup 为 `acquireRelease(打开并加入 room, 先 unload 再 invalidate)`，带 idle TTL                                           | `getOrCreateSessionDoc` 的 `sessions`、`pendingSessionDocs`、`withLocalDocOwnership`、`isDestroyed` 与手写 GC |
+| SessionHistory   | 执行 `HistoryAction`/`MetaPatch` 值的写入器；`commit(batch)` 避免本地取消打断写入序列；不可中断本身不提供崩溃恢复或跨 peer CRDT 事务；变化以 `Stream` 暴露 | `sessionData.commands.applyHistoryAction` 等 Promise 写入与 `subscribeSessionChanges` 回调                    |
+| SessionPresence  | `hold(sessionId, phase)` 为 `acquireRelease` 租约，心跳为作用域内的 `Effect.repeat(Schedule.spaced)`；机器三态用 `SubscriptionRef`                         | 分散的 start/clear 调用与十个定时器                                                                           |
+| CloudPort        | 能力接口，方法返回带标签错误的 Effect；超时与重试由调用方用 `timeout`/`Schedule` 组合；local 与 cloud 各一个 Layer                                         | 接收 `timeoutMs` 的 Promise 方法                                                                              |
 
 turn 代码只产出 `HistoryAction`/`MetaPatch` 这类数据，看不到 `LoroDoc` 或 loro-repo；只有
 SessionHistory 与 SessionDocuments 的实现能接触 `LoroDoc`，handle 对外只暴露 Effect 方法。
@@ -144,12 +158,19 @@ Lody 这一层的缺陷（#4 unload/invalidate 顺序、#774 join 永久停在 c
 
 ## 迁移单元
 
-### L0 + L1：平台与进程叶子层
+### 进程基础：已实现，但不代表整个 L0/L1 完成
 
-由 [Turn 执行与 ACP 进程所有权](2026-09-27-effect-turn-execution-and-acp-process-ownership.zh.md)
-的第一、二个 PR 交付，是所有上层的共同前提。其余约 35 个直接 spawn 的文件（git、worktree
-setup runner、终端、登录 shell 环境、MCP、preview、code-collab 扫描等）在第二个 PR 起迁到
-同一个 ProcessService；setup 脚本超时只 SIGTERM shell、子孙泄漏的问题在此解决。
+[#1065](https://github.com/LodyAI/Lody/pull/1065)、
+[#1069](https://github.com/LodyAI/Lody/pull/1069)、
+[#1348](https://github.com/LodyAI/Lody/pull/1348) 均已合并。共享核心使用 Effect 4.0.2、
+官方 ChildProcess/ChildProcessSpawner 与 Node Stream/Sink，保留 Lody 有界进程树后端。
+CLI process-options 只组合 Layer，旧 promise-facade 已删除。Sandbox 失败或中断回滚，
+成功命令在配置完成、整棵树退出和 stdio 关闭后释放子 Scope；所有进程消费保留 Legacy 可见。
+
+文件锁是之后第一个依赖单元，见[文件锁决定](../../implemented/architecture/2026-10-10-effect-file-lock-lifecycle.zh.md)：
+真实文件协议、公平且可取消的本地登记、可观察的清理失败。LocalProjects 和 WorktreeGit 执行已有待审的原生内核；worktree 变更/setup/GC、
+runtime 安装、启动闸门、SDK 请求、Session 与 Turn 仍需迁移；进程统一
+不代表这些生命周期或 daemon 所有权已完成。
 
 ### L2 与 Loro 同步栈
 
@@ -160,7 +181,7 @@ Flock 新鲜度同步用 `timeout` + `orElse` 回落本地副本。约束：**�
 
 ### 连接恢复、presence 与机器存活（CLI）
 
-- 位置：`apps/cli/src/lib/loro/connection-recovery.ts`、`presence.ts`、`machine-monitor.ts`、
+- 位置：`apps/cli/src/lib/loro/connection-recovery.ts`、`workspace-presence.ts`、`machine-monitor.ts`、
   `session-active-presence.ts`。
 - 证据：#12、#673；开放 #399、#484、#1028。
 - 拆分：presence 与机器存活属于 Lody 自己的 L2（SessionPresence 与机器三态），可在临时
@@ -201,8 +222,8 @@ Flock 新鲜度同步用 `timeout` + `orElse` 回落本地副本。约束：**�
 - 位置：`worktree-manager.ts`、`speculative-worktree.ts`、`worktree-gc.ts`、
   `packages/shared/src/node/file-lock.ts`。
 - 证据：#76、#6；开放 #296（可能已被 #620 修复，需核实）。
-- 目标：按 key 的 `Semaphore` 取代 `withSessionMarkerLock` promise 链；文件锁为 `acquireRelease`
-  资源并用 `Schedule` 轮询；GC 为守护进程作用域上的 `Effect.repeat`。
+- 文件锁内核已在 #1377 实现；其行为保证与单一 Legacy 门面以所属决定为准。
+- 剩余目标：迁移 Git/worktree 操作与 marker 排队；GC 由 daemon Scope 拥有。仅改变函数返回类型、或让计时循环调用 Promise 方法，不构成这些单元完成。
 
 ### 编排投递
 
@@ -245,18 +266,127 @@ preview 代理、`packages/loro-streams-rpc`、PR poller、Electron updater：�
 - #553：历史同步 single-flight 改为加入进行中的那一次。
 - 核实后关闭：#296、#828 的下载部分。
 
-## 建议顺序
+## 迁移引导与进度
 
-1. L0 + L1 ProcessService，迁移全部 ACP 相关进程（Turn 提案第一个 PR，#1065）。
-2. CLI 其余调用方（#1069），随后单独迁移 Electron main、supervisor 与 shared 辅助模块；
-   核心从 #1065 起就在 shared，不再搬迁。
-3. 与 1–2 并行：loro-repo Flock 持久化迁移。
-4. loro-repo 与 streams-crdt 的 Effect 内核与 `loro-repo/effect` 入口（各自仓库）。
-5. Lody L2：可在第 2 步后基于临时 `LoroRepo` Layer 开始，第 4 步完成后替换 Layer；同期完成
-   托管 runtime、worktree 与文件锁。
-6. L3 → L4 → L5（Turn 提案）。
-7. L6 与编排投递。
-8. Renderer workspace runtime（第 4 步之后），然后 Electron 与 supervisor。
+引导修订评审：[#1452](https://github.com/LodyAI/Lody/pull/1452)。
+
+叶子 PR 合并或代码导入 Effect，不能说明消费者与最终拥有者也已迁移。下面的单元台账分别记录这些事实；按可独立验收的职责组织，不要求一个文件一行，也不按层号全局串行。
+
+[Effect skill](../../../skills/effect-ts/SKILL.md)先区分 review、debug、feature/fix 与专门迁移。Review 检查变化的行为，debug 定位原因，二者都不主动启动迁移。功能/修复可在依赖或验证超出范围时推迟迁移。实现时先明确行为合同，优先官方原语，再核对已安装版本语义，最后决定是否需要自定义协调。本纲领负责依赖与完成标准，[指南](../../../docs/cli-effect-ts.md)负责惯例与测试，每个单元的 Note 负责决策、证据与局限。根 AGENTS.md 将实现者引向相关章节与台账行。当前上下文中首次完整阅读所解析版本的 Effect 指南，之后按任务加载资料；版本变化或上下文丢失时重读。
+
+指南的[五问行为合同](../../../docs/cli-effect-ts.md#behavior-contract)要求在 owning Note 中明确触发、资源拥有者、取消、交接和失败恢复，仅回答适用的问题。这用行为判断替代无条件迁移清单，不增加每任务文档，也不要求普通输入与纯 helper 成为 Service。
+
+小而内聚的模块保持在一起。只有混合计算、领域编排和平台实现的大模块，才考虑 pure/workflow/platform 职责拆分。Workflow 可依赖抽象 Service，执行时可以发生 I/O；Layer 构建不天然属于平台适配。这是与[版本一致的 Effect 资料](../../../docs/cli-effect-ts.md#version-matched-reference)中 Service/Layer 模型一致的 Lody 惯例，不是上游强制的三个目录或固定行数门槛。
+
+迁移事实改变时更新对应行：范围、前置依赖、原生边界、消费者、拥有者、验收证据。无关的日常修改无需更新台账。出现独立交付单元时登记，行为合同可独立验收时拆行。临时适配允许交付，也不能让依赖尚未完成的内核被宣称为完成。
+
+台账是人工维护的证据，不是自动纯化证明。最近的 scoped 规则、行为测试和适用边界守卫保护已完成边界；记录守卫缺口，不能声称现有进程检查覆盖全部 workflow。不按 PR 数量、移除 Promise 数或全仓百分比估算进度。旧 Effect 孤岛未经这些标准核对，保持未核验。
+
+实现状态与验证证据分开记录。内核、消费者、所有权列描述已交付边界；证据列及链接的 Note 记录测试 revision、环境、场景与局限。未测试平台是验证缺口，本身不证明实现未完成；反过来，叶子测试通过也不代表消费者完成。只更新变化的事实，不要求每个 PR 重新认证未变的行。
+
+### 引导评估场景
+
+评估引导修订时使用以下合成任务，判断 agent 的范围选择和拟验证的可观察行为，不检查它是否复述关键词。
+
+| 任务 | 预期选择与证据 |
+| --- | --- |
+| 修复依赖仍使用 Promise 编排的模块中的超时 | 完成修复，解释推迟迁移的原因，不遍历重写整条依赖链。 |
+| 取消正在等待忽略 abort 的 Promise 的 Effect | 区分等待取消与原始工作，保留租约，用可控的迟到完成验证。 |
+| 取消共享生产者的一个读者 | 保留其他租约，验证生产者仍可用且最后拥有者等待清理。 |
+| 主体与释放同时失败 | 在 Promise 边界保留两类失败和恢复所有权，不依赖普通 squash。 |
+| 提取纯 helper，并在既有 workflow 收集 Stream | helper 保持普通函数；允许返回 Effect 的 Stream 算子，不创建 runtime 或无必要的 Service。 |
+| Review 涉及既有生命周期缺陷附近的 diff | 比较 base/head，区分新增破坏与基线，遵守 P0/P1 报告规则，不启动重写。 |
+
+这些是评估输入与预期结果，不是已经完成的独立 agent 实验。后续评估应记录 prompt/指引 revision、产出 diff 或 findings、行为检查和偏差，仅使用合成 fixture。
+
+本次引导修订不改变产品保证或 Specs。文档/skill 检查只验证结构与引用；尚未通过独立 agent 使用实验确认引导能改善实现质量。
+
+## 单元台账
+
+快照：main `bcb1aa8712b2d040912d735f1ae6ef2fc832ab35`，2026-10-11。
+“原生”记录已合并的内核证据，不代表重新验证了所有平台；“待迁移”表示尚未完成；“部分”明确已完成的叶子。尚未评估的孤岛和未测试的环境记在证据局限中，不混入实现状态。所有权列说明实际租约/Scope 边界与应用集成余项。纯计算不计入台账；这是已知生命周期工作队列，不是全仓完整清单。
+
+| 职责单元                                  | 真实前置依赖                                          | 内核               | 消费者                          | 所有权 / 集成                           | 证据与余项                                                                                                                                                                                                       |
+| ----------------------------------------- | ----------------------------------------------------- | ------------------ | ------------------------------- | --------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 有界进程执行与释放                        | 官方进程合同、Node/平台后端                           | 原生               | 原生与 Legacy                   | 进程/container Scope；daemon 根待完成   | [进程决定](../../implemented/architecture/2026-10-09-effect-official-process-service.zh.md)、[释放恢复](../../implemented/bug-fix/2026-10-10-effect-process-release-failure.zh.md)；Windows 后代归属仍需单独工作 |
+| FileLocks：本地队列与跨进程租约           | FileSystem、原生 pid probe                            | 原生               | 原生与 Legacy                   | 操作租约；兼容 runtime 仍存在           | [锁决定](../../implemented/architecture/2026-10-10-effect-file-lock-lifecycle.zh.md)；worktree/install 消费者迁移后删门面                                                                                        |
+| LocalProjects Git 操作                    | 进程、文件系统                                        | 原生               | manager Legacy 路径仍存在       | 命令 Scope                              | [Git 决定](../../implemented/architecture/2026-10-10-effect-local-project-git.zh.md)；manager 协调待迁移                                                                                                         |
+| WorktreeGit 执行                          | 进程、文件系统                                        | 原生               | manager Legacy 路径仍存在       | 命令 Scope                              | [执行决定](../../implemented/architecture/2026-10-10-effect-worktree-git-execution.zh.md)；mutation 是独立单元                                                                                                   |
+| Worktree observations                     | FileLocks、WorktreeGit                                | 原生               | Legacy observation 入口仍存在   | 自持/借用锁租约                         | [观察决定](../../implemented/architecture/2026-10-10-effect-worktree-observations.zh.md)；不代表 mutation/setup/GC 完成                                                                                          |
+| 有限本地源准备                            | WorktreeGit、文件系统；借用 mutation 租约             | 原生               | Legacy worktree 入口仍存在      | 调用方 mutation 租约与临时资源          | [准备决定](../../implemented/architecture/2026-10-10-effect-local-worktree-preparation.zh.md)；manager mutation 协调待迁移                                                                                       |
+| 登录 shell 探测与共享缓存                 | 进程释放所有权、Clock                                 | 原生               | 原生入口；Legacy launcher       | 应用拥有缓存；探测 Scope                | [Shell 决定](../../implemented/architecture/2026-10-10-effect-login-shell-probe.zh.md)；launcher 迁移后删 Legacy                                                                                                 |
+| Runtime 凭据租约 / preparation control    | 平台 token port、文件系统、Clock                      | 原生叶子           | Legacy Session/preparation 胶水 | 精确凭据租约；TTL/control Scope         | [凭据决定](../../implemented/architecture/2026-10-10-runtime-owned-github-context.zh.md)；原始启动与完整 retirement 待完成                                                                                       |
+| Worktree mutations                        | 锁、Git、observations、本地准备                       | 待迁移             | Promise 编排                    | mutation/替换拥有者待完成               | 用原生协调替换 manager Promise 链并保留失败                                                                                                                                                                      |
+| Setup scripts                             | 进程、worktree mutation、真实注入回调                 | 待迁移             | Promise 编排                    | 脚本/任务 Scope 待完成                  | 进程调用原生不代表回调编排原生                                                                                                                                                                                   |
+| Worktree GC                               | mutations、setup、metadata writer、活跃拥有者         | 待迁移             | Promise 编排                    | 共享清理拥有者待完成                    | 删除前协调活跃所有权，换定时器不够                                                                                                                                                                               |
+| Managed-runtime 下载/安装                 | 锁、文件系统、网络和解包边界                          | 待迁移             | Promise 编排                    | 共享任务租约待完成                      | 要求取消与部分安装清理                                                                                                                                                                                           |
+| ACP 启动闸门内核                          | Clock、配置、日志                                     | 待迁移             | Promise 等待者/回调             | admission/等待者拥有者待完成            | 不天然依赖进程；启动回调是独立未完成工作                                                                                                                                                                         |
+| ACP transport 与领域操作                  | 进程、SDK 适配、原始请求跟踪                          | 待迁移             | Promise 请求                    | 连接/原始工作拥有者待完成               | 可独立于 worktree/install；保留 unknown steer 结果                                                                                                                                                               |
+| AgentSession 与池                         | Worktree/startup、install、shell、闸门、ACP、凭据叶子 | 部分               | Promise 编排                    | 完整实例/替换拥有者待完成               | 凭据/preparation 叶子原生，完整 Session 取消仍未完成                                                                                                                                                             |
+| 会话历史所属机器就绪                      | 第三方 Repo 订阅/快照、Clock                         | 原生               | MessageHandler 执行入口        | 单次请求 Stream Scope；关闭取消       | [就绪决定](2026-10-09-roost-native-runtime.zh.md#历史所属机器就绪检查)；所属机器/后端就绪前不打开正文，Repo 与文档生命周期仍待迁移                                                                                  |
+| 历史 RPC 前置拒绝结果持久化               | SQLite driver                                      | 原生               | MessageHandler RPC 回调        | 单次操作 Scope handle；FULL 拒绝事务 | [就绪决定](2026-10-09-roost-native-runtime.zh.md#历史所属机器就绪检查)；拒绝保持到原请求过期并跨重启；Promise RPC dispatch 生命周期仍待迁移 |
+| streams-crdt / loro-repo 生命周期         | Flock 持久化、发布/消费合同、各仓库规则               | 待迁移             | Promise 库 API                  | 库持久化/room/重连 Scope 待完成         | 开始前核对发布与源码；兼容仅使用单一内核                                                                                                                                                                         |
+| workspace presence 与远程代次 | 正式 streams-crdt 0.17.0 / client 0.10.0、原生 token | 原生 | doc/bridge 经唯一 Legacy 入口 | CLI 根 registry、workspace 与代次 Scope | [P5 决定](../../implemented/architecture/2026-10-12-effect-workspace-presence.zh.md)；验证共享 token 和实际 SDK 释放；P6 租约已原生化；relay 上层接线仍待迁移 |
+| 本地 presence 与物理 socket writer | 原生本地来源、真实 Flock SDK 导出、Node host turn/write/drain | 下层 writer 原生 | CLI doc/socket 与 room engine 经唯一 Legacy 入口 | 全进程 FIFO pacer、共享连接 lane；有界释放保留原 owner | [P7 writer 决定](../../implemented/architecture/2026-10-12-effect-local-presence-writer.zh.md)；room/LoroRepo 及应用接线仍待迁移 |
+| 会话活跃 presence 租约 / 心跳 | 同步本地发布、Clock；实际 Turn 子 Scope | 原生 | 原生 Turn 准入；MessageHandler phase/读取回调 | 每 Turn 租约；Legacy analytics/应用入口 | [P6 决策](../../implemented/architecture/2026-10-13-effect-session-presence-leases.zh.md)；完整 Session/Turn/daemon 和 analytics 所有权仍待迁移 |
+| Streams token provider | 原生凭据端口、WebCrypto/fetch、Clock | 原生 | CLI 借用 Legacy；renderer/Machine RPC 自有 Legacy | CLI workspace Scope；其余应用拥有者待迁移 | durable/presence 共用一个 provider/cache；取消只释放自身租约，未结束 I/O 保留恢复拥有者 |
+| 文档、历史、presence                      | 原生 Loro 生命周期、既有历史 reducer                  | 部分：workspace presence 与本地 writer | 混合/Promise 编排               | 会话 presence 租约原生；文档租约待完成；下层 writer 原生       | 既有孤岛未评估；保留 unload→invalidate 与既有写入/读取职责                                                                                                                                                                       |
+| Turn、steer、stop、收尾                   | Session 与文档/历史/presence 拥有者                   | 待迁移             | Promise 编排                    | Turn 任务待迁移；已接入原生 presence 租约           | 两条依赖链都就绪；保留类型化停止与 pending-input 行为                                                                                                                                                            |
+| dispatch、MessageHandler、daemon 集成     | Turn、投递、文档 flush                                | 待迁移             | Promise 编排                    | 已有 shell 根 runtime；其余所有权待完成 | 停会话→最终写入 flush→拆文档，报告外部释放失败                                                                                                                                                                   |
+| Renderer / Electron / supervisor 上层编排 | 各单元真实的平台与同步依赖                            | 待迁移    | 既有孤岛与进程调用方            | 上层资源/任务拥有者待完成               | 既有孤岛未评估；统一进程调用不代表上层 workflow 完成，交付前继续拆单元                                                                                                                                                           |
+
+## 交付依赖图
+
+箭头表示前置依赖，不是全局串行顺序。文件锁、Git 叶子、worktree 观察/本地准备与
+应用 shell 缓存已是合并后的基础；后续单元从最新 main 或新的依赖分支开始。
+
+```mermaid
+flowchart TD
+  P["已合并进程基础"] --> F["FileSystem + FileLocks"]
+  P --> C["Scope 释放失败与恢复租约：#1379"]
+  C --> F
+  C --> G["LocalProjects 原生 Git"]
+  C --> Q["WorktreeGit 执行：#1389"]
+  F --> O["WorktreeObservations: #1392"]
+  Q --> O
+  Q --> B["LocalWorktreePreparation"]
+  B --> J
+  O --> J["worktree 变更 / setup / GC"]
+  G --> J
+  F --> R["Runtime 下载 / 安装"]
+  C --> E["原生登录 shell 探测：#1397"]
+  E --> EC["应用 shell 缓存所有权：#1397"]
+  SG["ACP 启动闸门内核：Clock/config；待完成"]
+  P --> A["可独立的 ACP transport → 领域操作"]
+  J --> S["AgentSession / 会话池"]
+  R --> S
+  EC --> S
+  SG --> S
+  A --> S
+  N["已合并 #1385：运行实例凭据 / 预热 TTL 叶子"] --> S
+  K["Lody Flock 持久化已实现；仍需核实发布 / 消费"] --> L["streams-crdt / loro-repo Effect 内核：分别跨仓库 PR"]
+  L --> D["文档 / 历史 / presence"]
+  S --> T["Turn / steer / 停止 / 收尾"]
+  D --> T
+  T --> H["dispatch / MessageHandler / 编排投递"]
+  H --> M["Daemon 最终集成：停止 → flush → 文档拆除"]
+  L --> W["Renderer runtime"]
+  M --> X["Electron / supervisor 上层编排"]
+```
+
+文件锁门面的原生程序错误投影同样依赖 #1379，内核仍使用既有 pid 探测；文件锁由 [#1377](https://github.com/LodyAI/Lody/pull/1377) 审查。原生 Git 验证发现 Scope 释放失败曾被吞掉，独立修复 [#1379](https://github.com/LodyAI/Lody/pull/1379) 保留恢复租约。LocalProjects 在 #1379 之上的 [#1381](https://github.com/LodyAI/Lody/pull/1381) 审查，其内核不依赖 FileLocks；worktree setup/GC 需要同时集成两者。WorktreeGit 执行由 [#1389](https://github.com/LodyAI/Lody/pull/1389) 审查，内核只依赖进程基础和文件系统；为避免重复管理器改动，评审 base 包含 LocalProjects。
+原生 [worktree 观察单元](../../implemented/architecture/2026-10-10-effect-worktree-observations.zh.md)
+在包含刷新 main 的基础上组合 FileLocks 和 WorktreeGit，不代表变更、setup 或 GC 所有权完成。
+#1385 已合并，仅提供运行实例凭据租约和预热 TTL/控制；底层 ACP/worktree 启动及完整会话所有权仍未完成。
+有限[本地源准备单元](../../implemented/architecture/2026-10-10-effect-local-worktree-preparation.zh.md) 依赖文件系统/Git，借用既有变更租约。评审 base 包含观察单元，因为管理器边界共享；原生内核并不互相依赖。
+库侧前置核对：当前 lockfile 解析到 Flock WASM 0.4.3、streams-crdt 0.17.0 和 loro-repo 0.22.0。消费版本不证明 Effect 内核已完成；库侧迁移前仍须核实发布版本、上游仓库状态/规则与当前源码/检查点契约。此前 registry 观察不能作为当前发布保证。
+下文的七单元基础 stack 已于 2026-10-11 合入 main。Worktree 变更/setup/GC、runtime
+安装、ACP 和 Loro 内核仍未完成。
+
+应用 shell 缓存已建立 CLI/Electron 根 runtime。后续原生服务进入组合时扩展这些拥有者，
+不要每个服务另建 runtime；继续完成统一 daemon 所有权并保留两阶段关停。已登记删除条件的临时上游适配可解除 Lody 集成阻塞，但不能
+把同步栈宣称为完成。库侧工作前核实 Flock 发布/消费版本和各仓库规则；原本地检出版本与
+规模调查仅为历史。
 
 ## 验证边界
 
@@ -270,8 +400,38 @@ preview 代理、`packages/loro-streams-rpc`、PR poller、Electron updater：�
 已合入 main。[#1057](https://github.com/LodyAI/Lody/pull/1057) 合入了原基础分支而非 main；
 [#1355](https://github.com/LodyAI/Lody/pull/1355) 只将这两份中英文计划恢复到 main。
 
-剩余 stack 为 #1355 → #1065 → #1069 → #1348。#1065 直接在 shared 中引入 v4 进程核心、
-sandbox 与 ACP 调用方；#1069 迁移其余 CLI 调用方和 CLI 守卫；#1348 迁移 Electron、
-supervisor、shared 辅助模块与 review helper，并扩大守卫。所有层均基于 v4，核心不再经历
-CLI 到 shared 的搬迁。使用 GitHub 原生 stack 的合并流程；合并底部 PR 后，它会 rebase
-剩余层。继续合并前，核对下一层的 base 和差异。
+此前 #1355 → #1065 → #1069 → #1348 已合并。共享官方进程服务保留 Lody 有界后端，
+调用方迁移不等于整个 L0/L1 或 daemon 所有权完成。新评审使用新分支及实际依赖边；
+文件锁 #1377、Git 叶子 #1381/#1389、worktree 查询 #1392 和本地准备 #1394 是评审
+单元，不宣称 mutations、setup/GC 或 Session 取消已完成。
+
+独立的[登录 shell 探测单元](../../implemented/architecture/2026-10-10-effect-login-shell-probe.zh.md)
+依赖进程释放失败所有权 #1379，不依赖 worktree 准备。#1397 已原生化有限探测与
+应用缓存；CLI/Electron 入口通过根 runtime 拥有此服务，剩余启动器使用显式 Legacy
+访问器，不代表其它 daemon 拥有者已迁移。维护两个真实路径：
+
+```mermaid
+flowchart LR
+  P[原生进程服务与释放所有权] --> S[原生登录 shell 探测]
+  S --> C[应用拥有的 shell 缓存：#1397]
+  P --> G[Git 与文件系统/锁评审单元]
+  G --> W[worktree setup 和 GC：待完成]
+  C --> A[ACP 启动组合：待完成]
+  W --> A
+  L[Loro 库生命周期：待完成] --> T[Turn：待完成]
+  A --> Q[连接与 Session 所有权：待完成]
+  Q --> T
+```
+
+有限探测保留 CLI 三秒 pending 等待，同时保留实际失败；它不迁移 runtime 下载或启动
+闸门。Loro 库主线保持独立；Turn 等待真实两边依赖，而非按层号全局串行。
+
+### 已合并的基础 stack
+
+下列七份评审已于 2026-10-11 合入 main：
+
+```text
+main → #1379 → #1377 → #1381 → #1389 → #1392 → #1394 → #1397
+```
+
+评审时每份 PR 以前一份的 head 分支为 base，并包含该前置分支，替代临时 worktree/shell 整合 base。这是评审与合并顺序：LocalProjects 不获取 FileLocks，Git 执行内核不要求 LocalProjects，有限 shell 探测依赖进程所有权，不依赖 worktree 准备。后续规划继续保留上面的真实依赖图。进程获取错误转换现已保留配置失败和全部未解决的恢复租约。这些 PR 已成为小型任务相关单元和后续专门迁移的基础；stack 不代表后续 daemon 阶段完成。

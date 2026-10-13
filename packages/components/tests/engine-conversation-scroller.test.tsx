@@ -83,6 +83,7 @@ function mount(
     strict = false,
     suppress,
     hidden,
+    scaledRects = false,
     feedback = false,
     tickOnScroll = false,
   }: {
@@ -90,6 +91,8 @@ function mount(
     suppress?: { current: boolean };
     /** The tab is inactive: `display: none`, so every offset and size reads 0. */
     hidden?: { current: boolean };
+    /** A transformed ancestor scales visual rects while layout sizes stay in CSS pixels. */
+    scaledRects?: boolean;
     /** A view whose state flips whenever it is told the offset is 0. */
     feedback?: boolean;
     /** A view that setStates on every onScroll, like the top-fade flag. */
@@ -126,7 +129,7 @@ function mount(
         )
           return { top: -scrollTop, height: px(el.style.height) };
         if (el.hasAttribute('data-virtual-index'))
-          return { top: px(el.style.top) - scrollTop, height: ROW };
+          return { top: px(el.style.top) - scrollTop, height: scaledRects ? ROW / 4 : ROW };
         return undefined;
       },
     });
@@ -247,6 +250,25 @@ it('opens at the real bottom and never hides the viewport', async () => {
     expect(mountedKeys(ctx)).toEqual(
       expect.arrayContaining(keysOnScreen(keys, ctx.harness.scrollTop))
     );
+  } finally {
+    unmount(ctx);
+  }
+});
+
+it('measures conversation rows in layout pixels under a scaled ancestor', async () => {
+  const keys = rowKeys(40);
+  const ctx = mount('engine-scaled-ancestor' as SessionId, keys, undefined, {
+    scaledRects: true,
+  });
+  // Keep ResizeObserver from correcting an incorrect first measurement. The
+  // initial row layout must already be in the same CSS-pixel space as the
+  // engine's virtual positions.
+  ctx.harness.hold(() => true);
+  try {
+    await ctx.settle();
+    const container = ctx.viewport().firstElementChild as HTMLElement;
+    expect(Number.parseFloat(container.style.height)).toBe(keys.length * ROW);
+    expect(ctx.harness.scrollTop).toBe(keys.length * ROW - VIEWPORT);
   } finally {
     unmount(ctx);
   }
@@ -397,7 +419,9 @@ it('an upward navigation key in the conversation stops following; typing and oth
 
     await act(async () => {
       document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'PageUp', bubbles: true }));
+      ctx.harness.frame();
     });
+    expect(ctx.state.current?.isSticky).toBe(true);
     ctx.harness.nativeScrollTo(BOTTOM(42) - 400);
     await ctx.settle();
     expect(ctx.state.current?.isSticky).toBe(false);
@@ -411,6 +435,64 @@ it('an upward navigation key in the conversation stops following; typing and oth
   }
 });
 
+it.each(['edge wheel', 'body key', 'cancelled key', 'button space', 'idle wheel', 'idle key'])(
+  '%s leaves no input evidence for later unowned movement',
+  async (input) => {
+    const { ctx } = await openFollowing(`engine-no-scroll-${input}`);
+    try {
+      if (input === 'idle key') {
+        await act(async () => ctx.handle.current!.scrollRowToTop(30, { smooth: false }));
+        await ctx.settle();
+      }
+      await act(async () => {
+        if (input.includes('wheel'))
+          ctx.viewport().dispatchEvent(
+            new WheelEvent('wheel', {
+              deltaY: input === 'edge wheel' ? 120 : -120,
+              bubbles: true,
+            })
+          );
+        else {
+          let target = input === 'body key' ? document.body : rowElement(ctx, 'r38');
+          if (input === 'button space') {
+            const button = document.createElement('button');
+            target.append(button);
+            target = button;
+          }
+          if (input === 'cancelled key')
+            target.addEventListener('keydown', (event) => event.preventDefault(), { once: true });
+          target.dispatchEvent(
+            new KeyboardEvent('keydown', {
+              key: input === 'button space' ? ' ' : input === 'idle key' ? 'End' : 'PageUp',
+              shiftKey: input === 'button space',
+              bubbles: true,
+              cancelable: true,
+            })
+          );
+        }
+      });
+      // No movement or scrollend. Expiry follows the native animation-start frame.
+      await ctx.settle();
+      if (input === 'idle wheel' || input === 'idle key') {
+        // Reading remains deliberate. Unowned arrival at the
+        // exact bottom must not restore it from expired wheel/key evidence.
+        ctx.harness.nativeScrollTo(BOTTOM(40) - 100);
+        await ctx.settle();
+        ctx.harness.nativeScrollTo(BOTTOM(40));
+        await ctx.settle();
+        expect(ctx.state.current?.isSticky).toBe(false);
+      } else {
+        ctx.harness.nativeScrollTo(BOTTOM(40) - 100);
+        await ctx.settle();
+        expect(ctx.harness.scrollTop).toBe(BOTTOM(40));
+        expect(ctx.state.current?.isSticky).toBe(true);
+      }
+    } finally {
+      unmount(ctx);
+    }
+  }
+);
+
 it('an upward move with no pointer or touch is corrected back to the end', async () => {
   const { ctx } = await openFollowing('engine-unowned-move');
   try {
@@ -422,6 +504,107 @@ it('an upward move with no pointer or touch is corrected back to the end', async
     unmount(ctx);
   }
 });
+
+it.each(['up', 'down'])(
+  'recognizes a %s wheel delivered after its native offset',
+  async (direction) => {
+    const { ctx } = await openFollowing(`engine-offset-first-${direction}`);
+    try {
+      if (direction === 'down') {
+        await act(async () => ctx.handle.current!.scrollRowToTop(30, { smooth: false }));
+        await ctx.settle();
+      }
+      const target = direction === 'up' ? 0 : BOTTOM(40);
+      ctx.harness.nativeScrollTo(target);
+      await act(async () =>
+        ctx.viewport().dispatchEvent(
+          new WheelEvent('wheel', {
+            deltaY: direction === 'up' ? -4000 : 1200,
+            bubbles: true,
+          })
+        )
+      );
+      await ctx.settle();
+      expect(ctx.harness.scrollTop).toBe(target);
+      expect(ctx.state.current?.isSticky).toBe(direction === 'down');
+    } finally {
+      unmount(ctx);
+    }
+  }
+);
+
+it.each(['wheel', 'delayed wheel', 'key', 'delayed key', 'touch'])(
+  'downward %s input re-arms only after a near-edge scroll ends',
+  async (input) => {
+    const { ctx } = await openFollowing(`engine-down-${input}`);
+    try {
+      await act(async () => ctx.handle.current!.scrollRowToTop(30, { smooth: false }));
+      await ctx.settle();
+      await act(async () => {
+        const viewport = ctx.viewport();
+        if (input === 'wheel' || input === 'delayed wheel')
+          viewport.dispatchEvent(new WheelEvent('wheel', { deltaY: 100, bubbles: true }));
+        else if (input === 'key' || input === 'delayed key')
+          viewport.dispatchEvent(new KeyboardEvent('keydown', { key: 'End', bubbles: true }));
+        else {
+          viewport.dispatchEvent(touch('touchstart', [[100, 140]]));
+          viewport.dispatchEvent(touch('touchend', [[100, 100]]));
+        }
+      });
+      if (input.startsWith('delayed')) {
+        // Compositor-driven wheel/key motion can follow multiple callbacks.
+        await act(async () => {
+          for (let frame = 0; frame < 3; frame++) ctx.harness.frame();
+        });
+      }
+      ctx.harness.nativeScrollTo(BOTTOM(40) - 3);
+      await ctx.settle();
+      expect(ctx.state.current?.isSticky).toBe(false);
+      expect(ctx.harness.scrollTop).toBe(BOTTOM(40) - 3);
+      await act(async () => ctx.viewport().dispatchEvent(new Event('scrollend')));
+      await ctx.settle();
+      expect(ctx.state.current?.isSticky).toBe(true);
+      expect(ctx.harness.scrollTop).toBe(BOTTOM(40));
+    } finally {
+      unmount(ctx);
+    }
+  }
+);
+
+it.each(['focus', 'typing', 'pointer'])(
+  'composer %s clears old conversation momentum before browser movement',
+  async (input) => {
+    const { ctx, keys } = await openFollowing('engine-composer-focus');
+    const composer = document.createElement('textarea');
+    document.body.append(composer);
+    try {
+      if (input !== 'focus') await act(async () => composer.focus());
+      await act(async () => {
+        ctx.viewport().dispatchEvent(touch('touchstart', [[100, 100]]));
+        ctx.viewport().dispatchEvent(touch('touchend', [[100, 140]]));
+      });
+      ctx.harness.nativeScrollTo(BOTTOM(40) - 100);
+      await ctx.settle();
+      await act(async () => {
+        if (input === 'focus') composer.focus();
+        else
+          composer.dispatchEvent(
+            new Event(input === 'typing' ? 'beforeinput' : 'pointerdown', { bubbles: true })
+          );
+      });
+      ctx.harness.nativeScrollTo(BOTTOM(40) - 3);
+      await ctx.settle();
+      await act(async () => ctx.viewport().dispatchEvent(new Event('scrollend')));
+      await ctx.settle();
+      expect(ctx.state.current?.isSticky).toBe(false);
+      await appendRows(ctx, keys);
+      expect(ctx.harness.scrollTop).toBe(BOTTOM(40) - 3);
+    } finally {
+      composer.remove();
+      unmount(ctx);
+    }
+  }
+);
 
 it.each([
   [

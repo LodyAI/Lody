@@ -76,6 +76,8 @@ import {
 } from './roost-history-port';
 import { registerSessionBackendFactory } from './session-backend';
 import { RoostHistoryGeneration } from './roost-history-generation';
+import { reportRoostHistoryFailure } from './roost-history-diagnostics';
+import { loadRoostOwnerSeedLegacy } from './roost-writer-identity';
 import {
   projectLatestGoal,
   readGoalProjection,
@@ -99,40 +101,6 @@ type OwnerLease = {
 
 const bytesHex = (bytes: Uint8Array): string => Buffer.from(bytes).toString('hex');
 
-const parseSeed = (raw: string | undefined): Uint8Array | undefined => {
-  if (!raw?.trim()) return undefined;
-  const value = raw.trim();
-  if (!/^[0-9a-fA-F]{64}$/.test(value)) {
-    throw new Error('LODY_ROOST_SEED_HEX must contain exactly 32 bytes (64 hex characters)');
-  }
-  return Uint8Array.from(Buffer.from(value, 'hex'));
-};
-
-const loadRoostOwnerSeed = async (): Promise<Uint8Array> => {
-  const configured = parseSeed(process.env.LODY_ROOST_SEED_HEX);
-  if (configured) return configured;
-  try {
-    const { AsyncEntry } = await import('@napi-rs/keyring');
-    const entry = new AsyncEntry('Lody Roost History', 'owner-seed-v1', {
-      linux: { store: 'secret-service' },
-    });
-    const existing = await entry.getPassword(AbortSignal.timeout(30_000));
-    const restored = parseSeed(existing ?? undefined);
-    if (existing && !restored) {
-      throw new Error('stored Roost owner identity is invalid');
-    }
-    if (restored) return restored;
-    const generated = randomBytes(32);
-    await entry.setPassword(generated.toString('hex'), AbortSignal.timeout(30_000));
-    return generated;
-  } catch (error) {
-    throw new Error(
-      `Roost history owner identity is unavailable; configure LODY_ROOST_SEED_HEX or unlock the system credential store (${error instanceof Error ? error.message : String(error)})`,
-      { cause: error }
-    );
-  }
-};
-
 const defaultDatabase = (): string =>
   process.env.LODY_ROOST_DB_PATH?.trim() ||
   join(getLodyDataDir(undefined, homedir()), 'roost-history.sqlite3');
@@ -149,9 +117,10 @@ let ownerPool:
   | undefined;
 
 const acquireOwnerUnlocked = async (options: RoostNativeOptions): Promise<OwnerLease> => {
-  const seed = options.seed ?? (await loadRoostOwnerSeed());
   const dbPath = resolve(options.dbPath ?? defaultDatabase());
-  const key = `${dbPath}:${bytesHex(seed)}`;
+  const seed = await loadRoostOwnerSeedLegacy(dbPath, options.seed);
+  const owner = Identity.fromSeed(seed).owner();
+  const key = `${dbPath}:${bytesHex(owner)}`;
   if (ownerPool?.key === key && !ownerPool.closePromise) {
     ownerPool.refs += 1;
     return {
@@ -163,7 +132,6 @@ const acquireOwnerUnlocked = async (options: RoostNativeOptions): Promise<OwnerL
   }
   if (ownerPool) await releaseOwnerUnlocked(ownerPool.key, true);
   await mkdir(dirname(dbPath), { recursive: true });
-  const owner = Identity.fromSeed(seed).owner();
   const client = new RoostNativeClient({
     dbPath,
     seed,
@@ -171,9 +139,15 @@ const acquireOwnerUnlocked = async (options: RoostNativeOptions): Promise<OwnerL
     maxQueuedRequests: options.maxQueuedRequests ?? 32,
     maxQueuedBytes: options.maxQueuedBytes ?? 8 * 1024 * 1024,
   });
+  void client.exited.then(({ code }) => {
+    if (client.failure) {
+      reportRoostHistoryFailure(client.failure, { stage: 'worker', exitCode: code });
+    }
+  });
   try {
     await client.ready;
   } catch (error) {
+    reportRoostHistoryFailure(error, { stage: 'initialize' });
     await client.close().catch(() => undefined);
     throw error;
   }
@@ -210,7 +184,12 @@ const releaseOwnerUnlocked = async (key: string, force = false): Promise<void> =
   const current = ownerPool;
   ownerPool = undefined;
   current.closePromise ??= current.client.close();
-  await current.closePromise;
+  try {
+    await current.closePromise;
+  } catch (error) {
+    reportRoostHistoryFailure(error, { stage: 'close' });
+    throw error;
+  }
 };
 
 const releaseOwner = (key: string, force = false): Promise<void> =>
@@ -1102,7 +1081,14 @@ const createNodeServicesForLease = async (
           operationCursor = undefined;
           needsRefresh = true;
           const stale = error instanceof Error && 'code' in error && error.code === 'stale';
-          if (!stale || attempt >= 2) throw error;
+          if (!stale || attempt >= 2) {
+            reportRoostHistoryFailure(error, {
+              stage: 'write',
+              sessionId: viewId,
+              operation: operationId.split(':')[0],
+            });
+            throw error;
+          }
           const cursor = await sessionDoc.getRoostHistoryCursor();
           if (Number.isSafeInteger(cursor?.historyRevision)) {
             observedHistoryRevision = Math.max(observedHistoryRevision, cursor!.historyRevision!);
@@ -1983,11 +1969,13 @@ const createNodeServices = async (
   sessionDoc: SessionDocument,
   ownerOptions: RoostNativeOptions = {}
 ) => {
-  const lease = await acquireOwner(ownerOptions);
+  let lease: OwnerLease | undefined;
   try {
+    lease = await acquireOwner(ownerOptions);
     return await createNodeServicesForLease(sessionDoc, lease);
   } catch (error) {
-    await lease.release().catch(() => undefined);
+    reportRoostHistoryFailure(error, { stage: 'initialize', sessionId: sessionDoc.sessionId });
+    await lease?.release().catch(() => undefined);
     throw error;
   }
 };

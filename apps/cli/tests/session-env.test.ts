@@ -9,12 +9,8 @@ import type { SessionId, WorkspaceId } from '@lody/shared';
 const loginShellOverlay = vi.hoisted(() => ({ value: {} as NodeJS.ProcessEnv }));
 const resolvedLoginShellOverlay = vi.hoisted(() => ({ value: {} as NodeJS.ProcessEnv }));
 vi.mock('@/agent/login-shell-env', () => ({
-  getCachedLoginShellEnvSync: () => loginShellOverlay.value,
-  getLoginShellEnv: async () => resolvedLoginShellOverlay.value,
-  resetLoginShellEnvCache: () => {
-    loginShellOverlay.value = {};
-    resolvedLoginShellOverlay.value = {};
-  },
+  getCachedLoginShellEnvSyncLegacy: () => loginShellOverlay.value,
+  getLoginShellEnvLegacy: async () => resolvedLoginShellOverlay.value,
 }));
 
 import { Session } from '../src/session/session';

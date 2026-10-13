@@ -23,10 +23,9 @@ export const mergeToolCallWithPermission = (
   const kind = (toolCall.kind ?? tool.kind ?? undefined) as
     | ToolCallMessageContent['kind']
     | undefined;
-  const content = sanitizeToolCallContentForHistory(
-    toolCall.content ?? tool.content ?? undefined,
-    kind
-  );
+  // Permission enrichment must not project or reparse an existing stored list.
+  const content =
+    toolCall.content ?? sanitizeToolCallContentForHistory(tool.content ?? undefined, kind);
   const locations =
     toolCall.locations ??
     (Array.isArray(tool.locations) && tool.locations.length > 0 ? tool.locations : undefined) ??

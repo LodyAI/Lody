@@ -18,6 +18,7 @@ import { useTranslation } from 'react-i18next';
 import type { AcpCommandSummary } from '@lody/shared';
 import { AttachmentAddMenu, type AttachmentAddMenuMcp } from './attachment-add-menu';
 import { ComposerImagePeek } from './composer-image-peek';
+import { measureTextareaScrollHeight } from './textarea-measurement';
 import { CommentReferenceChip, type CommentReferenceChipItem } from './comment-reference-chip';
 import {
   VisualAnnotationReferenceChip,
@@ -591,10 +592,8 @@ export function ChatComposer({
     // When empty, the height is simply minHeight — and must be: Chromium includes
     // the wrapped placeholder text in an empty textarea's scrollHeight, so a long
     // placeholder would grow the box past minHeight and then visibly shrink on
-    // the first keystroke. Skipping the measurement also matters for speed: an
-    // `auto` reset followed by a scrollHeight read forces a synchronous layout
-    // of the whole page, and a session switch mounts an empty composer into a
-    // freshly committed conversation (~5ms per switch).
+    // the first keystroke. Skipping measurement also avoids constructing a
+    // mirror and forcing layout while an empty composer mounts on session switch.
     const hasValue = (promptValue ?? '').length > 0;
     if (!hasValue) {
       textarea.style.height = `${minHeight}px`;
@@ -602,9 +601,9 @@ export function ChatComposer({
       return;
     }
 
-    // Reset height to auto to get an accurate scrollHeight, then clamp.
-    textarea.style.height = 'auto';
-    const scrollHeight = textarea.scrollHeight;
+    // Measure outside the flex layout. A temporary height:auto on the live
+    // textarea expands the conversation viewport and can clamp its scrollTop.
+    const scrollHeight = measureTextareaScrollHeight(textarea, computedStyle);
     const newHeight = Math.max(minHeight, Math.min(scrollHeight, maxHeight));
 
     textarea.style.height = `${newHeight}px`;

@@ -59,7 +59,7 @@ describe('history session catalog client', () => {
       if (!profile) throw new Error('Missing synthetic profile');
       await store.markChatgptReady(profile);
       vi.spyOn(profileStore, 'getCodexProfileStore').mockReturnValue(store);
-      vi.spyOn(loginShell, 'getLoginShellEnv').mockResolvedValue({});
+      vi.spyOn(loginShell, 'getLoginShellEnvLegacy').mockResolvedValue({});
       vi.spyOn(store, 'isReady').mockImplementation(async () => {
         expect(await store.remove(profile)).toBe(false);
         return false;

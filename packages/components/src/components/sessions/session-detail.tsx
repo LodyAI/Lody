@@ -5623,6 +5623,7 @@ const SessionDetail = ({
         htmlPreviewRequestSeq={tab.htmlPreviewRequestSeq}
         saveRequestSeq={viewerTabSaveStates[tab.id]?.saveRequestSeq ?? 0}
         copyMarkdownRequestSeq={viewerTabSaveStates[tab.id]?.copyMarkdownRequestSeq ?? 0}
+        defaultHtmlPreview={isMobile}
         preferNativeMarkdownSelection={isMobile}
         fileProvider={activeSessionFileProvider}
         fileProviderPending={activeSessionFileProviderPending}

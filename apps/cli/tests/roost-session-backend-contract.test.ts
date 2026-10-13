@@ -1,20 +1,43 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { LoroRepo } from 'loro-repo';
+import { Cause, Effect, Exit, Fiber } from 'effect';
+import { TestClock } from 'effect/testing';
+import Database from 'better-sqlite3';
+import {
+  encryptCodeCollabV2RpcPayload,
+  type SessionHistoryRpcRequest,
+} from '@lody/loro-streams-rpc';
+import {
+  getSessionHistoryRpcRejection,
+  putSessionHistoryRpcRejection,
+} from '../src/session/session-history-rpc-rejections';
+import { it as effectIt } from '@effect/vitest';
+import {
+  awaitSessionHistoryOwner,
+  SESSION_HISTORY_METADATA_TIMEOUT_MS,
+} from '../src/session/session-history-owner';
 import { SessionDocument } from '../src/lib/loro/doc';
 import { installRoostNodeSessionBackend } from '../src/session/roost-node-session';
 import { createSessionBackend, type SessionBackendFactory } from '../src/session/session-backend';
 import { NodeLodyHistory } from '@loro-dev/roost/lody-history';
 import {
   CURRENT_MACHINE_PROTOCOL_CAPABILITIES,
+  SessionHistoryReadResponseSchema,
+  SessionHistoryWriteResponseSchema,
   getMachineRoomId,
   getSessionRoomId,
   SessionStatusFactory,
   type SessionId,
   type SessionHistoryInput,
+  type SessionHistoryReadResponse,
+  type SessionHistoryWriteResponse,
 } from '@lody/shared';
+import { MessageHandler } from '../src/lib/message-handler';
+import { getDefaultLogger } from '../src/utils/logger';
+import { createTestCloudPort } from './test-cloud-port';
 import { createCommandSessionHistoryFactory, type AuthContext } from '../src/lib/command-runtime';
 import type { LoroDocumentManager } from '../src/lib/loro/doc';
 import {
@@ -23,21 +46,24 @@ import {
   type HistoryImportInput,
 } from '@lody/shared/session-data';
 import { Identity } from '@loro-dev/roost';
-import { RoostNativeClient } from '@loro-dev/roost-node';
+import { RoostNativeClient, RoostHostError } from '@loro-dev/roost-node';
+import { describeRoostHistoryFailure } from '../src/session/roost-history-diagnostics';
 import { RoostHistoryGeneration } from '../src/session/roost-history-generation';
 import { encodeRoostContent } from '../src/session/roost-history-port';
-import { readGoalProjection } from '../src/session/roost-goal-projection';
+import { loadRoostOwnerSeedLegacy } from '../src/session/roost-writer-identity';
 import type { SessionBackendContractFixtureFactory } from './session-backend-contract';
 import { defineSessionBackendContract } from './session-backend-contract';
 let nativeDirectory: string;
 let ordinal = 0;
 const nativeFixtures = new Set<{ close(): Promise<void> }>();
-afterEach(() => vi.restoreAllMocks());
+afterEach(() => {
+  vi.restoreAllMocks();
+  vi.useRealTimers();
+});
 beforeAll(async () => {
   nativeDirectory = await mkdtemp(join(tmpdir(), 'lody-production-roost-'));
   installRoostNodeSessionBackend({
     dbPath: join(nativeDirectory, 'history.db'),
-    seed: new Uint8Array(32).fill(39),
   });
 });
 afterAll(async () => {
@@ -95,7 +121,14 @@ async function nativeFixture(
       timestamp: '2026-10-09T00:00:00.000Z',
       acpSessionConfig: {},
     });
-  const backend = await createSessionBackend(doc, { historyBackend: 'roost' });
+  let backend: Awaited<ReturnType<typeof createSessionBackend>>;
+  try {
+    backend = await createSessionBackend(doc, { historyBackend: 'roost' });
+  } catch (error) {
+    await doc.destroy({ preserveStatus: true }).catch(() => undefined);
+    await repo.destroy();
+    throw error;
+  }
   let closed = false;
   const result = {
     repo,
@@ -162,76 +195,691 @@ const nativeContractFixture: SessionBackendContractFixtureFactory = async (optio
 };
 defineSessionBackendContract('Production Roost SQLite', nativeContractFixture);
 
+async function coldHistoryHandlerFixture(count: number) {
+  const repo = await LoroRepo.create({});
+  const docs = new Map<SessionId, SessionDocument>();
+  for (let index = 0; index < count; index++) {
+    const id = `pending-handler-${ordinal++}` as SessionId;
+    await repo.upsertDocMeta(getSessionRoomId(id), {
+      id,
+      historyBackend: 'roost',
+      userId: 'test-user',
+    });
+    docs.set(id, new SessionDocument(repo, id, (room) => repo.unloadDoc(room)));
+  }
+  const noop = () => undefined;
+  const handler = new MessageHandler(
+    {
+      on: noop,
+      setRequestPermissionHandler: noop,
+      getSession: () => undefined,
+      cleanUp: async () => undefined,
+    } as never,
+    {
+      repo,
+      getOrCreateSessionDoc: async (id: SessionId) => {
+        const doc = docs.get(id)!;
+        if (!doc.handle) {
+          doc.handle = await repo.openPersistedDoc(getSessionRoomId(id));
+          doc.composeSessionData(doc.handle.doc, undefined, await doc.getMetaState());
+        }
+        return doc;
+      },
+      isTransportConnected: () => false,
+      markMachineFlockDocDirty: noop,
+      publishSessionPresence: noop,
+      clearSessionPresence: noop,
+      sendMachineHeartbeat: async () => undefined,
+    } as never,
+    getDefaultLogger(),
+    {
+      machineId: 'test-machine',
+      workspaceId: 'test-workspace' as never,
+      token: 'synthetic-token',
+      userId: 'test-user',
+      machineName: 'synthetic',
+      cliVersion: '0.0.0',
+      cloudPort: createTestCloudPort(),
+    }
+  );
+  const observers = new Set<object>();
+  const observerWaiters = new Map<number, () => void>();
+  const observe = repo.observeDocs.bind(repo);
+  vi.spyOn(repo, 'observeDocs').mockImplementation((listener, options) => {
+    const subscription = observe(listener, options);
+    observers.add(subscription);
+    observerWaiters.get(observers.size)?.();
+    return {
+      ...subscription,
+      unsubscribe: () => {
+        subscription.unsubscribe();
+        observers.delete(subscription);
+      },
+    };
+  });
+  return {
+    repo,
+    docs,
+    observers,
+    handler,
+    rpc: handler as unknown as {
+      writeSessionHistoryForRpc(
+        id: SessionId,
+        operation: 'append',
+        payload: Record<string, unknown>
+      ): Promise<SessionHistoryWriteResponse>;
+      resolveSessionHistoryOwnerSessionId(
+        id: SessionId,
+        options: { signal: AbortSignal }
+      ): Promise<SessionId>;
+    },
+    observing: (expected: number) =>
+      observers.size === expected
+        ? Promise.resolve()
+        : new Promise<void>((resolve) => {
+            observerWaiters.set(expected, resolve);
+          }),
+    ready: (id: SessionId) =>
+      repo.upsertDocMeta(getSessionRoomId(id), {
+        machineId: 'test-machine',
+        status: SessionStatusFactory.idle(),
+      }),
+    close: async () => {
+      await handler.cleanup();
+      for (const doc of docs.values()) if (doc.handle) await doc.destroy({ preserveStatus: true });
+      await repo.destroy();
+    },
+  };
+}
+
 describe('Production Roost history semantics', () => {
-  it('uses the target owner RPC factory instead of the installed native factory and propagates owner failures', async () => {
+  it('cancels all pending MessageHandler writes before cleanup and never opens history when metadata arrives later', async () => {
+    const fixture = await coldHistoryHandlerFixture(2);
+    const ids = [...fixture.docs.keys()];
+    const writes = Array.from({ length: 6 }, (_, index) =>
+      fixture.rpc.writeSessionHistoryForRpc(ids[index % ids.length]!, 'append', {
+        entry: nativeUser(`cleanup-turn-${index}`),
+      })
+    );
+    try {
+      await fixture.observing(6);
+      expect([...fixture.docs.values()].every((doc) => doc.handle === null)).toBe(true);
+      await fixture.handler.cleanup();
+      expect((await Promise.all(writes)).every((response) => !response.success)).toBe(true);
+      expect(fixture.observers.size).toBe(0);
+      await Promise.all(ids.map((id) => fixture.ready(id)));
+      const afterCleanup = await fixture.rpc.writeSessionHistoryForRpc(ids[0]!, 'append', {
+        entry: nativeUser('after-cleanup'),
+      });
+      expect(afterCleanup.success).toBe(false);
+      expect([...fixture.docs.values()].every((doc) => doc.handle === null)).toBe(true);
+      expect(fixture.observers.size).toBe(0);
+    } finally {
+      await fixture.close();
+    }
+  });
+
+  it('cancels one history waiter without interrupting another waiter or another session first write', async () => {
+    const fixture = await coldHistoryHandlerFixture(2);
+    const [first, second] = [...fixture.docs.keys()];
+    const controller = new AbortController();
+    const cancelled = fixture.rpc
+      .resolveSessionHistoryOwnerSessionId(first!, { signal: controller.signal })
+      .then(
+        () => ({ cancelled: false }),
+        () => ({ cancelled: true })
+      );
+    const writes = [first!, second!].map((id, index) =>
+      fixture.rpc.writeSessionHistoryForRpc(id, 'append', {
+        entry: nativeUser(`isolated-turn-${index}`),
+      })
+    );
+    try {
+      await fixture.observing(3);
+      controller.abort();
+      expect(await cancelled).toEqual({ cancelled: true });
+      expect(fixture.observers.size).toBe(2);
+      expect([...fixture.docs.values()].every((doc) => doc.handle === null)).toBe(true);
+      await Promise.all([first!, second!].map((id) => fixture.ready(id)));
+      expect((await Promise.all(writes)).every((response) => response.success)).toBe(true);
+      for (const [index, id] of [first!, second!].entries()) {
+        const doc = fixture.docs.get(id)!;
+        const backend = await createSessionBackend(doc);
+        expect(backend.kind).toBe('roost');
+        expect((await backend.readHistory()).map((entry) => entry.id)).toEqual([
+          `isolated-turn-${index}`,
+        ]);
+        expect(doc.handle?.doc.getList('history').length).toBe(0);
+      }
+      expect(fixture.observers.size).toBe(0);
+    } finally {
+      controller.abort();
+      await fixture.close();
+    }
+  });
+
+  it('retains rejected RPC identity across SQLite reopen, isolates targets, and removes expired refusals', async () => {
+    const filename = join(nativeDirectory, `rpc-refusals-${ordinal++}.sqlite3`);
+    const request: SessionHistoryRpcRequest = {
+      jsonrpc: '2.0',
+      id: 'synthetic-rejected-rpc',
+      rpcVersion: '1',
+      workspaceId: 'synthetic-workspace' as never,
+      machineId: 'synthetic-machine' as never,
+      replyTo: 'synthetic-reply',
+      method: 'session/history-write',
+      sentAt: 1,
+      expiresAt: 30_001,
+      params: await encryptCodeCollabV2RpcPayload('synthetic-session', {
+        sessionId: 'synthetic-session',
+        operation: 'append',
+        payload: { entry: nativeUser('synthetic-private-payload') },
+      }),
+    };
+    const rejection = {
+      code: 'session_metadata_pending',
+      message: 'Metadata is pending.',
+    } as const;
+    expect(await Effect.runPromise(getSessionHistoryRpcRejection(filename, request, 1))).toBeNull();
+    expect(
+      await Effect.runPromise(putSessionHistoryRpcRejection(filename, request, rejection, 1))
+    ).toEqual(rejection);
+    // Each Effect closes its handle. This lookup uses a different SQLite connection.
+    expect(await Effect.runPromise(getSessionHistoryRpcRejection(filename, request, 2))).toEqual(
+      rejection
+    );
+    expect(
+      await Effect.runPromise(
+        getSessionHistoryRpcRejection(
+          filename,
+          { ...request, workspaceId: 'another-workspace' as never },
+          2
+        )
+      )
+    ).toBeNull();
+    expect(
+      await Effect.runPromise(
+        getSessionHistoryRpcRejection(
+          filename,
+          { ...request, machineId: 'another-machine' as never },
+          2
+        )
+      )
+    ).toBeNull();
+    expect(
+      await Effect.runPromise(
+        getSessionHistoryRpcRejection(filename, { ...request, id: 'fresh-request' }, 2)
+      )
+    ).toBeNull();
+    await expect(
+      Effect.runPromise(
+        getSessionHistoryRpcRejection(filename, { ...request, replyTo: 'different-reply' }, 2)
+      )
+    ).rejects.toMatchObject({ code: 'rpc_request_identity_mismatch' });
+    const changedParams = await encryptCodeCollabV2RpcPayload('synthetic-session', {
+      sessionId: 'synthetic-session',
+      operation: 'append',
+      payload: { entry: nativeUser('different-turn') },
+    });
+    await expect(
+      Effect.runPromise(
+        getSessionHistoryRpcRejection(filename, { ...request, params: changedParams }, 2)
+      )
+    ).rejects.toMatchObject({ code: 'rpc_request_identity_mismatch' });
+    const original = await Effect.runPromise(
+      putSessionHistoryRpcRejection(
+        filename,
+        request,
+        { code: 'session_owner_mismatch', message: 'Owner changed later.' },
+        3
+      )
+    );
+    expect(original).toEqual(rejection);
+    const db = new Database(filename, { readonly: true });
+    try {
+      const row = db.prepare('SELECT * FROM history_rpc_rejections').get();
+      expect(row).toEqual({
+        workspace_id: request.workspaceId,
+        machine_id: request.machineId,
+        request_id: request.id,
+        expires_at: request.expiresAt,
+        fingerprint: expect.stringMatching(/^[0-9a-f]{64}$/),
+        ...rejection,
+      });
+    } finally {
+      db.close();
+    }
+    expect(
+      await Effect.runPromise(getSessionHistoryRpcRejection(filename, request, request.expiresAt))
+    ).toBeNull();
+    const next = { ...request, id: 'new-refusal', sentAt: 30_002, expiresAt: 60_002 };
+    await Effect.runPromise(putSessionHistoryRpcRejection(filename, next, rejection, 30_002));
+    const after = new Database(filename, { readonly: true });
+    try {
+      expect(after.prepare('SELECT request_id FROM history_rpc_rejections').all()).toEqual([
+        { request_id: next.id },
+      ]);
+    } finally {
+      after.close();
+    }
+  });
+
+  it('fails closed when durable RPC refusal storage is unavailable and preserves the local cause', async () => {
+    const blocked = join(nativeDirectory, `blocked-rpc-refusals-${ordinal++}`);
+    await writeFile(blocked, 'synthetic path obstruction');
+    const request: SessionHistoryRpcRequest = {
+      jsonrpc: '2.0',
+      id: 'synthetic-request',
+      rpcVersion: '1',
+      workspaceId: 'synthetic-workspace' as never,
+      machineId: 'synthetic-machine' as never,
+      replyTo: 'synthetic-reply',
+      method: 'session/history-write',
+      sentAt: 1,
+      expiresAt: 30_001,
+      params: await encryptCodeCollabV2RpcPayload('synthetic-session', {
+        sessionId: 'synthetic-session',
+        operation: 'append',
+        payload: {},
+      }),
+    };
+    const error = await Effect.runPromise(
+      getSessionHistoryRpcRejection(join(blocked, 'refusals.sqlite3'), request, 1)
+    ).catch((failure: unknown) => failure);
+    expect(error).toMatchObject({
+      code: 'session_history_request_state_unavailable',
+      cause: expect.any(Error),
+    });
+    expect((error as Error).message).not.toContain(blocked);
+  });
+
+  it.each(['absent', 'existence-only', 'owner-pending', 'backend-pending'] as const)(
+    'accepts the first cold write after %s metadata arrives without opening Loro history',
+    async (phase) => {
+      const repo = await LoroRepo.create({});
+      const sessionId = `metadata-${phase}-${ordinal++}` as SessionId;
+      const roomId = getSessionRoomId(sessionId);
+      if (phase !== 'absent') {
+        await repo.upsertDocMeta(
+          roomId,
+          phase === 'existence-only'
+            ? {}
+            : {
+                id: sessionId,
+                ...(phase === 'owner-pending'
+                  ? { historyBackend: 'roost' }
+                  : { machineId: 'test-machine' }),
+              }
+        );
+      }
+      const doc = new SessionDocument(repo, sessionId, (room) => repo.unloadDoc(room));
+      let observed!: () => void;
+      const observing = new Promise<void>((resolve) => {
+        observed = resolve;
+      });
+      const observe = repo.observeDocs.bind(repo);
+      const observers = new Set<object>();
+      vi.spyOn(repo, 'observeDocs').mockImplementation((listener, options) => {
+        const subscription = observe(listener, options);
+        observers.add(subscription);
+        observed();
+        return {
+          ...subscription,
+          unsubscribe: () => {
+            subscription.unsubscribe();
+            observers.delete(subscription);
+          },
+        };
+      });
+      const noop = () => undefined;
+      const handler = new MessageHandler(
+        {
+          on: noop,
+          setRequestPermissionHandler: noop,
+          getSession: () => undefined,
+          cleanUp: async () => undefined,
+        } as never,
+        {
+          repo,
+          getOrCreateSessionDoc: async () => {
+            if (!doc.handle) {
+              doc.handle = await repo.openPersistedDoc(roomId);
+              // Resolve from metadata, like a cold production SessionDocument.
+              doc.composeSessionData(doc.handle.doc, undefined, await doc.getMetaState());
+            }
+            return doc;
+          },
+          isTransportConnected: () => false,
+          markMachineFlockDocDirty: noop,
+          publishSessionPresence: noop,
+          clearSessionPresence: noop,
+          sendMachineHeartbeat: async () => undefined,
+        } as never,
+        getDefaultLogger(),
+        {
+          machineId: 'test-machine',
+          workspaceId: 'test-workspace' as never,
+          token: 'synthetic-token',
+          userId: 'test-user',
+          machineName: 'synthetic',
+          cliVersion: '0.0.0',
+          cloudPort: createTestCloudPort(),
+        }
+      );
+      const rpc = handler as unknown as {
+        writeSessionHistoryForRpc(
+          id: SessionId,
+          operation: 'append',
+          payload: Record<string, unknown>
+        ): Promise<SessionHistoryWriteResponse>;
+      };
+      try {
+        const write = rpc.writeSessionHistoryForRpc(sessionId, 'append', {
+          entry: nativeUser('first-turn'),
+        });
+        await Promise.race([
+          observing,
+          write.then(() => {
+            throw new Error('History request completed before metadata was ready');
+          }),
+        ]);
+        expect(doc.handle).toBeNull();
+        await repo.upsertDocMeta(roomId, {
+          id: sessionId,
+          machineId: 'test-machine',
+          historyBackend: 'roost',
+          userId: 'test-user',
+          status: SessionStatusFactory.idle(),
+        });
+        const response = SessionHistoryWriteResponseSchema.parse(await write);
+        expect(response.success).toBe(true);
+        const backend = await createSessionBackend(doc);
+        expect(backend.kind).toBe('roost');
+        expect((await backend.readHistory()).map((entry) => entry.id)).toEqual(['first-turn']);
+        expect(doc.handle?.doc.getList('history').length).toBe(0);
+        expect(observers.size).toBe(0);
+      } finally {
+        await handler.cleanup();
+        if (doc.handle) await doc.destroy({ preserveStatus: true });
+        await repo.destroy();
+      }
+    }
+  );
+
+  effectIt.effect.each([
+    'foreign',
+    'deleted',
+    'purged',
+    'identity',
+    'backend',
+    'timeout',
+    'cancelled',
+  ] as const)('refuses %s metadata without leaving a live observer', (scenario) =>
+    Effect.gen(function* () {
+      const repo = yield* Effect.promise(() => LoroRepo.create({}));
+      yield* Effect.addFinalizer(() => Effect.promise(() => repo.destroy()));
+      const sessionId = `metadata-refusal-${scenario}` as SessionId;
+      const roomId = getSessionRoomId(sessionId);
+      yield* Effect.promise(() =>
+        repo.upsertDocMeta(roomId, { id: sessionId, historyBackend: 'roost' })
+      );
+      let subscribed!: () => void;
+      const observing = new Promise<void>((resolve) => {
+        subscribed = resolve;
+      });
+      const observe = repo.observeDocs.bind(repo);
+      const observers = new Set<object>();
+      vi.spyOn(repo, 'observeDocs').mockImplementation((listener, options) => {
+        const subscription = observe(listener, options);
+        observers.add(subscription);
+        subscribed();
+        return {
+          ...subscription,
+          unsubscribe: () => {
+            subscription.unsubscribe();
+            observers.delete(subscription);
+          },
+        };
+      });
+      const request = yield* Effect.forkChild(
+        awaitSessionHistoryOwner(repo, sessionId, 'test-machine')
+      );
+      yield* Effect.promise(() => observing);
+      if (scenario === 'foreign')
+        yield* Effect.promise(() => repo.upsertDocMeta(roomId, { machineId: 'foreign-machine' }));
+      if (scenario === 'deleted') yield* Effect.promise(() => repo.deleteDoc(roomId));
+      if (scenario === 'purged') yield* Effect.promise(() => repo.purgeDoc(roomId));
+      if (scenario === 'identity')
+        yield* Effect.promise(() =>
+          repo.upsertDocMeta(roomId, { id: 'invalid-session', machineId: 'test-machine' })
+        );
+      if (scenario === 'backend')
+        yield* Effect.promise(() =>
+          repo.upsertDocMeta(roomId, { machineId: 'test-machine', historyBackend: 'loro' })
+        );
+      if (scenario === 'timeout') yield* TestClock.adjust(SESSION_HISTORY_METADATA_TIMEOUT_MS);
+      if (scenario === 'cancelled') yield* Fiber.interrupt(request);
+      const outcome = yield* Fiber.await(request);
+      expect(Exit.isFailure(outcome)).toBe(true);
+      const code = {
+        foreign: 'session_owner_mismatch',
+        deleted: 'session_unavailable',
+        purged: 'session_unavailable',
+        identity: 'session_identity_mismatch',
+        backend: 'session_backend_mismatch',
+        timeout: 'session_metadata_pending',
+      };
+      if (scenario !== 'cancelled' && Exit.isFailure(outcome))
+        expect(Cause.squash(outcome.cause)).toMatchObject({ code: code[scenario] });
+      expect(observers.size).toBe(0);
+      expect(
+        (yield* Effect.promise(() => repo.openPersistedDoc(roomId))).doc.getList('history').length
+      ).toBe(0);
+    })
+  );
+
+  it('distinguishes history initialization failure without changing the selected backend', async () => {
+    const workerFailure = new RoostHostError('workerFailed');
+    workerFailure.cause = new Error('synthetic bootstrap Worker failure');
+    const request = vi.spyOn(RoostNativeClient.prototype, 'request');
+    request.mockRejectedValueOnce(workerFailure);
+    const failure = await nativeFixture().catch((error: unknown) => error);
+    expect(failure).toBe(workerFailure);
+    const detail = describeRoostHistoryFailure(failure, { stage: 'write' });
+    expect(detail).toContain('initialize failed (code=workerFailed; diagnostic=');
+    expect(detail).not.toContain('synthetic bootstrap Worker failure');
+    request.mockRestore();
+    const healthy = await nativeFixture();
+    expect(healthy.backend.kind).toBe('roost');
+    expect((await healthy.doc.getMetaState())?.historyBackend).toBe('roost');
+  });
+
+  it.each(['read', 'write'] as const)(
+    'returns a safe diagnostic through the real history %s RPC',
+    async (kind) => {
+      const fixture = await nativeFixture();
+      await fixture.backend.appendHistoryTurn(nativeUser('rpc-retained-user'));
+      const workerFailure = new RoostHostError('workerFailed');
+      workerFailure.cause = new Error('synthetic private Worker path');
+      const request = vi.spyOn(RoostNativeClient.prototype, 'request');
+      request.mockRejectedValueOnce(workerFailure);
+      const noop = () => undefined;
+      const handler = new MessageHandler(
+        {
+          on: noop,
+          setRequestPermissionHandler: noop,
+          getSession: () => undefined,
+          cleanUp: async () => undefined,
+        } as never,
+        {
+          repo: fixture.repo,
+          getOrCreateSessionDoc: async () => fixture.doc,
+          isTransportConnected: () => false,
+          markMachineFlockDocDirty: noop,
+          publishSessionPresence: noop,
+          clearSessionPresence: noop,
+          sendMachineHeartbeat: async () => undefined,
+        } as never,
+        getDefaultLogger(),
+        {
+          machineId: 'test-machine',
+          workspaceId: 'test-workspace' as never,
+          token: 'synthetic-token',
+          userId: 'test-user',
+          machineName: 'synthetic',
+          cliVersion: '0.0.0',
+          cloudPort: createTestCloudPort(),
+        }
+      );
+      const rpc = handler as unknown as {
+        readSessionHistoryForRpc(
+          sessionId: SessionId,
+          query: { kind: 'readAll' }
+        ): Promise<SessionHistoryReadResponse>;
+        writeSessionHistoryForRpc(
+          sessionId: SessionId,
+          operation: 'append',
+          payload: Record<string, unknown>
+        ): Promise<SessionHistoryWriteResponse>;
+      };
+      const response =
+        kind === 'read'
+          ? await rpc.readSessionHistoryForRpc(fixture.doc.sessionId, { kind: 'readAll' })
+          : await rpc.writeSessionHistoryForRpc(fixture.doc.sessionId, 'append', {
+              entry: nativeUser('rpc-failed-user'),
+            });
+      const parsed =
+        kind === 'read'
+          ? SessionHistoryReadResponseSchema.parse(response)
+          : SessionHistoryWriteResponseSchema.parse(response);
+      expect(parsed.success).toBe(false);
+      expect(parsed.error).toContain('code=workerFailed; diagnostic=');
+      expect(JSON.stringify(parsed)).not.toContain('synthetic private Worker path');
+      request.mockRestore();
+      expect((await fixture.doc.getMetaState())?.historyBackend).toBe('roost');
+      expect((await fixture.backend.readHistory()).map((turn) => turn.id)).toEqual([
+        'rpc-retained-user',
+      ]);
+      expect(fixture.doc.handle?.doc.getList('history').length).toBe(0);
+      await handler.cleanup();
+    }
+  );
+
+  it('reports a failed native write without switching backend or writing Loro history', async () => {
+    const fixture = await nativeFixture();
+    await fixture.backend.appendHistoryTurn(nativeUser('retained-user'));
+    const workerFailure = new RoostHostError('workerFailed');
+    workerFailure.cause = new Error('synthetic private loader detail');
+    const request = vi.spyOn(RoostNativeClient.prototype, 'request');
+    request.mockRejectedValueOnce(workerFailure);
+    const failure = await fixture.backend
+      .appendHistoryTurn(nativeUser('failed-user'))
+      .catch((error: unknown) => error);
+    expect(failure).toBe(workerFailure);
+    const detail = describeRoostHistoryFailure(failure, {
+      stage: 'write',
+      sessionId: fixture.doc.sessionId,
+    });
+    expect(detail).toContain('write failed (code=workerFailed; diagnostic=');
+    expect(detail).not.toContain('synthetic private loader detail');
+    request.mockRestore();
+    expect(fixture.backend.kind).toBe('roost');
+    expect((await fixture.doc.getMetaState())?.historyBackend).toBe('roost');
+    expect((await fixture.backend.readHistory()).map((turn) => turn.id)).toEqual(['retained-user']);
+    expect(fixture.doc.handle?.doc.getList('history').length).toBe(0);
+  });
+
+  it('serves different members and devices through owner RPC and preserves access failures', async () => {
     const owner = await nativeFixture();
     await owner.backend.appendHistoryTurn(nativeUser('remote-u'));
     await owner.repo.upsertDocMeta(getMachineRoomId('test-machine'), {
       id: 'test-machine',
       protocolCapabilities: CURRENT_MACHINE_PROTOCOL_CAPABILITIES,
     });
-    const auth = {
-      token: 'synthetic-cli-token',
-      machineId: 'source-machine',
-      userId: 'test-user',
-    } as AuthContext;
     let denied = false;
-    const factory = createCommandSessionHistoryFactory(
-      () => ({ repo: owner.repo, waitUntilMetaSynced: async () => true }) as LoroDocumentManager,
-      auth,
-      'test-workspace',
-      async (target, run) => {
-        expect(target.machineId).toBe('test-machine');
-        expect(target.auth).toBe(auth);
-        return run({
-          requestSessionHistoryRead: async (request: {
-            sessionId: string;
-            ownerSessionId: string;
-          }) => {
-            expect(request.sessionId).toBe(owner.doc.sessionId);
-            expect(request.ownerSessionId).toBe(owner.doc.sessionId);
-            return {
-              type: 'session/history-read_response',
-              sessionId: owner.doc.sessionId,
-              success: !denied,
-              ...(denied
-                ? { error: 'Owner access refused' }
-                : { result: await owner.backend.readHistory() }),
-            };
-          },
-          requestSessionHistoryWrite: async (request: {
-            sessionId: string;
-            ownerSessionId: string;
-            operation: string;
-            payload: { entry: SessionHistoryInput };
-          }) => {
-            expect(request.ownerSessionId).toBe(owner.doc.sessionId);
-            if (request.operation !== 'append') throw new Error('Unsupported test operation');
-            await owner.backend.appendHistoryTurn(request.payload.entry);
-            return {
-              type: 'session/history-write_response',
-              sessionId: owner.doc.sessionId,
-              operation: request.operation,
-              success: true,
-              historyCount: await owner.backend.history.count(),
-            };
-          },
-        } as never);
-      }
+    const remoteClient = async (auth: AuthContext) => {
+      const factory = createCommandSessionHistoryFactory(
+        () => ({ repo: owner.repo, waitUntilMetaSynced: async () => true }) as LoroDocumentManager,
+        auth,
+        'test-workspace',
+        async (target, run) => {
+          expect(target.machineId).toBe('test-machine');
+          expect(target.auth).toBe(auth);
+          if (denied) throw new Error('Owner access refused');
+          return run({
+            requestSessionHistoryRead: async (request: {
+              sessionId: string;
+              ownerSessionId: string;
+            }) => {
+              expect(request.sessionId).toBe(owner.doc.sessionId);
+              expect(request.ownerSessionId).toBe(owner.doc.sessionId);
+              return {
+                type: 'session/history-read_response',
+                sessionId: owner.doc.sessionId,
+                success: true,
+                result: await owner.backend.readHistory(),
+              };
+            },
+            requestSessionHistoryWrite: async (request: {
+              sessionId: string;
+              ownerSessionId: string;
+              operation: string;
+              payload: { entry: SessionHistoryInput };
+            }) => {
+              expect(request.ownerSessionId).toBe(owner.doc.sessionId);
+              if (request.operation !== 'append') throw new Error('Unsupported test operation');
+              await owner.backend.appendHistoryTurn(request.payload.entry);
+              return {
+                type: 'session/history-write_response',
+                sessionId: owner.doc.sessionId,
+                operation: request.operation,
+                success: true,
+                historyCount: await owner.backend.history.count(),
+              };
+            },
+          } as never);
+        }
+      );
+      return nativeFixture(owner.doc.sessionId, false, factory);
+    };
+    const devices = [
+      { userId: 'member-a', machineId: 'device-a1', token: 'synthetic-a1' },
+      { userId: 'member-b', machineId: 'device-b1', token: 'synthetic-b1' },
+      { userId: 'member-a', machineId: 'device-a2', token: 'synthetic-a2' },
+    ] as AuthContext[];
+    const clients = await Promise.all(devices.map(remoteClient));
+    for (const client of clients)
+      expect(await client.backend.readHistory()).toMatchObject([{ id: 'remote-u' }]);
+    await Promise.all(
+      clients.map((client, index) => {
+        const device = devices[index];
+        if (!device) throw new Error('Synthetic client has no device context');
+        const userId = device.userId;
+        return client.backend.appendHistoryTurn({
+          ...nativeUser(`remote-added-${index}`),
+          userId,
+          author: { v: 1, kind: 'human', userId },
+        });
+      })
     );
-    const client = await nativeFixture(owner.doc.sessionId, false, factory);
-    expect(await client.backend.readHistory()).toMatchObject([{ id: 'remote-u' }]);
-    await client.backend.appendHistoryTurn(nativeUser('remote-added'));
-    expect((await owner.backend.readHistory()).map((entry) => entry.id)).toEqual([
-      'remote-u',
-      'remote-added',
+    const before = await owner.backend.readHistory();
+    expect(before.map(({ id, userId, author }) => ({ id, userId, author }))).toEqual([
+      { id: 'remote-u', userId: 'test-user', author: undefined },
+      ...devices.map(({ userId }, index) => ({
+        id: `remote-added-${index}`,
+        userId,
+        author: { v: 1, kind: 'human', userId },
+      })),
     ]);
+    for (const client of clients) expect(await client.backend.readHistory()).toEqual(before);
     denied = true;
-    await expect(client.backend.readHistory()).rejects.toThrow('Owner access refused');
-    expect((await owner.backend.readHistory()).map((entry) => entry.id)).toEqual([
-      'remote-u',
-      'remote-added',
-    ]);
+    for (const client of clients) {
+      await expect(client.backend.readHistory()).rejects.toThrow('Owner access refused');
+      await expect(client.backend.appendHistoryTurn(nativeUser('refused-input'))).rejects.toThrow(
+        'Owner access refused'
+      );
+    }
+    expect(await owner.backend.readHistory()).toEqual(before);
   });
 
   it('publishes logical corrections to observers and keeps streaming reads bounded', async () => {
@@ -339,7 +987,7 @@ describe('Production Roost history semantics', () => {
 
   it('copies opaque stored values into an empty target without validating them as newly authored items', async () => {
     const id = `opaque-${ordinal++}` as SessionId;
-    const seed = new Uint8Array(32).fill(39);
+    const seed = await loadRoostOwnerSeedLegacy(join(nativeDirectory, 'history.db'));
     const owner = Identity.fromSeed(seed).owner();
     const client = new RoostNativeClient({
       dbPath: join(nativeDirectory, 'history.db'),
@@ -461,109 +1109,6 @@ describe('Production Roost history semantics', () => {
     });
   });
 
-  it('reuses the signed prefix in the same session, restores it, and fences old writers', async () => {
-    const fixture = await nativeFixture();
-    for (let index = 0; index < 24; index += 1) {
-      await fixture.backend.appendHistoryTurn(nativeUser(`prefix-u-${index}`));
-      await fixture.backend.appendHistoryTurn({
-        ...nativeAssistant(`prefix-a-${index}`),
-        finished: true,
-        acpTurnId: `boundary-${index}`,
-      });
-    }
-    await fixture.backend.appendHistoryTurn(nativeUser('tail-u'));
-    // The nearest previous user lies outside the initial forty-row window.
-    for (let index = 0; index < 43; index += 1)
-      await fixture.backend.appendHistoryTurn({
-        ...nativeAssistant(`tail-a-${index}`),
-        finished: true,
-      });
-    const seed = new Uint8Array(32).fill(39);
-    const owner = Identity.fromSeed(seed).owner();
-    const client = new RoostNativeClient({
-      dbPath: join(nativeDirectory, 'history.db'),
-      seed,
-      allowedOwners: [owner],
-      maxQueuedRequests: 32,
-      maxQueuedBytes: 8 * 1024 * 1024,
-    });
-    try {
-      await client.ready;
-      const generation = new RoostHistoryGeneration(client, owner, fixture.doc.sessionId);
-      await generation.resolve();
-      const old = generation.history;
-      const before = await old.readActiveBranch(fixture.doc.sessionId);
-      const cursor = await old.observedEventCursor();
-      expect(await readGoalProjection(generation.host, cursor, before.messages.length)).toBeNull();
-      const all = await fixture.backend.readHistory();
-      let ownedOld: NodeLodyHistory | undefined;
-      const originalFork = RoostHistoryGeneration.prototype.fork;
-      const fork = vi.spyOn(RoostHistoryGeneration.prototype, 'fork').mockImplementation(function (
-        ...args
-      ) {
-        ownedOld = this.history;
-        return originalFork.apply(this, args);
-      });
-      const full = vi
-        .spyOn(NodeLodyHistory.prototype, 'readActiveBranch')
-        .mockRejectedValue(new Error('Bounded edit must not scan the prefix'));
-      let result: Awaited<ReturnType<typeof fixture.backend.replaceEditableTail>>;
-      try {
-        result = await fixture.backend.replaceEditableTail({
-          expectedUserTurnId: 'tail-u',
-          expectedForkTurnId: 'boundary-23',
-          replacement: nativeUser('replacement-u') as never,
-        });
-      } finally {
-        full.mockRestore();
-        fork.mockRestore();
-      }
-      expect(result.status).toBe('accepted');
-      if (result.status !== 'accepted') throw new Error('Expected bounded edit');
-      expect(result.previousUserTurnId).toBe('prefix-u-23');
-      await generation.resolve();
-      const after = await generation.history.readActiveBranch(fixture.doc.sessionId);
-      expect(after.messages.slice(0, 48).map((row) => row.turnId)).toEqual(
-        before.messages.slice(0, 48).map((row) => row.turnId)
-      );
-      expect(await fixture.backend.history.count()).toBe(49);
-      await expect(
-        old.accept({
-          kind: 'publication',
-          businessId: fixture.doc.sessionId,
-          segmentId: 'stale-prefix-writer',
-          parents: [],
-          content: encodeRoostContent(null),
-        })
-      ).rejects.toMatchObject({ code: 'stale' });
-      if (!ownedOld) throw new Error('Expected the activating writer binding');
-      await expect(
-        ownedOld.accept({
-          kind: 'publication',
-          businessId: fixture.doc.sessionId,
-          segmentId: 'same-owner-stale-writer',
-          parents: [],
-          content: encodeRoostContent(null),
-        })
-      ).rejects.toMatchObject({ code: 'stale' });
-      await result.rollback();
-      expect(await fixture.backend.readHistory()).toEqual(all);
-      const restored = await generation
-        .resolve()
-        .then(() => generation.history.readActiveBranch(fixture.doc.sessionId));
-      expect(restored.messages.map((row) => row.turnId)).toEqual(
-        before.messages.map((row) => row.turnId)
-      );
-      const id = fixture.doc.sessionId;
-      await fixture.close();
-      const reopened = await nativeFixture(id);
-      expect(reopened.doc.sessionId).toBe(id);
-      expect(await reopened.backend.readHistory()).toEqual(all);
-    } finally {
-      await client.close();
-    }
-  });
-
   it('rejects an edit for an older active goal and rebuilds an invalid derived cache', async () => {
     const fixture = await nativeFixture();
     await fixture.backend.appendHistoryTurn(nativeUser('goal-first-u'));
@@ -596,7 +1141,7 @@ describe('Production Roost history semantics', () => {
     } finally {
       full.mockRestore();
     }
-    const seed = new Uint8Array(32).fill(39);
+    const seed = await loadRoostOwnerSeedLegacy(join(nativeDirectory, 'history.db'));
     const client = new RoostNativeClient({
       dbPath: join(nativeDirectory, 'history.db'),
       seed,

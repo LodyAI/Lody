@@ -37,6 +37,19 @@ than a slow answer. Cloning a repository is the most generous, because its input
 size and the user's link speed are both unbounded and neither is Lody's to
 assume.
 
+## Git identity preflight
+
+Before applying commit identity, publish `initializing` with detail `Resolving Git identity`.
+The complete identity-policy lookup has a 3-second deadline per attempt, with one
+immediate retry on timeout or rejection. Two failures use the existing conservative
+`personalIdentityEnabled: false` result and permit agent startup. This is a read-only
+policy retry, not a retry of GitHub writes or an agent/daemon restart. The lower-level
+2.5-second fetch abort remains in place but does not replace this operation deadline.
+Cancellation ends the waiter without retry or fallback; cancelled startup cannot apply
+late identity results or launch an agent after that preflight. Log elapsed time and
+resolved, fallback, timeout/rejection, or cancellation outcomes. Once the lookup finishes,
+restore the appropriate agent-start stage and its watchdog budget.
+
 ## What the user sees
 
 A stalled turn fails the way any other known pre-prompt failure does: the chat
@@ -58,8 +71,8 @@ detached rather than left to be reused — otherwise the retry rejoins the same
 wedged attempt and stalls identically, and the failure is not recoverable at all.
 A retry therefore always begins genuinely new initialization work.
 
-Detaching is not cancellation: the abandoned attempt may still be running, and
-Lody cannot stop it. It is watched instead, and any Session it eventually
+Detaching cancels the Git identity waiter and fences subsequent startup steps.
+Other underlying work may still run when it cannot be interrupted. It is watched instead, and any Session it eventually
 produces is terminated rather than left behind as an orphan agent process.
 That termination is silent: it never counts as the end of the Session's work, so
 it cannot unregister or end a retry that has since started the same Session.

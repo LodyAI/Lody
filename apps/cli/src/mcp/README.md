@@ -45,6 +45,26 @@ and lifecycle decisions behind them; it does not introduce additional requiremen
   the prompt. Completion is delivered automatically — no public wait tool — and legacy `wait=true`
   is a temporary adapter new callers must not use.
 
+## Machine catalog retry guidance
+
+- A retryable Machine catalog `SYNC_UNAVAILABLE` means freshness could not be confirmed
+  and the local catalog could not validate a selection. It does not prove that an id is
+  valid; a typo or inaccessible catalog may remain unresolved. Permanent transport/auth
+  failures and explicit validation errors retain their existing non-retryable classification.
+- Without an active Operation handle, an Agent must wait at least 5 seconds between calls
+  and make at most **3 total attempts** (initial call plus 2 retries) for the same request.
+  Reuse the identical arguments and `operationId`; never mint ids to bypass this budget.
+  After the third failure, stop and report the catalog blocker so the user can check the
+  selection, access, and connectivity. This is caller guidance, not a server-enforced counter.
+- Chat can fail after acceptance. Retrying with the same id recovers the existing fixed
+  target rather than appending a second prompt. Once an active handle is returned, stop
+  resubmitting: the daemon owns recovery and completion arrives automatically. Existing
+  Operation status tools remain available for an intentional status check; do not poll in a loop.
+- The Agent call budget does not shorten an accepted Operation's deadline. Daemon
+  materialization retains its existing 1–30 second backoff until the Operation deadline
+  (24 hours by default, configurable up to 7 days), always rechecking the fixed target
+  Turn before writing.
+
 ## Role dispatch
 
 - `session_create` and `session_create_many` resolve an explicit Agent Role id directly from
@@ -75,3 +95,17 @@ and lifecycle decisions behind them; it does not introduce additional requiremen
   exact workspace/machine scope; never open a second local writer replica.
   Cloud keeps its authenticated command runtime and remote recovery confirmation.
 
+
+## Bounded collaboration
+
+The shared causal chain limit is 16 hops, including delegated target turns and
+completion continuations. A turn at the cap cannot start another Operation;
+the existing guard returns non-retryable `CHAIN_DEPTH_EXCEEDED` before acceptance.
+This is a depth limit, not a shared total-message or fan-out budget.
+
+MCP initialization instructions and all four create/chat tool descriptions tell
+agents to send only task-advancing messages, omit acknowledgments and courtesy
+replies, and use automatic completion delivery instead of manually sending the
+same result back. At the cap, report remaining work to the user without retrying
+or creating another session to evade the limit. These prompts guide behavior;
+the runtime guard enforces the depth bound.

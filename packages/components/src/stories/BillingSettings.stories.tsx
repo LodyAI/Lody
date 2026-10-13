@@ -173,6 +173,7 @@ function Harness({
       onResumeSubscription={() => {}}
       onRedeemCode={() => {}}
       onRetryInvoices={() => {}}
+      onViewInvoice={() => {}}
     />
   );
 }
@@ -452,5 +453,34 @@ export const Enterprise: Story = {
       effectivePlanTier: 'enterprise',
       entitlementSource: 'enterprise',
     },
+  },
+};
+
+export const PendingSeatInvoice: Story = {
+  args: {
+    overview: {
+      ...paidOverview,
+      seatBilling: {
+        policy: 'deferred',
+        capacity: 6,
+        available: 1,
+        renewalQuantity: 5,
+        periodEnd: paidOverview.currentPeriodEnd,
+      },
+    },
+    invoices: [
+      {
+        ...mockInvoices[0]!,
+        id: 'in_pending_seat',
+        status: 'open',
+        amountPaid: 0,
+        amountDue: 5741,
+        amountRemaining: 5741,
+        total: 5741,
+        reason: 'seats_added',
+        seatChange: { from: 1, to: 2 },
+      },
+      ...mockInvoices,
+    ],
   },
 };

@@ -256,6 +256,10 @@ describe('useGitHubPrDetails target isolation', () => {
   };
 
   beforeEach(() => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response(null, { status: 404 }))
+    );
     identityMocks.versions = null;
     identityMocks.repair.mockClear();
     currentResult = null;
@@ -311,8 +315,157 @@ describe('useGitHubPrDetails target isolation', () => {
     root = undefined;
     container?.remove();
     container = undefined;
+    vi.unstubAllGlobals();
     vi.useRealTimers();
     vi.clearAllMocks();
+  });
+
+  it('loads an unlinked public PR anonymously while rejecting every mutation', async () => {
+    identityMocks.versions = { identityPending: true };
+    cacheMocks.readPrCacheEntry.mockResolvedValue(null);
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (_url: string, options: RequestInit) => {
+        expect(options.credentials).toBe('omit');
+        expect(new Headers(options.headers).has('authorization')).toBe(false);
+        return new Response(JSON.stringify({ id: 123, private: false, full_name: 'org/public' }));
+      })
+    );
+    await renderHook({
+      workspaceId: 'public-ws',
+      sessionId: 'session',
+      repoFullName: 'org/public',
+      prNumber: 7,
+    });
+    expect(currentResult?.state).toBe('ready');
+    expect(currentResult?.data?.pullRequest.number).toBe(7);
+    expect(currentResult?.error).toBeNull();
+    expect(currentResult?.canWrite).toBe(false);
+    expect(githubMocks.githubFetchPullRequestDetails.mock.calls[0]?.[0]).toBe('');
+    await act(async () => {
+      await expect(currentResult!.postComment('hello')).rejects.toThrow('repository identity');
+      await expect(currentResult!.mergePullRequest('merge')).rejects.toThrow('repository identity');
+      await expect(currentResult!.setPullRequestState('closed')).rejects.toThrow(
+        'repository identity'
+      );
+      await expect(currentResult!.markReadyForReview()).rejects.toThrow('repository identity');
+      await expect(currentResult!.deleteBranch()).rejects.toThrow('repository identity');
+    });
+    expect(githubMocks.githubCreatePRIssueComment).not.toHaveBeenCalled();
+    expect(githubMocks.githubMergePullRequest).not.toHaveBeenCalled();
+  });
+
+  it('conserves anonymous quota while still refreshing an open public PR', async () => {
+    vi.useFakeTimers();
+    identityMocks.versions = { identityPending: true };
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        async () =>
+          new Response(JSON.stringify({ id: 123, private: false, full_name: 'org/public' }))
+      )
+    );
+    githubMocks.githubFetchPullRequestDetails.mockResolvedValue(
+      createPullRequest(7, { title: 'Initial', mergeable: null, mergeableState: 'unknown' })
+    );
+    await renderHook({
+      workspaceId: 'public-ws',
+      sessionId: 'session',
+      repoFullName: 'org/public',
+      prNumber: 7,
+    });
+    expect(currentResult?.data?.pullRequest.title).toBe('Initial');
+    githubMocks.githubFetchPullRequestDetails.mockResolvedValue(
+      createPullRequest(7, { title: 'Updated' })
+    );
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(299_999);
+    });
+    expect(currentResult?.data?.pullRequest.title).toBe('Initial');
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1);
+    });
+    expect(currentResult?.data?.pullRequest.title).toBe('Updated');
+  });
+
+  it('does not hydrate authenticated data while an anonymous PR request is pending', async () => {
+    identityMocks.versions = { identityPending: true };
+    const details = createDeferred<GitHubPullRequestDetails>();
+    githubMocks.githubFetchPullRequestDetails.mockReturnValue(details.promise);
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        async () =>
+          new Response(JSON.stringify({ id: 123, private: false, full_name: 'org/public' }))
+      )
+    );
+    await renderHook({
+      workspaceId: 'public-ws',
+      sessionId: 'session',
+      repoFullName: 'org/public',
+      prNumber: 7,
+    });
+    // The default IDB fixture contains a complete authenticated PR. It must not render.
+    expect(currentResult?.data).toBeNull();
+    await act(async () => details.resolve(createPullRequest(7, { title: 'Anonymous result' })));
+    expect(currentResult?.data?.pullRequest.title).toBe('Anonymous result');
+    expect(cacheMocks.writePrCacheEntry).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { id: 123, private: true, full_name: 'org/public' },
+    { id: 123, private: false, full_name: 'other/repo' },
+    { id: 999, private: false, full_name: 'org/public' },
+  ])(
+    'does not release the gate for private or mismatched repository metadata: %j',
+    async (repository) => {
+      identityMocks.versions = { identityPending: true, repositoryId: 123 };
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async () => new Response(JSON.stringify(repository)))
+      );
+      await renderHook({
+        workspaceId: 'public-ws',
+        sessionId: 'session',
+        repoFullName: 'org/public',
+        prNumber: 7,
+      });
+      expect(currentResult?.state).toBe('error');
+      expect(currentResult?.data).toBeNull();
+      expect(currentResult?.canWrite).toBe(false);
+    }
+  );
+
+  it('ignores a public repository response after switching to another PR', async () => {
+    identityMocks.versions = { identityPending: true };
+    const response = createDeferred<Response>();
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((url: string) =>
+        url.endsWith('/org/public')
+          ? response.promise
+          : Promise.resolve(new Response(null, { status: 404 }))
+      )
+    );
+    await renderHook({
+      workspaceId: 'public-ws',
+      sessionId: 'session',
+      repoFullName: 'org/public',
+      prNumber: 7,
+    });
+    await renderHook({
+      workspaceId: 'public-ws',
+      sessionId: 'other-session',
+      repoFullName: 'org/private',
+      prNumber: 8,
+    });
+    await act(async () =>
+      response.resolve(
+        new Response(JSON.stringify({ id: 123, private: false, full_name: 'org/public' }))
+      )
+    );
+    expect(currentResult?.state).toBe('error');
+    expect(currentResult?.data).toBeNull();
   });
 
   it('shows a blocked identity error and retries safe repair instead of loading forever', async () => {

@@ -27,8 +27,10 @@ this page is the full text of the rules summarised there.
     navigation, project, repository and flat session labels share a +37px text
     column (see the [baseline correction](../notes/implemented/bug-fix/2026-09-30-macos-traffic-light-baseline.md)).
     On Windows the native title bar is
-    hidden (`titleBarStyle: 'hidden'` + theme-tinted `titleBarOverlay`, see
-    `apps/electron/src/main/window-theme.ts`): the OS draws the caption buttons
+    hidden (`titleBarStyle: 'hidden'` + transparent `titleBarOverlay` with
+    theme-tinted glyphs, see `apps/electron/src/main/window-theme.ts`). The
+    transparent background lets renderer Modal/Dialog backdrops dim the area
+    beneath the native controls. The OS draws the caption buttons
     in a 36px strip (centerline y=18) OVER the window-top rows. Rows reaching
     the right edge pad `pr-[144px]` (`useWindowsCaptionPadClass`, ~3 × 46px
     buttons), and `useWindowsCaptionRowPadClass` (`pb-2`, or `pb-[7px]` with a

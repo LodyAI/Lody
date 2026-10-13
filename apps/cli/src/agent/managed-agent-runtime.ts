@@ -534,14 +534,34 @@ function getDownloadPercent(downloadedBytes: number, totalBytes: number): number
   return Math.min(100, Math.max(0, Math.floor((downloadedBytes / totalBytes) * 100)));
 }
 
-function isMuslLibc(): boolean {
+/**
+ * Host libc does not change for the life of this process. `process.report.getReport()`
+ * builds a synchronous process snapshot; capability refresh reaches it on every Claude
+ * archive lookup, including a capability-cache hit, and that snapshot stalled the daemon.
+ * Memoize the classification. A thrown report is not cached.
+ * .agents/notes/implemented/bug-fix/2026-10-11-musl-report-cache.md
+ */
+let muslLibc: boolean | undefined;
+
+function readMuslLibc(): boolean {
   if (process.platform !== 'linux') return false;
   const report =
     typeof process.report?.getReport === 'function'
       ? (process.report.getReport() as { header?: { glibcVersionRuntime?: string } })
       : null;
-  const header = report?.header;
-  return !header?.glibcVersionRuntime;
+  return !report?.header?.glibcVersionRuntime;
+}
+
+function isMuslLibc(): boolean {
+  if (muslLibc === undefined) {
+    muslLibc = readMuslLibc();
+  }
+  return muslLibc;
+}
+
+/** Test-only. Omit the argument to forget the classification; pass a boolean to preset it. */
+export function resetMuslLibcCacheForTests(preset?: boolean): void {
+  muslLibc = preset;
 }
 
 export function mapManagedRuntimePlatform(

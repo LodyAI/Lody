@@ -189,10 +189,31 @@ than selecting a database on the calling machine. Control metadata and
 delivery state remain in Loro. Local history acceptance does not establish remote
 Roost synchronization.
 
+Roost signing identities use the existing application-data security boundary,
+independent of login credentials. Each writable execution replica creates and
+persists its own identity once; normal startup never requires a system credential
+store or a user-supplied seed. A signing identity establishes the physical writer,
+not a human principal or permission grant. Multiple authorized members/devices may
+use the same execution replica; per-turn human identity and existing Workspace and
+machine authorization remain authoritative. Private signing material never enters
+history sync, exports, RPC or diagnostics. Missing or damaged identity state must
+not silently rotate an established writer. Migration from experimental Nightly
+keyring identities is outside this change; existing unpaired data is retained and
+explicitly refused rather than silently adopted or erased.
+
 Desktop sidebar session hover cards display the session's persisted history
 backend as Roost or Loro in Workspace, Updated and Pinned lists. Missing backend
 metadata on a legacy session resolves to Loro; the current experimental preference
 does not determine this label. Showing the label does not read the history body.
+
+Roost initialization or storage failure must not switch an existing session to
+Loro or replay a write with an unknown outcome. Preserve the distinction between
+an undispatched request and an indeterminate dispatched write. The owner records
+original Worker causes, abnormal exits and runtime/build information in local
+logs. Renderer and remote history RPC report these failures with a content-free
+stage, stable error code and diagnostic ID; raw causes, paths, credentials and history content
+remain outside those error responses. The UI explains that an unsuccessful write
+does not confirm acceptance and exposes the reference for the owner's local log.
 
 Performance work must preserve the existing Lody conversation identity and its
 owner workflow. Edit & Resend may reuse an immutable prefix through the storage
@@ -256,6 +277,8 @@ sealed turn from looking like a hash conflict once such skeletons exist.
 - `apps/cli/src/lib/local-project-history-sync-service.ts`
 - `apps/cli/src/session/{roost-node-session,roost-history-generation,roost-rpc-session}.ts`
 - `apps/cli/tests/roost-session-backend-contract.test.ts`
+- `apps/cli/src/session/roost-history-diagnostics.ts` and `apps/cli/tests/roost-history-local-owner.test.ts`
+- `packages/components/src/lib/roost-history-error.ts` and `packages/components/tests/conversation-session-backend-factory.test.ts`
 - `packages/shared/tests/history-writer.test.ts`, `history-writer.contract.ts`,
   `history-storage-policy.test.ts` and `session-history-import-port.test.ts`
 - `apps/cli/tests/local-project-history-sync-service.test.ts` and `local-project-history-sync-writer.test.ts`

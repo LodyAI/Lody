@@ -7,7 +7,7 @@ import type { SessionInfo } from '@agentclientprotocol/sdk';
 
 import { spawnAcpProcess, terminateAcpProcessTree } from '@/agent/acp-runner';
 import { withAcpSessionStartSlot } from '@/agent/acp-session-start-gate';
-import { getLoginShellEnv } from '@/agent/login-shell-env';
+import { getLoginShellEnvLegacy } from '@/agent/login-shell-env';
 import {
   mergeACPProcessEnv,
   mergeLoginShellEnv,
@@ -102,7 +102,10 @@ type ResolvedHistoryACPProcessLaunch = Omit<ResolvedACPProcessLaunch, 'env'> & {
 };
 
 export type HistoryProviderLaunch = LocalProjectHistoryProvider &
-  Pick<ResolveACPSettingInput, 'customAcp' | 'runtimeOverrides' | 'env'> & {
+  Pick<
+    ResolveACPSettingInput,
+    'agentConfigId' | 'customAcp' | 'runtimeOverrides' | 'magpieGatewayUrl' | 'env'
+  > & {
     codexProfile?: ResolvedCodexProfile;
   };
 
@@ -129,7 +132,7 @@ async function createHistoryAcpConnection(args: {
   // Same ENOENT trap as startLocalAcpAgent: a GUI/daemon launch inherits a
   // minimal PATH, so overlay the login-shell env (+ default fallback dirs) before
   // spawning the history-sync agent binary.
-  const loginShellEnv = await getLoginShellEnv();
+  const loginShellEnv = await getLoginShellEnvLegacy();
   const env = withDefaultAcpPathEntries(
     mergeLoginShellEnv(launch.env, loginShellEnv),
     args.provider.agentType

@@ -1,3 +1,4 @@
+import { ReadOnlyHtmlPreview } from './read-only-html-preview';
 import { PagedFileViewer } from './paged-file-viewer';
 import * as stylex from '@stylexjs/stylex';
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
@@ -456,6 +457,8 @@ export type SessionFileContentViewProps = {
   focusRequestSeq?: number;
   /** Explicit user request to enter rendered HTML for this open action. */
   htmlPreviewRequestSeq?: number;
+  /** Mobile file opens start in preview; desktop keeps explicit script opt-in. */
+  defaultHtmlPreview?: boolean;
   saveRequestSeq?: number;
   copyMarkdownRequestSeq?: number;
   /**
@@ -519,6 +522,7 @@ function SessionFileContentViewImpl({
   endLine,
   focusRequestSeq,
   htmlPreviewRequestSeq,
+  defaultHtmlPreview = false,
   saveRequestSeq,
   copyMarkdownRequestSeq,
   preferNativeMarkdownSelection = false,
@@ -614,8 +618,9 @@ function SessionFileContentViewImpl({
   // The source remains one toggle away in the editable source surface.
   const [markdownRenderMode, setMarkdownRenderMode] = useState<'rendered' | 'code'>('rendered');
   const [csvRenderMode, setCsvRenderMode] = useState<'rendered' | 'code'>('rendered');
-  // HTML starts as source because entering preview executes its inline scripts.
-  const [htmlRenderMode, setHtmlRenderMode] = useState<'rendered' | 'code'>('code');
+  const [htmlRenderMode, setHtmlRenderMode] = useState<'rendered' | 'code'>(
+    defaultHtmlPreview ? 'rendered' : 'code'
+  );
   const handledHtmlPreviewRequestSeqRef = useRef<number | undefined>(undefined);
   const [htmlAnnotationEnabled, setHtmlAnnotationEnabled] = useState(false);
   const [htmlAnnotationAvailable, setHtmlAnnotationAvailable] = useState(false);
@@ -1151,7 +1156,6 @@ function SessionFileContentViewImpl({
   const isTextFileReady = data.status === 'ready' && data.snapshot.kind === 'text';
   const supportsHtmlPreview = supportsCredentiallessManagedPreviewFrames();
   const htmlPreviewSource =
-    supportsHtmlPreview &&
     data.status === 'ready' &&
     data.snapshot.kind === 'text' &&
     data.snapshot.truncated !== true &&
@@ -1162,10 +1166,10 @@ function SessionFileContentViewImpl({
   const showHtmlRendered = isActiveSurface && isHtmlTextFile && htmlRenderMode === 'rendered';
   const htmlPreviewDocument = useMemo(
     () =>
-      showHtmlRendered && htmlPreviewSource !== null
+      showHtmlRendered && supportsHtmlPreview && htmlPreviewSource !== null
         ? buildStaticHtmlPreviewDocument(htmlPreviewSource)
         : null,
-    [htmlPreviewSource, showHtmlRendered]
+    [htmlPreviewSource, showHtmlRendered, supportsHtmlPreview]
   );
   const htmlPreviewLogicalUrl = useMemo(
     () => getStaticHtmlPreviewLogicalUrl(normalizedPath),
@@ -1580,6 +1584,8 @@ function SessionFileContentViewImpl({
         reason="deleted"
       />
     );
+  } else if (showHtmlRendered && !supportsHtmlPreview && htmlPreviewSource !== null) {
+    body = <ReadOnlyHtmlPreview text={htmlPreviewSource} />;
   } else if (showHtmlRendered && htmlPreviewDocument !== null) {
     body = (
       <div {...stylex.props(styles.previewFrame)}>
@@ -1813,7 +1819,7 @@ function SessionFileContentViewImpl({
                   }
                 }}
                 showLabel={
-                  isHtmlTextFile
+                  isHtmlTextFile && supportsHtmlPreview
                     ? t('sessions.fileViewer.htmlPreview.show', 'Preview HTML (runs scripts)')
                     : t('sessions.fileViewer.preview.show', 'Preview')
                 }
@@ -1839,7 +1845,7 @@ function SessionFileContentViewImpl({
                 <Copy {...stylex.props(styles.icon)} aria-hidden="true" />
               </button>
             ) : null}
-            {showHtmlRendered ? (
+            {showHtmlRendered && supportsHtmlPreview ? (
               <button
                 type="button"
                 aria-pressed={htmlAnnotationEnabled}
@@ -1855,7 +1861,7 @@ function SessionFileContentViewImpl({
                 <MessageCircle {...stylex.props(styles.icon)} aria-hidden="true" />
               </button>
             ) : null}
-            {showHtmlRendered ? (
+            {showHtmlRendered && supportsHtmlPreview ? (
               <button
                 type="button"
                 onClick={handleReloadHtmlPreview}

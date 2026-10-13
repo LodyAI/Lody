@@ -1,16 +1,21 @@
 import {
-  hashAnalyticsId,
   LODY_PRESENCE_HEARTBEAT_MS,
   SessionStatusFactory,
-  type MachineId,
   type SessionId,
   type SessionStatus,
 } from '@lody/shared';
-import type { LoroDocumentManager } from './doc';
-import type { Logger } from '@/utils/logger';
-import { captureMessage, isErrorReportingEnabled } from '@/instrument';
-import { formatErrorMessage } from '@/utils/format-error';
-import { captureCli } from '../analytics/posthog';
+import {
+  Cause,
+  Clock,
+  Context,
+  Data,
+  Deferred,
+  Effect,
+  Exit,
+  Layer,
+  Schedule,
+  Scope,
+} from 'effect';
 
 // Minimum interval between `app/active_ping` emissions (spec §3.3: >= 60s).
 // Mirrors ACTIVE_PING_MIN_INTERVAL_MS in commands/analytics-events.ts; kept local
@@ -72,10 +77,12 @@ export type SessionInitializationStall = {
 };
 
 type ActivePresenceState = {
-  epoch: number;
+  stall: Deferred.Deferred<SessionInitializationStall>;
   phase: SessionActivePresencePhase | null;
   detail: string | undefined;
-  timer: NodeJS.Timeout | null;
+  closing: boolean;
+  close: Effect.Effect<void>;
+  failure?: Cause.Cause<never>;
   reportedSlowKeys: Set<string>;
   lastPhase: SessionActivePresencePhase | null | undefined;
   stageStartMs: number;
@@ -86,18 +93,10 @@ type ActivePresenceState = {
   stallReported: boolean;
 };
 
-type SessionActivePresenceOptions = {
+export type SessionActivePresenceOptions = {
   intervalMs?: number;
   slowThresholdMs?: number;
-  /** Injected for deterministic tests; defaults to `Date.now`. */
-  now?: () => number;
   stallBudgetsMs?: Partial<Record<InitializingStageKey, number>>;
-  /**
-   * Invoked once when an initializing stage exceeds its budget. The owning turn
-   * is expected to fail and release its scope, which is what clears presence —
-   * this controller only stops the heartbeat (see {@link tick}).
-   */
-  onInitializationStalled?: (sessionId: SessionId, stall: SessionInitializationStall) => void;
 };
 
 const phaseToStatus = (
@@ -158,238 +157,250 @@ const describeStage = (status: SessionStatus): string => {
 const initializingStageKey = (status: SessionStatus): InitializingStageKey | null =>
   status.type === 'initializing' ? (status.stage ?? 'initializing') : null;
 
-/**
- * Owns CLI session active presence for this process.
- *
- * This is the only business-level module that publishes or clears session
- * presence. Other code may update durable SessionMeta.status or set a phase
- * here, but must not write presence directly.
- */
-export class SessionActivePresenceController {
-  private readonly active = new Map<SessionId, ActivePresenceState>();
-  private nextEpoch = 1;
-
-  constructor(
-    private readonly workspaceDocument: LoroDocumentManager,
-    private readonly machineId: MachineId,
-    private readonly logger: Logger,
-    private readonly options: SessionActivePresenceOptions = {}
-  ) {}
-
-  start(
-    sessionId: SessionId,
-    phase: SessionActivePresencePhase | null = 'thinking',
-    detail?: string
-  ): void {
-    const existing = this.active.get(sessionId);
-    if (existing) {
-      this.setPhase(sessionId, phase, detail);
-      return;
+export type SessionPresenceDiagnostic =
+  | { readonly kind: 'active-ping'; readonly sessionId: SessionId }
+  | {
+      readonly kind: 'slow';
+      readonly sessionId: SessionId;
+      readonly status: SessionStatus;
+      readonly elapsedMs: number;
+      readonly thresholdMs: number;
+      readonly message: string;
     }
-
-    const nowMs = this.now();
-    const state: ActivePresenceState = {
-      epoch: this.nextEpoch++,
-      phase,
-      detail,
-      timer: setInterval(() => {
-        this.tick(sessionId, state.epoch);
-      }, this.options.intervalMs ?? LODY_PRESENCE_HEARTBEAT_MS),
-      reportedSlowKeys: new Set(),
-      lastPhase: undefined,
-      stageStartMs: nowMs,
-      lastActivePingAtMs: nowMs,
-      lastProgressMs: nowMs,
-      stallReported: false,
+  | {
+      readonly kind: 'stall';
+      readonly sessionId: SessionId;
+      readonly stall: SessionInitializationStall;
+    }
+  | {
+      readonly kind: 'heartbeat-failed';
+      readonly sessionId: SessionId;
+      readonly cause: Cause.Cause<never>;
     };
-    state.timer?.unref?.();
-    this.active.set(sessionId, state);
-    this.tick(sessionId, state.epoch);
+
+/** Synchronous local-origin publication and diagnostic admission, with no remote flush. */
+export class SessionPresenceHost extends Context.Service<
+  SessionPresenceHost,
+  {
+    readonly publish: (sessionId: SessionId, status: SessionStatus) => void;
+    readonly clear: (sessionId: SessionId) => void;
+    readonly report: (event: SessionPresenceDiagnostic) => void;
   }
+>()('lody/loro/SessionPresenceHost') {}
 
-  /**
-   * Publishes immediately on any CHANGED (phase, detail) pair.
-   *
-   * The equality check below is de-duplication, NOT a rate limit: a `detail` that
-   * differs on every call — a percentage, a counter, a streaming label — passes it
-   * every time and publishes at the caller's rate. Presence is a shared serial queue
-   * that the machine heartbeat also uses, so a caller driven by a stream must throttle
-   * to a fixed ceiling BEFORE calling here.
-   * Bounds: `specs/loro-ephemeral-presence-channel.md`.
-   */
-  setPhase(sessionId: SessionId, phase: SessionActivePresencePhase | null, detail?: string): void {
-    const state = this.active.get(sessionId);
-    if (!state) return;
-    if (state.phase === phase && state.detail === detail) return;
-    state.phase = phase;
-    state.detail = detail;
-    // Any published change — including a `managed-runtime` download percent that
-    // keeps the phase constant — is proof of progress and restarts the stall clock.
-    state.lastProgressMs = this.now();
-    this.tick(sessionId, state.epoch);
-  }
+export class SessionPresenceUnavailable extends Data.TaggedError('SessionPresenceUnavailable')<{
+  readonly sessionId?: SessionId;
+  readonly reason: 'closed' | 'already-held' | 'release-pending';
+}> {}
 
-  clear(sessionId: SessionId): void {
-    const state = this.active.get(sessionId);
-    if (!state) return;
-    this.stopHeartbeat(state);
-    this.active.delete(sessionId);
-    this.workspaceDocument.clearSessionPresence(sessionId);
-  }
-
-  private now(): number {
-    return this.options.now?.() ?? Date.now();
-  }
-
-  private stopHeartbeat(state: ActivePresenceState): void {
-    if (!state.timer) return;
-    clearInterval(state.timer);
-    state.timer = null;
-  }
-
-  clearAll(): void {
-    for (const sessionId of Array.from(this.active.keys())) {
-      this.clear(sessionId);
-    }
-  }
-
-  has(sessionId: SessionId): boolean {
-    return this.active.has(sessionId);
-  }
-
-  getStatus(sessionId: SessionId): SessionStatus | null {
-    const state = this.active.get(sessionId);
-    return state ? phaseToStatus(state.phase, state.detail) : null;
-  }
-
-  activeSessionCount(): number {
-    return this.active.size;
-  }
-
-  private tick(sessionId: SessionId, epoch: number): void {
-    const state = this.active.get(sessionId);
-    if (!state || state.epoch !== epoch) return;
-
-    if (this.maybeReportInitializationStall(sessionId, state)) return;
-
-    this.publish(sessionId, state);
-    void this.updateMonitoring(sessionId, state).catch((error: unknown) => {
-      this.logger.debug(
-        `[${sessionId}] Session active presence monitoring failed: ${formatErrorMessage(error)}`
-      );
-    });
-  }
-
-  /**
-   * Fail-stop for an initializing stage that stopped making progress.
-   *
-   * Returns true once the stall has been reported, which also suppresses this
-   * and every later heartbeat: an unbounded `initializing` heartbeat keeps the
-   * session pinned against GC (`MessageHandler.hasActiveTurn` reads active
-   * presence) and wakes every presence subscriber every 10s for nothing. The
-   * presence ENTRY is still removed by the owning turn's scope release, which is
-   * the only writer allowed to clear it.
-   */
-  private maybeReportInitializationStall(
-    sessionId: SessionId,
-    state: ActivePresenceState
-  ): boolean {
-    if (state.stallReported) return true;
-    const status = phaseToStatus(state.phase, state.detail);
-    const stage = initializingStageKey(status);
-    if (!stage) return false;
-
-    const budgetMs =
-      this.options.stallBudgetsMs?.[stage] ?? DEFAULT_INITIALIZING_STALL_BUDGETS_MS[stage];
-    const stalledMs = this.now() - state.lastProgressMs;
-    if (stalledMs < budgetMs) return false;
-
-    state.stallReported = true;
-    this.stopHeartbeat(state);
-
-    const stall: SessionInitializationStall = {
-      stage,
-      description: describeStage(status),
-      stalledMs,
-      budgetMs,
-    };
-    this.logger.warn(
-      `[${sessionId}] Session initialization stalled at "${stall.description}" for ${Math.round(
-        stalledMs / 1000
-      )}s (budget ${Math.round(budgetMs / 1000)}s); failing the turn`
-    );
-    this.options.onInitializationStalled?.(sessionId, stall);
-    return true;
-  }
-
-  private publish(sessionId: SessionId, state: ActivePresenceState): void {
-    const status = phaseToStatus(state.phase, state.detail);
-    this.workspaceDocument.publishSessionPresence(sessionId, this.machineId, status);
-  }
-
-  private async updateMonitoring(sessionId: SessionId, state: ActivePresenceState): Promise<void> {
-    const status = phaseToStatus(state.phase, state.detail);
-    const nowMs = this.now();
-
-    if (state.lastPhase !== state.phase) {
-      state.lastPhase = state.phase;
-      state.stageStartMs = nowMs;
-    }
-
-    this.maybeEmitActivePing(sessionId, state, status, nowMs);
-    await this.maybeReportSlow(sessionId, state, status);
-  }
-
-  private maybeEmitActivePing(
-    sessionId: SessionId,
-    state: ActivePresenceState,
-    status: SessionStatus,
-    nowMs: number
-  ): void {
-    if (status.type !== 'running') return;
-    if (nowMs - state.lastActivePingAtMs < ACTIVE_PING_MIN_INTERVAL_MS) return;
-    state.lastActivePingAtMs = nowMs;
-    captureCli(
-      'app/active_ping',
-      {
-        active_context: 'session_turn',
-        session_id_hash: hashAnalyticsId(sessionId),
-      },
-      { tier: 'C' }
-    );
-  }
-
-  private async maybeReportSlow(
-    sessionId: SessionId,
-    state: ActivePresenceState,
-    status: SessionStatus
-  ): Promise<void> {
-    if (status.type !== 'initializing') return;
-
-    const elapsedMs = this.now() - state.stageStartMs;
-    const thresholdMs = this.options.slowThresholdMs ?? DEFAULT_SLOW_THRESHOLD_MS;
-    if (elapsedMs < thresholdMs) return;
-
-    const stageKey = status.stage ?? 'unknown';
-    const key = `${sessionId}:${stageKey}`;
-    if (state.reportedSlowKeys.has(key)) return;
-    state.reportedSlowKeys.add(key);
-
-    const stage = describeStage(status);
-    const message = `Pre-agent stage exceeded ${Math.round(thresholdMs / 1000)}s: ${stage}`;
-    this.logger.debug(`[${sessionId}] ${message}`);
-
-    if (isErrorReportingEnabled()) {
-      await captureMessage(message, {
-        component: 'session_active_presence',
-        level: 'error',
-        extra: {
-          sessionId,
-          status,
-          elapsedMs,
-          thresholdMs,
-        },
-      });
-    }
-  }
+export interface SessionActivePresenceLease {
+  readonly awaitInitializationStall: Effect.Effect<SessionInitializationStall>;
 }
+
+export interface SessionActivePresenceService {
+  readonly hold: (
+    sessionId: SessionId,
+    phase?: SessionActivePresencePhase | null,
+    detail?: string
+  ) => Effect.Effect<SessionActivePresenceLease, SessionPresenceUnavailable, Scope.Scope>;
+  readonly setPhase: (
+    sessionId: SessionId,
+    phase: SessionActivePresencePhase | null,
+    detail?: string
+  ) => void;
+  readonly has: (sessionId: SessionId) => boolean;
+  readonly getStatus: (sessionId: SessionId) => SessionStatus | null;
+  readonly activeSessionCount: () => number;
+  /** Failed clear retains the generation and Cause. Retry never closes the old Scope twice. */
+  readonly retryRelease: (sessionId: SessionId) => Effect.Effect<void>;
+  /** Waits only for leases; timeout retains their original owners and blocks teardown. */
+  readonly awaitIdle: (timeoutMs: number) => Effect.Effect<void, SessionPresenceUnavailable>;
+  readonly retire: () => void;
+}
+
+export class SessionActivePresence extends Context.Service<
+  SessionActivePresence,
+  SessionActivePresenceService
+>()('lody/loro/SessionActivePresence') {}
+
+export const makeSessionActivePresence = (options: SessionActivePresenceOptions = {}) =>
+  Effect.gen(function* () {
+    const host = yield* SessionPresenceHost;
+    const clock = yield* Clock.Clock;
+    const parent = yield* Scope.Scope;
+    const active = new Map<SessionId, ActivePresenceState>();
+    let idle = yield* Deferred.make<void>();
+    yield* Deferred.succeed(idle, undefined);
+    let retired = false;
+    const now = () => clock.currentTimeMillisUnsafe();
+
+    const tick = (sessionId: SessionId, state: ActivePresenceState): void => {
+      if (active.get(sessionId) !== state || state.closing || state.stallReported) return;
+      const status = phaseToStatus(state.phase, state.detail);
+      const nowMs = now();
+      const stage = initializingStageKey(status);
+      const budgetMs = stage
+        ? (options.stallBudgetsMs?.[stage] ?? DEFAULT_INITIALIZING_STALL_BUDGETS_MS[stage])
+        : 0;
+      const stalledMs = nowMs - state.lastProgressMs;
+      if (stage && stalledMs >= budgetMs) {
+        state.stallReported = true;
+        const stall = { stage, description: describeStage(status), stalledMs, budgetMs };
+        Deferred.doneUnsafe(state.stall, Effect.succeed(stall));
+        host.report({ kind: 'stall', sessionId, stall });
+        return;
+      }
+      host.publish(sessionId, status);
+      if (state.lastPhase !== state.phase) {
+        state.lastPhase = state.phase;
+        state.stageStartMs = nowMs;
+      }
+      if (
+        status.type === 'running' &&
+        nowMs - state.lastActivePingAtMs >= ACTIVE_PING_MIN_INTERVAL_MS
+      ) {
+        state.lastActivePingAtMs = nowMs;
+        host.report({ kind: 'active-ping', sessionId });
+      }
+      if (status.type === 'initializing') {
+        const elapsedMs = nowMs - state.stageStartMs;
+        const thresholdMs = options.slowThresholdMs ?? DEFAULT_SLOW_THRESHOLD_MS;
+        const key = status.stage ?? 'unknown';
+        if (elapsedMs >= thresholdMs && !state.reportedSlowKeys.has(key)) {
+          state.reportedSlowKeys.add(key);
+          host.report({
+            kind: 'slow',
+            sessionId,
+            status,
+            elapsedMs,
+            thresholdMs,
+            message: `Pre-agent stage exceeded ${Math.round(thresholdMs / 1000)}s: ${describeStage(status)}`,
+          });
+        }
+      }
+    };
+
+    const clear = (sessionId: SessionId, state: ActivePresenceState) =>
+      Effect.sync(() => {
+        if (active.get(sessionId) !== state) return;
+        host.clear(sessionId);
+        active.delete(sessionId);
+        if (active.size === 0) Deferred.doneUnsafe(idle, Effect.void);
+      });
+
+    const hold = Effect.fnUntraced(function* (
+      sessionId: SessionId,
+      phase: SessionActivePresencePhase | null = 'thinking',
+      detail?: string
+    ): Effect.fn.Return<SessionActivePresenceLease, SessionPresenceUnavailable, Scope.Scope> {
+      // Admission and finalizer registration share acquireRelease's interrupt mask.
+      const leaseState = yield* Effect.acquireRelease(
+        Effect.gen(function* () {
+          if (retired)
+            return yield* new SessionPresenceUnavailable({ sessionId, reason: 'closed' });
+          if (active.has(sessionId))
+            return yield* new SessionPresenceUnavailable({ sessionId, reason: 'already-held' });
+          const scope = yield* Scope.fork(parent);
+          const nowMs = now();
+          const state: ActivePresenceState = {
+            stall: yield* Deferred.make<SessionInitializationStall>(),
+            phase,
+            detail,
+            closing: false,
+            close: Effect.void,
+            reportedSlowKeys: new Set(),
+            lastPhase: undefined,
+            stageStartMs: nowMs,
+            lastActivePingAtMs: nowMs,
+            lastProgressMs: nowMs,
+            stallReported: false,
+          };
+          if (active.size === 0) idle = Deferred.makeUnsafe<void>();
+          active.set(sessionId, state);
+          yield* Scope.addFinalizer(
+            scope,
+            clear(sessionId, state).pipe(
+              Effect.catchCause((cause) => {
+                state.failure = cause;
+                return Effect.failCause(cause);
+              })
+            )
+          );
+          state.close = yield* Effect.cached(
+            Effect.gen(function* () {
+              state.closing = true;
+              yield* Scope.close(scope, Exit.void);
+            })
+          );
+          // First publication is synchronous; subsequent ticks belong to the lease.
+          yield* Effect.forkIn(
+            Effect.sync(() => tick(sessionId, state)).pipe(
+              Effect.catchCause((cause) =>
+                Effect.sync(() => host.report({ kind: 'heartbeat-failed', sessionId, cause }))
+              ),
+              Effect.repeat({
+                schedule: Schedule.spaced(options.intervalMs ?? LODY_PRESENCE_HEARTBEAT_MS),
+                while: () => !state.stallReported && !state.closing,
+              }),
+              Effect.asVoid,
+              Effect.delay(options.intervalMs ?? LODY_PRESENCE_HEARTBEAT_MS)
+            ),
+            scope,
+            { startImmediately: true, uninterruptible: false }
+          );
+          return state;
+        }),
+        (acquired) => acquired.close
+      );
+      yield* Effect.sync(() => tick(sessionId, leaseState));
+      return { awaitInitializationStall: Deferred.await(leaseState.stall) };
+    });
+
+    yield* Effect.addFinalizer(() =>
+      Effect.sync(() => {
+        retired = true;
+      })
+    );
+    return SessionActivePresence.of({
+      hold,
+      setPhase: (sessionId, phase, detail) => {
+        const state = active.get(sessionId);
+        if (
+          !state ||
+          state.closing ||
+          state.stallReported ||
+          (state.phase === phase && state.detail === detail)
+        )
+          return;
+        state.phase = phase;
+        state.detail = detail;
+        state.lastProgressMs = now();
+        tick(sessionId, state);
+      },
+      has: (sessionId) => active.has(sessionId),
+      getStatus: (sessionId) => {
+        const state = active.get(sessionId);
+        return state ? phaseToStatus(state.phase, state.detail) : null;
+      },
+      activeSessionCount: () => active.size,
+      retire: () => {
+        retired = true;
+      },
+      retryRelease: (sessionId) =>
+        Effect.suspend(() => {
+          const state = active.get(sessionId);
+          return state?.failure ? clear(sessionId, state) : Effect.void;
+        }),
+      awaitIdle: (timeoutMs) =>
+        Effect.suspend(() => Deferred.await(idle)).pipe(
+          Effect.timeoutOrElse({
+            duration: timeoutMs,
+            orElse: () =>
+              Effect.fail(new SessionPresenceUnavailable({ reason: 'release-pending' })),
+          })
+        ),
+    });
+  });
+
+export const SessionActivePresenceLive = (options?: SessionActivePresenceOptions) =>
+  Layer.effect(SessionActivePresence, makeSessionActivePresence(options));

@@ -17,7 +17,7 @@ import { withClassName } from '@/lib/stylex';
 import { PricingPageLink } from '../shared/pricing-page-link';
 import { FounderCallLink } from '../shared/founder-call-link';
 import { SubscribeConsentNotice } from '../shared/subscribe-consent-notice';
-import { CompactRow, CompactSection } from './compact-layout';
+import { CompactLinkRow, CompactRow, CompactSection } from './compact-layout';
 import { settingsSurface as surface } from './surface';
 import { settingContainerClass } from '.';
 import { settingsType as type } from './type.stylex';
@@ -168,20 +168,6 @@ const styles = stylex.create({
 
   inlineRow: { display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: space[3] },
   history: { maxHeight: '320px', overflowY: 'auto', margin: 0, padding: 0, listStyleType: 'none' },
-  invoice: {
-    display: 'flex',
-    flexWrap: 'wrap',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    columnGap: space[4],
-    rowGap: space[1],
-  },
-  invoiceText: { minWidth: 0 },
-  link: {
-    fontSize: uiText.footnoteSize,
-    color: colors.accent,
-    textDecoration: { default: 'none', ':hover': 'underline' },
-  },
 
   trailing: { display: 'flex', justifyContent: 'flex-end', paddingInline: space[4] },
   quietAction: {
@@ -208,6 +194,13 @@ export interface BillingOverviewData {
   billingAccountId: string | null;
   /** Backend capability fence for rolling frontend/backend deployments. */
   giftStackingSupported: boolean;
+  seatBilling?: {
+    policy: 'deferred';
+    capacity: number;
+    available: number;
+    renewalQuantity: number;
+    periodEnd: number | null;
+  } | null;
   effectivePlanTier: 'free' | 'plus' | 'enterprise';
   entitlementSource: 'free' | 'stripe' | 'stripe_gift' | 'enterprise';
   offerKey: string | null;
@@ -249,6 +242,20 @@ export interface BillingInvoice {
   number: string | null;
   status: string;
   amountPaid: number;
+  /** Optional for clients connected to an older billing backend. */
+  amountDue?: number | null;
+  amountRemaining?: number | null;
+  total?: number | null;
+  reason?:
+    | 'subscription_started'
+    | 'subscription_renewed'
+    | 'seats_added'
+    | 'seats_removed'
+    | 'plan_changed'
+    | 'subscription_changed'
+    | 'gift_redemption'
+    | 'other';
+  seatChange?: { from: number; to: number } | null;
   currency: string;
   periodStart: number | null;
   periodEnd: number | null;
@@ -320,7 +327,104 @@ export interface BillingSettingsViewProps {
   onResumeSubscription: () => void;
   onRedeemCode: (code: string) => void;
   onRetryInvoices: () => void;
+  onViewInvoice?: (invoice: BillingInvoice) => void;
   onCancelExternalCheckout?: () => void;
+}
+
+export function invoiceDisplayAmount(invoice: BillingInvoice): number | null {
+  if (invoice.status === 'open' || invoice.status === 'uncollectible') {
+    return invoice.amountRemaining ?? invoice.amountDue ?? null;
+  }
+  return invoice.status === 'paid'
+    ? invoice.amountPaid
+    : (invoice.total ?? invoice.amountDue ?? null);
+}
+
+export function invoiceReasonKey(invoice: BillingInvoice) {
+  if (invoice.kind === 'gift_redemption') return 'billing.historyGiftPlus' as const;
+  switch (invoice.reason) {
+    case 'subscription_started':
+      return 'billing.invoiceReasonStarted';
+    case 'subscription_renewed':
+      return 'billing.invoiceReasonRenewed';
+    case 'seats_added':
+      return 'billing.invoiceReasonSeatsAdded';
+    case 'seats_removed':
+      return 'billing.invoiceReasonSeatsRemoved';
+    case 'plan_changed':
+      return 'billing.invoiceReasonPlanChanged';
+    case 'subscription_changed':
+      return 'billing.invoiceReasonAdjusted';
+    default:
+      return 'billing.invoiceReasonOther';
+  }
+}
+
+export function invoiceStatusKey(status: string) {
+  switch (status) {
+    case 'open':
+      return 'billing.invoiceStatusOpen';
+    case 'paid':
+      return 'billing.invoiceStatusPaid';
+    case 'void':
+      return 'billing.invoiceStatusVoid';
+    case 'draft':
+      return 'billing.invoiceStatusDraft';
+    case 'uncollectible':
+      return 'billing.invoiceStatusUncollectible';
+    default:
+      return 'billing.invoiceStatusUnknown';
+  }
+}
+
+/** One invoice as a settings line: why it exists, when, and what it costs. */
+export function BillingInvoiceRow({
+  invoice,
+  onOpen,
+}: {
+  invoice: BillingInvoice;
+  /** Opens the invoice's details; without it the row leads to Stripe's page. */
+  onOpen?: () => void;
+}) {
+  const { t } = useTranslation();
+  const label =
+    invoice.kind === 'gift_redemption' && invoice.giftDurationMonths
+      ? t('billing.historyGiftPlusMonths', { count: invoice.giftDurationMonths })
+      : t(invoiceReasonKey(invoice));
+  const helper = [
+    formatDate(invoice.createdAt),
+    invoice.seatChange ? t('billing.invoiceSeatChange', invoice.seatChange) : null,
+    invoice.status === 'paid' ? null : t(invoiceStatusKey(invoice.status)),
+  ]
+    .filter(Boolean)
+    .join(' · ');
+  const value = formatInvoiceAmount(invoiceDisplayAmount(invoice), invoice.currency);
+  const url = invoice.hostedInvoiceUrl;
+  if (onOpen) {
+    return (
+      <CompactLinkRow to="open" label={label} helper={helper} detail={value} onClick={onOpen} />
+    );
+  }
+  if (url?.startsWith('https://')) {
+    return (
+      <CompactLinkRow
+        label={label}
+        helper={helper}
+        detail={value}
+        onClick={() => window.open(url, '_blank', 'noopener,noreferrer')}
+      />
+    );
+  }
+  return (
+    <CompactRow label={label} helper={helper}>
+      <span {...stylex.props(styles.tabular)}>{value}</span>
+    </CompactRow>
+  );
+}
+
+/** An amount the backend could not report reads as a dash, not a sentence. */
+export function formatInvoiceAmount(cents: number | null | undefined, currency: string): string {
+  return cents == null ? '—' : formatMoney(cents, currency);
 }
 
 export function formatUsd(cents: number): string {
@@ -332,7 +436,7 @@ export function formatDate(timestamp: number | null | undefined): string {
   return new Intl.DateTimeFormat(undefined, { dateStyle: 'medium' }).format(new Date(timestamp));
 }
 
-function formatMoney(cents: number, currency: string): string {
+export function formatMoney(cents: number, currency: string): string {
   try {
     return new Intl.NumberFormat('en-US', {
       style: 'currency',
@@ -367,6 +471,7 @@ export function BillingSettingsView({
   onResumeSubscription,
   onRedeemCode,
   onRetryInvoices,
+  onViewInvoice,
   onCancelExternalCheckout,
 }: BillingSettingsViewProps) {
   const { t } = useTranslation();
@@ -671,9 +776,23 @@ export function BillingSettingsView({
               <p {...stylex.props(surface.rowLabel)}>{t('billing.members')}</p>
               <span {...stylex.props(styles.metricValue)}>
                 <span {...stylex.props(styles.metricStrong)}>{overview.seatCount}</span>
-                {!entitled ? ` / ${FREE_WORKSPACE_MEMBER_LIMIT}` : null}
+                {overview.seatBilling
+                  ? ` / ${overview.seatBilling.capacity}`
+                  : !entitled
+                    ? ` / ${FREE_WORKSPACE_MEMBER_LIMIT}`
+                    : null}
               </span>
             </div>
+            {overview.seatBilling ? (
+              <p {...stylex.props(styles.helper)}>
+                {t(
+                  overview.billingInterval === 'year'
+                    ? 'billing.deferredSeatsYearly'
+                    : 'billing.deferredSeatsMonthly',
+                  { count: overview.seatBilling.available }
+                )}
+              </p>
+            ) : null}
           </div>
         </CompactSection>
       ) : null}
@@ -887,46 +1006,11 @@ export function BillingSettingsView({
             // Cap at roughly 6 rows; older invoices scroll.
             <ul {...withClassName(stylex.props(styles.history), 'input-scrollbar')}>
               {invoices.map((invoice, index) => (
-                <li
-                  key={invoice.id}
-                  {...stylex.props(styles.block, styles.invoice, index > 0 && surface.lineRuled)}
-                >
-                  <div {...stylex.props(styles.invoiceText)}>
-                    <p {...stylex.props(surface.rowLabel)}>
-                      {formatDate(invoice.periodStart ?? invoice.createdAt)}
-                    </p>
-                    <p {...stylex.props(surface.rowHelper)}>
-                      {invoice.kind === 'gift_redemption'
-                        ? invoice.giftDurationMonths
-                          ? t('billing.historyGiftPlusMonths', {
-                              count: invoice.giftDurationMonths,
-                            })
-                          : t('billing.historyGiftPlus')
-                        : invoice.interval === 'year'
-                          ? t('billing.historyPlanYearly')
-                          : invoice.interval === 'month'
-                            ? t('billing.historyPlanMonthly')
-                            : t('billing.plan.plus')}
-                    </p>
-                  </div>
-                  <div {...stylex.props(styles.inlineRow)}>
-                    <span {...stylex.props(styles.tabular)}>
-                      {formatMoney(invoice.amountPaid, invoice.currency)}
-                    </span>
-                    <Badge>
-                      {invoice.status.charAt(0).toUpperCase() + invoice.status.slice(1)}
-                    </Badge>
-                    {invoice.hostedInvoiceUrl ? (
-                      <a
-                        href={invoice.hostedInvoiceUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        {...stylex.props(styles.link)}
-                      >
-                        {t('billing.historyView')}
-                      </a>
-                    ) : null}
-                  </div>
+                <li key={invoice.id} {...stylex.props(index > 0 && surface.lineRuled)}>
+                  <BillingInvoiceRow
+                    invoice={invoice}
+                    onOpen={onViewInvoice ? () => onViewInvoice(invoice) : undefined}
+                  />
                 </li>
               ))}
             </ul>

@@ -1,12 +1,16 @@
 // @vitest-environment jsdom
 
-import { act } from 'react';
+import { act, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AgentConfigId, AgentConfigMeta, MachineId, MachineViewMeta } from '@lody/shared';
 
 import { ProviderRow } from '../src/components/settings/provider-row';
 import { initI18n } from '../src/i18n';
+import {
+  createCodexResetForecastStore,
+  setCodexResetForecastStoreForTests,
+} from '../src/lib/codex-reset-forecast-store';
 
 const machineId = 'machine-test' as MachineId;
 const machine: MachineViewMeta = {
@@ -44,6 +48,7 @@ describe('ProviderRow reauthentication', () => {
     act(() => root.unmount());
     container.remove();
     vi.restoreAllMocks();
+    setCodexResetForecastStoreForTests(null);
   });
 
   const renderConfig = async (config: AgentConfigMeta) => {
@@ -75,9 +80,16 @@ describe('ProviderRow reauthentication', () => {
 
   it('still opens the provider detail when the row is clicked', async () => {
     const config = makeConfig({ cliType: 'builtin', agentType: 'claude' });
-    const onEdit = vi.fn();
+    function DetailHarness() {
+      const [selected, setSelected] = useState<AgentConfigMeta | null>(null);
+      return selected ? (
+        <p>Opened detail for {selected.name}</p>
+      ) : (
+        <ProviderRow config={config} machine={machine} onEdit={setSelected} />
+      );
+    }
     await act(async () => {
-      root.render(<ProviderRow config={config} machine={machine} onEdit={onEdit} />);
+      root.render(<DetailHarness />);
     });
 
     const row = container.querySelector<HTMLButtonElement>('button[aria-label="Edit Config"]');
@@ -85,7 +97,29 @@ describe('ProviderRow reauthentication', () => {
       row?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
 
-    expect(onEdit).toHaveBeenCalledWith(config);
+    expect(container.textContent).toContain('Opened detail for claude');
+  });
+
+  it('loads the forecast only after its direct action is selected', async () => {
+    const store = createCodexResetForecastStore({
+      fetchStatus: async () => ({
+        status: { watch: null, scheduledReset: null, latestReset: null },
+        etag: null,
+        maxAgeMs: 60_000,
+      }),
+    });
+    setCodexResetForecastStoreForTests(store);
+    await renderConfig(makeConfig({ cliType: 'builtin', agentType: 'codex' }));
+    expect(store.getState().status).toBe('idle');
+    expect(container.textContent).toContain('Reset forecast');
+    expect(container.textContent).not.toContain('Quota details');
+    const forecast = Array.from(container.querySelectorAll('button')).find(
+      (button) => button.textContent === 'Reset forecast'
+    );
+    expect(forecast).toBeDefined();
+    await act(async () => forecast?.click());
+    expect(store.getState().status).toBe('ready');
+    expect(document.body.textContent).toContain('No reset forecast right now.');
   });
 });
 

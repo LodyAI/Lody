@@ -222,6 +222,13 @@ type BillingOverview = {
   billingAccountId: string | null;
   planTier: PlanTier;
   giftStackingSupported: boolean;
+  seatBilling?: {
+    policy: 'deferred';
+    capacity: number;
+    available: number;
+    renewalQuantity: number;
+    periodEnd: number | null;
+  } | null;
   checkoutPending: boolean;
   checkoutInterval: BillingInterval | null;
   offerKey:
@@ -256,6 +263,20 @@ type BillingInvoiceRecord = {
   number: string | null;
   status: string;
   amountPaid: number;
+  /** Optional for clients connected to an older billing backend. */
+  amountDue?: number | null;
+  amountRemaining?: number | null;
+  total?: number | null;
+  reason?:
+    | 'subscription_started'
+    | 'subscription_renewed'
+    | 'seats_added'
+    | 'seats_removed'
+    | 'plan_changed'
+    | 'subscription_changed'
+    | 'gift_redemption'
+    | 'other';
+  seatChange?: { from: number; to: number } | null;
   currency: string;
   periodStart: number | null;
   periodEnd: number | null;
@@ -264,6 +285,20 @@ type BillingInvoiceRecord = {
   giftDurationMonths: number | null;
   createdAt: number;
   hostedInvoiceUrl: string | null;
+};
+
+export type BillingInvoiceDetail = {
+  invoice: BillingInvoiceRecord;
+  lines: Array<{
+    id: string;
+    description: string;
+    amount: number;
+    quantity: number | null;
+    periodStart: number | null;
+    periodEnd: number | null;
+  }>;
+  canCancel: boolean;
+  cancellationPending?: boolean;
 };
 
 type UpcomingInvoicePreview = {
@@ -286,12 +321,13 @@ type SeatInvitePreview =
   | {
       status: 'billed';
       interval: BillingInterval;
-      unitAmount: number;
+      unitAmount: number | null;
       proratedAmount: number | null;
       currentPeriodEnd: number | null;
       seatCount: number;
       nextSeatCount: number;
-      nextRenewalAmount: number;
+      nextRenewalAmount: number | null;
+      currency?: string;
     };
 
 export type CloudApi = {
@@ -467,9 +503,19 @@ export type CloudApi = {
       } | null
     >;
     getWorkspaceSeatInvitePreview: Query<{ workspaceId: string }, SeatInvitePreview | null>;
+    listDeletedWorkspaceBillingAccounts: Query<
+      Record<string, never>,
+      Array<{ workspaceId: string; name: string }>
+    >;
     listBillingInvoices: Action<
       { workspaceId: string },
       { invoices: BillingInvoiceRecord[]; upcoming: UpcomingInvoicePreview | null }
+    >;
+    purchaseWorkspaceMemberSeat: Action<{ workspaceId: string }, { status: 'ready' }>;
+    getBillingInvoice: Action<{ workspaceId: string; invoiceId: string }, BillingInvoiceDetail>;
+    cancelPendingSeatInvoice: Action<
+      { workspaceId: string; invoiceId: string },
+      { status: 'canceled' }
     >;
     previewSubscriptionIntervalChange: Action<
       { workspaceId: string; interval: BillingInterval },

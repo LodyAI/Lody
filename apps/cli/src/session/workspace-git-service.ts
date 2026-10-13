@@ -1,5 +1,5 @@
 import { toShared } from '@/platform/process-options';
-import { getLocalProjectGitHubRepoAtRootPath } from '@lody/shared/node/local-project';
+import { localProjectsLegacy } from '@lody/shared/node/local-project';
 import type { SessionId } from '@lody/shared';
 import { resolveGitBranch, type SessionExec } from '@/lib/git/resolve-git-branch-name';
 import type { LoroDocumentManager } from '@/lib/loro/doc';
@@ -86,7 +86,8 @@ export class WorkspaceGitService {
           }
           const project = (await ownerDoc.getMetaState())?.project;
           if (observeLocalRepository && project?.kind === 'local' && !project.githubRepoFullName) {
-            const repoFullName = await getLocalProjectGitHubRepoAtRootPath(workdir);
+            const repoFullName =
+              await localProjectsLegacy.getLocalProjectGitHubRepoAtRootPath(workdir);
             const current = (await ownerDoc.getMetaState())?.project;
             if (
               repoFullName &&

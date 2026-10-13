@@ -48,6 +48,14 @@ Parent instructions apply. Background: [README.md](README.md).
 
 ## Session tool contracts
 
+- Keep the shared causal chain cap and MCP guidance aligned: create/chat tools forbid
+  courtesy-only messages, duplicate result callbacks, and evading the depth limit.
+
+- Catalog uncertainty is not `INVALID_ITEM`; only retryable failures abort batches.
+  Default-only calls allow no cache. Internal inferred defaults
+  rederive until authored. Explicit choices/access stay strict.
+  [Freshness/retries](README.md#machine-catalog-retry-guidance).
+
 - `lody_ios_simulator_preview` is the native-app tool; web previews remain
   `lody_report_preview_candidate`. Bind local agent-control RPC to MCP session context;
   the daemon resolves the active user. Return operation handles, never viewer URLs or
@@ -71,8 +79,8 @@ Parent instructions apply. Background: [README.md](README.md).
 - Chat inherits omitted mode/model/options from the target's last model turn, else last
   matching turn. Explicit fields/category options win; model changes drop old options.
   Validate effort/Fast against the final model, never reject on probe mismatch; missing
-  per-model data defers to runtime. Drop incompatible inherited selectors; fill builtin
-  mode only if empty. [Inheritance rationale](README.md#chat-configuration).
+  per-model data defers to runtime. Drop incompatible inherited selectors even after
+  unconfirmed freshness; only explicit misses block. Fill builtin mode only if empty. [Inheritance rationale](README.md#chat-configuration).
 - `lody_session_create_options` publishes modes and option ids/types/choices per agent config,
   never current values. Stay sparse by default (online Machines, one agent config, the current
   local project, no GitHub fetch), expanding only through explicit query inputs.
@@ -99,3 +107,6 @@ Parent instructions apply. Background: [README.md](README.md).
   authoritative workspace, never the daemon cwd or target workspace. Freeze references
   before acceptance; retries use stored references. Legacy wait and batch schemas reject
   attachment arguments. See [input Spec](../../../../specs/cli-session-attachments.md).
+
+- The user-owned inherited `collaborationStopped` barrier rejects delegation. Agents and
+  completion callbacks must never clear it; execution also fences setup and prompt dispatch.

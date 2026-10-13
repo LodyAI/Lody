@@ -393,9 +393,8 @@ export function createMainWindow(options: CreateMainWindowOptions): BrowserWindo
     ...(process.platform === 'darwin'
       ? { titleBarStyle: 'hiddenInset', trafficLightPosition: { x: 16, y: 16 } }
       : {}),
-    // Windows: hide the native title bar (its neutral gray clashes with the
-    // app canvas) and keep only the OS-drawn caption buttons as an overlay
-    // tinted to match the theme.
+    // Windows: hide the native title bar and retain OS-drawn caption buttons
+    // over a transparent background, with glyphs tinted to match the theme.
     ...(process.platform === 'win32'
       ? {
           titleBarStyle: 'hidden',

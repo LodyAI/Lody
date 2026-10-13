@@ -7,29 +7,17 @@ Translation: current
 
 ## Abstract
 
-Lody's lifecycle defects cluster around a few hand-written mechanisms:
-
-- timer-driven backoff and watchdogs;
-- generation counters;
-- hand-rolled disposed flags;
-- keyed promise chains;
-- swallowed `.catch` handlers.
-
-The repository already depends on effect 3.18, but only as islands: an Effect is built inside
-a class method and run with `runPromise` at the boundary.
-
-This roadmap sets a bottom-up migration rule:
-
-- seven layers run from the platform to the entry points;
-- a layer is done only when every dependency below it is already an Effect service;
-- our own Promise modules are rewritten, and only real third-party I/O boundaries may be
-  wrapped once.
-
-Under that rule, the Loro sync stack's lifecycle is fixed inside the libraries. After the Flock
-persistence migration, loro-repo and streams-crdt move to an Effect core that exposes both an
-Effect entry and a Promise entry. The first step is the platform and process leaf layers. The
-ranking comes from classifying fix commits and issues, not runtime measurement, and each unit
-needs its own detailed plan when work starts.
+Lody's lifecycle defects cluster around hand-written timers, Promise chains,
+cancellation flags and swallowed failures. The merged Effect 4.0.2 foundations
+cover process ownership and several native leaves, while upper daemon orchestration
+remains unfinished. This roadmap organizes independently accepted responsibility
+units by actual dependencies and records kernel, consumer and application-owner
+completion separately; native orchestration must use Effect rather than wrap
+unfinished Lody Promise workflows. The Loro lifecycle must migrate inside its
+libraries after verifying Flock persistence prerequisites, while pure calculations
+stay ordinary functions. The skill and guide select version-matched primitives,
+behavioral acceptance and optional responsibility splits for large mixed modules;
+the ledger records evidence and limits rather than an estimated repository percentage.
 
 ## Runtime revision
 
@@ -38,6 +26,8 @@ Effect 4.0.2; new layers use `Context.Service` and `Layer.effect`, and tests use
 `TestClock` from `effect/testing`. See the [v4 migration decision](../../implemented/architecture/2026-10-09-effect-v4-migration.md).
 
 ## Basis for the ranking
+
+These are historical survey counts, not current completion metrics.
 
 - **Lifecycle share of fixes.** Of the last three months' 511 fix commits, about 116 are races,
   hangs, leaks, cancellation, or reconnection bugs. Per file, the highest are:
@@ -83,15 +73,38 @@ Dependencies point downward only.
 
 ### Definition of done
 
-A module is fully Effect-ified only when every one of these holds:
+Assess a responsibility unit, not its filename or the presence of Effect imports.
+A native kernel meets all of these criteria:
 
-- its public API returns only `Effect`, and failures are tagged error types;
-- every dependency appears in `R` and is provided by a `Layer`, and each dependency is itself done;
-- it uses no `setTimeout`/`setInterval`, no `AbortController`, no lifecycle `EventEmitter`, and
-  no module-level mutable singletons;
-- resources are acquired only through `acquireRelease`, Scope, or `RcMap`;
-- it never calls `run*` internally;
-- tests replace Layers and use TestClock to assert observable outcomes.
+- Its boundary and actual consumer path are named. Public asynchronous operations
+  compose Effects with observable typed failures; pure calculations remain ordinary functions.
+- Its own waiting, concurrency, retries and cancellation use Effect. Dependencies
+  are native capabilities or genuine external I/O adapters, not wrapped unfinished
+  Lody Promise orchestration. Registered upstream adapters remain explicit exceptions.
+- Required capabilities come through Services/Layers. Construction requirements
+  may be satisfied by a Layer; they need not also appear in every method's `R`.
+  Ordinary input values and pure helpers do not need a Service.
+- Every acquired resource and background task has an owner through Scope,
+  acquire/release or a verified native resource container. Cancellation reaches
+  lower work, and callers can await cleanup. Release ordering and bounded waits
+  are verified; unresolved resources retain their owner and report failure.
+- Failure, timeout, interruption and release failure remain observable, including
+  combined Causes. Local cancellation does not imply that a remote request ended.
+- The native kernel contains no internal program launches through `Effect.run*`
+  or `ManagedRuntime.run*`, Legacy calls or hand-written Promise/timer lifecycle.
+  Execution stays at registered application/compatibility entries. Effect-returning
+  operators such as `Stream.runCollect` remain valid composition. Real SDK/platform
+  adapters may bridge callbacks and cancellation once.
+- Behavioral tests exercise the actual boundary: ordering, cancellation, retries,
+  replacement and failure paths as applicable. Clock-driven workflow tests use
+  injected clocks; real platform regressions complement test Layers.
+
+Track **kernel, consumers and application ownership separately**. A single-kernel,
+explicitly deprecated Legacy facade may remain with named consumers and a deletion
+condition; that means consumer migration is unfinished. Operation-scoped resources
+are valid owners, but do not establish daemon-wide shutdown completion. A unit is
+fully integrated only when its consumer and required application-owner work is
+also complete. Update the ledger and owning evidence when any dimension changes.
 
 ### Our code versus third-party boundaries
 
@@ -106,7 +119,9 @@ A module is fully Effect-ified only when every one of these holds:
 
 ### Rules during migration
 
-- **Strictly bottom-up.** Do not start rewriting an upper layer before the layer below is done.
+- **Follow actual dependencies bottom-up.** Layer numbers are a map, not a global
+  serial schedule. Independent ACP transport and Loro work can proceed separately;
+  an upper unit waits for the particular capabilities it consumes.
 - **Temporary facades.** Upper-layer callers not yet migrated use a new service through a
   `runtime.runPromise` facade. The facade is marked temporary and deleted when that upper
   layer migrates.
@@ -116,13 +131,33 @@ A module is fully Effect-ified only when every one of these holds:
   2. adapt the current Promise version with a temporary Layer;
   3. replace only that Layer once upstream is done.
 
+### Small migrations alongside features and fixes
+
+The dedicated series and ordinary feature/fix work can both deliver native leaves.
+Limiting migration to the series would leave ready modules accumulating new Promise
+mechanisms; rewriting every touched module would expand tasks into unfinished
+dependency chains. The root [Effect rule](../../../../AGENTS.md#effect-reference)
+therefore requires assessment and prefers a complete, task-related migration when
+its actual dependencies and verification scope are ready. The
+[selection guide](../../../docs/cli-effect-ts.md#small-migrations-during-feature-and-fix-work)
+owns the practical process and the roughly 500-line sizing reference.
+
+This reference measures extra review scope rather than net file growth and creates
+no approval gate. The migration must improve the requested behavior and meet the
+existing completion criteria with real consumers and behavioral regression coverage.
+Larger or blocked work remains a separately scoped unit. Pure computation stays
+ordinary code. Reduced complexity and stronger lifecycle behavior are goals to
+verify, not guarantees provided merely by choosing Effect. This workflow guidance
+changes no product contract; it does not need a new Spec document.
+
 ### Boundary rules
 
 The base PR #1070 provides `.agents/docs/cli-effect-ts.md`; the proposed lifecycle layers
 add these boundary requirements:
 
-- never call `run*` inside an Effect;
-- use `tryPromise` with the signal for any promise that can reject;
+- keep `Effect.run*`/`ManagedRuntime.run*` program launches at registered entries;
+- construct rejecting Promises inside `tryPromise` and forward its signal; when raw
+  work ignores cancellation, retain ownership until completion or confirmed termination;
 - every interrupt is owned by a scope or awaited;
 - timeouts go on the waiter;
 - every wait inside a finalizer has a clock/deferred bound that works while uninterruptible;
@@ -137,12 +172,12 @@ add these boundary requirements:
 
 ### Lody's four services
 
-| Service          | Effect concept                                                                                                                                                                                 | Replaces                                                                                                                |
-| ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
-| SessionDocuments | `RcMap<SessionId, DocHandle>` whose lookup is `acquireRelease(open and join the room, unload then invalidate)`, with an idle TTL                                                               | `getOrCreateSessionDoc`'s `sessions`, `pendingSessionDocs`, `withLocalDocOwnership`, `isDestroyed`, and hand-written GC |
-| SessionHistory   | An interpreter of `HistoryAction`/`MetaPatch` values. `commit(batch)` performs sequences that must be atomic in one commit inside an uninterruptible region; changes are exposed as a `Stream` | Promise writes such as `sessionData.commands.applyHistoryAction`, and the `subscribeSessionChanges` callback            |
-| SessionPresence  | `hold(sessionId, phase)` is an `acquireRelease` lease with its heartbeat as an in-scope `Effect.repeat(Schedule.spaced)`; machine three-state liveness is a `SubscriptionRef`                  | Scattered start/clear calls and ten timers                                                                              |
-| CloudPort        | A capability interface whose methods return Effects with tagged errors; callers compose timeouts and retries with `timeout`/`Schedule`; one Layer each for local and cloud                     | Promise methods that take `timeoutMs`                                                                                   |
+| Service          | Effect concept                                                                                                                                                                                                                        | Replaces                                                                                                                |
+| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| SessionDocuments | `RcMap<SessionId, DocHandle>` whose lookup is `acquireRelease(open and join the room, unload then invalidate)`, with an idle TTL                                                                                                      | `getOrCreateSessionDoc`'s `sessions`, `pendingSessionDocs`, `withLocalDocOwnership`, `isDestroyed`, and hand-written GC |
+| SessionHistory   | An interpreter of `HistoryAction`/`MetaPatch` values. `commit(batch)` shields local write sequences from cancellation; this alone provides neither crash recovery nor cross-peer CRDT transactions; changes are exposed as a `Stream` | Promise writes such as `sessionData.commands.applyHistoryAction`, and the `subscribeSessionChanges` callback            |
+| SessionPresence  | `hold(sessionId, phase)` is an `acquireRelease` lease with its heartbeat as an in-scope `Effect.repeat(Schedule.spaced)`; machine three-state liveness is a `SubscriptionRef`                                                         | Scattered start/clear calls and ten timers                                                                              |
+| CloudPort        | A capability interface whose methods return Effects with tagged errors; callers compose timeouts and retries with `timeout`/`Schedule`; one Layer each for local and cloud                                                            | Promise methods that take `timeoutMs`                                                                                   |
 
 Turn code only produces data such as `HistoryAction`/`MetaPatch` and never sees `LoroDoc` or
 loro-repo. Only the SessionHistory and SessionDocuments implementations touch `LoroDoc`, and
@@ -213,16 +248,24 @@ reconnection under Effect, so the decision is to go inside the libraries:
 
 ## Migration units
 
-### L0 + L1: platform and process leaf
+### Process foundation: implemented, not completion of L0/L1
 
-Delivered by the first and second PRs of
-[turn execution and ACP process ownership](2026-09-27-effect-turn-execution-and-acp-process-ownership.md).
-This is the shared prerequisite for every upper layer.
+[#1065](https://github.com/LodyAI/Lody/pull/1065),
+[#1069](https://github.com/LodyAI/Lody/pull/1069) and
+[#1348](https://github.com/LodyAI/Lody/pull/1348) are merged. The shared core uses
+Effect 4.0.2, official ChildProcess/ChildProcessSpawner and Node Stream/Sink
+adapters with Lody's bounded tree backend. The CLI process-options module only
+composes Layers, and the obsolete promise-facade is deleted. Sandbox acquisition
+rolls back and successful command Scopes retire after configuration, whole-tree
+exit and drained stdio. Legacy imports stay visible across all process consumers.
 
-From the second PR on, the other ~35 files that spawn processes directly move onto the same
-ProcessService: git, the worktree setup runner, terminals, login-shell environment, MCP,
-preview, code-collab scans, and others. This fixes a setup-script timeout signalling only the
-shell (SIGTERM), which leaks its descendants.
+File locks are the first subsequent dependency unit; see the
+[file-lock decision](../../implemented/architecture/2026-10-10-effect-file-lock-lifecycle.md).
+They supply a real filesystem protocol, fair interruptible local admission and
+observable cleanup failures. LocalProjects and WorktreeGit execution have native
+kernels under draft review; worktree mutation/setup/GC, managed
+runtime installation, startup gates, SDK requests, Sessions and Turns remain to
+migrate. Process unification does not finish those lifecycles or daemon ownership.
 
 ### L2 and the Loro sync stack
 
@@ -237,7 +280,7 @@ See the previous section. Local data plane join/unload joins this unit:
 
 ### Connection recovery, presence, and machine liveness (CLI)
 
-- **Where:** `apps/cli/src/lib/loro/connection-recovery.ts`, `presence.ts`, `machine-monitor.ts`,
+- **Where:** `apps/cli/src/lib/loro/connection-recovery.ts`, `workspace-presence.ts`, `machine-monitor.ts`,
   `session-active-presence.ts`.
 - **Evidence:** #12, #673; open #399, #484, #1028.
 - **Split:**
@@ -293,10 +336,11 @@ The turn layer depends on L2 and, by the layering rule, finishes last.
 - **Where:** `worktree-manager.ts`, `speculative-worktree.ts`, `worktree-gc.ts`,
   `packages/shared/src/node/file-lock.ts`.
 - **Evidence:** #76, #6; open #296 (possibly fixed by #620; needs checking).
-- **Target:**
-  - a keyed `Semaphore` replaces the `withSessionMarkerLock` promise chain;
-  - file locks become `acquireRelease` resources that poll with a `Schedule`;
-  - GC becomes an `Effect.repeat` in the daemon scope.
+- File-lock implementation is delivered in #1377; its owning decision defines
+  the behavior guarantee and single Legacy facade.
+- Remaining work migrates Git/worktree operations and marker admission, with GC
+  owned by the daemon Scope. Changing return types or repeating Promise methods
+  does not complete these units.
 
 ### Orchestration delivery
 
@@ -363,19 +407,188 @@ Migrate these only when touched:
 - **#553:** make the history-sync single-flight join the in-flight run.
 - **Close after checking:** #296, and the download half of #828.
 
-## Suggested order
+## Migration guidance and progress
 
-1. L0 + L1 ProcessService, migrating every ACP-related process (the turn proposal's first PR, #1065).
-2. The remaining CLI spawn callers (#1069), then cross-runtime consumers in their own PR.
-   The core already lives in shared from #1065; no relocation is needed.
-3. In parallel with 1–2: the loro-repo Flock persistence migration.
-4. The Effect core and `loro-repo/effect` entry for loro-repo and streams-crdt, each in its own
-   repository.
-5. Lody L2. It can start after step 2 on the temporary `LoroRepo` Layer, and swaps that Layer
-   once step 4 lands. Managed runtime and worktrees/file locks finish in the same period.
-6. L3 → L4 → L5 (the turn proposal).
-7. L6 and orchestration delivery.
-8. The renderer workspace runtime (after step 4), then Electron and the supervisor.
+Guidance review: [#1452](https://github.com/LodyAI/Lody/pull/1452).
+
+Merged leaves and Effect imports do not show whether their consumers or final
+owners have migrated. The unit ledger below separates those facts. It groups
+responsibilities that can be independently accepted, rather than requiring one
+row per file or a global sequence of layer numbers.
+
+The [Effect skill](../../../skills/effect-ts/SKILL.md) first selects review, debug,
+feature/fix or dedicated migration mode. Review investigates changed behavior;
+debugging isolates the cause. Neither initiates a migration. Feature/fix work may
+defer migration when dependencies or verification do not fit its scope. For
+implementation, start from behavioral contracts, prefer official primitives and
+check installed-version semantics before choosing custom coordination. This charter
+owns prerequisites and completion criteria; the [guide](../../../docs/cli-effect-ts.md)
+owns conventions/testing; each unit's Note records decisions, evidence and limits.
+The root AGENTS.md routes implementers to the relevant sections and ledger rows.
+Read the resolved release's Effect guide fully once in the current context, then
+load task-specific references; re-read when the version or context is lost.
+
+The guide's [five contract questions](../../../docs/cli-effect-ts.md#behavior-contract)
+make trigger, resource owner, cancellation, handoff and failure recovery explicit
+in the owning Note. Apply only relevant questions. This replaces an unconditional
+migration checklist with a behavior-based choice; it adds no per-task document or
+mandatory Service for ordinary inputs and pure helpers.
+
+Small cohesive modules stay together. Only large modules mixing calculation,
+domain coordination and platform implementation should consider a pure/workflow/
+platform responsibility split. Workflow code may consume abstract Services and
+perform I/O when executed; Layer construction is not inherently a platform adapter.
+This is a Lody convention consistent with the Service/Layer model in
+[version-matched Effect references](../../../docs/cli-effect-ts.md#version-matched-reference),
+not an upstream requirement for three directories or a fixed size threshold.
+
+Maintain a row when migration facts change: scope, prerequisites, native boundary,
+consumers, owners or acceptance evidence. Ordinary unrelated changes do not require
+ledger updates. Add independently delivered units as they emerge; split rows when
+their contracts can be accepted separately. An unfinished dependency prevents
+claiming its dependent kernel complete, even when a temporary adapter permits delivery.
+
+The ledger is manual evidence, not an automated purity proof. Nearest scoped rules,
+behavioral tests and applicable boundary guards defend completed boundaries; record
+guard gaps rather than claiming existing process checks cover all workflows. Do not
+estimate repository progress from PR counts, removed Promises or a global percentage.
+Older Effect islands remain unverified until assessed against these criteria.
+
+Keep implementation state separate from verification evidence. The kernel,
+consumer and ownership columns describe delivered boundaries; the evidence column
+and linked Note record the tested revision, environment, scenarios and limits.
+An untested platform is a verification gap, not by itself proof of unfinished
+implementation. Conversely, passing a leaf suite cannot complete its consumers.
+Update changed facts without recertifying unchanged rows on every PR.
+
+### Guidance evaluation cases
+
+Use these synthetic tasks when evaluating a guidance revision. Judge the agent's
+scope decision and proposed observable checks, not whether it repeats keywords.
+
+| Task | Expected decision and evidence |
+| --- | --- |
+| Fix a timeout in a module whose dependencies still use Promise orchestration | Deliver the fix; explain why migration is deferred without traversing and rewriting the whole dependency chain. |
+| Cancel an Effect waiting on an abort-ignoring Promise | Distinguish wait cancellation from raw work; retain the lease and test a controlled late completion. |
+| Cancel one reader of a shared producer | Preserve other leases; verify the producer remains usable and last-owner cleanup is awaited. |
+| Body and release fail together | Preserve both failures and recovery ownership through the Promise boundary; do not rely on plain squash. |
+| Extract a pure helper and collect a Stream in an existing workflow | Keep the helper ordinary; allow Effect-returning Stream operators without creating a runtime or unnecessary Service. |
+| Review a diff near a pre-existing lifecycle defect | Compare base/head, distinguish introduced breakage from baseline, and follow P0/P1 reporting rules without starting a rewrite. |
+
+These are evaluation inputs and expected outcomes, not completed independent agent
+runs. A future evaluation should record the prompt/guidance revision, resulting
+diff or findings, behavioral checks and deviations using synthetic fixtures only.
+
+This guidance revision changes no product guarantees or Specs. Document/skill checks
+verify structure and references; no independent agent-use benchmark has established
+that the guidance improves implementation quality.
+
+## Unit ledger
+
+Snapshot: main `bcb1aa8712b2d040912d735f1ae6ef2fc832ab35`, 2026-10-11.
+“Native” below records merged kernel evidence, not fresh certification on every
+platform. “Pending” is unfinished migration; “partial” names completed leaves within
+an unfinished unit. Unassessed islands and untested environments are recorded as
+evidence limits rather than mixed into the implementation status.
+Ownership describes the actual lease/Scope boundary and remaining application work.
+Pure calculation is outside this ledger. This is the known lifecycle work queue,
+not an exhaustive inventory of the repository.
+
+| Responsibility unit                                  | Actual prerequisites                                                 | Kernel                      | Consumers                            | Ownership / integration                              | Evidence and remaining work                                                                                                                                                                                                                          |
+| ---------------------------------------------------- | -------------------------------------------------------------------- | --------------------------- | ------------------------------------ | ---------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Bounded process execution and release                | Official process contracts, Node/platform backend                    | Native                      | Native and Legacy                    | Process/container scopes; daemon root pending        | [Process decision](../../implemented/architecture/2026-10-09-effect-official-process-service.md), [release recovery](../../implemented/bug-fix/2026-10-10-effect-process-release-failure.md); Windows descendant ownership still needs separate work |
+| FileLocks: local queue and cross-process lease       | FileSystem, native pid probe                                         | Native                      | Native and Legacy                    | Per-operation lease; compatibility runtime remains   | [Lock decision](../../implemented/architecture/2026-10-10-effect-file-lock-lifecycle.md); remove facade after worktree/install callers migrate                                                                                                       |
+| LocalProjects Git operations                         | Process, filesystem                                                  | Native                      | Legacy manager paths remain          | Command scopes                                       | [Git decision](../../implemented/architecture/2026-10-10-effect-local-project-git.md); manager coordination pending                                                                                                                                  |
+| WorktreeGit execution                                | Process, filesystem                                                  | Native                      | Legacy manager paths remain          | Command scopes                                       | [Execution decision](../../implemented/architecture/2026-10-10-effect-worktree-git-execution.md); mutations are a separate unit                                                                                                                      |
+| Worktree observations                                | FileLocks, WorktreeGit                                               | Native                      | Legacy observation entry remains     | Owned/borrowed lock lease                            | [Observation decision](../../implemented/architecture/2026-10-10-effect-worktree-observations.md); migration does not complete mutation/setup/GC                                                                                                     |
+| Finite local-source preparation                      | WorktreeGit, filesystem; borrows mutation lease                      | Native                      | Legacy worktree entry remains        | Caller mutation lease and temporary resources        | [Preparation decision](../../implemented/architecture/2026-10-10-effect-local-worktree-preparation.md); manager mutation coordination pending                                                                                                        |
+| Login-shell probe and shared cache                   | Process release ownership, Clock                                     | Native                      | Native entries; Legacy launchers     | Application-owned cache; probe scopes                | [Shell decision](../../implemented/architecture/2026-10-10-effect-login-shell-probe.md); launchers delete Legacy after migration                                                                                                                     |
+| Runtime credential lease / preparation control       | Platform token port, filesystem, Clock                               | Native leaves               | Legacy Session/preparation glue      | Exact credential lease; TTL/control scope            | [Credential decision](../../implemented/architecture/2026-10-10-runtime-owned-github-context.md); raw startup and complete retirement remain pending                                                                                                 |
+| Worktree mutations                                   | Locks, Git, observations, local preparation                          | Pending                     | Promise orchestration                | Mutation/replacement owner pending                   | Manager ownership and failure retention must replace Promise coordination                                                                                                                                                                            |
+| Setup scripts                                        | Process, worktree mutations; actual injected callbacks               | Pending                     | Promise orchestration                | Script/task scopes pending                           | Native process calls alone do not migrate callback orchestration                                                                                                                                                                                     |
+| Worktree GC                                          | Mutations, setup, metadata writers and active owners                 | Pending                     | Promise orchestration                | Shared cleanup owner pending                         | Must reconcile active ownership before deletion; timer replacement alone is insufficient                                                                                                                                                             |
+| Managed-runtime download/install                     | Locks, filesystem, network and extraction boundaries                 | Pending                     | Promise orchestration                | Shared-task leases pending                           | Cancellation and partial-install cleanup required                                                                                                                                                                                                    |
+| ACP startup gate kernel                              | Clock, configuration and logging                                     | Pending                     | Promise waiters/callbacks            | Admission/waiter owner pending                       | No intrinsic process prerequisite; startup callbacks are separate unfinished work                                                                                                                                                                    |
+| ACP transport and domain operations                  | Process, SDK adapter; raw request tracking                           | Pending                     | Promise requests                     | Connection/raw-work owner pending                    | Can migrate independently of worktree/install; preserve unknown steer outcome                                                                                                                                                                        |
+| AgentSession and pool                                | Worktree/startup, install, shell, gate, ACP, credential leaves       | Partial                     | Promise orchestration                | Complete instance/replacement owner pending          | Credential/preparation leaves are native; full Session cancellation is unfinished                                                                                                                                                                    |
+| Session history owner readiness                     | Third-party Repo observe/snapshot, Clock                            | Native                      | MessageHandler execution entry       | Per-request stream scope; shutdown cancellation      | [Readiness decision](2026-10-09-roost-native-runtime.md#history-owner-readiness); no body open before owner/backend readiness; Repo and document lifecycle remain pending                                                                                  |
+| History RPC precondition refusal persistence         | SQLite driver                                                       | Native                      | MessageHandler RPC callbacks         | Scoped handle per operation; FULL refusal transaction | [Readiness decision](2026-10-09-roost-native-runtime.md#history-owner-readiness); refusal survives restart until request expiry; Promise RPC dispatch lifecycle remains pending |
+| streams-crdt / loro-repo lifecycle                   | Flock persistence, published/consumed contracts; separate repo rules | Pending                     | Promise library APIs                 | Library persistence/room/reconnect scopes pending    | Verify releases/source before work; single-kernel compatibility only                                                                                                                                                                                 |
+| Workspace presence and remote generations | Published streams-crdt 0.17.0 / client 0.10.0; native tokens | Native | Product doc/bridge via one Legacy facade | CLI application registry, workspace and generation Scopes | [P5 decision](../../implemented/architecture/2026-10-12-effect-workspace-presence.md); token sharing and actual SDK release covered; P6 leases are native; upper relay integration remains pending |
+| Local presence and physical socket writer | Native local-origin source; genuine Flock SDK export; Node host turn/write/drain | Native lower writer | CLI doc/socket and room engine via one Legacy facade | Process-wide FIFO pacer and shared connection lanes; bounded release retains original owner | [P7 writer decision](../../implemented/architecture/2026-10-12-effect-local-presence-writer.md); room/LoroRepo and application integration remain pending |
+| Session active presence lease / heartbeat | Synchronous local publication, Clock; actual Turn child Scope | Native | Native Turn acquisition; MessageHandler phase/read callbacks | Per-Turn lease; Legacy analytics/application entry | [P6 decision](../../implemented/architecture/2026-10-13-effect-session-presence-leases.md); full Session/Turn/daemon and analytics ownership remain pending |
+| Streams token provider | Native credential ports, WebCrypto/fetch and Clock | Native | CLI borrowed Legacy; renderer/Machine RPC owned Legacy | CLI workspace Scope; other application consumers pending | One provider/cache for durable and presence; cancellation only releases caller lease; unresolved I/O retains recovery owner |
+| Documents, history and presence                      | Native Loro lifecycle; existing history reducer                      | Partial: workspace presence and local writer | Mixed/Promise orchestration          | Session presence leases native; document leases pending; lower writer native         | Existing islands unassessed; preserve unload-before-invalidate and existing writer/read responsibilities                                                                                                                                                                          |
+| Turn, steer, stop and finalization                   | Session owners and document/history/presence owners                  | Pending                     | Promise orchestration                | Turn tasks pending; native session presence lease integrated                    | Both dependency paths required; preserve typed stop and pending-input behavior                                                                                                                                                                       |
+| dispatch, MessageHandler and daemon integration      | Turn, delivery and document flush                                    | Pending                     | Promise orchestration                | Shell root runtime exists; broader ownership pending | Stop sessions → flush final writes → tear down documents; report external release failures                                                                                                                                                           |
+| Renderer / Electron / supervisor upper orchestration | Actual per-unit platform and sync dependencies                       | Pending        | Existing islands and process callers | Upper resource/task owners pending                   | Existing islands unassessed; process caller unification is not upper workflow completion; refine into units before delivery                                                                                                                                                       |
+
+## Delivery dependency graph
+
+Arrows mean prerequisites, not a global serial ordering. File locks, Git leaves,
+worktree observations/local preparation and the application shell cache are now
+merged foundations; subsequent units start from latest main or a new dependent branch.
+
+```mermaid
+flowchart TD
+  P["Merged process foundation"] --> F["FileSystem + FileLocks"]
+  P --> C["Scope release failure and recovery leases: #1379"]
+  C --> F
+  C --> G["LocalProjects native Git"]
+  C --> Q["WorktreeGit execution: #1389"]
+  F --> O["WorktreeObservations: #1392"]
+  Q --> O
+  Q --> B["LocalWorktreePreparation"]
+  B --> J
+  O --> J["worktree mutations / setup / GC"]
+  G --> J
+  F --> R["Runtime download / installation"]
+  C --> E["Native login-shell probe: #1397"]
+  E --> EC["Application shell-cache ownership: #1397"]
+  SG["ACP start gate kernel: Clock/config; pending"]
+  P --> A["Independent ACP transport → domain operations"]
+  J --> S["AgentSession / session pool"]
+  R --> S
+  EC --> S
+  SG --> S
+  A --> S
+  N["Merged #1385: runtime credentials / preparation TTL leaves"] --> S
+  K["Flock persistence: implemented in Lody; verify release / consumption"] --> L["streams-crdt / loro-repo Effect kernels: separate repositories"]
+  L --> D["Documents / history / presence"]
+  S --> T["Turn / steer / stop / finalization"]
+  D --> T
+  T --> H["dispatch / MessageHandler / delivery"]
+  H --> M["Daemon final integration: stop → flush → document teardown"]
+  L --> W["Renderer runtime"]
+  M --> X["Electron / supervisor upper orchestration"]
+```
+
+The file-lock native-program compatibility projection also depends on #1379;
+its kernel continues using the existing pid probe. File locks are reviewed in [#1377](https://github.com/LodyAI/Lody/pull/1377).
+Native Git validation exposed swallowed Scope release failure; the independent
+correction [#1379](https://github.com/LodyAI/Lody/pull/1379) retains recovery leases.
+LocalProjects is reviewed in [#1381](https://github.com/LodyAI/Lody/pull/1381)
+above #1379. Its kernel does not depend on FileLocks; worktree setup/GC must
+integrate both. WorktreeGit execution is reviewed in
+[#1389](https://github.com/LodyAI/Lody/pull/1389); its kernel needs the process
+foundation and filesystem, while its review base includes LocalProjects to avoid
+repeating manager changes. The native
+[worktree observation unit](../../implemented/architecture/2026-10-10-effect-worktree-observations.md)
+integrates FileLocks and WorktreeGit on a foundation containing refreshed main.
+It does not complete mutation/setup/GC ownership. #1385 is merged and supplies
+runtime credential leases and preparation TTL/control only; raw ACP/worktree
+startup and full session ownership remain unfinished.
+The finite [local-source preparation unit](../../implemented/architecture/2026-10-10-effect-local-worktree-preparation.md) depends on filesystem/Git and borrows the existing mutation lease. Its review base includes observations because their manager boundary is shared; the native kernels are independent.
+Library-side prerequisite verification: the current lockfile resolves Flock WASM 0.4.3, streams-crdt 0.17.0 and loro-repo 0.22.0. A consumed version is not proof of an Effect kernel. Verify published versions, upstream repository state/rules and current source/checkpoint contracts before library migration; earlier registry observations are not a current release guarantee.
+The seven-unit foundation stack below merged into main on 2026-10-11. Worktree
+mutations/setup/GC, runtime installation, ACP and the Loro kernels remain unfinished.
+
+The application shell cache has established CLI/Electron root runtimes. Extend
+these owners as native services enter composition rather than adding a runtime per
+service; complete unified daemon ownership and preserve two-phase shutdown. A registered temporary upstream
+adapter can unblock Lody integration, but does not mark the sync stack complete.
+Verify Flock's published and consumed versions and each repository's rules before
+library work; the initial local-checkout size/version survey is historical.
 
 ## Verification limits
 
@@ -396,10 +609,51 @@ migration to v4, is merged into main. [#1057](https://github.com/LodyAI/Lody/pul
 merged into its former base branch rather than main; [#1355](https://github.com/LodyAI/Lody/pull/1355)
 restores only these bilingual plans onto main.
 
-The remaining stack is #1355 → #1065 → #1069 → #1348. #1065 introduces the v4 process
-core directly in shared, CLI containers and ACP consumers; #1069 migrates the remaining
-CLI consumers and adds the CLI guard. #1348 migrates Electron, supervisor, shared helpers
-and the review helper and expands the guard. Every layer uses v4; the core is not first
-introduced in CLI and then relocated. Use GitHub's native stack merge workflow; it
-rebases the remaining layers after merging the bottom PR. Verify the next layer's
-base and diff before continuing.
+The former #1355 → #1065 → #1069 → #1348 stack is merged. The shared official
+process service retains Lody's bounded backend; its caller migration does not
+finish whole L0/L1 or daemon ownership. New reviews use fresh branches and actual
+dependency edges. File locks (#1377), Git leaves (#1381/#1389), worktree observations
+(#1392) and local preparation (#1394) are review units, not a claim that mutations,
+setup/GC or Session cancellation are complete.
+
+The independent [login-shell probe unit](../../implemented/architecture/2026-10-10-effect-login-shell-probe.md)
+depends on process release-failure ownership (#1379), not worktree preparation.
+Its finite probe and application-owned cache are native in #1397. CLI/Electron
+entries now own this service through their root runtime; remaining launchers use
+explicit Legacy accessors. This does not finish other daemon owners. Maintain both actual paths:
+
+```mermaid
+flowchart LR
+  P[Native process service + release ownership] --> S[Native login-shell probe]
+  S --> C[Application-owned shell cache: #1397]
+  P --> G[Git + filesystem/locks review units]
+  G --> W[Worktree setup and GC: pending]
+  C --> A[ACP startup composition: pending]
+  W --> A
+  L[Loro library lifecycle: pending] --> T[Turn: pending]
+  A --> Q[Connection and Session ownership: pending]
+  Q --> T
+```
+
+The finite probe preserves the CLI three-second pending wait while retaining
+actual failures. It does not migrate runtime downloads or the startup gate. The
+Loro library mainline remains independent; Turn waits for both actual dependency
+paths, not a global sequence of layer numbers.
+
+### Merged foundation stack
+
+The seven reviews below merged into main on 2026-10-11:
+
+```text
+main → #1379 → #1377 → #1381 → #1389 → #1392 → #1394 → #1397
+```
+
+Each PR targeted the preceding PR's head branch and contained that predecessor.
+This replaced the temporary worktree/shell integration bases. The order was a
+review and merge sequence: LocalProjects does not acquire FileLocks, the Git
+execution kernel does not require LocalProjects, and the finite shell probe
+requires process ownership rather than worktree preparation. Preserve the actual
+dependency diagrams above when planning the next units. Process acquisition error
+conversion now retains setup failure and every unresolved recovery lease. These
+PRs are merged foundations for small task-related units and the next dedicated
+migrations; this stack does not mark any subsequent daemon phase complete.
