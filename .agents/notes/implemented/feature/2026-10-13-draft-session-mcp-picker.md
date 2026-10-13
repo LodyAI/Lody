@@ -14,8 +14,8 @@ first message without offering a picker. This was an explicitly documented
 limitation in PR #141, rather than an established behavior accidentally broken.
 Passing the existing hook's menu adds first-turn selection without adding storage
 or changing dispatch.
-Behavioral tests cover selection, deselection and an empty catalog; the patched
-desktop has not been launched.
+Development verification covered selection, deselection and an empty catalog;
+the draft-owner test is not retained, and the patched desktop has not been launched.
 
 ## Previous behavior and decision
 
@@ -43,13 +43,14 @@ under the [shared contract](../../../../packages/shared/AGENTS.md#workspace-mcp-
 
 ## Verification and limits
 
-- The new first-turn selection test fails on the previous default-only behavior
-  and passes with the menu prop. It checks the actual first-turn payload after
-  selection and deselection; it verifies the added capability, not prior product intent.
-- The draft, draft-tab, input-submission and attachment-menu suites passed:
-  four files, 75 tests. The draft test substitutes the large input surface with
-  controls consuming its public contract; the draft owner, selection hook and
-  input-config builder remain real. It is not desktop end-to-end verification.
+- A temporary draft-owner test verified first-turn selection, deselection and
+  an empty catalog through a substituted input surface. It failed on the previous
+  default-only behavior and passed with the menu prop, verifying the added
+  capability rather than prior product intent. That test is not retained in this PR;
+  no automated draft-owner test remains for the new menu connection.
+- Retained draft-tab, input-submission, attachment-menu and session-action suites
+  passed after deletion: four files, 150 tests. They exercise adjacent behavior;
+  full desktop end-to-end verification remains outstanding.
 - `pnpm check` stops in shared-package type checking because the existing local
   DSH submodule does not export the required symbols:
   `DEEPSEEK_HARNESS_OFFICIAL_BASE_URL` and `isDeepSeekOfficialBaseUrl` are missing
