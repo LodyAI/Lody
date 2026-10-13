@@ -3,27 +3,37 @@
 Status: implemented
 Translation: current
 
+PR: https://github.com/LodyAI/Lody/pull/1541
+
 [中文](2026-10-13-draft-session-mcp-picker.zh.md)
 
 ## Abstract
 
-Blank child-tab drafts did not offer MCP selection before the first message,
-even when the workspace catalog contained servers. The draft already computed
-the selection and included it in the first-turn configuration, but omitted the
-menu prop when rendering the input surface. Passing the existing hook's menu
-restores the shared picker without adding storage or changing dispatch.
+Blank child-tab drafts previously used workspace-default MCP selection for the
+first message without offering a picker. This was an explicitly documented
+limitation in PR #141, rather than an established behavior accidentally broken.
+Passing the existing hook's menu adds first-turn selection without adding storage
+or changing dispatch.
 Behavioral tests cover selection, deselection and an empty catalog; the patched
 desktop has not been launched.
 
-## Cause and decision
+## Previous behavior and decision
 
 `DraftSessionChatInterface` called `useSessionMcpSelection`, while its
 `SessionChatInputArea` received no `mcp` prop. After promotion, the persisted
 session surface passed that prop, explaining why selection appeared after a
 message. Chat Landing already passed it before sending. The shared composer
 [contract](../../../../packages/components/src/components/chat/AGENTS.md)
-places per-turn selection in the "+" menu and hides it for an empty catalog;
-the draft's omission was an implementation gap.
+places per-turn selection in the "+" menu and hides it for an empty catalog.
+It does not establish that the previous draft behavior violated reviewed intent.
+
+[PR #141](https://github.com/LodyAI/Lody/pull/141) introduced the hook while fixing
+draft promotion and first-message acceptance. Its comment explicitly said the
+draft had no picker "yet", so the first turn used workspace defaults, matching
+what the promoted composer resolved from an empty session document. Defaults are
+only servers with `enabledByDefault: true`, not every catalog entry or the parent's
+selection. This change extends that known limitation; it does not restore a lost
+picker. The original bug classification is corrected here.
 
 Reuse `mcpSelection.menu` and the existing first-turn builder. Waiting for a
 message prevents selection for that first turn. Adding draft/session storage
@@ -33,9 +43,9 @@ under the [shared contract](../../../../packages/shared/AGENTS.md#workspace-mcp-
 
 ## Verification and limits
 
-- Before the fix, `draft-session-chat-interface.test.tsx` failed because the
-  configured server had no selectable control. The same test passes after the fix
-  and checks the actual first-turn payload after selection and deselection.
+- The new first-turn selection test fails on the previous default-only behavior
+  and passes with the menu prop. It checks the actual first-turn payload after
+  selection and deselection; it verifies the added capability, not prior product intent.
 - The draft, draft-tab, input-submission and attachment-menu suites passed:
   four files, 75 tests. The draft test substitutes the large input surface with
   controls consuming its public contract; the draft owner, selection hook and
