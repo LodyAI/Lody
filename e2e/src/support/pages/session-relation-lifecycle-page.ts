@@ -395,8 +395,9 @@ export class SessionRelationLifecyclePage {
               (prefix[0] === 'm' || prefix[0] === 'e');
             if (!isFullMetadataScan || control.released) return originalScan(...args);
             control.blockedScans += 1;
-            return gate
-              .then(() => originalScan(...args))
+            const result = originalScan(...args);
+            return Promise.resolve(result)
+              .then((rows) => gate.then(() => rows))
               .finally(() => {
                 control.completedScans += 1;
               });
