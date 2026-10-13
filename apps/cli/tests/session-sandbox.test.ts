@@ -947,3 +947,117 @@ describe('cgroup failure ownership', () => {
     );
   }
 });
+
+it('shares a failed cleanup receipt and retries retained resources only through recoverCleanup', async () => {
+  const table = new FakeProcessTable('darwin');
+  let denied = true;
+  const sandbox = await createSessionSandboxFactory({
+    logger: createSilentLogger(),
+    deps: {
+      platform: 'darwin',
+      spawnProcess: table.api.spawn,
+      killPid: (pid, signal) => {
+        if (signal !== 0 && denied)
+          throw Object.assign(new Error('signal failed'), { code: 'EIO' });
+        table.api.kill(pid, signal ?? 'SIGTERM');
+      },
+      configureExecutionProcess: async () => {},
+    },
+  })('shared-cleanup' as SessionId);
+  const child = await sandbox.spawn('agent', [], {});
+  const first = sandbox.cleanup();
+  const second = sandbox.cleanup();
+  expect(second).toBe(first);
+  await expect(first).rejects.toBeInstanceOf(ProcessReleaseFailed);
+  expect(table.isAlive(child.child.pid!)).toBe(true);
+  denied = false;
+  expect(sandbox.cleanup()).toBe(first);
+  await expect(sandbox.cleanup()).rejects.toBeInstanceOf(ProcessReleaseFailed);
+  await sandbox.recoverCleanup!();
+  expect(table.isAlive(child.child.pid!)).toBe(false);
+});
+
+it('starts a verified fresh generation without inheriting failed journal uncertainty', async () => {
+  const table = new FakeProcessTable('darwin');
+  const sandbox = await createSessionSandboxFactory({
+    logger: createSilentLogger(),
+    deps: {
+      platform: 'darwin',
+      spawnProcess: table.api.spawn,
+      killPid: (pid, signal) => table.api.kill(pid, signal ?? 'SIGTERM'),
+      configureExecutionProcess: async () => {},
+    },
+  })('journal-recovery-generation' as SessionId);
+  const detach = await sandbox.watchRecoveryResources!((identity) => {
+    if (!identity.complete && identity.roots.length) throw new Error('journal outage');
+  });
+  await expect(sandbox.spawn('agent', [], {})).rejects.toThrow();
+  detach();
+  await sandbox.cleanup();
+  const saved: Array<{ roots: readonly number[]; complete: boolean }> = [];
+  const detachFresh = await sandbox.watchRecoveryResources!((identity) => saved.push(identity));
+  try {
+    const next = await sandbox.spawn('replacement', [], {});
+    expect(saved.at(-1)).toEqual({ roots: [next.child.pid], complete: true });
+    expect(table.isAlive(1000)).toBe(false);
+  } finally {
+    detachFresh();
+    await sandbox.cleanup();
+  }
+});
+
+it('durably fences incomplete and concurrent spawns before roots can be proven complete', async () => {
+  const table = new FakeProcessTable('darwin');
+  let signalConfigured!: () => void;
+  const configured = new Promise<void>((resolve) => {
+    signalConfigured = resolve;
+  });
+  let releaseConfiguration!: () => void;
+  const configuration = new Promise<void>((resolve) => {
+    releaseConfiguration = resolve;
+  });
+  let configuredCount = 0;
+  let signalBothConfigured!: () => void;
+  const bothConfigured = new Promise<void>((resolve) => {
+    signalBothConfigured = resolve;
+  });
+  const saved: Array<{ roots: readonly number[]; complete: boolean }> = [];
+  const sandbox = await createSessionSandboxFactory({
+    logger: createSilentLogger(),
+    deps: {
+      platform: 'darwin',
+      spawnProcess: table.api.spawn,
+      killPid: (pid, signal) => table.api.kill(pid, signal ?? 'SIGTERM'),
+      configureExecutionProcess: async () => {
+        if (++configuredCount === 1) signalConfigured();
+        else signalBothConfigured();
+        await configuration;
+      },
+    },
+  })('spawn-fence' as SessionId);
+  const detach = await sandbox.watchRecoveryResources!((identity) => saved.push(identity));
+  try {
+    const spawning = sandbox.spawn('terminal', [], {});
+    await configured;
+    expect(saved.at(-1)).toEqual({ roots: [1000], complete: false });
+    const secondSpawn = sandbox.spawn('other-terminal', [], {});
+    await bothConfigured;
+    expect(saved.at(-1)).toEqual({ roots: [1000, 1001], complete: false });
+    // Simulate reopen at the acquisition fence: even an empty process table
+    // cannot turn incomplete identity into proof of release.
+    const { provesResourcesGone } = await import('../src/orchestration/inbox/recovery');
+    expect(
+      provesResourcesGone(
+        { platform: 'darwin', ...saved.at(-1)! },
+        { sampledAtMs: 0, memoryKind: 'rss-sum', warnings: [], entries: [] }
+      )
+    ).toBe(false);
+    releaseConfiguration();
+    await Promise.all([spawning, secondSpawn]);
+    expect(saved.at(-1)).toEqual({ roots: [1000, 1001], complete: true });
+  } finally {
+    releaseConfiguration();
+    detach();
+    await sandbox.cleanup();
+  }
+});

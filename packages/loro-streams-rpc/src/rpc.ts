@@ -532,6 +532,8 @@ export const LoroSessionCancelRpcRequestSchema = BaseRpcRequestSchema.extend({
     .object({
       sessionId: SessionIdSchema,
       turnId: z.string().trim().min(1),
+      cancelId: z.string().uuid().optional(),
+      pauseInbox: z.boolean().optional(),
       subagentTaskId: z.string().trim().min(1).optional(),
     })
     .strict(),
@@ -607,6 +609,7 @@ export const LoroSessionDispatchTurnRpcRequestSchema = BaseRpcRequestSchema.exte
       userTurnId: z.string().trim().min(1),
       userId: z.string().trim().min(1),
       timestamp: z.string().trim().min(1),
+      inputOrigin: z.enum(['human', 'agent']).optional(),
       // Opaque at the transport layer; the server normalizes it with
       // `normalizeSessionTurnInputConfig` before handing it to the CLI, the
       // same guard used for turn input configs read from CRDT history.
@@ -2992,6 +2995,8 @@ export class LoroStreamsMachineRpcClient {
     turnId: string;
     subagentTaskId?: string;
     timeoutMs?: number;
+    cancelId?: string;
+    pauseInbox?: boolean;
   }): Promise<SessionCancelResponse | null> {
     const result = await this.sendRequest({
       method: 'session/cancel',
@@ -3000,6 +3005,8 @@ export class LoroStreamsMachineRpcClient {
         sessionId: options.sessionId,
         turnId: options.turnId,
         subagentTaskId: options.subagentTaskId,
+        ...(options.cancelId ? { cancelId: options.cancelId } : {}),
+        ...(options.pauseInbox === undefined ? {} : { pauseInbox: options.pauseInbox }),
       },
     });
     return result as SessionCancelResponse | null;
@@ -3115,6 +3122,7 @@ export class LoroStreamsMachineRpcClient {
     userTurnId: string;
     userId: string;
     timestamp: string;
+    inputOrigin?: 'human' | 'agent';
     inputConfig: SessionTurnInputConfig;
     timeoutMs?: number;
   }): Promise<SessionDispatchTurnResponse | null> {
@@ -3126,6 +3134,7 @@ export class LoroStreamsMachineRpcClient {
         userTurnId: options.userTurnId,
         userId: options.userId,
         timestamp: options.timestamp,
+        inputOrigin: options.inputOrigin,
         inputConfig: options.inputConfig,
       },
     })) as SessionDispatchTurnResponse | null;
@@ -3660,6 +3669,7 @@ export class LoroStreamsMachineRpcClient {
             userTurnId: string;
             userId: string;
             timestamp: string;
+            inputOrigin?: 'human' | 'agent';
             inputConfig: SessionTurnInputConfig;
           };
         }

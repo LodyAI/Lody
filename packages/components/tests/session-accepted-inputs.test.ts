@@ -14,7 +14,7 @@ import { createAcceptedSessionInputs, SessionInputNotSentError } from '../src/li
 import { createSessionInputStorage } from '../src/lib/session-input-storage';
 import { createSessionSendResources } from '../src/lib/session-send-resources';
 import type { PendingSessionSend } from '../src/lib/session-pending-sends';
-import type { SessionHistory, SessionId, SessionInputBlock } from '@lody/shared';
+import type { SessionHistory, SessionId, SessionInputBlock, SessionMeta } from '@lody/shared';
 import type { SessionInputAcceptanceResult, SessionTurn } from '@lody/shared/session-data';
 
 const cleanup: (() => Promise<void>)[] = [];
@@ -76,6 +76,8 @@ function harness(options: {
 
 async function workspaceHarness(options: {
   accept(entry: SessionTurn, owner: ReturnType<typeof createLoroSessionData>): Promise<SessionInputAcceptanceResult>;
+  beforeAcquire?: () => Promise<void>;
+  newSession?: boolean;
   leaseQueued?: () => void;
   queuePublished?: () => void;
 }) {
@@ -95,7 +97,7 @@ async function workspaceHarness(options: {
   const repo = await LoroRepo.create({});
   const ownerDoc = new LoroDoc();
   const owner = createLoroSessionData({ sessionId, doc: ownerDoc, writer: createHistoryWriter(ownerDoc) });
-  await repo.upsertDocMeta(getSessionRoomId(sessionId), { id: sessionId, machineId: input.targetMachineId, historyBackend: 'roost', userId: 'source-user' });
+  if (!options.newSession) await repo.upsertDocMeta(getSessionRoomId(sessionId), { id: sessionId, machineId: input.targetMachineId, historyBackend: 'roost', userId: 'source-user' });
   await repo.upsertDocMeta(getMachineRoomId(input.targetMachineId!), { protocolCapabilities: CURRENT_MACHINE_PROTOCOL_CAPABILITIES });
   const handle = await repo.openPersistedDoc(getSessionRoomId(sessionId));
   const conversation = createConversationSession(handle.doc, { sessionId, backendKind: 'roost', createSessionData: () => ({
@@ -105,10 +107,10 @@ async function workspaceHarness(options: {
       lookup: async entry => (await owner.history.readTurn(entry.id)).state === 'ready' ? { status: 'accepted', turnId: entry.id, active: true } : { status: 'unobserved' },
     },
   }) });
-  const store = { sessionData: conversation.sessionData, history: conversation.history, setState: (change: never) => conversation.mirror.setState(change), waitUntilSynced: async () => {} };
+  const store = { sessionData: conversation.sessionData, history: conversation.history, getState: () => conversation.mirror.getState(), setState: (change: never) => conversation.mirror.setState(change), waitUntilSynced: async () => {} };
   const delivered: string[] = [];
   const makeRuntime = () => {
-    const resources = createSessionSendResources({ acquire: async () => store as never, releaseRef: () => {} });
+    const resources = createSessionSendResources({ acquire: async () => { await options.beforeAcquire?.(); return store as never; }, releaseRef: () => {} });
     const writer = createDirectWorkspaceWriter({ repo, acquireSessionStore: async () => store as never, releaseSessionStoreRef: () => {}, acquirePreviewVisualCommentStore: async () => { throw new Error('unused'); }, releasePreviewVisualCommentStoreRef: () => {} });
     const enqueueQueue = writer.enqueueSessionMessage;
     writer.enqueueSessionMessage = async (...args) => { await enqueueQueue(...args); options.queuePublished?.(); };
@@ -348,6 +350,36 @@ describe('locally accepted Roost input', () => {
     expect((await h.storage.list()).map(row => row.id)).toEqual(['first', 'second']);
   });
 
+  it('admits a new conversation before store acquisition and records its human receipt before owner history', async () => {
+    const entered = gate(), release = gate(), accepting = gate(), write = gate();
+    const fixture = await workspaceHarness({
+      newSession: true,
+      beforeAcquire: async () => { entered.resolve(); await release.promise; },
+      accept: async (entry, owner) => {
+        accepting.resolve(); await write.promise;
+        await owner.commands.appendTurn(entry);
+        return { status: 'accepted', turnId: entry.id, active: true };
+      },
+    });
+    const { input, sessionId, conversation, owner, repo } = fixture;
+    const { runtime, pending } = fixture.makeRuntime();
+    const creation = { id: sessionId, machineId: input.targetMachineId, historyBackend: 'roost', userId: 'source-user' } as SessionMeta;
+    const admission = acceptSessionUserTurn(runtime, sessionId, input.entry, { kind: 'dispatch' }, creation);
+    expect(await Promise.race([admission.then(() => 'admitted'), entered.promise.then(() => 'blocked')])).toBe('admitted');
+    expect(pending.getSnapshot()).toMatchObject([{ id: input.id, entry: input.entry }]);
+    expect((await repo.getDocMeta(getSessionRoomId(sessionId)))?.meta).toMatchObject(creation);
+    await entered.promise;
+    expect(conversation.mirror.getState().humanInputReceipts).toEqual({});
+    expect(await owner.history.count()).toBe(0);
+    release.resolve(); await accepting.promise;
+    expect(conversation.mirror.getState().humanInputReceipts).toEqual({ [input.id]: { userId: 'source-user' } });
+    expect(await owner.history.count()).toBe(0);
+    write.resolve();
+    await when(pending, () => pending.getSnapshot().length === 0);
+    expect((await owner.history.readAll()).map(entry => entry.id)).toEqual([input.id]);
+    expect(fixture.delivered).toEqual([input.id]);
+  });
+
   it.each(['image', 'file'] as const)('accepts already prepared %s content through the shared history input parser', async kind => {
     const fixture = await workspaceHarness({ accept: async (entry, owner) => {
       await owner.commands.appendTurn(entry);
@@ -428,6 +460,7 @@ describe('locally accepted Roost input', () => {
     if (twoWindows) await b.pending.resume();
     await acceptSessionUserTurn(a.runtime, sessionId, input.entry, { kind: 'dispatch' });
     await entered.promise;
+    expect(conversation.mirror.getState().humanInputReceipts).toEqual({ [input.id]: { userId: 'source-user' } });
     if (twoWindows) expect(b.pending.getSnapshot()).toEqual([]);
     const later = send('second');
     await acceptSessionUserTurn(b.runtime, sessionId, later.entry, { kind: 'queue' }, undefined, { userTurnId: later.id, task: 'second', timestamp: later.entry.timestamp });
@@ -438,6 +471,7 @@ describe('locally accepted Roost input', () => {
     release.resolve(); await published.promise;
     expect((await owner.history.readDirectory(0, 10)).map(row => row.turnId)).toEqual(['first']);
     expect(conversation.mirror.getState().mq?.map(row => row.userTurnId)).toEqual(['second']);
+    expect(conversation.mirror.getState().humanInputReceipts).toEqual({ first: { userId: 'source-user' }, second: { userId: 'source-user' } });
     expect((await repo.getDocMeta(getSessionRoomId(sessionId)))?.meta).toMatchObject({ latestUserMsgId: 'first' });
   });
 });

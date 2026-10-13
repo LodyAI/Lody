@@ -100,6 +100,7 @@ function fixture() {
       return {
         sessionData: session.sessionData,
         getState: () => session.mirror.getState(),
+        setState: session.mirror.setState.bind(session.mirror),
         waitUntilSynced: async () => {},
       } as never;
     },

@@ -40,6 +40,7 @@ export * from './history-import';
 export { applyHistoryAction, historyActionTarget, type HistoryAction } from './history-actions';
 
 export {
+  findProgressMessageId,
   getOperationProgressTurnId,
   getOperationProgressTargetKey,
   buildOperationProgressContent,

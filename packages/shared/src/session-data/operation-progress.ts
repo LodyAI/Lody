@@ -5,7 +5,8 @@ import type {
   OperationProgressStatus,
 } from '../session-orchestration';
 import type { SessionId } from '../ids';
-import type { SessionEntry } from './domain';
+import type { SessionEntry, SessionTurn } from './domain';
+import { MessageContentSchema } from '../message-schemas';
 export type OperationProgressStatusByTarget = ReadonlyMap<string, OperationProgressStatus>;
 
 export const getOperationProgressTurnId = (
@@ -163,8 +164,11 @@ export function planOperationProgress(
 }
 
 export function findProgressMessageId(
-  history: SessionEntry[],
-  operation: StoredLodyOperation
+  history: readonly SessionTurn[],
+  operation: Pick<
+    StoredLodyOperation,
+    'requesterSessionId' | 'operationId' | 'kind' | 'items' | 'completion'
+  >
 ): string | undefined {
   if (operation.kind !== 'session_create' && operation.kind !== 'session_create_many') {
     return undefined;
@@ -175,7 +179,11 @@ export function findProgressMessageId(
   );
   const progress = history
     .find((entry) => entry.id === progressMessageId && entry.role === 'system')
-    ?.items?.find(
+    ?.items?.flatMap((item) => {
+      const parsed = MessageContentSchema.safeParse(item);
+      return parsed.success ? [parsed.data] : [];
+    })
+    .find(
       (item) => item.type === 'operation_progress' && item.operationId === operation.operationId
     );
   if (progress?.type !== 'operation_progress') return undefined;
@@ -230,8 +238,6 @@ export function planOperationCompletion(
             if (item.type !== 'operation_completion' || item.deliveryId !== desired.deliveryId)
               return item;
             const next = progressMessageId ? { ...item, progressMessageId } : { ...item };
-            if (desired.continuation) next.continuation = desired.continuation;
-            else delete next.continuation;
             return next;
           }),
         }

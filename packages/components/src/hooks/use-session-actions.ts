@@ -24,6 +24,7 @@ import {
   getMachineFlockDeleteLocalProjectIds,
   getMachineFlockLocalProjects,
   getSessionRoomId,
+  getSessionCancelRequestMarker,
   machineFlockKeys,
   SessionStatusFactory,
   getLocalProjectHistoryProviderKey,
@@ -38,13 +39,18 @@ import {
   sanitizeMessageTextSpans,
   machineSupportsProtocolCapability,
   MACHINE_PROTOCOL_CAPABILITIES,
+  OPERATION_INBOX_PROTOCOL_VERSION,
 } from '@lody/shared';
 import { useAtomValue, useSetAtom, useStore } from 'jotai';
 import { usePostHog } from '@posthog/react';
 // Default import: `debug` is CJS. Named `{ debug }` breaks Vite 8 / TanStack
 // module-runner interop used by site-docs SSR (UNEXPECTED named-export error).
 import debug from 'debug';
-import { activeWorkspaceRuntimeAtom, type WorkspaceRuntime } from '@/atoms/runtime';
+import {
+  activeWorkspaceRuntimeAtom,
+  type SessionDocDraft,
+  type WorkspaceRuntime,
+} from '@/atoms/runtime';
 import {
   clearSessionRunConfigDraftsAtom,
   sessionRunConfigDraftAccountAtom,
@@ -497,10 +503,22 @@ export function useSessionActions(): SessionActions {
       if (isLoroRepoDocDeleted(existing)) return;
       const meta = existing?.meta as SessionMeta | undefined;
       const machineId = meta?.machineId;
+      const machine = machineId
+        ? await runtime.repo.getDocMeta(getMachineRoomId(machineId))
+        : undefined;
+      const supportsInbox = machineSupportsProtocolCapability(
+        machine?.meta,
+        MACHINE_PROTOCOL_CAPABILITIES.operationInbox,
+        OPERATION_INBOX_PROTOCOL_VERSION
+      );
+      const cancelId = supportsInbox ? crypto.randomUUID() : undefined;
       if (machineId) {
-        // Fast-path RPC is intentionally redundant with the durable meta fallback below.
+        // RPC and the durable control request share an identity, even if either arrives late.
         void runtime
-          .requestSessionCancel(machineId, sessionId, turnId, { timeoutMs: 2_000 })
+          .requestSessionCancel(machineId, sessionId, turnId, {
+            timeoutMs: 2_000,
+            ...(cancelId ? { cancelId } : {}),
+          })
           .then((response) => {
             if (response && !response.success) {
               log('session cancel rpc failed for %s/%s: %s', sessionId, turnId, response.error);
@@ -510,9 +528,16 @@ export function useSessionActions(): SessionActions {
             log('session cancel rpc threw for %s/%s: %o', sessionId, turnId, error);
           });
       }
+      if (cancelId) {
+        await runtime.sendResources.withSessionStore(sessionId, (sessionStore) => {
+          sessionStore.setState((draft: SessionDocDraft) => {
+            draft.cancelRequest = { id: cancelId, turnId };
+          });
+        });
+        await runtime.repo.flush();
+      }
       await runtime.writer.upsertDocMeta(roomId, {
-        // Stop targets the assistant turn currently on screen, not the originating user turn.
-        lastCanceledTurn: turnId,
+        lastCanceledTurn: cancelId ? getSessionCancelRequestMarker(cancelId) : turnId,
       } as Partial<SessionMeta>);
     },
     [runtime]

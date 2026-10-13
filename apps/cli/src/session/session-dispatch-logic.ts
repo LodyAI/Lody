@@ -18,6 +18,8 @@ import {
   resolveSessionHistoryStatus,
   getPendingUserTurnActivationId,
   hasPendingUserTurnActivation,
+  getSessionCancelRequestMarker,
+  isSessionCancelRequestMarker,
   type MachineId,
   type SessionHistoryInput,
   type SessionInputBlock,
@@ -90,8 +92,16 @@ export type DispatchAction =
   | { type: 'dispatch'; mode: 'create' | 'continue'; turn: SessionHistoryInput };
 
 export type CancelAction =
-  | { type: 'noop'; reason: 'not-owned' | 'archived' | 'no-cancel-turn' | 'already-seen' }
-  | { type: 'cancel'; turnId: string };
+  | {
+      type: 'noop';
+      reason:
+        | 'not-owned'
+        | 'archived'
+        | 'no-cancel-turn'
+        | 'already-seen'
+        | 'awaiting-cancel-request';
+    }
+  | { type: 'cancel'; turnId: string; cancelId?: string };
 
 export type DispatchTurnInput = {
   inputBlocks: SessionInputBlock[];
@@ -224,12 +234,14 @@ export function resolveSessionDispatchAction(
  * Given cancel-related state, determine whether to send a cancel request.
  *
  * The web client writes `meta.lastCanceledTurn` to request cancellation.
- * This function deduplicates by comparing against `lastSeenCancelTurn`.
+ * New markers name a control-document request; legacy values name a turn.
+ * Metadata arriving first must wait for the matching control payload.
  */
 export function resolveSessionCancelAction(
   meta: SessionMeta | undefined,
   lastSeenCancelTurn: string | undefined,
-  machineId: MachineId
+  machineId: MachineId,
+  cancelRequest?: { id: string; turnId: string }
 ): CancelAction {
   if (!meta || meta.machineId !== machineId) {
     return { type: 'noop', reason: 'not-owned' };
@@ -246,6 +258,18 @@ export function resolveSessionCancelAction(
     return { type: 'noop', reason: 'already-seen' };
   }
 
+  if (isSessionCancelRequestMarker(lastCanceledTurn)) {
+    if (
+      typeof cancelRequest?.id !== 'string' ||
+      !cancelRequest.id ||
+      typeof cancelRequest.turnId !== 'string' ||
+      !cancelRequest.turnId ||
+      getSessionCancelRequestMarker(cancelRequest.id) !== lastCanceledTurn
+    ) {
+      return { type: 'noop', reason: 'awaiting-cancel-request' };
+    }
+    return { type: 'cancel', turnId: cancelRequest.turnId, cancelId: cancelRequest.id };
+  }
   return { type: 'cancel', turnId: lastCanceledTurn };
 }
 

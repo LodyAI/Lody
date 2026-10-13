@@ -3,6 +3,7 @@
 Status: proposed
 Type: architecture
 Translation: current
+PR: https://github.com/LodyAI/Lody/pull/1546
 
 [中文](2026-10-13-backend-independent-send-acceptance.zh.md)
 
@@ -42,6 +43,10 @@ ready Roost input and final attachment references.
    content, input configuration and delivery intent. New routing metadata commits
    locally before the conversation can acquire its first history store. The row
    appears before owner work completes; local storage finishes in the background.
+   Routing preparation does not acquire a history store. Background delivery
+   commits the trusted `humanInputReceipts` control record before owner acceptance,
+   as ordinary Loro writes and control queues do before activation. Receipt lookup
+   remains read-only; slow store acquisition does not hold up local admission.
 2. Account/workspace-scoped IndexedDB retains ready input in admission order.
    Saving new input applies `parseHistoryWrite` to its entry before storage
    validation, so generated file/image data with `text: undefined` behaves like
@@ -124,16 +129,19 @@ package files match that download. The
 retains the separation of local admission, synchronization and execution; it has
 no new approval claim.
 
-Final validation passed `pnpm check`: 11,724 Vitest package cases plus scripts and
+Final validation passed `pnpm check`: 11,760 Vitest package cases plus scripts and
 Electron tests, types, lint, i18n, and public/local/Effect boundary checks. A
-31-case focused run covers the final attachment fixes, including preparation
-failure, retry, owner refusal and same-ID retry. It asserts exactly one owner
-entry, no duplicate upload and cleared IndexedDB, and covers direct-ready image
-and file input. Each regression fails when its corresponding fix is withdrawn.
+43-case focused run covers attachment preparation failure, retry, owner refusal
+and same-ID retry. It asserts exactly one owner entry, no duplicate upload and
+cleared IndexedDB, and covers direct-ready image and file input. The attachment
+regressions fail when their corresponding fix is withdrawn. Integration cases
+also verify that new-conversation admission does not await store acquisition and
+that human-input provenance precedes owner acceptance and control-queue writes.
 CLI published-bundle and Storybook builds, and the seven-case immutable receipt
 suite with pinned SQLite, passed before the final attachment changes.
 
-Before those final attachment changes, the macOS arm64 packaged Cloud app passed
+Before the final attachment changes and operation-inbox integration, the macOS
+arm64 packaged Cloud app passed
 its embedded CLI/native smoke check. Device tests used the existing authenticated
 Nightly profile and covered:
 
@@ -157,5 +165,5 @@ worker could acknowledge the input during the observation. These are single-run
 ordering checks, not a performance benchmark. These checks exercised an ad-hoc
 signed local artifact with updates disabled; notarization, publication and the
 update flow were not tested.
-The final attachment paths were verified by the deterministic integration cases
-above; the packaged device tests were not rerun for them.
+The final attachment paths and operation-inbox integration were verified by the
+deterministic cases above; the packaged device tests were not rerun for them.

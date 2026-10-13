@@ -19,12 +19,15 @@ import { createRoot, type Root } from 'react-dom/client';
 import { Provider, createStore } from 'jotai';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { LoroRepo } from 'loro-repo';
+import { LoroDoc } from 'loro-crdt';
 import {
   FREE_SESSION_LIMIT_PER_WORKSPACE,
   SESSION_DOC_PREFIX,
   getMachineRoomId,
   CURRENT_MACHINE_PROTOCOL_CAPABILITIES,
   getSessionRoomId,
+  getSessionCancelRequestMarker,
+  createSessionControlPlaneMirror,
   isLoroRepoDocDeleted,
   machineFlockKeys,
   type LocalProjectId,
@@ -561,6 +564,117 @@ describe('useSessionActions', () => {
     return actions;
   };
 
+  it('uses released Stop wire fields and turn marker when the target has no Inbox capability', async () => {
+    const sessionId = 'legacy-stop' as SessionId;
+    const metaRepo = createSessionMetaRepo([
+      { id: sessionId, machineId: 'old-machine', userId: 'user-1' } as SessionMeta,
+    ]);
+    const runtime = createRuntime({ repo: metaRepo.repo });
+    const received: unknown[] = [];
+    runtime.requestSessionCancel = async (_machine, _session, turnId, options) => {
+      expect(Object.keys(options ?? {})).toEqual(['timeoutMs']);
+      received.push(turnId);
+      return { success: true } as never;
+    };
+    const actions = await renderActions(runtime);
+    await actions.requestSessionCancel(sessionId, 'assistant-legacy');
+    expect(received).toEqual(['assistant-legacy']);
+    expect(metaRepo.getSession(sessionId)?.lastCanceledTurn).toBe('assistant-legacy');
+  });
+
+  it('persists Stop details before publishing only its marker, and reuses the request on RPC', async () => {
+    const sessionId = 'session-stop-control' as SessionId;
+    const metaRepo = createSessionMetaRepo([
+      {
+        id: sessionId,
+        machineId: 'machine-1',
+        userId: 'user-1',
+        createdAt: '2026-10-13T00:00:00.000Z',
+        cliType: 'builtin',
+        agentType: 'codex',
+      },
+    ]);
+    metaRepo.setMeta(getMachineRoomId('machine-1'), {
+      protocolCapabilities: CURRENT_MACHINE_PROTOCOL_CAPABILITIES,
+    });
+    const doc = new LoroDoc();
+    const control = createSessionControlPlaneMirror({
+      doc,
+      initialState: { session: { id: sessionId } },
+    });
+    const runtime = createRuntime({ repo: metaRepo.repo });
+    runtime.withSessionStore = async (_id, fn) =>
+      fn({ ...control, sessionData: sessionDataOver([]) } as never);
+    const flushEntered = createDeferred();
+    const durable = createDeferred();
+    let holdFlush = true;
+    runtime.repo.flush = async () => {
+      if (holdFlush) {
+        flushEntered.resolve();
+        await durable.promise;
+      }
+    };
+    const rpcReceipts: { turnId: string; cancelId?: string }[] = [];
+    runtime.requestSessionCancel = async (_machine, _session, turnId, options) => {
+      rpcReceipts.push({ turnId, cancelId: options?.cancelId });
+      return undefined; // RPC timeout/loss still leaves a complete durable request.
+    };
+    try {
+      const actions = await renderActions(runtime);
+      const stopped = actions.requestSessionCancel(sessionId, 'assistant-stop');
+      await flushEntered.promise;
+      expect(control.getState().cancelRequest?.turnId).toBe('assistant-stop');
+      expect(metaRepo.getSession(sessionId)?.lastCanceledTurn).toBeUndefined();
+      expect(rpcReceipts).toEqual([
+        {
+          turnId: 'assistant-stop',
+          cancelId: control.getState().cancelRequest!.id,
+        },
+      ]);
+      holdFlush = false;
+      durable.resolve();
+      await stopped;
+      const first = control.getState().cancelRequest!;
+      expect(metaRepo.getSession(sessionId)?.lastCanceledTurn).toBe(
+        getSessionCancelRequestMarker(first.id)
+      );
+      expect(Object.keys(metaRepo.getSession(sessionId)!)).toEqual([
+        'id',
+        'machineId',
+        'userId',
+        'createdAt',
+        'cliType',
+        'agentType',
+        'lastCanceledTurn',
+      ]);
+      expect(rpcReceipts).toEqual([{ turnId: 'assistant-stop', cancelId: first.id }]);
+
+      await actions.requestSessionCancel(sessionId, 'assistant-stop');
+      const second = control.getState().cancelRequest!;
+      expect(second.id).not.toBe(first.id);
+      expect(metaRepo.getSession(sessionId)?.lastCanceledTurn).toBe(
+        getSessionCancelRequestMarker(second.id)
+      );
+      const reopened = new LoroDoc();
+      reopened.import(doc.export({ mode: 'snapshot' }));
+      const reopenedControl = createSessionControlPlaneMirror({
+        doc: reopened,
+        initialState: { session: { id: sessionId } },
+      });
+      try {
+        expect(reopenedControl.getState().cancelRequest).toMatchObject({
+          id: second.id,
+          turnId: 'assistant-stop',
+        });
+      } finally {
+        reopenedControl.dispose();
+      }
+    } finally {
+      durable.resolve();
+      control.dispose();
+    }
+  });
+
   it('stops and restores the whole authoritative tree from a leaf, including hidden descendants', async () => {
     const tree = createContainmentSessions('collaboration', false);
     const unrelated = { ...tree.rootSession, id: 'unrelated' as SessionId };
@@ -832,7 +946,8 @@ describe('useSessionActions', () => {
         },
       },
     ];
-    const setState = vi.fn();
+    const control: { humanInputReceipts?: Record<string, { userId: string }> } = {};
+    const setState = (update: (draft: typeof control) => void) => update(control);
     const waitUntilSynced = vi.fn(async () => undefined);
     const upsertDocMeta = vi.fn(() => metaWrite.promise);
     const requestSessionDispatchTurn = vi.fn(async () => ({
@@ -871,7 +986,7 @@ describe('useSessionActions', () => {
     expect(upsertDocMeta).toHaveBeenCalledWith(getSessionRoomId(sessionId), {
       latestUserMsgId: userTurnId,
     });
-    expect(setState).not.toHaveBeenCalled();
+    expect(control.humanInputReceipts?.[userTurnId]).toEqual({ userId: 'user-1' });
     expect(waitUntilSynced).toHaveBeenCalledTimes(1);
 
     metaWrite.resolve();

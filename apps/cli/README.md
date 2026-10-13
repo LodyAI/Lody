@@ -14,6 +14,14 @@ Install the CLI package:
 npm install -g lody@next
 ```
 
+## Development type checking
+
+`tsconfig.json` includes source and tests so editor language servers resolve the
+CLI's `@/*` imports in both. `pnpm typecheck` uses `tsconfig.typecheck.json` to
+retain the production-only check. `tsconfig.tests.json` remains the explicit
+test-inclusive check; existing test typing errors are not part of the production
+check.
+
 ## Daemon upgrades and autostart
 
 Remote upgrades install globally using the daemon's npm environment, resolve the

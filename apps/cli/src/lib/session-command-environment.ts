@@ -21,7 +21,15 @@ export interface SessionCommandHost {
     sessionId: SessionId,
     turnId?: string
   ): Promise<{ success: boolean; error?: string }>;
-  dispatchSession(sessionId: SessionId): Promise<void>;
+  dispatchSession(
+    sessionId: SessionId,
+    input?: {
+      inputId: string;
+      userId: string;
+      config: import('@lody/shared').SessionTurnInputConfig;
+      inputOrigin: 'human' | 'agent';
+    }
+  ): Promise<void>;
 }
 
 /** A daemon-owned workspace, never a second replica opened by an MCP process. */

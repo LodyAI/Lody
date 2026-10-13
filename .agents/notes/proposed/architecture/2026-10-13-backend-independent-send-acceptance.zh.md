@@ -3,6 +3,7 @@
 Status: proposed
 Type: architecture
 Translation: current
+PR: https://github.com/LodyAI/Lody/pull/1546
 
 [English](2026-10-13-backend-independent-send-acceptance.md)
 
@@ -32,6 +33,9 @@ Loro 的本地历史文档已承担本地接纳，以及异步 Repo 持久化和
 1. 接纳时冻结账号/workspace、用户、目标、会话和 turn 身份、内容、输入配置及投递
    意图。新会话先本地提交路由元数据，再允许界面获取历史 store。消息先显示，所属
    机器的工作随后完成；本地持久化在后台完成。
+   路由准备不获取历史 store。后台投递先提交可信的 `humanInputReceipts` 控制记录，
+   再调用所属机器接纳；普通 Loro 写入和控制队列也保持先记用户来源、后激活的顺序。
+   回执查询保持只读，缓慢的 store 获取不阻塞本地接纳。
 2. IndexedDB 按账号/workspace 隔离，按接纳顺序保留就绪输入。保存新输入时，先用
    `parseHistoryWrite` 规范化 entry，再做存储校验，让包含 `text: undefined` 的
    图片/文件数据与普通历史写入保持一致。已持久化记录仍严格解码，同一 ID 的内容
@@ -91,14 +95,16 @@ tarball、依赖锁的完整性一致，安装后的 57 个文件也与下载包
 [会话文件草案](../../../../specs/session-files.zh.md#7-提交身份与本地写入)
 继续区分本地接纳、同步与执行，不增加已获批准的声明。
 
-最终 `pnpm check` 通过，包含 11,724 个 Vitest package 用例，以及脚本和 Electron
-测试、类型、lint、i18n、public/local/Effect 边界检查。31 个定向用例覆盖最终附件
-修复，包括准备失败、重试、所属机器拒绝、按原 ID 再次重试，断言所属历史恰好一条、
-没有重复上传且 IndexedDB 记录已清除，并覆盖直接就绪的图片和文件输入。撤回对应
-修复时，每项回归测试都会失败。CLI 发行 bundle、Storybook 构建及使用已固定 SQLite
+最终 `pnpm check` 通过，包含 11,760 个 Vitest package 用例，以及脚本和 Electron
+测试、类型、lint、i18n、public/local/Effect 边界检查。43 个定向用例覆盖附件准备失败、
+重试、所属机器拒绝、按原 ID 再次重试，断言所属历史恰好一条、没有重复上传且
+IndexedDB 记录已清除，并覆盖直接就绪的图片和文件输入。撤回对应修复时，附件回归
+测试会失败。集成用例还验证新会话接纳不等待 store 获取，以及用户来源记录先于所属
+历史接纳和控制队列写入。CLI 发行 bundle、Storybook 构建及使用已固定 SQLite
 的 7 个不可变回执用例在最终附件修改前通过。
 
-在最终附件修改前，macOS arm64 Cloud 打包 App 通过内置 CLI/原生组件 smoke 检查。
+在最终附件修改和 operation-inbox 集成前，macOS arm64 Cloud 打包 App 通过内置
+CLI/原生组件 smoke 检查。
 设备测试沿用已有已登录的 Nightly profile，覆盖：
 
 - 本机已保存输入在传输修复后以原 ID 恢复；所属历史只有一条用户输入及一条助手
@@ -115,4 +121,5 @@ tarball、依赖锁的完整性一致，安装后的 57 个文件也与下载包
 暂停 worker 时的 DOM 样本本机约 20 毫秒、远程约 16 毫秒；观测期间两个 worker 都
 无法确认输入。这是单次时序检查，不是性能基准。检查使用禁用更新、采用 ad-hoc
 签名的本地产物；没有测试公证、发布和更新流程。
-最终附件路径由上述确定性的集成测试验证，没有为这些修改重新执行打包设备测试。
+最终附件路径及 operation-inbox 集成由上述确定性用例验证，没有为这些修改重新执行
+打包设备测试。

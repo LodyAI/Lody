@@ -29,7 +29,6 @@ export function getCreatedSessionCards(message: SessionHistoryParsed): Card[] | 
       item.type === 'operation_completion' &&
       (item.operationKind === 'session_create' || item.operationKind === 'session_create_many') &&
       !item.progressMessageId &&
-      !item.continuation &&
       item.completion.type === 'result' &&
       item.completion.value.items.length > 0
     ) {

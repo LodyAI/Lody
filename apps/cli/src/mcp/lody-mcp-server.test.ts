@@ -1410,6 +1410,7 @@ describe('session MCP input schemas', () => {
     ).toEqual([
       'session',
       'cancel',
+      '--operation-cancel',
       '--workspace',
       'workspace-1',
       '--json',

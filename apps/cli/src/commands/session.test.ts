@@ -1,3 +1,6 @@
+import { z } from 'zod';
+import { getSessionCancelProtocolFields } from './session';
+import { CURRENT_MACHINE_PROTOCOL_CAPABILITIES } from '@lody/shared';
 import { LoroDoc } from 'loro-crdt';
 import { createHistoryWriter } from '@lody/shared';
 import { createLoroSessionData } from '@lody/shared/session-data';
@@ -61,6 +64,7 @@ import {
   selectDefaultAgentConfigForCreate,
   readDelegatedMachineAccess,
   resolveSessionRequester,
+  sendSessionChatResult,
   resolveSessionCommandRequesterUserId,
   resolveChatArgs,
   resolveRenameArgs,
@@ -2300,6 +2304,43 @@ describe('prepared command attachment inputs', () => {
     historyBackend: 'loro' as const,
   };
 
+  it('rejects delegated create and chat without source identity before any publication', async () => {
+    const manager = new Proxy(
+      {},
+      {
+        get: () => {
+          throw new Error('Unexpected side effect');
+        },
+      }
+    );
+    const delegatedRequester = { userId: auth.userId };
+    await expect(
+      prepareSessionInput(
+        auth,
+        workspace,
+        manager as never,
+        'Delegated work',
+        { ...options, delegatedRequester },
+        { inheritSessionDefaults: false },
+        ownerTarget
+      )
+    ).rejects.toThrow('missing Agent source identity');
+    await expect(
+      sendSessionChatResult(
+        auth,
+        workspace,
+        manager as never,
+        'target' as SessionId,
+        'Delegated work',
+        {},
+        undefined,
+        undefined,
+        undefined,
+        delegatedRequester
+      )
+    ).rejects.toThrow('missing Agent source identity');
+  });
+
   it('keeps raw input in history and preserves attachments beside composed execution text', async () => {
     // Preparation must not write metadata/history or start execution.
     const manager = new Proxy(
@@ -2705,5 +2746,33 @@ describe('Machine Flock freshness fallback validation', () => {
         cause: deadline(),
       }).toLodyError()
     ).toMatchObject({ code: 'SYNC_UNAVAILABLE', retryable: true });
+  });
+});
+
+describe('Stop protocol negotiation', () => {
+  it('keeps released strict cancel payloads valid and opts modern peers into durable pause', () => {
+    const legacy = z
+      .object({ sessionId: z.string(), turnId: z.string(), timeoutMs: z.number() })
+      .strict();
+    const common = { sessionId: 'session', turnId: 'turn', timeoutMs: 10000 };
+    for (const machine of [undefined, {}, { protocolCapabilities: { operationInbox: 1 } }]) {
+      expect(
+        legacy.parse({ ...common, ...getSessionCancelProtocolFields(machine, 'cancel-id', true) })
+      ).toEqual(common);
+    }
+    expect(
+      getSessionCancelProtocolFields(
+        { protocolCapabilities: CURRENT_MACHINE_PROTOCOL_CAPABILITIES },
+        'cancel-id',
+        true
+      )
+    ).toEqual({ cancelId: 'cancel-id', pauseInbox: true });
+    expect(
+      getSessionCancelProtocolFields(
+        { protocolCapabilities: CURRENT_MACHINE_PROTOCOL_CAPABILITIES },
+        'cancel-id',
+        false
+      )
+    ).toEqual({ cancelId: 'cancel-id', pauseInbox: false });
   });
 });

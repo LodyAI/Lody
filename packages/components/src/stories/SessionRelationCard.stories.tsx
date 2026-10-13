@@ -372,3 +372,30 @@ export const ManyCreatedSessions: Story = {
     );
   },
 };
+
+export const CompletedWorkBatch: Story = {
+  args: operationStoryArgs,
+  render: () => (
+    <div className="w-[720px] max-w-[calc(100vw-2rem)]">
+      <MessageRowView
+        sessionId={'storybook-opener' as SessionId}
+        message={{
+          ...operationCompletion,
+          id: 'storybook-batch',
+          items: [
+            {
+              type: 'operation_completion_batch',
+              batchId: '00000000-0000-4000-8000-000000000001',
+              memberCount: 8,
+              deliveryStatus: 'unknown',
+              members: operationCompletion.items?.filter(
+                (item) => item.type === 'operation_completion'
+              ),
+            },
+          ],
+        }}
+        onNavigateSession={() => {}}
+      />
+    </div>
+  ),
+};

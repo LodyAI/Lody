@@ -1,9 +1,8 @@
 # apps/cli/src/session
 
-`CLAUDE.md` is a symlink to this file. Edit `AGENTS.md` only.
+`CLAUDE.md` links here; edit this file.
 
-Module map and contracts: [README.md](README.md).
-Worktree rules: [worktree/AGENTS.md](worktree/AGENTS.md).
+[Module contracts](README.md); [worktree rules](worktree/AGENTS.md).
 
 ## Authorization and identity
 
@@ -14,8 +13,8 @@ Worktree rules: [worktree/AGENTS.md](worktree/AGENTS.md).
   identity.
 - Live status is a target-daemon Machine RPC read; durable metadata is not a live-presence
   substitute.
-- Derive the human identity from the active dispatch/execution runtime and fail closed when none
-  exists; retries and recovery never reread mutable history.
+- Require frozen human identity and pre-launch `humanInputReceipts`; recover via receipts,
+  never role/author. [Rules](../orchestration/AGENTS.md).
 - Machine/Provider credentials stay host-scoped. Attribution, authorization and commits
   use the frozen Turn identity; GitHub network auth uses the trusted conversation owner.
 - Git: owner uses local config, no profile query; others never read it.
@@ -36,38 +35,37 @@ Worktree rules: [worktree/AGENTS.md](worktree/AGENTS.md).
 - Never replay late history; recovery is a new send. Use last row per ID; stop no-progress repairs.
 - `hasPendingUserTurnActivation` is the ONLY pending-turn predicate; never compare those two
   pointers in a consumer.
-- Never inspect historical Session documents to infer work, or publish or clear active presence
+- Stop data: control doc; meta: pointer. Never scan old docs for work or change active presence
   here (`../lib/loro/session-active-presence.ts`).
-- Keep bootstrap and live reconciliation bounded as README describes; add no per-trigger scan or
-  extra throttle.
+- Keep reconciliation bounded per README; no per-trigger scans or throttles.
 
 ## Turn execution
 
-- Gate turn-scoped LIST writes on user-entry sync (`turn-history-gate.ts`, 20s), never status/meta.
+- Gate LIST writes on user-entry sync (`turn-history-gate.ts`, 20s), never status/meta.
 - Goals obey [this contract](../../../../specs/session-goal-control.md).
-- Stop ends local steer waits, not the owner fiber. Drain raw ACP or confirm termination,
-  clear presence, then permit reuse. Assistant ids use `userTurnId`.
-  `invocation` owns source Turn, requester and config atomically; steer replaces it before tools.
+- Stop ends steer waits, not the owner fiber. Drain raw ACP or confirm termination, then clear
+  presence before reuse. [Inbox admission](../orchestration/AGENTS.md); execution IDs stay fixed.
+  Assistant ids use `userTurnId`; `invocation` owns source/requester/config; steer replaces it.
 - Publish `latestUserMsgId` in the SAME write as the history append (`appendUserTurn`). Only
-  dispatch producers publish it. Renderer sends and queue promotion retain the missing-history
+  dispatch producers publish it. Renderer and queue promotion retain the missing-history
   tombstone; CLI dispatch producers keep their own marker policy.
-- Ordinary turn execution writes only `processingUserMsgId` and `lastHandledUserMsgId`; no start
+- Turn execution writes only `processingUserMsgId` and `lastHandledUserMsgId`; no start
   or terminal path may read-await-rewrite the other slots.
 - Never steer after cancellation or infer delivery from it. Stop uses
-  `pendingInput: promote` / `prePromptSession: discard`; Edit & Resend uses preserve/keep,
+  preserve/discard and cancels pre-Stop queued eligibility; Edit & Resend uses preserve/keep,
   access revocation preserve/discard. Limit create/restore fences to initialization.
 - Promote only proven non-delivery via `steerTurnStatuses`, never producer pointers.
   Unknown never replays; RPC ACKs never revive history. Surface recovery errors.
-- Foreground/steer config uses its owner signal; fence mutations after interrupt.
+- Config uses its owner signal; fence mutations after interrupt.
 - Resume must REOPEN the in-progress assistant entry, clearing
   `finished`/`endedAt`/`permissionWaitMs` there only; never write `finished=false` from teardown.
 - Keep JSON-RPC/transport matching in `acp-error-classification.ts`: disposed/stale `-32603` is
   `agent_disconnected`, Harness compression mismatch is `acp_session_storage_incompatible`.
-- User turns may restore stale ACP and retry once before output. Delivery never retries after
-  provider submission.
-- A turn with no ACP updates takes `recordSilentTurnFailure`, not `setDispatchHandled`.
-  Read `turnProducedVisibleOutput` before `finalizeTurn` clears it; still finalize, advance
-  the pointer, and fail open.
+- User turns may restore stale ACP and retry once before output. Inbox batches never retry after
+  submission; this includes human-plus-batch inputs.
+- Agent-input turns skip completion notices only. Use the completed invocation's exact input.
+- No ACP updates: `recordSilentTurnFailure`, not `setDispatchHandled`. Read
+  `turnProducedVisibleOutput` before `finalizeTurn` clears it; finalize, advance pointers, fail open.
 - Diff content comes only from the CLI-local ACP evidence store; GitHub `diffStats` use PR compare
   semantics, and `session-diff-stats-target.ts` skips rather than overwrites a good total.
 

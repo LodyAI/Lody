@@ -1239,6 +1239,24 @@ describe('SessionManager durable create ownership', () => {
     expect(exits).toEqual(['terminated']);
   });
 
+  it('keeps a failed Session registered until independent cleanup succeeds', async () => {
+    const manager = buildOwnershipManager();
+    const sessionId = 'retained-cleanup' as SessionId;
+    const session = await createSessionInner(manager, createSessionConfig({ sessionId }));
+    const original = session.terminate.bind(session);
+    const failure = new Error('synthetic retained-resource failure');
+    session.terminate = async () => {
+      throw failure;
+    };
+    await expect(manager.cleanUp({ keepWorkspaceDocumentOpen: true })).rejects.toBeInstanceOf(
+      AggregateError
+    );
+    expect(manager.getSession(sessionId)).toBe(session);
+    session.terminate = original;
+    await manager.cleanUp({ keepWorkspaceDocumentOpen: true });
+    expect(manager.getSession(sessionId)).toBeNull();
+  });
+
   it('reports no entry to abandon when the create already settled', async () => {
     const manager = buildOwnershipManager();
     const sessionId = 'settled-create-session' as SessionId;

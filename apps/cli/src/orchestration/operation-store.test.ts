@@ -1,22 +1,27 @@
 import { buildAgentMessageAuthor } from '@lody/shared';
+import { Effect, Layer } from 'effect';
 import { chmod, mkdtemp, rm, stat } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { InboxRepository } from './inbox/service';
+import { OperationRepository } from './operation-repository';
+import { OrchestrationDatabase } from './platform/database';
+import { orchestrationRepositoriesLayer } from './platform/operations';
 
-import Database from 'better-sqlite3';
-import { afterEach, describe, expect, it } from 'vitest';
 import {
   resolveEffectiveSessionCreateDispatchConfig,
   type ResolvedTurnDispatchConfig,
 } from '@/commands/session';
 import { FlockSyncTimeoutError } from '@/lib/loro/timeout-utils';
+import Database from 'better-sqlite3';
+import { afterEach, describe, expect, it } from 'vitest';
 
 import {
   LODY_OPERATION_COMPLETION_MAX_BYTES,
   type AcpCapabilityCacheEntry,
+  type MachineId,
   type SessionId,
   type WorkspaceId,
-  type MachineId,
 } from '@lody/shared';
 
 import {
@@ -26,6 +31,13 @@ import {
   LodyOperationStoreError,
   runWithOperationStoreBusyRetry,
 } from './operation-store';
+
+const queuedResults = (store: LodyOperationStore, workspaceId: WorkspaceId) =>
+  (store as unknown as { db: Database.Database }).db
+    .prepare(
+      'SELECT session_id AS requesterSessionId,operation_id AS operationId,consumed FROM inbox_results WHERE workspace_id=? AND consumed=0 ORDER BY sequence'
+    )
+    .all(workspaceId);
 
 const roots = new Set<string>();
 
@@ -66,6 +78,317 @@ afterEach(async () => {
 });
 
 describe('LodyOperationStore', () => {
+  it('memory repositories share the completion transaction and reject asynchronous transaction callbacks', async () => {
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* OrchestrationDatabase;
+          const operations = yield* OperationRepository;
+          const inbox = yield* InboxRepository;
+          const input = baseInput();
+          yield* operations.accept(input);
+          connection.raw.exec(
+            "CREATE TRIGGER fail_result BEFORE INSERT ON inbox_results BEGIN SELECT RAISE(ABORT,'outage'); END"
+          );
+          const failed = yield* Effect.exit(
+            operations.finish(input.requesterSessionId, input.operationId, {
+              type: 'result',
+              value: { items: [] },
+            })
+          );
+          expect(failed._tag).toBe('Failure');
+          expect((yield* operations.get(input.requesterSessionId, input.operationId)).state).toBe(
+            'active'
+          );
+          expect(
+            connection.raw
+              .prepare("SELECT value FROM orchestration_meta WHERE key='inbox_sequence'")
+              .get()
+          ).toEqual({ value: '0' });
+          connection.raw.exec('DROP TRIGGER fail_result');
+          yield* operations.finish(input.requesterSessionId, input.operationId, {
+            type: 'result',
+            value: { items: [] },
+          });
+          expect(connection.raw.prepare('SELECT sequence FROM inbox_results').all()).toEqual([
+            { sequence: 1 },
+          ]);
+          expect(yield* inbox.pending(input.workspaceId)).toHaveLength(1);
+          expect(() =>
+            connection.withImmediate((() => {
+              connection.raw.exec("UPDATE operations SET state='active'");
+              return Promise.resolve();
+            }) as never)
+          ).toThrow('ASYNC_SQLITE_TRANSACTION_FORBIDDEN');
+          expect((yield* operations.get(input.requesterSessionId, input.operationId)).state).toBe(
+            'finished'
+          );
+          expect(() =>
+            connection.withImmediate((() => {
+              connection.raw.exec("UPDATE operations SET state='active'");
+              return Effect.void;
+            }) as never)
+          ).toThrow('ASYNC_SQLITE_TRANSACTION_FORBIDDEN');
+          expect((yield* operations.get(input.requesterSessionId, input.operationId)).state).toBe(
+            'finished'
+          );
+        }).pipe(
+          Effect.provide(
+            orchestrationRepositoriesLayer.pipe(
+              // Both consumers receive the same scoped service, not separate memory databases.
+              Layer.provideMerge(OrchestrationDatabase.layer({ kind: 'memory' }))
+            )
+          )
+        )
+      )
+    );
+  });
+
+  it('does not infer an Agent source from the requester Session alone', async () => {
+    const store = await makeStore();
+    try {
+      const input = baseInput();
+      const { sourceTurnId: _, ...config } = input.frozenContinuationConfig;
+      const { operation } = store.accept({ ...input, frozenContinuationConfig: config });
+      expect(operation.author).toBeUndefined();
+      expect(store.get(operation.requesterSessionId, operation.operationId).author).toBeUndefined();
+    } finally {
+      store.close();
+    }
+  });
+
+  it('upgrades released Operation tables without losing active work or duplicate guards', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'lody-upgrade-store-'));
+    roots.add(root);
+    const filename = path.join(root, 'operations.sqlite3');
+    const now = () => Date.parse('2026-10-12T00:00:00Z');
+    const input = baseInput();
+    const active = { ...input, operationId: 'old-active' };
+    const finished = { ...input, operationId: 'old-finished' };
+    const author = buildAgentMessageAuthor({
+      sessionId: input.requesterSessionId,
+      turnId: 'source-turn-1',
+      name: 'Agent',
+    });
+    const seed = new LodyOperationStore(filename, now);
+    seed.accept({ ...active, author });
+    seed.accept(finished);
+    seed.finish(input.requesterSessionId, finished.operationId, {
+      type: 'result',
+      value: { items: [] },
+    });
+    seed.close();
+    const old = new Database(filename);
+    for (const { name } of old
+      .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'inbox_%'")
+      .all() as { name: string }[])
+      old.exec(`DROP TABLE ${name}`);
+    old.exec(`UPDATE orchestration_meta SET value='1' WHERE key='schema_version';
+      INSERT INTO operation_retired_ids VALUES('requester-session','old-retired');
+      CREATE TABLE deliveries(operation_id TEXT,state TEXT);
+      INSERT INTO deliveries VALUES('old-finished','pending');
+      CREATE TABLE delivery_execution_state(operation_id TEXT,execution_phase TEXT);
+      INSERT INTO delivery_execution_state VALUES('old-finished','started');`);
+    old.close();
+    const store = new LodyOperationStore(filename, now);
+    try {
+      const db = (store as unknown as { db: Database.Database }).db;
+      expect(
+        db
+          .prepare(
+            "SELECT name FROM sqlite_master WHERE name IN ('deliveries','delivery_execution_state')"
+          )
+          .all()
+      ).toEqual([]);
+      expect(store.get(input.requesterSessionId, active.operationId)).toMatchObject({
+        state: 'active',
+        author,
+      });
+      expect(store.get(input.requesterSessionId, finished.operationId).state).toBe('finished');
+      expect(store.accept(finished).created).toBe(false);
+      expect(() =>
+        store.accept({
+          ...input,
+          operationId: 'old-retired',
+          requesterSessionId: 'requester-session' as SessionId,
+        })
+      ).toThrow();
+      expect(db.prepare('SELECT * FROM inbox_results').all()).toEqual([]);
+      store.finish(input.requesterSessionId, active.operationId, {
+        type: 'result',
+        value: { items: [] },
+      });
+      expect(db.prepare('SELECT operation_id FROM inbox_results').all()).toEqual([
+        { operation_id: active.operationId },
+      ]);
+      expect(store.inbox.pending('workspace-1')).toHaveLength(1);
+    } finally {
+      store.close();
+    }
+  });
+
+  it('counts wakeable queued receipts and retained execution as work; pause makes receipts passive', async () => {
+    const store = await makeStore();
+    const op = baseInput();
+    const input = {
+      workspaceId: op.workspaceId,
+      sessionId: op.requesterSessionId,
+      userId: op.requesterUserId,
+      inputId: 'human',
+      kind: 'human' as const,
+      config: {},
+    };
+    try {
+      store.inbox.activate(op.workspaceId, 'owner');
+      store.accept(op);
+      expect(store.hasPendingWorkForRequester(op.workspaceId, op.requesterSessionId)).toBe(true);
+      store.finish(op.requesterSessionId, op.operationId, { type: 'cancelled' });
+      expect(queuedResults(store, op.workspaceId)).toHaveLength(1);
+      expect(store.hasPendingWorkForRequester(op.workspaceId, op.requesterSessionId)).toBe(true);
+      store.inbox.accept(input);
+      store.inbox.begin(input, 'execution');
+      expect(store.hasPendingWorkForRequester(op.workspaceId, op.requesterSessionId)).toBe(true);
+      store.inbox.release({ ...input, executionId: 'execution', outcome: 'normal' });
+      expect(store.inbox.pending(op.workspaceId)).toHaveLength(1);
+      expect(store.hasPendingWorkForRequester(op.workspaceId, op.requesterSessionId)).toBe(true);
+      store.inbox.pause(input, 'execution');
+      expect(store.hasPendingWorkForRequester(op.workspaceId, op.requesterSessionId)).toBe(false);
+      expect(queuedResults(store, op.workspaceId)).toHaveLength(1);
+    } finally {
+      store.close();
+    }
+  });
+
+  it.each(['session_chat', 'session_create'] as const)(
+    'retains unconsumed $0 results and retires consumed IDs without reusing their sequence',
+    async (kind) => {
+      let now = Date.parse('2026-07-20T00:00:00Z');
+      const root = await mkdtemp(path.join(os.tmpdir(), 'lody-native-result-retention-'));
+      roots.add(root);
+      const filename = path.join(root, 'operations.sqlite3');
+      const op = { ...baseInput(), kind };
+      const input = {
+        workspaceId: op.workspaceId,
+        sessionId: op.requesterSessionId,
+        userId: op.requesterUserId,
+        inputId: 'human',
+        kind: 'human' as const,
+        config: {},
+      };
+      let store = new LodyOperationStore(filename, () => now);
+      store.accept(op);
+      store.finish(op.requesterSessionId, op.operationId, { type: 'cancelled' });
+      store.close();
+      now += 10 * 24 * 60 * 60 * 1000;
+      store = new LodyOperationStore(filename, () => now);
+      expect(queuedResults(store, op.workspaceId)).toHaveLength(1);
+      store.inbox.activate(op.workspaceId, 'owner');
+      store.inbox.accept(input);
+      store.inbox.begin(input, 'exec');
+      const batch = store.inbox.prepare(input, 'owner')!;
+      expect(store.inbox.fence(batch, 'exec')).toBe(true);
+      store.inbox.settle(batch, 'settled');
+      store.inbox.release({ ...input, executionId: 'exec', outcome: 'normal' });
+      store.close();
+      now += 10 * 24 * 60 * 60 * 1000;
+      store = new LodyOperationStore(filename, () => now);
+      if (kind === 'session_create') {
+        expect(store.listPendingProgress(op.workspaceId, op.ownerMachineId)).toMatchObject([
+          { operationId: op.operationId },
+        ]);
+        expect(store.get(op.requesterSessionId, op.operationId).state).toBe('finished');
+        store.settleProgress(op.requesterSessionId, op.operationId);
+        store.close();
+        now += 2 * 24 * 60 * 60 * 1000;
+        store = new LodyOperationStore(filename, () => now);
+      }
+      try {
+        expect(() => store.get(op.requesterSessionId, op.operationId)).toThrow(
+          'Operation not found'
+        );
+        expect(() => store.accept(op)).toThrow(
+          expect.objectContaining({ code: 'OPERATION_ID_REUSED' })
+        );
+        expect(queuedResults(store, op.workspaceId)).toEqual([]);
+        expect(store.inbox.members(batch)).toEqual([]);
+        store.accept({ ...op, operationId: 'new-result' });
+        store.finish(op.requesterSessionId, 'new-result', { type: 'cancelled' });
+        expect(
+          (store as unknown as { db: Database.Database }).db
+            .prepare("SELECT sequence FROM inbox_results WHERE operation_id='new-result'")
+            .get()
+        ).toEqual({ sequence: 2 });
+      } finally {
+        store.close();
+      }
+    }
+  );
+
+  it('retains current Inbox evidence through atomic removal of old tables and failed migration', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'lody-remove-delivery-tables-'));
+    roots.add(root);
+    const filename = path.join(root, 'operations.sqlite3');
+    const op = baseInput();
+    const input = {
+      workspaceId: op.workspaceId,
+      sessionId: op.requesterSessionId,
+      userId: op.requesterUserId,
+      inputId: 'human',
+      kind: 'human' as const,
+      config: {},
+    };
+    let store = new LodyOperationStore(filename);
+    store.inbox.activate(op.workspaceId, 'owner');
+    store.accept(op);
+    store.finish(op.requesterSessionId, op.operationId, { type: 'cancelled' });
+    store.inbox.accept(input);
+    store.inbox.begin(input, 'execution');
+    const batch = store.inbox.prepare(input, 'owner')!;
+    expect(store.inbox.fence(batch, 'execution')).toBe(true);
+    store.inbox.release({ ...input, executionId: 'execution', outcome: 'unreleased' });
+    store.inbox.pause(input, 'execution', [], 'stop');
+    store.close();
+    let db = new Database(filename);
+    db.exec(`DELETE FROM orchestration_meta WHERE key='schema_version';
+      CREATE TABLE deliveries(sequence INTEGER PRIMARY KEY AUTOINCREMENT);
+      INSERT INTO deliveries(sequence) VALUES(100);
+      CREATE TABLE delivery_execution_state(operation_id TEXT);
+      CREATE TRIGGER fail_cleanup BEFORE INSERT ON orchestration_meta WHEN NEW.key='schema_version' BEGIN SELECT RAISE(ABORT,'cleanup outage'); END;`);
+    db.close();
+    expect(() => new LodyOperationStore(filename)).toThrow('cleanup outage');
+    db = new Database(filename);
+    expect(db.prepare('SELECT sequence FROM deliveries').all()).toEqual([{ sequence: 100 }]);
+    expect(db.prepare('SELECT state FROM inbox_batches').get()).toEqual({ state: 'submitting' });
+    db.exec('DROP TRIGGER fail_cleanup');
+    db.close();
+    store = new LodyOperationStore(filename);
+    try {
+      expect(store.inbox.getBatch(batch.batchId, batch)?.state).toBe('submitting');
+      expect(store.inbox.begin({ ...input, inputId: 'next' }, 'successor')).toBe(false);
+      store.inbox.activate(op.workspaceId, 'replacement');
+      expect(store.inbox.getBatch(batch.batchId, batch)?.state).toBe('unknown');
+      expect(store.inbox.pending(op.workspaceId)).toEqual([]);
+      expect(store.inbox.begin({ ...input, inputId: 'next' }, 'successor')).toBe(false);
+      store.accept({ ...op, operationId: 'after-cleanup' });
+      store.finish(op.requesterSessionId, 'after-cleanup', { type: 'cancelled' });
+      const last = queuedResults(store, op.workspaceId);
+      expect(last).toHaveLength(1);
+      expect(
+        (store as unknown as { db: Database.Database }).db
+          .prepare("SELECT sequence FROM inbox_results WHERE operation_id='after-cleanup'")
+          .get()
+      ).toEqual({ sequence: 101 });
+      expect(
+        (store as unknown as { db: Database.Database }).db
+          .prepare(
+            "SELECT name FROM sqlite_master WHERE name IN ('deliveries','delivery_execution_state')"
+          )
+          .all()
+      ).toEqual([]);
+    } finally {
+      store.close();
+    }
+  });
   it('freezes complete attachment inputs atomically across retries and database reopen', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'lody-inputs-'));
     roots.add(root);
@@ -208,173 +531,6 @@ describe('LodyOperationStore', () => {
       expect((await stat(root)).mode & 0o777).toBe(0o700);
       expect((await stat(dbPath)).mode & 0o777).toBe(0o600);
     } finally {
-      store.close();
-    }
-  });
-
-  it('marks an existing legacy pending Delivery as execution-uncertain', async () => {
-    const root = await mkdtemp(path.join(os.tmpdir(), 'lody-operation-store-migration-'));
-    roots.add(root);
-    const dbPath = path.join(root, 'operations.sqlite3');
-    const legacy = new Database(dbPath);
-    try {
-      legacy.exec(`
-        CREATE TABLE operations (
-          workspace_id TEXT NOT NULL,
-          owner_machine_id TEXT NOT NULL,
-          requester_session_id TEXT NOT NULL,
-          requester_user_id TEXT NOT NULL,
-          operation_id TEXT NOT NULL,
-          kind TEXT NOT NULL,
-          fingerprint TEXT NOT NULL,
-          canonical_command_json TEXT NOT NULL,
-          frozen_config_json TEXT NOT NULL,
-          initiator_chain_depth INTEGER NOT NULL,
-          created_at TEXT NOT NULL,
-          deadline_at TEXT NOT NULL,
-          state TEXT NOT NULL CHECK (state IN ('active', 'finished')),
-          items_json TEXT NOT NULL,
-          completion_json TEXT,
-          finished_at TEXT,
-          PRIMARY KEY (requester_session_id, operation_id)
-        );
-        CREATE TABLE deliveries (
-          sequence INTEGER PRIMARY KEY AUTOINCREMENT,
-          workspace_id TEXT NOT NULL,
-          requester_session_id TEXT NOT NULL,
-          operation_id TEXT NOT NULL,
-          delivery_id TEXT NOT NULL UNIQUE,
-          system_turn_id TEXT NOT NULL UNIQUE,
-          state TEXT NOT NULL CHECK (state IN ('pending', 'consumed')),
-          initiator_chain_depth INTEGER NOT NULL,
-          completion_json TEXT NOT NULL,
-          consumed_at TEXT,
-          FOREIGN KEY (requester_session_id, operation_id)
-            REFERENCES operations (requester_session_id, operation_id)
-            ON DELETE CASCADE
-        );
-        INSERT INTO operations (
-          workspace_id, owner_machine_id, requester_session_id, requester_user_id,
-          operation_id, kind, fingerprint, canonical_command_json, frozen_config_json,
-          initiator_chain_depth, created_at, deadline_at, state, items_json,
-          completion_json, finished_at
-        ) VALUES (
-          'workspace-1', 'machine-1', 'legacy-requester', 'user-1',
-          'legacy-operation', 'session_chat', 'legacy-fingerprint', '{}',
-          '{"inputConfig":{}}', 0, '2026-07-20T00:00:00.000Z',
-          '2026-07-20T01:00:00.000Z', 'finished', '[]',
-          '{"type":"cancelled"}', '2026-07-20T00:01:00.000Z'
-        );
-        INSERT INTO deliveries (
-          workspace_id, requester_session_id, operation_id, delivery_id,
-          system_turn_id, state, initiator_chain_depth, completion_json
-        ) VALUES (
-          'workspace-1', 'legacy-requester', 'legacy-operation',
-          'operation:legacy-requester:legacy-operation:completion',
-          'operation-completion:legacy-requester:legacy-operation',
-          'pending', 0, '{"type":"cancelled"}'
-        );
-      `);
-    } finally {
-      legacy.close();
-    }
-
-    const migrated = new LodyOperationStore(dbPath);
-    try {
-      migrated.accept(baseInput());
-      migrated.finish('requester-1' as SessionId, 'review-round-1', { type: 'cancelled' });
-      expect(migrated.listPendingDeliveries('workspace-1' as WorkspaceId)).toEqual([
-        expect.objectContaining({
-          operationId: 'legacy-operation',
-          attemptCount: 0,
-          executionPhase: 'uncertain',
-        }),
-        expect.objectContaining({ attemptCount: 0, executionPhase: 'ready', state: 'pending' }),
-      ]);
-    } finally {
-      migrated.close();
-    }
-
-    const legacyReader = new Database(dbPath, { readonly: true });
-    try {
-      const columns = legacyReader.pragma('table_info(deliveries)') as Array<{ name: string }>;
-      expect(columns.map((column) => column.name)).toEqual([
-        'sequence',
-        'workspace_id',
-        'requester_session_id',
-        'operation_id',
-        'delivery_id',
-        'system_turn_id',
-        'state',
-        'initiator_chain_depth',
-        'completion_json',
-        'consumed_at',
-      ]);
-      expect(
-        legacyReader
-          .prepare(
-            'SELECT execution_phase, attempt_count, active_claim_id, active_claim_worker_boot_id FROM delivery_execution_state WHERE requester_session_id = ? AND operation_id = ?'
-          )
-          .get('legacy-requester', 'legacy-operation')
-      ).toEqual({
-        execution_phase: 'uncertain',
-        attempt_count: 0,
-        active_claim_id: null,
-        active_claim_worker_boot_id: null,
-      });
-    } finally {
-      legacyReader.close();
-    }
-
-    const reopened = new LodyOperationStore(dbPath);
-    try {
-      expect(
-        reopened.getDelivery('legacy-requester' as SessionId, 'legacy-operation')
-      ).toMatchObject({ state: 'pending', attemptCount: 0, executionPhase: 'uncertain' });
-    } finally {
-      reopened.close();
-    }
-  });
-
-  it('exposes a Delivery inserted by a legacy writer after the store opens', async () => {
-    const root = await mkdtemp(path.join(os.tmpdir(), 'lody-operation-store-live-legacy-'));
-    roots.add(root);
-    const dbPath = path.join(root, 'operations.sqlite3');
-    const preTriggerStore = new LodyOperationStore(dbPath);
-    preTriggerStore.accept(baseInput());
-    preTriggerStore.close();
-
-    const legacyWriter = new Database(dbPath);
-    legacyWriter.exec('DROP TRIGGER deliveries_insert_execution_state');
-    const store = new LodyOperationStore(dbPath, undefined, { maintenance: false });
-    try {
-      legacyWriter.exec(`
-        BEGIN IMMEDIATE;
-        UPDATE operations
-        SET state = 'finished', completion_json = '{"type":"cancelled"}',
-            finished_at = '2026-07-20T00:01:00.000Z'
-        WHERE requester_session_id = 'requester-1' AND operation_id = 'review-round-1';
-        INSERT INTO deliveries (
-          workspace_id, requester_session_id, operation_id, delivery_id,
-          system_turn_id, state, initiator_chain_depth, completion_json
-        ) VALUES (
-          'workspace-1', 'requester-1', 'review-round-1',
-          'operation:requester-1:review-round-1:completion',
-          'operation-completion:requester-1:review-round-1', 'pending', 0,
-          '{"type":"cancelled"}'
-        );
-        COMMIT;
-      `);
-
-      expect(store.listPendingDeliveries('workspace-1' as WorkspaceId)).toEqual([
-        expect.objectContaining({
-          operationId: 'review-round-1',
-          executionPhase: 'ready',
-          attemptCount: 0,
-        }),
-      ]);
-    } finally {
-      legacyWriter.close();
       store.close();
     }
   });
@@ -700,7 +856,7 @@ describe('LodyOperationStore', () => {
     }
   });
 
-  it('atomically creates one pending Delivery when finishing', async () => {
+  it('atomically indexes one Inbox result when finishing', async () => {
     const store = await makeStore();
     try {
       store.accept(baseInput());
@@ -723,11 +879,9 @@ describe('LodyOperationStore', () => {
         state: 'finished',
         completion,
       });
-      expect(store.listPendingDeliveries('workspace-1' as WorkspaceId)).toEqual([
+      expect(queuedResults(store, 'workspace-1' as WorkspaceId)).toEqual([
         expect.objectContaining({
-          deliveryId: 'operation:requester-1:review-round-1:completion',
-          systemTurnId: 'operation-completion:requester-1:review-round-1',
-          state: 'pending',
+          consumed: 0,
         }),
       ]);
     } finally {
@@ -735,416 +889,7 @@ describe('LodyOperationStore', () => {
     }
   });
 
-  it('consumes only the active Delivery claim atomically', async () => {
-    const store = await makeStore();
-    try {
-      store.accept(baseInput());
-      store.finish('requester-1' as SessionId, 'review-round-1', { type: 'cancelled' });
-
-      expect(
-        store.claimDeliveryExecution('requester-1' as SessionId, 'review-round-1', {
-          claimId: 'attempt-1',
-          workerBootId: 'daemon-1',
-        })
-      ).toMatchObject({ status: 'claimed', delivery: { attemptCount: 0 } });
-      expect(
-        store.prepareClaimedDeliveryExecution(
-          'requester-1' as SessionId,
-          'review-round-1',
-          'daemon-1',
-          'stale-attempt'
-        )
-      ).toMatchObject({ prepared: false, delivery: { attemptCount: 0 } });
-      expect(
-        store.prepareClaimedDeliveryExecution(
-          'requester-1' as SessionId,
-          'review-round-1',
-          'daemon-1',
-          'attempt-1'
-        )
-      ).toMatchObject({ prepared: true, delivery: { attemptCount: 1 } });
-      expect(
-        store.consumeClaimedDelivery(
-          'requester-1' as SessionId,
-          'review-round-1',
-          'daemon-1',
-          'stale-attempt'
-        )
-      ).toMatchObject({ consumed: false, delivery: { state: 'pending' } });
-
-      expect(
-        store.consumeClaimedDelivery(
-          'requester-1' as SessionId,
-          'review-round-1',
-          'daemon-1',
-          'attempt-1'
-        )
-      ).toMatchObject({
-        consumed: true,
-        delivery: { state: 'consumed' },
-      });
-      expect(store.listPendingDeliveries('workspace-1' as WorkspaceId)).toEqual([]);
-    } finally {
-      store.close();
-    }
-  });
-
-  it('fences terminal finalization without spending an execution attempt', async () => {
-    const store = await makeStore();
-    try {
-      store.accept(baseInput());
-      store.finish('requester-1' as SessionId, 'review-round-1', { type: 'cancelled' });
-
-      expect(
-        store.claimDeliveryFinalization('requester-1' as SessionId, 'review-round-1', {
-          claimId: 'premature-exhaustion',
-          workerBootId: 'worker-a',
-          requireAttemptsExhausted: true,
-        })
-      ).toMatchObject({ status: 'not_ready', delivery: { attemptCount: 0 } });
-      expect(
-        store.claimDeliveryFinalization('requester-1' as SessionId, 'review-round-1', {
-          claimId: 'finalization-a',
-          workerBootId: 'worker-a',
-        })
-      ).toMatchObject({
-        status: 'claimed',
-        delivery: { attemptCount: 0, activeClaimId: 'finalization-a' },
-      });
-      expect(
-        store.claimDeliveryExecution('requester-1' as SessionId, 'review-round-1', {
-          claimId: 'attempt-b',
-          workerBootId: 'worker-b',
-        })
-      ).toMatchObject({
-        status: 'in_flight',
-        delivery: { attemptCount: 0, activeClaimId: 'finalization-a' },
-      });
-      expect(
-        store.consumeClaimedDelivery(
-          'requester-1' as SessionId,
-          'review-round-1',
-          'worker-b',
-          'finalization-a'
-        )
-      ).toMatchObject({ consumed: false, delivery: { state: 'pending' } });
-      expect(
-        store.consumeClaimedDelivery(
-          'requester-1' as SessionId,
-          'review-round-1',
-          'worker-a',
-          'finalization-a'
-        )
-      ).toMatchObject({ consumed: true, delivery: { state: 'consumed', attemptCount: 0 } });
-    } finally {
-      store.close();
-    }
-  });
-
-  it('recovers an orphaned terminal claim without changing the execution count', async () => {
-    const store = await makeStore();
-    try {
-      store.accept(baseInput());
-      store.finish('requester-1' as SessionId, 'review-round-1', { type: 'cancelled' });
-      expect(
-        store.claimDeliveryFinalization('requester-1' as SessionId, 'review-round-1', {
-          claimId: 'finalization-a',
-          workerBootId: 'worker-a',
-        })
-      ).toMatchObject({ status: 'claimed', delivery: { attemptCount: 0 } });
-
-      expect(store.recoverOrphanedDeliveryClaims('workspace-1' as WorkspaceId, 'worker-b')).toBe(1);
-      expect(
-        store.consumeClaimedDelivery(
-          'requester-1' as SessionId,
-          'review-round-1',
-          'worker-a',
-          'finalization-a'
-        )
-      ).toMatchObject({ consumed: false, delivery: { state: 'pending', attemptCount: 0 } });
-      expect(
-        store.claimDeliveryExecution('requester-1' as SessionId, 'review-round-1', {
-          claimId: 'attempt-b',
-          workerBootId: 'worker-b',
-        })
-      ).toMatchObject({ status: 'claimed', delivery: { attemptCount: 0 } });
-    } finally {
-      store.close();
-    }
-  });
-
-  it('abandons only the stopped coordinator owner and fences its prepared callback', async () => {
-    const store = await makeStore();
-    try {
-      store.accept(baseInput());
-      store.finish('requester-1' as SessionId, 'review-round-1', { type: 'cancelled' });
-      expect(
-        store.claimDeliveryExecution('requester-1' as SessionId, 'review-round-1', {
-          claimId: 'attempt-a',
-          workerBootId: 'worker-a',
-        })
-      ).toMatchObject({ status: 'claimed' });
-      expect(
-        store.prepareClaimedDeliveryExecution(
-          'requester-1' as SessionId,
-          'review-round-1',
-          'worker-a',
-          'attempt-a'
-        )
-      ).toMatchObject({ prepared: true, delivery: { attemptCount: 1 } });
-
-      expect(store.abandonDeliveryClaimsOwnedBy('workspace-1' as WorkspaceId, 'worker-b')).toBe(0);
-      expect(store.getDelivery('requester-1' as SessionId, 'review-round-1')).toMatchObject({
-        executionPhase: 'prepared',
-        activeClaimId: 'attempt-a',
-        activeClaimWorkerBootId: 'worker-a',
-      });
-      expect(store.abandonDeliveryClaimsOwnedBy('workspace-1' as WorkspaceId, 'worker-a')).toBe(1);
-      expect(store.getDelivery('requester-1' as SessionId, 'review-round-1')).toMatchObject({
-        executionPhase: 'ready',
-        attemptCount: 1,
-      });
-      expect(
-        store.markClaimedDeliveryExecutionStarted(
-          'requester-1' as SessionId,
-          'review-round-1',
-          'worker-a',
-          'attempt-a'
-        )
-      ).toBe(false);
-      expect(
-        store.claimDeliveryExecution('requester-1' as SessionId, 'review-round-1', {
-          claimId: 'attempt-b',
-          workerBootId: 'worker-a',
-        })
-      ).toMatchObject({ status: 'claimed', delivery: { attemptCount: 1 } });
-    } finally {
-      store.close();
-    }
-  });
-
-  it('quarantines an orphaned claim after provider execution starts', async () => {
-    const store = await makeStore();
-    try {
-      store.accept(baseInput());
-      store.finish('requester-1' as SessionId, 'review-round-1', { type: 'cancelled' });
-      expect(
-        store.claimDeliveryExecution('requester-1' as SessionId, 'review-round-1', {
-          claimId: 'attempt-a',
-          workerBootId: 'worker-a',
-        })
-      ).toMatchObject({ status: 'claimed', delivery: { executionPhase: 'claimed' } });
-      expect(
-        store.prepareClaimedDeliveryExecution(
-          'requester-1' as SessionId,
-          'review-round-1',
-          'worker-a',
-          'attempt-a'
-        )
-      ).toMatchObject({
-        prepared: true,
-        delivery: { attemptCount: 1, executionPhase: 'prepared' },
-      });
-      expect(
-        store.markClaimedDeliveryExecutionStarted(
-          'requester-1' as SessionId,
-          'review-round-1',
-          'worker-a',
-          'attempt-a'
-        )
-      ).toBe(true);
-
-      expect(store.recoverOrphanedDeliveryClaims('workspace-1' as WorkspaceId, 'worker-b')).toBe(1);
-      const recovered = store.getDelivery('requester-1' as SessionId, 'review-round-1');
-      expect(recovered).toMatchObject({
-        state: 'pending',
-        executionPhase: 'uncertain',
-        attemptCount: 1,
-      });
-      expect(recovered).not.toHaveProperty('activeClaimId');
-      expect(
-        store.claimDeliveryExecution('requester-1' as SessionId, 'review-round-1', {
-          claimId: 'attempt-b',
-          workerBootId: 'worker-b',
-        })
-      ).toMatchObject({ status: 'in_flight', delivery: { executionPhase: 'uncertain' } });
-    } finally {
-      store.close();
-    }
-  });
-
-  it('permits one prepared Delivery recovery and then exhausts attempts', async () => {
-    const store = await makeStore();
-    try {
-      store.accept(baseInput());
-      store.finish('requester-1' as SessionId, 'review-round-1', { type: 'cancelled' });
-
-      expect(
-        store.claimDeliveryExecution('requester-1' as SessionId, 'review-round-1', {
-          claimId: 'attempt-1',
-          workerBootId: 'daemon-1',
-        })
-      ).toMatchObject({ status: 'claimed', delivery: { attemptCount: 0 } });
-      expect(
-        store.prepareClaimedDeliveryExecution(
-          'requester-1' as SessionId,
-          'review-round-1',
-          'daemon-1',
-          'attempt-1'
-        )
-      ).toMatchObject({ prepared: true, delivery: { attemptCount: 1 } });
-      expect(
-        store.releaseDeliveryClaim(
-          'requester-1' as SessionId,
-          'review-round-1',
-          'daemon-1',
-          'attempt-1'
-        )
-      ).toBe(true);
-      expect(
-        store.claimDeliveryExecution('requester-1' as SessionId, 'review-round-1', {
-          claimId: 'attempt-2',
-          workerBootId: 'daemon-1',
-        })
-      ).toMatchObject({ status: 'claimed', delivery: { attemptCount: 1 } });
-      expect(
-        store.prepareClaimedDeliveryExecution(
-          'requester-1' as SessionId,
-          'review-round-1',
-          'daemon-1',
-          'attempt-2'
-        )
-      ).toMatchObject({ prepared: true, delivery: { attemptCount: 2 } });
-      expect(
-        store.releaseDeliveryClaim(
-          'requester-1' as SessionId,
-          'review-round-1',
-          'daemon-1',
-          'attempt-2'
-        )
-      ).toBe(true);
-      expect(
-        store.claimDeliveryExecution('requester-1' as SessionId, 'review-round-1', {
-          claimId: 'attempt-3',
-          workerBootId: 'daemon-1',
-        })
-      ).toMatchObject({ status: 'exhausted', delivery: { attemptCount: 2, state: 'pending' } });
-      expect(
-        store.claimDeliveryFinalization('requester-1' as SessionId, 'review-round-1', {
-          claimId: 'finalization-1',
-          workerBootId: 'daemon-1',
-          requireAttemptsExhausted: true,
-        })
-      ).toMatchObject({
-        status: 'claimed',
-        delivery: { attemptCount: 2, activeClaimId: 'finalization-1' },
-      });
-      expect(
-        store.consumeClaimedDelivery(
-          'requester-1' as SessionId,
-          'review-round-1',
-          'daemon-1',
-          'finalization-1'
-        )
-      ).toMatchObject({ consumed: true, delivery: { state: 'consumed', attemptCount: 2 } });
-    } finally {
-      store.close();
-    }
-  });
-
-  it('fences concurrent Workers and recovers only attempts from an older boot', async () => {
-    const store = await makeStore();
-    try {
-      store.accept(baseInput());
-      store.finish('requester-1' as SessionId, 'review-round-1', { type: 'cancelled' });
-
-      expect(
-        store.claimDeliveryExecution('requester-1' as SessionId, 'review-round-1', {
-          claimId: 'attempt-a',
-          workerBootId: 'worker-a',
-        })
-      ).toMatchObject({ status: 'claimed', delivery: { attemptCount: 0 } });
-      expect(
-        store.prepareClaimedDeliveryExecution(
-          'requester-1' as SessionId,
-          'review-round-1',
-          'worker-a',
-          'attempt-a'
-        )
-      ).toMatchObject({ prepared: true, delivery: { attemptCount: 1 } });
-      expect(
-        store.claimDeliveryExecution('requester-1' as SessionId, 'review-round-1', {
-          claimId: 'attempt-b-before-barrier',
-          workerBootId: 'worker-b',
-        })
-      ).toMatchObject({
-        status: 'in_flight',
-        delivery: {
-          attemptCount: 1,
-          activeClaimId: 'attempt-a',
-          activeClaimWorkerBootId: 'worker-a',
-        },
-      });
-      expect(store.recoverOrphanedDeliveryClaims('workspace-1' as WorkspaceId, 'worker-a')).toBe(0);
-      expect(store.recoverOrphanedDeliveryClaims('workspace-1' as WorkspaceId, 'worker-b')).toBe(1);
-      expect(
-        store.claimDeliveryExecution('requester-1' as SessionId, 'review-round-1', {
-          claimId: 'attempt-b',
-          workerBootId: 'worker-b',
-        })
-      ).toMatchObject({
-        status: 'claimed',
-        delivery: { attemptCount: 1, activeClaimWorkerBootId: 'worker-b' },
-      });
-      expect(
-        store.prepareClaimedDeliveryExecution(
-          'requester-1' as SessionId,
-          'review-round-1',
-          'worker-b',
-          'attempt-b'
-        )
-      ).toMatchObject({ prepared: true, delivery: { attemptCount: 2 } });
-
-      expect(
-        store.releaseDeliveryClaim(
-          'requester-1' as SessionId,
-          'review-round-1',
-          'worker-a',
-          'attempt-a'
-        )
-      ).toBe(false);
-      expect(
-        store.consumeClaimedDelivery(
-          'requester-1' as SessionId,
-          'review-round-1',
-          'worker-a',
-          'attempt-a'
-        )
-      ).toMatchObject({
-        consumed: false,
-        delivery: { state: 'pending', activeClaimId: 'attempt-b' },
-      });
-      expect(
-        store.claimDeliveryFinalization('requester-1' as SessionId, 'review-round-1', {
-          claimId: 'finalization-a',
-          workerBootId: 'worker-a',
-          requireAttemptsExhausted: true,
-        })
-      ).toMatchObject({ status: 'in_flight', delivery: { activeClaimId: 'attempt-b' } });
-      expect(
-        store.consumeClaimedDelivery(
-          'requester-1' as SessionId,
-          'review-round-1',
-          'worker-a',
-          'finalization-a'
-        )
-      ).toMatchObject({ consumed: false, delivery: { state: 'pending' } });
-    } finally {
-      store.close();
-    }
-  });
-
-  it('delivers the same caller-chosen operation id independently for two Sessions', async () => {
+  it('indexes the same operation id independently for two Sessions', async () => {
     const store = await makeStore();
     try {
       const completion = { type: 'cancelled' as const };
@@ -1157,14 +902,12 @@ describe('LodyOperationStore', () => {
       store.finish('requester-1' as SessionId, 'review-round-1', completion);
       store.finish('requester-2' as SessionId, 'review-round-1', completion);
 
-      expect(store.listPendingDeliveries('workspace-1' as WorkspaceId)).toEqual([
+      expect(queuedResults(store, 'workspace-1' as WorkspaceId)).toEqual([
         expect.objectContaining({
           requesterSessionId: 'requester-1',
-          deliveryId: 'operation:requester-1:review-round-1:completion',
         }),
         expect.objectContaining({
           requesterSessionId: 'requester-2',
-          deliveryId: 'operation:requester-2:review-round-1:completion',
         }),
       ]);
     } finally {
@@ -1209,76 +952,6 @@ describe('LodyOperationStore', () => {
     }
   });
 
-  it('retains pending Delivery and retires consumed ids across cleanup and reopen', async () => {
-    let nowMs = Date.parse('2026-07-20T00:00:00Z');
-    const root = await mkdtemp(path.join(os.tmpdir(), 'lody-operation-retirement-'));
-    roots.add(root);
-    const dbPath = path.join(root, 'operations.sqlite3');
-    let store = new LodyOperationStore(dbPath, () => nowMs);
-    try {
-      store.accept(baseInput());
-      store.finish('requester-1' as SessionId, 'review-round-1', {
-        type: 'cancelled',
-      });
-      nowMs += 8 * 24 * 60 * 60 * 1_000;
-
-      expect(store.get('requester-1' as SessionId, 'review-round-1').state).toBe('finished');
-      expect(
-        store.claimDeliveryFinalization('requester-1' as SessionId, 'review-round-1', {
-          claimId: 'retention-finalization',
-          workerBootId: 'daemon-1',
-        })
-      ).toMatchObject({ status: 'claimed' });
-      expect(
-        store.consumeClaimedDelivery(
-          'requester-1' as SessionId,
-          'review-round-1',
-          'daemon-1',
-          'retention-finalization'
-        )
-      ).toMatchObject({ consumed: true });
-      // Preserve a synthetic old writer's row to exercise the SQL compatibility fence.
-      const legacyWriter = new Database(dbPath);
-      try {
-        legacyWriter.exec('CREATE TEMP TABLE old_operation AS SELECT * FROM operations');
-        nowMs += 8 * 24 * 60 * 60 * 1_000;
-        expect(() => store.get('requester-1' as SessionId, 'review-round-1')).toThrowError(
-          expect.objectContaining<LodyOperationStoreError>({ code: 'OPERATION_NOT_FOUND' })
-        );
-        expect(() =>
-          legacyWriter.exec('INSERT INTO operations SELECT * FROM old_operation')
-        ).toThrow(/already completed and expired/);
-      } finally {
-        legacyWriter.close();
-      }
-      store.close();
-      store = new LodyOperationStore(dbPath, () => nowMs, { maintenance: false });
-      expect(() => store.accept(baseInput())).toThrowError(
-        expect.objectContaining<LodyOperationStoreError>({
-          code: 'OPERATION_ID_REUSED',
-          retryable: false,
-        })
-      );
-      expect(() =>
-        store.findMatchingRetry(
-          'requester-1' as SessionId,
-          'review-round-1',
-          'session_chat',
-          baseInput().canonicalCommand,
-          'user-1',
-          'source-turn-1'
-        )
-      ).toThrowError(expect.objectContaining({ code: 'OPERATION_ID_REUSED' }));
-      expect(store.listActive('workspace-1' as WorkspaceId, 'machine-1' as MachineId)).toEqual([]);
-      expect(store.listPendingDeliveries('workspace-1' as WorkspaceId)).toEqual([]);
-      expect(
-        store.accept({ ...baseInput(), requesterSessionId: 'requester-2' as SessionId })
-      ).toMatchObject({ created: true });
-    } finally {
-      store.close();
-    }
-  });
-
   it('wins cancellation once and preserves the first terminal completion', async () => {
     const store = await makeStore();
     try {
@@ -1289,7 +962,7 @@ describe('LodyOperationStore', () => {
       expect(first.didCancel).toBe(true);
       expect(retry.didCancel).toBe(false);
       expect(retry.operation.completion?.type).toBe('cancelled');
-      expect(store.listPendingDeliveries('workspace-1' as WorkspaceId)).toHaveLength(1);
+      expect(queuedResults(store, 'workspace-1' as WorkspaceId)).toHaveLength(1);
     } finally {
       store.close();
     }
@@ -1465,7 +1138,7 @@ describe('maintenance-free open', () => {
     try {
       const nonOwner = new LodyOperationStore(dbPath, undefined, { maintenance: false });
       try {
-        expect(nonOwner.listPendingDeliveries('workspace-1' as WorkspaceId)).toEqual([]);
+        expect(queuedResults(nonOwner, 'workspace-1' as WorkspaceId)).toEqual([]);
       } finally {
         nonOwner.close();
       }
@@ -1566,54 +1239,4 @@ describe('runWithOperationStoreBusyRetry', () => {
     expect(isOperationStoreBusyError(new Error('database is locked'))).toBe(false);
     expect(isOperationStoreBusyError('database is locked')).toBe(false);
   });
-});
-
-it('retains unfinished progress ownership across delivery consumption, reopening and retention cleanup', async () => {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'lody-progress-obligation-'));
-  roots.add(root);
-  const dbPath = path.join(root, 'operations.sqlite3');
-  let now = Date.parse('2026-07-20T00:00:00Z');
-  const input = { ...baseInput(), kind: 'session_create' as const };
-  let store = new LodyOperationStore(dbPath, () => now);
-  store.accept(input);
-  store.cancel(input.requesterSessionId, input.operationId);
-  const claim = store.claimDeliveryFinalization(input.requesterSessionId, input.operationId, {
-    claimId: 'progress-retention-claim',
-    workerBootId: 'progress-retention-worker',
-  });
-  expect(claim.status).toBe('claimed');
-  expect(
-    store.consumeClaimedDelivery(
-      input.requesterSessionId,
-      input.operationId,
-      'progress-retention-worker',
-      'progress-retention-claim'
-    ).consumed
-  ).toBe(true);
-  store.close();
-  now += 100 * 24 * 60 * 60 * 1000;
-  store = new LodyOperationStore(dbPath, () => now);
-  try {
-    expect(store.listPendingDeliveries(input.workspaceId)).toEqual([]);
-    expect(store.listPendingProgress(input.workspaceId, input.ownerMachineId)).toMatchObject([
-      { operationId: input.operationId },
-    ]);
-    expect(
-      store.listPendingProgress('other-workspace' as WorkspaceId, input.ownerMachineId)
-    ).toEqual([]);
-    expect(store.listPendingProgress(input.workspaceId, 'other-machine' as MachineId)).toEqual([]);
-    store.settleProgress(input.requesterSessionId, input.operationId);
-    expect(store.listPendingProgress(input.workspaceId, input.ownerMachineId)).toEqual([]);
-  } finally {
-    store.close();
-  }
-  now += 2 * 24 * 60 * 60 * 1000;
-  store = new LodyOperationStore(dbPath, () => now);
-  try {
-    expect(() => store.get(input.requesterSessionId, input.operationId)).toThrow(
-      'Operation not found'
-    );
-  } finally {
-    store.close();
-  }
 });

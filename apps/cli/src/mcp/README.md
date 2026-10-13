@@ -98,6 +98,20 @@ and lifecycle decisions behind them; it does not introduce additional requiremen
 
 ## Bounded collaboration
 
+If A sends an Agent-authored input to B, B cannot issue a new `session_chat` back to
+A while that exact input drives its active turn. This is a per-turn sender restriction,
+not a parent/child relationship or a permanent restriction between conversations.
+Single and legacy chats return non-retryable `REVERSE_CHAT_FORBIDDEN` before accepting
+work. Mixed batches retain unrelated items; a batch containing only reverse targets
+is rejected without creating an Operation. Matching accepted retries retain their
+existing identity and do not append another prompt.
+
+The runtime selects the exact source input id; its history author supplies only the
+sender provenance, never human authorization. Missing input history blocks a new chat;
+legacy inputs without Agent sender metadata cannot be classified by this guard. A new
+human-authored turn does not inherit an earlier input's restriction. This small fix does
+not change completion scheduling or add a note tool or ancestor graph.
+
 The shared causal chain limit is 16 hops, including delegated target turns and
 completion continuations. A turn at the cap cannot start another Operation;
 the existing guard returns non-retryable `CHAIN_DEPTH_EXCEEDED` before acceptance.
@@ -109,3 +123,10 @@ replies, and use automatic completion delivery instead of manually sending the
 same result back. At the cap, report remaining work to the user without retrying
 or creating another session to evade the limit. These prompts guide behavior;
 the runtime guard enforces the depth bound.
+
+Completed work is persisted and batched at normal release or fresh human input; result
+arrival alone never wakes idle or paused sessions. `lody_operation_batch_get` reads
+a fixed, Session/user-bound batch without new work. Pages are bounded to 128 KiB; large
+individual members return ordered `member-json` fragments. This reader does not grant
+submission permission. Human recovery provenance comes from fixed UI/CLI producers,
+never model tool fields, role or userId.

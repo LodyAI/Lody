@@ -650,6 +650,8 @@ export const SessionCancelRequestSchema = z
     machineId: MachineIdSchema,
     workspaceId: WorkspaceIdSchema,
     turnId: z.string(),
+    cancelId: z.string().uuid().optional(),
+    pauseInbox: z.boolean().optional(),
     subagentTaskId: z.string().trim().min(1).optional(),
   })
   .strict();
@@ -3521,6 +3523,20 @@ const SubagentItemIdentityShape = {
   nativeTurnId: z.string().optional(),
   messageId: z.string().optional(),
 };
+export const OperationCompletionContentSchema = z.object({
+  type: z.literal('operation_completion'),
+  deliveryId: z.string().trim().min(1),
+  operationId: LodyOperationIdSchema,
+  operationKind: z.enum([
+    'session_create',
+    'session_create_many',
+    'session_chat',
+    'session_chat_many',
+  ]),
+  progressMessageId: z.string().trim().min(1).optional(),
+  completion: LodyOperationCompletionSchema,
+});
+
 export const NonSystemNoticeMessageContentSchema = z.discriminatedUnion('type', [
   z.object({
     type: z.literal('text'),
@@ -3604,35 +3620,15 @@ export const NonSystemNoticeMessageContentSchema = z.discriminatedUnion('type', 
     commands: z.array(AvailableCommandSchema),
   }),
   z.object({
-    type: z.literal('operation_completion'),
-    deliveryId: z.string().trim().min(1),
-    operationId: LodyOperationIdSchema,
-    operationKind: z.enum([
-      'session_create',
-      'session_create_many',
-      'session_chat',
-      'session_chat_many',
-    ]),
-    progressMessageId: z.string().trim().min(1).optional(),
-    completion: LodyOperationCompletionSchema,
-    continuation: z
-      .object({
-        status: z.enum(['not_started', 'uncertain']),
-        reason: z
-          .object({
-            code: z.enum([
-              'CONFIGURATION_UNAVAILABLE',
-              'DELIVERY_ATTEMPTS_EXHAUSTED',
-              'DELIVERY_EXECUTION_UNCERTAIN',
-              'COLLABORATION_STOPPED',
-            ]),
-            message: z.string(),
-          })
-          .strict(),
-      })
-      .strict()
+    type: z.literal('operation_completion_batch'),
+    batchId: z.string().uuid(),
+    memberCount: z.number().int().positive(),
+    deliveryStatus: z
+      .enum(['prepared', 'submitted', 'unknown', 'settled', 'not_submitted'])
       .optional(),
+    members: z.array(OperationCompletionContentSchema).max(50).optional(),
   }),
+  OperationCompletionContentSchema,
   z.object({
     type: z.literal('operation_progress'),
     operationId: LodyOperationIdSchema,

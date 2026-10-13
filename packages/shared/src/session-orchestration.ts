@@ -264,23 +264,6 @@ export type StoredLodyOperation = {
   finishedAt?: string;
 };
 
-export type StoredLodyDelivery = {
-  sequence: number;
-  workspaceId: WorkspaceId;
-  requesterSessionId: SessionId;
-  operationId: string;
-  deliveryId: string;
-  systemTurnId: string;
-  state: 'pending' | 'consumed';
-  executionPhase: 'ready' | 'claimed' | 'prepared' | 'started' | 'uncertain';
-  attemptCount: number;
-  activeClaimId?: string;
-  activeClaimWorkerBootId?: string;
-  initiatorChainDepth: number;
-  completion: LodyOperationCompletion;
-  consumedAt?: string;
-};
-
 export type OperationCompletionContent = {
   type: 'operation_completion';
   deliveryId: string;
@@ -289,17 +272,6 @@ export type OperationCompletionContent = {
   /** Stable system history entry id for the matching operation_progress card, when one exists. */
   progressMessageId?: string;
   completion: LodyOperationCompletion;
-  continuation?: {
-    status: 'not_started' | 'uncertain';
-    reason: {
-      code:
-        | 'COLLABORATION_STOPPED'
-        | 'CONFIGURATION_UNAVAILABLE'
-        | 'DELIVERY_ATTEMPTS_EXHAUSTED'
-        | 'DELIVERY_EXECUTION_UNCERTAIN';
-      message: string;
-    };
-  };
 };
 
 export const makeLodyError = (code: string, message: string, retryable: boolean): LodyError => ({

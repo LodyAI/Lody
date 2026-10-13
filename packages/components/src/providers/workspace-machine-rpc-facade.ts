@@ -590,7 +590,7 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
     machineId: MachineId,
     sessionId: SessionId,
     turnId: string,
-    options?: { timeoutMs?: number; subagentTaskId?: string }
+    options?: { timeoutMs?: number; subagentTaskId?: string; cancelId?: string }
   ): Promise<SessionCancelResponse | null> => {
     try {
       if (
@@ -605,7 +605,12 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
           machineId,
           workspaceId,
           method: 'session/cancel',
-          params: { sessionId, turnId, subagentTaskId: options?.subagentTaskId },
+          params: {
+            sessionId,
+            turnId,
+            subagentTaskId: options?.subagentTaskId,
+            ...(options?.cancelId ? { cancelId: options.cancelId } : {}),
+          },
           timeoutMs: options?.timeoutMs ?? 2_000,
         });
         if (response && !response.ok) {
@@ -625,6 +630,7 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
         sessionId,
         turnId,
         subagentTaskId: options?.subagentTaskId,
+        ...(options?.cancelId ? { cancelId: options.cancelId } : {}),
         timeoutMs: options?.timeoutMs ?? 2_000,
       });
     } catch (error) {
@@ -680,12 +686,22 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
     options?: { timeoutMs?: number }
   ): Promise<SessionDispatchTurnResponse | null> => {
     try {
+      const protocolCapabilities = await deps.getMachineProtocolCapabilities(machineId);
+      const input = {
+        ...args,
+        ...(machineSupportsProtocolCapability(
+          { protocolCapabilities },
+          MACHINE_PROTOCOL_CAPABILITIES.operationInbox
+        )
+          ? { inputOrigin: 'human' as const }
+          : {}),
+      };
       if (await canUseLocalMachineRpc(machineId)) {
         const response = await getLocalMachineRpcSender()?.({
           machineId,
           workspaceId,
           method: 'session/dispatch-turn',
-          params: args,
+          params: input,
           timeoutMs: options?.timeoutMs ?? 15_000,
         });
         if (response && !response.ok) {
@@ -703,7 +719,7 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
       return await (
         await getMachineRpcClient(machineId)
       ).requestSessionDispatchTurn({
-        ...args,
+        ...input,
         timeoutMs: options?.timeoutMs ?? 15_000,
       });
     } catch (error) {

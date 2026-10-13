@@ -735,3 +735,51 @@ describe('memory provider routing', () => {
     });
   });
 });
+
+it.each([{ operationInbox: 1 }, {}])(
+  'marks UI dispatch as human only for compatible Inbox machines (%j)',
+  async (caps) => {
+    const received: unknown[] = [];
+    const facade = createWorkspaceMachineRpcFacade({
+      workspaceId,
+      getMachineProtocolCapabilities: async () => caps,
+      targetRouter: {
+        getPlaneForMachine: () => 'cloud',
+        resolvePlaneForMachine: async () => 'cloud',
+      },
+      getMachineRpcClient: async () =>
+        ({
+          requestSessionDispatchTurn: async (input: unknown) => {
+            received.push(input);
+            return {
+              type: 'session/dispatch-turn_response',
+              sessionId,
+              userTurnId: 'new-human',
+              accepted: true,
+              disposition: 'accepted',
+            };
+          },
+        }) as never,
+    });
+    expect(
+      await facade.requestSessionDispatchTurn(remoteMachineId, {
+        sessionId,
+        userTurnId: 'new-human',
+        userId: 'human',
+        timestamp: '2026-10-12T00:00:00Z',
+        inputConfig: { prompt: 'current request' },
+      })
+    ).toMatchObject({ accepted: true });
+    expect(received).toEqual([
+      {
+        sessionId,
+        userTurnId: 'new-human',
+        userId: 'human',
+        timestamp: '2026-10-12T00:00:00Z',
+        inputConfig: { prompt: 'current request' },
+        timeoutMs: 15000,
+        ...('operationInbox' in caps ? { inputOrigin: 'human' } : {}),
+      },
+    ]);
+  }
+);

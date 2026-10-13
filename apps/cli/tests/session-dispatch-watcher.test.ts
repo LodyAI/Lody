@@ -7,10 +7,16 @@ import type { SessionExecutionService } from '../src/session/session-execution-s
 import { SessionDocument, type LoroDocumentManager } from '../src/lib/loro/doc';
 import { composeTestSessionDoc } from './session-doc-fixture';
 import { LoroDoc } from 'loro-crdt';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { LodyOperationStore } from '../src/orchestration/operation-store';
+import { createSessionBackend } from '../src/session/session-backend';
 import { findNextDispatchableUserTurn } from '../src/session/session-dispatch-logic';
 import { createLoroSessionData } from '@lody/shared/session-data';
 import {
   buildMissingEmail,
+  getSessionCancelRequestMarker,
   getPendingUserTurnActivationId,
   hasPendingUserTurnActivation,
   type MessageContent,
@@ -2368,15 +2374,166 @@ describe('SessionDispatchWatcher', () => {
     });
   });
 
+  it('waits for Stop control data, deduplicates it after reopen, and honors a new Stop on the same turn', async () => {
+    vi.useFakeTimers();
+    const root = mkdtempSync(join(tmpdir(), 'lody-cancel-control-'));
+    const storePath = join(root, 'operations.sqlite3');
+    let store = new LodyOperationStore(storePath);
+    const sessionId = 'session-cancel-control' as SessionId;
+    const roomId = `session-${sessionId}`;
+    const input = {
+      workspaceId: 'workspace-1',
+      sessionId,
+      userId: 'user-1',
+      inputId: 'human-one',
+      kind: 'human' as const,
+    };
+    store.inbox.activate(input.workspaceId, 'owner');
+    store.inbox.accept(input);
+    store.inbox.begin(input, 'assistant-one');
+    let meta: SessionMeta = {
+      id: sessionId,
+      machineId: 'machine-1',
+      userId: 'user-1',
+      createdAt: '2026-10-13T00:00:00.000Z',
+      cliType: 'builtin',
+      agentType: 'codex',
+      status: { type: 'idle' },
+      lastCanceledTurn: getSessionCancelRequestMarker('stop-one'),
+    };
+    const repo = {
+      getDocMeta: async () => ({ meta }),
+      upsertDocMeta: async (_id: string, patch: Partial<SessionMeta>) => {
+        meta = { ...meta, ...patch };
+      },
+      flush: async () => {},
+      watch: () => ({ unsubscribe: () => {} }),
+    };
+    let sessionDoc = new SessionDocument(
+      repo as never,
+      sessionId,
+      async () => {},
+      createSilentLogger()
+    );
+    sessionDoc.roomId = roomId;
+    let loro = composeTestSessionDoc(sessionDoc);
+    let backend = await createSessionBackend(sessionDoc, meta);
+    sessionDoc.getSessionBackend = () => backend;
+    let completed = createDeferred();
+    const workspaceDocument = {
+      repo,
+      getOrCreateSessionDoc: async () => sessionDoc,
+      onMetaRoomSynced: () => () => {},
+    } as unknown as LoroDocumentManager;
+    const executionService = {
+      getExecutionSnapshot: () => ({
+        hasActiveTurn: false,
+        hasBlockingPendingCreate: false,
+        hasReusableSession: false,
+      }),
+      cancelSession: async (message: { turnId: string; cancelId?: string }) => {
+        const success = store.inbox.pause(input, message.turnId, [], message.cancelId);
+        completed.resolve();
+        return { success };
+      },
+    } as unknown as SessionExecutionService;
+    let watcher = createWatcher({
+      logger: createSilentLogger(),
+      machineId: 'machine-1',
+      workspaceId: 'workspace-1' as WorkspaceId,
+      workspaceDocument,
+      executionService,
+      canUseMachine: createAllowMachineAccess(),
+    });
+    const reconcile = () =>
+      (
+        watcher as unknown as {
+          reconcileSessionWatch: (
+            id: SessionId,
+            trigger: string,
+            options: { awaitInitialChecks: boolean }
+          ) => Promise<void>;
+        }
+      ).reconcileSessionWatch(sessionId, 'test', { awaitInitialChecks: true });
+    try {
+      await watcher.start();
+      await reconcile();
+      expect(store.inbox.state(input).paused).toBe(0);
+      // Control-only arrival must reach the cancellation chain, without another meta event.
+      sessionDoc.mirror!.setState((draft) => {
+        draft.cancelRequest = { id: 'stop-one', turnId: 'assistant-one' };
+      });
+      await completed.promise;
+      expect(store.inbox.state(input).paused).toBe(1);
+      store.inbox.release({ ...input, executionId: 'assistant-one', outcome: 'user_stop' });
+      const fresh = { ...input, inputId: 'human-two' };
+      expect(store.inbox.accept(fresh)).toBe(true);
+      expect(store.inbox.state(input).paused).toBe(0);
+
+      watcher.stop();
+      const snapshot = loro.export({ mode: 'snapshot' });
+      store.close();
+      store = new LodyOperationStore(storePath);
+      store.inbox.activate(input.workspaceId, 'replacement');
+      sessionDoc.mirror!.dispose();
+      const reopened = new LoroDoc();
+      reopened.import(snapshot);
+      sessionDoc = new SessionDocument(
+        repo as never,
+        sessionId,
+        async () => {},
+        createSilentLogger()
+      );
+      sessionDoc.roomId = roomId;
+      loro = composeTestSessionDoc(sessionDoc, { doc: reopened });
+      backend = await createSessionBackend(sessionDoc, meta);
+      sessionDoc.getSessionBackend = () => backend;
+      watcher = createWatcher({
+        logger: createSilentLogger(),
+        machineId: 'machine-1',
+        workspaceId: 'workspace-1' as WorkspaceId,
+        workspaceDocument,
+        executionService,
+        canUseMachine: createAllowMachineAccess(),
+      });
+      await watcher.start();
+      await reconcile();
+      // Replaying the durable side of the same Stop cannot cancel a fresh human input.
+      expect(store.inbox.state(input).paused).toBe(0);
+      expect(store.inbox.inputCanceled(input.workspaceId, sessionId, fresh.inputId)).toBe(false);
+
+      completed = createDeferred();
+      meta = { ...meta, lastCanceledTurn: getSessionCancelRequestMarker('stop-two') };
+      await reconcile();
+      expect(store.inbox.state(input).paused).toBe(0); // Old control payload is not this request.
+      sessionDoc.mirror!.setState((draft) => {
+        draft.cancelRequest = { id: 'stop-two', turnId: 'assistant-one' };
+      });
+      await completed.promise;
+      expect(store.inbox.state(input).paused).toBe(1);
+      expect(store.inbox.inputCanceled(input.workspaceId, sessionId, fresh.inputId)).toBe(true);
+    } finally {
+      watcher.stop();
+      sessionDoc.mirror!.dispose();
+      store.close();
+      rmSync(root, { recursive: true, force: true });
+      vi.useRealTimers();
+    }
+  });
+
   it('reacts to lastCanceledTurn metadata for an owned session', async () => {
     const continueSession = vi.fn(async () => {});
     const startSession = vi.fn(async () => {});
     const cancelSession = vi.fn(async () => ({ success: true }));
     const sessionId = 'session-2' as SessionId;
     const roomId = `session-${sessionId}`;
+    const subscriptions = new Set<() => void>();
     const sessionDoc = withHistoryPort({
       mirror: {
-        subscribe: vi.fn(() => vi.fn()),
+        subscribe: (listener: () => void) => {
+          subscriptions.add(listener);
+          return () => subscriptions.delete(listener);
+        },
       },
       getMetaState: vi.fn(async () => ({
         id: sessionId,
@@ -2445,8 +2602,10 @@ describe('SessionDispatchWatcher', () => {
         sessionId,
         turnId: 'assistant-turn-2',
       }),
-      { pendingInput: 'promote', prePromptSession: 'discard' }
+      { pendingInput: 'preserve', prePromptSession: 'discard' }
     );
+    expect(subscriptions.size).toBe(0);
+    await watcher.stop();
   });
 
   it('handles cancel metadata without waiting for an in-flight dispatch to finish', async () => {
@@ -2539,7 +2698,7 @@ describe('SessionDispatchWatcher', () => {
         sessionId,
         turnId: 'assistant-turn-2b',
       }),
-      { pendingInput: 'promote', prePromptSession: 'discard' }
+      { pendingInput: 'preserve', prePromptSession: 'discard' }
     );
 
     resolveContinue?.();

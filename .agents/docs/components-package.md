@@ -61,6 +61,12 @@ reuse `UserChatBubble`, including ready media and mention spans, with no separat
 acceptance badge. First paint precedes the storage transaction and does not prove
 crash durability.
 
+Creating a Roost conversation commits routing metadata before admission, without
+opening its history store on that path. Background delivery persists the trusted
+`humanInputReceipts` control record before accepting owner history; Loro writes
+and control queues preserve the same provenance-before-activation ordering.
+Receipt lookup stays read-only.
+
 New input uses ordinary history-write normalization before storage validation,
 including ready file/image records with `text: undefined`. Persisted records still
 decode strictly, and same-ID content conflicts still fail. After attachment

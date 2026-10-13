@@ -223,6 +223,7 @@ export const makeCgroupContainer = Effect.fnUntraced(function* (options: {
                 Exit.isFailure(exit) ? Scope.close(childScope, exit) : Effect.void
             )
       ),
+    recoveryRoots: registry.rootPids,
     terminateAll: (policy) =>
       Effect.gen(function* () {
         const outcomes = yield* Effect.all(

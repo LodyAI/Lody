@@ -8,7 +8,7 @@ import { createPendingSessionSends, type PendingSessionSend } from '../lib/sessi
 import { createAcceptedSessionInputs, SessionInputNotSentError } from '../lib/session-accepted-inputs';
 import { createSessionInputStorage } from '../lib/session-input-storage';
 import {
-  deliverUserTurn, writeUserTurn, prepareUserTurnWrite, type SessionSendRuntime,
+  deliverUserTurn, writeUserTurn, prepareUserTurnWrite, persistHumanInputReceipt, type SessionSendRuntime,
 } from '../lib/session-send-delivery';
 import { throwIfSendAborted } from '../lib/session-send-resources';
 
@@ -49,6 +49,7 @@ export function createWorkspacePendingSends(args: {
     write: async (send, signal) => {
       await validateTarget(send);
       await prepareUserTurnWrite(runtime, send, signal);
+      await persistHumanInputReceipt(runtime, send.sessionId, send.entry, signal);
       throwIfSendAborted(signal);
       return runtime.sendResources.withSessionStore(send.sessionId, async store => {
         if (!store.sessionData.inputAcceptance) throw new SessionInputNotSentError(i18next.t('sessions.inputOwnerNeedsUpdate'));

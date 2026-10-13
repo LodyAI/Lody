@@ -1,4 +1,10 @@
 import {
+  getMachineRoomId,
+  machineSupportsProtocolCapability,
+  MACHINE_PROTOCOL_CAPABILITIES,
+  OPERATION_INBOX_PROTOCOL_VERSION,
+} from '@lody/shared';
+import {
   assertMachineFlockCacheSufficient,
   validateWithMachineFlockFreshness,
   type MachineFlockFreshness,
@@ -25,7 +31,8 @@ import {
   isPreparedSessionDispatched,
   type PreparedSessionInput,
 } from '@/lib/prepared-session-input';
-import { Command } from 'commander';
+import { Command, Option } from 'commander';
+import { sessionInboxRecoveryCommand } from './session-inbox-recovery';
 import {
   SessionDiscoveryFilterShape,
   matchesSessionDiscovery,
@@ -165,6 +172,18 @@ export type DelegatedSessionRequester = {
   author?: AgentMessageAuthor;
 };
 
+/** Delegation without provenance must never be recorded as human input. */
+const resolveSessionInputAuthor = (
+  userId: string,
+  delegatedRequester?: DelegatedSessionRequester
+): MessageAuthor => {
+  if (!delegatedRequester) return { v: 1, kind: 'human', userId };
+  if (!delegatedRequester.author) {
+    throw new Error('Delegated message is missing Agent source identity.');
+  }
+  return delegatedRequester.author;
+};
+
 type ResolvedSessionRequester = {
   userId: string;
   isDelegated: boolean;
@@ -244,6 +263,21 @@ export type ChatOptions = CommonOptions &
     wait?: boolean;
     timeout?: number;
   };
+
+/** Additive Stop fields are sent only to a peer that implements Inbox pause/resume. */
+export function getSessionCancelProtocolFields(
+  machine: Parameters<typeof machineSupportsProtocolCapability>[0],
+  cancelId: string,
+  pauseInbox: boolean
+): { cancelId?: string; pauseInbox?: boolean } {
+  return machineSupportsProtocolCapability(
+    machine,
+    MACHINE_PROTOCOL_CAPABILITIES.operationInbox,
+    OPERATION_INBOX_PROTOCOL_VERSION
+  )
+    ? { cancelId, pauseInbox }
+    : {};
+}
 
 export async function ensureSessionCreateWorkspaceMetaFresh(args: {
   manager: Pick<LoroDocumentManager, 'syncMetaOrThrow'>;
@@ -519,7 +553,6 @@ function formatVisibleTranscriptItem(item: MessageContent): string | undefined {
       operationKind: item.operationKind,
       ...(item.progressMessageId ? { progressMessageId: item.progressMessageId } : {}),
       completion: item.completion,
-      ...(item.continuation ? { continuation: item.continuation } : {}),
     });
   }
 
@@ -2498,11 +2531,22 @@ async function dispatchTurnFastPath(args: {
   userTurnId: string;
   userId: string;
   timestamp: string;
+  inputOrigin: 'human' | 'agent';
   inputConfig: SessionTurnInputConfig | undefined;
 }): Promise<void> {
   const environment = getSessionCommandEnvironment();
   if (environment) {
-    await environment.host.dispatchSession(args.sessionId);
+    await environment.host.dispatchSession(
+      args.sessionId,
+      args.inputConfig
+        ? {
+            inputId: args.userTurnId,
+            userId: args.userId,
+            config: args.inputConfig,
+            inputOrigin: args.inputOrigin,
+          }
+        : undefined
+    );
     return;
   }
   if (!args.inputConfig) {
@@ -2517,6 +2561,7 @@ async function dispatchTurnFastPath(args: {
           userTurnId: args.userTurnId,
           userId: args.userId,
           timestamp: args.timestamp,
+          inputOrigin: args.inputOrigin,
           inputConfig: args.inputConfig!,
           timeoutMs: 15_000,
         })
@@ -3544,6 +3589,7 @@ export async function prepareSessionInput(
     options.delegatedRequester
   );
   const requesterUserId = requester.userId;
+  const author = resolveSessionInputAuthor(requesterUserId, options.delegatedRequester);
   const sessionOwnerUserId = resolveSessionCreateOwnerUserId(
     requesterUserId,
     options.sessionOwnerUserId
@@ -3714,7 +3760,7 @@ export async function prepareSessionInput(
         : 'pending',
     read: !!ownerTarget || machineSupportsPreparedSessionInputProtocol(targetMachine),
     userId: requesterUserId,
-    author: options.delegatedRequester?.author ?? { v: 1, kind: 'human', userId: requesterUserId },
+    author,
     items: inputBlocksToHistoryItems(inputBlocks),
     inputConfig: {
       ...(options.agentRoleId
@@ -3811,6 +3857,8 @@ export async function createSessionResult(
         status: SessionStatusFactory.idle(),
       } satisfies Partial<SessionMeta>);
     }
+    if (!options.delegatedRequester)
+      sessionDoc.recordHumanInputReceipt(userTurnId, requesterUserId);
     await commitPreparedSessionDispatch(manager, prepared);
     dispatched = true;
     await confirmDispatchSyncedBestEffort({
@@ -3826,6 +3874,7 @@ export async function createSessionResult(
       userTurnId,
       userId: requesterUserId,
       timestamp: userTurn.timestamp,
+      inputOrigin: options.delegatedRequester ? 'agent' : 'human',
       inputConfig: userTurn.inputConfig,
     });
     return {
@@ -3933,6 +3982,7 @@ export async function sendSessionChatResult(
 }> {
   const requester = resolveSessionRequester(auth, requesterUserIdOverride, delegatedRequester);
   const requesterUserId = requester.userId;
+  const author = resolveSessionInputAuthor(requesterUserId, delegatedRequester);
   const session = await validateSessionChatTargetForRequester({
     auth,
     workspace,
@@ -4022,7 +4072,7 @@ export async function sendSessionChatResult(
     sessionDoc,
     prompt,
     userId: requesterUserId,
-    author: delegatedRequester?.author,
+    author,
     inputConfig: {
       agentRoleId: roleSelection?.agentRoleId ?? null,
       agentRoleRevision: roleSelection?.agentRoleRevision,
@@ -4062,6 +4112,7 @@ export async function sendSessionChatResult(
   let dispatched = false;
   try {
     await updateSessionActivityTimestampsBestEffort(manager, sessionId);
+    if (!delegatedRequester) sessionDoc.recordHumanInputReceipt(userTurnId, requesterUserId);
     await writeDispatchPointer({ manager, sessionId, userTurnId });
     dispatched = true;
     await confirmDispatchSyncedBestEffort({
@@ -4077,6 +4128,7 @@ export async function sendSessionChatResult(
       userTurnId,
       userId: requesterUserId,
       timestamp: userTurn.timestamp,
+      inputOrigin: delegatedRequester ? 'agent' : 'human',
       inputConfig: userTurn.inputConfig,
     });
     return {
@@ -4861,11 +4913,15 @@ const sessionCancelCommand = new Command('cancel')
   .description('Cancel the current running turn for a session')
   .option('--workspace <selector>', 'Target workspace id, slug, or name')
   .option('--turn-id <turnId>', 'Cancel only when this exact assistant turn is active')
+  .addOption(new Option('--operation-cancel', 'Internal accepted-task cancellation').hideHelp())
   .option('--json', 'Print JSON output')
   .option('--debug', 'Enable debug output')
   .argument('[sessionId]', 'Session ID; falls back to LODY_SESSION_ID')
   .action(
-    async (sessionIdArg: string | undefined, options: CommonOptions & { turnId?: string }) => {
+    async (
+      sessionIdArg: string | undefined,
+      options: CommonOptions & { turnId?: string; operationCancel?: boolean }
+    ) => {
       await runSessionCommand(options, async () => {
         const auth = getAuthContextOrThrow();
         const sessionId = (normalizeCliValue(sessionIdArg) ??
@@ -4919,6 +4975,12 @@ const sessionCancelCommand = new Command('cancel')
 
           await ensureTargetMachineOnline({ auth, workspaceId, machineId: session.machineId });
 
+          const machine = await manager.repo.getDocMeta(getMachineRoomId(session.machineId));
+          const inboxCancel = getSessionCancelProtocolFields(
+            machine?.meta,
+            uuidV4(),
+            !options.operationCancel
+          );
           const response =
             session.machineId === auth.machineId
               ? extractCancelResponse(
@@ -4928,12 +4990,18 @@ const sessionCancelCommand = new Command('cancel')
                     machineId: auth.machineId,
                     workspaceId,
                     turnId,
+                    ...inboxCancel,
                   })
                 )
               : await withMachineRpcClient(
                   { auth, workspaceId, machineId: session.machineId },
                   async (client) =>
-                    await client.requestSessionCancel({ sessionId, turnId, timeoutMs: 10_000 })
+                    await client.requestSessionCancel({
+                      sessionId,
+                      turnId,
+                      timeoutMs: 10_000,
+                      ...inboxCancel,
+                    })
                 );
 
           if (!response) {
@@ -5539,4 +5607,5 @@ export const sessionCommand = new Command('session')
   .addCommand(sessionRenameCommand)
   .addCommand(sessionArchiveCommand)
   .addCommand(sessionRestoreCommand)
+  .addCommand(sessionInboxRecoveryCommand)
   .addCommand(sessionDeleteCommand);

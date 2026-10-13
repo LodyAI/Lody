@@ -288,7 +288,7 @@ the Subagent Task panel’s 22rem height cap and internal scrollbar. Controls us
 `buildChatVirtualRows` combines consecutive pure creation records (including
 separate MCP calls) under the first record's key; a different message or an
 unhydrated turn ends the group. The row retains its final turn index so visible
-range reporting keeps every grouped turn hydrated. Failure/continuation summaries
+range reporting keeps every grouped turn hydrated. Failure summaries
 remain outside the bounded card list, and card navigation/title/status remain live.
 Message-selection mode keeps original rows so each selected id matches one record.
 See the [decision note](../../../../../.agents/notes/implemented/feature/2026-10-11-created-session-list.md).
@@ -317,3 +317,10 @@ Assistant replies do not show an author identity entry or its popover. It reads 
 in `view.tsx`; execution controls continue to describe the receiving turn. The
 [identity contract](../../../../../specs/message-author-identity.md) defines capture,
 recovery and legacy behavior.
+
+## Completed work batches
+
+Render `operation_completion_batch` as one result group with total count and delivery
+uncertainty. Its bounded member preview reuses existing completion/creation cards and
+`progressMessageId` deduplication. Rendering is passive: it never resumes a session or
+reads every omitted result. The `CompletedWorkBatch` story covers the uncertain state.

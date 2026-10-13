@@ -382,3 +382,63 @@ it('Loro structural actions report membership changes even without a target hint
   expect(changes.at(-1)).toMatchObject({ kind: 'structure', from: 0, to: 0 });
   subscription.unsubscribe();
 });
+
+it('updates one matching batch receipt while preserving the original user input and other batches', async () => {
+  const data = createLoroSessionData({ sessionId: sid, doc: new LoroDoc() });
+  const input = {
+    ...row('user', 'user'),
+    inputConfig: { prompt: 'current request', chainDepth: 0 },
+  };
+  await data.commands.appendTurn(input);
+  for (const id of ['one', 'two'])
+    await data.commands.appendTurn({
+      ...row(id, 'system'),
+      items: [
+        {
+          type: 'operation_completion_batch',
+          batchId:
+            id === 'one'
+              ? '00000000-0000-4000-8000-000000000001'
+              : '00000000-0000-4000-8000-000000000002',
+          memberCount: 8,
+          deliveryStatus: 'prepared',
+        },
+      ],
+    });
+  expect(
+    (
+      await data.commands.applyHistoryAction({
+        kind: 'operation-batch-status',
+        turnId: 'one',
+        batchId: 'wrong',
+        status: 'unknown',
+      })
+    ).matched
+  ).toBe(false);
+  await data.commands.applyHistoryAction({
+    kind: 'operation-batch-status',
+    turnId: 'one',
+    batchId: '00000000-0000-4000-8000-000000000001',
+    status: 'unknown',
+  });
+  const history = await data.history.readAll();
+  expect(history[0]).toEqual(input);
+  expect(history[1]?.items?.[0]).toMatchObject({
+    batchId: '00000000-0000-4000-8000-000000000001',
+    deliveryStatus: 'unknown',
+  });
+  expect(history[2]?.items?.[0]).toMatchObject({
+    batchId: '00000000-0000-4000-8000-000000000002',
+    deliveryStatus: 'prepared',
+  });
+  expect(
+    (
+      await data.commands.applyHistoryAction({
+        kind: 'operation-batch-status',
+        turnId: 'one',
+        batchId: '00000000-0000-4000-8000-000000000001',
+        status: 'unknown',
+      })
+    ).matched
+  ).toBe(false);
+});

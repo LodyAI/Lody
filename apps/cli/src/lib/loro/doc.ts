@@ -2477,12 +2477,24 @@ export class SessionDocument implements LoroDocument<Omit<SessionDocMeta, 'histo
     return {
       session: state.session,
       mq: state.mq as SessionDocMeta['mq'],
+      humanInputReceipts: state.humanInputReceipts as SessionDocMeta['humanInputReceipts'],
+      cancelRequest: state.cancelRequest as SessionDocMeta['cancelRequest'],
       forkOperation: state.forkOperation as SessionDocMeta['forkOperation'],
       preview: state.preview as SessionDocMeta['preview'],
       externalHistoryCursor: state.externalHistoryCursor as SessionDocMeta['externalHistoryCursor'],
       roostHistoryCursor: state.roostHistoryCursor as SessionDocMeta['roostHistoryCursor'],
       acpRuntimeConfig: state.acpRuntimeConfig as SessionDocMeta['acpRuntimeConfig'],
     };
+  }
+
+  /** Trusted human send only; generic history writes/imports never author this outbox. */
+  recordHumanInputReceipt(inputId: string, userId: string): void {
+    if (!this.mirror) throw new Error('SessionDocument not initialized');
+    if (this.mirror.getState().humanInputReceipts?.[inputId]?.userId === userId) return;
+    this.mirror.setState((draft) => {
+      draft.humanInputReceipts ??= {};
+      draft.humanInputReceipts[inputId] = { userId };
+    });
   }
 
   async waitUntilSynced(options: { timeoutMs?: number } = {}): Promise<boolean> {

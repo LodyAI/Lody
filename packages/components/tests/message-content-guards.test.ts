@@ -204,3 +204,15 @@ describe('operation progress content guard', () => {
     expect(isMessageContent({ ...progress, operationKind: 'session_chat' })).toBe(false);
   });
 });
+
+it('renders a nonempty completion batch and rejects empty batches', () => {
+  const batch = {
+    type: 'operation_completion_batch',
+    batchId: '00000000-0000-4000-8000-000000000001',
+    memberCount: 8,
+    deliveryStatus: 'unknown',
+  };
+  expect(isMessageContent(batch)).toBe(true);
+  expect(shouldRenderSystemRowItem(batch as never)).toBe(true);
+  expect(isMessageContent({ ...batch, memberCount: 0 })).toBe(false);
+});

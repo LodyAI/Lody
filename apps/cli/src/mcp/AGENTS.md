@@ -39,8 +39,8 @@ Parent instructions apply. Background: [README.md](README.md).
 - Derive orchestration identity only from the active execution runtime's dispatch payload;
   reject absent runtime/userId, never infer from daemon credential, Session owner or history.
   Freeze `requesterUserId` and `sourceTurnId` at Operation acceptance; requester Session id
-  already identifies the Session. Author snapshots are presentation only. Recovery uses the Operation
-  owner Machine and current authorization, not a frozen daemon account.
+  already identifies the Session. Authors are presentation/provenance only. Recovery uses
+  the owner Machine and current authorization.
 - Direct Role creation stays on the ordinary `lody_session_create` and
   `lody_session_create_many` tools. When `agentRoleId` is present, tolerate manual Machine, Agent,
   and run-config fields but remove them before resolution: the current Role row is authoritative
@@ -48,8 +48,9 @@ Parent instructions apply. Background: [README.md](README.md).
 
 ## Session tool contracts
 
-- Keep the shared causal chain cap and MCP guidance aligned: create/chat tools forbid
-  courtesy-only messages, duplicate result callbacks, and evading the depth limit.
+- Align chain caps and MCP guidance; create/chat forbid courtesy, duplicate callbacks
+  and depth-limit evasion. Reject new chats to the active input's Agent sender; isolate
+  rejected batch items.
 
 - Catalog uncertainty is not `INVALID_ITEM`; only retryable failures abort batches.
   Default-only calls allow no cache. Internal inferred defaults

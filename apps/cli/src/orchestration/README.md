@@ -21,31 +21,146 @@ current history so a preflight snapshot cannot overwrite an intervening update.
 The real-Mirror regression is in
 [operation-progress-feedback.test.ts](../../tests/operation-progress-feedback.test.ts).
 
+## Effect and transaction ownership
+
+The native coordinator lives in `coordinator-workflow.ts`; `coordinator-model.ts`
+contains pure decisions. `coordinator-activity.ts` owns the scoped queue, coalesced
+wake tickets and retry fibers. The old coordinator class is a registered application
+entry point, not a second reconciliation loop. Concrete Session/history/OS effects
+are in `platform/`; these upstream Promise adapters still require their own migration.
+
+Ordinary coordinator steps compose directly with `yield*`. Only deadline,
+materialization retry and best-effort progress boundaries inspect failure Causes.
+Interruption propagates instead of becoming a completed Operation or a progress
+warning; recoverable failures keep the complete Cause. Activity/epoch admission
+remains authoritative; immutable repository aliases need no replacement checks.
+
+`OrchestrationDatabase` owns one scoped SQLite connection. Disk and `:memory:` Layers
+use the same schema, SQL and repositories. In-memory SQLite is still mutable I/O,
+not a pure function; it makes isolated tests reproducible without changing semantics.
+Operation and Inbox repositories borrow the same connection. A semantic repository
+operation runs one synchronous `BEGIN IMMEDIATE` transaction: reads, conditions and
+writes commit together. Transaction callbacks reject Promise and Effect returns;
+transport, history writes and waits happen outside the transaction. SQL failures keep
+the original cause and a busy/storage/invariant classification. Reopen and multi-Worker
+behavior still require disk tests. Session configuration is frozen in intents/batches;
+the unused session-row configuration read/write is removed without a schema migration.
+
+`inbox/execution-owner.ts` hides input/batch identity, resource registration, raw
+requests, submission, settlement and release recovery. Session callers use this
+handle rather than SQL. Its `submit` starts transport and records the submitted
+receipt; callers cannot manually interleave begin/prepare/submit/settle through the
+Legacy facade. Read queries use a plain Effect-valued port interface; concrete SQL
+remains in platform, without an unused Service/Layer. `inbox/close-owner.ts` retains the original close receipt and
+a raw disposal fiber; independent recovery repairs receipts without repeating requests.
+Fleet startup and normal stop use the same phased cleanup owner. Automatic startup
+retry first recovers retained resources, then starts a replacement.
+
 ## Completion consumption
 
-SQLite claims fence the fixed completion Turn and the provider submission. A
-Delivery connection failure after submission settles as uncertain and does not
-enter ordinary user-turn stale-ACP recovery. An absence of received output is
-insufficient evidence of non-consumption. Settlement retries and Worker recovery
-use the existing claim protocol; see the
-[consumption contract](../../../../specs/session-orchestration.md#idempotent-message-consumption).
+`inbox/sqlite.ts` indexes results in the existing completion transaction, fixes release
+watermarks and persists input/batch/resource receipts. `inbox/service.ts` owns coalesced
+signals, scoped workers and the shared admission gate. `inbox/legacy.ts` registers the
+single host runtime and the unfinished Session adapter. `inbox/recovery.ts` supplies the pure disappearance rule; the process probe is a platform capability. It proves
+resource disappearance conservatively; unsupported or missing identities remain blocked.
+Session admission locks retain both waiters and holders, then evict only at zero references.
+Projected receipt cache entries follow retained SQLite receipt identities/statuses. Release
+retries own a private mutable receipt, leaving the caller event unchanged.
 
-Consumed Operation payloads expire after seven days. `operation_retired_ids`
-retains only their Session/Operation keys for the life of the local store.
-The retirement trigger runs in the same cleanup transaction, before cascaded
-Delivery deletion; the insertion trigger also fences older writers. No columns
-are added to the strict legacy Operation or Delivery rows. Modern acceptance and
-retry lookup return non-retryable `OPERATION_ID_REUSED` for retired keys.
+Missing or incomplete resource journals remain fail-closed across restart, including
+when no record exists between `begin` and first acquisition. Inspect them with the
+local, offline operator command (stop the daemon and desktop first):
 
-Persistence and acknowledgement stay in this store: repeated notifications
-resolve the same Delivery, and successful settlement atomically records consumed
-state for its claim. No ACP client or provider-specific protocol is required.
-See the [scope correction](../../../../.agents/notes/rejected/architecture/2026-10-10-provider-prompt-receipts.md).
+```sh
+lody session recover-inbox <sessionId> --machine <machineId> --workspace <workspaceId>
+# Only AFTER independently checking that all old processes/requests are released:
+lody session recover-inbox <sessionId> --machine <machineId> --workspace <workspaceId> \
+  --execution <executionId> --confirm-resources-released
+```
+
+The scoped platform adapter acquires the exclusive Host lease before opening SQLite,
+checks known PIDs/process groups without sending signals, and rejects live roots,
+probe uncertainty or another platform. The operator must attest unrecorded resources
+as well; a dead daemon PID alone is insufficient. The native workflow rechecks the
+exact blocked identity. Pause, old-input retirement, release and audit commit in one
+transaction. Recovery stays paused, creates no intent and never replays unknown
+submissions; restart Lody and send fresh input from an Inbox-aware client/CLI.
+This is local-account maintenance, not a new MCP tool or remote recovery RPC.
+
+`session-execution-service.ts` calls the actual prompt primitive while holding admission.
+A batch is one system history item plus one model input, even when details require pages.
+Inline context intentionally previews at most 50 members and 64 KiB; batch_get reads all fixed members.
+`batch-page.ts` returns complete large members in bounded JSON fragments. The execution
+owner retains raw requests and full failures; `recoverInboxExecution` retries cleanup.
+Coordinator `stop()` now has a shared awaited drain receipt; `recoverStop()` is its
+independent retry entry. Old coordinator handoff and per-result execution APIs are removed.
+`recoverStop()` invokes the bridge's `recoverClose()` for failed close receipts, using
+an independent connection to retry only settlement/release/pause writes. The original
+failed close receipt remains unchanged; requests are never resubmitted.
+
+A wakeable receipt grants an automatic intent when idle; normal release grants one for queued wakeable receipts. Inbox-aware Stop cancels queued
+human execution eligibility and pauses automatic work. Fresh human input carries saved
+results, and a failed/unreleased execution cannot manufacture another wake. See the
+[contract](../../../../specs/session-orchestration.md#idempotent-message-consumption).
+
+New Stop producers negotiate Inbox v2 with the target machine before adding `cancelId`
+and `pauseInbox` or publishing a control-request marker. Without that capability they
+send the released cancel RPC fields and write the exact assistant Turn ID. The new
+CLI accepts that legacy Stop as execution cancellation, without a persistent Inbox
+pause that the old client cannot resume. No missing receipt is guessed to be human.
+Explicit no-pause cancellation and Operation cancellation remain supported.
+
+### Batch transactions
+
+Batch membership is immutable. History projection is an idempotent stable-ID write outside the transaction and grants no dispatch permission. Enforce unique release records, intent-to-automatic-batch binding, human-input-to-submittable-batch binding, and at most one live claim per result. Superseded batches retain member history; only current claims/bindings grant eligibility. Automatic batches require `memberCount > 0`, consistent with actual membership; both batch creation and submission fencing validate this condition.
+
+| Transition | Atomic write set and conditions |
+| --- | --- |
+| Completion → queued receipt/pending intent | Persist result and wake eligibility in the completion transaction. If idle, unpaused, unblocked, without accepted input or an existing live intent, record one pending intent. Busy/paused results stay queued |
+| First normal release → boundary record/pending intent | Atomically save the unique release record. Create one pending intent only if wakeable results remain and no queued input takes priority. Duplicate releases never grant another intent |
+| Pending intent → prepared/settled_empty | Conditionally claim intent, snapshot the current queue watermark, require a wakeable result and include all unconsumed/unclaimed results through that watermark. Only nonempty results atomically create fixed batch/members, live claims and input binding. Empty results atomically settle intent as terminal settled_empty without batch/execution or reactivation. Pending human input prevents this automatic branch |
+| Human input → prepared/original batch-free path | With results, bind trusted input receipt to a nonempty batch; without results, create no batch and retain the ordinary human-input path. Freeze original prompt/attachments/configuration |
+| Unsubmitted automatic batch → yield to human | Require old batch still prepared; supersede old intent/batch, transfer all live claims, create new fixed membership and human-input binding in one transaction. Failure rolls everything back; never release and bind in separate transactions |
+| Prepared → submitting | Under the shared gate, conditionally update owner/pause/acceptance sequence/execution identity/claim/binding, also verify automatic batch memberCount > 0, and persist unique submission token; immediately start transport afterward |
+| Prepared → paused/invalid | Require no submission fence; invalidate intent/binding and release claims as passive queued data, with pause in the same transaction; do not restore automatic eligibility |
+| Submitting → submitted/unknown | Persist receipt and retain non-resubmittable members. Unknown never returns to prepared/queued. Proven non-invocation records not_submitted for the recovery entry, without automatic replay |
+| Submitted/unknown → settled | Update settlement/consumption and Cause only; duplicate settlement is idempotent and invokes no provider. Settled uncertainty is not confirmed model success |
+
+Use `BEGIN IMMEDIATE` for claims. All batches snapshot the current watermark at claim. Wake eligibility grants admission, not a membership filter. The replacement batch may include newly available results; old membership history stays unchanged. Post-claim arrivals remain queued. History failure is pre-submission; uncertainty beyond the fence remains unknown and rebuilding history cannot restore submission eligibility.
+
+### Storage and retirement
+
+Operation completion writes directly into `inbox_results` in the same transaction;
+there is no Delivery table, insert trigger or separate per-result execution claim.
+A persistent sequence counter survives deletion so post-claim results cannot enter a fixed batch.
+Settlement records consumption time; consumed payloads expire after seven days, while
+unfinished creation progress keeps its Operation until projection is settled. Retired
+Operation IDs still prevent replay. Pending result data is passive, not busy work;
+automation admission observes active Operations, executions, blocked resources and runnable intents.
+
+Schema v2 deletes only `deliveries` and `delivery_execution_state`. Released Operation
+rows, author/input snapshots, materialization/progress state and retired IDs survive
+the upgrade; active Operations continue normal reconciliation. Finished legacy
+Delivery backlog is not imported or replayed. Previously imported, unclaimed
+compatibility results are discarded; current batches, pause and resource ownership remain.
+The cleanup is transactional and is retried after storage failure. Inbox protocol v2
+requires supervisor contract v3; earlier supervised workers are rejected before storage access.
+No old binary downgrade or same-process Delivery scheduler handoff is supported.
+
+`inbox/legacy.ts` remains the registered Promise-to-Effect bridge for the current
+Session/ACP consumers. It is not an old Delivery scheduler or data compatibility layer.
+`operation_completion` and its stable `deliveryId` remain the batch member's display
+format; old per-member continuation statuses and notices are removed.
 
 ## Message-author snapshots
 
 `operation_authors` stores source identity and per-target Role display snapshots in
 the Operation acceptance transaction, with cascading cleanup. Separate storage
-keeps strict legacy `SELECT *` and frozen-config readers compatible. Missing rows
-mean legacy provenance, not permission to reconstruct historical identities from
-current catalogs. See the [contract](../../../../specs/message-author-identity.md).
+keeps Operation records separate from display snapshots. A missing author snapshot
+on a delegated Operation retains its frozen requester Session and source Turn as
+minimal Agent provenance, with the generic label `Agent` and no Role/model details.
+Create/chat reject delegation without source identity rather than defaulting to human.
+Never reconstruct historical display details from current catalogs. See the [contract](../../../../specs/message-author-identity.md).
+
+Decision rationale, verification limits and future steer conditions are maintained in
+the [implementation record](../../../../.agents/notes/implemented/architecture/2026-10-12-operation-inbox.md).

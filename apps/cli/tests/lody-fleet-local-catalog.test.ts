@@ -1,19 +1,20 @@
-import { describe, expect, it, vi } from 'vitest';
-import { Effect } from 'effect';
+import { createLocalCloudPort, type CloudPort } from '@lody/platform';
 import {
   type LocalSessionControlRequest,
   type LocalSessionControlResponse,
   type MachineId,
   type SessionId,
 } from '@lody/shared';
-import { LodyFleet } from '../src/lib/lody-fleet';
+import { Effect } from 'effect';
+import { describe, expect, it, vi } from 'vitest';
 import {
   CatalogPermissionError,
   type LocalWorkspaceCatalogService,
   type LocalWorkspaceCatalogSnapshot,
 } from '../src/lib/local-workspace-catalog';
+import { Lody } from '../src/lib/lody';
+import { LodyFleet } from '../src/lib/lody-fleet';
 import type { Logger } from '../src/utils/logger';
-import { createLocalCloudPort, type CloudPort } from '@lody/platform';
 
 const createTestCloudPort = (
   watchWorkspaceAccess?: CloudPort['access']['watchWorkspaceAccess']
@@ -418,4 +419,114 @@ describe('LodyFleet local session control streaming', () => {
     expect(onResponse).toHaveBeenCalledOnce();
     expect(onResponse).toHaveBeenCalledWith(responses[0]);
   });
+});
+
+it('retains the failed workspace owner and retries only its unresolved cleanup phase', async () => {
+  const catalog = createCatalogStub(() => Effect.succeed(catalogSnapshot({})));
+  const fleet = createFleetHarness(catalog).fleet as unknown as {
+    runtimes: Map<string, unknown>;
+    cleanupOwners: Map<string, unknown>;
+    stopWorkspace(id: string): Promise<void>;
+    retryWorkspaceCleanup(id: string): Promise<void>;
+  };
+  const steps: string[] = [];
+  let failed = true;
+  let released = false;
+  const state = {
+    workspace: { id: 'retained' },
+    schedules: {
+      dispose: async () => {
+        steps.push('schedules released');
+      },
+    },
+    lody: {
+      cleanup: async () => {
+        if (failed) {
+          steps.push('resource release failed');
+          throw new Error('retained raw request');
+        }
+        released = true;
+        steps.push('resource released');
+      },
+    },
+    unsubscribeTerminalCleanup: () => {},
+    prPollerWorkspace: {
+      dispose: async () => {
+        steps.push('poller released');
+      },
+    },
+  };
+  fleet.runtimes.set('retained', state);
+  await expect(fleet.stopWorkspace('retained')).rejects.toThrow('retained raw request');
+  expect(fleet.runtimes.get('retained')).toBe(state);
+  expect(fleet.cleanupOwners.get('retained')).toBe(state);
+  expect(released).toBe(false);
+  await expect(fleet.stopWorkspace('retained')).rejects.toThrow('retained raw request');
+  expect(steps).toEqual(['schedules released', 'resource release failed']);
+  failed = false;
+  await fleet.retryWorkspaceCleanup('retained');
+  expect(released).toBe(true);
+  expect(fleet.runtimes.has('retained')).toBe(false);
+  expect(fleet.cleanupOwners.has('retained')).toBe(false);
+  expect(steps).toEqual([
+    'schedules released',
+    'resource release failed',
+    'resource released',
+    'poller released',
+  ]);
+});
+
+it('production startup retry recovers the retained owner before attempting another workspace', async () => {
+  vi.useFakeTimers();
+  const trace: string[] = [];
+  let releaseFails = true;
+  const create = vi.spyOn(Lody, 'create').mockImplementation(async () => {
+    trace.push('create');
+    if (trace.filter((step) => step === 'create').length > 1)
+      throw new Error('next startup reached');
+    return {
+      start: async () => {
+        trace.push('start failed');
+        throw new Error('startup failed');
+      },
+      cleanup: async () => {
+        trace.push(releaseFails ? 'release failed' : 'released');
+        if (releaseFails) throw new Error('temporary release failure');
+      },
+    } as never;
+  });
+  const fleet = createFleetHarness(createCatalogStub(() => Effect.succeed(catalogSnapshot({}))))
+    .fleet as unknown as {
+    desiredWorkspaces: Map<string, unknown>;
+    startupCleanupOwners: Map<string, unknown>;
+    retryTimers: Map<string, ReturnType<typeof setTimeout>>;
+    startWorkspace(workspace: never): Promise<void>;
+    stopped: boolean;
+  };
+  // This harness normally replaces startup; restore the production entry.
+  delete (fleet as unknown as { startWorkspace?: unknown }).startWorkspace;
+  const workspace = { id: 'recovery', name: 'Recovery', slug: 'recovery', role: 'owner' };
+  fleet.desiredWorkspaces.set(workspace.id, workspace);
+  try {
+    await fleet.startWorkspace(workspace as never);
+    expect(fleet.startupCleanupOwners.has(workspace.id)).toBe(true);
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(trace).toEqual(['create', 'start failed', 'release failed', 'release failed']);
+    releaseFails = false;
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(trace).toEqual([
+      'create',
+      'start failed',
+      'release failed',
+      'release failed',
+      'released',
+      'create',
+    ]);
+    expect(fleet.startupCleanupOwners.has(workspace.id)).toBe(false);
+  } finally {
+    fleet.stopped = true;
+    for (const timer of fleet.retryTimers.values()) clearTimeout(timer);
+    create.mockRestore();
+    vi.useRealTimers();
+  }
 });
