@@ -66,10 +66,10 @@ Given('已添加干净的合成 Git 项目', async function (this: LodyWorld) {
 When('用户创建 worktree Session 并启动 Terminal', async function (this: LodyWorld) {
   await this.workPage!.enableWorktree();
   const promptEnds = this.workFixture!.readAcpEvents().filter(
-    (event) => event.event === 'prompt-end'
+    (event) => event.event === 'prompt-end' && event.mode !== 'title'
   ).length;
   await this.workPage!.startSession('Exercise Work lifecycle [SCOUT:REPLY]');
-  const completed = await this.workFixture!.waitForAcpEvent('prompt-end', promptEnds + 1);
+  const completed = await this.workFixture!.waitForCompletedAgentPrompts(promptEnds + 1);
   this.activeAcpEvent = completed.at(-1)!;
   await this.workPage!.openTerminalAndRun("printf 'lody-terminal-ready\\n'", 'lody-terminal-ready');
   this.workResources = await this.workPage!.captureResources();

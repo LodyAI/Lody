@@ -178,9 +178,9 @@ async function runWorkIteration(
   await work.enableWorktree();
   const priorPromptEnds = fixture
     .readAcpEvents()
-    .filter((event) => event.event === 'prompt-end').length;
+    .filter((event) => event.event === 'prompt-end' && event.mode !== 'title').length;
   await work.startSession(`Scout Work lifecycle ${iteration} [SCOUT:REPLY]`);
-  const completed = await fixture.waitForAcpEvent('prompt-end', priorPromptEnds + 1);
+  const completed = await fixture.waitForCompletedAgentPrompts(priorPromptEnds + 1);
   const prompt = completed.at(-1) as ScriptedAcpEvent;
   const marker = `lody-scout-terminal-${iteration}`;
   await work.openTerminalAndRun(`printf '${marker}\\n'`, marker);

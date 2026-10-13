@@ -107,6 +107,20 @@ export class WorkSessionFixture {
     return this.readAcpEvents().filter((entry) => entry.event === event);
   }
 
+  async waitForCompletedAgentPrompts(minimumCount = 1): Promise<ScriptedAcpEvent[]> {
+    const completedAgentPrompts = (): ScriptedAcpEvent[] =>
+      this.readAcpEvents().filter(
+        (entry) => entry.event === 'prompt-end' && entry.mode !== 'title'
+      );
+    await expect
+      .poll(() => completedAgentPrompts().length, {
+        timeout: 30_000,
+        intervals: [50, 100, 250, 500],
+      })
+      .toBeGreaterThanOrEqual(minimumCount);
+    return completedAgentPrompts();
+  }
+
   getStartedAgentPids(): number[] {
     return [
       ...new Set(
