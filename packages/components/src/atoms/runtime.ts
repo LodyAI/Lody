@@ -284,6 +284,10 @@ export type WorkspaceRuntime = {
     requestId: string,
     options?: { timeoutMs?: number }
   ) => Promise<MachineUpgradeResponse | null>;
+  requestProviderRateLimitsRefresh?: (
+    machineId: MachineId,
+    configId: AgentConfigId
+  ) => Promise<boolean>;
   requestMachineAcpCapabilitiesRefresh: (
     request: Extract<ClientToServer, { type: 'machine/acp-capabilities-refresh' }>,
     options?: {

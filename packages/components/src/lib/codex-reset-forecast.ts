@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-import { canShowSubscriptionRateLimits } from './session-usage';
+import { resolveAgentBrandId } from '@lody/shared';
 import type { AgentConfigCliType, AgentConfigMeta } from '@lody/shared';
 
 /**
@@ -283,8 +283,7 @@ export function isCodexResetWatchExpired(
 }
 
 /**
- * The forecast tracks OpenAI's own Codex subscription limits, so it is shown on
- * exactly the providers whose subscription usage Lody already reports: a
+ * The forecast tracks OpenAI's own Codex subscription limits, so it is shown only on a
  * built-in Codex provider with no custom key or third-party brand behind it.
  */
 export function canShowCodexResetForecast({
@@ -296,7 +295,13 @@ export function canShowCodexResetForecast({
   agentType: string;
   config?: Pick<AgentConfigMeta, 'brandId' | 'env'> | null;
 }): boolean {
-  return agentType === 'codex' && canShowSubscriptionRateLimits({ cliType, agentType, config });
+  return (
+    cliType === 'builtin' &&
+    agentType === 'codex' &&
+    (!config ||
+      (Object.keys(config.env).length === 0 &&
+        !resolveAgentBrandId({ brandId: config.brandId, env: config.env })))
+  );
 }
 
 export type CodexResetStatusFetchResult = {

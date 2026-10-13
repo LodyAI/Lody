@@ -1,6 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   ACP_CAPABILITY_FETCH_TIME_RENEW_AFTER_MS,
+  machineFlockKeys,
+  getMachineFlockAgentConfigs,
+  readMachineFlockRowsFromFlock,
+  type AgentConfigMeta,
   type AgentConfigId,
   type MachineFlockKey,
   type MachineFlockWritableFlock,
@@ -307,5 +311,59 @@ describe('MachineDocument ACP capabilities', () => {
     await write(undefined);
     expect(flock.commits).toBe(3);
     expect(modelRow()).toMatchObject({ models: changed });
+  });
+});
+
+describe('MachineDocument quota publication', () => {
+  it('publishes custom quota only while its persisted config and push fence still match', async () => {
+    const flock = new FakeMachineFlock();
+    const configId = 'quota-provider' as AgentConfigId;
+    const config: AgentConfigMeta = {
+      id: configId,
+      machineId: 'machine-1' as MachineId,
+      cliType: 'custom',
+      agentType: 'example/agent',
+      name: 'Example',
+      env: {},
+      customAcp: { command: 'example', args: [] },
+    };
+    flock.set(machineFlockKeys.agentConfig(configId), config);
+    const expected = getMachineFlockAgentConfigs(readMachineFlockRowsFromFlock(flock))[configId]!;
+    expect(expected).toBeDefined();
+    const repo = {
+      openFlockDoc: async () => ({ flock, syncOnce: async () => {} }),
+      flush: async () => {},
+    } as unknown as LoroRepo;
+    const document = new MachineDocument(
+      repo,
+      'workspace-1' as WorkspaceId,
+      'machine-1' as MachineId,
+      () => {}
+    );
+    const limit = {
+      limitId: 'account',
+      scope: { providerId: 'example' },
+      windows: [{ usedPercent: 20, windowDurationSeconds: 3600, resetsAtEpochSeconds: null }],
+    };
+    const quotaKey = machineFlockKeys.rateLimit(configId, config.agentType, 'account');
+    await document.updateRateLimits(configId, config.agentType, limit, () => true, expected);
+    expect(flock.rows.get(JSON.stringify(quotaKey))?.value).toEqual(limit);
+    await document.updateRateLimits(
+      configId,
+      config.agentType,
+      { ...limit, windows: [] },
+      () => false,
+      expected
+    );
+    expect(flock.rows.get(JSON.stringify(quotaKey))?.value).toEqual(limit);
+    flock.delete(machineFlockKeys.agentConfig(configId));
+    await document.updateRateLimits(
+      configId,
+      config.agentType,
+      { ...limit, windows: [] },
+      () => true,
+      expected
+    );
+    expect(flock.rows.get(JSON.stringify(quotaKey))?.value).toEqual(limit);
   });
 });

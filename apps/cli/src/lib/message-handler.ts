@@ -53,7 +53,6 @@ import {
   SessionCreateRequestValidated,
   SessionChatRequestValidated,
   SessionCancelRequestValidated,
-  CliType,
   AgentConfigCliType,
   type AgentConfigId,
   type BuiltinRuntimeOverrides,
@@ -3162,6 +3161,8 @@ export class MessageHandler {
             this.triggerPendingProcessLifecycleAction(response.requestId);
           }
         },
+        refreshMachineProviderRateLimits: async (configId) =>
+          this.executionService.refreshProviderRateLimits(configId),
         refreshMachineAcpCapabilities: async ({ configId, force, onAcpBinaryProgress, signal }) =>
           await this.executionService.refreshMachineAcpCapabilities(
             {
@@ -3640,9 +3641,10 @@ export class MessageHandler {
       (
         machineId: MachineId,
         agentConfigId: AgentConfigId | undefined,
-        cliType: CliType,
+        cliType: string,
         limits: RateLimit
       ) => {
+        if (agentConfigId) this.executionService.noteProviderRateLimitsUpdate(agentConfigId);
         void this.workspaceDocument.updateRateLimits(machineId, agentConfigId, cliType, limits);
       }
     );
@@ -6779,6 +6781,11 @@ export class MessageHandler {
         break;
       case 'machine/upgrade':
         await this.handleMachineUpgrade(message, context);
+        break;
+      case 'machine/provider-rate-limits-refresh':
+        if (message.machineId !== this.machineId || message.workspaceId !== this.workspaceId)
+          return;
+        context.send(await this.executionService.refreshProviderRateLimits(message.configId));
         break;
       case 'machine/acp-capabilities-refresh':
         await this.handleMachineAcpCapabilitiesRefresh(message, context);

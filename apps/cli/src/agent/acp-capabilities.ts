@@ -179,6 +179,7 @@ export async function fetchAcpCapabilities(
       ...normalizeAcpSessionCapabilities(sessionResponse, {
         sessionFork: client.supportsSessionFork?.() === true,
         sessionTitle: client.supportsSessionTitleGeneration(),
+        rateLimits: client.getRateLimitsCapability(),
         acknowledgedSteer: client.supportsAcknowledgedSteer(),
         goalActions: client.getGoalCapability()?.actions.slice(),
         agent: { cliType, agentType },

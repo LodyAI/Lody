@@ -1,3 +1,4 @@
+import type { LodyRateLimitsCapability } from 'acp-extension-core';
 import type { MemoryBinding } from './memory-provider';
 import type { AcpModelControls } from './acp-model-capabilities';
 import {
@@ -373,7 +374,7 @@ export type AcpCommandSummary = {
 // Codex-only carry a bogus ladder for every agent that spells other variants
 // with the same brackets — a Claude probe stored `{ opus: ['1m'] }` — and the
 // per-model effort picker would rebuild that model's ladder from it.
-export const ACP_CAPABILITY_CACHE_VERSION = 9;
+export const ACP_CAPABILITY_CACHE_VERSION = 10;
 
 export type AcpCapabilityAuthority = 'unavailable' | 'provisional' | 'authoritative';
 
@@ -413,6 +414,7 @@ export type AcpCapabilityCacheEntry = {
   sessionFork?: boolean;
   /** Runtime advertised Core sessionTitle v1 (automatic, tagged title updates). */
   sessionTitle?: boolean;
+  rateLimits?: LodyRateLimitsCapability;
   /** True only when the runtime advertised Lody's acknowledged steering extension. */
   acknowledgedSteer?: boolean;
   /**

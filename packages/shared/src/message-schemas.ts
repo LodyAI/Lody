@@ -1268,6 +1268,7 @@ const AcpCapabilityCacheEntrySchema = z
     sessionFork: z.boolean().optional(),
     acknowledgedSteer: z.boolean().optional(),
     sessionTitle: z.boolean().optional(),
+    rateLimits: z.object({ version: z.literal(1), query: z.literal(true).optional() }).optional(),
     goalActions: z.array(z.enum(SESSION_GOAL_ACTIONS)).optional(),
     sessionForkWorktree: z.boolean().optional(),
     fetchedAt: z.number(),
@@ -1375,6 +1376,23 @@ const MachineAcpAuthenticationFormSchema = z
       }
     });
   });
+
+export const MachineProviderRateLimitsRefreshRequestSchema = z
+  .object({
+    type: z.literal('machine/provider-rate-limits-refresh'),
+    machineId: MachineIdSchema,
+    workspaceId: WorkspaceIdSchema,
+    configId: AgentConfigIdSchema,
+  })
+  .strict();
+export const MachineProviderRateLimitsRefreshResponseSchema = z
+  .object({
+    type: z.literal('machine/provider-rate-limits-refresh_response'),
+    machineId: MachineIdSchema,
+    configId: AgentConfigIdSchema,
+    success: z.boolean(),
+  })
+  .strict();
 
 export const MachineAcpCapabilitiesRefreshRequestSchema = z
   .object({
@@ -2228,6 +2246,7 @@ export const LocalSessionControlRequestSchema = z.discriminatedUnion('type', [
   MachinePingRequestSchema,
   MachineRestartRequestSchema,
   MachineUpgradeRequestSchema,
+  MachineProviderRateLimitsRefreshRequestSchema,
   MachineAcpCapabilitiesRefreshRequestSchema,
   MachineAcpAuthenticateRequestSchema,
   MachineAcpBinaryStatusRequestSchema,
@@ -2256,6 +2275,7 @@ export const LocalSessionControlResponseSchema = z.discriminatedUnion('type', [
   MachinePingResponseSchema,
   MachineRestartResponseSchema,
   MachineUpgradeResponseSchema,
+  MachineProviderRateLimitsRefreshResponseSchema,
   MachineAcpCapabilitiesRefreshResponseSchema,
   MachineAcpAuthenticateResponseSchema,
   MachineAcpAuthenticationProgressMessageSchema,
@@ -3021,6 +3041,7 @@ export const ClientToServerSchema = z.discriminatedUnion('type', [
   MachinePingRequestSchema,
   MachineRestartRequestSchema,
   MachineUpgradeRequestSchema,
+  MachineProviderRateLimitsRefreshRequestSchema,
   MachineAcpCapabilitiesRefreshRequestSchema,
   MachineAcpAuthenticateRequestSchema,
   MachineAcpBinaryStatusRequestSchema,
@@ -3038,6 +3059,7 @@ export const ServerToClientSchema = z.discriminatedUnion('type', [
   MachinePingResponseSchema,
   MachineRestartResponseSchema,
   MachineUpgradeResponseSchema,
+  MachineProviderRateLimitsRefreshResponseSchema,
   MachineAcpCapabilitiesRefreshResponseSchema,
   MachineAcpAuthenticateResponseSchema,
   MachineAcpAuthenticationProgressMessageSchema,
@@ -3055,6 +3077,7 @@ export const MachineToServerSchema = z.discriminatedUnion('type', [
   MachinePingResponseSchema,
   MachineRestartResponseSchema,
   MachineUpgradeResponseSchema,
+  MachineProviderRateLimitsRefreshResponseSchema,
   MachineAcpCapabilitiesRefreshResponseSchema,
   MachineAcpAuthenticateResponseSchema,
   MachineAcpAuthenticationProgressMessageSchema,
@@ -3072,6 +3095,7 @@ export const ServerToMachineSchema = z.discriminatedUnion('type', [
   MachinePingRequestSchema,
   MachineRestartRequestSchema,
   MachineUpgradeRequestSchema,
+  MachineProviderRateLimitsRefreshRequestSchema,
   MachineAcpCapabilitiesRefreshRequestSchema,
   MachineAcpAuthenticateRequestSchema,
   MachineAcpBinaryStatusRequestSchema,
@@ -3095,7 +3119,9 @@ export const ServerReceiveMessageSchema = z.discriminatedUnion('type', [
   MachineRestartResponseSchema,
   MachineUpgradeRequestSchema,
   MachineUpgradeResponseSchema,
+  MachineProviderRateLimitsRefreshRequestSchema,
   MachineAcpCapabilitiesRefreshRequestSchema,
+  MachineProviderRateLimitsRefreshResponseSchema,
   MachineAcpCapabilitiesRefreshResponseSchema,
   MachineAcpAuthenticateRequestSchema,
   MachineAcpAuthenticateResponseSchema,
@@ -3126,7 +3152,9 @@ export const ServerSendMessageSchema = z.discriminatedUnion('type', [
   MachineRestartResponseSchema,
   MachineUpgradeRequestSchema,
   MachineUpgradeResponseSchema,
+  MachineProviderRateLimitsRefreshRequestSchema,
   MachineAcpCapabilitiesRefreshRequestSchema,
+  MachineProviderRateLimitsRefreshResponseSchema,
   MachineAcpCapabilitiesRefreshResponseSchema,
   MachineAcpAuthenticateRequestSchema,
   MachineAcpAuthenticateResponseSchema,

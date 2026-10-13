@@ -1,3 +1,5 @@
+import * as quotaRunner from '../src/agent/acp-runner';
+import { ProviderQuotaRefreshCache } from '../src/session/provider-quota-refresh-cache';
 import type { SessionActivePresencePhase } from '../src/lib/loro/session-active-presence';
 import { withHistoryPort } from './history-port-fixture';
 import { describe, expect, it, vi } from 'vitest';
@@ -10493,5 +10495,145 @@ describe('SessionExecutionService initialization deadline', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe('Provider quota refresh', () => {
+  const snapshot = {
+    rateLimits: [
+      {
+        limitId: 'example',
+        scope: { providerId: 'example' },
+        windows: [{ usedPercent: 42, windowDurationSeconds: 18000, resetsAtEpochSeconds: null }],
+      },
+    ],
+  };
+
+  function quotaHarness(query = true) {
+    let config: AgentConfigMeta | null = createLaunchConfig({
+      cliType: 'custom',
+      agentType: 'example',
+      env: {},
+    });
+    const rows = new Map<string, unknown>();
+    const deps = createBaseDeps({});
+    deps.workspaceDocument.getAgentConfigForMachineLaunch = async () => config;
+    deps.workspaceDocument.getAcpCapabilities = async () => ({
+      cliType: 'custom',
+      agentType: 'example',
+      modes: [],
+      models: [],
+      fetchedAt: 1,
+      rateLimits: { version: 1, ...(query ? { query: true } : {}) },
+    });
+    deps.workspaceDocument.updateRateLimits = async (_machine, id, _cli, limit, guard) => {
+      if (!guard || guard()) rows.set(`${id}/${limit.limitId}`, limit);
+    };
+    return {
+      service: new SessionExecutionService(deps),
+      rows,
+      remove: () => {
+        config = null;
+      },
+    };
+  }
+
+  it('publishes a cold query for its exact Provider and coalesces concurrent consumers', async () => {
+    const pending = createDeferred<typeof snapshot>();
+    const ready = createDeferred();
+    const read = vi.spyOn(quotaRunner, 'queryLocalAcpRateLimits').mockImplementation(async () => {
+      ready.resolve();
+      return pending.promise;
+    });
+    try {
+      const harness = quotaHarness();
+      const first = harness.service.refreshProviderRateLimits(capabilityConfigId);
+      await ready.promise;
+      const second = harness.service.refreshProviderRateLimits(capabilityConfigId);
+      pending.resolve(snapshot);
+      expect((await first).success).toBe(true);
+      expect((await second).success).toBe(true);
+      expect([...harness.rows.entries()]).toEqual([
+        [`${capabilityConfigId}/example`, snapshot.rateLimits[0]],
+      ]);
+    } finally {
+      read.mockRestore();
+    }
+  });
+
+  it.each(['empty', 'failure', 'push', 'deleted', 'unsupported'] as const)(
+    'preserves old quota on %s',
+    async (mode) => {
+      const pending = createDeferred<typeof snapshot>();
+      const ready = createDeferred();
+      const read = vi.spyOn(quotaRunner, 'queryLocalAcpRateLimits').mockImplementation(async () => {
+        ready.resolve();
+        return pending.promise;
+      });
+      try {
+        const harness = quotaHarness(mode !== 'unsupported');
+        const key = `${capabilityConfigId}/example`;
+        harness.rows.set(key, 'previous');
+        const request = harness.service.refreshProviderRateLimits(capabilityConfigId);
+        if (mode !== 'unsupported') await ready.promise;
+        if (mode === 'push') {
+          harness.service.noteProviderRateLimitsUpdate(capabilityConfigId);
+          harness.rows.set(key, 'newer-push');
+        }
+        if (mode === 'deleted') harness.remove();
+        if (mode === 'failure') pending.reject(new Error('provider unavailable'));
+        else pending.resolve(mode === 'empty' ? { rateLimits: [] } : snapshot);
+        expect((await request).success).toBe(false);
+        expect(harness.rows.get(key)).toBe(mode === 'push' ? 'newer-push' : 'previous');
+      } finally {
+        read.mockRestore();
+      }
+    }
+  );
+
+  it('keeps independent Providers, bounds freshness, and waits for the prior launch before replacement', async () => {
+    let now = 0;
+    const cache = new ProviderQuotaRefreshCache(() => now);
+    const pending = createDeferred<boolean>();
+    const ready = createDeferred();
+    const states: string[] = [];
+    const first = cache.run('a', 'old', async () => {
+      ready.resolve();
+      await pending.promise;
+      states.push('old-released');
+      return true;
+    });
+    await ready.promise;
+    const same = cache.run('a', 'old', async () => {
+      throw new Error('duplicate owner');
+    });
+    const next = cache.run('a', 'new', async () => {
+      states.push('new');
+      return true;
+    });
+    await expect(cache.run('b', 'other', async () => false)).resolves.toBe(false);
+    expect(states).toEqual([]);
+    pending.resolve(true);
+    await Promise.all([first, same, next]);
+    expect(states).toEqual(['old-released', 'new']);
+    await expect(cache.run('a', 'new', async () => false)).resolves.toBe(true);
+    now = 15_000;
+    await expect(cache.run('a', 'new', async () => false)).resolves.toBe(false);
+    now += 5_000;
+    await expect(cache.run('a', 'new', async () => true)).resolves.toBe(true);
+  });
+
+  it('quarantines unconfirmed process cleanup across launch changes', async () => {
+    const cache = new ProviderQuotaRefreshCache(
+      () => 100_000,
+      () => false
+    );
+    await expect(
+      cache.run('a', 'old', async () => {
+        throw new Error('unreleased child');
+      })
+    ).resolves.toBe(false);
+    await expect(cache.run('a', 'new', async () => true)).resolves.toBe(false);
+    await expect(cache.run('b', 'other', async () => true)).resolves.toBe(true);
   });
 });

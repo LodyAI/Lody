@@ -759,6 +759,7 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
         acpCapabilities = normalizeAcpSessionCapabilities(started.sessionResponse, {
           sessionFork: started.client.supportsSessionFork(),
           sessionTitle: started.client.supportsSessionTitleGeneration(),
+          rateLimits: started.client.getRateLimitsCapability(),
           acknowledgedSteer: started.client.supportsAcknowledgedSteer(),
           goalActions: started.client.getGoalCapability()?.actions.slice(),
           agent: { cliType: this.config.agentCliType, agentType: this.config.agentType },

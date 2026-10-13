@@ -22,7 +22,7 @@ popover.
   so the usual outcome is a 304. `data` survives a revalidation, which is what gives
   stale-while-revalidate for free; never blank it on refresh.
 - Gate every entry point on `canShowCodexResetForecast` (built-in Codex with no custom
-  key/brand, matching `canShowSubscriptionRateLimits`); a disabled entry makes no
+  key/brand, independent of Core quota capabilities); a disabled entry makes no
   request at all. Eligible provider rows always offer the direct forecast action,
   even without usage data or an active forecast. Its label carries no probability.
   Never put forecast probabilities beside remaining-quota percentages in the

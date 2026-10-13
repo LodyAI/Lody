@@ -1,3 +1,4 @@
+import type { AgentConfigId, MachineProviderRateLimitsRefreshResponse } from '@lody/shared';
 import { createWorkspacePendingSends } from './workspace-pending-sends';
 import { createLoroSyncErrorTools } from '@lody/shared/loro-sync-errors';
 import { migrateLegacySessionSends } from '../lib/legacy-session-send-migration';
@@ -1522,6 +1523,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     | MachinePingResponse
     | MachineRestartResponse
     | MachineUpgradeResponse
+    | MachineProviderRateLimitsRefreshResponse
     | MachineAcpCapabilitiesRefreshResponse
     | MachineAcpAuthenticateResponse
     | MachineAcpAuthenticationProgressMessage
@@ -1591,6 +1593,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
         | 'machine/ping'
         | 'machine/restart'
         | 'machine/upgrade'
+        | 'machine/provider-rate-limits-refresh'
         | 'machine/acp-capabilities-refresh'
         | 'machine/acp-authenticate'
         | 'machine/acp-binary-status'
@@ -1639,6 +1642,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     message.type === 'machine/ping' ||
     message.type === 'machine/restart' ||
     message.type === 'machine/upgrade' ||
+    message.type === 'machine/provider-rate-limits-refresh' ||
     message.type === 'machine/acp-capabilities-refresh' ||
     message.type === 'machine/acp-authenticate' ||
     message.type === 'machine/acp-binary-status' ||
@@ -2039,6 +2043,54 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     }
   };
 
+  const quotaRefreshes = new Map<string, Promise<boolean>>();
+  const requestProviderRateLimitsRefresh = (
+    machineId: MachineId,
+    configId: AgentConfigId
+  ): Promise<boolean> => {
+    const key = `${machineId}/${configId}`;
+    const pending = quotaRefreshes.get(key);
+    if (pending) return pending;
+    const request = (async () => {
+      await waitForMachineRouteIfNeeded(machineId);
+      if (disposePromise) return false;
+      const capabilities = await getMachineProtocolCapabilities(machineId);
+      if ((capabilities?.providerRateLimitsRefresh ?? 0) < 1) return false;
+      const message = {
+        type: 'machine/provider-rate-limits-refresh' as const,
+        machineId,
+        workspaceId,
+        configId,
+      };
+      let success = false;
+      if (targetRouter.getPlaneForMachine(machineId) === 'local') {
+        if (!canUseLocalSessionControl(message)) return false;
+        const result = await requestLocalSessionControl(message);
+        success =
+          result.ok &&
+          result.responses.some(
+            (response) =>
+              response.type === 'machine/provider-rate-limits-refresh_response' &&
+              response.machineId === machineId &&
+              response.configId === configId &&
+              response.success
+          );
+      } else if (cloudPlaneEnabled) {
+        const result = await (
+          await getMachineRpcClient(machineId)
+        ).requestMachineProviderRateLimitsRefresh(configId);
+        success = result?.machineId === machineId && result.configId === configId && result.success;
+      }
+      if (success && !disposePromise)
+        await resyncMachineFlockRows({ repo, workspaceId }, machineId);
+      return success;
+    })()
+      .catch(() => false)
+      .finally(() => quotaRefreshes.delete(key));
+    quotaRefreshes.set(key, request);
+    return request;
+  };
+
   const performMachineAcpCapabilitiesRefreshViaRpc = async (
     message: Extract<ClientToServer, { type: 'machine/acp-capabilities-refresh' }>,
     options: {
@@ -2421,6 +2473,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
           controlMessage.type === 'machine/ping_response' ||
           controlMessage.type === 'machine/restart_response' ||
           controlMessage.type === 'machine/upgrade_response' ||
+          controlMessage.type === 'machine/provider-rate-limits-refresh_response' ||
           controlMessage.type === 'machine/acp-capabilities-refresh_response' ||
           controlMessage.type === 'machine/acp-authenticate_response' ||
           controlMessage.type === 'machine/acp-authentication-progress' ||
@@ -5194,6 +5247,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     waitForMachineRestartResponse,
     waitForMachineUpgradeResponse,
     requestMachineAcpCapabilitiesRefresh,
+    requestProviderRateLimitsRefresh,
     waitForMachineAcpAuthenticateResponse,
     subscribeMachineAcpAuthenticationProgress,
     waitForMachineAcpBinaryStatusResponse,

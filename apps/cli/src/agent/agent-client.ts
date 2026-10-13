@@ -1365,6 +1365,10 @@ export class AgentClient implements acp.Client {
     return {};
   }
 
+  getRateLimitsCapability() {
+    return this.lodyExtensionCapabilities.rateLimits;
+  }
+
   async getRateLimits(request: RateLimitsGetRequest = {}): Promise<RateLimitsSnapshot> {
     if (this.lodyExtensionCapabilities.rateLimits?.query !== true) {
       throw new Error('[ACP_RATE_LIMITS_UNSUPPORTED] Agent did not advertise rate-limit queries');

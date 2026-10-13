@@ -1,3 +1,4 @@
+import { getRateLimitEntryKey } from '@lody/shared';
 // @vitest-environment jsdom
 
 import { act, useState } from 'react';
@@ -58,6 +59,44 @@ describe('ProviderRow reauthentication', () => {
       );
     });
   };
+
+  it('shows quota only for a Provider that declares the capability, including custom ACP', async () => {
+    const config = makeConfig({ cliType: 'custom', agentType: 'example' });
+    const quotaMachine: MachineViewMeta = { ...machine };
+    // Use the same public key encoder as the daemon's Flock projection.
+    quotaMachine.raceLimits = {
+      [getRateLimitEntryKey('example', 'example', config.id)]: {
+        limitId: 'example',
+        scope: { providerId: 'example' },
+        windows: [{ usedPercent: 30, windowDurationSeconds: 18000, resetsAtEpochSeconds: null }],
+      },
+    };
+    const render = async () =>
+      act(async () => {
+        root.render(
+          <ProviderRow
+            config={config}
+            machine={{ ...quotaMachine }}
+            onEdit={() => {}}
+            onRefresh={() => {}}
+          />
+        );
+      });
+    await render();
+    expect(container.textContent).not.toContain('70%');
+    quotaMachine.acpCapabilities = {
+      [config.id]: {
+        cliType: 'custom',
+        agentType: 'example',
+        modes: [],
+        models: [],
+        fetchedAt: 1,
+        rateLimits: { version: 1 },
+      },
+    };
+    await render();
+    expect(container.textContent).toContain('70%');
+  });
 
   // Asserts on rendered text rather than a mocked panel: the row must not grow a
   // sign-in affordance again, whichever component would provide it.

@@ -33,6 +33,7 @@ import {
 } from '../src/machine-flock';
 import {
   getRateLimitEntryKey,
+  parseRateLimitEntryKey,
   getAcpCapabilityCacheKey,
   type AgentConfigId,
   type LocalProjectId,
@@ -580,6 +581,25 @@ describe('machine Flock helpers', () => {
           },
         },
       },
+    });
+  });
+
+  it('round-trips arbitrary ACP provider names through scoped quota rows', () => {
+    const flock = new FakeMachineFlock();
+    const configId = 'example-provider' as AgentConfigId;
+    const agentType = 'example::custom/agent';
+    const key = machineFlockKeys.rateLimit(configId, agentType, 'weekly');
+    const value = { limitId: 'weekly', scope: { providerId: 'example' }, windows: [] };
+    writeMachineFlockRowToFlock(flock, { key, value });
+    const limits = getMachineFlockRateLimits(
+      readMachineFlockRowsFromFlock(flock, { families: ['rateLimit'] })
+    );
+    const entryKey = getRateLimitEntryKey(agentType, 'weekly', configId);
+    expect(limits[entryKey]).toEqual(value);
+    expect(parseRateLimitEntryKey(entryKey)).toEqual({
+      agentConfigId: configId,
+      cliType: agentType,
+      limitId: 'weekly',
     });
   });
 

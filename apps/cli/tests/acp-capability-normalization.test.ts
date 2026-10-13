@@ -183,3 +183,13 @@ describe('ACP capability normalization', () => {
     expect(capabilities.acknowledgedSteer).toBe(true);
   });
 });
+
+it('preserves the runtime quota declaration including push-only support', () => {
+  expect(
+    normalizeAcpSessionCapabilities({}, { rateLimits: { version: 1, query: true } }).rateLimits
+  ).toEqual({ version: 1, query: true });
+  expect(normalizeAcpSessionCapabilities({}, { rateLimits: { version: 1 } }).rateLimits).toEqual({
+    version: 1,
+  });
+  expect(normalizeAcpSessionCapabilities({}).rateLimits).toBeUndefined();
+});

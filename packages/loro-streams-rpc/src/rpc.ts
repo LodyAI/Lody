@@ -55,6 +55,7 @@ import type {
   MachineAcpAuthenticateResponse,
   MachineAcpAuthenticationProgressMessage,
   MachineAcpCapabilitiesRefreshResponse,
+  MachineProviderRateLimitsRefreshResponse,
   MachinePiExtensionsResponse,
   RpcSecretEnvelope,
   RpcSecretPublicKey,
@@ -113,6 +114,7 @@ import {
   MachineAcpAuthenticateResponseSchema,
   MachineAcpAuthenticationProgressMessageSchema,
   MachineAcpCapabilitiesRefreshResponseSchema,
+  MachineProviderRateLimitsRefreshResponseSchema,
   MachinePiExtensionsResponseSchema,
   RpcSecretEnvelopeSchema,
   PreviewTargetSchema,
@@ -236,6 +238,7 @@ export const LoroStreamsRpcMethodSchema = z.enum([
   'machine/ping',
   'machine/restart',
   'machine/upgrade',
+  'machine/provider-rate-limits-refresh',
   'machine/acp-capabilities-refresh',
   'machine/acp-capabilities-refresh-cancel',
   'machine/acp-authenticate',
@@ -340,6 +343,11 @@ export const LoroMachineUpgradeRpcRequestSchema = BaseRpcRequestSchema.extend({
       targetVersion: z.string().trim().min(1).optional(),
     })
     .strict(),
+}).strict();
+
+export const LoroMachineProviderRateLimitsRefreshRpcRequestSchema = BaseRpcRequestSchema.extend({
+  method: z.literal('machine/provider-rate-limits-refresh'),
+  params: z.object({ configId: AgentConfigIdSchema }).strict(),
 }).strict();
 
 export const LoroMachineAcpCapabilitiesRefreshRpcRequestSchema = BaseRpcRequestSchema.extend({
@@ -719,6 +727,7 @@ export const LoroStreamsRpcRequestSchema = z.discriminatedUnion('method', [
   LoroMachinePingRpcRequestSchema,
   LoroMachineRestartRpcRequestSchema,
   LoroMachineUpgradeRpcRequestSchema,
+  LoroMachineProviderRateLimitsRefreshRpcRequestSchema,
   LoroMachineAcpCapabilitiesRefreshRpcRequestSchema,
   LoroMachineAcpCapabilitiesRefreshCancelRpcRequestSchema,
   LoroMachineAcpAuthenticateRpcRequestSchema,
@@ -1587,6 +1596,7 @@ export type LoroMachineRpcResult =
   | CodeCollabV2RpcResponse
   | CodeCollabV2Error
   | FilePreviewV3Response
+  | MachineProviderRateLimitsRefreshResponse
   | MachineAcpCapabilitiesRefreshResponse
   | MachineAcpAuthenticateResponse
   | MachineAcpAuthenticationProgressMessage
@@ -2013,6 +2023,10 @@ const parseRpcSuccessResult = async (
   if (response.method === 'machine/upgrade') {
     const parsed = MachineUpgradeResponseSchema.safeParse(response.result);
     return parsed.success ? (parsed.data as MachineUpgradeResponse) : null;
+  }
+  if (response.method === 'machine/provider-rate-limits-refresh') {
+    const parsed = MachineProviderRateLimitsRefreshResponseSchema.safeParse(response.result);
+    return parsed.success ? (parsed.data as MachineProviderRateLimitsRefreshResponse) : null;
   }
   if (response.method === 'machine/acp-capabilities-refresh') {
     const parsed = MachineAcpCapabilitiesRefreshResponseSchema.safeParse(response.result);
@@ -2738,6 +2752,16 @@ export class LoroStreamsMachineRpcClient {
         targetVersion: options.targetVersion,
       },
     })) as MachineUpgradeResponse | null;
+  }
+
+  async requestMachineProviderRateLimitsRefresh(
+    configId: AgentConfigId
+  ): Promise<MachineProviderRateLimitsRefreshResponse | null> {
+    return (await this.sendRequest({
+      method: 'machine/provider-rate-limits-refresh',
+      params: { configId },
+      timeoutMs: 60_000,
+    })) as MachineProviderRateLimitsRefreshResponse | null;
   }
 
   async requestMachineAcpCapabilitiesRefresh(options: {
@@ -3507,6 +3531,11 @@ export class LoroStreamsMachineRpcClient {
           };
         }
       | {
+          method: 'machine/provider-rate-limits-refresh';
+          timeoutMs: number;
+          params: { configId: AgentConfigId };
+        }
+      | {
           method: 'machine/acp-capabilities-refresh';
           timeoutMs: number;
           onAcpBinaryProgress?: (message: MachineAcpBinaryProgressMessage) => void;
@@ -3957,6 +3986,7 @@ export class LoroStreamsMachineRpcClient {
         case 'machine/upgrade':
           request = { ...envelope, method: args.method, params: args.params };
           break;
+        case 'machine/provider-rate-limits-refresh':
         case 'machine/acp-capabilities-refresh':
           request = { ...envelope, method: args.method, params: args.params };
           break;

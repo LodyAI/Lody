@@ -1,3 +1,4 @@
+import { useProviderQuotaRefresh } from '@/hooks/use-provider-quota-refresh';
 import { snapshotAgentRole } from '@lody/shared';
 import { buildDraftUserHistoryEntry } from '@/lib/session-attachment-draft';
 import { sessionHasUnreadMessages } from '@/lib/session-read-receipt';
@@ -1689,12 +1690,25 @@ function WorkspaceChatLanding({
     () => filterAcpSessionConfigOptionValues(configOptionValues, resolvedConfigOptionSelectors),
     [configOptionValues, resolvedConfigOptionSelectors]
   );
+  const refreshQuota = useProviderQuotaRefresh(
+    selectedMachine?.id,
+    selectedConfig?.id,
+    !!selectedConfig &&
+      selectedMachine?.acpCapabilities?.[selectedConfig.id]?.rateLimits?.query === true &&
+      canShowSubscriptionRateLimits({
+        cliType: selectedConfig.cliType,
+        agentType: selectedConfig.agentType,
+        config: selectedConfig,
+        capability: selectedMachine?.acpCapabilities?.[selectedConfig.id]?.rateLimits,
+      })
+  );
   const selectedRateLimits =
     selectedConfig &&
     canShowSubscriptionRateLimits({
       cliType: selectedConfig.cliType,
       agentType: selectedConfig.agentType,
       config: selectedConfig,
+      capability: selectedMachine?.acpCapabilities?.[selectedConfig.id]?.rateLimits,
     })
       ? selectedMachine?.raceLimits
       : undefined;
@@ -3780,6 +3794,7 @@ function WorkspaceChatLanding({
           />
         )}
         <SessionUsagePopover
+          onRefreshQuota={refreshQuota}
           rateLimits={selectedRateLimits}
           agentType={selectedConfig?.agentType ?? ''}
           agentConfigId={selectedConfig?.id}
@@ -4068,6 +4083,7 @@ function WorkspaceChatLanding({
           />
         </div>
         <SessionUsagePopover
+          onRefreshQuota={refreshQuota}
           rateLimits={selectedRateLimits}
           agentType={selectedConfig?.agentType ?? ''}
           agentConfigId={selectedConfig?.id}

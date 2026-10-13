@@ -26,7 +26,6 @@ import {
   type MessageContent,
   SessionStatusFactory,
   MachineId,
-  CliType,
   getManagedBuiltinRuntimeByAgentType,
   getManagedBuiltinRuntimeByRuntimeName,
   isManagedBuiltinAgentType,
@@ -455,7 +454,7 @@ interface SessionManagerEvents {
   onRateLimitUpdate: (
     machineId: MachineId,
     agentConfigId: AgentConfigId | undefined,
-    cliType: CliType,
+    cliType: string,
     limits: RateLimit
   ) => void;
   onThreadGoalUpdated: (
@@ -1450,7 +1449,10 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
       },
       onRateLimitUpdate: (limits: RateLimit) => {
         dispatchEvent(() => {
-          if (config.agentCliType === 'builtin' && isManagedBuiltinAgentType(config.agentType)) {
+          if (
+            config.agentConfigId ||
+            (config.agentCliType === 'builtin' && isManagedBuiltinAgentType(config.agentType))
+          ) {
             this.emit(
               'onRateLimitUpdate',
               this.machineId,

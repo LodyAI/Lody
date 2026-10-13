@@ -535,6 +535,18 @@ function isLocalSessionControlRequest(value) {
     );
   }
 
+  if (value.type === 'machine/provider-rate-limits-refresh') {
+    return (
+      typeof value.machineId === 'string' &&
+      typeof value.workspaceId === 'string' &&
+      typeof value.configId === 'string' &&
+      value.configId.trim().length > 0 &&
+      Object.keys(value).every((key) =>
+        ['type', 'machineId', 'workspaceId', 'configId'].includes(key)
+      )
+    );
+  }
+
   if (value.type === 'machine/acp-capabilities-refresh') {
     return (
       typeof value.machineId === 'string' &&
@@ -838,6 +850,14 @@ function isLocalSessionControlResponse(value) {
       isOptionalString(value.error) &&
       (value.type === 'machine/restart_response' ||
         (isOptionalString(value.currentVersion) && isOptionalString(value.targetVersion)))
+    );
+  }
+
+  if (value.type === 'machine/provider-rate-limits-refresh_response') {
+    return (
+      typeof value.machineId === 'string' &&
+      typeof value.configId === 'string' &&
+      typeof value.success === 'boolean'
     );
   }
 
