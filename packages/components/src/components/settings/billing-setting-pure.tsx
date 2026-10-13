@@ -208,6 +208,14 @@ export interface BillingOverviewData {
   billingAccountId: string | null;
   /** Backend capability fence for rolling frontend/backend deployments. */
   giftStackingSupported: boolean;
+  seatPaymentBeforeAdmission?: boolean;
+  seatBilling?: {
+    policy: 'deferred';
+    capacity: number;
+    available: number;
+    renewalQuantity: number;
+    periodEnd: number | null;
+  } | null;
   effectivePlanTier: 'free' | 'plus' | 'enterprise';
   entitlementSource: 'free' | 'stripe' | 'stripe_gift' | 'enterprise';
   offerKey: string | null;
@@ -249,6 +257,20 @@ export interface BillingInvoice {
   number: string | null;
   status: string;
   amountPaid: number;
+  /** Optional for clients connected to an older billing backend. */
+  amountDue?: number | null;
+  amountRemaining?: number | null;
+  total?: number | null;
+  reason?:
+    | 'subscription_started'
+    | 'subscription_renewed'
+    | 'seats_added'
+    | 'seats_removed'
+    | 'plan_changed'
+    | 'subscription_changed'
+    | 'gift_redemption'
+    | 'other';
+  seatChange?: { from: number; to: number } | null;
   currency: string;
   periodStart: number | null;
   periodEnd: number | null;
@@ -320,7 +342,54 @@ export interface BillingSettingsViewProps {
   onResumeSubscription: () => void;
   onRedeemCode: (code: string) => void;
   onRetryInvoices: () => void;
+  onViewInvoice?: (invoice: BillingInvoice) => void;
   onCancelExternalCheckout?: () => void;
+}
+
+export function invoiceDisplayAmount(invoice: BillingInvoice): number | null {
+  if (invoice.status === 'open' || invoice.status === 'uncollectible') {
+    return invoice.amountRemaining ?? invoice.amountDue ?? null;
+  }
+  return invoice.status === 'paid'
+    ? invoice.amountPaid
+    : (invoice.total ?? invoice.amountDue ?? null);
+}
+
+export function invoiceReasonKey(invoice: BillingInvoice) {
+  if (invoice.kind === 'gift_redemption') return 'billing.historyGiftPlus' as const;
+  switch (invoice.reason) {
+    case 'subscription_started':
+      return 'billing.invoiceReasonStarted';
+    case 'subscription_renewed':
+      return 'billing.invoiceReasonRenewed';
+    case 'seats_added':
+      return 'billing.invoiceReasonSeatsAdded';
+    case 'seats_removed':
+      return 'billing.invoiceReasonSeatsRemoved';
+    case 'plan_changed':
+      return 'billing.invoiceReasonPlanChanged';
+    case 'subscription_changed':
+      return 'billing.invoiceReasonAdjusted';
+    default:
+      return 'billing.invoiceReasonOther';
+  }
+}
+
+export function invoiceStatusKey(status: string) {
+  switch (status) {
+    case 'open':
+      return 'billing.invoiceStatusOpen';
+    case 'paid':
+      return 'billing.invoiceStatusPaid';
+    case 'void':
+      return 'billing.invoiceStatusVoid';
+    case 'draft':
+      return 'billing.invoiceStatusDraft';
+    case 'uncollectible':
+      return 'billing.invoiceStatusUncollectible';
+    default:
+      return 'billing.invoiceStatusUnknown';
+  }
 }
 
 export function formatUsd(cents: number): string {
@@ -332,7 +401,7 @@ export function formatDate(timestamp: number | null | undefined): string {
   return new Intl.DateTimeFormat(undefined, { dateStyle: 'medium' }).format(new Date(timestamp));
 }
 
-function formatMoney(cents: number, currency: string): string {
+export function formatMoney(cents: number, currency: string): string {
   try {
     return new Intl.NumberFormat('en-US', {
       style: 'currency',
@@ -367,6 +436,7 @@ export function BillingSettingsView({
   onResumeSubscription,
   onRedeemCode,
   onRetryInvoices,
+  onViewInvoice,
   onCancelExternalCheckout,
 }: BillingSettingsViewProps) {
   const { t } = useTranslation();
@@ -674,6 +744,26 @@ export function BillingSettingsView({
                 {!entitled ? ` / ${FREE_WORKSPACE_MEMBER_LIMIT}` : null}
               </span>
             </div>
+            {overview.seatBilling ? (
+              <>
+                <p {...stylex.props(styles.helper)}>
+                  {t('billing.deferredSeatCounts', {
+                    capacity: overview.seatBilling.capacity,
+                    available: overview.seatBilling.available,
+                    renewal: overview.seatBilling.renewalQuantity,
+                  })}
+                </p>
+                <p {...stylex.props(styles.helper)}>
+                  {t(
+                    overview.billingInterval === 'year'
+                      ? 'billing.deferredSeatsYearly'
+                      : 'billing.deferredSeatsMonthly'
+                  )}
+                </p>
+                <p {...stylex.props(styles.helper)}>{t('billing.deferredSeatRemoval')}</p>
+                <p {...stylex.props(styles.helper)}>{t('billing.seatRefundPolicy')}</p>
+              </>
+            ) : null}
           </div>
         </CompactSection>
       ) : null}
@@ -893,30 +983,40 @@ export function BillingSettingsView({
                 >
                   <div {...stylex.props(styles.invoiceText)}>
                     <p {...stylex.props(surface.rowLabel)}>
-                      {formatDate(invoice.periodStart ?? invoice.createdAt)}
+                      {invoice.status === 'draft'
+                        ? t('billing.invoiceScheduledCollection', {
+                            date: formatDate(invoice.createdAt),
+                          })
+                        : formatDate(invoice.createdAt)}
                     </p>
                     <p {...stylex.props(surface.rowHelper)}>
-                      {invoice.kind === 'gift_redemption'
-                        ? invoice.giftDurationMonths
-                          ? t('billing.historyGiftPlusMonths', {
-                              count: invoice.giftDurationMonths,
-                            })
-                          : t('billing.historyGiftPlus')
-                        : invoice.interval === 'year'
-                          ? t('billing.historyPlanYearly')
-                          : invoice.interval === 'month'
-                            ? t('billing.historyPlanMonthly')
-                            : t('billing.plan.plus')}
+                      {invoice.kind === 'gift_redemption' && invoice.giftDurationMonths
+                        ? t('billing.historyGiftPlusMonths', { count: invoice.giftDurationMonths })
+                        : t(invoiceReasonKey(invoice))}
+                      {invoice.kind !== 'gift_redemption' && invoice.interval
+                        ? ` · ${t(invoice.interval === 'year' ? 'billing.historyPlanYearly' : 'billing.historyPlanMonthly')}`
+                        : null}
+                      {invoice.seatChange
+                        ? ` · ${t('billing.invoiceSeatChange', invoice.seatChange)}`
+                        : null}
                     </p>
                   </div>
                   <div {...stylex.props(styles.inlineRow)}>
                     <span {...stylex.props(styles.tabular)}>
-                      {formatMoney(invoice.amountPaid, invoice.currency)}
+                      {invoiceDisplayAmount(invoice) == null
+                        ? t('billing.invoiceAmountUnavailable')
+                        : formatMoney(invoiceDisplayAmount(invoice)!, invoice.currency)}
                     </span>
-                    <Badge>
-                      {invoice.status.charAt(0).toUpperCase() + invoice.status.slice(1)}
-                    </Badge>
-                    {invoice.hostedInvoiceUrl ? (
+                    <Badge>{t(invoiceStatusKey(invoice.status))}</Badge>
+                    {onViewInvoice ? (
+                      <Button
+                        variant="secondary"
+                        size="small"
+                        onClick={() => onViewInvoice(invoice)}
+                      >
+                        {t('billing.invoiceDetails')}
+                      </Button>
+                    ) : invoice.hostedInvoiceUrl ? (
                       <a
                         href={invoice.hostedInvoiceUrl}
                         target="_blank"

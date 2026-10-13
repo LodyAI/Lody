@@ -112,6 +112,8 @@ export function areBillingOverviewsEqual(
   return (
     left.billingAccountId === right.billingAccountId &&
     left.giftStackingSupported === right.giftStackingSupported &&
+    left.seatPaymentBeforeAdmission === right.seatPaymentBeforeAdmission &&
+    JSON.stringify(left.seatBilling) === JSON.stringify(right.seatBilling) &&
     left.effectivePlanTier === right.effectivePlanTier &&
     left.entitlementSource === right.entitlementSource &&
     left.offerKey === right.offerKey &&

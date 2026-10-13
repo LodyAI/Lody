@@ -1,3 +1,5 @@
+import type { BillingInvoiceDetail } from '@lody/cloud-api';
+import { BillingInvoiceDetails } from './billing-invoice-details';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Spinner } from '@lody/ui/spinner';
 import { Button } from '@lody/ui/button';
@@ -155,6 +157,7 @@ function CloudBillingSettings() {
   const previewSubscriptionIntervalChange = useCloudAction(
     cloudOperations.billing.previewSubscriptionIntervalChange
   );
+
   const [pendingAction, setPendingAction] = useState<BillingPendingAction>(null);
   const [redeemPending, setRedeemPending] = useState(false);
   const [cancelDialogOpen, setCancelDialogOpen] = useState(false);
@@ -170,6 +173,10 @@ function CloudBillingSettings() {
   const [upcomingInvoice, setUpcomingInvoice] = useState<BillingUpcomingInvoice | null>(null);
   const [invoicesError, setInvoicesError] = useState(false);
   const [invoicesReloadKey, setInvoicesReloadKey] = useState(0);
+  const [selectedInvoice, setSelectedInvoice] = useState<{
+    scope: string;
+    invoice: BillingInvoice;
+  } | null>(null);
   const [checkoutSuccessReturn, setCheckoutSuccessReturn] = useState(false);
   // Anchor the confirmation window to when the return was first seen, so a
   // reload inside an already-slow confirmation does not restart the wait.
@@ -622,8 +629,23 @@ function CloudBillingSettings() {
         onResumeSubscription={() => void handleSetCancelAtPeriodEnd(false)}
         onRedeemCode={(code) => void handleRedeemCode(code)}
         onRetryInvoices={() => setInvoicesReloadKey((key) => key + 1)}
+        onViewInvoice={(invoice) => {
+          if (overviewScope) setSelectedInvoice({ scope: overviewScope, invoice });
+        }}
         onCancelExternalCheckout={() => setExternalCheckoutPending(false)}
       />
+      {selectedInvoice &&
+      selectedInvoice.scope === overviewScope &&
+      workspaceId &&
+      canLoadInvoices ? (
+        <ManagedBillingInvoiceDetails
+          key={`${overviewScope}:${selectedInvoice.invoice.id}`}
+          workspaceId={workspaceId}
+          invoice={selectedInvoice.invoice}
+          onClose={() => setSelectedInvoice(null)}
+          onCanceled={reloadInvoices}
+        />
+      ) : null}
       <AlertDialog.Root open={switchIntervalDialogOpen} onOpenChange={setSwitchIntervalDialogOpen}>
         <AlertDialog.Content>
           <AlertDialog.Header>
@@ -760,5 +782,83 @@ function CloudBillingSettings() {
         </AlertDialog.Content>
       </AlertDialog.Root>
     </>
+  );
+}
+
+function ManagedBillingInvoiceDetails({
+  workspaceId,
+  invoice,
+  onClose,
+  onCanceled,
+}: {
+  workspaceId: string;
+  invoice: BillingInvoice;
+  onClose: () => void;
+  onCanceled: () => void;
+}) {
+  const getDetail = useCloudAction(cloudOperations.billing.getBillingInvoice);
+  const cancelInvoice = useCloudAction(cloudOperations.billing.cancelPendingSeatInvoice);
+  const [detail, setDetail] = useState<BillingInvoiceDetail | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
+  const [cancelPending, setCancelPending] = useState(false);
+  const [cancelError, setCancelError] = useState(false);
+  const [reload, setReload] = useState(0);
+  const alive = useRef(true);
+  useEffect(() => {
+    alive.current = true;
+    return () => {
+      alive.current = false;
+    };
+  }, []);
+  useEffect(() => {
+    let current = true;
+    setLoading(true);
+    setError(false);
+    getDetail({ workspaceId, invoiceId: invoice.id })
+      .then((value) => {
+        if (current) setDetail(value);
+      })
+      .catch(() => {
+        if (current) setError(true);
+      })
+      .finally(() => {
+        if (current) setLoading(false);
+      });
+    return () => {
+      current = false;
+    };
+  }, [workspaceId, invoice.id, getDetail, reload]);
+  const cancel = async () => {
+    if (cancelPending) return;
+    setCancelPending(true);
+    setCancelError(false);
+    try {
+      await cancelInvoice({ workspaceId, invoiceId: invoice.id });
+      if (alive.current) {
+        onCanceled();
+        setReload((value) => value + 1);
+      }
+    } catch {
+      if (alive.current) {
+        setCancelError(true);
+        setReload((value) => value + 1);
+      }
+    } finally {
+      if (alive.current) setCancelPending(false);
+    }
+  };
+  return (
+    <BillingInvoiceDetails
+      invoice={invoice}
+      detail={detail}
+      loading={loading}
+      error={error}
+      cancelPending={cancelPending}
+      cancelError={cancelError}
+      onClose={onClose}
+      onRetry={() => setReload((value) => value + 1)}
+      onCancel={() => void cancel()}
+    />
   );
 }

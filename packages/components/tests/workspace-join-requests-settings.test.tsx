@@ -9,10 +9,12 @@ import { initI18n } from '../src/i18n';
 const mocks = vi.hoisted(() => ({
   useQuery: vi.fn(),
   mutation: vi.fn(),
+  action: vi.fn(),
 }));
 
 vi.mock('@lody/platform/react', () => ({
   useCloudMutation: () => mocks.mutation,
+  useCloudAction: () => mocks.action,
   useCloudQuery: (...args: unknown[]) => mocks.useQuery(...args),
 }));
 
