@@ -343,6 +343,31 @@ export class AppIpc extends IpcService {
   }
 
   @IpcMethod()
+  async restartOnboarding() {
+    const { event } = getIpcContext()
+    const { getMainWindow, restartOnboarding } = getIpcServiceDeps()
+    const mainWindow = getMainWindow()
+    if (
+      !mainWindow ||
+      mainWindow.isDestroyed() ||
+      event.sender !== mainWindow.webContents ||
+      event.senderFrame !== event.sender.mainFrame
+    ) {
+      return { ok: false as const, error: 'untrusted_sender' as const }
+    }
+    try {
+      restartOnboarding(mainWindow)
+      return { ok: true as const }
+    } catch (error) {
+      return {
+        ok: false as const,
+        error: 'restart_failed' as const,
+        message: formatUnknownError(error)
+      }
+    }
+  }
+
+  @IpcMethod()
   async getAutoLaunchStatus() {
     return getAutoLaunchStatus()
   }
