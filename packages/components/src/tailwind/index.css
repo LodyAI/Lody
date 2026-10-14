@@ -1233,6 +1233,13 @@ pre,
     user-select: text;
   }
 
+  /* No WKWebView link preview inside selectable text: after its "Open Link",
+     every later tap in the app reopened that link. Links open with a tap. */
+  body.native-mobile-shell [data-native-selection-allow] a[href],
+  body.native-mobile-shell [data-native-selection-allow] a[href] * {
+    -webkit-touch-callout: none;
+  }
+
   button,
   [role='button'],
   input[type='button'],
