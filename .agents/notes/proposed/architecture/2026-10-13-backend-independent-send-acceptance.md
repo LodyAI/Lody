@@ -108,7 +108,10 @@ handoff without adding acceptance text or mutating history status. Persisted sou
 state alone cannot show a check. Guide history acceptance remains distinct from
 application and does not publish this acknowledgement.
 
-The adjacent loading spinner is a separate part of the ordinary user row, outside
+Follow-up verification of the earlier desktop test package isolated the remaining
+visual gap to the rotating indicator beside the bubble; message content already
+appeared immediately. The adjacent loading spinner is a separate part of the
+ordinary user row, outside
 `UserChatBubble`. Reusing that bubble and adding its metadata circle did not render
 the spinner during local Roost input, so a slow confirmation still appeared idle.
 Ready input now shares the ordinary row's 500 ms loading hook and existing rotating
@@ -247,13 +250,16 @@ local Roost rows: at 499 ms neither loads, at 500 ms both load, and an owner rec
 removes loading while preserving the check through history handoff. Before the
 spinner change, the Loro case passed and the Roost case failed. A separate case
 covers error, retry, and a receipt before the retry timer expires. These two
-owning suites pass 48 tests, and browser rendering confirms a visible 16 px
-spinner in the waiting story and no spinner in the confirmed story. This is
-synthetic presentation evidence, not a production end-to-end timing measurement.
+owning suites pass 48 tests. Chromium rendering confirms a visible 16 px spinner
+in the waiting story, a hidden spinner below the 520 px container threshold, and
+no spinner in the confirmed story. Full `pnpm check` passed with the spinner
+change; after the CSS wrapper correction, components type-checking, the same 48
+tests, scoped lint and formatting checks passed again. These checks do not measure
+packaged-app confirmation timing or production end-to-end latency.
 The initial presentation-only suite passed 84 tests; components type-checking, scoped lint and
 format checks pass. Repository documentation checking remains blocked by six
-existing Kimi/Pi links in the subagent-events notes. Full workspace checks and
-packaged confirmation timing were not run for this presentation change.
+existing Kimi/Pi links in the subagent-events notes. For that earlier metadata-circle-only
+change, full workspace checks and packaged confirmation timing were not run.
 
 The combined-request follow-up passes 296 focused tests: 115 sender/UI tests,
 123 CLI backend/dispatcher/registration cases (including the native commit-order
@@ -266,4 +272,5 @@ checks pass. Recovery tests also gate source reads while checking activation ret
 and cleanup after removal. Full `pnpm check`, `pnpm format`, `pnpm format:check`
 and the local desktop/CLI `pnpm build` pass on remote main `c90c9f4cc` plus this
 change. Documentation checking still reports the six existing Kimi/Pi links.
-Packaged-app testing and staging end-to-end timing were not run for this follow-up.
+Owner-confirmation timing in a packaged app or staging end-to-end environment
+remains unmeasured.
