@@ -14,7 +14,9 @@ test('HTML attachment dialog defaults to preview and preserves source actions on
       configurable: true,
     });
   });
-  await page.goto('/iframe.html?id=ai-sessionfilepreviewpanel--html-attachment&viewMode=story');
+  await page.goto(
+    '/iframe.html?id=ai-sessionfilepreviewpanel--mobile-html-attachment&viewMode=story'
+  );
   const dialog = page.getByRole('dialog');
   const frame = dialog.frameLocator('iframe[title="Preview"]');
   await expect(frame.getByRole('heading', { name: 'HTML 附件预览' })).toBeVisible({
@@ -35,6 +37,13 @@ test('HTML attachment dialog defaults to preview and preserves source actions on
   const rect = await dialog.boundingBox();
   expect(rect!.x).toBeGreaterThanOrEqual(0);
   expect(rect!.x + rect!.width).toBeLessThanOrEqual(391);
+  await expect.poll(async () => (await dialog.boundingBox())!.height).toBeGreaterThan(844 * 0.9);
+  await expect
+    .poll(async () => {
+      const box = (await dialog.boundingBox())!;
+      return Math.abs(box.y + box.height - 844);
+    })
+    .toBeLessThan(2);
   await page.screenshot({ path: testInfo.outputPath('html-attachment-preview.png') });
   await dialog.getByRole('button', { name: 'Hide preview', exact: true }).click();
   await expect(dialog.locator('iframe')).toHaveCount(0);
@@ -74,3 +83,27 @@ for (const [story, message] of [
     ).toBeEnabled();
   });
 }
+
+for (const kind of ['markdown', 'text']) {
+  test(`mobile ${kind} attachment uses the same near-full-height sheet`, async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto(
+      `/iframe.html?id=ai-sessionfilepreviewpanel--mobile-${kind}-attachment&viewMode=story`
+    );
+    const sheet = page.getByRole('dialog');
+    await expect(sheet).toHaveAttribute('data-side', 'bottom', { timeout: 30_000 });
+    await expect.poll(async () => (await sheet.boundingBox())!.height).toBeGreaterThan(844 * 0.9);
+    await sheet.getByRole('button', { name: 'Close', exact: true }).click();
+    await expect(sheet).not.toBeVisible();
+  });
+}
+test('desktop attachment keeps the centered dialog', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await page.goto('/iframe.html?id=ai-sessionfilepreviewpanel--html-attachment&viewMode=story');
+  const dialog = page.getByRole('dialog');
+  await expect(dialog.locator('iframe')).toBeVisible({ timeout: 30_000 });
+  await expect(dialog).not.toHaveAttribute('data-side', 'bottom');
+  const box = (await dialog.boundingBox())!;
+  expect(box.y).toBeGreaterThan(0);
+  expect(box.height).toBeLessThan(900 * 0.9);
+});

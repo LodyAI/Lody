@@ -75,3 +75,19 @@ still stops at the unchanged CLI recursive SSH submodule fixture with
 full-suite result. The mobile-size attachment screenshot was inspected separately.
 
 The separately rerun `pnpm check:quick` passed all static, i18n and boundary guards.
+
+## Mobile attachment sheet (2026-10-14)
+
+Following the attachment-dialog correction, the requested mobile presentation is
+now a near-full-height bottom Sheet for all files sharing this preview entry
+(HTML, Markdown and plain text). It uses the existing `@lody/ui` Drawer, selected
+by `useIsMobile`; desktop retains the centered Dialog. The mobile panel occupies
+approximately 94dvh while respecting safe areas. Its header stays above a
+scrolling body, and HTML fills the remaining height. Drawer-specific Title and
+Close primitives preserve labeling and dismissal in the correct modal context.
+The existing image gallery and live session/project viewers are separate surfaces.
+Browser acceptance covers mobile HTML/source switching, Markdown/text sheet
+geometry and dismissal, plus the unchanged desktop dialog.
+
+All seven WebKit acceptance scenarios passed; the 390 × 844 sheet screenshot
+was inspected and shared. Native-device acceptance is still outstanding.

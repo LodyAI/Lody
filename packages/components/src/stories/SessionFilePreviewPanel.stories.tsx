@@ -7,6 +7,7 @@ import {
   type SessionFilePreviewStatus,
 } from '@/components/ai-gui/session-file-preview-dialog';
 import { Dialog } from '@/ui/dialog';
+import { ForceMobileLayoutProvider } from '@/hooks/use-mobile';
 
 const file = (overrides: Partial<SessionFilePayload>): SessionFilePayload => ({
   type: 'file',
@@ -193,4 +194,31 @@ export const LoadingHtml: Story = {
 export const FailedHtml: Story = {
   ...HtmlAttachment,
   args: { ...HtmlAttachment.args, status: { kind: 'error', message: 'Could not load preview' } },
+};
+
+export const MobileHtmlAttachment: Story = {
+  ...HtmlAttachment,
+  decorators: [
+    (Story) => (
+      <ForceMobileLayoutProvider force>
+        <Story />
+      </ForceMobileLayoutProvider>
+    ),
+  ],
+};
+export const MobileMarkdownAttachment: Story = {
+  ...MobileHtmlAttachment,
+  args: {
+    ...HtmlAttachment.args,
+    file: file({ fileName: 'notes.md' }),
+    status: loaded(SAMPLE_TEXT),
+  },
+};
+export const MobileTextAttachment: Story = {
+  ...MobileHtmlAttachment,
+  args: {
+    ...HtmlAttachment.args,
+    file: file({ fileName: 'notes.txt' }),
+    status: loaded(PLAIN_TEXT),
+  },
 };

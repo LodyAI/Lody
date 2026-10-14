@@ -33,3 +33,9 @@ PR #1525 未覆盖 `SessionFilePreviewDialog`：聊天附件无法打开实时�
 本次补漏通过 4 项 WebKit 验收、48 项针对性单元测试，以及全仓类型、格式和文档检查。根目录 `pnpm check` 仍停在未改动的 CLI 递归 SSH 子模块测试，报错 `context_unreadable`（CLI 4,186 项通过、1 项失败），不能视为全仓测试通过。另已检查移动尺寸的附件弹窗截图。
 
 单独补跑的 `pnpm check:quick` 已通过全部静态、i18n 与边界检查。
+
+## 移动端附件 Sheet（2026-10-14）
+
+附件弹窗补漏后，按用户要求将这个共用预览入口的 HTML、Markdown 和纯文本统一改为移动端近全屏底部 Sheet。复用 `@lody/ui` Drawer，由 `useIsMobile` 选择，桌面端保留居中 Dialog。移动面板约占 94dvh，同时避开顶部与底部安全区；标题栏固定，正文独立滚动，HTML 填满剩余高度。使用 Drawer 自己的 Title 和 Close，保证可访问名称和关闭行为绑定正确的模态上下文。图片图库和实时会话／项目查看器属于其他独立界面。浏览器验收覆盖 HTML／源码切换、Markdown／纯文本 Sheet 的尺寸与关闭，以及桌面弹窗保持不变。
+
+7 项 WebKit 验收全部通过，已检查并分享 390 × 844 的 Sheet 截图。真机验收仍待进行。
