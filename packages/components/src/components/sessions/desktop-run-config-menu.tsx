@@ -44,7 +44,7 @@ import {
 import { orderAcpConfigOptionSelectors } from '@/lib/acp-selector-order';
 import { shouldOfferOptionSearch } from '@/lib/fuzzy-option-filter';
 import { openExternalUrl } from '@/lib/native-browser';
-import { resolvePermissionModeFace } from '@/lib/permission-mode-face';
+import { permissionModeControlLabel, resolvePermissionModeFace } from '@/lib/permission-mode-face';
 import {
   doesAgentRolePinPermissionMode,
   type ComposerAgentRoleItem,
@@ -1119,7 +1119,7 @@ export function DesktopPermissionModeButton({
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   if (disabled && open) setOpen(false);
-  const { options, value, label, source } = useMemo(
+  const face = useMemo(
     () =>
       resolvePermissionModeFace({
         modeOptions,
@@ -1129,7 +1129,8 @@ export function DesktopPermissionModeButton({
       }),
     [configOptionSelectors, configOptionValues, modeOptions, selectedModeId]
   );
-  const controlLabel = t('chat.runConfig.modeLabel', 'Mode');
+  const { options, value, label, source } = face;
+  const controlLabel = permissionModeControlLabel(face, t);
 
   if (options.length === 0) return null;
 
