@@ -98,3 +98,21 @@ instead of its new identity. The guard was restored, not included in the cleanup
 The final retained changes passed 21 scoped tests, root typecheck, check:quick,
 format and docs check. These are deterministic behavioral checks, not an Electron
 visual or performance benchmark. The cleanup does not claim that all remaining code is indispensable.
+
+## Batch import (2026-10-14)
+
+The Import tab now uses checkboxes so users can import multiple identities in one
+submission. Already imported identities stay visible and disabled. The editor
+snapshots selected, currently available candidates and awaits each existing
+association write in inventory order. Each successful write clears that selection;
+the first failure stops the batch, retains earlier durable imports, and leaves
+failed/unattempted selections available for retry. All-success closes the dialog.
+Selection, provider switching and tab switching are disabled during saving.
+
+This keeps the existing per-row durability boundary instead of introducing a bulk
+transaction or concurrent writes. The trade-off is partial success and sequential
+latency; retry never intentionally resubmits a successful row. The existing component
+suite covers multiple selections, deselection, imported-row disabling, partial
+failure/retry, and a deferred save that keeps controls locked. Storybook includes
+multiple-selected, imported and saving states. Live provider enrollment is not
+needed to verify this association-only flow.

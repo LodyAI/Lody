@@ -58,3 +58,7 @@ durability/upload split applies. Linking is put-if-absent; editing cannot resurr
 a deleted row. Deleting an association leaves the external identity and existing
 Role/turn references intact. See the
 [association decision](../notes/implemented/feature/2026-10-05-memory-association-catalog.md).
+
+Memory batch import reuses these per-row writes sequentially. The editor removes
+successful rows from its checkbox selection, stops on the first failed write, and
+keeps remaining selections for retry; it does not roll back earlier durable rows.

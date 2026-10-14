@@ -10,8 +10,8 @@ Translation: current
 A user chooses a machine in Settings → Memory and manages Lody's saved memory
 associations. Add Memory opens an Agent Config-style editor with a provider rail
 and Create / Import tabs. Create enrolls an identity and immediately imports it; Import
-lists the device's identities with single selection and copies its name and
-description. Already-linked identities remain visible but cannot be linked again.
+lists the device's identities with checkboxes for batch import and copies each selected
+identity's name and description. Already-linked identities remain visible but cannot be linked again.
 
 Providers own memory data. Lody stores association metadata in the selected
 machine's Loro/Flock document at `['memory', providerId, memoryId]`, with machine
