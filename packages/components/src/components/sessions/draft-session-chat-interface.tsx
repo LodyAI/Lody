@@ -180,10 +180,7 @@ export const DraftSessionChatInterface = memo(
         return item.role.agentConfigId === draft.agentConfigId ? item.role : null;
       }, [composerAgentRoleItems, draft.agentConfigId, draft.agentRoleId]);
       const docMetaCacheReady = useAtomValue(docMetaCacheReadyAtom);
-      // The draft composer has no MCP picker yet, so the first turn carries the
-      // workspace default selection — the same set the promoted child composer
-      // resolves for an empty session doc.
-      const mcpSelection = useSessionMcpSelection(undefined, {});
+      const mcpSelection = useSessionMcpSelection(undefined);
       // Same resolution the composer uses: a local project may carry its repo
       // only in project.githubRepoFullName, not in repoFullName.
       const parentRepoFullName = resolveSessionRepoFullName(parentSession);
@@ -629,6 +626,7 @@ export const DraftSessionChatInterface = memo(
             isAgentBusy={false}
             isDark={isDark}
             isEmptyConversation={true}
+            mcp={mcpSelection.menu}
             commandsEnabled={commandsEnabled}
             selectedModeId={selectedModeId}
             selectedModelId={selectedModelId}

@@ -33,6 +33,11 @@ describes the shared parsing and persistence boundary.
 
 ## Conversation surface and composer
 
+Blank child-tab drafts use the same workspace MCP selection hook and composer
+"+" menu as Chat Landing and persisted sessions. The draft's current selection
+is frozen into the first turn's `inputConfig.mcpServerIds`, including an explicit
+empty list when all servers are deselected. An empty catalog hides the MCP entry.
+
 | File                                                            | Responsibility                                                                                                                                      |
 | --------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `session-chat-interface.tsx`                                    | Conversation surface: stream, header variants, read receipts, launchers                                                                             |
