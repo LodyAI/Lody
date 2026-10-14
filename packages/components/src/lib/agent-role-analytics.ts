@@ -1,4 +1,9 @@
-import type { AgentRole, MachineId, MessageTextSpan } from '@lody/shared';
+import {
+  resolveAgentRoleMentionValue,
+  type AgentRole,
+  type MachineId,
+  type MessageTextSpan,
+} from '@lody/shared';
 import { capturePostHogEvent, type PostHogAnalyticsClient } from '@/lib/posthog-analytics';
 
 export type AgentRoleAppliedSource = 'new_chat' | 'existing_session' | 'mention';
@@ -29,14 +34,15 @@ export function captureAgentRoleMentionsApplied(
   postHog: PostHogAnalyticsClient | null | undefined,
   input: {
     spans: readonly MessageTextSpan[] | undefined;
-    roles: readonly Pick<AgentRole, 'id' | 'machineId' | 'visibility'>[];
+    roles: readonly AgentRole[];
     /** Machine the sending conversation runs on; null when not known. */
     executionMachineId: MachineId | null | undefined;
   }
 ): void {
   for (const span of input.spans ?? []) {
     if (span.kind !== 'agent_role' || !span.target) continue;
-    const role = input.roles.find((entry) => entry.id === span.target);
+    // The span's target names the machine for a Role on several machines.
+    const role = resolveAgentRoleMentionValue(input.roles, span.target);
     if (!role) continue;
     captureAgentRoleApplied(postHog, role, {
       source: 'mention',

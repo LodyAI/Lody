@@ -8,12 +8,18 @@ import {
   normalizeAgentRoleEmoji,
   normalizeAgentRoleDescription,
   normalizeAgentRoleMentionSlug,
+  normalizeAgentRoleAlias,
   normalizeAgentRoleRunConfig,
+  getAgentRoleTargets,
+  withAgentRoleTargets,
   type AgentConfigId,
+  type AgentConfigMeta,
   type AgentRole,
   type AgentRoleId,
   type AgentRoleRunConfig,
+  type AgentRoleTarget,
   type MachineId,
+  type MemoryBinding,
 } from '@lody/shared';
 import {
   isConfigOptionValueValid,
@@ -32,29 +38,52 @@ export type AgentRoleFormValue = {
   name: string;
   description: string;
   emoji: string;
-  machineId: MachineId | null;
+  promptPrefix: string;
+  /** Off by default: a new Role is private until its owner says otherwise. */
+  shareWithWorkspace: boolean;
+  /** One per machine the Role runs on, in authoring order. */
+  targets: AgentRoleTargetFormValue[];
+  /** The machine tab being edited; it may have no target yet. */
+  activeMachineId: MachineId | null;
+};
+
+/** How one machine runs the Role, while it is being authored. */
+export type AgentRoleTargetFormValue = {
+  machineId: MachineId;
   agentConfigId: AgentConfigId | null;
   modeId: string | null;
   modelId: string | null;
   configOptionValues: Record<string, string | boolean>;
   memory?: AgentRoleRunConfig['memory'];
-  promptPrefix: string;
-  /** Off by default: a new Role is private until its owner says otherwise. */
-  shareWithWorkspace: boolean;
+  /** Only shown and stored while the Role has more than one target. */
+  alias: string;
 };
 
 export const EMPTY_AGENT_ROLE_FORM_VALUE: AgentRoleFormValue = {
   name: '',
   description: '',
   emoji: '',
-  machineId: null,
+  promptPrefix: '',
+  shareWithWorkspace: false,
+  targets: [],
+  activeMachineId: null,
+};
+
+export const createAgentRoleTargetFormValue = (machineId: MachineId): AgentRoleTargetFormValue => ({
+  machineId,
   agentConfigId: null,
   modeId: null,
   modelId: null,
   configOptionValues: {},
-  promptPrefix: '',
-  shareWithWorkspace: false,
-};
+  alias: '',
+});
+
+/** A new Role whose first target is on `machineId`, or with no target yet. */
+export const createAgentRoleFormValue = (machineId: MachineId | null): AgentRoleFormValue => ({
+  ...EMPTY_AGENT_ROLE_FORM_VALUE,
+  targets: machineId ? [createAgentRoleTargetFormValue(machineId)] : [],
+  activeMachineId: machineId,
+});
 
 /**
  * Seed a new Role from a run configuration the user already has in front of
@@ -72,6 +101,7 @@ export const buildAgentRoleFormValueFromRunConfig = (input: {
   modelId?: string | null;
   configOptionValues?: Record<string, string | boolean | undefined>;
 }): AgentRoleFormValue => {
+  if (!input.machineId) return EMPTY_AGENT_ROLE_FORM_VALUE;
   const runConfig = normalizeAgentRoleRunConfig({
     modeId: input.modeId ?? undefined,
     modelId: input.modelId ?? undefined,
@@ -79,78 +109,190 @@ export const buildAgentRoleFormValueFromRunConfig = (input: {
   });
   return {
     ...EMPTY_AGENT_ROLE_FORM_VALUE,
-    machineId: input.machineId ?? null,
-    agentConfigId: input.agentConfigId ?? null,
-    modeId: runConfig.modeId ?? null,
-    modelId: runConfig.modelId ?? null,
-    configOptionValues: { ...(runConfig.configOptionValues ?? {}) },
+    targets: [
+      {
+        ...createAgentRoleTargetFormValue(input.machineId),
+        agentConfigId: input.agentConfigId ?? null,
+        modeId: runConfig.modeId ?? null,
+        modelId: runConfig.modelId ?? null,
+        configOptionValues: { ...(runConfig.configOptionValues ?? {}) },
+      },
+    ],
+    activeMachineId: input.machineId,
   };
 };
 
-export const buildAgentRoleFormValue = (role: AgentRole): AgentRoleFormValue => ({
+const buildTargetFormValue = (target: AgentRoleTarget): AgentRoleTargetFormValue => ({
+  machineId: target.machineId,
+  agentConfigId: target.agentConfigId,
+  modeId: target.runConfig.modeId ?? null,
+  modelId: target.runConfig.modelId ?? null,
+  configOptionValues: { ...(target.runConfig.configOptionValues ?? {}) },
+  memory: target.runConfig.memory,
+  alias: target.alias ?? '',
+});
+
+export const buildAgentRoleFormValue = (
+  role: AgentRole,
+  activeMachineId: MachineId = role.machineId
+): AgentRoleFormValue => ({
   name: role.name,
   description: role.description ?? '',
   emoji: role.emoji ?? '',
-  machineId: role.machineId,
-  agentConfigId: role.agentConfigId,
-  modeId: role.runConfig.modeId ?? null,
-  modelId: role.runConfig.modelId ?? null,
-  configOptionValues: { ...(role.runConfig.configOptionValues ?? {}) },
-  memory: role.runConfig.memory,
   promptPrefix: role.promptPrefix ?? '',
   shareWithWorkspace: role.visibility === 'workspace',
+  targets: getAgentRoleTargets(role).map(buildTargetFormValue),
+  activeMachineId,
 });
+
+export const getAgentRoleFormTarget = (
+  value: AgentRoleFormValue,
+  machineId: MachineId | null = value.activeMachineId
+): AgentRoleTargetFormValue | undefined =>
+  machineId ? value.targets.find((target) => target.machineId === machineId) : undefined;
+
+/** Replace the target on `target.machineId`, or append it when the machine has none. */
+export const putAgentRoleFormTarget = (
+  value: AgentRoleFormValue,
+  target: AgentRoleTargetFormValue
+): AgentRoleFormValue => ({
+  ...value,
+  targets: value.targets.some((existing) => existing.machineId === target.machineId)
+    ? value.targets.map((existing) => (existing.machineId === target.machineId ? target : existing))
+    : [...value.targets, target],
+});
+
+export const removeAgentRoleFormTarget = (
+  value: AgentRoleFormValue,
+  machineId: MachineId
+): AgentRoleFormValue => ({
+  ...value,
+  targets: value.targets.filter((target) => target.machineId !== machineId),
+});
+
+type AgentConfigCandidate = Pick<AgentConfigMeta, 'id' | 'cliType' | 'agentType' | 'name'>;
+
+/**
+ * The target a Role gets when it is added to another machine.
+ *
+ * The Agent Config is matched by agent type — the same agent, configured on
+ * that machine — preferring one with the same name; a custom agent's type is
+ * unique per config, so for those the name alone decides. The run config is
+ * copied as authored: what the target agent does not support surfaces as an
+ * issue in the editor before save, never silently dropped. Memory carries over
+ * only when that machine has the same identity linked, because memories live on
+ * the machine.
+ */
+export const suggestAgentRoleTarget = (input: {
+  machineId: MachineId;
+  source: AgentRoleTargetFormValue | undefined;
+  sourceConfig: AgentConfigCandidate | undefined;
+  machineConfigs: readonly AgentConfigCandidate[];
+  memories: readonly MemoryBinding[];
+}): AgentRoleTargetFormValue => {
+  const empty = createAgentRoleTargetFormValue(input.machineId);
+  const { source, sourceConfig } = input;
+  if (!source || !sourceConfig) return empty;
+  const sameAgent = input.machineConfigs.filter((config) =>
+    sourceConfig.cliType === 'custom'
+      ? config.cliType === 'custom' && config.name === sourceConfig.name
+      : config.cliType === sourceConfig.cliType && config.agentType === sourceConfig.agentType
+  );
+  const config =
+    sameAgent.find((candidate) => candidate.name === sourceConfig.name) ?? sameAgent[0];
+  const memory = source.memory;
+  const memoryLinked =
+    memory !== undefined &&
+    input.memories.some(
+      (entry) => entry.providerId === memory.providerId && entry.memoryId === memory.memoryId
+    );
+  return {
+    ...empty,
+    ...(config
+      ? {
+          agentConfigId: config.id,
+          modeId: source.modeId,
+          modelId: source.modelId,
+          configOptionValues: { ...source.configOptionValues },
+        }
+      : {}),
+    ...(memoryLinked ? { memory } : {}),
+  };
+};
 
 export type AgentRoleFormError =
   | 'name_required'
   | 'name_taken'
+  | 'alias_taken'
   | 'machine_required'
   | 'agent_config_required';
 
+/** Every `@` token a Role answers to: its name, plus each target's alias. */
+const getAgentRoleMentionSlugs = (role: AgentRole): string[] => [
+  getAgentRoleMentionSlug(role),
+  ...getAgentRoleTargets(role).flatMap((target) =>
+    target.alias ? [normalizeAgentRoleMentionSlug(target.alias)] : []
+  ),
+];
+
 /**
- * The name is the only authored label, so it carries both jobs: it is what the
- * list shows and what `@` completes. Uniqueness is therefore checked on the
- * DERIVED mention token — "Code Reviewer" and "Code-Reviewer" are the same
- * `@Code-Reviewer` — and only against the Roles this user can see. It is a
- * readability rule, not an identity one: the mention range always carries the
- * Role id, so another member's private Role neither can nor needs to be checked.
+ * The name is the authored label, so it carries both jobs: it is what the list
+ * shows and what `@` completes. Uniqueness is therefore checked on the DERIVED
+ * mention token — "Code Reviewer" and "Code-Reviewer" are the same
+ * `@Code-Reviewer` — and only against the Roles this user can see. Aliases are
+ * tokens too, so they join the same check. It is a readability rule, not an
+ * identity one: the mention range always carries the Role id, so another
+ * member's private Role neither can nor needs to be checked.
  */
 export const validateAgentRoleForm = (
   value: AgentRoleFormValue,
   options: { accessibleRoles: readonly AgentRole[]; editingRoleId?: AgentRoleId | null }
 ): AgentRoleFormError[] => {
   const errors: AgentRoleFormError[] = [];
+  const taken = new Set(
+    options.accessibleRoles
+      .filter((role) => role.id !== options.editingRoleId)
+      .flatMap(getAgentRoleMentionSlugs)
+  );
   const slug = normalizeAgentRoleMentionSlug(value.name);
   if (!slug) {
     // Covers both an empty name and one that is all punctuation the mention
     // token strips: either way there is nothing to type after `@`.
     errors.push('name_required');
-  } else if (
-    options.accessibleRoles.some(
-      (role) => role.id !== options.editingRoleId && getAgentRoleMentionSlug(role) === slug
-    )
-  ) {
+  } else if (taken.has(slug)) {
     errors.push('name_taken');
   }
+  if (value.targets.length > 1) {
+    const own = new Set(slug ? [slug] : []);
+    for (const target of value.targets) {
+      const aliasSlug = normalizeAgentRoleMentionSlug(target.alias);
+      if (!aliasSlug) continue;
+      if (taken.has(aliasSlug) || own.has(aliasSlug)) {
+        errors.push('alias_taken');
+        break;
+      }
+      own.add(aliasSlug);
+    }
+  }
 
-  if (!value.machineId) errors.push('machine_required');
-  if (!value.agentConfigId) errors.push('agent_config_required');
+  if (value.targets.length === 0) errors.push('machine_required');
+  if (value.targets.some((target) => !target.agentConfigId)) errors.push('agent_config_required');
   return errors;
 };
 
 /**
- * The run config a form value implies.
+ * The run config a target implies.
  *
  * Runs through the shared normalizer rather than copying the fields, so the
  * authoring surface refuses exactly the option keys the reader would later
  * refuse — a Role never becomes a place a secret is stored.
  */
-export const buildAgentRoleRunConfig = (value: AgentRoleFormValue): AgentRoleRunConfig =>
+export const buildAgentRoleRunConfig = (target: AgentRoleTargetFormValue): AgentRoleRunConfig =>
   normalizeAgentRoleRunConfig({
-    memory: value.memory,
-    modeId: value.modeId ?? undefined,
-    modelId: value.modelId ?? undefined,
-    configOptionValues: value.configOptionValues,
+    memory: target.memory,
+    modeId: target.modeId ?? undefined,
+    modelId: target.modelId ?? undefined,
+    configOptionValues: target.configOptionValues,
   });
 
 /**
@@ -166,29 +308,59 @@ export const buildAgentRoleFromForm = (
     ownerUserId: string;
     now: number;
     createId: () => AgentRoleId;
-    /** Current editor capabilities; only explicit saves reconcile retired options. */
+    /**
+     * Current capabilities of the active tab's target; only explicit saves
+     * reconcile retired options, and only for the target the user is looking at.
+     */
     selectorOptions?: AcpSelectorOptions | null;
   }
 ): AgentRole => {
   const { existing, ownerUserId, now } = options;
   const emoji = normalizeAgentRoleEmoji(value.emoji);
   const promptPrefix = value.promptPrefix.trim();
-  const next: AgentRole = {
-    v: AGENT_ROLE_VERSION,
-    id: existing?.id ?? options.createId(),
-    ownerUserId: existing?.ownerUserId ?? ownerUserId,
-    visibility: value.shareWithWorkspace ? 'workspace' : 'private',
-    name: value.name.trim(),
-    description: normalizeAgentRoleDescription(value.description),
-    ...(emoji ? { emoji } : {}),
-    machineId: value.machineId as MachineId,
-    agentConfigId: value.agentConfigId as AgentConfigId,
-    runConfig: buildAgentRoleRunConfig(prepareAgentRoleFormForSave(value, options.selectorOptions)),
-    ...(promptPrefix ? { promptPrefix } : {}),
-    revision: existing?.revision ?? 1,
-    createdAt: existing?.createdAt ?? now,
-    updatedAt: existing?.updatedAt ?? now,
+  const multi = value.targets.length > 1;
+  // An edit keeps the stored target order — a form opened from a Role bound to
+  // another machine must not reorder the row — and appends new machines.
+  const order = existing ? getAgentRoleTargets(existing).map((target) => target.machineId) : [];
+  const rank = (machineId: MachineId) => {
+    const index = order.indexOf(machineId);
+    return index < 0 ? order.length : index;
   };
+  const ordered = [...value.targets].sort(
+    (left, right) => rank(left.machineId) - rank(right.machineId)
+  );
+  const targets = ordered.map((target): AgentRoleTarget => {
+    const alias = multi ? normalizeAgentRoleAlias(target.alias) : '';
+    const prepared =
+      target.machineId === value.activeMachineId
+        ? prepareAgentRoleTargetForSave(target, options.selectorOptions)
+        : target;
+    return {
+      machineId: target.machineId,
+      agentConfigId: target.agentConfigId as AgentConfigId,
+      runConfig: buildAgentRoleRunConfig(prepared),
+      ...(alias ? { alias } : {}),
+    };
+  });
+  const [first, ...additional] = targets;
+  if (!first) throw new Error('An Agent Role needs at least one machine target.');
+  const next = withAgentRoleTargets(
+    {
+      v: AGENT_ROLE_VERSION,
+      id: existing?.id ?? options.createId(),
+      ownerUserId: existing?.ownerUserId ?? ownerUserId,
+      visibility: value.shareWithWorkspace ? 'workspace' : 'private',
+      name: value.name.trim(),
+      description: normalizeAgentRoleDescription(value.description),
+      ...(emoji ? { emoji } : {}),
+      ...first,
+      ...(promptPrefix ? { promptPrefix } : {}),
+      revision: existing?.revision ?? 1,
+      createdAt: existing?.createdAt ?? now,
+      updatedAt: existing?.updatedAt ?? now,
+    },
+    [first, ...additional]
+  );
 
   if (!existing) return next;
   if (isAgentRoleContentEqual(existing, next)) return existing;
@@ -196,10 +368,10 @@ export const buildAgentRoleFromForm = (
 };
 
 /** Keep the current editor's options on explicit save, without rewriting a draft on open. */
-const prepareAgentRoleFormForSave = (
-  value: AgentRoleFormValue,
+const prepareAgentRoleTargetForSave = (
+  value: AgentRoleTargetFormValue,
   selectorOptions: AcpSelectorOptions | null | undefined
-): AgentRoleFormValue => {
+): AgentRoleTargetFormValue => {
   // Provisional static defaults cannot establish that a stored option was removed.
   if (selectorOptions?.capabilityAuthority !== 'authoritative') return value;
   return {
@@ -231,9 +403,9 @@ const prepareAgentRoleFormForSave = (
  * incompatible value visible instead of silently replaced.
  */
 export const applyAgentRoleRunConfigDefaults = (
-  value: AgentRoleFormValue,
+  value: AgentRoleTargetFormValue,
   selectorOptions: AcpSelectorOptions | null
-): AgentRoleFormValue => {
+): AgentRoleTargetFormValue => {
   if (!selectorOptions || selectorOptions.capabilityAuthority === 'unavailable') return value;
 
   const modelId =
@@ -266,10 +438,10 @@ export const applyAgentRoleRunConfigDefaults = (
 };
 
 export const carryAgentRoleOptionsToModel = (
-  values: AgentRoleFormValue['configOptionValues'],
+  values: AgentRoleTargetFormValue['configOptionValues'],
   outgoing: readonly AcpConfigOptionSelector[],
   incoming: readonly AcpConfigOptionSelector[]
-): AgentRoleFormValue['configOptionValues'] =>
+): AgentRoleTargetFormValue['configOptionValues'] =>
   Object.fromEntries(
     Object.entries(values).filter(([configId, value]) => {
       if (!outgoing.some((selector) => selector.configId === configId)) return true;

@@ -1,11 +1,15 @@
 import type { AgentRunRef } from '@/components/shared/agent-run-ref';
 import {
+  bindAgentRoleTarget,
+  getAgentRoleTarget,
   getBuiltinDefaultModeId,
+  isMultiTargetAgentRole,
   isSensitiveAcpConfigOptionId,
   type AcpConfigOptionValue,
   type AgentConfigId,
   type AgentConfigMeta,
   type AgentRole,
+  type MachineId,
   type ProjectRef,
   type ScheduleDestination,
   type ScheduleProposalMeta,
@@ -48,6 +52,7 @@ export type ResolvedProposalTarget = {
 
 export type ProposalTargetProblem =
   | 'role_not_found'
+  | 'role_machine_required'
   | 'agent_not_found'
   | 'machine_mismatch'
   | 'no_agent';
@@ -75,8 +80,21 @@ export function resolveScheduleProposalTarget(args: {
 
   let role: AgentRole | undefined;
   if (named.agentRoleId) {
-    role = roles.find((entry) => entry.id === named.agentRoleId);
-    if (!role) return { ok: false, problem: 'role_not_found' };
+    const found = roles.find((entry) => entry.id === named.agentRoleId);
+    if (!found) return { ok: false, problem: 'role_not_found' };
+    // A Role on several machines runs on the named one, else on the
+    // conversation's machine when it runs there; it is never guessed.
+    const machineId =
+      named.machineId ??
+      (isMultiTargetAgentRole(found)
+        ? conversation?.session.machineId &&
+          getAgentRoleTarget(found, conversation.session.machineId)
+          ? conversation.session.machineId
+          : undefined
+        : found.machineId);
+    if (!machineId) return { ok: false, problem: 'role_machine_required' };
+    role = bindAgentRoleTarget(found, machineId as MachineId);
+    if (!role) return { ok: false, problem: 'machine_mismatch' };
   }
 
   const agentConfigId =

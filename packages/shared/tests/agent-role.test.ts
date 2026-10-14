@@ -2,7 +2,11 @@ import { describe, expect, it } from 'vitest';
 
 import {
   AGENT_ROLE_VERSION,
+  bindAgentRoleTarget,
   canManageAgentRole,
+  formatAgentRoleMentionValue,
+  getAgentRoleTargets,
+  resolveAgentRoleMentionValue,
   canReadAgentRole,
   isAgentRoleContentEqual,
   isSensitiveAgentRoleConfigOptionKey,
@@ -241,4 +245,78 @@ it('preserves memory references, revises identity changes, and gates older machi
   expect(
     normalizeAgentRole({ ...configured, runConfig: { memory: { providerId: 'nowledge-mem' } } })
   ).toBeUndefined();
+});
+
+describe('agent role machine targets', () => {
+  const second = {
+    machineId: 'machine-2' as MachineId,
+    agentConfigId: 'config-2' as AgentConfigId,
+    runConfig: { modelId: 'gpt-5.6-luna' },
+    alias: 'Reviewer-Linux',
+  };
+  const multi = role({ alias: 'Reviewer-Mac', additionalTargets: [second] });
+
+  it('reads a v2 row and keeps one target per machine, first one wins', () => {
+    const stored = {
+      ...role(),
+      v: 2,
+      machineId: undefined,
+      targets: [
+        { machineId: 'machine-1', agentConfigId: 'config-1', runConfig: { modelId: 'gpt-5.6' } },
+        second,
+        { machineId: 'machine-2', agentConfigId: 'config-9', runConfig: {} },
+      ],
+    };
+    const read = normalizeAgentRole(stored);
+    expect(read && getAgentRoleTargets(read).map((target) => target.agentConfigId)).toEqual([
+      'config-1',
+      'config-2',
+    ]);
+    // A v2 row with no usable target is not a Role.
+    expect(normalizeAgentRole({ ...stored, targets: [] })).toBeUndefined();
+    expect(normalizeAgentRole({ ...stored, targets: [{ machineId: 'm' }] })).toBeUndefined();
+  });
+
+  it('drops an alias once the role runs on a single machine', () => {
+    expect(normalizeAgentRole(role({ alias: 'Solo' }))?.alias).toBeUndefined();
+    expect(normalizeAgentRole(multi)?.alias).toBe('Reviewer-Mac');
+  });
+
+  it('binds another machine inline and keeps every other target', () => {
+    const bound = bindAgentRoleTarget(multi, 'machine-2' as MachineId);
+    expect(bound).toMatchObject({
+      machineId: 'machine-2',
+      agentConfigId: 'config-2',
+      runConfig: { modelId: 'gpt-5.6-luna' },
+      alias: 'Reviewer-Linux',
+    });
+    expect(bound?.additionalTargets?.map((target) => target.machineId)).toEqual(['machine-1']);
+    expect(bindAgentRoleTarget(multi, 'machine-3' as MachineId)).toBeUndefined();
+  });
+
+  it('treats a change on any machine as an edit', () => {
+    expect(
+      isAgentRoleContentEqual(multi, role({ alias: 'Reviewer-Mac', additionalTargets: [second] }))
+    ).toBe(true);
+    expect(
+      isAgentRoleContentEqual(
+        multi,
+        role({ alias: 'Reviewer-Mac', additionalTargets: [{ ...second, runConfig: {} }] })
+      )
+    ).toBe(false);
+    expect(isAgentRoleContentEqual(multi, role({ alias: 'Reviewer-Mac' }))).toBe(false);
+  });
+
+  it('resolves a mention to one machine and never guesses for a bare id', () => {
+    const roles = [multi, role({ id: 'role-2' as AgentRoleId, name: 'Solo' })];
+    expect(resolveAgentRoleMentionValue(roles, 'role-2')?.machineId).toBe('machine-1');
+    expect(resolveAgentRoleMentionValue(roles, 'role-1')).toBeUndefined();
+    expect(
+      resolveAgentRoleMentionValue(
+        roles,
+        formatAgentRoleMentionValue('role-1' as AgentRoleId, 'machine-2' as MachineId)
+      )?.agentConfigId
+    ).toBe('config-2');
+    expect(resolveAgentRoleMentionValue(roles, 'role-1@machine-3')).toBeUndefined();
+  });
 });

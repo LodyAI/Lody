@@ -577,13 +577,13 @@ export function toAgentRoleCandidate(
   return {
     // The range payload is the stable Role id; the text only carries the token
     // derived from the name, which its owner may rename at any time.
-    value: role.id,
+    value: item.value,
     label: item.slug,
     insertText: `${MENTION_TRIGGER}${item.slug}`,
     kind: 'agent_role',
     icon: 'agent_role',
     iconEmoji: emoji,
-    title: role.name,
+    title: item.label,
     // Who does the work and where: two Roles named alike on two machines are
     // told apart here without opening the pane.
     hint: [item.agentConfig?.name, item.machine?.name].filter(Boolean).join(' · ') || undefined,

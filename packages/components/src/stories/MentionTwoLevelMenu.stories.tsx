@@ -5,6 +5,7 @@ import { Button } from '@lody/ui/button';
 import { Mention, MentionInput } from '@/ui/mention';
 import { mentionSurface } from '@/ui/mention/mention-surface';
 import type { Mention as MentionRange } from '@/ui/mention/mention-root';
+import type { AgentRoleMentionItem } from '@/components/mentions/mention-agent-role-source';
 import {
   MentionTwoLevelMenu,
   MentionTwoLevelMenuBody,
@@ -174,62 +175,73 @@ const agentRole = (overrides: Partial<AgentRole>): AgentRole => ({
   ...overrides,
 });
 
+/** A single-target Role's item: mentioned by its id, titled by its name. */
+const roleItem = (item: Omit<AgentRoleMentionItem, 'value' | 'label'>): AgentRoleMentionItem => ({
+  ...item,
+  value: item.role.id,
+  label: item.role.name,
+});
+
 const AGENT_ROLES: MentionCandidate[] = [
-  toAgentRoleCandidate({
-    availability: { kind: 'available' },
-    slug: 'Code-Reviewer',
-    role: agentRole({
-      // Long on purpose: the instruction scrolls inside its own block so the
-      // pinned-value rows stay on screen.
-      promptPrefix: [
-        'Review the diff for correctness before style.',
-        'Name the failure a reader could hit, with the input that triggers it.',
-        'Prefer one concrete repro over three hedged observations.',
-        'If the change is fine, say so in one line and stop.',
-      ].join('\n'),
-    }),
-    machine: ROLE_MACHINE,
-    agentConfig: ROLE_AGENT_CONFIG,
-  }),
-  toAgentRoleCandidate({
-    availability: { kind: 'available' },
-    slug: 'Release-Notes',
-    role: agentRole({
-      id: 'role-2' as AgentRoleId,
-      name: 'Release Notes',
-      emoji: '📝',
-      visibility: 'private',
-      runConfig: { modelId: 'gpt-5.6-luna' },
-    }),
-    machine: ROLE_MACHINE,
-    agentConfig: ROLE_AGENT_CONFIG,
-  }),
+  toAgentRoleCandidate(
+    roleItem({
+      availability: { kind: 'available' },
+      slug: 'Code-Reviewer',
+      role: agentRole({
+        // Long on purpose: the instruction scrolls inside its own block so the
+        // pinned-value rows stay on screen.
+        promptPrefix: [
+          'Review the diff for correctness before style.',
+          'Name the failure a reader could hit, with the input that triggers it.',
+          'Prefer one concrete repro over three hedged observations.',
+          'If the change is fine, say so in one line and stop.',
+        ].join('\n'),
+      }),
+      machine: ROLE_MACHINE,
+      agentConfig: ROLE_AGENT_CONFIG,
+    })
+  ),
+  toAgentRoleCandidate(
+    roleItem({
+      availability: { kind: 'available' },
+      slug: 'Release-Notes',
+      role: agentRole({
+        id: 'role-2' as AgentRoleId,
+        name: 'Release Notes',
+        emoji: '📝',
+        visibility: 'private',
+        runConfig: { modelId: 'gpt-5.6-luna' },
+      }),
+      machine: ROLE_MACHINE,
+      agentConfig: ROLE_AGENT_CONFIG,
+    })
+  ),
 ];
 
 const UNAVAILABLE_AGENT_ROLES: MentionCandidate[] = [
   ...AGENT_ROLES,
   toAgentRoleCandidate(
-    {
+    roleItem({
       slug: 'Offline-Reviewer',
       role: agentRole({ id: 'offline-role' as AgentRoleId, name: 'Offline Reviewer' }),
       availability: { kind: 'unavailable', reason: 'machine_offline' },
-    },
+    }),
     'Unavailable: its machine is offline'
   ),
   toAgentRoleCandidate(
-    {
+    roleItem({
       slug: 'Loading-Reviewer',
       role: agentRole({ id: 'loading-role' as AgentRoleId, name: 'Loading Reviewer' }),
       availability: { kind: 'unknown' },
-    },
+    }),
     'Checking availability…'
   ),
   toAgentRoleCandidate(
-    {
+    roleItem({
       slug: 'Unreachable-Reviewer',
       role: agentRole({ id: 'unreachable-role' as AgentRoleId, name: 'Unreachable Reviewer' }),
       availability: { kind: 'unavailable', reason: 'machine_unknown' },
-    },
+    }),
     'Unavailable: its machine is not available to you'
   ),
 ];
@@ -684,17 +696,19 @@ export const MainComposerRoleCatalogAtCaret: Story = {
         category('agent_role', 'role', 'Agent Roles', 'agent_role', [
           ...AGENT_ROLES,
           ...Array.from({ length: 18 }, (_, index) =>
-            toAgentRoleCandidate({
-              availability: { kind: 'available' },
-              slug: `Reviewer-${index + 1}`,
-              role: agentRole({
-                id: `catalog-role-${index}` as AgentRoleId,
-                name: `Reviewer ${index + 1}`,
-                promptPrefix: index % 2 ? 'Review this change.\n'.repeat(40) : undefined,
-              }),
-              machine: ROLE_MACHINE,
-              agentConfig: ROLE_AGENT_CONFIG,
-            })
+            toAgentRoleCandidate(
+              roleItem({
+                availability: { kind: 'available' },
+                slug: `Reviewer-${index + 1}`,
+                role: agentRole({
+                  id: `catalog-role-${index}` as AgentRoleId,
+                  name: `Reviewer ${index + 1}`,
+                  promptPrefix: index % 2 ? 'Review this change.\n'.repeat(40) : undefined,
+                }),
+                machine: ROLE_MACHINE,
+                agentConfig: ROLE_AGENT_CONFIG,
+              })
+            )
           ),
           ...UNAVAILABLE_AGENT_ROLES.slice(2),
         ]),

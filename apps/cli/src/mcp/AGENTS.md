@@ -41,10 +41,10 @@ Parent instructions apply. Background: [README.md](README.md).
   Freeze `requesterUserId` and `sourceTurnId` at Operation acceptance; requester Session id
   already identifies the Session. Authors are presentation/provenance only. Recovery uses
   the owner Machine and current authorization.
-- Direct Role creation stays on the ordinary `lody_session_create` and
-  `lody_session_create_many` tools. When `agentRoleId` is present, tolerate manual Machine, Agent,
-  and run-config fields but remove them before resolution: the current Role row is authoritative
-  and those fields must not influence validation, canonical identity, recovery, or dispatch.
+- Role creation uses `lody_session_create(_many)`; `agentRoleMachineId` names the target,
+  required for a multi-machine Role. Tolerate manual Machine, Agent and run-config fields but
+  remove them before resolution: the Role row is authoritative and they must not influence
+  validation, canonical identity, recovery, or dispatch.
 
 ## Session tool contracts
 

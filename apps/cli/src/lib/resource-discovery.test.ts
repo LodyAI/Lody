@@ -229,6 +229,27 @@ describe('resource discovery across MCP and CLI', () => {
     expect(page.items[0]?.availability?.state).toBe('unavailable');
   });
 
+  it('lists a multi-machine Role once per machine and returns every machine on get', async () => {
+    const both = role('both', {
+      alias: 'Both-One',
+      additionalTargets: [
+        { machineId: 'two' as MachineId, agentConfigId: 'cfg-two' as never, runConfig: {} },
+      ],
+    });
+    const discovery = new ResourceDiscovery(source({ roles: async () => [both] }));
+    const page = await discovery.list('agent_role');
+    expect(page.items.map((row) => [row.id, row.machineId, row.machineCount])).toEqual([
+      ['both', 'one', 2],
+      ['both', 'two', 2],
+    ]);
+    expect(page.items[0]?.alias).toBe('Both-One');
+    const got = await discovery.get('agent_role', 'both');
+    expect(got.targets?.map((row) => row.machineId)).toEqual(['one', 'two']);
+    expect(
+      (await discovery.list('agent_role', { machineId: 'two' })).items.map((row) => row.machineId)
+    ).toEqual(['two']);
+  });
+
   it('reads GitHub-only projects independently of the local machine catalog', async () => {
     const discovery = new ResourceDiscovery(
       source({

@@ -1,5 +1,7 @@
 import {
+  bindAgentRoleTarget,
   canReadAgentRole,
+  getAgentRoleTargets,
   getAcpCapabilityCacheKey,
   summarizeAgentRunConfigCapabilities,
   normalizeAgentRoleRunConfig,
@@ -118,11 +120,18 @@ export class ResourceDiscovery {
         repoFullName: repo.fullName,
       }));
     }
+    // One row per machine target: a Role on several machines is listed once per
+    // machine, each bound so its machine/config/run config are that target's.
     const roles =
       resource === 'agent_role'
-        ? (await source.roles()).filter(
-            (role) => canReadAgentRole(role, source.userId) && (!id || role.id === id)
-          )
+        ? (await source.roles())
+            .filter((role) => canReadAgentRole(role, source.userId) && (!id || role.id === id))
+            .flatMap((role) =>
+              getAgentRoleTargets(role).flatMap((target) => {
+                const bound = bindAgentRoleTarget(role, target.machineId);
+                return bound ? [bound] : [];
+              })
+            )
         : [];
     const machines = await source.machines();
     const online = await source.onlineMachineIds();
@@ -238,8 +247,11 @@ export class ResourceDiscovery {
       return {
         id: role.id,
         name: role.name,
+        ...(role.alias ? { alias: role.alias } : {}),
         description: role.description ?? '',
         machineId: role.machineId,
+        // More than one: create with agentRoleMachineId naming this row's machine.
+        machineCount: 1 + (role.additionalTargets?.length ?? 0),
         agentConfigId: role.agentConfigId,
         visibility: role.visibility,
         revision: role.revision,
@@ -279,8 +291,15 @@ export class ResourceDiscovery {
   }
 
   async get(resource: 'agent_config' | 'agent_role', id: string) {
-    const row = (await this.rows(resource, {}, id)).find((candidate) => candidate.id === id);
+    const rows = (await this.rows(resource, {}, id)).filter((candidate) => candidate.id === id);
+    const [row] = rows;
     if (!row) throw new Error('RESOURCE_NOT_FOUND: resource does not exist or is not readable.');
-    return { ok: true as const, workspaceId: this.source.workspaceId, item: row };
+    // A Role on several machines has one row per machine; all are returned.
+    return {
+      ok: true as const,
+      workspaceId: this.source.workspaceId,
+      item: row,
+      ...(rows.length > 1 ? { targets: rows } : {}),
+    };
   }
 }

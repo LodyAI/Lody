@@ -18,6 +18,7 @@ import { Dialog } from '@/ui/dialog';
 import {
   MEMORY_PROVIDERS,
   getAgentRoleEmoji,
+  getAgentRoleTarget,
   type AgentRole,
   MemoryCreateInputSchema,
   isMemoryIdentityMissing,
@@ -449,12 +450,10 @@ function MachineMemories({ machineId, supported }: { machineId: MachineId; suppo
   const { roles, synced } = useWorkspaceAgentRoles();
   const { openSettings } = useOpenSettings();
   const getAssignedRoles = (entry: MemoryAssociation) =>
-    roles.filter(
-      (role) =>
-        role.machineId === machineId &&
-        role.runConfig.memory?.providerId === entry.providerId &&
-        role.runConfig.memory.memoryId === entry.memoryId
-    );
+    roles.filter((role) => {
+      const memory = getAgentRoleTarget(role, machineId)?.runConfig.memory;
+      return memory?.providerId === entry.providerId && memory.memoryId === entry.memoryId;
+    });
 
   const [editor, setEditor] = useState<Editor | null>(null);
   const [error, setError] = useState(false);

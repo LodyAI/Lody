@@ -492,6 +492,10 @@ export function ScheduleProposalNotice({
 
   const problemText: Record<ProposalTargetProblem, string> = {
     role_not_found: t('schedules.proposal.roleNotFound', 'The named Agent Role no longer exists.'),
+    role_machine_required: t(
+      'schedules.proposal.roleMachineRequired',
+      'That Agent Role runs on several machines; name the machine to use.'
+    ),
     agent_not_found: t('schedules.proposal.agentNotFound', 'The named Agent is not available.'),
     machine_mismatch: t(
       'schedules.proposal.machineMismatch',

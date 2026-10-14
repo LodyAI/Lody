@@ -72,6 +72,35 @@ describe('buildComposerAgentRoleItems', () => {
     expect(items.at(-1)?.agentConfig?.agentType).toBe('claude');
   });
 
+  it("offers a multi-machine Role with this machine's own agent and run config", () => {
+    const both = makeRole({
+      id: 'r-5' as AgentRoleId,
+      name: 'Both',
+      machineId: 'machine-2' as MachineId,
+      runConfig: { modelId: 'remote-model' },
+      additionalTargets: [
+        {
+          machineId: 'machine-1' as MachineId,
+          agentConfigId: 'config-2' as AgentConfigId,
+          runConfig: { modelId: 'local-model' },
+        },
+      ],
+    });
+    const [item] = buildComposerAgentRoleItems({
+      roles: [both],
+      machineId: 'machine-1' as MachineId,
+      agentConfigs: configs,
+      resolveAvailability: () => available,
+    });
+    expect(item?.role).toMatchObject({
+      id: 'r-5',
+      machineId: 'machine-1',
+      agentConfigId: 'config-2',
+      runConfig: { modelId: 'local-model' },
+    });
+    expect(item?.agentConfig?.agentType).toBe('claude');
+  });
+
   it('offers nothing until a machine is selected', () => {
     expect(
       buildComposerAgentRoleItems({

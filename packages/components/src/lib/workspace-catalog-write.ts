@@ -1,5 +1,6 @@
 import {
   getWorkspaceFlockDocId,
+  serializeAgentRoleRow,
   workspaceFlockKeys,
   type AgentRole,
   type AgentRoleId,
@@ -82,12 +83,14 @@ export const deleteWorkspaceMcpServer = (
  *
  * Sharing is this same call: `visibility` lives on the row, so the whole catalog
  * stays one family and no state exists where a Role is in both directories or
- * neither.
+ * neither. The stored shape is the serializer's: v1 for a single-target Role,
+ * v2 — which older clients skip rather than rewrite — once it has several.
  */
 export const writeWorkspaceAgentRole = (
   deps: WorkspaceCatalogWriteDeps,
   role: AgentRole
-): Promise<void> => putRow(deps, workspaceFlockKeys.agentRole(role.id), role);
+): Promise<void> =>
+  putRow(deps, workspaceFlockKeys.agentRole(role.id), serializeAgentRoleRow(role));
 
 export const deleteWorkspaceAgentRole = (
   deps: WorkspaceCatalogWriteDeps,

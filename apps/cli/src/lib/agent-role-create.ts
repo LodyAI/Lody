@@ -1,9 +1,13 @@
 import {
+  bindAgentRoleTarget,
+  getAgentRoleTargets,
   getWorkspaceFlockDocId,
+  isMultiTargetAgentRole,
   listWorkspaceAgentRoles,
   readWorkspaceFlockRowsFromFlock,
   snapshotAgentRole,
   type AgentRole,
+  type MachineId,
   type WorkspaceId,
 } from '@lody/shared';
 import { normalizeCliValue } from '@/lib/command-runtime';
@@ -79,6 +83,58 @@ export const selectUniqueAgentRoleByIdOrName = (
   );
 };
 
+const formatAgentRoleTargets = (role: AgentRole): string =>
+  getAgentRoleTargets(role)
+    .map((target) => (target.alias ? `${target.machineId} (${target.alias})` : target.machineId))
+    .join(', ');
+
+/**
+ * The Role bound to the machine that will run it.
+ *
+ * A selector may be a Role id, its unique name, or one target's alias, which
+ * names the machine by itself. A Role on several machines otherwise needs
+ * `machineId`: nothing picks one of its targets on the caller's behalf. For a
+ * single-target Role the machine must match, unless the caller treats it as an
+ * overridden flag (`ignoreForSingleTarget`, the CLI's `--machine`).
+ */
+export const selectAgentRoleTarget = (
+  roles: readonly AgentRole[],
+  selector: string,
+  machine?: { machineId?: string; ignoreForSingleTarget?: boolean }
+): AgentRole => {
+  const normalizedSelector = normalizeCliValue(selector);
+  const machineId = normalizeCliValue(machine?.machineId);
+  const aliasMatches = roles.flatMap((role) =>
+    getAgentRoleTargets(role)
+      .filter((target) => target.alias && normalizeCliValue(target.alias) === normalizedSelector)
+      .map((target) => ({ role, target }))
+  );
+  const [onlyAlias] = aliasMatches;
+  const isIdOrName = roles.some(
+    (role) => role.id === normalizedSelector || normalizeCliValue(role.name) === normalizedSelector
+  );
+  if (!isIdOrName && aliasMatches.length === 1 && onlyAlias) {
+    if (!machineId || machineId === onlyAlias.target.machineId) {
+      const bound = bindAgentRoleTarget(onlyAlias.role, onlyAlias.target.machineId);
+      if (bound) return bound;
+    }
+  }
+  const role = selectUniqueAgentRoleByIdOrName(roles, selector);
+  if (!isMultiTargetAgentRole(role) && (!machineId || machine?.ignoreForSingleTarget)) return role;
+  if (!machineId) {
+    throw new Error(
+      `Agent Role ${role.name} (${role.id}) runs on several machines; name one. Machines: ${formatAgentRoleTargets(role)}`
+    );
+  }
+  const bound = bindAgentRoleTarget(role, machineId as MachineId);
+  if (!bound) {
+    throw new Error(
+      `Agent Role ${role.name} (${role.id}) does not run on machine ${machineId}. Machines: ${formatAgentRoleTargets(role)}`
+    );
+  }
+  return bound;
+};
+
 /** Manual create flags that an explicit Role replaces; their values are ignored. */
 export type AgentRoleCreateOverrides = {
   machine?: string;
@@ -147,8 +203,19 @@ export const resolveAgentRoleCreateFromCatalog = async (args: {
   overrides?: AgentRoleCreateOverrides;
 }): Promise<ResolvedAgentRoleCreate> => {
   const catalog = await loadWorkspaceAgentRoleCatalog(args.manager, args.workspaceId);
-  const role = selectUniqueAgentRoleByIdOrName([...catalog.values()], args.selector);
-  return resolveAgentRoleCreate({ role, prompt: args.prompt, overrides: args.overrides });
+  // `--machine` picks the target of a Role on several machines; for a
+  // single-target Role it stays an ignored override, as before.
+  const role = selectAgentRoleTarget([...catalog.values()], args.selector, {
+    machineId: args.overrides?.machine,
+    ignoreForSingleTarget: true,
+  });
+  return resolveAgentRoleCreate({
+    role,
+    prompt: args.prompt,
+    overrides: isMultiTargetAgentRole(role)
+      ? { ...args.overrides, machine: undefined }
+      : args.overrides,
+  });
 };
 
 export const bindAgentRoleCreateOptions = (

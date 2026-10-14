@@ -1,10 +1,11 @@
-import type {
-  AgentConfigMeta,
-  AgentRole,
-  AgentRoleAvailability,
-  AgentRoleId,
-  AgentRoleUnavailableReason,
-  MachineId,
+import {
+  bindAgentRoleTarget,
+  type AgentConfigMeta,
+  type AgentRole,
+  type AgentRoleAvailability,
+  type AgentRoleId,
+  type AgentRoleUnavailableReason,
+  type MachineId,
 } from '@lody/shared';
 import type { AcpConfigOptionValue } from '@/components/shared/acp-selector-options';
 import type { AgentSelection } from '@/components/shared/agent-selector';
@@ -21,6 +22,7 @@ import type { AgentSelection } from '@/components/shared/agent-selector';
  */
 
 export type ComposerAgentRoleItem = {
+  /** Bound to the composer's machine: its inline target is that machine's. */
   role: AgentRole;
   availability: AgentRoleAvailability;
   /**
@@ -120,6 +122,10 @@ export function resolveTurnAgentRoleForRunConfig({
  * machine could only either move the chat off the selected machine or fall back
  * to a different config, and a Role never falls back.
  *
+ * A Role that runs on several machines is offered with THIS machine's target
+ * (`bindAgentRoleTarget`), so everything downstream reads the binding the
+ * chat will actually run.
+ *
  * Unavailable Roles stay listed. Seeing that a Role exists and why it cannot run
  * is what lets someone fix it; dropping the row makes a broken Role look
  * deleted.
@@ -138,7 +144,10 @@ export function buildComposerAgentRoleItems({
   if (!machineId) return [];
   const configById = new Map(agentConfigs.map((config) => [config.id, config]));
   return roles
-    .filter((role) => role.machineId === machineId)
+    .flatMap((role) => {
+      const bound = bindAgentRoleTarget(role, machineId);
+      return bound ? [bound] : [];
+    })
     .sort((left, right) => left.name.localeCompare(right.name) || left.id.localeCompare(right.id))
     .map((role) => ({
       role,
@@ -304,9 +313,10 @@ export function selectSessionAgentRoles({
   const configById = new Map(agentConfigs.map((config) => [config.id, config]));
   return roles
     .flatMap((role) => {
-      if (role.machineId !== machineId || role.agentConfigId !== agentConfigId) return [];
-      const agentConfig = configById.get(role.agentConfigId);
-      return [{ role, availability: resolveAvailability(role), agentConfig }];
+      const bound = bindAgentRoleTarget(role, machineId);
+      if (!bound || bound.agentConfigId !== agentConfigId) return [];
+      const agentConfig = configById.get(bound.agentConfigId);
+      return [{ role: bound, availability: resolveAvailability(bound), agentConfig }];
     })
     .sort((left, right) => left.role.name.localeCompare(right.role.name));
 }

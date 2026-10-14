@@ -43,7 +43,10 @@ import {
   SessionImageUploadRequestSchema,
   SessionImageUploadResponseSchema,
   SessionIdSchema,
+  bindAgentRoleTarget,
   collectViewedSessionIdsFromPresence,
+  getAgentRoleTargets,
+  isMultiTargetAgentRole,
   findFreshSessionPresenceState,
   shouldBypassSessionQuota,
   type LodySessionPresenceState,
@@ -412,6 +415,14 @@ const SessionCreateCommandInputShape = {
     .describe(
       'Agent Role id from the workspace catalog. When set, machine, agent config, and run config come from the current Role row.'
     ),
+  agentRoleMachineId: z
+    .string()
+    .trim()
+    .min(1)
+    .optional()
+    .describe(
+      'Machine id of the Agent Role target to run. Required when the Role runs on several machines; otherwise must match its machine.'
+    ),
   machineId: z.string().trim().min(1).optional().describe('Target machine id.'),
   agentConfigId: z.string().trim().min(1).optional().describe('Target agent config id.'),
   ...SessionRunConfigInputShape,
@@ -624,6 +635,12 @@ const SessionCreateBatchItemShape = {
     .min(1)
     .optional()
     .describe('Agent Role id from the workspace catalog.'),
+  agentRoleMachineId: z
+    .string()
+    .trim()
+    .min(1)
+    .optional()
+    .describe('Machine id of the Agent Role target; required for a Role on several machines.'),
   machineId: z.string().trim().min(1).optional(),
   agentConfigId: z.string().trim().min(1).optional(),
   ...SessionRunConfigInputShape,
@@ -1348,7 +1365,7 @@ const resolveMcpSessionCreate = (
   input: SessionCreateCommandInput,
   invoking: InvokingTurnContext | undefined,
   requester: Pick<SessionMeta, 'machineId' | 'project'>,
-  role: AgentRole | undefined
+  catalogRole: AgentRole | undefined
 ): ResolvedMcpSessionCreate => {
   if (!input.agentRoleId) {
     return {
@@ -1358,10 +1375,32 @@ const resolveMcpSessionCreate = (
     };
   }
 
-  if (!role || role.id !== input.agentRoleId) {
+  if (!catalogRole || catalogRole.id !== input.agentRoleId) {
     throw new LodyOperationStoreError(
       'AGENT_ROLE_NOT_FOUND',
       `Agent Role ${input.agentRoleId} does not exist in the workspace catalog.`,
+      false
+    );
+  }
+  // The target is named, never chosen: a Role on several machines needs
+  // agentRoleMachineId, and a named machine must be one the Role runs on.
+  const targetMachines = getAgentRoleTargets(catalogRole)
+    .map((target) => target.machineId)
+    .join(', ');
+  if (!input.agentRoleMachineId && isMultiTargetAgentRole(catalogRole)) {
+    throw new LodyOperationStoreError(
+      'AGENT_ROLE_MACHINE_REQUIRED',
+      `Agent Role ${catalogRole.id} runs on several machines; pass agentRoleMachineId (one of: ${targetMachines}).`,
+      false
+    );
+  }
+  const role = input.agentRoleMachineId
+    ? bindAgentRoleTarget(catalogRole, input.agentRoleMachineId as MachineId)
+    : catalogRole;
+  if (!role) {
+    throw new LodyOperationStoreError(
+      'AGENT_ROLE_MACHINE_NOT_FOUND',
+      `Agent Role ${catalogRole.id} does not run on machine ${input.agentRoleMachineId} (machines: ${targetMachines}).`,
       false
     );
   }
@@ -1390,8 +1429,10 @@ const resolveMcpSessionCreate = (
     useCurrentSessionAsParent = true;
   }
 
+  const { agentRoleMachineId: _agentRoleMachineId, ...withoutTarget } =
+    omitAgentRoleManualOverrides(input);
   const resolvedInput = {
-    ...omitAgentRoleManualOverrides(input),
+    ...withoutTarget,
     machineId: role.machineId,
     agentConfigId: role.agentConfigId,
     ...(useCurrentSessionAsParent !== undefined ? { useCurrentSessionAsParent } : {}),
@@ -3213,6 +3254,7 @@ const startSessionCreateManyOperation = async (
           operationId: args.operationId,
           prompt: item.prompt,
           ...(item.agentRoleId ? { agentRoleId: item.agentRoleId } : {}),
+          ...(item.agentRoleMachineId ? { agentRoleMachineId: item.agentRoleMachineId } : {}),
           ...(item.machineId ? { machineId: item.machineId } : {}),
           ...(item.agentConfigId ? { agentConfigId: item.agentConfigId } : {}),
           ...buildMcpRunConfigCanonicalCommand(item),
@@ -4147,7 +4189,7 @@ export function buildSessionToolServer(handlers?: SessionToolHandlers): McpServe
     {
       title: 'Create a Lody session',
       description:
-        'Start durable asynchronous work that creates a Lody session. Supply operationId; results are queued and batched after a normal turn release, or with your next user input, so do not poll operation_get. To use an Agent Role, pass agentRoleId; the current workspace catalog row supplies the exact Machine, Agent config, model, reasoning, and permission mode. If manual machine or run-config fields are also present, the Role takes precedence and those fields are ignored. A Role may run on any Machine the owner of this Machine can use; to work in a project there, pass workContext for a local project on that Machine (find it with lody_session_create_options machineId + localProjectQuery). Without workContext a Role on another Machine starts as a plain chat there. To recover an already accepted create without resending its prompt, send only operationId with resume=true. useCurrentSessionAsParent=true and workContext are mutually exclusive schema branches. Machine/config ids and runConfig values for non-Role creates come from lody_session_create_options. The wait field is temporary legacy compatibility only. ' +
+        'Start durable asynchronous work that creates a Lody session. Supply operationId; results are queued and batched after a normal turn release, or with your next user input, so do not poll operation_get. To use an Agent Role, pass agentRoleId; the current workspace catalog row supplies the exact Machine, Agent config, model, reasoning, and permission mode. A Role that runs on several machines also needs agentRoleMachineId naming the target machine. If manual machine or run-config fields are also present, the Role takes precedence and those fields are ignored. A Role may run on any Machine the owner of this Machine can use; to work in a project there, pass workContext for a local project on that Machine (find it with lody_session_create_options machineId + localProjectQuery). Without workContext a Role on another Machine starts as a plain chat there. To recover an already accepted create without resending its prompt, send only operationId with resume=true. useCurrentSessionAsParent=true and workContext are mutually exclusive schema branches. Machine/config ids and runConfig values for non-Role creates come from lody_session_create_options. The wait field is temporary legacy compatibility only. ' +
         SESSION_COLLABORATION_GUIDANCE +
         ' For retryable Machine catalog SYNC_UNAVAILABLE errors:' +
         MACHINE_CATALOG_RETRY_GUIDANCE,
