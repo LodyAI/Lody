@@ -52,4 +52,4 @@ they isolate installed Claude SDK metadata and exercise real routes and temporar
 filesystems, but do not establish adapter/runtime integration. Windows name rules are
 exercised by an injected platform; a real Windows filesystem and a live remote-machine
 UI are not covered.
-Package checks and their environment limits are reported with the commit; no PR is created.
+PR: [#1576](https://github.com/LodyAI/Lody/pull/1576).

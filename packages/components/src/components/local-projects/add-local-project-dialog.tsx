@@ -833,28 +833,28 @@ function BrowseStep({
             {addError}
           </p>
         ) : null}
-        {!newFolderOpen ? (
-          <div {...stylex.props(styles.footerRow)}>
-            <div {...stylex.props(styles.currentFolder)}>
-              <p {...stylex.props(styles.currentFolderLabel)}>
-                {t('localProjects.add.currentFolder', 'Current folder')}
+        <div {...stylex.props(styles.footerRow)}>
+          <div {...stylex.props(styles.currentFolder)}>
+            <p {...stylex.props(styles.currentFolderLabel)}>
+              {t('localProjects.add.currentFolder', 'Current folder')}
+            </p>
+            {currentPathParts ? (
+              <p {...stylex.props(styles.currentPath)} title={current?.path}>
+                {currentPathParts.head ? (
+                  <span {...stylex.props(styles.truncate, styles.pathHead)}>
+                    {currentPathParts.head}
+                  </span>
+                ) : null}
+                <span {...stylex.props(styles.pathTail)}>{currentPathParts.tail}</span>
               </p>
-              {currentPathParts ? (
-                <p {...stylex.props(styles.currentPath)} title={current?.path}>
-                  {currentPathParts.head ? (
-                    <span {...stylex.props(styles.truncate, styles.pathHead)}>
-                      {currentPathParts.head}
-                    </span>
-                  ) : null}
-                  <span {...stylex.props(styles.pathTail)}>{currentPathParts.tail}</span>
-                </p>
-              ) : (
-                <p {...stylex.props(styles.currentPath, styles.currentPathEmpty, styles.truncate)}>
-                  …
-                </p>
-              )}
-            </div>
-            <div {...stylex.props(styles.actions)}>
+            ) : (
+              <p {...stylex.props(styles.currentPath, styles.currentPathEmpty, styles.truncate)}>
+                …
+              </p>
+            )}
+          </div>
+          <div {...stylex.props(styles.actions)}>
+            {!newFolderOpen ? (
               <Button
                 type="button"
                 variant="secondary"
@@ -864,22 +864,22 @@ function BrowseStep({
               >
                 {t('common.cancel', 'Cancel')}
               </Button>
-              <Button
-                type="button"
-                size="small"
-                disabled={!canAddCurrentFolder}
-                onClick={onAddCurrentFolder}
-              >
-                {adding ? (
-                  <Spinner {...stylex.props(styles.icon16)} />
-                ) : (
-                  <FolderPlus {...stylex.props(styles.icon16)} />
-                )}
-                {t('localProjects.add.useThisFolder', 'Add')}
-              </Button>
-            </div>
+            ) : null}
+            <Button
+              type="button"
+              size="small"
+              disabled={!canAddCurrentFolder}
+              onClick={onAddCurrentFolder}
+            >
+              {adding ? (
+                <Spinner {...stylex.props(styles.icon16)} />
+              ) : (
+                <FolderPlus {...stylex.props(styles.icon16)} />
+              )}
+              {t('localProjects.add.useThisFolder', 'Add')}
+            </Button>
           </div>
-        ) : null}
+        </div>
       </div>
     </>
   );
