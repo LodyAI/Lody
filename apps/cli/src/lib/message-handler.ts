@@ -7009,6 +7009,17 @@ export class MessageHandler {
       const payload = rawPayload;
       let result: unknown;
       switch (operation) {
+        case 'accept_input_and_dispatch': {
+          if (!backend.inputAcceptance?.acceptAndDispatch)
+            throw new Error('Input dispatch is unavailable');
+          const receipt = await backend.inputAcceptance.acceptAndDispatch(
+            parseHistoryWrite(HistoryEntryWriteSchema, payload.entry) as never
+          );
+          result = receipt;
+          if (receipt.status === 'accepted' && receipt.active && !this.cleanedUp)
+            void this.sessionDispatchWatcher.enqueueSessionCheck(sessionId);
+          break;
+        }
         case 'accept_input':
           if (!backend.inputAcceptance) throw new Error('Input acceptance is unavailable');
           result = await backend.inputAcceptance.accept(

@@ -16,6 +16,7 @@ import {
   HistoryWriteError,
   parseHistoryWrite,
   PermissionOutcomeSchema,
+  isSessionHistoryStatusAwaitingStart,
 } from '@lody/shared';
 import {
   applyHistoryAction as applyDomainHistoryAction,
@@ -42,6 +43,8 @@ import {
   projectRoostSegments,
   selectTurnOutput,
   ROOST_CLEAR_FIELDS_KEY,
+  readLatestTurn,
+  type SessionInputAcceptanceResult,
 } from '@lody/shared/session-data';
 import {
   createImportCursor,
@@ -1933,6 +1936,70 @@ const createNodeServicesForLease = async (
     if (read.state === 'missing') return false;
     throw new Error('Accepted Roost input history is not readable');
   };
+  const acceptInput = async (
+    entry: SessionTurn,
+    dispatch = false
+  ): Promise<SessionInputAcceptanceResult> => {
+    const identity = inputIdentity(entry);
+    await withWrites(identity.operationId, async () => {
+      // Receipt identity is checked before authoring trusted human provenance.
+      const prior = await historyGeneration.lookupInputAcceptance(identity);
+      let created = false;
+      if (dispatch && prior) {
+        const current = await history.readTurn(entry.id);
+        if (
+          current.state === 'missing' ||
+          (current.state === 'ready' && !isSessionHistoryStatusAwaitingStart(current.turn.status))
+        )
+          return false;
+        if (current.state !== 'ready')
+          throw new Error('Accepted Roost input history is not readable');
+      }
+      if (dispatch) {
+        const userId = entry.userId?.trim();
+        if (!userId)
+          throw new HistoryWriteError([{ path: ['userId'], code: 'invalid_user_input' }]);
+        const existing = (await sessionDoc.getDocState())?.humanInputReceipts?.[entry.id];
+        if (existing && existing.userId !== userId)
+          throw new HistoryWriteError([{ path: ['userId'], code: 'input_identity_conflict' }]);
+        sessionDoc.recordHumanInputReceipt(entry.id, userId);
+      }
+      if (!prior) {
+        const branch = await ensureHeadSealed();
+        const accepted = await roostHistory.acceptInputToView({
+          ...identity,
+          expectedRevision: branch.state.revision,
+          expectedHead: branch.state.head,
+          input: { ...identity.input, parents: await parentForHead(branch) },
+        });
+        created = accepted.created;
+        await refreshProjectedMessage(accepted.turnId, accepted);
+        if (entry.finished === true) await finishIfNeeded(accepted.turnId);
+      }
+      if (dispatch) {
+        const current = await history.readTurn(entry.id);
+        if (current.state !== 'ready' && current.state !== 'missing')
+          throw new Error('Accepted Roost input history is not readable');
+        if (current.state === 'ready' && isSessionHistoryStatusAwaitingStart(current.turn.status)) {
+          const latest = await readLatestTurn(history, 'user');
+          const meta = await sessionDoc.getMetaState();
+          if (
+            meta &&
+            !meta.isArchived &&
+            meta.lastMissingHistoryUserMsgId !== entry.id &&
+            meta.lastHandledUserMsgId !== entry.id
+          ) {
+            // The existing writer queue orders this check and activation with
+            // every competing accept. A recovered older input cannot move it back.
+            if (latest?.id === entry.id && meta.latestUserMsgId !== entry.id)
+              await sessionDoc.publishUserTurnActivation(entry.id);
+          }
+        }
+      }
+      return created;
+    });
+    return { status: 'accepted', turnId: entry.id, active: await inputIsActive(entry.id) };
+  };
   const inputAcceptance: import('@lody/shared/session-data').SessionInputAcceptance = {
     async lookup(entry) {
       const identity = inputIdentity(entry);
@@ -1947,29 +2014,8 @@ const createNodeServicesForLease = async (
           }
         : { status: 'unobserved' };
     },
-    async accept(entry) {
-      const identity = inputIdentity(entry);
-      await withWrites(identity.operationId, async () => {
-        // Receipts in retired generations still own this input. Do not put a
-        // removed turn back into the active branch during recovery.
-        if (await historyGeneration.lookupInputAcceptance(identity)) return false;
-        const branch = await ensureHeadSealed();
-        const accepted = await roostHistory.acceptInputToView({
-          ...identity,
-          expectedRevision: branch.state.revision,
-          expectedHead: branch.state.head,
-          input: { ...identity.input, parents: await parentForHead(branch) },
-        });
-        await refreshProjectedMessage(accepted.turnId, accepted);
-        if (entry.finished === true) await finishIfNeeded(accepted.turnId);
-        return accepted.created;
-      });
-      return {
-        status: 'accepted',
-        turnId: entry.id,
-        active: await inputIsActive(entry.id),
-      };
-    },
+    accept: (entry) => acceptInput(entry),
+    acceptAndDispatch: (entry) => acceptInput(entry, true),
   };
 
   const sessionData: RoostSessionData = createRoostSessionData({

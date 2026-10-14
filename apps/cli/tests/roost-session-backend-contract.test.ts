@@ -1641,60 +1641,303 @@ describe('Production Roost immutable input acceptance', () => {
     return port;
   };
 
+  it('commits human provenance and activation with ordinary acceptance and preserves a newer pointer on retry', async () => {
+    const fixture = await nativeFixture();
+    const first = nativeUser('combined-first'),
+      second = nativeUser('combined-second');
+    const accept = inputPort(fixture).acceptAndDispatch;
+    if (!accept) throw new Error('Expected combined input dispatch');
+    expect(await accept(first)).toMatchObject({
+      status: 'accepted',
+      turnId: first.id,
+      active: true,
+    });
+    expect((await fixture.doc.getDocState())?.humanInputReceipts?.[first.id]).toEqual({
+      userId: first.userId,
+    });
+    expect((await fixture.doc.getMetaState())?.latestUserMsgId).toBe(first.id);
+    await accept(second);
+    await accept(first);
+    expect((await fixture.doc.getMetaState())?.latestUserMsgId).toBe(second.id);
+    expect((await fixture.backend.readHistory()).map((turn) => turn.id)).toEqual([
+      first.id,
+      second.id,
+    ]);
+    const meta = await fixture.doc.getMetaState();
+    if (!meta) throw new Error('Expected live session metadata');
+    expect(findNextDispatchableUserTurn(await fixture.backend.readHistory(), meta)?.id).toBe(
+      first.id
+    );
+    await expect(accept({ ...first, userId: 'another-user' })).rejects.toThrow();
+    expect((await fixture.doc.getDocState())?.humanInputReceipts?.[first.id]).toEqual({
+      userId: first.userId,
+    });
+  });
+
+  it('keeps provenance before a paused native commit and serializes competing acceptance and activation', async () => {
+    const fixture = await nativeFixture();
+    const first = nativeUser('combined-paused-first'),
+      second = nativeUser('combined-paused-second');
+    const accept = inputPort(fixture).acceptAndDispatch;
+    if (!accept) throw new Error('Expected combined input dispatch');
+    const entered = Promise.withResolvers<void>(),
+      release = Promise.withResolvers<void>();
+    const request = RoostNativeClient.prototype.request;
+    let paused = false;
+    const spy = vi
+      .spyOn(RoostNativeClient.prototype, 'request')
+      .mockImplementation(async function (args, options) {
+        if (
+          !paused &&
+          args.method === 'writeBatch' &&
+          args.stream === `lody-session:${fixture.doc.sessionId}` &&
+          args.indexPuts?.some((put) => put.table === 'lody_history_branch_operations_v1')
+        ) {
+          paused = true;
+          entered.resolve();
+          await release.promise;
+        }
+        return request.call(this, args, options);
+      });
+    const initial = accept(first),
+      competing = accept(second);
+    void initial.catch(() => {});
+    void competing.catch(() => {});
+    try {
+      await entered.promise;
+      expect((await fixture.doc.getDocState())?.humanInputReceipts).toEqual({
+        [first.id]: { userId: first.userId },
+      });
+      expect((await fixture.doc.getMetaState())?.latestUserMsgId).toBeUndefined();
+      expect(await fixture.backend.readTurn(first.id)).toMatchObject({ state: 'missing' });
+      release.resolve();
+      await Promise.all([initial, competing]);
+      expect((await fixture.backend.readHistory()).map((turn) => turn.id)).toEqual([
+        first.id,
+        second.id,
+      ]);
+      expect((await fixture.doc.getMetaState())?.latestUserMsgId).toBe(second.id);
+    } finally {
+      release.resolve();
+      await Promise.allSettled([initial, competing]);
+      spy.mockRestore();
+    }
+  });
+
+  it.each(['handled', 'canceled', 'removed', 'archived', 'missing-marker'] as const)(
+    'never reactivates a settled or unavailable accepted input: %s',
+    async (state) => {
+      const fixture = await nativeFixture();
+      const input = nativeUser(`combined-${state}`);
+      const accept = inputPort(fixture).acceptAndDispatch;
+      if (!accept) throw new Error('Expected combined input dispatch');
+      await accept(input);
+      await fixture.repo.upsertDocMeta(fixture.doc.roomId, {
+        latestUserMsgId: 'preserved-pointer',
+      });
+      if (state === 'removed')
+        await fixture.backend.applyHistoryAction({ kind: 'remove-turn', turnId: input.id });
+      else if (state === 'archived')
+        await fixture.repo.upsertDocMeta(fixture.doc.roomId, { isArchived: true });
+      else if (state === 'missing-marker')
+        await fixture.repo.upsertDocMeta(fixture.doc.roomId, {
+          lastMissingHistoryUserMsgId: input.id,
+        });
+      else
+        await fixture.backend.applyHistoryAction({
+          kind: 'user-status',
+          turnId: input.id,
+          status: state,
+        });
+      expect(await accept(input)).toMatchObject({
+        status: 'accepted',
+        active: state !== 'removed',
+      });
+      expect((await fixture.doc.getMetaState())?.latestUserMsgId).toBe('preserved-pointer');
+      expect((await fixture.backend.readHistory()).map((turn) => [turn.id, turn.status])).toEqual(
+        state === 'removed'
+          ? []
+          : [[input.id, state === 'handled' || state === 'canceled' ? state : 'pending']]
+      );
+    }
+  );
+
+  it('recovers a committed input after activation failed without appending it again', async () => {
+    const fixture = await nativeFixture();
+    const input = nativeUser('combined-activation-failure');
+    const accept = inputPort(fixture).acceptAndDispatch;
+    if (!accept) throw new Error('Expected combined input dispatch');
+    const activate = fixture.doc.publishUserTurnActivation.bind(fixture.doc);
+    fixture.doc.publishUserTurnActivation = async () => {
+      throw new Error('Synthetic activation failure');
+    };
+    await expect(accept(input)).rejects.toThrow('Synthetic activation failure');
+    expect(await inputPort(fixture).lookup(input)).toMatchObject({
+      status: 'accepted',
+      active: true,
+    });
+    fixture.doc.publishUserTurnActivation = activate;
+    await accept(input);
+    expect((await fixture.backend.readHistory()).map((turn) => turn.id)).toEqual([input.id]);
+    expect((await fixture.doc.getMetaState())?.latestUserMsgId).toBe(input.id);
+  });
+
+  it('returns the combined RPC receipt after owner activation while dispatch execution is still blocked', async () => {
+    const fixture = await nativeFixture();
+    const input = nativeUser('combined-rpc-input');
+    const execution = Promise.withResolvers<void>();
+    let dispatched = false;
+    const handler = Object.assign(Object.create(MessageHandler.prototype), {
+      workspaceDocument: { repo: fixture.repo, getOrCreateSessionDoc: async () => fixture.doc },
+      resolveSessionHistoryOwnerSessionId: async (id: SessionId) => id,
+      touchSession: () => undefined,
+      logger: getDefaultLogger(),
+      cleanedUp: false,
+      sessionDispatchWatcher: {
+        enqueueSessionCheck: async () => {
+          dispatched = true;
+          await execution.promise;
+        },
+      },
+    }) as {
+      writeSessionHistoryForRpc(
+        id: SessionId,
+        operation: 'accept_input_and_dispatch',
+        payload: Record<string, unknown>
+      ): Promise<SessionHistoryWriteResponse>;
+    };
+    try {
+      const receipt = await handler.writeSessionHistoryForRpc(
+        fixture.doc.sessionId,
+        'accept_input_and_dispatch',
+        { entry: input }
+      );
+      expect(receipt).toMatchObject({
+        success: true,
+        operation: 'accept_input_and_dispatch',
+        result: { status: 'accepted', turnId: input.id, active: true },
+      });
+      expect(SessionHistoryWriteResponseSchema.safeParse(receipt).success).toBe(true);
+      expect((await fixture.doc.getMetaState())?.latestUserMsgId).toBe(input.id);
+      expect(await fixture.backend.readTurn(input.id)).toMatchObject({
+        state: 'ready',
+        turn: { id: input.id },
+      });
+      expect(dispatched).toBe(true);
+    } finally {
+      execution.resolve();
+    }
+  });
+
   it('keeps committed inputs dispatchable in history order independently of reply observation and later activation pointers', async () => {
     const fixture = await nativeFixture();
-    const first = nativeUser('first-input'), second = nativeUser('second-input');
-    await inputPort(fixture).accept(first); await inputPort(fixture).accept(second);
+    const first = nativeUser('first-input'),
+      second = nativeUser('second-input');
+    await inputPort(fixture).accept(first);
+    await inputPort(fixture).accept(second);
     const found = await fixture.repo.getDocMeta(getSessionRoomId(fixture.doc.sessionId));
     const meta = { ...found?.meta, latestUserMsgId: second.id } as SessionMeta;
-    expect(findNextDispatchableUserTurn(await fixture.backend.readHistory(), meta)?.id).toBe(first.id);
-    await fixture.backend.applyHistoryAction({ kind: 'user-status', turnId: first.id, status: 'handled' });
-    expect(findNextDispatchableUserTurn(await fixture.backend.readHistory(), meta)?.id).toBe(second.id);
-    await fixture.backend.applyHistoryAction({ kind: 'user-status', turnId: second.id, status: 'handled' });
-    expect(findNextDispatchableUserTurn(await fixture.backend.readHistory(), { ...meta, lastHandledUserMsgId: second.id })).toBeNull();
-    expect(await inputPort(fixture).accept(first)).toEqual({ status: 'accepted', turnId: first.id, active: true });
-    expect((await fixture.backend.readHistory()).map(turn => [turn.id, turn.status])).toEqual([[first.id, 'handled'], [second.id, 'handled']]);
+    expect(findNextDispatchableUserTurn(await fixture.backend.readHistory(), meta)?.id).toBe(
+      first.id
+    );
+    await fixture.backend.applyHistoryAction({
+      kind: 'user-status',
+      turnId: first.id,
+      status: 'handled',
+    });
+    expect(findNextDispatchableUserTurn(await fixture.backend.readHistory(), meta)?.id).toBe(
+      second.id
+    );
+    await fixture.backend.applyHistoryAction({
+      kind: 'user-status',
+      turnId: second.id,
+      status: 'handled',
+    });
+    expect(
+      findNextDispatchableUserTurn(await fixture.backend.readHistory(), {
+        ...meta,
+        lastHandledUserMsgId: second.id,
+      })
+    ).toBeNull();
+    expect(await inputPort(fixture).accept(first)).toEqual({
+      status: 'accepted',
+      turnId: first.id,
+      active: true,
+    });
+    expect((await fixture.backend.readHistory()).map((turn) => [turn.id, turn.status])).toEqual([
+      [first.id, 'handled'],
+      [second.id, 'handled'],
+    ]);
   });
 
   it.each(['retry-first', 'replacement-first', 'removed-after-original'] as const)(
-    'converges a delayed original and the same immutable retry: %s', async scenario => {
+    'converges a delayed original and the same immutable retry: %s',
+    async (scenario) => {
       const source = await nativeFixture();
       await source.backend.appendHistoryTurn(nativeUser('baseline'));
       const peer = await nativeFixture(source.doc.sessionId);
       const input = nativeUser('delayed-original');
-      const entered = Promise.withResolvers<void>(), release = Promise.withResolvers<void>();
+      const entered = Promise.withResolvers<void>(),
+        release = Promise.withResolvers<void>();
       const originalRequest = RoostNativeClient.prototype.request;
       let gated = false;
-      const spy = vi.spyOn(RoostNativeClient.prototype, 'request').mockImplementation(async function(request, options) {
-        if (!gated && request.method === 'writeBatch' && request.stream === `lody-session:${source.doc.sessionId}` &&
-            request.indexPuts?.some(put => put.table === 'lody_history_branch_operations_v1')) {
-          gated = true; entered.resolve(); await release.promise;
-        }
-        return originalRequest.call(this, request, options);
-      });
+      const spy = vi
+        .spyOn(RoostNativeClient.prototype, 'request')
+        .mockImplementation(async function (request, options) {
+          if (
+            !gated &&
+            request.method === 'writeBatch' &&
+            request.stream === `lody-session:${source.doc.sessionId}` &&
+            request.indexPuts?.some((put) => put.table === 'lody_history_branch_operations_v1')
+          ) {
+            gated = true;
+            entered.resolve();
+            await release.promise;
+          }
+          return originalRequest.call(this, request, options);
+        });
       const initial = inputPort(source).accept(input);
       void initial.catch(() => {});
       try {
         await entered.promise;
         expect(await inputPort(peer).lookup(input)).toEqual({ status: 'unobserved' });
         if (scenario === 'removed-after-original') {
-          release.resolve(); await initial;
+          release.resolve();
+          await initial;
           await peer.backend.applyHistoryAction({ kind: 'remove-turn', turnId: input.id });
-          expect(await inputPort(peer).accept(input)).toEqual({ status: 'accepted', turnId: input.id, active: false });
-          expect((await peer.backend.readHistory()).map(turn => turn.id)).toEqual(['baseline']);
+          expect(await inputPort(peer).accept(input)).toEqual({
+            status: 'accepted',
+            turnId: input.id,
+            active: false,
+          });
+          expect((await peer.backend.readHistory()).map((turn) => turn.id)).toEqual(['baseline']);
         } else {
-          if (scenario === 'replacement-first') await peer.backend.applyHistoryAction({ kind: 'remove-turn', turnId: 'baseline' });
-          expect(await inputPort(peer).accept(input)).toEqual({ status: 'accepted', turnId: input.id, active: true });
+          if (scenario === 'replacement-first')
+            await peer.backend.applyHistoryAction({ kind: 'remove-turn', turnId: 'baseline' });
+          expect(await inputPort(peer).accept(input)).toEqual({
+            status: 'accepted',
+            turnId: input.id,
+            active: true,
+          });
           release.resolve();
           expect(await initial).toEqual({ status: 'accepted', turnId: input.id, active: true });
           const expected = scenario === 'replacement-first' ? [input.id] : ['baseline', input.id];
-          expect((await source.backend.readHistory()).map(turn => turn.id)).toEqual(expected);
-          expect((await peer.backend.readHistory()).map(turn => turn.id)).toEqual(expected);
+          expect((await source.backend.readHistory()).map((turn) => turn.id)).toEqual(expected);
+          expect((await peer.backend.readHistory()).map((turn) => turn.id)).toEqual(expected);
         }
-        await source.close(); await peer.close();
+        await source.close();
+        await peer.close();
         const reopened = await nativeFixture(source.doc.sessionId);
-        expect(await inputPort(reopened).lookup(input)).toEqual({ status: 'accepted', turnId: input.id, active: scenario !== 'removed-after-original' });
-      } finally { release.resolve(); await initial.catch(() => {}); spy.mockRestore(); }
+        expect(await inputPort(reopened).lookup(input)).toEqual({
+          status: 'accepted',
+          turnId: input.id,
+          active: scenario !== 'removed-after-original',
+        });
+      } finally {
+        release.resolve();
+        await initial.catch(() => {});
+        spy.mockRestore();
+      }
     }
   );
 
@@ -1704,17 +1947,35 @@ describe('Production Roost immutable input acceptance', () => {
     const input = nativeUser('immutable-user');
     expect(await inputPort(fixture).lookup(input)).toEqual({ status: 'unobserved' });
     expect(await fixture.backend.readHistory()).toEqual([]);
-    expect(await inputPort(fixture).accept(input)).toEqual({ status: 'accepted', turnId: input.id, active: true });
-    await fixture.backend.applyHistoryAction({ kind: 'user-status', turnId: input.id, status: 'handled' });
+    expect(await inputPort(fixture).accept(input)).toEqual({
+      status: 'accepted',
+      turnId: input.id,
+      active: true,
+    });
+    await fixture.backend.applyHistoryAction({
+      kind: 'user-status',
+      turnId: input.id,
+      status: 'handled',
+    });
     await fixture.backend.appendHistoryTurn(nativeAssistant('later-assistant'));
     const before = await fixture.backend.readHistory();
-    expect(await inputPort(fixture).accept(input)).toEqual({ status: 'accepted', turnId: input.id, active: true });
+    expect(await inputPort(fixture).accept(input)).toEqual({
+      status: 'accepted',
+      turnId: input.id,
+      active: true,
+    });
     expect(await fixture.backend.readHistory()).toEqual(before);
     await fixture.close();
     fixture = await nativeFixture(id);
-    expect(await inputPort(fixture).lookup(input)).toEqual({ status: 'accepted', turnId: input.id, active: true });
+    expect(await inputPort(fixture).lookup(input)).toEqual({
+      status: 'accepted',
+      turnId: input.id,
+      active: true,
+    });
     expect(await fixture.backend.readHistory()).toEqual(before);
-    await expect(inputPort(fixture).accept({ ...input, items: [{ type: 'text', text: 'conflicting input' }] })).rejects.toMatchObject({ code: 'conflict' });
+    await expect(
+      inputPort(fixture).accept({ ...input, items: [{ type: 'text', text: 'conflicting input' }] })
+    ).rejects.toMatchObject({ code: 'conflict' });
     expect(await fixture.backend.readHistory()).toEqual(before);
     await fixture.close();
   });
@@ -1723,11 +1984,17 @@ describe('Production Roost immutable input acceptance', () => {
     const fixture = await nativeFixture();
     const input = nativeUser('unreadable-input');
     await inputPort(fixture).accept(input);
-    const read = vi.spyOn(fixture.backend.history, 'readTurn').mockResolvedValue({ state: 'unavailable', reason: 'incomplete' });
+    const read = vi
+      .spyOn(fixture.backend.history, 'readTurn')
+      .mockResolvedValue({ state: 'unavailable', reason: 'incomplete' });
     await expect(inputPort(fixture).lookup(input)).rejects.toThrow('not readable');
     read.mockRestore();
-    expect(await inputPort(fixture).lookup(input)).toEqual({ status: 'accepted', turnId: input.id, active: true });
-    expect((await fixture.backend.readHistory()).map(turn => turn.id)).toEqual([input.id]);
+    expect(await inputPort(fixture).lookup(input)).toEqual({
+      status: 'accepted',
+      turnId: input.id,
+      active: true,
+    });
+    expect((await fixture.backend.readHistory()).map((turn) => turn.id)).toEqual([input.id]);
   });
 
   it('retains receipts across branch removal and storage-generation replacement', async () => {
@@ -1737,12 +2004,24 @@ describe('Production Roost immutable input acceptance', () => {
     await inputPort(fixture).accept(input);
     await fixture.backend.applyHistoryAction({ kind: 'remove-turn', turnId: input.id });
     expect(await fixture.backend.readHistory()).toEqual([]);
-    expect(await inputPort(fixture).accept(input)).toEqual({ status: 'accepted', turnId: input.id, active: false });
+    expect(await inputPort(fixture).accept(input)).toEqual({
+      status: 'accepted',
+      turnId: input.id,
+      active: false,
+    });
     expect(await fixture.backend.readHistory()).toEqual([]);
     await fixture.close();
     fixture = await nativeFixture(id);
-    expect(await inputPort(fixture).lookup(input)).toEqual({ status: 'accepted', turnId: input.id, active: false });
-    expect(await inputPort(fixture).accept(input)).toEqual({ status: 'accepted', turnId: input.id, active: false });
+    expect(await inputPort(fixture).lookup(input)).toEqual({
+      status: 'accepted',
+      turnId: input.id,
+      active: false,
+    });
+    expect(await inputPort(fixture).accept(input)).toEqual({
+      status: 'accepted',
+      turnId: input.id,
+      active: false,
+    });
     expect(await fixture.backend.readHistory()).toEqual([]);
     await fixture.close();
   });

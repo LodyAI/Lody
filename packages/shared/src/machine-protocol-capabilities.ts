@@ -35,6 +35,7 @@ export const MACHINE_PROTOCOL_CAPABILITIES = {
   providerRateLimitsRefresh: 'providerRateLimitsRefresh',
   sessionHistory: 'sessionHistory',
   sessionInputAcceptance: 'sessionInputAcceptance',
+  sessionInputDispatch: 'sessionInputDispatch',
   sessionCollaborationControl: 'sessionCollaborationControl',
 } as const;
 
@@ -61,6 +62,7 @@ export const PI_EXTENSIONS_PROTOCOL_VERSION = 1;
 export const ACP_CAPABILITY_REFRESH_CACHE_PROTOCOL_VERSION = 1;
 export const SESSION_HISTORY_PROTOCOL_VERSION = 2;
 export const SESSION_INPUT_ACCEPTANCE_PROTOCOL_VERSION = 1;
+export const SESSION_INPUT_DISPATCH_PROTOCOL_VERSION = 1;
 
 type MachineProtocolCapabilityCarrier = {
   protocolCapabilities?: MachineProtocolCapabilities;
@@ -140,12 +142,27 @@ export const CURRENT_MACHINE_PROTOCOL_CAPABILITIES: MachineProtocolCapabilities 
     ACP_CAPABILITY_REFRESH_CACHE_PROTOCOL_VERSION,
   [MACHINE_PROTOCOL_CAPABILITIES.sessionHistory]: SESSION_HISTORY_PROTOCOL_VERSION,
   [MACHINE_PROTOCOL_CAPABILITIES.sessionInputAcceptance]: SESSION_INPUT_ACCEPTANCE_PROTOCOL_VERSION,
+  [MACHINE_PROTOCOL_CAPABILITIES.sessionInputDispatch]: SESSION_INPUT_DISPATCH_PROTOCOL_VERSION,
 };
+
+export function machineSupportsSessionInputDispatch(
+  machine: MachineProtocolCapabilityCarrier | null | undefined
+): boolean {
+  return machineSupportsProtocolCapability(
+    machine,
+    MACHINE_PROTOCOL_CAPABILITIES.sessionInputDispatch,
+    SESSION_INPUT_DISPATCH_PROTOCOL_VERSION
+  );
+}
 
 export function machineSupportsSessionInputAcceptance(
   machine: MachineProtocolCapabilityCarrier | null | undefined
 ): boolean {
-  return machineSupportsProtocolCapability(machine, MACHINE_PROTOCOL_CAPABILITIES.sessionInputAcceptance, SESSION_INPUT_ACCEPTANCE_PROTOCOL_VERSION);
+  return machineSupportsProtocolCapability(
+    machine,
+    MACHINE_PROTOCOL_CAPABILITIES.sessionInputAcceptance,
+    SESSION_INPUT_ACCEPTANCE_PROTOCOL_VERSION
+  );
 }
 
 /** Whether the target daemon exposes the Roost-backed session history RPC. */

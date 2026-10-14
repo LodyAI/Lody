@@ -2192,6 +2192,7 @@ export const SessionHistoryReadResponseSchema = z
 export const SessionHistoryWriteOperationSchema = z.enum([
   'append',
   'accept_input',
+  'accept_input_and_dispatch',
   'replace',
   'respond_permission',
   'apply_action',

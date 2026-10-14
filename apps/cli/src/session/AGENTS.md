@@ -46,9 +46,9 @@
 - Stop ends steer waits, not the owner fiber. Drain raw ACP or confirm termination, then clear
   presence before reuse. [Inbox admission](../orchestration/AGENTS.md); execution IDs stay fixed.
   Assistant ids use `userTurnId`; `invocation` owns source/requester/config; steer replaces it.
-- Publish `latestUserMsgId` in the SAME write as the history append (`appendUserTurn`). Only
-  dispatch producers publish it. Renderer and queue promotion retain the missing-history
-  tombstone; CLI dispatch producers keep their own marker policy.
+- Only dispatch producers publish `latestUserMsgId`, with history in `appendUserTurn`
+  or Roost's `accept_input_and_dispatch` writer queue. Save human provenance first;
+  guard live history/meta and newer activation; keep producer-specific tombstones.
 - Turn execution writes only `processingUserMsgId` and `lastHandledUserMsgId`; no start
   or terminal path may read-await-rewrite the other slots.
 - Never steer after cancellation or infer delivery from it. Stop uses

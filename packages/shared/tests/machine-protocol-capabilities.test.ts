@@ -13,11 +13,29 @@ import {
   machineSupportsIosSimulatorControls,
   negotiatedAcpCapabilitiesRefreshForce,
   resolveNewSessionHistoryBackend,
+  machineSupportsSessionInputDispatch,
 } from '../src/machine-protocol-capabilities';
 import {
   MachineAcpCapabilitiesRefreshRequestSchema,
   safeParseLocalSessionControlRequest,
 } from '../src/message-schemas';
+
+it('requires independently negotiated owner input dispatch, including mixed daemon versions', () => {
+  expect(machineSupportsSessionInputDispatch(undefined)).toBe(false);
+  expect(
+    machineSupportsSessionInputDispatch({
+      protocolCapabilities: { sessionHistory: 2, sessionInputAcceptance: 1 },
+    })
+  ).toBe(false);
+  expect(
+    machineSupportsSessionInputDispatch({ protocolCapabilities: { sessionInputDispatch: 0 } })
+  ).toBe(false);
+  expect(
+    machineSupportsSessionInputDispatch({
+      protocolCapabilities: CURRENT_MACHINE_PROTOCOL_CAPABILITIES,
+    })
+  ).toBe(true);
+});
 
 it('negotiates a new backend preference without changing explicit persisted choices', () => {
   expect(resolveNewSessionHistoryBackend(undefined, { preferred: 'roost' })).toBe('loro');

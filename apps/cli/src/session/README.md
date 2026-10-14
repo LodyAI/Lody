@@ -352,6 +352,16 @@ one immutable operation receipt with its history mutation, and the
 separately as `sessionInputAcceptance` version 1. Older targets require an update;
 ordinary history capability alone does not imply support.
 
+Ordinary ready input additionally negotiates `sessionInputDispatch` v1 and uses
+`accept_input_and_dispatch`. Its native writer queue records trusted human provenance,
+accepts immutable history and publishes activation for the latest awaiting user
+input before replying. Removed/settled input, archived/deleted metadata and the
+missing-history tombstone never reactivate; retry does not move a newer pointer back.
+The RPC host wakes its existing history dispatcher without awaiting execution or
+transport sync. The sender can show delivery from the owner receipt without reading
+history back or offering another dispatch RPC. A lost reply still queries the
+original receipt and repeats only the same immutable combined operation.
+
 The operation freezes user, turn ID and prepared content. Its digest excludes
 mutable parent/head placement. The owner checks current and retired history
 receipts before a write, so a retry converges with a delayed original after later
@@ -477,6 +487,16 @@ The synthetic [history benchmark](../../benchmarks/roost-history.mts) exercises
 these production backends and the shared view; `BENCH_STRUCTURAL=1` also measures
 the complete directory and a guarded last-user edit. Its timing excludes renderer
 transport, IndexedDB and paint.
+The synthetic [send benchmark](../../benchmarks/roost-send.mts) compares a first
+input and three follow-ups through production owner backends, recording acceptance
+and the observer's `seen` status separately. Run it from `apps/cli` with
+`TSX_TSCONFIG_PATH=tsconfig.json node --import ./node_modules/tsx/dist/loader.mjs benchmarks/roost-send.mts`;
+`BENCH_SAMPLES`, `BENCH_WARMUPS` and `BENCH_OUTPUT` control the run and JSON report.
+`BENCH_DISPATCH=1` selects combined Roost acceptance/activation and verifies the
+resulting activation pointer; dispatcher and Agent startup remain excluded.
+Roost includes SQLite/signing; Loro uses an in-memory Repo, so the result compares
+current owner paths with different durability costs, not equivalent storage engines.
+It excludes transport, source IndexedDB, dispatch, rendering and execution startup.
 
 Worktree observations use the native `WorktreeObservations` service: official
 filesystem, WorktreeGit and the existing FileLocks coordinator. The Promise manager

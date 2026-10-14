@@ -69,6 +69,9 @@
   execution. Preserve its source identity and expose the bound target in renderer
   adapters. Missing receipt lookup never proves non-delivery. Accepted history
   removed from the active branch must not be resurrected by a repeated accept.
+  Optional `acceptAndDispatch` requires independent `sessionInputDispatch` v1
+  negotiation; it joins ordinary acceptance and owner activation without claiming
+  execution. Plain acceptance and guide application retain their own boundaries.
 
 - `operation_completion_batch` is one stable system item with fixed batch identity/member count.
   Receipt projections target its exact turn and batch, preserve user text/config and do not

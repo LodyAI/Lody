@@ -128,14 +128,17 @@ describe('MessageHandler machine registration', () => {
   it('writes machine rpc version when the machine rpc server is enabled', async () => {
     const logger = createSilentLogger();
     const machineId = 'machine-rpc' as MachineId;
+    let storedMeta: MachineMeta | undefined;
     const workspaceDocument = {
       sessions: new Map<SessionId, unknown>(),
       restoreMachineDocument: vi.fn(async () => {}),
       watchMachineDocumentExistence: vi.fn(() => {}),
-      registerMachine: vi.fn(async () => {}),
+      registerMachine: async (_id: MachineId, meta: MachineMeta) => {
+        storedMeta = structuredClone(meta);
+      },
       repo: {
         watch: vi.fn(() => ({ unsubscribe: vi.fn() })),
-        getDocMeta: vi.fn(async () => undefined),
+        getDocMeta: async () => (storedMeta ? { meta: storedMeta } : undefined),
       },
     };
 
@@ -174,10 +177,7 @@ describe('MessageHandler machine registration', () => {
 
     await handler.registerMachine();
 
-    const [, registeredMeta] = workspaceDocument.registerMachine.mock.calls[0] as [
-      MachineId,
-      MachineMeta,
-    ];
+    const registeredMeta = (await workspaceDocument.repo.getDocMeta())!.meta;
 
     expect(registeredMeta.rpcVersion).toBe('1');
     expect(registeredMeta.name).toBe('machine-name');
@@ -192,6 +192,7 @@ describe('MessageHandler machine registration', () => {
       memoryProviders: 1,
       sessionHistory: 2,
       sessionInputAcceptance: 1,
+      sessionInputDispatch: 1,
       mcpToolDiscovery: 1,
       codexAuthProfiles: 1,
       ...(hostCapabilities.builtinPi ? { builtinPi: 1 } : {}),

@@ -819,6 +819,7 @@ export interface SessionHistoryReadResponse {
 
 export type SessionHistoryWriteOperation =
   | 'accept_input'
+  | 'accept_input_and_dispatch'
   | 'append'
   | 'replace'
   | 'respond_permission'

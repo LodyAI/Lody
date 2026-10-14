@@ -233,6 +233,8 @@ export interface SessionInputAcceptance {
   /** The renderer capability is bound to this owner, independently of mutable metadata. */
   readonly targetMachineId?: string;
   accept(entry: SessionTurn): Promise<SessionInputAcceptanceResult>;
+  /** Negotiated owner-side history acceptance and ordinary dispatch handoff. */
+  acceptAndDispatch?(entry: SessionTurn): Promise<SessionInputAcceptanceResult>;
   lookup(entry: SessionTurn): Promise<SessionInputAcceptanceResult>;
 }
 
