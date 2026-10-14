@@ -1,7 +1,9 @@
+import { useState } from 'react';
 import type { Meta, StoryObj } from '@storybook/react';
 import { getServerNow, type SessionFilePayload } from '@lody/shared';
 import {
   SessionFilePreviewPanel,
+  SessionFilePreviewDialog,
   type SessionFilePreviewStatus,
 } from '@/components/ai-gui/session-file-preview-dialog';
 import { Dialog } from '@/ui/dialog';
@@ -156,4 +158,39 @@ export const Error: Story = {
     onDownload: () => {},
   },
   render: (args) => wrap(<SessionFilePreviewPanel {...args} />),
+};
+
+const HTML_TEXT = `<!doctype html><html lang="zh-CN"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<style>body { margin: 0; padding: 24px; font: 16px system-ui; background: #f3f7ff; color: #153052; } h1 { font-size: 24px; }</style>
+</head><body><h1>HTML 附件预览</h1><p>打开即预览，小眼睛切换源码。</p>
+<button onclick="this.textContent='Script ran'">Run script</button>
+<a href="https://example.invalid/escape">External link</a>
+<script>document.body.dataset.executed='yes';</script></body></html>`;
+
+export const HtmlAttachment: Story = {
+  args: {
+    file: file({ fileName: 'demo.html', mimeType: 'text/html' }),
+    status: loaded(HTML_TEXT),
+    onDownload: () => {},
+  },
+  render: function HtmlAttachmentDialog(args) {
+    const [open, setOpen] = useState(true);
+    return <SessionFilePreviewDialog {...args} open={open} onOpenChange={setOpen} />;
+  },
+};
+
+export const TruncatedHtml: Story = {
+  ...HtmlAttachment,
+  args: { ...HtmlAttachment.args, status: loaded(HTML_TEXT, true) },
+};
+
+export const LoadingHtml: Story = {
+  ...HtmlAttachment,
+  args: { ...HtmlAttachment.args, status: { kind: 'loading' } },
+};
+
+export const FailedHtml: Story = {
+  ...HtmlAttachment,
+  args: { ...HtmlAttachment.args, status: { kind: 'error', message: 'Could not load preview' } },
 };

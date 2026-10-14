@@ -49,3 +49,29 @@ formatting, i18n, boundary guards and documentation checks passed. Root `pnpm ch
 stopped at the unchanged CLI recursive SSH submodule test with Git credential
 `context_unreadable`; the full repository suite is not green. Native-device
 acceptance is still separate from the WebKit browser run.
+
+## Attachment-dialog correction (2026-10-14)
+
+PR #1525 did not cover `SessionFilePreviewDialog`, the fallback used when a chat
+attachment cannot open a live file or an existing/reported Browser target. That
+panel only rendered Markdown, so even after merging, mobile HTML attachments could
+still show source with no eye button. The original two browser scenarios did not
+exercise this third entry point.
+
+The attachment panel now defaults complete HTML to the same readonly preview and
+places its eye toggle in the existing header beside Copy. It retains the dialog,
+file metadata, copy/download/close controls and 55vh content cap. Copy returns the
+original text; truncated HTML stays source-only. Fetching, authorization and richer
+attachment routing are unchanged. No new Effect boundary is introduced.
+
+Browser coverage targets the real attachment panel and modal, including source
+round trips, raw clipboard content, mobile bounds, frame cleanup on close and
+truncation. Native-device release acceptance remains outstanding.
+
+The correction passed 4 WebKit acceptance tests and 48 focused unit tests, plus
+repository typechecking, formatting and documentation checks. Root `pnpm check`
+still stops at the unchanged CLI recursive SSH submodule fixture with
+`context_unreadable` (4,186 CLI tests passed, one failed). This is not a green
+full-suite result. The mobile-size attachment screenshot was inspected separately.
+
+The separately rerun `pnpm check:quick` passed all static, i18n and boundary guards.

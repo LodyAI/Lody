@@ -1,13 +1,15 @@
+import * as stylex from '@stylexjs/stylex';
 import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { toast } from '@/lib/toast';
-import { Check, Copy, Download, FileWarning, X } from 'lucide-react';
+import { Check, Copy, Download, Eye, EyeClosed, FileWarning, X } from 'lucide-react';
 import { Spinner } from '@lody/ui/spinner';
 import type { SessionFilePayload } from '@lody/shared';
 import { Dialog } from '@/ui/dialog';
 import { Button } from '@lody/ui/button';
 import { Tabs } from '@lody/ui/tabs';
-import { formatFileSize } from '@/lib/session-file-presentation';
+import { ReadOnlyHtmlPreview } from '../sessions/read-only-html-preview';
+import { formatFileSize, isHtmlSessionFile } from '@/lib/session-file-presentation';
 import { MarkdownRenderer } from './markdown-renderer';
 
 const isMarkdownFile = (fileName: string): boolean => {
@@ -30,9 +32,8 @@ export type SessionFilePreviewPanelProps = {
 /**
  * Pure preview body: header (name/size + actions), then the rendered/raw text.
  * Stateless w.r.t. fetching — the container feeds it `status`. Markdown files
- * default to the sanitized rendered view (reusing the chat MarkdownRenderer; a
- * bespoke HTML path is forbidden) with a Raw toggle. Copy always copies the
- * raw source text.
+ * default to the existing sanitized MarkdownRenderer with a Raw toggle. Complete
+ * HTML uses the shared script-free sandbox preview. Copy always copies raw source.
  */
 export function SessionFilePreviewPanel({
   file,
@@ -41,9 +42,11 @@ export function SessionFilePreviewPanel({
   isDownloading = false,
 }: SessionFilePreviewPanelProps) {
   const { t } = useTranslation();
-  const markdown = isMarkdownFile(file.fileName);
-  // Markdown → rendered by default; plain text has no rendered view.
-  const [showRaw, setShowRaw] = useState(!markdown);
+  const html = isHtmlSessionFile(file);
+  const markdown = !html && isMarkdownFile(file.fileName);
+  // Renderable attachments open in preview; original bytes remain one toggle away.
+  const [showRaw, setShowRaw] = useState(!markdown && !html);
+  const canPreviewHtml = html && status.kind === 'loaded' && !status.truncated;
   const [copied, setCopied] = useState(false);
 
   const rawText = status.kind === 'loaded' ? status.text : '';
@@ -64,6 +67,7 @@ export function SessionFilePreviewPanel({
   };
 
   const renderMarkdown = markdown && !showRaw;
+  const renderHtml = canPreviewHtml && !showRaw;
 
   return (
     // `min-w-0` is load-bearing: this panel is a grid child of Dialog.Content
@@ -82,6 +86,23 @@ export function SessionFilePreviewPanel({
           </span>
         </div>
         <div className="flex shrink-0 items-center gap-1">
+          {canPreviewHtml ? (
+            <Button
+              type="button"
+              variant="ghost"
+              size="small"
+              icon
+              aria-pressed={renderHtml}
+              aria-label={
+                renderHtml
+                  ? t('sessions.fileViewer.preview.hide', 'Hide preview')
+                  : t('sessions.fileViewer.preview.show', 'Preview')
+              }
+              onClick={() => setShowRaw((raw) => !raw)}
+            >
+              {renderHtml ? <EyeClosed size={16} /> : <Eye size={16} />}
+            </Button>
+          ) : null}
           {markdown ? (
             <Tabs.Root
               value={showRaw ? 'raw' : 'rendered'}
@@ -178,6 +199,10 @@ export function SessionFilePreviewPanel({
               {t('sessions.fileDownload', 'Download')}
             </Button>
           </div>
+        ) : renderHtml ? (
+          <div {...stylex.props(styles.htmlPreview)}>
+            <ReadOnlyHtmlPreview text={status.text} />
+          </div>
         ) : renderMarkdown ? (
           <div className="px-0.5 pb-1">
             <MarkdownRenderer text={status.text} size="default" />
@@ -213,3 +238,7 @@ export function SessionFilePreviewDialog({
     </Dialog.Root>
   );
 }
+
+const styles = stylex.create({
+  htmlPreview: { display: 'flex', height: '55vh', minWidth: 0, overflow: 'hidden' },
+});
