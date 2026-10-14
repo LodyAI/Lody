@@ -13,7 +13,6 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import { createHash, randomUUID } from 'node:crypto';
 import path from 'path';
 import { McpServer } from '@modelcontextprotocol/server';
-import { StdioServerTransport } from '@modelcontextprotocol/server/stdio';
 import { Effect } from 'effect';
 import { z } from 'zod';
 import { requestSessionShare } from '@/lib/session-share-delivery';
@@ -4668,8 +4667,4 @@ export function buildSessionToolServer(handlers?: SessionToolHandlers): McpServe
   );
 
   return server;
-}
-
-export async function runLodyMcpServer(): Promise<void> {
-  await buildLodyMcpServer().connect(new StdioServerTransport());
 }

@@ -3,6 +3,21 @@
 Binding rules remain in [AGENTS.md](AGENTS.md). This document explains interoperability
 and lifecycle decisions behind them; it does not introduce additional requirements.
 
+## Stdio lifetime
+
+`commands/internal.ts` executes `serveStdioMcp` with the SDK/Node adapter in
+`stdio/lifecycle.ts`. Its scoped connection waits for stdin EOF/close, SDK transport
+close, SIGINT or SIGTERM. Input/output errors fail the command; malformed protocol
+messages retain the SDK's existing error behavior. Subscriptions are installed before
+connection, and partial startup is cleaned up before returning. Only after the command
+finishes may `index.ts` close the shared shell-cache/Presence application runtime.
+
+SDK 2.0.0 stdio `close()` synchronously detaches stream listeners and cancels SDK
+requests, without asynchronous I/O. Tool handler Promises still belong to their
+existing owners: SDK cancellation does not establish raw-work completion. This
+migration covers the stdio host, not HTTP, daemon or tool orchestration.
+See the [decision and verification](../../../../.agents/notes/implemented/bug-fix/2026-10-14-mcp-stdio-lifetime.md).
+
 ## HTTP and loopback
 
 - The MCP HTTP host answers a strict HTTP client (Grok's Rust `rmcp`), which reports a
