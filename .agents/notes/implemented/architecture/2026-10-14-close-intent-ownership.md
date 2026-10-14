@@ -113,7 +113,7 @@ stale async claims, and sequential close after panel collapse. Native-close deli
 was simulated; this is not a full product/Electron end-to-end run.
 
 The desktop-close suite passes all 54 cases and the targeted Electron suites pass
-all 11 cases. Strict type checking of the router/hook, changed-source lint/format
+all 11 cases. Strict type checking of the router/hook, changed-source type-aware lint/format
 checks, and i18n validation pass. The separate session-tab-target suite cannot
 collect because the shared index imports missing `mdast-util-from-markdown`.
 Adapter-inclusive and full type checks are blocked by incompatible installed

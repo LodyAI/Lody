@@ -636,7 +636,9 @@ describe('semantic close developer gate lifecycle', () => {
       if (change === 'route') render('two');
       if (change === 'beta') act(() => store.set(semanticShortcutsBetaEnabledAtom, false));
       if (change === 'developer') act(() => store.set(developerModeEnabledAtom, false));
-      act(() => vi.advanceTimersByTime(SEMANTIC_HOVER_DWELL_MS));
+      act(() => {
+        vi.advanceTimersByTime(SEMANTIC_HOVER_DWELL_MS);
+      });
       expect(
         container.querySelector('[data-lody-action-scope="side-panel"][data-lody-action-active]')
       ).toBeNull();
