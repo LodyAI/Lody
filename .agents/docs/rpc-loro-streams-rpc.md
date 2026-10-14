@@ -55,6 +55,16 @@ retained history generations before accepting it, including receipts for removed
 history. Request IDs can change; input IDs and content cannot. This capability
 does not grant history access, confirm execution, or permit steer replay.
 
+Ordinary input additionally negotiates `sessionInputDispatch` version 1 for
+`accept_input_and_dispatch`. The owner records trusted human provenance, accepts
+immutable history and publishes guarded activation in its existing writer queue;
+the host wakes its history dispatcher without waiting for Agent execution. The
+source uses this receipt for delivery feedback without history readback or another
+dispatch request. Recovery repeats the same immutable combined operation, retaining
+the existing identity, membership and metadata guards. Plain acceptance and guide
+application keep their separate contracts. See the
+[owner protocol](../../apps/cli/src/session/README.md#immutable-input-acceptance).
+
 ## Remote lifecycle acknowledgements
 
 For accepted restart/upgrade responses, `settleMachineLifecycleResponse` attempts
