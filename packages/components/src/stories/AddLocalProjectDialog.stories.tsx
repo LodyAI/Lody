@@ -39,8 +39,12 @@ const FAKE_TREE: Record<string, FakeEntry[]> = {
   [LONG_HOME]: [{ name: 'scripts' }, { name: 'static' }, { name: 'table' }, { name: 'template' }],
 };
 
-function buildBrowseResult(path: string, homeDir = HOME): LocalProjectBrowseDirectoryResult {
-  const entries = (FAKE_TREE[path] ?? [])
+function buildBrowseResult(
+  path: string,
+  homeDir = HOME,
+  tree = FAKE_TREE
+): LocalProjectBrowseDirectoryResult {
+  const entries = (tree[path] ?? [])
     .filter((entry) => !entry.name.startsWith('.'))
     .map((entry) => ({
       name: entry.name,
@@ -57,6 +61,7 @@ function buildBrowseResult(path: string, homeDir = HOME): LocalProjectBrowseDire
 }
 
 function createFakeOps(homeDir = HOME): RemoteDirectoryOps {
+  const tree = structuredClone(FAKE_TREE);
   return {
     listRoots: async () => ({
       ok: true,
@@ -66,8 +71,18 @@ function createFakeOps(homeDir = HOME): RemoteDirectoryOps {
       await new Promise((resolve) => setTimeout(resolve, 220));
       return {
         ok: true,
-        value: buildBrowseResult(args.absolutePath ?? homeDir, homeDir),
+        value: buildBrowseResult(args.absolutePath ?? homeDir, homeDir, tree),
       };
+    },
+    createDirectory: async (_machineId, args) => {
+      const target = `${args.parentPath}/${args.name}`;
+      const siblings = tree[args.parentPath] ?? [];
+      if (siblings.some((entry) => entry.name === args.name)) {
+        return { ok: false, errorCode: 'already_exists', message: 'Already exists' };
+      }
+      tree[args.parentPath] = [...siblings, { name: args.name }];
+      tree[target] = [];
+      return { ok: true, value: { path: target } };
     },
     addProject: async (_machineId, args) => {
       const name = args.rootPath.split('/').pop() || args.rootPath;
@@ -90,6 +105,7 @@ const longPathOps = createFakeOps(LONG_HOME);
 const offlineOps: RemoteDirectoryOps = {
   listRoots: async () => ({ ok: false, errorCode: 'timeout', message: 'No response' }),
   browseDir: async () => ({ ok: false, errorCode: 'timeout', message: 'No response' }),
+  createDirectory: async () => ({ ok: false, errorCode: 'timeout', message: 'No response' }),
   addProject: async () => ({ ok: false, errorCode: 'timeout', message: 'No response' }),
 };
 
@@ -100,6 +116,7 @@ const ONE_MACHINE: RemoteDirectoryPickerMachine[] = [
     online: true,
     ownerName: 'Zoe',
     canAddProjects: true,
+    supportsCreateDirectory: true,
   },
 ];
 
@@ -118,6 +135,7 @@ const MANY_MACHINES: RemoteDirectoryPickerMachine[] = [
     online: false,
     ownerName: 'Zoe',
     canAddProjects: true,
+    supportsCreateDirectory: true,
   },
 ];
 

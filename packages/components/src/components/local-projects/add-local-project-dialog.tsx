@@ -1,4 +1,4 @@
-import { useCallback } from 'react';
+import { useCallback, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   AlertTriangle,
@@ -46,6 +46,7 @@ import {
   type RemoteDirectoryPickerMachine,
 } from './use-remote-directory-picker';
 import { MobileAddLocalProjectFlow } from './mobile-add-local-project-flow';
+import { RemoteDirectoryNewFolderControl } from './remote-directory-new-folder-control';
 
 export type {
   RemoteDirectoryOpResult,
@@ -442,6 +443,9 @@ export function RemoteDirectoryPicker(props: RemoteDirectoryPickerArgs) {
           pathDraft={c.pathDraft}
           adding={c.adding}
           addError={c.addError}
+          creating={c.creating}
+          newFolderControl={<RemoteDirectoryNewFolderControl controller={c} />}
+          canAddCurrentFolder={c.canAddCurrentFolder}
           sep={c.sep}
           onNavigate={c.navigate}
           onEntryClick={c.entryClick}
@@ -593,6 +597,9 @@ function BrowseStep({
   pathDraft,
   adding,
   addError,
+  creating,
+  newFolderControl,
+  canAddCurrentFolder,
   sep,
   onNavigate,
   onEntryClick,
@@ -614,6 +621,9 @@ function BrowseStep({
   pathDraft: string;
   adding: boolean;
   addError: string | null;
+  creating: boolean;
+  newFolderControl: ReactNode;
+  canAddCurrentFolder: boolean;
   sep: '/' | '\\';
   onNavigate: (absolutePath: string) => void;
   onEntryClick: (entry: LocalProjectBrowseDirectoryEntry) => void;
@@ -806,6 +816,7 @@ function BrowseStep({
 
       {/* Footer */}
       <div {...stylex.props(styles.footer)}>
+        {newFolderControl}
         {addError ? (
           <p {...stylex.props(styles.message, styles.messageError)}>
             <AlertTriangle {...stylex.props(styles.icon14, styles.messageMark)} />
@@ -838,14 +849,14 @@ function BrowseStep({
               variant="secondary"
               size="small"
               onClick={onCancel}
-              disabled={adding}
+              disabled={adding || creating}
             >
               {t('common.cancel', 'Cancel')}
             </Button>
             <Button
               type="button"
               size="small"
-              disabled={!current || status !== 'ready' || adding}
+              disabled={!canAddCurrentFolder}
               onClick={onAddCurrentFolder}
             >
               {adding ? (

@@ -372,7 +372,10 @@ import {
   isACPAgentRichContentNotification,
   materializeACPAgentRichContent,
 } from '@/lib/acp-agent-attachments';
-import { LocalProjectControlService } from '@/lib/local-project-control-service';
+import {
+  LocalProjectControlService,
+  LocalProjectCreateDirectoryError,
+} from '@/lib/local-project-control-service';
 import {
   makeLocalWorkspaceCatalog,
   type LocalCatalogAccessSnapshot,
@@ -428,6 +431,7 @@ type LocalProjectOwnerOnlyRpcRequest = Extract<
       | 'local-project/add'
       | 'local-project/prepare-add'
       | 'local-project/list-roots'
+      | 'local-project/create-directory'
       | 'local-project/browse-dir';
   }
 >;
@@ -460,6 +464,7 @@ function isLocalProjectOwnerOnlyRpcRequest(
     request.type === 'local-project/add' ||
     request.type === 'local-project/prepare-add' ||
     request.type === 'local-project/list-roots' ||
+    request.type === 'local-project/create-directory' ||
     request.type === 'local-project/browse-dir'
   );
 }
@@ -9344,6 +9349,24 @@ export class MessageHandler {
         };
       }
 
+      if (request.type === 'local-project/create-directory') {
+        if (request.workspaceId !== this.workspaceId) {
+          return this.toLocalProjectControlError(
+            requestType,
+            'workspace_not_found',
+            'Workspace mismatch.'
+          );
+        }
+        return {
+          ok: true,
+          type: request.type,
+          result: await this.localProjectControlService.createDirectory(
+            request.parentPath,
+            request.name
+          ),
+        };
+      }
+
       if (request.type === 'local-project/prepare-add') {
         if (request.workspaceId !== this.workspaceId) {
           return this.toLocalProjectControlError(
@@ -9398,7 +9421,7 @@ export class MessageHandler {
     } catch (error) {
       return this.toLocalProjectControlError(
         requestType,
-        'execution_failed',
+        error instanceof LocalProjectCreateDirectoryError ? error.code : 'execution_failed',
         formatErrorMessage(error)
       );
     }

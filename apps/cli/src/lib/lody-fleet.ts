@@ -12,7 +12,10 @@ import {
   stopLocalLoroDataPlaneServer,
 } from '@/lib/local-loro-data-plane-server';
 import type { LocalProbeConfig } from '@/lib/local-probe';
-import { LocalProjectControlService } from '@/lib/local-project-control-service';
+import {
+  LocalProjectControlService,
+  LocalProjectCreateDirectoryError,
+} from '@/lib/local-project-control-service';
 import { LocalProjectHistorySyncService } from '@/lib/local-project-history-sync-service';
 import {
   readMachineLocalProjects,
@@ -1755,6 +1758,33 @@ export class LodyFleet {
             registeredProjects: await this.listRegisteredLocalProjectRootPaths(message.workspaceId),
           }),
         };
+      }
+
+      if (message.type === 'local-project/create-directory') {
+        try {
+          await this.resolveWorkspaceRuntime(message.workspaceId);
+        } catch {
+          return this.toProjectControlError(
+            requestType,
+            'workspace_not_found',
+            'Workspace runtime is unavailable.'
+          );
+        }
+        try {
+          return {
+            ok: true,
+            type: message.type,
+            result: await this.localProjectControlService.createDirectory(
+              message.parentPath,
+              message.name
+            ),
+          };
+        } catch (error) {
+          if (error instanceof LocalProjectCreateDirectoryError) {
+            return this.toProjectControlError(requestType, error.code, error.message);
+          }
+          throw error;
+        }
       }
 
       if (message.type === 'local-project/prepare-add') {

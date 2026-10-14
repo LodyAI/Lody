@@ -99,6 +99,14 @@ subdirectory; this file is the navigation index. Cross-module explanations live 
 
 ## Projects and providers
 
+The remote folder picker sends `local-project/create-directory` with a workspace,
+absolute parent and one name. `message-handler.ts` and `lody-fleet.ts` check the
+target machine/workspace before `LocalProjectControlService.createDirectory`
+canonicalizes the parent and uses non-recursive mkdir. Collisions never overwrite
+files or links. Creation does not write project metadata; Add still uses prepare-add.
+See the [creation decision](../../../../.agents/notes/implemented/feature/2026-10-14-remote-directory-creation.md)
+for error handling and the existing UI ownership limitation.
+
 Local-project observation and branch commands use shared `LocalProjects` native
 Effect workflows through the visible `localProjectsLegacy` facade while these
 entrypoints remain Promise-based. Worktree setup/GC and Session lifecycle still

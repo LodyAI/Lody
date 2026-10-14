@@ -1062,6 +1062,13 @@ export type LocalProjectControlRequest =
       cursor?: string;
     }
   | {
+      type: 'local-project/create-directory';
+      machineId: MachineId;
+      workspaceId: WorkspaceId;
+      parentPath: string;
+      name: string;
+    }
+  | {
       type: 'local-project/delete';
       machineId: MachineId;
       workspaceId: WorkspaceId;
@@ -1213,6 +1220,7 @@ export type LocalProjectControlErrorCode =
   | 'access_denied'
   | 'local_project_not_found'
   | 'path_invalid'
+  | 'already_exists'
   | 'execution_failed'
   | 'invalid_response';
 
@@ -1251,6 +1259,7 @@ export type LocalProjectControlResponse =
     >
   | LocalProjectControlOkResponse<'local-project/list-roots', LocalProjectBrowseRootsResult>
   | LocalProjectControlOkResponse<'local-project/browse-dir', LocalProjectBrowseDirectoryResult>
+  | LocalProjectControlOkResponse<'local-project/create-directory', { path: string }>
   | LocalProjectControlOkResponse<
       'local-project/delete',
       {

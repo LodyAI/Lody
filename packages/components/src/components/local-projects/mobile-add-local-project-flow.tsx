@@ -24,6 +24,7 @@ import { Badge } from '@lody/ui/badge';
 import { Button } from '@lody/ui/button';
 import { Input } from '@lody/ui/input';
 import { Skeleton } from '@lody/ui/skeleton';
+import { RemoteDirectoryNewFolderControl } from './remote-directory-new-folder-control';
 import {
   describeBrowseError,
   getTailPriorityBreadcrumbs,
@@ -383,6 +384,7 @@ function MobileBrowse({ controller: c }: { controller: RemoteDirectoryPickerCont
 
       {/* Footer — full-width primary action (adds the current folder directly) */}
       <div className="border-t border-border/60 px-4 pb-[max(0.75rem,var(--safe-area-bottom,0px))] pt-3">
+        <RemoteDirectoryNewFolderControl controller={c} />
         {c.addError ? (
           <p className="mb-2 text-left text-[0.8rem] text-destructive">{c.addError}</p>
         ) : null}
@@ -390,7 +392,7 @@ function MobileBrowse({ controller: c }: { controller: RemoteDirectoryPickerCont
           type="button"
           size="large"
           className="w-full"
-          disabled={!c.current || c.status !== 'ready' || c.editingPath || c.adding}
+          disabled={!c.canAddCurrentFolder}
           onClick={() => void c.addCurrentFolder()}
         >
           {c.adding ? <Spinner className="h-5 w-5" /> : null}

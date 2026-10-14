@@ -53,6 +53,13 @@ and [display preference](../../../../.agents/notes/implemented/feature/2026-09-2
 
 ## Entry points and layout
 
+- Remote Add folder: `local-projects/use-remote-directory-picker.ts` owns navigation,
+  creation and registration state. Both layouts use `remote-directory-new-folder-control.tsx`
+  for a single-name form, shown only when the target advertises
+  `localProjectCreateDirectory`. Creation enters the new directory; Add registers it
+  separately. Errors preserve the name, and pending operations cannot be repeated.
+  [Decision and verification](../../../../.agents/notes/implemented/feature/2026-10-14-remote-directory-creation.md).
+
 - Entry and workspace-gate redirects use `BootNavigate`; `PreloadedMainLayout`
   owns its boot-shell Suspense fallback for local and cloud paths. The ready layout
   keeps the existing content gate while workspace data resolves. See

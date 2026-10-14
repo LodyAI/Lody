@@ -2334,6 +2334,16 @@ export const LocalProjectBrowseDirRequestSchema = z
   })
   .strict();
 
+export const LocalProjectCreateDirectoryRequestSchema = z
+  .object({
+    type: z.literal('local-project/create-directory'),
+    machineId: MachineIdSchema.refine((id) => id.trim().length > 0),
+    workspaceId: WorkspaceIdSchema.refine((id) => id.trim().length > 0),
+    parentPath: z.string().min(1),
+    name: z.string().min(1),
+  })
+  .strict();
+
 export const LocalProjectDeleteRequestSchema = z
   .object({
     type: z.literal('local-project/delete'),
@@ -2547,6 +2557,7 @@ export const LocalProjectControlRequestSchema = z.discriminatedUnion('type', [
   LocalProjectPrepareAddRequestSchema,
   LocalProjectListRootsRequestSchema,
   LocalProjectBrowseDirRequestSchema,
+  LocalProjectCreateDirectoryRequestSchema,
   LocalProjectDeleteRequestSchema,
   LocalProjectRemovalPreflightRequestSchema,
   LocalProjectListRequestSchema,
@@ -2790,6 +2801,7 @@ const LocalProjectControlErrorCodeSchema = z.enum([
   'access_denied',
   'local_project_not_found',
   'path_invalid',
+  'already_exists',
   'execution_failed',
   'invalid_response',
 ]);
@@ -2802,6 +2814,7 @@ const LocalProjectControlErrorResponseSchema = z
       'local-project/prepare-add',
       'local-project/list-roots',
       'local-project/browse-dir',
+      'local-project/create-directory',
       'local-project/delete',
       'local-project/removal-preflight',
       'local-project/list',
@@ -2869,6 +2882,13 @@ export const LocalProjectControlResponseSchema = z.union([
       ok: z.literal(true),
       type: z.literal('local-project/browse-dir'),
       result: LocalProjectBrowseDirectoryResultSchema,
+    })
+    .strict(),
+  z
+    .object({
+      ok: z.literal(true),
+      type: z.literal('local-project/create-directory'),
+      result: z.object({ path: z.string().min(1) }).strict(),
     })
     .strict(),
   z

@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, realpath, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readdir, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import fs from 'node:fs';
@@ -20,6 +20,141 @@ const noopLogger: Logger = {
   child: () => noopLogger,
   close: async () => undefined,
 };
+
+describe('LocalProjectControlService.createDirectory', () => {
+  let parent: string;
+  const service = new LocalProjectControlService(noopLogger);
+
+  beforeEach(async () => {
+    parent = await realpath(await mkdtemp(path.join(os.tmpdir(), 'lody-create-directory-')));
+  });
+  afterEach(async () => {
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+    await rm(parent, { recursive: true, force: true });
+  });
+
+  it('creates one empty directory under the canonical parent, without registration', async () => {
+    await mkdir(path.join(parent, 'real parent'));
+    await symlink(path.join(parent, 'real parent'), path.join(parent, 'alias'), 'junction');
+    const result = await service.createDirectory(path.join(parent, 'alias'), '新项目 with spaces');
+    expect(result.path).toBe(path.join(parent, 'real parent', '新项目 with spaces'));
+    expect((await fs.promises.stat(result.path)).isDirectory()).toBe(true);
+    expect(await readdir(result.path)).toEqual([]);
+    expect((await service.browseDirectory({ absolutePath: result.path })).path).toBe(result.path);
+  });
+
+  it.each([
+    '',
+    ' ',
+    '.',
+    '..',
+    '../escape',
+    'a/b',
+    'a\\b',
+    '/absolute',
+    'a\0b',
+    'a\nb',
+    ' padded',
+    'padded ',
+  ])('rejects a non-single name %j without writing', async (name) => {
+    await expect(service.createDirectory(parent, name)).rejects.toMatchObject({
+      code: 'invalid_request',
+    });
+    expect(await readdir(parent)).toEqual([]);
+  });
+
+  it.each([
+    'CON',
+    'nul.txt',
+    'COM1',
+    'LPT9.ext',
+    'COM¹',
+    'trailing.',
+    'a:b',
+    'a*',
+    'a?',
+    'a|b',
+    'a<b',
+  ])('rejects Windows reserved or invalid name %j', async (name) => {
+    vi.stubGlobal('process', { ...process, platform: 'win32' });
+    await expect(service.createDirectory(parent, name)).rejects.toMatchObject({
+      code: 'invalid_request',
+    });
+    expect(await readdir(parent)).toEqual([]);
+  });
+
+  it('requires an absolute, existing directory parent and never creates intermediate parents', async () => {
+    await writeFile(path.join(parent, 'file'), 'preserve');
+    for (const invalid of [
+      '',
+      'relative',
+      `${parent}\0`,
+      path.join(parent, 'missing'),
+      path.join(parent, 'file'),
+    ]) {
+      await expect(service.createDirectory(invalid, 'child')).rejects.toMatchObject({
+        code: 'path_invalid',
+      });
+    }
+    expect(await readdir(parent)).toEqual(['file']);
+    expect(await fs.promises.readFile(path.join(parent, 'file'), 'utf8')).toBe('preserve');
+  });
+
+  it('never overwrites a directory, file, or dangling symlink', async () => {
+    await mkdir(path.join(parent, 'directory'));
+    await writeFile(path.join(parent, 'file'), 'preserve');
+    await symlink(path.join(parent, 'missing'), path.join(parent, 'link'), 'junction');
+    for (const name of ['directory', 'file', 'link']) {
+      await expect(service.createDirectory(parent, name)).rejects.toMatchObject({
+        code: 'already_exists',
+      });
+    }
+    expect(await fs.promises.readFile(path.join(parent, 'file'), 'utf8')).toBe('preserve');
+    expect((await fs.promises.lstat(path.join(parent, 'link'))).isSymbolicLink()).toBe(true);
+    expect(await readdir(parent)).toEqual(['directory', 'file', 'link']);
+  });
+
+  it('allows exactly one concurrent creation and rejects retries', async () => {
+    const results = await Promise.allSettled([
+      service.createDirectory(parent, 'child'),
+      service.createDirectory(parent, 'child'),
+    ]);
+    expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(1);
+    expect(results.find((result) => result.status === 'rejected')).toMatchObject({
+      reason: { code: 'already_exists' },
+    });
+    await expect(service.createDirectory(parent, 'child')).rejects.toMatchObject({
+      code: 'already_exists',
+    });
+    expect(await readdir(parent)).toEqual(['child']);
+    expect(await readdir(path.join(parent, 'child'))).toEqual([]);
+  });
+
+  it.each(['EACCES', 'EPERM', 'EROFS'])(
+    'reports mkdir %s without changing the parent',
+    async (code) => {
+      // chmod cannot reliably deny the root user running CI; inject the OS failure at mkdir.
+      vi.spyOn(fs.promises, 'mkdir').mockRejectedValueOnce(
+        Object.assign(new Error(code), { code })
+      );
+      await expect(service.createDirectory(parent, 'child')).rejects.toMatchObject({
+        code: 'access_denied',
+      });
+      expect(await readdir(parent)).toEqual([]);
+    }
+  );
+
+  it('reports an unreadable parent', async () => {
+    vi.spyOn(fs.promises, 'realpath').mockRejectedValueOnce(
+      Object.assign(new Error('denied'), { code: 'EACCES' })
+    );
+    await expect(service.createDirectory(parent, 'child')).rejects.toMatchObject({
+      code: 'access_denied',
+    });
+    expect(await readdir(parent)).toEqual([]);
+  });
+});
 
 describe('LocalProjectControlService.listProjectDirectory', () => {
   let rootPath: string;
