@@ -16,6 +16,11 @@ import {
   readSessionBootstrapSnapshot,
 } from './local-window-bootstrap';
 import { jotaiStore } from '@/lib/utils';
+import {
+  addRpcDeliveredTurn,
+  getRpcDeliveredTurnKey,
+  rpcDeliveredTurnsAtom,
+} from '@/atoms/session-dispatch-delivery';
 import { desktopWindowId } from '@/lib/desktop-window';
 import { navigationSidebarHiddenAtom } from '@/atoms/layout-state';
 import {
@@ -5093,6 +5098,10 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
   const isMachineRpcUnreachable = (machineId: MachineId) =>
     targetRouter.getPlaneForMachine(machineId) === 'cloud' && !isBrowserOnline();
   const pendingSends = createWorkspacePendingSends({
+    onDelivered: (sessionId, turnId) =>
+      jotaiStore.set(rpcDeliveredTurnsAtom, (previous) =>
+        addRpcDeliveredTurn(previous, getRpcDeliveredTurnKey(sessionId, turnId))
+      ),
     accountId: deps.accountId ?? `local:${workspaceId}`,
     workspaceId,
     paused: !initialMetaSyncCompleted,

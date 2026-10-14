@@ -10,6 +10,7 @@ import type { SessionFilePayload, SessionHistoryParsed } from '@lody/shared';
 import { getServerNow } from '@lody/shared';
 import type { Meta, StoryObj } from '@storybook/react';
 import { Provider, createStore } from 'jotai';
+import { getRpcDeliveredTurnKey, rpcDeliveredTurnsAtom } from '@/atoms/session-dispatch-delivery';
 import type { SessionHistory, SessionId, WorkspaceId } from '@lody/shared';
 
 import { currentWorkspaceIdAtom, currentWorkspaceSlugAtom } from '@/atoms/workspace-context';
@@ -71,11 +72,18 @@ const readyImage: SessionAttachmentDraft = {
 function StoryShell({
   records,
   width = 720,
+  ownerConfirmed = false,
 }: {
   records: readonly PendingSessionSend[];
   width?: number;
+  ownerConfirmed?: boolean;
 }) {
   const store = createStore();
+  if (ownerConfirmed)
+    store.set(
+      rpcDeliveredTurnsAtom,
+      new Set(records.map((input) => getRpcDeliveredTurnKey(input.sessionId, input.id)))
+    );
   const pendingSends = {
     subscribe: () => () => {},
     getSnapshot: () => records,
@@ -317,5 +325,23 @@ export const AcceptedRoostInput: Story = {
 };
 
 export const UnconfirmedRoostInput: Story = {
-  args: { records: [record({ historyBackend: 'roost', inputState: 'unknown', persisted: true, error: 'The conversation machine has not confirmed this message. Check the original send result.' })] },
+  args: {
+    records: [
+      record({
+        historyBackend: 'roost',
+        inputState: 'unknown',
+        persisted: true,
+        error:
+          'The conversation machine has not confirmed this message. Check the original send result.',
+      }),
+    ],
+  },
+};
+
+/** Owner receipt has arrived while the authoritative history view is still loading. */
+export const ConfirmedRoostInput: Story = {
+  args: {
+    records: [record({ historyBackend: 'roost', inputState: 'confirmed', persisted: true })],
+    ownerConfirmed: true,
+  },
 };

@@ -16,110 +16,119 @@ import {
 import { initI18n } from '../src/i18n';
 
 describe('createConversationSession backend seam', () => {
-  it('keeps a restored owner while following local identity changes for input and history', async () => {
-    const machineId = 'synthetic-restored-owner' as MachineId;
-    const sessionId = 'synthetic-restored-session' as SessionId;
-    const entry = {
-      id: 'synthetic-restored-input',
-      role: 'user' as const,
-      userId: 'synthetic-user',
-      timestamp: '2026-10-13T00:00:00Z',
-      items: [{ type: 'text' as const, text: 'Saved input' }],
-      status: 'pending' as const,
-    };
-    let plane: 'local' | 'cloud' = 'cloud';
-    let admitted = false;
-    const receipt = () =>
-      admitted
-        ? { status: 'accepted', turnId: entry.id, active: plane === 'local' }
-        : { status: 'unobserved' };
-    const factory = createRoostSessionDataFactoryForMachine({
-      accountId: 'synthetic-account',
-      workspaceId: 'synthetic-workspace' as WorkspaceId,
-      machineId,
-      resolvePlane: async (owner) => {
-        expect(owner).toBe(machineId);
-        return plane;
-      },
-      sendControl: async (request) => {
-        expect(request.machineId).toBe(machineId);
-        expect(request.sessionId).toBe(sessionId);
-        if (request.type === 'session/history-read') {
+  it.each([
+    ['accept', 'accept_input'],
+    ['acceptAndDispatch', 'accept_input_and_dispatch'],
+  ] as const)(
+    'keeps a restored owner while following local identity changes for %s and history',
+    async (method, operation) => {
+      const machineId = 'synthetic-restored-owner' as MachineId;
+      const sessionId = 'synthetic-restored-session' as SessionId;
+      const entry = {
+        id: 'synthetic-restored-input',
+        role: 'user' as const,
+        userId: 'synthetic-user',
+        timestamp: '2026-10-13T00:00:00Z',
+        items: [{ type: 'text' as const, text: 'Saved input' }],
+        status: 'pending' as const,
+      };
+      let plane: 'local' | 'cloud' = 'cloud';
+      let admitted = false;
+      const receipt = () =>
+        admitted
+          ? { status: 'accepted', turnId: entry.id, active: plane === 'local' }
+          : { status: 'unobserved' };
+      const factory = createRoostSessionDataFactoryForMachine({
+        accountId: 'synthetic-account',
+        workspaceId: 'synthetic-workspace' as WorkspaceId,
+        machineId,
+        resolvePlane: async (owner) => {
+          expect(owner).toBe(machineId);
+          return plane;
+        },
+        sendControl: async (request) => {
+          expect(request.machineId).toBe(machineId);
+          expect(request.sessionId).toBe(sessionId);
+          if (request.type === 'session/history-read') {
+            return {
+              ok: true,
+              responses: [
+                {
+                  type: 'session/history-read_response',
+                  sessionId,
+                  success: true,
+                  result:
+                    request.query.kind === 'inputAcceptance' ? receipt() : admitted ? [entry] : [],
+                  historyRevision: admitted ? 1 : 0,
+                  historyCount: admitted ? 1 : 0,
+                },
+              ],
+            };
+          }
+          if (request.type !== 'session/history-write')
+            throw new Error('Unexpected input transport');
+          expect(request.operation).toBe(operation);
+          expect(request.payload).toEqual({ entry });
+          admitted = true;
           return {
             ok: true,
             responses: [
               {
-                type: 'session/history-read_response',
+                type: 'session/history-write_response',
                 sessionId,
+                operation: request.operation,
                 success: true,
-                result:
-                  request.query.kind === 'inputAcceptance' ? receipt() : admitted ? [entry] : [],
-                historyRevision: admitted ? 1 : 0,
-                historyCount: admitted ? 1 : 0,
+                result: receipt(),
+                historyRevision: 1,
+                historyCount: 1,
+                historyChange: null,
               },
             ],
           };
-        }
-        if (request.type !== 'session/history-write') throw new Error('Unexpected input transport');
-        expect(request.operation).toBe('accept_input');
-        expect(request.payload).toEqual({ entry });
-        admitted = true;
-        return {
-          ok: true,
-          responses: [
-            {
-              type: 'session/history-write_response',
-              sessionId,
-              operation: request.operation,
-              success: true,
-              result: receipt(),
-              historyRevision: 1,
-              historyCount: 1,
-              historyChange: null,
-            },
-          ],
-        };
-      },
-      requestHistoryRead: async (owner, id) => {
-        expect(owner).toBe(machineId);
-        expect(id).toBe(sessionId);
-        if (plane === 'local') throw new Error('Local history must use local control');
-        return {
-          type: 'session/history-read_response',
-          sessionId,
-          success: true,
-          result: receipt(),
-          historyRevision: admitted ? 1 : 0,
-          historyCount: admitted ? 1 : 0,
-        };
-      },
-      requestHistoryWrite: async () => {
-        throw new Error('An input for the now-local owner must not use cloud RPC');
-      },
-    });
-    const doc = new LoroDoc();
-    const session = factory({ doc, sessionId, backendKind: 'roost' });
-    try {
-      expect(await session.inputAcceptance!.lookup(entry)).toEqual({ status: 'unobserved' });
-      plane = 'local';
-      expect(await session.inputAcceptance!.accept(entry)).toEqual({
-        status: 'accepted',
-        turnId: entry.id,
-        active: true,
+        },
+        requestHistoryRead: async (owner, id) => {
+          expect(owner).toBe(machineId);
+          expect(id).toBe(sessionId);
+          if (plane === 'local') throw new Error('Local history must use local control');
+          return {
+            type: 'session/history-read_response',
+            sessionId,
+            success: true,
+            result: receipt(),
+            historyRevision: admitted ? 1 : 0,
+            historyCount: admitted ? 1 : 0,
+          };
+        },
+        requestHistoryWrite: async () => {
+          throw new Error('An input for the now-local owner must not use cloud RPC');
+        },
       });
-      expect(await session.history.readAll()).toMatchObject([{ id: entry.id }]);
-      expect(doc.getList('history').length).toBe(0);
-      plane = 'cloud';
-      expect(await session.inputAcceptance!.lookup(entry)).toEqual({
-        status: 'accepted',
-        turnId: entry.id,
-        active: false,
-      });
-      expect(session.inputAcceptance!.targetMachineId).toBe(machineId);
-    } finally {
-      session.dispose?.();
+      const doc = new LoroDoc();
+      const session = factory({ doc, sessionId, backendKind: 'roost' });
+      try {
+        expect(await session.inputAcceptance!.lookup(entry)).toEqual({ status: 'unobserved' });
+        plane = 'local';
+        const accept = session.inputAcceptance?.[method];
+        if (!accept) throw new Error('Expected input acceptance method');
+        expect(await accept(entry)).toEqual({
+          status: 'accepted',
+          turnId: entry.id,
+          active: true,
+        });
+        expect(await session.history.readAll()).toMatchObject([{ id: entry.id }]);
+        expect(doc.getList('history').length).toBe(0);
+        plane = 'cloud';
+        expect(await session.inputAcceptance!.lookup(entry)).toEqual({
+          status: 'accepted',
+          turnId: entry.id,
+          active: false,
+        });
+        expect(session.inputAcceptance!.targetMachineId).toBe(machineId);
+      } finally {
+        session.dispose?.();
+      }
     }
-  });
+  );
 
   it.each([
     ['en', 'append'],

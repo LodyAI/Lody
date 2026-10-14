@@ -4606,6 +4606,7 @@
   "sessions.pendingSends": "待发送消息（{{count}}）",
   "sessions.sendStatus.sending": "正在发送 · {{sent}} / {{total}}",
   "sessions.sendStatus.sendingWithoutSize": "正在发送",
+  "sessions.sendStatus.delivered": "已送达",
   "sessions.sendStatus.failed": "发送失败，打开对话可继续发送",
   "sessions.retryPendingSend": "继续发送",
   "sessions.cancelPendingSend": "取消发送",

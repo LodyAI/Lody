@@ -13,14 +13,10 @@ Replacement contract: [shared rules](../../../shared/AGENTS.md#session-history).
 
 ## Streams connection cardinality
 
-- Capability discovery and refresh must reuse the workspace runtime's existing Machine
-  Flock and Machine RPC transports.
-- Never create or retain a Streams/Flock subscription per agent config or refresh request.
-  Live connection cardinality must stay bounded by workspace/machine topology and must not
-  grow with the number of agent configs. More configs may add serialized RPC requests, not
-  live Streams connections.
-- Release any one-shot document handle or subscription that is not already owned by the
-  workspace runtime.
+- Discovery/refresh reuse existing workspace Machine Flock/RPC transports, with no
+  subscription per config/request. Connections stay bounded by workspace/machine
+  topology; more configs add serialized RPCs only. Release unowned one-shot handles
+  and subscriptions.
 - Startup capability discovery is once per agent config per runtime, recorded in the
   runtime-owned `refreshedConfigKeys` set. A pass aborted by presence leaving `synced` is
   re-armed, so a pass-level flag is not the gate: reconnecting must never re-probe a config that
@@ -115,7 +111,9 @@ Replacement contract: [shared rules](../../../shared/AGENTS.md#session-history).
 
 `sendResources` owns preparation/I/O/borrows; cancel/join before transports/caches
 close. Only caches dispose stores. Loro commits locally, then dispatches best-effort.
-Roost freezes input/target, needs owner receipts before source activation and
-shares ordered leases with queues. Archive/delete cancel durable work beyond local
+Roost freezes input/target and shares ordered leases with queues. Ordinary input
+negotiates `sessionInputDispatch` v1: one owner request commits history and activation;
+the sender uses its receipt without history readback or a second dispatch RPC.
+Guide handoff still needs an owner receipt. Archive/delete cancel durable work beyond local
 snapshots and join leases. Unready Blobs stay in memory; uncertain steers never replay.
 [Decision](../../../../.agents/notes/proposed/architecture/2026-10-13-backend-independent-send-acceptance.md).

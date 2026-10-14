@@ -4606,6 +4606,7 @@
   "sessions.pendingSends": "Pending messages ({{count}})",
   "sessions.sendStatus.sending": "Sending · {{sent}} / {{total}}",
   "sessions.sendStatus.sendingWithoutSize": "Sending",
+  "sessions.sendStatus.delivered": "Delivered",
   "sessions.sendStatus.failed": "Not sent. Open the conversation to continue sending.",
   "sessions.retryPendingSend": "Continue sending",
   "sessions.cancelPendingSend": "Cancel send",

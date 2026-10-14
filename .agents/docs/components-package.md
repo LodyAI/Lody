@@ -106,15 +106,28 @@ foreground and every 30s while the page is visible. [Decision](../notes/implemen
 Loro ready messages commit to the live local history document. A ready Roost
 input instead appears from the workspace's immutable input projection and saves
 to account/workspace-scoped IndexedDB without waiting for owner RPC. Normal rows
-reuse `UserChatBubble`, including ready media and mention spans, with no separate
-acceptance badge. First paint precedes the storage transaction and does not prove
-crash durability.
+reuse `UserChatBubble`, including ready media and mention spans, with the ordinary
+pending delivery circle and no separate acceptance badge. The circle remains
+through local saving and unconfirmed owner work. A positive active owner receipt
+publishes the existing delivery overlay; both the local row and authoritative row
+use it, so history handoff cannot flash back to sending. A persisted `confirmed`
+source state alone is not a receipt. First paint precedes the storage transaction
+and does not prove crash durability.
 
 Creating a Roost conversation commits routing metadata before admission, without
 opening its history store on that path. Background delivery persists the trusted
 `humanInputReceipts` control record before accepting owner history; Loro writes
 and control queues preserve the same provenance-before-activation ordering.
 Receipt lookup stays read-only.
+
+Ordinary Roost sends negotiate `sessionInputDispatch` v1 and use one
+`accept_input_and_dispatch` owner request. The native writer queue commits trusted
+human provenance and immutable history, checks current status/metadata, and publishes
+activation before replying; the host wakes its existing history dispatcher without
+awaiting execution. The sender neither rereads history nor sends a second dispatch
+RPC. Recovery queries remain read-only and retry the same combined operation for
+activation, without recreating removed input. Older owners refuse admission before
+draft consumption. Guide application and its no-replay fence remain separate.
 
 New input uses ordinary history-write normalization before storage validation,
 including ready file/image records with `text: undefined`. Persisted records still

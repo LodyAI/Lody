@@ -1,9 +1,21 @@
 import type { SessionAttachmentDraft } from '@/lib/session-attachment-draft';
-import { getSessionRoomId, isLoroRepoDocDeleted } from '@lody/shared';
+import {
+  getMachineRoomId,
+  getSessionRoomId,
+  isLoroRepoDocDeleted,
+  machineSupportsSessionInputDispatch,
+  type MachineMeta,
+} from '@lody/shared';
+import i18next from 'i18next';
+import { SessionInputNotSentError } from './session-accepted-inputs';
 import type { MachineId, SessionHistory, SessionId, SessionMeta } from '@lody/shared';
 import type { WorkspaceRuntime } from '../atoms/runtime';
 import { finalizePreparedSend } from './session-attachment-preparation';
-import { prepareUserTurnWrite, writeUserTurn, type SessionSendDelivery } from './session-send-delivery';
+import {
+  prepareUserTurnWrite,
+  writeUserTurn,
+  type SessionSendDelivery,
+} from './session-send-delivery';
 
 /**
  * Every user-message entry point shares this admission. A ready send is written
@@ -28,17 +40,32 @@ export async function acceptSessionUserTurn(
   if (isLoroRepoDocDeleted(found)) throw new Error('Target conversation was deleted');
   const meta = creation ?? (found?.meta as SessionMeta | undefined);
   const roostBackend = meta?.historyBackend === 'roost';
-  // Opening the new conversation acquires its backend immediately. Publish
-  // routing metadata locally before its first row can mount a history store.
-  if (roostBackend && creation) await prepareUserTurnWrite(runtime, { sessionId, entry, delivery, creation });
   if (pending && (unprepared || pending.hasSession(sessionId) || roostBackend)) {
     let targetMachineId = creation?.machineId;
     if (!targetMachineId) {
       targetMachineId = (found?.meta as SessionMeta | undefined)?.machineId;
     }
-    const prepared = !unprepared && attachments?.length
-      ? finalizePreparedSend({ workspaceId: runtime.workspaceId, sessionId, entry, queue, attachments })
-      : { entry, queue };
+    if (roostBackend && delivery.kind === 'dispatch') {
+      const machine = targetMachineId
+        ? await runtime.repo.getDocMeta(getMachineRoomId(targetMachineId))
+        : undefined;
+      if (!machineSupportsSessionInputDispatch(machine?.meta as MachineMeta | undefined))
+        throw new SessionInputNotSentError(i18next.t('sessions.inputOwnerNeedsUpdate'));
+    }
+    // Publish routing before a row can acquire its backend, after capability
+    // refusal so an older owner cannot consume the draft or create an empty session.
+    if (roostBackend && creation)
+      await prepareUserTurnWrite(runtime, { sessionId, entry, delivery, creation });
+    const prepared =
+      !unprepared && attachments?.length
+        ? finalizePreparedSend({
+            workspaceId: runtime.workspaceId,
+            sessionId,
+            entry,
+            queue,
+            attachments,
+          })
+        : { entry, queue };
     pending.enqueue({
       id: entry.id,
       sessionId,

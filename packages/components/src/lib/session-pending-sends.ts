@@ -43,6 +43,8 @@ export type PendingSessionSendsPorts = {
 export type PendingSessionSends = ReturnType<typeof createPendingSessionSends> & {
   acknowledgeLanded?: (ids: Iterable<string>) => Promise<void>;
   resume?: () => Promise<void>;
+  /** The input coordinator keeps delivery ownership after its visible row is gone. */
+  ownsDelivery?: (id: string, kind: 'dispatch' | 'guide') => boolean;
 };
 
 const abortError = () => new DOMException('Pending send canceled', 'AbortError');

@@ -830,6 +830,8 @@ const createRoostSessionDataFactoryFromTransport =
         targetMachineId,
         accept: async (entry) =>
           validateInputAcceptance(await write('accept_input', { entry }), entry.id),
+        acceptAndDispatch: async (entry) =>
+          validateInputAcceptance(await write('accept_input_and_dispatch', { entry }), entry.id),
         lookup: async (entry) =>
           validateInputAcceptance(await readHistory({ kind: 'inputAcceptance', entry }), entry.id),
       },
