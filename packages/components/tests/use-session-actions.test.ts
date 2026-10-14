@@ -118,6 +118,7 @@ import {
 } from '../src/atoms/session-run-config-drafts';
 import { currentWorkspaceIdAtom, currentWorkspaceSlugAtom } from '../src/atoms/workspace-context';
 import {
+  developerModeEnabledAtom,
   experimentalFeaturesEnabledAtom,
   roostHistoryExperimentEnabledAtom,
 } from '../src/atoms/settings';
@@ -1202,9 +1203,10 @@ describe('useSessionActions', () => {
     expect(result.historyEntry.inputConfig?.inputBlocks).toEqual([{ type: 'text', text: 'hi' }]);
   });
 
-  it('selects Roost for new sessions only when both experimental gates are enabled', async () => {
+  it('selects Roost for new sessions with developer opt-in while experiments are off', async () => {
     const store = createStore();
-    store.set(experimentalFeaturesEnabledAtom, true);
+    store.set(developerModeEnabledAtom, true);
+    store.set(experimentalFeaturesEnabledAtom, false);
     store.set(roostHistoryExperimentEnabledAtom, true);
     const runtime = createRuntime({});
     const actions = await renderActions(runtime, { store });
@@ -1216,15 +1218,19 @@ describe('useSessionActions', () => {
     expect(result.sessionMeta.historyBackend).toBe('roost');
   });
 
-  it('keeps the legacy backend when the experimental master switch is off', async () => {
+  it.each([
+    { developerMode: false, roostHistory: true },
+    { developerMode: true, roostHistory: false },
+  ])('keeps Loro when a developer gate is off: %j', async ({ developerMode, roostHistory }) => {
     const store = createStore();
-    store.set(experimentalFeaturesEnabledAtom, false);
-    store.set(roostHistoryExperimentEnabledAtom, true);
+    store.set(developerModeEnabledAtom, developerMode);
+    store.set(experimentalFeaturesEnabledAtom, true);
+    store.set(roostHistoryExperimentEnabledAtom, roostHistory);
     const runtime = createRuntime({});
     const actions = await renderActions(runtime, { store });
 
     const result = await actions.createSession(
-      createSessionPayload('session-roost-master-off' as SessionId)
+      createSessionPayload('session-roost-developer-gate-off' as SessionId)
     );
 
     expect(result.sessionMeta.historyBackend).toBe('loro');
@@ -1232,7 +1238,8 @@ describe('useSessionActions', () => {
 
   it('keeps creating ordinary Loro sessions on targets without Roost capability', async () => {
     const store = createStore();
-    store.set(experimentalFeaturesEnabledAtom, true);
+    store.set(developerModeEnabledAtom, true);
+    store.set(experimentalFeaturesEnabledAtom, false);
     store.set(roostHistoryExperimentEnabledAtom, true);
     const metaRepo = createSessionMetaRepo([]);
     const runtime = createRuntime({ repo: metaRepo.repo });

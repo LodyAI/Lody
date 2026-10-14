@@ -132,7 +132,7 @@ Translation: current
 
 ### Backend 选择与显示读取
 
-新会话默认使用 Loro。两个实验开关打开时，renderer 仅在目标机器声明支持所需
+新会话默认使用 Loro。Developer mode 与开发者侧 Roost 开关都打开时，renderer 仅在目标机器声明支持所需
 历史协议时优先选择 Roost；能力缺失或较旧时，在任何会话写入前保留 Loro。
 明确要求 Roost 而目标不支持时，在 metadata、历史或 warm-up 创建前报错。
 没有显式选择的旧会话和非 renderer 创建路径仍使用 Loro。开关变化不会改变已有会话保存的

@@ -18,9 +18,10 @@ renderer-local preference.
 
 ## Decision
 
-The Experimental features section owns a master switch and a Roost history switch.
-The effective gate requires both switches. The preference is stored per renderer
-in local storage and is read before session creation.
+The Developer-mode beta section owns the Roost history switch alongside the other
+developer-only opt-ins. The effective gate requires Developer mode and the Roost
+switch; the Experimental features master switch is independent. The preference is
+stored per renderer in local storage and is read before session creation.
 
 When the effective gate is off, the shared creation default resolves to Loro.
 When it is on, the renderer reads the target machine's capabilities before any
@@ -48,10 +49,11 @@ replaces the separately staged owner executable with the published
 
 ## Verification
 
-The session-actions contract tests cover both gates: Roost is selected only when
-both are enabled, and the legacy Loro default remains when the master switch is
-off. The settings Storybook story exposes the disabled, remembered, and enabled
-states.
+The session-actions contract tests cover the developer gate: Roost is selected
+when Developer mode and its opt-in are enabled even with the Experimental features
+master switch off, and the legacy Loro default remains when either developer-side
+condition is off. The settings Storybook stories expose the hidden, remembered,
+and enabled states.
 
 Creation regressions additionally cover unavailable/older target capabilities,
 explicit Roost refusal before side effects, and explicit Loro overrides. Both

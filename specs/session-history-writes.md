@@ -172,8 +172,8 @@ on projected history. This is not arbitrary downgrade safety.
 
 ### Backend selection and display reads
 
-New sessions use Loro by default. With both experimental switches enabled, the
-renderer prefers Roost only when the target advertises the required history
+New sessions use Loro by default. With Developer mode and the Roost developer
+switch enabled, the renderer prefers Roost only when the target advertises the required history
 protocol. Missing or older capabilities retain Loro before any session write.
 An explicit Roost request to an unsupported target fails before metadata, history
 or warm-up is created. Legacy sessions and non-renderer creation paths without an

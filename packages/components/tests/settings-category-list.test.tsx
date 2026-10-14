@@ -5,9 +5,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createRoot, type Root } from 'react-dom/client';
 import { Provider, createStore, type Store } from 'jotai';
 
+import { BetaFeaturesSection } from '../src/components/settings/beta-features-setting';
 import { ExperimentalFeaturesSection } from '../src/components/settings/experimental-features-setting';
 import {
+  developerModeEnabledAtom,
   experimentalFeaturesEnabledAtom,
+  roostHistoryExperimentEnabledAtom,
   roostHistoryFeatureEnabledAtom,
 } from '../src/atoms/settings';
 import { bugReportDialogOpenAtom } from '../src/atoms/bug-report';
@@ -80,8 +83,10 @@ describe('SettingsCategoryList', () => {
     });
   }
 
-  it('keeps Roost selectable without exposing the retired review experiment', async () => {
-    store?.set(experimentalFeaturesEnabledAtom, true);
+  it('keeps Roost in developer features without an experimental master gate', async () => {
+    store?.set(experimentalFeaturesEnabledAtom, false);
+    store?.set(developerModeEnabledAtom, true);
+    store?.set(roostHistoryExperimentEnabledAtom, false);
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
@@ -89,6 +94,7 @@ describe('SettingsCategoryList', () => {
       root?.render(
         <Provider store={store}>
           <ExperimentalFeaturesSection />
+          <BetaFeaturesSection />
         </Provider>
       );
     });
@@ -99,6 +105,30 @@ describe('SettingsCategoryList', () => {
     expect(roostSwitch).not.toBeNull();
     await act(async () => roostSwitch?.click());
     expect(store?.get(roostHistoryFeatureEnabledAtom)).toBe(true);
+
+    await act(async () =>
+      container
+        ?.querySelector<HTMLElement>('[role="switch"][aria-label="Enable experimental features"]')
+        ?.click()
+    );
+    expect(store?.get(roostHistoryFeatureEnabledAtom)).toBe(true);
+    const experimentalSection = [...container.querySelectorAll('section')].find((section) =>
+      section.textContent?.includes('Experimental features')
+    );
+    expect(experimentalSection?.textContent).not.toContain('Roost history');
+
+    await act(async () => store?.set(developerModeEnabledAtom, false));
+    expect(store?.get(roostHistoryFeatureEnabledAtom)).toBe(false);
+    expect(container.querySelector('[role="switch"][aria-label="Roost history"]')).toBeNull();
+
+    await act(async () => store?.set(developerModeEnabledAtom, true));
+    expect(store?.get(roostHistoryFeatureEnabledAtom)).toBe(true);
+    const restoredSwitch = container.querySelector<HTMLElement>(
+      '[role="switch"][aria-label="Roost history"]'
+    );
+    expect(restoredSwitch?.getAttribute('aria-checked')).toBe('true');
+    await act(async () => restoredSwitch?.click());
+    expect(store?.get(roostHistoryFeatureEnabledAtom)).toBe(false);
   });
 
   it('renders a bottom bug report action that opens the report dialog state', async () => {
