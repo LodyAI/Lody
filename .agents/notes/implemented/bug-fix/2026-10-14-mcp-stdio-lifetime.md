@@ -3,6 +3,8 @@
 Status: implemented
 Translation: current
 
+PR: [#1559](https://github.com/LodyAI/Lody/pull/1559)
+
 [中文](2026-10-14-mcp-stdio-lifetime.zh.md)
 
 ## Abstract
