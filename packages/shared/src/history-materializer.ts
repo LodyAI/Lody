@@ -526,12 +526,35 @@ function diffMap(
   }
 }
 
+/**
+ * Diff the stored list range starting at `offset` that currently holds `oldValue`.
+ * Items before and after that range are neither read nor rewritten.
+ */
+export function diffHistoryListRange(
+  list: LoroList,
+  schema: SchemaType | undefined,
+  offset: number,
+  oldValue: readonly unknown[],
+  newValue: readonly unknown[],
+  infer: MaterializeInfer
+): void {
+  diffList(
+    list,
+    isListSchema(schema) ? schema : undefined,
+    oldValue,
+    newValue,
+    applySchemaToInfer(schema, infer),
+    offset
+  );
+}
+
 function diffList(
   list: LoroList | LoroMovableList,
   schema: Parameters<typeof writeDiffListInsert>[1],
   oldValue: readonly unknown[],
   newValue: readonly unknown[],
-  infer: MaterializeInfer
+  infer: MaterializeInfer,
+  offset = 0
 ): void {
   if (oldValue === newValue) return;
   // Retained object references anchor existing containers even when an earlier
@@ -550,7 +573,7 @@ function diffList(
       const before = oldValue[oldStart + j];
       const after = newValue[newStart + j];
       if (before === after) continue;
-      const container = list.get(newStart + j);
+      const container = list.get(offset + newStart + j);
       if (
         isContainer(container) &&
         matchesContainerType(container.kind(), before) &&
@@ -558,13 +581,13 @@ function diffList(
       ) {
         diffHistoryContainer(container, schema?.itemSchema, before, after, infer);
       } else {
-        list.delete(newStart + j, 1);
-        writeDiffListInsert(list, schema, newStart + j, after, infer);
+        list.delete(offset + newStart + j, 1);
+        writeDiffListInsert(list, schema, offset + newStart + j, after, infer);
       }
     }
-    if (oldLength > overlap) list.delete(newStart + overlap, oldLength - overlap);
+    if (oldLength > overlap) list.delete(offset + newStart + overlap, oldLength - overlap);
     for (let j = overlap; j < newLength; j++) {
-      writeDiffListInsert(list, schema, newStart + j, newValue[newStart + j], infer);
+      writeDiffListInsert(list, schema, offset + newStart + j, newValue[newStart + j], infer);
     }
   };
   for (let index = 0; index < newValue.length; index++) {

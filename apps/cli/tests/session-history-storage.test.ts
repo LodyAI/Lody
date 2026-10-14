@@ -1,4 +1,4 @@
-import { buildAgentMessageAuthor } from '@lody/shared';
+import { applyNotificationOnHistory, buildAgentMessageAuthor } from '@lody/shared';
 import { createSessionAgentWrites } from '../src/lib/loro/session-agent-writes';
 import { describe, expect, it, vi } from 'vitest';
 import { Loro, isContainer, LoroList, LoroMap } from 'loro-crdt';
@@ -438,6 +438,196 @@ describe('stored history operations', () => {
     if (createdRead.state === 'ready') {
       expect(JSON.stringify(createdRead.turn.items)).toContain('created');
     }
+  });
+
+  it('writes streamed output through the turn tail with the same result as a whole-history write', async () => {
+    const tool = (toolCallId: string) => ({
+      type: 'tool_call' as const,
+      toolCallId,
+      title: 'Run',
+      kind: 'execute' as const,
+      status: 'in_progress' as const,
+    });
+    const seed: SessionTurn[] = [
+      userTurn('user-1'),
+      {
+        ...assistantTurn('assistant-old'),
+        items: [{ type: 'text', text: 'old' }, tool('old-tool')],
+      },
+      userTurn('user-2'),
+      {
+        ...assistantTurn('assistant-1'),
+        finished: undefined,
+        items: [
+          { type: 'text', text: 'start' },
+          tool('early-tool'),
+          { type: 'text', text: 'between' },
+          tool('recent-tool'),
+          { type: 'thought', text: 'thinking' },
+          { type: 'text', text: 'tail' },
+        ],
+      },
+    ];
+    const batches = [
+      [{ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: ' more' } }],
+      [
+        { sessionUpdate: 'tool_call', toolCallId: 'new-tool', title: 'Read', kind: 'read' },
+        {
+          sessionUpdate: 'tool_call_update',
+          toolCallId: 'new-tool',
+          status: 'completed',
+          content: [{ type: 'content', content: { type: 'text', text: 'read result' } }],
+        },
+      ],
+      // Stored far before the tail of the target, then in an older turn.
+      [{ sessionUpdate: 'tool_call_update', toolCallId: 'early-tool', status: 'completed' }],
+      [{ sessionUpdate: 'tool_call_update', toolCallId: 'old-tool', status: 'failed' }],
+      [{ sessionUpdate: 'tool_call_update', toolCallId: 'recent-tool', status: 'completed' }],
+      [
+        {
+          sessionUpdate: 'agent_message_chunk',
+          content: { type: 'text', text: '<thinking>plan it</thinking>answer' },
+          _meta: { lody: { turnId: 'acp-turn-1' } },
+        },
+      ],
+      [
+        {
+          sessionUpdate: 'plan',
+          entries: [{ content: 'step', priority: 'high', status: 'pending' }],
+        },
+      ],
+      [{ sessionUpdate: 'tool_call_update', toolCallId: 'never-announced', status: 'completed' }],
+      // A tag split across chunks yields a thought that compacts into the stored one before it.
+      [{ sessionUpdate: 'agent_thought_chunk', content: { type: 'text', text: 'pondering' } }],
+      [
+        {
+          sessionUpdate: 'agent_message_chunk',
+          content: { type: 'text', text: '<thinking>inner' },
+        },
+      ],
+      [
+        {
+          sessionUpdate: 'agent_message_chunk',
+          content: { type: 'text', text: '</thinking>\nafter' },
+        },
+      ],
+    ];
+    const options = {
+      targetAssistantEntryId: 'assistant-1',
+      createId: () => 'assistant-1',
+      now: () => '2026-01-01T00:00:02.000Z',
+    };
+    const notifications = (batch: unknown[]) =>
+      batch.map((update) => ({ sessionId: 'synthetic', update })) as never;
+
+    const harness = makeHarness();
+    for (const turn of seed) await harness.data.commands.appendTurn(turn);
+    const wholeDoc = new Loro();
+    const whole = createHistoryWriter(wholeDoc);
+    for (const turn of seed) whole.append(turn as unknown as SessionHistory);
+
+    for (const batch of batches) {
+      await harness.data.commands.applyAgentBatch({
+        notifications: notifications(batch),
+        ...options,
+      });
+      whole.update((turns) =>
+        applyNotificationOnHistory(turns, notifications(batch), undefined, options)
+      );
+      expect(harness.readStored()).toEqual(whole.readStored());
+    }
+    const target = harness.readStored().find((turn) => turn.id === 'assistant-1')!;
+    expect(target.acpTurnId).toBe('acp-turn-1');
+    expect(target.plan).toHaveLength(1);
+    expect(JSON.stringify(target.items)).toContain('never-announced');
+    expect(harness.readStored().find((turn) => turn.id === 'assistant-old')!.items).toMatchObject([
+      { text: 'old' },
+      { toolCallId: 'old-tool', status: 'failed' },
+    ]);
+  });
+
+  it('routes a tool update to the item a peer stored or moved after earlier batches', async () => {
+    const doc = new Loro();
+    const harness = makeHarness(doc);
+    await harness.data.commands.appendTurn(assistantTurn('assistant-old'));
+    await harness.data.commands.appendTurn({
+      ...assistantTurn('assistant-1'),
+      finished: undefined,
+    });
+    const update = (toolCallId: string, status: string) =>
+      harness.data.commands.applyAgentBatch({
+        notifications: [
+          {
+            sessionId: 'synthetic',
+            update: { sessionUpdate: 'tool_call_update', toolCallId, status },
+          },
+        ] as never,
+        targetAssistantEntryId: 'assistant-1',
+        createId: () => 'assistant-1',
+      });
+    const oldItems = () => harness.readStored().find((turn) => turn.id === 'assistant-old')!.items;
+    await update('own-tool', 'in_progress');
+
+    // A peer stores a tool call in the older turn after this writer last looked.
+    harness.injectStoredItem('assistant-old', {
+      type: 'tool_call',
+      toolCallId: 'peer-tool',
+      status: 'pending',
+    });
+    await update('peer-tool', 'in_progress');
+    expect(oldItems()).toMatchObject([
+      { text: 'working' },
+      { toolCallId: 'peer-tool', status: 'in_progress' },
+    ]);
+
+    // Then it shifts that item by inserting before it.
+    const old = doc.getList('history').get(0) as LoroMap;
+    (old.get('items') as LoroList).insert(0, { type: 'text', text: 'peer first' } as never);
+    doc.commit();
+    await update('own-tool', 'completed');
+    await update('peer-tool', 'completed');
+    const stored = harness.readStored();
+    expect(oldItems()).toMatchObject([
+      { text: 'peer first' },
+      { text: 'working' },
+      { toolCallId: 'peer-tool', status: 'completed' },
+    ]);
+    const ownItems = stored.find((turn) => turn.id === 'assistant-1')!.items as {
+      toolCallId?: string;
+      status?: string;
+    }[];
+    expect(ownItems.filter((item) => item.toolCallId === 'own-tool')).toEqual([
+      expect.objectContaining({ status: 'completed' }),
+    ]);
+    expect(ownItems.some((item) => item.toolCallId === 'peer-tool')).toBe(false);
+  });
+
+  it('keeps whole-history routing for duplicated target copies', async () => {
+    const harness = makeHarness();
+    await harness.data.commands.appendTurn({
+      ...assistantTurn('assistant-1'),
+      finished: undefined,
+    });
+    harness.peerAppend({ ...assistantTurn('assistant-1'), finished: undefined });
+    await harness.data.commands.applyAgentBatch({
+      notifications: [
+        {
+          sessionId: 'synthetic',
+          update: {
+            sessionUpdate: 'tool_call',
+            toolCallId: 'tool',
+            title: 'Run',
+            status: 'pending',
+          },
+        },
+      ] as never,
+      targetAssistantEntryId: 'assistant-1',
+      createId: () => 'assistant-1',
+    });
+    // The whole-history planner selects the first copy; the window refuses to choose.
+    const [first, second] = harness.readStored();
+    expect(JSON.stringify(first!.items)).toContain('"toolCallId":"tool"');
+    expect(JSON.stringify(second!.items)).not.toContain('"toolCallId":"tool"');
   });
 
   it('replaces one known field without re-validating unchanged stored items', async () => {

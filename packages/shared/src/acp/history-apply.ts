@@ -1190,6 +1190,70 @@ const parseAssistantTextTags = (text: string, turnId: string): MessageContent[] 
   });
 };
 
+type ToolUpdate = Extract<
+  AcpSessionNotification['update'],
+  { sessionUpdate: 'tool_call' | 'tool_call_update' }
+>;
+
+// Subagent/background task lifecycle rides the tool_call transport (see
+// claude-subagent-task.ts). Materialize it as a first-class `subagent_task`
+// item instead of persisting a tool_call; the applier merges by taskId.
+const toolUpdateSubagentTasks = (update: ToolUpdate): MessageContent[] => {
+  const subagentTask =
+    parseLodyTaskMeta((update as ToolCallUpdateWithMeta)._meta) ??
+    parseDevinSubagentTaskMeta((update as ToolCallUpdateWithMeta)._meta) ??
+    parseSubagentTaskWire(update.rawInput);
+  if (subagentTask) {
+    const devinSubagentId = getDevinSubagentContextId((update as ToolCallUpdateWithMeta)._meta);
+    return [
+      {
+        type: 'subagent_task',
+        ...(devinSubagentId !== null ? { parentTaskId: devinSubagentId } : {}),
+        ...subagentTask,
+      },
+    ];
+  }
+  return parseCodexCollabAgentTasks(update.title, update.rawInput).map((task) => ({
+    type: 'subagent_task',
+    ...task,
+  }));
+};
+
+/**
+ * The tool calls a batch looks up when everything it writes is target-local: its
+ * active turn's tail and fields, plus tool rows matched by `toolCallId` wherever they
+ * are stored. Undefined when any update needs the whole history (subagent tasks and
+ * events, Devin subagent internals, singleton commands, other kinds).
+ */
+export const targetLocalToolCallIds = (
+  notifications: readonly AcpSessionNotification[]
+): string[] | undefined => {
+  const ids = new Set<string>();
+  for (const { update } of notifications) {
+    if (getDevinSubagentContextId(update._meta) !== null) return undefined;
+    switch (update.sessionUpdate) {
+      case 'agent_message_chunk':
+      case 'agent_thought_chunk':
+      case 'user_message_chunk':
+      case 'config_option_update':
+      case 'usage_update':
+      case 'plan':
+        continue;
+      case 'plan_update':
+        if (update.plan.type !== 'items') return undefined;
+        continue;
+      case 'tool_call':
+      case 'tool_call_update':
+        if (toolUpdateSubagentTasks(update).length > 0) return undefined;
+        ids.add(update.toolCallId);
+        continue;
+      default:
+        return undefined;
+    }
+  }
+  return [...ids];
+};
+
 export const buildMessageContentFromNotification = (
   message: AcpSessionNotification,
   previousTool?: ToolCallMessage
@@ -1227,28 +1291,8 @@ export const buildMessageContentFromNotification = (
       return [];
     case 'tool_call':
     case 'tool_call_update': {
-      // Subagent/background task lifecycle rides the tool_call transport (see
-      // claude-subagent-task.ts). Materialize it as a first-class `subagent_task`
-      // item instead of persisting a tool_call; the applier merges by taskId.
-      const subagentTask =
-        parseLodyTaskMeta((update as ToolCallUpdateWithMeta)._meta) ??
-        parseDevinSubagentTaskMeta((update as ToolCallUpdateWithMeta)._meta) ??
-        parseSubagentTaskWire(update.rawInput);
-      if (subagentTask) {
-        const devinSubagentId = getDevinSubagentContextId((update as ToolCallUpdateWithMeta)._meta);
-        return [
-          {
-            type: 'subagent_task',
-            ...(devinSubagentId !== null ? { parentTaskId: devinSubagentId } : {}),
-            ...subagentTask,
-          },
-        ];
-      }
-
-      const codexCollabTasks = parseCodexCollabAgentTasks(update.title, update.rawInput);
-      if (codexCollabTasks.length > 0) {
-        return codexCollabTasks.map((task) => ({ type: 'subagent_task', ...task }));
-      }
+      const subagentTasks = toolUpdateSubagentTasks(update);
+      if (subagentTasks.length > 0) return subagentTasks;
 
       const kind = (update.kind ?? previousTool?.kind) as ToolKind | null | undefined;
 
