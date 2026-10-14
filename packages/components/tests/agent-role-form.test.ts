@@ -221,6 +221,7 @@ const selectorOptions = (overrides: Partial<AcpSelectorOptions> = {}): AcpSelect
     },
     { type: 'boolean', configId: 'fast-mode', label: 'Fast', options: [], currentValue: false },
   ],
+  modelReasoningEfforts: undefined,
   ...overrides,
 });
 
@@ -281,6 +282,83 @@ describe('name check exemption', () => {
 });
 
 describe('building a role from the form', () => {
+  it('saves current options, removes retired thinking, and reopens without compatibility warnings', () => {
+    const existing = role({
+      runConfig: {
+        modelId: 'gpt-5.6',
+        modeId: 'default',
+        memory: { providerId: 'nowledge', memoryId: 'reviewer' },
+        configOptionValues: { thinking: 'high', thought_level: 'high', 'fast-mode': false },
+      },
+      promptPrefix: 'Review carefully.',
+    });
+    const value = buildAgentRoleFormValue(existing);
+    const capabilities = selectorOptions();
+    const options = {
+      existing,
+      ownerUserId: 'user-1',
+      now: 20,
+      createId,
+      selectorOptions: capabilities,
+    };
+    const saved = buildAgentRoleFromForm(value, options);
+    expect(saved.runConfig).toEqual({
+      ...existing.runConfig,
+      configOptionValues: { thought_level: 'high', 'fast-mode': false },
+    });
+    expect(saved.promptPrefix).toBe(existing.promptPrefix);
+    expect(saved.revision).toBe(2);
+    expect(saved.updatedAt).toBe(20);
+    expect(findAgentRoleRunConfigIssues(saved.runConfig, capabilities)).toEqual([]);
+    expect(value.configOptionValues).toHaveProperty('thinking', 'high');
+    expect(existing.runConfig.configOptionValues).toHaveProperty('thinking', 'high');
+    expect(
+      buildAgentRoleFromForm(buildAgentRoleFormValue(saved), { ...options, existing: saved })
+    ).toBe(saved);
+  });
+
+  it('uses current option defaults for invalid values without replacing model or mode pins', () => {
+    const saved = buildAgentRoleFromForm(
+      formValue({
+        modelId: 'retired-model',
+        modeId: 'retired-mode',
+        configOptionValues: { thought_level: 'ultra', 'fast-mode': 'true' },
+      }),
+      { ownerUserId: 'user-1', now: 20, createId, selectorOptions: selectorOptions() }
+    );
+    expect(saved.runConfig).toEqual({
+      modelId: 'retired-model',
+      modeId: 'retired-mode',
+      configOptionValues: { thought_level: 'medium', 'fast-mode': false },
+    });
+  });
+
+  it.each(['unavailable', 'provisional'] as const)(
+    'preserves options when capabilities are %s',
+    (capabilityAuthority) => {
+      const existing = role({ runConfig: { configOptionValues: { thinking: 'high' } } });
+      expect(
+        buildAgentRoleFromForm(buildAgentRoleFormValue(existing), {
+          existing,
+          ownerUserId: 'user-1',
+          now: 20,
+          createId,
+          selectorOptions: selectorOptions({ capabilityAuthority }),
+        })
+      ).toBe(existing);
+    }
+  );
+
+  it('clears all retired options when the authoritative editor has no option controls', () => {
+    const saved = buildAgentRoleFromForm(formValue({ configOptionValues: { thinking: 'high' } }), {
+      ownerUserId: 'user-1',
+      now: 20,
+      createId,
+      selectorOptions: selectorOptions({ configOptionSelectors: [] }),
+    });
+    expect(saved.runConfig.configOptionValues ?? {}).toEqual({});
+  });
+
   it('creates a private role with revision 1', () => {
     const created = buildAgentRoleFromForm(formValue(), {
       ownerUserId: 'user-1',

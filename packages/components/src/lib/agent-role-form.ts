@@ -166,6 +166,8 @@ export const buildAgentRoleFromForm = (
     ownerUserId: string;
     now: number;
     createId: () => AgentRoleId;
+    /** Current editor capabilities; only explicit saves reconcile retired options. */
+    selectorOptions?: AcpSelectorOptions | null;
   }
 ): AgentRole => {
   const { existing, ownerUserId, now } = options;
@@ -181,7 +183,7 @@ export const buildAgentRoleFromForm = (
     ...(emoji ? { emoji } : {}),
     machineId: value.machineId as MachineId,
     agentConfigId: value.agentConfigId as AgentConfigId,
-    runConfig: buildAgentRoleRunConfig(value),
+    runConfig: buildAgentRoleRunConfig(prepareAgentRoleFormForSave(value, options.selectorOptions)),
     ...(promptPrefix ? { promptPrefix } : {}),
     revision: existing?.revision ?? 1,
     createdAt: existing?.createdAt ?? now,
@@ -191,6 +193,28 @@ export const buildAgentRoleFromForm = (
   if (!existing) return next;
   if (isAgentRoleContentEqual(existing, next)) return existing;
   return { ...next, revision: existing.revision + 1, updatedAt: now };
+};
+
+/** Keep the current editor's options on explicit save, without rewriting a draft on open. */
+const prepareAgentRoleFormForSave = (
+  value: AgentRoleFormValue,
+  selectorOptions: AcpSelectorOptions | null | undefined
+): AgentRoleFormValue => {
+  // Provisional static defaults cannot establish that a stored option was removed.
+  if (selectorOptions?.capabilityAuthority !== 'authoritative') return value;
+  return {
+    ...value,
+    configOptionValues: Object.fromEntries(
+      selectAuthorableAgentRoleConfigOptions(selectorOptions.configOptionSelectors).map(
+        (selector) => [
+          selector.configId,
+          isConfigOptionValueValid(selector, value.configOptionValues[selector.configId])
+            ? value.configOptionValues[selector.configId]
+            : selector.currentValue,
+        ]
+      )
+    ),
+  };
 };
 
 /**
@@ -269,9 +293,8 @@ export type AgentRoleRunConfigIssue =
 /**
  * Which parts of a saved run config the selected agent no longer supports.
  *
- * Reported rather than repaired. A Role whose model disappeared must say so and
- * stay unavailable until its owner picks a new one — quietly substituting the
- * agent's default is the failure mode this feature exists to avoid.
+ * Opening the editor reports rather than repairs. Explicit Save reconciles option
+ * controls; a missing model or mode stays pinned until the owner selects a new one.
  */
 export const findAgentRoleRunConfigIssues = (
   runConfig: AgentRoleRunConfig,

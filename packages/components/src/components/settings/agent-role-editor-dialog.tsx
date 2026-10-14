@@ -193,6 +193,7 @@ export function AgentRoleEditorDialog({
       ownerUserId: currentUserId,
       now: getServerNow(),
       createId: () => (editor.mode === 'add' ? editor.roleId : editor.role.id),
+      selectorOptions: selectedAgentConfig ? selectorOptions : null,
     });
 
     setSubmitting(true);
