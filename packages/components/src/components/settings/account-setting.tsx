@@ -44,6 +44,26 @@ const styles = stylex.create({
 const getInviteLink = (invitation: Invitation) => getAppShareUrl(`/invite/${invitation.id}`);
 const FREE_WORKSPACE_MEMBER_LIMIT_REACHED_CODE = 'free_workspace_member_limit_reached';
 
+type UpdateUserAvatarState = {
+  url: string;
+  updateUser: (input: { image: string }) => Promise<{ error: { message?: string } | null }>;
+  refetchSession: () => Promise<unknown>;
+  refetchActiveOrganization: () => Promise<unknown>;
+};
+
+export async function persistUserAvatar({
+  url,
+  updateUser,
+  refetchSession,
+  refetchActiveOrganization,
+}: UpdateUserAvatarState): Promise<string> {
+  const { error } = await updateUser({ image: url });
+  if (error) throw new Error(error.message ?? 'Failed to update avatar');
+  void refetchSession();
+  void refetchActiveOrganization().catch(console.error);
+  return url;
+}
+
 export function AccountSettingsComponent({
   surface = 'account',
 }: {
@@ -379,15 +399,25 @@ function CloudAccountSettings({ surface }: { surface: AccountSettingsSurface }) 
         file,
       });
       if (kind === 'user') {
-        const { error } = await authClient.updateUser({ image: url });
-        if (error) throw new Error(error.message ?? 'Failed to update avatar');
-        void refetchSession();
+        await persistUserAvatar({
+          url,
+          updateUser: (input) => authClient.updateUser(input),
+          refetchSession,
+          refetchActiveOrganization,
+        });
       } else {
         await updateOrganization(activeOrganizationId, { logo: url });
       }
       return url;
     },
-    [activeOrganizationId, authClient, refetchSession, sessionToken, updateOrganization]
+    [
+      activeOrganizationId,
+      authClient,
+      refetchActiveOrganization,
+      refetchSession,
+      sessionToken,
+      updateOrganization,
+    ]
   );
 
   const handleChangePassword = useCallback(
