@@ -123,3 +123,7 @@ checks report 82 broken links outside the changed documents and no protected top
 Dependencies were reused without installing a nested workspace graph.
 No usability improvement or native-view focus ordering is claimed as measured;
 Managed Preview cross-origin keyboard input remains outside the existing bridge.
+
+## Pull request
+
+[PR #1558](https://github.com/LodyAI/Lody/pull/1558) targets `main`.
