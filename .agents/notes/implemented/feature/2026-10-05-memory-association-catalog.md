@@ -116,3 +116,5 @@ suite covers multiple selections, deselection, imported-row disabling, partial
 failure/retry, and a deferred save that keeps controls locked. Storybook includes
 multiple-selected, imported and saving states. Live provider enrollment is not
 needed to verify this association-only flow.
+
+Batch import implementation: [PR #1565](https://github.com/LodyAI/Lody/pull/1565).
