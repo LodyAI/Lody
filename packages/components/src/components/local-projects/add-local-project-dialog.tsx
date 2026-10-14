@@ -46,7 +46,10 @@ import {
   type RemoteDirectoryPickerMachine,
 } from './use-remote-directory-picker';
 import { MobileAddLocalProjectFlow } from './mobile-add-local-project-flow';
-import { RemoteDirectoryNewFolderControl } from './remote-directory-new-folder-control';
+import {
+  RemoteDirectoryNewFolderAction,
+  RemoteDirectoryNewFolderControl,
+} from './remote-directory-new-folder-control';
 
 export type {
   RemoteDirectoryOpResult,
@@ -444,7 +447,9 @@ export function RemoteDirectoryPicker(props: RemoteDirectoryPickerArgs) {
           adding={c.adding}
           addError={c.addError}
           creating={c.creating}
+          newFolderAction={<RemoteDirectoryNewFolderAction controller={c} />}
           newFolderControl={<RemoteDirectoryNewFolderControl controller={c} />}
+          newFolderOpen={c.newFolderOpen}
           canAddCurrentFolder={c.canAddCurrentFolder}
           sep={c.sep}
           onNavigate={c.navigate}
@@ -598,7 +603,9 @@ function BrowseStep({
   adding,
   addError,
   creating,
+  newFolderAction,
   newFolderControl,
+  newFolderOpen,
   canAddCurrentFolder,
   sep,
   onNavigate,
@@ -622,7 +629,9 @@ function BrowseStep({
   adding: boolean;
   addError: string | null;
   creating: boolean;
+  newFolderAction: ReactNode;
   newFolderControl: ReactNode;
+  newFolderOpen: boolean;
   canAddCurrentFolder: boolean;
   sep: '/' | '\\';
   onNavigate: (absolutePath: string) => void;
@@ -710,6 +719,7 @@ function BrowseStep({
             {status === 'loading' ? (
               <Spinner {...stylex.props(styles.icon14, styles.hint)} aria-hidden />
             ) : null}
+            {newFolderAction}
             <Button
               type="button"
               variant="ghost"
@@ -823,51 +833,53 @@ function BrowseStep({
             {addError}
           </p>
         ) : null}
-        <div {...stylex.props(styles.footerRow)}>
-          <div {...stylex.props(styles.currentFolder)}>
-            <p {...stylex.props(styles.currentFolderLabel)}>
-              {t('localProjects.add.currentFolder', 'Current folder')}
-            </p>
-            {currentPathParts ? (
-              <p {...stylex.props(styles.currentPath)} title={current?.path}>
-                {currentPathParts.head ? (
-                  <span {...stylex.props(styles.truncate, styles.pathHead)}>
-                    {currentPathParts.head}
-                  </span>
-                ) : null}
-                <span {...stylex.props(styles.pathTail)}>{currentPathParts.tail}</span>
+        {!newFolderOpen ? (
+          <div {...stylex.props(styles.footerRow)}>
+            <div {...stylex.props(styles.currentFolder)}>
+              <p {...stylex.props(styles.currentFolderLabel)}>
+                {t('localProjects.add.currentFolder', 'Current folder')}
               </p>
-            ) : (
-              <p {...stylex.props(styles.currentPath, styles.currentPathEmpty, styles.truncate)}>
-                …
-              </p>
-            )}
-          </div>
-          <div {...stylex.props(styles.actions)}>
-            <Button
-              type="button"
-              variant="secondary"
-              size="small"
-              onClick={onCancel}
-              disabled={adding || creating}
-            >
-              {t('common.cancel', 'Cancel')}
-            </Button>
-            <Button
-              type="button"
-              size="small"
-              disabled={!canAddCurrentFolder}
-              onClick={onAddCurrentFolder}
-            >
-              {adding ? (
-                <Spinner {...stylex.props(styles.icon16)} />
+              {currentPathParts ? (
+                <p {...stylex.props(styles.currentPath)} title={current?.path}>
+                  {currentPathParts.head ? (
+                    <span {...stylex.props(styles.truncate, styles.pathHead)}>
+                      {currentPathParts.head}
+                    </span>
+                  ) : null}
+                  <span {...stylex.props(styles.pathTail)}>{currentPathParts.tail}</span>
+                </p>
               ) : (
-                <FolderPlus {...stylex.props(styles.icon16)} />
+                <p {...stylex.props(styles.currentPath, styles.currentPathEmpty, styles.truncate)}>
+                  …
+                </p>
               )}
-              {t('localProjects.add.useThisFolder', 'Add')}
-            </Button>
+            </div>
+            <div {...stylex.props(styles.actions)}>
+              <Button
+                type="button"
+                variant="secondary"
+                size="small"
+                onClick={onCancel}
+                disabled={adding || creating}
+              >
+                {t('common.cancel', 'Cancel')}
+              </Button>
+              <Button
+                type="button"
+                size="small"
+                disabled={!canAddCurrentFolder}
+                onClick={onAddCurrentFolder}
+              >
+                {adding ? (
+                  <Spinner {...stylex.props(styles.icon16)} />
+                ) : (
+                  <FolderPlus {...stylex.props(styles.icon16)} />
+                )}
+                {t('localProjects.add.useThisFolder', 'Add')}
+              </Button>
+            </div>
           </div>
-        </div>
+        ) : null}
       </div>
     </>
   );

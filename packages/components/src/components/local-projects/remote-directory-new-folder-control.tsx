@@ -18,9 +18,47 @@ const styles = stylex.create({
   input: { flexGrow: 1, minWidth: '120px' },
   icon: { width: '16px', height: '16px', flexShrink: 0 },
   error: { margin: 0, color: colors.destructive, fontSize: text.footnoteSize },
+  visuallyHidden: {
+    position: 'absolute',
+    width: '1px',
+    height: '1px',
+    padding: 0,
+    margin: '-1px',
+    overflow: 'hidden',
+    clipPath: 'inset(50%)',
+    whiteSpace: 'nowrap',
+    borderWidth: 0,
+  },
 });
 
-/** One creation form for both remote picker layouts; registration stays separate. */
+/** Compact, on-demand entry point for creating a directory in the current location. */
+export function RemoteDirectoryNewFolderAction({
+  controller: c,
+}: {
+  controller: RemoteDirectoryPickerController;
+}) {
+  const { t } = useTranslation();
+  if (!c.selectedMachine?.canAddProjects || !c.selectedMachine.supportsCreateDirectory) return null;
+
+  const label = t('localProjects.add.newFolder', 'New folder');
+  return (
+    <Button
+      type="button"
+      variant="ghost"
+      size="small"
+      icon
+      title={label}
+      aria-label={label}
+      disabled={!c.canCreateFolder}
+      onClick={c.startNewFolder}
+    >
+      <FolderPlus {...stylex.props(styles.icon)} />
+      <span {...stylex.props(styles.visuallyHidden)}>{label}</span>
+    </Button>
+  );
+}
+
+/** Shows the creation form only after the user invokes the compact action. */
 export function RemoteDirectoryNewFolderControl({
   controller: c,
 }: {
@@ -29,60 +67,44 @@ export function RemoteDirectoryNewFolderControl({
   const { t } = useTranslation();
   const errorId = useId();
   if (!c.selectedMachine?.canAddProjects || !c.selectedMachine.supportsCreateDirectory) return null;
+  if (!c.newFolderOpen) return null;
 
   return (
     <div {...stylex.props(styles.control)}>
-      {c.newFolderOpen ? (
-        <form
-          {...stylex.props(styles.form)}
-          onSubmit={(event) => {
-            event.preventDefault();
-            void c.createFolder();
-          }}
-        >
-          <div {...stylex.props(styles.input)}>
-            <Input
-              value={c.folderName}
-              onChange={(event) => c.setFolderName(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === 'Escape') {
-                  event.preventDefault();
-                  event.stopPropagation();
-                  c.cancelNewFolder();
-                }
-              }}
-              placeholder={t('localProjects.add.folderName', 'Folder name')}
-              aria-label={t('localProjects.add.folderName', 'Folder name')}
-              aria-invalid={!!c.createError}
-              aria-describedby={c.createError ? errorId : undefined}
-              autoFocus
-              disabled={c.creating}
-            />
-          </div>
-          <Button
-            type="button"
-            variant="secondary"
-            onClick={c.cancelNewFolder}
+      <form
+        {...stylex.props(styles.form)}
+        onSubmit={(event) => {
+          event.preventDefault();
+          void c.createFolder();
+        }}
+      >
+        <div {...stylex.props(styles.input)}>
+          <Input
+            value={c.folderName}
+            onChange={(event) => c.setFolderName(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Escape') {
+                event.preventDefault();
+                event.stopPropagation();
+                c.cancelNewFolder();
+              }
+            }}
+            placeholder={t('localProjects.add.folderName', 'Folder name')}
+            aria-label={t('localProjects.add.folderName', 'Folder name')}
+            aria-invalid={!!c.createError}
+            aria-describedby={c.createError ? errorId : undefined}
+            autoFocus
             disabled={c.creating}
-          >
-            {t('common.cancel', 'Cancel')}
-          </Button>
-          <Button type="submit" disabled={!c.canCreateFolder || !c.folderName.trim()}>
-            {c.creating ? <Spinner {...stylex.props(styles.icon)} /> : null}
-            {t('localProjects.add.createFolder', 'Create')}
-          </Button>
-        </form>
-      ) : (
-        <Button
-          type="button"
-          variant="secondary"
-          disabled={!c.canCreateFolder}
-          onClick={c.startNewFolder}
-        >
-          <FolderPlus {...stylex.props(styles.icon)} />
-          {t('localProjects.add.newFolder', 'New folder')}
+          />
+        </div>
+        <Button type="button" variant="secondary" onClick={c.cancelNewFolder} disabled={c.creating}>
+          {t('common.cancel', 'Cancel')}
         </Button>
-      )}
+        <Button type="submit" disabled={!c.canCreateFolder || !c.folderName.trim()}>
+          {c.creating ? <Spinner {...stylex.props(styles.icon)} /> : null}
+          {t('localProjects.add.createFolder', 'Create')}
+        </Button>
+      </form>
       {c.createError ? (
         <p id={errorId} role="alert" {...stylex.props(styles.error)}>
           {describeCreateDirectoryError(c.createError.code, c.createError.message, t)}
