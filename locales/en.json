@@ -89,7 +89,7 @@
   "sessions.markdownImage.retry": "Retry",
   "sessions.markdownImage.unsupported": "Unsupported image format",
   "settings.beta.semanticShortcuts": "Pointer-aware close shortcut",
-  "settings.beta.semanticShortcutsHelper": "On desktop, close the active tab in the conversation or right panel you last pointed at or used with the keyboard.",
+  "settings.beta.semanticShortcutsHelper": "On desktop, close the tab where you last opened content, clicked, typed, or scrolled. Moving the pointer keeps that target; hover selects a region only before an explicit interaction.",
   "sessions.cancelSend": "Cancel send",
   "sessions.prTab.showLess": "Show less",
   "sessions.prTab.showMore": "Show more",

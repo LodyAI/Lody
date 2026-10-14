@@ -105,7 +105,8 @@ function LayoutHarness({
     }
     setSidebarOpen(true);
     setEmpty(false);
-  }, [empty, sidebarOpen]);
+    router.current?.activate('side-panel');
+  }, [empty, sidebarOpen, router]);
 
   return (
     <div className="flex h-screen flex-col gap-2 bg-muted/30 p-4">

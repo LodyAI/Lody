@@ -1,12 +1,20 @@
 import { matchesKeyboardEvent } from './key-matcher';
 
 export type SemanticActionResult = 'handled' | 'unhandled';
+export type SemanticActionInteraction =
+  | 'pointer'
+  | 'pointerdown'
+  | 'pointerleave'
+  | 'wheel'
+  | 'keyboard';
+
+export const SEMANTIC_HOVER_DWELL_MS = 250;
 
 const INTERACTION_EVENT = 'lody:semantic-action-interaction';
 
 export function reportSemanticActionInteraction(
   element: HTMLElement,
-  source: 'pointer' | 'keyboard'
+  source: SemanticActionInteraction
 ) {
   element.dispatchEvent(new CustomEvent(INTERACTION_EVENT, { bubbles: true, detail: source }));
 }
@@ -38,7 +46,9 @@ export function createSemanticActionRouter(
 ) {
   const doc = root.ownerDocument;
   const win = doc.defaultView!;
-  let selected: { id: string; source: 'pointer' | 'keyboard' | 'explicit' } | null = null;
+  let selected: { id: string; source: 'hover' | 'explicit' } | null = null;
+  let hover: { id: string; element: HTMLElement; timer: number } | null = null;
+  let generation = 0;
   let pointer: { x: number; y: number } | null = null;
   let keyboardNavigation = false;
   let dragging = false;
@@ -63,7 +73,19 @@ export function createSemanticActionRouter(
     if (id) return scopes.find((scope) => scope.id === id);
     return scopeAt(doc.activeElement) ?? scopes.find((scope) => scope.id === defaultScopeId);
   };
+  const cancelHover = () => {
+    if (hover) win.clearTimeout(hover.timer);
+    hover = null;
+  };
   const paint = () => {
+    if (
+      hover &&
+      (blocked() ||
+        !visibleScopes().some(
+          (scope) => scope.id === hover!.id && scope.element === hover!.element
+        ))
+    )
+      cancelHover();
     const current = blocked() ? undefined : currentScope();
     for (const scope of getScopes()) {
       if (scope.element) {
@@ -73,20 +95,69 @@ export function createSemanticActionRouter(
     }
   };
   const select = (id: string, source: NonNullable<typeof selected>['source']) => {
+    cancelHover();
+    if (source === 'explicit') generation += 1;
     selected = { id, source };
     paint();
+  };
+  const deliberateInteraction = (target: EventTarget | null) => {
+    // Even input outside our scopes supersedes an outstanding async open.
+    generation += 1;
+    cancelHover();
+    if (blocked() || dragging) return;
+    const scope = scopeAt(target);
+    if (scope) select(scope.id, 'explicit');
+  };
+  const considerHover = (target: EventTarget | null) => {
+    if (selected?.source === 'explicit' || dragging || blocked()) {
+      cancelHover();
+      return;
+    }
+    const scope = scopeAt(target);
+    if (!scope) {
+      cancelHover();
+      if (selected?.source === 'hover') selected = null;
+      paint();
+      return;
+    }
+    if (hover?.id === scope.id && hover.element === scope.element) return;
+    cancelHover();
+    if (selected?.id === scope.id) return;
+    const candidate = {
+      id: scope.id,
+      element: scope.element!,
+      timer: win.setTimeout(() => {
+        if (hover !== candidate) return;
+        hover = null;
+        if (disposed || dragging || blocked() || selected?.source === 'explicit') return;
+        if (
+          visibleScopes().some(
+            (item) => item.id === candidate.id && item.element === candidate.element
+          )
+        ) {
+          select(candidate.id, 'hover');
+        }
+      }, SEMANTIC_HOVER_DWELL_MS),
+    };
+    hover = candidate;
   };
   const onPointer = (event: PointerEvent) => {
     const moved = !pointer || pointer.x !== event.clientX || pointer.y !== event.clientY;
     pointer = { x: event.clientX, y: event.clientY };
     keyboardNavigation = false;
-    if (dragging || blocked() || (event.type !== 'pointerdown' && (event.buttons !== 0 || !moved)))
+    if (event.type === 'pointerdown') {
+      deliberateInteraction(event.target);
+    } else if (selected?.source === 'explicit') {
       return;
-    const scope = scopeAt(event.target);
-    if (scope) select(scope.id, 'pointer');
-    else if (selected?.source === 'pointer') {
-      selected = null;
-      paint();
+    } else if (event.buttons !== 0 || dragging || blocked()) {
+      cancelHover();
+    } else if (moved) {
+      considerHover(event.target);
+    }
+  };
+  const onWheel = (event: WheelEvent) => {
+    if (!event.ctrlKey && (event.deltaX !== 0 || event.deltaY !== 0)) {
+      deliberateInteraction(event.target);
     }
   };
   const onKeyDown = (event: KeyboardEvent) => {
@@ -95,9 +166,7 @@ export function createSemanticActionRouter(
     if (matchesKeyboardEvent(event, 'Mod+w')) return;
     if (['Meta', 'Control', 'Shift', 'Alt'].includes(event.key)) return;
     keyboardNavigation = event.key === 'Tab' || event.key.startsWith('Arrow');
-    if (blocked()) return;
-    const scope = scopeAt(event.target);
-    if (scope) select(scope.id, 'keyboard');
+    deliberateInteraction(event.target);
   };
   const onFramePointerOver = (event: PointerEvent) => {
     // Chromium sends pointerover to the iframe element, but pointermove inside
@@ -106,15 +175,17 @@ export function createSemanticActionRouter(
   };
   const onFocus = (event: FocusEvent) => {
     if (blocked()) return;
-    if (keyboardNavigation || !selected) {
+    if (keyboardNavigation) {
       const scope = scopeAt(event.target);
-      if (scope) select(scope.id, 'keyboard');
+      if (scope) select(scope.id, 'explicit');
     }
   };
   const onKeyUp = () => {
     keyboardNavigation = false;
   };
   const reset = () => {
+    generation += 1;
+    cancelHover();
     selected = null;
     pointer = null;
     keyboardNavigation = false;
@@ -126,25 +197,36 @@ export function createSemanticActionRouter(
   const onPointerOut = (event: PointerEvent) => {
     if (event.relatedTarget !== null) return;
     pointer = null;
-    if (selected?.source === 'pointer') selected = null;
+    cancelHover();
+    if (selected?.source === 'hover') selected = null;
     paint();
   };
   const onDragStart = () => {
+    generation += 1;
+    cancelHover();
     dragging = true;
   };
   const onDragEnd = () => {
     dragging = false;
   };
   const onExternalInteraction = (event: Event) => {
-    if (blocked() || dragging) return;
     const source = (event as CustomEvent).detail;
-    if (source !== 'pointer' && source !== 'keyboard') return;
-    const scope = scopeAt(event.target);
-    if (scope) select(scope.id, source);
+    if (source === 'pointer') considerHover(event.target);
+    else if (source === 'pointerdown' || source === 'keyboard' || source === 'wheel') {
+      deliberateInteraction(event.target);
+    } else if (source === 'pointerleave') {
+      const scope = scopeAt(event.target);
+      if (hover?.id === scope?.id) cancelHover();
+      if (selected?.source === 'hover' && selected.id === scope?.id) {
+        selected = null;
+        paint();
+      }
+    }
   };
 
   win.addEventListener('pointermove', onPointer, true);
   win.addEventListener('pointerdown', onPointer, true);
+  win.addEventListener('wheel', onWheel, { capture: true, passive: true });
   win.addEventListener('pointerover', onFramePointerOver, true);
   win.addEventListener('pointerout', onPointerOut, true);
   win.addEventListener('keydown', onKeyDown, true);
@@ -170,10 +252,28 @@ export function createSemanticActionRouter(
       const scope = currentScope();
       // Missing/removed targets and unsupported actions are owned no-ops.
       // Only an explicit target handler may yield to native window close.
-      return scope?.actions[action]?.() ?? 'handled';
+      const result = scope?.actions[action]?.() ?? 'handled';
+      // An incidental hover/focus fallback cannot escalate to closing a window
+      // while another visible surface still owns closeable content.
+      if (
+        result === 'unhandled' &&
+        selected?.source !== 'explicit' &&
+        visibleScopes().some((other) => other.id !== scope?.id && other.actions[action])
+      ) {
+        return 'handled';
+      }
+      return result;
     },
     activate(id: string) {
       if (!disposed) select(id, 'explicit');
+    },
+    /** Complete an async user action only if no newer input/reset superseded it. */
+    deferActivation(id: string) {
+      const requestedGeneration = ++generation;
+      cancelHover();
+      return () => {
+        if (!disposed && generation === requestedGeneration) select(id, 'explicit');
+      };
     },
     refresh: paint,
     dispose() {
@@ -181,6 +281,7 @@ export function createSemanticActionRouter(
       observer.disconnect();
       win.removeEventListener('pointermove', onPointer, true);
       win.removeEventListener('pointerdown', onPointer, true);
+      win.removeEventListener('wheel', onWheel, true);
       win.removeEventListener('pointerover', onFramePointerOver, true);
       win.removeEventListener('pointerout', onPointerOut, true);
       win.removeEventListener('keydown', onKeyDown, true);
@@ -194,3 +295,5 @@ export function createSemanticActionRouter(
     },
   };
 }
+
+export type SemanticActionRouter = ReturnType<typeof createSemanticActionRouter>;

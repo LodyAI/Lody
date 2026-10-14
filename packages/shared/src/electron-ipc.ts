@@ -137,7 +137,7 @@ export const ELECTRON_PUBLIC_BROWSER_STATE_CHANNEL = 'publicBrowser.state';
 
 export type ElectronPublicBrowserInteraction = {
   browserId: string;
-  source: 'pointer' | 'keyboard';
+  source: 'pointer' | 'pointerdown' | 'pointerleave' | 'wheel' | 'keyboard';
 };
 
 const LocalPathLauncherStringSchema = z

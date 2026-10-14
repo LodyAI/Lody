@@ -89,7 +89,7 @@
   "sessions.markdownImage.retry": "重试",
   "sessions.markdownImage.unsupported": "不支持的图片格式",
   "settings.beta.semanticShortcuts": "跟随操作区域关闭标签",
-  "settings.beta.semanticShortcutsHelper": "在桌面端，关闭最近用鼠标指向或用键盘操作的会话区或右侧面板中的当前标签。",
+  "settings.beta.semanticShortcutsHelper": "在桌面端，关闭最近打开内容、点击、输入或滚动的区域中的标签。移动鼠标会保留该目标；只有尚无明确操作时，悬停才会选择区域。",
   "sessions.cancelSend": "取消发送",
   "sessions.prTab.showLess": "收起",
   "sessions.prTab.showMore": "展开",

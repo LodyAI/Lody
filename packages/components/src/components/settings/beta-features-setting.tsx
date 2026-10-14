@@ -49,7 +49,7 @@ export function BetaFeaturesSection() {
         label={t('settings.beta.semanticShortcuts', 'Pointer-aware close shortcut')}
         helper={t(
           'settings.beta.semanticShortcutsHelper',
-          'On desktop, close the active tab in the conversation or right panel you last pointed at or used with the keyboard.'
+          'On desktop, close the tab where you last opened content, clicked, typed, or scrolled. Moving the pointer keeps that target; hover selects a region only before an explicit interaction.'
         )}
       >
         <Switch

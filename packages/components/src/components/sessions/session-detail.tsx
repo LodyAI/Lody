@@ -182,6 +182,7 @@ import { buildSessionLink } from '@lody/shared/session-link';
 import { getCommandKeybindings, useCommand } from '@/lib/commands';
 import { useDesktopTabCloser } from '@/lib/desktop-tab-or-window-close';
 import { useSemanticActionRouter } from '@/lib/commands/use-semantic-action-router';
+import type { SemanticActionRouter } from '@/lib/commands/semantic-action-router';
 import { semanticShortcutsFeatureEnabledAtom } from '@/atoms/settings';
 import { cn, getBasename } from '@/lib';
 
@@ -1016,6 +1017,7 @@ const SessionDetail = ({
   const sendingDraftIdsRef = useRef<Set<DraftSessionTab['id']>>(new Set());
   const desktopTabFocusRegionRef = useRef<SessionTabFocusRegion>('conversation');
   const desktopActionRootRef = useRef<HTMLDivElement>(null);
+  const semanticRouterRef = useRef<SemanticActionRouter | null>(null);
   const semanticShortcutsEnabled = useAtomValue(semanticShortcutsFeatureEnabledAtom);
   const initialTabState = getSessionDetailInitialTabState(sessionId, urlTab, {
     oneActiveSurface: isMobile,
@@ -3410,7 +3412,10 @@ const SessionDetail = ({
   );
 
   const upsertViewerTab = useCallback(
-    (tab: ViewerTab) => {
+    (
+      tab: ViewerTab,
+      claimCloseTarget = () => semanticRouterRef.current?.activate('side-panel')
+    ) => {
       setViewerTabs((prev) => {
         const idx = prev.findIndex((item) => item.id === tab.id);
         if (idx === -1) {
@@ -3436,6 +3441,7 @@ const SessionDetail = ({
       } else {
         selectSidePanelTab(tab.id);
         revealRightSidebar();
+        claimCloseTarget();
       }
     },
     [isMobile, revealRightSidebar, selectSidePanelTab]
@@ -3693,6 +3699,7 @@ const SessionDetail = ({
     } else {
       revealRightSidebar();
       activateSidebarTab('changes');
+      semanticRouterRef.current?.activate('side-panel');
       captureSessionDetailEvent('session/sidebar_tab_selected', {
         source: 'info_bar_diff_stat',
         sidebar_tab: 'changes',
@@ -3727,6 +3734,7 @@ const SessionDetail = ({
         }
         revealRightSidebar();
         activateSidebarTab('pr');
+        semanticRouterRef.current?.activate('side-panel');
       }
       captureSessionDetailEvent('session/pr_tab_opened', {
         pr_number: args.prNumber,
@@ -3805,6 +3813,7 @@ const SessionDetail = ({
       } else {
         revealRightSidebar();
         activateSidebarTab('browser');
+        semanticRouterRef.current?.activate('side-panel');
       }
       captureSessionDetailEvent('session/browser_tab_opened', {
         tab_session_id: tabSessionId ?? activeTabSessionId,
@@ -3836,6 +3845,7 @@ const SessionDetail = ({
     } else {
       revealRightSidebar();
       activateSidebarTab('ios-simulator');
+      semanticRouterRef.current?.activate('side-panel');
     }
   }, [activateSidebarTab, isMobile, replaceSessionUrlSimulator, revealRightSidebar]);
 
@@ -3857,6 +3867,7 @@ const SessionDetail = ({
 
   const handleOpenFile = useStableCallback(
     (filePath: string, options: SessionDetailOpenFileOptions = {}) => {
+      const claimCloseTarget = semanticRouterRef.current?.deferActivation('side-panel');
       setFileProviderRequestedByInteraction(true);
       void (async () => {
         // Where the path came from decides whether it may be rewritten at all;
@@ -3879,17 +3890,20 @@ const SessionDetail = ({
         const resolvedFilePath = resolution.path;
 
         const requestSeq = nextFocusRequestSeq();
-        upsertViewerTab({
-          id: getFileViewerTabId(resolvedFilePath, resolution.fileId),
-          type: 'file',
-          filePath: resolvedFilePath,
-          ...(resolution.fileId === undefined ? {} : { fileId: resolution.fileId }),
-          label: getBasename(resolvedFilePath),
-          startLine: target.startLine,
-          endLine: target.endLine,
-          focusRequestSeq: requestSeq,
-          ...(options.previewHtml ? { htmlPreviewRequestSeq: requestSeq } : {}),
-        });
+        upsertViewerTab(
+          {
+            id: getFileViewerTabId(resolvedFilePath, resolution.fileId),
+            type: 'file',
+            filePath: resolvedFilePath,
+            ...(resolution.fileId === undefined ? {} : { fileId: resolution.fileId }),
+            label: getBasename(resolvedFilePath),
+            startLine: target.startLine,
+            endLine: target.endLine,
+            focusRequestSeq: requestSeq,
+            ...(options.previewHtml ? { htmlPreviewRequestSeq: requestSeq } : {}),
+          },
+          () => claimCloseTarget?.()
+        );
         captureSessionDetailEvent('session/viewer_file_opened', {
           source: target.fromMarkdownLink ? 'markdown_link' : (options.source ?? 'file_tree'),
           file_extension: getFileExtension(resolvedFilePath),
@@ -4045,6 +4059,7 @@ const SessionDetail = ({
   const handleSessionTabSelect = useCallback(
     (tabId: string) => {
       desktopTabFocusRegionRef.current = 'conversation';
+      semanticRouterRef.current?.activate('conversation');
       // A user-driven switch PUSHES so tabs participate in history back.
       navigateToSessionTab(tabId, { push: true });
       if (isMobile) {
@@ -4199,6 +4214,7 @@ const SessionDetail = ({
       } else {
         selectSidePanelTab(tabId);
         revealRightSidebar();
+        semanticRouterRef.current?.activate('side-panel');
       }
       captureSessionDetailEvent('session/viewer_tab_selected', {
         viewer_tab_id: tabId,
@@ -4214,6 +4230,7 @@ const SessionDetail = ({
         desktopTabFocusRegionRef.current = 'side-panel';
       }
       activateSidebarTab(tabId);
+      semanticRouterRef.current?.activate('side-panel');
       if (tabId === 'pr' && latestPrNumber != null) {
         replaceSessionUrlPr(latestPrNumber, { push: true });
       }
@@ -5000,6 +5017,7 @@ const SessionDetail = ({
   const handleSidePanelTabSelect = useCallback(
     (tabId: string) => {
       desktopTabFocusRegionRef.current = 'side-panel';
+      semanticRouterRef.current?.activate('side-panel');
       if (isViewerTabId(tabId)) {
         handleViewerTabSelect(tabId);
         return;
@@ -5055,7 +5073,8 @@ const SessionDetail = ({
 
   const semanticCloseEnabled =
     semanticShortcutsEnabled && isElectronRenderer() && !isMobile && Boolean(activeSession);
-  const semanticRouterRef = useSemanticActionRouter({
+  useSemanticActionRouter({
+    routerRef: semanticRouterRef,
     rootRef: desktopActionRootRef,
     enabled: semanticCloseEnabled,
     resetKey: sessionId,
