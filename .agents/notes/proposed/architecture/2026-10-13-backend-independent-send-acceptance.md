@@ -108,6 +108,15 @@ handoff without adding acceptance text or mutating history status. Persisted sou
 state alone cannot show a check. Guide history acceptance remains distinct from
 application and does not publish this acknowledgement.
 
+The adjacent loading spinner is a separate part of the ordinary user row, outside
+`UserChatBubble`. Reusing that bubble and adding its metadata circle did not render
+the spinner during local Roost input, so a slow confirmation still appeared idle.
+Ready input now shares the ordinary row's 500 ms loading hook and existing rotating
+glyph, including the 520 px container threshold. Waiting is driven by the real
+owner receipt rather than control-document synchronization. An error stops loading;
+retry restarts the delay, and a receipt cancels it immediately. This corrects the
+waiting feedback without making a claim about owner or network latency.
+
 ```mermaid
 flowchart LR
   local["Local input · ○"] --> receipt["Active owner receipt · ✓"] --> history["Authoritative row · same delivery overlay · ✓"]
@@ -233,6 +242,14 @@ deterministic DOM regression fails on that revision because the local bubble has
 no sending circle, then verifies the circle through all local input states and
 the handoff to pending and delivered authoritative rows. This establishes the
 presentation defect; it does not measure owner confirmation latency.
+The adjacent-spinner regression uses a fake clock to compare the actual Loro and
+local Roost rows: at 499 ms neither loads, at 500 ms both load, and an owner receipt
+removes loading while preserving the check through history handoff. Before the
+spinner change, the Loro case passed and the Roost case failed. A separate case
+covers error, retry, and a receipt before the retry timer expires. These two
+owning suites pass 48 tests, and browser rendering confirms a visible 16 px
+spinner in the waiting story and no spinner in the confirmed story. This is
+synthetic presentation evidence, not a production end-to-end timing measurement.
 The initial presentation-only suite passed 84 tests; components type-checking, scoped lint and
 format checks pass. Repository documentation checking remains blocked by six
 existing Kimi/Pi links in the subagent-events notes. Full workspace checks and

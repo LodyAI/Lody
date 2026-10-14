@@ -408,13 +408,13 @@ function ContextChipActions({ actions }: { actions: readonly ContextChipAction[]
   }
 
   return (
-    <div className="flex shrink-0 items-center overflow-hidden rounded-md border border-foreground/[0.08] bg-foreground/[0.03] dark:border-transparent dark:bg-muted-foreground/[0.08]">
+    <div className="flex min-w-12 shrink-[8] items-center overflow-hidden rounded-md border border-foreground/[0.08] bg-foreground/[0.03] dark:border-transparent dark:bg-muted-foreground/[0.08]">
       <button
         type="button"
         onClick={primaryAction.onClick}
         disabled={primaryAction.disabled}
         title={primaryAction.label}
-        className="flex shrink-0 select-none items-center px-1.5 py-0.5 text-xs font-medium text-muted-foreground outline-none transition-colors enabled:hover:bg-foreground/[0.05] enabled:hover:text-foreground focus:outline-none focus:ring-0 focus:ring-offset-0 focus:shadow-none focus-visible:bg-foreground/[0.05] focus-visible:text-foreground focus-visible:outline-none focus-visible:ring-0 focus-visible:ring-offset-0 disabled:opacity-50 dark:text-muted-foreground/80 dark:enabled:hover:bg-muted-foreground/[0.08] dark:focus-visible:bg-muted-foreground/[0.08]"
+        className="flex min-w-0 shrink select-none items-center px-1.5 py-0.5 text-xs font-medium text-muted-foreground outline-none transition-colors enabled:hover:bg-foreground/[0.05] enabled:hover:text-foreground focus:outline-none focus:ring-0 focus:ring-offset-0 focus:shadow-none focus-visible:bg-foreground/[0.05] focus-visible:text-foreground focus-visible:outline-none focus-visible:ring-0 focus-visible:ring-offset-0 disabled:opacity-50 dark:text-muted-foreground/80 dark:enabled:hover:bg-muted-foreground/[0.08] dark:focus-visible:bg-muted-foreground/[0.08]"
       >
         <span className="truncate">{primaryAction.label}</span>
       </button>
@@ -684,6 +684,8 @@ export function ContextChip({
 
   // The line totals sit on the right edge in their own tinted chip, colored
   // like GitHub's (the PR's green and red), apart from the repo/branch text.
+  // Under squeeze the action label truncates first; the totals clip last,
+  // inside their own chip rather than past the bar.
   const diffChip = hasDiff ? (
     <button
       type="button"
@@ -691,7 +693,7 @@ export function ContextChip({
       disabled={!onOpenAllChanges}
       aria-label={t('sessions.detailTabs.allChanges', 'All Changes')}
       title={t('sessions.detailTabs.allChanges', 'All Changes')}
-      className="flex h-5 shrink-0 items-center gap-1.5 rounded-md bg-foreground/[0.06] px-1.5 text-[11px] font-medium tabular-nums transition-colors enabled:hover:bg-foreground/[0.1] disabled:pointer-events-none"
+      className="flex h-5 min-w-0 shrink items-center gap-1.5 overflow-hidden rounded-md bg-foreground/[0.06] px-1.5 text-[11px] font-medium tabular-nums transition-colors enabled:hover:bg-foreground/[0.1] disabled:pointer-events-none"
     >
       <span className="text-github-addition">+{diffStat.add}</span>
       <span className="text-github-deletion">−{diffStat.del}</span>

@@ -99,7 +99,10 @@ function StoryShell({
   } as unknown as WorkspaceRuntime);
   return (
     <Provider store={store}>
-      <div className="max-w-full rounded-xl border bg-background pt-4 shadow-xs" style={{ width }}>
+      <div
+        className="@container max-w-full rounded-xl border bg-background pt-4 shadow-xs"
+        style={{ width }}
+      >
         <SessionPendingMessages sessionId={sessionId} />
         <div className="border-t px-4 py-3 text-sm text-muted-foreground">
           Composer stays available here.

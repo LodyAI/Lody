@@ -236,6 +236,103 @@ const normalizeTerminalOutputsForHistory = (
   return next;
 };
 
+/**
+ * Durable budget for one `terminal_command` (command plus args, UTF-8 bytes).
+ * Agents inline whole files or base64 images into shell commands; the stored
+ * command is a display label, and the full text stays with the agent.
+ */
+export const MAX_STORED_TERMINAL_COMMAND_BYTES = 1024;
+const TERMINAL_COMMAND_TRUNCATION_MARKER = '…';
+const TERMINAL_COMMAND_TRUNCATION_MARKER_BYTES = 3;
+
+/**
+ * The longest head of `value` within `maxBytes` UTF-8 bytes that does not split
+ * a code point. Counts in place so a multi-megabyte string is never encoded.
+ */
+const utf8Head = (value: string, maxBytes: number): { end: number; bytes: number } => {
+  let end = 0;
+  let bytes = 0;
+  while (end < value.length) {
+    const unit = value.charCodeAt(end);
+    const isPair =
+      unit >= 0xd800 &&
+      unit <= 0xdbff &&
+      end + 1 < value.length &&
+      (value.charCodeAt(end + 1) & 0xfc00) === 0xdc00;
+    // A lone surrogate encodes as U+FFFD: three bytes.
+    const width = unit < 0x80 ? 1 : unit < 0x800 ? 2 : isPair ? 4 : 3;
+    if (bytes + width > maxBytes) break;
+    bytes += width;
+    end += isPair ? 2 : 1;
+  }
+  return { end, bytes };
+};
+
+/** Keep the head of a command and its args within one shared 1 KiB budget. */
+export const truncateTerminalCommandForHistory = <
+  T extends { command: string; args?: string[]; truncated?: boolean },
+>(
+  block: T
+): T => {
+  const parts = [block.command, ...(block.args ?? [])];
+  let remaining = MAX_STORED_TERMINAL_COMMAND_BYTES;
+  let fits = true;
+  for (const part of parts) {
+    const head = utf8Head(part, remaining);
+    if (head.end < part.length) {
+      fits = false;
+      break;
+    }
+    remaining -= head.bytes;
+  }
+  // Already-truncated commands fit, so re-compacting a stored block is a no-op.
+  if (fits) return block;
+
+  let budget = MAX_STORED_TERMINAL_COMMAND_BYTES - TERMINAL_COMMAND_TRUNCATION_MARKER_BYTES;
+  const kept: string[] = [];
+  for (const part of parts) {
+    const head = utf8Head(part, budget);
+    if (head.end === part.length) {
+      kept.push(part);
+      budget -= head.bytes;
+      continue;
+    }
+    kept.push(part.slice(0, head.end) + TERMINAL_COMMAND_TRUNCATION_MARKER);
+    break;
+  }
+  const [command = '', ...args] = kept;
+  return { ...block, command, ...(block.args === undefined ? {} : { args }), truncated: true };
+};
+
+/**
+ * Agents often use the full shell command as a tool title, so the title gets
+ * the same head-keeping 1 KiB bound as the command it repeats.
+ */
+export const truncateToolTitleForHistory = <T extends string | null | undefined>(title: T): T =>
+  typeof title === 'string'
+    ? (truncateTerminalCommandForHistory({ command: title }).command as T)
+    : title;
+
+/**
+ * Whether a stored tool title is the output of `truncateToolTitleForHistory`.
+ * Titles have no flag field: a cut title ends with the marker and fills the
+ * budget to within one code point, which an ordinary title practically never does.
+ */
+export const isToolTitleTruncatedForHistory = (title: string): boolean => {
+  if (!title.endsWith(TERMINAL_COMMAND_TRUNCATION_MARKER)) return false;
+  const { end, bytes } = utf8Head(title, MAX_STORED_TERMINAL_COMMAND_BYTES);
+  return end === title.length && bytes > MAX_STORED_TERMINAL_COMMAND_BYTES - 4;
+};
+
+const normalizeTerminalCommandsForHistory = (
+  contents: StoredToolCallContent
+): StoredToolCallContent =>
+  contents.some((block) => block.type === 'terminal_command')
+    ? contents.map((block) =>
+        block.type === 'terminal_command' ? truncateTerminalCommandForHistory(block) : block
+      )
+    : contents;
+
 const extractTerminalCommandContent = (
   rawInput: unknown,
   kind?: ToolKind | null
@@ -649,6 +746,7 @@ const compactToolCallContentForHistory = (
 
   compacted = stripDuplicateFencedToolContent(compacted);
   compacted = normalizeTerminalOutputsForHistory(compacted);
+  compacted = normalizeTerminalCommandsForHistory(compacted);
 
   // Post-filtering may have created adjacent duplicates again.
   return dedupeAdjacentToolCallContent(compacted);
@@ -941,7 +1039,7 @@ const mergeToolCallMessage = (
     toolCallId: incoming.toolCallId,
     // `null` title/kind means "no information" on the wire (zod allows explicit null);
     // it must keep the previously persisted value, not wipe it.
-    title: incoming.title ?? prev.title,
+    title: truncateToolTitleForHistory(incoming.title ?? prev.title),
     kind: nextKind ?? undefined,
     status: nextStatus,
     content: mergedContent.length
@@ -1255,7 +1353,7 @@ export const buildMessageContentFromNotification = (
         {
           type: 'tool_call',
           toolCallId: update.toolCallId,
-          title: update.title,
+          title: truncateToolTitleForHistory(update.title),
           toolName,
           kind: kind ?? undefined,
           status: update.status ?? previousTool?.status ?? 'pending',
@@ -1602,7 +1700,7 @@ class NotificationOnHistoryApplier {
           type: 'tool_call',
           toolCallId: update.toolCallId,
           status: update.status ?? tool?.status ?? 'pending',
-          title: update.title ?? tool?.title,
+          title: truncateToolTitleForHistory(update.title ?? tool?.title),
           kind: update.kind ?? tool?.kind,
           content:
             update.content != null
@@ -1987,6 +2085,7 @@ class NotificationOnHistoryApplier {
 
     items.push({
       ...incoming,
+      ...(incoming.title ? { title: truncateToolTitleForHistory(incoming.title) } : {}),
       status: incoming.status || 'pending',
       content: incoming.content
         ? compactToolCallContentForHistory(incoming.content, {
@@ -2288,6 +2387,7 @@ export const applyMessageContentsBatch = (
     } else {
       state.items.push({
         ...incoming,
+        ...(incoming.title ? { title: truncateToolTitleForHistory(incoming.title) } : {}),
         status: incoming.status || 'pending',
         content: incoming.content
           ? compactToolCallContentForHistory(incoming.content, {

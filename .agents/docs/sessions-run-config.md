@@ -36,7 +36,11 @@ this page is the full text of the rules summarised there.
   Agent/Model/Interaction/Reasoning plus provider-defined select side submenus +
   Plan/Fast toggle rows) and
   `DesktopPermissionModeButton` (permission icon + full name; flat permission
-  list). Explicit `_permission` config options take precedence over legacy ACP
+  list). Its tooltip/aria noun follows what the face resolved — "Permission"
+  only for an explicit `_permission` option, otherwise the provider's selector
+  label or "Mode" (`permissionModeControlLabel`), so a mode list such as
+  Agent/Plan/Ask never reads "Permission". Explicit `_permission` config
+  options take precedence over legacy ACP
   modes; provider interaction modes stay inside the run-config dropdown. Both
   are also used by the desktop chat landing; `DesktopRunConfigMenu` receives an
   explicit agent selection/machine scope rather than reading `SessionMeta`.

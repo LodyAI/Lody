@@ -144,21 +144,31 @@ function MachineConnectedResourcesContent({
                     <div {...stylex.props(styles.truncate, styles.name)}>{project.name}</div>
                     <div {...stylex.props(styles.truncate, styles.path)}>{project.rootPath}</div>
                   </div>
-                  <span {...stylex.props(styles.access)}>
-                    {project.sharedWithTeam
-                      ? t('workspace.machines.shared', 'Shared')
-                      : t('workspace.machines.private', 'Private')}
-                  </span>
                   {!readOnly && adminRow && onSharedWithTeamChange ? (
-                    <Switch
-                      checked={project.sharedWithTeam}
-                      disabled={adminRow.isUpdating || !adminRow.canUpdateSharing}
-                      aria-label={t('workspace.projects.shareToggle', 'Share project with team')}
-                      onCheckedChange={(checked) => {
-                        void onSharedWithTeamChange(adminRow, checked);
-                      }}
-                    />
-                  ) : null}
+                    <>
+                      {/* Same grammar as the machine's "Share machine" row: the
+                          label names what turning the switch on does, and the
+                          switch position carries the state. State text only
+                          makes sense when no control is offered. */}
+                      <span {...stylex.props(styles.access)}>
+                        {t('workspace.projects.shareToggle', 'Share project with team')}
+                      </span>
+                      <Switch
+                        checked={project.sharedWithTeam}
+                        disabled={adminRow.isUpdating || !adminRow.canUpdateSharing}
+                        aria-label={t('workspace.projects.shareToggle', 'Share project with team')}
+                        onCheckedChange={(checked) => {
+                          void onSharedWithTeamChange(adminRow, checked);
+                        }}
+                      />
+                    </>
+                  ) : (
+                    <span {...stylex.props(styles.access)}>
+                      {project.sharedWithTeam
+                        ? t('workspace.machines.shared', 'Shared')
+                        : t('workspace.machines.private', 'Private')}
+                    </span>
+                  )}
                 </div>
               );
             })}

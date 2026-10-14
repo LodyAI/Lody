@@ -490,6 +490,15 @@ export function PermissionPrompt({
         </div>
       ) : null}
 
+      {subject?.type === 'command' && subject.truncated ? (
+        <p role="note" {...stylex.props(styles.status, styles.statusError)}>
+          {t(
+            'sessions.permission.commandTruncated',
+            'This command is longer than 1 KB and only its beginning is shown. Approve only if you trust the rest.'
+          )}
+        </p>
+      ) : null}
+
       {error ? (
         <p role="alert" {...stylex.props(styles.status, styles.statusError)}>
           {error}

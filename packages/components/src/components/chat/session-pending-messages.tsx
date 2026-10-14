@@ -10,12 +10,15 @@ import {
   Image as ImageIcon,
 } from 'lucide-react';
 import * as stylex from '@stylexjs/stylex';
+import { colors } from '@lody/ui/tokens/colors.stylex';
+import { space } from '@lody/ui/tokens/scales.stylex';
 import { useTranslation } from 'react-i18next';
 import type { SessionId, WorkspaceId } from '@lody/shared';
 import { activeWorkspaceRuntimeAtom } from '@/atoms/runtime';
 import { getRpcDeliveredTurnKey, rpcDeliveredTurnsAtom } from '@/atoms/session-dispatch-delivery';
 import { DEFAULT_CONVERSATION_FONT_SIZE, type ConversationFontSize } from '@/atoms/settings';
 import { conversationTextFontSizeStyle } from '@/components/ai-gui/conversation-font-size-classes';
+import { useIsMessageSendingVisible } from '@/components/ai-gui/message-send-status-context';
 import {
   getSessionFileIcon,
   SessionFileCardLayout,
@@ -124,6 +127,18 @@ const styles = stylex.create({
   timestamp: { flexShrink: 0, whiteSpace: 'nowrap' },
   status: { minWidth: 0, overflow: 'hidden', whiteSpace: 'nowrap' },
   statusLabel: { minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' },
+  acceptedBubble: { position: 'relative', minWidth: 0, maxWidth: '100%' },
+  sendingSpinner: {
+    position: 'absolute',
+    bottom: 13,
+    right: '100%',
+    marginRight: space[1.5],
+    width: space[4],
+    height: space[4],
+    color: colors.secondaryLabel,
+    display: { default: 'none', '@container (min-width: 520px)': 'inline-flex' },
+  },
+  sendingGlyph: { width: '100%', height: '100%' },
 });
 
 /** Overlay the delivered card's bottom edge without adding a layout row. */
@@ -300,6 +315,10 @@ export function PendingMessageRow({
   const delivered = useAtomValue(rpcDeliveredTurnsAtom).has(
     getRpcDeliveredTurnKey(record.sessionId, record.id)
   );
+  const showSendingSpinner = useIsMessageSendingVisible(
+    record.id,
+    acceptedInput && !delivered && !failed
+  );
   const images = record.attachments.filter((attachment) => attachment.kind === 'image');
   const files = record.attachments.filter((attachment) => attachment.kind === 'file');
   const uploading = record.attachments.some((attachment) => !attachment.ready);
@@ -374,11 +393,18 @@ export function PendingMessageRow({
             )}
           </div>
           {acceptedInput ? (
-            <UserChatBubble
-              message={{ id: record.id, items: record.entry.items ?? [] }}
-              sessionId={record.sessionId}
-              conversationFontSize={conversationFontSize}
-            />
+            <div {...stylex.props(styles.acceptedBubble)}>
+              {showSendingSpinner ? (
+                <span {...stylex.props(styles.sendingSpinner)}>
+                  <Spinner {...stylex.props(styles.sendingGlyph)} />
+                </span>
+              ) : null}
+              <UserChatBubble
+                message={{ id: record.id, items: record.entry.items ?? [] }}
+                sessionId={record.sessionId}
+                conversationFontSize={conversationFontSize}
+              />
+            </div>
           ) : (
             <div className="flex min-w-0 max-w-full flex-col items-end gap-2">
               {images.length ? (

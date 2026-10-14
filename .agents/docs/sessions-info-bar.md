@@ -14,6 +14,10 @@ Its tap/click popover (also hover on desktop) exposes ownership from machine
 metadata, device identity when known, and connection status. Unknown presence
 stays neutral, while confirmed offline presence tints the control. Unknown local
 identity omits the device row.
+Below a 360px bar the desktop control also drops its name (icon only), and the
+bar's leading inset is trimmed so the machine glyph sits where a chip's would.
+Under squeeze nothing leaves the bar: summary text truncates first, then the
+repository action label, and the ±diff chip clips last inside itself.
 Mobile controls remain in the same 32px row. With only machine information the bar
 is a transparent row; existing items and actions retain the raised bar surface. The
 [draft Spec](../../specs/composer-machine-owner.md) owns the presentation intent.

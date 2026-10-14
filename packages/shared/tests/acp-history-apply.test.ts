@@ -5,9 +5,11 @@ import { describe, expect, it } from 'vitest';
 
 import type { MessageContent } from '../src/ai';
 import {
+  MAX_STORED_TERMINAL_COMMAND_BYTES,
   MAX_STORED_TERMINAL_OUTPUT_BYTES,
   applyMessageContentsBatch,
   applyNotificationOnHistory,
+  truncateTerminalCommandForHistory,
   truncateTerminalOutputForHistory,
 } from '../src/acp/history-apply';
 import {
@@ -285,6 +287,80 @@ describe('acp history apply', () => {
     expect(
       new TextEncoder().encode((outputs[0] as { output: string }).output).byteLength
     ).toBeLessThanOrEqual(MAX_STORED_TERMINAL_OUTPUT_BYTES);
+  });
+
+  it('stores at most 1 KiB of a command that inlines a base64 image', () => {
+    const base64 = 'iVBORw0KGgo'.repeat(40_000);
+    const storedTool = (rawInput: Record<string, unknown>, title?: string) => {
+      const history = applyNotificationOnHistory(
+        [],
+        [
+          makeNotification({
+            sessionUpdate: 'tool_call_update',
+            toolCallId: 'inline-image',
+            kind: 'execute',
+            status: 'completed',
+            title,
+            rawInput,
+          }),
+        ]
+      );
+      return ((history[0]?.items ?? []) as unknown as MessageContent[]).find(
+        (item) => item.type === 'tool_call'
+      ) as Extract<MessageContent, { type: 'tool_call' }>;
+    };
+    const commandOf = (rawInput: Record<string, unknown>) =>
+      storedTool(rawInput).content?.find((block) => block.type === 'terminal_command') as {
+        command: string;
+        args?: string[];
+        truncated?: boolean;
+      };
+    const storedBytes = (block: { command: string; args?: string[] }) =>
+      [block.command, ...(block.args ?? [])].reduce(
+        (sum, part) => sum + new TextEncoder().encode(part).byteLength,
+        0
+      );
+
+    const claude = commandOf({ command: `echo ${base64} | base64 -d > out.png` });
+    expect(claude.command.startsWith(`echo ${base64.slice(0, 100)}`)).toBe(true);
+    expect(claude.command.endsWith('…')).toBe(true);
+    expect(claude.truncated).toBe(true);
+    expect(storedBytes(claude)).toBeLessThanOrEqual(MAX_STORED_TERMINAL_COMMAND_BYTES);
+
+    // Codex puts the script in args: `bash -lc <script>` shares the same budget.
+    const codex = commandOf({ command: ['bash', '-lc', `echo ${base64}`, 'trailing'] });
+    expect(codex.command).toBe('bash');
+    expect(codex.args).toHaveLength(2);
+    expect(codex.args?.[0]).toBe('-lc');
+    expect(codex.args?.[1]?.endsWith('…')).toBe(true);
+    expect(codex.truncated).toBe(true);
+    expect(commandOf({ command: 'ls -la' }).truncated).toBeUndefined();
+    expect(storedBytes(codex)).toBeLessThanOrEqual(MAX_STORED_TERMINAL_COMMAND_BYTES);
+
+    // Claude's adapter titles a Bash call with the command itself.
+    const command = `echo ${base64} | base64 -d > out.png`;
+    const title = storedTool({ command }, command).title ?? '';
+    expect(title.startsWith('echo iVBORw0KGgo')).toBe(true);
+    expect(title.endsWith('…')).toBe(true);
+    expect(new TextEncoder().encode(title).byteLength).toBeLessThanOrEqual(
+      MAX_STORED_TERMINAL_COMMAND_BYTES
+    );
+  });
+
+  it('truncates commands on code point boundaries and leaves short ones untouched', () => {
+    const short = { type: 'terminal_command' as const, command: 'ls', args: ['-la'] };
+    expect(truncateTerminalCommandForHistory(short)).toBe(short);
+
+    const exact = { command: 'a'.repeat(MAX_STORED_TERMINAL_COMMAND_BYTES) };
+    expect(truncateTerminalCommandForHistory(exact)).toBe(exact);
+
+    const emoji = truncateTerminalCommandForHistory({ command: '🙂'.repeat(400) });
+    expect(emoji.command).toBe(`${'🙂'.repeat(255)}…`);
+    expect(new TextEncoder().encode(emoji.command).byteLength).toBeLessThanOrEqual(
+      MAX_STORED_TERMINAL_COMMAND_BYTES
+    );
+    // Re-compacting an already truncated block must not change it again.
+    expect(truncateTerminalCommandForHistory(emoji)).toBe(emoji);
   });
 
   it('preserves context compaction and retry activity markers across tool updates', () => {

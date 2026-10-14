@@ -1862,6 +1862,8 @@ export type TerminalCommandBlock = {
   command: string;
   args?: string[];
   cwd?: string;
+  /** History kept only the head of command + args (1 KiB budget). */
+  truncated?: boolean;
 };
 
 export type TerminalOutputBlock = {

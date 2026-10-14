@@ -114,6 +114,13 @@ use it, so history handoff cannot flash back to sending. A persisted `confirmed`
 source state alone is not a receipt. First paint precedes the storage transaction
 and does not prove crash durability.
 
+The metadata circle is separate from the loading spinner beside the bubble.
+Ready Roost input uses the same 500 ms loading delay as the ordinary Loro row,
+with the same narrow-column visibility threshold. Its delay follows unresolved
+owner confirmation, rather than synchronization of the Loro control document.
+An input error stops the spinner; retry starts a new delay, and a real delivery
+receipt removes it immediately.
+
 Creating a Roost conversation commits routing metadata before admission, without
 opening its history store on that path. Background delivery persists the trusted
 `humanInputReceipts` control record before accepting owner history; Loro writes

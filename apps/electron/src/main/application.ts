@@ -26,6 +26,7 @@ import {
   openMainWindow,
   openOrFocusMainWindow,
   reloadMainWindowForDevbar,
+  setMainWindowOnboardingReloadTarget,
   setMainWindowProductReloadTarget
 } from './window'
 import {
@@ -67,7 +68,11 @@ import { desktopInstallationProfile, isLocalPlatform } from './platform'
 import { mainPlatformKind } from './platform'
 import { getLocalLoroDataPlaneSocketPath } from '@lody/shared/node/local-ipc'
 import { getLocalTerminalSocketPath } from '@lody/shared/node/local-terminal'
-import { getInitialDesktopPath, markOnboardingCompleted } from './onboarding-state'
+import {
+  getInitialDesktopPath,
+  markOnboardingCompleted,
+  resetOnboardingCompleted
+} from './onboarding-state'
 import { handlePreparedWindowState, handleWindowWarmReady } from './window-warm-service'
 import { extractDeepLinkFromArgv } from './deep-link-url'
 import { shouldHideMainWindowOnAutoLaunch } from './auto-launch-policy'
@@ -291,6 +296,11 @@ export function startApplication(executionHost?: DesktopExecutionHost): void {
       markOnboardingCompleted()
       setMainWindowProductReloadTarget(window)
     }
+    const restartOnboarding = (window: BrowserWindow): void => {
+      resetOnboardingCompleted()
+      setMainWindowOnboardingReloadTarget(window)
+      requestRendererReload(window)
+    }
     registerIpcServices({
       appIconService,
       cliService,
@@ -304,6 +314,7 @@ export function startApplication(executionHost?: DesktopExecutionHost): void {
       globalShortcutsService,
       getMainWindow,
       completeOnboarding,
+      restartOnboarding,
       reloadMainWindowForDevbar
     })
 
