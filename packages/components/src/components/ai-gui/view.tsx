@@ -282,7 +282,7 @@ import { DEFAULT_CONVERSATION_FONT_SIZE, type ConversationFontSize } from '@/ato
 import {
   conversationTextFontSizeStyle,
   conversationReadingFontSizeStyle,
-  userTextCollapsedHeight,
+  userTextCollapsedStyle,
 } from './conversation-font-size-classes';
 import { useSessionPin } from '@/components/sessions/session-pin-context';
 import { useIsMobile } from '@/hooks/use-mobile';
@@ -6876,9 +6876,7 @@ const UserPlainTextBlock = ({
           )}
           style={{
             ...conversationReadingFontSizeStyle(fontSize),
-            ...(isLong && !isFullTextVisible
-              ? { maxHeight: userTextCollapsedHeight(fontSize) }
-              : {}),
+            ...(isLong && !isFullTextVisible ? userTextCollapsedStyle(fontSize) : {}),
           }}
           data-search-block-id={searchBlockId}
         >
