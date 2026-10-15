@@ -174,6 +174,7 @@ export const ACP_SKILL_DIRS_BY_AGENT_TYPE: Record<string, SkillDirsByAgentType> 
   mux: skillDirs(['.mux/skills'], ['~/.mux/skills']),
   neovate: skillDirs(['.neovate/skills'], ['~/.neovate/skills']),
   ona: skillDirs(['.ona/skills'], ['~/.ona/skills']),
+  'oh-my-pi': skillDirs(['.omp/skills'], ['~/.omp/agent/skills']),
   openclaw: skillDirs(['skills'], ['~/.openclaw/skills']),
   opencode: skillDirs(
     [DEFAULT_PROJECT_SKILL_DIR, '.opencode/skills', CLAUDE_PROJECT_SKILL_DIR],
@@ -223,8 +224,9 @@ export const ACP_SKILL_DIRS_BY_AGENT_TYPE: Record<string, SkillDirsByAgentType> 
    v9: home scan also surfaces agent built-in `system` skills (codex
    `~/.codex/skills/.system`) under the new `'system'` scope.
    v10: grok is registered, and pi/kimi global dirs match their engines
-   (`~/.agents/skills` for both, `.kimi-code` for kimi's brand dirs). */
-export const KNOWN_SKILL_DIRS_VERSION = 10;
+   (`~/.agents/skills` for both, `.kimi-code` for kimi's brand dirs).
+   v11: register Oh My Pi's default project and global skill directories. */
+export const KNOWN_SKILL_DIRS_VERSION = 11;
 
 export const DEFAULT_PROJECT_SKILLS_CONTENT_BUDGET_BYTES = 2 * 1024 * 1024;
 export const DEFAULT_PROJECT_SKILLS_RESULT_MAX_SKILLS = 5_000;

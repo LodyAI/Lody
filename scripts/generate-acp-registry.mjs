@@ -83,6 +83,11 @@ const LOCAL_REGISTRY_AGENTS = {
     args: ['acp'],
     versionArgs: ['-v'],
   },
+  'oh-my-pi': {
+    command: 'omp',
+    args: ['acp'],
+    versionArgs: ['--version'],
+  },
   reasonix: {
     npx: {
       package: 'reasonix@1.7.0-rc.1',
@@ -94,6 +99,10 @@ const LOCAL_REGISTRY_AGENT_IDS = new Set(Object.keys(LOCAL_REGISTRY_AGENTS));
 const LOCAL_REGISTRY_AGENT_FALLBACKS = {
   opencode: {
     name: 'OpenCode',
+  },
+  'oh-my-pi': {
+    name: 'Oh My Pi',
+    description: 'Use your installed Oh My Pi (OMP) via native ACP; you manage its version.',
   },
   reasonix: {
     name: 'DeepSeek Reasonix',

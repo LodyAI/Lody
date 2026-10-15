@@ -168,16 +168,17 @@ describe('process tree termination (POSIX groups)', () => {
 });
 
 describe('process tree termination (Windows)', () => {
-  it.effect('skips the grace period when a graceful taskkill is refused', () => {
+  it.effect('escalates when taskkill returns 128 for a live tree', () => {
     const table = new FakeProcessTable('win32');
-    table.queueSpawn({ ignores: ['SIGTERM'] });
     return Effect.gen(function* () {
       const managed = yield* spawnProcess(agentSpec);
       const root = managed.child.pid ?? -1;
+      const descendant = table.addDescendant(root, { ignores: ['SIGTERM'] });
 
       yield* managed.terminate(GRACEFUL);
 
       expect(table.isAlive(root)).toBe(false);
+      expect(table.isAlive(descendant)).toBe(false);
       expect(table.delivered).toEqual([
         { target: root, signal: 'SIGTERM' },
         { target: root, signal: 'SIGKILL' },
@@ -188,6 +189,24 @@ describe('process tree termination (Windows)', () => {
         ['/PID', String(root), '/T'],
         ['/PID', String(root), '/T', '/F'],
       ]);
+    }).pipe(Effect.provide(processLayer({ nodeProcess: table.api })));
+  });
+
+  it.effect('reports failure when forced taskkill returns 128 and the tree remains alive', () => {
+    const table = new FakeProcessTable('win32');
+    return Effect.gen(function* () {
+      const managed = yield* spawnProcess(agentSpec);
+      const root = managed.child.pid ?? -1;
+      const descendant = table.addDescendant(root, { ignores: ['SIGKILL'] });
+
+      const failure = failureOf(yield* Effect.exit(managed.terminate(FORCED)));
+
+      expect(failure).toBeInstanceOf(TerminationFailed);
+      expect(failure?.reason).toBe('signal-failed');
+      expect(table.isAlive(root)).toBe(true);
+      expect(table.isAlive(descendant)).toBe(true);
+      table.exitOnItsOwn(descendant);
+      table.exitOnItsOwn(root);
     }).pipe(Effect.provide(processLayer({ nodeProcess: table.api })));
   });
 
@@ -231,11 +250,16 @@ describe('process tree termination (Windows)', () => {
   it('never runs taskkill for a root that has already exited', () => {
     const table = new FakeProcessTable('win32');
     const child = table.api.spawn('cli', [], {});
+    const descendant = table.addDescendant(child.pid ?? -1);
     table.exitOnItsOwn(child.pid ?? -1);
+    const unrelated = table.api.spawn('unrelated', [], {});
 
     signalChildTreeNowLegacy(child, 'SIGKILL', { processGroup: false }, { nodeProcess: table.api });
 
     expect(table.spawned.filter((call) => call.command === 'taskkill')).toEqual([]);
+    expect(table.isAlive(child.pid ?? -1)).toBe(false);
+    expect(table.isAlive(descendant)).toBe(true);
+    expect(table.isAlive(unrelated.pid ?? -1)).toBe(true);
   });
 
   it.effect('leaves POSIX detachment to the process group', () => {

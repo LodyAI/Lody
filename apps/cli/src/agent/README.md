@@ -63,6 +63,28 @@ context/message-flow.md "Upstream".
 
 ## Background
 
+### Oh My Pi native ACP
+
+Install [Oh My Pi](https://github.com/can1357/oh-my-pi#installation) on the execution
+machine, make `omp` available on PATH, and configure its model credentials in OMP.
+In Agent settings, search for **OMP** or **Oh My Pi** and add that registry provider.
+The independent `oh-my-pi` entry launches `omp acp`; it uses the existing registry
+launch, capability probe, and session lifecycle. Lody does not install OMP or copy
+Pi credentials, extensions, or session identities. Refresh capabilities after
+upgrading the locally installed executable.
+
+The Skills catalog recognizes OMP's default `.omp/skills` project directory and
+`~/.omp/agent/skills` user directory. Named profiles and custom skill search paths
+remain owned by OMP and are not expanded by this static catalog.
+Only capabilities reported by the native ACP server are available; OMP terminal
+widgets and Lody Core extensions are not supplied by this registry entry. This is
+separate from the proposed [managed RPC adapter](https://github.com/LodyAI/Lody/issues/930).
+
+ACP shutdown uses the shared process owner. On Windows, taskkill status 128 only
+counts as a missing process after the root has exited; a live console process
+still requires the existing forceful cleanup path. See the
+[integration decision](../../../../.agents/notes/implemented/feature/2026-10-15-oh-my-pi-native-acp.md).
+
 ### ACP file errors
 
 `fs/read_text_file` maps a missing local file to ACP resource-not-found (`-32002`).

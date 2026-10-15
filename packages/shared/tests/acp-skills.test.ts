@@ -35,6 +35,14 @@ describe('getSkillMarkdownBody', () => {
 });
 
 describe('project skills helpers', () => {
+  it('discovers native OMP skill roots without assigning Pi profile directories', () => {
+    const provider = [{ cliType: 'registry' as const, agentType: 'oh-my-pi' }];
+    expect([...getRegisteredSkillDirs(provider)]).toEqual(['.omp/skills']);
+    expect([...getRegisteredGlobalSkillDirs(provider)]).toEqual(['~/.omp/agent/skills']);
+    expect(getSkillScanCandidateDirs()).toContain('.omp/skills');
+    expect(ALL_KNOWN_GLOBAL_SKILL_DIRS).toContain('~/.omp/agent/skills');
+  });
+
   it('always includes the default project skill directory in scan candidates', () => {
     expect(getSkillScanCandidateDirs()).toContain(DEFAULT_PROJECT_SKILL_DIR);
     expect(getSkillScanCandidateDirs()).toContain('agent/skills');

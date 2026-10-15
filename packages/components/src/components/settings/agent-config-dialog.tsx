@@ -1119,7 +1119,8 @@ const REGISTRY_OPTIONS: AgentTypeOption[] = REGISTRY_ACP_AGENTS.map((a) => ({
   cliType: 'registry' as AgentConfigCliType,
   agentType: a.id,
   experimental: true,
-  searchKeys: `${a.name} ${a.id} ${a.description ?? ''}`.toLowerCase(),
+  searchKeys:
+    `${a.name} ${a.id} ${a.description ?? ''} ${a.distribution.local?.command ?? ''}`.toLowerCase(),
 }));
 
 // Custom agents still need a stable provider slug for session launch metadata;

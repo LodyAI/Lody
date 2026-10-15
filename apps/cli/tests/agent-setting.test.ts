@@ -867,6 +867,32 @@ describe('resolveBuiltinACPSetting', () => {
     });
   });
 
+  it.each([{ extraArgs: [] }, { extraArgs: ['--model', 'synthetic/model'] }])(
+    'launches Oh My Pi directly with caller arguments $extraArgs',
+    async ({ extraArgs }) => {
+      const input = { cliType: 'registry' as const, agentType: 'oh-my-pi', extraArgs };
+      const agent = getRegistryAgent(input.agentType);
+      expect(agent.distribution).toEqual({
+        local: { command: 'omp', args: ['acp'], versionArgs: ['--version'] },
+      });
+      expect(resolveACPSetting(input).exec).toEqual({
+        command: 'omp',
+        args: ['acp'],
+        env: undefined,
+      });
+      const launch = await resolveACPProcessLaunchAsync(input);
+      expect(launch).toEqual({
+        command: 'omp',
+        args: ['acp', ...extraArgs],
+        env: undefined,
+        capabilitySourceVersion: `oh-my-pi@${agent.version}`,
+      });
+      expect(await resolveExpectedAcpCapabilitySourceVersion(input)).toBe(
+        launch.capabilitySourceVersion
+      );
+    }
+  );
+
   it('refreshes metadata when a registry uvx distribution is used', () => {
     const resolved = resolveRegistryAgentACPSetting({
       id: 'fast-agent',

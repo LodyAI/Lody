@@ -699,6 +699,23 @@ const REMOTE_REGISTRY_ACP_AGENTS: RegistryAcpAgent[] = [
     }
   },
   {
+    id: 'oh-my-pi',
+    name: 'Oh My Pi',
+    version: 'local',
+    description: 'Use your installed Oh My Pi (OMP) via native ACP; you manage its version.',
+    distribution: {
+      local: {
+        command: 'omp',
+        args: [
+          'acp'
+        ],
+        versionArgs: [
+          '--version'
+        ]
+      }
+    }
+  },
+  {
     id: 'opencode',
     name: 'OpenCode',
     version: '1.19.0',

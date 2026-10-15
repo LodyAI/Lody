@@ -124,8 +124,9 @@ export class FakeProcessTable {
 
   /**
    * `taskkill /PID <root> /T [/F]` over the tree rooted at `<root>`. Without
-   * `/F` a member that ignores SIGTERM makes it fail (a console process that
-   * can only be terminated forcefully); an unknown root exits with 128.
+   * `/F` a member that ignores SIGTERM makes it fail with 128 (a console
+   * process that requires force). The parent remains while a child refuses;
+   * an unknown root also exits with 128.
    */
   private runTaskkill(args: readonly string[]): ChildProcess {
     const child = new FakeChildProcess(this.nextPid++, this);
@@ -140,8 +141,12 @@ export class FakeProcessTable {
       const signal: NodeJS.Signals = force ? 'SIGKILL' : 'SIGTERM';
       this.delivered.push({ target: root, signal });
       for (const member of members) {
-        if (member.ignores.has(signal)) code = 1;
-        else this.terminate(member, signal, null);
+        if (member.ignores.has(signal)) code = 128;
+      }
+      for (const member of members) {
+        if (!member.ignores.has(signal) && (member.pid !== root || code === 0)) {
+          this.terminate(member, signal, null);
+        }
       }
     }
     queueMicrotask(() => child.emit('close', code, null));

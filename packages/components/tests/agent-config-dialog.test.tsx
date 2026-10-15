@@ -37,6 +37,18 @@ import * as machineAuthenticationHook from '../src/hooks/use-machine-acp-authent
 import { initI18n } from '../src/i18n';
 import { Tooltip } from '@lody/ui/tooltip';
 
+vi.mock('@lody/shared', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@lody/shared')>();
+  return {
+    ...actual,
+    // A registry refresh can replace the fallback description without retaining
+    // the OMP acronym. Search must still recognize its stable local command.
+    REGISTRY_ACP_AGENTS: actual.REGISTRY_ACP_AGENTS.map((agent) =>
+      agent.id === 'oh-my-pi' ? { ...agent, description: 'Synthetic registry description' } : agent
+    ),
+  };
+});
+
 const machineId = 'machine-test' as MachineId;
 const claudeConfigId = 'claude-config' as AgentConfigId;
 const kimiConfigId = 'kimi-config' as AgentConfigId;
@@ -734,6 +746,95 @@ describe('AgentConfigDialog', () => {
 
     expect(getSelectedOption()?.textContent).toContain('Custom command');
     expect(document.body.querySelector('#custom-acp-command')).not.toBeNull();
+  });
+
+  it('finds Oh My Pi by its local command after registry metadata changes and saves without Pi extensions', async () => {
+    const saved: AgentConfigSubmitPayload[] = [];
+    await renderDialog(
+      { kind: 'create' },
+      createMachine('Workstation', { piExtensions: 1 }),
+      vi.fn(async (payload: AgentConfigSubmitPayload) => {
+        saved.push(payload);
+      })
+    );
+    await act(async () => {
+      getOptionByText('Pi').click();
+    });
+    const piExtensions = document.querySelector('[aria-label="Pi extensions"]')!;
+    expect(piExtensions).not.toBeNull();
+    await act(async () => {
+      setNativeInputValue(
+        piExtensions.querySelector<HTMLInputElement>('input[aria-label="Extension path"]')!,
+        '/fixture/pi-only.ts'
+      );
+    });
+    await act(async () => {
+      Array.from(piExtensions.querySelectorAll('button'))
+        .find((button) => button.textContent === 'Add path')!
+        .click();
+    });
+    expect(piExtensions.textContent).toContain('/fixture/pi-only.ts');
+
+    const search = document.querySelector<HTMLInputElement>('input[aria-label="Search"]')!;
+    for (const query of ['OMP', 'Oh My Pi']) {
+      await act(async () => {
+        setNativeInputValue(search, query);
+      });
+      expect(getOptionByText('Oh My Pi')).toBeDefined();
+    }
+    await act(async () => {
+      getOptionByText('Oh My Pi').click();
+    });
+    expect(getSelectedOption()?.textContent).toContain('Oh My Pi');
+    expect(document.querySelector('[aria-label="Pi extensions"]')).toBeNull();
+    expect(getPrimaryAction('Create').disabled).toBe(false);
+    await act(async () => {
+      getPrimaryAction('Create').click();
+    });
+    expect(saved).toHaveLength(1);
+    expect(saved[0]).toMatchObject({
+      name: 'Oh My Pi',
+      cliType: 'registry',
+      agentType: 'oh-my-pi',
+    });
+    expect(saved[0]?.runtimeOverrides).toBeUndefined();
+    expect(saved[0]?.customAcp).toBeUndefined();
+    expect(saved[0]?.backgroundSetup).toBeUndefined();
+  });
+
+  it('keeps a saved Oh My Pi provider separate from the built-in Pi provider when editing', async () => {
+    const saved: AgentConfigSubmitPayload[] = [];
+    const config: AgentConfigMeta = {
+      id: 'omp-config' as AgentConfigId,
+      machineId,
+      name: 'My OMP',
+      cliType: 'registry',
+      agentType: 'oh-my-pi',
+      env: { OMP_CONFIG_DIR: '/fixture/omp' },
+    };
+    await renderDialog(
+      { kind: 'edit', config },
+      createMachine('Workstation', { piExtensions: 1 }),
+      vi.fn(async (payload: AgentConfigSubmitPayload) => {
+        saved.push(payload);
+      })
+    );
+    expect(getSelectedOption()?.textContent).toContain('Oh My Pi');
+    expect(getOptionByText('Pi').disabled).toBe(true);
+    expect(document.querySelector('[aria-label="Pi extensions"]')).toBeNull();
+    await act(async () => {
+      getOptionByText('Pi').click();
+      getPrimaryAction('Save').click();
+    });
+    expect(saved).toHaveLength(1);
+    expect(saved[0]).toMatchObject({
+      id: config.id,
+      name: config.name,
+      cliType: 'registry',
+      agentType: 'oh-my-pi',
+      env: config.env,
+    });
+    expect(saved[0]?.runtimeOverrides).toBeUndefined();
   });
 
   it('queues Bub for verification without publishing or probing it from the dialog', async () => {

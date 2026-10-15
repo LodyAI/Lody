@@ -81,3 +81,34 @@ void it('excludes builtin duplicates without reintroducing local Kimi fallbacks'
   assert.ok(!fallbackIds.includes('kimi'));
   assert.ok(!fallbackIds.includes('kimi-code'));
 });
+
+void describe('Oh My Pi local registry provider', () => {
+  const localDistribution = {
+    local: { command: 'omp', args: ['acp'], versionArgs: ['--version'] },
+  };
+
+  void it('remains available without a remote entry and uses the installed OMP command', () => {
+    const agent = normalizeRegistryAgents([]).find(({ id }) => id === 'oh-my-pi');
+    assert.deepEqual(agent, {
+      id: 'oh-my-pi',
+      name: 'Oh My Pi',
+      version: 'local',
+      description: 'Use your installed Oh My Pi (OMP) via native ACP; you manage its version.',
+      icon: undefined,
+      distribution: localDistribution,
+    });
+  });
+
+  void it('retains remote metadata without replacing the local launcher or duplicating the provider', () => {
+    const remote = {
+      id: 'oh-my-pi',
+      name: 'Oh My Pi',
+      version: '18.11.0',
+      description: 'Synthetic registry description',
+      icon: 'https://example.test/oh-my-pi.svg',
+      distribution: { npx: { package: 'synthetic-omp-adapter@1.0.0' } },
+    };
+    const agents = normalizeRegistryAgents([remote]).filter(({ id }) => id === remote.id);
+    assert.deepEqual(agents, [{ ...remote, distribution: localDistribution }]);
+  });
+});

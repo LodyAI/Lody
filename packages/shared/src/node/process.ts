@@ -233,8 +233,6 @@ export interface TerminationPolicy {
 export const TREE_POLL_INTERVAL = Duration.millis(20);
 export const TASKKILL_DEADLINE = Duration.seconds(10);
 const TREE_POLL_INTERVAL_MS = Duration.toMillis(TREE_POLL_INTERVAL);
-/** taskkill exit status when no process matched the pid. */
-const TASKKILL_NOT_FOUND = 128;
 
 export const hasExited = (child: ChildProcess): boolean =>
   (child.exitCode ?? null) !== null || (child.signalCode ?? null) !== null;
@@ -413,7 +411,10 @@ export const windowsTree = (
           ...(force ? ['/F'] : []),
         ]).pipe(Effect.mapError((cause) => signalFailed(description, signal, cause)));
         if (code === 0) return 'delivered' as const;
-        if (code === TASKKILL_NOT_FOUND) return 'gone' as const;
+        // Status 128 also means a console process refused graceful termination.
+        // Only Node's observed root exit proves it is gone; a live tree must
+        // escalate to /F or report a termination failure.
+        if (code === 128 && hasExited(root)) return 'gone' as const;
         return yield* Effect.fail(
           signalFailed(description, signal, new Error(`taskkill exited with status ${code}`))
         );
