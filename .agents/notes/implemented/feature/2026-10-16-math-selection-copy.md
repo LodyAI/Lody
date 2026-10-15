@@ -23,3 +23,5 @@ The official extension was chosen over maintaining a custom copy handler because
 - [Selection tests](../../../../packages/components/tests/conversation-text-selection.test.tsx) load the real extension and verify that a selection containing a formula writes no clipboard data while an intervening row is incomplete, then copies LaTeX once the row is ready.
 - In the development checkout, all 114 tests across seven related suites passed, as did component type checking, scoped formatting, and diff whitespace checking. Scoped type-aware lint reported zero errors and 23 warnings. Documentation checking retained the six existing broken links in the proposed subagent-events note pair; there were no new documentation errors. These checks preceded transferring the focused patch onto current `main`; additional local test runs and the full repository check are left to CI at the user's request.
 - The clipboard event payload is an in-memory implementation of `setData`; these tests do not claim native operating-system clipboard, Safari, or mobile-device acceptance.
+
+PR: [#1595](https://github.com/LodyAI/Lody/pull/1595)

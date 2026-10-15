@@ -23,3 +23,5 @@ Translation: current
 - [选区测试](../../../../packages/components/tests/conversation-text-selection.test.tsx) 加载真实扩展，验证包含公式的选区在中间行尚未完整加载时不写剪贴板，并在该行就绪后复制出 LaTeX。
 - 开发检出目录中，七个相关测试集的 114 项测试全部通过，组件类型检查、改动范围内的格式检查及差异空白检查也已通过。改动范围内的类型感知 lint 报告零错误、23 条警告。文档检查仍报告 subagent-events 提案中英双语文件中已有的六条失效链接，没有新增文档错误。这些检查发生在将本次改动迁移到当前 `main` 之前；按用户要求，不再追加本地测试，全仓库检查交由 CI 执行。
 - 测试中的剪贴板载荷使用内存实现的 `setData`，不代表已完成操作系统原生剪贴板、Safari 或移动设备验收。
+
+PR: [#1595](https://github.com/LodyAI/Lody/pull/1595)
