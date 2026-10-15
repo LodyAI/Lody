@@ -2,6 +2,7 @@
 
 Status: implemented
 Translation: current
+PR: [#1586](https://github.com/LodyAI/Lody/pull/1586)
 
 [中文](2026-10-15-oh-my-pi-native-acp.zh.md)
 
