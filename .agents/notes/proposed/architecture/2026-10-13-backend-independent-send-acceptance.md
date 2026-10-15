@@ -20,7 +20,9 @@ First paint does not imply local persistence, owner acceptance or execution.
 Follow-up measurements found millisecond-scale owner processing but additional
 source coordination and history feedback in Roost. Ordinary input now combines
 owner acceptance and activation in one negotiated request and uses its receipt for
-delivery feedback; production end-to-end latency remains unmeasured.
+delivery feedback. Local input now participates in keyed send anchoring and truthful
+sending activity before owner history; formal handoff waits for a hydrated body.
+Production end-to-end latency remains unmeasured.
 
 ## Decision and alternatives
 
@@ -85,7 +87,7 @@ ready Roost input and final attachment references.
    execute. A guide offer is fenced
    before handoff and never replayed after interruption. History acceptance is not
    proof of Agent execution. The local row remains until the authoritative view
-   contains that same ID; the UI never renders both copies.
+   contains a hydrated body for that same ID; the UI never renders both copies.
 7. Cancel/archive/delete discover durable rows independently of the window's
    snapshot, persist cancellation, and join local raw work plus matching session
    leases. A peer checks that stored fence before dispatch. Cancellation does not
@@ -177,6 +179,101 @@ also passes a TypeScript check including its production dependencies and scoped
 lint. Documentation checking still reports the same six pre-existing broken links.
 
 ## Transport and compatibility
+
+### Current Loro/Roost send comparison (2026-10-15)
+
+At `a06a69f3e`, a ready ordinary Loro send commits the formal local history and
+activation metadata through `writeUserTurn`. Its dispatch fast path and document
+upload then proceed independently: `dispatchUserTurn` starts `waitUntilSynced`
+without awaiting it. The owner offers the RPC input to its existing dispatch
+stash, with the applicable human-inbox admission. Neither an early local history
+row nor the RPC acknowledgement proves Agent execution or immediate disk durability.
+
+Roost admission publishes a separate local input row. Before owner handoff, the
+coordinator waits for its workspace save predecessor, initialization and IndexedDB
+save, acquires the session Web Lock, reads the stored queue and commits the
+`unknown` outcome marker. The workspace write callback then validates routing,
+records human provenance, borrows the session store and invokes the combined
+owner operation. Persistence is background work relative to local display, but
+is a serial prerequisite for that owner request. The native owner checks the
+immutable receipt, seals/writes/projects history as necessary and publishes
+activation before its response. This is still one ordinary write RPC; the earlier
+source history-readback/second-dispatch dependency remains removed.
+
+Before the UI repair below, the displayed rows had different integration boundaries. Loro's
+local turn enters `ConversationView` immediately. Ready Roost input is rendered by
+`SessionPendingMessages` in the stream's `trailingContent`; it is absent from
+the formal `virtualRows` searched by `anchorMessage`. The pending anchor therefore
+resolves only when formal history contains that ID. The optimistic pre-start
+derivation also reads formal `sessionHistory`, not the accepted-input projection;
+actual live presence remains independent. Thus an immediate Roost bubble does
+not establish the same scroll/pre-start behavior as a locally appended Loro turn.
+This explains a concrete presentation difference without attributing a particular
+production pause to network, storage or CPU. A pending input must not be relabeled
+as owner-delivered or executing merely to hide that difference.
+
+Four temporary behavioral probes extended the owning accepted-input suite using
+real Loro documents/writer, the production coordinator, isolated fake IndexedDB
+and explicit gates. The Loro probe retained formal history, its view index and
+pre-start timestamp while document sync and the dispatch reply were both held;
+releasing only the reply published delivery while sync remained held. Three Roost
+probes held source save, the `unknown` marker commit or the session lease. In each,
+local input was already projected while owner history remained empty; releasing
+the gate accepted the original content and confirmed its durable source record.
+All four passed; the temporary additions were removed.
+These prove ordering differences, not the duration of any stage. Before the repair,
+the unchanged accepted-input, pending-row and dispatch-state suites passed all 62
+cases after the temporary diagnostics were removed.
+
+### Local-row anchoring and hydrated handoff
+
+The UI repair makes each ready input a separate engine row with its immutable turn
+ID as key. `anchorMessage` resolves it during the local render commit, including an
+otherwise empty conversation and several outstanding inputs. It uses the existing
+scroll controller and send-context position, adding no scroll writer or retry loop.
+A directory placeholder with the same ID renders the local body in place; hydrated
+formal history wins and cleanup retires the projection. Index membership alone no
+longer removes the only displayable body. Local-only rows do not request a history
+hydration range or enter `ConversationView`, outline, export, dispatch or execution
+facts. Native text selection retains their UI rows and allows copy without acquiring
+a fictitious history lease; removal releases that selection.
+
+Unconfirmed, error-free ordinary input contributes a sending label. Live presence
+and bounded pre-start from formal pending history retain priority. The local label
+does not enable Stop, claim startup or publish delivery. Errors stop it; retry
+re-enables it; a positive owner receipt uses the existing delivered overlay.
+Guide and queue dispatch rules remain unchanged. Source save ordering, IndexedDB
+commit, unknown-outcome marker, session lease, immutable deduplication and guide
+no-replay fencing remain in place. Removing these barriers to shorten a request
+without a replacement recovery protocol was rejected.
+
+Trigger/owner: the workspace publishes accepted input; the pending-row hook owns
+UI projection while the existing coordinator owns durable work. Cancellation still
+joins raw work and removes its UI; it cannot undo remote commits. Handoff requires
+the same ID's hydrated body. Errors and uncertain outcomes retain existing recovery
+ownership. A native migration is deferred: this repair changes UI composition and a
+pure visibility predicate; the coordinator still depends on the unfinished document
+and RPC lifecycle and remains covered by its existing native resource scope.
+
+Deterministic DOM regressions failed on the baseline without local engine rows,
+then cover first/existing conversations, multiple inputs, queued anchors,
+placeholder/body handoff, stable position and no duplicate. The owning pending and
+accepted-input suites cover failure, retry, receipt, cancellation and delayed body
+hydration. These verify the repaired presentation boundary, not a reduction in
+owner acceptance time or elimination of the reported production pause.
+The final targeted run passes 185 tests across 12 suites; component type-checking
+and scoped type-aware lint pass (lint still reports warnings).
+Formatting and diff whitespace checks pass. Documentation checking retains the
+six baseline broken links to absent isolated ACP submodule sources and reports no
+registered SHA-protected topic changes.
+
+A packaged macOS arm64 test build used this repair on `a06a69f3e`. Packaged bytes,
+embedded CLI/native bindings, Roost Worker SQLite write/reopen, ad-hoc signing and
+DMG/ZIP integrity checks passed. The tester reported improvement after enabling
+Roost for a new conversation. This is qualitative manual evidence, not a measured
+latency bound. The submission subsequently integrates three main commits through
+`2163b93fc`; that integration is checked separately and was not repackaged.
+Submission verification on that integration passes `pnpm check` and `pnpm format`.
 
 ### Ordinary input in one owner request
 

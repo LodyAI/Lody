@@ -155,6 +155,29 @@ it('pins real history bodies before the viewport lease releases, then allows evi
   distant.release();
 });
 
+it('copies and retains local input without inventing history, and releases it on removal', async () => {
+  const doc = reimport(buildSessionDoc([]));
+  const view = await openReaderView(doc, { sessionId: FIXTURE_SESSION_ID });
+  dispose = () => {
+    view.dispose();
+    doc.free();
+  };
+  const rows = [{ ...row('local-input', -1), local: true }];
+  await act(async () => root.render(<Probe rows={rows} view={view} />));
+  await act(async () => select(0));
+  const copy = new Event('copy', { bubbles: true, cancelable: true });
+  await act(async () => viewport.dispatchEvent(copy));
+  expect(copy.defaultPrevented).toBe(false);
+  expect(document.getSelection()!.toString()).toContain('local-input original prose');
+  expect(state.keepMounted).toEqual([1]);
+  expect(state.holds.has('local-input')).toBe(true);
+  expect(state.holds.get('local-input')).toBeUndefined();
+  expect(view.turnCount).toBe(0);
+  await act(async () => root.render(<Probe rows={[]} view={view} />));
+  expect(state.keepMounted).toEqual([]);
+  expect(document.getSelection()!.isCollapsed).toBe(true);
+});
+
 it('blocks incomplete native copy without replacing clipboard contents and recovers after loading', async () => {
   const rows = [row('a', 0), row('loading', 1, false), row('c', 2)];
   await act(async () => root.render(<Probe rows={rows} />));

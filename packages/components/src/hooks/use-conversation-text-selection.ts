@@ -2,6 +2,7 @@ import {
   createContext,
   useContext,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
   type MutableRefObject,
@@ -27,9 +28,11 @@ export type SelectableConversationRow = {
   turnId: string;
   turnIndex: number;
   ready: boolean;
+  /** A mounted immutable input body, without an authoritative history lease. */
+  local?: boolean;
 };
 
-type RetainedTurn<T> = { snapshot: T; lease?: ConversationRange; failed?: boolean };
+type RetainedTurn<T> = { snapshot: T | undefined; lease?: ConversationRange; failed?: boolean };
 
 /** Owns native text selection, independently of the image-sharing checkbox selection. */
 export function useConversationTextSelection<T>({
@@ -60,10 +63,15 @@ export function useConversationTextSelection<T>({
 }) {
   const [version, setVersion] = useState(0);
   const retained = useRef(new Map<string, RetainedTurn<T>>());
+  const localTurnIds = useMemo(
+    () => new Set(rows.filter((row) => row.local).map((row) => row.turnId)),
+    [rows]
+  );
   const current = useLatestRef({
     view,
     rows,
     leadingRowCount,
+    localTurnIds,
     captureTurn,
     onCopyUnavailable,
     onChange,
@@ -77,11 +85,14 @@ export function useConversationTextSelection<T>({
     let disposed = false;
     let pointerDown = false;
     let generation = 0;
+    const isLocal = (id: string) => current.current.localTurnIds.has(id);
 
     const publish = () => {
       if (!disposed) {
         setVersion((value) => value + 1);
-        current.current.onChange(new Set(retained.current.keys()));
+        current.current.onChange(
+          new Set([...retained.current.keys()].filter((id) => !isLocal(id)))
+        );
       }
     };
     const release = () => {
@@ -125,12 +136,13 @@ export function useConversationTextSelection<T>({
       const epoch = generation;
       for (const id of ids) {
         const previous = retained.current.get(id);
-        const index = view?.indexOf(id) ?? -1;
+        const local = isLocal(id);
+        const index = local ? -1 : (view?.indexOf(id) ?? -1);
         if (previous && !previous.failed && (previous.lease || index < 0)) continue;
         // acquireRange pins synchronously, before a viewport lease can evict this body.
         const lease = index >= 0 ? view?.acquireRange(index, index + 1) : undefined;
         const held = {
-          snapshot: previous?.snapshot ?? current.current.captureTurn(id),
+          snapshot: previous?.snapshot ?? (local ? undefined : current.current.captureTurn(id)),
           lease,
           failed: false,
         };
@@ -254,7 +266,7 @@ export function useConversationTextSelection<T>({
       const incomplete = selectedRows.some(
         (row) =>
           !row.ready ||
-          (history && !history.isHydrated(history.indexOf(row.turnId))) ||
+          (!row.local && history && !history.isHydrated(history.indexOf(row.turnId))) ||
           !mounted.has(row.key)
       );
       if (incomplete) {
@@ -266,11 +278,13 @@ export function useConversationTextSelection<T>({
       if (!retained.current.size) return;
       if (
         [...retained.current].some(([id, held]) =>
-          held.lease
-            ? (view?.indexOf(id) ?? -1) < 0
-            : current.current.view
-              ? current.current.view.indexOf(id) < 0
-              : !current.current.rows.some((row) => row.turnId === id)
+          isLocal(id)
+            ? false
+            : held.lease
+              ? (view?.indexOf(id) ?? -1) < 0
+              : current.current.view
+                ? current.current.view.indexOf(id) < 0
+                : !current.current.rows.some((row) => row.turnId === id)
         )
       ) {
         // A real deletion ends selection; pins must never resurrect deleted history.
@@ -314,7 +328,7 @@ export function useConversationTextSelection<T>({
 
   for (const row of rows) {
     const turn = retained.current.get(row.turnId);
-    if (turn && turn.snapshot === undefined && row.ready)
+    if (turn && turn.snapshot === undefined && row.ready && !row.local)
       turn.snapshot = current.current.captureTurn(row.turnId);
   }
   // Keys/IDs survive insertions and hydration; positional Virtua indices do not.

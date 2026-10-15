@@ -114,6 +114,21 @@ use it, so history handoff cannot flash back to sending. A persisted `confirmed`
 source state alone is not a receipt. First paint precedes the storage transaction
 and does not prove crash durability.
 
+Background persistence is independent of displaying that input, but owner handoff
+waits for source save, the session lease and the persisted unknown-outcome marker.
+Ready local inputs are individual `SessionChatStreamView.localUserMessages` engine
+rows, keyed by their immutable turn IDs. Send anchoring can resolve before owner
+history; a matching directory placeholder retains the local body, then hydrated
+formal history replaces it once under the same key. Cleanup requires the hydrated
+body, not just index membership. Unprepared attachments remain in `trailingContent`.
+Local rows never enter authoritative history, outline, export or history selection
+leases. Native text copy can still retain their mounted UI without fabricating a
+history body. Local ordinary input displays truthful sending activity while its
+outcome is unresolved and error-free; actual presence and formal pre-start take
+priority. Startup/Stop derivation still requires the existing formal evidence. The
+[current send comparison](../notes/proposed/architecture/2026-10-13-backend-independent-send-acceptance.md#current-lororoost-send-comparison-2026-10-15)
+records the original integration gap, controlled ordering probes and repair limits.
+
 The metadata circle is separate from the loading spinner beside the bubble.
 Ready Roost input uses the same 500 ms loading delay as the ordinary Loro row,
 with the same narrow-column visibility threshold. Its delay follows unresolved

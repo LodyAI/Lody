@@ -18,6 +18,7 @@ import {
   type CapacityRetryControl,
   type MessageFileDiffEntriesByTurn,
   type SessionChatStreamHandle,
+  type SessionChatStreamViewProps,
   type UserMessageEditMentionContext,
   type UserMessageEditSubmission,
 } from './view';
@@ -69,6 +70,7 @@ export interface SessionChatStreamProps {
   leadingContent?: ReactNode;
   /** Scrolls after history as a local, not-yet-committed user message. */
   trailingContent?: ReactNode;
+  localUserMessages?: SessionChatStreamViewProps['localUserMessages'];
   emptyState?: ReactNode;
   onAtBottomChange?: (atBottom: boolean) => void;
   showScrollToLatest?: boolean;
@@ -173,6 +175,7 @@ const SessionChatStreamImpl = forwardRef<SessionChatStreamHandle, SessionChatStr
       className,
       leadingContent,
       trailingContent,
+      localUserMessages,
       emptyState,
       onAtBottomChange,
       showScrollToLatest = true,
@@ -329,6 +332,7 @@ const SessionChatStreamImpl = forwardRef<SessionChatStreamHandle, SessionChatStr
         className={className}
         leadingContent={leadingContent}
         trailingContent={trailingContent}
+        localUserMessages={localUserMessages}
         emptyState={emptyState}
         onAtBottomChange={onAtBottomChange}
         showScrollToLatest={showScrollToLatest}

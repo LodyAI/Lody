@@ -196,6 +196,12 @@ states, and the "no output" status).
   ([note](../../../../../.agents/notes/implemented/architecture/2026-09-27-conversation-scroll-engine.md)).
   `bufferSize` is a trade between blank space during a fast scroll and keeping
   resizing rows mounted.
+- **Local send continuity.** Ready accepted inputs have individual turn-ID keys
+  in the same scroll engine, so a send can anchor before owner history arrives.
+  A directory placeholder keeps the local body until formal history is hydrated;
+  the formal row then wins once under the same key. These rows stay outside
+  authoritative history and outline/export facts. Sending feedback does not imply
+  owner delivery or execution. [Decision](../../../../../.agents/notes/proposed/architecture/2026-10-13-backend-independent-send-acceptance.md#local-row-anchoring-and-hydrated-handoff).
 - **Touch input before scroll delivery.** The adapter releases following on a single
   upward conversation pan, including its final touch position when no move was
   delivered. The controller adopts post-touch momentum as reader movement even if

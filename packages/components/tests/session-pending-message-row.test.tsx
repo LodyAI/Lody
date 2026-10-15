@@ -31,6 +31,7 @@ import { MessageSendStatusContext } from '../src/components/ai-gui/message-send-
 import {
   PendingMessageRow,
   SessionPendingMessages,
+  useSessionPendingMessages,
 } from '../src/components/chat/session-pending-messages';
 import type { SessionAttachmentDraft } from '../src/lib/session-attachment-draft';
 import {
@@ -585,14 +586,96 @@ describe('PendingMessageRow failure presentation', () => {
 // between, the turn must show once, as the history row, not also as a pending
 // row beneath it.
 describe('SessionPendingMessages', () => {
-  it('hides a held send as soon as its turn is in history', async () => {
+  it('exposes keyed local rows and truthful sending state through failure, retry, receipt and cancel', async () => {
+    await initI18n('en');
+    const first = Promise.withResolvers<void>();
+    const retry = Promise.withResolvers<void>();
+    let attempt = 0;
+    const pendingSends = createPendingSessionSends({
+      prepare: async (send) => send,
+      write: async () => {
+        attempt += 1;
+        await (attempt === 1 ? first.promise : retry.promise);
+      },
+      deliver: async () => {},
+    });
+    const store = createStore();
+    store.set(runtimeAtom, { workspaceId: 'pending-row-workspace', pendingSends } as never);
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    function Surface() {
+      const model = useSessionPendingMessages({ sessionId });
+      return (
+        <>
+          <output data-sending={String(model.isSending)} />
+          <div data-local>
+            {model.localUserMessages.map((row) => (
+              <div key={row.id} data-input={row.id}>
+                {row.content}
+              </div>
+            ))}
+          </div>
+          <div data-held>{model.trailingContent}</div>
+        </>
+      );
+    }
+    try {
+      await act(async () => {
+        root.render(
+          <Provider store={store}>
+            <Surface />
+          </Provider>
+        );
+        pendingSends.enqueue(record({ inputState: 'saving', historyBackend: 'roost' }));
+      });
+      expect(container.querySelector('output')?.dataset.sending).toBe('true');
+      expect(container.querySelectorAll('[data-input="pending-turn"]')).toHaveLength(1);
+      expect(container.querySelector('[data-held]')?.textContent).toBe('');
+      expect(container.querySelector('[title="Delivered"]')).toBeNull();
+      await act(async () => first.reject(new Error('owner unavailable')));
+      expect(container.querySelector('output')?.dataset.sending).toBe('false');
+      expect(container.textContent).toContain('owner unavailable');
+      await act(async () => pendingSends.retry('pending-turn'));
+      expect(container.querySelector('output')?.dataset.sending).toBe('true');
+      expect(container.textContent).not.toContain('owner unavailable');
+      await act(async () => {
+        store.set(
+          rpcDeliveredTurnsAtom,
+          addRpcDeliveredTurn(
+            store.get(rpcDeliveredTurnsAtom),
+            getRpcDeliveredTurnKey(sessionId, 'pending-turn')
+          )
+        );
+      });
+      expect(container.querySelector('output')?.dataset.sending).toBe('false');
+      expect(container.querySelector('[title="Delivered"]')).not.toBeNull();
+      await act(async () => {
+        const canceled = pendingSends.cancel('pending-turn');
+        retry.resolve();
+        await canceled;
+      });
+      expect(container.querySelector('[data-local]')?.textContent).toBe('');
+      expect(pendingSends.getSnapshot()).toEqual([]);
+    } finally {
+      first.resolve();
+      retry.resolve();
+      await act(async () => root.unmount());
+      container.remove();
+      pendingSends.dispose();
+    }
+  });
+
+  it('keeps the local body until history is hydrated, then hands off once', async () => {
     await initI18n('en');
     URL.createObjectURL = () => 'blob:pending-row';
     URL.revokeObjectURL = () => {};
     const historyIds = new Set<string>();
+    let hydrated = false;
     const listeners = new Set<() => void>();
     const history = {
       indexOf: (id: string) => (historyIds.has(id) ? 0 : -1),
+      turn: () => (hydrated ? record().entry : undefined),
       subscribe: (listener: () => void) => {
         listeners.add(listener);
         return () => {
@@ -643,6 +726,11 @@ describe('SessionPendingMessages', () => {
       await writing.promise;
     });
     expect(pendingSends.has(held.id)).toBe(true);
+    expect(container.textContent).toContain('Take a look at these.');
+    await act(async () => {
+      hydrated = true;
+      for (const listener of listeners) listener();
+    });
     expect(container.textContent).toBe('');
 
     await act(async () => {

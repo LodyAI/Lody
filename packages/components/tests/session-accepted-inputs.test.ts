@@ -510,6 +510,16 @@ describe('locally accepted Roost input', () => {
         (await fixture.repo.getDocMeta(getSessionRoomId(fixture.sessionId)))?.meta?.latestUserMsgId
       ).toBeUndefined();
       pending.retry(fixture.input.id);
+      if (outcome === 'activate') {
+        // A directory entry alone cannot replace the only available local body.
+        await when(pending, () => pending.getSnapshot()[0]?.inputState === 'confirmed');
+        expect(pending.has(fixture.input.id)).toBe(true);
+        releaseRead.resolve();
+        const range = fixture.conversation.history.acquireRange(0, 1);
+        await range.ready;
+        await pending.resume();
+        range.release();
+      }
       await when(pending, () => !pending.has(fixture.input.id));
       expect(await fixture.owner.history.count()).toBe(outcome === 'activate' ? 1 : 0);
       expect(await fixture.owner.history.readTurn(fixture.input.id)).toMatchObject({

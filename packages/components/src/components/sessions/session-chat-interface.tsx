@@ -1,7 +1,7 @@
 import { useIosSimulatorPreviewRequest } from './ios-simulator/use-ios-simulator-preview-request';
 import { createLoroSyncErrorTools } from '@lody/shared/loro-sync-errors';
 import { RepoSyncError, RepoTransportError } from 'loro-repo';
-import { SessionPendingMessages } from '@/components/chat/session-pending-messages';
+import { useSessionPendingMessages } from '@/components/chat/session-pending-messages';
 import {
   buildDraftUserHistoryEntry,
   type SessionAttachmentDraft,
@@ -4156,6 +4156,17 @@ export const SessionChatInterface = memo(
       workspaceId,
     ]);
     const isFinalizing = isSessionFinalizing(liveSessionStatus);
+    // Resolve the same sender as the formal user row before owner confirmation.
+    const pendingSender = useCloudQuery(
+      cloudOperations.auth.getUserById,
+      currentUser?.id && workspaceId ? { userId: currentUser.id, workspaceId } : 'skip'
+    );
+    const pendingMessages = useSessionPendingMessages({
+      sessionId: session.id,
+      history: conversationView,
+      user: pendingSender,
+      conversationFontSize,
+    });
     const agentActivityLabel =
       initStatusLabel && !isEmptyConversation
         ? initStatusLabel
@@ -4176,7 +4187,9 @@ export const SessionChatInterface = memo(
               // connection/machine problem (browser offline, machine removed or
               // offline) hands the story to the status chip instead.
               t('sessions.statusIndicator.pendingDispatch')
-            : null;
+            : pendingMessages.isSending && statusStripState == null
+              ? t('sessions.sendStatus.sendingWithoutSize')
+              : null;
     const agentActivityTone =
       isSessionActive && liveSessionStatus?.type === 'requestPermission' ? 'warning' : 'primary';
     // Waiting on the user is not work in progress: that status does not shimmer.
@@ -4922,34 +4935,20 @@ export const SessionChatInterface = memo(
     const handleChildEmptyStateSuggest = useCallback((text: string) => {
       inputAreaRef.current?.setInputText(text);
     }, []);
-    // The sender the delivered user row resolves (same query, same cache), so
-    // the pending row it replaces draws the same avatar.
-    const pendingSender = useCloudQuery(
-      cloudOperations.auth.getUserById,
-      currentUser?.id && workspaceId ? { userId: currentUser.id, workspaceId } : 'skip'
-    );
-    const pendingMessages = useMemo(
-      () => (
-        <SessionPendingMessages
-          sessionId={session.id}
-          history={conversationView}
-          user={pendingSender}
-          conversationFontSize={conversationFontSize}
-        />
-      ),
-      [conversationFontSize, conversationView, pendingSender, session.id]
-    );
     // A first message still uploading is the conversation's only content: it
     // takes the top of the empty stream (where its committed turn will land)
     // instead of a loading skeleton with the pending row pinned under it.
     const hasUnsentNewConversation = useAtomValue(
       sessionUnsentNewConversationAtomFamily(session.id)
     );
-    const unsentFirstMessage = hasUnsentNewConversation && sessionHistoryLength === 0;
+    const unsentFirstMessage =
+      hasUnsentNewConversation &&
+      sessionHistoryLength === 0 &&
+      pendingMessages.localUserMessages.length === 0;
     const chatStreamEmptyState = useMemo(
       () =>
         unsentFirstMessage ? (
-          pendingMessages
+          pendingMessages.trailingContent
         ) : contentSyncState === 'cold' ? (
           <ConversationSkeleton />
         ) : isChildSession ? (
@@ -4961,7 +4960,7 @@ export const SessionChatInterface = memo(
         contentSyncState,
         handleChildEmptyStateSuggest,
         isChildSession,
-        pendingMessages,
+        pendingMessages.trailingContent,
         unsentFirstMessage,
       ]
     );
@@ -6704,7 +6703,10 @@ export const SessionChatInterface = memo(
                                 {...stylex.props(styles.stream)}
                                 leadingContent={openedByConversationStart}
                                 emptyState={chatStreamEmptyState}
-                                trailingContent={unsentFirstMessage ? undefined : pendingMessages}
+                                trailingContent={
+                                  unsentFirstMessage ? undefined : pendingMessages.trailingContent
+                                }
+                                localUserMessages={pendingMessages.localUserMessages}
                                 agentActivityLabel={agentActivityLabel}
                                 agentActivityTone={agentActivityTone}
                                 agentActivityShimmer={agentActivityShimmer}

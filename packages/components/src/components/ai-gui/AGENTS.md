@@ -10,19 +10,20 @@ Ownership: [README.md](README.md).
   output. Never wire `searchBlockId` to tool, terminal, or diff renderers.
 - Window stream readiness must use the same hydration/initial-scroll conditions as
   viewport visibility; hydrated history alone cannot reveal a native window.
-- `SessionChatStreamView` scrolls through `conversation-list/`'s
-  `ConversationListHandle` and [scroll engine](../../lib/conversation-scroll/AGENTS.md)
-  only. Keep row keys stable; map history indexes to rows. Collapsed activity is one
-  row; expanded details are siblings, never nested scrollers or fixed-height panels.
+- Stream scrolling uses `ConversationListHandle` and the
+  [engine](../../lib/conversation-scroll/AGENTS.md) only. Use turn-ID keys through
+  local/history handoff. Local UI stays outside history/outline/export and owner
+  facts; its selection has no history lease.
+  Map history indexes to rows. Collapsed activity is one row; expanded details
+  are siblings, never nested scrollers or fixed-height panels.
 - Native selection retains its row corridor and history leases: hold prose/folding,
   keep actions live, release on clear. [Contract](README.md#native-text-selection).
 - `buildChatStreamItems()` must drop empty assistant entries and de-duplicate
   history ids.
 - `leadingContent` is a real first row: include it in sticky counts and scroll
   targets; never overlay or persist it.
-- Empty-state presentation stays outside the list, even with an empty leading Fragment:
-  zero-height caches can hide the first user row. Preserve live activity labels/tones.
-  Apply the header inset once to the whole scroller.
+- Empty state stays outside the list even with an empty leading Fragment; zero-height
+  caches can hide the first user row. Keep activity labels/tones and one header inset.
 - Creation cards: [contract](README.md#creation-progress). Bind status to the
   target Turn and subscribe only to its title; `progressMessageId` prevents
   duplicates. Consecutive creation records share a five-card scroller with

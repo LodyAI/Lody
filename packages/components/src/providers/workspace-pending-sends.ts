@@ -161,7 +161,10 @@ export function createWorkspacePendingSends(args: {
     visible: (send, signal) =>
       runtime.sendResources.withSessionStore(
         send.sessionId,
-        (store) => store.history.indexOf(send.id) >= 0,
+        (store) => {
+          const index = store.history.indexOf(send.id);
+          return index >= 0 && store.history.turn(index) !== undefined;
+        },
         signal
       ),
     unknownMessage: () => i18next.t('sessions.inputOutcomeUnknown'),

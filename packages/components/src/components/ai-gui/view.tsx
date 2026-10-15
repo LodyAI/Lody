@@ -473,7 +473,19 @@ type PlaceholderChatVirtualRow = {
   item: PlaceholderSessionItem;
 };
 
-type ChatVirtualRow = AssistantChatVirtualRow | StandardChatVirtualRow | PlaceholderChatVirtualRow;
+type LocalUserChatVirtualRow = {
+  type: 'local-user';
+  key: string;
+  /** -1 until the authoritative directory contains this input. */
+  messageIndex: number;
+  content: ReactNode;
+};
+
+type ChatVirtualRow =
+  | AssistantChatVirtualRow
+  | StandardChatVirtualRow
+  | PlaceholderChatVirtualRow
+  | LocalUserChatVirtualRow;
 
 /** One row per placeholder item, identity-stable while the item is. */
 
@@ -607,7 +619,9 @@ export interface SessionChatStreamViewProps {
   className?: string;
   /** Scrolls as the first conversation row (for example, Session provenance). */
   leadingContent?: ReactNode;
-  /** Scrolls after history as a local, not-yet-committed user message. */
+  /** UI-only accepted inputs; never added to history, outline, export or dispatch facts. */
+  localUserMessages?: readonly { id: string; content: ReactNode }[];
+  /** Attachment preparation and action errors after the message rows. */
   trailingContent?: ReactNode;
   emptyState?: ReactNode;
   onAtBottomChange?: (atBottom: boolean) => void;
@@ -1562,6 +1576,9 @@ const engineRowOf = (row: ChatVirtualRow): EngineRow => {
     placeholder: false,
     fixed: null,
   };
+  if (row.type === 'local-user') {
+    return { ...base, turnId: row.key, estimate: ENGINE_ROW_ESTIMATE_PX.standard };
+  }
   if (row.type === 'placeholder') {
     return {
       ...base,
@@ -1715,6 +1732,7 @@ export const SessionChatStreamView = forwardRef<
       isVisible = true,
       className,
       leadingContent,
+      localUserMessages,
       trailingContent,
       emptyState,
       onAtBottomChange,
@@ -1853,7 +1871,7 @@ export const SessionChatStreamView = forwardRef<
       // Expansion lives in the module cache so virtualized child rows retain
       // their state after unmounting; this counter is its React invalidation
       // signal and also busts the per-turn row cache.
-      return buildChatVirtualRows({
+      const rows = buildChatVirtualRows({
         items,
         lastAssistantMessageId,
         messageFileDiffEntriesByTurn,
@@ -1866,6 +1884,31 @@ export const SessionChatStreamView = forwardRef<
         selectionLayouts,
         groupCreatedSessions: messageSelection === null,
       });
+      if (!localUserMessages?.length) return rows;
+      const local = new Map(localUserMessages.map((message) => [message.id, message]));
+      // Keep the exact turn key through directory-only and hydrated history.
+      // A placeholder must not evict the only available body of a local input.
+      const merged = rows.map((row): ChatVirtualRow => {
+        const message = local.get(row.key);
+        local.delete(row.key);
+        return message && row.type === 'placeholder'
+          ? {
+              type: 'local-user',
+              key: row.key,
+              messageIndex: row.messageIndex,
+              content: message.content,
+            }
+          : row;
+      });
+      for (const message of local.values()) {
+        merged.push({
+          type: 'local-user',
+          key: message.id,
+          messageIndex: -1,
+          content: message.content,
+        });
+      }
+      return merged;
     }, [
       messageSelection,
       showThoughts,
@@ -1876,6 +1919,7 @@ export const SessionChatStreamView = forwardRef<
       assistantExpansionVersion,
       copyContextAvailable,
       items,
+      localUserMessages,
       lastAssistantMessageId,
       messageFileDiffEntriesByTurn,
     ]);
@@ -2017,10 +2061,12 @@ export const SessionChatStreamView = forwardRef<
       (messageId: string) => {
         const rowIndex = virtualRows.findIndex(
           (row) =>
-            row.type === 'standard' &&
-            row.item.type === 'message' &&
-            (row.item.message.id === messageId ||
-              row.groupedItems?.some((entry) => entry.message.id === messageId))
+            (row.type === 'local-user' && row.key === messageId) ||
+            (row.type === 'placeholder' && row.key === messageId) ||
+            (row.type === 'standard' &&
+              row.item.type === 'message' &&
+              (row.item.message.id === messageId ||
+                row.groupedItems?.some((entry) => entry.message.id === messageId)))
         );
         return rowIndex === -1 ? -1 : rowIndex + leadingRowCount;
       },
@@ -2057,13 +2103,16 @@ export const SessionChatStreamView = forwardRef<
         virtualRows.map((row) => ({
           key: row.key,
           turnId:
-            row.type === 'placeholder'
-              ? row.item.row.id
-              : row.item.type === 'message'
-                ? row.item.message.id
-                : row.key,
+            row.type === 'local-user'
+              ? row.key
+              : row.type === 'placeholder'
+                ? row.item.row.id
+                : row.item.type === 'message'
+                  ? row.item.message.id
+                  : row.key,
           turnIndex: row.messageIndex,
           ready: row.type !== 'placeholder',
+          local: row.type === 'local-user',
         })),
       [virtualRows]
     );
@@ -2248,8 +2297,11 @@ export const SessionChatStreamView = forwardRef<
       const endRow = clampRow(
         vlist.findItemIndex(vlist.scrollOffset + vlist.viewportSize) - leadingRowCount
       );
-      const from = rows[startRow]?.messageIndex;
-      const end = rows[endRow];
+      // Local rows have no history index. They must not request a bogus
+      // hydration range when the viewport contains only accepted inputs.
+      const historyRows = rows.slice(startRow, endRow + 1).filter((row) => row.messageIndex >= 0);
+      const from = historyRows[0]?.messageIndex;
+      const end = historyRows.at(-1);
       const to =
         end?.type === 'standard'
           ? (end.groupedItems?.at(-1)?.turnIndex ?? end.messageIndex)
@@ -2406,7 +2458,7 @@ export const SessionChatStreamView = forwardRef<
 
     // A non-null leading Fragment may render no DOM. Keep the entire empty
     // state outside Virtua even then, and mount it only with real messages.
-    if (!items.length || hasOnlyEmptyItem) {
+    if ((!items.length || hasOnlyEmptyItem) && !localUserMessages?.length) {
       return (
         <SessionChatActionContext.Provider value={chatActionContextValue}>
           <SessionImagePreviewContext.Provider value={imagePreviewContextValue}>
@@ -2459,7 +2511,7 @@ export const SessionChatStreamView = forwardRef<
     }
 
     // Keyed rows in list order: the leading row, the conversation, the activity
-    // row, and the pending (not yet committed) messages.
+    // row, and attachment preparation/action errors.
     const listRows = [
       leadingContent == null ? null : (
         <div key={LEADING_ROW_KEY} data-conversation-leading-content="">
@@ -2467,6 +2519,9 @@ export const SessionChatStreamView = forwardRef<
         </div>
       ),
       ...virtualRows.map((row, rowIndex) => {
+        if (row.type === 'local-user') {
+          return <div key={row.key}>{row.content}</div>;
+        }
         if (row.type === 'placeholder') {
           return <TurnPlaceholderRow key={row.key} row={row.item.row} />;
         }

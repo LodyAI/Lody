@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, useSyncExternalStore } from 'react';
+import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import { useAtomValue } from 'jotai';
 import {
   AlertCircle,
@@ -469,19 +469,18 @@ export function PendingMessageRow({
 }
 
 /**
- * Held sends render beside ordinary conversation messages, never in the
- * composer. `history` hides a send whose turn already landed: the write reaches
- * the conversation view before the held send is removed, and both must not show
- * at once. `user` is the local sender as the delivered row resolves it.
+ * Ready accepted inputs become individually keyed UI rows; attachment preparation
+ * stays in the trailing slot. Only a hydrated history body completes the handoff.
+ * Local input is neither authoritative history nor evidence of owner delivery.
  */
-export function SessionPendingMessages({
+export function useSessionPendingMessages({
   sessionId,
   history,
   user,
   conversationFontSize,
 }: {
   sessionId: SessionId;
-  history?: Pick<ConversationView, 'indexOf' | 'subscribe'> | null;
+  history?: Pick<ConversationView, 'indexOf' | 'turn' | 'subscribe'> | null;
   user?: SessionChatUser;
   conversationFontSize?: ConversationFontSize;
 }) {
@@ -496,7 +495,11 @@ export function SessionPendingMessages({
   const readLanded = () =>
     history
       ? sends
-          .filter((send) => history.indexOf(send.id) >= 0)
+          .filter((send) => {
+            if (send.sessionId !== sessionId) return false;
+            const index = history.indexOf(send.id);
+            return index >= 0 && history.turn(index) !== undefined;
+          })
           .map((send) => send.id)
           .join('\n')
       : '';
@@ -505,7 +508,6 @@ export function SessionPendingMessages({
     [history]
   );
   const landedKey = useSyncExternalStore(subscribeHistory, readLanded, readLanded);
-  const landed = new Set(landedKey ? landedKey.split('\n') : []);
   useEffect(() => {
     if (!landedKey || !pendingSends?.acknowledgeLanded) return;
     void pendingSends.acknowledgeLanded(landedKey.split('\n')).catch((error: unknown) => {
@@ -516,40 +518,88 @@ export function SessionPendingMessages({
   const [busy, setBusy] = useState<string | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
   // Queue-bound messages render in the queue sheet instead.
-  const pending = sends.filter(
-    (send) => send.sessionId === sessionId && !isQueueBoundSend(send) && !landed.has(send.id)
+  const pending = useMemo(() => {
+    const landed = new Set(landedKey ? landedKey.split('\n') : []);
+    return sends.filter(
+      (send) => send.sessionId === sessionId && !isQueueBoundSend(send) && !landed.has(send.id)
+    );
+  }, [sends, sessionId, landedKey]);
+  const delivered = useAtomValue(rpcDeliveredTurnsAtom);
+  const action = useCallback(
+    async (send: PendingSessionSend, kind: 'retry' | 'cancel') => {
+      setBusy(send.id);
+      try {
+        if (kind === 'cancel') await pendingSends?.cancel(send.id);
+        else pendingSends?.retry(send.id);
+        setFailure(null);
+      } catch (error) {
+        setFailure(error instanceof Error ? error.message : t('sessions.sendError'));
+      } finally {
+        setBusy(null);
+      }
+    },
+    [pendingSends, t]
   );
-  if (!pending.length) return null;
-  const action = async (send: PendingSessionSend, kind: 'retry' | 'cancel') => {
-    setBusy(send.id);
-    try {
-      if (kind === 'cancel') await pendingSends?.cancel(send.id);
-      else pendingSends?.retry(send.id);
-      setFailure(null);
-    } catch (error) {
-      setFailure(error instanceof Error ? error.message : t('sessions.sendError'));
-    } finally {
-      setBusy(null);
-    }
-  };
-  return (
-    <section aria-label={t('sessions.pendingSends', { count: pending.length })}>
-      {pending.map((send) => (
-        <PendingMessageRow
-          key={send.id}
-          record={send}
-          user={user}
-          conversationFontSize={conversationFontSize}
-          busy={busy === send.id}
-          onRetry={() => void action(send, 'retry')}
-          onCancel={() => void action(send, 'cancel')}
-        />
-      ))}
-      {failure ? (
+  const rows = useMemo(
+    () =>
+      pending.map((send) => ({
+        id: send.id,
+        accepted: Boolean(send.inputState),
+        content: (
+          <PendingMessageRow
+            key={send.id}
+            record={send}
+            user={user}
+            conversationFontSize={conversationFontSize}
+            busy={busy === send.id}
+            onRetry={() => void action(send, 'retry')}
+            onCancel={() => void action(send, 'cancel')}
+          />
+        ),
+      })),
+    [pending, user, conversationFontSize, busy, action]
+  );
+  const failureNotice = useMemo(
+    () =>
+      failure ? (
         <ConversationColumn className="pb-3">
           <PendingFailureNotice reason={failure} role="alert" />
         </ConversationColumn>
-      ) : null}
-    </section>
+      ) : null,
+    [failure]
   );
+  const localUserMessages = useMemo(() => rows.filter((row) => row.accepted), [rows]);
+  const heldRows = useMemo(() => rows.filter((row) => !row.accepted), [rows]);
+  const trailingContent = useMemo(
+    () =>
+      heldRows.length || failureNotice ? (
+        <section aria-label={t('sessions.pendingSends', { count: heldRows.length })}>
+          {heldRows.map((row) => row.content)}
+          {failureNotice}
+        </section>
+      ) : null,
+    [heldRows, failureNotice, t]
+  );
+  return {
+    localUserMessages,
+    isSending: pending.some(
+      (send) =>
+        Boolean(send.inputState) &&
+        send.inputState !== 'confirmed' &&
+        !send.error &&
+        send.delivery.kind === 'dispatch' &&
+        !delivered.has(getRpcDeliveredTurnKey(send.sessionId, send.id))
+    ),
+    trailingContent,
+    content: pending.length ? (
+      <section aria-label={t('sessions.pendingSends', { count: pending.length })}>
+        {rows.map((row) => row.content)}
+        {failureNotice}
+      </section>
+    ) : null,
+  };
+}
+
+export function SessionPendingMessages(props: Parameters<typeof useSessionPendingMessages>[0]) {
+  return useSessionPendingMessages(props).content;
 }
