@@ -13,6 +13,15 @@ Child directories such as `sessions/`, `mobile/`, `chat/`, and `archive/` own th
 | Session controls    | [`shared/workdir-mode-selector.tsx`](shared/workdir-mode-selector.tsx), [`shared/session-relation-card.tsx`](shared/session-relation-card.tsx) | Selects workdir mode and navigates session provenance.           |
 | Conversation access | [`session-sharing.tsx`](session-sharing.tsx), [`sharing/`](sharing/)                                                                           | Presents team visibility and static sharing controls.            |
 
+## About notices
+
+[`settings/open-source-attributions-dialog.tsx`](settings/open-source-attributions-dialog.tsx)
+keeps its heading outside one scrolling body containing the summary and both
+notice groups. The height-capped ScrollArea is a flex column, and its viewport
+can shrink to fit the dialog's available height. This keeps the last notice
+reachable even when summary cards stack in a short window. See the
+[scrolling fix](../../../../.agents/notes/implemented/bug-fix/2026-10-15-open-source-notices-scroll.md).
+
 ## Sidebar and session rows
 
 Machine-section ordering uses [`sidebar-machine-order.ts`](sidebar-machine-order.ts)
