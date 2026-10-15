@@ -2,7 +2,10 @@
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { SessionGoalMessage } from '@lody/shared';
-import { isAppForeground, shouldNotifySessionCompletion } from '../src/lib/session-completion-notification';
+import {
+  isAppForeground,
+  shouldNotifySessionCompletion,
+} from '../src/lib/session-completion-notification';
 
 const activeGoal: SessionGoalMessage = {
   type: 'goal',
@@ -18,6 +21,19 @@ const activeGoal: SessionGoalMessage = {
 };
 
 describe('shouldNotifySessionCompletion', () => {
+  it('keeps idle inference only for legacy machines', () => {
+    const input = {
+      initialized: true,
+      enabled: true,
+      previousStatusType: 'running' as const,
+      currentStatusType: 'idle' as const,
+      latestGoal: null,
+    };
+    expect(shouldNotifySessionCompletion(input)).toBe(true);
+    expect(shouldNotifySessionCompletion({ ...input, supportsTerminalNotifications: true })).toBe(
+      false
+    );
+  });
   it('notifies when a normal active turn transitions to idle', () => {
     expect(
       shouldNotifySessionCompletion({

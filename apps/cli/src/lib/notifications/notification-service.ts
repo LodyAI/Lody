@@ -1,3 +1,4 @@
+import type { TerminalOutcome } from '@lody/shared/notifications';
 import {
   type LiveActivityConversationItem,
   type LiveActivityPermissionAlert,
@@ -13,9 +14,10 @@ import { ConvexHttpClient } from 'convex/browser';
 import { api } from '@lody/cloud-api';
 import { Logger } from '@/utils/logger';
 
-export type SessionCompletionNotificationInput = {
+export type TurnOutcomeNotificationInput = {
   sessionId: SessionId;
   occurrenceId: string;
+  outcome?: TerminalOutcome;
   sessionTitle: string | null | undefined;
   pullRequests?: SessionPullRequestMeta[];
   workspaceId: WorkspaceId;
@@ -61,9 +63,19 @@ export class NotificationService {
   private client: ConvexHttpClient;
   private cliToken: string;
   private logger: Logger;
+  private terminalCapabilities?: Promise<boolean>;
 
   constructor(config: NotificationServiceConfig) {
-    this.client = new ConvexHttpClient(config.convexUrl);
+    this.client = new ConvexHttpClient(config.convexUrl, {
+      fetch: (input, init) =>
+        globalThis.fetch(input, {
+          ...init,
+          signal: AbortSignal.any([
+            ...(init?.signal ? [init.signal] : []),
+            AbortSignal.timeout(30_000),
+          ]),
+        }),
+    });
     this.cliToken = config.cliToken;
     this.logger = config.logger;
   }
@@ -72,8 +84,23 @@ export class NotificationService {
     return true;
   }
 
-  async notifySessionCompleted(input: SessionCompletionNotificationInput): Promise<void> {
+  private supportsTerminalOutcomes(): Promise<boolean> {
+    // Cache read-only negotiation for this client lifetime. No send has happened
+    // when this fails; submitted actions never trigger a legacy retry.
+    return (this.terminalCapabilities ??= this.client
+      .query(api.notifications.getCapabilities, {})
+      .then((value) => value.terminalOutcomes === 1)
+      .catch(() => false));
+  }
+
+  // Compatibility adapter: keep the legacy cloud port/action name and argument shape.
+  async notifySessionCompleted(input: TurnOutcomeNotificationInput): Promise<void> {
     try {
+      const modern = input.outcome !== undefined && (await this.supportsTerminalOutcomes());
+      if (input.outcome && input.outcome !== 'succeeded' && !modern) {
+        this.logger.debug('[notifications] Old server cannot represent a failed/interrupted turn');
+        return;
+      }
       const pullRequests = input.pullRequests?.flatMap((pr) => {
         const legacy = pr as SessionPullRequestLegacyMetaFields;
         const number = legacy.number ?? parseGitHubPrNumber(pr.url);
@@ -93,15 +120,15 @@ export class NotificationService {
         cliToken: this.cliToken,
         sessionId: input.sessionId,
         occurrenceId: input.occurrenceId,
-        sessionTitle: input.sessionTitle ?? undefined,
-        pullRequests,
+        ...(modern ? { outcome: input.outcome } : {}),
+        ...(modern ? {} : { sessionTitle: input.sessionTitle ?? undefined, pullRequests }),
         workspaceId: input.workspaceId,
         workspaceSlug: input.workspaceSlug,
         userId: input.userId,
       });
     } catch (error) {
       this.logger.debug(
-        `[notifications] Failed to send completion notification for ${input.sessionId}: ${
+        `[notifications] Failed to send turn outcome notification for ${input.sessionId}: ${
           error instanceof Error ? error.message : 'Unknown error'
         }`
       );
@@ -110,15 +137,21 @@ export class NotificationService {
 
   async notifyPermissionRequested(input: PermissionRequestNotificationInput): Promise<void> {
     try {
+      const modern = await this.supportsTerminalOutcomes();
       await this.client.action(api.notifications.notifyPermissionRequested, {
         cliToken: this.cliToken,
+        ...(modern ? { deliveryVersion: 1 as const } : {}),
         sessionId: input.sessionId,
         requestId: input.requestId,
         toolCallId: input.toolCallId,
-        toolTitle: input.toolTitle ?? undefined,
-        toolKind: input.toolKind ?? undefined,
+        ...(modern
+          ? {}
+          : {
+              toolTitle: input.toolTitle ?? undefined,
+              toolKind: input.toolKind ?? undefined,
+              sessionTitle: input.sessionTitle ?? undefined,
+            }),
         requestKind: input.requestKind,
-        sessionTitle: input.sessionTitle ?? undefined,
         workspaceId: input.workspaceId,
         workspaceSlug: input.workspaceSlug,
         userId: input.userId,

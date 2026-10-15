@@ -4,6 +4,7 @@ import type { LodyRateLimitsCapability } from 'acp-extension-core';
 import { queryLocalAcpRateLimits, AcpQuotaCleanupError } from '@/agent/acp-runner';
 import type { MachineProviderRateLimitsRefreshResponse } from '@lody/shared';
 import { ProviderQuotaRefreshCache } from './provider-quota-refresh-cache';
+import type { TurnOutcome, TurnOutcomeFact, TurnResultAudience } from '@lody/shared/notifications';
 import {
   AcpAuthenticationManager,
   type AcpAuthenticationProgressEvent,
@@ -238,6 +239,7 @@ type TurnFinalizationEffects = {
   /** Publish the workspace dirty/unpushed flags alone, for paths that skip diff stats. */
   syncWorkspaceGitState: (sessionId: SessionId, session: ISession) => Promise<void>;
   refreshCodeCollabSharedState?: (sessionId: SessionId) => Promise<void>;
+  onTurnOutcome?: (fact: TurnOutcomeFact) => Promise<void>;
   notifySessionCompleted: (
     sessionId: SessionId,
     userId: string,
@@ -287,6 +289,7 @@ type TurnInvocation = {
   sourceTurnId: string;
   requesterUserId?: string;
   inputConfig: SessionTurnInputConfig;
+  notificationAudience?: TurnResultAudience;
 };
 
 type TurnRuntimeState = {
@@ -305,6 +308,8 @@ type TurnRuntimeState = {
   promptFailed: boolean;
   finalizeStarted: boolean;
   finalizeCompleted: boolean;
+  notificationOutcome?: TurnOutcome;
+  notificationAttempted?: boolean;
   /** Publish-once latch for the workspace git-state flags; both cancel routes read it. */
   workspaceGitStateSynced: boolean;
   prePromptFailureRecorded: boolean;
@@ -439,6 +444,7 @@ export type SessionDispatchSource = 'rpc' | 'crdt' | 'queue' | 'inbox' | 'goal';
 
 type SessionDispatchOptions = {
   inboxBatch?: InboxBatch;
+  notificationAudience?: TurnResultAudience;
   dispatchSource?: SessionDispatchSource;
   /** Goal action this turn exists to run; travels to the agent as prompt metadata. */
   goalControl?: GoalPromptControl;
@@ -2185,6 +2191,8 @@ export class SessionExecutionService {
         // The provider has accepted this steer and may execute tools before
         // history/finalization catches up. Switch causal identity first.
         const switchInvocation = () => {
+          runtime.notificationOutcome = undefined;
+          runtime.notificationAttempted = false;
           runtime.invocation = {
             sourceTurnId: options.userTurnId,
             requesterUserId: options.userId,
@@ -3259,6 +3267,12 @@ export class SessionExecutionService {
     code?: string;
     message: string;
   }): Promise<void> {
+    const notificationRuntime = this.turnRuntimeBySession.get(options.sessionId);
+    if (notificationRuntime)
+      notificationRuntime.notificationOutcome = {
+        kind: 'failed',
+        code: options.code ?? options.reason,
+      };
     // turn_failed (spec §5b, P0). These are known, pre-prompt halts — not ACP
     // protocol errors — so is_acp_error=false.
     this.captureTurnFailed(
@@ -3790,6 +3804,13 @@ export class SessionExecutionService {
       return;
     }
 
+    const notificationRuntime = this.getTurnRuntime(sessionId, turnId);
+    if (notificationRuntime)
+      notificationRuntime.notificationOutcome =
+        ctx.producedOutput === false
+          ? { kind: 'failed', code: 'no_agent_output' }
+          : { kind: 'succeeded' };
+
     let preferredStatsBaseBranch = project?.branch;
     if (project?.kind === 'local') {
       preferredStatsBaseBranch =
@@ -3910,6 +3931,8 @@ export class SessionExecutionService {
       return;
     }
 
+    // New consumers own all outcomes. Legacy embedders retain the old callback.
+    if (this.deps.turnFinalization.onTurnOutcome) return;
     await this.runTurnFinalizationStage(sessionId, turnId, 'notifySessionCompleted', async () => {
       if (ctx.inputTurnId) {
         const input = await (
@@ -4522,6 +4545,7 @@ export class SessionExecutionService {
         );
       } else if (isSessionTurnHalted(error)) {
         outcome = `halted-${error.reason}`;
+        runtime.notificationOutcome = { kind: 'failed', code: error.reason };
         await this.finalizeHaltedTurn({
           sessionId,
           sessionDoc,
@@ -4536,7 +4560,24 @@ export class SessionExecutionService {
         (await this.isUserTurnCancelled(sessionDoc, runtime.userTurnId))
       ) {
         outcome = 'cancelled';
+        const explicitlyCancelled =
+          runtime.cancelRequested ||
+          this.isTurnCancelled(sessionId, runtime.turnId) ||
+          (await this.isUserTurnCancelled(sessionDoc, runtime.userTurnId));
+        runtime.notificationOutcome = explicitlyCancelled
+          ? { kind: 'cancelled' }
+          : { kind: 'unknown', code: 'execution_interrupted' };
       } else {
+        const parsedError = parseACPError(error);
+        runtime.notificationOutcome = isAgentDisconnectedError(error)
+          ? { kind: 'unknown', code: 'agent_disconnected' }
+          : {
+              kind: 'failed',
+              code: parsedError
+                ? mapACPErrorToFailureReason(parsedError)
+                : effectiveErrorContext.code,
+            };
+        await this.publishTurnNotificationOutcome(runtime);
         await this.handleVisibleTurnUnhandledError({
           sessionId,
           sessionDoc,
@@ -4550,6 +4591,9 @@ export class SessionExecutionService {
         outcome = 'unhandled-error-recorded';
       }
     } finally {
+      if (runtime.cancelRequested && !runtime.initializationStalled)
+        runtime.notificationOutcome = { kind: 'cancelled' };
+      await this.publishTurnNotificationOutcome(runtime);
       if (!runtime.promptStarted) {
         this.deps.clearConversationTurn(sessionId, runtime.turnId);
       }
@@ -4599,6 +4643,51 @@ export class SessionExecutionService {
       this.onInboxReleased?.(sessionId);
     }
     return outcome;
+  }
+
+  /** Freeze provenance once the exact input is available; never changes authorization. */
+  setTurnNotificationAudience(
+    sessionId: SessionId,
+    sourceTurnId: string,
+    audience: TurnResultAudience
+  ): void {
+    const invocation = this.turnRuntimeBySession.get(sessionId)?.invocation;
+    if (
+      invocation?.sourceTurnId === sourceTurnId &&
+      (!invocation.notificationAudience || invocation.notificationAudience.kind === 'unknown')
+    ) {
+      invocation.notificationAudience = { ...audience };
+    }
+  }
+
+  private async publishTurnNotificationOutcome(runtime: TurnRuntimeState): Promise<void> {
+    const publish = this.deps.turnFinalization.onTurnOutcome;
+    const invocation = runtime.invocation;
+    if (
+      !publish ||
+      runtime.notificationAttempted ||
+      !runtime.notificationOutcome ||
+      !invocation?.requesterUserId
+    )
+      return;
+    const fact: TurnOutcomeFact = {
+      scope: { workspaceId: this.deps.workspaceId, recipientId: invocation.requesterUserId },
+      sessionId: runtime.sessionId,
+      turnId: invocation.sourceTurnId,
+      audience: invocation.notificationAudience ?? { kind: 'unknown' },
+      outcome: { ...runtime.notificationOutcome },
+    };
+    // Mark before invoking the consumer: a failed or uncertain submission ends
+    // this notification, including when finalization is entered again.
+    runtime.notificationAttempted = true;
+    try {
+      await publish(fact);
+    } catch (error) {
+      // Notification failure must not replay provider execution or notification.
+      this.deps.logger.error(
+        `[${runtime.sessionId}] Turn notification submission failed: ${formatErrorMessage(error)}`
+      );
+    }
   }
 
   private markCurrentTurn(sessionId: SessionId, turnId: string): void {
@@ -5867,6 +5956,7 @@ export class SessionExecutionService {
       runtime.finalizeCompleted = true;
 
       yield* abortIfCancelled();
+      yield* self.tryPromise(() => self.publishTurnNotificationOutcome(runtime));
 
       if (!producedOutput) {
         runtime.promptFailed = true;
@@ -5938,6 +6028,7 @@ export class SessionExecutionService {
           sourceTurnId: userTurnId,
           requesterUserId: userId,
           inputConfig: acpSessionConfig,
+          notificationAudience: dispatchOptions?.notificationAudience,
         },
         ...(dispatchOptions?.dispatchSource === 'inbox'
           ? { assistantEntryParentTurnId: userTurnId }
@@ -6591,6 +6682,7 @@ export class SessionExecutionService {
           runtime.finalizeCompleted = true;
 
           yield* abortIfCancelled();
+          yield* self.tryPromise(() => self.publishTurnNotificationOutcome(runtime));
 
           if (!producedOutput) {
             runtime.promptFailed = true;

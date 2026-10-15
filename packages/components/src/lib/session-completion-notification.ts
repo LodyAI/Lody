@@ -1,7 +1,9 @@
 import type { SessionGoalMessage } from '@lody/shared';
 
 export function isAppForeground(): boolean {
-  return typeof document !== 'undefined' && document.visibilityState === 'visible' && document.hasFocus();
+  return (
+    typeof document !== 'undefined' && document.visibilityState === 'visible' && document.hasFocus()
+  );
 }
 
 export type SessionCompletionNotificationStatus =
@@ -12,6 +14,7 @@ export type SessionCompletionNotificationStatus =
 
 export type ShouldNotifySessionCompletionInput = {
   initialized: boolean;
+  supportsTerminalNotifications?: boolean;
   enabled: boolean;
   previousStatusType: SessionCompletionNotificationStatus | undefined;
   currentStatusType: SessionCompletionNotificationStatus;
@@ -20,11 +23,13 @@ export type ShouldNotifySessionCompletionInput = {
 
 export function shouldNotifySessionCompletion({
   initialized,
+  supportsTerminalNotifications,
   enabled,
   previousStatusType,
   currentStatusType,
 }: ShouldNotifySessionCompletionInput): boolean {
   return (
+    !supportsTerminalNotifications &&
     initialized &&
     enabled &&
     previousStatusType !== undefined &&

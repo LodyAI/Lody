@@ -1,5 +1,6 @@
 import type { Effect, Scope } from 'effect';
 export type { LoroStreamsTokenProvider } from '@lody/shared';
+import type { TerminalOutcome } from '@lody/shared/notifications';
 import type {
   LiveActivityConversationItem,
   LiveActivityPermissionAlert,
@@ -174,6 +175,7 @@ export interface CloudNotificationsPort {
   notifySessionCompleted(input: {
     sessionId: SessionId;
     occurrenceId: string;
+    outcome?: TerminalOutcome;
     sessionTitle?: string | null;
     pullRequests?: readonly SessionPullRequestMeta[];
     workspaceId: WorkspaceId;

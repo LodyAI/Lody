@@ -1,4 +1,5 @@
 import type { LodyRateLimitsCapability } from 'acp-extension-core';
+import { terminalNotificationSchema, type TerminalNotification } from '@lody/shared/notifications';
 import { createSessionAgentWrites, type SessionAgentWrites } from './session-agent-writes';
 import { createSessionBackend, disposeSessionBackend } from '@/session/session-backend';
 import type { SessionBackend, SessionBackendFactory } from '@/session/session-backend';
@@ -2485,6 +2486,7 @@ export class SessionDocument implements LoroDocument<Omit<SessionDocMeta, 'histo
       humanInputReceipts: state.humanInputReceipts as SessionDocMeta['humanInputReceipts'],
       cancelRequest: state.cancelRequest as SessionDocMeta['cancelRequest'],
       forkOperation: state.forkOperation as SessionDocMeta['forkOperation'],
+      notification: state.notification,
       preview: state.preview as SessionDocMeta['preview'],
       externalHistoryCursor: state.externalHistoryCursor as SessionDocMeta['externalHistoryCursor'],
       roostHistoryCursor: state.roostHistoryCursor as SessionDocMeta['roostHistoryCursor'],
@@ -3038,6 +3040,21 @@ export class SessionDocument implements LoroDocument<Omit<SessionDocMeta, 'histo
       this.sessionId
     );
     this.logger.debug(`[${this.sessionId}] setStatus: upsertDocMeta complete`);
+  }
+
+  /** Publish the latest terminal projection, not a delivery queue. The UUID
+   * index makes only this changed document discoverable without history scans.
+   */
+  async publishTerminalNotification(notification: TerminalNotification): Promise<void> {
+    if (!this.mirror) throw new Error('Mirror not initialized');
+    terminalNotificationSchema.parse(notification);
+    const current = await this.repo.getDocMeta(this.roomId);
+    if (!current || isLoroRepoDocDeleted(current)) return;
+    this.mirror.setState((prev) => ({ ...prev, notification }));
+    // Commit the control document before exposing its activation index. This is
+    // best effort across independently synced documents, not a delivery barrier.
+    this.handle?.doc.commit();
+    await this.repo.upsertDocMeta(this.roomId, { notificationId: notification.id });
   }
 
   async getPreviewState(): Promise<SessionPreviewDocState | undefined> {

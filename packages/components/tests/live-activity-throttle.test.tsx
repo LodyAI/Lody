@@ -225,7 +225,7 @@ describe('useLodyLiveActivity summary throttling', () => {
     expect(syncedPayloads.at(-1)?.totalCount).toBe(1 + burstMs / stepMs);
   });
 
-  it('delivers a permission alert raised in the middle of an ongoing metadata burst', async () => {
+  it('promptly projects a permission request silently during a metadata burst', async () => {
     await mount();
     await advance(SYNC_DEBOUNCE_MS);
     syncedPayloads.length = 0;
@@ -244,36 +244,37 @@ describe('useLodyLiveActivity summary throttling', () => {
       await advance(50);
     }
 
-    const alertPayload = syncedPayloads.find((payload) => payload.permissionAlert !== undefined);
-    expect(alertPayload?.permissionAlert).toEqual({
-      title: 'Permission Required',
-      body: 'Task b',
-    });
-    // The flush also refreshes the summary, so the alert does not ship next to a
-    // stale item list that omits the session asking for permission.
+    const alertPayload = syncedPayloads.find((payload) => payload.statusCounts.permission > 0);
+    expect(alertPayload).toBeDefined();
+    expect(syncedPayloads.every((payload) => payload.permissionAlert === undefined)).toBe(true);
+    // The silent flush must include the session asking for permission.
     expect(alertPayload?.items.map((item) => [item.id, item.status])).toContainEqual([
       'b',
       'permission',
     ]);
   });
 
-  it('does not re-alert or resume summary sync while the same permission request is pending', async () => {
+  it('keeps the summary current while a permission request is pending without adding alerts', async () => {
     await mount();
     await advance(SYNC_DEBOUNCE_MS);
     await setPresence(presence('b', { type: 'requestPermission' }, Date.now()));
     await setSessions([session('a'), session('b')]);
     await advance(SYNC_DEBOUNCE_MS);
-    expect(syncedPayloads.at(-1)?.permissionAlert).toBeDefined();
+    expect(syncedPayloads.at(-1)?.statusCounts.permission).toBe(1);
     syncedPayloads.length = 0;
 
-    // Further batches must not replace the just-shown alert with a plain summary.
+    // Other conversations continue progressing while this request is unanswered.
     for (let step = 1; step <= 40; step += 1) {
       await metadataBatch(step, [session('b')]);
       await advance(50);
     }
-    expect(syncedPayloads).toHaveLength(0);
+    await advance(LIVE_ACTIVITY_SUMMARY_THROTTLE_MS);
+    await advance(SYNC_DEBOUNCE_MS);
+    expect(syncedPayloads.at(-1)?.totalCount).toBe(42);
+    expect(syncedPayloads.at(-1)?.statusCounts.permission).toBe(1);
+    expect(syncedPayloads.every((payload) => payload.permissionAlert === undefined)).toBe(true);
 
-    // Once the request is answered, ordinary summaries resume.
+    // Answering the request clears its state in the ordinary summary.
     await setPresence(presence('b', { type: 'running' }, Date.now()));
     await advance(LIVE_ACTIVITY_SUMMARY_THROTTLE_MS);
     await advance(SYNC_DEBOUNCE_MS);
@@ -346,6 +347,58 @@ describe('useLodyLiveActivity summary throttling', () => {
     expect(syncedPayloads).toHaveLength(1);
     expect(syncedPayloads[0]?.activityId).toBe('lody-conversations:v5:ws-2:user-1');
     expect(syncedPayloads[0]?.items.map((item) => item.id)).toEqual(['z']);
+  });
+
+  it('cancels a pending summary on logout without sending the previous account payload', async () => {
+    await mount();
+    await act(async () => {
+      store.set(testAtoms.userAtom as PrimitiveAtom<{ id: string } | null>, null);
+    });
+    await advance(LIVE_ACTIVITY_SUMMARY_THROTTLE_MS);
+    await advance(SYNC_DEBOUNCE_MS);
+    expect(syncedPayloads).toEqual([]);
+    expect(endedActivityIds).toEqual([ACTIVITY_ID_WS_1]);
+  });
+
+  it('publishes an empty summary when the last item is read so native can end it', async () => {
+    await mount();
+    await advance(SYNC_DEBOUNCE_MS);
+    await setSessions([session('a', { lastReadAt: NOW_MS })]);
+    await advance(LIVE_ACTIVITY_SUMMARY_THROTTLE_MS);
+    await advance(SYNC_DEBOUNCE_MS);
+    expect(syncedPayloads.at(-1)).toMatchObject({
+      totalCount: 0,
+      items: [],
+      statusCounts: { permission: 0, question: 0, running: 0, unread: 0 },
+    });
+  });
+
+  it('does not retry a failed bridge update but permits later fresh state', async () => {
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+    let rejectUpdate!: (reason: Error) => void;
+    const bridge = (window as LiveActivityBridgeWindow).__LODY_LIVE_ACTIVITY__!;
+    const sync = bridge.syncConversationSummary;
+    bridge.syncConversationSummary = (payload) => {
+      syncedPayloads.push(structuredClone(payload));
+      return new Promise((_, reject) => {
+        rejectUpdate = reject;
+      });
+    };
+    try {
+      await mount();
+      await advance(SYNC_DEBOUNCE_MS);
+      await act(async () => {
+        rejectUpdate(new Error('native unavailable'));
+      });
+      await advance(5_000);
+      expect(syncedPayloads).toHaveLength(1);
+      bridge.syncConversationSummary = sync;
+      await setSessions([session('b')]);
+      await advance(SYNC_DEBOUNCE_MS);
+      expect(syncedPayloads.at(-1)?.items.map((item) => item.id)).toEqual(['b']);
+    } finally {
+      errors.mockRestore();
+    }
   });
 
   it('ends the activity on unmount', async () => {

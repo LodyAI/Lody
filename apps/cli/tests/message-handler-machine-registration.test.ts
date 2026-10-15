@@ -189,6 +189,7 @@ describe('MessageHandler machine registration', () => {
       providerRateLimitsRefresh: 1,
       magpieImport: 1,
       dshProviderIsolation: 1,
+      terminalNotifications: 1,
       memoryProviders: 1,
       sessionHistory: 2,
       sessionInputAcceptance: 1,

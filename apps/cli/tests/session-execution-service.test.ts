@@ -1,6 +1,7 @@
 import * as quotaRunner from '../src/agent/acp-runner';
 import { ProviderQuotaRefreshCache } from '../src/session/provider-quota-refresh-cache';
 import { createSessionBackend } from '@/session/session-backend';
+import type { TurnOutcomeFact, TurnResultAudience } from '@lody/shared/notifications';
 import {
   RequestError,
   type ContentBlock,
@@ -2546,6 +2547,10 @@ describe('SessionExecutionService', () => {
     attempts?: number;
     hasPromptOutputForTurn: boolean;
     dispatchSource?: 'rpc' | 'crdt' | 'queue' | 'goal';
+    promptFailure?: unknown;
+    notificationAudience?: TurnResultAudience;
+    onTurnOutcome?: (fact: TurnOutcomeFact) => Promise<void>;
+    legacyNotifications?: boolean;
     onTurnClaimed?: () => Promise<boolean>;
     onTurnStarted?: () => Promise<boolean>;
   }) => {
@@ -2571,7 +2576,10 @@ describe('SessionExecutionService', () => {
     const agentClient = {
       isCreated: vi.fn(() => true),
       cancel: vi.fn(async () => {}),
-      prompt: vi.fn(async () => ({ stopReason: 'end_turn' })),
+      prompt: vi.fn(async () => {
+        if (options.promptFailure) throw options.promptFailure;
+        return { stopReason: 'end_turn' };
+      }),
       currentModel: undefined,
     };
     const activeSession = {
@@ -2600,6 +2608,7 @@ describe('SessionExecutionService', () => {
         history = updater(history);
       }),
     });
+    const notificationFacts: TurnOutcomeFact[] = [];
     const notifySessionCompleted = vi.fn(async () => {});
     const finalizationOwners: boolean[] = [];
     const upsertDocMeta = vi.fn(async () => {});
@@ -2632,6 +2641,14 @@ describe('SessionExecutionService', () => {
       turnFinalization: {
         ...createBaseDeps({}).turnFinalization,
         notifySessionCompleted,
+        ...(options.legacyNotifications
+          ? {}
+          : {
+              onTurnOutcome: async (fact: TurnOutcomeFact) => {
+                await options.onTurnOutcome?.(fact);
+                notificationFacts.push(fact);
+              },
+            }),
         finalizeACPState: vi.fn(async (_sessionId, turnId) => {
           finalizationOwners.push(
             service.getExecutionSnapshot(options.sessionId as SessionId).hasActiveTurn
@@ -2643,6 +2660,7 @@ describe('SessionExecutionService', () => {
         }),
       },
       observePromptOutputForTurn: vi.fn(() => options.hasPromptOutputForTurn),
+      hasPromptOutputForTurn: vi.fn(() => options.hasPromptOutputForTurn),
     });
 
     const service = new SessionExecutionService(deps);
@@ -2660,13 +2678,12 @@ describe('SessionExecutionService', () => {
           userName: 'User',
           userEmail: 'user@example.com',
         },
-        options.dispatchSource
-          ? {
-              dispatchSource: options.dispatchSource,
-              ...(options.onTurnClaimed ? { onTurnClaimed: options.onTurnClaimed } : {}),
-              ...(options.onTurnStarted ? { onTurnStarted: options.onTurnStarted } : {}),
-            }
-          : undefined
+        {
+          notificationAudience: options.notificationAudience ?? { kind: 'user' },
+          ...(options.dispatchSource ? { dispatchSource: options.dispatchSource } : {}),
+          ...(options.onTurnClaimed ? { onTurnClaimed: options.onTurnClaimed } : {}),
+          ...(options.onTurnStarted ? { onTurnStarted: options.onTurnStarted } : {}),
+        }
       );
     }
 
@@ -2674,6 +2691,7 @@ describe('SessionExecutionService', () => {
       deps,
       sessionDoc,
       notifySessionCompleted,
+      notificationFacts,
       upsertDocMeta,
       agentClient,
       getHistory: () => history,
@@ -2682,6 +2700,96 @@ describe('SessionExecutionService', () => {
       service,
     });
   };
+
+  it.each([
+    { output: true, outcome: { kind: 'succeeded' } },
+    { output: false, outcome: { kind: 'failed', code: 'no_agent_output' } },
+  ])(
+    'publishes the trusted terminal fact with the frozen requester ($outcome.kind)',
+    async ({ output, outcome }) => {
+      const { notificationFacts, getHistory } = await runSilentPromptTurn({
+        sessionId: 'notification-source',
+        hasPromptOutputForTurn: output,
+      });
+      expect(notificationFacts).toEqual([
+        {
+          scope: { workspaceId: 'workspace-1', recipientId: 'user-1' },
+          sessionId: 'notification-source',
+          turnId: 'turn-user-1',
+          audience: { kind: 'user' },
+          outcome,
+        },
+      ]);
+      expect(getHistory()[0]?.status).toBe(output ? 'handled' : 'failed');
+    }
+  );
+
+  it('preserves delegated audience on the terminal fact without substituting the host owner', async () => {
+    const audience = {
+      kind: 'agent',
+      sessionId: 'parent' as SessionId,
+      turnId: 'parent-input',
+    } as const;
+    const { notificationFacts } = await runSilentPromptTurn({
+      sessionId: 'notification-child',
+      hasPromptOutputForTurn: true,
+      notificationAudience: audience,
+    });
+    expect(notificationFacts).toEqual([
+      {
+        scope: { workspaceId: 'workspace-1', recipientId: 'user-1' },
+        sessionId: 'notification-child',
+        turnId: 'turn-user-1',
+        audience,
+        outcome: { kind: 'succeeded' },
+      },
+    ]);
+  });
+
+  it('publishes provider failure separately from successful completion', async () => {
+    const { notificationFacts, getHistory } = await runSilentPromptTurn({
+      sessionId: 'notification-failure',
+      hasPromptOutputForTurn: true,
+      promptFailure: new Error('synthetic provider failure'),
+    });
+    expect(notificationFacts).toEqual([
+      {
+        scope: { workspaceId: 'workspace-1', recipientId: 'user-1' },
+        sessionId: 'notification-failure',
+        turnId: 'turn-user-1',
+        audience: { kind: 'user' },
+        outcome: { kind: 'failed', code: 'session_chat_failed' },
+      },
+    ]);
+    expect(getHistory()[0]?.status).toBe('failed');
+  });
+
+  it('retains disconnected execution as unknown instead of claiming success', async () => {
+    const { notificationFacts } = await runSilentPromptTurn({
+      sessionId: 'notification-disconnected',
+      hasPromptOutputForTurn: true,
+      promptFailure: new Error('Connection is disposed'),
+    });
+    expect(notificationFacts.map((fact) => fact.outcome)).toEqual([
+      { kind: 'unknown', code: 'agent_disconnected' },
+    ]);
+  });
+
+  it('a failed notification is attempted once without replaying the completed provider turn', async () => {
+    const attempts: TurnOutcomeFact[] = [];
+    const { notificationFacts, getHistory, agentClient } = await runSilentPromptTurn({
+      sessionId: 'notification-store-failure',
+      hasPromptOutputForTurn: true,
+      onTurnOutcome: async (fact) => {
+        attempts.push(fact);
+        throw new Error('synthetic notification failure');
+      },
+    });
+    expect(notificationFacts).toEqual([]);
+    expect(attempts.map((fact) => fact.outcome)).toEqual([{ kind: 'succeeded' }]);
+    expect(getHistory()[0]?.status).toBe('handled');
+    expect(agentClient.prompt).toHaveBeenCalledOnce();
+  });
 
   it('fails a turn whose prompt completed without emitting any agent output', async () => {
     const { deps, sessionDoc, notifySessionCompleted, upsertDocMeta, agentClient, getHistory } =
@@ -2710,15 +2818,17 @@ describe('SessionExecutionService', () => {
     );
   });
 
-  it('leaves a turn that emitted agent output on the normal completion path', async () => {
-    const { deps, notifySessionCompleted, getHistory } = await runSilentPromptTurn({
-      sessionId: 'session-output-turn',
-      hasPromptOutputForTurn: true,
-    });
+  it('publishes an output turn through the new consumer without the legacy sender', async () => {
+    const { deps, notifySessionCompleted, getHistory, notificationFacts } =
+      await runSilentPromptTurn({
+        sessionId: 'session-output-turn',
+        hasPromptOutputForTurn: true,
+      });
 
     expect(deps.recordChatFailure).not.toHaveBeenCalled();
     expect(getHistory()[0]?.status).toBe('handled');
-    expect(notifySessionCompleted).toHaveBeenCalledTimes(1);
+    expect(notifySessionCompleted).not.toHaveBeenCalled();
+    expect(notificationFacts[0]?.outcome).toEqual({ kind: 'succeeded' });
   });
 
   it.each(['agent', 'human'] as const)(
@@ -2735,6 +2845,7 @@ describe('SessionExecutionService', () => {
         await runSilentPromptTurn({
           sessionId: `session-notify-${kind}`,
           hasPromptOutputForTurn: true,
+          legacyNotifications: true,
           inputAuthor: kind === 'agent' ? agentAuthor : { v: 1, kind: 'human', userId: 'user-1' },
           earlierInputAuthor: kind === 'human' ? agentAuthor : undefined,
         });
@@ -8156,6 +8267,10 @@ describe('SessionExecutionService', () => {
       processMessageQueue: vi.fn(async () => {}),
     });
 
+    const notificationFacts: TurnOutcomeFact[] = [];
+    deps.turnFinalization.onTurnOutcome = async (fact) => {
+      notificationFacts.push(fact);
+    };
     service = new SessionExecutionService(deps);
     await service.continueSession({
       type: 'session/chat',
@@ -8170,6 +8285,7 @@ describe('SessionExecutionService', () => {
       userEmail: 'user@example.com',
     });
 
+    expect(notificationFacts.map((fact) => fact.outcome)).toEqual([{ kind: 'cancelled' }]);
     expect(agentClient.cancel).toHaveBeenCalledWith('acp-prompt-cancel-resolved');
     expect(deps.turnFinalization.finalizeACPState).toHaveBeenCalledTimes(2);
     expect(deps.turnFinalization.finalizeACPState).toHaveBeenLastCalledWith(
@@ -10705,16 +10821,33 @@ describe('Operation Inbox execution boundary', () => {
     }
   );
 
-  it('submits one intact human input with eight results through the actual prompt boundary', async () => {
+  it.each<TurnResultAudience>([
+    { kind: 'user' },
+    { kind: 'agent', sessionId: 'sender-session' as SessionId, turnId: 'sender-turn' },
+    { kind: 'unknown' },
+  ])('preserves the $kind audience when an input carries eight Inbox results', async (audience) => {
     const received: ContentBlock[][] = [];
     const f = inboxExecutionFixture(async (blocks) => {
       received.push(structuredClone(blocks));
       return { stopReason: 'end_turn' };
     });
+    const notificationFacts: TurnOutcomeFact[] = [];
+    f.deps.turnFinalization.onTurnOutcome = async (fact) => {
+      notificationFacts.push(fact);
+    };
     try {
       for (let i = 0; i < 8; i++) f.add(`saved-${i}`, i === 0 ? 15 : 0);
       await f.accept();
-      await f.service.continueSession(f.message);
+      await f.service.continueSession(f.message, { notificationAudience: audience });
+      expect(notificationFacts).toEqual([
+        {
+          scope: { workspaceId: 'workspace-1', recipientId: 'user-1' },
+          sessionId: f.message.sessionId,
+          turnId: 'human-input',
+          audience,
+          outcome: { kind: 'succeeded' },
+        },
+      ]);
       expect(received).toHaveLength(1);
       expect(received[0][0]).toEqual({ type: 'text', text: 'CURRENT_REQUEST' });
       const results = received[0]

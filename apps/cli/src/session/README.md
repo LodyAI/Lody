@@ -15,6 +15,16 @@ CLI/MCP orchestration contract is specs/session-orchestration.md.
 | Execution        | [Execution service](session-execution-service.ts) | Owns turns, steer results, cancellation, and raw-request drain.                      |
 | Process lifetime | [Session](session.ts)                             | Owns ACP resources, confirmed termination, and bounded Codex refresh-start recovery. |
 
+## Terminal notification facts
+
+Execution publishes typed terminal facts using the frozen invocation requester and
+input turn identity. Input author provenance determines result audience; Session
+containment does not. `onTurnOutcome` is attempted once, even on failure; its consumer
+publishes the latest desktop projection and submits mobile independently. Installing
+this consumer disables the legacy execution completion sender. Older embedders retain
+that callback. No notification journal, retry or replay. See [notification ownership rules](../lib/notifications/AGENTS.md).
+A notification failure cannot replay Agent execution.
+
 ## Files
 
 - `session-dispatch-watcher.ts` — the current dispatch entry: watches

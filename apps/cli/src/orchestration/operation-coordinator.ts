@@ -373,7 +373,14 @@ export class LodyOperationCoordinator {
           chainDepth: batch.chainDepth,
         },
       },
-      { dispatchSource: 'inbox', inboxBatch: batch }
+      {
+        dispatchSource: 'inbox',
+        inboxBatch: batch,
+        // A synthetic batch can combine several frozen Operation authors. It is
+        // never a fresh human input; do not invent one author or notify its user.
+        // Human turns carrying Inbox results retain their own invocation audience.
+        notificationAudience: { kind: 'unknown' },
+      }
     );
   }
 

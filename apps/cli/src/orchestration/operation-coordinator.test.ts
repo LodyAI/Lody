@@ -25,6 +25,7 @@ import {
   type WorkspaceId,
 } from '@lody/shared';
 
+import { projectTurnAttention, type TurnResultAudience } from '@lody/shared/notifications';
 import { LodyOperationCoordinator } from './operation-coordinator';
 import { LodyOperationStore } from './operation-store';
 
@@ -40,6 +41,7 @@ const TEST_NOW_MS = Date.parse('2026-07-20T00:00:00Z');
 
 const makeHarness = async (options?: {
   deadlineAt?: string;
+  author?: import('@lody/shared').AgentMessageAuthor;
   requesterArchived?: boolean;
   pendingUser?: boolean;
   busy?: boolean;
@@ -231,7 +233,13 @@ const makeHarness = async (options?: {
   let pendingUser = options?.pendingUser ?? false;
   let busy = options?.busy ?? false;
   const continueSession = vi.fn(
-    async (message: unknown, dispatch?: { inboxBatch?: import('./inbox/model').InboxBatch }) => {
+    async (
+      message: unknown,
+      dispatch?: {
+        inboxBatch?: import('./inbox/model').InboxBatch;
+        notificationAudience?: TurnResultAudience;
+      }
+    ) => {
       const typedMessage = message as { sessionId: SessionId; userTurnId: string };
       await options?.beforeTurnClaim?.();
       const assistantTurnId = `assistant:${typedMessage.userTurnId}`;
@@ -368,9 +376,11 @@ const makeHarness = async (options?: {
     requesterSessionId,
     requesterUserId: 'user-1',
     operationId: 'review-round-1',
+    ...(options?.author ? { author: options.author } : {}),
     kind: options?.operationKind ?? 'session_chat',
     canonicalCommand: { sessionId: targetSessionId, prompt: 'work' },
     frozenContinuationConfig: {
+      ...(options?.author ? { sourceTurnId: options.author.turnId } : {}),
       ...(options?.agentConfigId ? { agentConfigId: options.agentConfigId } : {}),
       inputConfig: { cliType: 'builtin', agentType: 'codex', chainDepth: 0 },
     },
@@ -429,6 +439,57 @@ afterEach(async () => {
 });
 
 describe('LodyOperationCoordinator', () => {
+  it.each([
+    undefined,
+    {
+      v: 1 as const,
+      kind: 'agent' as const,
+      sessionId: 'requester-1',
+      turnId: 'origin-turn',
+      name: 'Delegating agent',
+    },
+  ])('keeps synthetic Inbox continuations silent with frozen author %j', async (author) => {
+    const completed = Promise.withResolvers<void>();
+    const harness = await makeHarness({ author, afterTurnComplete: completed.resolve });
+    const store = new LodyOperationStore(harness.storePath, () => TEST_NOW_MS);
+    try {
+      store.finish(harness.requesterSessionId, 'review-round-1', {
+        type: 'result',
+        value: { items: [] },
+      });
+      harness.coordinator.start();
+      await completed.promise;
+      await harness.coordinator.stop();
+
+      const [message, dispatch] = harness.continueSession.mock.calls[0] ?? [];
+      expect(dispatch?.notificationAudience).toEqual({ kind: 'unknown' });
+      const input = message as { userTurnId: string };
+      expect(
+        projectTurnAttention({
+          scope: { workspaceId: harness.coordinatorOptions.workspaceId, recipientId: 'user-1' },
+          sessionId: harness.requesterSessionId,
+          turnId: input.userTurnId,
+          audience: dispatch?.notificationAudience ?? { kind: 'user' },
+          outcome: { kind: 'succeeded' },
+        })
+      ).toBeNull();
+      expect(queuedResults(store, harness.coordinatorOptions.workspaceId)).toEqual([]);
+      expect(harness.histories.get(harness.requesterSessionId)).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            role: 'assistant',
+            userTurnId: input.userTurnId,
+            finished: true,
+          }),
+        ])
+      );
+      expect(store.get(harness.requesterSessionId, 'review-round-1').author).toEqual(author);
+    } finally {
+      store.close();
+      await harness.coordinator.stop();
+    }
+  });
+
   it('recovers local creation using daemon authority even when remote Streams is unavailable', async () => {
     const harness = await makeHarness({
       targetInputDurable: false,

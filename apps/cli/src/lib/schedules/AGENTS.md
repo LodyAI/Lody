@@ -64,6 +64,9 @@
   `SESSION_UNAVAILABLE` as a recoverable configuration problem. The command
   service applies the same rule on create/edit and rejects a project on a
   schedule that sends into a chat.
+- Notifications follow ordinary Session outcomes after handoff: success/failure/unknown
+  may notify the owner, cancellation stays silent. No schedule-specific condition
+  evaluation or aggregation yet; prehandoff failures remain Schedule runtime state.
 - Dispose Schedule workers before tearing down a workspace's Lody runtime.
   Timers and active evaluations must not survive workspace revocation.
 - Deterministic tests use injected clocks, explicit sync barriers and temporary

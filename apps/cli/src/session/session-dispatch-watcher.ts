@@ -1,3 +1,4 @@
+import { turnNotificationAudience } from '@/lib/notifications/turn-notification-audience';
 import { MemoryBindingSchema } from '@lody/shared';
 import type { RepoTransportRoomStatus, RepoWatchHandle } from 'loro-repo';
 import { Effect, Fiber } from 'effect';
@@ -1627,6 +1628,10 @@ export class SessionDispatchWatcher {
               sourceTurnId: nextUserTurn.id,
               requesterUserId: nextUserTurn.userId,
               inputConfig: nextUserTurn.inputConfig ?? {},
+              notificationAudience:
+                dispatchSource === 'rpc'
+                  ? { kind: 'unknown' }
+                  : turnNotificationAudience(nextUserTurn.author),
             },
             dispatchSource,
             accessPromise: executionAccessPromise,

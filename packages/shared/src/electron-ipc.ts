@@ -214,6 +214,8 @@ export type LaunchLocalPathResult =
     };
 
 export type ShowSessionCompletionNotificationInput = {
+  /** New renderers already checked visibility of this specific source. */
+  allowWhileForeground?: boolean;
   sessionId: string;
   workspaceSlug?: string;
   title: string;

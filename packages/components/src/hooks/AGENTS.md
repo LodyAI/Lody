@@ -122,10 +122,10 @@ Parent AGENTS apply. Edit `AGENTS.md`, not its `CLAUDE.md` symlink. Background: 
   EVERY summary input goes through one leading-edge throttle whose trailing deadline
   is anchored to the last EMIT; one input left outside it restores starvation.
 - Nothing reaching the payload memo may carry a per-render identity: depend on the
-  permission candidate's key and title.
+  permission candidate's key.
 - Keep the 250ms bridge debounce.
-- Scan a pending permission request from the UNTHROTTLED list and flush the window, so
-  the alert ships promptly with it; `shownPermissionAlertKeysRef` shows one per key.
+- Pending permissions from the UNTHROTTLED list flush the window. Summaries stay
+  silent and refresh all rows; ordinary Push owns alerts.
 - Compute nothing when the feature is off: `iosLiveActivitiesEnabledAtom` and the
   native iOS shell are BOTH required and are not equivalent. Derive the activity id
   separately from that gate so the disable and unmount paths can still end an activity

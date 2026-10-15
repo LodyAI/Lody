@@ -1,3 +1,4 @@
+import type { TerminalOutcome } from '@lody/shared/notifications';
 import { anyApi, type FunctionReference } from 'convex/server';
 import type {
   BeginShareDeployment,
@@ -852,6 +853,7 @@ export type CloudApi = {
     >;
   };
   notifications: {
+    getCapabilities: Query<{}, { terminalOutcomes: 1 }>;
     notifySessionCompleted: Action<
       {
         sessionTitle?: string;
@@ -860,6 +862,7 @@ export type CloudApi = {
         workspaceId: string;
         sessionId: string;
         occurrenceId: string;
+        outcome?: TerminalOutcome;
         cliToken: string;
         workspaceSlug: string;
       },
@@ -876,6 +879,7 @@ export type CloudApi = {
         sessionId: string;
         cliToken: string;
         workspaceSlug: string;
+        deliveryVersion?: 1;
         requestId: string;
         toolCallId: string;
       },
