@@ -1,0 +1,125 @@
+---
+title: '20261015'
+version: 0.105.0
+date: 2026-10-15
+description: iOS widgets, expanded DeepSeek sessions and Goals, file previews, and batch memory imports, with improvements to long-session sync, mobile interactions, and recovery.
+---
+
+Version 0.105.0
+
+### ✨ New Features
+
+- Added video file previews.
+- Full-screen image previews now offer a touch-and-hold menu to copy, save, or share images where supported by the device.
+- CSV, TSV, and XLSX previews now support resizing columns and selecting and copying cells or rectangular ranges. XLSX previews also support resizing rows.
+- HTML files and chat attachments on mobile now open in preview mode by default, with an option to view the source.
+- Added iOS Home Screen widgets for conversation progress and workspace token usage.
+- Memory import now supports selecting and adding multiple identities at once.
+- DeepSeek can now load and resume native session history while preserving context, model, permissions, and preset configuration.
+- DeepSeek now supports steering during execution and setting, pausing, and resuming Goals.
+- DeepSeek now supports querying and cancelling subagents, and displaying background task status, retry activity, and current context usage. Cancellation availability depends on the execution method.
+- Pi's subagent tool can now select an available model for each subtask.
+- Updated Claude Code with Haiku 5.5 support and Codex with support for larger context windows.
+- Codex now accepts a task description directly after `/plan`, and automatic titles can use the title model and parameters configured in Lody.
+- CLI and MCP session creation and continuation now support file and image attachments, including attachments sent to sessions on remote machines.
+- CLI session creation now supports `--agent-role <name or ID>` to use a workspace role's machine, Agent, model, and prompt configuration.
+- Cloud CLI adds `migrate --from-oss` to import Loro session records and historical attachments from the OSS edition into an existing cloud workspace.
+- After creating an isolated worktree, the Agent receives a prompt on its first task to name the branch after the task, making parallel work easier to identify.
+- The related conversations panel now offers stop and resume collaboration actions. Stopping the main session and its child sessions prevents late Agent results from restarting execution. Collaboration must be resumed manually; offline machines apply the change after syncing.
+- Consecutively created child conversations are grouped into a compact task panel with expansion, collapse, and internal scrolling.
+- Message queues can now be collapsed while preserving drafts and showing counts for messages still being prepared or that failed.
+- The composer now provides execution machine details. On desktop, hover over or click the machine name to see its owner and connection status; on phones, open the details card with an icon button.
+- The remote directory picker can now create and enter folders on desktop and mobile before adding them as projects. The target machine needs a CLI version that supports this feature.
+- Long sidebar session titles scroll on hover or keyboard focus. You can also drag or use a trackpad or mouse wheel to read the full title. The animation respects the system's reduced motion setting.
+- Providers that support quota queries can now refresh subscription quotas as needed when switching composer configuration, opening the quota panel, or returning to the app.
+- Invoice details now show charge reasons, seat changes, line items, outstanding balances, and a payment entry point.
+- Added a receiver for local Magpie configuration imports. The full import flow still requires corresponding support in Magpie.
+
+### 🐛 Fixes & Improvements
+
+- Fixed the selected model not being applied in time when creating or resuming a Codex session.
+- The interface now warns when an Agent rejects a model selection, so a failed switch is no longer mistaken for a successful one.
+- Fixed model configuration ordering for some ACP Agents so role options such as reasoning effort are not reset after switching models.
+- Fixed inherited options such as reasoning effort and Fast being validated against the wrong model.
+- Saving an Agent Role now clears obsolete configuration options while preserving valid selections, reducing persistent compatibility warnings.
+- Fixed prompts, including Agent Role prompts, changing between submission and delivery during continuation, steering, or recovery.
+- Fixed Agent Role mention menus losing their selection or position when details change, and corrected focus outlines in Agent configuration dialogs.
+- Fixed mobile Dimcode configuration options interfering with each other and permission selections being lost after releasing a touch.
+- Dimcode now uses the command and configuration already installed on the machine, with a copyable installation command when it is missing.
+- Fixed the Amp adapter repeatedly using an old cached version. It now uses the binary for the corresponding version.
+- Fixed ZIP-distributed Agent installations stalling during extraction on some Node.js versions.
+- Fixed missing line breaks in Pi command output, including output in existing sessions.
+- Pi extensions now display saved package names before scanning finishes, and extension load failures are reported clearly.
+- Codex history imports now preserve attachments. Error messages are clearer for sessions held by another client, service errors, startup failures, and working directory issues.
+- Fixed empty Codex sessions failing to resume after a service restart and inaccurate title selection for historical sessions.
+- Codex now saves trust for the actual execution directory before opening a session, improving discovery of project skills and MCP configuration while preserving explicitly untrusted directories.
+- Claude background Bash tasks now display their actual commands separately from task descriptions, with highlighting and copying support.
+- Improved how stopped background tasks appear in Claude history so they are less likely to be shown as user prompts.
+- Fixed Agent completion messages being processed twice after reconnection or delayed retries, triggering duplicate execution.
+- Results from multiple Agents are now batched. Busy sessions receive them after the current turn ends, reducing repeated continuations for individual results.
+- Set the consecutive Agent delegation limit to 16 levels and improved collaboration instructions to reduce unnecessary acknowledgements and repeated results.
+- Fixed a save acknowledgement for one queued message clearing the draft of the next message being edited.
+- Switching between pending questions now preserves selected answers, custom input, and notes. Failed submissions show an error and keep the answers for retry.
+- Fixed confirming a Chinese input method candidate accidentally submitting a custom answer.
+- Fixed single-question forms from Codex and other Agents displaying only “Input requested” instead of the full question.
+- Fixed duplicate chat failure details.
+- Optimized streaming output writes in long conversations to reduce CLI stalls during heavy tool use and long delays in delivering messages to other devices.
+- Fixed lengthy interface freezes in conversations containing very long commands or inline images.
+- Reduced unused tool images, embedded resource bytes, and duplicate data in session history, and bounded command summaries and tool titles to reduce storage and sync overhead. Ordinary attachments, readable output, code diffs, and approval content are retained. Permission prompts clearly indicate truncated commands.
+- Optimized rendering when opening mention menus to reduce composer lag.
+- Pasted text of 50,000 characters or more is now converted into a text attachment while preserving the full original content.
+- Fixed the mobile pasted-text editor not using the available space. The full text can now be scrolled within the panel, with typography matching the composer.
+- Fixed delayed scroll events interrupting momentum or pulling touch users back to the bottom while reading earlier messages.
+- Fixed jitter and bounce when quickly scrolling to the bottom on mobile, and unintended following of new messages when the composer height changes or a draft is edited.
+- Fixed conversation scrolling over Mermaid previews and reduced page errors caused by repeated layout updates.
+- Sending a new message now preserves some preceding context for easier reading.
+- Fixed the scroll-to-latest arrow being hidden on hover or keyboard focus.
+- Improved mobile conversation alignment and turn spacing across prose, execution steps, and action bars. Older messages show actions when tapped, while the latest assistant reply keeps common actions visible.
+- Aligned pasted-text chips and GitHub Issue and PR references with surrounding text, improved task reply card spacing, and matched elapsed-time typography to the footer.
+- Fixed bold and italic Markdown next to punctuation in Chinese, Japanese, and Korean text.
+- Collapsed long user messages now end between complete lines with a fade indicating more content, instead of cutting through text.
+- The desktop composer footer now displays the full model name.
+- Fixed buttons and change statistics overflowing the session info bar in narrow windows. Text and machine names shrink when space is limited.
+- Mobile HTML, Markdown, and plain-text attachments now use a near-full-screen sheet for more reading space, with improved preview empty-state messages.
+- Fixed clicking, typing, and scrolling in dialogs inside mobile drawers, and prevented touches from passing through to the interface underneath.
+- Disabled the system long-press preview for message links on iOS to prevent later taps from repeatedly reopening the same link. Tap-to-open and text selection remain available.
+- Enlarged message queue action buttons on touch devices to reduce accidental taps.
+- Fixed stretched icons when mobile bottom navigation collapses or expands, and improved navigation visibility and focus handling while scrolling upward.
+- Unified opening, pasting, and exporting session links for more accurate workspace and session targeting, while retaining compatibility with older links.
+- Fixed pasted child-session links pointing to the parent session. Link errors now distinguish archived sessions, inaccessible workspaces, and other cases.
+- Local sessions without an available working directory can now preview absolute and `~/` file paths. Fixed `~/` paths being previewable but not openable or revealable in the file manager.
+- Fixed file links with line numbers opening at the top on the first click, and restored target line-range highlighting.
+- Restored the sidebar expand button on scheduled task pages when the sidebar is hidden, and corrected layout near the macOS window controls.
+- Fixed the phone schedule list being covered by the status bar. Saving or closing a task now returns to the home schedules tab with workspace switching, search, settings, and bottom navigation.
+- Repeated sign-in recovery failures now stop indefinite loading and offer retry and sign-in actions while preserving the current page.
+- After waiting more than 30 seconds for sign-in, workspace switching, or workspace opening, a recovery page offers reload, cache clearing, and diagnostic copying. A stalled-connection banner also opens this page.
+- iOS startup recovery now supports a native full local data reset to clear local data and return to sign-in when the app cannot load normally.
+- Fixed desktop sign-in failures in some proxy or certificate environments, with clearer troubleshooting guidance for certificate validation errors.
+- Cloud queries now retry transient server errors a limited number of times, reducing page interruptions from temporary failures.
+- CLI machine reads can fall back to existing local data after temporary sync failures. Incomplete machine configuration no longer incorrectly marks temporarily unavailable projects, Agents, or models as invalid.
+- Improved cleanup after workspace or account switches and connection failures so old connections and late requests do not interfere with new ones. Sync errors now include more detail.
+- Improved sharing and cancellation of sync credential refreshes and shell environment queries so one request timing out or being cancelled does not affect others.
+- Fixed duplicate initialization errors when multiple CLI or MCP commands access the same workspace, and interference with later sessions when a workspace is reused before earlier preparation finishes.
+- Fixed the stdio MCP service releasing its runtime too early after connecting, causing later tool calls to fail.
+- Improved process cleanup on Agent exit, session termination, and startup failure. Cancelled tasks remain marked active while finishing cleanup.
+- Restored personal GitHub authorization in desktop and mobile clients, opening the browser to complete authorization.
+- Public GitHub PR details, reviews, and code changes can now be viewed read-only even when the workspace has no linked repository.
+- Bounded retries after GitHub PR association failures and added permission repair guidance while continuing to update PR status.
+- Fixed stale GitHub credential state during session preparation and restart preventing later messages from running.
+- Fixed read-only GitHub credentials being rejected for HTTPS clones and recursive submodule fetches, and preserved GitHub App attribution in non-interactive PR creation flows.
+- Added timeouts for Git identity queries and credential helper probes, reduced repeated environment probes, and retried transient process startup failures to prevent prolonged Agent initialization.
+- Fixed Git identity reads missing XDG global configuration and file indexing falling back before a parallel Git query finishes.
+- Improved Git error handling for local projects and worktrees so startup failures, timeouts, and permission errors are not mistaken for missing repositories or branches.
+- Improved file-lock queuing and cleanup after abnormal exits to reduce stale-lock blocking. Git and cleanup errors are preserved instead of incorrectly triggering forced removal of working directories.
+- Improved checks before worktree branch naming to avoid sending rename prompts for existing branches or unsuitable workspaces.
+- Reorganized quota information in Provider settings to distinguish remaining quotas from reset forecasts and display every quota window.
+- Codex reset forecasts now open with one click. Refresh and delete actions are in a separate management menu so they do not cover the forecast entry on hover.
+- Sidebar machine groups keep their order while a local Agent is temporarily unavailable, reducing list movement.
+- Updating a personal avatar now refreshes workspace member information so member lists do not keep showing the old avatar.
+- Mobile run configuration and Agent Role settings now distinguish Mode from Permissions more clearly. Folder sharing switches use explicit action labels such as “Share project with team.”
+- Fixed unexpected background blocks behind the top-right Windows window controls after opening a dialog.
+- Removed duplicate runtime files from desktop installers, compressed desktop interface assets, and reduced repeated Claude environment checks on Linux.
+- Improved onboarding conversation spacing after changing the interface font size, and fixed archive timestamps such as “0 minutes ago.”
+- Fixed documentation title anchors and duplicate top-level page headings.
+
+Thanks to Astro-Han, delete-cloud, etonwan, hjlarry, kipyin, Lampese, lawvs, Pleasurecruise, slashdevcorpse, timonwong, and yayoinoyume for contributing to this release!
