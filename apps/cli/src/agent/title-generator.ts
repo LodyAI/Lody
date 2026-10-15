@@ -141,8 +141,7 @@ export const extractTitleFromAgentResponse = (response: unknown): string | null 
   extractTextFromAgentResponse(response);
 
 export const extractTitleChunkFromNotification = (
-  notification: AcpSessionNotification,
-  agentType?: AgentType
+  notification: AcpSessionNotification
 ): string | null => {
   const update = notification.update;
   if (update.sessionUpdate !== 'agent_message_chunk') {
@@ -154,12 +153,7 @@ export const extractTitleChunkFromNotification = (
   }
 
   const phase = parseLodyMessagePhase(update._meta);
-  if (agentType === 'codex') {
-    if (phase !== 'final_answer') {
-      return null;
-    }
-    return content.text;
-  }
+  // Codex also permits an unknown phase, especially with custom providers.
   if (phase !== undefined && phase !== 'final_answer') {
     return null;
   }
@@ -316,6 +310,7 @@ export const generateTitleIsolated = async (
 
   const tryGenerateWithArgs = async (extraArgs: string[]): Promise<string | null> => {
     let collectedText = '';
+    let unphasedText = '';
     const startupStartedAt = Date.now();
     options.logger.debug(
       `[title-generator] Starting isolated title ACP agent (cliType=${options.cliType} agentType=${options.agentType})`
@@ -334,9 +329,13 @@ export const generateTitleIsolated = async (
       terminalManager: noopTerminalManager,
       terminalEnabled: false,
       onUpdateMessage: (msg) => {
-        const text = extractTitleChunkFromNotification(msg, options.agentType);
+        const text = extractTitleChunkFromNotification(msg);
         if (text) {
-          collectedText += text;
+          if (parseLodyMessagePhase(msg.update._meta) === 'final_answer') {
+            collectedText += text;
+          } else {
+            unphasedText += text;
+          }
         }
       },
       onRequestPermission: async (
@@ -386,6 +385,7 @@ export const generateTitleIsolated = async (
       // request to the agent. A titleConfig whose every value the agent cannot apply
       // skips that request, and is not covered.
       collectedText = '';
+      unphasedText = '';
 
       options.logger.debug(`[title-generator] Sending title prompt (acpSessionId=${acpSessionId})`);
       const response = await client?.prompt(acpSessionId, prompt);
@@ -394,11 +394,15 @@ export const generateTitleIsolated = async (
       );
 
       const deadline = Date.now() + 10000;
-      while (Date.now() < deadline && collectedText.trim() === '') {
+      while (Date.now() < deadline && collectedText.trim() === '' && unphasedText.trim() === '') {
         await sleep(100);
       }
 
-      const fromStream = sanitizeGeneratedTitle(collectedText);
+      // Explicit final answers take precedence over compatibility text. Never
+      // concatenate unknown-phase commentary with a phase-aware final answer.
+      const fromStream = sanitizeGeneratedTitle(
+        collectedText.trim() ? collectedText : unphasedText
+      );
       if (fromStream) {
         return fromStream;
       }

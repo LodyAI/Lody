@@ -103,11 +103,12 @@ context/acp-agent-edit-evidence.md; adapter repos: [apps/cli/AGENTS.md](../../AG
   the cache, and requests/responses carry that id to keep configs of one provider isolated.
   `ManagedRuntimeUpdateCoordinator` never hot-swaps a running ACP process, and Machine Flock
   writes ignore `fetchedAt` when comparing entries.
-- Core `sessionTitle` v1 transfers titles to ACP after initialization, except builtin Codex.
-  Codex uses Lody title settings; its adapter never generates titles.
-  Accept tagged `generated`/`explicit`, never `fallback`/`unset`. Legacy managed
-  Claude/Grok retain ownership without overrides and alone allow untagged titles.
-  Strip internal instructions; preserve user titles. [Contract](../../../../specs/acp-session-titles.md).
+- Core `sessionTitle` v1 owns titles after init except builtin Codex.
+  Lody owns Codex titles/settings; never the adapter. Accept `generated`/`explicit`,
+  not `fallback`/`unset`. Untagged titles: only legacy managed Claude/Grok without overrides.
+  Strip internal instructions; keep user titles.
+  Isolated titles: accept absent phases; prefer final answers; discard commentary/pre-prompt
+  text; sanitize. [Rules](README.md#session-titles).
 - NEVER derive a git ref from prompt text: refs reach the remote and no filter proves a
   prompt secret-free. Worktree sessions keep their allocated ref unless the agent renames it.
 
