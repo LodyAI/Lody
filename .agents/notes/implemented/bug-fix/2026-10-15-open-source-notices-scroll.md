@@ -2,6 +2,7 @@
 
 Status: implemented
 Translation: current
+PR: [#1593](https://github.com/LodyAI/Lody/pull/1593)
 
 [中文](2026-10-15-open-source-notices-scroll.zh.md)
 
