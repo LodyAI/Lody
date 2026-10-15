@@ -560,7 +560,8 @@ End of synthetic document.`,
     expect(container?.querySelectorAll('.katex-display')).toHaveLength(0);
   });
 
-  const copyRange = (range: Range) => {
+  const copyRange = async (range: Range) => {
+    await vi.dynamicImportSettled();
     const selection = document.getSelection()!;
     selection.removeAllRanges();
     selection.addRange(range);
@@ -588,7 +589,7 @@ End of synthetic document.`,
 
       const range = document.createRange();
       range.selectNodeContents(container!.querySelector('p')!);
-      const { event, contents } = copyRange(range);
+      const { event, contents } = await copyRange(range);
 
       expect(event.defaultPrevented).toBe(true);
       expect(contents.get('text/plain')).toBe(String.raw`Before $\frac{a}{b}$ after.`);
@@ -609,7 +610,7 @@ End of synthetic document.`,
 
     const range = document.createRange();
     range.selectNode(container!.querySelector('.katex-display')!);
-    const { contents } = copyRange(range);
+    const { contents } = await copyRange(range);
 
     expect(contents.get('text/plain')?.trim()).toBe('$$x^2 + y^2 = z^2$$');
   });
@@ -622,14 +623,14 @@ End of synthetic document.`,
     const range = document.createRange();
     range.selectNodeContents(container!.querySelector('.katex-html .mord')!);
     expect(range.toString()).toBe('x');
-    expect(copyRange(range).contents.get('text/plain')).toBe('$x+y$');
+    expect((await copyRange(range)).contents.get('text/plain')).toBe('$x+y$');
   });
 
   it('leaves ordinary prose copying to the browser', async () => {
     await renderMarkdown('Plain text and `literal code`.');
     const range = document.createRange();
     range.selectNodeContents(container!.querySelector('p')!);
-    const { event, contents } = copyRange(range);
+    const { event, contents } = await copyRange(range);
 
     expect(event.defaultPrevented).toBe(false);
     expect(contents.size).toBe(0);

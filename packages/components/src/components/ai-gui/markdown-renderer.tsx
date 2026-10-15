@@ -34,7 +34,6 @@ import Markdown, {
   type UrlTransform,
 } from 'react-markdown';
 import rehypeKatex from 'rehype-katex';
-import 'katex/contrib/copy-tex';
 import rehypeRaw from 'rehype-raw';
 import rehypeSanitize from 'rehype-sanitize';
 import remarkGfm from 'remark-gfm';
@@ -1461,6 +1460,9 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
   const readonly = useContext(SessionReadonlyContext);
   const getAgentFileLinkContextMenuItems = useContext(AgentFileLinkContextMenuItemsContext);
   const containerRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    void import('./markdown-math-copy');
+  }, []);
   /** Text nodes split for search marks in this block, with what to undo. */
   const searchSplitsRef = useRef<SearchTextSplit[]>([]);
   const search = useSelectionStableValue(useSessionSearch());

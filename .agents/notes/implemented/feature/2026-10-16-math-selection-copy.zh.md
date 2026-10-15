@@ -11,7 +11,7 @@ Translation: current
 
 ## 决策与职责
 
-[共享渲染器](../../../../packages/components/src/components/ai-gui/markdown-renderer.tsx) 通过模块依赖图一次性导入 `katex/contrib/copy-tex`，复用现有 KaTeX 依赖，为静态和流式 Markdown 接入相同能力，无需新增设置、依赖或自定义公式序列化逻辑。扩展处理原生选区复制；消息复制按钮继续使用现有源文本路径。
+[共享渲染器](../../../../packages/components/src/components/ai-gui/markdown-renderer.tsx) 在挂载 effect 中加载[仅供浏览器使用的 Copy-tex 入口](../../../../packages/components/src/components/ai-gui/markdown-math-copy.ts)。Copy-tex 在模块求值时注册 document 监听器，顶层直接导入会让 Node 消费方报 `document is not defined`；CI 在五个现有测试集中暴露了这个问题。延迟到组件挂载后导入，使无 DOM 的消费者可以正常加载渲染器；模块缓存保证扩展在页面生命周期内只注册一次。此方案复用现有 KaTeX 依赖，为静态和流式 Markdown 接入相同能力，无需新增设置、依赖或自定义公式序列化逻辑。扩展处理原生选区复制；消息复制按钮继续使用现有源文本路径。
 
 [原生选区保护](../../../../packages/components/src/hooks/use-conversation-text-selection.ts) 继续负责检查会话选区对应的行是否已挂载并加载完整。对不完整选区，其捕获阶段监听器在 `preventDefault()` 之外增加 `stopImmediatePropagation()`，避免扩展在 document 上的监听器写入缺失内容的剪贴板数据。这延续了[选区保留决策](../bug-fix/2026-09-20-conversation-text-selection.md)的保护职责；选区保留和历史加载的职责不变。行内公式渲染继续遵循[现有偏好设置](2026-09-28-inline-math-preference.md)。
 
@@ -21,7 +21,7 @@ Translation: current
 
 - [渲染器测试](../../../../packages/components/tests/markdown-streaming-reparse.test.ts) 使用真实公式 DOM、原生 Range 和派发的复制事件，覆盖公式与正文混选、块级公式、静态与流式路径、部分公式选区、HTML 保留以及普通正文继续走默认复制。
 - [选区测试](../../../../packages/components/tests/conversation-text-selection.test.tsx) 加载真实扩展，验证包含公式的选区在中间行尚未完整加载时不写剪贴板，并在该行就绪后复制出 LaTeX。
-- 开发检出目录中，七个相关测试集的 114 项测试全部通过，组件类型检查、改动范围内的格式检查及差异空白检查也已通过。改动范围内的类型感知 lint 报告零错误、23 条警告。文档检查仍报告 subagent-events 提案中英双语文件中已有的六条失效链接，没有新增文档错误。这些检查发生在将本次改动迁移到当前 `main` 之前；按用户要求，不再追加本地测试，全仓库检查交由 CI 执行。
+- 七个定向测试集的 99 项测试全部通过，包括 CI 失败的五个 Node 测试集及渲染器、选区测试。复制测试等待挂载触发的动态导入完成后，再派发原生复制事件。改动范围内的格式检查与差异空白检查通过，类型感知 lint 报告零错误、20 条警告。按用户要求，全仓库测试继续交给 CI。本地 worktree 的类型检查受复用依赖指向较旧的兄弟检出目录影响，文档检查受未初始化的 ACP 子模块影响，两项均不报告为通过。
 - 测试中的剪贴板载荷使用内存实现的 `setData`，不代表已完成操作系统原生剪贴板、Safari 或移动设备验收。
 
 PR: [#1595](https://github.com/LodyAI/Lody/pull/1595)

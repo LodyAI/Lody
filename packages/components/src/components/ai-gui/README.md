@@ -40,7 +40,9 @@ the reasoning behind those rules.
   Rendering and search extraction share CJK-friendly emphasis parsing, so bold
   sentences ending in punctuation can touch subsequent prose without exposing
   their markers; see [CJK emphasis](../../../../../specs/markdown-cjk-emphasis.md).
-  KaTeX's bundled Copy-tex extension converts selected rendered formulas to LaTeX
+  After mounting in the browser, the renderer loads KaTeX's bundled Copy-tex
+  extension through `markdown-math-copy.ts`, keeping Node imports free of DOM
+  access. The extension converts selected rendered formulas to LaTeX
   in the clipboard's plain text (`$...$` inline, `$$...$$` display), including
   selections mixed with prose; the selected HTML is preserved. Partial formula
   selections expand to the complete formula. The native selection guard stops
