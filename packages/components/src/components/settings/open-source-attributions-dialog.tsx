@@ -13,7 +13,7 @@ import { colors } from '@lody/ui/tokens/colors.stylex';
 import { corner, radius, space, text } from '@lody/ui/tokens/scales.stylex';
 import { OPEN_SOURCE_ATTRIBUTION_BUNDLE } from '@/lib/open-source-attributions.generated';
 import type { OpenSourceAttributionEntry } from '@/lib/open-source-attributions';
-import { Badge, Button, ScrollArea, Dialog } from '@/ui';
+import { Badge, Button, Dialog } from '@/ui';
 import { Accordion } from '@lody/ui/accordion';
 import { Select } from '@lody/ui/select';
 
@@ -73,7 +73,14 @@ const styles = stylex.create({
   summaryValue: { fontSize: text.titleSize, fontWeight: 400, color: colors.label },
   icon: { width: '16px', height: '16px', flexShrink: 0, color: colors.tertiaryLabel },
   smallIcon: { width: '14px', height: '14px', flexShrink: 0 },
-  scroll: { maxHeight: '70vh', minHeight: 0 },
+  // The panel is a column capped at the window. This region shrinks inside that
+  // cap and scrolls; a max-height on a Radix ScrollArea clips the list instead,
+  // because its viewport never receives a definite height.
+  scroll: {
+    minHeight: 0,
+    overflowY: 'auto',
+    overscrollBehavior: 'contain',
+  },
   triggerLabel: { display: 'flex', alignItems: 'center', gap: space[2] },
   panelBody: { display: 'flex', flexDirection: 'column', gap: space[3] },
   /** The records are one list: a region of the panel, its rows ruled apart. */
@@ -302,7 +309,7 @@ export function OpenSourceAttributionsDialog({
           />
         </div>
 
-        <ScrollArea {...stylex.props(styles.scroll)}>
+        <div {...stylex.props(styles.scroll)}>
           <Accordion.Root multiple defaultValue={['bundled-assets']}>
             <Accordion.Item value="bundled-assets">
               <Accordion.Trigger>
@@ -365,7 +372,7 @@ export function OpenSourceAttributionsDialog({
               </Accordion.Panel>
             </Accordion.Item>
           </Accordion.Root>
-        </ScrollArea>
+        </div>
       </Dialog.Content>
     </Dialog.Root>
   );
