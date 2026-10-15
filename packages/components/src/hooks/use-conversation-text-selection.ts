@@ -271,6 +271,8 @@ export function useConversationTextSelection<T>({
       );
       if (incomplete) {
         event.preventDefault();
+        // Copy-tex writes clipboard data even when default has been prevented.
+        event.stopImmediatePropagation();
         current.current.onCopyUnavailable();
       }
     };

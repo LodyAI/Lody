@@ -34,6 +34,7 @@ import Markdown, {
   type UrlTransform,
 } from 'react-markdown';
 import rehypeKatex from 'rehype-katex';
+import 'katex/contrib/copy-tex';
 import rehypeRaw from 'rehype-raw';
 import rehypeSanitize from 'rehype-sanitize';
 import remarkGfm from 'remark-gfm';

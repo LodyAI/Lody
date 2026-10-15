@@ -3,6 +3,8 @@ import { createHistoryWriter } from '@lody/shared';
 import { act, useRef, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { renderToString } from 'katex';
+import 'katex/contrib/copy-tex';
 import { useConversationStreamItems } from '../src/hooks/use-conversation-stream-items';
 import type { ConversationView } from '../src/lib/conversation-view';
 import {
@@ -88,7 +90,7 @@ function Probe({
   );
 }
 function select(from: number, to = from) {
-  const elements = viewport.querySelectorAll('[data-conversation-row-key] span');
+  const elements = viewport.querySelectorAll('[data-conversation-row-key] > span');
   const first = elements[from]!.firstChild!;
   const last = elements[to]!.firstChild!;
   document.getSelection()!.setBaseAndExtent(first, 0, last, last.textContent!.length);
@@ -191,6 +193,30 @@ it('blocks incomplete native copy without replacing clipboard contents and recov
   await act(async () => viewport.dispatchEvent(retry));
   expect(retry.defaultPrevented).toBe(false);
   expect(document.getSelection()!.toString()).toContain('loading original prose');
+});
+
+it('blocks formula clipboard conversion until every selected row is ready', async () => {
+  const rows = [row('a', 0), row('loading', 1, false), row('c', 2)];
+  await act(async () => root.render(<Probe rows={rows} />));
+  viewport.querySelector('span')!.insertAdjacentHTML('beforeend', renderToString('x^2'));
+  await act(async () => select(0, 2));
+  const contents = new Map<string, string>();
+  const copy = () => {
+    const event = new Event('copy', { bubbles: true, cancelable: true });
+    Object.defineProperty(event, 'clipboardData', {
+      value: { setData: (format: string, value: string) => contents.set(format, value) },
+    });
+    viewport.dispatchEvent(event);
+  };
+
+  await act(async () => copy());
+  expect(contents.size).toBe(0);
+  expect(viewport.querySelector('output')!.textContent).toBe('copy incomplete');
+
+  await act(async () => root.render(<Probe rows={rows.map((r) => ({ ...r, ready: true }))} />));
+  await act(async () => copy());
+  expect(contents.get('text/plain')).toContain('$x^2$');
+  expect(contents.get('text/plain')).toContain('loading original prose');
 });
 
 it('keeps a touch-cancelled provisional turn until the native range arrives', async () => {
