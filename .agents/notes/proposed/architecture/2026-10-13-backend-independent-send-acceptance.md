@@ -5,6 +5,7 @@ Type: architecture
 Translation: current
 PR: https://github.com/LodyAI/Lody/pull/1546
 Follow-up PR: https://github.com/LodyAI/Lody/pull/1570
+UI follow-up PR: https://github.com/LodyAI/Lody/pull/1591
 
 [中文](2026-10-13-backend-independent-send-acceptance.zh.md)
 
