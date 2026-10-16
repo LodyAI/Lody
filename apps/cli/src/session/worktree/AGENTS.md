@@ -2,9 +2,8 @@
 
 `CLAUDE.md` is a symlink to this file. Edit `AGENTS.md` only.
 
-Repo checkouts, worktrees, branch allocation, and setup scripts for sessions.
-[../AGENTS.md](../AGENTS.md) and [apps/cli/AGENTS.md](../../../AGENTS.md) apply. Background
-and file responsibilities: [../README.md](../README.md).
+Session checkouts and setup.
+[../AGENTS.md](../AGENTS.md) and [apps/cli/AGENTS.md](../../../AGENTS.md) apply. Map: [../README.md](../README.md).
 
 ## Effect execution boundary
 
@@ -91,6 +90,8 @@ and file responsibilities: [../README.md](../README.md).
 - A fresh local/GitHub worktree always owns a newly allocated branch from its selected base
   ref; suffix collisions instead of attaching to an existing ref. Reattaching an existing
   branch is reserved for an explicit `restoreBranchName` from the same Session.
+- Title rename needs a new Session’s one-time intent, unchanged branch/HEAD, and no publication
+  or PR. Reconcile the actual branch into Session metadata before restore.
 - Worktree setup scripts are per worktree-directory lifetime: session runtime restore after
   idle GC must skip setup when the session's worktree directory already exists, but setup still
   runs when a missing worktree directory is materialized again.

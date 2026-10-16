@@ -1,4 +1,7 @@
-import { describe, expect, it, vi, beforeEach } from 'vitest';
+import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { MessageHandler } from '../src/lib/message-handler';
 import type { Logger } from '../src/utils/logger';
 import type { SessionId, SessionTitleSource } from '@lody/shared';
@@ -18,6 +21,7 @@ vi.mock('@/agent/title-generator', async () => {
 import { generateTitleIsolated } from '@/agent/title-generator';
 
 const mockedGenerateTitleIsolated = vi.mocked(generateTitleIsolated);
+const handlers: MessageHandler[] = [];
 
 const createSilentLogger = (): Logger => ({
   info: () => {},
@@ -83,6 +87,7 @@ const createHandler = async (
     hasSession: vi.fn(),
     initialize: vi.fn(),
     createSession: vi.fn(),
+    maybeRenameWorktreeAfterTitle: vi.fn(async () => undefined),
   };
 
   const handler = new MessageHandler(
@@ -100,12 +105,25 @@ const createHandler = async (
     }
   );
 
-  return { handler, sessionDoc, workspaceDocument };
+  handlers.push(handler);
+  return { handler, sessionDoc, workspaceDocument, sessionManager };
 };
 
 describe('MessageHandler title generation', () => {
+  let dataDir: string;
   beforeEach(() => {
+    dataDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'lody-title-handler-')));
+    vi.stubEnv('LODY_DATA_DIR', dataDir);
     mockedGenerateTitleIsolated.mockClear();
+  });
+
+  afterEach(async () => {
+    try {
+      for (const handler of handlers.splice(0)) await handler.cleanup();
+    } finally {
+      vi.unstubAllEnvs();
+      fs.rmSync(dataDir, { recursive: true, force: true });
+    }
   });
 
   it('skips isolated generation when title already meaningful', async () => {
@@ -129,7 +147,7 @@ describe('MessageHandler title generation', () => {
   });
 
   it('runs isolated generation for Kimi when title is missing', async () => {
-    const { handler, sessionDoc } = await createHandler(undefined);
+    const { handler, sessionDoc, sessionManager } = await createHandler(undefined);
 
     const titleHost = handler as unknown as {
       maybeGenerateAndStoreSessionTitle: (
@@ -150,6 +168,10 @@ describe('MessageHandler title generation', () => {
     expect(sessionDoc.setTitleIfSourceIn).toHaveBeenCalledWith('Generated Title', 'generated', [
       'draft',
     ]);
+    expect(sessionManager.maybeRenameWorktreeAfterTitle).toHaveBeenCalledWith(
+      's-2',
+      'Generated Title'
+    );
   });
 
   it('shares one in-flight generation across duplicate title requests', async () => {
@@ -328,7 +350,7 @@ describe('MessageHandler title generation', () => {
   });
 
   it('filters Lody internal prompt instructions before storing an ACP title', async () => {
-    const { handler, sessionDoc } = await createHandler(undefined);
+    const { handler, sessionDoc, sessionManager } = await createHandler(undefined);
     const titleHost = handler as unknown as {
       maybeStoreAgentSessionTitle: (sessionId: SessionId, title: string) => Promise<void>;
     };
@@ -343,6 +365,10 @@ describe('MessageHandler title generation', () => {
       'draft',
       'generated',
     ]);
+    expect(sessionManager.maybeRenameWorktreeAfterTitle).toHaveBeenCalledWith(
+      's-9',
+      'Fix flaky login'
+    );
   });
 
   it('does not store an ACP title containing only Lody internal instructions', async () => {
