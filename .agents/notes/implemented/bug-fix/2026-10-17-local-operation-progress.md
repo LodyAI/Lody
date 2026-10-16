@@ -2,6 +2,7 @@
 
 Status: implemented
 Translation: current
+PR: [#1629](https://github.com/LodyAI/Lody/pull/1629)
 
 [中文](2026-10-17-local-operation-progress.zh.md)
 
@@ -21,6 +22,6 @@ Caching only the old preview would still export unrelated transcripts on each do
 
 ## Verification
 
-The existing shared action suite exercises creation, repeated no-ops, terminal status, duplicate and inline cards, preserved sibling containers/unknown fields, peer imports, pending structural edits, and validation failure before duplicate deletion. Restoring the old route fails with `full history exported`. All 1,516 shared tests pass after review. The CLI progress and history storage suites pass 59 tests, and dispatch/inbox/settings suites pass another 170. Shared type checking, workspace type checking, static boundary/lint checks and formatting pass. The documentation check retains six pre-existing broken links into uninitialized Kimi/Pi submodules, with no new errors. Full `pnpm check` reached 4,270 passing CLI tests and one Git transport failure (`context_unreadable`); the same failure reproduces with the original source. The full repository gate is therefore not claimed green.
+The existing shared action suite exercises creation, repeated no-ops, terminal status, duplicate and inline cards, preserved sibling containers/unknown fields, peer imports, pending structural edits, and validation failure before duplicate deletion. Restoring the old route fails with `full history exported`. All 1,518 shared tests pass after review and rebasing onto main. The CLI progress and history storage suites pass 59 tests. Shared type checking, workspace type checking, static boundary/lint checks and formatting pass. The documentation check retains six pre-existing broken links into uninitialized Kimi/Pi submodules, with no new errors. Full `pnpm check` reached 4,286 passing CLI tests and one Git transport failure (`context_unreadable`); the same failure reproduces with the original source. The full repository gate is therefore not claimed green.
 
 A synthetic 512-turn document containing 8.19 MB of text measured 20 updates per path: changed-update median fell from 8.31 ms to 0.46 ms; unchanged-update median from 2.69 ms to 0.012 ms. The first local read, including its metadata scan, took 0.88 ms. The old comparison used the same content-equality fix, so these figures isolate the narrower read/write path. These local measurements do not establish daemon or network latency.
