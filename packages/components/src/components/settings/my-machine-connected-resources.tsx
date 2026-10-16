@@ -12,6 +12,7 @@ import { colors } from '@lody/ui/tokens/colors.stylex';
 import { space } from '@lody/ui/tokens/scales.stylex';
 import { settingsSurface as surface } from './surface';
 import type { ProjectSettingsRow } from './project-settings';
+import { AgentIcon } from '@/components/icons/agent-icon';
 
 export type MachineConnectedProject = {
   key: string;
@@ -197,7 +198,20 @@ function MachineConnectedResourcesContent({
         ) : (
           <div {...stylex.props(styles.chips)}>
             {configs.map((config) => (
-              <Badge key={config.id}>{config.name}</Badge>
+              <Badge
+                key={config.id}
+                icon={
+                  <AgentIcon
+                    cliType={config.cliType}
+                    agentType={config.agentType}
+                    brandId={config.brandId}
+                    env={config.env}
+                    className={stylex.props(styles.agentIcon).className}
+                  />
+                }
+              >
+                {config.name}
+              </Badge>
             ))}
           </div>
         )}
@@ -256,4 +270,5 @@ const styles = stylex.create({
   },
   access: { flexShrink: 0, fontSize: '11px', color: colors.secondaryLabel },
   chips: { display: 'flex', flexWrap: 'wrap', gap: space[1.5] },
+  agentIcon: { width: '100%', height: '100%' },
 });
