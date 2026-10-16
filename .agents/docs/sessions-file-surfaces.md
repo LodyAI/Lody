@@ -145,3 +145,12 @@ this page is the full text of the rules summarised there.
   local Electron bundle and must not return. Office format engines are the
   narrow exception: their WASM/worker cost is deferred until an active file
   actually needs them. The static entry shell handles loading and errors.
+
+## Recovering failed previews
+
+An explicit reopen of the same failed file tab starts another read, including when
+the tab is already active. The error card also offers Retry. Focus requests on a
+successful preview do not reload its snapshot or discard unsaved edits. Existing
+load-effect cleanup fences late results after a retry, file switch, or unmount;
+there is no background retry loop. See the
+[failure classification and recovery note](../notes/implemented/bug-fix/2026-10-16-file-preview-failure-recovery.md).

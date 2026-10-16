@@ -2851,6 +2851,7 @@ export class MessageHandler {
       },
     });
     this.filePreviewService = new FilePreviewService({
+      onDiagnostic: (event) => this.logger.debug(`[file-preview] ${JSON.stringify(event)}`),
       resolveLocalWorkspace: this.resolveLocalFilePreviewWorkspace,
       resolveWorkspace: async (sessionId) => {
         const resolved = await this.resolveCodeCollabV2Workspace(sessionId);

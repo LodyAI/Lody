@@ -77,3 +77,19 @@ real per-append ceiling is not asserted anywhere in this repo.
 The generic `permission-denied` copy ("Access denied") misdescribes a policy
 rejection as a filesystem one, so the web surface keys a dedicated presentation off
 the phrase "File is outside the workspace".
+
+## Failure classification and diagnostics
+
+Only ENOENT/ENOTDIR imply absence. Both realpath implementations may fail; retain
+permission and other I/O errors, including directory-listing failures during the
+case/Unicode fallback. Remote unresolved paths still require every candidate to
+be inside an allowed root before exposing a filesystem classification.
+
+The daily log's `[file-preview]` JSON events distinguish `resolve-workspace`,
+`resolve-owner`, `resolve-path`, and Electron/remote `read` failures. Resolution
+records the requested path, session/owner, workspace root, canonical path on
+success, and up to eight failed probes with operation/path/errno. Electron records
+read outcome and duration with machine/workspace/session identity. These are local
+diagnostics, contain no content or resource tokens, and are not protocol fields.
+Pair events by session and requested path to distinguish a wrong root, a missing
+file, a permission failure, and a file disappearing between resolution and read.

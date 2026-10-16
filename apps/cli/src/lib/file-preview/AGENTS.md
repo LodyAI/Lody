@@ -62,6 +62,10 @@ save path's text reads.
 - A missing target has no realpath, so classify it against BOTH the resolved and the
   unresolved roots. That step only picks the error code; it never grants a read, and
   it still reports `file_not_found` only inside an allowed root.
+- Failed path probes must retain non-missing filesystem errors: EACCES/EPERM are
+  permission failures; other non-ENOENT/ENOTDIR errors are I/O failures. Apply the
+  remote path boundary before returning that classification. Diagnostics stay local
+  and contain identity/error codes, never file contents.
 - Unit-test the fold rule through an injected `FilePreviewDirectoryReader`
   (`file-preview-path-policy.test.ts`), not only against the real filesystem.
 - Remote oversize is refused, never truncated. The read takes one byte past the limit so a

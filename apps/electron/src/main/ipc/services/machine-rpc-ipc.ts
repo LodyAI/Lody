@@ -25,7 +25,42 @@ export class MachineRpcIpc extends IpcService {
     if (!result.ok) throw new Error(result.error)
     const file = LocalFileResolutionSchema.safeParse(result.result)
     if (!file.success) return FilePreviewV3ErrorSchema.parse(result.result)
-    const response = await localFileResources.preview(generation, file.data)
+    const startedAt = Date.now()
+    const diagnostic = {
+      stage: 'read',
+      transport: 'local',
+      sessionId: parsed.params.sessionId,
+      workspaceId: parsed.workspaceId,
+      machineId: parsed.machineId,
+      requestedPath: parsed.params.path,
+      absolutePath: file.data.absolutePath
+    }
+    const response = await localFileResources.preview(generation, file.data).then(
+      (preview) => {
+        console.debug(
+          '[file-preview]',
+          JSON.stringify({
+            ...diagnostic,
+            status: preview.status,
+            durationMs: Date.now() - startedAt,
+            ...('code' in preview ? { code: preview.code } : {})
+          })
+        )
+        return preview
+      },
+      (error: unknown) => {
+        console.warn(
+          '[file-preview]',
+          JSON.stringify({
+            ...diagnostic,
+            status: 'error',
+            durationMs: Date.now() - startedAt,
+            code: (error as NodeJS.ErrnoException)?.code ?? 'UNKNOWN'
+          })
+        )
+        throw error
+      }
+    )
     if (owner.isDestroyed() || resourceOwners.get(owner.id) !== generation) {
       localFileResources.releaseOwner(generation)
       throw new Error('Preview window closed.')

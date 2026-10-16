@@ -64,6 +64,8 @@ export type FilePreviewPathPolicyOptions = {
    * authorization check. See `FilePreviewDirectoryReader`.
    */
   readonly directoryReader?: FilePreviewDirectoryReader;
+  /** Local diagnostics only; never returned over the preview protocol. */
+  readonly onIoError?: (failure: FilePreviewIoFailure) => void;
 };
 
 /**
@@ -83,6 +85,16 @@ export type FilePreviewDirectoryReader = {
   /** Entry names in `directoryPath`, or null when it cannot be listed. */
   readonly readNames: (directoryPath: string) => readonly string[] | null;
 };
+
+export type FilePreviewIoFailure = {
+  readonly operation: 'realpath' | 'readdir' | 'stat';
+  readonly path: string;
+  readonly code: string;
+};
+
+function isMissing(code: string): boolean {
+  return code === 'ENOENT' || code === 'ENOTDIR';
+}
 
 const NODE_DIRECTORY_READER: FilePreviewDirectoryReader = {
   exists: (candidatePath) => fs.existsSync(candidatePath),
@@ -118,13 +130,24 @@ export function getDefaultFilePreviewExtraRoots(
   ];
 }
 
-function resolveRealPathOrNull(candidate: string): string | null {
+function resolveRealPathOrNull(
+  candidate: string,
+  onError?: (failure: FilePreviewIoFailure) => void
+): string | null {
   try {
     return fs.realpathSync.native(candidate);
-  } catch {
+  } catch (nativeError) {
     try {
       return fs.realpathSync(candidate);
-    } catch {
+    } catch (fallbackError) {
+      const nativeCode = (nativeError as NodeJS.ErrnoException).code ?? 'UNKNOWN';
+      const fallbackCode = (fallbackError as NodeJS.ErrnoException).code ?? 'UNKNOWN';
+      // Do not turn a permission/I/O failure into absence if the fallback disagrees.
+      onError?.({
+        operation: 'realpath',
+        path: candidate,
+        code: isMissing(nativeCode) ? fallbackCode : nativeCode,
+      });
       return null;
     }
   }
@@ -347,9 +370,10 @@ export function resolveFilePreviewPath(args: {
   const realWorkspaceRoot =
     workspaceRoot === null ? null : (resolveRealPathOrNull(workspaceRoot) ?? workspaceRoot);
   // Authorization compares symlink-resolved paths only.
-  const realRoots = [realWorkspaceRoot, ...extraRoots.map(resolveRealPathOrNull)].filter(
-    (root): root is string => root !== null
-  );
+  const realRoots = [
+    realWorkspaceRoot,
+    ...extraRoots.map((root) => resolveRealPathOrNull(root)),
+  ].filter((root): root is string => root !== null);
   // Classification-only root set, used when the target does NOT exist and so has
   // no realpath to compare. A root is very often reached through a symlink —
   // macOS `os.tmpdir()` is `/var/folders/…`, which really lives at
@@ -377,9 +401,14 @@ export function resolveFilePreviewPath(args: {
 
   // Find a spelling that exists. Everything below authorizes whatever this
   // step landed on, unchanged — resolution never grants a read on its own.
+  let resolutionFailure: FilePreviewIoFailure | undefined;
+  const recordFailure = (failure: FilePreviewIoFailure) => {
+    args.options?.onIoError?.(failure);
+    if (!isMissing(failure.code)) resolutionFailure ??= failure;
+  };
   let realTarget: string | null = null;
   for (const candidate of lexicalCandidates) {
-    realTarget = resolveRealPathOrNull(candidate);
+    realTarget = resolveRealPathOrNull(candidate, recordFailure);
     if (realTarget !== null) break;
   }
   if (realTarget === null) {
@@ -393,32 +422,52 @@ export function resolveFilePreviewPath(args: {
     const tolerantRoots = [realWorkspaceRoot, workspaceRoot].filter(
       (root, index, roots): root is string => root !== null && roots.indexOf(root) === index
     );
-    const reader = args.options?.directoryReader ?? NODE_DIRECTORY_READER;
+    const reader = args.options?.directoryReader ?? {
+      exists: NODE_DIRECTORY_READER.exists,
+      readNames: (directoryPath: string) => {
+        try {
+          return fs.readdirSync(directoryPath);
+        } catch (error) {
+          recordFailure({
+            operation: 'readdir',
+            path: directoryPath,
+            code: (error as NodeJS.ErrnoException).code ?? 'UNKNOWN',
+          });
+          return null;
+        }
+      },
+    };
     for (const candidate of lexicalCandidates) {
       const tolerant = resolveWorkspacePathTolerantly(candidate, tolerantRoots, reader);
       if (tolerant !== null) {
-        realTarget = resolveRealPathOrNull(tolerant);
+        realTarget = resolveRealPathOrNull(tolerant, recordFailure);
         if (realTarget !== null) break;
       }
     }
   }
   if (realTarget === null) {
-    if (args.options?.allowArbitraryPaths) {
-      return { ok: false, rejection: { code: 'file_not_found', message: 'File was not found.' } };
-    }
-    // Only reveal "missing" when EVERY spelling we were willing to look for is
-    // inside an allowed root. `every`, not `some` — `some` turns the two codes
-    // into an existence oracle for the whole filesystem: `" /etc/passwd"` keeps
-    // the leading space in the verbatim candidate, so that one resolves under
-    // the workspace and vouches for the trimmed candidate that actually escaped.
-    // The caller then reads `file_not_found` vs `path_not_allowed` as "does this
-    // path exist outside the workspace", which the boundary exists to prevent.
-    return lexicalCandidates.every((candidate) =>
-      classificationRoots.some((root) => isWithinRoot(root, candidate))
+    // Preserve the remote existence boundary for EVERY spelling before exposing
+    // either absence or an I/O failure. This never grants filesystem access.
+    if (
+      !args.options?.allowArbitraryPaths &&
+      !lexicalCandidates.every((candidate) =>
+        classificationRoots.some((root) => isWithinRoot(root, candidate))
+      )
     )
-      ? { ok: false, rejection: { code: 'file_not_found', message: 'File was not found.' } }
-      : notAllowed;
+      return notAllowed;
+    if (resolutionFailure) {
+      const denied = ['EACCES', 'EPERM'].includes(resolutionFailure.code);
+      return {
+        ok: false,
+        rejection: {
+          code: denied ? 'permission_denied' : 'transient_io',
+          message: denied ? 'Permission denied.' : 'File could not be resolved. Try again.',
+        },
+      };
+    }
+    return { ok: false, rejection: { code: 'file_not_found', message: 'File was not found.' } };
   }
+
   if (
     !args.options?.allowArbitraryPaths &&
     !realRoots.some((root) => isWithinRoot(root, realTarget))
@@ -431,6 +480,7 @@ export function resolveFilePreviewPath(args: {
     stat = fs.statSync(realTarget);
   } catch (error) {
     const code = (error as NodeJS.ErrnoException).code;
+    recordFailure({ operation: 'stat', path: realTarget, code: code ?? 'UNKNOWN' });
     if (code === 'ENOENT' || code === 'ENOTDIR') {
       return { ok: false, rejection: { code: 'file_not_found', message: 'File was not found.' } };
     }
