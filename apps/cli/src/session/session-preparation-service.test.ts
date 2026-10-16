@@ -103,11 +103,24 @@ describe('SessionPreparationService', () => {
     });
     expect(service.claim({ ...identity, isCompatible: () => true })).toEqual({
       status: 'miss',
+      reason: 'absent',
       cleanup: null,
     });
     expect(service.cancel(lease)).toBe('not-found');
     await service.disposeAll();
     expect(prepared.state.disposed).toBe(false);
+  });
+
+  it.each([
+    ['requester', { requesterUserId: 'other' }],
+    ['claim-key', { claimKey: 'other' }],
+  ] as const)('reports a %s mismatch as the miss reason', async (reason, mismatch) => {
+    const service = createService();
+    const prepared = start(service);
+    await prepared.started.promise;
+    const result = service.claim({ ...identity, ...mismatch, isCompatible: () => true });
+    expect(result.status === 'miss' && result.reason).toBe(reason);
+    await prepared.disposed.promise;
   });
 
   it.each([
@@ -146,13 +159,14 @@ describe('SessionPreparationService', () => {
       if (trigger === 'ttl') await vi.advanceTimersByTimeAsync(120_000);
       if (trigger === 'failure') prepared.sessionReady.reject(new Error('startup failed'));
       if (trigger === 'incompatible' || trigger === 'compatibility-error') {
-        service.claim({
+        const rejected = service.claim({
           ...identity,
           isCompatible: () => {
             if (trigger === 'compatibility-error') throw new Error('workspace unavailable');
             return false;
           },
         });
+        expect(rejected.status === 'miss' && rejected.reason).toBe(trigger);
       }
       await cleanupStarted.promise;
       expect(service.getState(sessionId)).toBeNull();

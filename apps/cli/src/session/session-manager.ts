@@ -293,6 +293,53 @@ function buildSessionPreparationCompatibility(
   };
 }
 
+type SessionPreparationSelection = Pick<
+  SessionConfig,
+  'modelId' | 'memory' | 'mcpServerIds' | 'configOptionValues'
+>;
+
+/**
+ * Names (never values: launch carries the agent environment) of what makes a
+ * prepared session incompatible. The run half is compared from the selections
+ * that built each compatibility, since its normalized form is positional.
+ */
+function describeCompatibilityMismatch(
+  prepared: ReturnType<typeof buildSessionPreparationCompatibility>,
+  requested: ReturnType<typeof buildSessionPreparationCompatibility>,
+  preparedSelection: SessionPreparationSelection,
+  requestedSelection: SessionPreparationSelection
+): string[] {
+  const fields: string[] = [];
+  const preparedLaunch: Record<string, unknown> = { ...prepared.launch };
+  const requestedLaunch: Record<string, unknown> = { ...requested.launch };
+  for (const key of new Set([...Object.keys(preparedLaunch), ...Object.keys(requestedLaunch)])) {
+    if (!isDeepStrictEqual(preparedLaunch[key], requestedLaunch[key])) fields.push(`launch.${key}`);
+  }
+  if (!isDeepStrictEqual(prepared.runConfig, requested.runConfig)) {
+    const runFields: string[] = [];
+    for (const key of ['modelId', 'memory', 'mcpServerIds'] as const) {
+      if (
+        !isDeepStrictEqual(
+          normalizeSessionPreparationRunConfigForDedup({ [key]: preparedSelection[key] }),
+          normalizeSessionPreparationRunConfigForDedup({ [key]: requestedSelection[key] })
+        )
+      )
+        runFields.push(key);
+    }
+    const preparedOptions: Record<string, unknown> = { ...preparedSelection.configOptionValues };
+    const requestedOptions: Record<string, unknown> = { ...requestedSelection.configOptionValues };
+    for (const key of new Set([
+      ...Object.keys(preparedOptions),
+      ...Object.keys(requestedOptions),
+    ])) {
+      if (!isDeepStrictEqual(preparedOptions[key], requestedOptions[key]))
+        runFields.push(`configOptionValues.${key}`);
+    }
+    fields.push(...(runFields.length > 0 ? runFields : ['runConfig']));
+  }
+  return fields.length > 0 || isDeepStrictEqual(prepared, requested) ? fields : ['compatibility'];
+}
+
 function agentConfigMatchesPreparation(
   agentConfig: {
     machineId: MachineId;
@@ -774,12 +821,19 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
       config.memory,
       config.modelId
     );
+    let incompatibleFields: string[] = [];
     const claim = this.preparationService.claim({
       sessionId,
       requesterUserId: config.requesterUserId,
       claimKey: buildSessionPreparationClaimKey(preparationIdentity),
       isCompatible: (resource) => {
-        if (!isDeepStrictEqual(resource.compatibility, compatibility)) {
+        incompatibleFields = describeCompatibilityMismatch(
+          resource.compatibility,
+          compatibility,
+          resource.config,
+          config
+        );
+        if (incompatibleFields.length > 0) {
           return false;
         }
         if (!resource.readCurrentLaunchConfig) {
@@ -792,22 +846,32 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
           cliType: config.agentCliType,
           agentType: config.agentType,
         } as SessionMeta);
-        return (
-          current !== null &&
-          isDeepStrictEqual(
-            resource.compatibility,
-            buildSessionPreparationCompatibility(
-              current.config,
-              config.mcpServerIds,
-              config.configOptionValues,
-              config.memory,
-              config.modelId
-            )
-          )
-        );
+        if (current === null) {
+          incompatibleFields = ['currentLaunchConfig'];
+          return false;
+        }
+        incompatibleFields = describeCompatibilityMismatch(
+          resource.compatibility,
+          buildSessionPreparationCompatibility(
+            current.config,
+            config.mcpServerIds,
+            config.configOptionValues,
+            config.memory,
+            config.modelId
+          ),
+          resource.config,
+          config
+        ).map((field) => `current.${field}`);
+        return incompatibleFields.length === 0;
       },
     });
     if (claim.status === 'miss') {
+      if (claim.reason !== 'absent') {
+        const detail = claim.reason === 'incompatible' ? ` (${incompatibleFields.join(', ')})` : '';
+        this.logger.debug(
+          `[${sessionId}] Prepared session not claimed: ${claim.reason}${detail}; starting cold after its cleanup`
+        );
+      }
       await claim.cleanup;
       return await this.createSessionInnerWithAgent(config, agentStart, signal);
     }

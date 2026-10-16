@@ -1371,8 +1371,9 @@ describe('SessionManager preparation compatibility', () => {
   });
 
   it('rejects a prepared session with different initial config option values', async () => {
+    const logger = createLogger();
     const manager = new SessionManager(
-      createLogger(),
+      logger,
       'token',
       'machine-1' as MachineId,
       'workspace-1' as WorkspaceId,
@@ -1432,6 +1433,10 @@ describe('SessionManager preparation compatibility', () => {
     );
     expect(prepared.dispose).toHaveBeenCalledTimes(1);
     expect(coldCreate).toHaveBeenCalledWith(durableConfig, undefined, undefined);
+    // Names the changed option without its value.
+    expect(logger.debug).toHaveBeenCalledWith(
+      `[${sessionId}] Prepared session not claimed: incompatible (configOptionValues.permission_mode); starting cold after its cleanup`
+    );
   });
 
   // A tree that outlived one forced termination used to keep the retirement's

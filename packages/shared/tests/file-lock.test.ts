@@ -568,6 +568,9 @@ describe('native file locks', () => {
           expect(error).toBeInstanceOf(LockReleaseFailed);
           if (!(error instanceof LockReleaseFailed) || !error.cleanup)
             throw new Error('missing cleanup owner');
+          expect(error.message).toBe(
+            `Failed to release file lock "${lockPath}": Operation timed out after '5s'`
+          );
           expect(fs.existsSync(lockPath)).toBe(true);
           deadline = nextDeadline;
           let successorRan = false;
@@ -730,6 +733,9 @@ describe('native file locks', () => {
           throw new Error('missing complete failure');
         expect(projected.cause).toBe(primary);
         expect(projected.fullCause).toBe(native);
+        expect(projected.message).toMatch(
+          /^task failed; Failed to release file lock ".+": .+; Failed to release file lock ".+": .+$/
+        );
         expect(native?.reasons.some((r) => Cause.isFailReason(r) && r.error === primary)).toBe(
           true
         );

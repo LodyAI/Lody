@@ -78,9 +78,18 @@ type PreparationRecord<T extends SessionPreparationResource> = {
   rollbackFailure?: SessionPreparationCleanupError;
 };
 
+/** Why a claim fell back to a cold start; `absent` means nothing was prepared. */
+export type SessionPreparationMissReason =
+  | 'absent'
+  | 'requester'
+  | 'claim-key'
+  | 'not-ready'
+  | 'incompatible'
+  | 'compatibility-error';
+
 export type SessionPreparationClaimResult<T extends SessionPreparationResource> =
   | { status: 'claimed'; resource: T }
-  | { status: 'miss'; cleanup: Promise<void> | null };
+  | { status: 'miss'; reason: SessionPreparationMissReason; cleanup: Promise<void> | null };
 
 export class SessionPreparationService<T extends SessionPreparationResource> {
   private readonly records = new Map<SessionId, PreparationRecord<T>>();
@@ -225,25 +234,24 @@ export class SessionPreparationService<T extends SessionPreparationResource> {
   }): SessionPreparationClaimResult<T> {
     const record = this.records.get(args.sessionId);
     if (!record) {
-      return { status: 'miss', cleanup: this.retirementOf(args.sessionId) };
+      return { status: 'miss', reason: 'absent', cleanup: this.retirementOf(args.sessionId) };
     }
-    if (
-      record.requesterUserId !== args.requesterUserId ||
-      record.claimKey !== args.claimKey ||
-      !record.resource
-    ) {
-      return { status: 'miss', cleanup: this.expire(record, 'expired') };
-    }
+    const miss = (reason: SessionPreparationMissReason): SessionPreparationClaimResult<T> => ({
+      status: 'miss',
+      reason,
+      cleanup: this.expire(record, 'expired'),
+    });
+    if (record.requesterUserId !== args.requesterUserId) return miss('requester');
+    if (record.claimKey !== args.claimKey) return miss('claim-key');
+    if (!record.resource) return miss('not-ready');
 
     try {
-      if (!args.isCompatible(record.resource)) {
-        return { status: 'miss', cleanup: this.expire(record, 'expired') };
-      }
+      if (!args.isCompatible(record.resource)) return miss('incompatible');
     } catch (error) {
       this.logger.debug(
         `[${record.sessionId}] Session preparation claim fell back to cold start: ${formatErrorMessage(error)}`
       );
-      return { status: 'miss', cleanup: this.expire(record, 'expired') };
+      return miss('compatibility-error');
     }
 
     record.state = 'claimed';
