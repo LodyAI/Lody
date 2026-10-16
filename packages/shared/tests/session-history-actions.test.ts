@@ -14,6 +14,7 @@ import { createHistoryWriter } from '../src/history-writer';
 import {
   planOperationProgress,
   getOperationProgressTurnId,
+  findProgressMessageId,
 } from '../src/session-data/operation-progress';
 const sid = 'actions' as SessionId;
 const row = (id: string, role: SessionTurn['role'] = 'assistant'): SessionEntry => ({
@@ -183,27 +184,177 @@ describe('operation progress local history writes', () => {
     data.dispose();
   });
 
-  it('rejects invalid progress before mutating or deleting any selected card', async () => {
-    const doc = new LoroDoc();
-    const data = createLoroSessionData({ sessionId: sid, doc });
-    await data.commands.applyHistoryAction(action());
-    const id = getOperationProgressTurnId(sid, 'op');
-    await data.commands.appendTurn({
-      ...planOperationProgress([], operation(), action().timestamp)[0]!,
-      id: `${id}:duplicate:old`,
+  it('merges concurrent canonical copies without regressing a terminal target and converges by local updates', () => {
+    const left = new LoroDoc();
+    const right = new LoroDoc();
+    const leftWriter = createHistoryWriter(left);
+    const rightWriter = createHistoryWriter(right);
+    leftWriter.updateOperationProgress(action());
+    rightWriter.updateOperationProgress({ ...action(), statuses: [['child\0input', 'succeeded']] });
+    left.import(right.export({ mode: 'update' }));
+    expect(leftWriter.readStored()).toHaveLength(2);
+    const observer = new LoroDoc();
+    observer.import(left.export({ mode: 'snapshot' }));
+    const unsubscribe = left.subscribeLocalUpdates((update) => observer.import(update));
+    expect(leftWriter.updateOperationProgress(action())).toBe(true);
+    expect(leftWriter.readStored()).toHaveLength(1);
+    expect(leftWriter.readStored()[0]).toMatchObject({
+      items: [{ items: [{ status: 'succeeded' }] }],
     });
+    right.import(left.export({ mode: 'update' }));
+    expect(right.toJSON()).toEqual(left.toJSON());
+    // A transport subscribed only to local updates must receive the reconciliation.
+    expect(observer.toJSON()).toEqual(left.toJSON());
+    const count = right.opCount();
+    expect(rightWriter.updateOperationProgress(action())).toBe(false);
+    expect(right.opCount()).toBe(count);
+    unsubscribe();
+    observer.free();
+  });
+
+  it.each(['map', 'inline'] as const)(
+    'repairs an alias-only %s card in place, even when its content is unchanged',
+    (storage) => {
+      const doc = new LoroDoc();
+      const writer = createHistoryWriter(doc);
+      const card = planOperationProgress(
+        [],
+        operation(),
+        action().timestamp,
+        action().statuses
+      )[0]!;
+      writer.append(row('before'));
+      const legacy = { ...card, id: `${card.id}:duplicate:legacy`, future: { retained: true } };
+      const list = doc.getList('history');
+      if (storage === 'map') {
+        writer.append(legacy);
+        (list.get(1) as LoroMap).set('future', legacy.future);
+      } else list.push(legacy as never);
+      writer.append(row('after'));
+      const containerId = storage === 'map' ? (list.get(1) as LoroMap).id : undefined;
+      const siblings = [0, 2].map((index) => (list.get(index) as LoroMap).id);
+      expect(writer.updateOperationProgress(action())).toBe(true);
+      const history = writer.readStored();
+      expect(history.map((entry) => entry.id)).toEqual(['before', card.id, 'after']);
+      expect(history[1]).toMatchObject({ ...card, future: legacy.future });
+      expect(findProgressMessageId(history, operation())).toBe(card.id);
+      if (storage === 'map') expect((list.get(1) as LoroMap).id).toBe(containerId);
+      expect([0, 2].map((index) => (list.get(index) as LoroMap).id)).toEqual(siblings);
+      const count = doc.opCount();
+      expect(writer.updateOperationProgress(action())).toBe(false);
+      expect(doc.opCount()).toBe(count);
+    }
+  );
+
+  it('retains the canonical card metadata when an older alias precedes it', () => {
+    const doc = new LoroDoc();
+    const writer = createHistoryWriter(doc);
+    const card = planOperationProgress([], operation(), action().timestamp)[0]!;
+    writer.append({ ...card, id: `${card.id}:duplicate:first`, timestamp: '2025-01-01T00:00:00Z' });
+    writer.append(row('between'));
+    writer.append(card);
+    const list = doc.getList('history');
+    const canonical = list.get(2) as LoroMap;
+    canonical.set('future', { retained: true });
+    expect(writer.updateOperationProgress(action())).toBe(true);
+    expect(writer.readStored().map((entry) => entry.id)).toEqual(['between', card.id]);
+    expect(writer.readStored()[1]).toMatchObject({
+      timestamp: card.timestamp,
+      future: { retained: true },
+    });
+    expect((list.get(1) as LoroMap).id).toBe(canonical.id);
+  });
+
+  it('treats unchanged progress with stored extension fields as a no-op', () => {
+    const doc = new LoroDoc();
+    const writer = createHistoryWriter(doc);
+    writer.updateOperationProgress(action());
+    const card = doc.getList('history').get(0) as LoroMap;
+    const content = (card.get('items') as LoroList).get(0) as LoroMap;
+    content.set('future', { retained: true });
+    const item = (content.get('items') as LoroList).get(0) as LoroMap;
+    (item.get('target') as LoroMap).set('futureTarget', { retained: true });
+    doc.commit();
     const before = doc.toJSON();
     const count = doc.opCount();
-    await expect(
-      data.commands.applyHistoryAction({
-        ...action(),
-        statuses: [['child\0input', 'invalid' as never]],
-      })
-    ).rejects.toThrow();
+    expect(writer.updateOperationProgress(action())).toBe(false);
     expect(doc.opCount()).toBe(count);
     expect(doc.toJSON()).toEqual(before);
-    data.dispose();
+    expect(
+      writer.updateOperationProgress({ ...action(), statuses: [['child\0input', 'succeeded']] })
+    ).toBe(true);
+    expect(writer.readStored()[0]).toMatchObject({
+      items: [
+        {
+          future: { retained: true },
+          items: [{ status: 'succeeded', target: { futureTarget: { retained: true } } }],
+        },
+      ],
+    });
+    expect(writer.updateOperationProgress(action())).toBe(false);
   });
+
+  it('invalidates warm positions on checkout and pending identity or role edits without committing a no-op', () => {
+    const doc = new LoroDoc();
+    const writer = createHistoryWriter(doc);
+    writer.updateOperationProgress(action());
+    const oldFrontiers = doc.frontiers();
+    const list = doc.getList('history');
+    list.insert(0, row('shift') as never);
+    doc.commit();
+    expect(writer.updateOperationProgress(action())).toBe(false);
+    doc.checkout(oldFrontiers);
+    expect(writer.updateOperationProgress(action())).toBe(false);
+    doc.attach();
+    const card = list.get(1) as LoroMap;
+    card.set('id', `${getOperationProgressTurnId(sid, 'op')}:duplicate:pending`);
+    expect(writer.updateOperationProgress(action())).toBe(true);
+    expect(writer.readStored().map((entry) => entry.id)).toEqual([
+      'shift',
+      getOperationProgressTurnId(sid, 'op'),
+    ]);
+    doc.getMap('session').set('pending', true);
+    const pending = doc.getPendingTxnLength();
+    expect(writer.updateOperationProgress(action())).toBe(false);
+    expect(writer.updateOperationProgress(action())).toBe(false);
+    expect(doc.getPendingTxnLength()).toBe(pending);
+    card.set('role', 'assistant');
+    expect(writer.updateOperationProgress(action())).toBe(true);
+    expect(writer.readStored().map((entry) => entry.role)).toEqual([
+      'assistant',
+      'assistant',
+      'system',
+    ]);
+  });
+
+  it.each(['canonical', 'alias-only'] as const)(
+    'rejects invalid progress before mutating or deleting %s cards',
+    async (identity) => {
+      const doc = new LoroDoc();
+      const data = createLoroSessionData({ sessionId: sid, doc });
+      await data.commands.applyHistoryAction(action());
+      const id = getOperationProgressTurnId(sid, 'op');
+      if (identity === 'alias-only') {
+        (doc.getList('history').get(0) as LoroMap).set('id', `${id}:duplicate:first`);
+        doc.commit();
+      }
+      await data.commands.appendTurn({
+        ...planOperationProgress([], operation(), action().timestamp)[0]!,
+        id: `${id}:duplicate:old`,
+      });
+      const before = doc.toJSON();
+      const count = doc.opCount();
+      await expect(
+        data.commands.applyHistoryAction({
+          ...action(),
+          statuses: [['child\0input', 'invalid' as never]],
+        })
+      ).rejects.toThrow();
+      expect(doc.opCount()).toBe(count);
+      expect(doc.toJSON()).toEqual(before);
+      data.dispose();
+    }
+  );
 });
 for (const backend of ['loro'] as const)
   describe(`history actions ${backend}`, () => {

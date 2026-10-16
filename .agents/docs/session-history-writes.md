@@ -61,6 +61,10 @@ for the shared planner and validator; no history-root export or full-history fal
 is allowed. Replacements preserve existing containers, duplicate deletion touches
 only selected positions, and new cards append at the actual history tail. No-op
 checks compare content rather than JSON object key order and do not commit.
+The canonical card owns its metadata even when an alias appears earlier. If only
+aliases remain, rename the first one in place; equal progress content must not
+skip this identity repair. Preserve stored progress and target extension fields
+while merging, so future-version metadata does not turn no-ops into repeated writes.
 
 Unknown document writes, imports, checkout and pending edits invalidate the directory;
 the next update scans identity metadata again, never unrelated bodies. This is not

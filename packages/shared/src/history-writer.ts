@@ -462,8 +462,7 @@ export function createHistoryWriter(doc: LoroDoc, readHistory?: () => readonly S
       old,
       value
     ) =>
-      old === undefined ? cleanNew(HistoryEntryWriteSchema, value) : prepareReplacement(old, value),
-    positions?: readonly number[]
+      old === undefined ? cleanNew(HistoryEntryWriteSchema, value) : prepareReplacement(old, value)
   ) => {
     const used = new Set<number>();
     const byId = new Map<unknown, number[]>();
@@ -487,7 +486,7 @@ export function createHistoryWriter(doc: LoroDoc, readHistory?: () => readonly S
       last = index;
       used.add(index);
       if (historyValuesEqual(previous[index], entry)) return { index };
-      const map = list.get(positions?.[index] ?? index);
+      const map = list.get(index);
       if (!isContainer(map) && record(map))
         return { index, inline: true, value: prepareValue(previous[index], entry) };
       if (!isContainer(map) || map.kind() !== 'Map')
@@ -495,38 +494,6 @@ export function createHistoryWriter(doc: LoroDoc, readHistory?: () => readonly S
       return { index, map, value: prepareValue(previous[index], entry) };
     });
     return () => {
-      if (positions) {
-        // Replace before deleting: inline rows still have their original positions.
-        // Every value above has been validated before the first mutation.
-        for (const op of plan) {
-          if (op.index < 0 || op.value === undefined) continue;
-          if ('inline' in op && op.inline) {
-            const position = positions[op.index]!;
-            list.delete(position, 1);
-            list.insert(position, op.value as Parameters<LoroList['insert']>[1]);
-          } else if (isContainer(op.map)) {
-            diffHistoryContainer(
-              op.map,
-              sessionHistorySchema,
-              previous[op.index],
-              op.value,
-              undefined
-            );
-          }
-        }
-        for (let i = positions.length - 1; i >= 0; i--)
-          if (!used.has(i)) list.delete(positions[i]!, 1);
-        for (const op of plan)
-          if (op.index < 0)
-            populateContainer(
-              list.insertContainer(list.length, new LoroMap()),
-              sessionHistorySchema,
-              op.value,
-              undefined
-            );
-        doc.commit();
-        return;
-      }
       for (let i = previous.length - 1; i >= 0; i--) if (!used.has(i)) list.delete(i, 1);
       plan.forEach((op, i) => {
         if (op.index < 0)
@@ -697,7 +664,35 @@ export function createHistoryWriter(doc: LoroDoc, readHistory?: () => readonly S
       });
       const next = planOperationProgress(previous, operation, action.timestamp, action.statuses);
       if (next === previous) return false;
-      planWrite(previous, next, undefined, positions)();
+      // A changed operation projection contains exactly one canonical card.
+      // Keep that card's container/position, or rename the first legacy alias.
+      const canonicalIndex = previous.findIndex((entry) => entry.id === id);
+      const retainedIndex = canonicalIndex >= 0 ? canonicalIndex : previous.length ? 0 : -1;
+      const old = previous[retainedIndex];
+      const prepared = old
+        ? prepareReplacement(old, next[0])
+        : cleanNew(HistoryEntryWriteSchema, next[0]);
+      // Preflight above must finish before replacing or deleting any stored row.
+      if (retainedIndex < 0) {
+        populateContainer(
+          list.insertContainer(list.length, new LoroMap()),
+          sessionHistorySchema,
+          prepared,
+          undefined
+        );
+      } else {
+        const position = positions[retainedIndex]!;
+        const value = list.get(position);
+        if (isContainer(value)) {
+          diffHistoryContainer(value, sessionHistorySchema, old, prepared, undefined);
+        } else {
+          list.delete(position, 1);
+          list.insert(position, prepared as Parameters<LoroList['insert']>[1]);
+        }
+        for (let i = positions.length - 1; i >= 0; i--)
+          if (i !== retainedIndex) list.delete(positions[i]!, 1);
+      }
+      doc.commit();
       return true;
     },
     updateEntry(id, updater) {

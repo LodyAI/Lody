@@ -83,7 +83,7 @@ const mergeProgressItem = (
       progressStatusRank(existing.status) > progressStatusRank(next.status))
   )
     return existing;
-  return { ...existing, ...next };
+  return { ...existing, ...next, target: { ...existing?.target, ...next.target } };
 };
 
 export const mergeOperationProgressContent = (
@@ -99,6 +99,7 @@ export const mergeOperationProgressContent = (
     mergedItems.set(key, mergeProgressItem(mergedItems.get(key), item));
   }
   return {
+    ...existing,
     ...next,
     items: [...mergedItems.values()],
   };
@@ -120,9 +121,10 @@ export function planOperationProgress(
   const isProgressRow = (entry: SessionEntry) =>
     entry.role === 'system' && (entry.id === id || entry.id.startsWith(duplicatePrefix));
   const updateHistory = (history: SessionEntry[]): SessionEntry[] => {
-    const existingIndex = history.findIndex((entry) => entry.id === id && entry.role === 'system');
+    const canonicalIndex = history.findIndex((entry) => entry.id === id && entry.role === 'system');
+    const existingIndex = canonicalIndex >= 0 ? canonicalIndex : history.findIndex(isProgressRow);
     const duplicates = history.filter(isProgressRow);
-    const existing = duplicates[0];
+    const existing = history[existingIndex];
     const existingProgress = duplicates
       .flatMap((entry) => entry.items ?? [])
       .filter((item) => item.type === 'operation_progress')
@@ -139,13 +141,6 @@ export function planOperationProgress(
     if (!content) return history;
     const merged = mergeOperationProgressContent(existingProgress, content);
     const nextItems = [merged];
-    if (
-      duplicates.length === 1 &&
-      existing &&
-      historyValuesEqual(existing.items ?? [], nextItems)
-    ) {
-      return history;
-    }
     const entry: SessionEntry = {
       ...(existing ?? {}),
       id,
@@ -156,6 +151,7 @@ export function planOperationProgress(
       fileDiff: existing?.fileDiff ?? [],
       finished: true,
     };
+    if (duplicates.length === 1 && historyValuesEqual(existing, entry)) return history;
     if (existingIndex < 0) return [...history, entry];
     return history.flatMap((candidate, index) =>
       index === existingIndex ? [entry] : isProgressRow(candidate) ? [] : [candidate]
