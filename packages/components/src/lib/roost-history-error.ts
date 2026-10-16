@@ -5,7 +5,11 @@ import type { SessionHistoryRpcFailure } from '@lody/loro-streams-rpc';
 export class RoostHistoryError extends Error {
   readonly backend = 'roost';
 
-  constructor(operation: 'read' | 'write', detail: string) {
+  constructor(
+    operation: 'read' | 'write',
+    detail: string,
+    readonly retryReason?: 'superseded'
+  ) {
     super(
       i18next.t(
         operation === 'read' ? 'sessions.roostHistoryReadError' : 'sessions.roostHistoryWriteError',

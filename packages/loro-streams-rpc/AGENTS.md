@@ -40,17 +40,16 @@ and the `file/preview` namespace are in
   the watchdog.
 - The CLI owns/listens to the request stream via `src/machine-rpc-server.ts`
   `LoroStreamsMachineRpcServer`.
-- The server dispatches requests **concurrently**, bounded by `maxConcurrentRequests`
-  (default 16), so a slow handler cannot head-of-line block independent reads on the
-  shared per-machine request stream. Handlers must be safe to run concurrently; one that
-  needs read-check-write atomicity serializes in its own service layer (Code Collab
-  `save-text` per absolute path in `code-collab-v2-service.ts`), not in the request loop.
-- Control-plane methods (`machine/status`, `machine/preview-control`, `machine/ping`, `session/cancel`,
-  `session/live-status`, `session/steer`, `session/terminate`, `machine/restart`,
-  `machine/upgrade`, `session/dispatch-turn`)
-  bypass the shared semaphore through `CONTROL_METHODS`. Keep handlers fast:
-  `session/dispatch-turn` stashes and wakes the watcher; never execute the agent inline.
-  Its short TTL equals the client deadline, bounding restart replay from `'-1'`.
+- Handler permits wait inside tracked tasks, never behind ordinary intake. Bound
+  ordinary admission (default 128); overload replies are separately bounded.
+  History writes and `CONTROL_METHODS` have reserved pools, independent of reads.
+  Serialize mutations in their owner service, not the request loop.
+  `session/history-watch` retains owner encryption and readiness checks. Bound its
+  separate admission at 128; checkpoint waits hold no ordinary read permit. Acquire
+  that permit only for the subsequent body/change read. Stop aborts parked waits.
+- Control handlers stay fast: `session/dispatch-turn` stashes/wakes, never executes
+  an agent inline. Its TTL equals the client deadline, bounding restart replay.
+  Stop fences queued handlers; retain started work until its raw completion.
 - History writes require durable precondition-refusal retention before replying.
   Replayed IDs keep that refusal until expiry; conflicting ID reuse and unavailable
   request state fail closed. Details: [history readiness](../../.agents/docs/rpc-loro-streams-rpc.md#history-readiness-and-error-provenance).

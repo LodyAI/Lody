@@ -20,6 +20,36 @@ been removed.
   handlers.
 - `README.md` — package smoke-test notes.
 
+## Request scheduling
+
+Ordinary handlers have a shared execution pool (default 16) and bounded admission
+(default 128, including active tasks). History writes, including immutable input
+acceptance, have four reserved execution slots; control methods have four more.
+Each foreground pool admits at most 128 active/queued tasks. Batch intake examines
+control and write requests first and acquires handler permits inside tracked tasks.
+A full ordinary pool never waits at intake: excess requests get a protocol busy
+response through another bounded four-slot pool. At most 128 busy responses are
+retained; further overload is logged and left to the caller's timeout/recovery.
+No overload result proves the outcome of an earlier duplicate dispatched write.
+
+Local Electron history reads instead use their own pool (at most eight active
+sessions) in `MessageProcessor`. Writes remain ordered on the session writer lane.
+Remote RPC calls the history handlers directly. Stop prevents queued handlers from
+starting; already-started raw work retains its task/permit until it settles.
+[Incremental recovery and scheduling decision](../notes/implemented/bug-fix/2026-10-16-roost-incremental-history.md)
+records boundary tests and limits; none is a live-service latency measurement.
+
+`session/history-watch` is an independently negotiated, owner-encrypted read method.
+It admits at most 128 parked requests in a separate lane; MessageHandler also caps
+owner waits across transports at 128. The checkpoint wait lasts at most 15 seconds
+outside ordinary permits, SQLite execution and writer serialization. After publication
+or deadline, its change/body read acquires an ordinary permit. The client response
+budget is 45 seconds. Local watches use independent wait lanes and a bounded
+post-wake read pool; one viewer cannot park another viewer behind its same-session wait.
+Stop aborts parked waits and fences queued work. The existing dispatcher retains raw
+reads through settlement; it never interprets waiter cancellation as write rollback.
+See [peer observation](../notes/implemented/bug-fix/2026-10-16-roost-peer-reader-readiness.md).
+
 ## History readiness and error provenance
 
 History RPC verifies session identity, owning machine and the persisted Roost backend

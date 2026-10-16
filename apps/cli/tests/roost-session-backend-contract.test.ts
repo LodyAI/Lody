@@ -2,14 +2,21 @@ import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { createRequire } from 'node:module';
 import { LoroRepo } from 'loro-repo';
+import { LoroDoc } from 'loro-crdt';
 import { Cause, Effect, Exit, Fiber } from 'effect';
 import { TestClock } from 'effect/testing';
 import Database from 'better-sqlite3';
 import {
   encryptCodeCollabV2RpcPayload,
+  LoroStreamsMachineRpcClient,
+  LoroStreamsMachineRpcServer,
+  type LoroJsonLiveBatchHandler,
+  type LoroStreamsJsonStreamClient,
   type SessionHistoryRpcRequest,
 } from '@lody/loro-streams-rpc';
+import { createRemoteRoostSessionDataFactory } from '../../../packages/components/src/lib/roost-session-bridge';
 import {
   getSessionHistoryRpcRejection,
   putSessionHistoryRpcRejection,
@@ -33,7 +40,12 @@ import {
   type SessionId,
   type SessionHistoryInput,
   type SessionHistoryReadResponse,
+  type SessionHistoryReadQuery,
+  SessionHistoryChangesSchema,
   type SessionHistoryWriteResponse,
+  type SessionHistoryWriteOperation,
+  type MachineId,
+  type WorkspaceId,
 } from '@lody/shared';
 import { MessageHandler } from '../src/lib/message-handler';
 import { getDefaultLogger } from '../src/utils/logger';
@@ -265,9 +277,14 @@ async function coldHistoryHandlerFixture(count: number) {
     observers,
     handler,
     rpc: handler as unknown as {
+      readSessionHistoryForRpc(
+        id: SessionId,
+        query: SessionHistoryReadQuery,
+        signal?: AbortSignal
+      ): Promise<SessionHistoryReadResponse>;
       writeSessionHistoryForRpc(
         id: SessionId,
-        operation: 'append',
+        operation: SessionHistoryWriteOperation,
         payload: Record<string, unknown>
       ): Promise<SessionHistoryWriteResponse>;
       resolveSessionHistoryOwnerSessionId(
@@ -884,6 +901,212 @@ describe('Production Roost history semantics', () => {
     expect(await owner.backend.readHistory()).toEqual(before);
   });
 
+  it('binds real owner RPC bodies to checkpoints and treats supersession as retryable', async () => {
+    const fixture = await coldHistoryHandlerFixture(1);
+    const id = [...fixture.docs.keys()][0];
+    if (!id) throw new Error('Missing fixture session');
+    try {
+      await fixture.ready(id);
+      expect(
+        await fixture.rpc.writeSessionHistoryForRpc(id, 'append', {
+          entry: nativeUser('rpc-first'),
+        })
+      ).toMatchObject({ success: true });
+      const page = await fixture.rpc.readSessionHistoryForRpc(id, {
+        kind: 'readLatestPage',
+        limit: 40,
+        withCheckpoint: true,
+      });
+      expect(page.success).toBe(true);
+      const checkpoint = (page.result as { checkpoint?: string }).checkpoint;
+      if (!checkpoint) throw new Error('Missing owner checkpoint');
+      expect(
+        await fixture.rpc.writeSessionHistoryForRpc(id, 'apply_action', {
+          action: { kind: 'user-status', turnId: 'rpc-first', status: 'seen' },
+        })
+      ).toMatchObject({ success: true });
+      expect(
+        await fixture.rpc.writeSessionHistoryForRpc(id, 'append', { entry: nativeUser('rpc-next') })
+      ).toMatchObject({ success: true });
+      const response = await fixture.rpc.readSessionHistoryForRpc(id, {
+        kind: 'readChanges',
+        checkpoint,
+        includeBodiesFrom: 0,
+      });
+      expect(response.success).toBe(true);
+      const changes = SessionHistoryChangesSchema.parse(response.result);
+      expect(changes.state).toBe('ready');
+      expect(changes).toMatchObject({
+        bodies: {
+          changed: [{ id: 'rpc-first', status: 'seen' }],
+          from: 1,
+          suffix: [{ id: 'rpc-next' }],
+        },
+      });
+      const superseded = await fixture.rpc.readSessionHistoryForRpc(id, {
+        kind: 'readTurn',
+        turnId: 'rpc-first',
+        atCheckpoint: checkpoint,
+      });
+      expect(SessionHistoryReadResponseSchema.parse(superseded)).toMatchObject({
+        success: false,
+        retryReason: 'superseded',
+      });
+      const body = await fixture.rpc.readSessionHistoryForRpc(id, {
+        kind: 'readTurn',
+        turnId: 'rpc-next',
+        atCheckpoint: changes.checkpoint,
+      });
+      expect(body).toMatchObject({
+        success: true,
+        result: { state: 'ready', turn: { id: 'rpc-next' } },
+      });
+    } finally {
+      await fixture.close();
+    }
+  });
+
+  it('preserves Unicode scalar edits and list changes through sealing and state correction', async () => {
+    const fixture = await nativeFixture();
+    const turn = {
+      ...nativeAssistant('delta-unicode'),
+      items: [
+        { type: 'text' as const, text: 'a🙂bc🚀d' },
+        { type: 'text' as const, text: 'unchanged' },
+        { type: 'text' as const, text: 'removed' },
+      ],
+    };
+    await fixture.backend.appendHistoryTurn(turn);
+    let items = [{ type: 'text' as const, text: 'a🙂XYZ🚀d' }, turn.items[1]!];
+    await fixture.backend.applyHistoryAction({
+      kind: 'assistant-items',
+      turnId: turn.id,
+      mode: 'replace',
+      items,
+    });
+    expect(await fixture.backend.readTurn(turn.id)).toMatchObject({
+      state: 'ready',
+      turn: { items },
+    });
+    items = [...items, { type: 'text' as const, text: 'added' }];
+    await fixture.backend.applyHistoryAction({
+      kind: 'assistant-items',
+      turnId: turn.id,
+      mode: 'replace',
+      items,
+    });
+    await fixture.backend.applyHistoryAction({
+      kind: 'finish-assistant',
+      turnId: turn.id,
+      endedAt: 42,
+    });
+    expect(await fixture.backend.readTurn(turn.id)).toMatchObject({
+      state: 'ready',
+      turn: { items, finished: true, endedAt: 42 },
+    });
+    // A sealed primary's first correction still uses its SDK state contract;
+    // subsequent state edits can use the same atomic delta path.
+    for (const text of ['state 🙂 text', 'state 😀 text']) {
+      items = [{ type: 'text' as const, text }, turn.items[1]!];
+      await fixture.backend.applyHistoryAction({
+        kind: 'assistant-items',
+        turnId: turn.id,
+        mode: 'replace',
+        items,
+      });
+      expect(await fixture.backend.readTurn(turn.id)).toMatchObject({
+        state: 'ready',
+        turn: { items, finished: true },
+      });
+    }
+    await fixture.backend.flushLocalWrites();
+    const id = fixture.doc.sessionId;
+    await fixture.close();
+    const reopened = await nativeFixture(id);
+    expect(await reopened.backend.readTurn(turn.id)).toMatchObject({
+      state: 'ready',
+      turn: { items, finished: true, endedAt: 42 },
+    });
+  });
+
+  it('observes owner checkpoints without holding the writer and closes waits on cancellation', async () => {
+    const fixture = await nativeFixture();
+    const history = fixture.backend.history;
+    if (!history.getCheckpoint || !history.waitForChanges)
+      throw new Error('Expected checkpoint watch');
+    const checkpoint = await history.getCheckpoint();
+    const original = history.getCheckpoint;
+    let armed = Promise.withResolvers<void>();
+    vi.spyOn(history, 'getCheckpoint').mockImplementation(async () => {
+      const value = await original();
+      armed.resolve();
+      return value;
+    });
+    vi.useFakeTimers();
+    const observed = history.waitForChanges(checkpoint, 15_000);
+    await armed.promise;
+    await fixture.backend.appendHistoryTurn(nativeUser('watched-owner-write'));
+    await observed;
+    const next = await original();
+    expect(next).not.toBe(checkpoint);
+    // The durable checkpoint covers a write between the initial read and watch admission.
+    await history.waitForChanges(checkpoint, 15_000);
+    expect(await history.readTurn('watched-owner-write')).toMatchObject({ state: 'ready' });
+    armed = Promise.withResolvers<void>();
+    const deadline = history.waitForChanges(next, 15_000);
+    await armed.promise;
+    await vi.advanceTimersByTimeAsync(15_000);
+    await deadline;
+    armed = Promise.withResolvers<void>();
+    const abort = new AbortController();
+    const cancelled = history.waitForChanges(next, 15_000, abort.signal).catch((error) => error);
+    await armed.promise;
+    abort.abort();
+    expect(await cancelled).toBeInstanceOf(Error);
+    // An aborted viewer does not retire the shared writer or checkpoint reader.
+    await fixture.backend.appendHistoryTurn(nativeUser('after-observer-abort'));
+    expect(await history.readTurn('after-observer-abort')).toMatchObject({ state: 'ready' });
+    const atClose = await original();
+    armed = Promise.withResolvers<void>();
+    const closing = history.waitForChanges(atClose, 15_000).catch((error) => error);
+    await armed.promise;
+    await fixture.close();
+    expect(await closing).toBeInstanceOf(Error);
+  });
+
+  it('recovers missed logical edits and appends from an owner-issued checkpoint', async () => {
+    const fixture = await nativeFixture();
+    await fixture.backend.appendHistoryTurn(nativeUser('catchup-user'));
+    await fixture.backend.appendHistoryTurn(nativeAssistant('catchup-assistant'));
+    const history = fixture.backend.history;
+    if (!history.getCheckpoint || !history.readChanges)
+      throw new Error('Expected incremental owner');
+    const checkpoint = await history.getCheckpoint();
+    await fixture.backend.applyHistoryAction({
+      kind: 'user-status',
+      turnId: 'catchup-user',
+      status: 'seen',
+    });
+    await fixture.backend.appendHistoryTurn(nativeUser('catchup-next'));
+    await fixture.backend.flushLocalWrites();
+    const changes = await history.readChanges(checkpoint);
+    expect(changes).toMatchObject({ state: 'ready', from: 2 });
+    if (changes.state !== 'ready') throw new Error('Expected complete recovery');
+    expect(changes.ids).toContain('catchup-user');
+    expect(await history.readTurn('catchup-user')).toMatchObject({
+      state: 'ready',
+      turn: { status: 'seen' },
+    });
+    expect(await history.readAt(2)).toMatchObject({ state: 'ready', turn: { id: 'catchup-next' } });
+    expect(await history.readChanges(changes.checkpoint)).toMatchObject({
+      state: 'ready',
+      ids: [],
+    });
+    expect(await history.readChanges('synthetic-foreign-checkpoint')).toMatchObject({
+      state: 'reset',
+    });
+  });
+
   it('publishes logical corrections to observers and keeps streaming reads bounded', async () => {
     const fixture = await nativeFixture();
     await fixture.backend.appendHistoryTurn(nativeUser('observed-u'));
@@ -1182,10 +1405,10 @@ describe('Production Roost history semantics', () => {
     });
     await first.backend.appendHistoryTurn(nativeUser('concurrent-tail-u'));
     const peer = await nativeFixture(first.doc.sessionId);
-    const original = NodeLodyHistory.prototype.commitHistoryBatch;
+    const original = RoostHistoryGeneration.prototype.commitPatches;
     let injected = false;
     const spy = vi
-      .spyOn(NodeLodyHistory.prototype, 'commitHistoryBatch')
+      .spyOn(RoostHistoryGeneration.prototype, 'commitPatches')
       .mockImplementation(async function (...args) {
         const result = await original.apply(this, args);
         if (!injected) {
@@ -1581,15 +1804,470 @@ describe('Production Roost history semantics', () => {
     }
   });
 
+  it('persists sparse ACP tool updates and subsequent text together, including retry after reopen', async () => {
+    const fixture = await nativeFixture();
+    await fixture.backend.appendHistoryTurn(nativeAssistant('sparse-tools'));
+    const checkpoint = await fixture.backend.history.getCheckpoint?.();
+    const input = {
+      targetAssistantEntryId: 'sparse-tools',
+      notifications: [
+        {
+          sessionId: 'synthetic-acp',
+          update: {
+            sessionUpdate: 'tool_call' as const,
+            toolCallId: 'synthetic-tool',
+            title: 'Synthetic tool',
+            status: 'in_progress' as const,
+          },
+        },
+        {
+          sessionId: 'synthetic-acp',
+          update: {
+            sessionUpdate: 'tool_call_update' as const,
+            toolCallId: 'synthetic-tool',
+            status: 'completed' as const,
+          },
+        },
+        {
+          sessionId: 'synthetic-acp',
+          update: {
+            sessionUpdate: 'agent_message_chunk' as const,
+            content: { type: 'text' as const, text: 'Visible reply after tool' },
+          },
+        },
+      ],
+      operationIds: ['sparse-tool-start', 'sparse-tool-finish', 'sparse-text'],
+    };
+    await fixture.backend.applyAgentBatch(input);
+    const expected = {
+      state: 'ready',
+      turn: {
+        items: [
+          { type: 'tool_call', toolCallId: 'synthetic-tool', status: 'completed' },
+          { type: 'text', text: 'Visible reply after tool' },
+        ],
+      },
+    };
+    expect(await fixture.backend.readTurn('sparse-tools')).toMatchObject(expected);
+    if (!checkpoint || !fixture.backend.history.readChanges)
+      throw new Error('Expected incremental owner');
+    expect(await fixture.backend.history.readChanges(checkpoint)).toMatchObject({
+      state: 'ready',
+      ids: ['sparse-tools'],
+    });
+    await fixture.backend.flushLocalWrites();
+    const sessionId = fixture.doc.sessionId;
+    await fixture.close();
+    const reopened = await nativeFixture(sessionId);
+    await reopened.backend.applyAgentBatch(input);
+    expect(await reopened.backend.readTurn('sparse-tools')).toMatchObject(expected);
+  });
+
+  it('delivers an accepted user turn through the ACP buffer and Native history to peer RPC reads', async () => {
+    const fixture = await coldHistoryHandlerFixture(1);
+    const sessionId = [...fixture.docs.keys()][0];
+    if (!sessionId) throw new Error('Missing synthetic session');
+    const host = fixture.handler as unknown as {
+      beginConversationTurn(id: SessionId, userTurnId: string): string;
+      enqueueACPUpdate(
+        id: SessionId,
+        notification: import('@lody/shared').AcpSessionNotification
+      ): void;
+      flushACPUpdatesNow(id: SessionId): Promise<void>;
+      store: { get(id: SessionId): { acpUpdateBuffer: unknown[] } };
+    };
+    try {
+      await fixture.ready(sessionId);
+      expect(
+        await fixture.rpc.writeSessionHistoryForRpc(sessionId, 'append', {
+          entry: nativeUser('synthetic-request'),
+        })
+      ).toMatchObject({ success: true });
+      const doc = fixture.docs.get(sessionId);
+      if (!doc) throw new Error('Missing synthetic document');
+      const backend = await createSessionBackend(doc);
+      const assistantId = host.beginConversationTurn(sessionId, 'synthetic-request');
+      await backend.appendHistoryTurn(nativeAssistant(assistantId));
+      const page = await fixture.rpc.readSessionHistoryForRpc(sessionId, {
+        kind: 'readLatestPage',
+        limit: 40,
+        withCheckpoint: true,
+      });
+      const checkpoint = (page.result as { checkpoint?: string }).checkpoint;
+      if (!page.success || !checkpoint) throw new Error('Expected peer checkpoint');
+      host.enqueueACPUpdate(sessionId, {
+        sessionId,
+        update: {
+          sessionUpdate: 'tool_call',
+          toolCallId: 'buffered-tool',
+          title: 'Synthetic tool',
+          status: 'in_progress',
+        },
+      });
+      const chunks = Array.from({ length: 31 }, (_, index) => `chunk-${index};`);
+      for (const text of chunks)
+        host.enqueueACPUpdate(sessionId, {
+          sessionId,
+          update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text } },
+        });
+      host.enqueueACPUpdate(sessionId, {
+        sessionId,
+        update: {
+          sessionUpdate: 'tool_call_update',
+          toolCallId: 'buffered-tool',
+          status: 'completed',
+        },
+      });
+      await host.flushACPUpdatesNow(sessionId);
+      expect(host.store.get(sessionId).acpUpdateBuffer).toEqual([]);
+      const response = SessionHistoryReadResponseSchema.parse(
+        JSON.parse(
+          JSON.stringify(
+            await fixture.rpc.readSessionHistoryForRpc(sessionId, {
+              kind: 'readChanges',
+              checkpoint,
+              includeBodiesFrom: 0,
+            })
+          )
+        )
+      );
+      expect(response.success).toBe(true);
+      const changes = SessionHistoryChangesSchema.parse(response.result);
+      const expected = {
+        id: assistantId,
+        items: [
+          { type: 'tool_call', toolCallId: 'buffered-tool', status: 'completed' },
+          { type: 'text', text: chunks.join('') },
+        ],
+      };
+      expect(changes).toMatchObject({
+        state: 'ready',
+        ids: [assistantId],
+        bodies: { changed: [expected] },
+      });
+      await backend.flushLocalWrites();
+      await fixture.close();
+      const reopened = await nativeFixture(sessionId);
+      expect(await reopened.backend.readTurn(assistantId)).toMatchObject({
+        state: 'ready',
+        turn: expected,
+      });
+      expect(await reopened.backend.readHistoryCount()).toBe(2);
+    } finally {
+      await fixture.close();
+    }
+  });
+
+  it.each([false, true])(
+    'updates two independent renderer replicas through encrypted RPC without control hints (lostNativeReply=%s)',
+    async (lostNativeReply) => {
+      // The renderer package owns its browser test dependency; the CLI runtime
+      // stays free of IndexedDB dependencies.
+      const rendererRequire = createRequire(
+        new URL('../../../packages/components/package.json', import.meta.url)
+      );
+      const idb = rendererRequire('fake-indexeddb') as {
+        IDBFactory: new () => IDBFactory;
+        IDBKeyRange: typeof IDBKeyRange;
+      };
+      vi.stubGlobal('indexedDB', new idb.IDBFactory());
+      vi.stubGlobal('IDBKeyRange', idb.IDBKeyRange);
+      const fixture = await coldHistoryHandlerFixture(1);
+      const sessionId = [...fixture.docs.keys()][0];
+      if (!sessionId) throw new Error('Missing synthetic session');
+      const host = fixture.handler as unknown as {
+        beginConversationTurn(id: SessionId, userTurnId: string): string;
+        enqueueACPUpdate(id: SessionId, value: import('@lody/shared').AcpSessionNotification): void;
+        flushACPUpdatesNow(id: SessionId): Promise<void>;
+        waitForSessionHistoryChanges(args: {
+          sessionId: SessionId;
+          checkpoint: string;
+          waitMs: number;
+          signal: AbortSignal;
+        }): Promise<void>;
+        store: { get(id: SessionId): { acpUpdateBuffer: unknown[] } };
+      };
+      // Substitute only delivery. Both production RPC endpoints still serialize,
+      // encrypt, validate and decrypt every request/result.
+      const receivers = new Map<string, LoroJsonLiveBatchHandler>();
+      const streams: LoroStreamsJsonStreamClient = {
+        ensureJsonStream: async () => undefined,
+        appendJson: async (streamId, value) => {
+          const receive = receivers.get(streamId);
+          if (!receive) throw new Error('Synthetic stream has no receiver');
+          await receive({ messages: [JSON.parse(JSON.stringify(value))], upToDate: true });
+          return 'synthetic-offset';
+        },
+        readJsonLive: (streamId, _state, receive, options) =>
+          new Promise<void>((resolve) => {
+            if (options?.signal?.aborted) return resolve();
+            receivers.set(streamId, receive);
+            options?.signal?.addEventListener(
+              'abort',
+              () => {
+                receivers.delete(streamId);
+                resolve();
+              },
+              { once: true }
+            );
+          }),
+      };
+      const workspaceId = 'test-workspace' as WorkspaceId;
+      const machineId = 'test-machine' as MachineId;
+      const parked = Promise.withResolvers<void>();
+      let observations = 0;
+      let checkedObservations = 0;
+      const refusalPath = join(nativeDirectory, `replica-refusals-${ordinal++}.db`);
+      const server = new LoroStreamsMachineRpcServer({
+        workspaceId,
+        machineId,
+        streamClient: streams,
+        logger: getDefaultLogger(),
+        getMachineStatus: async () => {
+          throw new Error('Unused machine status');
+        },
+        refreshMachineAcpCapabilities: async () => {
+          throw new Error('Unused capability refresh');
+        },
+        historyRequestRejections: {
+          get: (request) =>
+            Effect.runPromise(getSessionHistoryRpcRejection(refusalPath, request, Date.now())),
+          put: (request, refusal) =>
+            Effect.runPromise(
+              putSessionHistoryRpcRejection(refusalPath, request, refusal, Date.now())
+            ),
+        },
+        resolveSessionHistoryOwnerSessionId: (id, options) =>
+          fixture.rpc.resolveSessionHistoryOwnerSessionId(id, options),
+        readSessionHistory: ({ sessionId: id, query, signal }) =>
+          fixture.rpc.readSessionHistoryForRpc(id, query, signal),
+        writeSessionHistory: ({ sessionId: id, operation, payload }) =>
+          fixture.rpc.writeSessionHistoryForRpc(id, operation, payload),
+        waitForSessionHistoryChanges: (args) => {
+          const waiting = host.waitForSessionHistoryChanges(args);
+          observations++;
+          return waiting;
+        },
+      });
+      const client = new LoroStreamsMachineRpcClient({
+        workspaceId,
+        machineId,
+        streamClient: streams,
+      });
+      const peers: ReturnType<ReturnType<typeof createRemoteRoostSessionDataFactory>>[] = [];
+      const peerDocs = [new LoroDoc(), new LoroDoc()];
+      const stops: (() => void)[] = [];
+      try {
+        await fixture.ready(sessionId);
+        await server.start();
+        await client.start();
+        expect(
+          await client.requestSessionHistoryWrite({
+            sessionId,
+            operation: 'append',
+            payload: { entry: nativeUser('replica-user') },
+          })
+        ).toMatchObject({ success: true });
+        const doc = fixture.docs.get(sessionId);
+        if (!doc) throw new Error('Missing synthetic document');
+        const backend = await createSessionBackend(doc);
+        const checkpoint = backend.history.getCheckpoint;
+        if (!checkpoint) throw new Error('Missing native checkpoint observation');
+        vi.spyOn(backend.history, 'getCheckpoint').mockImplementation(async () => {
+          const result = await checkpoint();
+          if (observations > 0 && ++checkedObservations === 2) parked.resolve();
+          return result;
+        });
+        const assistantId = host.beginConversationTurn(sessionId, 'replica-user');
+        await backend.appendHistoryTurn(nativeAssistant(assistantId));
+        const chunks = Array.from({ length: 31 }, (_, index) => `跨端-${index}🙂;`);
+        const finalText = chunks.join('');
+        const visible = peerDocs.map(() => Promise.withResolvers<void>());
+        vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+        const ticks: number[] = [];
+        let timerReady = Promise.withResolvers<void>();
+        const setTimer = globalThis.setTimeout;
+        vi.spyOn(globalThis, 'setTimeout').mockImplementation((...args) => {
+          const timer = setTimer(...args);
+          // Advance scheduled recovery explicitly, without expiring a parked
+          // 15-second owner watch or relying on native I/O scheduling speed.
+          if (args[1] === 0 || args[1] === 500) {
+            ticks.push(args[1]);
+            timerReady.resolve();
+          }
+          return timer;
+        });
+        for (const [index, peerDoc] of peerDocs.entries()) {
+          const peer = createRemoteRoostSessionDataFactory({
+            accountId: `synthetic-peer-${index}`,
+            workspaceId,
+            machineId,
+            incremental: true,
+            watch: true,
+            requestHistoryRead: async (_machine, id, query) => {
+              const result = await client.requestSessionHistoryRead({ sessionId: id, query });
+              if (!result) throw new Error('Missing history read response');
+              return result;
+            },
+            requestHistoryWrite: async (args) => {
+              const result = await client.requestSessionHistoryWrite(args);
+              if (!result) throw new Error('Missing history write response');
+              return result;
+            },
+          })({ sessionId, doc: peerDoc, backendKind: 'roost' });
+          peers.push(peer);
+          const observation = peer.history.observe(() => {
+            void peer.history.readTurn(assistantId).then((read) => {
+              if (
+                read.state === 'ready' &&
+                read.turn.items?.some((item) => item.type === 'text' && item.text === finalText)
+              )
+                visible[index]!.resolve();
+            }, visible[index]!.reject);
+          });
+          stops.push(observation.unsubscribe);
+          await observation.initial;
+        }
+        await vi.advanceTimersByTimeAsync(0);
+        await parked.promise;
+        host.enqueueACPUpdate(sessionId, {
+          sessionId,
+          update: {
+            sessionUpdate: 'tool_call',
+            toolCallId: 'replica-tool',
+            title: 'Synthetic tool',
+            status: 'in_progress',
+          },
+        });
+        for (const text of chunks)
+          host.enqueueACPUpdate(sessionId, {
+            sessionId,
+            update: {
+              sessionUpdate: 'agent_message_chunk',
+              content: { type: 'text', text },
+            },
+          });
+        host.enqueueACPUpdate(sessionId, {
+          sessionId,
+          update: {
+            sessionUpdate: 'tool_call_update',
+            toolCallId: 'replica-tool',
+            status: 'completed',
+          },
+        });
+        if (lostNativeReply) {
+          const commit = RoostHistoryGeneration.prototype.commitPatches;
+          vi.spyOn(RoostHistoryGeneration.prototype, 'commitPatches').mockImplementationOnce(
+            async function (this: RoostHistoryGeneration, ...args) {
+              await commit.apply(this, args);
+              throw new Error('Synthetic committed native reply loss');
+            }
+          );
+        }
+        await host.flushACPUpdatesNow(sessionId);
+        expect(host.store.get(sessionId).acpUpdateBuffer).toEqual([]);
+        const displayed = Promise.all(visible.map((result) => result.promise));
+        for (;;) {
+          const outcome = await Promise.race([
+            displayed.then(() => 'displayed' as const),
+            (ticks.length ? Promise.resolve() : timerReady.promise).then(() => 'tick' as const),
+          ]);
+          if (outcome === 'displayed') break;
+          timerReady = Promise.withResolvers<void>();
+          const delay = ticks.shift();
+          if (delay === undefined) throw new Error('Missing scheduled recovery');
+          await vi.advanceTimersByTimeAsync(delay);
+        }
+        const expected = {
+          id: assistantId,
+          items: [
+            { type: 'tool_call', toolCallId: 'replica-tool', status: 'completed' },
+            { type: 'text', text: finalText },
+          ],
+        };
+        for (const peer of peers) {
+          expect(await peer.history.readTurn(assistantId)).toMatchObject({
+            state: 'ready',
+            turn: expected,
+          });
+          expect(await peer.history.count()).toBe(2);
+        }
+        expect(peerDocs.map((peerDoc) => peerDoc.getMap('roostHistoryCursor').toJSON())).toEqual([
+          {},
+          {},
+        ]);
+        stops.forEach((stop) => stop());
+        peers.forEach((peer) => peer.dispose?.());
+        server.stop();
+        client.stop();
+        await Promise.all(
+          (server as unknown as { inFlightRequests: Set<Promise<void>> }).inFlightRequests
+        );
+        vi.restoreAllMocks();
+        vi.useRealTimers();
+        await fixture.close();
+        const reopened = await nativeFixture(sessionId);
+        expect(await reopened.backend.readTurn(assistantId)).toMatchObject({
+          state: 'ready',
+          turn: expected,
+        });
+        expect(await reopened.backend.readHistoryCount()).toBe(2);
+      } finally {
+        stops.forEach((stop) => stop());
+        peers.forEach((peer) => peer.dispose?.());
+        server.stop();
+        client.stop();
+        await Promise.all(
+          (server as unknown as { inFlightRequests: Set<Promise<void>> }).inFlightRequests
+        );
+        vi.restoreAllMocks();
+        vi.useRealTimers();
+        vi.unstubAllGlobals();
+        await fixture.close();
+      }
+    }
+  );
+
+  it('uses the same JSON absence rules for inserted items and newly assigned nested fields', async () => {
+    const fixture = await nativeFixture();
+    await fixture.backend.appendHistoryTurn({
+      ...nativeAssistant('nested-optionals'),
+      items: [{ type: 'tool_call', toolCallId: 'nested-tool', status: 'completed' }],
+    });
+    const item = {
+      type: 'tool_call' as const,
+      toolCallId: 'nested-tool',
+      status: 'completed' as const,
+      kind: undefined,
+      rawOutput: {
+        absent: undefined,
+        kept: null,
+        nested: { absent: undefined, kept: 'value' },
+        list: [undefined, { absent: undefined, kept: 0 }],
+      },
+    };
+    for (const items of [[item], [item, { type: 'text' as const, text: 'after nested data' }]]) {
+      await fixture.backend.applyHistoryAction({
+        kind: 'assistant-items',
+        turnId: 'nested-optionals',
+        mode: 'replace',
+        items,
+      });
+      const read = await fixture.backend.readTurn('nested-optionals');
+      if (read.state !== 'ready') throw new Error('Expected persisted content');
+      expect(read.turn.items).toEqual(JSON.parse(JSON.stringify(items)));
+    }
+  });
+
   it('deduplicates durable per-item retries and retains identical output with different identities', async () => {
     const fixture = await nativeFixture();
     await fixture.backend.appendHistoryTurn({
       ...nativeAssistant('retry-a'),
       items: [{ type: 'text', text: 'start:' }],
     });
-    const original = NodeLodyHistory.prototype.commitHistoryBatch;
+    const original = RoostHistoryGeneration.prototype.commitPatches;
     const spy = vi
-      .spyOn(NodeLodyHistory.prototype, 'commitHistoryBatch')
+      .spyOn(RoostHistoryGeneration.prototype, 'commitPatches')
       .mockImplementationOnce(async function (...args) {
         await original.apply(this, args);
         throw new Error('Injected lost native reply');
@@ -1631,6 +2309,87 @@ describe('Production Roost history semantics', () => {
         ],
       })
     ).rejects.toThrow('identity conflict');
+  });
+
+  it('keeps sustained streaming writes bounded with a large unchanged field and survives reopen', async () => {
+    const fixture = await nativeFixture();
+    const untouched = 'unchanged'.repeat(4096);
+    await fixture.backend.appendHistoryTurn({
+      ...nativeAssistant('bounded-stream'),
+      items: [
+        {
+          type: 'tool_call',
+          toolCallId: 'unchanged-tool',
+          status: 'completed',
+          title: 'Synthetic unchanged tool',
+          rawOutput: { text: untouched },
+        },
+        { type: 'text', text: '' },
+      ],
+    });
+    const notification = (index: number) => ({
+      sessionId: 'synthetic-acp',
+      update: {
+        sessionUpdate: 'agent_message_chunk' as const,
+        content: { type: 'text' as const, text: `🙂increment-${index};` },
+      },
+    });
+    const output = Array.from(
+      { length: 128 },
+      (_, index) => notification(index).update.content.text
+    ).join('');
+    for (let i = 0; i < 128; i++)
+      await fixture.backend.applyAgentBatch({
+        targetAssistantEntryId: 'bounded-stream',
+        notifications: [notification(i)],
+        operationIds: [`bounded-stream-${i}`],
+      });
+    await fixture.backend.flushLocalWrites();
+    const streamed = await fixture.backend.readTurn('bounded-stream');
+    expect(streamed).toMatchObject({ state: 'ready' });
+    if (streamed.state === 'ready') {
+      const text =
+        streamed.turn.items?.map((item) => (item.type === 'text' ? item.text : '')).join('') ?? '';
+      expect(text).toBe(output);
+      expect(streamed.turn.items?.[0]).toMatchObject({ rawOutput: { text: untouched } });
+    }
+    const db = new Database(join(nativeDirectory, 'history.db'), { readonly: true });
+    try {
+      const stats = db
+        .prepare(`SELECT COUNT(*) AS rows, SUM(LENGTH(key) + LENGTH(value)) AS bytes
+        FROM roost_kv WHERE space LIKE ?`)
+        .get(`%${fixture.doc.sessionId}%:updates`) as { rows: number; bytes: number };
+      expect(stats.rows).toBeGreaterThan(128);
+      expect(stats.bytes).toBeLessThan(1024 * 1024);
+      const receipts = db
+        .prepare(`SELECT COUNT(*) AS count FROM roost_kv WHERE space LIKE ?`)
+        .get(`%${fixture.doc.sessionId}%:lody_agent_operation_receipts_v1`) as { count: number };
+      expect(receipts.count).toBe(128);
+      const projection = db
+        .prepare(`SELECT COUNT(*) AS count FROM roost_kv WHERE space LIKE ?`)
+        .get(`%${fixture.doc.sessionId}%:projection`) as { count: number };
+      expect(projection.count).toBeGreaterThan(0);
+      expect(projection.count).toBeLessThan(1000);
+    } finally {
+      db.close();
+    }
+    const sessionId = fixture.doc.sessionId;
+    await fixture.close();
+    const reopened = await nativeFixture(sessionId);
+    await reopened.backend.applyAgentBatch({
+      targetAssistantEntryId: 'bounded-stream',
+      notifications: [notification(127)],
+      operationIds: ['bounded-stream-127'],
+    });
+    expect(await reopened.backend.readTurn('bounded-stream')).toMatchObject({
+      state: 'ready',
+      turn: {
+        items: [
+          { type: 'tool_call', rawOutput: { text: untouched } },
+          { type: 'text', text: output },
+        ],
+      },
+    });
   });
 });
 

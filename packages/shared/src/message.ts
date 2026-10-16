@@ -793,19 +793,56 @@ export interface SessionHistoryReadRequest {
 
 /** Bounded logical reads over the owner session's active history branch. */
 export type SessionHistoryReadQuery =
+  | {
+      readonly kind: 'watchChanges';
+      readonly checkpoint: string;
+      readonly includeBodiesFrom?: number;
+      readonly waitMs: number;
+    }
   | { readonly kind: 'inputAcceptance'; readonly entry: unknown }
   | { readonly kind: 'count' }
   | { readonly kind: 'readAt'; readonly position: number }
-  | { readonly kind: 'readTurn'; readonly turnId: string }
-  | { readonly kind: 'readRange'; readonly from: number; readonly to: number }
+  | { readonly kind: 'readTurn'; readonly turnId: string; readonly atCheckpoint?: string }
+  | {
+      readonly kind: 'readRange';
+      readonly from: number;
+      readonly to: number;
+      readonly atCheckpoint?: string;
+    }
   | { readonly kind: 'readDirectory'; readonly from: number; readonly to: number }
-  | { readonly kind: 'readLatestPage'; readonly limit: number }
-  | { readonly kind: 'readOlderPage'; readonly cursor: string; readonly limit: number }
+  | { readonly kind: 'readLatestPage'; readonly limit: number; readonly withCheckpoint?: boolean }
+  | {
+      readonly kind: 'readOlderPage';
+      readonly cursor: string;
+      readonly limit: number;
+      readonly withCheckpoint?: boolean;
+    }
+  | {
+      readonly kind: 'readChanges';
+      readonly checkpoint: string;
+      readonly includeBodiesFrom?: number;
+    }
   | { readonly kind: 'readAll' }
   | { readonly kind: 'readTurnOutput'; readonly userTurnId: string };
 
+/** Complete logical changes since one owner-issued durable observation. */
+export type SessionHistoryChanges =
+  | {
+      readonly state: 'ready';
+      readonly checkpoint: string;
+      readonly from?: number;
+      readonly ids: readonly string[];
+      readonly bodies?: {
+        readonly changed: readonly SessionHistoryInput[];
+        readonly from?: number;
+        readonly suffix: readonly SessionHistoryInput[];
+      };
+    }
+  | { readonly state: 'reset'; readonly checkpoint: string };
+
 export interface SessionHistoryReadResponse {
   type: 'session/history-read_response';
+  retryReason?: 'superseded';
   sessionId: SessionId;
   success: boolean;
   result?: unknown;

@@ -31,6 +31,8 @@ CLI/MCP orchestration contract is specs/session-orchestration.md.
   application data, independent of login credentials and the system credential store.
 - `roost-history-generation.ts` — stages structural replacements privately and
   atomically activates them, fencing writes through superseded handles.
+- `roost-history-changes.ts` — durable semantic receipts over verified native event intervals;
+  owner-scoped checkpoints recover missed logical edits without rereading unchanged bodies.
 - `roost-history-diagnostics.ts` — correlates local Worker causes and runtime details
   with the safe error reference returned by history RPC.
 - `session-history-owner.ts` — native Effect readiness barrier for history RPC; waits
@@ -344,6 +346,51 @@ Web/iOS clients need no Node addon. The owning machine must be available for RPC
 reads; browser-local IndexedDB replicas and offline sync are separate work.
 Runtime packaging and verification: [native runtime note](../../../../.agents/notes/proposed/architecture/2026-10-09-roost-native-runtime.md).
 
+### Incremental replica recovery
+
+`sessionHistoryIncremental` v1 is negotiated separately from existing history paging.
+Checkpoint-bearing pages opt in with `withCheckpoint`; legacy page replies remain unchanged.
+`readChanges` verifies the previous checkpoint and returns complete changed identities plus
+any affected structural suffix, or an explicit reset. The native owner's local index records
+semantic change receipts after verifying the corresponding raw event interval. Receipts
+contain no history body, signing material or executable command, and emit no outgoing event.
+A crash or foreign mutation that leaves an uncovered interval requires reset. A checkpoint
+cannot claim acceptance or execution, and must not be copied between unrelated owner views.
+
+Normal repairs request affected bodies with the change interval in one reply, bounded at
+500 changed/suffix bodies. Larger repairs use checkpoint-protected ranges. The renderer
+atomically commits bodies, positions, revision and checkpoint. Coherent replies may advance
+behind newer control hints and immediately catch up again, so streaming does not need to
+stop for a stable observation. Body-only edits retain cached directory cursor validity.
+A successful delta repair finishes even for a partial tail cache, without rereading
+the unchanged latest page.
+The previous coherent projection remains readable on failure. Supersession retries immediately; storage and transport
+failures retain recovery backoff. Initial population, legacy targets and unknown coverage
+retain staged rebuilding. Local control reads have a separate bounded pool from writes;
+remote RPC reserves write/control pools and rejects excess ordinary work without blocking
+send intake. Detailed decision and verification:
+[Roost incremental recovery](../../../../.agents/notes/implemented/bug-fix/2026-10-16-roost-incremental-history.md).
+
+An explicit checkpoint reset forces replacement in the other cache slot even when
+its control revision is equal or consecutive. Last-change hints cannot repair unknown
+coverage. Replacement pages share one checkpoint, and the old snapshot remains readable
+until every replacement page is durable; failed staging retains that recovery mode.
+
+Cold readers observe backend metadata before composition; provisional absence remains
+pending until explicit identity or the session's selected metadata source restores.
+An empty history list is not legacy evidence. Owner capabilities remain live.
+Restoration is a finite identity barrier; a still-missing owner or a known Roost
+cursor waits for metadata changes rather than selecting legacy history.
+Independently negotiated `sessionHistoryWatch` v1 observes the committed checkpoint
+through local `watchChanges` or encrypted remote `session/history-watch`. Publication
+wakes the wait immediately; a 15-second deadline bounds idle waits without occupying
+the native Worker or writer queue. Actual body reads acquire bounded read capacity after
+waking, and idle replies transfer no history bodies. Active readers therefore recover
+without relying only on control-cursor hints. Each bridge owns one refresh; release and
+hidden/offline remote views stop new observations. Local IPC remains usable offline.
+[Peer-reader readiness and observation](../../../../.agents/notes/implemented/bug-fix/2026-10-16-roost-peer-reader-readiness.md)
+records the lifecycle, protocol limits and verification.
+
 ### Immutable input acceptance
 
 Ready renderer input uses `SessionData.inputAcceptance`: `accept_input` writes
@@ -454,6 +501,19 @@ Content changes refresh only affected primary bodies. Sealed-turn corrections
 use mutable SDK state records anchored to their primary; permission responses
 remain independent SDK records projected onto the matching tool. Responding does
 not seal the assistant or interrupt its output.
+Existing eligible unsealed primary/state records use guarded native field/text edits,
+with compact publication digests in `lody_agent_operation_receipts_v1`, committed in
+the same `writeBatch`. This owner-local journal has no command/body/baseline snapshots;
+lookup retains previous SDK receipts and generation ancestors. Creation, stitched or
+sealed targets, permissions, immutable human input and branch contracts retain their
+SDK path. A failed native write never falls through to a second write path.
+Native inserted items/fields use the same JSON encoding as SDK content: absent object
+fields are omitted and absent array values become `null`. Normalize only changed
+subtrees; unchanged message bodies are not serialized for each delta. The semantic
+change receipt starts at the command's initial cursor, even when its bounded ACP
+batches advance the native write guard between chunks.
+The [write-amplification repair](../../../../.agents/notes/implemented/bug-fix/2026-10-16-roost-storage-write-amplification.md)
+records storage budgets and the unchanged existing-data/outbox retention limits.
 Ordinary Edit & Resend reuses the sealed prefix through the SDK's branch activation
 inside the same stream/view. The Lody session id and owner saga do not change.
 An application-owned signed epoch commits in that native transaction and fences

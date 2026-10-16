@@ -2,6 +2,7 @@ import type { SessionActivePresencePhase } from './loro/session-active-presence'
 import { fileLocksLegacy } from '@/utils/file-lock';
 import { Effect } from 'effect';
 import { awaitSessionHistoryOwner } from '@/session/session-history-owner';
+import { ConcurrentQueue } from './concurrent-queue';
 import {
   getSessionHistoryRpcRejection,
   putSessionHistoryRpcRejection,
@@ -30,6 +31,7 @@ import { describeRoostHistoryFailure } from '@/session/roost-history-diagnostics
 import {
   createLoroStreamsJsonStreamClient,
   LoroStreamsMachineRpcServer,
+  LoroStreamsRpcHandlerError,
   LORO_STREAMS_RPC_RETENTION_SECONDS,
   LORO_STREAMS_RPC_VERSION,
   type LocalProjectGitStateRpcResponse,
@@ -695,6 +697,8 @@ export class MessageHandler {
   private pendingProcessLifecycleAction: MachineProcessLifecycleAction | null = null;
   private readonly store = new SessionTransientStore();
   private readonly historyOwnerAbort = new AbortController();
+  private readonly historyWatchReads = new ConcurrentQueue<string>(8);
+  private historyWatchWaiters = 0;
   private sessionActivePresence!: SessionActivePresenceControllerLegacy;
   private readonly titleGenerationInFlight = new Map<SessionId, Promise<string | null>>();
   // Note: titleGenerationInFlight, archiveInFlight are self-cleaning
@@ -3329,8 +3333,9 @@ export class MessageHandler {
         cancelSessionPreparation: async (args) =>
           await this.cancelSessionPreparationWithAccessCheck(args),
         resolveSessionHistoryOwnerSessionId: this.resolveSessionHistoryOwnerSessionId,
-        readSessionHistory: async ({ sessionId, query }) =>
-          await this.readSessionHistoryForRpc(sessionId, query),
+        readSessionHistory: async ({ sessionId, query, signal }) =>
+          await this.readSessionHistoryForRpc(sessionId, query, signal),
+        waitForSessionHistoryChanges: async (args) => await this.waitForSessionHistoryChanges(args),
         writeSessionHistory: async ({ sessionId, operation, payload }) =>
           await this.writeSessionHistoryForRpc(sessionId, operation, payload),
         resolveCodeCollabOwnerSessionId: this.resolveCodeCollabV2OwnerSessionId,
@@ -6870,12 +6875,58 @@ export class MessageHandler {
     );
   };
 
+  private async waitForSessionHistoryChanges(args: {
+    sessionId: SessionId;
+    checkpoint: string;
+    waitMs: number;
+    signal?: AbortSignal;
+  }): Promise<void> {
+    if (this.historyWatchWaiters >= 128)
+      throw new LoroStreamsRpcHandlerError(
+        'rpc_request_capacity_exceeded',
+        'History observation capacity exceeded.'
+      );
+    this.historyWatchWaiters++;
+    try {
+      const signal = args.signal
+        ? AbortSignal.any([args.signal, this.historyOwnerAbort.signal])
+        : this.historyOwnerAbort.signal;
+      await this.resolveSessionHistoryOwnerSessionId(args.sessionId, { signal });
+      this.touchSession(args.sessionId);
+      const doc = await this.workspaceDocument.getOrCreateSessionDoc(args.sessionId);
+      const backend = await this.getSessionBackend(doc);
+      if (backend.kind !== 'roost' || !backend.history.waitForChanges)
+        throw new Error('History observation unavailable');
+      await backend.flushLocalWrites();
+      await backend.history.waitForChanges(args.checkpoint, args.waitMs, signal);
+    } finally {
+      this.historyWatchWaiters--;
+    }
+  }
+
   private async readSessionHistoryForRpc(
     sessionId: SessionId,
-    query: SessionHistoryReadQuery
+    query: SessionHistoryReadQuery,
+    signal?: AbortSignal
   ): Promise<SessionHistoryReadResponse> {
     try {
-      await this.resolveSessionHistoryOwnerSessionId(sessionId);
+      if (query.kind === 'watchChanges') {
+        await this.waitForSessionHistoryChanges({
+          sessionId,
+          checkpoint: query.checkpoint,
+          waitMs: query.waitMs,
+          signal,
+        });
+        const read = {
+          kind: 'readChanges' as const,
+          checkpoint: query.checkpoint,
+          includeBodiesFrom: query.includeBodiesFrom,
+        };
+        return await this.historyWatchReads.enqueue(sessionId, () =>
+          this.readSessionHistoryForRpc(sessionId, read, signal)
+        );
+      }
+      await this.resolveSessionHistoryOwnerSessionId(sessionId, { signal });
       this.touchSession(sessionId);
       const sessionDoc = await this.workspaceDocument.getOrCreateSessionDoc(sessionId);
       const backend = await this.getSessionBackend(sessionDoc);
@@ -6891,6 +6942,45 @@ export class MessageHandler {
         let result: unknown;
         let pageTurns: SessionHistoryReadResponse['pageTurns'];
         switch (query.kind) {
+          case 'readChanges': {
+            if (!history.readChanges)
+              throw new Error('History incremental recovery is unavailable');
+            const changes = await history.readChanges(query.checkpoint);
+            result = changes;
+            if (changes.state === 'ready' && query.includeBodiesFrom !== undefined) {
+              const count = await history.count();
+              const retainedFrom =
+                query.includeBodiesFrom >= count && count > 0
+                  ? Math.max(0, count - 40)
+                  : Math.min(query.includeBodiesFrom, count);
+              const from =
+                changes.from === undefined
+                  ? undefined
+                  : Math.max(retainedFrom, Math.min(changes.from, count));
+              // Normal streaming edits/appends fit in one coherent reply. A large
+              // structural rewrite retains the bounded checkpoint-read path.
+              if (changes.ids.length + (from === undefined ? 0 : count - from) <= 500) {
+                const changed: SessionHistoryInput[] = [];
+                for (const id of changes.ids) {
+                  const read = await history.readTurn(id);
+                  if (read.state === 'ready') changed.push(read.turn as SessionHistoryInput);
+                }
+                const suffix =
+                  from === undefined
+                    ? []
+                    : (await history.readRange(from, count)).map((read) => {
+                        if (read.state !== 'ready')
+                          throw new Error('History suffix body is unavailable');
+                        return read.turn as SessionHistoryInput;
+                      });
+                result = {
+                  ...changes,
+                  bodies: { changed, ...(from === undefined ? {} : { from }), suffix },
+                };
+              }
+            }
+            break;
+          }
           case 'count':
             result = await history.count();
             break;
@@ -6920,7 +7010,10 @@ export class MessageHandler {
             }
             {
               const page = await history.readLatestDirectoryPage(query.limit);
-              result = page;
+              result =
+                query.withCheckpoint && history.getCheckpoint
+                  ? { ...page, checkpoint: await history.getCheckpoint() }
+                  : page;
               pageTurns = (
                 await history.readRange(page.startPosition, page.startPosition + page.rows.length)
               ).map((read) => {
@@ -6937,7 +7030,10 @@ export class MessageHandler {
             }
             {
               const page = await history.readOlderDirectoryPage(query.cursor, query.limit);
-              result = page;
+              result =
+                query.withCheckpoint && history.getCheckpoint
+                  ? { ...page, checkpoint: await history.getCheckpoint() }
+                  : page;
               pageTurns = (
                 await history.readRange(page.startPosition, page.startPosition + page.rows.length)
               ).map((read) => {
@@ -6956,6 +7052,21 @@ export class MessageHandler {
         await backend.flushLocalWrites();
         const after = await sessionDoc.getRoostHistoryCursor();
         if (before?.historyRevision !== after?.historyRevision) continue;
+        const protectedRead =
+          query.kind === 'readChanges' ||
+          ((query.kind === 'readLatestPage' || query.kind === 'readOlderPage') &&
+            query.withCheckpoint) ||
+          ((query.kind === 'readTurn' || query.kind === 'readRange') && query.atCheckpoint);
+        if (protectedRead) {
+          if (!history.getCheckpoint) throw new Error('History checkpoints are unavailable');
+          const current = await history.getCheckpoint();
+          const expected =
+            query.kind === 'readTurn' || query.kind === 'readRange'
+              ? query.atCheckpoint
+              : (result as { checkpoint?: string }).checkpoint;
+          if (current !== expected)
+            throw Object.assign(new Error('History checkpoint was superseded'), { code: 'stale' });
+        }
         if (after?.historyRevision === undefined || after.historyCount === undefined) {
           throw new Error('Roost history has no durable revision');
         }
@@ -6980,8 +7091,25 @@ export class MessageHandler {
           ...(pageTurns ? { pageTurns } : {}),
         };
       }
-      throw new Error('History changed during the read; retry the observation');
+      throw Object.assign(new Error('History changed during the read; retry the observation'), {
+        code: 'stale',
+      });
     } catch (error) {
+      const protectedRead =
+        query.kind === 'readChanges' ||
+        ((query.kind === 'readLatestPage' || query.kind === 'readOlderPage') &&
+          query.withCheckpoint) ||
+        ((query.kind === 'readTurn' || query.kind === 'readRange') && query.atCheckpoint);
+      if (protectedRead && error instanceof Error && 'code' in error && error.code === 'stale') {
+        this.logger.trace(`[${sessionId}] History observation superseded operation=${query.kind}`);
+        return {
+          type: 'session/history-read_response',
+          sessionId,
+          success: false,
+          retryReason: 'superseded',
+          error: 'The history observation was superseded; retry it.',
+        };
+      }
       const detail =
         describeRoostHistoryFailure(error, {
           stage: 'read',

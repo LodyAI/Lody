@@ -76,3 +76,9 @@
 - `operation_completion_batch` is one stable system item with fixed batch identity/member count.
   Receipt projections target its exact turn and batch, preserve user text/config and do not
   rewrite unchanged status. Full result bodies remain in the scoped orchestration repository.
+
+- Roost incremental reads bind a complete logical change interval to one owner checkpoint.
+  Missing or foreign checkpoint evidence requires explicit reset, never trusting the last hint.
+  Persist repaired bodies, membership and checkpoint atomically; the cache grants no write receipt.
+  Independently negotiated checkpoint observation covers admission gaps and missed hints.
+  Park bounded waits outside foreground/native execution; resume the same catch-up flow.

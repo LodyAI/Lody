@@ -270,6 +270,7 @@ export const LoroStreamsRpcMethodSchema = z.enum([
   'session/prepare',
   'session/prepare-cancel',
   'session/history-read',
+  'session/history-watch',
   'session/history-write',
   'session/preview-create',
   'session/preview-revoke',
@@ -524,6 +525,7 @@ export const isOwnerScopedEncryptedRpcMethod = (method: string): boolean =>
   method.startsWith('code-collab/') ||
   method === 'file/preview' ||
   method === 'session/history-read' ||
+  method === 'session/history-watch' ||
   method === 'session/history-write';
 
 export const LoroSessionCancelRpcRequestSchema = BaseRpcRequestSchema.extend({
@@ -631,6 +633,11 @@ export const LoroSessionPrepareCancelRpcRequestSchema = BaseRpcRequestSchema.ext
 /** Roost history payloads are encrypted with the owner-session envelope. */
 export const LoroSessionHistoryReadRpcRequestSchema = BaseRpcRequestSchema.extend({
   method: z.literal('session/history-read'),
+  params: CodeCollabV2RpcContentEnvelopeSchema,
+}).strict();
+
+export const LoroSessionHistoryWatchRpcRequestSchema = BaseRpcRequestSchema.extend({
+  method: z.literal('session/history-watch'),
   params: CodeCollabV2RpcContentEnvelopeSchema,
 }).strict();
 
@@ -760,6 +767,7 @@ export const LoroStreamsRpcRequestSchema = z.discriminatedUnion('method', [
   LoroSessionPrepareRpcRequestSchema,
   LoroSessionPrepareCancelRpcRequestSchema,
   LoroSessionHistoryReadRpcRequestSchema,
+  LoroSessionHistoryWatchRpcRequestSchema,
   LoroSessionHistoryWriteRpcRequestSchema,
   LoroSessionPreviewCreateRpcRequestSchema,
   LoroSessionPreviewRevokeRpcRequestSchema,
@@ -1629,7 +1637,7 @@ export type LoroMachineRpcResult =
   | LocalProjectControlResponse;
 
 const historyRpcFailureResponse = (
-  method: 'session/history-read' | 'session/history-write',
+  method: 'session/history-read' | 'session/history-watch' | 'session/history-write',
   context: { sessionId: string; operation?: SessionHistoryWriteOperation } | undefined,
   error: LoroStreamsRpcError,
   failure?: SessionHistoryRpcFailure
@@ -1640,7 +1648,7 @@ const historyRpcFailureResponse = (
     error: `${error.code}: ${error.message}`,
     ...(failure ? { rpcFailure: failure } : {}),
   };
-  return method === 'session/history-read'
+  return method === 'session/history-read' || method === 'session/history-watch'
     ? { ...common, type: 'session/history-read_response' }
     : {
         ...common,
@@ -1891,7 +1899,11 @@ const toLegacyRpcErrorResponse = (
     };
   }
 
-  if (method === 'session/history-read' || method === 'session/history-write') {
+  if (
+    method === 'session/history-read' ||
+    method === 'session/history-watch' ||
+    method === 'session/history-write'
+  ) {
     return historyRpcFailureResponse(method, historyContext, error, historyFailure);
   }
 
@@ -2108,7 +2120,7 @@ const parseRpcSuccessResult = async (
       envelope.data,
       expectedCodeCollabOwnerSessionId
     );
-    if (response.method === 'session/history-read') {
+    if (response.method === 'session/history-read' || response.method === 'session/history-watch') {
       const parsed = SessionHistoryReadResponseSchema.safeParse(decrypted);
       return parsed.success ? (parsed.data as SessionHistoryReadResponse) : null;
     }
@@ -2310,6 +2322,7 @@ export class LoroStreamsRpcResponseDispatcher {
       if (
         pending?.historyContext &&
         (registration.method === 'session/history-read' ||
+          registration.method === 'session/history-watch' ||
           registration.method === 'session/history-write')
       ) {
         pending.resolve(
@@ -3179,8 +3192,9 @@ export class LoroStreamsMachineRpcClient {
     timeoutMs?: number;
   }): Promise<SessionHistoryRpcReadResponse | null> {
     return (await this.sendRequest({
-      method: 'session/history-read',
-      timeoutMs: options.timeoutMs ?? 30_000,
+      method:
+        options.query.kind === 'watchChanges' ? 'session/history-watch' : 'session/history-read',
+      timeoutMs: options.timeoutMs ?? (options.query.kind === 'watchChanges' ? 45_000 : 30_000),
       ownerSessionId: options.ownerSessionId ?? options.sessionId,
       params: { sessionId: options.sessionId, query: options.query },
     })) as SessionHistoryRpcReadResponse | null;
@@ -3684,7 +3698,7 @@ export class LoroStreamsMachineRpcClient {
           params: SessionPreparationCancelSpec;
         }
       | {
-          method: 'session/history-read';
+          method: 'session/history-read' | 'session/history-watch';
           timeoutMs: number;
           ownerSessionId: string;
           params: { sessionId: SessionId; query: SessionHistoryReadQuery };
@@ -3839,6 +3853,7 @@ export class LoroStreamsMachineRpcClient {
       args.method === 'code-collab/lsp-references' ||
       args.method === 'file/preview' ||
       args.method === 'session/history-read' ||
+      args.method === 'session/history-watch' ||
       args.method === 'session/history-write'
         ? args.ownerSessionId
         : undefined;
@@ -3924,7 +3939,9 @@ export class LoroStreamsMachineRpcClient {
             ? { type: args.params.request.type }
             : undefined,
       historyContext:
-        args.method === 'session/history-read' || args.method === 'session/history-write'
+        args.method === 'session/history-read' ||
+        args.method === 'session/history-watch' ||
+        args.method === 'session/history-write'
           ? {
               sessionId: args.params.sessionId,
               ...(args.method === 'session/history-write'
@@ -4049,6 +4066,7 @@ export class LoroStreamsMachineRpcClient {
           request = { ...envelope, method: args.method, params: args.params };
           break;
         case 'session/history-read':
+        case 'session/history-watch':
         case 'session/history-write':
           request = {
             ...envelope,

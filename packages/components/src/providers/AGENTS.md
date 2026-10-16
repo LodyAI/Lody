@@ -17,12 +17,11 @@ Replacement contract: [shared rules](../../../shared/AGENTS.md#session-history).
   subscription per config/request. Connections stay bounded by workspace/machine
   topology; more configs add serialized RPCs only. Release unowned one-shot handles
   and subscriptions.
-- Startup capability discovery is once per agent config per runtime, recorded in the
-  runtime-owned `refreshedConfigKeys` set. A pass aborted by presence leaving `synced` is
-  re-armed, so a pass-level flag is not the gate: reconnecting must never re-probe a config that
-  already answered, because each probe starts and kills a real agent process. Refresh requests
-  default to the machine's cache; only a user action or a setup/authentication workflow sets
-  `force`. Intent: [capability refresh cache](../../../../specs/acp-capability-refresh-cache.md).
+- Discover startup capabilities once per config/runtime, tracked in `refreshedConfigKeys`.
+  Re-arm passes aborted when presence leaves `synced`; reconnect must not re-probe answered
+  configs or use a pass-level gate. Probes launch real agents. Refresh defaults to machine
+  cache; only user or setup/authentication actions set `force`.
+  Intent: [capability refresh cache](../../../../specs/acp-capability-refresh-cache.md).
 
 ## Workspace switching
 
@@ -41,6 +40,10 @@ Replacement contract: [shared rules](../../../shared/AGENTS.md#session-history).
   [Stuck report](../../../../.agents/notes/implemented/feature/2026-09-26-workspace-sync-stuck-telemetry.md).
 
 ## Workspace runtime
+
+- Readers require backend identity and their Meta plane. Provisional absence/empty
+  history is not legacy evidence; release waits on resolve/retire. Keep Roost
+  capabilities live and wake its bridge on arrival.
 
 - A neutral local warm spare may initialize the implicit workspace runtime without
   publishing route context. A matching claim must retain that runtime or its in-flight

@@ -164,7 +164,7 @@ export type SessionHistoryRpcRejection = {
 };
 export type SessionHistoryRpcRequest = Extract<
   LoroStreamsRpcRequest,
-  { method: 'session/history-read' | 'session/history-write' }
+  { method: 'session/history-read' | 'session/history-watch' | 'session/history-write' }
 >;
 /** Host-owned durable refusals. A failed lookup/save must fail closed before history. */
 export type SessionHistoryRpcRejectionStore = {
@@ -175,7 +175,9 @@ export type SessionHistoryRpcRejectionStore = {
   ): Promise<SessionHistoryRpcRejection>;
 };
 const isHistoryRequest = (request: LoroStreamsRpcRequest): request is SessionHistoryRpcRequest =>
-  request.method === 'session/history-read' || request.method === 'session/history-write';
+  request.method === 'session/history-read' ||
+  request.method === 'session/history-watch' ||
+  request.method === 'session/history-write';
 
 const redactRpcRequestForLog = (raw: unknown): unknown => {
   if (typeof raw !== 'object' || raw === null) return raw;
@@ -341,6 +343,8 @@ type RpcServerDeps = {
    * Defaults to {@link DEFAULT_MAX_CONCURRENT_REQUESTS}.
    */
   maxConcurrentRequests?: number;
+  /** Ordinary admitted tasks, including queued handlers; foreground pools are reserved. */
+  maxPendingRequests?: number;
   /** Required for history writes; retain a refusal until the original request expires. */
   historyRequestRejections?: SessionHistoryRpcRejectionStore;
   getMachineStatus: () => Promise<MachineStatusResponse>;
@@ -459,7 +463,14 @@ type RpcServerDeps = {
   readSessionHistory?: (args: {
     sessionId: SessionId;
     query: SessionHistoryReadQuery;
+    signal?: AbortSignal;
   }) => Promise<SessionHistoryReadResponse>;
+  waitForSessionHistoryChanges?: (args: {
+    sessionId: SessionId;
+    checkpoint: string;
+    waitMs: number;
+    signal: AbortSignal;
+  }) => Promise<void>;
   writeSessionHistory?: (args: {
     sessionId: SessionId;
     operation: SessionHistoryWriteOperation;
@@ -545,6 +556,14 @@ export class LoroStreamsMachineRpcServer {
   private readonly requestState: LoroJsonStreamState = { nextOffset: '-1' };
   private readonly stopController = new AbortController();
   private readonly requestConcurrency: Semaphore;
+  private readonly historyWriteConcurrency = new Semaphore(4);
+  private readonly overloadConcurrency = new Semaphore(4);
+  private readonly ordinaryTasks = new Set<Promise<void>>();
+  private readonly historyWatchConcurrency = new Semaphore(128);
+  private readonly historyWatchTasks = new Set<Promise<void>>();
+  private readonly historyWriteTasks = new Set<Promise<void>>();
+  private readonly controlTasks = new Set<Promise<void>>();
+  private readonly overloadTasks = new Set<Promise<void>>();
   private readonly controlConcurrency = new Semaphore(DEFAULT_MAX_CONCURRENT_CONTROL_REQUESTS);
   private readonly inFlightRequests = new Set<Promise<void>>();
   private readonly historyRequests = new Map<string, { identity: string; task: Promise<void> }>();
@@ -724,42 +743,119 @@ export class LoroStreamsMachineRpcServer {
     this.requestState.nextOffset = batch.nextOffset ?? this.requestState.nextOffset;
     this.requestState.cursor = batch.cursor;
 
-    // Dispatch each request concurrently instead of awaiting them in series. The
-    // request stream is shared by every client of this machine and every method,
-    // so a single slow handler (e.g. materializing a large turn diff, or a handler
-    // that stalls on git/fs) must not head-of-line block independent reads like
-    // open-file/refresh. Handlers run as tracked tasks; the semaphore bounds how
-    // many execute at once and backpressures this loop (pausing intake of new
-    // requests) once saturated rather than spawning unbounded work.
-    for (const raw of batch.messages) {
-      if (this.stopped) {
-        return;
-      }
-      // Control-plane requests never wait for the shared semaphore at intake:
-      // their tasks acquire from the dedicated control pool inside the task, so
-      // a burst of slow code-collab handlers cannot delay a chat dispatch or a
-      // cancel sitting behind them in the same batch. The peek at `method` is
-      // classification only — full schema validation still happens in
-      // handleRawRequest.
-      if (this.isControlRequest(raw)) {
-        const task = this.runRequestTask(raw, this.controlConcurrency, { deferredAcquire: true });
-        this.inFlightRequests.add(task);
-        void task.finally(() => {
-          this.inFlightRequests.delete(task);
-        });
+    // Inspect foreground requests before admitting background work from this
+    // batch. Handler permits are acquired inside tracked tasks, not at intake.
+    // A separate history-write pool keeps immutable input acceptance independent
+    // of background reads; owner writers still serialize their own mutations.
+    const classifyPriority = (raw: unknown) =>
+      this.isControlRequest(raw)
+        ? 0
+        : this.isHistoryWrite(raw)
+          ? 1
+          : raw &&
+              typeof raw === 'object' &&
+              'method' in raw &&
+              raw.method === 'session/history-watch'
+            ? 3
+            : 2;
+    const ordered = batch.messages
+      .map((raw, index) => ({ raw, index, priority: classifyPriority(raw) }))
+      .sort((left, right) => left.priority - right.priority || left.index - right.index);
+    const limit = Math.max(
+      this.deps.maxConcurrentRequests ?? DEFAULT_MAX_CONCURRENT_REQUESTS,
+      this.deps.maxPendingRequests ?? 128
+    );
+    for (const { raw, priority } of ordered) {
+      if (this.stopped) return;
+      const tasks =
+        priority === 0
+          ? this.controlTasks
+          : priority === 1
+            ? this.historyWriteTasks
+            : priority === 3
+              ? this.historyWatchTasks
+              : this.ordinaryTasks;
+      if (priority >= 2 && tasks.size >= (priority === 3 ? 128 : limit)) {
+        // Shed unstarted ordinary work rather than blocking intake of a later
+        // human send. Busy replies have their own bounded ownership too.
+        if (this.overloadTasks.size < 128) {
+          const task = this.rejectOrdinaryOverload(raw);
+          this.trackRequestTask(task, this.overloadTasks);
+        } else {
+          this.deps.logger.warn(
+            `[rpc-server:${this.deps.machineId}] ordinary request and busy-response capacity exhausted`
+          );
+        }
         continue;
       }
-      await this.requestConcurrency.acquire();
-      if (this.stopped) {
-        this.requestConcurrency.release();
-        return;
-      }
-      const task = this.runRequestTask(raw, this.requestConcurrency);
-      this.inFlightRequests.add(task);
-      void task.finally(() => {
-        this.inFlightRequests.delete(task);
-      });
+      if (priority < 2)
+        while (!this.stopped && tasks.size >= 128) {
+          let stop!: () => void;
+          const stopped = new Promise<void>((resolve) => {
+            stop = resolve;
+          });
+          this.stopController.signal.addEventListener('abort', stop, { once: true });
+          try {
+            await Promise.race([...tasks, stopped]);
+          } finally {
+            this.stopController.signal.removeEventListener('abort', stop);
+          }
+        }
+      if (this.stopped) return;
+      const lane =
+        priority === 0
+          ? this.controlConcurrency
+          : priority === 1
+            ? this.historyWriteConcurrency
+            : priority === 3
+              ? this.historyWatchConcurrency
+              : this.requestConcurrency;
+      this.trackRequestTask(this.runRequestTask(raw, lane), tasks);
     }
+  }
+
+  private trackRequestTask(task: Promise<void>, tasks: Set<Promise<void>>): void {
+    tasks.add(task);
+    this.inFlightRequests.add(task);
+    void task.finally(() => {
+      tasks.delete(task);
+      this.inFlightRequests.delete(task);
+    });
+  }
+
+  private async rejectOrdinaryOverload(raw: unknown): Promise<void> {
+    await this.overloadConcurrency.acquire();
+    try {
+      if (this.stopped) return;
+      const parsed = LoroStreamsRpcRequestSchema.safeParse(raw);
+      if (!parsed.success) return;
+      const request = parsed.data;
+      if (
+        request.workspaceId !== this.deps.workspaceId ||
+        request.machineId !== this.deps.machineId ||
+        request.expiresAt <= this.now()
+      )
+        return;
+      await this.appendErrorResponse(request.replyTo, request.id, request.method, {
+        code: 'rpc_request_capacity_exceeded',
+        message: 'The machine request queue is full.',
+      });
+    } catch (error) {
+      this.deps.logger.warn(
+        `[rpc-server:${this.deps.machineId}] failed to return request capacity refusal: ${formatRpcStartupError(error)}`
+      );
+    } finally {
+      this.overloadConcurrency.release();
+    }
+  }
+
+  private isHistoryWrite(raw: unknown): boolean {
+    return (
+      typeof raw === 'object' &&
+      raw !== null &&
+      'method' in raw &&
+      raw.method === 'session/history-write'
+    );
   }
 
   private isControlRequest(raw: unknown): boolean {
@@ -780,17 +876,11 @@ export class LoroStreamsMachineRpcServer {
     return action === 'cancel' || action === 'submit-code' || action === 'submit-input';
   }
 
-  private async runRequestTask(
-    raw: unknown,
-    lane: Semaphore,
-    options?: { deferredAcquire?: boolean }
-  ): Promise<void> {
-    if (options?.deferredAcquire) {
-      await lane.acquire();
-      if (this.stopped) {
-        lane.release();
-        return;
-      }
+  private async runRequestTask(raw: unknown, lane: Semaphore): Promise<void> {
+    await lane.acquire();
+    if (this.stopped) {
+      lane.release();
+      return;
     }
     try {
       await this.handleRawRequest(raw);
@@ -1429,10 +1519,19 @@ export class LoroStreamsMachineRpcServer {
           await this.appendResultResponse(request.replyTo, request.id, request.method, response);
           return;
         }
-        case 'session/history-read': {
+        case 'session/history-read':
+        case 'session/history-watch': {
           const decoded = await this.decryptCodeCollabV2RequestParams(request.params);
           codeCollabOwnerSessionId = decoded.ownerSessionId;
           const params = SessionHistoryReadRpcPayloadSchema.parse(decoded.payload);
+          if (
+            (request.method === 'session/history-watch') !==
+            (params.query.kind === 'watchChanges')
+          )
+            throw new LoroStreamsRpcHandlerError(
+              'invalid_request',
+              'History observation method mismatch'
+            );
           await this.verifySessionHistoryOwnerSession(decoded.ownerSessionId, params.sessionId);
           if (this.stopController.signal.aborted || request.expiresAt <= this.now()) return;
           if (!this.deps.readSessionHistory) {
@@ -1449,10 +1548,40 @@ export class LoroStreamsMachineRpcServer {
             return;
           }
           historyOperationStarted = true;
-          const response = await this.deps.readSessionHistory({
-            sessionId: params.sessionId as SessionId,
-            query: params.query,
-          });
+          let query = params.query;
+          let readPermit = false;
+          if (query.kind === 'watchChanges') {
+            if (!this.deps.waitForSessionHistoryChanges)
+              throw new LoroStreamsRpcHandlerError(
+                LORO_STREAMS_RPC_ERROR_CODES.methodUnavailable,
+                'History observation unavailable'
+              );
+            await this.deps.waitForSessionHistoryChanges({
+              sessionId: params.sessionId,
+              checkpoint: query.checkpoint,
+              waitMs: Math.min(query.waitMs, Math.max(0, request.expiresAt - this.now() - 1000)),
+              signal: this.stopController.signal,
+            });
+            if (this.stopped || request.expiresAt <= this.now()) return;
+            query = {
+              kind: 'readChanges',
+              checkpoint: query.checkpoint,
+              includeBodiesFrom: query.includeBodiesFrom,
+            };
+            await this.requestConcurrency.acquire();
+            readPermit = true;
+          }
+          let response: SessionHistoryReadResponse;
+          try {
+            if (this.stopped || request.expiresAt <= this.now()) return;
+            response = await this.deps.readSessionHistory({
+              sessionId: params.sessionId as SessionId,
+              query,
+              signal: this.stopController.signal,
+            });
+          } finally {
+            if (readPermit) this.requestConcurrency.release();
+          }
           await this.appendResultResponse(request.replyTo, request.id, request.method, response, {
             codeCollabOwnerSessionId,
           });
@@ -1814,7 +1943,9 @@ export class LoroStreamsMachineRpcServer {
     } catch (error) {
       if (
         this.stopController.signal.aborted &&
-        (request.method === 'session/history-read' || request.method === 'session/history-write')
+        (request.method === 'session/history-read' ||
+          request.method === 'session/history-watch' ||
+          request.method === 'session/history-write')
       )
         return;
       let failure = error;

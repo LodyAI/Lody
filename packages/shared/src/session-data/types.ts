@@ -1,6 +1,6 @@
 import type { HistoryAction } from './history-actions';
 import type { SessionGoalMessage } from '../goal';
-import type { PermissionOutcome } from '../message';
+import type { PermissionOutcome, SessionHistoryChanges } from '../message';
 import type { SessionId } from '../ids';
 import type { HistoryImportInput } from './history-import';
 import type { SessionSnapshotService } from './snapshot';
@@ -122,6 +122,8 @@ export type SessionDataChangeListener = (change: SessionDataChange) => void;
 
 /** One bounded directory window from a backend with reverse pagination. */
 export type SessionHistoryDirectoryPage = {
+  /** Optional owner-scoped checkpoint, negotiated separately from paging. */
+  readonly checkpoint?: string;
   readonly startPosition: number;
   readonly totalCount: number;
   readonly rows: readonly SessionDirectoryRow[];
@@ -177,6 +179,10 @@ export interface SessionHistoryReader {
     from: number,
     to: number
   ): readonly SessionDirectoryRow[] | Promise<readonly SessionDirectoryRow[]>;
+  getCheckpoint?(): Promise<string>;
+  readChanges?(checkpoint: string): Promise<SessionHistoryChanges>;
+  /** Bounded commit observation; it owns no database transaction while waiting. */
+  waitForChanges?(checkpoint: string, waitMs: number, signal?: AbortSignal): Promise<void>;
   /** Latest bounded directory page for windowed-history backends. */
   readLatestDirectoryPage?(limit: number): Promise<SessionHistoryDirectoryPage>;
   /** Bounded page immediately older than `cursor`. */

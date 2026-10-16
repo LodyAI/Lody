@@ -191,6 +191,8 @@ describe('MessageHandler machine registration', () => {
       dshProviderIsolation: 1,
       memoryProviders: 1,
       sessionHistory: 2,
+      sessionHistoryIncremental: 1,
+      sessionHistoryWatch: 1,
       sessionInputAcceptance: 1,
       sessionInputDispatch: 1,
       mcpToolDiscovery: 1,

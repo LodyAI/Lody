@@ -6,8 +6,8 @@
 
 ## Authorization and identity
 
-- Authorize the target machine through the injected access capability with the source CLI token;
-  MCP delegation verifies the frozen Turn requester; Operation-side rules are in
+- Authorize target machines via injected access with the source CLI token. MCP delegation
+  verifies the frozen Turn requester; Operation rules:
   [../mcp/AGENTS.md](../mcp/AGENTS.md).
 - Never send an untrusted requester through workspace Machine RPC: it authenticates no member
   identity.
@@ -15,15 +15,15 @@
   substitute.
 - Require frozen human identity and pre-launch `humanInputReceipts`; recover via receipts,
   never role/author. [Rules](../orchestration/AGENTS.md).
-- Machine/Provider credentials stay host-scoped. Attribution, authorization and commits
-  use the frozen Turn identity; GitHub network auth uses the trusted conversation owner.
+- Host-scope Machine/Provider credentials. Use frozen Turn identity for attribution,
+  authorization and commits; trusted conversation owner for GitHub network auth.
 - Git: owner uses local config, no profile query; others never read it.
   `CloudPort` profiles: 60s deadline, retry failures, reject placeholders.
   Commit attribution never restarts ACP; owner changes retire the runtime.
 
 ## Dispatch
 
-- Queue promotion preserves frozen fields; remove its row only after history and activation succeed.
+- Queue promotion preserves frozen fields; remove only after history+activation succeed.
 - Absent session meta is "unknown", not foreign: hold the TTL-bounded RPC stash until meta lands;
   drop it only on a definitive verdict.
 - Subscribe to RPC offers BEFORE awaiting Doc Room join/sync and never dispatch from the RPC
@@ -72,15 +72,17 @@
 ## Lifecycle
 
 - [Roost](README.md#roost-history-paging): check owner/backend; no keyring,
-  rotation/fallback, removed-history revival or uncertain steer replay.
-  Causes local; RPC stage/code/ID.
+  rotation/fallback, history revival, uncertain steer replay or signed-log/receipt pruning.
+  Commit guarded edits+digests atomically; no SDK retry after uncertainty.
+  Keep input/permission/branch recovery SDK-owned. Local causes; RPC stage/code/ID.
 
-- `Session.createAgent` gates each ACP spawn; failed spawns reject JSON-RPC. Terminals use protocol argv (`sh -c` for unsplit commands only). Managed Codex reused-refresh startup
-  retries once after process cleanup, delay, and live Provider recheck; other auth errors do not.
+- `Session.createAgent` gates ACP spawn; failures reject JSON-RPC. Terminals use protocol
+  argv (`sh -c` only for unsplit commands). Managed Codex reused-refresh startup retries
+  once after process cleanup, delay and live Provider recheck; other auth errors never retry.
 - Child tabs reuse parent workspace. No per-session paths in `MachineMeta`:
   machines publish `['dotlodyPath']` for frontends to derive them.
-- INVARIANT: any `sandbox.spawn` whose OUTPUT is the result must pass `captureOutput: true` (ACP
-  stdio deliberately does not), and the capture buffer stays capped at 4 MiB.
+- `sandbox.spawn` returning OUTPUT requires `captureOutput: true` and a 4 MiB buffer cap;
+  ACP stdio does not capture.
 - Shutdown: `cleanUp({ keepWorkspaceDocumentOpen: true })`, MessageHandler's final flush,
   then `cleanUp()`; never close the doc first.
 
@@ -89,9 +91,9 @@
 - Peek/claim are synchronous; publish before `start()`. Peek never transfers ownership.
   Cold/replacement starts await same-session cleanup; failures block until a retry, including late creation.
   Before adoption: marked worktree and `newSession` only; no doc, setup, history or events.
-- Credentials are runtime leases: adopt retains, dispose releases that generation; local has none.
+- Credential leases: adopt retains, dispose releases that generation; local has none.
 - Dispatch/claim rescan `buildSessionLaunchConfig`; await incompatible cleanup.
-- Nested child Sessions are rejected: ownership resolves one parent hop only.
+- Reject nested child Sessions; resolve ownership one parent hop.
 - Fork and continuation share `resolveSessionAcpTargetId`; source runtime config copies only at its matching user-turn fence.
 - Fork commits at `persistPendingChanges()`, never cloud sync. Persist its placeholder
   before ACP; failed commits terminate and durably delete the target. Post-commit

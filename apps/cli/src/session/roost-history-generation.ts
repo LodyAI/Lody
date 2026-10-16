@@ -10,9 +10,10 @@ import {
   type RestoreActiveBranchInput,
   type HistoryInputIdentity,
 } from '@loro-dev/roost/lody-history';
-import type { RoostNativeClient, RoostNodeStream } from '@loro-dev/roost-node';
+import type { RoostNativeClient, RoostNodeStream, Write, IndexPut } from '@loro-dev/roost-node';
 import type { SessionHistoryInput } from '@lody/shared';
 import { encodeRoostContent } from './roost-history-port';
+import { AGENT_RECEIPTS_TABLE, agentReceiptKey } from './roost-content-patches';
 
 const nextKey = { table: 'lody_history_generation_v1', key: new TextEncoder().encode('next') };
 const epochKey = { table: 'lody_history_epoch_v1', key: new TextEncoder().encode('current') };
@@ -56,8 +57,16 @@ export class RoostHistoryGeneration {
     this.history = this.bind(this.raw);
   }
 
+  get observationScope(): string {
+    return createHash('sha256').update(this.owner).update(this.streamId).digest('hex');
+  }
+
   get host(): RoostNodeStream {
     return this.history.stream as RoostNodeStream;
+  }
+
+  commitPatches(writes: Write[], receipts: IndexPut[], cursor: bigint | undefined) {
+    return this.host.writeBatch(writes, { indexPuts: receipts, expectedEventCursor: cursor });
   }
 
   /** A derived cache may advance only across writes whose receipts we own. */
@@ -347,6 +356,17 @@ export class RoostHistoryGeneration {
 
   async lookupOperation(identity: HistoryIdentity) {
     for (const history of [this.history, ...[...this.ancestors].reverse()]) {
+      if (identity.kind === 'publication') {
+        const [receipt] = await history.stream.readIndex([
+          { table: AGENT_RECEIPTS_TABLE, key: agentReceiptKey(identity) },
+        ]);
+        if (receipt) {
+          const value = JSON.parse(new TextDecoder().decode(receipt));
+          if (value?.version !== 1 || typeof value.digest !== 'string')
+            throw new Error('Roost agent operation receipt is invalid');
+          return { digest: value.digest };
+        }
+      }
       const found = await history.lookup(identity);
       if (found?.kind === 'found') {
         const inner = await history.read(found.turn.turnId);

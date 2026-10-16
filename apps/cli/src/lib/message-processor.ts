@@ -21,6 +21,9 @@ interface ProcessorEvents {
  */
 export class MessageProcessor extends EventEmitter<ProcessorEvents> {
   private readonly queue: ConcurrentQueue<MessageQueueKey>;
+  private readonly historyReads: ConcurrentQueue<MessageQueueKey>;
+  private readonly historyWatches = new ConcurrentQueue<MessageQueueKey>(128);
+  private historyWatchOrdinal = 0;
   private isStopped = false;
   private static readonly QUEUE_WAIT_WARNING_MS = 10_000;
   private static readonly PROCESSING_WARNING_MS = 30_000;
@@ -31,6 +34,9 @@ export class MessageProcessor extends EventEmitter<ProcessorEvents> {
   ) {
     super();
     this.queue = new ConcurrentQueue<MessageQueueKey>(maxConcurrentSessions);
+    this.historyReads = new ConcurrentQueue<MessageQueueKey>(
+      Math.max(1, Math.min(8, maxConcurrentSessions))
+    );
   }
 
   /**
@@ -69,7 +75,13 @@ export class MessageProcessor extends EventEmitter<ProcessorEvents> {
       } waiting=${this.queue.waiting}`
     );
 
-    void this.queue.enqueue(queueKey, async () => {
+    const queue =
+      message.type === 'session/history-read'
+        ? message.query.kind === 'watchChanges'
+          ? this.historyWatches
+          : this.historyReads
+        : this.queue;
+    void queue.enqueue(queueKey, async () => {
       const startTime = Date.now();
       started = true;
       clearInterval(waitWarning);
@@ -125,14 +137,14 @@ export class MessageProcessor extends EventEmitter<ProcessorEvents> {
    * 获取当前活跃的 session 数量
    */
   getActiveSessions(): number {
-    return this.queue.active;
+    return this.queue.active + this.historyReads.active + this.historyWatches.active;
   }
 
   /**
    * 获取队列中等待的任务数量
    */
   getQueueSize(): number {
-    return this.queue.waiting;
+    return this.queue.waiting + this.historyReads.waiting + this.historyWatches.waiting;
   }
 
   /**
@@ -151,7 +163,7 @@ export class MessageProcessor extends EventEmitter<ProcessorEvents> {
       `Draining MessageProcessor: active=${this.queue.active} waiting=${this.queue.waiting}`
     );
 
-    await this.queue.drain();
+    await Promise.all([this.queue.drain(), this.historyReads.drain(), this.historyWatches.drain()]);
     this.emit('queue:drained');
   }
 
@@ -164,7 +176,13 @@ export class MessageProcessor extends EventEmitter<ProcessorEvents> {
       `Draining MessageProcessor (timeout=${timeoutMs}ms): active=${this.queue.active} waiting=${this.queue.waiting}`
     );
 
-    const completed = await this.queue.drainWithTimeout(timeoutMs);
+    const completed = (
+      await Promise.all([
+        this.queue.drainWithTimeout(timeoutMs),
+        this.historyReads.drainWithTimeout(timeoutMs),
+        this.historyWatches.drainWithTimeout(timeoutMs),
+      ])
+    ).every(Boolean);
 
     if (completed) {
       this.emit('queue:drained');
@@ -213,9 +231,12 @@ export class MessageProcessor extends EventEmitter<ProcessorEvents> {
       case 'session/chat':
         return `session:${message.sessionId}:main`;
       case 'session/history-read':
+        if (message.query.kind === 'watchChanges')
+          return `history-watch:${this.historyWatchOrdinal++}`;
+        return `session:${message.sessionId}:history-read`;
       case 'session/history-write':
         // History requests must not wait behind a long-running ACP prompt.
-        // Roost streaming is machine-owned and the renderer polls it while
+        // Roost streaming is machine-owned and the renderer observes it while
         // that prompt is still active.
         return `session:${message.sessionId}:history`;
       case 'session/image-upload':

@@ -1,3 +1,7 @@
+import {
+  machineSupportsSessionHistoryIncremental,
+  machineSupportsSessionHistoryWatch,
+} from '@lody/shared';
 import type { AgentConfigId, MachineProviderRateLimitsRefreshResponse } from '@lody/shared';
 import { createWorkspacePendingSends } from './workspace-pending-sends';
 import { createLoroSyncErrorTools } from '@lody/shared/loro-sync-errors';
@@ -115,7 +119,7 @@ import {
 } from './workspace-target-router';
 import { mergePresenceSnapshots } from './presence-snapshot-merge';
 import { Mirror } from 'loro-mirror';
-import { LoroDoc, EphemeralStore } from 'loro-crdt';
+import { LoroDoc, LoroList, EphemeralStore } from 'loro-crdt';
 import {
   WorkspaceRuntime,
   type PreviewVisualCommentDocStore,
@@ -665,6 +669,8 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
   // Slow reconcile interval for the reconnect-loop backstop tick.
   const RECONNECT_BACKSTOP_INTERVAL_MS = 60_000;
   let disposePromise: Promise<void> | null = null;
+  const sessionReaderAbort = new AbortController();
+  const sessionReaderWakeListeners = new Set<() => void>();
   let reconnectingStatusTimer: ReturnType<typeof setTimeout> | null = null;
   let reconnectingStatusVisible = false;
   let localReconnectLoop: LocalReconnectLoop | null = null;
@@ -926,6 +932,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
       listCloudTransportProblemRooms().length > 0);
 
   const notifyConnectionStateInputsChanged = () => {
+    for (const wake of sessionReaderWakeListeners) wake();
     localReconnectLoop?.update();
     cloudReconnectLoop?.update();
     emitControlConnectionState();
@@ -3404,6 +3411,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
         return;
       }
       metaSub = joined;
+      for (const wake of sessionReaderWakeListeners) wake();
       if (cloudTransportAttached) {
         attachCloudMetaHealthTracker();
       }
@@ -4170,6 +4178,121 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     },
   });
 
+  const awaitSessionReaderMetadata = (
+    roomId: string,
+    doc: LoroDoc
+  ): Promise<{ historyBackend?: SessionHistoryBackendKind; machineId?: MachineId }> => {
+    // A persisted Loro history is enough to read a legacy session offline. An
+    // empty provisional control doc is not evidence that its backend is Loro.
+    const legacyHistory = doc.getByPath('history');
+    const hasRoostCursor = doc.getByPath('roostHistoryCursor/cursor') !== undefined;
+    const hasLegacyHistory =
+      legacyHistory instanceof LoroList && legacyHistory.length > 0 && !hasRoostCursor;
+    return new Promise((resolve, reject) => {
+      let meta: { historyBackend?: SessionHistoryBackendKind; machineId?: MachineId } = {};
+      let exists = false;
+      let settled = false;
+      let unsubscribe = () => {};
+      const readyBindings = new Set<unknown>();
+      const watchedBindings = new Set<unknown>();
+      const waitAbort = new AbortController();
+      const bindingListeners = new Map<unknown, () => void>();
+      const bindingChanges = new Set<unknown>();
+      const finish = (error?: Error) => {
+        if (settled) return;
+        settled = true;
+        waitAbort.abort();
+        unsubscribe();
+        for (const stop of bindingListeners.values()) stop();
+        bindingListeners.clear();
+        sessionReaderWakeListeners.delete(evaluate);
+        sessionReaderAbort.signal.removeEventListener('abort', aborted);
+        if (error) reject(error);
+        else resolve(meta);
+      };
+      const aborted = () => finish(new Error('Runtime disposed'));
+      const evaluate = () => {
+        if (settled) return;
+        if (sessionReaderAbort.signal.aborted) {
+          aborted();
+          return;
+        }
+        if (meta.historyBackend) {
+          if (meta.historyBackend !== 'roost' || meta.machineId) finish();
+          return;
+        }
+        if (hasLegacyHistory) {
+          finish();
+          return;
+        }
+        if (meta.machineId) targetRouter.observeDocMeta(roomId, meta);
+        // The local Meta binding cannot establish the identity of a foreign
+        // cloud session in a dual runtime. Select the session's actual plane.
+        const plane = targetRouter.getReadinessTransportForRoom({ kind: 'doc', id: roomId });
+        const binding = metaSub?.subscription(plane);
+        if (!binding) return;
+        if (!bindingListeners.has(binding))
+          bindingListeners.set(
+            binding,
+            binding.onStatusChange(() => {
+              if (watchedBindings.has(binding)) bindingChanges.add(binding);
+              evaluate();
+            })
+          );
+        if (readyBindings.has(binding)) {
+          if (exists && meta.machineId && !hasRoostCursor) finish();
+          // Restoration is a completed barrier, not a polling loop. Missing
+          // identity is woken by metadata/route events; a known Roost cursor
+          // cannot turn into a legacy identity merely because Meta is late.
+          return;
+        }
+        if (watchedBindings.has(binding)) return;
+        watchedBindings.add(binding);
+        void binding.waitFor({ phase: 'restored', signal: waitAbort.signal }).then(
+          (result) => {
+            watchedBindings.delete(binding);
+            if (result.status === 'complete') {
+              readyBindings.add(binding);
+              evaluate();
+            } else if (bindingChanges.delete(binding)) evaluate();
+          },
+          () => {
+            watchedBindings.delete(binding);
+          }
+        );
+      };
+      sessionReaderWakeListeners.add(evaluate);
+      sessionReaderAbort.signal.addEventListener('abort', aborted, { once: true });
+      const observation = repo.observeDocs(
+        (event) => {
+          if (event.kind === 'doc-metadata') meta = { ...meta, ...event.patch };
+          if (event.kind === 'doc-existence-changed') {
+            if (event.to === 'deleted' || (event.to === 'missing' && exists)) {
+              finish(new Error('Session was deleted'));
+              return;
+            }
+            exists = event.to === 'active';
+          }
+          evaluate();
+        },
+        {
+          query: { prefix: roomId },
+          filter: {
+            docIds: [roomId],
+            kinds: ['doc-metadata', 'doc-existence-changed'],
+            metadataFields: ['historyBackend', 'machineId'],
+          },
+        }
+      );
+      unsubscribe = observation.unsubscribe;
+      const snapshot = observation.snapshot.find((entry) => entry.docId === roomId);
+      exists = Boolean(snapshot && !snapshot.deleted);
+      meta = snapshot?.meta ?? {};
+      if (snapshot?.deleted) finish(new Error('Session was deleted'));
+      else evaluate();
+    });
+  };
+
   const createSessionStore = async (sessionId: SessionId): Promise<SessionDocStore> => {
     const roomId = getSessionRoomId(sessionId);
     // Backend selection is part of the persisted session identity, so resolve it
@@ -4195,12 +4318,17 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     // Read metadata after the bootstrap merge. Otherwise a cold remote Roost
     // session can be composed with the legacy Loro reader before its catalog
     // row becomes visible in this Repo instance.
-    const sessionMeta = (await repo.getDocMeta(roomId))?.meta as
-      | { historyBackend?: SessionHistoryBackendKind; machineId?: MachineId }
-      | undefined;
+    let sessionMeta: { historyBackend?: SessionHistoryBackendKind; machineId?: MachineId };
+    try {
+      sessionMeta = await awaitSessionReaderMetadata(roomId, sessionDoc);
+    } catch (error) {
+      await repo.unloadDoc(roomId).catch(() => {});
+      throw error;
+    }
 
     const backendKind = resolveSessionHistoryBackendKind(sessionMeta);
     let rendererSessionDataFactory = deps.createSessionData;
+    let disposeReaderObservation = () => {};
     let conversation: ReturnType<typeof createConversationSession>;
     try {
       if (!rendererSessionDataFactory && backendKind === 'roost') {
@@ -4208,7 +4336,57 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
         if (!machineId) {
           throw new Error(`Roost session ${sessionId} has no owning machine`);
         }
+        const machineRoomId = getMachineRoomId(machineId);
+        let ownerMachineMeta: MachineMeta | undefined;
+        const readerWakes = new Set<() => void>();
+        const wakeReader = () => {
+          for (const wake of readerWakes) wake();
+        };
+        const machineObservation = repo.observeDocs(
+          (event) => {
+            if (event.kind === 'doc-metadata') {
+              ownerMachineMeta = { ...ownerMachineMeta, ...event.patch } as MachineMeta;
+              wakeReader();
+            }
+            if (event.kind === 'doc-existence-changed' && event.to === 'missing') {
+              ownerMachineMeta = undefined;
+              wakeReader();
+            }
+          },
+          {
+            query: { prefix: machineRoomId },
+            filter: {
+              docIds: [machineRoomId],
+              kinds: ['doc-metadata', 'doc-existence-changed'],
+              metadataFields: ['protocolCapabilities'],
+            },
+          }
+        );
+        ownerMachineMeta = machineObservation.snapshot.find(
+          (entry) => entry.docId === machineRoomId
+        )?.meta as MachineMeta | undefined;
+        sessionReaderWakeListeners.add(wakeReader);
+        document.addEventListener('visibilitychange', wakeReader);
+        window.addEventListener('online', wakeReader);
+        disposeReaderObservation = () => {
+          machineObservation.unsubscribe();
+          sessionReaderWakeListeners.delete(wakeReader);
+          document.removeEventListener('visibilitychange', wakeReader);
+          window.removeEventListener('online', wakeReader);
+          readerWakes.clear();
+        };
         rendererSessionDataFactory = createRoostSessionDataFactoryForMachine({
+          incremental: () => machineSupportsSessionHistoryIncremental(ownerMachineMeta),
+          watch: () => machineSupportsSessionHistoryWatch(ownerMachineMeta),
+          active: () =>
+            document.visibilityState !== 'hidden' &&
+            (targetRouter.getPlaneForMachine(machineId) === 'local' || isBrowserOnline()),
+          subscribeWake: (wake) => {
+            readerWakes.add(wake);
+            return () => {
+              readerWakes.delete(wake);
+            };
+          },
           accountId: deps.accountId,
           workspaceId,
           machineId,
@@ -4244,6 +4422,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
         ...(rendererSessionDataFactory ? { createSessionData: rendererSessionDataFactory } : {}),
       });
     } catch (error) {
+      disposeReaderObservation();
       // A Roost session without its renderer adapter fails closed. Release the
       // cold repo handle before the cache gets a chance to retry the open.
       await repo.unloadDoc(roomId).catch(() => {});
@@ -4395,6 +4574,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
         stopSyncNow();
         syncTracker.dispose();
         disposeConversation();
+        disposeReaderObservation();
       },
       waitUntilSynced: async (signal?: AbortSignal) => {
         if (signal) await waitForPromiseOrAbort(transportReady.promise, signal);
@@ -4871,6 +5051,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
 
     // Publish retirement before any cancellation callback or asynchronous close runs.
     disposePromise = Promise.resolve().then(async () => {
+      sessionReaderAbort.abort();
       windowBootstrap?.close();
       sharedWindowDocuments.clear();
       streamsTokenAbort?.abort();
