@@ -1,4 +1,10 @@
-import { applyNotificationOnHistory, buildAgentMessageAuthor } from '@lody/shared';
+import {
+  applyNotificationOnHistory,
+  buildAgentMessageAuthor,
+  parseSessionNotification,
+  HistoryWriteError,
+  targetLocalHistoryTargets,
+} from '@lody/shared';
 import { createSessionAgentWrites } from '../src/lib/loro/session-agent-writes';
 import { describe, expect, it, vi } from 'vitest';
 import { Loro, isContainer, LoroList, LoroMap } from 'loro-crdt';
@@ -438,6 +444,511 @@ describe('stored history operations', () => {
     if (createdRead.state === 'ready') {
       expect(JSON.stringify(createdRead.turn.items)).toContain('created');
     }
+  });
+
+  it('keeps mixed subagent batches equivalent to whole-history writes across roots and older turns', async () => {
+    const doc = new Loro();
+    const writer = createHistoryWriter(doc);
+    const full = createHistoryWriter(new Loro());
+    const seed = [
+      {
+        ...assistantTurn('old'),
+        items: [
+          { type: 'tool_call', toolCallId: 'launch', status: 'in_progress' },
+          { type: 'text', text: 'old tail' },
+        ],
+      },
+      assistantTurn('active'),
+    ] as SessionHistory[];
+    for (const turn of seed) {
+      writer.append(turn);
+      full.append(turn);
+    }
+    const writes = createSessionAgentWrites(writer);
+    const snapshot = {
+      state: 'running',
+      parentRunId: null,
+      support: {
+        stream: ['text', 'thought', 'tool', 'plan'],
+        progress: true,
+        cancel: false,
+        outputRead: 'none',
+      },
+    };
+    const event = (runId: string, payload: Record<string, unknown>, sessionId = 'root') => ({
+      sessionUpdate: 'subagent_event',
+      event: { version: 1, sessionId, runId, ...payload },
+    });
+    const output = (runId: string, update: Record<string, unknown>, sessionId = 'root') =>
+      event(
+        runId,
+        { type: 'output', nativeTurnId: 'child-turn', messageId: 'message', update },
+        sessionId
+      );
+    const text = (value: string) => ({
+      sessionUpdate: 'agent_message_chunk',
+      content: { type: 'text', text: value },
+    });
+    const tool = (status: string) => ({
+      sessionUpdate: 'tool_call_update',
+      toolCallId: 'same-tool',
+      status,
+      title: 'Read',
+    });
+    const batches = [
+      [
+        event('a', { type: 'snapshot', snapshot: { ...snapshot, parentToolCallId: 'launch' } }),
+        output('a', text('first')),
+      ],
+      // The same run id under another root is a distinct child.
+      [
+        event('a', { type: 'snapshot', snapshot }, 'other'),
+        output('a', tool('in_progress')),
+        output('a', text('other'), 'other'),
+      ],
+      [
+        event('b', { type: 'snapshot', snapshot: { ...snapshot, parentRunId: 'a' } }),
+        output('b', tool('in_progress')),
+        text(' parent'),
+      ],
+      [output('a', text('delta')), output('b', text('child')), output('a', tool('completed'))],
+      [
+        output('a', {
+          sessionUpdate: 'plan',
+          entries: [{ content: 'first plan', priority: 'high', status: 'pending' }],
+        }),
+        output('a', text('after plan')),
+      ],
+      [
+        output('a', {
+          sessionUpdate: 'plan',
+          entries: [{ content: 'updated plan', priority: 'high', status: 'completed' }],
+        }),
+        event('a', { type: 'progress', progress: { totalTokens: 20, summary: null } }),
+      ],
+      // Missing ancestry, a cycle and output without a snapshot cannot author rows.
+      [
+        event('a', { type: 'snapshot', snapshot: { ...snapshot, parentRunId: 'b' } }),
+        event('orphan', { type: 'snapshot', snapshot: { ...snapshot, parentRunId: 'missing' } }),
+        output('missing', text('dropped')),
+      ],
+      [
+        event('a', { type: 'snapshot', snapshot: { ...snapshot, state: 'completed' } }),
+        output('a', text('late')),
+        event('a', { type: 'snapshot', snapshot }),
+      ],
+      // Legacy provider task lifecycle and tagged internals share the sparse route.
+      [
+        {
+          sessionUpdate: 'tool_call_update',
+          toolCallId: 'legacy',
+          _meta: { 'cognition.ai/subagent_started': { agentId: 'legacy', title: 'Task' } },
+        },
+      ],
+      [
+        text(' visible'),
+        {
+          ...text('hidden'),
+          _meta: { 'cognition.ai/subagent_context': { parentAgentId: 'legacy' } },
+        },
+        {
+          sessionUpdate: 'tool_call_update',
+          toolCallId: 'legacy',
+          _meta: { 'cognition.ai/subagent_completed': { agentId: 'legacy', summary: 'done' } },
+        },
+      ],
+    ];
+    for (const batch of batches) {
+      const notifications = batch.map((update) =>
+        parseSessionNotification({
+          sessionId: 'root',
+          update,
+        })
+      );
+      // Keep the notification's root matched for the explicitly separate ACP root.
+      for (let i = 0; i < notifications.length; i++) {
+        const update = notifications[i]!.update;
+        if (update.sessionUpdate === 'subagent_event')
+          notifications[i]!.sessionId = update.event.sessionId;
+      }
+      const options = { targetAssistantEntryId: 'active', now: () => '2026-01-01T00:00:02Z' };
+      await writes.applyAgentBatch({ notifications, ...options });
+      full.update((history) =>
+        applyNotificationOnHistory(history, notifications, undefined, options)
+      );
+      expect(writer.readStored()).toEqual(full.readStored());
+    }
+    const old = writer.read('old')!;
+    expect(old.items).toMatchObject([
+      { toolCallId: 'launch' },
+      { text: 'old tail' },
+      { taskId: 'a', run: { snapshot: { state: 'completed' } } },
+      { taskId: 'b' },
+    ]);
+    expect(JSON.stringify(writer.read('active'))).not.toContain('hidden');
+  });
+
+  it('writes child deltas without exporting or rescanning unrelated history and child output', async () => {
+    const doc = new Loro();
+    const writer = createHistoryWriter(doc);
+    for (let i = 0; i < 32; i++)
+      writer.append({
+        ...assistantTurn(`old-${i}`),
+        items: Array.from({ length: 8 }, (_, j) => ({
+          type: 'tool_call',
+          toolCallId: `old-${i}-${j}`,
+          status: 'completed',
+          content: [
+            { type: 'content', content: { type: 'text', text: 'stored payload'.repeat(100) } },
+          ],
+        })),
+      } as SessionHistory);
+    writer.append({ ...assistantTurn('active'), items: [] } as SessionHistory);
+    const writes = createSessionAgentWrites(writer);
+    const snapshot = {
+      state: 'running',
+      parentRunId: null,
+      support: {
+        stream: ['text', 'tool', 'plan'],
+        progress: true,
+        cancel: false,
+        outputRead: 'none',
+      },
+    };
+    const event = (payload: Record<string, unknown>) =>
+      parseSessionNotification({
+        sessionId: 'root',
+        update: {
+          sessionUpdate: 'subagent_event',
+          event: { version: 1, sessionId: 'root', runId: 'run', ...payload },
+        },
+      });
+    await writes.applyAgentBatch({
+      targetAssistantEntryId: 'active',
+      notifications: [event({ type: 'snapshot', snapshot })],
+    });
+    const children = Array.from({ length: 64 }, (_, i) =>
+      event({
+        type: 'output',
+        update: {
+          sessionUpdate: 'tool_call',
+          toolCallId: `child-${i}`,
+          title: 'Read',
+          content: [
+            { type: 'content', content: { type: 'text', text: 'child payload'.repeat(100) } },
+          ],
+        },
+      })
+    );
+    await writes.applyAgentBatch({ targetAssistantEntryId: 'active', notifications: children });
+    writer.updateEntry('active', (turn) => {
+      turn.items.push(
+        { type: 'tool_call', toolCallId: 'unrelated-parent-tool', status: 'completed' },
+        { type: 'text', text: 'unrelated parent tail' }
+      );
+      return turn;
+    });
+    const seededHistory = doc.getList('history');
+    const seededTask = ((seededHistory.get(32) as LoroMap).get('items') as LoroList).get(
+      0
+    ) as LoroMap;
+    const seededChildren = (seededTask.get('run') as LoroMap).get('items') as LoroList;
+    (seededChildren.get(10) as LoroMap).set('status', 'legacy-unknown');
+    (seededChildren.get(10) as LoroMap).set('futureChildField', { retained: true });
+    doc.commit();
+    // Warm both directories, then guard historical reads rather than elapsed time.
+    await writes.applyAgentBatch({
+      targetAssistantEntryId: 'active',
+      notifications: [
+        event({
+          type: 'output',
+          update: {
+            sessionUpdate: 'agent_message_chunk',
+            content: { type: 'text', text: 'start' },
+          },
+        }),
+      ],
+    });
+    const history = doc.getList('history');
+    const oldItems = (history.get(0) as LoroMap).get('items') as LoroList;
+    const rootItems = (history.get(32) as LoroMap).get('items') as LoroList;
+    const run = (rootItems.get(0) as LoroMap).get('run') as LoroMap;
+    const childItems = run.get('items') as LoroList;
+    // First child-tool lookup may scan metadata once; subsequent writes must not.
+    await writes.applyAgentBatch({
+      targetAssistantEntryId: 'active',
+      notifications: [
+        event({
+          type: 'output',
+          update: { sessionUpdate: 'tool_call_update', toolCallId: 'child-0', status: 'completed' },
+        }),
+      ],
+    });
+    const unread = new Set([
+      (oldItems.get(0) as LoroMap).id,
+      (childItems.get(10) as LoroMap).id,
+      (rootItems.get(2) as LoroMap).id,
+    ]);
+    const noExports = new Set([history.id, oldItems.id, rootItems.id, childItems.id]);
+    const readMap = LoroMap.prototype.get;
+    const exportList = LoroList.prototype.toJSON;
+    const mapGuard = vi
+      .spyOn(LoroMap.prototype, 'get')
+      .mockImplementation(function (this: LoroMap, name) {
+        if (unread.has(this.id)) throw new Error('unrelated historical item was read');
+        return readMap.call(this, name);
+      });
+    const exportGuard = vi
+      .spyOn(LoroList.prototype, 'toJSON')
+      .mockImplementation(function (this: LoroList) {
+        if (noExports.has(this.id)) throw new Error('whole history/turn/run was exported');
+        return exportList.call(this);
+      });
+    try {
+      await writes.setTurnField('active', 'finished', { kind: 'set', value: false });
+      for (let i = 0; i < 32; i++)
+        await writes.applyAgentBatch({
+          targetAssistantEntryId: 'active',
+          notifications: [
+            event({
+              type: 'output',
+              update: {
+                sessionUpdate: 'agent_message_chunk',
+                content: { type: 'text', text: 'x' },
+              },
+            }),
+            event({
+              type: 'output',
+              update: {
+                sessionUpdate: 'tool_call_update',
+                toolCallId: 'child-0',
+                status: 'completed',
+              },
+            }),
+            event({ type: 'progress', progress: { totalTokens: i } }),
+          ],
+        });
+      await writes.applyAgentBatch({
+        targetAssistantEntryId: 'active',
+        notifications: [
+          parseSessionNotification({
+            sessionId: 'root',
+            update: {
+              sessionUpdate: 'tool_call_update',
+              toolCallId: 'legacy',
+              _meta: {
+                'cognition.ai/subagent_started': { agentId: 'legacy', title: 'Legacy task' },
+              },
+            },
+          }),
+        ],
+      });
+      await writes.applyAgentBatch({
+        targetAssistantEntryId: 'active',
+        notifications: [
+          parseSessionNotification({
+            sessionId: 'root',
+            update: {
+              sessionUpdate: 'agent_message_chunk',
+              content: { type: 'text', text: 'hidden internal' },
+              _meta: { 'cognition.ai/subagent_context': { parentAgentId: 'legacy' } },
+            },
+          }),
+          parseSessionNotification({
+            sessionId: 'root',
+            update: {
+              sessionUpdate: 'tool_call_update',
+              toolCallId: 'legacy',
+              _meta: { 'cognition.ai/subagent_completed': { agentId: 'legacy', summary: 'done' } },
+            },
+          }),
+        ],
+      });
+    } finally {
+      mapGuard.mockRestore();
+      exportGuard.mockRestore();
+    }
+    const task = writer.read('active')!.items[0];
+    expect(task).toMatchObject({ taskId: 'run', run: { progress: { totalTokens: 31 } } });
+    if (task?.type !== 'subagent_task' || !task.run) throw new Error('missing run');
+    expect(task.run.items[0]).toMatchObject({ toolCallId: 'child-0', status: 'completed' });
+    expect(task.run.items.at(-1)).toMatchObject({ text: `start${'x'.repeat(32)}` });
+    expect(writer.read('active')!.items.at(-1)).toMatchObject({
+      taskId: 'legacy',
+      status: 'completed',
+      summary: 'done',
+    });
+    expect(JSON.stringify(writer.read('active'))).not.toContain('hidden internal');
+    expect(task.run.items).toHaveLength(65);
+    expect(task.run.items[10]).toMatchObject({
+      status: 'legacy-unknown',
+      futureChildField: { retained: true },
+    });
+  });
+
+  it('rebuilds child ownership after peer insertion, moves and previously missing runs', async () => {
+    const doc = new Loro();
+    const writer = createHistoryWriter(doc);
+    writer.append({ ...assistantTurn('old'), items: [] } as SessionHistory);
+    writer.append({ ...assistantTurn('active'), items: [] } as SessionHistory);
+    const writes = createSessionAgentWrites(writer);
+    const notification = (payload: Record<string, unknown>) =>
+      parseSessionNotification({
+        sessionId: 'root',
+        update: {
+          sessionUpdate: 'subagent_event',
+          event: { version: 1, sessionId: 'root', runId: 'run', ...payload },
+        },
+      });
+    const emit = (payload: Record<string, unknown>) =>
+      writes.applyAgentBatch({
+        targetAssistantEntryId: 'active',
+        notifications: [notification(payload)],
+      });
+    await emit({ type: 'progress', progress: { totalTokens: 1 } });
+    const peer = new Loro();
+    peer.import(doc.export({ mode: 'snapshot' }));
+    const peerWriter = createHistoryWriter(peer);
+    peerWriter.update((history) =>
+      applyNotificationOnHistory(
+        history,
+        [
+          notification({
+            type: 'snapshot',
+            snapshot: {
+              state: 'running',
+              support: { stream: ['tool'], progress: true, cancel: false, outputRead: 'none' },
+            },
+          }),
+          notification({
+            type: 'output',
+            update: { sessionUpdate: 'tool_call', toolCallId: 'tool', title: 'Read' },
+          }),
+        ],
+        undefined,
+        { targetAssistantEntryId: 'old' }
+      )
+    );
+    doc.import(peer.export({ mode: 'update', from: doc.version() }));
+    await emit({
+      type: 'output',
+      update: { sessionUpdate: 'tool_call_update', toolCallId: 'tool', status: 'completed' },
+    });
+    // A second peer change shifts both the owning history row and child item.
+    peer.import(doc.export({ mode: 'update', from: peer.version() }));
+    const old = peer.getList('history').get(0) as LoroMap;
+    const tasks = old.get('items') as LoroList;
+    const run = (tasks.get(0) as LoroMap).get('run') as LoroMap;
+    (run.get('items') as LoroList).insert(0, { type: 'text', text: 'peer prefix' });
+    peer
+      .getList('history')
+      .insert(0, { id: 'peer-prefix', role: 'user', timestamp: '2026-01-01T00:00:00Z', items: [] });
+    peer.commit();
+    doc.import(peer.export({ mode: 'update', from: doc.version() }));
+    await emit({
+      type: 'output',
+      update: { sessionUpdate: 'tool_call_update', toolCallId: 'tool', status: 'failed' },
+    });
+    const task = writer.read('old')!.items[0];
+    expect(task).toMatchObject({
+      run: { items: [{ text: 'peer prefix' }, { toolCallId: 'tool', status: 'failed' }] },
+    });
+    expect(writer.read('active')!.items).toEqual([]);
+    // A synchronous listener can commit another writer's edit inside our commit.
+    let shifted = false;
+    const unsubscribe = doc.subscribe(() => {
+      if (shifted) return;
+      const owner = writer.read('old')?.items[0];
+      if (owner?.type !== 'subagent_task' || owner.run?.progress?.totalTokens !== 10) return;
+      shifted = true;
+      doc.getList('history').insert(0, {
+        id: 'callback-prefix',
+        role: 'user',
+        timestamp: '2026-01-01T00:00:00Z',
+        items: [],
+      });
+      doc.commit();
+    });
+    try {
+      await emit({ type: 'progress', progress: { totalTokens: 10 } });
+    } finally {
+      unsubscribe();
+    }
+    expect(shifted).toBe(true);
+    await emit({
+      type: 'output',
+      update: { sessionUpdate: 'tool_call_update', toolCallId: 'tool', status: 'completed' },
+    });
+    expect(writer.read('old')!.items[0]).toMatchObject({
+      run: {
+        progress: { totalTokens: 10 },
+        items: [{ text: 'peer prefix' }, { toolCallId: 'tool', status: 'completed' }],
+      },
+    });
+    expect(writer.read('active')!.items).toEqual([]);
+  });
+
+  it('rejects a malformed child edit before committing any valid prefix', async () => {
+    const doc = new Loro();
+    const writer = createHistoryWriter(doc);
+    writer.append({ ...assistantTurn('active'), items: [] } as SessionHistory);
+    const writes = createSessionAgentWrites(writer);
+    const notification = (payload: Record<string, unknown>) =>
+      parseSessionNotification({
+        sessionId: 'root',
+        update: {
+          sessionUpdate: 'subagent_event',
+          event: { version: 1, sessionId: 'root', runId: 'run', ...payload },
+        },
+      });
+    await writes.applyAgentBatch({
+      targetAssistantEntryId: 'active',
+      notifications: [
+        notification({
+          type: 'snapshot',
+          snapshot: {
+            state: 'running',
+            support: { stream: ['tool'], progress: true, cancel: false, outputRead: 'none' },
+          },
+        }),
+        notification({
+          type: 'output',
+          update: { sessionUpdate: 'tool_call', toolCallId: 'child', title: 'Read' },
+        }),
+      ],
+    });
+    const before = doc.export({ mode: 'snapshot' });
+    const notifications = [
+      parseSessionNotification({
+        sessionId: 'root',
+        update: {
+          sessionUpdate: 'agent_message_chunk',
+          content: { type: 'text', text: 'must not commit' },
+        },
+      }),
+      notification({
+        type: 'output',
+        update: { sessionUpdate: 'tool_call_update', toolCallId: 'child', status: 'completed' },
+      }),
+    ];
+    const targets = targetLocalHistoryTargets(notifications);
+    if (!targets) throw new Error('missing window targets');
+    expect(() =>
+      writer.updateTail('active', targets, (history) => {
+        const next = applyNotificationOnHistory(history, notifications, undefined, {
+          targetAssistantEntryId: 'active',
+        });
+        const task = next
+          .flatMap((row) => row.items)
+          .find((item) => item?.type === 'subagent_task');
+        if (!task) throw new Error('missing task');
+        (task as unknown as { run: { items: Array<{ status?: string }> } }).run.items[0]!.status =
+          'invalid-status';
+        return next;
+      })
+    ).toThrow(HistoryWriteError);
+    expect(doc.export({ mode: 'snapshot' })).toEqual(before);
+    expect(writer.read('active')!.items).toHaveLength(1);
   });
 
   it('writes streamed output through the turn tail with the same result as a whole-history write', async () => {

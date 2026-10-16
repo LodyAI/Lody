@@ -79,10 +79,6 @@ type SessionDispatchWatcherDeps = {
   // instead of the daemon host's git config.
   userResolver: SessionUserResolverLike;
   accessPolicy?: SessionAccessPolicyService;
-  getPreparedSessionLaunchConfig?: (input: {
-    sessionMeta: SessionMeta;
-    requesterUserId: string;
-  }) => { config: SessionLaunchConfig | undefined } | null;
   // Three-way result (allowed / definitive deny / indeterminate). The
   // indeterminate case is what keeps a transient outage from dropping the turn —
   // see {@link verifyMachineAccessWithRetry}.
@@ -104,6 +100,14 @@ type SessionDispatchWatcherDeps = {
   // (definitive online deny) clears it, so the next dispatch falls back to the
   // remote three-state check. Indeterminate verdicts never reach this.
   recordOwnerAccessSnapshot?: (verdict: 'allowed' | 'denied') => Promise<void>;
+  // Member counterpart: every backend verdict for a requester who is not the
+  // machine owner refreshes ('allowed') or clears ('denied') that requester's
+  // TTL-bounded cached allow. Indeterminate verdicts never reach this.
+  recordMemberAccessSnapshot?: (input: {
+    requesterUserId: string;
+    localProjectId?: string;
+    verdict: 'allowed' | 'denied';
+  }) => Promise<void>;
   // Optional so existing callers/tests can omit it. When provided, a definitive
   // access denial surfaces a visible chat_failed notice instead of silently
   // marking the turn failed (which the web UI renders as "Delivered").
@@ -1474,23 +1478,14 @@ export class SessionDispatchWatcher {
         requesterUserId,
         localProjectId,
       });
-      const preparedLaunchConfig =
-        dispatchAction.mode === 'create'
-          ? this.deps.getPreparedSessionLaunchConfig?.({
-              sessionMeta: freshMeta,
-              requesterUserId,
-            })
-          : null;
-      const launchConfigPromise = preparedLaunchConfig
-        ? Promise.resolve(preparedLaunchConfig.config)
-        : dispatchTurnPromise.then((turn) =>
-            traceAsync(
-              this.deps.logger,
-              'dispatch.resolve_launch_config',
-              { sessionId, userTurnId: turn.nextUserTurn.id },
-              async () => await this.resolveSessionLaunchConfig(turn.freshMeta)
-            )
-          );
+      const launchConfigPromise = dispatchTurnPromise.then((turn) =>
+        traceAsync(
+          this.deps.logger,
+          'dispatch.resolve_launch_config',
+          { sessionId, userTurnId: turn.nextUserTurn.id },
+          async () => await this.resolveSessionLaunchConfig(turn.freshMeta)
+        )
+      );
       void launchConfigPromise.catch(() => undefined);
       const userResolution = this.startUserResolution(sessionId, nextUserTurn.id, requesterUserId);
       const userForRequestPromise = dispatchTurnPromise.then((turn) =>
@@ -1565,6 +1560,9 @@ export class SessionDispatchWatcher {
       });
       let executionAccessPromise: Promise<MachineAccessVerification> = accessPromise;
       let ownerRecheckStarted = false;
+      // A member's dispatch-path verification is always a real backend call, so
+      // its verdict maintains the member cache whether or not dispatch waits on it.
+      this.recordMemberAccessVerdict(sessionId, requesterUserId, localProjectId, accessPromise);
       // Local-first access gate (P5/R1): the catalog policy is offline-authoritative
       // for owner-cached allow and for remote_missing workspaces; only a `remote`
       // outcome falls through to the pre-started backend verify DAG node, so the
@@ -1577,6 +1575,8 @@ export class SessionDispatchWatcher {
                 workspaceId: this.deps.workspaceId,
                 currentUserId: this.deps.currentUserId,
                 requesterUserId,
+                machineId: this.deps.machineId,
+                ...(localProjectId ? { localProjectId } : {}),
               })
             )
           : ({ outcome: 'remote' } as const);
@@ -1597,11 +1597,12 @@ export class SessionDispatchWatcher {
         return;
       }
       if (localAccess.outcome === 'allow') {
-        // Owner-cached fast path: dispatch immediately. The pre-started verify
-        // is discarded (its owner fast-path answer carries no new information);
-        // the REAL backend re-verification runs in the background instead, so
-        // an online revocation clears the snapshot and sends the NEXT dispatch
-        // back to remote verification.
+        // Cached fast path: dispatch immediately. For the owner, the pre-started
+        // verify is discarded (its owner fast-path answer carries no new
+        // information) and the REAL backend re-verification runs in the
+        // background instead. For a member, the pre-started verify already is
+        // that backend check and refreshes/clears the member entry. Either way an
+        // online revocation sends the NEXT dispatch back to remote verification.
         this.interruptAccessRetry(sessionId);
         void accessPromise.catch(() => undefined);
         this.fireOwnerAccessRecheck(sessionId, requesterUserId, localProjectId);
@@ -1722,6 +1723,37 @@ export class SessionDispatchWatcher {
   }
 
   /**
+   * Maintain the member optimistic-allow cache from a backend verdict for a
+   * requester who is not the machine owner. Only definitive verdicts write;
+   * fire-and-forget like the owner recheck, so it never affects dispatch.
+   */
+  private recordMemberAccessVerdict(
+    sessionId: SessionId,
+    requesterUserId: string,
+    localProjectId: string | undefined,
+    verdict: Promise<MachineAccessVerification>
+  ): void {
+    const record = this.deps.recordMemberAccessSnapshot;
+    if (!record || !this.deps.currentUserId || requesterUserId === this.deps.currentUserId) {
+      void verdict.catch(() => undefined);
+      return;
+    }
+    void (async () => {
+      const access = await verdict;
+      if (access.outcome === 'indeterminate') return;
+      await record({
+        requesterUserId,
+        ...(localProjectId ? { localProjectId } : {}),
+        verdict: access.outcome,
+      });
+    })().catch((error: unknown) => {
+      this.deps.logger.debug(
+        `[${sessionId}] Failed to record member access verdict: ${formatErrorMessage(error)}`
+      );
+    });
+  }
+
+  /**
    * Fork a background verify-with-retry for a transient access failure on `turnId`.
    *
    * Writes NOTHING to the session doc: the turn stays `pending` (and therefore
@@ -1767,6 +1799,12 @@ export class SessionDispatchWatcher {
     }).pipe(
       Effect.flatMap(() =>
         Effect.sync(() => {
+          this.recordMemberAccessVerdict(
+            sessionId,
+            verifyArgs.requesterUserId,
+            verifyArgs.localProjectId,
+            Promise.resolve({ outcome: 'allowed' })
+          );
           // Clear the handle BEFORE re-enqueuing so the re-check's dedup guard
           // passes and the inline path actually dispatches (no stall).
           this.clearAccessFiberIf(sessionId, turnId);
@@ -1776,6 +1814,12 @@ export class SessionDispatchWatcher {
       Effect.catchTag('AccessDenied', (denied) =>
         Effect.promise(async () => {
           this.clearAccessFiberIf(sessionId, turnId);
+          this.recordMemberAccessVerdict(
+            sessionId,
+            verifyArgs.requesterUserId,
+            verifyArgs.localProjectId,
+            Promise.resolve({ outcome: 'denied', reason: denied.reason })
+          );
           await this.markDispatchAccessDenied(sessionId, sessionDoc, turnId, denied.reason).catch(
             (error: unknown) => {
               this.deps.logger.error(

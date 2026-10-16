@@ -26,20 +26,19 @@ GitHub token 环境或 shell 启动文件。
 
 ## 运行实例所有权
 
-同一逻辑 Session 可以先后拥有多个预热和正式运行实例。每个托管实例持有独立的凭据
-lease 和固定上下文文件，即便 Session ID 与 owner 相同也不复用。接管成功保留原 lease；
-取消预热、启动失败、实例结束只释放精确获取的那一代。旧实例释放不能撤销新实例。
+同一逻辑 Session 可以先后拥有多个运行实例，例如 owner 变更使旧实例退役之后。每个托管
+实例持有独立的凭据 lease 和固定上下文文件，即便 Session ID 与 owner 相同也不复用。
+启动失败、实例结束只释放精确获取的那一代。旧实例释放不能撤销新实例。
 本地实例没有托管 lease，不从 broker 的历史 Session 注册推断认证模式。
 托管授权缺失或已释放属于错误，不能因此降级使用机器凭据。
 
-预热控制（过期/取消）在 claim 时结束，接管后的运行资源则保留到实例结束。
 相同 Session 的替换必须等待清理成功，包括迟到的资源创建。清理失败保持可观察并
 阻止替换；等待超时或等待方被中断不等于资源已经释放。
 
 ## 凭据来源与可用性
 
-本地 HTTP broker 只提供个人与 App token。云请求截止时间为 2.5 秒，helper 请求为
-3 秒，包含响应正文。成功凭据可缓存至多 60 秒，按仓库、owner、机器、来源隔离，
+本地 HTTP broker 只提供个人与 App token。云请求截止时间为 15 秒，helper 请求等待
+20 秒（包含响应正文），保证 helper 总比 broker 自身的云请求等得更久。成功凭据可缓存至多 60 秒，按仓库、owner、机器、来源隔离，
 且不超过 token 有效期；失败不缓存。配置更新可清空缓存，不承诺离线期间立即撤销。
 
 broker 故障不能阻断具备资格的机器候选。启动失败会报告，但可信本地上下文仍可用；
@@ -79,6 +78,6 @@ repository_required。帮助命令无需凭据且隔离机器配置。
 ## 证据
 
 实现位于 CLI 的 github-credential-runtime.ts、github-git-transport.ts、gh-shim-script.ts、
-token broker/manager 与会话准备逻辑。测试覆盖优先级、服务故障、owner 上下文、
+token broker/manager 与会话创建逻辑。测试覆盖优先级、服务故障、owner 上下文、
 gh 写入不重放、checkout 凭据和 broker 失败时的真实 Git 递归克隆。
 尚未验证生产 GitHub 和 Windows 端到端链路。

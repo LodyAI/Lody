@@ -11,6 +11,7 @@ import {
   type ComponentType,
   type CSSProperties,
   type ReactNode,
+  Children,
   createContext,
   lazy,
   useState,
@@ -83,6 +84,7 @@ import type { MarkdownAgentFileLinkMenuItem } from '@/hooks/use-session-file-act
 import { ContextMenu } from '@/ui/armed-overlays';
 import { MarkdownFileImage, MarkdownFileResourcesContext } from './markdown-file-image';
 import { resolveMarkdownImagePath } from '@/lib/session-file-open-target';
+import { getImageMimeTypeForPath } from '@/lib/image-file-preview';
 import { rehypeHeadingAnchors } from './markdown-heading-anchors';
 
 export { createMarkdownMermaidConfig } from './markdown-mermaid';
@@ -1087,6 +1089,37 @@ const AgentFileLink = ({
   );
 };
 
+/**
+ * In a live file preview, a plain-text link to an image file shows the image
+ * itself (same loading rules as `![]()`) instead of the copy-path chip. Links
+ * with their own markup (e.g. a badge image) or a line anchor keep the chip.
+ */
+function MarkdownFileImageLink({
+  href,
+  label,
+  fallback,
+}: {
+  href: string;
+  label: ReactNode;
+  fallback: ReactNode;
+}) {
+  const resources = useContext(MarkdownFileResourcesContext);
+  const content = Children.toArray(label);
+  const target = parseMarkdownAgentFileHref(href);
+  if (
+    !resources ||
+    !target ||
+    target.startLine != null ||
+    !getImageMimeTypeForPath(target.filePath) ||
+    resolveMarkdownImagePath(resources.documentPath, href) === null ||
+    !content.every((child) => typeof child === 'string' || typeof child === 'number')
+  ) {
+    return fallback;
+  }
+  const text = content.join('').trim();
+  return <MarkdownFileImage src={href} alt={text && text !== href ? text : undefined} />;
+}
+
 function isWorkspaceResourceHref(href: string): boolean {
   try {
     return (
@@ -1261,15 +1294,21 @@ const createMarkdownComponents = ({
 
     if (isMarkdownAgentFileHref(href)) {
       return (
-        <AgentFileLink
+        <MarkdownFileImageLink
           href={href}
-          onFilePathClick={onAgentFileLinkClick}
-          copyAgentFileLabel={copyAgentFileLabel}
-          openAgentFileLabel={openAgentFileLabel}
-          getContextMenuItems={getAgentFileLinkContextMenuItems}
-        >
-          {children}
-        </AgentFileLink>
+          label={children}
+          fallback={
+            <AgentFileLink
+              href={href}
+              onFilePathClick={onAgentFileLinkClick}
+              copyAgentFileLabel={copyAgentFileLabel}
+              openAgentFileLabel={openAgentFileLabel}
+              getContextMenuItems={getAgentFileLinkContextMenuItems}
+            >
+              {children}
+            </AgentFileLink>
+          }
+        />
       );
     }
 
@@ -1460,6 +1499,9 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
   const readonly = useContext(SessionReadonlyContext);
   const getAgentFileLinkContextMenuItems = useContext(AgentFileLinkContextMenuItemsContext);
   const containerRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    void import('./markdown-math-copy');
+  }, []);
   /** Text nodes split for search marks in this block, with what to undo. */
   const searchSplitsRef = useRef<SearchTextSplit[]>([]);
   const search = useSelectionStableValue(useSessionSearch());

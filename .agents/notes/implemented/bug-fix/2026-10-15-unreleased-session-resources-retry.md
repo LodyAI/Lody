@@ -73,7 +73,7 @@ Two common termination failures were not survivors at all:
   release-failure decision forbids.
 - **Drop the fence after one failure.** Rejected. It would allow workspace reuse
   while the old tree may still run, against the
-  [preparation handoff](../../../../specs/session-worktree-lifecycle.md#preparation-handoff).
+  [preparation handoff](../../implemented/simplification/2026-10-16-remove-draft-session-preparation.md).
 - **Reap the orphans ourselves.** Rejected. Becoming a subreaper or calling
   `waitpid(-1)` would take children owned by Node's own handles.
 

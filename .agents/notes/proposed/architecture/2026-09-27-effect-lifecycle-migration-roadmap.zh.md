@@ -219,7 +219,7 @@ Flock 新鲜度同步用 `timeout` + `orElse` 回落本地副本。约束：**�
 
 ### Worktree 与文件锁（L4/L5 的依赖）
 
-- 位置：`worktree-manager.ts`、`speculative-worktree.ts`、`worktree-gc.ts`、
+- 位置：`worktree-manager.ts`、`legacy-speculative-worktrees.ts`、`worktree-gc.ts`、
   `packages/shared/src/node/file-lock.ts`。
 - 证据：#76、#6；开放 #296（可能已被 #620 修复，需核实）。
 - 文件锁内核已在 #1377 实现；其行为保证与单一 Legacy 门面以所属决定为准。
@@ -317,7 +317,7 @@ preview 代理、`packages/loro-streams-rpc`、PR poller、Electron updater：�
 | Worktree observations                     | FileLocks、WorktreeGit                                | 原生               | Legacy observation 入口仍存在   | 自持/借用锁租约                         | [观察决定](../../implemented/architecture/2026-10-10-effect-worktree-observations.zh.md)；不代表 mutation/setup/GC 完成                                                                                          |
 | 有限本地源准备                            | WorktreeGit、文件系统；借用 mutation 租约             | 原生               | Legacy worktree 入口仍存在      | 调用方 mutation 租约与临时资源          | [准备决定](../../implemented/architecture/2026-10-10-effect-local-worktree-preparation.zh.md)；manager mutation 协调待迁移                                                                                       |
 | 登录 shell 探测与共享缓存                 | 进程释放所有权、Clock                                 | 原生               | 原生入口；Legacy launcher       | 应用拥有缓存；探测 Scope                | [Shell 决定](../../implemented/architecture/2026-10-10-effect-login-shell-probe.zh.md)；launcher 迁移后删 Legacy                                                                                                 |
-| Runtime 凭据租约 / preparation control    | 平台 token port、文件系统、Clock                      | 原生叶子           | Legacy Session/preparation 胶水 | 精确凭据租约；TTL/control Scope         | [凭据决定](../../implemented/architecture/2026-10-10-runtime-owned-github-context.zh.md)；原始启动与完整 retirement 待完成                                                                                       |
+| Runtime 凭据租约                          | 平台 token port、文件系统、Clock                      | 原生叶子           | Legacy Session 胶水             | 精确凭据租约                            | [凭据决定](../../implemented/architecture/2026-10-10-runtime-owned-github-context.zh.md)；预热控制已[移除](../../implemented/simplification/2026-10-16-remove-draft-session-preparation.zh.md)；启动待完成       |
 | Worktree mutations                        | 锁、Git、observations、本地准备                       | 待迁移             | Promise 编排                    | mutation/替换拥有者待完成               | 用原生协调替换 manager Promise 链并保留失败                                                                                                                                                                      |
 | Setup scripts                             | 进程、worktree mutation、真实注入回调                 | 待迁移             | Promise 编排                    | 脚本/任务 Scope 待完成                  | 进程调用原生不代表回调编排原生                                                                                                                                                                                   |
 | Worktree GC                               | mutations、setup、metadata writer、活跃拥有者         | 待迁移             | Promise 编排                    | 共享清理拥有者待完成                    | 删除前协调活跃所有权，换定时器不够                                                                                                                                                                               |
@@ -379,7 +379,7 @@ flowchart TD
 文件锁门面的原生程序错误投影同样依赖 #1379，内核仍使用既有 pid 探测；文件锁由 [#1377](https://github.com/LodyAI/Lody/pull/1377) 审查。原生 Git 验证发现 Scope 释放失败曾被吞掉，独立修复 [#1379](https://github.com/LodyAI/Lody/pull/1379) 保留恢复租约。LocalProjects 在 #1379 之上的 [#1381](https://github.com/LodyAI/Lody/pull/1381) 审查，其内核不依赖 FileLocks；worktree setup/GC 需要同时集成两者。WorktreeGit 执行由 [#1389](https://github.com/LodyAI/Lody/pull/1389) 审查，内核只依赖进程基础和文件系统；为避免重复管理器改动，评审 base 包含 LocalProjects。
 原生 [worktree 观察单元](../../implemented/architecture/2026-10-10-effect-worktree-observations.zh.md)
 在包含刷新 main 的基础上组合 FileLocks 和 WorktreeGit，不代表变更、setup 或 GC 所有权完成。
-#1385 已合并，仅提供运行实例凭据租约和预热 TTL/控制；底层 ACP/worktree 启动及完整会话所有权仍未完成。
+#1385 已合并，仅提供运行实例凭据租约和预热 TTL/控制（该控制后来随草稿预热一并移除）；底层 ACP/worktree 启动及完整会话所有权仍未完成。
 有限[本地源准备单元](../../implemented/architecture/2026-10-10-effect-local-worktree-preparation.zh.md) 依赖文件系统/Git，借用既有变更租约。评审 base 包含观察单元，因为管理器边界共享；原生内核并不互相依赖。
 库侧前置核对：当前 lockfile 解析到 Flock WASM 0.4.3、streams-crdt 0.17.0 和 loro-repo 0.22.0。消费版本不证明 Effect 内核已完成；库侧迁移前仍须核实发布版本、上游仓库状态/规则与当前源码/检查点契约。此前 registry 观察不能作为当前发布保证。
 下文的七单元基础 stack 已于 2026-10-11 合入 main。Worktree 变更/setup/GC、runtime

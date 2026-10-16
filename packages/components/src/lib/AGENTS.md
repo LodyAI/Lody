@@ -54,9 +54,9 @@ Background: [components](../../../../.agents/docs/components-package.md),
   join events to converge with the CLI's asynchronous snapshot reconciliation.
   Machine RPC also serves exact content, save, LSP, and diff requests.
 - `openFile` uses File Preview v3 plain reads: no workspace watch, All Changes recompute,
-  or Flock publish. Local Electron uses IPC-only `file/resolve-local`, negotiated via
-  `localFileResources`; unresolved routes never fall back to Streams RPC. Electron
-  serves local file resources; remote targets retain restricted, bounded `file/preview`.
+  or Flock publish. Electron verifies disk machine identity and reads via local IPC,
+  independent of daemon/index readiness. Unknown targets never fall back to Streams;
+  confirmed remote targets retain restricted, bounded `file/preview`.
 - Small local text may enter the full-document editor/cache. `paged-text` is a separate
   readonly snapshot with bounded random reads; never seed the save cache, executable
   HTML, rendered Markdown/SVG, or full-document copy/download from it. Hidden paged

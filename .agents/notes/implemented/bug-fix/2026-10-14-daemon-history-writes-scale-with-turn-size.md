@@ -5,6 +5,10 @@ Translation: current
 
 [中文](2026-10-14-daemon-history-writes-scale-with-turn-size.zh.md)
 
+Follow-up: [nested subagent windows](2026-10-16-subagent-history-windows.md)
+extend the coverage beyond this original tool-only decision. The limitations
+below describe this change at the time it landed.
+
 ## Abstract
 
 In a tool-heavy session whose history grew to tens of megabytes, the CLI daemon spent

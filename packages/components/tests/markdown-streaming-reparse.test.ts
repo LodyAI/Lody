@@ -102,6 +102,7 @@ describe('MarkdownRenderer streaming rendering', () => {
       });
     }
     root = undefined;
+    document.getSelection()?.removeAllRanges();
     container?.remove();
     container = undefined;
     localStorage.removeItem('lody-inline-math-enabled');
@@ -557,6 +558,82 @@ End of synthetic document.`,
 
     expect(container?.querySelectorAll('.katex')).toHaveLength(2);
     expect(container?.querySelectorAll('.katex-display')).toHaveLength(0);
+  });
+
+  const copyRange = async (range: Range) => {
+    await vi.dynamicImportSettled();
+    const selection = document.getSelection()!;
+    selection.removeAllRanges();
+    selection.addRange(range);
+    const contents = new Map<string, string>();
+    const event = new Event('copy', { bubbles: true, cancelable: true });
+    Object.defineProperty(event, 'clipboardData', {
+      value: { setData: (format: string, value: string) => contents.set(format, value) },
+    });
+    container!.dispatchEvent(event);
+    return { event, contents };
+  };
+
+  it.each([false, true])(
+    'copies inline math with surrounding prose while streaming=%s',
+    async (isStreaming) => {
+      const store = createStore();
+      store.set(inlineMathEnabledAtom, true);
+      await renderMarkdownWithStore(String.raw`Before $\frac{a}{b}$ after.`, store, {
+        isStreaming,
+      });
+      if (isStreaming)
+        await act(async () => {
+          await import('@lobehub/streamdown');
+        });
+
+      const range = document.createRange();
+      range.selectNodeContents(container!.querySelector('p')!);
+      const { event, contents } = await copyRange(range);
+
+      expect(event.defaultPrevented).toBe(true);
+      expect(contents.get('text/plain')).toBe(String.raw`Before $\frac{a}{b}$ after.`);
+      const html = document.createElement('div');
+      html.innerHTML = contents.get('text/html')!;
+      expect(html.querySelector('.katex')).not.toBeNull();
+      expect(html.textContent).toContain('Before ');
+      expect(html.textContent).toContain(' after.');
+    }
+  );
+
+  it.each([false, true])('copies display math as LaTeX while streaming=%s', async (isStreaming) => {
+    await renderMarkdown('$$\nx^2 + y^2 = z^2\n$$', { isStreaming });
+    if (isStreaming)
+      await act(async () => {
+        await import('@lobehub/streamdown');
+      });
+
+    const range = document.createRange();
+    range.selectNode(container!.querySelector('.katex-display')!);
+    const { contents } = await copyRange(range);
+
+    expect(contents.get('text/plain')?.trim()).toBe('$$x^2 + y^2 = z^2$$');
+  });
+
+  it('copies the complete formula when only part of its rendered text is selected', async () => {
+    const store = createStore();
+    store.set(inlineMathEnabledAtom, true);
+    await renderMarkdownWithStore('Before $x+y$ after.', store);
+
+    const range = document.createRange();
+    range.selectNodeContents(container!.querySelector('.katex-html .mord')!);
+    expect(range.toString()).toBe('x');
+    expect((await copyRange(range)).contents.get('text/plain')).toBe('$x+y$');
+  });
+
+  it('leaves ordinary prose copying to the browser', async () => {
+    await renderMarkdown('Plain text and `literal code`.');
+    const range = document.createRange();
+    range.selectNodeContents(container!.querySelector('p')!);
+    const { event, contents } = await copyRange(range);
+
+    expect(event.defaultPrevented).toBe(false);
+    expect(contents.size).toBe(0);
   });
 
   it('renders parenthesis inline math through the streaming path when enabled', async () => {

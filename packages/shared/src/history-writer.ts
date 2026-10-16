@@ -1,5 +1,5 @@
 import { Immer } from 'immer';
-import { isContainer, LoroMap, type LoroDoc, type LoroList, type VersionVector } from 'loro-crdt';
+import { isContainer, LoroMap, type LoroDoc, type LoroList } from 'loro-crdt';
 import { z } from 'zod';
 import type { SessionHistory, SessionHistoryInput } from './schema';
 import { sessionHistorySchema } from './schema';
@@ -18,14 +18,9 @@ import {
   parseHistoryWrite,
   historyUnionCandidates,
 } from './history-write-schema';
-import {
-  applySchemaToInfer,
-  diffHistoryContainer,
-  diffHistoryListRange,
-  getMapFieldSchema,
-  populateContainer,
-} from './history-materializer';
+import { diffHistoryContainer, populateContainer } from './history-materializer';
 import { applyRespondPermission } from './session-data/planner';
+import { createAgentHistoryWindow, type AgentHistoryTargets } from './history-agent-window';
 
 const immer = new Immer({ autoFreeze: false, useStrictShallowCopy: true });
 const record = (value: unknown): value is Record<string, unknown> =>
@@ -384,17 +379,17 @@ export interface HistoryWriter {
   /** Mutate an existing turn without producing/planning the entire history. */
   updateEntry(id: string, updater: (entry: SessionHistoryInput) => SessionHistoryInput): boolean;
   /**
-   * Target-local agent output that materializes neither the history nor the whole
-   * turn. The updater receives one single-item row per requested tool call stored
-   * outside the window, then the assistant turn with every field except `fileDiff`
-   * and only its trailing items: the last item, extended back across adjacent
-   * text/thought so compaction sees the neighbours a whole-turn write would. Returns
-   * false without writing when the turn is missing, duplicated or not a stored Map
-   * with an item list, or a requested tool call is stored inline; use `update` then.
+   * Streaming output over sparse rows in stored order: requested tools/tasks/runs
+   * and each owning turn's contiguous text/thought tail. Runs themselves expose
+   * only requested child tools/plans and their output tail. Appends stay at the
+   * actual end of the owning list. All changes are preflighted together.
+   * Returns false without writing for missing/duplicated target turns or inline
+   * turn/item-list storage; structural legacy updates may then use `update`.
+   * A string array retains the original tool-only call contract.
    */
   updateTail(
     turnId: string,
-    toolCallIds: readonly string[],
+    targets: readonly string[] | AgentHistoryTargets,
     updater: (rows: SessionHistoryInput[]) => SessionHistoryInput[]
   ): boolean;
   /**
@@ -434,53 +429,11 @@ export function createHistoryWriter(doc: LoroDoc, readHistory?: () => readonly S
     }
     return undefined;
   };
-  const storedList = (value: unknown) =>
-    isContainer(value) && value.kind() === 'List' ? (value as LoroList) : undefined;
-  const storedJson = (value: unknown) => (isContainer(value) ? value.toJSON() : value);
-  const isTextish = (item: unknown) => {
-    const type = storedScalar(storedField(item, 'type'));
-    return type === 'text' || type === 'thought';
-  };
-
-  // Where each tool call is stored, so target-local writes neither materialize nor
-  // scan the history. A full-history write merges into the newest row holding the
-  // id, the first such item within it; the index keeps that same owner. It is
-  // complete only at `version`: any write it did not account for, local or
-  // imported, makes the next use rescan.
-  type ToolSlot = { row: number; item: number; inline?: true };
-  let toolIndex: { version: VersionVector; slots: Map<string, ToolSlot> } | undefined;
-  const indexTool = (slots: Map<string, ToolSlot>, id: unknown, slot: ToolSlot) => {
-    if (typeof id !== 'string') return;
-    const current = slots.get(id);
-    if (!current || current.row < slot.row) slots.set(id, slot);
-  };
-  const currentToolIndex = () => {
-    if (toolIndex && toolIndex.version.compare(doc.version()) === 0) return toolIndex.slots;
-    const slots = new Map<string, ToolSlot>();
-    for (let row = 0; row < list.length; row++) {
-      const stored = list.get(row);
-      const items = storedField(stored, 'items');
-      const inline = !isContainer(stored) || !storedList(items);
-      const values = storedList(items)?.toArray() ?? (Array.isArray(items) ? items : []);
-      values.forEach((value, item) => {
-        if (storedScalar(storedField(value, 'type')) !== 'tool_call') return;
-        indexTool(slots, storedScalar(storedField(value, 'toolCallId')), {
-          row,
-          item,
-          ...(inline ? { inline: true as const } : {}),
-        });
-      });
-    }
-    toolIndex = { version: doc.version(), slots };
-    return slots;
-  };
-  const toolAt = (slot: ToolSlot, id: string) => {
-    const items = storedList(storedField(list.get(slot.row), 'items'));
-    const value = items && slot.item < items.length ? items.get(slot.item) : undefined;
-    return storedScalar(storedField(value, 'toolCallId')) === id && items
-      ? { items, value: storedJson(value) }
-      : undefined;
-  };
+  const agentWindow = createAgentHistoryWindow(
+    doc,
+    (old, next) => prepareReplacement(old, next),
+    historyValuesEqual
+  );
 
   // Preparation is separate so a malformed update cannot leave half-written CRDT ops.
   const planWrite = (
@@ -706,129 +659,14 @@ export function createHistoryWriter(doc: LoroDoc, readHistory?: () => readonly S
       doc.commit();
       return true;
     },
-    updateTail(id, toolCallIds, updater) {
-      // A pending foreign change must count against the index version, not ride in our commit.
-      doc.commit();
-      let targetRow = -1;
-      for (let row = 0; row < list.length; row++) {
-        if (storedScalar(storedField(list.get(row), 'id')) !== id) continue;
-        if (targetRow >= 0) return false;
-        targetRow = row;
-      }
-      if (targetRow < 0) return false;
-      const map = list.get(targetRow);
-      if (!isContainer(map) || map.kind() !== 'Map') return false;
-      const target = map as LoroMap;
-      const items = storedList(target.get('items'));
-      if (!items || storedScalar(target.get('role')) !== 'assistant') return false;
-      let start = Math.max(0, items.length - 1);
-      while (start > 0 && isTextish(items.get(start)) && isTextish(items.get(start - 1))) start--;
-
-      let slots = currentToolIndex();
-      const resolve = () =>
-        toolCallIds.map((toolCallId) => {
-          const slot = slots.get(toolCallId);
-          if (!slot) return { toolCallId };
-          const stored = slot.inline ? undefined : toolAt(slot, toolCallId);
-          return { toolCallId, slot, stored };
-        });
-      let tools = resolve();
-      if (tools.some(({ slot, stored }) => slot && !slot.inline && !stored)) {
-        toolIndex = undefined;
-        slots = currentToolIndex();
-        tools = resolve();
-      }
-      if (tools.some(({ slot, stored }) => slot && !stored)) return false;
-      const segments = tools.flatMap(({ toolCallId, slot, stored }) =>
-        slot && stored && (slot.row !== targetRow || slot.item < start)
-          ? [{ toolCallId, slot, items: stored.items, value: stored.value }]
-          : []
+    updateTail(id, targets, updater) {
+      return agentWindow.update(
+        id,
+        Array.isArray(targets)
+          ? { toolCallIds: targets, taskIds: [], runs: [] }
+          : (targets as AgentHistoryTargets),
+        updater
       );
-
-      const fields: Record<string, unknown> = {};
-      for (const key of target.keys())
-        if (key !== 'items' && key !== 'fileDiff') fields[key] = storedJson(target.get(key));
-      const tail = Array.from({ length: items.length - start }, (_, i) =>
-        storedJson(items.get(start + i))
-      );
-      // A duplicate copy in the tail would win the planner's lookup over the indexed owner.
-      if (
-        segments.some(({ toolCallId }) =>
-          tail.some((item) => storedField(item, 'toolCallId') === toolCallId)
-        )
-      )
-        return false;
-      const previous = [
-        ...segments.map(
-          ({ toolCallId, value }) =>
-            // Never the target id: the planner selects its active turn by id.
-            ({ id: `\u0000tool:${toolCallId}`, role: 'assistant', items: [value] }) as unknown
-        ),
-        { ...fields, items: tail },
-      ] as SessionHistoryInput[];
-      const next = immer.produce(previous, (draft) => {
-        const result = updater(draft);
-        if (result && result !== (draft as unknown)) draft.splice(0, draft.length, ...result);
-        return undefined;
-      });
-      if (next.length !== previous.length)
-        throw new HistoryWriteError([{ path: ['history'], code: 'unsupported_reorder' }]);
-      // Window rows carry only what this write may change; preflight all of it first.
-      const prepared = next.map((row, i) => {
-        const old = previous[i]!;
-        if (row === old) return undefined;
-        if (row.id !== old.id)
-          throw new HistoryWriteError([{ path: ['id'], code: 'immutable_id' }]);
-        const { items: _oldItems, ...oldFields } = old;
-        const { items: _items, ...rowFields } = row;
-        if (
-          (i < segments.length || 'fileDiff' in rowFields) &&
-          !historyValuesEqual(oldFields, rowFields)
-        )
-          throw new HistoryWriteError([{ path: ['history', i], code: 'invalid_input' }]);
-        return historyValuesEqual(old, row) ? undefined : prepareReplacement(old, row);
-      });
-      if (prepared.every((value) => value === undefined)) return true;
-
-      const itemsSchema = getMapFieldSchema(sessionHistorySchema, 'items');
-      const infer = applySchemaToInfer(sessionHistorySchema, undefined);
-      const targetPrepared = prepared[segments.length];
-      if (targetPrepared) {
-        const { items: _items, ...oldFields } = previous[segments.length]!;
-        const { items: nextTail, ...nextFields } = targetPrepared;
-        // A partial map diff visits only these fields; the range diff only the tail.
-        diffHistoryContainer(target, sessionHistorySchema, oldFields, nextFields, undefined);
-        diffHistoryListRange(items, itemsSchema, start, tail, nextTail as unknown[], infer);
-      }
-      // Segments sit below the tail; write later positions first so earlier ones hold.
-      let reindex = false;
-      segments
-        .map((segment, i) => ({
-          ...segment,
-          old: previous[i]!.items as unknown[],
-          value: prepared[i]?.items as unknown[] | undefined,
-        }))
-        .sort((a, b) => b.slot.row - a.slot.row || b.slot.item - a.slot.item)
-        .forEach(({ slot, items: owner, old, value }) => {
-          if (!value) return;
-          if (value.length !== 1) reindex = true;
-          diffHistoryListRange(owner, itemsSchema, slot.item, old, value, infer);
-        });
-      doc.commit();
-
-      // Positions below the tail are unchanged unless a segment changed length.
-      if (reindex || !toolIndex) {
-        toolIndex = undefined;
-        return true;
-      }
-      for (const [toolCallId, slot] of slots)
-        if (slot.row === targetRow && slot.item >= start) slots.delete(toolCallId);
-      ((targetPrepared?.items as unknown[] | undefined) ?? tail).forEach((value, i) => {
-        if (storedScalar(storedField(value, 'type')) === 'tool_call')
-          indexTool(slots, storedField(value, 'toolCallId'), { row: targetRow, item: start + i });
-      });
-      toolIndex.version = doc.version();
-      return true;
     },
     updateCopies(id, updater) {
       const targets: NonNullable<ReturnType<typeof rowWithId>>[] = [];
@@ -889,19 +727,17 @@ export function createHistoryWriter(doc: LoroDoc, readHistory?: () => readonly S
       const previous = isContainer(stored) ? stored.toJSON() : stored;
       if (historyValuesEqual(previous, value)) return true;
       const parsed = cleanNew(field, value, previous);
-      doc.commit();
-      const indexed = toolIndex?.version.compare(doc.version()) === 0;
-      // A partial map diff only visits this key; it neither reads nor authors items.
-      diffHistoryContainer(
-        map,
-        sessionHistorySchema,
-        { [key]: previous },
-        { [key]: parsed },
-        undefined
-      );
-      doc.commit();
-      // A field write cannot add a tool call, so it keeps the index complete.
-      if (indexed && toolIndex) toolIndex.version = doc.version();
+      // A partial field diff cannot add or move an indexed item.
+      agentWindow.preserveIndex(() => {
+        diffHistoryContainer(
+          map,
+          sessionHistorySchema,
+          { [key]: previous },
+          { [key]: parsed },
+          undefined
+        );
+        doc.commit();
+      });
       return true;
     },
     respondPermission(requestId, outcome, options) {

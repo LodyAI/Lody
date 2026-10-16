@@ -127,6 +127,9 @@ provides LocalProjects. See the [decision](../../../../.agents/notes/implemented
 ## Subdirectories
 
 - `acp/` — ACP notification → session history pipeline ([AGENTS.md](acp/AGENTS.md)).
+- `loro/session-agent-writes.ts` — agent output policy over the shared HistoryWriter;
+  mixed tool/subagent batches resolve original ownership and use nested item windows.
+  Storage responsibilities: [history writes](../../../../.agents/docs/session-history-writes.md).
 - `code-collab/` — unified Code Collab v2 filesystem RPC service
   ([AGENTS.md](code-collab/AGENTS.md)).
 - `file-preview/` — the `file/preview` (File Preview v3) read path

@@ -22,6 +22,7 @@ import {
   resolveFilePreviewPath,
   type FilePreviewPathPolicyOptions,
   type ResolvedPreviewPath,
+  type FilePreviewIoFailure,
 } from './file-preview-path-policy';
 
 const gzipAsync = promisify(gzip);
@@ -58,6 +59,7 @@ export type FilePreviewLocalWorkspaceResolver = (
 >;
 
 export type FilePreviewServiceOptions = {
+  readonly onDiagnostic?: (event: Readonly<Record<string, unknown>>) => void;
   readonly resolveWorkspace: FilePreviewWorkspaceResolver;
   readonly resolveLocalWorkspace: FilePreviewLocalWorkspaceResolver;
   readonly limits?: Partial<typeof FILE_PREVIEW_V3_LIMITS>;
@@ -83,28 +85,83 @@ export class FilePreviewService {
     this.limits = { ...FILE_PREVIEW_V3_LIMITS, ...deps.limits };
   }
 
+  private resolvePath(
+    request: FilePreviewV3Request,
+    workspace: { readonly ownerSessionId: SessionId; readonly workspaceRoot: string | null },
+    local: boolean
+  ) {
+    const failures: FilePreviewIoFailure[] = [];
+    const result = resolveFilePreviewPath({
+      workspaceRoot: workspace.workspaceRoot,
+      requestedPath: request.path,
+      extraRoots: this.deps.extraRoots,
+      options: {
+        ...this.deps.pathPolicy,
+        allowArbitraryPaths: local,
+        onIoError: (failure) => {
+          if (failures.length < 8) failures.push(failure);
+        },
+      },
+    });
+    this.deps.onDiagnostic?.({
+      stage: 'resolve-path',
+      transport: local ? 'local' : 'remote',
+      sessionId: request.sessionId,
+      ownerSessionId: workspace.ownerSessionId,
+      requestedPath: request.path,
+      workspaceRoot: workspace.workspaceRoot,
+      ...(result.ok
+        ? {
+            status: 'ok',
+            absolutePath: result.resolved.absolutePath,
+            reportedPath: result.resolved.reportedPath,
+            external: result.resolved.external,
+          }
+        : { status: 'error', code: result.rejection.code }),
+      ...(failures.length ? { failures } : {}),
+    });
+    return result;
+  }
+
   /** Local IPC resolves identity; Electron owns content IO and resource lifetime. */
   async resolveLocalFile(
     request: FilePreviewV3Request,
     expectedOwnerSessionId?: string
   ): Promise<LocalFileResolution | import('@lody/shared').FilePreviewV3Error> {
     const workspace = await this.deps.resolveLocalWorkspace(request.sessionId as SessionId);
-    if (!workspace.ok) return filePreviewV3Error(workspace.code, { message: workspace.message });
+    if (!workspace.ok) {
+      this.deps.onDiagnostic?.({
+        stage: 'resolve-workspace',
+        transport: 'local',
+        sessionId: request.sessionId,
+        requestedPath: request.path,
+        status: 'error',
+        code: workspace.code,
+      });
+      return filePreviewV3Error(workspace.code, { message: workspace.message });
+    }
     if (expectedOwnerSessionId && workspace.ownerSessionId !== expectedOwnerSessionId) {
+      this.deps.onDiagnostic?.({
+        stage: 'resolve-owner',
+        transport: 'local',
+        sessionId: request.sessionId,
+        requestedPath: request.path,
+        expectedOwnerSessionId,
+        ownerSessionId: workspace.ownerSessionId,
+        status: 'error',
+        code: 'permission_denied',
+      });
       return filePreviewV3Error('permission_denied', {
         message: 'Local file preview owner session mismatch.',
         path: request.path,
       });
     }
-    const resolution = resolveFilePreviewPath({
-      workspaceRoot: workspace.workspaceRoot,
-      requestedPath: request.path,
-      options: { ...this.deps.pathPolicy, allowArbitraryPaths: true },
-    });
+    const resolution = this.resolvePath(request, workspace, true);
     if (!resolution.ok)
       return filePreviewV3Error(resolution.rejection.code, {
         message: resolution.rejection.message,
         path: request.path,
+        retryable: resolution.rejection.code === 'transient_io',
       });
     return {
       status: 'local-file',
@@ -118,6 +175,14 @@ export class FilePreviewService {
     const limits = this.limits;
     const workspace = await this.deps.resolveWorkspace(request.sessionId as SessionId);
     if (!workspace.ok) {
+      this.deps.onDiagnostic?.({
+        stage: 'resolve-workspace',
+        transport: 'remote',
+        sessionId: request.sessionId,
+        requestedPath: request.path,
+        status: 'error',
+        code: workspace.code,
+      });
       return filePreviewV3Error(workspace.code, {
         message: workspace.message,
         path: request.path,
@@ -125,14 +190,7 @@ export class FilePreviewService {
       });
     }
 
-    const resolution = resolveFilePreviewPath({
-      workspaceRoot: workspace.workspaceRoot,
-      requestedPath: request.path,
-      ...(this.deps.extraRoots === undefined ? {} : { extraRoots: this.deps.extraRoots }),
-      options: {
-        ...this.deps.pathPolicy,
-      },
-    });
+    const resolution = this.resolvePath(request, workspace, false);
     if (!resolution.ok) {
       return filePreviewV3Error(resolution.rejection.code, {
         message: resolution.rejection.message,
@@ -169,6 +227,16 @@ export class FilePreviewService {
       bytes = await readFileWithinLimit(resolved.absolutePath, limitBytes);
     } catch (error) {
       const code = (error as NodeJS.ErrnoException).code;
+      this.deps.onDiagnostic?.({
+        stage: 'read',
+        transport: 'remote',
+        sessionId: request.sessionId,
+        ownerSessionId: workspace.ownerSessionId,
+        requestedPath: request.path,
+        absolutePath: resolved.absolutePath,
+        status: 'error',
+        code: code ?? 'UNKNOWN',
+      });
       if (code === 'ENOENT' || code === 'ENOTDIR') {
         return filePreviewV3Error('file_not_found', {
           message: 'File was not found.',

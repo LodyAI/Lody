@@ -19,10 +19,6 @@ import type {
   SessionCancelResponse,
   SessionChatResponse,
   SessionDispatchTurnResponse,
-  SessionPreparationCancelSpec,
-  SessionPreparationSpec,
-  SessionPrepareCancelResponse,
-  SessionPrepareResponse,
   SessionSteerResponse,
   SessionGoalAction,
   SessionGoalResponse,
@@ -378,16 +374,6 @@ export type WorkspaceRuntime = {
     },
     options?: { timeoutMs?: number }
   ) => Promise<SessionDispatchTurnResponse | null>;
-  requestSessionPrepare: (
-    machineId: MachineId,
-    spec: SessionPreparationSpec,
-    options?: { timeoutMs?: number }
-  ) => Promise<SessionPrepareResponse | null>;
-  requestSessionPrepareCancel: (
-    machineId: MachineId,
-    args: SessionPreparationCancelSpec,
-    options?: { timeoutMs?: number }
-  ) => Promise<SessionPrepareCancelResponse | null>;
   requestSessionPreviewCreate: (
     machineId: MachineId,
     sessionId: SessionId,
@@ -420,7 +406,11 @@ export type WorkspaceRuntime = {
   requestFilePreview: (
     machineId: MachineId,
     request: Omit<FilePreviewV3Request, 'v'>,
-    options?: { timeoutMs?: number; ownerSessionId?: SessionId | string }
+    options?: {
+      timeoutMs?: number;
+      ownerSessionId?: SessionId | string;
+      workspaceRoot?: string | null;
+    }
   ) => Promise<FilePreviewV3Response | LocalFilePreviewResource>;
   /**
    * Electron-only initial Code Collab tree/current-All-Changes snapshot. This

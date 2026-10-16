@@ -157,27 +157,29 @@ cover publication, admission gaps, deadlines, cancellation, close and subsequent
 writer usability. Encrypted RPC tests cover the actual client method and 128
 parked watches while ordinary reads, sends and ping complete.
 
-Final focused checks pass 215 CLI/Inbox cases, including 72 native owner
-contracts, 84 renderer/readiness cases and 139 RPC cases with three existing
-integration skips. The full shared suite passes 1508 cases. Type checks,
+Final focused checks pass 216 CLI/Inbox cases, including 72 native owner
+contracts, 83 renderer/readiness cases and 138 RPC cases with three existing
+integration skips. The full shared suite passes 1506 cases. Type checks,
 type-aware lint, Effect lint, formatting and the separately completed post-test
 boundary/i18n guards pass.
 
-The final root `pnpm check` passes 4284 CLI cases, including the entire native
-owner suite, but fails two unchanged Inbox operator-resource verification cases
-with `Known resources are still running or cannot be verified`. Their 59-case
-owning suite passes in the focused run; that does not establish the cause of the
-full-run failures. The recursive check stops at CLI, so it does not complete all
-downstream package suites. Documentation retains six baseline broken Kimi/Pi
+The post-integration root `pnpm check` is still running. Its type checks, lint
+and Effect lint passed. The pre-integration root run passed 4284 CLI cases but
+failed two unchanged Inbox operator-resource verification cases with
+`Known resources are still running or cannot be verified`. Their 59-case owning
+suite passes in the focused run; that does not establish the cause of the
+full-run failures. Full-package verification of the merged head remains pending.
+Documentation retains six baseline broken Kimi/Pi
 links in the subagent-events language pair because those isolated submodules are
 not initialized here. Changed documents add no link errors, and no SHA-protected
-topics are registered. The full check remains non-green.
+topics are registered. The pending full-run result is not claimed as passing.
 
-The product macOS arm64 installer compiles and packages successfully with native
-smoke and signature checks. Its CLI is byte-identical to the deployed Docker CLI;
-the strict-review correction is in the renderer. Immutable build provenance is
-recorded in the installer handoff. Packaging does not install the new renderer
-into a running application.
+Before the PR's main-branch integration, the product macOS arm64 snapshot compiled
+and packaged successfully with native smoke and signature checks. That snapshot's
+CLI was byte-identical to the deployed Docker CLI; the strict-review correction
+was in the renderer. Immutable build provenance is recorded in the installer
+handoff. The merged PR head has not been repackaged, and packaging does not
+install a new renderer into a running application.
 
 These are synthetic local regressions. No linked product conversation, private
 Web/mobile source, permissions service or live network was accessed. Cached

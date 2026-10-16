@@ -27,7 +27,7 @@ import type { ProjectRef } from './project';
 import { MAX_MESSAGE_TEXT_SPAN_MARK_LENGTH, MESSAGE_TEXT_SPAN_KINDS } from './message-text-spans';
 import { RpcSecretPublicKeySchema } from './rpc-secret';
 import { LodyOperationIdSchema, LodyOperationCompletionSchema } from './session-orchestration';
-import { isSensitiveAcpConfigOptionId } from './session-preparation';
+import { isSensitiveAcpConfigOptionId } from './acp-config-option-sensitivity';
 import { normalizeMcpServerIdSelection } from './workspace-mcp';
 import {
   ACP_AUTH_FORM_FIELD_MAX_COUNT,
@@ -959,8 +959,10 @@ export const SessionPreparationRunConfigSchema = z
   .strict();
 
 /**
- * Ephemeral ACP preparation for a draft session. Draft text, launch secrets,
- * and secret-shaped ACP option values stay out of the RPC request stream.
+ * Draft session preparation request from desktops that predate its removal.
+ * Daemons decline it without doing any work; the schemas remain only so those
+ * requests still parse. Draft text, launch secrets, and secret-shaped ACP
+ * option values were never part of the request.
  */
 export const SessionPreparationSpecSchema = z
   .object({

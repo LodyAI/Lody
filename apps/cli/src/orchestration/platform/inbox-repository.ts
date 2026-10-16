@@ -14,6 +14,7 @@ export const inboxRepositoryLayer = (sql: InboxSqlite, ownedConnection = false) 
     canSubmit: (s, id, o) => io(() => sql.canSubmit(s, id, o)),
     accept: (i) => io(() => sql.accept(i)),
     begin: (s, id, owner) => io(() => sql.begin(s, id, owner)),
+    withdraw: (i, id) => io(() => sql.withdraw(i, id)),
     pause: (s, id, ids, cancelId) => io(() => sql.pause(s, id, ids, cancelId)),
     release: (e) => io(() => sql.release(e)),
     prepare: (i, o, id) => io(() => sql.prepare(i, o, id)),

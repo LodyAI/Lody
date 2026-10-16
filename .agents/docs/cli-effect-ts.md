@@ -440,12 +440,10 @@ these and reaches `child_process`, `cross-spawn`, `node-pty`, `process.kill` or
 a child's `kill` directly.
 
 Session credential acquisition also has a temporary `acquireSessionCredentialsLegacy`
-facade (`session/session-credentials.ts`): the Effect broker lease's scope follows
-preparation into the live Session and closes on failure/termination. The separate
-`makePreparationControlLegacy` facade owns only the preparation TTL and its awaited
-close receipt. Claim stops that control without closing runtime resources. These
-are bounded resource migrations; Session/ACP/worktree Promise orchestration has
-not become Effect-native merely by using these facades.
+facade (`session/session-credentials.ts`): the Effect broker lease's scope belongs
+to the live Session and closes on failure/termination. This is a bounded resource
+migration; Session/ACP/worktree Promise orchestration has not become Effect-native
+merely by using this facade.
 
 Execution facades carry a `Legacy` suffix and `@deprecated`; keep that suffix
 visible in imports and calls. New Effect workflows compose core APIs and leave

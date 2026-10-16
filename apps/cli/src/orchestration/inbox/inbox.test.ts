@@ -176,6 +176,27 @@ describe('durable Operation inbox', () => {
       expect(other.inbox.pending('workspace')).toEqual([]);
     }
   );
+  it('withdraws only an unsubmitted, resource-free execution and keeps its input admissible', () => {
+    const f = fixture();
+    f.add('result');
+    f.start();
+    const batch = f.sql.prepare(f.input, 'owner')!;
+    expect(f.sql.withdraw(f.input, 'execution-1')).toBe(true);
+    expect(f.sql.inputEnded('workspace', 'A', 'user-1')).toBe(false);
+    // The same execution id begins again and keeps the prepared claim.
+    expect(f.sql.begin(f.input, 'execution-1')).toBe(true);
+    expect(f.sql.prepare(f.input, 'owner')?.batchId).toBe(batch.batchId);
+    // Acquired resources or a fenced submission make withdrawal impossible.
+    f.sql.registerResources(f.input, 'execution-1', undefined);
+    expect(f.sql.withdraw(f.input, 'execution-1')).toBe(false);
+    expect(f.sql.fence(batch, 'execution-1')).toBe(true);
+    expect(f.sql.withdraw(f.input, 'execution-1')).toBe(false);
+    f.sql.settle(batch, 'settled');
+    f.release('normal');
+    expect(f.sql.inputEnded('workspace', 'A', 'user-1')).toBe(true);
+    expect(f.sql.withdraw(f.input, 'execution-1')).toBe(false);
+    expect(f.sql.begin(f.input, 'execution-1')).toBe(false);
+  });
   it('keeps eight arrivals passive until one normal release and one fixed batch', () => {
     const f = fixture();
     f.start();

@@ -84,6 +84,11 @@ describe('current Inbox scheduling contract', () => {
       human: true,
     });
   });
+  it('withdrawing an unverified human execution reschedules the same results once', () => {
+    expect(
+      trace('result', 'human', 'schedule', 'withdraw', 'schedule', 'submit', 'withdraw', 'normal')
+    ).toMatchObject({ active: 'none', receipts: [[1]], consumed: [1], human: false });
+  });
   it('failure retains results without automatic intent', () => {
     expect(trace('human', 'schedule', 'submit', 'result', 'failed', 'schedule')).toMatchObject({
       active: 'none',

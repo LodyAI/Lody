@@ -46,10 +46,20 @@ export class LockReentrant extends Data.TaggedError('LockReentrant')<{ lockName:
     return `withFileLock("${this.lockName}") is not reentrant within the same process`;
   }
 }
+/** One-line cause for messages; the structured cause stays on the error. */
+const describeCause = (cause: unknown): string => {
+  if (Cause.isCause(cause)) return describeCause(Cause.squash(cause));
+  if (cause instanceof Error) return cause.message || cause.name;
+  return String(cause);
+};
 export class LockIoError extends Data.TaggedError('LockIoError')<{
   path: string;
   cause: unknown;
-}> {}
+}> {
+  override get message() {
+    return `File lock I/O failed at "${this.path}": ${describeCause(this.cause)}`;
+  }
+}
 export interface FileLockCleanupLease {
   readonly path: string;
   /** Waits at most five seconds; a pending deletion is joined, never replaced. */
@@ -60,13 +70,25 @@ export class LockReleaseFailed extends Data.TaggedError('LockReleaseFailed')<{
   path: string;
   cause: unknown;
   cleanup?: FileLockCleanupLease;
-}> {}
+}> {
+  override get message() {
+    return `Failed to release file lock "${this.path}": ${describeCause(this.cause)}`;
+  }
+}
 /** Complete failure projection for Legacy callers and failed Layer disposal. */
 export class FileLockCleanupFailed extends Data.TaggedError('FileLockCleanupFailed')<{
   cause: unknown;
   fullCause: Cause.Cause<unknown>;
   releases: ReadonlyArray<LockReleaseFailed>;
-}> {}
+}> {
+  override get message() {
+    const primary = describeCause(this.cause);
+    const releases = this.releases
+      .filter((release) => release !== this.cause)
+      .map((release) => release.message);
+    return releases.length === 0 ? primary : `${primary}; ${releases.join('; ')}`;
+  }
+}
 export type FileLockError = LockTimeout | LockReentrant | LockIoError | LockReleaseFailed;
 
 /** Stable pid and per-operation directory resolver; tests may inject a fixed directory. */

@@ -161,6 +161,7 @@ catalogs:
       version: 3.6.0
 
 overrides:
+  '@loro-dev/sqlite-riverrun>better-sqlite3': 13.0.3
   '@peculiar/x509>@peculiar/asn1-schema': 2.10.0
   acp-extension-core: workspace:*
   electron-builder-squirrel-windows: ^26.15.3
@@ -172,6 +173,9 @@ overrides:
 packageExtensionsChecksum: sha256-qx78IuVw57JU2mPjJTu+fdHElVbU1c7U2OLk+VEmKU4=
 
 patchedDependencies:
+  '@loro-dev/sqlite-riverrun@0.3.0':
+    hash: 9e80924ae904a7643f397cefaef1e404070b0dae3bac55cd525ae97e6a975536
+    path: patches/@loro-dev__sqlite-riverrun@0.3.0.patch
   '@better-auth/api-key@1.6.33':
     hash: f1baa101f9ee2553089669ac0eb647dad29f30179ccb48dd43b270c9a3d74a7d
     path: patches/@better-auth__api-key@1.6.33.patch
@@ -608,6 +612,15 @@ importers:
         specifier: 4.3.6
         version: 4.3.6
     devDependencies:
+      '@lody/e2ee-core':
+        specifier: workspace:*
+        version: link:../../packages/e2ee-core
+      '@noble/ciphers':
+        specifier: 2.1.1
+        version: 2.1.1
+      tsx:
+        specifier: 4.23.7
+        version: 4.23.7
       '@electron-toolkit/eslint-config-prettier':
         specifier: ^3.0.0
         version: 3.0.0(eslint@9.39.2(jiti@2.7.0))(prettier@3.8.1)
@@ -920,6 +933,9 @@ importers:
 
   packages/cloud-api:
     dependencies:
+      '@lody/e2ee-core':
+        specifier: workspace:*
+        version: link:../e2ee-core
       '@lody/shared':
         specifier: workspace:*
         version: link:../shared
@@ -1584,6 +1600,12 @@ importers:
         specifier: 'catalog:'
         version: 4.0.2
     devDependencies:
+      '@loro-dev/streams-crdt':
+        specifier: 0.17.0
+        version: 0.17.0(@loro-dev/flock-wasm@0.4.4)(effect@4.0.2)(loro-crdt@1.16.3)
+      '@loro-dev/streams-client':
+        specifier: 'catalog:'
+        version: 0.9.0
       '@types/better-sqlite3':
         specifier: 'catalog:'
         version: 7.6.13
@@ -1918,6 +1940,55 @@ importers:
       yaml:
         specifier: ^2.8.2
         version: 2.8.2
+
+  packages/e2ee-lab:
+    dependencies:
+      '@loro-dev/flock-wasm':
+        specifier: 'catalog:'
+        version: 0.4.4
+      '@loro-dev/streams-crdt':
+        specifier: 0.17.0
+        version: 0.17.0(@loro-dev/flock-wasm@0.4.4)(effect@4.0.2)(loro-crdt@1.16.3)
+      loro-crdt:
+        specifier: 'catalog:'
+        version: 1.16.3
+      '@lody/e2ee-core':
+        specifier: workspace:*
+        version: link:../e2ee-core
+      '@loro-dev/sqlite-riverrun':
+        specifier: 0.3.0
+        version: 0.3.0(patch_hash=9e80924ae904a7643f397cefaef1e404070b0dae3bac55cd525ae97e6a975536)
+      '@loro-dev/streams-client':
+        specifier: 'catalog:'
+        version: 0.9.0
+      better-sqlite3:
+        specifier: 'catalog:'
+        version: 13.0.3
+      effect:
+        specifier: 'catalog:'
+        version: 4.0.2
+    devDependencies:
+      '@lody/cloud-api':
+        specifier: workspace:*
+        version: link:../cloud-api
+      '@types/better-sqlite3':
+        specifier: 'catalog:'
+        version: 7.6.13
+      '@types/node':
+        specifier: 'catalog:'
+        version: 24.10.12
+      oxfmt:
+        specifier: ^0.65.0
+        version: 0.65.0
+      tsx:
+        specifier: 4.23.7
+        version: 4.23.7
+      typescript:
+        specifier: 'catalog:'
+        version: 5.9.3
+      vitest:
+        specifier: 3.2.4
+        version: 3.2.4(@types/debug@4.1.12)(@types/node@24.10.12)(jiti@2.7.0)(jsdom@26.1.0)(lightningcss@1.33.0)(terser@5.46.0)(tsx@4.23.7)(yaml@2.8.2)
 
 packages:
 
@@ -14589,6 +14660,9 @@ packages:
   zwitch@2.0.4:
     resolution: {integrity: sha512-bXE4cR/kVZhKZX/RjPEflHaKVhUVl85noU3v6b8apfQEc1x4A+zBxjZ4lN8LqGd6WZ3dl98pY4o717VFmoPp+A==}
 
+  '@loro-dev/sqlite-riverrun@0.3.0':
+    resolution: {integrity: sha512-UGolSlUDMfaRSGzhvwFmqC5HnM5Vs9mGEA8d6xyAB/pO9La+HPDhUCYdQ/wO2XJZVxiNVglIdT5W5iHO+FTr5Q==}
+    engines: {node: '>=22'}
 snapshots:
 
   '@adobe/css-tools@4.4.4': {}
@@ -29395,3 +29469,8 @@ snapshots:
       use-sync-external-store: 1.6.0(react@19.2.0)
 
   zwitch@2.0.4: {}
+
+  '@loro-dev/sqlite-riverrun@0.3.0(patch_hash=9e80924ae904a7643f397cefaef1e404070b0dae3bac55cd525ae97e6a975536)':
+    dependencies:
+      better-sqlite3: 13.0.3
+      loro-crdt: 1.16.3

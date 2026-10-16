@@ -2,9 +2,7 @@
 
 `CLAUDE.md` is a symlink to this file. Edit `AGENTS.md` only.
 
-CLI/MCP commands and daemon dispatch.
-[apps/cli/AGENTS.md](../../AGENTS.md) applies; session-side rules are in
-[../session/AGENTS.md](../session/AGENTS.md).
+Parent rules apply; see [Session rules](../session/AGENTS.md).
 
 ## Process and daemon lifecycle
 
@@ -38,6 +36,8 @@ CLI/MCP commands and daemon dispatch.
   connecting/disconnected transitions and clear only on connected. Keep them in the top-level
   `connectionAges` v1 extension: older consumers reject unknown keys inside the strict
   backend/workspace objects. Status reports a red connection error at 60 seconds.
+
+`runSessionCommand`: JSON/JSONL diagnostics go to stderr through setup, cleanup and exit.
 
 ## Read commands and workspace sync
 

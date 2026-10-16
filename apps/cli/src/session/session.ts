@@ -205,26 +205,6 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
     return this.getWorkdir();
   }
 
-  setWorkdir(workdir: string): void {
-    let stat: fs.Stats;
-    try {
-      stat = fs.statSync(workdir);
-    } catch (error) {
-      const code =
-        error && typeof error === 'object' && 'code' in error
-          ? (error as { code?: unknown }).code
-          : null;
-      if (code === 'ENOENT') {
-        throw new Error(`Session workdir does not exist: ${workdir}`, { cause: error });
-      }
-      throw error;
-    }
-    if (!stat.isDirectory()) {
-      throw new Error(`Session workdir is not a directory: ${workdir}`);
-    }
-    this.fixedWorkdir = workdir;
-  }
-
   getParentSessionId(): SessionId | undefined {
     return this.config.parentSessionId;
   }
@@ -769,7 +749,6 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
           startupAbort: externalAbort
             ? Promise.race([startupMonitor.abortPromise, externalAbort.promise])
             : startupMonitor.abortPromise,
-          resolveSessionStart: callbacks.resolveSessionStart,
         });
         client = started.client;
         acpSessionId = started.acpSessionId;

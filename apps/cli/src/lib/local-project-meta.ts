@@ -266,31 +266,10 @@ export type ResolveLocalProjectRootPathRetryOptions = {
   sleep?: (ms: number) => Promise<void>;
   /** Called after each miss, before the sync wait (attempt is 1-based). */
   onRetry?: (attempt: number, maxAttempts: number) => void;
-  /** Cancels retry waits without cancelling the coordinator's background sync. */
-  signal?: AbortSignal;
 };
 
 const defaultSleep = (ms: number): Promise<void> =>
   new Promise((resolve) => setTimeout(resolve, ms));
-
-function withAbortSignal<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T> {
-  if (!signal) return promise;
-  signal.throwIfAborted();
-  return new Promise<T>((resolve, reject) => {
-    const onAbort = () => reject(signal.reason);
-    signal.addEventListener('abort', onAbort, { once: true });
-    promise.then(
-      (value) => {
-        signal.removeEventListener('abort', onAbort);
-        resolve(value);
-      },
-      (error) => {
-        signal.removeEventListener('abort', onAbort);
-        reject(error);
-      }
-    );
-  });
-}
 
 export async function resolveWorkspaceLocalProjectWithSyncOnMiss(
   repo: LoroRepo,
@@ -345,7 +324,6 @@ export async function resolveWorkspaceLocalProjectRootPathWithRetry(
   const sleep = options.sleep ?? defaultSleep;
 
   for (let attempt = 1; ; attempt += 1) {
-    options.signal?.throwIfAborted();
     const rootPath = await resolveWorkspaceLocalProjectRootPath(
       repo,
       workspaceId,
@@ -362,19 +340,15 @@ export async function resolveWorkspaceLocalProjectRootPathWithRetry(
     if (options.requestSync) {
       // try/catch (not .catch) so a synchronously-throwing stub is also tolerated.
       try {
-        await withAbortSignal(
-          withTimeout(
-            options.requestSync(),
-            syncTimeoutMs,
-            `Timeout waiting for machine Flock sync (localProject=${localProjectId})`
-          ),
-          options.signal
+        await withTimeout(
+          options.requestSync(),
+          syncTimeoutMs,
+          `Timeout waiting for machine Flock sync (localProject=${localProjectId})`
         );
       } catch {
-        options.signal?.throwIfAborted();
         // Best-effort pull — the next read is the verdict.
       }
     }
-    await withAbortSignal(sleep(retryDelayMs), options.signal);
+    await sleep(retryDelayMs);
   }
 }

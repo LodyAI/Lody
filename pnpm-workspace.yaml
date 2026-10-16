@@ -236,6 +236,8 @@ onlyBuiltDependencies:
   - workerd
 
 overrides:
+  # The local Lab server shares the approved Node-API 10 SQLite runtime.
+  '@loro-dev/sqlite-riverrun>better-sqlite3': 13.0.3
   # ASN.1 decorators and consumers must share one schema registry for WebRTC DTLS certificates.
   '@peculiar/x509>@peculiar/asn1-schema': 2.10.0
   acp-extension-core: workspace:*
@@ -255,6 +257,7 @@ packageExtensions:
 packageManagerStrictVersion: true
 
 patchedDependencies:
+  '@loro-dev/sqlite-riverrun@0.3.0': patches/@loro-dev__sqlite-riverrun@0.3.0.patch
   '@shinyoshiaki/binary-data@0.6.1': patches/@shinyoshiaki__binary-data@0.6.1.patch
   werift@0.24.4: patches/werift@0.24.4.patch
   '@radix-ui/react-scroll-area@1.2.10': patches/@radix-ui__react-scroll-area@1.2.10.patch

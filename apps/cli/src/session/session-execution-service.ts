@@ -314,6 +314,8 @@ type TurnRuntimeState = {
   rawPromptCompletion?: Promise<void>;
   disconnectedTransport?: boolean;
   inboxOwner?: Awaited<ReturnType<OperationInboxLegacy['openExecution']>>;
+  /** Withdraw rather than release the unsubmitted Inbox execution at turn end. */
+  withdrawInboxExecution?: boolean;
   cancelFinalized: boolean;
   /** One drain deadline shared by Stop and the cancellation finalizer. */
   cancellationDrain?: Promise<void>;
@@ -2693,6 +2695,10 @@ export class SessionExecutionService {
             }
             if (access.outcome === 'indeterminate') {
               outcome = 'access-indeterminate';
+              // The turn stays pending for the access retry, so its Inbox input
+              // must stay pending too: releasing would finish it and the retry's
+              // `begin` would be rejected forever.
+              ctx.runtime.withdrawInboxExecution = true;
               yield* self.tryPromise(async () => await options.onAccessIndeterminate(access));
               return undefined;
             }
@@ -3295,6 +3301,34 @@ export class SessionExecutionService {
     }
     await options.sessionDoc.setStatus(SessionStatusFactory.idle());
     this.captureStatusChanged(options.sessionId, 'idle', undefined, 'turn_failed');
+  }
+
+  /**
+   * Fail a still-pending user turn whose Inbox input already ended in an earlier
+   * execution. Lody never replays such an input, so the user resends instead.
+   */
+  private async retireEndedInboxInputTurn(
+    sessionId: SessionId,
+    sessionDoc: SessionDocument,
+    userTurnId: string
+  ): Promise<void> {
+    const read = await (await createSessionBackend(sessionDoc)).readTurn(userTurnId);
+    if (
+      read.state === 'ready' &&
+      (read.turn.role !== 'user' ||
+        ['handled', 'failed', 'canceled', 'delivery_unknown'].includes(read.turn.status ?? ''))
+    ) {
+      return;
+    }
+    await this.recordKnownChatFailure({
+      sessionId,
+      sessionDoc,
+      userTurnId,
+      reason: 'turn_pre_prompt_failed',
+      message:
+        'This message was not started because an earlier attempt to run it already ended. ' +
+        'Lody does not replay messages automatically; send it again to retry.',
+    });
   }
 
   private formatMemoryPressureFailureMessage(result: MemoryPressureEvictionResult): string {
@@ -4054,6 +4088,24 @@ export class SessionExecutionService {
           'Inbox preparation and release failed'
         );
       }
+      if (
+        !runtime.releaseFailure &&
+        userTurnId &&
+        inboxInput &&
+        !options.inboxBatch &&
+        inbox!.inputEnded(this.deps.workspaceId, sessionId, inboxInput.inputId)
+      ) {
+        // An ended input is never admitted again (no replay), so leaving its user
+        // turn pending would make dispatch select it ahead of every later message.
+        await this.retireEndedInboxInputTurn(sessionId, sessionDoc, userTurnId).catch(
+          (retireCause: unknown) =>
+            this.deps.logger.warn(
+              `[${sessionId}] Failed to retire ended Inbox input ${userTurnId}: ${formatErrorMessage(retireCause)}`
+            )
+        );
+        span.end({ outcome: 'inbox-input-ended' });
+        return 'inbox-input-ended';
+      }
       span.end({ outcome: 'inbox-prepare-failed' });
       throw cause;
     }
@@ -4555,7 +4607,19 @@ export class SessionExecutionService {
       }
       span.end({ outcome, turnId });
     }
-    if (inboxInput) {
+    const withdrawn =
+      inboxInput &&
+      runtime.withdrawInboxExecution &&
+      !runtime.promptStarted &&
+      !runtime.cancelRequested &&
+      !runtime.releaseFailure &&
+      (await runtime.inboxOwner!.withdraw().catch((cause: unknown) => {
+        this.deps.logger.warn(
+          `[${sessionId}] Inbox withdraw failed; releasing instead: ${formatErrorMessage(cause)}`
+        );
+        return false;
+      }));
+    if (inboxInput && !withdrawn) {
       if (inboxBatch)
         await (
           await createSessionBackend(sessionDoc)
@@ -6150,7 +6214,6 @@ export class SessionExecutionService {
     const shouldPrepareWorktree =
       (project?.kind === 'github' && !!githubRepoFullName) ||
       (project?.kind === 'local' && project.useWorktree === true);
-    // Logical first use also covers adoption of a speculatively prepared worktree.
     // Shared child workspaces and restored ACP sessions retain their branch identity.
     const newWorktree =
       shouldPrepareWorktree &&

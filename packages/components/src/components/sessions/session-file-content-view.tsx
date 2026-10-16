@@ -649,6 +649,27 @@ function SessionFileContentViewImpl({
   const markProviderConflictPendingRef = useRef<((message?: string) => void) | null>(null);
 
   const normalizedPath = useMemo(() => filePath.trim(), [filePath]);
+  const [retryRevision, setRetryRevision] = useState(0);
+  const [lastOpenRequest, setLastOpenRequest] = useState({ path: normalizedPath, focusRequestSeq });
+  // Reopening an already-active failed tab is a new read, not just cursor focus.
+  // Successful previews (especially unsaved drafts) retain their current snapshot.
+  if (
+    lastOpenRequest.path !== normalizedPath ||
+    lastOpenRequest.focusRequestSeq !== focusRequestSeq
+  ) {
+    setLastOpenRequest({ path: normalizedPath, focusRequestSeq });
+    if (
+      lastOpenRequest.path === normalizedPath &&
+      (data.status === 'error' || (data.status === 'ready' && data.snapshot.kind === 'missing'))
+    ) {
+      setRetryRevision((revision) => revision + 1);
+      setData({ status: 'loading' });
+    }
+  }
+  const retryFile = useCallback(() => {
+    setData({ status: 'loading' });
+    setRetryRevision((revision) => revision + 1);
+  }, []);
   const selectedLines = useMemo<SessionMonacoSelectedLines>(
     () => createSelectedLines(startLine, endLine, focusRequestSeq),
     [endLine, focusRequestSeq, startLine]
@@ -902,6 +923,7 @@ function SessionFileContentViewImpl({
       cancelled = true;
     };
   }, [
+    retryRevision,
     fileContentSource,
     fileProviderMessage,
     currentUserId,
@@ -1555,6 +1577,7 @@ function SessionFileContentViewImpl({
       <SessionFileErrorState
         message={data.message}
         reason={data.reason}
+        onRetry={retryFile}
         {...(fileErrorActions ? { fileActions: fileErrorActions } : {})}
       />
     );
@@ -1582,6 +1605,7 @@ function SessionFileContentViewImpl({
       <SessionFileErrorState
         message={t('sessions.fileViewer.missing', 'File not found.')}
         reason="deleted"
+        onRetry={retryFile}
       />
     );
   } else if (showHtmlRendered && !supportsHtmlPreview && htmlPreviewSource !== null) {

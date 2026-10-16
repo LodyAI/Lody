@@ -3153,38 +3153,6 @@ export class LoroStreamsMachineRpcClient {
     })) as SessionDispatchTurnResponse | null;
   }
 
-  async requestSessionPrepare(
-    options: SessionPreparationSpec & { timeoutMs?: number }
-  ): Promise<SessionPrepareResponse | null> {
-    return (await this.sendRequest({
-      method: 'session/prepare',
-      timeoutMs: options.timeoutMs ?? 5_000,
-      params: {
-        preparationId: options.preparationId,
-        sessionId: options.sessionId,
-        requestedByUserId: options.requestedByUserId,
-        agentConfigId: options.agentConfigId,
-        cliType: options.cliType,
-        agentType: options.agentType,
-        project: options.project,
-      },
-    })) as SessionPrepareResponse | null;
-  }
-
-  async requestSessionPrepareCancel(
-    options: SessionPreparationCancelSpec & { timeoutMs?: number }
-  ): Promise<SessionPrepareCancelResponse | null> {
-    return (await this.sendRequest({
-      method: 'session/prepare-cancel',
-      timeoutMs: options.timeoutMs ?? 5_000,
-      params: {
-        preparationId: options.preparationId,
-        sessionId: options.sessionId,
-        requestedByUserId: options.requestedByUserId,
-      },
-    })) as SessionPrepareCancelResponse | null;
-  }
-
   async requestSessionHistoryRead(options: {
     sessionId: SessionId;
     query: SessionHistoryReadQuery;

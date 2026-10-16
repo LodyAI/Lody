@@ -1,6 +1,7 @@
 import type { MessageContent, ModelInfo, SubagentRunItem } from '../ai';
 import { isLodySubagentEvent, type LodySubagentEvent } from 'acp-extension-core';
 import type { SessionHistoryInput, SessionPlanEntry } from '../schema';
+import type { AgentHistoryTargets } from '../history-agent-window';
 import { sanitizeLodyInternalInstructions } from '../goal';
 
 import { parseCodexTerminalCommand, parseCodexTerminalOutput } from './codex-raw';
@@ -1219,21 +1220,60 @@ const toolUpdateSubagentTasks = (update: ToolUpdate): MessageContent[] => {
   }));
 };
 
-/**
- * The tool calls a batch looks up when everything it writes is target-local: its
- * active turn's tail and fields, plus tool rows matched by `toolCallId` wherever they
- * are stored. Undefined when any update needs the whole history (subagent tasks and
- * events, Devin subagent internals, singleton commands, other kinds).
- */
-export const targetLocalToolCallIds = (
+/** Dependencies for a sparse history write; undefined only for structural/singleton updates. */
+export const targetLocalHistoryTargets = (
   notifications: readonly AcpSessionNotification[]
-): string[] | undefined => {
-  const ids = new Set<string>();
-  for (const { update } of notifications) {
-    if (getDevinSubagentContextId(update._meta) !== null) return undefined;
+): AgentHistoryTargets | undefined => {
+  const tools = new Set<string>();
+  const tasks = new Set<string>();
+  let rootTail = false;
+  const rootTailIfTaskMissing = new Set<string>();
+  const runs = new Map<
+    string,
+    { sessionId: string; runId: string; tail: boolean; plan: boolean; toolCallIds: string[] }
+  >();
+  const run = (sessionId: string, runId: string) => {
+    const key = JSON.stringify([sessionId, runId]);
+    let target = runs.get(key);
+    if (!target)
+      runs.set(key, (target = { sessionId, runId, tail: false, plan: false, toolCallIds: [] }));
+    return target;
+  };
+  for (const { sessionId, update } of notifications) {
+    const context = getDevinSubagentContextId(update._meta);
+    if (context !== null) tasks.add(context);
     switch (update.sessionUpdate) {
+      case 'subagent_event': {
+        const event = update.event;
+        if (!isLodySubagentEvent(event) || event.sessionId !== sessionId) continue;
+        const target = run(event.sessionId, event.runId);
+        if (event.type === 'snapshot') {
+          if (event.snapshot.parentRunId) run(event.sessionId, event.snapshot.parentRunId);
+          if (event.snapshot.parentToolCallId) tools.add(event.snapshot.parentToolCallId);
+        } else if (event.type === 'output') {
+          if (
+            (event.update.sessionUpdate === 'agent_message_chunk' ||
+              event.update.sessionUpdate === 'agent_thought_chunk') &&
+            event.update.content.type === 'text'
+          )
+            target.tail = true;
+          if (event.update.sessionUpdate === 'plan') target.plan = true;
+          if (
+            event.update.sessionUpdate === 'tool_call' ||
+            event.update.sessionUpdate === 'tool_call_update'
+          )
+            target.toolCallIds.push(event.update.toolCallId);
+        }
+        continue;
+      }
       case 'agent_message_chunk':
       case 'agent_thought_chunk':
+        if (update.content.type === 'text' && update.content.text.length > 0) {
+          if (context !== null && !hasOtherDevinSubagentMeta(update._meta))
+            rootTailIfTaskMissing.add(context);
+          else rootTail = true;
+        }
+        continue;
       case 'user_message_chunk':
       case 'config_option_update':
       case 'usage_update':
@@ -1244,14 +1284,31 @@ export const targetLocalToolCallIds = (
         continue;
       case 'tool_call':
       case 'tool_call_update':
-        if (toolUpdateSubagentTasks(update).length > 0) return undefined;
-        ids.add(update.toolCallId);
+        tools.add(update.toolCallId);
+        for (const task of toolUpdateSubagentTasks(update))
+          if (task.type === 'subagent_task') tasks.add(task.taskId);
         continue;
       default:
         return undefined;
     }
   }
-  return [...ids];
+  return {
+    toolCallIds: [...tools],
+    taskIds: [...tasks],
+    rootTail,
+    rootTailIfTaskMissing: [...rootTailIfTaskMissing],
+    runs: [...runs.values()],
+  };
+};
+
+/** Compatibility for callers that only support the original tool-only window. */
+export const targetLocalToolCallIds = (
+  notifications: readonly AcpSessionNotification[]
+): string[] | undefined => {
+  const targets = targetLocalHistoryTargets(notifications);
+  return targets && targets.taskIds.length === 0 && targets.runs.length === 0
+    ? [...targets.toolCallIds]
+    : undefined;
 };
 
 export const buildMessageContentFromNotification = (
@@ -1491,6 +1548,7 @@ class NotificationOnHistoryApplier {
   // where the task first appeared (keyed by `taskId`).
   private readonly subagentTaskEntryIndexById = new Map<string, number | null>();
   private readonly touchedAssistantEntryIndices = new Set<number>();
+  private runIndex: Map<string, { entryIndex: number; itemIndex: number }> | undefined;
   private changed = false;
 
   constructor(
@@ -1599,22 +1657,20 @@ class NotificationOnHistoryApplier {
   }
 
   private findRun(sessionId: string, runId: string) {
-    for (let entryIndex = 0; entryIndex < this.history.length; entryIndex++) {
-      const items = this.readEntryItems(entryIndex);
-      const itemIndex = items.findIndex(
-        (item) =>
-          item.type === 'subagent_task' &&
-          item.taskId === runId &&
-          item.run?.sessionId === sessionId
-      );
-      if (itemIndex >= 0)
-        return {
-          entryIndex,
-          itemIndex,
-          task: items[itemIndex] as Extract<MessageContent, { type: 'subagent_task' }>,
-        };
+    if (!this.runIndex) {
+      this.runIndex = new Map();
+      for (let entryIndex = 0; entryIndex < this.history.length; entryIndex++) {
+        this.readEntryItems(entryIndex).forEach((item, itemIndex) => {
+          if (item.type !== 'subagent_task' || !item.run) return;
+          const key = JSON.stringify([item.run.sessionId, item.taskId]);
+          if (!this.runIndex!.has(key)) this.runIndex!.set(key, { entryIndex, itemIndex });
+        });
+      }
     }
-    return undefined;
+    const found = this.runIndex.get(JSON.stringify([sessionId, runId]));
+    if (!found) return undefined;
+    const task = this.readEntryItems(found.entryIndex)[found.itemIndex];
+    return task?.type === 'subagent_task' ? { ...found, task } : undefined;
   }
 
   /** Run identity includes the ACP root; children never alter parent turn metadata. */
@@ -1686,7 +1742,13 @@ class NotificationOnHistoryApplier {
       };
       const items = this.ensureEntryItems(entryIndex);
       if (existing) items[existing.itemIndex] = task;
-      else items.push(task);
+      else {
+        items.push(task);
+        this.runIndex?.set(JSON.stringify([event.sessionId, event.runId]), {
+          entryIndex,
+          itemIndex: items.length - 1,
+        });
+      }
       this.changed = true;
       return;
     }

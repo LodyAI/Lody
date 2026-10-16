@@ -1,12 +1,7 @@
 import { Effect } from 'effect';
-import {
-  SubmissionRemote,
-  SubmissionRemoteError,
-  SubmissionJournal,
-  submitRecord,
-  resumeSubmission,
-} from '../../src/submission';
-import { sqliteSubmissionJournal } from '../../src/submission/sqlite';
+import { LedgerLog, LedgerLogError, SubmissionJournal } from '../../src/services';
+import { submitRecord, resumeSubmission } from './fixture';
+import { sqliteSubmissionJournal } from '../../src/adapters/node-sqlite/submission-journal';
 import { anchor, host, rotate } from './fixture';
 const [mode, journalPath, hostPath] = process.argv.slice(2);
 const remote = host(hostPath);
@@ -24,7 +19,7 @@ const service = {
         Effect.flatMap(() =>
           mode === 'lost-response'
             ? Effect.sync(() => process.exit(72))
-            : Effect.fail(new SubmissionRemoteError())
+            : Effect.fail(new LedgerLogError())
         )
       );
   },
@@ -46,8 +41,8 @@ const program = Effect.gen(function* () {
 try {
   await Effect.runPromise(
     program.pipe(
-      Effect.provideService(SubmissionRemote, mode === 'reopen' ? remote.service : service),
-      Effect.provide(sqliteSubmissionJournal(journalPath))
+      Effect.provideService(LedgerLog, mode === 'reopen' ? remote.service : service),
+      Effect.provide(sqliteSubmissionJournal({ path: journalPath }))
     )
   );
 } finally {

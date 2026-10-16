@@ -4,6 +4,7 @@ import * as path from 'path';
 import { describe, expect, it } from 'vitest';
 
 import type { MessageContent } from '../src/ai';
+import type { SessionHistoryInput } from '../src/schema';
 import {
   MAX_STORED_TERMINAL_COMMAND_BYTES,
   MAX_STORED_TERMINAL_OUTPUT_BYTES,
@@ -191,30 +192,46 @@ describe('acp history apply', () => {
   });
 
   it('stores ACP markdown plans beside their mode-switch card without duplicating updates', () => {
-    const plan = (content: string) => makeNotification({
-      sessionUpdate: 'plan_update',
-      plan: { type: 'markdown', planId: '1:submit_plan', content },
-      _meta: { lody: { turnId: '0' } },
-    });
-    const history = applyNotificationOnHistory([], [
+    const plan = (content: string) =>
       makeNotification({
-        sessionUpdate: 'tool_call', toolCallId: '1:submit_plan',
-        title: 'ExitPlanMode', kind: 'switch_mode', status: 'in_progress',
-      }),
-      plan('# Draft'),
-      plan('# Final plan\n\n- Verify the adapter.'),
-      makeNotification({
-        sessionUpdate: 'tool_call_update', toolCallId: '1:submit_plan', status: 'completed',
-      }),
-    ]);
+        sessionUpdate: 'plan_update',
+        plan: { type: 'markdown', planId: '1:submit_plan', content },
+        _meta: { lody: { turnId: '0' } },
+      });
+    const history = applyNotificationOnHistory(
+      [],
+      [
+        makeNotification({
+          sessionUpdate: 'tool_call',
+          toolCallId: '1:submit_plan',
+          title: 'ExitPlanMode',
+          kind: 'switch_mode',
+          status: 'in_progress',
+        }),
+        plan('# Draft'),
+        plan('# Final plan\n\n- Verify the adapter.'),
+        makeNotification({
+          sessionUpdate: 'tool_call_update',
+          toolCallId: '1:submit_plan',
+          status: 'completed',
+        }),
+      ]
+    );
     expect(history).toHaveLength(1);
     const items = history[0]!.items as unknown as MessageContent[];
-    expect(items.filter((item) => item.type === 'proposed_plan')).toEqual([{
-      type: 'proposed_plan', turnId: '1:submit_plan',
-      markdown: '# Final plan\n\n- Verify the adapter.', status: 'delta', isLatest: true,
-    }]);
+    expect(items.filter((item) => item.type === 'proposed_plan')).toEqual([
+      {
+        type: 'proposed_plan',
+        turnId: '1:submit_plan',
+        markdown: '# Final plan\n\n- Verify the adapter.',
+        status: 'delta',
+        isLatest: true,
+      },
+    ]);
     expect(items.find((item) => item.type === 'tool_call')).toMatchObject({
-      toolCallId: '1:submit_plan', kind: 'switch_mode', status: 'completed',
+      toolCallId: '1:submit_plan',
+      kind: 'switch_mode',
+      status: 'completed',
     });
   });
 
@@ -1381,5 +1398,52 @@ describe('acp history apply', () => {
         }),
       ]);
     });
+  });
+  it('indexes run identity once per batch and preserves progress order', () => {
+    let inspected = 0;
+    const task = (i: number): MessageContent => ({
+      get type() {
+        inspected++;
+        return 'subagent_task' as const;
+      },
+      taskId: `run-${i}`,
+      status: 'in_progress',
+      run: {
+        sessionId: 'root',
+        snapshot: {
+          state: 'running',
+          support: { stream: [], progress: true, cancel: false, outputRead: 'none' },
+        },
+        items: [],
+      },
+    });
+    const items = Array.from({ length: 128 }, (_, i) => task(i));
+    const history = [
+      { id: 'turn', role: 'assistant', timestamp: '2026-01-01T00:00:00Z', items, fileDiff: [] },
+    ] as SessionHistoryInput[];
+    const notifications = Array.from({ length: 32 }, (_, i) =>
+      parseSessionNotification({
+        sessionId: 'root',
+        update: {
+          sessionUpdate: 'subagent_event',
+          event: {
+            version: 1,
+            sessionId: 'root',
+            runId: 'run-127',
+            type: 'progress',
+            progress: { totalTokens: i },
+          },
+        },
+      })
+    );
+    const result = applyNotificationOnHistory(history, notifications);
+    // A linear lookup per event inspects 4096 items; one index build visits 128,
+    // with a small constant amount of per-event work for the matching run.
+    expect(inspected).toBeLessThan(256);
+    expect(result[0]!.items[127]).toMatchObject({
+      taskId: 'run-127',
+      run: { progress: { totalTokens: 31 } },
+    });
+    expect(result[0]!.items).toHaveLength(128);
   });
 });

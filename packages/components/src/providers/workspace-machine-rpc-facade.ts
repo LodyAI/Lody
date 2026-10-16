@@ -20,7 +20,6 @@ import {
   type WorkspaceMcpServerMeta,
   DEFAULT_PREVIEW_CREATE_TIMEOUT_MS,
   getServerNow,
-  machineSupportsLocalFileResourcesProtocol,
   machineSupportsPiExtensions,
   machineSupportsSubagentCancellation,
   machineSupportsIosSimulatorProtocol,
@@ -65,10 +64,6 @@ import {
   type SessionCancelResponse,
   type SessionDispatchTurnResponse,
   type SessionId,
-  type SessionPreparationCancelSpec,
-  type SessionPreparationSpec,
-  type SessionPrepareCancelResponse,
-  type SessionPrepareResponse,
   type SessionPreviewCreateResponse,
   type SessionPreviewEndpointAcquireResponse,
   type SessionPreviewEndpointReleaseResponse,
@@ -274,7 +269,7 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
   const requestFilePreview = async (
     machineId: MachineId,
     request: Omit<FilePreviewV3Request, 'v'>,
-    options?: CodeCollabRequestOptions
+    options?: CodeCollabRequestOptions & { workspaceRoot?: string | null }
   ): Promise<FilePreviewV3Response | LocalFilePreviewResource> => {
     const params: FilePreviewV3Request = {
       v: FILE_PREVIEW_PROTOCOL_VERSION,
@@ -287,36 +282,27 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
       const result = await (async () => {
         const isElectron = typeof window !== 'undefined' && window.__LODY_ELECTRON__;
         if (isElectron) {
-          // A local Electron file preview must never fall through to the
-          // Streams RPC plane. Until the target router identifies the machine,
-          // returning a retryable error is safer than sending a local path to
-          // the server; once identified, remote machines still use Streams.
-          const plane = await resolveMachineTargetPlane(machineId);
-          if (plane === 'cloud') {
-            const client = await getMachineRpcClient(machineId);
-            return await client.requestFilePreview({
-              ...params,
-              ownerSessionId: options?.ownerSessionId,
-              timeoutMs: options?.timeoutMs ?? 30_000,
-            });
-          }
-
-          const protocolCapabilities = await deps.getMachineProtocolCapabilities(machineId);
-          if (!machineSupportsLocalFileResourcesProtocol({ protocolCapabilities })) {
-            return filePreviewV3Error('transient_io', {
-              message:
-                'The local agent does not support file resources. Update or restart the local agent.',
-              retryable: false,
-            });
-          }
           const ipc = getIpcServices();
           if (!ipc) throw new Error('Local file preview is not available.');
-          return await ipc.machineRpc.previewFile({
+          // Main checks persistent machine identity before touching the path. This
+          // remains usable when the daemon and its routing/presence are offline.
+          const local = await ipc.machineRpc.previewFile({
             machineId,
-            workspaceId,
-            method: 'file/resolve-local',
-            params,
-            ...ownerSessionFields(options),
+            path: request.path,
+            workspaceRoot: options?.workspaceRoot ?? null,
+          });
+          if (local !== null) return local;
+          const plane = await resolveMachineTargetPlane(machineId);
+          if (plane === 'local') {
+            return filePreviewV3Error('permission_denied', {
+              message: 'The file target does not match this desktop machine.',
+              path: request.path,
+            });
+          }
+          const client = await getMachineRpcClient(machineId);
+          return await client.requestFilePreview({
+            ...params,
+            ownerSessionId: options?.ownerSessionId,
             timeoutMs: options?.timeoutMs ?? 30_000,
           });
         }
@@ -728,94 +714,6 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
         sessionId: args.sessionId,
         userTurnId: args.userTurnId,
         accepted: false,
-        disposition: 'error',
-        error: error instanceof Error ? error.message : String(error),
-      };
-    }
-  };
-
-  const requestSessionPrepare = async (
-    machineId: MachineId,
-    spec: SessionPreparationSpec,
-    options?: { timeoutMs?: number }
-  ): Promise<SessionPrepareResponse | null> => {
-    try {
-      if (await canUseLocalMachineRpc(machineId)) {
-        const response = await getLocalMachineRpcSender()?.({
-          machineId,
-          workspaceId,
-          method: 'session/prepare',
-          params: spec,
-          timeoutMs: options?.timeoutMs ?? 5_000,
-        });
-        if (response && !response.ok) {
-          return {
-            type: 'session/prepare_response',
-            preparationId: spec.preparationId,
-            sessionId: spec.sessionId,
-            accepted: false,
-            disposition: 'error',
-            error: response.error,
-          };
-        }
-        if (response?.ok) return response.result as SessionPrepareResponse;
-      }
-      return await (
-        await getMachineRpcClient(machineId)
-      ).requestSessionPrepare({
-        ...spec,
-        timeoutMs: options?.timeoutMs ?? 5_000,
-      });
-    } catch (error) {
-      return {
-        type: 'session/prepare_response',
-        preparationId: spec.preparationId,
-        sessionId: spec.sessionId,
-        accepted: false,
-        disposition: 'error',
-        error: error instanceof Error ? error.message : String(error),
-      };
-    }
-  };
-
-  const requestSessionPrepareCancel = async (
-    machineId: MachineId,
-    args: SessionPreparationCancelSpec,
-    options?: { timeoutMs?: number }
-  ): Promise<SessionPrepareCancelResponse | null> => {
-    try {
-      if (await canUseLocalMachineRpc(machineId)) {
-        const response = await getLocalMachineRpcSender()?.({
-          machineId,
-          workspaceId,
-          method: 'session/prepare-cancel',
-          params: args,
-          timeoutMs: options?.timeoutMs ?? 5_000,
-        });
-        if (response && !response.ok) {
-          return {
-            type: 'session/prepare-cancel_response',
-            preparationId: args.preparationId,
-            sessionId: args.sessionId,
-            cancelled: false,
-            disposition: 'error',
-            error: response.error,
-          };
-        }
-        if (response?.ok) return response.result as SessionPrepareCancelResponse;
-      }
-      return await (
-        await getMachineRpcClient(machineId)
-      ).requestSessionPrepareCancel({
-        ...args,
-        timeoutMs: options?.timeoutMs ?? 5_000,
-      });
-    } catch (error) {
-      return {
-        type: 'session/prepare-cancel_response',
-        preparationId: args.preparationId,
-        sessionId: args.sessionId,
-        cancelled: false,
         disposition: 'error',
         error: error instanceof Error ? error.message : String(error),
       };
@@ -1575,8 +1473,6 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
     requestSessionFork,
     requestSessionEditAndResend,
     requestSessionDispatchTurn,
-    requestSessionPrepare,
-    requestSessionPrepareCancel,
     requestSessionHistoryRead,
     requestSessionHistoryWrite,
     requestFilePreview,

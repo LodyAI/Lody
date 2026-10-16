@@ -334,7 +334,7 @@ The turn layer depends on L2 and, by the layering rule, finishes last.
 
 ### Worktrees and file locks (an L4/L5 dependency)
 
-- **Where:** `worktree-manager.ts`, `speculative-worktree.ts`, `worktree-gc.ts`,
+- **Where:** `worktree-manager.ts`, `legacy-speculative-worktrees.ts`, `worktree-gc.ts`,
   `packages/shared/src/node/file-lock.ts`.
 - **Evidence:** #76, #6; open #296 (possibly fixed by #620; needs checking).
 - File-lock implementation is delivered in #1377; its owning decision defines
@@ -505,7 +505,7 @@ not an exhaustive inventory of the repository.
 | Worktree observations                                | FileLocks, WorktreeGit                                               | Native                      | Legacy observation entry remains     | Owned/borrowed lock lease                            | [Observation decision](../../implemented/architecture/2026-10-10-effect-worktree-observations.md); migration does not complete mutation/setup/GC                                                                                                     |
 | Finite local-source preparation                      | WorktreeGit, filesystem; borrows mutation lease                      | Native                      | Legacy worktree entry remains        | Caller mutation lease and temporary resources        | [Preparation decision](../../implemented/architecture/2026-10-10-effect-local-worktree-preparation.md); manager mutation coordination pending                                                                                                        |
 | Login-shell probe and shared cache                   | Process release ownership, Clock                                     | Native                      | Native entries; Legacy launchers     | Application-owned cache; probe scopes                | [Shell decision](../../implemented/architecture/2026-10-10-effect-login-shell-probe.md); launchers delete Legacy after migration                                                                                                                     |
-| Runtime credential lease / preparation control       | Platform token port, filesystem, Clock                               | Native leaves               | Legacy Session/preparation glue      | Exact credential lease; TTL/control scope            | [Credential decision](../../implemented/architecture/2026-10-10-runtime-owned-github-context.md); raw startup and complete retirement remain pending                                                                                                 |
+| Runtime credential lease                             | Platform token port, filesystem, Clock                               | Native leaf                 | Legacy Session glue                  | Exact credential lease                               | [Credential decision](../../implemented/architecture/2026-10-10-runtime-owned-github-context.md); preparation control [removed](../../implemented/simplification/2026-10-16-remove-draft-session-preparation.md); raw startup pending                |
 | Worktree mutations                                   | Locks, Git, observations, local preparation                          | Pending                     | Promise orchestration                | Mutation/replacement owner pending                   | Manager ownership and failure retention must replace Promise coordination                                                                                                                                                                            |
 | Setup scripts                                        | Process, worktree mutations; actual injected callbacks               | Pending                     | Promise orchestration                | Script/task scopes pending                           | Native process calls alone do not migrate callback orchestration                                                                                                                                                                                     |
 | Worktree GC                                          | Mutations, setup, metadata writers and active owners                 | Pending                     | Promise orchestration                | Shared cleanup owner pending                         | Must reconcile active ownership before deletion; timer replacement alone is insufficient                                                                                                                                                             |
@@ -578,8 +578,9 @@ repeating manager changes. The native
 [worktree observation unit](../../implemented/architecture/2026-10-10-effect-worktree-observations.md)
 integrates FileLocks and WorktreeGit on a foundation containing refreshed main.
 It does not complete mutation/setup/GC ownership. #1385 is merged and supplies
-runtime credential leases and preparation TTL/control only; raw ACP/worktree
-startup and full session ownership remain unfinished.
+runtime credential leases and preparation TTL/control only (that control was later
+removed with draft preparation); raw ACP/worktree startup and full session ownership
+remain unfinished.
 The finite [local-source preparation unit](../../implemented/architecture/2026-10-10-effect-local-worktree-preparation.md) depends on filesystem/Git and borrows the existing mutation lease. Its review base includes observations because their manager boundary is shared; the native kernels are independent.
 Library-side prerequisite verification: the current lockfile resolves Flock WASM 0.4.3, streams-crdt 0.17.0 and loro-repo 0.22.0. A consumed version is not proof of an Effect kernel. Verify published versions, upstream repository state/rules and current source/checkpoint contracts before library migration; earlier registry observations are not a current release guarantee.
 The seven-unit foundation stack below merged into main on 2026-10-11. Worktree

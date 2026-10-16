@@ -43,7 +43,8 @@ builds to `site-docs/out/client`. Binding rules live in
 - `components/landing-preview-data.ts` — demo copy, session rows, the scripted
   conversations, and the mock diff.
 - `components/marketing-atmosphere.tsx` — the shared marketing ambient field,
-  hosted once by `components/site-root-provider.tsx`.
+  hosted once by `components/site-root-provider.tsx`; its GLSL (single-pass and
+  split field, temporal blend) is in `components/marketing-atmosphere-shaders.ts`.
 - `components/pricing-page.tsx` — pricing table, plans, and FAQ.
 
 Demo sequencing and screenshot notes live in

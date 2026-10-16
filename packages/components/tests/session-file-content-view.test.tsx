@@ -1905,3 +1905,51 @@ describe('independent preview remount investigation', () => {
     expect(textarea()?.value).toBe('# Original');
   });
 });
+
+describe('failed file preview recovery', () => {
+  it.each(['reopen', 'retry button'])('reads the recovered file through %s', async (action) => {
+    let available = false;
+    const provider = createCodeCollabProvider(
+      createCodeCollabRuntime({
+        previewFile: async () =>
+          available
+            ? filePreviewResult('recovered file', DIGEST_1)
+            : { status: 'error', v: 3, code: 'file_not_found', message: 'File was not found.' },
+      })
+    );
+    const viewNode = (focusRequestSeq: number) =>
+      createElement(SessionFileContentView, {
+        sessionId: session.id,
+        session,
+        filePath: 'src/live.ts',
+        fileId: 'src/live.ts',
+        fileProvider: provider,
+        fileProviderPending: false,
+        fileProviderRole: 'write',
+        active: true,
+        focusRequestSeq,
+      });
+    const view = await render(viewNode(1));
+    expect(view.textContent).toContain('File not found');
+    available = true;
+    if (action === 'reopen') await rerender(viewNode(2));
+    else
+      await act(async () => {
+        const retry = [...view.querySelectorAll('button')].find(
+          (button) => button.textContent === 'Retry'
+        );
+        expect(retry).toBeDefined();
+        retry?.click();
+      });
+    expect(view.querySelector('[data-testid="session-file-error-state"]')).toBeNull();
+    expect(view.querySelector('[data-testid="monaco-viewer"]')?.getAttribute('data-text')).toBe(
+      'recovered file'
+    );
+    // Focusing a successful preview must not replace its accepted snapshot.
+    available = false;
+    await rerender(viewNode(3));
+    expect(view.querySelector('[data-testid="monaco-viewer"]')?.getAttribute('data-text')).toBe(
+      'recovered file'
+    );
+  });
+});

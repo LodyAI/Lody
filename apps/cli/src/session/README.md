@@ -1,7 +1,7 @@
 # apps/cli/src/session
 
 Session lifecycle on the daemon side: watching for user turns, running them through an ACP
-agent, and the sagas around them (fork, edit-and-resend, preparation, worktrees). Binding
+agent, and the sagas around them (fork, edit-and-resend, worktrees). Binding
 rules live in [AGENTS.md](AGENTS.md) and [worktree/AGENTS.md](worktree/AGENTS.md); this file
 is the responsibility index and background.
 
@@ -56,7 +56,6 @@ CLI/MCP orchestration contract is specs/session-orchestration.md.
   session and process lifecycle, workdirs, worktrees, sandboxed spawning, ACP terminals.
   Managed GitHub credential preparation excludes local projects and their worktrees;
   each managed runtime owns a scoped credential lease, retained across adoption.
-- `session-preparation-service.ts` — process-local speculative ACP lease/state owner.
 - `session-fork-service.ts` / `session-fork-operation-store.ts` — the fork saga and its
   machine-local marker store.
 - `session-edit-and-resend-service.ts` — same-session replacement of the last normal User turn.
@@ -71,7 +70,8 @@ CLI/MCP orchestration contract is specs/session-orchestration.md.
   which self-gates on the session's GitHub binding).
 - `session-diff-stats-target.ts` — chooses which writer owns a session's `diffStats`.
 - `session-access-policy.ts` — local-first dispatch access precheck (optimistic-allow cache,
-  D11). It may allow owner-cached turns from the catalog snapshot, deny `remote_missing`
+  D11). It may allow owner-cached turns from the catalog snapshot, allow a workspace member
+  whose backend allow for the same local project is under one hour old, deny `remote_missing`
   workspaces, or return `remote` to preserve the existing Convex three-state path. Catalog read
   failures degrade to `remote`, never to an error.
 - `session-access-retry.ts` — remote machine access verification: bounded retries at command
@@ -286,18 +286,13 @@ checkout. Managed credential helpers also cover checkout filters and LFS; non-ow
 host children scrub inherited GitHub tokens. `session-credentials.ts` bridges the
 broker's Effect-scoped acquisition into the existing Promise Session lifecycle.
 Each acquisition has its own token and pinned file; neither enrollment nor release
-uses a Session ID lookup. `SessionConfig` carries no credential policy. Preparation
-owns the lease until adoption transfers it to the same Session; failures before
-Session creation release it too. Validation on create, continue, recovery and steer
-checks that runtime's lease and trusted owner. Owner changes revoke it and retire
-the old runtime, since children retain their old environments. Operations are not replayed.
+uses a Session ID lookup. `SessionConfig` carries no credential policy. Session
+creation owns the lease and a failed creation releases it. Validation on create,
+continue, recovery and steer checks that runtime's lease and trusted owner. Owner
+changes revoke it and retire the old runtime, since children retain their old
+environments. Operations are not replayed.
 
-`preparation-control.ts` owns the Effect TTL fiber separately from runtime resources.
-Claim closes this control scope without closing the adopted runtime's credentials.
-The synchronous admission/claim facade remains; raw ACP/worktree creation is still
-owned by the existing Promise lifecycle, not treated as automatically interruptible
-by Effect. Retirement stays visible until cleanup succeeds; a failed cleanup blocks
-same-session replacement rather than pretending resources were released. See [the contract](../../../../specs/github-identity-fallback.md) and
+See [the contract](../../../../specs/github-identity-fallback.md) and
 [worktree rules](worktree/AGENTS.md) for ownership, write non-replay and isolation.
 
 ### Commit identity
@@ -317,20 +312,24 @@ Lody/GitHub identity and can never inherit the machine owner's Git config; if no
 identity exists, the neutral LodyAI identity is used. The cloud composition root owns hosted
 user resolution because the daemon does not own an end-user browser session; the local access
 port resolves only its synthetic owner and never performs network I/O. PR and push identity
-itself comes from the conversation-owner GitHub credential, not from git config. Identity changes update the host Session environment without restarting ACP or its sandbox,
-including adopted preparations. Existing ACP children retain their launch environment; live
+itself comes from the conversation-owner GitHub credential, not from git config. Identity
+changes update the host Session environment without restarting ACP or its sandbox.
+Existing ACP children retain their launch environment; live
 identity propagation into adapter-owned Git commands remains unresolved.
 
-### Speculative preparation
+### No draft preparation
 
-Peek and claim are synchronous published-resource snapshots. A prepared resource may reuse its
-open target-machine Flock to synchronously resolve launch config, but dispatch and claim
-rescan the current row. Durable creation claims the marker only when repo, source, and base
-branch target identity match, runs setup, then permits the first prompt. A missed claim returns
-any retiring cleanup barrier even after its lease has disappeared. Cold creation, discard,
-replacement preparation and shutdown join that barrier, including resources returned after
-cancellation. This can delay cold startup until cleanup finishes; otherwise a retired
-preparation could delete the newly reused directory. Unrelated Sessions remain independent.
+Every Session starts its ACP process and worktree when its first turn is dispatched.
+Draft preparation, which started both while the user typed, was removed: its runtime was
+almost never adopted, and discarding it cost more than a cold start
+([decision](../../../../.agents/notes/implemented/simplification/2026-10-16-remove-draft-session-preparation.md)).
+`session/prepare` and `session/prepare-cancel` still parse, because older desktops send
+them. The daemon answers both at once without work; prepare reports an accepted duplicate
+so an older desktop holds one lease per draft instead of re-asking after every pause.
+`worktree/legacy-speculative-worktrees.ts` handles worktrees an older daemon prepared:
+creation claims the Session's marker and reruns setup on its worktree. Only a worktree no
+Session adopted is rebuilt for a target mismatch: an adopted one keeps its branch, which
+resume restores by name. A sweep removes orphans whose Session never became durable.
 
 Memory identity references travel with turn configuration. `Session.createAgent` maps
 them through `../lib/memory-providers.ts` at spawn; the execution service restarts a

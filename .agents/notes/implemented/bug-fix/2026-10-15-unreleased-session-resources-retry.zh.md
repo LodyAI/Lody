@@ -63,7 +63,7 @@ claim 未命中、discard 或替换预备，拿到的都是同一个 rejection�
 - **恢复 0.104.0 的“记日志然后继续”。** 不采用。后继者可能与仍在运行的 agent、
   端口或锁发生争用，释放失败决策明确禁止这种情况。
 - **失败一次后就解除阻止。** 不采用。旧进程树可能仍在运行时就会复用工作区，违反
-  [预热交接](../../../../specs/session-worktree-lifecycle.zh.md#预热交接)。
+  [预热交接](../../implemented/simplification/2026-10-16-remove-draft-session-preparation.zh.md)。
 - **由我们自己回收孤儿。** 不采用。成为 subreaper 或调用 `waitpid(-1)` 会抢走
   Node 自己句柄所拥有的子进程。
 

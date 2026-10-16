@@ -94,6 +94,7 @@ export const operationInboxLegacy = (options: {
       Effect.runSync(queries.preferredHumanInput(w, s)),
     inputCancellationReason: (w: string, s: string, id: string) =>
       Effect.runSync(queries.inputCancellationReason(w, s, id)),
+    inputEnded: (w: string, s: string, id: string) => Effect.runSync(queries.inputEnded(w, s, id)),
     inputCanceled: (w: string, s: string, id: string) =>
       Effect.runSync(queries.inputCanceled(w, s, id)),
     inputKind: (s: InboxScope, id: string) => Effect.runSync(queries.inputKind(s, id)),
@@ -126,6 +127,7 @@ export const operationInboxLegacy = (options: {
         submit: <A>(start: () => A) => runtime.runPromise(owner.submit(start)),
         finish: (outcome: InboxRelease['outcome'], cause?: unknown) =>
           runtime.runPromise(owner.finish(outcome, cause)),
+        withdraw: () => runtime.runPromise(owner.withdraw),
         detach: () => runtime.runSync(owner.detach),
         retain: (resource: ExecutionResource) => runtime.runSync(owner.retain(resource)),
         recover: (prepare: () => Promise<void>, beforeRelease: () => Promise<void>) =>

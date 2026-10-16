@@ -182,9 +182,6 @@ export const normalizeMcpServerIdSelection = (value: unknown): McpServerId[] | u
   return ids;
 };
 
-export const normalizeMcpServerIdsForDedup = (ids: readonly string[] | undefined): string[] =>
-  [...new Set(ids ?? [])].sort();
-
 export const interpolateEnvVars = (
   value: string,
   env: Readonly<Record<string, string | undefined>>

@@ -72,13 +72,12 @@
 ## Lifecycle
 
 - [Roost](README.md#roost-history-paging): check owner/backend; no keyring,
-  rotation/fallback, history revival, uncertain steer replay or signed-log/receipt pruning.
+  rotation/fallback, removed-history revival, uncertain steer replay or signed-log/receipt pruning.
   Commit guarded edits+digests atomically; no SDK retry after uncertainty.
   Keep input/permission/branch recovery SDK-owned. Local causes; RPC stage/code/ID.
 
-- `Session.createAgent` gates ACP spawn; failures reject JSON-RPC. Terminals use protocol
-  argv (`sh -c` only for unsplit commands). Managed Codex reused-refresh startup retries
-  once after process cleanup, delay and live Provider recheck; other auth errors never retry.
+- `Session.createAgent` gates each ACP spawn; failed spawns reject JSON-RPC. Terminals use protocol argv (`sh -c` for unsplit commands only). Managed Codex reused-refresh startup
+  retries once after process cleanup, delay, and live Provider recheck; other auth errors do not.
 - Child tabs reuse parent workspace. No per-session paths in `MachineMeta`:
   machines publish `['dotlodyPath']` for frontends to derive them.
 - `sandbox.spawn` returning OUTPUT requires `captureOutput: true` and a 4 MiB buffer cap;
@@ -88,12 +87,11 @@
 
 ## Sagas
 
-- Peek/claim are synchronous; publish before `start()`. Peek never transfers ownership.
-  Cold/replacement starts await same-session cleanup; failures block until a retry, including late creation.
-  Before adoption: marked worktree and `newSession` only; no doc, setup, history or events.
-- Credential leases: adopt retains, dispose releases that generation; local has none.
-- Dispatch/claim rescan `buildSessionLaunchConfig`; await incompatible cleanup.
-- Reject nested child Sessions; resolve ownership one parent hop.
+- ACP processes and worktrees start at dispatch, never while a draft is typed. Answer
+  `session/prepare`/`-cancel` at once as no-ops (prepare: accepted duplicate), with no access check
+  ([decision](../../../../.agents/notes/implemented/simplification/2026-10-16-remove-draft-session-preparation.md)).
+- Credentials are runtime leases: a failed creation releases that generation; local has none.
+- Nested child Sessions are rejected: ownership resolves one parent hop only.
 - Fork and continuation share `resolveSessionAcpTargetId`; source runtime config copies only at its matching user-turn fence.
 - Fork commits at `persistPendingChanges()`, never cloud sync. Persist its placeholder
   before ACP; failed commits terminate and durably delete the target. Post-commit
@@ -114,10 +112,9 @@
 
 - Never write per-session `sessionLaunchConfig`: the first `session/create` payload is transient,
   resume and dispatch resolve from agent config/project, and the legacy row is fallback only.
-- Dispatch access is local policy first, optional-cloud three-state second: owner-cached policy
-  may allow offline, `remote_missing` and a definitive `denied` fail the turn, `indeterminate`
-  leaves it pending behind `verifyMachineAccessWithRetry()`. Never collapse a thrown check into
-  denial.
-- Every owner-allowed dispatch fires `fireOwnerAccessRecheck` with `forceBackendVerification`; a
-  confirmed online allow is the ONLY writer of the access snapshot and `verifiedAt`, a deny clears
-  it, `indeterminate` writes nothing.
+- Dispatch access: local policy, then optional-cloud three-state. The owner cache or a member
+  allow confirmed <1h ago may allow offline; `remote_missing`/definitive `denied` fail the turn;
+  `indeterminate` stays pending behind `verifyMachineAccessWithRetry()`. A throw is never denial.
+- Only confirmed backend verdicts write caches (allow refreshes `verifiedAt`, deny clears,
+  `indeterminate` nothing). Owner hits recheck with `forceBackendVerification`; member
+  entries bind requester, project, CLI account and Machine.

@@ -11,6 +11,7 @@ export interface InboxQueries {
     sessionId: string,
     id: string
   ): Effect.Effect<'user_stop' | undefined, unknown>;
+  inputEnded(workspaceId: string, sessionId: string, id: string): Effect.Effect<boolean, unknown>;
   inputCanceled(
     workspaceId: string,
     sessionId: string,
