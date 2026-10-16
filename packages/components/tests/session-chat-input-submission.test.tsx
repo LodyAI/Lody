@@ -23,7 +23,15 @@ import { computeSha256Hex, uploadSessionFile } from '../src/lib/session-file-upl
 import { uploadSessionImage } from '../src/lib/session-image-upload';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { AgentRole, AgentRoleId, SessionMeta, SessionInputBlock } from '@lody/shared';
+import type {
+  AgentRole,
+  AgentRoleId,
+  SessionMeta,
+  SessionInputBlock,
+  CommentReferencePayload,
+} from '@lody/shared';
+import { SessionCommentDraft } from '../src/ui/diff-viewer/session-comment-draft';
+import { CommentReferenceCard } from '../src/components/ai-gui/comment-reference-card';
 
 const sessionAgentRoleState = vi.hoisted(() => ({
   control: {
@@ -870,6 +878,191 @@ describe('SessionChatInputArea submission feedback', () => {
     expect(submitted).toEqual([[{ type: 'comment_reference', ...comment }]]);
     await act(async () => acceptance.resolve(false));
     expect(container!.textContent).toContain('Synthetic review comment');
+  });
+
+  it('sends local line drafts across files, removes only the chosen chip, and renders sent cards', async () => {
+    let id = 0;
+    vi.spyOn(crypto, 'randomUUID').mockImplementation(
+      () => `00000000-0000-4000-8000-${String(++id).padStart(12, '0')}`
+    );
+    const submitted: SessionInputBlock[][] = [];
+    const composerRef = createRef<SessionChatInputAreaHandle>();
+    await renderComposer({
+      composerRef,
+      onSendMessage: async (blocks) => {
+        submitted.push(blocks);
+        return true;
+      },
+    });
+    const draftContainer = document.createElement('div');
+    document.body.appendChild(draftContainer);
+    const draftRoot = createRoot(draftContainer);
+    try {
+      for (const [path, body] of [
+        ['src/a.ts', 'First note'],
+        ['src/a.ts', 'Second note'],
+        ['src/b.ts', 'Other file'],
+      ] as const) {
+        await act(async () =>
+          draftRoot.render(
+            createElement(SessionCommentDraft, {
+              anchor: {
+                anchorType: 'diff',
+                path,
+                lineNumber: 12,
+                side: 'deletions',
+                turnId: 'turn-1',
+                mode: 'conversation',
+              },
+              currentUser: null,
+              onSendToChat: (reference) => composerRef.current!.addCommentReference(reference),
+            })
+          )
+        );
+        const field = draftContainer.querySelector('textarea')!;
+        await act(async () => {
+          Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(
+            field,
+            body
+          );
+          field.dispatchEvent(new Event('input', { bubbles: true }));
+        });
+        await act(async () =>
+          draftContainer.querySelector<HTMLButtonElement>('button:last-child')!.click()
+        );
+        expect(field.value).toBe('');
+      }
+      expect(
+        Array.from(container!.querySelectorAll('[data-comment-ref]')).map(
+          (chip) => chip.textContent
+        )
+      ).toEqual(['a.ts:12“First note”', 'a.ts:12“Second note”', 'b.ts:12“Other file”']);
+      await act(async () =>
+        container!.querySelector<HTMLButtonElement>('[data-comment-ref] button')!.click()
+      );
+      await submit('button');
+      const comments = submitted[0]!.filter((block) => block.type === 'comment_reference');
+      expect(comments).toEqual([
+        {
+          type: 'comment_reference',
+          source: 'lody',
+          path: 'src/a.ts',
+          lineNumber: 12,
+          side: 'deletions',
+          commentBody: 'Second note',
+          authorName: 'Anonymous',
+          authorImage: undefined,
+          turnId: 'turn-1',
+          mode: 'conversation',
+          threadId: '00000000-0000-4000-8000-000000000002',
+        },
+        {
+          type: 'comment_reference',
+          source: 'lody',
+          path: 'src/b.ts',
+          lineNumber: 12,
+          side: 'deletions',
+          commentBody: 'Other file',
+          authorName: 'Anonymous',
+          authorImage: undefined,
+          turnId: 'turn-1',
+          mode: 'conversation',
+          threadId: '00000000-0000-4000-8000-000000000003',
+        },
+      ]);
+      expect(submitted[0]).toContainEqual({ type: 'text', text: 'focus regression draft' });
+      expect(container!.querySelectorAll('[data-comment-ref]')).toHaveLength(0);
+      await act(async () =>
+        draftRoot.render(
+          createElement(
+            'div',
+            {},
+            ...comments.map((reference, index) =>
+              createElement(CommentReferenceCard, { key: index, reference })
+            )
+          )
+        )
+      );
+      expect(draftContainer.textContent).toBe('a.ts:12“Second note”b.ts:12“Other file”');
+      await act(async () => draftContainer.querySelector<HTMLButtonElement>('button')!.click());
+      expect(draftContainer.textContent).toBe('a.ts:12“Second note”b.ts:12“Other file”');
+    } finally {
+      await act(async () => draftRoot.unmount());
+      draftContainer.remove();
+    }
+  });
+
+  it('rejects a local comment on an archived composer', async () => {
+    const composerRef = createRef<SessionChatInputAreaHandle>();
+    const submitted: SessionInputBlock[][] = [];
+    await renderComposer({
+      composerRef,
+      isArchived: true,
+      onSendMessage: async (blocks) => {
+        submitted.push(blocks);
+        return true;
+      },
+    });
+    let accepted: boolean | undefined;
+    await act(async () => {
+      accepted = composerRef.current!.addCommentReference({
+        source: 'lody',
+        path: 'README.md',
+        lineNumber: 1,
+        side: 'additions',
+        commentBody: 'Archived note',
+        authorName: 'Anonymous',
+      });
+    });
+    expect(accepted).toBe(false);
+    expect(container!.querySelector('[data-comment-ref]')).toBeNull();
+    await submit('keyboard');
+    expect(submitted).toEqual([]);
+  });
+
+  it('retires accepted comments while preserving a new comment added during submission', async () => {
+    const acceptance = deferredBoolean();
+    const composerRef = createRef<SessionChatInputAreaHandle>();
+    const submitted: SessionInputBlock[][] = [];
+    await renderComposer({
+      composerRef,
+      onSendMessage: (blocks) => {
+        submitted.push(blocks);
+        return acceptance.promise;
+      },
+    });
+    const first: CommentReferencePayload = {
+      source: 'lody',
+      path: 'README.md',
+      lineNumber: 1,
+      side: 'additions',
+      commentBody: 'Already sent',
+      authorName: 'Anonymous',
+      threadId: 'first',
+    };
+    const second: CommentReferencePayload = {
+      ...first,
+      commentBody: 'Next turn',
+      threadId: 'second',
+    };
+    await act(async () => {
+      composerRef.current!.addCommentReference(first);
+    });
+    await submit('keyboard');
+    await act(async () => {
+      expect(composerRef.current!.addCommentReference(second)).toBe(true);
+    });
+    await act(async () => acceptance.resolve(true));
+    expect(
+      Array.from(container!.querySelectorAll('[data-comment-ref]')).map((chip) => chip.textContent)
+    ).toEqual(['README.md:1“Next turn”']);
+    await submit('keyboard');
+    expect(
+      submitted.map((blocks) => blocks.filter((block) => block.type === 'comment_reference'))
+    ).toEqual([
+      [{ type: 'comment_reference', ...first }],
+      [{ type: 'comment_reference', ...second }],
+    ]);
   });
 
   /** jsdom has no ClipboardEvent, and React only reads `clipboardData`. */

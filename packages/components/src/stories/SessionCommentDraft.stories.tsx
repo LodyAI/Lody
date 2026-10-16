@@ -53,6 +53,28 @@ export const GitHubLinked: Story = {
   render: (args) => wrap(<SessionCommentDraft {...args} />),
 };
 
+export const LocalChat: Story = {
+  args: {
+    anchor: mockAnchor,
+    currentUser: mockUser,
+    onSendToChat: (reference) => console.log('Send to chat:', reference),
+    onCancel: () => console.log('Cancel'),
+  },
+  render: (args) => wrap(<SessionCommentDraft {...args} />),
+};
+
+export const GitHubLinkedWithChat: Story = {
+  args: {
+    anchor: mockAnchor,
+    currentUser: mockUser,
+    prLinked: true,
+    onSubmitToGitHub: (input) => console.log('Submit to GitHub:', input),
+    onSendToChat: (reference) => console.log('Send to chat:', reference),
+    onCancel: () => console.log('Cancel'),
+  },
+  render: (args) => wrap(<SessionCommentDraft {...args} />),
+};
+
 export const Anonymous: Story = {
   args: {
     anchor: mockAnchor,

@@ -59,6 +59,7 @@ export function SessionCommentAnnotation({
           currentUser={currentUser}
           prLinked={prLinked}
           onSubmitToGitHub={callbacks.onCreateThreadToGitHub}
+          onSendToChat={callbacks.onSendToChat}
           onCancel={onCancelDraft}
         />
       )}
