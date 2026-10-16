@@ -406,29 +406,93 @@ describe('createWorkspaceMachineRpcFacade', () => {
       'machineRpc.previewFile',
       expect.objectContaining({
         machineId: localMachineId,
-        workspaceId,
-        method: 'file/resolve-local',
-        params: { v: 3, sessionId, path: '/Users/me/Documents/notes.md' },
+        path: '/Users/me/Documents/notes.md',
+        workspaceRoot: null,
       })
     );
     expect(getMachineRpcClient).not.toHaveBeenCalled();
     expect(resolvePlaneForMachine).not.toHaveBeenCalled();
   });
 
-  it('reports an unsupported local daemon without requesting resource IO or cloud fallback', async () => {
+  it('reads local content with no daemon capability or live route, forwarding the original root', async () => {
     vi.stubGlobal('window', {
       __LODY_ELECTRON__: true,
       ipc: {
-        invoke: async () => {
-          throw new Error('Unexpected IPC');
+        invoke: async (channel: string, request: unknown) => {
+          expect(channel).toBe('machineRpc.previewFile');
+          expect(request).toEqual({
+            machineId: localMachineId,
+            path: 'notes.md',
+            workspaceRoot: '/project',
+          });
+          return { status: 'ok', content: { text: 'offline document' } };
         },
       },
     });
     const facade = createWorkspaceMachineRpcFacade({
       workspaceId,
       targetRouter: {
-        getPlaneForMachine: () => 'local',
-        resolvePlaneForMachine: async () => 'local',
+        getPlaneForMachine: () => {
+          throw new Error('Daemon identity unavailable');
+        },
+        resolvePlaneForMachine: async () => {
+          throw new Error('Daemon offline');
+        },
+      },
+      getMachineProtocolCapabilities: async () => {
+        throw new Error('No daemon metadata');
+      },
+      getMachineRpcClient: async () => {
+        throw new Error('Unexpected cloud IO');
+      },
+    });
+    expect(
+      await facade.requestFilePreview(
+        localMachineId,
+        { sessionId, path: 'notes.md' },
+        { workspaceRoot: '/project' }
+      )
+    ).toMatchObject({ status: 'ok', content: { text: 'offline document' } });
+  });
+
+  it('keeps remote file reads on the remote owner after main rejects the local target', async () => {
+    vi.stubGlobal('window', { __LODY_ELECTRON__: true, ipc: { invoke: async () => null } });
+    const facade = createWorkspaceMachineRpcFacade({
+      workspaceId,
+      targetRouter: {
+        getPlaneForMachine: () => 'cloud',
+        resolvePlaneForMachine: async () => 'cloud',
+      },
+      getMachineProtocolCapabilities: async () => undefined,
+      getMachineRpcClient: async (machineId) => {
+        expect(machineId).toBe(remoteMachineId);
+        return {
+          requestFilePreview: async (request: unknown) => {
+            expect(request).toMatchObject({ path: '/remote/notes.md', sessionId });
+            return { status: 'ok', content: { text: 'remote document' } };
+          },
+        } as never;
+      },
+    });
+    expect(
+      await facade.requestFilePreview(remoteMachineId, { sessionId, path: '/remote/notes.md' })
+    ).toMatchObject({ status: 'ok', content: { text: 'remote document' } });
+  });
+
+  it('does not route a local filesystem failure to the cloud', async () => {
+    vi.stubGlobal('window', {
+      __LODY_ELECTRON__: true,
+      ipc: {
+        invoke: async () => {
+          throw new Error('EACCES');
+        },
+      },
+    });
+    const facade = createWorkspaceMachineRpcFacade({
+      workspaceId,
+      targetRouter: {
+        getPlaneForMachine: () => 'cloud',
+        resolvePlaneForMachine: async () => 'cloud',
       },
       getMachineProtocolCapabilities: async () => undefined,
       getMachineRpcClient: async () => {
@@ -436,16 +500,12 @@ describe('createWorkspaceMachineRpcFacade', () => {
       },
     });
     expect(
-      await facade.requestFilePreview(localMachineId, { sessionId, path: 'large.txt' })
-    ).toMatchObject({
-      status: 'error',
-      retryable: false,
-      message: expect.stringContaining('does not support file resources'),
-    });
+      await facade.requestFilePreview(localMachineId, { sessionId, path: '/local/notes.md' })
+    ).toMatchObject({ status: 'error', message: 'EACCES' });
   });
 
   it('does not fall back to a cloud preview while Electron local routing is unresolved', async () => {
-    const invoke = vi.fn();
+    const invoke = vi.fn(async () => null);
     vi.stubGlobal('window', {
       __LODY_ELECTRON__: true,
       ipc: { invoke },
@@ -466,7 +526,6 @@ describe('createWorkspaceMachineRpcFacade', () => {
     await expect(
       facade.requestFilePreview(localMachineId, { sessionId, path: '/tmp/local.txt' })
     ).resolves.toMatchObject({ status: 'error', code: 'transient_io' });
-    expect(invoke).not.toHaveBeenCalled();
     expect(getMachineRpcClient).not.toHaveBeenCalled();
   });
 

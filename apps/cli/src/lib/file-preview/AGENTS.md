@@ -30,10 +30,10 @@ save path's text reads.
   preview and Code Collab still require their existing workspace resolution.
 - `file-preview-service.ts` never throws for a domain failure: every rejection is a
   typed `status: 'error'` response.
-- `file-preview-path-policy.ts` is the security boundary. Remote `file/preview`
+- Shared `node/file-preview-path-policy.ts` is the security boundary. Remote `file/preview`
   requests may read only the session workspace root, `os.tmpdir()`,
   `<LodyDataDir>/chats`, and `LODY_FILE_PREVIEW_EXTRA_ROOTS`. The separate
-  local-only `file/resolve-local` IPC method is the Electron user's explicit
+  legacy local-only `file/resolve-local` IPC method is the desktop user's explicit
   same-machine capability and resolves any regular file for Electron; it returns
   identity only, never bytes, and is never added
   to the Loro Streams RPC protocol.
@@ -78,7 +78,8 @@ save path's text reads.
 - **Remote previews remain one bounded complete response. Local content never rides
   that response.** `file/resolve-local` returns the canonical absolute path after
   owner/path resolution; Electron owns bounded content reads and resource lifetime.
-  Negotiate `localFileResources` through the central machine protocol binding.
+  Legacy clients negotiate `localFileResources`. Current Electron resolves and reads
+  directly, using its own disk machine identity rather than daemon ownership checks.
 - `maxBinaryBytes` stays pinned to `SESSION_IMAGE_MAX_SIZE_BYTES`. Do not raise these
   budgets without measuring against the real gateway, since a non-404 4xx append
   failure is not retried.

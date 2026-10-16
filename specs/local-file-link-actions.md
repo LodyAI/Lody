@@ -19,9 +19,12 @@ readable regular local file, including files outside the session workspace and i
 another worktree. Worktree prefixes must not redirect these links into the current
 workspace. This applies to both Markdown links and tool file entries. External
 files remain readonly, and genuinely missing files still show a not-found error.
-Same-machine preview uses the local communication channel and does not require a
-running agent. Absolute and home-rooted paths remain previewable when the session's
-working directory is unavailable, after validating session and machine ownership.
+Same-machine preview reads directly in Electron and does not require a running
+agent, daemon, or file index. Electron verifies the target against its persistent
+local machine identity. Absolute and home-rooted paths remain previewable when
+the session working directory is unavailable; relative paths use the original
+owner-session workspace root from local metadata. Session lifecycle is not a
+filesystem read permission gate for the desktop user.
 These files remain readonly. Relative paths require the original workspace; they
 must never be resolved against a substitute directory. Remote preview authorization
 remains restricted to its existing allowed roots.

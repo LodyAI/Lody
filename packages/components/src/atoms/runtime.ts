@@ -420,7 +420,11 @@ export type WorkspaceRuntime = {
   requestFilePreview: (
     machineId: MachineId,
     request: Omit<FilePreviewV3Request, 'v'>,
-    options?: { timeoutMs?: number; ownerSessionId?: SessionId | string }
+    options?: {
+      timeoutMs?: number;
+      ownerSessionId?: SessionId | string;
+      workspaceRoot?: string | null;
+    }
   ) => Promise<FilePreviewV3Response | LocalFilePreviewResource>;
   /**
    * Electron-only initial Code Collab tree/current-All-Changes snapshot. This

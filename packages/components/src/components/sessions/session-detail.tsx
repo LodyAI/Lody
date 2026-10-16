@@ -1,3 +1,4 @@
+import { getIpcServices } from '@/lib/electron-ipc-client';
 import { buildDraftUserHistoryEntry } from '@/lib/session-attachment-draft';
 import { pendingSessionLinkAtom } from '@/lib/session-deep-link';
 import { windowPreparationAtom } from '@/lib/window-preparation';
@@ -3872,11 +3873,19 @@ const SessionDetail = ({
       void (async () => {
         // Where the path came from decides whether it may be rewritten at all;
         // `resolveSessionFileOpenTarget` owns that rule and documents why.
+        const preserveWorktreePath =
+          isElectronRenderer() &&
+          (isActiveSessionLocalMachine ||
+            (activeSessionMachineId
+              ? await getIpcServices()
+                  ?.machineRpc.isLocalFileMachine(activeSessionMachineId)
+                  .catch(() => false)
+              : false));
         const target = resolveSessionFileOpenTarget({
           rawPath: filePath,
           pathKind: options.pathKind ?? 'markdown-href',
           workspacePath: activeSessionWorkspacePath,
-          preserveWorktreePath: isElectronRenderer() && isActiveSessionLocalMachine,
+          preserveWorktreePath,
           ...(options.startLine === undefined ? {} : { startLine: options.startLine }),
           ...(options.endLine === undefined ? {} : { endLine: options.endLine }),
         });

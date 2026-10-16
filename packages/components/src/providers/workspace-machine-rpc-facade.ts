@@ -20,7 +20,6 @@ import {
   type WorkspaceMcpServerMeta,
   DEFAULT_PREVIEW_CREATE_TIMEOUT_MS,
   getServerNow,
-  machineSupportsLocalFileResourcesProtocol,
   machineSupportsPiExtensions,
   machineSupportsSubagentCancellation,
   machineSupportsIosSimulatorProtocol,
@@ -274,7 +273,7 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
   const requestFilePreview = async (
     machineId: MachineId,
     request: Omit<FilePreviewV3Request, 'v'>,
-    options?: CodeCollabRequestOptions
+    options?: CodeCollabRequestOptions & { workspaceRoot?: string | null }
   ): Promise<FilePreviewV3Response | LocalFilePreviewResource> => {
     const params: FilePreviewV3Request = {
       v: FILE_PREVIEW_PROTOCOL_VERSION,
@@ -287,36 +286,27 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
       const result = await (async () => {
         const isElectron = typeof window !== 'undefined' && window.__LODY_ELECTRON__;
         if (isElectron) {
-          // A local Electron file preview must never fall through to the
-          // Streams RPC plane. Until the target router identifies the machine,
-          // returning a retryable error is safer than sending a local path to
-          // the server; once identified, remote machines still use Streams.
-          const plane = await resolveMachineTargetPlane(machineId);
-          if (plane === 'cloud') {
-            const client = await getMachineRpcClient(machineId);
-            return await client.requestFilePreview({
-              ...params,
-              ownerSessionId: options?.ownerSessionId,
-              timeoutMs: options?.timeoutMs ?? 30_000,
-            });
-          }
-
-          const protocolCapabilities = await deps.getMachineProtocolCapabilities(machineId);
-          if (!machineSupportsLocalFileResourcesProtocol({ protocolCapabilities })) {
-            return filePreviewV3Error('transient_io', {
-              message:
-                'The local agent does not support file resources. Update or restart the local agent.',
-              retryable: false,
-            });
-          }
           const ipc = getIpcServices();
           if (!ipc) throw new Error('Local file preview is not available.');
-          return await ipc.machineRpc.previewFile({
+          // Main checks persistent machine identity before touching the path. This
+          // remains usable when the daemon and its routing/presence are offline.
+          const local = await ipc.machineRpc.previewFile({
             machineId,
-            workspaceId,
-            method: 'file/resolve-local',
-            params,
-            ...ownerSessionFields(options),
+            path: request.path,
+            workspaceRoot: options?.workspaceRoot ?? null,
+          });
+          if (local !== null) return local;
+          const plane = await resolveMachineTargetPlane(machineId);
+          if (plane === 'local') {
+            return filePreviewV3Error('permission_denied', {
+              message: 'The file target does not match this desktop machine.',
+              path: request.path,
+            });
+          }
+          const client = await getMachineRpcClient(machineId);
+          return await client.requestFilePreview({
+            ...params,
+            ownerSessionId: options?.ownerSessionId,
             timeoutMs: options?.timeoutMs ?? 30_000,
           });
         }
