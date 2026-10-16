@@ -130,11 +130,15 @@ export function SettingsLayoutComponent() {
       typeof locationSearch.project === 'string' ? locationSearch.project : null
     );
     setSettingsModalOpen(true);
+    // OAuth returns through this route before the desktop GitHub settings modal mounts.
+    const hash = window.location.hash.startsWith('#github-personal=')
+      ? window.location.hash.slice(1)
+      : undefined;
     const closeTo = resolveSettingsCloseTo(settingsFrom);
     if (closeTo) {
-      void navigate({ to: closeTo, replace: true });
+      void navigate({ to: closeTo, replace: true, hash });
     } else {
-      void navigate({ to: '/$workspaceName/chat', params: { workspaceName }, replace: true });
+      void navigate({ to: '/$workspaceName/chat', params: { workspaceName }, replace: true, hash });
     }
   }, [
     isMobile,
