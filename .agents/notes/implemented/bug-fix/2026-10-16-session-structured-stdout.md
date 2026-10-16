@@ -51,3 +51,32 @@ with locked-version Winston 3.19.0 and synthetic setup/exit boundaries: six case
 reproduced the parsing failure. This is not full module integration or an
 authenticated CLI/MCP end-to-end test. Changed TypeScript files were formatted with
 Oxfmt 0.65.0. Existing documentation checks have missing-submodule link failures.
+
+
+## Ablation-backed simplification
+
+The output tests share one five-case table for JSON/JSONL success and failure,
+and human success. This removes 36 lines of duplicate capture, boundary replacement
+and restoration code. Failure cases now also use the real workspace-manager cleanup.
+
+An isolated Vitest 5.0.2 harness ran the exact before/after test blocks against
+extracted current command/exit, logger and workspace-manager source with Winston
+3.19.0. Only unrelated time-sync, telemetry and file-log dependencies were stubbed;
+this does not load the full CLI module graph. Each revision passes all five baseline
+cases and detects all six mutations below. Mutations existed only in temporary
+copies; production protection remains intact.
+
+| Mutation | Before | After |
+| --- | --- | --- |
+| Remove stderr routing | Detected | Detected |
+| Remove routing restoration | Detected | Detected |
+| Omit JSONL routing | Detected | Detected |
+| Restore before the action and cleanup | Detected | Detected |
+| Restore before successful exit flushing | Detected | Detected |
+| Route human output diagnostics to stderr | Detected | Detected |
+
+These results support consolidating the fixtures, not deleting behavioral cases
+or the routing guard/finally. Full repository integration remains blocked by the
+checkout's missing dependencies.
+
+PR: [LodyAI/Lody #1610](https://github.com/LodyAI/Lody/pull/1610).
