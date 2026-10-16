@@ -1627,15 +1627,42 @@ export function withBuiltinDefaultTurnMode(
   return { ...config, modeId };
 }
 
+/**
+ * The inherited permission policy (`_permission` options such as Grok's
+ * `permission_mode`, or a `mode`-category option). Unlike effort and Fast it
+ * does not depend on the model, so a model switch or a partial option override
+ * must not silently reset it to the agent's default.
+ */
+function pickPermissionConfigOptionValues(
+  values: Record<string, string | boolean> | undefined,
+  capability: AcpCapabilityCacheEntry | undefined
+): Record<string, string | boolean> | undefined {
+  if (!values) return undefined;
+  const permissionIds = new Set(
+    (capability?.configOptions ?? [])
+      .filter((option) => option.category === '_permission' || option.category === 'mode')
+      .map((option) => option.id)
+  );
+  const picked = Object.fromEntries(Object.entries(values).filter(([id]) => permissionIds.has(id)));
+  return Object.keys(picked).length > 0 ? picked : undefined;
+}
+
 function mergeTurnDispatchConfig(
   explicitConfig: ResolvedTurnDispatchConfig,
-  fallbackConfig: ResolvedTurnDispatchConfig | undefined
+  fallbackConfig: ResolvedTurnDispatchConfig | undefined,
+  capability: AcpCapabilityCacheEntry | undefined
 ): ResolvedTurnDispatchConfig {
+  const inheritedPermission = pickPermissionConfigOptionValues(
+    fallbackConfig?.configOptionValues,
+    capability
+  );
   return {
     memory: explicitConfig.memory ?? fallbackConfig?.memory,
     modeId: explicitConfig.modeId ?? fallbackConfig?.modeId,
     modelId: explicitConfig.modelId ?? fallbackConfig?.modelId,
-    configOptionValues: explicitConfig.configOptionValues ?? fallbackConfig?.configOptionValues,
+    configOptionValues: explicitConfig.configOptionValues
+      ? { ...inheritedPermission, ...explicitConfig.configOptionValues }
+      : fallbackConfig?.configOptionValues,
   };
 }
 
@@ -2130,7 +2157,7 @@ export function resolveEffectiveSessionChatDispatchConfig(args: {
         modelId: explicitModelOption ? undefined : previous.modelId,
         configOptionValues:
           args.dispatchConfig.modelId && args.dispatchConfig.modelId !== previous.modelId
-            ? undefined
+            ? pickPermissionConfigOptionValues(previous.configOptionValues, args.capability)
             : previous.configOptionValues,
       }
     : undefined;
@@ -2153,7 +2180,7 @@ export function resolveEffectiveSessionChatDispatchConfig(args: {
   });
   removeShadowedInheritedSelectors(compatible, args.dispatchConfig, args.capability);
   const effective = withBuiltinDefaultTurnMode(
-    mergeTurnDispatchConfig(args.dispatchConfig, compatible),
+    mergeTurnDispatchConfig(args.dispatchConfig, compatible, args.capability),
     args.target,
     args.capability
   );
@@ -3463,7 +3490,7 @@ export async function resolveEffectiveSessionCreateDispatchConfig(args: {
     capability,
   });
   removeShadowedInheritedSelectors(inherited, requested.config, capability);
-  const merged = mergeTurnDispatchConfig(requested.config, inherited);
+  const merged = mergeTurnDispatchConfig(requested.config, inherited, capability);
   const effective = withBuiltinDefaultTurnMode(merged, args.agentConfig, capability);
   const derivedBuiltinDefault =
     effective.modeId === builtinDefault &&

@@ -1078,6 +1078,69 @@ describe('session command helpers', () => {
     ).toMatchObject({ modeId: 'agent-auto-review' });
   });
 
+  it('keeps the inherited permission option across model switches and partial overrides', () => {
+    // Grok carries permission in a `_permission` config option, not in modeId.
+    const capability: AcpCapabilityCacheEntry = {
+      cliType: 'builtin',
+      agentType: 'grok',
+      modes: [],
+      models: [
+        { modelId: 'grok-a', name: 'A' },
+        { modelId: 'grok-b', name: 'B' },
+      ],
+      configOptions: [
+        {
+          id: 'permission_mode',
+          name: 'Permission Mode',
+          category: '_permission',
+          type: 'select',
+          currentValue: 'ask',
+          options: [
+            { value: 'ask', name: 'Ask Every Time' },
+            { value: 'always-approve', name: 'Always Approve' },
+          ],
+        },
+        {
+          id: 'web_search',
+          name: 'Web search',
+          type: 'boolean',
+          currentValue: false,
+          options: [],
+        },
+      ],
+      fetchedAt: 1,
+    };
+    const target = createSessionMeta({ agentType: 'grok' });
+    const inheritedDispatchConfig = {
+      modelId: 'grok-a',
+      configOptionValues: { permission_mode: 'always-approve', web_search: true },
+    };
+    const resolve = (
+      dispatchConfig: Parameters<
+        typeof resolveEffectiveSessionChatDispatchConfig
+      >[0]['dispatchConfig']
+    ) =>
+      resolveEffectiveSessionChatDispatchConfig({
+        dispatchConfig,
+        inheritedDispatchConfig,
+        target,
+        capability,
+      });
+
+    expect(resolve({ modelId: 'grok-b' })).toMatchObject({
+      modelId: 'grok-b',
+      configOptionValues: { permission_mode: 'always-approve' },
+    });
+    expect(resolve({ modelId: 'grok-b' }).configOptionValues).not.toHaveProperty('web_search');
+    expect(resolve({ configOptionValues: { web_search: false } }).configOptionValues).toEqual({
+      permission_mode: 'always-approve',
+      web_search: false,
+    });
+    expect(resolve({ configOptionValues: { permission_mode: 'ask' } }).configOptionValues).toEqual({
+      permission_mode: 'ask',
+    });
+  });
+
   it.each(['xhigh', 'medium'])(
     'checks inherited effort %s against the inherited model',
     (effort) => {
