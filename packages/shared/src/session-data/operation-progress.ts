@@ -1,3 +1,4 @@
+import { historyValuesEqual } from '../history-values-equal';
 import type { LodyOperationItemResult, StoredLodyOperation } from '../session-orchestration';
 import type {
   OperationProgressContent,
@@ -141,7 +142,7 @@ export function planOperationProgress(
     if (
       duplicates.length === 1 &&
       existing &&
-      JSON.stringify(existing.items ?? []) === JSON.stringify(nextItems)
+      historyValuesEqual(existing.items ?? [], nextItems)
     ) {
       return history;
     }

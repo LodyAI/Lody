@@ -1,3 +1,5 @@
+import { historyValuesEqual } from './history-values-equal';
+export { historyValuesEqual } from './history-values-equal';
 import { Immer } from 'immer';
 import { isContainer, LoroMap, type LoroDoc, type LoroList } from 'loro-crdt';
 import { z } from 'zod';
@@ -21,6 +23,11 @@ import {
 import { diffHistoryContainer, populateContainer } from './history-materializer';
 import { applyRespondPermission } from './session-data/planner';
 import { createAgentHistoryWindow, type AgentHistoryTargets } from './history-agent-window';
+import {
+  getOperationProgressTurnId,
+  planOperationProgress,
+} from './session-data/operation-progress';
+import type { HistoryAction } from './session-data/history-actions';
 
 const immer = new Immer({ autoFreeze: false, useStrictShallowCopy: true });
 const record = (value: unknown): value is Record<string, unknown> =>
@@ -36,7 +43,7 @@ const storedField = (value: unknown, key: string): unknown =>
       ? value[key]
       : undefined;
 const storedScalar = (value: unknown): unknown =>
-  isContainer(value) && value.kind() === 'Text' ? value.toJSON() : value;
+  isContainer(value) && value.kind() === 'Text' ? value.toString() : value;
 
 declare const storedHistoryBrand: unique symbol;
 /** Provenance, not a way to bless caller-supplied JSON. history is a detached copy. */
@@ -82,20 +89,6 @@ export function prepareStoredHistoryCopy(
       old ? prepareReplacement(old, entry) : cleanNew(HistoryEntryWriteSchema, entry)
     ) as SessionHistoryInput;
   });
-}
-
-/** Ignore Mirror's transport identity, never the contents of a historical item. */
-export function historyValuesEqual(a: unknown, b: unknown): boolean {
-  if (a === b) return true;
-  if (Array.isArray(a) && Array.isArray(b))
-    return a.length === b.length && a.every((v, i) => historyValuesEqual(v, b[i]));
-  if (!record(a) || !record(b)) return false;
-  const ak = Object.keys(a).filter((k) => k !== '$cid' && a[k] !== undefined);
-  const bk = Object.keys(b).filter((k) => k !== '$cid' && b[k] !== undefined);
-  return (
-    ak.length === bk.length &&
-    ak.every((k) => Object.hasOwn(b, k) && historyValuesEqual(a[k], b[k]))
-  );
 }
 
 /** New unknown keys are filtered; unknown keys already stored are never scrubbed. */
@@ -376,6 +369,8 @@ export interface HistoryWriter {
   read(turnId: string): SessionHistory | undefined;
   /** Existing typed callback API; only its changed turns/items reach the writer. */
   update(updater: (history: SessionHistoryInput[]) => SessionHistoryInput[]): void;
+  /** Read only this operation's cards, once each; never export the history. */
+  updateOperationProgress(action: Extract<HistoryAction, { kind: 'operation-progress' }>): boolean;
   /** Mutate an existing turn without producing/planning the entire history. */
   updateEntry(id: string, updater: (entry: SessionHistoryInput) => SessionHistoryInput): boolean;
   /**
@@ -414,6 +409,30 @@ export interface HistoryWriter {
 export function createHistoryWriter(doc: LoroDoc, readHistory?: () => readonly SessionHistory[]) {
   const list = doc.getList('history');
   const readAll = () => readHistory?.() ?? (list.toJSON() as SessionHistory[]);
+  // No subscription lifetime to manage. Unknown writes/imports/checkout invalidate
+  // this metadata-only directory, including edits in an uncommitted transaction.
+  let progressDirectory: { stamp: string; rows: Map<string, number[]> } | undefined;
+  const progressPositions = (id: string) => {
+    const stamp = JSON.stringify([doc.opCount(), doc.frontiers(), doc.getPendingTxnLength()]);
+    if (progressDirectory?.stamp !== stamp) {
+      const rows = new Map<string, number[]>();
+      for (let index = 0; index < list.length; index++) {
+        const value = list.get(index);
+        const rowId = storedScalar(storedField(value, 'id'));
+        if (typeof rowId !== 'string' || !rowId.startsWith('operation-progress:')) continue;
+        if (storedScalar(storedField(value, 'role')) !== 'system') continue;
+        const copies = rows.get(rowId) ?? [];
+        copies.push(index);
+        rows.set(rowId, copies);
+      }
+      progressDirectory = { stamp, rows };
+    }
+    const prefix = `${id}:duplicate:`;
+    const positions = [...(progressDirectory.rows.get(id) ?? [])];
+    for (const [rowId, copies] of progressDirectory.rows)
+      if (rowId.startsWith(prefix)) positions.push(...copies);
+    return positions.sort((a, b) => a - b);
+  };
   const rowWithId = (index: number, id: string) => {
     const map = list.get(index);
     if (isContainer(map) && map.kind() === 'Map' && (map as LoroMap).get('id') === id)
@@ -443,7 +462,8 @@ export function createHistoryWriter(doc: LoroDoc, readHistory?: () => readonly S
       old,
       value
     ) =>
-      old === undefined ? cleanNew(HistoryEntryWriteSchema, value) : prepareReplacement(old, value)
+      old === undefined ? cleanNew(HistoryEntryWriteSchema, value) : prepareReplacement(old, value),
+    positions?: readonly number[]
   ) => {
     const used = new Set<number>();
     const byId = new Map<unknown, number[]>();
@@ -467,7 +487,7 @@ export function createHistoryWriter(doc: LoroDoc, readHistory?: () => readonly S
       last = index;
       used.add(index);
       if (historyValuesEqual(previous[index], entry)) return { index };
-      const map = list.get(index);
+      const map = list.get(positions?.[index] ?? index);
       if (!isContainer(map) && record(map))
         return { index, inline: true, value: prepareValue(previous[index], entry) };
       if (!isContainer(map) || map.kind() !== 'Map')
@@ -475,6 +495,38 @@ export function createHistoryWriter(doc: LoroDoc, readHistory?: () => readonly S
       return { index, map, value: prepareValue(previous[index], entry) };
     });
     return () => {
+      if (positions) {
+        // Replace before deleting: inline rows still have their original positions.
+        // Every value above has been validated before the first mutation.
+        for (const op of plan) {
+          if (op.index < 0 || op.value === undefined) continue;
+          if ('inline' in op && op.inline) {
+            const position = positions[op.index]!;
+            list.delete(position, 1);
+            list.insert(position, op.value as Parameters<LoroList['insert']>[1]);
+          } else if (isContainer(op.map)) {
+            diffHistoryContainer(
+              op.map,
+              sessionHistorySchema,
+              previous[op.index],
+              op.value,
+              undefined
+            );
+          }
+        }
+        for (let i = positions.length - 1; i >= 0; i--)
+          if (!used.has(i)) list.delete(positions[i]!, 1);
+        for (const op of plan)
+          if (op.index < 0)
+            populateContainer(
+              list.insertContainer(list.length, new LoroMap()),
+              sessionHistorySchema,
+              op.value,
+              undefined
+            );
+        doc.commit();
+        return;
+      }
       for (let i = previous.length - 1; i >= 0; i--) if (!used.has(i)) list.delete(i, 1);
       plan.forEach((op, i) => {
         if (op.index < 0)
@@ -630,6 +682,23 @@ export function createHistoryWriter(doc: LoroDoc, readHistory?: () => readonly S
         return undefined;
       });
       prepare(previous, next)();
+    },
+    updateOperationProgress(action) {
+      const { operation } = action;
+      if (operation.kind !== 'session_create' && operation.kind !== 'session_create_many')
+        return false;
+      const id = getOperationProgressTurnId(operation.requesterSessionId, operation.operationId);
+      const positions = progressPositions(id);
+      const previous = positions.map((index) => {
+        const value = list.get(index);
+        // The planner needs detached values to preserve legacy/unknown card fields.
+        // Export each matching card once; unrelated turns are never materialized.
+        return (isContainer(value) ? value.toJSON() : value) as SessionHistoryInput;
+      });
+      const next = planOperationProgress(previous, operation, action.timestamp, action.statuses);
+      if (next === previous) return false;
+      planWrite(previous, next, undefined, positions)();
+      return true;
     },
     updateEntry(id, updater) {
       const target = locate(id);

@@ -424,16 +424,14 @@ export function createLoroSessionData(options: LoroSessionDataOptions) {
 
   const commands: SessionHistoryCommands = {
     async applyHistoryAction(action) {
+      if (action.kind === 'operation-progress')
+        return { matched: writer.updateOperationProgress(action) };
       let matched = action.kind === 'user-status' && action.requeueUndelivered === true;
       const apply = (entries: SessionHistoryInput[]) => {
         const result = applyHistoryAction(entries, action);
         matched = result.matched;
         return result.turns;
       };
-      if (action.kind === 'operation-progress') {
-        const preview = applyHistoryAction(writer.readStored(), action);
-        if (!preview.matched) return { matched: false };
-      }
       const target = historyActionTarget(action);
       if (action.kind === 'user-status') writer.updateCopies(action.turnId, apply);
       else if (target !== undefined)
