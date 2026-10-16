@@ -158,24 +158,26 @@ cover publication, admission gaps, deadlines, cancellation, close and subsequent
 writer usability. Encrypted RPC tests cover the actual client method and 128
 parked watches while ordinary reads, sends and ping complete.
 
-Final focused checks pass 216 CLI/Inbox cases, including 72 native owner
-contracts, 83 renderer/readiness cases and 138 RPC cases with three existing
-integration skips. The full shared suite passes 1506 cases. Type checks,
-type-aware lint, Effect lint, formatting and the separately completed post-test
-boundary/i18n guards pass.
+The final root `pnpm check` passes type checks, type-aware lint, Effect lint,
+the complete configured package test run and all post-test i18n/boundary guards.
+CLI passes 4287 cases with four existing skips, components 5402, shared 1506,
+and RPC 138 with three existing integration skips. All 72 native owner contracts
+pass within the full CLI run. Formatting and `git diff --check` pass.
 
-The final root `pnpm check` after integrating main passes 4282 CLI cases,
-including the entire native owner suite, but fails two unchanged Inbox
-operator-resource verification cases with `Known resources are still running or
-cannot be verified`: recovering incomplete identity after reopen, and requiring
-confirmation/exact identity without replaying unknown submission. Their 59-case
-owning suite passes in the focused run; that does not establish the cause of the
-full-run failures. The recursive command stops at CLI and does not complete all
-downstream package suites.
-Documentation retains six baseline broken Kimi/Pi
-links in the subagent-events language pair because those isolated submodules are
-not initialized here. Changed documents add no link errors, and no SHA-protected
-topics are registered. The full check remains non-green.
+The two Inbox failures in the earlier full check were reproduced against an
+unmodified archive of PR baseline `fb4d565` under a controlled macOS memory-probe
+failure. The relevant production files have identical Git blobs in that baseline
+and the original Roost head. They are pre-existing warning behavior, not a Roost
+regression. The operator success tests now use deterministic process-command
+fixtures and retain assertions that uncertain snapshots refuse recovery without
+replay. The 63-case owning suite passes. Evidence and the unchanged production
+boundary are recorded in the [Inbox note](../architecture/2026-10-12-operation-inbox.md#deterministic-operator-recovery-verification-2026-10-17).
+The full root check passes with those fixtures.
+
+Documentation checks now pass after checking out Kimi `743c6641` and Pi `64482a51`
+at the repository's existing gitlink pins, without installing their dependencies
+or changing those pins. The six reported paths were valid source links to absent
+submodule checkouts. No registered SHA topics exist.
 
 Before the PR's main-branch integration, the product macOS arm64 snapshot compiled
 and packaged successfully with native smoke and signature checks. That snapshot's
