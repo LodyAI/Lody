@@ -2,6 +2,7 @@ export const IPC_INVOKE_SERVICE_GROUPS = [
   'app',
   'auth',
   'cli',
+  'e2ee',
   'image',
   'localPlatform',
   'localProjects',

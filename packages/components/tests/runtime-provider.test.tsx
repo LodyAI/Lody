@@ -4,10 +4,13 @@ import React, { act, StrictMode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { atom, createStore, Provider } from 'jotai';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { PlatformE2eeWorkspaces } from '@lody/platform';
 
 const environment = vi.hoisted(() => ({
   warm: true,
   mode: 'local',
+  e2eeWorkspaces: undefined as PlatformE2eeWorkspaces | undefined,
+  cachedWorkspaceId: null as string | null,
   workspace: { id: 'local:workspace', slug: 'local' } as { id: string; slug: string } | null,
 }));
 vi.mock('@/atoms', () => ({
@@ -44,7 +47,9 @@ vi.mock('@/atoms/control-connection', () => ({
   browserOnlineAtom: atom(true),
 }));
 vi.mock('@/lib', () => ({ API_BASE_URL: '' }));
-vi.mock('@/lib/local-storage-cache', () => ({ getCachedWorkspaceId: () => null }));
+vi.mock('@/lib/local-storage-cache', () => ({
+  getCachedWorkspaceId: () => environment.cachedWorkspaceId,
+}));
 vi.mock('@posthog/react', () => ({ usePostHog: () => null }));
 vi.mock('@/lib/posthog-analytics', () => ({ capturePostHogEvent: () => {} }));
 vi.mock('@/lib/clear-local-cache', () => ({ maybeClearLodyCacheOnBoot: async () => {} }));
@@ -53,7 +58,11 @@ vi.mock('@/lib/native-platform', () => ({ isNativeAppShell: () => false }));
 vi.mock('@/lib/desktop-window', () => ({ isWarmWindow: () => environment.warm }));
 vi.mock('@lody/platform/react', () => ({
   useCloudQuery: () => undefined,
-  usePlatform: () => ({ sync: { mode: environment.mode }, capabilities: new Set() }),
+  usePlatform: () => ({
+    sync: { mode: environment.mode },
+    capabilities: new Set(),
+    e2eeWorkspaces: environment.e2eeWorkspaces,
+  }),
 }));
 vi.mock('@/hooks/use-visible-machine-metas', () => ({
   useVisibleMachineMetas: () => ({ isLoading: true }),
@@ -69,7 +78,13 @@ vi.mock('@/providers/create-workspace-runtime', () => ({ createWorkspaceRuntime:
 
 import { RuntimeProvider } from '../src/providers/runtime-provider';
 import { createWorkspaceRuntime } from '../src/providers/create-workspace-runtime';
-import { currentWorkspaceSlugAtom, userAtom } from '../src/atoms';
+import { currentWorkspaceSlugAtom, currentWorkspaceIdAtom, userAtom } from '../src/atoms';
+import { workspaceContentModeAtom } from '../src/atoms/workspace-content-mode';
+import {
+  readWorkspaceModeProof,
+  retainWorkspaceModeProof,
+  saveE2eeGenesisPin,
+} from '../src/lib/e2ee-workspace-storage';
 import { runtimeAtom, workspaceRuntimeInitFailureAtom } from '../src/atoms/runtime';
 import {
   editSessionRunConfigDraftAtom,
@@ -124,6 +139,9 @@ describe('RuntimeProvider warm workspace preparation', () => {
     Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
     environment.warm = true;
     environment.mode = 'local';
+    environment.e2eeWorkspaces = undefined;
+    environment.cachedWorkspaceId = null;
+    localStorage.clear();
     environment.workspace = { id: 'local:workspace', slug: 'local' };
     store = createStore();
     root = createRoot(document.createElement('div'));
@@ -134,6 +152,233 @@ describe('RuntimeProvider warm workspace preparation', () => {
   });
   afterEach(async () => {
     await act(async () => root.unmount());
+  });
+
+  it('does not open any data plane while authoritative mode is pending, then exposes encrypted control access', async () => {
+    environment.mode = 'cloud';
+    environment.warm = false;
+    let resolveMode!: (mode: Awaited<ReturnType<PlatformE2eeWorkspaces['describe']>>) => void;
+    environment.e2eeWorkspaces = {
+      describe: () =>
+        new Promise((resolve) => {
+          resolveMode = resolve;
+        }),
+      create: async () => {
+        throw new Error('unused');
+      },
+      history: async () => {
+        throw new Error('unused');
+      },
+    };
+    store.set(currentWorkspaceSlugAtom, 'encrypted');
+    store.set(currentWorkspaceIdAtom, 'workspace-encrypted');
+    await render();
+    expect(store.get(runtimeAtom)).toBeNull();
+    expect(store.get(workspaceContentModeAtom)).toBeNull();
+    expect(createWorkspaceRuntime).not.toHaveBeenCalled();
+    await act(async () =>
+      resolveMode({
+        workspaceId: 'workspace-encrypted',
+        contentMode: 'e2ee',
+        contentModeVersion: 1,
+        genesisHash: '11'.repeat(32),
+        cryptoOrgId: '11'.repeat(32),
+        activation: 'control-only',
+      })
+    );
+    expect(store.get(runtimeAtom)).toBeNull();
+    expect(store.get(workspaceContentModeAtom)?.descriptor).toMatchObject({ contentMode: 'e2ee' });
+    expect(createWorkspaceRuntime).not.toHaveBeenCalled();
+  });
+
+  it.each(['unknown', 'unavailable'])(
+    'refuses the plaintext runtime when mode is %s',
+    async (failure) => {
+      environment.mode = 'cloud';
+      environment.warm = false;
+      environment.e2eeWorkspaces = {
+        describe: async () => {
+          if (failure === 'unavailable') throw new Error('Offline');
+          return {
+            workspaceId: 'workspace-encrypted',
+            contentMode: 'future',
+            contentModeVersion: 2,
+          } as never;
+        },
+        create: async () => {
+          throw new Error('unused');
+        },
+        history: async () => {
+          throw new Error('unused');
+        },
+      };
+      store.set(currentWorkspaceSlugAtom, 'encrypted');
+      store.set(currentWorkspaceIdAtom, 'workspace-encrypted');
+      await render();
+      expect(store.get(runtimeAtom)).toBeNull();
+      expect(store.get(workspaceRuntimeInitFailureAtom)).toMatchObject({
+        workspaceSlug: 'encrypted',
+      });
+      expect(createWorkspaceRuntime).not.toHaveBeenCalled();
+    }
+  );
+
+  it.each(['plaintext', 'legacy'] as const)(
+    'rejects a server %s downgrade of a locally pinned encrypted workspace',
+    async (kind) => {
+      environment.mode = 'cloud';
+      environment.warm = false;
+      saveE2eeGenesisPin(localStorage, 'local:user', 'workspace-encrypted', '11'.repeat(32));
+      environment.e2eeWorkspaces = {
+        describe: async () =>
+          kind === 'plaintext'
+            ? {
+                workspaceId: 'workspace-encrypted',
+                contentMode: 'plaintext',
+                contentModeVersion: 1,
+              }
+            : { workspaceId: 'workspace-encrypted', admission: 'legacy-unclassified' },
+        create: async () => {
+          throw new Error('unused');
+        },
+        history: async () => {
+          throw new Error('unused');
+        },
+      };
+      store.set(currentWorkspaceSlugAtom, 'encrypted');
+      store.set(currentWorkspaceIdAtom, 'workspace-encrypted');
+      await render();
+      expect(store.get(runtimeAtom)).toBeNull();
+      expect(store.get(workspaceContentModeAtom)).toBeNull();
+      expect(store.get(workspaceRuntimeInitFailureAtom)).toMatchObject({
+        workspaceSlug: 'encrypted',
+      });
+      expect(createWorkspaceRuntime).not.toHaveBeenCalled();
+    }
+  );
+
+  it('reopens an authenticated plaintext mode offline using only its matching account and slug proof', async () => {
+    environment.mode = 'cloud';
+    environment.warm = false;
+    environment.cachedWorkspaceId = 'local:workspace';
+    retainWorkspaceModeProof(localStorage, 'local:user', 'local', {
+      workspaceId: 'local:workspace',
+      contentMode: 'plaintext',
+      contentModeVersion: 1,
+    });
+    environment.e2eeWorkspaces = {
+      describe: async () => {
+        throw new Error('Network offline');
+      },
+      create: async () => {
+        throw new Error('unused');
+      },
+      history: async () => {
+        throw new Error('unused');
+      },
+    };
+    store.set(currentWorkspaceSlugAtom, 'local');
+    await render();
+    expect(store.get(currentWorkspaceIdAtom)).toBeNull();
+    expect(store.get(runtimeAtom)).toBe(prepared);
+    expect(store.get(workspaceContentModeAtom)?.descriptor).toMatchObject({
+      contentMode: 'plaintext',
+    });
+    expect(
+      readWorkspaceModeProof(localStorage, 'other-user', 'local:workspace', 'local')
+    ).toBeNull();
+    expect(
+      readWorkspaceModeProof(localStorage, 'local:user', 'local:workspace', 'other-slug')
+    ).toBeNull();
+    await act(async () => store.set(userAtom, { id: 'other-user' } as never));
+    expect(store.get(runtimeAtom)).toBeNull();
+    expect(prepared.disposed).toBe(true);
+  });
+
+  it('accepts an explicit server legacy admission without labelling the workspace plaintext', async () => {
+    environment.mode = 'cloud';
+    environment.warm = false;
+    const admission = { workspaceId: 'local:workspace', admission: 'legacy-unclassified' as const };
+    environment.e2eeWorkspaces = {
+      describe: async () => admission,
+      create: async () => {
+        throw new Error('unused');
+      },
+      history: async () => {
+        throw new Error('unused');
+      },
+    };
+    store.set(currentWorkspaceSlugAtom, 'local');
+    store.set(currentWorkspaceIdAtom, 'local:workspace');
+    await render();
+    expect(store.get(runtimeAtom)).toBe(prepared);
+    expect(store.get(workspaceContentModeAtom)?.descriptor).toEqual(admission);
+    expect(readWorkspaceModeProof(localStorage, 'local:user', 'local:workspace', 'local')).toEqual(
+      admission
+    );
+  });
+
+  it('reopens a previously authenticated legacy admission while offline without reclassifying it', async () => {
+    environment.mode = 'cloud';
+    environment.warm = false;
+    environment.cachedWorkspaceId = 'local:workspace';
+    const admission = { workspaceId: 'local:workspace', admission: 'legacy-unclassified' as const };
+    retainWorkspaceModeProof(localStorage, 'local:user', 'local', admission);
+    environment.e2eeWorkspaces = {
+      describe: async () => {
+        throw new Error('Offline');
+      },
+      create: async () => {
+        throw new Error('unused');
+      },
+      history: async () => {
+        throw new Error('unused');
+      },
+    };
+    store.set(currentWorkspaceSlugAtom, 'local');
+    await render();
+    expect(store.get(runtimeAtom)).toBe(prepared);
+    expect(store.get(workspaceContentModeAtom)?.descriptor).toEqual(admission);
+  });
+
+  it('lets another workspace initialize while an old mode read is unresolved and ignores its late result', async () => {
+    environment.mode = 'cloud';
+    environment.warm = false;
+    let resolveOld!: (value: Awaited<ReturnType<PlatformE2eeWorkspaces['describe']>>) => void;
+    environment.e2eeWorkspaces = {
+      describe: async ({ workspaceId }) =>
+        workspaceId === 'old'
+          ? new Promise((resolve) => {
+              resolveOld = resolve;
+            })
+          : { workspaceId, contentMode: 'plaintext', contentModeVersion: 1 },
+      create: async () => {
+        throw new Error('unused');
+      },
+      history: async () => {
+        throw new Error('unused');
+      },
+    };
+    store.set(currentWorkspaceSlugAtom, 'old');
+    store.set(currentWorkspaceIdAtom, 'old');
+    await render();
+    await act(async () => {
+      store.set(currentWorkspaceSlugAtom, 'local');
+      store.set(currentWorkspaceIdAtom, 'local:workspace');
+    });
+    expect(store.get(runtimeAtom)).toBe(prepared);
+    await act(async () =>
+      resolveOld({
+        workspaceId: 'old',
+        contentMode: 'e2ee',
+        contentModeVersion: 1,
+        genesisHash: '11'.repeat(32),
+        cryptoOrgId: '11'.repeat(32),
+        activation: 'control-only',
+      })
+    );
+    expect(store.get(workspaceContentModeAtom)?.workspaceId).toBe('local:workspace');
+    expect(store.get(runtimeAtom)).toBe(prepared);
   });
 
   it('prepares before routing and retains the populated runtime when claimed', async () => {

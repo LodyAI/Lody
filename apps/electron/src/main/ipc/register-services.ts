@@ -6,6 +6,7 @@ import { TerminalClientMessageSchema } from '@lody/shared/terminal-protocol'
 import { AppIpc, installNativeThemeWatch } from './services/app-ipc'
 import { AuthIpc } from './services/auth-ipc'
 import { CliIpc } from './services/cli-ipc'
+import { E2eeIpc } from './services/e2ee-ipc'
 import { ImageIpc } from './services/image-ipc'
 import { LocalPlatformIpc } from './services/local-platform-ipc'
 import { LocalProjectsIpc } from './services/local-projects-ipc'
@@ -24,6 +25,7 @@ export const IPC_SERVICE_CONSTRUCTORS = [
   AppIpc,
   AuthIpc,
   CliIpc,
+  E2eeIpc,
   ImageIpc,
   LocalPlatformIpc,
   LocalProjectsIpc,

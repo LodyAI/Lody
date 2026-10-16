@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import {
   generateWorkspaceSlug,
   getWorkspaceSlugRuleError,
@@ -22,15 +22,15 @@ export const useWorkspaceSlugField = (workspaceName: string) => {
 
   const slug = manuallyEdited ? manualSlug : suggestedSlug;
 
-  const updateSlug = (value: string) => {
+  const updateSlug = useCallback((value: string) => {
     setManuallyEdited(true);
     setManualSlug(normalizeWorkspaceSlugInput(value));
-  };
+  }, []);
 
-  const resetSlug = () => {
+  const resetSlug = useCallback(() => {
     setManuallyEdited(false);
-    setManualSlug(suggestedSlug);
-  };
+    setManualSlug('');
+  }, []);
 
   const shouldCheck = isUsableWorkspaceSlug(slug);
   const canCheckAvailability = shouldCheck && isAuthenticated;

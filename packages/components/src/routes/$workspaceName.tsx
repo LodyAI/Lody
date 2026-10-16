@@ -4,7 +4,11 @@ import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useOrganization } from '@/hooks/useOrganization';
 import { useStableSession } from '@/hooks/useStableSession';
-import { useCloudQuery } from '@lody/platform/react';
+import { useCloudQuery, usePlatform } from '@lody/platform/react';
+import { useAtomValue } from 'jotai';
+import { workspaceContentModeAtom } from '@/atoms/workspace-content-mode';
+import { userAtom } from '@/atoms';
+import { workspaceRuntimeInitFailureAtom } from '@/atoms/runtime';
 import { cloudOperations } from '@/lib/cloud-api-operations';
 import {
   clearPreferredWorkspaceSlugIfMatch,
@@ -351,7 +355,42 @@ function CloudWorkspaceGuardRoute() {
   );
 }
 
-function WorkspaceAuthedRoute({
+function WorkspaceAuthedRoute(props: Parameters<typeof PlaintextWorkspaceAuthedRoute>[0]) {
+  const platform = usePlatform();
+  const mode = useAtomValue(workspaceContentModeAtom);
+  const user = useAtomValue(userAtom);
+  const failure = useAtomValue(workspaceRuntimeInitFailureAtom);
+  const { t } = useTranslation();
+  if (platform.e2eeWorkspaces) {
+    if (!mode || mode.workspaceSlug !== props.workspaceName || mode.accountId !== user?.id) {
+      return failure?.workspaceSlug === props.workspaceName ? (
+        <RouteMessage
+          gate="workspace_content_mode"
+          title={t('e2ee.mode.failed')}
+          description={t('e2ee.mode.failedHelp')}
+        />
+      ) : (
+        <BlockingWaitPlaceholder
+          gate="workspace_content_mode"
+          variant="boot"
+          title={t('e2ee.mode.loading')}
+        />
+      );
+    }
+    if ('contentMode' in mode.descriptor && mode.descriptor.contentMode === 'e2ee') {
+      return (
+        <BootNavigate
+          to="/workspace/e2ee/$workspaceId"
+          params={{ workspaceId: mode.workspaceId }}
+          replace
+        />
+      );
+    }
+  }
+  return <PlaintextWorkspaceAuthedRoute {...props} />;
+}
+
+function PlaintextWorkspaceAuthedRoute({
   workspaceName,
   organizations,
   organizationsLoading,

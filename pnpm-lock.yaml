@@ -1127,6 +1127,9 @@ importers:
       '@lody/cloud-api':
         specifier: workspace:*
         version: link:../cloud-api
+      '@lody/e2ee-core':
+        specifier: workspace:*
+        version: link:../e2ee-core
       '@lody/loro-streams-rpc':
         specifier: workspace:*
         version: link:../loro-streams-rpc
@@ -1452,9 +1455,6 @@ importers:
       '@lody/configs':
         specifier: workspace:*
         version: link:../configs
-      '@lody/e2ee-core':
-        specifier: workspace:*
-        version: link:../e2ee-core
       '@playwright/test':
         specifier: ^1.58.2
         version: 1.58.2
@@ -1668,6 +1668,9 @@ importers:
 
   packages/platform:
     dependencies:
+      '@lody/cloud-api':
+        specifier: workspace:*
+        version: link:../cloud-api
       '@lody/shared':
         specifier: workspace:*
         version: link:../shared

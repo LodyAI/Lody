@@ -9,6 +9,8 @@ import { BetaFeaturesSection } from '../src/components/settings/beta-features-se
 import { ExperimentalFeaturesSection } from '../src/components/settings/experimental-features-setting';
 import {
   developerModeEnabledAtom,
+  e2eeWorkspaceCreationEnabledAtom,
+  e2eeWorkspaceCreationFeatureEnabledAtom,
   experimentalFeaturesEnabledAtom,
   roostHistoryExperimentEnabledAtom,
   roostHistoryFeatureEnabledAtom,
@@ -82,6 +84,30 @@ describe('SettingsCategoryList', () => {
       );
     });
   }
+
+  it('requires developer mode only for new encrypted workspace creation and retains the preference', async () => {
+    store?.set(developerModeEnabledAtom, true);
+    store?.set(e2eeWorkspaceCreationEnabledAtom, false);
+    container = document.createElement('div');
+    root = createRoot(container);
+    await act(async () =>
+      root?.render(
+        <Provider store={store}>
+          <BetaFeaturesSection />
+        </Provider>
+      )
+    );
+    const control = container.querySelector<HTMLElement>(
+      '[role="switch"][aria-label="Encrypted workspace creation"]'
+    );
+    expect(control).not.toBeNull();
+    await act(async () => control?.click());
+    expect(store?.get(e2eeWorkspaceCreationFeatureEnabledAtom)).toBe(true);
+    await act(async () => store?.set(developerModeEnabledAtom, false));
+    expect(store?.get(e2eeWorkspaceCreationFeatureEnabledAtom)).toBe(false);
+    expect(store?.get(e2eeWorkspaceCreationEnabledAtom)).toBe(true);
+    expect(container.querySelector('[role="switch"]')).toBeNull();
+  });
 
   it('keeps Roost in developer features without an experimental master gate', async () => {
     store?.set(experimentalFeaturesEnabledAtom, false);

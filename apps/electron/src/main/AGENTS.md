@@ -43,7 +43,11 @@ The [window Spec](../../../../specs/desktop-windows.md) owns the behavior contra
 
 `e2ee-custody.mts` owns an explicit main-process Scope, an OS-wrapped KEK and
 XChaCha20-Poly1305 protected blobs. It never joins the renderer IPC registry or
-starts from application bootstrap; the product E2EE switch remains closed.
+starts from application bootstrap. The narrow `e2ee.prepareCreation` IPC creates
+or reopens an account-bound local pending request; it exposes signed public genesis
+bytes only, with no arbitrary signing or key export. It rejects local composition
+before authentication/native access and checks the main-process account session.
+Content synchronization remains closed until its separate encrypted adapter exists.
 `e2ee-custody-electron.ts` is the readiness-gated native composition factory.
 Reject unavailable native encryption and Linux `basic_text`/unknown backends;
 never reuse auth cookie plaintext overrides or fall back to plaintext files.
@@ -61,6 +65,14 @@ Stop admission before shutdown, await actual native work, then clear owned KEK
 bytes. Failed opens preserve originals; no key deletion or migration. Interrupted
 KEK rewrap recovers only a validated same-key wrapper under the native OS mutex;
 never infer lock ownership from PID/age or generate a replacement KEK on failure.
+
+`services/e2ee-bootstrap.mts` commits immutable creation intent and signed genesis
+before retaining device/epoch keys. Return only after native device reopen and core
+epoch commitment verification. Exact retries retain original bytes and metadata;
+incomplete local writes, unknown remote outcomes and corruption must never trigger
+replacement keys or deletion. SQLite owns the cross-process creation mutex; scopes
+await admitted native work before releasing it. No network or plaintext data-plane
+activation belongs in this host workflow.
 
 The owning test uses synthetic authenticated safeStorage plus real crypto,
 filesystem and another OS process. It does not prove an OS keychain or all-platform

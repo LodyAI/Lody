@@ -13,7 +13,10 @@ import { useOrganization } from '@/hooks/useOrganization';
 import { useStableSession } from '@/hooks/useStableSession';
 import { useAuthSignOut } from './convex-provider';
 import { isElectronRenderer } from '@/lib/electron';
-import { cloudPlatformApi } from './cloud-platform-api';
+import { cloudPlatformApi, useCloudPlatformClient } from './cloud-platform-api';
+import { createCloudE2eeWorkspaces } from './cloud-e2ee-workspaces';
+import { cloudOperations } from '@/lib/cloud-api-operations';
+import { getIpcServices } from '@/lib/electron-ipc-client';
 import { installGitHubTokenPort } from '@/lib/github-token-port';
 import { cloudGitHubTokenPort } from './cloud-github-token-port';
 import { installCloudHttpPort } from '@/lib/cloud-http-port';
@@ -26,7 +29,15 @@ const CLOUD_HTTP_PORT = {
 } as const;
 
 function toWorkspaceSummary(
-  organization: { id: string; name: string; slug?: string | null },
+  organization: {
+    id: string;
+    name: string;
+    slug?: string | null;
+    contentMode?: string;
+    contentModeVersion?: number;
+    cryptoOrgId?: string;
+    genesisHash?: string;
+  },
   role: string | undefined
 ): WorkspaceSummary {
   return {
@@ -34,6 +45,12 @@ function toWorkspaceSummary(
     name: organization.name,
     slug: organization.slug ?? null,
     role: role ?? 'member',
+    ...(organization.contentMode === undefined ? {} : { contentMode: organization.contentMode }),
+    ...(organization.contentModeVersion === undefined
+      ? {}
+      : { contentModeVersion: organization.contentModeVersion }),
+    ...(organization.cryptoOrgId === undefined ? {} : { cryptoOrgId: organization.cryptoOrgId }),
+    ...(organization.genesisHash === undefined ? {} : { genesisHash: organization.genesisHash }),
   };
 }
 
@@ -44,6 +61,7 @@ function toWorkspaceSummary(
  */
 export function CloudPlatformProvider({ children }: { children: ReactNode }) {
   const electron = isElectronRenderer();
+  const cloudClient = useCloudPlatformClient();
   const localAgentEnabled = useAtomValue(localAgentEnabledAtom);
   const { syncMode: localAgentSyncMode } = resolveCloudPlatformRuntimePolicy({
     electron,
@@ -155,6 +173,22 @@ export function CloudPlatformProvider({ children }: { children: ReactNode }) {
     role: organization.role,
   };
 
+  const e2eeWorkspaces = useMemo(() => {
+    const native = electron ? getIpcServices()?.e2ee : undefined;
+    return createCloudE2eeWorkspaces({
+      session: () => sessionStore.get(),
+      ...(native ? { prepareCreation: (request) => native.prepareCreation(request) } : {}),
+      remote: {
+        create: (request) => cloudClient.mutation(cloudOperations.e2eeWorkspaces.create, request),
+        describe: (request) => cloudClient.query(cloudOperations.e2eeWorkspaces.describe, request),
+        history: (request) => cloudClient.query(cloudOperations.e2eeWorkspaces.history, request),
+      },
+      refreshWorkspaces: async () => {
+        await actions.current.refetchOrganizations();
+      },
+    });
+  }, [cloudClient, electron, sessionStore]);
+
   const provider = useMemo<PlatformProvider>(
     () => ({
       kind: 'cloud',
@@ -162,6 +196,7 @@ export function CloudPlatformProvider({ children }: { children: ReactNode }) {
         session: sessionStore,
         signOut: () => actions.current.signOut(),
       },
+      e2eeWorkspaces,
       workspaces: {
         state: workspacesStore,
         retry: async () => {
@@ -198,7 +233,7 @@ export function CloudPlatformProvider({ children }: { children: ReactNode }) {
         mode: localAgentSyncMode,
       },
     }),
-    [localAgentSyncMode, sessionStore, workspacesStore]
+    [e2eeWorkspaces, localAgentSyncMode, sessionStore, workspacesStore]
   );
 
   return <PlatformContext.Provider value={provider}>{children}</PlatformContext.Provider>;

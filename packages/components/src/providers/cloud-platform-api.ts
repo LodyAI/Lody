@@ -1,4 +1,5 @@
-import { useAction, useMutation } from 'convex/react';
+import { useAction, useConvex, useMutation } from 'convex/react';
+import { useMemo } from 'react';
 import { makeFunctionReference, type FunctionReference } from 'convex/server';
 import type { CloudAction, CloudApi, CloudMutation, CloudQuery } from '@lody/platform';
 import {
@@ -55,3 +56,22 @@ export const cloudPlatformApi: CloudApi = {
   useAction: <Args, Result>(operation: CloudAction<Args, Result>) =>
     useAction(actionReference(operation)) as (args: Args) => Promise<Result>,
 };
+
+/** Imperative operations for the app-owned workspace control lifecycle. Callers
+ * still supply the same public descriptors as reactive UI, never private APIs.
+ */
+export function useCloudPlatformClient() {
+  const client = useConvex();
+  return useMemo(
+    () => ({
+      query: <Args, Result>(operation: CloudQuery<Args, Result>, args: Args): Promise<Result> =>
+        client.query(queryReference(operation), args as never) as Promise<Result>,
+      mutation: <Args, Result>(
+        operation: CloudMutation<Args, Result>,
+        args: Args
+      ): Promise<Result> =>
+        client.mutation(mutationReference(operation), args as never) as Promise<Result>,
+    }),
+    [client]
+  );
+}

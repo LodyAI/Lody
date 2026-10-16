@@ -3,6 +3,15 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { IDBFactory } from 'fake-indexeddb';
 import {
+  listPendingE2eeWorkspaces,
+  readE2eeGenesisPin,
+  readObservedLedgerCheckpoint,
+  readWorkspaceModeProof,
+  retainWorkspaceModeProof,
+  saveE2eeGenesisPin,
+  savePendingE2eeWorkspace,
+} from '../src/lib/e2ee-workspace-storage';
+import {
   createSessionInputStorage,
   SESSION_INPUT_DATABASE,
 } from '../src/lib/session-input-storage';
@@ -91,6 +100,46 @@ afterEach(() => {
 });
 
 describe('maybeClearLodyCacheOnBoot', () => {
+  it('preserves encrypted creation intents, genesis pins and authenticated mode evidence during ordinary cache clear', async () => {
+    const hash = '12'.repeat(32);
+    const intent = {
+      accountId: 'account',
+      requestId: 'request',
+      name: 'Synthetic',
+      slug: 'synthetic',
+    };
+    savePendingE2eeWorkspace(localStorage, intent);
+    saveE2eeGenesisPin(localStorage, 'account', 'encrypted', hash);
+    const observed = { genesisHash: hash, headHash: hash, length: 1 };
+    localStorage.setItem(
+      `lody-e2ee-observed-ledger:account:encrypted:1:${hash}`,
+      JSON.stringify(observed)
+    );
+    retainWorkspaceModeProof(localStorage, 'account', 'synthetic', {
+      workspaceId: 'encrypted',
+      contentMode: 'e2ee',
+      contentModeVersion: 1,
+      genesisHash: hash,
+      cryptoOrgId: hash,
+      activation: 'control-only',
+    });
+    retainWorkspaceModeProof(localStorage, 'account', 'plain', {
+      workspaceId: 'plain',
+      contentMode: 'plaintext',
+      contentModeVersion: 1,
+    });
+    markCacheClearPending();
+    await maybeClearLodyCacheOnBoot();
+    expect(listPendingE2eeWorkspaces(localStorage, 'account')).toEqual([intent]);
+    expect(readE2eeGenesisPin(localStorage, 'account', 'encrypted')).toBe(hash);
+    expect(readObservedLedgerCheckpoint(localStorage, 'account', 'encrypted')).toEqual(observed);
+    expect(readWorkspaceModeProof(localStorage, 'account', 'encrypted', 'synthetic')).toMatchObject(
+      { contentMode: 'e2ee' }
+    );
+    expect(readWorkspaceModeProof(localStorage, 'account', 'plain', 'plain')).toMatchObject({
+      contentMode: 'plaintext',
+    });
+  });
   it('does nothing when no clear was requested', async () => {
     localStorage.setItem('lody:auth-token', 'token');
 

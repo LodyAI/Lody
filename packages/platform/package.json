@@ -27,7 +27,8 @@
   },
   "dependencies": {
     "@lody/shared": "workspace:*",
-    "effect": "catalog:"
+    "effect": "catalog:",
+    "@lody/cloud-api": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "catalog:",

@@ -1,5 +1,5 @@
 import { SessionPendingSendsHost } from '../components/chat/session-pending-sends-host';
-import { useEffect, useRef, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useAtomValue, useSetAtom, useStore } from 'jotai';
 import { LODY_PRESENCE_HEARTBEAT_MS, type MachineId, type WorkspaceId } from '@lody/shared';
 import { authTokenAtom, runtimeAtom, workspaceRuntimeInitFailureAtom } from '@/atoms/runtime';
@@ -44,6 +44,8 @@ import { isNativeAppShell } from '@/lib/native-platform';
 import { usePlatform } from '@lody/platform/react';
 import { useVisibleMachineMetas } from '@/hooks/use-visible-machine-metas';
 import { subscribeLocalAuthStateCleared } from '@/lib/auth';
+import { workspaceContentModeAtom } from '@/atoms/workspace-content-mode';
+import { readWorkspaceModeProof, retainWorkspaceModeProof } from '@/lib/e2ee-workspace-storage';
 
 const isExpectedRuntimeShutdownError = (error: unknown): boolean => {
   if (!(error instanceof Error)) {
@@ -85,6 +87,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
   const runtime = useAtomValue(runtimeAtom);
   const setRuntime = useSetAtom(runtimeAtom);
   const setRuntimeInitFailure = useSetAtom(workspaceRuntimeInitFailureAtom);
+  const setContentMode = useSetAtom(workspaceContentModeAtom);
   const store = useStore();
   const setControlConnectionState = useSetAtom(lodyControlConnectionStateAtom);
   const setRuntimeInitializing = useSetAtom(runtimeInitializingAtom);
@@ -170,17 +173,55 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
   const cachedId = workspaceSlug
     ? (getCachedWorkspaceId(workspaceSlug) as WorkspaceId | null)
     : null;
+  const [modeStorageRevision, setModeStorageRevision] = useState(0);
+  useEffect(() => {
+    const changed = (event: StorageEvent) => {
+      if (
+        event.key === null ||
+        event.key.startsWith('lody-workspace-mode-proof:') ||
+        event.key.startsWith('lody-e2ee-genesis-pin:') ||
+        event.key.startsWith('lody-e2ee-known-mode:')
+      )
+        setModeStorageRevision((value) => value + 1);
+    };
+    window.addEventListener('storage', changed);
+    return () => window.removeEventListener('storage', changed);
+  }, []);
+  const savedMode = useMemo(() => {
+    const revision = modeStorageRevision;
+    const id = workspaceId ?? cachedId;
+    if (!platform.e2eeWorkspaces || !accountId || !workspaceSlug || !id)
+      return { descriptor: null, error: null, revision };
+    try {
+      return {
+        descriptor: readWorkspaceModeProof(localStorage, accountId, id, workspaceSlug),
+        error: null,
+        revision,
+      };
+    } catch (error) {
+      return { descriptor: null, error, revision };
+    }
+  }, [
+    platform.e2eeWorkspaces,
+    accountId,
+    workspaceSlug,
+    workspaceId,
+    cachedId,
+    modeStorageRevision,
+  ]);
   const effectiveWorkspaceId = isLocalPlatform
     ? workspaceSlug
       ? ((implicitLocalWorkspace?.id as WorkspaceId | undefined) ?? null)
       : null
-    : resolveEffectiveWorkspaceId({
-        workspaceSlug,
-        cachedWorkspaceId: cachedId,
-        serverWorkspaceId: workspaceId,
-        prevWorkspaceSlug: prevWorkspaceSlugRef.current,
-        prevServerWorkspaceId: prevWorkspaceIdRef.current,
-      });
+    : platform.e2eeWorkspaces
+      ? (workspaceId ?? (savedMode.descriptor ? cachedId : null))
+      : resolveEffectiveWorkspaceId({
+          workspaceSlug,
+          cachedWorkspaceId: cachedId,
+          serverWorkspaceId: workspaceId,
+          prevWorkspaceSlug: prevWorkspaceSlugRef.current,
+          prevServerWorkspaceId: prevWorkspaceIdRef.current,
+        });
   const effectiveWorkspaceIdSource = isLocalPlatform
     ? effectiveWorkspaceId
       ? 'local-platform'
@@ -236,6 +277,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     // A failure describes one attempt; every new attempt starts without one.
     setRuntimeInitFailure(null);
+    setContentMode(null);
     if (!workspaceSlug) {
       console.info('RuntimeProvider: clear runtime due to missing workspaceSlug');
       setRuntime(null);
@@ -248,6 +290,14 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
 
     // Enter a new initialization cycle for this workspace.
     setRuntimeInitializing(true);
+    if (savedMode.error) {
+      setRuntime(null);
+      setRuntimeInitFailure({ workspaceSlug, errorType: describeErrorType(savedMode.error) });
+      setControlConnectionState('error');
+      setRuntimeInitializing(false);
+      return undefined;
+    }
+    if (platform.e2eeWorkspaces && !accountId) return undefined;
 
     // The Electron main-process setting decides whether cloud desktop uses a
     // dual local-first runtime or a cloud-only control runtime. Wait for that
@@ -273,6 +323,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
     let disposed = false;
     const initializationAbort = new AbortController();
     let workspaceRuntime: Awaited<ReturnType<typeof createWorkspaceRuntime>> | null = null;
+    let dataPlaneStarted = false;
     // Logging-only workspace id resolution inputs intentionally stay out of
     // this effect's dependency list. A cached id can create the runtime before
     // the server id arrives; server-id arrival must not tear down that runtime.
@@ -283,6 +334,35 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
       try {
         await previousShutdown.current;
         if (disposed) return;
+        if (platform.e2eeWorkspaces) {
+          // Neither a cached organization nor a developer preference authorizes
+          // opening the plaintext data plane. Resolve the persisted mode first.
+          const descriptor =
+            savedMode.descriptor ??
+            (await platform.e2eeWorkspaces.describe({
+              workspaceId: effectiveWorkspaceId,
+            }));
+          if (disposed) return;
+          if (descriptor.workspaceId !== effectiveWorkspaceId) {
+            throw new Error('Unsupported workspace content mode');
+          }
+          // A previous authenticated immutable mode can reopen offline. Pins
+          // and known encrypted modes remain sticky, even if the server lies.
+          retainWorkspaceModeProof(localStorage, accountId!, workspaceSlug, descriptor);
+          setContentMode({
+            accountId,
+            workspaceSlug,
+            workspaceId: effectiveWorkspaceId,
+            descriptor,
+          });
+          if ('contentMode' in descriptor && descriptor.contentMode === 'e2ee') {
+            setRuntime(null);
+            setRuntimeInitializing(false);
+            clearDocMetaCache();
+            clearPresenceStates();
+            return;
+          }
+        }
         // If the user requested a cache clear before the last reload, delete all
         // lody* IndexedDB + Cache Storage now — before the runtime opens the repo
         // DB, while nothing holds those databases open. No-op on normal boots.
@@ -300,6 +380,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
           workspaceIdSource,
           eagerSyncSurface,
         });
+        dataPlaneStarted = true;
         workspaceRuntime = await createWorkspaceRuntime({
           signal: initializationAbort.signal,
           accountId,
@@ -405,9 +486,12 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
       setRuntimeInitializing(true);
       clearDocMetaCache();
       clearPresenceStates();
-      previousShutdown.current = initialization.then(async () => {
-        if (workspaceRuntime) await workspaceRuntime.dispose();
-      });
+      // A superseded read-only describe owns no data-plane resources. Do not
+      // make another workspace wait for a lost response from that request.
+      if (dataPlaneStarted)
+        previousShutdown.current = initialization.then(async () => {
+          if (workspaceRuntime) await workspaceRuntime.dispose();
+        });
       void previousShutdown.current.catch((error: unknown) => {
         logRuntimeOperationError('cleanup dispose', error);
       });
@@ -418,6 +502,9 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
     clearPresenceStates,
     isLocalPlatform,
     platform.sync.mode,
+    platform.e2eeWorkspaces,
+    setContentMode,
+    savedMode,
     setControlConnectionState,
     setRuntimeInitializing,
     setRuntime,

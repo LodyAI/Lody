@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { useSetAtom } from 'jotai';
+import { useAtomValue, useSetAtom } from 'jotai';
+import { e2eeWorkspaceCreationFeatureEnabledAtom } from '@/atoms/settings';
 import { motion, AnimatePresence } from 'framer-motion';
 import * as stylex from '@stylexjs/stylex';
 import { ArrowRight, Building2, Check, Plus, RotateCcw } from 'lucide-react';
@@ -9,7 +10,13 @@ import type { WorkspaceId } from '@lody/shared';
 import { setWorkspaceContextAtom } from '@/atoms/workspace-context';
 import { cloudOperations } from '@/lib/cloud-api-operations';
 import { toast } from '@/lib/toast';
-import { useCloudQuery, usePlatform, usePlatformWorkspaces } from '@lody/platform/react';
+import {
+  useCloudQuery,
+  usePlatform,
+  usePlatformSession,
+  usePlatformWorkspaces,
+} from '@lody/platform/react';
+import { retainWorkspaceModeProof } from '@/lib/e2ee-workspace-storage';
 import { Button } from '@lody/ui/button';
 import { Input } from '@lody/ui/input';
 import { Field as UiField } from '@lody/ui/field';
@@ -113,6 +120,7 @@ export interface WorkspaceListEntry {
 }
 
 export interface WorkspaceScreenViewProps {
+  onOpenEncryptedCreation?: () => void;
   /** All workspaces the current user is a member of. */
   workspaces: WorkspaceListEntry[];
   /** Load state of the workspace list itself; non-ready never looks like "empty". */
@@ -168,6 +176,7 @@ export interface WorkspaceScreenViewProps {
 }
 
 export function WorkspaceScreenView({
+  onOpenEncryptedCreation,
   workspaces,
   workspacesStatus,
   workspacesError,
@@ -321,6 +330,11 @@ export function WorkspaceScreenView({
         ) : null
       }
     >
+      {onOpenEncryptedCreation && (
+        <Button variant="secondary" disabled={writePending} onClick={onOpenEncryptedCreation}>
+          {t('e2ee.create.open')}
+        </Button>
+      )}
       <AnimatePresence mode="wait" initial={false}>
         {creating ? (
           <motion.div
@@ -621,6 +635,9 @@ export function WorkspaceScreen({ onBack, onNext }: WorkspaceScreenProps) {
   const { t } = useTranslation();
   const analytics = useOnboardingAnalytics();
   const platform = usePlatform();
+  const encryptedCreationEnabled = useAtomValue(e2eeWorkspaceCreationFeatureEnabledAtom);
+  const session = usePlatformSession();
+  const accountId = session.status === 'authenticated' ? session.user.id : null;
   const workspaceState = usePlatformWorkspaces();
   const setWorkspaceContext = useSetAtom(setWorkspaceContextAtom);
 
@@ -853,7 +870,7 @@ export function WorkspaceScreen({ onBack, onNext }: WorkspaceScreenProps) {
     if (selectedWorkspaceId === null || writePending) return;
     const target = workspaces.find((workspace) => workspace.id === selectedWorkspaceId);
     if (!target?.slug) return;
-    if (selectedWorkspaceId === activeWorkspaceId) {
+    if (selectedWorkspaceId === activeWorkspaceId && !platform.e2eeWorkspaces) {
       commitWorkspaceContext(target);
       onNext();
       return;
@@ -869,7 +886,17 @@ export function WorkspaceScreen({ onBack, onNext }: WorkspaceScreenProps) {
     });
     const switchWrite = trackWorkspaceWrite(
       platform.workspaces,
-      platform.workspaces.setActive(selectedWorkspaceId)
+      (async () => {
+        if (platform.e2eeWorkspaces) {
+          const mode = await platform.e2eeWorkspaces.describe({ workspaceId: selectedWorkspaceId });
+          if (!accountId || mode.workspaceId !== selectedWorkspaceId)
+            throw new Error('Unknown workspace content mode');
+          retainWorkspaceModeProof(localStorage, accountId, target.slug, mode);
+          if ('contentMode' in mode && mode.contentMode === 'e2ee') return mode;
+        }
+        await platform.workspaces.setActive(selectedWorkspaceId);
+        return null;
+      })()
     );
     const staleTimer = setTimeout(() => {
       if (writeAttemptRef.current !== attempt) return;
@@ -897,7 +924,7 @@ export function WorkspaceScreen({ onBack, onNext }: WorkspaceScreenProps) {
       );
     }, WORKSPACE_WRITE_STALE_MS);
     void switchWrite.then(
-      () => {
+      (mode) => {
         clearTimeout(staleTimer);
         if (writeAttemptRef.current !== attempt) return;
         setSaving(false);
@@ -907,6 +934,11 @@ export function WorkspaceScreen({ onBack, onNext }: WorkspaceScreenProps) {
           operation: 'workspace_switch',
           attempt,
         });
+        if (mode?.contentMode === 'e2ee') {
+          commitWorkspaceContext(null);
+          window.location.assign(`/workspace/e2ee/${encodeURIComponent(mode.workspaceId)}`);
+          return;
+        }
         commitWorkspaceContext(target);
         onNext();
       },
@@ -937,6 +969,8 @@ export function WorkspaceScreen({ onBack, onNext }: WorkspaceScreenProps) {
     commitWorkspaceContext,
     onNext,
     platform.workspaces,
+    platform.e2eeWorkspaces,
+    accountId,
     selectedWorkspaceId,
     t,
     writePending,
@@ -1107,6 +1141,11 @@ export function WorkspaceScreen({ onBack, onNext }: WorkspaceScreenProps) {
         </ErrorBoundary>
       ) : null}
       <WorkspaceScreenView
+        onOpenEncryptedCreation={
+          encryptedCreationEnabled
+            ? () => window.location.assign('/workspace/create?allowExisting=true')
+            : undefined
+        }
         workspaces={workspaces}
         workspacesStatus={workspaceState.status}
         workspacesError={

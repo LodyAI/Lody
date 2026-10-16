@@ -45,3 +45,15 @@ telemetry, or managed-runtime downloads, as routed by the root instructions.
   keys. Preserve uncertain failure reasons and writes; no plaintext-file fallback.
 - Native fixtures use random UUIDs and isolated test keychains only. Verify exact
   cleanup; never change user keychains or global settings. See [validation](README.md).
+
+## E2EE workspace control
+
+- `e2eeWorkspaces` is an optional cloud control port; `prepareCreation` exists only
+  with persistent host custody. It is separate from the unconnected `./host-keys`
+  experiment. The developer preference gates new creation, not existing reads.
+- Keep request identity and original genesis across unknown results. Never expose
+  private keys, silently replace interrupted preparation, or infer plaintext from
+  missing mode fields. A retained encrypted identity rejects mode downgrade.
+- Control-only encrypted workspaces must not acquire ordinary content/execution
+  transports. Before changing creation, mode admission, cache cleanup or ledger UI,
+  read the [bootstrap guide](../../.agents/docs/e2ee-workspace-bootstrap.md).
