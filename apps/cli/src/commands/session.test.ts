@@ -1,3 +1,10 @@
+import { Console } from 'node:console';
+import { Writable } from 'node:stream';
+import * as commandRuntime from '@/lib/command-runtime';
+import * as telemetry from '@/instrument';
+import { getLogger } from '@/utils/logger';
+import { makeWorkspaceCommandManagers } from '@/lib/workspace-command-manager';
+import { runSessionCommand } from './session';
 import { z } from 'zod';
 import { getSessionCancelProtocolFields } from './session';
 import { CURRENT_MACHINE_PROTOCOL_CAPABILITIES } from '@lody/shared';
@@ -2775,4 +2782,119 @@ describe('Stop protocol negotiation', () => {
       )
     ).toEqual({ cancelId: 'cancel-id', pauseInbox: false });
   });
+});
+
+describe('session command output boundary', () => {
+  it.each(['json', 'jsonl', 'human'] as const)(
+    'keeps setup, cleanup and exit diagnostics separate from %s results',
+    async (mode) => {
+      const out: string[] = [];
+      const err: string[] = [];
+      const capture = (chunks: string[]) =>
+        new Writable({
+          write(chunk, _encoding, done) {
+            chunks.push(String(chunk));
+            done();
+          },
+        });
+      vi.stubGlobal('console', new Console({ stdout: capture(out), stderr: capture(err) }));
+      const logger = getLogger('output-regression');
+      const exitCode = process.exitCode;
+      const setup = vi.spyOn(commandRuntime, 'syncCommandTime').mockImplementation(async () => {
+        logger.info('setup diagnostic');
+      });
+      const flush = vi.spyOn(telemetry, 'flushTelemetry').mockImplementation(async () => {
+        logger.info('exit diagnostic');
+      });
+      const withManager = makeWorkspaceCommandManagers();
+      try {
+        await runSessionCommand(mode === 'human' ? {} : { [mode]: true }, async () => {
+          await withManager(
+            'synthetic-workspace',
+            {
+              userId: 'synthetic-user',
+              token: 'synthetic-token',
+              machineId: 'synthetic-machine',
+              authBaseUrl: 'https://example.invalid',
+            },
+            async () => ({
+              cleanUp: async () => {
+                logger.info('transport detached');
+              },
+              isPresenceReleased: () => true,
+            }),
+            async () => {
+              commandRuntime.printJson({ ok: true, alreadyStopped: true });
+            },
+            (error) => {
+              throw error;
+            }
+          );
+        });
+        expect(process.exitCode).toBe(0);
+        if (mode === 'human') {
+          expect(out.join('')).toContain('transport detached');
+          expect(err.join('')).toBe('');
+        } else {
+          expect(JSON.parse(out.join(''))).toEqual({ ok: true, alreadyStopped: true });
+          for (const diagnostic of ['setup diagnostic', 'transport detached', 'exit diagnostic']) {
+            expect(err.join('')).toContain(diagnostic);
+          }
+        }
+        logger.info('after command');
+        expect(out.join('')).toContain('after command');
+      } finally {
+        process.exitCode = exitCode;
+        setup.mockRestore();
+        flush.mockRestore();
+        vi.unstubAllGlobals();
+      }
+    }
+  );
+
+  it.each(['json', 'jsonl'] as const)(
+    'preserves %s errors and restores logging after failure',
+    async (mode) => {
+      const out: string[] = [];
+      const err: string[] = [];
+      const capture = (chunks: string[]) =>
+        new Writable({
+          write(chunk, _encoding, done) {
+            chunks.push(String(chunk));
+            done();
+          },
+        });
+      vi.stubGlobal('console', new Console({ stdout: capture(out), stderr: capture(err) }));
+      const logger = getLogger('output-regression');
+      const exitCode = process.exitCode;
+      const setup = vi.spyOn(commandRuntime, 'syncCommandTime').mockResolvedValue(undefined);
+      const flush = vi.spyOn(telemetry, 'flushTelemetry').mockImplementation(async () => {
+        logger.info('failure exit diagnostic');
+      });
+      try {
+        await runSessionCommand({ [mode]: true }, async () => {
+          try {
+            throw new Error('synthetic failure');
+          } finally {
+            logger.info('failed action cleanup');
+          }
+        });
+        expect(process.exitCode).toBe(1);
+        expect(JSON.parse(out.join(''))).toEqual(
+          mode === 'json'
+            ? { ok: false, error: 'synthetic failure' }
+            : { type: 'error', error: 'synthetic failure' }
+        );
+        expect(err.join('')).toContain('failed action cleanup');
+        expect(err.join('')).toContain('failure exit diagnostic');
+        logger.info('after failure');
+        expect(out.join('')).toContain('after failure');
+      } finally {
+        process.exitCode = exitCode;
+        setup.mockRestore();
+        flush.mockRestore();
+        vi.unstubAllGlobals();
+      }
+    }
+  );
 });

@@ -54,6 +54,11 @@ the one-time launcher correction and restart are needed for that deployment.
 Older releases without versioned readiness cannot be verified by the new remote
 handoff and must be started explicitly if a rollback is required.
 
+## Structured Session output
+
+Session commands with `--json` or `--jsonl` reserve stdout for structured results.
+Diagnostic logs, including workspace transport cleanup, go to stderr.
+
 ## Workspace discovery
 
 The cloud workspace CLI and Lody MCP share resource queries. Lists return 20 entries

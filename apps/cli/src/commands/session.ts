@@ -4440,7 +4440,7 @@ function printHumanSessionStatus(result: SessionStatusResult): void {
   console.log(`parentSessionId: ${result.parentSessionId ?? '-'}`);
 }
 
-async function runSessionCommand(
+export async function runSessionCommand(
   options: CommonOptions,
   action: () => Promise<void>
 ): Promise<void> {
@@ -4448,6 +4448,8 @@ async function runSessionCommand(
     rootLogger.setDebug(true);
   }
 
+  // Keep diagnostics off stdout through setup, action, cleanup, and exit flushing.
+  const restoreLogging = options.json || options.jsonl ? routeLoggerToStderr() : () => {};
   try {
     await syncCommandTime('session');
     await action();
@@ -4467,6 +4469,8 @@ async function runSessionCommand(
       getLogger('session').error(message);
     }
     await exitSessionCommand(1);
+  } finally {
+    restoreLogging();
   }
 }
 
@@ -5074,184 +5078,179 @@ const sessionObserveCommand = new Command('observe')
       sessionIdArg: string | undefined,
       options: CommonOptions & { follow?: boolean; all?: boolean }
     ) => {
-      const restoreLogging = options.json || options.jsonl ? routeLoggerToStderr() : () => {};
-      try {
-        await runSessionCommand(options, async () => {
-          const selection = resolveObserveSelection(
-            sessionIdArg,
-            options,
-            process.env.LODY_SESSION_ID
-          );
-          const auth = getAuthContextOrThrow();
-          const sessionId = selection.sessionId;
-          const workspace = selection.all
-            ? selectWorkspaceSummary(await listWorkspacesForToken(auth.token), options.workspace)
-            : await resolveWorkspaceForSessionOrThrow(auth, sessionId as SessionId, {
-                workspace: options.workspace,
-                reason: `session.observe.resolve:${sessionId}`,
-              });
-          await withWorkspaceManager(auth, workspace, async (manager) => {
-            await syncWorkspaceMetaForRead(manager, 'session.observe:meta');
-            const stop = new AbortController();
-            let resolveStopped = () => {};
-            const stopped = new Promise<void>((resolve) => {
-              resolveStopped = resolve;
+      await runSessionCommand(options, async () => {
+        const selection = resolveObserveSelection(
+          sessionIdArg,
+          options,
+          process.env.LODY_SESSION_ID
+        );
+        const auth = getAuthContextOrThrow();
+        const sessionId = selection.sessionId;
+        const workspace = selection.all
+          ? selectWorkspaceSummary(await listWorkspacesForToken(auth.token), options.workspace)
+          : await resolveWorkspaceForSessionOrThrow(auth, sessionId as SessionId, {
+              workspace: options.workspace,
+              reason: `session.observe.resolve:${sessionId}`,
             });
-            let failure: unknown;
-            const stopObserving = () => {
-              stop.abort();
-              resolveStopped();
-            };
-            const fail = (error: unknown) => {
-              if (!stop.signal.aborted) {
-                failure = error;
-                stopObserving();
-              }
-            };
-            const write = createSessionObserveWriter({
-              output: process.stdout,
-              workspaceId: workspace.id as WorkspaceId,
-              streamId: uuidV4(),
-              now: getServerNow,
-              signal: stop.signal,
-            });
-            const emit = options.jsonl ? write : async () => {};
-            const attempt = <T>(run: () => Promise<T>) =>
-              Effect.tryPromise({ try: run, catch: (error) => error });
-            await Effect.runPromise(
-              Effect.scoped(
-                Effect.gen(function* () {
-                  yield* Effect.acquireRelease(
+        await withWorkspaceManager(auth, workspace, async (manager) => {
+          await syncWorkspaceMetaForRead(manager, 'session.observe:meta');
+          const stop = new AbortController();
+          let resolveStopped = () => {};
+          const stopped = new Promise<void>((resolve) => {
+            resolveStopped = resolve;
+          });
+          let failure: unknown;
+          const stopObserving = () => {
+            stop.abort();
+            resolveStopped();
+          };
+          const fail = (error: unknown) => {
+            if (!stop.signal.aborted) {
+              failure = error;
+              stopObserving();
+            }
+          };
+          const write = createSessionObserveWriter({
+            output: process.stdout,
+            workspaceId: workspace.id as WorkspaceId,
+            streamId: uuidV4(),
+            now: getServerNow,
+            signal: stop.signal,
+          });
+          const emit = options.jsonl ? write : async () => {};
+          const attempt = <T>(run: () => Promise<T>) =>
+            Effect.tryPromise({ try: run, catch: (error) => error });
+          await Effect.runPromise(
+            Effect.scoped(
+              Effect.gen(function* () {
+                yield* Effect.acquireRelease(
+                  Effect.sync(() => {
+                    process.once('SIGINT', stopObserving);
+                    process.once('SIGTERM', stopObserving);
+                  }),
+                  () =>
                     Effect.sync(() => {
-                      process.once('SIGINT', stopObserving);
-                      process.once('SIGTERM', stopObserving);
-                    }),
-                    () =>
-                      Effect.sync(() => {
-                        process.off('SIGINT', stopObserving);
-                        process.off('SIGTERM', stopObserving);
+                      process.off('SIGINT', stopObserving);
+                      process.off('SIGTERM', stopObserving);
+                    })
+                );
+                if (selection.all) {
+                  const reader = new WorkspaceSessionObserver({
+                    listMetas: () => listSessionMetasForWorkspace(manager),
+                    async readMeta(id) {
+                      const raw = await manager.repo.getDocMeta(getSessionRoomId(id));
+                      if (isLoroRepoDocDeleted(raw)) return null;
+                      if (!raw?.meta) throw new Error(`Session metadata is unavailable: ${id}`);
+                      return raw.meta as SessionMeta;
+                    },
+                    open: (id, onEvent) =>
+                      acquireSessionObservation({
+                        manager,
+                        sessionId: id,
+                        signal: stop.signal,
+                        emit: onEvent,
+                        onError: fail,
+                      }),
+                    emit,
+                    onError: fail,
+                    follow: options.follow === true,
+                  });
+                  yield* Effect.acquireRelease(Effect.succeed(reader), (owned) =>
+                    Effect.promise(() => owned.close())
+                  );
+                  yield* Effect.acquireRelease(
+                    Effect.sync(() =>
+                      manager.repo.watch(
+                        (event) => {
+                          if (event.kind === 'doc-metadata') {
+                            const id = getSessionIdFromRoomId(event.docId);
+                            if (id) reader.refresh(id);
+                          }
+                        },
+                        { kinds: ['doc-metadata'] }
+                      )
+                    ),
+                    (watch) => Effect.sync(() => watch.unsubscribe())
+                  );
+                  yield* Effect.acquireRelease(
+                    Effect.sync(() => manager.onMetaRoomSynced(() => reader.refresh())),
+                    (unsubscribe) => Effect.sync(unsubscribe)
+                  );
+                  yield* attempt(() => reader.start());
+                  if (!options.jsonl) {
+                    if (options.json)
+                      printJson({
+                        ok: true,
+                        version: 1,
+                        workspaceId: workspace.id,
+                        sessions: reader.current,
+                      });
+                    else
+                      for (const session of reader.current)
+                        console.log(
+                          `${session.sessionId}\t${session.state}\t${session.title ?? ''}`
+                        );
+                  }
+                  if (options.follow) yield* Effect.promise(() => stopped);
+                } else {
+                  if (!sessionId) throw new Error('Missing Session ID.');
+                  const handle = yield* Effect.acquireRelease(
+                    attempt(() =>
+                      acquireSessionObservation({
+                        manager,
+                        sessionId,
+                        signal: stop.signal,
+                        emit,
+                        onError: fail,
+                        onRemoved: resolveStopped,
+                      })
+                    ),
+                    (owned) =>
+                      Effect.promise(async () => {
+                        await owned?.close();
                       })
                   );
-                  if (selection.all) {
-                    const reader = new WorkspaceSessionObserver({
-                      listMetas: () => listSessionMetasForWorkspace(manager),
-                      async readMeta(id) {
-                        const raw = await manager.repo.getDocMeta(getSessionRoomId(id));
-                        if (isLoroRepoDocDeleted(raw)) return null;
-                        if (!raw?.meta) throw new Error(`Session metadata is unavailable: ${id}`);
-                        return raw.meta as SessionMeta;
-                      },
-                      open: (id, onEvent) =>
-                        acquireSessionObservation({
-                          manager,
-                          sessionId: id,
-                          signal: stop.signal,
-                          emit: onEvent,
-                          onError: fail,
-                        }),
-                      emit,
-                      onError: fail,
-                      follow: options.follow === true,
-                    });
-                    yield* Effect.acquireRelease(Effect.succeed(reader), (owned) =>
-                      Effect.promise(() => owned.close())
-                    );
-                    yield* Effect.acquireRelease(
-                      Effect.sync(() =>
-                        manager.repo.watch(
-                          (event) => {
-                            if (event.kind === 'doc-metadata') {
-                              const id = getSessionIdFromRoomId(event.docId);
-                              if (id) reader.refresh(id);
-                            }
-                          },
-                          { kinds: ['doc-metadata'] }
-                        )
-                      ),
-                      (watch) => Effect.sync(() => watch.unsubscribe())
-                    );
-                    yield* Effect.acquireRelease(
-                      Effect.sync(() => manager.onMetaRoomSynced(() => reader.refresh())),
-                      (unsubscribe) => Effect.sync(unsubscribe)
-                    );
-                    yield* attempt(() => reader.start());
-                    if (!options.jsonl) {
-                      if (options.json)
-                        printJson({
-                          ok: true,
-                          version: 1,
-                          workspaceId: workspace.id,
-                          sessions: reader.current,
-                        });
-                      else
-                        for (const session of reader.current)
-                          console.log(
-                            `${session.sessionId}\t${session.state}\t${session.title ?? ''}`
-                          );
-                    }
+                  if (!handle) return;
+                  const { observer } = handle;
+                  yield* Effect.acquireRelease(
+                    Effect.sync(() =>
+                      manager.repo.watch(
+                        (event) => {
+                          if (
+                            event.kind === 'doc-metadata' &&
+                            event.docId === getSessionRoomId(sessionId)
+                          )
+                            observer.refresh();
+                        },
+                        { kinds: ['doc-metadata'] }
+                      )
+                    ),
+                    (watch) => Effect.sync(() => watch.unsubscribe())
+                  );
+                  observer.refresh();
+                  yield* attempt(() => observer.flush());
+                  if (observer.current) {
+                    if (options.jsonl) yield* attempt(() => write({ type: 'ready', sessionId }));
+                    else if (options.json)
+                      printJson({
+                        ok: true,
+                        version: 1,
+                        workspaceId: workspace.id,
+                        session: observer.current,
+                      });
+                    else
+                      console.log(
+                        `${sessionId}\t${observer.current.state}\t${observer.current.latestTurn?.state ?? '-'}\t${observer.current.title ?? ''}`
+                      );
                     if (options.follow) yield* Effect.promise(() => stopped);
-                  } else {
-                    if (!sessionId) throw new Error('Missing Session ID.');
-                    const handle = yield* Effect.acquireRelease(
-                      attempt(() =>
-                        acquireSessionObservation({
-                          manager,
-                          sessionId,
-                          signal: stop.signal,
-                          emit,
-                          onError: fail,
-                          onRemoved: resolveStopped,
-                        })
-                      ),
-                      (owned) =>
-                        Effect.promise(async () => {
-                          await owned?.close();
-                        })
-                    );
-                    if (!handle) return;
-                    const { observer } = handle;
-                    yield* Effect.acquireRelease(
-                      Effect.sync(() =>
-                        manager.repo.watch(
-                          (event) => {
-                            if (
-                              event.kind === 'doc-metadata' &&
-                              event.docId === getSessionRoomId(sessionId)
-                            )
-                              observer.refresh();
-                          },
-                          { kinds: ['doc-metadata'] }
-                        )
-                      ),
-                      (watch) => Effect.sync(() => watch.unsubscribe())
-                    );
-                    observer.refresh();
-                    yield* attempt(() => observer.flush());
-                    if (observer.current) {
-                      if (options.jsonl) yield* attempt(() => write({ type: 'ready', sessionId }));
-                      else if (options.json)
-                        printJson({
-                          ok: true,
-                          version: 1,
-                          workspaceId: workspace.id,
-                          session: observer.current,
-                        });
-                      else
-                        console.log(
-                          `${sessionId}\t${observer.current.state}\t${observer.current.latestTurn?.state ?? '-'}\t${observer.current.title ?? ''}`
-                        );
-                      if (options.follow) yield* Effect.promise(() => stopped);
-                    }
                   }
-                  if (failure) yield* Effect.fail(failure);
-                })
-              )
-            );
-          });
+                }
+                if (failure) yield* Effect.fail(failure);
+              })
+            )
+          );
         });
-      } finally {
-        restoreLogging();
-      }
+      });
     }
   );
 
