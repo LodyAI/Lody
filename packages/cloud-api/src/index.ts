@@ -381,9 +381,9 @@ type SeatInvitePreview =
 export type CloudApi = {
   /** Optional developer-only E2EE control plane; does not authorize content access. */
   e2eeWorkspaces: {
-    create: Mutation<E2eeWorkspaceCreateRequest, E2eeWorkspaceCreateResult>;
+    create: Action<E2eeWorkspaceCreateRequest, E2eeWorkspaceCreateResult>;
     describe: Query<{ workspaceId: string }, WorkspaceAdmissionDescriptor>;
-    history: Query<E2eeWorkspaceHistoryRequest, E2eeWorkspaceHistoryPage>;
+    history: Action<E2eeWorkspaceHistoryRequest, E2eeWorkspaceHistoryPage>;
   };
   /** Optional E2EE ciphertext staging. No ordinary/local product constructs it. */
   e2eeRecoveryVault: {

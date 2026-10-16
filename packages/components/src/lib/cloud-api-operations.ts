@@ -138,9 +138,9 @@ const action = <Reference extends FunctionReference<'action'>>(
  */
 export const cloudOperations = {
   e2eeWorkspaces: {
-    create: mutation<ConvexApi['e2eeWorkspaces']['create']>('e2eeWorkspaces:create'),
+    create: action<ConvexApi['e2eeWorkspaces']['create']>('e2eeWorkspaces:create'),
     describe: query<ConvexApi['e2eeWorkspaces']['describe']>('e2eeWorkspaces:describe'),
-    history: query<ConvexApi['e2eeWorkspaces']['history']>('e2eeWorkspaces:history'),
+    history: action<ConvexApi['e2eeWorkspaces']['history']>('e2eeWorkspaces:history'),
   },
   promptShortcuts: {
     stageDocument: mutation<ConvexApi['promptShortcuts']['stageDocument']>(

@@ -59,3 +59,9 @@ Legacy organizations with all four mode/crypto fields absent may receive an expl
 Recovery enrollment, approved device joining, ledger mutations, protected data transports and all-platform custody remain separate batches. Closing the creation option preserves existing control access and pending reconciliation. This preview does not establish production deployment, native OS keychain usability, recovery coverage, or encrypted real-time collaboration.
 
 Rollout order: deploy the backend exposing `e2eeWorkspaces.describe` before shipping the client. Ordinary workspaces also use this operation to obtain their first admission record; disabling the developer preference does not bypass it.
+
+## Private ledger storage behind the cloud port
+
+Creation and history use Convex actions; mode description remains a query. The private backend stores original signed ledger records in a separate Streams bucket and verifies complete core authorization before conditional append. No public DTO exposes a Streams address or credential. Clients continue verifying original records and retained checkpoints independently.
+
+Creation spans a database reservation and an external atomic genesis write/readback. A pending request retains its original bytes; only the backend attempt that owns the durable writer can dispatch. A settled failure before any write dispatch can release ownership for exact retry. Once dispatched, an unknown result is resolved by reading its original position, not by timeout, blind replay or re-signing. Workspace deletion waits for that writer and confirmed external erasure. This boundary does not enable the content runtime or provide a product ledger-editing UI.

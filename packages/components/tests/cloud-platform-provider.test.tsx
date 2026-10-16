@@ -3,10 +3,12 @@
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { getFunctionName, type FunctionReference } from 'convex/server';
 import type {
   PlatformProvider,
   PlatformSessionState,
   E2eeWorkspacePrepared,
+  E2eeWorkspacePrepareInput,
   PlatformE2eeWorkspaces,
 } from '@lody/platform';
 import { usePlatform } from '@lody/platform/react';
@@ -14,18 +16,44 @@ import { usePlatform } from '@lody/platform/react';
 const fixture = vi.hoisted(() => ({
   session: {} as Record<string, unknown>,
   organization: {} as Record<string, unknown>,
-  cloudClient: { query: async () => undefined, mutation: async () => undefined },
+  electron: false,
+  native: undefined as
+    | {
+        e2ee: {
+          prepareCreation: (input: E2eeWorkspacePrepareInput) => Promise<E2eeWorkspacePrepared>;
+        };
+      }
+    | undefined,
+  cloudClient: {
+    query: async (_reference: FunctionReference<'query'>, _args: unknown): Promise<unknown> => {
+      throw new Error('unexpected query');
+    },
+    mutation: async (
+      _reference: FunctionReference<'mutation'>,
+      _args: unknown
+    ): Promise<unknown> => {
+      throw new Error('unexpected mutation');
+    },
+    action: async (_reference: FunctionReference<'action'>, _args: unknown): Promise<unknown> => {
+      throw new Error('unexpected action');
+    },
+  },
 }));
 
 vi.mock('jotai', () => ({ useAtomValue: () => false }));
 vi.mock('@/atoms/local-probe', () => ({ localAgentEnabledAtom: 'local-agent' }));
-vi.mock('@/lib/electron', () => ({ isElectronRenderer: () => false }));
+vi.mock('@/lib/electron', () => ({ isElectronRenderer: () => fixture.electron }));
+vi.mock('@/lib/electron-ipc-client', () => ({ getIpcServices: () => fixture.native }));
 vi.mock('@/hooks/useStableSession', () => ({ useStableSession: () => fixture.session }));
 vi.mock('@/hooks/useOrganization', () => ({ useOrganization: () => fixture.organization }));
 vi.mock('@/providers/convex-provider', () => ({ useAuthSignOut: () => async () => {} }));
-vi.mock('@/providers/cloud-platform-api', () => ({
-  cloudPlatformApi: {},
-  useCloudPlatformClient: () => fixture.cloudClient,
+vi.mock('convex/react', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('convex/react')>()),
+  useConvex: () => fixture.cloudClient,
+}));
+vi.mock('@/hooks/use-recoverable-convex-query', () => ({
+  usePublicConvexQuery: () => undefined,
+  useRecoverableConvexQuery: () => undefined,
 }));
 vi.mock('@/providers/cloud-github-token-port', () => ({ cloudGitHubTokenPort: {} }));
 vi.mock('@/lib/github-token-port', () => ({ installGitHubTokenPort: () => () => {} }));
@@ -65,6 +93,14 @@ describe('CloudPlatformProvider', () => {
 
   beforeEach(() => {
     seen.length = 0;
+    fixture.electron = false;
+    fixture.native = undefined;
+    fixture.cloudClient.query = async () => {
+      throw new Error('unexpected query');
+    };
+    fixture.cloudClient.action = async () => {
+      throw new Error('unexpected action');
+    };
     container = document.createElement('div');
     document.body.append(container);
     root = createRoot(container);
@@ -93,6 +129,79 @@ describe('CloudPlatformProvider', () => {
       name: 'second',
       role: 'owner',
     });
+  });
+
+  it('uses actions for creation and fixed-checkpoint history while keeping mode lookup a query', async () => {
+    refetch('Encrypted');
+    const prepared: E2eeWorkspacePrepared = {
+      accountId: 'user-a',
+      requestId: 'request-a',
+      name: 'Encrypted',
+      slug: 'encrypted',
+      genesisRecordHex: '01',
+      genesisHashHex: 'ab'.repeat(32),
+    };
+    const receipt = {
+      workspaceId: 'workspace-encrypted',
+      name: prepared.name,
+      slug: prepared.slug,
+      contentMode: 'e2ee' as const,
+      contentModeVersion: 1 as const,
+      cryptoOrgId: prepared.genesisHashHex,
+      genesisHash: prepared.genesisHashHex,
+      activation: 'control-only' as const,
+    };
+    const createRequest = {
+      accountId: prepared.accountId,
+      requestId: prepared.requestId,
+      name: prepared.name,
+      slug: prepared.slug,
+      genesisRecordHex: prepared.genesisRecordHex,
+      developerMode: true as const,
+    };
+    const historyRequest = {
+      workspaceId: receipt.workspaceId,
+      cursor: 'page-two',
+      checkpoint: { headHash: 'cd'.repeat(32), length: 2 },
+    };
+    const historyPage = {
+      workspaceId: receipt.workspaceId,
+      genesisHash: receipt.genesisHash,
+      checkpoint: { ...historyRequest.checkpoint },
+      startIndex: 1,
+      recordsHex: ['02'],
+      nextCursor: null,
+    };
+    fixture.electron = true;
+    fixture.native = { e2ee: { prepareCreation: async () => ({ ...prepared }) } };
+    fixture.cloudClient.query = async (reference, args) => {
+      expect(getFunctionName(reference)).toBe('e2eeWorkspaces:describe');
+      expect(args).toEqual({ workspaceId: receipt.workspaceId });
+      return receipt;
+    };
+    fixture.cloudClient.action = async (reference, args) => {
+      switch (getFunctionName(reference)) {
+        case 'e2eeWorkspaces:create':
+          expect(args).toEqual(createRequest);
+          return receipt;
+        case 'e2eeWorkspaces:history':
+          expect(args).toEqual(historyRequest);
+          return historyPage;
+        default:
+          throw new Error('unexpected action');
+      }
+    };
+    await render();
+    const port = seen.at(-1)!.e2eeWorkspaces!;
+    await expect(port.prepareCreation!(prepared)).resolves.toEqual(prepared);
+    await expect(port.create(createRequest)).resolves.toEqual(receipt);
+    await expect(port.describe({ workspaceId: receipt.workspaceId })).resolves.toEqual(receipt);
+    await expect(port.history(historyRequest)).resolves.toEqual(historyPage);
+
+    fixture.cloudClient.action = async () => {
+      throw new Error('history temporarily unavailable');
+    };
+    await expect(port.history(historyRequest)).rejects.toThrow('history temporarily unavailable');
   });
 });
 

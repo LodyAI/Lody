@@ -71,6 +71,8 @@ export function useCloudPlatformClient() {
         args: Args
       ): Promise<Result> =>
         client.mutation(mutationReference(operation), args as never) as Promise<Result>,
+      action: <Args, Result>(operation: CloudAction<Args, Result>, args: Args): Promise<Result> =>
+        client.action(actionReference(operation), args as never) as Promise<Result>,
     }),
     [client]
   );

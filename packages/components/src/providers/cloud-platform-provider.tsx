@@ -179,9 +179,9 @@ export function CloudPlatformProvider({ children }: { children: ReactNode }) {
       session: () => sessionStore.get(),
       ...(native ? { prepareCreation: (request) => native.prepareCreation(request) } : {}),
       remote: {
-        create: (request) => cloudClient.mutation(cloudOperations.e2eeWorkspaces.create, request),
+        create: (request) => cloudClient.action(cloudOperations.e2eeWorkspaces.create, request),
         describe: (request) => cloudClient.query(cloudOperations.e2eeWorkspaces.describe, request),
-        history: (request) => cloudClient.query(cloudOperations.e2eeWorkspaces.history, request),
+        history: (request) => cloudClient.action(cloudOperations.e2eeWorkspaces.history, request),
       },
       refreshWorkspaces: async () => {
         await actions.current.refetchOrganizations();

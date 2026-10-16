@@ -34,3 +34,9 @@ Translation: current
 Postinstall 删除了通用 `install-app-deps` 命令，因为该命令不遵循已有的 `npmRebuild: false` 打包设置。SQLite 和 node-pty 保留 Node-API 预编译产物，Electron 自己的二进制安装器和 macOS Sparkle 专用构建保持不变。打包仍按目标准备二进制并运行探针。运行时版本与 [Node-API 下限](../bug-fix/2026-09-09-node-api-runtime-floor.md)均未改变。
 
 子进程回归测试在旧脚本上失败、修复后通过；允许既有打包夹具访问 npm 后，原生依赖准备与 Sparkle 的 11 项测试全部通过。真实 macOS arm64 postinstall 已完成，包括 Sparkle 原生构建。同一 SQLite 预编译产物在 Node 和 Electron `44.7.0` 下完成内存数据库读写，node-pty 也在两者中加载成功。这些检查不证明 Windows/Linux 执行、其他架构打包、签名安装包或部署。
+
+## 私有 Streams 账本调整
+
+用户确认让 Streams 在 Convex 背后保存原始账本。共享组合层改用 action 创建和读取历史，describe 仍为 query，公开 DTO 不变。私有宿主负责签名和权限验证、条件追加、固定待处理请求以及跨服务删除恢复。客户端独立验证和仅开放控制功能的运行时边界保持不变。上文测试数量属于前一批改动；本批存储和 action 接线验证在交付时单独报告，不据此声称已部署或完成全栈 Beta 验收。
+
+本次 action 接线验证：使用原生 Git 环境的公共仓库完整 `pnpm check`、格式与文档检查已通过；独立与组合环境的云组合测试均为 8/8。对应私有宿主的完整 affected 检查通过，最终后端测试 750/750，真实本地 Convex/SQLite Streams 联调 19/19（18 个场景及父测试）。新一轮独立对抗审查未发现有证据的 P0/P1。上文早期本地检查失败属于历史记录，并非本次结果；这些验证不证明生产网关、安装后的密钥保管或部署已验收。
