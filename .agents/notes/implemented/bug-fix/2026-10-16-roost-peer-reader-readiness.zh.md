@@ -2,6 +2,7 @@
 
 Status: implemented
 Translation: current
+PR: [#1626](https://github.com/LodyAI/Lody/pull/1626)
 
 [English](2026-10-16-roost-peer-reader-readiness.md)
 
@@ -124,14 +125,15 @@ Native 测试覆盖发布、登记间隙、期限、取消、关闭及后续写�
 共享层全套 1506 项通过。类型检查、类型感知 lint、Effect lint、格式化，
 以及单独补完的测试后边界/i18n 检查通过。
 
-合并后的根目录 `pnpm check` 仍在运行，类型检查、lint 和 Effect lint 已通过。
-合并前的全套运行中 CLI 4284 项通过，但两个未修改的 Inbox 操作资源校验用例失败，
-错误为 `Known resources are still running or cannot be verified`。
+合并主分支后的最终根目录 `pnpm check` 中 CLI 4282 项通过，包括整个 Native 所有者套件，
+但两个未修改的 Inbox 操作资源校验用例失败，错误为
+`Known resources are still running or cannot be verified`：
+重开后恢复不完整身份，以及要求确认和精确身份且不重放未知提交。
 它们的 59 项所属套件在聚焦运行中通过，不能据此认定全套失败的原因。
-合并后完整包套件的验证结果仍待完成。
+递归命令在 CLI 停止，没有完成全部后续包套件。
 文档仍有 subagent-events 双语文档的六处 Kimi/Pi 基线失效链接，
 因为这里未初始化这些隔离子模块；改动文档未新增链接错误，没有注册 SHA 保护主题。
-不把待完成的全量检查记为通过。
+全量检查仍未全绿。
 
 PR 合入主分支之前的产品版 macOS arm64 快照编译及打包成功，原生 smoke 和签名校验通过。
 该快照的 CLI 与已部署的 Docker CLI 字节一致，严格复查更正在渲染器。

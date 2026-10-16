@@ -2,6 +2,7 @@
 
 Status: implemented
 Translation: current
+PR: [#1626](https://github.com/LodyAI/Lody/pull/1626)
 
 [中文](2026-10-16-roost-peer-reader-readiness.zh.md)
 
@@ -163,16 +164,18 @@ integration skips. The full shared suite passes 1506 cases. Type checks,
 type-aware lint, Effect lint, formatting and the separately completed post-test
 boundary/i18n guards pass.
 
-The post-integration root `pnpm check` is still running. Its type checks, lint
-and Effect lint passed. The pre-integration root run passed 4284 CLI cases but
-failed two unchanged Inbox operator-resource verification cases with
-`Known resources are still running or cannot be verified`. Their 59-case owning
-suite passes in the focused run; that does not establish the cause of the
-full-run failures. Full-package verification of the merged head remains pending.
+The final root `pnpm check` after integrating main passes 4282 CLI cases,
+including the entire native owner suite, but fails two unchanged Inbox
+operator-resource verification cases with `Known resources are still running or
+cannot be verified`: recovering incomplete identity after reopen, and requiring
+confirmation/exact identity without replaying unknown submission. Their 59-case
+owning suite passes in the focused run; that does not establish the cause of the
+full-run failures. The recursive command stops at CLI and does not complete all
+downstream package suites.
 Documentation retains six baseline broken Kimi/Pi
 links in the subagent-events language pair because those isolated submodules are
 not initialized here. Changed documents add no link errors, and no SHA-protected
-topics are registered. The pending full-run result is not claimed as passing.
+topics are registered. The full check remains non-green.
 
 Before the PR's main-branch integration, the product macOS arm64 snapshot compiled
 and packaged successfully with native smoke and signature checks. That snapshot's

@@ -2,6 +2,7 @@
 
 Status: implemented
 Translation: current
+PR: [#1626](https://github.com/LodyAI/Lody/pull/1626)
 
 [中文](2026-10-16-roost-incremental-history.zh.md)
 
