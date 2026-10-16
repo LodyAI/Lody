@@ -311,10 +311,11 @@ jobs:
             --workers=1
 
   # Stable required check: green only when every group succeeded.
+  # Cancellation supersedes this run; do not turn cancelled groups into a failure.
   tests:
     name: Tests
     needs: test-groups
-    if: always()
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
