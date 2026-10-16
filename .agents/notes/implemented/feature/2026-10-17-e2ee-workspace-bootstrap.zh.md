@@ -26,3 +26,11 @@ Translation: current
 本批目标验证：前端 77 项、云端组合 7 项、桌面保管/初始化 26 项与 IPC 2 项通过；私有后端 726 项及真实本地 Convex 18 项通过。新的独立复核运行相关三套 36 项测试并确认源码一致，未发现剩余可证 P0/P1。浏览器验证了合成账本和创建页的桌面/手机布局。完整仓库检查及部署结果单独记录，不由这些数字推定。
 
 仓库验证：类型检查、类型感知 lint、Effect lint、格式与文档检查通过。完整 `pnpm check` 没有全绿：未改动的 CLI 测试受到注入的 Git 环境和 macOS 进程探针期限影响。隔离到原生 Git 后 24/24 通过；Inbox 套件曾独立 60/60 通过，但重复隔离运行仍触发既有探针期限。这些是保留的验证限制，没有绕过，也不记为完整检查成功。机械 lint 调整后的最终桌面保管/初始化测试为 26/26 通过。
+
+## 桌面依赖安装
+
+本次接入新增生产依赖链 Electron → platform → cloud-api → E2EE core → SQLite。在同一锁定依赖树上，真实 `@electron/rebuild@4.0.4` 发现器使用基线 `fb4d565` 的工作区声明时没有原生候选，使用 `ba794186` 声明时则选中了 `better-sqlite3@13.0.3`。重建因 `node-abi@4.26.0` 无法映射 Electron `44.7.0` 而失败；这是本次接入触发的安装回归，不是无关的基线失败。
+
+Postinstall 删除了通用 `install-app-deps` 命令，因为该命令不遵循已有的 `npmRebuild: false` 打包设置。SQLite 和 node-pty 保留 Node-API 预编译产物，Electron 自己的二进制安装器和 macOS Sparkle 专用构建保持不变。打包仍按目标准备二进制并运行探针。运行时版本与 [Node-API 下限](../bug-fix/2026-09-09-node-api-runtime-floor.md)均未改变。
+
+子进程回归测试在旧脚本上失败、修复后通过；允许既有打包夹具访问 npm 后，原生依赖准备与 Sparkle 的 11 项测试全部通过。真实 macOS arm64 postinstall 已完成，包括 Sparkle 原生构建。同一 SQLite 预编译产物在 Node 和 Electron `44.7.0` 下完成内存数据库读写，node-pty 也在两者中加载成功。这些检查不证明 Windows/Linux 执行、其他架构打包、签名安装包或部署。

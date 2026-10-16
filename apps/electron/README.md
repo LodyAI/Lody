@@ -26,6 +26,12 @@ resource and callback protocols; see the [deep-link contract](../../specs/deep-l
 $ pnpm install
 ```
 
+Postinstall prepares the Electron binary and, on macOS, builds Sparkle through its
+own installer. SQLite and the embedded CLI native packages use their shipped
+Node-API prebuilds; installation does not rebuild them for an Electron ABI.
+Packaging stages the target platform/architecture binaries and probes them before
+signing.
+
 ### Open-source desktop development
 
 From the repository root, build the embedded CLI and OSS renderer, then launch

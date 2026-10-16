@@ -1,5 +1,16 @@
 import assert from 'node:assert/strict'
-import { mkdtemp, mkdir, cp, readdir, readFile, realpath, writeFile, rm } from 'node:fs/promises'
+import {
+  mkdtemp,
+  mkdir,
+  chmod,
+  cp,
+  readdir,
+  readFile,
+  realpath,
+  writeFile,
+  rm
+} from 'node:fs/promises'
+import { spawnSync } from 'node:child_process'
 import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
@@ -16,6 +27,82 @@ const publishedSource = path.resolve(
   import.meta.dirname,
   '../../cli/node_modules/@loro-dev/roost-node'
 )
+
+async function postinstallFixture(directory, { installerExit = 0, sparkleExit = 0 } = {}) {
+  const scripts = path.join(directory, 'scripts')
+  const electron = path.join(directory, 'node_modules/electron')
+  const bin = path.join(directory, 'node_modules/.bin')
+  await Promise.all([scripts, electron, bin].map((dir) => mkdir(dir, { recursive: true })))
+  await cp(new URL('./postinstall.mjs', import.meta.url), path.join(scripts, 'postinstall.mjs'))
+  await writeFile(path.join(electron, 'package.json'), JSON.stringify({ main: 'index.js' }))
+  await writeFile(path.join(electron, 'index.js'), '')
+  await writeFile(
+    path.join(electron, 'install.js'),
+    `const fs = require('node:fs');
+    if (${installerExit}) process.exit(${installerExit});
+    fs.writeFileSync('electron-installed', 'ready');`
+  )
+  // Any accidental broad rebuild must fail the install, even when the Electron
+  // binary and the separately owned macOS addon can both be prepared.
+  for (const name of ['electron-builder', 'electron-builder.cmd']) {
+    await writeFile(path.join(bin, name), '#!/usr/bin/env node\nprocess.exit(91)\n')
+    await chmod(path.join(bin, name), 0o755)
+  }
+  const sparkle = path.join(bin, 'electron-sparkle-updater')
+  await writeFile(
+    sparkle,
+    `#!/usr/bin/env node
+    const fs = require('node:fs');
+    if (!fs.existsSync('electron-installed')) process.exit(92);
+    if (${sparkleExit}) process.exit(${sparkleExit});
+    fs.writeFileSync('sparkle-installed', 'ready');`
+  )
+  await chmod(sparkle, 0o755)
+  return (env = {}) =>
+    spawnSync(process.execPath, [path.join(scripts, 'postinstall.mjs')], {
+      cwd: directory,
+      env: { ...process.env, LODY_SKIP_ELECTRON_POSTINSTALL: '0', ...env },
+      encoding: 'utf8'
+    })
+}
+
+test('desktop postinstall prepares Electron and macOS Sparkle without ABI-rebuilding N-API dependencies', async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), 'lody-native-postinstall-'))
+  try {
+    const install = await postinstallFixture(directory)
+    const result = install()
+    assert.equal(result.status, 0, result.stderr)
+    assert.equal(await readFile(path.join(directory, 'electron-installed'), 'utf8'), 'ready')
+    assert.equal(
+      (await readdir(directory)).includes('sparkle-installed'),
+      process.platform === 'darwin'
+    )
+    if (process.platform === 'darwin') {
+      assert.equal(await readFile(path.join(directory, 'sparkle-installed'), 'utf8'), 'ready')
+    }
+  } finally {
+    await rm(directory, { recursive: true, force: true })
+  }
+})
+
+test('desktop postinstall preserves explicit skip and native installer failures', async () => {
+  for (const options of [
+    { installerExit: 23, sparkleExit: 0 },
+    ...(process.platform === 'darwin' ? [{ installerExit: 0, sparkleExit: 24 }] : [])
+  ]) {
+    const directory = await mkdtemp(path.join(tmpdir(), 'lody-native-postinstall-failure-'))
+    try {
+      const install = await postinstallFixture(directory, options)
+      assert.equal(install({ LODY_SKIP_ELECTRON_POSTINSTALL: '1' }).status, 0)
+      assert.equal((await readdir(directory)).includes('electron-installed'), false)
+      const result = install()
+      assert.equal(result.status, options.installerExit || options.sparkleExit, result.stderr)
+      assert.equal((await readdir(directory)).includes('sparkle-installed'), false)
+    } finally {
+      await rm(directory, { recursive: true, force: true })
+    }
+  }
+})
 
 test('staged Loro supports CommonJS resolution and ESM worker snapshot round trips without browser distributions', async () => {
   const directory = await mkdtemp(path.join(tmpdir(), 'lody-loro-stage-'))

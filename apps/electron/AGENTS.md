@@ -65,8 +65,8 @@ Root rules apply. For `src/**`, read module, IPC and window contracts in
   `scripts/cli-native-deps.mjs`.
   Roost's client, Worker, and binding retain relative paths; stage only the target prebuild,
   from the main package or its exact-version optional platform package.
-- `@lydell/node-pty` and `better-sqlite3 >= 13.0.2` use N-API artifacts. Stage the
-  target platform/architecture artifact; do not rebuild by Electron ABI.
+- `@lydell/node-pty` and `better-sqlite3 >= 13.0.2` use N-API prebuilds. Stage the
+  target platform/arch; never run `install-app-deps` or rebuild these by Electron ABI.
 - Every embedded-CLI descendant launched through `process.execPath` must inherit
   `ELECTRON_RUN_AS_NODE` when it exists. On packaged macOS, omitting it launches a
   second GUI app instead of Node.
