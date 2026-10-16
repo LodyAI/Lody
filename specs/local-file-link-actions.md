@@ -121,6 +121,10 @@ Retry without hiding the document. Successful remote reads become browser Blob
 URLs. Leaving the preview releases those URLs and discards late responses; a new
 document or provider must not inherit the previous image's load request.
 
+A plain-text link whose target is an image file, such as `[plot](./plot.png)`,
+renders as that image under the same rules instead of a copy-path file link. A link
+with a line reference or its own image markup stays a file link.
+
 This capability is supplied only by live file providers. Chat Markdown, standalone
 uploaded Markdown without a filesystem provider, and anonymous publications do not
 gain filesystem access. Ordinary web image URLs keep their existing behavior.
