@@ -665,6 +665,46 @@ describe('useOrganization list recovery', () => {
     }
   });
 
+  it('keeps loading through a first-login active-organization failure until the list resolves', async () => {
+    const workspace = createOrganization('workspace-first-login', 'target-workspace', 'Target');
+    // Answered before the new session settled; Better Auth only refetches it on setActive.
+    let active: { data: TestOrganization | null; error: Error | null } = {
+      data: null,
+      error: new Error('Unauthorized'),
+    };
+    organizationMocks.refetchOrganizations.mockImplementation(async () => {
+      list = networkUp ? { data: [workspace], error: null } : list;
+    });
+    organizationMocks.setActive.mockImplementation(async () => {
+      active = { data: workspace, error: null };
+      return { data: workspace, error: null };
+    });
+    organizationMocks.authClient = {
+      ...(organizationMocks.authClient as object),
+      useActiveOrganization: () => ({
+        data: active.data,
+        isPending: false,
+        error: active.error,
+        refetch: organizationMocks.refetchActiveOrganization,
+      }),
+    };
+
+    await renderApp();
+    await advance(400);
+    expect(latestOrganizationState?.organizationsLoading).toBe(true);
+    expect(latestOrganizationState?.error).toBeNull();
+
+    networkUp = true;
+    await advance(5_000);
+    await advance(0);
+
+    expect(latestOrganizationState?.organizations?.map((org) => org.slug)).toEqual([
+      'target-workspace',
+    ]);
+    expect(latestOrganizationState?.activeOrganization?.id).toBe('workspace-first-login');
+    expect(latestOrganizationState?.error).toBeNull();
+  });
+
   it('tries again on its own after a while, without any event', async () => {
     await renderApp();
     for (let i = 0; i < 8; i += 1) await advance(5_000);

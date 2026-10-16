@@ -194,6 +194,7 @@ function useLocalOrganizationState(): UseOrganizationResult {
       role: workspace?.role,
       hasAdminPermission: true,
       loading,
+      organizationsError: null,
       error: null,
       activeOrganization,
       activateOrganization: () => Promise.resolve(),
@@ -453,10 +454,20 @@ function useCloudOrganizationState(options?: UseOrganizationOptions) {
     organizations !== undefined &&
     organizations.length > 0 &&
     (activeOrganizationIsPending || !resolvedActiveOrganization);
+  // While the list is still loading, an active-organization failure is not
+  // final: right after sign-in Better Auth can answer that query before the new
+  // session settles, and it only refetches on `setActive`, which the activation
+  // effect below issues once the list arrives. Surfacing it earlier turns the
+  // first-login wait into a failed-list screen.
   const shouldSurfaceActiveOrganizationError =
     Boolean(activeOrganizationError) &&
     !activeOrganizationIsPending &&
-    (organizations === undefined || (organizations.length > 0 && !resolvedActiveOrganization));
+    organizations !== undefined &&
+    organizations.length > 0 &&
+    !resolvedActiveOrganization;
+  const organizationsListError = organizationsFailureFinal
+    ? (organizationsError ?? new Error('Failed to load organizations'))
+    : null;
   const optimisticWorkspaceId = useMemo(() => {
     if (!user || !targetSlug) {
       return null;
@@ -920,11 +931,11 @@ function useCloudOrganizationState(options?: UseOrganizationOptions) {
         organizations !== undefined &&
         organizations.length > 0 &&
         activeOrganizationIsPending),
+    /** Final failure of the organization list alone; routes that only need the list gate on it. */
+    organizationsError: organizationsListError,
     error:
       (!user ? sessionError : null) ||
-      (organizationsFailureFinal
-        ? (organizationsError ?? new Error('Failed to load organizations'))
-        : null) ||
+      organizationsListError ||
       (shouldSurfaceActiveOrganizationError ? activeOrganizationError : null) ||
       mutationErrorObject,
     activeOrganization: resolvedActiveOrganization,
