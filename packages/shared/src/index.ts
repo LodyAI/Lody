@@ -1,5 +1,10 @@
 import { SESSION_DOC_PREFIX, LEGACY_SESSION_COMMENT_DOC_PREFIX } from './session-room-id';
-export { SESSION_DOC_PREFIX, getSessionRoomId, isSessionDocRoomId, getSessionIdFromRoomId } from './session-room-id';
+export {
+  SESSION_DOC_PREFIX,
+  getSessionRoomId,
+  isSessionDocRoomId,
+  getSessionIdFromRoomId,
+} from './session-room-id';
 export * from './preview-control';
 import { CliType } from './ai';
 export * from './history-writer';
@@ -58,6 +63,8 @@ export * from './cron-next-fire';
 export * from './scheduled-tasks-from-history';
 export * from './project';
 export * from './time-sync';
+export * from './time-sync-maintenance';
+export * from './time-sync-legacy';
 export * from './session-status-machine';
 export * from './session-archive-targets';
 export * from './session-operation-targets';
