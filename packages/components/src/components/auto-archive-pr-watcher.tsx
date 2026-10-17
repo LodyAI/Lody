@@ -1,7 +1,9 @@
 import { WorkspaceWindowOwnerContext } from '@/lib/desktop-window';
-import { useContext, useEffect, useRef } from 'react';
-import { useAtomValue } from 'jotai';
-import type { SessionMeta } from '@lody/shared';
+import { useContext, useEffect, useMemo, useRef } from 'react';
+import { useAtomValue, useStore } from 'jotai';
+import { getSessionRoomId, type SessionId } from '@lody/shared';
+import { activeWorkspaceRuntimeAtom } from '@/atoms/runtime';
+import { sessionMetaCacheAtom } from '@/atoms/doc-meta';
 import { autoArchiveOnPrClosedAtom, autoArchiveOnPrMergedAtom, userAtom } from '@/atoms';
 import {
   useVisibleArchivedSessionMetas,
@@ -15,10 +17,14 @@ import {
 } from '@/lib/auto-archive-pr';
 import { useAppCapability } from '@/lib/app-platform';
 
-// Skip the first effect run so we never retro-archive on app open: a session whose PR
-// was already merged days ago must not vanish into the archive at startup. Only archive
-// when we actually observe the status flip during this app session.
-// (Same shape as electron-session-completion-notifier's initializedRef + prev-status map.)
+type PendingArchive = {
+  sessionId: SessionId;
+  pr: AutoArchivePrSnapshot;
+  accepted: Set<SessionId>;
+  retryDelay: number;
+  timer?: ReturnType<typeof setTimeout>;
+};
+
 export function AutoArchivePrWatcher() {
   const owner = useContext(WorkspaceWindowOwnerContext);
   const githubIntegrationAvailable = useAppCapability('githubIntegration');
@@ -32,83 +38,184 @@ function CloudAutoArchivePrWatcher() {
   const { sessions } = useVisibleSessionMetas();
   const { archivedSessions } = useVisibleArchivedSessionMetas();
   const user = useAtomValue(userAtom);
+  const runtime = useAtomValue(activeWorkspaceRuntimeAtom);
   const onPrMerged = useAtomValue(autoArchiveOnPrMergedAtom);
   const onPrClosed = useAtomValue(autoArchiveOnPrClosedAtom);
   const { archiveSession } = useSessionActions();
-
+  const store = useStore();
+  const archiveRef = useRef(archiveSession);
+  archiveRef.current = archiveSession;
   const currentUserId = typeof user?.id === 'string' ? user.id.trim() : '';
-  const previousPrRef = useRef<Map<string, AutoArchivePrSnapshot>>(new Map());
-  const initializedRef = useRef(false);
-  const inFlightRef = useRef<Set<string>>(new Set());
+  const state = useMemo(
+    () => ({
+      runtime,
+      currentUserId,
+      previous: new Map<string, AutoArchivePrSnapshot>(),
+      pending: new Map<string, PendingArchive>(),
+      inFlight: new Set<string>(),
+      initialized: false,
+      active: false,
+      run: undefined as ((intent: PendingArchive) => void) | undefined,
+    }),
+    [runtime, currentUserId]
+  );
+
+  useEffect(() => {
+    state.active = true;
+    const retire = (intent: PendingArchive) => {
+      clearTimeout(intent.timer);
+      if (state.pending.get(intent.sessionId) === intent) state.pending.delete(intent.sessionId);
+    };
+    const applicable = (intent: PendingArchive) => {
+      if (
+        !state.active ||
+        !state.runtime ||
+        store.get(activeWorkspaceRuntimeAtom) !== state.runtime
+      )
+        return false;
+      if (store.get(userAtom)?.id?.trim() !== state.currentUserId) return false;
+      const cache = store.get(sessionMetaCacheAtom);
+      const session = cache[getSessionRoomId(intent.sessionId)];
+      const pr = getAutoArchivePrSnapshot(session?.pullRequests);
+      if (
+        !session ||
+        session.userId !== currentUserId ||
+        pr?.url !== intent.pr.url ||
+        pr.status !== intent.pr.status
+      )
+        return false;
+      if (
+        !store.get(
+          intent.pr.status === 'merged' ? autoArchiveOnPrMergedAtom : autoArchiveOnPrClosedAtom
+        )
+      )
+        return false;
+      return true;
+    };
+    const reconcile = () => {
+      for (const intent of state.pending.values()) {
+        if (!applicable(intent)) retire(intent);
+      }
+    };
+    state.run = (intent) => {
+      if (state.pending.get(intent.sessionId) !== intent || !applicable(intent)) {
+        retire(intent);
+        return;
+      }
+      if (intent.timer || state.inFlight.has(intent.sessionId)) return;
+      state.inFlight.add(intent.sessionId);
+      void (async () => {
+        let failed = false;
+        try {
+          await archiveRef.current(intent.sessionId, {
+            shouldContinue: (targets) => {
+              if (!applicable(intent) || state.pending.get(intent.sessionId) !== intent)
+                return false;
+              const root = targets[0];
+              const pr = getAutoArchivePrSnapshot(root?.pullRequests);
+              if (
+                root?.userId !== currentUserId ||
+                pr?.url !== intent.pr.url ||
+                pr.status !== intent.pr.status
+              )
+                return false;
+              // An accepted root does not prove all descendants succeeded. A
+              // restore/removal of any accepted target supersedes this intent.
+              // Read the action's authoritative snapshot: Repo watch events
+              // can coalesce archive/restore into the final unarchived state.
+              return [...intent.accepted].every((id) =>
+                targets.some((target) => target.id === id && target.isArchived)
+              );
+            },
+            onAccepted: (id) => {
+              intent.accepted.add(id);
+            },
+          });
+          retire(intent);
+        } catch (error) {
+          failed = true;
+          // Logging must not turn an observed background failure into a rejection.
+          try {
+            console.error('AutoArchivePrWatcher: failed to archive session', {
+              sessionId: intent.sessionId,
+              status: intent.pr.status,
+              error,
+            });
+          } catch {}
+        } finally {
+          state.inFlight.delete(intent.sessionId);
+          const next = state.pending.get(intent.sessionId);
+          if (next) {
+            if (!applicable(next)) {
+              retire(next);
+            } else if (next !== intent) {
+              state.run?.(next);
+            } else if (failed) {
+              intent.timer = setTimeout(() => {
+                intent.timer = undefined;
+                state.run?.(intent);
+              }, intent.retryDelay);
+              intent.retryDelay = Math.min(30_000, intent.retryDelay * 2);
+            }
+          }
+        }
+      })();
+    };
+    const unsubscribe = [
+      sessionMetaCacheAtom,
+      activeWorkspaceRuntimeAtom,
+      userAtom,
+      autoArchiveOnPrMergedAtom,
+      autoArchiveOnPrClosedAtom,
+    ].map((atom) => store.sub(atom, reconcile));
+    return () => {
+      state.active = false;
+      for (const intent of state.pending.values()) retire(intent);
+      state.previous.clear();
+      state.initialized = false;
+      for (const release of unsubscribe) release();
+    };
+  }, [currentUserId, runtime, state, store]);
 
   useEffect(() => {
     const seenSessionIds = new Set<string>();
-
-    const updateBaseline = (session: SessionMeta) => {
-      if (!currentUserId || session.userId !== currentUserId) return;
-      seenSessionIds.add(session.id);
-
-      const current = getAutoArchivePrSnapshot(session.pullRequests);
-      if (current) {
-        previousPrRef.current.set(session.id, current);
-      } else {
-        previousPrRef.current.delete(session.id);
-      }
-    };
-
-    // Archived sessions cannot be auto-archived again, but their PR state must
-    // stay in the baseline so restoring a merged/closed PR session is not
-    // misread as a fresh terminal transition.
-    for (const session of archivedSessions) {
-      updateBaseline(session);
-    }
-
-    for (const session of sessions) {
+    for (const session of [...archivedSessions, ...sessions]) {
       if (!currentUserId || session.userId !== currentUserId) continue;
       seenSessionIds.add(session.id);
-
       const current = getAutoArchivePrSnapshot(session.pullRequests);
-      const prev = previousPrRef.current.get(session.id);
-
       const decision = getAutoArchivePrDecision({
-        previous: prev,
+        previous: state.previous.get(session.id),
         current,
         archiveOnMerged: onPrMerged,
         archiveOnClosed: onPrClosed,
       });
-      if (current) {
-        previousPrRef.current.set(session.id, current);
-      } else {
-        previousPrRef.current.delete(session.id);
-      }
-      if (!initializedRef.current) continue;
-      if (!decision.shouldArchive || !decision.status) continue;
-      if (inFlightRef.current.has(session.id)) continue;
-
-      inFlightRef.current.add(session.id);
-      void archiveSession(session.id)
-        .catch((error: unknown) => {
-          console.error('AutoArchivePrWatcher: failed to archive session', {
-            sessionId: session.id,
-            status: decision.status,
-            error,
-          });
-        })
-        .finally(() => {
-          inFlightRef.current.delete(session.id);
-        });
+      if (current) state.previous.set(session.id, current);
+      else state.previous.delete(session.id);
+      // Startup and restore establish observations; only an active Session's
+      // newly observed terminal transition creates work. Failure keeps that work.
+      if (!state.initialized || session.isArchived || !decision.shouldArchive || !current) continue;
+      const prior = state.pending.get(session.id);
+      if (prior) clearTimeout(prior.timer);
+      const intent: PendingArchive = {
+        sessionId: session.id,
+        pr: current,
+        accepted: new Set(),
+        retryDelay: 1_000,
+      };
+      state.pending.set(session.id, intent);
+      state.run?.(intent);
     }
-
-    for (const sessionId of Array.from(previousPrRef.current.keys())) {
+    for (const sessionId of state.previous.keys()) {
+      if (!seenSessionIds.has(sessionId)) state.previous.delete(sessionId);
+    }
+    for (const [sessionId, intent] of state.pending) {
       if (!seenSessionIds.has(sessionId)) {
-        previousPrRef.current.delete(sessionId);
+        clearTimeout(intent.timer);
+        state.pending.delete(sessionId);
       }
     }
-
-    if (!initializedRef.current) {
-      initializedRef.current = true;
-    }
-  }, [sessions, archivedSessions, currentUserId, onPrMerged, onPrClosed, archiveSession]);
+    state.initialized = true;
+  }, [sessions, archivedSessions, currentUserId, onPrMerged, onPrClosed, state]);
 
   return null;
 }
