@@ -341,3 +341,52 @@ session/owner/prompt/Git transport 回归 74 项通过，含全部三种项目�
 一个原生 SSH 凭据测试报 `context_unreadable`。全仓检查未全绿，UI 与真实凭据验收仍待完成。
 
 运行时接入 PR：[#1644](https://github.com/LodyAI/Lody/pull/1644)。
+
+## UI/daemon 交接
+
+`buildSessionProjectRun(project, selectedMemberIds)` 按定义顺序冻结 source、placement、path、
+root 和 instructions。`selectProjectMembers` 递归去除未选中父成员的后代，未知 ID 报错。
+过滤后不足两个成员返回 `undefined`，调用方走现有单仓库流程（零成员禁用创建）。
+root 的 base 使用 `baseBranch ?? 'HEAD'`；子模块使用 `PROJECT_SUBMODULE_BASE = 'gitlink'`。
+owner 在发布物化回执前将 root 占位值改为基线引用、子模块占位值改为提交 ID；root HEAD 对应本地当前分支或
+GitHub 默认分支。显式 baseBranch 保留原值。单成员回退不携带 `projectRun`。
+
+machine RPC `project/probe-local-member` 的 params 为 `{ localProjectId }`，外层携带标准
+machineId/workspaceId。result 含 type `project/probe-local-member`、可选 repoFullName 和
+`submodules: { path, url, repoFullName? }[]`，保留标准 `{ ok, result }` 外壳。仅探测当前
+工作区/机器已注册成员，拒绝 session-scoped 调用；读取工作树 `.gitmodules`，不展开 include，
+不 fetch/init/sync、不改 Git config。忽略非法子模块路径，拒绝不安全或过大的配置。
+本地绝对路径和 file URL 脱敏为 `url: ''`，不返回主机根路径和 Git 错误细节；不猜测此类
+URL 的 GitHub 身份，UI 可以保留其关系为未确认。
+
+shared `getProjectRepositoryFullName` 解析 GitHub HTTPS/SSH/SCP 及相对父仓库 URL；
+`matchProjectSubmoduleMember` 匹配 GitHub 成员或机器解析出的本地成员身份，歧义时不匹配。
+daemon 的 gitlink 校验共用 `projectRepositoryUrlIdentity` 规范化。创建入口保持
+`session/create`，project 是首个选中成员的投影，projectRun 仅在
+`machineSupportsMultiRepoProject` 为真时发送。
+
+探测由已认证 machine RPC 触发和拥有；有限的原生 Effect 工作流使用 WorktreeGit/FileSystem，
+等待命令释放，不保留后台状态。既有 Legacy 入口衔接 Promise dispatcher；失败返回不含路径的
+错误，重试重新读取。此次不宣称完成 dispatcher 的 Effect 迁移。
+
+远程机器通过 Streams 提供同名方法：
+`LoroStreamsMachineRpcClient.requestProjectProbeLocalMember({ localProjectId, requestedByUserId, timeoutMs? })`
+返回 typed result，传输/处理失败返回 null；daemon 探测前校验机器/项目访问权限。
+本地 IPC 沿用已认证 machine RPC 外壳。
+
+root HEAD 回执保留命名基线引用，避免 PR 基线变成 SHA；本地 detached HEAD 或恢复时没有
+基线回执才固定提交。GitHub HEAD 读取当前远端符号 HEAD，不优先 main 或缓存中的旧默认分支。
+验证覆盖 shared 37 项、Streams 124 项、RPC 范围 13 项、Git/owner 12 项，以及远端基线
+2 项（含默认分支变化）。全工作区类型检查、check:quick、format、docs check 已通过；
+全仓测试另行记录。
+
+
+shared `withProjectGroupPrScope(prompt)` 将创建 PR 或 Commit & Push 操作应用到成员仓库，
+保留请求的操作及 draft 状态，先发布子模块再发布父仓库 gitlink，取得所有 URL 后在各 PR 正文
+互相链接。单独 Commit & Push 不开 PR；子模块发布失败时，不发布指向未发布提交的父仓库指针。
+成员目录使用首轮清单，项目组主目录本身不是 Git 仓库。
+本地成员身份观测字段最终仍为 `SessionProjectMember.repoFullName?: string`；
+UI 中读取 `repo` 的代码须改为 `repoFullName`，不新增同义存储字段。
+
+初始 GitHub `project` 投影须用 `branch: baseBranch ?? 'HEAD'`，既有 `ProjectRefSchema`
+不接受空字符串 branch。本地投影继续使用 `useWorktree: true`。

@@ -1,3 +1,4 @@
+import type { ProjectProbeLocalMemberResult } from '@lody/shared';
 import type { MemoryProviderRequest, MemoryProviderResponse } from '@lody/shared';
 import {
   IosSimulatorRemoteResponseSchema,
@@ -524,6 +525,10 @@ type RpcServerDeps = {
     proof: PreviewControlProof;
     reason?: string;
   }) => Promise<SessionPreviewRevokeResponse>;
+  probeLocalProjectMember?: (args: {
+    localProjectId: LocalProjectId;
+    requestedByUserId: string;
+  }) => Promise<ProjectProbeLocalMemberResult>;
   getLocalProjectGitState?: (args: {
     localProjectId: LocalProjectId;
     requestedByUserId: string;
@@ -1781,6 +1786,21 @@ export class LoroStreamsMachineRpcServer {
           await this.appendResultResponse(request.replyTo, request.id, request.method, response);
           return;
         }
+        case 'project/probe-local-member': {
+          if (!this.deps.probeLocalProjectMember) {
+            await this.appendErrorResponse(request.replyTo, request.id, request.method, {
+              code: LORO_STREAMS_RPC_ERROR_CODES.methodUnavailable,
+              message: 'Project group member probing is not available on this machine.',
+            });
+            return;
+          }
+          const result = await this.deps.probeLocalProjectMember({
+            localProjectId: request.params.localProjectId as LocalProjectId,
+            requestedByUserId: request.params.requestedByUserId,
+          });
+          await this.appendResultResponse(request.replyTo, request.id, request.method, result);
+          return;
+        }
         case 'local-project/git-state': {
           if (!this.deps.getLocalProjectGitState) {
             await this.appendErrorResponse(request.replyTo, request.id, request.method, {
@@ -2008,6 +2028,7 @@ export class LoroStreamsMachineRpcServer {
       | SessionPreviewRevokeResponse
       | SessionPreviewStatusResponse
       | IosSimulatorResponse
+      | ProjectProbeLocalMemberResult
       | LocalProjectGitStateRpcResponse
       | LocalProjectControlResponse,
     options: { readonly codeCollabOwnerSessionId?: string } = {}

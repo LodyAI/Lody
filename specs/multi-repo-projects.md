@@ -224,3 +224,8 @@ These describe the current code, not an implementation of this Spec:
 - [Branch observation](workspace-branch-state.md) and
   [local PR observation](local-github-pr-observation.md).
 - Decision and alternatives: [proposal note](../.agents/notes/proposed/architecture/2026-10-16-multi-repo-projects.md).
+
+Creation snapshots use `HEAD` for unspecified root bases and `gitlink` for submodule bases;
+the owner daemon resolves root placeholders to base refs and submodule placeholders to commits during materialization. Deselecting a parent
+also deselects all its descendants. Local submodule probing is read-only and returns no
+absolute host paths; machine-local URLs are redacted.

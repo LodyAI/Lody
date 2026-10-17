@@ -1,4 +1,8 @@
 import {
+  ProjectProbeLocalMemberResultSchema,
+  type ProjectProbeLocalMemberResult,
+} from '@lody/shared';
+import {
   MemoryProviderRequestSchema,
   MemoryProviderResponseSchema,
   type MemoryProviderRequest,
@@ -274,6 +278,7 @@ export const LoroStreamsRpcMethodSchema = z.enum([
   'session/preview-create',
   'session/preview-revoke',
   'session/preview-status',
+  'project/probe-local-member',
   'local-project/git-state',
   'local-project/control',
 ]);
@@ -705,6 +710,16 @@ export const LoroSessionPreviewRevokeRpcRequestSchema = BaseRpcRequestSchema.ext
     .strict(),
 }).strict();
 
+export const LoroProjectProbeLocalMemberRpcRequestSchema = BaseRpcRequestSchema.extend({
+  method: z.literal('project/probe-local-member'),
+  params: z
+    .object({
+      localProjectId: z.string().trim().min(1),
+      requestedByUserId: z.string().trim().min(1),
+    })
+    .strict(),
+}).strict();
+
 export const LoroLocalProjectGitStateRpcRequestSchema = BaseRpcRequestSchema.extend({
   method: z.literal('local-project/git-state'),
   params: z
@@ -765,6 +780,7 @@ export const LoroStreamsRpcRequestSchema = z.discriminatedUnion('method', [
   LoroSessionPreviewRevokeRpcRequestSchema,
   LoroSessionPreviewStatusRpcRequestSchema,
   LoroIosSimulatorRpcRequestSchema,
+  LoroProjectProbeLocalMemberRpcRequestSchema,
   LoroLocalProjectGitStateRpcRequestSchema,
   LoroLocalProjectControlRpcRequestSchema,
 ]);
@@ -1625,6 +1641,7 @@ export type LoroMachineRpcResult =
   | SessionPreviewRevokeResponse
   | SessionPreviewStatusResponse
   | IosSimulatorRemoteResponse
+  | ProjectProbeLocalMemberResult
   | LocalProjectGitStateRpcResponse
   | LocalProjectControlResponse;
 
@@ -2134,6 +2151,10 @@ const parseRpcSuccessResult = async (
   if (response.method === 'session/preview-create') {
     const parsed = SessionPreviewCreateResponseSchema.safeParse(response.result);
     return parsed.success ? (parsed.data as SessionPreviewCreateResponse) : null;
+  }
+  if (response.method === 'project/probe-local-member') {
+    const parsed = ProjectProbeLocalMemberResultSchema.safeParse(response.result);
+    return parsed.success ? parsed.data : null;
   }
   if (response.method === 'local-project/git-state') {
     const parsed = LoroLocalProjectGitStateRpcResponseSchema.safeParse(response.result);
@@ -3461,6 +3482,21 @@ export class LoroStreamsMachineRpcClient {
     })) as SessionPreviewRevokeResponse | null;
   }
 
+  async requestProjectProbeLocalMember(options: {
+    localProjectId: LocalProjectId;
+    requestedByUserId: string;
+    timeoutMs?: number;
+  }): Promise<ProjectProbeLocalMemberResult | null> {
+    return (await this.sendRequest({
+      method: 'project/probe-local-member',
+      timeoutMs: options.timeoutMs ?? 30_000,
+      params: {
+        localProjectId: options.localProjectId,
+        requestedByUserId: options.requestedByUserId,
+      },
+    })) as ProjectProbeLocalMemberResult | null;
+  }
+
   async requestLocalProjectGitState(options: {
     localProjectId: LocalProjectId;
     requestedByUserId: string;
@@ -3799,7 +3835,7 @@ export class LoroStreamsMachineRpcClient {
           };
         }
       | {
-          method: 'local-project/git-state';
+          method: 'local-project/git-state' | 'project/probe-local-member';
           timeoutMs: number;
           params: {
             localProjectId: LocalProjectId;
@@ -4136,6 +4172,7 @@ export class LoroStreamsMachineRpcClient {
         case 'ios-simulator/control':
           request = { ...envelope, method: args.method, params: args.params };
           break;
+        case 'project/probe-local-member':
         case 'local-project/git-state':
           request = { ...envelope, method: args.method, params: args.params };
           break;

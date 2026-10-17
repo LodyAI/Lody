@@ -1,8 +1,9 @@
+import { worktreeGitLegacy } from './worktree/git-execution-legacy';
 import { archiveProjectGroup } from './worktree/project-worktree-archive';
 import { existsSync } from 'node:fs';
 import { materializeProjectGroup } from './worktree/project-worktrees';
 import { execFile } from 'node:child_process';
-import { mkdtemp, rm, writeFile, readFile } from 'node:fs/promises';
+import { mkdtemp, rm, writeFile, readFile, symlink } from 'node:fs/promises';
 import { devNull, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
@@ -160,6 +161,33 @@ describe('WorkspaceGitService', () => {
     });
   });
 
+  it('probes working submodule configuration without fetching, writing config or exposing host paths', async () => {
+    vi.stubEnv('GIT_ALLOW_PROTOCOL', 'file');
+    await withRepo(async (root, git) => {
+      await git(['remote', 'add', 'origin', 'git@github.com:acme/api.git']);
+      expect(await worktreeGitLegacy.probeLocalProjectMember(root)).toEqual({
+        repoFullName: 'acme/api',
+        submodules: [],
+      });
+      const modules =
+        '[submodule "quoted name"]\npath = deps/proto\nurl = ../proto.git\n[submodule "local"]\npath = local\nurl = /private/host/repo\n[include]\npath = /not-readable-or-needed\n';
+      await writeFile(join(root, '.gitmodules'), modules);
+      const config = await readFile(join(root, '.git/config'), 'utf8');
+      expect(await worktreeGitLegacy.probeLocalProjectMember(root)).toEqual({
+        repoFullName: 'acme/api',
+        submodules: [
+          { path: 'deps/proto', url: '../proto.git', repoFullName: 'acme/proto' },
+          { path: 'local', url: '' },
+        ],
+      });
+      expect(await readFile(join(root, '.git/config'), 'utf8')).toBe(config);
+      expect(await readFile(join(root, '.gitmodules'), 'utf8')).toBe(modules);
+      await rm(join(root, '.gitmodules'));
+      await symlink(join(root, '.git/config'), join(root, '.gitmodules'));
+      await expect(worktreeGitLegacy.probeLocalProjectMember(root)).rejects.toThrow();
+    });
+  });
+
   it.each(['roots', 'submodule', 'submodule-cache'])(
     'materializes, observes, archives and restores %s without losing branches',
     async (layout) => {
@@ -213,13 +241,14 @@ describe('WorkspaceGitService', () => {
               machineId: 'machine' as never,
               localProjectId: id as never,
             };
-            member.base = 'feature/local';
+            member.base = 'HEAD';
           }
           const apiPath = layout !== 'roots' ? 'web/deps/api' : 'api';
           if (layout !== 'roots') {
             const member = Object.values(run.members)[1]!;
             member.placement = { kind: 'submodule', parent: 'web' as never, path: 'deps/api' };
             member.path = apiPath;
+            member.base = 'gitlink';
             if (layout === 'submodule-cache')
               member.src = { kind: 'github', repoFullName: 'example/api' };
           }
@@ -239,6 +268,9 @@ describe('WorkspaceGitService', () => {
               (member) => member.branch
             );
             const firstBases = Object.values(prepared.run.members).map((member) => member.base);
+            expect(firstBases[0]).toBe('feature/local');
+            if (layout === 'roots') expect(firstBases[1]).toBe('feature/local');
+            else expect(firstBases[1]).toMatch(/^[0-9a-f]{40,64}$/);
             const again = await materializeProjectGroup(options);
             expect(Object.values(again.run.members).map((member) => member.branch)).toEqual(
               firstBranches

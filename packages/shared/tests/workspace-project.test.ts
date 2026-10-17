@@ -2,6 +2,10 @@ import { SessionCreateRequestSchema } from '../src/message-schemas';
 import { describe, expect, it } from 'vitest';
 import {
   WorkspaceProjectSchema,
+  buildSessionProjectRun,
+  selectProjectMembers,
+  matchProjectSubmoduleMember,
+  getProjectRepositoryFullName,
   SessionProjectRunSchema,
   deduplicateProjectMembers,
   getCurrentPullRequestsByRepository,
@@ -16,7 +20,10 @@ import {
   applyWorkspaceFlockRowEvents,
   listWorkspaceProjects,
 } from '../src/workspace-flock';
-import { CURRENT_MACHINE_PROTOCOL_CAPABILITIES, machineSupportsMultiRepoProject } from '../src/machine-protocol-capabilities';
+import {
+  CURRENT_MACHINE_PROTOCOL_CAPABILITIES,
+  machineSupportsMultiRepoProject,
+} from '../src/machine-protocol-capabilities';
 
 const project = () =>
   WorkspaceProjectSchema.parse({
@@ -57,6 +64,78 @@ const run = () => {
   };
 };
 describe('workspace Projects', () => {
+  it('freezes selected members, defers Git bases and recursively prunes unselected parents', () => {
+    const p = project();
+    const snapshot = buildSessionProjectRun(
+      p,
+      p.members.map((m) => m.id)
+    )!;
+    expect(Object.values(snapshot.members).map((m) => [m.o, m.path, m.base])).toEqual([
+      [0, 'api', 'HEAD'],
+      [1, 'api/lib/proto', 'gitlink'],
+    ]);
+    p.members[0]!.source.baseBranch = 'later';
+    p.instructions = 'Changed';
+    expect(snapshot.instructions).toBe('API owns the protocol.');
+    expect(Object.values(snapshot.members)[0]!.src.baseBranch).toBeUndefined();
+    expect(
+      buildSessionProjectRun(
+        p,
+        p.members.map((m) => m.id)
+      )!.members[p.members[0]!.id]!.base
+    ).toBe('later');
+    const child = p.members[1]!;
+    const grandchild: ProjectMember = {
+      id: 'nested' as ProjectMemberId,
+      source: { kind: 'github', repoFullName: 'acme/nested' },
+      placement: { kind: 'submodule', parent: child.id, path: 'nested' },
+    };
+    p.members.push(grandchild);
+    expect(selectProjectMembers(p.members, [child.id, grandchild.id])).toEqual([]);
+    expect(selectProjectMembers(p.members, [p.members[0]!.id, grandchild.id])).toEqual([
+      p.members[0],
+    ]);
+    expect(buildSessionProjectRun(p, [child.id, grandchild.id])).toBeUndefined();
+    expect(buildSessionProjectRun(p, [p.members[0]!.id])).toBeUndefined();
+    expect(() => buildSessionProjectRun(p, ['missing' as ProjectMemberId])).toThrow('Unknown');
+  });
+  it('matches GitHub transport aliases and relative URLs without guessing ambiguous identities', () => {
+    const p = project();
+    for (const url of [
+      '../proto.git',
+      'git@github.com:ACME/proto.git',
+      'ssh://git@github.com/acme/proto.git',
+      'https://github.com/acme/proto',
+    ]) {
+      expect(matchProjectSubmoduleMember({ url }, p.members, undefined, 'acme/api')?.id).toBe(
+        p.members[1]!.id
+      );
+    }
+    expect(getProjectRepositoryFullName('../other.git', 'acme/api')).toBe('acme/other');
+    expect(getProjectRepositoryFullName('https://github.com.evil/acme/proto')).toBeUndefined();
+    expect(matchProjectSubmoduleMember({ url: '/host/proto' }, p.members)).toBeUndefined();
+    const local: ProjectMember = {
+      ...p.members[1]!,
+      id: 'local' as ProjectMemberId,
+      source: { kind: 'local', machineId: 'm' as never, localProjectId: 'l' as never },
+    };
+    expect(
+      matchProjectSubmoduleMember(
+        { url: '../proto.git' },
+        [local],
+        () => ({ repoFullName: 'acme/proto' }),
+        'acme/api'
+      )
+    ).toEqual(local);
+    expect(
+      matchProjectSubmoduleMember(
+        { url: '../proto.git' },
+        [...p.members, local],
+        () => ({ repoFullName: 'acme/proto' }),
+        'acme/api'
+      )
+    ).toBeUndefined();
+  });
   it('normalizes catalog rows, freezes nested paths and removes deleted rows', () => {
     const p = project();
     const key = ['project', p.id];
@@ -153,7 +232,11 @@ describe('workspace Projects', () => {
   });
   it('requires explicit multi-repository capability', () => {
     expect(machineSupportsMultiRepoProject({})).toBe(false);
-    expect(machineSupportsMultiRepoProject({ protocolCapabilities: CURRENT_MACHINE_PROTOCOL_CAPABILITIES })).toBe(true);
+    expect(
+      machineSupportsMultiRepoProject({
+        protocolCapabilities: CURRENT_MACHINE_PROTOCOL_CAPABILITIES,
+      })
+    ).toBe(true);
     expect(machineSupportsMultiRepoProject({ protocolCapabilities: { multiRepoProject: 1 } })).toBe(
       true
     );
@@ -175,7 +258,10 @@ describe('session file root resolution', () => {
     });
     expect(resolveSessionFilePath(roots, '/work-other/file')).toBeUndefined();
     expect(resolveSessionFilePath(roots, '/work\\outside/file')).toBeUndefined();
-    expect(resolveSessionFilePath(roots, '/work/file\\name')).toEqual({ rootId: 'main', relativePath: 'file\\name' });
+    expect(resolveSessionFilePath(roots, '/work/file\\name')).toEqual({
+      rootId: 'main',
+      relativePath: 'file\\name',
+    });
     expect(resolveSessionFilePath(roots, '/work/../../etc/passwd')).toBeUndefined();
     expect(resolveSessionFilePath(roots, 'relative')).toBeUndefined();
     expect(resolveSessionFilePath([{ id: 'main', absolutePath: '/' }], '/file')).toEqual({

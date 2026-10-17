@@ -6,6 +6,36 @@ import {
 } from '../src/local-machine-rpc';
 
 describe('local Machine RPC', () => {
+  it('accepts a registered local member reference and validates the path-free probe result', () => {
+    const request = {
+      machineId: 'm',
+      workspaceId: 'w',
+      method: 'project/probe-local-member',
+      params: { localProjectId: 'local' },
+    };
+    expect(LocalMachineRpcRequestSchema.parse(request)).toEqual(request);
+    expect(
+      LocalMachineRpcRequestSchema.safeParse({
+        ...request,
+        params: { ...request.params, rootPath: '/host' },
+      }).success
+    ).toBe(false);
+    const response = {
+      ok: true,
+      result: {
+        type: 'project/probe-local-member',
+        repoFullName: 'acme/api',
+        submodules: [{ path: 'proto', url: '../proto.git', repoFullName: 'acme/proto' }],
+      },
+    };
+    expect(LocalMachineRpcResponseSchema.parse(response)).toEqual(response);
+    expect(
+      LocalMachineRpcResponseSchema.safeParse({
+        ok: true,
+        result: { ...response.result, rootPath: '/host' },
+      }).success
+    ).toBe(false);
+  });
   it('allows Pi discovery by saved config reference but never caller launch inputs', () => {
     const request = {
       machineId: 'machine-1',

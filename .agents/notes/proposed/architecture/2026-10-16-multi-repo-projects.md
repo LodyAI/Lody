@@ -434,3 +434,59 @@ lifecycle layouts, with one native SSH credential fixture failing `context_unrea
 The full repository check is not green; UI and live credential acceptance remain outstanding.
 
 Runtime integration PR: [#1644](https://github.com/LodyAI/Lody/pull/1644)。
+
+## UI/daemon handoff
+
+`buildSessionProjectRun(project, selectedMemberIds)` freezes definition order, source,
+placement, paths, stable root and instructions. `selectProjectMembers` recursively drops
+children of deselected parents; unknown IDs fail. Fewer than two remaining members returns
+`undefined`, so callers use the existing single-repository flow (zero disables Create).
+Root bases use `baseBranch ?? 'HEAD'`; submodules use `PROJECT_SUBMODULE_BASE = 'gitlink'`.
+The owner resolves placeholders to named root base refs and submodule commit IDs before publishing materialization
+receipts; root HEAD uses the local current checkout or GitHub default branch. Explicit
+base branches remain unchanged. A single-member fallback never carries `projectRun`.
+
+Machine RPC `project/probe-local-member` takes `{ localProjectId }` in `params`, alongside
+normal `machineId`/`workspaceId`. Its result has type `project/probe-local-member`, optional
+`repoFullName`, and `submodules: { path, url, repoFullName? }[]`; transport retains the normal
+`{ ok, result }` envelope. It only reads a registered member in that workspace/machine,
+rejects session-scoped calls, never fetches/initializes/syncs/writes Git config, and reads
+the working `.gitmodules` without includes. Invalid paths are omitted; unsafe/oversized
+configuration fails. Absolute local/file URLs are redacted to `url: ''`; no host root is
+returned and command error details are not exposed. No GitHub identity is guessed for
+redacted local URLs. UI may leave those relationships unconfirmed.
+
+Shared `getProjectRepositoryFullName` resolves GitHub HTTPS/SSH/SCP and parent-relative URLs.
+`matchProjectSubmoduleMember` matches against GitHub members or machine-resolved local
+identities and returns no match for ambiguity. The daemon's gitlink validator uses the same
+`projectRepositoryUrlIdentity` normalization. `session/create` keeps the first selected
+member's `project` projection and optional `projectRun`, gated by `machineSupportsMultiRepoProject`.
+
+Probe trigger/owner: a read-only authenticated machine RPC; the finite native Effect probe
+uses WorktreeGit/FileSystem, awaits command release, and retains no background state. The
+existing Legacy entry bridges the Promise dispatcher; failure returns a path-free error and
+a retry reads fresh state. No surrounding dispatcher migration is claimed.
+
+Remote machines expose the same method through Streams.
+`LoroStreamsMachineRpcClient.requestProjectProbeLocalMember({ localProjectId, requestedByUserId, timeoutMs? })`
+returns the typed result or null on transport/handler failure. The daemon checks machine/project access
+before probing. Local IPC uses the existing authenticated machine RPC envelope.
+
+The HEAD root receipt preserves the named base ref (so PR bases remain branch names);
+a detached checkout or recovery without a base receipt pins the commit. GitHub HEAD reads
+the current remote symbolic HEAD rather than preferring main or a stale cached default.
+Validation includes 37 shared, 124 Streams, 13 RPC-scope and 12 Git/owner tests, plus
+two remote base tests including a changed default branch. Full workspace typecheck,
+`check:quick`, format and docs check passed; full repository tests remain separate.
+
+
+Shared `withProjectGroupPrScope(prompt)` scopes either PR creation or Commit & Push to
+member repositories. It preserves the requested action and draft status, publishes children
+before parent gitlinks, and cross-links all related PR bodies after URLs are known. Commit &
+Push alone does not create PRs; a failed child publication blocks publishing its parent pointer.
+The member inventory supplies directories because the Project group root is not a Git repository.
+The final local-member observation field remains `SessionProjectMember.repoFullName?: string`;
+UI code using `repo` must switch to `repoFullName`. No synonymous storage field is introduced.
+
+The initial GitHub `project` projection uses `branch: baseBranch ?? 'HEAD'`; an empty
+branch is rejected by the existing `ProjectRefSchema`. Local projections retain `useWorktree: true`.

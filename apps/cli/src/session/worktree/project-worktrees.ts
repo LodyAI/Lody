@@ -4,6 +4,7 @@ import path from 'node:path';
 import { mkdir, realpath } from 'node:fs/promises';
 import {
   SessionProjectRunSchema,
+  PROJECT_SUBMODULE_BASE,
   deduplicateProjectMembers,
   resolveSessionFilePath,
   type LocalProjectId,
@@ -160,6 +161,16 @@ export async function materializeProjectGroup(options: {
             undefined,
             auth
           );
+          if (member.base === 'HEAD') {
+            // Keep a named root base for PR targets; detached/recovered receipts pin the commit.
+            const base = info.baseRef;
+            member.base =
+              base && base !== 'HEAD'
+                ? member.src.kind === 'github'
+                  ? base.replace(/^origin\//, '')
+                  : base
+                : await worktreeGitLegacy.run({ cwd: info.hostPath, args: ['rev-parse', 'HEAD'] });
+          }
           member.branch = info.branch;
         } else {
           const parent = run.members[member.placement.parent]!;
@@ -175,7 +186,8 @@ export async function materializeProjectGroup(options: {
             auth
           );
           member.branch = info.branch;
-          if (!info.existed && !restoring) member.base = info.commit;
+          if ((!info.existed && !restoring) || member.base === PROJECT_SUBMODULE_BASE)
+            member.base = info.commit;
           existed = info.existed === true;
         }
         const actualPath = await realpath(memberPath);

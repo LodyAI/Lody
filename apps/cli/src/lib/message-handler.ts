@@ -1,3 +1,4 @@
+import { worktreeGitLegacy } from '@/session/worktree/git-execution-legacy';
 import { resolveSessionFilePath } from '@lody/shared';
 import { projectGroupDirectory } from '@/session/worktree/project-worktrees';
 import { archiveProjectGroup } from '@/session/worktree/project-worktree-archive';
@@ -2383,6 +2384,24 @@ export class MessageHandler {
     return promptBlocks;
   }
 
+  private async probeProjectLocalMember(localProjectId: LocalProjectId) {
+    try {
+      const rootPath = await resolveWorkspaceLocalProjectRootPath(
+        this.workspaceDocument.repo,
+        this.workspaceId,
+        this.machineId,
+        localProjectId
+      );
+      if (!rootPath) throw new Error('Project group member is unavailable');
+      return {
+        type: 'project/probe-local-member' as const,
+        ...(await worktreeGitLegacy.probeLocalProjectMember(rootPath)),
+      };
+    } catch {
+      throw new Error('Unable to probe project group member');
+    }
+  }
+
   private async getLocalProjectGitStateForRpc(args: {
     localProjectId: LocalProjectId;
     requestedByUserId: string;
@@ -3412,6 +3431,16 @@ export class MessageHandler {
             machineId: this.machineId,
             workspaceId: this.workspaceId,
           });
+        },
+        probeLocalProjectMember: async ({ localProjectId, requestedByUserId }) => {
+          const access = await this.cloudPort.access.verifyMachineAccess({
+            workspaceId: this.workspaceId,
+            machineId: this.machineId,
+            requesterUserId: requestedByUserId,
+            localProjectId,
+          });
+          if (!access.allowed) throw new Error('Project group member access denied');
+          return this.probeProjectLocalMember(localProjectId);
         },
         getLocalProjectGitState: async ({ localProjectId, requestedByUserId }) =>
           await this.getLocalProjectGitStateForRpc({
@@ -6551,6 +6580,15 @@ export class MessageHandler {
     };
 
     switch (request.method) {
+      case 'project/probe-local-member': {
+        if (
+          request.machineId !== this.machineId ||
+          request.workspaceId !== this.workspaceId ||
+          request.ownerSessionId
+        )
+          throw new Error('Project group probe scope mismatch');
+        return this.probeProjectLocalMember(request.params.localProjectId as LocalProjectId);
+      }
       case 'mcp/list-tools':
         return await listMcpTools(request.params.server);
       case 'session/call-tool': {

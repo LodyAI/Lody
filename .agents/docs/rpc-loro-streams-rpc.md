@@ -106,3 +106,10 @@ content, so it reuses the owner-session content envelope and owner verification.
 The earlier `method.startsWith('code-collab/')` checks silently excluded any new
 envelope method, which is why every encrypt/decrypt/error-decode site now goes
 through `isOwnerScopedEncryptedRpcMethod`.
+
+## Project group member probing
+
+`project/probe-local-member` is a read-only workspace/machine method. It carries a registered
+localProjectId and requester identity, never a host path. The daemon checks machine/project
+access and shares its native probe with local IPC. `requestProjectProbeLocalMember` returns
+the shared `ProjectProbeLocalMemberResult`, or null on failure. Local/file URLs are redacted.

@@ -959,6 +959,7 @@ export class WorktreeManager {
   private async resolveBaseRef(preferredBranch?: string, env?: NodeJS.ProcessEnv): Promise<string> {
     if (this.source.kind === 'local-shared') {
       const preferred = preferredBranch?.trim();
+      if (preferred === 'HEAD') return this.resolveDefaultBranch();
       if (preferred) {
         if (preferred.startsWith('refs/heads/') || preferred.startsWith('refs/remotes/')) {
           if (await this.hasCommitish(preferred, env)) return preferred;
@@ -980,6 +981,16 @@ export class WorktreeManager {
       throw new Error(`[${this.repoId}] Local repository has no commit to use as a worktree base`);
     }
 
+    if (preferredBranch === 'HEAD') {
+      const remoteHead = await this.runGit(
+        ['ls-remote', '--symref', 'origin', 'HEAD'],
+        this.getGitAdminCwd(),
+        env
+      );
+      preferredBranch =
+        /^ref: refs\/heads\/(.+)\tHEAD$/m.exec(remoteHead)?.[1] ??
+        (await this.resolveDefaultBranch());
+    }
     const candidates: string[] = [];
 
     if (preferredBranch) {
@@ -1268,9 +1279,10 @@ export class WorktreeManager {
     restoreBranchName?: string,
     exactStartPoint?: string,
     brokerAuth?: GitCredentialBrokerAuth
-  ): Promise<WorktreeInfo> {
+  ): Promise<WorktreeInfo & { baseRef?: string }> {
     return withRepoLock(this.repoId, async () => {
       assertSafeSessionId(sessionId);
+      let baseRef: string | undefined;
       const worktreePath = this.getWorktreeHostPath(sessionId);
       const gitAdminCwd = this.getGitAdminCwd();
 
@@ -1354,6 +1366,7 @@ export class WorktreeManager {
           );
         } else {
           const resolvedBase = await this.resolveBaseRef(baseBranch, gitEnv);
+          if (baseBranch === 'HEAD') baseRef = resolvedBase;
           this.logger.debug(
             `[${this.repoId}] Creating new worktree (sessionId=${sessionId} base=${resolvedBase}): ${worktreePath}`
           );
@@ -1372,7 +1385,7 @@ export class WorktreeManager {
       this.logger.debug(
         `[${this.repoId}] Worktree ready (sessionId=${sessionId} branch=${info.branch} head=${info.headSha ?? 'unknown'}): host=${info.hostPath}`
       );
-      return info;
+      return { ...info, ...(baseRef ? { baseRef } : {}) };
     });
   }
 

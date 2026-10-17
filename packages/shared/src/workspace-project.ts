@@ -180,7 +180,10 @@ export function normalizeWorkspaceProject(value: unknown): WorkspaceProject | un
   return result.success ? result.data : undefined;
 }
 export const SessionProjectMemberSchema = z.object({
-  repoFullName: z.string().regex(/^[\w.-]+\/[\w.-]+$/).optional(),
+  repoFullName: z
+    .string()
+    .regex(/^[\w.-]+\/[\w.-]+$/)
+    .optional(),
   o: z.number().int().nonnegative(),
   src: ProjectMemberSourceSchema,
   placement: ProjectMemberPlacementSchema,
@@ -277,3 +280,118 @@ export function getCurrentPullRequestsByRepository<T extends { url: string }>(
   }
   return [...current.values()];
 }
+
+/** Remove a deselected member and all its descendants, preserving definition order. */
+export function selectProjectMembers(
+  members: readonly ProjectMember[],
+  selectedMemberIds: Iterable<ProjectMemberId>
+): ProjectMember[] {
+  resolveProjectMemberPaths(members);
+  const selected = new Set(selectedMemberIds);
+  const byId = new Map(members.map((member) => [member.id, member]));
+  for (const id of selected) if (!byId.has(id)) throw new Error('Unknown project group member');
+  const included = (member: ProjectMember): boolean =>
+    selected.has(member.id) &&
+    (member.placement.kind === 'root' || included(byId.get(member.placement.parent)!));
+  return members.filter(included);
+}
+
+export const PROJECT_SUBMODULE_BASE = 'gitlink';
+/** Undefined means use the existing single-repository flow (or disable Create for zero members). */
+export function buildSessionProjectRun(
+  project: WorkspaceProject,
+  selectedMemberIds: Iterable<ProjectMemberId>
+): SessionProjectRun | undefined {
+  const frozen = WorkspaceProjectSchema.parse(project);
+  const members = selectProjectMembers(frozen.members, selectedMemberIds);
+  if (members.length < 2) return undefined;
+  const paths = resolveProjectMemberPaths(members);
+  return SessionProjectRunSchema.parse({
+    id: frozen.id,
+    name: frozen.name,
+    instructions: frozen.instructions,
+    root: getProjectRunRoot(frozen),
+    members: Object.fromEntries(
+      members.map((member, o) => [
+        member.id,
+        {
+          o,
+          src: member.source,
+          placement: member.placement,
+          path: paths[member.id],
+          base:
+            member.placement.kind === 'submodule'
+              ? PROJECT_SUBMODULE_BASE
+              : (member.source.baseBranch ?? 'HEAD'),
+        },
+      ])
+    ),
+  });
+}
+
+/** Git remote spellings, including .gitmodules URLs relative to a GitHub parent remote. */
+export function getProjectRepositoryFullName(
+  url: string,
+  parentRepoFullName?: string
+): string | undefined {
+  let value = url.trim();
+  if (/^\.\.?\//.test(value)) {
+    if (!parentRepoFullName || !/^[\w.-]+\/[\w.-]+$/.test(parentRepoFullName)) return undefined;
+    value = new URL(value, `https://github.com/${parentRepoFullName}/`).href;
+  }
+  const match =
+    /^(?:https?:\/\/github\.com\/|ssh:\/\/(?:git@)?github\.com\/|git@github\.com:)([\w.-]+)\/([\w.-]+)\/?$/i.exec(
+      value
+    );
+  if (!match) return undefined;
+  const owner = match[1]!;
+  const repo = match[2]!.replace(/\.git$/i, '');
+  if (!repo || [owner, repo].some((part) => part === '.' || part === '..')) return undefined;
+  return `${owner}/${repo}`;
+}
+
+export function projectRepositoryUrlIdentity(url: string): string {
+  const name = getProjectRepositoryFullName(url);
+  return name ? `github:${name.toLowerCase()}` : url.replace(/\/$/, '');
+}
+
+/** Ambiguous/unknown identities do not establish a submodule relationship. */
+export function matchProjectSubmoduleMember(
+  submodule: { url: string; repoFullName?: string },
+  members: readonly ProjectMember[],
+  resolveLocal?: ResolveLocalProjectRepository,
+  parentRepoFullName?: string
+): ProjectMember | undefined {
+  const name =
+    submodule.repoFullName ?? getProjectRepositoryFullName(submodule.url, parentRepoFullName);
+  if (!name) return undefined;
+  const matches = members.filter((member) => {
+    const identity =
+      member.source.kind === 'github' ? member.source : resolveLocal?.(member.source);
+    return identity?.repoFullName.toLowerCase() === name.toLowerCase();
+  });
+  return matches.length === 1 ? matches[0] : undefined;
+}
+
+export const ProjectLocalMemberProbeSchema = z
+  .object({
+    repoFullName: z
+      .string()
+      .regex(/^[\w.-]+\/[\w.-]+$/)
+      .optional(),
+    submodules: z.array(
+      z
+        .object({
+          path: pathSchema,
+          /** Empty when a machine-local URL was redacted; absolute host paths never cross RPC. */
+          url: z.string(),
+          repoFullName: z
+            .string()
+            .regex(/^[\w.-]+\/[\w.-]+$/)
+            .optional(),
+        })
+        .strict()
+    ),
+  })
+  .strict();
+export type ProjectLocalMemberProbe = z.infer<typeof ProjectLocalMemberProbeSchema>;

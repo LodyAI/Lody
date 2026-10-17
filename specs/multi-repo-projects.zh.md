@@ -167,3 +167,7 @@ Project 的对话都归到同一个原生项目，`cwd` 仍是各自的主目录
 - 单分支 PR 发现，以及“当前 PR 是最后一项”：[PR 调和器](../apps/cli/src/lib/pr-poller/AGENTS.md)。
 - [分支观测](workspace-branch-state.md)、[本地 PR 观测](local-github-pr-observation.md)。
 - 决策与备选方案：[提案 Note](../.agents/notes/proposed/architecture/2026-10-16-multi-repo-projects.zh.md)。
+
+创建快照对未指定的 root base 使用 `HEAD`，对子模块 base 使用 `gitlink`；owner daemon
+在物化时将 root 占位值解析为基线引用、子模块占位值解析为提交。取消父成员同时取消全部后代。本地子模块探测只读，不返回主机
+绝对路径，本地路径 URL 脱敏。

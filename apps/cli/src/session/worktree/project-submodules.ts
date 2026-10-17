@@ -1,20 +1,11 @@
 import path from 'node:path';
 import { Effect } from 'effect';
-import { isSafeProjectPath, parseGitHubRepo } from '@lody/shared';
+import { isSafeProjectPath, projectRepositoryUrlIdentity } from '@lody/shared';
 import { WorktreeGit, WorktreeGitExecutionFailed } from './git-execution';
 import {
   getAllocatedSessionBranchName,
   resolveAvailableBranchName,
 } from './branch-name-allocation';
-
-/** GitHub identity is transport independent; local URLs are resolved by the owning machine. */
-export function projectRepositoryUrlIdentity(url: string): string {
-  if (/^(?:https?:\/\/github\.com\/|ssh:\/\/(?:git@)?github\.com\/|git@github\.com:)/i.test(url)) {
-    const parsed = parseGitHubRepo(url);
-    return `github:${parsed.owner}/${parsed.repo}`.toLowerCase();
-  }
-  return url.replace(/\/$/, '');
-}
 
 /** Validates a configured Member against the parent's actual gitlink before any checkout. */
 export const inspectProjectSubmodule = Effect.fn('inspectProjectSubmodule')(function* (options: {

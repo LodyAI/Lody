@@ -337,7 +337,7 @@ describe('WorktreeManager', () => {
       expect(info.headSha).not.toBeNull();
     });
 
-    it('should create a session branch based on the specified common branch', async () => {
+    it.each(['develop', 'HEAD'])('should create a session branch from the remote %s base', async (base) => {
       const { sourceDir, remoteBareDir } = createRemoteRepo(testDir, 'main');
       manager.updateRepoUrl(toFileUrl(remoteBareDir));
 
@@ -347,8 +347,12 @@ describe('WorktreeManager', () => {
       runGit(sourceDir, ['push', '-u', 'origin', 'develop']);
       runGit(sourceDir, ['checkout', 'main']);
 
+      runGit(remoteBareDir, ['symbolic-ref', 'HEAD', 'refs/heads/main']);
+      await manager.ensureRepo();
+      runGit(remoteBareDir, ['symbolic-ref', 'HEAD', 'refs/heads/develop']);
       const sessionId = 'rbranch01-remote-develop-1' as SessionId;
-      const info = await manager.createWorktree(sessionId, 'develop');
+      const info = await manager.createWorktree(sessionId, base);
+      expect(info.baseRef).toBe(base === 'HEAD' ? 'origin/develop' : undefined);
       expect(info.headSha).toBe(developHead);
       expect(info.branch).toBe(`session/${sessionId.slice(0, 8)}`);
     });

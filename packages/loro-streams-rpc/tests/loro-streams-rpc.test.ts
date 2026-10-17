@@ -2020,6 +2020,52 @@ describe('LoroStreamsMachineRpcClient', () => {
     }
   });
 
+  it('roundtrips a project member probe with its typed result', async () => {
+    vi.useFakeTimers();
+    const fake = createFakeStreamClient();
+    const client = new LoroStreamsMachineRpcClient({
+      workspaceId: 'workspace-1',
+      machineId: 'machine-1',
+      streamClient: fake.streamClient,
+    });
+    try {
+      const pending = client.requestProjectProbeLocalMember({
+        localProjectId: 'local-1' as LocalProjectId,
+        requestedByUserId: 'user-1',
+      });
+      await fake.waitForAppendedCount(1);
+      const request = fake.appended[0]!.value as { id: string; method: string; params: unknown };
+      expect(request).toMatchObject({
+        method: 'project/probe-local-member',
+        params: { localProjectId: 'local-1', requestedByUserId: 'user-1' },
+      });
+      const result = {
+        type: 'project/probe-local-member',
+        repoFullName: 'acme/api',
+        submodules: [{ path: 'proto', url: '../proto.git', repoFullName: 'acme/proto' }],
+      };
+      fake.pushBatch({
+        messages: [
+          {
+            jsonrpc: '2.0',
+            id: request.id,
+            method: request.method,
+            rpcVersion: '1',
+            machineId: 'machine-1',
+            result,
+          },
+        ],
+        nextOffset: '1',
+        cursor: '1',
+        upToDate: true,
+      });
+      expect(await pending).toEqual(result);
+    } finally {
+      client.stop();
+      vi.useRealTimers();
+    }
+  });
+
   it('sends local project git state requests and resolves git state responses', async () => {
     const fake = createFakeStreamClient();
     const client = new LoroStreamsMachineRpcClient({
