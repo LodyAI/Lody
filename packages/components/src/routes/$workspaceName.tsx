@@ -4,7 +4,18 @@ import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useOrganization } from '@/hooks/useOrganization';
 import { useStableSession } from '@/hooks/useStableSession';
-import { useCloudQuery } from '@lody/platform/react';
+import { useCloudQuery, usePlatform } from '@lody/platform/react';
+import { useAtomValue, useSetAtom } from 'jotai';
+import { workspaceContentModeAtom } from '@/atoms/workspace-content-mode';
+import { userAtom } from '@/atoms';
+import { workspaceModeAdmissionRetryAtom, workspaceRuntimeInitFailureAtom } from '@/atoms/runtime';
+import { WorkspaceModeAdmissionTimeoutError } from '../providers/workspace-mode-admission';
+import { E2eeClientUpgradeRequiredError } from '../providers/cloud-e2ee-workspaces';
+import {
+  E2eeLocalEvidenceConflictError,
+  E2eeLocalEvidenceCorruptError,
+  repairUnreadableE2eeCaches,
+} from '@/lib/e2ee-workspace-storage';
 import { cloudOperations } from '@/lib/cloud-api-operations';
 import {
   clearPreferredWorkspaceSlugIfMatch,
@@ -351,7 +362,65 @@ function CloudWorkspaceGuardRoute() {
   );
 }
 
-function WorkspaceAuthedRoute({
+function admissionFailureHelp(errorType: string): string {
+  switch (errorType) {
+    case WorkspaceModeAdmissionTimeoutError.name:
+      return 'e2ee.mode.timedOutHelp';
+    case E2eeLocalEvidenceCorruptError.name:
+      return 'e2ee.mode.localCorruptHelp';
+    case E2eeLocalEvidenceConflictError.name:
+      return 'e2ee.mode.localConflictHelp';
+    case E2eeClientUpgradeRequiredError.name:
+      return 'e2ee.mode.upgradeHelp';
+    default:
+      return 'e2ee.mode.failedHelp';
+  }
+}
+
+function WorkspaceAuthedRoute(props: Parameters<typeof PlaintextWorkspaceAuthedRoute>[0]) {
+  const platform = usePlatform();
+  const mode = useAtomValue(workspaceContentModeAtom);
+  const user = useAtomValue(userAtom);
+  const failure = useAtomValue(workspaceRuntimeInitFailureAtom);
+  const retryAdmission = useSetAtom(workspaceModeAdmissionRetryAtom);
+  const { t } = useTranslation();
+  if (platform.e2eeWorkspaces) {
+    if (!mode || mode.workspaceSlug !== props.workspaceName || mode.accountId !== user?.id) {
+      return failure?.workspaceSlug === props.workspaceName ? (
+        <RouteMessage
+          gate="workspace_content_mode"
+          title={t('e2ee.mode.failed')}
+          description={t(admissionFailureHelp(failure.errorType))}
+          onRetry={() => {
+            // Unreadable optional caches cannot help any later attempt. Sticky
+            // encrypted evidence and conflicting records are never removed here.
+            if (failure.errorType === E2eeLocalEvidenceCorruptError.name && user?.id)
+              repairUnreadableE2eeCaches(localStorage, user.id);
+            retryAdmission((value) => value + 1);
+          }}
+        />
+      ) : (
+        <BlockingWaitPlaceholder
+          gate="workspace_content_mode"
+          variant="boot"
+          title={t('e2ee.mode.loading')}
+        />
+      );
+    }
+    if ('contentMode' in mode.descriptor && mode.descriptor.contentMode === 'e2ee') {
+      return (
+        <BootNavigate
+          to="/workspace/e2ee/$workspaceId"
+          params={{ workspaceId: mode.workspaceId }}
+          replace
+        />
+      );
+    }
+  }
+  return <PlaintextWorkspaceAuthedRoute {...props} />;
+}
+
+function PlaintextWorkspaceAuthedRoute({
   workspaceName,
   organizations,
   organizationsLoading,

@@ -1,6 +1,7 @@
 export * from './capabilities';
 export * from './cloud-api';
 export * from './cloud-port';
+export * from './e2ee-workspaces';
 export * from './local';
 export * from './provider';
 export * from './runtime-artifacts';

@@ -1,6 +1,7 @@
 import { useTranslation } from 'react-i18next';
 import { ArrowLeft, ArrowRight, Building2, CreditCard } from 'lucide-react';
 import { Spinner } from '@lody/ui/spinner';
+import type { ReactNode } from 'react';
 
 import { Button } from '@lody/ui/button';
 import { Card } from '@/ui/card';
@@ -21,6 +22,10 @@ export interface CreateWorkspacePageProps {
   workspaceSlug: string;
   error?: string | null;
   creating?: boolean;
+  fieldsDisabled?: boolean;
+  submitDisabled?: boolean;
+  retryPendingCreation?: boolean;
+  creationOptions?: ReactNode;
   slugChecking?: boolean;
   slugAvailable?: boolean;
   slugErrorType?: string | null;
@@ -42,6 +47,10 @@ export function CreateWorkspacePage({
   workspaceSlug,
   error = null,
   creating = false,
+  fieldsDisabled = false,
+  submitDisabled = false,
+  retryPendingCreation = false,
+  creationOptions,
   slugChecking = false,
   slugAvailable = false,
   slugErrorType = null,
@@ -114,7 +123,7 @@ export function CreateWorkspacePage({
                       onSubmit();
                     }
                   }}
-                  disabled={creating}
+                  disabled={creating || fieldsDisabled}
                   className={error ? 'border-destructive' : ''}
                 />
                 {error ? <p className="text-sm text-destructive">{error}</p> : null}
@@ -137,7 +146,7 @@ export function CreateWorkspacePage({
                         type="button"
                         className="text-xs text-muted-foreground hover:text-foreground"
                         onClick={onResetWorkspaceSlug}
-                        disabled={creating}
+                        disabled={creating || fieldsDisabled}
                       >
                         {t('organization.workspaceSlugReset')}
                       </button>
@@ -160,7 +169,7 @@ export function CreateWorkspacePage({
                   placeholder={t('organization.workspaceSlugPlaceholder', 'my-workspace')}
                   value={workspaceSlug}
                   onChange={(event) => onWorkspaceSlugChange(event.target.value)}
-                  disabled={creating}
+                  disabled={creating || fieldsDisabled}
                   className={slugErrorType ? 'border-destructive' : ''}
                 />
                 {slugErrorType ? (
@@ -169,6 +178,8 @@ export function CreateWorkspacePage({
                   </p>
                 ) : null}
               </div>
+
+              {creationOptions}
 
               {paidRequired ? (
                 <div className="space-y-2 border-t border-border/60 pt-4">
@@ -227,10 +238,10 @@ export function CreateWorkspacePage({
                 onClick={onSubmit}
                 disabled={
                   creating ||
+                  submitDisabled ||
                   !workspaceName.trim() ||
-                  slugChecking ||
-                  Boolean(slugErrorType) ||
-                  !slugAvailable
+                  (!retryPendingCreation &&
+                    (slugChecking || Boolean(slugErrorType) || !slugAvailable))
                 }
                 className="w-full"
               >
@@ -243,9 +254,11 @@ export function CreateWorkspacePage({
                   </span>
                 ) : (
                   <span className="flex items-center">
-                    {paidRequired
-                      ? t('organization.continueToCheckout', 'Continue to checkout')
-                      : t('organization.createWorkspace', 'Create Workspace')}
+                    {retryPendingCreation
+                      ? t('e2ee.create.resume')
+                      : paidRequired
+                        ? t('organization.continueToCheckout', 'Continue to checkout')
+                        : t('organization.createWorkspace', 'Create Workspace')}
                     <ArrowRight className="ml-2 h-4 w-4" />
                   </span>
                 )}

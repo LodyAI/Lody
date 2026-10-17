@@ -1,5 +1,9 @@
 import { useMemo, useState } from 'react';
 import { ChevronsUpDown, Plus, Building2, LogOut } from 'lucide-react';
+import {
+  EncryptedWorkspaceMark,
+  isListedEncryptedWorkspace,
+} from '@/components/e2ee/encrypted-workspace-mark';
 import { cloudOperations } from '@/lib/cloud-api-operations';
 import { useCloudQuery } from '@lody/platform/react';
 import { useOrganization } from '../hooks/useOrganization';
@@ -232,6 +236,7 @@ function CloudOrganizationSwitcher() {
                     className="shrink-0"
                   />
                   {org.name}
+                  {isListedEncryptedWorkspace(org) ? <EncryptedWorkspaceMark /> : null}
                   {planTierByWorkspaceId.has(org.id) ? (
                     <Badge>
                       {planTierByWorkspaceId.get(org.id) === 'enterprise'

@@ -6,7 +6,11 @@ import type { ElectronUpdaterPhase } from '@lody/shared';
 import { useAtom } from 'jotai';
 import { Button } from '@lody/ui/button';
 import { Switch } from '@lody/ui/switch';
-import { developerModeEnabledAtom, inboxBetaEnabledAtom } from '@/atoms/settings';
+import {
+  developerModeEnabledAtom,
+  e2eeWorkspaceCreationEnabledAtom,
+  inboxBetaEnabledAtom,
+} from '@/atoms/settings';
 import { useElectronUpdaterState } from '@/hooks/use-electron-updater-state';
 import { OpenSourceAttributionsDialog } from '@/components/settings/open-source-attributions-dialog';
 import { JoinCommunityButton } from '@/components/settings/join-community-dialog';
@@ -107,6 +111,7 @@ export function MobileAboutSettings() {
   const { t, i18n } = useTranslation();
   const [developerModeEnabled, setDeveloperModeEnabled] = useAtom(developerModeEnabledAtom);
   const [inboxBetaEnabled, setInboxBetaEnabled] = useAtom(inboxBetaEnabledAtom);
+  const [e2eeCreationEnabled, setE2eeCreationEnabled] = useAtom(e2eeWorkspaceCreationEnabledAtom);
   const [revealTaps, setRevealTaps] = useState(0);
   const updaterState = useElectronUpdaterState();
   const [isInstalling, setIsInstalling] = useState(false);
@@ -284,6 +289,19 @@ export function MobileAboutSettings() {
       {developerModeEnabled ? (
         <MobileSettingsSection title={t('settings.beta.title', 'Beta features')}>
           <MobileSettingsRowGroup>
+            <MobileSettingsRow
+              label={t('settings.beta.e2eeWorkspace', 'Encrypted workspace creation')}
+              helper={t(
+                'settings.beta.e2eeWorkspaceHelper',
+                'Create a workspace with a device identity and signed permission history. Conversation sync and execution are not available yet. Existing workspaces are unchanged.'
+              )}
+            >
+              <Switch
+                checked={e2eeCreationEnabled}
+                onCheckedChange={setE2eeCreationEnabled}
+                aria-label={t('settings.beta.e2eeWorkspace', 'Encrypted workspace creation')}
+              />
+            </MobileSettingsRow>
             <MobileSettingsRow
               label={t('settings.beta.inbox', 'Inbox')}
               helper={t(

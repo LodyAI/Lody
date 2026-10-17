@@ -1,6 +1,19 @@
 import { createFileRoute, Navigate, useNavigate } from '@tanstack/react-router';
 import { useState, useEffect, useRef } from 'react';
-import { useCloudAction } from '@lody/platform/react';
+import { useCloudAction, usePlatform, usePlatformSession } from '@lody/platform/react';
+import { useAtomValue } from 'jotai';
+import { e2eeWorkspaceCreationFeatureEnabledAtom } from '@/atoms/settings';
+import { E2eeWorkspaceCreationOption } from '@/components/pages/e2ee-workspace-creation-option';
+import {
+  createPreparedE2eeWorkspace,
+  e2eeCreationChoice,
+  isE2eeCreationNotEnabled,
+} from '@/lib/create-e2ee-workspace';
+import {
+  listPendingE2eeWorkspaces,
+  savePendingE2eeWorkspace,
+  type PendingE2eeWorkspace,
+} from '@/lib/e2ee-workspace-storage';
 import { cloudOperations } from '@/lib/cloud-api-operations';
 import { useCloudQuery } from '@lody/platform/react';
 import { useTranslation } from 'react-i18next';
@@ -106,6 +119,18 @@ function CreateWorkspaceAuthed({
 }) {
   const { t } = useTranslation();
   const isMobile = useIsMobile();
+  const platform = usePlatform();
+  const platformSession = usePlatformSession();
+  const accountId = platformSession.status === 'authenticated' ? platformSession.user.id : null;
+  const accountRef = useRef(accountId);
+  accountRef.current = accountId;
+  const creationEnabled = useAtomValue(e2eeWorkspaceCreationFeatureEnabledAtom);
+  const [encrypted, setEncrypted] = useState(false);
+  const [pendingCreation, setPendingCreation] = useState<PendingE2eeWorkspace | null>(null);
+  const [pendingRequests, setPendingRequests] = useState<PendingE2eeWorkspace[]>([]);
+  const [intentAccount, setIntentAccount] = useState<string | null>(null);
+  const [intentReadFailed, setIntentReadFailed] = useState(false);
+  const submitInFlight = useRef(false);
   const hidesBillingUi = isMobile || isNativeAppShell();
   const postHog = usePostHog();
   const {
@@ -140,12 +165,60 @@ function CreateWorkspaceAuthed({
     isAvailable: slugAvailable,
     error: slugErrorType,
   } = useWorkspaceSlugField(workspaceName);
+  const currentPending = pendingCreation?.accountId === accountId ? pendingCreation : null;
+  const creationChoice = e2eeCreationChoice({
+    featureEnabled: creationEnabled,
+    selected: encrypted,
+    resumable: Boolean(currentPending),
+    savedRequests: pendingRequests.length,
+  });
+  const useEncryption = creationChoice.encrypt;
+  useEffect(() => {
+    setPendingCreation(null);
+    setPendingRequests([]);
+    setCreating(false);
+    setEncrypted(false);
+    setIntentReadFailed(false);
+    if (!accountId) return;
+    try {
+      const requests = listPendingE2eeWorkspaces(localStorage, accountId);
+      setPendingRequests(requests);
+      const pending = requests[0] ?? null;
+      setPendingCreation(pending);
+      setWorkspaceName(pending?.name ?? '');
+      if (pending) setWorkspaceSlug(pending.slug);
+      else resetWorkspaceSlug();
+      setEncrypted(Boolean(pending));
+    } catch {
+      setIntentReadFailed(true);
+      setError(t('e2ee.create.storageFailed'));
+    }
+    setIntentAccount(accountId);
+  }, [accountId, setWorkspaceSlug, resetWorkspaceSlug, t]);
+  useEffect(() => {
+    if (!accountId) return undefined;
+    const refresh = (event: StorageEvent) => {
+      if (event.key !== null && !event.key.startsWith('lody-e2ee-pending-creation:')) return;
+      try {
+        setPendingRequests(listPendingE2eeWorkspaces(localStorage, accountId));
+      } catch {
+        setIntentReadFailed(true);
+        setError(t('e2ee.create.storageFailed'));
+      }
+    };
+    window.addEventListener('storage', refresh);
+    return () => window.removeEventListener('storage', refresh);
+  }, [accountId, t]);
 
   const hasExistingWorkspaces = Boolean(organizations && organizations.length > 0);
   const paidRequired = creationAvailability?.canCreateFree === false;
   // Mirrors the early-return below: the form is only really shown when creating
   // is allowed for an existing-workspace user, or the user has none.
-  const willRenderCreateForm = allowExisting === true || !hasExistingWorkspaces;
+  const willRenderCreateForm =
+    allowExisting === true ||
+    Boolean(currentPending) ||
+    pendingRequests.length > 0 ||
+    !hasExistingWorkspaces;
   const pageViewedRef = useRef(false);
   // create_page_viewed: fire once the create form is actually rendered (org
   // list settled, not about to auto-redirect). is_first_workspace distinguishes
@@ -205,7 +278,16 @@ function CreateWorkspaceAuthed({
 
   // 检查用户是否已有组织，如果有则重定向
   useEffect(() => {
-    if (!allowExisting && !organizationsLoading && organizations && organizations.length > 0) {
+    if (
+      !allowExisting &&
+      !currentPending &&
+      pendingRequests.length === 0 &&
+      intentAccount === accountId &&
+      !intentReadFailed &&
+      !organizationsLoading &&
+      organizations &&
+      organizations.length > 0
+    ) {
       if (redirect) {
         window.location.href = redirect;
       } else {
@@ -220,12 +302,22 @@ function CreateWorkspaceAuthed({
           setError(missingSlugMessage);
         }
       }
-    } else if (!organizationsLoading && (!organizations || organizations.length === 0)) {
+    } else if (
+      !intentReadFailed &&
+      !currentPending &&
+      !organizationsLoading &&
+      (!organizations || organizations.length === 0)
+    ) {
       setError(null);
     }
   }, [
     activeOrganization,
     allowExisting,
+    currentPending,
+    pendingRequests.length,
+    intentAccount,
+    accountId,
+    intentReadFailed,
     organizations,
     organizationsLoading,
     redirect,
@@ -239,11 +331,19 @@ function CreateWorkspaceAuthed({
 
   if (organizationsLoading) return null;
 
-  if (!allowExisting && organizations && organizations.length > 0) {
+  if (
+    !allowExisting &&
+    !currentPending &&
+    pendingRequests.length === 0 &&
+    intentAccount === accountId &&
+    !intentReadFailed &&
+    organizations &&
+    organizations.length > 0
+  ) {
     return null;
   }
 
-  if (hidesBillingUi && paidRequired) {
+  if (hidesBillingUi && paidRequired && !currentPending) {
     return (
       <RouteMessage
         gate={null}
@@ -262,13 +362,21 @@ function CreateWorkspaceAuthed({
   };
 
   const handleCreateWorkspace = async () => {
+    if (
+      !accountId ||
+      submitInFlight.current ||
+      creating ||
+      intentReadFailed ||
+      intentAccount !== accountId
+    )
+      return;
     const startMs = getPerformanceNowMs();
     if (!workspaceName.trim()) {
       setError(t('organization.workspaceNameRequired'));
       captureCreateFailed('missing_name', startMs);
       return;
     }
-    if (slugErrorType || slugChecking || !slugAvailable || !workspaceSlug) {
+    if (!currentPending && (slugErrorType || slugChecking || !slugAvailable || !workspaceSlug)) {
       captureCreateFailed(
         slugChecking ? 'slug_checking' : slugErrorType ? 'slug_invalid' : 'slug_unavailable',
         startMs
@@ -276,6 +384,7 @@ function CreateWorkspaceAuthed({
       return;
     }
     setCreating(true);
+    submitInFlight.current = true;
     setError(null);
 
     // create_requested -> create_succeeded/create_failed kept as a triplet
@@ -288,6 +397,32 @@ function CreateWorkspaceAuthed({
     });
 
     try {
+      if (useEncryption) {
+        const port = platform.e2eeWorkspaces;
+        if (!port?.prepareCreation || !accountId || (paidRequired && !currentPending)) {
+          throw new Error('Encrypted workspace creation unavailable');
+        }
+        const intent = currentPending ?? {
+          accountId,
+          requestId: crypto.randomUUID(),
+          name: workspaceName.trim(),
+          slug: workspaceSlug,
+        };
+        // Persist before generating an identity or sending a request. A lost
+        // response reuses these exact fields after reload, including its slug.
+        savePendingE2eeWorkspace(localStorage, intent);
+        setPendingRequests(listPendingE2eeWorkspaces(localStorage, accountId));
+        setPendingCreation(intent);
+        const result = await createPreparedE2eeWorkspace(port, localStorage, intent);
+        if (accountRef.current !== accountId) return;
+        setPendingCreation(null);
+        await navigate({
+          to: '/workspace/e2ee/$workspaceId',
+          params: { workspaceId: result.workspaceId },
+          replace: true,
+        });
+        return;
+      }
       if (paidRequired) {
         const isDesktop = isElectronRenderer();
         const billingUrl = `${window.location.origin}/${workspaceSlug}/settings/billing`;
@@ -357,11 +492,21 @@ function CreateWorkspaceAuthed({
         }
       }
     } catch (err) {
+      if (accountRef.current !== accountId) return;
       console.error('Failed to create workspace:', err);
-      setError(t('organization.createFailed'));
+      setError(
+        t(
+          !useEncryption
+            ? 'organization.createFailed'
+            : isE2eeCreationNotEnabled(err)
+              ? 'e2ee.create.notEnabled'
+              : 'e2ee.create.failed'
+        )
+      );
       captureCreateFailed('create_rejected', startMs);
     } finally {
-      setCreating(false);
+      submitInFlight.current = false;
+      if (accountRef.current === accountId) setCreating(false);
     }
   };
 
@@ -381,13 +526,58 @@ function CreateWorkspaceAuthed({
       workspaceSlug={workspaceSlug}
       error={error}
       creating={creating}
-      paidRequired={paidRequired}
+      fieldsDisabled={Boolean(currentPending)}
+      submitDisabled={
+        !accountId ||
+        intentReadFailed ||
+        intentAccount !== accountId ||
+        (useEncryption &&
+          (!platform.e2eeWorkspaces?.prepareCreation || (paidRequired && !currentPending)))
+      }
+      retryPendingCreation={Boolean(currentPending)}
+      paidRequired={paidRequired && !useEncryption}
+      creationOptions={
+        creationChoice.showOption ? (
+          <E2eeWorkspaceCreationOption
+            selected={useEncryption}
+            supported={Boolean(platform.e2eeWorkspaces?.prepareCreation)}
+            pending={Boolean(currentPending)}
+            disabled={creating}
+            paidRequired={paidRequired}
+            onChange={setEncrypted}
+            requests={pendingRequests.filter((request) => request.accountId === accountId)}
+            selectedRequestId={currentPending?.requestId ?? null}
+            onSelectRequest={(requestId) => {
+              const pending = pendingRequests.find(
+                (request) => request.requestId === requestId && request.accountId === accountId
+              );
+              if (!pending || creating) return;
+              setPendingCreation(pending);
+              setWorkspaceName(pending.name);
+              setWorkspaceSlug(pending.slug);
+              setEncrypted(true);
+              setError(null);
+            }}
+            onNewRequest={
+              creationEnabled && currentPending
+                ? () => {
+                    setPendingCreation(null);
+                    setWorkspaceName('');
+                    resetWorkspaceSlug();
+                    setEncrypted(true);
+                    setError(null);
+                  }
+                : undefined
+            }
+          />
+        ) : undefined
+      }
       billingInterval={billingInterval}
       pricing={newWorkspacePricing}
       slugChecking={slugChecking}
       slugAvailable={slugAvailable}
-      slugErrorType={slugErrorType}
-      canResetSlug={canResetSlug}
+      slugErrorType={currentPending ? null : slugErrorType}
+      canResetSlug={!currentPending && canResetSlug}
       onWorkspaceNameChange={(value) => {
         setWorkspaceName(value);
         setError(null);

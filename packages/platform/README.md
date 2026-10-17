@@ -1,6 +1,11 @@
 # Platform contracts
 
-This package contains platform-neutral composition contracts. `./host-keys` adds
+This package contains platform-neutral composition contracts. The optional
+`PlatformE2eeWorkspaces` port supports developer creation and public ledger
+inspection with persistent host custody. It never enables document transports;
+see the [workspace bootstrap guide](../../.agents/docs/e2ee-workspace-bootstrap.md).
+
+The separate `./host-keys` entry adds
 an unconnected host identity lifecycle seam using the workspace's Effect version.
 It does not enable encrypted workspaces or register IPC handlers.
 

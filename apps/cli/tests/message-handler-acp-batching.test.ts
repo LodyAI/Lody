@@ -425,6 +425,7 @@ describe('MessageHandler ACP batching', () => {
         cacheReadInputTokens: 3000,
         cacheCreationInputTokens: 15,
         reasoningOutputTokens: 21,
+        costUSD: null,
       });
       expect(history.find((entry) => entry.id === second)?.tokenUsage).toMatchObject({
         inputTokens: 3,
