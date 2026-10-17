@@ -1,10 +1,16 @@
 import { EphemeralStore } from 'loro-crdt';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   LODY_PRESENCE_HEARTBEAT_MS,
   LODY_PRESENCE_TTL_MS,
   parseLodyPresenceStates,
   SessionStatusFactory,
+  getServerNow,
+  getServerTimeOffset,
+  syncTime,
+  resetTimeSync,
+  maintainTimeSync,
+  findFreshMachinePresenceState,
   type LodyPresenceInstanceId,
   type LodyPresenceStateMap,
   type MachineId,
@@ -242,7 +248,8 @@ import {
 
 const nativeFixture = Effect.fnUntraced(function* (
   releaseTimeoutMs = 100,
-  holdJoinCleanup = false
+  holdJoinCleanup = false,
+  serverOffsetMs: () => number = () => 0
 ) {
   const clock = yield* Clock.Clock;
   const events: Array<{ stage: string; generation: number; code?: string; ageMs?: number }> = [];
@@ -370,7 +377,7 @@ const nativeFixture = Effect.fnUntraced(function* (
   });
   const host = Layer.succeed(PresenceHost, {
     instanceId: () => REMOTE_INSTANCE_ID,
-    serverOffsetMs: () => 0,
+    serverOffsetMs,
     report: (_workspaceId, event) => {
       events.push(event);
     },
@@ -407,6 +414,61 @@ const readyNative = Effect.fnUntraced(function* (
 });
 
 describe('native workspace presence ownership', () => {
+  effectIt.effect(
+    'native heartbeats adopt refreshed calibration without replacing the workspace',
+    () =>
+      Effect.gen(function* () {
+        const testClock = yield* TestClock.testClockWith(Effect.succeed);
+        const clock = yield* Clock.Clock;
+        const epoch = 2_000_000_000_000;
+        let error = 120_000;
+        const serverNow = () => epoch + clock.currentTimeMillisUnsafe();
+        const wall = () => serverNow() + error;
+        vi.spyOn(Date, 'now').mockImplementation(wall);
+        vi.spyOn(performance, 'now').mockImplementation(
+          () => Number(clock.monotonicTimeNanosUnsafe()) / 1_000_000
+        );
+        yield* Effect.addFinalizer(() =>
+          Effect.sync(() => {
+            vi.restoreAllMocks();
+            resetTimeSync();
+          })
+        );
+        yield* Effect.gen(function* () {
+          yield* Effect.promise(() => syncTime(async () => serverNow()));
+          const fixture = yield* nativeFixture(100, false, getServerTimeOffset);
+          fixture.owner.replica.setMachineOnline(MACHINE_ID, getServerNow());
+          error = 0;
+          const ready = Deferred.makeUnsafe<void>();
+          const maintenance = yield* Effect.forkChild(
+            maintainTimeSync(async () => serverNow(), {
+              onFirstAttempt: Deferred.succeed(ready, undefined),
+            })
+          );
+          yield* Deferred.await(ready);
+          yield* testClock.adjust(LODY_PRESENCE_HEARTBEAT_MS);
+          const state = findFreshMachinePresenceState(
+            fixture.owner.replica.getPresenceStates(),
+            MACHINE_ID,
+            serverNow()
+          );
+          expect(state?.updatedAt).toBe(serverNow());
+          yield* Fiber.interrupt(maintenance);
+          yield* fixture.owner.stop;
+        }).pipe(
+          Effect.provideService(Clock.Clock, {
+            currentTimeMillisUnsafe: wall,
+            currentTimeMillis: Effect.sync(wall),
+            currentTimeNanosUnsafe: () => BigInt(wall()) * 1_000_000n,
+            currentTimeNanos: Effect.sync(() => BigInt(wall()) * 1_000_000n),
+            monotonicTimeNanosUnsafe: () => clock.monotonicTimeNanosUnsafe(),
+            monotonicTimeNanos: clock.monotonicTimeNanos,
+            sleep: (duration) => clock.sleep(duration),
+          })
+        );
+      })
+  );
+
   effectIt.effect(
     'workspace stop retains token I/O ownership and recovers after actual settlement',
     () =>
