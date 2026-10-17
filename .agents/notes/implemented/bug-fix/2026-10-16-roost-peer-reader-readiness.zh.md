@@ -2,7 +2,7 @@
 
 Status: implemented
 Translation: current
-PR: [#1626](https://github.com/LodyAI/Lody/pull/1626)
+PR: [#1626](https://github.com/LodyAI/Lody/pull/1626), [#1650](https://github.com/LodyAI/Lody/pull/1650)
 
 [English](2026-10-16-roost-peer-reader-readiness.md)
 
