@@ -119,6 +119,20 @@ const modeKey = (accountId: string, workspaceId: string) =>
 const knownEncryptedKey = (accountId: string, workspaceId: string) =>
   `lody-e2ee-known-mode:${encodeURIComponent(accountId)}:${encodeURIComponent(workspaceId)}`;
 
+/** Only changes to this workspace's admission evidence can invalidate its runtime. */
+export function isWorkspaceModeStorageKey(
+  key: string | null,
+  accountId: string,
+  workspaceId: string
+): boolean {
+  return (
+    key === null ||
+    key === modeKey(accountId, workspaceId) ||
+    key === pinKey(accountId, workspaceId) ||
+    key === knownEncryptedKey(accountId, workspaceId)
+  );
+}
+
 function assertEncryptedEvidence(
   storage: Storage,
   accountId: string,
@@ -198,13 +212,16 @@ export function readWorkspaceModeProof(
   return saved.workspaceSlug === workspaceSlug ? descriptor : null;
 }
 
-/** Never accept a plaintext downgrade or a different genesis after learning E2EE. */
+/** Never accept a plaintext downgrade or a different genesis after learning E2EE.
+ * Returns false only when a verified ordinary admission could not be cached.
+ * Encrypted evidence must be durable; its writes and all validation failures throw.
+ */
 export function retainWorkspaceModeProof(
   storage: Storage,
   accountId: string,
   workspaceSlug: string,
   descriptor: WorkspaceAdmissionDescriptor
-): void {
+): boolean {
   validateDescriptor(descriptor);
   assertEncryptedEvidence(storage, accountId, descriptor);
   const raw = storage.getItem(modeKey(accountId, descriptor.workspaceId));
@@ -234,13 +251,22 @@ export function retainWorkspaceModeProof(
     )
       throw new Error('Legacy workspace cannot become encrypted');
   }
-  if ('contentMode' in descriptor && descriptor.contentMode === 'e2ee')
+  const encrypted = 'contentMode' in descriptor && descriptor.contentMode === 'e2ee';
+  if (encrypted)
     storage.setItem(knownEncryptedKey(accountId, descriptor.workspaceId), descriptor.genesisHash);
-  storage.setItem(
-    modeKey(accountId, descriptor.workspaceId),
-    JSON.stringify({ accountId, workspaceSlug, descriptor })
-  );
+  try {
+    storage.setItem(
+      modeKey(accountId, descriptor.workspaceId),
+      JSON.stringify({ accountId, workspaceSlug, descriptor })
+    );
+  } catch (error) {
+    if (encrypted) throw error;
+    // Recheck sticky evidence even when the optional offline cache is full.
+    assertEncryptedEvidence(storage, accountId, descriptor);
+    return false;
+  }
   readWorkspaceModeProof(storage, accountId, descriptor.workspaceId, workspaceSlug);
+  return true;
 }
 
 /** History-only entry learns that a workspace is encrypted without assigning a slug. */

@@ -45,7 +45,14 @@ import { usePlatform } from '@lody/platform/react';
 import { useVisibleMachineMetas } from '@/hooks/use-visible-machine-metas';
 import { subscribeLocalAuthStateCleared } from '@/lib/auth';
 import { workspaceContentModeAtom } from '@/atoms/workspace-content-mode';
-import { readWorkspaceModeProof, retainWorkspaceModeProof } from '@/lib/e2ee-workspace-storage';
+import {
+  isWorkspaceModeStorageKey,
+  readWorkspaceModeProof,
+  retainWorkspaceModeProof,
+} from '@/lib/e2ee-workspace-storage';
+import { describeAuthenticatedWorkspace } from './workspace-mode-admission';
+
+const noSavedMode = { descriptor: null, error: null };
 
 const isExpectedRuntimeShutdownError = (error: unknown): boolean => {
   if (!(error instanceof Error)) {
@@ -174,41 +181,34 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
     ? (getCachedWorkspaceId(workspaceSlug) as WorkspaceId | null)
     : null;
   const [modeStorageRevision, setModeStorageRevision] = useState(0);
+  const modeWorkspaceId = workspaceId ?? cachedId;
   useEffect(() => {
+    if (!platform.e2eeWorkspaces || !accountId || !modeWorkspaceId) return undefined;
     const changed = (event: StorageEvent) => {
       if (
-        event.key === null ||
-        event.key.startsWith('lody-workspace-mode-proof:') ||
-        event.key.startsWith('lody-e2ee-genesis-pin:') ||
-        event.key.startsWith('lody-e2ee-known-mode:')
+        event.storageArea === localStorage &&
+        (event.key === null || event.oldValue !== event.newValue) &&
+        isWorkspaceModeStorageKey(event.key, accountId, modeWorkspaceId)
       )
         setModeStorageRevision((value) => value + 1);
     };
     window.addEventListener('storage', changed);
     return () => window.removeEventListener('storage', changed);
-  }, []);
+  }, [platform.e2eeWorkspaces, accountId, modeWorkspaceId]);
   const savedMode = useMemo(() => {
-    const revision = modeStorageRevision;
-    const id = workspaceId ?? cachedId;
-    if (!platform.e2eeWorkspaces || !accountId || !workspaceSlug || !id)
-      return { descriptor: null, error: null, revision };
+    // Relevant storage events invalidate this external read.
+    void modeStorageRevision;
+    if (!platform.e2eeWorkspaces || !accountId || !workspaceSlug || !modeWorkspaceId)
+      return noSavedMode;
     try {
       return {
-        descriptor: readWorkspaceModeProof(localStorage, accountId, id, workspaceSlug),
+        descriptor: readWorkspaceModeProof(localStorage, accountId, modeWorkspaceId, workspaceSlug),
         error: null,
-        revision,
       };
     } catch (error) {
-      return { descriptor: null, error, revision };
+      return { descriptor: null, error };
     }
-  }, [
-    platform.e2eeWorkspaces,
-    accountId,
-    workspaceSlug,
-    workspaceId,
-    cachedId,
-    modeStorageRevision,
-  ]);
+  }, [platform.e2eeWorkspaces, accountId, workspaceSlug, modeWorkspaceId, modeStorageRevision]);
   const effectiveWorkspaceId = isLocalPlatform
     ? workspaceSlug
       ? ((implicitLocalWorkspace?.id as WorkspaceId | undefined) ?? null)
@@ -339,8 +339,12 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
           // opening the plaintext data plane. Resolve the persisted mode first.
           const descriptor =
             savedMode.descriptor ??
-            (await platform.e2eeWorkspaces.describe({
+            (await describeAuthenticatedWorkspace({
+              session: platform.identity.session,
+              workspaces: platform.e2eeWorkspaces,
+              accountId: accountId!,
               workspaceId: effectiveWorkspaceId,
+              signal: initializationAbort.signal,
             }));
           if (disposed) return;
           if (descriptor.workspaceId !== effectiveWorkspaceId) {
@@ -348,7 +352,9 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
           }
           // A previous authenticated immutable mode can reopen offline. Pins
           // and known encrypted modes remain sticky, even if the server lies.
-          retainWorkspaceModeProof(localStorage, accountId!, workspaceSlug, descriptor);
+          if (!retainWorkspaceModeProof(localStorage, accountId!, workspaceSlug, descriptor)) {
+            console.warn('RuntimeProvider: verified workspace admission could not be cached');
+          }
           setContentMode({
             accountId,
             workspaceSlug,
@@ -503,6 +509,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
     isLocalPlatform,
     platform.sync.mode,
     platform.e2eeWorkspaces,
+    platform.identity.session,
     setContentMode,
     savedMode,
     setControlConnectionState,

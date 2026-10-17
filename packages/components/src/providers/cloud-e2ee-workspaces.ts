@@ -5,6 +5,13 @@ import type {
   PlatformSessionState,
 } from '@lody/platform';
 
+/** Local authentication hydration can recover without changing the account ID. */
+export class E2eeAccountUnavailableError extends Error {
+  constructor() {
+    super('e2ee_account_unavailable');
+  }
+}
+
 /** Bind the native creation intent and cloud receipt to the same live account.
  * Raw network calls retain ownership until settlement; a logout only invalidates
  * their UI result. It never deletes a potentially committed local key or intent.
@@ -19,7 +26,7 @@ export function createCloudE2eeWorkspaces(input: {
   const prepareCreation = input.prepareCreation;
   const account = () => {
     const session = input.session();
-    if (session.status !== 'authenticated') throw new Error('e2ee_account_unavailable');
+    if (session.status !== 'authenticated') throw new E2eeAccountUnavailableError();
     return session.user.id;
   };
   const assertAccount = (owner: string) => {

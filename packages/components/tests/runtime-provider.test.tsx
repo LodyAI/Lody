@@ -4,7 +4,12 @@ import React, { act, StrictMode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { atom, createStore, Provider } from 'jotai';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { PlatformE2eeWorkspaces } from '@lody/platform';
+import {
+  createStore as createPlatformStore,
+  type MutableStore,
+  type PlatformSessionState,
+  type PlatformE2eeWorkspaces,
+} from '@lody/platform';
 
 const environment = vi.hoisted(() => ({
   warm: true,
@@ -12,6 +17,7 @@ const environment = vi.hoisted(() => ({
   e2eeWorkspaces: undefined as PlatformE2eeWorkspaces | undefined,
   cachedWorkspaceId: null as string | null,
   workspace: { id: 'local:workspace', slug: 'local' } as { id: string; slug: string } | null,
+  session: undefined as unknown as MutableStore<PlatformSessionState>,
 }));
 vi.mock('@/atoms', () => ({
   userAtom: atom({ id: 'local:user' }),
@@ -59,6 +65,7 @@ vi.mock('@/lib/desktop-window', () => ({ isWarmWindow: () => environment.warm })
 vi.mock('@lody/platform/react', () => ({
   useCloudQuery: () => undefined,
   usePlatform: () => ({
+    identity: { session: environment.session },
     sync: { mode: environment.mode },
     capabilities: new Set(),
     e2eeWorkspaces: environment.e2eeWorkspaces,
@@ -94,6 +101,9 @@ import {
 } from '../src/atoms/session-run-config-drafts';
 import { signOutWithoutRedirect, type LodyAuthClient } from '../src/lib/auth';
 import { useSessionRunConfigDraft } from '../src/hooks/use-session-run-config-draft';
+import { createCloudE2eeWorkspaces } from '../src/providers/cloud-e2ee-workspaces';
+import { createPendingSessionSends } from '../src/lib/session-pending-sends';
+import { describeAuthenticatedWorkspace } from '../src/providers/workspace-mode-admission';
 
 function editDraft(store: ReturnType<typeof createStore>, accountId = 'local:user') {
   const lease = store.set(registerSessionRunConfigDraftLeaseAtom, {
@@ -141,6 +151,10 @@ describe('RuntimeProvider warm workspace preparation', () => {
     environment.mode = 'local';
     environment.e2eeWorkspaces = undefined;
     environment.cachedWorkspaceId = null;
+    environment.session = createPlatformStore<PlatformSessionState>({
+      status: 'authenticated',
+      user: { id: 'local:user' },
+    });
     localStorage.clear();
     environment.workspace = { id: 'local:workspace', slug: 'local' };
     store = createStore();
@@ -152,6 +166,268 @@ describe('RuntimeProvider warm workspace preparation', () => {
   });
   afterEach(async () => {
     await act(async () => root.unmount());
+  });
+
+  function ordinaryCloud() {
+    environment.mode = 'cloud';
+    environment.warm = false;
+    environment.cachedWorkspaceId = 'local:workspace';
+    environment.e2eeWorkspaces = createCloudE2eeWorkspaces({
+      session: environment.session.get,
+      remote: {
+        describe: async ({ workspaceId }) => ({
+          workspaceId,
+          contentMode: 'plaintext',
+          contentModeVersion: 1,
+        }),
+        create: async () => {
+          throw new Error('unused');
+        },
+        history: async () => {
+          throw new Error('unused');
+        },
+      },
+      refreshWorkspaces: async () => {},
+    });
+    store.set(currentWorkspaceSlugAtom, 'local');
+    store.set(currentWorkspaceIdAtom, 'local:workspace');
+  }
+
+  it('waits for the same account to authenticate, then preserves the runtime through auth refresh', async () => {
+    ordinaryCloud();
+    environment.session.set({ status: 'loading' });
+    await render();
+    expect(store.get(runtimeAtom)).toBeNull();
+    expect(store.get(workspaceRuntimeInitFailureAtom)).toBeNull();
+    await act(async () =>
+      environment.session.set({
+        status: 'authenticated',
+        user: { id: 'local:user' },
+      })
+    );
+    expect(store.get(runtimeAtom)).toBe(prepared);
+    expect(store.get(workspaceContentModeAtom)?.descriptor).toMatchObject({
+      contentMode: 'plaintext',
+    });
+    await act(async () => environment.session.set({ status: 'loading' }));
+    await render();
+    await act(async () =>
+      environment.session.set({
+        status: 'authenticated',
+        user: { id: 'local:user' },
+      })
+    );
+    expect(store.get(runtimeAtom)).toBe(prepared);
+    expect(prepared.disposed).toBe(false);
+  });
+
+  it('does not admit a cached account using another account authentication', async () => {
+    ordinaryCloud();
+    environment.session.set({ status: 'loading' });
+    await render();
+    await act(async () =>
+      environment.session.set({
+        status: 'authenticated',
+        user: { id: 'other-user' },
+      })
+    );
+    expect(store.get(runtimeAtom)).toBeNull();
+    expect(store.get(workspaceContentModeAtom)).toBeNull();
+    expect(store.get(workspaceRuntimeInitFailureAtom)?.workspaceSlug).toBe('local');
+  });
+
+  it('rechecks account and cancellation after the authentication wait resolves', async () => {
+    ordinaryCloud();
+    const abort = new AbortController();
+    const input = {
+      session: environment.session,
+      workspaces: environment.e2eeWorkspaces!,
+      accountId: 'local:user',
+      workspaceId: 'local:workspace',
+      signal: abort.signal,
+    };
+    const switched = describeAuthenticatedWorkspace(input);
+    environment.session.set({ status: 'authenticated', user: { id: 'other-user' } });
+    await expect(switched).rejects.toThrow('e2ee_account_changed');
+    environment.session.set({ status: 'authenticated', user: { id: 'local:user' } });
+    const cancelled = describeAuthenticatedWorkspace(input);
+    abort.abort(new Error('replaced workspace'));
+    await expect(cancelled).rejects.toThrow('replaced workspace');
+  });
+
+  it('recovers an in-flight auth error even if the same account is ready before the error is received', async () => {
+    ordinaryCloud();
+    let release!: () => void;
+    const response = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const remote = environment.e2eeWorkspaces!;
+    let first = true;
+    const adapter = createCloudE2eeWorkspaces({
+      session: environment.session.get,
+      remote: {
+        ...remote,
+        describe: async ({ workspaceId }) => {
+          if (first) {
+            first = false;
+            await response;
+          }
+          return { workspaceId, contentMode: 'plaintext', contentModeVersion: 1 };
+        },
+      },
+      refreshWorkspaces: async () => {},
+    });
+    environment.e2eeWorkspaces = {
+      ...adapter,
+      describe: async (request) => {
+        try {
+          return await adapter.describe(request);
+        } catch (error) {
+          // Deliver the real adapter error only after auth has recovered.
+          environment.session.set({ status: 'authenticated', user: { id: 'local:user' } });
+          throw error;
+        }
+      },
+    };
+    await render();
+    environment.session.set({ status: 'loading' });
+    await act(async () => release());
+    expect(store.get(runtimeAtom)).toBe(prepared);
+    expect(store.get(workspaceRuntimeInitFailureAtom)).toBeNull();
+  });
+
+  it('cancels an old authentication wait when switching workspace and ignores its later readiness', async () => {
+    ordinaryCloud();
+    environment.session.set({ status: 'loading' });
+    await render();
+    retainWorkspaceModeProof(localStorage, 'local:user', 'next', {
+      workspaceId: 'next',
+      contentMode: 'plaintext',
+      contentModeVersion: 1,
+    });
+    await act(async () => {
+      store.set(currentWorkspaceSlugAtom, 'next');
+      store.set(currentWorkspaceIdAtom, 'next');
+    });
+    expect(store.get(runtimeAtom)).toBe(prepared);
+    await act(async () =>
+      environment.session.set({
+        status: 'authenticated',
+        user: { id: 'local:user' },
+      })
+    );
+    expect(store.get(workspaceContentModeAtom)?.workspaceId).toBe('next');
+    expect(
+      readWorkspaceModeProof(localStorage, 'local:user', 'local:workspace', 'local')
+    ).toBeNull();
+    expect(prepared.disposed).toBe(false);
+  });
+
+  it.each(['plaintext', 'legacy'] as const)(
+    'opens verified %s admission when the offline cache is full',
+    async (kind) => {
+      ordinaryCloud();
+      if (kind === 'legacy')
+        environment.e2eeWorkspaces!.describe = async ({ workspaceId }) => ({
+          workspaceId,
+          admission: 'legacy-unclassified',
+        });
+      localStorage.setItem('unrelated-application-cache', 'x'.repeat(4_999_920));
+      await render();
+      expect(store.get(runtimeAtom)).toBe(prepared);
+      expect(store.get(workspaceRuntimeInitFailureAtom)).toBeNull();
+      expect(
+        readWorkspaceModeProof(localStorage, 'local:user', 'local:workspace', 'local')
+      ).toBeNull();
+      expect(store.get(workspaceContentModeAtom)?.descriptor).toMatchObject(
+        kind === 'legacy' ? { admission: 'legacy-unclassified' } : { contentMode: 'plaintext' }
+      );
+    }
+  );
+
+  it.each([
+    'server-id',
+    'other-workspace',
+    'other-account',
+    'same-value',
+    'session-storage',
+  ] as const)('preserves the runtime and held attachment on %s changes', async (change) => {
+    ordinaryCloud();
+    retainWorkspaceModeProof(localStorage, 'local:user', 'local', {
+      workspaceId: 'local:workspace',
+      contentMode: 'plaintext',
+      contentModeVersion: 1,
+    });
+    store.set(currentWorkspaceIdAtom, null);
+    const writes: string[] = [];
+    const held = createPendingSessionSends({
+      prepare: async (_send, signal) =>
+        new Promise((_resolve, reject) => {
+          signal.addEventListener(
+            'abort',
+            () => reject(new DOMException('Stopped', 'AbortError')),
+            { once: true }
+          );
+        }),
+      write: async (send) => {
+        writes.push(send.id);
+      },
+      deliver: async () => {},
+    });
+    prepared.dispose = async function () {
+      this.disposed = true;
+      held.dispose();
+    };
+    await render();
+    held.enqueue({
+      id: 'held-turn',
+      workspaceId: 'local:workspace',
+      sessionId: 'session-1',
+      entry: { id: 'held-turn', text: 'Unsent draft' },
+      attachments: [{ id: 'attachment', ready: false }],
+      delivery: { kind: 'dispatch' },
+    } as never);
+    await act(async () => {
+      if (change === 'server-id') store.set(currentWorkspaceIdAtom, 'local:workspace');
+      else {
+        const key =
+          change === 'other-workspace'
+            ? 'lody-workspace-mode-proof:local%3Auser:other-workspace'
+            : change === 'other-account'
+              ? 'lody-workspace-mode-proof:other-account:local%3Aworkspace'
+              : 'lody-workspace-mode-proof:local%3Auser:local%3Aworkspace';
+        window.dispatchEvent(
+          new StorageEvent('storage', {
+            key,
+            oldValue: change === 'same-value' ? '{}' : null,
+            newValue: '{}',
+            storageArea: change === 'session-storage' ? sessionStorage : localStorage,
+          })
+        );
+      }
+    });
+    expect(store.get(runtimeAtom)).toBe(prepared);
+    expect(prepared.disposed).toBe(false);
+    expect(held.has('held-turn')).toBe(true);
+    expect(writes).toEqual([]);
+  });
+
+  it('still retires a plaintext runtime when its own encrypted evidence changes', async () => {
+    ordinaryCloud();
+    await render();
+    saveE2eeGenesisPin(localStorage, 'local:user', 'local:workspace', '11'.repeat(32));
+    await act(async () =>
+      window.dispatchEvent(
+        new StorageEvent('storage', {
+          key: 'lody-e2ee-genesis-pin:local%3Auser:local%3Aworkspace',
+          newValue: '11'.repeat(32),
+          storageArea: localStorage,
+        })
+      )
+    );
+    expect(store.get(runtimeAtom)).toBeNull();
+    expect(prepared.disposed).toBe(true);
+    expect(store.get(workspaceRuntimeInitFailureAtom)?.workspaceSlug).toBe('local');
   });
 
   it('does not open any data plane while authoritative mode is pending, then exposes encrypted control access', async () => {
@@ -386,9 +662,12 @@ describe('RuntimeProvider warm workspace preparation', () => {
     expect(store.get(currentWorkspaceSlugAtom)).toBeNull();
     expect(store.get(runtimeAtom)).toBe(prepared);
     await act(async () => {
-      environment.warm = false;
       store.set(currentWorkspaceSlugAtom, 'local');
+      store.set(currentWorkspaceIdAtom, 'local:workspace');
     });
+    // Electron clears the warm marker only after navigation has completed.
+    environment.warm = false;
+    await render();
     expect(store.get(runtimeAtom)).toBe(prepared);
     expect(prepared.metadata.get('session')).toBe('already prepared');
     expect(prepared.disposed).toBe(false);
