@@ -291,6 +291,7 @@ const createBaseDeps = (
     },
     recordChatFailure: vi.fn(async () => {}),
     maybeGenerateAndStoreSessionTitle: vi.fn(async () => {}),
+    scheduleProviderTitleFallback: vi.fn(async () => {}),
     processMessageQueue: vi.fn(async () => {}),
     collectMachineResources: vi.fn(async () => ({
       totalMemoryGB: 1,
@@ -3718,6 +3719,7 @@ describe('SessionExecutionService', () => {
         maybeGenerateAndStoreSessionTitle: async () => {
           generatedTitles.push('Local title');
         },
+        scheduleProviderTitleFallback: async () => {},
         sessionManager,
         workspaceDocument: {
           repo: {
