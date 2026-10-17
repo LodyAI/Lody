@@ -192,6 +192,14 @@ inside that same ACP process. Creation/restoration retain their cancellation fen
 initialization completes; those fences must not override a later `keep` during configuration.
 Binding a ready session alone does not authorize termination.
 
+An ordinary user turn can retry a stale ACP prompt once before observing output.
+Replacement uses the existing instance retirement path, which detaches lifecycle listeners
+before terminating the old process. It keeps the same assistant entry and ACP output owner;
+resume replay suppression must not follow a spurious turn finalization. Until retirement
+succeeds, the runtime retains the old Session and the existing disconnected-execution release
+path owns cleanup, including missing-session errors and Stop during retirement. A successful
+replacement remains reusable. Inbox submissions keep their separate no-retry policy.
+
 History promotion and activation can fail independently. `promotion-failed` preserves proof
 of non-delivery. `recoveryOwned` tells the renderer not to publish a conflicting activation;
 it retries that proven failure once through the daemon and surfaces persistent failure.

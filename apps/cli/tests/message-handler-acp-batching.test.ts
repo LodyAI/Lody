@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import crypto from 'crypto';
+import { RequestError } from '@agentclientprotocol/sdk';
 import { WorkspaceRepoLegacy } from '@lody/shared/workspace-data/repo-legacy';
+import { getSessionRoomId, type ACPSessionId, type MachineId } from '@lody/shared';
 
 import type {
   AcpSessionNotification,
@@ -15,11 +17,31 @@ import type { SessionUsageUpdate } from 'acp-extension-core';
 import { MessageHandler } from '../src/lib/message-handler';
 import { SessionDocument } from '../src/lib/loro/doc';
 import type { LoroDocumentManager } from '../src/lib/loro/doc';
-import type { SessionManager } from '../src/session/session-manager';
+import { SessionManager } from '../src/session/session-manager';
+import { Session } from '../src/session/session';
+import { createNoopSessionSandbox } from '../src/session/session-sandbox';
+import type { SessionConfig } from '../src/session/types';
+import type { AgentClient } from '../src/agent/agent-client';
+import type {
+  SessionExecutionService,
+  SessionExecutionServiceDeps,
+} from '../src/session/session-execution-service';
+import type { SessionTransientStore } from '../src/lib/session-transient-store';
+import type { SessionActivePresenceControllerLegacy } from '../src/lib/loro/session-active-presence-legacy';
 import type { Logger } from '../src/utils/logger';
 import { loadEnv } from '../src/utils/const';
 import { createTestCloudPort } from './test-cloud-port';
 import { isSessionContextCompacting } from '../../../packages/components/src/lib/session-context-compaction';
+import { createConversationViewFromReader } from '../../../packages/components/src/lib/conversation-view/create-conversation-view-from-reader';
+import { resolveActiveAssistantTurnIdFromIndex } from '../../../packages/components/src/lib/conversation-view/index-queries';
+
+const deferred = <T = void>() => {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  const promise = new Promise<T>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+};
 
 const createSilentLogger = (): Logger => ({
   info: () => {},
@@ -146,6 +168,245 @@ const createHandlerHarness = async (sessionIds: SessionId[]) => {
   };
 };
 
+// Keep lifecycle forwarding, finalization, history storage and renderer projection
+// real. Only ACP preparation, the provider and Git observation are synthetic.
+const createRecoveryHarness = async (
+  options: {
+    resume?: boolean;
+    lifecycleTail?: 'before-restore' | 'after-retry';
+    promptError?: Error;
+    priorOutput?: string;
+    retryError?: Error;
+    cleanup?: () => Promise<void>;
+  } = {}
+) => {
+  const fakeTimersActive = vi.isFakeTimers();
+  if (fakeTimersActive) vi.useRealTimers();
+  const sessionId = 'stale-recovery' as SessionId;
+  const userTurnId = 'recovery-input';
+  const turnId = `assistant:${userTurnId}`;
+  const harness = await createHandlerHarness([sessionId]);
+  const doc = harness.docs.get(sessionId);
+  if (!doc) throw new Error('Missing recovery doc');
+  const { repo, workspaceDocument, handler } = harness;
+  await repo.upsertDocMeta(getSessionRoomId(sessionId), {
+    id: sessionId,
+    machineId: 'm-1',
+    userId: 'u-1',
+    cliType: 'builtin',
+    agentType: 'codex',
+    ...(options.resume ? { acpSessionId: 'acp-old' } : {}),
+  });
+  await doc.sessionData.commands.applyHistoryAction({
+    kind: 'upsert-turn',
+    turn: {
+      id: userTurnId,
+      role: 'user',
+      status: 'pending',
+      read: false,
+      timestamp: '2026-10-17T00:00:00.000Z',
+      items: [{ type: 'text', text: 'continue the synthetic task' }],
+    } as SessionHistoryInput,
+  });
+  Object.assign(workspaceDocument.repo, {
+    getDocMeta: repo.getDocMeta.bind(repo),
+    upsertDocMeta: repo.upsertDocMeta.bind(repo),
+    openFlockDoc: async () => ({ flock: { scan: () => [] } }),
+  });
+  Object.assign(workspaceDocument, {
+    publishSessionPresence: () => {},
+    clearSessionPresence: () => {},
+    updateAcpCapabilities: async () => {},
+  });
+  const logger = createSilentLogger();
+  const manager = new SessionManager(
+    logger,
+    't',
+    'm-1' as MachineId,
+    'ws-1' as WorkspaceId,
+    workspaceDocument as unknown as LoroDocumentManager,
+    { cloudPort: createTestCloudPort() }
+  );
+  const managerHost = manager as unknown as {
+    sessions: Map<SessionId, Session>;
+    registerSessionEvents(session: Session): void;
+  };
+  const host = handler as unknown as {
+    sessionManager: SessionManager;
+    setupSessionEventHandlers(): void;
+    executionService: SessionExecutionService;
+    store: SessionTransientStore;
+    sessionActivePresence: SessionActivePresenceControllerLegacy;
+    machineFlockCommandWatcher: { stop(): void };
+    finalizeACPState(id: SessionId, turnId?: string): Promise<void>;
+    flushACPUpdatesNow(id: SessionId): Promise<void>;
+  };
+  host.sessionManager = manager;
+  host.machineFlockCommandWatcher.stop();
+  host.setupSessionEventHandlers();
+  const service = host.executionService;
+  const deps = (service as unknown as { deps: SessionExecutionServiceDeps }).deps;
+  Object.assign(deps, {
+    sessionManager: manager,
+    syncSessionBranchName: async () => null,
+    syncLiveActivitySummary: async () => {},
+    processMessageQueue: async () => {},
+    maybeGenerateAndStoreSessionTitle: async () => {},
+    evictForMemoryPressure: async () => ({
+      availableMemoryBytes: 4 * 1024 ** 3,
+      thresholdBytes: 1024 ** 3,
+      hadMemoryPressure: false,
+      stillUnderPressure: false,
+      evictedSessionIds: [],
+      pressureReason: null,
+    }),
+  });
+  Object.assign(deps.turnFinalization, {
+    flushSessionUsage: async () => {},
+    persistCodeCollabTurnDiffs: async () => false,
+    updateSessionDiffStats: async () => [],
+    detectAndAssociatePR: async () => null,
+    syncWorkspaceGitState: async () => {},
+    notifySessionCompleted: async () => {},
+    refreshCodeCollabSharedState: async () => {},
+  });
+  const lifecycleFinalizations: Promise<void>[] = [];
+  const releaseLifecycleTail = deferred();
+  const finalize = host.finalizeACPState.bind(handler);
+  vi.spyOn(host, 'finalizeACPState').mockImplementation((id, finishedTurnId) => {
+    if (finishedTurnId) return finalize(id, finishedTurnId);
+    const pending = (async () => {
+      if (options.lifecycleTail === 'after-retry') await releaseLifecycleTail.promise;
+      await finalize(id);
+    })();
+    lifecycleFinalizations.push(pending);
+    return pending;
+  });
+  const retryStarted = deferred();
+  const finishRetry = deferred();
+  const retryCancelled = deferred();
+  const cleanupStarted = deferred();
+  const submissions: string[] = [];
+  const makeSession = (replacement: boolean) => {
+    const sandbox = createNoopSessionSandbox();
+    if (!replacement && options.cleanup)
+      sandbox.terminate = async () => {
+        cleanupStarted.resolve();
+        await options.cleanup?.();
+      };
+    const config: SessionConfig = {
+      workspaceId: 'ws-1' as WorkspaceId,
+      machineId: 'm-1' as MachineId,
+      requesterUserId: 'u-1',
+      userName: 'Synthetic User',
+      userEmail: 'synthetic@example.test',
+      sessionId,
+      agentCliType: 'builtin',
+      agentType: 'codex',
+      mcpServerIds: [],
+    };
+    const session = new Session(config, logger, '/tmp', sandbox);
+    session.acpSessionId = (replacement ? 'acp-replacement' : 'acp-old') as ACPSessionId;
+    let promptPending = false;
+    session.agentClient = {
+      isCreated: () => true,
+      getConfigOptions: () => [],
+      currentModel: undefined,
+      get pendingPromptCompletion() {
+        return promptPending ? finishRetry.promise : null;
+      },
+      cancel: async () => {
+        if (replacement) retryCancelled.resolve();
+      },
+      prompt: async () => {
+        submissions.push(replacement ? 'replacement' : 'old');
+        if (!replacement) {
+          if (options.priorOutput)
+            manager.emit('onACPUpdateMessage', sessionId, {
+              sessionId,
+              update: {
+                sessionUpdate: 'agent_message_chunk',
+                content: { type: 'text', text: options.priorOutput },
+              },
+            });
+          throw options.promptError ?? new Error('ACP connection closed');
+        }
+        promptPending = true;
+        retryStarted.resolve();
+        if (options.retryError) {
+          promptPending = false;
+          throw options.retryError;
+        }
+        try {
+          await finishRetry.promise;
+        } finally {
+          promptPending = false;
+        }
+        return { stopReason: 'end_turn' };
+      },
+    } as unknown as AgentClient;
+    vi.spyOn(session, 'exec').mockImplementation(async (command, args) =>
+      command === 'git' && args.join(' ') === 'rev-parse HEAD' ? 'abc123\n' : ''
+    );
+    managerHost.sessions.set(sessionId, session);
+    managerHost.registerSessionEvents(session);
+    return session;
+  };
+  const originalSession = makeSession(false);
+  vi.spyOn(manager, 'createSession').mockImplementation(async () => {
+    if (options.lifecycleTail === 'before-restore') await Promise.all(lifecycleFinalizations);
+    return makeSession(true);
+  });
+  const message: Parameters<SessionExecutionService['continueSession']>[0] = {
+    type: 'session/chat',
+    sessionId,
+    machineId: 'm-1',
+    workspaceId: 'ws-1' as WorkspaceId,
+    userTurnId,
+    userId: 'u-1',
+    userName: 'Synthetic User',
+    userEmail: 'synthetic@example.test',
+    acpSessionConfig: {
+      prompt: 'continue the synthetic task',
+      cliType: 'builtin',
+      agentType: 'codex',
+    },
+  };
+  const emitText = (text: string) =>
+    manager.emit('onACPUpdateMessage', sessionId, {
+      sessionId,
+      update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text } },
+    });
+  if (fakeTimersActive) vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+  return {
+    ...harness,
+    doc,
+    host,
+    service,
+    manager,
+    originalSession,
+    message,
+    sessionId,
+    turnId,
+    retryStarted,
+    finishRetry,
+    retryCancelled,
+    cleanupStarted,
+    submissions,
+    emitText,
+    drainLifecycleTail: async () => {
+      releaseLifecycleTail.resolve();
+      await Promise.all(lifecycleFinalizations);
+    },
+    close: async () => {
+      finishRetry.resolve();
+      releaseLifecycleTail.resolve();
+      await host.sessionActivePresence.close();
+      await destroyRepoOnRealTimers(repo);
+    },
+  };
+};
+
 describe('MessageHandler ACP batching', () => {
   it('isolates a malformed tool notification and continues flushing valid output', async () => {
     const sessionId = 'poison-session' as SessionId;
@@ -220,6 +481,209 @@ describe('MessageHandler ACP batching', () => {
       process.env.LODY_SERVER_URL = originalLodyServerUrl;
     }
     loadEnv();
+  });
+
+  it.each([
+    { resume: false, lifecycleTail: 'before-restore' as const },
+    { resume: true, lifecycleTail: 'before-restore' as const },
+    { resume: true, lifecycleTail: 'after-retry' as const },
+  ])(
+    'keeps a stale ACP retry in its unfinished turn ($resume, $lifecycleTail)',
+    async (options) => {
+      const h = await createRecoveryHarness(options);
+      const running = h.service.continueSession(h.message);
+      try {
+        await Promise.race([
+          h.retryStarted.promise,
+          running.then(() => {
+            throw new Error('Turn ended before retry');
+          }),
+        ]);
+        await h.drainLifecycleTail();
+        expect(h.submissions).toEqual(['old', 'replacement']);
+        expect(h.host.store.getCurrentACPUpdateTarget(h.sessionId)).toMatchObject({
+          assistantEntryId: h.turnId,
+          source: 'active_turn',
+        });
+        expect(h.host.sessionActivePresence.has(h.sessionId)).toBe(true);
+        h.emitText('replacement ');
+        h.emitText('output');
+        await h.host.flushACPUpdatesNow(h.sessionId);
+        const history = await h.doc.sessionData.history.readAll();
+        const assistant = history.find((entry) => entry.id === h.turnId);
+        expect(assistant?.finished).not.toBe(true);
+        expect(readItems(assistant)).toEqual([{ type: 'text', text: 'replacement output' }]);
+        const view = createConversationViewFromReader(h.doc.sessionData.history, {
+          sessionId: h.sessionId,
+        });
+        try {
+          await vi.advanceTimersByTimeAsync(16);
+          await view.ready;
+          expect(resolveActiveAssistantTurnIdFromIndex(view)).toBe(h.turnId);
+        } finally {
+          view.dispose();
+        }
+
+        h.finishRetry.resolve();
+        await running;
+        const finished = await h.doc.sessionData.history.readAll();
+        expect(finished.find((entry) => entry.id === h.turnId)?.finished).toBe(true);
+        expect(finished.find((entry) => entry.id === h.message.userTurnId)?.status).toBe('handled');
+        expect(h.host.sessionActivePresence.has(h.sessionId)).toBe(false);
+        // Confirm that a successful replacement remains reusable after this turn.
+        expect(h.manager.getSession(h.sessionId)?.acpSessionId).toBe('acp-replacement');
+      } finally {
+        h.finishRetry.resolve();
+        await h.drainLifecycleTail();
+        await running;
+        await h.close();
+      }
+    }
+  );
+
+  it.each([new Error('ACP connection closed'), new RequestError(-32603, 'Session not found')])(
+    'retains failed stale cleanup until its existing owner can release it (%s)',
+    async (promptError) => {
+      const allowCleanup = deferred();
+      const cleanupRetried = deferred();
+      let firstCleanup = true;
+      const h = await createRecoveryHarness({
+        promptError,
+        cleanup: async () => {
+          if (firstCleanup) {
+            firstCleanup = false;
+            throw new Error('Synthetic process survivor');
+          }
+          cleanupRetried.resolve();
+          await allowCleanup.promise;
+        },
+      });
+      const running = h.service.continueSession(h.message);
+      try {
+        await Promise.race([
+          cleanupRetried.promise,
+          running.then(() => {
+            throw new Error('Released without retrying failed cleanup');
+          }),
+        ]);
+        // The first failure cannot authorize replacement; the finalizer retries the
+        // real Session termination and keeps the visible execution until it settles.
+        expect(h.submissions).toEqual(['old']);
+        expect(h.service.getExecutionSnapshot(h.sessionId).hasActiveTurn).toBe(true);
+        expect(h.host.sessionActivePresence.has(h.sessionId)).toBe(true);
+        allowCleanup.resolve();
+        await running;
+        expect(h.submissions).toEqual(['old']);
+        expect(h.service.getExecutionSnapshot(h.sessionId).hasActiveTurn).toBe(false);
+        expect(h.host.sessionActivePresence.has(h.sessionId)).toBe(false);
+        expect(h.originalSession.agentClient).toBeNull();
+      } finally {
+        allowCleanup.resolve();
+        await running;
+        await h.close();
+      }
+    }
+  );
+
+  it.each([
+    { priorOutput: 'already streamed', retryError: undefined, submitted: ['old'] },
+    {
+      priorOutput: undefined,
+      retryError: new Error('ACP connection closed'),
+      submitted: ['old', 'replacement'],
+    },
+  ])('does not replay after output or retry a second time ($submitted)', async (options) => {
+    const h = await createRecoveryHarness(options);
+    try {
+      await h.service.continueSession(h.message);
+      await h.drainLifecycleTail();
+      expect(h.submissions).toEqual(options.submitted);
+      expect(h.service.getExecutionSnapshot(h.sessionId).hasActiveTurn).toBe(false);
+      if (options.priorOutput)
+        expect(
+          readItems(
+            (await h.doc.sessionData.history.readAll()).find((entry) => entry.id === h.turnId)
+          )
+        ).toContainEqual({ type: 'text', text: options.priorOutput });
+    } finally {
+      await h.close();
+    }
+  });
+
+  it('cancels and drains the replacement prompt after stale recovery', async () => {
+    const h = await createRecoveryHarness({ resume: true });
+    const running = h.service.continueSession(h.message);
+    try {
+      await Promise.race([
+        h.retryStarted.promise,
+        running.then(() => {
+          throw new Error('Turn ended before retry');
+        }),
+      ]);
+      await h.service.cancelSession({
+        type: 'session/cancel',
+        sessionId: h.sessionId,
+        turnId: h.turnId,
+        machineId: 'm-1',
+        workspaceId: 'ws-1' as WorkspaceId,
+      });
+      // Cancel acknowledgement is distinct from completion of the raw prompt.
+      // Its request is admitted synchronously, before the cancellation RPC returns.
+      let cancelled = false;
+      void h.retryCancelled.promise.then(() => {
+        cancelled = true;
+      });
+      await Promise.resolve();
+      expect(cancelled).toBe(true);
+      expect(h.host.sessionActivePresence.has(h.sessionId)).toBe(true);
+      h.finishRetry.resolve();
+      await running;
+      expect(h.service.getExecutionSnapshot(h.sessionId).hasActiveTurn).toBe(false);
+      expect(h.host.sessionActivePresence.has(h.sessionId)).toBe(false);
+      expect(
+        (await h.doc.sessionData.history.readAll()).find(
+          (entry) => entry.id === h.message.userTurnId
+        )?.status
+      ).toBe('canceled');
+    } finally {
+      h.finishRetry.resolve();
+      await running;
+      await h.close();
+    }
+  });
+
+  it('joins stale retirement after Stop without starting a replacement', async () => {
+    const allowCleanup = deferred();
+    const h = await createRecoveryHarness({
+      promptError: new RequestError(-32603, 'Session not found'),
+      cleanup: () => allowCleanup.promise,
+    });
+    const running = h.service.continueSession(h.message);
+    try {
+      await h.cleanupStarted.promise;
+      await h.service.cancelSession({
+        type: 'session/cancel',
+        sessionId: h.sessionId,
+        turnId: h.turnId,
+        machineId: 'm-1',
+        workspaceId: 'ws-1' as WorkspaceId,
+      });
+      expect(h.submissions).toEqual(['old']);
+      expect(h.host.sessionActivePresence.has(h.sessionId)).toBe(true);
+      allowCleanup.resolve();
+      await running;
+      expect(h.submissions).toEqual(['old']);
+      expect(h.service.getExecutionSnapshot(h.sessionId).hasActiveTurn).toBe(false);
+      expect(
+        (await h.doc.sessionData.history.readAll()).find(
+          (entry) => entry.id === h.message.userTurnId
+        )?.status
+      ).toBe('canceled');
+    } finally {
+      allowCleanup.resolve();
+      await running;
+      await h.close();
+    }
   });
 
   it('waits for the initial 10ms batch window before flushing ACP updates', async () => {
