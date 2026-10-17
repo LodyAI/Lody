@@ -12,10 +12,64 @@ A cold viewer could select legacy Loro before a Roost session's metadata arrived
 leaving a permanently empty reader. A correctly selected reader could also stay
 stale after the separate control cursor stopped delivering updates. The renderer
 now waits for backend identity, follows live owner capabilities, and observes
-committed checkpoints through bounded owner requests. Actual Repo, native SQLite,
-IndexedDB and encrypted RPC tests cover late metadata, missed hints, cancellation
-and independent foreground capacity. This fixes the integration boundary; it
-does not establish production network latency or independent Roost replication.
+committed checkpoints through bounded owner requests. Post-merge fixes align local
+watch deadlines and shutdown ordering, preserve live display during replacement,
+and deliver committed notifications. Tests exercise real Repo, native SQLite,
+IndexedDB, ConversationView and encrypted RPC boundaries with synthetic transport;
+they do not establish production latency or independent Roost replication.
+
+## Post-merge correction: local watches and live recovery
+
+An October 17 investigation reproduced four integration defects in the code
+merged by PR #1626 (`a4de9a264`). They concern the new observation and recovery
+paths, independently of the unrelated Inbox host-sampling failures. This follow-up
+fixes them without changing the protocol, history storage, or dependency versions.
+
+- **Local watch deadline.** Electron now derives the control timeout from the whole
+  validated request. A watch gets its requested wait plus the ordinary ten-second
+  read allowance; ordinary reads and existing long-running control requests keep
+  their previous budgets. The renderer test uses this production policy, completes
+  an idle 15-second watch successfully, then observes the next reply immediately.
+  A pending nonzero recovery timer can also be shortened by a fresh hint or wake;
+  zero-delay work remains coalesced.
+- **Shutdown cancellation.** MessageHandler owns a separate watch cancellation
+  controller. MachineRuntime stops admission and cancels parked watches before
+  draining the processor; the full handler owner signal remains available to shared
+  writes until normal cleanup. Tests cancel a watch while a writer awaits the same
+  metadata and prove that writer still commits. A second test runs the real runtime,
+  handler, native waiter and ACP buffer across two sessions: shutdown cancels the
+  observer synchronously, drains it and persists the other session's buffered output.
+  Reopening native history returns that output. No batch, watch or native I/O
+  deadline is advanced to make shutdown finish.
+- **Live display during replacement.** Unknown checkpoint coverage still stages a
+  complete, coherent replacement while retaining the previous durable cache. During
+  that replacement, display reads use the owner rather than the old projection and
+  hints continue invalidating the view. The first two supersessions retry immediately;
+  repeated ones back off from 500 milliseconds to at most ten seconds. New hints
+  update the live view without defeating that bounded rebuild backoff. A 120-row
+  regression keeps superseding older pages, verifies that the real ConversationView
+  receives another streamed chunk while the durable head remains old, then stops
+  publication and verifies complete atomic replacement including the early body.
+- **Commit precedes notifications.** Once `cache.applyChanges` succeeds, its
+  invalidations are delivered even if a newer hint arrived during the transaction.
+  The newer revision schedules catch-up rather than discarding the committed result.
+  A 600-row fixture exceeds the inline-body budget and injects that hint during the
+  IndexedDB transaction. The actual ConversationView updates its hydrated tail at
+  the first commit and retains it after the next checkpoint is applied.
+
+The original tests used a watch transport without Electron's deadline, stable
+revision replacement pages, and coherent inline streaming replies. Backend waiter
+cancellation did not exercise the runtime's outer drain order. The follow-up tests
+extend those owning suites and assert visible content, durable state and cancellation
+isolation. Transport interleavings and clocks are controlled; IndexedDB uses
+`fake-indexeddb`. This is not production latency or incidence measurement.
+
+Native Effect migration remains deferred for this fix. The renderer's transport,
+cache and Repo callbacks, and the runtime/MessageHandler drain and SessionManager
+cleanup are unfinished Lody Promise orchestration. A small wrapper would not complete
+their ownership contract. No new runtime/Legacy facade or migration ledger claim is
+introduced. Dedicated watch cancellation ends observations, not shared producer writes;
+the processor still awaits their actual settlement before handler teardown.
 
 ## Correction from strict review: reset is a coverage verdict
 
@@ -118,7 +172,8 @@ history bodies, writes no cache replacement and emits no body invalidation.
 Successful delta repair also finishes immediately when only the history tail is
 cached; it does not follow the repair with another full latest-page read.
 
-Waits last at most 15 seconds, with a 45-second remote response budget. Remote
+Waits last at most 15 seconds, with a 45-second remote response budget. Local
+desktop requests include the requested wait plus a ten-second read allowance. Remote
 admission is bounded at 128 watches, separate from ordinary read admission.
 MessageHandler also bounds parked owner waits at 128 across transports. Waits
 park in JavaScript outside the native Worker and writer queue; after waking,
@@ -136,11 +191,15 @@ created: remote requests reuse the workspace Machine RPC transport.
 - Cancellation: hidden/offline remote views start no new observations; local IPC
   remains usable offline. Unsubscribe/dispose fences later publication. A dispatched
   viewer request settles or reaches its bounded deadline; server stop and backend
-  close abort parked waits. Retiring a metadata waiter releases only its wait.
+  close abort parked waits. Runtime shutdown cancels its dedicated watch signal
+  before processor drain; shared writers retain their normal owner. Retiring a
+  metadata waiter releases only its wait.
 - Handoff: durable owner journal precedes the checkpoint response, and atomic
   cache publication precedes observing the next checkpoint.
-- Recovery: supersession retries immediately, actual failures back off, and
-  missing journal evidence uses explicit reset. User commands are never replayed.
+- Recovery: isolated supersessions retry immediately; repeated supersessions and
+  actual failures back off. Reset keeps live owner reads and hint invalidations
+  available while staging a coherent replacement. Committed intervals always notify
+  readers before further catch-up. User commands are never replayed.
 
 Native Effect migration of the renderer orchestration remains deferred: Repo
 composition, cache and transport consumers are unfinished Lody Promise boundaries.
@@ -158,11 +217,14 @@ cover publication, admission gaps, deadlines, cancellation, close and subsequent
 writer usability. Encrypted RPC tests cover the actual client method and 128
 parked watches while ordinary reads, sends and ping complete.
 
-The final root `pnpm check` passes type checks, type-aware lint, Effect lint,
+The follow-up root `pnpm check` passes type checks, type-aware lint, Effect lint,
 the complete configured package test run and all post-test i18n/boundary guards.
-CLI passes 4287 cases with four existing skips, components 5402, shared 1506,
-and RPC 138 with three existing integration skips. All 72 native owner contracts
-pass within the full CLI run. Formatting and `git diff --check` pass.
+CLI passes 4330 cases with four existing skips, components 5434, shared 1525,
+and RPC 139 with three existing integration skips. All 75 native owner contracts
+and the 32-case renderer backend suite pass in those full runs. Restoring the old
+deadline, renderer recovery or runtime shutdown code causes the four corresponding
+regressions to fail on behavioral assertions. Formatting, documentation checks and
+`git diff --check` pass.
 
 The two Inbox failures in the earlier full check were reproduced against an
 unmodified archive of PR baseline `fb4d565` under a controlled macOS memory-probe

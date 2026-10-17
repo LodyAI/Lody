@@ -1,4 +1,4 @@
-import { IDBFactory, IDBKeyRange } from 'fake-indexeddb';
+import { IDBFactory, IDBKeyRange, IDBObjectStore } from 'fake-indexeddb';
 import { createRoostHistoryCache } from '../src/lib/roost-history-cache';
 import { createRoostDirectoryRow } from '@lody/shared/session-data';
 import type { SessionHistoryInput, SessionHistoryReadResponse } from '@lody/shared';
@@ -18,6 +18,9 @@ import {
   LoroStreamsMachineRpcClient,
 } from '@lody/loro-streams-rpc';
 import { initI18n } from '../src/i18n';
+import { createConversationViewFromReader } from '../src/lib/conversation-view/create-conversation-view-from-reader';
+import { resolveLocalSessionControlTimeoutMs } from '../../../apps/electron/src/main/services/local-session-control-budget';
+import type { SessionDataChange } from '@lody/shared/session-data';
 
 describe('createConversationSession backend seam', () => {
   it.each([
@@ -1324,5 +1327,403 @@ it('rolls back incomplete cache repairs and removes a truncated suffix with its 
     });
   } finally {
     cache.dispose();
+  }
+});
+
+function controlledRefreshTimers() {
+  type Timer = { callback: () => void; delay: number };
+  const timers: Timer[] = [];
+  const waiters: ((timer: Timer) => void)[] = [];
+  const set = vi.spyOn(globalThis, 'setTimeout').mockImplementation(((
+    callback: () => void,
+    delay = 0
+  ) => {
+    const timer = { callback, delay };
+    const waiter = waiters.shift();
+    if (waiter) waiter(timer);
+    else timers.push(timer);
+    return timer as never;
+  }) as typeof setTimeout);
+  const clear = vi.spyOn(globalThis, 'clearTimeout').mockImplementation((handle) => {
+    const index = timers.indexOf(handle as never);
+    if (index >= 0) timers.splice(index, 1);
+  });
+  return {
+    next: () =>
+      timers.length
+        ? Promise.resolve(timers.shift()!)
+        : new Promise<Timer>((resolve) => waiters.push(resolve)),
+    pending: () => [...timers],
+    restore: () => {
+      set.mockRestore();
+      clear.mockRestore();
+    },
+  };
+}
+
+async function cachedRecoveryFixture(name: string, count: number, first = 0) {
+  Object.assign(globalThis, { indexedDB: new IDBFactory(), IDBKeyRange });
+  const sessionId = `synthetic-recovery-${name}` as SessionId;
+  const workspaceId = 'synthetic-workspace' as WorkspaceId;
+  const machineId = 'synthetic-machine' as MachineId;
+  const entries: SessionHistoryInput[] = Array.from({ length: count }, (_, position) => ({
+    id: `recovery-${position}`,
+    role: 'assistant',
+    timestamp: 'synthetic',
+    items: [{ type: 'text', text: 'old' }],
+  }));
+  const cache = createRoostHistoryCache(
+    JSON.stringify(['local', workspaceId, machineId, sessionId])
+  );
+  await cache.acceptPage(
+    {
+      checkpoint: 'checkpoint-1',
+      startPosition: first,
+      totalCount: count,
+      rows: entries
+        .slice(first)
+        .map((entry, offset) => createRoostDirectoryRow(first + offset, entry as never)),
+      hasMoreOlder: first > 0,
+      cursor: first > 0 ? String(first) : null,
+    },
+    entries.slice(first),
+    1
+  );
+  const doc = new LoroDoc();
+  const publish = (revision: number, ids = [entries.at(-1)!.id]) => {
+    const cursor = doc.getMap('roostHistoryCursor');
+    cursor.set('historyRevision', revision);
+    cursor.set('historyCount', count);
+    cursor.set('historyChangeJson', JSON.stringify({ kind: 'changed', ids }));
+    doc.commit();
+  };
+  publish(1);
+  const reply = (revision: number, result: unknown, pageTurns?: SessionHistoryInput[]) => ({
+    ok: true as const,
+    responses: [
+      {
+        type: 'session/history-read_response' as const,
+        success: true,
+        sessionId,
+        historyRevision: revision,
+        historyCount: count,
+        result,
+        ...(pageTurns ? { pageTurns } : {}),
+      },
+    ],
+  });
+  return { sessionId, workspaceId, machineId, entries, cache, doc, publish, reply };
+}
+
+it('keeps a local idle watch healthy through the desktop deadline and immediately receives the next reply', async () => {
+  const h = await cachedRecoveryFixture('idle-watch', 1);
+  const timers = controlledRefreshTimers();
+  const visible = Promise.withResolvers<void>();
+  const outcomes: string[] = [];
+  const waits = new Set<() => void>();
+  let revision = 1;
+  const data = createLocalRoostSessionDataFactory({
+    incremental: true,
+    watch: true,
+    workspaceId: h.workspaceId,
+    machineId: h.machineId,
+    sendControl: (request) => {
+      if (request.type !== 'session/history-read' || request.query.kind !== 'watchChanges')
+        throw new Error('Unexpected request');
+      const query = request.query;
+      return new Promise((resolve) => {
+        const finish = () => {
+          clearTimeout(deadline);
+          clearTimeout(idle);
+          waits.delete(finish);
+          outcomes.push(revision === 1 ? 'idle' : 'changed');
+          resolve(
+            h.reply(revision, {
+              state: 'ready',
+              checkpoint: `checkpoint-${revision}`,
+              ids: revision === 1 ? [] : [h.entries[0]!.id],
+              ...(revision === 1
+                ? {}
+                : {
+                    bodies: {
+                      changed: [
+                        { ...h.entries[0], items: [{ type: 'text', text: 'fresh reply' }] },
+                      ],
+                      suffix: [],
+                    },
+                  }),
+            })
+          );
+        };
+        const deadline = setTimeout(() => {
+          clearTimeout(idle);
+          waits.delete(finish);
+          outcomes.push('request_timeout');
+          resolve({ ok: false, error: 'request_timeout' });
+        }, resolveLocalSessionControlTimeoutMs(request));
+        const idle = setTimeout(finish, query.waitMs);
+        waits.add(finish);
+      });
+    },
+  })({ sessionId: h.sessionId, doc: h.doc, backendKind: 'roost' });
+  const observation = data.history.observe(() => {
+    void h.cache.getHead().then((head) => {
+      if (head?.revision === 2) visible.resolve();
+    });
+  });
+  try {
+    await observation.initial;
+    (await timers.next()).callback();
+    const deadline = await timers.next();
+    const idle = await timers.next();
+    // Execute the first actual deadline, so the former 10s policy fails here.
+    (deadline.delay < idle.delay ? deadline : idle).callback();
+    expect(outcomes).toEqual(['idle']);
+    (await timers.next()).callback();
+    await timers.next(); // The next request's deadline.
+    await timers.next(); // Its parked idle watch.
+    revision = 2;
+    for (const finish of [...waits]) finish();
+    await visible.promise;
+    expect(await data.history.readAt(0)).toMatchObject({
+      state: 'ready',
+      turn: { items: [{ text: 'fresh reply' }] },
+    });
+    expect(outcomes).toEqual(['idle', 'changed']);
+  } finally {
+    observation.unsubscribe();
+    data.dispose?.();
+    h.cache.dispose();
+    for (const finish of [...waits]) finish();
+    timers.restore();
+  }
+});
+
+it('backs off repeated reset supersessions while live reads and hint invalidations keep progressing', async () => {
+  const h = await cachedRecoveryFixture('reset', 120);
+  const timers = controlledRefreshTimers();
+  const events: SessionDataChange[] = [];
+  let revision = 2;
+  let writing = true;
+  const ownerEntries = h.entries.map((entry) => ({
+    ...entry,
+    items: [{ type: 'text' as const, text: 'new' }],
+  }));
+  const complete = Promise.withResolvers<void>();
+  const visible = Promise.withResolvers<void>();
+  const data = createLocalRoostSessionDataFactory({
+    incremental: true,
+    workspaceId: h.workspaceId,
+    machineId: h.machineId,
+    sendControl: async (request) => {
+      if (request.type !== 'session/history-read') throw new Error('Unexpected write');
+      const query = request.query;
+      if (query.kind === 'readChanges')
+        return h.reply(revision, { state: 'reset', checkpoint: `checkpoint-${revision}` });
+      if (query.kind === 'count') return h.reply(revision, 120);
+      if (query.kind === 'readAt')
+        return h.reply(revision, { state: 'ready', turn: ownerEntries[query.position] });
+      if (query.kind === 'readTurn')
+        return h.reply(revision, {
+          state: 'ready',
+          turn: ownerEntries.find((entry) => entry.id === query.turnId),
+        });
+      if (query.kind === 'readDirectory')
+        return h.reply(
+          revision,
+          ownerEntries
+            .slice(query.from, query.to)
+            .map((entry, offset) => createRoostDirectoryRow(query.from + offset, entry as never))
+        );
+      if (query.kind !== 'readLatestPage' && query.kind !== 'readOlderPage')
+        throw new Error('Unexpected read');
+      if (query.kind === 'readOlderPage' && writing) revision++;
+      const end = query.kind === 'readLatestPage' ? 120 : Number(query.cursor);
+      const start = Math.max(0, end - query.limit);
+      const turns = ownerEntries.slice(start, end);
+      return h.reply(
+        revision,
+        {
+          checkpoint: `checkpoint-${revision}`,
+          startPosition: start,
+          totalCount: 120,
+          rows: turns.map((entry, offset) =>
+            createRoostDirectoryRow(start + offset, entry as never)
+          ),
+          hasMoreOlder: start > 0,
+          cursor: start > 0 ? String(start) : null,
+        },
+        turns
+      );
+    },
+  })({ sessionId: h.sessionId, doc: h.doc, backendKind: 'roost' });
+  const observation = data.history.observe((event) => {
+    events.push(event);
+    void h.cache.getHead().then((head) => {
+      if (head?.revision === revision && head.start === 0) complete.resolve();
+    });
+  });
+  let view: ReturnType<typeof createConversationViewFromReader> | undefined;
+  let unsubscribe: (() => void) | undefined;
+  try {
+    await observation.initial;
+    const delays: number[] = [];
+    for (let i = 0; i < 20; i++) {
+      const next = await timers.next();
+      delays.push(next.delay);
+      next.callback();
+    }
+    const pending = await timers.next();
+    expect(delays.some((delay) => delay > 0)).toBe(true);
+    expect(await h.cache.getHead()).toMatchObject({ revision: 1, checkpoint: 'checkpoint-1' });
+    view = createConversationViewFromReader(data.history, {
+      sessionId: h.sessionId,
+      tailKeep: 1,
+      yieldToEventLoop: () => Promise.resolve(),
+      scheduleIdle: (task) => {
+        queueMicrotask(() => task({ timeRemaining: () => 100 }));
+        return () => {};
+      },
+    });
+    await view.ready;
+    expect(view.turn(119)?.items).toEqual([{ type: 'text', text: 'new' }]);
+    unsubscribe = view.subscribe(() => {
+      const item = view?.turn(119)?.items[0];
+      if (item?.type === 'text' && item.text === 'next streamed chunk') visible.resolve();
+    });
+    const beforeHint = events.length;
+    ownerEntries[119]!.items = [{ type: 'text', text: 'next streamed chunk' }];
+    h.publish(++revision);
+    await visible.promise;
+    await h.cache.getHead();
+    expect(events.slice(beforeHint)).toContainEqual({ kind: 'changed', ids: [h.entries[119]!.id] });
+    expect(timers.pending()).toEqual([]);
+    expect(await data.history.readAt(119)).toMatchObject({
+      state: 'ready',
+      turn: { items: [{ text: 'next streamed chunk' }] },
+    });
+    writing = false;
+    pending.callback();
+    for (let i = 0; i < 5; i++) {
+      const next = await Promise.race([timers.next(), complete.promise.then(() => null)]);
+      if (!next) break;
+      next.callback();
+    }
+    await complete.promise;
+    expect(await h.cache.getHead()).toMatchObject({
+      revision,
+      checkpoint: `checkpoint-${revision}`,
+      start: 0,
+    });
+    expect((await h.cache.readRows(0, 1))?.[0]?.turn.items).toEqual([
+      { type: 'text', text: 'new' },
+    ]);
+  } finally {
+    unsubscribe?.();
+    view?.dispose();
+    observation.unsubscribe();
+    data.dispose?.();
+    h.cache.dispose();
+    timers.restore();
+  }
+});
+
+it('notifies the actual view for a committed non-inline interval even when a newer hint arrives during its transaction', async () => {
+  const h = await cachedRecoveryFixture('commit-notification', 600, 560);
+  const timers = controlledRefreshTimers();
+  const events: SessionDataChange[] = [];
+  const committed3 = Promise.withResolvers<void>();
+  const tailVisible = Promise.withResolvers<void>();
+  const newTail = {
+    ...h.entries[599]!,
+    items: [{ type: 'text' as const, text: 'new durable tail' }],
+  };
+  let hintSent = false;
+  const originalPut = IDBObjectStore.prototype.put;
+  const intercept = vi
+    .spyOn(IDBObjectStore.prototype, 'put')
+    .mockImplementation(function (this: IDBObjectStore, value, key) {
+      const request =
+        key === undefined ? originalPut.call(this, value) : originalPut.call(this, value, key);
+      if (!hintSent && value?.checkpoint === 'checkpoint-2') {
+        hintSent = true;
+        h.publish(3, [h.entries[0]!.id]);
+      }
+      return request;
+    });
+  const data = createLocalRoostSessionDataFactory({
+    incremental: true,
+    workspaceId: h.workspaceId,
+    machineId: h.machineId,
+    sendControl: async (request) => {
+      if (request.type !== 'session/history-read') throw new Error('Unexpected write');
+      const query = request.query;
+      if (query.kind === 'readChanges') {
+        if (query.checkpoint === 'checkpoint-1')
+          return h.reply(2, {
+            state: 'ready',
+            checkpoint: 'checkpoint-2',
+            ids: h.entries.slice(0, 501).map((entry) => entry.id),
+            from: 599,
+          });
+        return h.reply(3, {
+          state: 'ready',
+          checkpoint: 'checkpoint-3',
+          ids: [h.entries[0]!.id],
+          bodies: { changed: [h.entries[0]], suffix: [] },
+        });
+      }
+      if (query.kind === 'readRange') return h.reply(2, [{ state: 'ready', turn: newTail }]);
+      throw new Error(`Unexpected ${query.kind}`);
+    },
+  })({ sessionId: h.sessionId, doc: h.doc, backendKind: 'roost' });
+  const observation = data.history.observe((change) => {
+    events.push(change);
+    void h.cache.getHead().then((head) => {
+      if (head?.revision === 3) committed3.resolve();
+    });
+  });
+  const view = createConversationViewFromReader(data.history, {
+    sessionId: h.sessionId,
+    tailKeep: 1,
+    scheduleIdle: (task) => {
+      queueMicrotask(() => task({ timeRemaining: () => 100 }));
+      return () => {};
+    },
+  });
+  const unsubscribe = view.subscribe(() => {
+    const item = view.turn(599)?.items[0];
+    if (item?.type === 'text' && item.text === 'new durable tail') tailVisible.resolve();
+  });
+  try {
+    await observation.initial;
+    await view.ready;
+    expect(view.turn(599)?.items).toEqual([{ type: 'text', text: 'old' }]);
+    (await timers.next()).callback();
+    const retry = await timers.next();
+    expect(hintSent).toBe(true);
+    expect(await h.cache.getHead()).toMatchObject({ revision: 2, checkpoint: 'checkpoint-2' });
+    expect(events).toContainEqual({ kind: 'structure', from: 599, to: 600 });
+    expect(events).toContainEqual({
+      kind: 'changed',
+      ids: h.entries.slice(0, 501).map((entry) => entry.id),
+    });
+    await tailVisible.promise;
+    retry.callback();
+    await committed3.promise;
+    expect(await h.cache.getHead()).toMatchObject({ revision: 3, checkpoint: 'checkpoint-3' });
+    expect(await data.history.readAt(599)).toMatchObject({
+      state: 'ready',
+      turn: { items: newTail.items },
+    });
+    expect(view.turn(599)?.items).toEqual(newTail.items);
+  } finally {
+    unsubscribe();
+    view.dispose();
+    observation.unsubscribe();
+    data.dispose?.();
+    h.cache.dispose();
+    intercept.mockRestore();
+    timers.restore();
   }
 });

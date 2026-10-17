@@ -29,10 +29,9 @@
   require `LODY_LORO_STREAMS_BASE_URL` as a parallel hidden composition path.
 - `cloud-pr-association.ts`: use `authSiteUrl`, not `authBaseUrl` (internal proxy).
   Six failures/workspace/repo, no eviction; reset on client recreation. Log once.
-- Local session control preserves every intermediate response: new clients negotiate
-  NDJSON, legacy clients keep the buffered JSON envelope. `MachineRuntime` may collect
-  responses for completion, but must also forward each to the streaming observer as it
-  is sent.
+- Local control negotiates NDJSON or legacy buffered JSON, preserving intermediate
+  replies. `MachineRuntime` may collect responses but forwards each as sent. Cancel
+  parked history watches before shutdown drain; preserve shared writers.
 - Route every remote bridge attach/detach/revoke through `machine-runtime.ts`
   `runBridgeTransition` and keep long waits OUT of transition bodies: attach is
   deliberately short, so a queued detach/revoke stays prompt. Backfill enable/disable

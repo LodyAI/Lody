@@ -52,6 +52,7 @@ import {
   type WorkspaceId,
 } from '@lody/shared';
 import { MessageHandler } from '../src/lib/message-handler';
+import { MachineRuntime } from '../src/lib/machine-runtime';
 import { getDefaultLogger } from '../src/utils/logger';
 import { createTestCloudPort } from './test-cloud-port';
 import { createCommandSessionHistoryFactory, type AuthContext } from '../src/lib/command-runtime';
@@ -316,6 +317,127 @@ async function coldHistoryHandlerFixture(count: number) {
 }
 
 describe('Production Roost history semantics', () => {
+  it('cancels parked history observers without cancelling a writer waiting for the same owner', async () => {
+    const fixture = await coldHistoryHandlerFixture(1);
+    const id = [...fixture.docs.keys()][0]!;
+    const watching = fixture.rpc.readSessionHistoryForRpc(id, {
+      kind: 'watchChanges',
+      checkpoint: 'synthetic-checkpoint',
+      waitMs: 15_000,
+    });
+    const writing = fixture.rpc.writeSessionHistoryForRpc(id, 'append', {
+      entry: nativeUser('writer-survives-observer-stop'),
+    });
+    try {
+      await fixture.observing(2);
+      fixture.handler.cancelPendingHistoryWatches();
+      expect(await watching).toMatchObject({ success: false });
+      expect(fixture.observers.size).toBe(1);
+      await fixture.ready(id);
+      expect(await writing).toMatchObject({ success: true });
+      expect(await (await createSessionBackend(fixture.docs.get(id)!)).readHistory()).toMatchObject(
+        [{ id: 'writer-survives-observer-stop' }]
+      );
+    } finally {
+      await fixture.close();
+      await Promise.all([watching, writing]);
+    }
+  });
+
+  it('cancels a parked local watch before draining and durably flushes another session ACP buffer on shutdown', async () => {
+    const fixture = await coldHistoryHandlerFixture(2);
+    const [watchedId, writingId] = [...fixture.docs.keys()];
+    if (!watchedId || !writingId) throw new Error('Missing synthetic sessions');
+    let closing: Promise<void> | undefined;
+    const host = fixture.handler as unknown as {
+      beginConversationTurn(id: SessionId, userTurnId: string): string;
+      enqueueACPUpdate(
+        id: SessionId,
+        notification: import('@lody/shared').AcpSessionNotification
+      ): void;
+      store: { get(id: SessionId): { acpUpdateBuffer: unknown[] } };
+    };
+    try {
+      await Promise.all([watchedId, writingId].map((id) => fixture.ready(id)));
+      const page = await fixture.rpc.readSessionHistoryForRpc(watchedId, {
+        kind: 'readLatestPage',
+        limit: 40,
+        withCheckpoint: true,
+      });
+      const checkpoint = (page.result as { checkpoint?: string }).checkpoint;
+      if (!page.success || !checkpoint) throw new Error('Missing watch checkpoint');
+      await fixture.rpc.writeSessionHistoryForRpc(writingId, 'append', {
+        entry: nativeUser('shutdown-input'),
+      });
+      const writingDoc = fixture.docs.get(writingId)!;
+      const backend = await createSessionBackend(writingDoc);
+      const assistantId = host.beginConversationTurn(writingId, 'shutdown-input');
+      await backend.appendHistoryTurn(nativeAssistant(assistantId));
+      const watchedBackend = await createSessionBackend(fixture.docs.get(watchedId)!);
+      const wait = watchedBackend.history.waitForChanges?.bind(watchedBackend.history);
+      if (!wait) throw new Error('Expected native watch');
+      const parked = Promise.withResolvers<void>();
+      let watchSignal: AbortSignal | undefined;
+      vi.spyOn(watchedBackend.history, 'waitForChanges').mockImplementation(
+        (cursor, waitMs, signal) => {
+          watchSignal = signal;
+          const pending = wait(cursor, waitMs, signal);
+          parked.resolve();
+          return pending;
+        }
+      );
+      vi.useFakeTimers({
+        toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date'],
+      });
+      const startedAt = Date.now();
+      host.enqueueACPUpdate(writingId, {
+        sessionId: writingId,
+        update: {
+          sessionUpdate: 'agent_message_chunk',
+          content: { type: 'text', text: 'final buffered reply' },
+        },
+      });
+      expect(host.store.get(writingId).acpUpdateBuffer).toHaveLength(1);
+      const runtime = new MachineRuntime({
+        workspaceDocument: { clearMachineMonitorProvider: () => {} } as never,
+        sessionManagerFactory: () => {
+          throw new Error('Synthetic test does not start an agent');
+        },
+        handlerConfig: { machineId: 'test-machine', workspaceId: 'test-workspace' } as never,
+        logger: getDefaultLogger(),
+      });
+      Reflect.set(runtime, 'handler', fixture.handler);
+      const watching = runtime.dispatchLocalMessageForResponse({
+        type: 'session/history-read',
+        sessionId: watchedId,
+        workspaceId: 'test-workspace' as WorkspaceId,
+        machineId: 'test-machine' as MachineId,
+        query: { kind: 'watchChanges', checkpoint, waitMs: 15_000 },
+      });
+      await parked.promise;
+      closing = runtime.cleanup();
+      // Cancellation is synchronous, before the drain can wait on the observer.
+      // No native I/O guard or ACP batch timer is advanced to make shutdown pass.
+      expect(watchSignal?.aborted).toBe(true);
+      expect(await watching).toMatchObject([
+        { type: 'session/history-read_response', success: false },
+      ]);
+      await closing;
+      expect(Date.now()).toBe(startedAt);
+      expect(host.store.get(writingId).acpUpdateBuffer).toEqual([]);
+      await fixture.close();
+      const reopened = await nativeFixture(writingId);
+      expect(await reopened.backend.readTurn(assistantId)).toMatchObject({
+        state: 'ready',
+        turn: { items: [{ type: 'text', text: 'final buffered reply' }] },
+      });
+    } finally {
+      fixture.handler.cancelPendingHistoryWatches();
+      await closing;
+      await fixture.close();
+    }
+  });
+
   it('cancels all pending MessageHandler writes before cleanup and never opens history when metadata arrives later', async () => {
     const fixture = await coldHistoryHandlerFixture(2);
     const ids = [...fixture.docs.keys()];

@@ -698,6 +698,7 @@ export class MessageHandler {
   private pendingProcessLifecycleAction: MachineProcessLifecycleAction | null = null;
   private readonly store = new SessionTransientStore();
   private readonly historyOwnerAbort = new AbortController();
+  private readonly historyWatchAbort = new AbortController();
   private readonly historyWatchReads = new ConcurrentQueue<string>(8);
   private historyWatchWaiters = 0;
   private sessionActivePresence!: SessionActivePresenceControllerLegacy;
@@ -6896,9 +6897,11 @@ export class MessageHandler {
       );
     this.historyWatchWaiters++;
     try {
-      const signal = args.signal
-        ? AbortSignal.any([args.signal, this.historyOwnerAbort.signal])
-        : this.historyOwnerAbort.signal;
+      const signal = AbortSignal.any([
+        this.historyOwnerAbort.signal,
+        this.historyWatchAbort.signal,
+        ...(args.signal ? [args.signal] : []),
+      ]);
       await this.resolveSessionHistoryOwnerSessionId(args.sessionId, { signal });
       this.touchSession(args.sessionId);
       const doc = await this.workspaceDocument.getOrCreateSessionDoc(args.sessionId);
@@ -9953,6 +9956,13 @@ export class MessageHandler {
   }
 
   /**
+   * Release parked observers before the processor drains; shared writes keep their owner.
+   */
+  cancelPendingHistoryWatches(): void {
+    this.historyWatchAbort.abort();
+  }
+
+  /**
    * Flush pending ACP updates and tear down session resources.
    */
   async cleanup(): Promise<void> {
@@ -9960,6 +9970,7 @@ export class MessageHandler {
     void inboxShutdown.catch((cause) =>
       this.logger.error('Inbox shutdown retains resources', cause)
     );
+    this.cancelPendingHistoryWatches();
     this.historyOwnerAbort.abort();
     await this.iosSimulatorService.closeAll();
     this.logger.debug('Cleaning up message handler resources');

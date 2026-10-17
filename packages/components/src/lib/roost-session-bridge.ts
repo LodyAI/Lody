@@ -383,6 +383,7 @@ const createRoostSessionDataFactoryFromTransport =
         }
       }
       return head &&
+        !replacingSnapshot &&
         (ownerRevision === undefined ||
           (incrementalEnabled() && head.checkpoint !== undefined) ||
           head.revision >= Math.max(ownerRevision, observedHistoryRevision))
@@ -496,7 +497,12 @@ const createRoostSessionDataFactoryFromTransport =
         if (disposed) return;
         if (revision !== undefined && revision <= observedHistoryRevision) return;
 
-        if (incrementalEnabled() && hasIncrementalCheckpoint && revision !== undefined) {
+        if (
+          incrementalEnabled() &&
+          hasIncrementalCheckpoint &&
+          !replacingSnapshot &&
+          revision !== undefined
+        ) {
           observedHistoryRevision = revision;
           if (count !== undefined) observedHistoryCount = count;
           latestChange = change;
@@ -632,9 +638,11 @@ const createRoostSessionDataFactoryFromTransport =
     };
 
     let refreshTimer: ReturnType<typeof setTimeout> | undefined;
+    let refreshTimerDelay = 0;
     let refreshing = false;
     let refreshRequested = false;
     let retryDelay = 250;
+    let consecutiveSupersessions = 0;
     const refresh = async () => {
       if (!active()) return;
       if (disposed || refreshing || listeners.size === 0) return;
@@ -669,6 +677,7 @@ const createRoostSessionDataFactoryFromTransport =
             response.historyCount === prior.count
           ) {
             retryDelay = 0;
+            consecutiveSupersessions = 0;
             return;
           }
           if (change.state === 'ready') {
@@ -754,14 +763,9 @@ const createRoostSessionDataFactoryFromTransport =
             if (applied === undefined) throw new Error('Roost history cache is unavailable');
             if (!applied) throw new HistoryRefreshSupersededError();
             await notificationQueue;
-            if (
-              disposed ||
-              (change.bodies === undefined &&
-                (revision < (ownerRevision ?? 0) || revision < observedHistoryRevision))
-            ) {
-              bodies.clear();
-              throw new HistoryRefreshSupersededError();
-            }
+            // The cache transaction committed this interval. A newer hint can
+            // request catch-up, but must not suppress its view invalidations.
+            if (disposed) return;
             hasIncrementalCheckpoint = true;
             replacingSnapshot = false;
             if (revision < (ownerRevision ?? 0) || revision < observedHistoryRevision)
@@ -781,6 +785,7 @@ const createRoostSessionDataFactoryFromTransport =
             if (change.ids.length)
               for (const listener of listeners) listener({ kind: 'changed', ids: [...change.ids] });
             retryDelay = refreshRequested || watchEnabled() ? 0 : 250;
+            consecutiveSupersessions = 0;
             // Complete checkpoint coverage repairs the retained window even
             // when older pages have never been loaded. Do not reread its tail.
             return;
@@ -818,6 +823,7 @@ const createRoostSessionDataFactoryFromTransport =
             const applied = await cached(() => cache.updateTurns(deltaRevision, deltaCount, turns));
             if (applied && prior.start === 0) {
               retryDelay = 250;
+              consecutiveSupersessions = 0;
               return;
             }
           }
@@ -873,16 +879,23 @@ const createRoostSessionDataFactoryFromTransport =
             listener({ kind: 'structure', from: 0, to: head.count });
         }
         retryDelay = refreshRequested || watchEnabled() ? 0 : 250;
+        consecutiveSupersessions = 0;
       } catch (error) {
         // Cached history remains readable. This retries connection recovery,
         // never a user command or an uncertain provider delivery.
         refreshRequested = true;
-        retryDelay = isHistorySuperseded(error)
-          ? 0
-          : Math.min(10_000, Math.max(250, retryDelay) * 2);
+        if (isHistorySuperseded(error)) {
+          consecutiveSupersessions += 1;
+          retryDelay =
+            consecutiveSupersessions <= 2 ? 0 : Math.min(10_000, Math.max(250, retryDelay) * 2);
+        } else {
+          consecutiveSupersessions = 0;
+          retryDelay = Math.min(10_000, Math.max(250, retryDelay) * 2);
+        }
       } finally {
         refreshing = false;
         if ((refreshRequested || watchEnabled()) && !disposed && listeners.size > 0 && active()) {
+          refreshTimerDelay = retryDelay;
           refreshTimer = setTimeout(() => {
             refreshTimer = undefined;
             void refresh();
@@ -893,7 +906,14 @@ const createRoostSessionDataFactoryFromTransport =
     scheduleRefresh = () => {
       if (disposed || !active()) return;
       refreshRequested = true;
-      if (refreshing || refreshTimer || listeners.size === 0) return;
+      if (refreshing || listeners.size === 0) return;
+      if (refreshTimer) {
+        // Keep repeated snapshot supersessions bounded while hints still
+        // invalidate the live view. A recovery hint can shorten other retries.
+        if (refreshTimerDelay === 0 || consecutiveSupersessions > 2) return;
+        clearTimeout(refreshTimer);
+      }
+      refreshTimerDelay = 0;
       refreshTimer = setTimeout(() => {
         refreshTimer = undefined;
         void refresh();

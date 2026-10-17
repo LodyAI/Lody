@@ -51,7 +51,11 @@
   Independently negotiate `sessionHistoryWatch`; park one checkpoint observation per
   active bridge outside body-read capacity. Hints accelerate the same recovery owner,
   never replace its durable coverage. Idle replies do not invalidate unchanged bodies.
-  Unknown coverage stages a new snapshot while retaining the readable one. Never persist commands or claim remote
+  Unknown coverage stages a new snapshot while retaining the durable old one.
+  During replacement, display reads use the owner and hints still invalidate the
+  view; repeated supersessions back off. Publish only complete checkpoint coverage.
+  Committed cache changes must notify readers even if a newer hint requests catch-up.
+  Never persist commands or claim remote
   acceptance from the cache. Cache-clear must include its database.
 - Send through the selected SessionData backend (the shared HistoryWriter for
   Loro, the owner bridge for Roost), with no optimistic display overlay;
