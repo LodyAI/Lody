@@ -46,7 +46,9 @@ mandatory caller responsibilities; HPKE validity does not establish sender ident
 
 ## Format compatibility
 
-**Ledger v1 is permanent.** Developer-preview creation can produce real ledgers, so every genesis and ordinary record that ledger v1 accepts must stay verifiable by every later client, with unchanged bytes, hashes, signing domains and operation semantics. The independently generated vector `packages/e2ee-core/test/ledger-v1-vector.json` is the contract; it is never regenerated to match changed code.
+**Freeze point.** Ledger v1 (record version 1, the `sig/v1` and `rec/v1` domains and the operation codes in the [permission-ledger Spec](e2ee/permission-ledger.zh.md)) becomes permanent when a production deployment first enables encrypted workspace creation, because only then can a ledger exist that must never break. Merging code does not freeze it. Until that point the format may still change, but only with owner approval, and the same change regenerates `packages/e2ee-core/test/ledger-v1-vector.json` with its independent generator; development and staging ledgers created earlier may stop verifying. Production creation must not be enabled before a format review confirms that the record shapes, operation codes, signing domains and the open items in permission-ledger §9 (recovery vault and trust-anchor encoding, rotation after self-revocation, recovery-device enrollment order) need no change to how existing records encode or verify. After the freeze the vector is never regenerated.
+
+**What freezes.** Every record that v1 accepts at a position must stay accepted by every later client, with the same bytes, hashes and resulting ledger state. New behavior, including relaxed or extended permissions, takes effect only through records after a capability declaration; it never changes how an existing record verifies.
 
 Ledger evolution is append-only:
 

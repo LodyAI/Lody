@@ -26,7 +26,8 @@ Follow the package [boundary](../../../AGENTS.md) and [record/replay contract](R
   Close this Scope before destroying the SDK owner. ACK/CAS and snapshot bootstrap
   remain separate contracts; no fallback append or new snapshot header.
 
-- Ledger v1 bytes and semantics are permanent; the frozen vector must keep passing.
+- Ledger v1 freezes at the first production creation (see the foundations Spec);
+  before that, format changes need owner approval and a regenerated vector.
   New operations need a prior tag9 capability declaration; an unsupported genuine
   declaration is `upgrade-required`, never corruption or a skipped record. No legacy-ledger
   adapters, old-state import, schema conversion or version downgrade. Current-format

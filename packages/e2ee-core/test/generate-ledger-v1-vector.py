@@ -1,8 +1,10 @@
 """Frozen ledger v1 vector: Python hashlib SHA256 and PyNaCl==1.6.2 Ed25519.
 
 No production encoder or noble implementation is used here. The output is a
-compatibility contract: never regenerate it to match changed code. A failing
-vector test means the change breaks ledgers that already exist.
+compatibility contract. After the production freeze (the first production
+creation, see specs/e2ee-foundations.md) never regenerate it: a failing vector
+test then means the change breaks ledgers that already exist. Before the freeze,
+regenerate it only in an owner-approved format change.
 """
 import hashlib
 import json

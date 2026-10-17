@@ -44,7 +44,8 @@ it violates the already adopted atomic removal/rotation rule; [P12](../../../REA
 Tag 9 declares capabilities: Owner/Admin personal devices list strictly ascending
 nonzero u32 codes, monotonically. This verifier implements none, so a genuine
 declaration ends verification at its position with `upgrade-required` rather than
-an invalid-ledger code. The v1 arrays and domains above are permanent; see the
+an invalid-ledger code. The v1 arrays and domains above become permanent at the
+first production creation; see the
 [frozen vector](../../../test/ledger-v1-vector.json) and
 [format compatibility](../../../../../specs/e2ee-foundations.md#format-compatibility).
 
