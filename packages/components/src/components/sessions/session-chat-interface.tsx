@@ -1,4 +1,5 @@
 import { useIosSimulatorPreviewRequest } from './ios-simulator/use-ios-simulator-preview-request';
+import type { DocumentSelection } from '@/lib/document-selection';
 import { createLoroSyncErrorTools } from '@lody/shared/loro-sync-errors';
 import { RepoSyncError, RepoTransportError } from 'loro-repo';
 import { useSessionPendingMessages } from '@/components/chat/session-pending-messages';
@@ -2257,6 +2258,7 @@ function SpinningLoaderIcon({ className }: { className?: string }) {
 const EMPTY_CHAT_STREAM_EMPTY_STATE = <></>;
 
 export type SessionChatInterfaceHandle = {
+  addDocumentSelection: (selection: DocumentSelection) => boolean;
   focusInput: () => void;
   addCommentReference: (reference: CommentReferencePayload) => boolean;
   toggleCommentReference: (reference: CommentReferencePayload) => boolean;
@@ -5561,6 +5563,8 @@ export const SessionChatInterface = memo(
     useImperativeHandle(
       ref,
       () => ({
+        addDocumentSelection: (selection) =>
+          inputAreaRef.current?.addDocumentSelection(selection) ?? false,
         focusInput: () => {
           inputAreaRef.current?.focusInput();
         },

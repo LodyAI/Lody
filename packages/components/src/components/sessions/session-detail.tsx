@@ -5687,6 +5687,18 @@ const SessionDetail = ({
         copyMarkdownRequestSeq={viewerTabSaveStates[tab.id]?.copyMarkdownRequestSeq ?? 0}
         defaultHtmlPreview={isMobile}
         preferNativeMarkdownSelection={isMobile}
+        onAddSelectionToChat={
+          activeSession.isArchived
+            ? undefined
+            : (selection) => {
+                const chat = chatRefsMap.current.get(activeSession.id);
+                return !closedConversationIds.has(activeSession.id) &&
+                  chat &&
+                  'addDocumentSelection' in chat
+                  ? chat.addDocumentSelection(selection)
+                  : false;
+              }
+        }
         fileProvider={activeSessionFileProvider}
         fileProviderPending={activeSessionFileProviderPending}
         fileProviderMessage={activeSessionFileProviderMessage}
