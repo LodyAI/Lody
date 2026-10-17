@@ -66,15 +66,13 @@ Replacement contract: [shared rules](../../../shared/AGENTS.md#session-history).
   Never restore a second writer or proxy-authoring/write-intent mirror.
 - Runtime close cancels auth, joins attach/reconnect work, then destroys Repo.
   Failed startup shares this close path.
-- Local-only window bootstrap may exchange same-workspace CRDT snapshots from
-  already owned documents. Merge into the receiving Repo; never treat peer state
-  as authoritative sync or open stores solely to answer bootstrap requests.
-  Check disk before requesting peer exports; Web Locks inventory bounds requests
-  to live runtimes, and negative replies must release missing-document waits.
-  Seed cold documents before Repo subscribes, persisting the merged snapshot before
-  adoption; storage-loaded versions must be durable before cursor advancement. Never
-  replace a live document. Import before constructing the history reader to avoid
-  replaying bulk-import events through an initialized projection.
+- Local-only bootstrap exchanges CRDT snapshots only from already owned documents
+  in the same workspace. Merge into the receiving Repo; peer state is not authoritative,
+  and requests must not open stores. Check disk first; Web Locks bound requests to live
+  runtimes, and negative replies release missing-document waits. Seed cold documents
+  before Repo subscribes; persist merged snapshots before adoption and storage-loaded
+  versions before cursor advancement. Never replace live documents. Import before
+  creating the history reader to avoid replaying bulk-import events.
 - Repo storage, LoroDoc cursors and eager-sync high-water state share a per-renderer
   cache namespace. Independently persisted replicas must not share checkpoints.
   Meta/Flock cursors stay repo-owned; delete Meta progress via `repo.getReplicaCheckpointStore`.
