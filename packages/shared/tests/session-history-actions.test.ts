@@ -490,6 +490,90 @@ for (const backend of ['loro'] as const)
         ).matched
       ).toBe(false);
     });
+    it('sums a known per-turn cost and keeps mixed unknown costs unknown', async () => {
+      const data = create();
+      await seed(data);
+      const usage = (inputTokens: number, costUSD: number | null | undefined) => ({
+        inputTokens,
+        outputTokens: 5,
+        cacheReadInputTokens: 0,
+        cacheCreationInputTokens: 1,
+        reasoningOutputTokens: 2,
+        ...(costUSD !== undefined ? { costUSD } : {}),
+      });
+      await data.commands.applyHistoryAction({
+        kind: 'assistant-token-usage',
+        turnId: 'a',
+        add: usage(10, 0.5),
+      });
+      await data.commands.applyHistoryAction({
+        kind: 'assistant-token-usage',
+        turnId: 'a',
+        add: usage(3, 0.25),
+      });
+      expect((await data.history.readAll())[1]?.tokenUsage).toMatchObject({ costUSD: 0.75 });
+
+      // Once a contribution has no tariff, the turn total is unknown rather than partial.
+      await data.commands.applyHistoryAction({
+        kind: 'assistant-token-usage',
+        turnId: 'a',
+        add: usage(1, undefined),
+      });
+      await data.commands.applyHistoryAction({
+        kind: 'assistant-token-usage',
+        turnId: 'a',
+        add: usage(1, 0.1),
+      });
+      expect((await data.history.readAll())[1]?.tokenUsage).toMatchObject({ costUSD: null });
+    });
+    it('does not price legacy tokens from a later known delta', async () => {
+      const data = create();
+      await seed(data);
+      await data.commands.applyHistoryAction({
+        kind: 'assistant-token-usage',
+        turnId: 'a',
+        add: {
+          inputTokens: 10,
+          outputTokens: 5,
+          cacheReadInputTokens: 0,
+          cacheCreationInputTokens: 0,
+          reasoningOutputTokens: 0,
+        },
+      });
+      await data.commands.applyHistoryAction({
+        kind: 'assistant-token-usage',
+        turnId: 'a',
+        add: {
+          inputTokens: 1,
+          outputTokens: 1,
+          cacheReadInputTokens: 0,
+          cacheCreationInputTokens: 0,
+          reasoningOutputTokens: 0,
+          costUSD: 0.5,
+        },
+      });
+      expect((await data.history.readAll())[1]?.tokenUsage).toMatchObject({ costUSD: null });
+    });
+    it('rejects a negative token cost without changing history', async () => {
+      const data = create();
+      await seed(data);
+      const before = await data.history.readAll();
+      await expect(
+        data.commands.applyHistoryAction({
+          kind: 'assistant-token-usage',
+          turnId: 'a',
+          add: {
+            inputTokens: 1,
+            outputTokens: 0,
+            cacheReadInputTokens: 0,
+            cacheCreationInputTokens: 0,
+            reasoningOutputTokens: 0,
+            costUSD: -0.01,
+          },
+        })
+      ).rejects.toThrow();
+      expect(await data.history.readAll()).toEqual(before);
+    });
     it('rejects malformed token usage without changing history', async () => {
       const data = create();
       await seed(data);

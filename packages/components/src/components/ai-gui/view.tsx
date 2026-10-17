@@ -97,7 +97,7 @@ import { authTokenAtom, runtimeAtom } from '@/atoms/runtime';
 import { machineSupportsSubagentCancellation, machineSupportsSubagentEvents } from '@lody/shared';
 import { scrollDebug } from '@/hooks/scroll-debug-log';
 import { readSessionTurnTokenUsage, type SessionTurnTokenUsage } from '@lody/shared/session-data';
-import { formatCompactNumber } from '@/lib/format-compact-number';
+import { formatCompactNumber, formatUsdAmount } from '@/lib/format-compact-number';
 import { toIntlLocaleOrEn } from '@/lib/intl-locale';
 import type { EngineRow } from '@/lib/conversation-scroll/types';
 import { EngineConversationScroller } from './conversation-list/engine-conversation-scroller';
@@ -4376,12 +4376,32 @@ const ResendUndeliveredDialog = ({
   );
 };
 
-/** Tokens this turn consumed, in compact product-language units (1.2K / 1.2万). */
-const AssistantTurnTokenUsageRows = ({ usage }: { usage: SessionTurnTokenUsage }) => {
+type AssistantTurnUsageRow = {
+  key: string;
+  label: string;
+  value: number;
+  detail?: string;
+  /** Preformatted value for rows whose unit is not a compact token count. */
+  display?: string;
+  title?: string;
+};
+
+/** Tokens and estimated cost this turn consumed, in compact product-language units. */
+const AssistantTurnUsageRows = ({ usage }: { usage: SessionTurnTokenUsage }) => {
   const { t, i18n } = useTranslation();
   const locale = toIntlLocaleOrEn(i18n.resolvedLanguage ?? i18n.language);
   const exact = new Intl.NumberFormat(locale);
-  const rows = [
+  const costUSD = usage.costUSD;
+  /* Per-turn costs are small enough that cents hide the number; keep two
+     fraction digits and spend more only where they carry information. */
+  const formatCost = (value: number): string => {
+    const abs = Math.abs(value);
+    return formatUsdAmount(value, locale, {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: abs > 0 && abs < 0.01 ? 8 : abs < 1 ? 4 : 2,
+    });
+  };
+  const rows: AssistantTurnUsageRow[] = [
     {
       key: 'input',
       label: t('sessions.turnConfig.inputTokens', 'Input'),
@@ -4409,6 +4429,20 @@ const AssistantTurnTokenUsageRows = ({ usage }: { usage: SessionTurnTokenUsage }
         write: exact.format(usage.cacheCreationInputTokens),
       }),
     },
+    ...(typeof costUSD === 'number'
+      ? [
+          {
+            key: 'cost',
+            label: t('sessions.turnConfig.costEstimate', 'Cost estimate'),
+            value: costUSD,
+            display: formatCost(costUSD),
+            title: t(
+              'sessions.turnConfig.costHint',
+              "Estimated from the provider's reported usage, not an invoice."
+            ),
+          },
+        ]
+      : []),
   ];
   return (
     <div className="border-t border-border/60 px-3 py-2.5">
@@ -4424,6 +4458,7 @@ const AssistantTurnTokenUsageRows = ({ usage }: { usage: SessionTurnTokenUsage }
         {rows.map((row) => (
           <div
             key={row.key}
+            data-turn-cost={row.key === 'cost' ? '' : undefined}
             className={cn(
               stylex.props(activityTypography.caption).className,
               'flex items-start justify-between gap-3 '
@@ -4432,9 +4467,9 @@ const AssistantTurnTokenUsageRows = ({ usage }: { usage: SessionTurnTokenUsage }
             <dt className="shrink-0 text-muted-foreground">{row.label}</dt>
             <dd
               className="text-right font-medium tabular-nums text-foreground"
-              title={[exact.format(row.value), row.detail].filter(Boolean).join(' · ')}
+              title={row.title ?? [exact.format(row.value), row.detail].filter(Boolean).join(' · ')}
             >
-              {formatCompactNumber(row.value, locale)}
+              {row.display ?? formatCompactNumber(row.value, locale)}
             </dd>
           </div>
         ))}
@@ -4741,7 +4776,7 @@ const AssistantTurnConfigInfoButton = ({
           ) : null}
         </dl>
         <AssistantTurnTimingRows message={message} isLive={isLive} />
-        {tokenUsage ? <AssistantTurnTokenUsageRows usage={tokenUsage} /> : null}
+        {tokenUsage ? <AssistantTurnUsageRows usage={tokenUsage} /> : null}
       </Popover.Content>
     </Popover.Root>
   );

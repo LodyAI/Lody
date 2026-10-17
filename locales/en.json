@@ -4144,6 +4144,8 @@
   "sessions.turnConfig.outputDetail": "Reasoning {{reasoning}}",
   "sessions.turnConfig.cacheTokens": "Cache",
   "sessions.turnConfig.cacheDetail": "Read {{read}} · Write {{write}}",
+  "sessions.turnConfig.costEstimate": "Cost estimate",
+  "sessions.turnConfig.costHint": "Estimated from the provider's reported usage, not an invoice.",
   "sessions.turnTiming.title": "Timing",
   "sessions.turnTiming.started": "Started",
   "sessions.turnTiming.startedRunning": "{{time}} · running {{duration}}",

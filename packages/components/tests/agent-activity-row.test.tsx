@@ -680,6 +680,7 @@ describe('live agent status', () => {
           cacheReadInputTokens: 1_500_000,
           cacheCreationInputTokens: 2000,
           reasoningOutputTokens: 200,
+          costUSD: 0.0182,
         },
       }),
       { label: 'Working' }
@@ -706,6 +707,10 @@ describe('live agent status', () => {
     expect(value('Output')?.getAttribute('title')).toBe('500 · Reasoning 200');
     expect(value('Cache')?.textContent).toBe('1.5M');
     expect(value('Cache')?.getAttribute('title')).toBe('1,502,000 · Read 1,500,000 · Write 2,000');
+    // The cost estimate is one more row of the same token section.
+    expect(document.body.textContent).toContain('Cost estimate');
+    expect(value('Cost estimate')?.textContent).toBe('$0.0182');
+    expect(value('Cost estimate')?.getAttribute('title')).toContain('not an invoice');
     expect(document.body.textContent).not.toContain('No configuration recorded');
   });
 });

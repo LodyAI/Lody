@@ -4144,6 +4144,8 @@
   "sessions.turnConfig.outputDetail": "其中推理 {{reasoning}}",
   "sessions.turnConfig.cacheTokens": "缓存",
   "sessions.turnConfig.cacheDetail": "读取 {{read}} · 写入 {{write}}",
+  "sessions.turnConfig.costEstimate": "花费预估",
+  "sessions.turnConfig.costHint": "根据提供商上报的用量估算，并非账单。",
   "sessions.turnTiming.title": "时间",
   "sessions.turnTiming.started": "开始",
   "sessions.turnTiming.startedRunning": "{{time}} · 已运行{{duration}}",
