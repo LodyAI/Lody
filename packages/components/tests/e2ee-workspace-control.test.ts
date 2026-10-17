@@ -14,17 +14,29 @@ import {
   bytesToHex,
   ledgerRecordFields,
 } from '../src/lib/e2ee-ledger-history';
-import { createPreparedE2eeWorkspace } from '../src/lib/create-e2ee-workspace';
+import {
+  createPreparedE2eeWorkspace,
+  e2eeCreationChoice,
+  isE2eeCreationNotEnabled,
+} from '../src/lib/create-e2ee-workspace';
 import {
   listPendingE2eeWorkspaces,
   readE2eeGenesisPin,
   readObservedLedgerCheckpoint,
   readPendingE2eeWorkspace,
   readWorkspaceModeProof,
+  repairUnreadableE2eeCaches,
+  resetObservedLedgerProgress,
   retainObservedLedgerCheckpoint,
   retainWorkspaceModeProof,
+  saveE2eeGenesisPin,
   savePendingE2eeWorkspace,
 } from '../src/lib/e2ee-workspace-storage';
+import {
+  classifyE2eeControlFailure,
+  e2eeControlDiagnostics,
+} from '../src/lib/e2ee-control-failure';
+import { createCloudE2eeWorkspaces } from '../src/providers/cloud-e2ee-workspaces';
 
 class MemoryStorage implements Storage {
   data = new Map<string, string>();
@@ -79,6 +91,8 @@ function historyFixture(commitment = 6) {
     publicKey,
     [7, 2, fill(32, 10), fill(72, 11)],
   ]);
+  // A genuine Owner capability declaration that this client version cannot verify past.
+  const declaration = signed([hashRecordBytes(second).toBytes(), publicKey, [9, [1]]]);
   const checkpoint = { headHash: bytesToHex(hashRecordBytes(second).toBytes()), length: 2 };
   const firstPage: E2eeWorkspaceHistoryPage = {
     workspaceId: 'workspace-1',
@@ -99,6 +113,7 @@ function historyFixture(commitment = 6) {
     firstPage,
     secondPage,
     third,
+    declaration,
     expected: { workspaceId: 'workspace-1', genesisHash, localPin: genesisHash },
   };
 }
@@ -187,7 +202,7 @@ describe('encrypted workspace history', () => {
         },
         expected
       )
-    ).toThrow('rolled back');
+    ).toThrow('rolled-back');
     const fork = historyFixture(8);
     const forkPrefix = appendLedgerHistory(null, fork.firstPage, expected);
     expect(forkPrefix.continuityPending).toBe(true);
@@ -353,5 +368,326 @@ describe('encrypted workspace creation recovery', () => {
     expect(
       readWorkspaceModeProof(storage, pending.accountId, result.workspaceId, pending.slug)
     ).toEqual(result);
+  });
+});
+
+const failureOf = (run: () => unknown) => {
+  try {
+    run();
+  } catch (error) {
+    return classifyE2eeControlFailure(error);
+  }
+  throw new Error('expected a failure');
+};
+
+describe('encrypted workspace recovery classification', () => {
+  it('shows the verified prefix and stops at a capability declaration instead of reporting corruption', () => {
+    const fixture = historyFixture();
+    const checkpoint = {
+      headHash: bytesToHex(hashRecordBytes(fixture.declaration).toBytes()),
+      length: 3,
+    };
+    const single = appendLedgerHistory(
+      null,
+      {
+        ...fixture.firstPage,
+        checkpoint,
+        recordsHex: [
+          ...fixture.firstPage.recordsHex,
+          ...fixture.secondPage.recordsHex,
+          bytesToHex(fixture.declaration),
+        ],
+        nextCursor: null,
+      },
+      fixture.expected
+    );
+    expect(single.upgradeRequiredAt).toBe(2);
+    expect(single.view.length).toBe(2);
+    expect(single.records.map((record) => record.index)).toEqual([0, 1]);
+    const storage = new MemoryStorage();
+    expect(retainObservedLedgerCheckpoint(storage, 'account', 'workspace-1', single)).toBe(true);
+    expect(readObservedLedgerCheckpoint(storage, 'account', 'workspace-1')?.length).toBe(2);
+
+    const first = appendLedgerHistory(
+      null,
+      {
+        ...fixture.firstPage,
+        checkpoint,
+        recordsHex: [...fixture.firstPage.recordsHex, ...fixture.secondPage.recordsHex],
+      },
+      fixture.expected
+    );
+    const paged = appendLedgerHistory(
+      first,
+      {
+        ...fixture.secondPage,
+        checkpoint,
+        startIndex: 2,
+        recordsHex: [bytesToHex(fixture.declaration)],
+      },
+      fixture.expected
+    );
+    expect(paged.upgradeRequiredAt).toBe(2);
+    expect(paged.records).toHaveLength(2);
+    expect(paged.view).toBe(first.view);
+  });
+
+  it('separates identity conflicts, rollbacks and invalid server history', () => {
+    const fixture = historyFixture();
+    expect(
+      failureOf(() =>
+        appendLedgerHistory(null, fixture.firstPage, {
+          ...fixture.expected,
+          localPin: 'ab'.repeat(32),
+        })
+      )
+    ).toEqual({ kind: 'identity-conflict', code: 'pin-mismatch' });
+    const prefix = appendLedgerHistory(null, fixture.firstPage, fixture.expected);
+    expect(
+      failureOf(() =>
+        appendLedgerHistory(
+          prefix,
+          { ...fixture.secondPage, recordsHex: [bytesToHex(fixture.third)] },
+          fixture.expected
+        )
+      )
+    ).toMatchObject({ kind: 'server' });
+    const storage = new MemoryStorage();
+    saveE2eeGenesisPin(storage, 'account', 'workspace-1', fixture.genesisHash);
+    expect(
+      failureOf(() => saveE2eeGenesisPin(storage, 'account', 'workspace-1', 'cd'.repeat(32)))
+    ).toEqual({
+      kind: 'identity-conflict',
+      code: 'Genesis pin changed',
+    });
+  });
+
+  it('repairs only unreadable optional caches and keeps identity evidence and conflicts', () => {
+    const fixture = historyFixture();
+    const storage = new MemoryStorage();
+    saveE2eeGenesisPin(storage, 'account', 'encrypted', fixture.genesisHash);
+    storage.setItem('lody-e2ee-known-mode:account:encrypted', fixture.genesisHash);
+    storage.setItem('lody-workspace-mode-proof:account:encrypted', '{broken');
+    storage.setItem('lody-workspace-mode-proof:account:plain', '{broken');
+    // A valid proof that contradicts sticky evidence is a downgrade signal, not a cache.
+    storage.setItem('lody-e2ee-known-mode:account:downgraded', fixture.genesisHash);
+    storage.setItem(
+      'lody-workspace-mode-proof:account:downgraded',
+      JSON.stringify({
+        accountId: 'account',
+        workspaceSlug: 'downgraded',
+        descriptor: { workspaceId: 'downgraded', contentMode: 'plaintext', contentModeVersion: 1 },
+      })
+    );
+    storage.setItem('lody-e2ee-observed-ledger:account:encrypted:1:x', 'not json');
+    storage.setItem('lody-workspace-mode-proof:other:plain', '{broken');
+    savePendingE2eeWorkspace(storage, {
+      accountId: 'account',
+      requestId: 'r',
+      name: 'n',
+      slug: 's',
+    });
+    expect(
+      failureOf(() => readWorkspaceModeProof(storage, 'account', 'plain', 'plain'))
+    ).toMatchObject({
+      kind: 'local-corrupt',
+    });
+
+    expect(repairUnreadableE2eeCaches(storage, 'account')).toBe(3);
+    expect(storage.getItem('lody-workspace-mode-proof:account:plain')).toBeNull();
+    expect(storage.getItem('lody-workspace-mode-proof:account:encrypted')).toBeNull();
+    expect(storage.getItem('lody-e2ee-observed-ledger:account:encrypted:1:x')).toBeNull();
+    expect(readE2eeGenesisPin(storage, 'account', 'encrypted')).toBe(fixture.genesisHash);
+    expect(storage.getItem('lody-e2ee-known-mode:account:encrypted')).toBe(fixture.genesisHash);
+    expect(storage.getItem('lody-workspace-mode-proof:account:downgraded')).not.toBeNull();
+    expect(storage.getItem('lody-workspace-mode-proof:other:plain')).toBe('{broken');
+    expect(readPendingE2eeWorkspace(storage, 'account')?.requestId).toBe('r');
+
+    // A corrupt pin is identity evidence: classified for support, never deleted.
+    storage.setItem('lody-e2ee-genesis-pin:account:encrypted', 'garbage');
+    expect(failureOf(() => readE2eeGenesisPin(storage, 'account', 'encrypted'))).toMatchObject({
+      kind: 'identity-conflict',
+    });
+    repairUnreadableE2eeCaches(storage, 'account');
+    expect(storage.getItem('lody-e2ee-genesis-pin:account:encrypted')).toBe('garbage');
+  });
+
+  it('resets observed progress for one workspace only after an explicit request', () => {
+    const fixture = historyFixture();
+    const storage = new MemoryStorage();
+    const prefix = appendLedgerHistory(null, fixture.firstPage, fixture.expected);
+    retainObservedLedgerCheckpoint(storage, 'account', 'workspace-1', prefix);
+    retainObservedLedgerCheckpoint(storage, 'account', 'workspace-2', {
+      ...prefix,
+      page: { ...prefix.page, workspaceId: 'workspace-2' },
+    });
+    saveE2eeGenesisPin(storage, 'account', 'workspace-1', fixture.genesisHash);
+    expect(resetObservedLedgerProgress(storage, 'account', 'workspace-1')).toBe(1);
+    expect(readObservedLedgerCheckpoint(storage, 'account', 'workspace-1')).toBeNull();
+    expect(readObservedLedgerCheckpoint(storage, 'account', 'workspace-2')?.length).toBe(1);
+    expect(readE2eeGenesisPin(storage, 'account', 'workspace-1')).toBe(fixture.genesisHash);
+  });
+
+  it('builds diagnostics without account identifiers or record bodies', () => {
+    const fixture = historyFixture();
+    const history = appendLedgerHistory(null, fixture.firstPage, fixture.expected);
+    const report = e2eeControlDiagnostics({
+      workspaceId: 'workspace-1',
+      genesisHash: fixture.genesisHash,
+      localPin: fixture.genesisHash,
+      observed: { length: 1, headHash: fixture.genesisHash },
+      history,
+      failure: { kind: 'progress-conflict', code: 'rolled-back' },
+      now: new Date('2026-10-17T00:00:00Z'),
+    });
+    const parsed = JSON.parse(report) as Record<string, unknown>;
+    expect(parsed).toMatchObject({
+      workspaceId: 'workspace-1',
+      server: { verifiedLength: 1, checkpoint: fixture.firstPage.checkpoint },
+      failure: { kind: 'progress-conflict' },
+    });
+    expect(report).not.toContain(fixture.firstPage.recordsHex[0]!);
+    expect(report).not.toContain('account');
+  });
+
+  it('asks for an update when the server describes a newer mode or activation', async () => {
+    const service = (descriptor: unknown) =>
+      createCloudE2eeWorkspaces({
+        session: () => ({
+          status: 'authenticated',
+          user: { id: 'account', email: 'a@example.invalid', name: 'A', image: null },
+        }),
+        remote: {
+          create: () => Promise.reject(new Error('unused')),
+          describe: () => Promise.resolve(descriptor as never),
+          history: () => Promise.reject(new Error('unused')),
+        },
+        refreshWorkspaces: () => Promise.resolve(),
+      });
+    const hash = 'ab'.repeat(32);
+    for (const descriptor of [
+      {
+        workspaceId: 'w',
+        contentMode: 'e2ee',
+        contentModeVersion: 2,
+        cryptoOrgId: hash,
+        genesisHash: hash,
+      },
+      {
+        workspaceId: 'w',
+        contentMode: 'e2ee',
+        contentModeVersion: 1,
+        cryptoOrgId: hash,
+        genesisHash: hash,
+        activation: 'content',
+      },
+    ]) {
+      const error = await service(descriptor)
+        .describe({ workspaceId: 'w' })
+        .catch((reason: unknown) => reason);
+      expect(classifyE2eeControlFailure(error)).toMatchObject({ kind: 'upgrade' });
+    }
+    const malformed = await service({
+      workspaceId: 'w',
+      contentMode: 'e2ee',
+      contentModeVersion: 1,
+      activation: 7,
+    })
+      .describe({ workspaceId: 'w' })
+      .catch((reason: unknown) => reason);
+    expect(classifyE2eeControlFailure(malformed)).toMatchObject({ kind: 'mode' });
+  });
+});
+
+describe('encrypted workspace creation gate', () => {
+  it('requires both developer toggles for new creation but keeps a saved request resumable', () => {
+    expect(
+      e2eeCreationChoice({
+        featureEnabled: false,
+        selected: true,
+        resumable: false,
+        savedRequests: 0,
+      })
+    ).toEqual({
+      showOption: false,
+      encrypt: false,
+    });
+    expect(
+      e2eeCreationChoice({
+        featureEnabled: true,
+        selected: false,
+        resumable: false,
+        savedRequests: 0,
+      })
+    ).toEqual({
+      showOption: true,
+      encrypt: false,
+    });
+    expect(
+      e2eeCreationChoice({
+        featureEnabled: true,
+        selected: true,
+        resumable: false,
+        savedRequests: 0,
+      })
+    ).toEqual({
+      showOption: true,
+      encrypt: true,
+    });
+    expect(
+      e2eeCreationChoice({
+        featureEnabled: false,
+        selected: false,
+        resumable: true,
+        savedRequests: 1,
+      })
+    ).toEqual({
+      showOption: true,
+      encrypt: true,
+    });
+    expect(
+      e2eeCreationChoice({
+        featureEnabled: false,
+        selected: false,
+        resumable: false,
+        savedRequests: 1,
+      })
+    ).toEqual({
+      showOption: true,
+      encrypt: false,
+    });
+  });
+});
+
+describe('encrypted workspace server release switch', () => {
+  it('keeps the saved request when the server has not enabled creation', async () => {
+    const storage = new MemoryStorage();
+    const pending = { accountId: 'account', requestId: 'request-1', name: 'n', slug: 's' };
+    savePendingE2eeWorkspace(storage, pending);
+    const refusal = Object.assign(new Error('not enabled'), {
+      data: { code: 'e2ee_creation_not_enabled' },
+    });
+    const port = {
+      prepareCreation: async () => ({
+        ...pending,
+        genesisRecordHex: 'aa',
+        genesisHashHex: 'bb'.repeat(32),
+      }),
+      create: async () => {
+        throw refusal;
+      },
+      describe: async () => {
+        throw new Error('unused');
+      },
+      history: async () => {
+        throw new Error('unused');
+      },
+    } satisfies PlatformE2eeWorkspaces;
+    const error = await createPreparedE2eeWorkspace(port, storage, pending).catch(
+      (reason: unknown) => reason
+    );
+    expect(isE2eeCreationNotEnabled(error)).toBe(true);
+    expect(isE2eeCreationNotEnabled(new Error('e2ee_creation_not_enabled'))).toBe(false);
+    expect(readPendingE2eeWorkspace(storage, 'account')).toEqual(pending);
   });
 });

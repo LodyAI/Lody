@@ -12,6 +12,16 @@ export class E2eeAccountUnavailableError extends Error {
   }
 }
 
+/** The server describes a mode or activation newer than this client implements.
+ * Fails closed like any unknown mode, but tells the user to update instead of
+ * reporting a damaged workspace. */
+export class E2eeClientUpgradeRequiredError extends Error {
+  constructor() {
+    super('e2ee_client_upgrade_required');
+    this.name = 'E2eeClientUpgradeRequiredError';
+  }
+}
+
 /** Bind the native creation intent and cloud receipt to the same live account.
  * Raw network calls retain ownership until settlement; a logout only invalidates
  * their UI result. It never deletes a potentially committed local key or intent.
@@ -108,6 +118,15 @@ export function createCloudE2eeWorkspaces(input: {
         }
         return { workspaceId, admission: 'legacy-unclassified' };
       }
+      const reported = result as { contentModeVersion?: unknown; activation?: unknown };
+      if (
+        (typeof reported.contentModeVersion === 'number' && reported.contentModeVersion > 1) ||
+        (result.contentMode === 'e2ee' &&
+          result.contentModeVersion === 1 &&
+          typeof reported.activation === 'string' &&
+          reported.activation !== 'control-only')
+      )
+        throw new E2eeClientUpgradeRequiredError();
       if (
         result.contentModeVersion !== 1 ||
         (result.contentMode !== 'plaintext' && result.contentMode !== 'e2ee') ||

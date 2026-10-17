@@ -24,6 +24,23 @@ export interface VerifiedLedgerHistory {
   /** Only a separately retained local creation pin confirms the genesis here. */
   locallyPinned: boolean;
   continuityPending: boolean;
+  /** Position of a genuine capability declaration this client cannot verify past. */
+  upgradeRequiredAt?: number;
+}
+
+/** Why a history read stopped. `local-conflict` may indicate a server rollback or
+ * fork; it is never repaired by trusting the server's current answer. */
+export type E2eeHistoryFailureKind = 'server' | 'local-conflict';
+
+export class E2eeHistoryError extends Error {
+  constructor(
+    readonly kind: E2eeHistoryFailureKind,
+    readonly code: string,
+    readonly position?: number
+  ) {
+    super(`e2ee_history_${code}`);
+    this.name = 'E2eeHistoryError';
+  }
 }
 
 export interface ObservedLedgerCheckpoint {
@@ -36,7 +53,7 @@ export const bytesToHex = (bytes: Uint8Array): string =>
   Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
 
 function hexToBytes(hex: string): Uint8Array {
-  if (!/^(?:[0-9a-f]{2})+$/.test(hex)) throw new Error('Invalid ledger encoding');
+  if (!/^(?:[0-9a-f]{2})+$/.test(hex)) throw new E2eeHistoryError('server', 'encoding');
   return Uint8Array.from(hex.match(/../g)!, (byte) => Number.parseInt(byte, 16));
 }
 
@@ -52,10 +69,11 @@ export function appendLedgerHistory(
   }
 ): VerifiedLedgerHistory {
   const start = previous?.view.length ?? 0;
+  if (expected.localPin !== null && page.genesisHash !== expected.localPin)
+    throw new E2eeHistoryError('local-conflict', 'pin-mismatch');
   if (
     page.workspaceId !== expected.workspaceId ||
     page.genesisHash !== expected.genesisHash ||
-    (expected.localPin !== null && page.genesisHash !== expected.localPin) ||
     page.startIndex !== start ||
     page.recordsHex.length === 0 ||
     page.recordsHex.length > 100 ||
@@ -67,15 +85,15 @@ export function appendLedgerHistory(
         previous.page.checkpoint.length !== page.checkpoint.length ||
         previous.page.checkpoint.headHash !== page.checkpoint.headHash))
   )
-    throw new Error('Ledger page does not continue the selected history');
+    throw new E2eeHistoryError('server', 'discontinuous-page');
   if (
     expected.observed &&
     (expected.observed.genesisHash !== page.genesisHash ||
       page.checkpoint.length < expected.observed.length)
   )
-    throw new Error('Ledger history rolled back');
+    throw new E2eeHistoryError('local-conflict', 'rolled-back');
   const bytes = page.recordsHex.map((hex) => {
-    if (hex.length > 16_384) throw new Error('Ledger record too large');
+    if (hex.length > 16_384) throw new E2eeHistoryError('server', 'oversize');
     return hexToBytes(hex);
   });
   const length = start + bytes.length;
@@ -85,18 +103,48 @@ export function appendLedgerHistory(
     (page.nextCursor === null) !== (length === page.checkpoint.length) ||
     (length === page.checkpoint.length && bytesToHex(head.toBytes()) !== page.checkpoint.headHash)
   ) {
-    throw new Error('Ledger endpoint does not match the selected history');
+    throw new E2eeHistoryError('server', 'endpoint-mismatch');
   }
   const anchor = Bytes.genesisHash(hexToBytes(expected.localPin ?? expected.genesisHash));
-  if (Result.isFailure(anchor)) throw new Error('Invalid genesis hash');
-  const verified = previous
-    ? extendLedger(previous.view, bytes, { head, length })
-    : verifyLedger({ anchor: anchor.success, records: bytes, checkpoint: { head, length } });
-  if (Result.isFailure(verified))
-    throw new Error(`Ledger verification failed: ${verified.failure.code}`);
-  const records = bytes.map((record, index): ReadableLedgerRecord => {
+  if (Result.isFailure(anchor)) throw new E2eeHistoryError('server', 'genesis');
+  const verify = (records: Uint8Array[], total: number) =>
+    previous
+      ? extendLedger(previous.view, records, {
+          head: hashRecordBytes(records[records.length - 1]!),
+          length: total,
+        })
+      : verifyLedger({
+          anchor: anchor.success,
+          records,
+          checkpoint: { head: hashRecordBytes(records[records.length - 1]!), length: total },
+        });
+  let verified = verify(bytes, length);
+  let accepted = bytes;
+  let upgradeRequiredAt: number | undefined;
+  if (Result.isFailure(verified)) {
+    const { code, position } = verified.failure;
+    // A genuine future record: keep the verified prefix and stop, never skip it.
+    if (code !== 'upgrade-required' || position === undefined || position < start)
+      throw new E2eeHistoryError('server', code, position);
+    upgradeRequiredAt = position;
+    accepted = bytes.slice(0, position - start);
+    if (accepted.length === 0) {
+      if (!previous) throw new E2eeHistoryError('server', code, position);
+      return {
+        ...previous,
+        page,
+        upgradeRequiredAt,
+        continuityPending: Boolean(expected.observed && position < expected.observed.length),
+      };
+    }
+    verified = verify(accepted, position);
+    if (Result.isFailure(verified))
+      throw new E2eeHistoryError('server', verified.failure.code, verified.failure.position);
+  }
+  const verifiedLength = start + accepted.length;
+  const records = accepted.map((record, index): ReadableLedgerRecord => {
     const decoded = decodeRecord(record);
-    if (Result.isFailure(decoded)) throw new Error('Invalid ledger record');
+    if (Result.isFailure(decoded)) throw new E2eeHistoryError('server', 'record', start + index);
     return {
       index: start + index,
       hash: bytesToHex(hashRecordBytes(record).toBytes()),
@@ -107,16 +155,17 @@ export function appendLedgerHistory(
   const completeRecords = [...(previous?.records ?? []), ...records];
   if (
     expected.observed &&
-    length >= expected.observed.length &&
+    verifiedLength >= expected.observed.length &&
     completeRecords[expected.observed.length - 1]?.hash !== expected.observed.headHash
   )
-    throw new Error('Ledger history changed');
+    throw new E2eeHistoryError('local-conflict', 'history-changed');
   return {
     view: verified.success,
     page,
     records: completeRecords,
     locallyPinned: expected.localPin !== null,
-    continuityPending: Boolean(expected.observed && length < expected.observed.length),
+    continuityPending: Boolean(expected.observed && verifiedLength < expected.observed.length),
+    ...(upgradeRequiredAt === undefined ? {} : { upgradeRequiredAt }),
   };
 }
 
@@ -168,6 +217,8 @@ export function ledgerRecordFields(
         epoch: op.epoch,
         commitment: bytesToHex(op.commitment.toBytes()),
       };
+    case 'declareCapabilities':
+      return { ...base, capabilities: op.capabilities.join(', ') };
   }
   throw new Error('Unsupported ledger operation');
 }

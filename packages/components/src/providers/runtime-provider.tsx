@@ -208,8 +208,9 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
     return () => window.removeEventListener('storage', changed);
   }, [platform.e2eeWorkspaces, accountId, modeWorkspaceId]);
   const savedMode = useMemo(() => {
-    // Relevant storage events invalidate this external read.
+    // Relevant storage events, and an explicit retry after local repair, invalidate this read.
     void modeStorageRevision;
+    void admissionRetry;
     if (!platform.e2eeWorkspaces || !accountId || !workspaceSlug || !modeWorkspaceId)
       return noSavedMode;
     try {
@@ -220,7 +221,14 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
     } catch (error) {
       return { descriptor: null, error };
     }
-  }, [platform.e2eeWorkspaces, accountId, workspaceSlug, modeWorkspaceId, modeStorageRevision]);
+  }, [
+    platform.e2eeWorkspaces,
+    accountId,
+    workspaceSlug,
+    modeWorkspaceId,
+    modeStorageRevision,
+    admissionRetry,
+  ]);
   const effectiveWorkspaceId = isLocalPlatform
     ? workspaceSlug
       ? ((implicitLocalWorkspace?.id as WorkspaceId | undefined) ?? null)

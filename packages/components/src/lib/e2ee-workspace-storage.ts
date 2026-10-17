@@ -1,6 +1,33 @@
 import type { WorkspaceAdmissionDescriptor, WorkspaceModeDescriptor } from '@lody/cloud-api';
 import type { ObservedLedgerCheckpoint, VerifiedLedgerHistory } from './e2ee-ledger-history';
 
+/** Unreadable local evidence. Only optional caches may be repaired by deleting them. */
+export class E2eeLocalEvidenceCorruptError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'E2eeLocalEvidenceCorruptError';
+  }
+}
+
+/** Valid local evidence that disagrees with another record or the server. This can
+ * indicate a rollback, fork or downgrade, so it is never resolved automatically. */
+export class E2eeLocalEvidenceConflictError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'E2eeLocalEvidenceConflictError';
+  }
+}
+
+const corrupt = (message: string) => new E2eeLocalEvidenceCorruptError(message);
+const conflict = (message: string) => new E2eeLocalEvidenceConflictError(message);
+function parseJson(raw: string, message: string): unknown {
+  try {
+    return JSON.parse(raw);
+  } catch {
+    throw corrupt(message);
+  }
+}
+
 /** Durable creation intent and public trust pins, deliberately outside the cache delete list. */
 export interface PendingE2eeWorkspace {
   accountId: string;
@@ -17,7 +44,7 @@ const pinKey = (accountId: string, workspaceId: string) =>
   `lody-e2ee-genesis-pin:${encodeURIComponent(accountId)}:${encodeURIComponent(workspaceId)}`;
 
 function parsePending(raw: string, accountId: string): PendingE2eeWorkspace {
-  const value: unknown = JSON.parse(raw);
+  const value = parseJson(raw, 'Invalid pending encrypted workspace');
   if (
     !value ||
     typeof value !== 'object' ||
@@ -30,7 +57,7 @@ function parsePending(raw: string, accountId: string): PendingE2eeWorkspace {
     !('slug' in value) ||
     typeof value.slug !== 'string'
   ) {
-    throw new Error('Invalid pending encrypted workspace');
+    throw corrupt('Invalid pending encrypted workspace');
   }
   return value as PendingE2eeWorkspace;
 }
@@ -49,7 +76,7 @@ export function listPendingE2eeWorkspaces(
     const pending = parsePending(raw, accountId);
     const previous = results.get(pending.requestId);
     if (previous && (previous.name !== pending.name || previous.slug !== pending.slug))
-      throw new Error('Conflicting creation intent');
+      throw corrupt('Conflicting creation intent');
     results.set(pending.requestId, pending);
   }
   return [...results.values()].sort((a, b) => a.requestId.localeCompare(b.requestId));
@@ -72,7 +99,7 @@ export function savePendingE2eeWorkspace(storage: Storage, pending: PendingE2eeW
       previous.name !== pending.name ||
       previous.slug !== pending.slug
     )
-      throw new Error('Creation intent changed');
+      throw conflict('Creation intent changed');
   }
   // Each request owns its own key. Concurrent windows cannot replace another
   // request, and reconciling one success never clears another unknown result.
@@ -98,7 +125,7 @@ export function readE2eeGenesisPin(
   workspaceId: string
 ): string | null {
   const value = storage.getItem(pinKey(accountId, workspaceId));
-  if (value !== null && !/^[0-9a-f]{64}$/.test(value)) throw new Error('Invalid genesis pin');
+  if (value !== null && !/^[0-9a-f]{64}$/.test(value)) throw corrupt('Invalid genesis pin');
   return value;
 }
 
@@ -110,7 +137,7 @@ export function saveE2eeGenesisPin(
 ): void {
   if (!/^[0-9a-f]{64}$/.test(hash)) throw new Error('Invalid genesis pin');
   const previous = readE2eeGenesisPin(storage, accountId, workspaceId);
-  if (previous !== null && previous !== hash) throw new Error('Genesis pin changed');
+  if (previous !== null && previous !== hash) throw conflict('Genesis pin changed');
   storage.setItem(pinKey(accountId, workspaceId), hash);
 }
 
@@ -144,20 +171,20 @@ function assertEncryptedEvidence(
     readE2eeGenesisPin(storage, accountId, descriptor.workspaceId),
     storage.getItem(knownEncryptedKey(accountId, descriptor.workspaceId)),
   ]) {
+    if (hash !== null && !/^[0-9a-f]{64}$/.test(hash)) throw corrupt('Invalid encrypted evidence');
     if (
       hash !== null &&
-      (!/^[0-9a-f]{64}$/.test(hash) ||
-        !('contentMode' in descriptor) ||
+      (!('contentMode' in descriptor) ||
         descriptor.contentMode !== 'e2ee' ||
         descriptor.genesisHash !== hash)
     )
-      throw new Error('Workspace mode conflicts with encrypted evidence');
+      throw conflict('Workspace mode conflicts with encrypted evidence');
   }
 }
 
 function validateDescriptor(descriptor: WorkspaceAdmissionDescriptor): void {
   if (!descriptor || typeof descriptor.workspaceId !== 'string' || !descriptor.workspaceId)
-    throw new Error('Invalid workspace admission proof');
+    throw corrupt('Invalid workspace admission proof');
   if ('admission' in descriptor) {
     if (
       descriptor.admission !== 'legacy-unclassified' ||
@@ -166,21 +193,21 @@ function validateDescriptor(descriptor: WorkspaceAdmissionDescriptor): void {
       'cryptoOrgId' in descriptor ||
       'contentModeVersion' in descriptor
     )
-      throw new Error('Invalid legacy workspace admission');
+      throw corrupt('Invalid legacy workspace admission');
     return;
   }
   if (
     descriptor.contentModeVersion !== 1 ||
     (descriptor.contentMode !== 'plaintext' && descriptor.contentMode !== 'e2ee')
   )
-    throw new Error('Invalid workspace mode proof');
+    throw corrupt('Invalid workspace mode proof');
   if (
     descriptor.contentMode === 'e2ee' &&
     (!/^[0-9a-f]{64}$/.test(descriptor.genesisHash) ||
       descriptor.cryptoOrgId !== descriptor.genesisHash ||
       descriptor.activation !== 'control-only')
   )
-    throw new Error('Invalid encrypted workspace mode proof');
+    throw corrupt('Invalid encrypted workspace mode proof');
 }
 
 /** A previous authenticated response may reopen an immutable mode offline.
@@ -194,11 +221,11 @@ export function readWorkspaceModeProof(
 ): WorkspaceAdmissionDescriptor | null {
   const raw = storage.getItem(modeKey(accountId, workspaceId));
   if (raw === null) return null;
-  const saved = JSON.parse(raw) as {
+  const saved = parseJson(raw, 'Invalid workspace mode proof') as {
     accountId?: unknown;
     workspaceSlug?: unknown;
     descriptor?: WorkspaceAdmissionDescriptor;
-  };
+  } | null;
   const descriptor = saved?.descriptor;
   if (
     saved?.accountId !== accountId ||
@@ -206,7 +233,7 @@ export function readWorkspaceModeProof(
     descriptor.workspaceId !== workspaceId ||
     typeof saved.workspaceSlug !== 'string'
   )
-    throw new Error('Invalid workspace mode proof');
+    throw corrupt('Invalid workspace mode proof');
   validateDescriptor(descriptor);
   assertEncryptedEvidence(storage, accountId, descriptor);
   return saved.workspaceSlug === workspaceSlug ? descriptor : null;
@@ -226,7 +253,7 @@ export function retainWorkspaceModeProof(
   assertEncryptedEvidence(storage, accountId, descriptor);
   const raw = storage.getItem(modeKey(accountId, descriptor.workspaceId));
   if (raw !== null) {
-    const saved = JSON.parse(raw) as { workspaceSlug: string };
+    const saved = parseJson(raw, 'Invalid workspace mode proof') as { workspaceSlug: string };
     const previous = readWorkspaceModeProof(
       storage,
       accountId,
@@ -242,14 +269,14 @@ export function retainWorkspaceModeProof(
           descriptor.contentMode === 'e2ee' &&
           previous.genesisHash !== descriptor.genesisHash))
     )
-      throw new Error('Immutable workspace mode changed');
+      throw conflict('Immutable workspace mode changed');
     if (
       previous &&
       'admission' in previous &&
       'contentMode' in descriptor &&
       descriptor.contentMode === 'e2ee'
     )
-      throw new Error('Legacy workspace cannot become encrypted');
+      throw conflict('Legacy workspace cannot become encrypted');
   }
   const encrypted = 'contentMode' in descriptor && descriptor.contentMode === 'e2ee';
   if (encrypted)
@@ -276,7 +303,10 @@ export function retainEncryptedWorkspaceMode(
   descriptor: Extract<WorkspaceModeDescriptor, { contentMode: 'e2ee' }>
 ): void {
   const raw = storage.getItem(modeKey(accountId, descriptor.workspaceId));
-  const slug = raw === null ? '' : (JSON.parse(raw) as { workspaceSlug: string }).workspaceSlug;
+  const slug =
+    raw === null
+      ? ''
+      : (parseJson(raw, 'Invalid workspace mode proof') as { workspaceSlug: string }).workspaceSlug;
   retainWorkspaceModeProof(storage, accountId, slug, descriptor);
 }
 
@@ -295,7 +325,7 @@ function observedCheckpoints(
     if (!key?.startsWith(prefix)) continue;
     const raw = storage.getItem(key);
     if (raw === null) continue;
-    const value = JSON.parse(raw) as ObservedLedgerCheckpoint;
+    const value = parseJson(raw, 'Invalid observed ledger checkpoint') as ObservedLedgerCheckpoint;
     if (
       !value ||
       !/^[0-9a-f]{64}$/.test(value.genesisHash) ||
@@ -303,18 +333,18 @@ function observedCheckpoints(
       !Number.isSafeInteger(value.length) ||
       value.length < 1
     )
-      throw new Error('Invalid observed ledger checkpoint');
+      throw corrupt('Invalid observed ledger checkpoint');
     const previous = points.get(value.length);
     if (
       previous &&
       (previous.genesisHash !== value.genesisHash || previous.headHash !== value.headHash)
     )
-      throw new Error('Conflicting observed ledger checkpoints');
+      throw conflict('Conflicting observed ledger checkpoints');
     points.set(value.length, value);
   }
   const result = [...points.values()].sort((a, b) => a.length - b.length);
   if (result.some((point) => point.genesisHash !== result[0]!.genesisHash))
-    throw new Error('Conflicting observed genesis');
+    throw conflict('Conflicting observed genesis');
   return result;
 }
 
@@ -341,13 +371,13 @@ export function retainObservedLedgerCheckpoint(
       previous.genesisHash !== history.page.genesisHash ||
       history.page.checkpoint.length < previous.length
     )
-      throw new Error('Ledger history rolled back');
+      throw conflict('Ledger history rolled back');
     if (history.view.length < previous.length) {
       pending = true;
       continue;
     }
     if (history.records[previous.length - 1]?.hash !== previous.headHash)
-      throw new Error('Ledger history changed');
+      throw conflict('Ledger history changed');
   }
   if (pending) return false;
   const head = history.records[history.view.length - 1]?.hash;
@@ -364,4 +394,89 @@ export function retainObservedLedgerCheckpoint(
     } satisfies ObservedLedgerCheckpoint)
   );
   return true;
+}
+
+const keysWithPrefix = (storage: Storage, prefix: string): string[] => {
+  const keys: string[] = [];
+  for (let index = 0; index < storage.length; index += 1) {
+    const key = storage.key(index);
+    if (key?.startsWith(prefix)) keys.push(key);
+  }
+  return keys;
+};
+
+/** Delete only unreadable optional caches for this account: mode proofs and observed
+ * checkpoints. Pins, known-encrypted markers and creation intents are never touched;
+ * a valid record that conflicts is evidence and stays. Returns the number removed. */
+export function repairUnreadableE2eeCaches(storage: Storage, accountId: string): number {
+  let removed = 0;
+  const account = encodeURIComponent(accountId);
+  for (const key of keysWithPrefix(storage, `lody-workspace-mode-proof:${account}:`)) {
+    let workspaceId: string;
+    try {
+      workspaceId = decodeURIComponent(key.slice(key.lastIndexOf(':') + 1));
+    } catch {
+      continue; // Not a key this module wrote; leave it untouched.
+    }
+    const raw = storage.getItem(key);
+    if (raw === null) continue;
+    let slug: unknown;
+    try {
+      slug = (JSON.parse(raw) as { workspaceSlug?: unknown } | null)?.workspaceSlug;
+    } catch {
+      slug = undefined;
+    }
+    try {
+      if (typeof slug !== 'string') throw corrupt('Invalid workspace mode proof');
+      readWorkspaceModeProof(storage, accountId, workspaceId, slug);
+    } catch (error) {
+      if (!(error instanceof E2eeLocalEvidenceCorruptError)) continue;
+      // Corrupt sticky evidence is not this cache; keep the proof as a downgrade guard.
+      try {
+        readE2eeGenesisPin(storage, accountId, workspaceId);
+        const known = storage.getItem(knownEncryptedKey(accountId, workspaceId));
+        if (known !== null && !/^[0-9a-f]{64}$/.test(known)) continue;
+      } catch {
+        continue;
+      }
+      storage.removeItem(key);
+      removed += 1;
+    }
+  }
+  for (const key of keysWithPrefix(storage, `lody-e2ee-observed-ledger:${account}:`)) {
+    const raw = storage.getItem(key);
+    if (raw === null) continue;
+    let value: Partial<ObservedLedgerCheckpoint> | null = null;
+    try {
+      value = JSON.parse(raw) as Partial<ObservedLedgerCheckpoint> | null;
+    } catch {
+      value = null;
+    }
+    if (
+      !value ||
+      typeof value.genesisHash !== 'string' ||
+      !/^[0-9a-f]{64}$/.test(value.genesisHash) ||
+      typeof value.headHash !== 'string' ||
+      !/^[0-9a-f]{64}$/.test(value.headHash) ||
+      !Number.isSafeInteger(value.length) ||
+      (value.length ?? 0) < 1
+    ) {
+      storage.removeItem(key);
+      removed += 1;
+    }
+  }
+  return removed;
+}
+
+/** User-confirmed recovery after support verifies the server ledger: forget the
+ * history position this device last observed for one workspace. This also hides a
+ * genuine rollback, so it is never automatic. Pins and mode markers stay. */
+export function resetObservedLedgerProgress(
+  storage: Storage,
+  accountId: string,
+  workspaceId: string
+): number {
+  const keys = keysWithPrefix(storage, observedPrefix(accountId, workspaceId));
+  for (const key of keys) storage.removeItem(key);
+  return keys.length;
 }

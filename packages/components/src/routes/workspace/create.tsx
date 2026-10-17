@@ -4,7 +4,11 @@ import { useCloudAction, usePlatform, usePlatformSession } from '@lody/platform/
 import { useAtomValue } from 'jotai';
 import { e2eeWorkspaceCreationFeatureEnabledAtom } from '@/atoms/settings';
 import { E2eeWorkspaceCreationOption } from '@/components/pages/e2ee-workspace-creation-option';
-import { createPreparedE2eeWorkspace } from '@/lib/create-e2ee-workspace';
+import {
+  createPreparedE2eeWorkspace,
+  e2eeCreationChoice,
+  isE2eeCreationNotEnabled,
+} from '@/lib/create-e2ee-workspace';
 import {
   listPendingE2eeWorkspaces,
   savePendingE2eeWorkspace,
@@ -162,7 +166,13 @@ function CreateWorkspaceAuthed({
     error: slugErrorType,
   } = useWorkspaceSlugField(workspaceName);
   const currentPending = pendingCreation?.accountId === accountId ? pendingCreation : null;
-  const useEncryption = Boolean(currentPending) || (creationEnabled && encrypted);
+  const creationChoice = e2eeCreationChoice({
+    featureEnabled: creationEnabled,
+    selected: encrypted,
+    resumable: Boolean(currentPending),
+    savedRequests: pendingRequests.length,
+  });
+  const useEncryption = creationChoice.encrypt;
   useEffect(() => {
     setPendingCreation(null);
     setPendingRequests([]);
@@ -484,7 +494,15 @@ function CreateWorkspaceAuthed({
     } catch (err) {
       if (accountRef.current !== accountId) return;
       console.error('Failed to create workspace:', err);
-      setError(t(useEncryption ? 'e2ee.create.failed' : 'organization.createFailed'));
+      setError(
+        t(
+          !useEncryption
+            ? 'organization.createFailed'
+            : isE2eeCreationNotEnabled(err)
+              ? 'e2ee.create.notEnabled'
+              : 'e2ee.create.failed'
+        )
+      );
       captureCreateFailed('create_rejected', startMs);
     } finally {
       submitInFlight.current = false;
@@ -519,7 +537,7 @@ function CreateWorkspaceAuthed({
       retryPendingCreation={Boolean(currentPending)}
       paidRequired={paidRequired && !useEncryption}
       creationOptions={
-        creationEnabled || currentPending || pendingRequests.length > 0 ? (
+        creationChoice.showOption ? (
           <E2eeWorkspaceCreationOption
             selected={useEncryption}
             supported={Boolean(platform.e2eeWorkspaces?.prepareCreation)}

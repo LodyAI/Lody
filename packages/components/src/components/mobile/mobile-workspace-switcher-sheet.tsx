@@ -1,5 +1,6 @@
 import { Fragment, type ReactNode } from 'react';
 import { Check, Plus, Users } from 'lucide-react';
+import { EncryptedWorkspaceMark } from '@/components/e2ee/encrypted-workspace-mark';
 
 import { Drawer, DrawerClose, DrawerContent, DrawerDescription, DrawerTitle } from '@/ui/drawer';
 import { cn } from '@/lib/utils';
@@ -10,6 +11,8 @@ export type MobileWorkspaceSwitcherWorkspace = {
   name: string;
   avatarUrl?: string | null;
   isActive?: boolean;
+  /** Display-only listing metadata; never an admission decision. */
+  encrypted?: boolean;
 };
 
 export type MobileWorkspaceSwitcherSheetLabels = {
@@ -96,6 +99,7 @@ export function MobileWorkspaceSwitcherSheet({
                     }
                   >
                     <span className="truncate text-[0.95rem] font-medium">{workspace.name}</span>
+                    {workspace.encrypted ? <EncryptedWorkspaceMark /> : null}
                   </SheetRow>
                 </li>
               ))}
@@ -152,11 +156,7 @@ export function MobileWorkspaceSwitcherSheet({
   );
 }
 
-function WorkspaceLeadingAvatar({
-  workspace,
-}: {
-  workspace: MobileWorkspaceSwitcherWorkspace;
-}) {
+function WorkspaceLeadingAvatar({ workspace }: { workspace: MobileWorkspaceSwitcherWorkspace }) {
   /* No selection ring on the avatar — letter tiles use hashed hues
      (green/blue/…) and a primary ring clashes hard. Active state is
      shown by the trailing check + row background instead. */

@@ -277,7 +277,6 @@ describe('cloud E2EE creation ownership', () => {
     const invalid = [
       { ...receipt, genesisHash: 'invalid' },
       { ...receipt, cryptoOrgId: 'cd'.repeat(32) },
-      { ...receipt, activation: 'enabled' },
       {
         workspaceId: receipt.workspaceId,
         contentMode: 'plaintext',
@@ -301,6 +300,23 @@ describe('cloud E2EE creation ownership', () => {
       });
       await expect(port.describe({ workspaceId: receipt.workspaceId })).rejects.toThrow(
         'e2ee_workspace_mode_unavailable'
+      );
+    }
+    // A newer activation or mode version still fails closed, but asks for an update.
+    for (const value of [
+      { ...receipt, activation: 'enabled' },
+      { ...receipt, contentModeVersion: 2 },
+    ]) {
+      const port = createCloudE2eeWorkspaces({
+        session: authenticated,
+        remote: {
+          ...remote,
+          describe: async () => value as Awaited<ReturnType<PlatformE2eeWorkspaces['describe']>>,
+        },
+        refreshWorkspaces: async () => {},
+      });
+      await expect(port.describe({ workspaceId: receipt.workspaceId })).rejects.toThrow(
+        'e2ee_client_upgrade_required'
       );
     }
   });

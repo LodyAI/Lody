@@ -44,3 +44,31 @@ export async function createPreparedE2eeWorkspace(
   clearPendingE2eeWorkspace(storage, pending);
   return result;
 }
+
+/** Creation stays behind both developer toggles. A saved request whose result may
+ * already be committed stays visible and resumable after the toggles are turned off. */
+export function e2eeCreationChoice(input: {
+  featureEnabled: boolean;
+  selected: boolean;
+  resumable: boolean;
+  savedRequests: number;
+}): { showOption: boolean; encrypt: boolean } {
+  return {
+    showOption: input.featureEnabled || input.resumable || input.savedRequests > 0,
+    encrypt: input.resumable || (input.featureEnabled && input.selected),
+  };
+}
+
+/** The server's release switch has not enabled new encrypted workspaces for this
+ * account. The saved request is kept: an earlier attempt with the same request ID
+ * may still have reserved it, and a later retry reconciles once creation is enabled. */
+export function isE2eeCreationNotEnabled(error: unknown): boolean {
+  if (typeof error !== 'object' || error === null || !('data' in error)) return false;
+  const data = (error as { data?: unknown }).data;
+  return (
+    typeof data === 'object' &&
+    data !== null &&
+    'code' in data &&
+    data.code === 'e2ee_creation_not_enabled'
+  );
+}

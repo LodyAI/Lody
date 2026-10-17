@@ -24,7 +24,10 @@ const meta = {
     genesisHash,
     history: null,
     loading: false,
-    error: false,
+    failure: null,
+    diagnostics: () => '{}',
+    onRepairLocal: () => {},
+    onResetProgress: () => {},
     onLoadMore: fn(),
     onRefresh: fn(),
     onBack: fn(),
@@ -33,7 +36,15 @@ const meta = {
 export default meta;
 type Story = StoryObj<typeof meta>;
 export const Loading: Story = { args: { loading: true } };
-export const Failed: Story = { args: { error: true } };
+export const Failed: Story = {
+  args: { failure: { kind: 'server', code: 'bad-signature', position: 1 } },
+};
+export const ProgressConflict: Story = {
+  args: { failure: { kind: 'progress-conflict', code: 'rolled-back' } },
+};
+export const IdentityConflict: Story = {
+  args: { failure: { kind: 'identity-conflict', code: 'pin-mismatch' } },
+};
 export const Unsupported: Story = { args: { unavailable: true } };
 export const VerifiedLocalGenesis: Story = {
   args: {

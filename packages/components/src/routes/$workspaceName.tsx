@@ -10,6 +10,12 @@ import { workspaceContentModeAtom } from '@/atoms/workspace-content-mode';
 import { userAtom } from '@/atoms';
 import { workspaceModeAdmissionRetryAtom, workspaceRuntimeInitFailureAtom } from '@/atoms/runtime';
 import { WorkspaceModeAdmissionTimeoutError } from '../providers/workspace-mode-admission';
+import { E2eeClientUpgradeRequiredError } from '../providers/cloud-e2ee-workspaces';
+import {
+  E2eeLocalEvidenceConflictError,
+  E2eeLocalEvidenceCorruptError,
+  repairUnreadableE2eeCaches,
+} from '@/lib/e2ee-workspace-storage';
 import { cloudOperations } from '@/lib/cloud-api-operations';
 import {
   clearPreferredWorkspaceSlugIfMatch,
@@ -356,6 +362,21 @@ function CloudWorkspaceGuardRoute() {
   );
 }
 
+function admissionFailureHelp(errorType: string): string {
+  switch (errorType) {
+    case WorkspaceModeAdmissionTimeoutError.name:
+      return 'e2ee.mode.timedOutHelp';
+    case E2eeLocalEvidenceCorruptError.name:
+      return 'e2ee.mode.localCorruptHelp';
+    case E2eeLocalEvidenceConflictError.name:
+      return 'e2ee.mode.localConflictHelp';
+    case E2eeClientUpgradeRequiredError.name:
+      return 'e2ee.mode.upgradeHelp';
+    default:
+      return 'e2ee.mode.failedHelp';
+  }
+}
+
 function WorkspaceAuthedRoute(props: Parameters<typeof PlaintextWorkspaceAuthedRoute>[0]) {
   const platform = usePlatform();
   const mode = useAtomValue(workspaceContentModeAtom);
@@ -369,12 +390,14 @@ function WorkspaceAuthedRoute(props: Parameters<typeof PlaintextWorkspaceAuthedR
         <RouteMessage
           gate="workspace_content_mode"
           title={t('e2ee.mode.failed')}
-          description={t(
-            failure.errorType === WorkspaceModeAdmissionTimeoutError.name
-              ? 'e2ee.mode.timedOutHelp'
-              : 'e2ee.mode.failedHelp'
-          )}
-          onRetry={() => retryAdmission((value) => value + 1)}
+          description={t(admissionFailureHelp(failure.errorType))}
+          onRetry={() => {
+            // Unreadable optional caches cannot help any later attempt. Sticky
+            // encrypted evidence and conflicting records are never removed here.
+            if (failure.errorType === E2eeLocalEvidenceCorruptError.name && user?.id)
+              repairUnreadableE2eeCaches(localStorage, user.id);
+            retryAdmission((value) => value + 1);
+          }}
         />
       ) : (
         <BlockingWaitPlaceholder

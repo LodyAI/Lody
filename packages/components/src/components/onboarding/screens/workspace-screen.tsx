@@ -17,6 +17,10 @@ import {
   usePlatformWorkspaces,
 } from '@lody/platform/react';
 import { retainWorkspaceModeProof } from '@/lib/e2ee-workspace-storage';
+import {
+  EncryptedWorkspaceMark,
+  isListedEncryptedWorkspace,
+} from '@/components/e2ee/encrypted-workspace-mark';
 import { Button } from '@lody/ui/button';
 import { Input } from '@lody/ui/input';
 import { Field as UiField } from '@lody/ui/field';
@@ -117,6 +121,8 @@ export interface WorkspaceListEntry {
   id: string;
   name: string;
   slug: string;
+  /** Display-only listing metadata; selection still verifies the persisted mode. */
+  encrypted?: boolean;
 }
 
 export interface WorkspaceScreenViewProps {
@@ -533,7 +539,15 @@ export function WorkspaceScreenView({
                           <Building2 {...stylex.props(surface.icon20)} />
                         </span>
                         <span {...stylex.props(surface.textColumn)}>
-                          <span {...stylex.props(surface.title)}>{workspace.name}</span>
+                          <span {...stylex.props(surface.title)}>
+                            {workspace.name}
+                            {workspace.encrypted ? (
+                              <>
+                                {' '}
+                                <EncryptedWorkspaceMark className="inline-block align-[-2px]" />
+                              </>
+                            ) : null}
+                          </span>
                           <span {...stylex.props(surface.detail)}>
                             {hasSlug
                               ? `/${workspace.slug}`
@@ -647,6 +661,7 @@ export function WorkspaceScreen({ onBack, onNext }: WorkspaceScreenProps) {
         id: workspace.id,
         name: workspace.name,
         slug: workspace.slug ?? '',
+        encrypted: isListedEncryptedWorkspace(workspace),
       })),
     [workspaceState]
   );

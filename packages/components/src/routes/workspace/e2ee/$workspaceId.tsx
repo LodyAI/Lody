@@ -8,10 +8,17 @@ import { E2eeWorkspaceControlPage } from '@/components/pages/e2ee-workspace-cont
 import { appendLedgerHistory, type VerifiedLedgerHistory } from '@/lib/e2ee-ledger-history';
 import {
   readE2eeGenesisPin,
+  repairUnreadableE2eeCaches,
+  resetObservedLedgerProgress,
   retainEncryptedWorkspaceMode,
   readObservedLedgerCheckpoint,
   retainObservedLedgerCheckpoint,
 } from '@/lib/e2ee-workspace-storage';
+import {
+  classifyE2eeControlFailure,
+  e2eeControlDiagnostics,
+  type E2eeControlFailure,
+} from '@/lib/e2ee-control-failure';
 
 export const Route = createFileRoute('/workspace/e2ee/$workspaceId')({
   component: WorkspaceControlRoute,
@@ -40,20 +47,20 @@ function WorkspaceControlRoute() {
     descriptor: Extract<WorkspaceModeDescriptor, { contentMode: 'e2ee' }> | null;
     history: VerifiedLedgerHistory | null;
     loading: boolean;
-    error: boolean;
-  }>({ scope, identity, descriptor: null, history: null, loading: true, error: false });
+    failure: E2eeControlFailure | null;
+  }>({ scope, identity, descriptor: null, history: null, loading: true, failure: null });
   useEffect(() => {
     let disposed = false;
     setState((previous) =>
       previous.identity === identity
-        ? { ...previous, scope, loading: Boolean(port && accountId), error: false }
+        ? { ...previous, scope, loading: Boolean(port && accountId), failure: null }
         : {
             scope,
             identity,
             descriptor: null,
             history: null,
             loading: Boolean(port && accountId),
-            error: false,
+            failure: null,
           }
     );
     if (!port || !accountId) return undefined;
@@ -85,11 +92,13 @@ function WorkspaceControlRoute() {
           workspaceId,
           history
         );
-        setState({ scope, identity, descriptor, history, loading: false, error: false });
-      } catch {
+        setState({ scope, identity, descriptor, history, loading: false, failure: null });
+      } catch (error) {
         if (!disposed)
           setState((previous) =>
-            previous.scope === scope ? { ...previous, loading: false, error: true } : previous
+            previous.scope === scope
+              ? { ...previous, loading: false, failure: classifyE2eeControlFailure(error) }
+              : previous
           );
       }
     })();
@@ -106,13 +115,14 @@ function WorkspaceControlRoute() {
       !port ||
       !accountId ||
       !current?.history?.page.nextCursor ||
+      current.history.upgradeRequiredAt !== undefined ||
       !current.descriptor ||
       current.loading ||
       current.scope !== scope
     )
       return;
     const previous = current.history;
-    setState({ ...current, loading: true, error: false });
+    setState({ ...current, loading: true, failure: null });
     try {
       const page = await port.history({
         workspaceId,
@@ -132,11 +142,37 @@ function WorkspaceControlRoute() {
         workspaceId,
         history
       );
-      setState({ ...current, history, loading: false, error: false });
-    } catch {
+      setState({ ...current, history, loading: false, failure: null });
+    } catch (error) {
       if (scopeRef.current === scope && readOwner.current === owner)
-        setState({ ...current, loading: false, error: true });
+        setState({ ...current, loading: false, failure: classifyE2eeControlFailure(error) });
     }
+  };
+  const refresh = () => setGeneration((value) => value + 1);
+  const diagnostics = () => {
+    let localPin: string | null = null;
+    let observed: { length: number; headHash: string } | null = null;
+    // Diagnostics must still work when the evidence itself is unreadable.
+    try {
+      localPin = accountId ? readE2eeGenesisPin(localStorage, accountId, workspaceId) : null;
+    } catch {
+      localPin = 'unreadable';
+    }
+    try {
+      observed = accountId
+        ? readObservedLedgerCheckpoint(localStorage, accountId, workspaceId)
+        : null;
+    } catch {
+      observed = null;
+    }
+    return e2eeControlDiagnostics({
+      workspaceId,
+      genesisHash: current?.descriptor?.genesisHash,
+      localPin,
+      observed,
+      history: current?.history ?? null,
+      failure: current?.failure ?? null,
+    });
   };
   return (
     <E2eeWorkspaceControlPage
@@ -144,12 +180,23 @@ function WorkspaceControlRoute() {
       genesisHash={current?.descriptor?.genesisHash}
       history={current?.history ?? null}
       loading={!current || current.loading || current.scope !== scope}
-      error={current?.error ?? false}
+      failure={current?.failure ?? null}
       unavailable={!port || !accountId}
+      diagnostics={diagnostics}
+      onRepairLocal={() => {
+        if (!accountId) return;
+        repairUnreadableE2eeCaches(localStorage, accountId);
+        refresh();
+      }}
+      onResetProgress={() => {
+        if (!accountId) return;
+        resetObservedLedgerProgress(localStorage, accountId, workspaceId);
+        refresh();
+      }}
       onLoadMore={() => {
         void loadMore();
       }}
-      onRefresh={() => setGeneration((value) => value + 1)}
+      onRefresh={refresh}
       onBack={() => {
         void navigate({ to: '/workspace/create', search: { allowExisting: true } });
       }}

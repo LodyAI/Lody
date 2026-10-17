@@ -312,6 +312,7 @@ import {
   type MobileNewChatSheetContentProps,
 } from '@/components/mobile/mobile-new-chat-sheet';
 import { MobileWorkspaceSwitcherSheet } from '@/components/mobile/mobile-workspace-switcher-sheet';
+import { isListedEncryptedWorkspace } from '@/components/e2ee/encrypted-workspace-mark';
 import { MobileCreateWorkspaceSheet } from '@/components/mobile/mobile-create-workspace-sheet';
 import { MobileSessionRunConfig } from '@/components/mobile/mobile-session-run-config';
 import { ChatComposer } from '@/components/chat/chat-composer';
@@ -4285,6 +4286,7 @@ function WorkspaceChatLanding({
         name: organization.name,
         avatarUrl: resolveWorkspaceIdentityLogo(organization.logo, multiWorkspaceAvailable),
         isActive: organization.id === activeOrganization?.id,
+        encrypted: isListedEncryptedWorkspace(organization),
       })),
     [activeOrganization?.id, multiWorkspaceAvailable, organizations]
   );

@@ -2,8 +2,11 @@ import * as stylex from '@stylexjs/stylex';
 import { Button } from '@lody/ui/button';
 import { colors, shadow } from '@lody/ui/tokens/colors.stylex';
 import { radius, space } from '@lody/ui/tokens/scales.stylex';
+import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { Lock, ShieldAlert, ShieldCheck } from 'lucide-react';
 import { ledgerRecordFields, type VerifiedLedgerHistory } from '@/lib/e2ee-ledger-history';
+import type { E2eeControlFailure } from '@/lib/e2ee-control-failure';
 
 const styles = stylex.create({
   page: {
@@ -76,15 +79,113 @@ const styles = stylex.create({
   },
   error: { color: colors.destructive },
   footer: { marginTop: space[4] },
+  badges: { display: 'flex', flexWrap: 'wrap', gap: space[2], marginTop: space[3] },
+  badge: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: space[1],
+    paddingBlock: space[1],
+    paddingInline: space[2],
+    borderRadius: radius.small,
+    backgroundColor: colors.wellBackground,
+    boxShadow: shadow.inset,
+    fontSize: '0.85em',
+  },
+  failure: { display: 'flex', flexDirection: 'column', gap: space[3], marginBlock: space[3] },
+  actions: { display: 'flex', flexWrap: 'wrap', gap: space[2] },
 });
+
+const failureMessage: Record<E2eeControlFailure['kind'], string> = {
+  network: 'e2ee.control.failure.network',
+  auth: 'e2ee.control.failure.auth',
+  server: 'e2ee.control.failure.server',
+  mode: 'e2ee.control.failure.mode',
+  upgrade: 'e2ee.control.failure.upgrade',
+  'identity-conflict': 'e2ee.control.failure.identityConflict',
+  'progress-conflict': 'e2ee.control.failure.progressConflict',
+  'local-corrupt': 'e2ee.control.failure.localCorrupt',
+};
+
+function FailurePanel(props: {
+  failure: E2eeControlFailure;
+  diagnostics: () => string;
+  onRepairLocal: () => void;
+  onResetProgress: () => void;
+}) {
+  const { t } = useTranslation();
+  const [copied, setCopied] = useState<'idle' | 'copied' | 'shown'>('idle');
+  const [confirmReset, setConfirmReset] = useState(false);
+  const [report, setReport] = useState<string | null>(null);
+  const copy = async () => {
+    const text = props.diagnostics();
+    setReport(text);
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied('copied');
+    } catch {
+      // Clipboard access can be denied; the report stays selectable below.
+      setCopied('shown');
+    }
+  };
+  return (
+    <div role="alert" {...stylex.props(styles.failure)}>
+      <p {...stylex.props(styles.error)}>
+        {t(failureMessage[props.failure.kind], { code: props.failure.code })}
+      </p>
+      <div {...stylex.props(styles.actions)}>
+        <Button variant="secondary" onClick={() => void copy()}>
+          {copied === 'copied'
+            ? t('e2ee.control.diagnosticsCopied')
+            : t('e2ee.control.copyDiagnostics')}
+        </Button>
+        {props.failure.kind === 'local-corrupt' && (
+          <Button variant="secondary" onClick={props.onRepairLocal}>
+            {t('e2ee.control.repairLocal')}
+          </Button>
+        )}
+        {props.failure.kind === 'progress-conflict' && !confirmReset && (
+          <Button variant="ghost" onClick={() => setConfirmReset(true)}>
+            {t('e2ee.control.resetProgress')}
+          </Button>
+        )}
+      </div>
+      {confirmReset && (
+        <div {...stylex.props(styles.failure)}>
+          <p {...stylex.props(styles.muted)}>{t('e2ee.control.resetProgressWarning')}</p>
+          <div {...stylex.props(styles.actions)}>
+            <Button variant="destructive" onClick={props.onResetProgress}>
+              {t('e2ee.control.resetProgressConfirm')}
+            </Button>
+            <Button variant="ghost" onClick={() => setConfirmReset(false)}>
+              {t('common.cancel')}
+            </Button>
+          </div>
+        </div>
+      )}
+      {report !== null && (
+        <details open={copied === 'shown'}>
+          <summary>{t('e2ee.control.diagnostics')}</summary>
+          <p {...stylex.props(styles.muted)}>{t('e2ee.control.diagnosticsHelp')}</p>
+          <pre {...stylex.props(styles.raw)}>{report}</pre>
+        </details>
+      )}
+    </div>
+  );
+}
 
 export interface E2eeWorkspaceControlPageProps {
   workspaceId: string;
   genesisHash?: string;
   history: VerifiedLedgerHistory | null;
   loading: boolean;
-  error: boolean;
+  failure: E2eeControlFailure | null;
   unavailable?: boolean;
+  /** Builds the support report on demand; it contains no keys or record bodies. */
+  diagnostics: () => string;
+  /** Deletes only unreadable optional caches, then refreshes. */
+  onRepairLocal: () => void;
+  /** User-confirmed: forget this device's observed history position, then refresh. */
+  onResetProgress: () => void;
   onLoadMore: () => void;
   onRefresh: () => void;
   onBack: () => void;
@@ -105,6 +206,24 @@ export function E2eeWorkspaceControlPage(props: E2eeWorkspaceControlPageProps) {
         <header>
           <h1 {...stylex.props(styles.title)}>{t('e2ee.control.title')}</h1>
           <p {...stylex.props(styles.muted)}>{t('e2ee.control.description')}</p>
+          <div {...stylex.props(styles.badges)}>
+            <span {...stylex.props(styles.badge)}>
+              <Lock size={14} aria-hidden="true" />
+              {t('e2ee.control.badge')}
+            </span>
+            {history && (
+              <span {...stylex.props(styles.badge)}>
+                {history.locallyPinned ? (
+                  <ShieldCheck size={14} aria-hidden="true" />
+                ) : (
+                  <ShieldAlert size={14} aria-hidden="true" />
+                )}
+                {history.locallyPinned
+                  ? t('e2ee.control.badgePinned')
+                  : t('e2ee.control.badgeUnpinned')}
+              </span>
+            )}
+          </div>
         </header>
         <section {...stylex.props(styles.card)} aria-label={t('e2ee.control.workspace')}>
           <dl {...stylex.props(styles.fields)}>
@@ -140,14 +259,22 @@ export function E2eeWorkspaceControlPage(props: E2eeWorkspaceControlPageProps) {
                   : t('e2ee.control.verifiedUnpinned')}
               </p>
               {history.continuityPending && <p>{t('e2ee.control.continuityPending')}</p>}
+              {history.upgradeRequiredAt !== undefined && (
+                <p role="status">
+                  {t('e2ee.control.upgradeStop', { position: history.upgradeRequiredAt })}
+                </p>
+              )}
               <p>{t('e2ee.control.freshness')}</p>
             </div>
           )}
           {props.unavailable && <p role="alert">{t('e2ee.control.unavailable')}</p>}
-          {props.error && (
-            <p role="alert" {...stylex.props(styles.error)}>
-              {t('e2ee.control.failed')}
-            </p>
+          {props.failure && (
+            <FailurePanel
+              failure={props.failure}
+              diagnostics={props.diagnostics}
+              onRepairLocal={props.onRepairLocal}
+              onResetProgress={props.onResetProgress}
+            />
           )}
           {props.loading && <p role="status">{t('e2ee.control.loading')}</p>}
           {history && (
@@ -186,14 +313,16 @@ export function E2eeWorkspaceControlPage(props: E2eeWorkspaceControlPageProps) {
               })}
             </ol>
           )}
-          {history?.page.nextCursor && (
+          {history?.page.nextCursor && history.upgradeRequiredAt === undefined && (
             <div {...stylex.props(styles.footer)}>
               <Button disabled={props.loading} onClick={props.onLoadMore}>
                 {t('e2ee.control.loadMore')}
               </Button>
             </div>
           )}
-          {history?.page.nextCursor === null && <p>{t('e2ee.control.complete')}</p>}
+          {history?.page.nextCursor === null && history.upgradeRequiredAt === undefined && (
+            <p>{t('e2ee.control.complete')}</p>
+          )}
         </section>
       </div>
     </main>

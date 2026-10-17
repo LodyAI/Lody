@@ -90,6 +90,7 @@ import { currentWorkspaceSlugAtom, currentWorkspaceIdAtom, userAtom } from '../s
 import { workspaceContentModeAtom } from '../src/atoms/workspace-content-mode';
 import {
   readWorkspaceModeProof,
+  repairUnreadableE2eeCaches,
   retainWorkspaceModeProof,
   saveE2eeGenesisPin,
 } from '../src/lib/e2ee-workspace-storage';
@@ -693,6 +694,22 @@ describe('RuntimeProvider warm workspace preparation', () => {
     await act(async () => store.set(userAtom, { id: 'other-user' } as never));
     expect(store.get(runtimeAtom)).toBeNull();
     expect(prepared.disposed).toBe(true);
+  });
+
+  it('blocks an unreadable mode cache, then admits after local repair and an in-place retry', async () => {
+    ordinaryCloud();
+    localStorage.setItem('lody-workspace-mode-proof:local%3Auser:local%3Aworkspace', '{broken');
+    await render();
+    expect(store.get(runtimeAtom)).toBeNull();
+    expect(store.get(workspaceRuntimeInitFailureAtom)).toMatchObject({
+      workspaceSlug: 'local',
+      errorType: 'E2eeLocalEvidenceCorruptError',
+    });
+    // The route's retry repairs only unreadable caches before bumping the retry atom.
+    expect(repairUnreadableE2eeCaches(localStorage, 'local:user')).toBe(1);
+    await act(async () => store.set(workspaceModeAdmissionRetryAtom, 1));
+    expect(store.get(workspaceRuntimeInitFailureAtom)).toBeNull();
+    expect(store.get(runtimeAtom)).toBe(prepared);
   });
 
   it('accepts an explicit server legacy admission without labelling the workspace plaintext', async () => {
