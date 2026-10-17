@@ -28,6 +28,7 @@ vi.mock('@/atoms/runtime', () => ({
   authTokenAtom: atom(null),
   runtimeAtom: atom(null),
   workspaceRuntimeInitFailureAtom: atom(null),
+  workspaceModeAdmissionRetryAtom: atom(0),
 }));
 vi.mock('@/atoms/doc-meta', () => ({
   sessionMetaCacheAtom: atom({}),
@@ -92,7 +93,11 @@ import {
   retainWorkspaceModeProof,
   saveE2eeGenesisPin,
 } from '../src/lib/e2ee-workspace-storage';
-import { runtimeAtom, workspaceRuntimeInitFailureAtom } from '../src/atoms/runtime';
+import {
+  runtimeAtom,
+  workspaceModeAdmissionRetryAtom,
+  workspaceRuntimeInitFailureAtom,
+} from '../src/atoms/runtime';
 import {
   editSessionRunConfigDraftAtom,
   registerSessionRunConfigDraftLeaseAtom,
@@ -103,7 +108,10 @@ import { signOutWithoutRedirect, type LodyAuthClient } from '../src/lib/auth';
 import { useSessionRunConfigDraft } from '../src/hooks/use-session-run-config-draft';
 import { createCloudE2eeWorkspaces } from '../src/providers/cloud-e2ee-workspaces';
 import { createPendingSessionSends } from '../src/lib/session-pending-sends';
-import { describeAuthenticatedWorkspace } from '../src/providers/workspace-mode-admission';
+import {
+  describeAuthenticatedWorkspace,
+  WorkspaceModeAdmissionTimeoutError,
+} from '../src/providers/workspace-mode-admission';
 
 function editDraft(store: ReturnType<typeof createStore>, accountId = 'local:user') {
   const lease = store.set(registerSessionRunConfigDraftLeaseAtom, {
@@ -253,6 +261,122 @@ describe('RuntimeProvider warm workspace preparation', () => {
     const cancelled = describeAuthenticatedWorkspace(input);
     abort.abort(new Error('replaced workspace'));
     await expect(cancelled).rejects.toThrow('replaced workspace');
+  });
+
+  it('ends first admission when authentication never becomes ready and accepts a later retry', async () => {
+    ordinaryCloud();
+    environment.session.set({ status: 'loading' });
+    const input = {
+      session: environment.session,
+      workspaces: environment.e2eeWorkspaces!,
+      accountId: 'local:user',
+      workspaceId: 'local:workspace',
+      signal: new AbortController().signal,
+    };
+    vi.useFakeTimers();
+    try {
+      const pending = describeAuthenticatedWorkspace(input, 100);
+      const outcome = expect(pending).rejects.toBeInstanceOf(WorkspaceModeAdmissionTimeoutError);
+      await vi.advanceTimersByTimeAsync(100);
+      await outcome;
+      environment.session.set({ status: 'authenticated', user: { id: 'local:user' } });
+      await expect(describeAuthenticatedWorkspace(input, 100)).resolves.toMatchObject({
+        contentMode: 'plaintext',
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('ignores a mode read that arrives after timeout and admits only the retried read', async () => {
+    environment.mode = 'cloud';
+    environment.warm = false;
+    let resolveOld!: (value: Awaited<ReturnType<PlatformE2eeWorkspaces['describe']>>) => void;
+    let reads = 0;
+    environment.e2eeWorkspaces = {
+      describe: ({ workspaceId }) => {
+        reads++;
+        return reads === 1
+          ? new Promise((resolve) => {
+              resolveOld = resolve;
+            })
+          : Promise.resolve({ workspaceId, contentMode: 'plaintext', contentModeVersion: 1 });
+      },
+      create: async () => {
+        throw new Error('unused');
+      },
+      history: async () => {
+        throw new Error('unused');
+      },
+    };
+    store.set(currentWorkspaceSlugAtom, 'local');
+    store.set(currentWorkspaceIdAtom, 'local:workspace');
+    vi.useFakeTimers();
+    try {
+      await render();
+      await act(async () => vi.advanceTimersByTimeAsync(15_000));
+      expect(store.get(workspaceRuntimeInitFailureAtom)?.errorType).toBe(
+        WorkspaceModeAdmissionTimeoutError.name
+      );
+      expect(store.get(runtimeAtom)).toBeNull();
+      await act(async () => store.set(workspaceModeAdmissionRetryAtom, 1));
+      expect(store.get(runtimeAtom)).toBe(prepared);
+      await act(async () =>
+        resolveOld({
+          workspaceId: 'local:workspace',
+          contentMode: 'e2ee',
+          contentModeVersion: 1,
+          genesisHash: '11'.repeat(32),
+          cryptoOrgId: '11'.repeat(32),
+          activation: 'control-only',
+        })
+      );
+      expect(store.get(runtimeAtom)).toBe(prepared);
+      expect(store.get(workspaceContentModeAtom)?.descriptor).toMatchObject({
+        contentMode: 'plaintext',
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('reports a bounded failure when only an unverified workspace ID cache exists', async () => {
+    ordinaryCloud();
+    environment.cachedWorkspaceId = 'local:workspace';
+    store.set(currentWorkspaceIdAtom, null);
+    vi.useFakeTimers();
+    try {
+      await render();
+      expect(store.get(runtimeAtom)).toBeNull();
+      await act(async () => vi.advanceTimersByTimeAsync(15_000));
+      expect(store.get(workspaceRuntimeInitFailureAtom)?.errorType).toBe(
+        WorkspaceModeAdmissionTimeoutError.name
+      );
+      expect(createWorkspaceRuntime).not.toHaveBeenCalled();
+      await act(async () => store.set(currentWorkspaceIdAtom, 'local:workspace'));
+      expect(store.get(runtimeAtom)).toBe(prepared);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('retries timed-out authentication after the same account becomes ready', async () => {
+    ordinaryCloud();
+    environment.session.set({ status: 'loading' });
+    vi.useFakeTimers();
+    try {
+      await render();
+      await act(async () => vi.advanceTimersByTimeAsync(15_000));
+      expect(store.get(workspaceRuntimeInitFailureAtom)?.errorType).toBe(
+        WorkspaceModeAdmissionTimeoutError.name
+      );
+      await act(async () =>
+        environment.session.set({ status: 'authenticated', user: { id: 'local:user' } })
+      );
+      expect(store.get(runtimeAtom)).toBe(prepared);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('recovers an in-flight auth error even if the same account is ready before the error is received', async () => {

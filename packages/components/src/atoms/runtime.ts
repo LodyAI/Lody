@@ -540,6 +540,9 @@ export type WorkspaceRuntimeInitFailure = { workspaceSlug: string; errorType: st
 
 export const workspaceRuntimeInitFailureAtom = atom<WorkspaceRuntimeInitFailure | null>(null);
 
+/** Reattempt first workspace mode admission without reloading the whole app. */
+export const workspaceModeAdmissionRetryAtom = atom(0);
+
 export type ActiveWorkspaceRuntimeState =
   | { status: 'ready'; runtime: WorkspaceRuntime }
   | {

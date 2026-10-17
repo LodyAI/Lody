@@ -5,10 +5,11 @@ import { useTranslation } from 'react-i18next';
 import { useOrganization } from '@/hooks/useOrganization';
 import { useStableSession } from '@/hooks/useStableSession';
 import { useCloudQuery, usePlatform } from '@lody/platform/react';
-import { useAtomValue } from 'jotai';
+import { useAtomValue, useSetAtom } from 'jotai';
 import { workspaceContentModeAtom } from '@/atoms/workspace-content-mode';
 import { userAtom } from '@/atoms';
-import { workspaceRuntimeInitFailureAtom } from '@/atoms/runtime';
+import { workspaceModeAdmissionRetryAtom, workspaceRuntimeInitFailureAtom } from '@/atoms/runtime';
+import { WorkspaceModeAdmissionTimeoutError } from '../providers/workspace-mode-admission';
 import { cloudOperations } from '@/lib/cloud-api-operations';
 import {
   clearPreferredWorkspaceSlugIfMatch,
@@ -360,6 +361,7 @@ function WorkspaceAuthedRoute(props: Parameters<typeof PlaintextWorkspaceAuthedR
   const mode = useAtomValue(workspaceContentModeAtom);
   const user = useAtomValue(userAtom);
   const failure = useAtomValue(workspaceRuntimeInitFailureAtom);
+  const retryAdmission = useSetAtom(workspaceModeAdmissionRetryAtom);
   const { t } = useTranslation();
   if (platform.e2eeWorkspaces) {
     if (!mode || mode.workspaceSlug !== props.workspaceName || mode.accountId !== user?.id) {
@@ -367,7 +369,12 @@ function WorkspaceAuthedRoute(props: Parameters<typeof PlaintextWorkspaceAuthedR
         <RouteMessage
           gate="workspace_content_mode"
           title={t('e2ee.mode.failed')}
-          description={t('e2ee.mode.failedHelp')}
+          description={t(
+            failure.errorType === WorkspaceModeAdmissionTimeoutError.name
+              ? 'e2ee.mode.timedOutHelp'
+              : 'e2ee.mode.failedHelp'
+          )}
+          onRetry={() => retryAdmission((value) => value + 1)}
         />
       ) : (
         <BlockingWaitPlaceholder

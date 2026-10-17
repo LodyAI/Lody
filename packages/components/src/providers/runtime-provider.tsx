@@ -2,7 +2,12 @@ import { SessionPendingSendsHost } from '../components/chat/session-pending-send
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useAtomValue, useSetAtom, useStore } from 'jotai';
 import { LODY_PRESENCE_HEARTBEAT_MS, type MachineId, type WorkspaceId } from '@lody/shared';
-import { authTokenAtom, runtimeAtom, workspaceRuntimeInitFailureAtom } from '@/atoms/runtime';
+import {
+  authTokenAtom,
+  runtimeAtom,
+  workspaceModeAdmissionRetryAtom,
+  workspaceRuntimeInitFailureAtom,
+} from '@/atoms/runtime';
 import { setSessionRunConfigDraftAccountAtom } from '@/atoms/session-run-config-drafts';
 import { currentWorkspaceIdAtom, currentWorkspaceSlugAtom, userAtom } from '@/atoms';
 import {
@@ -50,7 +55,11 @@ import {
   readWorkspaceModeProof,
   retainWorkspaceModeProof,
 } from '@/lib/e2ee-workspace-storage';
-import { describeAuthenticatedWorkspace } from './workspace-mode-admission';
+import {
+  describeAuthenticatedWorkspace,
+  WORKSPACE_MODE_ADMISSION_TIMEOUT_MS,
+  WorkspaceModeAdmissionTimeoutError,
+} from './workspace-mode-admission';
 
 const noSavedMode = { descriptor: null, error: null };
 
@@ -94,6 +103,9 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
   const runtime = useAtomValue(runtimeAtom);
   const setRuntime = useSetAtom(runtimeAtom);
   const setRuntimeInitFailure = useSetAtom(workspaceRuntimeInitFailureAtom);
+  const runtimeInitFailure = useAtomValue(workspaceRuntimeInitFailureAtom);
+  const admissionRetry = useAtomValue(workspaceModeAdmissionRetryAtom);
+  const retryAdmission = useSetAtom(workspaceModeAdmissionRetryAtom);
   const setContentMode = useSetAtom(workspaceContentModeAtom);
   const store = useStore();
   const setControlConnectionState = useSetAtom(lodyControlConnectionStateAtom);
@@ -233,6 +245,44 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
         : effectiveWorkspaceId
           ? 'previous'
           : 'pending';
+
+  // A timed-out first admission should recover when connectivity or the same
+  // account returns. Subscribe only while failed; auth refresh never owns a
+  // healthy runtime or changes the initialization effect's keys.
+  useEffect(() => {
+    if (
+      !platform.e2eeWorkspaces ||
+      !accountId ||
+      !workspaceSlug ||
+      runtimeInitFailure?.workspaceSlug !== workspaceSlug ||
+      runtimeInitFailure.errorType !== WorkspaceModeAdmissionTimeoutError.name
+    )
+      return undefined;
+    let previousStatus = platform.identity.session.get().status;
+    const unsubscribe = platform.identity.session.subscribe(() => {
+      const current = platform.identity.session.get();
+      if (
+        previousStatus !== 'authenticated' &&
+        current.status === 'authenticated' &&
+        current.user.id === accountId
+      )
+        retryAdmission((value) => value + 1);
+      previousStatus = current.status;
+    });
+    const onOnline = () => retryAdmission((value) => value + 1);
+    window.addEventListener('online', onOnline);
+    return () => {
+      unsubscribe();
+      window.removeEventListener('online', onOnline);
+    };
+  }, [
+    platform.e2eeWorkspaces,
+    platform.identity.session,
+    accountId,
+    workspaceSlug,
+    runtimeInitFailure,
+    retryAdmission,
+  ]);
   const workspaceIdResolutionLogRef = useRef({
     cachedWorkspaceId: cachedId,
     serverWorkspaceId: workspaceId,
@@ -297,7 +347,16 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
       setRuntimeInitializing(false);
       return undefined;
     }
-    if (platform.e2eeWorkspaces && !accountId) return undefined;
+    if (platform.e2eeWorkspaces && !accountId) {
+      const timeout = window.setTimeout(() => {
+        setRuntimeInitFailure({
+          workspaceSlug,
+          errorType: WorkspaceModeAdmissionTimeoutError.name,
+        });
+        setRuntimeInitializing(false);
+      }, WORKSPACE_MODE_ADMISSION_TIMEOUT_MS);
+      return () => window.clearTimeout(timeout);
+    }
 
     // The Electron main-process setting decides whether cloud desktop uses a
     // dual local-first runtime or a cloud-only control runtime. Wait for that
@@ -317,7 +376,15 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
         cachedWorkspaceId,
         serverWorkspaceId,
       });
-      return undefined;
+      if (!platform.e2eeWorkspaces) return undefined;
+      const timeout = window.setTimeout(() => {
+        setRuntimeInitFailure({
+          workspaceSlug,
+          errorType: WorkspaceModeAdmissionTimeoutError.name,
+        });
+        setRuntimeInitializing(false);
+      }, WORKSPACE_MODE_ADMISSION_TIMEOUT_MS);
+      return () => window.clearTimeout(timeout);
     }
 
     let disposed = false;
@@ -523,6 +590,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
     workspaceSlug,
     effectiveWorkspaceId,
     localAgentRuntimeReady,
+    admissionRetry,
   ]);
 
   useEffect(() => {

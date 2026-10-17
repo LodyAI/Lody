@@ -7,6 +7,7 @@
   "e2ee.mode.loading": "Checking workspace encryption mode…",
   "e2ee.mode.failed": "Workspace mode could not be verified",
   "e2ee.mode.failedHelp": "No conversation data was opened. Retry the connection to verify this workspace’s persisted mode.",
+  "e2ee.mode.timedOutHelp": "Sign in and connect to the internet, then retry. This device has no saved mode proof for this workspace, so its conversation data cannot open offline yet.",
   "e2ee.create.label": "Encrypted workspace (developer preview)",
   "e2ee.create.description": "Initializes a device identity and a signed permission ledger. Conversations, files, collaboration and agent execution are not available in this workspace yet. This mode cannot be changed later.",
   "e2ee.create.unsupported": "Creation requires the desktop app with protected device key storage. This platform can read existing workspace history.",
