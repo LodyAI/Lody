@@ -1,3 +1,4 @@
+import type { SessionProjectRun } from './workspace-project';
 import type { SessionEntry, SessionFileDiff } from './session-data/domain';
 import { InferInputType, InferType, schema } from 'loro-mirror';
 import {
@@ -1074,6 +1075,7 @@ export type SessionMeta = {
   openedByRootSessionId?: SessionId;
   /** Project binding for this session (GitHub repo or local project). */
   project?: ProjectRef;
+  projectRun?: SessionProjectRun;
   repoFullName?: string;
   /** Base branch selected when the session starts (starting point). */
   baseBranch?: string;

@@ -241,3 +241,26 @@ Changes 按 Member 分别使用 Git。这件事和将来是否支持本地目录
 的显示，以及子模块相关的 Git 行为：worktree 中子模块 Git 数据的位置、包含子模块的
 worktree 的移除、SSH 子模块 URL 与托管凭证的配合，以及本地父仓库能否复用原仓库已有的
 子模块数据来避免联网拉取。
+
+
+## Shared 契约实现
+
+第一部分实现在 `packages/shared/src/workspace-project.ts` 导出 `WorkspaceProject`、
+`SessionProjectRun` 及上文的 Member 类型。工作区 Flock 归一化 `project` 行，并提供
+list/write/delete 函数。定义与运行快照 schema 拒绝不安全的跨平台路径、重复仓库身份、
+不存在的父成员、循环引用和兄弟成员路径重叠。运行快照至少包含两个 Member；普通单仓库
+对话沿用原契约。创建请求使用完整 `SessionProjectRun`（包括 placement），而非上文的
+简略字段清单。daemon 必须解析并验证 `base`（尤其是子模块 gitlink），不能信任客户端
+携带的运行时观测字段。
+
+`deduplicateProjectMembers` 接受机器提供的本地仓库到 GitHub 身份解析函数。
+数字 ID 优先；仅有名称的别名在已知 ID 无歧义时使用该 ID。冲突的数字 ID 不按名称合并。
+`getCurrentPullRequestsByRepository` 按输入顺序返回各仓库最后一个有效 GitHub PR。
+`resolveSessionFilePath` 是跨平台的最长根目录词法解析器；磁盘调用方仍须检查 realpath
+以拒绝符号链接逃逸。绝对根目录只留在本机。
+
+已定义并可协商 `multiRepoProject: 1`，但物化与生命周期实现完成前，不加入 daemon 的
+当前能力广告。此契约部分不会让现有 daemon 开启多仓库创建。运行时实现、按 Member
+并发写入元数据和生命周期行为仍待验证。
+
+契约 PR：[#1641](https://github.com/LodyAI/Lody/pull/1641)。

@@ -1,3 +1,4 @@
+import type { SessionProjectRun } from './workspace-project';
 import type {
   MachineId,
   ACPSessionConfig,
@@ -67,6 +68,7 @@ export interface SessionCreateRequest {
   machineId: MachineId;
   workspaceId: WorkspaceId;
   project?: ProjectRef;
+  projectRun?: SessionProjectRun;
   meta?: SessionStartMeta;
   acpSessionConfig: ACPSessionConfig;
   worktreeSetup?: WorktreeSetupScriptConfig;

@@ -89,7 +89,11 @@ describe('workspace Flock helpers', () => {
     expect(rows[serializeWorkspaceFlockKey(key)]).toEqual({ key, value: valid });
     expect(Object.keys(rows)).toHaveLength(1);
     // One prefixed scan per family, never an unprefixed full-document scan.
-    expect(flock.scanOptions).toEqual([{ prefix: ['mcpServer'] }, { prefix: ['agentRole'] }]);
+    expect(flock.scanOptions).toEqual([
+      { prefix: ['mcpServer'] },
+      { prefix: ['agentRole'] },
+      { prefix: ['project'] },
+    ]);
   });
 
   it('does not commit unchanged writes and deletes only once', () => {

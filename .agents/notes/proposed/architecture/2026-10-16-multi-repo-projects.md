@@ -312,3 +312,30 @@ submodule Git behavior: where a worktree keeps submodule Git data, removing a
 worktree that contains submodules, how SSH submodule URLs work with hosted
 credentials, and whether a local parent can reuse the original repository's
 existing submodule data instead of fetching over the network.
+
+
+## Shared contract implementation
+
+The first implementation slice exports `WorkspaceProject` and `SessionProjectRun` from
+`packages/shared/src/workspace-project.ts`, with the Member types shown above. Workspace
+Flock now normalizes `project` rows and exposes list/write/delete helpers. Both catalog
+and run schemas reject unsafe portable paths, duplicate identities, missing parents,
+cycles and overlapping sibling placements. A run requires at least two Members; ordinary
+single-repository sessions keep the existing contract. The create payload uses the full
+`SessionProjectRun` shape, including placement, rather than the abbreviated field list
+above. The daemon must resolve and verify `base` (especially submodule gitlinks), and
+must not trust client-supplied runtime observations.
+
+`deduplicateProjectMembers` accepts a machine-owned local-to-GitHub identity resolver.
+Known numeric IDs take precedence; name-only aliases use an unambiguous known ID when
+available. Conflicting numeric IDs are not collapsed by name. `getCurrentPullRequestsByRepository`
+returns each repository's last valid GitHub PR in input order. `resolveSessionFilePath`
+is a portable lexical longest-root resolver; callers operating on disk must still check
+realpaths to reject symlink escapes. Absolute roots remain machine-local.
+
+`multiRepoProject: 1` is defined and negotiable, but is deliberately not included in the
+current daemon advertisement until materialization and lifecycle support are implemented.
+This contract slice does not enable creation on existing daemons. Runtime implementation,
+per-Member concurrent metadata writes and lifecycle behavior remain to be verified.
+
+Contract PR: [#1641](https://github.com/LodyAI/Lody/pull/1641).

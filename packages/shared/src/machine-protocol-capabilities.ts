@@ -8,6 +8,7 @@
 export type MachineProtocolCapabilities = Record<string, number>;
 
 export const MACHINE_PROTOCOL_CAPABILITIES = {
+  multiRepoProject: 'multiRepoProject',
   operationInbox: 'operationInbox',
   magpieImport: 'magpieImport',
   dshProviderIsolation: 'dshProviderIsolation',
@@ -381,5 +382,16 @@ export function machineSupportsIosSimulatorExterior(
     machine,
     MACHINE_PROTOCOL_CAPABILITIES.iosSimulatorExterior,
     1
+  );
+}
+
+export const MULTI_REPO_PROJECT_PROTOCOL_VERSION = 1;
+export function machineSupportsMultiRepoProject(
+  machine: MachineProtocolCapabilityCarrier | null | undefined
+): boolean {
+  return machineSupportsProtocolCapability(
+    machine,
+    MACHINE_PROTOCOL_CAPABILITIES.multiRepoProject,
+    MULTI_REPO_PROJECT_PROTOCOL_VERSION
   );
 }

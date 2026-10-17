@@ -496,3 +496,7 @@ export * from './memory-provider';
 export * from './message-author';
 
 export * from './magpie-import';
+
+export * from './workspace-project';
+
+export * from './project-path';

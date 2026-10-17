@@ -1,9 +1,11 @@
+import {
+  normalizeWorkspaceProject,
+  type WorkspaceProject,
+  type ProjectId,
+} from './workspace-project';
 import { normalizeAgentRole, type AgentRole } from './agent-role';
 import type { AgentRoleId, McpServerId, WorkspaceId } from './ids';
-import {
-  isWorkspaceMcpServerMeta,
-  type WorkspaceMcpServerMeta,
-} from './workspace-mcp';
+import { isWorkspaceMcpServerMeta, type WorkspaceMcpServerMeta } from './workspace-mcp';
 
 export const WORKSPACE_FLOCK_DOC_STREAM_SEGMENT = 'wf';
 const WORKSPACE_FLOCK_DOC_NAME = 'workspace';
@@ -13,7 +15,11 @@ export const getWorkspaceFlockDocId = (workspaceId: WorkspaceId): string =>
 
 export type WorkspaceFlockMcpServerKey = ['mcpServer', McpServerId];
 export type WorkspaceFlockAgentRoleKey = ['agentRole', AgentRoleId];
-export type WorkspaceFlockKey = WorkspaceFlockMcpServerKey | WorkspaceFlockAgentRoleKey;
+export type WorkspaceFlockProjectKey = ['project', ProjectId];
+export type WorkspaceFlockKey =
+  | WorkspaceFlockProjectKey
+  | WorkspaceFlockMcpServerKey
+  | WorkspaceFlockAgentRoleKey;
 
 /**
  * Every family stored in the one workspace document.
@@ -24,14 +30,16 @@ export type WorkspaceFlockKey = WorkspaceFlockMcpServerKey | WorkspaceFlockAgent
  * data moved between documents and no window where a Role exists in both or
  * neither.
  */
-export const WORKSPACE_FLOCK_ROW_FAMILIES = ['mcpServer', 'agentRole'] as const;
+export const WORKSPACE_FLOCK_ROW_FAMILIES = ['mcpServer', 'agentRole', 'project'] as const;
 
 export const workspaceFlockKeys = {
+  project: (id: ProjectId): WorkspaceFlockProjectKey => ['project', id],
   mcpServer: (id: McpServerId): WorkspaceFlockMcpServerKey => ['mcpServer', id],
   agentRole: (id: AgentRoleId): WorkspaceFlockAgentRoleKey => ['agentRole', id],
 } as const;
 
 export type ParsedWorkspaceFlockKey =
+  | { kind: 'project'; key: WorkspaceFlockProjectKey; projectId: ProjectId }
   | {
       kind: 'mcpServer';
       key: WorkspaceFlockMcpServerKey;
@@ -53,6 +61,10 @@ export const parseWorkspaceFlockKey = (
   if (!id) {
     return undefined;
   }
+  if (key[0] === 'project') {
+    const projectId = id as ProjectId;
+    return { kind: 'project', key: workspaceFlockKeys.project(projectId), projectId };
+  }
   if (key[0] === 'mcpServer') {
     const mcpServerId = id as McpServerId;
     return { kind: 'mcpServer', key: workspaceFlockKeys.mcpServer(mcpServerId), mcpServerId };
@@ -72,7 +84,11 @@ export type WorkspaceFlockAgentRoleRow = {
   key: WorkspaceFlockAgentRoleKey;
   value: AgentRole;
 };
-export type WorkspaceFlockRow = WorkspaceFlockMcpServerRow | WorkspaceFlockAgentRoleRow;
+export type WorkspaceFlockProjectRow = { key: WorkspaceFlockProjectKey; value: WorkspaceProject };
+export type WorkspaceFlockRow =
+  | WorkspaceFlockProjectRow
+  | WorkspaceFlockMcpServerRow
+  | WorkspaceFlockAgentRoleRow;
 export type WorkspaceFlockRowId = string & { __brand: 'WorkspaceFlockRowId' };
 export type WorkspaceFlockRowMap = Record<WorkspaceFlockRowId, WorkspaceFlockRow>;
 
@@ -101,6 +117,10 @@ export const parseWorkspaceFlockRow = (
   const parsedKey = parseWorkspaceFlockKey(key);
   if (!parsedKey) {
     return undefined;
+  }
+  if (parsedKey.kind === 'project') {
+    const project = normalizeWorkspaceProject(value);
+    return project?.id === parsedKey.projectId ? { key: parsedKey.key, value: project } : undefined;
   }
   if (parsedKey.kind === 'mcpServer') {
     if (!isWorkspaceMcpServerMeta(value) || value.id !== parsedKey.mcpServerId) {
@@ -270,3 +290,17 @@ const readSingleRow = (
   }
   return rows;
 };
+
+export const listWorkspaceProjects = (rows: WorkspaceFlockRowMap): WorkspaceProject[] =>
+  Object.values(rows)
+    .filter((row): row is WorkspaceFlockProjectRow => row.key[0] === 'project')
+    .map((row) => row.value)
+    .sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id));
+export const writeWorkspaceProjectToFlock = (
+  flock: WorkspaceFlockWritableFlock,
+  project: WorkspaceProject
+): boolean => writeWorkspaceFlockRow(flock, workspaceFlockKeys.project(project.id), project);
+export const deleteWorkspaceProjectFromFlock = (
+  flock: WorkspaceFlockWritableFlock,
+  id: ProjectId
+): boolean => deleteWorkspaceFlockRow(flock, workspaceFlockKeys.project(id));
