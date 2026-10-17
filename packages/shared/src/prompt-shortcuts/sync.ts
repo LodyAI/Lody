@@ -1,12 +1,19 @@
+import { Effect, Exit, Scope } from 'effect';
 import {
-  StreamsCrdt,
-  type CrdtAdapter,
-  type JsonObject,
-  type TransportSubscription,
-} from '@loro-dev/streams-crdt';
+  makeDurableStream,
+  durableAdapterLegacy,
+  StreamsAuth,
+} from '@loro-dev/streams-crdt/effect';
+import { RepoIOError, RepoReleaseFailed } from 'loro-repo/effect';
+import type { RemoteCursor } from '@loro-dev/streams-crdt';
+import {
+  workspaceAcquisitionFailureLegacy,
+  type WorkspaceRepoLegacy,
+} from '../workspace-data/repo-legacy';
+import { type CrdtAdapter, type JsonObject } from '@loro-dev/streams-crdt';
 import { createLoroDocAdapter } from '@loro-dev/streams-crdt/loro';
 import { createFlockAdapter } from '@loro-dev/streams-crdt/flock';
-import type { LoroRepo } from 'loro-repo';
+
 import { createLoroStreamUrl, LORO_STREAMS_BUCKET_ID } from '../index';
 import { getShortcutBodyStreamId, getShortcutIndexStreamId } from './access';
 import { PromptShortcutError } from './model';
@@ -44,6 +51,14 @@ type ShortcutSyncRoom = {
   close(): Promise<void>;
 };
 
+type ShortcutRoomEntry = {
+  refs: number;
+  write: boolean;
+  opening: Promise<ShortcutSyncRoom>;
+  retiring?: boolean;
+  closing?: Promise<void>;
+};
+
 export type ShortcutSyncLease = Pick<ShortcutSyncRoom, 'sync' | 'join'> & {
   release(): Promise<void>;
 };
@@ -54,15 +69,12 @@ export type ShortcutSyncLease = Pick<ShortcutSyncRoom, 'sync' | 'join'> & {
  */
 export class PromptShortcutSync {
   private readonly lifetime = new ShortcutLifetime();
-  private rooms = new Map<
-    string,
-    { refs: number; write: boolean; opening: Promise<ShortcutSyncRoom> }
-  >();
+  private rooms = new Map<string, ShortcutRoomEntry>();
   private disposed = false;
 
   constructor(
     private readonly options: {
-      repo: LoroRepo;
+      repo: WorkspaceRepoLegacy;
       grant: (resource: ShortcutResource, write: boolean) => Promise<ShortcutStreamGrant>;
       now: () => number;
     }
@@ -75,6 +87,10 @@ export class PromptShortcutSync {
         ? getShortcutIndexStreamId(resource.domain)
         : getShortcutBodyStreamId(resource.bodyDocId);
     let entry = this.rooms.get(key);
+    if (entry?.retiring) {
+      await this.closeRoom(key, entry);
+      return this.acquire(resource, write);
+    }
     if (entry && entry.write !== write)
       throw new PromptShortcutError(
         'forbidden',
@@ -96,13 +112,12 @@ export class PromptShortcutSync {
     }
     let released = false;
     const release = async () => {
-      if (released) return;
-      released = true;
-      captured.refs--;
-      if (captured.refs === 0 && this.rooms.get(key) === captured) {
-        this.rooms.delete(key);
-        await room.close();
+      if (!released) {
+        released = true;
+        captured.refs--;
       }
+      if (captured.refs !== 0 || this.rooms.get(key) !== captured) return;
+      return this.closeRoom(key, captured);
     };
     if (this.disposed) {
       await release();
@@ -119,6 +134,20 @@ export class PromptShortcutSync {
       },
       release,
     };
+  }
+
+  private closeRoom(key: string, entry: ShortcutRoomEntry): Promise<void> {
+    if (entry.closing) return entry.closing;
+    entry.retiring = true;
+    entry.closing = entry.opening
+      .then((room) => room.close())
+      .then(() => {
+        if (this.rooms.get(key) === entry) this.rooms.delete(key);
+      })
+      .finally(() => {
+        entry.closing = undefined;
+      });
+    return entry.closing;
   }
 
   private async open(resource: ShortcutResource, write: boolean): Promise<ShortcutSyncRoom> {
@@ -141,67 +170,107 @@ export class PromptShortcutSync {
       }
       return grant.token;
     };
-    const lease =
-      resource.kind === 'body'
-        ? await this.options.repo.acquireDoc(streamId)
-        : await this.options.repo.acquireFlockDoc(streamId);
+    const owner = await this.options.repo.acquireScopeLegacy(`shortcut:${streamId}`);
+    const repo = this.options.repo;
     try {
-      const adapter: CrdtAdapter<JsonObject> =
-        'doc' in lease ? createLoroDocAdapter(lease.doc) : createFlockAdapter(lease.flock);
-      const persist = () =>
-        'doc' in lease
-          ? this.options.repo.persistDocNow(streamId, lease.doc)
-          : this.options.repo.persistFlockDocNow(streamId, lease.flock);
-      const transport = new StreamsCrdt({
-        streamUrl: createLoroStreamUrl({
-          baseUrl: gatewayBaseUrl,
-          bucketId: LORO_STREAMS_BUCKET_ID,
-          streamId,
-        }),
-        adapter: write ? adapter : readonlyShortcutAdapter(adapter),
-        auth: (context) => auth(context?.reason === 'unauthorized'),
-        createStreamIfMissing: write,
-        // In-memory cursors deliberately replay on restart. The document is durable,
-        // but a cursor must never outlive the matching local state.
-        beforeRemoteCursorSave: persist,
-      });
-      let subscription: TransportSubscription | undefined;
+      const resourceOwner = await repo.runLegacy(
+        Effect.gen(function* () {
+          const lease =
+            resource.kind === 'body'
+              ? yield* repo.native.acquireDoc(streamId)
+              : yield* repo.native.acquireFlockDoc(streamId);
+          const adapter: CrdtAdapter<JsonObject> =
+            'doc' in lease ? createLoroDocAdapter(lease.doc) : createFlockAdapter(lease.flock);
+          let cursor: RemoteCursor | null = null;
+          const transport = yield* makeDurableStream({
+            streamUrl: createLoroStreamUrl({
+              baseUrl: gatewayBaseUrl,
+              bucketId: LORO_STREAMS_BUCKET_ID,
+              streamId,
+            }),
+            adapter: durableAdapterLegacy(write ? adapter : readonlyShortcutAdapter(adapter)),
+            createStreamIfMissing: write,
+            // Data is saved first. This private cursor deliberately disappears with the room.
+            persistence: {
+              load: () => Effect.succeed(cursor),
+              checkpoint: ({ cursor: next }) =>
+                lease.persist.pipe(
+                  Effect.andThen(
+                    Effect.sync(() => {
+                      cursor = structuredClone(next);
+                    })
+                  )
+                ),
+            },
+          }).pipe(
+            Effect.provideService(StreamsAuth, {
+              getToken: (context, io) =>
+                io.fromPromise(() => auth(context.reason === 'unauthorized')),
+            })
+          );
+          return { transport, persist: lease.persist };
+        }).pipe(Effect.provideService(Scope.Scope, owner.scope))
+      );
+      const transport = resourceOwner.transport;
       let joining: Promise<void> | undefined;
       let closed = false;
+      let releaseFailed = false;
+      const release: Effect.Effect<void, RepoReleaseFailed> = Effect.suspend(() =>
+        Effect.gen(function* () {
+          const result = yield* (releaseFailed ? transport.retryRelease : transport.close).pipe(
+            Effect.exit
+          );
+          if (Exit.isFailure(result)) {
+            releaseFailed = true;
+            yield* Effect.fail(
+              new RepoReleaseFailed(`shortcut:${streamId}`, result.cause, release)
+            );
+          }
+          yield* owner.close;
+        })
+      );
       return {
         sync: async () => {
           if (closed) throw new Error('Shortcut room closed');
-          const result = await transport.sync();
-          if (!result.ok) throw new Error(result.error.message);
-          await persist();
+          await repo.runLegacy(
+            transport.connect.pipe(
+              Effect.andThen(transport.sync),
+              Effect.flatMap((result) =>
+                result.kind === 'confirmed'
+                  ? resourceOwner.persist
+                  : Effect.fail(new RepoIOError('shortcut synchronization not confirmed', result))
+              ),
+              Effect.mapError((failure) =>
+                failure instanceof RepoIOError ? failure : new RepoIOError('shortcut sync', failure)
+              ),
+              Effect.provideService(Scope.Scope, owner.scope)
+            )
+          );
         },
         join: () => {
           if (closed) return Promise.reject(new Error('Shortcut room closed'));
           if (joining) return joining;
-          joining = (async () => {
-            const result = await transport.join();
-            if (!result.ok) throw new Error(result.error.message);
-            subscription = result.value;
-            if (closed) subscription.unsubscribe();
-          })().catch((error: unknown) => {
-            joining = undefined;
-            throw error;
-          });
+          joining = repo
+            .runLegacy(
+              transport.join.pipe(Effect.asVoid, Effect.provideService(Scope.Scope, owner.scope))
+            )
+            .catch((error: unknown) => {
+              joining = undefined;
+              throw error;
+            });
           return joining;
         },
         close: async () => {
-          if (closed) return;
           closed = true;
-          subscription?.unsubscribe();
-          try {
-            await transport.close();
-          } finally {
-            await lease.release();
-          }
+          await repo.runLegacy(release);
         },
       };
     } catch (error) {
-      await lease.release();
+      try {
+        await repo.runLegacy(owner.close);
+      } catch (cleanup) {
+        throw workspaceAcquisitionFailureLegacy(error, cleanup, 'Shortcut acquisition');
+      }
       throw error;
     }
   }
@@ -209,13 +278,17 @@ export class PromptShortcutSync {
   async dispose(): Promise<void> {
     this.disposed = true;
     this.lifetime.dispose();
-    const entries = [...this.rooms.values()];
-    this.rooms.clear();
-    await Promise.all(
-      entries.map(async (entry) => {
-        const room = await entry.opening.catch(() => null);
-        await room?.close();
-      })
+    const entries = [...this.rooms];
+    const results = await Promise.allSettled(
+      entries.map(([key, entry]) => this.closeRoom(key, entry))
     );
+    const failures = results.filter(
+      (result): result is PromiseRejectedResult => result.status === 'rejected'
+    );
+    if (failures.length)
+      throw new AggregateError(
+        failures.map((result) => result.reason),
+        'Shortcut sync release failed'
+      );
   }
 }

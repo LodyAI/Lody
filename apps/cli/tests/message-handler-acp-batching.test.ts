@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import crypto from 'crypto';
-import { LoroRepo } from 'loro-repo';
+import { WorkspaceRepoLegacy } from '@lody/shared/workspace-data/repo-legacy';
 
 import type {
   AcpSessionNotification,
@@ -65,7 +65,8 @@ const jsonResponse = (body: unknown, status = 200): Response =>
 // (native libuv async), NOT via the timers vitest fakes. Awaiting them while fake
 // timers are installed leaves the resolution to real wall time, which on a loaded CI
 // runner can be starved past the 30s test timeout. So run repo setup/teardown on real
-// timers and only keep the fake clock for the batch-window assertions.
+// timers and only fake the batch timeout/Date afterward. Keep setImmediate and
+// microtasks real so native Effect fibers continue while assertions await writes.
 const destroyRepoOnRealTimers = async (repo: LoroRepo) => {
   if (vi.isFakeTimers()) {
     vi.useRealTimers();
@@ -79,7 +80,7 @@ const createHandlerHarness = async (sessionIds: SessionId[]) => {
   if (fakeTimersActive) {
     vi.useRealTimers();
   }
-  const repo = await LoroRepo.create({});
+  const repo = await WorkspaceRepoLegacy.create({});
   const docs = new Map<SessionId, SessionDocument>();
   for (const sessionId of sessionIds) {
     const doc = new SessionDocument(repo, sessionId);
@@ -87,7 +88,7 @@ const createHandlerHarness = async (sessionIds: SessionId[]) => {
     docs.set(sessionId, doc);
   }
   if (fakeTimersActive) {
-    vi.useFakeTimers();
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
   }
 
   const workspaceDocument = {
@@ -204,7 +205,7 @@ describe('MessageHandler ACP batching', () => {
   });
 
   beforeEach(() => {
-    vi.useFakeTimers();
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
     process.env.LODY_SERVER_URL = 'https://server.example.test';
     loadEnv();
   });
@@ -1153,7 +1154,7 @@ describe('MessageHandler ACP batching', () => {
         .spyOn(host, 'persistCodeCollabTurnDiffs')
         .mockRejectedValueOnce(new Error('transient persistence failure'))
         .mockResolvedValueOnce(true);
-      vi.useFakeTimers();
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
 
       host.enqueueACPUpdate(sessionId, {
         sessionId,

@@ -5,6 +5,8 @@ Translation: current
 
 [English](2026-10-12-effect-workspace-presence.md)
 
+> 后续变更：[由 daemon 执行 MCP 工作区命令](2026-10-16-daemon-hosted-mcp-workspace-commands.zh.md) 允许应用注册表替换释放失败的已停止 owner；同一 owner 内替换远端 generation 仍被禁止。
+
 ## 摘要
 
 旧 workspace 编排会在远程 I/O 尚未结束时丢弃句柄，bootstrap 读者也可能在超时后继续登记。现在 heartbeat 和远程代次由原生子 Scope 持有，释放失败保留完整 Cause 和拥有者，直到实际清理完成。产品 doc/bridge 从 CLI 应用 registry 获取 workspace，durable 与 ephemeral 请求借用同一个原生 token provider。正式 SDK 负责传输所有权；session-active 租约和本地 relay 节奏仍属于独立的 P6/P7 工作。

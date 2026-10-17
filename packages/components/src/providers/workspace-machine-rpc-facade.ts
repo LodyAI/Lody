@@ -1,6 +1,8 @@
 import {
   MemoryProviderResponseSchema,
+  machineSupportsBugReportClientLog,
   machineSupportsMemoryProviders,
+  type BugReportClientLog,
   type MemoryProviderRequest,
   type MemoryProviderResponse,
 } from '@lody/shared';
@@ -1422,14 +1424,28 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
 
   const requestMachineBugReport = async (
     machineId: MachineId,
-    args: { description: string; reporterUserId: string; requestToken: string },
+    args: {
+      description: string;
+      reporterUserId: string;
+      requestToken: string;
+      clientLog?: BugReportClientLog;
+    },
     options?: { timeoutMs?: number }
   ): Promise<MachineBugReportResponse | null> => {
     try {
+      const { clientLog, ...report } = args;
+      // The request schema is strict: an older daemon rejects the whole report
+      // when the field is present, so the client log goes only where it is understood.
+      const sendClientLog =
+        clientLog !== undefined &&
+        machineSupportsBugReportClientLog({
+          protocolCapabilities: await deps.getMachineProtocolCapabilities(machineId),
+        });
       return await (
         await getMachineRpcClient(machineId)
       ).requestMachineBugReport({
-        ...args,
+        ...report,
+        ...(sendClientLog ? { clientLog } : {}),
         timeoutMs: options?.timeoutMs ?? 120_000,
       });
     } catch (error) {

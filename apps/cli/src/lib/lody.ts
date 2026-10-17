@@ -17,6 +17,8 @@ import {
 import { getLoginShellEnvLegacy } from '@/agent/login-shell-env';
 import { SessionManager } from '@/session/session-manager';
 import { installRoostNodeSessionBackend } from '@/session/roost-node-session';
+import { routeRemoteOwnedSessionHistory } from '@/session/session-backend';
+import { createCommandSessionHistoryFactory } from '@/lib/command-runtime';
 import pkg from '@/pkg';
 import { formatErrorMessage } from '@/utils/format-error';
 import type { LocalWorkspaceCatalogService } from '@/lib/local-workspace-catalog';
@@ -72,7 +74,31 @@ export class Lody {
     // resolve its backend. The selector remains metadata-driven, so legacy and
     // new Loro sessions continue to use the built-in backend by default.
     installRoostNodeSessionBackend();
-    const manager = await traceAsync(
+    let manager: LoroDocumentManager | undefined;
+    // Commands the daemon executes may touch Sessions owned by other machines; their
+    // Roost history lives with that owner, never in this machine's database.
+    const ownerHistoryRouter =
+      options.cloudPort.kind === 'local'
+        ? undefined
+        : routeRemoteOwnedSessionHistory(
+            options.machineId,
+            createCommandSessionHistoryFactory(
+              () => {
+                if (!manager) throw new Error('Workspace document manager is unavailable');
+                return manager;
+              },
+              {
+                token: options.token,
+                userId: options.userId,
+                userName: options.userId,
+                userEmail: '',
+                machineId: options.machineId,
+                machineName: options.machineName,
+              },
+              options.workspaceId
+            )
+          );
+    manager = await traceAsync(
       options.logger,
       'startup.loro_document_manager',
       { workspaceId: options.workspaceId },
@@ -83,6 +109,7 @@ export class Lody {
           documentCursorScope: 'shared-durable',
           streamsTokens: options.cloudPort.streamsTokens,
           cloudBilling: options.cloudPort.billing,
+          ownerHistoryRouter,
         })
     );
     return new Lody(options, manager);

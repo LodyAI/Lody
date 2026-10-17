@@ -8,8 +8,8 @@ import {
   resolveNewSessionHistoryBackend,
   type MachineMeta,
   getSessionIdFromRoomId,
+  SESSION_DOC_PREFIX,
   isLoroRepoDocDeleted,
-  isSessionDocRoomId,
   isTimeSynced,
   syncTime,
   type LocalSessionControlRequest,
@@ -56,7 +56,7 @@ import {
 } from '@/lib/cloud-cli-port';
 import { getCliPlatformKind } from '@/lib/cli-platform';
 import type { CloudSessionSharingPort } from '@lody/platform';
-import { getSessionCommandEnvironment } from './session-command-environment';
+import { getDaemonWorkspace, getSessionCommandEnvironment } from './session-command-environment';
 import { makeWorkspaceCommandManagers } from './workspace-command-manager';
 
 export function getCommandSessionSharingPort(): CloudSessionSharingPort | null {
@@ -355,6 +355,17 @@ export async function withWorkspaceManager<T>(
       throw new Error('Session command workspace mismatch');
     return fn(environment.manager);
   }
+  const daemon = getDaemonWorkspace();
+  if (daemon) {
+    // A daemon-executed command never opens a second replica of its own workspace,
+    // and never writes into it under a different identity.
+    if (workspace.id !== daemon.workspaceId) throw new Error('Daemon command workspace mismatch');
+    if (auth.userId !== daemon.userId || auth.machineId !== daemon.machineId)
+      throw new Error(
+        'The CLI login no longer matches the running Lody daemon; restart the daemon to use the new login.'
+      );
+    return fn(daemon.manager);
+  }
   // One-shot commands write directly into the workspace repo and rely on
   // Loro Streams to reach the cloud (and the daemon); without the remote
   // transport the write would silently strand in the local SQLite store.
@@ -480,13 +491,24 @@ export async function listAliveDocMetas<Meta>(
  * must not be trusted for discovery or identity.
  */
 export async function listAliveSessionMetas(
-  manager: LoroDocumentManager
+  manager: Pick<LoroDocumentManager, 'repo'>
 ): Promise<Array<{ roomId: string; meta: SessionMeta }>> {
-  const rows = await listAliveDocMetas<SessionMeta>(manager, isSessionDocRoomId);
-  return rows.flatMap(({ roomId, meta }) => {
-    const id = getSessionIdFromRoomId(roomId);
-    return id === null ? [] : [{ roomId, meta: { ...meta, id } }];
-  });
+  const rows = await manager.repo.runLegacy(
+    manager.repo.native.listDoc({ prefix: SESSION_DOC_PREFIX })
+  );
+  return rows
+    .flatMap((row) => {
+      const id = getSessionIdFromRoomId(row.docId);
+      return row.deleted || id === null
+        ? []
+        : [{ roomId: row.docId, meta: { ...row.meta, id } as SessionMeta }];
+    })
+    .sort((left, right) => {
+      const activity = (row: SessionMeta) => row.lastMessageAt ?? (Date.parse(row.createdAt) || 0);
+      return (
+        activity(right.meta) - activity(left.meta) || right.meta.id.localeCompare(left.meta.id)
+      );
+    });
 }
 
 function readLocalControlTimeoutMs(env: NodeJS.ProcessEnv = process.env): number {

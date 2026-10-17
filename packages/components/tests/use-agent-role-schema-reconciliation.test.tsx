@@ -6,6 +6,7 @@ import { Flock } from '@loro-dev/flock-wasm';
 import {
   ACP_CAPABILITY_CACHE_VERSION,
   AGENT_ROLE_VERSION,
+  serializeAgentRoleRow,
   workspaceFlockKeys,
   type AgentRole,
 } from '@lody/shared';
@@ -151,4 +152,100 @@ describe('role maintenance at workspace startup', () => {
       } else expect(flock.get(key)).toEqual(role);
     }
   );
+
+  it('reconciles one machine of a multi-machine role and keeps the v2 row', async () => {
+    const flock = new Flock('startup-multi-role');
+    const retired = { configOptionValues: { collaboration_mode: 'plan' } };
+    const role: AgentRole = {
+      v: AGENT_ROLE_VERSION,
+      id: 'role' as never,
+      machineId: 'offline-machine' as never,
+      agentConfigId: 'config-a' as never,
+      additionalTargets: [
+        { machineId: 'machine' as never, agentConfigId: 'config' as never, runConfig: retired },
+      ],
+      ownerUserId: 'owner',
+      visibility: 'private',
+      name: 'Reviewer',
+      runConfig: retired,
+      revision: 1,
+      createdAt: 1,
+      updatedAt: 1,
+    };
+    const key = workspaceFlockKeys.agentRole(role.id);
+    flock.set(key, serializeAgentRoleRow(role) as never);
+    flock.commit();
+    const repo = { openFlockDoc: async () => ({ flock, syncOnce: async () => {} }) };
+    const probed: string[] = [];
+    const runtime = {
+      workspaceId: 'workspace',
+      repo,
+      writer: createDirectWorkspaceWriter({ repo } as never),
+      requestMachineAcpCapabilitiesRefresh: async (request: { machineId: string }) => {
+        probed.push(request.machineId);
+        return {
+          success: true,
+          machineId: 'machine',
+          configId: 'config',
+          cliType: 'builtin',
+          agentType: 'codex',
+          capability: {
+            cliType: 'builtin',
+            agentType: 'codex',
+            provenance: 'runtime',
+            cacheVersion: ACP_CAPABILITY_CACHE_VERSION,
+            fetchedAt: 2,
+            modes: [],
+            models: [],
+            configOptions: [
+              { id: 'plan_mode', name: 'Plan', type: 'boolean', currentValue: false },
+            ],
+          },
+        };
+      },
+    };
+    state.roles = [role];
+    state.synced = true;
+    state.machines = new Map([
+      ['machine', { id: 'machine' }],
+      ['offline-machine', { id: 'offline-machine' }],
+    ]);
+    state.atoms = new Map<string, unknown>([
+      ['runtime', runtime],
+      ['user', { id: 'owner' }],
+      ['online', new Set(['machine'])],
+      [
+        'configs',
+        [
+          { id: 'config', machineId: 'machine', cliType: 'builtin', agentType: 'codex' },
+          { id: 'config-a', machineId: 'offline-machine', cliType: 'builtin', agentType: 'codex' },
+        ],
+      ],
+    ]);
+    const root = createRoot(document.createElement('div'));
+    roots.push(root);
+    await act(async () => root.render(<Startup />));
+    await act(async () => {});
+
+    expect(probed).toEqual(['machine']);
+    expect(flock.get(key)).toEqual({
+      v: 2,
+      id: 'role',
+      ownerUserId: 'owner',
+      visibility: 'private',
+      name: 'Reviewer',
+      revision: 2,
+      createdAt: 1,
+      updatedAt: expect.any(Number),
+      targets: [
+        // The offline machine's agent was not probed, so nothing proves it retired.
+        { machineId: 'offline-machine', agentConfigId: 'config-a', runConfig: retired },
+        {
+          machineId: 'machine',
+          agentConfigId: 'config',
+          runConfig: { configOptionValues: { plan_mode: true } },
+        },
+      ],
+    });
+  });
 });

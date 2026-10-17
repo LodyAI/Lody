@@ -702,8 +702,9 @@ export const sessionHistorySchema = schema.LoroMap({
   userId: schema.String({ required: false }),
   author: schema.Any({ required: false }),
   modelInfo: schema.Any({ required: false }),
-  // Assistant turns: tokens this turn consumed, summed from adapter usage deltas.
-  // A primitive JSON value (`SessionTurnTokenUsage`), replaced whole on each write.
+  // Assistant turns: tokens and optional estimated cost this turn consumed,
+  // summed from adapter usage deltas. A primitive JSON value
+  // (`SessionTurnTokenUsage`), replaced whole on each write.
   tokenUsage: schema.Any({ required: false }),
   // FileDiff 此次对话有哪些文件变更，和具体变更行数
   fileDiff: schema.Any(),

@@ -93,6 +93,10 @@ and [display preference](../../../../.agents/notes/implemented/feature/2026-09-2
   keeps an accessible name and a hover tooltip. The page and its editors stay
   mounted through resizing; header actions wrap within the pane. [Decision and
   verification](../../../../.agents/notes/implemented/bug-fix/2026-10-01-narrow-settings-panel.md).
+- Machine settings' connected Agent badges in
+  [`settings/my-machine-connected-resources.tsx`](settings/my-machine-connected-resources.tsx)
+  use the shared `AgentIcon`, including provider-brand inference and custom/unknown
+  Agent fallbacks, in the Badge's leading icon slot.
 - GitHub personal identity authorization stays available in cloud-capable native
   clients: Authorize opens the current workspace's `/settings/github` on
   `VITE_SITE_URL` (default `https://lody.ai`) in the external browser. Complete

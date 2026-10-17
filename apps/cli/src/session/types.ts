@@ -13,6 +13,7 @@ import {
   type SessionTurnInputConfig,
 } from '@lody/shared';
 import type { SessionActivePresencePhase } from '@/lib/loro/session-active-presence';
+import type { SessionStartStage } from './session-start-stage';
 /**
  * 会话配置
  */
@@ -81,6 +82,9 @@ export interface SessionConfig {
 
   /** Reports active-presence phase to the owner; does not write presence directly. */
   onPresencePhase?: (phase: SessionActivePresencePhase, detail?: string) => void;
+
+  /** Reports each start step as it begins, so a failure can name where it stopped. */
+  onStartStage?: (stage: SessionStartStage) => void;
 
   /** Parent session ID for child tab sessions. When set, reuse the parent's workspace directory. */
   parentSessionId?: SessionId;

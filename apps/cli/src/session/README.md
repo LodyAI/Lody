@@ -31,12 +31,16 @@ CLI/MCP orchestration contract is specs/session-orchestration.md.
   application data, independent of login credentials and the system credential store.
 - `roost-history-generation.ts` — stages structural replacements privately and
   atomically activates them, fencing writes through superseded handles.
+- `roost-history-changes.ts` — durable semantic receipts over verified native event intervals;
+  owner-scoped checkpoints recover missed logical edits without rereading unchanged bodies.
 - `roost-history-diagnostics.ts` — correlates local Worker causes and runtime details
   with the safe error reference returned by history RPC.
 - `session-history-owner.ts` — native Effect readiness barrier for history RPC; waits
   for this session's owner/backend metadata and releases its observer on every exit.
-- `roost-rpc-session.ts` — one-shot Cloud CLI history services backed by owner RPC;
-  `lib/command-runtime.ts` supplies the same composition for sessions, export and MCP.
+- `roost-rpc-session.ts` — Cloud CLI history services backed by owner RPC;
+  `lib/command-runtime.ts` supplies the same composition for standalone commands and,
+  through `routeRemoteOwnedSessionHistory`, for Sessions the cloud daemon touches on
+  other machines.
 - `turn-history-gate.ts` — ordering barrier for RPC fast-path turns. Created in
   message-handler's `beginConversationTurn`, stored/disposed via `SessionTransientStore` turn
   state; it creates the assistant entry when it opens.
@@ -54,6 +58,8 @@ CLI/MCP orchestration contract is specs/session-orchestration.md.
   session and process lifecycle, workdirs, worktrees, sandboxed spawning, ACP terminals.
   Managed GitHub credential preparation excludes local projects and their worktrees;
   each managed runtime owns a scoped credential lease, retained across adoption.
+- `session-start-stage.ts` — start step names and the user-visible failure text
+  ([start failures](#start-failures)).
 - `session-fork-service.ts` / `session-fork-operation-store.ts` — the fork saga and its
   machine-local marker store.
 - `session-edit-and-resend-service.ts` — same-session replacement of the last normal User turn.
@@ -315,6 +321,40 @@ changes update the host Session environment without restarting ACP or its sandbo
 Existing ACP children retain their launch environment; live
 identity propagation into adapter-owned Git commands remains unresolved.
 
+### Start failures
+
+`SessionManager.createSession` reports each start step through `onStartStage` as it
+begins: credentials, working directory, worktree, worktree setup script (reported only when a
+script actually starts), agent sandbox, Git identity, agent runtime, then agent start. The execution service keeps the last step on the turn and clears it once a Session
+is bound. A failure is recorded as `<step> failed: <message>`, using
+`session-start-stage.ts`, so the user sees where start-up stopped. Authentication failures
+keep their own message. The error itself is never wrapped: the restore and create paths
+classify it by identity to choose sign-in, the history-replay fallback or a generic failure.
+When a start fails, cleanup terminates the partial Session and releases its credentials.
+Each cleanup failure is logged, and the original error is rethrown. These are rules:
+never wrap the start error, and never let cleanup replace it. Failure text uses
+`formatReportedError`, which names the type and cause of an error whose message is empty,
+which a `Data.TaggedError` without a message getter produces. Only Error and string causes
+are described. Classifiers keep using `formatErrorMessage`, whose output does not change.
+See the
+[decision](../../../../.agents/notes/implemented/bug-fix/2026-10-16-session-start-failure-attribution.md).
+
+`startWithTransientRetry` in the execution service starts again after a temporary OS
+failure (`EAGAIN`, `EMFILE`, `ENFILE` or `ENOMEM` anywhere in the cause chain), up to three
+attempts with 1- and 3-second delays from `SESSION_START_RETRY_DELAYS_MS`, each jittered
+over its upper half. Before each delay it publishes `Retrying after a temporary system error`
+as presence detail, and after the delay it checks for Stop. Each attempt is a fresh
+`createSession`. A failed attempt whose cleanup could not terminate its agent or release its
+credentials is marked (`recordIncompleteStartCleanup`) and never retried. The whole
+service shares `SESSION_START_RETRY_BUDGET` (6 retries per minute), because a temporary OS
+failure usually hits every Session at once. `sessionStartRetryMode` decides how to repeat.
+A new Session repeats unchanged if it failed before its worktree setup script. If it got past
+the script, it repeats as a resume, which skips the script. It never repeats if it failed
+while the script was running. A restore always repeats unchanged, because its existing
+worktree already skips setup. Authentication, resume and every other error fail on the first
+attempt. See the
+[retry decision](../../../../.agents/notes/implemented/feature/2026-10-16-session-start-transient-retry.md).
+
 ### No draft preparation
 
 Every Session starts its ACP process and worktree when its first turn is dispatched.
@@ -342,6 +382,51 @@ The shared renderer uses the existing local IPC or remote history RPC bridge;
 Web/iOS clients need no Node addon. The owning machine must be available for RPC
 reads; browser-local IndexedDB replicas and offline sync are separate work.
 Runtime packaging and verification: [native runtime note](../../../../.agents/notes/proposed/architecture/2026-10-09-roost-native-runtime.md).
+
+### Incremental replica recovery
+
+`sessionHistoryIncremental` v1 is negotiated separately from existing history paging.
+Checkpoint-bearing pages opt in with `withCheckpoint`; legacy page replies remain unchanged.
+`readChanges` verifies the previous checkpoint and returns complete changed identities plus
+any affected structural suffix, or an explicit reset. The native owner's local index records
+semantic change receipts after verifying the corresponding raw event interval. Receipts
+contain no history body, signing material or executable command, and emit no outgoing event.
+A crash or foreign mutation that leaves an uncovered interval requires reset. A checkpoint
+cannot claim acceptance or execution, and must not be copied between unrelated owner views.
+
+Normal repairs request affected bodies with the change interval in one reply, bounded at
+500 changed/suffix bodies. Larger repairs use checkpoint-protected ranges. The renderer
+atomically commits bodies, positions, revision and checkpoint. Coherent replies may advance
+behind newer control hints and immediately catch up again, so streaming does not need to
+stop for a stable observation. Body-only edits retain cached directory cursor validity.
+A successful delta repair finishes even for a partial tail cache, without rereading
+the unchanged latest page.
+The previous coherent projection remains readable on failure. Supersession retries immediately; storage and transport
+failures retain recovery backoff. Initial population, legacy targets and unknown coverage
+retain staged rebuilding. Local control reads have a separate bounded pool from writes;
+remote RPC reserves write/control pools and rejects excess ordinary work without blocking
+send intake. Detailed decision and verification:
+[Roost incremental recovery](../../../../.agents/notes/implemented/bug-fix/2026-10-16-roost-incremental-history.md).
+
+An explicit checkpoint reset forces replacement in the other cache slot even when
+its control revision is equal or consecutive. Last-change hints cannot repair unknown
+coverage. Replacement pages share one checkpoint, and the old snapshot remains readable
+until every replacement page is durable; failed staging retains that recovery mode.
+
+Cold readers observe backend metadata before composition; provisional absence remains
+pending until explicit identity or the session's selected metadata source restores.
+An empty history list is not legacy evidence. Owner capabilities remain live.
+Restoration is a finite identity barrier; a still-missing owner or a known Roost
+cursor waits for metadata changes rather than selecting legacy history.
+Independently negotiated `sessionHistoryWatch` v1 observes the committed checkpoint
+through local `watchChanges` or encrypted remote `session/history-watch`. Publication
+wakes the wait immediately; a 15-second deadline bounds idle waits without occupying
+the native Worker or writer queue. Actual body reads acquire bounded read capacity after
+waking, and idle replies transfer no history bodies. Active readers therefore recover
+without relying only on control-cursor hints. Each bridge owns one refresh; release and
+hidden/offline remote views stop new observations. Local IPC remains usable offline.
+[Peer-reader readiness and observation](../../../../.agents/notes/implemented/bug-fix/2026-10-16-roost-peer-reader-readiness.md)
+records the lifecycle, protocol limits and verification.
 
 ### Immutable input acceptance
 
@@ -453,6 +538,19 @@ Content changes refresh only affected primary bodies. Sealed-turn corrections
 use mutable SDK state records anchored to their primary; permission responses
 remain independent SDK records projected onto the matching tool. Responding does
 not seal the assistant or interrupt its output.
+Existing eligible unsealed primary/state records use guarded native field/text edits,
+with compact publication digests in `lody_agent_operation_receipts_v1`, committed in
+the same `writeBatch`. This owner-local journal has no command/body/baseline snapshots;
+lookup retains previous SDK receipts and generation ancestors. Creation, stitched or
+sealed targets, permissions, immutable human input and branch contracts retain their
+SDK path. A failed native write never falls through to a second write path.
+Native inserted items/fields use the same JSON encoding as SDK content: absent object
+fields are omitted and absent array values become `null`. Normalize only changed
+subtrees; unchanged message bodies are not serialized for each delta. The semantic
+change receipt starts at the command's initial cursor, even when its bounded ACP
+batches advance the native write guard between chunks.
+The [write-amplification repair](../../../../.agents/notes/implemented/bug-fix/2026-10-16-roost-storage-write-amplification.md)
+records storage budgets and the unchanged existing-data/outbox retention limits.
 Ordinary Edit & Resend reuses the sealed prefix through the SDK's branch activation
 inside the same stream/view. The Lody session id and owner saga do not change.
 An application-owned signed epoch commits in that native transaction and fences
@@ -477,7 +575,9 @@ it never retries an indeterminate history action.
 External cursor refreshes share the local write queue so an earlier branch read
 cannot overwrite a later mutation's projection; disposal rejects pending reads.
 Cloud one-shot managers inject owner RPC services and never open a caller-local
-Roost database. Open-ended directory reads clip to the owner count and use at most
+Roost database. The cloud daemon routes per Session: another machine's Sessions use
+owner RPC, its own (or not-yet-known owners) use the installed local owner, and the
+routing leaves its execution documents' auto-read policy unchanged. Open-ended directory reads clip to the owner count and use at most
 500 rows per RPC, restarting when the durable revision moves. Fork and Edit & Resend
 retain their owner sagas; process-local snapshot/rollback handles do not cross RPC.
 The production SQLite regressions live in
@@ -546,3 +646,7 @@ The Session sandbox persists incomplete identity before spawn and continuously a
 ACP/terminal process roots. Execution retains every attached Session owner until release,
 including replacements within one turn. Restart probes require explicit completeness and
 absence of every root/group; an initial snapshot alone is insufficient.
+A child error with no PID proves that spawn created no process: it still rejects
+the command, but does not make resource identity permanently incomplete. This
+exception matches the actual child error; journal, setup and cleanup failures
+remain uncertain, as do other acquisitions already marked uncertain.

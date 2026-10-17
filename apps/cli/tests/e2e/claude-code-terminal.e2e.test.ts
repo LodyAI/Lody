@@ -11,7 +11,7 @@ import os from 'os';
 import path from 'path';
 import * as fs from 'fs';
 import { v4 as uuidv4 } from 'uuid';
-import { LoroRepo } from 'loro-repo';
+import { WorkspaceRepoLegacy } from '@lody/shared/workspace-data/repo-legacy';
 
 import type { Logger } from '../../src/utils/logger';
 import type { MessageContent, SessionHistoryInput, SessionId, ToolCallContent } from '@lody/shared';
@@ -262,7 +262,7 @@ e2eDescribe('claude code terminal output e2e', () => {
 
     setActiveSessionId(acpSessionId);
 
-    const repo = await LoroRepo.create({});
+    const repo = await WorkspaceRepoLegacy.create({});
     const sessionId = uuidv4() as SessionId;
     const doc = new SessionDocument(repo, sessionId);
     await doc.initOffline();

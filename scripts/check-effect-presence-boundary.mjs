@@ -12,6 +12,9 @@ const files = [
   'apps/cli/src/lib/loro/presence-replica.ts',
   'apps/cli/src/lib/loro/session-active-presence.ts',
 ];
+const workspaceFiles = ['ownership', 'transport', 'streams', 'local-transport'].map(
+  (name) => `packages/shared/src/workspace-data/${name}.ts`
+);
 const forbidden = new Set([
   'Promise',
   'AbortController',
@@ -35,7 +38,8 @@ const launches = new Set([
   'squash',
 ]);
 let failures = 0;
-for (const file of files) {
+for (const file of [...files, ...workspaceFiles]) {
+  const workspace = workspaceFiles.includes(file);
   const text = await readFile(path.join(root, file), 'utf8');
   const source = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true);
   const fail = (node, message) => {
@@ -44,22 +48,23 @@ for (const file of files) {
     failures++;
   };
   const visit = (node) => {
-    if (ts.isIdentifier(node) && forbidden.has(node.text))
+    if (!workspace && ts.isIdentifier(node) && forbidden.has(node.text))
       fail(node, `native presence references ${node.text}`);
     if (ts.isImportDeclaration(node) && ts.isStringLiteral(node.moduleSpecifier)) {
       const specifier = node.moduleSpecifier.text;
       if (
         specifier.includes('legacy') ||
-        specifier === './presence' ||
-        specifier.startsWith('node:') ||
-        specifier.startsWith('@loro-dev/streams')
+        (!workspace &&
+          (specifier === './presence' ||
+            specifier.startsWith('node:') ||
+            specifier.startsWith('@loro-dev/streams')))
       )
         fail(node, 'native presence imports an execution or concrete I/O boundary');
       const bindings = node.importClause?.namedBindings;
       if (bindings && ts.isNamedImports(bindings))
         for (const binding of bindings.elements) {
           const original = (binding.propertyName ?? binding.name).text;
-          if (launches.has(original) || forbidden.has(original))
+          if (launches.has(original) || (!workspace && forbidden.has(original)))
             fail(binding, `native presence imports ${original}`);
         }
     }
@@ -84,4 +89,4 @@ for (const file of files) {
   visit(source);
 }
 if (failures) process.exitCode = 1;
-else console.log('Native workspace presence boundary passed');
+else console.log('Native workspace Repo and presence boundaries passed');

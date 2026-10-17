@@ -49,6 +49,7 @@ claim key、就绪状态还是兼容性不同，调查只能猜测是哪个设�
   包装中重复。需要完整 `Cause` 的调用方仍可从错误对象上拿到。
 - **回收时重试或忽略释放超时。** 推迟。这会改变“释放失败会阻止同一 Session 被替换”的保证
   （[回收重试](2026-10-15-unreleased-session-resources-retry.zh.md)），需要单独决定。
+  后续变更：锁释放超时不再让持有者失败，见[持有者释放](../architecture/2026-10-16-file-lock-holder-release.zh.md)。
 
 ## 取舍与限制
 

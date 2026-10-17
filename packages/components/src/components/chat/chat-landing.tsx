@@ -1,5 +1,5 @@
 import { useProviderQuotaRefresh } from '@/hooks/use-provider-quota-refresh';
-import { snapshotAgentRole } from '@lody/shared';
+import { bindAgentRoleTarget, snapshotAgentRole } from '@lody/shared';
 import { buildDraftUserHistoryEntry } from '@/lib/session-attachment-draft';
 import { sessionHasUnreadMessages } from '@/lib/session-read-receipt';
 import {
@@ -1630,10 +1630,12 @@ function WorkspaceChatLanding({
   const activeAgentRolePreference = useMemo(() => {
     if (!agentRolePreference || !selectedAgent) return null;
     const role = workspaceAgentRoles.find((entry) => entry.id === agentRolePreference.roleId);
-    if (!role) return null;
-    const bound =
-      role.agentConfigId === selectedAgent.agentId && role.machineId === selectedAgent.machineId;
-    return bound ? { role, token: agentRolePreference.token } : null;
+    // The Role as the selected machine runs it; a Role with no target there,
+    // or a different agent there, does not apply.
+    const bound = role && bindAgentRoleTarget(role, selectedAgent.machineId);
+    return bound && bound.agentConfigId === selectedAgent.agentId
+      ? { role: bound, token: agentRolePreference.token }
+      : null;
   }, [agentRolePreference, selectedAgent, workspaceAgentRoles]);
   const selectedAgentDefaults = useMemo(() => {
     const roleRunConfig = activeAgentRolePreference?.role.runConfig;
@@ -3523,10 +3525,12 @@ function WorkspaceChatLanding({
   ]);
   const handleAgentRoleEdit = useCallback(
     (roleId: AgentRoleId) => {
-      const role = composerAgentRoleItems.find((entry) => entry.role.id === roleId)?.role;
-      if (role) setAgentRoleEditor(openAgentRoleEditorForEdit(role));
+      // The item is bound to this machine; edit the catalog row, opened on it.
+      const bound = composerAgentRoleItems.find((entry) => entry.role.id === roleId)?.role;
+      const role = workspaceAgentRoles.find((entry) => entry.id === roleId);
+      if (bound && role) setAgentRoleEditor(openAgentRoleEditorForEdit(role, bound.machineId));
     },
-    [composerAgentRoleItems]
+    [composerAgentRoleItems, workspaceAgentRoles]
   );
   /* Creating a Role from the composer means "use this now", so the new Role is
      selected as soon as the composer can offer it. Deferred rather than

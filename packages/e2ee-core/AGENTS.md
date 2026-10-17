@@ -73,5 +73,7 @@ whitepaper, Specs, decisions and this package's docs. Contract:
   network I/O.
 - Tests use fixed synthetic vectors, real SQLite and crypto, explicit signals;
   never captured transcripts, real keychains or private designs.
+- TypeScript Worker fixtures preload `test/worker-loader.mjs` to register tsx
+  inside the worker; `--import tsx` alone does not resolve their imports on Node 22.
 
 Module rules: [ledger](src/internal/ledger/AGENTS.md), [keys](src/internal/keys/AGENTS.md).

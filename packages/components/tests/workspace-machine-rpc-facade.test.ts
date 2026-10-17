@@ -658,6 +658,72 @@ describe('createWorkspaceMachineRpcFacade', () => {
   });
 });
 
+describe('machine bug report client log', () => {
+  const clientLog = {
+    encoding: 'gzip-base64' as const,
+    data: 'H4sIAAAAAAAAA8vJLC4BAQAA//8DAOKaL3oEAAAA',
+    rawBytes: 4,
+    compressedBytes: 28,
+  };
+
+  /** A daemon whose strict request schema predates `clientLog` refuses it outright. */
+  const facadeFor = (protocolCapabilities: Record<string, number> | undefined) => {
+    const received: Array<Record<string, unknown>> = [];
+    const facade = createWorkspaceMachineRpcFacade({
+      workspaceId,
+      getMachineProtocolCapabilities: async () => protocolCapabilities,
+      targetRouter: {
+        getPlaneForMachine: () => 'cloud',
+        resolvePlaneForMachine: async () => 'cloud',
+      },
+      getMachineRpcClient: async () =>
+        ({
+          requestMachineBugReport: async (params: Record<string, unknown>) => {
+            received.push(params);
+            if ('clientLog' in params && !protocolCapabilities?.bugReportClientLog) {
+              throw new Error('invalid_params: unrecognized key "clientLog"');
+            }
+            return {
+              type: 'machine/bug-report_response',
+              machineId: remoteMachineId,
+              success: true,
+              bugReportId: 'bug-1',
+            };
+          },
+        }) as never,
+    });
+    return { facade, received };
+  };
+  const report = {
+    description: 'diff sheet reloads the app',
+    reporterUserId: 'owner',
+    requestToken: 'proof',
+    clientLog,
+  };
+
+  it('sends the client log to a daemon that advertises it', async () => {
+    const { facade, received } = facadeFor(CURRENT_MACHINE_PROTOCOL_CAPABILITIES);
+
+    await expect(facade.requestMachineBugReport(remoteMachineId, report)).resolves.toMatchObject({
+      success: true,
+    });
+    expect(received[0]?.clientLog).toEqual(clientLog);
+  });
+
+  it.each([undefined, {}, { bugReportClientLog: 0 }])(
+    'still files the report, without the client log, on an older daemon (%j)',
+    async (protocolCapabilities) => {
+      const { facade, received } = facadeFor(protocolCapabilities);
+
+      await expect(facade.requestMachineBugReport(remoteMachineId, report)).resolves.toMatchObject({
+        success: true,
+        bugReportId: 'bug-1',
+      });
+      expect(received[0]).not.toHaveProperty('clientLog');
+    }
+  );
+});
+
 describe('local MCP discovery routing', () => {
   const server = {
     id: 'test' as McpServerId,

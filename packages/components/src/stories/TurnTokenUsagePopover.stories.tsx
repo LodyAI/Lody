@@ -1,6 +1,7 @@
 /**
  * The turn details popover (ⓘ in a finished assistant turn's footer) with the
- * per-turn token section: compact product-language units, exact values on hover.
+ * per-turn token section, including the cost-estimate row: compact
+ * product-language units, exact values on hover.
  */
 import type { Meta, StoryObj } from '@storybook/react';
 import type { SessionHistoryParsed, SessionId } from '@lody/shared';
@@ -38,6 +39,7 @@ const finishedTurn: SessionHistoryParsed = {
     cacheReadInputTokens: 1_482_310,
     cacheCreationInputTokens: 36_904,
     reasoningOutputTokens: 2_112,
+    costUSD: 0.0182,
   },
   items: [{ type: 'text', text: '已修复 resume 后的重复计数，并补上了回归测试。' }],
 };

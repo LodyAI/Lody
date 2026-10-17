@@ -671,6 +671,64 @@ describe('SessionManager worktree setup', () => {
     rmSync(tempHome, { recursive: true, force: true });
   });
 
+  it('reports the setup step only once a script starts, and names the sandbox after it', async () => {
+    const sourceDir = createLocalRepo(tempHome);
+    const temporary = Object.assign(new Error('spawn EAGAIN'), { code: 'EAGAIN' });
+    const manager = new SessionManager(
+      createLogger(),
+      'token',
+      'machine-1' as MachineId,
+      'workspace-1' as WorkspaceId,
+      createWorkspaceDocument(new Map<SessionId, FakeSessionDoc>()),
+      {
+        sessionSandboxFactory: async () => {
+          throw temporary;
+        },
+        cloudPort: createTestCloudPort(),
+      }
+    );
+    const start = (sessionId: string) => {
+      const stages: string[] = [];
+      const config = createSessionConfig({
+        sessionId: sessionId as SessionId,
+        branch: 'main',
+        workdir: sourceDir,
+        project: {
+          kind: 'local',
+          localProjectId: 'local-project-1' as LocalProjectId,
+          branch: 'main',
+          useWorktree: true,
+        },
+      });
+      config.onStartStage = (stage) => stages.push(stage);
+      return { stages, run: () => createSessionInner(manager, config) };
+    };
+
+    // No script ran, so a failure after the worktree is not blamed on setup.
+    const withoutScript = start('setup-stage-none');
+    await expect(withoutScript.run()).rejects.toBe(temporary);
+    expect(withoutScript.stages).toEqual(['workdir', 'worktree', 'sandbox']);
+
+    const scriptFailure = new Error('setup script failed');
+    vi.mocked(runWorktreeSetup).mockImplementationOnce(async (options) => {
+      // The fixture doc has no history port; only the reported step matters here.
+      await Promise.resolve(
+        options.events?.onStart?.({
+          phase: 'setup',
+          shell: 'bash',
+          displayCommand: 'pnpm install',
+          command: 'bash',
+          args: [],
+          workdir: options.workdir,
+        })
+      ).catch(() => undefined);
+      throw scriptFailure;
+    });
+    const withScript = start('setup-stage-script');
+    await expect(withScript.run()).rejects.toBe(scriptFailure);
+    expect(withScript.stages).toEqual(['workdir', 'worktree', 'worktree-setup']);
+  });
+
   it('does not rerun setup or switch branches when restoring an existing local worktree', async () => {
     const sourceDir = createLocalRepo(tempHome);
     const sessionId = 'setup-resume-session' as SessionId;

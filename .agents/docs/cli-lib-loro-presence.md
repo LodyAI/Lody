@@ -140,13 +140,15 @@ written only at status transitions.
 
 The CLI root supplies one `WorkspacePresenceOwners` registry alongside its shell
 cache. `doc.ts` acquires a child workspace through the deprecated
-`presence-legacy.ts` execution facade. Overlapping cloud commands share their
-document manager through `command-runtime.ts`, so they also share that manager's
-existing presence and credential owner. Last command release awaits manager cleanup;
-failed cleanup blocks replacement only while presence remains unreleased. The
-manager exposes the native owner's release state through its Legacy facade, so
-transport, session or repo cleanup errors after release permit a fresh command.
-Direct duplicate workspace owners remain forbidden.
+`presence-legacy.ts` execution facade. MCP workspace commands run in the daemon
+and borrow its manager, so they open no presence owner of their own. Overlapping
+standalone commands share one document manager through `command-runtime.ts`; last
+release awaits its cleanup, and a failed cleanup never blocks the next command. Two
+live owners of one workspace remain forbidden. A replacement waits for the previous
+stop to settle; an owner whose release failed is retired: it keeps its retained work
+in the application root Scope, every later acquisition retries it in the background,
+and a new owner is admitted
+([decision](../notes/implemented/architecture/2026-10-16-daemon-hosted-mcp-workspace-commands.md)).
 The native owner uses child Scopes for
 heartbeat, shared bootstrap, probes and remote generations; `platform/presence.ts`
 composes the published SDK's native API. It adds no POST/SSE queue or token cache.
@@ -171,8 +173,9 @@ tokens, URLs and Cause contents never enter structured fields. Effect annotation
 continue through the existing daemon file logger's allowlist; no telemetry sink is added.
 
 `streams-crdt@0.17.0` with its `streams-client@0.10.0` dependency aborts owned I/O
-and retains raw work that ignores abort. Failed close forbids replacement; explicit
-`retryCleanup` joins original work and calls the SDK recovery entry after settlement.
+and retains raw work that ignores abort. Failed close forbids replacing that owner's
+remote generation; explicit `retryCleanup` joins original work and calls the SDK
+recovery entry after settlement.
 The workspace applies the same rule to token Scope failures. Concurrent close callers
 share the completion receipt, and full Causes survive the Legacy boundary.
 The SDK's retirement cancellation fix is recorded in

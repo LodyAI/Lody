@@ -18,7 +18,10 @@ import os from 'node:os';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { describe, expect, it, vi } from 'vitest';
-import { LoroRepo, RepoSyncError, RepoTransportError } from 'loro-repo';
+import { RepoSyncError, RepoTransportError } from 'loro-repo';
+import { WorkspaceRepoLegacy as LoroRepo } from '@lody/shared/workspace-data/repo-legacy';
+import { RepoIOError } from 'loro-repo/effect';
+import { Effect } from 'effect';
 import { FlockSyncTimeoutError } from '@/lib/loro/timeout-utils';
 import { FlockSyncUnavailableError } from '@/lib/loro/flock-sync-errors';
 import {
@@ -1620,10 +1623,12 @@ describe('session command helpers', () => {
           waitUntilMetaSynced: async () => true,
           cleanSessionDoc: async () => {},
         } as unknown as Parameters<typeof runSessionOperationWithSyncedMetadata>[0];
-        const listDoc = vi.spyOn(repo, 'listDoc').mockRejectedValueOnce(new Error('query failed'));
+        const listDoc = vi
+          .spyOn(repo.native, 'listDoc')
+          .mockReturnValueOnce(Effect.fail(new RepoIOError('query failed', undefined)));
         await expect(
           runSessionOperationWithSyncedMetadata(manager, root.id, operation)
-        ).rejects.toThrow('query failed');
+        ).rejects.toMatchObject({ _tag: 'RepoIOError', operation: 'query failed' });
         expect((await repo.getDocMeta(getSessionRoomId(root.id)))?.meta).toEqual(root);
         listDoc.mockRestore();
         await repo.deleteDoc(getSessionRoomId(root.id));
@@ -2888,7 +2893,6 @@ describe('session command output boundary', () => {
             cleanUp: async () => {
               logger.info('transport detached');
             },
-            isPresenceReleased: () => true,
           }),
           async () => {
             if (fail) throw new Error('synthetic failure');

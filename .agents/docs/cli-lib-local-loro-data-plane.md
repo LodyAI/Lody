@@ -103,8 +103,11 @@ path.
   persistent socket with redial backoff and a ping watchdog, `webContents.send`
   broadcast fan-out plus a status channel, synthesizing peer `detach` for destroyed or
   navigated windows.
-- Renderer adapter: `@lody/shared` `local-loro-transport.ts` — filters inbound frames
+- Renderer client: `@lody/shared` `workspace-data/local-transport.ts` — filters inbound frames
   by workspaceId + peerId and treats every (re)join as the reconciliation point,
   up-syncing its delta from the returned `serverVersion` regardless of the in-memory
   dirty flag, so offline writes survive app restarts and dropped frames. Regression
-  suite: `packages/shared/tests/local-loro-transport-bug-repro.test.ts`.
+  suite: `packages/shared/tests/workspace-local-transport.test.ts`. The old v7
+  client is a test-only fixture in `packages/shared/test-support/local-loro-v7-client.ts`;
+  `packages/shared/tests/local-loro-transport-bug-repro.test.ts` retains host wire
+  compatibility coverage against that peer, rather than a second product client.

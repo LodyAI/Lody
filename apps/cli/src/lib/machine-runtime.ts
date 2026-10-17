@@ -241,6 +241,7 @@ export class MachineRuntime {
 
     this.messageProcessor.stop();
     this.handler?.cancelPendingPermissionRequests();
+    this.handler?.cancelPendingHistoryWatches();
     await this.messageProcessor.drainWithTimeout(5000);
 
     if (this.handler) {

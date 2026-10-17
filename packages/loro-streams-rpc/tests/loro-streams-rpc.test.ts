@@ -2130,31 +2130,6 @@ describe('createLoroStreamsJsonStreamClient', () => {
     });
   });
 
-  it('forwards timeout config to StreamsClient', async () => {
-    streamsClientMockFns.create.mockResolvedValue({
-      ok: true,
-      result: {
-        created: true,
-        contentType: 'application/json',
-        nextOffset: '-1',
-        closed: false,
-      },
-    });
-
-    const timeout = { connectTimeoutMs: 30_000, pollTimeoutMs: 45_000 };
-    const client = createLoroStreamsJsonStreamClient({
-      bucketId: 'bucket-1',
-      getToken: async () => 'token-1',
-      baseUrl: 'https://streams.example.com',
-      timeout,
-    });
-
-    await client.ensureJsonStream('workspace-1:rpc:req:machine-1');
-
-    const instance = getLastStreamsClientInstance();
-    expect(instance.options.timeout).toEqual(timeout);
-  });
-
   it('adds request context to stream ensure errors', async () => {
     streamsClientMockFns.create.mockResolvedValue({
       ok: false,

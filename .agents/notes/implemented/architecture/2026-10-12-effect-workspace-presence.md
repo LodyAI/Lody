@@ -5,6 +5,8 @@ Translation: current
 
 [中文](2026-10-12-effect-workspace-presence.zh.md)
 
+> Later change: [daemon-hosted MCP workspace commands](2026-10-16-daemon-hosted-mcp-workspace-commands.md) lets the application registry replace a stopped owner whose release failed. Replacing a remote generation inside one owner stays forbidden.
+
 ## Abstract
 
 The old workspace coordinator could discard remote handles before their I/O ended

@@ -15,7 +15,7 @@ import {
   type PDFDataRangeTransport,
   type PDFDocumentProxy,
 } from 'pdfjs-dist/legacy/build/pdf.mjs';
-import pdfWorkerUrl from 'pdfjs-dist/legacy/build/pdf.worker.min.mjs?url';
+import pdfWorkerUrl from './session-file-pdf.worker.js?worker&url';
 import 'pdfjs-dist/legacy/web/pdf_viewer.css';
 import {
   ArrowDown,
@@ -178,7 +178,10 @@ export function SessionFilePdfPreview({ bytes, url, fileActions }: SessionFilePd
       externalLinkRel: 'noopener noreferrer nofollow',
     });
     const findController = new PDFFindController({ eventBus, linkService });
-    const pdfViewer = new PDFViewer({
+    // PDF.js 6.3 implements abortSignal but omits it from its shipped options type.
+    const viewerOptions: ConstructorParameters<typeof PDFViewer>[0] & {
+      abortSignal: AbortSignal;
+    } = {
       container,
       viewer: viewerElement,
       eventBus,
@@ -186,7 +189,9 @@ export function SessionFilePdfPreview({ bytes, url, fileActions }: SessionFilePd
       findController,
       maxCanvasPixels: MAX_CANVAS_PIXELS,
       textLayerMode: 1,
-    });
+      abortSignal: abortController.signal,
+    };
+    const pdfViewer = new PDFViewer(viewerOptions);
     linkService.setViewer(pdfViewer);
     viewerRef.current = pdfViewer;
     eventBusRef.current = eventBus;
@@ -275,7 +280,6 @@ export function SessionFilePdfPreview({ bytes, url, fileActions }: SessionFilePd
 
     return () => {
       disposed = true;
-      abortController.abort();
       rangeTransport?.abort();
       eventBus.off('pagechanging', handlePageChanging);
       eventBus.off('scalechanging', handleScaleChanging);
@@ -283,7 +287,14 @@ export function SessionFilePdfPreview({ bytes, url, fileActions }: SessionFilePd
       eventBus.off('pagesinit', handlePagesInit);
       eventBus.off('updatefindmatchescount', handleFindMatchesCount);
       eventBus.off('updatefindcontrolstate', handleFindMatchesCount);
-      pdfViewer.cleanup();
+      // cleanup() only trims unfinished page renders. Clearing the document
+      // also retires its event/annotation owners before the viewer lifetime ends.
+      // Its runtime accepts null to detach; the shipped declaration omits null.
+      (
+        pdfViewer as PDFViewer & { setDocument(document: PDFDocumentProxy | null): void }
+      ).setDocument(null);
+      linkService.setDocument(null);
+      abortController.abort();
       viewerElement.replaceChildren();
       viewerRef.current = null;
       eventBusRef.current = null;

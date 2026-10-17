@@ -106,6 +106,14 @@ its consumers and deletion condition. Extend the owning behavioral suite for
 failure, interruption and release paths with explicit signals and injected clocks.
 Pure reducers, CRDT codecs and synchronous calculations remain ordinary functions.
 
+Workspace durable data now uses the released native Repo and Streams SDK.
+`packages/shared/src/workspace-data/repo-legacy.ts` is its one deprecated execution
+door for CLI managers, renderer stores, shortcut grants and snapshot migration
+readers; the same Repo owns every borrowed replica. Remove it as those consumers
+accept native Services and caller Scopes. The local v7 client and eager worker are
+native; upper Session/Turn workflows, grant acquisition, host server and RPC remain
+separate units. See [ownership and acceptance](../notes/proposed/architecture/2026-10-16-native-workspace-repo.md).
+
 When migration would pull in unfinished dependencies or substantially expand the
 task, complete the requested feature/fix and schedule that migration separately.
 Record the chosen boundary and remaining work in the owning Note when updating it;
@@ -126,11 +134,23 @@ instead of creating a new checklist document for every edit.
 | Cancellation     | Does cancellation end one wait, the producer, or raw external work? How is actual termination confirmed? |
 | Handoff          | What observable release condition allows a successor or replacement to start?                            |
 | Failure recovery | Who retains unresolved resources and the complete failure, and who can retry cleanup?                    |
+| Containment      | Which independent work remains available, who bounds recovery, and how does terminal shutdown finish?    |
 
 Map applicable answers to behavioral acceptance cases. A cancelled reader must not
-stop a shared producer needed by other readers; a cleanup timeout must not permit
-replacement while the old resource is still owned. Review/debug can use the same
-questions to assess existing evidence without editing the Note.
+stop a shared producer needed by other readers. A cleanup timeout does not prove
+release; exclude a successor only where unresolved ownership makes proceeding
+unsafe. Verify the lower owner's partial-release and safe-reuse contract instead
+of treating any cleanup failure as an acquisition fence. For one key, share
+concurrent cleanup retries; continue independent teardown. Bound recovery and its
+dependencies under a named owner; cross-dispose recovery coordinates same-Repo
+adoption or confirmed close before replacement. At quit, sign-out or workspace deletion, use a bounded final
+flush, report unconfirmed persistence and release resources. A waiter timeout alone
+does not stop a writer or permit a second Repo. If lower-owner safety cannot be
+verified, preserve base behavior by default and record the missing evidence as
+conditional in the owning Note; do not invent a fence or destructive fallback.
+Observe background rejections and keep unconfirmed gate results out of success
+caches and once sets. See [failure containment](failure-containment.md).
+Review/debug can use the same questions to assess existing evidence without editing the Note.
 
 ## Choosing a native unit and its structure
 
@@ -308,11 +328,19 @@ fixes pid and resolves the default lock directory on each operation; tests may
 inject a fixed directory.
 `fileLockLayer` supplies Node implementations at composition. One service instance
 owns local Ref/Deferred admission and unresolved releases; each operation owns its
-candidate and acquired file. Release waits have their own 5-second Clock bound;
-`LockReleaseFailed.cleanup` retains the original OS deletion for awaited retry.
-A still-pending deletion blocks replacement. Body and release run outside acquisition
-retry; `squashFileLockFailure` preserves their full Cause, file cleanup owners and
-process recovery leases at compatibility boundaries. See the [decision and preserved lock policy](../notes/implemented/architecture/2026-10-10-effect-file-lock-lifecycle.md).
+candidate and acquired file. The releasing holder waits once, within a 5-second Clock
+bound, for its lock file and scratch directory. The body's result stands: a slow or
+failed deletion stays registered with the service instead of failing the holder.
+The next local holder joins it within its own acquisition deadline, and a settled
+failure is retried before that body runs. That wait is charged once per deletion attempt:
+once one successor has waited its whole deadline, later successors fail fast until a new
+attempt starts. Disposal reports anything still
+unresolved. `LockReleaseFailed.cleanup` retains the original OS deletion for awaited
+retry. Only a replaced lock generation (`LockOwnershipLost`) fails the holder, because
+then the body did not run exclusively; that lease is not retried. Body and release run
+outside acquisition retry; `squashFileLockFailure` preserves file cleanup owners and
+process recovery leases at compatibility boundaries. See the [decision and preserved lock policy](../notes/implemented/architecture/2026-10-10-effect-file-lock-lifecycle.md)
+and the [holder release decision](../notes/implemented/architecture/2026-10-16-file-lock-holder-release.md).
 
 Catalog mutations compose the native API and require FileLocks. Existing Promise
 application entrypoints execute them through `fileLocksLegacy.runPromise`; worktree,
@@ -481,15 +509,20 @@ The guard rejects retired facade imports/exports and aliases that hide Legacy.
 
 For lifecycle changes, select the applicable behaviors from this acceptance matrix:
 
-| Mechanism         | Observable acceptance                                                                           |
-| ----------------- | ----------------------------------------------------------------------------------------------- |
-| Queue/admission   | Cancelled waiters cannot acquire later; preserve ordering and reentry policy                    |
-| Resource/body     | Failure or interruption releases acquired resources before a successor proceeds                 |
-| Shared work       | One reader's cancellation preserves other leases; the last release awaits producer cleanup      |
-| Close/replacement | Concurrent close joins one receipt; a new generation waits for confirmed old release            |
-| Deadline/retry    | Clock-driven expiry is observable; body/release failures do not become acquisition retries      |
-| Release failure   | Retain the unresolved owner and full Cause, including simultaneous body/release failure         |
-| Composition       | Real consumers use the kernel; applicable filesystem/process/protocol boundaries remain covered |
+| Mechanism         | Observable acceptance                                                                                             |
+| ----------------- | ----------------------------------------------------------------------------------------------------------------- |
+| Queue/admission   | Cancelled waiters cannot acquire later; preserve ordering and reentry policy                                      |
+| Resource/body     | Failure or interruption preserves custody within the selected recovery/shutdown lifetime                          |
+| Shared work       | One reader's cancellation preserves other leases; the last release awaits producer cleanup                        |
+| Close/replacement | Concurrent close joins one receipt; replacement obeys the verified release/reuse contract                         |
+| Deadline/retry    | Clock-driven expiry is observable; body/release failures do not become acquisition retries                        |
+| Release failure   | The recovery owner retains the full Cause, including simultaneous body/release failure, for its bounded lifetime  |
+| Containment       | Independent cleanup continues; safe reuse survives persistent failure; same-key retries share one flight          |
+| Recovery handoff  | A named owner bounds retention/retry; same-key acquire adopts the retained Repo or joins close before replacement |
+| Terminal boundary | Quit/sign-out/deletion finish bounded flush, report unconfirmed persistence and release resources                 |
+| Background error  | Fire-and-forget entries observe rejection; recovery has an owner and safe diagnostics stay bounded                |
+| Unconfirmed gate  | Degradation is observable and retryable; no authoritative success cache or once-set update                        |
+| Composition       | Real consumers use the kernel; applicable filesystem/process/protocol boundaries remain covered                   |
 
 Confirm readiness with an explicit signal before advancing time or cancelling. Await
 the affected fiber and cleanup, then inspect resulting resource/data state. Pure

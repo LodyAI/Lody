@@ -5,6 +5,8 @@ Translation: current
 
 [中文](2026-10-14-workspace-presence-manager-collision.zh.md)
 
+> Later change: [daemon-hosted MCP workspace commands](../architecture/2026-10-16-daemon-hosted-mcp-workspace-commands.md) moves cloud MCP commands onto the daemon replica and removes the unreleased-presence fence described below.
+
 ## Abstract
 
 Overlapping cloud commands share one document manager, avoiding duplicate presence acquisition while preserving authorization isolation and last-user cleanup. The fix stays in command composition and leaves presence, tokens and revocation unchanged.

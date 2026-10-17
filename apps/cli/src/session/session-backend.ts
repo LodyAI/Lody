@@ -539,6 +539,24 @@ export function registerSessionBackendFactory(
   };
 }
 
+/**
+ * Daemon composition for Roost history: a Session owned by another machine uses
+ * the owner route; this machine's Sessions, or ones whose owner is not yet known,
+ * keep the installed local owner.
+ */
+export function routeRemoteOwnedSessionHistory(
+  localMachineId: string,
+  remote: SessionBackendFactory
+): SessionBackendFactory {
+  return async (sessionDoc, meta) => {
+    const owner = (await (sessionDoc.getMetaState?.() ?? Promise.resolve(undefined)))?.machineId;
+    if (owner && owner !== localMachineId) return await remote(sessionDoc, meta);
+    const local = sessionBackendFactories.get('roost');
+    if (!local) throw new SessionBackendUnavailableError('roost', sessionDoc.sessionId);
+    return await local(sessionDoc, meta);
+  };
+}
+
 /** Legacy documents without a discriminator remain Loro-backed. */
 export function resolveSessionBackendKind(
   meta?: Pick<SessionMeta, 'historyBackend'> | null

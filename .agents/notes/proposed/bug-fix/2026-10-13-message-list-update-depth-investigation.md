@@ -80,6 +80,9 @@ The remaining scroll/hydration proposals below are not implemented.
 An [engine update-loop guard](../../implemented/bug-fix/2026-10-13-scroll-update-loop-guard.md)
 now contains synthetic synchronous cascades with explicit boundary recovery;
 it does not establish the reported production root cause.
+One production cascade caught by that guard has since been traced to the hydration
+feedback path: a [creation record grouped away by its neighbour's hydration](../../implemented/bug-fix/2026-10-17-grouped-creation-record-anchor.md)
+lost its reading anchor. Other reported #185 cases remain unexplained.
 
 Apply React's [You Might Not Need an Effect](https://react.dev/learn/you-might-not-need-an-effect)
 to redundant state and child-to-parent mirroring. The scroller's layout measurement,

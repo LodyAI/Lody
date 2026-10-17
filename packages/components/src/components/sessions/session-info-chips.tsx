@@ -408,7 +408,7 @@ function ContextChipActions({ actions }: { actions: readonly ContextChipAction[]
   }
 
   return (
-    <div className="flex min-w-12 shrink-[8] items-center overflow-hidden rounded-md border border-foreground/[0.08] bg-foreground/[0.03] dark:border-transparent dark:bg-muted-foreground/[0.08]">
+    <div className="flex min-w-12 shrink-[8] items-center overflow-hidden rounded-md bg-foreground/[0.05] dark:bg-muted-foreground/[0.08]">
       <button
         type="button"
         onClick={primaryAction.onClick}
@@ -420,14 +420,18 @@ function ContextChipActions({ actions }: { actions: readonly ContextChipAction[]
       </button>
       {overflowActions.length > 0 ? (
         <Menu.Root>
-          <Menu.Trigger render={<button
-              type="button"
-              aria-label={t('sessions.moreActions', 'More actions')}
-              title={t('sessions.moreActions', 'More actions')}
-              className="relative flex w-5 shrink-0 self-stretch items-center justify-center text-muted-foreground/75 outline-none transition-colors before:absolute before:left-0 before:h-3 before:w-px before:bg-foreground/10 hover:bg-foreground/[0.05] hover:text-foreground focus:outline-none focus:ring-0 focus:ring-offset-0 focus:shadow-none focus-visible:bg-foreground/[0.05] focus-visible:text-foreground focus-visible:outline-none focus-visible:ring-0 focus-visible:ring-offset-0 dark:before:bg-muted-foreground/15 dark:hover:bg-muted-foreground/[0.08] dark:focus-visible:bg-muted-foreground/[0.08]"
-            >
-              <ChevronDown className="h-3.5 w-3.5" aria-hidden="true" />
-            </button>}>
+          <Menu.Trigger
+            render={
+              <button
+                type="button"
+                aria-label={t('sessions.moreActions', 'More actions')}
+                title={t('sessions.moreActions', 'More actions')}
+                className="relative flex w-5 shrink-0 self-stretch items-center justify-center text-muted-foreground/75 outline-none transition-colors before:absolute before:left-0 before:h-3 before:w-px before:bg-foreground/10 hover:bg-foreground/[0.05] hover:text-foreground focus:outline-none focus:ring-0 focus:ring-offset-0 focus:shadow-none focus-visible:bg-foreground/[0.05] focus-visible:text-foreground focus-visible:outline-none focus-visible:ring-0 focus-visible:ring-offset-0 dark:before:bg-muted-foreground/15 dark:hover:bg-muted-foreground/[0.08] dark:focus-visible:bg-muted-foreground/[0.08]"
+              >
+                <ChevronDown className="h-3.5 w-3.5" aria-hidden="true" />
+              </button>
+            }
+          >
             <button
               type="button"
               aria-label={t('sessions.moreActions', 'More actions')}
@@ -457,11 +461,7 @@ function ContextChipActions({ actions }: { actions: readonly ContextChipAction[]
                   )}
                 </Menu.Item>
               ) : (
-                <Menu.Item
-                  key={action.id}
-                  disabled={action.disabled}
-                  onClick={action.onClick}
-                >
+                <Menu.Item key={action.id} disabled={action.disabled} onClick={action.onClick}>
                   {action.label}
                 </Menu.Item>
               )
@@ -521,22 +521,26 @@ function LocationControl({
   return (
     <Tooltip.Provider delay={300}>
       <Tooltip.Root>
-        <Tooltip.Trigger render={canCopy ? (
-            <button
-              type="button"
-              onClick={handleCopy}
-              aria-label={label}
-              // -mr-1 cancels the stage's icon→summary gap so the glyph sits
-              // close to the repo/branch text (a lone icon otherwise floats).
-              className="-mr-1 flex h-6 shrink-0 select-none items-center rounded-md px-1 text-muted-foreground transition-colors hover:bg-muted-foreground/10 hover:text-foreground"
-            >
-              {glyph}
-            </button>
-          ) : (
-            <span className="flex h-6 shrink-0 select-none items-center px-1 text-muted-foreground">
-              {glyph}
-            </span>
-          )}/>
+        <Tooltip.Trigger
+          render={
+            canCopy ? (
+              <button
+                type="button"
+                onClick={handleCopy}
+                aria-label={label}
+                // -mr-1 cancels the stage's icon→summary gap so the glyph sits
+                // close to the repo/branch text (a lone icon otherwise floats).
+                className="-mr-1 flex h-6 shrink-0 select-none items-center rounded-md px-1 text-muted-foreground transition-colors hover:bg-muted-foreground/10 hover:text-foreground"
+              >
+                {glyph}
+              </button>
+            ) : (
+              <span className="flex h-6 shrink-0 select-none items-center px-1 text-muted-foreground">
+                {glyph}
+              </span>
+            )
+          }
+        />
         <Tooltip.Content side="top">
           <span className="font-medium text-foreground">{label}</span>
           {canCopy ? (

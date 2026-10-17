@@ -1,7 +1,9 @@
+import { AgentRoleProposalMetaSchema } from './agent-role-proposal';
 import { isMagpieGatewayUrl } from './magpie-import';
 import { MemoryBindingSchema } from './memory-provider';
 import { AgentRoleSnapshotSchema } from './message-author';
 import { z } from 'zod';
+import { BugReportClientLogSchema } from './bug-report';
 import { SubagentTaskPayloadSchema } from './acp/claude-subagent-task';
 import {
   isLodySubagentSnapshot,
@@ -1689,6 +1691,7 @@ export const MachineBugReportRequestSchema = z
     description: z.string().trim().min(1),
     reporterUserId: z.string().trim().min(1),
     requestToken: z.string().trim().min(1),
+    clientLog: BugReportClientLogSchema.optional(),
   })
   .strict();
 
@@ -2066,13 +2069,28 @@ export const SESSION_HISTORY_READ_MAX_PAGE = 500;
 
 export const SessionHistoryReadQuerySchema = z
   .discriminatedUnion('kind', [
+    z
+      .object({
+        kind: z.literal('watchChanges'),
+        checkpoint: z.string().min(1).max(1024),
+        includeBodiesFrom: z.number().int().nonnegative().optional(),
+        waitMs: z.number().int().nonnegative().max(15_000),
+      })
+      .strict(),
     z.object({ kind: z.literal('count') }).strict(),
     z.object({ kind: z.literal('readAt'), position: z.number().int().nonnegative() }).strict(),
-    z.object({ kind: z.literal('readTurn'), turnId: z.string().trim().min(1) }).strict(),
+    z
+      .object({
+        kind: z.literal('readTurn'),
+        turnId: z.string().trim().min(1),
+        atCheckpoint: z.string().min(1).max(1024).optional(),
+      })
+      .strict(),
     z.object({ kind: z.literal('inputAcceptance'), entry: z.unknown() }).strict(),
     z
       .object({
         kind: z.literal('readRange'),
+        atCheckpoint: z.string().min(1).max(1024).optional(),
         from: z.number().int().nonnegative(),
         to: z.number().int().nonnegative(),
       })
@@ -2088,6 +2106,7 @@ export const SessionHistoryReadQuerySchema = z
       .object({
         kind: z.literal('readLatestPage'),
         limit: z.number().int().positive().max(SESSION_HISTORY_READ_MAX_PAGE),
+        withCheckpoint: z.boolean().optional(),
       })
       .strict(),
     z
@@ -2095,6 +2114,14 @@ export const SessionHistoryReadQuerySchema = z
         kind: z.literal('readOlderPage'),
         cursor: z.string().min(1),
         limit: z.number().int().positive().max(SESSION_HISTORY_READ_MAX_PAGE),
+        withCheckpoint: z.boolean().optional(),
+      })
+      .strict(),
+    z
+      .object({
+        kind: z.literal('readChanges'),
+        checkpoint: z.string().min(1).max(1024),
+        includeBodiesFrom: z.number().int().nonnegative().optional(),
       })
       .strict(),
     z.object({ kind: z.literal('readAll') }).strict(),
@@ -2158,9 +2185,30 @@ export const SessionHistoryChangeSchema = z
     }
   });
 
+export const SessionHistoryChangesSchema = z.discriminatedUnion('state', [
+  z
+    .object({
+      state: z.literal('ready'),
+      checkpoint: z.string().min(1).max(1024),
+      from: z.number().int().nonnegative().optional(),
+      ids: z.array(z.string().trim().min(1)),
+      bodies: z
+        .object({
+          changed: z.array(z.unknown()),
+          from: z.number().int().nonnegative().optional(),
+          suffix: z.array(z.unknown()),
+        })
+        .strict()
+        .optional(),
+    })
+    .strict(),
+  z.object({ state: z.literal('reset'), checkpoint: z.string().min(1).max(1024) }).strict(),
+]);
+
 export const SessionHistoryReadResponseSchema = z
   .object({
     type: z.literal('session/history-read_response'),
+    retryReason: z.literal('superseded').optional(),
     sessionId: SessionIdSchema,
     success: z.boolean(),
     result: z.unknown().optional(),
@@ -3701,6 +3749,11 @@ export const SystemNoticeSchema = z.discriminatedUnion('name', [
     type: z.literal('system_notice'),
     name: z.literal('task_proposal'),
     meta: TaskProposalMetaSchema.optional(),
+  }),
+  z.object({
+    type: z.literal('system_notice'),
+    name: z.literal('agent_role_proposal'),
+    meta: AgentRoleProposalMetaSchema.optional(),
   }),
   z.object({
     type: z.literal('system_notice'),

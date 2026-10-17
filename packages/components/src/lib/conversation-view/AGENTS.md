@@ -44,8 +44,18 @@
   retry timers stop on release/dispose; a page failure is never complete coverage.
 - Roost's renderer bridge retains a durable read projection scoped by account,
   workspace, machine and session. Persist page bodies, positions and owner revision
-  together. Consecutive deltas update only affected rows; unknown gaps stage a new
-  snapshot while retaining the readable one. Never persist commands or claim remote
+  together with an owner-issued checkpoint. Negotiate `sessionHistoryIncremental`
+  independently; verified catch-up patches only changed rows, including revision gaps.
+  Coherent checkpoint replies may advance behind newer hints; keep catching up.
+  Body-only edits retain directory cursor validity.
+  Independently negotiate `sessionHistoryWatch`; park one checkpoint observation per
+  active bridge outside body-read capacity. Hints accelerate the same recovery owner,
+  never replace its durable coverage. Idle replies do not invalidate unchanged bodies.
+  Unknown coverage stages a new snapshot while retaining the durable old one.
+  During replacement, display reads use the owner and hints still invalidate the
+  view; repeated supersessions back off. Publish only complete checkpoint coverage.
+  Committed cache changes must notify readers even if a newer hint requests catch-up.
+  Never persist commands or claim remote
   acceptance from the cache. Cache-clear must include its database.
 - Send through the selected SessionData backend (the shared HistoryWriter for
   Loro, the owner bridge for Roost), with no optimistic display overlay;

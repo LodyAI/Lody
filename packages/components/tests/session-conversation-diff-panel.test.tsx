@@ -1,7 +1,27 @@
-import { describe, expect, it } from 'vitest';
+/** @vitest-environment jsdom */
+
+import { act } from 'react';
+import { createRoot, type Root } from 'react-dom/client';
+import { Provider, createStore } from 'jotai';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { FileDiff, SessionId } from '@lody/shared';
+import { initI18n } from '../src/i18n';
+import type { SessionFileProvider } from '../src/lib/session-file-provider';
+
+// PR review threads are a separate, cloud-backed surface; these sessions have no PR.
+vi.mock('../src/hooks/use-github-review-comments', () => ({
+  useGitHubReviewComments: () => ({
+    threads: [],
+    error: null,
+    refresh: async () => {},
+    runWithToken: async () => undefined,
+  }),
+}));
+import { TestCloudPlatformProvider } from './test-platform';
 import {
   areFileDiffListsEqual,
+  MAX_DIFF_SKELETON_BODIES,
+  SessionConversationDiffPanel,
   areSessionConversationDiffPanelPropsEqual,
   createConversationDiffViewerParseCacheKey,
   shouldOpenDiffFileByDefault,
@@ -170,5 +190,83 @@ describe('shouldOpenDiffFileByDefault', () => {
         focusFilePath: 'src/target.ts',
       })
     ).toBe(true);
+  });
+});
+
+describe('SessionConversationDiffPanel loading cards', () => {
+  (
+    globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
+  ).IS_REACT_ACT_ENVIRONMENT = true;
+
+  // Every request stays in flight, as on a large diff the machine is still serving.
+  const pending = () => new Promise<never>(() => {});
+  const stalledProvider = new Proxy({} as SessionFileProvider, {
+    get: (_target, property) => (property === 'then' ? undefined : pending),
+  });
+  const paths = Array.from({ length: 300 }, (_, index) => `deleted/file-${index}.md`);
+
+  let container: HTMLDivElement;
+  let root: Root;
+
+  beforeEach(async () => {
+    await initI18n('en');
+    // The All Changes scroll area measures itself; jsdom has no layout to report.
+    globalThis.ResizeObserver ??= class {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    };
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+  });
+
+  afterEach(() => {
+    act(() => root.unmount());
+    container.remove();
+  });
+
+  const render = (props: Partial<SessionConversationDiffPanelProps>) => {
+    act(() => {
+      root.render(
+        <Provider store={createStore()}>
+          <TestCloudPlatformProvider>
+            <SessionConversationDiffPanel
+              sessionId={'session-1' as SessionId}
+              turnId="turn-1"
+              filePaths={paths}
+              fileProvider={stalledProvider}
+              {...props}
+            />
+          </TestCloudPlatformProvider>
+        </Provider>
+      );
+    });
+  };
+  // A skeleton line is an empty, screen-reader-hidden block; each one pulses.
+  const skeletonLines = () =>
+    Array.from(container.querySelectorAll('div[aria-hidden="true"]')).filter(
+      (element) => element.childNodes.length === 0
+    ).length;
+
+  it('loads every file of an unfocused All Changes diff as headers without pulsing bodies', () => {
+    render({ mode: 'base', turnId: 'all-changes' });
+
+    expect(container.textContent).toContain('deleted/file-0.md');
+    expect(container.textContent).toContain('deleted/file-299.md');
+    expect(skeletonLines()).toBe(0);
+  });
+
+  it('draws a body only for the focused file of an All Changes diff', () => {
+    render({ mode: 'base', turnId: 'all-changes', focusFilePath: 'deleted/file-150.md' });
+
+    expect(skeletonLines()).toBe(5);
+  });
+
+  it('bounds pulsing bodies when a conversation diff opens every file', () => {
+    render({ mode: 'conversation', fileDiffs: [] });
+
+    expect(container.textContent).toContain('deleted/file-299.md');
+    expect(skeletonLines()).toBe(MAX_DIFF_SKELETON_BODIES * 5);
   });
 });

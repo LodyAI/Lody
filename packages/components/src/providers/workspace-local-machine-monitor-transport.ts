@@ -15,7 +15,7 @@ import {
   type MachineMonitorSnapshot,
   type WorkspaceId,
 } from '@lody/shared';
-import type { LocalLoroDataPlaneConnection } from '@lody/shared/local-loro-transport';
+import type { LocalLoroDataPlaneConnection } from '@lody/shared/local-loro-data-plane';
 
 type SnapshotListener = (snapshot: MachineMonitorSnapshot | null) => void;
 

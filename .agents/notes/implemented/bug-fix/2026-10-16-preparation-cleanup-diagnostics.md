@@ -66,6 +66,8 @@ differed, so the investigation could only guess which setting changed.
   change the guarantee that a failed release fences same-Session replacement
   ([retirement retry](2026-10-15-unreleased-session-resources-retry.md)) and
   needs its own decision.
+  Later change: a lock-release timeout no longer fails the holder; see
+  [holder release](../architecture/2026-10-16-file-lock-holder-release.md).
 
 ## Trade-offs and limits
 

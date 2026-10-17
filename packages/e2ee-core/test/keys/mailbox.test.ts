@@ -91,7 +91,7 @@ describe('authenticated SQLite key mailbox', () => {
             Effect.sync(
               () =>
                 new Worker(new URL('./mailbox-repair.mts', import.meta.url), {
-                  execArgv: ['--import', 'tsx'],
+                  execArgv: ['--import', new URL('../worker-loader.mjs', import.meta.url).href],
                   workerData: {
                     file: dbPath,
                     signal,

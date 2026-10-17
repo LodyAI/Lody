@@ -20,15 +20,14 @@ Background: [components](../../../../.agents/docs/components-package.md),
 
 ## Crash recovery and diagnostics
 
-- `ErrorBoundary`'s `error-boundary-fallback.tsx` shows the real error and one-click
-  full-report copy on every build; details visible by default (`showErrorDetails` opts
-  out). `lib/error-boundary-report.ts` is the pure copy builder.
+- `ErrorBoundary`'s fallback shows the real error and one-click full-report copy on every
+  build, details visible (`showErrorDetails` opts out); `error-boundary-report.ts` builds it.
 - Error/not-found screens use `components/status-page.tsx`; pre-React `boot-failure.ts`
-  draws that column in plain DOM with copied V2 token values, never React/StyleX/Tailwind.
+  copies its V2 tokens into plain DOM, never React/StyleX/Tailwind.
 - Crash screens never reload/restart/reset themselves. `resetKeys` must not clear a captured
   error; the copyable fallback stays until the user presses a recovery button.
-- A cloud query throws into render and keeps throwing. An optional surface inside a larger
-  boundary owns an inline `ErrorBoundary`, so a backend failure degrades locally.
+- A cloud query throws into render and keeps throwing: an optional surface owns an inline
+  `ErrorBoundary`, so a backend failure degrades locally.
 - `lib/clear-local-cache.ts` owns `restartIntoCacheClear` (recoverable `lody*` caches,
   still signed in; reloads one window) and `startHardReset` (full wipe/sign-out,
   host-native first, own confirmation). Defer deletes to next boot; clear synchronous
@@ -38,8 +37,10 @@ Background: [components](../../../../.agents/docs/components-package.md),
   `lody:*` cache keys; retain auth tokens and preferences.
 - Reports copy the `lib/session-render-trace.ts` tail; writers append one compact line,
   never drive behavior from it; surface mount/unmount uses a layout effect.
-- `maybeClearLodyCacheOnBoot` runs once per page load, shared by `AppInitializer` and
-  `RuntimeProvider`, which awaits it before opening repo IndexedDB.
+- Record crashes and unretried failures in `client-log.ts` (sent with bug reports):
+  events and ids, never prompts, history or file content.
+- `maybeClearLodyCacheOnBoot` runs once per page load; `RuntimeProvider` awaits it
+  before opening repo IndexedDB.
 - Route waits are `BlockingWaitPlaceholder` (recovery at 30s), never bare
   `LoadingPlaceholder`/`BootShell`; failures are `RouteMessage` with a `gate` (`null`:
   not a failure). `stuck-connection-banner.tsx` (`MainLayout`, 45s `loading`) opens
@@ -109,9 +110,11 @@ Background: [components](../../../../.agents/docs/components-package.md),
 
 ## ACP dispatch
 
-- Automatic Role cleanup requires a fresh matching runtime schema and owner access.
-  Persist through a conditional writer transaction; never overwrite intervening edits
-  or clear model/permission pins. See [intent](../../../../specs/agent-role-schema-reconciliation.md).
+- Independent Plan toggles retain Roles; match other pins.
+
+- Automatic Role cleanup needs a fresh matching runtime schema and owner access.
+  Conditional writer transactions preserve concurrent edits and model/permission pins.
+  [Contract](../../../../specs/agent-role-schema-reconciliation.md).
 
 - Display every provider-supplied rate-limit window name with localized duration via
   `formatAgentRateLimitWindowLabel`, even when duration/utilization/reset match.

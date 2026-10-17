@@ -1,5 +1,6 @@
+import type { WorkspaceRepoLegacy } from '@lody/shared/workspace-data/repo-legacy';
 import type { MachineFlockEvent } from '@lody/shared';
-import type { LoroRepo, RepoRoomSubscription } from 'loro-repo';
+import type { WorkspaceRoom as RepoRoomSubscription } from '@lody/shared/workspace-data/repo-legacy';
 
 import type { Logger } from '@/utils/logger';
 import { formatErrorMessage } from '@/utils/format-error';
@@ -7,10 +8,10 @@ import { formatErrorMessage } from '@/utils/format-error';
 import { computeLoroReconnectDelayMs } from './connection-recovery';
 import { isRecoverableStreamsRoomStatus, streamsRoomBinding } from './streams-room-binding';
 
-type MachineFlockDocHandle = Awaited<ReturnType<LoroRepo['openFlockDoc']>>;
+type MachineFlockDocHandle = Awaited<ReturnType<WorkspaceRepoLegacy['openFlockDoc']>>;
 
 export type MachineFlockCommandWatcherOptions = {
-  repo: LoroRepo;
+  repo: WorkspaceRepoLegacy;
   docId: string;
   /** Greppable `workspaceId=…, machineId=…, docId=…` context for debug lines. */
   logContext: string;
@@ -34,7 +35,7 @@ export type MachineFlockCommandWatcherOptions = {
  * the room is healthy. Initial join/sync failures retry with bounded backoff.
  */
 export class MachineFlockCommandWatcher {
-  private readonly repo: LoroRepo;
+  private readonly repo: WorkspaceRepoLegacy;
   private readonly docId: string;
   private readonly logContext: string;
   private readonly waitForRemoteAuthority: boolean;

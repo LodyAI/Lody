@@ -4907,6 +4907,80 @@ const sessionChatCommand = new Command('chat')
     }
   );
 
+/** Cancel a Session's running turn through the caller's workspace manager. */
+export async function cancelSessionTurn(args: {
+  auth: AuthContext;
+  workspaceId: WorkspaceId;
+  manager: LoroDocumentManager;
+  sessionId: SessionId;
+  turnId?: string;
+  operationCancel?: boolean;
+}) {
+  const { auth, workspaceId, manager, sessionId } = args;
+  await syncSessionReadData(manager, sessionId, undefined, `session.cancel:${sessionId}`);
+  const session = await resolveSessionMetaOrThrow(manager, sessionId);
+  await assertMachineAccess({
+    auth,
+    workspaceId,
+    machineId: session.machineId,
+    requester: resolveSessionRequester(auth),
+    localProjectId: session.project?.kind === 'local' ? session.project.localProjectId : undefined,
+  });
+  // Already-stopped cancellation stays idempotent even when the daemon is offline.
+  const turnId = await resolveRunningAssistantTurnId(manager, sessionId);
+  if (!turnId) return { ok: true as const, sessionId, alreadyStopped: true as const };
+  const expectedTurnId = normalizeCliValue(args.turnId);
+  if (expectedTurnId && turnId !== expectedTurnId)
+    return {
+      ok: true as const,
+      sessionId,
+      alreadyStopped: true as const,
+      expectedTurnId,
+      activeTurnId: turnId,
+    };
+
+  await ensureTargetMachineOnline({ auth, workspaceId, machineId: session.machineId });
+
+  const machine = await manager.repo.getDocMeta(getMachineRoomId(session.machineId));
+  const inboxCancel = getSessionCancelProtocolFields(
+    machine?.meta,
+    uuidV4(),
+    !args.operationCancel
+  );
+  const response =
+    session.machineId === auth.machineId
+      ? extractCancelResponse(
+          await dispatchLocalControl({
+            type: 'session/cancel',
+            sessionId,
+            machineId: auth.machineId,
+            workspaceId,
+            turnId,
+            ...inboxCancel,
+          })
+        )
+      : await withMachineRpcClient(
+          { auth, workspaceId, machineId: session.machineId },
+          async (client) =>
+            await client.requestSessionCancel({
+              sessionId,
+              turnId,
+              timeoutMs: 10_000,
+              ...inboxCancel,
+            })
+        );
+
+  if (!response) {
+    throw new Error(`Machine ${session.machineId} did not answer the cancel request.`);
+  }
+
+  if (!response.success) {
+    throw new Error(response.error ?? `Failed to cancel ${sessionId}.`);
+  }
+
+  return { ok: true as const, sessionId, response };
+}
+
 const sessionCancelCommand = new Command('cancel')
   .description('Cancel the current running turn for a session')
   .option('--workspace <selector>', 'Target workspace id, slug, or name')
@@ -4933,94 +5007,25 @@ const sessionCancelCommand = new Command('cancel')
           sessionId,
           options.workspace
         );
-        await withWorkspaceManager(auth, workspace, async (manager) => {
-          await syncSessionReadData(manager, sessionId, undefined, `session.cancel:${sessionId}`);
-          const session = await resolveSessionMetaOrThrow(manager, sessionId);
-          const workspaceId = workspace.id as WorkspaceId;
-          await assertMachineAccess({
+        const result = await withWorkspaceManager(auth, workspace, (manager) =>
+          cancelSessionTurn({
             auth,
-            workspaceId,
-            machineId: session.machineId,
-            requester: resolveSessionRequester(auth),
-            localProjectId:
-              session.project?.kind === 'local' ? session.project.localProjectId : undefined,
-          });
-          // Already-stopped cancellation stays idempotent even when the daemon is offline.
-          const turnId = await resolveRunningAssistantTurnId(manager, sessionId);
-          if (!turnId) {
-            if (options.json) {
-              printJson({ ok: true, sessionId, alreadyStopped: true });
-            } else {
-              console.log(`Session ${sessionId} has no active turn.`);
-            }
-            return;
-          }
-          const expectedTurnId = normalizeCliValue(options.turnId);
-          if (expectedTurnId && turnId !== expectedTurnId) {
-            if (options.json) {
-              printJson({
-                ok: true,
-                sessionId,
-                alreadyStopped: true,
-                expectedTurnId,
-                activeTurnId: turnId,
-              });
-            } else {
-              console.log(`Target turn ${expectedTurnId} is no longer active in ${sessionId}.`);
-            }
-            return;
-          }
-
-          await ensureTargetMachineOnline({ auth, workspaceId, machineId: session.machineId });
-
-          const machine = await manager.repo.getDocMeta(getMachineRoomId(session.machineId));
-          const inboxCancel = getSessionCancelProtocolFields(
-            machine?.meta,
-            uuidV4(),
-            !options.operationCancel
-          );
-          const response =
-            session.machineId === auth.machineId
-              ? extractCancelResponse(
-                  await dispatchLocalControl({
-                    type: 'session/cancel',
-                    sessionId,
-                    machineId: auth.machineId,
-                    workspaceId,
-                    turnId,
-                    ...inboxCancel,
-                  })
-                )
-              : await withMachineRpcClient(
-                  { auth, workspaceId, machineId: session.machineId },
-                  async (client) =>
-                    await client.requestSessionCancel({
-                      sessionId,
-                      turnId,
-                      timeoutMs: 10_000,
-                      ...inboxCancel,
-                    })
-                );
-
-          if (!response) {
-            throw new Error(`Machine ${session.machineId} did not answer the cancel request.`);
-          }
-
-          if (!response.success) {
-            throw new Error(response.error ?? `Failed to cancel ${sessionId}.`);
-          }
-
-          if (options.json) {
-            printJson({
-              ok: true,
-              sessionId,
-              response,
-            });
-            return;
-          }
-
+            workspaceId: workspace.id as WorkspaceId,
+            manager,
+            sessionId,
+            turnId: options.turnId,
+            operationCancel: options.operationCancel,
+          })
+        );
+        if (options.json) {
+          printJson(result);
+        } else if (result.response) {
           console.log(`Cancelled ${sessionId}`);
-        });
+        } else if (result.expectedTurnId) {
+          console.log(`Target turn ${result.expectedTurnId} is no longer active in ${sessionId}.`);
+        } else {
+          console.log(`Session ${sessionId} has no active turn.`);
+        }
       });
     }
   );

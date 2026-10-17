@@ -1,6 +1,6 @@
 import { updateTestHistory } from './history-port-fixture';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { LoroRepo } from 'loro-repo';
+import { WorkspaceRepoLegacy } from '@lody/shared/workspace-data/repo-legacy';
 
 import type {
   ACPSessionId,
@@ -87,11 +87,11 @@ const createHandlerHarness = async (sessionId: SessionId) => {
   if (fakeTimersActive) {
     vi.useRealTimers();
   }
-  const repo = await LoroRepo.create({});
+  const repo = await WorkspaceRepoLegacy.create({});
   const doc = new SessionDocument(repo, sessionId);
   await doc.initOffline();
   if (fakeTimersActive) {
-    vi.useFakeTimers();
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
   }
 
   const workspaceDocument = {
@@ -305,7 +305,7 @@ describe('MessageHandler turn history gate (RPC fast path ordering)', () => {
   );
 
   beforeEach(() => {
-    vi.useFakeTimers();
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
     process.env.LODY_SERVER_URL = 'https://server.example.test';
     loadEnv();
   });

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { reconcileAgentRoleSchema } from '../src/lib/agent-role-schema-reconciliation';
 import {
   AGENT_ROLE_VERSION,
+  bindAgentRoleTarget,
   type AcpCapabilityCacheEntry,
   type AgentConfigId,
   type AgentRole,
@@ -15,11 +16,14 @@ import {
   buildAgentRoleFormValue,
   buildAgentRoleRunConfigSummary,
   buildAgentRoleFromForm,
+  createAgentRoleTargetFormValue,
   EMPTY_AGENT_ROLE_FORM_VALUE,
   findAgentRoleRunConfigIssues,
   selectAuthorableAgentRoleConfigOptions,
+  suggestAgentRoleTarget,
   validateAgentRoleForm,
   type AgentRoleFormValue,
+  type AgentRoleTargetFormValue,
 } from '../src/lib/agent-role-form';
 
 const role = (overrides: Partial<AgentRole> = {}): AgentRole => ({
@@ -37,14 +41,40 @@ const role = (overrides: Partial<AgentRole> = {}): AgentRole => ({
   ...overrides,
 });
 
-const formValue = (overrides: Partial<AgentRoleFormValue> = {}): AgentRoleFormValue => ({
-  ...EMPTY_AGENT_ROLE_FORM_VALUE,
-  name: 'Reviewer',
-  machineId: 'machine-1' as MachineId,
+const targetValue = (
+  overrides: Partial<AgentRoleTargetFormValue> = {}
+): AgentRoleTargetFormValue => ({
+  ...createAgentRoleTargetFormValue('machine-1' as MachineId),
   agentConfigId: 'config-1' as AgentConfigId,
   modelId: 'gpt-5.6',
   ...overrides,
 });
+
+const TARGET_KEYS = new Set<string>([
+  'machineId',
+  'agentConfigId',
+  'modeId',
+  'modelId',
+  'configOptionValues',
+  'memory',
+  'alias',
+]);
+
+/** A single-target form; target fields in `overrides` go to that one target. */
+const formValue = (
+  overrides: Partial<AgentRoleFormValue> & Partial<AgentRoleTargetFormValue> = {}
+): AgentRoleFormValue => {
+  const entries = Object.entries(overrides);
+  const target = Object.fromEntries(entries.filter(([key]) => TARGET_KEYS.has(key)));
+  const shared = Object.fromEntries(entries.filter(([key]) => !TARGET_KEYS.has(key)));
+  return {
+    ...EMPTY_AGENT_ROLE_FORM_VALUE,
+    name: 'Reviewer',
+    activeMachineId: 'machine-1' as MachineId,
+    targets: [targetValue(target)],
+    ...shared,
+  };
+};
 
 const createId = () => 'new-role' as AgentRoleId;
 
@@ -230,8 +260,10 @@ describe('agent role form validation', () => {
     expect(validateAgentRoleForm(EMPTY_AGENT_ROLE_FORM_VALUE, { accessibleRoles: [] })).toEqual([
       'name_required',
       'machine_required',
-      'agent_config_required',
     ]);
+    expect(
+      validateAgentRoleForm(formValue({ agentConfigId: null }), { accessibleRoles: [] })
+    ).toEqual(['agent_config_required']);
     expect(validateAgentRoleForm(formValue(), { accessibleRoles: [] })).toEqual([]);
   });
 
@@ -310,7 +342,7 @@ describe('building a role from the form', () => {
     expect(saved.revision).toBe(2);
     expect(saved.updatedAt).toBe(20);
     expect(findAgentRoleRunConfigIssues(saved.runConfig, capabilities)).toEqual([]);
-    expect(value.configOptionValues).toHaveProperty('thinking', 'high');
+    expect(value.targets[0]?.configOptionValues).toHaveProperty('thinking', 'high');
     expect(existing.runConfig.configOptionValues).toHaveProperty('thinking', 'high');
     expect(
       buildAgentRoleFromForm(buildAgentRoleFormValue(saved), { ...options, existing: saved })
@@ -454,9 +486,9 @@ describe('building a role from the form', () => {
 describe('run config defaults', () => {
   it('writes the agent own defaults into the unset fields', () => {
     expect(
-      applyAgentRoleRunConfigDefaults(formValue({ modelId: null }), selectorOptions())
+      applyAgentRoleRunConfigDefaults(targetValue({ modelId: null }), selectorOptions())
     ).toEqual(
-      formValue({
+      targetValue({
         modelId: 'gpt-5.6',
         modeId: 'default',
         configOptionValues: { thought_level: 'medium', 'fast-mode': false },
@@ -465,7 +497,7 @@ describe('run config defaults', () => {
   });
 
   it('never overwrites a stored selection, so an incompatible one stays visible', () => {
-    const stored = formValue({
+    const stored = targetValue({
       modelId: 'retired-model',
       modeId: 'default',
       configOptionValues: { thought_level: 'ultra', 'fast-mode': true },
@@ -474,7 +506,7 @@ describe('run config defaults', () => {
   });
 
   it('fills nothing while the agent capabilities are unknown', () => {
-    const value = formValue({ modelId: null });
+    const value = targetValue({ modelId: null });
     expect(
       applyAgentRoleRunConfigDefaults(
         value,
@@ -486,7 +518,7 @@ describe('run config defaults', () => {
 
   it('offers no default for a secret-shaped option, because it is never authorable', () => {
     const seeded = applyAgentRoleRunConfigDefaults(
-      formValue({ modelId: null }),
+      targetValue({ modelId: null }),
       selectorOptions({
         configOptionSelectors: [
           { type: 'select', configId: 'api_key', label: 'Key', currentValue: 'x', options: [] },
@@ -593,5 +625,204 @@ describe('run config summary', () => {
 
   it('is empty for a role that pins nothing', () => {
     expect(buildAgentRoleRunConfigSummary({})).toEqual([]);
+  });
+});
+
+describe('machine targets in the form', () => {
+  const linux = targetValue({
+    machineId: 'machine-2' as MachineId,
+    agentConfigId: 'config-2' as AgentConfigId,
+    modelId: 'gpt-5.6-luna',
+  });
+  const twoMachines = (overrides: Partial<AgentRoleFormValue> = {}): AgentRoleFormValue =>
+    formValue({ ...overrides, targets: [targetValue(), linux] });
+
+  it('saves every machine and reopens on the machine it was asked for', () => {
+    const saved = buildAgentRoleFromForm(twoMachines(), {
+      ownerUserId: 'user-1',
+      now: 100,
+      createId,
+    });
+    expect(saved).toMatchObject({ machineId: 'machine-1', agentConfigId: 'config-1' });
+    expect(saved.additionalTargets).toEqual([
+      { machineId: 'machine-2', agentConfigId: 'config-2', runConfig: { modelId: 'gpt-5.6-luna' } },
+    ]);
+    const reopened = buildAgentRoleFormValue(saved, 'machine-2' as MachineId);
+    expect(reopened.activeMachineId).toBe('machine-2');
+    expect(reopened.targets.map((target) => target.machineId)).toEqual(['machine-1', 'machine-2']);
+    expect(
+      buildAgentRoleFromForm(reopened, {
+        existing: saved,
+        ownerUserId: 'user-1',
+        now: 200,
+        createId,
+      })
+    ).toBe(saved);
+  });
+
+  it('reconciles retired options only on the machine being edited', () => {
+    const value = formValue({
+      targets: [
+        targetValue({ configOptionValues: { thinking: 'high' } }),
+        { ...linux, configOptionValues: { thinking: 'high' } },
+      ],
+    });
+    const saved = buildAgentRoleFromForm(value, {
+      ownerUserId: 'user-1',
+      now: 100,
+      createId,
+      selectorOptions: selectorOptions(),
+    });
+    expect(saved.runConfig.configOptionValues).not.toHaveProperty('thinking');
+    // Machine 2's agent was never probed in this editor; nothing proves it retired.
+    expect(saved.additionalTargets?.[0]?.runConfig.configOptionValues).toEqual({
+      thinking: 'high',
+    });
+  });
+
+  it('stores aliases only while the role runs on several machines', () => {
+    const aliased = formValue({
+      targets: [targetValue({ alias: 'Reviewer-Mac' }), { ...linux, alias: 'Reviewer-Linux' }],
+    });
+    const saved = buildAgentRoleFromForm(aliased, { ownerUserId: 'user-1', now: 1, createId });
+    expect(saved.alias).toBe('Reviewer-Mac');
+    expect(saved.additionalTargets?.[0]?.alias).toBe('Reviewer-Linux');
+    const single = buildAgentRoleFromForm(formValue({ alias: 'Reviewer-Mac' }), {
+      ownerUserId: 'user-1',
+      now: 1,
+      createId,
+    });
+    expect(single.alias).toBeUndefined();
+  });
+
+  it('checks aliases against role names, other aliases and each other', () => {
+    const other = role({
+      id: 'other' as AgentRoleId,
+      name: 'Writer',
+      alias: 'Writer-Mac',
+      additionalTargets: [
+        {
+          machineId: 'machine-2' as MachineId,
+          agentConfigId: 'config-2' as AgentConfigId,
+          runConfig: {},
+        },
+      ],
+    });
+    const withAliases = (first: string, second: string) =>
+      formValue({ targets: [targetValue({ alias: first }), { ...linux, alias: second }] });
+    expect(
+      validateAgentRoleForm(withAliases('Writer Mac', ''), { accessibleRoles: [other] })
+    ).toEqual(['alias_taken']);
+    expect(validateAgentRoleForm(withAliases('Writer', ''), { accessibleRoles: [other] })).toEqual([
+      'alias_taken',
+    ]);
+    expect(validateAgentRoleForm(withAliases('Same', 'same'), { accessibleRoles: [] })).toEqual([]);
+    expect(validateAgentRoleForm(withAliases('Same', 'Same'), { accessibleRoles: [] })).toEqual([
+      'alias_taken',
+    ]);
+    expect(validateAgentRoleForm(withAliases('Reviewer', ''), { accessibleRoles: [] })).toEqual([
+      'alias_taken',
+    ]);
+    // Another role's alias also blocks a name.
+    expect(
+      validateAgentRoleForm(formValue({ name: 'Writer-Mac' }), { accessibleRoles: [other] })
+    ).toEqual(['name_taken']);
+  });
+
+  it('requires an agent config on every machine', () => {
+    expect(
+      validateAgentRoleForm(
+        formValue({ targets: [targetValue(), { ...linux, agentConfigId: null }] }),
+        { accessibleRoles: [] }
+      )
+    ).toEqual(['agent_config_required']);
+  });
+});
+
+describe('adding a role to another machine', () => {
+  const codex = (id: string, name: string, machineId = 'machine-2') => ({
+    id: id as AgentConfigId,
+    cliType: 'builtin' as const,
+    agentType: 'codex' as const,
+    name,
+    machineId,
+  });
+  const source = targetValue({
+    modeId: 'default',
+    configOptionValues: { thought_level: 'high' },
+    memory: { providerId: 'nowledge', memoryId: 'reviewer' },
+  });
+
+  it('starts from the same agent, preferring the same name, with the settings copied', () => {
+    const suggestion = suggestAgentRoleTarget({
+      machineId: 'machine-2' as MachineId,
+      source,
+      sourceConfig: codex('config-1', 'Codex', 'machine-1'),
+      machineConfigs: [
+        { ...codex('claude', 'Claude'), agentType: 'claude' as const },
+        codex('codex-work', 'Codex work'),
+        codex('codex', 'Codex'),
+      ],
+      memories: [],
+    });
+    expect(suggestion).toEqual({
+      machineId: 'machine-2',
+      agentConfigId: 'codex',
+      modeId: 'default',
+      modelId: 'gpt-5.6',
+      configOptionValues: { thought_level: 'high' },
+      alias: '',
+    });
+  });
+
+  it('links memory only when that machine has the same identity', () => {
+    const input = {
+      machineId: 'machine-2' as MachineId,
+      source,
+      sourceConfig: codex('config-1', 'Codex', 'machine-1'),
+      machineConfigs: [codex('codex', 'Codex')],
+    };
+    expect(suggestAgentRoleTarget({ ...input, memories: [] }).memory).toBeUndefined();
+    expect(
+      suggestAgentRoleTarget({
+        ...input,
+        memories: [{ providerId: 'nowledge', memoryId: 'reviewer' }],
+      }).memory
+    ).toEqual({ providerId: 'nowledge', memoryId: 'reviewer' });
+  });
+
+  it('leaves the agent to the user when the machine has no such agent', () => {
+    expect(
+      suggestAgentRoleTarget({
+        machineId: 'machine-2' as MachineId,
+        source,
+        sourceConfig: codex('config-1', 'Codex', 'machine-1'),
+        machineConfigs: [{ ...codex('claude', 'Claude'), agentType: 'claude' as const }],
+        memories: [],
+      })
+    ).toEqual(createAgentRoleTargetFormValue('machine-2' as MachineId));
+  });
+});
+
+describe('editing a role opened on another machine', () => {
+  it('keeps the stored machine order, so an unchanged save is no edit', () => {
+    const existing = role({
+      additionalTargets: [
+        {
+          machineId: 'machine-2' as MachineId,
+          agentConfigId: 'config-2' as AgentConfigId,
+          runConfig: {},
+        },
+      ],
+    });
+    const bound = bindAgentRoleTarget(existing, 'machine-2' as MachineId);
+    if (!bound) throw new Error('expected a target on machine-2');
+    const saved = buildAgentRoleFromForm(buildAgentRoleFormValue(bound), {
+      existing,
+      ownerUserId: 'user-1',
+      now: 20,
+      createId,
+    });
+    expect(saved).toBe(existing);
   });
 });

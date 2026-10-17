@@ -51,3 +51,24 @@ Behavioral and read-boundary regressions live in
 and [`acp-history-apply.test.ts`](../../packages/shared/tests/acp-history-apply.test.ts).
 The [decision and validation](../notes/implemented/bug-fix/2026-10-16-subagent-history-windows.md)
 extend the earlier [tool streaming optimization](../notes/implemented/bug-fix/2026-10-14-daemon-history-writes-scale-with-turn-size.md).
+
+## Coordinator operation progress
+
+`operation-progress` uses `HistoryWriter.updateOperationProgress`, independently of
+ACP output windows. A version-checked scalar directory selects only the operation's
+system cards and legacy duplicate aliases. Each selected card has one detached read
+for the shared planner and validator; no history-root export or full-history fallback
+is allowed. Replacements preserve existing containers, duplicate deletion touches
+only selected positions, and new cards append at the actual history tail. No-op
+checks compare content rather than JSON object key order and do not commit.
+The canonical card owns its metadata even when an alias appears earlier. If only
+aliases remain, rename the first one in place; equal progress content must not
+skip this identity repair. Preserve stored progress and target extension fields
+while merging, so future-version metadata does not turn no-ops into repeated writes.
+
+Unknown document writes, imports, checkout and pending edits invalidate the directory;
+the next update scans identity metadata again, never unrelated bodies. This is not
+a constant-time guarantee after every document change. Real-Loro coverage lives in
+`packages/shared/tests/session-history-actions.test.ts`; the
+[decision and measurements](../notes/implemented/bug-fix/2026-10-17-local-operation-progress.md)
+describe the bounded per-card conversion and validation boundary.

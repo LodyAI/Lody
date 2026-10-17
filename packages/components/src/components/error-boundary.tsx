@@ -1,6 +1,7 @@
 import { Component, type ErrorInfo, type ReactNode } from 'react';
 import { hashAnalyticsId, isConvexUnauthenticatedError } from '@lody/shared';
 import { deferredPostHog } from '@/lib/deferred-posthog';
+import { recordClientError } from '@/lib/client-log';
 import { capturePostHogEvent } from '@/lib/posthog-analytics';
 import { jotaiStore } from '@/lib/utils';
 import { currentWorkspaceIdAtom } from '@/atoms/workspace-context';
@@ -115,6 +116,13 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
     this.props.onError?.(error, info);
 
     const boundaryName = this.props.name ?? 'unknown';
+    // Kept on the device so the next bug report carries the crash, even after
+    // the user reloads or the app is restarted.
+    recordClientError('react.error_boundary', error, {
+      boundary: boundaryName,
+      variant: this.props.variant ?? 'section',
+      componentStack: info.componentStack ?? null,
+    });
     // Authoritative crash report: send the full exception (stack + component
     // stack) to PostHog error tracking. posthog-js groups by the exception
     // itself; the boundary name and React component stack ride along as

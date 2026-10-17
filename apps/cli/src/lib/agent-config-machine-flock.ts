@@ -1,3 +1,4 @@
+import type { WorkspaceRepoLegacy } from '@lody/shared/workspace-data/repo-legacy';
 import {
   deleteAgentConfigFromFlock,
   getAgentConfigRoomId,
@@ -19,7 +20,6 @@ import {
   type WorkspaceId,
   writeAgentConfigToFlock,
 } from '@lody/shared';
-import type { LoroRepo } from 'loro-repo';
 
 export type MachineFlockSyncScheduler = {
   markMachineFlockDocDirty: (machineId: MachineId, options?: { reason?: string }) => void;
@@ -27,7 +27,7 @@ export type MachineFlockSyncScheduler = {
 
 /** Managed builtin provider types the user removed on this machine, so they must not be auto-registered at startup. */
 export async function readMachineBuiltinAgentOptOuts(
-  repo: LoroRepo,
+  repo: WorkspaceRepoLegacy,
   workspaceId: WorkspaceId,
   machineId: MachineId
 ): Promise<Set<ManagedBuiltinAgentType>> {
@@ -38,7 +38,7 @@ export async function readMachineBuiltinAgentOptOuts(
 }
 
 export async function readMachineAgentConfigs(
-  repo: LoroRepo,
+  repo: WorkspaceRepoLegacy,
   workspaceId: WorkspaceId,
   machineId: MachineId
 ): Promise<Record<AgentConfigId, AgentConfigMeta>> {
@@ -59,7 +59,7 @@ export type AgentConfigPointLookup = {
  * storage generations contain the id.
  */
 export async function readMergedAgentConfigById(
-  repo: LoroRepo,
+  repo: WorkspaceRepoLegacy,
   workspaceId: WorkspaceId,
   machineId: MachineId,
   agentConfigId: AgentConfigId
@@ -99,7 +99,7 @@ export function mergeAgentConfigs(
 }
 
 export async function listMergedAgentConfigs(
-  repo: LoroRepo,
+  repo: WorkspaceRepoLegacy,
   workspaceId: WorkspaceId,
   machineIds?: readonly MachineId[]
 ): Promise<AgentConfigMeta[]> {
@@ -113,7 +113,7 @@ export async function listMergedAgentConfigs(
 
 /** The machine's only provider of this type; none when absent or ambiguous. */
 export async function findSoleMachineAgentConfig(
-  repo: LoroRepo,
+  repo: WorkspaceRepoLegacy,
   workspaceId: WorkspaceId,
   machineId: MachineId,
   cliType: AgentConfigCliType,
@@ -127,7 +127,7 @@ export async function findSoleMachineAgentConfig(
 }
 
 export async function upsertMachineAgentConfig(
-  repo: LoroRepo,
+  repo: WorkspaceRepoLegacy,
   workspaceId: WorkspaceId,
   config: AgentConfigMeta,
   options: { sync?: MachineFlockSyncScheduler; reason?: string } = {}
@@ -151,7 +151,7 @@ export async function upsertMachineAgentConfig(
 }
 
 export async function deleteMachineAgentConfig(
-  repo: LoroRepo,
+  repo: WorkspaceRepoLegacy,
   workspaceId: WorkspaceId,
   config: AgentConfigMeta,
   options: { sync?: MachineFlockSyncScheduler; reason?: string } = {}
@@ -175,7 +175,7 @@ export async function deleteMachineAgentConfig(
 }
 
 export async function listMachineAgentConfigs(
-  repo: LoroRepo,
+  repo: WorkspaceRepoLegacy,
   workspaceId: WorkspaceId,
   machineIds: readonly MachineId[]
 ): Promise<AgentConfigMeta[]> {
@@ -192,7 +192,7 @@ export async function listMachineAgentConfigs(
 }
 
 async function deleteLoroRepoMetaAgentConfigIfPresent(
-  repo: LoroRepo,
+  repo: WorkspaceRepoLegacy,
   agentConfigId: AgentConfigId
 ): Promise<void> {
   const roomId = getAgentConfigRoomId(agentConfigId);
@@ -204,7 +204,7 @@ async function deleteLoroRepoMetaAgentConfigIfPresent(
   await repo.flush();
 }
 
-async function listLoroRepoMetaAgentConfigs(repo: LoroRepo): Promise<AgentConfigMeta[]> {
+async function listLoroRepoMetaAgentConfigs(repo: WorkspaceRepoLegacy): Promise<AgentConfigMeta[]> {
   const roomIds = await listAliveDocIds(repo, isAgentConfigDocRoomId);
   const configs = await Promise.all(
     roomIds.map(async (roomId) => {
@@ -218,13 +218,13 @@ async function listLoroRepoMetaAgentConfigs(repo: LoroRepo): Promise<AgentConfig
   return configs.filter((config): config is AgentConfigMeta => config !== null);
 }
 
-async function listMachineIds(repo: LoroRepo): Promise<MachineId[]> {
+async function listMachineIds(repo: WorkspaceRepoLegacy): Promise<MachineId[]> {
   const roomIds = await listAliveDocIds(repo, isMachineDocRoomId);
   return roomIds.map((roomId) => roomId.slice(MACHINE_DOC_PREFIX.length) as MachineId);
 }
 
 async function listAliveDocIds(
-  repo: LoroRepo,
+  repo: WorkspaceRepoLegacy,
   predicate: (docId: string) => boolean
 ): Promise<string[]> {
   const scanner = repo.getMeta();

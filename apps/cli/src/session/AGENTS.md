@@ -6,24 +6,22 @@
 
 ## Authorization and identity
 
-- Authorize the target machine through the injected access capability with the source CLI token;
-  MCP delegation verifies the frozen Turn requester; Operation-side rules are in
+- Authorize target machines via injected access with the source CLI token. MCP delegation
+  verifies the frozen Turn requester; Operation rules:
   [../mcp/AGENTS.md](../mcp/AGENTS.md).
-- Never send an untrusted requester through workspace Machine RPC: it authenticates no member
-  identity.
-- Live status is a target-daemon Machine RPC read; durable metadata is not a live-presence
-  substitute.
+- Never send an untrusted requester through workspace Machine RPC: it authenticates no member identity.
+- Live status is a target-daemon Machine RPC read; durable metadata never substitutes for it.
 - Require frozen human identity and pre-launch `humanInputReceipts`; recover via receipts,
   never role/author. [Rules](../orchestration/AGENTS.md).
-- Machine/Provider credentials stay host-scoped. Attribution, authorization and commits
-  use the frozen Turn identity; GitHub network auth uses the trusted conversation owner.
+- Host-scope Machine/Provider credentials. Use frozen Turn identity for attribution,
+  authorization and commits; trusted conversation owner for GitHub network auth.
 - Git: owner uses local config, no profile query; others never read it.
   `CloudPort` profiles: 60s deadline, retry failures, reject placeholders.
   Commit attribution never restarts ACP; owner changes retire the runtime.
 
 ## Dispatch
 
-- Queue promotion preserves frozen fields; remove its row only after history and activation succeed.
+- Queue promotion preserves frozen fields; remove only after history+activation succeed.
 - Absent session meta is "unknown", not foreign: hold the TTL-bounded RPC stash until meta lands;
   drop it only on a definitive verdict.
 - Subscribe to RPC offers BEFORE awaiting Doc Room join/sync and never dispatch from the RPC
@@ -59,28 +57,29 @@
 - Config uses its owner signal; fence mutations after interrupt.
 - Resume must REOPEN the in-progress assistant entry, clearing
   `finished`/`endedAt`/`permissionWaitMs` there only; never write `finished=false` from teardown.
-- Keep JSON-RPC/transport matching in `acp-error-classification.ts`: disposed/stale `-32603` is
-  `agent_disconnected`, Harness compression mismatch is `acp_session_storage_incompatible`.
+- Keep JSON-RPC/transport matching in `acp-error-classification.ts`: disposed/stale `-32603` =
+  `agent_disconnected`, Harness compression mismatch = `acp_session_storage_incompatible`.
 - User turns may restore stale ACP and retry once before output. Inbox batches never retry after
   submission; this includes human-plus-batch inputs.
 - Agent-input turns skip completion notices only. Use the completed invocation's exact input.
 - No ACP updates: `recordSilentTurnFailure`, not `setDispatchHandled`. Read
   `turnProducedVisibleOutput` before `finalizeTurn` clears it; finalize, advance pointers, fail open.
 - Diff content comes only from the CLI-local ACP evidence store; GitHub `diffStats` use PR compare
-  semantics, and `session-diff-stats-target.ts` skips rather than overwrites a good total.
+  semantics; `session-diff-stats-target.ts` skips, never overwrites, a good total.
 
 ## Lifecycle
 
 - [Roost](README.md#roost-history-paging): check owner/backend; no keyring,
-  rotation/fallback, removed-history revival or uncertain steer replay.
-  Causes local; RPC stage/code/ID.
-
+  rotation/fallback, removed-history revival, uncertain steer replay or signed-log/receipt pruning.
+  Commit guarded edits+digests atomically; no SDK retry after uncertainty.
+  Keep input/permission/branch recovery SDK-owned. Local causes; RPC stage/code/ID.
 - `Session.createAgent` gates each ACP spawn; failed spawns reject JSON-RPC. Terminals use protocol argv (`sh -c` for unsplit commands only). Managed Codex reused-refresh startup
   retries once after process cleanup, delay, and live Provider recheck; other auth errors do not.
 - Child tabs reuse parent workspace. No per-session paths in `MachineMeta`:
-  machines publish `['dotlodyPath']` for frontends to derive them.
-- INVARIANT: any `sandbox.spawn` whose OUTPUT is the result must pass `captureOutput: true` (ACP
-  stdio deliberately does not), and the capture buffer stays capped at 4 MiB.
+  machines publish `['dotlodyPath']`; frontends derive them.
+- `sandbox.spawn` returning OUTPUT requires `captureOutput: true` and a 4 MiB buffer cap;
+  ACP stdio does not capture.
+- Session start failures: [rules](README.md#start-failures).
 - Shutdown: `cleanUp({ keepWorkspaceDocumentOpen: true })`, MessageHandler's final flush,
   then `cleanUp()`; never close the doc first.
 

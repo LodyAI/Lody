@@ -9,6 +9,7 @@ import { stylexOptions } from '../../ui/stylex-options';
 import topLevelAwait from '../vite-top-level-await-fixed.cjs';
 import { emojibaseAssetsPlugin } from '../vite-emojibase-assets';
 import { loroCrdtWasmUrlWorkaround } from '../vite-wasm-workarounds.ts';
+import { preservePdfWorkerExports } from '../vite-pdf-worker';
 
 // The shell can export NODE_ENV=production even while running Storybook's dev
 // server. Vite's React plugin then disables its refresh runtime while the
@@ -56,7 +57,12 @@ const config: StorybookConfig = {
     viteConfig.worker = {
       ...(viteConfig.worker ?? {}),
       format: 'es',
-      plugins: () => [loroCrdtWasmUrlWorkaround(), wasm(), topLevelAwait()],
+      plugins: () => [
+        preservePdfWorkerExports(),
+        loroCrdtWasmUrlWorkaround(),
+        wasm(),
+        topLevelAwait(),
+      ],
     };
 
     if (process.env.STORYBOOK_DEBUG_PLUGINS === '1') {

@@ -885,7 +885,7 @@ describe('durable finite epoch receive and original-report queue', () => {
             Effect.sync(
               () =>
                 new Worker(new URL('./receive-reopen.mts', import.meta.url), {
-                  execArgv: ['--import', 'tsx'],
+                  execArgv: ['--import', new URL('../worker-loader.mjs', import.meta.url).href],
                   workerData: { journal, keys },
                 })
             ),

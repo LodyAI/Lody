@@ -1,3 +1,8 @@
+/**
+ * Frozen pre-migration v7 client for host wire-compatibility regression tests.
+ * Product code uses workspace-data/local-transport.ts; do not import this fixture
+ * from application code or add new client behavior here.
+ */
 import { EphemeralStore, LoroDoc, VersionVector } from 'loro-crdt';
 import type {
   TransportAdapter,
@@ -24,12 +29,11 @@ import {
   roomKey,
   sameRoom,
   type FlockVersionVector,
-  type LocalLoroDataPlaneClientMessage,
   type LocalLoroDataPlanePayload,
   type LocalLoroDataPlaneRoom,
   type LocalLoroDataPlaneServerMessage,
   type LocalLoroServerErrorMessage,
-} from './local-loro-data-plane';
+} from '../src/local-loro-data-plane';
 
 /**
  * Persistent, push-capable link to the CLI data-plane server. The renderer wires
@@ -41,12 +45,8 @@ import {
  * server push out to every window). The adapter is responsible for filtering by
  * workspaceId + its own peerId — never assume a delivered frame is ours.
  */
-export type LocalLoroDataPlaneConnection = {
-  send: (message: LocalLoroDataPlaneClientMessage) => void;
-  onMessage: (listener: (message: LocalLoroDataPlaneServerMessage) => void) => () => void;
-  onStatusChange: (listener: (connected: boolean) => void) => () => void;
-  isConnected: () => boolean;
-};
+export type { LocalLoroDataPlaneConnection } from '../src/local-loro-data-plane';
+import type { LocalLoroDataPlaneConnection } from '../src/local-loro-data-plane';
 
 type FlockLike = {
   exportJson(from: FlockVersionVector): unknown | Promise<unknown>;
