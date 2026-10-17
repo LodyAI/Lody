@@ -25,7 +25,7 @@ describe('computeTitleGenerationDefaults', () => {
   const claudeOptions: AcpConfigOptionSummary[] = [
     makeOption('model', 'model', 'claude-sonnet-4-5-20250514', [
       { value: 'claude-sonnet-4-5-20250514', name: 'Claude Sonnet 4.5' },
-      { value: 'claude-haiku-4-5-20251001', name: 'Claude Haiku 4.5' },
+      { value: 'claude-haiku-5-5', name: 'Claude Haiku 5.5' },
       { value: 'claude-opus-4-0-20250514', name: 'Claude Opus 4' },
     ]),
     makeOption('mode', 'mode', 'default', [

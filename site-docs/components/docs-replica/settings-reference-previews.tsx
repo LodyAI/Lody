@@ -293,7 +293,7 @@ const USAGE_MODELS = [
   { id: 'claude-opus-4-6', label: 'claude-opus-4-6', color: '#0ea5e9', weight: 0.15 },
   { id: 'gpt-5.2-xhigh', label: 'gpt-5.2/xhigh', color: '#06b6d4', weight: 0.12 },
   { id: 'gpt-5.2-high', label: 'gpt-5.2/high', color: '#10b981', weight: 0.08 },
-  { id: 'claude-haiku-4-5', label: 'claude-haiku-4-5', color: '#f59e0b', weight: 0.08 },
+  { id: 'claude-haiku-5-5', label: 'claude-haiku-5-5', color: '#f59e0b', weight: 0.08 },
   { id: 'other', label: 'Other', color: '#6b7280', weight: 0.05 },
 ] as const;
 

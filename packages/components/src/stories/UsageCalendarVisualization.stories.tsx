@@ -95,7 +95,7 @@ function buildDayDetail(dayStartMs: number): SettingsUsageDayData {
       { modelId: 'claude-sonnet-5', tokens: Math.round(tokens * 0.52), costUSD: 0 },
       { modelId: 'claude-opus-4-8', tokens: Math.round(tokens * 0.24), costUSD: 0 },
       { modelId: 'gpt-5-codex', tokens: Math.round(tokens * 0.14), costUSD: 0 },
-      { modelId: 'claude-haiku-4-5', tokens: Math.round(tokens * 0.06), costUSD: 0 },
+      { modelId: 'claude-haiku-5-5', tokens: Math.round(tokens * 0.06), costUSD: 0 },
       { modelId: 'gemini-2.5-pro', tokens: Math.round(tokens * 0.03), costUSD: 0 },
       { modelId: 'kimi-k2', tokens: Math.round(tokens * 0.01), costUSD: 0 },
     ],
@@ -174,7 +174,7 @@ function buildTimeline(
         'gpt-5-codex',
         'claude-opus-4-8',
         'gemini-2.5-pro',
-        'claude-haiku-4-5',
+        'claude-haiku-5-5',
       ].map((modelId, modelIndex) => ({
         modelId,
         tokens: modelTokens[modelIndex] ?? 0,

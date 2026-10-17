@@ -38,7 +38,7 @@ describe('builtin Claude shared contract', () => {
       {
         modelId: 'haiku',
         name: 'Haiku',
-        description: 'Haiku 4.5 · Fastest for quick answers',
+        description: 'Haiku 5.5 · Fastest for quick answers',
       },
     ]);
   });

@@ -105,7 +105,7 @@ const claudeModelOptions: AcpSessionSelectOption[] = [
     label: 'Opus (1M context)',
     description: 'Opus 4.6 for long sessions · $10/$37.50 per Mtok',
   },
-  { value: 'haiku', label: 'Haiku', description: 'Haiku 4.5 - Fastest for quick answers' },
+  { value: 'haiku', label: 'Haiku', description: 'Haiku 5.5 - Fastest for quick answers' },
 ];
 
 // Codex models

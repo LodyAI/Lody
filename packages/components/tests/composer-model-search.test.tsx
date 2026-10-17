@@ -60,7 +60,7 @@ const deepseekModels = [
 const manyModels = [
   { value: 'claude-opus-5', label: 'Opus 5' },
   { value: 'claude-sonnet-5', label: 'Sonnet 5' },
-  { value: 'claude-haiku-4-5', label: 'Haiku 4.5' },
+  { value: 'claude-haiku-5-5', label: 'Haiku 5.5' },
   { value: 'gpt-5.5', label: 'GPT-5.5' },
   { value: 'gpt-5.5-codex', label: 'GPT-5.5 Codex' },
   { value: 'gemini-3-pro', label: 'Gemini 3 Pro' },
@@ -164,8 +164,8 @@ describe('composer model picker search', () => {
 
   it('finds a model by its id, which the row does not even show', async () => {
     const { search, rows } = await openModelSubmenu();
-    await typeInto(search as HTMLInputElement, 'haiku-4');
-    expect(rows()).toEqual(['Haiku 4.5']);
+    await typeInto(search as HTMLInputElement, 'haiku-5');
+    expect(rows()).toEqual(['Haiku 5.5']);
   });
 
   it('says so when nothing matches instead of showing an empty menu', async () => {

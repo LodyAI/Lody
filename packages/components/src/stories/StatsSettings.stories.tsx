@@ -19,7 +19,7 @@ const MODELS = [
   { id: 'claude-sonnet-5', label: 'claude-sonnet-5', weight: 8 },
   { id: 'gpt-5-codex', label: 'gpt-5-codex', weight: 4 },
   { id: 'gemini-2.5-pro', label: 'gemini-2.5-pro', weight: 2 },
-  { id: 'claude-haiku-4-5', label: 'claude-haiku-4-5', weight: 3 },
+  { id: 'claude-haiku-5-5', label: 'claude-haiku-5-5', weight: 3 },
 ];
 
 const MEMBERS = [
