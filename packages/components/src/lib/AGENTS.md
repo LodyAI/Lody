@@ -110,9 +110,11 @@ Background: [components](../../../../.agents/docs/components-package.md),
 
 ## ACP dispatch
 
-- Automatic Role cleanup requires a fresh matching runtime schema and owner access.
-  Persist through a conditional writer transaction; never overwrite intervening edits
-  or clear model/permission pins. See [intent](../../../../specs/agent-role-schema-reconciliation.md).
+- Independent Plan toggles retain Roles; match other pins.
+
+- Automatic Role cleanup needs a fresh matching runtime schema and owner access.
+  Conditional writer transactions preserve concurrent edits and model/permission pins.
+  [Contract](../../../../specs/agent-role-schema-reconciliation.md).
 
 - Display every provider-supplied rate-limit window name with localized duration via
   `formatAgentRateLimitWindowLabel`, even when duration/utilization/reset match.
