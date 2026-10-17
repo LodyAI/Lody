@@ -420,14 +420,18 @@ function ContextChipActions({ actions }: { actions: readonly ContextChipAction[]
       </button>
       {overflowActions.length > 0 ? (
         <Menu.Root>
-          <Menu.Trigger render={<button
-              type="button"
-              aria-label={t('sessions.moreActions', 'More actions')}
-              title={t('sessions.moreActions', 'More actions')}
-              className="relative flex w-5 shrink-0 self-stretch items-center justify-center text-muted-foreground/75 outline-none transition-colors before:absolute before:left-0 before:h-3 before:w-px before:bg-foreground/10 hover:bg-foreground/[0.05] hover:text-foreground focus:outline-none focus:ring-0 focus:ring-offset-0 focus:shadow-none focus-visible:bg-foreground/[0.05] focus-visible:text-foreground focus-visible:outline-none focus-visible:ring-0 focus-visible:ring-offset-0 dark:before:bg-muted-foreground/15 dark:hover:bg-muted-foreground/[0.08] dark:focus-visible:bg-muted-foreground/[0.08]"
-            >
-              <ChevronDown className="h-3.5 w-3.5" aria-hidden="true" />
-            </button>}>
+          <Menu.Trigger
+            render={
+              <button
+                type="button"
+                aria-label={t('sessions.moreActions', 'More actions')}
+                title={t('sessions.moreActions', 'More actions')}
+                className="relative flex w-5 shrink-0 self-stretch items-center justify-center text-muted-foreground/75 outline-none transition-colors before:absolute before:left-0 before:h-3 before:w-px before:bg-foreground/10 hover:bg-foreground/[0.05] hover:text-foreground focus:outline-none focus:ring-0 focus:ring-offset-0 focus:shadow-none focus-visible:bg-foreground/[0.05] focus-visible:text-foreground focus-visible:outline-none focus-visible:ring-0 focus-visible:ring-offset-0 dark:before:bg-muted-foreground/15 dark:hover:bg-muted-foreground/[0.08] dark:focus-visible:bg-muted-foreground/[0.08]"
+              >
+                <ChevronDown className="h-3.5 w-3.5" aria-hidden="true" />
+              </button>
+            }
+          >
             <button
               type="button"
               aria-label={t('sessions.moreActions', 'More actions')}
@@ -457,11 +461,7 @@ function ContextChipActions({ actions }: { actions: readonly ContextChipAction[]
                   )}
                 </Menu.Item>
               ) : (
-                <Menu.Item
-                  key={action.id}
-                  disabled={action.disabled}
-                  onClick={action.onClick}
-                >
+                <Menu.Item key={action.id} disabled={action.disabled} onClick={action.onClick}>
                   {action.label}
                 </Menu.Item>
               )
@@ -521,22 +521,26 @@ function LocationControl({
   return (
     <Tooltip.Provider delay={300}>
       <Tooltip.Root>
-        <Tooltip.Trigger render={canCopy ? (
-            <button
-              type="button"
-              onClick={handleCopy}
-              aria-label={label}
-              // -mr-1 cancels the stage's icon→summary gap so the glyph sits
-              // close to the repo/branch text (a lone icon otherwise floats).
-              className="-mr-1 flex h-6 shrink-0 select-none items-center rounded-md px-1 text-muted-foreground transition-colors hover:bg-muted-foreground/10 hover:text-foreground"
-            >
-              {glyph}
-            </button>
-          ) : (
-            <span className="flex h-6 shrink-0 select-none items-center px-1 text-muted-foreground">
-              {glyph}
-            </span>
-          )}/>
+        <Tooltip.Trigger
+          render={
+            canCopy ? (
+              <button
+                type="button"
+                onClick={handleCopy}
+                aria-label={label}
+                // -mr-1 cancels the stage's icon→summary gap so the glyph sits
+                // close to the repo/branch text (a lone icon otherwise floats).
+                className="-mr-1 flex h-6 shrink-0 select-none items-center rounded-md px-1 text-muted-foreground transition-colors hover:bg-muted-foreground/10 hover:text-foreground"
+              >
+                {glyph}
+              </button>
+            ) : (
+              <span className="flex h-6 shrink-0 select-none items-center px-1 text-muted-foreground">
+                {glyph}
+              </span>
+            )
+          }
+        />
         <Tooltip.Content side="top">
           <span className="font-medium text-foreground">{label}</span>
           {canCopy ? (
@@ -626,7 +630,15 @@ export function ContextChip({
     : trimmedBranch || projectName || t('sessions.infoBar.context', 'Work context');
 
   if (itemMode.mode === 'cluster') {
-    return <ClusterChip icon={LocationIcon} label={label} onPromote={itemMode.onPromote} />;
+    return (
+      <ClusterChip
+        icon={pr ? StatusIcon : LocationIcon}
+        label={label}
+        value={value}
+        textClassName={pr && statusMeta ? statusMeta.iconColorClassName : undefined}
+        onPromote={itemMode.onPromote}
+      />
+    );
   }
 
   const copyBranchLabel = t('sessions.copyBranchName', 'Copy branch name');
@@ -639,25 +651,43 @@ export function ContextChip({
     });
   };
 
+  const statusLabel = statusMeta ? t(statusMeta.labelKey, statusMeta.labelFallback) : '';
+  const prTitle = statusLabel && value ? `${statusLabel} ${value}` : label;
+
   const prControl = pr ? (
     onOpenPr ? (
       <button
         type="button"
         onClick={onOpenPr}
         aria-label={t('sessions.pr.openTab', 'Open pull request')}
-        title={t('sessions.pr.openTab', 'Open pull request')}
-        className="flex h-6 shrink-0 select-none items-center gap-1 rounded-md px-1 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted-foreground/10"
+        title={prTitle}
+        className={cn(
+          'flex h-6 shrink-0 select-none items-center gap-1.5 rounded-md px-1.5 text-xs font-medium transition-colors',
+          statusMeta?.className ??
+            'bg-foreground/[0.06] text-muted-foreground hover:bg-foreground/[0.1]'
+        )}
       >
         <SessionPrIcon prStatus={status ?? 'open'} prCiState={compactCiState} />
-        {value ? (
-          <span className="hidden shrink-0 tabular-nums @[420px]:inline">{value}</span>
+        {value ? <span className="shrink-0 tabular-nums">{value}</span> : null}
+        {statusLabel ? (
+          <span className="hidden shrink-0 @[480px]:inline text-[11px] font-normal opacity-90">
+            {statusLabel}
+          </span>
         ) : null}
       </button>
     ) : (
-      <span className="flex h-6 shrink-0 items-center gap-1 px-1 font-medium text-muted-foreground">
+      <span
+        className={cn(
+          'flex h-6 shrink-0 items-center gap-1.5 rounded-md px-1.5 text-xs font-medium',
+          statusMeta?.className ?? 'bg-foreground/[0.06] text-muted-foreground'
+        )}
+      >
         <SessionPrIcon prStatus={status ?? 'open'} prCiState={compactCiState} />
-        {value ? (
-          <span className="hidden shrink-0 tabular-nums @[420px]:inline">{value}</span>
+        {value ? <span className="shrink-0 tabular-nums">{value}</span> : null}
+        {statusLabel ? (
+          <span className="hidden shrink-0 @[480px]:inline text-[11px] font-normal opacity-90">
+            {statusLabel}
+          </span>
         ) : null}
       </span>
     )

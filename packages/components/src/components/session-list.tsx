@@ -82,6 +82,7 @@ import {
   SessionPrIcon,
   SessionRowAuthorAvatar,
   SessionRowLeadingSlot,
+  SessionRowSubtitle,
   SidebarRowArchiveButton,
   SidebarRowEndSlot,
   SessionMergeablePill,
@@ -751,6 +752,11 @@ const SessionGroupRow = memo(function SessionGroupRow({
   );
   const openedByOpener = openedByTreeSlot?.kind === 'opener' ? openedByTreeSlot : null;
   const canToggleOpenedSessions = openedByOpener !== null;
+  const isNestedChild = node.depth === 1;
+  const isOpener = openedByOpener !== null;
+  const hasLeadingTreeAffordance = isNestedChild || isOpener;
+  const showLeadingPr = hasPr && !hasLeadingTreeAffordance;
+  const showTrailingPr = hasPr && hasLeadingTreeAffordance;
   const hasStandardMenuActions = Boolean(
     onRenameSession ||
     onTogglePinSession ||
@@ -789,7 +795,7 @@ const SessionGroupRow = memo(function SessionGroupRow({
         // Both chat and repo rows are a single line now; the repo row's
         // low-signal metadata (time / repo / branch / PR) moves to the
         // desktop hover info card so both organize modes read equally compact.
-        'px-2 py-1',
+        hasPr ? 'py-1.5' : 'py-1',
         'border border-transparent bg-transparent',
         !showSelectedState &&
           isSelectable &&
@@ -999,30 +1005,51 @@ const SessionGroupRow = memo(function SessionGroupRow({
           showMenuButton={hasMenuActions}
           menuLabel={moreActionsLabel}
           openedByTree={openedByTreeSlot}
+          prIcon={
+            showLeadingPr ? (
+              <SessionPrIcon compact prStatus={prStatus} prCiState={session.prCiState} />
+            ) : undefined
+          }
         />
         <div
           className={cn(
-            // Body role: conversation titles match prose in every organize mode.
-            'min-w-0 flex-1 flex items-center gap-1 truncate',
-            SIDEBAR_ROW_TEXT_CLASS,
+            'min-w-0 flex-1 flex flex-col justify-center',
             showSelectedState ? 'text-sidebar-selection-foreground' : 'text-sidebar-row-foreground'
           )}
-          // Double-click to rename is scoped to the title only, so it can't
-          // be triggered by double-clicking the Archive confirm button.
-          onDoubleClick={(e) => {
-            if (typeof onRenameSession !== 'function') return;
-            e.preventDefault();
-            e.stopPropagation();
-            beginRename(session.sessionId, session.title);
-          }}
         >
-          <SessionRowAuthorAvatar author={session.owner} />
-          {session.isPinned ? (
-            <Pin aria-hidden="true" className="h-3 w-3 shrink-0 text-sidebar-foreground-muted/80" />
+          <div
+            className={cn(
+              // Body role: conversation titles match prose in every organize mode.
+              'min-w-0 flex items-center gap-1 truncate',
+              SIDEBAR_ROW_TEXT_CLASS
+            )}
+            // Double-click to rename is scoped to the title only, so it can't
+            // be triggered by double-clicking the Archive confirm button.
+            onDoubleClick={(e) => {
+              if (typeof onRenameSession !== 'function') return;
+              e.preventDefault();
+              e.stopPropagation();
+              beginRename(session.sessionId, session.title);
+            }}
+          >
+            <SessionRowAuthorAvatar author={session.owner} />
+            {session.isPinned ? (
+              <Pin
+                aria-hidden="true"
+                className="h-3 w-3 shrink-0 text-sidebar-foreground-muted/80"
+              />
+            ) : null}
+            {renderTitle()}
+          </div>
+          {hasPr ? (
+            <SessionRowSubtitle
+              prNumber={prNumber}
+              prStatus={prStatus}
+              branchName={session.branchName}
+            />
           ) : null}
-          {renderTitle()}
         </div>
-        {/* Keep PR at the right edge. Line totals stay in the hover card. */}
+        {/* Keep PR at the right edge when not shown leading. Line totals stay in the hover card. */}
         <SidebarRowEndSlot
           sessionId={session.sessionId}
           isWaitingPermission={session.isWaitingPermission}
@@ -1036,7 +1063,7 @@ const SessionGroupRow = memo(function SessionGroupRow({
                   className={cn(SIDEBAR_CAPTION_TEXT_CLASS, 'text-muted-foreground')}
                 />
               </span>
-            ) : hasPr || showMergeablePill || isMobile ? (
+            ) : showTrailingPr || showMergeablePill || isMobile ? (
               <span
                 className={cn(
                   SIDEBAR_CAPTION_TEXT_CLASS,
@@ -1051,7 +1078,7 @@ const SessionGroupRow = memo(function SessionGroupRow({
                   />
                 ) : null}
                 {showMergeablePill ? <SessionMergeablePill /> : null}
-                {hasPr ? (
+                {showTrailingPr ? (
                   <SessionPrIcon compact prStatus={prStatus} prCiState={session.prCiState} />
                 ) : null}
               </span>
