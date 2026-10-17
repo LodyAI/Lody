@@ -607,6 +607,16 @@ export type CloudApi = {
       { billingInterval: BillingInterval; effectiveAt: number | null }
     >;
   };
+  githubPersonalAuthorization: {
+    begin: Action<
+      { workspaceId: string; challenge: string; callbackURL: string },
+      { state: string; url: string }
+    >;
+    complete: Action<
+      { workspaceId: string; state: string; code: string; verifier: string },
+      { success: true }
+    >;
+  };
   github: {
     createGitHubInstallState: Action<
       { returnTarget?: 'desktop' | 'web'; workspaceSlug?: string; workspaceId: string },
