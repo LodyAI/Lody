@@ -156,8 +156,8 @@ Project 行冻结的 Member 列表（`id`、`dir`、`src`、`base`）。这和 R
 **磁盘**：普通 Member 在 `<data>/repos/<root>/worktrees/<sessionId>/<dir>/`，子模块
 Member 在父 Member 路径下的子模块路径。`<root>` 中的名称片段是
 Project 名称经过小写化、只保留 `[a-z0-9-]` 并截断到 32 个字符的结果，为空时用
-`project`。每个 Member 的 Git worktree 登记在它自己的仓库中，登记名使用 sessionId；
-同一个对话里每个仓库只有一个 Member，所以不会冲突。
+`project`。每个 Member 的 Git worktree 登记在它自己的仓库中；Git 根据检出目录名
+分配内部登记名，必要时加后缀。Lody 使用冻结目录和分支识别 Member，不依赖内部登记名。
 
 ## 路径依赖调研（为将来支持本地目录做准备）
 
@@ -264,3 +264,32 @@ list/write/delete 函数。定义与运行快照 schema 拒绝不安全的跨平
 并发写入元数据和生命周期行为仍待验证。
 
 契约 PR：[#1641](https://github.com/LodyAI/Lody/pull/1641)。
+
+
+## 运行时存储发现与 worktree 基础能力
+
+当前锁定的 `loro-repo` **不会**把嵌套元数据 Record 转成 Loro map：
+`MetadataManager.upsert` 将每个顶层键写入单个 Flock 值 `['m', docId, key]`。
+因此写 `projectRun` 会替换整个运行快照，TypeScript Record 本身不能保证 Member
+独立合并。运行时接入待决定采用上游嵌套元数据支持，还是独立 Member 行再投影到
+SessionMeta。仅在本机串行读改写不能满足原提案的复制合并契约。本次未改依赖版本。
+
+worktree 准备性改动为 WorktreeManager 增加显式冻结的 Project 位置。
+仓库存储与锁仍以 repoId 为键；带位置的实例不进入仅按 repoId 的全局缓存。
+原生观测使用同一个 Member 目录后缀。不同对话重复使用 Member 目录名时，Git 可能
+为内部管理目录名加后缀；Member 通过目录与分支识别，不依赖内部名称。这修正了上文
+“Git 登记名总是 sessionId”的假设。
+
+子模块基础函数组合现有原生 WorktreeGit 服务，检出前验证 `.gitmodules` 与实际
+gitlink，递归初始化，从 gitlink 创建分支，并在 deinit 前通过本地 fetch 将备份分支
+保存到持久仓库；恢复时取回该分支。非快进保存和仓库身份不符均失败保留。
+这些函数已有真实 Git 测试，但尚无 daemon 消费方，不代表完整物化、归档或 GC 已完成。
+
+未来 Project mutation owner 须由冻结创建/恢复快照触发，串行处理同一 Project
+对话的变更，失败时保留部分目录和分支记录，原始 Git 进程清理完成后才能交接。
+WorktreeGit 已拥有命令取消和清理；现有 manager/setup/GC 编排仍基于 Promise。
+整个 manager 迁移会拉入未完成的依赖，因此暂缓。新增原生子模块叶子函数不代表该迁移
+完成。测试验证本地 Git 的检出、备份与恢复；托管凭据、重试记录、多 Member 观测和
+先恢复父 Member 的编排仍待验证。
+
+Worktree 基础能力 PR：[ #1642](https://github.com/LodyAI/Lody/pull/1642)。

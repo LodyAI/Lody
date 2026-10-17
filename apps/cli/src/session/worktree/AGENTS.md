@@ -110,3 +110,5 @@ and file responsibilities: [../README.md](../README.md).
   reconciled from Session state by `worktree-gc.ts` (no command, no acknowledgement);
   it acts only on `archived` or `deleted` owners, never on `unknown`, and only once
   workspace metadata is complete. Contract: specs/session-worktree-lifecycle.md.
+
+- Project placement changes checkout paths, never repository storage or repo locks.

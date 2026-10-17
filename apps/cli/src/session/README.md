@@ -548,3 +548,13 @@ The Session sandbox persists incomplete identity before spawn and continuously a
 ACP/terminal process roots. Execution retains every attached Session owner until release,
 including replacements within one turn. Restart probes require explicit completeness and
 absence of every root/group; an initial snapshot alone is insufficient.
+
+
+### Project worktree preparation
+
+`WorktreeManagerConfig.projectMember` places a root Member under the frozen Project
+root while retaining the source repository's storage and lock. Placement-aware managers
+are not cached by repo ID alone. `worktree/project-submodules.ts` provides native Git
+validation, gitlink checkout and persistent backup/restore primitives. Runtime admission,
+per-Member metadata publication and Project-wide cleanup are not connected yet; see the
+[storage finding](../../../../.agents/notes/proposed/architecture/2026-10-16-multi-repo-projects.md#runtime-storage-finding-and-worktree-primitives).

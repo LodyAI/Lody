@@ -1,7 +1,7 @@
 import { Context, Effect, Exit } from 'effect';
 import { squashFileLockFailure } from '@lody/shared/node/file-lock';
 import { GITHUB_CREDENTIAL_ENV_KEYS } from '@/lib/gh-token-env';
-import { RepoId, SessionId } from '@lody/shared';
+import { RepoId, SessionId, isSafeProjectPath } from '@lody/shared';
 import { localProjectsLegacy } from '@lody/shared/node/local-project';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -105,6 +105,9 @@ export type WorktreeManagerSource =
   | { kind: 'local-shared'; sourceGitDir?: string; originalRootPath: string };
 
 export interface WorktreeManagerConfig {
+  /** Frozen Project layout; repository storage and locking still belong to repoId. */
+  projectMember?: { root: string; dir: string };
+
   repoId: RepoId;
   source?: WorktreeManagerSource;
   repoUrl?: string;
@@ -313,6 +316,7 @@ export class WorktreeManager {
   private readonly bareGitDir: string;
   /** Worktrees directory: <active installation data root>/repos/<repoId>/worktrees */
   private readonly worktreesDir: string;
+  private readonly worktreeSubdirectory: string;
   /** Cache directory: <active installation data root>/repos/<repoId>/cache */
   private readonly cacheDir: string;
 
@@ -326,7 +330,22 @@ export class WorktreeManager {
     this.baseDir = path.join(getLodyDataDir(), 'repos');
     this.repoDir = path.join(this.baseDir, this.repoId);
     this.bareGitDir = path.join(this.repoDir, 'bare.git');
-    this.worktreesDir = path.join(this.repoDir, 'worktrees');
+    const placement = config.projectMember;
+    if (
+      placement &&
+      (!placement.root.startsWith('project-') ||
+        !isSafeProjectPath(placement.root) ||
+        placement.root.includes('/') ||
+        !isSafeProjectPath(placement.dir) ||
+        placement.dir.includes('/'))
+    ) {
+      throw new Error('Invalid Project worktree placement');
+    }
+    this.worktreesDir = path.join(
+      placement ? path.join(this.baseDir, placement.root) : this.repoDir,
+      'worktrees'
+    );
+    this.worktreeSubdirectory = placement?.dir ?? '';
     this.cacheDir = path.join(this.repoDir, 'cache');
   }
 
@@ -1008,7 +1027,7 @@ export class WorktreeManager {
    */
   getWorktreeHostPath(sessionId: SessionId): string {
     assertSafeSessionId(sessionId);
-    return path.join(this.getWorktreesHostPath(), sessionId);
+    return path.join(this.getWorktreesHostPath(), sessionId, this.worktreeSubdirectory);
   }
 
   private getWorktreesHostPath(): string {
@@ -1363,6 +1382,7 @@ export class WorktreeManager {
       source: {
         repoId: RepoId;
         worktreesDir: string;
+        worktreeSubdirectory?: string;
         localShared: boolean;
       }
     ) => Effect.Effect<A, E>
@@ -1370,6 +1390,7 @@ export class WorktreeManager {
     const source = {
       repoId: this.repoId,
       worktreesDir: this.worktreesDir,
+      worktreeSubdirectory: this.worktreeSubdirectory,
       localShared: this.isLocalSharedSource(),
     };
     return this.runWorktreeLegacy(
@@ -1740,6 +1761,7 @@ const worktreeManagers = new Map<RepoId, WorktreeManager>();
  * Get or create a WorktreeManager for a repository
  */
 export function getWorktreeManager(config: WorktreeManagerConfig): WorktreeManager {
+  if (config.projectMember) return new WorktreeManager(config);
   let manager = worktreeManagers.get(config.repoId);
   if (!manager) {
     manager = new WorktreeManager(config);

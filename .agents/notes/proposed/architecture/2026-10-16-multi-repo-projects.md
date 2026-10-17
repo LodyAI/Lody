@@ -195,8 +195,9 @@ only after materializing it.
 a submodule Member is at its submodule path under the parent Member's path. The name part of
 `<root>` is the Project name lower-cased, reduced to `[a-z0-9-]` and truncated to
 32 characters, falling back to `project` when empty. Each Member's Git worktree is
-registered in its own repository under the sessionId as the registration name. A
-conversation has only one Member per repository, so the names cannot collide.
+registered in its own repository. Git derives the internal administrative name from
+the checkout directory, suffixing collisions. Lody identifies Members by frozen path
+and branch, not this internal name.
 
 ## Path dependency survey (preparing for local directories)
 
@@ -339,3 +340,40 @@ This contract slice does not enable creation on existing daemons. Runtime implem
 per-Member concurrent metadata writes and lifecycle behavior remain to be verified.
 
 Contract PR: [#1641](https://github.com/LodyAI/Lody/pull/1641).
+
+
+## Runtime storage finding and worktree primitives
+
+The locked `loro-repo` implementation does **not** turn nested metadata records into
+Loro maps: `MetadataManager.upsert` writes each top-level key to one Flock value
+`['m', docId, key]`. Thus writing `projectRun` replaces the entire run. The TypeScript
+Record in the contract cannot establish independent Member merge semantics. Runtime
+activation is pending a decision between upstream nested metadata support and separate
+Member rows projected into SessionMeta. A serial local read-modify-write queue alone
+would not preserve the proposed replication contract. No dependency version is changed.
+
+The preparatory worktree change adds an explicit frozen Project placement to
+WorktreeManager. Repository data and leases remain keyed by repoId; placement-aware
+instances are not put in the repo-only global cache. Native observations use the same
+member suffix. Git may suffix the administrative worktree name when member directory
+basenames repeat across sessions; the directory and branch, rather than that internal
+name, identify the Member. This corrects the earlier assumption that Git always uses
+sessionId as its administrative registration name.
+
+Submodule primitives compose the existing native WorktreeGit service. They validate
+`.gitmodules` and the actual gitlink before checkout, initialize recursively, allocate
+from the gitlink commit, and save backup branches by local fetch into persistent storage
+before deinit. Restore retrieves that branch. Non-fast-forward persistence and repository
+mismatch fail closed. These primitives have real-Git tests but no daemon consumer yet.
+They do not establish a complete materialization, archive or GC workflow.
+
+The future Project mutation owner must trigger from the frozen create/restore snapshot,
+serialize same-Project session mutations, retain partial directories and branch receipts
+on failure, and release all raw Git processes before handoff. WorktreeGit already owns
+command cancellation and cleanup; the existing manager/setup/GC orchestration remains
+Promise-based. A whole-manager migration pulls in unfinished dependencies and is deferred.
+The new native submodule leaf does not claim that migration is complete. Tests verify
+local Git checkout, backup and restore; managed credentials, retry receipts, multi-Member
+observation and parent-first restore orchestration remain unverified.
+
+Worktree primitives PR: [#1642](https://github.com/LodyAI/Lody/pull/1642).
