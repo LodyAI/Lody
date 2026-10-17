@@ -62,6 +62,8 @@ export interface InternalState {
   verification: 'full-history' | 'endorsed-snapshot';
 }
 const id = (value: { toBytes(): Uint8Array }) => keyId(value.toBytes());
+/** Capability codes this verifier implements. Adding one also adds its state and snapshot field. */
+const SUPPORTED_CAPABILITIES: ReadonlySet<number> = new Set();
 export function genesisState(
   body: Extract<RecordBody, { type: 'genesis' }>,
   genesis: Bytes.GenesisHash,
@@ -268,6 +270,14 @@ export function applyOperation(
           Object.freeze({ userId: found.userId, role: 'owner' })
         );
         s.owner = op.successorMembershipId;
+        break;
+      }
+      case 'declareCapabilities': {
+        if (!manage) return yield* fail('unauthorized');
+        // Ledger v1 supports no capability yet. A genuine declaration is a valid
+        // future record, so stop at it as an upgrade, never as corruption.
+        if (op.capabilities.some((code) => !SUPPORTED_CAPABILITIES.has(code)))
+          return yield* fail('upgrade-required');
         break;
       }
       case 'publishEpoch':

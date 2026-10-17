@@ -6,6 +6,8 @@ export type LedgerErrorCode =
   | ValidationErrorCode
   | 'unknown-version'
   | 'unknown-operation'
+  /** A well-formed, authorized capability declaration this client does not support. */
+  | 'upgrade-required'
   | 'bad-proof'
   | 'unauthorized'
   | 'replay'

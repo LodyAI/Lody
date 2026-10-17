@@ -38,8 +38,10 @@ whitepaper, Specs, decisions and this package's docs. Contract:
 ## Invariants
 
 - Preserve wire algorithms, domains and versions. Expected malformed input
-  returns typed errors; never silently repair or downgrade bytes. Current format
-  only: no legacy import, conversion or downgrade.
+  returns typed errors; never silently repair or downgrade bytes. Ledger v1 stays
+  verifiable forever: never regenerate `test/ledger-v1-vector.json`; evolve only by
+  [capability declaration or a new ledger](../../specs/e2ee-foundations.md#format-compatibility).
+  Other formats are current-only: no legacy import, conversion or downgrade.
 - Enforce CBOR limits before full expansion or copying; charge shared values by
   expanded size and reject cycles without unbounded traversal.
 - Trusted genesis, resource, epoch, purpose and signer come from independently

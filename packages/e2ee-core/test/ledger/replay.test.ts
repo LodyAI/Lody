@@ -19,6 +19,7 @@ import * as Bytes from '../../src/internal/foundation/bytes';
 import { encodeCbor, type CborValue } from '../../src/internal/foundation/cbor';
 import { keyId } from '../../src/internal/foundation/identifiers';
 import * as Ledger from '@lody/e2ee-core/protocol';
+import ledgerV1 from '../ledger-v1-vector.json';
 
 const ok = <A, E>(r: Result.Result<A, E>): A => Result.getOrThrow(r);
 const filled = (n: number, size = 32) => new Uint8Array(size).fill(n);
@@ -2126,5 +2127,91 @@ describe('public admission consent and ordinary intent', () => {
       )
     );
     expect(Result.isFailure(bad) && bad.failure).toMatchObject({ code: 'bad-signature' });
+  });
+});
+
+describe('frozen ledger v1 compatibility', () => {
+  const fromHex = (value: string) => new Uint8Array(Buffer.from(value, 'hex'));
+  const records = ledgerV1.records.map((record) => fromHex(record.hex));
+  const anchor = ok(Bytes.genesisHash(fromHex(ledgerV1.anchor)));
+  const prefix = (length: number) =>
+    Ledger.verifyLedger({
+      anchor,
+      records: records.slice(0, length),
+      checkpoint: checkpoint(records.slice(0, length)),
+    });
+
+  it('verifies independently encoded v1 history with unchanged hashes and state', () => {
+    // Created outside this codebase; a failure here means existing ledgers stop verifying.
+    expect(records.map((record) => hex(Ledger.hashRecordBytes(record)))).toEqual(
+      ledgerV1.records.map((record) => record.hash)
+    );
+    const view = ok(prefix(ledgerV1.expected.verifiedLength));
+    const state = comparable(view);
+    const expected = ledgerV1.expected;
+    expect(state.owner).toBe(expected.owner);
+    expect(state.epoch).toEqual(expected.epoch);
+    expect(
+      Object.fromEntries(state.members.map(([key, userId, role]) => [key, { userId, role }]))
+    ).toEqual(expected.members);
+    expect(
+      Object.fromEntries(
+        state.devices.map(([key, membershipId, kind]) => [key, { membershipId, kind }])
+      )
+    ).toEqual(expected.devices);
+  });
+
+  it('stops at a genuine capability declaration as an upgrade, with its position', () => {
+    const all = Ledger.verifyLedger({ anchor, records, checkpoint: checkpoint(records) });
+    expect(Result.isFailure(all) && all.failure).toMatchObject(ledgerV1.expected.failure);
+    const before = ok(prefix(ledgerV1.expected.verifiedLength));
+    const extended = Ledger.extendLedger(before, records.slice(-1), checkpoint(records));
+    expect(Result.isFailure(extended) && extended.failure).toMatchObject(ledgerV1.expected.failure);
+    expect(before.length).toBe(ledgerV1.expected.verifiedLength);
+  });
+});
+
+describe('capability declarations', () => {
+  it('lets Owner and Admin personal devices declare, and reports an upgrade rather than corruption', () => {
+    for (const role of ['owner', 'admin'] as const) {
+      const o = org();
+      o.append(owner, o.join(bob, 11));
+      if (role === 'admin') o.append(owner, [3, id(11), 1]);
+      o.append(role === 'owner' ? owner : bob, [9, [1, 7]]);
+      const result = o.verify();
+      expect(Result.isFailure(result) && result.failure).toMatchObject({
+        code: 'upgrade-required',
+        position: o.records.length - 1,
+      });
+    }
+  });
+
+  it('rejects declarations by Member, Guest, machine and recovery devices', () => {
+    for (const role of ['member', 'guest'] as const) {
+      const o = org();
+      o.append(owner, o.join(bob, 11));
+      if (role === 'guest') o.append(owner, [3, id(11), 3]);
+      o.append(bob, [9, [1]]);
+      expect(code(o.verify())).toBe('unauthorized');
+    }
+    for (const kind of [1, 2]) {
+      const o = org();
+      o.append(owner, o.device(machine, kind));
+      o.append(machine, [9, [1]]);
+      expect(code(o.verify())).toBe('unauthorized');
+    }
+  });
+
+  it.each([
+    ['empty', []],
+    ['zero', [0]],
+    ['unsorted', [2, 1]],
+    ['duplicate', [1, 1]],
+    ['beyond u32', [2 ** 32]],
+    ['too many', Array.from({ length: 17 }, (_, index) => index + 1)],
+  ])('rejects a %s capability list as invalid', (_, capabilities) => {
+    const o = org();
+    o.append(owner, [9, capabilities]);
+    expect(code(o.verify())).toBe('invalid-operation');
   });
 });

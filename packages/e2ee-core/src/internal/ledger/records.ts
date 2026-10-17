@@ -51,7 +51,15 @@ export type Operation =
       readonly epoch: Bytes.EpochNumber;
       readonly commitment: Bytes.EpochCommitment;
       readonly previousEpochKey: Uint8Array;
+    }
+  | {
+      /** Monotonic protocol extension gate: later records may use these capabilities. */
+      readonly type: 'declareCapabilities';
+      /** Strictly ascending nonzero u32 capability codes, at most sixteen. */
+      readonly capabilities: readonly number[];
     };
+/** Most capability codes one declaration may carry. */
+export const MAX_DECLARED_CAPABILITIES = 16;
 /** Unverified decoded record body (genesis or ordinary). */
 export type RecordBody =
   | {
@@ -176,6 +184,28 @@ function parseOperation(value: CborValue): Result.Result<Operation, LedgerError>
           epoch,
           commitment: yield* lift(Bytes.epochCommitment(p[3])),
           previousEpochKey: new Uint8Array(p[4]),
+        });
+      }
+      case 9: {
+        // v1 knows this shape permanently; support for each code is decided at replay.
+        yield* array(p, 2);
+        const codes = yield* array(p[1]!);
+        if (codes.length < 1 || codes.length > MAX_DECLARED_CAPABILITIES)
+          return yield* fail('invalid-operation');
+        const capabilities: number[] = [];
+        for (const code of codes) {
+          const capability = yield* uint(code);
+          if (
+            capability < 1 ||
+            capability > 0xffff_ffff ||
+            capability <= (capabilities.at(-1) ?? 0)
+          )
+            return yield* fail('invalid-operation');
+          capabilities.push(capability);
+        }
+        return Object.freeze({
+          type: 'declareCapabilities',
+          capabilities: Object.freeze(capabilities),
         });
       }
       default:
