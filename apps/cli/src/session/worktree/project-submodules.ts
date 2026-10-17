@@ -62,7 +62,11 @@ export const inspectProjectSubmodule = Effect.fn('inspectProjectSubmodule')(func
   ) {
     return yield* fail('Project submodule repository no longer matches the frozen Member');
   }
-  return { commit: match[1] as string, path: path.join(options.parentPath, options.submodulePath) };
+  return {
+    commit: match[1] as string,
+    path: path.join(options.parentPath, options.submodulePath),
+    configKey: entry[1],
+  };
 });
 
 /** Caller owns the Project mutation lease and must retain partial materialization on failure. */
@@ -77,9 +81,30 @@ export const checkoutProjectSubmodule = Effect.fn('checkoutProjectSubmodule')(fu
   env?: NodeJS.ProcessEnv;
 }) {
   const git = yield* WorktreeGit;
+  if (options.restore && !path.isAbsolute(options.restore.repositoryPath))
+    return yield* Effect.fail(
+      new WorktreeGitExecutionFailed({
+        message: 'Submodule restore requires a machine-resolved repository path',
+        cause: undefined,
+      })
+    );
   const inspected = yield* inspectProjectSubmodule(options);
   yield* git.run({
-    args: ['submodule', 'update', '--init', '--recursive', '--', options.submodulePath],
+    // Restore unpublished gitlinks from the durable local store before contacting the remote.
+    // Nested selected members are restored separately before recursive initialization.
+    args: options.restore
+      ? [
+          '-c',
+          'protocol.file.allow=always',
+          '-c',
+          `${inspected.configKey}.url=${options.restore.repositoryPath}`,
+          'submodule',
+          'update',
+          '--init',
+          '--',
+          options.submodulePath,
+        ]
+      : ['submodule', 'update', '--init', '--recursive', '--', options.submodulePath],
     cwd: options.parentPath,
     env: options.env,
   });
@@ -88,6 +113,7 @@ export const checkoutProjectSubmodule = Effect.fn('checkoutProjectSubmodule')(fu
     '\n'
   );
   if (options.restore) {
+    yield* run(['remote', 'set-url', 'origin', options.expectedRepositoryUrl]);
     yield* run(['check-ref-format', '--branch', options.restore.branch]);
     if (!path.isAbsolute(options.restore.repositoryPath))
       return yield* Effect.fail(

@@ -1,4 +1,4 @@
-# Multi-repository Projects: flat under one main directory
+# Multi-repository Project groups: one main directory
 
 Status: proposed
 Type: architecture
@@ -15,11 +15,9 @@ adds workspace-level Projects. When a conversation is created, each Member gets 
 editable worktree placed directly under one main directory, and that main
 directory is the agent's execution directory. PR discovery and the meaning of
 "current PR" become per-repository. This design simplifies the original
-nested-layout proposal after review. The cost is that original nesting, such as
-submodules and relative paths inside dependency folders, is no longer kept on
-disk; the agent is only told about it. Nothing is implemented yet. Still
-unverified: agent sandbox scope, `SessionMeta` size, and how older clients display
-these conversations. The intended contract is in the
+nested-layout proposal after review. Declared submodules retain their nesting; other
+members are flattened. Shared and daemon implementation is under review. Agent sandbox
+scope and older-client presentation still need product verification. The intended contract is in the
 [draft Spec](../../../../specs/multi-repo-projects.md).
 
 ## Problem and requirements
@@ -153,7 +151,7 @@ type SessionProjectRun = {
   instructions?: string;
   /** Name of the main directory's parent under `repos/`, e.g. `project-acme-shop-<id>`; fixed at creation. */
   root: string;
-  /** A Loro map keyed by Member ID, so writes for different Members do not conflict. */
+  /** One top-level snapshot: only the owner daemon serially updates it after creation. */
   members: Record<ProjectMemberId, SessionProjectMember>;
 };
 
@@ -168,6 +166,7 @@ type SessionProjectMember = {
   /** Base resolved at creation: the base ref for an ordinary Member, the gitlink commit for a submodule Member. */
   base: string;
   /** Runtime observations below, written by the machine that owns the conversation. */
+  repoFullName?: string; // GitHub identity observed for a local Member remote
   branch?: string; // last observed named branch
   dirty?: boolean;
   unpushed?: boolean;
@@ -337,7 +336,7 @@ realpaths to reject symlink escapes. Absolute roots remain machine-local.
 `multiRepoProject: 1` is defined and negotiable, but is deliberately not included in the
 current daemon advertisement until materialization and lifecycle support are implemented.
 This contract slice does not enable creation on existing daemons. Runtime implementation,
-per-Member concurrent metadata writes and lifecycle behavior remain to be verified.
+owner-serialized metadata writes and lifecycle behavior remain to be verified.
 
 Contract PR: [#1641](https://github.com/LodyAI/Lody/pull/1641).
 
@@ -346,11 +345,15 @@ Contract PR: [#1641](https://github.com/LodyAI/Lody/pull/1641).
 
 The locked `loro-repo` implementation does **not** turn nested metadata records into
 Loro maps: `MetadataManager.upsert` writes each top-level key to one Flock value
-`['m', docId, key]`. Thus writing `projectRun` replaces the entire run. The TypeScript
-Record in the contract cannot establish independent Member merge semantics. Runtime
-activation is pending a decision between upstream nested metadata support and separate
-Member rows projected into SessionMeta. A serial local read-modify-write queue alone
-would not preserve the proposed replication contract. No dependency version is changed.
+`['m', docId, key]`. The product owner selected a single-writer contract:
+`projectRun` remains one top-level SessionMeta value. Clients write only the initial
+snapshot with session/create metadata. Afterwards, only the owning daemon writes it.
+Observations, member additions and legacy projections share the branch observation
+owner queue, serializing read-modify-write per conversation. No nested Record merge,
+upstream loro-repo change or separate member rows are needed. A future second writer
+requires a separate row per member. Code type names stay unchanged; user-facing and
+first-turn agent text calls this a “Project group”. “Project” continues to mean a
+single local folder or GitHub repository.
 
 The preparatory worktree change adds an explicit frozen Project placement to
 WorktreeManager. Repository data and leases remain keyed by repoId; placement-aware
@@ -364,16 +367,70 @@ Submodule primitives compose the existing native WorktreeGit service. They valid
 `.gitmodules` and the actual gitlink before checkout, initialize recursively, allocate
 from the gitlink commit, and save backup branches by local fetch into persistent storage
 before deinit. Restore retrieves that branch. Non-fast-forward persistence and repository
-mismatch fail closed. These primitives have real-Git tests but no daemon consumer yet.
-They do not establish a complete materialization, archive or GC workflow.
+mismatch fail closed. These primitives have real-Git tests.
+The runtime integration below composes them into materialization and GC.
 
-The future Project mutation owner must trigger from the frozen create/restore snapshot,
-serialize same-Project session mutations, retain partial directories and branch receipts
-on failure, and release all raw Git processes before handoff. WorktreeGit already owns
+The Project mutation owner triggers from the frozen create/restore snapshot,
+serializes mutations of the same owner session, retains partial directories and branch receipts
+on failure, and releases all raw Git processes before handoff. WorktreeGit already owns
 command cancellation and cleanup; the existing manager/setup/GC orchestration remains
 Promise-based. A whole-manager migration pulls in unfinished dependencies and is deferred.
 The new native submodule leaf does not claim that migration is complete. Tests verify
-local Git checkout, backup and restore; managed credentials, retry receipts, multi-Member
-observation and parent-first restore orchestration remain unverified.
+local Git checkout, backup, restore, member observation and stable branch receipts.
+Live managed credentials remain outside the deterministic local test fixtures.
 
 Worktree primitives PR: [#1642](https://github.com/LodyAI/Lody/pull/1642).
+
+
+## Owner serialization and runtime integration
+
+The owning daemon shares the existing WorkspaceGitService queue across service instances
+for the same document manager and owner Session. Reads occur after queue acquisition;
+failed writes do not poison recovery. Materialization publishes each successful member's
+branch before continuing, so a later failure retains both directories and branch receipts.
+Observations use each member's Git directory and publish the snapshot with legacy projections.
+Unknown probes retain prior facts; detached HEAD retains the last named branch. Children
+publish to their owner. The surrounding session/setup/GC orchestration remains Promise-based;
+this change does not claim a native lifecycle migration. WorktreeGit still owns process release.
+
+Session startup uses the frozen group directory and first-use prompt context says “Project group”.
+ACP originProjectPath points to the stable group directory. With archive/GC, PR reconciliation
+and member-based file indexing connected, the runtime advertises `multiRepoProject: 1`.
+
+
+Local GitHub discovery needs a durable machine-observed repository identity for each local
+member, without opening Git during metadata-wide poller scans. `SessionProjectMember` adds
+optional `repoFullName`, populated by the owner from the member remote. This additive field
+is compatible with existing consumers; `src` remains the frozen local binding. The creation
+request cannot supply an authoritative observed identity. PR discovery still requires the
+member's observed branch and revalidates both identity and branch before writing.
+
+
+Runtime archive backs up all members before removing any root. Submodule refs are fetched
+into persistent repository storage before parent backup records the new gitlink. Restore
+seeds submodule objects from that store, including commits absent from the remote, and
+keeps the original base. Git requires forced worktree removal even after deinit; the
+manager first verifies the saved branch, a clean checkout and deinitialized submodules.
+Unselected submodule commits without a persistent Member store, or unresolved repositories,
+retain the group. Root files outside members are not recursively deleted. Reproducible
+`.lody/attachments` copies can be removed after backup.
+
+PR discovery targets and idle fingerprints include Member ID. Fresh-meta revalidation
+checks that same member's repository and branch; current-PR ordering is repository-local.
+File-index workers scan each Member with Git and prefix relative paths; All Changes pins
+a merge base per Member. Code Collab, preview, ACP diff evidence and upload containment
+share `resolveSessionFilePath`, retaining realpath checks at filesystem boundaries. POSIX
+backslashes remain literal characters, preventing a sibling path from masquerading as a
+child. UI components and desktop presentation remain owned by the separate UI session.
+
+The public mid-conversation add-member request remains a follow-up: no RPC shape was defined
+by this contract slice. Any such request must materialize and publish through the same owner
+queue; clients must never replace the snapshot after creation. Live managed-credential and
+UI end-to-end acceptance are not covered by the deterministic Git fixtures.
+
+Validation: CLI typecheck and `check:quick` passed; PR reconciliation suites passed 101 tests.
+The final session/owner/prompt/Git transport run passed 74 tests, including all three group
+lifecycle layouts, with one native SSH credential fixture failing `context_unreadable`.
+The full repository check is not green; UI and live credential acceptance remain outstanding.
+
+Runtime integration PR: [#1644](https://github.com/LodyAI/Lody/pull/1644)。

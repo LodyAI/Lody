@@ -79,8 +79,8 @@ and file responsibilities: [../README.md](../README.md).
   refresh them via `syncWorkspaceGitState`: the one in `finalizeTurn` (Stop raced finalization)
   and `finalizeCancelledTurn` (Stop during the prompt — the common one). That helper owns
   the GitHub-capability gate itself because those callers carry no `ProjectRef`; do not
-  re-test it per call site. The flags are NOT written for a session with no GitHub
-  repository — nothing can act on them there.
+  re-test it per call site. Single-project flags need a GitHub
+  repository; Project groups publish the OR across members.
 - Resume a Session on a local project with the workspace's current branch as-is, worktree mode
   included: a persisted `acpSessionId` proves prior execution, so the stored `project.branch` is
   historical state, not a checkout request. A legacy direct local Session may re-enter

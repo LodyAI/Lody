@@ -8,7 +8,9 @@ host/runtime/CRDT capture implementation has been removed from this directory.
   owner/child workspace roots through `message-handler.ts`, treats relative paths as
   file ids, enforces path/text/payload limits, handles open/refresh/save conflicts,
   publishes file tree/current All Changes, and opens current or turn-scoped diffs.
-  Git All Changes uses the owner base; non-Git uses local diff evidence only when a
+  Project groups scan each Member with Git, prefix paths by Member placement, and pin
+  each Member merge base for All Changes snapshots. The main directory is not a Git repository.
+  Ordinary Git All Changes uses the owner base; non-Git uses local diff evidence only when a
   trustworthy base exists. It owns in-memory file-index state replacement and Flock
   publish even when the scan itself ran in a worker.
 - `file-index-scan-core.ts` — shared scan and Git merge-base resolution. Tracking

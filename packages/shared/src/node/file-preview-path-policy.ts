@@ -1,3 +1,4 @@
+import { resolveSessionFilePath } from '../project-path';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -141,10 +142,7 @@ function resolveRealPathOrNull(
  * matching spellings on its own.
  */
 function isWithinRoot(rootPath: string, targetPath: string): boolean {
-  const relativePath = path.relative(rootPath, targetPath);
-  if (relativePath === '') return true;
-  if (path.isAbsolute(relativePath)) return false;
-  return relativePath !== '..' && !relativePath.startsWith(`..${path.sep}`);
+  return resolveSessionFilePath([{ id: 'main', absolutePath: rootPath }], targetPath) !== undefined;
 }
 
 function expandHome(input: string, homeDir: string): string {

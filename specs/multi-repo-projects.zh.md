@@ -1,9 +1,12 @@
-# 多仓库 Project
+# 多仓库项目组（Project group）
 
 Status: draft
 Translation: current
 
 [English](multi-repo-projects.md)
+
+界面与 Agent 文案称为「项目组 / Project group」。代码类型名不变；下文 Project
+指项目组，现有「项目」仍指单个本地文件夹或 GitHub 仓库。
 
 ## 场景
 
@@ -126,7 +129,10 @@ Member 无法解析或备份失败，都保留整个主目录并稍后重试。�
   Member 只引用 `(machineId, localProjectId)`；路径仍只存在于该机器的 Flock 中。
 - 对话元数据保存创建时冻结的 Member 快照，包括 Project 名称和主目录名。删除或修改
   Project 不影响已有对话；Project 被删除后，已有对话仍按快照分组和恢复。
-- 各 Member 的运行时状态以 Member ID 为键分开存储，不同 Member 的并发写入互不覆盖。
+- `projectRun` 保持 SessionMeta 上的单个顶层值。客户端只在创建对话时写初始快照；
+  此后只有拥有该对话的 daemon 写入，包括成员观测、中途追加成员和旧字段投影，
+  按对话串行执行读取、修改、写回，复用分支观测的 owner 串行链。
+  如果将来出现第二个写入方，必须改为每个成员单独一行。
 - 主目录名在创建时确定并写入对话元数据，之后不随 Project 改名而变化。
 - 旧字段 `project`、`branchName`、`repoFullName`、`isWorktree` 是第一个 Member 的
   投影；`workspaceDirty`、`workspaceUnpushed` 取所有 Member 的“或”，`diffStats` 取总和，

@@ -16,7 +16,7 @@ import {
   applyWorkspaceFlockRowEvents,
   listWorkspaceProjects,
 } from '../src/workspace-flock';
-import { machineSupportsMultiRepoProject } from '../src/machine-protocol-capabilities';
+import { CURRENT_MACHINE_PROTOCOL_CAPABILITIES, machineSupportsMultiRepoProject } from '../src/machine-protocol-capabilities';
 
 const project = () =>
   WorkspaceProjectSchema.parse({
@@ -153,6 +153,7 @@ describe('workspace Projects', () => {
   });
   it('requires explicit multi-repository capability', () => {
     expect(machineSupportsMultiRepoProject({})).toBe(false);
+    expect(machineSupportsMultiRepoProject({ protocolCapabilities: CURRENT_MACHINE_PROTOCOL_CAPABILITIES })).toBe(true);
     expect(machineSupportsMultiRepoProject({ protocolCapabilities: { multiRepoProject: 1 } })).toBe(
       true
     );
@@ -173,6 +174,8 @@ describe('session file root resolution', () => {
       relativePath: 'file.ts',
     });
     expect(resolveSessionFilePath(roots, '/work-other/file')).toBeUndefined();
+    expect(resolveSessionFilePath(roots, '/work\\outside/file')).toBeUndefined();
+    expect(resolveSessionFilePath(roots, '/work/file\\name')).toEqual({ rootId: 'main', relativePath: 'file\\name' });
     expect(resolveSessionFilePath(roots, '/work/../../etc/passwd')).toBeUndefined();
     expect(resolveSessionFilePath(roots, 'relative')).toBeUndefined();
     expect(resolveSessionFilePath([{ id: 'main', absolutePath: '/' }], '/file')).toEqual({

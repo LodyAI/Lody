@@ -2,21 +2,19 @@
 
 `CLAUDE.md` is a symlink to this file. Edit `AGENTS.md` only.
 
-Machine-side reconciler for PR discovery/association, lifecycle, CI rollup,
-and merge/conflict state. Local observation path and compensation for hosted webhook updates.
+Machine-side PR discovery, lifecycle, CI and merge/conflict reconciliation.
 Local authorization contract: [Spec](../../../../../specs/local-github-pr-observation.md).
 
 ## Architecture: pure decisions, thin effects
 
-Every policy lives in a pure module; `pr-poll-scheduler.ts` only wires
-facts → decisions → effects. Do not add priority/quota/selection/write-back
+Pure modules own policy; `pr-poll-scheduler.ts` wires facts → decisions → effects. Do not add priority/quota/selection/write-back
 logic to the scheduler, the GraphQL client, or the workspace adapter.
 
 Pure modules (deterministic, unit-tested without IO):
 
 - `pr-poll-targets.ts` — metadata replica → status/discovery targets; owner
   normalization (`parentSessionId ?? sessionId`); idle-terminal fingerprint
-  rule; archived/deleted exclusion; current PR = LAST `pullRequests` item.
+  rule; archived/deleted exclusion; current PR = LAST `pullRequests` item per repository for Project groups.
 - `pr-poll-priority.ts` — viewing presence + `lastMessageAt` → high/low lane
   (top-100 cap). Priority only shortens intervals; never a precondition.
 - `pr-poll-quota.ts` — per-scope token bucket, provider safety-floor freeze,
@@ -70,7 +68,7 @@ Effect adapters: `pr-poller-workspace.ts` (Loro repo + presence + credentials
   number, discovery keys the branch — a new PR / switched branch is
   never-refreshed and immediately due. Truncated (over-alias-budget) targets
   are NOT stamped as attempted; they stay due and form the next batch.
-- **Current PR is the LAST `pullRequests` item; the reconciler is the
+- **Current PR is the LAST `pullRequests` item per repository for Project groups; the reconciler is the
   ordering authority.** The hosted webhook fan-out is a blind single-PR
   overwrite and must not load Loro Streams;
   the reconciler re-discovers and re-associates overwritten current-branch
@@ -89,7 +87,7 @@ Effect adapters: `pr-poller-workspace.ts` (Loro repo + presence + credentials
   GitHub user/installation scope, never token bytes; token rotation must not
   reset freeze/cooldown/bucket state. A token-invalid retry must pass the
   replacement scope's own gates before the second call.
-- **Discovery requires `branchName`.** Never query by `baseBranch` (the
+- **Discovery requires `branchName` (Member `branch` for Project groups).** Never query by `baseBranch` (the
   starting ref — would associate unrelated PRs). Discovery continues while an
   open/draft PR exists (newer-PR detection); only idle-terminal owners
   (terminal current PR + unchanged `repo|branch` fingerprint) stop entirely.

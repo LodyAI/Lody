@@ -11,6 +11,9 @@ import {
 import { closeDirectoryQuietly } from './directory-handle';
 import {
   computeAllChanges,
+  computeProjectAllChanges,
+  resolveProjectGitDirectory,
+  type ProjectGitMember,
   isInsideGitWorktree,
   joinWorkspacePath,
   pathSegmentComparisonKey,
@@ -33,6 +36,7 @@ export type FileIndexScanWorkerResult = {
 
 export type FileIndexFullStateWorkerInput = {
   readonly kind: 'full-state';
+  readonly projectMembers?: readonly ProjectGitMember[];
   readonly workspaceRoot: string;
   readonly maxRawTextBytes: number;
   readonly entryBudget: number;
@@ -106,8 +110,21 @@ async function computeFullFileIndexState(
     directoryWorkspacePath: '',
     maxRawTextBytes: input.maxRawTextBytes,
     entryBudget: input.entryBudget,
-    recursive: true,
+    recursive: !input.projectMembers,
   });
+  if (input.projectMembers) {
+    for (const member of input.projectMembers) {
+      const directory = await resolveProjectGitDirectory(input.workspaceRoot, member.path);
+      const entries = await scanDirectoryEntries({
+        directoryAbsolutePath: directory,
+        directoryWorkspacePath: member.path,
+        maxRawTextBytes: input.maxRawTextBytes,
+        entryBudget: Math.max(0, input.entryBudget - fileTreeEntries.size),
+        recursive: true,
+      });
+      for (const entry of entries) fileTreeEntries.set(...entry);
+    }
+  }
   const scanMs = Date.now() - scanStartedAtMs;
   const fileTree = Object.fromEntries(fileTreeEntries);
   const buildStartedAtMs = Date.now();
@@ -144,6 +161,15 @@ async function resolveFullStateAllChanges(input: FileIndexFullStateWorkerInput):
       source: input.providedAllChanges.source,
       allChanges: input.providedAllChanges.state,
       allChangesMs: input.providedAllChanges.computeMs,
+    };
+  }
+  if (input.projectMembers) {
+    const started = Date.now();
+    return {
+      status: 'ok',
+      source: 'git',
+      allChanges: await computeProjectAllChanges(input.workspaceRoot, input.projectMembers),
+      allChangesMs: Date.now() - started,
     };
   }
   if (!(await isInsideGitWorktree(input.workspaceRoot))) {

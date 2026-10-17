@@ -1,3 +1,4 @@
+import { resolveSessionFilePath } from '@lody/shared';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, realpathSync } from 'node:fs';
 import path from 'node:path';
@@ -315,8 +316,11 @@ function normalizeEvidencePath(workspaceRoot: string, evidencePath: string): str
   const realAbsolutePath = realpathOrSelf(absolutePath);
   for (const candidatePath of uniqueStrings([absolutePath, realAbsolutePath])) {
     for (const candidateRoot of uniqueStrings([workspaceRoot, realWorkspaceRoot])) {
-      const relative = path.relative(candidateRoot, candidatePath).replace(/\\/g, '/');
-      if (!relative || relative.startsWith('..') || path.isAbsolute(relative)) continue;
+      const relative = resolveSessionFilePath(
+        [{ id: 'main', absolutePath: candidateRoot }],
+        candidatePath
+      )?.relativePath;
+      if (!relative) continue;
       return path.posix.normalize(relative.normalize('NFC'));
     }
   }

@@ -1,4 +1,4 @@
-# Multi-repository Projects
+# Multi-repository Project groups
 
 Status: draft
 Translation: current
@@ -19,7 +19,7 @@ looks only at that branch.
 
 ## Concepts
 
-- **Project**: a workspace-level group of **Members**. Each Member is a Git
+- **Project group** (code type `WorkspaceProject`, called Project below): a workspace-level group of **Members**. Each Member is a Git
   repository: a GitHub repository, or a local project that is a Git repository.
   A local repository may have no remote; it then gets a branch and backups, but no
   PR. A local directory that is not a Git repository cannot be a Member; adding one
@@ -173,8 +173,11 @@ GC scope extended to `<data>/repos/project-*/worktrees/<session>`.
   the Project name and the main directory name. Deleting or editing a Project does
   not affect existing conversations; after a Project is deleted, its conversations
   are still grouped and restored from the snapshot.
-- Each Member's runtime state is stored separately, keyed by Member ID, so
-  concurrent writes for different Members do not overwrite each other.
+- `projectRun` remains one top-level SessionMeta value. Clients write only the
+  initial snapshot at conversation creation. Afterwards, only the owning daemon
+  writes it, including observations, member additions and legacy projections.
+  Read-modify-write operations are serialized per conversation through the branch
+  observation owner queue. A future second writer requires a separate row per member.
 - The main directory name is fixed at creation and written to conversation
   metadata. It does not change when the Project is renamed.
 - The legacy fields `project`, `branchName`, `repoFullName` and `isWorktree` are a

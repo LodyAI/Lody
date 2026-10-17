@@ -5390,6 +5390,7 @@ export class SessionExecutionService {
       // part of the workspace state being resumed.
       const restoreBranch = project?.branch?.trim() || undefined;
       const restoreConfig: SessionConfig = {
+        projectRun: meta?.projectRun,
         sessionId,
         agentConfigId: meta?.agentConfigId,
         codexAuth: storedLaunchConfig.config?.codexAuth,
@@ -6244,6 +6245,7 @@ export class SessionExecutionService {
       githubRepo: githubRepoFullName,
       branch,
       project,
+      projectRun: existingMeta?.projectRun ?? message.projectRun,
       worktreeSetup: message.worktreeSetup,
       worktreeCleanup: message.worktreeCleanup,
       fromFeedbackPostId,
@@ -6269,6 +6271,7 @@ export class SessionExecutionService {
       githubRepo: githubRepoFullName,
       branch,
       project,
+      projectRun: existingMeta?.projectRun ?? message.projectRun,
       worktreeSetup: message.worktreeSetup,
       worktreeCleanup: message.worktreeCleanup,
       workdir,
@@ -6281,6 +6284,19 @@ export class SessionExecutionService {
     // latency-critical create path performs one doc-meta upsert instead of five
     // sequential ones.
     const dispatchStartPatch: Partial<SessionMeta> = {};
+    if (!existingMeta?.projectRun && message.projectRun) {
+      // The creation snapshot cannot claim daemon-observed branches or status.
+      const initialRun = structuredClone(message.projectRun);
+      for (const member of Object.values(initialRun.members)) {
+        delete member.branch;
+        delete member.repoFullName;
+        delete member.dirty;
+        delete member.unpushed;
+        delete member.diff;
+      }
+      sessionConfig.projectRun = initialRun;
+      dispatchStartPatch.projectRun = initialRun;
+    }
     if (project) {
       dispatchStartPatch.project = project;
     }
@@ -6454,7 +6470,13 @@ export class SessionExecutionService {
                 project,
                 agentConfig.issuePRMentions,
                 fromFeedbackPostId,
-                { branchToRename }
+                {
+                  branchToRename,
+                  projectRun:
+                    !hasPriorAcpSession && !message.parentSessionId
+                      ? (await sessionDoc.getMetaState())?.projectRun
+                      : undefined,
+                }
               ),
             });
             return traceAsync(

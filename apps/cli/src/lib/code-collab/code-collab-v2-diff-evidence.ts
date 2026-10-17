@@ -1,3 +1,4 @@
+import { resolveSessionFilePath } from '@lody/shared';
 import fs from 'fs';
 import path from 'path';
 
@@ -289,11 +290,8 @@ function realpathOrSelf(inputPath: string): string {
 }
 
 function normalizeRelativePath(root: string, candidatePath: string): string | null {
-  const relative = path.relative(root, candidatePath).replace(/\\/g, '/');
-  if (!relative || relative.startsWith('..') || path.isAbsolute(relative)) {
-    return null;
-  }
-  return path.posix.normalize(relative.normalize('NFC'));
+  const parsed = resolveSessionFilePath([{ id: 'main', absolutePath: root }], candidatePath);
+  return parsed?.relativePath ? path.posix.normalize(parsed.relativePath.normalize('NFC')) : null;
 }
 
 function uniqueStrings(values: readonly string[]): string[] {

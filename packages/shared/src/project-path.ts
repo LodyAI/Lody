@@ -4,7 +4,8 @@ export type SessionFilePath = { rootId: string; relativePath: string };
 
 function normalizeAbsolutePath(input: string): string | undefined {
   if (Array.from(input).some((char) => char.charCodeAt(0) < 32)) return undefined;
-  const value = input.replace(/\\/g, '/');
+  const windows = /^[a-zA-Z]:[\\/]/.test(input) || input.startsWith('\\\\') || input.startsWith('//');
+  const value = windows ? input.replace(/\\/g, '/') : input;
   const prefix = value.match(/^(?:[a-zA-Z]:\/|\/\/[^/]+\/[^/]+\/|\/)/)?.[0];
   if (!prefix) return undefined;
   const parts: string[] = [];

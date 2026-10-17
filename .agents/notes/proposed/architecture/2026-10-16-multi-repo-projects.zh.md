@@ -1,4 +1,4 @@
-# 多仓库 Project：平铺在一个主目录下
+# 多仓库项目组：一个主目录
 
 Status: proposed
 Type: architecture
@@ -12,9 +12,8 @@ Translation: current
 一个执行目录、一个分支，PR 发现也只针对这一个仓库。本提案引入工作区级的 Project：
 新建对话时，为每个 Member 创建一个可编辑的 worktree，平铺在一个主目录下，主目录就是
 Agent 的执行目录；PR 发现和“当前 PR”都改为按仓库计算。这是在评审中把最初的嵌套
-布局方案简化后的结果，代价是原有的嵌套关系（子模块、依赖目录内部的相对路径）不再在
-磁盘上保留，只通过提示告诉 Agent。设计尚未实现，Agent 沙箱范围、`SessionMeta` 大小
-和旧客户端的显示都还没有验证。规范意图见[草案 Spec](../../../../specs/multi-repo-projects.zh.md)。
+布局方案简化后的结果。已声明的子模块保留嵌套关系，其他成员平铺。shared 与 daemon
+实现正在评审，Agent 沙箱范围和旧客户端的呈现仍需产品验证。规范意图见[草案 Spec](../../../../specs/multi-repo-projects.zh.md)。
 
 ## 问题与要求
 
@@ -119,7 +118,7 @@ type SessionProjectRun = {
   instructions?: string;
   /** 主目录所在的 `repos/` 子目录名，例如 `project-acme-shop-<id>`，创建时固定。 */
   root: string;
-  /** 以 Member ID 为键的 Loro map，不同 Member 的写入互不冲突。 */
+  /** 单个顶层快照：创建后只有 owner daemon 按对话串行读改写。 */
   members: Record<ProjectMemberId, SessionProjectMember>;
 };
 
@@ -134,6 +133,7 @@ type SessionProjectMember = {
   /** 创建时解析出的基准：普通 Member 为基准引用，子模块 Member 为 gitlink 提交。 */
   base: string;
   /** 以下为运行时观测，由拥有该对话的机器写入。 */
+  repoFullName?: string; // 本地 Member remote 的 GitHub 身份观测
   branch?: string; // 最后一次观测到的命名分支
   dirty?: boolean;
   unpushed?: boolean;
@@ -260,8 +260,7 @@ list/write/delete 函数。定义与运行快照 schema 拒绝不安全的跨平
 以拒绝符号链接逃逸。绝对根目录只留在本机。
 
 已定义并可协商 `multiRepoProject: 1`，但物化与生命周期实现完成前，不加入 daemon 的
-当前能力广告。此契约部分不会让现有 daemon 开启多仓库创建。运行时实现、按 Member
-并发写入元数据和生命周期行为仍待验证。
+当前能力广告。此契约部分不会让现有 daemon 开启多仓库创建。运行时实现、owner 串行写入元数据和生命周期行为仍待验证。
 
 契约 PR：[#1641](https://github.com/LodyAI/Lody/pull/1641)。
 
@@ -270,9 +269,13 @@ list/write/delete 函数。定义与运行快照 schema 拒绝不安全的跨平
 
 当前锁定的 `loro-repo` **不会**把嵌套元数据 Record 转成 Loro map：
 `MetadataManager.upsert` 将每个顶层键写入单个 Flock 值 `['m', docId, key]`。
-因此写 `projectRun` 会替换整个运行快照，TypeScript Record 本身不能保证 Member
-独立合并。运行时接入待决定采用上游嵌套元数据支持，还是独立 Member 行再投影到
-SessionMeta。仅在本机串行读改写不能满足原提案的复制合并契约。本次未改依赖版本。
+产品负责人已确定单一写入方方案：`projectRun` 保持 SessionMeta 上的单个顶层值。
+客户端只在创建对话时随 session/create 元数据写入初始快照。此后只有拥有该对话的
+daemon 写入，成员状态观测、中途追加成员和旧字段投影均复用分支观测的 owner 串行链，
+按对话执行读取、修改、写回。因此不依赖嵌套 Record 合并，不改上游 loro-repo，
+也不单独存成员行。如果将来出现第二个写入方，必须改为每个成员单独一行。
+代码类型名保持不变；面向用户与 Agent 首轮注入的概念名称为「项目组」，
+「项目」仍指单个本地文件夹或 GitHub 仓库。
 
 worktree 准备性改动为 WorktreeManager 增加显式冻结的 Project 位置。
 仓库存储与锁仍以 repoId 为键；带位置的实例不进入仅按 repoId 的全局缓存。
@@ -283,13 +286,58 @@ worktree 准备性改动为 WorktreeManager 增加显式冻结的 Project 位置
 子模块基础函数组合现有原生 WorktreeGit 服务，检出前验证 `.gitmodules` 与实际
 gitlink，递归初始化，从 gitlink 创建分支，并在 deinit 前通过本地 fetch 将备份分支
 保存到持久仓库；恢复时取回该分支。非快进保存和仓库身份不符均失败保留。
-这些函数已有真实 Git 测试，但尚无 daemon 消费方，不代表完整物化、归档或 GC 已完成。
+这些函数已有真实 Git 测试；下文运行时编排将其接入物化与 GC。
 
-未来 Project mutation owner 须由冻结创建/恢复快照触发，串行处理同一 Project
+Project mutation owner 由冻结创建/恢复快照触发，串行处理同一 Project
 对话的变更，失败时保留部分目录和分支记录，原始 Git 进程清理完成后才能交接。
 WorktreeGit 已拥有命令取消和清理；现有 manager/setup/GC 编排仍基于 Promise。
 整个 manager 迁移会拉入未完成的依赖，因此暂缓。新增原生子模块叶子函数不代表该迁移
-完成。测试验证本地 Git 的检出、备份与恢复；托管凭据、重试记录、多 Member 观测和
-先恢复父 Member 的编排仍待验证。
+完成。测试验证本地 Git 的检出、备份、恢复、多 Member 观测和稳定分支记录；真实托管凭据
+不在确定性的本地测试范围内。
 
 Worktree 基础能力 PR：[ #1642](https://github.com/LodyAI/Lody/pull/1642)。
+
+
+## Owner 串行与运行时接入
+
+拥有该对话的 daemon 在同一 document manager、同一 owner Session 的服务实例间共享
+WorkspaceGitService 队列。读取发生在取得队列之后；失败不会阻断后续恢复。
+物化逐个发布成功成员的分支，再处理下一成员，因此后续失败保留目录与分支记录。
+观测在各成员 Git 目录执行，并将快照与旧字段投影一起发布。未知观测保留已有事实；
+detached HEAD 保留最后一个命名分支。Child Tab 写入 owner。外层 session/setup/GC
+编排仍基于 Promise，不声称完成原生生命周期迁移；WorktreeGit 仍拥有进程释放。
+
+Session 启动使用冻结的项目组目录，首轮提示称为「Project group / 项目组」。
+ACP originProjectPath 指向稳定的项目组目录。归档/GC、PR 调和和按成员文件索引接入后，
+运行时声明 `multiRepoProject: 1`。
+
+
+本地 Member 的 GitHub PR 发现需要持久的机器观测仓库身份，避免 PR 调和器扫描元数据时
+逐个打开 Git。`SessionProjectMember` 新增可选 `repoFullName`，由 owner 从 Member remote
+观测写入；这是向后兼容的增量字段，`src` 仍保留冻结的本地绑定。创建请求不能提供权威的
+观测身份；PR 发现仍要求 Member 的观测分支，并在写回前重新校验仓库身份与分支。
+
+
+运行时归档在移除任何 root 前先完成所有成员备份。子模块分支先保存到持久仓库，父成员
+随后记录新的 gitlink。恢复从持久仓库取得子模块对象，包括远端没有的提交，并保留原始
+基准。Git 即使在 deinit 后仍要求强制移除 worktree；manager 先验证已保存的分支、干净的
+工作区和已 deinit 的子模块。未选中子模块的新提交没有 Member 持久存储，或任一仓库无法
+解析时，保留整个项目组。成员外的主目录文件不递归删除；可从冻结 blob 重建的
+`.lody/attachments` 副本可在备份后移除。
+
+PR 发现目标与闲置指纹包含 Member ID，写回前用最新元数据重新校验同一成员的仓库和
+分支，当前 PR 排序只在各自仓库内进行。文件索引 worker 对各 Member 使用 Git，并为相对
+路径添加 Member 前缀；All Changes 为每个 Member 固定独立的 merge base。Code Collab、
+预览、ACP diff 证据和上传包含检查共用 `resolveSessionFilePath`，文件系统边界保留
+realpath 校验。POSIX 反斜杠保持字面字符，避免相邻目录冒充子路径。UI 组件和桌面呈现
+仍由独立的 UI session 负责。
+
+中途追加成员的公开请求仍是后续工作：本次契约尚未定义其 RPC 格式。后续请求必须经同一
+owner 队列物化并发布，客户端不得在创建后替换快照。真实托管凭据和 UI 端到端验收
+不在确定性本地 Git 测试的覆盖范围内。
+
+验证：CLI 类型检查和 `check:quick` 通过；PR 调和套件 101 项通过。最终
+session/owner/prompt/Git transport 回归 74 项通过，含全部三种项目组生命周期布局；
+一个原生 SSH 凭据测试报 `context_unreadable`。全仓检查未全绿，UI 与真实凭据验收仍待完成。
+
+运行时接入 PR：[#1644](https://github.com/LodyAI/Lody/pull/1644)。

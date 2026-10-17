@@ -1,4 +1,5 @@
-import { readFile } from 'node:fs/promises';
+import { resolveSessionFilePath, isSafeProjectPath } from '@lody/shared';
+import { readFile, realpath } from 'node:fs/promises';
 import path from 'node:path';
 
 import type {
@@ -84,6 +85,46 @@ async function runGitLsFiles(
       .map(normalizeGitPath)
       .filter((filePath) => isValidRelativeGitPath(filePath) && !deletedPaths.has(filePath)),
   };
+}
+
+export type ProjectGitMember = { readonly path: string; readonly base: string };
+
+export async function resolveProjectGitDirectory(
+  root: string,
+  memberPath: string
+): Promise<string> {
+  if (!isSafeProjectPath(memberPath)) throw new Error('Invalid project group member path');
+  const canonicalRoot = await realpath(root);
+  const directory = await realpath(path.join(canonicalRoot, memberPath));
+  if (
+    resolveSessionFilePath([{ id: 'main', absolutePath: canonicalRoot }], directory)
+      ?.relativePath !== memberPath
+  )
+    throw new Error('Project group member escaped its directory');
+  return directory;
+}
+
+export async function computeProjectAllChanges(
+  root: string,
+  members: readonly ProjectGitMember[]
+): Promise<CodeCollabV2AllChangesState> {
+  return (await computeProjectAllChangesSnapshot(root, members)).allChanges;
+}
+
+export async function computeProjectAllChangesSnapshot(
+  root: string,
+  members: readonly ProjectGitMember[]
+) {
+  const changes: CodeCollabV2AllChangesState = {};
+  const gitMemberBases: Record<string, string> = {};
+  for (const member of members) {
+    const directory = await resolveProjectGitDirectory(root, member.path);
+    const diffBase = (await resolveAllChangesDiffBase(directory, member.base)) ?? 'HEAD';
+    gitMemberBases[member.path] = diffBase;
+    const state = await computeAllChanges(directory, { diffBase });
+    for (const [file, change] of Object.entries(state)) changes[`${member.path}/${file}`] = change;
+  }
+  return { allChanges: changes, gitMemberBases };
 }
 
 export async function computeAllChanges(

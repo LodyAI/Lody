@@ -1,3 +1,4 @@
+import { materializeProjectGroup, projectGroupDirectory } from './worktree/project-worktrees';
 import { resolveGitIdentityPolicyLegacy } from './git-identity-policy';
 import {
   acquireSessionCredentialsLegacy,
@@ -1360,6 +1361,8 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
   ): Promise<ISession> {
     const sessionId = incomingConfig.sessionId!;
     if (
+      incomingConfig.projectRun ||
+      prepared.config.projectRun ||
       (incomingConfig.project?.kind === 'local') !== (prepared.config.project?.kind === 'local') ||
       (incomingConfig.project?.kind === 'local' &&
         prepared.session.getGitHubCredentials().mode !== 'native')
@@ -1473,13 +1476,15 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
       command: launch.command,
       args: launch.args,
       env: launch.env,
-      resolveWorktreeProject: localProjectId
-        ? async () => {
-            const originProjectPath = await this.resolveLocalProjectRootPath(localProjectId);
-            if (!originProjectPath) throw new Error(`Local project not found: ${localProjectId}`);
-            return { version: 1, originProjectPath };
-          }
-        : undefined,
+      resolveWorktreeProject: config.projectRun
+        ? async () => ({ version: 1, originProjectPath: projectGroupDirectory(config.projectRun!) })
+        : localProjectId
+          ? async () => {
+              const originProjectPath = await this.resolveLocalProjectRootPath(localProjectId);
+              if (!originProjectPath) throw new Error(`Local project not found: ${localProjectId}`);
+              return { version: 1, originProjectPath };
+            }
+          : undefined,
       capabilitySourceVersion: launch.capabilitySourceVersion,
       revalidateManagedCodexProfile:
         config.codexProfile?.profile.mode === 'chatgpt'
@@ -1850,9 +1855,21 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
   }
 
   private async prepareGitHubRepoSessionConfig(config: SessionConfig): Promise<SessionCredentials> {
+    if (config.parentSessionId && !config.projectRun) {
+      const ownerDoc = await this.workspaceDocument.getOrCreateSessionDoc(
+        config.parentSessionId ?? config.sessionId
+      );
+      config.projectRun = (await ownerDoc.getMetaState())?.projectRun;
+    }
     // A GitHub remote does not make a local project a managed GitHub checkout.
     // Direct local sessions and their worktrees keep the user's native auth.
-    if (config.project?.kind === 'local') return nativeSessionCredentials;
+    if (
+      config.project?.kind === 'local' &&
+      !Object.values(config.projectRun?.members ?? {}).some(
+        (member) => member.src.kind === 'github'
+      )
+    )
+      return nativeSessionCredentials;
 
     const githubRepo = config.githubRepo ?? tryDeriveGitHubRepoFromUrl(config.githubRepoUrl);
     if (githubRepo) {
@@ -2226,7 +2243,7 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
   }
 
   private resolveSessionWorktreeTarget(config: SessionConfig): SessionWorktreeTarget | null {
-    if (config.parentSessionId) return null;
+    if (config.parentSessionId || config.projectRun) return null;
     const localSource = this.resolveLocalWorktreeSource(config.project, config.workdir);
     const repoId = localSource?.repoId ?? config.repoId;
     if (!repoId) return null;
@@ -2334,12 +2351,59 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
     let workdir: string | undefined = config.workdir;
     const repoId = config.repoId;
     const sessionDoc = await this.workspaceDocument.getOrCreateSessionDoc(config.sessionId!);
-    if (config.githubRepo) {
+    const ownerDoc = config.parentSessionId
+      ? await this.workspaceDocument.getOrCreateSessionDoc(config.parentSessionId)
+      : sessionDoc;
+    config.projectRun = (await ownerDoc.getMetaState())?.projectRun ?? config.projectRun;
+    if (config.githubRepo && !config.projectRun)
       await sessionDoc.setRepoFullName(config.githubRepo);
-    }
 
-    workdir = await this.resolveSharedWorkdir(config, repoId, credentials);
-    const worktreeTarget = this.resolveSessionWorktreeTarget(config);
+    if (config.projectRun) {
+      const prepared = await materializeProjectGroup({
+        sessionId: config.parentSessionId ?? config.sessionId!,
+        machineId: this.machineId,
+        workspaceDocument: this.workspaceDocument,
+        logger: this.logger,
+        resolveLocalRoot: (id) => this.resolveLocalProjectRootPath(id),
+        brokerAuth: (source) => this.resolveHostGitBrokerAuth(source, config, credentials),
+        setup: async (member, memberWorkdir) => {
+          const memberConfig: SessionConfig = {
+            ...config,
+            project:
+              member.src.kind === 'github'
+                ? { kind: 'github', repoFullName: member.src.repoFullName, branch: member.base }
+                : {
+                    kind: 'local',
+                    localProjectId: member.src.localProjectId,
+                    branch: member.base,
+                    useWorktree: true,
+                  },
+            githubRepo: member.src.kind === 'github' ? member.src.repoFullName : undefined,
+          };
+          await runWorktreeSetup({
+            config: await this.resolveWorktreeSetupConfig(memberConfig),
+            sessionId: config.parentSessionId ?? config.sessionId!,
+            workspaceId: config.workspaceId,
+            workdir: memberWorkdir,
+            branch: member.branch!,
+            repoFullName: memberConfig.githubRepo,
+            localProjectId: member.src.kind === 'local' ? member.src.localProjectId : undefined,
+            logger: this.logger,
+            events: createWorktreeScriptHistoryRecorder({
+              sessionDoc: ownerDoc,
+              sessionId: config.parentSessionId ?? config.sessionId!,
+              phase: 'setup',
+              logger: this.logger,
+              backend: await createSessionBackend(ownerDoc, await ownerDoc.getMetaState()),
+              insertBeforeEntryId: config.worktreeScriptHistoryInsertBeforeEntryId,
+            }),
+          });
+        },
+      });
+      workdir = prepared.workdir;
+      config.projectRun = prepared.run;
+    } else workdir = await this.resolveSharedWorkdir(config, repoId, credentials);
+    const worktreeTarget = config.projectRun ? null : this.resolveSessionWorktreeTarget(config);
 
     // Child sessions reuse the parent's workdir — skip worktree creation
     if (worktreeTarget) {

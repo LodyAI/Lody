@@ -1,4 +1,4 @@
-import { type IssuePRMention, type ProjectRef } from '@lody/shared';
+import { type IssuePRMention, type ProjectRef, type SessionProjectRun } from '@lody/shared';
 
 export {
   extractPromptPreviewFromInputBlocks,
@@ -74,9 +74,24 @@ export const buildPrompt = (
   project?: ProjectRef,
   issuePRMentions?: IssuePRMention[],
   feedbackPostId?: string,
-  options?: { branchToRename?: string }
+  options?: { branchToRename?: string; projectRun?: SessionProjectRun }
 ): string => {
-  const promptWithReferences = appendIssuePrMentionsToPrompt(prompt, issuePRMentions);
+  const group = options?.projectRun;
+  const groupContext = group
+    ? `\n\nProject group: ${JSON.stringify(group.name)}\nThe working directory contains these repository members; run Git in the relevant member directory:\n${Object.entries(
+        group.members
+      )
+        .sort(([, a], [, b]) => a.o - b.o)
+        .map(
+          ([id, member]) =>
+            `- ${JSON.stringify(id)}: ${JSON.stringify(member.path)} (${member.src.kind === 'github' ? member.src.repoFullName : 'local repository'}), base ${JSON.stringify(member.base)}${member.placement.kind === 'submodule' ? `; submodule of ${JSON.stringify(member.placement.parent)}` : ''}`
+        )
+        .join(
+          '\n'
+        )}${group.instructions ? `\n\nProject group instructions:\n${group.instructions}` : ''}`
+    : '';
+  const promptWithReferences =
+    appendIssuePrMentionsToPrompt(prompt, issuePRMentions) + groupContext;
   const normalizedFeedbackPostId = feedbackPostId?.trim();
   const feedbackInstruction = normalizedFeedbackPostId
     ? `\n\nThe postId is ${normalizedFeedbackPostId}. Use the feedback-progress-reporter skill when appropriate.`

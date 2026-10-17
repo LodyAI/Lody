@@ -28,6 +28,8 @@ export type WorkspaceProject = {
   members: ProjectMember[];
 };
 export type SessionProjectMember = {
+  /** Owner-observed GitHub identity, including local members with a GitHub remote. */
+  repoFullName?: string;
   o: number;
   src: ProjectMemberSource;
   placement: ProjectMemberPlacement;
@@ -38,6 +40,10 @@ export type SessionProjectMember = {
   unpushed?: boolean;
   diff?: LineChange;
 };
+/** One atomic metadata value. Clients write the creation snapshot only.
+ * Afterwards the owning daemon serializes all read-modify-write operations per session.
+ * A second writer requires separate member rows; nested records do not merge.
+ */
 export type SessionProjectRun = {
   id: ProjectId;
   name: string;
@@ -174,6 +180,7 @@ export function normalizeWorkspaceProject(value: unknown): WorkspaceProject | un
   return result.success ? result.data : undefined;
 }
 export const SessionProjectMemberSchema = z.object({
+  repoFullName: z.string().regex(/^[\w.-]+\/[\w.-]+$/).optional(),
   o: z.number().int().nonnegative(),
   src: ProjectMemberSourceSchema,
   placement: ProjectMemberPlacementSchema,

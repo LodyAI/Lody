@@ -1,3 +1,6 @@
+import { resolveSessionFilePath } from '@lody/shared';
+import { projectGroupDirectory } from '@/session/worktree/project-worktrees';
+import { archiveProjectGroup } from '@/session/worktree/project-worktree-archive';
 import type { SessionActivePresencePhase } from './loro/session-active-presence';
 import { fileLocksLegacy } from '@/utils/file-lock';
 import { Effect } from 'effect';
@@ -3014,6 +3017,15 @@ export class MessageHandler {
       isRuntimeActive: (sessionId) =>
         this.archiveInFlight.has(sessionId) || this.sessionManager.hasSession(sessionId),
       runCleanupScript: (input) => this.runArchivedWorktreeCleanupScript(input),
+      archiveProjectGroup: (input) =>
+        archiveProjectGroup({
+          ...input,
+          machineId: this.machineId,
+          workspaceDocument: this.workspaceDocument,
+          logger: this.logger,
+          resolveLocalRoot: (id) => this.sessionManager.resolveLocalProjectRootPath(id),
+          cleanup: (cleanupInput) => this.runArchivedWorktreeCleanupScript(cleanupInput),
+        }),
       // Restore reattaches by `branchName`; a branch renamed in a terminal is
       // only known to git, so the name archiving reports is written back.
       recordArchivedBranch: async (sessionId, branchName) => {
@@ -6031,6 +6043,34 @@ export class MessageHandler {
 
     const project = meta.project;
     const ownerSessionId = (meta.parentSessionId ?? sessionId) as SessionId;
+    const groupMeta =
+      ownerSessionId === sessionId
+        ? meta
+        : await this.resolveCodeCollabOwnerSessionMeta(ownerSessionId);
+    if (groupMeta?.projectRun) {
+      if (
+        groupMeta.isArchived ||
+        groupMeta.machineId !== this.machineId ||
+        meta.machineId !== this.machineId
+      )
+        return {
+          ok: false,
+          error: 'permission_denied',
+          message: 'Project group ownership is invalid.',
+        };
+      const workspaceRoot = path.join(
+        projectGroupDirectory(groupMeta.projectRun),
+        'worktrees',
+        ownerSessionId
+      );
+      if (!fs.existsSync(workspaceRoot))
+        return {
+          ok: false,
+          error: 'workspace_unavailable',
+          message: 'Project group workspace is unavailable.',
+        };
+      return { ok: true, workspaceRoot, ownerSessionId, source: 'project-group' };
+    }
     if (project?.kind === 'local') {
       const originalRootPath = await resolveWorkspaceLocalProjectRootPath(
         this.workspaceDocument.repo,
@@ -6282,6 +6322,7 @@ export class MessageHandler {
           ok: true,
           ownerSessionId,
           workspaceRoot: resolved.workspaceRoot,
+          projectRun: ownerMeta?.projectRun,
           allChangesBaseBranch: this.resolveGitHubProjectBranch(ownerMeta),
         };
       }
@@ -6390,6 +6431,7 @@ export class MessageHandler {
     if (!metaRecord?.meta || isLoroRepoDocDeleted(metaRecord)) {
       return;
     }
+    if ((metaRecord.meta as SessionMeta).projectRun) return;
     const ownerMeta = readDiffStatsMetadata(metaRecord.meta);
     const target = resolveDiffStatsTarget({ ownerRoomId, ownerMeta });
     const patch = resolveCodeCollabAllChangesDiffStatsPatch({ target, ownerMeta, diffStats });
@@ -7649,9 +7691,12 @@ export class MessageHandler {
         // Validation above canonicalized the path and proved containment. Keep
         // only the workspace-relative provenance in history so a local Lody
         // client can reopen the live artifact without publishing a host path.
-        const sourcePath = normalizeSessionFileSourcePath(
-          path.relative(canonicalWorkspaceRoot, file.absolutePath)
+        const source = resolveSessionFilePath(
+          [{ id: 'main', absolutePath: canonicalWorkspaceRoot }],
+          file.absolutePath
         );
+        if (!source) throw new Error('File is outside the session workspace');
+        const sourcePath = normalizeSessionFileSourcePath(source.relativePath);
         uploadedFiles.push({ ...uploaded, sourcePath });
       } catch (error) {
         failures.push(`${file.fileName}: ${formatErrorMessage(error)}`);

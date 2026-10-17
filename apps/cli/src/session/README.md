@@ -555,6 +555,12 @@ absence of every root/group; an initial snapshot alone is insufficient.
 `WorktreeManagerConfig.projectMember` places a root Member under the frozen Project
 root while retaining the source repository's storage and lock. Placement-aware managers
 are not cached by repo ID alone. `worktree/project-submodules.ts` provides native Git
-validation, gitlink checkout and persistent backup/restore primitives. Runtime admission,
-per-Member metadata publication and Project-wide cleanup are not connected yet; see the
-[storage finding](../../../../.agents/notes/proposed/architecture/2026-10-16-multi-repo-projects.md#runtime-storage-finding-and-worktree-primitives).
+validation, gitlink checkout and persistent backup/restore primitives.
+`project-worktrees.ts` materializes the frozen group in parent-first order and publishes
+each successful member branch before continuing. `WorkspaceGitService` shares one queue
+per document manager and owner Session for materialization receipts and observations;
+`projectRun` is one atomic metadata value, never a nested merge. Client writes stop at
+the creation snapshot. `project-worktree-archive.ts` backs up children before parents, persists submodule refs,
+then deinitializes submodules and removes root worktrees. Unresolvable members retain
+the directory for GC retry. See the
+[single-writer decision](../../../../.agents/notes/proposed/architecture/2026-10-16-multi-repo-projects.md#runtime-storage-finding-and-worktree-primitives).

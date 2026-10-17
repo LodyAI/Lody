@@ -128,6 +128,46 @@ async function withPlainWorkspace<T>(fn: (workspaceRoot: string) => Promise<T>):
 }
 
 describe('fileIndexScanWorker', () => {
+  it('uses each project group member Git ignore rules and prefixes independent changes', async () => {
+    await withPlainWorkspace(async (workspaceRoot) => {
+      for (const name of ['web', 'api']) {
+        const root = path.join(workspaceRoot, name);
+        await mkdir(root);
+        await git(root, ['init', '-b', 'main']);
+        await git(root, ['config', 'user.name', 'Test']);
+        await git(root, ['config', 'user.email', 'test@example.com']);
+        await writeFile(path.join(root, '.gitignore'), 'generated.txt\n');
+        await writeFile(path.join(root, 'shared.txt'), 'old\n');
+        await git(root, ['add', '.']);
+        await git(root, ['commit', '-m', 'base']);
+        await writeFile(path.join(root, 'shared.txt'), 'old\nnew\n');
+        await writeFile(path.join(root, 'generated.txt'), 'ignored');
+      }
+      const result = await fileIndexScanWorker({
+        kind: 'full-state',
+        workspaceRoot,
+        projectMembers: [
+          { path: 'web', base: 'main' },
+          { path: 'api', base: 'main' },
+        ],
+        maxRawTextBytes: 1024 * 1024,
+        entryBudget: 1000,
+      });
+      expect(result.status).toBe('ok');
+      if (result.kind !== 'full-state' || result.status !== 'ok')
+        throw new Error('Missing group state');
+      expect(result.allChanges).toMatchObject({
+        'web/shared.txt': { diff: [1, 0] },
+        'api/shared.txt': { diff: [1, 0] },
+      });
+      expect(result.fileTreeEntries.map(([file]) => file)).toContain('web/shared.txt');
+      expect(result.fileTreeEntries.map(([file]) => file)).toContain('api/shared.txt');
+      expect(result.fileTreeEntries.map(([file]) => file)).not.toContain('web/generated.txt');
+      expect(result.fileTreeEntries.map(([file]) => file)).not.toContain('api/generated.txt');
+      expect(result.allChangesSource).toBe('git');
+    });
+  });
+
   it('rebuilds against the tracking base for a qualified local owner ref', async () => {
     await withGitWorkspace(async (workspaceRoot) => {
       await git(workspaceRoot, ['checkout', '-b', 'feature']);

@@ -32,7 +32,8 @@ import {
   computeDiscoveryFingerprint,
   computePrPollMetaSignature,
   enumeratePrPollTargets,
-  resolveOwnerRepositoryContext,
+  projectMemberRepositoryContext,
+  discoveryOwnerKey,
   type AliveSessionMeta,
   type PrPollSessionEntry,
 } from './pr-poll-targets';
@@ -509,7 +510,8 @@ export class PrPollScheduler {
             })
           );
         }
-        if (entry.discoveryTarget) {
+        for (const discoveryTarget of entry.discoveryTargets ??
+          (entry.discoveryTarget ? [entry.discoveryTarget] : [])) {
           // A discovery target with open/draft PRs rides the status cadence
           // (same batch, zero extra requests); a bare discovery target uses
           // the slower discovery cadence.
@@ -520,11 +522,13 @@ export class PrPollScheduler {
           targets.push(
             this.makeTarget(runtime, entry, {
               kind: 'discovery',
-              repoFullName: entry.discoveryTarget.repoFullName,
+              repoFullName: discoveryTarget.repoFullName,
               lane,
               desiredIntervalMs: lane === 'high' ? config.highIntervalMs : lowIntervalMs,
-              qualifier: entry.discoveryTarget.branch,
-              discovery: entry.discoveryTarget,
+              qualifier: discoveryTarget.memberId
+                ? JSON.stringify([discoveryTarget.memberId, discoveryTarget.branch])
+                : discoveryTarget.branch,
+              discovery: discoveryTarget,
             })
           );
         }
@@ -690,6 +694,10 @@ export class PrPollScheduler {
       }
       for (const entry of runtime.entries) {
         validOwners.add(`${runtime.handle.workspaceId}:${entry.ownerSessionId}`);
+        for (const memberId of entry.projectMemberIds ?? [])
+          validOwners.add(
+            `${runtime.handle.workspaceId}:${discoveryOwnerKey(entry.ownerSessionId, memberId)}`
+          );
       }
       for (const owner of runtime.confirmedAssociations.keys()) {
         if (!validOwners.has(`${runtime.handle.workspaceId}:${owner}`)) {
@@ -1059,7 +1067,7 @@ export class PrPollScheduler {
         if (!entry?.ok || !effects?.discoveryOk) {
           continue;
         }
-        const fingerprintKey = `${target.workspaceId}:${target.ownerSessionId}`;
+        const fingerprintKey = `${target.workspaceId}:${discoveryOwnerKey(target.ownerSessionId, target.discovery?.memberId)}`;
         const fingerprint = computeDiscoveryFingerprint(target.repoFullName, branch);
         if (this.state.discoveryFingerprints[fingerprintKey] !== fingerprint) {
           this.state.discoveryFingerprints[fingerprintKey] = fingerprint;
@@ -1096,6 +1104,7 @@ export class PrPollScheduler {
       const observations: PrObservation[] = [];
       const discovered: PrObservation[] = [];
       let queriedBranch: string | null = null;
+      let memberId: string | undefined;
       for (const target of targets) {
         if (target.status) {
           const result = results.pullRequests.find(
@@ -1109,6 +1118,7 @@ export class PrPollScheduler {
         const branch = target.discovery?.branch;
         if (branch) {
           queriedBranch = branch;
+          memberId = target.discovery?.memberId;
           const discovery = results.discoveries.find((candidate) => candidate.branch === branch);
           for (const pr of discovery?.prs ?? []) {
             discovered.push(pr);
@@ -1121,6 +1131,7 @@ export class PrPollScheduler {
           observations,
           discovered,
           queriedBranch,
+          memberId,
         })
       );
     }
@@ -1135,6 +1146,7 @@ export class PrPollScheduler {
       observations: PrObservation[];
       discovered: PrObservation[];
       queriedBranch: string | null;
+      memberId?: string;
     }
   ): Promise<OwnerEffectResult> {
     const { logger } = this.deps;
@@ -1153,7 +1165,7 @@ export class PrPollScheduler {
       // queriedBranch)`. A repo/branch switch while the request was in flight
       // invalidates the DISCOVERY results (they belong to the old context);
       // status observations stay valid (URL-keyed, branch-independent).
-      const freshContext = resolveOwnerRepositoryContext(freshMeta);
+      const freshContext = projectMemberRepositoryContext(freshMeta, args.memberId, repoFullName);
       const contextUnchanged =
         args.queriedBranch === null ||
         (freshContext.repoFullName === repoFullName && freshContext.branch === args.queriedBranch);
@@ -1163,6 +1175,7 @@ export class PrPollScheduler {
       const newlyAssociated: PrObservation[] = [];
       const associationPlan = planAssociation({
         meta: freshMeta,
+        ...(freshMeta.projectRun ? { repoFullName } : {}),
         observations: args.observations,
         discovered,
         runtimeBranch: freshContext.branch,
@@ -1191,12 +1204,18 @@ export class PrPollScheduler {
           );
         }
         if (associated) {
-          runtime.confirmedAssociations.set(ownerSessionId, new Set([associationPlan.url]));
+          runtime.confirmedAssociations.set(
+            ownerSessionId,
+            new Set([
+              ...(runtime.confirmedAssociations.get(ownerSessionId) ?? []),
+              associationPlan.url,
+            ])
+          );
         } else {
           discoveryOk = false;
           // An earlier empty discovery must not make a newly published terminal
           // PR idle while its webhook association still needs retrying.
-          const key = `${runtime.handle.workspaceId}:${ownerSessionId}`;
+          const key = `${runtime.handle.workspaceId}:${discoveryOwnerKey(ownerSessionId, args.memberId)}`;
           delete this.state.discoveryFingerprints[key];
           this.deps.stateStore.deleteDiscoveryFingerprint(key);
         }
@@ -1216,7 +1235,11 @@ export class PrPollScheduler {
           ) {
             return failed;
           }
-          const publicationContext = resolveOwnerRepositoryContext(freshMeta);
+          const publicationContext = projectMemberRepositoryContext(
+            freshMeta,
+            args.memberId,
+            repoFullName
+          );
           if (
             publicationContext.repoFullName !== repoFullName ||
             publicationContext.branch !== args.queriedBranch
@@ -1228,6 +1251,7 @@ export class PrPollScheduler {
 
       const plan = planPullRequestMetaWrite({
         meta: freshMeta,
+        ...(freshMeta.projectRun ? { repoFullName } : {}),
         observations: [...args.observations, ...discovered],
         newlyAssociated,
         runtimeBranch: freshContext.branch,

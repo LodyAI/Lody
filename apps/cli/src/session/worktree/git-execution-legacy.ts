@@ -1,3 +1,4 @@
+import { checkoutProjectSubmodule, persistProjectSubmoduleBranch } from './project-submodules';
 import { FileLockCleanupFailed, LockReleaseFailed } from '@lody/shared/node/file-lock';
 import { Effect } from 'effect';
 import {
@@ -41,10 +42,18 @@ const executeLegacy = async <A, E>(
 };
 
 /**
- * @deprecated Only for WorktreeManager's unmigrated Promise orchestration.
+ * @deprecated Only for unmigrated worktree manager and Project group orchestration.
  * Delete when that owner composes WorktreeGit in its own Effect workflow.
  */
 export const worktreeGitLegacy = {
+  persistProjectSubmoduleBranch: (
+    input: Parameters<typeof persistProjectSubmoduleBranch>[0],
+    options: PlatformFacadeOptions = {}
+  ) => executeLegacy(persistProjectSubmoduleBranch(input), options),
+  checkoutProjectSubmodule: (
+    input: Parameters<typeof checkoutProjectSubmodule>[0],
+    options: PlatformFacadeOptions = {}
+  ) => executeLegacy(checkoutProjectSubmodule(input), options),
   run: (command: WorktreeGitCommand, options: PlatformFacadeOptions = {}) =>
     executeLegacy(
       Effect.flatMap(WorktreeGit, (git) => git.run(command)),

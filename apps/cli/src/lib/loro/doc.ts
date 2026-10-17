@@ -1,3 +1,4 @@
+import { projectRunMetaPatch } from '@/session/project-run-state';
 import type { LodyRateLimitsCapability } from 'acp-extension-core';
 import { createSessionAgentWrites, type SessionAgentWrites } from './session-agent-writes';
 import { createSessionBackend, disposeSessionBackend } from '@/session/session-backend';
@@ -2864,6 +2865,14 @@ export class SessionDocument implements LoroDocument<Omit<SessionDocMeta, 'histo
     const current = await this.repo.getDocMeta(this.roomId);
     if (isLoroRepoDocDeleted(current)) return;
     await this.repo.upsertDocMeta(this.roomId, { project });
+  }
+
+  /** Caller must hold the conversation's WorkspaceGitService mutation queue. */
+  async setProjectRun(run: NonNullable<SessionMeta['projectRun']>) {
+    if (!this.mirror) throw new Error('SessionDocument not initialized');
+    const current = await this.repo.getDocMeta(this.roomId);
+    if (isLoroRepoDocDeleted(current)) return;
+    await this.repo.upsertDocMeta(this.roomId, projectRunMetaPatch(run));
   }
 
   async setBranchName(branchName: string) {
