@@ -12,7 +12,7 @@ import {
   type ReactNode,
   type Ref,
 } from 'react';
-import { ClipboardPaste, RefreshCw, X } from 'lucide-react';
+import { ClipboardPaste, RefreshCw, X, Pencil } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
 import type { AcpCommandSummary } from '@lody/shared';
@@ -63,9 +63,10 @@ import {
 import { Kbd } from '@/components/commands/kbd';
 import { commands, formatKeyBinding } from '@/lib/commands';
 import * as stylex from '@stylexjs/stylex';
-import { text as textScale } from '@lody/ui/tokens/scales.stylex';
+import { text as textScale, space } from '@lody/ui/tokens/scales.stylex';
 
 const typography = stylex.create({
+  imageMarkup: { position: 'absolute', insetInlineStart: space[1], bottom: space[1] },
   prompt: { fontSize: textScale.bodySize, lineHeight: textScale.bodyLeading },
   helper: { fontSize: textScale.footnoteSize, lineHeight: textScale.footnoteLeading },
   code: { fontSize: textScale.subheadlineSize, lineHeight: textScale.subheadlineLeading },
@@ -157,6 +158,7 @@ export interface ChatComposerProps {
    */
   onDirectoryDrop?: (directories: File[]) => void;
   onImageRemove?: (id: string) => void;
+  onImageAnnotate?: (id: string) => void;
   onImageRetry?: (id: string) => void;
   /** Pending file attachments (non-image), rendered as a chip strip. */
   fileItems?: ChatComposerFileItem[];
@@ -270,6 +272,7 @@ export function ChatComposer({
   onImageDrop,
   onDirectoryDrop,
   onImageRemove,
+  onImageAnnotate,
   onImageRetry,
   fileItems = [],
   onFileRemove,
@@ -860,6 +863,23 @@ export function ChatComposer({
                           )}
                         >
                           {image.progress}%
+                        </div>
+                      ) : null}
+                      {onImageAnnotate && image.status !== 'uploading' ? (
+                        <div {...stylex.props(typography.imageMarkup)}>
+                          <Button
+                            size="mini"
+                            icon
+                            variant="secondary"
+                            onClick={() => onImageAnnotate(image.id)}
+                            aria-label={t(
+                              'sessions.fileViewer.selection.markupNamedImage',
+                              'Mark up {{name}}',
+                              { name: image.name }
+                            )}
+                          >
+                            <Pencil size={14} aria-hidden />
+                          </Button>
                         </div>
                       ) : null}
                       {image.status === 'failed' ? (

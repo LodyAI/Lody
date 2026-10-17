@@ -1,4 +1,5 @@
 import type { Meta, StoryObj } from '@storybook/react';
+import { useState } from 'react';
 import * as stylex from '@stylexjs/stylex';
 import { fn } from 'storybook/test';
 import { useTranslation } from 'react-i18next';
@@ -6,6 +7,8 @@ import { resolveRevealFileLabel } from '@/lib/session-file-actions';
 import { SessionFileBinaryPreview } from '@/components/sessions/session-file-binary-preview';
 import { SessionFileNoticeCard } from '@/components/sessions/session-file-error-state';
 import { sampleDocx, samplePptx, sampleXlsx } from './fixtures/office-viewer-files';
+import type { DocumentSelection } from '@/lib/document-selection';
+import { PendingImageMarkupDialog } from '@/components/sessions/pending-image-markup-dialog';
 
 const styles = stylex.create({
   frame: { width: 'min(100%, 960px)', height: '640px' },
@@ -118,6 +121,62 @@ export const DocxDocument: Story = {
 
 export const XlsxWorkbook: Story = {
   args: { path: '/tmp/revenue.xlsx', bytes: sampleXlsx() },
+};
+
+// The mock composer retains the actual File so browser acceptance can decode its pixels.
+const acceptSelection = fn((selection: DocumentSelection) => {
+  (window as Window & { documentSelection?: DocumentSelection }).documentSelection = selection;
+  return true;
+});
+export const PdfSelection: Story = {
+  args: { ...PdfDocument.args, onAddSelectionToChat: acceptSelection },
+};
+export const DocxSelection: Story = {
+  args: { ...DocxDocument.args, onAddSelectionToChat: acceptSelection },
+};
+export const XlsxSelection: Story = {
+  args: { ...XlsxWorkbook.args, onAddSelectionToChat: acceptSelection },
+};
+export const PptxSelection: Story = {
+  args: { path: '/tmp/slides.pptx', bytes: samplePptx(), onAddSelectionToChat: acceptSelection },
+};
+
+function AttachedImageMarkupStory({ file }: { file: File }) {
+  const [open, setOpen] = useState(true);
+  return open ? (
+    <PendingImageMarkupDialog
+      file={file}
+      onClose={() => setOpen(false)}
+      onAdd={(selection) => {
+        acceptSelection(selection);
+        setOpen(false);
+        return true;
+      }}
+    />
+  ) : null;
+}
+export const AttachedImageMarkup: Story = {
+  args: { path: 'screenshot.png' },
+  loaders: [
+    async () => {
+      const canvas = document.createElement('canvas');
+      canvas.width = 800;
+      canvas.height = 400;
+      const context = canvas.getContext('2d')!;
+      context.fillStyle = '#fff';
+      context.fillRect(0, 0, 800, 400);
+      context.fillStyle = '#2563eb';
+      context.fillRect(40, 40, 720, 100);
+      context.fillStyle = '#111';
+      context.font = '28px sans-serif';
+      context.fillText('Synthetic screenshot', 40, 210);
+      const blob = await new Promise<Blob>((resolve) =>
+        canvas.toBlob((value) => resolve(value!), 'image/png')
+      );
+      return { file: new File([blob], 'screenshot.png', { type: 'image/png' }) };
+    },
+  ],
+  render: (_args, { loaded }) => <AttachedImageMarkupStory file={loaded.file} />,
 };
 
 function PreviousXlsxFallback() {

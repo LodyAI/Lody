@@ -124,6 +124,24 @@ with the full access description in its accessible name/title.
 
 ## Binary previews
 
+An open session chat can accept text selections, spreadsheet cell ranges and
+annotated screenshot regions from supported document/image previews.
+`document-selection-surface.tsx` owns preparation, cancellation and the floating
+selection composer. Screenshot actions occupy the existing reading toolbar; native
+text selection opens feedback beside the source and preserves its highlight.
+Empty feedback dismisses outside; typed feedback stays anchored through scrolling.
+Cmd/Ctrl+I focuses its comment, Cmd/Ctrl+Enter stages it, and Escape cancels.
+PDF rotation is in More and PDF/CSV search opens beneath the toolbar.
+`document-selection-editor.tsx` owns screenshot previews and comments. Only the
+existing-image attachment dialog opts into drawing tools, with names and a drawing
+hint. Crops preserve display pixel density within the 4 MP output budget; their CSS
+preview size and markup stroke size remain independent of that density. PDF pages
+are captured in page coordinates to preserve centering and crop edges, and cross-page regions compose those page patches.
+Source context is staged as an expandable text reference and screenshots as
+ordinary image attachments, awaiting the user's send. The session composer also
+offers markup on existing image drafts, replacing their pixels only after acceptance.
+See the [decision and verification limits](../../../../../.agents/notes/implemented/feature/2026-10-17-document-selection-and-image-markup.md).
+
 `session-file-binary-preview.tsx` renders supported images, videos, PDFs, DOCX, XLSX, and
 PPTX, and otherwise shows a binary notice. The [PDF viewer](session-file-pdf-preview.tsx) reads local
 resources in 64 KiB byte ranges, keeps page canvases within an 8-megapixel budget,

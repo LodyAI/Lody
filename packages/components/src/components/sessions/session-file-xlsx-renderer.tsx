@@ -1,7 +1,7 @@
 import * as stylex from '@stylexjs/stylex';
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Copy, ZoomIn, ZoomOut } from 'lucide-react';
+import { Copy, MessageSquarePlus, ZoomIn, ZoomOut } from 'lucide-react';
 import {
   setWasmSource,
   useXlsxViewerController,
@@ -9,6 +9,7 @@ import {
   type XlsxViewerController,
 } from '@extend-ai/react-xlsx';
 import wasmUrl from '@extend-ai/react-xlsx/duke_sheets_wasm_bg.wasm?url';
+import { DocumentSelectionTooltip as Tooltip } from './document-selection-tooltip';
 import { Button } from '@lody/ui/button';
 import { Spinner } from '@lody/ui/spinner';
 import { colors } from '@lody/ui/tokens/colors.stylex';
@@ -18,7 +19,11 @@ import type { SessionFileErrorActions } from '@/lib/session-file-actions';
 import { SessionFileNoticeCard } from './session-file-error-state';
 import { OfficeViewerFrame, officeFrameStyles } from './session-file-office-frame';
 import { writeSpreadsheetClipboard } from './session-file-spreadsheet-clipboard';
-import { readXlsxSelectionClipboard } from './session-file-xlsx-clipboard';
+import {
+  readXlsxSelectionClipboard,
+  getXlsxSelectionLocation,
+} from './session-file-xlsx-clipboard';
+import { DocumentCaptureButton, useDocumentSelection } from './document-selection-surface';
 
 setWasmSource(wasmUrl);
 
@@ -39,15 +44,18 @@ function XlsxToolbar({
   copyStatus,
   isCopying,
   onCopy,
+  path,
 }: {
   readonly controller: XlsxViewerController;
   readonly copyStatus: string;
   readonly isCopying: boolean;
   readonly onCopy: () => void;
+  readonly path: string;
 }) {
   const { t } = useTranslation();
+  const select = useDocumentSelection();
   return (
-    <div {...stylex.props(officeFrameStyles.toolbar)}>
+    <div {...stylex.props(officeFrameStyles.toolbar)} data-document-toolbar>
       <Button
         type="button"
         variant="ghost"
@@ -80,6 +88,8 @@ function XlsxToolbar({
         type="button"
         variant="ghost"
         size="mini"
+        icon
+        aria-label={t('sessions.fileViewer.spreadsheet.copySelection', 'Copy selection')}
         disabled={
           isCopying ||
           controller.isLoading ||
@@ -89,11 +99,37 @@ function XlsxToolbar({
         onClick={onCopy}
       >
         <Copy size={16} aria-hidden />
-        {t('sessions.fileViewer.spreadsheet.copySelection', 'Copy selection')}
       </Button>
       <span {...stylex.props(officeFrameStyles.label)} role="status">
         {copyStatus}
       </span>
+      {select ? (
+        <Tooltip
+          content={t('sessions.fileViewer.selection.annotateCells', 'Annotate selected cells')}
+        >
+          <Button
+            icon
+            aria-label={t('sessions.fileViewer.selection.annotateCells', 'Annotate selected cells')}
+            size="mini"
+            variant="ghost"
+            disabled={
+              controller.isLoading ||
+              !controller.activeSheet ||
+              (!controller.selection && !controller.activeCell)
+            }
+            onClick={(event) =>
+              select(async (signal) => {
+                const location = getXlsxSelectionLocation(controller);
+                const data = await readXlsxSelectionClipboard(controller, signal);
+                return { path, location, text: data.text };
+              }, event.currentTarget)
+            }
+          >
+            <MessageSquarePlus size={16} aria-hidden />
+          </Button>
+        </Tooltip>
+      ) : null}
+      <DocumentCaptureButton />
       <span {...stylex.props(officeFrameStyles.spacer)} />
       <span {...stylex.props(officeFrameStyles.label)}>
         {controller.tabs.length > 0
@@ -212,6 +248,7 @@ export function SessionFileXlsxRenderer({
               copyStatus={copyStatus}
               isCopying={isCopying}
               onCopy={copySelection}
+              path={path}
             />
           )}
           loadingState={

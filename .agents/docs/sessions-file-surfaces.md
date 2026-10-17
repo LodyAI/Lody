@@ -151,6 +151,19 @@ bounded Machine RPC reads. Indexing and saving still require the daemon. See the
 - CSV/TSV and XLSX support preview-only resize and rectangular selection copy.
   Clipboard values preserve table structure; XLSX reads from its worker through
   a bounded adapter. See the [decision](../notes/implemented/feature/2026-10-09-spreadsheet-preview-controls.md).
+- PDF/Office/image previews with an open session composer support source-labelled
+  text/cell references and screenshot regions with comments. The screenshot icon shares
+  the reading toolbar; native text selection opens an anchored comment card with
+  retained source highlighting. Typed drafts survive scrolling away and back.
+  PDF rotation lives in More; PDF/CSV search expands below the reading controls.
+  Captures are clipped to
+  the authorized preview, preserve display pixel density within a 4-megapixel
+  output budget, and keep their logical preview size. PDF page crops preserve
+  source alignment, including regions crossing page boundaries. Changing source or hiding
+  the surface discards unfinished preparation. Context uses existing expandable
+  text drafts and images use existing attachments. These are captured snapshots,
+  without revision-aware source navigation. Existing image drafts can be marked
+  up and replaced after acceptance. See the [selection decision](../notes/implemented/feature/2026-10-17-document-selection-and-image-markup.md).
 - **Core viewers are intentionally NOT code-split** (file viewer, diff viewer,
   diff panel, inner Monaco/Markdown remain static imports). The old
   `lazy(() => import())` wrappers produced stale-chunk load failures in the
