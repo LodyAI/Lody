@@ -1,5 +1,5 @@
 import { LOCAL_LORO_DATA_PLANE_PROTOCOL_VERSION } from '@lody/shared/local-loro-data-plane';
-import type { LocalLoroDataPlaneConnection } from '@lody/shared/local-loro-transport';
+import type { LocalLoroDataPlaneConnection } from '@lody/shared/local-loro-data-plane';
 import type { PrefetchOutcome } from './background-sync-coordinator';
 import { readEagerSyncSnapshot } from './eager-sync-snapshot-cache';
 import type {

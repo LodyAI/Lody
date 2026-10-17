@@ -1,3 +1,8 @@
+import {
+  applyAgentRoleProposal,
+  AgentRoleProposalCommandSchema,
+  type AgentRoleProposalMeta,
+} from '../src/agent-role-proposal';
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -318,5 +323,149 @@ describe('agent role machine targets', () => {
       )?.agentConfigId
     ).toBe('config-2');
     expect(resolveAgentRoleMentionValue(roles, 'role-1@machine-3')).toBeUndefined();
+  });
+});
+
+// Proposals share the same catalog rules as Settings while preserving unrelated fields.
+describe('Agent Role proposals', () => {
+  const proposal = (command: AgentRoleProposalMeta['command']): AgentRoleProposalMeta => ({
+    command,
+    roleId: 'role-1',
+    requesterUserId: 'user-1',
+  });
+  it('creates a private role bound to the exact machine and Agent defaults', () => {
+    const next = applyAgentRoleProposal(
+      proposal({
+        action: 'create',
+        requestId: 'request',
+        name: 'Reviewer',
+        machineId: 'machine',
+        agentConfigId: 'config',
+        promptPrefix: 'Review carefully',
+      }),
+      [],
+      'user-1',
+      20
+    );
+    expect(next).toMatchObject({
+      name: 'Reviewer',
+      visibility: 'private',
+      ownerUserId: 'user-1',
+      machineId: 'machine',
+      agentConfigId: 'config',
+      runConfig: {},
+      revision: 1,
+      promptPrefix: 'Review carefully',
+    });
+    expect(next.createdAt).toBe(20);
+  });
+  it('patches the latest row, clears explicit empty fields and retains the execution snapshot', () => {
+    const current = role({
+      revision: 9,
+      promptPrefix: 'Old',
+      description: 'Keep this',
+      emoji: '🐦',
+      visibility: 'workspace',
+    });
+    const next = applyAgentRoleProposal(
+      proposal({
+        action: 'update',
+        requestId: 'request',
+        roleId: current.id,
+        patch: { promptPrefix: '' },
+      }),
+      [current],
+      'user-1',
+      20
+    );
+    expect(next).toEqual({ ...current, promptPrefix: '', revision: 10, updatedAt: 20 });
+    expect(current.promptPrefix).toBe('Old');
+    expect(
+      applyAgentRoleProposal(
+        proposal({
+          action: 'update',
+          requestId: 'request',
+          roleId: current.id,
+          patch: { promptPrefix: '' },
+        }),
+        [next],
+        'user-1',
+        30
+      )
+    ).toBe(next);
+  });
+  it('normalizes instruction whitespace like Settings so file-based retries are no-ops', () => {
+    const current = role({ promptPrefix: 'Review carefully' });
+    const next = applyAgentRoleProposal(
+      proposal({
+        action: 'update',
+        requestId: 'request',
+        roleId: current.id,
+        patch: { promptPrefix: '  Review carefully\n' },
+      }),
+      [current],
+      'user-1',
+      20
+    );
+    expect(next).toBe(current);
+  });
+
+  it('rejects deleted roles, unauthorized confirmation and duplicate mention names', () => {
+    const update = proposal({
+      action: 'update',
+      requestId: 'request',
+      roleId: 'role-1',
+      patch: { name: 'New' },
+    });
+    expect(() => applyAgentRoleProposal(update, [], 'user-1', 20)).toThrow('no longer exists');
+    expect(() => applyAgentRoleProposal(update, [role()], 'other', 20)).toThrow('requesting user');
+    expect(() =>
+      applyAgentRoleProposal(update, [role({ ownerUserId: 'other' })], 'user-1', 20)
+    ).toThrow('not editable');
+    expect(() =>
+      applyAgentRoleProposal(
+        update,
+        [role(), role({ id: 'other' as AgentRoleId, name: 'New' })],
+        'user-1',
+        20
+      )
+    ).toThrow('already in use');
+  });
+  it('does not overwrite a previously created role when confirmation is retried', () => {
+    const current = role({ name: 'Edited later' });
+    expect(
+      applyAgentRoleProposal(
+        proposal({
+          action: 'create',
+          requestId: 'request',
+          name: 'Original',
+          machineId: 'machine',
+          agentConfigId: 'config',
+        }),
+        [current],
+        'user-1',
+        20
+      )
+    ).toBe(current);
+  });
+  it('rejects unsupported fields, empty patches and oversized instructions', () => {
+    const update = { action: 'update', requestId: 'request', roleId: 'role-1', patch: {} };
+    expect(AgentRoleProposalCommandSchema.safeParse(update).success).toBe(false);
+    expect(
+      AgentRoleProposalCommandSchema.safeParse({ ...update, patch: { apiKey: 'synthetic' } })
+        .success
+    ).toBe(false);
+    expect(
+      AgentRoleProposalCommandSchema.safeParse({
+        ...update,
+        patch: { promptPrefix: 'x'.repeat(32769) },
+      }).success
+    ).toBe(false);
+    expect(
+      AgentRoleProposalCommandSchema.safeParse({
+        ...update,
+        patch: { description: '🐦'.repeat(140) },
+      }).success
+    ).toBe(true);
   });
 });

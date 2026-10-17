@@ -106,6 +106,7 @@ const styles = stylex.create({
     fontSize: '14px',
     lineHeight: '20px',
   },
+  diffCardHeaderOnly: { borderBottomWidth: 0 },
   skeletonBody: {
     display: 'flex',
     flexDirection: 'column',
@@ -144,14 +145,16 @@ const styles = stylex.create({
 
 function FileDiffSkeleton({
   filePath,
+  showBody,
   onOpenFile,
 }: {
   filePath: string;
+  showBody: boolean;
   onOpenFile?: (path: string) => void;
 }) {
   return (
     <div {...stylex.props(styles.diffCard)}>
-      <div {...stylex.props(styles.diffCardHeader)}>
+      <div {...stylex.props(styles.diffCardHeader, !showBody && styles.diffCardHeaderOnly)}>
         <FileIcon filePath={filePath} className={stylex.props(styles.fileIcon).className} />
         <div {...stylex.props(styles.filePathRow)}>
           <span {...stylex.props(styles.filePath)} title={filePath}>
@@ -160,15 +163,44 @@ function FileDiffSkeleton({
           <DiffFileHeaderActions path={filePath} onOpenFile={onOpenFile} />
         </div>
       </div>
-      <div {...stylex.props(styles.skeletonBody)}>
-        <Skeleton width="100%" height={12} />
-        <Skeleton width="91%" height={12} />
-        <Skeleton width="80%" height={12} />
-        <Skeleton width="100%" height={12} />
-        <Skeleton width="75%" height={12} />
-      </div>
+      {showBody ? (
+        <div {...stylex.props(styles.skeletonBody)}>
+          <Skeleton width="100%" height={12} />
+          <Skeleton width="91%" height={12} />
+          <Skeleton width="80%" height={12} />
+          <Skeleton width="100%" height={12} />
+          <Skeleton width="75%" height={12} />
+        </div>
+      ) : null}
     </div>
   );
+}
+
+/**
+ * How many loading cards may draw a skeleton body. Every skeleton line pulses,
+ * and WebKit composites each pulsing element into its own layer, so one body
+ * per file turned a diff of a few thousand files into a WebContent process
+ * kill on iOS before any diff arrived. The first few open cards fill the
+ * screen; the rest wait as headers.
+ */
+export const MAX_DIFF_SKELETON_BODIES = 3;
+
+/**
+ * The loading cards that draw a skeleton body: only cards that will open (a
+ * collapsed card has no body to stand in for), and at most
+ * {@link MAX_DIFF_SKELETON_BODIES} of them, in list order.
+ */
+export function selectDiffSkeletonBodyPaths(input: {
+  readonly paths: readonly string[];
+  readonly isLoaded: (path: string) => boolean;
+  readonly opensByDefault: (path: string) => boolean;
+}): ReadonlySet<string> {
+  const selected = new Set<string>();
+  for (const path of input.paths) {
+    if (selected.size >= MAX_DIFF_SKELETON_BODIES) break;
+    if (!input.isLoaded(path) && input.opensByDefault(path)) selected.add(path);
+  }
+  return selected;
 }
 
 function getThreadsForPath<T extends { anchor: { path: string } }>(
@@ -270,6 +302,8 @@ type DiffFileBlockProps = {
   filePath: string;
   data: FileDiffData | undefined;
   defaultOpen: boolean;
+  /** Whether a card still loading draws a skeleton body; see {@link selectDiffSkeletonBodyPaths}. */
+  showSkeletonBody: boolean;
   commentsEnabled: boolean;
   currentUser: CommentUser | null;
   githubThreads: GitHubReviewThread[];
@@ -297,6 +331,7 @@ const DiffFileBlock = memo(function DiffFileBlock({
   filePath,
   data,
   defaultOpen,
+  showSkeletonBody,
   commentsEnabled,
   currentUser,
   githubThreads,
@@ -317,7 +352,9 @@ const DiffFileBlock = memo(function DiffFileBlock({
   });
 
   if (!data) {
-    return <FileDiffSkeleton filePath={filePath} onOpenFile={onOpenFile} />;
+    return (
+      <FileDiffSkeleton filePath={filePath} showBody={showSkeletonBody} onOpenFile={onOpenFile} />
+    );
   }
 
   if (data.status === 'error') {
@@ -770,6 +807,12 @@ function SessionConversationDiffPanelImpl({
     );
   }
 
+  const skeletonBodyPaths = selectDiffSkeletonBodyPaths({
+    paths: normalizedPaths,
+    isLoaded: (path) => resolvedByPath[path] !== undefined,
+    opensByDefault: (path) => shouldOpenDiffFileByDefault({ mode, filePath: path, focusFilePath }),
+  });
+
   const renderFileBlock = (filePath: string) => (
     <div
       key={filePath}
@@ -780,6 +823,7 @@ function SessionConversationDiffPanelImpl({
         filePath={filePath}
         data={resolvedByPath[filePath]}
         defaultOpen={shouldOpenDiffFileByDefault({ mode, filePath, focusFilePath })}
+        showSkeletonBody={skeletonBodyPaths.has(filePath)}
         commentsEnabled={Boolean(latestPrNumber && repoFullName)}
         currentUser={currentUser}
         githubThreads={githubThreadsByPath.get(filePath) ?? EMPTY_GITHUB_THREADS}

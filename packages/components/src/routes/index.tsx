@@ -115,7 +115,9 @@ function AuthedHomeRoute() {
     activeOrganization,
     organizations,
     organizationsLoading,
-    error: organizationsError,
+    // Only the list decides the landing target; the active organization is
+    // optional here and is activated in the background.
+    organizationsError,
     refetchOrganizations,
     refetchActiveOrganization,
   } = useOrganization();

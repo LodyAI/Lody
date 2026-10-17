@@ -1,4 +1,5 @@
 import { getDeepSeekHarnessProviderConfigPath } from '@lody/shared';
+import { DEEPSEEK_HARNESS_CORDIS_PACKAGE_VERSIONS } from 'acp-extension-dsh/profile';
 import { execFile } from 'node:child_process';
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -210,7 +211,9 @@ describe('resolveDeepSeekHarnessProcessLaunch', () => {
     expect(launch.args).not.toContain('@deepseek-ai/dsh@0.1.0-rc.6');
     // The Cordis ecosystem versions independently of the Harness family, and
     // a `DEEPSEEK_HARNESS_VERSION` specifier for it fails the cold install.
-    expect(launch.args).toContain('@deepseek-ai/cordis@4.0.4');
+    expect(launch.args).toContain(
+      `@deepseek-ai/cordis@${DEEPSEEK_HARNESS_CORDIS_PACKAGE_VERSIONS['@deepseek-ai/cordis']}`
+    );
     expect(launch.args).toContain(`@deepseek-ai/dsh-hmr@${DEEPSEEK_HARNESS_VERSION}`);
     expect(launch.args).not.toContain(`@deepseek-ai/cordis@${DEEPSEEK_HARNESS_VERSION}`);
     expect(launch.env[DEEPSEEK_HARNESS_HOME_ENV]).toBe(rootDir);

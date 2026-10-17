@@ -465,6 +465,7 @@ describe('local platform zero-cloud integration', () => {
     );
     try {
       expect(documentManager.isTransportConnected()).toBe(true);
+      expect(documentManager.isTransportRecovering()).toBe(false);
       await expect(
         cloudPort.access.verifyMachineAccess({
           workspaceId: workspace.id as WorkspaceId,

@@ -13,6 +13,15 @@ Child directories such as `sessions/`, `mobile/`, `chat/`, and `archive/` own th
 | Session controls    | [`shared/workdir-mode-selector.tsx`](shared/workdir-mode-selector.tsx), [`shared/session-relation-card.tsx`](shared/session-relation-card.tsx) | Selects workdir mode and navigates session provenance.           |
 | Conversation access | [`session-sharing.tsx`](session-sharing.tsx), [`sharing/`](sharing/)                                                                           | Presents team visibility and static sharing controls.            |
 
+## About notices
+
+[`settings/open-source-attributions-dialog.tsx`](settings/open-source-attributions-dialog.tsx)
+keeps its heading outside one scrolling body containing the summary and both
+notice groups. The height-capped ScrollArea is a flex column, and its viewport
+can shrink to fit the dialog's available height. This keeps the last notice
+reachable even when summary cards stack in a short window. See the
+[scrolling fix](../../../../.agents/notes/implemented/bug-fix/2026-10-15-open-source-notices-scroll.md).
+
 ## Sidebar and session rows
 
 Machine-section ordering uses [`sidebar-machine-order.ts`](sidebar-machine-order.ts)
@@ -53,6 +62,13 @@ and [display preference](../../../../.agents/notes/implemented/feature/2026-09-2
 
 ## Entry points and layout
 
+- Remote Add folder: `local-projects/use-remote-directory-picker.ts` owns navigation,
+  creation and registration state. Both layouts use `remote-directory-new-folder-control.tsx`
+  for a single-name form, shown only when the target advertises
+  `localProjectCreateDirectory`. Creation enters the new directory; Add registers it
+  separately. Errors preserve the name, and pending operations cannot be repeated.
+  [Decision and verification](../../../../.agents/notes/implemented/feature/2026-10-14-remote-directory-creation.md).
+
 - Entry and workspace-gate redirects use `BootNavigate`; `PreloadedMainLayout`
   owns its boot-shell Suspense fallback for local and cloud paths. The ready layout
   keeps the existing content gate while workspace data resolves. See
@@ -77,6 +93,10 @@ and [display preference](../../../../.agents/notes/implemented/feature/2026-09-2
   keeps an accessible name and a hover tooltip. The page and its editors stay
   mounted through resizing; header actions wrap within the pane. [Decision and
   verification](../../../../.agents/notes/implemented/bug-fix/2026-10-01-narrow-settings-panel.md).
+- Machine settings' connected Agent badges in
+  [`settings/my-machine-connected-resources.tsx`](settings/my-machine-connected-resources.tsx)
+  use the shared `AgentIcon`, including provider-brand inference and custom/unknown
+  Agent fallbacks, in the Badge's leading icon slot.
 - GitHub personal identity authorization stays available in cloud-capable native
   clients: Authorize opens the current workspace's `/settings/github` on
   `VITE_SITE_URL` (default `https://lody.ai`) in the external browser. Complete

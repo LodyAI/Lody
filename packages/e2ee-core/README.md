@@ -1,134 +1,183 @@
-# E2EE foundations
+# @lody/e2ee-core — reading guide
 
-An independently testable extraction, with no production consumers. The root
-foundation entry is `@lody/e2ee-core`; it uses the root Effect 4.0.2 catalog.
+[中文导读](README.zh.md)
 
-| Entry | Responsibility |
+End-to-end encryption for collaborative documents synced over an untrusted
+backend. A **signed membership ledger** decides who belongs to a workspace and
+which **epoch key** is current. Devices deliver that key to each other through
+an untrusted mailbox. Documents are sealed with keys derived from it. The
+backend stores ciphertext and relays messages, but cannot read content, forge
+membership or roll a device back.
+
+The library is not tied to Lody or to Convex. Every remote system, platform
+capability and local store is a service you provide, so it fits any app that
+syncs through Loro / Durable Streams or a comparable append-only log.
+
+## Availability
+
+The service architecture is reusable, but this is currently a private workspace
+package (`private: true`, version `0.0.0`), not a published SDK. Production E2EE
+composition is not enabled. Node SQLite and Loro Streams adapters are provided;
+other runtimes need their own storage and platform adapters. Backend ports and
+`/host` define what another backend must implement; they do not deploy a server.
+
+## Start here
+
+| You want to… | Read |
 | --- | --- |
-| `Bytes` | Copy-owning public keys, hashes, IDs, signatures and opaque epoch secrets |
-| `encodeCbor` / `decodeCbor` | Bounded canonical array/scalar CBOR; no ledger schemas |
-| Context/header/AAD/signing-byte encoders | Existing content v0 byte domains, document generation zero |
-| `inspectContentFrame` | Unverified routing metadata only |
-| `verifySignature` | Strict Ed25519 Result; no signing or private-key input |
-| `verifyContentSignature` | v0 signature against caller-supplied scope and trusted signer |
-| `deriveContentKey` | HKDF-SHA-256 scoped opaque leaf from `Bytes.EpochKey` |
-| `sealContentAead` / `openContentAead` | Content v0 XChaCha20-Poly1305 primitive; separate signature/authority checks required |
-| `epochHpkeAad` / `sealEpochKeyHpke` / `openEpochKeyHpke` | Fixed Base epoch HPKE primitive; no sender authentication, authority or installation |
+| understand the protocol and its guarantees | [whitepaper](../../specs/e2ee/whitepaper.md) ([中文](../../specs/e2ee/whitepaper.zh.md)) |
+| integrate E2EE into an app | [services](docs/services.md) → [workflows](docs/workflows.md) (start from `E2eeWorkspace`) → [surface](docs/surface.md) |
+| implement a backend (mailbox, staging, ledger log) | [backend guide](docs/backend-guide.md) and `@lody/e2ee-core/host` |
+| implement key custody on a platform | [`DeviceIdentity`, `KeyProtector`, `CandidateProtector`](docs/services.md#platform-ports) |
+| store state somewhere other than SQLite | [local storage ports](docs/services.md#local-storage-ports) |
+| review or change this package | [architecture](docs/architecture.md), then [AGENTS.md](AGENTS.md) |
+| see everything working with real faults | the E2EE Lab, `packages/e2ee-lab` (later in this PR stack) |
 
-Compose HPKE Effects directly and use `Effect.fromResult` for Result primitives
-in existing workflows; this package starts no runtime.
-CBOR encoding budgets the expanded wire size before serialization and copies only
-bounded data. Shared values remain valid within 8192 bytes; cycles return a Result
-failure. These limits bound data traversal, not arbitrary code in getters/proxies.
-`verifyContentSignature(frame, trustedScope, trustedSigner, additionalData?)`
-checks the supplied organization genesis, document resource, epoch, purpose and
-independent binding. It does not decrypt, establish membership, approve a
-snapshot, or grant publication permission. A valid signature can cover invalid
-ciphertext. `contentKeyInfo` returns derivation context, not derived key material.
+## Entries
 
-P14 can consume `Bytes.SigningPublicKey`, `Bytes.EncryptionPublicKey`,
-`Bytes.Signature` and the validators from this root entry. Private keys and native
-handles stay in the platform owner. `EncryptionPublicKey` preserves the candidate's
-32-byte, nonzero wire-shape check; it is not proof of safe X25519 agreement or
-possession. Do not use it as one. No generic signer or key export is introduced.
-Full signed HPKE delivery, document-key import/export and signed content workflows
-remain future slices; no SDK or repo dependency is needed here.
+| Import | Contents | Stability |
+| --- | --- | --- |
+| `@lody/e2ee-core` | workflows (`KeyReceiver`, `EpochPublisher`, …), their errors and results, `E2eeWorkflows` | public |
+| `@lody/e2ee-core/services` | ports to implement or provide, port errors | public |
+| `@lody/e2ee-core/protocol` | the pure protocol: bytes, CBOR, ledger verification, envelopes, content format | public |
+| `@lody/e2ee-core/host` | what a backend must enforce, staging wire schemas (no Node APIs) | public |
+| `@lody/e2ee-core/adapters/node-sqlite` | SQLite implementation of every local store, reference mailbox backend | public |
+| `@lody/e2ee-core/adapters/loro-streams` | `LedgerLog` / `LedgerFeedSource` over a Loro / Durable Streams control stream | public |
+| `@lody/e2ee-core/internal` | internals for this repository's tests and the Lab | **unstable** |
 
-Source files and exact input SHA-256 values are in [provenance.json](provenance.json).
-Extraction omits ledger/snapshot schemas, trust caches, injected executors,
-full signed content workflows and host adapters. The HKDF salt is returned as a
-fresh copy instead of shared mutable bytes. Protocol bytes remain unchanged.
+## A composition in one screen
 
-Run `pnpm --filter @lody/e2ee-core typecheck` and
-`pnpm --filter @lody/e2ee-core test`. Tests include the
-[RFC 8032 §7.1 vector](https://www.rfc-editor.org/rfc/rfc8032#section-7.1).
-`test/content-vector.json` is a synthetic v0 frame signed independently with
-Node's native Ed25519 and the RFC test seed: genesis `11` repeated 32 times,
-epoch `0x01020304`, resource `doc`, purpose 1, nonce `22` repeated 24 times,
-opaque ciphertext/tag `33` repeated 16 times, optional binding `abcd`.
-This fixture tests signatures, not AEAD. Both frames are fixed and native-checked.
+```ts
+import { Effect, Layer } from 'effect';
+import { E2eeWorkflows, KeyReceiver, LedgerFeed } from '@lody/e2ee-core';
+import { DeviceIdentity, KeyProtector, CandidateProtector, WorkspaceScope } from '@lody/e2ee-core/services';
+import { sqliteLocalStores } from '@lody/e2ee-core/adapters/node-sqlite';
+import { streamsLedgerLog } from '@lody/e2ee-core/adapters/loro-streams';
 
-See the [Spec](../../specs/e2ee-foundations.md) and
-[extraction decision](../../.agents/notes/implemented/architecture/2026-10-10-e2ee-foundations.md)
-for trust boundaries, failure ownership and validation limits.
+const app = E2eeWorkflows.pipe(
+  Layer.provideMerge(LedgerFeed.viewSource),
+  Layer.provideMerge(LedgerFeed.layer({ origin: { kind: 'genesis', record }, expected, budget })),
+  Layer.provideMerge(
+    Layer.mergeAll(
+      sqliteLocalStores({ directory, mode: 'create-or-open' }),
+      streamsLedgerLog({ stream, checkpoint, budget }),
+      myKeyMailbox,        // your KeyMailbox adapter
+      myStagingStore,      // your EpochStagingStore adapter
+      myPublicationSource, // EpochPublicationSource
+      KeyProtector.layerFromPromises(nativeInstalledKeyProtection),
+      CandidateProtector.layerFromPromises(nativeCandidateProtection),
+    )
+  ),
+  Layer.provideMerge(
+    Layer.mergeAll(
+      Layer.succeed(WorkspaceScope, { genesis }),
+      Layer.succeed(DeviceIdentity, { signer, encryptionKeyPair }),
+    )
+  )
+);
 
-## Content AEAD primitive (P07-b)
+// Finite steps; the application decides when to run them.
+const onStartup = Effect.gen(function* () {
+  const receiver = yield* KeyReceiver;
+  yield* receiver.resume();
+  yield* receiver.fetchAndInstall();
+  yield* receiver.flushReports();
+});
+```
 
-`deriveContentKey(epochKey, trustedScope)` consumes an opaque `Bytes.EpochKey`.
-The returned opaque key owns its bytes and derivation context; it has no public
-constructor or export. Four document purposes share a derived leaf. Other purposes
-have independent leaves. Every seal/open checks the derivation context and binds
-the exact purpose, trusted signing device, header and optional external data in AAD.
-Salt, info, big-endian fields and domains retain candidate content v0 bytes.
+## Code map
 
-`sealContentAead(key, trustedHeader, plaintext, additionalData?)` returns only
-`{ nonce, ciphertext }`, where ciphertext includes exactly one 16-byte tag. It
-obtains a fresh 24-byte nonce from `globalThis.crypto.getRandomValues`; missing or
-throwing randomness returns `content-random-unavailable`. No caller nonce or random
-source override is exposed. Retain exact ciphertext for retries. `openContentAead`
-accepts that nonce/ciphertext and the independently trusted header; it returns
-plaintext only after tag verification. Neither function creates a signed frame,
-verifies author authority, or checks permission/freshness. Callers must perform
-those checks separately before consuming plaintext or publishing bytes.
+```text
+src/
+  index.ts, workflows.ts   "."        workflows and composition
+  services/                "/services" ports
+  protocol/                "/protocol" pure protocol barrel
+  host/                    "/host"     backend contract
+  adapters/node-sqlite/    SQLite stores, reference mailbox backend
+  adapters/loro-streams/   Streams ledger log and feed source
+  internal/                implementation: foundation, crypto, ledger, keys, submission
+test/                      behavior suites (real SQLite, real crypto, child processes)
+scripts/check-public-docs.ts  JSDoc and surface documentation check
+docs/                      architecture, services, workflows, surface, backend guide
+```
 
-Inputs are bounded before large copies: plaintext 0..16 MiB, ciphertext 16..16 MiB
-+ 16, nonce exactly 24 bytes, external binding 0..1024 bytes. Scope/header errors
-retain the existing content codes; malformed nonce/ciphertext have separate codes,
-context-key mismatch is `content-key-scope-mismatch`, tag failure is
-`content-authentication-failed`. Errors contain codes only. Temporary epoch-key
-copies, HKDF PRK, operation key copies and encryption plaintext copies are wiped
-in `finally`; the derived key lasts while its opaque object is reachable. This is
-best-effort JavaScript cleanup, not a guarantee that runtimes erase all copies.
+Module notes for protocol internals: [ledger](src/internal/ledger/README.md),
+[keys](src/internal/keys/README.md),
+[Streams adapter](src/adapters/loro-streams/README.md),
+[documents](src/internal/content/README.md).
 
-[Fixed synthetic vectors](test/crypto-vector.json) use Python HMAC-SHA256 and
-PyNaCl 1.6.2/libsodium with independently encoded v0 bytes. Tests also compare with
-native Node/WebCrypto HKDF, cover wrong contexts/keys, tampering, exact limits,
-random-source failure and input ownership through the public package entry.
-A browser bundle was exercised in Chromium; this is not all-platform acceptance.
-See the [extraction note](../../.agents/notes/implemented/architecture/2026-10-11-e2ee-content-crypto.md).
+## Documents to read
 
-To regenerate the fixture in a disposable Python environment, install `PyNaCl==1.6.2`
-and run `python test/generate-crypto-vector.py > test/crypto-vector.json` from this
-package. Runtime tests consume the checked-in JSON; Python is not a project dependency.
+- **Protocol**: [whitepaper](../../specs/e2ee/whitepaper.md), the
+  [E2EE spec index](../../specs/e2ee/README.md),
+  [foundations spec](../../specs/e2ee-foundations.md),
+  [atomic removal](../../specs/e2ee/atomic-removal.md),
+  [publisher key recoverability](../../specs/e2ee/publisher-key-recoverability.md).
+- **Decisions**: [current decisions](../../.agents/notes/implemented/architecture/2026-10-15-e2ee-current-decisions.md),
+  [open contracts](../../.agents/notes/proposed/architecture/2026-10-15-e2ee-open-contracts.md),
+  [service architecture](../../.agents/notes/implemented/architecture/2026-10-16-e2ee-core-service-architecture.md).
+- **This package**: [architecture](docs/architecture.md),
+  [services](docs/services.md), [workflows](docs/workflows.md),
+  [surface](docs/surface.md), [backend guide](docs/backend-guide.md).
 
-The separate [`@lody/e2ee-core/ledger`](src/ledger/README.md) subentry now
-provides strict records, signature/chain verification and deterministic permission
-replay from caller-pinned trust. It has no snapshot, CAS, journal or production
-consumer. The root exports and crypto modules remain unchanged. Ledger extraction
-fingerprints are [separate](src/ledger/provenance.json).
+## Questions
 
-The [submission subentry](src/submission/README.md) adds finite persistent recovery
-for existing-ledger ordinary records, with an explicit Scope-owned SQLite Layer.
-It calls P08 replay before CAS and readback, retains exact signed bytes and
-unconsumed results across process restart, and exposes no production host or signer.
+**Do I need Convex or Lody Cloud?** No. You need a ledger log with conditional
+append (Loro / Durable Streams works out of the box), a key mailbox and a
+staging store. Implement them on any stack: [backend guide](docs/backend-guide.md).
 
-## HPKE epoch primitive (P07-c)
+**What can the server see?** Metadata only: identifiers, epochs, sizes and
+timing. Never keys or plaintext. See the whitepaper's threat model.
 
-`epochHpkeAad`, `sealEpochKeyHpke` and `openEpochKeyHpke` preserve the existing
-ledger envelope's Base suite: DHKEM(X25519, HKDF-SHA-256), HKDF-SHA-256 and
-ChaCha20-Poly1305 (RFC identifiers 0x0020/0x0001/0x0003). Info is exactly
-`lody-e2ee/hpke-epoch/v1\0`, including the final zero byte. AAD is canonical
-DAG-CBOR `[genesis32, epoch(u32), senderSign32, recipientSign32]`, supplied from
-independently trusted caller context. Plaintext is one opaque 32-byte EpochKey;
-output is `enc32` and `ct48`. The existing full envelope remains
-`AAD || enc32 || ct48 || signature64`, signed over
-`lody-e2ee/epoch-env/v1\0 || AAD || enc32 || ct48`. This slice does not construct,
-sign, authenticate, deliver or install that full envelope.
+**How does a new device get the key?** It is admitted by a signed ledger
+record. Existing devices see it in the ledger and `KeyDistributor` sends it an
+envelope through the mailbox. The new device runs `KeyReceiver.fetchAndInstall`.
 
-The functions return Effect values with fixed, non-secret errors. Execute them in
-the caller's existing Effect owner. Every new seal gets 32 bytes of host secure
-randomness for DHKEM derivation, with no public entropy override or retry fallback.
-Opening requires a caller-owned X25519 CryptoKeyPair and its independently trusted
-expected encryption public key. No private-key generation/export/store is added.
-Temporary plaintext and random copies are wiped after native work settles;
-interruption waits for that cleanup because WebCrypto has no abort API. This is
-not a bounded shutdown guarantee if the host's native crypto never settles, nor
-complete erasure of library/native-runtime internal copies.
+**How do I encrypt a document?** For Loro over Streams, use
+`streamsDocumentBinding` as the document's payload protection. Otherwise use
+`sealDocument` / `openDocument`. See [workflows](docs/workflows.md#documents).
 
-Base decryption **does not authenticate a sender or grant authority**. Callers must
-verify the outer signature, current sending/receiving eligibility, recipient key
-binding and epoch-key commitment before using or durably installing the result,
-and recheck authority after async operations. Those workflows remain separate.
-The primitive exposes no transport, ledger shortcut, recovery format or production
-switch. [HPKE tests](test/hpke.test.ts) cover independently encoded RFC/Python
-vectors, trusted-context mismatch, lengths, randomness failure and interruption.
+**How do I rotate the key or remove a member?** `EpochPublisher.publish()` /
+`publishRemoving(membershipId)`. Removal and rotation are one signed record, so
+there is no window where a removed member can read new content.
+
+**What if a device crashes mid-operation?** Every workflow saves its exact
+originals before any network step. Call `resume` / `flush…` after restart; the
+same bytes are retried and nothing is re-signed.
+
+**How is rollback prevented?** `VerifiedLedger` pins the newest verified
+checkpoint durably and refuses any view that does not contain it.
+
+**Where are keys stored?** Only `InstalledEpochKeys` touches key material.
+Blobs are protected by your `KeyProtector` and stored by `InstalledKeyStore`;
+callers receive opaque keys they must dispose.
+
+**What if all devices are lost?** A recovery device whose keys live in an
+encrypted vault (recovery file or passkey) admits a new personal device:
+`E2eeWorkspace.restoreFromRecovery`. See [workflows](docs/workflows.md#recovery).
+
+**Is there a background loop?** No. Every operation is a finite page that
+returns a `next` hint; the application schedules calls.
+
+**What errors can a call return?** Method signatures name their typed errors;
+JSDoc explains the behavior and ownership contract. Each workflow exports its
+full union (`ReceiveFailure`, …). Branch on the documented tag, `reason` or
+protocol `code`. Some errors retain an opaque adapter `cause` for local
+diagnostics; never display or export it raw.
+
+**How do I test my integration?** Use the SQLite adapters, the reference
+mailbox (`makeSqliteKeyMailbox` + `referenceKeyMailbox`) and the suites in
+`test/` as examples. The Lab reproduces protocol attacks end to end.
+
+## Checks
+
+```sh
+pnpm --filter @lody/e2ee-core typecheck
+pnpm --filter @lody/e2ee-core test        # includes the public-docs test
+pnpm --filter @lody/e2ee-core check:docs  # exports, namespaces and service members
+```
+
+Tests use fixed synthetic vectors, real SQLite, real Ed25519/HPKE and child
+processes; the `test/generate-*.py` scripts regenerate vectors (optional).
+
+[Non-gating benchmarks](bench/README.md) emit environment-qualified JSON.

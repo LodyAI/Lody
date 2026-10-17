@@ -31,6 +31,9 @@ maintenance commands here.
   target but under the 8192-byte gate, never do. Status, check, and diff are read-only; only explicit `confirm` writes a
   topic record. Confirmation requires recoverable committed inputs and evidence,
   never changes Spec approval, and never auto-refreshes a stale baseline.
+  Await Git subprocesses throughout the command chain and retain Buffer output.
+  Only no-index content comparison accepts exit code 1; launch errors, signals,
+  other nonzero exits, and output truncation must fail with diagnostics.
   `docs/anchors.mjs` uses TypeScript to hash declarations below `@dec:`
   markers. Check both directions against adjacent `.anchors.json` records;
   unrelated declarations must not invalidate the reviewed block.

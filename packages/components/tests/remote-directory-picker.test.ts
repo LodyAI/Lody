@@ -65,6 +65,7 @@ function access(machineId: string, ownerUserId: string): MachineVisibilityAccess
 describe('buildAddLocalProjectMachineOptions', () => {
   it('keeps teammates’ visible machines and marks them owner-only', () => {
     const ownMachine = machine('machine-own', 'My Mac', 'user-me');
+    ownMachine.protocolCapabilities = { localProjectCreateDirectory: 1 };
     const teammateMachine = machine('machine-team', 'Build server', 'user-alex');
     const visibleMachines = new Map([
       [ownMachine.id, ownMachine],
@@ -92,6 +93,7 @@ describe('buildAddLocalProjectMachineOptions', () => {
         id: ownMachine.id,
         name: 'My Mac',
         online: true,
+        supportsCreateDirectory: true,
         canAddProjects: true,
         ownerName: 'Zoe',
       },
@@ -99,6 +101,7 @@ describe('buildAddLocalProjectMachineOptions', () => {
         id: teammateMachine.id,
         name: 'Build server',
         online: true,
+        supportsCreateDirectory: false,
         canAddProjects: false,
         ownerName: 'Alex Chen',
       },
@@ -122,6 +125,7 @@ describe('buildAddLocalProjectMachineOptions', () => {
         id: ownMachine.id,
         name: 'My Mac',
         online: true,
+        supportsCreateDirectory: false,
         canAddProjects: true,
         ownerName: 'Zoe',
       },

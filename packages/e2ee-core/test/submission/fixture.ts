@@ -1,10 +1,10 @@
 import { createPrivateKey, createPublicKey, sign } from 'node:crypto';
 import Database from 'better-sqlite3';
 import { Effect, Result } from 'effect';
-import * as Bytes from '../../src/bytes';
-import { encodeCbor, bytesEqual, type CborValue } from '../../src/cbor';
-import { hashRecordBytes, verifyLedger, type LedgerCheckpoint } from '../../src/ledger';
-import { SubmissionRemote, SubmissionRemoteError } from '../../src/submission';
+import * as Bytes from '../../src/internal/foundation/bytes';
+import { encodeCbor, bytesEqual, type CborValue } from '../../src/internal/foundation/cbor';
+import { hashRecordBytes, verifyLedger, type LedgerCheckpoint } from '../../src/internal/ledger';
+import { LedgerLog, LedgerLogError } from '@lody/e2ee-core/services';
 const ok = Result.getOrThrow;
 export const filled = (n: number, length = 32) => new Uint8Array(length).fill(n);
 export function keys(n: number) {
@@ -65,7 +65,7 @@ export function host(path: string) {
     db,
     read,
     append: (record: Uint8Array) => append.immediate(checkpoint(read()), record),
-    service: SubmissionRemote.of({
+    service: LedgerLog.of({
       read: () =>
         Effect.sync(() => {
           const records = read();
@@ -74,8 +74,15 @@ export function host(path: string) {
       appendCas: (_anchor, expected, record) =>
         Effect.try({
           try: () => append.immediate(expected, record),
-          catch: () => new SubmissionRemoteError(),
+          catch: () => new LedgerLogError(),
         }),
     }),
   };
 }
+
+export {
+  submissionLayer,
+  submitRecord,
+  resumeSubmission,
+  acknowledgeSubmission,
+} from '../../src/internal/testing/submission';

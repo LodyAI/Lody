@@ -51,7 +51,7 @@ head/count 防止相对本机已接受证据的回退，不是权限投影或全
 
 实现基线为 `f1ba33a61244e2da07aaea93a30f06227311c4b6`，仅在 P08 #1418
 实际合入后 fetch；其中也包含 P07-b #1417。未复制未合入分支或候选 journal。
-[来源指纹](../../../../packages/e2ee-core/src/submission/provenance.json)记录已合入
+[来源指纹](https://github.com/LodyAI/Lody/blob/5f97599e60700d6185834632df85922ea0d73ec6/packages/e2ee-core/src/submission/provenance.json)记录已合入
 依赖闭包与新实现文件。候选 core 7 项和 Lab 2 项历史失败未重跑、未关闭。
 
 包类型检查与 100 项测试通过，其中 15 项提交测试覆盖原生合成签名、独立 Node

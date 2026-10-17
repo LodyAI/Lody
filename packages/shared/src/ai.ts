@@ -1,3 +1,4 @@
+import type { AgentRoleProposalMeta } from './agent-role-proposal';
 import type { LodyRateLimitsCapability } from 'acp-extension-core';
 import type { MemoryBinding } from './memory-provider';
 import type { AcpModelControls } from './acp-model-capabilities';
@@ -1322,6 +1323,7 @@ export type SystemNoticeName =
   | 'agent_warning'
   | 'task_proposal'
   | 'schedule_proposal'
+  | 'agent_role_proposal'
   | 'session_fork_origin';
 
 /**
@@ -1494,6 +1496,7 @@ export type SystemNoticeMeta = {
   agent_warning: AgentWarningMeta;
   task_proposal: TaskProposalMeta;
   schedule_proposal: ScheduleProposalMeta;
+  agent_role_proposal: AgentRoleProposalMeta;
   session_fork_origin: SessionForkOriginMeta;
 };
 
@@ -1862,6 +1865,8 @@ export type TerminalCommandBlock = {
   command: string;
   args?: string[];
   cwd?: string;
+  /** History kept only the head of command + args (1 KiB budget). */
+  truncated?: boolean;
 };
 
 export type TerminalOutputBlock = {

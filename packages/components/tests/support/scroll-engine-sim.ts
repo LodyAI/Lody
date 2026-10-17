@@ -33,6 +33,7 @@ export interface SimRow {
   key: string;
   turnId: string | null;
   turnIndex: number;
+  groupTurnIds?: readonly string[];
   itemIndex?: number | null;
   fixed?: FixedRowKind | null;
   placeholder?: boolean;
@@ -156,6 +157,7 @@ export class ScrollSim implements ScrollHost {
     return this.rows.map((row) => ({
       key: row.key,
       turnId: row.turnId,
+      groupTurnIds: row.groupTurnIds,
       turnIndex: row.turnIndex,
       itemIndex: row.itemIndex ?? null,
       itemIdentity: null,

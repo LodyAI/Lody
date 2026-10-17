@@ -142,7 +142,8 @@ describe('file Markdown images', () => {
   const render = (
     source: Pick<ReturnType<typeof provider>, 'openFile'>,
     automatic = false,
-    documentPath = 'docs/guide.md'
+    documentPath = 'docs/guide.md',
+    text = '# Complete document\n\n![Plot](../images/plot.png)\n\nText after the image.'
   ) =>
     act(async () =>
       root.render(
@@ -152,9 +153,7 @@ describe('file Markdown images', () => {
           automatic={automatic}
           active
         >
-          <MarkdownRenderer
-            text={'# Complete document\n\n![Plot](../images/plot.png)\n\nText after the image.'}
-          />
+          <MarkdownRenderer text={text} />
         </MarkdownFileResources>
       )
     );
@@ -244,6 +243,48 @@ describe('file Markdown images', () => {
     expect(container.textContent).toContain('Load image');
   });
 
+  it('shows a linked remote image on click instead of a copy-path chip', async () => {
+    const source = provider();
+    const paths: string[] = [];
+    await render(
+      {
+        openFile: async (path) => {
+          paths.push(path);
+          return source.openFile(path);
+        },
+      },
+      false,
+      'docs/guide.md',
+      'See [the plot](../images/plot.png).'
+    );
+    expect(container.textContent).toContain('the plot');
+    expect(container.textContent).toContain('Load image');
+    expect(container.querySelector('[aria-label^="Copy agent file path"]')).toBeNull();
+    expect(paths).toEqual([]);
+    await click();
+    expect(paths).toEqual(['images/plot.png']);
+    expect(blobs.get(container.querySelector('img')!.src)?.type).toBe('image/png');
+  });
+
+  it('loads linked same-machine images directly and keeps chips for other links', async () => {
+    const source = createFakeFileWorkspaceProvider({
+      files: [{ path: 'images/plot.png', kind: 'binary', sourceState: 'live-readonly' }],
+      snapshots: { 'images/plot.png': { kind: 'binary', url: 'lody-file://synthetic/image' } },
+    });
+    await render(
+      source,
+      true,
+      'docs/guide.md',
+      '[Plot](../images/plot.png) [Notes](../notes.md) [Line](../images/plot.png#L3)'
+    );
+    expect([...container.querySelectorAll('img')].map((img) => img.getAttribute('src'))).toEqual([
+      'lody-file://synthetic/image',
+    ]);
+    expect(
+      [...container.querySelectorAll('button')].map((button) => button.getAttribute('aria-label'))
+    ).toEqual(['Copy agent file path: ../notes.md', 'Copy agent file path: ../images/plot.png#L3']);
+  });
+
   it('cannot grant filesystem access to an anonymous share', async () => {
     await act(async () =>
       root.render(
@@ -260,14 +301,14 @@ describe('file Markdown images', () => {
             automatic
             active
           >
-            <MarkdownRenderer text="![Private image](../images/plot.png)" />
+            <MarkdownRenderer text="![Private image](../images/plot.png) [Linked image](../images/plot.png)" />
           </MarkdownFileResources>
         </SessionReadonlyContext.Provider>
       )
     );
     expect(container.querySelector('img')).toBeNull();
     expect(container.querySelector('button')).toBeNull();
-    expect(container.textContent).toBe('Private image');
+    expect(container.textContent).toBe('Private image Linked image');
   });
 });
 

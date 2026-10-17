@@ -110,6 +110,11 @@ export function createLoroStreamsTokenProviderLegacy(
     });
   };
   return {
+    /** Borrow the already-primed provider without a Promise round trip or another cache. */
+    createNativeAuthCallback: (): ReturnType<LoroStreamsTokenProvider['createAuthCallback']> => {
+      if (!provider) throw new Error('Prime the Streams token provider before borrowing native auth');
+      return provider.createAuthCallback();
+    },
     getToken: (signal?: AbortSignal) => run((tokens) => tokens.getToken(), signal),
     invalidate: (reason: 'manual' | 'unauthorized' = 'manual'): void => {
       // The imperative caller retains its old synchronous signature. A failed

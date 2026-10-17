@@ -1,5 +1,162 @@
 import { expect, test } from '@playwright/test';
 
+test.describe('permission option wrapping', () => {
+  for (const width of [320, 390, 1280]) {
+    for (const story of ['long-options', 'long-chinese-options']) {
+      test(`${story} stays readable at ${width}px`, async ({ page }) => {
+        await page.setViewportSize({ width, height: 900 });
+        await page.goto(`/iframe.html?id=sessions-permissionprompt--${story}&viewMode=story`);
+        const prompt = page.getByRole('group').filter({
+          has: page.getByRole('button', { name: 'Decline', exact: true }),
+        });
+        const refusal = prompt.getByRole('button', { name: 'Decline', exact: true });
+        await expect(refusal).toBeVisible();
+        await expect
+          .poll(() =>
+            prompt.evaluate((card) => {
+              const bounds = card.getBoundingClientRect();
+              return Array.from(card.querySelectorAll('button')).every((button) => {
+                const box = button.getBoundingClientRect();
+                return box.left >= bounds.left && box.right <= bounds.right;
+              });
+            })
+          )
+          .toBe(true);
+
+        const expectWrapped = async (label: typeof refusal) => {
+          await expect
+            .poll(() =>
+              label.evaluate((element) => {
+                const bounds = element.getBoundingClientRect();
+                const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
+                const lines: DOMRect[] = [];
+                while (walker.nextNode()) {
+                  const text = document.createRange();
+                  text.selectNodeContents(walker.currentNode);
+                  lines.push(...text.getClientRects());
+                }
+                return (
+                  lines.length > 1 &&
+                  lines.every(
+                    (line) =>
+                      line.left >= bounds.left - 1 &&
+                      line.right <= bounds.right + 1 &&
+                      line.top >= bounds.top - 1 &&
+                      line.bottom <= bounds.bottom + 1
+                  ) &&
+                  Array.from(element.querySelectorAll('*')).every(
+                    (child) => child.scrollWidth <= child.clientWidth + 1
+                  )
+                );
+              })
+            )
+            .toBe(true);
+        };
+        const controls = prompt.getByRole('button');
+        for (const control of await controls.all()) {
+          expect((await control.boundingBox())!.height).toBeLessThanOrEqual(32);
+        }
+        await expect(page.getByRole('status', { name: 'Selected option' })).toBeEmpty();
+
+        const menus = prompt.locator('button[aria-haspopup="menu"]');
+        for (let index = 0; index < (await menus.count()); index += 1) {
+          await menus.nth(index).click();
+          const option = page.getByRole('menuitem');
+          await expect(option.first()).toBeVisible();
+          for (const item of await option.all()) await expectWrapped(item);
+          const box = await page.getByRole('menu').boundingBox();
+          expect(box!.x).toBeGreaterThanOrEqual(0);
+          expect(box!.x + box!.width).toBeLessThanOrEqual(width);
+          await page.keyboard.press('Escape');
+          await expect(option.first()).toBeHidden();
+        }
+        await refusal.focus();
+        await page.keyboard.press('Enter');
+        const originalRefusal = page.getByRole('menuitem', {
+          name: /^(Deny this request|拒绝本次请求)/,
+        });
+        await expect(originalRefusal).toBeVisible();
+        await expect(page.getByRole('status', { name: 'Selected option' })).toBeEmpty();
+        await originalRefusal.click();
+        await expect(page.getByRole('status', { name: 'Selected option' })).toHaveText('reject');
+        expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(
+          width
+        );
+      });
+    }
+  }
+});
+
+test.describe('permission controls in the chat footer', () => {
+  for (const viewport of [
+    { width: 1280, height: 800 },
+    { width: 390, height: 844 },
+    { width: 390, height: 420 },
+  ]) {
+    test(`joins split buttons and opens above at ${viewport.width}x${viewport.height}`, async ({
+      page,
+    }) => {
+      await page.setViewportSize(viewport);
+      const frame = viewport.width < 640 ? 'mobile' : 'desktop';
+      await page.goto(
+        `/iframe.html?id=sessions-sessionconversationpage--${frame}-permission-approval&viewMode=story`
+      );
+      const allow = page.getByRole('button', { name: 'Allow once', exact: true });
+      const more = page.getByRole('button', { name: 'More answers', exact: true });
+      await expect(allow).toBeVisible();
+      const segments = await allow.evaluate((button) => {
+        const arrow = button.parentElement!.querySelector('button[aria-haspopup="menu"]')!;
+        const mainBox = button.getBoundingClientRect();
+        const arrowBox = arrow.getBoundingClientRect();
+        return {
+          role: button.parentElement?.getAttribute('role'),
+          gap: arrowBox.left - mainBox.right,
+          mainInnerRadius: parseFloat(getComputedStyle(button).borderTopRightRadius),
+          arrowInnerRadius: parseFloat(getComputedStyle(arrow).borderTopLeftRadius),
+          bottom: mainBox.bottom,
+        };
+      });
+      expect(segments.role).toBe('group');
+      expect(segments.gap).toBeCloseTo(1, 0);
+      expect(segments.mainInnerRadius).toBe(0);
+      expect(segments.arrowInnerRadius).toBe(0);
+      expect(segments.bottom).toBeGreaterThan(viewport.height - 120);
+      for (const trigger of [more, page.getByRole('button', { name: 'Decline', exact: true })]) {
+        await trigger.click();
+        const menu = page.getByRole('menu');
+        await expect(menu).toBeVisible();
+        await expect(menu).toHaveAttribute('data-side', 'top');
+        await expect
+          .poll(() =>
+            more.evaluate((button) => parseFloat(getComputedStyle(button).borderTopRightRadius))
+          )
+          .toBeGreaterThan(0);
+        await expect
+          .poll(() =>
+            menu.evaluate((element) => {
+              const box = element.getBoundingClientRect();
+              const hit = document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2);
+              return (
+                box.top >= 0 &&
+                box.bottom <= innerHeight &&
+                box.left >= 0 &&
+                box.right <= innerWidth &&
+                !!hit &&
+                element.contains(hit)
+              );
+            })
+          )
+          .toBe(true);
+        const anchor = await trigger.boundingBox();
+        const popup = await menu.boundingBox();
+        expect(popup!.y + popup!.height).toBeLessThanOrEqual(anchor!.y);
+        await page.keyboard.press('Escape');
+        await expect(menu).toBeHidden();
+      }
+    });
+  }
+});
+
 for (const openWith of ['click', 'keyboard'] as const) {
   test(`project search receives focus on ${openWith} and on reopening`, async ({ page }) => {
     await page.goto('/iframe.html?id=chat-unifiedprojectselector--selected-private&viewMode=story');

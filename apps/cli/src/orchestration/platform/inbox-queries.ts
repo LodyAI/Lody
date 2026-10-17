@@ -7,6 +7,7 @@ export const makeInboxQueries = (sql: InboxSqlite): InboxQueries => {
   return {
     preferredHumanInput: (w, s) => io(() => sql.preferredHumanInput(w, s)),
     inputCancellationReason: (w, s, id) => io(() => sql.inputCancellationReason(w, s, id)),
+    inputEnded: (w, s, id) => io(() => sql.inputEnded(w, s, id)),
     inputCanceled: (w, s, id) => io(() => sql.inputCanceled(w, s, id)),
     inputKind: (s, id) => io(() => sql.inputKind(s, id)),
     pauseTarget: (w, s, id) => io(() => sql.pauseTarget(w, s, id)),

@@ -1,3 +1,5 @@
+import { historyValuesEqual } from './history-values-equal';
+export { historyValuesEqual } from './history-values-equal';
 import { Immer } from 'immer';
 import { isContainer, LoroMap, type LoroDoc, type LoroList } from 'loro-crdt';
 import { z } from 'zod';
@@ -20,6 +22,12 @@ import {
 } from './history-write-schema';
 import { diffHistoryContainer, populateContainer } from './history-materializer';
 import { applyRespondPermission } from './session-data/planner';
+import { createAgentHistoryWindow, type AgentHistoryTargets } from './history-agent-window';
+import {
+  getOperationProgressTurnId,
+  planOperationProgress,
+} from './session-data/operation-progress';
+import type { HistoryAction } from './session-data/history-actions';
 
 const immer = new Immer({ autoFreeze: false, useStrictShallowCopy: true });
 const record = (value: unknown): value is Record<string, unknown> =>
@@ -35,7 +43,7 @@ const storedField = (value: unknown, key: string): unknown =>
       ? value[key]
       : undefined;
 const storedScalar = (value: unknown): unknown =>
-  isContainer(value) && value.kind() === 'Text' ? value.toJSON() : value;
+  isContainer(value) && value.kind() === 'Text' ? value.toString() : value;
 
 declare const storedHistoryBrand: unique symbol;
 /** Provenance, not a way to bless caller-supplied JSON. history is a detached copy. */
@@ -81,20 +89,6 @@ export function prepareStoredHistoryCopy(
       old ? prepareReplacement(old, entry) : cleanNew(HistoryEntryWriteSchema, entry)
     ) as SessionHistoryInput;
   });
-}
-
-/** Ignore Mirror's transport identity, never the contents of a historical item. */
-export function historyValuesEqual(a: unknown, b: unknown): boolean {
-  if (a === b) return true;
-  if (Array.isArray(a) && Array.isArray(b))
-    return a.length === b.length && a.every((v, i) => historyValuesEqual(v, b[i]));
-  if (!record(a) || !record(b)) return false;
-  const ak = Object.keys(a).filter((k) => k !== '$cid' && a[k] !== undefined);
-  const bk = Object.keys(b).filter((k) => k !== '$cid' && b[k] !== undefined);
-  return (
-    ak.length === bk.length &&
-    ak.every((k) => Object.hasOwn(b, k) && historyValuesEqual(a[k], b[k]))
-  );
 }
 
 /** New unknown keys are filtered; unknown keys already stored are never scrubbed. */
@@ -375,8 +369,24 @@ export interface HistoryWriter {
   read(turnId: string): SessionHistory | undefined;
   /** Existing typed callback API; only its changed turns/items reach the writer. */
   update(updater: (history: SessionHistoryInput[]) => SessionHistoryInput[]): void;
+  /** Read only this operation's cards, once each; never export the history. */
+  updateOperationProgress(action: Extract<HistoryAction, { kind: 'operation-progress' }>): boolean;
   /** Mutate an existing turn without producing/planning the entire history. */
   updateEntry(id: string, updater: (entry: SessionHistoryInput) => SessionHistoryInput): boolean;
+  /**
+   * Streaming output over sparse rows in stored order: requested tools/tasks/runs
+   * and each owning turn's contiguous text/thought tail. Runs themselves expose
+   * only requested child tools/plans and their output tail. Appends stay at the
+   * actual end of the owning list. All changes are preflighted together.
+   * Returns false without writing for missing/duplicated target turns or inline
+   * turn/item-list storage; structural legacy updates may then use `update`.
+   * A string array retains the original tool-only call contract.
+   */
+  updateTail(
+    turnId: string,
+    targets: readonly string[] | AgentHistoryTargets,
+    updater: (rows: SessionHistoryInput[]) => SessionHistoryInput[]
+  ): boolean;
   /**
    * Mutate every stored row carrying `id`, oldest first. Concurrent producers
    * can insert the same turn twice; this keeps those copies in step. Every
@@ -399,6 +409,30 @@ export interface HistoryWriter {
 export function createHistoryWriter(doc: LoroDoc, readHistory?: () => readonly SessionHistory[]) {
   const list = doc.getList('history');
   const readAll = () => readHistory?.() ?? (list.toJSON() as SessionHistory[]);
+  // No subscription lifetime to manage. Unknown writes/imports/checkout invalidate
+  // this metadata-only directory, including edits in an uncommitted transaction.
+  let progressDirectory: { stamp: string; rows: Map<string, number[]> } | undefined;
+  const progressPositions = (id: string) => {
+    const stamp = JSON.stringify([doc.opCount(), doc.frontiers(), doc.getPendingTxnLength()]);
+    if (progressDirectory?.stamp !== stamp) {
+      const rows = new Map<string, number[]>();
+      for (let index = 0; index < list.length; index++) {
+        const value = list.get(index);
+        const rowId = storedScalar(storedField(value, 'id'));
+        if (typeof rowId !== 'string' || !rowId.startsWith('operation-progress:')) continue;
+        if (storedScalar(storedField(value, 'role')) !== 'system') continue;
+        const copies = rows.get(rowId) ?? [];
+        copies.push(index);
+        rows.set(rowId, copies);
+      }
+      progressDirectory = { stamp, rows };
+    }
+    const prefix = `${id}:duplicate:`;
+    const positions = [...(progressDirectory.rows.get(id) ?? [])];
+    for (const [rowId, copies] of progressDirectory.rows)
+      if (rowId.startsWith(prefix)) positions.push(...copies);
+    return positions.sort((a, b) => a - b);
+  };
   const rowWithId = (index: number, id: string) => {
     const map = list.get(index);
     if (isContainer(map) && map.kind() === 'Map' && (map as LoroMap).get('id') === id)
@@ -414,6 +448,11 @@ export function createHistoryWriter(doc: LoroDoc, readHistory?: () => readonly S
     }
     return undefined;
   };
+  const agentWindow = createAgentHistoryWindow(
+    doc,
+    (old, next) => prepareReplacement(old, next),
+    historyValuesEqual
+  );
 
   // Preparation is separate so a malformed update cannot leave half-written CRDT ops.
   const planWrite = (
@@ -611,6 +650,51 @@ export function createHistoryWriter(doc: LoroDoc, readHistory?: () => readonly S
       });
       prepare(previous, next)();
     },
+    updateOperationProgress(action) {
+      const { operation } = action;
+      if (operation.kind !== 'session_create' && operation.kind !== 'session_create_many')
+        return false;
+      const id = getOperationProgressTurnId(operation.requesterSessionId, operation.operationId);
+      const positions = progressPositions(id);
+      const previous = positions.map((index) => {
+        const value = list.get(index);
+        // The planner needs detached values to preserve legacy/unknown card fields.
+        // Export each matching card once; unrelated turns are never materialized.
+        return (isContainer(value) ? value.toJSON() : value) as SessionHistoryInput;
+      });
+      const next = planOperationProgress(previous, operation, action.timestamp, action.statuses);
+      if (next === previous) return false;
+      // A changed operation projection contains exactly one canonical card.
+      // Keep that card's container/position, or rename the first legacy alias.
+      const canonicalIndex = previous.findIndex((entry) => entry.id === id);
+      const retainedIndex = canonicalIndex >= 0 ? canonicalIndex : previous.length ? 0 : -1;
+      const old = previous[retainedIndex];
+      const prepared = old
+        ? prepareReplacement(old, next[0])
+        : cleanNew(HistoryEntryWriteSchema, next[0]);
+      // Preflight above must finish before replacing or deleting any stored row.
+      if (retainedIndex < 0) {
+        populateContainer(
+          list.insertContainer(list.length, new LoroMap()),
+          sessionHistorySchema,
+          prepared,
+          undefined
+        );
+      } else {
+        const position = positions[retainedIndex]!;
+        const value = list.get(position);
+        if (isContainer(value)) {
+          diffHistoryContainer(value, sessionHistorySchema, old, prepared, undefined);
+        } else {
+          list.delete(position, 1);
+          list.insert(position, prepared as Parameters<LoroList['insert']>[1]);
+        }
+        for (let i = positions.length - 1; i >= 0; i--)
+          if (i !== retainedIndex) list.delete(positions[i]!, 1);
+      }
+      doc.commit();
+      return true;
+    },
     updateEntry(id, updater) {
       const target = locate(id);
       if (!target) return false;
@@ -638,6 +722,15 @@ export function createHistoryWriter(doc: LoroDoc, readHistory?: () => readonly S
       }
       doc.commit();
       return true;
+    },
+    updateTail(id, targets, updater) {
+      return agentWindow.update(
+        id,
+        Array.isArray(targets)
+          ? { toolCallIds: targets, taskIds: [], runs: [] }
+          : (targets as AgentHistoryTargets),
+        updater
+      );
     },
     updateCopies(id, updater) {
       const targets: NonNullable<ReturnType<typeof rowWithId>>[] = [];
@@ -698,15 +791,17 @@ export function createHistoryWriter(doc: LoroDoc, readHistory?: () => readonly S
       const previous = isContainer(stored) ? stored.toJSON() : stored;
       if (historyValuesEqual(previous, value)) return true;
       const parsed = cleanNew(field, value, previous);
-      // A partial map diff only visits this key; it neither reads nor authors items.
-      diffHistoryContainer(
-        map,
-        sessionHistorySchema,
-        { [key]: previous },
-        { [key]: parsed },
-        undefined
-      );
-      doc.commit();
+      // A partial field diff cannot add or move an indexed item.
+      agentWindow.preserveIndex(() => {
+        diffHistoryContainer(
+          map,
+          sessionHistorySchema,
+          { [key]: previous },
+          { [key]: parsed },
+          undefined
+        );
+        doc.commit();
+      });
       return true;
     },
     respondPermission(requestId, outcome, options) {

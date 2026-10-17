@@ -20,6 +20,7 @@ type Repository = {
   canSubmit(scope: InboxScope, executionId: string, owner: string): Effect.Effect<boolean, unknown>;
   accept(input: InboxInput): Effect.Effect<boolean, unknown>;
   begin(scope: InboxScope, executionId: string, owner?: string): Effect.Effect<boolean, unknown>;
+  withdraw(input: InboxInput, executionId: string): Effect.Effect<boolean, unknown>;
   pause(
     scope: InboxScope,
     executionId: string,
@@ -76,6 +77,7 @@ export class OperationInbox extends Context.Service<
     ): Effect.Effect<boolean, unknown>;
     accept(input: InboxInput): Effect.Effect<boolean, unknown>;
     begin(scope: InboxScope, executionId: string): Effect.Effect<boolean, unknown>;
+    withdraw(input: InboxInput, executionId: string): Effect.Effect<boolean, unknown>;
     pause(
       scope: InboxScope,
       executionId: string,
@@ -300,6 +302,9 @@ export class OperationInbox extends Context.Service<
           }),
           begin: Effect.fn('OperationInbox.begin')(function* (s: InboxScope, id: string) {
             return yield* withGate(s, repo.begin(s, id, owner));
+          }),
+          withdraw: Effect.fn('OperationInbox.withdraw')(function* (i: InboxInput, id: string) {
+            return yield* withGate(i, repo.withdraw(i, id));
           }),
           pause: Effect.fn('OperationInbox.pause')(function* (
             s: InboxScope,

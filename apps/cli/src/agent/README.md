@@ -295,6 +295,13 @@ requested options fail to the existing prompt-derived fallback. The bundled adap
 has no automatic generator, so neither the main nor title session starts an extra
 naming turn. Main conversation settings and Provider authentication are preserved.
 
+Title output accepts normal assistant text with an absent message phase, as Codex
+providers do not all emit that optional field. Explicit `commentary` is excluded;
+when a final-answer stream exists, it takes precedence over unphased text. Both
+buffers are cleared immediately before prompting so startup/configuration banners
+are excluded. The selected stream still passes through error-payload and internal
+instruction sanitization; failed prompts retain the prompt-derived fallback.
+
 The daemon does not name branches. A worktree session starts on the temporary branch
 `worktree-manager.ts` created for it (`session/<id>` for GitHub, `lody/<id>` for shared-local
 projects, with collision suffixes). [WorkspaceGitService](../session/workspace-git-service.ts)

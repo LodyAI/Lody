@@ -9,6 +9,7 @@ import { rehydrateAvatarMemoryCacheFromPersistent } from '../lib/avatar-cache';
 import { languageAtom } from '../atoms/settings';
 import { maybeClearLodyCacheOnBoot } from '../lib/clear-local-cache';
 import { installAppActivityTracking } from '../lib/app-activity-gap';
+import { installClientLog } from '../lib/client-log';
 import { getIpcServices } from '../lib/electron-ipc-client';
 import { useSetAtom } from 'jotai';
 import { installFocusModality } from '@lody/ui/focus-modality';
@@ -35,6 +36,10 @@ const AppInitializer = ({ children }: { children: React.ReactNode }) => {
   useState(() => {
     registerBuiltInCommands();
   });
+
+  // Before anything below can fail: the boot entry and the previous page's
+  // unclean exit belong at the head of this page's log.
+  useEffect(() => installClientLog(), []);
 
   useEffect(() => {
     const stored = readStoredLanguagePreference();

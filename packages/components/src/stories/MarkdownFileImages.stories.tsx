@@ -51,3 +51,12 @@ export const Failed: Story = {
     },
   },
 };
+const linkedImages = (
+  <MarkdownRenderer
+    text={
+      '# Document\n\nSee [the chart](../images/chart.svg) for the trend.\n\nThe bare path ../images/chart.svg links too.\n\nOther links keep the copy chip: [notes](../notes.md), [line](../images/chart.svg#L3).'
+    }
+  />
+);
+export const LinkedImageRemote: Story = { args: { children: linkedImages } };
+export const LinkedImageLocal: Story = { args: { automatic: true, children: linkedImages } };

@@ -1,3 +1,4 @@
+import type { WorkspaceRepoLegacy } from '@lody/shared/workspace-data/repo-legacy';
 import {
   applyProviderSetupCancellationToFlock,
   encodeCodexProfileConfig,
@@ -22,7 +23,6 @@ import {
   type ProviderSetupTask,
   type WorkspaceId,
 } from '@lody/shared';
-import type { LoroRepo } from 'loro-repo';
 
 import type { SessionExecutionService } from '@/session/session-execution-service';
 import { formatErrorMessage } from '@/utils/format-error';
@@ -39,7 +39,7 @@ type ProviderSetupSyncScheduler = {
 };
 
 export type ProviderSetupManagerOptions = {
-  repo: LoroRepo;
+  repo: WorkspaceRepoLegacy;
   workspaceId: WorkspaceId;
   machineId: MachineId;
   execution: ProviderSetupExecution;
@@ -85,7 +85,7 @@ const isMissingDimcodeRuntimeError = (error: string | undefined): boolean => {
  * explicitly resumes them.
  */
 export class ProviderSetupManager {
-  private readonly repo: LoroRepo;
+  private readonly repo: WorkspaceRepoLegacy;
   private readonly workspaceId: WorkspaceId;
   private readonly machineId: MachineId;
   private readonly execution: ProviderSetupExecution;

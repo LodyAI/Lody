@@ -310,17 +310,45 @@ jobs:
             tests/e2e/conversation-scroll-engine.spec.ts \
             --workers=1
 
+  e2ee-signature-vectors:
+    name: E2EE signatures (Node ${{ matrix.node }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ['22.x', '23.6.0', '24.x']
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          persist-credentials: false
+      - name: Set up workspace toolchain
+        uses: ./.github/actions/setup-workspace
+        with:
+          node-version: ${{ matrix.node }}
+      # These fixed vectors use WebCrypto and pure TS only. No native SQLite
+      # build or product lifecycle scripts are needed on the additional runtime.
+      - name: Install signature-vector dependencies
+        run: pnpm --filter @lody/e2ee-core... install --frozen-lockfile --ignore-scripts
+      - name: Compare pure and native strict verification
+        run: pnpm --filter @lody/e2ee-core exec vitest run test/foundation.test.ts -t 'strict Ed25519 subgroup-edge vectors' --maxWorkers=2
+
   # Stable required check: green only when every group succeeded.
+  # Cancellation supersedes this run; do not turn cancelled groups into a failure.
   tests:
     name: Tests
-    needs: test-groups
-    if: always()
+    needs: [test-groups, e2ee-signature-vectors]
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - name: Require every test group
         env:
           RESULT: ${{ needs.test-groups.result }}
+          SIGNATURE_RESULT: ${{ needs.e2ee-signature-vectors.result }}
         run: |
           echo "Test groups: $RESULT"
           [ "$RESULT" = "success" ]
+          [ "$SIGNATURE_RESULT" = "success" ]

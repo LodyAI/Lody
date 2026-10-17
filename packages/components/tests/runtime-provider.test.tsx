@@ -173,6 +173,52 @@ describe('RuntimeProvider warm workspace preparation', () => {
     expect(store.get(runtimeAtom)).toBe(prepared);
   });
 
+  it.each([false, true])(
+    'opens another workspace after failed close and retries its owner, with an earlier failed return: %s',
+    async (failedReturn) => {
+      const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+      let blocked = true;
+      let released = false;
+      const privateFailure = new Error('synthetic private release payload');
+      prepared.dispose = async () => {
+        prepared.disposed = true;
+        if (blocked) throw privateFailure;
+        released = true;
+      };
+      const original = prepared;
+      await render();
+      const other = runtimeFixture();
+      vi.mocked(createWorkspaceRuntime).mockResolvedValueOnce(other as never);
+      environment.workspace = { id: 'local:other', slug: 'other' };
+      await render();
+      expect(store.get(runtimeAtom)).toBe(other);
+      expect(released).toBe(false);
+      expect(logged.mock.calls.flat()).not.toContain(privateFailure);
+      if (failedReturn) {
+        environment.workspace = { id: 'local:workspace', slug: 'local' };
+        await render();
+        expect(store.get(runtimeAtom)).toBeNull();
+        expect(released).toBe(false);
+        environment.workspace = { id: 'local:other', slug: 'other' };
+        vi.mocked(createWorkspaceRuntime).mockResolvedValueOnce(other as never);
+        await render();
+        expect(store.get(runtimeAtom)).toBe(other);
+      }
+      const replacement = runtimeFixture();
+      vi.mocked(createWorkspaceRuntime).mockImplementationOnce(async () => {
+        expect(released).toBe(true);
+        return replacement as never;
+      });
+      blocked = false;
+      environment.workspace = { id: 'local:workspace', slug: 'local' };
+      await render();
+      expect(store.get(runtimeAtom)).toBe(replacement);
+      expect(store.get(runtimeAtom)).not.toBe(original);
+      expect(released).toBe(true);
+      logged.mockRestore();
+    }
+  );
+
   it('establishes an editable real draft lease after StrictMode owner replay', async () => {
     let selection!: ReturnType<typeof useSessionRunConfigDraft>;
     function DraftProbe() {

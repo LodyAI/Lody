@@ -1,4 +1,4 @@
-import type { RepoRoomSubscription } from 'loro-repo';
+import type { WorkspaceRoom as RepoRoomSubscription } from '@lody/shared/workspace-data/repo-legacy';
 import type { ManagedStoreCache } from './store-ref-tracker';
 
 type Binding = ReturnType<RepoRoomSubscription['subscription']>;

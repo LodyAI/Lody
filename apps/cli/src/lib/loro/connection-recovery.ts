@@ -1,18 +1,13 @@
+import type { WorkspaceRepoLegacy } from '@lody/shared/workspace-data/repo-legacy';
 import type { WorkspaceId } from '@lody/shared';
 import { Effect, Fiber, Queue } from 'effect';
-import type {
-  LoroRepo,
-  RepoTransportRoomEntry,
-  RepoTransportRoomStatus,
-  TransportConnectionStatus,
-} from 'loro-repo';
-import type { RepoRoomSubscription } from 'loro-repo';
+import type { RepoTransportRoomStatus, TransportConnectionStatus } from 'loro-repo';
+import type { WorkspaceRoom as RepoRoomSubscription } from '@lody/shared/workspace-data/repo-legacy';
 
 import { formatErrorMessage } from '@/utils/format-error';
 import type { Logger } from '@/utils/logger';
 
 import {
-  STREAMS_TRANSPORT_ID,
   isRecoverableStreamsRoomStatus,
   streamsRoomBinding,
   type StreamsRoomBinding,
@@ -30,12 +25,6 @@ type ReconnectOptions = {
 const DEFAULT_RECONNECT_BASE_DELAY_MS = 1_000;
 const DEFAULT_RECONNECT_MAX_DELAY_MS = 30_000;
 const RECONNECT_JITTER_FRACTION = 0.2;
-// Fan-out cap for the errored-binding rejoin sweep (O(rooms) work).
-const REJOIN_SWEEP_CONCURRENCY = 4;
-// Total-time cap, expressed in per-batch timeouts: the sweep must not hold the
-// recovery fiber (or cleanUp) for longer than a few batches, however many
-// rooms are errored. Leftovers wait for the next watchdog pass.
-const REJOIN_SWEEP_MAX_BATCHES = 3;
 /**
  * Floor on how often the EXPENSIVE `meta-room-synced` fan-out may run.
  *
@@ -96,7 +85,7 @@ type RecoveryEvent =
     };
 
 type LoroConnectionRecoveryControllerOptions = {
-  repo: LoroRepo;
+  repo: WorkspaceRepoLegacy;
   workspaceId: WorkspaceId;
   logger: Logger;
   initialMetaSub: RepoRoomSubscription | null;
@@ -134,7 +123,7 @@ export class LoroConnectionRecoveryController {
   private readonly streamsOnlineListeners = new Set<StreamsOnlineListener>();
   private readonly pendingReconnectCompletions = new Set<ReconnectCompletion>();
   private readonly eventFiber: Fiber.Fiber<never, never>;
-  private readonly repo: LoroRepo;
+  private readonly repo: WorkspaceRepoLegacy;
   private readonly workspaceId: WorkspaceId;
   private readonly logger: Logger;
   private readonly onMetaRoomReady: () => void;
@@ -823,12 +812,9 @@ export class LoroConnectionRecoveryController {
     }
 
     if (!options.force && this.isStreamsHealthy()) {
-      // Healthy transport + meta says nothing about per-doc/flock rooms: a
-      // room whose stream session hit a non-retriable failure (e.g. a token
-      // refresh hiccup answered with a 4xx) sits in 'error' forever —
-      // streams-crdt exits that room's loops permanently and nothing else
-      // supervises it, so CLI-authored ops for the room never reach the cloud
-      // until a daemon restart. Sweep instead of returning early.
+      // Healthy transport + meta says nothing about individual room attaches.
+      // Repair failed rooms, including failed SDK initialization still projected
+      // as joining. An HTTP error must not trigger connection-wide resets.
       await this.sweepRooms(reason);
       return;
     }
@@ -853,7 +839,6 @@ export class LoroConnectionRecoveryController {
         timeoutMs,
         `Timeout waiting for Loro streams reconnect (workspace=${this.workspaceId})`
       );
-      await this.rejoinFailedStreamsBindings(reason);
 
       if (shouldLog) {
         this.logger.debug(
@@ -870,12 +855,11 @@ export class LoroConnectionRecoveryController {
   }
 
   /**
-   * Healthy-path room sweep. `repo.reconnect()` rejoins exactly the rooms in a
-   * recoverable bad state (`error`/`disconnected`/incomplete join) and is a
-   * pure per-room status read — no network — when everything is healthy, so
-   * the 30s watchdog can afford to run it unconditionally. Deliberately skips
-   * the meta-ready ceremony (`ensureMetaRoomJoined`/`waitForMetaRoomReady`) so
-   * a healthy sweep never re-fires meta-synced listeners.
+   * On an online transport, the facade syncs/reconciles only failed/offline
+   * rooms and SDK-proven failed initialization. This fixed-period controller
+   * path has no reset backoff and must never promote a room failure into a
+   * shared transport reset. Skip the meta-ready
+   * ceremony so a healthy sweep never re-fires meta-synced listeners.
    */
   private async sweepRooms(reason: string): Promise<void> {
     const timeoutMs = readTimeoutEnv('LODY_LORO_RECONNECT_TIMEOUT_MS', 10_000);
@@ -885,75 +869,12 @@ export class LoroConnectionRecoveryController {
         timeoutMs,
         `Timeout waiting for Loro streams room sweep (workspace=${this.workspaceId})`
       );
-      await this.rejoinFailedStreamsBindings(reason);
     } catch (error) {
       this.logger.debug(
         `[${this.workspaceId}] Loro streams room sweep failed (reason=${reason}): ${formatErrorMessage(
           error
         )}`
       );
-    }
-  }
-
-  /**
-   * Repair owner for loro-repo-level failed attaches. `repo.addTransport`
-   * resolves even when some rooms fail to attach (their 'streams' bindings sit
-   * in 'error'), and `repo.reconnect()` only drives transport-level recovery —
-   * a binding whose attach failed at the repo level is only retried by its own
-   * `rejoin()`. Sweep those here so a failed attach has a supervised retry
-   * path. 'detached' bindings are skipped: they mean the transport is absent
-   * (deliberately offline), and rejoin cannot change that.
-   */
-  private async rejoinFailedStreamsBindings(reason: string): Promise<void> {
-    let entries: RepoTransportRoomEntry[];
-    try {
-      entries = this.repo.transportRooms(STREAMS_TRANSPORT_ID);
-    } catch (error) {
-      this.logger.debug(
-        `[${this.workspaceId}] Failed to enumerate Streams transport rooms (reason=${reason}): ${formatErrorMessage(
-          error
-        )}`
-      );
-      return;
-    }
-
-    const failed = entries.filter((entry) => entry.subscription.status === 'error');
-    if (failed.length === 0) {
-      return;
-    }
-
-    this.logger.debug(
-      `[${this.workspaceId}] Rejoining ${failed.length} errored Streams room binding(s) (reason=${reason})`
-    );
-    // Bounded on all three axes — per rejoin, per batch width, and in total.
-    // A rejoin awaits doc/monitor setup inside loro-repo, so one that never
-    // settles would otherwise stall every later reconnect event on this fiber
-    // (and hang cleanUp); the errored set is O(rooms), so without a total cap
-    // a large one would serialize into minutes of batches. Rooms left over
-    // are simply picked up by the next watchdog pass.
-    const timeoutMs = readTimeoutEnv('LODY_LORO_RECONNECT_TIMEOUT_MS', 10_000);
-    const rejoinOne = (entry: RepoTransportRoomEntry): Promise<void> =>
-      withTimeout(
-        entry.subscription.rejoin(),
-        timeoutMs,
-        `Timeout rejoining Streams room binding (room=${entry.room.kind}:${entry.room.id})`
-      ).catch((error: unknown) => {
-        this.logger.debug(
-          `[${this.workspaceId}] Streams room binding rejoin failed (room=${entry.room.kind}:${entry.room.id} reason=${reason}): ${formatErrorMessage(
-            error
-          )}`
-        );
-      });
-
-    const sweepDeadline = Date.now() + timeoutMs * REJOIN_SWEEP_MAX_BATCHES;
-    for (let index = 0; index < failed.length; index += REJOIN_SWEEP_CONCURRENCY) {
-      if (Date.now() >= sweepDeadline) {
-        this.logger.debug(
-          `[${this.workspaceId}] Streams rejoin sweep hit its time budget with ${failed.length - index} room(s) left (reason=${reason}); the next pass resumes`
-        );
-        break;
-      }
-      await Promise.all(failed.slice(index, index + REJOIN_SWEEP_CONCURRENCY).map(rejoinOne));
     }
   }
 

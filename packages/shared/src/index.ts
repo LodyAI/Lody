@@ -1,6 +1,9 @@
+import { SESSION_DOC_PREFIX, LEGACY_SESSION_COMMENT_DOC_PREFIX } from './session-room-id';
+export { SESSION_DOC_PREFIX, getSessionRoomId, isSessionDocRoomId, getSessionIdFromRoomId } from './session-room-id';
 export * from './preview-control';
 import { CliType } from './ai';
 export * from './history-writer';
+export type { AgentHistoryTargets } from './history-agent-window';
 export * from './history-write-schema';
 export * from './session-mirror';
 export * from './session-control-plane';
@@ -89,7 +92,7 @@ export * from './machine-protocol-capabilities';
 export * from './pi-extensions';
 export * from './repo-doc-meta';
 export * from './session-input';
-export * from './session-preparation';
+export * from './acp-config-option-sensitivity';
 export * from './session-bootstrap';
 export * from './goal';
 export * from './comment-reference-format';
@@ -118,6 +121,7 @@ export * from './file-preview';
 export * from './machine-flock';
 export * from './workspace-mcp';
 export * from './agent-role';
+export * from './agent-role-proposal';
 export * from './workspace-flock';
 export * from './local-machine-rpc';
 export * from './local-loro-data-plane';
@@ -381,15 +385,9 @@ export const getLoroStreamsRemoteCursorUrlAliases = (streamUrl: string): string[
 export const SUPPORTED_CLI_TYPES: CliType[] = ['kimi', 'grok', 'claude', 'codex'];
 export type SupportedLanguage = 'en' | 'zh_CN';
 export const AGENT_CONFIG_DOC_PREFIX = 'agent-';
-export const SESSION_DOC_PREFIX = 'session-';
-// Compatibility tombstone: session comment docs were removed in 2026, but their
-// persisted room ids still share the session prefix and must never be projected
-// as sessions.
-const LEGACY_SESSION_COMMENT_DOC_PREFIX = 'session-comment-';
 export const MACHINE_DOC_PREFIX = 'machine-';
 export const getAgentConfigRoomId = (agentConfigId: AgentConfigId) =>
   `${AGENT_CONFIG_DOC_PREFIX}${agentConfigId}`;
-export const getSessionRoomId = (sessionId: SessionId) => `${SESSION_DOC_PREFIX}${sessionId}`;
 export const getMachineRoomId = (id: MachineId) => `${MACHINE_DOC_PREFIX}${id}`;
 export const getLoroMetaStreamId = (workspaceId: WorkspaceId) =>
   `${workspaceId}:${LORO_META_STREAM_SUFFIX}`;
@@ -434,12 +432,6 @@ export const getLoroStreamIdForDocId = (workspaceId: WorkspaceId, docId: string)
 };
 export const isAgentConfigDocRoomId = (roomId: string) =>
   roomId.startsWith(AGENT_CONFIG_DOC_PREFIX);
-export const isSessionDocRoomId = (roomId: string) =>
-  roomId.startsWith(SESSION_DOC_PREFIX) &&
-  !roomId.startsWith(LEGACY_SESSION_COMMENT_DOC_PREFIX) &&
-  roomId.length > SESSION_DOC_PREFIX.length;
-export const getSessionIdFromRoomId = (roomId: string): SessionId | null =>
-  isSessionDocRoomId(roomId) ? (roomId.slice(SESSION_DOC_PREFIX.length) as SessionId) : null;
 export const isMachineDocRoomId = (roomId: string) => roomId.startsWith(MACHINE_DOC_PREFIX);
 
 export type FileTreeItem = {

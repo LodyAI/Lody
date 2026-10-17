@@ -23,6 +23,10 @@ reasoning behind those rules.
 
 Attachment preparation and history publication share the final card layout;
 see [attachment rendering](../ai-gui/session-files-rendering.md#upload-to-history-continuity).
+`useSessionPendingMessages` separates ready accepted inputs into individually keyed
+UI rows and leaves attachment preparation in the trailing slot. It retains local
+bodies until matching formal history is hydrated; only real owner receipts mark
+delivery. The wrapper component keeps the standalone pending-message surface.
 
 ## Why the rules read the way they do
 
@@ -66,8 +70,6 @@ see [attachment rendering](../ai-gui/session-files-rendering.md#upload-to-histor
   sidebar writes a mention into the composer this layout renders, and nothing above
   it participates, so plumbing the handle up to `chat-landing.tsx` would buy
   nothing.
-- Draft ACP preparation has a longer contract that remains in the private
-  architecture context.
 
 Chat Landing no longer emits the legacy onboarding project-source, project-selection,
 or agent-selection events. Onboarding owns its route-scoped flow, step and operation

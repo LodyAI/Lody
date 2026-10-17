@@ -1,3 +1,10 @@
+import { Console } from 'node:console';
+import { Writable } from 'node:stream';
+import * as commandRuntime from '@/lib/command-runtime';
+import * as telemetry from '@/instrument';
+import { getLogger } from '@/utils/logger';
+import { makeWorkspaceCommandManagers } from '@/lib/workspace-command-manager';
+import { runSessionCommand } from './session';
 import { z } from 'zod';
 import { getSessionCancelProtocolFields } from './session';
 import { CURRENT_MACHINE_PROTOCOL_CAPABILITIES } from '@lody/shared';
@@ -11,7 +18,10 @@ import os from 'node:os';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { describe, expect, it, vi } from 'vitest';
-import { LoroRepo, RepoSyncError, RepoTransportError } from 'loro-repo';
+import { RepoSyncError, RepoTransportError } from 'loro-repo';
+import { WorkspaceRepoLegacy as LoroRepo } from '@lody/shared/workspace-data/repo-legacy';
+import { RepoIOError } from 'loro-repo/effect';
+import { Effect } from 'effect';
 import { FlockSyncTimeoutError } from '@/lib/loro/timeout-utils';
 import { FlockSyncUnavailableError } from '@/lib/loro/flock-sync-errors';
 import {
@@ -1071,6 +1081,69 @@ describe('session command helpers', () => {
     ).toMatchObject({ modeId: 'agent-auto-review' });
   });
 
+  it('keeps the inherited permission option across model switches and partial overrides', () => {
+    // Grok carries permission in a `_permission` config option, not in modeId.
+    const capability: AcpCapabilityCacheEntry = {
+      cliType: 'builtin',
+      agentType: 'grok',
+      modes: [],
+      models: [
+        { modelId: 'grok-a', name: 'A' },
+        { modelId: 'grok-b', name: 'B' },
+      ],
+      configOptions: [
+        {
+          id: 'permission_mode',
+          name: 'Permission Mode',
+          category: '_permission',
+          type: 'select',
+          currentValue: 'ask',
+          options: [
+            { value: 'ask', name: 'Ask Every Time' },
+            { value: 'always-approve', name: 'Always Approve' },
+          ],
+        },
+        {
+          id: 'web_search',
+          name: 'Web search',
+          type: 'boolean',
+          currentValue: false,
+          options: [],
+        },
+      ],
+      fetchedAt: 1,
+    };
+    const target = createSessionMeta({ agentType: 'grok' });
+    const inheritedDispatchConfig = {
+      modelId: 'grok-a',
+      configOptionValues: { permission_mode: 'always-approve', web_search: true },
+    };
+    const resolve = (
+      dispatchConfig: Parameters<
+        typeof resolveEffectiveSessionChatDispatchConfig
+      >[0]['dispatchConfig']
+    ) =>
+      resolveEffectiveSessionChatDispatchConfig({
+        dispatchConfig,
+        inheritedDispatchConfig,
+        target,
+        capability,
+      });
+
+    expect(resolve({ modelId: 'grok-b' })).toMatchObject({
+      modelId: 'grok-b',
+      configOptionValues: { permission_mode: 'always-approve' },
+    });
+    expect(resolve({ modelId: 'grok-b' }).configOptionValues).not.toHaveProperty('web_search');
+    expect(resolve({ configOptionValues: { web_search: false } }).configOptionValues).toEqual({
+      permission_mode: 'always-approve',
+      web_search: false,
+    });
+    expect(resolve({ configOptionValues: { permission_mode: 'ask' } }).configOptionValues).toEqual({
+      permission_mode: 'ask',
+    });
+  });
+
   it.each(['xhigh', 'medium'])(
     'checks inherited effort %s against the inherited model',
     (effort) => {
@@ -1550,10 +1623,12 @@ describe('session command helpers', () => {
           waitUntilMetaSynced: async () => true,
           cleanSessionDoc: async () => {},
         } as unknown as Parameters<typeof runSessionOperationWithSyncedMetadata>[0];
-        const listDoc = vi.spyOn(repo, 'listDoc').mockRejectedValueOnce(new Error('query failed'));
+        const listDoc = vi
+          .spyOn(repo.native, 'listDoc')
+          .mockReturnValueOnce(Effect.fail(new RepoIOError('query failed', undefined)));
         await expect(
           runSessionOperationWithSyncedMetadata(manager, root.id, operation)
-        ).rejects.toThrow('query failed');
+        ).rejects.toMatchObject({ _tag: 'RepoIOError', operation: 'query failed' });
         expect((await repo.getDocMeta(getSessionRoomId(root.id)))?.meta).toEqual(root);
         listDoc.mockRestore();
         await repo.deleteDoc(getSessionRoomId(root.id));
@@ -2774,5 +2849,83 @@ describe('Stop protocol negotiation', () => {
         false
       )
     ).toEqual({ cancelId: 'cancel-id', pauseInbox: false });
+  });
+});
+
+describe('session command output boundary', () => {
+  it.each([
+    { mode: 'json', fail: false },
+    { mode: 'jsonl', fail: false },
+    { mode: 'human', fail: false },
+    { mode: 'json', fail: true },
+    { mode: 'jsonl', fail: true },
+  ])('preserves $mode output and restores logging (failure=$fail)', async ({ mode, fail }) => {
+    const out: string[] = [];
+    const err: string[] = [];
+    const capture = (chunks: string[]) =>
+      new Writable({
+        write(chunk, _encoding, done) {
+          chunks.push(String(chunk));
+          done();
+        },
+      });
+    vi.stubGlobal('console', new Console({ stdout: capture(out), stderr: capture(err) }));
+    const logger = getLogger('output-regression');
+    const exitCode = process.exitCode;
+    const setup = vi.spyOn(commandRuntime, 'syncCommandTime').mockImplementation(async () => {
+      logger.info('setup diagnostic');
+    });
+    const flush = vi.spyOn(telemetry, 'flushTelemetry').mockImplementation(async () => {
+      logger.info('exit diagnostic');
+    });
+    const withManager = makeWorkspaceCommandManagers();
+    try {
+      await runSessionCommand(mode === 'human' ? {} : { [mode]: true }, async () => {
+        await withManager(
+          'synthetic-workspace',
+          {
+            userId: 'synthetic-user',
+            token: 'synthetic-token',
+            machineId: 'synthetic-machine',
+            authBaseUrl: 'https://example.invalid',
+          },
+          async () => ({
+            cleanUp: async () => {
+              logger.info('transport detached');
+            },
+          }),
+          async () => {
+            if (fail) throw new Error('synthetic failure');
+            commandRuntime.printJson({ ok: true, alreadyStopped: true });
+          },
+          (error) => {
+            throw error;
+          }
+        );
+      });
+      expect(process.exitCode).toBe(fail ? 1 : 0);
+      if (mode === 'human') {
+        expect(out.join('')).toContain('transport detached');
+        expect(err.join('')).toBe('');
+      } else {
+        expect(JSON.parse(out.join(''))).toEqual(
+          fail
+            ? mode === 'json'
+              ? { ok: false, error: 'synthetic failure' }
+              : { type: 'error', error: 'synthetic failure' }
+            : { ok: true, alreadyStopped: true }
+        );
+        for (const diagnostic of ['setup diagnostic', 'transport detached', 'exit diagnostic']) {
+          expect(err.join('')).toContain(diagnostic);
+        }
+      }
+      logger.info('after command');
+      expect(out.join('')).toContain('after command');
+    } finally {
+      process.exitCode = exitCode;
+      setup.mockRestore();
+      flush.mockRestore();
+      vi.unstubAllGlobals();
+    }
   });
 });

@@ -106,15 +106,50 @@ foreground and every 30s while the page is visible. [Decision](../notes/implemen
 Loro ready messages commit to the live local history document. A ready Roost
 input instead appears from the workspace's immutable input projection and saves
 to account/workspace-scoped IndexedDB without waiting for owner RPC. Normal rows
-reuse `UserChatBubble`, including ready media and mention spans, with no separate
-acceptance badge. First paint precedes the storage transaction and does not prove
-crash durability.
+reuse `UserChatBubble`, including ready media and mention spans, with the ordinary
+pending delivery circle and no separate acceptance badge. The circle remains
+through local saving and unconfirmed owner work. A positive active owner receipt
+publishes the existing delivery overlay; both the local row and authoritative row
+use it, so history handoff cannot flash back to sending. A persisted `confirmed`
+source state alone is not a receipt. First paint precedes the storage transaction
+and does not prove crash durability.
+
+Background persistence is independent of displaying that input, but owner handoff
+waits for source save, the session lease and the persisted unknown-outcome marker.
+Ready local inputs are individual `SessionChatStreamView.localUserMessages` engine
+rows, keyed by their immutable turn IDs. Send anchoring can resolve before owner
+history; a matching directory placeholder retains the local body, then hydrated
+formal history replaces it once under the same key. Cleanup requires the hydrated
+body, not just index membership. Unprepared attachments remain in `trailingContent`.
+Local rows never enter authoritative history, outline, export or history selection
+leases. Native text copy can still retain their mounted UI without fabricating a
+history body. Local ordinary input displays truthful sending activity while its
+outcome is unresolved and error-free; actual presence and formal pre-start take
+priority. Startup/Stop derivation still requires the existing formal evidence. The
+[current send comparison](../notes/proposed/architecture/2026-10-13-backend-independent-send-acceptance.md#current-lororoost-send-comparison-2026-10-15)
+records the original integration gap, controlled ordering probes and repair limits.
+
+The metadata circle is separate from the loading spinner beside the bubble.
+Ready Roost input uses the same 500 ms loading delay as the ordinary Loro row,
+with the same narrow-column visibility threshold. Its delay follows unresolved
+owner confirmation, rather than synchronization of the Loro control document.
+An input error stops the spinner; retry starts a new delay, and a real delivery
+receipt removes it immediately.
 
 Creating a Roost conversation commits routing metadata before admission, without
 opening its history store on that path. Background delivery persists the trusted
 `humanInputReceipts` control record before accepting owner history; Loro writes
 and control queues preserve the same provenance-before-activation ordering.
 Receipt lookup stays read-only.
+
+Ordinary Roost sends negotiate `sessionInputDispatch` v1 and use one
+`accept_input_and_dispatch` owner request. The native writer queue commits trusted
+human provenance and immutable history, checks current status/metadata, and publishes
+activation before replying; the host wakes its existing history dispatcher without
+awaiting execution. The sender neither rereads history nor sends a second dispatch
+RPC. Recovery queries remain read-only and retry the same combined operation for
+activation, without recreating removed input. Older owners refuse admission before
+draft consumption. Guide application and its no-replay fence remain separate.
 
 New input uses ordinary history-write normalization before storage validation,
 including ready file/image records with `text: undefined`. Persisted records still

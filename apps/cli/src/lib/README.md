@@ -14,10 +14,11 @@ subdirectory; this file is the navigation index. Cross-module explanations live 
 
 ## Resource discovery
 
-- `workspace-command-manager.ts` — overlapping cloud commands borrow one document
-  manager through `command-runtime.ts`; the last callback awaits its cleanup.
-  Authorization scopes stay separate; failed cleanup blocks replacement only
-  while presence remains unreleased.
+- `workspace-command-manager.ts` — overlapping standalone commands borrow one
+  document manager through `command-runtime.ts`; the last callback awaits its
+  cleanup. Authorization scopes stay separate; a failed cleanup is reported once
+  and never blocks later commands. Daemon-executed commands borrow the daemon's
+  replica through `session-command-environment.ts` instead.
 - `discovery-query.ts` — strict query schemas, scope-bound keyset pagination and
   shared Session title/Machine/Agent/Role filters.
 - `resource-discovery.ts` — readable directory projections, Role availability,
@@ -103,6 +104,14 @@ subdirectory; this file is the navigation index. Cross-module explanations live 
 
 ## Projects and providers
 
+The remote folder picker sends `local-project/create-directory` with a workspace,
+absolute parent and one name. `message-handler.ts` and `lody-fleet.ts` check the
+target machine/workspace before `LocalProjectControlService.createDirectory`
+canonicalizes the parent and uses non-recursive mkdir. Collisions never overwrite
+files or links. Creation does not write project metadata; Add still uses prepare-add.
+See the [creation decision](../../../../.agents/notes/implemented/feature/2026-10-14-remote-directory-creation.md)
+for error handling and the existing UI ownership limitation.
+
 Local-project observation and branch commands use shared `LocalProjects` native
 Effect workflows through the visible `localProjectsLegacy` facade while these
 entrypoints remain Promise-based. Worktree setup/GC and Session lifecycle still
@@ -119,6 +128,9 @@ provides LocalProjects. See the [decision](../../../../.agents/notes/implemented
 ## Subdirectories
 
 - `acp/` — ACP notification → session history pipeline ([AGENTS.md](acp/AGENTS.md)).
+- `loro/session-agent-writes.ts` — agent output policy over the shared HistoryWriter;
+  mixed tool/subagent batches resolve original ownership and use nested item windows.
+  Storage responsibilities: [history writes](../../../../.agents/docs/session-history-writes.md).
 - `code-collab/` — unified Code Collab v2 filesystem RPC service
   ([AGENTS.md](code-collab/AGENTS.md)).
 - `file-preview/` — the `file/preview` (File Preview v3) read path

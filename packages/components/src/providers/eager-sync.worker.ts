@@ -1,3 +1,4 @@
+import { Effect } from 'effect';
 import { runEagerSyncWorkerTask } from './eager-sync-worker-task';
 import type {
   EagerSyncWorkerInput,
@@ -28,7 +29,7 @@ worker.onmessage = ({ data }) => {
   } else if (!started) {
     started = true;
     connected = data.connected;
-    void runEagerSyncWorkerTask(data, {
+    void Effect.runPromise(runEagerSyncWorkerTask(data, {
       connection: {
         send: (message) => worker.postMessage({ type: 'local-send', message }),
         isConnected: () => connected,
@@ -61,7 +62,7 @@ worker.onmessage = ({ data }) => {
               : undefined,
           });
         }),
-    }).then(
+    })).then(
       (outcome) => worker.postMessage({ type: 'complete', outcome }),
       () => worker.postMessage({ type: 'complete', outcome: 'failed' })
     );

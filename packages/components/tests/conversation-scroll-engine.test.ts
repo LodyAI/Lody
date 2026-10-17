@@ -690,6 +690,53 @@ describe('onScroll must not re-enter a cycle (React #185)', () => {
     expect(reports).toBeGreaterThan(0);
     expect(reports).toBeLessThanOrEqual(COMMIT_BOUND);
   });
+
+  it('keeps an anchor on a creation record that its hydrated neighbour groups away', () => {
+    // Consecutive creation records c0, c1 share c0's row only while c0 is
+    // hydrated, and the hydration window follows each reported offset.
+    const rowsFor = (grouped: boolean): SimRow[] => [
+      ...turnRows(20, () => 300),
+      grouped
+        ? {
+            key: 'c0',
+            turnId: 'c0',
+            turnIndex: 20,
+            groupTurnIds: ['c1'],
+            height: 160,
+            estimate: 60,
+          }
+        : { key: 'c0', turnId: 'c0', turnIndex: 20, placeholder: true, height: 60, estimate: 60 },
+      ...(grouped ? [] : [{ key: 'c1', turnId: 'c1', turnIndex: 21, height: 100, estimate: 60 }]),
+      ...turnRows(18, () => 300, undefined, 'u').map((row) => ({
+        ...row,
+        turnIndex: row.turnIndex + 22,
+      })),
+    ];
+    let grouped = false;
+    const sim: ScrollSim = new ScrollSim(rowsFor(grouped), V, {
+      // A recorded turn index can be out of date; the production report fell
+      // back from the missing row to a turn ~9000px away.
+      initialIntent: {
+        kind: 'read',
+        anchor: { kind: 'turn', turnId: 'c1', turnIndex: 3, rowKey: 'c1', item: null, offsetPx: 0 },
+        screenY: 0,
+      },
+      callbacks: {
+        onScroll: (offset) => {
+          const top = sim.rows[sim.controller.findItemIndex(offset - sim.contentTop)]!;
+          const next = Math.abs(top.turnIndex - 20) <= 4;
+          if (next === grouped) return;
+          grouped = next;
+          sim.render(rowsFor(grouped));
+        },
+      },
+    });
+    sim.render();
+    sim.settle();
+    expect(grouped).toBe(true);
+    expect(sim.screenTop('c0')).toBe(0);
+    expectHealthy(sim);
+  });
 });
 
 describe('hidden viewport', () => {

@@ -20,9 +20,11 @@
  *    in — which would release every idle document store, rejoin every local
  *    room, and charge a backoff step forgiven only after 30s of health.
  *
- * The chain under test is the real one: engine -> `room-status` frame ->
+ * This compatibility chain retains the pre-migration v7 client fixture:
+ * engine -> `room-status` frame ->
  * `LocalLoroTransportAdapter` -> real `createRoomSyncTracker` -> real
- * `createRoomSyncRegistry` -> the exact predicate the loop gates on.
+ * `createRoomSyncRegistry` -> the exact predicate the loop gates on. Product
+ * native-client automatic rejoin is covered by workspace-local-transport.test.ts.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Effect, Layer } from 'effect';
@@ -34,7 +36,7 @@ import {
   type LocalLoroDataPlaneServerMessage,
 } from '@lody/shared/local-loro-data-plane';
 import { LocalLoroDataPlaneServerLegacy } from '@lody/shared/local-loro-data-plane-server';
-import { LocalLoroTransportAdapter } from '@lody/shared/local-loro-transport';
+import { LocalLoroTransportAdapter } from '../../shared/test-support/local-loro-v7-client';
 import type { RepoTransportRoomStatus } from 'loro-repo';
 import { createRoomSyncTracker } from '../src/providers/room-sync-tracker';
 import { createRoomSyncRegistry } from '../src/providers/room-sync-registry';

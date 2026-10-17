@@ -33,6 +33,13 @@ describes the shared parsing and persistence boundary.
 
 ## Conversation surface and composer
 
+`PermissionPrompt` keeps short answers directly clickable. A long shown answer
+moves its family into a compact menu trigger; selecting an original option in
+that menu submits the answer. A short answer and its chevron use `ButtonGroup`;
+menus prefer opening above the bottom-of-chat controls. Full provider labels
+wrap left-aligned within the popup, including paths without spaces. The [presentation decision](../../../../../.agents/notes/implemented/bug-fix/2026-10-15-permission-option-wrapping.md)
+records the label budget, interaction trade-off, and verification limits.
+
 | File                                                            | Responsibility                                                                                                                                      |
 | --------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `session-chat-interface.tsx`                                    | Conversation surface: stream, header variants, read receipts, launchers                                                                             |

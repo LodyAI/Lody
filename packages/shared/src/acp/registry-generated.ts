@@ -61,15 +61,27 @@ const REMOTE_REGISTRY_ACP_AGENTS: RegistryAcpAgent[] = [
     description: 'ACP wrapper for Amp - the frontier coding agent',
     icon: 'https://cdn.agentclientprotocol.com/registry/v1/latest/amp-acp.svg',
     distribution: {
-      local: {
-        command: 'npx',
-        args: [
-          '-y',
-          'amp-acp'
-        ],
-        versionArgs: [
-          '--version'
-        ]
+      binary: {
+        'darwin-aarch64': {
+          archive: 'https://github.com/tao12345666333/amp-acp/releases/download/v0.10.0/amp-acp-darwin-aarch64.tar.gz',
+          cmd: './amp-acp'
+        },
+        'darwin-x86_64': {
+          archive: 'https://github.com/tao12345666333/amp-acp/releases/download/v0.10.0/amp-acp-darwin-x86_64.tar.gz',
+          cmd: './amp-acp'
+        },
+        'linux-aarch64': {
+          archive: 'https://github.com/tao12345666333/amp-acp/releases/download/v0.10.0/amp-acp-linux-aarch64.tar.gz',
+          cmd: './amp-acp'
+        },
+        'linux-x86_64': {
+          archive: 'https://github.com/tao12345666333/amp-acp/releases/download/v0.10.0/amp-acp-linux-x86_64.tar.gz',
+          cmd: './amp-acp'
+        },
+        'windows-x86_64': {
+          archive: 'https://github.com/tao12345666333/amp-acp/releases/download/v0.10.0/amp-acp-windows-x86_64.zip',
+          cmd: 'amp-acp.exe'
+        }
       }
     }
   },

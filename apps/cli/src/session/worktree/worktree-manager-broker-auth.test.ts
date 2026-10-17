@@ -7,14 +7,13 @@ import { execFileSync, spawn, type ChildProcess, type SpawnOptions } from 'node:
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { MachineId, RepoId, SessionId, WorkspaceId } from '@lody/shared';
+import type { RepoId, SessionId } from '@lody/shared';
 import type { Logger } from '@/utils/logger';
 import type { NodeProcessApi } from '@lody/shared/node/process';
 import { SessionManager } from '../session-manager';
 import type { SessionConfig } from '../types';
 import type { LoroDocumentManager } from '@/lib/loro/doc';
 import { createTestCloudPort } from '../../../tests/test-cloud-port';
-import { materializeSpeculativeWorktree } from './speculative-worktree';
 import { ensureGitHubGitTransport } from '@/lib/github-git-transport';
 import type { GitCredentialBrokerAuth } from './worktree-manager';
 import { isGitExecutableNotFoundError } from './git-process-error';
@@ -372,7 +371,7 @@ process.exit(result.status ?? 1);
     };
   }
 
-  it.each(['clone', 'fetch', 'speculative', 'restore-cache'] as const)(
+  it.each(['clone', 'fetch', 'restore-cache'] as const)(
     'creates a real worktree through authenticated %s',
     async (mode) => {
       const fixture = nativeFixture();
@@ -381,27 +380,13 @@ process.exit(result.status ?? 1);
       const manager = await newManager();
       const sessionId = `startup-${mode}` as SessionId;
       const brokerAuth = await fixture.auth('requester-a');
-      const info =
-        mode === 'speculative'
-          ? (
-              await materializeSpeculativeWorktree({
-                preparationId: 'prepare',
-                sessionId,
-                workspaceId: 'workspace-a' as WorkspaceId,
-                machineId: 'machine-a' as MachineId,
-                manager,
-                managerConfig: { repoId: REPO_ID, source: { kind: 'github', repoUrl: REPO_URL } },
-                resolveBrokerAuth: async () => brokerAuth,
-                logger: createLogger(),
-              })
-            ).info
-          : await manager.createWorktree(
-              sessionId,
-              undefined,
-              mode === 'restore-cache' ? 'fixture-base' : undefined,
-              undefined,
-              brokerAuth
-            );
+      const info = await manager.createWorktree(
+        sessionId,
+        undefined,
+        mode === 'restore-cache' ? 'fixture-base' : undefined,
+        undefined,
+        brokerAuth
+      );
       expect(readFileSync(path.join(info.hostPath, 'README.md'), 'utf8')).toBe('fixture content');
       expect(info.headSha).toBe(fixture.head);
       expect(fixture.calls()).toBe(needsClone ? 2 : 1);

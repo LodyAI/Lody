@@ -46,28 +46,62 @@ export class LockReentrant extends Data.TaggedError('LockReentrant')<{ lockName:
     return `withFileLock("${this.lockName}") is not reentrant within the same process`;
   }
 }
+/** One-line cause for messages; the structured cause stays on the error. */
+const describeCause = (cause: unknown): string => {
+  if (Cause.isCause(cause)) return describeCause(Cause.squash(cause));
+  if (cause instanceof Error) return cause.message || cause.name;
+  return String(cause);
+};
 export class LockIoError extends Data.TaggedError('LockIoError')<{
   path: string;
   cause: unknown;
-}> {}
+}> {
+  override get message() {
+    return `File lock I/O failed at "${this.path}": ${describeCause(this.cause)}`;
+  }
+}
 export interface FileLockCleanupLease {
   readonly path: string;
   /** Waits at most five seconds; a pending deletion is joined, never replaced. */
   readonly retryCleanup: Effect.Effect<void, LockReleaseFailed>;
 }
+/** Bounds how long the releasing holder waits; the service keeps owning slower cleanup. */
 export const FILE_LOCK_CLEANUP_MS = 5_000;
+/** Another owner replaced the lock file while the body ran, so exclusion was not held. */
+export class LockOwnershipLost extends Data.TaggedError('LockOwnershipLost')<{ path: string }> {
+  override get message() {
+    return `File lock "${this.path}" was replaced by another owner before release`;
+  }
+}
 export class LockReleaseFailed extends Data.TaggedError('LockReleaseFailed')<{
   path: string;
   cause: unknown;
   cleanup?: FileLockCleanupLease;
-}> {}
+}> {
+  override get message() {
+    return `Failed to release file lock "${this.path}": ${describeCause(this.cause)}`;
+  }
+}
 /** Complete failure projection for Legacy callers and failed Layer disposal. */
 export class FileLockCleanupFailed extends Data.TaggedError('FileLockCleanupFailed')<{
   cause: unknown;
   fullCause: Cause.Cause<unknown>;
   releases: ReadonlyArray<LockReleaseFailed>;
-}> {}
-export type FileLockError = LockTimeout | LockReentrant | LockIoError | LockReleaseFailed;
+}> {
+  override get message() {
+    const primary = describeCause(this.cause);
+    const releases = this.releases
+      .filter((release) => release !== this.cause)
+      .map((release) => release.message);
+    return releases.length === 0 ? primary : `${primary}; ${releases.join('; ')}`;
+  }
+}
+export type FileLockError =
+  | LockTimeout
+  | LockReentrant
+  | LockIoError
+  | LockReleaseFailed
+  | LockOwnershipLost;
 
 /** Stable pid and per-operation directory resolver; tests may inject a fixed directory. */
 export class FileLockHost extends Context.Service<
@@ -116,9 +150,23 @@ const parseLock = (raw: string): { pid: number; timestamp: number; token?: strin
   }
 };
 
+/** A lease plus a wait with a caller-chosen bound; both join the same raw operation. */
+interface OwnedCleanup<A> extends FileLockCleanupLease {
+  /** `charged` waits are successors' deadlines; they set and honor `wedged`. */
+  readonly join: (
+    boundMs: number,
+    options?: { readonly charged?: boolean }
+  ) => Effect.Effect<A, LockReleaseFailed>;
+  /**
+   * A successor already waited a full acquisition deadline for this attempt. Later
+   * successors only poll it, so one wedged deletion costs the queue one deadline,
+   * not one per queued holder. A new raw attempt clears it.
+   */
+  wedged: boolean;
+}
 type QueueEntry = {
   waiters: Array<Deferred.Deferred<void>>;
-  cleanups: Set<FileLockCleanupLease>;
+  cleanups: Set<OwnedCleanup<unknown>>;
 };
 
 /** One instance owns its queues and unresolved releases. No module-global lock state. */
@@ -209,36 +257,30 @@ export const FileLocksLive = Layer.effect(
       if ((yield* read(owner)) !== raw) return;
       yield* remove(scratch, true);
     });
-    const release = (lockPath: string, token: string) =>
-      Effect.gen(function* () {
-        const raw = yield* read(lockPath);
-        if (raw === undefined) return;
-        const info = parseLock(raw);
-        if (info?.pid !== host.pid || info.token !== token) {
-          yield* Effect.fail(
-            new LockReleaseFailed({ path: lockPath, cause: 'lock ownership changed' })
-          );
-        }
-        yield* remove(lockPath);
-      }).pipe(
-        Effect.mapError((cause) =>
-          cause instanceof LockReleaseFailed
-            ? cause
-            : new LockReleaseFailed({ path: lockPath, cause })
-        )
-      );
+    // A replaced generation is not ours to delete and leaves nothing to retry: the
+    // holder learns that exclusion was lost, and successors contend normally.
+    const release = Effect.fnUntraced(function* (lockPath: string, token: string) {
+      const raw = yield* read(lockPath);
+      if (raw === undefined) return 'released' as const;
+      const info = parseLock(raw);
+      if (info?.pid !== host.pid || info.token !== token) return 'lost' as const;
+      yield* remove(lockPath);
+      return 'released' as const;
+    });
 
-    const makeCleanup = Effect.fnUntraced(function* (
+    const makeCleanup = Effect.fnUntraced(function* <A>(
       lockPath: string,
       entry: QueueEntry,
       file: string,
-      raw: () => Effect.Effect<void, unknown>
+      raw: () => Effect.Effect<A, unknown>
     ) {
       const serial = yield* Semaphore.make(1);
-      const running = yield* Ref.make<Fiber.Fiber<void, unknown> | undefined>(undefined);
-      const cleanup: FileLockCleanupLease = {
-        path: file,
-        retryCleanup: Effect.suspend(() =>
+      const running = yield* Ref.make<Fiber.Fiber<A, unknown> | undefined>(undefined);
+      const join = (
+        boundMs: number,
+        options?: { readonly charged?: boolean }
+      ): Effect.Effect<A, LockReleaseFailed> =>
+        Effect.suspend(() =>
           serial
             .withPermit(
               Effect.gen(function* () {
@@ -246,6 +288,7 @@ export const FileLocksLive = Layer.effect(
                 const previousExit = previous?.pollUnsafe();
                 if (previous && (!previousExit || Exit.isSuccess(previousExit))) return previous;
                 entry.cleanups.add(cleanup);
+                cleanup.wedged = false;
                 // Detached from the bounded waiter, explicitly owned by this lease and
                 // the service registry. Local interruption cannot stop an OS unlink.
                 const fiber = yield* Effect.forkDetach(
@@ -268,17 +311,30 @@ export const FileLocksLive = Layer.effect(
             )
             .pipe(
               Effect.uninterruptible,
-              Effect.flatMap((fiber) =>
-                Effect.acquireUseRelease(
+              Effect.flatMap((fiber) => {
+                const charged = options?.charged === true;
+                const bound = charged && cleanup.wedged && !fiber.pollUnsafe() ? 0 : boundMs;
+                // An exhausted bound observes the current state without a timer.
+                if (bound <= 0) {
+                  const exit = fiber.pollUnsafe();
+                  return exit ?? Effect.fail('cleanup still pending at the deadline');
+                }
+                return Effect.acquireUseRelease(
                   // A finalizer can already carry an interruption. Give its bounded
                   // waiter a fresh fiber instead of restoring that interruption here.
-                  Effect.forkDetach(
-                    Fiber.await(fiber).pipe(Effect.flatten, Effect.timeout(FILE_LOCK_CLEANUP_MS))
-                  ),
+                  Effect.forkDetach(Fiber.await(fiber).pipe(Effect.flatten, Effect.timeout(bound))),
                   Fiber.join,
                   (waiter) => Fiber.interrupt(waiter).pipe(Effect.asVoid)
-                )
-              ),
+                ).pipe(
+                  // Only a deletion still pending after a full charged wait is wedged;
+                  // a settled failure stays retryable by the next holder.
+                  Effect.tapError(() =>
+                    Effect.sync(() => {
+                      if (charged && !fiber.pollUnsafe()) cleanup.wedged = true;
+                    })
+                  )
+                );
+              }),
               Effect.provideService(Clock.Clock, ownerClock),
               Effect.catchCause((cause) =>
                 Cause.hasInterruptsOnly(cause)
@@ -288,12 +344,29 @@ export const FileLocksLive = Layer.effect(
                   : Effect.fail(new LockReleaseFailed({ path: file, cause, cleanup }))
               )
             )
-        ),
+        );
+      const cleanup: OwnedCleanup<A> = {
+        path: file,
+        join,
+        retryCleanup: Effect.asVoid(join(FILE_LOCK_CLEANUP_MS)),
+        wedged: false,
       };
       return cleanup;
     });
-    const recover = (entry: QueueEntry) =>
-      Effect.forEach([...entry.cleanups], (cleanup) => cleanup.retryCleanup, { discard: true });
+    // A successor joins retained cleanup within its own acquisition deadline: a
+    // deletion that is merely slow delays the next holder instead of failing it.
+    // The wait is charged to the deletion, not to each successor: after one
+    // successor has waited its whole deadline, the rest fail fast until a new
+    // attempt starts, instead of each waiting a full deadline in FIFO order.
+    const recover = (entry: QueueEntry, deadline: number) =>
+      Effect.forEach(
+        [...entry.cleanups],
+        (cleanup) =>
+          Clock.currentTimeMillis.pipe(
+            Effect.flatMap((now) => cleanup.join(Math.max(0, deadline - now), { charged: true }))
+          ),
+        { discard: true }
+      );
     yield* Effect.addFinalizer(() =>
       Ref.get(entries).pipe(
         Effect.flatMap((map) =>
@@ -350,8 +423,20 @@ export const FileLocksLive = Layer.effect(
         ({ entry, ticket }) =>
           Effect.gen(function* () {
             yield* Deferred.await(ticket);
+            // One deadline, started at local admission, covers retained cleanup and
+            // cross-process contention.
+            const admittedAt = yield* Clock.currentTimeMillis;
             // A failed release retains its owner. Retry it before admitting a replacement.
-            yield* recover(entry);
+            yield* recover(entry, admittedAt + timeout);
+            // The holder waits for its lock file and scratch together within one bound.
+            let releaseDeadline: number | undefined;
+            const holderBound = Clock.currentTimeMillis.pipe(
+              Effect.map((now) =>
+                releaseDeadline === undefined
+                  ? FILE_LOCK_CLEANUP_MS
+                  : Math.max(0, releaseDeadline - now)
+              )
+            );
             yield* fs
               .makeDirectory(dir, { recursive: true })
               .pipe(Effect.mapError((cause) => new LockIoError({ path: dir, cause })));
@@ -371,7 +456,6 @@ export const FileLocksLive = Layer.effect(
                 Effect.uninterruptibleMask((restore) => {
                   const token = path.join(scratch, 'owner');
                   const acquire = Effect.gen(function* () {
-                    const start = yield* Clock.currentTimeMillis;
                     const delay = yield* Ref.make(retryDelay);
                     const step = yield* Schedule.toStepWithMetadata(
                       Schedule.forever.pipe(
@@ -380,50 +464,67 @@ export const FileLocksLive = Layer.effect(
                         )
                       )
                     );
-                    const attempt: Effect.Effect<FileLockCleanupLease, FileLockError> = Effect.gen(
-                      function* () {
-                        const timestamp = yield* Clock.currentTimeMillis;
-                        yield* restore(
-                          fs
-                            .writeFileString(
-                              token,
-                              JSON.stringify({ pid: host.pid, timestamp, token })
-                            )
-                            .pipe(
-                              Effect.mapError((cause) => new LockIoError({ path: token, cause }))
-                            )
-                        );
-                        // Only publication and registering its release stay masked.
-                        const acquired = yield* fs.link(token, lockPath).pipe(
-                          Effect.as(true),
-                          Effect.catch((error) =>
-                            hasReason(error, 'AlreadyExists')
-                              ? Effect.succeed(false)
-                              : Effect.fail(new LockIoError({ path: lockPath, cause: error }))
+                    const attempt: Effect.Effect<
+                      OwnedCleanup<'released' | 'lost'>,
+                      FileLockError
+                    > = Effect.gen(function* () {
+                      const timestamp = yield* Clock.currentTimeMillis;
+                      yield* restore(
+                        fs
+                          .writeFileString(
+                            token,
+                            JSON.stringify({ pid: host.pid, timestamp, token })
                           )
+                          .pipe(Effect.mapError((cause) => new LockIoError({ path: token, cause })))
+                      );
+                      // Only publication and registering its release stay masked.
+                      const acquired = yield* fs.link(token, lockPath).pipe(
+                        Effect.as(true),
+                        Effect.catch((error) =>
+                          hasReason(error, 'AlreadyExists')
+                            ? Effect.succeed(false)
+                            : Effect.fail(new LockIoError({ path: lockPath, cause: error }))
+                        )
+                      );
+                      if (acquired)
+                        return yield* makeCleanup(lockPath, entry, lockPath, () =>
+                          release(lockPath, token)
                         );
-                        if (acquired)
-                          return yield* makeCleanup(lockPath, entry, lockPath, () =>
-                            release(lockPath, token)
-                          );
-                        if (yield* restore(reclaim(lockPath)))
-                          return yield* Effect.suspend(() => attempt);
-                        if ((yield* Clock.currentTimeMillis) - start > timeout)
-                          return yield* Effect.fail(new LockTimeout({ lockName: name, timeout }));
-                        yield* restore(step(undefined)).pipe(Effect.orDie);
+                      if (yield* restore(reclaim(lockPath)))
                         return yield* Effect.suspend(() => attempt);
-                      }
-                    );
+                      if ((yield* Clock.currentTimeMillis) - admittedAt > timeout)
+                        return yield* Effect.fail(new LockTimeout({ lockName: name, timeout }));
+                      yield* restore(step(undefined)).pipe(Effect.orDie);
+                      return yield* Effect.suspend(() => attempt);
+                    });
                     return yield* attempt;
                   });
                   return Effect.acquireUseRelease(
                     acquire,
                     () =>
                       restore(Effect.provideService(body, heldPaths, new Set([...held, lockPath]))),
-                    (cleanup) => cleanup.retryCleanup
+                    // The body's result stands once it ran exclusively. A slow or failed
+                    // deletion stays registered: successors and disposal retry it.
+                    (cleanup) =>
+                      Clock.currentTimeMillis.pipe(
+                        Effect.flatMap((now) => {
+                          releaseDeadline = now + FILE_LOCK_CLEANUP_MS;
+                          return cleanup.join(FILE_LOCK_CLEANUP_MS);
+                        }),
+                        Effect.catchTag('LockReleaseFailed', () => Effect.succeed('retained')),
+                        Effect.flatMap((outcome) =>
+                          outcome === 'lost'
+                            ? Effect.fail(new LockOwnershipLost({ path: lockPath }))
+                            : Effect.void
+                        )
+                      )
                   );
                 }),
-              ({ cleanup }) => cleanup.retryCleanup
+              ({ cleanup }) =>
+                holderBound.pipe(
+                  Effect.flatMap(cleanup.join),
+                  Effect.catchTag('LockReleaseFailed', () => Effect.void)
+                )
             );
           }),
         ({ entry, ticket }) =>

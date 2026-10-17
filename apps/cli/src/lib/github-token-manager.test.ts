@@ -17,7 +17,15 @@ vi.mock('@lody/cloud-api', () => ({
   },
 }));
 
-import { GitHubTokenManager, GitHubTokenFetchError } from '../lib/github-token-manager';
+import {
+  GitHubTokenManager,
+  GitHubTokenFetchError,
+  withRequestDeadline,
+} from '../lib/github-token-manager';
+import {
+  GITHUB_BROKER_TOKEN_TIMEOUT_MS,
+  GITHUB_TOKEN_CLOUD_TIMEOUT_MS,
+} from '../lib/github-credential-runtime';
 
 describe('GitHubTokenManager', () => {
   beforeEach(() => {
@@ -410,5 +418,59 @@ describe('GitHubTokenManager', () => {
     await expect(manager.getWriteTokenForRepo('owner/repo', context)).rejects.toThrow(
       'Backend returned an invalidated personal GitHub token'
     );
+  });
+
+  describe('cloud request deadline', () => {
+    // Answers after `delayMs` unless its signal aborts first, like a slow backend.
+    const slowFetch =
+      (delayMs: number): typeof fetch =>
+      (_input, init) =>
+        new Promise<Response>((resolve, reject) => {
+          const signal = init?.signal;
+          const timer = setTimeout(() => resolve(new Response('ok')), delayMs);
+          signal?.addEventListener('abort', () => {
+            clearTimeout(timer);
+            reject(signal.reason);
+          });
+        });
+
+    it('lets a token request that outlasts the old 2.5 s deadline succeed', async () => {
+      vi.useFakeTimers();
+      const request = withRequestDeadline(
+        GITHUB_TOKEN_CLOUD_TIMEOUT_MS,
+        slowFetch(10_000)
+      )('http://example.test');
+      await vi.advanceTimersByTimeAsync(10_000);
+      await expect(request.then((response) => response.text())).resolves.toBe('ok');
+    });
+
+    it('aborts a hung request at the deadline, before the helper stops waiting', async () => {
+      vi.useFakeTimers();
+      const request = withRequestDeadline(
+        GITHUB_TOKEN_CLOUD_TIMEOUT_MS,
+        slowFetch(60_000)
+      )('http://example.test');
+      let outcome: unknown = 'pending';
+      void request.then(
+        () => (outcome = 'resolved'),
+        (error: unknown) => (outcome = error)
+      );
+      await vi.advanceTimersByTimeAsync(GITHUB_TOKEN_CLOUD_TIMEOUT_MS - 1);
+      expect(outcome).toBe('pending');
+      await vi.advanceTimersByTimeAsync(1);
+      expect(outcome).toMatchObject({ name: 'TimeoutError' });
+      expect(GITHUB_TOKEN_CLOUD_TIMEOUT_MS).toBeLessThan(GITHUB_BROKER_TOKEN_TIMEOUT_MS);
+    });
+
+    it('still honors a caller abort before the deadline', async () => {
+      vi.useFakeTimers();
+      const caller = new AbortController();
+      const request = withRequestDeadline(GITHUB_TOKEN_CLOUD_TIMEOUT_MS, slowFetch(60_000))(
+        'http://example.test',
+        { signal: caller.signal }
+      );
+      caller.abort(new Error('caller cancelled'));
+      await expect(request).rejects.toThrow('caller cancelled');
+    });
   });
 });

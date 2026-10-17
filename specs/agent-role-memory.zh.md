@@ -9,8 +9,8 @@ Translation: current
 
 用户在设置 → 记忆中选择机器，管理 Lody 保存的记忆关联。“添加记忆体”打开与
 Agent Config 一致的双栏编辑器，左侧选择 Provider，右侧提供创建和导入两个 Tab。
-创建会在 Provider 中登记身份并自动关联；导入页展示设备上的身份，单选后复制名称和
-描述。已经关联的身份仍显示，但不能重复选择。
+创建会在 Provider 中登记身份并自动关联；导入页展示设备上的身份，通过 checkbox 多选
+批量导入，并复制每个所选身份的名称和描述。已经关联的身份仍显示，但不能重复选择。
 
 记忆内容由 Provider 管理。Lody 在所选机器的 Loro/Flock 文档中以
 `['memory', providerId, memoryId]` 保存机器 ID、名称和可选描述。写入使用现有

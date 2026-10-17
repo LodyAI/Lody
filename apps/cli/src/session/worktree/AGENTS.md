@@ -59,7 +59,7 @@ and file responsibilities: [../README.md](../README.md).
 ## Worktrees, branches, and setup
 
 - First-task branch naming is agent guidance for ordinary new independent GitHub/local
-  worktree Sessions, including prepared-worktree adoption. The daemon verifies the actual branch
+  worktree Sessions. The daemon verifies the actual branch
   after setup against this Session's allocation (numeric collisions included); unknown or
   descriptive refs receive no rename instruction. Exclude direct folders, child Tabs,
   prior/resumed ACP Sessions, later turns, and Fork; never restore a host prompt-to-ref
@@ -94,15 +94,12 @@ and file responsibilities: [../README.md](../README.md).
 - Worktree setup scripts are per worktree-directory lifetime: session runtime restore after
   idle GC must skip setup when the session's worktree directory already exists, but setup still
   runs when a missing worktree directory is materialized again.
-- INVARIANT: speculative-worktree marker mutations are read-check-act on one file and are
-  serialized per session (`withSessionMarkerLock` in `speculative-worktree.ts`) — a superseded
-  preparation's dispose racing its replacement's materialization must never delete the
-  replacement's directory.
-- A prepared worktree may be adopted only when the durable claim did not return `mismatch` AND
-  its directory still exists on disk; otherwise discard the prepared runtime (its ACP process
-  cwd points at a dead inode) and let the cold path rebuild via `createWorktree`. A `mismatch`
-  claim deletes the mismatched directory, so adoption after it hands the session a path that is
-  not on disk.
+- Nothing writes speculative-worktree markers any more; `legacy-speculative-worktrees.ts`
+  handles those older daemons left. Creation claims its marker before probing the directory
+  and reruns setup before dropping it. NEVER destroy a worktree a Session adopted
+  (`durable-pending-setup`, or a `restoreBranchName`) over a target mismatch: removal deletes
+  the branch resume restores. Only unadopted mismatches rebuild. The sweep removes orphans of
+  non-durable, inactive Sessions under the shared per-session lock, re-checking liveness.
 - `worktree-config-resolver.ts` follows the durable launch-config rule in
   [../AGENTS.md](../AGENTS.md): do not write per-session `sessionLaunchConfig`.
 - Archive and delete never delete a Session branch; only the worktree directory goes

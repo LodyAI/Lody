@@ -6,6 +6,7 @@ import { Identity } from '@loro-dev/roost';
 import { fromApplicationJson } from '@loro-dev/roost/lody-history';
 import { createRoostHistoryReader } from '@lody/shared/session-data';
 import { createRoostReadPort } from '../src/session/roost-history-port';
+import { createRoostHistoryChanges } from '../src/session/roost-history-changes';
 
 const assistantContent = (text: string, finished = false) =>
   fromApplicationJson({
@@ -108,4 +109,71 @@ describe('local Roost history writes', () => {
       await rm(directory, { recursive: true, force: true });
     }
   }, 30000);
+});
+
+it('recovers verified native change intervals and refuses a missing interval after reopen', async () => {
+  const { RoostNativeClient } = await import('@loro-dev/roost-node');
+  const directory = await mkdtemp(join(tmpdir(), 'lody-roost-changes-'));
+  const seed = new Uint8Array(32).fill(17);
+  const owner = Identity.fromSeed(seed).owner();
+  const dbPath = join(directory, 'history.db');
+  let client = new RoostNativeClient({
+    dbPath,
+    seed,
+    allowedOwners: [owner],
+    clockMs: 1_700_000_000_000n,
+    maxQueuedRequests: 16,
+    maxQueuedBytes: 8 * 1024 * 1024,
+  });
+  try {
+    await client.ready;
+    let stream = client.stream('synthetic-changes');
+    let journal = createRoostHistoryChanges(
+      () => stream,
+      () => 'synthetic-owner'
+    );
+    const initial = await journal.checkpoint(0n);
+    const first = await stream.create([], '{"text":"first"}');
+    await journal.record(0n, 1n, { kind: 'changed', businessIds: ['logical-first'] }, true);
+    await stream.edit(first.updates[0]!.turnId, 1n, [
+      { kind: 'appendText', path: [{ key: 'text' }], text: ' update' },
+    ]);
+    await journal.record(1n, 2n, { kind: 'structure', from: 4, to: 5 }, true, [
+      'logical-early-status',
+    ]);
+    const recovered = await journal.read(initial, 2n);
+    expect(recovered).toMatchObject({
+      state: 'ready',
+      from: 4,
+      ids: ['logical-first', 'logical-early-status'],
+    });
+    await client.close();
+    client = new RoostNativeClient({
+      dbPath,
+      seed,
+      allowedOwners: [owner],
+      clockMs: 1_700_000_000_000n,
+      maxQueuedRequests: 16,
+      maxQueuedBytes: 8 * 1024 * 1024,
+    });
+    await client.ready;
+    stream = client.stream('synthetic-changes');
+    journal = createRoostHistoryChanges(
+      () => stream,
+      () => 'synthetic-owner'
+    );
+    expect(await journal.read(initial, 2n)).toEqual(recovered);
+    await stream.create([], '{"text":"unrecorded"}');
+    await stream.create([], '{"text":"later"}');
+    await journal.record(3n, 4n, { kind: 'changed', businessIds: ['later'] }, true);
+    expect(await journal.read(initial, 4n)).toMatchObject({ state: 'reset' });
+    const foreign = createRoostHistoryChanges(
+      () => stream,
+      () => 'foreign-owner'
+    );
+    expect(await foreign.read(initial, 4n)).toMatchObject({ state: 'reset' });
+  } finally {
+    await client.close();
+    await rm(directory, { recursive: true, force: true });
+  }
 });

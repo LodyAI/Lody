@@ -8,6 +8,8 @@ export type CreateConversationViewFromHistoryOptions = {
   /** Fires whenever `getHistory()` would return a new array. */
   subscribe: (listener: () => void) => () => void;
   tailKeep?: number;
+  /** Clock for `lastUpdateAt`; defaults to `Date.now`. */
+  now?: () => number;
 };
 
 /**
@@ -26,6 +28,8 @@ export function createConversationViewFromHistory(
   let version = 0;
   let structureVersion = 0;
   let disposed = false;
+  let lastUpdateAt: number | null = null;
+  const now = options.now ?? Date.now;
 
   const rowOf = (entry: SessionHistory): TurnIndexRow => {
     const cached = rowsByEntry.get(entry);
@@ -39,6 +43,7 @@ export function createConversationViewFromHistory(
     if (disposed) return;
     const next = options.getHistory();
     if (next === history) return;
+    lastUpdateAt = now();
     const previous = history;
     history = next;
     const structural =
@@ -67,6 +72,9 @@ export function createConversationViewFromHistory(
     },
     get structureVersion() {
       return structureVersion;
+    },
+    get lastUpdateAt() {
+      return lastUpdateAt;
     },
     ready: Promise.resolve(),
     index: (i) => {

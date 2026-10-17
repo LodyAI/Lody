@@ -170,6 +170,61 @@ describe('isComposerAgentRoleApplied', () => {
     ).toBe(true);
   });
 
+  it.each([
+    ['plan_mode', true, false],
+    ['plan_mode', false, true],
+    ['collaboration_mode', 'plan', 'default'],
+    ['collaboration_mode', 'default', 'plan'],
+  ] as const)('retains the Role when %s changes from %s to %s', (configId, before, after) => {
+    const planningRole = {
+      ...role,
+      runConfig: {
+        ...role.runConfig,
+        configOptionValues: { thought_level: 'high', [configId]: before },
+      },
+    };
+    const changed = {
+      ...matching,
+      configOptionValues: { thought_level: 'high', [configId]: after },
+    };
+    expect(isComposerAgentRoleApplied(planningRole, changed)).toBe(true);
+    expect(isComposerAgentRoleApplied(planningRole, { ...changed, modelId: 'other' })).toBe(false);
+    expect(
+      isComposerAgentRoleApplied(planningRole, {
+        ...changed,
+        configOptionValues: { thought_level: 'low', [configId]: after },
+      })
+    ).toBe(false);
+    expect(isComposerAgentRoleApplied(planningRole, matching)).toBe(false);
+    expect(
+      isComposerAgentRoleApplied(planningRole, {
+        ...changed,
+        configOptionValues: { thought_level: 'high', [configId]: 'invalid' },
+      })
+    ).toBe(false);
+  });
+
+  it.each([
+    ['plan_mode', 'true', false],
+    ['plan_mode', 'invalid', true],
+    ['collaboration_mode', true, 'default'],
+    ['collaboration_mode', 'invalid', 'plan'],
+  ] as const)(
+    'does not retain a Role with invalid saved %s value %s',
+    (configId, saved, selected) => {
+      const invalidRole = {
+        ...role,
+        runConfig: { ...role.runConfig, configOptionValues: { [configId]: saved } },
+      };
+      expect(
+        isComposerAgentRoleApplied(invalidRole, {
+          ...matching,
+          configOptionValues: { [configId]: selected },
+        })
+      ).toBe(false);
+    }
+  );
+
   it('stops holding when a pinned option falls back to the agent value', () => {
     expect(
       isComposerAgentRoleApplied(role, {
@@ -219,6 +274,40 @@ describe('resolveTurnAgentRoleForRunConfig', () => {
     modelId: null,
     configOptionValues: { collaboration_mode: 'plan' },
   };
+
+  it.each([
+    ['plan_mode', true, false],
+    ['collaboration_mode', 'plan', 'default'],
+  ] as const)(
+    'preserves Role metadata when execute-plan overrides %s',
+    (configId, before, after) => {
+      const planningRole = {
+        ...role,
+        runConfig: { configOptionValues: { [configId]: before, permission_mode: 'ask' } },
+      };
+      const config = {
+        ...current,
+        modeId: null,
+        configOptionValues: { [configId]: before, permission_mode: 'ask' },
+      };
+      expect(
+        resolveTurnAgentRoleForRunConfig({
+          turnSelection,
+          role: planningRole,
+          current: config,
+          overrides: { configOptionValuesOverride: { [configId]: after, permission_mode: 'ask' } },
+        })
+      ).toEqual(turnSelection);
+      expect(
+        resolveTurnAgentRoleForRunConfig({
+          turnSelection,
+          role: planningRole,
+          current: config,
+          overrides: { configOptionValuesOverride: { [configId]: after, permission_mode: 'yolo' } },
+        })
+      ).toBeNull();
+    }
+  );
 
   it('freezes explicit None when execute-plan overrides a pinned Role value', () => {
     expect(

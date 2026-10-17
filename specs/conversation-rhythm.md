@@ -49,7 +49,9 @@ The user row owns `responseGap` below the bubble, including hover/focus actions.
 The first assistant row adds no second top gap. The last assistant row owns
 `roundGap` when the following turn is a user, including an unhydrated user turn.
 The answer's ordinary footer actions and next user's metadata fit inside that
-reserve, rather than adding independent gaps. Without a footer the last content
+reserve, rather than adding independent gaps. On mobile the footer is always
+visible (it leads with the turn duration), so the reserve sits below the footer
+instead of containing it; otherwise the next round reads as crowded. Without a footer the last content
 row reserves the same distance. At the conversation tail no next-round reserve
 is added. Edited-file cards, additional or wrapped actions, and attachments may
 naturally exceed the minimum; they must remain accessible and never overlap.

@@ -47,6 +47,7 @@ import {
 } from '@/lib/error-boundary-report';
 import { capturePostHogEvent, type PostHogAnalyticsProperties } from '@/lib/posthog-analytics';
 import { reportRecoveryOutcome } from '@/lib/recovery-outcome';
+import { recordClientLog } from '@/lib/client-log';
 import { getSessionRenderTraceText, recordSessionRenderTrace } from '@/lib/session-render-trace';
 import type { WorkspaceDataScopeBlocker } from '@/lib/workspace-data-scope';
 
@@ -228,6 +229,15 @@ export function reportRecoveryShown(
   const requestFailure = readLatestBootRequestFailure();
   console.warn('[blocking-wait] offering recovery', { gate, blocker, failed });
   recordSessionRenderTrace(`blocking-wait recovery ${gate} ${blocker ?? '-'}`);
+  recordClientLog(failed ? 'error' : 'warn', 'boot.wait_stuck', undefined, {
+    gate,
+    blocker: blocker ?? null,
+    docMetaScanErrorType: observation.docMetaScanErrorType ?? null,
+    runtimeInitErrorType: observation.runtimeInitErrorType ?? null,
+    requestFailure: requestFailure
+      ? `${requestFailure.source}:${requestFailure.kind}:${requestFailure.status ?? '-'}`
+      : null,
+  });
   captureSafely('workspace/boot_wait_stuck', {
     gate,
     failed,

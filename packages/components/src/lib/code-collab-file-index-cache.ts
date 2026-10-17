@@ -1,6 +1,7 @@
 import { Cause, Duration, Effect, Exit, Scope, ScopedCache } from 'effect';
 import type { Flock } from '@loro-dev/flock-wasm';
-import { ResourceBusyError, type RepoRoomSubscription } from 'loro-repo';
+import { ResourceBusyError } from 'loro-repo';
+import type { WorkspaceRoom as RepoRoomSubscription } from '@lody/shared/workspace-data/repo-legacy';
 import {
   applyCodeCollabFileIndexFlockEvents,
   getServerNow,
@@ -50,7 +51,7 @@ export type CodeCollabFileIndexCache = {
 };
 
 export type CodeCollabFileIndexRuntimeRepo = {
-  acquireFlockDoc: (flockDocId: string) => Promise<{
+  acquireFlockDocHandleLegacy: (flockDocId: string) => Promise<{
     readonly flock: Flock;
     readonly release: () => Promise<void>;
   }>;
@@ -68,7 +69,7 @@ async function openCodeCollabFileIndexResource(
   onSyncFailure: () => void
 ): Promise<MutableFileIndexResource> {
   logCodeCollabInfo('file-index flock open', { flockDocId });
-  const repoLease = await runtimeRepo.acquireFlockDoc(flockDocId);
+  const repoLease = await runtimeRepo.acquireFlockDocHandleLegacy(flockDocId);
   const listeners = new Set<() => void>();
   const resourceKey = {};
   let state: CodeCollabFileIndexLoadState = { status: 'loading' };

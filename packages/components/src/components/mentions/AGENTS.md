@@ -8,8 +8,8 @@ Pipeline background: [ui-mentions.md](../../../../../.agents/docs/ui-mentions.md
 ## Triggers, menu, and candidates
 
 - `@` reaches every mention type through the two-level menu. Skills keep their
-  direct `$`/`￥` menu, `/` and `、` open commands directly, and `#` opens no menu but
-  keeps its hydrator, so a pasted `#123` still expands before send.
+  direct `$`/`￥`/`¥` menu, `/` and `、` open commands directly, and `#` opens no menu but
+  keeps hydration, so pasted `#123` still expands before send.
 - `enableAtMentions` is the ONE list of what `@` reaches, gating both trigger
   registration and mounting `<Mention>`; every source with its own `enabled`
   rule (sessions: having any) belongs there too. Placeholder hints advertise `$`

@@ -205,26 +205,6 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
     return this.getWorkdir();
   }
 
-  setWorkdir(workdir: string): void {
-    let stat: fs.Stats;
-    try {
-      stat = fs.statSync(workdir);
-    } catch (error) {
-      const code =
-        error && typeof error === 'object' && 'code' in error
-          ? (error as { code?: unknown }).code
-          : null;
-      if (code === 'ENOENT') {
-        throw new Error(`Session workdir does not exist: ${workdir}`, { cause: error });
-      }
-      throw error;
-    }
-    if (!stat.isDirectory()) {
-      throw new Error(`Session workdir is not a directory: ${workdir}`);
-    }
-    this.fixedWorkdir = workdir;
-  }
-
   getParentSessionId(): SessionId | undefined {
     return this.config.parentSessionId;
   }
@@ -354,19 +334,16 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
     const activeProcess = this.activeProcess;
     const agentProcess = this.agentProcess;
 
-    // The per-process trees first, then the sandbox as a whole: the latter also
-    // reaches terminal commands and groups whose leader already exited.
+    // The sandbox as a whole also reaches terminal commands and groups whose
+    // leader already exited. It tracks the per-process trees too, so ending
+    // them one after the other would double every bounded wait on a survivor.
     const failures: unknown[] = [];
     for (const outcome of await Promise.allSettled([
       activeProcess?.terminate(termination.force),
       agentProcess?.terminate(termination.force),
+      this.sandbox.terminate(termination.force),
     ])) {
       if (outcome.status === 'rejected') failures.push(outcome.reason);
-    }
-    try {
-      await this.sandbox.terminate(termination.force);
-    } catch (error) {
-      failures.push(error);
     }
     await terminalsDisposed;
     for (const failure of failures) {
@@ -772,7 +749,6 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
           startupAbort: externalAbort
             ? Promise.race([startupMonitor.abortPromise, externalAbort.promise])
             : startupMonitor.abortPromise,
-          resolveSessionStart: callbacks.resolveSessionStart,
         });
         client = started.client;
         acpSessionId = started.acpSessionId;

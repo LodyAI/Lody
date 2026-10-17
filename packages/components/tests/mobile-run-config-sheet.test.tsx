@@ -245,9 +245,8 @@ describe('MobileRunConfigSheet', () => {
       )!;
       await act(async () => option.click());
       expect(view.querySelector('button[aria-label="Role"]')?.textContent).toContain(label);
-      expect(view.querySelector('button[aria-label="Permission"]')?.textContent).toContain(
-        'Read-only'
-      );
+      // The fixture's modeOptions resolve to a mode control, named "Mode".
+      expect(view.querySelector('button[aria-label="Mode"]')?.textContent).toContain('Read-only');
     }
   });
 
@@ -386,7 +385,16 @@ describe('MobileRunConfigSheet', () => {
       await act(async () =>
         document.querySelector<HTMLButtonElement>('button[aria-label="Run configuration"]')!.click()
       );
-      const trigger = document.querySelector<HTMLButtonElement>('button[aria-label="Permission"]')!;
+      // The row is named after what it resolves to: a real _permission
+      // selector keeps "Permission" (kimi/grok), builtin modes land on "Mode",
+      // and dimcode's own provider option carries the "Permission" label.
+      const rowLabel =
+        agentType === 'kimi' || agentType === 'grok' || agentType === 'dimcode'
+          ? 'Permission'
+          : 'Mode';
+      const trigger = document.querySelector<HTMLButtonElement>(
+        `button[aria-label="${rowLabel}"]`
+      )!;
       const before = document.querySelector('[data-testid="selection"]')!.textContent;
       await act(async () => trigger.click());
       const target = [...document.querySelectorAll('[role="option"]')]
@@ -422,7 +430,9 @@ describe('MobileRunConfigSheet', () => {
     await act(async () =>
       document.querySelector<HTMLButtonElement>('button[aria-label="Run configuration"]')!.click()
     );
-    expect(document.querySelector('button[aria-label="Permission"]')).toBeNull();
+    expect(
+      document.querySelector('button[aria-label="Permission"], button[aria-label="Mode"]')
+    ).toBeNull();
     expect(document.querySelector('button[aria-label="Model"]')).not.toBeNull();
   });
 
@@ -492,7 +502,8 @@ describe('MobileRunConfigSheet', () => {
       ].find((node) => node.textContent === 'Second')!;
       await pressOption(trigger, target);
       expect(trigger.textContent).toBe('Second');
-      expect(document.querySelector('button[aria-label="Permission"]')?.textContent).toContain(
+      // The fixture's modeOptions resolve to a mode control, named "Mode".
+      expect(document.querySelector('button[aria-label="Mode"]')?.textContent).toContain(
         'Read-only'
       );
     }

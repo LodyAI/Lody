@@ -1,4 +1,4 @@
-import type { RepoRoomSubscription } from 'loro-repo';
+import type { WorkspaceRoom as RepoRoomSubscription } from '@lody/shared/workspace-data/repo-legacy';
 import {
   canonicalScheduleJson,
   getScheduleRegistryFlockDocId,

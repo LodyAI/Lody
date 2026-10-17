@@ -2,12 +2,11 @@
 
 Parent instructions apply. Background: [README.md](README.md).
 
-- Route local Session/catalog tools via `session/call-tool` to the daemon repo, never a
-  second writer. Reuse SDK-parsed arguments and validate daemon inputs in
-  `session-tool-router.ts`; scope identity/host operations with AsyncLocalStorage in
-  `session-command-environment.ts`. Require an active local user Turn and exact
-  workspace/machine scope. Cloud retains authenticated commands and remote recovery
-  confirmation.
+- Route Session/catalog tools via `session/call-tool` to the daemon repo in every
+  composition, never a second replica or child `lody` CLI. Reuse SDK-parsed arguments
+  and validate daemon inputs in `session-tool-router.ts`; scope replica/identity with
+  ALS in `session-command-environment.ts`. Require exact workspace/machine scope
+  and an active Turn (local: its user). Cloud keeps authenticated commands/recovery.
 
 - MCP sharing requires the active Turn user to equal the CLI authenticated account.
   Fail closed on shared-machine account mismatch; never substitute the machine owner.
@@ -41,10 +40,11 @@ Parent instructions apply. Background: [README.md](README.md).
   Freeze `requesterUserId` and `sourceTurnId` at Operation acceptance; requester Session id
   already identifies the Session. Authors are presentation/provenance only. Recovery uses
   the owner Machine and current authorization.
-- Role creation uses `lody_session_create(_many)`; `agentRoleMachineId` names the target,
-  required for a multi-machine Role. Tolerate manual Machine, Agent and run-config fields but
-  remove them before resolution: the Role row is authoritative and they must not influence
-  validation, canonical identity, recovery, or dispatch.
+- With `agentRoleId`, create tools require `agentRoleMachineId` for multi-machine
+  Roles. Strip manual target/run-config before resolution,
+  validation, identity, recovery or dispatch; the Role is authoritative.
+- Role create/update only propose. Save checks ownership, patches latest text;
+  replicas may overwrite. CLI shares [flow](README.md#agent-role-proposals).
 
 ## Session tool contracts
 

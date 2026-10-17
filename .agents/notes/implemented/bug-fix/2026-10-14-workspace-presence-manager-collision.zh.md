@@ -5,6 +5,8 @@ Translation: current
 
 [English](2026-10-14-workspace-presence-manager-collision.md)
 
+> 后续变更：[由 daemon 执行 MCP 工作区命令](../architecture/2026-10-16-daemon-hosted-mcp-workspace-commands.zh.md) 让 Cloud MCP 命令改用 daemon 副本，并移除下文所述的 presence 未释放栅栏。
+
 ## 摘要
 
 重叠的 Cloud 命令共享一个文档管理器，避免重复申请 presence，并保留身份隔离和最后使用者清理。修复只在命令组合入口，presence、token 和撤权均不改变。

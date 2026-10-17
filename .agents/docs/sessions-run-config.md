@@ -36,7 +36,11 @@ this page is the full text of the rules summarised there.
   Agent/Model/Interaction/Reasoning plus provider-defined select side submenus +
   Plan/Fast toggle rows) and
   `DesktopPermissionModeButton` (permission icon + full name; flat permission
-  list). Explicit `_permission` config options take precedence over legacy ACP
+  list). Its tooltip/aria noun follows what the face resolved — "Permission"
+  only for an explicit `_permission` option, otherwise the provider's selector
+  label or "Mode" (`permissionModeControlLabel`), so a mode list such as
+  Agent/Plan/Ask never reads "Permission". Explicit `_permission` config
+  options take precedence over legacy ACP
   modes; provider interaction modes stay inside the run-config dropdown. Both
   are also used by the desktop chat landing; `DesktopRunConfigMenu` receives an
   explicit agent selection/machine scope rather than reading `SessionMeta`.
@@ -125,7 +129,13 @@ this page is the full text of the rules summarised there.
   ready because its transient provider defaults are not a valid run config.
   Programmatic Turns inherit the current
   Role only after their final run-config overrides are applied; if an override
-  breaks a value the Role pins, freeze explicit None instead of a lying Role id.
+  breaks a non-Plan value the Role pins, freeze explicit None. Independent Plan
+  is a per-turn override: valid boolean `plan_mode` toggles and legacy
+  `collaboration_mode` default/plan switches retain the Role, revision, snapshot,
+  and memory. Selecting the Role still seeds its saved Plan value; dispatch uses
+  the actual composer/override value, without rewriting the Role catalog. Missing
+  or invalid Plan values still fail matching. Permission-based Plan (`modeId`
+  or permission options) remains a pinned permission, not this exception.
   A legacy/non-composer Turn with both fields absent inherits the most recent
   explicit selection; only `agentRoleId: null` means None. Keep unsynced catalog
   rows and not-yet-hydrated Session docs in the unknown state — neither may
@@ -203,13 +213,14 @@ this page is the full text of the rules summarised there.
   two dispatches disagreeing about a runtime-omitted key plus options rebuilt
   from the selection was a synchronous #185 render loop on session open. The footer names a Role only while
   `isComposerAgentRoleApplied` still holds (`lib/composer-agent-roles.ts`):
-  every value the Role pins is what will run. Moving a knob takes the name away
+  every non-Plan pin matches, and independent Plan may be overridden as above.
+  Moving another pinned knob takes the name away
   rather than clearing the preference, which would re-seed the value just
   changed. With a Role selected the TRIGGER carries the Role and nothing else,
   and the model/reasoning/permission/Plan/Fast values render beside it as inert
-  dimmed text: a Role IS the whole configuration, so changing one of those by
-  hand is exactly what unnames it, and a knob that silently unnames the thing
-  next to it is a trap. Permission is one of those values
+  dimmed text. Changing a pinned non-Plan value by hand unnames the Role;
+  independent Plan remains adjustable inside the menu. Permission is pinned
+  when present
   (`doesAgentRolePinPermissionMode`), so `DesktopPermissionModeButton` is not
   rendered at all while a Role that pins it is selected — but it STAYS a button
   when the Role pins nothing there, because an agent with no permission control

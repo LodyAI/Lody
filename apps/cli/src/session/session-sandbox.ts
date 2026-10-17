@@ -131,6 +131,8 @@ interface SessionSandboxDeps {
   readSelfCgroupPath: () => Promise<string>;
   configureExecutionProcess: (pid: number, logger?: Logger) => Promise<void>;
   killPid: (pid: number, signal?: NodeJS.Signals | 0) => void;
+  /** Must describe the same process table as `killPid`. */
+  listProcessGroup?: NodeProcessApi['listProcessGroup'];
 }
 
 interface CreateSessionSandboxFactoryOptions {
@@ -164,6 +166,7 @@ const defaultSandboxDeps = (): SessionSandboxDeps => ({
   },
   killPid: (pid: number, signal?: NodeJS.Signals | 0) =>
     nodeProcessLive.kill(pid, signal ?? 'SIGTERM'),
+  listProcessGroup: nodeProcessLive.listProcessGroup,
 });
 
 const toNodeProcess = (deps: SessionSandboxDeps): NodeProcessApi => ({
@@ -171,6 +174,7 @@ const toNodeProcess = (deps: SessionSandboxDeps): NodeProcessApi => ({
   spawn: deps.spawnProcess,
   spawnSync: nodeProcessLive.spawnSync,
   kill: (pid, signal) => deps.killPid(pid, signal),
+  ...(deps.listProcessGroup ? { listProcessGroup: deps.listProcessGroup } : {}),
 });
 
 const configureProcessBestEffort =
@@ -192,6 +196,8 @@ export function createSessionSandboxFactory(
 ): SessionSandboxFactory {
   const deps: SessionSandboxDeps = {
     ...defaultSandboxDeps(),
+    // A substituted process table must not be judged by the host's.
+    ...(options.deps?.killPid ? { listProcessGroup: undefined } : {}),
     ...(options.deps ?? {}),
   };
   const facade = { logger: options.logger, nodeProcess: toNodeProcess(deps) };
@@ -381,6 +387,7 @@ class ContainerSessionSandbox implements SessionSandbox {
   ): Promise<SessionProcessHandle> {
     const { captureOutput, ...spawnOptions } = options;
     let events: ProcessEvents | undefined;
+    let failedBeforeSpawn: Error | undefined;
     this.pendingSpawns++;
     const contained = await (async () => {
       try {
@@ -395,20 +402,28 @@ class ContainerSessionSandbox implements SessionSandbox {
             options: spawnOptions,
             onSpawned: (child) => {
               events = attachProcessEvents(child, { captureOutput, logger: this.logger });
+              // Node emits an error without a PID when no process was started.
+              // pendingSpawns keeps the journal incomplete until that failure settles.
+              child.once('error', (error) => {
+                if (child.pid === undefined) failedBeforeSpawn = error;
+              });
               if (child.pid && child.pid > 0) this.spawnedRoots.add(child.pid);
-              else this.uncertainResources = true;
               for (const observer of this.recoveryObservers) {
                 if (child.pid && child.pid > 0) observer.roots.add(child.pid);
-                else observer.uncertain = true;
               }
               this.publishRecoveryResources();
             },
           })
         );
       } catch (cause) {
-        this.uncertainResources = true;
-        for (const observer of this.recoveryObservers) observer.uncertain = true;
-        throw unwrapSpawnFailure(cause);
+        const failure = unwrapSpawnFailure(cause);
+        // Match the actual no-PID error, not an errno from journal/setup/cleanup.
+        // Never clear uncertainty left by another acquisition or failed write.
+        if (!failedBeforeSpawn || failure !== failedBeforeSpawn) {
+          this.uncertainResources = true;
+          for (const observer of this.recoveryObservers) observer.uncertain = true;
+        }
+        throw failure;
       } finally {
         this.pendingSpawns--;
         this.publishRecoveryResources();

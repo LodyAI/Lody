@@ -40,6 +40,14 @@ the reasoning behind those rules.
   Rendering and search extraction share CJK-friendly emphasis parsing, so bold
   sentences ending in punctuation can touch subsequent prose without exposing
   their markers; see [CJK emphasis](../../../../../specs/markdown-cjk-emphasis.md).
+  After mounting in the browser, the renderer loads KaTeX's bundled Copy-tex
+  extension through `markdown-math-copy.ts`, keeping Node imports free of DOM
+  access. The extension converts selected rendered formulas to LaTeX
+  in the clipboard's plain text (`$...$` inline, `$$...$$` display), including
+  selections mixed with prose; the selected HTML is preserved. Partial formula
+  selections expand to the complete formula. The native selection guard stops
+  incomplete copy events before the extension can write clipboard data; see the
+  [integration note](../../../../../.agents/notes/implemented/feature/2026-10-16-math-selection-copy.md).
   `markdown-code-block.tsx` owns fenced
   blocks, wrap, and Markdown-fence preview (`markdown-code-highlight.ts` the Shiki
   tokens); `markdown-diff-block.tsx` is the inline diff; `markdown-mermaid-block.tsx`
@@ -59,6 +67,17 @@ the reasoning behind those rules.
   Only a known source workspace supplies a missing ID; anonymous readers do not
   borrow the viewer's workspace.
 - `message-content-guards.ts` gates which shared `MessageContent` variants render.
+- `assistant-turn-timing.ts` builds the turn popover's timing rows (Started,
+  Ended, Duration, and Last update for a running turn) and the live status
+  line's "no output for N m" suffix. Durations reuse the "Worked for" resolvers.
+  "Running" means presence reports the session active (`liveTurnActivity`),
+  never an unfinished history entry. The age reads `ConversationView.lastUpdateAt`,
+  an in-memory stamp of backend history notifications. It counts only inside the
+  live window from `hooks/use-history-live-window.ts`, which the session page
+  opens each time room sync becomes live. Otherwise the row states a reason:
+  syncing, disconnected, or waiting on the user. `view.tsx` passes all of this
+  through `LiveTurnContext`. Thresholds are constants in the module.
+  [Decision](../../../../../.agents/notes/implemented/feature/2026-10-15-turn-timing-liveness.md).
 - The stream and `SessionChatInterface` derive the last completed assistant id
   directly from the same `resolveLastAssistantTurnIds` index query. The parent
   uses its existing conversation-version subscription; the stream does not copy
@@ -133,6 +152,9 @@ See the [global scale decision](../../../../../.agents/notes/implemented/simplif
 for scope and retained exceptions.
 `AssistantTurnAlignment.ConversationRhythm` renders a synthetic two-round conversation;
 `ConversationRhythmTheme` applies a scoped StyleX theme to the same components.
+`MobileConversationRhythm` renders the same rounds at phone width: one left rail,
+the round gap below the always-visible footer, and only the newest turn's
+buttons at rest (`tests/assistant-turn-action-inset.test.ts` covers tap reveal).
 `ConversationRhythmReading` and its streaming variant add continuous mixed-script
 paragraphs to verify real wrapped-line pitch and compare reading density.
 `ConversationRhythmProgress` and its streaming variant interleave long progress
@@ -163,6 +185,12 @@ uses a synthetic upward wheel because a real scrollbar gesture is not reliable i
 the Storybook canvas.
 The [compact duration Spec](../../../../../specs/compact-duration-spacing.md)
 defines locale-specific spacing for these labels.
+Turn timing is covered by `tests/assistant-turn-timing.test.ts` (rows, liveness
+states, thresholds, local-time formatting) and by `tests/agent-activity-row.test.tsx`
+(running and finished popovers, the stale warning, catch-up, waiting and offline
+states, and the "no output" status).
+`DesktopTurnTimingLive` and `DesktopTurnTimingFinished` in
+`AssistantTurnAlignment.stories.tsx` show both popover states.
 
 ## Why the rules read the way they do
 
@@ -176,6 +204,12 @@ defines locale-specific spacing for these labels.
   ([note](../../../../../.agents/notes/implemented/architecture/2026-09-27-conversation-scroll-engine.md)).
   `bufferSize` is a trade between blank space during a fast scroll and keeping
   resizing rows mounted.
+- **Local send continuity.** Ready accepted inputs have individual turn-ID keys
+  in the same scroll engine, so a send can anchor before owner history arrives.
+  A directory placeholder keeps the local body until formal history is hydrated;
+  the formal row then wins once under the same key. These rows stay outside
+  authoritative history and outline/export facts. Sending feedback does not imply
+  owner delivery or execution. [Decision](../../../../../.agents/notes/proposed/architecture/2026-10-13-backend-independent-send-acceptance.md#local-row-anchoring-and-hydrated-handoff).
 - **Touch input before scroll delivery.** The adapter releases following on a single
   upward conversation pan, including its final touch position when no move was
   delivered. The controller adopts post-touch momentum as reader movement even if

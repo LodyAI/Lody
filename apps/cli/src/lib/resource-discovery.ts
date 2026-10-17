@@ -231,18 +231,24 @@ export class ResourceDiscovery {
         !models.some((model) => model.id === role.runConfig.modelId)
       )
         state = { state: 'unavailable', reason: 'model_unavailable' };
-      const permission = capability?.configOptions?.find(
-        (option) => option.id === '_permission' || option.category === 'mode'
-      );
-      const modeId = role.runConfig.modeId ?? role.runConfig.configOptionValues?._permission;
-      if (
-        state.state === 'available' &&
-        capability &&
-        modeId &&
-        !(permission
-          ? permission.options.some((option) => option.value === modeId)
-          : capability.modes.some((mode) => mode.id === modeId))
-      )
+      // A Role pins permission as `modeId` (legacy modes or a `mode` option) or
+      // as the value of the agent's `_permission` option, e.g. Grok's
+      // `permission_mode`. Check each pin against the knob that carries it.
+      const modeOption = capability?.configOptions?.find((option) => option.category === 'mode');
+      const modeId = role.runConfig.modeId;
+      const unavailableMode =
+        Boolean(modeId) &&
+        !(modeOption
+          ? modeOption.options.some((option) => option.value === modeId)
+          : capability?.modes.some((mode) => mode.id === modeId));
+      const unavailablePermission = (capability?.configOptions ?? []).some((option) => {
+        if (option.category !== '_permission') return false;
+        const value = role.runConfig.configOptionValues?.[option.id];
+        return (
+          value !== undefined && !option.options.some((candidate) => candidate.value === value)
+        );
+      });
+      if (state.state === 'available' && capability && (unavailableMode || unavailablePermission))
         state = { state: 'unavailable', reason: 'mode_unavailable' };
       return {
         id: role.id,

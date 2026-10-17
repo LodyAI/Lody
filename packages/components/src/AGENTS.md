@@ -31,7 +31,8 @@ Performance comparisons must use the current full-Mirror baseline.
 ## Lightweight hosted entries
 
 - `lib/client-build-info.ts` owns build provenance for About and reports. Bug report
-  metadata contains only build constants, distinct from remote machine logs.
+  diagnostics use `lib/client-diagnostics.ts`'s environment allowlist and a bounded
+  tail from `lib/client-log.ts`, distinct from remote machine logs.
 
 - Public/auth entry points that bypass the full product router import route-agnostic
   surfaces. Keep host navigation behind callback props so those surfaces do not import
@@ -105,6 +106,9 @@ Performance comparisons must use the current full-Mirror baseline.
   and the mobile workspace stack do not start early. The workspace identity's
   syncing state follows that same scoped readiness, not the coarser connection
   state; an online transport does not imply that workspace data is ready.
+  A cold start (no workspace ready yet in this page) has no layout to keep: it
+  continues the boot shell, and only a real switch says "Switching workspace"
+  ([decision](../../../.agents/notes/implemented/bug-fix/2026-10-16-cold-start-workspace-wait.md)).
 
 ## Billing data
 

@@ -6,8 +6,8 @@ Root/CLI rules apply; `specs/session-orchestration.md` owns behavior.
   Key: `(requesterSessionId, operationId)`; foreign Session lookup must be
   indistinguishable from absence. Operation finalization and Inbox result insertion
   are one transaction. Manual target Stop stays queryable but never queues a receipt; persist its cause atomically. Cleanup retains retired ids; accepting them again is forbidden.
-  Result/system-Turn ids include both key parts; never
-  derive a globally unique id from the Session-scoped `operationId` alone.
+  Result/system-Turn ids include both key parts, never the Session-scoped
+  `operationId` alone.
 - Target input creation is fenced by the SQLite item-materialization claim.
   Acceptance owns new claims; the lease Worker only adopts absent/expired
   claims. Loro history evidence clears the claim. Before an adopted claim may
@@ -20,8 +20,8 @@ Root/CLI rules apply; `specs/session-orchestration.md` owns behavior.
 - Successful item completion copies only visible assistant text into an 8 KiB
   `output` preview. The store may further head/tail-bound it to keep the whole
   completion at 64 KiB; preserve both per-output and aggregate omission metadata.
-- Operation files contain prompts and assistant output; keep them private to the
-  local account (0700/0600 on Unix).
+- Operation files hold prompts and assistant output; keep them account-private
+  (0700/0600 on Unix).
 - Create Operations freeze each target's effective dispatch config at
   acceptance; recovery must not re-read mutable requester history defaults.
   Full content stays in the target Session history.
@@ -56,18 +56,19 @@ Root/CLI rules apply; `specs/session-orchestration.md` owns behavior.
   one per-Session admission covers Stop, trusted human acceptance and actual transport start.
   Core imports no platform/consumers; registered bridges execute. Submit/settle through execution owners.
 - Inbox-aware Stop pauses/cancels queued eligibility; legacy Stop only cancels execution.
-  Only trusted fresh human receipts clear pause; role/userId/author are insufficient. New human
+  Only trusted fresh human receipts clear pause (not role/userId/author). New human
   acceptance cannot revive a canceled execution or discard an already prepared human input.
-- Fixed batch claims and submission fence precede synchronous transport initiation under the
-  same gate, without an await between them. Post-fence uncertainty never replays, including
+- Fixed batch claims and submission fence precede synchronous transport start under the
+  same gate, with no await between. Post-fence uncertainty never replays, including
   human-plus-batch stale-ACP recovery. Retry failed settlement only, never the request.
 - Physical request/resource release differs from waiter exit and Scope close. Keep immutable
   execution IDs, shared close receipts, full Cause and retained recovery owners. Unknown
-  release blocks successors. Independent recovery must prove release before clearing that slot.
-  Persist acquisition-incomplete before every sandbox spawn, then union all spawned roots for
-  every Session owned by the execution. Only explicitly complete identities can prove restart
-  release; legacy snapshots and interrupted journaling remain blocked. Coordinator recovery
-  calls `recoverClose`, not the cached failed `close` receipt; never replay transport.
+  release blocks successors. Independent recovery proves release before clearing the slot.
+  Persist acquisition-incomplete before every sandbox spawn, then union spawned roots of every
+  Session the execution owns. Only explicitly complete identities can prove restart release;
+  legacy snapshots and interrupted journaling stay blocked. Coordinator recovery calls
+  `recoverClose`, not the cached failed `close`; never replay transport. Release finishes
+  input; a still-pending turn `withdraw`s before submit/acquisition.
 - Schema/Inbox v2 drops Delivery data/APIs; keep Operation rows and retired IDs.
   Missing/incomplete journals stay blocked automatically. Offline operator recovery holds the
   Host lease before opening SQLite, verifies known roots and requires explicit confirmation

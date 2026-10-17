@@ -69,6 +69,12 @@ files, and stale or broken registered topics. Warnings, including an `AGENTS.md`
 nearing the size gate, are reported separately and never fail the check. Errors in one topic do not hide others. Pending
 translation or Spec approval alone does not fail the check.
 
+The Node implementation awaits asynchronous Git subprocesses, preserving binary
+blob and NUL-separated path output. Imported command/report functions return
+Promises. Git failures retain exit/signal and stderr diagnostics; only the content
+comparison accepts `git diff --no-index` exit code 1 as a successful difference.
+Truncated output remains an error.
+
 The [communication architecture draft](../specs/communication-architecture.zh.md)
 is the pilot. SHA tooling exists, but protection scopes and baselines still need
 review and registration. Unregistered topics have no SHA protection.

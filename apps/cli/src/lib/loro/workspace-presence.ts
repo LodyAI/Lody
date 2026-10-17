@@ -108,6 +108,7 @@ export interface WorkspacePresence {
   readonly retryCleanup: Effect.Effect<void, PresenceReleaseFailed>;
   readonly waitUntilJoined: (timeoutMs: number) => Effect.Effect<void, PresenceUnavailable>;
   readonly failure: () => Cause.Cause<unknown>;
+  readonly isStopped: () => boolean;
   readonly isReleased: () => boolean;
   readonly deliveryHealth: () => PresenceDeliveryStalled | 'unknown' | 'pending' | 'idle';
 }
@@ -601,6 +602,7 @@ export const makeWorkspacePresence = Effect.fnUntraced(function* (
         );
       }),
     failure: () => (generation ? Cause.combine(failure, generation.cause) : failure),
+    isStopped: () => stopped,
     isReleased: () => released,
     deliveryHealth: () => generation?.health ?? 'unknown',
   };
@@ -623,13 +625,17 @@ export const WorkspacePresenceOwnersLive = Layer.effect(
     const root = yield* Scope.Scope;
     const services = yield* Effect.context<PresenceHost | PresenceTransport>();
     const owners = new Map<WorkspaceId, WorkspacePresence>();
+    // Stopped owners whose release failed. They stay in the root Scope, so shutdown
+    // still stops them, and every later acquisition retries them until released.
+    const retired = new Set<WorkspacePresence>();
     const gate = yield* Semaphore.make(1);
     return WorkspacePresenceOwners.of({
       create: (workspaceId) =>
         gate.withPermit(
           Effect.gen(function* () {
             const previous = owners.get(workspaceId);
-            if (previous && !previous.isReleased())
+            // Two live owners of one workspace remain forbidden.
+            if (previous && !previous.isStopped())
               return yield* Effect.fail(
                 new PresenceReleaseFailed({
                   cause: previous.failure(),
@@ -637,6 +643,16 @@ export const WorkspacePresenceOwnersLive = Layer.effect(
                   generation: 0,
                 })
               );
+            // A replacement never overlaps an unfinished release: settle the stop
+            // first. A failed release is retired instead of blocking the workspace.
+            if (previous && !previous.isReleased()) {
+              yield* Effect.exit(previous.stop);
+              if (!previous.isReleased()) retired.add(previous);
+            }
+            for (const owner of retired) {
+              if (owner.isReleased()) retired.delete(owner);
+              else yield* Effect.forkIn(Effect.ignoreCause(owner.retryCleanup), root);
+            }
             const owner = yield* Scope.provide(
               makeWorkspacePresence(workspaceId).pipe(Effect.provideContext(services)),
               root

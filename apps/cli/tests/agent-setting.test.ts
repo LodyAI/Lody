@@ -664,7 +664,7 @@ describe('resolveBuiltinACPSetting', () => {
 
     it('matches a registry launch without consulting a managed runtime', async () => {
       const getRuntimeStatus = vi.fn();
-      const input = { cliType: 'registry' as const, agentType: 'amp-acp' };
+      const input = { cliType: 'registry' as const, agentType: 'goose' };
 
       const { expected, launched } = await withManagedRuntimeManager(
         { getRuntimeStatus },
@@ -752,13 +752,14 @@ describe('resolveBuiltinACPSetting', () => {
     }
   });
 
-  it('refreshes metadata when a registry local command uses npx', () => {
-    const resolved = resolveACPSetting({ cliType: 'registry', agentType: 'amp-acp' });
-
-    expect(resolved.exec).toMatchObject({
-      command: 'npx',
-      args: ['--prefer-offline', '-y', 'amp-acp'],
-    });
+  it('pins an exact version for every registry npx launch it serves from cache', () => {
+    // --prefer-offline reuses whatever an unpinned spec first installed, forever.
+    for (const agent of REGISTRY_ACP_AGENTS) {
+      expect(agent.distribution.local?.command, agent.id).not.toBe('npx');
+      if (!agent.distribution.npx) continue;
+      const { args } = resolveACPSetting({ cliType: 'registry', agentType: agent.id }).exec;
+      expect(parseNpxPackageSpecFromArgs(args)?.version, agent.id).toMatch(/^\d+\.\d+\.\d+/);
+    }
   });
 
   it('refreshes metadata when a registry npx distribution is used', () => {

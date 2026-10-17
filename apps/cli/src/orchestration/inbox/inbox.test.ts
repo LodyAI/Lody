@@ -7,7 +7,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import * as processCommands from '@lody/shared/node/process';
 import { LodyOperationStore } from '../operation-store';
 import { inboxRepositoryLayer } from '../platform/inbox-repository';
 import { ExecutionJournal, makeExecutionOwner } from './execution-owner';
@@ -23,6 +24,7 @@ import { InboxExecution, InboxRepository, OperationInbox } from './service';
 const roots: string[] = [];
 const stores: LodyOperationStore[] = [];
 afterEach(() => {
+  vi.restoreAllMocks();
   for (const s of stores.splice(0)) s.close();
   for (const p of roots.splice(0)) rmSync(p, { recursive: true, force: true });
 });
@@ -176,6 +178,27 @@ describe('durable Operation inbox', () => {
       expect(other.inbox.pending('workspace')).toEqual([]);
     }
   );
+  it('withdraws only an unsubmitted, resource-free execution and keeps its input admissible', () => {
+    const f = fixture();
+    f.add('result');
+    f.start();
+    const batch = f.sql.prepare(f.input, 'owner')!;
+    expect(f.sql.withdraw(f.input, 'execution-1')).toBe(true);
+    expect(f.sql.inputEnded('workspace', 'A', 'user-1')).toBe(false);
+    // The same execution id begins again and keeps the prepared claim.
+    expect(f.sql.begin(f.input, 'execution-1')).toBe(true);
+    expect(f.sql.prepare(f.input, 'owner')?.batchId).toBe(batch.batchId);
+    // Acquired resources or a fenced submission make withdrawal impossible.
+    f.sql.registerResources(f.input, 'execution-1', undefined);
+    expect(f.sql.withdraw(f.input, 'execution-1')).toBe(false);
+    expect(f.sql.fence(batch, 'execution-1')).toBe(true);
+    expect(f.sql.withdraw(f.input, 'execution-1')).toBe(false);
+    f.sql.settle(batch, 'settled');
+    f.release('normal');
+    expect(f.sql.inputEnded('workspace', 'A', 'user-1')).toBe(true);
+    expect(f.sql.withdraw(f.input, 'execution-1')).toBe(false);
+    expect(f.sql.begin(f.input, 'execution-1')).toBe(false);
+  });
   it('keeps eight arrivals passive until one normal release and one fixed batch', () => {
     const f = fixture();
     f.start();
@@ -1409,6 +1432,30 @@ function operatorEndpoint(root: string) {
 }
 
 describe('blocked execution operator recovery', () => {
+  beforeEach(() => {
+    vi.spyOn(processCommands, 'runCommandTextLegacy').mockImplementation(async (spec) => {
+      let stdout: string;
+      if (spec.command === 'ps') {
+        stdout = `${process.pid} 1 ${process.pid} 1024 00:00:00 Sat Oct 17 04:00:00 2026\n`;
+      } else if (spec.command === 'top') {
+        stdout = `PID MEM\n${process.pid} 1M\n`;
+      } else if (spec.command === 'powershell.exe') {
+        stdout = JSON.stringify([
+          {
+            ProcessId: process.pid,
+            ParentProcessId: 1,
+            CreationDateMs: 0,
+            KernelModeTime: 0,
+            UserModeTime: 0,
+            WorkingSetSize: 0,
+          },
+        ]);
+      } else {
+        throw new Error('Optional memory sampling is unavailable');
+      }
+      return { code: 0, signal: null, stdout, stderr: '' };
+    });
+  });
   it.each(['missing', 'incomplete'] as const)(
     'recovers %s identity after reopen, paused and without replay',
     async (kind) => {
@@ -1506,6 +1553,128 @@ describe('blocked execution operator recovery', () => {
     expect(reopened.inbox.prepare(fresh, 'replacement')).toBeUndefined();
     expect(reopened.inbox.begin(fresh, 'new')).toBe(true);
   });
+  it('recovers absent known roots after confirmation without replay', async () => {
+    const f = fixture();
+    f.start();
+    f.add('saved');
+    f.sql.registerResources(f.input, 'execution-1', {
+      platform: process.platform,
+      roots: [123_456_789],
+      complete: false,
+    });
+    f.store.close();
+    const reopened = new LodyOperationStore(f.filename);
+    stores.push(reopened);
+    reopened.inbox.activate('workspace', 'replacement');
+    const { makeInboxOperatorRecovery } = await import('../platform/operator-recovery');
+    const { recoverBlockedInboxExecution } = await import('./operator-recovery');
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const ports = yield* makeInboxOperatorRecovery('machine', 'workspace', {
+            filename: f.filename,
+            endpoint: operatorEndpoint(f.root),
+          });
+          yield* recoverBlockedInboxExecution(ports, 'A', 'execution-1', true);
+        })
+      )
+    );
+    expect(reopened.inbox.state(f.input)).toMatchObject({
+      blocked: 0,
+      paused: 1,
+      active_execution: null,
+    });
+    expect(reopened.inbox.pending('workspace')).toEqual([]);
+    expect(reopened.inbox.begin(f.input, 'replay')).toBe(false);
+  });
+  it('keeps known roots blocked after an unavailable process probe', async () => {
+    const f = fixture();
+    f.start();
+    f.sql.registerResources(f.input, 'execution-1', {
+      platform: process.platform,
+      roots: [123_456_789],
+      complete: false,
+    });
+    f.store.close();
+    const reopened = new LodyOperationStore(f.filename);
+    stores.push(reopened);
+    reopened.inbox.activate('workspace', 'replacement');
+    vi.mocked(processCommands.runCommandTextLegacy).mockImplementation(async () => {
+      throw new Error('Process probe unavailable');
+    });
+    const { makeInboxOperatorRecovery } = await import('../platform/operator-recovery');
+    const { recoverBlockedInboxExecution } = await import('./operator-recovery');
+    await expect(
+      Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const ports = yield* makeInboxOperatorRecovery('machine', 'workspace', {
+              filename: f.filename,
+              endpoint: operatorEndpoint(f.root),
+            });
+            yield* recoverBlockedInboxExecution(ports, 'A', 'execution-1', true);
+          })
+        )
+      )
+    ).rejects.toThrow();
+    expect(reopened.inbox.state(f.input)).toMatchObject({
+      blocked: 1,
+      paused: 0,
+      active_execution: 'execution-1',
+    });
+    expect(reopened.inbox.begin({ ...f.input, inputId: 'new' }, 'successor')).toBe(false);
+    const { acquireLocalCliHostLease } = await import('@lody/shared/node/local-cli-host-lease');
+    const next = await acquireLocalCliHostLease({
+      instanceId: 'next',
+      mode: 'foreground',
+      endpoint: operatorEndpoint(f.root),
+    });
+    expect(next.status).toBe('acquired');
+    if (next.status === 'acquired') await next.lease.close();
+  });
+  it.skipIf(process.platform !== 'darwin')(
+    'retains blocking when optional memory sampling makes the snapshot uncertain',
+    async () => {
+      const f = fixture();
+      f.start();
+      f.sql.registerResources(f.input, 'execution-1', {
+        platform: process.platform,
+        roots: [123_456_789],
+        complete: false,
+      });
+      f.store.close();
+      const reopened = new LodyOperationStore(f.filename);
+      stores.push(reopened);
+      reopened.inbox.activate('workspace', 'replacement');
+      const sample = vi.mocked(processCommands.runCommandTextLegacy).getMockImplementation();
+      if (!sample) throw new Error('Missing process fixture');
+      vi.mocked(processCommands.runCommandTextLegacy).mockImplementation((spec, options) => {
+        if (spec.command === 'top') return Promise.reject(new Error('Memory probe unavailable'));
+        return sample(spec, options);
+      });
+      const { makeInboxOperatorRecovery } = await import('../platform/operator-recovery');
+      const { recoverBlockedInboxExecution } = await import('./operator-recovery');
+      await expect(
+        Effect.runPromise(
+          Effect.scoped(
+            Effect.gen(function* () {
+              const ports = yield* makeInboxOperatorRecovery('machine', 'workspace', {
+                filename: f.filename,
+                endpoint: operatorEndpoint(f.root),
+              });
+              yield* recoverBlockedInboxExecution(ports, 'A', 'execution-1', true);
+            })
+          )
+        )
+      ).rejects.toThrow('Known resources are still running or cannot be verified');
+      expect(reopened.inbox.state(f.input)).toMatchObject({
+        blocked: 1,
+        paused: 0,
+        active_execution: 'execution-1',
+      });
+      expect(reopened.inbox.begin({ ...f.input, inputId: 'new' }, 'successor')).toBe(false);
+    }
+  );
   it('refuses a live Host and known live roots, retaining blocking and releasing the operator lease', async () => {
     const f = fixture();
     f.start();

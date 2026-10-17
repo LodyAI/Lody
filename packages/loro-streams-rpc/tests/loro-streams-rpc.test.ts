@@ -8,7 +8,6 @@ import type {
   SessionId,
   WorkspaceId,
 } from '@lody/shared';
-import { SessionIdSchema } from '@lody/shared';
 
 const configId = 'config-1' as AgentConfigId;
 
@@ -292,76 +291,6 @@ describe('LoroStreamsMachineRpcClient', () => {
       // request and drops it without a reply, so the caller only sees a timeout.
       expect(previousGenerationSchema.safeParse(request).success).toBe(false);
     });
-  });
-
-  it('sends minimal session preparation requests and resolves the response', async () => {
-    const fake = createFakeStreamClient();
-    const sessionId = SessionIdSchema.parse('session-1');
-    const client = new LoroStreamsMachineRpcClient({
-      workspaceId: 'workspace-1',
-      machineId: 'machine-1',
-      streamClient: fake.streamClient,
-    });
-
-    const responsePromise = client.requestSessionPrepare({
-      preparationId: 'prepare-1',
-      sessionId,
-      requestedByUserId: 'user-1',
-      agentConfigId: configId,
-      cliType: 'builtin',
-      agentType: 'codex',
-      timeoutMs: 5_000,
-    });
-    await vi.waitFor(() => expect(fake.appended).toHaveLength(1));
-
-    const request = fake.appended[0]?.value as { id: string; params: Record<string, unknown> };
-    expect(fake.appended[0]?.value).toEqual(
-      expect.objectContaining({
-        method: 'session/prepare',
-        params: {
-          preparationId: 'prepare-1',
-          sessionId: 'session-1',
-          requestedByUserId: 'user-1',
-          agentConfigId: 'config-1',
-          cliType: 'builtin',
-          agentType: 'codex',
-          project: undefined,
-        },
-      })
-    );
-    expect(request.params).not.toHaveProperty('prompt');
-    expect(request.params).not.toHaveProperty('env');
-
-    fake.pushBatch({
-      messages: [
-        {
-          jsonrpc: '2.0',
-          id: request.id,
-          method: 'session/prepare',
-          rpcVersion: '1',
-          machineId: 'machine-1',
-          result: {
-            type: 'session/prepare_response',
-            preparationId: 'prepare-1',
-            sessionId: 'session-1',
-            accepted: true,
-            disposition: 'accepted',
-          },
-        },
-      ],
-      nextOffset: '1',
-      cursor: 'cursor-1',
-      upToDate: true,
-    });
-
-    await expect(responsePromise).resolves.toEqual({
-      type: 'session/prepare_response',
-      preparationId: 'prepare-1',
-      sessionId: 'session-1',
-      accepted: true,
-      disposition: 'accepted',
-    });
-    client.stop();
   });
 
   it('sends session terminate requests and resolves the response', async () => {
@@ -2199,31 +2128,6 @@ describe('createLoroStreamsJsonStreamClient', () => {
       contentType: 'application/json',
       ttlSeconds: 61,
     });
-  });
-
-  it('forwards timeout config to StreamsClient', async () => {
-    streamsClientMockFns.create.mockResolvedValue({
-      ok: true,
-      result: {
-        created: true,
-        contentType: 'application/json',
-        nextOffset: '-1',
-        closed: false,
-      },
-    });
-
-    const timeout = { connectTimeoutMs: 30_000, pollTimeoutMs: 45_000 };
-    const client = createLoroStreamsJsonStreamClient({
-      bucketId: 'bucket-1',
-      getToken: async () => 'token-1',
-      baseUrl: 'https://streams.example.com',
-      timeout,
-    });
-
-    await client.ensureJsonStream('workspace-1:rpc:req:machine-1');
-
-    const instance = getLastStreamsClientInstance();
-    expect(instance.options.timeout).toEqual(timeout);
   });
 
   it('adds request context to stream ensure errors', async () => {

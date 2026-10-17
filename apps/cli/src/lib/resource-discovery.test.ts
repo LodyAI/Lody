@@ -220,6 +220,47 @@ describe('resource discovery across MCP and CLI', () => {
     });
   });
 
+  it('checks a Role permission pin against the agent `_permission` option', async () => {
+    const discovery = new ResourceDiscovery(
+      source({
+        capabilities: async () => ({
+          // Shaped like Grok's catalog; bound to the fixture's agent config.
+          agent: {
+            cliType: 'builtin',
+            agentType: 'codex',
+            fetchedAt: 1,
+            modes: [],
+            models: [{ modelId: 'model', name: 'Model' }],
+            configOptions: [
+              {
+                id: 'permission_mode',
+                name: 'Permission Mode',
+                category: '_permission',
+                type: 'select',
+                currentValue: 'ask',
+                options: [
+                  { value: 'ask', name: 'Ask Every Time' },
+                  { value: 'always-approve', name: 'Always Approve' },
+                ],
+              },
+            ],
+          },
+        }),
+        roles: async () => [
+          role('approve', {
+            runConfig: { configOptionValues: { permission_mode: 'always-approve' } },
+          }),
+          role('retired', { runConfig: { configOptionValues: { permission_mode: 'yolo' } } }),
+        ],
+      })
+    );
+    const page = await discovery.list('agent_role');
+    expect(page.items.find((row) => row.id === 'approve')?.availability?.state).toBe('available');
+    expect(page.items.find((row) => row.id === 'retired')?.availability?.reason).toBe(
+      'mode_unavailable'
+    );
+  });
+
   it('filters Roles by their binding while retaining unavailable matches', async () => {
     const discovery = new ResourceDiscovery(
       source({ roles: async () => [role('one'), role('two', { machineId: 'two' as MachineId })] })

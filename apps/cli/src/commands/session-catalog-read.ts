@@ -1,5 +1,6 @@
 import { Data } from 'effect';
 import { RepoSyncError, RepoTransportError } from 'loro-repo';
+import { workspaceSyncFailuresLegacy } from '@lody/shared/workspace-data/repo-legacy';
 import type { LodyError } from '@lody/shared';
 import { FlockSyncTimeoutError } from '@/lib/loro/timeout-utils';
 import { FlockSyncUnavailableError } from '@/lib/loro/flock-sync-errors';
@@ -25,6 +26,15 @@ function getSyncRetryability(
 ): boolean | undefined {
   if (depth > 8 || seen.has(error)) return undefined;
   const path = new Set(seen).add(error);
+  const native = workspaceSyncFailuresLegacy(error, RepoTransportError);
+  if (native.length) {
+    const results = native.map((failure) => getSyncRetryability(failure, path, depth + 1));
+    return results.includes(false)
+      ? false
+      : results.every((result) => result === true)
+        ? true
+        : undefined;
+  }
   if (error instanceof FlockSyncTimeoutError || error instanceof FlockSyncUnavailableError) {
     return true;
   }

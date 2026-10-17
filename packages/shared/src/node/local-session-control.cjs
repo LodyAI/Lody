@@ -51,6 +51,7 @@ function isSessionHistoryWriteOperation(value) {
   return (
     value === 'append' ||
     value === 'accept_input' ||
+    value === 'accept_input_and_dispatch' ||
     value === 'replace' ||
     value === 'respond_permission' ||
     value === 'apply_action' ||

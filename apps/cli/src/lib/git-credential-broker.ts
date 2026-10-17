@@ -66,6 +66,8 @@ export type GitCredentialBrokerEnv = {
   token: string;
 };
 
+const SLOW_TOKEN_LOG_THRESHOLD_MS = 2_000;
+
 export const createGitCredentialBrokerHandler = (options: {
   authToken: string;
   tokenManager: CloudGithubTokenManager;
@@ -191,6 +193,13 @@ export const createGitCredentialBrokerHandler = (options: {
             : undefined
         );
         if (!isContextCurrent()) return;
+        const elapsedMs = Date.now() - startedAt;
+        // Successes are otherwise silent, so a shrinking deadline margin stays visible.
+        if (elapsedMs >= SLOW_TOKEN_LOG_THRESHOLD_MS) {
+          options.logger.debug(
+            `[git-cred-broker] ${JSON.stringify({ requestId, path: req.url, source, code: 'slow_ok', elapsedMs })}`
+          );
+        }
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(
           JSON.stringify(

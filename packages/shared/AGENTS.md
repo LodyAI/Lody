@@ -52,9 +52,9 @@ Exact deletion bypasses discovery: [relations](../../specs/session-relations.md)
   never mutate the original RPC schemas. Parsing filters and validates in one pass.
   `readStored` returns detached JSON for hashing, not stored-copy provenance. Keep `capture`
   protection for callers that can author copies from an old snapshot.
-- Target-local streaming uses `updateEntry`; it must not produce/plan the entire history.
-  Resolve the live turn on each call, preserve immutable ids, and preflight before writing.
-  Generic history updates remain for operations with cross-turn ownership or structural edits.
+- Streaming/mixed writes use indexed `updateTail`/`updateEntry`, with child output windows;
+  snapshot/progress never reads transcripts. Preserve ownership/ids, preflight all writes,
+  invalidate stale indexes. Full-history updates: structural commands or unwindowable storage.
 - Permission responses inspect request metadata and materialize only the matching turn;
   a supplied turn id restricts lookup to that turn. Preserve legacy JSON metadata on lookup.
 - Mirror's text-event optimization ships upstream in pinned `loro-mirror`; no local patch

@@ -1,5 +1,6 @@
 import type { RemoteCursorStore } from '@loro-dev/streams-crdt';
-import { createLoroSyncErrorTools } from '@lody/shared/loro-sync-errors';
+import { createLoroSyncErrorTools, getLoroSnapshotDiagnostic } from '@lody/shared/loro-sync-errors';
+import { workspaceSyncFailuresLegacy } from '@lody/shared/workspace-data/repo-legacy';
 import { RepoSyncError, RepoTransportError } from 'loro-repo';
 import { registerLoroSyncErrorFormatter } from '../../utils/format-error';
 import {
@@ -13,20 +14,22 @@ import {
   streamsSnapshotCodec,
   type WorkspaceId,
 } from '@lody/shared';
-import type { LoroRepo } from 'loro-repo';
-import { StreamsTransportAdapter, createRepoStreamsPersistence } from 'loro-repo/transport/streams';
+import { workspaceStreamsTransport } from '@lody/shared/workspace-data/streams';
+import type { NativeWorkspaceTransport } from '@lody/shared/workspace-data/repo-legacy';
+import type { LoroStreamsTokenAuth } from '@lody/shared';
 import type { Logger } from '@/utils/logger';
 import type { LoroStreamsTokenProviderLegacy } from '@lody/platform';
 import { prepareCliStreamsGatewayBaseUrl } from './streams-access';
 
-const { getLoroSyncDiagnostic, formatLoroSyncError } = createLoroSyncErrorTools({
+const { formatLoroSyncError } = createLoroSyncErrorTools({
   RepoSyncError,
   RepoTransportError,
+  nativeFailures: workspaceSyncFailuresLegacy,
 });
 registerLoroSyncErrorFormatter(formatLoroSyncError);
 
 export type CliStreamsTransport = {
-  adapter: StreamsTransportAdapter;
+  adapter: NativeWorkspaceTransport;
   gatewayBaseUrl: string;
   tokenProvider: LoroStreamsTokenProviderLegacy;
 };
@@ -34,7 +37,7 @@ export type CliStreamsTransport = {
 export async function createCliStreamsTransport(args: {
   workspaceId: WorkspaceId;
   tokenProvider: LoroStreamsTokenProviderLegacy;
-  repo: LoroRepo;
+  auth: LoroStreamsTokenAuth;
   /**
    * LoroDoc room cursors only. Meta and named Flock cursors are replica-bound:
    * `SqliteRepoStore` restores each one in the same transaction as the data it
@@ -49,38 +52,32 @@ export async function createCliStreamsTransport(args: {
   return {
     gatewayBaseUrl,
     tokenProvider,
-    adapter: new StreamsTransportAdapter({
-      diagnostics: (event) => {
-        const diagnostic = getLoroSyncDiagnostic(event);
-        if (diagnostic) {
-          args.logger[diagnostic.level]('[loro-streams] transport failure', {
-            workspaceId: args.workspaceId,
-            ...diagnostic,
-          });
-        }
+    adapter: workspaceStreamsTransport(
+      {
+        bucketId: LORO_STREAMS_BUCKET_ID,
+        metaStreamId: getLoroMetaStreamId(args.workspaceId),
+        docStreamId: (docId) => getLoroStreamIdForDocId(args.workspaceId, docId),
+        flockDocStreamId: (flockDocId) => flockDocId,
+        flockDocStreamTtlMs: (flockDocId) =>
+          isCodeCollabFileIndexFlockDocId(flockDocId) ||
+          isCodeCollabFileIndexSignalFlockDocId(flockDocId)
+            ? CODE_COLLAB_FILE_INDEX_FLOCK_TTL_MS
+            : undefined,
+        snapshotCodec: streamsSnapshotCodec,
+        baseUrl: gatewayBaseUrl,
+        shardUrls: getLoroStreamsShardUrls(gatewayBaseUrl, tokenProvider.getShardHostSuffix()),
+        snapshotUpload: {
+          canUpload: async () => true,
+          debounceMs: 5_000,
+          onDiagnostic: (event) => {
+            const diagnostic = getLoroSnapshotDiagnostic(event);
+            const message = `Streams snapshot ${JSON.stringify(diagnostic)}`;
+            if (event.outcome === 'failed') args.logger.warn(message);
+            else args.logger.debug(message);
+          },
+        },
       },
-      bucketId: LORO_STREAMS_BUCKET_ID,
-      metaStreamId: getLoroMetaStreamId(args.workspaceId),
-      docStreamId: (docId) => getLoroStreamIdForDocId(args.workspaceId, docId),
-      flockDocStreamId: (flockDocId) => flockDocId,
-      flockDocStreamTtlMs: (flockDocId) =>
-        isCodeCollabFileIndexFlockDocId(flockDocId) ||
-        isCodeCollabFileIndexSignalFlockDocId(flockDocId)
-          ? CODE_COLLAB_FILE_INDEX_FLOCK_TTL_MS
-          : undefined,
-      auth: tokenProvider.createAuthCallback(),
-      // Every cursor save first awaits the covered resource's durability
-      // barrier (`persistMetaNow` / `persistDocNow` / `persistFlockDocNow`).
-      persistence: createRepoStreamsPersistence(args.repo, {
-        documentRemoteCursorStore: args.documentRemoteCursorStore,
-      }),
-      snapshotCodec: streamsSnapshotCodec,
-      baseUrl: gatewayBaseUrl,
-      shardUrls: getLoroStreamsShardUrls(gatewayBaseUrl, tokenProvider.getShardHostSuffix()),
-      snapshotUpload: {
-        canUpload: async () => true,
-        debounceMs: 5_000,
-      },
-    }),
+      args.auth
+    ),
   };
 }

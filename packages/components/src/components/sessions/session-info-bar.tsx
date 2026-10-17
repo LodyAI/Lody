@@ -352,7 +352,10 @@ export function SessionInfoBar({
   const surfaceProps = hasSurfaceContent
     ? {
         className: cn(
-          '@container flex h-8 w-full min-w-0 select-none items-center gap-1.5 rounded-lg border-[0.5px] border-foreground/[0.10] bg-[hsl(var(--composer))] px-2.5 text-xs dark:border-input-border/45 dark:bg-input/70',
+          '@container flex h-8 w-full min-w-0 select-none items-center gap-1.5 rounded-lg border-[0.5px] border-foreground/[0.10] bg-[hsl(var(--composer))] px-2 text-xs dark:border-input-border/45 dark:bg-input/70',
+          // The machine button carries its own 8px padding (chips carry 4px):
+          // trim the leading inset so the first glyph sits where a chip's would.
+          hasMachine && 'pl-1',
           INFO_BAR_ELEVATION_CLASS,
           // Keep the queue sheet's top seam free of upward shadow bleed.
           queue && '[clip-path:inset(0_-6px_-6px_-6px)]'

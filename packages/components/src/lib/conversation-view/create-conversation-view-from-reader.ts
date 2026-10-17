@@ -62,6 +62,8 @@ export type CreateConversationViewFromReaderOptions = {
    * many items with the rest of the tail following in the first idle chunk.
    */
   hydrateItemBudget?: number;
+  /** Clock for `lastUpdateAt`; defaults to `Date.now`. */
+  now?: () => number;
 };
 
 /** Item budget for deferred tail hydration. */
@@ -122,6 +124,8 @@ export function createConversationViewFromReader(
   const yieldToEventLoop = options.yieldToEventLoop ?? defaultYield;
   const hydrateChunkSize = options.hydrateChunkSize ?? 64;
   const hydrateItemBudget = options.hydrateItemBudget ?? 320;
+  const now = options.now ?? Date.now;
+  let lastUpdateAt: number | null = null;
 
   /** Position-aligned with the raw directory; every row owns an id. */
   let rows: TurnIndexRow[] = [];
@@ -994,6 +998,7 @@ export function createConversationViewFromReader(
 
   const onDataChange = (change: SessionDataChange) => {
     if (disposed) return;
+    lastUpdateAt = now();
     if (!initialApplied) {
       pendingChanges.push(change);
       return;
@@ -1184,6 +1189,9 @@ export function createConversationViewFromReader(
     },
     get structureVersion() {
       return structureEpoch;
+    },
+    get lastUpdateAt() {
+      return lastUpdateAt;
     },
     get hasMoreOlder() {
       return hasMoreOlder;

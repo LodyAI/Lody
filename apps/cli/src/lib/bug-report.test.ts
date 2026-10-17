@@ -5,6 +5,7 @@ import zlib from 'node:zlib';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { MachineId, WorkspaceId } from '@lody/shared';
 import {
+  BUG_REPORT_CLIENT_LOG_FILE_NAME,
   collectBugReportLogs,
   formatBugReportLogDate,
   mergeBugReportLogs,
@@ -186,5 +187,69 @@ describe('submitBugReportFromMachine machine-access gate', () => {
     } finally {
       vi.unstubAllGlobals();
     }
+  });
+});
+
+describe('submitBugReportFromMachine client log', () => {
+  const baseArgs = {
+    workspaceId: 'ws_1' as WorkspaceId,
+    machineId: 'machine_1' as MachineId,
+    description: 'opening the diff reloads the app',
+    requestToken: 'token',
+    reporterUserId: 'owner_user',
+    machineUserId: 'owner_user',
+    token: 'cli-token',
+    siteUrl: 'https://auth.example.test',
+    logger: { info: () => {}, warn: () => {} },
+    checkMachineAccess: vi.fn(),
+  };
+
+  const encode = (text: string) => {
+    const compressed = zlib.gzipSync(Buffer.from(text, 'utf8'));
+    return {
+      encoding: 'gzip-base64' as const,
+      data: compressed.toString('base64'),
+      rawBytes: Buffer.byteLength(text, 'utf8'),
+      compressedBytes: compressed.byteLength,
+    };
+  };
+
+  /** Submit with an accepting backend and return the JSON body it received. */
+  const submitAndCaptureBody = async (
+    clientLog: Parameters<typeof submitBugReportFromMachine>[0]['clientLog']
+  ): Promise<{ logContent?: string; logFileNames?: string[] }> => {
+    let body: string | undefined;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (_url: string, init: { body: string }) => {
+        body = init.body;
+        return { ok: true, status: 200, json: async () => ({ bugReportId: 'bug_1' }) };
+      })
+    );
+    try {
+      const response = await submitBugReportFromMachine({ ...baseArgs, clientLog });
+      expect(response).toMatchObject({ success: true, bugReportId: 'bug_1' });
+    } finally {
+      vi.unstubAllGlobals();
+    }
+    return JSON.parse(body ?? '{}') as { logContent?: string; logFileNames?: string[] };
+  };
+
+  it('uploads the client log as its own section of the same report', async () => {
+    const body = await submitAndCaptureBody(
+      encode('2026-10-16T14:22:13.000Z ERROR error_boundary RootOutlet TypeError\n')
+    );
+
+    expect(body.logFileNames).toContain(BUG_REPORT_CLIENT_LOG_FILE_NAME);
+    expect(body.logContent).toContain(
+      `===== ${BUG_REPORT_CLIENT_LOG_FILE_NAME} =====\n2026-10-16T14:22:13.000Z ERROR error_boundary`
+    );
+  });
+
+  it('keeps the report when the client log does not decode, and says so', async () => {
+    const valid = encode('client text');
+    const body = await submitAndCaptureBody({ ...valid, rawBytes: valid.rawBytes + 1 });
+
+    expect(body.logContent).toContain('[client log could not be decoded: raw size mismatch]');
   });
 });

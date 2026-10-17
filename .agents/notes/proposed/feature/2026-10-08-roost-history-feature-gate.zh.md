@@ -16,8 +16,9 @@ renderer 在接受会话时明确传递 backend 选择，已保存的会话 meta
 
 ## 决策
 
-Experimental features 区域包含一个总开关和一个 Roost history 开关。有效 gate 要求两个
-开关都打开。偏好按 renderer 保存在 local storage 中，并在创建会话前读取。
+Developer mode 下的 Beta 功能区域与其他仅开发者可见的 opt-in 一起管理 Roost history 开关。
+有效 gate 要求 Developer mode 和 Roost 开关都打开；Experimental features 总开关独立生效。
+偏好按 renderer 保存在 local storage 中，并在创建会话前读取。
 
 有效 gate 关闭时，共享创建默认值解析为 Loro。有效 gate 打开时，renderer 在任何会话
 写入之前读取目标机器能力；仅受支持的目标保存 Roost 选择，能力缺失或较旧时为该新会话
@@ -39,8 +40,9 @@ CLI 保留 npm 发布的 `@loro-dev/roost@0.1.2`，锁文件记录 registry 校�
 
 ## 验证
 
-session-actions 契约测试覆盖两个开关：只有两个开关都打开时才选择 Roost，总开关关闭时仍
-保持 Loro 默认值。设置 Storybook 覆盖关闭、记住 opt-in 和开启三种状态。
+session-actions 契约测试覆盖开发者 gate：Developer mode 和 Roost opt-in 都打开时，即使
+Experimental features 总开关关闭也选择 Roost；任一开发者侧条件关闭时仍保持 Loro 默认值。
+设置 Storybook 覆盖隐藏、记住 opt-in 和开启三种状态。
 
 创建回归还覆盖目标能力缺失/较旧、显式 Roost 在副作用前拒绝，以及显式 Loro 覆盖。
 renderer 两个创建入口与 CLI 复用同一个能力解析函数。

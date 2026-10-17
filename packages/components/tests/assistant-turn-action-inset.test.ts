@@ -11,6 +11,10 @@ import {
   MOBILE_TURN_ACTION_LEADING_INSET_PX,
   SessionChatActionContext,
 } from '../src/components/ai-gui/view';
+import {
+  isMessageActionsToggleTap,
+  toggleMobileMessageActions,
+} from '../src/components/ai-gui/mobile-message-actions';
 import { EDGE_ZONE_PX } from '../src/components/mobile/mobile-edge-back-swipe';
 import { ForceDesktopLayoutProvider, ForceMobileLayoutProvider } from '../src/hooks/use-mobile';
 import { initI18n } from '../src/i18n';
@@ -82,6 +86,103 @@ describe('desktop assistant-turn action bar visibility', () => {
     expect(actions?.classList.contains('opacity-100')).toBe(true);
     expect(container.querySelector('[aria-label="Copy response"]')).not.toBeNull();
     expect(container.querySelector('[aria-label="Fork session"] .animate-spin')).not.toBeNull();
+
+    await act(async () => root.unmount());
+    container.remove();
+  });
+});
+
+describe('mobile assistant-turn action reveal', () => {
+  const finishedTurn = (id: string) =>
+    ({
+      id,
+      role: 'assistant',
+      timestamp: '2026-09-10T03:00:00.000Z',
+      endedAt: Date.parse('2026-09-10T03:00:08.000Z'),
+      finished: true,
+      items: [{ type: 'text', text: `Answer ${id}.` }],
+    }) as unknown as SessionHistoryParsed;
+
+  const renderTurns = async (turns: { id: string; isLatestTurn: boolean }[]) => {
+    await initI18n('en');
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    await act(async () => {
+      root.render(
+        createElement(
+          ForceMobileLayoutProvider,
+          { force: true },
+          ...turns.map(({ id, isLatestTurn }) =>
+            createElement(
+              'div',
+              { key: id, 'data-turn': id },
+              createElement(AssistantTurnFooter, {
+                message: finishedTurn(id),
+                sessionId: 'session-reveal' as SessionId,
+                showDuration: false,
+                isTurnHovered: false,
+                isLatestTurn,
+                onFork: () => undefined,
+              })
+            )
+          )
+        )
+      );
+    });
+    return { container, root };
+  };
+
+  const buttonsHidden = (container: HTMLElement, id: string) =>
+    container
+      .querySelector(`[data-turn="${id}"] [aria-label="Copy response"]`)
+      ?.closest('[data-mobile-actions-hidden]') != null;
+  const durationText = (container: HTMLElement, id: string) =>
+    container.querySelector(`[data-turn="${id}"] [data-assistant-turn-actions] > span`)
+      ?.textContent;
+
+  it('rests older turns with only their duration, and taps reveal one turn at a time', async () => {
+    const { container, root } = await renderTurns([
+      { id: 'older-a', isLatestTurn: false },
+      { id: 'older-b', isLatestTurn: false },
+      { id: 'latest', isLatestTurn: true },
+    ]);
+
+    expect(buttonsHidden(container, 'older-a')).toBe(true);
+    expect(buttonsHidden(container, 'older-b')).toBe(true);
+    expect(buttonsHidden(container, 'latest')).toBe(false);
+    // The duration is information, not an action: it stays on every turn.
+    expect(durationText(container, 'older-a')).toBe('Worked for 8s');
+
+    await act(async () => toggleMobileMessageActions('older-a'));
+    expect(buttonsHidden(container, 'older-a')).toBe(false);
+
+    await act(async () => toggleMobileMessageActions('older-b'));
+    expect(buttonsHidden(container, 'older-a')).toBe(true);
+    expect(buttonsHidden(container, 'older-b')).toBe(false);
+
+    await act(async () => toggleMobileMessageActions('older-b'));
+    expect(buttonsHidden(container, 'older-b')).toBe(true);
+    expect(buttonsHidden(container, 'latest')).toBe(false);
+
+    await act(async () => root.unmount());
+    container.remove();
+  });
+
+  it('leaves taps on controls, links and the action bar to those elements', async () => {
+    const { container, root } = await renderTurns([{ id: 'turn', isLatestTurn: false }]);
+    const prose = document.createElement('p');
+    prose.innerHTML = 'Plain answer with <a href="#x">a link</a>.';
+    container.appendChild(prose);
+
+    expect(isMessageActionsToggleTap(prose)).toBe(true);
+    expect(isMessageActionsToggleTap(prose.querySelector('a'))).toBe(false);
+    expect(
+      isMessageActionsToggleTap(container.querySelector('[data-assistant-turn-actions]'))
+    ).toBe(false);
+    expect(isMessageActionsToggleTap(container.querySelector('[aria-label="Copy response"]'))).toBe(
+      false
+    );
 
     await act(async () => root.unmount());
     container.remove();

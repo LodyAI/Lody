@@ -8,12 +8,13 @@ import { createContext, useContext, useEffect, useState } from 'react';
 export const MessageSendStatusContext = createContext<ReadonlySet<string>>(new Set());
 
 /**
- * Returns true when the message is sending AND has been sending for more than 500ms.
- * This avoids flashing a loading indicator for fast syncs.
+ * Returns true after 500ms of sending, avoiding flashes for fast delivery.
+ * Ready local inputs supply their owner-confirmation state because control-doc
+ * synchronization alone does not confirm Roost history delivery.
  */
-export function useIsMessageSendingVisible(messageId: string): boolean {
+export function useIsMessageSendingVisible(messageId: string, sending?: boolean): boolean {
   const sendingIds = useContext(MessageSendStatusContext);
-  const isSending = sendingIds.has(messageId);
+  const isSending = sending ?? sendingIds.has(messageId);
   const [visible, setVisible] = useState(false);
 
   useEffect(() => {

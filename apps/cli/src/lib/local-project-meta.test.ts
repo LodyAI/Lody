@@ -414,24 +414,4 @@ describe('resolveWorkspaceLocalProjectRootPathWithRetry', () => {
     expect(requestSync).toHaveBeenCalledTimes(2);
     expect(sleep).toHaveBeenCalledTimes(2);
   });
-
-  it('stops retrying when speculative preparation is cancelled', async () => {
-    const flock = new FakeMachineFlock();
-    const { repo } = createRepo(flock);
-    const controller = new AbortController();
-    const sleep = instantSleep();
-    const requestSync = vi.fn(async () => {
-      controller.abort(new Error('preparation cancelled'));
-    });
-
-    await expect(
-      resolveWorkspaceLocalProjectRootPathWithRetry(repo, workspaceId, machineId, localProjectId, {
-        requestSync,
-        sleep,
-        signal: controller.signal,
-      })
-    ).rejects.toThrow('preparation cancelled');
-    expect(requestSync).toHaveBeenCalledTimes(1);
-    expect(sleep).not.toHaveBeenCalled();
-  });
 });

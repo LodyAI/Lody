@@ -35,7 +35,9 @@ Design, invariants I1–I8 and the coverage lemma:
   transaction, measurement or `onScroll` until shown, then the kept intent is written.
   A host that keeps a stream mounted off screen must pass it.
 - Reading anchors are separate from React row keys: resolve through `anchor.ts`
-  rules, never by list index.
+  rules, never by list index. A row rendering several turns lists the others in
+  `groupTurnIds`, or a grouped anchor falls back and can loop with hydration
+  ([decision](../../../../../.agents/notes/implemented/bug-fix/2026-10-17-grouped-creation-record-anchor.md)).
 - Upward conversation touch input releases follow before the first scroll event;
   post-touch momentum is reader input too. Taps, pinches, horizontal gestures,
   cancelled touches and nested scrolling must not arm conversation momentum.

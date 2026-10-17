@@ -118,6 +118,17 @@ function createHarness(options?: {
     setLastMessageAt: vi.fn(async () => {}),
   });
   const repo = {
+    runLegacy: Effect.runPromise,
+    native: {
+      listDoc: () =>
+        Effect.sync(() =>
+          [...sessionMetas].map(([docId, meta]) => ({
+            docId,
+            meta,
+            deleted: options?.deletedSessionIds?.includes(meta.id) === true,
+          }))
+        ),
+    },
     watch: vi.fn(() => ({ unsubscribe: vi.fn() })),
     getDocMeta: vi.fn(async (roomId: string) => {
       const localSessionMeta = sessionMetas.get(roomId);

@@ -1,24 +1,39 @@
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, symlinkSync } from 'node:fs';
+import { execFile, spawn } from 'node:child_process';
+import { once } from 'node:events';
+import { promisify } from 'node:util';
+import { git as runGit } from './git.mjs';
+
+import {
+  mkdtempSync,
+  mkdirSync,
+  writeFileSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  chmodSync,
+  openSync,
+  closeSync,
+} from 'node:fs';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
 import { confirmTopic, documentStatus, inspectTopic, main, topicDiff } from './main.mjs';
 
-function fixture(t) {
+const execute = promisify(execFile);
+
+async function fixture(t) {
   const root = mkdtempSync(path.join(tmpdir(), 'lody-doc-review-'));
   t.after(() => rmSync(root, { recursive: true, force: true }));
-  const git = (...args) =>
-    execFileSync('git', args, { cwd: root, stdio: 'pipe' }).toString().trim();
+  const git = async (...args) => (await execute('git', args, { cwd: root })).stdout.trim();
   const write = (file, body) => {
     mkdirSync(path.dirname(path.join(root, file)), { recursive: true });
     writeFileSync(path.join(root, file), body);
   };
-  git('init', '-q', '-b', 'document-review-fixture');
-  git('config', 'user.email', 'synthetic@example.invalid');
-  git('config', 'user.name', 'Synthetic fixture');
+  await git('init', '-q', '-b', 'document-review-fixture');
+  await git('config', 'user.email', 'synthetic@example.invalid');
+  await git('config', 'user.name', 'Synthetic fixture');
   write('specs/flow.zh.md', '# Flow\n\nStatus: draft\nTranslation: pending\n');
   write('apps/flow.ts', '// @dec:specs/flow\nexport const durable = true;\n');
   const scopeFile = 'specs/flow.anchors.json';
@@ -31,47 +46,62 @@ function fixture(t) {
     watch: ['apps'],
   };
   write(scopeFile, JSON.stringify(scope));
-  const commit = () => {
-    git('add', '.');
-    git('-c', 'core.hooksPath=/dev/null', '-c', 'commit.gpgSign=false', 'commit', '-qm', 'fixture');
+  const commit = async () => {
+    await git('add', '.');
+    await git(
+      '-c',
+      'core.hooksPath=/dev/null',
+      '-c',
+      'commit.gpgSign=false',
+      'commit',
+      '-qm',
+      'fixture'
+    );
   };
-  commit();
+  await commit();
   const readScope = () => JSON.parse(readFileSync(path.join(root, scopeFile), 'utf8'));
   return { root, git, write, commit, scopeFile, scope, readScope };
 }
 
-test('confirmation binds source and document bytes without approving the Spec', (t) => {
-  const f = fixture(t);
-  assert.equal(inspectTopic(f.root, 'specs/flow').status, 'unreviewed');
-  confirmTopic(f.root, 'specs/flow', 'Contract still holds', 'Read source and synthetic test');
+test('confirmation binds source and document bytes without approving the Spec', async (t) => {
+  const f = await fixture(t);
+  assert.equal((await inspectTopic(f.root, 'specs/flow')).status, 'unreviewed');
+  await confirmTopic(
+    f.root,
+    'specs/flow',
+    'Contract still holds',
+    'Read source and synthetic test'
+  );
   const confirmed = readFileSync(path.join(f.root, f.scopeFile), 'utf8');
-  assert.equal(inspectTopic(f.root, 'specs/flow').status, 'current');
-  assert.equal(documentStatus(f.root).documents[0].status, 'draft');
+  assert.equal((await inspectTopic(f.root, 'specs/flow')).status, 'current');
+  assert.equal((await documentStatus(f.root)).documents[0].status, 'draft');
   f.write('unrelated.txt', 'new commit only');
-  f.commit();
-  assert.equal(inspectTopic(f.root, 'specs/flow').status, 'current');
+  await f.commit();
+  assert.equal((await inspectTopic(f.root, 'specs/flow')).status, 'current');
   f.write('apps/flow.ts', '// @dec:specs/flow\nexport const durable = false;\n');
-  assert.equal(inspectTopic(f.root, 'specs/flow').status, 'stale');
-  assert.match(topicDiff(f.root, 'specs/flow'), /-export const durable = true/);
-  assert.match(topicDiff(f.root, 'specs/flow'), /\+export const durable = false/);
+  assert.equal((await inspectTopic(f.root, 'specs/flow')).status, 'stale');
+  assert.match(await topicDiff(f.root, 'specs/flow'), /-export const durable = true/);
+  assert.match(await topicDiff(f.root, 'specs/flow'), /\+export const durable = false/);
   assert.equal(readFileSync(path.join(f.root, f.scopeFile), 'utf8'), confirmed);
-  assert.throws(
+  await assert.rejects(
     () => confirmTopic(f.root, 'specs/flow', 'review', 'evidence'),
     /Commit reviewed content first/
   );
   f.write('apps/flow.ts', '// @dec:specs/flow\nexport const durable = true;\n');
   f.write('specs/flow.zh.md', '# Changed intent\nStatus: draft\nTranslation: pending\n');
-  assert.equal(inspectTopic(f.root, 'specs/flow').status, 'stale');
+  assert.equal((await inspectTopic(f.root, 'specs/flow')).status, 'stale');
 });
 
-test('new, removed, or unprotected sources need explicit review', (t) => {
-  const f = fixture(t);
-  confirmTopic(f.root, 'specs/flow', 'review', 'evidence');
+test('new, removed, or unprotected sources need explicit review', async (t) => {
+  const f = await fixture(t);
+  await confirmTopic(f.root, 'specs/flow', 'review', 'evidence');
   f.write('apps/new.ts', 'export {};\n');
-  assert.ok(inspectTopic(f.root, 'specs/flow').changes.some((c) => c.kind === 'added-to-watch'));
+  assert.ok(
+    (await inspectTopic(f.root, 'specs/flow')).changes.some((c) => c.kind === 'added-to-watch')
+  );
   rmSync(path.join(f.root, 'apps/flow.ts'));
-  assert.ok(inspectTopic(f.root, 'specs/flow').changes.some((c) => c.kind === 'missing'));
-  assert.throws(
+  assert.ok((await inspectTopic(f.root, 'specs/flow')).changes.some((c) => c.kind === 'missing'));
+  await assert.rejects(
     () => confirmTopic(f.root, 'specs/flow', 'review', 'evidence'),
     /missing protected/
   );
@@ -79,39 +109,39 @@ test('new, removed, or unprotected sources need explicit review', (t) => {
   record.sources = [];
   f.write(f.scopeFile, JSON.stringify(record));
   assert.ok(
-    inspectTopic(f.root, 'specs/flow').changes.some((c) => c.kind === 'protection-removed')
+    (await inspectTopic(f.root, 'specs/flow')).changes.some((c) => c.kind === 'protection-removed')
   );
 });
 
-test('confirmation requires scope approval and meaningful evidence', (t) => {
-  const f = fixture(t);
-  assert.throws(() => confirmTopic(f.root, 'specs/flow', '', 'evidence'), /--reason/);
+test('confirmation requires scope approval and meaningful evidence', async (t) => {
+  const f = await fixture(t);
+  await assert.rejects(() => confirmTopic(f.root, 'specs/flow', '', 'evidence'), /--reason/);
   f.write(f.scopeFile, JSON.stringify({ ...f.scope, scopeReview: null }));
-  assert.equal(inspectTopic(f.root, 'specs/flow').status, 'scope-pending');
-  assert.throws(
+  assert.equal((await inspectTopic(f.root, 'specs/flow')).status, 'scope-pending');
+  await assert.rejects(
     () => confirmTopic(f.root, 'specs/flow', 'review', 'evidence'),
     /scope confirmation/
   );
 });
 
-test('review paths cannot escape the repo, follow symlinks, or hash metadata', (t) => {
-  const f = fixture(t);
+test('review paths cannot escape the repo, follow symlinks, or hash metadata', async (t) => {
+  const f = await fixture(t);
   for (const source of ['../elsewhere', '.git/config', 'specs/flow.anchors.json']) {
     f.write(f.scopeFile, JSON.stringify({ ...f.scope, sources: [source] }));
-    assert.throws(() => inspectTopic(f.root, 'specs/flow'));
+    await assert.rejects(() => inspectTopic(f.root, 'specs/flow'));
   }
   symlinkSync('flow.ts', path.join(f.root, 'apps/alias.ts'));
   f.write(f.scopeFile, JSON.stringify({ ...f.scope, sources: ['apps/alias.ts'] }));
-  assert.throws(() => inspectTopic(f.root, 'specs/flow'), /Symlink/);
+  await assert.rejects(() => inspectTopic(f.root, 'specs/flow'), /Symlink/);
 });
 
-test('queues preserve translation debt and catch invalid note state and broken links', (t) => {
-  const f = fixture(t);
+test('queues preserve translation debt and catch invalid note state and broken links', async (t) => {
+  const f = await fixture(t);
   f.write(
     '.agents/notes/proposed/process/2026-09-06-example.zh.md',
     '# Note\nStatus: implemented\nTranslation: current\n[missing](absent.md)\n'
   );
-  const report = documentStatus(f.root);
+  const report = await documentStatus(f.root);
   assert.ok(report.documents.some((d) => d.missingTranslation && d.status === 'draft'));
   assert.ok(report.errors.some((e) => e.includes('lifecycle')));
   assert.ok(report.errors.some((e) => e.includes('counterpart missing')));
@@ -122,71 +152,74 @@ test('queues preserve translation debt and catch invalid note state and broken l
   );
 });
 
-test('base comparison detects a deleted topic record', (t) => {
-  const f = fixture(t);
-  const base = f.git('rev-parse', 'HEAD');
+test('base comparison detects a deleted topic record', async (t) => {
+  const f = await fixture(t);
+  const base = await f.git('rev-parse', 'HEAD');
   rmSync(path.join(f.root, f.scopeFile));
-  assert.equal(main(f.root, ['check', '--base', base]), 1);
+  assert.equal(await main(f.root, ['check', '--base', base]), 1);
 });
 
-test('check discovers adjacent records and rejects an unrelated owner', (t) => {
-  const f = fixture(t);
-  confirmTopic(f.root, 'specs/flow', 'review', 'evidence');
-  assert.equal(main(f.root, ['check']), 0);
+test('check discovers adjacent records and rejects an unrelated owner', async (t) => {
+  const f = await fixture(t);
+  await confirmTopic(f.root, 'specs/flow', 'review', 'evidence');
+  assert.equal(await main(f.root, ['check']), 0);
   f.write('apps/flow.ts', '// @dec:specs/flow\nexport const durable = false;\n');
-  assert.equal(main(f.root, ['check']), 1);
+  assert.equal(await main(f.root, ['check']), 1);
   const record = f.readScope();
   record.documents = ['specs/another.md'];
   f.write(f.scopeFile, JSON.stringify(record));
-  assert.throws(() => inspectTopic(f.root, 'specs/flow'), /adjacent owning document/);
+  await assert.rejects(() => inspectTopic(f.root, 'specs/flow'), /adjacent owning document/);
 });
 
-test('unrelated declarations stay current while anchor removal and reverse-link gaps fail', (t) => {
-  const f = fixture(t);
-  confirmTopic(f.root, 'specs/flow', 'review', 'evidence');
+test('unrelated declarations stay current while anchor removal and reverse-link gaps fail', async (t) => {
+  const f = await fixture(t);
+  await confirmTopic(f.root, 'specs/flow', 'review', 'evidence');
   f.write(
     'apps/flow.ts',
     '// @dec:specs/flow\nexport const durable = true;\nexport const unrelated = 2;\n'
   );
-  assert.equal(inspectTopic(f.root, 'specs/flow').status, 'current');
+  assert.equal((await inspectTopic(f.root, 'specs/flow')).status, 'current');
   f.write('apps/extra.ts', '// @dec:specs/flow\nexport const other = 1;\n');
-  assert.equal(main(f.root, ['check']), 1);
-  assert.throws(() => confirmTopic(f.root, 'specs/flow', 'review', 'evidence'), /absent from/);
+  assert.equal(await main(f.root, ['check']), 1);
+  await assert.rejects(
+    () => confirmTopic(f.root, 'specs/flow', 'review', 'evidence'),
+    /absent from/
+  );
   rmSync(path.join(f.root, 'apps/extra.ts'));
   f.write('apps/flow.ts', 'export const durable = true;\n');
-  assert.throws(() => inspectTopic(f.root, 'specs/flow'), /missing @dec/);
+  await assert.rejects(() => inspectTopic(f.root, 'specs/flow'), /missing @dec/);
 });
 
-test('note opening requires a nonempty abstract in the authored language', (t) => {
-  const f = fixture(t);
+test('note opening requires a nonempty abstract in the authored language', async (t) => {
+  const f = await fixture(t);
   const note = '.agents/notes/proposed/process/2026-09-06-example.md';
   const header = '# Example\nStatus: proposed\nTranslation: pending\n\n';
   f.write(note, header + '## Problem\nA problem.\n');
-  assert.ok(documentStatus(f.root).errors.some((e) => e.includes('Abstract')));
+  assert.ok((await documentStatus(f.root)).errors.some((e) => e.includes('Abstract')));
   f.write(note, header + '## Abstract\n\n## Problem\nA problem.\n');
-  assert.ok(documentStatus(f.root).errors.some((e) => e.includes('Abstract')));
+  assert.ok((await documentStatus(f.root)).errors.some((e) => e.includes('Abstract')));
   f.write(
     note,
     header +
       '## Abstract\nThe problem, approach, and remaining uncertainty.\n\n## Problem\nA problem.\n'
   );
-  assert.deepEqual(documentStatus(f.root).errors, []);
+  assert.deepEqual((await documentStatus(f.root)).errors, []);
 });
 
-test('removing one of several anchors exposes its source diff', (t) => {
-  const f = fixture(t);
+test('removing one of several anchors exposes its source diff', async (t) => {
+  const f = await fixture(t);
   const first = '// @dec:specs/flow\nexport function first() { return 1; }\n';
   const second = '// @dec:specs/flow\nexport function second() { return 2; }\n';
   f.write('apps/flow.ts', first + second);
-  f.commit();
-  confirmTopic(f.root, 'specs/flow', 'review', 'evidence');
+  await f.commit();
+  await confirmTopic(f.root, 'specs/flow', 'review', 'evidence');
   f.write('apps/flow.ts', first);
-  assert.match(topicDiff(f.root, 'specs/flow'), /-export function second/);
+  assert.match(await topicDiff(f.root, 'specs/flow'), /-export function second/);
 });
 
-test('CLI completes initial review, drift, diff, and reconfirmation without approving a Spec', (t) => {
-  const f = fixture(t);
-  for (const name of ['main.mjs', 'anchors.mjs']) {
+test('CLI completes initial review, drift, diff, and reconfirmation without approving a Spec', async (t) => {
+  const f = await fixture(t);
+  for (const name of ['main.mjs', 'anchors.mjs', 'git.mjs']) {
     f.write(`scripts/docs/${name}`, readFileSync(new URL(name, import.meta.url), 'utf8'));
   }
   mkdirSync(path.join(f.root, 'node_modules'), { recursive: true });
@@ -194,18 +227,34 @@ test('CLI completes initial review, drift, diff, and reconfirmation without appr
     path.dirname(createRequire(import.meta.url).resolve('typescript/package.json')),
     path.join(f.root, 'node_modules/typescript')
   );
-  const cli = (...args) =>
-    execFileSync(process.execPath, [path.join(f.root, 'scripts/docs/main.mjs'), ...args], {
-      cwd: f.root,
-      stdio: 'pipe',
-    }).toString();
-  assert.equal(JSON.parse(cli('status')).topics[0].status, 'unreviewed');
-  assert.throws(
+  // Regular files also work on hosts where nested Node processes cannot write to socket stdio.
+  const runCli = async (args, options = {}) => {
+    const outputs = ['stdout', 'stderr'].map((name) => path.join(f.root, '.git', `cli-${name}`));
+    const descriptors = outputs.map((file) => openSync(file, 'w'));
+    let code, signal;
+    try {
+      const child = spawn(process.execPath, [path.join(f.root, 'scripts/docs/main.mjs'), ...args], {
+        ...options,
+        cwd: f.root,
+        stdio: ['ignore', ...descriptors],
+      });
+      [code, signal] = await once(child, 'close');
+    } finally {
+      descriptors.forEach(closeSync);
+    }
+    const [stdout, stderr] = outputs.map((file) => readFileSync(file, 'utf8'));
+    if (code !== 0 || signal)
+      throw Object.assign(new Error(stderr), { code, signal, stdout, stderr });
+    return stdout;
+  };
+  const cli = (...args) => runCli(args);
+  assert.equal(JSON.parse(await cli('status')).topics[0].status, 'unreviewed');
+  await assert.rejects(
     () => cli('check'),
-    (error) => error.status === 1
+    (error) => error.code === 1
   );
-  const confirm = () =>
-    cli(
+  const confirm = async () =>
+    await cli(
       'confirm',
       '--topic',
       'specs/flow',
@@ -214,48 +263,55 @@ test('CLI completes initial review, drift, diff, and reconfirmation without appr
       '--evidence',
       'Synthetic source and tests'
     );
-  confirm();
-  assert.equal(JSON.parse(cli('check')).topics[0].status, 'current');
+  await confirm();
+  assert.equal(JSON.parse(await cli('check')).topics[0].status, 'current');
   const baseline = readFileSync(path.join(f.root, f.scopeFile), 'utf8');
   f.write('apps/flow.ts', '// @dec:specs/flow\nexport const durable = false;\n');
-  assert.throws(
+  await assert.rejects(
     () => cli('check'),
-    (error) => error.status === 1
+    (error) => error.code === 1
   );
-  assert.match(cli('diff', '--topic', 'specs/flow'), /-export const durable = true/);
+  assert.match(await cli('diff', '--topic', 'specs/flow'), /-export const durable = true/);
   assert.equal(readFileSync(path.join(f.root, f.scopeFile), 'utf8'), baseline);
-  assert.throws(confirm, (error) => error.status === 1);
-  f.commit();
-  confirm();
-  const report = JSON.parse(cli('check'));
+  await assert.rejects(confirm, (error) => error.code === 1);
+  await f.commit();
+  await confirm();
+  const report = JSON.parse(await cli('check'));
   assert.equal(report.topics[0].status, 'current');
   assert.equal(report.documents[0].status, 'draft');
+  await assert.rejects(
+    () =>
+      runCli(['status'], {
+        env: { ...process.env, PATH: '' },
+      }),
+    (error) => error.code === 1 && error.stdout === '' && /git ENOENT/.test(error.stderr)
+  );
 });
 
-test('watch ignores committed symlinks just like working-tree discovery', (t) => {
-  const f = fixture(t);
+test('watch ignores committed symlinks just like working-tree discovery', async (t) => {
+  const f = await fixture(t);
   symlinkSync('flow.ts', path.join(f.root, 'apps/CLAUDE.md'));
-  f.commit();
-  assert.equal(confirmTopic(f.root, 'specs/flow', 'review', 'evidence').status, 'current');
+  await f.commit();
+  assert.equal((await confirmTopic(f.root, 'specs/flow', 'review', 'evidence')).status, 'current');
   assert.deepEqual(f.readScope().baseline.inventory, ['apps/flow.ts']);
 });
 
-test('diff reads baseline blobs when the recorded revision is unavailable and writes no objects', (t) => {
-  const f = fixture(t);
-  confirmTopic(f.root, 'specs/flow', 'review', 'evidence');
+test('diff reads baseline blobs when the recorded revision is unavailable and writes no objects', async (t) => {
+  const f = await fixture(t);
+  await confirmTopic(f.root, 'specs/flow', 'review', 'evidence');
   const record = f.readScope();
   record.baseline.revision = 'a'.repeat(40);
   f.write(f.scopeFile, JSON.stringify(record));
-  const before = f.git('count-objects', '-v');
+  const before = await f.git('count-objects', '-v');
   f.write('apps/flow.ts', '// @dec:specs/flow\nexport const durable = false;\n');
-  assert.match(topicDiff(f.root, 'specs/flow'), /-export const durable = true/);
-  assert.equal(f.git('count-objects', '-v'), before);
+  assert.match(await topicDiff(f.root, 'specs/flow'), /-export const durable = true/);
+  assert.equal(await f.git('count-objects', '-v'), before);
   record.baseline.sourceBlobs['apps/flow.ts'] = 'b'.repeat(40);
   f.write(f.scopeFile, JSON.stringify(record));
-  assert.throws(() => topicDiff(f.root, 'specs/flow'), /Missing baseline blob/);
+  await assert.rejects(() => topicDiff(f.root, 'specs/flow'), /Missing baseline blob/);
 });
 
-function captureReport(root, args) {
+async function captureReport(root, args) {
   let report;
   const original = console.log;
   console.log = (output) => {
@@ -263,7 +319,7 @@ function captureReport(root, args) {
   };
   try {
     return {
-      code: main(root, args),
+      code: await main(root, args),
       get report() {
         return report;
       },
@@ -273,10 +329,10 @@ function captureReport(root, args) {
   }
 }
 
-test('bad topics and malformed source markers do not hide healthy topics or document queues', (t) => {
-  const f = fixture(t);
+test('bad topics and malformed source markers do not hide healthy topics or document queues', async (t) => {
+  const f = await fixture(t);
   f.write(f.scopeFile, JSON.stringify({ ...f.scope, watch: [] }));
-  confirmTopic(f.root, 'specs/flow', 'review', 'evidence');
+  await confirmTopic(f.root, 'specs/flow', 'review', 'evidence');
   f.write('specs/b.md', '# B\nStatus: draft\nTranslation: pending\n');
   f.write('apps/b.ts', 'export const b = 1;\n');
   f.write(
@@ -284,19 +340,19 @@ test('bad topics and malformed source markers do not hide healthy topics or docu
     JSON.stringify({ ...f.scope, documents: ['specs/b.md'], sources: ['apps/b.ts'] })
   );
   f.write('apps/c.ts', '// @dec:specs/c malformed\nexport const c = 1;\n');
-  const result = captureReport(f.root, ['check']);
+  const result = await captureReport(f.root, ['check']);
   assert.equal(result.code, 1);
   assert.ok(result.report.documents.some((d) => d.file === 'specs/b.md'));
   assert.equal(result.report.topics.find((t) => t.topic === 'specs/flow').status, 'current');
   assert.equal(result.report.topics.find((t) => t.topic === 'specs/b').status, 'error');
   assert.ok(result.report.errors.some((e) => e.includes('apps/c.ts')));
-  const status = captureReport(f.root, ['status']);
+  const status = await captureReport(f.root, ['status']);
   assert.equal(status.code, 0);
   assert.equal(status.report.topics.length, 2);
 });
 
-test('repo-wide links include hubs and archives, while metadata stays scoped', (t) => {
-  const f = fixture(t);
+test('repo-wide links include hubs and archives, while metadata stays scoped', async (t) => {
+  const f = await fixture(t);
   const files = [
     'AGENTS.md',
     'CONTRIBUTING.md',
@@ -306,7 +362,7 @@ test('repo-wide links include hubs and archives, while metadata stays scoped', (
   ];
   for (const file of files) f.write(file, '[broken](missing-file.md)\n');
   f.write('README.md', '[reference][guide]\n\n[guide]: missing-guide.md\n');
-  const errors = documentStatus(f.root).errors;
+  const errors = (await documentStatus(f.root)).errors;
   for (const file of files)
     assert.ok(
       errors.some((e) => e.startsWith(`${file}: broken local link`)),
@@ -316,100 +372,190 @@ test('repo-wide links include hubs and archives, while metadata stays scoped', (
   assert.equal(errors.filter((e) => e.includes('invalid/missing')).length, 0);
 });
 
-test('retired records retain evidence, skip stale sources, and forbid live markers or confirmation', (t) => {
-  const f = fixture(t);
-  confirmTopic(f.root, 'specs/flow', 'review', 'evidence');
-  f.commit();
-  const base = f.git('rev-parse', 'HEAD');
+test('retired records retain evidence, skip stale sources, and forbid live markers or confirmation', async (t) => {
+  const f = await fixture(t);
+  await confirmTopic(f.root, 'specs/flow', 'review', 'evidence');
+  await f.commit();
+  const base = await f.git('rev-parse', 'HEAD');
   const record = f.readScope();
   record.retired = { date: '2026-09-06', reason: 'Contract removed', scopeReview: 'PR #2' };
   f.write(f.scopeFile, JSON.stringify(record));
-  assert.equal(inspectTopic(f.root, 'specs/flow').status, 'retired');
-  assert.equal(captureReport(f.root, ['check', '--base', base]).code, 1);
+  assert.equal((await inspectTopic(f.root, 'specs/flow')).status, 'retired');
+  assert.equal((await captureReport(f.root, ['check', '--base', base])).code, 1);
   rmSync(path.join(f.root, 'apps/flow.ts'));
-  assert.equal(captureReport(f.root, ['check', '--base', base]).code, 0);
-  assert.throws(() => confirmTopic(f.root, 'specs/flow', 'review', 'evidence'), /Retired topics/);
+  assert.equal((await captureReport(f.root, ['check', '--base', base])).code, 0);
+  await assert.rejects(
+    () => confirmTopic(f.root, 'specs/flow', 'review', 'evidence'),
+    /Retired topics/
+  );
   record.retired.scopeReview = 'someone approved';
   f.write(f.scopeFile, JSON.stringify(record));
-  assert.throws(() => inspectTopic(f.root, 'specs/flow'), /retirement/);
+  await assert.rejects(() => inspectTopic(f.root, 'specs/flow'), /retirement/);
 });
 
-test('scope schema rejects unknown keys and untraceable reviews', (t) => {
-  const f = fixture(t);
+test('scope schema rejects unknown keys and untraceable reviews', async (t) => {
+  const f = await fixture(t);
   f.write(f.scopeFile, JSON.stringify({ ...f.scope, sourcs: [] }));
-  assert.throws(() => inspectTopic(f.root, 'specs/flow'), /unknown field sourcs/);
+  await assert.rejects(() => inspectTopic(f.root, 'specs/flow'), /unknown field sourcs/);
   for (const scopeReview of ['yes', '', 'PR #0', 'javascript:alert(1)']) {
     f.write(f.scopeFile, JSON.stringify({ ...f.scope, scopeReview }));
-    assert.throws(() => inspectTopic(f.root, 'specs/flow'), /scopeReview/);
+    await assert.rejects(() => inspectTopic(f.root, 'specs/flow'), /scopeReview/);
   }
   for (const scopeReview of ['PR #12', 'https://example.invalid/review/1', 'a'.repeat(40)]) {
     f.write(f.scopeFile, JSON.stringify({ ...f.scope, scopeReview }));
-    assert.equal(inspectTopic(f.root, 'specs/flow').status, 'unreviewed');
+    assert.equal((await inspectTopic(f.root, 'specs/flow')).status, 'unreviewed');
   }
 });
 
-test('translation statuses must agree and every AGENTS file stays under 8 KiB', (t) => {
-  const f = fixture(t);
+test('translation statuses must agree and every AGENTS file stays under 8 KiB', async (t) => {
+  const f = await fixture(t);
   f.write('specs/flow.md', '# Flow\nStatus: approved\nTranslation: current\n');
   f.write('AGENTS.md', 'x'.repeat(8191));
-  assert.ok(documentStatus(f.root).errors.some((e) => e.includes('Status differs')));
-  assert.ok(!documentStatus(f.root).errors.some((e) => e.includes('8192 bytes')));
+  assert.ok((await documentStatus(f.root)).errors.some((e) => e.includes('Status differs')));
+  assert.ok(!(await documentStatus(f.root)).errors.some((e) => e.includes('8192 bytes')));
   f.write('apps/AGENTS.md', 'x'.repeat(8192));
-  assert.ok(documentStatus(f.root).errors.some((e) => e.includes('apps/AGENTS.md: 8192')));
+  assert.ok((await documentStatus(f.root)).errors.some((e) => e.includes('apps/AGENTS.md: 8192')));
 });
 
-test('a pending note counterpart warns without failing the check', (t) => {
-  const f = fixture(t);
+test('a pending note counterpart warns without failing the check', async (t) => {
+  const f = await fixture(t);
   const note = '.agents/notes/proposed/process/2026-09-06-example.md';
   f.write(note, '# Note\n\nStatus: proposed\nTranslation: pending\n\n## Abstract\n\nBody.\n');
-  const pending = documentStatus(f.root);
+  const pending = await documentStatus(f.root);
   assert.ok(
     pending.warnings.some((w) => w.includes(`${note}: ${note.replace(/\.md$/, '.zh.md')}`))
   );
   assert.deepEqual(pending.errors, []);
-  f.commit();
-  confirmTopic(f.root, 'specs/flow', 'reviewed', 'evidence');
-  assert.equal(main(f.root, ['check']), 0, 'translation debt alone must not fail the check');
+  await f.commit();
+  await confirmTopic(f.root, 'specs/flow', 'reviewed', 'evidence');
+  assert.equal(await main(f.root, ['check']), 0, 'translation debt alone must not fail the check');
   f.write(
     note.replace(/\.md$/, '.zh.md'),
     '# 记录\n\nStatus: proposed\nTranslation: current\n\n## 摘要\n\n正文。\n'
   );
-  assert.deepEqual(documentStatus(f.root).warnings, []);
+  assert.deepEqual((await documentStatus(f.root)).warnings, []);
 });
 
-test('an AGENTS file near the gate warns without failing the check', (t) => {
-  const f = fixture(t);
+test('an AGENTS file near the gate warns without failing the check', async (t) => {
+  const f = await fixture(t);
   f.write('AGENTS.md', 'x'.repeat(7000));
-  assert.deepEqual(documentStatus(f.root).warnings, []);
+  assert.deepEqual((await documentStatus(f.root)).warnings, []);
   f.write('AGENTS.md', 'x'.repeat(7001));
-  const near = documentStatus(f.root);
+  const near = await documentStatus(f.root);
   assert.ok(near.warnings.some((w) => w.includes('AGENTS.md: 7001') && w.includes('1191 left')));
   assert.ok(!near.errors.some((e) => e.includes('AGENTS.md')));
-  f.commit();
-  confirmTopic(f.root, 'specs/flow', 'reviewed', 'evidence');
-  assert.equal(main(f.root, ['check']), 0, 'a warning alone must not fail the check');
+  await f.commit();
+  await confirmTopic(f.root, 'specs/flow', 'reviewed', 'evidence');
+  assert.equal(await main(f.root, ['check']), 0, 'a warning alone must not fail the check');
   f.write('AGENTS.md', 'x'.repeat(8192));
-  f.commit();
-  assert.equal(main(f.root, ['check']), 1);
+  await f.commit();
+  assert.equal(await main(f.root, ['check']), 1);
 });
 
-test('a shallow clone of a consolidated commit can diff blobs without the original PR revision', (t) => {
-  const f = fixture(t);
-  confirmTopic(f.root, 'specs/flow', 'review', 'evidence');
+test('a shallow clone of a consolidated commit can diff blobs without the original PR revision', async (t) => {
+  const f = await fixture(t);
+  await confirmTopic(f.root, 'specs/flow', 'review', 'evidence');
   const revision = f.readScope().baseline.revision;
-  f.git('checkout', '--orphan', 'consolidated-document-fixture');
-  f.commit();
+  await f.git('checkout', '--orphan', 'consolidated-document-fixture');
+  await f.commit();
   const clone = mkdtempSync(path.join(tmpdir(), 'lody-doc-shallow-'));
   t.after(() => rmSync(clone, { recursive: true, force: true }));
-  execFileSync('git', ['clone', '--quiet', '--depth=1', `file://${f.root}`, clone], {
+  await execute('git', ['clone', '--quiet', '--depth=1', `file://${f.root}`, clone], {
     stdio: 'pipe',
   });
-  assert.throws(() =>
-    execFileSync('git', ['cat-file', '-e', revision], { cwd: clone, stdio: 'pipe' })
+  await assert.rejects(
+    async () => await execute('git', ['cat-file', '-e', revision], { cwd: clone, stdio: 'pipe' })
   );
   writeFileSync(
     path.join(clone, 'apps/flow.ts'),
     '// @dec:specs/flow\nexport const durable = false;\n'
   );
-  assert.match(topicDiff(clone, 'specs/flow'), /-export const durable = true/);
+  assert.match(await topicDiff(clone, 'specs/flow'), /-export const durable = true/);
 });
+
+test('Git preserves binary blobs, cwd, and NUL-delimited unusual paths', async (t) => {
+  const f = await fixture(t);
+  const bytes = Buffer.from([0, 255, 254, 13, 10, 128, 0]);
+  f.write('binary.dat', bytes);
+  const unusual = 'specs/space 中文\nname.md';
+  f.write(unusual, '[missing](absent.md)\n');
+  await f.commit();
+  assert.deepEqual(await runGit(f.root, ['cat-file', 'blob', 'HEAD:binary.dat']), bytes);
+  const listed = await runGit(f.root, ['ls-files', '-z']);
+  assert.ok(Buffer.isBuffer(listed));
+  assert.ok(listed.toString().split('\0').includes(unusual));
+  assert.ok(
+    (await documentStatus(f.root)).errors.includes(`${unusual}: broken local link absent.md`)
+  );
+});
+
+test('Git diff accepts equal and different content, while other failures retain diagnostics', async (t) => {
+  const f = await fixture(t);
+  f.write('before', 'original\n');
+  f.write('after', 'original\n');
+  const args = ['diff', '--no-index', '--no-ext-diff', '--no-textconv', '--', 'before', 'after'];
+  assert.deepEqual(await runGit(f.root, args, { diff: true }), Buffer.alloc(0));
+  f.write('after', 'changed\n');
+  assert.match((await runGit(f.root, args, { diff: true })).toString(), /\+changed/);
+  await assert.rejects(
+    () => runGit(f.root, args),
+    (error) => error.code === 1
+  );
+  await assert.rejects(
+    () =>
+      runGit(f.root, ['rev-parse', '--verify', 'refs/heads/missing-synthetic-ref'], { diff: true }),
+    (error) =>
+      error.code === 128 &&
+      Buffer.isBuffer(error.stderr) &&
+      error.stderr.includes('fatal:') &&
+      error.message.includes(error.stderr.toString().trim())
+  );
+});
+
+test('Git launch failures reject even when diff permits exit code 1', async (t) => {
+  const f = await fixture(t);
+  await assert.rejects(
+    () => runGit(f.root, ['status'], { diff: true, env: { ...process.env, PATH: '' } }),
+    (error) => error.code === 'ENOENT' && /git/.test(error.message)
+  );
+  if (process.platform === 'win32') return; // POSIX executable permission bits.
+  const bin = path.join(f.root, 'bin');
+  f.write('bin/git', '#!/bin/sh\nexit 0\n');
+  chmodSync(path.join(bin, 'git'), 0o644);
+  await assert.rejects(
+    () => runGit(f.root, ['status'], { diff: true, env: { ...process.env, PATH: bin } }),
+    (error) => error.code === 'EACCES'
+  );
+});
+
+test(
+  'Git signal termination and truncated stdout or stderr never become successful diffs',
+  {
+    skip: process.platform === 'win32' && 'POSIX executable fixture and signals',
+  },
+  async (t) => {
+    const f = await fixture(t);
+    const executable = path.join(f.root, 'bin/git');
+    const options = { diff: true, env: { ...process.env, PATH: path.dirname(executable) } };
+    f.write(
+      'bin/git',
+      `#!${process.execPath}\nrequire('node:fs').writeSync(2, 'synthetic signal diagnostic');\nprocess.kill(process.pid, 'SIGTERM');\n`
+    );
+    chmodSync(executable, 0o755);
+    await assert.rejects(
+      () => runGit(f.root, [], options),
+      (error) =>
+        error.signal === 'SIGTERM' && error.stderr.toString() === 'synthetic signal diagnostic'
+    );
+    for (const stream of ['stdout', 'stderr']) {
+      f.write(
+        'bin/git',
+        `#!${process.execPath}\nrequire('node:fs').writeSync(${stream === 'stdout' ? 1 : 2}, Buffer.alloc(4096, 120));\nprocess.exitCode = 1;\n`
+      );
+      await assert.rejects(
+        () => runGit(f.root, [], { ...options, maxBuffer: 32 }),
+        (error) => error.code === 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER' && error[stream].length === 32
+      );
+    }
+  }
+);

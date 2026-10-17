@@ -48,7 +48,7 @@ import {
  */
 import { describe, expect, it } from 'vitest';
 import { LoroDoc } from 'loro-crdt';
-import { LocalLoroTransportAdapter } from '../src/local-loro-transport';
+import { LocalLoroTransportAdapter } from '../test-support/local-loro-v7-client';
 import { LocalLoroDataPlaneServerLegacy } from '../src/local-loro-data-plane-server';
 import {
   base64ToBytes,

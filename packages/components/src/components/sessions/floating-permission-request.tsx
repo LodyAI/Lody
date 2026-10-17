@@ -9,7 +9,7 @@ import {
 import * as stylex from '@stylexjs/stylex';
 import { ChevronDown, ChevronLeft, ChevronRight, CircleStop } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import { Button } from '@lody/ui/button';
+import { Button, ButtonGroup } from '@lody/ui/button';
 import { Spinner } from '@lody/ui/spinner';
 import { colors, shadow } from '@lody/ui/tokens/colors.stylex';
 import { corner, radius, space, text } from '@lody/ui/tokens/scales.stylex';
@@ -127,6 +127,8 @@ const styles = stylex.create({
    */
   card: {
     boxSizing: 'border-box',
+    minWidth: 0,
+    maxWidth: '100%',
     display: 'flex',
     flexDirection: 'column',
     gap: space[2],
@@ -224,7 +226,18 @@ const styles = stylex.create({
     gap: space[2],
     paddingTop: space[1],
   },
-  split: { display: 'inline-flex', alignItems: 'center', gap: '2px', minWidth: 0 },
+  split: {
+    minWidth: 0,
+    maxWidth: '100%',
+  },
+  optionLabel: {
+    minWidth: 0,
+    maxWidth: '32em',
+    whiteSpace: 'pre-wrap',
+    overflowWrap: 'anywhere',
+  },
+  menuLabel: { paddingBlock: space[1.5], textAlign: 'start' },
+  menuChevron: { width: '12px', height: '12px', flexShrink: 0 },
 
   queueStrip: {
     display: 'flex',
@@ -273,8 +286,9 @@ export interface PermissionPromptProps {
  * One permission request at the composer's scale: the question and why, what
  * it is about, and one row of answers at the end — a split button for refusing
  * and one for allowing, each showing its one-time answer (the suggestion
- * primary) with the standing answers in its menu. The answers are the
- * provider's own words, never rewritten.
+ * primary) with the standing answers in its menu. A long shown answer moves
+ * its family into a compact menu trigger. Option names stay the provider's
+ * own words, never rewritten, and opening a menu submits no answer.
  *
  * Keyboard: the arrows walk the answers starting from the suggested one, Enter
  * or Space presses the one focused, and Escape refuses once. Enter on the card
@@ -384,14 +398,61 @@ export function PermissionPrompt({
   const renderFamily = (family: { main: PermissionOption; more: PermissionOption[] }) => {
     const { main, more } = family;
     const description = resolvePermissionOptionDescription(main);
+    const tone = resolvePermissionOptionTone(main);
+    // Keep sentences in the reading surface. Full-width characters consume
+    // two places in this conservative compact-control label budget.
+    const menuOnly =
+      Array.from(main.name).reduce(
+        (width, character) => width + (character.codePointAt(0)! > 255 ? 2 : 1),
+        0
+      ) > 32;
+    const variant = main.optionId === suggestedOptionId ? 'primary' : 'secondary';
+    const registerAnswer = (node: HTMLButtonElement | null) => {
+      if (node) answerRefs.current.set(main.optionId, node);
+      else answerRefs.current.delete(main.optionId);
+    };
+    const renderOptions = (options: PermissionOption[]) => (
+      <Menu.Content side="top" align="end">
+        {options.map((option) => (
+          <Menu.Item
+            key={option.optionId}
+            data-tone={resolvePermissionOptionTone(option)}
+            onClick={() => onSelect(option.optionId)}
+          >
+            <span {...stylex.props(styles.optionLabel, styles.menuLabel)}>{option.name}</span>
+          </Menu.Item>
+        ))}
+      </Menu.Content>
+    );
+    if (menuOnly) {
+      const label =
+        tone === 'reject' || tone === 'rejectAlways'
+          ? t('sessions.permission.refuseChoices', 'Decline')
+          : tone === 'allow' || tone === 'allowAlways'
+            ? t('sessions.permission.allowChoices', 'Allow')
+            : t('sessions.permission.otherChoices', 'Choose an answer');
+      return (
+        <Menu.Root key={main.optionId}>
+          <Menu.Trigger
+            render={
+              <Button ref={registerAnswer} variant={variant} size="small" disabled={disabled} />
+            }
+          >
+            {sendingFamily === family ? <Spinner size="small" /> : null}
+            {label}
+            <ChevronDown aria-hidden="true" {...stylex.props(styles.menuChevron)} />
+          </Menu.Trigger>
+          {renderOptions(
+            permission.options.filter((option) => option === main || more.includes(option))
+          )}
+        </Menu.Root>
+      );
+    }
     return (
-      <div key={main.optionId} {...stylex.props(styles.split)}>
+      <ButtonGroup key={main.optionId} {...stylex.props(styles.split)}>
         <Button
-          ref={(node: HTMLButtonElement | null) => {
-            if (node) answerRefs.current.set(main.optionId, node);
-            else answerRefs.current.delete(main.optionId);
-          }}
-          variant={main.optionId === suggestedOptionId ? 'primary' : 'secondary'}
+          ref={registerAnswer}
+          variant={variant}
           size="small"
           disabled={disabled}
           title={description ?? undefined}
@@ -417,20 +478,10 @@ export function PermissionPrompt({
             >
               <ChevronDown aria-hidden="true" />
             </Menu.Trigger>
-            <Menu.Content align="end">
-              {more.map((option) => (
-                <Menu.Item
-                  key={option.optionId}
-                  data-tone={resolvePermissionOptionTone(option)}
-                  onClick={() => onSelect(option.optionId)}
-                >
-                  {option.name}
-                </Menu.Item>
-              ))}
-            </Menu.Content>
+            {renderOptions(more)}
           </Menu.Root>
         ) : null}
-      </div>
+      </ButtonGroup>
     );
   };
 
@@ -488,6 +539,15 @@ export function PermissionPrompt({
             </span>
           ) : null}
         </div>
+      ) : null}
+
+      {subject?.type === 'command' && subject.truncated ? (
+        <p role="note" {...stylex.props(styles.status, styles.statusError)}>
+          {t(
+            'sessions.permission.commandTruncated',
+            'This command is longer than 1 KB and only its beginning is shown. Approve only if you trust the rest.'
+          )}
+        </p>
       ) : null}
 
       {error ? (

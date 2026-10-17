@@ -1,4 +1,5 @@
-import type { LoroRepo, RepoFlockDocLease } from 'loro-repo';
+import type { WorkspaceRepoLegacy } from '../workspace-data/repo-legacy';
+import type { RepoFlockDocLease } from 'loro-repo';
 import { z } from 'zod';
 import { getShortcutBodyStreamId } from './access';
 import { parsePromptShortcut } from './compiler';
@@ -39,14 +40,14 @@ const intentSchema = z.object({ record: recordSchema, baseRevision: z.string().n
 export class LocalShortcutStore {
   private tail: Promise<unknown> = Promise.resolve();
   private constructor(
-    readonly repo: LoroRepo,
+    readonly repo: WorkspaceRepoLegacy,
     readonly workspaceId: string,
     readonly userId: string,
     private readonly ledger: RepoFlockDocLease,
     private readonly ledgerId: string
   ) {}
 
-  static async open(options: { repo: LoroRepo; workspaceId: string; userId: string }) {
+  static async open(options: { repo: WorkspaceRepoLegacy; workspaceId: string; userId: string }) {
     if (options.repo.hasTransport())
       throw new Error('Shortcut storage must not use workspace transports');
     const id = `shortcut-local:${encodeURIComponent(options.workspaceId)}:${encodeURIComponent(options.userId)}`;

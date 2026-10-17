@@ -205,44 +205,6 @@ export function isDirectLocalProject(project: unknown, sessionIsWorktree?: unkno
   );
 }
 
-/**
- * Structural, brand-agnostic view of a `ProjectRef` so this helper accepts both
- * the branded `ProjectRef` (web) and the Zod-inferred preparation spec (CLI),
- * whose `localProjectId` is a plain string.
- */
-type ProjectRefDedupInput =
-  | { kind: 'github'; repoFullName: string; branch: string }
-  | {
-      kind: 'local';
-      localProjectId: string;
-      branch?: string;
-      githubRepoFullName?: string;
-      useWorktree?: boolean;
-    };
-
-/**
- * Produces a stable, JSON-comparable value from a `ProjectRef` so that the CLI's
- * session-preparation claim key and the client's preparation request key derive
- * the SAME identity. Both sides MUST consume this single definition: if the shapes
- * drift, preparations silently stop being claimed and every draft falls back to a
- * cold start with no error. Returns `null` when there is no project.
- */
-export function normalizeProjectRefForDedup(
-  project: ProjectRefDedupInput | null | undefined
-): unknown {
-  if (!project) return null;
-  if (project.kind === 'github') {
-    return ['github', project.repoFullName, project.branch];
-  }
-  return [
-    'local',
-    project.localProjectId,
-    project.branch ?? null,
-    project.githubRepoFullName ?? null,
-    project.useWorktree === true,
-  ];
-}
-
 export function resolveBaseBranchPreference(options: {
   preferredBranch?: unknown;
   baseBranch?: unknown;

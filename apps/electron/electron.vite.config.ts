@@ -19,6 +19,7 @@ import {
 import { stylexOptions } from '../../packages/ui/stylex-options'
 import { emojibaseAssetsPlugin } from '../../packages/components/vite-emojibase-assets'
 import { bootShellPlugin } from '../../packages/components/vite-boot-shell'
+import { preservePdfWorkerExports } from '../../packages/components/vite-pdf-worker'
 
 function getGitCommitHash(): string {
   try {
@@ -146,7 +147,7 @@ export default defineConfig(({ mode }) => {
       },
       worker: {
         format: 'es',
-        plugins: () => [loroCrdtWasmUrlWorkaround(), wasm()]
+        plugins: () => [preservePdfWorkerExports(), loroCrdtWasmUrlWorkaround(), wasm()]
       },
       optimizeDeps: {
         exclude: ['@loro-dev/streams-crdt', '@loro-dev/streams-crdt/zstd']

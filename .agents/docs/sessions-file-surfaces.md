@@ -9,6 +9,13 @@ pointer to this page live in
 [that directory's AGENTS.md](../../packages/components/src/components/sessions/AGENTS.md);
 this page is the full text of the rules summarised there.
 
+Same-machine Electron previews read directly through desktop IPC after checking
+persistent local machine identity. Neither daemon liveness, protocol metadata nor
+the file index gates opening a known path. Relative paths use the cached owner
+session's workspace root; absolute/home paths need no root. Remote targets retain
+bounded Machine RPC reads. Indexing and saving still require the daemon. See the
+[implementation decision](../notes/implemented/bug-fix/2026-10-16-daemon-independent-local-file-preview.md).
+
 - Diff page: `session-conversation-diff-panel.tsx`, data from
   `use-session-conversation-diff-data.ts`. Each file title copies the
   workspace-relative path and, when wired, opens a file-preview viewer tab
@@ -21,6 +28,11 @@ this page is the full text of the rules summarised there.
   cards start collapsed and remain individually expandable. A base (All Changes)
   diff opened without a focus starts with every card collapsed, while a direct
   conversation/turn diff without a file focus keeps its all-files-open default.
+  A card still loading draws a pulsing skeleton body only if it will open, and
+  only the first `MAX_DIFF_SKELETON_BODIES` such cards do; the rest wait as
+  headers. One body per file in a diff of a few thousand files made WebKit
+  composite thousands of pulsing layers and killed the iOS WebContent process
+  ([decision](../notes/implemented/bug-fix/2026-10-16-diff-loading-skeleton-cap.md)).
   On mobile, the diff-header action closes the diff sheet before opening the
   file drawer so the diff modal cannot cover the destination viewer.
   `SessionMobileDiffDrawerContent` explicitly portals the diff into the nearest
@@ -116,6 +128,12 @@ this page is the full text of the rules summarised there.
   thumbnails, direct page entry, quarter-turn rotation, zoom modes and percentages,
   and expandable search. Thumbnail rendering follows the visible sidebar range;
   file actions remain in the existing side-panel menu.
+  Keep the project-owned, bundled Worker entry and its `WorkerMessageHandler`
+  export for the main-thread fallback. Clear the viewer document before aborting
+  its lifetime. The PDF.js patch makes global selection listeners belong to all
+  live text layers, so closing one viewer cannot disable another; removing the
+  final layer releases them. Preserve these responsibilities on dependency
+  upgrades. See [PDF Worker and listener ownership](../notes/implemented/bug-fix/2026-10-17-pdf-worker-build-compatibility.md).
 - Markdown file viewers copy the latest complete source text (including unsaved
   editor changes) from the top toolbar. On mobile, source mode uses the native
   text surface instead of Monaco so long-press keeps the OS selection menu;
@@ -145,3 +163,12 @@ this page is the full text of the rules summarised there.
   local Electron bundle and must not return. Office format engines are the
   narrow exception: their WASM/worker cost is deferred until an active file
   actually needs them. The static entry shell handles loading and errors.
+
+## Recovering failed previews
+
+An explicit reopen of the same failed file tab starts another read, including when
+the tab is already active. The error card also offers Retry. Focus requests on a
+successful preview do not reload its snapshot or discard unsaved edits. Existing
+load-effect cleanup fences late results after a retry, file switch, or unmount;
+there is no background retry loop. See the
+[failure classification and recovery note](../notes/implemented/bug-fix/2026-10-16-file-preview-failure-recovery.md).

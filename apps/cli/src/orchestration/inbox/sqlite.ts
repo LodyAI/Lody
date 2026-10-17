@@ -488,6 +488,15 @@ export class InboxSqlite {
       .get(workspaceId, sessionId, inputId) as { cancellation_reason: string | null } | undefined;
     return row?.cancellation_reason === 'user_stop' ? 'user_stop' : undefined;
   }
+  /** True once an input finished or was canceled; `begin` never admits it again. */
+  inputEnded(workspaceId: string, sessionId: string, inputId: string): boolean {
+    const row = this.db
+      .prepare(
+        'SELECT canceled,finished FROM inbox_inputs WHERE workspace_id=? AND session_id=? AND input_id=?'
+      )
+      .get(workspaceId, sessionId, inputId) as { canceled: number; finished: number } | undefined;
+    return row?.canceled === 1 || row?.finished === 1;
+  }
   inputCanceled(workspaceId: string, sessionId: string, inputId: string): boolean {
     const row = this.db
       .prepare(
@@ -686,6 +695,44 @@ export class InboxSqlite {
           )
           .run(executionId, 'inputId' in s ? s.inputId : null, s.workspaceId, s.sessionId, s.userId)
           .changes === 1
+      );
+    });
+  }
+  /**
+   * Undo `begin` for an execution that submitted nothing and acquired nothing,
+   * such as a turn whose machine access is still unverified. No release receipt is
+   * written and the input stays unfinished, so the same execution id may begin it
+   * again; prepared batch claims stay with the input.
+   */
+  withdraw(s: InboxScope & { inputId: string }, executionId: string): boolean {
+    return this.transaction(() => {
+      const current = this.state(s);
+      if (current.active_execution !== executionId || current.active_input !== s.inputId)
+        return false;
+      const used = this.db
+        .prepare(
+          `SELECT 1 FROM inbox_releases WHERE workspace_id=? AND session_id=? AND execution_id=?
+           UNION ALL SELECT 1 FROM inbox_resources WHERE workspace_id=? AND session_id=? AND execution_id=?
+           UNION ALL SELECT 1 FROM inbox_batches WHERE workspace_id=? AND session_id=? AND input_id=? AND state NOT IN ('prepared','superseded')`
+        )
+        .get(
+          s.workspaceId,
+          s.sessionId,
+          executionId,
+          s.workspaceId,
+          s.sessionId,
+          executionId,
+          s.workspaceId,
+          s.sessionId,
+          s.inputId
+        );
+      if (used) return false;
+      return (
+        this.db
+          .prepare(
+            'UPDATE inbox_sessions SET active_execution=NULL WHERE workspace_id=? AND session_id=? AND active_execution=?'
+          )
+          .run(s.workspaceId, s.sessionId, executionId).changes === 1
       );
     });
   }

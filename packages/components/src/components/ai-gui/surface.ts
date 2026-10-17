@@ -26,6 +26,8 @@ export const conversationSurface = stylex.create({
     minHeight: `max(0px, calc(${conversation.roundGap} - ${conversation.metadataPitch} - ${conversation.metadataGap}))`,
   },
   roundFooterRow: { paddingBottom: 0 },
+  // Mobile leads the action bar with "Worked for …": put it on the prose rail.
+  mobileTurnActions: { paddingInlineStart: conversation.railInset },
   roundLastRow: {
     paddingBottom: `max(0px, calc(${conversation.roundGap} - ${conversation.metadataPitch} - ${conversation.metadataGap}))`,
   },

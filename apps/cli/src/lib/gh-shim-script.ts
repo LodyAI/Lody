@@ -681,7 +681,7 @@ async function* ghEnvironments(ghCommand, args) {
     const token = env.GH_TOKEN || env.GITHUB_TOKEN;
     if (token) return { token };
     const result = await runGhCommand(ghCommand, ['auth', 'token', '--hostname', target.host], {
-      env, stdio: ['ignore', 'pipe', 'pipe'], timeout: 3000,
+      env, stdio: ['ignore', 'pipe', 'pipe'], timeout: 10_000,
     });
     if (result.error) throw result.error;
     if (result.status !== 0) throw credentialError('local_auth_missing');

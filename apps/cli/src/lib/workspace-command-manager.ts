@@ -9,10 +9,12 @@ export interface WorkspaceCommandScope {
 
 interface CommandManager {
   cleanUp(options: { fast: boolean; preserveSessionStatus: boolean }): Promise<void>;
-  isPresenceReleased(): boolean;
 }
 
-/** Overlapping commands borrow one manager; completed cleanup removes the entry. */
+/**
+ * Overlapping standalone commands borrow one manager; the last release cleans it up.
+ * Daemon-executed commands borrow the daemon's replica instead and never reach this.
+ */
 export function makeWorkspaceCommandManagers<Manager extends CommandManager>() {
   const entries = new Map<
     string,
@@ -31,8 +33,8 @@ export function makeWorkspaceCommandManagers<Manager extends CommandManager>() {
     onCleanupFailure: (error: unknown) => void
   ): Promise<Result> {
     let entry = entries.get(workspaceId);
-    // Never admit a new owner while the previous manager is still closing.
-    // Only unreleased presence keeps a failed receipt and its original owner.
+    // Hand off after the previous manager's actual cleanup. A failed cleanup is
+    // reported once and never fences later commands.
     while (entry?.closing) {
       await entry.closing;
       entry = entries.get(workspaceId);
@@ -65,22 +67,19 @@ export function makeWorkspaceCommandManagers<Manager extends CommandManager>() {
       if (--borrowed.users === 0) {
         borrowed.closing = Promise.resolve()
           .then(() => manager.cleanUp({ fast: true, preserveSessionStatus: true }))
-          .then(() => {
-            entries.delete(workspaceId);
-          })
-          .catch((error: unknown) => {
-            if (!manager.isPresenceReleased()) throw error;
-            // Cleanup settled and presence is released: a transport/repo error
-            // must not poison later callers, including those already waiting.
-            entries.delete(workspaceId);
-            onCleanupFailure(error);
-          });
-        try {
-          await borrowed.closing;
-        } catch (error) {
           // Preserve an accepted command's result, matching the existing cleanup policy.
-          onCleanupFailure(error);
-        }
+          // A throwing reporter must not fail this command or the waiters behind it.
+          .catch((error: unknown) => {
+            try {
+              onCleanupFailure(error);
+            } catch {
+              // Reporting is best effort.
+            }
+          })
+          .finally(() => {
+            entries.delete(workspaceId);
+          });
+        await borrowed.closing;
       }
     }
   };

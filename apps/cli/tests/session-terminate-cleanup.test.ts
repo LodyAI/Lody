@@ -9,6 +9,7 @@ import { TerminationFailed } from '@lody/shared/node/process';
 import { Session } from '../src/session/session';
 import type { TerminalManager } from '../src/session/terminal-manager';
 import {
+  createNoopSessionSandbox,
   createSessionSandboxFactory,
   type SessionProcessHandle,
   type SessionSandbox,
@@ -246,6 +247,27 @@ describe('Session terminate cleanup', () => {
   });
 
   // A survivor may still hold the ACP prompt; reuse would feed it a new turn.
+  // Both track the same process group: ending them in turn doubled every
+  // bounded wait on a survivor before the turn could fail or proceed.
+  it('ends the sandbox while the agent tree is still being waited on', async () => {
+    const sandbox = createNoopSessionSandbox();
+    let sandboxTerminating = false;
+    vi.spyOn(sandbox, 'terminate').mockImplementation(async () => {
+      sandboxTerminating = true;
+    });
+    const session = createSession(sandbox);
+    let sandboxTerminatingDuringAgentWait = false;
+    // @ts-expect-error - exercising private process handle wiring
+    session.agentProcess = createProcessHandle(async () => {
+      await Promise.resolve();
+      sandboxTerminatingDuringAgentWait = sandboxTerminating;
+    });
+
+    await session.terminate(true);
+
+    expect(sandboxTerminatingDuringAgentWait).toBe(true);
+  });
+
   it('retains the process owner and original failure until independent cleanup succeeds', async () => {
     const survivor = new TerminationFailed({
       target: 'process group 4321',

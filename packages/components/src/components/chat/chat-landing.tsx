@@ -18,7 +18,6 @@ import { useTranslation } from 'react-i18next';
 import { useAtom, useAtomValue, useSetAtom, useStore } from 'jotai';
 import {
   ACP_CAPABILITY_ROW_FAMILIES,
-  buildSessionPreparationRunConfig,
   buildSessionTurnInputConfig,
   evaluateSessionCreateQuota,
   extractPromptPreviewFromInputBlocks,
@@ -225,7 +224,6 @@ import { buildChatLandingDraftKey } from '@/atoms/chat-landing-draft';
 import { useChatLandingImageDraft } from '@/hooks/use-chat-landing-image-draft';
 import { useChatLandingFileDraft } from '@/hooks/use-chat-landing-file-draft';
 import { useChatLandingDraftSession } from '@/hooks/use-chat-landing-draft-session';
-import { useSessionPreparation } from '@/hooks/use-session-preparation';
 import { getCommandKeybindings, useCommand } from '@/lib/commands';
 import { isElectronRenderer } from '@/lib/electron';
 import { withGitHubTokenRetry } from '@/lib/github-token';
@@ -968,7 +966,6 @@ function WorkspaceChatLanding({
     chatLandingSessionStateAtomFamily(chatLandingDraftKey)
   );
   const prompt = sessionState.prompt;
-  const [draftActivityRevision, setDraftActivityRevision] = useState(0);
   const pastedTextDrafts = useMemo(
     () => sanitizePastedTextDrafts(sessionState.pastedTextDrafts),
     [sessionState.pastedTextDrafts]
@@ -1007,7 +1004,6 @@ function WorkspaceChatLanding({
   const setPrompt = useCallback(
     (value: string) => {
       setSessionState((prev) => ({ ...prev, prompt: value }));
-      setDraftActivityRevision((revision) => revision + 1);
       setComposerStatus(null);
     },
     [setSessionState]
@@ -3096,9 +3092,6 @@ function WorkspaceChatLanding({
           Date.now()
         )
       );
-      if (attachments.length) cancelSessionPreparation();
-      else handoffSessionPreparation(sessionId);
-
       capturePostHogEvent(postHog, 'session/start_requested', {
         user_id: userId,
         workspace_id: workspaceId,
@@ -4168,100 +4161,6 @@ function WorkspaceChatLanding({
     if (contextType !== 'local') return undefined;
     return resolveLocalProjectGithubRepoFullName(activeLocalGitState) ?? undefined;
   }, [activeLocalGitState, contextType]);
-
-  const preparationMachineId = useMemo(() => {
-    if (!selectedAgent) return null;
-    const candidateMachineId =
-      selectedMachineId && isSelectedMachineValid
-        ? selectedMachineId
-        : contextType === 'local'
-          ? (selectedLocalProject?.machineId ?? null)
-          : null;
-    return candidateMachineId === selectedAgent.machineId ? candidateMachineId : null;
-  }, [
-    contextType,
-    isSelectedMachineValid,
-    selectedAgent,
-    selectedLocalProject?.machineId,
-    selectedMachineId,
-  ]);
-  const preparationProject = useMemo<ProjectRef | undefined>(() => {
-    if (contextType === 'chat') return undefined;
-    if (contextType === 'github') {
-      const branch = selectedBranch?.trim();
-      if (!selectedRepo || !branch) return undefined;
-      return { kind: 'github', repoFullName: selectedRepo, branch };
-    }
-    if (!selectedLocalProject || selectedLocalProject.machineId !== preparationMachineId) {
-      return undefined;
-    }
-    const branch =
-      effectiveWorkdirMode === 'worktree' ? selectedLocalBranch?.trim() || undefined : undefined;
-    return {
-      kind: 'local',
-      localProjectId: selectedLocalProject.localProjectId,
-      ...(branch ? { branch } : {}),
-      ...(selectedLocalProjectGithubRepoFullName
-        ? { githubRepoFullName: selectedLocalProjectGithubRepoFullName }
-        : {}),
-      ...(effectiveWorkdirMode === 'worktree' ? { useWorktree: true } : {}),
-    };
-  }, [
-    contextType,
-    effectiveWorkdirMode,
-    preparationMachineId,
-    selectedBranch,
-    selectedLocalBranch,
-    selectedLocalProject,
-    selectedLocalProjectGithubRepoFullName,
-    selectedRepo,
-  ]);
-  const preparationContextReady =
-    contextType === 'chat' ||
-    (contextType === 'github' && preparationProject?.kind === 'github') ||
-    (contextType === 'local' && preparationProject?.kind === 'local');
-  const preparationRunConfig = useMemo(
-    () =>
-      buildSessionPreparationRunConfig({
-        memory: activeAgentRole?.runConfig.memory,
-        modeId: modeOptions.length > 0 ? selectedModeId : null,
-        modelId: modelOptions.length > 0 ? selectedModelId : null,
-        configOptionValues: dispatchConfigOptionValues,
-        mcpServerIds: mcpSelection.selectedIds,
-      }),
-    [
-      dispatchConfigOptionValues,
-      mcpSelection.selectedIds,
-      activeAgentRole?.runConfig.memory,
-      modeOptions.length,
-      modelOptions.length,
-      selectedModeId,
-      selectedModelId,
-    ]
-  );
-  const { handoffToSession: handoffSessionPreparation, cancel: cancelSessionPreparation } =
-    useSessionPreparation({
-      runtime,
-      machineId: preparationMachineId,
-      requestedByUserId: userId ?? null,
-      agentConfigId: selectedConfig?.id ?? null,
-      cliType: selectedConfig?.cliType ?? null,
-      agentType: selectedConfig?.agentType ?? null,
-      project: preparationProject,
-      runConfig: preparationRunConfig,
-      sessionId: draftSessionId,
-      ensureSessionId: ensureDraftSessionId,
-      enabled:
-        preparationContextReady &&
-        Boolean(
-          runtime &&
-          preparationMachineId &&
-          userId &&
-          selectedConfig &&
-          (prompt.trim().length > 0 || imageItems.length > 0 || fileItems.length > 0)
-        ),
-      activityRevision: `${draftActivityRevision}:${imageItems.length}:${fileItems.length}`,
-    });
 
   const mentionSource = useMemo(() => {
     if (contextType === 'chat') return undefined;

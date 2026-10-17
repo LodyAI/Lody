@@ -96,3 +96,7 @@ executor })` with that provider and the existing application runtime; this mode
 creates no runtime or cache. Its close ends the provider after all cloud sinks
 are detached, and never disposes the borrowed executor. Renderer/Machine RPC
 callers may still use the owned options until their application ownership migrates.
+Native workspace transports borrow the already primed provider's
+`createNativeAuthCallback()` through the compatibility entry. This returns the
+existing native service callback directly, with no second token cache or Promise
+round trip. Workspace close retains the provider until transport cleanup completes.

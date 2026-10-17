@@ -18,31 +18,27 @@ const agentMessage = (text: string, phase?: string): AcpSessionNotification => (
 
 describe('extractTitleChunkFromNotification', () => {
   it('ignores Codex commentary status text', () => {
-    expect(
-      extractTitleChunkFromNotification(agentMessage('Reconnecting...', 'commentary'), 'codex')
-    ).toBe(null);
+    expect(extractTitleChunkFromNotification(agentMessage('Reconnecting...', 'commentary'))).toBe(
+      null
+    );
   });
 
   it('accepts the Codex final answer', () => {
     expect(
-      extractTitleChunkFromNotification(agentMessage('Fix session title', 'final_answer'), 'codex')
+      extractTitleChunkFromNotification(agentMessage('Fix session title', 'final_answer'))
     ).toBe('Fix session title');
   });
 
-  it('rejects untyped chunks from Codex title agents', () => {
-    expect(extractTitleChunkFromNotification(agentMessage('HTTP 400'), 'codex')).toBe(null);
+  it('accepts Codex answers without optional phase metadata', () => {
+    expect(extractTitleChunkFromNotification(agentMessage('Fix session title'))).toBe(
+      'Fix session title'
+    );
   });
 
   it('keeps one-release compatibility with Codex phase metadata', () => {
     const notification = agentMessage('Fix session title');
     notification.update._meta = { codex: { phase: 'final_answer' } };
-    expect(extractTitleChunkFromNotification(notification, 'codex')).toBe('Fix session title');
-  });
-
-  it('keeps compatibility with ACP agents that do not provide phase metadata', () => {
-    expect(extractTitleChunkFromNotification(agentMessage('Fix session title'), 'kimi')).toBe(
-      'Fix session title'
-    );
+    expect(extractTitleChunkFromNotification(notification)).toBe('Fix session title');
   });
 });
 

@@ -38,6 +38,11 @@ import { isNativeIOSAppShell } from '@/lib/native-platform';
 import { isLocalAppPlatform } from '@/lib/app-platform';
 import { useResolvedWorkspaceScope } from '../../hooks/use-resolved-workspace-scope';
 import { WorkspaceSyncStuckReporter } from '@/components/workspace-sync-stuck-reporter';
+import {
+  resolveWorkspaceDataWaitKind,
+  useRecordWorkspaceDataReady,
+  WorkspaceDataWait,
+} from '@/components/workspace-data-wait';
 import { useBillingOverviewPreload } from '../../hooks/use-billing-overview-preload';
 
 const AUTH_ROUTE_ONESIGNAL_LOGIN_IDLE_TIMEOUT_MS = 10_000;
@@ -362,6 +367,7 @@ function AuthedLayoutRoutes({
   useBillingOverviewPreload(user ? currentWorkspaceId : null);
   const [orgSettled, setOrgSettled] = useState(!organizationsLoading);
   const [userSettled, setUserSettled] = useState(Boolean(user) && Boolean(currentWorkspaceId));
+  useRecordWorkspaceDataReady(currentWorkspaceId ? workspaceName : null, user?.id ?? null);
 
   useEffect(() => {
     if (!organizationsLoading) {
@@ -381,14 +387,13 @@ function AuthedLayoutRoutes({
     }
 
     if (!currentWorkspaceId) {
+      const waitKind = resolveWorkspaceDataWaitKind(workspaceName, user?.id ?? null);
+      if (waitKind === 'cold-start') {
+        return <WorkspaceDataWait kind={waitKind} />;
+      }
       return (
         <PreloadedMainLayout workspaceReady={false}>
-          <BlockingWaitPlaceholder
-            gate="workspace_data"
-            variant="content"
-            title={t('workspace.route.switchingTitle')}
-            description={t('workspace.route.switchingDescription')}
-          />
+          <WorkspaceDataWait kind={waitKind} />
         </PreloadedMainLayout>
       );
     }

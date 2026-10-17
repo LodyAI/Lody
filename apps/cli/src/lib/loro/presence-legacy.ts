@@ -69,7 +69,6 @@ export const createCliPresenceRuntimeLegacy = async (workspaceId: WorkspaceId) =
     attachStreams: (options: PresenceRemoteOptions) => run(owner.attach(options)),
     detachStreams: () => run(owner.detach),
     stop: () => run(owner.stop),
-    isReleased: owner.isReleased,
     retryCleanup: () => run(owner.retryCleanup),
     waitUntilJoined: async (timeoutMs: number, signal?: AbortSignal): Promise<boolean> => {
       const exit = await root.runtime.runPromiseExit(owner.waitUntilJoined(timeoutMs), { signal });

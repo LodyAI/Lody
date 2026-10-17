@@ -34,6 +34,12 @@ import { isWarmWindow } from './desktop-window';
 import { PROMPT_SHORTCUT_DATA_PREFIX } from './prompt-shortcut-storage';
 import { ROOST_HISTORY_CACHE_DB } from './roost-history-cache';
 import { SESSION_INPUT_DATABASE } from './session-input-storage';
+import {
+  CLIENT_LOG_DATABASE,
+  flushClientLog,
+  recordClientError,
+  recordClientLog,
+} from './client-log';
 
 /**
  * Prefix for the per-workspace meta remote-cursor startup-bypass marker.
@@ -62,6 +68,7 @@ export type PendingLocalClearMode = 'cache' | 'hard';
 /** IndexedDB databases created with static names (not suffixed per workspace). */
 const KNOWN_INDEXEDDB_NAMES = [
   SESSION_INPUT_DATABASE,
+  CLIENT_LOG_DATABASE,
   ROOST_HISTORY_CACHE_DB,
   // Durable session-send journal of earlier builds; no longer written, but an
   // upgraded install may still hold it, and a cache clear should remove it.
@@ -248,10 +255,14 @@ export async function clearAllLodyLocalCache(extraNames: string[] = []): Promise
       // known static names plus any per-workspace names the caller passed.
     }
     // A Shortcut outbox may contain the only copy of an offline save. Only the
-    // explicitly destructive hard reset below may remove these databases.
+    // explicitly destructive hard reset below may remove these databases. The
+    // client log is what explains why a clear was needed, so it stays too.
     failed = await deleteDatabases(
       [...names].filter(
-        (name) => !name.startsWith(PROMPT_SHORTCUT_DATA_PREFIX) && name !== SESSION_INPUT_DATABASE
+        (name) =>
+          !name.startsWith(PROMPT_SHORTCUT_DATA_PREFIX) &&
+          name !== SESSION_INPUT_DATABASE &&
+          name !== CLIENT_LOG_DATABASE
       )
     );
   }
@@ -641,6 +652,7 @@ async function runPendingClearOnBoot(): Promise<PendingLocalClearMode | null> {
     ({ failed } = mode === 'hard' ? await clearAllLodyLocalData() : await clearAllLodyLocalCache());
   } catch (error) {
     console.warn('[Lody] local clear threw', error);
+    recordClientError('cache.clear_on_boot_threw', error, { mode });
   }
   const record: LocalClearRecord = {
     mode,
@@ -651,6 +663,11 @@ async function runPendingClearOnBoot(): Promise<PendingLocalClearMode | null> {
   writeLastLocalClear(record);
   bootClearRecord = record;
   if (!record.ok) console.warn('[Lody] local clear left databases behind', record);
+  recordClientLog(record.ok ? 'info' : 'error', 'cache.clear_on_boot', undefined, {
+    mode,
+    ok: record.ok,
+    failedCount: record.failedCount,
+  });
   try {
     localStorage.removeItem(CACHE_CLEAR_FLAG);
   } catch (error) {
@@ -710,6 +727,9 @@ export function resetBootClearMemoForTests(): void {
  */
 export function reloadApp(): void {
   if (typeof window === 'undefined') return;
+  // The reload will not wait for IndexedDB; the page-hide spill keeps this entry.
+  recordClientLog('warn', 'app.reload_requested', undefined, { path: window.location.pathname });
+  void flushClientLog();
   if (window.__LODY_ELECTRON__ === true) {
     if (getIpcServices()) {
       void getIpcServices()!.app.requestRendererReload();

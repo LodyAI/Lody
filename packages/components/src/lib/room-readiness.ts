@@ -1,4 +1,7 @@
-import type { RepoRoomSubscription, RepoTransportRoomSubscription } from 'loro-repo';
+import type {
+  WorkspaceRoom as RepoRoomSubscription,
+  WorkspaceRoomBinding as RepoTransportRoomSubscription,
+} from '@lody/shared/workspace-data/repo-legacy';
 
 /**
  * Picks the single transport binding whose sync progress defines "readiness"

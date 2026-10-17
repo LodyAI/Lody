@@ -1,3 +1,4 @@
+import { useSessionWorkspacePath } from './use-session-workspace-path';
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { useAtomValue } from 'jotai';
 import { selectAtom } from 'jotai/utils';
@@ -176,8 +177,8 @@ function codeCollabFileIndexErrorMessage(error: unknown): string {
   return error instanceof Error
     ? error.message
     : typeof codeCollabError.message === 'string'
-    ? codeCollabError.message
-    : CODE_COLLAB_UNSUPPORTED_SESSION_MESSAGE;
+      ? codeCollabError.message
+      : CODE_COLLAB_UNSUPPORTED_SESSION_MESSAGE;
 }
 
 function useCodeCollabFileIndexLoadState(args: {
@@ -337,6 +338,25 @@ export function useCodeCollabSessionFileProvider(
     )
   );
   const ownerSessionId = (parentSessionId ?? sessionId) as SessionId;
+  const ownerMeta = useAtomValue(
+    useMemo(
+      () =>
+        selectAtom(
+          sessionMetaAtomFamily(getSessionRoomId(ownerSessionId)),
+          (meta) => meta,
+          (a, b) =>
+            a?.id === b?.id &&
+            a?.machineId === b?.machineId &&
+            a?.parentSessionId === b?.parentSessionId &&
+            a?.project === b?.project &&
+            a?.isWorktree === b?.isWorktree &&
+            a?.repoFullName === b?.repoFullName
+        ),
+      [ownerSessionId]
+    )
+  );
+  const desktopPreview = typeof window !== 'undefined' && window.__LODY_ELECTRON__ === true;
+  const workspaceRoot = useSessionWorkspacePath(desktopPreview ? ownerMeta : null);
   const workspaceId = options.workspaceId ?? runtime?.workspaceId ?? null;
   const machineId = options.machineId as MachineId | null | undefined;
   const textStateRef = useRef<ProviderTextStateRef | null>(null);
@@ -412,7 +432,7 @@ export function useCodeCollabSessionFileProvider(
         await runtime.requestFilePreview(
           machineId,
           { sessionId, path, ...(knownDigest === undefined ? {} : { knownDigest }) },
-          { ownerSessionId }
+          { ownerSessionId, workspaceRoot }
         ),
       openText: async (path) =>
         await runtime.requestCodeCollabOpenText(machineId, { sessionId, path }, { ownerSessionId }),
@@ -478,21 +498,21 @@ export function useCodeCollabSessionFileProvider(
           { ownerSessionId }
         ),
     };
-  }, [machineId, options.requestedByUserId, ownerSessionId, runtime, sessionId]);
+  }, [machineId, options.requestedByUserId, ownerSessionId, runtime, sessionId, workspaceRoot]);
 
   const provider = useMemo<SessionFileProvider | null>(() => {
     const sharedState = materializedSharedState;
-    if (!sharedState || !rpcRuntime) return null;
+    if (!rpcRuntime || (!sharedState && !desktopPreview)) return null;
     return new CodeCollabSessionFileProvider({
       runtime: rpcRuntime,
       role,
       sourceState,
-      files: sharedState.files,
-      allChanges: sharedState.allChanges,
-      updatedAtMs: sharedState.updatedAtMs,
+      files: sharedState?.files ?? [],
+      allChanges: sharedState?.allChanges ?? {},
+      updatedAtMs: sharedState?.updatedAtMs,
       textState: providerTextState,
     });
-  }, [materializedSharedState, providerTextState, role, rpcRuntime, sourceState]);
+  }, [desktopPreview, materializedSharedState, providerTextState, role, rpcRuntime, sourceState]);
 
   return useMemo<UseCodeCollabSessionFileProviderResult>(() => {
     if (options.enabled === false) {
@@ -526,7 +546,7 @@ export function useCodeCollabSessionFileProvider(
     }
     if (fileIndexLoadState.status === 'error') {
       return {
-        provider: null,
+        provider,
         status: 'error',
         space: null,
         error: fileIndexLoadState.error,
@@ -535,7 +555,7 @@ export function useCodeCollabSessionFileProvider(
     }
 
     return {
-      provider: null,
+      provider,
       status: fileIndexLoadState.status === 'loading' ? 'loading' : 'checking',
       space: null,
       message: CODE_COLLAB_SHARED_STATE_LOADING_MESSAGE,

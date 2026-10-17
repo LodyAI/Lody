@@ -14,6 +14,13 @@ The package owns:
 - The web RPC client.
 - The CLI RPC server.
 
+## Request deadlines
+
+JSON appends keep a 10-second upload deadline by default. A configured
+`timeout.connectTimeoutMs` also applies to appends unless
+`timeout.uploadTimeoutMs` overrides it. The SDK's longer bulk-document upload
+default does not change Machine RPC request deadlines.
+
 ## Development
 
 ```bash

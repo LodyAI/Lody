@@ -197,6 +197,19 @@ export const makeExecutionOwner = Effect.fnUntraced(function* (
         .pipe(Effect.tap(() => (batch ? inbox.settle(batch, 'submitted') : Effect.void))),
     finish: (outcome: InboxRelease['outcome'], cause?: unknown) =>
       releaseGate.withPermit(finishWork(outcome, cause)),
+    /** Return an unsubmitted, resource-free execution's input to pending; false if ineligible. */
+    withdraw: releaseGate.withPermit(
+      Effect.gen(function* () {
+        if (firstFinish || phase !== 'prepared' || resources.size > 0 || rawRequests.length > 0)
+          return false;
+        if (!(yield* inbox.withdraw(input, id))) return false;
+        firstFinish = Exit.void;
+        phase = 'released';
+        yield* detach;
+        yield* Deferred.succeed(released, undefined);
+        return true;
+      }).pipe(Effect.uninterruptible)
+    ),
     awaitReleased: Deferred.await(released),
     detach,
     recover: (prepare: Effect.Effect<void, unknown>, beforeRelease: Effect.Effect<void, unknown>) =>

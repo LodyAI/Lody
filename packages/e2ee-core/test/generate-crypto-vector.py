@@ -16,20 +16,23 @@ prefix = bytes([0]) + struct.pack('>IH', 0x01020304, 0) + bytes.fromhex(
 )
 prk = hmac.digest(b'lody-content-hkdf/v0\0', secret, 'sha256')
 cases = []
-for purpose, code in [('doc-update', 1), ('doc-snapshot', 2), ('blob', 5), ('presence', 7)]:
+for purpose, code in [('doc-update', 1), ('doc-snapshot', 2), ('flock-update', 3), ('flock-snapshot', 4), ('blob', 5), ('presence', 7)]:
     for binding in [b'', bytes.fromhex('abcd')]:
         authenticated_context = context + bytes([code])
         info = (b'lody-document-key/v0\0' + context if code <= 4
                 else b'lody-content-key/v0\0' + authenticated_context)
         # RFC5869 extract above; 32-byte output uses exactly one expand block.
         key = hmac.digest(prk, info + b'\x01', 'sha256')
+        position = b'opaque:0_123' if code in (2, 4) else None
+        purpose_prefix = prefix + (struct.pack('>H', len(position)) + position if position else b'')
         aad = (b'lody-content-aad-bound/v0\0' + authenticated_context
                + struct.pack('>H', len(binding)) + binding if binding
-               else b'lody-content-aad/v0\0' + authenticated_context) + prefix
+               else b'lody-content-aad/v0\0' + authenticated_context) + purpose_prefix
         plaintext = b'synthetic content v0'
         ciphertext = crypto_aead_xchacha20poly1305_ietf_encrypt(plaintext, aad, nonce, key)
         cases.append(dict(purpose=purpose, binding=binding.hex(), key=key.hex(),
-                          plaintext=plaintext.hex(), ciphertext=ciphertext.hex()))
+                          plaintext=plaintext.hex(), ciphertext=ciphertext.hex(),
+                          **({'continuationOffset': position.decode('ascii')} if position else {})))
 print(json.dumps(dict(
     source='Python stdlib HMAC-SHA256 RFC5869 extract/one-block expand; PyNaCl 1.6.2 libsodium XChaCha20-Poly1305; independently encoded v0 context/header/AAD',
     nonce=nonce.hex(), cases=cases,

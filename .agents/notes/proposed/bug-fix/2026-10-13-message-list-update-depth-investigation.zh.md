@@ -35,6 +35,7 @@ PR: [#1534](https://github.com/LodyAI/Lody/pull/1534)
 
 完成消息的 effect 镜像已由小范围的[派生状态改造](../../implemented/simplification/2026-10-13-completed-assistant-derived-state.zh.md) 移除。下面其余滚动和水合建议尚未实施。
 另已加入[引擎更新循环保护](../../implemented/bug-fix/2026-10-13-scroll-update-loop-guard.zh.md)，通过明确的边界恢复中止合成同步更新链，但没有证明用户报告的生产根因。
+该保护捕获的一次生产更新链已查明走的是水合反馈路径：[被相邻记录的水合状态分组的创建记录](../../implemented/bug-fix/2026-10-17-grouped-creation-record-anchor.zh.md)丢失了阅读锚点。其他报告的 #185 仍未解释。
 
 参考 React 的 [You Might Not Need an Effect](https://react.dev/learn/you-might-not-need-an-effect)，优先删除冗余状态和子到父的状态镜像。滚动适配器的布局测量、覆盖所需 commit、滚动写入、observer 注册和 lease 清理仍然在同步外部系统，不能变成渲染期副作用。
 

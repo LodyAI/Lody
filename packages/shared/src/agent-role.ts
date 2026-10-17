@@ -1,6 +1,6 @@
 import { MemoryBindingSchema, type MemoryBinding } from './memory-provider';
 import type { AgentConfigId, AgentRoleId, MachineId } from './ids';
-import { isSensitiveAcpConfigOptionId } from './session-preparation';
+import { isSensitiveAcpConfigOptionId } from './acp-config-option-sensitivity';
 
 /**
  * Agent Role — a named, mentionable preset for *creating* a Session.
@@ -187,7 +187,7 @@ export const normalizeAgentRoleEmoji = (value: unknown): string | undefined => {
  * Option keys a Role may never persist.
  *
  * The shared `isSensitiveAcpConfigOptionId` rule is the base so a Role refuses
- * exactly what session preparation already refuses to retain — one rule, not two
+ * exactly what other retained selections refuse to keep — one rule, not two
  * that drift. The extra names are Role-specific: a Role is a durable, possibly
  * workspace-shared row, so anything that looks like a stored identity belongs
  * in the Agent Config, not here.

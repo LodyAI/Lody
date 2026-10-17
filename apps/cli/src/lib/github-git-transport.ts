@@ -209,7 +209,7 @@ const main = async () => {
       if (token) return { token };
       throw credentialError('unsupported_local_header');
     }
-    const fill = spawnSync(REAL_GIT, ['credential', 'fill'], { env: { ...env, LODY_GIT_LOCAL_DELEGATE: '1' }, input: 'protocol=https\nhost=github.com\npath=' + repo + '.git\n\n', encoding: 'utf8', timeout: 3000 });
+    const fill = spawnSync(REAL_GIT, ['credential', 'fill'], { env: { ...env, LODY_GIT_LOCAL_DELEGATE: '1' }, input: 'protocol=https\nhost=github.com\npath=' + repo + '.git\n\n', encoding: 'utf8', timeout: 10_000 });
     if (fill.error) throw fill.error;
     const token = /^password=(.*)$/m.exec(fill.stdout || '')?.[1];
     if (token) return { token };
@@ -220,14 +220,14 @@ const main = async () => {
     const env = candidate.ssh ? nativeEnv() : authenticatedEnv(httpsUrl, candidate.token);
     if (candidate.ssh) {
       const configured = spawnSync(REAL_GIT, ['config', '--get', 'core.sshCommand'], { env, encoding: 'utf8' });
-      env.GIT_SSH_COMMAND = (env.GIT_SSH_COMMAND || configured.stdout?.trim() || (env.GIT_SSH ? quote(env.GIT_SSH) : 'ssh')) + sshPort + ' -oBatchMode=yes -oConnectTimeout=3';
+      env.GIT_SSH_COMMAND = (env.GIT_SSH_COMMAND || configured.stdout?.trim() || (env.GIT_SSH ? quote(env.GIT_SSH) : 'ssh')) + sshPort + ' -oBatchMode=yes -oConnectTimeout=10';
     }
     // Native upload/receive-pack advertisement has no write effects. It lets
     // denied credentials fall through without replaying an uncertain push.
     const target = candidate.ssh ? (sshPort ? 'ssh://git@ssh.github.com:443/' : 'git@github.com:') + repo + '.git' : httpsUrl;
     const args = candidate.ssh ? ['ls-remote', ...(write ? ['--upload-pack=git-receive-pack'] : []), target] : ['remote-https', 'lody-advertisement', target];
     const result = spawnSync(REAL_GIT, args, {
-      env, input: candidate.ssh ? undefined : (write ? 'list for-push\n\n' : 'list\n\n'), encoding: 'utf8', timeout: 5000, maxBuffer: 1024 * 1024, stdio: ['pipe', 'ignore', 'pipe'],
+      env, input: candidate.ssh ? undefined : (write ? 'list for-push\n\n' : 'list\n\n'), encoding: 'utf8', timeout: 15_000, maxBuffer: 1024 * 1024, stdio: ['pipe', 'ignore', 'pipe'],
     });
     if (result.error) throw result.error;
     if (result.status !== 0) {
