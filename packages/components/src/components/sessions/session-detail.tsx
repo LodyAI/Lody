@@ -5723,6 +5723,7 @@ const SessionDetail = ({
       />
     ) : (
       <SessionConversationDiffPanel
+        active={active}
         sessionId={activeSession.id}
         turnId={tab.turnId}
         filePaths={tab.filePaths}

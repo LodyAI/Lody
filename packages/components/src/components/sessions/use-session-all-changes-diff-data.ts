@@ -2,11 +2,16 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type { SessionId } from '@lody/shared';
 import { sessionFileProviderDiffResultToFileDiffData } from '@/lib/session-file-provider-diff';
 import type { SessionFileProvider } from '@/lib/session-file-provider';
-import { arePathsEquivalent, type FileDiffData } from './session-conversation-diff-types';
-import { shouldRetrySessionProviderDiffErrorMessage } from './use-session-conversation-diff-data';
+import type { FileDiffData } from './session-conversation-diff-types';
+import {
+  shouldRetrySessionProviderDiffErrorMessage,
+  useSessionConversationDiffData,
+} from './use-session-conversation-diff-data';
+import { getSessionDiffErrorMessage } from '@/lib/session-diff-diagnostics';
 
 const RETRY_DELAY_MS = 800;
-const DEFERRED_LOAD_CONCURRENCY = 4;
+const EMPTY_PATHS: string[] = [];
+const EMPTY_DIFF_DATA: Record<string, FileDiffData> = {};
 
 const delay = (ms: number): Promise<void> =>
   new Promise((resolve) => {
@@ -21,14 +26,17 @@ const delay = (ms: number): Promise<void> =>
  * Base ("All Changes") diff loader. Unlike {@link useSessionConversationDiffData}, which pulls
  * each file with its own gated Machine RPC, this fires ONE batched `getAllChangesDiff` request
  * that returns every changed file's current diff. Files the machine could not inline come back
- * `deferred` and are lazily fetched per file via `getDiff` (focus first, bounded). One request
+ * `deferred` and are fetched via the shared per-file loader only near the viewport
+ * (focus first, bounded). One request
  * means no per-file fan-out, no 1200ms trickle, and a clean single-request retry.
  *
  * Returns the same shape the diff panel consumes from the conversation hook, so the panel can
  * select between the two by `mode`.
  */
 export function useSessionAllChangesDiffData({
+  sessionId,
   filePaths,
+  loadFilePaths,
   focusPath,
   fileProvider,
   fileProviderPending = false,
@@ -36,6 +44,7 @@ export function useSessionAllChangesDiffData({
 }: {
   sessionId: SessionId;
   filePaths: string[];
+  loadFilePaths?: string[];
   focusPath?: string | null;
   fileProvider?: SessionFileProvider | null;
   fileProviderPending?: boolean;
@@ -54,7 +63,42 @@ export function useSessionAllChangesDiffData({
   );
   const normalizedPathsKey = useMemo(() => JSON.stringify(normalizedPaths), [normalizedPaths]);
 
-  const [resolvedByPath, setResolvedByPath] = useState<Record<string, FileDiffData>>({});
+  const [batch, setBatch] = useState<{
+    provider: SessionFileProvider;
+    pathsKey: string;
+    inline: Record<string, FileDiffData>;
+    deferred: string[];
+  } | null>(null);
+  const currentBatch =
+    batch !== null && batch.provider === fileProvider && batch.pathsKey === normalizedPathsKey
+      ? batch
+      : null;
+  const deferredData = useSessionConversationDiffData({
+    sessionId,
+    mode: 'base',
+    filePaths: currentBatch?.deferred ?? EMPTY_PATHS,
+    loadFilePaths,
+    priorityFilePath: focusPath,
+    fileProvider,
+    fileProviderPending,
+    requestScope: currentBatch ?? undefined,
+    enabled: enabled && currentBatch !== null && currentBatch.deferred.length > 0,
+  });
+  const resolvedByPath = useMemo(
+    () =>
+      currentBatch === null
+        ? EMPTY_DIFF_DATA
+        : {
+            ...currentBatch.inline,
+            ...Object.fromEntries(
+              currentBatch.deferred.flatMap((path) => {
+                const data = deferredData.resolvedByPath[path];
+                return data ? [[path, data]] : [];
+              })
+            ),
+          },
+    [currentBatch, deferredData.resolvedByPath]
+  );
 
   // Keep focusPath out of the fetch deps (it only affects inline ordering, not the result set)
   // so changing the selected file does not re-fire the whole batch.
@@ -72,9 +116,9 @@ export function useSessionAllChangesDiffData({
     let cancelled = false;
     const getAllChangesDiff = fileProvider.getAllChangesDiff.bind(fileProvider);
 
-    const applyEntry = (path: string, data: FileDiffData): void => {
-      if (cancelled) return;
-      setResolvedByPath((prev) => ({ ...prev, [path]: data }));
+    const publish = (inline: Record<string, FileDiffData>, deferred: string[] = []): void => {
+      if (!cancelled)
+        setBatch({ provider: fileProvider, pathsKey: normalizedPathsKey, inline, deferred });
     };
 
     const run = async (): Promise<void> => {
@@ -102,7 +146,7 @@ export function useSessionAllChangesDiffData({
             ...(result.message === undefined ? {} : { message: result.message }),
           });
         }
-        if (!cancelled) setResolvedByPath(next);
+        publish(next);
         return;
       }
 
@@ -129,49 +173,21 @@ export function useSessionAllChangesDiffData({
         });
       }
       if (cancelled) return;
-      setResolvedByPath(next);
-
-      // Lazily fetch deferred files (focus first), bounded concurrency. Deferred is the rare
-      // oversized case, so this fan-out stays small.
-      const focusValue = focusPathRef.current;
-      const orderedDeferred = focusValue
-        ? [
-            ...deferredPaths.filter((path) => arePathsEquivalent(path, focusValue)),
-            ...deferredPaths.filter((path) => !arePathsEquivalent(path, focusValue)),
-          ]
-        : deferredPaths;
-      const getDiffBound = fileProvider.getDiff.bind(fileProvider);
-      let index = 0;
-      const loadNext = async (): Promise<void> => {
-        while (index < orderedDeferred.length) {
-          if (cancelled) return;
-          const path = orderedDeferred[index];
-          index += 1;
-          if (path === undefined) continue;
-          const single = sessionFileProviderDiffResultToFileDiffData(await getDiffBound(path));
-          if (cancelled) return;
-          applyEntry(path, single);
-        }
-      };
-      await Promise.all(
-        Array.from({ length: Math.min(DEFERRED_LOAD_CONCURRENCY, orderedDeferred.length) }, () =>
-          loadNext()
-        )
-      );
+      publish(next, deferredPaths);
     };
 
-    void run();
+    void run().catch((error: unknown) => {
+      const message = getSessionDiffErrorMessage(error);
+      publish(
+        Object.fromEntries(normalizedPaths.map((path) => [path, { status: 'error', message }]))
+      );
+    });
     return () => {
       cancelled = true;
     };
     // Refetch when the provider is rebuilt (file-index/list changed → D4) or the path set changes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [enabled, fileProvider, normalizedPathsKey]);
-
-  // Reset when disabled or the path set changes so stale rows do not leak across sessions/tabs.
-  useEffect(() => {
-    setResolvedByPath({});
-  }, [normalizedPathsKey]);
 
   const hasAllResolved = useMemo(
     () => normalizedPaths.every((path) => Boolean(resolvedByPath[path])),

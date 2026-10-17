@@ -1,6 +1,6 @@
 /** @vitest-environment jsdom */
 
-import { act } from 'react';
+import { act, createElement, useRef } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { Provider, createStore } from 'jotai';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -27,6 +27,7 @@ import {
   shouldOpenDiffFileByDefault,
   type SessionConversationDiffPanelProps,
 } from '../src/components/sessions/session-conversation-diff-panel';
+import { useDiffViewport } from '../src/components/sessions/use-diff-viewport';
 
 const checkpointFileDiff = (overrides: Partial<FileDiff> = {}): FileDiff => ({
   filePath: 'docs/README.md',
@@ -268,5 +269,83 @@ describe('SessionConversationDiffPanel loading cards', () => {
 
     expect(container.textContent).toContain('deleted/file-299.md');
     expect(skeletonLines()).toBe(MAX_DIFF_SKELETON_BODIES * 5);
+  });
+});
+
+describe('diff viewport loading', () => {
+  it('loads nearby files and an off-screen focus, pauses hidden panels and resumes on return', async () => {
+    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+    const paths = Array.from({ length: 100 }, (_, index) => `src/file-${index}.ts`);
+    let publish!: (visiblePaths: string[]) => void;
+    vi.stubGlobal(
+      'IntersectionObserver',
+      class {
+        private nodes = new Set<Element>();
+        constructor(callback: IntersectionObserverCallback) {
+          publish = (visiblePaths) =>
+            callback(
+              [...this.nodes].map(
+                (target) =>
+                  ({
+                    target,
+                    isIntersecting: visiblePaths.includes(
+                      (target as HTMLElement).dataset.diffPath!
+                    ),
+                  }) as IntersectionObserverEntry
+              ),
+              this as unknown as IntersectionObserver
+            );
+        }
+        observe(node: Element) {
+          this.nodes.add(node);
+        }
+        unobserve(node: Element) {
+          this.nodes.delete(node);
+        }
+        disconnect() {
+          this.nodes.clear();
+        }
+      }
+    );
+    function Harness({ active }: { active: boolean }) {
+      const scrollContainerRef = useRef<HTMLDivElement | null>(null);
+      const { loadPaths, registerPath } = useDiffViewport({
+        active,
+        paths,
+        priorityPath: paths[99],
+        scrollContainerRef,
+      });
+      return createElement(
+        'div',
+        { ref: scrollContainerRef },
+        createElement('output', null, JSON.stringify(loadPaths)),
+        ...paths.map((path) =>
+          createElement('div', {
+            key: path,
+            'data-diff-path': path,
+            ref: (node: HTMLDivElement | null) => registerPath(path, node),
+          })
+        )
+      );
+    }
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    const loaded = () => JSON.parse(container.querySelector('output')!.textContent!) as string[];
+    try {
+      await act(async () => root.render(createElement(Harness, { active: true })));
+      expect(loaded()).toEqual([paths[0], paths[1], paths[99]]);
+      await act(async () => publish([paths[10], paths[11]]));
+      expect(loaded()).toEqual([paths[10], paths[11], paths[99]]);
+      await act(async () => root.render(createElement(Harness, { active: false })));
+      expect(loaded()).toEqual([]);
+      await act(async () => root.render(createElement(Harness, { active: true })));
+      await act(async () => publish([paths[70]]));
+      expect(loaded()).toEqual([paths[70], paths[99]]);
+    } finally {
+      await act(async () => root.unmount());
+      container.remove();
+      vi.unstubAllGlobals();
+    }
   });
 });

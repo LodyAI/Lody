@@ -1700,7 +1700,7 @@
   "sessions.fileDiff.loadDiff": "加载差异",
   "sessions.fileDiff.loadOnDemand": "需要时再加载此文件。",
   "sessions.fileDiff.loading": "正在加载差异…",
-  "sessions.fileDiff.preparingLargeDiff": "正在准备大型差异",
+  "sessions.fileDiff.preparingLargeDiff": "正在准备差异",
   "sessions.fileDiff.preparingLargeDiffDescription": "{{path}} 的差异正在主线程外解析。",
   "sessions.fileDiff.virtualizedLargeDiff": "正在虚拟化渲染大型差异：{{rows}} 行，旧文本 {{oldTextLength}} 字符，新文本 {{newTextLength}} 字符。",
   "sessions.fileDiff.virtualizedRowsUnavailable": "差异行不可用。请重新打开该差异。",

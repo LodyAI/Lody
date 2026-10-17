@@ -22,9 +22,8 @@ Read parent rules and linked context before edits.
 
 ## [Shell, side panel, side chats](../../../../../.agents/docs/sessions-side-panel.md)
 
-- Desktop file/diff/browser/PR surfaces never split the conversation: they are
-  closeable right-panel tabs. `sidePanelTabs` is the one strip order; every close
-  handler takes its fallback neighbour from it.
+- Desktop file/diff/browser/PR viewers are closeable right-panel tabs; never split
+  the conversation. `sidePanelTabs` owns order and close fallback neighbours.
 - A Side Chat is a durable child Session (`childSessionPlacement: 'side-panel'`):
   no top tab, no sidebar row, but it still rolls up into the parent row. Only explicit
   tab close deletes it; mount it lazily.
@@ -124,10 +123,10 @@ Read parent rules and linked context before edits.
 
 ## [File surfaces](../../../../../.agents/docs/sessions-file-surfaces.md)
 
-- What a client may do with a session file is ONE model
-  (`hooks/use-session-file-actions.ts` + `lib/session-file-actions.ts`): never
-  promote a local-host action to a surface that cannot perform it, nor re-derive
-  the split per surface.
+- File actions use `hooks/use-session-file-actions.ts` + `lib/session-file-actions.ts`.
+  Never promote unavailable local-host actions or re-derive that split per surface.
+- Diff bodies load/mount near the viewport; hidden panels pause. Preserve drafts,
+  expansion and focus; multi-file cache misses use the shared parse Worker.
 - Local paths resolve on the OWNING machine from its workspace root plus a
   genuinely workspace-relative path; `lib/session-local-file-path.ts` rejects
   absolute and `..` paths.
