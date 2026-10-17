@@ -3,18 +3,20 @@ import {
   getWorkspaceFlockDocId,
   listWorkspaceAgentRoles,
   listWorkspaceMcpServers,
+  listWorkspaceProjects,
   readWorkspaceFlockRowsFromFlock,
   type AgentRole,
   type WorkspaceFlockEvent,
   type WorkspaceFlockRowMap,
   type WorkspaceMcpServerMeta,
+  type WorkspaceProject,
 } from '@lody/shared';
 import type { WorkspaceRuntime } from '@/atoms/runtime';
 
 /**
  * The workspace document's catalogs, as one snapshot.
  *
- * MCP servers and Agent Roles are separate row families of the SAME Flock
+ * MCP servers, Agent Roles and Project groups are separate row families of the SAME Flock
  * document, so they are read through one room rather than one room each: a
  * second room would open the same document, join the same Loro room, and keep a
  * second copy of the same row map for a list of a few dozen entries.
@@ -22,6 +24,8 @@ import type { WorkspaceRuntime } from '@/atoms/runtime';
 export type WorkspaceCatalogSnapshot = {
   servers: WorkspaceMcpServerMeta[];
   roles: AgentRole[];
+  /** Multi-repository Project groups, sorted by name. */
+  projects: WorkspaceProject[];
   /** True once the first remote sync landed, which makes an empty catalog authoritative. */
   synced: boolean;
 };
@@ -33,6 +37,7 @@ const EMPTY_ROWS = Object.freeze({}) as WorkspaceFlockRowMap;
 export const EMPTY_WORKSPACE_CATALOG: WorkspaceCatalogSnapshot = Object.freeze({
   servers: Object.freeze([]) as unknown as WorkspaceMcpServerMeta[],
   roles: Object.freeze([]) as unknown as AgentRole[],
+  projects: Object.freeze([]) as unknown as WorkspaceProject[],
   synced: false,
 });
 
@@ -62,7 +67,7 @@ const ROOMS = new WeakMap<WorkspaceRuntime, SharedCatalogRoom>();
  * (and vice versa). Rows are identity-stable across
  * `applyWorkspaceFlockRowEvents`, so element identity is the whole comparison.
  */
-const reuseUnchanged = <T,>(previous: T[], next: T[]): T[] =>
+const reuseUnchanged = <T>(previous: T[], next: T[]): T[] =>
   previous.length === next.length && previous.every((item, index) => item === next[index])
     ? previous
     : next;
@@ -72,14 +77,16 @@ function publish(room: SharedCatalogRoom, rows: WorkspaceFlockRowMap, synced: bo
   room.rows = rows;
   const servers = reuseUnchanged(room.snapshot.servers, listWorkspaceMcpServers(rows));
   const roles = reuseUnchanged(room.snapshot.roles, listWorkspaceAgentRoles(rows));
+  const projects = reuseUnchanged(room.snapshot.projects, listWorkspaceProjects(rows));
   if (
     servers === room.snapshot.servers &&
     roles === room.snapshot.roles &&
+    projects === room.snapshot.projects &&
     room.snapshot.synced === synced
   ) {
     return;
   }
-  room.snapshot = { servers, roles, synced };
+  room.snapshot = { servers, roles, projects, synced };
   for (const listener of room.listeners) {
     listener(room.snapshot);
   }

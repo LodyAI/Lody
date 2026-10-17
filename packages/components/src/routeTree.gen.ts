@@ -39,6 +39,7 @@ import { Route as WorkspaceNameAuthSettingsStatsRouteImport } from './routes/$wo
 import { Route as WorkspaceNameAuthSettingsSharesRouteImport } from './routes/$workspaceName/_auth/settings/shares';
 import { Route as WorkspaceNameAuthSettingsPromptShortcutsRouteImport } from './routes/$workspaceName/_auth/settings/prompt-shortcuts';
 import { Route as WorkspaceNameAuthSettingsProjectsRouteImport } from './routes/$workspaceName/_auth/settings/projects';
+import { Route as WorkspaceNameAuthSettingsProjectGroupsRouteImport } from './routes/$workspaceName/_auth/settings/project-groups';
 import { Route as WorkspaceNameAuthSettingsPreferencesRouteImport } from './routes/$workspaceName/_auth/settings/preferences';
 import { Route as WorkspaceNameAuthSettingsPeopleRouteImport } from './routes/$workspaceName/_auth/settings/people';
 import { Route as WorkspaceNameAuthSettingsMyMachinesRouteImport } from './routes/$workspaceName/_auth/settings/my-machines';
@@ -212,6 +213,12 @@ const WorkspaceNameAuthSettingsProjectsRoute = WorkspaceNameAuthSettingsProjects
   path: '/projects',
   getParentRoute: () => WorkspaceNameAuthSettingsRoute,
 } as any);
+const WorkspaceNameAuthSettingsProjectGroupsRoute =
+  WorkspaceNameAuthSettingsProjectGroupsRouteImport.update({
+    id: '/project-groups',
+    path: '/project-groups',
+    getParentRoute: () => WorkspaceNameAuthSettingsRoute,
+  } as any);
 const WorkspaceNameAuthSettingsPreferencesRoute =
   WorkspaceNameAuthSettingsPreferencesRouteImport.update({
     id: '/preferences',
@@ -370,6 +377,7 @@ export interface FileRoutesByFullPath {
   '/$workspaceName/settings/my-machines': typeof WorkspaceNameAuthSettingsMyMachinesRoute;
   '/$workspaceName/settings/people': typeof WorkspaceNameAuthSettingsPeopleRoute;
   '/$workspaceName/settings/preferences': typeof WorkspaceNameAuthSettingsPreferencesRoute;
+  '/$workspaceName/settings/project-groups': typeof WorkspaceNameAuthSettingsProjectGroupsRoute;
   '/$workspaceName/settings/projects': typeof WorkspaceNameAuthSettingsProjectsRoute;
   '/$workspaceName/settings/prompt-shortcuts': typeof WorkspaceNameAuthSettingsPromptShortcutsRoute;
   '/$workspaceName/settings/shares': typeof WorkspaceNameAuthSettingsSharesRoute;
@@ -419,6 +427,7 @@ export interface FileRoutesByTo {
   '/$workspaceName/settings/my-machines': typeof WorkspaceNameAuthSettingsMyMachinesRoute;
   '/$workspaceName/settings/people': typeof WorkspaceNameAuthSettingsPeopleRoute;
   '/$workspaceName/settings/preferences': typeof WorkspaceNameAuthSettingsPreferencesRoute;
+  '/$workspaceName/settings/project-groups': typeof WorkspaceNameAuthSettingsProjectGroupsRoute;
   '/$workspaceName/settings/projects': typeof WorkspaceNameAuthSettingsProjectsRoute;
   '/$workspaceName/settings/prompt-shortcuts': typeof WorkspaceNameAuthSettingsPromptShortcutsRoute;
   '/$workspaceName/settings/shares': typeof WorkspaceNameAuthSettingsSharesRoute;
@@ -473,6 +482,7 @@ export interface FileRoutesById {
   '/$workspaceName/_auth/settings/my-machines': typeof WorkspaceNameAuthSettingsMyMachinesRoute;
   '/$workspaceName/_auth/settings/people': typeof WorkspaceNameAuthSettingsPeopleRoute;
   '/$workspaceName/_auth/settings/preferences': typeof WorkspaceNameAuthSettingsPreferencesRoute;
+  '/$workspaceName/_auth/settings/project-groups': typeof WorkspaceNameAuthSettingsProjectGroupsRoute;
   '/$workspaceName/_auth/settings/projects': typeof WorkspaceNameAuthSettingsProjectsRoute;
   '/$workspaceName/_auth/settings/prompt-shortcuts': typeof WorkspaceNameAuthSettingsPromptShortcutsRoute;
   '/$workspaceName/_auth/settings/shares': typeof WorkspaceNameAuthSettingsSharesRoute;
@@ -527,6 +537,7 @@ export interface FileRouteTypes {
     | '/$workspaceName/settings/my-machines'
     | '/$workspaceName/settings/people'
     | '/$workspaceName/settings/preferences'
+    | '/$workspaceName/settings/project-groups'
     | '/$workspaceName/settings/projects'
     | '/$workspaceName/settings/prompt-shortcuts'
     | '/$workspaceName/settings/shares'
@@ -576,6 +587,7 @@ export interface FileRouteTypes {
     | '/$workspaceName/settings/my-machines'
     | '/$workspaceName/settings/people'
     | '/$workspaceName/settings/preferences'
+    | '/$workspaceName/settings/project-groups'
     | '/$workspaceName/settings/projects'
     | '/$workspaceName/settings/prompt-shortcuts'
     | '/$workspaceName/settings/shares'
@@ -629,6 +641,7 @@ export interface FileRouteTypes {
     | '/$workspaceName/_auth/settings/my-machines'
     | '/$workspaceName/_auth/settings/people'
     | '/$workspaceName/_auth/settings/preferences'
+    | '/$workspaceName/_auth/settings/project-groups'
     | '/$workspaceName/_auth/settings/projects'
     | '/$workspaceName/_auth/settings/prompt-shortcuts'
     | '/$workspaceName/_auth/settings/shares'
@@ -870,6 +883,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof WorkspaceNameAuthSettingsProjectsRouteImport;
       parentRoute: typeof WorkspaceNameAuthSettingsRoute;
     };
+    '/$workspaceName/_auth/settings/project-groups': {
+      id: '/$workspaceName/_auth/settings/project-groups';
+      path: '/project-groups';
+      fullPath: '/$workspaceName/settings/project-groups';
+      preLoaderRoute: typeof WorkspaceNameAuthSettingsProjectGroupsRouteImport;
+      parentRoute: typeof WorkspaceNameAuthSettingsRoute;
+    };
     '/$workspaceName/_auth/settings/preferences': {
       id: '/$workspaceName/_auth/settings/preferences';
       path: '/preferences';
@@ -1064,6 +1084,7 @@ interface WorkspaceNameAuthSettingsRouteChildren {
   WorkspaceNameAuthSettingsMyMachinesRoute: typeof WorkspaceNameAuthSettingsMyMachinesRoute;
   WorkspaceNameAuthSettingsPeopleRoute: typeof WorkspaceNameAuthSettingsPeopleRoute;
   WorkspaceNameAuthSettingsPreferencesRoute: typeof WorkspaceNameAuthSettingsPreferencesRoute;
+  WorkspaceNameAuthSettingsProjectGroupsRoute: typeof WorkspaceNameAuthSettingsProjectGroupsRoute;
   WorkspaceNameAuthSettingsProjectsRoute: typeof WorkspaceNameAuthSettingsProjectsRoute;
   WorkspaceNameAuthSettingsPromptShortcutsRoute: typeof WorkspaceNameAuthSettingsPromptShortcutsRoute;
   WorkspaceNameAuthSettingsSharesRoute: typeof WorkspaceNameAuthSettingsSharesRoute;
@@ -1091,6 +1112,7 @@ const WorkspaceNameAuthSettingsRouteChildren: WorkspaceNameAuthSettingsRouteChil
   WorkspaceNameAuthSettingsMyMachinesRoute: WorkspaceNameAuthSettingsMyMachinesRoute,
   WorkspaceNameAuthSettingsPeopleRoute: WorkspaceNameAuthSettingsPeopleRoute,
   WorkspaceNameAuthSettingsPreferencesRoute: WorkspaceNameAuthSettingsPreferencesRoute,
+  WorkspaceNameAuthSettingsProjectGroupsRoute: WorkspaceNameAuthSettingsProjectGroupsRoute,
   WorkspaceNameAuthSettingsProjectsRoute: WorkspaceNameAuthSettingsProjectsRoute,
   WorkspaceNameAuthSettingsPromptShortcutsRoute: WorkspaceNameAuthSettingsPromptShortcutsRoute,
   WorkspaceNameAuthSettingsSharesRoute: WorkspaceNameAuthSettingsSharesRoute,

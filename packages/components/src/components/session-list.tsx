@@ -33,6 +33,7 @@ import {
   PinOff,
   Plus,
   Users,
+  Boxes,
 } from 'lucide-react';
 import { Spinner } from '@lody/ui/spinner';
 import {
@@ -161,12 +162,28 @@ export type SessionListRow = {
   externalHistoryProvider?: LocalProjectHistoryProvider | null;
   owner?: SessionListRowOwner | null;
   sharing?: SessionSharingState;
+  /**
+   * The Project group a multi-repository Session belongs to, from its frozen
+   * `projectRun` snapshot. Such a row is grouped under the group, never under
+   * the repository its legacy `repoFullName` projection names.
+   */
+  projectGroup?: { id: string; name: string } | null;
 };
 
 export type SessionListRepoState = {
   repoFullName: string;
   collapsed: boolean;
 };
+
+/** A Project group shown even before it has a conversation, so one can be started. */
+export type SessionListProjectGroupState = {
+  projectId: string;
+  name: string;
+  collapsed: boolean;
+};
+
+export const getProjectGroupSessionGroupKey = (projectId: string): string =>
+  `projectGroup:${projectId}`;
 
 export type SessionListRepoMove = {
   activeRepoFullName: string;
@@ -186,6 +203,8 @@ export type SessionListPullRequestOpen = {
 export type SessionListProps = {
   sessions: SessionListRow[];
   repos: SessionListRepoState[];
+  /** Project groups in display order; their rows are matched by `projectGroup.id`. */
+  projectGroups?: SessionListProjectGroupState[];
   isLoading?: boolean;
   chatsCollapsed?: boolean;
   selectedSessionId?: string | null;
@@ -198,6 +217,8 @@ export type SessionListProps = {
   onNavigateSessionTab?: (sessionId: string, tabSessionId: string) => void;
   onToggleRepoCollapsed?: (repoFullName: string) => void;
   onToggleChatsCollapsed?: () => void;
+  onToggleProjectGroupCollapsed?: (groupKey: string) => void;
+  onNewInProjectGroup?: (projectId: string) => void;
   onArchiveSession?: (sessionId: string) => void;
   onMarkSessionUnread?: (sessionId: string) => void;
   onRenameSession?: (sessionId: string, nextTitle: string) => void | Promise<void>;
@@ -235,8 +256,10 @@ export type SessionListProps = {
 export type SessionRowGroup = {
   key: string;
   label: string;
-  kind: 'repo' | 'chat';
+  kind: 'repo' | 'chat' | 'projectGroup';
   repoFullName: string | null;
+  /** Set for `projectGroup` groups. */
+  projectId?: string;
   collapsed: boolean;
   sessions: SessionListRow[];
 };
@@ -348,12 +371,23 @@ export function buildGroups(
   sessions: SessionListRow[],
   repos: SessionListRepoState[],
   chatsCollapsed: boolean,
-  chatsLabel: string = 'Chats'
+  chatsLabel: string = 'Chats',
+  projectGroups: readonly SessionListProjectGroupState[] = []
 ): SessionRowGroup[] {
   const sessionsByRepo = new Map<string, SessionListRow[]>();
   const onlyChats: SessionListRow[] = [];
+  const sessionsByProjectGroup = new Map<string, SessionListRow[]>();
+  const removedProjectGroupNames = new Map<string, string>();
 
   for (const session of sessions) {
+    if (session.projectGroup) {
+      const id = session.projectGroup.id;
+      const list = sessionsByProjectGroup.get(id);
+      if (list) list.push(session);
+      else sessionsByProjectGroup.set(id, [session]);
+      removedProjectGroupNames.set(id, session.projectGroup.name);
+      continue;
+    }
     const repoFullName = normalizeRepoFullName(session.repoFullName);
     if (!repoFullName) {
       onlyChats.push(session);
@@ -365,6 +399,35 @@ export function buildGroups(
   }
 
   const ordered: SessionRowGroup[] = [];
+
+  // Defined groups come first and stay listed while empty: the header is where
+  // a conversation in the group starts. A deleted group keeps its
+  // conversations under the name their snapshot recorded.
+  for (const group of projectGroups) {
+    removedProjectGroupNames.delete(group.projectId);
+    ordered.push({
+      key: getProjectGroupSessionGroupKey(group.projectId),
+      label: group.name,
+      kind: 'projectGroup',
+      repoFullName: null,
+      projectId: group.projectId,
+      collapsed: group.collapsed,
+      sessions: sortSessionRowsByLatestMessage(sessionsByProjectGroup.get(group.projectId) ?? []),
+    });
+  }
+  for (const [projectId, name] of [...removedProjectGroupNames].sort((a, b) =>
+    a[1].localeCompare(b[1])
+  )) {
+    ordered.push({
+      key: getProjectGroupSessionGroupKey(projectId),
+      label: name,
+      kind: 'projectGroup',
+      repoFullName: null,
+      projectId,
+      collapsed: false,
+      sessions: sortSessionRowsByLatestMessage(sessionsByProjectGroup.get(projectId) ?? []),
+    });
+  }
 
   if (onlyChats.length) {
     ordered.push({
@@ -500,6 +563,8 @@ type SessionGroupSectionProps = {
   onNavigateSessionTab?: (sessionId: string, tabSessionId: string) => void;
   onToggleRepoCollapsed?: (repoFullName: string) => void;
   onToggleChatsCollapsed?: () => void;
+  onToggleProjectGroupCollapsed?: (groupKey: string) => void;
+  onNewInProjectGroup?: (projectId: string) => void;
   onArchiveSession?: (sessionId: string) => void;
   onMarkSessionUnread?: (sessionId: string) => void;
   onRenameSession?: (sessionId: string, nextTitle: string) => void | Promise<void>;
@@ -1312,6 +1377,8 @@ const SessionGroupSection = memo(function SessionGroupSection({
   onNavigateSessionTab,
   onToggleRepoCollapsed,
   onToggleChatsCollapsed,
+  onToggleProjectGroupCollapsed,
+  onNewInProjectGroup,
   onArchiveSession,
   onMarkSessionUnread,
   onRenameSession,
@@ -1336,7 +1403,8 @@ const SessionGroupSection = memo(function SessionGroupSection({
 }: SessionGroupSectionProps) {
   const { t } = useTranslation();
   const moreActionsLabel = t('sessions.moreActions', 'More actions');
-  const showGroupHeaderIcon = group.kind === 'repo';
+  const isProjectGroup = group.kind === 'projectGroup';
+  const showGroupHeaderIcon = group.kind === 'repo' || isProjectGroup;
   const [renameTarget, setRenameTarget] = useState<RenameSessionDialogTarget | null>(null);
   const beginRename = useCallback((sessionId: string, currentTitle: string) => {
     setRenameTarget({ sessionId: sessionId as SessionId, initialTitle: currentTitle });
@@ -1346,11 +1414,23 @@ const SessionGroupSection = memo(function SessionGroupSection({
   const canToggle =
     group.kind === 'repo'
       ? typeof onToggleRepoCollapsed === 'function'
-      : typeof onToggleChatsCollapsed === 'function';
-  const canNavigate = typeof onNavigateToNewSession === 'function';
-  const canCreateNew = typeof onNew === 'function';
+      : isProjectGroup
+        ? typeof onToggleProjectGroupCollapsed === 'function'
+        : typeof onToggleChatsCollapsed === 'function';
+  // A project group starts its conversations from its own handler; the repo
+  // and chat navigation callbacks name a repository, which a group is not.
+  const canNavigate = isProjectGroup
+    ? typeof onNewInProjectGroup === 'function'
+    : typeof onNavigateToNewSession === 'function';
+  const canCreateNew = isProjectGroup
+    ? typeof onNewInProjectGroup === 'function'
+    : typeof onNew === 'function';
   const handleToggleGroup = () => {
     if (!canToggle) return;
+    if (isProjectGroup) {
+      onToggleProjectGroupCollapsed?.(group.key);
+      return;
+    }
     if (group.kind === 'repo' && group.repoFullName) {
       onToggleRepoCollapsed?.(group.repoFullName);
       return;
@@ -1358,6 +1438,10 @@ const SessionGroupSection = memo(function SessionGroupSection({
     if (group.kind === 'chat') onToggleChatsCollapsed?.();
   };
   const handleNavigate = () => {
+    if (isProjectGroup) {
+      if (group.projectId) onNewInProjectGroup?.(group.projectId);
+      return;
+    }
     onNavigateToNewSession?.(group.repoFullName ?? undefined);
   };
 
@@ -1407,7 +1491,7 @@ const SessionGroupSection = memo(function SessionGroupSection({
   // "Chats" is a top-level group label like a machine or GitHub Worktrees:
   // the shared group label type (small, bold, faint, no icon), no hover fill,
   // and it scrolls with its conversations.
-  const isGroupLabel = group.kind !== 'repo';
+  const isGroupLabel = group.kind === 'chat';
   const headerBaseColorClass = isGroupLabel
     ? SIDEBAR_GROUP_LABEL_COLOR_CLASS
     : 'text-sidebar-row-foreground';
@@ -1483,17 +1567,27 @@ const SessionGroupSection = memo(function SessionGroupSection({
                   : undefined
               }
             >
-              <GitHubOwnerIcon
-                repoFullName={group.repoFullName}
-                className={cn(
-                  // Left-anchored (not centered in the 20px button) so its left edge
-                  // lines up with the session rows' leading status slot below.
-                  'absolute left-0 top-1/2 -translate-y-1/2 h-4 w-4 transition-opacity duration-100',
-                  // Mobile: chevron is always shown so the owner avatar must hide
-                  // permanently to avoid the two icons overlapping.
-                  canToggle && isMobile ? 'opacity-0' : cn(canToggle && 'group-hover:opacity-0')
-                )}
-              />
+              {isProjectGroup ? (
+                <Boxes
+                  aria-hidden="true"
+                  className={cn(
+                    'absolute left-0 top-1/2 -translate-y-1/2 h-4 w-4 opacity-70 transition-opacity duration-100',
+                    canToggle && isMobile ? 'opacity-0' : cn(canToggle && 'group-hover:opacity-0')
+                  )}
+                />
+              ) : (
+                <GitHubOwnerIcon
+                  repoFullName={group.repoFullName}
+                  className={cn(
+                    // Left-anchored (not centered in the 20px button) so its left edge
+                    // lines up with the session rows' leading status slot below.
+                    'absolute left-0 top-1/2 -translate-y-1/2 h-4 w-4 transition-opacity duration-100',
+                    // Mobile: chevron is always shown so the owner avatar must hide
+                    // permanently to avoid the two icons overlapping.
+                    canToggle && isMobile ? 'opacity-0' : cn(canToggle && 'group-hover:opacity-0')
+                  )}
+                />
+              )}
               {canToggle && (
                 <ChevronDown
                   className={cn(
@@ -1537,7 +1631,13 @@ const SessionGroupSection = memo(function SessionGroupSection({
               'hover:bg-sidebar-hover hover:text-sidebar-hover-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-sidebar-ring/40'
             )}
             aria-label="New session"
-            onClick={() => onNew?.(group.repoFullName ?? undefined)}
+            onClick={() => {
+              if (isProjectGroup) {
+                if (group.projectId) onNewInProjectGroup?.(group.projectId);
+                return;
+              }
+              onNew?.(group.repoFullName ?? undefined);
+            }}
           >
             <Plus className="h-3.5 w-3.5" />
           </button>
@@ -1695,6 +1795,9 @@ export const getSidebarGroupSpacingClass = (collapsed: boolean | undefined) =>
 export const SessionList = memo(function SessionList({
   sessions,
   repos,
+  projectGroups,
+  onToggleProjectGroupCollapsed,
+  onNewInProjectGroup,
   isLoading = false,
   chatsCollapsed = false,
   selectedSessionId,
@@ -1747,8 +1850,8 @@ export const SessionList = memo(function SessionList({
   const isMobile = useIsMobile();
   const chatsGroupLabel = t('sessions.chats', 'Chats');
   const groups = useMemo(
-    () => buildGroups(sessions, repos, chatsCollapsed, chatsGroupLabel),
-    [sessions, repos, chatsCollapsed, chatsGroupLabel]
+    () => buildGroups(sessions, repos, chatsCollapsed, chatsGroupLabel, projectGroups),
+    [sessions, repos, chatsCollapsed, chatsGroupLabel, projectGroups]
   );
   const [whetherShowFullListByGroup, setWhetherShowFullListByGroup] =
     useAtom(sidebarShowFullListAtom);
@@ -1890,6 +1993,8 @@ export const SessionList = memo(function SessionList({
                 <SessionGroupSection
                   key={group.key}
                   group={group}
+                  onToggleProjectGroupCollapsed={onToggleProjectGroupCollapsed}
+                  onNewInProjectGroup={onNewInProjectGroup}
                   headerAction={groupHeaderAction}
                   selectedSessionId={selectedSessionId}
                   activeGroupKey={activeGroupKey}

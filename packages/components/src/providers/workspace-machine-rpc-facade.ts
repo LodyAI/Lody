@@ -1,8 +1,10 @@
 import {
   MemoryProviderResponseSchema,
+  ProjectProbeLocalMemberResultSchema,
   machineSupportsMemoryProviders,
   type MemoryProviderRequest,
   type MemoryProviderResponse,
+  type ProjectProbeLocalMemberResult,
 } from '@lody/shared';
 import { createRpcSecretRecipient } from '@lody/loro-streams-rpc';
 import type { PreviewControlOperation } from '@lody/shared';
@@ -1386,6 +1388,42 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
     }
   };
 
+  /**
+   * Read-only `.gitmodules` probe of a registered local project, used by the
+   * Project group editor. The local plane answers through Local Machine RPC; a
+   * remote machine through Streams. `null` is "no answer", never "no submodules".
+   */
+  const requestProjectProbeLocalMember = async (
+    machineId: MachineId,
+    localProjectId: LocalProjectId,
+    requestedByUserId: string,
+    options?: { timeoutMs?: number }
+  ): Promise<ProjectProbeLocalMemberResult | null> => {
+    try {
+      if (await canUseLocalMachineRpc(machineId)) {
+        const result = await sendLocalMachineRpcRequest({
+          machineId,
+          workspaceId,
+          method: 'project/probe-local-member',
+          params: { localProjectId },
+          timeoutMs: options?.timeoutMs ?? 30_000,
+        });
+        const parsed = ProjectProbeLocalMemberResultSchema.safeParse(result);
+        return parsed.success ? parsed.data : null;
+      }
+      return await (
+        await getMachineRpcClient(machineId)
+      ).requestProjectProbeLocalMember({
+        localProjectId,
+        requestedByUserId,
+        timeoutMs: options?.timeoutMs ?? 30_000,
+      });
+    } catch (error) {
+      console.warn('Project member probe failed', error);
+      return null;
+    }
+  };
+
   const requestLocalProjectControl = async (
     request: LocalProjectControlRequest,
     options?: { timeoutMs?: number }
@@ -1588,6 +1626,7 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
     requestSessionPreviewStatus,
     requestIosSimulatorControl,
     requestLocalProjectGitState,
+    requestProjectProbeLocalMember,
     requestLocalProjectControl,
     requestMachineBugReport,
     requestMemoryProvider,

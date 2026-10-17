@@ -587,10 +587,12 @@ export function getChatLandingVisibleComposerStatus<TMessage>({
 }
 
 export type ChatLandingPreSelectionIntent = {
-  context: 'local' | 'github' | 'chat' | undefined;
+  context: 'local' | 'github' | 'chat' | 'group' | undefined;
   machine: string | undefined;
   project: string | undefined;
   repo: string | undefined;
+  /** Project group id; only meaningful with `context: 'group'`. */
+  group?: string | undefined;
 };
 
 /** Identity of one URL-named selection (pre-selection intent or mirrored state). */
@@ -599,27 +601,36 @@ export function buildChatLandingPreSelectionKey({
   machine,
   project,
   repo,
+  group,
 }: ChatLandingPreSelectionIntent): string {
-  return `${context}|${machine}|${project}|${repo}`;
+  // A group id is appended only when present, so existing keys keep their shape.
+  const base = `${context}|${machine}|${project}|${repo}`;
+  return group ? `${base}|${group}` : base;
 }
 
 /** Search-parameter contract of the `/$workspaceName/chat` route. */
 export type ChatLandingSearch = {
-  context?: 'local' | 'github' | 'chat';
+  context?: 'local' | 'github' | 'chat' | 'group';
   machine?: string;
   project?: string;
   repo?: string;
+  /** Project group id, with `context: 'group'`. */
+  group?: string;
 };
 
 export function parseChatLandingSearch(search: Record<string, unknown>): ChatLandingSearch {
   return {
     context:
-      search.context === 'local' || search.context === 'github' || search.context === 'chat'
+      search.context === 'local' ||
+      search.context === 'github' ||
+      search.context === 'chat' ||
+      search.context === 'group'
         ? search.context
         : undefined,
     machine: typeof search.machine === 'string' ? search.machine : undefined,
     project: typeof search.project === 'string' ? search.project : undefined,
     repo: typeof search.repo === 'string' ? search.repo : undefined,
+    group: typeof search.group === 'string' ? search.group : undefined,
   };
 }
 
@@ -660,10 +671,12 @@ export function getSelectedLocalProjectKey(
 }
 
 export type ChatLandingEffectiveSelection = {
-  contextType: 'local' | 'github' | 'chat';
+  contextType: 'local' | 'github' | 'chat' | 'group';
   machineId: string | null;
   localProjectId: string | null;
   repoFullName: string | null;
+  /** Selected Project group, with `contextType: 'group'`. */
+  projectGroupId?: string | null;
 };
 
 /**
@@ -676,9 +689,13 @@ export function getChatLandingSelectionSearch({
   machineId,
   localProjectId,
   repoFullName,
+  projectGroupId,
 }: ChatLandingEffectiveSelection): ChatLandingSearch {
   if (contextType === 'chat') {
     return { context: 'chat' };
+  }
+  if (contextType === 'group' && projectGroupId) {
+    return { context: 'group', group: projectGroupId };
   }
   if (contextType === 'local' && machineId && localProjectId) {
     return { context: 'local', machine: machineId, project: localProjectId };

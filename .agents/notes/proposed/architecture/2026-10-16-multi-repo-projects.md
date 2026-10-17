@@ -490,3 +490,40 @@ UI code using `repo` must switch to `repoFullName`. No synonymous storage field 
 
 The initial GitHub `project` projection uses `branch: baseBranch ?? 'HEAD'`; an empty
 branch is rejected by the existing `ProjectRefSchema`. Local projections retain `useWorktree: true`.
+
+## UI implementation
+
+The UI calls this concept a "Project group"; "project" still means one local
+folder or GitHub repository, so existing Settings, sidebar and picker copy keeps
+its meaning. Type names in code are unchanged.
+
+- **Settings → Project groups**: the list and editor follow the Agent Role
+  pattern and write to the same workspace catalog document; a save is done once
+  it is durable locally, and the upload is neither awaited nor reported. The
+  member list is ordered as directories nest, so it doubles as a preview of the
+  conversation's main directory. The UI reads a GitHub member's `.gitmodules`
+  through the GitHub API and sets submodule relationships automatically; local
+  members wait for a read-only daemon probe RPC. Detection only moves a default
+  or previously detected placement, never one the user set by hand, and a
+  detected result that would form a cycle is discarded. Only the creator can
+  edit or delete a group.
+- **Sidebar**: Project groups are a section above local projects. A defined
+  group is listed even with no conversations, so one can be started there;
+  conversations of a deleted group stay grouped under the name in their
+  snapshot. A conversation with `projectRun` no longer appears under the local
+  project or GitHub group of its first member.
+- **New conversation**: a group sits on top of the plain chat context, leaving
+  the existing local/GitHub logic and the mobile views unchanged. Choosing a
+  group lets its local members' machine decide the execution machine. The member
+  picker starts with everything ticked, and unticking a parent also unticks its
+  submodules. With one member left, the conversation is created as an ordinary
+  single-project one. If the daemon does not advertise `multiRepoProject`,
+  submission is blocked with a prompt to update.
+- **Info Bar**: a new Repositories chip (never staged) lists each repository in
+  snapshot order with its path, branch, uncommitted/unpushed state, current PR
+  and CI. The context stage shows only the first member's own current PR.
+
+Not done yet: submodule detection and repository identity for local members
+(waiting on daemon fields), a Project group variant of the Create PR prompt, and
+mobile entry points. The UI is verified only in Storybook and unit tests, not
+end to end against a real daemon.

@@ -99,6 +99,7 @@ import {
   chatScopeAtom,
   chatsCollapsedAtom,
   githubWorktreesSectionCollapsedAtom,
+  projectGroupsSectionCollapsedAtom,
   localProjectCollapseStateAtom,
   localProjectOrderAtom,
   moveLocalProjectOrder,
@@ -125,6 +126,7 @@ import { pickLocalizedReleaseNotes, readUpdateBannerState } from '@/lib/electron
 import { useElectronUpdaterState } from '@/hooks/use-electron-updater-state';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { useOpenSettings } from '@/hooks/use-open-settings';
+import { useWorkspaceProjects } from '@/hooks/use-workspace-projects';
 import { useOrganization } from '@/hooks/useOrganization';
 import { useVisibleSessionMetas } from '@/hooks/use-visible-session-metas';
 import { useReportVisibleSessionsForEagerSync } from '@/hooks/use-report-visible-sessions-for-eager-sync';
@@ -147,6 +149,8 @@ import {
   SessionList,
   shallowEqualExceptKeys,
   type SessionListPullRequestOpen,
+  getProjectGroupSessionGroupKey,
+  type SessionListProjectGroupState,
   type SessionListRepoMove,
   type SessionListRepoState,
 } from '@/components/session-list';
@@ -1637,8 +1641,11 @@ const SortableLocalProjectItem = memo(
 
 export const hasWorkspaceSidebarTopContent = (
   localProjectSectionCount: number,
-  showGithubWorktrees: boolean
-): boolean => localProjectSectionCount > 0 || showGithubWorktrees;
+  showGithubWorktrees: boolean,
+  showProjectGroups = false
+): boolean => localProjectSectionCount > 0 || showGithubWorktrees || showProjectGroups;
+
+const EMPTY_REPO_STATES: SessionListRepoState[] = [];
 
 function VisibleSidebarEagerSync({
   sessions,
@@ -2062,7 +2069,9 @@ export function LoroAppSidebar({
 
   const tasks = useMemo(() => {
     const sourceSessions = sessionsListLoading ? [] : sessions;
-    const filteredSessions = sourceSessions.filter((session) => session.project?.kind !== 'local');
+    const filteredSessions = sourceSessions.filter(
+      (session) => session.project?.kind !== 'local' || session.projectRun !== undefined
+    );
     return buildSessionListRows(
       filteredSessions,
       {
@@ -2097,8 +2106,18 @@ export function LoroAppSidebar({
     userId,
   ]);
 
-  const chatSessions = useMemo(() => tasks.filter((task) => !task.repoFullName), [tasks]);
-  const repoSessions = useMemo(() => tasks.filter((task) => Boolean(task.repoFullName)), [tasks]);
+  const chatSessions = useMemo(
+    () => tasks.filter((task) => !task.repoFullName && !task.projectGroup),
+    [tasks]
+  );
+  const repoSessions = useMemo(
+    () => tasks.filter((task) => Boolean(task.repoFullName) && !task.projectGroup),
+    [tasks]
+  );
+  const projectGroupSessions = useMemo(
+    () => tasks.filter((task) => task.projectGroup && !task.isPinned),
+    [tasks]
+  );
   const workspaceChatSessions = useMemo(
     () => chatSessions.filter((task) => !task.isPinned),
     [chatSessions]
@@ -2307,6 +2326,9 @@ export function LoroAppSidebar({
     for (const session of sourceSessions) {
       const project = session.project;
       if (!project || project.kind !== 'local') continue;
+      // A multi-repository Session belongs to its Project group, even though
+      // its legacy `project` projection names the first member's folder.
+      if (session.projectRun) continue;
       if (scope === 'my') {
         if (!userId) continue;
         if (session.userId !== userId) continue;
@@ -2375,6 +2397,19 @@ export function LoroAppSidebar({
         search: repoFullName
           ? { context: 'github' as const, repo: repoFullName }
           : { context: 'chat' as const },
+      });
+    },
+    [closeMobileDrawer, router, workspaceSlug]
+  );
+
+  const handleNewInProjectGroup = useCallback(
+    (projectId: string) => {
+      if (!workspaceSlug) return;
+      closeMobileDrawer();
+      void router.navigate({
+        to: '/$workspaceName/chat',
+        params: { workspaceName: workspaceSlug },
+        search: { context: 'group' as const, group: projectId },
       });
     },
     [closeMobileDrawer, router, workspaceSlug]
@@ -3308,6 +3343,78 @@ export function LoroAppSidebar({
     updateBanner,
   ]);
 
+  const { projects: workspaceProjects } = useWorkspaceProjects();
+  const [projectGroupsSectionCollapsed, setProjectGroupsSectionCollapsed] = useAtom(
+    projectGroupsSectionCollapsedAtom
+  );
+  const handleToggleProjectGroupsSection = useCallback(() => {
+    setProjectGroupsSectionCollapsed((prev) => !prev);
+  }, [setProjectGroupsSectionCollapsed]);
+  // Collapse state shares the repo-group store, keyed by group key, so the
+  // keyboard model's group-header toggle needs no second path.
+  const projectGroupStates = useMemo<SessionListProjectGroupState[]>(
+    () =>
+      workspaceProjects.map((project) => ({
+        projectId: project.id,
+        name: project.name,
+        collapsed: repoCollapseState[getProjectGroupSessionGroupKey(project.id)] ?? false,
+      })),
+    [repoCollapseState, workspaceProjects]
+  );
+  const showProjectGroups = projectGroupStates.length > 0 || projectGroupSessions.length > 0;
+  const handleToggleProjectGroupCollapsed = useCallback(
+    (groupKey: string) => {
+      setRepoCollapseState((prev) => ({ ...prev, [groupKey]: !prev[groupKey] }));
+    },
+    [setRepoCollapseState]
+  );
+  const projectGroupsLabel = useMemo(() => t('sidebar.projectGroups', 'Project groups'), [t]);
+  const projectGroupsCollapsedActivity = useMemo(
+    () =>
+      projectGroupsSectionCollapsed
+        ? summarizeSidebarGroupActivity(
+            withSessionSendStates(projectGroupSessions, (row) => row.sessionId, sendStates)
+          )
+        : null,
+    [projectGroupSessions, projectGroupsSectionCollapsed, sendStates]
+  );
+  const projectGroupsContent = showProjectGroups ? (
+    <>
+      <SidebarSectionHeader
+        label={projectGroupsLabel}
+        collapsed={projectGroupsSectionCollapsed}
+        activity={projectGroupsCollapsedActivity}
+        isMobile={isMobile}
+        toggleLabel={toggleLabel}
+        onToggleCollapsed={handleToggleProjectGroupsSection}
+        action={firstSectionFilterAction ?? undefined}
+      />
+      {projectGroupsSectionCollapsed ? null : (
+        <SessionList
+          className="mb-3"
+          sessions={projectGroupSessions}
+          repos={EMPTY_REPO_STATES}
+          projectGroups={projectGroupStates}
+          isLoading={false}
+          selectedSessionId={selectedSessionId}
+          activeGroupKey={activeNewSessionGroup}
+          onSelectSession={handleNavigateToSession}
+          onNavigateSessionTab={handleNavigateToSession}
+          onArchiveSession={handleArchiveSession}
+          onMarkSessionUnread={handleMarkSessionUnread}
+          onRenameSession={handleRenameSession}
+          onTogglePinSession={handleTogglePinSession}
+          onCopySessionUrl={handleCopySessionUrl}
+          onShareSessionWithTeam={handleRequestShareSession}
+          onToggleProjectGroupCollapsed={handleToggleProjectGroupCollapsed}
+          onNewInProjectGroup={handleNewInProjectGroup}
+          onOpenPullRequest={handleOpenTaskPullRequest}
+          getSessionHref={getSessionHref}
+        />
+      )}
+    </>
+  ) : null;
+
   const githubWorktreesLabel = useMemo(() => t('sidebar.githubWorktrees', 'GitHub Worktrees'), [t]);
   const githubWorktreesCollapsedActivity = useMemo(
     () =>
@@ -3320,13 +3427,16 @@ export function LoroAppSidebar({
   );
   const sidebarTopContent = hasWorkspaceSidebarTopContent(
     localProjectSections.length,
-    showGithubWorktrees
+    showGithubWorktrees,
+    showProjectGroups
   ) ? (
     // Sections carry their own bottom margin: 12px expanded (wider than the
     // 10px between repo groups and the 2-4px between a section header and its
     // content, so headers bind to the list below them), 4px collapsed so a
     // stack of folded sections reads as one compact block.
     <div>
+      {projectGroupsContent}
+
       {localProjectsTopContent}
 
       {showGithubWorktrees ? (
@@ -3558,6 +3668,7 @@ export function LoroAppSidebar({
         // Check cloud tasks
         const task = tasksRef.current.find((taskItem) => taskItem.sessionId === sessionId);
         if (task) {
+          if (task.projectGroup) return getProjectGroupSessionGroupKey(task.projectGroup.id);
           const repo = task.repoFullName?.trim();
           return repo || ONLY_CHATS_KEY;
         }
@@ -3598,6 +3709,9 @@ export function LoroAppSidebar({
         pinnedItems,
         pinnedSectionCollapsed,
         workspace: {
+          projectGroupsSectionCollapsed,
+          projectGroupSessions,
+          projectGroups: projectGroupStates,
           localSections: keyboardNavLocalSections,
           githubSectionCollapsed: githubWorktreesSectionCollapsed,
           repoSessions: workspaceRepoSessions,
@@ -3615,6 +3729,9 @@ export function LoroAppSidebar({
       chatsCollapsed,
       collapsedOpenedBySessionIds,
       githubWorktreesSectionCollapsed,
+      projectGroupsSectionCollapsed,
+      projectGroupSessions,
+      projectGroupStates,
       keyboardNavLocalSections,
       organizeMode,
       pinnedItems,

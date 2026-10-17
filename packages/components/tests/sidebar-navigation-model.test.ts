@@ -303,4 +303,55 @@ describe('sidebar navigation model opened-by tree', () => {
 
     expect(sessionIds(items)).toEqual(['opener', 'opened', 'unrelated']);
   });
+
+  it('puts project groups first, keeps an empty group, and files its rows by group', () => {
+    const groupRow = (id: string, at: string, group: { id: string; name: string }) => ({
+      ...sessionRow(id, at, 'acme/web'),
+      projectGroup: group,
+    });
+    const shop = { id: 'shop', name: 'Shop' };
+    const items = buildSidebarNavigationItems({
+      ...baseOptions,
+      workspace: {
+        ...baseOptions.workspace,
+        projectGroups: [
+          { projectId: 'shop', name: 'Shop', collapsed: false },
+          { projectId: 'empty', name: 'Empty', collapsed: false },
+        ],
+        projectGroupSessions: [
+          groupRow('group-old', '2026-04-22T08:00:00.000Z', shop),
+          groupRow('group-new', '2026-04-22T09:00:00.000Z', shop),
+          // A deleted group keeps its conversations under the snapshot name.
+          groupRow('orphan', '2026-04-22T07:00:00.000Z', { id: 'gone', name: 'Gone' }),
+        ],
+        chatSessions: [sessionRow('chat', '2026-04-22T10:00:00.000Z')],
+      },
+    });
+
+    expect(items.flatMap((item) => (item.kind === 'group-header' ? [item.groupKey] : []))).toEqual([
+      'projectGroup:shop',
+      'projectGroup:empty',
+      'projectGroup:gone',
+      ONLY_CHATS_KEY,
+    ]);
+    expect(sessionIds(items)).toEqual(['group-new', 'group-old', 'orphan', 'chat']);
+  });
+
+  it('skips project group rows while the section is folded', () => {
+    const items = buildSidebarNavigationItems({
+      ...baseOptions,
+      workspace: {
+        ...baseOptions.workspace,
+        projectGroupsSectionCollapsed: true,
+        projectGroups: [{ projectId: 'shop', name: 'Shop', collapsed: false }],
+        projectGroupSessions: [
+          {
+            ...sessionRow('group-row', '2026-04-22T08:00:00.000Z'),
+            projectGroup: { id: 'shop', name: 'Shop' },
+          },
+        ],
+      },
+    });
+    expect(items).toEqual([]);
+  });
 });

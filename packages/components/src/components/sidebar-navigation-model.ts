@@ -6,6 +6,7 @@ import {
   MAX_VISIBLE_SESSIONS,
   sessionGroupOverflowsPreview,
   type SessionRowGroup,
+  type SessionListProjectGroupState,
   type SessionListRepoState,
   type SessionListRow,
 } from '@/components/session-list';
@@ -51,6 +52,10 @@ export type SidebarNavigationModelOptions = {
   pinnedItems: SidebarUpdatedItem[];
   pinnedSectionCollapsed: boolean;
   workspace: {
+    /** Project groups render first, above the machines' local projects. */
+    projectGroupsSectionCollapsed?: boolean;
+    projectGroupSessions?: SessionListRow[];
+    projectGroups?: SessionListProjectGroupState[];
     localSections: SidebarNavigationLocalSection[];
     githubSectionCollapsed: boolean;
     repoSessions: SessionListRow[];
@@ -160,6 +165,18 @@ export function buildSidebarNavigationItems({
       items.push({ kind: 'session', sessionId: item.id, groupKey: '__updated__' });
     }
     return items;
+  }
+
+  if (!workspace.projectGroupsSectionCollapsed && workspace.projectGroups?.length) {
+    for (const group of buildGroups(
+      workspace.projectGroupSessions ?? [],
+      [],
+      false,
+      undefined,
+      workspace.projectGroups
+    )) {
+      emitSessionGroup(items, group, showFullSessionGroups, collapsedOpenedBySessions);
+    }
   }
 
   emitLocalSections(items, workspace.localSections, collapsedOpenedBySessions);

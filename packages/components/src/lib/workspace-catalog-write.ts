@@ -4,8 +4,10 @@ import {
   type AgentRole,
   type AgentRoleId,
   type McpServerId,
+  type ProjectId,
   type WorkspaceId,
   type WorkspaceMcpServerMeta,
+  type WorkspaceProject,
 } from '@lody/shared';
 import type { WorkspaceRuntime } from '@/atoms/runtime';
 
@@ -93,3 +95,14 @@ export const deleteWorkspaceAgentRole = (
   deps: WorkspaceCatalogWriteDeps,
   id: AgentRoleId
 ): Promise<void> => deleteRow(deps, workspaceFlockKeys.agentRole(id));
+
+/** Write a Project group — created or edited. Each content change bumps `revision`. */
+export const writeWorkspaceProject = (
+  deps: WorkspaceCatalogWriteDeps,
+  project: WorkspaceProject
+): Promise<void> => putRow(deps, workspaceFlockKeys.project(project.id), project);
+
+export const deleteWorkspaceProject = (
+  deps: WorkspaceCatalogWriteDeps,
+  id: ProjectId
+): Promise<void> => deleteRow(deps, workspaceFlockKeys.project(id));

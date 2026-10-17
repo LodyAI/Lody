@@ -43,9 +43,14 @@ import {
   type LocalProjectId,
   type MachineId,
   type MachineViewMeta,
+  type ProjectMember,
+  type ProjectMemberId,
   type ProjectRef,
   type SessionId,
+  type SessionProjectRun,
   type SessionStatus,
+  machineSupportsMultiRepoProject,
+  buildSessionProjectRun,
   type WorktreeSetupScriptConfig,
   type WorktreeCleanupScriptConfig,
   type WorkspaceId,
@@ -268,8 +273,17 @@ import {
   UnifiedProjectSelectorView,
   buildUnifiedLocalProjectOptions,
   type LocalProjectSelection,
+  type UnifiedProjectGroupOption,
   type UnifiedProjectSelection,
 } from './unified-project-selector';
+import { ProjectGroupMemberPicker } from './project-group-member-picker';
+import { useWorkspaceProjects } from '@/hooks/use-workspace-projects';
+import {
+  buildProjectGroupProjectRef,
+  resolveProjectGroupLaunchTarget,
+} from '@/lib/project-group-launch';
+
+const EMPTY_PROJECT_MEMBER_IDS: ReadonlySet<ProjectMemberId> = new Set();
 import {
   DesktopMachineMenu,
   DesktopPermissionModeButton,
@@ -396,10 +410,12 @@ import {
 
 interface ChatLandingProps {
   workspaceSlug: string;
-  preSelectedContext?: 'local' | 'github' | 'chat';
+  preSelectedContext?: 'local' | 'github' | 'chat' | 'group';
   preSelectedMachine?: string;
   preSelectedProject?: string;
   preSelectedRepo?: string;
+  /** Project group id, with `preSelectedContext: 'group'`. */
+  preSelectedGroup?: string;
   /**
    * Mirrors the composer's effective selection back into the chat-route URL
    * (with `replace`) once the URL names a selection. Passed by the desktop
@@ -568,12 +584,19 @@ export function ChatLanding(props: ChatLandingProps) {
 
 function WorkspaceChatLanding({
   workspaceSlug,
-  preSelectedContext,
+  preSelectedContext: preSelectedContextProp,
   preSelectedMachine,
   preSelectedProject,
   preSelectedRepo,
+  preSelectedGroup,
   onSelectionUrlSync,
 }: ChatLandingProps) {
+  // A Project group runs on top of the plain chat context: every existing
+  // local/GitHub branch below sees `chat`, and the group overrides only the
+  // picker value, the context pill, the machine and the submit payload.
+  const preSelectedContext = preSelectedContextProp === 'group' ? 'chat' : preSelectedContextProp;
+  const preSelectedProjectGroupId =
+    preSelectedContextProp === 'group' ? (preSelectedGroup ?? null) : null;
   const { t, i18n } = useTranslation();
   const navigate = useNavigate();
   const { openSettings } = useOpenSettings();
@@ -960,6 +983,37 @@ function WorkspaceChatLanding({
       (isMobile ? 'github' : 'chat')
   );
   const analyticsProjectKind = contextType === 'chat' ? null : contextType;
+
+  // ── Project group (multi-repository) selection ──
+  const { projects: workspaceProjects } = useWorkspaceProjects();
+  const [selectedProjectGroupId, setSelectedProjectGroupId] = useState<string | null>(
+    preSelectedProjectGroupId
+  );
+  const [excludedProjectMemberIds, setExcludedProjectMemberIds] =
+    useState<ReadonlySet<ProjectMemberId>>(EMPTY_PROJECT_MEMBER_IDS);
+  const selectProjectGroup = useCallback((projectId: string | null) => {
+    setSelectedProjectGroupId(projectId);
+    // Every member starts ticked for each newly chosen group.
+    setExcludedProjectMemberIds(EMPTY_PROJECT_MEMBER_IDS);
+  }, []);
+  const selectedProjectGroup = useMemo(
+    () =>
+      selectedProjectGroupId
+        ? (workspaceProjects.find((project) => project.id === selectedProjectGroupId) ?? null)
+        : null,
+    [selectedProjectGroupId, workspaceProjects]
+  );
+  const projectGroupLaunchTarget = useMemo(
+    () =>
+      selectedProjectGroup
+        ? resolveProjectGroupLaunchTarget(selectedProjectGroup, excludedProjectMemberIds)
+        : null,
+    [excludedProjectMemberIds, selectedProjectGroup]
+  );
+  const projectGroupPinnedMachineId =
+    projectGroupLaunchTarget?.kind === 'ready' ? projectGroupLaunchTarget.machineId : null;
+  const projectGroupPinnedMachineIdRef = useRef(projectGroupPinnedMachineId);
+  projectGroupPinnedMachineIdRef.current = projectGroupPinnedMachineId;
 
   // ── Prompt state (shared across contexts) ──
   const chatLandingStateOwnerKey = userId ?? null;
@@ -1398,10 +1452,11 @@ function WorkspaceChatLanding({
 
   // ── Apply pre-selection from search params ──
   const preSelectionKey = buildChatLandingPreSelectionKey({
-    context: preSelectedContext,
+    context: preSelectedProjectGroupId ? 'group' : preSelectedContext,
     machine: preSelectedMachine,
     project: preSelectedProject,
     repo: preSelectedRepo,
+    group: preSelectedProjectGroupId ?? undefined,
   });
   useEffect(() => {
     const previousPreSelectionKey = previousPreSelectionKeyRef.current;
@@ -1413,6 +1468,12 @@ function WorkspaceChatLanding({
     // effect below, which must run after this one).
     selectionSyncArmedRef.current = false;
 
+    if (preSelectedProjectGroupId) {
+      setContextType('chat');
+      selectProjectGroup(preSelectedProjectGroupId);
+      return;
+    }
+    if (preSelectedContext || preSelectedRepo) selectProjectGroup(null);
     if (preSelectedContext === 'chat') {
       setContextType('chat');
     } else if (preSelectedContext === 'local' && preSelectedMachine && preSelectedProject) {
@@ -1442,6 +1503,8 @@ function WorkspaceChatLanding({
     preSelectedMachine,
     preSelectedProject,
     preSelectedRepo,
+    preSelectedProjectGroupId,
+    selectProjectGroup,
     handleSelectedLocalProjectChange,
   ]);
 
@@ -1455,14 +1518,16 @@ function WorkspaceChatLanding({
   const selectionSearch = useMemo(
     () =>
       getChatLandingSelectionSearch({
-        contextType,
+        contextType: selectedProjectGroupId ? 'group' : contextType,
         machineId: selectedLocalProject?.machineId ?? null,
         localProjectId: selectedLocalProject?.localProjectId ?? null,
         repoFullName: selectedRepo ?? null,
+        projectGroupId: selectedProjectGroupId,
       }),
-    [contextType, selectedLocalProject, selectedRepo]
+    [contextType, selectedLocalProject, selectedProjectGroupId, selectedRepo]
   );
   const urlNamesSelection =
+    preSelectedProjectGroupId !== null ||
     preSelectedContext !== undefined ||
     preSelectedMachine !== undefined ||
     preSelectedProject !== undefined ||
@@ -1474,6 +1539,7 @@ function WorkspaceChatLanding({
       machine: selectionSearch.machine,
       project: selectionSearch.project,
       repo: selectionSearch.repo,
+      group: selectionSearch.group,
     });
     const decision = getChatLandingSelectionSyncDecision({
       urlNamesSelection,
@@ -1949,6 +2015,10 @@ function WorkspaceChatLanding({
     (machineId: MachineId) => {
       machineChangedByUserRef.current = true;
       setSelectedMachineId(machineId);
+      // A group whose local repositories live on another machine cannot run
+      // here; leaving that machine leaves the group.
+      const pinnedMachineId = projectGroupPinnedMachineIdRef.current;
+      if (pinnedMachineId && pinnedMachineId !== machineId) selectProjectGroup(null);
       if (contextType === 'local') {
         const currentProject = selectedLocalProjectRef.current;
         if (currentProject?.machineId !== machineId) {
@@ -1977,8 +2047,21 @@ function WorkspaceChatLanding({
         setSelectedAgent(null);
       }
     },
-    [contextType, executorConfigs, handleSelectedLocalProjectChange, selectedAgent]
+    [
+      contextType,
+      executorConfigs,
+      handleSelectedLocalProjectChange,
+      selectProjectGroup,
+      selectedAgent,
+    ]
   );
+
+  // The group's local repositories decide the machine.
+  useEffect(() => {
+    if (!projectGroupPinnedMachineId || projectGroupPinnedMachineId === selectedMachineId) return;
+    if (!machines.has(projectGroupPinnedMachineId as MachineId)) return;
+    handleMachineChange(projectGroupPinnedMachineId as MachineId);
+  }, [handleMachineChange, machines, projectGroupPinnedMachineId, selectedMachineId]);
 
   const createNewMachinePairing = useCallback(async () => {
     setMachinePairingDialogOpen(true);
@@ -2958,8 +3041,40 @@ function WorkspaceChatLanding({
 
       let project: ProjectRef | undefined;
       let repoFullNameForMentions: string | undefined;
+      let projectRun: SessionProjectRun | undefined;
 
-      if (contextType === 'local' && !selectedLocalProject) {
+      if (selectedProjectGroupId) {
+        if (!selectedProjectGroup || projectGroupLaunchTarget?.kind !== 'ready') {
+          captureSessionInputBlocked('missing_project');
+          setComposerError(
+            projectGroupStatusMessage ??
+              t('chat.validation.missingProject', 'Please select a project')
+          );
+          return;
+        }
+        const groupMembers = projectGroupLaunchTarget.members;
+        projectRun = buildSessionProjectRun(
+          selectedProjectGroup,
+          groupMembers.map((member) => member.id)
+        );
+        if (projectRun && !machineSupportsMultiRepoProject(machine)) {
+          captureSessionInputBlocked('missing_machine');
+          setComposerError(
+            t(
+              'chat.projectGroup.unsupportedMachine',
+              'Update Lody on this machine to start project group conversations.'
+            )
+          );
+          return;
+        }
+        // The legacy fields describe the first member, so older clients still
+        // show a repository, a branch and a PR for the conversation.
+        const firstMember = groupMembers[0]!;
+        project = buildProjectGroupProjectRef(firstMember);
+        const githubMember = groupMembers.find((member) => member.source.kind === 'github');
+        repoFullNameForMentions =
+          githubMember?.source.kind === 'github' ? githubMember.source.repoFullName : undefined;
+      } else if (contextType === 'local' && !selectedLocalProject) {
         captureSessionInputBlocked('missing_project');
         setComposerError(t('chat.validation.missingProject', 'Please select a project'));
         return;
@@ -3039,6 +3154,7 @@ function WorkspaceChatLanding({
           env: selectedConfig.env,
           repoFullName: repoFullNameForMentions,
           project,
+          ...(projectRun ? { projectRun } : {}),
           worktreeSetup:
             contextType === 'github' && selectedRepoWorktreeSetup
               ? selectedRepoWorktreeSetup
@@ -3047,7 +3163,11 @@ function WorkspaceChatLanding({
             contextType === 'github' && selectedRepoWorktreeCleanup
               ? selectedRepoWorktreeCleanup
               : undefined,
-          branchName: contextType === 'github' ? githubBranch : localWorktreeBranch,
+          branchName: projectRun
+            ? undefined
+            : contextType === 'github'
+              ? githubBranch
+              : localWorktreeBranch,
           title: draftTitle,
           titleSource: draftTitle ? 'draft' : undefined,
           // Provenance only: the dispatch config above is already frozen, so a
@@ -3421,16 +3541,32 @@ function WorkspaceChatLanding({
       />
     ) : null;
 
-  const branchWorktreePill =
-    branchSelectorNode || topWorktreeNode ? (
-      <div {...stylex.props(composerSurface.contextPill)}>
-        {branchSelectorNode}
-        {branchSelectorNode && topWorktreeNode ? (
-          <span aria-hidden="true" {...stylex.props(composerSurface.contextPillDivider)} />
-        ) : null}
-        {topWorktreeNode}
-      </div>
-    ) : null;
+  const projectMemberLabel = useCallback(
+    (member: ProjectMember) =>
+      member.source.kind === 'github'
+        ? member.source.repoFullName
+        : (visibleLocalProjectMap.get(
+            getLocalProjectVisibilityKey(member.source.machineId, member.source.localProjectId)
+          )?.project.name ?? member.source.localProjectId),
+    [visibleLocalProjectMap]
+  );
+  const branchWorktreePill = selectedProjectGroup ? (
+    <ProjectGroupMemberPicker
+      members={selectedProjectGroup.members}
+      excluded={excludedProjectMemberIds}
+      onExcludedChange={setExcludedProjectMemberIds}
+      labelOf={projectMemberLabel}
+      disabled={submitting}
+    />
+  ) : branchSelectorNode || topWorktreeNode ? (
+    <div {...stylex.props(composerSurface.contextPill)}>
+      {branchSelectorNode}
+      {branchSelectorNode && topWorktreeNode ? (
+        <span aria-hidden="true" {...stylex.props(composerSurface.contextPillDivider)} />
+      ) : null}
+      {topWorktreeNode}
+    </div>
+  ) : null;
 
   const mobileSheetRecency = useMemo(
     () => getChatLandingProjectRecency(visibleSessions),
@@ -3438,6 +3574,7 @@ function WorkspaceChatLanding({
   );
 
   const desktopProjectSelection = useMemo<UnifiedProjectSelection>(() => {
+    if (selectedProjectGroupId) return { kind: 'group', projectId: selectedProjectGroupId };
     if (contextType === 'local' && selectedLocalProject) {
       return { kind: 'local', ...selectedLocalProject };
     }
@@ -3445,9 +3582,15 @@ function WorkspaceChatLanding({
       return { kind: 'github', repoFullName: selectedRepo };
     }
     return { kind: 'none' };
-  }, [contextType, selectedLocalProject, selectedRepo]);
+  }, [contextType, selectedLocalProject, selectedProjectGroupId, selectedRepo]);
   const handleDesktopProjectChange = useCallback(
     (selection: UnifiedProjectSelection) => {
+      if (selection.kind === 'group') {
+        setContextType('chat');
+        selectProjectGroup(selection.projectId);
+        return;
+      }
+      selectProjectGroup(null);
       if (selection.kind === 'none') {
         setContextType('chat');
         return;
@@ -3463,7 +3606,26 @@ function WorkspaceChatLanding({
       });
       setContextType('local');
     },
-    [handleSelectedLocalProjectChange]
+    [handleSelectedLocalProjectChange, selectProjectGroup]
+  );
+  const desktopProjectGroupOptions = useMemo<UnifiedProjectGroupOption[]>(
+    () =>
+      workspaceProjects.map((project) => {
+        const target = resolveProjectGroupLaunchTarget(project, EMPTY_PROJECT_MEMBER_IDS);
+        return {
+          projectId: project.id,
+          name: project.name,
+          memberCount: project.members.length,
+          disabledReason:
+            target.kind === 'machines_conflict'
+              ? t(
+                  'chat.projectGroup.machinesConflict',
+                  'Its local repositories are on different machines'
+                )
+              : undefined,
+        };
+      }),
+    [t, workspaceProjects]
   );
   const desktopAgentMachineIds = useMemo(
     () => (scopedMachineId ? [scopedMachineId] : []),
@@ -3722,6 +3884,7 @@ function WorkspaceChatLanding({
           value={desktopProjectSelection}
           onChange={handleDesktopProjectChange}
           localProjects={desktopLocalProjectOptions}
+          projectGroups={desktopProjectGroupOptions}
           repositories={repositories}
           latestMessageAtByRepo={mobileSheetRecency.byRepo}
           onConnectGitRepo={handleConnectGitRepo}
@@ -4297,18 +4460,20 @@ function WorkspaceChatLanding({
   );
 
   const hasSendableContent = prompt.trim().length > 0 || hasUploadedImages || hasUploadedFiles;
-  const submitDisabled = getChatLandingSubmitDisabled({
-    submitting,
-    hasBlockingImages,
-    hasBlockingFiles,
-    hasSendableContent,
-    contextType,
-    workdirMode: selectedWorkdirMode,
-    hasSelectedLocalProject: Boolean(selectedLocalProject),
-    isRuntimeInitializing: runtimeInitializing,
-    isLoadingLocalGitState: loadingLocalGitState,
-    hasLocalGitStateError: Boolean(localGitStateError),
-  });
+  const submitDisabled =
+    (selectedProjectGroupId !== null && projectGroupLaunchTarget?.kind !== 'ready') ||
+    getChatLandingSubmitDisabled({
+      submitting,
+      hasBlockingImages,
+      hasBlockingFiles,
+      hasSendableContent,
+      contextType,
+      workdirMode: selectedWorkdirMode,
+      hasSelectedLocalProject: Boolean(selectedLocalProject),
+      isRuntimeInitializing: runtimeInitializing,
+      isLoadingLocalGitState: loadingLocalGitState,
+      hasLocalGitStateError: Boolean(localGitStateError),
+    });
   const selectedMachineHasVisibleLocalProject = useMemo(
     () =>
       selectedMachineId ? getFirstVisibleLocalProjectForMachine(selectedMachineId) !== null : false,
@@ -4331,14 +4496,37 @@ function WorkspaceChatLanding({
             selectedMachineProjectStatus === 'no-projects-on-selected-machine'
           )
         );
-  const visibleComposerStatus = getChatLandingVisibleComposerStatus({
-    contextType,
-    composerStatus,
-    localGitStateError,
-    selectedMachineProjectStatus: selectedMachineProjectStatusMessage
-      ? { message: selectedMachineProjectStatusMessage, tone: 'warning' }
-      : null,
-  });
+  const scopedMachineMeta = selectedMachineId ? machines.get(selectedMachineId) : undefined;
+  const projectGroupStatusMessage: string | null = !selectedProjectGroupId
+    ? null
+    : !selectedProjectGroup
+      ? t('chat.projectGroup.missing', 'This project group no longer exists')
+      : projectGroupLaunchTarget?.kind === 'machines_conflict'
+        ? t(
+            'chat.projectGroup.machinesConflictStatus',
+            'This group has local repositories on different machines, so they cannot share one conversation.'
+          )
+        : projectGroupLaunchTarget?.kind === 'empty'
+          ? t('chat.projectGroup.empty', 'Choose at least one repository')
+          : projectGroupLaunchTarget?.kind === 'ready' &&
+              projectGroupLaunchTarget.members.length > 1 &&
+              scopedMachineMeta &&
+              !machineSupportsMultiRepoProject(scopedMachineMeta)
+            ? t(
+                'chat.projectGroup.unsupportedMachine',
+                'Update Lody on this machine to start project group conversations.'
+              )
+            : null;
+  const visibleComposerStatus = projectGroupStatusMessage
+    ? { message: projectGroupStatusMessage, tone: 'warning' as const }
+    : getChatLandingVisibleComposerStatus({
+        contextType,
+        composerStatus,
+        localGitStateError,
+        selectedMachineProjectStatus: selectedMachineProjectStatusMessage
+          ? { message: selectedMachineProjectStatusMessage, tone: 'warning' }
+          : null,
+      });
 
   // ── Title ──
   // Rotate the landing heading once per (UTC) day: stable within a day, no

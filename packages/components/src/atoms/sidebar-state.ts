@@ -257,6 +257,14 @@ export const githubWorktreesSectionCollapsedAtom = atomWithStorage<boolean>(
   false
 );
 
+/**
+ * Whether the "Project groups" section header is collapsed - persisted.
+ */
+export const projectGroupsSectionCollapsedAtom = atomWithStorage<boolean>(
+  'lody-sidebar-project-groups-section-collapsed',
+  false
+);
+
 // ============================================================================
 // Sidebar Collapsed (Desktop)
 // ============================================================================
