@@ -28,9 +28,9 @@ bounded Machine RPC reads. Indexing and saving still require the daemon. See the
   cards start collapsed and remain individually expandable. A base (All Changes)
   diff opened without a focus starts with every card collapsed, while a direct
   conversation/turn diff without a file focus keeps its all-files-open default.
-  A card still loading draws a pulsing skeleton body only if it will open, and
-  only the first `MAX_DIFF_SKELETON_BODIES` such cards do; the rest wait as
-  headers. One body per file in a diff of a few thousand files made WebKit
+  A card still loading draws a pulsing skeleton body only if it will open and
+  is near the scrollport; at most `MAX_DIFF_SKELETON_BODIES` such cards pulse.
+  Other open cards use static placeholders. One pulsing body per file in a diff of a few thousand files made WebKit
   composite thousands of pulsing layers and killed the iOS WebContent process
   ([decision](../notes/implemented/bug-fix/2026-10-16-diff-loading-skeleton-cap.md)).
   On mobile, the diff-header action closes the diff sheet before opening the
@@ -40,6 +40,20 @@ bounded Machine RPC reads. Indexing and saving still require the daemon. See the
   on the body; a Base UI drawer portalled there can pass scrolling through to
   the conversation. Keep this choice local to the mobile diff rather than changing
   the default container of every modal.
+- Multi-file diff panels keep filename shells and expansion state mounted, but
+  load turn/deferred snapshots and mount code bodies only near the scrollport
+  (600px overscan, with an explicit file focus always included). Hidden panels
+  pause new reads. `use-diff-viewport.ts` preserves the visible file's offset when
+  earlier bodies grow; at the bottom it anchors the last visible file. Measured
+  body placeholders preserve space when code leaves the viewport. Bodies with
+  pointer or keyboard interaction remain mounted to preserve selections, expanded
+  context and unsent comments. Parser cache misses use the shared parse Worker
+  regardless of text length, while ordinary standalone snippets retain their
+  existing threshold. In-flight reads keep their slots until settlement across
+  viewport/source changes; live batch identity fences old content, including
+  equal-length edits. All Changes retains its existing batched inline transfer
+  and decoding; only deferred reads become viewport-driven. See the
+  [implementation decision](../notes/implemented/bug-fix/2026-10-17-multi-file-diff-opening.md).
 - Editor window (Monaco): `session-monaco-text-viewer.tsx` inside
   `session-file-content-view.tsx`.
   File-link line anchors move Monaco's cursor as well as its viewport, using an

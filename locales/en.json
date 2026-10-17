@@ -1700,7 +1700,7 @@
   "sessions.fileDiff.loadDiff": "Load diff",
   "sessions.fileDiff.loadOnDemand": "Load this file when you need it.",
   "sessions.fileDiff.loading": "Loading diff…",
-  "sessions.fileDiff.preparingLargeDiff": "Preparing large diff",
+  "sessions.fileDiff.preparingLargeDiff": "Preparing diff",
   "sessions.fileDiff.preparingLargeDiffDescription": "The diff for {{path}} is being parsed off the main thread.",
   "sessions.fileDiff.virtualizedLargeDiff": "Rendering a virtualized large diff: {{rows}} rows, {{oldTextLength}} old chars, {{newTextLength}} new chars.",
   "sessions.fileDiff.virtualizedRowsUnavailable": "Diff rows are unavailable. Please reopen this diff.",

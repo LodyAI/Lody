@@ -46,12 +46,12 @@ records the label budget, interaction trade-off, and verification limits.
 | [`chat-share-image-dialog.tsx`](chat-share-image-dialog.tsx)    | Selected-message card styling, historical metadata, PNG export, and local image copying; [draft contract](../../../../../specs/chat-share-image.md) |
 | `draft-session-chat-interface.tsx`                              | Draft variant of the conversation surface                                                                                                           |
 | `session-chat-input-area.tsx`                                   | Composer: attachments, run-config footer, [upload waiting](../../../../../specs/composer-send-during-upload.md), submit                             |
-| `message-queue/`                                                | Queued turns and edit-operation ownership ([scope AGENTS.md](message-queue/AGENTS.md))                                                                                           |
+| `message-queue/`                                                | Queued turns and edit-operation ownership ([scope AGENTS.md](message-queue/AGENTS.md))                                                              |
 | `session-message-submit-route.ts`                               | Capability-gated send, regular queue, and native steer routing                                                                                      |
 | `desktop-run-config-menu.tsx`                                   | Desktop run-config dropdown + permission-mode button                                                                                                |
 | `recent-run-config-menu-group.tsx`                              | "Recently used" run-config entries                                                                                                                  |
 | `composer-agent-role-panel.tsx`, `agent-role-detail-pane.tsx`   | Agent Role selection and the single Role detail pane                                                                                                |
-| `floating-permission-request.tsx`, `ask-user-question-card.tsx` | Permission/question queue, draft continuity, and answer recovery                                                                                                    |
+| `floating-permission-request.tsx`, `ask-user-question-card.tsx` | Permission/question queue, draft continuity, and answer recovery                                                                                    |
 | `notification-permission-prompt.tsx`                            | Notification permission ask                                                                                                                         |
 | `session-fork-destination-menu.tsx`                             | Fork target choice (shared workspace tab vs. new worktree)                                                                                          |
 | `rename-session-dialog.tsx`                                     | Session rename dialog                                                                                                                               |
@@ -68,22 +68,22 @@ record the presentation decision awaiting visual review.
 In narrow mobile bars the private-access badge keeps its lock and sharing action,
 with the full access description in its accessible name/title.
 
-| File                                                                          | Responsibility                                                   |
-| ----------------------------------------------------------------------------- | ---------------------------------------------------------------- |
-| `session-info-bar.tsx`, `session-info-chips.tsx`, `info-chip.tsx`             | Canonical cluster + fixed stage bar above the composer           |
-| `session-machine-info.tsx`                                                    | Execution target and its on-demand ownership details             |
-| `session-info-action-state.ts`                                                | Which repository action the context stage offers                 |
-| `session-status-strip.tsx`                                                    | Priority-ordered connection/machine status (story coverage only) |
-| `session-syncing-indicator.tsx`                                               | Catch-up spinner pinned to the bar's right edge                  |
-| `session-goal-banner.tsx`, `session-goal-control.ts`                          | Goal actions reused by the goal chip                             |
-| `session-plan-bar.tsx`, `session-tasklist-mapping.ts`                         | Plan/tasklist presentation                                       |
-| `scheduled-tasks-panel.tsx`                                                   | Scheduled task list reused by the schedule chip                  |
-| `session-usage-popover.tsx`                                                   | Context and subscription usage ([display contract](../../../../../specs/session-usage-indicator.md)) |
-| `pull-request-badge.tsx`, `pr-merge-button.tsx`, `pr-merge-method.ts`         | PR identity and merge split-button                               |
-| `pr-tab-container.tsx`, `pr-tab-view.tsx`                                     | PR side-panel tab                                                |
-| `create-pr-prompt.ts`, `session-pr-prompts.ts`, `session-pr-agent-action.ts`  | Agent prompts behind Create PR / Fix CI / Resolve Conflicts      |
-| `diff-pr-analytics.ts`                                                        | Analytics for diff and PR surfaces                               |
-| `use-capacity-auto-retry.ts`                                                  | Capacity-error retry behaviour                                   |
+| File                                                                         | Responsibility                                                                                       |
+| ---------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| `session-info-bar.tsx`, `session-info-chips.tsx`, `info-chip.tsx`            | Canonical cluster + fixed stage bar above the composer                                               |
+| `session-machine-info.tsx`                                                   | Execution target and its on-demand ownership details                                                 |
+| `session-info-action-state.ts`                                               | Which repository action the context stage offers                                                     |
+| `session-status-strip.tsx`                                                   | Priority-ordered connection/machine status (story coverage only)                                     |
+| `session-syncing-indicator.tsx`                                              | Catch-up spinner pinned to the bar's right edge                                                      |
+| `session-goal-banner.tsx`, `session-goal-control.ts`                         | Goal actions reused by the goal chip                                                                 |
+| `session-plan-bar.tsx`, `session-tasklist-mapping.ts`                        | Plan/tasklist presentation                                                                           |
+| `scheduled-tasks-panel.tsx`                                                  | Scheduled task list reused by the schedule chip                                                      |
+| `session-usage-popover.tsx`                                                  | Context and subscription usage ([display contract](../../../../../specs/session-usage-indicator.md)) |
+| `pull-request-badge.tsx`, `pr-merge-button.tsx`, `pr-merge-method.ts`        | PR identity and merge split-button                                                                   |
+| `pr-tab-container.tsx`, `pr-tab-view.tsx`                                    | PR side-panel tab                                                                                    |
+| `create-pr-prompt.ts`, `session-pr-prompts.ts`, `session-pr-agent-action.ts` | Agent prompts behind Create PR / Fix CI / Resolve Conflicts                                          |
+| `diff-pr-analytics.ts`                                                       | Analytics for diff and PR surfaces                                                                   |
+| `use-capacity-auto-retry.ts`                                                 | Capacity-error retry behaviour                                                                       |
 
 ## File, diff, and browser surfaces
 
@@ -92,7 +92,7 @@ with the full access description in its accessible name/title.
 | `session-changes-sidebar.tsx`                                                                                                             | All Changes panel                                                                        |
 | `session-conversation-diff-panel.tsx`, `session-conversation-diff-types.ts`                                                               | Conversation/turn diff page                                                              |
 | `use-session-conversation-diff-data.ts`, `use-session-all-changes-diff-data.ts`, `use-session-diff-summary.ts`, `session-diff-summary.ts` | Diff data and summary derivation                                                         |
-| `use-diff-focus-scroll.ts`                                                                                                                | Scroll-to-focused-hunk behaviour                                                         |
+| `use-diff-focus-scroll.ts`, `use-diff-viewport.ts`                                                                                        | Focused-hunk navigation, visible diff bodies, and scroll anchoring                       |
 | `session-file-content-view.tsx`, `session-monaco-text-viewer.tsx`                                                                         | File viewer and its Monaco editor window                                                 |
 | `session-file-image-preview.tsx`, `session-file-binary-preview.tsx`, `session-file-pdf-preview.tsx`, `session-file-pdf-thumbnails.tsx`    | Image, PDF, and other binary previews; virtual thumbnail navigation                      |
 | `session-file-office-preview.tsx`, `session-file-{docx,xlsx,pptx}-renderer.tsx`, `session-file-office-frame.tsx`                          | Idle-loaded, read-only Office previews with worker-backed format engines                 |

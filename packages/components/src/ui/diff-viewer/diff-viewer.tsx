@@ -11,6 +11,7 @@ import {
 import type { DiffLineAnnotation, FileDiffMetadata, SupportedLanguages } from '@pierre/diffs';
 import { parseDiffFromFile } from '@pierre/diffs';
 import { useTranslation } from 'react-i18next';
+import * as stylex from '@stylexjs/stylex';
 
 import * as Collapsible from '@radix-ui/react-collapsible';
 import { ChevronDown, MessageSquare } from 'lucide-react';
@@ -58,6 +59,20 @@ const MAX_WORD_LEVEL_LINE_DIFF_PAIRS = 320;
 const DIFF_PARSE_WORKER_MIN_TEXT_LENGTH = 200_000;
 const parsedDiffCache = new Map<string, FileDiffMetadata>();
 const prerenderedHtmlCache = new Map<string, string>();
+let parseQueue: Promise<void> = Promise.resolve();
+function scheduleDiffParse(run: () => Promise<FileDiffMetadata | undefined>) {
+  // One parse worker executes synchronously. Start each request's timeout only
+  // when it reaches that worker, rather than while earlier files are computing.
+  const result = parseQueue.then(run);
+  parseQueue = result.then(
+    () => undefined,
+    () => undefined
+  );
+  return result;
+}
+const viewportStyles = stylex.create({
+  placeholder: (height: number) => ({ height }),
+});
 type DiffLineEnterProps = Parameters<
   NonNullable<NonNullable<FileDiffProps<CommentAnnotationMeta>['options']>['onLineEnter']>
 >[0];
@@ -207,6 +222,10 @@ export interface DiffViewerProps {
   preparsedOldTextLength?: number;
   preparsedNewTextLength?: number;
   lazyTextDiffSource?: DiffTextChunkSource;
+  /** Multi-file surfaces parse cache misses off the main thread, regardless of text length. */
+  preferParseWorker?: boolean;
+  /** Suspend off-screen code DOM while retaining the header and local interaction state. */
+  renderContent?: boolean;
   /**
    * Diff display style. If not specified and responsiveSplit is true,
    * the style will be automatically determined based on the component's width.
@@ -332,37 +351,6 @@ function createParsedDiffCacheKey(
   return parseCacheKey === undefined ? null : `${parseCacheKey}:${oldTextLength}:${newTextLength}`;
 }
 
-function createDiffParseRequestKey(input: {
-  readonly path: string;
-  readonly oldText: string;
-  readonly newText: string;
-  readonly oldTextLength?: number;
-  readonly newTextLength?: number;
-  readonly parseCacheKey?: string;
-}): string {
-  const oldTextLength = input.oldTextLength ?? input.oldText.length;
-  const newTextLength = input.newTextLength ?? input.newText.length;
-  const cacheKey = createParsedDiffCacheKey(input.parseCacheKey, oldTextLength, newTextLength);
-  if (cacheKey !== null) {
-    return cacheKey;
-  }
-  return [
-    input.path,
-    oldTextLength,
-    sampleTextForDiffParseKey(input.oldText),
-    newTextLength,
-    sampleTextForDiffParseKey(input.newText),
-  ].join('\0');
-}
-
-function sampleTextForDiffParseKey(text: string): string {
-  if (text.length <= 384) {
-    return text;
-  }
-  const midpoint = Math.floor(text.length / 2);
-  return `${text.slice(0, 128)}\0${text.slice(midpoint, midpoint + 128)}\0${text.slice(-128)}`;
-}
-
 /**
  * A collapse toggle button that can be used in custom headers.
  * Must be used inside a Collapsible.Root context.
@@ -396,7 +384,7 @@ function DiffViewerLoadingState({ path }: { path: string }) {
   return (
     <div className="px-4 py-3">
       <div className="text-sm font-medium text-foreground">
-        {t('sessions.fileDiff.preparingLargeDiff', 'Preparing large diff')}
+        {t('sessions.fileDiff.preparingLargeDiff', 'Preparing diff')}
       </div>
       <div className="mt-1 break-words text-xs text-muted-foreground">
         {t(
@@ -412,16 +400,16 @@ function DiffViewerLoadingState({ path }: { path: string }) {
 type WorkerParsedDiffState =
   | {
       readonly status: 'loading';
-      readonly requestKey: string;
+      readonly requestKey: object;
     }
   | {
       readonly status: 'ready';
-      readonly requestKey: string;
+      readonly requestKey: object;
       readonly fileDiff: FileDiffMetadata;
     }
   | {
       readonly status: 'error';
-      readonly requestKey: string;
+      readonly requestKey: object;
       readonly message: string;
     };
 
@@ -454,6 +442,8 @@ function DiffViewerImpl({
   preparsedOldTextLength,
   preparsedNewTextLength,
   lazyTextDiffSource,
+  preferParseWorker = false,
+  renderContent = true,
   diffStyle,
   responsiveSplit = false,
   className,
@@ -489,13 +479,19 @@ function DiffViewerImpl({
   );
   const effectiveDiffStyle = diffStyle ?? responsiveStyle;
   const diffHostRef = useRef<HTMLDivElement | null>(null);
+  const suspendedHeight = useRef(160);
+  // Replies, native selections and expanded context own state below FileDiff.
+  // Keep explicitly interacted bodies mounted rather than losing that state.
+  const [keepContentMounted, setKeepContentMounted] = useState(false);
+  const mountContent = renderContent || keepContentMounted;
   const isControlledOpen = open !== undefined;
   const [internalOpen, setInternalOpen] = useState<boolean>(defaultOpen);
   const [hasEverOpened, setHasEverOpened] = useState<boolean>(
     isControlledOpen ? Boolean(open) : defaultOpen
   );
   const isOpen = isControlledOpen ? Boolean(open) : internalOpen;
-  const shouldRenderDiff = !deferRenderUntilOpen || !showHeader || isOpen || hasEverOpened;
+  const shouldRenderDiff =
+    mountContent && (!deferRenderUntilOpen || !showHeader || isOpen || hasEverOpened);
   const effectiveOldTextLength =
     lazyTextDiffSource?.oldTextLength ?? preparsedOldTextLength ?? oldText.length;
   const effectiveNewTextLength =
@@ -505,25 +501,57 @@ function DiffViewerImpl({
     [effectiveNewTextLength, effectiveOldTextLength, parseCacheKey]
   );
   const diffParseRequestKey = useMemo(
-    () =>
-      createDiffParseRequestKey({
-        path,
-        oldText,
-        newText,
-        oldTextLength: effectiveOldTextLength,
-        newTextLength: effectiveNewTextLength,
-        parseCacheKey,
-      }),
-    [effectiveNewTextLength, effectiveOldTextLength, newText, oldText, parseCacheKey, path]
+    // Identity includes the complete inputs, including equal-length live edits.
+    () => ({
+      effectiveNewTextLength,
+      effectiveOldTextLength,
+      lazyTextDiffSource,
+      newText,
+      oldText,
+      parseCacheKey,
+      path,
+    }),
+    [
+      effectiveNewTextLength,
+      effectiveOldTextLength,
+      lazyTextDiffSource,
+      newText,
+      oldText,
+      parseCacheKey,
+      path,
+    ]
   );
   const shouldUseDiffParseWorker =
     preparsedDiff === undefined &&
     shouldRenderDiff &&
-    (lazyTextDiffSource !== undefined ||
+    (preferParseWorker ||
+      lazyTextDiffSource !== undefined ||
       effectiveOldTextLength + effectiveNewTextLength >= DIFF_PARSE_WORKER_MIN_TEXT_LENGTH);
   const [workerParsedDiffState, setWorkerParsedDiffState] = useState<WorkerParsedDiffState | null>(
     null
   );
+  const currentParseRequest = useRef({
+    key: diffParseRequestKey,
+    enabled: shouldUseDiffParseWorker,
+  });
+  currentParseRequest.current = { key: diffParseRequestKey, enabled: shouldUseDiffParseWorker };
+  const parseJob = useRef<{
+    requestKey: object;
+    promise: Promise<FileDiffMetadata | undefined>;
+  } | null>(null);
+
+  useEffect(() => {
+    const host = diffHostRef.current;
+    if (!mountContent || !host || typeof ResizeObserver === 'undefined') return undefined;
+    // This only records a measurement, with no DOM writes or React update. Record
+    // before the intersection callback can suspend a newly resized code body.
+    const observer = new ResizeObserver((entries) => {
+      const height = entries[0]?.contentRect.height ?? 0;
+      if (height > 0) suspendedHeight.current = height;
+    });
+    observer.observe(host);
+    return () => observer.disconnect();
+  }, [mountContent]);
 
   useEffect(() => {
     if (isOpen) {
@@ -546,9 +574,9 @@ function DiffViewerImpl({
 
   useEffect(() => {
     if (!shouldRenderDiff || !shouldUseDiffParseWorker) {
-      setWorkerParsedDiffState(null);
       return undefined;
     }
+    currentParseRequest.current = { key: diffParseRequestKey, enabled: true };
 
     if (parsedDiffCacheKey !== null && readParsedDiffCache(parsedDiffCacheKey) !== undefined) {
       setWorkerParsedDiffState(null);
@@ -564,22 +592,34 @@ function DiffViewerImpl({
 
     const ext = getExtensionFromPath(path) as SupportedLanguages | undefined;
     const parsedPromise =
-      lazyTextDiffSource === undefined
-        ? parseDiffInWorker({
-            path,
-            oldText,
-            newText,
-            lang: ext,
-            oldCacheKey: parseCacheKey ? `${parseCacheKey}:old` : undefined,
-            newCacheKey: parseCacheKey ? `${parseCacheKey}:new` : undefined,
-          })
-        : parseDiffTextSourceInWorker({
-            path,
-            source: lazyTextDiffSource,
-            lang: ext,
-            oldCacheKey: parseCacheKey ? `${parseCacheKey}:old` : undefined,
-            newCacheKey: parseCacheKey ? `${parseCacheKey}:new` : undefined,
+      parseJob.current?.requestKey === diffParseRequestKey
+        ? parseJob.current.promise
+        : scheduleDiffParse(() => {
+            if (
+              currentParseRequest.current.key !== diffParseRequestKey ||
+              !currentParseRequest.current.enabled
+            ) {
+              if (parseJob.current?.requestKey === diffParseRequestKey) parseJob.current = null;
+              return Promise.resolve(undefined);
+            }
+            return lazyTextDiffSource === undefined
+              ? parseDiffInWorker({
+                  path,
+                  oldText,
+                  newText,
+                  lang: ext,
+                  oldCacheKey: parseCacheKey ? `${parseCacheKey}:old` : undefined,
+                  newCacheKey: parseCacheKey ? `${parseCacheKey}:new` : undefined,
+                })
+              : parseDiffTextSourceInWorker({
+                  path,
+                  source: lazyTextDiffSource,
+                  lang: ext,
+                  oldCacheKey: parseCacheKey ? `${parseCacheKey}:old` : undefined,
+                  newCacheKey: parseCacheKey ? `${parseCacheKey}:new` : undefined,
+                });
           });
+    parseJob.current = { requestKey: diffParseRequestKey, promise: parsedPromise };
     void parsedPromise.then(
       (parsed) => {
         if (cancelled) {
@@ -616,6 +656,9 @@ function DiffViewerImpl({
 
     return () => {
       cancelled = true;
+      if (currentParseRequest.current.key === diffParseRequestKey) {
+        currentParseRequest.current.enabled = false;
+      }
     };
   }, [
     diffParseRequestKey,
@@ -1028,7 +1071,7 @@ function DiffViewerImpl({
   }, [cachedPrerenderedHTML, path, prerenderCacheKey, shouldRenderDiff]);
 
   const renderedFileDiff =
-    fileDiff !== null ? (
+    mountContent && fileDiff !== null ? (
       <MemoizedFileDiff
         fileDiff={fileDiff}
         options={mergedOptions}
@@ -1039,7 +1082,12 @@ function DiffViewerImpl({
       />
     ) : null;
 
-  const diffContentCore = isParsingLargeDiff ? (
+  const diffContentCore = !mountContent ? (
+    <div
+      aria-hidden="true"
+      {...stylex.props(viewportStyles.placeholder(suspendedHeight.current))}
+    />
+  ) : isParsingLargeDiff ? (
     <DiffViewerLoadingState path={path} />
   ) : parseErrorMessage ? (
     <DiffViewerErrorState message={parseErrorMessage} />
@@ -1085,6 +1133,8 @@ function DiffViewerImpl({
   const diffContentContainer = (
     <div
       ref={diffHostRef}
+      onPointerDownCapture={() => setKeepContentMounted(true)}
+      onFocusCapture={() => setKeepContentMounted(true)}
       className="lody-pierre-diff w-full bg-background"
       style={pierreDiffHostStyle}
     >
@@ -1191,6 +1241,8 @@ const areDiffViewerPropsEqual = (prev: DiffViewerProps, next: DiffViewerProps): 
   prev.preparsedOldTextLength === next.preparsedOldTextLength &&
   prev.preparsedNewTextLength === next.preparsedNewTextLength &&
   prev.lazyTextDiffSource === next.lazyTextDiffSource &&
+  prev.preferParseWorker === next.preferParseWorker &&
+  prev.renderContent === next.renderContent &&
   prev.diffStyle === next.diffStyle &&
   prev.responsiveSplit === next.responsiveSplit &&
   prev.className === next.className &&
