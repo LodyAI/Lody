@@ -11024,6 +11024,10 @@ describe('Operation Inbox execution boundary', () => {
       await f.accept();
       await f.service.continueSession(f.message);
       expect(f.store.inbox.pending('workspace-1')).toEqual([]);
+      expect(f.service.getExecutionSnapshot(f.message.sessionId)).toMatchObject({
+        hasActiveTurn: true,
+        releaseBlocked: { reason: 'Inbox resource acquisition remains incomplete' },
+      });
       const next = {
         workspaceId: 'workspace-1',
         sessionId: f.message.sessionId,
@@ -11043,8 +11047,20 @@ describe('Operation Inbox execution boundary', () => {
           'release outage'
         );
         expect(f.store.inbox.begin(next, 'successor')).toBe(false);
+        // A waiting input's recovery request reports the still-blocked slot.
+        await expect(f.service.requestReleaseRecovery(f.message.sessionId)).resolves.toBe(false);
+        expect(f.service.getExecutionSnapshot(f.message.sessionId).releaseBlocked).toBeDefined();
         db.exec('DROP TRIGGER release_outage');
-        await f.service.recoverInboxExecution(f.message.sessionId);
+        // Concurrent waiting inputs share one recovery, which succeeds once the fault clears.
+        const first = f.service.requestReleaseRecovery(f.message.sessionId);
+        const second = f.service.requestReleaseRecovery(f.message.sessionId);
+        expect(second).toBe(first);
+        await expect(first).resolves.toBe(true);
+        expect(f.service.getExecutionSnapshot(f.message.sessionId)).toMatchObject({
+          hasActiveTurn: false,
+        });
+        expect(f.service.getExecutionSnapshot(f.message.sessionId).releaseBlocked).toBeUndefined();
+        await expect(f.service.requestReleaseRecovery(f.message.sessionId)).resolves.toBe(false);
         expect(f.store.inbox.begin(next, 'successor')).toBe(true);
         expect(received).toHaveLength(1);
         expect(received[0]).toEqual([{ type: 'text', text: 'CURRENT_REQUEST' }]);
@@ -11052,6 +11068,85 @@ describe('Operation Inbox execution boundary', () => {
         db.close();
       }
     } finally {
+      await f.close();
+    }
+  });
+
+  it('releases an Inbox turn whose failure handling also fails, so the next input runs', async () => {
+    // Regression: a document that stops accepting status writes mid-turn made the
+    // failure handler throw too. That skipped the Inbox release, leaked the turn
+    // registration, and refused every later input as `active-session` forever.
+    const received: ContentBlock[][] = [];
+    const f = inboxExecutionFixture(async (blocks) => {
+      received.push(structuredClone(blocks));
+      return { stopReason: 'end_turn' };
+    });
+    const setStatus = f.doc.setStatus.bind(f.doc);
+    let statusWritesFail = true;
+    f.doc.setStatus = async (status) => {
+      if (statusWritesFail) throw new Error('Mirror not initialized');
+      await setStatus(status);
+    };
+    try {
+      await f.accept();
+      await f.service.continueSession(f.message).catch(() => undefined);
+      expect(received).toHaveLength(0);
+      expect(f.service.getExecutionSnapshot(f.message.sessionId)).toMatchObject({
+        hasActiveTurn: false,
+      });
+      expect(f.service.getExecutionSnapshot(f.message.sessionId).releaseBlocked).toBeUndefined();
+
+      // The agent process is kept for reuse; only the turn's ownership was released.
+      expect(f.client.isCreated()).toBe(true);
+
+      statusWritesFail = false;
+      const next = { ...f.message, userTurnId: 'later-human' };
+      await f.service.acceptInboxHumanInput({
+        sessionId: next.sessionId,
+        inputId: next.userTurnId,
+        userId: 'user-1',
+        config: next.acpSessionConfig,
+      });
+      await f.service.continueSession(next);
+      expect(received).toHaveLength(1);
+    } finally {
+      await f.close();
+    }
+  });
+
+  it('waits for a slow yielded finalization instead of treating it as a release failure', async () => {
+    const finalization = createDeferred<void>();
+    let service: SessionExecutionService | undefined;
+    const f = inboxExecutionFixture(async () => {
+      // A yielded turn's ancillary finalization outlives the old 5 s bound while
+      // the prompt fails, so the turn body exits early and the release waits.
+      const runtime = (
+        service as unknown as {
+          turnRuntimeBySession: Map<SessionId, { yieldedFinalization: Promise<void> }>;
+        }
+      ).turnRuntimeBySession.get('inbox-session' as SessionId);
+      if (runtime) runtime.yieldedFinalization = finalization.promise;
+      throw new Error('agent crashed');
+    });
+    service = f.service;
+    vi.useFakeTimers();
+    try {
+      await f.accept();
+      const turn = f.service.continueSession(f.message);
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(f.service.getExecutionSnapshot(f.message.sessionId)).toMatchObject({
+        hasActiveTurn: true,
+      });
+      expect(f.service.getExecutionSnapshot(f.message.sessionId).releaseBlocked).toBeUndefined();
+
+      finalization.resolve();
+      await turn.catch(() => undefined);
+      expect(f.service.getExecutionSnapshot(f.message.sessionId)).toMatchObject({
+        hasActiveTurn: false,
+      });
+      expect(f.service.getExecutionSnapshot(f.message.sessionId).releaseBlocked).toBeUndefined();
+    } finally {
+      vi.useRealTimers();
       await f.close();
     }
   });

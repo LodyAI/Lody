@@ -137,7 +137,7 @@ import {
   localProjectsLegacy,
 } from '@lody/shared/node/local-project';
 import { findProgressMessageId } from '@lody/shared/session-data';
-import { Cause, Clock, Data, Effect, Exit, Fiber, Random, Scope } from 'effect';
+import { Cause, Clock, Data, Effect, Exit, Fiber, Option, Random, Scope } from 'effect';
 import { createHash, randomUUID } from 'node:crypto';
 import { getCodexProfileStore, type ResolvedCodexProfile } from '../agent/codex-profile-store';
 import {
@@ -187,6 +187,8 @@ type FinalizeTurnContext = {
 };
 
 const TURN_FINALIZATION_STAGE_WARN_MS = 5_000;
+/** Log, never fail, a yielded turn's finalization that is still running at release. */
+const YIELDED_FINALIZATION_SLOW_WARNING = '5 seconds';
 // Renderer, local IPC, and Machine RPC wait at most 300s for the complete
 // authentication workflow. Keep the post-login capability proof inside that
 // envelope and leave a small delivery margin for the final response.
@@ -370,7 +372,20 @@ export type SessionExecutionSnapshot = {
   hasReusableSession: boolean;
   /** True while edit-and-resend owns the durable history tail. */
   hasRewriteBarrier: boolean;
+  /**
+   * Set when the active turn ended but could not confirm releasing its execution
+   * resources (in-flight ACP requests, the Inbox execution record). Successors
+   * stay blocked, since an unconfirmed release may still be running, until
+   * `requestReleaseRecovery` proves release. This is not "the agent process
+   * should have exited": a normally released turn keeps its process for reuse.
+   */
+  releaseBlocked?: { reason: string };
 };
+
+const describeReleaseFailure = (failure: unknown): string =>
+  Cause.isCause(failure)
+    ? (Cause.pretty(failure).split('\n')[0] ?? 'Unknown release failure')
+    : formatErrorMessage(failure);
 
 type TurnCancellationFinalizerOptions = {
   sessionId: SessionId;
@@ -913,6 +928,41 @@ export class SessionExecutionService {
     }
   }
 
+  private readonly releaseRecoveryBySession = new Map<SessionId, Promise<boolean>>();
+
+  /**
+   * Retry proving release for a turn whose release could not be confirmed.
+   *
+   * Called by the next input that waits on this session (a dispatch check or an
+   * Inbox readiness check), so recovery follows the fault clearing without a
+   * timer. Single-flight per session; a failed attempt keeps the slot and the
+   * next waiting input retries. Resolves true once the slot was released.
+   *
+   * Recovery may terminate the session's agent process: that is how it proves an
+   * unconfirmed release ended. It runs only for a blocked release, never after a
+   * normally released turn, whose process is kept for reuse.
+   */
+  requestReleaseRecovery(sessionId: SessionId): Promise<boolean> {
+    const inFlight = this.releaseRecoveryBySession.get(sessionId);
+    if (inFlight) return inFlight;
+    if (this.turnRuntimeBySession.get(sessionId)?.releaseFailure === undefined) {
+      return Promise.resolve(false);
+    }
+    const recovery = this.recoverInboxExecution(sessionId)
+      .then(() => this.turnRuntimeBySession.get(sessionId)?.releaseFailure === undefined)
+      .catch((cause: unknown) => {
+        this.deps.logger.warn(
+          `[${sessionId}] Turn resources remain unreleased; the next waiting input retries: ${formatErrorMessage(cause)}`
+        );
+        return false;
+      })
+      .finally(() => {
+        this.releaseRecoveryBySession.delete(sessionId);
+      });
+    this.releaseRecoveryBySession.set(sessionId, recovery);
+    return recovery;
+  }
+
   async recoverInboxExecution(sessionId: SessionId): Promise<void> {
     const runtime = this.turnRuntimeBySession.get(sessionId);
     if (!runtime?.releaseFailure) return;
@@ -1453,6 +1503,9 @@ export class SessionExecutionService {
       hasBlockingPendingCreate: Boolean(runtime?.pendingSession || (runtime && pendingSession)),
       hasReusableSession: Boolean(this.deps.sessionManager.getSession(sessionId)),
       hasRewriteBarrier: this.rewriteBarrierSessions.has(sessionId),
+      ...(runtime?.releaseFailure !== undefined
+        ? { releaseBlocked: { reason: describeReleaseFailure(runtime.releaseFailure) } }
+        : {}),
     };
   }
 
@@ -4205,14 +4258,23 @@ export class SessionExecutionService {
         (presenceScope, exit) =>
           Effect.gen(function* () {
             const turnRuntime = runtime;
+            // Yielded-turn finalization is Lody's own bookkeeping, and its chain
+            // catches every failure, so it always settles. A slow run is waited
+            // for and only logged: treating it as a release failure would block
+            // the session until a recovery that terminates its agent process.
+            const yieldedFinalizationSettled = yield* Effect.interruptible(
+              self.tryPromise(() => turnRuntime.yieldedFinalization)
+            ).pipe(
+              Effect.timeoutOption(YIELDED_FINALIZATION_SLOW_WARNING),
+              Effect.orElseSucceed(() => Option.some(undefined))
+            );
+            if (Option.isNone(yieldedFinalizationSettled)) {
+              self.deps.logger.warn(
+                `[${sessionId}] Yielded turn finalization is still running after ${YIELDED_FINALIZATION_SLOW_WARNING}; turn ${turnRuntime.turnId} waits for it before release`
+              );
+            }
             yield* self
-              .tryPromise(() =>
-                withTimeout(
-                  turnRuntime.yieldedFinalization,
-                  5_000,
-                  'Turn finalization release timed out'
-                )
-              )
+              .tryPromise(() => turnRuntime.yieldedFinalization)
               .pipe(
                 Effect.catchCause((cause) =>
                   Effect.sync(() => {
@@ -4642,47 +4704,33 @@ export class SessionExecutionService {
 
     const fiber = Effect.runFork(program);
     runtime.fiber = fiber;
+    // Failure bookkeeping is best effort and must never skip the release below.
+    // When it throws too (for example a status write on a document that stopped
+    // accepting writes), skipping the release would leave this registration in
+    // place: every later input for the session is then refused as
+    // `active-session`, and no recovery path owns the leaked slot.
+    let failureHandlingError: unknown;
     try {
       await this.awaitTurnFiber(fiber, sessionId, turnId);
       if (outcome === 'unknown') {
         outcome = 'completed';
       }
     } catch (error) {
-      if (isSessionTurnClaimContended(error)) {
-        outcome = 'claim-contended';
-      } else if (isSessionTurnStartFenceFailed(error)) {
-        outcome = 'start-fence-failed';
-        this.deps.logger.warn(
-          `[${sessionId}] Input start fence failed before provider execution: ${formatErrorMessage(error.cause)}`
-        );
-      } else if (isSessionTurnHalted(error)) {
-        outcome = `halted-${error.reason}`;
-        await this.finalizeHaltedTurn({
+      try {
+        outcome = await this.settleVisibleTurnFailure({
           sessionId,
           sessionDoc,
-          turnId: runtime.turnId,
-          reason: error.reason,
-        });
-      } else if (
-        isSessionTurnCancelled(error) ||
-        runtime.cancelFinalized ||
-        runtime.cancelRequested ||
-        this.isTurnCancelled(sessionId, runtime.turnId) ||
-        (await this.isUserTurnCancelled(sessionDoc, runtime.userTurnId))
-      ) {
-        outcome = 'cancelled';
-      } else {
-        await this.handleVisibleTurnUnhandledError({
-          sessionId,
-          sessionDoc,
-          userTurnId: runtime.userTurnId,
           runtime,
           error,
-          code: effectiveErrorContext.code,
-          describe: effectiveErrorContext.describe,
-          onUnhandledError: effectiveErrorContext.onUnhandledError,
+          errorContext: effectiveErrorContext,
         });
-        outcome = 'unhandled-error-recorded';
+      } catch (handlingError) {
+        failureHandlingError = handlingError;
+        outcome = 'failure-handling-failed';
+        this.deps.logger.error(
+          `[${sessionId}] Failed to finalize failed turn ${runtime.turnId}; releasing it anyway (original error: ${formatErrorMessage(error)}): ${formatErrorMessage(handlingError)}`,
+          handlingError
+        );
       }
     } finally {
       if (!runtime.promptStarted) {
@@ -4690,6 +4738,92 @@ export class SessionExecutionService {
       }
       span.end({ outcome, turnId });
     }
+    await this.releaseVisibleTurn({
+      sessionId,
+      sessionDoc,
+      runtime,
+      inbox,
+      inboxInput,
+      inboxBatch,
+      outcome,
+    });
+    if (failureHandlingError !== undefined) throw failureHandlingError;
+    return outcome;
+  }
+
+  /** Classify a visible turn's failure and publish its user-visible result. */
+  private async settleVisibleTurnFailure(options: {
+    sessionId: SessionId;
+    sessionDoc: SessionDocument;
+    runtime: TurnRuntimeState;
+    error: unknown;
+    errorContext: VisibleSessionTurnUnhandledErrorContext;
+  }): Promise<string> {
+    const { sessionId, sessionDoc, runtime, error, errorContext } = options;
+    if (isSessionTurnClaimContended(error)) {
+      return 'claim-contended';
+    }
+    if (isSessionTurnStartFenceFailed(error)) {
+      this.deps.logger.warn(
+        `[${sessionId}] Input start fence failed before provider execution: ${formatErrorMessage(error.cause)}`
+      );
+      return 'start-fence-failed';
+    }
+    if (isSessionTurnHalted(error)) {
+      await this.finalizeHaltedTurn({
+        sessionId,
+        sessionDoc,
+        turnId: runtime.turnId,
+        reason: error.reason,
+      });
+      return `halted-${error.reason}`;
+    }
+    if (
+      isSessionTurnCancelled(error) ||
+      runtime.cancelFinalized ||
+      runtime.cancelRequested ||
+      this.isTurnCancelled(sessionId, runtime.turnId) ||
+      (await this.isUserTurnCancelled(sessionDoc, runtime.userTurnId))
+    ) {
+      return 'cancelled';
+    }
+    await this.handleVisibleTurnUnhandledError({
+      sessionId,
+      sessionDoc,
+      userTurnId: runtime.userTurnId,
+      runtime,
+      error,
+      code: errorContext.code,
+      describe: errorContext.describe,
+      onUnhandledError: errorContext.onUnhandledError,
+    });
+    return 'unhandled-error-recorded';
+  }
+
+  /**
+   * Hand the turn's Inbox execution back and drop its registration.
+   *
+   * Releasing a turn returns its ownership slot: in-flight ACP requests have
+   * ended and the Inbox execution record is written. It does NOT terminate the
+   * agent process, which stays alive for the next turn to reuse; only idle GC
+   * (`LODY_SESSION_GC_IDLE_TIMEOUT_MS`, 20 minutes by default), memory-pressure
+   * eviction, archive, or an abnormal path (an agent that ignores Stop, a lost
+   * connection) ends it.
+   *
+   * A release that cannot be confirmed keeps `releaseFailure` and the slot, so
+   * successors stay blocked until `recoverInboxExecution` proves release; the
+   * next input that waits on this session requests that recovery.
+   */
+  private async releaseVisibleTurn(options: {
+    sessionId: SessionId;
+    sessionDoc: SessionDocument;
+    runtime: TurnRuntimeState;
+    inbox: OperationInboxLegacy | undefined;
+    inboxInput: InboxInput | undefined;
+    inboxBatch: InboxBatch | undefined;
+    outcome: string;
+  }): Promise<void> {
+    const { sessionId, sessionDoc, runtime, inbox, inboxInput, inboxBatch, outcome } = options;
     const withdrawn =
       inboxInput &&
       runtime.withdrawInboxExecution &&
@@ -4745,7 +4879,6 @@ export class SessionExecutionService {
       await inbox!.wake();
       this.onInboxReleased?.(sessionId);
     }
-    return outcome;
   }
 
   private markCurrentTurn(sessionId: SessionId, turnId: string): void {

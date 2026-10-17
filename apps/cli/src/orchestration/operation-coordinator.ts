@@ -139,11 +139,18 @@ export class LodyOperationCoordinator {
         return { sql: store.inbox, close: () => store.close() };
       },
       quiesce: () => this.options.executionService.quiesceInboxExecutions?.(),
-      ready: (batch) =>
-        this.started &&
-        !this.options.executionService.getExecutionSnapshot(batch.sessionId as SessionId)
-          .hasActiveTurn &&
-        !this.options.dispatchWatcher.hasPendingDispatch(batch.sessionId as SessionId),
+      ready: (batch) => {
+        if (!this.started) return false;
+        const sessionId = batch.sessionId as SessionId;
+        const execution = this.options.executionService.getExecutionSnapshot(sessionId);
+        // A delivery waiting on an unconfirmed release asks for its recovery; a
+        // successful recovery wakes the Inbox, which runs this check again.
+        if (execution.releaseBlocked)
+          void this.options.executionService.requestReleaseRecovery?.(sessionId);
+        return (
+          !execution.hasActiveTurn && !this.options.dispatchWatcher.hasPendingDispatch(sessionId)
+        );
+      },
       admit: (batch) =>
         this.started &&
         (batch.kind !== 'automatic' ||
