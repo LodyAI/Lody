@@ -7,8 +7,9 @@ authorities.
 Persisted and draft composers share `useSessionAcpSelectorContext`, which subscribes
 to the exact bound Provider and passes its runtime overrides to model and command
 catalog readers. This keeps extension-enabled Pi catalogs usable while rejecting
-catalogs for removed or changed selections; a missing or mismatched Provider cannot
-lend another launch configuration's catalog.
+catalogs for removed or changed selections. A Provider row bound to another
+machine or agent type lends nothing; an absent row reads with no overrides, so only
+an override-free catalog applies. Override matching is key-order insensitive.
 
 Independent Plan uses ACP Core's boolean `plan_mode`. Shared capability discovery
 and selector ordering recognize it as Plan; UI changes and semantic run-config

@@ -31,14 +31,18 @@ export function useSessionAcpSelectorContext({
   const { machine: sessionMachine, machineFlockRows } = useResolvedMachineMeta(machineId);
   useMachineFlockAgentConfigsForMachineIds([machineId]);
   const config = useAtomValue(getAgentMetaByIdAtomFamily(configId ?? undefined));
-  const matchesProvider =
-    config?.machineId === machineId &&
-    config?.cliType === cliType &&
-    config?.agentType === agentType;
-  const runtimeOverrides = matchesProvider ? config?.runtimeOverrides : undefined;
+  // A Provider row that is absent (not yet materialized, or dropped from the
+  // client cache) reads with no overrides: the gate then serves only an
+  // override-free catalog, so a plain Pi keeps its pickers while an
+  // extension-launched catalog stays hidden. A row bound elsewhere is a
+  // different launch configuration and lends nothing.
+  const providerMismatch =
+    !!config &&
+    (config.machineId !== machineId || config.cliType !== cliType || config.agentType !== agentType);
+  const runtimeOverrides = config && !providerMismatch ? config.runtimeOverrides : undefined;
   const acpTarget = useMemo(
     () =>
-      configId && !matchesProvider
+      configId && providerMismatch
         ? undefined
         : {
             configId,
@@ -58,7 +62,7 @@ export function useSessionAcpSelectorContext({
       selectedModeId,
       selectedModelId,
       sessionMachine,
-      matchesProvider,
+      providerMismatch,
       runtimeOverrides,
     ]
   );
