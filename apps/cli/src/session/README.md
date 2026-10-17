@@ -646,3 +646,7 @@ The Session sandbox persists incomplete identity before spawn and continuously a
 ACP/terminal process roots. Execution retains every attached Session owner until release,
 including replacements within one turn. Restart probes require explicit completeness and
 absence of every root/group; an initial snapshot alone is insufficient.
+A child error with no PID proves that spawn created no process: it still rejects
+the command, but does not make resource identity permanently incomplete. This
+exception matches the actual child error; journal, setup and cleanup failures
+remain uncertain, as do other acquisitions already marked uncertain.
