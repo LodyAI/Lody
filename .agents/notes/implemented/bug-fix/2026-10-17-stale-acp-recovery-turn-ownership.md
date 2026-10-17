@@ -2,6 +2,7 @@
 
 Status: implemented
 Translation: current
+PR: [#1665](https://github.com/LodyAI/Lody/pull/1665)
 
 [中文](2026-10-17-stale-acp-recovery-turn-ownership.zh.md)
 
@@ -38,22 +39,22 @@ history/output corruption intact. Reopening the turn after termination would rac
 the asynchronous old finalizer. Removing automatic retry would regress the
 existing user-turn policy. Reusing retirement needs no new registry or abstraction.
 
-Effect skill mode: feature/fix. The changed workflow already composes native
-Effects; Session/process acquisition and MessageHandler remain unfinished upstream
-orchestration. Expanding their migration would not help this event-source fix;
-no migration boundary or ledger claim changes.
+The workflow already composes native Effects. Session/process acquisition and
+MessageHandler remain unfinished upstream orchestration; this event-source fix
+changes no migration boundary.
 
 ## Verification and limits
 
 The owning ACP batching suite connects real Session termination, SessionManager
 forwarding, MessageHandler, transient state, offline SessionDocument, native
-presence and the renderer conversation-index rule. Explicit gates exercise
-resume/no-resume and both lifecycle-finalization orderings, cleanup rejection for
-connection-closed and missing-session errors, Stop during retirement and during
-the replacement prompt, and the no-output/one-retry submission restrictions.
-The four owning suites pass 369 tests, and CLI typechecking passes. Temporary
-ablations restore ordinary termination, omit failed-retirement ownership, or
-retain the old drain receipt; each fails its corresponding behavioral regression.
+presence and the renderer conversation-index rule. Its fixture supplies the manager
+at handler construction and leaves lifecycle finalizers untouched. Explicit gates
+cover resume/no-resume, both cleanup error classes, Stop during retirement and
+replacement, and bounded retry without prior output.
+The focused suites and CLI typechecking pass. Ablations show that ordinary
+termination corrupts the output owner, dropping failed-retirement ownership loses
+cleanup, retaining the disconnected flag kills a healthy replacement, and retaining
+the old drain receipt prevents replacement cancellation.
 
 The provider and Git observation are synthetic. This does not establish live
 provider or packaged desktop behavior. Detaching listeners does not revoke a

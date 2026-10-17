@@ -2,6 +2,7 @@
 
 Status: implemented
 Translation: current
+PR: [#1665](https://github.com/LodyAI/Lody/pull/1665)
 
 [English](2026-10-17-stale-acp-recovery-turn-ownership.md)
 
@@ -30,18 +31,17 @@ Translation: current
 已经能抵抗附带的生命周期清理。新增心跳修复不能解决历史和输出损坏。终止后重新打开轮次
 会与旧异步 finalizer 竞争；删除自动重试则会削弱现有用户轮次行为。复用退役无需新增注册表或抽象。
 
-Effect skill 使用 feature/fix 模式。修改所在工作流已经组合原生 Effect；Session/进程获取
-及 MessageHandler 仍是尚未迁移的上游编排。扩展迁移不能帮助修正本次错误事件源，
-因此不改变迁移边界或台账声明。
+修改所在工作流已经组合原生 Effect；Session/进程获取及 MessageHandler
+仍是尚未迁移的上游编排。本次事件源修正不改变迁移边界。
 
 ## 验证与限制
 
 现有 ACP batching suite 连接真实 Session 终止、SessionManager 事件转发、MessageHandler、
-临时状态、离线 SessionDocument、原生 presence 和渲染器会话索引规则。显式信号控制
-有无 resume ID、两种生命周期终结顺序、连接关闭和会话不存在的清理失败、退役中及替代 prompt
-执行中的 Stop，以及无输出和最多一次重试的提交限制。
-四个所属测试 suite 共 369 个测试通过，CLI 类型检查通过。临时消融分别恢复普通终止、
-去掉退役失败所有权、保留旧排空凭据，对应的行为回归均会失败。
+临时状态、离线 SessionDocument、原生 presence 和渲染器会话索引规则。fixture 在构造
+handler 时注入 manager，不改写生命周期 finalizer。显式信号覆盖有无
+resume ID、两类清理错误、退役中及替代 prompt 执行中的 Stop，以及无输出和最多一次重试的限制。
+所属测试 suite 与 CLI 类型检查通过。消融验证了：普通终止会破坏输出归属；丢掉退役失败
+所有权会遗漏清理；保留 disconnected 标记会杀死健康替代实例；保留旧排空凭据会阻止替代实例取消。
 
 Provider 与 Git 观察使用合成端口，不能据此证明真实 provider 或桌面安装包行为。
 解绑监听器不能撤销已经进入的消费者；独立资源限制/error finalizer 和 provider 已排队的
