@@ -605,7 +605,7 @@ test.describe('attachment upload submission', () => {
               {
                 blocks: [image, { type: 'text', text: 'Inspect this image' }],
                 ...(action === 'Meta+Shift+Enter'
-                  ? { options: { invertSubmitBehavior: true } }
+                  ? { options: { submitBehavior: 'guide' } }
                   : {}),
               },
             ]);

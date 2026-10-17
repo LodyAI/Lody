@@ -152,6 +152,7 @@ import {
   currentWorkspaceSlugAtom,
   getAllAgentConfigAtom,
   queuedMessageBehaviorAtom,
+  type QueuedMessageBehavior,
   userAtom,
 } from '@/atoms';
 import { activeWorkspaceRuntimeAtom } from '@/atoms/runtime';
@@ -2291,8 +2292,8 @@ export type DispatchInputBlocksOptions = {
   attachments?: SessionAttachmentDraft[];
   forceQueue?: boolean;
   forceDirect?: boolean;
-  /** Swaps the configured busy-send behavior (queue <-> steer) for this send. */
-  invertSubmitBehavior?: boolean;
+  /** Replaces the configured busy-send behavior (queue or steer) for this send. */
+  submitBehavior?: QueuedMessageBehavior;
   modeIdOverride?: string | null;
   modelIdOverride?: string | null;
   configOptionValuesOverride?: Record<string, AcpConfigOptionValue>;
@@ -4544,7 +4545,7 @@ export const SessionChatInterface = memo(
         const submitRoute = resolveSessionMessageSubmitRoute({
           forceDirect,
           forceQueue: options?.forceQueue === true,
-          invertBehavior: options?.invertSubmitBehavior === true,
+          behaviorOverride: options?.submitBehavior ?? null,
           isPromptBusy: isAgentBusy,
           hasUnfinishedAssistantTurn: activeAssistantTurnId != null,
           queuedMessageBehavior,
@@ -4572,7 +4573,7 @@ export const SessionChatInterface = memo(
           ...inputSummary,
           force_queue: Boolean(options?.forceQueue),
           force_direct: forceDirect,
-          invert_behavior: Boolean(options?.invertSubmitBehavior),
+          submit_behavior_override: options?.submitBehavior ?? null,
           submit_route: submitRoute.type,
           is_agent_busy: isAgentBusy,
           mode_id: turnModeId ?? null,
