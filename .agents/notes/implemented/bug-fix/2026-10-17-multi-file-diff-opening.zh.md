@@ -2,6 +2,7 @@
 
 Status: implemented
 Translation: current
+PR: [#1648](https://github.com/LodyAI/Lody/pull/1648)
 
 [English](2026-10-17-multi-file-diff-opening.md)
 
