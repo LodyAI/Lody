@@ -44,9 +44,16 @@ required; async native completion precedes temporary-buffer cleanup and cancella
 completion. Outer signatures, current eligibility and epoch commitments remain
 mandatory caller responsibilities; HPKE validity does not establish sender identity.
 
-## Current formats only
+## Format compatibility
 
-E2EE has not shipped and has no deployed ledger or journal data to migrate. Support only the current format for each entrypoint; do not add old-format decoders, dual readers, schema upgrades, legacy imports or compatibility facades. Unsupported formats fail without rewriting their input. Normal reopening of current stores, verified history within the current ledger and epoch-key history recovery remain required. This scope choice does not select any pending replacement format or approve production activation.
+**Ledger v1 is permanent.** Developer-preview creation can produce real ledgers, so every genesis and ordinary record that ledger v1 accepts must stay verifiable by every later client, with unchanged bytes, hashes, signing domains and operation semantics. The independently generated vector `packages/e2ee-core/test/ledger-v1-vector.json` is the contract; it is never regenerated to match changed code.
+
+Ledger evolution is append-only:
+
+- A new operation becomes valid only after a capability declaration (operation tag 9) earlier in the same ledger. The declaration lists strictly ascending nonzero u32 capability codes, is signed by an Owner or Admin personal device and is monotonic. A client that does not implement a declared capability verifies the preceding records and stops at the declaration with `upgrade-required`; it never reports corruption or skips the record. Writers and hosts refuse a declaration they do not implement and any operation whose capability was not declared earlier.
+- Changing the cipher suite or another genesis-level parameter creates a new ledger with a new genesis. The old ledger is never rewritten; it ends with a link record introduced through a capability, as MLS ReInit links a replacement group.
+
+Every other format remains current-only. Content, journal, local-store and snapshot formats have no deployed data: support only the current format for each entrypoint, with no old-format decoders, dual readers, schema upgrades, legacy imports or compatibility facades. Snapshots can always be rebuilt from full v1 history, so a snapshot format change does not break ledger compatibility. Unsupported formats fail without rewriting their input. Normal reopening of current stores, verified history within the current ledger and epoch-key history recovery remain required. This scope choice does not select any pending replacement format or approve production activation.
 
 ## Local epoch protection boundary
 
