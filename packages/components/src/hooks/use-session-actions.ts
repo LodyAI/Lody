@@ -220,11 +220,11 @@ async function deleteMachineFlockRowsBestEffort(
   }
 }
 
-/** Only PR auto-archive supplies this attempt-local cancellation/progress seam. */
-export type AutoArchiveSessionOptions = {
+/** Only PR auto-archive supplies this cancellation check and progress receipt. */
+type AutoArchiveSessionOptions = {
   /** False retires a superseded request before any archive writes. */
   shouldContinue: (targets: readonly SessionMeta[]) => boolean;
-  onAccepted: (sessionId: SessionId) => void;
+  accepted: Set<SessionId>;
 };
 
 export type SessionActions = {
@@ -841,7 +841,7 @@ export function useSessionActions(): SessionActions {
           isArchived: true,
           status: SessionStatusFactory.idle(),
         } as Partial<SessionMeta>);
-        autoArchive?.onAccepted(session.id);
+        autoArchive?.accepted.add(session.id);
         if (typeof window !== 'undefined') {
           // Cleanup failure cannot undo the accepted archive state.
           try {

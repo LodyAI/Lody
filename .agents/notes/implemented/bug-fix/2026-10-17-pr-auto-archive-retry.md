@@ -2,6 +2,7 @@
 
 Status: implemented
 Translation: current
+PR: [#1666](https://github.com/LodyAI/Lody/pull/1666)
 
 [中文](2026-10-17-pr-auto-archive-retry.zh.md)
 
@@ -36,13 +37,18 @@ observed active PR transition -> pending intent -> archiveSession
 The original [archive relation contract](../../../../specs/session-relations.md)
 already permits partial completion and retry of an archived root. The
 [retention decision](2026-10-01-archive-worktree-retention-contract.md) is unchanged.
-The automatic-only `shouldContinue` and `onAccepted` callbacks reuse the action's
-existing authoritative target snapshot and successful write boundary. A restored
-or removed accepted target retires the intent before cancellation of held sends
+The automatic-only `shouldContinue` check and caller-owned `accepted` set reuse the
+action's existing authoritative target snapshot and successful write boundary.
+A restored or removed accepted target retires the intent before cancellation of held sends
 or archive writes. Manual archive retains its unwritten-creation behavior and
 receives no new gate. Native `WorkspaceRepoLegacy.watch` can rehydrate both an
 archive and a restore event to the final unarchived row, so UI metadata alone
 cannot prove the accepted intermediate state.
+
+The existing PR baseline suppresses startup. Pending-entry identity also supplies
+completion and unmount fencing, so separate initialization, failure and active flags
+are redundant. The archive action is stable for its runtime and store; retries
+capture it directly.
 
 ## Ownership and failure containment
 
@@ -78,5 +84,6 @@ Repo case verifies coalesced archive/restore observation and authoritative retry
 cancellation; a restored Session's newly held send remains deliverable. Removing
 accepted-ID tracking makes that native case archive the restored root again,
 confirming that the progress boundary is necessary.
+Restoring the base watcher makes both merged and closed recovery cases fail.
 The fixtures and injected failures are synthetic. No hosted writes, real PR
 mutations or packaged-desktop reproduction are claimed.

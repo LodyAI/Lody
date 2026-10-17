@@ -188,7 +188,8 @@ and the "…" menu open. Rationale:
 `auto-archive-pr-watcher.tsx` keeps observed PR transitions separate from unfinished
 archive attempts. Its owning window retries the existing Session action with capped
 backoff and drops superseded work on scope changes. The action's automatic-only
-callbacks record accepted targets and check its authoritative target snapshot before
-any retry side effects, so restoring a partially archived Session or Tab supersedes
-the unfinished operation. Startup and restore still only establish the PR baseline.
+progress receipt records accepted targets; its cancellation check uses the
+authoritative snapshot before retry side effects, so restoring a partially archived
+Session or Tab supersedes the unfinished operation. Startup and restore still only
+establish the PR baseline.
 See the [retry decision](../../../../.agents/notes/implemented/bug-fix/2026-10-17-pr-auto-archive-retry.md).

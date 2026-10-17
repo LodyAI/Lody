@@ -1,5 +1,5 @@
 import { WorkspaceWindowOwnerContext } from '@/lib/desktop-window';
-import { useContext, useEffect, useMemo, useRef } from 'react';
+import { useContext, useEffect, useMemo } from 'react';
 import { useAtomValue, useStore } from 'jotai';
 import { getSessionRoomId, type SessionId } from '@lody/shared';
 import { activeWorkspaceRuntimeAtom } from '@/atoms/runtime';
@@ -43,8 +43,6 @@ function CloudAutoArchivePrWatcher() {
   const onPrClosed = useAtomValue(autoArchiveOnPrClosedAtom);
   const { archiveSession } = useSessionActions();
   const store = useStore();
-  const archiveRef = useRef(archiveSession);
-  archiveRef.current = archiveSession;
   const currentUserId = typeof user?.id === 'string' ? user.id.trim() : '';
   const state = useMemo(
     () => ({
@@ -53,26 +51,18 @@ function CloudAutoArchivePrWatcher() {
       previous: new Map<string, AutoArchivePrSnapshot>(),
       pending: new Map<string, PendingArchive>(),
       inFlight: new Set<string>(),
-      initialized: false,
-      active: false,
       run: undefined as ((intent: PendingArchive) => void) | undefined,
     }),
     [runtime, currentUserId]
   );
 
   useEffect(() => {
-    state.active = true;
     const retire = (intent: PendingArchive) => {
       clearTimeout(intent.timer);
       if (state.pending.get(intent.sessionId) === intent) state.pending.delete(intent.sessionId);
     };
     const applicable = (intent: PendingArchive) => {
-      if (
-        !state.active ||
-        !state.runtime ||
-        store.get(activeWorkspaceRuntimeAtom) !== state.runtime
-      )
-        return false;
+      if (!state.runtime || store.get(activeWorkspaceRuntimeAtom) !== state.runtime) return false;
       if (store.get(userAtom)?.id?.trim() !== state.currentUserId) return false;
       const cache = store.get(sessionMetaCacheAtom);
       const session = cache[getSessionRoomId(intent.sessionId)];
@@ -105,9 +95,9 @@ function CloudAutoArchivePrWatcher() {
       if (intent.timer || state.inFlight.has(intent.sessionId)) return;
       state.inFlight.add(intent.sessionId);
       void (async () => {
-        let failed = false;
         try {
-          await archiveRef.current(intent.sessionId, {
+          await archiveSession(intent.sessionId, {
+            accepted: intent.accepted,
             shouldContinue: (targets) => {
               if (!applicable(intent) || state.pending.get(intent.sessionId) !== intent)
                 return false;
@@ -127,13 +117,9 @@ function CloudAutoArchivePrWatcher() {
                 targets.some((target) => target.id === id && target.isArchived)
               );
             },
-            onAccepted: (id) => {
-              intent.accepted.add(id);
-            },
           });
           retire(intent);
         } catch (error) {
-          failed = true;
           // Logging must not turn an observed background failure into a rejection.
           try {
             console.error('AutoArchivePrWatcher: failed to archive session', {
@@ -150,7 +136,7 @@ function CloudAutoArchivePrWatcher() {
               retire(next);
             } else if (next !== intent) {
               state.run?.(next);
-            } else if (failed) {
+            } else {
               intent.timer = setTimeout(() => {
                 intent.timer = undefined;
                 state.run?.(intent);
@@ -169,13 +155,11 @@ function CloudAutoArchivePrWatcher() {
       autoArchiveOnPrClosedAtom,
     ].map((atom) => store.sub(atom, reconcile));
     return () => {
-      state.active = false;
       for (const intent of state.pending.values()) retire(intent);
       state.previous.clear();
-      state.initialized = false;
       for (const release of unsubscribe) release();
     };
-  }, [currentUserId, runtime, state, store]);
+  }, [archiveSession, currentUserId, runtime, state, store]);
 
   useEffect(() => {
     const seenSessionIds = new Set<string>();
@@ -191,9 +175,9 @@ function CloudAutoArchivePrWatcher() {
       });
       if (current) state.previous.set(session.id, current);
       else state.previous.delete(session.id);
-      // Startup and restore establish observations; only an active Session's
-      // newly observed terminal transition creates work. Failure keeps that work.
-      if (!state.initialized || session.isArchived || !decision.shouldArchive || !current) continue;
+      // A missing baseline cannot be a transition, including at startup. Archived
+      // Sessions keep that baseline so restore does not create new work either.
+      if (session.isArchived || !decision.shouldArchive || !current) continue;
       const prior = state.pending.get(session.id);
       if (prior) clearTimeout(prior.timer);
       const intent: PendingArchive = {
@@ -214,7 +198,6 @@ function CloudAutoArchivePrWatcher() {
         state.pending.delete(sessionId);
       }
     }
-    state.initialized = true;
   }, [sessions, archivedSessions, currentUserId, onPrMerged, onPrClosed, state]);
 
   return null;
