@@ -5921,11 +5921,17 @@ export class SessionExecutionService {
                 `[${sessionId}] ACP prompt failed because the connection was stale; restoring session before one retry`
               );
               yield* abortIfCancelled();
-              yield* self.ignoreWithWarning(
-                sessionId,
-                'Failed to terminate stale ACP session before prompt retry',
-                self.tryPromise(() => self.deps.sessionManager.terminateSession(sessionId, true))
+              // Replacing this runtime continues the same logical turn. Ordinary
+              // termination publishes agent-death events that finalize its history
+              // owner before the replacement prompt can produce output. Keep the
+              // old runtime bound until retirement succeeds, so failed cleanup is
+              // still owned by the disconnected-execution finalizer.
+              runtime.disconnectedTransport = true;
+              yield* self.tryPromise(() =>
+                self.deps.sessionManager.retireSessionForReconfiguration(activeSession)
               );
+              runtime.disconnectedTransport = false;
+              runtime.cancellationDrain = undefined;
               session = null;
               runtime.session = undefined;
               runtime.pendingSession = undefined;
