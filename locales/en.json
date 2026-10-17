@@ -1630,6 +1630,8 @@
   "sessions.usage.extraBalance": "Extra usage balance",
   "sessions.usage.fiveHour": "5 hours",
   "sessions.usage.limit": "Usage",
+  "sessions.usage.showAbsoluteTime": "Show absolute time",
+  "sessions.usage.showRelativeTime": "Show relative time",
   "sessions.usage.modelFallback": "Model usage",
   "sessions.usage.monthlySpend": "Monthly spend",
   "sessions.usage.openWithRemaining": "Open usage details, {{percent}}% remaining",

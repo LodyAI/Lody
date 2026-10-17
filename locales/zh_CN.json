@@ -1630,6 +1630,8 @@
   "sessions.usage.extraBalance": "额外用量余额",
   "sessions.usage.fiveHour": "5 小时",
   "sessions.usage.limit": "用量",
+  "sessions.usage.showAbsoluteTime": "显示绝对时间",
+  "sessions.usage.showRelativeTime": "显示相对时间",
   "sessions.usage.modelFallback": "模型额度",
   "sessions.usage.monthlySpend": "本月消费",
   "sessions.usage.openWithRemaining": "打开用量详情，剩余 {{percent}}%",

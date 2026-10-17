@@ -147,3 +147,11 @@ The [video viewer](session-file-video-preview.tsx) uses native controls for
 browser-decodable WebM, MP4/M4V, MOV, and OGV. It consumes authorized bytes or
 resource URLs, releases the player when inactive, and preserves file actions on
 failure. The mobile project browser uses the same player.
+
+## Usage reset time
+
+Each reported reset time in `SessionUsagePopover` has an `ArrowLeftRight` button
+that toggles that row between relative time (the default) and a local date/time
+formatted in the product language. Missing reset timestamps show neither a time
+nor a toggle. The choice lasts while the row is mounted; see the
+[decision](../../../../../.agents/notes/implemented/feature/2026-10-10-usage-reset-time-toggle.md).
