@@ -2,6 +2,7 @@
 
 Status: implemented
 Translation: current
+PR: [#1649](https://github.com/LodyAI/Lody/pull/1649)
 
 [English](2026-10-17-document-selection-and-image-markup.md)
 
