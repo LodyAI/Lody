@@ -1,3 +1,5 @@
+import { useCloudMutation } from '@lody/platform/react';
+import { cloudOperations } from '@/lib/cloud-api-operations';
 import { createFileRoute, Outlet } from '@tanstack/react-router';
 import { BootNavigate } from '@/components/boot-navigate';
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -27,7 +29,7 @@ import {
   identifyPostHogWorkspace,
 } from '@/lib/posthog-analytics';
 import { identifyPostHogUser } from '@/lib/posthog-identity';
-import { scheduleOneSignalTask } from '@/lib/onesignal';
+import { installPushPort, schedulePushTask } from '@/lib/push-notifications';
 import { PreloadedMainLayout } from '@/components/preloaded-main-layout';
 import { RouteMessage } from '@/components/route-message';
 import { BlockingWaitPlaceholder } from '@/components/blocking-wait-placeholder';
@@ -45,7 +47,7 @@ import {
 } from '@/components/workspace-data-wait';
 import { useBillingOverviewPreload } from '../../hooks/use-billing-overview-preload';
 
-const AUTH_ROUTE_ONESIGNAL_LOGIN_IDLE_TIMEOUT_MS = 10_000;
+const AUTH_ROUTE_PUSH_LOGIN_IDLE_TIMEOUT_MS = 10_000;
 
 function normalizeConvexSiteUrl(rawUrl: string | undefined): string | null {
   const trimmed = rawUrl?.trim();
@@ -224,6 +226,13 @@ function CloudMainLayoutComponent({ workspaceName }: { workspaceName: string }) 
     postHog,
   ]);
 
+  const registerPush = useCloudMutation(cloudOperations.pushSubscriptions.register);
+  const unregisterPush = useCloudMutation(cloudOperations.pushSubscriptions.unregister);
+  useEffect(
+    () => installPushPort({ register: registerPush, unregister: unregisterPush }),
+    [registerPush, unregisterPush]
+  );
+
   useEffect(() => {
     const token = session?.session?.token;
     if (!currentUser || !token) {
@@ -233,16 +242,15 @@ function CloudMainLayoutComponent({ workspaceName }: { workspaceName: string }) 
       return undefined;
     }
 
-    return scheduleOneSignalTask(async (oneSignal, signal) => {
+    return schedulePushTask(async (pushClient, signal) => {
       try {
-        await oneSignal.login(currentUser.id, token);
-        if (signal.aborted) {
-          await oneSignal.logout?.();
-        }
+        await pushClient.login(currentUser.id, token);
+        // A subsequent login owns the new generation; an old effect must not log it out.
+        if (signal.aborted) return;
       } catch (loginError) {
-        console.error('OneSignal login failed', loginError);
+        console.error('Push login failed', loginError);
       }
-    }, AUTH_ROUTE_ONESIGNAL_LOGIN_IDLE_TIMEOUT_MS);
+    }, AUTH_ROUTE_PUSH_LOGIN_IDLE_TIMEOUT_MS);
   }, [currentUser, session?.session?.token]);
 
   useEffect(() => {

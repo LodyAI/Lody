@@ -6,7 +6,7 @@ import { useTranslation } from 'react-i18next';
 import { useAtom } from 'jotai';
 import { languageAtom } from '../atoms/settings';
 import type { SupportedLanguage } from '@lody/shared';
-import { withOneSignal } from '@/lib/onesignal';
+import { withPush } from '@/lib/push-notifications';
 
 import en from '../../../../locales/en.json';
 import lang_en from '../../../../locales/modules/lang/en.json';
@@ -178,10 +178,10 @@ export const LanguageSelector = ({ triggerClassName }: { triggerClassName?: stri
         if (typeof window === 'undefined' || window.__LODY_ELECTRON__ === true) {
           return;
         }
-        void withOneSignal((oneSignal) => {
-          void oneSignal.User.setLanguage(value === 'en' ? 'en' : 'zh');
+        void withPush((pushClient) => {
+          void pushClient.User.setLanguage(value === 'en' ? 'en' : 'zh');
         }).catch((error: unknown) => {
-          console.error('Failed to sync OneSignal language', error);
+          console.error('Failed to sync Push language', error);
         });
       }}
     >
