@@ -33,10 +33,34 @@ now records this exception to its strict pin-matching rule.
 
 Regression coverage extends the existing matcher and hook suites: both Plan
 representations, execute-plan metadata, missing/invalid values, other pin drift,
-memory retention, navigation, and explicit None. All 40 tests in the three owning
+memory retention, navigation, and explicit None. All 44 tests in the three owning
 suites pass, as does components typecheck. Scoped lint has no errors (two existing
 nullable-string warnings); docs check passes with existing size warnings. Full
 `pnpm check` passed typecheck, lint, Effect lint and script tests, then stopped at
 the unchanged CLI recursive SSH submodule test with `context_unreadable` (4,310
 CLI tests passed, one failed, four skipped). Later stages did not run.
 `pnpm format` passed. Packaged UI acceptance has not been performed.
+
+## Ablation evidence
+
+Seven one-at-a-time deletions were tested against the three owning suites,
+restoring the source after each run. The initial 40-test baseline passed.
+
+| Deleted behavior | Failing tests |
+| --- | ---: |
+| Boolean Plan exception | 4 |
+| Legacy Plan exception | 3 |
+| Current boolean value validation | 2 |
+| Current legacy value validation | 2 |
+| Other pinned-option comparison | 8 |
+| Saved boolean value validation | 0 initially; 2 after coverage repair |
+| Saved legacy value validation | 0 initially; 2 after coverage repair |
+
+The two surviving deletions exposed missing coverage, not redundant validation:
+Role option normalization preserves strings and booleans without validating their
+Plan semantics. Four cases now verify that invalid stored Plan values cannot
+retain the Role merely because the composer has a valid value. With those cases,
+the intact baseline passes 44 tests and each formerly surviving deletion fails
+two tests. No production branch was removed: this bounded experiment provides
+no evidence that the new matching guards are redundant. Mutation scripts and
+logs remain temporary, outside the repository.

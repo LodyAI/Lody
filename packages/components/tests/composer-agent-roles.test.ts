@@ -175,6 +175,27 @@ describe('isComposerAgentRoleApplied', () => {
     ).toBe(false);
   });
 
+  it.each([
+    ['plan_mode', 'true', false],
+    ['plan_mode', 'invalid', true],
+    ['collaboration_mode', true, 'default'],
+    ['collaboration_mode', 'invalid', 'plan'],
+  ] as const)(
+    'does not retain a Role with invalid saved %s value %s',
+    (configId, saved, selected) => {
+      const invalidRole = {
+        ...role,
+        runConfig: { ...role.runConfig, configOptionValues: { [configId]: saved } },
+      };
+      expect(
+        isComposerAgentRoleApplied(invalidRole, {
+          ...matching,
+          configOptionValues: { [configId]: selected },
+        })
+      ).toBe(false);
+    }
+  );
+
   it('stops holding when a pinned option falls back to the agent value', () => {
     expect(
       isComposerAgentRoleApplied(role, {
