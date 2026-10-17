@@ -10,8 +10,7 @@ import {
   syncTime,
   createServerTimeFetcher,
 } from '../src/time-sync';
-import { maintainTimeSync } from '../src/time-sync-maintenance';
-import { startTimeSyncLegacy } from '../src/time-sync-legacy';
+import { maintainTimeSync, startTimeSyncLegacy } from '../src/time-sync-maintenance';
 import { isFreshLodyPresenceState } from '../src/presence';
 import { makeLoroStreamsTokenWebPorts } from '../src/loro-streams-auth';
 
@@ -34,6 +33,7 @@ describe('time sync', () => {
   });
 
   it('keeps calibrated timestamps integral when the RTT midpoint is fractional', async () => {
+    vi.spyOn(performance, 'now').mockReturnValue(0);
     vi.spyOn(Date, 'now')
       .mockReturnValueOnce(1_000)
       .mockReturnValueOnce(1_001)
@@ -46,22 +46,18 @@ describe('time sync', () => {
     expect(Number.isInteger(getServerNow())).toBe(true);
   });
 
-  it('does not publish cancelled or superseded samples', async () => {
+  it('does not publish cancelled samples after a successor calibrates', async () => {
+    vi.spyOn(Date, 'now').mockReturnValue(1_000_000);
+    vi.spyOn(performance, 'now').mockReturnValue(0);
     const late = Promise.withResolvers<number>();
     const controller = new AbortController();
     const pending = syncTime(() => late.promise, controller.signal);
     controller.abort();
     await syncTime(async () => Date.now() + 500);
     late.resolve(Date.now() - 120_000);
-    await expect(pending).rejects.toMatchObject({ name: 'AbortError' });
+    const failure = await pending.catch((error: unknown) => error);
     expect(getServerTimeOffset()).toBe(500);
-
-    const old = Promise.withResolvers<number>();
-    const older = syncTime(() => old.promise);
-    await syncTime(async () => Date.now() + 750);
-    old.resolve(Date.now() - 120_000);
-    await older;
-    expect(getServerTimeOffset()).toBe(750);
+    expect(failure).toMatchObject({ name: 'AbortError' });
   });
 
   it('rejects a sample taken across a clock correction without losing calibration', async () => {
@@ -69,13 +65,12 @@ describe('time sync', () => {
     vi.spyOn(Date, 'now').mockImplementation(() => wall);
     vi.spyOn(performance, 'now').mockReturnValue(0);
     await syncTime(async () => wall + 500);
-    await expect(
-      syncTime(async () => {
-        wall -= 120_000;
-        return wall;
-      })
-    ).rejects.toThrow('System clock changed');
+    const failure = await syncTime(async () => {
+      wall -= 120_000;
+      return wall;
+    }).catch((error: unknown) => error);
     expect(getServerTimeOffset()).toBe(500);
+    expect(failure).toMatchObject({ message: 'System clock changed during time synchronization' });
   });
 
   it('aborts the actual HTTP request when its application owner stops', async () => {
@@ -168,7 +163,7 @@ describe('maintained time calibration', () => {
         const maintenance = yield* Effect.forkChild(
           maintainTimeSync(async () => epoch + clock.currentTimeMillisUnsafe(), {
             onFirstAttempt: Deferred.succeed(completed, undefined),
-          }).pipe(Effect.provideService(Clock.Clock, clockWithWallTime(clock, wall)))
+          })
         );
         yield* Deferred.await(completed);
         expect(getServerTimeOffset()).toBe(-initialError);
@@ -182,7 +177,7 @@ describe('maintained time calibration', () => {
             isFreshLodyPresenceState({ updatedAt: getServerNow() }, consumer.getServerNow())
           ).toBe(false);
         }
-        yield* TestClock.adjust(1_000);
+        yield* TestClock.adjust(30_000);
         expect(getServerTimeOffset()).toBe(0);
         const heartbeat = { updatedAt: getServerNow() };
         expect(isFreshLodyPresenceState(heartbeat, consumer.getServerNow())).toBe(true);
@@ -225,14 +220,17 @@ describe('maintained time calibration', () => {
             },
             {
               onFirstAttempt: Deferred.succeed(ready, undefined),
-              onError: () => Deferred.doneUnsafe(failed, Effect.void),
+              onError: () => {
+                Deferred.doneUnsafe(failed, Effect.void);
+                throw new Error('synthetic diagnostic failure');
+              },
             }
-          ).pipe(Effect.provideService(Clock.Clock, clockWithWallTime(clock, wall)))
+          )
         );
         yield* Deferred.await(ready);
         offline = true;
         wallError = 0;
-        yield* TestClock.adjust(1_000);
+        yield* TestClock.adjust(30_000);
         yield* Deferred.await(failed);
         expect(getServerTimeOffset()).toBe(-120_000);
         offline = false;
@@ -242,9 +240,10 @@ describe('maintained time calibration', () => {
         // Re-sample rather than serializing the frozen monotonic estimate.
         const beforeSuspend = getServerNow();
         suspendedElapsed = 600_000;
-        yield* TestClock.adjust(1_000);
+        expect(getServerNow() - beforeSuspend).toBe(600_000);
+        yield* TestClock.adjust(30_000);
         expect(getServerTimeOffset()).toBe(0);
-        expect(getServerNow() - beforeSuspend).toBe(601_000);
+        expect(getServerNow() - beforeSuspend).toBe(630_000);
         yield* Fiber.interrupt(maintenance);
       })
   );

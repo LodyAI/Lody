@@ -4,7 +4,7 @@ import { z } from 'zod';
  * Zod schema for the /api/time response.
  */
 export const serverTimeResponseSchema = z.object({
-  serverTime: z.number().finite(),
+  serverTime: z.number(),
 });
 
 export type ServerTimeResponse = z.infer<typeof serverTimeResponseSchema>;
@@ -54,7 +54,6 @@ let serverTimeOffset = 0;
 
 /** Whether time sync has been completed */
 let isSynced = false;
-let sampleGeneration = 0;
 
 export type ServerTimeFetcher = (signal?: AbortSignal) => Promise<number>;
 
@@ -63,7 +62,7 @@ const CLOCK_DISCONTINUITY_MS = 1_000;
 
 /**
  * Synchronize local time with server time.
- * Failed, cancelled and superseded samples preserve the last calibration.
+ * Failed and cancelled samples preserve the last calibration.
  *
  * @param getServerTime - A function that returns a Promise resolving to the server timestamp in milliseconds
  */
@@ -72,18 +71,15 @@ export async function syncTime(
   signal?: AbortSignal
 ): Promise<void> {
   signal?.throwIfAborted();
-  const generation = ++sampleGeneration;
   const localBefore = Date.now();
   const elapsedBefore = performance.now();
   const serverTime = await getServerTime(signal);
   const localAfter = Date.now();
   const elapsed = performance.now() - elapsedBefore;
   signal?.throwIfAborted();
-  if (!Number.isFinite(serverTime)) throw new Error('Invalid server time');
   if (Math.abs(localAfter - localBefore - elapsed) > CLOCK_DISCONTINUITY_MS) {
     throw new Error('System clock changed during time synchronization');
   }
-  if (generation !== sampleGeneration) return;
 
   // Use round-trip midpoint to approximate when server generated timestamp
   const localMid = (localBefore + localAfter) / 2;
@@ -127,7 +123,6 @@ export function getServerTimeOffset(): number {
  * Reset time sync state. Mainly useful for testing.
  */
 export function resetTimeSync(): void {
-  sampleGeneration++;
   serverTimeOffset = 0;
   isSynced = false;
 }

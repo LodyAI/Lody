@@ -64,7 +64,6 @@ export * from './scheduled-tasks-from-history';
 export * from './project';
 export * from './time-sync';
 export * from './time-sync-maintenance';
-export * from './time-sync-legacy';
 export * from './session-status-machine';
 export * from './session-archive-targets';
 export * from './session-operation-targets';

@@ -7,7 +7,6 @@ import {
   SessionStatusFactory,
   getServerNow,
   getServerTimeOffset,
-  syncTime,
   resetTimeSync,
   maintainTimeSync,
   findFreshMachinePresenceState,
@@ -435,10 +434,6 @@ describe('native workspace presence ownership', () => {
           })
         );
         yield* Effect.gen(function* () {
-          yield* Effect.promise(() => syncTime(async () => serverNow()));
-          const fixture = yield* nativeFixture(100, false, getServerTimeOffset);
-          fixture.owner.replica.setMachineOnline(MACHINE_ID, getServerNow());
-          error = 0;
           const ready = Deferred.makeUnsafe<void>();
           const maintenance = yield* Effect.forkChild(
             maintainTimeSync(async () => serverNow(), {
@@ -446,7 +441,10 @@ describe('native workspace presence ownership', () => {
             })
           );
           yield* Deferred.await(ready);
-          yield* testClock.adjust(LODY_PRESENCE_HEARTBEAT_MS);
+          const fixture = yield* nativeFixture(100, false, getServerTimeOffset);
+          fixture.owner.replica.setMachineOnline(MACHINE_ID, getServerNow());
+          error = 0;
+          yield* testClock.adjust(LODY_PRESENCE_HEARTBEAT_MS * 2);
           const state = findFreshMachinePresenceState(
             fixture.owner.replica.getPresenceStates(),
             MACHINE_ID,

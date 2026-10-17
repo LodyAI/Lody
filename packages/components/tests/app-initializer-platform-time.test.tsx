@@ -86,6 +86,7 @@ describe('AppInitializer platform time synchronization', () => {
   it('calibrates against the time endpoint when cloud synchronization is available', async () => {
     const wall = 2_000_000_000_000;
     vi.spyOn(Date, 'now').mockReturnValue(wall);
+    vi.spyOn(performance, 'now').mockReturnValue(0);
     const fetchMock = vi.fn(
       async () =>
         new Response(JSON.stringify({ serverTime: wall + 5_000 }), {
