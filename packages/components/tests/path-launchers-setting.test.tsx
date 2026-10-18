@@ -105,7 +105,7 @@ describe('PathLaunchersSettings', () => {
     });
   });
 
-  it('explains Delta installation when it is selected as the default', async () => {
+  it('persists Delta as a standard default launcher', async () => {
     writeStoredPathLauncherPreference({
       selectedLauncherId: 'delta',
       customLaunchers: [],
@@ -113,9 +113,7 @@ describe('PathLaunchersSettings', () => {
     await renderSettings();
     expect(getSelectTrigger().textContent).toContain('Delta');
     expect(getSelectTrigger().querySelector('svg')).not.toBeNull();
-    expect(container.textContent).toContain(
-      'Install the Delta app, then choose Install CLI in Delta'
-    );
+    expect(container.textContent).toContain("The app a session header's Open button uses.");
     expect(readStoredPathLauncherPreference().selectedLauncherId).toBe('delta');
   });
 

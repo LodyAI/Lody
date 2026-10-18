@@ -3156,7 +3156,6 @@
   "settings.pathLaunchers.customHint": "Custom launchers run a shell command and work only on this desktop. Use {path} for the folder path.",
   "settings.pathLaunchers.default.label": "Default launcher",
   "settings.pathLaunchers.defaultBadge": "Default",
-  "settings.pathLaunchers.deltaHint": "Install the Delta app, then choose Install CLI in Delta to open session diffs.",
   "settings.pathLaunchers.description": "The app a session header's Open button uses.",
   "settings.pathLaunchers.editAction": "Edit",
   "settings.pathLaunchers.editTitle": "Edit launcher",
