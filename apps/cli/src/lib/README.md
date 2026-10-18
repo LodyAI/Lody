@@ -61,6 +61,10 @@ subdirectory; this file is the navigation index. Cross-module explanations live 
   RPC wiring, local project control, session file upload/send, and the turn cloud
   side-effect gate. Turn execution itself lives in
   `../session/session-execution-service.ts`.
+  Machine registration passes the daemon's `TZ` hint to `getDeviceTimeZone`:
+  when Intl exposes no zone name, named zoneinfo paths and fixed whole-hour
+  POSIX zones such as `HKT-8` are resolved before the legacy UTC fallback.
+  See the [timezone decision](../../../../.agents/notes/implemented/bug-fix/2026-10-18-linux-schedule-timezone.md).
 - `machine-runtime.ts` — machine runtime bootstrap; still hosts the DEPRECATED hosted
   WS control-plane listener, and serializes remote bridge attach/detach/revoke through
   `runBridgeTransition`.
