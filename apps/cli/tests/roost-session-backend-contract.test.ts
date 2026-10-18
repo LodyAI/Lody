@@ -2562,6 +2562,56 @@ describe('Production Roost immutable input acceptance', () => {
     return port;
   };
 
+  it('accepts the first input after reopen without hydrating older history pages', async () => {
+    const fixture = await nativeFixture();
+    const history = Array.from({ length: 81 }, (_, index) => ({
+      ...nativeAssistant(`unrelated-old-${index}`),
+      finished: true,
+      items: [{ type: 'text' as const, text: 'Synthetic old output'.repeat(128) }],
+    }));
+    const hashes = history.map((entry) => hashHistoryEntryForVersion(entry as never, 2));
+    expect(
+      await fixture.backend.applyHistoryImport({
+        mode: 'initialize',
+        replay: {
+          history: history as never,
+          turnHashes: hashes,
+          replayDigest: hashText(hashes.join('\n')),
+          hashVersion: 2,
+          droppedNotifications: 0,
+        },
+      })
+    ).toMatchObject({ status: 'accepted' });
+    const sessionId = fixture.doc.sessionId;
+    await fixture.close();
+    const reopened = await nativeFixture(sessionId);
+    const readPage = NodeLodyHistory.prototype.readActiveBranchPage;
+    vi.spyOn(NodeLodyHistory.prototype, 'readActiveBranchPage').mockImplementation(
+      function (id, options) {
+        if (options.before) throw new Error('Unrelated old history is unavailable');
+        return readPage.call(this, id, options);
+      }
+    );
+    const input = nativeUser('first-input-after-reopen');
+    const accept = inputPort(reopened).acceptAndDispatch;
+    if (!accept) throw new Error('Expected combined input dispatch');
+    expect(await accept(input)).toEqual({
+      status: 'accepted',
+      turnId: input.id,
+      active: true,
+    });
+    expect(await inputPort(reopened).lookup(input)).toMatchObject({
+      status: 'accepted',
+      active: true,
+    });
+    expect((await reopened.doc.getMetaState())?.latestUserMsgId).toBe(input.id);
+    expect(await reopened.backend.readHistoryCount()).toBe(history.length + 1);
+    expect(await reopened.backend.readTurn(input.id)).toMatchObject({
+      state: 'ready',
+      turn: input,
+    });
+  });
+
   it('commits human provenance and activation with ordinary acceptance and preserves a newer pointer on retry', async () => {
     const fixture = await nativeFixture();
     const first = nativeUser('combined-first'),
