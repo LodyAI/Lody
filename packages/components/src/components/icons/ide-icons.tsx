@@ -376,6 +376,27 @@ export function AntigravityIcon(props: SVGProps<SVGSVGElement>) {
   );
 }
 
+// Delta brand mark: https://delta.dev/favicon.svg
+export function DeltaIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg
+      width="32"
+      height="32"
+      viewBox="0 0 32 32"
+      fill="none"
+      xmlns="http://www.w3.org/2000/svg"
+      {...props}
+    >
+      <path
+        fillRule="evenodd"
+        clipRule="evenodd"
+        d="M15.0907 5.15945C15.3263 4.75139 15.7618 4.5 16.233 4.5C16.7042 4.5 17.1396 4.75139 17.3753 5.15945L29.3238 25.8549C29.5594 26.2629 29.5594 26.7657 29.3238 27.1738C29.0882 27.5819 28.6527 27.8333 28.1815 27.8333H9.34553C8.87431 27.8333 8.43888 27.5819 8.20327 27.1738C7.96766 26.7657 7.96766 26.2629 8.20327 25.8549L16.233 11.947L22.8744 23.4503H14.6526L15.782 21.4942H19.4863L16.233 15.8593L10.4491 25.8772H27.0779L16.233 7.09328L4.25871 27.8333H2L15.0907 5.15945Z"
+        fill="currentColor"
+      />
+    </svg>
+  );
+}
+
 export function ZedIcon(props: SVGProps<SVGSVGElement>) {
   return (
     <svg width="90" viewBox="0 0 90 90" fill="none" xmlns="http://www.w3.org/2000/svg" {...props}>

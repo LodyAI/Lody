@@ -11,7 +11,7 @@ Reviewing a Lody session in Delta previously required copying the worktree path 
 
 ## Decision and limits
 
-The launcher passes `open` and the resolved path as separate arguments, preserving spaces and shell characters. Its persisted id is `delta`, and it uses the same settings helper as other launchers. A generic diff icon identifies the launcher without importing a new brand asset.
+The launcher passes `open` and the resolved path as separate arguments, preserving spaces and shell characters. Its persisted id is `delta`, and it uses the same settings helper as other launchers. The launcher uses the [Delta brand mark](https://delta.dev/favicon.svg), rendered with the same theme-aware `currentColor` treatment as Zed.
 
 Keeping a custom launcher would avoid a built-in entry but leave setup to each user. A separate Delta execution service would duplicate the existing desktop boundary, so the implementation instead adds one command specification. Availability uses the existing PATH executable probe; it does not distinguish other executables named `delta`, and users must ensure the Delta app CLI is the command on PATH. Real app launch remains a manual verification requirement.
 
