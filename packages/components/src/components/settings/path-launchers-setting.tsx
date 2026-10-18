@@ -230,10 +230,14 @@ export function PathLaunchersSettings({
   const row = (
     <CompactRow
       label={t('settings.pathLaunchers.title', 'Open with')}
-      helper={t(
-        'settings.pathLaunchers.description',
-        "The app a session header's Open button uses."
-      )}
+      helper={
+        selectedLauncherId === 'delta'
+          ? t(
+              'settings.pathLaunchers.deltaHint',
+              'Install the Delta app, then choose Install CLI in Delta to open session diffs.'
+            )
+          : t('settings.pathLaunchers.description', "The app a session header's Open button uses.")
+      }
     >
       <Select.Root
         open={selectOpen}

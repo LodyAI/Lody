@@ -1,4 +1,5 @@
 import type React from 'react';
+import { GitCompareArrows } from 'lucide-react';
 import type { BuiltinPathLauncherId, PathLauncherOption } from '@/lib/session-path-launchers';
 import {
   AntigravityIcon,
@@ -26,6 +27,7 @@ const BUILTIN_PATH_LAUNCHER_ICONS: Record<BuiltinPathLauncherId, PathLauncherIco
   sublime: SublimeIcon,
   warp: WarpIcon,
   xcode: XcodeIcon,
+  delta: GitCompareArrows,
 };
 
 /**

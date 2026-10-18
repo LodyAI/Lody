@@ -3156,6 +3156,7 @@
   "settings.pathLaunchers.customHint": "自定义启动方式会执行 Shell 命令，且只在当前桌面端生效。使用 {path} 表示文件夹路径。",
   "settings.pathLaunchers.default.label": "默认启动方式",
   "settings.pathLaunchers.defaultBadge": "默认",
+  "settings.pathLaunchers.deltaHint": "请先安装 Delta 应用，再在 Delta 中选择「Install CLI」，即可打开会话的差异进行审查。",
   "settings.pathLaunchers.description": "会话顶部“打开”按钮使用的应用。",
   "settings.pathLaunchers.editAction": "编辑",
   "settings.pathLaunchers.editTitle": "编辑启动方式",

@@ -105,6 +105,20 @@ describe('PathLaunchersSettings', () => {
     });
   });
 
+  it('explains Delta installation when it is selected as the default', async () => {
+    writeStoredPathLauncherPreference({
+      selectedLauncherId: 'delta',
+      customLaunchers: [],
+    });
+    await renderSettings();
+    expect(getSelectTrigger().textContent).toContain('Delta');
+    expect(getSelectTrigger().querySelector('svg')).not.toBeNull();
+    expect(container.textContent).toContain(
+      'Install the Delta app, then choose Install CLI in Delta'
+    );
+    expect(readStoredPathLauncherPreference().selectedLauncherId).toBe('delta');
+  });
+
   it('lists logo and name options with the custom action last', async () => {
     seedCustomLauncher();
     await renderSettings();
