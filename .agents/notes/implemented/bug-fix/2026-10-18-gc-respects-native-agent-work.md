@@ -2,6 +2,7 @@
 
 Status: implemented
 Translation: current
+PR: [#1679](https://github.com/LodyAI/Lody/pull/1679)
 
 [中文](2026-10-18-gc-respects-native-agent-work.zh.md)
 
