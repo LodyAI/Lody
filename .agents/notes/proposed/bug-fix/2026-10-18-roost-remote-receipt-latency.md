@@ -3,6 +3,7 @@
 Status: proposed
 Type: bug-fix
 Translation: current
+PR: [#1699](https://github.com/LodyAI/Lody/pull/1699)
 
 [中文](2026-10-18-roost-remote-receipt-latency.zh.md)
 
