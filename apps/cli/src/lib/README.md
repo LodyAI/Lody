@@ -96,7 +96,10 @@ subdirectory; this file is the navigation index. Cross-module explanations live 
   `session-file-backfill.ts`, `acp-agent-attachments.ts` — the attachment lifecycle;
   see
   [`.agents/docs/cli-lib-session-files.md`](../../../../.agents/docs/cli-lib-session-files.md).
-- `session-gc-manager.ts` — idle cleanup plus memory-pressure reclamation. Per-OS
+- `session-gc-manager.ts` — idle cleanup plus memory-pressure reclamation. Idle also
+  asks the native agent (`AgentClient.getNativeWork`, from Core `sessionActivity`)
+  whether it still runs or waits on background tasks
+  ([decision](../../../../.agents/notes/implemented/bug-fix/2026-10-18-gc-respects-native-agent-work.md)). Per-OS
   measurement rationale:
   [`.agents/docs/cli-lib-memory-pressure.md`](../../../../.agents/docs/cli-lib-memory-pressure.md).
 - `session-transient-store.ts` — buffered ACP updates and their turn ownership.

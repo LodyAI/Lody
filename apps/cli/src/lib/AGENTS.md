@@ -64,12 +64,13 @@ never pushed to renderers as local room health.
 ## Sessions and turns
 
 - `session-gc-manager.ts`: `evaluateMemoryPressure` returns TWO verdicts, `evict` and
-  `block`, which must not share a threshold. Every probe fails OPEN, and `null`
-  (UNDETERMINED) Windows commit growth must never collapse to `0`. Do not let the
-  periodic sweep force the cached commit probe; never act on a cached sample once
-  anything looks like pressure; re-check with a short delay before failing a turn; keep
-  eviction bounded per call. The threshold is a safety MARGIN, never "what a turn
-  needs". [Per-OS signals](../../../../.agents/docs/cli-lib-memory-pressure.md).
+  `block`, sharing no threshold. Probes fail OPEN; `null` Windows commit growth
+  never becomes `0`. Sweeps never force the cached commit probe; never act on a
+  cached sample once pressure appears; re-check briefly before failing a turn; bound
+  evictions per call. The threshold is a safety MARGIN, not "what a turn needs".
+  [Per-OS signals](../../../../.agents/docs/cli-lib-memory-pressure.md). Idle counts
+  native work: never clean `running`, cap background waits. Post-turn output resets
+  it only for `sessionActivity` agents.
 - **Session attachments**: before changing preparation, transfer, materialization,
   or backfill, read the [lifecycle rules](../../../../.agents/docs/cli-lib-session-files.md).
   CLI/MCP input preparation must finish before history/dispatch; recovery uses frozen
