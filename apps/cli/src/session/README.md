@@ -390,6 +390,16 @@ Web/iOS clients need no Node addon. The owning machine must be available for RPC
 reads; browser-local IndexedDB replicas and offline sync are separate work.
 Runtime packaging and verification: [native runtime note](../../../../.agents/notes/proposed/architecture/2026-10-09-roost-native-runtime.md).
 
+Latest-turn queries share `readLatestTurn` from session-data. It scans the latest
+40-row page first and reads older pages only when no readable match is present.
+The `accept_input_and_dispatch` activation guard uses this path too: a newly
+accepted tail input must not wait for unrelated old history bodies before its
+receipt. The [input acceptance lookup note](../../../../.agents/notes/proposed/bug-fix/2026-10-19-roost-input-acceptance-paging.md)
+records the cold-reopen native regression and its separate rollout from browser recovery.
+The manual [first-input benchmark](../../benchmarks/roost-first-input.mts) reopens
+identical synthetic snapshots, records acceptance timings and page reads, and
+keeps native SQLite durability distinct from the in-memory Loro reference.
+
 ### Incremental replica recovery
 
 `sessionHistoryIncremental` v1 is negotiated separately from existing history paging.

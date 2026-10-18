@@ -3,19 +3,35 @@ import type { SessionEntry } from './domain';
 import type { SessionHistoryReader } from './types';
 import type { SessionTurn } from './domain';
 
-/** Read the latest matching body after scanning only directory scalars. */
+/** Read newest directory pages first, materializing only matching turn bodies. */
 export async function readLatestTurn(
   reader: SessionHistoryReader,
   role: SessionTurn['role']
 ): Promise<SessionTurn | undefined> {
-  const rows = await reader.readDirectory(0, await reader.count());
-  for (let i = rows.length - 1; i >= 0; i--) {
-    const row = rows[i];
-    if (!row?.turnId || row.scalars?.role !== role) continue;
-    const read = await reader.readTurn(row.turnId);
-    if (read.state === 'ready' && read.turn.role === role) return read.turn;
+  const pageSize = 40;
+  let page =
+    reader.readLatestDirectoryPage && reader.readOlderDirectoryPage
+      ? await reader.readLatestDirectoryPage(pageSize)
+      : undefined;
+  let rows = page?.rows ?? (await reader.readDirectory(0, await reader.count()));
+  for (;;) {
+    for (let i = rows.length - 1; i >= 0; i--) {
+      const row = rows[i];
+      if (!row?.turnId || row.scalars?.role !== role) continue;
+      const read = await reader.readTurn(row.turnId);
+      if (read.state === 'ready' && read.turn.role === role) return read.turn;
+    }
+    if (
+      page === undefined ||
+      !page.hasMoreOlder ||
+      page.cursor === null ||
+      page.cursor.length === 0 ||
+      reader.readOlderDirectoryPage === undefined
+    )
+      return undefined;
+    page = await reader.readOlderDirectoryPage(page.cursor, pageSize);
+    rows = page.rows;
   }
-  return undefined;
 }
 
 /** Legacy business projection. Keep the authoritative readAll/snapshot unchanged
