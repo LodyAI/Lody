@@ -4,6 +4,7 @@ import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { parseDiffFromFile, type FileDiffMetadata } from '@pierre/diffs';
+import { stripParsedFileDiffFullText } from '../src/lib/code-collab-diff-metadata-bounds';
 
 const workerMocks = vi.hoisted(() => {
   const pool = { kind: 'shared-diff-render-worker' };
@@ -11,7 +12,14 @@ const workerMocks = vi.hoisted(() => {
     pool,
     configurePool: vi.fn(() => Promise.resolve()),
     createPool: vi.fn(() => pool),
-    parse: vi.fn<(input: { path: string }) => Promise<FileDiffMetadata | undefined>>(),
+    parse:
+      vi.fn<
+        (input: {
+          path: string;
+          oldText: string;
+          newText: string;
+        }) => Promise<FileDiffMetadata | undefined>
+      >(),
   };
 });
 
@@ -36,6 +44,7 @@ vi.mock('@pierre/diffs/react', async () => {
         {
           'data-testid': 'file-diff',
           'data-render-worker': workerPool === workerMocks.pool ? 'shared' : 'main-thread',
+          'data-diff-metadata': JSON.stringify(fileDiff),
         },
         fileDiff.newLines?.join(''),
         React.createElement('textarea', { 'aria-label': 'Comment' })
@@ -75,6 +84,10 @@ describe('DiffViewer render worker routing', () => {
     workerMocks.createPool.mockClear();
     workerMocks.createPool.mockReturnValue(workerMocks.pool);
     workerMocks.parse.mockReset();
+    workerMocks.parse.mockImplementation(async ({ path, oldText, newText }) =>
+      parseDiffFromFile({ name: path, contents: oldText }, { name: path, contents: newText })
+    );
+    vi.stubGlobal('Worker', class Worker {});
     Object.defineProperty(window, 'matchMedia', {
       configurable: true,
       writable: true,
@@ -97,6 +110,167 @@ describe('DiffViewer render worker routing', () => {
   afterEach(async () => {
     await act(async () => root.unmount());
     container.remove();
+    vi.unstubAllGlobals();
+  });
+
+  it('waits for a default standalone parse and retains all unchanged context and CRLF endings', async () => {
+    const path = 'standalone-context.ts';
+    const oldText = Array.from({ length: 31 }, (_, index) => `line ${index}`).join('\r\n');
+    const newText = oldText.replace('line 15', 'updated');
+    const parsed = parseDiffFromFile(
+      { name: path, contents: oldText, cacheKey: 'context:old' },
+      { name: path, contents: newText, cacheKey: 'context:new' }
+    );
+    let finish!: (diff: FileDiffMetadata) => void;
+    workerMocks.parse.mockReturnValue(
+      new Promise((resolve) => {
+        finish = resolve;
+      })
+    );
+    await act(async () =>
+      root.render(
+        createElement(DiffViewer, {
+          path,
+          oldText,
+          newText,
+          parseCacheKey: 'context',
+          showHeader: false,
+        })
+      )
+    );
+    expect(container.textContent).toContain('Preparing diff');
+    expect(container.querySelector('[data-testid="file-diff"]')).toBeNull();
+    await act(async () => finish(stripParsedFileDiffFullText(parsed)));
+    expect(readRenderedDiff(container)).toEqual(parsed);
+
+    await act(async () => root.render(null));
+    workerMocks.parse.mockRejectedValue(new Error('Cached output should remain readable'));
+    await act(async () =>
+      root.render(
+        createElement(DiffViewer, {
+          path,
+          oldText,
+          newText,
+          parseCacheKey: 'context',
+          showHeader: false,
+        })
+      )
+    );
+    expect(readRenderedDiff(container)).toEqual(parsed);
+    expect(container.textContent).not.toContain('Preparing diff');
+  });
+
+  it('does not publish an obsolete default parse when another file is selected', async () => {
+    const jobs = new Map<string, (diff: FileDiffMetadata) => void>();
+    workerMocks.parse.mockImplementation(
+      ({ path }) => new Promise((resolve) => jobs.set(path, resolve))
+    );
+    const props = (path: string) => ({
+      path,
+      oldText: 'before\n',
+      newText: `${path}\n`,
+      showHeader: false,
+    });
+    await act(async () => root.render(createElement(DiffViewer, props('obsolete.ts'))));
+    await act(async () => root.render(createElement(DiffViewer, props('selected.ts'))));
+    const diff = (path: string) =>
+      parseDiffFromFile(
+        { name: path, contents: 'before\n' },
+        { name: path, contents: `${path}\n` }
+      );
+    await act(async () =>
+      jobs.get('obsolete.ts')!(stripParsedFileDiffFullText(diff('obsolete.ts')))
+    );
+    expect(container.querySelector('[data-testid="file-diff"]')).toBeNull();
+    await act(async () =>
+      jobs.get('selected.ts')!(stripParsedFileDiffFullText(diff('selected.ts')))
+    );
+    expect(readRenderedDiff(container)).toEqual(diff('selected.ts'));
+    expect(container.textContent).not.toContain('obsolete.ts');
+  });
+
+  it.each(['unavailable', 'failed'] as const)(
+    'keeps a formerly inline diff readable when its worker is %s',
+    async (outcome) => {
+      if (outcome === 'unavailable') workerMocks.parse.mockResolvedValue(undefined);
+      else workerMocks.parse.mockRejectedValue(new Error('Worker startup failed'));
+      const path = `fallback-${outcome}.txt`;
+      const oldText = 'old\r\nunchanged';
+      const newText = 'new\r\nunchanged';
+      await act(async () =>
+        root.render(createElement(DiffViewer, { path, oldText, newText, showHeader: false }))
+      );
+      expect(readRenderedDiff(container)).toEqual(
+        parseDiffFromFile({ name: path, contents: oldText }, { name: path, contents: newText })
+      );
+    }
+  );
+
+  it('retains synchronous standalone availability in runtimes without Workers', async () => {
+    vi.stubGlobal('Worker', undefined);
+    workerMocks.parse.mockRejectedValue(new Error('Workers do not exist'));
+    const path = 'without-workers.txt';
+    const oldText = 'old';
+    const newText = 'new';
+    await act(async () =>
+      root.render(createElement(DiffViewer, { path, oldText, newText, showHeader: false }))
+    );
+    expect(readRenderedDiff(container)).toEqual(
+      parseDiffFromFile({ name: path, contents: oldText }, { name: path, contents: newText })
+    );
+  });
+
+  it.each([
+    ['', 'added\n'],
+    ['removed\n', ''],
+    ['before', 'after'],
+    ['before\n', 'after\n'],
+  ])('retains empty-file and final-newline metadata for %j → %j', async (oldText, newText) => {
+    const path = 'line-ending.txt';
+    const parsed = parseDiffFromFile(
+      { name: path, contents: oldText },
+      { name: path, contents: newText }
+    );
+    workerMocks.parse.mockResolvedValue(stripParsedFileDiffFullText(parsed));
+    await act(async () =>
+      root.render(createElement(DiffViewer, { path, oldText, newText, showHeader: false }))
+    );
+    expect(readRenderedDiff(container)).toEqual(parsed);
+  });
+
+  it('keeps supplied metadata authoritative and defers a collapsed standalone body', async () => {
+    const path = 'supplied.txt';
+    const parsed = parseDiffFromFile(
+      { name: path, contents: 'before' },
+      { name: path, contents: 'supplied' }
+    );
+    await act(async () =>
+      root.render(
+        createElement(DiffViewer, {
+          path,
+          oldText: 'different old input',
+          newText: 'different new input',
+          preparsedDiff: parsed,
+          defaultOpen: false,
+          deferRenderUntilOpen: true,
+        })
+      )
+    );
+    expect(container.querySelector('[data-testid="file-diff"]')).toBeNull();
+    expect(container.textContent).not.toContain('Preparing diff');
+    await act(async () =>
+      root.render(
+        createElement(DiffViewer, {
+          path,
+          oldText: 'different old input',
+          newText: 'different new input',
+          preparsedDiff: parsed,
+          open: true,
+          deferRenderUntilOpen: true,
+        })
+      )
+    );
+    expect(readRenderedDiff(container)).toEqual(parsed);
   });
 
   it('keeps a sub-threshold syntax diff off the main-thread highlighter', async () => {
@@ -290,3 +464,11 @@ describe('DiffViewer render worker routing', () => {
     expect(container.querySelector('[data-testid="file-diff"]')).toBeNull();
   });
 });
+
+function readRenderedDiff(container: HTMLElement): FileDiffMetadata {
+  const metadata = container
+    .querySelector('[data-testid="file-diff"]')
+    ?.getAttribute('data-diff-metadata');
+  if (!metadata) throw new Error('Expected rendered diff metadata');
+  return JSON.parse(metadata) as FileDiffMetadata;
+}

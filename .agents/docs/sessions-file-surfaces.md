@@ -48,8 +48,12 @@ bounded Machine RPC reads. Indexing and saving still require the daemon. See the
   body placeholders preserve space when code leaves the viewport. Bodies with
   pointer or keyboard interaction remain mounted to preserve selections, expanded
   context and unsent comments. Parser cache misses use the shared parse Worker
-  regardless of text length, while ordinary standalone snippets retain their
-  existing threshold. In-flight reads keep their slots until settlement across
+  regardless of text length, including ordinary standalone snippets when Workers
+  are available. Standalone inputs below the former 200,000-character threshold
+  retain full unchanged-line context and their synchronous availability fallback
+  if a Worker is unavailable or fails. Explicit multi-file/chunked and larger
+  inputs keep bounded metadata and fail visibly rather than parsing inline.
+  In-flight reads keep their slots until settlement across
   viewport/source changes; live batch identity fences old content, including
   equal-length edits. All Changes retains its existing batched inline transfer
   and decoding; only deferred reads become viewport-driven. See the

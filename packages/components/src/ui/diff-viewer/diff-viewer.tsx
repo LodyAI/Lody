@@ -9,7 +9,7 @@ import {
   type WorkerInitializationRenderOptions,
 } from '@pierre/diffs/react';
 import type { DiffLineAnnotation, FileDiffMetadata, SupportedLanguages } from '@pierre/diffs';
-import { parseDiffFromFile } from '@pierre/diffs';
+import { parseDiffFromFile, SPLIT_WITH_NEWLINES } from '@pierre/diffs';
 import { useTranslation } from 'react-i18next';
 import * as stylex from '@stylexjs/stylex';
 
@@ -56,7 +56,7 @@ const SPLIT_VIEW_MIN_WIDTH = 1024;
 const MAX_PARSED_DIFF_CACHE = 96;
 const MAX_PRERENDERED_HTML_CACHE = 24;
 const MAX_WORD_LEVEL_LINE_DIFF_PAIRS = 320;
-const DIFF_PARSE_WORKER_MIN_TEXT_LENGTH = 200_000;
+const LEGACY_INLINE_DIFF_MAX_TEXT_LENGTH = 200_000;
 const parsedDiffCache = new Map<string, FileDiffMetadata>();
 const prerenderedHtmlCache = new Map<string, string>();
 let parseQueue: Promise<void> = Promise.resolve();
@@ -334,6 +334,29 @@ function getExtensionFromPath(filePath: string): string | undefined {
   return filePath.slice(lastDot + 1).toLowerCase();
 }
 
+function parseTextDiff(
+  path: string,
+  oldText: string,
+  newText: string,
+  parseCacheKey: string | undefined
+): FileDiffMetadata {
+  const lang = getExtensionFromPath(path) as SupportedLanguages | undefined;
+  return parseDiffFromFile(
+    {
+      name: path,
+      contents: oldText,
+      lang,
+      cacheKey: parseCacheKey ? `${parseCacheKey}:old` : undefined,
+    },
+    {
+      name: path,
+      contents: newText,
+      lang,
+      cacheKey: parseCacheKey ? `${parseCacheKey}:new` : undefined,
+    }
+  );
+}
+
 /**
  * Get file name from path for display
  */
@@ -526,7 +549,14 @@ function DiffViewerImpl({
     shouldRenderDiff &&
     (preferParseWorker ||
       lazyTextDiffSource !== undefined ||
-      effectiveOldTextLength + effectiveNewTextLength >= DIFF_PARSE_WORKER_MIN_TEXT_LENGTH);
+      effectiveOldTextLength + effectiveNewTextLength >= LEGACY_INLINE_DIFF_MAX_TEXT_LENGTH ||
+      typeof Worker !== 'undefined');
+  // Preserve the complete context previously supplied by synchronous standalone
+  // parsing. Explicit multi-file/chunked and large-diff paths remain bounded.
+  const retainStandaloneContext =
+    !preferParseWorker &&
+    lazyTextDiffSource === undefined &&
+    effectiveOldTextLength + effectiveNewTextLength < LEGACY_INLINE_DIFF_MAX_TEXT_LENGTH;
   const [workerParsedDiffState, setWorkerParsedDiffState] = useState<WorkerParsedDiffState | null>(
     null
   );
@@ -620,39 +650,50 @@ function DiffViewerImpl({
                 });
           });
     parseJob.current = { requestKey: diffParseRequestKey, promise: parsedPromise };
-    void parsedPromise.then(
-      (parsed) => {
-        if (cancelled) {
-          return;
-        }
-        if (parsed === undefined) {
-          setWorkerParsedDiffState({
-            status: 'error',
-            requestKey: diffParseRequestKey,
-            message: 'Large diff parsing is unavailable in this browser.',
-          });
-          return;
-        }
-        if (parsedDiffCacheKey !== null) {
-          writeParsedDiffCache(parsedDiffCacheKey, parsed);
-        }
-        setWorkerParsedDiffState({
-          status: 'ready',
-          requestKey: diffParseRequestKey,
-          fileDiff: parsed,
-        });
-      },
-      (error: unknown) => {
-        if (cancelled) {
-          return;
-        }
-        setWorkerParsedDiffState({
-          status: 'error',
-          requestKey: diffParseRequestKey,
-          message: getSessionDiffErrorMessage(error),
-        });
+    const publishParsed = (parsed: FileDiffMetadata) => {
+      if (cancelled) return;
+      const fileDiff = retainStandaloneContext
+        ? {
+            ...parsed,
+            oldLines: oldText.split(SPLIT_WITH_NEWLINES),
+            newLines: newText.split(SPLIT_WITH_NEWLINES),
+          }
+        : parsed;
+      if (parsedDiffCacheKey !== null) {
+        writeParsedDiffCache(parsedDiffCacheKey, fileDiff);
       }
-    );
+      setWorkerParsedDiffState({
+        status: 'ready',
+        requestKey: diffParseRequestKey,
+        fileDiff,
+      });
+    };
+    const handleParseFailure = (error: unknown) => {
+      if (cancelled) return;
+      // These inputs were readable without Workers before this optimization.
+      // Keep that availability if a Worker cannot start or fails; do not make
+      // large/chunked or explicitly worker-only surfaces parse synchronously.
+      if (retainStandaloneContext) {
+        try {
+          publishParsed(parseTextDiff(path, oldText, newText, parseCacheKey));
+          return;
+        } catch (fallbackError) {
+          error = fallbackError;
+        }
+      }
+      setWorkerParsedDiffState({
+        status: 'error',
+        requestKey: diffParseRequestKey,
+        message: getSessionDiffErrorMessage(error),
+      });
+    };
+    void parsedPromise.then((parsed) => {
+      if (parsed === undefined) {
+        handleParseFailure(new Error('Large diff parsing is unavailable in this browser.'));
+      } else {
+        publishParsed(parsed);
+      }
+    }, handleParseFailure);
 
     return () => {
       cancelled = true;
@@ -668,6 +709,7 @@ function DiffViewerImpl({
     parseCacheKey,
     parsedDiffCacheKey,
     path,
+    retainStandaloneContext,
     shouldRenderDiff,
     shouldUseDiffParseWorker,
   ]);
@@ -716,21 +758,7 @@ function DiffViewerImpl({
 
     try {
       const parseStartedAt = getDiffPerfNow();
-      const ext = getExtensionFromPath(path);
-      const parsed = parseDiffFromFile(
-        {
-          name: path,
-          contents: oldText,
-          lang: ext as never,
-          cacheKey: parseCacheKey ? `${parseCacheKey}:old` : undefined,
-        },
-        {
-          name: path,
-          contents: newText,
-          lang: ext as never,
-          cacheKey: parseCacheKey ? `${parseCacheKey}:new` : undefined,
-        }
-      );
+      const parsed = parseTextDiff(path, oldText, newText, parseCacheKey);
       if (parsedDiffCacheKey) {
         writeParsedDiffCache(parsedDiffCacheKey, parsed);
       }
