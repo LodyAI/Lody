@@ -5,6 +5,8 @@ Translation: current
 
 [中文](2026-10-18-linux-schedule-timezone.zh.md)
 
+PR: https://github.com/LodyAI/Lody/pull/1685
+
 ## Abstract
 
 Linux Node can display Hong Kong local time correctly while Intl exposes no default

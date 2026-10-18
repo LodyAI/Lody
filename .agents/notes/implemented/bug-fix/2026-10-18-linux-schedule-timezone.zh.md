@@ -5,6 +5,8 @@ Translation: current
 
 [English](2026-10-18-linux-schedule-timezone.md)
 
+PR: https://github.com/LodyAI/Lody/pull/1685
+
 ## 摘要
 
 Linux Node 在 `TZ=HKT-8` 或绝对 zoneinfo 路径下，可以正确显示香港本地时间，
