@@ -23,7 +23,9 @@ source coordination and history feedback in Roost. Ordinary input now combines
 owner acceptance and activation in one negotiated request and uses its receipt for
 delivery feedback. Local input now participates in keyed send anchoring and truthful
 sending activity before owner history; formal handoff waits for a hydrated body.
-Production end-to-end latency remains unmeasured.
+The subsequent [browser receipt investigation](../bug-fix/2026-10-18-roost-remote-receipt-latency.md)
+records one live send and retained first-send RPC timings; owner-stage attribution
+remains unmeasured.
 
 ## Decision and alternatives
 

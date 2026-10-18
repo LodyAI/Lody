@@ -128,6 +128,23 @@ Stable shard selection exists for the same kind of reason: a randomly picked
 write shard re-runs the cross-origin CORS preflight on every append, while a
 stable one reuses the warm connection and the cached preflight.
 
+### Foreground input receipt recovery
+
+The browser dispatcher also renews a response read when an appended
+`accept_input`/`accept_input_and_dispatch` has no response after two seconds.
+The shared live-mode policy moves SSE to long-poll; a stalled long-poll connection
+is renewed too. One timer covers overlapping inputs and each pending input gets
+one renewal. Normal replies, request deadlines, owner cancellation and dispatcher
+stop remove the timer. Explicit transport pins and static-policy clients retain
+their existing behavior; idle history watches do not arm this recovery.
+
+Renewal preserves the response offset, request IDs and original RPC deadlines.
+It never re-appends input, confirms delivery or needs a new daemon protocol. A
+slow owner still has to produce a real receipt. Two seconds is a recovery trigger,
+not a delivery bound or evidence that SSE caused a particular delay. A normal
+owner taking longer can also trigger long-poll and its CORS cost for the existing
+five-minute SSE cooldown. [Evidence and limits](../notes/proposed/bug-fix/2026-10-18-roost-remote-receipt-latency.md).
+
 ## Why `file/preview` sits outside `code-collab/`
 
 Previewing a file must not activate Code Collab on the machine, so File Preview

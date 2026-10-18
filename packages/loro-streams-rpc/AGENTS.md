@@ -33,11 +33,11 @@ and the `file/preview` namespace are in
   `LoroStreamsLiveModePolicy` (`src/live-mode-policy.ts`) and passed to
   `LoroStreamsRpcResponseDispatcher` as `liveModePolicy`; it picks the mode per read, so do
   **not** re-pin a static `liveMode` on the web json stream client. It falls back on
-  unsupported SSE, consecutive failed reads, and pending-response starvation, and switches
-  must preserve `responseState` offsets and the `pending` map. Read
-  context/machine-rpc-live-transport.md
-  before touching it. The CLI request-read keeps the static client default (`'sse'`) plus
-  the watchdog.
+  unsupported SSE, failed reads and response starvation. Appended Roost input writes
+  renew the shared response read once after 2s; retain offsets, pending calls and
+  deadlines, never replay the write or infer acceptance. Stop/cancel removes that
+  recovery; explicit pins disable it. Read the linked Machine RPC map before changes.
+  CLI request reads keep static `'sse'` plus the watchdog.
 - The CLI owns/listens to the request stream via `src/machine-rpc-server.ts`
   `LoroStreamsMachineRpcServer`.
 - Handler permits wait inside tracked tasks, never behind ordinary intake. Bound

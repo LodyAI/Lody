@@ -15,7 +15,11 @@ import {
 import { RoostHistoryError, SessionHistoryRequestError } from '../src/lib/roost-history-error';
 import {
   createLoroStreamsJsonStreamClient,
+  encryptCodeCollabV2RpcPayload,
+  HISTORY_INPUT_RESPONSE_RECOVERY_MS,
+  LoroStreamsLiveModePolicy,
   LoroStreamsMachineRpcClient,
+  LoroStreamsRpcResponseDispatcher,
 } from '@lody/loro-streams-rpc';
 import { initI18n } from '../src/i18n';
 import { createConversationViewFromReader } from '../src/lib/conversation-view/create-conversation-view-from-reader';
@@ -23,6 +27,158 @@ import { resolveLocalSessionControlTimeoutMs } from '../../../apps/electron/src/
 import type { SessionDataChange } from '@lody/shared/session-data';
 
 describe('createConversationSession backend seam', () => {
+  it('receives an existing owner acceptance through the real SDK after a silent SSE stall', async () => {
+    vi.useFakeTimers();
+    const connected = Promise.withResolvers<void>();
+    const appended = Promise.withResolvers<void>();
+    const sessionId = 'synthetic-response-recovery' as SessionId;
+    const entry: SessionHistoryInput = {
+      id: 'synthetic-input',
+      role: 'user',
+      userId: 'synthetic-user',
+      timestamp: '2026-10-18T00:00:00Z',
+      status: 'pending',
+      items: [{ type: 'text', text: 'Synthetic input' }],
+    };
+    let response: unknown;
+    const requests: unknown[] = [];
+    const reads: Array<{ mode: string | null; offset: string | null }> = [];
+    const json = createLoroStreamsJsonStreamClient({
+      bucketId: 'synthetic-bucket',
+      getToken: async () => 'synthetic-token',
+      baseUrl: 'https://streams.example.com',
+      fetchImpl: async (input, init) => {
+        const url = new URL(input);
+        if (init?.method === 'HEAD')
+          return new Response(null, {
+            headers: { 'Content-Type': 'application/json', 'Stream-Next-Offset': '42' },
+          });
+        if (init?.method === 'POST') {
+          const request = JSON.parse(await new Response(init.body).text());
+          requests.push(request);
+          response = {
+            jsonrpc: '2.0',
+            id: request.id,
+            method: request.method,
+            rpcVersion: '1',
+            machineId: 'synthetic-machine',
+            result: await encryptCodeCollabV2RpcPayload(sessionId, {
+              type: 'session/history-write_response',
+              sessionId,
+              operation: 'accept_input_and_dispatch',
+              success: true,
+              result: { status: 'accepted', turnId: entry.id, active: true },
+              historyRevision: 1,
+              historyCount: 1,
+              historyChange: null,
+            }),
+          };
+          return new Response(null, { status: 204, headers: { 'Stream-Next-Offset': '1' } });
+        }
+        reads.push({ mode: url.searchParams.get('live'), offset: url.searchParams.get('offset') });
+        if (reads.length === 1) {
+          return new Response(
+            new ReadableStream({
+              start(controller) {
+                controller.enqueue(
+                  new TextEncoder().encode(
+                    'event: control\ndata: {"streamNextOffset":"42","upToDate":true}\n\n'
+                  )
+                );
+                init?.signal?.addEventListener(
+                  'abort',
+                  () => {
+                    controller.error(new DOMException('Aborted', 'AbortError'));
+                  },
+                  { once: true }
+                );
+              },
+            }),
+            { headers: { 'Content-Type': 'text/event-stream' } }
+          );
+        }
+        if (reads.length === 2)
+          return new Response(JSON.stringify([response]), {
+            headers: {
+              'Content-Type': 'application/json',
+              'Stream-Next-Offset': '43',
+              'Stream-Up-To-Date': 'true',
+            },
+          });
+        return new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener(
+            'abort',
+            () => reject(new DOMException('Aborted', 'AbortError')),
+            { once: true }
+          );
+        });
+      },
+    });
+    const streamClient = {
+      ...json,
+      readJsonLive: (...args: Parameters<typeof json.readJsonLive>) =>
+        json.readJsonLive(
+          args[0],
+          args[1],
+          async (batch) => {
+            await args[2](batch);
+            if (batch.upToDate) connected.resolve();
+          },
+          args[3]
+        ),
+    };
+    const dispatcher = new LoroStreamsRpcResponseDispatcher({
+      workspaceId: 'synthetic-workspace',
+      streamClient,
+      liveModePolicy: new LoroStreamsLiveModePolicy(),
+    });
+    const rpc = new LoroStreamsMachineRpcClient({
+      workspaceId: 'synthetic-workspace',
+      machineId: 'synthetic-machine',
+      streamClient,
+      responseDispatcher: dispatcher,
+      trace: (event) => {
+        if (event === 'machine rpc transport append finished') appended.resolve();
+      },
+    });
+    const doc = new LoroDoc();
+    const session = createRemoteRoostSessionDataFactory({
+      workspaceId: 'synthetic-workspace' as WorkspaceId,
+      machineId: 'synthetic-machine' as MachineId,
+      requestHistoryRead: async () => {
+        throw new Error('Acceptance must not read history back');
+      },
+      requestHistoryWrite: async (request) => {
+        const result = await rpc.requestSessionHistoryWrite(request);
+        if (!result) throw new Error('Missing acceptance response');
+        return result;
+      },
+    })({ sessionId, doc, backendKind: 'roost' });
+    try {
+      let accepted = false;
+      const write = session.inputAcceptance!.acceptAndDispatch!(entry).then((receipt) => {
+        accepted = true;
+        return receipt;
+      });
+      void write.catch(() => undefined);
+      await Promise.all([connected.promise, appended.promise]);
+      expect(accepted).toBe(false);
+      await vi.advanceTimersByTimeAsync(HISTORY_INPUT_RESPONSE_RECOVERY_MS);
+      await expect(write).resolves.toEqual({ status: 'accepted', turnId: entry.id, active: true });
+      expect(reads.slice(0, 2)).toEqual([
+        { mode: 'sse', offset: '-1' },
+        { mode: 'long-poll', offset: '42' },
+      ]);
+      expect(requests).toHaveLength(1);
+      expect(doc.getList('history').length).toBe(0);
+    } finally {
+      dispatcher.stop();
+      session.dispose?.();
+      doc.free();
+      vi.useRealTimers();
+    }
+  });
+
   it.each([
     ['accept', 'accept_input'],
     ['acceptAndDispatch', 'accept_input_and_dispatch'],
