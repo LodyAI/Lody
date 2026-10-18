@@ -24,6 +24,13 @@ bounded Machine RPC reads. Indexing and saving still require the daemon. See the
 - The Changes sidebar's Types view keeps the filename prominent and shows its
   parent workspace path beneath it, so similarly named files remain identifiable
   without relying on a hover-only title.
+  Mobile change-stat presses open this same Types/Files list in
+  `SessionMobileDiffDrawer`; selecting a canonical path enters the All Changes diff
+  with the full path set and a fresh focus request. First-level browsing does not
+  mount a diff panel. Back retains the list's view/expansion/scroll and the mounted
+  diff's state, with its hidden reads paused. Direct conversation-file and comment
+  navigation still enters the precise diff directly. Both levels share one modal
+  and the existing enclosing-session popup host.
 - Diffs opened with a precise file focus open only that file by default; the other
   cards start collapsed and remain individually expandable. A base (All Changes)
   diff opened without a focus starts with every card collapsed, while a direct

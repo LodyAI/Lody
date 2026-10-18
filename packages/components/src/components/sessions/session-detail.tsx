@@ -194,10 +194,7 @@ import {
 import { isSessionMarkdownPath } from '@/lib/session-file-language';
 import { SessionNotFound } from './session-not-found';
 import { SessionSyncingIndicator } from './session-syncing-indicator';
-// Aliased while the vaul drawer below still holds the bare name; the two
-// merge when the mobile drawers migrate onto this primitive.
-import { Drawer as UiDrawer } from '@lody/ui/drawer';
-import { SessionMobileDiffDrawerContent } from './session-mobile-diff-drawer-content';
+import { SessionMobileDiffDrawer, type MobileDiffView } from './session-mobile-diff-drawer';
 import { Drawer, DrawerContent, DrawerTitle } from '@/ui/drawer';
 import { VaulDrawerBody } from '@/components/mobile/vaul-drawer-edge-back-zone';
 import { Dialog } from '@/ui/dialog';
@@ -387,6 +384,7 @@ type MobileDiffState = {
   focusComment?: DiffCommentFocusTarget | null;
   focusRequestSeq: number;
   mode?: 'conversation' | 'base';
+  view?: MobileDiffView;
 } | null;
 
 type PendingSessionShare = {
@@ -562,11 +560,6 @@ const detailStyles = stylex.create({
     fontSize: '0.875rem',
     lineHeight: '1.25rem',
     color: 'hsl(var(--muted-foreground))',
-  },
-  drawerBody: {
-    minHeight: 0,
-    flex: 1,
-    overflow: 'hidden',
   },
   columnFill: {
     display: 'flex',
@@ -3585,6 +3578,38 @@ const SessionDetail = ({
     setMobileDiffState(null);
   }, []);
 
+  const handleSelectMobileChange = useCallback(
+    (filePath: string, filePaths: string[]) => {
+      const requestSeq = nextFocusRequestSeq();
+      setMobileDiffState((current) =>
+        current?.mode === 'base'
+          ? {
+              ...current,
+              filePaths,
+              focusFilePath: filePath,
+              focusComment: null,
+              focusRequestSeq: requestSeq,
+              view: 'diff',
+            }
+          : current
+      );
+      captureSessionDetailEvent('session/viewer_diff_opened', {
+        source: 'changes_sidebar',
+        turn_id: 'all-changes',
+        mode: 'base',
+        file_count: filePaths.length,
+        focus_file_extension: getFileExtension(filePath),
+        surface: 'mobile_sheet',
+      });
+    },
+    [captureSessionDetailEvent, nextFocusRequestSeq]
+  );
+  const handleBackToMobileChanges = useCallback(() => {
+    setMobileDiffState((current) =>
+      current?.mode === 'base' ? { ...current, view: 'files-with-diff' } : current
+    );
+  }, []);
+
   useEffect(() => {
     const nextViewerTabs = viewerTabs.map((tab) => {
       if (tab.type !== 'diff') {
@@ -3689,12 +3714,12 @@ const SessionDetail = ({
         focusComment: null,
         focusRequestSeq: nextFocusRequestSeq(),
         mode: 'base',
+        view: 'files',
       });
-      captureSessionDetailEvent('session/viewer_diff_opened', {
+      captureSessionDetailEvent('session/sidebar_tab_selected', {
         source: 'info_bar_diff_stat',
-        turn_id: 'all-changes',
-        mode: 'base',
-        file_count: filePaths.length,
+        sidebar_tab: 'changes',
+        change_file_count: filePaths.length,
         surface: 'mobile_sheet',
       });
     } else {
@@ -6229,63 +6254,64 @@ const SessionDetail = ({
         </div>
 
         {/* Mobile diff sheet */}
-        <UiDrawer.Root
-          side="bottom"
+        <SessionMobileDiffDrawer
           open={mobileDiffState !== null}
           onOpenChange={(open) => !open && handleCloseMobileDiff()}
+          view={mobileDiffState?.view}
+          onBackToFiles={mobileDiffState?.mode === 'base' ? handleBackToMobileChanges : undefined}
+          changes={{
+            ready: sessionDiffReady,
+            synced: sessionDiffSynced,
+            unavailableMessage: sessionDiffUnavailableMessage,
+            changeEntries,
+            changeFilePaths,
+            onOpenChangesDiff: handleSelectMobileChange,
+          }}
         >
-          <SessionMobileDiffDrawerContent side="bottom" className="h-[85vh] flex flex-col p-0">
-            <UiDrawer.Header className="shrink-0 border-b border-border px-4 py-3">
-              <UiDrawer.Title className="text-sm font-medium">
-                {t('sessions.diffTab', 'Changes')}
-              </UiDrawer.Title>
-            </UiDrawer.Header>
-            <div {...stylex.props(detailStyles.drawerBody)}>
-              {mobileDiffState && (
-                <SessionConversationDiffPanel
-                  sessionId={activeSession.id}
-                  turnId={mobileDiffState.turnId}
-                  filePaths={mobileDiffState.filePaths}
-                  focusFilePath={mobileDiffState.focusFilePath}
-                  focusComment={mobileDiffState.focusComment}
-                  focusRequestSeq={mobileDiffState.focusRequestSeq}
-                  mode={mobileDiffState.mode ?? 'conversation'}
-                  refreshToken={
-                    (mobileDiffState.mode ?? 'conversation') === 'base'
-                      ? allChangesRefreshToken
-                      : undefined
-                  }
-                  fileDiffs={
-                    (mobileDiffState.mode ?? 'conversation') === 'base'
-                      ? []
-                      : resolveTurnFileDiffs(mobileDiffState.turnId)
-                  }
-                  fileDiffsPending={!sessionDiffReady}
-                  session={activeSession}
-                  workspaceSession={workspaceOwnerSession}
-                  onSendToChat={handleAddCommentReferenceToActiveChatInput}
-                  commentReferenceKeys={activeCommentReferenceKeys}
-                  fileProvider={
-                    (mobileDiffState.mode ?? 'conversation') === 'base' ||
-                    canOpenHistoricalDiffs ||
-                    activeSessionFileProviderRequested
-                      ? activeSessionFileProvider
-                      : null
-                  }
-                  fileProviderPending={
-                    (mobileDiffState.mode ?? 'conversation') === 'base' ||
-                    canOpenHistoricalDiffs ||
-                    activeSessionFileProviderRequested
-                      ? activeSessionFileProviderPending
-                      : false
-                  }
-                  onOpenFile={handleOpenFileFromDiff}
-                  className={stylex.props(detailStyles.rootFill).className}
-                />
-              )}
-            </div>
-          </SessionMobileDiffDrawerContent>
-        </UiDrawer.Root>
+          {mobileDiffState && (
+            <SessionConversationDiffPanel
+              active={mobileDiffState.view === undefined || mobileDiffState.view === 'diff'}
+              sessionId={activeSession.id}
+              turnId={mobileDiffState.turnId}
+              filePaths={mobileDiffState.filePaths}
+              focusFilePath={mobileDiffState.focusFilePath}
+              focusComment={mobileDiffState.focusComment}
+              focusRequestSeq={mobileDiffState.focusRequestSeq}
+              mode={mobileDiffState.mode ?? 'conversation'}
+              refreshToken={
+                (mobileDiffState.mode ?? 'conversation') === 'base'
+                  ? allChangesRefreshToken
+                  : undefined
+              }
+              fileDiffs={
+                (mobileDiffState.mode ?? 'conversation') === 'base'
+                  ? []
+                  : resolveTurnFileDiffs(mobileDiffState.turnId)
+              }
+              fileDiffsPending={!sessionDiffReady}
+              session={activeSession}
+              workspaceSession={workspaceOwnerSession}
+              onSendToChat={handleAddCommentReferenceToActiveChatInput}
+              commentReferenceKeys={activeCommentReferenceKeys}
+              fileProvider={
+                (mobileDiffState.mode ?? 'conversation') === 'base' ||
+                canOpenHistoricalDiffs ||
+                activeSessionFileProviderRequested
+                  ? activeSessionFileProvider
+                  : null
+              }
+              fileProviderPending={
+                (mobileDiffState.mode ?? 'conversation') === 'base' ||
+                canOpenHistoricalDiffs ||
+                activeSessionFileProviderRequested
+                  ? activeSessionFileProviderPending
+                  : false
+              }
+              onOpenFile={handleOpenFileFromDiff}
+              className={stylex.props(detailStyles.rootFill).className}
+            />
+          )}
+        </SessionMobileDiffDrawer>
         {viewerTabs
           .filter((tab): tab is Extract<ViewerTab, { type: 'file' }> => tab.type === 'file')
           .map((tab) => {

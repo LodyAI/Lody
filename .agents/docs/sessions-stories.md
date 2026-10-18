@@ -18,6 +18,11 @@ this page is the full text of the rules summarised there.
   assessing a cold first open. The opener is a small synthetic harness; it does not
   run `SessionDetail`'s turn-summary, tab or RPC controllers, or measure Electron latency.
   `ManyFiles`, `FocusLastFile` and `AllChanges` cover the already-open panel states.
+- `MobileDiffDrawer` renders the real shared changes list, mobile drawer and diff
+  panel with four synthetic code/doc/test entries. `Changes` exercises list →
+  selected diff → Back, Types/Files selection and retained hidden panel state;
+  `Loading` uses the real summary-loading state. It has no native transport or
+  full SessionDetail runtime and does not validate physical-device gestures.
 - `SessionInfoBar` → `DiscoveredPrAssociationRejected` feeds synthetic owner
   metadata through production PR selection/action gating into the real bar,
   without hosted mutations. Run `pnpm --filter @lody/components exec playwright test

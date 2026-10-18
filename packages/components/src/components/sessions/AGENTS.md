@@ -122,18 +122,17 @@ Read parent rules and linked context before edits.
 
 ## [File surfaces](../../../../../.agents/docs/sessions-file-surfaces.md)
 
-- File actions use `hooks/use-session-file-actions.ts` + `lib/session-file-actions.ts`.
-  Never promote unavailable local-host actions or re-derive that split per surface.
-- Diff bodies load/mount near the viewport; hidden panels pause. Preserve drafts,
-  expansion and focus; multi-file cache misses use the shared parse Worker.
-- Local paths resolve on the OWNING machine from its workspace root plus a
-  genuinely workspace-relative path; `lib/session-local-file-path.ts` rejects
-  absolute and `..` paths.
-- Keep viewer shells static; load Office engines on activation/idle only.
-  Stop hidden video. PDFs: 64 KiB ranges, 8 MP canvases; keep the bundled Worker entry/export.
+- File actions use `hooks/use-session-file-actions.ts` + `lib/session-file-actions.ts`;
+  never duplicate capability checks or expose unavailable local-host actions.
+- Mobile Changes starts at the shared file list; exact file/comment links open diffs.
+  Retain diffs on Back; preserve drafts/expansion/focus. Viewport-gate bodies,
+  pause hidden reads and use shared parse Workers for multi-file cache misses.
+- Local paths use the OWNING machine's workspace root + workspace-relative path;
+  `lib/session-local-file-path.ts` rejects absolute/`..`.
+- Static viewer shells; Office engines load on activation/idle; pause hidden video.
+  PDFs: 64 KiB ranges, 8 MP canvases; retain bundled Worker entry/export.
 
 ## [Stories](../../../../../.agents/docs/sessions-stories.md)
 
-- Stories mirror production and never own UI: a story may only mock data and
-  render the real component; appearance lives in the component.
+- Stories render real components and only mock data; appearance lives in production.
   Keep stories minimal; verify UI changes in the app.

@@ -7,7 +7,7 @@ import { Drawer as UiDrawer } from '@lody/ui/drawer';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Drawer, DrawerContent, DrawerTitle } from '../src/ui/drawer';
-import { SessionMobileDiffDrawerContent } from '../src/components/sessions/session-mobile-diff-drawer-content';
+import { SessionMobileDiffDrawer } from '../src/components/sessions/session-mobile-diff-drawer';
 
 const runtime = vi.hoisted(() => ({ native: true, ios: false }));
 vi.mock('../src/lib/native-platform', () => ({
@@ -242,12 +242,19 @@ describe('drawer floating controls', () => {
               <DrawerTitle>Conversation</DrawerTitle>
               <button onClick={() => setOpen(true)}>Open changes</button>
               <output>{selection}</output>
-              <UiDrawer.Root side="bottom" open={open} onOpenChange={setOpen}>
-                <SessionMobileDiffDrawerContent side="bottom" aria-describedby={undefined}>
-                  <UiDrawer.Title>Changes</UiDrawer.Title>
-                  <button onClick={() => setSelection('Selected line')}>Select line</button>
-                </SessionMobileDiffDrawerContent>
-              </UiDrawer.Root>
+              <SessionMobileDiffDrawer
+                open={open}
+                onOpenChange={setOpen}
+                changes={{
+                  ready: true,
+                  synced: true,
+                  changeEntries: [],
+                  changeFilePaths: [],
+                  onOpenChangesDiff: () => {},
+                }}
+              >
+                <button onClick={() => setSelection('Selected line')}>Select line</button>
+              </SessionMobileDiffDrawer>
             </DrawerContent>
           </Drawer>
         );
