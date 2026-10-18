@@ -406,6 +406,214 @@ describe('createConversationSession backend seam', () => {
     }
   );
 
+  it.each(['reader', 'view'] as const)(
+    'makes the initial %s readable without depending on another owner round trip',
+    async (consumer) => {
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+      vi.stubGlobal('indexedDB', new IDBFactory());
+      vi.stubGlobal('IDBKeyRange', IDBKeyRange);
+      const sessionId = 'initial-owner-page' as SessionId;
+      const machineId = 'synthetic-machine' as MachineId;
+      const workspaceId = 'synthetic-workspace' as WorkspaceId;
+      const history: SessionHistoryInput[] = Array.from({ length: 120 }, (_, index) => ({
+        id: `turn-${index}`,
+        role: index % 2 === 0 ? 'user' : 'assistant',
+        timestamp: '2026-10-18T00:00:00Z',
+        items: [{ type: 'text', text: `Current owner body ${index}` }],
+      }));
+      const page = {
+        startPosition: 80,
+        totalCount: history.length,
+        rows: history.slice(80).map((turn, index) => createRoostDirectoryRow(80 + index, turn)),
+        hasMoreOlder: true,
+        cursor: 'synthetic-owner-cursor',
+      };
+      const cache = createRoostHistoryCache(
+        JSON.stringify(['local', workspaceId, machineId, sessionId])
+      );
+      const doc = new LoroDoc();
+      let releaseDuplicate!: () => void;
+      const duplicateGate = new Promise<void>((resolve) => {
+        releaseDuplicate = resolve;
+      });
+      let duplicateStarted!: () => void;
+      const duplicate = new Promise<'duplicate'>((resolve) => {
+        duplicateStarted = () => resolve('duplicate');
+      });
+      let latestReads = 0;
+      const factory = createRemoteRoostSessionDataFactory({
+        workspaceId,
+        machineId,
+        requestHistoryRead: async (
+          _machine,
+          _session,
+          query
+        ): Promise<SessionHistoryReadResponse> => {
+          if (query.kind === 'readTurn') {
+            return {
+              type: 'session/history-read_response',
+              sessionId,
+              success: true,
+              historyRevision: 3,
+              historyCount: history.length,
+              result: { state: 'ready', turn: history[0] },
+            };
+          }
+          if (query.kind !== 'readLatestPage') throw new Error('Unexpected history query');
+          latestReads += 1;
+          if (latestReads > 1) {
+            duplicateStarted();
+            await duplicateGate;
+          }
+          return {
+            type: 'session/history-read_response',
+            sessionId,
+            success: true,
+            historyRevision: 5,
+            historyCount: history.length,
+            result: page,
+            pageTurns: history.slice(80),
+          };
+        },
+        requestHistoryWrite: async () => {
+          throw new Error('Unexpected history write');
+        },
+      });
+      const data = factory({ doc, sessionId, backendKind: 'roost' });
+      let observation: ReturnType<typeof data.history.observe> | undefined;
+      let conversation: ReturnType<typeof createConversationSession> | undefined;
+      try {
+        await cache.acceptPage(
+          page,
+          history
+            .slice(80)
+            .map((turn) => ({ ...turn, items: [{ type: 'text', text: 'Old cache' }] })),
+          1
+        );
+        // An uncached foreground read has already established a newer owner.
+        await data.history.readTurn(history[0]!.id);
+        let readable: Promise<'readable'>;
+        if (consumer === 'reader') {
+          observation = data.history.observe(() => {});
+          void observation.initial.catch(() => {});
+          readable = observation.initialPage!.then((initialPage) => {
+            expect(initialPage).toEqual(page);
+            return 'readable';
+          });
+        } else {
+          conversation = createConversationSession(doc, {
+            sessionId,
+            backendKind: 'roost',
+            createSessionData: () => data,
+            scheduleIdle: (task) => {
+              let cancelled = false;
+              queueMicrotask(() => {
+                if (!cancelled) task({ timeRemaining: () => 50 });
+              });
+              return () => {
+                cancelled = true;
+              };
+            },
+            yieldToEventLoop: () => Promise.resolve(),
+          });
+          readable = conversation.history.ready.then(() => {
+            expect(conversation!.history.turn(119)).toMatchObject(history[119]!);
+            return 'readable';
+          });
+        }
+        expect(await Promise.race([readable, duplicate])).toBe('readable');
+        expect(await data.history.readTurn(history[119]!.id)).toMatchObject({
+          state: 'ready',
+          turn: history[119],
+        });
+        // The new page is readable even while the previous coherent disk snapshot
+        // is retained during replacement; publishing a partial replica is unnecessary.
+        expect(await cache.getHead()).toMatchObject({ revision: 1, start: 80 });
+      } finally {
+        releaseDuplicate();
+        await observation?.initialPage?.catch(() => {});
+        observation?.unsubscribe();
+        if (conversation) conversation.dispose();
+        else data.dispose?.();
+        cache.dispose();
+        doc.free();
+        vi.unstubAllGlobals();
+        vi.useRealTimers();
+      }
+    }
+  );
+
+  it.each([false, true])(
+    'keeps initial history coherent while control advances: incremental=%s',
+    async (incremental) => {
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+      vi.stubGlobal('indexedDB', new IDBFactory());
+      vi.stubGlobal('IDBKeyRange', IDBKeyRange);
+      const sessionId = 'superseded-initial-page' as SessionId;
+      const doc = new LoroDoc();
+      let revision = 5;
+      const turn = (atRevision = revision): SessionHistoryInput => ({
+        id: 'synthetic-turn',
+        role: 'user',
+        timestamp: '2026-10-18T00:00:00Z',
+        items: [{ type: 'text', text: `Owner revision ${atRevision}` }],
+      });
+      const factory = createRemoteRoostSessionDataFactory({
+        incremental,
+        workspaceId: 'synthetic-workspace' as WorkspaceId,
+        machineId: 'synthetic-machine' as MachineId,
+        requestHistoryRead: async () => {
+          const body = turn();
+          return {
+            type: 'session/history-read_response',
+            sessionId,
+            success: true,
+            historyRevision: revision,
+            historyCount: 1,
+            result: {
+              ...(incremental ? { checkpoint: `checkpoint-${revision}` } : {}),
+              startPosition: 0,
+              totalCount: 1,
+              rows: [createRoostDirectoryRow(0, body)],
+              hasMoreOlder: false,
+              cursor: null,
+            },
+            pageTurns: [body],
+          };
+        },
+        requestHistoryWrite: async () => {
+          throw new Error('Unexpected history write');
+        },
+      });
+      const data = factory({ doc, sessionId, backendKind: 'roost' });
+      const observation = data.history.observe(() => {
+        if (revision !== 5) return;
+        revision = 7;
+        const cursor = doc.getMap('roostHistoryCursor');
+        cursor.set('historyRevision', revision);
+        cursor.set('historyCount', 1);
+        doc.commit();
+      });
+      void observation.initial.catch(() => {});
+      try {
+        const expected = turn(incremental ? 5 : 7);
+        const page = await observation.initialPage;
+        expect(page?.rows).toEqual([createRoostDirectoryRow(0, expected)]);
+        if (incremental) expect(page?.checkpoint).toBe('checkpoint-5');
+        expect(await data.history.readTurn('synthetic-turn')).toMatchObject({
+          state: 'ready',
+          turn: expected,
+        });
+      } finally {
+        observation.unsubscribe();
+        data.dispose?.();
+        doc.free();
+        vi.unstubAllGlobals();
+        vi.useRealTimers();
+      }
+    }
+  );
+
   it('uses the injected SessionData factory and forwards the backend kind', async () => {
     const doc = new LoroDoc();
     const injectedDoc = new LoroDoc();

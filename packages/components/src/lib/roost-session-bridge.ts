@@ -562,9 +562,10 @@ const createRoostSessionDataFactoryFromTransport =
       return next;
     };
 
-    const readDirectoryPage = async (
+    const readDirectorySnapshot = async (
       query: Extract<SessionHistoryReadQuery, { kind: 'readLatestPage' | 'readOlderPage' }>
-    ): Promise<SessionHistoryDirectoryPage> => {
+    ): Promise<{ page: SessionHistoryDirectoryPage; directoryEpoch: number | null }> => {
+      const directoryEpoch = observedDirectoryEpoch;
       const before =
         query.kind === 'readOlderPage' ? parseRoostCacheCursor(query.cursor) : undefined;
       const localHead = await canReadCache();
@@ -591,7 +592,7 @@ const createRoostSessionDataFactoryFromTransport =
             rememberBody(turn, stored.page.startPosition + index)
           );
           if (ownerRevision === undefined) displayedCacheRevision = stored.head.revision;
-          return stored.page;
+          return { page: stored.page, directoryEpoch };
         }
       }
       if (before) {
@@ -627,14 +628,28 @@ const createRoostSessionDataFactoryFromTransport =
           throw new Error('Roost cached page edge is stale');
         }
         return {
-          startPosition: from,
-          totalCount: page.totalCount,
-          rows,
-          hasMoreOlder: from > 0,
-          cursor: from > 0 ? roostCacheCursor(before.revision, from) : null,
+          page: {
+            startPosition: from,
+            totalCount: page.totalCount,
+            rows,
+            hasMoreOlder: from > 0,
+            cursor: from > 0 ? roostCacheCursor(before.revision, from) : null,
+          },
+          directoryEpoch,
         };
       }
-      return validateDirectoryPage(await readHistory(query), 'Roost history page');
+      const response = await readOwner(query);
+      const page = validateDirectoryPage(response.result, 'Roost history page');
+      return {
+        page,
+        // The reply covers its own notification. A coherent checkpoint can also
+        // progress behind newer hints, while ordinary replies must still be current.
+        directoryEpoch:
+          (incrementalEnabled() && page.checkpoint) ||
+          response.historyRevision === Math.max(ownerRevision ?? 0, observedHistoryRevision)
+            ? observedDirectoryEpoch
+            : null,
+      };
     };
 
     let refreshTimer: ReturnType<typeof setTimeout> | undefined;
@@ -925,11 +940,11 @@ const createRoostSessionDataFactoryFromTransport =
       let attempt = 0;
       for (;;) {
         if (disposed) throw new Error('Roost session bridge is disposed');
-        const directoryEpoch = observedDirectoryEpoch;
         try {
-          lastPage = await readDirectoryPage({ kind: 'readLatestPage', limit: 40 });
+          const snapshot = await readDirectorySnapshot({ kind: 'readLatestPage', limit: 40 });
+          lastPage = snapshot.page;
           await notificationQueue;
-          if (directoryEpoch === observedDirectoryEpoch) return lastPage;
+          if (snapshot.directoryEpoch === observedDirectoryEpoch) return lastPage;
         } catch (error) {
           if (!isHistorySuperseded(error)) throw error;
         }
@@ -984,9 +999,9 @@ const createRoostSessionDataFactoryFromTransport =
       readRange,
       readDirectory,
       readLatestDirectoryPage: async (limit) =>
-        await readDirectoryPage({ kind: 'readLatestPage', limit }),
+        (await readDirectorySnapshot({ kind: 'readLatestPage', limit })).page,
       readOlderDirectoryPage: async (cursor, limit) =>
-        await readDirectoryPage({ kind: 'readOlderPage', cursor, limit }),
+        (await readDirectorySnapshot({ kind: 'readOlderPage', cursor, limit })).page,
       readAll: async () => {
         const head = await canReadCache();
         if (head?.start === 0) {
