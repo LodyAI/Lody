@@ -219,3 +219,18 @@ export const MachineNotAdded: Story = {
     isEditing: true,
   },
 };
+
+/** Overflow belongs to the machine tabs, leaving the fields and footer in place. */
+export const ManyMachines: Story = {
+  args: {
+    machines: [
+      ...machines,
+      ...Array.from({ length: 12 }, (_, index) => ({
+        machineId: `extra-machine-${index}` as MachineId,
+        label: `Development workstation ${index + 1}`,
+        online: index % 2 === 0,
+      })),
+    ],
+    isEditing: true,
+  },
+};
