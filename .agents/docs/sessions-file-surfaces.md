@@ -54,6 +54,10 @@ bounded Machine RPC reads. Indexing and saving still require the daemon. See the
   equal-length edits. All Changes retains its existing batched inline transfer
   and decoding; only deferred reads become viewport-driven. See the
   [implementation decision](../notes/implemented/bug-fix/2026-10-17-multi-file-diff-opening.md).
+- File-provider trees attach lazy directories through a per-construction sibling
+  index, then sort each changed sibling array once. Directory ids, loaded children,
+  modified flags and directories-before-files order are preserved; the temporary
+  indexes are discarded with construction, never shared across provider snapshots.
 - Editor window (Monaco): `session-monaco-text-viewer.tsx` inside
   `session-file-content-view.tsx`.
   File-link line anchors move Monaco's cursor as well as its viewport, using an
