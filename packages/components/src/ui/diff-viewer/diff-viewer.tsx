@@ -57,6 +57,8 @@ const MAX_PARSED_DIFF_CACHE = 96;
 const MAX_PRERENDERED_HTML_CACHE = 24;
 const MAX_WORD_LEVEL_LINE_DIFF_PAIRS = 320;
 const LEGACY_INLINE_DIFF_MAX_TEXT_LENGTH = 200_000;
+const SMALL_INLINE_DIFF_MAX_TEXT_LENGTH = 8_192;
+const SMALL_INLINE_DIFF_MAX_LINES = 256;
 const parsedDiffCache = new Map<string, FileDiffMetadata>();
 const prerenderedHtmlCache = new Map<string, string>();
 let parseQueue: Promise<void> = Promise.resolve();
@@ -69,6 +71,21 @@ function scheduleDiffParse(run: () => Promise<FileDiffMetadata | undefined>) {
     () => undefined
   );
   return result;
+}
+
+function isSmallTextDiff(oldText: string, newText: string): boolean {
+  if (oldText.length + newText.length > SMALL_INLINE_DIFF_MAX_TEXT_LENGTH) return false;
+  // Length alone admits thousands of very short replaced lines. Count without
+  // allocating line arrays, stopping as soon as the inline budget is exceeded.
+  let lines = 0;
+  for (const text of [oldText, newText]) {
+    let offset = -1;
+    do {
+      if (++lines > SMALL_INLINE_DIFF_MAX_LINES) return false;
+      offset = text.indexOf('\n', offset + 1);
+    } while (offset !== -1);
+  }
+  return true;
 }
 const viewportStyles = stylex.create({
   placeholder: (height: number) => ({ height }),
@@ -550,7 +567,9 @@ function DiffViewerImpl({
     (preferParseWorker ||
       lazyTextDiffSource !== undefined ||
       effectiveOldTextLength + effectiveNewTextLength >= LEGACY_INLINE_DIFF_MAX_TEXT_LENGTH ||
-      typeof Worker !== 'undefined');
+      // Tiny standalone snippets keep their first-frame availability, including
+      // remounts while a larger diff occupies the shared parse Worker.
+      (typeof Worker !== 'undefined' && !isSmallTextDiff(oldText, newText)));
   // Preserve the complete context previously supplied by synchronous standalone
   // parsing. Explicit multi-file/chunked and large-diff paths remain bounded.
   const retainStandaloneContext =

@@ -47,9 +47,12 @@ bounded Machine RPC reads. Indexing and saving still require the daemon. See the
   earlier bodies grow; at the bottom it anchors the last visible file. Measured
   body placeholders preserve space when code leaves the viewport. Bodies with
   pointer or keyboard interaction remain mounted to preserve selections, expanded
-  context and unsent comments. Parser cache misses use the shared parse Worker
-  regardless of text length, including ordinary standalone snippets when Workers
-  are available. Standalone inputs below the former 200,000-character threshold
+  context and unsent comments. Standalone snippets with at most 8,192 combined
+  characters and 256 combined lines parse inline, so first mounts and uncached
+  remounts do not wait behind a busy parse Worker. Other standalone cache misses
+  use the shared parse Worker when available; explicit multi-file and chunked
+  sources use it regardless of size. Syntax highlighting still uses the shared
+  render Worker for small snippets too. Standalone inputs below the former 200,000-character threshold
   retain full unchanged-line context and their synchronous availability fallback
   if a Worker is unavailable or fails. Explicit multi-file/chunked and larger
   inputs keep bounded metadata and fail visibly rather than parsing inline.

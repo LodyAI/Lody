@@ -113,9 +113,72 @@ describe('DiffViewer render worker routing', () => {
     vi.unstubAllGlobals();
   });
 
+  it.each([
+    ['a tool snippet', 'old\n', 'new\n'],
+    ['8 KiB of text', 'a'.repeat(4096), 'b'.repeat(4096)],
+    [
+      '256 combined lines',
+      Array.from({ length: 128 }, (_, index) => `before ${index}`).join('\n'),
+      Array.from({ length: 128 }, (_, index) => `after ${index}`).join('\n'),
+    ],
+  ])('renders and remounts %s while the shared parse worker is busy', async (_, oldText, newText) => {
+    let finish!: (diff: FileDiffMetadata) => void;
+    workerMocks.parse.mockImplementation(({ path, oldText: before, newText: after }) =>
+      path === 'busy.ts'
+        ? new Promise((resolve) => (finish = resolve))
+        : Promise.resolve(
+            parseDiffFromFile({ name: path, contents: before }, { name: path, contents: after })
+          )
+    );
+    const smallProps = { path: 'snippet.ts', oldText, newText, showHeader: false };
+    const expected = parseDiffFromFile(
+      { name: smallProps.path, contents: oldText },
+      { name: smallProps.path, contents: newText }
+    );
+    const viewers = (showSmall: boolean) =>
+      createElement(
+        'div',
+        null,
+        createElement(DiffViewer, {
+          path: 'busy.ts',
+          oldText: 'before',
+          newText: 'after',
+          preferParseWorker: true,
+          showHeader: false,
+        }),
+        showSmall &&
+          createElement(
+            'div',
+            { 'data-testid': 'small-viewer' },
+            createElement(DiffViewer, smallProps)
+          )
+      );
+    try {
+      await act(async () => root.render(viewers(true)));
+      const readSmall = () => container.querySelector<HTMLElement>('[data-testid="small-viewer"]')!;
+      expect(container.textContent).toContain('Preparing diff');
+      expect(readRenderedDiff(readSmall())).toEqual(expected);
+      expect(readSmall().textContent).not.toContain('Preparing diff');
+      await act(async () => root.render(viewers(false)));
+      await act(async () => root.render(viewers(true)));
+      expect(readRenderedDiff(readSmall())).toEqual(expected);
+      expect(readSmall().textContent).not.toContain('Preparing diff');
+    } finally {
+      await act(async () =>
+        finish(
+          parseDiffFromFile(
+            { name: 'busy.ts', contents: 'before' },
+            { name: 'busy.ts', contents: 'after' }
+          )
+        )
+      );
+      await act(async () => root.render(null));
+    }
+  });
+
   it('waits for a default standalone parse and retains all unchanged context and CRLF endings', async () => {
     const path = 'standalone-context.ts';
-    const oldText = Array.from({ length: 31 }, (_, index) => `line ${index}`).join('\r\n');
+    const oldText = Array.from({ length: 160 }, (_, index) => `line ${index}`).join('\r\n');
     const newText = oldText.replace('line 15', 'updated');
     const parsed = parseDiffFromFile(
       { name: path, contents: oldText, cacheKey: 'context:old' },
@@ -165,18 +228,19 @@ describe('DiffViewer render worker routing', () => {
     workerMocks.parse.mockImplementation(
       ({ path }) => new Promise((resolve) => jobs.set(path, resolve))
     );
+    const oldText = 'x'.repeat(5000) + '\n';
     const props = (path: string) => ({
       path,
-      oldText: 'before\n',
-      newText: `${path}\n`,
+      oldText,
+      newText: `${oldText}${path}\n`,
       showHeader: false,
     });
     await act(async () => root.render(createElement(DiffViewer, props('obsolete.ts'))));
     await act(async () => root.render(createElement(DiffViewer, props('selected.ts'))));
     const diff = (path: string) =>
       parseDiffFromFile(
-        { name: path, contents: 'before\n' },
-        { name: path, contents: `${path}\n` }
+        { name: path, contents: oldText },
+        { name: path, contents: `${oldText}${path}\n` }
       );
     await act(async () =>
       jobs.get('obsolete.ts')!(stripParsedFileDiffFullText(diff('obsolete.ts')))
@@ -195,8 +259,8 @@ describe('DiffViewer render worker routing', () => {
       if (outcome === 'unavailable') workerMocks.parse.mockResolvedValue(undefined);
       else workerMocks.parse.mockRejectedValue(new Error('Worker startup failed'));
       const path = `fallback-${outcome}.txt`;
-      const oldText = 'old\r\nunchanged';
-      const newText = 'new\r\nunchanged';
+      const oldText = Array.from({ length: 160 }, (_, index) => `line ${index}`).join('\r\n');
+      const newText = oldText.replace('line 15', 'updated');
       await act(async () =>
         root.render(createElement(DiffViewer, { path, oldText, newText, showHeader: false }))
       );
@@ -225,17 +289,22 @@ describe('DiffViewer render worker routing', () => {
     ['removed\n', ''],
     ['before', 'after'],
     ['before\n', 'after\n'],
-  ])('retains empty-file and final-newline metadata for %j → %j', async (oldText, newText) => {
+  ])('retains empty-file and final-newline metadata for %j → %j', async (before, after) => {
     const path = 'line-ending.txt';
-    const parsed = parseDiffFromFile(
-      { name: path, contents: oldText },
-      { name: path, contents: newText }
-    );
-    workerMocks.parse.mockResolvedValue(stripParsedFileDiffFullText(parsed));
-    await act(async () =>
-      root.render(createElement(DiffViewer, { path, oldText, newText, showHeader: false }))
-    );
-    expect(readRenderedDiff(container)).toEqual(parsed);
+    for (const padding of ['', 'x'.repeat(8193)]) {
+      const oldText = before ? padding + before : before;
+      const newText = after ? padding + after : after;
+      const parsed = parseDiffFromFile(
+        { name: path, contents: oldText },
+        { name: path, contents: newText }
+      );
+      workerMocks.parse.mockResolvedValue(stripParsedFileDiffFullText(parsed));
+      await act(async () =>
+        root.render(createElement(DiffViewer, { path, oldText, newText, showHeader: false }))
+      );
+      expect(readRenderedDiff(container)).toEqual(parsed);
+      await act(async () => root.render(null));
+    }
   });
 
   it('keeps supplied metadata authoritative and defers a collapsed standalone body', async () => {

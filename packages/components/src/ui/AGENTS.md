@@ -54,8 +54,8 @@ strings on i18n rather than the registry's inline English.
 - Dialog-contained `OptionSelector` menus must portal into the nearest
   `[data-lody-dialog-content]`; a body portal is outside the modal's scroll and
   focus guards. `src/ui/dialog.tsx` emits that attribute on every panel.
-- `DiffViewer` shares parse and syntax Workers, including small diffs. Preserve
-  standalone context/fallbacks; never create or terminate a pool per viewer.
+- `DiffViewer` bounds standalone inline parsing by characters AND lines; syntax
+  and other parsing share Workers. Preserve context/fallbacks; no per-viewer pools.
 - Every floating surface passes `useSafeAreaCollisionPadding` as
   `collisionPadding`; the default parks a colliding surface flush against the
   screen edge and caps `--available-height` there too.
