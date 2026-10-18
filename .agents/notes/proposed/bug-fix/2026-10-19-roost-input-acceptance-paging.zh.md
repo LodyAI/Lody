@@ -3,6 +3,7 @@
 Status: proposed
 Type: bug-fix
 Translation: current
+PR: [#1700](https://github.com/LodyAI/Lody/pull/1700)
 
 [English](2026-10-19-roost-input-acceptance-paging.md)
 
