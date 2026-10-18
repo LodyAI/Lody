@@ -2,6 +2,7 @@
 
 Status: implemented
 Translation: current
+PR: [#1695](https://github.com/LodyAI/Lody/pull/1695)
 
 [中文版](2026-10-18-mobile-changes-file-list.zh.md)
 
