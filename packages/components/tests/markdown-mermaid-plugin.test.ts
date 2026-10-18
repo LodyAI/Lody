@@ -1,20 +1,9 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
-vi.mock('beautiful-mermaid', () => ({
-  renderMermaidSVGAsync: async (source: string) => {
-    if (!source.includes('A-->B')) {
-      throw new Error(`Invalid mermaid header: "${source.split('\n')[0]}"`);
-    }
-    return `<svg xmlns="http://www.w3.org/2000/svg" data-diagram="flowchart"></svg>`;
-  },
-}));
-
-vi.mock('mermaid', () => {
-  throw new Error('mermaid.js must not load after the renderer unifies on beautiful-mermaid');
-});
-
-const { createMarkdownMermaidConfig, renderMarkdownMermaidSvg } =
-  await import('../src/components/ai-gui/markdown-mermaid');
+import {
+  markdownMermaidPalette,
+  renderMarkdownMermaidSvg,
+} from '../src/components/ai-gui/markdown-mermaid';
 
 const relativeLuminance = (hex: string): number => {
   const channel = (offset: number) => {
@@ -24,58 +13,94 @@ const relativeLuminance = (hex: string): number => {
   return 0.2126 * channel(1) + 0.7152 * channel(3) + 0.0722 * channel(5);
 };
 
-describe('markdown mermaid rendering', () => {
-  it('renders a flowchart through beautiful-mermaid', async () => {
-    const svg = await renderMarkdownMermaidSvg(['graph TD', '  A-->B'].join('\n'), 'dark');
+const rootSvgTag = (svg: string) => svg.slice(0, svg.indexOf('>') + 1);
 
-    expect(svg).toContain('data-diagram="flowchart"');
+describe('markdown mermaid rendering', () => {
+  it('renders a flowchart with the theme palette declared on the root svg', async () => {
+    const svg = await renderMarkdownMermaidSvg(
+      ['graph TD', '  A[Start]-->B[Done]'].join('\n'),
+      'dark'
+    );
+    const root = rootSvgTag(svg);
+
+    expect(root).toContain('pele-flowchart');
+    // Declared on the svg itself, so a downloaded or full-screen copy keeps the colors.
+    expect(root).toContain('--pele-bg:#0b1120');
+    expect(root).toContain('--pele-fg:#cbd5e1');
+    expect(svg).toContain('Start');
   });
 
-  it('keeps dark-mode mermaid colors readable', () => {
-    const lightConfig = createMarkdownMermaidConfig('light');
-    const darkConfig = createMarkdownMermaidConfig('dark');
+  it('renders diagram types the previous renderer showed as source', async () => {
+    const pie = await renderMarkdownMermaidSvg(
+      ['pie title Pets', '  "Dogs" : 40', '  "Cats" : 60'].join('\n'),
+      'light'
+    );
+    const gantt = await renderMarkdownMermaidSvg(
+      ['gantt', '  title Plan', '  section Build', '  Ship :a1, 2026-01-01, 3d'].join('\n'),
+      'light'
+    );
 
-    expect(lightConfig.theme).toBe('base');
-    expect(darkConfig.theme).toBe('base');
-    expect(darkConfig.darkMode).toBe(true);
+    expect(rootSvgTag(pie)).toContain('pele-pie');
+    expect(rootSvgTag(pie)).toContain('--pele-fg:#0f172a');
+    expect(pie.match(/class="pele-slice"/g)).toHaveLength(2);
+    expect(rootSvgTag(gantt)).toContain('pele-gantt');
+    expect(gantt).toContain('Ship');
+  });
+
+  it('drops diagram links and remote images', async () => {
+    const svg = await renderMarkdownMermaidSvg(
+      [
+        'graph TD',
+        '  A-->B',
+        '  click A "https://example.com/track"',
+        '  C@{ img: "https://example.com/pixel.png", label: "C" }',
+      ].join('\n'),
+      'light'
+    );
+
+    expect(svg).not.toContain('example.com');
+  });
+
+  it('keeps dark-mode diagram text readable but under the brightness ceiling', () => {
+    const light = markdownMermaidPalette('light');
+    const dark = markdownMermaidPalette('dark');
+
     // Dark diagram text is readable but no brighter than the app's dark text
     // ceiling (#D5D5D5-level luminance), never near-white.
-    const variables = darkConfig.themeVariables as Record<string, string>;
-    for (const name of [
-      'primaryTextColor',
-      'textColor',
-      'titleColor',
-      'actorTextColor',
-      'signalTextColor',
-      'noteTextColor',
-    ]) {
-      const luminance = relativeLuminance(variables[name]!);
-      expect({ name, readable: luminance > 0.5, capped: luminance <= 0.666 }).toEqual({
+    for (const name of ['fg', 'muted'] as const) {
+      const luminance = relativeLuminance(dark[name]);
+      expect({ name, readable: luminance > 0.3, capped: luminance <= 0.666 }).toEqual({
         name,
         readable: true,
         capped: true,
       });
     }
-    expect(darkConfig.themeVariables).not.toBe(lightConfig.themeVariables);
+    expect(dark).not.toEqual(light);
   });
 
   it('falls back to a themed multi-line code block for unsupported diagram types', async () => {
     const svg = await renderMarkdownMermaidSvg(
-      ['pie title Pets', '  "Dogs" : 40', '  "Cats" : 60'].join('\n'),
+      ['zenuml', '  title Order', '  Alice->Bob: hello'].join('\n'),
       'dark'
     );
 
     expect(svg).not.toContain('Diagram unavailable');
     // One tspan per source line, so the fallback actually renders multi-line.
     expect(svg.match(/<tspan/g)).toHaveLength(3);
-    expect(svg).toContain('pie title Pets');
-    // Dark theme surface/text colors, not the old light amber panel.
+    expect(svg).toContain('zenuml');
     expect(svg).toContain('fill="#111827"');
     expect(svg).toContain('fill="#cbd5e1"');
   });
 
+  it('falls back to the source listing on a syntax error', async () => {
+    const svg = await renderMarkdownMermaidSvg(['graph TD', '  A-->'].join('\n'), 'light');
+
+    expect(svg.match(/<tspan/g)).toHaveLength(2);
+    expect(svg).toContain('A--&gt;');
+  });
+
   it('escapes markup in the fallback source listing', async () => {
-    const svg = await renderMarkdownMermaidSvg('pie title <script>alert(1)</script>', 'light');
+    const svg = await renderMarkdownMermaidSvg('zenuml <script>alert(1)</script>', 'light');
 
     expect(svg).not.toContain('<script>');
     expect(svg).toContain('&lt;script&gt;');

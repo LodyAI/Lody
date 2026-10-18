@@ -109,6 +109,8 @@ minimumReleaseAgeExclude:
   - '@peculiar/asn1-csr@2.10.0'
   - '@peculiar/asn1-cms@2.10.0'
   - mediabunny@1.61.0
+  # Mermaid renderer for chat diagrams; reviewed: no dependencies or install scripts.
+  - pele@1.6.0
   - '@peculiar/asn1-schema@2.10.0'
   # Electron 44.7.0 matches DSH's native loader runtime support.
   # electron-vite 6.0.0-beta.2+ is the first release

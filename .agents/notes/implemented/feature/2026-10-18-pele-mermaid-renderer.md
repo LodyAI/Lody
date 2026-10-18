@@ -1,0 +1,59 @@
+# Render chat Mermaid diagrams with Pele
+
+Status: implemented
+Translation: current
+
+[中文](2026-10-18-pele-mermaid-renderer.zh.md)
+
+## Abstract
+
+Chat Mermaid fences rendered through beautiful-mermaid, which supports only
+flowchart, state, sequence, class, ER and XY charts. Agents' Gantt, pie, mindmap,
+timeline and git graphs therefore showed as source text. Pele, Obsidian's MIT
+renderer, covers every built-in Mermaid 12.1 type with no dependencies and
+replaces it behind the same lazy boundary; the guarded diagram chunk falls from
+about 492 kB to 251 kB gzipped. The trade-off is a library first released on
+2026-10-06, adopted as an exact, reviewed version ahead of the seven-day quarantine.
+
+## Decision
+
+- Only the renderer changes. `markdown-mermaid.ts` lazily imports `pele`, calls
+  `render()`, and keeps the existing source-listing fallback for rejected input
+  (syntax errors, ZenUML, size limits) and runtime load failures. Activation,
+  gestures, the viewer and download controls are untouched.
+- `mount()` and `enableZoom()` are not used: they observe container width and add
+  their own zoom, which would conflict with the
+  [inline view contract](../../../../specs/mermaid-inline-view.md).
+- `links: false` and `images: false`: Pele otherwise emits `click` URLs and
+  remote node images (verified with a synthetic diagram), and the local desktop
+  must not fetch or navigate from agent output.
+- Pele themes through `--pele-*` custom properties. Lody writes its light/dark
+  palette into the root `<svg>`'s `style`, so a downloaded SVG, the PNG export
+  (drawn from a `data:` image) and the full-screen clone keep their colors. The
+  mermaid.js-shaped theme tables and the type-only `mermaid` dependency are gone.
+- `pele@1.6.0` is listed in `minimumReleaseAgeExclude`. Its tarball has no
+  dependencies or install scripts, and its bundle contains no `fetch`, `eval`
+  or `new Function`. Later versions remain quarantined.
+- The Vite resolver that pointed `@meowdown/react`'s private beautiful-mermaid
+  chunk at Lody's copy is removed. Nothing imports meowdown since the Tasks
+  product was removed, so beautiful-mermaid stays only as its unused transitive
+  dependency.
+
+## Alternatives
+
+- Keep beautiful-mermaid: smaller API surface, but the unsupported types stay as
+  source text.
+- Return to mermaid.js: full coverage, but it is the 1.6 MB runtime #46 removed,
+  and it renders through the DOM.
+
+## Evidence and limits
+
+- `tests/markdown-mermaid-plugin.test.ts` now runs real Pele: flowchart, pie and
+  Gantt rendering, root palette declaration, link/image removal, and fallbacks.
+- `electron-vite build --mode oss` passes the Mermaid lazy-boundary guard;
+  `mermaid-deps` is 677 kB minified / 251 kB gzipped, against 1.63 MB / 492 kB
+  for beautiful-mermaid with elkjs bundled the same way.
+- A Chromium page rendered twelve diagram types through the real module in both
+  themes, plus the export path. Layout differs from mermaid.js, as it did with
+  beautiful-mermaid. No in-app Storybook or E2E walk was run.
+- Pele is new and fast-moving; upgrades need the same tarball review.

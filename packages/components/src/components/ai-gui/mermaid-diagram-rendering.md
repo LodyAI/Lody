@@ -8,6 +8,21 @@ Binding rules live in [AGENTS.md](AGENTS.md); this file holds the invariants and
 why they read the way they do. Coverage:
 `tests/markdown-mermaid-fullscreen.test.tsx`.
 
+## The renderer produces a self-contained, inert SVG
+
+- `markdown-mermaid.ts` lazily imports Pele and calls its synchronous `render()`,
+  never `mount()` or `enableZoom()`: those would take resizing and zoom away from
+  the canvas and viewer below. `responsive: false` keeps the natural size those
+  surfaces scale from.
+- Links and images are disabled. An agent's diagram must not make the desktop
+  fetch a remote image or carry a navigable link.
+- The theme's `--pele-*` colors are written into the root `<svg>`'s `style`, not
+  inherited from the page. Copy, SVG/PNG download and the full-screen clone keep
+  the colors, and the block's per-theme cache stays correct.
+- Anything Pele rejects (syntax error, ZenUML, a size limit) or a runtime that
+  fails to load renders the source as an SVG listing, so the block's controls keep
+  working. Decision: [Pele renderer note](../../../../../.agents/notes/implemented/feature/2026-10-18-pele-mermaid-renderer.md).
+
 ## A diagram in a message is a still preview until it is clicked
 
 - It NEVER captures an unmodified wheel, activated or not. The only wheel the

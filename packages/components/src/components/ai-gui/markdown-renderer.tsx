@@ -87,8 +87,6 @@ import { resolveMarkdownImagePath } from '@/lib/session-file-open-target';
 import { getImageMimeTypeForPath } from '@/lib/image-file-preview';
 import { rehypeHeadingAnchors } from './markdown-heading-anchors';
 
-export { createMarkdownMermaidConfig } from './markdown-mermaid';
-
 /**
  * Conversation surfaces provide this capability at their boundary. Rendering
  * Markdown elsewhere (shared pages, file previews) deliberately has no native

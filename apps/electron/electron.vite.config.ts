@@ -13,7 +13,6 @@ import {
 import { mermaidLazyBoundaryGuardPlugin } from '../../packages/components/vite-mermaid-lazy-boundary-guard'
 import {
   isMermaidRuntimeDependency,
-  rendererBundleAliasPlugin,
   rendererBundleAliases
 } from '../../packages/components/vite-renderer-bundle-aliases'
 import { stylexOptions } from '../../packages/ui/stylex-options'
@@ -170,7 +169,7 @@ export default defineConfig(({ mode }) => {
           output: {
             onlyExplicitManualChunks: true,
             manualChunks(id) {
-              // Keep beautiful-mermaid (and elkjs) in the same guarded chunk.
+              // Keep the Pele diagram runtime in one guarded chunk.
               // Rejected: letting Rollup freely hoist these deps can mix
               // diagram-only runtime into ordinary renderer chunks.
               if (isMermaidRuntimeDependency(id)) {
@@ -191,7 +190,6 @@ export default defineConfig(({ mode }) => {
         // The desktop app must work with no network, so the emoji picker's
         // dataset ships in the bundle instead of being fetched from a CDN.
         emojibaseAssetsPlugin(),
-        rendererBundleAliasPlugin(),
         mermaidLazyBoundaryGuardPlugin(),
         // Paints the window's first frame before the renderer bundle has run.
         bootShellPlugin()
