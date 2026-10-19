@@ -33,6 +33,18 @@ forks; callers own those trust and freshness checks. There is no arbitrary-state
 starting point in the record/replay entry. The explicit snapshot entry below has
 separate qualification and provenance.
 
+`exportVerifiedState` and `restoreVerifiedState` let a party resume from **its
+own** earlier verified view. Export returns the canonical state bytes (the
+comparison-note state plus the view's verification origin), position and the
+comparison-note `stateDigest`. Restore only decodes: it checks structure and the
+caller's stored genesis/length/head, but neither signatures, curve points nor the
+digest, because the bytes come from the caller's own storage. The restored view
+extends exactly like the exported one; the next record must name its head. It
+reports historical attribution of removed devices as `device-only` and original
+epoch publication records as unavailable. Never restore another party's bytes;
+that is what endorsed snapshots are for. Retained bytes are current-format only:
+after an encoding change, rebuild them by one full replay.
+
 Preserved candidate v1 arrays/domains: genesis, admit Member, set role, admit own
 device, revoke own device, transfer Owner, publish epoch. Owner/Admin personal
 devices may invite and rotate; only Owner personal devices change roles or transfer

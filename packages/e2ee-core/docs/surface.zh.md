@@ -46,6 +46,7 @@
 | 纪元 HPKE | `epochHpkeAad`, `sealEpochKeyHpke`, `openEpochKeyHpke`, `HpkePrimitiveError`, `EpochHpkeContext`, `SealedEpochHpke` |
 | 记录 | `decodeRecord`, `hashRecordBytes`, `recordSigningBytes`, `joinRequestSigningBytes`, `possessionSigningBytes`, `DecodedRecord`, `RecordBody`, `Operation`, `JoinRequest`, `Role`, `DeviceKind`, `LedgerError`, `LedgerErrorCode` |
 | 重放与视图 | `verifyLedger`, `verifyLedgerEffect`, `extendLedger`, `extendLedgerEffect`, `requireLedgerContinuation`, `hasVerifiedRecordHash`, `hasVerifiedCheckpoint`, `contentPermissions`, `epochHistoryPacket`, `epochPublicationRecord`, `LedgerView`, `LedgerCheckpoint`, `LedgerState`, `Member`, `Device`, `ContentPermissions`, `EpochHistoryPacket`, `HistoricalContentAuthor` |
+| 保留状态 | `exportVerifiedState`, `restoreVerifiedState`, `RetainedLedgerState` |
 | 记录签名 | `prepareLedgerRecord`, `signLedgerRecord`, `PreparedLedgerRecord` |
 | 准入与创世 | `prepareJoinRequest`, `prepareDeviceAdmission`, `prepareLedgerCommand`, `signGenesisRecord`, `LedgerCommand` |
 | 快照 | `verifyLedgerSnapshot`, `prepareLedgerSnapshot`, `signLedgerSnapshot`, `snapshotTrustFromView`, `authenticateLedgerSnapshotEvidence`, `encodeSignedSnapshot`, `snapshotSigningBytes`, `headAttestationSigningBytes`, `historicalContentIdentity`, `comparisonNote`, `compareNotes`, `confirmIndependentComparison`, `SnapshotTrust`, `VerifiedViewSnapshotTrust`, `SnapshotIdentityPin`, `SnapshotEvidence`, `SnapshotProposal`, `ComparisonNote`, `Comparison`, `IndependentConfirmation`, `HistoricalContentIdentity` |

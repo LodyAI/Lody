@@ -1,4 +1,11 @@
-import { verifiedSnapshotState, proposalOf, noteOf, type SnapshotTrust } from './snapshot-codec';
+import {
+  verifiedSnapshotState,
+  proposalOf,
+  noteOf,
+  encodeRetainedState,
+  decodeRetainedState,
+  type SnapshotTrust,
+} from './snapshot-codec';
 import { Chunk, Effect, HashMap, HashSet, Result } from 'effect';
 import {
   genesisHash,
@@ -292,6 +299,42 @@ export function extendLedger(
   return state
     ? replay(cloneState(state), state.genesis, records, checkpoint)
     : fail('unauthorized');
+}
+
+/** A party's own verified state at one position, to restore later. Not a snapshot: it is evidence for nobody else. */
+export interface RetainedLedgerState {
+  readonly bytes: Uint8Array;
+  readonly genesis: GenesisHash;
+  readonly head: RecordHash;
+  readonly length: number;
+  /** The digest this position's comparison note carries; for comparison and audits, not checked on restore. */
+  readonly stateDigest: RecordHash;
+}
+/** Canonical state of a genuine view, for its holder's own storage. */
+export function exportVerifiedState(
+  view: LedgerView
+): Result.Result<RetainedLedgerState, LedgerError> {
+  const state = states.get(view);
+  if (!state) return fail('unauthorized');
+  return Result.map(encodeRetainedState(state), ({ bytes, stateDigest }) =>
+    Object.freeze({
+      bytes,
+      genesis: view.genesis,
+      head: view.head,
+      length: view.length,
+      stateDigest,
+    })
+  );
+}
+/** Resume from bytes the caller itself exported and stored. Decodes only; no signature
+ * or digest recheck. Never accept another party's bytes here: use endorsed snapshots. */
+export function restoreVerifiedState(input: {
+  readonly bytes: Uint8Array;
+  readonly genesis: GenesisHash;
+  readonly head: RecordHash;
+  readonly length: number;
+}): Result.Result<LedgerView, LedgerError> {
+  return Result.map(decodeRetainedState(input.bytes, input), viewOf);
 }
 
 /** What a device may do with document content at a verified view. */

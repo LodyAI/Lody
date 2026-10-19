@@ -5,11 +5,14 @@ import { concat } from '../foundation/concat';
 import {
   bytesEqual,
   copyBytes,
+  decodeRetainedCbor,
   decodeSnapshotCbor,
+  encodeRetainedCbor,
   encodeSnapshotCbor,
   type CborValue,
 } from '../foundation/cbor';
 import { keyId } from '../foundation/identifiers';
+import { retainedSigningPublicKey } from '../foundation/owned-bytes';
 import { verifySignature } from '../foundation/signature';
 import { LedgerError } from './errors';
 import { fail, type DeviceKind, type Role } from './records';
@@ -41,10 +44,19 @@ const cmp = (a: Uint8Array, b: Uint8Array) => {
   return a.length - b.length;
 };
 const id = (v: { toBytes(): Uint8Array }) => keyId(v.toBytes());
-const raw = (s: string) => Uint8Array.from(s.match(/../g)!.map((x) => Number.parseInt(x, 16)));
+// Lowercase hex digit value: '0'-'9' keep their low nibble, 'a'-'f' add 9.
+const nibble = (c: number) => (c & 0xf) + (c >> 6) * 9;
+const raw = (s: string) => {
+  const bytes = new Uint8Array(s.length / 2);
+  for (let i = 0; i < bytes.length; i++)
+    bytes[i] = (nibble(s.charCodeAt(2 * i)) << 4) | nibble(s.charCodeAt(2 * i + 1));
+  return bytes;
+};
+// Same-length lowercase hex sorts exactly like its bytes.
+const byKey = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
 const roles: readonly Role[] = ['owner', 'admin', 'member', 'guest'];
 const kinds: readonly DeviceKind[] = ['personal', 'machine', 'recovery'];
-const sortedKeys = (s: Iterable<string>) => [...s].map(raw).sort(cmp);
+const sortedKeys = (s: Iterable<string>) => [...s].sort(byKey).map(raw);
 
 /** Independent authenticated contact and expected position; never obtained from the snapshot/journal itself. */
 export interface SnapshotIdentityPin {
@@ -123,19 +135,18 @@ export const headAttestationSigningBytes = (genesis: Bytes.GenesisHash, head: By
   concat([domain('head-attest/v1'), genesis.toBytes(), head.toBytes()]);
 function authState(s: InternalState): CborValue {
   const members = [...s.members]
-    .sort(([a], [b]) => cmp(raw(a), raw(b)))
+    .sort(([a], [b]) => byKey(a, b))
     .map(([key, row]) => [raw(key), row.userId.toBytes(), roles.indexOf(row.role)]);
   const devices = [...s.devices]
-    .sort(([a], [b]) => cmp(raw(a), raw(b)))
+    .sort(([a], [b]) => byKey(a, b))
     .map(([key, row]) => [
       raw(key),
       row.membershipId.toBytes(),
       kinds.indexOf(row.kind),
       row.encryptionPublicKey.toBytes(),
     ]);
-  const closed = [...s.closedJoins]
-    .map((key) => key.split(':').map(raw))
-    .sort((a, b) => cmp(a[0]!, b[0]!) || cmp(a[1]!, b[1]!));
+  // Fixed-width `signingKey:requestId` keys sort like the (key, request) pairs.
+  const closed = [...s.closedJoins].sort(byKey).map((key) => key.split(':').map(raw));
   const history = [...s.historyPackets]
     .sort(([a], [b]) => a - b)
     .map(([epoch, row]) => [epoch, row.commitment.toBytes(), copyBytes(row.packet)]);
@@ -235,6 +246,242 @@ function keySet(v: CborValue | undefined, size: number): Result.Result<Set<strin
     return result;
   });
 }
+const verifications: readonly InternalState['verification'][] = [
+  'full-history',
+  'endorsed-snapshot',
+];
+/** A party's own retained state bytes and the state digest of its comparison note. */
+export function encodeRetainedState(
+  s: InternalState
+): Result.Result<{ bytes: Uint8Array; stateDigest: Bytes.RecordHash }, LedgerError> {
+  return Result.gen(function* () {
+    const head = hashAt(s, s.hashes.length - 1)!;
+    const bytes = yield* lift(
+      encodeRetainedCbor([
+        1,
+        s.genesis.toBytes(),
+        s.hashesOffset + s.hashes.length,
+        head.toBytes(),
+        authState(s),
+        verifications.indexOf(s.verification),
+      ])
+    );
+    // Deterministic CBOR: the comparison-note body is this array without its
+    // last one-byte element, so the digest needs no second encoding.
+    const body = concat([Uint8Array.of(0x85), bytes.subarray(1, bytes.length - 1)]);
+    const stateDigest = yield* lift(
+      Bytes.recordHash(sha256(concat([domain('snapshot-digest/v1'), body])))
+    );
+    return { bytes, stateDigest };
+  });
+}
+/** Decode only: no signature or digest check. The caller vouches that these are its own exported bytes. */
+export function decodeRetainedState(
+  bytes: Uint8Array,
+  expected: {
+    readonly genesis: Bytes.GenesisHash;
+    readonly head: Bytes.RecordHash;
+    readonly length: number;
+  }
+): Result.Result<InternalState, LedgerError> {
+  return safely(() =>
+    Result.gen(function* () {
+      const genesis = yield* lift(Bytes.genesisHash(expected.genesis.toBytes()));
+      const head = yield* lift(Bytes.recordHash(expected.head.toBytes()));
+      const length = expected.length;
+      if (!Number.isSafeInteger(length) || length < 1) return yield* fail('checkpoint-mismatch');
+      const root = yield* array(yield* lift(decodeRetainedCbor(bytes)));
+      if (root.length !== 6) return yield* fail('canonical');
+      if ((yield* uint(root[0])) !== 1) return yield* fail('unknown-version');
+      if (!bytesEqual(yield* exact(root[1], 32), genesis.toBytes()))
+        return yield* fail('wrong-anchor');
+      if (
+        (yield* uint(root[2])) !== length ||
+        !bytesEqual(yield* exact(root[3], 32), head.toBytes())
+      )
+        return yield* fail('checkpoint-mismatch');
+      const verification = verifications[yield* uint(root[5])];
+      if (!verification) return yield* fail('canonical');
+      return yield* decodeAuthState(root[4], {
+        genesis,
+        length,
+        head,
+        verification,
+        retained: true,
+      });
+    })
+  );
+}
+/** Structural decode of an encoded authorization state at a known position. Establishes no authority by itself. */
+function decodeAuthState(
+  value: CborValue | undefined,
+  at: {
+    readonly genesis: Bytes.GenesisHash;
+    readonly length: number;
+    readonly head: Bytes.RecordHash;
+    readonly verification: InternalState['verification'];
+    /** The caller's own retained state: its keys passed the curve check when first verified. */
+    readonly retained: boolean;
+  }
+): Result.Result<InternalState, LedgerError> {
+  const signingKey = (bytes: Uint8Array) =>
+    at.retained
+      ? Result.succeed(retainedSigningPublicKey(bytes))
+      : lift(Bytes.signingPublicKey(bytes));
+  return Result.gen(function* () {
+    const fields = yield* array(value);
+    if (fields.length !== 11) return yield* fail('canonical');
+    const owner = yield* lift(Bytes.membershipId(yield* exact(fields[0], 16)));
+    const members = new Map<string, Member>();
+    const users = new Set<string>();
+    let last: Uint8Array | undefined;
+    let owners = 0;
+    for (const item of yield* array(fields[1])) {
+      const row = yield* array(item);
+      if (row.length !== 3) return yield* fail('canonical');
+      const key = yield* lift(Bytes.membershipId(yield* exact(row[0], 16)));
+      const bytes = key.toBytes();
+      if (last && cmp(last, bytes) >= 0) return yield* fail('canonical');
+      last = bytes;
+      const userId = yield* lift(Bytes.userId(yield* exact(row[1], 32)));
+      const role = roles[yield* uint(row[2])];
+      if (!role) return yield* fail('canonical');
+      if (users.has(id(userId))) return yield* fail('replay');
+      users.add(id(userId));
+      members.set(id(key), Object.freeze({ userId, role }));
+      if (role === 'owner') owners++;
+    }
+    if (owners !== 1 || members.get(id(owner))?.role !== 'owner') return yield* fail('canonical');
+    const devices = new Map<string, Device>();
+    const encryptionKeys = new Set<string>();
+    last = undefined;
+    for (const item of yield* array(fields[2])) {
+      const row = yield* array(item);
+      if (row.length !== 4) return yield* fail('canonical');
+      const key = yield* signingKey(yield* exact(row[0], 32));
+      const bytes = key.toBytes();
+      if (last && cmp(last, bytes) >= 0) return yield* fail('canonical');
+      last = bytes;
+      const membershipId = yield* lift(Bytes.membershipId(yield* exact(row[1], 16)));
+      const kind = kinds[yield* uint(row[2])];
+      if (!kind || !members.has(id(membershipId))) return yield* fail('canonical');
+      const encryptionPublicKey = yield* lift(Bytes.encryptionPublicKey(yield* exact(row[3], 32)));
+      if (encryptionKeys.has(id(encryptionPublicKey))) return yield* fail('replay');
+      encryptionKeys.add(id(encryptionPublicKey));
+      devices.set(id(key), Object.freeze({ membershipId, kind, encryptionPublicKey }));
+    }
+    // A signed endorsement cannot make structurally unreachable Owner custody valid.
+    if (
+      ![...devices.values()].some((d) => id(d.membershipId) === id(owner) && d.kind !== 'machine')
+    )
+      return yield* fail('unauthorized');
+    const number = yield* uint(fields[3]);
+    if (number > 0xffffffff) return yield* fail('canonical');
+    const keyCommitment = yield* lift(Bytes.epochCommitment(yield* exact(fields[4], 32)));
+    const rotationRequired = fields[5];
+    if (typeof rotationRequired !== 'boolean') return yield* fail('canonical');
+    const usedSigningKeys = yield* keySet(fields[6], 32);
+    const usedEncKeys = yield* keySet(fields[7], 32);
+    const usedMembershipIds = yield* keySet(fields[8], 16);
+    if (!at.retained) for (const key of usedSigningKeys) yield* signingKey(raw(key));
+    for (const key of usedEncKeys) yield* lift(Bytes.encryptionPublicKey(raw(key)));
+    for (const [key, d] of devices)
+      if (
+        !usedSigningKeys.has(key) ||
+        !usedEncKeys.has(id(d.encryptionPublicKey)) ||
+        !usedMembershipIds.has(id(d.membershipId))
+      )
+        return yield* fail('canonical');
+    for (const key of members.keys())
+      if (!usedMembershipIds.has(key)) return yield* fail('canonical');
+    const closedJoins = new Set<string>();
+    let lastJoin: Uint8Array | undefined;
+    for (const item of yield* array(fields[9])) {
+      const row = yield* array(item);
+      if (row.length !== 2) return yield* fail('canonical');
+      const key = yield* signingKey(yield* exact(row[0], 32));
+      const request = yield* exact(row[1], 16);
+      const joined = concat([key.toBytes(), request]);
+      if (lastJoin && cmp(lastJoin, joined) >= 0) return yield* fail('canonical');
+      lastJoin = joined;
+      closedJoins.add(`${id(key)}:${keyId(request)}`);
+    }
+    const history = yield* array(fields[10]);
+    if (history.length !== number + 1) return yield* fail('canonical');
+    const historyPackets = new Map<number, EpochHistoryPacket>();
+    const usedCommitments = new Set<string>();
+    for (let epoch = 0; epoch < history.length; epoch++) {
+      const row = yield* array(history[epoch]);
+      if (row.length !== 3 || (yield* uint(row[0])) !== epoch) return yield* fail('canonical');
+      const commitment = yield* lift(Bytes.epochCommitment(yield* exact(row[1], 32)));
+      const packet = yield* exact(row[2], epoch === 0 ? 0 : 72);
+      if (usedCommitments.has(id(commitment))) return yield* fail('replay');
+      usedCommitments.add(id(commitment));
+      historyPackets.set(epoch, Object.freeze({ epoch, commitment, packet: copyBytes(packet) }));
+    }
+    if (!historyPackets.get(number)!.commitment.equals(keyCommitment))
+      return yield* fail('canonical');
+    if ((at.length === 1) !== bytesEqual(at.genesis.toBytes(), at.head.toBytes()))
+      return yield* fail('canonical');
+    // Bounds that follow from the existing supported record grammar, not an audit claim.
+    if (
+      number >= at.length ||
+      members.size > at.length ||
+      devices.size > at.length ||
+      usedSigningKeys.size > at.length ||
+      usedEncKeys.size > at.length ||
+      usedMembershipIds.size > at.length ||
+      closedJoins.size >= at.length
+    )
+      return yield* fail('canonical');
+    if (
+      at.length === 1 &&
+      (members.size !== 1 ||
+        devices.size !== 1 ||
+        [...devices.values()][0]!.kind !== 'personal' ||
+        rotationRequired ||
+        usedSigningKeys.size !== 1 ||
+        usedEncKeys.size !== 1 ||
+        usedMembershipIds.size !== 1 ||
+        closedJoins.size !== 0)
+    )
+      return yield* fail('canonical');
+    const hashes = Chunk.of(at.head);
+    const hashesOffset = at.length - 1;
+    const contentAuthors = new Map<
+      string,
+      InternalState['contentAuthors'] extends HashMap.HashMap<string, infer A> ? A : never
+    >();
+    for (const [key, d] of devices)
+      contentAuthors.set(
+        key,
+        Object.freeze({
+          kind: 'member' as const,
+          device: yield* signingKey(raw(key)),
+          actor: members.get(id(d.membershipId))!.userId,
+          memberInstance: d.membershipId,
+        })
+      );
+    return {
+      genesis: at.genesis,
+      owner,
+      members: HashMap.fromIterable(members),
+      devices: HashMap.fromIterable(devices),
+      epoch: Object.freeze({ number, keyCommitment, rotationRequired }),
+      usedSigningKeys: HashSet.fromIterable(usedSigningKeys),
+      usedEncKeys: HashSet.fromIterable(usedEncKeys),
+      usedMembershipIds: HashSet.fromIterable(usedMembershipIds),
+      memberUsers: HashSet.fromIterable([...members.values()].map((member) => id(member.userId))),
+      closedJoins: HashSet.fromIterable(closedJoins),
+      usedCommitments: HashSet.fromIterable(usedCommitments),
+      hashes,
+      hashesOffset,
+      verification: at.verification,
+      historyPackets: HashMap.fromIterable(historyPackets),
+      contentAuthors: HashMap.fromIterable(contentAuthors),
+    };
+  });
+}
 /** Internal parser only. Authority creation is performed by replay's module-private view factory. */
 function claimedSnapshotState(
   inputBytes: Uint8Array,
@@ -276,158 +523,13 @@ function claimedSnapshotState(
       )
     );
     yield* lift(verifySignature(signer.toBytes(), snapshotSigningBytes(bodyBytes), sig));
-    const fields = yield* array(body[5]);
-    if (fields.length !== 11) return yield* fail('canonical');
-    const owner = yield* lift(Bytes.membershipId(yield* exact(fields[0], 16)));
-    const members = new Map<string, Member>();
-    const users = new Set<string>();
-    let last: Uint8Array | undefined;
-    let owners = 0;
-    for (const item of yield* array(fields[1])) {
-      const row = yield* array(item);
-      if (row.length !== 3) return yield* fail('canonical');
-      const key = yield* lift(Bytes.membershipId(yield* exact(row[0], 16)));
-      const bytes = key.toBytes();
-      if (last && cmp(last, bytes) >= 0) return yield* fail('canonical');
-      last = bytes;
-      const userId = yield* lift(Bytes.userId(yield* exact(row[1], 32)));
-      const role = roles[yield* uint(row[2])];
-      if (!role) return yield* fail('canonical');
-      if (users.has(id(userId))) return yield* fail('replay');
-      users.add(id(userId));
-      members.set(id(key), Object.freeze({ userId, role }));
-      if (role === 'owner') owners++;
-    }
-    if (owners !== 1 || members.get(id(owner))?.role !== 'owner') return yield* fail('canonical');
-    const devices = new Map<string, Device>();
-    const encryptionKeys = new Set<string>();
-    last = undefined;
-    for (const item of yield* array(fields[2])) {
-      const row = yield* array(item);
-      if (row.length !== 4) return yield* fail('canonical');
-      const key = yield* lift(Bytes.signingPublicKey(yield* exact(row[0], 32)));
-      const bytes = key.toBytes();
-      if (last && cmp(last, bytes) >= 0) return yield* fail('canonical');
-      last = bytes;
-      const membershipId = yield* lift(Bytes.membershipId(yield* exact(row[1], 16)));
-      const kind = kinds[yield* uint(row[2])];
-      if (!kind || !members.has(id(membershipId))) return yield* fail('canonical');
-      const encryptionPublicKey = yield* lift(Bytes.encryptionPublicKey(yield* exact(row[3], 32)));
-      if (encryptionKeys.has(id(encryptionPublicKey))) return yield* fail('replay');
-      encryptionKeys.add(id(encryptionPublicKey));
-      devices.set(id(key), Object.freeze({ membershipId, kind, encryptionPublicKey }));
-    }
-    // A signed endorsement cannot make structurally unreachable Owner custody valid.
-    if (
-      ![...devices.values()].some((d) => id(d.membershipId) === id(owner) && d.kind !== 'machine')
-    )
-      return yield* fail('unauthorized');
-    const number = yield* uint(fields[3]);
-    if (number > 0xffffffff) return yield* fail('canonical');
-    const keyCommitment = yield* lift(Bytes.epochCommitment(yield* exact(fields[4], 32)));
-    const rotationRequired = fields[5];
-    if (typeof rotationRequired !== 'boolean') return yield* fail('canonical');
-    const usedSigningKeys = yield* keySet(fields[6], 32);
-    const usedEncKeys = yield* keySet(fields[7], 32);
-    const usedMembershipIds = yield* keySet(fields[8], 16);
-    for (const key of usedSigningKeys) yield* lift(Bytes.signingPublicKey(raw(key)));
-    for (const key of usedEncKeys) yield* lift(Bytes.encryptionPublicKey(raw(key)));
-    for (const [key, d] of devices)
-      if (
-        !usedSigningKeys.has(key) ||
-        !usedEncKeys.has(id(d.encryptionPublicKey)) ||
-        !usedMembershipIds.has(id(d.membershipId))
-      )
-        return yield* fail('canonical');
-    for (const key of members.keys())
-      if (!usedMembershipIds.has(key)) return yield* fail('canonical');
-    const closedJoins = new Set<string>();
-    let lastJoin: Uint8Array | undefined;
-    for (const item of yield* array(fields[9])) {
-      const row = yield* array(item);
-      if (row.length !== 2) return yield* fail('canonical');
-      const key = yield* lift(Bytes.signingPublicKey(yield* exact(row[0], 32)));
-      const request = yield* exact(row[1], 16);
-      const joined = concat([key.toBytes(), request]);
-      if (lastJoin && cmp(lastJoin, joined) >= 0) return yield* fail('canonical');
-      lastJoin = joined;
-      closedJoins.add(`${id(key)}:${keyId(request)}`);
-    }
-    const history = yield* array(fields[10]);
-    if (history.length !== number + 1) return yield* fail('canonical');
-    const historyPackets = new Map<number, EpochHistoryPacket>();
-    const usedCommitments = new Set<string>();
-    for (let epoch = 0; epoch < history.length; epoch++) {
-      const row = yield* array(history[epoch]);
-      if (row.length !== 3 || (yield* uint(row[0])) !== epoch) return yield* fail('canonical');
-      const commitment = yield* lift(Bytes.epochCommitment(yield* exact(row[1], 32)));
-      const packet = yield* exact(row[2], epoch === 0 ? 0 : 72);
-      if (usedCommitments.has(id(commitment))) return yield* fail('replay');
-      usedCommitments.add(id(commitment));
-      historyPackets.set(epoch, Object.freeze({ epoch, commitment, packet: copyBytes(packet) }));
-    }
-    if (!historyPackets.get(number)!.commitment.equals(keyCommitment))
-      return yield* fail('canonical');
-    if ((trust.length === 1) !== bytesEqual(genesis.toBytes(), head.toBytes()))
-      return yield* fail('canonical');
-    // Bounds that follow from the existing supported record grammar, not an audit claim.
-    if (
-      number >= trust.length ||
-      members.size > trust.length ||
-      devices.size > trust.length ||
-      usedSigningKeys.size > trust.length ||
-      usedEncKeys.size > trust.length ||
-      usedMembershipIds.size > trust.length ||
-      closedJoins.size >= trust.length
-    )
-      return yield* fail('canonical');
-    if (
-      trust.length === 1 &&
-      (members.size !== 1 ||
-        devices.size !== 1 ||
-        [...devices.values()][0]!.kind !== 'personal' ||
-        rotationRequired ||
-        usedSigningKeys.size !== 1 ||
-        usedEncKeys.size !== 1 ||
-        usedMembershipIds.size !== 1 ||
-        closedJoins.size !== 0)
-    )
-      return yield* fail('canonical');
-    const hashes = Chunk.of(head);
-    const hashesOffset = trust.length - 1;
-    const verification = 'endorsed-snapshot' as const;
-    const contentAuthors = new Map<
-      string,
-      InternalState['contentAuthors'] extends HashMap.HashMap<string, infer A> ? A : never
-    >();
-    for (const [key, d] of devices)
-      contentAuthors.set(
-        key,
-        Object.freeze({
-          kind: 'member' as const,
-          device: yield* lift(Bytes.signingPublicKey(raw(key))),
-          actor: members.get(id(d.membershipId))!.userId,
-          memberInstance: d.membershipId,
-        })
-      );
-    const state: InternalState = {
+    const state = yield* decodeAuthState(body[5], {
       genesis,
-      owner,
-      members: HashMap.fromIterable(members),
-      devices: HashMap.fromIterable(devices),
-      epoch: Object.freeze({ number, keyCommitment, rotationRequired }),
-      usedSigningKeys: HashSet.fromIterable(usedSigningKeys),
-      usedEncKeys: HashSet.fromIterable(usedEncKeys),
-      usedMembershipIds: HashSet.fromIterable(usedMembershipIds),
-      memberUsers: HashSet.fromIterable([...members.values()].map((member) => id(member.userId))),
-      closedJoins: HashSet.fromIterable(closedJoins),
-      usedCommitments: HashSet.fromIterable(usedCommitments),
-      hashes,
-      hashesOffset,
-      verification,
-      historyPackets: HashMap.fromIterable(historyPackets),
-      contentAuthors: HashMap.fromIterable(contentAuthors),
-    };
+      length: trust.length,
+      head,
+      verification: 'endorsed-snapshot',
+      retained: false,
+    });
     if (!eligible(state, signer)) return yield* fail('unauthorized');
     return state;
   });

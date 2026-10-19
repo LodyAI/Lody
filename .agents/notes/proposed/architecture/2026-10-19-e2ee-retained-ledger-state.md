@@ -66,6 +66,20 @@ From the Convex limits documentation: queries and mutations have 1 s of user-cod
 - Retained state is stored as bytes; state above 1 MiB needs chunking (core snapshots are bounded at 2 MiB).
 - Per-record cost inside the Convex runtime is assumed similar to Node (both V8, pure-JS noble Ed25519) but has not been measured there.
 
+## Core implementation (2026-10-19)
+
+`exportVerifiedState`/`restoreVerifiedState` are in `@lody/e2ee-core/protocol`. The retained bytes are the comparison-note state array plus the view's verification origin, so the export digest is the comparison-note digest without a second encoding. They share the snapshot decoder, with a 16 MiB budget instead of the 2 MiB snapshot cap. Restore skips the per-key Ed25519 curve check (about 7 ms per key) that dominated a first version; export sorts hex keys directly instead of re-parsing them per comparison.
+
+Same real-data ledgers as above (one Node process, idle host):
+
+| Ledger | Export | Restore | Extend by one | brotli q6 | brotli q11 | Decompress |
+|---|---|---|---|---|---|---|
+| 4,096 rotations | 32 ms | 68 ms | 5 ms | 438 KB, 20 ms | 432 KB, 1.6 s | 5 ms |
+| 1k members + 1k devices + 2k rotations | 53 ms | 165 ms | 5 ms | 427 KB, 21 ms | 428 KB, 1.8 s | 6 ms |
+| 4k members + 4k devices | 177 ms | 576 ms | 6 ms | 863 KB, 77 ms | 853 KB, 3.7 s | 7 ms |
+
+The first version's restore took 14.5 s and 58 s for the last two rows. Use brotli quality 6: the default 11 gains under 1% at 50× the time. Restore's remaining cost is per-element generator overhead in the shared decoder; a write-path restore under 0.6 s at 8,000 records is accepted for now.
+
 ## Platform review (2026-10-19)
 
 - **Convex** (docs.convex.dev limits and pricing): the plan fits. Cost is dominated by database I/O, the bytes moved between functions and the database: each write reads and rewrites the state. At 10 writes/day per workspace and 0.5 MiB state, Pro overage is about $53/month for 1,000 workspaces and $620 for 10,000; rewriting the snapshot only every 64 appends roughly halves it, and brotli reduces it further. Storage and function calls stay within included amounts. The current full-replay code breaks Starter's 64-action concurrency near 10,000 workspaces.
@@ -81,10 +95,9 @@ From the Convex limits documentation: queries and mutations have 1 s of user-cod
 
 ## Open questions
 
-- Whether retained state includes historical content attribution and original epoch publication records, or a restored view reports them unavailable.
-- Size: core bounds snapshots at 2 MiB, while a Convex document is limited to 1 MiB, so large organizations need chunked storage.
+- Size: a Convex document is limited to 1 MiB, so large organizations need chunked storage (planned: brotli, chunks under about 900 KiB, switched by generation).
 - Whether the client local stores adopt restore-on-open, which changes the "revalidates stored ledger records on open" rule in the foundations Spec.
 
 ## Verification limits
 
-The timings come from one local Node benchmark with synthetic records (signed with Node's crypto, verified through core's pure-JS noble path); the Convex runtime may differ. No code, cache table or audit job exists yet.
+The timings come from local Node benchmarks (the first with synthetic records, the real-data tables with freshly generated keys and signatures), verified through core's noble path; the Convex runtime may differ. The core export/restore exists with tests (restore at every position then extend equals full replay; every replay fact survives; mismatched position, version and fork fail closed). The host cache tables and the audit job do not exist yet.

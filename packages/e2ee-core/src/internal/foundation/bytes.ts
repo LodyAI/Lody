@@ -2,31 +2,7 @@ import { Brand, Result } from 'effect';
 import { Point } from '@noble/ed25519';
 import { ValidationError } from './errors';
 import { keyId } from './identifiers';
-
-/** Unexported constructor: successful parsers are the only public constructors. */
-class OwnedBytes<K extends string> implements Brand.Brand<K> {
-  declare readonly ['~effect/Brand']: { readonly [P in K]: K };
-  readonly #bytes: Uint8Array<ArrayBuffer>;
-
-  constructor(
-    readonly kind: K,
-    bytes: Uint8Array
-  ) {
-    this.#bytes = new Uint8Array(bytes);
-    Object.freeze(this);
-  }
-
-  /** Return a fresh owned copy; modifying it cannot change this value. */
-  toBytes(): Uint8Array<ArrayBuffer> {
-    return new Uint8Array(this.#bytes);
-  }
-
-  /** Compare kind and bytes for equality; this is not an authorization check. */
-  equals(other: OwnedBytes<K>): boolean {
-    if (this.kind !== other.kind || this.#bytes.length !== other.#bytes.length) return false;
-    return this.#bytes.every((value, i) => value === other.#bytes[i]);
-  }
-}
+import { OwnedBytes } from './owned-bytes';
 
 /** A device's Ed25519 public key (32 bytes); also its device id in hex. */
 export type SigningPublicKey = OwnedBytes<'SigningPublicKey'>;

@@ -180,6 +180,13 @@ export const encodeCbor = (value: CborValue): Result<Uint8Array<ArrayBuffer>> =>
 /** Separate fixed snapshot budget; ordinary record limits remain unchanged. */
 export const decodeSnapshotCbor = (input: unknown): Result<CborValue> =>
   decodeBounded(input, MAX_SNAPSHOT_BYTES, MAX_SNAPSHOT_ARRAY_LENGTH);
+/** A party's own retained ledger state (never exchanged): a larger budget than an endorsed snapshot. */
+export const MAX_RETAINED_STATE_BYTES = 16 * 1024 * 1024;
+export const MAX_RETAINED_ARRAY_LENGTH = 262_144;
+export const decodeRetainedCbor = (input: unknown): Result<CborValue> =>
+  decodeBounded(input, MAX_RETAINED_STATE_BYTES, MAX_RETAINED_ARRAY_LENGTH);
+export const encodeRetainedCbor = (value: CborValue): Result<Uint8Array<ArrayBuffer>> =>
+  encodeBounded(value, MAX_RETAINED_STATE_BYTES, MAX_RETAINED_ARRAY_LENGTH);
 export const encodeSnapshotCbor = (value: CborValue): Result<Uint8Array<ArrayBuffer>> =>
   Result.gen(function* () {
     const bytes = yield* encodeBounded(value, MAX_SNAPSHOT_BYTES, MAX_SNAPSHOT_ARRAY_LENGTH);

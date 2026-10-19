@@ -44,6 +44,9 @@ Follow the package [boundary](../../../AGENTS.md) and [record/replay contract](R
   snapshot bytes and an explicit transport locator. Requalify on every open;
   persist exact snapshot/suffix/position together. No SQL-chosen endorser, unknown
   prefix skipping or implied snapshot-only submission authorization.
+- Retained state (`exportVerifiedState`/`restoreVerifiedState`) restores only the
+  caller's own export: no signature, curve-point or digest recheck, no acceptance
+  from another party, no unretained fact invented. Restore results equal full replay.
 - `VerifiedLedger` is the single rollback guard: genuine view, same workspace,
   continuation of the newest observed view, containment of the durable pin.
   Unchanged pins are not rewritten; failed pin writes keep the in-memory view.
