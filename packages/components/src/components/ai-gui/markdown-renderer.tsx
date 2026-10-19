@@ -65,7 +65,6 @@ import {
   useSessionSearchBlock,
 } from '@/components/sessions/session-search-context';
 import { findSessionSearchOccurrences } from '@/lib/session-chat-search';
-import { useResolvedTheme, type ResolvedTheme } from '../../theme-provider';
 import type { ConversationFontSize } from '@/atoms/settings';
 import { MarkdownFencedCodeBlock } from './markdown-code-block';
 import { MarkdownDiffBlock } from './markdown-diff-block';
@@ -955,15 +954,11 @@ const readCodeElement = (pre: HastElement | undefined) => {
   };
 };
 
-function MarkdownPre({
-  node,
-  theme,
-  ...props
-}: ComponentPropsWithoutRef<'pre'> & ExtraProps & { theme: ResolvedTheme }) {
+function MarkdownPre({ node, ...props }: ComponentPropsWithoutRef<'pre'> & ExtraProps) {
   const block = readCodeElement(node);
   if (!block) return <pre {...props} />;
   if (block.language === 'mermaid' && !block.isIncomplete) {
-    return <MarkdownMermaidBlock code={block.code} theme={theme} />;
+    return <MarkdownMermaidBlock code={block.code} />;
   }
   if (block.language === 'diff') return <MarkdownDiffBlock {...block} />;
   return <MarkdownFencedCodeBlock {...block} />;
@@ -1135,7 +1130,6 @@ const createMarkdownComponents = ({
   onAgentFileLinkClick,
   getAgentFileLinkContextMenuItems,
   readonly,
-  theme,
   headingAnchors,
   compact,
 }: {
@@ -1144,7 +1138,6 @@ const createMarkdownComponents = ({
   onAgentFileLinkClick?: (href: string) => void;
   getAgentFileLinkContextMenuItems?: (href: string) => readonly MarkdownAgentFileLinkMenuItem[];
   readonly: boolean;
-  theme: ResolvedTheme;
   headingAnchors: boolean;
   compact: boolean;
 }): Components => ({
@@ -1256,7 +1249,7 @@ const createMarkdownComponents = ({
       )}
     />
   ),
-  pre: (props) => <MarkdownPre {...props} theme={theme} />,
+  pre: (props) => <MarkdownPre {...props} />,
   code: (props: MarkdownCodeProps) => {
     const { className, children, style: _style, node: _node, ...rest } = props;
     return (
@@ -1493,7 +1486,6 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
     searchBlockId,
   }));
   const { t } = useTranslation();
-  const resolvedTheme = useSelectionStableValue(useResolvedTheme());
   const readonly = useContext(SessionReadonlyContext);
   const getAgentFileLinkContextMenuItems = useContext(AgentFileLinkContextMenuItemsContext);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -1541,7 +1533,6 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
         onAgentFileLinkClick,
         getAgentFileLinkContextMenuItems,
         readonly: readonly !== null,
-        theme: resolvedTheme,
         headingAnchors,
         compact,
       }),
@@ -1551,7 +1542,6 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
       onAgentFileLinkClick,
       openAgentFileLabel,
       readonly,
-      resolvedTheme,
       headingAnchors,
       compact,
     ]

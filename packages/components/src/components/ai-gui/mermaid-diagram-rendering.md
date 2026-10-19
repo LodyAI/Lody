@@ -8,7 +8,7 @@ Binding rules live in [AGENTS.md](AGENTS.md); this file holds the invariants and
 why they read the way they do. Coverage:
 `tests/markdown-mermaid-fullscreen.test.tsx`.
 
-## The renderer produces a self-contained, inert SVG
+## The renderer produces an inert SVG colored by the theme
 
 - `markdown-mermaid.ts` lazily imports Pele and calls its synchronous `render()`,
   never `mount()` or `enableZoom()`: those would take resizing and zoom away from
@@ -16,9 +16,16 @@ why they read the way they do. Coverage:
   surfaces scale from.
 - Links and images are disabled. An agent's diagram must not make the desktop
   fetch a remote image or carry a navigable link.
-- The theme's `--pele-*` colors are written into the root `<svg>`'s `style`, not
-  inherited from the page. Copy, SVG/PNG download and the full-screen clone keep
-  the colors, and the block's per-theme cache stays correct.
+- Diagram colors come from the active theme, never from the markup. The
+  markdown stylesheet maps `--pele-*` to theme tokens on the block, so an inline
+  diagram follows any VS Code theme without re-rendering, and the SVG cache is
+  keyed by source alone. Labels use the prose foreground; chart series keep
+  Pele's palette because theme hue tokens repeat.
+- A copy that leaves the block carries resolved plain colors:
+  `resolveMermaidColors` reads them where the diagram sits, and SVG/PNG download
+  (`withMermaidColors`) and the portalled viewer clone (`applyMermaidColors`)
+  declare them on their root. Without that, the viewer falls back to Pele's
+  light defaults in a dark theme.
 - Anything Pele rejects (syntax error, ZenUML, a size limit) or a runtime that
   fails to load renders the source as an SVG listing, so the block's controls keep
   working. Decision: [Pele renderer note](../../../../../.agents/notes/implemented/feature/2026-10-18-pele-mermaid-renderer.md).

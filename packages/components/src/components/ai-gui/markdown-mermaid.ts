@@ -1,49 +1,7 @@
 import type { RenderOptions } from 'pele';
 
-import type { ResolvedTheme } from '../../theme-provider';
-
 const MERMAID_FONT_FAMILY =
   'Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
-
-export interface MarkdownMermaidPalette {
-  bg: string;
-  fg: string;
-  muted: string;
-  line: string;
-  surface: string;
-  surfaceAlt: string;
-  border: string;
-  accent: string;
-}
-
-const MERMAID_LIGHT_PALETTE: MarkdownMermaidPalette = {
-  bg: '#ffffff',
-  fg: '#0f172a',
-  muted: '#475569',
-  line: '#64748b',
-  surface: '#f8fafc',
-  surfaceAlt: '#f1f5f9',
-  border: '#60a5fa',
-  accent: '#60a5fa',
-};
-
-// Dark diagram text stays under the app's dark brightness ceiling (text no
-// lighter than ~13:1 against the canvas, see `vscode-theme-css.ts`). The
-// colors are written into the SVG itself rather than read from the app's
-// theme variables, so a downloaded or full-screen copy keeps them.
-const MERMAID_DARK_PALETTE: MarkdownMermaidPalette = {
-  bg: '#0b1120',
-  fg: '#cbd5e1',
-  muted: '#94a3b8',
-  line: '#cbd5e1',
-  surface: '#111827',
-  surfaceAlt: '#0f172a',
-  border: '#60a5fa',
-  accent: '#60a5fa',
-};
-
-export const markdownMermaidPalette = (theme: ResolvedTheme): MarkdownMermaidPalette =>
-  theme === 'dark' ? MERMAID_DARK_PALETTE : MERMAID_LIGHT_PALETTE;
 
 // Agent-written diagrams must not make the desktop fetch remote images or
 // navigate, so links and images are off; a fixed size keeps the inline canvas
@@ -55,22 +13,65 @@ const RENDER_OPTIONS = {
   images: false,
 } satisfies RenderOptions;
 
-const paletteStyle = (palette: MarkdownMermaidPalette): string =>
-  [
-    `--pele-bg:${palette.bg}`,
-    `--pele-fg:${palette.fg}`,
-    `--pele-muted:${palette.muted}`,
-    `--pele-line:${palette.line}`,
-    `--pele-surface:${palette.surface}`,
-    `--pele-surface-alt:${palette.surfaceAlt}`,
-    `--pele-border:${palette.border}`,
-    `--pele-accent:${palette.accent}`,
-  ].join(';');
+// Pele colors every diagram through these custom properties. The markdown
+// stylesheet maps them to the active theme's tokens on the block, so an inline
+// diagram follows any theme without re-rendering. A copy that leaves the block
+// (download, the full-screen viewer) must carry resolved values instead.
+const MERMAID_COLOR_PROPERTIES = [
+  '--pele-bg',
+  '--pele-fg',
+  '--pele-muted',
+  '--pele-line',
+  '--pele-surface',
+  '--pele-surface-alt',
+  '--pele-border',
+  '--pele-accent',
+  '--pele-critical',
+  '--pele-error',
+] as const;
 
-// Pele reads its colors from `--pele-*` custom properties on any ancestor.
-// Declaring them on the root `<svg>` makes the markup self-contained.
-const applyPalette = (svg: string, palette: MarkdownMermaidPalette): string =>
-  svg.replace(/^<svg\b[^>]*?\sstyle="/u, (match) => `${match}${paletteStyle(palette)};`);
+export type MermaidColors = ReadonlyArray<readonly [property: string, value: string]>;
+
+let colorProbe: CanvasRenderingContext2D | null | undefined;
+
+// A theme token resolves to modern syntax (`hsl(220 16% 96%)`, `color-mix()`)
+// that other SVG consumers may not parse. Painting one pixel normalizes any
+// CSS color to plain rgb; without a canvas the value is kept as resolved.
+const toPlainColor = (value: string): string => {
+  if (colorProbe === undefined) {
+    colorProbe = document.createElement('canvas').getContext('2d', { willReadFrequently: true });
+  }
+  if (!colorProbe) return value;
+  colorProbe.clearRect(0, 0, 1, 1);
+  colorProbe.fillStyle = '#000';
+  colorProbe.fillStyle = value;
+  colorProbe.fillRect(0, 0, 1, 1);
+  const [r, g, b, a] = colorProbe.getImageData(0, 0, 1, 1).data;
+  return a === 255 ? `rgb(${r}, ${g}, ${b})` : `rgba(${r}, ${g}, ${b}, ${(a! / 255).toFixed(3)})`;
+};
+
+/** The diagram colors in effect at `element`, as plain values. */
+export const resolveMermaidColors = (element: Element): MermaidColors => {
+  const computed = getComputedStyle(element);
+  return MERMAID_COLOR_PROPERTIES.flatMap((property) => {
+    const value = computed.getPropertyValue(property).trim();
+    return value ? [[property, toPlainColor(value)] as const] : [];
+  });
+};
+
+/** Declares `colors` on the root of serialized diagram markup. */
+export const withMermaidColors = (svg: string, colors: MermaidColors): string => {
+  if (colors.length === 0) return svg;
+  const declarations = colors.map(([property, value]) => `${property}:${value}`).join(';');
+  return /^<svg\b[^>]*?\sstyle="/u.test(svg)
+    ? svg.replace(/^<svg\b[^>]*?\sstyle="/u, (match) => `${match}${declarations};`)
+    : svg.replace(/^<svg\b/u, `<svg style="${declarations}"`);
+};
+
+/** Declares `colors` on a diagram element that is leaving its themed block. */
+export const applyMermaidColors = (svg: SVGSVGElement, colors: MermaidColors): void => {
+  for (const [property, value] of colors) svg.style.setProperty(property, value);
+};
 
 const escapeXml = (value: string): string =>
   value
@@ -92,7 +93,7 @@ const FALLBACK_CHAR_WIDTH = FALLBACK_FONT_SIZE * 0.6;
 // syntax error, an unsupported type such as ZenUML, or a size limit), show the
 // mermaid source as a plain code block instead of an error panel: the source is the most useful thing left to
 // display, and staying SVG keeps the block's copy/download controls working.
-const renderMermaidLoadFallback = (source: string, palette: MarkdownMermaidPalette): string => {
+const renderMermaidLoadFallback = (source: string): string => {
   const allLines = source.split('\n');
   const lines = allLines
     .slice(0, FALLBACK_MAX_LINES)
@@ -112,8 +113,8 @@ const renderMermaidLoadFallback = (source: string, palette: MarkdownMermaidPalet
     )
     .join('');
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">
-<rect width="100%" height="100%" fill="${palette.surface}" rx="6" />
-<text x="${FALLBACK_PADDING}" y="${FALLBACK_PADDING + FALLBACK_FONT_SIZE}" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="${FALLBACK_FONT_SIZE}" fill="${palette.fg}">${tspans}${
+<rect width="100%" height="100%" fill="var(--pele-surface, #f3f3f3)" rx="6" />
+<text x="${FALLBACK_PADDING}" y="${FALLBACK_PADDING + FALLBACK_FONT_SIZE}" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="${FALLBACK_FONT_SIZE}" fill="var(--pele-fg, #1f1f1f)">${tspans}${
     truncated ? `<tspan x="${FALLBACK_PADDING}" dy="${FALLBACK_LINE_HEIGHT}">…</tspan>` : ''
   }</text>
 </svg>`;
@@ -137,19 +138,15 @@ const loadRuntime = async (): Promise<PeleRuntime | null> => {
   }
 };
 
-export const renderMarkdownMermaidSvg = async (
-  source: string,
-  theme: ResolvedTheme
-): Promise<string> => {
-  const palette = markdownMermaidPalette(theme);
+export const renderMarkdownMermaidSvg = async (source: string): Promise<string> => {
   const runtime = await loadRuntime();
   if (!runtime) {
-    return renderMermaidLoadFallback(source, palette);
+    return renderMermaidLoadFallback(source);
   }
   try {
-    return applyPalette(runtime.render(source, RENDER_OPTIONS).svg, palette);
+    return runtime.render(source, RENDER_OPTIONS).svg;
   } catch (error) {
     console.warn('[Lody] Mermaid render failed; using fallback.', error);
-    return renderMermaidLoadFallback(source, palette);
+    return renderMermaidLoadFallback(source);
   }
 };
