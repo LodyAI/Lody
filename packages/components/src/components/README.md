@@ -98,7 +98,9 @@ and [details group](../../../../.agents/notes/implemented/feature/2026-10-18-sid
   and its [layout-handoff follow-up](../../../../.agents/notes/implemented/feature/2026-10-19-boot-shell-layout-handoff.md).
 
 - Sidebar footer: Help (`?`), Archive, Settings, in that order. Help retains the
-  documentation, GitHub repository, community, GitHub Issues feedback, and bug-report menu; Archive is a direct
+  documentation, GitHub repository, community, GitHub Issues feedback, and bug-report menu.
+  Desktop Help opens to the right of its button with bottom edges aligned; mobile Help opens upward.
+  Archive is a direct
   button and becomes the return action while open. Desktop controls are 28px and use
   the navigation rows' ink and fills (`sidebarSurface.iconButton`, shared with the
   header's icon buttons); mobile actions retain their touch targets. See the

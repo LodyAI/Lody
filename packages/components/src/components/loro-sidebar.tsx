@@ -1671,7 +1671,7 @@ export const LoroSidebar = memo(function LoroSidebar({
                   </IconButton>
                 }
               />
-              <Menu.Content side="top" align="end" className="min-w-[160px]">
+              <Menu.Content side={isMobile ? 'top' : 'right'} align="end" className="min-w-[160px]">
                 <Menu.Item icon={BookOpen} onClick={() => onDocsClicked?.()}>
                   {mergedLabels.docs}
                 </Menu.Item>
