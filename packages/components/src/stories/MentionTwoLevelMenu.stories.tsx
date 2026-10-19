@@ -577,14 +577,31 @@ export const SkillCategoryWithDetail: Story = {
 };
 
 /**
- * Six system skills: the names take the narrow column, and a long description
- * is clamped so the list, not the pane, sets the height. The path gives way in
- * its middle.
+ * Six system skills: the description fills the space above the always-visible
+ * path and truncates when full. The detail pane does not scroll.
  */
 export const SkillCategorySystem: Story = {
   args: {
     search: 'skill:',
     categories: [category('skill', 'skill', 'Skills', 'skill', SYSTEM_SKILLS)],
+  },
+};
+
+/** A taller list lets the description show more lines while keeping the path visible. */
+export const SkillCategorySystemLongList: Story = {
+  args: {
+    search: 'skill:',
+    categories: [
+      category('skill', 'skill', 'Skills', 'skill', [
+        ...SYSTEM_SKILLS,
+        ...Array.from({ length: 10 }, (_, index) => ({
+          ...SYSTEM_SKILLS[1],
+          value: `fixture-skill-${index + 1}`,
+          label: `fixture-skill-${index + 1}`,
+          title: `fixture-skill-${index + 1}`,
+        })),
+      ]),
+    ],
   },
 };
 

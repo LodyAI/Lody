@@ -431,6 +431,60 @@ test('inline editor keeps a floating menu and focus through category selection',
   await expect(input).toHaveValue(/@Fix-flaky-scroll-tests /);
 });
 
+test('skill descriptions use remaining height while the path stays visible without scrolling', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 960, height: 720 });
+  for (const story of ['skill-category-system', 'skill-category-system-long-list']) {
+    await page.goto(
+      `/iframe.html?id=mentions-mentiontwolevelmenu--${story}&viewMode=story&globals=locale:en`
+    );
+    const pane = page.locator('[data-mention-detail]');
+    await expect(pane).toBeVisible();
+    const content = pane.locator(':scope > div');
+    const description = pane.locator('[data-mention-description]');
+    for (const size of [12, 18, 14]) {
+      await page.evaluate(
+        (fontSize) => document.documentElement.style.setProperty('--ui-font-size', `${fontSize}px`),
+        size
+      );
+      await expect
+        .poll(() =>
+          description.evaluate((node) => {
+            const paragraph = node.querySelector('p')!;
+            const lineHeight = Number.parseFloat(getComputedStyle(paragraph).lineHeight);
+            const lines = Number.parseInt(getComputedStyle(paragraph).webkitLineClamp, 10);
+            return Math.abs(
+              lines - Math.max(1, Math.floor(node.getBoundingClientRect().height / lineHeight))
+            );
+          })
+        )
+        .toBe(0);
+      const geometry = await pane.evaluate((node) => {
+        const bounds = node.getBoundingClientRect();
+        const path = node.querySelector('dl')!.getBoundingClientRect();
+        const descriptionBox = node.querySelector('[data-mention-description]')!;
+        const paragraph = descriptionBox.querySelector('p')!;
+        return {
+          pathVisible: path.top >= bounds.top && path.bottom <= bounds.bottom,
+          descriptionVisible:
+            paragraph.getBoundingClientRect().bottom <=
+            descriptionBox.getBoundingClientRect().bottom + 0.5,
+          lines: Number.parseInt(getComputedStyle(paragraph).webkitLineClamp, 10),
+        };
+      });
+      expect(geometry.pathVisible).toBe(true);
+      expect(geometry.descriptionVisible).toBe(true);
+      if (story.endsWith('long-list') && size === 12) expect(geometry.lines).toBeGreaterThan(5);
+      await expect(content).toHaveCSS('overflow-y', 'clip');
+      await content.hover();
+      await page.mouse.wheel(0, 400);
+      await expect(content).toHaveJSProperty('scrollTop', 0);
+      await expect(pane.getByText('Path', { exact: true })).toBeVisible();
+    }
+  }
+});
+
 for (const width of [960, 650]) {
   test(`Role previews retain list height through hover and scrolling at ${width}px`, async ({
     page,
