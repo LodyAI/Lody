@@ -220,8 +220,22 @@ export function DownloadPage({ locale }: { locale: DownloadLocale }) {
         description: t.platforms.linux,
         icon: Laptop,
         downloads: [
-          { label: 'AppImage', file: 'Lody-latest-x86_64.AppImage' },
-          { label: 'Debian / Ubuntu', file: 'Lody-latest-amd64.deb' },
+          {
+            label: 'AppImage · x86-64',
+            file: downloads['Lody-latest-x64.AppImage']
+              ? 'Lody-latest-x64.AppImage'
+              : 'Lody-latest-x86_64.AppImage',
+          },
+          {
+            label: 'Debian / Ubuntu · x86-64',
+            file: downloads['Lody-latest-x64.deb']
+              ? 'Lody-latest-x64.deb'
+              : 'Lody-latest-amd64.deb',
+          },
+          ...[
+            { label: 'AppImage · ARM64', file: 'Lody-latest-arm64.AppImage' },
+            { label: 'Debian / Ubuntu · ARM64', file: 'Lody-latest-arm64.deb' },
+          ].filter((item) => Boolean(downloads[item.file])),
         ],
       },
     ];
@@ -276,7 +290,7 @@ export function DownloadPage({ locale }: { locale: DownloadLocale }) {
     ];
 
     return [desktop, mobile];
-  }, [androidDownloadUrl, isZh, t.platforms]);
+  }, [androidDownloadUrl, downloads, isZh, t.platforms]);
 
   const sectionTitles = [t.desktop, t.mobile];
   const languageHref = isZh ? '/download' : '/zh/download';

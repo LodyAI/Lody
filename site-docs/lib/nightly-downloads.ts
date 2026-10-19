@@ -49,9 +49,9 @@ export function parseNightlyRelease(value: unknown, base: string): NightlyReleas
     ['mac', 'Apple Silicon', 'arm64.dmg'],
     ['mac', 'Intel', 'x64.dmg'],
     ['win', 'Windows x64', 'x64-setup.exe'],
-    ['linux', 'AppImage · x64', 'x64.AppImage'],
-    ['linux', 'Debian / Ubuntu · x64', 'x64.deb'],
-    ['linux', 'Snap · x64', 'x64.snap'],
+    ['linux', 'AppImage · x86-64', 'x64.AppImage'],
+    ['linux', 'Debian / Ubuntu · x86-64', 'x64.deb'],
+    ['linux', 'Snap · x86-64', 'x64.snap'],
   ];
   const { downloads: mapping, files } = value;
   const downloads = targets.map(([platform, label, suffix]) => {
@@ -61,6 +61,18 @@ export function parseNightlyRelease(value: unknown, base: string): NightlyReleas
     }
     return { platform, label, href: `${root}/${encodeURIComponent(file)}` };
   });
+  // Older releases remain usable; once ARM64 is advertised require both installers.
+  const armTargets = [
+    ['AppImage · ARM64', `Lody-${value.version}-arm64-nightly.AppImage`],
+    ['Debian / Ubuntu · ARM64', `Lody-${value.version}-arm64-nightly.deb`],
+  ] as const;
+  if (armTargets.some(([, file]) => files.includes(file) || Object.hasOwn(mapping, file))) {
+    for (const [label, file] of armTargets) {
+      if (mapping[file] !== file || !files.includes(file))
+        throw new Error('Incomplete Linux ARM64 Nightly release manifest');
+      downloads.push({ platform: 'linux', label, href: `${root}/${encodeURIComponent(file)}` });
+    }
+  }
   const apk = `Lody-${value.version}-android.apk`;
   // Existing desktop-only releases remain downloadable during mobile rollout.
   if (files.includes(apk) || Object.hasOwn(mapping, apk)) {
