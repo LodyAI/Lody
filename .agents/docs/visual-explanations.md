@@ -130,6 +130,37 @@ function expandSkill(command: string): string {
 Bash(open path/to/show-me-{description}.html)
 ```
 
+## UI screenshots
+
+For a PR that changes visible UI, we recommend a labeled **Before / After**
+screenshot pair in the template's matching section, with a short caption explaining
+the change. Agent authors should try to capture the baseline before editing and the
+final result after verification as part of their implementation loop. Use the
+actual running UI or its owning Storybook fixture, with synthetic data and
+comparable viewport, theme, and interaction state so the difference is clear.
+
+Prepare a safe scene before capture: prefer demo or synthetic fixtures and an
+isolated development data directory over a personal workspace. Crop to the
+relevant UI while retaining enough context to judge the change. Inspect both
+images before uploading or committing for conversation text, source contents,
+names, avatars, local paths, repository details, notifications, credentials, and
+other private content. If cropping or redaction is needed, inspect the final
+export and share only that sanitized file; do not upload or commit the private
+original alongside it. Follow the repository's prohibition on captured user or
+agent transcripts.
+
+Attach safe images inline or link to an artifact reviewers can access; a local
+filesystem path alone is not reviewable in a PR. A small side-by-side table works
+well for a pair. Captions should identify the relevant state and any deliberate
+comparison differences.
+
+This is a recommendation, not an additional submission requirement or automated
+gate. If the baseline cannot be reproduced, safe capture is unavailable, or the
+change is not visible in a still image, explain that limit and provide the safe
+evidence available, such as an after screenshot and a written before description.
+Do not invent a baseline capture or disclose private content to complete a pair.
+The existing structural-view rules still apply independently.
+
 ## Choosing and placing a view
 
 Place each visual next to the short text it supports. Keep only the calls, files, props, states, and boundaries needed to answer the user's current question or the options to resolve the current discussion point.
