@@ -23,11 +23,13 @@ not extend it to other surfaces.
 
 ## Verification
 
+- `pnpm format` passed. `pnpm run docs check` passed with repository-wide
+  warnings about older notes without translations and `AGENTS.md` size.
+- `pnpm check` passed typecheck, lint and Effect lint. Its `test:ci` phase failed
+  on unrelated five-second UI test timeouts and CLI tests. The focused
+  `workspace-identity.test.tsx` suite passed all 9 tests, including assertions
+  for the shared mark in syncing state and its absence offline.
 - `git diff --check` passed.
-- `pnpm check`, `pnpm format` and `pnpm run docs check` could not complete because
-  this nested worktree has no `node_modules`; required tools such as `tsgo` and
-  `oxfmt` are unavailable. The documentation check also reported existing
-  repository-wide status and `AGENTS.md` size findings.
 
 ## Pull request
 

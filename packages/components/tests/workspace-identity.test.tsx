@@ -200,6 +200,7 @@ describe('workspace identity capability boundary', () => {
     const status = container?.querySelector('[data-workspace-status]');
     expect(status?.getAttribute('data-workspace-status')).toBe('syncing');
     expect(status?.textContent).toBe('Syncing target workspace…');
+    expect(status?.querySelector('[data-working-grid]')).not.toBeNull();
   });
 
   it('keeps connection failures ahead of workspace synchronization', () => {
@@ -215,6 +216,7 @@ describe('workspace identity capability boundary', () => {
     const status = container?.querySelector('[data-workspace-status]');
     expect(status?.getAttribute('data-workspace-status')).toBe('offline');
     expect(status?.textContent).toBe('No connection');
+    expect(status?.querySelector('[data-working-grid]')).toBeNull();
   });
 
   it('supports a content-scoped loading placeholder without taking over the viewport', () => {

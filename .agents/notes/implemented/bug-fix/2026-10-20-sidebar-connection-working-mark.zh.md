@@ -16,9 +16,12 @@ Translation: current
 
 ## 验证
 
+- `pnpm format` 通过。`pnpm run docs check` 通过，但报告了仓库旧笔记缺少翻译和
+  `AGENTS.md` 体积等全仓警告。
+- `pnpm check` 的类型检查、lint 和 Effect lint 均通过；`test:ci` 因无关的 UI
+  测试五秒超时和 CLI 测试失败而未通过。针对性的 `workspace-identity.test.tsx`
+  套件 9 项全通过，覆盖同步状态显示统一标记以及离线时不显示标记。
 - `git diff --check` 通过。
-- `pnpm check`、`pnpm format` 和 `pnpm run docs check` 因嵌套 worktree 缺少
-  `node_modules` 而无法完成；所需的 `tsgo`、`oxfmt` 等工具不可用。文档检查还报告了仓库已有的状态和 `AGENTS.md` 体积问题。
 
 ## Pull request
 
