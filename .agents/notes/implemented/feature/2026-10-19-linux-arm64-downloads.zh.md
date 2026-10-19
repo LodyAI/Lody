@@ -16,3 +16,5 @@ Linux 下载入口此前只提供 x86-64 安装包。下载页现在明确标注
 如果网站强制所有清单包含 ARM64，首个对应版本发布前会隐藏全部下载。增量规则保留旧版下载，一旦声明任一 ARM64 安装包则要求 AppImage/deb 完整配对。这延续了 [Android Nightly 下载](2026-10-04-nightly-android-download.zh.md) 的上线策略。既有 Nightly 组件直接渲染新增 Linux 项，无需另建布局。
 
 测试覆盖完整组合、旧清单、缺失条目和路径穿越映射。真实 Linux ARM64 安装仍需发布流程和原生 runner 验证。
+
+PR: [LodyAI/Lody#1705](https://github.com/LodyAI/Lody/pull/1705)

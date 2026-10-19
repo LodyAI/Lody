@@ -16,3 +16,5 @@ The official desktop publisher owns build availability. Stable links use its dow
 Making ARM64 mandatory in the website parser would hide all downloads until the first matching release. The additive rule instead preserves old releases and requires a complete AppImage/deb pair once either is advertised. This follows the rollout approach in [Android Nightly downloads](2026-10-04-nightly-android-download.md). Existing Nightly rendering handles the additional Linux entries without a new layout.
 
 Tests exercise complete pairs, old manifests, missing entries and traversal mappings. Real Linux ARM64 installation remains a publisher/native-runner validation.
+
+PR: [LodyAI/Lody#1705](https://github.com/LodyAI/Lody/pull/1705)
