@@ -10787,9 +10787,8 @@ describe('Operation Inbox execution boundary', () => {
     automaticFinished?: () => void
   ) {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'lody-inbox-execution-'));
-    const store = new LodyOperationStore(path.join(root, 'operations.sqlite3'), () =>
-      Date.parse('2026-10-12T00:00:00Z')
-    );
+    const now = () => Date.parse('2026-10-12T00:00:00Z');
+    const store = new LodyOperationStore(path.join(root, 'operations.sqlite3'), now);
     const sessionId = 'inbox-session' as SessionId;
     let meta: Partial<SessionMeta> = {
       id: sessionId,
@@ -10980,6 +10979,7 @@ describe('Operation Inbox execution boundary', () => {
       close,
       wake: () => bridge.wake(),
       storePath: path.join(root, 'operations.sqlite3'),
+      now,
     };
   }
 
@@ -12040,7 +12040,7 @@ describe('Operation Inbox execution boundary', () => {
       };
       const id = (item as Extract<typeof item, { type: 'operation_completion_batch' }>).batchId;
       expect(f.store.inbox.getBatch(id, scope)?.state).toBe('unknown');
-      const other = new LodyOperationStore(f.storePath);
+      const other = new LodyOperationStore(f.storePath, f.now);
       try {
         other.inbox.activate('workspace-1', 'replacement');
         expect(other.inbox.getBatch(id, scope)?.state).toBe('unknown');

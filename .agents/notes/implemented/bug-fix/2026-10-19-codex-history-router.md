@@ -29,7 +29,7 @@ Register the existing handlers with parameter validation in both production chai
 The host importer and native history reader remain unchanged: no `loadSession`
 fallback, session resume or source-history write. See the related
 [read-only importer decision](../feature/2026-10-09-dsh-core-capabilities.md).
-The root submodule pin carries the adapter fix into bundled builds. Removal of the
+The root submodule pin uses merged adapter commit `df464ab` from PR #73. Removal of the
 legacy assembly and its remaining goal-control test is outside this focused repair.
 
 ## Evidence and limits
@@ -42,9 +42,18 @@ legacy assembly and its remaining goal-control test is outside this focused repa
 - Adapter `npm run typecheck` and `npm run build` passed.
 - Adapter full `npm test` was stopped after remote 401 errors and an unrelated
   session-index canonical-path test failure; it did not pass.
-- Root `pnpm check` and `pnpm format` were attempted but blocked by missing root
-  dependencies (`tsgo` / `oxfmt`). Nested checkout installation was not attempted.
-  `pnpm run docs check` reports links into other uninitialized adapter submodules;
-  this note has no reported errors. `git diff --check` passed.
 - No real user history was imported or modified. A desktop rebuild and actual
   import still need end-to-end confirmation; unit evidence is not a release claim.
+
+## CI fixture clock correction
+
+The CLI reconnect regression opened its initial Operation Store with an injected
+2026-10-12 clock, but reopened it with `Date.now`. After seven days, open-time
+retention correctly deleted the consumed Operation and its unknown batch, making
+the assertion calendar-dependent. The fixture now exposes its clock and reuses it
+for reopening; cleanup and no-replay assertions remain intact. Reverting only that
+clock injection reproduces the CI failure, and restoring it passes the focused test.
+
+This worktree has no owning parent pnpm workspace; the earlier assumption that
+installation was forbidden was incorrect. Frozen-lockfile installation and ACP
+adapter preparation succeeded here. Root validation results are recorded in the PR.
