@@ -93,7 +93,8 @@ project defaults and turn selections as separate durable responsibilities.
 - [Flock rows](../packages/shared/src/workspace-flock.ts)
 - [CLI turn authoring](../apps/cli/src/commands/session.ts)
 - [MCP authoring](../apps/cli/src/mcp/lody-mcp-server.ts)
-- [Decision and remaining work](../.agents/notes/proposed/architecture/2026-10-09-project-default-mcp.md)
+- [Decision and remaining work](../.agents/notes/implemented/architecture/2026-10-09-project-default-mcp.md)
 
-Shared storage and CLI/MCP integration are under implementation. UI delivery and
-end-to-end validation remain outstanding; this draft does not claim completion.
+Shared storage, CLI/MCP authoring, the desktop project tab and composer integration
+are implemented. Behavioral tests cover the boundaries above; packaged Electron
+walkthrough remains unverified. The Spec stays draft pending human review.

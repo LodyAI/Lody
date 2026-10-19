@@ -69,6 +69,7 @@ CLI 创建和续聊支持 `--mcp-server-ids <json>`，包括 `[]`。MCP 单项/�
 - [Flock 行](../packages/shared/src/workspace-flock.ts)
 - [CLI 轮次写入](../apps/cli/src/commands/session.ts)
 - [MCP 写入](../apps/cli/src/mcp/lody-mcp-server.ts)
-- [决策及剩余工作](../.agents/notes/proposed/architecture/2026-10-09-project-default-mcp.zh.md)
+- [决策及剩余工作](../.agents/notes/implemented/architecture/2026-10-09-project-default-mcp.zh.md)
 
-共享存储及 CLI/MCP 接入正在实现。UI 交付及端到端验证仍未完成，本文不宣称功能完成。
+共享存储、CLI/MCP 写入、桌面项目 Tab 和输入框接入已实现。行为测试覆盖上述边界；
+尚未走查打包 Electron 应用。本文等待人工审阅，保持 draft。

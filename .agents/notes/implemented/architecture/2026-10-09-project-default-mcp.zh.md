@@ -1,6 +1,6 @@
 # 项目默认 MCP 的轮次写入策略
 
-Status: proposed
+Status: implemented
 Translation: current
 
 [English](2026-10-09-project-default-mcp.md)
@@ -10,7 +10,7 @@ Translation: current
 项目对话需要可复用的 MCP 选择，同时不能改变已接受的轮次。修订方案在工作区
 Flock 为每个项目保存可选 ids 数组，在新对话写入时解析，复用既有每轮与 Operation
 的 dispatch 配置。它替代最初逐个 MCP 覆盖的方案，明确接受整组冲突及自定义后
-不自动加入全局新增项的代价。共享层/CLI 正在实现，UI 交付仍未完成。
+不自动加入全局新增项的代价。共享层、CLI/MCP 和桌面项目 UI 已实现；尚未走查打包桌面应用。
 
 ## 决策与职责
 
@@ -56,6 +56,13 @@ CLI 创建在准备前解析默认，续聊保留目标选择。CLI JSON 参数�
 续聊、持久化 Operation 配置、批量关闭继承及零产品云访问。最终全量检查结果写入
 PR；不能根据这些测试声称已验证打包 UI。
 
-UI 实施仍在委派等待中。完成 UI 选择/就绪/写入授权接入及端到端验收前，不将本记录
-标记 implemented，也不宣称整个功能完成。ACP 启动不解析项目策略，Role 不增加
-MCP 选择字段。
+桌面项目 Tab 和三个输入入口已集成。目录 room 暴露本地读取就绪及失败状态，选择
+在 workspace/项目切换时同步重置。writer 在持久化前检查 workspace 与项目权限，
+上传失败不回滚本地保存。本地项目要求机器所有者；GitHub 项目要求已登录用户及
+仓库已连接当前 workspace。这沿用客户端管理边界，不是新增服务端逐行授权机制。
+
+UI Designer 报告组件全量 4,910 项测试通过，并完成浅色/深色 Storybook 走查。
+集成后重跑选择、目录 room、writer 和输入提交四套测试，76 项通过。尚未走查打包
+Electron 应用；移动端项目设置维持现有布局。目录打开失败需所有 room 消费者释放后
+才重试；已读取的本地快照可离线使用。ACP 启动不解析项目策略，Role 不增加 MCP
+选择字段。

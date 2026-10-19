@@ -1,6 +1,6 @@
 # Project default MCP authoring policy
 
-Status: proposed
+Status: implemented
 Translation: current
 
 [中文](2026-10-09-project-default-mcp.zh.md)
@@ -12,7 +12,8 @@ turns. The revised design stores one optional ids array per project in workspace
 Flock, resolves it when authoring a new conversation, and reuses existing per-turn
 and Operation dispatch configuration. This replaces the initial per-server override
 proposal, accepting whole-list conflict resolution and no automatic additions after
-customization. Shared/CLI implementation is in progress; UI delivery is outstanding.
+customization. Shared, CLI/MCP and desktop project UI are implemented. Packaged desktop
+walkthrough remains unverified.
 
 ## Decision and responsibilities
 
@@ -43,7 +44,7 @@ selection. CLI/MCP authoring resolves target-project defaults or target-conversa
 selection and writes ids. Operation acceptance uses its existing per-target config;
 recovery never rereads defaults. Runtime continues to resolve connections from the
 catalog and driving turn. Preserve [catalog durability](../../../docs/workspace-catalog-durability.md)
-and the [local orchestration boundary](../../implemented/architecture/2026-09-29-local-session-orchestration.md).
+and the [local orchestration boundary](2026-09-29-local-session-orchestration.md).
 
 The earlier proposal added per-server overrides, extensive UI controls and new
 protocol negotiation. These are unnecessary for the initial scope. The existing
@@ -68,7 +69,18 @@ MCP creation and continuation, persisted Operation configuration, batch opt-out
 inheritance, and zero product-cloud access. Final full-check results belong in the
 PR; do not infer packaged UI validation from these tests.
 
-UI implementation remains delegated and pending. Do not mark this note implemented
-or the whole feature complete until UI selection/readiness/writer authorization and
-end-to-end acceptance are integrated. No additional project policy is resolved at
-ACP startup, and Role rows do not gain MCP selections.
+The desktop project tab and all three composers are integrated. The catalog room
+exposes local-load readiness and read failure; selection resets synchronously on
+workspace/project scope changes. The writer checks workspace and project authority
+before persisting, and upload failure does not roll back a local save. Local
+projects require the machine owner; GitHub projects require a signed-in user and
+a repository connected to the workspace. This follows existing client-side
+management boundaries, not a new server-side row authorization mechanism.
+
+UI Designer reported 4,910 passing component tests and light/dark Storybook checks.
+Integration reran 76 tests across selection, catalog room, writer and input
+submission. The packaged Electron app was not walked through. Mobile project
+settings retain their existing layout. A failed catalog open retries after all
+room consumers release; a loaded local snapshot remains usable offline.
+No additional project policy is resolved at ACP startup, and Role rows do not gain
+MCP selections.
