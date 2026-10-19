@@ -410,11 +410,12 @@ pre,
     --markdown-mermaid-muted: hsl(var(--muted-foreground));
     --markdown-mermaid-control-bg: hsl(var(--background) / 0.86);
     --markdown-mermaid-control-border: hsl(var(--border) / 0.78);
-    /* Diagram colors follow the active theme's tokens. Labels are content, so
-       they use the prose foreground. `--pele-bg` backs edge labels, so it is
-       the block's own fill made opaque. Chart series keep Pele's palette:
-       theme hue tokens repeat (Ayu's info and warning are one orange), and
-       categories must stay distinguishable. */
+    /* Diagram colors come from the app palette's tokens (Lody Light or Vesper),
+       so they match the surrounding chrome. Labels are content, so they use the
+       prose foreground. `--pele-bg` backs edge labels, so it is the block's own
+       fill made opaque. Chart series keep Pele's categorical palette: status
+       tokens carry meaning (a "danger" slice misreads) and are not built to be
+       told apart as categories. */
     --pele-bg: color-mix(in srgb, hsl(var(--muted)) 32%, hsl(var(--background)));
     --pele-fg: hsl(var(--reading-foreground));
     --pele-muted: hsl(var(--muted-foreground));

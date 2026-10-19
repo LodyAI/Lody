@@ -12,8 +12,9 @@ flowchart, state, sequence, class, ER and XY charts. Agents' Gantt, pie, mindmap
 timeline and git graphs therefore showed as source text. Pele, Obsidian's MIT
 renderer, covers every built-in Mermaid 12.1 type with no dependencies and
 replaces it behind the same lazy boundary; the guarded diagram chunk falls from
-about 492 kB to 251 kB gzipped. Diagrams now take their colors from the active
-VS Code theme instead of two fixed slate palettes. The trade-off is a library
+about 492 kB to 251 kB gzipped. Diagrams now take their colors from the app's
+own palette tokens instead of a separate slate palette that clashed with
+Vesper's graphite chrome. The trade-off is a library
 first released on 2026-10-06, adopted as an exact, reviewed version ahead of the
 seven-day quarantine.
 
@@ -29,16 +30,19 @@ seven-day quarantine.
 - `links: false` and `images: false`: Pele otherwise emits `click` URLs and
   remote node images (verified with a synthetic diagram), and the local desktop
   must not fetch or navigate from agent output.
-- Colors follow the theme. Pele reads `--pele-*` custom properties, and the
-  markdown stylesheet maps them to theme tokens on the block: labels use the
-  prose foreground, borders mix the primary color with the muted foreground,
-  and edge-label backing is the block fill made opaque. Inline diagrams follow
-  any theme without re-rendering, so the SVG cache and the markdown component
-  map no longer depend on light/dark. The fixed palettes and the type-only
+- Colors come from the app palette. Lody ships two palettes, Lody Light and
+  deep-sea Vesper, and the old hand-picked slate colors matched neither (a navy
+  `#0b1120` canvas inside Vesper's graphite). Pele reads `--pele-*` custom
+  properties, and the markdown stylesheet maps them to the palette tokens on
+  the block: labels use the prose foreground, borders mix the primary color with
+  the muted foreground, and edge-label backing is the block fill made opaque.
+  Palette changes now reach diagrams with no second table to keep in sync, and
+  switching light/dark needs no re-render, so the SVG cache and the markdown
+  component map no longer depend on it. The fixed palettes and the type-only
   `mermaid` dependency are gone.
-- Chart series keep Pele's palette. Theme hue tokens repeat (Ayu Light's info
-  and warning are one orange; Vesper's function and warning match), and a pie
-  whose slices share a color is wrong in a way a themed tint does not repay.
+- Chart series keep Pele's categorical palette. The only hue tokens are status
+  colors, which carry meaning (a "danger" slice misreads) and are not built to
+  be told apart side by side.
 - Copies that leave the block resolve the colors where the diagram sits and
   declare them on their root: SVG/PNG download and the portalled full-screen
   clone. A one-pixel canvas paint normalizes `hsl()`/`color-mix()` to plain
@@ -68,10 +72,9 @@ seven-day quarantine.
   `mermaid-deps` is 677 kB minified / 251 kB gzipped, against 1.63 MB / 492 kB
   for beautiful-mermaid with elkjs bundled the same way.
 - A Chromium page rendered twelve diagram types through the real module. A
-  second page applied eight bundled themes through Lody's own theme-variable
+  second page applied Lody Light and Vesper through Lody's own theme-variable
   pipeline and the stylesheet's real mapping, and checked the download image,
   the viewer clone (plus an unbaked control that reverts to Pele's light
-  defaults) and a snapdom capture. Low-contrast themes such as Tokyo Night stay
-  as dim as their prose. Layout differs from mermaid.js, as it did with
-  beautiful-mermaid. No in-app Storybook or E2E walk was run.
+  defaults) and a snapdom capture. Layout differs from mermaid.js, as it did
+  with beautiful-mermaid. No in-app Storybook or E2E walk was run.
 - Pele is new and fast-moving; upgrades need the same tarball review.

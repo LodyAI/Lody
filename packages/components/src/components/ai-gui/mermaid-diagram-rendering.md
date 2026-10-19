@@ -16,11 +16,11 @@ why they read the way they do. Coverage:
   surfaces scale from.
 - Links and images are disabled. An agent's diagram must not make the desktop
   fetch a remote image or carry a navigable link.
-- Diagram colors come from the active theme, never from the markup. The
+- Diagram colors come from the app palette, never from the markup. The
   markdown stylesheet maps `--pele-*` to theme tokens on the block, so an inline
-  diagram follows any VS Code theme without re-rendering, and the SVG cache is
-  keyed by source alone. Labels use the prose foreground; chart series keep
-  Pele's palette because theme hue tokens repeat.
+  diagram matches Lody Light or Vesper and switches without re-rendering, and
+  the SVG cache is keyed by source alone. Labels use the prose foreground; chart
+  series keep Pele's categorical palette, since status tokens carry meaning.
 - A copy that leaves the block carries resolved plain colors:
   `resolveMermaidColors` reads them where the diagram sits, and SVG/PNG download
   (`withMermaidColors`) and the portalled viewer clone (`applyMermaidColors`)

@@ -14,9 +14,10 @@ const RENDER_OPTIONS = {
 } satisfies RenderOptions;
 
 // Pele colors every diagram through these custom properties. The markdown
-// stylesheet maps them to the active theme's tokens on the block, so an inline
-// diagram follows any theme without re-rendering. A copy that leaves the block
-// (download, the full-screen viewer) must carry resolved values instead.
+// stylesheet maps them to the app palette's tokens on the block, so an inline
+// diagram matches light or dark and switches without re-rendering. A copy that
+// leaves the block (download, the full-screen viewer) must carry resolved
+// values instead.
 const MERMAID_COLOR_PROPERTIES = [
   '--pele-bg',
   '--pele-fg',
