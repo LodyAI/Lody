@@ -33,3 +33,5 @@ slots, a tall list exposes more than five lines, and wheel input cannot scroll
 the pane. That regression test passes. An isolated browser render of the actual
 detail component also passes nine height/font-size combinations (168/300/440px
 pane heights and 12/14/18px font settings).
+
+PR: [#1740](https://github.com/LodyAI/Lody/pull/1740).
