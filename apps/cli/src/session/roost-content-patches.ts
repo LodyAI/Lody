@@ -76,7 +76,11 @@ export function roostContentPatches(before: unknown, after: unknown): ContentOp[
     }
     if (object(left) && object(right)) {
       for (const key of new Set([...Object.keys(left), ...Object.keys(right)]))
-        walk(left[key], right[key], [...path, { key }]);
+        walk(
+          Object.hasOwn(left, key) ? left[key] : undefined,
+          Object.hasOwn(right, key) ? right[key] : undefined,
+          [...path, { key }]
+        );
       return;
     }
     ops.push({ kind: 'set', path, contentJson: encodeRoostContentText(right) });

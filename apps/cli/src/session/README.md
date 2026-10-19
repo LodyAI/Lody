@@ -562,7 +562,16 @@ it never authorizes switching back to Loro or reading a superseded published suf
 ACP batch appliers can mutate item arrays. The Roost adapter applies them to a
 detached working copy, preserving the before-image used to decide what to persist.
 Content changes refresh only affected primary bodies. Sealed-turn corrections
-use mutable SDK state records anchored to their primary; permission responses
+use `lody-message-state` version 1 records: field, Unicode-text and array operations
+relative to the exact immutable primary Turn ID. The owner reconstructs logical
+entries for existing RPC readers. Whole-entry state records remain readable in a
+supported container and convert on their next mutation; sealed primary bytes stay
+unchanged. SDK fallback batches use owner-local recovery: the compact pending
+receipt and private journal commit together, then effects, publication, seal and
+journal retirement commit together. Moving unfinished work requires the whole
+owner database and its paired host identity; Turn exports carry committed history.
+The [message-copy repair](../../../../.agents/notes/implemented/bug-fix/2026-10-20-roost-message-storage-copies.md)
+records the format, release dependency and measured storage reduction. Permission responses
 remain independent SDK records projected onto the matching tool. Responding does
 not seal the assistant or interrupt its output.
 Existing eligible unsealed primary/state records use guarded native field/text edits,

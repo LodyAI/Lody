@@ -430,7 +430,9 @@ export class RoostHistoryGeneration {
     if (!verified.complete || verified.messages.length !== next.length)
       throw new Error('Roost staged history is incomplete');
     if (options.commands?.length)
-      await staged.commitHistoryBatch(`stage:${operationId}`, [...options.commands]);
+      await staged.commitHistoryBatch(`stage:${operationId}`, [...options.commands], {
+        recovery: 'local',
+      });
     const key = new TextEncoder().encode(
       `generation:${createHash('sha256').update(nextId).digest('hex')}`
     );

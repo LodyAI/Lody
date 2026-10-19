@@ -81,6 +81,7 @@ import { registerSessionBackendFactory } from './session-backend';
 import { RoostHistoryGeneration } from './roost-history-generation';
 import { createRoostHistoryChanges } from './roost-history-changes';
 import { roostContentPatches, agentReceiptPut } from './roost-content-patches';
+import { createRoostMessageState, projectRoostMessageState } from './roost-message-state';
 import { reportRoostHistoryFailure } from './roost-history-diagnostics';
 import { loadRoostOwnerSeedLegacy } from './roost-writer-identity';
 import {
@@ -321,7 +322,13 @@ const createNodeServicesForLease = async (
   const projectMessages = async (
     messages: readonly HistoryProjectedMessage[]
   ): Promise<SessionEntry[]> => {
-    const projected = projectRoostSegments(adaptRoostProjectedMessages(messages)) as SessionEntry[];
+    const decoded = adaptRoostProjectedMessages(messages);
+    const projected = projectRoostSegments(decoded) as SessionEntry[];
+    const primaryContent = new Map(
+      decoded
+        .filter((row) => row.segmentId === 'primary')
+        .map((row) => [row.businessId, row.content])
+    );
     const primaries = new Map(
       messages.filter((row) => row.segmentId === 'primary').map((row) => [row.businessId, row])
     );
@@ -332,7 +339,14 @@ const createNodeServicesForLease = async (
     const project = async (entry: SessionEntry): Promise<SessionEntry> => {
       const primary = primaries.get(entry.id);
       const state = primary ? await readState(primary) : undefined;
-      let turn = state ? (toApplicationJson(state.content) as SessionEntry) : entry;
+      let turn =
+        state && primary
+          ? (projectRoostMessageState(
+              primaryContent.get(entry.id),
+              bytesHex(primary.turnId),
+              toApplicationJson(state.content)
+            ) as SessionEntry)
+          : entry;
       if (turn.id !== entry.id) throw new Error('Roost state record identity mismatch');
       const items = [...(turn.items ?? [])];
       for (const [index, item] of items.entries()) {
@@ -1269,19 +1283,22 @@ const createNodeServicesForLease = async (
     const state = await readState(primary);
     if (state || primary.sealed) {
       const identity = stateIdentity(primary);
+      const content = encodeRoostContent(
+        createRoostMessageState(toApplicationJson(primary.content), bytesHex(primary.turnId), after)
+      );
       return [
         state
           ? {
               type: 'setContent',
               identity,
               expectedNextSeq: state.nextSeq,
-              content: encodeRoostContent(after),
+              content,
             }
           : {
               type: 'accept',
               identity,
               parents: primary.sealedHash ? [{ id: primary.turnId, hash: primary.sealedHash }] : [],
-              content: encodeRoostContent(after),
+              content,
             },
       ];
     }
@@ -1400,7 +1417,14 @@ const createNodeServicesForLease = async (
           canPatch = false;
           break;
         }
-        const ops = roostContentPatches(toApplicationJson(target.content), entry);
+        const content = state
+          ? createRoostMessageState(
+              toApplicationJson(primary.content),
+              bytesHex(primary.turnId),
+              entry
+            )
+          : entry;
+        const ops = roostContentPatches(toApplicationJson(target.content), content);
         if (ops.length) {
           patchWrites.push({
             kind: 'edit',
@@ -1450,7 +1474,8 @@ const createNodeServicesForLease = async (
     } else {
       await roostHistory.commitHistoryBatch(
         `${operationId}:${randomBytes(8).toString('hex')}`,
-        commands
+        commands,
+        { recovery: 'local' }
       );
       await refreshTurnProjections(changed);
       for (const entry of prepared) rememberGoal(entry, positions.get(entry.id));
@@ -1662,7 +1687,8 @@ const createNodeServicesForLease = async (
               outcome: encodeRoostContent(validated),
               parents: [],
             },
-          ]
+          ],
+          { recovery: 'local' }
         );
         permissionCache.delete(requestId);
         await refreshTurnProjections([read.turn.id]);
