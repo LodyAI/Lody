@@ -381,3 +381,53 @@ for (const locale of ['en', 'zh_CN']) {
     ).toHaveCount(0);
   });
 }
+
+for (const { locale, triggerName, onlineName, mineName } of [
+  { locale: 'en', triggerName: 'Filter machines', onlineName: 'Online', mineName: 'My machines' },
+  { locale: 'zh_CN', triggerName: '过滤机器', onlineName: '在线', mineName: '我的机器' },
+]) {
+  test(`machine filters keep labels unindented in a compact menu (${locale})`, async ({ page }) => {
+    await page.setViewportSize({ width: 900, height: 600 });
+    await page.goto(
+      `/iframe.html?id=settings-machinetablist--default&viewMode=story&globals=theme:dark;locale:${locale}`
+    );
+    const trigger = page.getByRole('button', { name: triggerName, exact: true });
+    const machines = page.locator('button[data-settings-machine-id]');
+    await expect(machines).toHaveCount(4);
+    await trigger.click();
+    const menu = page.getByRole('menu');
+    const online = menu.getByRole('menuitemcheckbox', { name: onlineName, exact: true });
+    const mine = menu.getByRole('menuitemcheckbox', { name: mineName, exact: true });
+    await expect(online).toBeVisible();
+    await expect(mine).toHaveAttribute('aria-checked', 'false');
+    const box = await menu.boundingBox();
+    expect(box!.width).toBeLessThanOrEqual(182);
+    expect(box!.height).toBeLessThanOrEqual(72);
+    const labelLeft = await online.evaluate(
+      (row) => row.firstElementChild!.getBoundingClientRect().left
+    );
+    expect(labelLeft - box!.x).toBeLessThanOrEqual(14);
+    await online.click();
+    await expect(online).toHaveAttribute('aria-checked', 'true');
+    await expect(machines).toHaveCount(2);
+    await expect(online.locator(':scope > span:last-child svg')).toBeVisible();
+    expect(
+      await online.evaluate((row) => row.firstElementChild!.getBoundingClientRect().left)
+    ).toBe(labelLeft);
+    await mine.click();
+    await expect(mine).toHaveAttribute('aria-checked', 'true');
+    await expect(machines).toHaveCount(1);
+    await page.keyboard.press('ArrowUp');
+    await expect(online).toBeFocused();
+    await page.keyboard.press('Space');
+    await expect(online).toHaveAttribute('aria-checked', 'false');
+    await expect(machines).toHaveCount(2);
+    await page.keyboard.press('Escape');
+    await expect(menu).toBeHidden();
+    await trigger.click();
+    await expect(mine).toHaveAttribute('aria-checked', 'true');
+    await mine.click();
+    await expect(machines).toHaveCount(4);
+    await expect(menu).toBeVisible();
+  });
+}

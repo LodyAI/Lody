@@ -204,6 +204,10 @@ had there, through Base UI's `render`:
 `width="compact"` for a short two-choice menu; the regular width remains the
 default. Width is a primitive variant, not a caller class override.
 
+`Menu.CheckboxItem indicatorSide="end"` places the tick after the label for
+compact filters. It reserves the trailing mark box in both states, keeping the
+label aligned without a leading indent. The default remains `start`.
+
 `ContextMenu` and `Menubar` restate only the way in — a right click or a long
 press, and a bar of names — and re-export `Menu`'s rows rather than rebuilding
 them, so a command looks and behaves the same wherever a person meets it. A row

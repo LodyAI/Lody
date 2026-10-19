@@ -262,6 +262,12 @@ does not name a control. The Preferences switches use this association with the
 existing translated copy. See the
 [decision and browser regression](../notes/implemented/bug-fix/2026-10-01-preferences-switch-names.md).
 
+Machine-list filters compose `Menu.Content width="compact"` and
+`Menu.CheckboxItem indicatorSide="end"`. The trigger names this two-option menu,
+so the popup contains only the independent filters. The shared checkable row
+keeps keyboard and multi-select behavior; its existing start-aligned indicator
+remains the default for other menus.
+
 `--input` is the theme's raw `input.background` and doubles as a muted chip/composer
 slab, so in a light theme it can sit below the page color and read as a disabled field.
 `--input-field` is derived in `lib/vscode-theme/vscode-theme-css.ts` as the lighter of

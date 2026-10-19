@@ -1844,8 +1844,10 @@ function CompactMenu() {
     <Menu.Root>
       <Menu.Trigger render={<Button variant="secondary" />}>Two choices</Menu.Trigger>
       <Menu.Content width="compact">
-        <Menu.Item>Local</Menu.Item>
-        <Menu.Item>Worktree</Menu.Item>
+        <Menu.CheckboxItem indicatorSide="end" defaultChecked>
+          Online
+        </Menu.CheckboxItem>
+        <Menu.CheckboxItem indicatorSide="end">My machines</Menu.CheckboxItem>
       </Menu.Content>
     </Menu.Root>
   );
