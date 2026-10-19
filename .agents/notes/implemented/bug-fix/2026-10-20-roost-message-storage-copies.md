@@ -23,7 +23,8 @@ requires the coordinated release and dependency update before this consumer merg
   the primary Turn ID. Reads reconstruct the full application entry. Existing
   whole-entry states remain readable within a compatible container and become deltas on their next mutation;
   sealed records and retained updates are never rewritten or pruned.
-  This adds no SQLite-container migration. State projection reuses the decoded
+  This adds no SQLite-container migration. Reopening delta state requires this
+  adapter or newer; RPC readers still receive complete logical entries. State projection reuses the decoded
   primary, and incremental state generation converts operation offsets without
   serializing the accumulated text or unchanged body again.
 - Local batch plans and compact pending receipts are prepared atomically by the
@@ -50,7 +51,8 @@ Journal preparation/apply failures remain SDK-owned, with no Lody recovery loop.
 
 ## Verification
 
-The SDK implementation is [Roost #16](https://github.com/loro-dev/roost/pull/16).
+The consumer implementation is [Lody #1737](https://github.com/LodyAI/Lody/pull/1737);
+the SDK implementation is [Roost #16](https://github.com/loro-dev/roost/pull/16).
 Package pins remain unchanged until the consolidated release; checks below use
 its locally packed build, not the currently published API.
 
@@ -68,7 +70,17 @@ its locally packed build, not the currently published API.
   outside this measurement. Both runs preserve old frames, primary immutability,
   logical content and reopen after the lost reply. The checked-in regression
   enforces bounded growth, not exact protocol byte counts.
-- Formatting, all package typechecks, ordinary typed lint, Effect lint, i18n
-  and all eight repository boundary checks pass. The root `test:ci` run is still
-  in progress at initial draft submission; its outcome is recorded before handoff.
-  These checks use the proposed SDK artifact. No deployment or package publication occurred.
+- With the proposed SDK artifact, formatting, all package typechecks, ordinary
+  typed lint, Effect lint, i18n and all repository boundary checks pass. The full
+  CLI suite passes **4,428 tests, 2 existing skips**; the final focused rerun passes
+  **82 tests**. Documentation check reports no errors or registered stale topics.
+- [Hosted CI](https://github.com/LodyAI/Lody/actions/runs/39295941789) test jobs pass
+  (CLI, components shards, remaining packages, conversation browser and signature
+  matrix). Static checks and the
+  [desktop build](https://github.com/LodyAI/Lody/actions/runs/39295941691) stop with
+  `TS2554` at the three new batch calls: published SDK 0.1.3 accepts two arguments.
+  Desktop smoke itself therefore has not run. These are release dependencies;
+  update the catalog after the coordinated Roost release and repeat standard CI.
+- The broad local `test:ci` invocation was stopped after CLI acceptance when the
+  hosted test jobs had passed, freeing the benchmark machine. Do not claim a clean
+  end-to-end local `pnpm check` run. No deployment or package publication occurred.

@@ -566,7 +566,8 @@ use `lody-message-state` version 1 records: field, Unicode-text and array operat
 relative to the exact immutable primary Turn ID. The owner reconstructs logical
 entries for existing RPC readers. Whole-entry state records remain readable in a
 supported container and convert on their next mutation; sealed primary bytes stay
-unchanged. SDK fallback batches use owner-local recovery: the compact pending
+unchanged. Reopening delta states requires this adapter or newer. SDK fallback
+batches use owner-local recovery: the compact pending
 receipt and private journal commit together, then effects, publication, seal and
 journal retirement commit together. Moving unfinished work requires the whole
 owner database and its paired host identity; Turn exports carry committed history.
