@@ -5,6 +5,8 @@ Translation: current
 
 [English](2026-10-20-session-menu-switch-focus.md)
 
+PR: [#1741](https://github.com/LodyAI/Lody/pull/1741)
+
 ## 摘要
 
 用鼠标打开会话操作菜单时，指针还停留在触发按钮上，“全宽显示”就出现了高亮。

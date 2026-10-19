@@ -5,6 +5,8 @@ Translation: current
 
 [中文](2026-10-20-session-menu-switch-focus.zh.md)
 
+PR: [#1741](https://github.com/LodyAI/Lody/pull/1741)
+
 ## Abstract
 
 Opening the session actions menu with the pointer highlighted Full width while
