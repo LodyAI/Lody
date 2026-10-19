@@ -349,3 +349,110 @@ describe('diff viewport loading', () => {
     }
   });
 });
+
+describe('SessionConversationDiffPanel All Changes scope', () => {
+  (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+
+  const branchBase = '1234567890abcdef1234567890abcdef12345678';
+  const headBase = 'abcdef1234567890abcdef1234567890abcdef12';
+  const readyEntry = {
+    path: 'worktree.txt',
+    diff: {
+      status: 'ready' as const,
+      path: 'worktree.txt',
+      oldSnapshot: { kind: 'text' as const, text: 'old\n' },
+      newSnapshot: { kind: 'text' as const, text: 'old\nnew\n' },
+    },
+  };
+  const committedEntry = {
+    path: 'committed.txt',
+    diff: {
+      status: 'unavailable' as const,
+      path: 'committed.txt',
+      reason: 'metadata-only' as const,
+    },
+  };
+
+  const makeProvider = (unavailable = false) =>
+    ({
+      getAllChangesDiff: async (_focusPath?: string, scope?: 'branch' | 'uncommitted') => {
+        if (unavailable) {
+          return {
+            status: 'unavailable',
+            reason: 'metadata-only',
+            scopeReason: 'no_commits',
+            message: 'no commits',
+          };
+        }
+        return {
+          status: 'ready',
+          base: scope === 'uncommitted' ? headBase : branchBase,
+          truncated: false,
+          entries: scope === 'uncommitted' ? [readyEntry] : [committedEntry, readyEntry],
+        };
+      },
+    }) as unknown as SessionFileProvider;
+
+  let container: HTMLDivElement;
+  let root: Root;
+
+  beforeEach(async () => {
+    await initI18n('en');
+    globalThis.ResizeObserver ??= class {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    };
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+  });
+
+  afterEach(() => {
+    act(() => root.unmount());
+    container.remove();
+  });
+
+  const render = async (props: Partial<SessionConversationDiffPanelProps>) => {
+    await act(async () => {
+      root.render(
+        <Provider store={createStore()}>
+          <TestCloudPlatformProvider>
+            <SessionConversationDiffPanel
+              sessionId={'session-1' as SessionId}
+              turnId="all-changes"
+              mode="base"
+              filePaths={['committed.txt', 'worktree.txt']}
+              fileProvider={makeProvider()}
+              allChangesScopeSupported
+              {...props}
+            />
+          </TestCloudPlatformProvider>
+        </Provider>
+      );
+    });
+  };
+
+  it('renders the uncommitted set and explains a focused committed-only file', async () => {
+    await render({ allChangesScope: 'uncommitted', fileProvider: makeProvider() });
+
+    expect(container.textContent).toContain('worktree.txt');
+    expect(container.textContent).not.toContain('committed.txt');
+    expect(container.textContent).toContain('HEAD · abcdef1');
+
+    await render({
+      allChangesScope: 'uncommitted',
+      focusFilePath: 'committed.txt',
+      fileProvider: makeProvider(),
+    });
+    expect(container.textContent).toContain('This file has no uncommitted changes.');
+  });
+
+  it('hides the selector without capability and reports an explicit scope limitation', async () => {
+    await render({ allChangesScope: 'branch', allChangesScopeSupported: false });
+    expect(container.textContent).not.toContain('Uncommitted');
+
+    await render({ allChangesScope: 'uncommitted', fileProvider: makeProvider(true) });
+    expect(container.textContent).toContain('no commits yet');
+  });
+});

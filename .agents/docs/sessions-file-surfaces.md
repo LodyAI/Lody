@@ -31,6 +31,13 @@ bounded Machine RPC reads. Indexing and saving still require the daemon. See the
   diff's state, with its hidden reads paused. Direct conversation-file and comment
   navigation still enters the precise diff directly. Both levels share one modal
   and the existing enclosing-session popup host.
+- All Changes compares the resolved merge-base against disk by default. Its header
+  can switch to an uncommitted scope (`HEAD` against disk, including staged,
+  unstaged and untracked non-ignored files) and names the resolved base in both
+  modes. The control is hidden when the machine does not advertise
+  `codeCollabAllChangesScope`; non-Git and unborn worktrees report an explicit
+  unavailable state
+  ([decision](../notes/implemented/feature/2026-10-19-all-changes-diff-scope.md)).
 - Diffs opened with a precise file focus open only that file by default; the other
   cards start collapsed and remain individually expandable. A base (All Changes)
   diff opened without a focus starts with every card collapsed, while a direct

@@ -47,6 +47,18 @@ fileProvider.getAllChangesDiff = async () => ({
   entries: paths.map((path) => ({ path, diff: { status: 'deferred' } })),
 });
 
+const uncommittedPaths = paths.slice(0, 3);
+const uncommittedProvider = createFakeSessionFileProvider({ diffs });
+uncommittedProvider.getAllChangesDiff = async (_focusPath, scope) => ({
+  status: 'ready',
+  base: scope === 'uncommitted' ? 'abcdef1234567890abcdef1234567890abcdef12' : 'synthetic-base',
+  truncated: false,
+  entries: (scope === 'uncommitted' ? uncommittedPaths : paths).map((path) => ({
+    path,
+    diff: diffs[path]!,
+  })),
+});
+
 const meta = {
   title: 'Sessions/ConversationDiffPanel',
   component: SessionConversationDiffPanel,
@@ -99,10 +111,29 @@ function OpenFromChangesHarness(args: ComponentProps<typeof SessionConversationD
   );
 }
 
+function ScopedAllChangesHarness(args: ComponentProps<typeof SessionConversationDiffPanel>) {
+  const [scope, setScope] = useState<'branch' | 'uncommitted'>('branch');
+  return (
+    <SessionConversationDiffPanel
+      {...args}
+      allChangesScope={scope}
+      onAllChangesScopeChange={setScope}
+    />
+  );
+}
+
 export const OpenFromChanges: Story = {
   render: (args) => <OpenFromChangesHarness {...args} />,
 };
 export const ManyFiles: Story = {};
 export const FocusLastFile: Story = { args: { focusFilePath: paths.at(-1) } };
 export const AllChanges: Story = { args: { mode: 'base', turnId: 'all-changes' } };
+export const AllChangesScopeSwitch: Story = {
+  args: {
+    mode: 'base',
+    allChangesScopeSupported: true,
+    fileProvider: uncommittedProvider,
+  },
+  render: (args) => <ScopedAllChangesHarness {...args} />,
+};
 export const Hidden: Story = { args: { active: false } };

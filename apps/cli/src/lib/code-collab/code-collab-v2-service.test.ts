@@ -2114,3 +2114,176 @@ describe('CodeCollabV2Service openAllChangesDiff', () => {
     });
   });
 });
+
+describe('CodeCollabV2Service All Changes scope', () => {
+  const gitText = async (workspaceRoot: string, ...args: string[]): Promise<string> =>
+    (await execFileAsync('git', args, { cwd: workspaceRoot })).stdout.trim();
+
+  const entryPaths = (
+    result: Awaited<ReturnType<CodeCollabV2Service['openAllChangesDiff']>>
+  ): string[] => {
+    if (result.status !== 'ok') throw new Error(`Expected ok, received ${result.status}`);
+    return result.entries.map((entry) => entry.path).sort();
+  };
+
+  it('separates branch-cumulative and uncommitted changes and uses HEAD as the uncommitted base', async () => {
+    await withWorkspace(async (workspaceRoot) => {
+      await initGitRepoWithCommit(workspaceRoot);
+      await writeFile(path.join(workspaceRoot, 'base.txt'), 'base\n');
+      await writeFile(path.join(workspaceRoot, 'gone.txt'), 'bye\n');
+      await gitCommitAll(workspaceRoot, 'init');
+      const baseCommit = await gitText(workspaceRoot, 'rev-parse', 'HEAD');
+
+      await gitText(workspaceRoot, 'checkout', '-b', 'feature');
+      await writeFile(path.join(workspaceRoot, 'committed.txt'), 'committed\n');
+      await writeFile(path.join(workspaceRoot, 'modified.txt'), 'one\n');
+      await gitCommitAll(workspaceRoot, 'feature work');
+      const head = await gitText(workspaceRoot, 'rev-parse', 'HEAD');
+
+      await writeFile(path.join(workspaceRoot, 'modified.txt'), 'one\ntwo\n');
+      await writeFile(path.join(workspaceRoot, 'staged.txt'), 'staged\n');
+      await execFileAsync('git', ['add', 'staged.txt'], { cwd: workspaceRoot });
+      await writeFile(path.join(workspaceRoot, 'untracked.txt'), 'untracked\n');
+      await rm(path.join(workspaceRoot, 'gone.txt'));
+
+      const service = new CodeCollabV2Service({ resolveWorkspace: makeResolver(workspaceRoot) });
+      try {
+        const branch = await service.openAllChangesDiff({
+          sessionId: SESSION_ID,
+          scope: 'branch',
+        });
+        expect(branch).toMatchObject({ status: 'ok', base: baseCommit });
+        expect(entryPaths(branch)).toEqual([
+          'committed.txt',
+          'gone.txt',
+          'modified.txt',
+          'staged.txt',
+          'untracked.txt',
+        ]);
+
+        const uncommitted = await service.openAllChangesDiff({
+          sessionId: SESSION_ID,
+          scope: 'uncommitted',
+        });
+        expect(uncommitted).toMatchObject({ status: 'ok', base: head });
+        expect(entryPaths(uncommitted)).toEqual([
+          'gone.txt',
+          'modified.txt',
+          'staged.txt',
+          'untracked.txt',
+        ]);
+
+        await gitCommitAll(workspaceRoot, 'commit worktree');
+        const afterCommit = await service.openAllChangesDiff({
+          sessionId: SESSION_ID,
+          scope: 'uncommitted',
+        });
+        expect(entryPaths(afterCommit)).toEqual([]);
+        const afterBranch = await service.openAllChangesDiff({
+          sessionId: SESSION_ID,
+          scope: 'branch',
+        });
+        expect(entryPaths(afterBranch)).toContain('committed.txt');
+        expect(
+          await service.openCurrentDiff({
+            sessionId: SESSION_ID,
+            path: 'committed.txt',
+            scope: 'uncommitted',
+          })
+        ).toMatchObject({
+          status: 'unavailable',
+          reason: 'not_changed',
+          message: 'This file has no uncommitted changes.',
+        });
+      } finally {
+        service.dispose();
+      }
+    });
+  });
+
+  it('reports explicit unavailability for non-Git and unborn worktrees', async () => {
+    await withWorkspace(async (workspaceRoot) => {
+      const service = new CodeCollabV2Service({ resolveWorkspace: makeResolver(workspaceRoot) });
+      try {
+        expect(
+          await service.openAllChangesDiff({ sessionId: SESSION_ID, scope: 'uncommitted' })
+        ).toMatchObject({ status: 'unavailable', reason: 'not_a_git_worktree' });
+      } finally {
+        service.dispose();
+      }
+    });
+
+    await withWorkspace(async (workspaceRoot) => {
+      await initGitRepoWithCommit(workspaceRoot);
+      const service = new CodeCollabV2Service({ resolveWorkspace: makeResolver(workspaceRoot) });
+      try {
+        expect(
+          await service.openAllChangesDiff({ sessionId: SESSION_ID, scope: 'uncommitted' })
+        ).toMatchObject({ status: 'unavailable', reason: 'no_commits' });
+      } finally {
+        service.dispose();
+      }
+    });
+  });
+
+  it('keeps deferred single-file loads on the uncommitted base and never falls back to the diff store', async () => {
+    await withWorkspace(async (workspaceRoot) => {
+      await initGitRepoWithCommit(workspaceRoot);
+      await writeFile(path.join(workspaceRoot, 'file.txt'), 'old\n');
+      await gitCommitAll(workspaceRoot, 'init');
+      const head = await gitText(workspaceRoot, 'rev-parse', 'HEAD');
+      await writeFile(path.join(workspaceRoot, 'file.txt'), 'old\nnew\n');
+
+      const diffStore = new CodeCollabV2DiffStore('workspace-v2', {
+        dbPath: path.join(workspaceRoot, 'diff-store.sqlite3'),
+      });
+      try {
+        await diffStore.recordTurnDiffs({
+          workspaceRoot,
+          ownerSessionId: SESSION_ID,
+          turnId: 'turn-stale',
+          capturedAtMs: Date.now(),
+          events: [
+            {
+              path: path.join(workspaceRoot, 'file.txt'),
+              oldText: 'stale\n',
+              newText: 'stale-new\n',
+            },
+          ],
+        });
+        const service = new CodeCollabV2Service({
+          resolveWorkspace: makeResolver(workspaceRoot),
+          diffStore,
+          allChangesDiffLimits: {
+            perFileMaxRawBytes: 1,
+            perFileMaxCompressedBytes: 1,
+            responseBudgetCompressedBytes: 1,
+          },
+        });
+        try {
+          const batch = await service.openAllChangesDiff({
+            sessionId: SESSION_ID,
+            scope: 'uncommitted',
+          });
+          expect(batch).toMatchObject({ status: 'ok', base: head });
+          if (batch.status !== 'ok') return;
+          expect(batch.entries.find((entry) => entry.path === 'file.txt')?.status).toBe('deferred');
+
+          const single = await service.openCurrentDiff({
+            sessionId: SESSION_ID,
+            path: 'file.txt',
+            scope: 'uncommitted',
+          });
+          expect(single.status).toBe('ok');
+          if (single.status !== 'ok') return;
+          expect(plainSnapshotText(single.oldSnapshot)).toBe('old\n');
+          expect(plainSnapshotText(single.newSnapshot)).toBe('old\nnew\n');
+        } finally {
+          service.dispose();
+        }
+      } finally {
+        await diffStore.close();
+      }
+    });
+  });
+});

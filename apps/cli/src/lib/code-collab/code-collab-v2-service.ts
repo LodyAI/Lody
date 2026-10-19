@@ -837,13 +837,33 @@ export class CodeCollabV2Service {
   ): Promise<CodeCollabV2OpenCurrentDiffResponse> {
     const resolved = await this.resolveRequestPath(request.sessionId as SessionId, request.path);
     void this.ensureWorkspaceWatch(resolved).catch(() => undefined);
-    const oldSnapshot = await this.resolveCurrentDiffBaseSnapshot(resolved);
+    const scope = request.scope ?? 'branch';
+    let oldSnapshot: Awaited<ReturnType<typeof this.resolveCurrentDiffBaseSnapshot>>;
+    if (scope === 'uncommitted') {
+      const head = await this.resolveUncommittedHead(resolved.workspaceRoot);
+      if (!head.ok) {
+        return {
+          status: 'unavailable',
+          path: resolved.workspacePath,
+          reason: head.reason,
+          message: head.message,
+        };
+      }
+      oldSnapshot = await this.resolveCurrentDiffBaseSnapshot(resolved, head.head, {
+        allowDiffStoreFallback: false,
+      });
+    } else {
+      oldSnapshot = await this.resolveCurrentDiffBaseSnapshot(resolved);
+    }
     if (oldSnapshot.status === 'unavailable') {
       return {
         status: 'unavailable',
         path: resolved.workspacePath,
         reason: 'base_unavailable',
-        message: 'No Git base or local ACP diff evidence is available for this file.',
+        message:
+          scope === 'uncommitted'
+            ? 'No HEAD snapshot is available for this file.'
+            : 'No Git base or local ACP diff evidence is available for this file.',
       };
     }
 
@@ -864,7 +884,10 @@ export class CodeCollabV2Service {
         status: 'unavailable',
         path: resolved.workspacePath,
         reason: 'not_changed',
-        message: 'The file is unchanged from the current All Changes base.',
+        message:
+          scope === 'uncommitted'
+            ? 'This file has no uncommitted changes.'
+            : 'The file is unchanged from the current All Changes base.',
       };
     }
 
@@ -892,16 +915,36 @@ export class CodeCollabV2Service {
     );
     void this.ensureWorkspaceWatch(root).catch(() => undefined);
 
+    const scope = request.scope ?? 'branch';
+    let uncommittedHead: string | undefined;
+    if (scope === 'uncommitted') {
+      const head = await this.resolveUncommittedHead(root.workspaceRoot);
+      if (!head.ok) {
+        return { status: 'unavailable', reason: head.reason, message: head.message };
+      }
+      uncommittedHead = head.head;
+    }
+
     const limits = this.deps.allChangesDiffLimits ?? CODE_COLLAB_V2_ALL_CHANGES_DIFF_LIMITS;
     const { allChanges, source, gitBase, diffStoreSnapshots, diffStoreDeferredPaths } =
-      await this.computeAllChangesForResolvedWorkspaceWithSource(root, {
-        includeDiffStoreSnapshots: true,
-        preferredDiffStoreSnapshotPath: request.focusPath,
-        diffStoreSnapshotCacheMaxRawBytes:
-          this.deps.allChangesSnapshotCacheMaxRawBytes ??
-          DEFAULT_DIFF_STORE_SNAPSHOT_CACHE_MAX_RAW_BYTES,
-        diffStoreSnapshotPerFileMaxRawBytes: limits.perFileMaxRawBytes,
-      });
+      uncommittedHead !== undefined
+        ? {
+            allChanges: await computeAllChanges(root.workspaceRoot, {
+              diffBase: uncommittedHead,
+            }),
+            source: 'git' as const,
+            gitBase: uncommittedHead,
+            diffStoreSnapshots: undefined,
+            diffStoreDeferredPaths: undefined,
+          }
+        : await this.computeAllChangesForResolvedWorkspaceWithSource(root, {
+            includeDiffStoreSnapshots: true,
+            preferredDiffStoreSnapshotPath: request.focusPath,
+            diffStoreSnapshotCacheMaxRawBytes:
+              this.deps.allChangesSnapshotCacheMaxRawBytes ??
+              DEFAULT_DIFF_STORE_SNAPSHOT_CACHE_MAX_RAW_BYTES,
+            diffStoreSnapshotPerFileMaxRawBytes: limits.perFileMaxRawBytes,
+          });
     const base = source === 'git' ? (gitBase ?? 'HEAD') : 'diff-store';
 
     const maxRawTextBytes = this.deps.maxRawTextBytes ?? CODE_COLLAB_V2_TEXT_LIMITS.maxRawTextBytes;
@@ -943,7 +986,9 @@ export class CodeCollabV2Service {
             { status: 'ready', snapshot: cachedSnapshots.newSnapshot },
           ] as const)
         : await Promise.all([
-            this.resolveCurrentDiffBaseSnapshot(fileResolved, base),
+            this.resolveCurrentDiffBaseSnapshot(fileResolved, base, {
+              allowDiffStoreFallback: scope !== 'uncommitted',
+            }),
             readCurrentDiffSnapshot(fileResolved, maxRawTextBytes),
           ]);
       if (oldSnapshot.status === 'unavailable' || newSnapshot.status === 'unavailable') {
@@ -1768,9 +1813,36 @@ export class CodeCollabV2Service {
     await this.computeAllChangesAndPublish(resolved, state, { fileTreeIndex });
   }
 
+  private async resolveUncommittedHead(workspaceRoot: string): Promise<
+    | { readonly ok: true; readonly head: string }
+    | {
+        readonly ok: false;
+        readonly reason: 'not_a_git_worktree' | 'no_commits';
+        readonly message: string;
+      }
+  > {
+    if (!(await isInsideGitWorktree(workspaceRoot))) {
+      return {
+        ok: false,
+        reason: 'not_a_git_worktree',
+        message: 'Uncommitted diffs require a Git worktree.',
+      };
+    }
+    const head = await resolveGitHeadCommit(workspaceRoot);
+    if (!head) {
+      return {
+        ok: false,
+        reason: 'no_commits',
+        message: 'The worktree has no commits yet, so there is no HEAD to compare against.',
+      };
+    }
+    return { ok: true, head };
+  }
+
   private async resolveCurrentDiffBaseSnapshot(
     resolved: ResolvedPath,
-    pinnedGitBase?: string
+    pinnedGitBase?: string,
+    options: { readonly allowDiffStoreFallback?: boolean } = {}
   ): Promise<
     | { readonly status: 'ready'; readonly snapshot: InternalDiffSnapshot }
     | { readonly status: 'unavailable' }
@@ -1793,6 +1865,9 @@ export class CodeCollabV2Service {
     }
 
     const maxRawTextBytes = this.deps.maxRawTextBytes ?? CODE_COLLAB_V2_TEXT_LIMITS.maxRawTextBytes;
+    if (options.allowDiffStoreFallback === false) {
+      return { status: 'unavailable' };
+    }
     const storeSnapshot = await this.deps.diffStore?.getEarliestOldSnapshot({
       ownerSessionId: resolved.ownerSessionId,
       path: resolved.workspacePath,
@@ -2880,6 +2955,11 @@ function pathDepth(workspacePath: string): number {
 async function isInsideGitWorktree(workspaceRoot: string): Promise<boolean> {
   const inside = await runGit(workspaceRoot, ['rev-parse', '--is-inside-work-tree']);
   return inside.ok && inside.stdout.trim() === 'true';
+}
+
+async function resolveGitHeadCommit(workspaceRoot: string): Promise<string | null> {
+  const head = await runGit(workspaceRoot, ['rev-parse', '--verify', 'HEAD^{commit}']);
+  return head.ok && head.stdout.trim() ? head.stdout.trim() : null;
 }
 
 async function readGitBaseDiffSnapshot(

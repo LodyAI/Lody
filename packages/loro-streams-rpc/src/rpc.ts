@@ -3350,6 +3350,7 @@ export class LoroStreamsMachineRpcClient {
       params: {
         sessionId: options.sessionId,
         path: options.path,
+        ...(options.scope === undefined ? {} : { scope: options.scope }),
       },
     })) as CodeCollabV2OpenCurrentDiffResponse | CodeCollabV2Error | null;
   }
@@ -3364,6 +3365,7 @@ export class LoroStreamsMachineRpcClient {
       params: {
         sessionId: options.sessionId,
         ...(options.focusPath === undefined ? {} : { focusPath: options.focusPath }),
+        ...(options.scope === undefined ? {} : { scope: options.scope }),
       },
     })) as CodeCollabV2OpenAllChangesDiffResponse | CodeCollabV2Error | null;
   }
