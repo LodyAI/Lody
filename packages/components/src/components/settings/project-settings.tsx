@@ -47,6 +47,7 @@ import {
   currentWorkspaceSlugAtom,
   settingsSelectedMachineIdAtom,
   settingsSelectedProjectKeyAtom,
+  userAtom,
 } from '@/atoms';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { useLocalProjectsAdmin } from '@/hooks/use-local-projects-admin';
@@ -94,6 +95,11 @@ import {
   useAddLocalProjectMachines,
 } from '@/components/local-projects/add-local-project-dialog-container';
 import { ProjectSkillsTab } from './project-skills-tab';
+import { ProjectDefaultMcpTab } from './project-default-mcp-tab';
+import type {
+  ProjectMcpDefaultAccess,
+  ProjectMcpDefaultTarget,
+} from '@/lib/workspace-catalog-write';
 import type { ProjectSkillsSource } from '@/hooks/use-project-skills';
 import { useAppCapability } from '@/lib/app-platform';
 import { getVisibleLocalProjectHistoryFailures } from '@/lib/local-project-history-catalog';
@@ -103,6 +109,8 @@ export type ProjectSettingsRow = {
   key: string;
   machineId: MachineId;
   machineName: string;
+  /** Owner of the project's machine: who may manage the project's defaults. */
+  machineOwnerUserId?: string | null;
   /** Shell this project's machine runs, probed from the machine OS. Local
      projects only edit this shell; the value drives which textarea we show. */
   shell: WorktreeSetupShell;
@@ -220,6 +228,8 @@ export type ProjectSettingsViewProps = {
   onAddLocalProject?: (machineId?: MachineId | null) => void;
   onAddGitHubProject?: () => void;
   onOpenGitHubSettings?: () => void;
+  /** Opens Settings > MCP, where the workspace catalog a project draws on is managed. */
+  onOpenMcpSettings?: () => void;
   canRemoveLocalProject?: (row: ProjectSettingsRow) => boolean;
   onRequestRemoveLocalProject?: (row: ProjectSettingsRow) => void;
   localProjectRemovalStateByKey?: ReadonlyMap<string, LocalProjectRemovalState>;
@@ -990,6 +1000,8 @@ export function ProjectSettingsComponent({
     await saveGithubWorktreeCleanup(row.repoFullName, config);
   };
 
+  const handleOpenMcpSettings = useCallback(() => openSettings('mcp'), [openSettings]);
+
   const handleAddGitHubProject = useCallback(() => {
     if (!workspaceSlug) return;
     openSettings('github');
@@ -1084,6 +1096,7 @@ export function ProjectSettingsComponent({
         onAddLocalProject={handleAddLocalProject}
         onAddGitHubProject={workspaceSlug ? handleAddGitHubProject : undefined}
         onOpenGitHubSettings={workspaceSlug ? handleAddGitHubProject : undefined}
+        onOpenMcpSettings={handleOpenMcpSettings}
         canRemoveLocalProject={canRemoveLocalProject}
         onRequestRemoveLocalProject={handleRequestRemoveLocalProject}
         localProjectRemovalStateByKey={localProjectRemovalStateByKey}
@@ -1150,6 +1163,7 @@ function ProjectSettingsDesktop({
   onAddLocalProject,
   onAddGitHubProject,
   onOpenGitHubSettings,
+  onOpenMcpSettings,
   canRemoveLocalProject,
   onRequestRemoveLocalProject,
   localProjectRemovalStateByKey,
@@ -1233,6 +1247,7 @@ function ProjectSettingsDesktop({
     onGithubWorktreeSetupChange,
     onGithubWorktreeCleanupChange,
     onOpenGitHubSettings,
+    onOpenMcpSettings,
     canRemoveLocalProject,
     onRequestRemoveLocalProject,
     localProjectRemovalStateByKey,
@@ -1552,6 +1567,7 @@ function ProjectWindow({
   onGithubWorktreeSetupChange,
   onGithubWorktreeCleanupChange,
   onOpenGitHubSettings,
+  onOpenMcpSettings,
   canRemoveLocalProject,
   onRequestRemoveLocalProject,
   localProjectRemovalStateByKey,
@@ -1569,6 +1585,7 @@ function ProjectWindow({
       config: WorktreeCleanupScriptConfig
     ) => Promise<void>;
     onOpenGitHubSettings?: () => void;
+    onOpenMcpSettings?: () => void;
     canRemoveLocalProject?: (row: ProjectSettingsRow) => boolean;
     onRequestRemoveLocalProject?: (row: ProjectSettingsRow) => void;
     localProjectRemovalStateByKey?: ReadonlyMap<string, LocalProjectRemovalState>;
@@ -1577,6 +1594,7 @@ function ProjectWindow({
   }) {
   const { t } = useTranslation();
   const workspaceId = useAtomValue(currentWorkspaceIdAtom);
+  const currentUserId = useAtomValue(userAtom)?.id ?? null;
   const isLocal = selection.kind === 'local';
   const localRow = selection.kind === 'local' ? selection.row : null;
   const githubRow = selection.kind === 'github' ? selection.row : null;
@@ -1614,6 +1632,7 @@ function ProjectWindow({
     { id: 'general', label: t('workspace.projects.window.general', 'General') },
     { id: 'worktree', label: t('workspace.projects.window.worktree', 'Worktree') },
     { id: 'skills', label: t('workspace.projects.window.skills', 'Skills') },
+    { id: 'defaultMcp', label: t('workspace.projects.window.defaultMcp', 'Default MCP') },
     ...(isLocal
       ? [
           {
@@ -1653,7 +1672,45 @@ function ProjectWindow({
           'workspace.projects.window.conversationsDescription',
           'Bring conversations you had with an agent outside Lody into this workspace.'
         )
-      : null;
+      : page === 'defaultMcp'
+        ? t(
+            'workspace.projects.window.defaultMcpDescription',
+            'MCP servers new conversations in this project start with. You can still change them in the composer.'
+          )
+        : null;
+
+  // Worktrees and branches of a project share one default: the target names
+  // the project alone, never a branch or checkout.
+  const defaultMcpTarget = useMemo<ProjectMcpDefaultTarget | null>(() => {
+    if (!workspaceId) return null;
+    if (localRow) {
+      return {
+        workspaceId,
+        project: { kind: 'local', localProjectId: localRow.project.id },
+        machineId: localRow.machineId,
+      };
+    }
+    if (githubRow) {
+      return {
+        workspaceId,
+        project: { kind: 'github', repoFullName: githubRow.repoFullName, branch: '' },
+      };
+    }
+    return null;
+  }, [githubRow, localRow, workspaceId]);
+  const defaultMcpAccess = useMemo<ProjectMcpDefaultAccess>(
+    () =>
+      localRow
+        ? {
+            kind: 'local',
+            currentUserId,
+            machineOwnerUserId: localRow.machineOwnerUserId ?? null,
+          }
+        : // A GitHub project is listed here only while its repository is
+          // connected to the workspace.
+          { kind: 'github', currentUserId, repoInWorkspace: githubRow != null },
+    [currentUserId, githubRow, localRow]
+  );
 
   return (
     <Tooltip.Provider delay={200}>
@@ -1894,6 +1951,15 @@ function ProjectWindow({
                   </CompactSection>
                 )
               ) : null}
+
+              {page === 'defaultMcp' && defaultMcpTarget ? (
+                <ProjectDefaultMcpTab
+                  key={`${defaultMcpTarget.workspaceId}:${localRow?.key ?? githubRow?.key ?? ''}`}
+                  target={defaultMcpTarget}
+                  access={defaultMcpAccess}
+                  onManageMcp={onOpenMcpSettings}
+                />
+              ) : null}
             </div>
           )}
         </section>
@@ -1902,7 +1968,7 @@ function ProjectWindow({
   );
 }
 
-type ProjectWindowPage = 'general' | 'worktree' | 'skills' | 'conversations';
+type ProjectWindowPage = 'general' | 'worktree' | 'skills' | 'defaultMcp' | 'conversations';
 
 /**
  * The window's views: words with a line under the current one that travels to

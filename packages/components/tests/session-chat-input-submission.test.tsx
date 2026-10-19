@@ -23,7 +23,14 @@ import { computeSha256Hex, uploadSessionFile } from '../src/lib/session-file-upl
 import { uploadSessionImage } from '../src/lib/session-image-upload';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { AgentRole, AgentRoleId, SessionMeta, SessionInputBlock } from '@lody/shared';
+import type {
+  AgentRole,
+  AgentRoleId,
+  McpServerId,
+  SessionMeta,
+  SessionInputBlock,
+  WorkspaceMcpServerMeta,
+} from '@lody/shared';
 
 const sessionAgentRoleState = vi.hoisted(() => ({
   control: {
@@ -543,6 +550,51 @@ describe('SessionChatInputArea submission feedback', () => {
       expect(container!.textContent).not.toContain('notes.txt');
     }
   );
+
+  describe('MCP selection', () => {
+    const servers: WorkspaceMcpServerMeta[] = ['files', 'search'].map((id) => ({
+      id: id as McpServerId,
+      name: id,
+      transport: 'stdio',
+      createdAt: 1,
+      updatedAt: 1,
+    }));
+    const mcp = (selectedIds: string[]) => ({
+      servers,
+      selectedIds: selectedIds as McpServerId[],
+      onSelectedIdsChange: () => undefined,
+    });
+
+    it('cannot send while the selection waits on unread project defaults', async () => {
+      const onSendMessage = vi.fn(async () => true);
+      await renderComposer({
+        onSendMessage,
+        overrides: { mcp: mcp([]), mcpSelectionReady: false },
+      });
+      expect(
+        container!.querySelector<HTMLButtonElement>('button[aria-label="Send"]')?.disabled
+      ).toBe(true);
+      await submit('keyboard');
+      expect(onSendMessage).not.toHaveBeenCalled();
+    });
+
+    it('dispatches the selection shown at the click, not one that changed before acceptance', async () => {
+      const acceptance = deferredBoolean();
+      const submissions: Parameters<SessionChatInputAreaProps['onSendMessage']>[] = [];
+      const onSendMessage: SessionChatInputAreaProps['onSendMessage'] = (...args) => {
+        submissions.push(args);
+        return acceptance.promise;
+      };
+      const sessionId = `mcp-snapshot-${++nextSession}`;
+      await renderComposer({ sessionId, onSendMessage, overrides: { mcp: mcp(['files']) } });
+      await submit('button');
+      // The project's defaults change while the send is still pending.
+      await renderComposer({ sessionId, onSendMessage, overrides: { mcp: mcp(['search']) } });
+      await act(async () => acceptance.resolve(true));
+      expect(submissions).toHaveLength(1);
+      expect(submissions[0][2]?.mcpServerIds).toEqual(['files']);
+    });
+  });
 
   it('retains all drafts after failed admission and retries the same bytes', async () => {
     const composerRef = createRef<SessionChatInputAreaHandle>();

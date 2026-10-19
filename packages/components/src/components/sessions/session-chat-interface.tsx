@@ -137,6 +137,7 @@ import {
   resolveActiveAssistantTurnId,
   resolveBaseBranchPreference,
   resolveProjectGitHubRepo,
+  type McpServerId,
 } from '@lody/shared';
 import { useIsMobile } from '../../hooks/use-mobile';
 import { useStableCallback } from '@/hooks/use-stable-callback';
@@ -2306,6 +2307,8 @@ export type DispatchInputBlocksOptions = {
   configOptionValuesOverride?: Record<string, AcpConfigOptionValue>;
   /** Role identity frozen beside this Turn's run config; null is explicit None. */
   agentRole?: SessionTurnAgentRoleSelection;
+  /** The MCP selection captured when the user pressed send. */
+  mcpServerIds?: readonly McpServerId[];
 };
 
 function buildEditedMessageQueueItem(
@@ -3048,6 +3051,7 @@ export const SessionChatInterface = memo(
     const mcpSelection = useSessionMcpSelection(sessionConversationConfig.mcpServerIds, {
       existingSession: true,
       disabled: isArchivedSession,
+      scopeKey: session.id,
     });
     const executionTurnConfigOverrides = useMemo(
       () =>
@@ -4225,6 +4229,7 @@ export const SessionChatInterface = memo(
           modelIdOverride?: string | null;
           configOptionValuesOverride?: Record<string, AcpConfigOptionValue>;
           agentRole?: SessionTurnAgentRoleSelection;
+          mcpServerIds?: readonly McpServerId[];
         }
       ): Promise<boolean> => {
         try {
@@ -4246,7 +4251,7 @@ export const SessionChatInterface = memo(
             modelId: turnModelId,
             configOptionValues: turnConfigOptionValues,
             issuePRMentions,
-            mcpServerIds: mcpSelection.selectedIds,
+            mcpServerIds: [...(options?.mcpServerIds ?? mcpSelection.selectedIds)],
             agentRoleId:
               options?.agentRole?.agentRoleId ?? (options?.agentRole === null ? null : undefined),
             agentRoleRevision: options?.agentRole?.agentRoleRevision,
@@ -4383,6 +4388,7 @@ export const SessionChatInterface = memo(
           | 'configOptionValuesOverride'
           | 'agentRole'
           | 'attachments'
+          | 'mcpServerIds'
         >
       ): Promise<boolean> => {
         try {
@@ -4404,7 +4410,7 @@ export const SessionChatInterface = memo(
             modelId: turnModelId,
             configOptionValues: turnConfigOptionValues,
             issuePRMentions,
-            mcpServerIds: mcpSelection.selectedIds,
+            mcpServerIds: [...(options?.mcpServerIds ?? mcpSelection.selectedIds)],
             agentRoleId:
               options?.agentRole?.agentRoleId ?? (options?.agentRole === null ? null : undefined),
             agentRoleRevision: options?.agentRole?.agentRoleRevision,
@@ -4424,7 +4430,7 @@ export const SessionChatInterface = memo(
             modelId: inputConfig.modelId ?? undefined,
             configOptionValues: inputConfig.configOptionValues ?? undefined,
             issuePRMentions: inputConfig.issuePRMentions ?? undefined,
-            mcpServerIds: [...mcpSelection.selectedIds],
+            mcpServerIds: [...(options?.mcpServerIds ?? mcpSelection.selectedIds)],
             agentRoleId: inputConfig.agentRoleId,
             agentRoleRevision: inputConfig.agentRoleRevision,
             memory: inputConfig.memory,
@@ -4495,6 +4501,7 @@ export const SessionChatInterface = memo(
           | 'configOptionValuesOverride'
           | 'agentRole'
           | 'attachments'
+          | 'mcpServerIds'
         >
       ): Promise<boolean> => {
         const turnConfigOptionValues = options?.configOptionValuesOverride ?? configOptionValues;
@@ -4506,6 +4513,7 @@ export const SessionChatInterface = memo(
           configOptionValuesOverride: turnConfigOptionValues,
           agentRole: options?.agentRole,
           attachments: options?.attachments,
+          mcpServerIds: options?.mcpServerIds,
         });
       },
       [configOptionValues, enqueueInputBlocks]
@@ -4575,6 +4583,7 @@ export const SessionChatInterface = memo(
             configOptionValuesOverride: turnConfigOptionValues,
             agentRole: options?.agentRole,
             attachments: options?.attachments,
+            mcpServerIds: options?.mcpServerIds,
           });
           captureSessionEvent(
             accepted ? 'session/message_queued' : 'session/message_submit_failed',
@@ -4597,6 +4606,7 @@ export const SessionChatInterface = memo(
             configOptionValuesOverride: turnConfigOptionValues,
             agentRole: options?.agentRole,
             attachments: options?.attachments,
+            mcpServerIds: options?.mcpServerIds,
           });
           captureSessionEvent(
             accepted ? 'session/message_guide_requested' : 'session/message_submit_failed',
@@ -4627,6 +4637,7 @@ export const SessionChatInterface = memo(
           configOptionValuesOverride: turnConfigOptionValues,
           agentRole: options?.agentRole,
           attachments: options?.attachments,
+          mcpServerIds: options?.mcpServerIds,
         });
         // A held send (attachments still preparing) dispatches itself later;
         // the composer is free again now.

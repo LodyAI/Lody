@@ -486,6 +486,7 @@ export function useLocalProjectsAdmin(): LocalProjectsAdminData {
         key: entry.key,
         machineId: entry.machineId,
         machineName,
+        machineOwnerUserId: entry.machine.ownerUserId ?? null,
         shell: resolveWorktreeSetupShellForPlatform(entry.machine.os),
         project: entry.project,
         sharedWithTeam: sharingUpdate?.desired ?? access?.sharedWithTeam ?? false,

@@ -1,10 +1,12 @@
 import {
   applyWorkspaceFlockRowEvents,
+  getProjectMcpDefaults,
   getWorkspaceFlockDocId,
   listWorkspaceAgentRoles,
   listWorkspaceMcpServers,
   readWorkspaceFlockRowsFromFlock,
   type AgentRole,
+  type ProjectMcpDefault,
   type WorkspaceFlockEvent,
   type WorkspaceFlockRowMap,
   type WorkspaceMcpServerMeta,
@@ -22,6 +24,15 @@ import type { WorkspaceRuntime } from '@/atoms/runtime';
 export type WorkspaceCatalogSnapshot = {
   servers: WorkspaceMcpServerMeta[];
   roles: AgentRole[];
+  /** Explicit per-project default MCP selections, keyed by `getProjectMcpKey`. */
+  projectMcpDefaults: Readonly<Record<string, ProjectMcpDefault>>;
+  /**
+   * True once the local document has been read. Defaults derived before this
+   * would be derived from nothing, so default-dependent sends wait for it.
+   */
+  loaded: boolean;
+  /** Opening or reading the document failed; defaults cannot be resolved. */
+  failed: boolean;
   /** True once the first remote sync landed, which makes an empty catalog authoritative. */
   synced: boolean;
 };
@@ -33,6 +44,9 @@ const EMPTY_ROWS = Object.freeze({}) as WorkspaceFlockRowMap;
 export const EMPTY_WORKSPACE_CATALOG: WorkspaceCatalogSnapshot = Object.freeze({
   servers: Object.freeze([]) as unknown as WorkspaceMcpServerMeta[],
   roles: Object.freeze([]) as unknown as AgentRole[],
+  projectMcpDefaults: Object.freeze({}),
+  loaded: false,
+  failed: false,
   synced: false,
 });
 
@@ -62,27 +76,50 @@ const ROOMS = new WeakMap<WorkspaceRuntime, SharedCatalogRoom>();
  * (and vice versa). Rows are identity-stable across
  * `applyWorkspaceFlockRowEvents`, so element identity is the whole comparison.
  */
-const reuseUnchanged = <T,>(previous: T[], next: T[]): T[] =>
+const reuseUnchanged = <T>(previous: T[], next: T[]): T[] =>
   previous.length === next.length && previous.every((item, index) => item === next[index])
     ? previous
     : next;
 
-function publish(room: SharedCatalogRoom, rows: WorkspaceFlockRowMap, synced: boolean): void {
-  if (room.rows === rows && room.snapshot.synced === synced) return;
-  room.rows = rows;
-  const servers = reuseUnchanged(room.snapshot.servers, listWorkspaceMcpServers(rows));
-  const roles = reuseUnchanged(room.snapshot.roles, listWorkspaceAgentRoles(rows));
-  if (
-    servers === room.snapshot.servers &&
-    roles === room.snapshot.roles &&
-    room.snapshot.synced === synced
-  ) {
-    return;
-  }
-  room.snapshot = { servers, roles, synced };
+/** The same, for the project-default family: keyed rows, identity-stable values. */
+const reuseUnchangedRecord = <T>(
+  previous: Readonly<Record<string, T>>,
+  next: Record<string, T>
+): Readonly<Record<string, T>> => {
+  const previousKeys = Object.keys(previous);
+  return previousKeys.length === Object.keys(next).length &&
+    previousKeys.every((key) => previous[key] === next[key])
+    ? previous
+    : next;
+};
+
+function emit(room: SharedCatalogRoom, snapshot: WorkspaceCatalogSnapshot): void {
+  room.snapshot = snapshot;
   for (const listener of room.listeners) {
     listener(room.snapshot);
   }
+}
+
+function publish(room: SharedCatalogRoom, rows: WorkspaceFlockRowMap, synced: boolean): void {
+  const previous = room.snapshot;
+  if (room.rows === rows && previous.loaded && previous.synced === synced) return;
+  room.rows = rows;
+  const servers = reuseUnchanged(previous.servers, listWorkspaceMcpServers(rows));
+  const roles = reuseUnchanged(previous.roles, listWorkspaceAgentRoles(rows));
+  const projectMcpDefaults = reuseUnchangedRecord(
+    previous.projectMcpDefaults,
+    getProjectMcpDefaults(rows)
+  );
+  if (
+    servers === previous.servers &&
+    roles === previous.roles &&
+    projectMcpDefaults === previous.projectMcpDefaults &&
+    previous.loaded &&
+    previous.synced === synced
+  ) {
+    return;
+  }
+  emit(room, { servers, roles, projectMcpDefaults, loaded: true, failed: false, synced });
 }
 
 function startRoom(runtime: WorkspaceRuntime, room: SharedCatalogRoom): void {
@@ -114,7 +151,11 @@ function startRoom(runtime: WorkspaceRuntime, room: SharedCatalogRoom): void {
       // wholesale so remotely deleted rows cannot survive in the UI cache.
       publish(room, readWorkspaceFlockRowsFromFlock(handle.flock), true);
     } catch (error) {
-      if (!room.cancelled) console.error('Failed to sync workspace catalog', error);
+      if (room.cancelled) return;
+      console.error('Failed to sync workspace catalog', error);
+      // Only a document that was never read is a failure to resolve defaults: a
+      // read snapshot stays usable while the remote room is unavailable.
+      if (!room.snapshot.loaded) emit(room, { ...room.snapshot, failed: true });
     }
   })();
 }

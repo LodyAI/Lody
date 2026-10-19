@@ -108,7 +108,7 @@ import {
 } from '@/lib/session-file-upload';
 import { formatFileSize } from '@/lib/session-file-presentation';
 import { SESSION_FILE_MAX_COUNT, SESSION_IMAGE_MAX_SIZE_BYTES } from '@lody/shared';
-import type { SessionFilePayload } from '@lody/shared';
+import type { McpServerId, SessionFilePayload } from '@lody/shared';
 import {
   arePastedTextDraftsEqual,
   createPastedTextFile,
@@ -454,6 +454,8 @@ export interface SessionChatInputAreaProps {
   durableAgentRoleKnownTurnKeys?: readonly string[];
   /** False while this Session's durable document is still hydrating. */
   durableAgentRoleReady?: boolean;
+  /** False while the MCP selection still waits on project defaults that are not read. */
+  mcpSelectionReady?: boolean;
   /** True when the composer run config differs through an unsent user edit. */
   runConfigHasUserEdits?: boolean;
   modeOptions: AcpSessionSelectOption[];
@@ -533,6 +535,11 @@ export type SessionSendMessageOptions = {
   attachments?: SessionAttachmentDraft[];
   /** Swaps the configured busy-send behavior (queue <-> steer) for this send. */
   invertSubmitBehavior?: boolean;
+  /**
+   * The MCP selection shown when the user pressed send. A send that resolves
+   * later dispatches this, not whatever the selection became in between.
+   */
+  mcpServerIds?: readonly McpServerId[];
 };
 
 export type SessionChatInputAreaHandle = {
@@ -580,6 +587,7 @@ export const SessionChatInputArea = memo(
       durableAgentRoleSourceTurnKey,
       durableAgentRoleKnownTurnKeys,
       durableAgentRoleReady,
+      mcpSelectionReady,
       runConfigHasUserEdits,
       modeOptions,
       modelOptions,
@@ -1565,7 +1573,7 @@ export const SessionChatInputArea = memo(
           });
           return;
         }
-        if (durableAgentRoleReady === false) {
+        if (durableAgentRoleReady === false || mcpSelectionReady === false) {
           return;
         }
         if (isMachineRemoved) {
@@ -1616,6 +1624,7 @@ export const SessionChatInputArea = memo(
             ]
           : [];
         const attachments = snapshotAttachmentDrafts(pendingImages, pendingFiles);
+        const mcpServerIds = mcp ? [...mcp.selectedIds] : undefined;
         const commentRefBlocks: SessionInputBlock[] = commentReferencesRef.current.map((item) => ({
           type: 'comment_reference' as const,
           ...item.reference,
@@ -1680,6 +1689,7 @@ export const SessionChatInputArea = memo(
           const accepted = await onSendMessage(inputBlocks, agentRoleTurnSelectionRef.current, {
             ...options,
             attachments,
+            ...(mcpServerIds ? { mcpServerIds } : {}),
           });
           if (accepted) {
             captureAgentRoleMentionsApplied(postHog, {
@@ -1729,6 +1739,8 @@ export const SessionChatInputArea = memo(
         freeTurnLimitNotice,
         isArchived,
         durableAgentRoleReady,
+        mcp,
+        mcpSelectionReady,
         isExternalHistoryRefreshing,
         isMachineRemoved,
         isVisible,
@@ -1799,6 +1811,7 @@ export const SessionChatInputArea = memo(
       isArchived ||
       isExternalHistoryRefreshing ||
       durableAgentRoleReady === false ||
+      mcpSelectionReady === false ||
       Boolean(freeTurnLimitNotice && freeTurnLimitNotice.current >= freeTurnLimitNotice.limit);
     const attachmentAddEnabled = !isArchived;
     const mentionSource = useSessionMentionSource({

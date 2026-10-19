@@ -65,6 +65,10 @@ Parent AGENTS apply. Edit `AGENTS.md`, not its `CLAUDE.md` symlink. Background: 
   preserve snapshot identity across mounts.
 - Role/MCP catalog `upsert`/`remove` resolve on DURABILITY; upload runs independently
   and no surface waits for or reports it.
+- Composer MCP selection (`use-session-mcp-selection.ts`): existing Sessions keep recorded
+  ids (unrecorded = empty); new ones use target-project defaults and cannot send until the
+  room has read them. Edits are scoped per workspace/scope/project and reset in render, never
+  an effect. Project-default writes check authority in `putProjectMcpDefault`, not the UI.
 - Role filtering uses shared `listAccessibleAgentRoles` / `resolveAgentRoleAvailability`,
   never local predicates. Availability stays `unknown` until bound machine configs load;
   subscribe exactly those machines. Settings rows describe their own binding;

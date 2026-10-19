@@ -1,4 +1,4 @@
-import { snapshotAgentRole } from '@lody/shared';
+import { snapshotAgentRole, type McpServerId } from '@lody/shared';
 import type { SessionAttachmentDraft } from '@/lib/session-attachment-draft';
 import {
   forwardRef,
@@ -41,7 +41,11 @@ import { useSessionMcpSelection } from '@/hooks/use-session-mcp-selection';
 import { canShowSubscriptionRateLimits } from '@/lib/session-usage';
 import { canShowCodexResetForecast } from '@/lib/codex-reset-forecast';
 import { useResolvedTheme } from '../../theme-provider';
-import { SessionChatInputArea, type SessionChatInputAreaHandle } from './session-chat-input-area';
+import {
+  SessionChatInputArea,
+  type SessionChatInputAreaHandle,
+  type SessionSendMessageOptions,
+} from './session-chat-input-area';
 import { useSessionAcpSelectorContext } from '@/hooks/use-session-acp-selector-context';
 import {
   resolveSessionLocalProjectRootPath,
@@ -180,10 +184,12 @@ export const DraftSessionChatInterface = memo(
         return item.role.agentConfigId === draft.agentConfigId ? item.role : null;
       }, [composerAgentRoleItems, draft.agentConfigId, draft.agentRoleId]);
       const docMetaCacheReady = useAtomValue(docMetaCacheReadyAtom);
-      // The draft composer has no MCP picker yet, so the first turn carries the
-      // workspace default selection — the same set the promoted child composer
-      // resolves for an empty session doc.
-      const mcpSelection = useSessionMcpSelection(undefined, {});
+      // A blank tab creates a new Session in the parent's project, so it starts
+      // from that project's defaults; the first turn records the selection.
+      const mcpSelection = useSessionMcpSelection(undefined, {
+        scopeKey: draft.id,
+        defaultsTarget: { project: parentSession.project, machineId: parentSession.machineId },
+      });
       // Same resolution the composer uses: a local project may carry its repo
       // only in project.githubRepoFullName, not in repoFullName.
       const parentRepoFullName = resolveSessionRepoFullName(parentSession);
@@ -496,7 +502,8 @@ export const DraftSessionChatInterface = memo(
       const buildSendPayload = useCallback(
         (
           inputBlocks: SessionInputBlock[],
-          preservedInputText?: string
+          preservedInputText?: string,
+          mcpServerIds: readonly McpServerId[] = mcpSelection.selectedIds
         ): DraftSessionSendPayload => {
           const prompt = extractPromptPreviewFromInputBlocks(inputBlocks);
           // A Role is a new-Session preset even inside a parent Session's blank
@@ -539,7 +546,7 @@ export const DraftSessionChatInterface = memo(
                     parentRepoFullName || undefined
                   )
                 : undefined,
-              mcpServerIds: mcpSelection.selectedIds,
+              mcpServerIds: [...mcpServerIds],
               agentRoleId: activeAgentRole?.id ?? null,
               agentRoleRevision: activeAgentRole?.revision,
               memory: activeAgentRole?.runConfig.memory,
@@ -570,10 +577,10 @@ export const DraftSessionChatInterface = memo(
         async (
           inputBlocks: SessionInputBlock[],
           _role: unknown,
-          options?: { attachments?: SessionAttachmentDraft[] }
+          options?: SessionSendMessageOptions
         ) => {
           return await onSendDraft({
-            ...buildSendPayload(inputBlocks),
+            ...buildSendPayload(inputBlocks, undefined, options?.mcpServerIds),
             attachments: options?.attachments,
           });
         },
@@ -661,6 +668,8 @@ export const DraftSessionChatInterface = memo(
             onModeChange={selectMode}
             onModelChange={selectModel}
             onConfigOptionChange={selectConfigOption}
+            mcp={mcpSelection.menu}
+            mcpSelectionReady={mcpSelection.ready}
             onSendMessage={handleSendMessage}
             onStop={() => {}}
             onRemoveQueueItem={async () => {}}

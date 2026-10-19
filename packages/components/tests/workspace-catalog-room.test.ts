@@ -1,10 +1,12 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   AGENT_ROLE_VERSION,
+  getProjectMcpKey,
   workspaceFlockKeys,
   type AgentConfigId,
   type AgentRole,
   type AgentRoleId,
+  type LocalProjectId,
   type MachineId,
   type WorkspaceMcpServerMeta,
 } from '@lody/shared';
@@ -50,7 +52,12 @@ const settle = async (): Promise<void> => {
  * Minimal stand-in for the workspace runtime: one Flock document whose rows,
  * events, and first remote sync are driven by the test rather than a transport.
  */
-function createRuntime(workspaceId: string, rows: WorkspaceMcpServerMeta[], roles: AgentRole[] = []) {
+function createRuntime(
+  workspaceId: string,
+  rows: WorkspaceMcpServerMeta[],
+  roles: AgentRole[] = [],
+  projectDefaults: Record<string, { ids: string[] }> = {}
+) {
   const listeners: Array<(batch: unknown) => void> = [];
   let completeFirstSync!: () => void;
   const firstSyncedWithRemote = new Promise<void>((resolve) => {
@@ -63,7 +70,12 @@ function createRuntime(workspaceId: string, rows: WorkspaceMcpServerMeta[], role
     scan: (options?: { prefix?: readonly unknown[] }) =>
       options?.prefix?.[0] === 'agentRole'
         ? roles.map((value) => ({ key: workspaceFlockKeys.agentRole(value.id), value }))
-        : current.map((value) => ({ key: workspaceFlockKeys.mcpServer(value.id), value })),
+        : options?.prefix?.[0] === 'projectMcpDefault'
+          ? Object.entries(projectDefaults).map(([projectKey, value]) => ({
+              key: workspaceFlockKeys.projectMcpDefault(projectKey),
+              value,
+            }))
+          : current.map((value) => ({ key: workspaceFlockKeys.mcpServer(value.id), value })),
     subscribe: (listener: (batch: unknown) => void) => {
       listeners.push(listener);
       return () => {
@@ -147,9 +159,11 @@ describe('workspace MCP catalog room', () => {
   });
 
   it('publishes both row families of the one workspace document', async () => {
-    const harness = createRuntime('workspace-families', [entry('server-1', 'Files')], [
-      roleRow('role-1', 'Reviewer'),
-    ]);
+    const harness = createRuntime(
+      'workspace-families',
+      [entry('server-1', 'Files')],
+      [roleRow('role-1', 'Reviewer')]
+    );
     const seen: WorkspaceCatalogSnapshot[] = [];
     const lease = acquireWorkspaceCatalog(harness.runtime, (snapshot) => seen.push(snapshot));
     await settle();
@@ -160,5 +174,43 @@ describe('workspace MCP catalog room', () => {
     expect(seen.at(-1)?.roles.map(({ name }) => name)).toEqual(['Reviewer']);
 
     lease.release();
+  });
+
+  it('publishes project defaults once the local document is read', async () => {
+    const projectKey = getProjectMcpKey(
+      { kind: 'local', localProjectId: 'project-1' as LocalProjectId },
+      'machine-1'
+    )!;
+    const harness = createRuntime('workspace-project-defaults', [entry('server-1', 'Files')], [], {
+      [projectKey]: { ids: [] },
+    });
+    const seen: WorkspaceCatalogSnapshot[] = [];
+    const lease = acquireWorkspaceCatalog(harness.runtime, (snapshot) => seen.push(snapshot));
+    // Nothing read yet: defaults are unknown, not empty.
+    expect(lease.snapshot.loaded).toBe(false);
+    await settle();
+
+    expect(seen.at(-1)).toMatchObject({ loaded: true, failed: false, synced: false });
+    expect(seen.at(-1)?.projectMcpDefaults).toEqual({ [projectKey]: { ids: [] } });
+
+    // An MCP-only change keeps the defaults record's identity.
+    const defaults = seen.at(-1)?.projectMcpDefaults;
+    harness.emit(entry('server-2', 'Ada'));
+    expect(seen.at(-1)?.projectMcpDefaults).toBe(defaults);
+
+    lease.release();
+  });
+
+  it('reports a document that could not be read as failed, never as an empty catalog', async () => {
+    const harness = createRuntime('workspace-unreadable', [entry('server-1', 'Files')]);
+    harness.openFlockDoc.mockRejectedValueOnce(new Error('storage unavailable'));
+    const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const seen: WorkspaceCatalogSnapshot[] = [];
+    const lease = acquireWorkspaceCatalog(harness.runtime, (snapshot) => seen.push(snapshot));
+    await settle();
+
+    expect(seen.at(-1)).toMatchObject({ loaded: false, failed: true });
+    lease.release();
+    error.mockRestore();
   });
 });

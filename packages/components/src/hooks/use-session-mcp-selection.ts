@@ -1,11 +1,15 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
+import { useAtomValue } from 'jotai';
 import {
-  getDefaultSelectedMcpServerIds,
+  getEffectiveDefaultMcpIds,
+  getProjectMcpKey,
   type McpServerId,
+  type ProjectRef,
   type WorkspaceMcpServerMeta,
 } from '@lody/shared';
 import type { AttachmentAddMenuMcp } from '@/components/chat/attachment-add-menu';
-import { useWorkspaceMcpCatalog } from './use-workspace-mcp-catalog';
+import { activeWorkspaceRuntimeAtom } from '@/atoms/runtime';
+import { useWorkspaceCatalog } from './use-workspace-catalog';
 
 export type SessionMcpSelection = {
   servers: WorkspaceMcpServerMeta[];
@@ -13,26 +17,74 @@ export type SessionMcpSelection = {
   setSelectedIds: (ids: readonly McpServerId[]) => void;
   /** Ready to hand to `AttachmentAddMenu`; undefined when the catalog is empty. */
   menu: AttachmentAddMenuMcp | undefined;
+  /**
+   * Whether `selectedIds` can be sent. False only while a new conversation's
+   * selection still comes from defaults that have not been read: sending then
+   * would silently author a turn with no MCP servers.
+   */
+  ready: boolean;
+  /** The defaults this selection depends on could not be read at all. */
+  defaultsFailed: boolean;
 };
 
+/** The project a NEW conversation is created in; its defaults preselect servers. */
+export type SessionMcpDefaultsTarget = {
+  project: ProjectRef | null | undefined;
+  /** The project's machine; identifies a local project only. */
+  machineId?: string | null;
+};
+
+const NO_IDS: McpServerId[] = [];
+
+/**
+ * The MCP selection a composer sends with.
+ *
+ * - An existing conversation keeps what it recorded — including `[]`, which
+ *   nothing here may overwrite — and one that never recorded any stays empty:
+ *   defaults are for creating a conversation, not for enrolling an old one.
+ * - A new conversation starts from its target project's defaults (or the
+ *   workspace's, when it has no project or the project has no list).
+ *
+ * The user's edits are scoped to workspace, `scopeKey`, target project and the
+ * recorded selection, and are dropped in the same render any of them changes —
+ * an effect would leave one frame (and one possible send) carrying the previous
+ * project's choice.
+ */
 export function useSessionMcpSelection(
   persistedIds: readonly McpServerId[] | undefined,
-  menuOptions: { existingSession?: boolean; disabled?: boolean } = {}
+  options: {
+    existingSession?: boolean;
+    disabled?: boolean;
+    /** The draft/session the composer edits; a different one starts clean. */
+    scopeKey?: string;
+    defaultsTarget?: SessionMcpDefaultsTarget;
+  } = {}
 ): SessionMcpSelection {
-  const { existingSession, disabled } = menuOptions;
-  const { servers, synced } = useWorkspaceMcpCatalog();
-  const persistedKey = persistedIds?.join('\0');
-  const [override, setOverride] = useState<McpServerId[] | undefined>();
-
-  useEffect(() => {
-    setOverride(undefined);
-  }, [persistedKey]);
+  const { existingSession, disabled, scopeKey, defaultsTarget } = options;
+  const runtime = useAtomValue(activeWorkspaceRuntimeAtom);
+  const { servers, synced, loaded, failed, projectMcpDefaults } = useWorkspaceCatalog();
+  const projectKey = existingSession
+    ? undefined
+    : getProjectMcpKey(defaultsTarget?.project, defaultsTarget?.machineId);
+  const preference = projectKey ? projectMcpDefaults[projectKey] : undefined;
+  const persistedKey = persistedIds ? `ids:${persistedIds.join('\0')}` : 'none';
+  const scope = [runtime?.workspaceId ?? '', scopeKey ?? '', projectKey ?? '', persistedKey].join(
+    '\u0001'
+  );
+  const [override, setOverride] = useState<{ scope: string; ids: McpServerId[] }>();
+  const scopedOverride = override?.scope === scope ? override.ids : undefined;
+  // Forget an edit once its scope is left, so returning to that project later
+  // starts from its defaults again. Render-phase, like the read above.
+  if (override && scopedOverride === undefined) setOverride(undefined);
 
   // Memoized so a caller with no persisted ids (a fresh draft/landing composer)
   // gets an identity-stable selection; a fresh array here would invalidate
   // every send-payload/menu memo built on `selectedIds` each render.
-  const defaultSelectedIds = useMemo(() => getDefaultSelectedMcpServerIds(servers), [servers]);
-  const baseSelection = override ?? persistedIds ?? defaultSelectedIds;
+  const defaultSelectedIds = useMemo(
+    () => (existingSession ? NO_IDS : getEffectiveDefaultMcpIds(servers, preference)),
+    [existingSession, preference, servers]
+  );
+  const baseSelection = scopedOverride ?? persistedIds ?? defaultSelectedIds;
   const selectedIds = useMemo(() => {
     // An empty catalog is authoritative only after the first remote sync. Until
     // then, preserve persisted ids so a fast send cannot erase a session's MCP
@@ -42,8 +94,15 @@ export function useSessionMcpSelection(
     return [...new Set(baseSelection)].filter((id) => availableIds.has(id));
   }, [baseSelection, servers, synced]);
 
-  // Stable so menu props built from this selection do not churn every render.
-  const setSelectedIds = useCallback((ids: readonly McpServerId[]) => setOverride([...ids]), []);
+  const dependsOnDefaults =
+    !existingSession && scopedOverride === undefined && persistedIds === undefined;
+  const ready = !dependsOnDefaults || (runtime != null && loaded);
+
+  // Stable per scope so menu props built from this selection do not churn every render.
+  const setSelectedIds = useCallback(
+    (ids: readonly McpServerId[]) => setOverride({ scope, ids: [...ids] }),
+    [scope]
+  );
 
   /* MCP lives in the composer's "+" menu (second level), not the footer row: it
      is a per-turn attachment-shaped choice, not a run knob. */
@@ -61,5 +120,12 @@ export function useSessionMcpSelection(
     [disabled, existingSession, selectedIds, servers, setSelectedIds]
   );
 
-  return { servers, selectedIds, setSelectedIds, menu };
+  return {
+    servers,
+    selectedIds,
+    setSelectedIds,
+    menu,
+    ready,
+    defaultsFailed: dependsOnDefaults && failed,
+  };
 }

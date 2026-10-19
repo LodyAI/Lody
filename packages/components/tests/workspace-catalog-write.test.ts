@@ -1,14 +1,20 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   AGENT_ROLE_VERSION,
+  getProjectMcpKey,
+  workspaceFlockKeys,
   type AgentConfigId,
   type AgentRole,
   type AgentRoleId,
+  type LocalProjectId,
   type MachineId,
+  type McpServerId,
   type WorkspaceMcpServerMeta,
 } from '@lody/shared';
 import {
   deleteWorkspaceMcpServer,
+  ProjectMcpDefaultWriteError,
+  putProjectMcpDefault,
   putWorkspaceMcpServer,
   uploadWorkspaceCatalog,
   writeWorkspaceAgentRole,
@@ -117,5 +123,120 @@ describe('workspace catalog writes', () => {
     const unopenable = createDeps({ openError: new Error('room unavailable') });
     await expect(writeWorkspaceAgentRole(unopenable.deps, role)).resolves.toBeUndefined();
     await expect(uploadWorkspaceCatalog(unopenable.deps)).resolves.toBeUndefined();
+  });
+});
+
+describe('project default MCP writes', () => {
+  const settle = async () => {
+    for (let tick = 0; tick < 10; tick += 1) await Promise.resolve();
+  };
+  const localTarget = {
+    workspaceId,
+    project: { kind: 'local' as const, localProjectId: 'project-1' as LocalProjectId },
+    machineId: 'machine-1',
+  };
+  const owner = { kind: 'local' as const, currentUserId: 'user-1', machineOwnerUserId: 'user-1' };
+  const ids = ['server-1', 'server-2'] as McpServerId[];
+
+  it('writes the whole list under the project key, durable before the upload', async () => {
+    const { calls, deps, releaseUpload } = createDeps();
+    await putProjectMcpDefault(deps, localTarget, owner, ids);
+
+    expect(deps.writer.flockRowPut).toHaveBeenCalledWith(
+      expect.any(String),
+      workspaceFlockKeys.projectMcpDefault(
+        getProjectMcpKey(localTarget.project, localTarget.machineId)!
+      ),
+      { ids }
+    );
+    expect(calls).not.toContain('syncOnce:end');
+    releaseUpload();
+    await settle();
+    expect(calls).toContain('syncOnce:end');
+  });
+
+  it('records an explicit empty list, and ignores the branch and worktree', async () => {
+    const { deps } = createDeps();
+    await putProjectMcpDefault(
+      deps,
+      {
+        ...localTarget,
+        project: { ...localTarget.project, branch: 'feature', useWorktree: true },
+      },
+      owner,
+      []
+    );
+    expect(deps.writer.flockRowPut).toHaveBeenCalledWith(
+      expect.any(String),
+      workspaceFlockKeys.projectMcpDefault(
+        getProjectMcpKey(localTarget.project, localTarget.machineId)!
+      ),
+      { ids: [] }
+    );
+  });
+
+  it('does not fail or roll back when the upload fails', async () => {
+    const failed = createDeps({ syncError: new Error('network unavailable') });
+    await expect(
+      putProjectMcpDefault(failed.deps, localTarget, owner, ids)
+    ).resolves.toBeUndefined();
+    failed.releaseUpload();
+    await settle();
+    expect(failed.deps.writer.flockRowDelete).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['a teammate on the owner’s machine', { ...owner, currentUserId: 'user-2' }],
+    ['a signed-out user', { ...owner, currentUserId: null }],
+    ['an unknown machine owner', { ...owner, machineOwnerUserId: null }],
+    [
+      'a GitHub grant for a local project',
+      { kind: 'github' as const, currentUserId: 'user-1', repoInWorkspace: true },
+    ],
+  ])('refuses %s at the write, not only in the UI', async (_name, access) => {
+    const { deps } = createDeps();
+    await expect(putProjectMcpDefault(deps, localTarget, access, ids)).rejects.toMatchObject({
+      code: 'forbidden',
+    });
+    expect(deps.writer.flockRowPut).not.toHaveBeenCalled();
+  });
+
+  it('refuses a repository that is not connected to the workspace', async () => {
+    const { deps } = createDeps();
+    const github = {
+      workspaceId,
+      project: { kind: 'github' as const, repoFullName: 'LodyAI/Lody', branch: 'main' },
+    };
+    await expect(
+      putProjectMcpDefault(
+        deps,
+        github,
+        { kind: 'github', currentUserId: 'user-1', repoInWorkspace: false },
+        ids
+      )
+    ).rejects.toBeInstanceOf(ProjectMcpDefaultWriteError);
+    await putProjectMcpDefault(
+      deps,
+      github,
+      { kind: 'github', currentUserId: 'user-1', repoInWorkspace: true },
+      ids
+    );
+    expect(deps.writer.flockRowPut).toHaveBeenCalledTimes(1);
+  });
+
+  it('refuses another workspace’s project and malformed ids', async () => {
+    const { deps } = createDeps();
+    await expect(
+      putProjectMcpDefault(
+        deps,
+        { ...localTarget, workspaceId: 'workspace-2' as typeof workspaceId },
+        owner,
+        ids
+      )
+    ).rejects.toMatchObject({ code: 'workspace_mismatch' });
+    await expect(
+      putProjectMcpDefault(deps, localTarget, owner, [' '] as McpServerId[])
+    ).rejects.toMatchObject({ code: 'invalid_selection' });
+    expect(deps.writer.flockRowPut).not.toHaveBeenCalled();
   });
 });

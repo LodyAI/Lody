@@ -1041,7 +1041,6 @@ function WorkspaceChatLanding({
   const [selectedMachineId, setSelectedMachineId] = useState<MachineId | null>(null);
   const [selectedAgent, setSelectedAgent] = useState<AgentSelection | null>(null);
   const [submitting, setSubmitting] = useState(false);
-  const mcpSelection = useSessionMcpSelection(undefined, { disabled: submitting });
   // The project selector always uses the machine-aware picker so multi-machine
   // workspaces can choose the target explicitly. Standalone Electron entry
   // points such as the sidebar and onboarding may still use the native dialog.
@@ -1173,6 +1172,20 @@ function WorkspaceChatLanding({
   machinesRef.current = machines;
   const selectedLocalProjectMachineId = selectedLocalProject?.machineId ?? null;
   const activeLocalProjectId = selectedLocalProject?.localProjectId ?? null;
+  // A new conversation starts from its target project's defaults. Branch and
+  // worktree are not part of the project's identity, so they are left out.
+  const mcpSelection = useSessionMcpSelection(undefined, {
+    disabled: submitting,
+    defaultsTarget:
+      contextType === 'local' && activeLocalProjectId
+        ? {
+            project: { kind: 'local', localProjectId: activeLocalProjectId },
+            machineId: selectedLocalProjectMachineId,
+          }
+        : contextType === 'github' && selectedRepo
+          ? { project: { kind: 'github', repoFullName: selectedRepo, branch: '' } }
+          : { project: null },
+  });
   const hasWorkspaceRuntime = Boolean(runtime);
   const canUseSelectedLocalProjectDesktopControl = useMemo(
     () =>
@@ -2908,7 +2921,8 @@ function WorkspaceChatLanding({
         | 'missing_context'
         | 'local_project_git_state_failed'
         | 'missing_branch'
-        | 'missing_project',
+        | 'missing_project'
+        | 'mcp_defaults_not_ready',
       extra?: Record<string, unknown>
     ) => {
       capturePostHogEvent(postHog, 'session/input_blocked', {
@@ -2972,6 +2986,20 @@ function WorkspaceChatLanding({
     if (!selectedAgent || !selectedConfig) {
       captureSessionInputBlocked('missing_agent_config');
       setComposerError(t('chat.validation.missingAgent'));
+      return;
+    }
+    // The selection still comes from defaults that were never read; sending now
+    // would create the conversation with no MCP servers instead of its defaults.
+    if (!mcpSelection.ready) {
+      captureSessionInputBlocked('mcp_defaults_not_ready');
+      setComposerError(
+        mcpSelection.defaultsFailed
+          ? t(
+              'chat.validation.mcpDefaultsFailed',
+              'Default MCP servers couldn’t be read, so this conversation can’t be created yet.'
+            )
+          : t('chat.validation.mcpDefaultsLoading', 'Loading this project’s default MCP servers…')
+      );
       return;
     }
     const scopedMachineId =
@@ -4393,6 +4421,7 @@ function WorkspaceChatLanding({
     isRuntimeInitializing: runtimeInitializing,
     isLoadingLocalGitState: loadingLocalGitState,
     hasLocalGitStateError: Boolean(localGitStateError),
+    mcpDefaultsPending: !mcpSelection.ready && !mcpSelection.defaultsFailed,
   });
   const selectedMachineHasVisibleLocalProject = useMemo(
     () =>
