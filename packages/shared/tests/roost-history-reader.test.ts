@@ -2,6 +2,9 @@ import { describe, expect, it } from 'vitest';
 import {
   createRoostHistoryReader,
   projectRoostSegments,
+  readLatestTurn,
+  type SessionHistoryDirectoryPage,
+  type SessionHistoryReader,
   type RoostHistoryChange,
   type RoostHistoryPort,
   type RoostHistorySegment,
@@ -120,6 +123,7 @@ describe('Roost logical history projection', () => {
       expect.objectContaining({ id: 'user-1', role: 'user' }),
       expect.objectContaining({ id: 'assistant-1', role: 'assistant' }),
     ]);
+    expect(await readLatestTurn(reader, 'user')).toMatchObject({ id: 'user-1' });
   });
 
   it('keeps the gap-free initial snapshot and invalidates only after a port change', async () => {
@@ -204,5 +208,62 @@ describe('Roost logical history projection', () => {
         },
       ])
     ).toThrow(/timestamp/);
+  });
+});
+
+describe('latest-turn directory paging', () => {
+  const pagedReader = async (segments: RoostHistorySegment[]): Promise<SessionHistoryReader> => {
+    const reader = createRoostHistoryReader(new FakeRoostPort(segments));
+    const totalCount = await reader.count();
+    const directory = reader.readDirectory.bind(reader);
+    const page = async (end: number, limit: number): Promise<SessionHistoryDirectoryPage> => {
+      const startPosition = Math.max(0, end - limit);
+      return {
+        startPosition,
+        totalCount,
+        rows: await directory(startPosition, end),
+        hasMoreOlder: startPosition > 0,
+        cursor: startPosition > 0 ? String(startPosition) : null,
+      };
+    };
+    return {
+      ...reader,
+      count: () => {
+        throw new Error('Whole-directory reads are unavailable');
+      },
+      readDirectory: () => {
+        throw new Error('Whole-directory reads are unavailable');
+      },
+      readLatestDirectoryPage: (limit) => page(totalCount, limit),
+      readOlderDirectoryPage: (cursor, limit) => page(Number(cursor), limit),
+    };
+  };
+  const middle = () =>
+    Array.from({ length: 81 }, (_, index) => ({
+      ...assistant('primary', { finished: true }),
+      businessId: `middle-${index}`,
+    }));
+
+  it.each([true, false])(
+    'finds the latest readable match across pages when the newest body is ready=%s',
+    async (ready) => {
+      const reader = await pagedReader([user('earlier'), ...middle(), user('latest')]);
+      const readTurn = reader.readTurn.bind(reader);
+      reader.readTurn = (id) => (!ready && id === 'latest' ? { state: 'missing' } : readTurn(id));
+      expect(await readLatestTurn(reader, 'user')).toMatchObject({
+        id: ready ? 'latest' : 'earlier',
+        role: 'user',
+        items: [{ type: 'text', text: 'hello' }],
+      });
+    }
+  );
+
+  it('reports no matching turn only after exhausting pages and preserves page failures', async () => {
+    const reader = await pagedReader(middle());
+    expect(await readLatestTurn(reader, 'user')).toBeUndefined();
+    reader.readOlderDirectoryPage = async () => {
+      throw new Error('History page is unavailable');
+    };
+    await expect(readLatestTurn(reader, 'user')).rejects.toThrow('History page is unavailable');
   });
 });

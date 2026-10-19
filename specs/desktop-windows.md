@@ -98,6 +98,8 @@ remain. With one tab, including a draft, it closes the current window without
 changing shared Session closure state. A focused side panel closes its active tab
 first. Explicit tab × still closes the tab. Primary and new conversation windows
 follow the same rule, preserving each window's native close/hide behavior.
+The opt-in [semantic close beta](semantic-action-targeting.md) additionally blocks
+window close from hover/focus fallback while another close scope is visible.
 Application shortcut settings are device-wide and changes propagate to all open
 windows; execution acts only in the window receiving the key. The original window
 retains existing close/tray behavior; other workspace windows are not automatically

@@ -35,6 +35,17 @@ this page is the full text of the rules summarised there.
   shown as base fallback, but must not be copied or labeled as current. The
   mobile bottom `SessionInfoBar` omits branch information; desktop keeps it.
 
+Roost initialization pairs a directory page with its observation epoch. A
+validated owner page already includes the version advancement announced by its
+own reply, so that announcement must not require another foreground RPC before
+the page becomes readable. An ordinary page overtaken by a newer owner/control
+revision cannot borrow that observation's epoch; later structural notifications
+still force a retry. Negotiated coherent checkpoints retain their ability to
+progress behind newer hints. Cached reads retain their pre-read epoch fence. The bridge persists accepted
+pages before returning them and retains the previous coherent disk snapshot
+during replacement. This does not make complete cache rebuilding a first-window
+readiness requirement.
+
 ## Desktop windows
 
 `MainLayout` uses one Web Lock per workspace for completion notifications, dock

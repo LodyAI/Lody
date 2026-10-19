@@ -13,7 +13,7 @@ import type { EphemeralRoomAuthCallback } from '../src/providers/ephemeral-room-
 /**
  * Milestone-0 proof for the CLI PR poller: a local `EphemeralStore` write is
  * encoded and broadcast by `EphemeralStoreAdaptor` — the same adaptor both the
- * CLI publisher (`CliPresenceRuntime`) and the web `WorkspacePresenceTransport`
+ * CLI publisher (`PresenceReplica`) and the web `WorkspacePresenceTransport`
  * wire into `EphemeralStreamCrdt`. Bridging two stores with encode/apply
  * exercises the exact wasm primitives the adaptor drives over the wire, so a
  * browser-side `store.set` is observed by every room peer.
@@ -160,9 +160,12 @@ describe('production presence transport with the published Streams runtime', () 
   it.each(['request', 'unauthorized'] as const)(
     'recovers after a stalled %s token callback reaches the default deadline',
     async (reason) => {
-      vi.useFakeTimers();
+      vi.useFakeTimers({
+        toFake: ['Date', 'setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'],
+      });
       const store = new EphemeralStore(90_000);
       const tokenStalled = Promise.withResolvers<void>();
+      const tokenCancelled = Promise.withResolvers<void>();
       const recovering = Promise.withResolvers<void>();
       const appended = Promise.withResolvers<void>();
       let stall = true;
@@ -180,10 +183,17 @@ describe('production presence transport with the published Streams runtime', () 
       const factory = new ProductionPresenceTransport({
         workspaceId: 'workspace-test' as WorkspaceId,
       });
-      const transport = factory.open(store, async (context) => {
+      const transport = factory.open(store, async (context, signal) => {
         if (allowStall && stall && context?.reason === reason) {
           tokenStalled.resolve();
-          return new Promise<string>(() => {});
+          return new Promise<string>((_resolve, reject) => {
+            const abort = () => {
+              tokenCancelled.resolve();
+              reject(new DOMException('synthetic auth canceled', 'AbortError'));
+            };
+            if (signal?.aborted) abort();
+            else signal?.addEventListener('abort', abort, { once: true });
+          });
         }
         return 'test-token';
       });
@@ -200,7 +210,11 @@ describe('production presence transport with the published Streams runtime', () 
         await tokenStalled.promise;
         stall = false;
         await vi.advanceTimersByTimeAsync(10_001);
+        await tokenCancelled.promise;
         await recovering.promise;
+        // The published native owner retries only after actual callback cleanup.
+        // Its first default backoff, including jitter, is below this clock advance.
+        await vi.advanceTimersByTimeAsync(2_000);
         await appended.promise;
         await barrier;
         expect(result.value.pendingLocalCount).toBe(0);

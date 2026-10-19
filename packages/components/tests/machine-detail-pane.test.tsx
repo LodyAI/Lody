@@ -217,8 +217,17 @@ describe('MachineDetailPane revoke machine access', () => {
       agentType: 'codex',
       env: {},
     });
+    const quotaCapability = {
+      cliType: 'builtin' as const,
+      agentType: 'codex',
+      modes: [],
+      models: [],
+      fetchedAt: 1,
+      rateLimits: { version: 1 as const },
+    };
     const scopedMachine: MachineViewMeta = {
       ...machine,
+      acpCapabilities: { [workId]: quotaCapability, [personalId]: quotaCapability },
       raceLimits: {
         [getRateLimitEntryKey('codex', 'codex')]: {
           limitId: 'codex',

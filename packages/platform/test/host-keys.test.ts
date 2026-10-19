@@ -43,6 +43,21 @@ function fixture() {
 }
 
 describe('host identity lifecycle', () => {
+  it('captures read inputs before execution while leaving backend access lazy', async () => {
+    const { backend, rows } = fixture();
+    const store = makeHostIdentityStore('personal-device', backend);
+    const input = { ...ref };
+    const expected = { ...keys };
+    const inspect = store.inspect(input);
+    const read = store.read(input, expected);
+    input.accountId = 'changed-after-construction';
+    expected.ed25519 = other.ed25519;
+    expect(rows.size).toBe(0);
+    await Effect.runPromise(store.create(ref));
+    expect(await Effect.runPromise(inspect)).toEqual(keys);
+    expect(await Effect.runPromise(read)).toEqual(keys);
+  });
+
   it('keeps account/device/purpose separate, detects duplicates, never regenerates missing keys', async () => {
     const { backend, rows } = fixture();
     const personal = makeHostIdentityStore('personal-device', backend);

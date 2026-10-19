@@ -45,27 +45,25 @@ describe.skipIf(!enabled)('macOS isolated host identity fixture', () => {
 
   const invoke = (action: string, purpose: HostKeyPurpose = 'machine') =>
     JSON.parse(run(binary, [action, uuid, directory, purpose])) as Record<string, unknown>;
-  const operation = (action: string, purpose: HostKeyPurpose) =>
-    Effect.gen(function* () {
-      const result = yield* Effect.try({
-        try: () => invoke(action, purpose),
-        catch: () => ({
-          ...hostKeyFailure('unavailable'),
-          ...(action === 'create' ? { creationOutcome: 'unknown' as const } : {}),
-        }),
-      });
-      if (typeof result.status !== 'number')
-        return yield* Effect.fail(hostKeyFailure('unavailable'));
-      if (result.status !== 0) return yield* Effect.fail(macOSKeyFailure(result.status));
-      if (
-        result.invalidRecord ||
-        typeof result.ed25519 !== 'string' ||
-        typeof result.x25519 !== 'string'
-      ) {
-        return yield* Effect.fail(hostKeyFailure('invalid-record'));
-      }
-      return { ed25519: result.ed25519, x25519: result.x25519 };
+  const operation = Effect.fnUntraced(function* (action: string, purpose: HostKeyPurpose) {
+    const result = yield* Effect.try({
+      try: () => invoke(action, purpose),
+      catch: () => ({
+        ...hostKeyFailure('unavailable'),
+        ...(action === 'create' ? { creationOutcome: 'unknown' as const } : {}),
+      }),
     });
+    if (typeof result.status !== 'number') return yield* Effect.fail(hostKeyFailure('unavailable'));
+    if (result.status !== 0) return yield* Effect.fail(macOSKeyFailure(result.status));
+    if (
+      result.invalidRecord ||
+      typeof result.ed25519 !== 'string' ||
+      typeof result.x25519 !== 'string'
+    ) {
+      return yield* Effect.fail(hostKeyFailure('invalid-record'));
+    }
+    return { ed25519: result.ed25519, x25519: result.x25519 };
+  });
   const backend: HostIdentityBackend = {
     storage: 'macos-isolated-file-keychain',
     execution: 'host-software',

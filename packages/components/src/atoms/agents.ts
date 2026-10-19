@@ -1,3 +1,4 @@
+import { isMagpieGatewayUrl } from '@lody/shared';
 import { atom } from 'jotai';
 import {
   AGENT_CONFIG_DOC_PREFIX,
@@ -178,6 +179,7 @@ type ParsedConfigRaw = {
   agentType: string;
   customAcp?: CustomAcpLaunchSpec;
   runtimeOverrides?: BuiltinRuntimeOverrides;
+  magpieGatewayUrl?: string;
   env: Record<string, string>;
   prompt: string;
   titleGeneration?: TitleGenerationConfig;
@@ -225,6 +227,7 @@ function parseAgentConfigRaw(roomId: string, raw: unknown): ParsedConfigRaw | nu
     agentType,
     customAcp,
     runtimeOverrides,
+    magpieGatewayUrl: isMagpieGatewayUrl(raw.magpieGatewayUrl) ? raw.magpieGatewayUrl : undefined,
     env: isPlainObject(raw.env) ? (raw.env as Record<string, string>) : {},
     prompt: typeof raw.prompt === 'string' ? raw.prompt : '',
     titleGeneration,
@@ -250,6 +253,7 @@ function buildAgentConfigMeta(roomId: string, raw: unknown): AgentConfigMeta | n
     agentType: parsed.agentType,
     customAcp: parsed.customAcp,
     runtimeOverrides: parsed.runtimeOverrides,
+    magpieGatewayUrl: parsed.magpieGatewayUrl,
     env: parsed.env,
     prompt: parsed.prompt,
     titleGeneration: parsed.titleGeneration,
@@ -268,6 +272,7 @@ function buildLegacyAgentConfigMeta(roomId: string, raw: unknown): LegacyAgentCo
     agentType: parsed.agentType,
     customAcp: parsed.customAcp,
     runtimeOverrides: parsed.runtimeOverrides,
+    magpieGatewayUrl: parsed.magpieGatewayUrl,
     env: parsed.env,
     prompt: parsed.prompt,
     titleGeneration: parsed.titleGeneration,

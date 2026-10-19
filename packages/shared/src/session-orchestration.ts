@@ -67,6 +67,7 @@ export const LodyOperationItemSchema = z.discriminatedUnion('status', [
   z
     .object({
       status: z.literal('cancelled'),
+      cancellationReason: z.literal('user_stop').optional(),
       label: z.string().optional(),
       target: OperationTargetSchema.optional(),
     })
@@ -168,6 +169,7 @@ export type LodyOperationItemResult =
     }
   | {
       status: 'cancelled';
+      cancellationReason?: 'user_stop';
       label?: string;
       target?: LodyOperationItemTarget;
     };
@@ -215,6 +217,8 @@ export type FrozenOperationContinuationConfig = {
   inputConfig: SessionTurnInputConfig;
   /** Frozen causal Turn for delegated Operations; recovery must not re-resolve it. */
   sourceTurnId?: string;
+  /** Human requests whose result this requester is still assembling. Not authorization. */
+  notificationOriginTurnIds?: string[];
   /**
    * Effective per-target create config captured at acceptance. Null entries
    * correspond to batch items rejected before a target was accepted.
@@ -264,23 +268,6 @@ export type StoredLodyOperation = {
   finishedAt?: string;
 };
 
-export type StoredLodyDelivery = {
-  sequence: number;
-  workspaceId: WorkspaceId;
-  requesterSessionId: SessionId;
-  operationId: string;
-  deliveryId: string;
-  systemTurnId: string;
-  state: 'pending' | 'consumed';
-  executionPhase: 'ready' | 'claimed' | 'prepared' | 'started' | 'uncertain';
-  attemptCount: number;
-  activeClaimId?: string;
-  activeClaimWorkerBootId?: string;
-  initiatorChainDepth: number;
-  completion: LodyOperationCompletion;
-  consumedAt?: string;
-};
-
 export type OperationCompletionContent = {
   type: 'operation_completion';
   deliveryId: string;
@@ -289,17 +276,6 @@ export type OperationCompletionContent = {
   /** Stable system history entry id for the matching operation_progress card, when one exists. */
   progressMessageId?: string;
   completion: LodyOperationCompletion;
-  continuation?: {
-    status: 'not_started' | 'uncertain';
-    reason: {
-      code:
-        | 'COLLABORATION_STOPPED'
-        | 'CONFIGURATION_UNAVAILABLE'
-        | 'DELIVERY_ATTEMPTS_EXHAUSTED'
-        | 'DELIVERY_EXECUTION_UNCERTAIN';
-      message: string;
-    };
-  };
 };
 
 export const makeLodyError = (code: string, message: string, retryable: boolean): LodyError => ({

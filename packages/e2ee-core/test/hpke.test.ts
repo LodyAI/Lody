@@ -1,9 +1,15 @@
+import { envelopeFixture } from './keys/fixture';
+import * as Envelopes from '@lody/e2ee-core/protocol';
+import * as EpochKeys from '@lody/e2ee-core/protocol';
+import * as KeyMaterial from '../src/internal/foundation/epoch-key';
+import { concat } from '../src/internal/foundation/concat';
+import type { DeviceSigner } from '@lody/e2ee-core/protocol';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { Cause, Effect, Exit, Fiber, Result } from 'effect';
+import { Cause, Deferred, Effect, Exit, Fiber, Result } from 'effect';
 import { CipherSuite, DhkemX25519HkdfSha256, HkdfSha256 } from '@hpke/core';
 import { Chacha20Poly1305 } from '@hpke/chacha20poly1305';
-import * as Public from '../src/index';
-import { copyEpochKeyBytes } from '../src/epoch-key';
+import * as Public from '../src/protocol';
+import { copyEpochKeyBytes } from '../src/internal/foundation/epoch-key';
 import vector from './hpke-vector.json';
 
 const bytes = (hex: string) => new Uint8Array(Buffer.from(hex, 'hex'));
@@ -353,5 +359,252 @@ describe('fixed Base HPKE epoch primitive through the public entry', () => {
     );
     expect(hex(copyEpochKeyBytes(opened))).toBe(v.pt);
     expect(input).toEqual({ enc: new Uint8Array(32), ct: new Uint8Array(48) });
+  });
+});
+
+describe('authorized signed epoch envelopes through the public subentry', () => {
+  it.each([0, 1, 2] as const)(
+    'opens the committed key for active recipient kind %s with real HPKE and signature',
+    async (kind) => {
+      const f = envelopeFixture(kind),
+        frame = await Effect.runPromise(f.prepare());
+      const sealedParts = ok(Envelopes.authenticateEpochEnvelope(f.view(), f.context, frame));
+      expect(sealedParts.enc.length).toBe(32);
+      expect(sealedParts.ct.length).toBe(48);
+      sealedParts.ct.fill(0);
+      const opened = await Effect.runPromise(
+        Envelopes.openEpochEnvelope({
+          context: f.context,
+          pair: await pair(),
+          frame,
+          ledger: f.ledger,
+        })
+      );
+      expect(hex(copyEpochKeyBytes(opened))).toBe(v.pt);
+      expect(ok(EpochKeys.commitEpochKey(f.context.genesis, 0, opened))).toEqual(
+        ok(EpochKeys.commitEpochKey(f.context.genesis, 0, f.secret))
+      );
+    }
+  );
+  it('rejects forged view, trusted routing substitution, bad signature and signer output', async () => {
+    const f = envelopeFixture(),
+      view = f.view(),
+      frame = await Effect.runPromise(f.prepare());
+    expect(
+      Result.isFailure(Envelopes.authenticateEpochEnvelope({ ...view }, f.context, frame))
+    ).toBe(true);
+    for (const checkedContext of [
+      { ...f.context, genesis: ok(Public.Bytes.genesisHash(new Uint8Array(32).fill(99))) },
+      { ...f.context, epoch: ok(Public.Bytes.epochNumber(1)) },
+      { ...f.context, recipient: f.owner.publicKey },
+      { ...f.context, sender: f.phone.publicKey },
+    ])
+      expect(
+        Result.isFailure(Envelopes.authenticateEpochEnvelope(view, checkedContext, frame))
+      ).toBe(true);
+    const bad = new Uint8Array(frame);
+    bad[bad.length - 1] ^= 1;
+    expect(Result.isFailure(Envelopes.authenticateEpochEnvelope(view, f.context, bad))).toBe(true);
+    expect(
+      await failure(
+        Envelopes.prepareEpochEnvelope({
+          context: f.context,
+          key: f.secret,
+          ledger: f.ledger,
+          signer: {
+            publicKey: f.owner.publicKey,
+            sign: () => Effect.succeed(ok(Public.Bytes.signature(new Uint8Array(64)))),
+          },
+        })
+      )
+    ).toMatchObject({ code: 'bad-signature' });
+    expect(
+      await failure(
+        Envelopes.prepareEpochEnvelope({
+          context: f.context,
+          key: ok(Public.Bytes.epochKey(new Uint8Array(32).fill(99))),
+          ledger: f.ledger,
+          signer: f.owner.signer,
+        })
+      )
+    ).toMatchObject({ code: 'commitment-mismatch' });
+  });
+  it('does not confuse valid outer signature with AEAD or plaintext commitment', async () => {
+    const f = envelopeFixture(),
+      frame = await Effect.runPromise(f.prepare());
+    const bad = new Uint8Array(frame);
+    bad[bad.length - 65] ^= 1;
+    const resigned = f.resign(bad);
+    expect(
+      Result.isSuccess(Envelopes.authenticateEpochEnvelope(f.view(), f.context, resigned))
+    ).toBe(true);
+    expect(
+      await failure(
+        Envelopes.openEpochEnvelope({
+          context: f.context,
+          pair: await pair(),
+          frame: resigned,
+          ledger: f.ledger,
+        })
+      )
+    ).toMatchObject({ code: 'open-failed' });
+    const wrong = await Effect.runPromise(
+      Public.sealEpochKeyHpke(
+        recipient,
+        ok(Public.Bytes.epochKey(new Uint8Array(32).fill(99))),
+        f.context
+      )
+    );
+    const unsigned = concat([
+      ok(Public.epochHpkeAad(f.context)),
+      wrong.enc,
+      wrong.ct,
+      new Uint8Array(64),
+    ]);
+    const signed = f.resign(unsigned);
+    let owned: Public.Bytes.EpochKey | undefined;
+    const factory = KeyMaterial.epochKey;
+    vi.spyOn(KeyMaterial, 'epochKey').mockImplementation((input) => {
+      const parsed = factory(input);
+      if (Result.isSuccess(parsed)) owned = parsed.success;
+      return parsed;
+    });
+    expect(
+      await failure(
+        Envelopes.openEpochEnvelope({
+          context: f.context,
+          pair: await pair(),
+          frame: signed,
+          ledger: f.ledger,
+        })
+      )
+    ).toMatchObject({ code: 'commitment-mismatch' });
+    expect(owned).toBeDefined();
+    expect(() => copyEpochKeyBytes(owned!)).toThrow('invalid-epoch-key');
+  });
+  it('captures frame before asynchronous ledger lookup and rejects recipient revocation while signing', async () => {
+    const f = envelopeFixture(),
+      frame = await Effect.runPromise(f.prepare());
+    const before = f.view();
+    let first = true;
+    const opened = await Effect.runPromise(
+      Envelopes.openEpochEnvelope({
+        context: f.context,
+        pair: await pair(),
+        frame,
+        ledger: () =>
+          Effect.sync(() => {
+            if (first) {
+              first = false;
+              frame.fill(0);
+            }
+            return before;
+          }),
+      })
+    );
+    expect(hex(copyEpochKeyBytes(opened))).toBe(v.pt);
+    const signer: DeviceSigner = {
+      publicKey: f.owner.publicKey,
+      sign: (message) =>
+        Effect.sync(() => {
+          f.append([5, f.phone.raw]);
+          return ok(Public.Bytes.signature(f.owner.signBytes(message)));
+        }),
+    };
+    expect(
+      await failure(
+        Envelopes.prepareEpochEnvelope({
+          context: f.context,
+          key: f.secret,
+          ledger: f.ledger,
+          signer,
+        })
+      )
+    ).toMatchObject({ code: 'unauthorized' });
+    expect(f.view().inspectState().devices.has(hex(f.phone.raw))).toBe(false);
+  });
+  it('permits machine key forwarding but rejects Recovery as a sender', async () => {
+    for (const kind of [1, 2] as const) {
+      const f = envelopeFixture(kind);
+      const forwardingContext = {
+        ...f.context,
+        sender: f.phone.publicKey,
+        recipient: f.owner.publicKey,
+      };
+      const result = await Effect.runPromise(
+        Effect.result(
+          Envelopes.prepareEpochEnvelope({
+            context: forwardingContext,
+            key: f.secret,
+            signer: f.phone.signer,
+            ledger: f.ledger,
+          })
+        )
+      );
+      if (kind === 2) expect(Result.isFailure(result)).toBe(true);
+      else expect(Result.isSuccess(result)).toBe(true);
+    }
+  });
+  it('rejects revocation after real decryption and invalidates its operation-owned key', async () => {
+    const f = envelopeFixture(),
+      frame = await Effect.runPromise(f.prepare()),
+      keys = await pair();
+    let owned: Public.Bytes.EpochKey | undefined;
+    const factory = KeyMaterial.epochKey;
+    vi.spyOn(KeyMaterial, 'epochKey').mockImplementation((input) => {
+      const parsed = factory(input);
+      if (Result.isSuccess(parsed)) owned = parsed.success;
+      return parsed;
+    });
+    let first = true;
+    const ledger = () =>
+      Effect.sync(() => {
+        if (first) first = false;
+        else f.append([5, f.phone.raw]);
+        return f.view();
+      });
+    expect(
+      await failure(Envelopes.openEpochEnvelope({ context: f.context, pair: keys, frame, ledger }))
+    ).toMatchObject({ code: 'unauthorized' });
+    expect(owned).toBeDefined();
+    expect(() => copyEpochKeyBytes(owned!)).toThrow('invalid-epoch-key');
+  });
+  it('cleans an opened operation key when cancellation interrupts the post-crypto authority wait', async () => {
+    const f = envelopeFixture(),
+      frame = await Effect.runPromise(f.prepare()),
+      keys = await pair();
+    let owned: Public.Bytes.EpochKey | undefined;
+    const factory = KeyMaterial.epochKey;
+    vi.spyOn(KeyMaterial, 'epochKey').mockImplementation((input) => {
+      const parsed = factory(input);
+      if (Result.isSuccess(parsed)) owned = parsed.success;
+      return parsed;
+    });
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const reached = yield* Deferred.make<void>();
+          let first = true;
+          const ledger = () =>
+            Effect.gen(function* () {
+              if (first) {
+                first = false;
+                return f.view();
+              }
+              yield* Deferred.succeed(reached, undefined);
+              return yield* Effect.never;
+            });
+          const worker = yield* Effect.forkChild(
+            Envelopes.openEpochEnvelope({ context: f.context, pair: keys, frame, ledger })
+          );
+          yield* Deferred.await(reached);
+          expect(hex(copyEpochKeyBytes(owned!))).toBe(v.pt);
+          yield* Fiber.interrupt(worker);
+          const exit = yield* Fiber.await(worker);
+          expect(Exit.isFailure(exit)).toBe(true);
+          expect(() => copyEpochKeyBytes(owned!)).toThrow('invalid-epoch-key');
+        })
+      )
+    );
   });
 });

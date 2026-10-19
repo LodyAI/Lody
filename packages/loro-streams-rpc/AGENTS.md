@@ -25,36 +25,34 @@ and the `file/preview` namespace are in
   methods are on `LoroStreamsMachineRpcClient`.
 - `createLoroStreamsJsonStreamClient` append must select its shard **stably** per stream
   id (`selectStableShardUrl`), never randomly.
-- `readJsonLive` must keep its idle watchdog (`liveIdleTimeoutMs`, default
-  `DEFAULT_LIVE_IDLE_TIMEOUT_MS` = 120s; `0` disables) and must abort with a plain
-  `AbortError`, so the caller's `while (!this.stopped)` loop (`runResponseLoop` /
-  server `runLoop`) reconnects from the saved offset.
+- JSON append timeout: `uploadTimeoutMs ?? connectTimeoutMs ?? 10000`; keep
+  RPC deadlines independent of bulk uploads.
+- `readJsonLive` keeps `liveIdleTimeoutMs` (default 120s; `0` disables) and aborts
+  with plain `AbortError`, so `runResponseLoop` / `runLoop` resume saved offsets.
 - Web Machine RPC responses are **SSE-first with a bounded long-poll fallback**, owned by
   `LoroStreamsLiveModePolicy` (`src/live-mode-policy.ts`) and passed to
   `LoroStreamsRpcResponseDispatcher` as `liveModePolicy`; it picks the mode per read, so do
   **not** re-pin a static `liveMode` on the web json stream client. It falls back on
-  unsupported SSE, consecutive failed reads, and pending-response starvation, and switches
-  must preserve `responseState` offsets and the `pending` map. Read
-  context/machine-rpc-live-transport.md
-  before touching it. The CLI request-read keeps the static client default (`'sse'`) plus
-  the watchdog.
+  unsupported SSE, failed reads and response starvation. Appended Roost input writes
+  renew the shared response read once after 2s; retain offsets, pending calls and
+  deadlines, never replay the write or infer acceptance. Stop/cancel removes that
+  recovery; explicit pins disable it. Read the linked Machine RPC map before changes.
+  CLI request reads keep static `'sse'` plus the watchdog.
 - The CLI owns/listens to the request stream via `src/machine-rpc-server.ts`
   `LoroStreamsMachineRpcServer`.
-- The server dispatches requests **concurrently**, bounded by `maxConcurrentRequests`
-  (default 16), so a slow handler cannot head-of-line block independent reads on the
-  shared per-machine request stream. Handlers must be safe to run concurrently; one that
-  needs read-check-write atomicity serializes in its own service layer (Code Collab
-  `save-text` per absolute path in `code-collab-v2-service.ts`), not in the request loop.
-- Control-plane methods (`machine/status`, `machine/preview-control`, `machine/ping`, `session/cancel`,
-  `session/live-status`, `session/steer`, `session/terminate`, `machine/restart`,
-  `machine/upgrade`, `session/dispatch-turn`)
-  bypass the shared semaphore and run on a small dedicated lane
-  (`CONTROL_METHODS` in `machine-rpc-server.ts`) so saturated code-collab
-  handlers cannot delay them at intake. Control handlers must stay fast
-  (ack-then-execute): `session/dispatch-turn` only stashes the payload and wakes the
-  dispatch watcher — never run the agent turn inside the handler. Its `expiresAt`
-  is deliberately short (== client timeout, ~15s) because a server restart replays
-  the request stream from offset `'-1'`.
+- Handler permits wait inside tracked tasks, never behind ordinary intake. Bound
+  ordinary admission (default 128); overload replies are separately bounded.
+  History writes and `CONTROL_METHODS` have reserved pools, independent of reads.
+  Serialize mutations in their owner service, not the request loop.
+  `session/history-watch` retains owner encryption and readiness checks. Bound its
+  separate admission at 128; checkpoint waits hold no ordinary read permit. Acquire
+  that permit only for the subsequent body/change read. Stop aborts parked waits.
+- Control handlers stay fast: `session/dispatch-turn` stashes/wakes, never executes
+  an agent inline. Its TTL equals the client deadline, bounding restart replay.
+  Stop fences queued handlers; retain started work until its raw completion.
+- History writes require durable precondition-refusal retention before replying.
+  Replayed IDs keep that refusal until expiry; conflicting ID reuse and unavailable
+  request state fail closed. Details: [history readiness](../../.agents/docs/rpc-loro-streams-rpc.md#history-readiness-and-error-provenance).
 - Session orchestration authorization is checked source-side with the source CLI
   token because workspace RPC cannot authenticate a claimed requester identity.
   `session/live-status` reads the target

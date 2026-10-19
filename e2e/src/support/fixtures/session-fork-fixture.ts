@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { expect } from '@playwright/test';
 import { quoteCommandArgument } from './command-line.js';
+export { isPidAlive as isProcessAlive } from './process-liveness.js';
 
 const execFileAsync = promisify(execFile);
 const ACP_ENTRY = resolve(dirname(fileURLToPath(import.meta.url)), 'session-fork-acp.mjs');
@@ -21,19 +22,6 @@ export type SessionForkEvent = {
   cwd?: string;
   purpose?: 'title' | 'turn';
 };
-
-export function isProcessAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (error) {
-    return !(
-      error instanceof Error &&
-      'code' in error &&
-      (error as NodeJS.ErrnoException).code === 'ESRCH'
-    );
-  }
-}
 
 export class SessionForkFixture {
   readonly projectName = 'lody-e2e-work';

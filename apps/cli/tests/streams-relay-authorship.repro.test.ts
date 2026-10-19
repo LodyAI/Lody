@@ -51,7 +51,13 @@
  *    'import' / by 'import'), wired to the repo's internal metaFlock via
  *    apps/cli/src/lib/loro/doc.ts:108-121.
  */
-import { describe, expect, it } from 'vitest';
+import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
+import { Effect, Layer } from 'effect';
+import { LocalLoroWriterTurn } from '@lody/shared/local-loro-writer';
+import {
+  makeLocalLoroWriterLegacy,
+  type LocalLoroWriterLegacy,
+} from '@lody/shared/local-loro-writer/legacy';
 import { Flock } from '@loro-dev/flock-wasm';
 import { LoroDoc } from 'loro-crdt';
 import { createLoroDocAdapter } from '@loro-dev/streams-crdt/loro';
@@ -60,8 +66,8 @@ import {
   type LocalLoroDataPlaneClientMessage,
   type LocalLoroDataPlaneServerMessage,
 } from '@lody/shared/local-loro-data-plane';
-import { LocalLoroDataPlaneServer } from '@lody/shared/local-loro-data-plane-server';
-import { LocalLoroTransportAdapter } from '@lody/shared/local-loro-transport';
+import { LocalLoroDataPlaneServerLegacy } from '@lody/shared/local-loro-data-plane-server';
+import { LocalLoroTransportAdapter } from '../../../packages/shared/test-support/local-loro-v7-client';
 
 const decoder = new TextDecoder();
 
@@ -98,7 +104,7 @@ function patchFlockExportJson(flock: Flock): Flock {
 /** Flock events are debounced; commit() forces emission, then drain microtasks. */
 async function settle(rounds = 10): Promise<void> {
   for (let i = 0; i < rounds; i += 1) {
-    await new Promise((resolve) => setTimeout(resolve, 5));
+    await vi.advanceTimersByTimeAsync(5);
   }
 }
 
@@ -123,7 +129,7 @@ describe('dual-author invariant: a Streams up-link cannot relay foreign-authored
 
     // Renderer creates a session locally: its own replica authors the existence
     // entry + creation metadata; the CLI receives the bundle as an IMPORT
-    // (LocalLoroDataPlaneServer.handleUpdate → flock.importJson), preserving the
+    // (LocalLoroDataPlaneServerLegacy.handleUpdate → flock.importJson), preserving the
     // renderer peer's authorship on every entry (dual-author local plane sync).
     const rendererMeta = new Flock('renderer-meta-peer');
     rendererMeta.put(['e', 'session-1'], true);
@@ -171,7 +177,7 @@ describe('dual-author invariant: a Streams up-link cannot relay foreign-authored
     });
 
     // The user's message is authored by the renderer replica and reaches the CLI
-    // doc as an import (LocalLoroDataPlaneServer.handleUpdate → doc.import).
+    // doc as an import (LocalLoroDataPlaneServerLegacy.handleUpdate → doc.import).
     const rendererDoc = new LoroDoc();
     rendererDoc.getText('history').insert(0, 'user-message');
     rendererDoc.commit();
@@ -202,7 +208,7 @@ describe('dual-author invariant: a Streams up-link cannot relay foreign-authored
   it("product chain: a session created over the relayed data plane is DROPPED from the Streams sink's live drain", async () => {
     // Faithful compression of the production chain with only the HTTP gateway
     // replaced by a recording sink:
-    //   renderer LocalLoroTransportAdapter (v3) → LocalLoroDataPlaneServer
+    //   renderer LocalLoroTransportAdapter (v3) → LocalLoroDataPlaneServerLegacy
     //   (resolveMetaFlock → the CLI's real metaFlock, doc.ts:108-121) →
     //   real streams-crdt createFlockAdapter live drain (what
     //   StreamsTransportAdapter's meta session pushes to the cloud).
@@ -210,7 +216,8 @@ describe('dual-author invariant: a Streams up-link cannot relay foreign-authored
     // (re)attach, and the user-visible bug is precisely that nothing after that
     // point ever syncs up.
     const cliMeta = patchFlockExportJson(new Flock('cli-meta-peer'));
-    const engine = new LocalLoroDataPlaneServer({
+    const engine = new LocalLoroDataPlaneServerLegacy({
+      writerLegacy,
       workspaceId: 'ws',
       resolveDoc: async () => new LoroDoc(),
       resolveFlockDoc: async () => {
@@ -309,14 +316,15 @@ describe('dual-author invariant: a Streams up-link cannot relay foreign-authored
   it('dual-author convergence: the renderer and CLI drains together reconstruct the full session; each alone is incomplete', async () => {
     // End-to-end shape of an offline local conversation converging to the
     // cloud: renderer and CLI exchange ops over the real local data plane
-    // (renderer LocalLoroTransportAdapter ↔ LocalLoroDataPlaneServer), while
+    // (renderer LocalLoroTransportAdapter ↔ LocalLoroDataPlaneServerLegacy), while
     // each side's OWN Streams live drain records what its cloud connection
     // would upload. The cloud replica is the merge of BOTH drains — and only
     // both: author scoping makes either drain alone incomplete. This is the
     // dual-author acceptance criterion (specs/local-first-two-plane.md 验收).
     const cliMeta = patchFlockExportJson(new Flock('cli-meta-peer'));
     const cliSessionDoc = new LoroDoc();
-    const engine = new LocalLoroDataPlaneServer({
+    const engine = new LocalLoroDataPlaneServerLegacy({
+      writerLegacy,
       workspaceId: 'ws',
       resolveDoc: async (docId) => {
         if (docId !== 'session-1') throw new Error(`unexpected doc ${docId}`);
@@ -453,4 +461,23 @@ describe('dual-author invariant: a Streams up-link cannot relay foreign-authored
     importDrainedFlockBatches(rendererOnlyMeta, rendererMetaDrained);
     expect(rendererOnlyMeta.get(['m', 'session-1', 'status'])).toBeUndefined();
   });
+});
+
+let writerLegacy: LocalLoroWriterLegacy;
+beforeEach(() => {
+  vi.useFakeTimers();
+  writerLegacy = makeLocalLoroWriterLegacy(
+    Layer.succeed(LocalLoroWriterTurn, {
+      next: Effect.callback<void>((resume) => {
+        const handle = setTimeout(() => resume(Effect.void), 0);
+        return Effect.sync(() => clearTimeout(handle));
+      }),
+    })
+  );
+});
+afterEach(async () => {
+  const closed = writerLegacy.closeLegacy();
+  await vi.runAllTimersAsync();
+  await closed;
+  vi.useRealTimers();
 });

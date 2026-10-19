@@ -25,6 +25,19 @@ Pick the machine and agent config, then the model, reasoning, and permission tha
 and optionally a default instruction. A new role is private to you until you turn on
 **Share with workspace**.
 
+## Ask an agent to create or update a role
+
+In an active Lody conversation, ask the agent to create a role or update the name,
+description, or default instruction of a role you own. The agent uses
+`lody_agent_role_create` or `lody_agent_role_update` to show a review card.
+Review the proposed fields and click **Save** to apply them, or dismiss the card.
+
+New roles created this way are private, bind the specified machine and Agent Config,
+and use that Agent's default run configuration. Updates preserve fields you did not
+ask to change. Model, permission, sharing, and other settings remain editable in Settings.
+You can also submit the same proposals through the [CLI](/docs/cli#create-and-update-agent-roles),
+using direct parameters or a JSON file.
+
 ## Use a role when starting a conversation
 
 The composer's run configuration has a **Role** row above **Agent**, because a role answers every

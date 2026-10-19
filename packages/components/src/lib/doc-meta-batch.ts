@@ -1,4 +1,5 @@
-import type { LoroRepo } from 'loro-repo';
+import type { WorkspaceRepoLegacy } from '@lody/shared/workspace-data/repo-legacy';
+
 import { isLoroRepoDocDeleted, isMachineDocRoomId, isSessionDocRoomId } from '@lody/shared';
 import { collectDocExistenceValues, collectDocMetadataPatchesFromEntries } from './flock-existence';
 
@@ -13,7 +14,7 @@ type FlockScanner = {
   }): Iterable<FlockScanRow> | Promise<Iterable<FlockScanRow>>;
 };
 
-type RepoWithMetaScanner = LoroRepo & {
+type RepoWithMetaScanner = WorkspaceRepoLegacy & {
   getMeta?: () => FlockScanner | null | undefined;
 };
 
@@ -30,7 +31,7 @@ async function scanRows(
   return Array.from(await scanner.scan({ prefix }));
 }
 
-async function tryListDocMetaEntriesFromFlock(repo: LoroRepo): Promise<DocMetaEntry[] | null> {
+async function tryListDocMetaEntriesFromFlock(repo: WorkspaceRepoLegacy): Promise<DocMetaEntry[] | null> {
   const scanner = (repo as RepoWithMetaScanner).getMeta?.();
   if (!scanner) return null;
 
@@ -57,7 +58,7 @@ async function tryListDocMetaEntriesFromFlock(repo: LoroRepo): Promise<DocMetaEn
   }
 }
 
-export async function listDocMetaEntries(repo: LoroRepo): Promise<DocMetaEntry[]> {
+export async function listDocMetaEntries(repo: WorkspaceRepoLegacy): Promise<DocMetaEntry[]> {
   const batchedEntries = await tryListDocMetaEntriesFromFlock(repo);
   if (batchedEntries) return batchedEntries;
   const entries = await repo.listDoc();
@@ -77,7 +78,7 @@ export type DocMetaCacheSnapshot = {
   machines: Readonly<Record<string, Record<string, unknown>>>;
 };
 
-export type ReadDocMetaCache = (repo: LoroRepo) => DocMetaCacheSnapshot | null;
+export type ReadDocMetaCache = (repo: WorkspaceRepoLegacy) => DocMetaCacheSnapshot | null;
 
 /**
  * Live session and machine metadata by room id. Prefers the ready doc-meta
@@ -86,7 +87,7 @@ export type ReadDocMetaCache = (repo: LoroRepo) => DocMetaCacheSnapshot | null;
  * reader after the first must reuse the projection instead of scanning again.
  */
 export async function readSessionAndMachineMetas(
-  repo: LoroRepo,
+  repo: WorkspaceRepoLegacy,
   readCache: ReadDocMetaCache | undefined
 ): Promise<DocMetaCacheSnapshot> {
   const cached = readCache?.(repo);

@@ -232,6 +232,90 @@ lody project list --help
 lody project delete --help
 ```
 
+## Create and update Agent Roles
+
+CLI and MCP can propose a new Role or changes to a Role you own. The proposal appears
+as a review card in an active conversation. Click **Save** in Lody to apply it, or dismiss
+the card to leave the catalog unchanged. A successful command reports a pending proposal,
+not a saved Role.
+
+```bash
+lody agent-role create --name "Reviewer" --description "Review code" \
+  --prompt-prefix "Find actionable bugs" \
+  --machine-id MACHINE_ID --agent-config-id CONFIG_ID --session SESSION_ID
+
+lody agent-role update ROLE_ID --name "Code reviewer" \
+  --description "" --prompt-prefix "Focus on correctness" --session SESSION_ID
+```
+
+| Option | Create | Update |
+| --- | --- | --- |
+| `--name <name>` | Required | Optional |
+| `--description <text>` | Optional | Optional; `""` clears it |
+| `--prompt-prefix <text>` | Optional | Optional; `""` clears it |
+| `--machine-id <id>` | Required | Not supported |
+| `--agent-config-id <id>` | Required | Not supported |
+
+Updates require at least one field. Omitted fields stay unchanged. New Roles are private
+and use the bound Agent's default run configuration. Change model, permissions, sharing,
+and other settings in the Role editor.
+
+Use `--session` or set `LODY_SESSION_ID` to select the active conversation, and
+`--workspace <id-or-slug>` when the workspace is ambiguous. Reuse `--request-id <id>`
+with identical input when retrying; the result reports the existing proposal's outcome.
+
+JSON files are also supported:
+
+```bash
+lody agent-role create --file role.json --session SESSION_ID
+lody agent-role update ROLE_ID --file patch.json --session SESSION_ID
+```
+
+A create file contains `name`, `machineId`, `agentConfigId`, and optionally `description`
+and `promptPrefix`. An update file contains only the changed `name`, `description`, or
+`promptPrefix`. `--file` cannot be combined with direct Role field options. For instructions
+stored in Markdown, pass `--prompt-prefix "$(cat reviewer.md)"` instead.
+
+
+`role.json`:
+
+```json
+{
+  "name": "Reviewer",
+  "machineId": "MACHINE_ID",
+  "agentConfigId": "CONFIG_ID",
+  "description": "Review code",
+  "promptPrefix": "Check correctness.\nReport actionable bugs."
+}
+```
+
+`patch.json`:
+
+```json
+{
+  "description": "",
+  "promptPrefix": "Focus on correctness.\nExplain each finding."
+}
+```
+
+Files must contain a single UTF-8 JSON object, using the camelCase keys shown above.
+The update file is the patch itself: do not wrap it in `patch`; pass the Role ID as the
+command argument. Pass retry IDs with `--request-id`. JSON strings use `\n` for line
+breaks; comments and trailing commas are not valid JSON.
+
+All field values are strings. Creation requires `name`, `machineId`, and `agentConfigId`.
+Updates require at least one supported field. Omitted update fields stay unchanged;
+`""` clears description or instructions, while `null` is rejected. Names must be nonempty,
+mention-compatible and at most 60 characters after trimming; descriptions allow up to
+140 Unicode code points; instructions allow up to 32,768 characters before trimming.
+Machine/config IDs must be nonempty and at most 128 characters after trimming.
+Unsupported fields are rejected.
+
+MCP exposes the same confirmation flow through `lody_agent_role_create` and
+`lody_agent_role_update`. Create takes `requestId` plus the create fields above; update
+takes `requestId`, `roleId`, and a `patch` containing the changed text fields.
+See [Agent Roles](/docs/agent-roles) for how saved Roles are used.
+
 ## Desktop App Commands
 
 | Command                | What it does                                              | Help command                  |

@@ -90,6 +90,24 @@ const styles = stylex.create({
   input: { flexGrow: 1, minWidth: 0 },
 });
 
+const ENTRY_DIRS = new Set(['src', 'dist', 'lib']);
+
+/** Settings persist only paths; approximate the scan's package name for unscanned rows. */
+function savedExtensionName(path: string): string {
+  const parts = path.split(/[\\/]/).filter(Boolean);
+  const modules = parts.lastIndexOf('node_modules');
+  const scoped = parts[modules + 1]?.startsWith('@');
+  const pkg = modules >= 0 ? parts.slice(modules + 1, modules + (scoped ? 3 : 2)) : [];
+  if (pkg.length === (scoped ? 2 : 1)) return pkg.join('/');
+  const file = parts.at(-1) ?? path;
+  if (!/^index\.[^.]+$/.test(file)) return file;
+  const dir = parts
+    .slice(0, -1)
+    .reverse()
+    .find((part) => !ENTRY_DIRS.has(part));
+  return dir && !/^[a-zA-Z]:$/.test(dir) ? dir : file;
+}
+
 export function PiExtensionsField({
   value,
   onChange,
@@ -128,7 +146,7 @@ export function PiExtensionsField({
     if (!discovered.has(selected))
       rows.push({
         path: selected,
-        name: selected.split(/[\\/]/).pop() ?? selected,
+        name: savedExtensionName(selected),
         stale: discovery !== undefined,
       });
   const add = (candidate: string): boolean => {

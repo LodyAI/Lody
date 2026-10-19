@@ -12,6 +12,10 @@ const count = (value: number | undefined) =>
  * A turn's share of one usage update: only the Core `delta`, which adapters
  * compute resume-safely from native data. Cumulative totals are never used;
  * an adapter without `delta` contributes nothing rather than a guess.
+ *
+ * Cost follows the same rule. A delta without a known tariff records `null`
+ * rather than dropping the field, so a turn that mixes known and unknown
+ * contributions never displays a partial total as if it were complete.
  */
 export function turnTokenUsageFromUpdate(
   update: SessionUsageUpdate
@@ -24,6 +28,10 @@ export function turnTokenUsageFromUpdate(
     cacheReadInputTokens: count(delta.cacheReadInputTokens),
     cacheCreationInputTokens: count(delta.cacheCreationInputTokens),
     reasoningOutputTokens: count(delta.reasoningOutputTokens),
+    costUSD:
+      typeof delta.costUSD === 'number' && Number.isFinite(delta.costUSD) && delta.costUSD >= 0
+        ? delta.costUSD
+        : null,
   };
   return isEmptySessionTurnTokenUsage(usage) ? undefined : usage;
 }

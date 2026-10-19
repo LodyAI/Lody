@@ -1,3 +1,4 @@
+import type { WorkspaceRepoLegacy } from '@lody/shared/workspace-data/repo-legacy';
 import {
   getMachineFlockDocId,
   isMachineDocRoomId,
@@ -8,7 +9,6 @@ import {
   type MachineMeta,
   type WorkspaceId,
 } from '@lody/shared';
-import type { LoroRepo } from 'loro-repo';
 
 import { listAliveDocMetas, normalizeCliValue, type AuthContext } from '@/lib/command-runtime';
 import type { LoroDocumentManager } from '@/lib/loro/doc';
@@ -29,7 +29,7 @@ type ProjectListResponse = Extract<
 export type RemoteProjectListDependencies = {
   listMachines: (manager: LoroDocumentManager) => Promise<readonly MachineMeta[]>;
   readProjects: (
-    repo: LoroRepo,
+    repo: WorkspaceRepoLegacy,
     workspaceId: WorkspaceId,
     machineId: MachineId
   ) => Promise<Record<LocalProjectId, LocalProjectMeta>>;

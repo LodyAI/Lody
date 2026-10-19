@@ -1,6 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
+import { Flock } from '@loro-dev/flock-wasm';
 import {
   AGENT_ROLE_VERSION,
+  normalizeAgentRole,
+  workspaceFlockKeys,
   type AgentConfigId,
   type AgentRole,
   type AgentRoleId,
@@ -14,6 +17,7 @@ import {
   writeWorkspaceAgentRole,
   type WorkspaceCatalogWriteDeps,
 } from '../src/lib/workspace-catalog-write';
+import { createDirectWorkspaceWriter } from '../src/providers/workspace-writer-impl';
 
 const workspaceId = 'workspace-1' as WorkspaceCatalogWriteDeps['workspaceId'];
 const entry: WorkspaceMcpServerMeta = {
@@ -117,5 +121,34 @@ describe('workspace catalog writes', () => {
     const unopenable = createDeps({ openError: new Error('room unavailable') });
     await expect(writeWorkspaceAgentRole(unopenable.deps, role)).resolves.toBeUndefined();
     await expect(uploadWorkspaceCatalog(unopenable.deps)).resolves.toBeUndefined();
+  });
+
+  it('stores a multi-machine role in the row shape older clients skip', async () => {
+    const flock = new Flock('catalog-write-multi');
+    const repo = { openFlockDoc: async () => ({ flock, syncOnce: async () => {} }) };
+    const deps = {
+      workspaceId,
+      repo,
+      writer: createDirectWorkspaceWriter({ repo } as never),
+    } as unknown as WorkspaceCatalogWriteDeps;
+    const multi: AgentRole = {
+      ...role,
+      additionalTargets: [
+        {
+          machineId: 'machine-2' as MachineId,
+          agentConfigId: 'config-2' as AgentConfigId,
+          runConfig: {},
+        },
+      ],
+    };
+    const key = workspaceFlockKeys.agentRole(role.id);
+
+    await writeWorkspaceAgentRole(deps, role);
+    expect(flock.get(key)).toEqual(role);
+
+    await writeWorkspaceAgentRole(deps, multi);
+    expect(flock.get(key)).toMatchObject({ v: 2 });
+    expect(flock.get(key)).not.toHaveProperty('additionalTargets');
+    expect(normalizeAgentRole(flock.get(key))).toEqual(multi);
   });
 });

@@ -18,6 +18,12 @@ export interface EngineRow {
   key: string;
   /** Owning turn; null for the fixed rows. */
   turnId: string | null;
+  /**
+   * Further turns this row renders after `turnId` (consecutive creation records
+   * grouped under the first one's key). Whether a turn is grouped depends on
+   * its neighbours' hydration, so its own row can come and go.
+   */
+  groupTurnIds?: readonly string[];
   /** Absolute turn index, for ordering fallbacks; -1 for the fixed rows. */
   turnIndex: number;
   /** The history item this row renders on its own, when it renders exactly one. */
@@ -78,6 +84,8 @@ export interface CycleDiagnostic {
   passes: number;
   covered: boolean;
   pendingExternalMove: boolean;
+  /** Present when repeated unsettled commits exhaust the synchronous update budget. */
+  synchronousCommits?: number;
   /** The reading anchor's recorded row and the row it resolved to (ids only). */
   anchorKey: string | null;
   resolvedKey: string | null;

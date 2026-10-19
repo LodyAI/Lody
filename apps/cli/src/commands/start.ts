@@ -206,11 +206,6 @@ export const startCommand = new Command('start')
       logger.info('Starting in local platform mode (no account, no cloud services).');
     }
 
-    const startupTimeSync =
-      platformKind !== 'local' && LODY_SERVER_URL
-        ? syncCliServerTime(logger, LODY_SERVER_URL)
-        : undefined;
-
     const machineNameOverride = options.machineName?.trim();
     const defaultMachineName = machineNameOverride || os.hostname();
     const authClient = platformKind === 'cloud' ? new AuthClient(logger) : null;
@@ -466,6 +461,10 @@ export const startCommand = new Command('start')
       return recovery;
     };
 
+    const startupTimeSync =
+      platformKind !== 'local' && LODY_SERVER_URL
+        ? syncCliServerTime(logger, LODY_SERVER_URL)
+        : undefined;
     try {
       await startAgentService(
         options,
@@ -486,6 +485,7 @@ export const startCommand = new Command('start')
         platformKind
       );
     } catch (error) {
+      await startupTimeSync?.stop();
       captureAgentServiceEvent('agent_service_startup_failed', {
         failure_stage: runtimeStateReporter.snapshot().startupStage ?? 'unknown',
       });
@@ -517,7 +517,7 @@ async function startAgentService(
   logger: Logger,
   runtimeStateReporter: CliRuntimeStateReporter,
   authMethod: StartAuthMethod,
-  startupTimeSync: Promise<void> | undefined,
+  startupTimeSync: ReturnType<typeof syncCliServerTime> | undefined,
   recoverRejectedCredential: () => Promise<RejectedCredentialRecovery>,
   foregroundHostLease: LocalCliHostLease | null,
   supervisorIdentity: LocalSupervisorIdentity | null,
@@ -600,7 +600,7 @@ async function startAgentService(
       machineName,
       runtimeStateReporter,
       cloudPort,
-      startupTimeSync,
+      startupTimeSync: startupTimeSync?.ready,
       machineLifecycleCapability,
       onFatalAuthFailure: (error) => triggerFatalAuthShutdown?.(error),
       onProcessLifecycleAction: (action) => triggerProcessLifecycleAction?.(action),
@@ -619,6 +619,7 @@ async function startAgentService(
   const stopDaemonAndApplication = async () => {
     const failures: unknown[] = [];
     for (const stop of [
+      () => startupTimeSync?.stop(),
       () => managedRuntimeUpdates.shutdown(),
       () => fleet.shutdown(),
       closeLoginShellApplicationLegacy,

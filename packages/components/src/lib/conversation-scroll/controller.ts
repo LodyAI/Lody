@@ -30,6 +30,17 @@ export const ENGINE_OVERSCAN_PX = 800;
 export const ENGINE_MIN_ROW_PX = 20;
 /** Supplementary commits per pass (coverage lemma). */
 const MAX_SUPPLEMENTARY_COMMITS = 2;
+/** Healthy transactions need at most six commits; bound repeated transaction restarts too. */
+export const MAX_SYNCHRONOUS_SCROLL_COMMITS = 24;
+
+export class ConversationScrollUpdateLoopError extends Error {
+  constructor() {
+    super(
+      `Conversation scroll did not settle within ${MAX_SYNCHRONOUS_SCROLL_COMMITS} synchronous commits. Retry the message list to recover.`
+    );
+    this.name = 'ConversationScrollUpdateLoopError';
+  }
+}
 /** A downward scroll that ends this close to the real bottom re-arms follow. */
 const REARM_DISTANCE_PX = 4;
 /** Scroll ranges remembered per scroll sequence (see {@link ScrollGesture}). */
@@ -77,6 +88,8 @@ export interface ScrollHost {
    * commit before this task ends (callers outside React use `flushSync`).
    */
   requestCommit(sync: boolean): void;
+  /** End-of-stack bookkeeping only; the callback must not request another render. */
+  scheduleMicrotask(callback: () => void): void;
   /** Follow-output is suppressed by a deliberate reading-position change. */
   isSuppressed(): boolean;
   prefersReducedMotion(): boolean;
@@ -217,6 +230,8 @@ export class ScrollController {
   private reshown = false;
   private readonly reportedMinRow = new Set<string>();
   private lastReportedScroll: number | null = null;
+  private synchronousCommits = 0;
+  private updateLoopError: ConversationScrollUpdateLoopError | null = null;
 
   constructor(options: ControllerOptions) {
     this.host = options.host;
@@ -328,6 +343,7 @@ export class ScrollController {
   /** Call from the layout effect of every list commit. */
   afterCommit(): void {
     if (this.disposed) return;
+    if (this.updateLoopError) throw this.updateLoopError;
     const previous = this.committedPlan;
     this.committedPlan = this.lastPlan;
     if (this.rows.length === 0 || this.hidden) return;
@@ -336,6 +352,9 @@ export class ScrollController {
     // reporting the offset again, is the React #185 nested-update loop.
     if (!this.tx) {
       if (this.isSettled()) return;
+    }
+    this.checkSynchronousCommitBudget();
+    if (!this.tx) {
       this.beginTransaction(this.reshown ? 'reshow' : 'commit', previous);
     }
     this.continueTransaction();
@@ -649,6 +668,39 @@ export class ScrollController {
   }
 
   // ---- Internals ----------------------------------------------------------
+
+  private checkSynchronousCommitBudget(): void {
+    this.synchronousCommits += 1;
+    if (this.synchronousCommits === 1) {
+      this.host.scheduleMicrotask(() => {
+        this.synchronousCommits = 0;
+      });
+    }
+    if (this.synchronousCommits <= MAX_SYNCHRONOUS_SCROLL_COMMITS) return;
+    const actual = this.readScrollTop();
+    const target = this.targetScrollTop();
+    const tx = this.tx;
+    this.updateLoopError = new ConversationScrollUpdateLoopError();
+    this.tx = null;
+    this.cancelGlide();
+    this.callbacks.onDiagnostic?.({
+      reason: 'update-loop',
+      intent: this.intent.kind,
+      movement: tx?.movement ?? 'none',
+      target: Math.round(target),
+      actual: Math.round(actual),
+      clamped: Math.abs(target - actual) > EPSILON_PX,
+      supplementaryCommits: tx?.supplementary ?? 0,
+      passes: tx?.pass ?? 0,
+      covered: this.isCovered(actual, this.committedPlan),
+      pendingExternalMove: this.pendingExternalMove,
+      synchronousCommits: this.synchronousCommits,
+      ...this.anchorDiagnostic(),
+    });
+    // The message-list boundary unmounts this controller. Never retry an unstable
+    // layout automatically or pretend its latest position is a covered snapshot.
+    throw this.updateLoopError;
+  }
 
   private run(reason: string, sync: boolean, commitFirst = true): void {
     if (this.tx || this.hidden || this.rows.length === 0) return;

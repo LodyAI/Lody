@@ -56,6 +56,29 @@ const mockInvoices: BillingInvoice[] = [
   },
 ];
 
+const GIFT_START = Date.now() - 60 * DAY;
+const GIFT_END = Date.now() + 30 * DAY;
+const giftPeriodInvoices: BillingInvoice[] = Array.from({ length: 3 }, (_, index) => ({
+  id: `in_gift_period_${index + 1}`,
+  number: `GIFT-000${index + 1}`,
+  status: 'paid',
+  amountPaid: 0,
+  amountDue: 0,
+  amountRemaining: 0,
+  total: 0,
+  currency: 'USD',
+  periodStart: GIFT_START + index * 30 * DAY,
+  periodEnd: GIFT_START + (index + 1) * 30 * DAY,
+  interval: 'month',
+  kind: 'gift_redemption',
+  // The backend repeats the total grant duration on each monthly $0 invoice.
+  // The history UI therefore describes each service period instead of reading
+  // this as three separate three-month grants.
+  giftDurationMonths: 3,
+  createdAt: GIFT_START + index * 30 * DAY,
+  hostedInvoiceUrl: `https://invoice.stripe.com/i/gift-period-${index + 1}`,
+}));
+
 const freeOverview: BillingOverviewData = {
   billingAccountId: null,
   giftStackingSupported: true,
@@ -173,6 +196,7 @@ function Harness({
       onResumeSubscription={() => {}}
       onRedeemCode={() => {}}
       onRetryInvoices={() => {}}
+      onViewInvoice={() => {}}
     />
   );
 }
@@ -292,6 +316,36 @@ export const PromotionalPlus: Story = {
         hostedInvoiceUrl: 'https://invoice.stripe.com/i/gift-example',
       },
     ],
+  },
+};
+
+export const PromotionalPlusScheduledCharge: Story = {
+  args: {
+    overview: {
+      ...paidOverview,
+      entitlementSource: 'stripe_gift',
+      promotionalEntitlementEndsAt: GIFT_END,
+      giftStartsAt: GIFT_START,
+      giftEndsAt: GIFT_END,
+      nextBillingAt: GIFT_END,
+      autoRenewAfterGift: true,
+      scheduledBillingInterval: 'month',
+      scheduleManaged: true,
+      subscriptionStatus: 'active',
+      billingInterval: 'month',
+      currentPeriodEnd: GIFT_END,
+      seatCount: 2,
+    },
+    invoices: giftPeriodInvoices,
+    upcomingInvoice: {
+      amountDue: 2000,
+      currency: 'USD',
+      expectedAt: GIFT_END,
+      renewal: { amount: 2000, quantity: 2 },
+      discount: null,
+      adjustment: null,
+      creditApplied: null,
+    },
   },
 };
 
@@ -452,5 +506,34 @@ export const Enterprise: Story = {
       effectivePlanTier: 'enterprise',
       entitlementSource: 'enterprise',
     },
+  },
+};
+
+export const PendingSeatInvoice: Story = {
+  args: {
+    overview: {
+      ...paidOverview,
+      seatBilling: {
+        policy: 'deferred',
+        capacity: 6,
+        available: 1,
+        renewalQuantity: 5,
+        periodEnd: paidOverview.currentPeriodEnd,
+      },
+    },
+    invoices: [
+      {
+        ...mockInvoices[0]!,
+        id: 'in_pending_seat',
+        status: 'open',
+        amountPaid: 0,
+        amountDue: 5741,
+        amountRemaining: 5741,
+        total: 5741,
+        reason: 'seats_added',
+        seatChange: { from: 1, to: 2 },
+      },
+      ...mockInvoices,
+    ],
   },
 };

@@ -1,4 +1,5 @@
-import type { RepoRoomSubscription } from 'loro-repo';
+import { notificationLabel } from '@lody/shared/notifications';
+import type { WorkspaceRoom as RepoRoomSubscription } from '@lody/shared/workspace-data/repo-legacy';
 import {
   canonicalScheduleJson,
   getScheduleRegistryFlockDocId,
@@ -180,6 +181,11 @@ export async function createScheduleWorkspace(args: {
       if (prepared.meta.machineId !== run.machineId || prepared.meta.userId !== auth.userId)
         throw new Error('Schedule target ownership changed');
       prepared.meta.scheduleId = run.scheduleId;
+      prepared.userTurn.scheduleRun = {
+        scheduleId: run.scheduleId,
+        turnId: prepared.userTurn.id,
+        title: notificationLabel(run.definition.title) ?? '',
+      };
       prepared.source = {
         id: run.sourceEntryId,
         role: 'system',

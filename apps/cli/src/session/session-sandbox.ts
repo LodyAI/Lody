@@ -104,6 +104,10 @@ export interface SessionSandbox {
   readonly description: string;
   applyLimits(limits: SessionSandboxLimits): Promise<void>;
   readResourceAccounting(): Promise<SessionResourceAccounting>;
+  recoveryRoots?(): Promise<readonly number[]>;
+  watchRecoveryResources?(
+    persist: (identity: SessionRecoveryResources) => void
+  ): Promise<() => void>;
   spawn(
     command: string,
     args: string[],
@@ -112,7 +116,10 @@ export interface SessionSandbox {
   /** Terminate every process the sandbox started; rejects if any tree survives. */
   terminate(force?: boolean): Promise<void>;
   cleanup(): Promise<void>;
+  recoverCleanup?(): Promise<void>;
 }
+
+export type SessionRecoveryResources = { roots: readonly number[]; complete: boolean };
 
 export type SessionSandboxFactory = (sessionId: SessionId) => Promise<SessionSandbox>;
 
@@ -124,6 +131,8 @@ interface SessionSandboxDeps {
   readSelfCgroupPath: () => Promise<string>;
   configureExecutionProcess: (pid: number, logger?: Logger) => Promise<void>;
   killPid: (pid: number, signal?: NodeJS.Signals | 0) => void;
+  /** Must describe the same process table as `killPid`. */
+  listProcessGroup?: NodeProcessApi['listProcessGroup'];
 }
 
 interface CreateSessionSandboxFactoryOptions {
@@ -157,6 +166,7 @@ const defaultSandboxDeps = (): SessionSandboxDeps => ({
   },
   killPid: (pid: number, signal?: NodeJS.Signals | 0) =>
     nodeProcessLive.kill(pid, signal ?? 'SIGTERM'),
+  listProcessGroup: nodeProcessLive.listProcessGroup,
 });
 
 const toNodeProcess = (deps: SessionSandboxDeps): NodeProcessApi => ({
@@ -164,6 +174,7 @@ const toNodeProcess = (deps: SessionSandboxDeps): NodeProcessApi => ({
   spawn: deps.spawnProcess,
   spawnSync: nodeProcessLive.spawnSync,
   kill: (pid, signal) => deps.killPid(pid, signal),
+  ...(deps.listProcessGroup ? { listProcessGroup: deps.listProcessGroup } : {}),
 });
 
 const configureProcessBestEffort =
@@ -185,6 +196,8 @@ export function createSessionSandboxFactory(
 ): SessionSandboxFactory {
   const deps: SessionSandboxDeps = {
     ...defaultSandboxDeps(),
+    // A substituted process table must not be judged by the host's.
+    ...(options.deps?.killPid ? { listProcessGroup: undefined } : {}),
     ...(options.deps ?? {}),
   };
   const facade = { logger: options.logger, nodeProcess: toNodeProcess(deps) };
@@ -267,6 +280,17 @@ function createNoopSandbox(
 }
 
 class ContainerSessionSandbox implements SessionSandbox {
+  private cleanupReceipt: Promise<void> | undefined;
+  private recoveryReceipt: Promise<void> | undefined;
+  private pendingSpawns = 0;
+  private readonly spawnedRoots = new Set<number>();
+  private uncertainResources = false;
+  private readonly recoveryObservers = new Set<{
+    roots: Set<number>;
+    initialized: boolean;
+    uncertain: boolean;
+    persist: (identity: SessionRecoveryResources) => void;
+  }>();
   constructor(
     private container: ProcessContainer,
     private scope: Scope.Closeable,
@@ -285,6 +309,48 @@ class ContainerSessionSandbox implements SessionSandbox {
     return this.container.description;
   }
 
+  recoveryRoots(): Promise<readonly number[]> {
+    if (!this.container.recoveryRoots)
+      return Promise.reject(new Error('Resource identity is unavailable'));
+    return this.run(this.container.recoveryRoots);
+  }
+  async watchRecoveryResources(
+    persist: (identity: SessionRecoveryResources) => void
+  ): Promise<() => void> {
+    if (this.scope.state._tag === 'Closed') await this.ensureOpenContainer();
+    const observer = {
+      roots: new Set(this.spawnedRoots),
+      initialized: false,
+      uncertain: this.uncertainResources,
+      persist,
+    };
+    this.recoveryObservers.add(observer);
+    try {
+      // Incomplete is durable before the asynchronous initial snapshot. Spawns
+      // in that interval are already observed and unioned with existing roots.
+      this.publishRecoveryResources();
+      for (const pid of await this.recoveryRoots()) observer.roots.add(pid);
+      observer.initialized = true;
+      this.publishRecoveryResources();
+      return () => this.recoveryObservers.delete(observer);
+    } catch (cause) {
+      this.recoveryObservers.delete(observer);
+      throw cause;
+    }
+  }
+  private publishRecoveryResources(): void {
+    for (const observer of this.recoveryObservers) {
+      try {
+        observer.persist({
+          roots: [...observer.roots],
+          complete: observer.initialized && !observer.uncertain && this.pendingSpawns === 0,
+        });
+      } catch (cause) {
+        observer.uncertain = true;
+        throw cause;
+      }
+    }
+  }
   async applyLimits(limits: SessionSandboxLimits): Promise<void> {
     await this.run(this.container.applyLimits(limits));
   }
@@ -293,11 +359,7 @@ class ContainerSessionSandbox implements SessionSandbox {
     return await this.run(this.container.readAccounting);
   }
 
-  async spawn(
-    command: string,
-    args: string[],
-    options: SessionSpawnOptions
-  ): Promise<SessionProcessHandle> {
+  private async ensureOpenContainer(): Promise<void> {
     if (this.scope.state._tag === 'Closed' && this.reopen) {
       // Keep the failed generation reachable until all its trees are gone.
       const retired = this.container;
@@ -308,22 +370,65 @@ class ContainerSessionSandbox implements SessionSandbox {
         const fresh = this.reopen();
         this.container = fresh.container;
         this.scope = fresh.scope;
+        this.cleanupReceipt = undefined;
+        this.recoveryReceipt = undefined;
+        // This generation starts only after verified termination of the old
+        // container. Keep uncertainty on old observers, not on future owners.
+        this.spawnedRoots.clear();
+        this.uncertainResources = false;
       }
     }
+  }
+
+  async spawn(
+    command: string,
+    args: string[],
+    options: SessionSpawnOptions
+  ): Promise<SessionProcessHandle> {
     const { captureOutput, ...spawnOptions } = options;
     let events: ProcessEvents | undefined;
-    const contained = await this.run(
-      this.container.spawn({
-        command,
-        args,
-        options: spawnOptions,
-        onSpawned: (child) => {
-          events = attachProcessEvents(child, { captureOutput, logger: this.logger });
-        },
-      })
-    ).catch((error: unknown) => {
-      throw unwrapSpawnFailure(error);
-    });
+    let failedBeforeSpawn: Error | undefined;
+    this.pendingSpawns++;
+    const contained = await (async () => {
+      try {
+        // Fence recovery BEFORE a process can exist without a recorded PID.
+        // Failure here prevents spawn; failure later retains incomplete identity.
+        this.publishRecoveryResources();
+        if (this.scope.state._tag === 'Closed') await this.ensureOpenContainer();
+        return await this.run(
+          this.container.spawn({
+            command,
+            args,
+            options: spawnOptions,
+            onSpawned: (child) => {
+              events = attachProcessEvents(child, { captureOutput, logger: this.logger });
+              // Node emits an error without a PID when no process was started.
+              // pendingSpawns keeps the journal incomplete until that failure settles.
+              child.once('error', (error) => {
+                if (child.pid === undefined) failedBeforeSpawn = error;
+              });
+              if (child.pid && child.pid > 0) this.spawnedRoots.add(child.pid);
+              for (const observer of this.recoveryObservers) {
+                if (child.pid && child.pid > 0) observer.roots.add(child.pid);
+              }
+              this.publishRecoveryResources();
+            },
+          })
+        );
+      } catch (cause) {
+        const failure = unwrapSpawnFailure(cause);
+        // Match the actual no-PID error, not an errno from journal/setup/cleanup.
+        // Never clear uncertainty left by another acquisition or failed write.
+        if (!failedBeforeSpawn || failure !== failedBeforeSpawn) {
+          this.uncertainResources = true;
+          for (const observer of this.recoveryObservers) observer.uncertain = true;
+        }
+        throw failure;
+      } finally {
+        this.pendingSpawns--;
+        this.publishRecoveryResources();
+      }
+    })();
     if (!events) {
       throw new Error(`Process events were not attached for ${command}`);
     }
@@ -340,9 +445,29 @@ class ContainerSessionSandbox implements SessionSandbox {
     await this.run(this.container.terminateAll(terminationPolicy(force)));
   }
 
-  async cleanup(): Promise<void> {
+  cleanup(): Promise<void> {
     const { container, scope } = this;
-    await this.run(Effect.andThen(container.cleanup, Scope.close(scope, Exit.void)));
+    return (this.cleanupReceipt ??= this.run(
+      Effect.andThen(container.cleanup, Scope.close(scope, Exit.void))
+    ));
+  }
+  recoverCleanup(): Promise<void> {
+    if (this.recoveryReceipt) return this.recoveryReceipt;
+    const { container, scope } = this;
+    const attempt = (async () => {
+      await this.cleanupReceipt?.catch(() => undefined);
+      // Retry the retained resources, never a closed Scope's finalizer.
+      await this.run(container.terminateAll(terminationPolicy(true)));
+      await this.run(container.cleanup);
+      if (scope.state._tag !== 'Closed') await this.run(Scope.close(scope, Exit.void));
+    })();
+    this.recoveryReceipt = attempt;
+    void attempt
+      .finally(() => {
+        if (this.recoveryReceipt === attempt) this.recoveryReceipt = undefined;
+      })
+      .catch(() => undefined);
+    return attempt;
   }
 }
 

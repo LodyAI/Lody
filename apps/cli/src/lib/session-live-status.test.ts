@@ -29,6 +29,24 @@ describe('resolveSessionLiveStatus', () => {
     ).toEqual({ state: 'initializing' });
   });
 
+  it('reports an unconfirmed release as busy waiting with its reason, not initializing', () => {
+    const live = resolveSessionLiveStatus({
+      presence: null,
+      execution: {
+        ...idleExecution,
+        hasActiveTurn: true,
+        releaseBlocked: { reason: 'release outage' },
+      },
+      hasPendingDispatch: false,
+    });
+    expect(live).toEqual({
+      state: 'waiting',
+      reason: 'The previous turn has not confirmed releasing its resources: release outage',
+    });
+    // Fork and MCP treat every state except `unknown` as busy.
+    expect(live.state).not.toBe('unknown');
+  });
+
   it('reports an acknowledged pending dispatch as waiting', () => {
     expect(
       resolveSessionLiveStatus({

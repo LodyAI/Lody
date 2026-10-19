@@ -24,6 +24,7 @@ import {
   getMachineFlockDeleteLocalProjectIds,
   getMachineFlockLocalProjects,
   getSessionRoomId,
+  getSessionCancelRequestMarker,
   machineFlockKeys,
   SessionStatusFactory,
   getLocalProjectHistoryProviderKey,
@@ -38,13 +39,18 @@ import {
   sanitizeMessageTextSpans,
   machineSupportsProtocolCapability,
   MACHINE_PROTOCOL_CAPABILITIES,
+  OPERATION_INBOX_PROTOCOL_VERSION,
 } from '@lody/shared';
 import { useAtomValue, useSetAtom, useStore } from 'jotai';
 import { usePostHog } from '@posthog/react';
 // Default import: `debug` is CJS. Named `{ debug }` breaks Vite 8 / TanStack
 // module-runner interop used by site-docs SSR (UNEXPECTED named-export error).
 import debug from 'debug';
-import { activeWorkspaceRuntimeAtom, type WorkspaceRuntime } from '@/atoms/runtime';
+import {
+  activeWorkspaceRuntimeAtom,
+  type SessionDocDraft,
+  type WorkspaceRuntime,
+} from '@/atoms/runtime';
 import {
   clearSessionRunConfigDraftsAtom,
   sessionRunConfigDraftAccountAtom,
@@ -214,6 +220,13 @@ async function deleteMachineFlockRowsBestEffort(
   }
 }
 
+/** Only PR auto-archive supplies this cancellation check and progress receipt. */
+type AutoArchiveSessionOptions = {
+  /** False retires a superseded request before any archive writes. */
+  shouldContinue: (targets: readonly SessionMeta[]) => boolean;
+  accepted: Set<SessionId>;
+};
+
 export type SessionActions = {
   createSession: (payload: SessionToCreate) => Promise<CreateSessionResult>;
   startSession: (
@@ -263,7 +276,7 @@ export type SessionActions = {
   markSessionUnread: (sessionId: SessionId) => Promise<void>;
   /** Delete exactly the supplied Sessions without discovering related Sessions. */
   deleteSessions: (sessionIds: SessionId[]) => Promise<void>;
-  archiveSession: (sessionId: SessionId) => Promise<void>;
+  archiveSession: (sessionId: SessionId, autoArchive?: AutoArchiveSessionOptions) => Promise<void>;
   setTreeCollaborationStopped: (sessionId: SessionId, stopped: boolean) => Promise<void>;
   setSessionTabClosed: (sessionId: SessionId, closed: boolean) => Promise<void>;
   restoreSession: (sessionId: SessionId) => Promise<void>;
@@ -497,10 +510,22 @@ export function useSessionActions(): SessionActions {
       if (isLoroRepoDocDeleted(existing)) return;
       const meta = existing?.meta as SessionMeta | undefined;
       const machineId = meta?.machineId;
+      const machine = machineId
+        ? await runtime.repo.getDocMeta(getMachineRoomId(machineId))
+        : undefined;
+      const supportsInbox = machineSupportsProtocolCapability(
+        machine?.meta,
+        MACHINE_PROTOCOL_CAPABILITIES.operationInbox,
+        OPERATION_INBOX_PROTOCOL_VERSION
+      );
+      const cancelId = supportsInbox ? crypto.randomUUID() : undefined;
       if (machineId) {
-        // Fast-path RPC is intentionally redundant with the durable meta fallback below.
+        // RPC and the durable control request share an identity, even if either arrives late.
         void runtime
-          .requestSessionCancel(machineId, sessionId, turnId, { timeoutMs: 2_000 })
+          .requestSessionCancel(machineId, sessionId, turnId, {
+            timeoutMs: 2_000,
+            ...(cancelId ? { cancelId } : {}),
+          })
           .then((response) => {
             if (response && !response.success) {
               log('session cancel rpc failed for %s/%s: %s', sessionId, turnId, response.error);
@@ -510,9 +535,16 @@ export function useSessionActions(): SessionActions {
             log('session cancel rpc threw for %s/%s: %o', sessionId, turnId, error);
           });
       }
+      if (cancelId) {
+        await runtime.sendResources.withSessionStore(sessionId, (sessionStore) => {
+          sessionStore.setState((draft: SessionDocDraft) => {
+            draft.cancelRequest = { id: cancelId, turnId };
+          });
+        });
+        await runtime.repo.flush();
+      }
       await runtime.writer.upsertDocMeta(roomId, {
-        // Stop targets the assistant turn currently on screen, not the originating user turn.
-        lastCanceledTurn: turnId,
+        lastCanceledTurn: cancelId ? getSessionCancelRequestMarker(cancelId) : turnId,
       } as Partial<SessionMeta>);
     },
     [runtime]
@@ -779,23 +811,27 @@ export function useSessionActions(): SessionActions {
   );
 
   const archiveSession = useCallback(
-    async (sessionId: SessionId) => {
+    async (sessionId: SessionId, autoArchive?: AutoArchiveSessionOptions) => {
       log('[session-archive] start', { sessionId });
       if (!runtime) {
         throw new Error('Runtime not ready');
       }
-      // A conversation whose creation is still held exists only in memory:
-      // archiving it cancels that send (and its pending children) and ends here.
-      const unwritten = runtime.pendingSends?.hasPendingCreation(sessionId) ?? false;
-      await runtime.pendingSends?.cancelSessions([sessionId]);
-      if (unwritten && !(await runtime.repo.getDocMeta(getSessionRoomId(sessionId)))?.meta?.id) {
-        log('[session-archive] canceled unwritten conversation', { sessionId });
-        return;
+      // Automatic intents come only from durable metadata. Keep manual archive's
+      // held-creation cancellation, but let an automatic retry validate its
+      // snapshot before it can cancel any newly held follow-up.
+      if (!autoArchive) {
+        const unwritten = runtime.pendingSends?.hasPendingCreation(sessionId) ?? false;
+        await runtime.pendingSends?.cancelSessions([sessionId]);
+        if (unwritten && !(await runtime.repo.getDocMeta(getSessionRoomId(sessionId)))?.meta?.id) {
+          log('[session-archive] canceled unwritten conversation', { sessionId });
+          return;
+        }
       }
       const archiveTargets = await runtime.readSessionOperationTargets(sessionId, 'archive');
       if (store.get(activeWorkspaceRuntimeAtom) !== runtime) {
         throw new Error('Workspace changed before archiving');
       }
+      if (autoArchive && !autoArchive.shouldContinue(archiveTargets)) return;
       // Held follow-ups would otherwise be written into archived conversations.
       await runtime.pendingSends?.cancelSessions(archiveTargets.map((session) => session.id));
       for (const session of archiveTargets) {
@@ -805,6 +841,7 @@ export function useSessionActions(): SessionActions {
           isArchived: true,
           status: SessionStatusFactory.idle(),
         } as Partial<SessionMeta>);
+        autoArchive?.accepted.add(session.id);
         if (typeof window !== 'undefined') {
           // Cleanup failure cannot undo the accepted archive state.
           try {

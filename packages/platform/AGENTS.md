@@ -21,6 +21,15 @@ telemetry, or managed-runtime downloads, as routed by the root instructions.
 - Local CLI, renderer, and Electron-main telemetry is hard-disabled even when
   unrelated PostHog variables exist in the caller's shell.
 
+## Streams token capability
+
+- Only official cloud composition constructs Streams token ports. Native
+  `createTokenProvider` requires the consumer's Scope; dispose those providers
+  before disposing the cloud port. Promise consumers retain visible
+  `createTokenProviderLegacy` / `LoroStreamsTokenProviderLegacy` names and await
+  close. A failed token release retains its owner/Cause and blocks handoff until
+  explicit recovery. Contract: [token ownership](../shared/src/loro-streams-token/AGENTS.md).
+
 ## Managed runtime channel
 
 - Managed runtime downloads default to the public R2-backed channel owned by

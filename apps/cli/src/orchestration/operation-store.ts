@@ -1,23 +1,28 @@
 import { SessionInputAttachmentsSchema } from '@/lib/session-input-content';
 import {
-  MemoryBindingSchema,
   AgentMessageAuthorSchema,
   AgentRoleSnapshotSchema,
+  buildAgentMessageAuthor,
+  MemoryBindingSchema,
 } from '@lody/shared';
 import { createHash } from 'node:crypto';
-import { chmodSync, mkdirSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { InboxSqlite } from './inbox/sqlite';
+import type { InboxBatch, InboxScope } from './inbox/model';
+import { cancelManuallyStoppedTargets } from './inbox/rules';
 
-import Database from 'better-sqlite3';
+import type Database from 'better-sqlite3';
 import { z } from 'zod';
+import { OrchestrationConnection } from './platform/database';
 
+import { discoveryCursor, DiscoveryPageShape } from '@/lib/discovery-query';
 import {
   LODY_OPERATION_COMMAND_MAX_BYTES,
   LODY_OPERATION_COMPLETION_MAX_BYTES,
-  LodyOperationItemSchema as OperationItemSchema,
-  LodyOperationCompletionSchema as OperationCompletionSchema,
   LodyOperationIdSchema,
+  LodyOperationCompletionSchema as OperationCompletionSchema,
+  LodyOperationItemSchema as OperationItemSchema,
   type FrozenOperationContinuationConfig,
   type LodyError,
   type LodyOperationCompletion,
@@ -26,12 +31,10 @@ import {
   type LodyOperationSnapshot,
   type MachineId,
   type SessionId,
-  type StoredLodyDelivery,
   type StoredLodyOperation,
   type WorkspaceId,
 } from '@lody/shared';
 import { getLodyDataDir } from '@lody/shared/node/installation-profile';
-import { discoveryCursor, DiscoveryPageShape } from '@/lib/discovery-query';
 
 export const OperationListQuerySchema = z
   .object({
@@ -45,20 +48,6 @@ export type OperationListQuery = z.input<typeof OperationListQuerySchema>;
 const DAY_MS = 24 * 60 * 60 * 1_000;
 const TERMINAL_RETENTION_MS = 7 * DAY_MS;
 export const MATERIALIZATION_CLAIM_MS = 60_000;
-export const DELIVERY_MAX_ATTEMPTS = 2;
-
-type DeliveryExecutionClaim =
-  | { status: 'claimed'; delivery: StoredLodyDelivery }
-  | { status: 'in_flight'; delivery: StoredLodyDelivery }
-  | { status: 'exhausted'; delivery: StoredLodyDelivery }
-  | { status: 'consumed'; delivery: StoredLodyDelivery };
-
-type DeliveryFinalizationClaim =
-  | { status: 'claimed'; delivery: StoredLodyDelivery }
-  | { status: 'in_flight'; delivery: StoredLodyDelivery }
-  | { status: 'not_ready'; delivery: StoredLodyDelivery }
-  | { status: 'consumed'; delivery: StoredLodyDelivery };
-
 const OperationKindSchema = z.enum([
   'session_create',
   'session_create_many',
@@ -71,6 +60,7 @@ const FrozenConfigSchema = z
     agentConfigId: z.string().optional(),
     inputConfig: z.record(z.string(), z.unknown()),
     sourceTurnId: z.string().trim().min(1).optional(),
+    notificationOriginTurnIds: z.array(z.string().min(1)).optional(),
     targetDispatchConfigs: z
       .array(
         z
@@ -121,44 +111,6 @@ const OperationRowSchema = z
     finished_at: z.string().nullable(),
   })
   .strict();
-
-const DeliveryRowSchema = z
-  .object({
-    sequence: z.number().int().positive(),
-    workspace_id: z.string(),
-    requester_session_id: z.string(),
-    operation_id: LodyOperationIdSchema,
-    delivery_id: z.string(),
-    system_turn_id: z.string(),
-    state: z.enum(['pending', 'consumed']),
-    initiator_chain_depth: z.number().int().nonnegative(),
-    completion_json: z.string(),
-    consumed_at: z.string().nullable(),
-  })
-  .strict();
-
-const DeliveryReadRowSchema = DeliveryRowSchema.extend({
-  execution_phase: z.enum(['ready', 'claimed', 'prepared', 'started', 'uncertain']),
-  attempt_count: z.number().int().nonnegative(),
-  active_claim_id: z.string().nullable(),
-  active_claim_worker_boot_id: z.string().nullable(),
-}).strict();
-
-const DELIVERY_READ_COLUMNS = `
-  deliveries.sequence,
-  deliveries.workspace_id,
-  deliveries.requester_session_id,
-  deliveries.operation_id,
-  deliveries.delivery_id,
-  deliveries.system_turn_id,
-  deliveries.state,
-  deliveries.initiator_chain_depth,
-  deliveries.completion_json,
-  deliveries.consumed_at,
-  delivery_execution_state.execution_phase,
-  delivery_execution_state.attempt_count,
-  delivery_execution_state.active_claim_id,
-  delivery_execution_state.active_claim_worker_boot_id`;
 
 export class LodyOperationStoreError extends Error {
   constructor(
@@ -373,18 +325,11 @@ export type AcceptOperationOptions = {
   materializationClaimToken?: string;
 };
 
-export const getOperationDeliveryId = (
-  requesterSessionId: SessionId,
-  operationId: string
-): string => `operation:${requesterSessionId}:${operationId}:completion`;
-
-export const getOperationCompletionTurnId = (
-  requesterSessionId: SessionId,
-  operationId: string
-): string => `operation-completion:${requesterSessionId}:${operationId}`;
-
 export class LodyOperationStore {
   private readonly db: Database.Database;
+  private readonly connection: OrchestrationConnection;
+  private ownsConnection: boolean;
+  readonly inbox: InboxSqlite;
 
   /**
    * `maintenance: false` skips the open-time repair/cleanup write transactions.
@@ -395,27 +340,43 @@ export class LodyOperationStore {
   constructor(
     dbPath: string,
     private readonly now: () => number = Date.now,
-    options: { maintenance?: boolean } = {}
+    options: { maintenance?: boolean; connection?: OrchestrationConnection } = {}
   ) {
-    const storeDirectory = path.dirname(dbPath);
-    mkdirSync(storeDirectory, { recursive: true, mode: 0o700 });
-    chmodSync(storeDirectory, 0o700);
-    this.db = new Database(dbPath);
-    // Operations contain canonical prompts and bounded assistant output. Keep
-    // both the database and SQLite sidecars private to the local account.
-    chmodSync(dbPath, 0o600);
-    this.db.pragma('busy_timeout = 5000');
-    this.db.pragma('journal_mode = WAL');
-    this.db.pragma('foreign_keys = ON');
-    this.migrate();
-    if (options.maintenance !== false) {
-      this.repairTerminalDeliveries();
-      this.cleanupExpired(false);
+    this.ownsConnection = !options.connection;
+    this.connection =
+      options.connection ??
+      new OrchestrationConnection(
+        dbPath === ':memory:' ? { kind: 'memory' } : { kind: 'disk', path: dbPath }
+      );
+    this.db = this.connection.raw;
+    try {
+      this.migrate();
+      InboxSqlite.migrate(this.db);
+      this.inbox = new InboxSqlite(
+        this.db,
+        () => new Date(this.now()).toISOString(),
+        this.connection
+      );
+      if (options.maintenance !== false) this.cleanupExpired(false);
+    } catch (cause) {
+      if (this.ownsConnection) this.connection.close();
+      throw cause;
     }
   }
 
+  private transaction<A>(body: () => A) {
+    return { immediate: () => this.connection.withImmediate(body as () => never) as A };
+  }
+
+  /** Platform composition transfers the sole close authority into a scoped Database Layer. */
+  takeConnectionOwnership(): OrchestrationConnection {
+    if (!this.ownsConnection) throw new Error('Database ownership already transferred');
+    this.ownsConnection = false;
+    return this.connection;
+  }
+
   close(): void {
-    this.db.close();
+    if (this.ownsConnection) this.connection.close();
   }
 
   accept(
@@ -444,7 +405,7 @@ export class LodyOperationStore {
     ) {
       throw new Error('Operation author does not match its source turn.');
     }
-    const transaction = this.db.transaction(
+    const transaction = this.transaction(
       (): { created: boolean; operation: StoredLodyOperation; claimedItemIndexes: number[] } => {
         const existing = this.getStored(input.requesterSessionId, input.operationId);
         if (existing)
@@ -634,17 +595,49 @@ export class LodyOperationStore {
     };
   }
 
+  /** Read the entire fixed membership, never just the Agent's bounded preview. */
+  notificationOriginsForBatch(batch: InboxBatch): string[] {
+    return this.db
+      .prepare(`SELECT DISTINCT origin.value AS origin
+      FROM inbox_members m JOIN inbox_results r USING(sequence)
+      JOIN operations o ON o.requester_session_id=r.session_id AND o.operation_id=r.operation_id,
+        json_each(o.frozen_config_json, '$.notificationOriginTurnIds') origin
+      WHERE m.batch_id=? AND o.workspace_id=? AND o.requester_session_id=? AND o.requester_user_id=?`)
+      .all(batch.batchId, batch.workspaceId, batch.sessionId, batch.userId)
+      .map((row) => (row as { origin: string }).origin);
+  }
+
+  /** Pending Operations and unconsumed results are the existing completion authority. */
+  pendingNotificationOrigins(scope: InboxScope, origins: readonly string[]): Set<string> {
+    if (!origins.length) return new Set();
+    return new Set(
+      this.db
+        .prepare(`SELECT DISTINCT origin.value AS origin
+      FROM operations o, json_each(o.frozen_config_json, '$.notificationOriginTurnIds') origin
+      WHERE o.workspace_id=? AND o.requester_session_id=? AND o.requester_user_id=?
+        AND origin.value IN (SELECT value FROM json_each(?))
+        AND (o.state='active' OR EXISTS (
+          SELECT 1 FROM inbox_results r WHERE r.session_id=o.requester_session_id
+            AND r.operation_id=o.operation_id AND r.consumed=0))`)
+        .all(scope.workspaceId, scope.sessionId, scope.userId, JSON.stringify(origins))
+        .map((row) => (row as { origin: string }).origin)
+    );
+  }
+
   hasPendingWorkForRequester(workspaceId: WorkspaceId, requesterSessionId: SessionId): boolean {
-    return !!this.db
-      .prepare(
-        `SELECT 1 FROM operations WHERE workspace_id=? AND requester_session_id=? AND state='active'
-      UNION ALL SELECT 1 FROM deliveries WHERE workspace_id=? AND requester_session_id=? AND state='pending' LIMIT 1`
-      )
-      .get(workspaceId, requesterSessionId, workspaceId, requesterSessionId);
+    return (
+      !!this.db
+        .prepare(
+          `SELECT 1 FROM operations WHERE workspace_id=? AND requester_session_id=? AND state='active'
+      LIMIT 1`
+        )
+        .get(workspaceId, requesterSessionId) ||
+      this.inbox.hasRunnableWork(workspaceId, requesterSessionId)
+    );
   }
 
   // Absence of a settlement is the durable obligation, including for Operations
-  // created before this table existed. Delivery consumption does not discharge it.
+  // created before this table existed. Inbox consumption does not discharge it.
   listPendingProgress(workspaceId: WorkspaceId, ownerMachineId: MachineId): StoredLodyOperation[] {
     return this.db
       .prepare(
@@ -661,19 +654,17 @@ export class LodyOperationStore {
   }
 
   settleProgress(requesterSessionId: SessionId, operationId: string): void {
-    this.db
-      .transaction(() => {
-        this.db
-          .prepare(
-            `INSERT OR IGNORE INTO operation_progress_settlements
+    this.transaction(() => {
+      this.db
+        .prepare(
+          `INSERT OR IGNORE INTO operation_progress_settlements
         (requester_session_id, operation_id)
         SELECT requester_session_id, operation_id FROM operations
         WHERE requester_session_id = ? AND operation_id = ? AND state = 'finished'
           AND kind IN ('session_create', 'session_create_many')`
-          )
-          .run(requesterSessionId, operationId);
-      })
-      .immediate();
+        )
+        .run(requesterSessionId, operationId);
+    }).immediate();
   }
 
   updateItems(
@@ -701,35 +692,33 @@ export class LodyOperationStore {
     claimToken: string,
     claimDurationMs = MATERIALIZATION_CLAIM_MS
   ): { claimed: boolean; retryAtMs?: number } {
-    return this.db
-      .transaction(() => {
-        const operation = this.get(requesterSessionId, operationId);
-        const item = operation.items[itemIndex];
-        if (!item || item.status !== 'active' || item.inputDurable) return { claimed: false };
-        const row = this.db
-          .prepare(
-            `SELECT claim_token, claimed_at_ms FROM operation_item_materializations
+    return this.transaction(() => {
+      const operation = this.get(requesterSessionId, operationId);
+      const item = operation.items[itemIndex];
+      if (!item || item.status !== 'active' || item.inputDurable) return { claimed: false };
+      const row = this.db
+        .prepare(
+          `SELECT claim_token, claimed_at_ms FROM operation_item_materializations
            WHERE requester_session_id = ? AND operation_id = ? AND item_index = ?`
-          )
-          .get(requesterSessionId, operationId, itemIndex) as
-          | { claim_token: string; claimed_at_ms: number }
-          | undefined;
-        const nowMs = this.now();
-        if (row && row.claim_token !== claimToken && row.claimed_at_ms + claimDurationMs > nowMs) {
-          return { claimed: false, retryAtMs: row.claimed_at_ms + claimDurationMs };
-        }
-        this.db
-          .prepare(
-            `INSERT INTO operation_item_materializations (
+        )
+        .get(requesterSessionId, operationId, itemIndex) as
+        | { claim_token: string; claimed_at_ms: number }
+        | undefined;
+      const nowMs = this.now();
+      if (row && row.claim_token !== claimToken && row.claimed_at_ms + claimDurationMs > nowMs) {
+        return { claimed: false, retryAtMs: row.claimed_at_ms + claimDurationMs };
+      }
+      this.db
+        .prepare(
+          `INSERT INTO operation_item_materializations (
              requester_session_id, operation_id, item_index, claim_token, claimed_at_ms
            ) VALUES (?, ?, ?, ?, ?)
            ON CONFLICT(requester_session_id, operation_id, item_index)
            DO UPDATE SET claim_token = excluded.claim_token, claimed_at_ms = excluded.claimed_at_ms`
-          )
-          .run(requesterSessionId, operationId, itemIndex, claimToken, nowMs);
-        return { claimed: true };
-      })
-      .immediate();
+        )
+        .run(requesterSessionId, operationId, itemIndex, claimToken, nowMs);
+      return { claimed: true };
+    }).immediate();
   }
 
   markItemInputDurable(
@@ -738,40 +727,38 @@ export class LodyOperationStore {
     itemIndex: number,
     claimToken?: string
   ): StoredLodyOperation {
-    return this.db
-      .transaction(() => {
-        const operation = this.get(requesterSessionId, operationId);
-        const item = operation.items[itemIndex];
-        if (!item || item.status !== 'active' || item.inputDurable) return operation;
-        if (claimToken) {
-          const claim = this.db
-            .prepare(
-              `SELECT claim_token FROM operation_item_materializations
+    return this.transaction(() => {
+      const operation = this.get(requesterSessionId, operationId);
+      const item = operation.items[itemIndex];
+      if (!item || item.status !== 'active' || item.inputDurable) return operation;
+      if (claimToken) {
+        const claim = this.db
+          .prepare(
+            `SELECT claim_token FROM operation_item_materializations
              WHERE requester_session_id = ? AND operation_id = ? AND item_index = ?`
-            )
-            .get(requesterSessionId, operationId, itemIndex) as { claim_token: string } | undefined;
-          if (claim?.claim_token !== claimToken) return operation;
-        }
-        const items = operation.items.map((candidate, index) =>
-          index === itemIndex && candidate.status === 'active'
-            ? { ...candidate, inputDurable: true }
-            : candidate
-        );
-        this.db
-          .prepare(
-            `UPDATE operations SET items_json = ?
+          )
+          .get(requesterSessionId, operationId, itemIndex) as { claim_token: string } | undefined;
+        if (claim?.claim_token !== claimToken) return operation;
+      }
+      const items = operation.items.map((candidate, index) =>
+        index === itemIndex && candidate.status === 'active'
+          ? { ...candidate, inputDurable: true }
+          : candidate
+      );
+      this.db
+        .prepare(
+          `UPDATE operations SET items_json = ?
            WHERE requester_session_id = ? AND operation_id = ? AND state = 'active'`
-          )
-          .run(JSON.stringify(items), requesterSessionId, operationId);
-        this.db
-          .prepare(
-            `DELETE FROM operation_item_materializations
+        )
+        .run(JSON.stringify(items), requesterSessionId, operationId);
+      this.db
+        .prepare(
+          `DELETE FROM operation_item_materializations
            WHERE requester_session_id = ? AND operation_id = ? AND item_index = ?`
-          )
-          .run(requesterSessionId, operationId, itemIndex);
-        return this.get(requesterSessionId, operationId);
-      })
-      .immediate();
+        )
+        .run(requesterSessionId, operationId, itemIndex);
+      return this.get(requesterSessionId, operationId);
+    }).immediate();
   }
 
   finish(
@@ -781,7 +768,7 @@ export class LodyOperationStore {
     finishedAt = new Date(this.now()).toISOString()
   ): StoredLodyOperation {
     const bounded = this.assertCompletionBound(completion);
-    const transaction = this.db.transaction(() => {
+    const transaction = this.transaction(() => {
       const current = this.getStored(requesterSessionId, operationId);
       if (!current) {
         throw new LodyOperationStoreError(
@@ -790,7 +777,34 @@ export class LodyOperationStore {
           false
         );
       }
-      const durableCompletion = current.state === 'finished' ? current.completion : bounded;
+      const stopped =
+        current.state === 'active' && bounded.type === 'result'
+          ? bounded.value.items.flatMap((item) =>
+              item.target &&
+              this.inbox.inputCancellationReason(
+                current.workspaceId,
+                item.target.sessionId,
+                item.target.userTurnId
+              ) === 'user_stop'
+                ? [item.target]
+                : []
+            )
+          : [];
+      const terminal = this.assertCompletionBound(cancelManuallyStoppedTargets(bounded, stopped));
+      const durableCompletion = current.state === 'finished' ? current.completion : terminal;
+      if (stopped.length) {
+        const items = cancelManuallyStoppedTargets(
+          { type: 'result', value: { items: current.items } },
+          stopped
+        );
+        if (items.type === 'result')
+          this.db
+            .prepare(
+              "UPDATE operations SET items_json=? WHERE requester_session_id=? AND operation_id=? AND state='active'"
+            )
+            .run(JSON.stringify(items.value.items), requesterSessionId, operationId);
+      }
+
       if (!durableCompletion) throw new Error('Finished Operation is missing its completion.');
       if (current.state === 'active') {
         this.db
@@ -799,24 +813,14 @@ export class LodyOperationStore {
              SET state = 'finished', completion_json = ?, finished_at = ?
              WHERE requester_session_id = ? AND operation_id = ? AND state = 'active'`
           )
-          .run(JSON.stringify(bounded), finishedAt, requesterSessionId, operationId);
+          .run(JSON.stringify(terminal), finishedAt, requesterSessionId, operationId);
       }
-      this.db
-        .prepare(
-          `INSERT OR IGNORE INTO deliveries (
-             workspace_id, requester_session_id, operation_id, delivery_id,
-             system_turn_id, state, initiator_chain_depth, completion_json
-           ) VALUES (?, ?, ?, ?, ?, 'pending', ?, ?)`
-        )
-        .run(
-          current.workspaceId,
-          current.requesterSessionId,
-          current.operationId,
-          getOperationDeliveryId(current.requesterSessionId, current.operationId),
-          getOperationCompletionTurnId(current.requesterSessionId, current.operationId),
-          current.initiatorChainDepth,
-          JSON.stringify(durableCompletion)
-        );
+      this.inbox.indexCompletion({
+        ...current,
+        state: 'finished',
+        completion: durableCompletion,
+        finishedAt: current.finishedAt ?? finishedAt,
+      });
       const updated = this.getStored(requesterSessionId, operationId);
       if (!updated) {
         throw new Error('Finished Operation disappeared during transaction.');
@@ -830,7 +834,7 @@ export class LodyOperationStore {
     requesterSessionId: SessionId,
     operationId: string
   ): { operation: StoredLodyOperation; didCancel: boolean } {
-    const transaction = this.db.transaction(() => {
+    const transaction = this.transaction(() => {
       const current = this.get(requesterSessionId, operationId);
       if (current.state === 'finished') {
         return { operation: current, didCancel: false };
@@ -847,416 +851,13 @@ export class LodyOperationStore {
     return transaction.immediate();
   }
 
-  listPendingDeliveries(
-    workspaceId: WorkspaceId,
-    requesterSessionId?: SessionId
-  ): StoredLodyDelivery[] {
-    const rows = requesterSessionId
-      ? this.db
-          .prepare(
-            `SELECT ${DELIVERY_READ_COLUMNS}
-             FROM deliveries
-             JOIN delivery_execution_state USING (requester_session_id, operation_id)
-             WHERE deliveries.workspace_id = ?
-               AND deliveries.requester_session_id = ?
-               AND deliveries.state = 'pending'
-             ORDER BY deliveries.sequence ASC`
-          )
-          .all(workspaceId, requesterSessionId)
-      : this.db
-          .prepare(
-            `SELECT ${DELIVERY_READ_COLUMNS}
-             FROM deliveries
-             JOIN delivery_execution_state USING (requester_session_id, operation_id)
-             WHERE deliveries.workspace_id = ? AND deliveries.state = 'pending'
-             ORDER BY deliveries.sequence ASC`
-          )
-          .all(workspaceId);
-    return rows.map((row) => this.decodeDelivery(row));
-  }
-
-  getDelivery(requesterSessionId: SessionId, operationId: string): StoredLodyDelivery {
-    const row = this.db
-      .prepare(
-        `SELECT ${DELIVERY_READ_COLUMNS}
-         FROM deliveries
-         JOIN delivery_execution_state USING (requester_session_id, operation_id)
-         WHERE deliveries.requester_session_id = ? AND deliveries.operation_id = ?`
-      )
-      .get(requesterSessionId, operationId);
-    if (row === undefined) {
-      throw new LodyOperationStoreError(
-        'DELIVERY_NOT_FOUND',
-        `Delivery not found for Operation: ${operationId}`,
-        false
-      );
-    }
-    return this.decodeDelivery(row);
-  }
-
-  /** Run once after the Worker lifecycle barrier, never during ordinary reconciliation. */
-  recoverOrphanedDeliveryClaims(workspaceId: WorkspaceId, workerBootId: string): number {
-    const result = this.db
-      .prepare(
-        `UPDATE delivery_execution_state
-         SET execution_phase = CASE
-               WHEN execution_phase = 'started' THEN 'uncertain'
-               WHEN execution_phase IN ('claimed', 'prepared') THEN 'ready'
-               ELSE execution_phase
-             END,
-             active_claim_id = NULL,
-             active_claim_worker_boot_id = NULL
-         WHERE (active_claim_id IS NOT NULL OR active_claim_worker_boot_id IS NOT NULL)
-           AND (
-             active_claim_id IS NULL
-             OR active_claim_worker_boot_id IS NULL
-             OR active_claim_worker_boot_id <> ?
-           )
-           AND EXISTS (
-             SELECT 1 FROM deliveries
-             WHERE deliveries.requester_session_id = delivery_execution_state.requester_session_id
-               AND deliveries.operation_id = delivery_execution_state.operation_id
-               AND deliveries.workspace_id = ? AND deliveries.state = 'pending'
-           )`
-      )
-      .run(workerBootId, workspaceId);
-    return result.changes;
-  }
-
-  /** Run only after this coordinator has stopped scheduling new Delivery work. */
-  abandonDeliveryClaimsOwnedBy(workspaceId: WorkspaceId, workerBootId: string): number {
-    const result = this.db
-      .prepare(
-        `UPDATE delivery_execution_state
-         SET execution_phase = CASE
-               WHEN execution_phase = 'started' THEN 'uncertain'
-               WHEN execution_phase IN ('claimed', 'prepared') THEN 'ready'
-               ELSE execution_phase
-             END,
-             active_claim_id = NULL,
-             active_claim_worker_boot_id = NULL
-         WHERE active_claim_worker_boot_id = ?
-           AND EXISTS (
-             SELECT 1 FROM deliveries
-             WHERE deliveries.requester_session_id = delivery_execution_state.requester_session_id
-               AND deliveries.operation_id = delivery_execution_state.operation_id
-               AND deliveries.workspace_id = ? AND deliveries.state = 'pending'
-           )`
-      )
-      .run(workerBootId, workspaceId);
-    return result.changes;
-  }
-
-  claimDeliveryExecution(
-    requesterSessionId: SessionId,
-    operationId: string,
-    claim: { claimId: string; workerBootId: string }
-  ): DeliveryExecutionClaim {
-    const transaction = this.db.transaction((): DeliveryExecutionClaim => {
-      const current = this.getDelivery(requesterSessionId, operationId);
-      if (current.state === 'consumed') return { status: 'consumed', delivery: current };
-      if (
-        current.activeClaimId === claim.claimId &&
-        current.activeClaimWorkerBootId === claim.workerBootId
-      ) {
-        return { status: 'claimed', delivery: current };
-      }
-      if (current.activeClaimId !== undefined || current.activeClaimWorkerBootId !== undefined) {
-        return { status: 'in_flight', delivery: current };
-      }
-      if (current.executionPhase !== 'ready') {
-        return { status: 'in_flight', delivery: current };
-      }
-      if (current.attemptCount >= DELIVERY_MAX_ATTEMPTS) {
-        return { status: 'exhausted', delivery: current };
-      }
-      const result = this.db
-        .prepare(
-          `UPDATE delivery_execution_state
-           SET execution_phase = 'claimed', active_claim_id = ?, active_claim_worker_boot_id = ?
-           WHERE requester_session_id = ? AND operation_id = ?
-             AND attempt_count < ?
-             AND execution_phase = 'ready'
-             AND active_claim_id IS NULL AND active_claim_worker_boot_id IS NULL
-             AND EXISTS (
-               SELECT 1 FROM deliveries
-               WHERE deliveries.requester_session_id = delivery_execution_state.requester_session_id
-                 AND deliveries.operation_id = delivery_execution_state.operation_id
-                 AND deliveries.state = 'pending'
-             )`
-        )
-        .run(
-          claim.claimId,
-          claim.workerBootId,
-          requesterSessionId,
-          operationId,
-          DELIVERY_MAX_ATTEMPTS
-        );
-      if (result.changes !== 1) {
-        const latest = this.getDelivery(requesterSessionId, operationId);
-        if (latest.state === 'consumed') return { status: 'consumed', delivery: latest };
-        if (latest.activeClaimId !== undefined || latest.activeClaimWorkerBootId !== undefined) {
-          return { status: 'in_flight', delivery: latest };
-        }
-        return { status: 'exhausted', delivery: latest };
-      }
-      return {
-        status: 'claimed',
-        delivery: this.getDelivery(requesterSessionId, operationId),
-      };
-    });
-    return transaction.immediate();
-  }
-
-  prepareClaimedDeliveryExecution(
-    requesterSessionId: SessionId,
-    operationId: string,
-    workerBootId: string,
-    claimId: string
-  ): { prepared: boolean; delivery: StoredLodyDelivery } {
-    const transaction = this.db.transaction(() => {
-      const current = this.getDelivery(requesterSessionId, operationId);
-      if (
-        current.activeClaimWorkerBootId === workerBootId &&
-        current.activeClaimId === claimId &&
-        (current.executionPhase === 'prepared' || current.executionPhase === 'started')
-      ) {
-        return { prepared: true, delivery: current };
-      }
-      const result = this.db
-        .prepare(
-          `UPDATE delivery_execution_state
-           SET execution_phase = 'prepared', attempt_count = attempt_count + 1
-           WHERE requester_session_id = ? AND operation_id = ?
-             AND attempt_count < ?
-             AND execution_phase = 'claimed'
-             AND active_claim_worker_boot_id = ? AND active_claim_id = ?
-             AND EXISTS (
-               SELECT 1 FROM deliveries
-               WHERE deliveries.requester_session_id = delivery_execution_state.requester_session_id
-                 AND deliveries.operation_id = delivery_execution_state.operation_id
-                 AND deliveries.state = 'pending'
-             )`
-        )
-        .run(requesterSessionId, operationId, DELIVERY_MAX_ATTEMPTS, workerBootId, claimId);
-      return {
-        prepared: result.changes === 1,
-        delivery: this.getDelivery(requesterSessionId, operationId),
-      };
-    });
-    return transaction.immediate();
-  }
-
-  markClaimedDeliveryExecutionStarted(
-    requesterSessionId: SessionId,
-    operationId: string,
-    workerBootId: string,
-    claimId: string
-  ): boolean {
-    const result = this.db
-      .prepare(
-        `UPDATE delivery_execution_state
-         SET execution_phase = 'started'
-         WHERE requester_session_id = ? AND operation_id = ?
-           AND execution_phase = 'prepared'
-           AND active_claim_worker_boot_id = ? AND active_claim_id = ?
-           AND EXISTS (
-             SELECT 1 FROM deliveries
-             WHERE deliveries.requester_session_id = delivery_execution_state.requester_session_id
-               AND deliveries.operation_id = delivery_execution_state.operation_id
-               AND deliveries.state = 'pending'
-           )`
-      )
-      .run(requesterSessionId, operationId, workerBootId, claimId);
-    if (result.changes === 1) return true;
-    const current = this.getDelivery(requesterSessionId, operationId);
-    return (
-      current.executionPhase === 'started' &&
-      current.activeClaimWorkerBootId === workerBootId &&
-      current.activeClaimId === claimId
-    );
-  }
-
-  markClaimedDeliveryExecutionUncertain(
-    requesterSessionId: SessionId,
-    operationId: string,
-    workerBootId: string,
-    claimId: string
-  ): boolean {
-    const result = this.db
-      .prepare(
-        `UPDATE delivery_execution_state
-         SET execution_phase = 'uncertain',
-             active_claim_id = NULL,
-             active_claim_worker_boot_id = NULL
-         WHERE requester_session_id = ? AND operation_id = ?
-           AND execution_phase = 'started'
-           AND active_claim_worker_boot_id = ? AND active_claim_id = ?
-           AND EXISTS (
-             SELECT 1 FROM deliveries
-             WHERE deliveries.requester_session_id = delivery_execution_state.requester_session_id
-               AND deliveries.operation_id = delivery_execution_state.operation_id
-               AND deliveries.state = 'pending'
-           )`
-      )
-      .run(requesterSessionId, operationId, workerBootId, claimId);
-    return result.changes === 1;
-  }
-
-  claimDeliveryFinalization(
-    requesterSessionId: SessionId,
-    operationId: string,
-    claim: {
-      claimId: string;
-      workerBootId: string;
-      requireAttemptsExhausted?: boolean;
-      requiredExecutionPhase?: 'ready' | 'uncertain';
-    }
-  ): DeliveryFinalizationClaim {
-    const transaction = this.db.transaction((): DeliveryFinalizationClaim => {
-      const current = this.getDelivery(requesterSessionId, operationId);
-      if (current.state === 'consumed') return { status: 'consumed', delivery: current };
-      if (
-        current.activeClaimId === claim.claimId &&
-        current.activeClaimWorkerBootId === claim.workerBootId
-      ) {
-        return { status: 'claimed', delivery: current };
-      }
-      if (current.activeClaimId !== undefined || current.activeClaimWorkerBootId !== undefined) {
-        return { status: 'in_flight', delivery: current };
-      }
-      const minimumAttemptCount = claim.requireAttemptsExhausted ? DELIVERY_MAX_ATTEMPTS : 0;
-      const requiredExecutionPhase = claim.requiredExecutionPhase ?? 'ready';
-      if (current.attemptCount < minimumAttemptCount) {
-        return { status: 'not_ready', delivery: current };
-      }
-      if (current.executionPhase !== requiredExecutionPhase) {
-        return { status: 'not_ready', delivery: current };
-      }
-      const result = this.db
-        .prepare(
-          `UPDATE delivery_execution_state
-           SET active_claim_id = ?, active_claim_worker_boot_id = ?
-           WHERE requester_session_id = ? AND operation_id = ?
-             AND attempt_count >= ?
-             AND execution_phase = ?
-             AND active_claim_id IS NULL AND active_claim_worker_boot_id IS NULL
-             AND EXISTS (
-               SELECT 1 FROM deliveries
-               WHERE deliveries.requester_session_id = delivery_execution_state.requester_session_id
-                 AND deliveries.operation_id = delivery_execution_state.operation_id
-                 AND deliveries.state = 'pending'
-             )`
-        )
-        .run(
-          claim.claimId,
-          claim.workerBootId,
-          requesterSessionId,
-          operationId,
-          minimumAttemptCount,
-          requiredExecutionPhase
-        );
-      if (result.changes !== 1) {
-        const latest = this.getDelivery(requesterSessionId, operationId);
-        if (latest.state === 'consumed') return { status: 'consumed', delivery: latest };
-        if (latest.activeClaimId !== undefined || latest.activeClaimWorkerBootId !== undefined) {
-          return { status: 'in_flight', delivery: latest };
-        }
-        return { status: 'not_ready', delivery: latest };
-      }
-      return {
-        status: 'claimed',
-        delivery: this.getDelivery(requesterSessionId, operationId),
-      };
-    });
-    return transaction.immediate();
-  }
-
-  releaseDeliveryClaim(
-    requesterSessionId: SessionId,
-    operationId: string,
-    workerBootId: string,
-    claimId: string
-  ): boolean {
-    const result = this.db
-      .prepare(
-        `UPDATE delivery_execution_state
-         SET execution_phase = CASE
-               WHEN execution_phase IN ('claimed', 'prepared') THEN 'ready'
-               ELSE execution_phase
-             END,
-             active_claim_id = NULL,
-             active_claim_worker_boot_id = NULL
-         WHERE requester_session_id = ? AND operation_id = ?
-           AND active_claim_worker_boot_id = ? AND active_claim_id = ?
-           AND execution_phase <> 'started'
-           AND EXISTS (
-             SELECT 1 FROM deliveries
-             WHERE deliveries.requester_session_id = delivery_execution_state.requester_session_id
-               AND deliveries.operation_id = delivery_execution_state.operation_id
-               AND deliveries.state = 'pending'
-           )`
-      )
-      .run(requesterSessionId, operationId, workerBootId, claimId);
-    return result.changes === 1;
-  }
-
-  consumeClaimedDelivery(
-    requesterSessionId: SessionId,
-    operationId: string,
-    workerBootId: string,
-    claimId: string,
-    consumedAt = new Date(this.now()).toISOString()
-  ): { consumed: boolean; delivery: StoredLodyDelivery } {
-    const transaction = this.db.transaction(() => {
-      const current = this.getDelivery(requesterSessionId, operationId);
-      if (
-        current.state === 'consumed' ||
-        current.activeClaimWorkerBootId !== workerBootId ||
-        current.activeClaimId !== claimId
-      ) {
-        return { consumed: false, delivery: current };
-      }
-      const result = this.db
-        .prepare(
-          `UPDATE deliveries
-           SET state = 'consumed', consumed_at = ?
-           WHERE requester_session_id = ? AND operation_id = ? AND state = 'pending'
-             AND EXISTS (
-               SELECT 1 FROM delivery_execution_state
-               WHERE delivery_execution_state.requester_session_id = deliveries.requester_session_id
-                 AND delivery_execution_state.operation_id = deliveries.operation_id
-                 AND delivery_execution_state.active_claim_worker_boot_id = ?
-                 AND delivery_execution_state.active_claim_id = ?
-             )`
-        )
-        .run(consumedAt, requesterSessionId, operationId, workerBootId, claimId);
-      if (result.changes === 1) {
-        const released = this.db
-          .prepare(
-            `UPDATE delivery_execution_state
-             SET active_claim_id = NULL, active_claim_worker_boot_id = NULL
-             WHERE requester_session_id = ? AND operation_id = ?
-               AND active_claim_worker_boot_id = ? AND active_claim_id = ?`
-          )
-          .run(requesterSessionId, operationId, workerBootId, claimId);
-        if (released.changes !== 1) {
-          throw new Error('Consumed Delivery lost its active claim during transaction.');
-        }
-      }
-      const latest = this.getDelivery(requesterSessionId, operationId);
-      return {
-        consumed: result.changes === 1,
-        delivery: latest,
-      };
-    });
-    return transaction.immediate();
-  }
-
   deleteRequesterSession(requesterSessionId: SessionId): void {
-    this.db
-      .prepare('DELETE FROM operations WHERE requester_session_id = ?')
-      .run(requesterSessionId);
+    this.transaction(() => {
+      this.inbox.deleteSession(requesterSessionId);
+      this.db
+        .prepare('DELETE FROM operations WHERE requester_session_id = ?')
+        .run(requesterSessionId);
+    }).immediate();
   }
 
   snapshot(operation: StoredLodyOperation): LodyOperationSnapshot {
@@ -1363,7 +964,12 @@ export class LodyOperationStore {
       | undefined;
     const author = authorRow?.author_json
       ? parseJson(authorRow.author_json, AgentMessageAuthorSchema, 'Operation author')
-      : undefined;
+      : frozen.sourceTurnId
+        ? buildAgentMessageAuthor({
+            sessionId: parsed.requester_session_id,
+            turnId: frozen.sourceTurnId,
+          })
+        : undefined;
     const inputRow = this.db
       .prepare(
         'SELECT attachments_json FROM operation_inputs WHERE requester_session_id = ? AND operation_id = ?'
@@ -1410,32 +1016,6 @@ export class LodyOperationStore {
     };
   }
 
-  private decodeDelivery(row: unknown): StoredLodyDelivery {
-    const parsed = DeliveryReadRowSchema.parse(row);
-    return {
-      sequence: parsed.sequence,
-      workspaceId: parsed.workspace_id as WorkspaceId,
-      requesterSessionId: parsed.requester_session_id as SessionId,
-      operationId: parsed.operation_id,
-      deliveryId: parsed.delivery_id,
-      systemTurnId: parsed.system_turn_id,
-      state: parsed.state,
-      executionPhase: parsed.execution_phase,
-      attemptCount: parsed.attempt_count,
-      ...(parsed.active_claim_id ? { activeClaimId: parsed.active_claim_id } : {}),
-      ...(parsed.active_claim_worker_boot_id
-        ? { activeClaimWorkerBootId: parsed.active_claim_worker_boot_id }
-        : {}),
-      initiatorChainDepth: parsed.initiator_chain_depth,
-      completion: parseJson(
-        parsed.completion_json,
-        OperationCompletionSchema,
-        'Delivery completion'
-      ) as LodyOperationCompletion,
-      ...(parsed.consumed_at ? { consumedAt: parsed.consumed_at } : {}),
-    };
-  }
-
   private assertCompletionBound(completion: LodyOperationCompletion): LodyOperationCompletion {
     const parsed = OperationCompletionSchema.parse(completion) as LodyOperationCompletion;
     if (Buffer.byteLength(JSON.stringify(parsed), 'utf8') <= LODY_OPERATION_COMPLETION_MAX_BYTES) {
@@ -1472,11 +1052,10 @@ export class LodyOperationStore {
       return;
     }
     const cutoff = new Date(nowMs - TERMINAL_RETENTION_MS).toISOString();
-    this.db
-      .transaction(() => {
-        this.db
-          .prepare(
-            `DELETE FROM operations
+    this.transaction(() => {
+      this.db
+        .prepare(
+          `DELETE FROM operations
            WHERE state = 'finished'
              AND (kind NOT IN ('session_create', 'session_create_many') OR EXISTS (
                SELECT 1 FROM operation_progress_settlements p
@@ -1484,43 +1063,50 @@ export class LodyOperationStore {
                  AND p.operation_id = operations.operation_id
              ))
              AND EXISTS (
-               SELECT 1 FROM deliveries
-               WHERE deliveries.requester_session_id = operations.requester_session_id
-                 AND deliveries.operation_id = operations.operation_id
-                 AND deliveries.state = 'consumed'
-                 AND deliveries.consumed_at < ?
+               SELECT 1 FROM inbox_results r
+               WHERE r.session_id=operations.requester_session_id
+                 AND r.operation_id=operations.operation_id
+                 AND r.consumed=1 AND r.consumed_at < ?
              )`
-          )
-          .run(cutoff);
-        this.db
-          .prepare(
-            `INSERT INTO orchestration_meta (key, value) VALUES ('last_cleanup_at_ms', ?)
+        )
+        .run(cutoff);
+      this.inbox.cleanupExpired();
+      this.db
+        .prepare(
+          `INSERT INTO orchestration_meta (key, value) VALUES ('last_cleanup_at_ms', ?)
            ON CONFLICT(key) DO UPDATE SET value = excluded.value`
-          )
-          .run(String(nowMs));
-      })
-      .immediate();
+        )
+        .run(String(nowMs));
+    }).immediate();
   }
 
   private migrate(): void {
     if (!this.isMigrationRequired()) return;
 
-    this.db
-      .transaction(() => {
-        const hadDeliveryExecutionState =
-          this.db
-            .prepare(
-              "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'delivery_execution_state'"
-            )
-            .get() !== undefined;
-        const hadDeliveryExecutionPhase =
-          hadDeliveryExecutionState &&
+    this.transaction(() => {
+      const tables = new Set(
+        (
+          this.db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all() as {
+            name: string;
+          }[]
+        ).map((r) => r.name)
+      );
+      const hasInbox = tables.has('inbox_sessions');
+      let sequence = 0;
+      if (tables.has('sqlite_sequence')) {
+        sequence =
           (
-            this.db.prepare(`PRAGMA table_info(delivery_execution_state)`).all() as Array<{
-              name: string;
-            }>
-          ).some((column) => column.name === 'execution_phase');
-        this.db.exec(`
+            this.db.prepare("SELECT seq FROM sqlite_sequence WHERE name='deliveries'").get() as
+              | { seq: number }
+              | undefined
+          )?.seq ?? 0;
+      }
+      // Released Operations and their duplicate guards remain authoritative.
+      // Retire only the old per-result Delivery scheduler; never replay its backlog.
+      this.db.exec(
+        'DROP TRIGGER IF EXISTS inbox_results_insert; DROP TRIGGER IF EXISTS inbox_reject_legacy_submission; DROP TRIGGER IF EXISTS deliveries_insert_execution_state; DROP TABLE IF EXISTS delivery_execution_state; DROP TABLE IF EXISTS deliveries;'
+      );
+      this.db.exec(`
       CREATE TABLE IF NOT EXISTS operations (
         workspace_id TEXT NOT NULL,
         owner_machine_id TEXT NOT NULL,
@@ -1567,47 +1153,6 @@ export class LodyOperationStore {
         SELECT RAISE(ABORT, 'Operation id has already completed and expired.');
       END;
 
-      CREATE TABLE IF NOT EXISTS deliveries (
-        sequence INTEGER PRIMARY KEY AUTOINCREMENT,
-        workspace_id TEXT NOT NULL,
-        requester_session_id TEXT NOT NULL,
-        operation_id TEXT NOT NULL,
-        delivery_id TEXT NOT NULL UNIQUE,
-        system_turn_id TEXT NOT NULL UNIQUE,
-        state TEXT NOT NULL CHECK (state IN ('pending', 'consumed')),
-        initiator_chain_depth INTEGER NOT NULL,
-        completion_json TEXT NOT NULL,
-        consumed_at TEXT,
-        FOREIGN KEY (requester_session_id, operation_id)
-          REFERENCES operations (requester_session_id, operation_id)
-          ON DELETE CASCADE
-      );
-
-      CREATE INDEX IF NOT EXISTS deliveries_pending_session
-      ON deliveries (workspace_id, requester_session_id, state, sequence);
-
-      CREATE TABLE IF NOT EXISTS delivery_execution_state (
-        requester_session_id TEXT NOT NULL,
-        operation_id TEXT NOT NULL,
-        execution_phase TEXT NOT NULL DEFAULT 'ready'
-          CHECK (execution_phase IN ('ready', 'claimed', 'prepared', 'started', 'uncertain')),
-        attempt_count INTEGER NOT NULL DEFAULT 0,
-        active_claim_id TEXT,
-        active_claim_worker_boot_id TEXT,
-        PRIMARY KEY (requester_session_id, operation_id),
-        FOREIGN KEY (requester_session_id, operation_id)
-          REFERENCES operations (requester_session_id, operation_id)
-          ON DELETE CASCADE
-      );
-
-      CREATE TRIGGER IF NOT EXISTS deliveries_insert_execution_state
-      AFTER INSERT ON deliveries
-      BEGIN
-        INSERT OR IGNORE INTO delivery_execution_state (
-          requester_session_id, operation_id, execution_phase, attempt_count
-        ) VALUES (NEW.requester_session_id, NEW.operation_id, 'ready', 0);
-      END;
-
       CREATE TABLE IF NOT EXISTS operation_item_materializations (
         requester_session_id TEXT NOT NULL,
         operation_id TEXT NOT NULL,
@@ -1650,35 +1195,30 @@ export class LodyOperationStore {
         value TEXT NOT NULL
       );
     `);
-        if (hadDeliveryExecutionState && !hadDeliveryExecutionPhase) {
-          this.db.exec(
-            `ALTER TABLE delivery_execution_state
-             ADD COLUMN execution_phase TEXT NOT NULL DEFAULT 'ready'`
-          );
-          this.db.exec(
-            `UPDATE delivery_execution_state
-             SET execution_phase = CASE
-               WHEN attempt_count > 0
-                 OR active_claim_id IS NOT NULL
-                 OR active_claim_worker_boot_id IS NOT NULL
-               THEN 'uncertain'
-               ELSE 'ready'
-             END`
-          );
-        }
-        this.db
-          .prepare(
-            `INSERT OR IGNORE INTO delivery_execution_state (
-               requester_session_id, operation_id, execution_phase, attempt_count
-             )
-             SELECT requester_session_id, operation_id,
-               CASE WHEN state = 'pending' THEN ? ELSE 'ready' END,
-               0
-             FROM deliveries`
-          )
-          .run(hadDeliveryExecutionState ? 'ready' : 'uncertain');
-      })
-      .immediate();
+      if (hasInbox) {
+        // Passive upgrade copies with no batch are legacy backlog, not new work.
+        this.db.exec(`DELETE FROM inbox_results WHERE automatic_eligible=0
+            AND NOT EXISTS(SELECT 1 FROM inbox_members m WHERE m.sequence=inbox_results.sequence);`);
+        sequence = Math.max(
+          sequence,
+          (
+            this.db
+              .prepare('SELECT COALESCE(MAX(sequence),0) AS value FROM inbox_results')
+              .get() as { value: number }
+          ).value
+        );
+      }
+      this.db
+        .prepare(
+          "INSERT INTO orchestration_meta VALUES('inbox_sequence',?) ON CONFLICT(key) DO UPDATE SET value=CAST(MAX(CAST(value AS INTEGER),CAST(excluded.value AS INTEGER)) AS TEXT)"
+        )
+        .run(String(sequence));
+      this.db
+        .prepare(
+          "INSERT INTO orchestration_meta VALUES('schema_version','2') ON CONFLICT(key) DO UPDATE SET value=excluded.value"
+        )
+        .run();
+    }).immediate();
   }
 
   private isMigrationRequired(): boolean {
@@ -1688,10 +1228,6 @@ export class LodyOperationStore {
       'table:operation_retired_ids',
       'trigger:operations_retire_id',
       'trigger:operations_reject_retired_id',
-      'table:deliveries',
-      'index:deliveries_pending_session',
-      'table:delivery_execution_state',
-      'trigger:deliveries_insert_execution_state',
       'table:operation_item_materializations',
       'table:operation_progress_settlements',
       'table:orchestration_meta',
@@ -1704,47 +1240,27 @@ export class LodyOperationStore {
          WHERE type IN ('table', 'index', 'trigger')`
       )
       .all() as Array<{ type: string; name: string }>;
+    if (existingObjects.some(({ name }) => name === 'orchestration_meta')) {
+      const storedVersion = this.db
+        .prepare("SELECT value FROM orchestration_meta WHERE key='schema_version'")
+        .get() as { value: string } | undefined;
+      if (storedVersion && Number(storedVersion.value) > 2)
+        throw new Error('INBOX_SCHEMA_UNSUPPORTED');
+    }
     for (const { type, name } of existingObjects) {
       requiredObjects.delete(`${type}:${name}`);
     }
     if (requiredObjects.size > 0) return true;
 
-    const executionStateColumns = this.db
-      .prepare(`PRAGMA table_info(delivery_execution_state)`)
-      .all() as Array<{ name: string }>;
-    return !executionStateColumns.some((column) => column.name === 'execution_phase');
-  }
-
-  private repairTerminalDeliveries(): void {
-    this.db
-      .transaction(() => {
-        this.db
-          .prepare(
-            `UPDATE deliveries
-           SET delivery_id = 'operation:' || requester_session_id || ':' || operation_id || ':completion',
-               system_turn_id = 'operation-completion:' || requester_session_id || ':' || operation_id`
-          )
-          .run();
-        this.db
-          .prepare(
-            `INSERT OR IGNORE INTO deliveries (
-             workspace_id, requester_session_id, operation_id, delivery_id,
-             system_turn_id, state, initiator_chain_depth, completion_json
-           )
-           SELECT workspace_id, requester_session_id, operation_id,
-             'operation:' || requester_session_id || ':' || operation_id || ':completion',
-             'operation-completion:' || requester_session_id || ':' || operation_id,
-             'pending', initiator_chain_depth, completion_json
-           FROM operations
-           WHERE state = 'finished' AND completion_json IS NOT NULL
-             AND NOT EXISTS (
-               SELECT 1 FROM deliveries
-               WHERE deliveries.requester_session_id = operations.requester_session_id
-                 AND deliveries.operation_id = operations.operation_id
-             )`
-          )
-          .run();
-      })
-      .immediate();
+    const version = this.db
+      .prepare("SELECT value FROM orchestration_meta WHERE key='schema_version'")
+      .get() as { value: string } | undefined;
+    if (version && Number(version.value) > 2) throw new Error('INBOX_SCHEMA_UNSUPPORTED');
+    return (
+      version?.value !== '2' ||
+      existingObjects.some(
+        ({ name }) => name === 'deliveries' || name === 'delivery_execution_state'
+      )
+    );
   }
 }

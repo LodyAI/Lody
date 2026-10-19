@@ -1,6 +1,7 @@
 import {
   fromApplicationJson,
   toApplicationJson,
+  applicationJsonText,
   type HistoryProjectedMessage,
 } from '@loro-dev/roost/lody-history';
 import type { RoostHistorySegment, RoostHistoryPort } from '@lody/shared/session-data';
@@ -27,8 +28,15 @@ export function adaptRoostProjectedMessages(
 }
 
 /** Validated optional fields use undefined for absence; JSON storage omits them. */
+const storageJson = (value: unknown): unknown => JSON.parse(JSON.stringify(value));
+
 export function encodeRoostContent(value: unknown) {
-  return fromApplicationJson(JSON.parse(JSON.stringify(value)));
+  return fromApplicationJson(storageJson(value));
+}
+
+/** Native inserted subtrees share the SDK content encoder's JSON absence rules. */
+export function encodeRoostContentText(value: unknown): string {
+  return applicationJsonText(storageJson(value));
 }
 
 /**

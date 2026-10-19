@@ -1,3 +1,5 @@
+import { makeNodeLocalLoroWriterConnection } from '@lody/shared/node/local-loro-writer';
+import { closeProcessLocalLoroWriterLegacy } from '@lody/shared/local-loro-writer/legacy';
 import fs from 'node:fs';
 import net from 'node:net';
 import {
@@ -6,10 +8,9 @@ import {
   LOCAL_LORO_DATA_PLANE_MAX_FRAME_BYTES,
   LOCAL_LORO_DATA_PLANE_PROTOCOL_VERSION,
   type LocalLoroDataPlaneClientMessage,
-  type LocalLoroDataPlaneServerMessage,
 } from '@lody/shared';
 import type {
-  LocalLoroDataPlaneServer,
+  LocalLoroDataPlaneServerLegacy,
   LocalLoroDataPlaneServerConnection,
 } from '@lody/shared/local-loro-data-plane-server';
 import { getLocalLoroDataPlaneSocketPath } from '@lody/shared/node/local-ipc';
@@ -28,7 +29,7 @@ export interface LocalLoroDataPlaneSocketServerConfig {
   logger: Logger;
   // Resolves the per-workspace sync engine. Returns null when the workspace has
   // no running runtime (the client gets an error and can retry after bootstrap).
-  getWorkspaceServer: (workspaceId: string) => LocalLoroDataPlaneServer | null;
+  getWorkspaceServer: (workspaceId: string) => LocalLoroDataPlaneServerLegacy | null;
   /** Override the protocol frame limit for focused transport tests. */
   maxFrameBytes?: number;
 }
@@ -38,10 +39,8 @@ let activeSocketPath: string | null = null;
 let dataPlaneServerStart: Promise<void> | null = null;
 let connectionSeq = 0;
 const activeClientSockets = new Set<net.Socket>();
-
-function encode(message: LocalLoroDataPlaneServerMessage): string {
-  return `${JSON.stringify(message)}\n`;
-}
+const connectionReleases = new Set<() => Promise<void>>();
+let stopReceipt: Promise<void> | null = null;
 
 export async function startLocalLoroDataPlaneServer(
   config: LocalLoroDataPlaneSocketServerConfig
@@ -65,29 +64,10 @@ async function startInner(config: LocalLoroDataPlaneSocketServerConfig): Promise
   const server = net.createServer((socket) => {
     const connectionId = `dp:${process.pid}:${++connectionSeq}`;
     // Track engines this socket touched so we can drop its subscriptions on close.
-    const touchedEngines = new Set<LocalLoroDataPlaneServer>();
+    const touchedEngines = new Set<LocalLoroDataPlaneServerLegacy>();
     activeClientSockets.add(socket);
 
-    const connection: LocalLoroDataPlaneServerConnection = {
-      id: connectionId,
-      // Flow control instead of kill-on-burst: `write` returning false pauses
-      // the engine's per-connection writer (which stops EXPORTING — deltas
-      // coalesce against the per-peer frontier) until 'drain'. Outbound memory
-      // is bounded by one in-flight frame, so a slow consumer just syncs
-      // slower; liveness is owned by the idle watchdog below, never by buffer
-      // size heuristics (the old writableLength kill misread bursts as dead
-      // consumers and livelocked the reconnect loop).
-      send: (message) => {
-        if (socket.destroyed) {
-          return false;
-        }
-        return socket.write(encode(message));
-      },
-      onDrain: (listener) => {
-        socket.on('drain', listener);
-        return () => socket.off('drain', listener);
-      },
-    };
+    const connection = makeNodeLocalLoroWriterConnection(connectionId, socket);
 
     // Room topology/import messages retain connection order because join awaits
     // real I/O and leave/update must not overtake it.
@@ -100,7 +80,11 @@ async function startInner(config: LocalLoroDataPlaneSocketServerConfig): Promise
           return;
         }
         roomMessageChain = roomMessageChain
-          .then(() => handleMessage(config, connection, touchedEngines, message))
+          .then(() =>
+            socket.destroyed
+              ? undefined
+              : handleMessage(config, connection, touchedEngines, message)
+          )
           .catch((error) => logMessageHandlingError(config.logger, error));
       },
       maxBufferBytes: config.maxFrameBytes ?? LOCAL_LORO_DATA_PLANE_MAX_FRAME_BYTES,
@@ -131,7 +115,15 @@ async function startInner(config: LocalLoroDataPlaneSocketServerConfig): Promise
     socket.on('close', () => {
       activeClientSockets.delete(socket);
       for (const engine of touchedEngines) {
-        engine.handleDisconnect(connectionId);
+        const release = () => engine.handleDisconnectLegacy(connectionId);
+        connectionReleases.add(release);
+        void release().then(
+          () => connectionReleases.delete(release),
+          () => {
+            // Retain the recovery owner; no payload/error projection is logged.
+            config.logger.debug('[loro-data-plane] writer release pending');
+          }
+        );
       }
       touchedEngines.clear();
     });
@@ -212,7 +204,7 @@ function parseLine(
 async function handleMessage(
   config: LocalLoroDataPlaneSocketServerConfig,
   connection: LocalLoroDataPlaneServerConnection,
-  touchedEngines: Set<LocalLoroDataPlaneServer>,
+  touchedEngines: Set<LocalLoroDataPlaneServerLegacy>,
   message: Exclude<LocalLoroDataPlaneClientMessage, { type: 'ping' }>
 ): Promise<void> {
   const engine = config.getWorkspaceServer(message.workspaceId);
@@ -245,24 +237,29 @@ function hasStringField<K extends string>(value: unknown, field: K): value is Re
   );
 }
 
-export async function stopLocalLoroDataPlaneServer(): Promise<void> {
-  if (!dataPlaneServer) {
-    return;
-  }
+export function stopLocalLoroDataPlaneServer(): Promise<void> {
+  return (stopReceipt ??= stopInner().finally(() => {
+    stopReceipt = null;
+  }));
+}
+
+async function stopInner(): Promise<void> {
   const server = dataPlaneServer;
   const socketPath = activeSocketPath;
+  for (const socket of activeClientSockets) socket.destroy();
+  activeClientSockets.clear();
+  if (server) await new Promise<void>((resolve) => server.close(() => resolve()));
+  // The close event registered the recovery owners before server.close resolves.
+  // Failures leave those owners and the application writer available for retry.
+  await Promise.all(
+    [...connectionReleases].map(async (release) => {
+      await release();
+      connectionReleases.delete(release);
+    })
+  );
+  await closeProcessLocalLoroWriterLegacy();
   dataPlaneServer = null;
   activeSocketPath = null;
-
-  for (const socket of activeClientSockets) {
-    socket.destroy();
-  }
-  activeClientSockets.clear();
-
-  await new Promise<void>((resolve) => {
-    server.close(() => resolve());
-  });
-  if (socketPath && process.platform !== 'win32' && fs.existsSync(socketPath)) {
+  if (socketPath && process.platform !== 'win32' && fs.existsSync(socketPath))
     fs.unlinkSync(socketPath);
-  }
 }

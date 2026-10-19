@@ -25,6 +25,10 @@ entry document to reach `DOMContentLoaded` before reading its boot profile or
 marking readiness. The initial `about:blank` document is not an application-ready
 signal. Console listeners and tracing attach before this navigation wait.
 
+Onboarding Page Objects wait for the final Configure Lody action, which remains
+available after the intro finishes. Local CLI readiness can arrive after the
+transient Skip intro button disappears, so that button is not a setup prerequisite.
+
 Each run uses fresh durable directories and a kernel-assigned loopback port.
 The test-only port override is accepted only when `LODY_E2E=1`, so Electron and
 its bundled CLI cannot attach to the normal local daemon. Teardown first asks

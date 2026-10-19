@@ -1,3 +1,4 @@
+import { agentRoleWriteCommand } from './agent-role-write';
 import { Command } from 'commander';
 import type { WorkspaceId } from '@lody/shared';
 import { createResourceDiscovery } from '@/lib/resource-discovery-runtime';
@@ -142,6 +143,8 @@ export function discoveryGetCommand(resource: 'agent_config' | 'agent_role'): Co
 }
 
 export const agentRoleCommand = new Command('agent-role')
-  .description('Inspect Agent Roles')
+  .description('Inspect Agent Roles and propose creations or updates')
   .addCommand(discoveryListCommand('agent_role'))
-  .addCommand(discoveryGetCommand('agent_role'));
+  .addCommand(discoveryGetCommand('agent_role'))
+  .addCommand(agentRoleWriteCommand('create'))
+  .addCommand(agentRoleWriteCommand('update'));

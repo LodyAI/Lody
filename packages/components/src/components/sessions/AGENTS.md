@@ -2,7 +2,7 @@
 
 `CLAUDE.md` symlinks here. Edit `AGENTS.md` only.
 
-Read parent rules and each heading's linked context before edits.
+Read parent rules and linked context before edits.
 
 ## [Tabs and `?tab` routing](../../../../../.agents/docs/sessions-tabs-routing.md)
 
@@ -14,17 +14,15 @@ Read parent rules and each heading's linked context before edits.
   Test `isWaiting` first; use `sessionHasUnreadMessages` to exclude closed/archived output.
 - `?tab` owns selection; never mirror it in state (#193). Confirmed shared closure
   may replace the current choice with a neighbour or local draft. Close writes
-  `isTabClosed`, never archive or delete.
-  Reopen clears only `isTabClosed`; it never unarchives.
+  `isTabClosed`, never archive/delete; reopen clears only it, never unarchives.
 - Cmd/Ctrl+W ownership: [command rules](../../lib/commands/AGENTS.md).
 - `Change owner` writes the OWNER `SessionMeta.userId`, never sharing/visibility;
   they stay separate actions.
 
 ## [Shell, side panel, side chats](../../../../../.agents/docs/sessions-side-panel.md)
 
-- Desktop file/diff/browser/PR surfaces never split the conversation: they are
-  closeable right-panel tabs. `sidePanelTabs` is the one strip order; every close
-  handler takes its fallback neighbour from it.
+- Desktop file/diff/browser/PR viewers are closeable right-panel tabs; never split
+  the conversation. `sidePanelTabs` owns order and close fallback neighbours.
 - A Side Chat is a durable child Session (`childSessionPlacement: 'side-panel'`):
   no top tab, no sidebar row, but it still rolls up into the parent row. Only explicit
   tab close deletes it; mount it lazily.
@@ -44,16 +42,17 @@ Read parent rules and each heading's linked context before edits.
   (`fromPageContent`) never opens private LAN; only the address bar may.
 - Preload one bounded frame after live confirmation; require atomic moves, no
   polling, and cleanup safe after Browser takeover.
-- Static HTML runs `allow-scripts`-only from a policy-owned `srcdoc`; truncated
-  documents are never executable and static frames die with their tab.
+- Static HTML requires policy-owned `srcdoc`. Scripts require credentialless and
+  `allow-scripts` only; otherwise use navigation-stripped HTML with an empty sandbox.
+  Never preview truncated text; static frames die with their tab.
 - Preview comment writes go through `runtime.writer.mutatePreviewVisualComments`, never the store's `setState`.
 
 ## [Conversation surface](../../../../../.agents/docs/sessions-surface.md)
 
 - Message-list crash fallback preserves the composer and copies the shared report,
   including the original error and caught React component stacks.
-- Read receipts are gated on VISIBILITY, not on being mounted: keep the
-  explicit per-surface `isVisible` prop.
+- Read receipts require per-surface `isVisible`, never mere mounting.
+- Keep question drafts on navigation and IME Enter; show failures.
 - Markdown copy uses `buildConversationMarkdown`, not `buildReplayPromptFromHistory`:
   keep prose whole, cap thinking rather than drop it, toast every omission, and
   include the selected message regardless of ACP fork support.
@@ -123,18 +122,17 @@ Read parent rules and each heading's linked context before edits.
 
 ## [File surfaces](../../../../../.agents/docs/sessions-file-surfaces.md)
 
-- What a client may do with a session file is ONE model
-  (`hooks/use-session-file-actions.ts` + `lib/session-file-actions.ts`): never
-  promote a local-host action to a surface that cannot perform it, nor re-derive
-  the split per surface.
-- Local paths resolve on the OWNING machine from its workspace root plus a
-  genuinely workspace-relative path; `lib/session-local-file-path.ts` rejects
-  absolute and `..` paths.
-- Keep viewer shells static; load Office engines on activation/idle only.
-  Stop hidden video; local PDFs use 64 KiB ranges and 8 MP canvases.
+- File actions use `hooks/use-session-file-actions.ts` + `lib/session-file-actions.ts`;
+  never duplicate capability checks or expose unavailable local-host actions.
+- Mobile Changes starts at the shared file list; exact file/comment links open diffs.
+  Retain diffs on Back; preserve drafts/expansion/focus. Viewport-gate bodies,
+  pause hidden reads and use shared parse Workers for multi-file cache misses.
+- Local paths use the OWNING machine's workspace root + workspace-relative path;
+  `lib/session-local-file-path.ts` rejects absolute/`..`.
+- Static viewer shells; Office engines load on activation/idle; pause hidden video.
+  PDFs: 64 KiB ranges, 8 MP canvases; retain bundled Worker entry/export.
 
 ## [Stories](../../../../../.agents/docs/sessions-stories.md)
 
-- Stories mirror production and never own UI: a story may only mock data and
-  render the real component; appearance lives in the component.
+- Stories render real components and only mock data; appearance lives in production.
   Keep stories minimal; verify UI changes in the app.

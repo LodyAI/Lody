@@ -4,6 +4,24 @@ import { api } from '@lody/cloud-api';
 import { Logger, getLogger } from '@/utils/logger';
 import { normalizeGitHubRepo } from '@/utils/github';
 import { formatErrorMessage } from '@/utils/format-error';
+import { GITHUB_TOKEN_CLOUD_TIMEOUT_MS } from './github-credential-runtime';
+
+/**
+ * Bounds a whole cloud request, response body included. The timer stays
+ * unref'd so a finished request never holds the process open.
+ */
+export const withRequestDeadline =
+  (timeoutMs: number, fetchImpl: typeof fetch = fetch): typeof fetch =>
+  (input, init) => {
+    const deadline = new AbortController();
+    const timer = setTimeout(
+      () => deadline.abort(new DOMException('GitHub token request timed out', 'TimeoutError')),
+      timeoutMs
+    );
+    timer.unref?.();
+    const signal = init?.signal ? AbortSignal.any([init.signal, deadline.signal]) : deadline.signal;
+    return fetchImpl(input, { ...init, signal });
+  };
 
 /**
  * Error codes returned by the backend for GitHub token operations.
@@ -203,7 +221,7 @@ export class GitHubTokenManager {
     this.logger = options.logger ?? getLogger('github-token');
     this.client = new ConvexHttpClient(options.serverUrl, {
       logger: false,
-      fetch: (input, init) => fetch(input, { ...init, signal: AbortSignal.timeout(2500) }),
+      fetch: withRequestDeadline(GITHUB_TOKEN_CLOUD_TIMEOUT_MS),
     });
     this.cliToken = options.cliToken;
     this.workspaceId = options.workspaceId;

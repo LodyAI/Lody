@@ -329,6 +329,85 @@ function resolveLocalProjectBrowsePath(absolutePath: string | undefined): string
   return requestedPath;
 }
 
+export type LocalProjectCreateDirectoryErrorCode =
+  | 'invalid_request'
+  | 'path_invalid'
+  | 'access_denied'
+  | 'already_exists';
+
+export class LocalProjectCreateDirectoryError extends Error {
+  constructor(
+    readonly code: LocalProjectCreateDirectoryErrorCode,
+    message: string,
+    options?: ErrorOptions
+  ) {
+    super(message, options);
+    this.name = 'LocalProjectCreateDirectoryError';
+  }
+}
+
+function mapCreateDirectoryFsError(
+  error: unknown,
+  operation: 'parent' | 'create',
+  targetPath: string
+): LocalProjectCreateDirectoryError | null {
+  const code = (error as NodeJS.ErrnoException | null)?.code;
+  if (code === 'EEXIST' && operation === 'create') {
+    return new LocalProjectCreateDirectoryError(
+      'already_exists',
+      `A file or folder named "${path.basename(targetPath)}" already exists.`
+    );
+  }
+  if (code === 'EACCES' || code === 'EPERM' || code === 'EROFS') {
+    return new LocalProjectCreateDirectoryError(
+      'access_denied',
+      `Permission denied creating folder in "${path.dirname(targetPath)}".`
+    );
+  }
+  if (code === 'ENOENT' || code === 'ENOTDIR' || code === 'EINVAL' || code === 'ENAMETOOLONG') {
+    return new LocalProjectCreateDirectoryError(
+      'path_invalid',
+      operation === 'parent'
+        ? 'The parent folder does not exist or is not a directory.'
+        : 'The folder path is no longer available.'
+    );
+  }
+  return null;
+}
+
+function validateLocalProjectDirectoryName(name: string): string {
+  const normalized = name.trim();
+  if (
+    !normalized ||
+    normalized !== name ||
+    normalized === '.' ||
+    normalized === '..' ||
+    Array.from(normalized).some((char) => char.charCodeAt(0) < 32) ||
+    normalized.includes('/') ||
+    normalized.includes('\\') ||
+    path.isAbsolute(normalized)
+  ) {
+    throw new LocalProjectCreateDirectoryError(
+      'invalid_request',
+      'Folder name must be a single directory name.'
+    );
+  }
+  if (process.platform === 'win32') {
+    const stem = normalized.split('.')[0]?.toUpperCase() ?? normalized.toUpperCase();
+    if (
+      /^(CON|PRN|AUX|NUL|CONIN\$|CONOUT\$|COM[1-9¹²³]|LPT[1-9¹²³])$/.test(stem) ||
+      /[<>:"|?*]/.test(normalized) ||
+      /[. ]$/.test(normalized)
+    ) {
+      throw new LocalProjectCreateDirectoryError(
+        'invalid_request',
+        'Folder name is not valid on this machine.'
+      );
+    }
+  }
+  return normalized;
+}
+
 function parseLocalProjectBrowseCursor(cursor: string | undefined): number {
   if (!cursor) {
     return 0;
@@ -1342,6 +1421,38 @@ export class LocalProjectControlService {
       homeDir,
       ...(platform === 'win32' ? { drives: await listWindowsDrives() } : {}),
     };
+  }
+
+  async createDirectory(parentPath: string, name: string): Promise<{ path: string }> {
+    const directoryName = validateLocalProjectDirectoryName(name);
+    if (!path.isAbsolute(parentPath) || parentPath.includes('\0')) {
+      throw new LocalProjectCreateDirectoryError('path_invalid', 'Parent path must be absolute.');
+    }
+
+    let canonicalParent: string;
+    try {
+      canonicalParent = await fs.promises.realpath(parentPath);
+      if (!(await fs.promises.stat(canonicalParent)).isDirectory()) {
+        throw new LocalProjectCreateDirectoryError(
+          'path_invalid',
+          'Parent path is not a directory.'
+        );
+      }
+    } catch (error) {
+      throw (
+        mapCreateDirectoryFsError(error, 'parent', path.join(parentPath, directoryName)) ?? error
+      );
+    }
+
+    const targetPath = path.join(canonicalParent, directoryName);
+    try {
+      // Non-recursive mkdir is atomic for collisions, including files and symlinks.
+      // Never accept an existing target as a successful creation or register it here.
+      await fs.promises.mkdir(targetPath);
+    } catch (error) {
+      throw mapCreateDirectoryFsError(error, 'create', targetPath) ?? error;
+    }
+    return { path: targetPath };
   }
 
   async browseDirectory(options?: {

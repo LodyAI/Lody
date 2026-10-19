@@ -1,3 +1,4 @@
+import { bindTestPresenceApplication } from './presence-application-fixture';
 import { resolveSessionMessageAuthor } from '../src/session/message-author';
 import fs from 'node:fs/promises';
 import http from 'node:http';
@@ -58,7 +59,10 @@ describe('local platform zero-cloud integration', () => {
   let cloudConnectionAttempts: number;
   let originalEnv: NodeJS.ProcessEnv;
 
+  let presenceApplication: ReturnType<typeof bindTestPresenceApplication>;
+
   beforeEach(async () => {
+    presenceApplication = bindTestPresenceApplication(createSilentLogger());
     originalEnv = { ...process.env };
     tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'lody-zero-cloud-'));
     cloudConnectionAttempts = 0;
@@ -86,6 +90,7 @@ describe('local platform zero-cloud integration', () => {
   });
 
   afterEach(async () => {
+    await presenceApplication.closeLegacy();
     process.env = originalEnv;
     await new Promise<void>((resolve, reject) => {
       trapServer.close((error) => (error ? reject(error) : resolve()));
@@ -325,7 +330,38 @@ describe('local platform zero-cloud integration', () => {
           }),
         },
       };
-      const chat = await runWithSessionCommandEnvironment(fromTarget, () =>
+      const reverse = await runWithSessionCommandEnvironment(fromTarget, () =>
+        executeDaemonSessionTool({ ...context, sessionId: targetId }, 'lody_session_chat', {
+          operationId: 'rejected-reverse',
+          sessionId,
+          prompt: 'Review completed.',
+        })
+      );
+      expect(reverse.isError).toBe(true);
+      expect(JSON.stringify(reverse)).toContain('REVERSE_CHAT_FORBIDDEN');
+      const humanTurnId = 'independent-human-turn';
+      await doc.sessionData.commands.appendTurn({
+        id: humanTurnId,
+        role: 'user',
+        userId,
+        author: { v: 1, kind: 'human', userId },
+        timestamp: targetInput.timestamp,
+        items: [{ type: 'text', text: 'Send my new follow-up.' }],
+        fileDiff: [],
+        status: 'processing',
+        inputConfig: targetInput.inputConfig,
+      });
+      const freshTarget = {
+        ...fromTarget,
+        host: {
+          ...fromTarget.host,
+          readInvocation: (id: SessionId) => ({
+            ...fromTarget.host.readInvocation(id),
+            sourceTurnId: humanTurnId,
+          }),
+        },
+      };
+      const chat = await runWithSessionCommandEnvironment(freshTarget, () =>
         executeDaemonSessionTool({ ...context, sessionId: targetId }, 'lody_session_chat', {
           operationId: 'reply-to-source',
           sessionId,
@@ -339,7 +375,7 @@ describe('local platform zero-cloud integration', () => {
         userId,
         author: {
           sessionId: targetId,
-          turnId: targetInput.id,
+          turnId: humanTurnId,
           role: { id: 'reviewer', name: 'Reviewer' },
         },
       });
@@ -429,6 +465,7 @@ describe('local platform zero-cloud integration', () => {
     );
     try {
       expect(documentManager.isTransportConnected()).toBe(true);
+      expect(documentManager.isTransportRecovering()).toBe(false);
       await expect(
         cloudPort.access.verifyMachineAccess({
           workspaceId: workspace.id as WorkspaceId,

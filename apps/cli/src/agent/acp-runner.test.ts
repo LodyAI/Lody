@@ -1,3 +1,5 @@
+import { AgentSideConnection, PROTOCOL_VERSION, type Stream } from '@agentclientprotocol/sdk';
+import { initializeAndReadAcpRateLimits } from './acp-runner';
 import { EventEmitter } from 'events';
 import type { ChildProcess } from 'child_process';
 import fs from 'node:fs';
@@ -223,4 +225,69 @@ describe('shutdownLocalAcpAgent', () => {
       '[test-local-agent] ACP agent process could not be terminated'
     );
   });
+});
+
+describe('read-only quota ACP handshake', () => {
+  it.each([true, false])(
+    'queries only when advertised (query=%s), without creating a session',
+    async (query) => {
+      const outbound = new TransformStream();
+      const inbound = new TransformStream();
+      const limits = {
+        rateLimits: [
+          {
+            limitId: 'account',
+            scope: { providerId: 'example' },
+            windows: [
+              { usedPercent: 37, windowDurationSeconds: 18000, resetsAtEpochSeconds: null },
+            ],
+          },
+        ],
+        fetchedAtEpochSeconds: 123,
+      };
+      let sessions = 0;
+      let initialization: unknown;
+      const _server = new AgentSideConnection(
+        () => ({
+          initialize: async (params) => {
+            initialization = params.clientCapabilities;
+            return {
+              protocolVersion: PROTOCOL_VERSION,
+              agentCapabilities: {
+                _meta: { lody: { rateLimits: { version: 1, ...(query ? { query: true } : {}) } } },
+              },
+            };
+          },
+          newSession: async () => {
+            sessions++;
+            throw new Error('Unexpected session');
+          },
+          authenticate: async () => {
+            throw new Error('Unexpected login');
+          },
+          prompt: async () => {
+            throw new Error('Unexpected prompt');
+          },
+          cancel: async () => {},
+          extMethod: async (method) => {
+            if (method !== '_lody/rate_limits/get' && method !== 'lody/rate_limits/get')
+              throw new Error(method);
+            return limits;
+          },
+        }),
+        { readable: outbound.readable, writable: inbound.writable } as Stream
+      );
+      const result = initializeAndReadAcpRateLimits({
+        readable: inbound.readable,
+        writable: outbound.writable,
+      } as Stream);
+      if (query) await expect(result).resolves.toEqual(limits);
+      else await expect(result).rejects.toThrow('unsupported');
+      expect(sessions).toBe(0);
+      expect(initialization).toMatchObject({
+        terminal: false,
+        fs: { readTextFile: false, writeTextFile: false },
+      });
+    }
+  );
 });

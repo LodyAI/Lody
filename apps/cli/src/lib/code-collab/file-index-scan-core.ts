@@ -55,40 +55,35 @@ export async function scanGitDirectoryEntries(
 async function runGitLsFiles(
   cwd: string
 ): Promise<{ readonly ok: true; readonly paths: readonly string[] } | { readonly ok: false }> {
-  try {
-    const [{ stdout }, deleted] = await Promise.all([
-      runCommandTextLegacy({
-        command: 'git',
-        args: [
-          '-C',
-          cwd,
-          'ls-files',
-          '-z',
-          '--cached',
-          '--others',
-          '--exclude-standard',
-          '--deduplicate',
-          '--',
-          '.',
-        ],
-        maxOutputBytes: GIT_MAX_BUFFER_BYTES,
-        check: 'exit-0',
-      }),
-      runGit(cwd, ['ls-files', '--deleted', '-z', '--', '.']),
-    ]);
-    const deletedPaths = deleted.ok
-      ? new Set(deleted.stdout.split('\0').map(normalizeGitPath).filter(isValidRelativeGitPath))
-      : new Set<string>();
-    return {
-      ok: true,
-      paths: stdout
-        .split('\0')
-        .map(normalizeGitPath)
-        .filter((filePath) => isValidRelativeGitPath(filePath) && !deletedPaths.has(filePath)),
-    };
-  } catch {
+  // `runGit` never rejects, so both children are joined before either outcome is used.
+  // Returning on the first failure left the sibling `git` unawaited; with Tinypool's
+  // `Atomics.wait` idle worker it could stay unreaped as a daemon zombie on macOS.
+  const [listed, deleted] = await Promise.all([
+    runGit(cwd, [
+      'ls-files',
+      '-z',
+      '--cached',
+      '--others',
+      '--exclude-standard',
+      '--deduplicate',
+      '--',
+      '.',
+    ]),
+    runGit(cwd, ['ls-files', '--deleted', '-z', '--', '.']),
+  ]);
+  if (!listed.ok) {
     return { ok: false };
   }
+  const deletedPaths = deleted.ok
+    ? new Set(deleted.stdout.split('\0').map(normalizeGitPath).filter(isValidRelativeGitPath))
+    : new Set<string>();
+  return {
+    ok: true,
+    paths: listed.stdout
+      .split('\0')
+      .map(normalizeGitPath)
+      .filter((filePath) => isValidRelativeGitPath(filePath) && !deletedPaths.has(filePath)),
+  };
 }
 
 export async function computeAllChanges(

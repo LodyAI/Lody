@@ -234,6 +234,9 @@ export const cloudOperations = {
     ),
   },
   billing: {
+    listDeletedWorkspaceBillingAccounts: query<
+      ConvexApi['billing']['listDeletedWorkspaceBillingAccounts']
+    >('billing:listDeletedWorkspaceBillingAccounts'),
     createBillingPortalSession: action<ConvexApi['billing']['createBillingPortalSession']>(
       'billing:createBillingPortalSession'
     ),
@@ -263,6 +266,15 @@ export const cloudOperations = {
     ),
     getWorkspaceSeatInvitePreview: query<ConvexApi['billing']['getWorkspaceSeatInvitePreview']>(
       'billing:getWorkspaceSeatInvitePreview'
+    ),
+    purchaseWorkspaceMemberSeat: action<ConvexApi['billing']['purchaseWorkspaceMemberSeat']>(
+      'billing:purchaseWorkspaceMemberSeat'
+    ),
+    getBillingInvoice: action<ConvexApi['billing']['getBillingInvoice']>(
+      'billing:getBillingInvoice'
+    ),
+    cancelPendingSeatInvoice: action<ConvexApi['billing']['cancelPendingSeatInvoice']>(
+      'billing:cancelPendingSeatInvoice'
     ),
     listBillingInvoices: action<ConvexApi['billing']['listBillingInvoices']>(
       'billing:listBillingInvoices'

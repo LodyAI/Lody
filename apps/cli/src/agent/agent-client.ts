@@ -345,11 +345,6 @@ export type AcpStartupTimeoutOptions = {
   resumeSessionTimeoutMs?: number;
 };
 
-export type AcpSessionStartTarget = {
-  workdir: string;
-  resumeSessionId?: ACPSessionId;
-};
-
 const LegacyCodexGoalStatusSchema = z.enum([
   'active',
   'paused',
@@ -1365,6 +1360,10 @@ export class AgentClient implements acp.Client {
     return {};
   }
 
+  getRateLimitsCapability() {
+    return this.lodyExtensionCapabilities.rateLimits;
+  }
+
   async getRateLimits(request: RateLimitsGetRequest = {}): Promise<RateLimitsSnapshot> {
     if (this.lodyExtensionCapabilities.rateLimits?.query !== true) {
       throw new Error('[ACP_RATE_LIMITS_UNSUPPORTED] Agent did not advertise rate-limit queries');
@@ -1861,7 +1860,6 @@ export class AgentClient implements acp.Client {
     resumeSessionId?: ACPSessionId,
     timeoutOptions: AcpStartupTimeoutOptions = {},
     startupAbort?: Promise<never>,
-    resolveSessionStart?: () => Promise<AcpSessionStartTarget>,
     forkSessionId?: ACPSessionId,
     forkSessionTurnId?: string
   ): Promise<acp.NewSessionResponse> {
@@ -2024,12 +2022,6 @@ export class AgentClient implements acp.Client {
         this.acknowledgedSteerCapability ? 'yes' : 'no'
       } fork=${this.supportsFork ? 'yes' : 'no'} forkMethod=${hasForkMethod ? 'yes' : 'no'})`
     );
-
-    if (resolveSessionStart) {
-      const target = await withAbort(resolveSessionStart(), startupAbort);
-      workdir = target.workdir;
-      resumeSessionId = target.resumeSessionId;
-    }
 
     if (
       this.lodyExtensionCapabilities.worktreeProject?.version === 1 &&

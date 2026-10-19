@@ -293,7 +293,11 @@ export function createSessionSubmission(ports: SessionSubmissionPorts) {
       throw new Error('Runtime not ready');
     }
     // A held send is written and dispatched by the pending queue.
-    if (runtime.pendingSends?.has(userTurnId)) return;
+    if (
+      runtime.pendingSends?.has(userTurnId) ||
+      runtime.pendingSends?.ownsDelivery?.(userTurnId, 'dispatch')
+    )
+      return;
     await dispatchUserTurn(runtime, sessionId, userTurnId, {
       ...options,
       onAccepted: () => onRpcDelivered(sessionId, userTurnId),
@@ -310,7 +314,11 @@ export function createSessionSubmission(ports: SessionSubmissionPorts) {
       throw new Error('Runtime not ready');
     }
     // A held guide is offered by the pending queue once it is written.
-    if (runtime.pendingSends?.has(userTurnId)) return false;
+    if (
+      runtime.pendingSends?.has(userTurnId) ||
+      runtime.pendingSends?.ownsDelivery?.(userTurnId, 'guide')
+    )
+      return false;
     return steerUserTurn(runtime, sessionId, expectedTurnId, userTurnId, {
       machineId: options?.machineId,
       onApplied: () => onRpcDelivered(sessionId, userTurnId),

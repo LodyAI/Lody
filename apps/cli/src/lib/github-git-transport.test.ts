@@ -344,4 +344,97 @@ process.exit(child.status ?? 1);
       );
     }
   });
+
+  describe('exec-path probe resilience', () => {
+    const markerPath = () => path.join(directory, 'lody-git-transport.json');
+    const spawnError = (code: string) =>
+      Object.assign(new Error(`spawnSync git ${code}`), { code });
+
+    it('records the resolved layout in a marker after materialization', () => {
+      ensureGitHubGitTransport(directory, '/workspace/broker', 'git');
+      const marker = JSON.parse(fs.readFileSync(markerPath(), 'utf8'));
+      expect(marker).toMatchObject({ version: 1, realGit: 'git', statePath: '/workspace/broker' });
+      expect(fs.existsSync(marker.execPath)).toBe(true);
+      expect(fs.existsSync(marker.nativeGit)).toBe(true);
+    });
+
+    it('skips the probe entirely when the recorded layout matches', () => {
+      ensureGitHubGitTransport(directory, '/workspace/broker', 'git');
+      fs.rmSync(path.join(directory, 'package.json'));
+      const probe = vi.fn(() => {
+        throw spawnError('EAGAIN');
+      });
+      expect(() =>
+        ensureGitHubGitTransport(directory, '/workspace/broker', 'git', {
+          probeExecPathOnce: probe,
+        })
+      ).not.toThrow();
+      expect(probe).not.toHaveBeenCalled();
+      expect(fs.existsSync(path.join(directory, 'package.json'))).toBe(true);
+    });
+
+    it('retries transient spawn failures before succeeding', () => {
+      const realExecPath = execFileSync('git', ['--exec-path'], { encoding: 'utf8' }).trim();
+      let calls = 0;
+      ensureGitHubGitTransport(directory, '/workspace/broker', 'git', {
+        probeExecPathOnce: () => {
+          calls++;
+          if (calls < 3) throw spawnError('EAGAIN');
+          return realExecPath;
+        },
+      });
+      expect(calls).toBe(3);
+      expect(fs.existsSync(path.join(directory, 'git'))).toBe(true);
+    });
+
+    it('does not retry a non-transient probe failure', () => {
+      let calls = 0;
+      expect(() =>
+        ensureGitHubGitTransport(directory, '/workspace/broker', 'git', {
+          probeExecPathOnce: () => {
+            calls++;
+            throw spawnError('ENOENT');
+          },
+        })
+      ).toThrowError(spawnError('ENOENT'));
+      expect(calls).toBe(1);
+    });
+
+    it('fails session preparation only when no recorded layout survives the probe failure', () => {
+      let calls = 0;
+      expect(() =>
+        ensureGitHubGitTransport(directory, '/workspace/broker', 'git', {
+          probeExecPathOnce: () => {
+            calls++;
+            throw spawnError('EAGAIN');
+          },
+        })
+      ).toThrowError(spawnError('EAGAIN'));
+      expect(calls).toBe(4);
+    });
+
+    it('reuses a stale recorded layout and warns when the probe keeps failing', () => {
+      const realExecPath = execFileSync('git', ['--exec-path'], { encoding: 'utf8' }).trim();
+      const nativeGit = path.join(realExecPath, process.platform === 'win32' ? 'git.exe' : 'git');
+      fs.writeFileSync(
+        markerPath(),
+        JSON.stringify({
+          version: 1,
+          realGit: '/previous/git',
+          statePath: '/workspace/broker',
+          execPath: realExecPath,
+          nativeGit: fs.existsSync(nativeGit) ? nativeGit : 'git',
+        })
+      );
+      const warn = vi.fn();
+      ensureGitHubGitTransport(directory, '/workspace/broker', 'git', {
+        logger: { warn },
+        probeExecPathOnce: () => {
+          throw spawnError('EAGAIN');
+        },
+      });
+      expect(warn).toHaveBeenCalledOnce();
+      expect(fs.readFileSync(path.join(directory, 'git'), 'utf8')).toContain(realExecPath);
+    });
+  });
 });

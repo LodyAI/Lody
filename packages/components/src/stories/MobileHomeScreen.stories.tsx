@@ -521,11 +521,11 @@ export const StuckConnectionHint: Story = {
       <StuckConnectionBanner
         labels={{
           title: '连接时间较长',
-          description: '通常是本地缓存异常导致',
-          clearCache: '清空缓存',
+          description: '可能是登录、网络或本地数据异常',
+          recover: '恢复选项',
           dismissAriaLabel: '关闭',
         }}
-        onClearCache={fn()}
+        onRecover={fn()}
         onDismiss={fn()}
       />
     </>

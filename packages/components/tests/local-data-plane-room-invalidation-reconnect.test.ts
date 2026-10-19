@@ -1,5 +1,5 @@
 /**
- * `LocalLoroDataPlaneServer.invalidateDocRoom` drops the room whose cached
+ * `LocalLoroDataPlaneServerLegacy.invalidateDocRoom` drops the room whose cached
  * `LoroDoc` the repo just evicted. Inbound sync repairs itself (the next
  * `update`/`join` rebuilds the room), but OUTBOUND sync does not: once the entry
  * is gone there is no subscriber left to mark dirty, so a renderer that is only
@@ -20,42 +20,64 @@
  *    in — which would release every idle document store, rejoin every local
  *    room, and charge a backoff step forgiven only after 30s of health.
  *
- * The chain under test is the real one: engine -> `room-status` frame ->
+ * This compatibility chain retains the pre-migration v7 client fixture:
+ * engine -> `room-status` frame ->
  * `LocalLoroTransportAdapter` -> real `createRoomSyncTracker` -> real
- * `createRoomSyncRegistry` -> the exact predicate the loop gates on.
+ * `createRoomSyncRegistry` -> the exact predicate the loop gates on. Product
+ * native-client automatic rejoin is covered by workspace-local-transport.test.ts.
  */
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { Effect, Layer } from 'effect';
+import { LocalLoroWriterTurn } from '@lody/shared/local-loro-writer';
+import { makeLocalLoroWriterLegacy } from '@lody/shared/local-loro-writer/legacy';
 import { LoroDoc } from 'loro-crdt';
 import {
   type LocalLoroDataPlaneClientMessage,
   type LocalLoroDataPlaneServerMessage,
 } from '@lody/shared/local-loro-data-plane';
-import { LocalLoroDataPlaneServer } from '@lody/shared/local-loro-data-plane-server';
-import { LocalLoroTransportAdapter } from '@lody/shared/local-loro-transport';
+import { LocalLoroDataPlaneServerLegacy } from '@lody/shared/local-loro-data-plane-server';
+import { LocalLoroTransportAdapter } from '../../shared/test-support/local-loro-v7-client';
 import type { RepoTransportRoomStatus } from 'loro-repo';
 import { createRoomSyncTracker } from '../src/providers/room-sync-tracker';
 import { createRoomSyncRegistry } from '../src/providers/room-sync-registry';
 
 const DOC_ID = 'session-doc-1';
 const WORKSPACE_ID = 'ws-1';
+const harnesses = new Set<Harness>();
+beforeEach(() => vi.useFakeTimers());
+afterEach(async () => {
+  try {
+    await Promise.all([...harnesses].map((harness) => harness.close()));
+  } finally {
+    harnesses.clear();
+    vi.useRealTimers();
+  }
+});
 
 /**
  * Renderer adapter <-> CLI engine over one connection, with a drain queue that
- * stands in for the relay's async delivery. No timers, no wall-clock waits.
+ * stands in for the relay's async delivery. Host turns use the fake clock.
  */
 class Harness {
   private readonly tasks: Array<() => void | Promise<void>> = [];
-  private readonly scheduler = {
-    scheduleDataWork: (work: () => void | Promise<void>) => {
-      const scheduled = { cancelled: false };
-      this.tasks.push(async () => {
-        if (!scheduled.cancelled) await work();
-      });
-      return () => {
-        scheduled.cancelled = true;
-      };
-    },
-  };
+  private readonly writerLegacy = makeLocalLoroWriterLegacy(
+    Layer.succeed(LocalLoroWriterTurn, {
+      next: Effect.callback<void>((resume) => {
+        const handle = setTimeout(() => resume(Effect.void), 0);
+        return Effect.sync(() => clearTimeout(handle));
+      }),
+    })
+  );
+  private readonly adapters = new Set<LocalLoroTransportAdapter>();
+  constructor() {
+    harnesses.add(this);
+  }
+  async close(): Promise<void> {
+    await Promise.all([...this.adapters].map((adapter) => adapter.close()));
+    await this.engine.disposeLegacy();
+    await this.writerLegacy.closeLegacy();
+    this.tasks.length = 0;
+  }
   private readonly rendererListeners = new Set<(m: LocalLoroDataPlaneServerMessage) => void>();
   readonly serverDocs = new Map<string, LoroDoc>();
   /**
@@ -81,13 +103,13 @@ class Harness {
     return this.pushed.filter((m) => m.type === type).map((m) => m.status);
   }
 
-  readonly engine = new LocalLoroDataPlaneServer({
+  readonly engine = new LocalLoroDataPlaneServerLegacy({
     workspaceId: WORKSPACE_ID,
     resolveDoc: async (docId) => this.serverDoc(docId),
     resolveFlockDoc: async () => {
       throw new Error('no flock rooms in this test');
     },
-    scheduler: this.scheduler,
+    writerLegacy: this.writerLegacy,
   });
 
   serverDoc(docId: string): LoroDoc {
@@ -108,7 +130,7 @@ class Harness {
   }
 
   createAdapter(peerId: string): LocalLoroTransportAdapter {
-    return new LocalLoroTransportAdapter({
+    const adapter = new LocalLoroTransportAdapter({
       workspaceId: WORKSPACE_ID,
       peerId,
       connection: {
@@ -127,16 +149,18 @@ class Harness {
         isConnected: () => true,
       },
     });
+    this.adapters.add(adapter);
+    return adapter;
   }
 
   async settle(): Promise<void> {
     for (let round = 0; round < 200; round += 1) {
       if (this.tasks.length === 0) {
-        await new Promise((resolve) => setTimeout(resolve, 0));
+        await vi.advanceTimersByTimeAsync(1);
         if (this.tasks.length === 0) return;
       }
       for (const task of this.tasks.splice(0)) await task();
-      await new Promise((resolve) => setTimeout(resolve, 0));
+      await vi.advanceTimersByTimeAsync(1);
     }
     throw new Error('settle_did_not_converge');
   }

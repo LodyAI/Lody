@@ -8,7 +8,7 @@ import { ErrorBoundaryFallback } from '../src/components/error-boundary-fallback
 import { initI18n } from '../src/i18n';
 
 const mocks = vi.hoisted(() => ({
-  startHardReset: vi.fn(),
+  startHardReset: vi.fn<() => Promise<boolean>>(),
   reloadApp: vi.fn(),
 }));
 
@@ -72,7 +72,8 @@ function click(element: HTMLElement) {
 
 beforeEach(async () => {
   await initI18n('en');
-  mocks.startHardReset.mockClear();
+  mocks.startHardReset.mockReset();
+  mocks.startHardReset.mockResolvedValue(true);
   mocks.reloadApp.mockClear();
   writeText = vi.fn().mockResolvedValue(undefined);
   Object.defineProperty(navigator, 'clipboard', {
@@ -144,7 +145,7 @@ describe('ErrorBoundaryFallback', () => {
     expect(mocks.reloadApp).toHaveBeenCalledTimes(1);
   });
 
-  it('requires a confirmation before clearing local data and signing out', () => {
+  it('requires a confirmation before clearing local data and signing out', async () => {
     render();
 
     click(button('clear local data'));
@@ -154,6 +155,28 @@ describe('ErrorBoundaryFallback', () => {
     click(button('Clear and sign out'));
     expect(mocks.startHardReset).toHaveBeenCalledTimes(1);
     // The dialog stays up in a progress state while the wipe + reload runs.
+    expect(document.body.textContent).toContain('Clearing…');
+    await act(async () => {});
+    expect(document.body.textContent).toContain('Clearing…');
+  });
+
+  it('closes the progress dialog after a cancelled reset and allows another attempt', async () => {
+    const reset = Promise.withResolvers<boolean>();
+    mocks.startHardReset.mockReturnValueOnce(reset.promise);
+    render();
+
+    click(button('clear local data'));
+    click(button('Clear and sign out'));
+    expect(document.body.textContent).toContain('Clearing…');
+
+    await act(async () => reset.resolve(false));
+    expect(document.body.querySelector('[role="alertdialog"]')).toBeNull();
+    expect(document.body.textContent).not.toContain('Clearing…');
+
+    click(button('clear local data'));
+    expect(button('Clear and sign out').disabled).toBe(false);
+    click(button('Clear and sign out'));
+    await act(async () => {});
     expect(document.body.textContent).toContain('Clearing…');
   });
 

@@ -4,6 +4,8 @@ export function createDesktopQuitBarrier(options: {
   stop: () => Promise<void>
   quit: () => void
   reportFailure: (error: unknown) => void
+  /** The app stays running: a renderer chose Stay, or cleanup failed. */
+  cancelled?: () => void
 }) {
   let state: 'running' | 'stopping' | 'stopped' = 'running'
   return (event: { preventDefault: () => void }): Promise<void> | void => {
@@ -21,6 +23,7 @@ export function createDesktopQuitBarrier(options: {
         (allowed) => {
           if (!allowed) {
             state = 'running'
+            options.cancelled?.()
             return
           }
           state = 'stopped'
@@ -29,6 +32,7 @@ export function createDesktopQuitBarrier(options: {
         (error: unknown) => {
           state = 'running'
           options.reportFailure(error)
+          options.cancelled?.()
         }
       )
   }

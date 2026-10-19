@@ -20,18 +20,15 @@ worktree directories. Their branches remain. A week later Alice restores one Ses
 its worktree is recreated from the preserved branch. She deletes the other; nothing
 further happens on disk.
 
-## Preparation handoff
+## Worktree creation
 
-A user can send while a draft preparation is being cancelled, replaced, or failing.
-Before formal execution or another preparation reuses that Session's workspace,
-the daemon must finish releasing the old preparation, including resources whose
-creation returns after cancellation. Removing a preparation from the available
-pool does not mean its cleanup has completed. A late cleanup must never remove
-the workspace adopted or recreated for execution. The wait is scoped to the
-Session; unrelated Sessions need not wait for it.
-
-This handoff concerns unadopted speculative resources. It does not change the
-archive and restore retention contract below.
+A Session's worktree is created when its first turn is dispatched, never while the
+user is still writing a draft. Older daemons could create one for a draft and stop
+before releasing it. If that Session never became durable, the worktree is removed.
+If it did, the Session runs setup on the worktree before using it. The worktree is
+rebuilt only when no Session ever adopted it and it targets a different repository or
+base branch; an adopted worktree and its branch are never discarded, because resume
+restores that branch. This does not change the archive and restore retention contract below.
 
 ## Git execution failure
 

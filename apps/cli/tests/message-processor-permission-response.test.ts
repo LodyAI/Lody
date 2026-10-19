@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import type {
   LocalSessionControlRequestValidated,
@@ -271,3 +271,119 @@ describe('MessageProcessor machine/acp-authenticate lanes', () => {
     expect(events).toEqual(['start1:begin', 'start1:end', 'start2:begin']);
   });
 });
+
+it.each(['page', 'watch'] as const)(
+  'runs ordered history writes while the same session %s read is parked',
+  async (kind) => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    const processor = new MessageProcessor(createSilentLogger(), 1);
+    let enterRead!: () => void;
+    const entered = new Promise<void>((resolve) => {
+      enterRead = resolve;
+    });
+    let releaseRead!: () => void;
+    const reading = new Promise<void>((resolve) => {
+      releaseRead = resolve;
+    });
+    let firstEntered!: () => void;
+    const first = new Promise<void>((resolve) => {
+      firstEntered = resolve;
+    });
+    let releaseWrite!: () => void;
+    const writing = new Promise<void>((resolve) => {
+      releaseWrite = resolve;
+    });
+    let secondDone!: () => void;
+    const second = new Promise<void>((resolve) => {
+      secondDone = resolve;
+    });
+    const inputs: string[] = [];
+    const target = {
+      sessionId: 'synthetic-session' as SessionId,
+      machineId: 'synthetic-machine' as MachineId,
+      workspaceId: 'synthetic-workspace' as WorkspaceId,
+    };
+    try {
+      processor.enqueue(
+        {
+          ...target,
+          type: 'session/history-read',
+          query:
+            kind === 'page'
+              ? { kind: 'readLatestPage', limit: 40 }
+              : { kind: 'watchChanges', checkpoint: 'synthetic-checkpoint', waitMs: 15_000 },
+        },
+        async () => {
+          enterRead();
+          await reading;
+        }
+      );
+      await entered;
+      if (kind === 'watch') {
+        let secondWatching!: () => void;
+        const other = new Promise<void>((resolve) => {
+          secondWatching = resolve;
+        });
+        processor.enqueue(
+          {
+            ...target,
+            type: 'session/history-read',
+            query: { kind: 'watchChanges', checkpoint: 'synthetic-checkpoint', waitMs: 15_000 },
+          },
+          async () => {
+            secondWatching();
+            await reading;
+          }
+        );
+        await other; // A second viewer must not serialize behind the first idle watch.
+        let ordinaryRead!: () => void;
+        const ordinary = new Promise<void>((resolve) => {
+          ordinaryRead = resolve;
+        });
+        processor.enqueue(
+          { ...target, type: 'session/history-read', query: { kind: 'count' } },
+          async () => {
+            ordinaryRead();
+          }
+        );
+        await ordinary;
+      }
+      processor.enqueue(
+        {
+          ...target,
+          type: 'session/history-write',
+          operation: 'accept_input_and_dispatch',
+          payload: {},
+        },
+        async () => {
+          inputs.push('first');
+          firstEntered();
+          await writing;
+        }
+      );
+      processor.enqueue(
+        {
+          ...target,
+          type: 'session/history-write',
+          operation: 'accept_input_and_dispatch',
+          payload: {},
+        },
+        async () => {
+          inputs.push('second');
+          secondDone();
+        }
+      );
+      await first;
+      expect(inputs).toEqual(['first']);
+      releaseWrite();
+      await second;
+      expect(inputs).toEqual(['first', 'second']);
+    } finally {
+      releaseRead();
+      releaseWrite();
+      processor.stop();
+      await processor.drain();
+      vi.useRealTimers();
+    }
+  }
+);

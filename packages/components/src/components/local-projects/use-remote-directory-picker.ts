@@ -27,6 +27,10 @@ export interface RemoteDirectoryOps {
     machineId: MachineId,
     args: { absolutePath?: string; cursor?: string }
   ) => Promise<RemoteDirectoryOpResult<LocalProjectBrowseDirectoryResult>>;
+  createDirectory: (
+    machineId: MachineId,
+    args: { parentPath: string; name: string }
+  ) => Promise<RemoteDirectoryOpResult<{ path: string }>>;
   // The project name is derived from the path by the host; the picker just
   // sends the chosen root.
   addProject: (
@@ -41,6 +45,7 @@ export interface RemoteDirectoryPickerMachine {
   online: boolean;
   ownerName: string | null;
   canAddProjects: boolean;
+  supportsCreateDirectory?: boolean;
 }
 
 export type RemoteDirectoryPickerPhase = 'machine' | 'browse';
@@ -162,6 +167,45 @@ export function describeBrowseError(
   };
 }
 
+export function describeCreateDirectoryError(
+  code: string | undefined,
+  fallback: string,
+  t: (key: string, defaultValue: string) => string
+): string {
+  if (code === 'access_denied') {
+    return t(
+      'localProjects.add.createPermissionDenied',
+      'You do not have permission to create a folder here.'
+    );
+  }
+  if (code === 'already_exists') {
+    return t(
+      'localProjects.add.createAlreadyExists',
+      'A file or folder with this name already exists.'
+    );
+  }
+  if (code === 'invalid_request') {
+    return t(
+      'localProjects.add.createInvalidName',
+      'Enter one folder name without separators or surrounding spaces.'
+    );
+  }
+  if (code === 'path_invalid') {
+    return t(
+      'localProjects.add.createInvalidPath',
+      'The parent folder or name is unavailable. Refresh or choose another folder.'
+    );
+  }
+  // The RPC facade also maps transport rejection/timeouts to execution_failed.
+  if (code === 'timeout' || code === 'daemon_unavailable' || code === 'execution_failed') {
+    return t(
+      'localProjects.add.createOffline',
+      "Can't confirm creation. Reconnect and refresh the parent folder before retrying."
+    );
+  }
+  return fallback || t('localProjects.add.createFailed', "Couldn't create the folder. Try again.");
+}
+
 export function mergeRemoteDirectoryPage(
   current: LocalProjectBrowseDirectoryResult | null,
   page: LocalProjectBrowseDirectoryResult
@@ -200,9 +244,22 @@ export function useRemoteDirectoryPicker({
   const [pathDraft, setPathDraft] = useState('');
   const [adding, setAdding] = useState(false);
   const [addError, setAddError] = useState<string | null>(null);
+  const [newFolderOpen, setNewFolderOpen] = useState(false);
+  const [folderName, setFolderName] = useState('');
+  const [creating, setCreating] = useState(false);
+  const [createError, setCreateError] = useState<{ code?: string; message: string } | null>(null);
+  const mutationInFlight = useRef(false);
+  const initialMachineLoadRef = useRef<MachineId | null>(null);
 
   // Guards against out-of-order responses when the user navigates quickly.
   const requestSeq = useRef(0);
+  useEffect(
+    () => () => {
+      requestSeq.current += 1;
+      initialMachineLoadRef.current = null;
+    },
+    []
+  );
 
   const sep = roots?.pathSeparator ?? '/';
 
@@ -212,7 +269,14 @@ export function useRemoteDirectoryPicker({
       setStatus('loading');
       setBrowseError(null);
       setEditingPath(false);
-      const res = await ops.browseDir(machineId, { absolutePath });
+      setNewFolderOpen(false);
+      setCreateError(null);
+      let res: RemoteDirectoryOpResult<LocalProjectBrowseDirectoryResult>;
+      try {
+        res = await ops.browseDir(machineId, { absolutePath });
+      } catch (error) {
+        res = { ok: false, errorCode: 'daemon_unavailable', message: String(error) };
+      }
       if (seq !== requestSeq.current) return;
       if (!res.ok) {
         setStatus('error');
@@ -230,7 +294,15 @@ export function useRemoteDirectoryPicker({
       const seq = ++requestSeq.current;
       setStatus('loading');
       setBrowseError(null);
-      const rootsRes = await ops.listRoots(machineId);
+      setCurrent(null);
+      setNewFolderOpen(false);
+      setCreateError(null);
+      let rootsRes: RemoteDirectoryOpResult<LocalProjectBrowseRootsResult>;
+      try {
+        rootsRes = await ops.listRoots(machineId);
+      } catch (error) {
+        rootsRes = { ok: false, errorCode: 'daemon_unavailable', message: String(error) };
+      }
       if (seq !== requestSeq.current) return;
       if (!rootsRes.ok) {
         setStatus('error');
@@ -243,7 +315,6 @@ export function useRemoteDirectoryPicker({
     [ops, browseTo]
   );
 
-  const initialMachineLoadRef = useRef<MachineId | null>(null);
   useEffect(() => {
     if (!initialMachineId) {
       initialMachineLoadRef.current = null;
@@ -309,6 +380,9 @@ export function useRemoteDirectoryPicker({
   }, [selectedMachineId, current, ops]);
 
   const startEditPath = useCallback(() => {
+    if (mutationInFlight.current) return;
+    setNewFolderOpen(false);
+    setCreateError(null);
     setPathDraft(current?.path ?? '');
     setEditingPath(true);
   }, [current]);
@@ -322,14 +396,105 @@ export function useRemoteDirectoryPicker({
     void browseTo(selectedMachineId, value);
   }, [pathDraft, selectedMachineId, browseTo]);
 
+  const selectedMachine = machines.find((m) => m.id === selectedMachineId) ?? null;
+  const canCreateFolder = Boolean(
+    selectedMachine?.canAddProjects &&
+    selectedMachine.online &&
+    selectedMachine.supportsCreateDirectory === true &&
+    current &&
+    status === 'ready' &&
+    !editingPath &&
+    !adding &&
+    !creating
+  );
+  const canAddCurrentFolder = Boolean(
+    selectedMachine?.canAddProjects &&
+    selectedMachine.online &&
+    current &&
+    status === 'ready' &&
+    !editingPath &&
+    !newFolderOpen &&
+    !creating &&
+    !adding
+  );
+
+  const startNewFolder = useCallback(() => {
+    if (!canCreateFolder || mutationInFlight.current) return;
+    setFolderName('');
+    setCreateError(null);
+    setNewFolderOpen(true);
+  }, [canCreateFolder]);
+
+  const cancelNewFolder = useCallback(() => {
+    if (!mutationInFlight.current) {
+      setNewFolderOpen(false);
+      setCreateError(null);
+    }
+  }, []);
+
+  const createFolder = useCallback(async () => {
+    if (!newFolderOpen || !current || !selectedMachine || mutationInFlight.current) return;
+    if (!selectedMachine.online) {
+      setCreateError({ code: 'daemon_unavailable', message: '' });
+      return;
+    }
+    if (!canCreateFolder) return;
+    if (
+      !folderName.trim() ||
+      folderName !== folderName.trim() ||
+      folderName === '.' ||
+      folderName === '..' ||
+      folderName.includes('/') ||
+      folderName.includes('\\') ||
+      Array.from(folderName).some((char) => char.charCodeAt(0) < 32)
+    ) {
+      setCreateError({ code: 'invalid_request', message: '' });
+      return;
+    }
+    const seq = requestSeq.current;
+    mutationInFlight.current = true;
+    setCreating(true);
+    setCreateError(null);
+    try {
+      const res = await ops.createDirectory(selectedMachine.id, {
+        parentPath: current.path,
+        name: folderName,
+      });
+      if (seq !== requestSeq.current) return;
+      if (!res.ok) {
+        setCreateError({ code: res.errorCode, message: res.message });
+        return;
+      }
+      setFolderName('');
+      // Creation has committed. A failed browse must retry this path, never mkdir.
+      setCurrent({ path: res.value.path, parentPath: current.path, entries: [], truncated: false });
+      await browseTo(selectedMachine.id, res.value.path);
+    } catch (error) {
+      if (seq === requestSeq.current) {
+        setCreateError({ code: 'daemon_unavailable', message: String(error) });
+      }
+    } finally {
+      mutationInFlight.current = false;
+      setCreating(false);
+    }
+  }, [newFolderOpen, current, selectedMachine, canCreateFolder, folderName, ops, browseTo]);
+
   // Adds the currently-browsed folder directly — there is no separate naming /
   // confirmation step. The host derives the project name from the path.
   const addCurrentFolder = useCallback(async () => {
-    if (!current || !selectedMachineId || adding) return;
+    if (!current || !selectedMachineId || !canAddCurrentFolder || mutationInFlight.current) return;
+    mutationInFlight.current = true;
     setAdding(true);
     setAddError(null);
-    const res = await ops.addProject(selectedMachineId, { rootPath: current.path });
-    setAdding(false);
+    let res: RemoteDirectoryOpResult<AddLocalProjectResult>;
+    try {
+      res = await ops.addProject(selectedMachineId, { rootPath: current.path });
+    } catch (error) {
+      res = { ok: false, message: String(error) };
+    } finally {
+      mutationInFlight.current = false;
+      setAdding(false);
+    }
     if (!res.ok) {
       setAddError(res.message);
       return;
@@ -346,7 +511,7 @@ export function useRemoteDirectoryPicker({
       rootPath: res.value.rootPath,
     });
     onClose();
-  }, [current, selectedMachineId, adding, ops, onAdded, onLocateRegistered, onClose]);
+  }, [current, selectedMachineId, canAddCurrentFolder, ops, onAdded, onLocateRegistered, onClose]);
 
   const back = useCallback(() => {
     // From the directory browser, step back to machine selection.
@@ -358,6 +523,8 @@ export function useRemoteDirectoryPicker({
     setRoots(null);
     setStatus('idle');
     setBrowseError(null);
+    setNewFolderOpen(false);
+    setCreateError(null);
   }, []);
 
   const retry = useCallback(() => {
@@ -366,8 +533,11 @@ export function useRemoteDirectoryPicker({
     else void loadMachine(selectedMachineId);
   }, [selectedMachineId, current, browseTo, loadMachine]);
 
-  const selectedMachine = machines.find((m) => m.id === selectedMachineId) ?? null;
   const blockedMachine = machines.find((m) => m.id === blockedMachineId) ?? null;
+  const close = useCallback(() => {
+    requestSeq.current += 1;
+    onClose();
+  }, [onClose]);
 
   return {
     phase,
@@ -385,6 +555,16 @@ export function useRemoteDirectoryPicker({
     pathDraft,
     adding,
     addError,
+    newFolderOpen,
+    folderName,
+    creating,
+    createError,
+    canCreateFolder,
+    canAddCurrentFolder,
+    setFolderName,
+    startNewFolder,
+    cancelNewFolder,
+    createFolder,
     selectMachine,
     navigate,
     entryClick,
@@ -396,7 +576,7 @@ export function useRemoteDirectoryPicker({
     addCurrentFolder,
     back,
     retry,
-    close: onClose,
+    close,
   };
 }
 

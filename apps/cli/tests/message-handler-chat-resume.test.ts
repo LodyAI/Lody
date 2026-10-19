@@ -68,6 +68,7 @@ describe('MessageHandler chat resume', () => {
         getDocMeta: vi.fn(async () => ({ meta: { needToArchiveSessions: {} } })),
       },
       getOrCreateSessionDoc: vi.fn(async () => sessionDoc),
+      acquireSessionDocLegacy: async () => ({ doc: sessionDoc, release: async () => {} }),
       isTransportConnected: vi.fn(() => true),
       publishSessionPresence: vi.fn(),
       clearSessionPresence: vi.fn(),

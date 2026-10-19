@@ -18,7 +18,11 @@ const createClock = (startMs = 1_000) => {
   };
 };
 
-const healthySseRead = { requestedMode: 'auto', observedTransport: 'sse', deliveredBatch: true } as const;
+const healthySseRead = {
+  requestedMode: 'auto',
+  observedTransport: 'sse',
+  deliveredBatch: true,
+} as const;
 const failedSseRead = {
   requestedMode: 'auto',
   observedTransport: 'sse',
@@ -79,21 +83,35 @@ describe('LoroStreamsLiveModePolicy', () => {
   });
 
   it('treats an SSE read that delivered nothing as a failure', () => {
-    const policy = new LoroStreamsLiveModePolicy({ sseReadFailureLimit: 2, now: createClock().now });
+    const policy = new LoroStreamsLiveModePolicy({
+      sseReadFailureLimit: 2,
+      now: createClock().now,
+    });
 
     // No error, but no data/up_to_date/eof either: the idle watchdog aborted a
     // silently stalled connection. A healthy read always delivers up_to_date.
     policy.selectRequestMode();
-    policy.noteReadOutcome({ requestedMode: 'auto', observedTransport: 'sse', deliveredBatch: false });
+    policy.noteReadOutcome({
+      requestedMode: 'auto',
+      observedTransport: 'sse',
+      deliveredBatch: false,
+    });
     policy.selectRequestMode();
-    policy.noteReadOutcome({ requestedMode: 'auto', observedTransport: 'sse', deliveredBatch: false });
+    policy.noteReadOutcome({
+      requestedMode: 'auto',
+      observedTransport: 'sse',
+      deliveredBatch: false,
+    });
 
     expect(policy.selectRequestMode()).toBe('long-poll');
     expect(policy.getDiagnostics().reason).toBe('sse-read-failures');
   });
 
   it('resets the failure streak when SSE recovers', () => {
-    const policy = new LoroStreamsLiveModePolicy({ sseReadFailureLimit: 3, now: createClock().now });
+    const policy = new LoroStreamsLiveModePolicy({
+      sseReadFailureLimit: 3,
+      now: createClock().now,
+    });
 
     policy.selectRequestMode();
     policy.noteReadOutcome(failedSseRead);
@@ -169,6 +187,33 @@ describe('LoroStreamsLiveModePolicy', () => {
       sseResponseTimeouts: 1,
     });
   });
+
+  it('recovers a pending write before RPC timeout and retains the SSE cooldown', () => {
+    const clock = createClock();
+    const policy = new LoroStreamsLiveModePolicy({ now: clock.now, sseRetryCooldownMs: 5_000 });
+    policy.recoverPendingWrite();
+    expect(policy.getDiagnostics()).toMatchObject({
+      transport: 'long-poll',
+      reason: 'pending-write-recovery',
+      sseResponseTimeouts: 0,
+    });
+    clock.advance(5_000);
+    // A new interactive write renews long-poll instead of starting an SSE probe.
+    policy.recoverPendingWrite();
+    expect(policy.selectRequestMode()).toBe('long-poll');
+    clock.advance(5_000);
+    expect(policy.selectRequestMode()).toBe('auto');
+  });
+
+  it.each(['sse', 'long-poll'] as const)(
+    'preserves the explicit %s pin during write recovery',
+    (pin) => {
+      const policy = new LoroStreamsLiveModePolicy({ pin });
+      policy.recoverPendingWrite();
+      expect(policy.selectRequestMode()).toBe(pin);
+      expect(policy.getDiagnostics().transportSwitches).toBe(0);
+    }
+  );
 
   it('probes SSE again once the cooldown elapses, and re-falls back on a single failure', () => {
     const clock = createClock();

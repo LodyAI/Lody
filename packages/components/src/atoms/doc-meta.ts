@@ -1,9 +1,10 @@
+import type { WorkspaceRepoLegacy } from '@lody/shared/workspace-data/repo-legacy';
 import { atom, type createStore, type PrimitiveAtom } from 'jotai';
 
 type JotaiStore = ReturnType<typeof createStore>;
 import { atomFamily } from 'jotai/utils';
 import { atomEffect } from 'jotai-effect';
-import type { LoroRepo } from 'loro-repo';
+
 import {
   isLoroRepoDocDeleted,
   getSessionRoomId,
@@ -26,6 +27,7 @@ import { mergeBootstrapMetaCache } from '@/lib/doc-meta-bootstrap';
 import { listDocMetaEntries, type DocMetaCacheSnapshot } from '@/lib/doc-meta-batch';
 import { jsonValueEqual } from '@/lib/json-value-equal';
 import { getDocMetaRoomKind, withDerivedDocMetaId } from '@/lib/doc-meta-room';
+import { describeErrorType } from '@/lib/workspace-data-scope';
 
 // ---------------------------------------------------------------------------
 // Runtime guard for metadata entering the cache.
@@ -257,7 +259,7 @@ export const docMetaCacheScopeAtom = atom<DocMetaCacheScope | null>(null);
  */
 export function readReadyDocMetaCache(
   store: Pick<JotaiStore, 'get'>,
-  repo: LoroRepo
+  repo: WorkspaceRepoLegacy
 ): DocMetaCacheSnapshot | null {
   const scope = store.get(docMetaCacheScopeAtom);
   if (!scope?.ready || scope.runtime.repo !== repo) return null;
@@ -510,7 +512,7 @@ export const clearDocMetaCacheAtom = atom(null, (_get, set) => {
 });
 
 // 初始扫描
-async function buildDocMetaCache(repo: LoroRepo) {
+async function buildDocMetaCache(repo: WorkspaceRepoLegacy) {
   const sessions: Record<string, SessionMeta> = {};
   const machines: Record<string, MachineMeta> = {};
   const agents: Record<string, AgentConfigMeta> = {};
@@ -549,7 +551,7 @@ async function buildDocMetaCache(repo: LoroRepo) {
 
 // Helper to fetch metadata for a single doc through loro-repo's public API.
 async function fetchDocMeta(
-  repo: LoroRepo,
+  repo: WorkspaceRepoLegacy,
   docId: string
 ): Promise<Record<string, unknown> | null> {
   const entry = await repo.getDocMeta(docId);
@@ -1018,7 +1020,7 @@ export const docMetaSubscriptionAtom = atomEffect((get, set) => {
         workspaceId: runtime.workspaceId,
         workspaceSlug: runtime.workspaceSlug,
         ready: false,
-        scanFailure: { errorType: error instanceof Error ? error.name || 'Error' : typeof error },
+        scanFailure: { errorType: describeErrorType(error) },
       });
     }
   );

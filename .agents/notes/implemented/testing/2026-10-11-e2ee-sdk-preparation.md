@@ -21,7 +21,7 @@ or product E2EE acceptance.
 ## Boundary and evidence
 
 The fixed input is public main `f1ba33a61244e2da07aaea93a30f06227311c4b6`,
-including P07-b and P08. [Input fingerprints](../../../../packages/components/tests/workspace-streams-crypto-provenance.json)
+including P07-b and P08. [Input fingerprints](https://github.com/LodyAI/Lody/blob/5f97599e60700d6185834632df85922ea0d73ec6/packages/components/tests/workspace-streams-crypto-provenance.json)
 identify the actual merged source; no candidate modules or Lab hosts are extracted.
 The only dependency addition is a components **devDependency** on the existing
 workspace core. Effect remains 4.0.2, Repo 0.22.0, Streams CRDT 0.16.2 and Loro
@@ -47,7 +47,7 @@ The fixture uses the public RFC 8032 seed and disposable synthetic data only.
 P08's public `verifyLedger` authenticates the fixture's current personal Owner
 from a pinned genesis and head/count. Its public `LedgerState.devices` describes
 current devices and does not expose the original-author/member-instance mapping
-needed after revocation or rejoining. [P08's limits](../../../../packages/e2ee-core/src/ledger/README.md)
+needed after revocation or rejoining. [P08's limits](../../../../packages/e2ee-core/src/internal/ledger/README.md)
 explicitly defer historical-author APIs and snapshot trust. [P07-b](../architecture/2026-10-11-e2ee-content-crypto.md)
 exposes AEAD only, not a signer or full signed workflow. Importing candidate
 ContentCipher/authority/signing hosts would conceal these missing dependencies;

@@ -1,3 +1,4 @@
+import { WorkspaceRepoLegacy } from '@lody/shared/workspace-data/repo-legacy';
 import {
   createContext,
   useContext,
@@ -8,7 +9,7 @@ import {
   type ReactNode,
 } from 'react';
 import { useAtomValue } from 'jotai';
-import { LoroRepo } from 'loro-repo';
+
 import { IndexedDBStorageAdaptor } from 'loro-repo/storage/indexeddb';
 import {
   LocalShortcutStore,
@@ -40,7 +41,7 @@ const noopSubscribe = () => () => {};
 const emptySnapshot = () => EMPTY;
 // StrictMode and a quick workspace return must finish the previous writer's
 // durable writes before reopening the same IndexedDB as a new replica.
-const closingDatabases = new Map<string, Promise<void>>();
+const closingDatabases = new Map<string, Set<() => Promise<void>>>();
 
 export function usePromptShortcuts() {
   const { runtime, error, retry } = useContext(Context);
@@ -138,9 +139,9 @@ export function PromptShortcutProvider({
     if (!workspaceId || !userId) return undefined;
     let disposed = false;
     let owned: PromptShortcutRuntime | undefined;
-    let repo: LoroRepo | undefined;
+    let repo: WorkspaceRepoLegacy | undefined;
     const databaseName = promptShortcutDatabaseName(workspaceId, userId);
-    const previousClose = closingDatabases.get(databaseName);
+    const previousCloses = [...(closingDatabases.get(databaseName) ?? [])];
     const check = () => {
       const identity = platform.identity.session.get();
       if (
@@ -153,9 +154,13 @@ export function PromptShortcutProvider({
         throw new Error('Shortcut identity changed');
     };
     const opening = (async () => {
-      await previousClose;
+      const closed = await Promise.allSettled(previousCloses.map((close) => close()));
+      const failures = closed.flatMap((result) =>
+        result.status === 'rejected' ? [result.reason] : []
+      );
+      if (failures.length) throw new AggregateError(failures, 'Previous shortcut cleanup failed');
       check();
-      repo = await LoroRepo.create({
+      repo = await WorkspaceRepoLegacy.create({
         storageAdapter: new IndexedDBStorageAdaptor({
           dbName: databaseName,
         }),
@@ -248,7 +253,7 @@ export function PromptShortcutProvider({
       void owned.flush();
     })().catch((error) => {
       if (!disposed) {
-        console.error('Failed to open Prompt Shortcuts', error);
+        console.error('Failed to open Prompt Shortcuts');
         setFailure({ workspaceId, userId, generation, error });
       }
     });
@@ -258,16 +263,37 @@ export function PromptShortcutProvider({
       // effect's instance immediately, even while its durable close is pending.
       setInstance((value) => (value?.runtime === owned ? null : value));
       // Close a late initialization as well; no leaked IndexedDB/Streams leases.
-      const closing = opening
-        .then(async () => {
-          await owned?.dispose();
-          await repo?.destroy();
-        })
-        .catch((error) => console.error('Failed to close Prompt Shortcuts', error));
-      closingDatabases.set(databaseName, closing);
-      void closing.then(() => {
-        if (closingDatabases.get(databaseName) === closing) closingDatabases.delete(databaseName);
-      });
+      const retired = closingDatabases.get(databaseName) ?? new Set<() => Promise<void>>();
+      closingDatabases.set(databaseName, retired);
+      let receipt: Promise<void> | undefined;
+      const close = (): Promise<void> => {
+        if (receipt) return receipt;
+        receipt = opening
+          .then(async () => {
+            const failures: unknown[] = [];
+            try {
+              await owned?.dispose();
+            } catch (error) {
+              failures.push(error);
+            }
+            try {
+              await repo?.destroy();
+            } catch (error) {
+              failures.push(error);
+            }
+            if (failures.length)
+              throw new AggregateError(failures, 'Shortcut owner cleanup failed');
+            retired.delete(close);
+            if (!retired.size && closingDatabases.get(databaseName) === retired)
+              closingDatabases.delete(databaseName);
+          })
+          .finally(() => {
+            receipt = undefined;
+          });
+        return receipt;
+      };
+      retired.add(close);
+      void close().catch(() => console.error('Failed to close Prompt Shortcuts'));
     };
   }, [workspaceId, userId, cloud, platform, generation]);
 

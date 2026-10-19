@@ -1,6 +1,6 @@
 import { assertProductWindowSender } from '../assert-sender'
 import { parseSessionLink, INSTALLATION_LINK_SCHEMES } from '@lody/shared/session-link'
-import { desktopInstallationProfile } from '../../platform'
+import { desktopInstallationProfile, mainPlatformKind } from '../../platform'
 import { getDesktopCallbackProtocol } from '../../desktop-channel'
 import { isDefaultLodyProtocolClient, setDefaultLodyProtocolClient } from '../../protocol-client'
 import { parseAppIconName } from '../../services/app-icon-core'
@@ -34,6 +34,11 @@ import { setMenuLanguage } from '../../menu'
 import { localFileActionError } from '../../services/local-file-action-error'
 import { hasPathLauncher, launchLocalPath } from '../../services/local-path-launcher-service'
 import { takePendingRendererLocalClear } from '../../services/local-reset-service'
+import {
+  clearDesktopLocalResetRequest,
+  writeDesktopLocalResetRequest
+} from '@lody/shared/node/desktop-local-reset'
+import { quitAndRelaunch, type RelaunchQuitOutcome } from '../../relaunch-intent'
 import { parseWindowBadge } from '../../services/window-badge-service'
 import {
   findWindow,
@@ -202,6 +207,31 @@ export class AppIpc extends IpcService {
   }
 
   /**
+   * Arms the same one-shot reset `lody app reset-cache` writes, then quits and
+   * relaunches, so the reset runs in a fresh process before any window loads (a
+   * renderer reload keeps a storage backend that already failed). Quit goes
+   * through the normal barrier: renderers may answer Stay, and the embedded CLI
+   * must confirm exit. When the app stays running, the request is withdrawn so it
+   * cannot fire at some later launch, and `cancelled` lets the caller recover.
+   */
+  @IpcMethod()
+  async relaunchIntoLocalReset(mode: unknown): Promise<RelaunchQuitOutcome> {
+    const { event } = getIpcContext()
+    assertProductWindowSender(event)
+    if (mode !== 'cache' && mode !== 'hard') throw new Error('Invalid local reset mode')
+    await writeDesktopLocalResetRequest({ mode, platform: mainPlatformKind })
+    const outcome = await quitAndRelaunch()
+    if (outcome === 'cancelled') {
+      await clearDesktopLocalResetRequest({ platform: mainPlatformKind }).catch(
+        (error: unknown) => {
+          console.error('[Electron] Could not withdraw a cancelled local reset', error)
+        }
+      )
+    }
+    return outcome
+  }
+
+  /**
    * Reports a cache clear armed from the CLI (`lody app reset-cache`) to the
    * booting renderer, which owns the precise clear. One-shot: a later reload of
    * the same window must not repeat it.
@@ -307,6 +337,31 @@ export class AppIpc extends IpcService {
       return {
         ok: false as const,
         error: 'completion_failed' as const,
+        message: formatUnknownError(error)
+      }
+    }
+  }
+
+  @IpcMethod()
+  async restartOnboarding() {
+    const { event } = getIpcContext()
+    const { getMainWindow, restartOnboarding } = getIpcServiceDeps()
+    const mainWindow = getMainWindow()
+    if (
+      !mainWindow ||
+      mainWindow.isDestroyed() ||
+      event.sender !== mainWindow.webContents ||
+      event.senderFrame !== event.sender.mainFrame
+    ) {
+      return { ok: false as const, error: 'untrusted_sender' as const }
+    }
+    try {
+      restartOnboarding(mainWindow)
+      return { ok: true as const }
+    } catch (error) {
+      return {
+        ok: false as const,
+        error: 'restart_failed' as const,
         message: formatUnknownError(error)
       }
     }

@@ -21,6 +21,7 @@ import {
   trackMainWindowState
 } from './window-persistence'
 import {
+  applyResolvedWindowTheme,
   getInitialMainWindowThemeSource,
   getMainWindowBackgroundColor,
   getMainWindowTitleBarOverlay
@@ -596,6 +597,12 @@ export function openMainWindow(options: OpenMainWindowOptions): BrowserWindow {
 
 export function setMainWindowProductReloadTarget(window: BrowserWindow): void {
   setReloadTarget(window, resolveMainRendererTarget('/'))
+}
+
+export function setMainWindowOnboardingReloadTarget(window: BrowserWindow): void {
+  nativeTheme.themeSource = 'light'
+  applyResolvedWindowTheme(window, 'light', process.platform)
+  setReloadTarget(window, resolveMainRendererTarget('/onboarding', false))
 }
 
 export function openOrFocusMainWindow(options: OpenMainWindowOptions): BrowserWindow {

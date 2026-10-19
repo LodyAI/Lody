@@ -89,5 +89,6 @@ export interface ProcessContainer {
   readonly terminateAll: (policy: TerminationPolicy) => Effect.Effect<void, TerminationFailed>;
   readonly applyLimits: (limits: SessionSandboxLimits) => Effect.Effect<void, SandboxIoError>;
   readonly readAccounting: Effect.Effect<SessionResourceAccounting, SandboxIoError>;
+  readonly recoveryRoots?: Effect.Effect<readonly number[]>;
   readonly cleanup: Effect.Effect<void>;
 }

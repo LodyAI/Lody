@@ -172,8 +172,8 @@ on projected history. This is not arbitrary downgrade safety.
 
 ### Backend selection and display reads
 
-New sessions use Loro by default. With both experimental switches enabled, the
-renderer prefers Roost only when the target advertises the required history
+New sessions use Loro by default. With Developer mode and the Roost developer
+switch enabled, the renderer prefers Roost only when the target advertises the required history
 protocol. Missing or older capabilities retain Loro before any session write.
 An explicit Roost request to an unsupported target fails before metadata, history
 or warm-up is created. Legacy sessions and non-renderer creation paths without an
@@ -248,10 +248,25 @@ including reopening the conversation, searching and navigating older cached turn
 The renderer persists a read-only projection scoped by account, workspace, machine
 and session. Owner read responses bind page content, count and a durable revision
 to the same observation. Consecutive changes update the affected cached rows
-atomically; a missed revision stages a replacement through bounded pages while
-retaining the previous coherent snapshot. Reconnection refreshes through the
+atomically. Independently negotiated incremental recovery uses an owner-issued,
+durable checkpoint to cover missed changes: notification coalescing alone must
+not require rereading unchanged historical bodies. Cache bodies, membership and
+checkpoint advance together. Missing or foreign recovery evidence stages a
+replacement through bounded pages while retaining the previous coherent snapshot. Reconnection refreshes through the
 existing owner transport. The cache never accepts or replays user commands, and
 cannot supply history this device has never synchronized.
+
+Independently negotiated history observation follows the owner's committed
+checkpoint through the existing owner transport. Initial reads and subsequent
+observation resume from durable checkpoints, including changes committed between
+them and during disconnection; a separate Loro control hint is not the only
+update signal. Idle observation reads no unchanged historical bodies and its
+bounded wait must not occupy foreground execution capacity. Pending backend
+identity is distinct from a confirmed empty history or legacy backend; resolved
+cached content remains readable while recovering. Unsupported owners keep the
+explicit legacy protocol path. This observation guarantee is draft intent;
+implementation and the watch contract are recorded in the
+[peer-reader repair](../.agents/notes/implemented/bug-fix/2026-10-16-roost-peer-reader-readiness.md).
 
 ### Verification limits
 

@@ -1,4 +1,10 @@
-import type { MachineId, MachineViewMeta } from '@lody/shared';
+import {
+  MACHINE_PROTOCOL_CAPABILITIES,
+  LOCAL_PROJECT_CREATE_DIRECTORY_PROTOCOL_VERSION,
+  machineSupportsProtocolCapability,
+  type MachineId,
+  type MachineViewMeta,
+} from '@lody/shared';
 import type { MachineVisibilityAccess } from '@/lib/visible-machine-index';
 import type { RemoteDirectoryPickerMachine } from './use-remote-directory-picker';
 
@@ -30,6 +36,11 @@ export function buildAddLocalProjectMachineOptions({
       name: meta.name || machineId,
       online: machineId === localMachineId || onlineMachineIds.has(machineId),
       canAddProjects: ownerUserId === currentUserId,
+      supportsCreateDirectory: machineSupportsProtocolCapability(
+        meta,
+        MACHINE_PROTOCOL_CAPABILITIES.localProjectCreateDirectory,
+        LOCAL_PROJECT_CREATE_DIRECTORY_PROTOCOL_VERSION
+      ),
       ownerName: ownerUserId ? (ownerNameByUserId.get(ownerUserId) ?? null) : null,
     });
   }

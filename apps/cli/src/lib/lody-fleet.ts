@@ -1,46 +1,22 @@
-import { Effect } from 'effect';
 import { initCliAnalytics } from '@/lib/analytics/posthog';
-import {
-  type CliRuntimeConnectivity,
-  type CliRuntimeWorkspace,
-  CliType,
-  MachineId,
-  WorkspaceId,
-  createServerTimeFetcher,
-  getSessionRoomId,
-  getServerNow,
-  isLoroRepoDocDeleted,
-  syncTime,
-  type LocalProjectControlErrorCode,
-  type LocalProjectControlRequest,
-  type LocalProjectControlResponse,
-  type LocalProjectId,
-  type LocalSessionControlRequest,
-  type LocalSessionControlResponse,
-  type MachineLifecycleCapability,
-  type SessionId,
-  type SessionMeta,
-} from '@lody/shared';
-import type { LocalLoroDataPlaneServer } from '@lody/shared/local-loro-data-plane-server';
-import pkg from '@/pkg';
-import { Logger } from '@/utils/logger';
-import { Lody } from '@/lib/lody';
+import { ensureImplicitLocalWorkspace } from '@/lib/cli-platform';
+import { CliRuntimeStateReporter } from '@/lib/cli-runtime-state';
+import { WorkspaceWatchCoordinator } from '@/lib/code-collab/workspace-watch-coordinator';
+import { listAliveSessionMetas } from '@/lib/command-runtime';
 import {
   startLocalIpcSocketServers,
   stopLocalIpcSocketServers,
 } from '@/lib/local-ipc-socket-server';
-import { startLodyMcpHttpServer, stopLodyMcpHttpServer } from '@/mcp/lody-mcp-http-server';
-import type { LocalProbeConfig } from '@/lib/local-probe';
-import type { LocalSessionControlConfig } from '@/lib/local-session-control';
-import { startLocalTerminalServer, stopLocalTerminalServer } from '@/lib/local-terminal-server';
 import {
   startLocalLoroDataPlaneServer,
   stopLocalLoroDataPlaneServer,
 } from '@/lib/local-loro-data-plane-server';
-import { LocalProjectControlService } from '@/lib/local-project-control-service';
+import type { LocalProbeConfig } from '@/lib/local-probe';
+import {
+  LocalProjectControlService,
+  LocalProjectCreateDirectoryError,
+} from '@/lib/local-project-control-service';
 import { LocalProjectHistorySyncService } from '@/lib/local-project-history-sync-service';
-import { CliRuntimeStateReporter } from '@/lib/cli-runtime-state';
-import { makeTerminalPtyService, type TerminalPtyServiceApi } from '@/lib/terminal-pty-service';
 import {
   readMachineLocalProjects,
   reconcileMachineLocalProjectRootPaths,
@@ -51,45 +27,72 @@ import {
   resolveWorkspaceLocalProjectWithSyncOnMiss,
   upsertMachineLocalProject,
 } from '@/lib/local-project-meta';
-import { readTimeoutEnv } from '@/lib/loro/timeout-utils';
-import {
-  deleteLocalProjectWorktreeSetup,
-  handleLocalProjectWorktreeConfigRequest,
-  isLocalProjectWorktreeConfigRequest,
-} from '@/session/worktree/worktree-setup-config-store';
-import { formatErrorMessage } from '@/utils/format-error';
-import {
-  resolveTerminalWorkdirFromMetadata,
-  type TerminalSessionMetaLookup,
-} from '@/lib/terminal-workdir-resolver';
+import { preflightLocalProjectWorktreeRemoval } from '@/lib/local-project-removal';
+import type { LocalSessionControlConfig } from '@/lib/local-session-control';
+import { startLocalTerminalServer, stopLocalTerminalServer } from '@/lib/local-terminal-server';
 import {
   localCatalogWorkspaceToWorkspaceListItem,
   makeLocalWorkspaceCatalog,
   type LocalWorkspaceCatalogService,
   type LocalWorkspaceCatalogSnapshot,
 } from '@/lib/local-workspace-catalog';
-import { RemoteBridge } from '@/lib/remote-bridge';
-import { ensureImplicitLocalWorkspace } from '@/lib/cli-platform';
-import type { CloudAccessSnapshot, CloudPort } from '@lody/platform';
+import { Lody } from '@/lib/lody';
+import { readTimeoutEnv } from '@/lib/loro/timeout-utils';
 import type { MachineProcessLifecycleAction } from '@/lib/machine-lifecycle';
-import { traceAsync } from '@/utils/trace-span';
-import { MemoryPressureSampler } from '@/monitor/memory-pressure-sampler';
-import { makePrStatusPoller, type PrStatusPollerShape } from '@/lib/pr-poller/pr-status-poller';
 import { loadPrPollerConfig } from '@/lib/pr-poller/pr-poller-config';
 import { PrPollerStateStore } from '@/lib/pr-poller/pr-poller-state';
 import {
   createLodyPrPollerWorkspace,
   type PrPollerWorkspaceHandle,
 } from '@/lib/pr-poller/pr-poller-workspace';
-import { WorkspaceWatchCoordinator } from '@/lib/code-collab/workspace-watch-coordinator';
+import { makePrStatusPoller, type PrStatusPollerShape } from '@/lib/pr-poller/pr-status-poller';
+import { RemoteBridge } from '@/lib/remote-bridge';
+import { makeTerminalPtyService, type TerminalPtyServiceApi } from '@/lib/terminal-pty-service';
+import {
+  resolveTerminalWorkdirFromMetadata,
+  type TerminalSessionMetaLookup,
+} from '@/lib/terminal-workdir-resolver';
 import { findWorkspacesBySelector, formatWorkspaceCandidate } from '@/lib/workspace-selector';
-import { listAliveSessionMetas } from '@/lib/command-runtime';
+import { startLodyMcpHttpServer, stopLodyMcpHttpServer } from '@/mcp/lody-mcp-http-server';
+import { MemoryPressureSampler } from '@/monitor/memory-pressure-sampler';
+import pkg from '@/pkg';
+import {
+  deleteLocalProjectWorktreeSetup,
+  handleLocalProjectWorktreeConfigRequest,
+  isLocalProjectWorktreeConfigRequest,
+} from '@/session/worktree/worktree-setup-config-store';
+import { formatErrorMessage } from '@/utils/format-error';
+import { Logger } from '@/utils/logger';
+import { traceAsync } from '@/utils/trace-span';
+import type { CloudAccessSnapshot, CloudPort } from '@lody/platform';
+import {
+  CliType,
+  MachineId,
+  WorkspaceId,
+  getServerNow,
+  getSessionRoomId,
+  isLoroRepoDocDeleted,
+  startTimeSyncLegacy,
+  type CliRuntimeConnectivity,
+  type CliRuntimeWorkspace,
+  type LocalProjectControlErrorCode,
+  type LocalProjectControlRequest,
+  type LocalProjectControlResponse,
+  type LocalProjectId,
+  type LocalSessionControlRequest,
+  type LocalSessionControlResponse,
+  type MachineLifecycleCapability,
+  type SessionId,
+  type SessionMeta,
+} from '@lody/shared';
+import type { LocalLoroDataPlaneServerLegacy } from '@lody/shared/local-loro-data-plane-server';
+import { Effect } from 'effect';
 import { AgentExecutionSlots } from './agent-execution-slots';
 import {
   createScheduleWorkspace,
   type ScheduleWorkspaceHandle,
 } from './schedules/schedule-workspace';
-import { preflightLocalProjectWorktreeRemoval } from '@/lib/local-project-removal';
+import { workspaceCleanupOwnerLegacy } from './workspace-cleanup-legacy';
 
 const FLEET_RUNTIME_STATE_INTERVAL_MS = 2_000;
 const FLEET_REMOTE_BRIDGE_OFFLINE_GRACE_MS = 15_000;
@@ -97,16 +100,9 @@ const FLEET_RECONCILE_RETRY_INITIAL_DELAY_MS = 5_000;
 const FLEET_RECONCILE_RETRY_MAX_DELAY_MS = 5 * 60_000;
 const FLEET_WORKSPACE_START_CONCURRENCY = 4;
 
-export async function syncCliServerTime(logger: Logger, serverUrl: string): Promise<void> {
-  await traceAsync(logger, 'startup.sync_time', undefined, async () => {
-    try {
-      await syncTime(createServerTimeFetcher(`${serverUrl}/api/time`));
-      logger.debug('Time synchronized with server');
-    } catch (error) {
-      logger.debug(
-        `Failed to sync time with server ${serverUrl}: ${error instanceof Error ? error.message : 'Unknown error'}`
-      );
-    }
+export function syncCliServerTime(logger: Logger, serverUrl: string) {
+  return startTimeSyncLegacy(`${serverUrl}/api/time`, () => {
+    logger.debug('Time synchronization unavailable; retaining the previous calibration.');
   });
 }
 
@@ -125,6 +121,10 @@ type WorkspaceRuntimeState = {
   unsubscribeTerminalCleanup: () => void;
   prPollerWorkspace: PrPollerWorkspaceHandle;
   schedules: ScheduleWorkspaceHandle;
+  cleanupOwner?: ReturnType<typeof workspaceCleanupOwnerLegacy>;
+  cleanupReceipt?: Promise<void>;
+  cleanupFailure?: unknown;
+  cleanupCauses?: unknown[];
 };
 
 export class LodyFleet {
@@ -159,6 +159,15 @@ export class LodyFleet {
 
   private unsubscribeWorkspaces: (() => void) | null = null;
   private stopped = false;
+  private shutdownReceipt: Promise<void> | undefined;
+  private shutdownRecovery: Promise<void> | undefined;
+  private localServiceReleaseFailure: unknown;
+  private globalShutdownReceipt: Promise<void> | undefined;
+  private readonly cleanupOwners = new Map<string, WorkspaceRuntimeState>();
+  private readonly startupCleanupOwners = new Map<
+    string,
+    { run(): Promise<void>; retry(): Promise<void> }
+  >();
   private runtimeStateTimer: NodeJS.Timeout | null = null;
   private hasWorkspaceRetryIssue = false;
   private hasControlOfflineIssue = false;
@@ -249,7 +258,7 @@ export class LodyFleet {
       initCliAnalytics();
     }
     this.memoryPressure.start();
-    // Sync time once before any time-sensitive operations (heartbeats, unread
+    // Await the first calibration attempt before time-sensitive operations (heartbeats, unread
     // detection). Local platform: no time server; getServerNow() falls back to
     // the local clock.
     if (this.startupTimeSync) {
@@ -548,8 +557,35 @@ export class LodyFleet {
     });
   }
 
-  async shutdown(): Promise<void> {
-    if (this.stopped) return;
+  shutdown(): Promise<void> {
+    return (this.shutdownReceipt ??= this.shutdownOnce());
+  }
+
+  recoverShutdown(): Promise<void> {
+    if (!this.shutdownReceipt) return this.shutdown();
+    if (this.shutdownRecovery) return this.shutdownRecovery;
+    const original = this.shutdownReceipt;
+    const attempt = (async () => {
+      try {
+        await original;
+        return;
+      } catch {
+        /* retained workspace owners below */
+      }
+      for (const id of [...this.cleanupOwners.keys(), ...this.startupCleanupOwners.keys()])
+        await this.retryWorkspaceCleanup(id);
+      // Workspace recovery cannot prove release of a failed global service owner.
+      if (this.localServiceReleaseFailure) throw this.localServiceReleaseFailure;
+      await this.finishGlobalShutdown();
+    })();
+    this.shutdownRecovery = attempt;
+    void attempt.catch(() => {
+      if (this.shutdownRecovery === attempt) this.shutdownRecovery = undefined;
+    });
+    return attempt;
+  }
+
+  private async shutdownOnce(): Promise<void> {
     this.stopped = true;
     this.stopRuntimeStateLoop();
     this.memoryPressure.stop();
@@ -576,33 +612,44 @@ export class LodyFleet {
     this.unsubscribeWorkspaces?.();
     this.unsubscribeWorkspaces = null;
 
-    const runtimes = Array.from(this.runtimes.values());
-    this.runtimes.clear();
-    for (const runtime of runtimes) {
+    const failures: unknown[] = [];
+    for (const runtime of this.runtimes.values()) {
       try {
-        await runtime.schedules.dispose();
-        await runtime.lody.cleanup();
-        runtime.unsubscribeTerminalCleanup();
-        await runtime.prPollerWorkspace.dispose();
-      } catch (error) {
-        runtime.unsubscribeTerminalCleanup();
-        this.logger.debug(
-          `[fleet] Failed to cleanup workspace runtime ${runtime.workspace.id}: ${formatErrorMessage(
-            error
-          )}`
-        );
+        await this.cleanupWorkspaceRuntime(runtime);
+      } catch (cause) {
+        failures.push(cause);
       }
     }
+    for (const owner of this.startupCleanupOwners.values()) {
+      try {
+        await owner.run();
+      } catch (cause) {
+        failures.push(cause);
+      }
+    }
+    const localFailures = (await localServicesStopped).flatMap((result) =>
+      result.status === 'rejected' ? [result.reason] : []
+    );
+    if (localFailures.length) {
+      this.localServiceReleaseFailure = new AggregateError(
+        localFailures,
+        'Local service release remains unproven'
+      );
+      failures.push(this.localServiceReleaseFailure);
+    }
+    if (failures.length)
+      throw new AggregateError(failures, 'Fleet shutdown retains unresolved workspace resources');
+    await this.finishGlobalShutdown();
+  }
+
+  private finishGlobalShutdown(): Promise<void> {
+    return (this.globalShutdownReceipt ??= this.finishGlobalShutdownOnce());
+  }
+
+  private async finishGlobalShutdownOnce(): Promise<void> {
     await this.workspaceWatchCoordinator.dispose();
     await this.cloudPort.dispose();
 
-    for (const result of await localServicesStopped) {
-      if (result.status === 'rejected') {
-        this.logger.debug(
-          `[fleet] Failed to stop a local service: ${formatErrorMessage(result.reason)}`
-        );
-      }
-    }
     this.terminalPtyService.closeAll();
   }
 
@@ -634,7 +681,9 @@ export class LodyFleet {
       if (options.retainRunningWorkspaceIds?.has(workspaceId) && this.runtimes.has(workspaceId)) {
         continue;
       }
-      await this.stopWorkspace(workspaceId);
+      if (this.cleanupOwners.has(workspaceId) || this.startupCleanupOwners.has(workspaceId))
+        await this.retryWorkspaceCleanup(workspaceId);
+      else await this.stopWorkspace(workspaceId);
     }
 
     // Workspace repos are independent SQLite databases. Start a small bounded
@@ -734,6 +783,16 @@ export class LodyFleet {
   private async startWorkspace(workspace: WorkspaceListItem): Promise<void> {
     if (this.stopped) return;
     if (!this.desiredWorkspaces.has(workspace.id)) return;
+    if (this.startupCleanupOwners.has(workspace.id) || this.cleanupOwners.has(workspace.id)) {
+      try {
+        await this.retryWorkspaceCleanup(workspace.id);
+      } catch (cause) {
+        this.logger.warn(`[fleet] Startup recovery failed: ${formatErrorMessage(cause)}`);
+        this.scheduleRetry(workspace);
+        return;
+      }
+      if (this.stopped || !this.desiredWorkspaces.has(workspace.id)) return;
+    }
     if (this.runtimes.has(workspace.id)) return;
 
     const retryTimer = this.retryTimers.get(workspace.id);
@@ -760,6 +819,8 @@ export class LodyFleet {
 
       let lody: Lody | null = null;
       let stopSchedules: (() => Promise<void>) | undefined;
+      let partialPoller: PrPollerWorkspaceHandle | undefined;
+      let detachTerminals: (() => void) | undefined;
       const workspaceStartAt = Date.now();
       try {
         lody = await Lody.create({
@@ -811,7 +872,8 @@ export class LodyFleet {
         const unsubscribeTerminalCleanup = startedLody.onSessionTerminated((sessionId) => {
           this.terminalPtyService.closeSession(sessionId);
         });
-        const prPollerWorkspace = createLodyPrPollerWorkspace({
+        detachTerminals = unsubscribeTerminalCleanup;
+        const prPollerWorkspace = (partialPoller = createLodyPrPollerWorkspace({
           documentManager: startedLody.documentManager,
           workspaceId: workspace.id,
           userId: this.userId,
@@ -819,7 +881,7 @@ export class LodyFleet {
           githubTokens: this.cloudPort.githubTokens,
           prAssociation: this.cloudPort.prAssociation,
           logger: workspaceLogger,
-        });
+        }));
         // Scheduled automation: this machine runs the schedules it owns, so
         // entrusted work continues while nobody is looking.
         const executionSlots = new AgentExecutionSlots();
@@ -858,15 +920,32 @@ export class LodyFleet {
         this.runtimeStateReporter.clearIssue(`workspace_start_failed:${workspace.id}`);
         this.refreshRuntimeState();
       } catch (error) {
-        await stopSchedules?.();
         if (lody) {
-          await lody.cleanup().catch((cleanupError: unknown) => {
-            this.logger.debug(
-              `[fleet] Failed to cleanup failed workspace runtime ${workspace.id}: ${formatErrorMessage(
-                cleanupError
-              )}`
+          const retained = lody;
+          const owner = workspaceCleanupOwnerLegacy([
+            async () => {
+              await stopSchedules?.();
+            },
+            () => retained.cleanup(),
+            async () => {
+              await partialPoller?.dispose();
+              detachTerminals?.();
+            },
+            async () => {
+              this.startupCleanupOwners.delete(workspace.id);
+            },
+          ]);
+          this.startupCleanupOwners.set(workspace.id, owner);
+          try {
+            await owner.run();
+          } catch (cleanupCause) {
+            const releaseFailure = new AggregateError(
+              [error, cleanupCause],
+              'Failed startup retains workspace resources',
+              { cause: cleanupCause }
             );
-          });
+            throw releaseFailure;
+          }
         }
         throw error;
       }
@@ -922,23 +1001,48 @@ export class LodyFleet {
 
     const state = this.runtimes.get(workspaceId);
     if (!state) return;
-    this.runtimes.delete(workspaceId);
-    // Keyed by workspace, so it would otherwise outlive every workspace this
-    // process ever connected to.
-    this.prStatusPoller.unregisterWorkspace(workspaceId);
-
-    try {
-      await state.schedules.dispose();
-      await state.lody.cleanup();
-      state.unsubscribeTerminalCleanup();
-      await state.prPollerWorkspace.dispose();
-    } catch (error) {
-      state.unsubscribeTerminalCleanup();
-      this.logger.debug(
-        `[fleet] Failed to cleanup workspace runtime ${workspaceId}: ${formatErrorMessage(error)}`
-      );
-    }
+    await this.cleanupWorkspaceRuntime(state);
     this.refreshRuntimeState();
+  }
+
+  private cleanupWorkspaceRuntime(state: WorkspaceRuntimeState, recover = false): Promise<void> {
+    if (state.cleanupReceipt && !recover) return state.cleanupReceipt;
+    this.cleanupOwners.set(state.workspace.id, state);
+    state.cleanupOwner ??= workspaceCleanupOwnerLegacy([
+      () => state.schedules.dispose(),
+      async () => {
+        await state.lody.cleanup();
+        state.unsubscribeTerminalCleanup();
+      },
+      () => state.prPollerWorkspace.dispose(),
+      async () => {
+        if (this.runtimes.get(state.workspace.id) === state)
+          this.runtimes.delete(state.workspace.id);
+        this.cleanupOwners.delete(state.workspace.id);
+        this.prStatusPoller.unregisterWorkspace(state.workspace.id);
+        state.cleanupFailure = undefined;
+      },
+    ]);
+    const receipt = recover ? state.cleanupOwner.retry() : state.cleanupOwner.run();
+    state.cleanupReceipt ??= receipt;
+    void receipt.catch((cause) => {
+      state.cleanupFailure = cause;
+      (state.cleanupCauses ??= []).push(cause);
+    });
+    return receipt;
+  }
+
+  /** Independent retry retains the original failure and starts at the unresolved owner. */
+  async retryWorkspaceCleanup(workspaceId: string): Promise<void> {
+    const startup = this.startupCleanupOwners.get(workspaceId);
+    if (startup) {
+      await startup.retry();
+      return;
+    }
+    const state = this.cleanupOwners.get(workspaceId);
+    if (!state) return;
+    if (!state.cleanupFailure) return state.cleanupReceipt;
+    await this.cleanupWorkspaceRuntime(state, true);
   }
 
   private startRuntimeStateLoop(): void {
@@ -1187,7 +1291,9 @@ export class LodyFleet {
   // Resolves the push-based data-plane engine for a workspace the CLI socket
   // server can route a client connection to. Returns null when no runtime is
   // running yet (the client receives a retryable error).
-  private getWorkspaceLoroDataPlaneServer(workspaceId: string): LocalLoroDataPlaneServer | null {
+  private getWorkspaceLoroDataPlaneServer(
+    workspaceId: string
+  ): LocalLoroDataPlaneServerLegacy | null {
     const runtime = this.runtimes.get(workspaceId);
     if (!runtime) {
       return null;
@@ -1644,6 +1750,33 @@ export class LodyFleet {
             registeredProjects: await this.listRegisteredLocalProjectRootPaths(message.workspaceId),
           }),
         };
+      }
+
+      if (message.type === 'local-project/create-directory') {
+        try {
+          await this.resolveWorkspaceRuntime(message.workspaceId);
+        } catch {
+          return this.toProjectControlError(
+            requestType,
+            'workspace_not_found',
+            'Workspace runtime is unavailable.'
+          );
+        }
+        try {
+          return {
+            ok: true,
+            type: message.type,
+            result: await this.localProjectControlService.createDirectory(
+              message.parentPath,
+              message.name
+            ),
+          };
+        } catch (error) {
+          if (error instanceof LocalProjectCreateDirectoryError) {
+            return this.toProjectControlError(requestType, error.code, error.message);
+          }
+          throw error;
+        }
       }
 
       if (message.type === 'local-project/prepare-add') {

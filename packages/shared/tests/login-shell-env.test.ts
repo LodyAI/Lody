@@ -523,6 +523,7 @@ describe('application-owned login-shell cache', () => {
         const gate = yield* Deferred.make<void>();
         const resource = { held: false, denied: true };
         const leaseFailure = { resource };
+        const recoveryFailure = new Error('still denied');
         const layer = Layer.effectDiscard(
           Effect.acquireRelease(
             Effect.sync(() => {
@@ -541,11 +542,11 @@ describe('application-owned login-shell cache', () => {
               expect(
                 cause.reasons.some((r) => Cause.isDieReason(r) && r.defect === leaseFailure)
               ).toBe(true);
-              if (resource.denied) return yield* Effect.fail(new Error('still denied'));
+              if (resource.denied) return yield* Effect.fail(recoveryFailure);
               resource.held = false;
               return undefined;
             }),
-          project: Cause.squash,
+          project: (cause) => cause,
         });
         yield* Effect.promise(() => application.runtime.runPromise(Effect.void));
         const first = application.closeLegacy().catch((error) => error);
@@ -560,9 +561,20 @@ describe('application-owned login-shell cache', () => {
         expect(settled).toBe(false);
         expect(resource.held).toBe(true);
         yield* Deferred.succeed(gate, undefined);
-        expect(yield* Effect.promise(() => first)).toBe(leaseFailure);
-        expect(yield* Effect.promise(() => observed)).toBe(leaseFailure);
-        yield* Effect.promise(() => application.closeLegacy().catch((error) => error));
+        const firstCause = yield* Effect.promise(() => first) as Cause.Cause<unknown>;
+        expect(
+          firstCause.reasons.some((r) => Cause.isDieReason(r) && r.defect === leaseFailure)
+        ).toBe(true);
+        expect(yield* Effect.promise(() => observed)).toBe(firstCause);
+        const recoveryCause = yield* Effect.promise(() =>
+          application.closeLegacy().catch((error) => error)
+        ) as Cause.Cause<unknown>;
+        expect(
+          recoveryCause.reasons.some((r) => Cause.isDieReason(r) && r.defect === leaseFailure)
+        ).toBe(true);
+        expect(
+          recoveryCause.reasons.some((r) => Cause.isFailReason(r) && r.error === recoveryFailure)
+        ).toBe(true);
         expect(resource.held).toBe(true);
         resource.denied = false;
         yield* Effect.promise(() => application.closeLegacy());

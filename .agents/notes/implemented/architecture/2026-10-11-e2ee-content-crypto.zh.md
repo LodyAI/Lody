@@ -16,7 +16,7 @@ PR: [#1417](https://github.com/LodyAI/Lody/pull/1417)
 基于已合入 P07-a #1405 与 main `c52e5d26b5260cc94191cbae62d4fe11cfa2bb04`。
 Effect 保持 4.0.2，hashes 保持 2.2.0；ciphers 2.1.1 与候选一致，根锁文件已有此版本，只添加 importer。开工已核对现有 E2EE PR 防止重复。
 
-[来源记录](../../../../packages/e2ee-core/provenance.json) 扩展 [P07-a 记录](2026-10-10-e2ee-foundations.zh.md)，补充 content-frame 与 platform-content 指纹。两份源文件均与候选提交 `bd5a9c1ec71ed7fa8085e51faec4f1e8dbe985b8` 一致，未迁入暂存的 SDK 修复。现行协议和候选在本范围一致：salt/info、文档用途共钥、外部绑定、包头、算法、nonce 与 tag 长度。候选保持只读，测试在临时副本中运行。
+[来源记录](https://github.com/LodyAI/Lody/blob/5f97599e60700d6185834632df85922ea0d73ec6/packages/e2ee-core/provenance.json) 扩展 [P07-a 记录](2026-10-10-e2ee-foundations.zh.md)，补充 content-frame 与 platform-content 指纹。两份源文件均与候选提交 `bd5a9c1ec71ed7fa8085e51faec4f1e8dbe985b8` 一致，未迁入暂存的 SDK 修复。现行协议和候选在本范围一致：salt/info、文档用途共钥、外部绑定、包头、算法、nonce 与 tag 长度。候选保持只读，测试在临时副本中运行。
 
 切片停在 ContentCipher、DocumentKey 导入导出和签名工作流之下。ContentKey 保存不可直接取出的秘密并绑定上下文；四种文档用途共钥，其他用途隔离。同步 noble HKDF 复用已锁定 hashes，不增加异步 WebCrypto 服务或运行时；实际候选 WebCrypto 对照验证字节一致。HPKE 留后续。
 

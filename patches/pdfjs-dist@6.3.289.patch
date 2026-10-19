@@ -1,0 +1,54 @@
+diff --git a/legacy/web/pdf_viewer.mjs b/legacy/web/pdf_viewer.mjs
+--- a/legacy/web/pdf_viewer.mjs
++++ b/legacy/web/pdf_viewer.mjs
+@@ -11444,7 +11444,7 @@
+       stopEvent(event);
+     }, opts);
+     TextLayerBuilder.#textLayers.set(div, end);
+-    TextLayerBuilder.#enableGlobalSelectionListener(abortSignal);
++    TextLayerBuilder.#enableGlobalSelectionListener();
+   }
+   static #removeGlobalSelectionListener(textLayerDiv) {
+     this.#textLayers.delete(textLayerDiv);
+@@ -11453,12 +11453,12 @@
+       this.#selectionChangeAC = null;
+     }
+   }
+-  static #enableGlobalSelectionListener(globalAbortSignal) {
++  static #enableGlobalSelectionListener() {
+     if (this.#selectionChangeAC) {
+       return;
+     }
+     this.#selectionChangeAC = new AbortController();
+-    const signal = globalAbortSignal ? AbortSignal.any([this.#selectionChangeAC.signal, globalAbortSignal]) : this.#selectionChangeAC.signal;
++    const signal = this.#selectionChangeAC.signal;
+     const reset = (end, textLayer) => {
+       textLayer.append(end);
+       end.style.width = "";
+diff --git a/web/pdf_viewer.mjs b/web/pdf_viewer.mjs
+--- a/web/pdf_viewer.mjs
++++ b/web/pdf_viewer.mjs
+@@ -6281,7 +6281,7 @@
+       stopEvent(event);
+     }, opts);
+     TextLayerBuilder.#textLayers.set(div, end);
+-    TextLayerBuilder.#enableGlobalSelectionListener(abortSignal);
++    TextLayerBuilder.#enableGlobalSelectionListener();
+   }
+   static #removeGlobalSelectionListener(textLayerDiv) {
+     this.#textLayers.delete(textLayerDiv);
+@@ -6290,12 +6290,12 @@
+       this.#selectionChangeAC = null;
+     }
+   }
+-  static #enableGlobalSelectionListener(globalAbortSignal) {
++  static #enableGlobalSelectionListener() {
+     if (this.#selectionChangeAC) {
+       return;
+     }
+     this.#selectionChangeAC = new AbortController();
+-    const signal = globalAbortSignal ? AbortSignal.any([this.#selectionChangeAC.signal, globalAbortSignal]) : this.#selectionChangeAC.signal;
++    const signal = this.#selectionChangeAC.signal;
+     const reset = (end, textLayer) => {
+       textLayer.append(end);
+       end.style.width = "";

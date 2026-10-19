@@ -262,6 +262,20 @@ export const MachineWithContextNarrow: Story = {
   },
 };
 
+/** Side-chat width: the machine keeps only its icon and nothing leaves the bar. */
+export const MachineWithPrSideChatWidth: Story = {
+  args: {
+    machine: { ...LOCAL_MACHINE, name: 'codex-happy' },
+    width: 260,
+    workspaceLocation: { kind: 'github-worktree', path: '/tmp/lody' },
+    projectName: null,
+    branch: null,
+    prCiRuns: CI_PASSING,
+    diffStat: { add: 10365, del: 2048 },
+    actionLabels: ['Commit & Push', 'Fix CI Errors'],
+  },
+};
+
 export const MachineUnknownStatus: Story = {
   ...MachineOnly,
   args: {

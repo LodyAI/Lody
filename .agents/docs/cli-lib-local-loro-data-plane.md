@@ -26,21 +26,37 @@ bind that file.
 
 Protocol v7, push-only, peer-scoped. A dedicated `lody-loro-data-plane` socket in the
 0700 run dir routes persistent connections to per-workspace
-`LocalLoroDataPlaneServer` engines (`@lody/shared`, owned by `LoroDocumentManager`).
+`LocalLoroDataPlaneServerLegacy` engines (`@lody/shared`, owned by `LoroDocumentManager`).
 Every message carries `workspaceId` + `peerId` (a per-adapter uuid), and the server
 keys sync state per PEER (`lastSentVV`, flock bundle hash), so multiple windows
 multiplexed over the one relay socket sync independently and a sender's own ops are
 never echoed back to it.
 
-Doc rooms sync via version-vector deltas in both directions; flock rooms sync via full
-bundles on change. Broadcast passes are coalesced by a queued-pass latch that bounds a
-change burst to one running plus one queued full `exportJson` — never an unbounded
-chain — while still giving a change that lands mid-broadcast its own follow-up pass.
+Doc rooms sync by version-vector deltas; Flock rooms export independently importable
+LWW entries from each peer's frontier. Frontiers and framing remain ordinary CRDT
+computation. Outbound tasks materialize only when the physical connection is writable.
 
-All workspace engines share the process-level `local-loro-data-plane-scheduler`
-created in `loro/doc.ts`. Presence and CRDT materialization run through `setImmediate`
-with globally one task/frame quantum per turn, because running the bulk writer inline
-from a CRDT callback, or per workspace, starves the socket.
+All workspace engines consume one process/application `LocalLoroWriterLive`. Its
+native Effect FIFO pacer rotates workspace lanes after one task/frame, including
+remaining catch-up chunks on the same socket. One physical connection owns one drain
+subscription and one backpressure latch across every workspace: `write(false)` pauses
+both export and send until drain. Parked lanes keep their order. The Node turn and
+socket adapters live in `packages/shared/src/node/local-loro-writer.ts`.
+
+Presence uses the same writer and snapshots local-origin state at execution. Repeated
+changes retain one running plus one queued task, so the final clear/delete still gets
+a follow-up. Machine-monitor observer application and publication keep their existing
+semantics on this same queue. There is no separate presence scheduler.
+
+`LocalLoroDataPlaneServerLegacy` explicitly retains Promise room resolution,
+join/leave/import and LoroRepo orchestration. Its native frame builders compose the
+writer directly; only `exportLocalFlock` adapts genuine SDK I/O. The one deprecated
+`local-loro-writer/legacy` facade executes for doc/socket owners. `disposeLegacy` and
+`handleDisconnectLegacy` revoke queued work and await actual running export and drain
+cleanup. A failed bounded release retains full Cause and recovery ownership; late
+results cannot write or advance a disconnected/superseded frontier. Full room/app
+lifecycle migration remains separate. Stable API and evidence:
+[writer README](../../packages/shared/src/local-loro-writer/README.md).
 
 ## Framing discipline
 
@@ -87,8 +103,11 @@ path.
   persistent socket with redial backoff and a ping watchdog, `webContents.send`
   broadcast fan-out plus a status channel, synthesizing peer `detach` for destroyed or
   navigated windows.
-- Renderer adapter: `@lody/shared` `local-loro-transport.ts` — filters inbound frames
+- Renderer client: `@lody/shared` `workspace-data/local-transport.ts` — filters inbound frames
   by workspaceId + peerId and treats every (re)join as the reconciliation point,
   up-syncing its delta from the returned `serverVersion` regardless of the in-memory
   dirty flag, so offline writes survive app restarts and dropped frames. Regression
-  suite: `packages/shared/tests/local-loro-transport-bug-repro.test.ts`.
+  suite: `packages/shared/tests/workspace-local-transport.test.ts`. The old v7
+  client is a test-only fixture in `packages/shared/test-support/local-loro-v7-client.ts`;
+  `packages/shared/tests/local-loro-transport-bug-repro.test.ts` retains host wire
+  compatibility coverage against that peer, rather than a second product client.

@@ -33,6 +33,7 @@ import type {
 } from './preview';
 import type { ProjectSkillsResult } from './acp/skills';
 import type { RpcSecretPublicKey } from './rpc-secret';
+import type { BugReportClientLog } from './bug-report';
 import type { RequestPermissionRequest, RequestPermissionResponse } from '@agentclientprotocol/sdk';
 
 export type PermissionOutcome = RequestPermissionResponse['outcome'] & {
@@ -138,6 +139,10 @@ export interface SessionCancelRequest {
   workspaceId: WorkspaceId;
   /** Target assistant turn id. This is intentionally not the userTurnId. */
   turnId: string;
+  /** Shared identity for the Stop RPC and its durable fallback. */
+  cancelId?: string;
+  /** Internal cancellation does not persist a user message pause. */
+  pauseInbox?: boolean;
   /** When present, cancel only this native subagent; never cancel the parent turn. */
   subagentTaskId?: string;
 }
@@ -334,6 +339,20 @@ export interface MachineUpgradeResponse {
   currentVersion?: string;
   targetVersion?: string;
   error?: string;
+}
+
+export interface MachineProviderRateLimitsRefreshRequest {
+  type: 'machine/provider-rate-limits-refresh';
+  machineId: MachineId;
+  workspaceId: WorkspaceId;
+  configId: AgentConfigId;
+}
+
+export interface MachineProviderRateLimitsRefreshResponse {
+  type: 'machine/provider-rate-limits-refresh_response';
+  machineId: MachineId;
+  configId: AgentConfigId;
+  success: boolean;
 }
 
 export interface MachineAcpCapabilitiesRefreshRequest {
@@ -631,6 +650,11 @@ export interface MachineBugReportRequest {
   reporterUserId: string;
   /** Signed requester proof minted by the backend for this workspace+machine. */
   requestToken: string;
+  /**
+   * The reporter's client log, merged into the uploaded logs. Sent only to a
+   * machine advertising `bugReportClientLog`.
+   */
+  clientLog?: BugReportClientLog;
 }
 
 export interface MachineBugReportResponse {
@@ -775,18 +799,56 @@ export interface SessionHistoryReadRequest {
 
 /** Bounded logical reads over the owner session's active history branch. */
 export type SessionHistoryReadQuery =
+  | {
+      readonly kind: 'watchChanges';
+      readonly checkpoint: string;
+      readonly includeBodiesFrom?: number;
+      readonly waitMs: number;
+    }
+  | { readonly kind: 'inputAcceptance'; readonly entry: unknown }
   | { readonly kind: 'count' }
   | { readonly kind: 'readAt'; readonly position: number }
-  | { readonly kind: 'readTurn'; readonly turnId: string }
-  | { readonly kind: 'readRange'; readonly from: number; readonly to: number }
+  | { readonly kind: 'readTurn'; readonly turnId: string; readonly atCheckpoint?: string }
+  | {
+      readonly kind: 'readRange';
+      readonly from: number;
+      readonly to: number;
+      readonly atCheckpoint?: string;
+    }
   | { readonly kind: 'readDirectory'; readonly from: number; readonly to: number }
-  | { readonly kind: 'readLatestPage'; readonly limit: number }
-  | { readonly kind: 'readOlderPage'; readonly cursor: string; readonly limit: number }
+  | { readonly kind: 'readLatestPage'; readonly limit: number; readonly withCheckpoint?: boolean }
+  | {
+      readonly kind: 'readOlderPage';
+      readonly cursor: string;
+      readonly limit: number;
+      readonly withCheckpoint?: boolean;
+    }
+  | {
+      readonly kind: 'readChanges';
+      readonly checkpoint: string;
+      readonly includeBodiesFrom?: number;
+    }
   | { readonly kind: 'readAll' }
   | { readonly kind: 'readTurnOutput'; readonly userTurnId: string };
 
+/** Complete logical changes since one owner-issued durable observation. */
+export type SessionHistoryChanges =
+  | {
+      readonly state: 'ready';
+      readonly checkpoint: string;
+      readonly from?: number;
+      readonly ids: readonly string[];
+      readonly bodies?: {
+        readonly changed: readonly SessionHistoryInput[];
+        readonly from?: number;
+        readonly suffix: readonly SessionHistoryInput[];
+      };
+    }
+  | { readonly state: 'reset'; readonly checkpoint: string };
+
 export interface SessionHistoryReadResponse {
   type: 'session/history-read_response';
+  retryReason?: 'superseded';
   sessionId: SessionId;
   success: boolean;
   result?: unknown;
@@ -799,6 +861,8 @@ export interface SessionHistoryReadResponse {
 }
 
 export type SessionHistoryWriteOperation =
+  | 'accept_input'
+  | 'accept_input_and_dispatch'
   | 'append'
   | 'replace'
   | 'respond_permission'
@@ -838,6 +902,7 @@ export type LocalSessionControlRequest =
   | MachinePingRequest
   | MachineRestartRequest
   | MachineUpgradeRequest
+  | MachineProviderRateLimitsRefreshRequest
   | MachineAcpCapabilitiesRefreshRequest
   | MachineAcpAuthenticateRequest
   | MachineAcpBinaryStatusRequest
@@ -865,6 +930,7 @@ export type LocalSessionControlResponse =
   | MachinePingResponse
   | MachineRestartResponse
   | MachineUpgradeResponse
+  | MachineProviderRateLimitsRefreshResponse
   | MachineAcpCapabilitiesRefreshResponse
   | MachineAcpAuthenticateResponse
   | MachineAcpAuthenticationProgressMessage
@@ -1040,6 +1106,13 @@ export type LocalProjectControlRequest =
       cursor?: string;
     }
   | {
+      type: 'local-project/create-directory';
+      machineId: MachineId;
+      workspaceId: WorkspaceId;
+      parentPath: string;
+      name: string;
+    }
+  | {
       type: 'local-project/delete';
       machineId: MachineId;
       workspaceId: WorkspaceId;
@@ -1191,6 +1264,7 @@ export type LocalProjectControlErrorCode =
   | 'access_denied'
   | 'local_project_not_found'
   | 'path_invalid'
+  | 'already_exists'
   | 'execution_failed'
   | 'invalid_response';
 
@@ -1229,6 +1303,7 @@ export type LocalProjectControlResponse =
     >
   | LocalProjectControlOkResponse<'local-project/list-roots', LocalProjectBrowseRootsResult>
   | LocalProjectControlOkResponse<'local-project/browse-dir', LocalProjectBrowseDirectoryResult>
+  | LocalProjectControlOkResponse<'local-project/create-directory', { path: string }>
   | LocalProjectControlOkResponse<
       'local-project/delete',
       {
@@ -1287,6 +1362,7 @@ export type ClientToServer =
   | MachinePingRequest
   | MachineRestartRequest
   | MachineUpgradeRequest
+  | MachineProviderRateLimitsRefreshRequest
   | MachineAcpCapabilitiesRefreshRequest
   | MachineAcpAuthenticateRequest
   | MachineAcpBinaryStatusRequest
@@ -1304,6 +1380,7 @@ export type ServerToClient =
   | MachinePingResponse
   | MachineRestartResponse
   | MachineUpgradeResponse
+  | MachineProviderRateLimitsRefreshResponse
   | MachineAcpCapabilitiesRefreshResponse
   | MachineAcpAuthenticateResponse
   | MachineAcpAuthenticationProgressMessage
@@ -1321,6 +1398,7 @@ export type MachineToServer =
   | MachinePingResponse
   | MachineRestartResponse
   | MachineUpgradeResponse
+  | MachineProviderRateLimitsRefreshResponse
   | MachineAcpCapabilitiesRefreshResponse
   | MachineAcpAuthenticateResponse
   | MachineAcpAuthenticationProgressMessage
@@ -1338,6 +1416,7 @@ export type ServerToMachine =
   | MachinePingRequest
   | MachineRestartRequest
   | MachineUpgradeRequest
+  | MachineProviderRateLimitsRefreshRequest
   | MachineAcpCapabilitiesRefreshRequest
   | MachineAcpAuthenticateRequest
   | MachineAcpBinaryStatusRequest

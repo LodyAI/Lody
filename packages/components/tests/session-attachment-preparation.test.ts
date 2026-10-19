@@ -1,4 +1,5 @@
-import { afterEach, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { IDBFactory } from 'fake-indexeddb';
 import { LoroDoc } from 'loro-crdt';
 import {
   getSessionRoomId,
@@ -61,11 +62,13 @@ vi.mock('../src/lib/electron-session-file-sender', () => ({
 }));
 
 const cleanup: Array<() => Promise<void>> = [];
+beforeEach(() => { vi.stubGlobal('indexedDB', new IDBFactory()); });
 afterEach(async () => {
   for (const close of cleanup.splice(0)) await close();
   Object.assign(local, { enabled: false, machineId: null, files: [], fail: false });
   upload.run = undefined;
   clearSessionImageCache();
+  vi.unstubAllGlobals();
 });
 
 const SESSION = 'session' as SessionId;
@@ -97,6 +100,7 @@ function fixture() {
       return {
         sessionData: session.sessionData,
         getState: () => session.mirror.getState(),
+        setState: session.mirror.setState.bind(session.mirror),
         waitUntilSynced: async () => {},
       } as never;
     },
@@ -127,11 +131,13 @@ function fixture() {
   } as unknown as SessionSendRuntime;
   const pending = createWorkspacePendingSends({
     runtime,
+    accountId: 'attachment-test-account',
+    workspaceId: 'workspace',
     token: () => 'token',
     localMachineId: () => local.machineId as MachineId | null,
   });
   cleanup.push(async () => {
-    pending.dispose();
+    await pending.dispose();
     await resources.dispose();
     for (const session of sessions.values()) session.dispose();
     for (const doc of docs) doc.free();

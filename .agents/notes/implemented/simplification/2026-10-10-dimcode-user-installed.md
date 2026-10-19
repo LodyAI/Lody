@@ -56,3 +56,19 @@ that separate issue is unresolved. This verifies the component, not the packaged
 real machine installation. Screenshots are temporary review artifacts, not committed files.
 
 Pull request: [#1380](https://github.com/LodyAI/Lody/pull/1380) (draft).
+
+## Copy-button correction (2026-10-17)
+
+The inline `Trans` copy slot previously supplied a button with icon children.
+React-i18next 15.7.4 wraps such self-closing slots in a newly created component type
+on each render, replacing the DOM button and losing focus or an in-flight press.
+The slot now supplies a childless, module-level component that owns its icon and
+copy feedback, preserving the button across row updates. Installation behavior
+and translated sentence order are unchanged.
+
+The existing provider-row suite now checks focus, button identity and successful
+feedback across updates. A standalone React/jsdom reproduction using the locked
+React and react-i18next versions reproduced replacement and lost clicks before the
+change and retained the button and copied command with the stable component.
+The repository suite could not start because local dependencies are incomplete
+(`@stylexjs/unplugin` unavailable); packaged-app clipboard acceptance remains unverified.

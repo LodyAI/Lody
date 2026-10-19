@@ -27,9 +27,14 @@ vi.mock('react-i18next', () => ({
 const DIAGRAM_WIDTH = 1200;
 const DIAGRAM_HEIGHT = 800;
 
-vi.mock('beautiful-mermaid', () => ({
-  renderMermaidSVGAsync: async () =>
-    `<svg xmlns="http://www.w3.org/2000/svg" width="${DIAGRAM_WIDTH}" height="${DIAGRAM_HEIGHT}" data-diagram="sequence"><text>Launch game</text></svg>`,
+vi.mock('pele', () => ({
+  render: () => ({
+    svg: `<svg xmlns="http://www.w3.org/2000/svg" width="${DIAGRAM_WIDTH}" height="${DIAGRAM_HEIGHT}" style="color:var(--_fg)" data-diagram="sequence"><text>Launch game</text></svg>`,
+    width: DIAGRAM_WIDTH,
+    height: DIAGRAM_HEIGHT,
+    links: [],
+    type: 'sequence',
+  }),
 }));
 
 const { MarkdownRenderer } = await import('../src/components/ai-gui/markdown-renderer');

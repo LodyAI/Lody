@@ -15,7 +15,11 @@ vi.mock('@/atoms', () => ({
   currentWorkspaceSlugAtom: atom<string | null>(null),
   currentWorkspaceIdAtom: atom<string | null>(null),
 }));
-vi.mock('@/atoms/runtime', () => ({ authTokenAtom: atom(null), runtimeAtom: atom(null) }));
+vi.mock('@/atoms/runtime', () => ({
+  authTokenAtom: atom(null),
+  runtimeAtom: atom(null),
+  workspaceRuntimeInitFailureAtom: atom(null),
+}));
 vi.mock('@/atoms/doc-meta', () => ({
   sessionMetaCacheAtom: atom({}),
   docMetaCacheReadyAtom: atom(false),
@@ -66,7 +70,7 @@ vi.mock('@/providers/create-workspace-runtime', () => ({ createWorkspaceRuntime:
 import { RuntimeProvider } from '../src/providers/runtime-provider';
 import { createWorkspaceRuntime } from '../src/providers/create-workspace-runtime';
 import { currentWorkspaceSlugAtom, userAtom } from '../src/atoms';
-import { runtimeAtom } from '../src/atoms/runtime';
+import { runtimeAtom, workspaceRuntimeInitFailureAtom } from '../src/atoms/runtime';
 import {
   editSessionRunConfigDraftAtom,
   registerSessionRunConfigDraftLeaseAtom,
@@ -144,6 +148,76 @@ describe('RuntimeProvider warm workspace preparation', () => {
     expect(prepared.metadata.get('session')).toBe('already prepared');
     expect(prepared.disposed).toBe(false);
   });
+
+  it('records a rejected runtime creation for its workspace until the next attempt', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.mocked(createWorkspaceRuntime).mockRejectedValueOnce(
+      new DOMException('The database connection is closing.', 'InvalidStateError')
+    );
+    await render();
+    expect(store.get(runtimeAtom)).toBeNull();
+    expect(store.get(workspaceRuntimeInitFailureAtom)).toEqual({
+      workspaceSlug: 'local',
+      errorType: 'InvalidStateError',
+    });
+
+    await act(async () => {
+      environment.workspace = { id: 'local:workspace-2', slug: 'local' };
+      root.render(
+        <Provider store={store}>
+          <RuntimeProvider>{null}</RuntimeProvider>
+        </Provider>
+      );
+    });
+    expect(store.get(workspaceRuntimeInitFailureAtom)).toBeNull();
+    expect(store.get(runtimeAtom)).toBe(prepared);
+  });
+
+  it.each([false, true])(
+    'opens another workspace after failed close and retries its owner, with an earlier failed return: %s',
+    async (failedReturn) => {
+      const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+      let blocked = true;
+      let released = false;
+      const privateFailure = new Error('synthetic private release payload');
+      prepared.dispose = async () => {
+        prepared.disposed = true;
+        if (blocked) throw privateFailure;
+        released = true;
+      };
+      const original = prepared;
+      await render();
+      const other = runtimeFixture();
+      vi.mocked(createWorkspaceRuntime).mockResolvedValueOnce(other as never);
+      environment.workspace = { id: 'local:other', slug: 'other' };
+      await render();
+      expect(store.get(runtimeAtom)).toBe(other);
+      expect(released).toBe(false);
+      expect(logged.mock.calls.flat()).not.toContain(privateFailure);
+      if (failedReturn) {
+        environment.workspace = { id: 'local:workspace', slug: 'local' };
+        await render();
+        expect(store.get(runtimeAtom)).toBeNull();
+        expect(released).toBe(false);
+        environment.workspace = { id: 'local:other', slug: 'other' };
+        vi.mocked(createWorkspaceRuntime).mockResolvedValueOnce(other as never);
+        await render();
+        expect(store.get(runtimeAtom)).toBe(other);
+      }
+      const replacement = runtimeFixture();
+      vi.mocked(createWorkspaceRuntime).mockImplementationOnce(async () => {
+        expect(released).toBe(true);
+        return replacement as never;
+      });
+      blocked = false;
+      environment.workspace = { id: 'local:workspace', slug: 'local' };
+      await render();
+      expect(store.get(runtimeAtom)).toBe(replacement);
+      expect(store.get(runtimeAtom)).not.toBe(original);
+      expect(released).toBe(true);
+      logged.mockRestore();
+    }
+  );
 
   it('establishes an editable real draft lease after StrictMode owner replay', async () => {
     let selection!: ReturnType<typeof useSessionRunConfigDraft>;

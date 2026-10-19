@@ -2,7 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 
 import { describe, expect, it } from 'vitest';
-import { LoroRepo } from 'loro-repo';
+import { WorkspaceRepoLegacy } from '@lody/shared/workspace-data/repo-legacy';
 
 import {
   parseSessionNotifications,
@@ -60,7 +60,7 @@ const buildHistory = async (
   notifications: AcpSessionNotification[],
   mode: 'batched' | 'streamed'
 ): Promise<unknown[]> => {
-  const repo = await LoroRepo.create({});
+  const repo = await WorkspaceRepoLegacy.create({});
   const doc = new SessionDocument(repo, `${mode}-session` as SessionId);
   await doc.initOffline();
 

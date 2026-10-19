@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { ScrollSim, turnRows, type SimRow } from './support/scroll-engine-sim';
+import {
+  ConversationScrollUpdateLoopError,
+  MAX_SYNCHRONOUS_SCROLL_COMMITS,
+} from '../src/lib/conversation-scroll/controller';
 
 /**
  * Model tests of the conversation scroll engine's transaction logic
@@ -624,6 +628,51 @@ describe('commands', () => {
 });
 
 describe('onScroll must not re-enter a cycle (React #185)', () => {
+  it('bounds transaction restarts caused by changing row keys and records the failure', () => {
+    const first = turnRows(
+      40,
+      () => 100,
+      () => 60,
+      'first'
+    );
+    class OscillatingSim extends ScrollSim {
+      private generation = 0;
+      override requestCommit() {
+        this.rows = turnRows(
+          40,
+          () => 100,
+          () => 60,
+          `restart-${this.generation++}-`
+        );
+        super.requestCommit();
+      }
+    }
+    const diagnostics: string[] = [];
+    const sim = new OscillatingSim(first, V, {
+      callbacks: {
+        onDiagnostic: (entry) => diagnostics.push(entry.reason),
+      },
+    });
+    expect(() => sim.render()).toThrow(ConversationScrollUpdateLoopError);
+    expect(sim.commits).toBe(MAX_SYNCHRONOUS_SCROLL_COMMITS + 1);
+    expect(diagnostics.at(-1)).toBe('update-loop');
+    const writes = sim.writes.length;
+    expect(() => sim.render(first)).toThrow(ConversationScrollUpdateLoopError);
+    expect(sim.writes.length).toBe(writes);
+  });
+
+  it('does not accumulate a synchronous budget across independent updates', () => {
+    const sim = new ScrollSim(
+      turnRows(40, () => 100),
+      V
+    );
+    for (let i = 0; i < MAX_SYNCHRONOUS_SCROLL_COMMITS * 2; i += 1) {
+      sim.render(turnRows(40, () => 100 + i));
+      sim.settle();
+      expectHealthy(sim);
+    }
+  });
+
   it('a consumer that re-commits from onScroll settles instead of looping', () => {
     const rows = turnRows(40, () => 100);
     const sim = new ScrollSim(rows, V);
@@ -640,6 +689,53 @@ describe('onScroll must not re-enter a cycle (React #185)', () => {
     expectHealthy(sim);
     expect(reports).toBeGreaterThan(0);
     expect(reports).toBeLessThanOrEqual(COMMIT_BOUND);
+  });
+
+  it('keeps an anchor on a creation record that its hydrated neighbour groups away', () => {
+    // Consecutive creation records c0, c1 share c0's row only while c0 is
+    // hydrated, and the hydration window follows each reported offset.
+    const rowsFor = (grouped: boolean): SimRow[] => [
+      ...turnRows(20, () => 300),
+      grouped
+        ? {
+            key: 'c0',
+            turnId: 'c0',
+            turnIndex: 20,
+            groupTurnIds: ['c1'],
+            height: 160,
+            estimate: 60,
+          }
+        : { key: 'c0', turnId: 'c0', turnIndex: 20, placeholder: true, height: 60, estimate: 60 },
+      ...(grouped ? [] : [{ key: 'c1', turnId: 'c1', turnIndex: 21, height: 100, estimate: 60 }]),
+      ...turnRows(18, () => 300, undefined, 'u').map((row) => ({
+        ...row,
+        turnIndex: row.turnIndex + 22,
+      })),
+    ];
+    let grouped = false;
+    const sim: ScrollSim = new ScrollSim(rowsFor(grouped), V, {
+      // A recorded turn index can be out of date; the production report fell
+      // back from the missing row to a turn ~9000px away.
+      initialIntent: {
+        kind: 'read',
+        anchor: { kind: 'turn', turnId: 'c1', turnIndex: 3, rowKey: 'c1', item: null, offsetPx: 0 },
+        screenY: 0,
+      },
+      callbacks: {
+        onScroll: (offset) => {
+          const top = sim.rows[sim.controller.findItemIndex(offset - sim.contentTop)]!;
+          const next = Math.abs(top.turnIndex - 20) <= 4;
+          if (next === grouped) return;
+          grouped = next;
+          sim.render(rowsFor(grouped));
+        },
+      },
+    });
+    sim.render();
+    sim.settle();
+    expect(grouped).toBe(true);
+    expect(sim.screenTop('c0')).toBe(0);
+    expectHealthy(sim);
   });
 });
 

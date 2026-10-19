@@ -4,7 +4,7 @@ import { z } from 'zod';
 import { AcpConfigOptionValueSchema, ProjectRefSchema } from './message-schemas';
 import type { ProjectRef } from './project';
 import { classifyPermissionModeFace, type AcpConfigOptionSummary } from './ai';
-import { isSensitiveAcpConfigOptionId } from './session-preparation';
+import { isSensitiveAcpConfigOptionId } from './acp-config-option-sensitivity';
 
 export const SCHEDULE_PROMPT_MAX_BYTES = 32 * 1024;
 export { SCHEDULES_PROTOCOL_VERSION as SCHEDULE_PROTOCOL_VERSION } from './machine-protocol-capabilities';

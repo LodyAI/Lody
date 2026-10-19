@@ -91,8 +91,17 @@ export class FakeProcessTable {
         throw new Error('FakeProcessTable does not model synchronous spawns');
       },
       kill: (target, signal) => this.kill(target, signal),
+      listProcessGroup: (pgid) =>
+        this.processGroupsListable
+          ? Array.from(this.processes.values())
+              .filter((p) => p.pgid === pgid && (p.alive || p.zombie === true))
+              .map((p) => ({ pid: p.pid, zombie: !p.alive }))
+          : null,
     };
   }
+
+  /** When false, the host cannot enumerate a group's members (no `/proc`, no `ps`). */
+  processGroupsListable = true;
 
   private spawn(command: string, args: readonly string[], options: SpawnOptions): ChildProcess {
     this.spawned.push({ command, args, options });
@@ -175,8 +184,9 @@ export class FakeProcessTable {
   }
 
   /**
-   * The leader exits but Node has not reaped it yet. Like macOS, signalling
-   * a group whose only member is such a zombie fails with EPERM until `reap`.
+   * The process exits but its parent has not reaped it yet. Like macOS,
+   * signalling a group whose only member is such a zombie fails with EPERM
+   * until `reap`. A descendant left here models an orphan nobody reaps.
    */
   exitUnreaped(pid: number): void {
     const process = this.processes.get(pid);

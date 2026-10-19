@@ -33,6 +33,7 @@ export interface SimRow {
   key: string;
   turnId: string | null;
   turnIndex: number;
+  groupTurnIds?: readonly string[];
   itemIndex?: number | null;
   fixed?: FixedRowKind | null;
   placeholder?: boolean;
@@ -67,6 +68,8 @@ export class ScrollSim implements ScrollHost {
   private frames: Array<(time: number) => void> = [];
   private time = 0;
   private sourceGeneration = 1;
+  private microtasks: Array<() => void> = [];
+  private taskDepth = 0;
 
   constructor(rows: SimRow[], viewport: number, options: Omit<ControllerOptions, 'host'> = {}) {
     this.rows = rows;
@@ -131,6 +134,9 @@ export class ScrollSim implements ScrollHost {
   requestCommit() {
     this.queued = true;
   }
+  scheduleMicrotask(callback: () => void) {
+    this.microtasks.push(callback);
+  }
   isSuppressed() {
     return this.suppressed;
   }
@@ -151,6 +157,7 @@ export class ScrollSim implements ScrollHost {
     return this.rows.map((row) => ({
       key: row.key,
       turnId: row.turnId,
+      groupTurnIds: row.groupTurnIds,
       turnIndex: row.turnIndex,
       itemIndex: row.itemIndex ?? null,
       itemIdentity: null,
@@ -163,10 +170,20 @@ export class ScrollSim implements ScrollHost {
 
   /** One task: `action`, then every commit it requested, like React before paint. */
   task(action: () => void = () => {}) {
-    this.commitsThisTask = 0;
-    action();
-    this.drain();
-    this.maxCommitsPerTask = Math.max(this.maxCommitsPerTask, this.commitsThisTask);
+    if (this.taskDepth === 0) this.commitsThisTask = 0;
+    this.taskDepth += 1;
+    try {
+      action();
+      this.drain();
+      this.maxCommitsPerTask = Math.max(this.maxCommitsPerTask, this.commitsThisTask);
+    } finally {
+      this.taskDepth -= 1;
+      if (this.taskDepth === 0) {
+        const callbacks = this.microtasks;
+        this.microtasks = [];
+        for (const callback of callbacks) callback();
+      }
+    }
   }
 
   /** A React render of new rows (props changed), then its commit. */

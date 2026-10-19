@@ -14,6 +14,18 @@ The package owns:
 - The web RPC client.
 - The CLI RPC server.
 
+## Request deadlines
+
+JSON appends keep a 10-second upload deadline by default. A configured
+`timeout.connectTimeoutMs` also applies to appends unless
+`timeout.uploadTimeoutMs` overrides it. The SDK's longer bulk-document upload
+default does not change Machine RPC request deadlines.
+
+Browser response readers using the live-mode policy renew their connection once
+if an appended Roost input has no receipt after two seconds. This retains the
+request and its deadline, works with existing daemons, and still requires a real
+owner response before confirming delivery. Explicit transport pins disable it.
+
 ## Development
 
 ```bash

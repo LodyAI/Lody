@@ -74,6 +74,8 @@ forever and reported nothing, which is exactly an endless "Syncing workspace…"
 - **Retrying the failed scan.** That is a recovery change with its own risks, such
   as retry storms against a failing repository. It stays a follow-up; the new
   `doc_meta_scan_failed` count says whether it is needed.
+  Later: [recovering a workspace that never opens](../bug-fix/2026-10-13-workspace-open-recovery.md)
+  answers a failed scan with one automatic cache clear instead of a retry.
 
 ## Analysis
 

@@ -1,12 +1,28 @@
-import { LoroMap } from 'loro-crdt';
+import { LoroDoc, LoroMap } from 'loro-crdt';
 import { updateTestHistory } from './history-port-fixture';
 import { describe, expect, it, vi } from 'vitest';
+import { Effect, Stream, SubscriptionRef } from 'effect';
+import type { RoomStatus } from 'loro-repo/effect';
 
-import { LoroRepo } from 'loro-repo';
+import { WorkspaceRepoLegacy } from '@lody/shared/workspace-data/repo-legacy';
 import { v4 as uuidv4 } from 'uuid';
+import { FileSystemStorageAdaptor } from 'loro-repo/storage/filesystem';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
-import { SessionDocument } from '../src/lib/loro/doc';
-import type { MessageContent, SessionHistoryInput, SessionId } from '@lody/shared';
+import { LoroDocumentManager, SessionDocument } from '../src/lib/loro/doc';
+import { MessageHandler } from '../src/lib/message-handler';
+import { SessionGCManager } from '../src/lib/session-gc-manager';
+import { createSessionBackend } from '../src/session/session-backend';
+import {
+  getSessionRoomId,
+  type MessageContent,
+  type SessionHistoryInput,
+  type SessionId,
+  type WorkspaceId,
+} from '@lody/shared';
+import type { Logger } from '../src/utils/logger';
 
 const createUserEntry = (id: string, text: string): SessionHistoryInput => ({
   id,
@@ -19,8 +35,438 @@ const createUserEntry = (id: string, text: string): SessionHistoryInput => ({
 });
 
 describe('SessionDocument auto read', () => {
+  it.each([false, true])(
+    'reopens a retired manager wrapper after save failure, storage recovered=%s',
+    async (recovered) => {
+      const baseDir = await mkdtemp(join(tmpdir(), 'manager-session-recovery-'));
+      const adapter = new FileSystemStorageAdaptor({ baseDir });
+      const save = adapter.save.bind(adapter);
+      const sessionId = 'retained-session' as SessionId;
+      const roomId = getSessionRoomId(sessionId);
+      const entered = Promise.withResolvers<void>();
+      const resume = Promise.withResolvers<void>();
+      const saveFailure = new Error('synthetic ENOSPC');
+      let blocked = false;
+      adapter.save = async (payload) => {
+        if (
+          blocked &&
+          (payload.type === 'doc-update' || payload.type === 'doc-snapshot') &&
+          payload.docId === roomId
+        ) {
+          entered.resolve();
+          await resume.promise;
+          throw saveFailure;
+        }
+        await save(payload);
+      };
+      const repo = await WorkspaceRepoLegacy.create({ storageAdapter: adapter });
+      const joinEntered = Promise.withResolvers<void>();
+      const resumeJoin = Promise.withResolvers<void>();
+      const joinRoom = repo.joinDocRoom.bind(repo);
+      let oldRoom: Awaited<ReturnType<typeof repo.joinDocRoom>> | undefined;
+      let oldSync: Promise<void> | undefined;
+      vi.spyOn(repo, 'joinDocRoom').mockImplementationOnce(async (id) => {
+        oldRoom = await joinRoom(id);
+        joinEntered.resolve();
+        await resumeJoin.promise;
+        return oldRoom;
+      });
+      const noop = () => {};
+      const logger: Logger = {
+        info: noop,
+        warn: noop,
+        error: noop,
+        success: noop,
+        debug: noop,
+        trace: noop,
+        setLevel: noop,
+        child: () => logger,
+        close: async () => {},
+      };
+      const manager = new LoroDocumentManager({
+        repo,
+        workspaceId: 'synthetic-workspace' as WorkspaceId,
+        userId: 'synthetic-user',
+        metaSub: null,
+        logger,
+      });
+      let cleanupTask: Promise<void> | undefined;
+      let openingTask: Promise<SessionDocument[]> | undefined;
+      try {
+        const first = await manager.getOrCreateSessionDoc(sessionId, {
+          historyBackend: 'loro',
+          skipAutoRead: true,
+        });
+        oldSync = first.waitForRemoteSync();
+        await joinEntered.promise;
+        const replica = first.handle?.doc;
+        if (!replica) throw new Error('Missing initial replica');
+        replica.getText('synthetic').insert(0, 'retained bytes');
+        replica.commit();
+        blocked = true;
+        const cleanup = manager.cleanSessionDoc(sessionId, { preserveStatus: true });
+        cleanupTask = cleanup;
+        const cleanupFailure = cleanup.then(
+          () => {
+            throw new Error('Expected failed eviction');
+          },
+          (error: unknown) => error
+        );
+        void cleanupFailure.catch(() => undefined);
+        await entered.promise;
+        let opened = false;
+        const reopen = () => {
+          openingTask = Promise.all([
+            manager.getOrCreateSessionDoc(sessionId, { skipAutoRead: true }),
+            manager.getOrCreateSessionDoc(sessionId, { skipAutoRead: true }),
+          ]).then((sessions) => {
+            opened = true;
+            return sessions;
+          });
+          void openingTask.catch(() => undefined);
+          return openingTask;
+        };
+        const reopening = recovered ? undefined : reopen();
+        const other = await manager.getOrCreateSessionDoc('independent-session' as SessionId, {
+          skipAutoRead: true,
+        });
+        await expect(other.getDocState()).resolves.toBeDefined();
+        expect(opened).toBe(false);
+        resume.resolve();
+        const failure = await cleanupFailure;
+        expect(failure).toBeInstanceOf(Error);
+        if (recovered) blocked = false;
+        const [left, right] = await (reopening ?? reopen());
+        if (!left || !right) throw new Error('Missing reopened Session');
+        expect(left).toBe(right);
+        expect(left.isDestroyed).toBe(false);
+        expect(left.handle?.doc).toBe(replica);
+        await left.waitForRemoteSync();
+        const currentRoom = left.docSub;
+        resumeJoin.resolve();
+        await oldSync;
+        expect(left.docSub === currentRoom).toBe(true);
+        expect(oldRoom?.signal.aborted).toBe(true);
+        await expect(left.getDocState()).resolves.toBeDefined();
+        await expect(cleanup).rejects.toBe(failure);
+        await updateTestHistory(left, () => [createUserEntry('reopened-turn', 'usable writer')]);
+        expect((await left.sessionData.history.readAll())[0]?.id).toBe('reopened-turn');
+        if (!recovered) {
+          await expect(
+            manager.cleanSessionDoc(sessionId, { preserveStatus: true })
+          ).rejects.toThrow();
+          expect((await manager.getSessionHistorySnapshot(sessionId))[0]?.id).toBe('reopened-turn');
+          const next = await manager.getOrCreateSessionDoc(sessionId, { skipAutoRead: true });
+          expect(next.handle?.doc).toBe(replica);
+          await expect(next.getDocState()).resolves.toBeDefined();
+        }
+        blocked = false;
+        await manager.cleanSessionDoc(sessionId, { preserveStatus: true });
+        expect((await adapter.loadDoc(roomId))?.getText('synthetic').toString()).toBe(
+          'retained bytes'
+        );
+        const next = await manager.getOrCreateSessionDoc(sessionId, { skipAutoRead: true });
+        expect((await next.sessionData.history.readAll())[0]?.id).toBe('reopened-turn');
+      } finally {
+        blocked = false;
+        resume.resolve();
+        resumeJoin.resolve();
+        await Promise.allSettled([cleanupTask, openingTask, oldSync]);
+        await manager.cleanUp({ preserveSessionStatus: true });
+        await rm(baseDir, { recursive: true, force: true });
+      }
+    }
+  );
+
+  it('repairs pending Session rooms without taking a healthy sibling offline', async () => {
+    const repo = await WorkspaceRepoLegacy.create({});
+    const remote = new LoroDoc();
+    remote.getText('incoming').insert(0, 'history delivery');
+    remote.commit();
+    const sessions = ['healthy', 'pending-a', 'pending-b'].map(
+      (id) => new SessionDocument(repo, id as SessionId, async () => {})
+    );
+    const [healthy, ...pending] = sessions;
+    if (!healthy) throw new Error('Missing healthy fixture');
+    const statuses = new Map<string, SubscriptionRef.SubscriptionRef<RoomStatus>>();
+    const resetting = Promise.withResolvers<void>();
+    const resume = Promise.withResolvers<void>();
+    let attempts: Promise<void[]> | undefined;
+    await repo.addTransport('streams', {
+      kind: 'native-workspace-transport',
+      make: (id) =>
+        Effect.succeed({
+          id,
+          authority: 'server',
+          connect: Effect.void,
+          disconnect: Effect.void,
+          reconnect: Effect.gen(function* () {
+            for (const status of statuses.values()) yield* SubscriptionRef.set(status, 'offline');
+            resetting.resolve();
+            yield* Effect.promise(() => resume.promise);
+            for (const status of statuses.values()) yield* SubscriptionRef.set(status, 'synced');
+          }),
+          join: (target, replica) =>
+            Effect.gen(function* () {
+              const status = yield* SubscriptionRef.make<RoomStatus>('synced');
+              if (target.kind === 'doc') statuses.set(target.id, status);
+              return {
+                status,
+                close: Effect.void,
+                sync: Effect.gen(function* () {
+                  if (replica.kind === 'doc') {
+                    yield* replica.lease.importUpdates([remote.export({ mode: 'snapshot' })]);
+                    yield* SubscriptionRef.set(status, 'synced');
+                  }
+                  return 'confirmed' as const;
+                }),
+              };
+            }),
+        }),
+    });
+    try {
+      for (const session of sessions) {
+        await session.initOffline(undefined, { historyBackend: 'loro' });
+        const room = await repo.joinDocRoom(session.roomId);
+        session.docSub = room;
+        await repo.runLegacy(room.native.awaitSynced('streams'));
+      }
+      const room = healthy.docSub;
+      if (!room) throw new Error('Missing healthy room');
+      for (const session of pending) {
+        const status = statuses.get(session.roomId);
+        if (!status) throw new Error('Missing pending transport room');
+        await repo.runLegacy(SubscriptionRef.set(status, 'offline'));
+        const pendingRoom = session.docSub;
+        if (!pendingRoom) throw new Error('Missing pending room');
+        await repo.runLegacy(
+          pendingRoom.native.status('streams').pipe(
+            Stream.filter((next) => next === 'offline'),
+            Stream.runHead
+          )
+        );
+      }
+      attempts = Promise.all(pending.map((session) => session.rejoinDocRoom()));
+      // Both outcomes have explicit signals. Hold a connection reset long
+      // enough to observe its effect on the sibling, without scheduler races.
+      const first = await Promise.race([
+        attempts.then(() => 'rooms' as const),
+        resetting.promise.then(() => 'connection' as const),
+      ]);
+      if (first === 'connection')
+        await repo.runLegacy(
+          room.native.status('streams').pipe(
+            Stream.filter((status) => status === 'offline'),
+            Stream.runHead
+          )
+        );
+      expect(await repo.runLegacy(room.native.statusSnapshot('streams'))).toBe('synced');
+      await attempts;
+      for (const session of pending)
+        expect(session.handle?.doc.getText('incoming').toString()).toBe('history delivery');
+      healthy.handle?.doc.getText('outgoing').insert(0, 'still writable');
+      expect(healthy.handle?.doc.getText('outgoing').toString()).toBe('still writable');
+    } finally {
+      resume.resolve();
+      await attempts?.catch(() => undefined);
+      for (const session of sessions) await session.destroy({ preserveStatus: true });
+      await repo.destroy();
+      remote.free();
+    }
+  });
+  it('rejects an explicit room rejoin without a route instead of parking readiness', async () => {
+    const repo = await WorkspaceRepoLegacy.create({});
+    const session = new SessionDocument(repo, uuidv4() as SessionId, async () => {});
+    try {
+      await session.initOffline({ history: [] });
+      session.docSub = await repo.joinDocRoom(session.roomId);
+      await expect(session.rejoinDocRoom()).rejects.toMatchObject({ _tag: 'RepoUnsupported' });
+    } finally {
+      await session.destroy({ preserveStatus: true });
+      await repo.destroy();
+    }
+  });
+  it.each(['reconcile', 'sync'] as const)(
+    'retires its own room during %s while another borrower survives',
+    async (phase) => {
+      const repo = await WorkspaceRepoLegacy.create({});
+      const session = new SessionDocument(repo, uuidv4() as SessionId, async () => {});
+      const entered = Promise.withResolvers<void>();
+      const reconnect = Promise.withResolvers<void>();
+      await session.initOffline({ history: [] });
+      await repo.addTransport('streams', {
+        kind: 'native-workspace-transport',
+        make: (id) =>
+          Effect.succeed({
+            id,
+            authority: 'server',
+            connect: Effect.void,
+            disconnect: Effect.void,
+            join: () =>
+              Effect.gen(function* () {
+                if (phase === 'reconcile') {
+                  entered.resolve();
+                  yield* Effect.promise(() => reconnect.promise);
+                }
+                return {
+                  status: yield* SubscriptionRef.make<RoomStatus>('joining'),
+                  close: Effect.void,
+                  sync: Effect.gen(function* () {
+                    if (phase === 'sync') {
+                      entered.resolve();
+                      yield* Effect.promise(() => reconnect.promise);
+                    }
+                    return 'confirmed' as const;
+                  }),
+                };
+              }),
+          }),
+      });
+      const room = await repo.joinDocRoom(session.roomId);
+      const other = await repo.joinDocRoom(session.roomId);
+      session.docSub = room;
+      const rejoining = session.rejoinDocRoom();
+      const settled = rejoining.then(
+        () => undefined,
+        (error: unknown) => error
+      );
+      try {
+        await entered.promise;
+        await session.destroy({ preserveStatus: true });
+        reconnect.resolve();
+        const result = await settled;
+        expect(result).toBeInstanceOf(Error);
+        expect(session.isDestroyed).toBe(true);
+        expect(session.docSub).toBeNull();
+        expect(room.signal.aborted).toBe(true);
+        expect(other.signal.aborted).toBe(false);
+        expect(other.native.replica.kind).toBe('doc');
+        if (other.native.replica.kind === 'doc') {
+          other.native.replica.lease.doc.getText('survivor').insert(0, 'still writable');
+          expect(other.native.replica.lease.doc.getText('survivor').toString()).toBe(
+            'still writable'
+          );
+        }
+      } finally {
+        reconnect.resolve();
+        other.unsubscribe();
+        await session.destroy({ preserveStatus: true });
+        await repo.destroy();
+      }
+    }
+  );
+  it.each(['joining', 'offline'] as const)(
+    'bounds a %s room attempt and permits a later retry',
+    async (initialStatus) => {
+      const repo = await WorkspaceRepoLegacy.create({});
+      const session = new SessionDocument(repo, uuidv4() as SessionId, async () => {});
+      const entered = Promise.withResolvers<void>();
+      let stalled = true;
+      await session.initOffline({ history: [] });
+      await repo.addTransport('streams', {
+        kind: 'native-workspace-transport',
+        make: (id) =>
+          Effect.succeed({
+            id,
+            authority: 'server',
+            connect: Effect.void,
+            disconnect: Effect.void,
+            join: () =>
+              Effect.gen(function* () {
+                const status = yield* SubscriptionRef.make<RoomStatus>(initialStatus);
+                return {
+                  status,
+                  close: Effect.void,
+                  sync: Effect.suspend(() => {
+                    if (stalled) {
+                      entered.resolve();
+                      return Effect.never;
+                    }
+                    return SubscriptionRef.set(status, 'synced').pipe(
+                      Effect.as('confirmed' as const)
+                    );
+                  }),
+                };
+              }),
+          }),
+      });
+      session.docSub = await repo.joinDocRoom(session.roomId);
+      const other = await repo.joinDocRoom(session.roomId);
+      vi.stubEnv('LODY_LORO_SYNC_DOC_TIMEOUT_MS', '8000');
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+      try {
+        const attempt = session.rejoinDocRoom();
+        const timedOut = expect(attempt).rejects.toMatchObject({ _tag: 'TimeoutError' });
+        await entered.promise;
+        await vi.advanceTimersByTimeAsync(8000);
+        await timedOut;
+        expect(other.signal.aborted).toBe(false);
+        if (other.native.replica.kind !== 'doc') throw new Error('Expected Doc');
+        other.native.replica.lease.doc.getText('survivor').insert(0, 'writable after timeout');
+        expect(other.native.replica.lease.doc.getText('survivor').toString()).toBe(
+          'writable after timeout'
+        );
+        stalled = false;
+        await session.rejoinDocRoom();
+      } finally {
+        vi.useRealTimers();
+        vi.unstubAllEnvs();
+        other.unsubscribe();
+        await session.destroy({ preserveStatus: true });
+        await repo.destroy();
+      }
+    }
+  );
+  it.each(['destroy', 'reinitialize'] as const)(
+    'retains its original local replica after a failed eviction and retries on %s',
+    async (retry) => {
+      const baseDir = await mkdtemp(join(tmpdir(), 'lody-session-close-'));
+      const adapter = new FileSystemStorageAdaptor({ baseDir });
+      const save = adapter.save.bind(adapter);
+      let blocked = false;
+      adapter.save = async (payload) => {
+        if (blocked && (payload.type === 'doc-update' || payload.type === 'doc-snapshot'))
+          throw new Error('synthetic session save failure');
+        await save(payload);
+      };
+      const repo = await WorkspaceRepoLegacy.create({ storageAdapter: adapter });
+      const boundRooms = new Set<string>();
+      const session = new SessionDocument(repo, uuidv4() as SessionId, async (id) => {
+        await repo.unloadDoc(id);
+        boundRooms.delete(id);
+      });
+      try {
+        await session.initOffline({ history: [] });
+        boundRooms.add(session.roomId);
+        session.handle!.doc.getText('synthetic').insert(0, 'kept');
+        session.handle!.doc.commit();
+        blocked = true;
+        await expect(session.destroy({ preserveStatus: true })).rejects.toThrow();
+        expect(boundRooms.size).toBe(1);
+        expect(session.isDestroyed).toBe(true);
+        expect(session.handle).toBeNull();
+        if (retry === 'reinitialize') {
+          const original = (await repo.openPersistedDoc(session.roomId)).doc;
+          await session.initOffline();
+          expect(session.handle?.doc).toBe(original);
+          expect(session.handle?.doc.getText('synthetic').toString()).toBe('kept');
+        }
+        blocked = false;
+        await session.destroy({ preserveStatus: true });
+        const reopened = await repo.acquireDoc(session.roomId);
+        expect(reopened.doc.getText('synthetic').toString()).toBe('kept');
+        await reopened.release();
+      } finally {
+        blocked = false;
+        await session.destroy({ preserveStatus: true });
+        await repo.destroy();
+        await rm(baseDir, { recursive: true, force: true });
+      }
+    }
+  );
+
   it('acknowledges from shallow fields without reading assistant bodies on notifications', async () => {
-    const repo = await LoroRepo.create({});
+    const repo = await WorkspaceRepoLegacy.create({});
     const session = new SessionDocument(repo, uuidv4() as SessionId);
     try {
       await session.initOffline({
@@ -57,7 +503,7 @@ describe('SessionDocument auto read', () => {
   });
 
   it('marks latest user entry as read on history updates', async () => {
-    const repo = await LoroRepo.create({});
+    const repo = await WorkspaceRepoLegacy.create({});
     try {
       const sessionId = uuidv4() as SessionId;
       const doc = new SessionDocument(repo, sessionId);
@@ -81,7 +527,7 @@ describe('SessionDocument auto read', () => {
   });
 
   it('only marks the latest user entry when multiple are unread', async () => {
-    const repo = await LoroRepo.create({});
+    const repo = await WorkspaceRepoLegacy.create({});
     try {
       const sessionId = uuidv4() as SessionId;
       const doc = new SessionDocument(repo, sessionId);
@@ -109,7 +555,7 @@ describe('SessionDocument auto read', () => {
   });
 
   it('can mark the latest user entry as read for existing history', async () => {
-    const repo = await LoroRepo.create({});
+    const repo = await WorkspaceRepoLegacy.create({});
     try {
       const sessionId = uuidv4() as SessionId;
       const doc = new SessionDocument(repo, sessionId);
@@ -148,7 +594,7 @@ describe('SessionDocument auto read', () => {
   });
 
   it('does not pop the first queued message while it is being edited', async () => {
-    const repo = await LoroRepo.create({});
+    const repo = await WorkspaceRepoLegacy.create({});
     try {
       const sessionId = uuidv4() as SessionId;
       const doc = new SessionDocument(repo, sessionId);
@@ -182,7 +628,7 @@ describe('SessionDocument auto read', () => {
   });
 
   it('pops a queued message whose editing lease has expired', async () => {
-    const repo = await LoroRepo.create({});
+    const repo = await WorkspaceRepoLegacy.create({});
     try {
       const sessionId = uuidv4() as SessionId;
       const doc = new SessionDocument(repo, sessionId);
@@ -216,7 +662,7 @@ describe('SessionDocument auto read', () => {
   });
 
   it('treats a missing editingStartedAt as an expired lease (legacy item)', async () => {
-    const repo = await LoroRepo.create({});
+    const repo = await WorkspaceRepoLegacy.create({});
     try {
       const sessionId = uuidv4() as SessionId;
       const doc = new SessionDocument(repo, sessionId);
@@ -241,6 +687,198 @@ describe('SessionDocument auto read', () => {
       await expect(doc.getMessageQueue()).resolves.toEqual([]);
     } finally {
       await repo.destroy();
+    }
+  });
+});
+
+describe('LoroDocumentManager Session residency', () => {
+  const noop = () => {};
+  const logger: Logger = {
+    info: noop,
+    warn: noop,
+    error: noop,
+    success: noop,
+    debug: noop,
+    trace: noop,
+    setLevel: noop,
+    child: () => logger,
+    close: async () => {},
+  };
+  const withManager = async (
+    run: (manager: LoroDocumentManager) => Promise<void>
+  ): Promise<void> => {
+    const repo = await WorkspaceRepoLegacy.create({});
+    const manager = new LoroDocumentManager({
+      repo,
+      workspaceId: 'synthetic-workspace' as WorkspaceId,
+      userId: 'synthetic-user',
+      metaSub: null,
+      logger,
+    });
+    try {
+      await run(manager);
+    } finally {
+      await manager.cleanUp({ preserveSessionStatus: true });
+    }
+  };
+  const idle = { minIdleMs: 0, veto: () => false };
+
+  it('never retires a leased document and keeps it resident after the lease ends', async () => {
+    await withManager(async (manager) => {
+      const sessionId = 'leased-session' as SessionId;
+      const lease = await manager.acquireSessionDocLegacy(sessionId, { skipAutoRead: true });
+      let tornDown = false;
+      await expect(
+        manager.retireSessionLegacy(sessionId, {
+          ...idle,
+          teardown: async () => {
+            tornDown = true;
+          },
+        })
+      ).resolves.toBe('in-use');
+      expect(tornDown).toBe(false);
+      expect(lease.doc.isDestroyed).toBe(false);
+
+      await lease.release();
+      // Releasing destroys nothing; only a later idle retirement does.
+      expect(lease.doc.isDestroyed).toBe(false);
+      expect(manager.sessions.get(sessionId)).toBe(lease.doc);
+      await expect(
+        manager.retireSessionLegacy(sessionId, {
+          ...idle,
+          minIdleMs: 20 * 60_000,
+          teardown: async () => {},
+        })
+      ).resolves.toBe('recently-used');
+      await expect(
+        manager.retireSessionLegacy(sessionId, { ...idle, teardown: async () => {} })
+      ).resolves.toBe('retired');
+      expect(lease.doc.isDestroyed).toBe(true);
+    });
+  });
+
+  it('gives a turn that arrives during GC teardown a fresh document, not the doomed one', async () => {
+    await withManager(async (manager) => {
+      const sessionId = 'retiring-session' as SessionId;
+      const doomed = await manager.getOrCreateSessionDoc(sessionId, { skipAutoRead: true });
+      const teardownEntered = Promise.withResolvers<SessionDocument | undefined>();
+      const finishTeardown = Promise.withResolvers<void>();
+      const retirement = manager.retireSessionLegacy(sessionId, {
+        ...idle,
+        teardown: async (sessionDoc) => {
+          teardownEntered.resolve(sessionDoc);
+          await finishTeardown.promise;
+          // The teardown writes through the document it was handed, without
+          // acquiring the Session whose gate it holds.
+          await sessionDoc?.setPreviewState({});
+        },
+      });
+      await expect(teardownEntered.promise).resolves.toBe(doomed);
+
+      // Like the Inbox turn that started 2 ms into GC.
+      let leased = false;
+      const turn = manager
+        .acquireSessionDocLegacy(sessionId, { skipAutoRead: true })
+        .then((lease) => {
+          leased = true;
+          return lease;
+        });
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(leased).toBe(false);
+
+      finishTeardown.resolve();
+      await expect(retirement).resolves.toBe('retired');
+      const lease = await turn;
+      try {
+        expect(doomed.isDestroyed).toBe(true);
+        expect(lease.doc).not.toBe(doomed);
+        expect(lease.doc.isDestroyed).toBe(false);
+        await updateTestHistory(lease.doc, () => [createUserEntry('after-gc', 'still writable')]);
+        expect((await lease.doc.sessionData.history.readAll())[0]?.id).toBe('after-gc');
+      } finally {
+        await lease.release();
+      }
+    });
+  });
+
+  it('defers cleanup of a leased document until its last lease ends', async () => {
+    await withManager(async (manager) => {
+      const sessionId = 'archived-while-leased' as SessionId;
+      const lease = await manager.acquireSessionDocLegacy(sessionId, { skipAutoRead: true });
+      await manager.cleanSessionDoc(sessionId, { preserveStatus: true });
+      expect(lease.doc.isDestroyed).toBe(false);
+      await lease.release();
+      expect(lease.doc.isDestroyed).toBe(true);
+      expect(manager.sessions.has(sessionId)).toBe(false);
+    });
+  });
+
+  it('lets the real GC sweep retire a session idle past the timeout after its goal check', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+      await withManager(async (manager) => {
+        const sessionId = 'idle-past-timeout' as SessionId;
+        const startedAt = Date.parse('2026-10-17T08:26:48.000Z');
+        vi.setSystemTime(startedAt);
+        // The last turn used the document, then ended.
+        const used = await manager.getOrCreateSessionDoc(sessionId, { skipAutoRead: true });
+        vi.setSystemTime(startedAt + 21 * 60_000);
+
+        const deleted: SessionId[] = [];
+        // The real MessageHandler methods GC runs, over the collaborators they read.
+        const handler = {
+          workspaceDocument: manager,
+          logger,
+          getSessionBackend: (sessionDoc: SessionDocument) => createSessionBackend(sessionDoc),
+          hasActiveTurn: () => false,
+          executionService: { getExecutionSnapshot: () => ({ hasActiveTurn: false }) },
+          hasPendingUpdates: () => false,
+          isArchiveInFlight: () => false,
+          gcRetiringSessions: new Set<SessionId>(),
+          clearSessionActivePresence: () => {},
+          iosSimulatorService: { closeSession: async () => {} },
+          previewService: { closeSessionPreviewForCleanup: async () => {} },
+          sessionManager: { hasSession: () => false },
+          store: { deleteSession: (id: SessionId) => deleted.push(id) },
+        } as unknown as MessageHandler;
+        const gc = new SessionGCManager(
+          {
+            idleTimeoutMs: 20 * 60_000,
+            sweepIntervalMs: 60_000,
+            enabled: true,
+            memoryThresholdBytes: 0,
+            maxEvictionsPerCall: 1,
+            pressureRecheckAttempts: 0,
+            pressureRecheckDelayMs: 0,
+          },
+          {
+            getSessionLastActivity: () => startedAt,
+            getSessionIds: () => [sessionId],
+            hasActiveTurn: () => false,
+            hasActiveGoal: (id) => MessageHandler.prototype.hasActiveGoal.call(handler, id),
+            hasPendingUpdates: () => false,
+            hasPendingUserWork: async () => false,
+            isArchiveInFlight: () => false,
+            cleanSession: (id, options) =>
+              MessageHandler.prototype.cleanSessionForGC.call(handler, id, options),
+            memoryPressure: {
+              getLatest: async () => ({ availableMemoryBytes: 1, effectiveMemoryLimitBytes: 1 }),
+              refresh: async () => ({ availableMemoryBytes: 1, effectiveMemoryLimitBytes: 1 }),
+            },
+            logger,
+            sleep: async () => {},
+          },
+          'linux'
+        );
+
+        await gc.sweep();
+
+        expect(used.isDestroyed).toBe(true);
+        expect(manager.sessions.has(sessionId)).toBe(false);
+        expect(deleted).toEqual([sessionId]);
+      });
+    } finally {
+      vi.useRealTimers();
     }
   });
 });

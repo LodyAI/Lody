@@ -74,7 +74,7 @@ export function resolveDesktopDeepLink(
   const auth = route === 'auth/callback'
   const cloud =
     auth || ['invite/open', 'github-install', 'checkout-return', 'machine/connect'].includes(route)
-  if (!cloud && route !== 'chat/new') return { kind: 'unsupported' }
+  if (!cloud && route !== 'chat/new' && route !== 'provider/import') return { kind: 'unsupported' }
   // Old common-scheme cloud callbacks belong to Stable, not the resource default.
   // OSS cannot process cloud routes even through its own private scheme.
   if (

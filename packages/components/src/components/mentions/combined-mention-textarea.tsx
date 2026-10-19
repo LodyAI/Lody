@@ -54,14 +54,14 @@ import {
 } from '@/components/mentions/mention-project-file-source';
 import {
   SKILL_MENTION_TRIGGER,
-  SKILL_MENTION_TRIGGER_ALIAS,
+  SKILL_MENTION_TRIGGER_ALIASES,
   SkillMentionHydrator,
   getAllowedSkillMentionDirs,
   type SkillMentionAgent,
   type SkillMentionItem,
   useMentionProjectSkills,
 } from '@/components/mentions/mention-skill-source';
-import { getAgentRoleEmoji, type AcpCommandSummary } from '@lody/shared';
+import { getAgentRoleEmoji, type AcpCommandSummary, type MachineId } from '@lody/shared';
 import { Mention, MentionInput, MentionLabel, useMentionContext } from '@/ui/mention';
 import type { Mention as MentionRange, MentionChipResolver } from '@/ui/mention/index';
 import { Textarea, type TextareaProps } from '@lody/ui/textarea';
@@ -878,15 +878,14 @@ export const CombinedMentionTextarea = React.forwardRef<
       () => getMentionSourceProjectKey(mentionSource),
       [mentionSource]
     );
-    const agentRoleItems = useAgentRoleMentionItems();
+    const agentRoleItems = useAgentRoleMentionItems(
+      (skillAgent?.machineId as MachineId | undefined) ?? null
+    );
     // A committed range carries only the Role id, so the caller's chip resolver
     // cannot reach the Role's emoji on its own. The composer already owns the
     // mentionable list, so it upgrades the glyph on the way through.
     const agentRoleEmojiById = React.useMemo(
-      () =>
-        new Map(
-          agentRoleItems.map((item) => [item.role.id as string, getAgentRoleEmoji(item.role)])
-        ),
+      () => new Map(agentRoleItems.map((item) => [item.value, getAgentRoleEmoji(item.role)])),
       [agentRoleItems]
     );
     const resolveMentionChip = React.useMemo<MentionChipResolver | undefined>(() => {
@@ -1029,11 +1028,11 @@ export const CombinedMentionTextarea = React.forwardRef<
     const triggers = React.useMemo(() => {
       const nextTriggers: string[] = [];
       // Every mention type is reachable through `@`; skills also retain their
-      // direct `$` / `￥` entry points, and commands accept `/` and `、` because they must
+      // direct `$` / `￥` / `¥` entry points, and commands accept `/` and `、` because they must
       // own the whole prompt.
       if (enableAtMentions) nextTriggers.push('@');
       if (enableSkillMentions)
-        nextTriggers.push(SKILL_MENTION_TRIGGER, SKILL_MENTION_TRIGGER_ALIAS);
+        nextTriggers.push(SKILL_MENTION_TRIGGER, ...SKILL_MENTION_TRIGGER_ALIASES);
       if (enableShortcutMentions || (enableCommandMentions && isSlashOnly))
         nextTriggers.push('/', '、');
       return nextTriggers;

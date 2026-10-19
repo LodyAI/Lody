@@ -44,13 +44,23 @@ export const Submitting: Story = {
 
 export const Success: Story = {
   args: {
-    state: { status: 'success', bugReportId: 'k57c2mvf8q1zx0e9w3jh4t6ya', withLogs: true },
+    state: {
+      status: 'success',
+      bugReportId: 'k57c2mvf8q1zx0e9w3jh4t6ya',
+      withLogs: true,
+      clientDiagnostics: 'uploaded',
+    },
   },
 };
 
 export const SuccessWithoutLogs: Story = {
   args: {
-    state: { status: 'success', bugReportId: 'k57c2mvf8q1zx0e9w3jh4t6ya', withLogs: false },
+    state: {
+      status: 'success',
+      bugReportId: 'k57c2mvf8q1zx0e9w3jh4t6ya',
+      withLogs: false,
+      clientDiagnostics: 'uploaded',
+    },
   },
 };
 
@@ -67,5 +77,28 @@ export const NoMachines: Story = {
   args: {
     machines: [],
     initialMachineId: null,
+  },
+};
+
+export const ClientDiagnosticsUploading: Story = {
+  args: {
+    state: {
+      status: 'success',
+      bugReportId: 'k57c2mvf8q1zx0e9w3jh4t6ya',
+      withLogs: false,
+      clientDiagnostics: 'uploading',
+    },
+  },
+};
+
+export const ClientDiagnosticsFailed: Story = {
+  args: {
+    state: {
+      status: 'success',
+      bugReportId: 'k57c2mvf8q1zx0e9w3jh4t6ya',
+      withLogs: true,
+      clientDiagnostics: 'failed',
+    },
+    onRetryClientDiagnostics: fn(),
   },
 };

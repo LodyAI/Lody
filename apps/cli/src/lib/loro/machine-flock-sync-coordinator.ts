@@ -1,5 +1,7 @@
+import type { WorkspaceRepoLegacy } from '@lody/shared/workspace-data/repo-legacy';
 import { getMachineFlockDocId, type MachineId, type WorkspaceId } from '@lody/shared';
-import type { LoroRepo, RepoTransportRoomStatus, TransportSubscription } from 'loro-repo';
+import type { RepoTransportRoomStatus } from 'loro-repo';
+import type { WorkspaceRoom as TransportSubscription } from '@lody/shared/workspace-data/repo-legacy';
 
 import { formatErrorMessage } from '@/utils/format-error';
 import type { Logger } from '@/utils/logger';
@@ -30,7 +32,7 @@ type MachineFlockSyncState = {
 };
 
 export type MachineFlockSyncCoordinatorOptions = {
-  repo: LoroRepo;
+  repo: WorkspaceRepoLegacy;
   workspaceId: WorkspaceId;
   logger: Logger;
   retryBaseDelayMs?: number;
@@ -50,7 +52,7 @@ export type MachineFlockSyncRequestOptions = {
 const isRecoverableMachineFlockRoomStatus = isRecoverableStreamsRoomStatus;
 
 export class MachineFlockSyncCoordinator {
-  private readonly repo: LoroRepo;
+  private readonly repo: WorkspaceRepoLegacy;
   private readonly workspaceId: WorkspaceId;
   private readonly logger: Logger;
   private readonly random: () => number;

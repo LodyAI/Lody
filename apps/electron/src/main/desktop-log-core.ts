@@ -1,4 +1,6 @@
 import { formatWithOptions } from 'node:util'
+import type { CliRuntimeState } from '@lody/shared/electron-ipc'
+import type { IpcError } from '@lody/shared/node/local-ipc'
 import {
   appendDailyLogSync,
   formatDailyLogLine,
@@ -31,6 +33,63 @@ export type DesktopLogOptions = {
   now?: () => Date
   append?: (logDir: string, text: string, at: Date) => void
   scheduleFlush?: (flush: () => void) => void
+}
+
+/** Trace request failures before the adapter folds them into an absent snapshot. */
+export function createCliProbeTrace(options: {
+  getLog: () => DesktopLog
+  getChildPid: () => number | undefined
+  now?: () => number
+}) {
+  const now = options.now ?? (() => performance.now())
+  let consecutiveRequestFailures = 0
+  let lastFailureTag: IpcError['_tag'] | null = null
+  let lastFailureLogAt = -Infinity
+
+  return {
+    failure(error: IpcError, timeoutMs: number, durationMs: number): void {
+      const at = now()
+      consecutiveRequestFailures += 1
+      const shouldLog =
+        consecutiveRequestFailures === 1 ||
+        consecutiveRequestFailures === 3 ||
+        error._tag !== lastFailureTag ||
+        at - lastFailureLogAt >= 30_000
+      lastFailureTag = error._tag
+      if (!shouldLog) return
+      lastFailureLogAt = at
+      // Includes startup/reconcile reads, so this is not the supervisor's poll
+      // counter. Keep payloads, causes and messages out of diagnostics.
+      try {
+        options
+          .getLog()
+          .warn(
+            'cli-probe',
+            `state request failed type=${error._tag} durationMs=${Math.round(durationMs)} timeoutMs=${timeoutMs} consecutiveRequestFailures=${consecutiveRequestFailures} childPid=${options.getChildPid() ?? 'none'}${
+              error._tag === 'IpcProtocolError' ? ` httpStatus=${error.status ?? 'unknown'}` : ''
+            }`
+          )
+      } catch {
+        // Diagnostic failures must preserve the probe result.
+      }
+    },
+    success(runtime: CliRuntimeState, durationMs: number): void {
+      const failures = consecutiveRequestFailures
+      consecutiveRequestFailures = 0
+      lastFailureTag = null
+      if (failures === 0) return
+      try {
+        options
+          .getLog()
+          .info(
+            'cli-probe',
+            `state request recovered durationMs=${Math.round(durationMs)} consecutiveRequestFailures=${failures} observedPid=${runtime.pid} hasMachineId=${Boolean(runtime.machineId?.trim())}`
+          )
+      } catch {
+        // Diagnostic failures must preserve the probe result.
+      }
+    }
+  }
 }
 
 // Obvious credential shapes that main-process diagnostics were never written to

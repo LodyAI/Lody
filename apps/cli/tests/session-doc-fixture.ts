@@ -25,7 +25,7 @@ export function composeTestSessionDoc(
   const doc = options.doc ?? new LoroDoc();
   // `composeSessionData` does not assign `handle`; shallow readers and storage
   // metadata need it, matching `init()` which sets it from `openPersistedDoc`.
-  sessionDoc.handle = { doc } as never;
+  sessionDoc.handle = { doc, release: async () => {} } as never;
   sessionDoc.composeSessionData(doc, {
     session: { id: sessionDoc.sessionId, ...(options.session ?? {}) },
     history: options.history ?? [],

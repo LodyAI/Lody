@@ -4,6 +4,7 @@ import { Switch } from '@lody/ui/switch';
 import {
   developerModeEnabledAtom,
   inboxBetaEnabledAtom,
+  roostHistoryExperimentEnabledAtom,
   semanticShortcutsBetaEnabledAtom,
 } from '@/atoms/settings';
 import { CompactRow, CompactSection } from './compact-layout';
@@ -17,6 +18,10 @@ import { CompactRow, CompactSection } from './compact-layout';
  * the switches — each derived feature gate already requires both, so the features
  * disappear immediately either way, and a user toggling Developer mode for an
  * unrelated diagnostic does not silently lose their opt-ins.
+ *
+ * The Roost history switch lives here with the same pattern: Developer mode and
+ * the switch are required together, while the Experimental features master switch
+ * is an independent user-facing surface.
  */
 export function BetaFeaturesSection() {
   const { t } = useTranslation();
@@ -26,6 +31,7 @@ export function BetaFeaturesSection() {
   const [semanticShortcutsEnabled, setSemanticShortcutsEnabled] = useAtom(
     semanticShortcutsBetaEnabledAtom
   );
+  const [roostHistoryEnabled, setRoostHistoryEnabled] = useAtom(roostHistoryExperimentEnabledAtom);
 
   if (!developerModeEnabled) return null;
 
@@ -49,13 +55,27 @@ export function BetaFeaturesSection() {
         label={t('settings.beta.semanticShortcuts', 'Pointer-aware close shortcut')}
         helper={t(
           'settings.beta.semanticShortcutsHelper',
-          'On desktop, close the active tab in the conversation or right panel you last pointed at or used with the keyboard.'
+          'On desktop, close the tab where you last opened content, clicked, typed, or scrolled. Moving the pointer keeps that target; hover selects a region only before an explicit interaction.'
         )}
       >
         <Switch
           checked={semanticShortcutsEnabled}
           onCheckedChange={setSemanticShortcutsEnabled}
           aria-label={t('settings.beta.semanticShortcuts', 'Pointer-aware close shortcut')}
+        />
+      </CompactRow>
+
+      <CompactRow
+        label={t('settings.experimental.roostHistory', 'Roost history')}
+        helper={t(
+          'settings.experimental.roostHistoryHelper',
+          'Use Roost for new conversations. Existing conversations keep their current history backend.'
+        )}
+      >
+        <Switch
+          checked={roostHistoryEnabled}
+          onCheckedChange={setRoostHistoryEnabled}
+          aria-label={t('settings.experimental.roostHistory', 'Roost history')}
         />
       </CompactRow>
     </CompactSection>

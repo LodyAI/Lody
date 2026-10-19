@@ -228,3 +228,31 @@ void test('quit awaits application Scope cleanup and retries transferred ownersh
   await quit.promise
   assert.equal(resource.held, false)
 })
+
+void test('quit reports cancellation for Stay and for failed cleanup, but not for a quit', async () => {
+  let cancelled = 0
+  let allow = false
+  let failStop = false
+  const quit = Promise.withResolvers()
+  const handler = createDesktopQuitBarrier({
+    prepare: async () => allow,
+    stop: async () => {
+      if (failStop) throw new Error('CLI still alive')
+    },
+    quit: () => quit.resolve(),
+    reportFailure: () => {},
+    cancelled: () => {
+      cancelled++
+    }
+  })
+  await handler({ preventDefault() {} })
+  assert.equal(cancelled, 1)
+  allow = true
+  failStop = true
+  await handler({ preventDefault() {} })
+  assert.equal(cancelled, 2)
+  failStop = false
+  await handler({ preventDefault() {} })
+  await quit.promise
+  assert.equal(cancelled, 2)
+})

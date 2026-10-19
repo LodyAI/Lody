@@ -75,7 +75,6 @@ const {
   loadWorkspaceAgentRoleCatalog,
   resolveMcpSessionCreate,
   buildResolvedMcpCreateCanonicalCommand,
-  buildOperationTargetCancelArgs,
   summarizeAgentConfig,
   getSessionContext,
   resolveOperationStorePathForContext,
@@ -1398,25 +1397,6 @@ describe('session MCP input schemas', () => {
     ]);
     expect(manager.repo.upsertDocMeta).not.toHaveBeenCalled();
     expect(waitUntilMetaSynced).not.toHaveBeenCalled();
-  });
-
-  it('cancels only the assistant turn created by the Operation item', () => {
-    expect(
-      buildOperationTargetCancelArgs('workspace-1', {
-        status: 'active',
-        inputDurable: true,
-        target: { sessionId: 'target-session' as SessionId, userTurnId: 'target-user-turn' },
-      })
-    ).toEqual([
-      'session',
-      'cancel',
-      '--workspace',
-      'workspace-1',
-      '--json',
-      '--turn-id',
-      'assistant:target-user-turn',
-      'target-session',
-    ]);
   });
 
   it('accepts only the finite list filters and bounded batch shapes', () => {

@@ -60,6 +60,7 @@ function DeviceAuthRoute() {
   if (error) {
     return (
       <RouteMessage
+        gate="session_load_error"
         title={t('workspace.route.sessionLoadErrorTitle')}
         description={t('workspace.route.sessionLoadErrorDescription')}
       />

@@ -49,6 +49,20 @@ function isOptionalString(value: unknown): boolean {
   return typeof value === 'undefined' || typeof value === 'string';
 }
 
+function isSessionHistoryWriteOperation(value: unknown): boolean {
+  return (
+    value === 'append' ||
+    value === 'accept_input' ||
+    value === 'accept_input_and_dispatch' ||
+    value === 'replace' ||
+    value === 'respond_permission' ||
+    value === 'apply_action' ||
+    value === 'replace_editable_tail' ||
+    value === 'apply_import' ||
+    value === 'copy_history'
+  );
+}
+
 function isOptionalNonnegativeInteger(value: unknown): boolean {
   return (
     typeof value === 'undefined' ||
@@ -536,6 +550,18 @@ export function isLocalSessionControlRequest(value: unknown): value is LocalSess
     );
   }
 
+  if (value.type === 'machine/provider-rate-limits-refresh') {
+    return (
+      typeof value.machineId === 'string' &&
+      typeof value.workspaceId === 'string' &&
+      typeof value.configId === 'string' &&
+      value.configId.trim().length > 0 &&
+      Object.keys(value).every((key) =>
+        ['type', 'machineId', 'workspaceId', 'configId'].includes(key)
+      )
+    );
+  }
+
   if (value.type === 'machine/acp-capabilities-refresh') {
     return (
       typeof value.machineId === 'string' &&
@@ -659,13 +685,7 @@ export function isLocalSessionControlRequest(value: unknown): value is LocalSess
       typeof value.machineId === 'string' &&
       typeof value.workspaceId === 'string' &&
       typeof value.sessionId === 'string' &&
-      (value.operation === 'append' ||
-        value.operation === 'replace' ||
-        value.operation === 'respond_permission' ||
-        value.operation === 'apply_action' ||
-        value.operation === 'replace_editable_tail' ||
-        value.operation === 'apply_import' ||
-        value.operation === 'copy_history') &&
+      isSessionHistoryWriteOperation(value.operation) &&
       isObjectRecord(value.payload)
     );
   }
@@ -847,6 +867,14 @@ export function isLocalSessionControlResponse(
       isOptionalString(value.error) &&
       (value.type === 'machine/restart_response' ||
         (isOptionalString(value.currentVersion) && isOptionalString(value.targetVersion)))
+    );
+  }
+
+  if (value.type === 'machine/provider-rate-limits-refresh_response') {
+    return (
+      typeof value.machineId === 'string' &&
+      typeof value.configId === 'string' &&
+      typeof value.success === 'boolean'
     );
   }
 
@@ -1119,13 +1147,7 @@ export function isLocalSessionControlResponse(
   if (value.type === 'session/history-write_response') {
     return (
       typeof value.sessionId === 'string' &&
-      (value.operation === 'append' ||
-        value.operation === 'replace' ||
-        value.operation === 'respond_permission' ||
-        value.operation === 'apply_action' ||
-        value.operation === 'replace_editable_tail' ||
-        value.operation === 'apply_import' ||
-        value.operation === 'copy_history') &&
+      isSessionHistoryWriteOperation(value.operation) &&
       typeof value.success === 'boolean' &&
       isOptionalNonnegativeInteger(value.historyRevision) &&
       isOptionalNonnegativeInteger(value.historyCount) &&

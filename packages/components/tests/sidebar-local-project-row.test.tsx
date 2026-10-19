@@ -1,7 +1,6 @@
 // @vitest-environment jsdom
 
-import React from 'react';
-import { flushSync } from 'react-dom';
+import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type {
@@ -15,6 +14,12 @@ import type {
 import { LocalProjectItem } from '../src/components/loro-app-sidebar';
 import { initI18n } from '../src/i18n';
 import { Tooltip } from '@lody/ui/tooltip';
+
+// Under `act`, React drains effects and scheduled work before each call returns,
+// so nothing is left to run after the jsdom environment is torn down.
+(
+  globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
+).IS_REACT_ACT_ENVIRONMENT = true;
 
 // A project hosted on a machine a teammate shared with the workspace. The row
 // must behave exactly like one on this user's own device: clicking it steers the
@@ -69,7 +74,7 @@ describe('sidebar local project row', () => {
 
   afterEach(() => {
     if (root) {
-      flushSync(() => root?.unmount());
+      act(() => root?.unmount());
     }
     root = undefined;
     container?.remove();
@@ -87,7 +92,7 @@ describe('sidebar local project row', () => {
     collapsed?: boolean;
     liveSessionStatuses?: ReadonlyMap<string, SessionStatus>;
   }) {
-    flushSync(() => {
+    act(() => {
       root?.render(
         <Tooltip.Provider>
           <LocalProjectItem
@@ -137,12 +142,12 @@ describe('sidebar local project row', () => {
     expect(row?.getAttribute('role')).toBe('button');
     expect(row?.getAttribute('aria-disabled')).toBeNull();
 
-    flushSync(() => row?.click());
+    act(() => row?.click());
     expect(onNavigateProject).toHaveBeenCalledWith(machineId, project.id);
 
     const newChatButton = row?.querySelector<HTMLButtonElement>('button[aria-label="New chat"]');
     expect(newChatButton).toBeInstanceOf(HTMLButtonElement);
-    flushSync(() => newChatButton?.click());
+    act(() => newChatButton?.click());
     expect(onNewChatInProject).toHaveBeenCalledWith(machineId, project.id);
     // Starting a fresh chat must not double as a plain row activation.
     expect(onNavigateProject).toHaveBeenCalledTimes(1);
@@ -156,7 +161,7 @@ describe('sidebar local project row', () => {
     expect(row?.getAttribute('role')).toBeNull();
     expect(row?.getAttribute('aria-disabled')).toBe('true');
 
-    flushSync(() => row?.click());
+    act(() => row?.click());
     expect(onNavigateProject).not.toHaveBeenCalled();
     expect(row?.querySelector('button[aria-label="New chat"]')).toBeNull();
   });
@@ -187,7 +192,7 @@ describe('sidebar local project row', () => {
     );
     expect(showAll?.textContent).toBe('Show all (7)');
 
-    flushSync(() => showAll?.click());
+    act(() => showAll?.click());
     expect(onToggleFullList).toHaveBeenCalledWith('local-project:machine-teammate:project-shared');
 
     render({ ...baseOptions, whetherShowFullList: true });

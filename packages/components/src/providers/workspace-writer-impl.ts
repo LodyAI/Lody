@@ -1,3 +1,4 @@
+import type { WorkspaceRepoLegacy } from '@lody/shared/workspace-data/repo-legacy';
 import {
   applyPreviewVisualCommentMutation,
   getServerNow,
@@ -6,7 +7,7 @@ import {
   type PreviewVisualCommentDocInput,
 } from '@lody/shared';
 import type { SessionId } from '@lody/shared/ids';
-import type { LoroRepo } from 'loro-repo';
+
 import type {
   PreviewVisualCommentDocStore,
   SessionDocDraft,
@@ -22,11 +23,13 @@ import type { WorkspaceWriter } from './workspace-writer';
 
 /** Deps the writer needs from the runtime (repo + session stores). */
 export type DirectWorkspaceWriterDeps = {
-  repo: LoroRepo;
+  repo: WorkspaceRepoLegacy;
   acquireSessionStore: (sessionId: SessionId) => Promise<SessionDocStore>;
   releaseSessionStoreRef: (sessionId: SessionId) => void;
   acquirePreviewVisualCommentStore: (sessionId: SessionId) => Promise<PreviewVisualCommentDocStore>;
   releasePreviewVisualCommentStoreRef: (sessionId: SessionId) => void;
+  /** Records an authored row after commit, independently of later network delivery. */
+  onFlockWrite?: (flockDocId: string, key: readonly string[]) => void;
 };
 
 /**
@@ -70,7 +73,7 @@ export function createDirectWorkspaceWriter(deps: DirectWorkspaceWriterDeps): Wo
 
   return {
     async upsertDocMeta(roomId, patch) {
-      await deps.repo.upsertDocMeta(roomId, patch as Parameters<LoroRepo['upsertDocMeta']>[1]);
+      await deps.repo.upsertDocMeta(roomId, patch as Parameters<WorkspaceRepoLegacy['upsertDocMeta']>[1]);
     },
 
     async startSession(sessionId, meta, entry, dispatch) {
@@ -79,7 +82,7 @@ export function createDirectWorkspaceWriter(deps: DirectWorkspaceWriterDeps): Wo
       // document that a later opener interprets as legacy Loro.
       await deps.repo.upsertDocMeta(
         getSessionRoomId(sessionId as SessionId),
-        meta as Parameters<LoroRepo['upsertDocMeta']>[1]
+        meta as Parameters<WorkspaceRepoLegacy['upsertDocMeta']>[1]
       );
       await withSessionStore(sessionId, async (store) => {
         await store.sessionData.commands.appendTurn(entry);
@@ -95,16 +98,19 @@ export function createDirectWorkspaceWriter(deps: DirectWorkspaceWriterDeps): Wo
       const handle = await deps.repo.openFlockDoc(flockDocId);
       handle.flock.set([...key], value as Parameters<typeof handle.flock.set>[1]);
       handle.flock.commit();
+      deps.onFlockWrite?.(flockDocId, key);
     },
 
     async flockRowUpdate(flockDocId, key, update) {
       const handle = await deps.repo.openFlockDoc(flockDocId);
-      return handle.flock.txn(() => {
+      const changed = handle.flock.txn(() => {
         const next = update(handle.flock.get([...key]));
         if (next === undefined) return false;
         handle.flock.set([...key], next as Parameters<typeof handle.flock.set>[1]);
         return true;
       });
+      if (changed) deps.onFlockWrite?.(flockDocId, key);
+      return changed;
     },
 
     async flockRowPutIfAbsent(
@@ -113,7 +119,7 @@ export function createDirectWorkspaceWriter(deps: DirectWorkspaceWriterDeps): Wo
       value: unknown
     ): Promise<{ inserted: boolean; value: unknown }> {
       const handle = await deps.repo.openFlockDoc(flockDocId);
-      return handle.flock.txn(() => {
+      const result = handle.flock.txn(() => {
         const existing = handle.flock.get([...key]);
         if (existing !== undefined) {
           return { inserted: false, value: existing };
@@ -122,12 +128,15 @@ export function createDirectWorkspaceWriter(deps: DirectWorkspaceWriterDeps): Wo
         handle.flock.put([...key], value as Parameters<typeof handle.flock.put>[1]);
         return { inserted: true, value };
       });
+      if (result.inserted) deps.onFlockWrite?.(flockDocId, key);
+      return result;
     },
 
     async flockRowDelete(flockDocId, key) {
       const handle = await deps.repo.openFlockDoc(flockDocId);
       handle.flock.delete([...key]);
       handle.flock.commit();
+      deps.onFlockWrite?.(flockDocId, key);
     },
 
     async appendSessionTurn(sessionId, entry, dispatch) {

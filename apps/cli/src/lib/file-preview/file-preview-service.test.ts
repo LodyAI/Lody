@@ -555,3 +555,45 @@ describe('FilePreviewService', () => {
     expect(response).toMatchObject({ status: 'error', code: 'session_not_found' });
   });
 });
+
+it('records resolution identity and failures without file contents', async () => {
+  const root = await makeDir('preview-diagnostics-');
+  await writeFile(path.join(root, 'present.md'), 'private fixture contents');
+  const events: Readonly<Record<string, unknown>>[] = [];
+  const resolveWorkspace: FilePreviewWorkspaceResolver = async () => ({
+    ok: true,
+    ownerSessionId: SESSION_ID,
+    workspaceRoot: root,
+  });
+  const service = new FilePreviewService({
+    resolveWorkspace,
+    resolveLocalWorkspace: resolveWorkspace,
+    extraRoots: [],
+    onDiagnostic: (event) => events.push(event),
+  });
+  expect(
+    await service.resolveLocalFile({ v: 3, sessionId: SESSION_ID, path: 'present.md' })
+  ).toMatchObject({ status: 'local-file' });
+  expect(
+    await service.resolveLocalFile({ v: 3, sessionId: SESSION_ID, path: 'missing.md' })
+  ).toMatchObject({ status: 'error', code: 'file_not_found' });
+  expect(events[0]).toMatchObject({
+    stage: 'resolve-path',
+    transport: 'local',
+    status: 'ok',
+    sessionId: SESSION_ID,
+    ownerSessionId: SESSION_ID,
+    workspaceRoot: root,
+    requestedPath: 'present.md',
+    absolutePath: await realpath(path.join(root, 'present.md')),
+  });
+  expect(events[1]).toMatchObject({
+    status: 'error',
+    code: 'file_not_found',
+    requestedPath: 'missing.md',
+    failures: expect.arrayContaining([
+      { operation: 'realpath', path: path.join(root, 'missing.md'), code: 'ENOENT' },
+    ]),
+  });
+  expect(JSON.stringify(events)).not.toContain('private fixture contents');
+});

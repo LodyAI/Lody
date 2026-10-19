@@ -121,7 +121,10 @@ export function useSessionDoc(
     () => ({
       session: { id: sessionId },
       mq: [],
+      humanInputReceipts: {},
+      cancelRequest: undefined,
       forkOperation: undefined,
+      notification: undefined,
       preview: undefined,
       externalHistoryCursor: undefined,
       roostHistoryCursor: undefined,

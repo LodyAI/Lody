@@ -28,6 +28,33 @@ stale explanation or unimplemented intent; do not change a Spec to fit the code.
 Read the relevant guide sections, ledger rows and owning Notes for the task rather
 than repeatedly loading the entire migration roadmap.
 
+## Effect lint
+
+`pnpm lint:effect` runs five official correctness rules and the community
+`effect/prefer-effect-fn` rule with visible warnings. It is included in
+`check:quick` and `check`; ordinary `lint` and `lint:fast` retain their existing
+rule configuration. Use `pnpm lint:effect -- apps/cli/src/lib` to narrow a run.
+The dedicated config disables nested configs so vendor or embedded workspace
+configs cannot replace this rule set. Generated code and ACP extension workspaces
+are excluded.
+
+The installing workspace includes the unpublished tooling package at
+`scripts/effect-lint`, which pins its own compatible Oxlint and Effect integration.
+The root `prepare` hook patches only those tool binaries; each invocation repeats
+that idempotent patch to support installs with `--ignore-scripts`. The runner
+explicitly selects the matching type-aware engine. Ordinary lint keeps its
+original Oxlint and oxlint-tsgolint versions and does not acquire newly introduced
+React Compiler rules. TypeScript and Effect runtime installations are unchanged.
+For an embedded checkout, run the installing parent workspace's `lint:effect`
+command; do not install a second virtual store in the public checkout.
+
+Warnings are initially advisory. After reviewing and fixing the baseline,
+correctness rules can become errors; `--deny-warnings` is available for a strict
+manual run. The checks do not prove lifecycle ownership, cancellation, or that
+`runSync` only receives synchronous programs. The
+[decision record](../notes/implemented/process/2026-10-13-effect-lint-integration.md)
+records the version selection and validation boundary.
+
 ## When to use Effect
 
 - Injectable capabilities and shared resources: `Context.Service` contracts and
@@ -79,6 +106,14 @@ its consumers and deletion condition. Extend the owning behavioral suite for
 failure, interruption and release paths with explicit signals and injected clocks.
 Pure reducers, CRDT codecs and synchronous calculations remain ordinary functions.
 
+Workspace durable data now uses the released native Repo and Streams SDK.
+`packages/shared/src/workspace-data/repo-legacy.ts` is its one deprecated execution
+door for CLI managers, renderer stores, shortcut grants and snapshot migration
+readers; the same Repo owns every borrowed replica. Remove it as those consumers
+accept native Services and caller Scopes. The local v7 client and eager worker are
+native; upper Session/Turn workflows, grant acquisition, host server and RPC remain
+separate units. See [ownership and acceptance](../notes/proposed/architecture/2026-10-16-native-workspace-repo.md).
+
 When migration would pull in unfinished dependencies or substantially expand the
 task, complete the requested feature/fix and schedule that migration separately.
 Record the chosen boundary and remaining work in the owning Note when updating it;
@@ -92,18 +127,30 @@ For a lifecycle change, answer these questions briefly in the existing owning No
 before choosing primitives. Omit inapplicable questions and link existing contracts
 instead of creating a new checklist document for every edit.
 
-| Question | Observable contract |
-| --- | --- |
-| Trigger | Which input/state starts work, and what ordering or reentry is allowed? |
-| Owner | Who owns each resource/producer, and who may release it? |
-| Cancellation | Does cancellation end one wait, the producer, or raw external work? How is actual termination confirmed? |
-| Handoff | What observable release condition allows a successor or replacement to start? |
-| Failure recovery | Who retains unresolved resources and the complete failure, and who can retry cleanup? |
+| Question         | Observable contract                                                                                      |
+| ---------------- | -------------------------------------------------------------------------------------------------------- |
+| Trigger          | Which input/state starts work, and what ordering or reentry is allowed?                                  |
+| Owner            | Who owns each resource/producer, and who may release it?                                                 |
+| Cancellation     | Does cancellation end one wait, the producer, or raw external work? How is actual termination confirmed? |
+| Handoff          | What observable release condition allows a successor or replacement to start?                            |
+| Failure recovery | Who retains unresolved resources and the complete failure, and who can retry cleanup?                    |
+| Containment      | Which independent work remains available, who bounds recovery, and how does terminal shutdown finish?    |
 
 Map applicable answers to behavioral acceptance cases. A cancelled reader must not
-stop a shared producer needed by other readers; a cleanup timeout must not permit
-replacement while the old resource is still owned. Review/debug can use the same
-questions to assess existing evidence without editing the Note.
+stop a shared producer needed by other readers. A cleanup timeout does not prove
+release; exclude a successor only where unresolved ownership makes proceeding
+unsafe. Verify the lower owner's partial-release and safe-reuse contract instead
+of treating any cleanup failure as an acquisition fence. For one key, share
+concurrent cleanup retries; continue independent teardown. Bound recovery and its
+dependencies under a named owner; cross-dispose recovery coordinates same-Repo
+adoption or confirmed close before replacement. At quit, sign-out or workspace deletion, use a bounded final
+flush, report unconfirmed persistence and release resources. A waiter timeout alone
+does not stop a writer or permit a second Repo. If lower-owner safety cannot be
+verified, preserve base behavior by default and record the missing evidence as
+conditional in the owning Note; do not invent a fence or destructive fallback.
+Observe background rejections and keep unconfirmed gate results out of success
+caches and once sets. See [failure containment](failure-containment.md).
+Review/debug can use the same questions to assess existing evidence without editing the Note.
 
 ## Choosing a native unit and its structure
 
@@ -206,8 +253,9 @@ leases. There is no Promise cache, cache timer or independent shell-probe runner
 
 CLI index and Electron startApplication each compose the application's first
 long-lived native service through makeApplicationRuntime. Concurrent disposal joins
-one receipt; failed disposal retains the original ownership Cause across failed
-recovery attempts. Replacement is allowed only after release is confirmed.
+one receipt; failed disposal retains the original ownership Cause and subsequent
+recovery Causes in its receipts. Recovery retries the original transferred owners.
+Replacement is allowed only after release is confirmed.
 CLI graceful/one-shot/fatal exits await that owner; failed graceful cleanup exits
 with a failure code. Electron stops it inside the existing quit barrier after
 renderer unload approval, and a later quit retries unresolved resources.
@@ -280,11 +328,19 @@ fixes pid and resolves the default lock directory on each operation; tests may
 inject a fixed directory.
 `fileLockLayer` supplies Node implementations at composition. One service instance
 owns local Ref/Deferred admission and unresolved releases; each operation owns its
-candidate and acquired file. Release waits have their own 5-second Clock bound;
-`LockReleaseFailed.cleanup` retains the original OS deletion for awaited retry.
-A still-pending deletion blocks replacement. Body and release run outside acquisition
-retry; `squashFileLockFailure` preserves their full Cause, file cleanup owners and
-process recovery leases at compatibility boundaries. See the [decision and preserved lock policy](../notes/implemented/architecture/2026-10-10-effect-file-lock-lifecycle.md).
+candidate and acquired file. The releasing holder waits once, within a 5-second Clock
+bound, for its lock file and scratch directory. The body's result stands: a slow or
+failed deletion stays registered with the service instead of failing the holder.
+The next local holder joins it within its own acquisition deadline, and a settled
+failure is retried before that body runs. That wait is charged once per deletion attempt:
+once one successor has waited its whole deadline, later successors fail fast until a new
+attempt starts. Disposal reports anything still
+unresolved. `LockReleaseFailed.cleanup` retains the original OS deletion for awaited
+retry. Only a replaced lock generation (`LockOwnershipLost`) fails the holder, because
+then the body did not run exclusively; that lease is not retried. Body and release run
+outside acquisition retry; `squashFileLockFailure` preserves file cleanup owners and
+process recovery leases at compatibility boundaries. See the [decision and preserved lock policy](../notes/implemented/architecture/2026-10-10-effect-file-lock-lifecycle.md)
+and the [holder release decision](../notes/implemented/architecture/2026-10-16-file-lock-holder-release.md).
 
 Catalog mutations compose the native API and require FileLocks. Existing Promise
 application entrypoints execute them through `fileLocksLegacy.runPromise`; worktree,
@@ -320,6 +376,76 @@ Delete it when the mutation owner receives native services. Synchronous manager
 path/existence methods, setup, GC and the daemon runtime still need migration. See
 [the decision](../notes/implemented/architecture/2026-10-10-effect-worktree-observations.md).
 
+## Streams token refresh
+
+`LoroStreamsTokens` / `LoroStreamsTokensLive` own native credential admission,
+shared refresh leases and encrypted-cache publication. Each provider has its own
+ports and Scope. Waiter deadlines retire only that waiter; last-lease release and
+replacement/close abort and join actual I/O. Failed joins retain raw/provider
+owners and the full Cause, and require explicit recovery before handoff.
+
+The official CLI cloud root supplies the native platform token port. Remaining
+renderer and Machine RPC callers use the sole
+`createLoroStreamsTokenProviderLegacy` facade and visible
+`createTokenProviderLegacy` port/type. Renderer teardown and CLI cloud-port
+shutdown await provider close. CLI durable transport and machine monitor borrow the
+workspace-native provider through `{provider, executor}` in that same facade,
+creating no extra runtime/cache. This is token ownership, not completion of upper
+Loro/daemon lifecycles. [API and decision](../../packages/shared/src/loro-streams-token/README.md).
+
+Native getToken/auth preserve terminal typed failure; only the explicit Legacy
+old-protocol callback projects a nonempty all-auth Cause to undefined. Mixed Causes
+retain non-auth reasons. Native `health` and `describeLoroStreamsTokenCause` expose
+safe state/counts and failure kinds without tokens, credentials or raw error payloads;
+keep the original Cause separately for recovery.
+
+## Workspace presence
+
+The CLI root provides `WorkspacePresenceOwners` alongside its shell cache. Product
+`doc.ts` and bridge readers use `createCliPresenceRuntimeLegacy`; its execution
+borrows that application runtime. `workspace-presence.ts` owns heartbeat and remote
+generation Scopes, while `presence-replica.ts` keeps CRDT state synchronous.
+`platform/presence.ts` supplies the published native SDK without a Promise transport
+coordinator. Delete the sole Legacy door when doc/Session/reader consumers directly
+compose the service. Full Causes and retained cleanup owners survive root disposal;
+explicit retry proves actual SDK and token cleanup before handoff. Session-active
+leases remain P6; the local relay's upper owners remain pending. See the
+[decision](../notes/implemented/architecture/2026-10-12-effect-workspace-presence.md).
+
+## Session active presence leases
+
+`session-active-presence.ts` provides the native local-publication lease and heartbeat
+service. Visible Turns compose its `hold` into their existing presence child Scope;
+per-lease Deferred stalls replace the old callback waiter map. Clock/Schedule drive
+heartbeats, and raw ACP cleanup still precedes lease release and Turn handoff. A failed
+synchronous clear retains that lease/Cause until explicit `retryRelease`; recovery of
+an upper Turn finalizer remains the execution owner's responsibility.
+
+`SessionActivePresenceControllerLegacy` is the sole synchronous MessageHandler entry.
+It retains existing analytics flush Promises, preserves optional telemetry gates and
+waits for actual lease/monitoring release before document teardown. Delete this door
+when MessageHandler construction and analytics ownership become native. It introduces
+no transport queue, timer or nested ManagedRuntime. The presence boundary guard checks
+this kernel alongside the workspace kernel and replica.
+
+## Local presence and the shared connection writer
+
+`LocalLoroWriterLive` owns the application's FIFO pacer and shared physical socket
+writers. It requires `LocalLoroWriterTurn`; Node composition supplies a real host turn
+and the socket write/drain adapter. Native task/frame composition does not execute
+runtimes or wrap the former Promise pump. Presence encodes local-origin state at writer
+execution; CRDT/frontier/framing computation remains synchronous. Only the genuine
+Flock SDK export is a Promise adapter, retaining actual settlement without an abort
+contract. Close observers remain bounded inside finalizers; failed release retains
+complete Cause, the original producer/subscription and retry ownership.
+
+The one deprecated `local-loro-writer/legacy` executor serves the explicitly named
+`LocalLoroDataPlaneServerLegacy` and CLI doc/socket owners. Delete it when those
+application owners receive the native service. Room resolution/join/leave/import,
+LoroRepo and Fleet's wider cleanup remain under migration; this unit
+does not complete P7 or the Loro stack. Decision and acceptance evidence:
+[local presence writer](../notes/implemented/architecture/2026-10-12-effect-local-presence-writer.md).
+
 ## Temporary Promise facades
 
 A migrated layer is consumed by callers that are still Promise-based. Such a
@@ -342,12 +468,10 @@ these and reaches `child_process`, `cross-spawn`, `node-pty`, `process.kill` or
 a child's `kill` directly.
 
 Session credential acquisition also has a temporary `acquireSessionCredentialsLegacy`
-facade (`session/session-credentials.ts`): the Effect broker lease's scope follows
-preparation into the live Session and closes on failure/termination. The separate
-`makePreparationControlLegacy` facade owns only the preparation TTL and its awaited
-close receipt. Claim stops that control without closing runtime resources. These
-are bounded resource migrations; Session/ACP/worktree Promise orchestration has
-not become Effect-native merely by using these facades.
+facade (`session/session-credentials.ts`): the Effect broker lease's scope belongs
+to the live Session and closes on failure/termination. This is a bounded resource
+migration; Session/ACP/worktree Promise orchestration has not become Effect-native
+merely by using this facade.
 
 Execution facades carry a `Legacy` suffix and `@deprecated`; keep that suffix
 visible in imports and calls. New Effect workflows compose core APIs and leave
@@ -385,15 +509,20 @@ The guard rejects retired facade imports/exports and aliases that hide Legacy.
 
 For lifecycle changes, select the applicable behaviors from this acceptance matrix:
 
-| Mechanism         | Observable acceptance                                                                           |
-| ----------------- | ----------------------------------------------------------------------------------------------- |
-| Queue/admission   | Cancelled waiters cannot acquire later; preserve ordering and reentry policy                    |
-| Resource/body     | Failure or interruption releases acquired resources before a successor proceeds                 |
-| Shared work       | One reader's cancellation preserves other leases; the last release awaits producer cleanup      |
-| Close/replacement | Concurrent close joins one receipt; a new generation waits for confirmed old release            |
-| Deadline/retry    | Clock-driven expiry is observable; body/release failures do not become acquisition retries      |
-| Release failure   | Retain the unresolved owner and full Cause, including simultaneous body/release failure         |
-| Composition       | Real consumers use the kernel; applicable filesystem/process/protocol boundaries remain covered |
+| Mechanism         | Observable acceptance                                                                                             |
+| ----------------- | ----------------------------------------------------------------------------------------------------------------- |
+| Queue/admission   | Cancelled waiters cannot acquire later; preserve ordering and reentry policy                                      |
+| Resource/body     | Failure or interruption preserves custody within the selected recovery/shutdown lifetime                          |
+| Shared work       | One reader's cancellation preserves other leases; the last release awaits producer cleanup                        |
+| Close/replacement | Concurrent close joins one receipt; replacement obeys the verified release/reuse contract                         |
+| Deadline/retry    | Clock-driven expiry is observable; body/release failures do not become acquisition retries                        |
+| Release failure   | The recovery owner retains the full Cause, including simultaneous body/release failure, for its bounded lifetime  |
+| Containment       | Independent cleanup continues; safe reuse survives persistent failure; same-key retries share one flight          |
+| Recovery handoff  | A named owner bounds retention/retry; same-key acquire adopts the retained Repo or joins close before replacement |
+| Terminal boundary | Quit/sign-out/deletion finish bounded flush, report unconfirmed persistence and release resources                 |
+| Background error  | Fire-and-forget entries observe rejection; recovery has an owner and safe diagnostics stay bounded                |
+| Unconfirmed gate  | Degradation is observable and retryable; no authoritative success cache or once-set update                        |
+| Composition       | Real consumers use the kernel; applicable filesystem/process/protocol boundaries remain covered                   |
 
 Confirm readiness with an explicit signal before advancing time or cancelling. Await
 the affected fiber and cleanup, then inspect resulting resource/data state. Pure

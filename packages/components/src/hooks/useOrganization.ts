@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { recordBootRequestResult } from '@/lib/boot-request-failures';
 import {
   clearPreferredWorkspaceSlugIfMatch,
   generateWorkspaceSlug,
@@ -62,6 +63,9 @@ function getResponseErrorMessage(response: unknown): string | null {
   }
   return 'Failed to switch organization';
 }
+
+/** Spacing of the single retries a spent organization-list retry burst still gets. */
+export const ORGANIZATIONS_SLOW_RETRY_MS = 30_000;
 
 async function setActiveOrganizationOnce(
   authClient: LodyAuthClient,
@@ -190,6 +194,7 @@ function useLocalOrganizationState(): UseOrganizationResult {
       role: workspace?.role,
       hasAdminPermission: true,
       loading,
+      organizationsError: null,
       error: null,
       activeOrganization,
       activateOrganization: () => Promise.resolve(),
@@ -244,6 +249,12 @@ function useCloudOrganizationState(options?: UseOrganizationOptions) {
   const activeOrganizationError =
     activeOrganizationQueryError ??
     (activeOrganizationMatchesTarget ? activeOrganizationDataError : null);
+  useEffect(() => {
+    recordBootRequestResult('organizations', organizationsError);
+  }, [organizationsError]);
+  useEffect(() => {
+    recordBootRequestResult('active_organization', activeOrganizationQueryError);
+  }, [activeOrganizationQueryError]);
 
   const setWorkspaceContext = useSetAtom(setWorkspaceContextAtom);
   const setWorkspaceContextAtRevision = useSetAtom(setWorkspaceContextAtRevisionAtom);
@@ -354,6 +365,37 @@ function useCloudOrganizationState(options?: UseOrganizationOptions) {
 
   const organizationsFailureFinal = organizationsErrorFinal || organizationsIdleFinal;
 
+  // A failed list must not stay failed for the life of the page: with no cached
+  // workspace id, the route has nothing else to open with. After the retry burst
+  // is spent, allow one more attempt when the network returns, when the app
+  // comes back to the foreground (a phone resuming after a long absence often
+  // fails its first requests), and every `ORGANIZATIONS_SLOW_RETRY_MS` while
+  // visible. A hidden page does not poll: coming back to it retries at once.
+  useEffect(() => {
+    if (!organizationsFailureFinal || typeof window === 'undefined') return undefined;
+    const retryOnce = () => setOrganizationsRetryCount(maxOrganizationsRetries - 1);
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const armTimer = () => {
+      clearTimeout(timer);
+      timer =
+        document.visibilityState === 'hidden'
+          ? undefined
+          : setTimeout(retryOnce, ORGANIZATIONS_SLOW_RETRY_MS);
+    };
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'visible') retryOnce();
+      else armTimer();
+    };
+    armTimer();
+    window.addEventListener('online', retryOnce);
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    return () => {
+      clearTimeout(timer);
+      window.removeEventListener('online', retryOnce);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+    };
+  }, [maxOrganizationsRetries, organizationsFailureFinal]);
+
   const organizations = useMemo(() => {
     if (!user) return undefined;
     if (organizationsPending) return undefined;
@@ -412,10 +454,20 @@ function useCloudOrganizationState(options?: UseOrganizationOptions) {
     organizations !== undefined &&
     organizations.length > 0 &&
     (activeOrganizationIsPending || !resolvedActiveOrganization);
+  // While the list is still loading, an active-organization failure is not
+  // final: right after sign-in Better Auth can answer that query before the new
+  // session settles, and it only refetches on `setActive`, which the activation
+  // effect below issues once the list arrives. Surfacing it earlier turns the
+  // first-login wait into a failed-list screen.
   const shouldSurfaceActiveOrganizationError =
     Boolean(activeOrganizationError) &&
     !activeOrganizationIsPending &&
-    (organizations === undefined || (organizations.length > 0 && !resolvedActiveOrganization));
+    organizations !== undefined &&
+    organizations.length > 0 &&
+    !resolvedActiveOrganization;
+  const organizationsListError = organizationsFailureFinal
+    ? (organizationsError ?? new Error('Failed to load organizations'))
+    : null;
   const optimisticWorkspaceId = useMemo(() => {
     if (!user || !targetSlug) {
       return null;
@@ -453,8 +505,10 @@ function useCloudOrganizationState(options?: UseOrganizationOptions) {
       try {
         await switchOrganizationOrThrow(organizationId);
         setMutationError(null);
+        recordBootRequestResult('switch_organization', null);
       } catch (err) {
         setMutationError('Failed to switch organization');
+        recordBootRequestResult('switch_organization', err);
         throw err;
       }
     },
@@ -877,11 +931,11 @@ function useCloudOrganizationState(options?: UseOrganizationOptions) {
         organizations !== undefined &&
         organizations.length > 0 &&
         activeOrganizationIsPending),
+    /** Final failure of the organization list alone; routes that only need the list gate on it. */
+    organizationsError: organizationsListError,
     error:
       (!user ? sessionError : null) ||
-      (organizationsFailureFinal
-        ? (organizationsError ?? new Error('Failed to load organizations'))
-        : null) ||
+      organizationsListError ||
       (shouldSurfaceActiveOrganizationError ? activeOrganizationError : null) ||
       mutationErrorObject,
     activeOrganization: resolvedActiveOrganization,

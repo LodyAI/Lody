@@ -44,7 +44,7 @@ import {
 import { orderAcpConfigOptionSelectors } from '@/lib/acp-selector-order';
 import { shouldOfferOptionSearch } from '@/lib/fuzzy-option-filter';
 import { openExternalUrl } from '@/lib/native-browser';
-import { resolvePermissionModeFace } from '@/lib/permission-mode-face';
+import { permissionModeControlLabel, resolvePermissionModeFace } from '@/lib/permission-mode-face';
 import {
   doesAgentRolePinPermissionMode,
   type ComposerAgentRoleItem,
@@ -90,7 +90,8 @@ const styles = stylex.create({
   agentValue: { maxWidth: '9rem' },
   machineName: { maxWidth: '8rem' },
   roleName: { maxWidth: '11rem' },
-  agentName: { maxWidth: '9rem' },
+  /** The agent keeps its (capped) width: the model is what gives way first. */
+  agentName: { flexShrink: 0, maxWidth: '9rem' },
   modelList: {
     display: 'flex',
     flexDirection: 'column',
@@ -105,8 +106,12 @@ const styles = stylex.create({
     paddingInline: 0,
     justifyContent: 'center',
   },
-  /** The model keeps its tail when it truncates: `provider/model` loses the prefix. */
-  modelName: { maxWidth: '10rem', direction: 'rtl' },
+  /**
+   * The model shows in full while the face has room, and only truncates once
+   * the slot runs out. It keeps its tail when it does: `provider/model` loses
+   * the prefix.
+   */
+  modelName: { direction: 'rtl' },
   /** The "create a Role" mark at the end of the empty Role row. */
   createMark: {
     display: 'flex',
@@ -1114,7 +1119,7 @@ export function DesktopPermissionModeButton({
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   if (disabled && open) setOpen(false);
-  const { options, value, label, source } = useMemo(
+  const face = useMemo(
     () =>
       resolvePermissionModeFace({
         modeOptions,
@@ -1124,7 +1129,8 @@ export function DesktopPermissionModeButton({
       }),
     [configOptionSelectors, configOptionValues, modeOptions, selectedModeId]
   );
-  const permissionLabel = t('chat.runConfig.permissionLabel', 'Permission');
+  const { options, value, label, source } = face;
+  const controlLabel = permissionModeControlLabel(face, t);
 
   if (options.length === 0) return null;
 
@@ -1143,8 +1149,8 @@ export function DesktopPermissionModeButton({
           row. The mode's name is the tooltip and the accessible name. */}
       <Menu.Trigger
         disabled={disabled}
-        aria-label={label ? `${permissionLabel}: ${label}` : permissionLabel}
-        title={label ? `${permissionLabel}: ${label}` : permissionLabel}
+        aria-label={label ? `${controlLabel}: ${label}` : controlLabel}
+        title={label ? `${controlLabel}: ${label}` : controlLabel}
         className={iconOnlyTriggerClassName}
         render={<button type="button" />}
       >

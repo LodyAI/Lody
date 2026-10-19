@@ -234,3 +234,45 @@ test('undo to saved text clears dirty state, redo restores it, and Save advances
   await refresh.click();
   await expect(editorText).toHaveText(draft);
 });
+
+test('mobile HTML opens as a readonly preview on WebKit and toggles source', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  // Exercise the unsupported-engine path in Chromium runs too.
+  await page.addInitScript(() => {
+    delete (HTMLIFrameElement.prototype as HTMLIFrameElement & { credentialless?: boolean })
+      .credentialless;
+  });
+  await page.goto('/iframe.html?id=sessions-codecollabhtmlpreview--mobile-preview&viewMode=story');
+  const frame = page.frameLocator('iframe[title="Preview"]');
+  await expect(frame.getByRole('heading', { name: 'Self-contained HTML preview' })).toBeVisible({
+    timeout: 30_000,
+  });
+  await expect(page.locator('iframe[title="Preview"]')).toHaveAttribute('sandbox', '');
+  await frame.getByRole('button', { name: 'Clicked 0 times' }).click();
+  await expect(frame.getByRole('button', { name: 'Clicked 0 times' })).toBeVisible();
+  await frame.getByText('Try blocked navigation').click();
+  await expect(frame.getByRole('heading', { name: 'Self-contained HTML preview' })).toBeVisible();
+  await page.getByRole('button', { name: 'Hide preview', exact: true }).click();
+  await expect(page.locator('iframe[title="Preview"]')).toHaveCount(0);
+  await expect(page.locator('.monaco-editor')).toBeVisible();
+  await page.getByRole('button', { name: 'Preview', exact: true }).click();
+  await expect(frame.getByRole('heading', { name: 'Self-contained HTML preview' })).toBeVisible();
+});
+
+test('mobile project HTML opens from its file row and toggles back to the original source', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto('/iframe.html?id=files-mobileprojectfilebrowser--default&viewMode=story');
+  await page.getByRole('button', { name: 'preview.html', exact: true }).click();
+  const frame = page.frameLocator('iframe[title="Preview"]');
+  await expect(frame.getByRole('heading', { name: 'Mobile HTML report' })).toBeVisible();
+  await expect(frame.locator('body')).not.toHaveAttribute('data-executed', 'yes');
+  await frame.getByText('External link').click();
+  await expect(frame.getByRole('heading', { name: 'Mobile HTML report' })).toBeVisible();
+  await page.getByRole('button', { name: 'Hide preview', exact: true }).click();
+  await expect(page.locator('iframe[title="Preview"]')).toHaveCount(0);
+  await expect(page.locator('.monaco-editor')).toBeVisible();
+  await page.getByRole('button', { name: 'Preview', exact: true }).click();
+  await expect(frame.getByRole('heading', { name: 'Mobile HTML report' })).toBeVisible();
+});

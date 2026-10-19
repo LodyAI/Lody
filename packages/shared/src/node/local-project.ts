@@ -74,21 +74,19 @@ const normalizeCanonicalRootPath = (real: string): string => {
 const hashCanonicalProjectRoot = (root: string): LocalProjectId =>
   `local-project-${createHash('sha256').update(root).digest('hex').slice(0, 24)}` as LocalProjectId;
 
-const normalizeLocalProjectRootPathImpl = (inputPath: string) =>
-  Effect.gen(function* () {
-    const paths = yield* LocalProjectPaths;
-    return normalizeCanonicalRootPath(yield* paths.realPath(path.resolve(inputPath)));
-  });
-const ensureLocalProjectRootPathImpl = (inputPath: string) =>
-  Effect.gen(function* () {
-    const normalized = yield* normalizeLocalProjectRootPathImpl(inputPath.trim());
-    const paths = yield* LocalProjectPaths;
-    if (!(yield* paths.isDirectory(normalized)))
-      return yield* Effect.fail(
-        new LocalProjectGitError({ message: 'Selected path is not a directory' })
-      );
-    return normalized;
-  });
+const normalizeLocalProjectRootPathImpl = Effect.fnUntraced(function* (inputPath: string) {
+  const paths = yield* LocalProjectPaths;
+  return normalizeCanonicalRootPath(yield* paths.realPath(path.resolve(inputPath)));
+});
+const ensureLocalProjectRootPathImpl = Effect.fnUntraced(function* (inputPath: string) {
+  const normalized = yield* normalizeLocalProjectRootPathImpl(inputPath.trim());
+  const paths = yield* LocalProjectPaths;
+  if (!(yield* paths.isDirectory(normalized)))
+    return yield* Effect.fail(
+      new LocalProjectGitError({ message: 'Selected path is not a directory' })
+    );
+  return normalized;
+});
 const createLocalProjectIdImpl = (rootPath: string) =>
   Effect.map(normalizeLocalProjectRootPathImpl(rootPath), hashCanonicalProjectRoot);
 

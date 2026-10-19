@@ -26,3 +26,7 @@ Provider 行展示身份和模型／使用情况元信息、只读剩余额度�
 - [浏览器行为](../packages/components/tests/e2e/desktop-settings-layout.spec.ts)
 - [Provider 测试](../packages/components/tests/provider-row-reauthentication.test.tsx)
 - [决策](../.agents/notes/implemented/bug-fix/2026-10-10-codex-reset-provider-actions.zh.md)
+
+## 能力门控刷新
+
+订阅额度要求 Provider 声明 Core `rateLimits` 能力；主动刷新额外要求 `query: true`，并保留 builtin 账户模式适用性检查。打开 composer、Agent 设置或 usage popover 时，通过既有 Machine RPC 路由重新获取，期间继续展示缓存值。不支持的 Provider 不展示订阅额度；上下文占用和 Codex 重置预测保持各自独立的适用条件。失败或 v1 语义含糊的空结果保留原缓存。

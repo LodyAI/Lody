@@ -241,6 +241,7 @@ export class MachineRuntime {
 
     this.messageProcessor.stop();
     this.handler?.cancelPendingPermissionRequests();
+    this.handler?.cancelPendingHistoryWatches();
     await this.messageProcessor.drainWithTimeout(5000);
 
     if (this.handler) {
@@ -354,7 +355,7 @@ export class MachineRuntime {
       hasPendingUpdates: (sessionId) => handler.hasPendingUpdates(sessionId),
       hasPendingUserWork: async (sessionId) => await handler.hasPendingUserWork(sessionId),
       isArchiveInFlight: (sessionId) => handler.isArchiveInFlight(sessionId),
-      cleanSession: (sessionId) => handler.cleanSessionForGC(sessionId),
+      cleanSession: (sessionId, options) => handler.cleanSessionForGC(sessionId, options),
       getSessionIds: () => handler.getTrackedSessionIds(),
       memoryPressure: this.options.memoryPressure,
       logger: this.options.logger,

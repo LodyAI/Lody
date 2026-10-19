@@ -18,6 +18,14 @@ File attachments use `file` blocks; the product contract is in
   in-flight spinner, and the primary affordance keeps reading as preview.
 - `session-file-preview-dialog.tsx` — `SessionFilePreviewPanel` (status-driven;
   markdown reuses `MarkdownRenderer`, raw toggle, copy=raw, truncation) and dialog wrapper.
+  Complete HTML fallback attachments open in the shared `ReadOnlyHtmlPreview`, with
+  an eye toggle beside Copy in the existing header. Source mode and Copy retain
+  the original text; loading, errors and truncated HTML never mount the iframe.
+  On mobile, all these file types use a bottom Drawer/Sheet taking approximately
+  94dvh (respecting top and bottom safe areas), with a fixed header and scrolling
+  body; HTML fills the available body. Desktop retains the centered Dialog and
+  55vh content cap. Preview uses the script-free sandbox, with no
+  live-file provenance or Browser connection required.
   Story: `SessionFilePreviewPanel.stories.tsx`.
 - `view.tsx` `SessionFileGroup` owns atoms/download/preview-fetch and resolves the pending
   machine name. Both render switches and `UserChatBubble` route `file` blocks through it.

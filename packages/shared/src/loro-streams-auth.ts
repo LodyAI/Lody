@@ -1,5 +1,6 @@
 import { z } from 'zod';
-import { getServerNow } from './time-sync';
+import { Clock, Context, Data, Effect, Layer } from 'effect';
+import { getServerTimeOffset } from './time-sync';
 
 export const LoroStreamsTokenRequestSchema = z.object({
   rejectedToken: z.string().min(1).max(16384).optional(),
@@ -25,9 +26,9 @@ export const LoroStreamsTokenResponseSchema = z.object({
 export type LoroStreamsTokenRequest = z.infer<typeof LoroStreamsTokenRequestSchema>;
 export type LoroStreamsTokenResponse = z.infer<typeof LoroStreamsTokenResponseSchema>;
 
-type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
+export type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
 
-type CachedLoroStreamsToken = {
+export type CachedLoroStreamsToken = {
   token: string;
   expiresAtMs: number;
   gatewayBaseUrl?: string;
@@ -57,12 +58,7 @@ const EncryptedLoroStreamsTokenStorageSchema = z.object({
   ciphertext: z.string().min(1),
 });
 
-const LegacyPlaintextLoroStreamsTokenStorageSchema = z.object({
-  token: z.string(),
-  expiresAtMs: z.number(),
-});
-
-type MinimalStorage = {
+export type MinimalStorage = {
   getItem(key: string): string | null;
   setItem(key: string, value: string): void;
   removeItem(key: string): void;
@@ -213,81 +209,6 @@ async function decryptCachedTokenFromStorage(
   }
 }
 
-async function readCachedTokenFromStorage(
-  workspaceId: string,
-  authToken: string
-): Promise<CachedLoroStreamsToken | null> {
-  const storage = getLocalStorage();
-  if (!storage) {
-    return null;
-  }
-
-  const storageKey = getTokenStorageKey(workspaceId);
-  try {
-    const raw = storage.getItem(storageKey);
-    if (!raw) {
-      return null;
-    }
-
-    const parsed = JSON.parse(raw) as unknown;
-    const encrypted = EncryptedLoroStreamsTokenStorageSchema.safeParse(parsed);
-    if (!encrypted.success) {
-      if (LegacyPlaintextLoroStreamsTokenStorageSchema.safeParse(parsed).success) {
-        storage.removeItem(storageKey);
-      }
-      return null;
-    }
-
-    const token = await decryptCachedTokenFromStorage(workspaceId, authToken, encrypted.data);
-    if (!token) {
-      storage.removeItem(storageKey);
-    }
-    return token;
-  } catch {
-    try {
-      storage.removeItem(storageKey);
-    } catch {
-      // ignore
-    }
-    return null;
-  }
-}
-
-async function writeCachedTokenToStorage(
-  workspaceId: string,
-  authToken: string,
-  token: CachedLoroStreamsToken,
-  shouldWrite: () => boolean
-): Promise<void> {
-  const storage = getLocalStorage();
-  if (!storage) {
-    return;
-  }
-
-  try {
-    const encrypted = await encryptCachedTokenForStorage(workspaceId, authToken, token);
-    if (!encrypted) {
-      return;
-    }
-    if (shouldWrite()) storage.setItem(getTokenStorageKey(workspaceId), encrypted);
-  } catch {
-    // ignore cache write failures, including quota and WebCrypto errors
-  }
-}
-
-function clearCachedTokenFromStorage(workspaceId: string): void {
-  const storage = getLocalStorage();
-  if (!storage) {
-    return;
-  }
-
-  try {
-    storage.removeItem(getTokenStorageKey(workspaceId));
-  } catch {
-    // ignore
-  }
-}
-
 export type LoroStreamsTokenProviderEvent =
   | {
       type: 'cache-hit';
@@ -339,6 +260,7 @@ export const buildLoroStreamsTokenEndpoint = (baseUrl: string): string =>
  * `auth_failed` instead of retryable `auth_provider_error`.
  */
 export class LoroStreamsTokenAuthError extends Error {
+  readonly _tag = 'LoroStreamsTokenAuthError';
   constructor(
     message: string,
     readonly status: number,
@@ -349,238 +271,150 @@ export class LoroStreamsTokenAuthError extends Error {
   }
 }
 
-export function createLoroStreamsTokenProvider(options: {
-  endpoint: string;
-  workspaceId: string;
-  authToken:
-    | string
-    | null
-    | undefined
-    | (() => Promise<string | null | undefined> | string | null | undefined);
+export class LoroStreamsTokenError extends Data.TaggedError('LoroStreamsTokenError')<{
+  readonly reason: 'credential' | 'http' | 'response' | 'superseded' | 'closed';
+  readonly message: string;
+  readonly cause?: unknown;
+  readonly status?: number;
+}> {}
+
+export type LoroStreamsTokenFailure = LoroStreamsTokenError | LoroStreamsTokenAuthError;
+
+/** One instance per provider: I/O ownership must not be shared between providers. */
+export class LoroStreamsTokenPorts extends Context.Service<
+  LoroStreamsTokenPorts,
+  {
+    readonly credential: Effect.Effect<string | null | undefined, LoroStreamsTokenFailure>;
+    readonly request: (
+      endpoint: string,
+      credential: string,
+      request: LoroStreamsTokenRequest
+    ) => Effect.Effect<{ status: number; body?: unknown }, LoroStreamsTokenFailure>;
+    readonly now: Effect.Effect<number>;
+    readonly storage: MinimalStorage | undefined;
+    readonly encrypt: (
+      namespace: string,
+      credential: string,
+      token: CachedLoroStreamsToken
+    ) => Effect.Effect<string | null>;
+    readonly decrypt: (
+      namespace: string,
+      credential: string,
+      raw: string
+    ) => Effect.Effect<CachedLoroStreamsToken | null>;
+    readonly hasPending: () => boolean;
+    readonly cleanup: Effect.Effect<void>;
+  }
+>()('@lody/shared/LoroStreamsTokenPorts') {}
+
+export { LoroStreamsTokenReleaseFailed } from './loro-streams-token/io';
+import { makeLoroStreamsRawIo } from './loro-streams-token/io';
+
+/** Fetch and WebCrypto are adapted once; refresh/cache orchestration stays native. */
+export const makeLoroStreamsTokenWebPorts = (options: {
+  credential: Effect.Effect<string | null | undefined, LoroStreamsTokenFailure>;
   fetchImpl?: FetchLike;
-  refreshSkewMs?: number;
-  onEvent?: (event: LoroStreamsTokenProviderEvent) => void;
-}) {
-  const fetchImpl = options.fetchImpl ?? fetch;
-  const refreshSkewMs = options.refreshSkewMs ?? LORO_STREAMS_TOKEN_REFRESH_SKEW_MS;
-  // State belongs to this provider and one resolved credential, never a global cache.
-  const storageNamespace = JSON.stringify([options.endpoint, options.workspaceId]);
-  let credential: string | null | undefined;
-  let initialized = false;
-  let generation = 0;
-  let cached: CachedLoroStreamsToken | null = null;
-  let inFlight: Promise<CachedLoroStreamsToken> | null = null;
-  let terminalAuthFailure: LoroStreamsTokenAuthError | null = null;
-  let rejectedToken: string | undefined;
-  let hydrate = true;
-
-  const emit = (event: LoroStreamsTokenProviderEvent): void => options.onEvent?.(event);
-  const resolveAuthToken = async () =>
-    typeof options.authToken === 'function' ? await options.authToken() : options.authToken;
-
-  const reset = (reason: 'manual' | 'unauthorized') => {
-    cached = null;
-    hydrate = false;
-    clearCachedTokenFromStorage(storageNamespace);
-    if (reason === 'manual') {
-      generation++;
-      inFlight = null;
-      terminalAuthFailure = null;
-      rejectedToken = undefined;
-    }
-    emit({ type: 'invalidate', workspaceId: options.workspaceId, reason });
-  };
-
-  const ensureFreshToken = async (failedToken?: string): Promise<CachedLoroStreamsToken> => {
-    // Even an in-memory hit must belong to the currently resolved login.
-    const authToken = await resolveAuthToken();
-    if (!initialized || credential !== authToken) {
-      if (initialized) reset('manual');
-      else clearCachedTokenFromStorage(options.workspaceId); // Remove the old endpoint-agnostic cache.
-      initialized = true;
-      credential = authToken;
-      hydrate = true;
-    }
-    if (!authToken) {
-      throw new LoroStreamsTokenAuthError('Missing Loro Streams token provider auth token', 401);
-    }
-    if (terminalAuthFailure) throw terminalAuthFailure;
-    // A callback from an older stream cannot invalidate a newer cached token.
-    // Never discard the refresh another callback has already started.
-    if (failedToken && cached?.token === failedToken) {
-      rejectedToken = failedToken;
-      reset('unauthorized');
-    }
-    if (inFlight) {
-      emit({ type: 'in-flight-reuse', workspaceId: options.workspaceId });
-      return inFlight;
-    }
-    if (cached && getServerNow() < cached.expiresAtMs - refreshSkewMs) {
-      emit({
-        type: 'cache-hit',
-        workspaceId: options.workspaceId,
-        expiresInMs: cached.expiresAtMs - getServerNow(),
-        hasGatewayBaseUrl: typeof cached.gatewayBaseUrl === 'string',
-      });
-      return cached;
-    }
-
-    const epoch = generation;
-    const isCurrent = () => generation === epoch && credential === authToken;
-    const assertCurrentGeneration = () => {
-      if (!isCurrent()) throw new Error('Loro Streams token request superseded by an auth change');
-    };
-    const assertCurrent = async () => {
-      if (!isCurrent() || (await resolveAuthToken()) !== authToken || !isCurrent()) {
-        throw new Error('Loro Streams token request superseded by an auth change');
-      }
-    };
-    // One HTTP round trip. `sentRejectedToken` is fixed when the body is built,
-    // so a rejection that arrives later cannot be carried by this request.
-    const requestToken = async (
-      sentRejectedToken: string | undefined
-    ): Promise<CachedLoroStreamsToken> => {
-      emit({ type: 'fetch-start', workspaceId: options.workspaceId, endpoint: options.endpoint });
-      const startedAt = getServerNow();
-      const response = await fetchImpl(options.endpoint, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${authToken}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          workspaceId: LoroStreamsTokenRequestSchema.shape.workspaceId.parse(options.workspaceId),
-          ...(sentRejectedToken ? { rejectedToken: sentRejectedToken } : {}),
-        } satisfies LoroStreamsTokenRequest),
-      });
-      await assertCurrent();
-      assertCurrentGeneration();
-      if (!response.ok) {
-        // Do not include a backend response body: it may contain credentials.
-        if (response.status === 401 || response.status === 403) {
-          const error = new LoroStreamsTokenAuthError(
-            `Loro Streams token authorization failed (status=${response.status})`,
-            response.status
-          );
-          terminalAuthFailure = error;
-          throw error;
-        }
-        throw new Error(`Failed to fetch Loro Streams token (status=${response.status})`);
-      }
-      const parsed = LoroStreamsTokenResponseSchema.safeParse(await response.json());
-      if (!parsed.success) throw new Error('Invalid Loro Streams token response');
-      await assertCurrent();
-      assertCurrentGeneration();
-      return {
-        token: parsed.data.token,
-        expiresAtMs: startedAt + parsed.data.expiresIn * 1000,
-        gatewayBaseUrl: parsed.data.gatewayBaseUrl,
-        shardHostSuffix: parsed.data.shardHostSuffix,
-      };
-    };
-    const promise = (async (): Promise<CachedLoroStreamsToken> => {
-      if (hydrate) {
-        hydrate = false;
-        const stored = await readCachedTokenFromStorage(storageNamespace, authToken);
-        await assertCurrent();
-        assertCurrentGeneration();
-        if (
-          stored &&
-          stored.token !== rejectedToken &&
-          getServerNow() < stored.expiresAtMs - refreshSkewMs
-        ) {
-          cached = stored;
-          return stored;
-        }
-      }
-      emit({
-        type: 'cache-miss',
-        workspaceId: options.workspaceId,
-        reason: cached ? 'expired-or-stale' : 'missing',
-      });
-      try {
-        const sent = rejectedToken;
-        let nextToken = await requestToken(sent);
-        if (rejectedToken !== undefined && rejectedToken !== sent) {
-          // An unauthorized callback joined this refresh after its body was
-          // already sent. If the issuer handed back the very token the gateway
-          // rejected, spend exactly one more request that does carry
-          // `rejectedToken`. Every caller awaiting this promise shares that
-          // retry, so a fan-out of callbacks still costs one extra round trip.
-          if (nextToken.token === rejectedToken) {
-            nextToken = await requestToken(rejectedToken);
-          }
-        }
-        // Encryption uses the credential that authorized this request, never a
-        // later login. A stale encrypted write cannot be decrypted by that login.
-        // The gate also re-reads the rejection marker, because it runs
-        // synchronously just before `setItem` while the encryption above it is
-        // several async WebCrypto calls long: an unauthorized callback landing
-        // inside that window clears storage first, and an unguarded write would
-        // put the rejected JWT back for the next process to hydrate.
-        // `reset('unauthorized')` deliberately keeps the generation, so
-        // `isCurrent()` alone cannot see it.
-        await writeCachedTokenToStorage(
-          storageNamespace,
-          authToken,
-          nextToken,
-          () => isCurrent() && nextToken.token !== rejectedToken
+  storage?: MinimalStorage;
+  cleanupTimeoutMs?: number;
+  /** Registered only by the deprecated facade, never by native consumers. */
+  resolveCredentialLegacy?: (signal: AbortSignal) => PromiseLike<string | null | undefined>;
+}) => {
+  const raw = makeLoroStreamsRawIo(options.cleanupTimeoutMs ?? 5_000);
+  const ioError = (reason: 'http' | 'credential') => (cause: unknown) =>
+    new LoroStreamsTokenError({
+      reason,
+      message: `Loro Streams ${reason} request failed`,
+      cause,
+    });
+  return LoroStreamsTokenPorts.of({
+    credential: options.resolveCredentialLegacy
+      ? raw.fromPromise('credential', options.resolveCredentialLegacy, ioError('credential'))
+      : options.credential,
+    request: (endpoint, credential, request) =>
+      Effect.suspend(() => {
+        let status: number | undefined;
+        let releasingBody = false;
+        return raw.fromPromise(
+          'HTTP',
+          async (signal) => {
+            const response = await (options.fetchImpl ?? fetch)(endpoint, {
+              method: 'POST',
+              headers: {
+                Authorization: `Bearer ${credential}`,
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify(request),
+              signal,
+            });
+            status = response.status;
+            // Error bodies can contain secrets. Body consumption remains owned by
+            // the same abortable raw operation as fetch.
+            if (!response.ok) {
+              releasingBody = true;
+              await response.body?.cancel();
+              releasingBody = false;
+              return { status: response.status };
+            }
+            return { status: response.status, body: await response.json() };
+          },
+          (cause) =>
+            new LoroStreamsTokenError({
+              reason: 'http',
+              message: 'Loro Streams HTTP/body request failed',
+              cause,
+              status,
+            }),
+          () => releasingBody
         );
-        await assertCurrent();
-        assertCurrentGeneration();
-        cached = nextToken;
-        // The marker only survives while the provider is still serving the
-        // rejected JWT, so a refresh that predates the rejection cannot clear it.
-        if (nextToken.token !== rejectedToken) rejectedToken = undefined;
-        emit({
-          type: 'fetch-success',
-          workspaceId: options.workspaceId,
-          expiresInMs: nextToken.expiresAtMs - getServerNow(),
-          hasGatewayBaseUrl: typeof nextToken.gatewayBaseUrl === 'string',
-        });
-        return nextToken;
-      } catch (error) {
-        emit({
-          type: 'fetch-failure',
-          workspaceId: options.workspaceId,
-          status: error instanceof LoroStreamsTokenAuthError ? error.status : undefined,
-          error,
-        });
-        throw error;
-      }
-    })();
-    inFlight = promise;
-    try {
-      return await promise;
-    } finally {
-      if (inFlight === promise) inFlight = null;
-    }
-  };
+      }),
+    now: Clock.currentTimeMillis.pipe(Effect.map((now) => now + getServerTimeOffset())),
+    storage: options.storage ?? getLocalStorage(),
+    encrypt: (namespace, credential, token) =>
+      raw
+        .fromPromise(
+          'WebCrypto encrypt',
+          () => encryptCachedTokenForStorage(namespace, credential, token),
+          () => null
+        )
+        .pipe(Effect.catch(() => Effect.succeed(null))),
+    decrypt: (namespace, credential, value) =>
+      raw
+        .fromPromise(
+          'WebCrypto decrypt',
+          async () => {
+            const encrypted = EncryptedLoroStreamsTokenStorageSchema.safeParse(JSON.parse(value));
+            return encrypted.success
+              ? await decryptCachedTokenFromStorage(namespace, credential, encrypted.data)
+              : null;
+          },
+          () => null
+        )
+        .pipe(Effect.catch(() => Effect.succeed(null))),
+    hasPending: raw.hasPending,
+    cleanup: raw.cleanup,
+  });
+};
 
-  return {
-    getToken: async (): Promise<string> => (await ensureFreshToken()).token,
-    invalidate: (reason: 'manual' | 'unauthorized' = 'manual'): void => {
-      if (reason === 'unauthorized') rejectedToken = cached?.token ?? rejectedToken;
-      reset(reason);
-    },
-    getGatewayBaseUrl: (): string | undefined => cached?.gatewayBaseUrl,
-    getShardHostSuffix: (): string | undefined => cached?.shardHostSuffix,
-    /** Each stream callback tracks the token it received, so delayed failures
-     * cannot invalidate a replacement obtained by another stream callback. */
-    createAuthCallback: (): ((context?: {
-      reason: string;
-      previousToken?: string;
-    }) => Promise<string | undefined>) => {
-      let lastToken: string | undefined;
-      return async (context) => {
-        try {
-          const current = await ensureFreshToken(
-            context?.reason === 'unauthorized' ? (context.previousToken ?? lastToken) : undefined
-          );
-          lastToken = current.token;
-          return current.token;
-        } catch (error) {
-          if (error instanceof LoroStreamsTokenAuthError) return undefined;
-          throw error;
-        }
-      };
-    },
-  };
-}
+export const LoroStreamsTokenWebLive = (
+  options: Parameters<typeof makeLoroStreamsTokenWebPorts>[0]
+) => Layer.sync(LoroStreamsTokenPorts, () => makeLoroStreamsTokenWebPorts(options));
+
+export const loroStreamsTokenStorageKey = getTokenStorageKey;
+export {
+  makeLoroStreamsTokenProvider,
+  LoroStreamsTokens,
+  LoroStreamsTokensLive,
+  LoroStreamsTokenShutdownFailed,
+  describeLoroStreamsTokenCause,
+} from './loro-streams-token/service';
+export type {
+  LoroStreamsTokenProvider,
+  LoroStreamsTokenProviderOptions,
+  LoroStreamsAuthContext,
+  LoroStreamsTokenAuth,
+  LoroStreamsTokenReadFailure,
+  LoroStreamsTokenFailureKind,
+  LoroStreamsTokenErrorContext,
+  LoroStreamsTokenHealth,
+} from './loro-streams-token/service';
+export { createLoroStreamsTokenProviderLegacy } from './loro-streams-token/legacy';

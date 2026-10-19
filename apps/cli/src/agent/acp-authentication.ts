@@ -196,6 +196,7 @@ type ProbeBuiltinAuthenticationOptions = {
   cliType: AgentConfigCliType;
   agentType: string;
   runtimeOverrides?: BuiltinRuntimeOverrides;
+  magpieGatewayUrl?: string;
   env?: NodeJS.ProcessEnv;
   onManagedRuntimeProgress?: Parameters<
     typeof resolveBuiltinAuthenticationProcessLaunch
@@ -421,6 +422,7 @@ export async function probeBuiltinAuthentication(
     cliType: options.cliType,
     agentType: options.agentType,
     runtimeOverrides: options.runtimeOverrides,
+    magpieGatewayUrl: options.magpieGatewayUrl,
     action: 'status',
     onManagedRuntimeProgress: options.onManagedRuntimeProgress,
     signal: options.signal,
@@ -558,6 +560,8 @@ export class AcpAuthenticationManager {
     agentType: string;
     customAcp?: CustomAcpLaunchSpec;
     runtimeOverrides?: BuiltinRuntimeOverrides;
+    agentConfigId?: string;
+    magpieGatewayUrl?: string;
     env?: Record<string, string>;
     codexProfile?: ResolvedCodexProfile;
     onProgress?: (event: AcpAuthenticationProgressEvent) => void;
@@ -670,6 +674,7 @@ export class AcpAuthenticationManager {
         cliType: options.cliType,
         agentType: options.agentType,
         runtimeOverrides: options.runtimeOverrides,
+        magpieGatewayUrl: options.magpieGatewayUrl,
         action: 'login',
         signal: running.abortController.signal,
         onManagedRuntimeProgress: (event) => {
@@ -926,6 +931,8 @@ export class AcpAuthenticationManager {
       agentType: string;
       customAcp?: CustomAcpLaunchSpec;
       runtimeOverrides?: BuiltinRuntimeOverrides;
+      agentConfigId?: string;
+      magpieGatewayUrl?: string;
       env?: Record<string, string>;
       onProgress?: (event: AcpAuthenticationProgressEvent) => void;
     },
@@ -936,6 +943,8 @@ export class AcpAuthenticationManager {
       agentType: options.agentType,
       customAcp: options.customAcp,
       runtimeOverrides: options.runtimeOverrides,
+      agentConfigId: options.agentConfigId,
+      magpieGatewayUrl: options.magpieGatewayUrl,
       signal: running.abortController.signal,
     });
     const env = await buildAuthenticationProcessEnv({
@@ -973,6 +982,7 @@ export class AcpAuthenticationManager {
               agentType: options.agentType,
               customAcp: options.customAcp,
               runtimeOverrides: options.runtimeOverrides,
+              magpieGatewayUrl: options.magpieGatewayUrl,
               workdir: process.cwd(),
               env,
               command: launch.command,

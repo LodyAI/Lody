@@ -32,7 +32,7 @@ Base 0x0020/0x0001/0x0003, info `lody-e2ee/hpke-epoch/v1\0`, canonical CBOR
 `lody-e2ee/epoch-env/v1\0`. Whitepaper v0.16 retains epoch envelopes; the legacy
 `lody-epoch-key-hpke/v1` JSON format is excluded. No new protocol fields or
 recovery format are selected. Source/destination fingerprints are in
-[provenance](../../../../packages/e2ee-core/provenance.json).
+[provenance](https://github.com/LodyAI/Lody/blob/5f97599e60700d6185834632df85922ea0d73ec6/packages/e2ee-core/provenance.json).
 
 The exact candidate dependency closure adds core 1.9.0, chacha20poly1305 1.8.0
 and common 1.10.1. Effect stays 4.0.2. Incidental lockfile reordering/transitive

@@ -1,3 +1,5 @@
+import { AgentRoleProposalNotice } from './agent-role-proposal-notice';
+import type { AgentRoleProposalMeta } from '@lody/shared';
 import { MessageAuthorIdentity } from './message-author-identity';
 import * as stylex from '@stylexjs/stylex';
 import { space, text as textScale } from '@lody/ui/tokens/scales.stylex';
@@ -95,7 +97,7 @@ import { authTokenAtom, runtimeAtom } from '@/atoms/runtime';
 import { machineSupportsSubagentCancellation, machineSupportsSubagentEvents } from '@lody/shared';
 import { scrollDebug } from '@/hooks/scroll-debug-log';
 import { readSessionTurnTokenUsage, type SessionTurnTokenUsage } from '@lody/shared/session-data';
-import { formatCompactNumber } from '@/lib/format-compact-number';
+import { formatCompactNumber, formatUsdAmount } from '@/lib/format-compact-number';
 import { toIntlLocaleOrEn } from '@/lib/intl-locale';
 import type { EngineRow } from '@/lib/conversation-scroll/types';
 import { EngineConversationScroller } from './conversation-list/engine-conversation-scroller';
@@ -223,6 +225,11 @@ import {
 import { cn } from '@/lib/utils';
 import { withClassName } from '@/lib/stylex';
 import { conversationSurface } from './surface';
+import {
+  isMessageActionsToggleTap,
+  toggleMobileMessageActions,
+  useMobileMessageActionsRevealed,
+} from './mobile-message-actions';
 import { ConversationColumn } from '@/components/shared/conversation-column';
 import type { TurnIndexRow } from '@/lib/conversation-view';
 import { TurnPlaceholderRow, estimatePlaceholderHeight } from './turn-placeholder-row';
@@ -272,21 +279,32 @@ import { toast } from '@/lib/toast';
 import { SessionPlanBar } from '@/components/sessions/session-plan-bar';
 import { ContainerQueryProvider } from './container-query-provider';
 import { ScheduleProposalNotice } from '@/components/schedules/schedule-proposal-notice';
-import { shouldRenderSystemRowItem } from './message-content-guards';
+import { isOperationSurfaceItem, shouldRenderSystemRowItem } from './message-content-guards';
 import { getChatFailedDiagnosticCopy } from './chat-failed-diagnostic-copy';
 import {
   buildChatFailedErrorReport,
-  extractReadableChatFailedMessage,
+  buildChatFailedNoticeDetail,
 } from './chat-failed-error-report';
 import { DEFAULT_CONVERSATION_FONT_SIZE, type ConversationFontSize } from '@/atoms/settings';
 import {
   conversationTextFontSizeStyle,
   conversationReadingFontSizeStyle,
-  userTextCollapsedHeight,
+  userTextCollapsedStyle,
 } from './conversation-font-size-classes';
 import { useSessionPin } from '@/components/sessions/session-pin-context';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { useStableNow } from '@/hooks/use-stable-now';
+import {
+  buildAssistantTurnTimingRows,
+  formatSilenceCompact,
+  formatTurnClockTime,
+  resolveTurnLiveness,
+  resolveTurnSilenceMs,
+  type AssistantTurnTimingRow,
+  type HistoryLiveWindow,
+  type LiveTurnActivity,
+  type TurnLiveness,
+} from './assistant-turn-timing';
 import {
   SEARCH_HIGHLIGHT_CONTAINER_ACTIVE_CLASS_NAME,
   SEARCH_HIGHLIGHT_CONTAINER_MATCHED_CLASS_NAME,
@@ -457,7 +475,19 @@ type PlaceholderChatVirtualRow = {
   item: PlaceholderSessionItem;
 };
 
-type ChatVirtualRow = AssistantChatVirtualRow | StandardChatVirtualRow | PlaceholderChatVirtualRow;
+type LocalUserChatVirtualRow = {
+  type: 'local-user';
+  key: string;
+  /** -1 until the authoritative directory contains this input. */
+  messageIndex: number;
+  content: ReactNode;
+};
+
+type ChatVirtualRow =
+  | AssistantChatVirtualRow
+  | StandardChatVirtualRow
+  | PlaceholderChatVirtualRow
+  | LocalUserChatVirtualRow;
 
 /** One row per placeholder item, identity-stable while the item is. */
 
@@ -591,7 +621,9 @@ export interface SessionChatStreamViewProps {
   className?: string;
   /** Scrolls as the first conversation row (for example, Session provenance). */
   leadingContent?: ReactNode;
-  /** Scrolls after history as a local, not-yet-committed user message. */
+  /** UI-only accepted inputs; never added to history, outline, export or dispatch facts. */
+  localUserMessages?: readonly { id: string; content: ReactNode }[];
+  /** Attachment preparation and action errors after the message rows. */
   trailingContent?: ReactNode;
   emptyState?: ReactNode;
   onAtBottomChange?: (atBottom: boolean) => void;
@@ -616,6 +648,13 @@ export interface SessionChatStreamViewProps {
   agentActivityTone?: AgentActivityTone;
   /** The status is live work (not waiting on the user): shimmer it. */
   agentActivityShimmer?: boolean;
+  /**
+   * What presence says the session is doing. Only a running session's newest
+   * turn reports a running time and a last update; `null` when nothing runs.
+   */
+  liveTurnActivity?: LiveTurnActivity | null;
+  /** Whether, and since when, this client receives the session's history live. */
+  historyLive?: HistoryLiveWindow;
   conversationFontSize?: ConversationFontSize;
   /** Full-page overlay that keeps the conversation outline independent of composer height. */
   outlineOverlayRoot?: HTMLElement | null;
@@ -638,6 +677,35 @@ export const SessionChatActionContext = createContext<{
 const SessionImagePreviewContext = createContext<{
   openImagePreview: (imageKey: string) => void;
 } | null>(null);
+
+/**
+ * Everything the liveness labels need to judge a running turn. `clock` is the
+ * stream's `ConversationView`, whose `lastUpdateAt` is an in-memory stamp read
+ * on each label's own tick; the rest changes only with presence or sync state.
+ */
+type LiveTurnContextValue = {
+  clock: Pick<ConversationView, 'lastUpdateAt'> | null;
+  activity: LiveTurnActivity | null;
+  live: HistoryLiveWindow;
+};
+
+const LiveTurnContext = createContext<LiveTurnContextValue | null>(null);
+
+/** Callers that do not track live sync report no live window. */
+const NOT_LIVE: HistoryLiveWindow = { sync: 'syncing', since: null };
+
+/** The running turn's liveness at `nowMs`, or `null` when presence says nothing runs. */
+const useRunningTurnLiveness = (nowMs: number): TurnLiveness | null => {
+  const live = useContext(LiveTurnContext);
+  if (!live?.activity) return null;
+  return resolveTurnLiveness({
+    activity: live.activity,
+    sync: live.live.sync,
+    liveSince: live.live.since,
+    lastUpdateAt: live.clock?.lastUpdateAt ?? null,
+    nowMs,
+  });
+};
 
 /** Live work reads in the process tone; waiting on the user in the warning tone. */
 export type AgentActivityTone = 'primary' | 'warning';
@@ -689,8 +757,9 @@ const AgentActivityStatus = ({
       aria-live="polite"
       data-agent-activity-status=""
       className={cn(
-        'flex w-full items-center py-0.5 text-muted-foreground',
-        isMobile ? 'gap-1.5 pr-1' : 'px-[4px]'
+        /* `px-[4px]` is `conversation.railInset`: the status sits on the prose rail. */
+        'flex w-full items-center px-[4px] py-0.5 text-muted-foreground',
+        isMobile && 'gap-1.5'
       )}
     >
       <span
@@ -930,7 +999,10 @@ const ChatItem = memo(function ChatItem({
       <ConversationColumn
         {...stylex.props(
           conversationSurface.message,
-          msg.role === 'user' && conversationSurface.userMessage
+          msg.role === 'user' && conversationSurface.userMessage,
+          msg.role === 'system' &&
+            msg.items.some(isOperationSurfaceItem) &&
+            conversationSurface.operationSurface
         )}
       >
         {renderMessageRow({
@@ -1506,6 +1578,9 @@ const engineRowOf = (row: ChatVirtualRow): EngineRow => {
     placeholder: false,
     fixed: null,
   };
+  if (row.type === 'local-user') {
+    return { ...base, turnId: row.key, estimate: ENGINE_ROW_ESTIMATE_PX.standard };
+  }
   if (row.type === 'placeholder') {
     return {
       ...base,
@@ -1519,6 +1594,7 @@ const engineRowOf = (row: ChatVirtualRow): EngineRow => {
     return {
       ...base,
       turnId: row.item.type === 'message' ? row.item.message.id : null,
+      groupTurnIds: row.groupedItems?.slice(1).map((entry) => entry.message.id),
       estimate: ENGINE_ROW_ESTIMATE_PX.standard,
     };
   }
@@ -1659,6 +1735,7 @@ export const SessionChatStreamView = forwardRef<
       isVisible = true,
       className,
       leadingContent,
+      localUserMessages,
       trailingContent,
       emptyState,
       onAtBottomChange,
@@ -1682,6 +1759,8 @@ export const SessionChatStreamView = forwardRef<
       agentActivityTone = 'primary',
       // Waiting on the user (warning tone) is not work in progress.
       agentActivityShimmer = agentActivityTone !== 'warning',
+      liveTurnActivity = null,
+      historyLive = NOT_LIVE,
       conversationFontSize = DEFAULT_CONVERSATION_FONT_SIZE,
       suppressStickyAutoScrollRef,
       outlineOverlayRoot,
@@ -1720,6 +1799,16 @@ export const SessionChatStreamView = forwardRef<
             item.message.finished !== true
         )?.message ?? null,
       [items, lastAssistantMessageId]
+    );
+    // Keyed on the window's fields: callers rebuild its object every render.
+    const { sync: liveSync, since: liveSince } = historyLive;
+    const liveTurnContextValue = useMemo<LiveTurnContextValue>(
+      () => ({
+        clock: conversationView ?? null,
+        activity: liveTurnActivity,
+        live: { sync: liveSync, since: liveSince },
+      }),
+      [conversationView, liveSince, liveSync, liveTurnActivity]
     );
     const [assistantExpansionVersion, setAssistantExpansionVersion] = useState(0);
     const [hoveredAssistantMessageId, setHoveredAssistantMessageId] = useState<string | null>(null);
@@ -1785,7 +1874,7 @@ export const SessionChatStreamView = forwardRef<
       // Expansion lives in the module cache so virtualized child rows retain
       // their state after unmounting; this counter is its React invalidation
       // signal and also busts the per-turn row cache.
-      return buildChatVirtualRows({
+      const rows = buildChatVirtualRows({
         items,
         lastAssistantMessageId,
         messageFileDiffEntriesByTurn,
@@ -1798,6 +1887,31 @@ export const SessionChatStreamView = forwardRef<
         selectionLayouts,
         groupCreatedSessions: messageSelection === null,
       });
+      if (!localUserMessages?.length) return rows;
+      const local = new Map(localUserMessages.map((message) => [message.id, message]));
+      // Keep the exact turn key through directory-only and hydrated history.
+      // A placeholder must not evict the only available body of a local input.
+      const merged = rows.map((row): ChatVirtualRow => {
+        const message = local.get(row.key);
+        local.delete(row.key);
+        return message && row.type === 'placeholder'
+          ? {
+              type: 'local-user',
+              key: row.key,
+              messageIndex: row.messageIndex,
+              content: message.content,
+            }
+          : row;
+      });
+      for (const message of local.values()) {
+        merged.push({
+          type: 'local-user',
+          key: message.id,
+          messageIndex: -1,
+          content: message.content,
+        });
+      }
+      return merged;
     }, [
       messageSelection,
       showThoughts,
@@ -1808,6 +1922,7 @@ export const SessionChatStreamView = forwardRef<
       assistantExpansionVersion,
       copyContextAvailable,
       items,
+      localUserMessages,
       lastAssistantMessageId,
       messageFileDiffEntriesByTurn,
     ]);
@@ -1949,10 +2064,12 @@ export const SessionChatStreamView = forwardRef<
       (messageId: string) => {
         const rowIndex = virtualRows.findIndex(
           (row) =>
-            row.type === 'standard' &&
-            row.item.type === 'message' &&
-            (row.item.message.id === messageId ||
-              row.groupedItems?.some((entry) => entry.message.id === messageId))
+            (row.type === 'local-user' && row.key === messageId) ||
+            (row.type === 'placeholder' && row.key === messageId) ||
+            (row.type === 'standard' &&
+              row.item.type === 'message' &&
+              (row.item.message.id === messageId ||
+                row.groupedItems?.some((entry) => entry.message.id === messageId)))
         );
         return rowIndex === -1 ? -1 : rowIndex + leadingRowCount;
       },
@@ -1989,13 +2106,16 @@ export const SessionChatStreamView = forwardRef<
         virtualRows.map((row) => ({
           key: row.key,
           turnId:
-            row.type === 'placeholder'
-              ? row.item.row.id
-              : row.item.type === 'message'
-                ? row.item.message.id
-                : row.key,
+            row.type === 'local-user'
+              ? row.key
+              : row.type === 'placeholder'
+                ? row.item.row.id
+                : row.item.type === 'message'
+                  ? row.item.message.id
+                  : row.key,
           turnIndex: row.messageIndex,
           ready: row.type !== 'placeholder',
+          local: row.type === 'local-user',
         })),
       [virtualRows]
     );
@@ -2180,8 +2300,11 @@ export const SessionChatStreamView = forwardRef<
       const endRow = clampRow(
         vlist.findItemIndex(vlist.scrollOffset + vlist.viewportSize) - leadingRowCount
       );
-      const from = rows[startRow]?.messageIndex;
-      const end = rows[endRow];
+      // Local rows have no history index. They must not request a bogus
+      // hydration range when the viewport contains only accepted inputs.
+      const historyRows = rows.slice(startRow, endRow + 1).filter((row) => row.messageIndex >= 0);
+      const from = historyRows[0]?.messageIndex;
+      const end = historyRows.at(-1);
       const to =
         end?.type === 'standard'
           ? (end.groupedItems?.at(-1)?.turnIndex ?? end.messageIndex)
@@ -2338,7 +2461,7 @@ export const SessionChatStreamView = forwardRef<
 
     // A non-null leading Fragment may render no DOM. Keep the entire empty
     // state outside Virtua even then, and mount it only with real messages.
-    if (!items.length || hasOnlyEmptyItem) {
+    if ((!items.length || hasOnlyEmptyItem) && !localUserMessages?.length) {
       return (
         <SessionChatActionContext.Provider value={chatActionContextValue}>
           <SessionImagePreviewContext.Provider value={imagePreviewContextValue}>
@@ -2391,7 +2514,7 @@ export const SessionChatStreamView = forwardRef<
     }
 
     // Keyed rows in list order: the leading row, the conversation, the activity
-    // row, and the pending (not yet committed) messages.
+    // row, and attachment preparation/action errors.
     const listRows = [
       leadingContent == null ? null : (
         <div key={LEADING_ROW_KEY} data-conversation-leading-content="">
@@ -2399,6 +2522,9 @@ export const SessionChatStreamView = forwardRef<
         </div>
       ),
       ...virtualRows.map((row, rowIndex) => {
+        if (row.type === 'local-user') {
+          return <div key={row.key}>{row.content}</div>;
+        }
         if (row.type === 'placeholder') {
           return <TurnPlaceholderRow key={row.key} row={row.item.row} />;
         }
@@ -2455,6 +2581,7 @@ export const SessionChatStreamView = forwardRef<
               onWorkedGroupExpandedChange={handleAssistantWorkedGroupExpandedChange}
               isTurnHovered={hoveredAssistantMessageId === row.item.message.id}
               onTurnHoverChange={handleAssistantTurnHoverChange}
+              isLatestTurn={row.item.message.id === lastAssistantMessageId}
               conversationFontSize={conversationFontSize}
               shimmerGroupHeader={row.key === liveGroupHeaderRowKey}
               liveStatus={row.key === liveStatusRowKey ? liveTurnStatus : null}
@@ -2490,125 +2617,129 @@ export const SessionChatStreamView = forwardRef<
     return (
       <SessionChatActionContext.Provider value={chatActionContextValue}>
         <SessionImagePreviewContext.Provider value={imagePreviewContextValue}>
-          <ContainerQueryProvider
-            ref={scrollRootRef}
-            className={cn('relative bg-background', className)}
-          >
-            <NativeSelectionRowsContext.Provider value={nativeSelectionRows}>
-              <EngineConversationScroller
-                sessionId={sessionId}
-                rows={listRows}
-                rowMeta={engineRowMeta}
-                item={ConversationVirtualRow}
-                keepMounted={nativeTextSelection.keepMounted}
-                initialWindowReady={initialWindowReady}
-                hidden={!isVisible}
-                suppressAutoScrollRef={autoScrollSuppressedRef}
-                onAtBottomChange={onAtBottomChange}
-                onScroll={handleStreamScroll}
-                onStateChange={handleListStateChange}
-                layoutKey={String(conversationFontSize)}
-                // Keep x overflow explicit: overflow-y:auto otherwise computes
-                // the untouched x axis to auto too, letting any wide row pan the
-                // entire conversation instead of its own nested scroller.
-                // Mobile session page floats a frosted header over the list;
-                // `--conversation-top-inset` (set by session-detail's mobile
-                // branch) pads the scroll content so the first message clears the
-                // header at rest while later content scrolls under it and blurs.
-                // Unset elsewhere → falls back to py-6's 1.5rem, a no-op.
-                viewportClassName="chat-scrollbar relative h-full overflow-x-hidden py-5 sm:py-6"
-                viewportStyle={CONVERSATION_VIEWPORT_STYLE}
-                trailing={<MessageSelectionOverlay />}
-                // Pre-render extra items outside the viewport to reduce blank areas
-                // during fast scrolling (especially on mobile). This is 4x Virtua's
-                // default (200px) — generous, but deliberately not the previous 2000px:
-                // an oversized buffer keeps a huge set of still-resizing rows mounted,
-                // which widens the window where Virtua's offsets are mid-recompute and
-                // rows can transiently overlap. 800 keeps ~2 viewports of headroom.
-                bufferSize={CONVERSATION_OVERSCAN}
-                handleRef={listRef}
-              />
-            </NativeSelectionRowsContext.Provider>
-            {/* Top fade into the bg-background canvas above (desktop only),
+          <LiveTurnContext.Provider value={liveTurnContextValue}>
+            <ContainerQueryProvider
+              ref={scrollRootRef}
+              className={cn('relative bg-background', className)}
+            >
+              <NativeSelectionRowsContext.Provider value={nativeSelectionRows}>
+                <EngineConversationScroller
+                  sessionId={sessionId}
+                  rows={listRows}
+                  rowMeta={engineRowMeta}
+                  item={ConversationVirtualRow}
+                  keepMounted={nativeTextSelection.keepMounted}
+                  initialWindowReady={initialWindowReady}
+                  hidden={!isVisible}
+                  suppressAutoScrollRef={autoScrollSuppressedRef}
+                  onAtBottomChange={onAtBottomChange}
+                  onScroll={handleStreamScroll}
+                  onStateChange={handleListStateChange}
+                  layoutKey={String(conversationFontSize)}
+                  // Keep x overflow explicit: overflow-y:auto otherwise computes
+                  // the untouched x axis to auto too, letting any wide row pan the
+                  // entire conversation instead of its own nested scroller.
+                  // Mobile session page floats a frosted header over the list;
+                  // `--conversation-top-inset` (set by session-detail's mobile
+                  // branch) pads the scroll content so the first message clears the
+                  // header at rest while later content scrolls under it and blurs.
+                  // Unset elsewhere → falls back to py-6's 1.5rem, a no-op.
+                  viewportClassName="chat-scrollbar relative h-full overflow-x-hidden py-5 sm:py-6"
+                  viewportStyle={CONVERSATION_VIEWPORT_STYLE}
+                  trailing={<MessageSelectionOverlay />}
+                  // Pre-render extra items outside the viewport to reduce blank areas
+                  // during fast scrolling (especially on mobile). This is 4x Virtua's
+                  // default (200px) — generous, but deliberately not the previous 2000px:
+                  // an oversized buffer keeps a huge set of still-resizing rows mounted,
+                  // which widens the window where Virtua's offsets are mid-recompute and
+                  // rows can transiently overlap. 800 keeps ~2 viewports of headroom.
+                  bufferSize={CONVERSATION_OVERSCAN}
+                  handleRef={listRef}
+                />
+              </NativeSelectionRowsContext.Provider>
+              {/* Top fade into the bg-background canvas above (desktop only),
                 hinting that the conversation continues past the top edge. */}
-            {!isMobile && isScrolledFromTop ? (
-              <div className="pointer-events-none absolute inset-x-0 top-0 h-12 bg-gradient-to-b from-background to-transparent" />
-            ) : null}
-            {/* Bottom fade into the same canvas over the last 40px above the
+              {!isMobile && isScrolledFromTop ? (
+                <div className="pointer-events-none absolute inset-x-0 top-0 h-12 bg-gradient-to-b from-background to-transparent" />
+              ) : null}
+              {/* Bottom fade into the same canvas over the last 40px above the
                 info bar (desktop only): more conversation below. */}
-            {!isMobile && hasContentBelow ? (
-              <div
-                data-conversation-bottom-fade=""
-                className="pointer-events-none absolute inset-x-0 bottom-0 h-10 bg-gradient-to-t from-background to-transparent"
-              />
-            ) : null}
-            {/* Round outline. Its visual layer portals to the full-page overlay
+              {!isMobile && hasContentBelow ? (
+                <div
+                  data-conversation-bottom-fade=""
+                  className="pointer-events-none absolute inset-x-0 bottom-0 h-10 bg-gradient-to-t from-background to-transparent"
+                />
+              ) : null}
+              {/* Round outline. Its visual layer portals to the full-page overlay
                 when supplied, so composer growth cannot move its centre. It is
                 never a Virtua row or a child of the viewport: sticky scroll
                 takes the content element from that div's `firstElementChild`.
                 Touch has no hover, so mobile is excluded rather than shipped
                 without its preview card. */}
-            {isMobile || !showOutlineRail ? null : (
-              <ConversationOutlineRail
-                entries={outlineEntries}
-                activeIndex={activeOutlineIndex}
-                onJumpToRound={handleOutlineJump}
-                onPreviewRound={handleOutlinePreview}
-                overlayRoot={outlineOverlayRoot}
-                enableArrivalIntent
-              />
-            )}
-            {showScrollToLatest && !isSticky && (
-              /* Full-bleed overlay; ConversationColumn carries the shared
+              {isMobile || !showOutlineRail ? null : (
+                <ConversationOutlineRail
+                  entries={outlineEntries}
+                  activeIndex={activeOutlineIndex}
+                  onJumpToRound={handleOutlineJump}
+                  onPreviewRound={handleOutlinePreview}
+                  overlayRoot={outlineOverlayRoot}
+                  enableArrivalIntent
+                />
+              )}
+              {showScrollToLatest && !isSticky && (
+                /* Full-bleed overlay; ConversationColumn carries the shared
                  horizontal gutter so the button lines up with the composer. */
-              <div className="pointer-events-none absolute inset-x-0 bottom-4">
-                <ConversationColumn className="flex justify-end">
-                  <Button
-                    variant="secondary"
-                    icon
-                    data-scroll-to-latest=""
-                    className={cn(
-                      stylex.props(stylex.defaultMarker()).className,
-                      'pointer-events-auto rounded-full border-[0.5px] border-border bg-white text-foreground shadow-[0_0.5px_1px_1px_rgba(0,0,0,0.04)] hover:bg-white dark:bg-secondary dark:text-secondary-foreground dark:shadow-none'
-                    )}
-                    onClick={scrollToBottom}
-                    aria-label={t('sessions.scrollToLatest')}
-                  >
-                    {agentActivityLabel && agentActivityShimmer ? (
-                      <Spinner
+                <div className="pointer-events-none absolute inset-x-0 bottom-4">
+                  <ConversationColumn className="flex justify-end">
+                    <Button
+                      variant="secondary"
+                      icon
+                      data-scroll-to-latest=""
+                      className={cn(
+                        stylex.props(stylex.defaultMarker()).className,
+                        'pointer-events-auto rounded-full border-[0.5px] border-border bg-white text-foreground shadow-[0_0.5px_1px_1px_rgba(0,0,0,0.04)] hover:bg-white dark:bg-secondary dark:text-secondary-foreground dark:shadow-none'
+                      )}
+                      onClick={scrollToBottom}
+                      aria-label={t('sessions.scrollToLatest')}
+                    >
+                      {agentActivityLabel && agentActivityShimmer ? (
+                        <Spinner
+                          {...stylex.props(
+                            scrollToLatestStyles.icon,
+                            scrollToLatestStyles.workingSpinner
+                          )}
+                          aria-hidden="true"
+                        />
+                      ) : null}
+                      <ArrowDown
                         {...stylex.props(
                           scrollToLatestStyles.icon,
-                          scrollToLatestStyles.workingSpinner
+                          !!agentActivityLabel &&
+                            agentActivityShimmer &&
+                            scrollToLatestStyles.workingArrow
                         )}
                         aria-hidden="true"
                       />
-                    ) : null}
-                    <ArrowDown
-                      {...stylex.props(
-                        scrollToLatestStyles.icon,
-                        !!agentActivityLabel &&
-                          agentActivityShimmer &&
-                          scrollToLatestStyles.workingArrow
-                      )}
-                      aria-hidden="true"
-                    />
-                  </Button>
-                </ConversationColumn>
-              </div>
-            )}
-            <ImagePreviewDialog
-              open={findSessionImageGalleryEntryIndex(activeGalleryEntries, activeImageKey) !== -1}
-              onOpenChange={(open) => {
-                if (!open) {
-                  setActiveImageKey(null);
+                    </Button>
+                  </ConversationColumn>
+                </div>
+              )}
+              <ImagePreviewDialog
+                open={
+                  findSessionImageGalleryEntryIndex(activeGalleryEntries, activeImageKey) !== -1
                 }
-              }}
-              activeImageKey={activeImageKey}
-              onActiveImageKeyChange={setActiveImageKey}
-              entries={activeGalleryEntries}
-              portalAnchorRef={scrollRootRef}
-            />
-          </ContainerQueryProvider>
+                onOpenChange={(open) => {
+                  if (!open) {
+                    setActiveImageKey(null);
+                  }
+                }}
+                activeImageKey={activeImageKey}
+                onActiveImageKeyChange={setActiveImageKey}
+                entries={activeGalleryEntries}
+                portalAnchorRef={scrollRootRef}
+              />
+            </ContainerQueryProvider>
+          </LiveTurnContext.Provider>
         </SessionImagePreviewContext.Provider>
       </SessionChatActionContext.Provider>
     );
@@ -2714,7 +2845,15 @@ const SystemMessageRowView = ({
   return (
     <div className="flex flex-col gap-2">
       {systemItems.map(({ item, itemIndex }) =>
-        item.type === 'system_notice' && item.name === 'schedule_proposal' && item.meta ? (
+        item.type === 'system_notice' && item.name === 'agent_role_proposal' && item.meta ? (
+          <AgentRoleProposalNotice
+            key={`role-proposal-${itemIndex}`}
+            meta={item.meta as AgentRoleProposalMeta}
+            sessionId={sessionId}
+            entryId={message.id}
+            itemIndex={itemIndex}
+          />
+        ) : item.type === 'system_notice' && item.name === 'schedule_proposal' && item.meta ? (
           <ScheduleProposalNotice
             key={`schedule-proposal-${itemIndex}`}
             meta={item.meta as ScheduleProposalMeta}
@@ -2735,6 +2874,12 @@ const SystemMessageRowView = ({
             key={`worktree-script-${item.phase}-${itemIndex}`}
             script={item}
           />
+        ) : item.type === 'operation_completion_batch' ? (
+          <OperationCompletionBatchView
+            key={item.batchId}
+            batch={item}
+            onNavigateSession={onNavigateSession}
+          />
         ) : item.type === 'operation_progress' ? (
           <CreatedSessionList
             key={item.operationId}
@@ -2753,6 +2898,41 @@ const SystemMessageRowView = ({
           />
         )
       )}
+    </div>
+  );
+};
+
+const OperationCompletionBatchView = ({
+  batch,
+  onNavigateSession,
+}: {
+  batch: Extract<MessageContent, { type: 'operation_completion_batch' }>;
+  onNavigateSession?: (target: SessionNavigationTarget) => void;
+}) => {
+  const { t } = useTranslation();
+  return (
+    <div className="flex flex-col gap-1.5">
+      <div>
+        {t(
+          batch.deliveryStatus === 'unknown'
+            ? 'orchestration.batchResultsUnknown'
+            : 'orchestration.batchResults',
+          {
+            defaultValue:
+              batch.deliveryStatus === 'unknown'
+                ? '{{count}} task results saved; model delivery is uncertain'
+                : '{{count}} completed task results',
+            count: batch.memberCount,
+          }
+        )}
+      </div>
+      {(batch.members ?? []).map((member) => (
+        <OperationCompletionView
+          key={member.deliveryId}
+          completion={member}
+          onNavigateSession={onNavigateSession}
+        />
+      ))}
     </div>
   );
 };
@@ -2814,22 +2994,11 @@ const OperationCompletionView = ({
         ]
       : []
   );
-  const continuationNotice = completion.continuation
-    ? t(
-        completion.continuation.status === 'uncertain'
-          ? 'orchestration.continuationUncertain'
-          : 'orchestration.continuationNotStarted'
-      )
-    : null;
   // The status card carries only what the cards cannot: a whole-Operation
-  // failure or cancellation, targetless failures, the continuation outcome, or
+  // failure or cancellation, targetless failures, or
   // the plain outcome when there is no Session to show.
   const showStatusCard =
-    cards.length === 0 ||
-    failedCompletion ||
-    cancelledCompletion ||
-    untargetedProblems.length > 0 ||
-    continuationNotice !== null;
+    cards.length === 0 || failedCompletion || cancelledCompletion || untargetedProblems.length > 0;
 
   return (
     <div className="flex flex-col gap-2" data-operation-completion={completion.operationKind}>
@@ -2899,16 +3068,6 @@ const OperationCompletionView = ({
                 {problem.label ? `${problem.label}: ${problem.message}` : problem.message}
               </div>
             ))}
-            {continuationNotice ? (
-              <div
-                className={cn(
-                  stylex.props(activityTypography.footnote).className,
-                  'mt-0.5 text-muted-foreground'
-                )}
-              >
-                {continuationNotice}
-              </div>
-            ) : null}
           </div>
         </div>
       ) : null}
@@ -3400,15 +3559,6 @@ const ChatFailedNoticeView = ({
     ? t(diagnosticCopy.actionKey, diagnosticCopy.action)
     : undefined;
   const rawMessage = meta?.message?.trim() ? meta.message : undefined;
-  const detailMessage = (() => {
-    if (!rawMessage) return undefined;
-    const extracted = extractReadableChatFailedMessage(rawMessage);
-    return extracted !== reasonMessage ? extracted : undefined;
-  })();
-  // Unfold whenever there is a raw message at all: even one whose readable
-  // extract equals the title, the full payload (stack, upstream JSON) is worth
-  // reading.
-  const hasDetail = Boolean(rawMessage && rawMessage.trim() !== reasonMessage);
   const isProviderOverloaded = meta?.reason === 'acp_provider_overloaded';
 
   const retryInSeconds = capacityRetry?.retryInSeconds ?? null;
@@ -3487,12 +3637,11 @@ const ChatFailedNoticeView = ({
     <AgentNoticeBanner
       tone={isProviderOverloaded ? 'muted' : 'error'}
       label={reasonMessage}
-      // The readable extract first, then the untouched payload behind it.
-      detail={
-        [actionMessage, detailMessage, hasDetail ? rawMessage : null]
-          .filter((part, index, all) => Boolean(part) && all.indexOf(part) === index)
-          .join('\n\n') || undefined
-      }
+      detail={buildChatFailedNoticeDetail({
+        title: reasonMessage,
+        action: actionMessage,
+        message: rawMessage,
+      })}
       action={retryAction}
       footer={
         <Button variant="ghost" size="medium" onClick={() => void handleCopyError()}>
@@ -3727,6 +3876,7 @@ const UserMessageRowView = ({
   const { copyContext } = useContext(SessionChatActionContext);
   const copyWorkspaceId = useSessionCopyWorkspaceId();
   const isMobile = useIsMobile();
+  const mobileActionsRevealed = useMobileMessageActionsRevealed(message.id);
   // The RPC fast-path ACK overlays "delivered" before the entry's CRDT status
   // flip syncs back (the machine may run the whole turn before it can see the
   // entry to flip it).
@@ -3850,6 +4000,13 @@ const UserMessageRowView = ({
           ),
           'group/usermsg'
         )}
+        onClick={
+          isMobile
+            ? (event) => {
+                if (isMessageActionsToggleTap(event.target)) toggleMobileMessageActions(message.id);
+              }
+            : undefined
+        }
       >
         <div {...stylex.props(conversationSurface.metadata)} data-testid="user-message-metadata">
           {message.author?.kind === 'agent' ? (
@@ -3960,7 +4117,15 @@ const UserMessageRowView = ({
         {/* While editing, the row's own actions (edit/pin/copy) would compete with
             the editor's Cancel / Save & resend — hide them until it closes. */}
         {(hasTextContent || copyContext) && !isEditing ? (
-          <div {...stylex.props(conversationSurface.userActions)} data-user-message-actions="">
+          <div
+            {...withClassName(
+              stylex.props(conversationSurface.userActions),
+              /* Touch has no hover: a tap on the message reveals its actions. */
+              isMobile && !mobileActionsRevealed ? 'invisible' : undefined
+            )}
+            data-user-message-actions=""
+            data-mobile-actions-hidden={isMobile && !mobileActionsRevealed ? '' : undefined}
+          >
             {copyContext && (
               <AssistantForkButton
                 turnId={message.id}
@@ -4211,12 +4376,32 @@ const ResendUndeliveredDialog = ({
   );
 };
 
-/** Tokens this turn consumed, in compact product-language units (1.2K / 1.2万). */
-const AssistantTurnTokenUsageRows = ({ usage }: { usage: SessionTurnTokenUsage }) => {
+type AssistantTurnUsageRow = {
+  key: string;
+  label: string;
+  value: number;
+  detail?: string;
+  /** Preformatted value for rows whose unit is not a compact token count. */
+  display?: string;
+  title?: string;
+};
+
+/** Tokens and estimated cost this turn consumed, in compact product-language units. */
+const AssistantTurnUsageRows = ({ usage }: { usage: SessionTurnTokenUsage }) => {
   const { t, i18n } = useTranslation();
   const locale = toIntlLocaleOrEn(i18n.resolvedLanguage ?? i18n.language);
   const exact = new Intl.NumberFormat(locale);
-  const rows = [
+  const costUSD = usage.costUSD;
+  /* Per-turn costs are small enough that cents hide the number; keep two
+     fraction digits and spend more only where they carry information. */
+  const formatCost = (value: number): string => {
+    const abs = Math.abs(value);
+    return formatUsdAmount(value, locale, {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: abs > 0 && abs < 0.01 ? 8 : abs < 1 ? 4 : 2,
+    });
+  };
+  const rows: AssistantTurnUsageRow[] = [
     {
       key: 'input',
       label: t('sessions.turnConfig.inputTokens', 'Input'),
@@ -4244,6 +4429,20 @@ const AssistantTurnTokenUsageRows = ({ usage }: { usage: SessionTurnTokenUsage }
         write: exact.format(usage.cacheCreationInputTokens),
       }),
     },
+    ...(typeof costUSD === 'number'
+      ? [
+          {
+            key: 'cost',
+            label: t('sessions.turnConfig.costEstimate', 'Cost estimate'),
+            value: costUSD,
+            display: formatCost(costUSD),
+            title: t(
+              'sessions.turnConfig.costHint',
+              "Estimated from the provider's reported usage, not an invoice."
+            ),
+          },
+        ]
+      : []),
   ];
   return (
     <div className="border-t border-border/60 px-3 py-2.5">
@@ -4259,6 +4458,7 @@ const AssistantTurnTokenUsageRows = ({ usage }: { usage: SessionTurnTokenUsage }
         {rows.map((row) => (
           <div
             key={row.key}
+            data-turn-cost={row.key === 'cost' ? '' : undefined}
             className={cn(
               stylex.props(activityTypography.caption).className,
               'flex items-start justify-between gap-3 '
@@ -4267,12 +4467,172 @@ const AssistantTurnTokenUsageRows = ({ usage }: { usage: SessionTurnTokenUsage }
             <dt className="shrink-0 text-muted-foreground">{row.label}</dt>
             <dd
               className="text-right font-medium tabular-nums text-foreground"
-              title={[exact.format(row.value), row.detail].filter(Boolean).join(' · ')}
+              title={row.title ?? [exact.format(row.value), row.detail].filter(Boolean).join(' · ')}
             >
-              {formatCompactNumber(row.value, locale)}
+              {row.display ?? formatCompactNumber(row.value, locale)}
             </dd>
           </div>
         ))}
+      </dl>
+    </div>
+  );
+};
+
+/** Ticks once a second while the popover is open; a closed popover mounts none of this. */
+const TURN_TIMING_SAMPLE_MS = 1_000;
+
+/**
+ * When the turn started, how long it has run or took, and — while it is live —
+ * how long since the conversation last received an update, so a user can tell
+ * a busy turn from a stuck one.
+ */
+const AssistantTurnTimingRows = ({
+  message,
+  isLive,
+}: {
+  message: SessionHistoryParsed;
+  isLive: boolean;
+}) => {
+  const { t, i18n } = useTranslation();
+  const nowMs = useStableNow(TURN_TIMING_SAMPLE_MS).getTime();
+  const runningLiveness = useRunningTurnLiveness(nowMs);
+  const rows = buildAssistantTurnTimingRows(message, {
+    liveness: isLive ? runningLiveness : null,
+    nowMs,
+  });
+  if (rows.length === 0) return null;
+  const locale = toIntlLocale(i18n.resolvedLanguage ?? i18n.language);
+  const durationUnitLabels = getDurationUnitLabels(t);
+  const formatDuration = (ms: number) => formatDurationCompact(ms, durationUnitLabels);
+  /* Only `updated` carries a time. Every other state says why there is none
+     instead of guessing, so a catch-up import or a permission wait never reads
+     as fresh output or as a stuck agent. */
+  const displayLiveness = (
+    liveness: TurnLiveness
+  ): { value: string; title?: string; warning?: boolean } => {
+    switch (liveness.kind) {
+      case 'offline':
+        return {
+          value: t('sessions.turnTiming.offline', 'Disconnected'),
+          title: t(
+            'sessions.turnTiming.offlineHint',
+            "This device isn't receiving updates, so it can't tell whether the agent is still working."
+          ),
+          warning: true,
+        };
+      case 'awaitingUser':
+        return {
+          value: t('sessions.turnTiming.awaitingUser', 'Waiting for you'),
+          title: t(
+            'sessions.turnTiming.awaitingUserHint',
+            'The agent is waiting for your decision, not stuck.'
+          ),
+        };
+      case 'syncing':
+        return {
+          value: '—',
+          title: t('sessions.turnTiming.syncingHint', 'Catching up with this conversation.'),
+        };
+      case 'noUpdateYet':
+        return {
+          value: '—',
+          title: t(
+            'sessions.turnTiming.noUpdateYet',
+            'No new output has arrived since live updates started on this device.'
+          ),
+        };
+      case 'updated':
+        break;
+    }
+    return {
+      value: t('sessions.turnTiming.ago', {
+        duration: formatDuration(liveness.sinceMs),
+        defaultValue: '{{duration}} ago',
+      }),
+      title: liveness.stale
+        ? t(
+            'sessions.turnTiming.staleHint',
+            'No update for a while. The agent may be running a long command, or it may be stuck.'
+          )
+        : undefined,
+      warning: liveness.stale,
+    };
+  };
+  const display = (
+    row: AssistantTurnTimingRow
+  ): { label: string; value: string; title?: string; warning?: boolean } => {
+    switch (row.kind) {
+      case 'started': {
+        const clock = formatTurnClockTime(row.atMs, { locale, nowMs });
+        const running = row.runningMs === null ? '' : formatDuration(row.runningMs);
+        return {
+          label: t('sessions.turnTiming.started', 'Started'),
+          value: running
+            ? t('sessions.turnTiming.startedRunning', {
+                time: clock.short,
+                duration: running,
+                defaultValue: '{{time}} · running {{duration}}',
+              })
+            : clock.short,
+          title: clock.full,
+        };
+      }
+      case 'ended': {
+        const clock = formatTurnClockTime(row.atMs, { locale, nowMs });
+        return {
+          label: t('sessions.turnTiming.ended', 'Ended'),
+          value: clock.short,
+          title: clock.full,
+        };
+      }
+      case 'duration':
+        return {
+          label: t('sessions.turnTiming.duration', 'Duration'),
+          value: formatDuration(row.durationMs),
+        };
+      case 'lastUpdate':
+        break;
+    }
+    return {
+      label: t('sessions.turnTiming.lastUpdate', 'Last update'),
+      ...displayLiveness(row.liveness),
+    };
+  };
+  return (
+    <div className="border-t border-border/60 px-3 py-2.5" data-turn-timing="">
+      <div
+        className={cn(
+          stylex.props(activityTypography.caption).className,
+          'mb-1.5 font-medium text-foreground'
+        )}
+      >
+        {t('sessions.turnTiming.title', 'Timing')}
+      </div>
+      <dl className="space-y-1.5">
+        {rows.map((row) => {
+          const { label, value, title, warning } = display(row);
+          return (
+            <div
+              key={row.kind}
+              className={cn(
+                stylex.props(activityTypography.caption).className,
+                'flex items-start justify-between gap-3'
+              )}
+            >
+              <dt className="shrink-0 text-muted-foreground">{label}</dt>
+              <dd
+                className={cn(
+                  'min-w-0 text-right font-medium tabular-nums',
+                  warning ? 'text-status-warning' : 'text-foreground'
+                )}
+                title={title}
+                data-stale={warning ? '' : undefined}
+              >
+                {value}
+              </dd>
+            </div>
+          );
+        })}
       </dl>
     </div>
   );
@@ -4282,11 +4642,14 @@ const AssistantTurnTokenUsageRows = ({ usage }: { usage: SessionTurnTokenUsage }
 const AssistantTurnConfigInfoButton = ({
   message,
   sessionId,
+  isLive = false,
   className,
   iconClassName,
 }: {
   message: SessionHistoryParsed;
   sessionId: SessionId;
+  /** The newest, unfinished turn: its timing counts up and reports liveness. */
+  isLive?: boolean;
   className?: string;
   iconClassName?: string;
 }) => {
@@ -4412,7 +4775,8 @@ const AssistantTurnConfigInfoButton = ({
             </p>
           ) : null}
         </dl>
-        {tokenUsage ? <AssistantTurnTokenUsageRows usage={tokenUsage} /> : null}
+        <AssistantTurnTimingRows message={message} isLive={isLive} />
+        {tokenUsage ? <AssistantTurnUsageRows usage={tokenUsage} /> : null}
       </Popover.Content>
     </Popover.Root>
   );
@@ -4514,7 +4878,14 @@ function ProcessDisclosureButton({
     </span>
   );
   const title = (
-    <span className={cn(ACTIVITY_GROUP_LABEL_CLASS(isMobile), shimmer && 'agent-shimmer')}>
+    <span
+      className={cn(
+        ACTIVITY_GROUP_LABEL_CLASS(isMobile),
+        /* The chevron follows the label rather than the column's far edge. */
+        'flex-initial',
+        shimmer && 'agent-shimmer'
+      )}
+    >
       {liveMessage ? <LiveActivityLabel label={label} message={liveMessage} /> : label}
     </span>
   );
@@ -4537,17 +4908,10 @@ function ProcessDisclosureButton({
       }}
       aria-expanded={expanded}
     >
-      {isMobile ? (
-        <>
-          {chevron}
-          {title}
-        </>
-      ) : (
-        <>
-          {title}
-          {chevron}
-        </>
-      )}
+      {/* Label first on every layout: it starts on the prose rail, and the
+          chevron (always shown on touch, hover-only on desktop) trails it. */}
+      {title}
+      {chevron}
     </button>
   );
 }
@@ -4993,10 +5357,27 @@ type LiveActivityMessage = Pick<SessionHistoryParsed, 'timestamp' | 'permissionW
 const LiveActivityLabel = ({ label, message }: { label: string; message: LiveActivityMessage }) => {
   const { t } = useTranslation();
   const now = useStableNow(LIVE_TURN_DURATION_SAMPLE_MS);
+  const liveness = useRunningTurnLiveness(now.getTime());
+  const durationUnitLabels = getDurationUnitLabels(t);
   const durationMs = resolveLiveSessionHistoryDurationMs(message, now.getTime());
-  const duration =
-    durationMs === null ? '' : formatDurationCompact(durationMs, getDurationUnitLabels(t));
+  const duration = durationMs === null ? '' : formatDurationCompact(durationMs, durationUnitLabels);
   if (!duration) return <>{label}</>;
+  /* A long quiet stretch is not proof of a stuck turn (a lint gate can run
+     for minutes), so this only states the fact; the turn popover carries the
+     detail and the warning tone. */
+  const silenceMs = liveness ? resolveTurnSilenceMs(liveness) : null;
+  if (silenceMs !== null) {
+    return (
+      <>
+        {t('sessions.activityWithDurationSilent', {
+          label,
+          duration,
+          silence: formatSilenceCompact(silenceMs, durationUnitLabels),
+          defaultValue: '{{label}} (Worked for {{duration}} · no output for {{silence}})',
+        })}
+      </>
+    );
+  }
   return (
     <>
       {t('sessions.activityWithDuration', {
@@ -5067,6 +5448,7 @@ export const AssistantTurnFooter = ({
   showDuration,
   isLive = false,
   isTurnHovered,
+  isLatestTurn = false,
   onFork,
   forkWorktreeAvailability = 'hidden',
   onForkWorktreeMenuOpen,
@@ -5081,6 +5463,8 @@ export const AssistantTurnFooter = ({
   /** This turn is the live one: its duration slot counts up. */
   isLive?: boolean;
   isTurnHovered: boolean;
+  /** The conversation's newest assistant turn: on mobile its actions rest visible. */
+  isLatestTurn?: boolean;
   onFork?: (turnId: string, destination?: SessionForkDestination) => void;
   forkWorktreeAvailability?: SessionForkWorktreeAvailability;
   onForkWorktreeMenuOpen?: () => void;
@@ -5089,6 +5473,7 @@ export const AssistantTurnFooter = ({
   const { t, i18n } = useTranslation();
   const { copyContext } = useContext(SessionChatActionContext);
   const isMobile = useIsMobile();
+  const mobileActionsRevealed = useMobileMessageActionsRevealed(message.id);
   const [didCopy, setDidCopy] = useState(false);
   const textContent = useMemo(() => {
     const contentItems = buildAssistantMessageRenderItems(message.items).map(
@@ -5130,6 +5515,10 @@ export const AssistantTurnFooter = ({
     (durationLabel.length > 0 && (isMobile || showDuration)) ||
     hasTurnConfigInfo;
   const showActionBar = hasActionBarContent || onFork !== undefined || !!copyContext;
+  /* Touch has no hover: only the newest turn's buttons rest visible, and a tap
+     on an older turn reveals its own. The duration slot always stays. */
+  const mobileButtonsHidden =
+    isMobile && !isLatestTurn && !mobileActionsRevealed && !(showFinishedMetadata && isForking);
 
   const handleCopy = useCallback(async () => {
     if (!hasCopyableText) return;
@@ -5172,7 +5561,8 @@ export const AssistantTurnFooter = ({
             ),
             isMobile ? 'min-h-6 gap-1' : 'min-h-7 gap-2',
             !isMobile && 'opacity-0 transition-opacity duration-150 focus-within:opacity-100',
-            !isMobile && (isTurnHovered || (showFinishedMetadata && isForking)) && 'opacity-100'
+            !isMobile && (isTurnHovered || (showFinishedMetadata && isForking)) && 'opacity-100',
+            isMobile && stylex.props(conversationSurface.mobileTurnActions).className
           )}
           data-assistant-turn-actions
         >
@@ -5202,7 +5592,14 @@ export const AssistantTurnFooter = ({
           {/* Keep the leading button inside the column; only the trailing hover
              area bleeds into the metadata gap. Mobile retains its leading slot. */}
           {hasCopyableText || hasTurnConfigInfo || onFork || copyContext ? (
-            <div className="flex items-center gap-0.5 -mr-[7px]">
+            <div
+              className={cn(
+                'flex items-center gap-0.5 -mr-[7px]',
+                /* `invisible` keeps the row's height: revealing never shifts the list. */
+                mobileButtonsHidden && 'invisible'
+              )}
+              data-mobile-actions-hidden={mobileButtonsHidden ? '' : undefined}
+            >
               {showStreamingContextCopy ? (
                 <Tooltip.Provider>
                   <Tooltip.Root>
@@ -5264,6 +5661,7 @@ export const AssistantTurnFooter = ({
                 <AssistantTurnConfigInfoButton
                   message={message}
                   sessionId={sessionId}
+                  isLive={isLive}
                   className="h-7 w-7"
                 />
               ) : null}
@@ -5356,6 +5754,8 @@ interface AssistantChatItemProps {
   onWorkedGroupExpandedChange: (messageId: string, segmentKey: string, expanded: boolean) => void;
   isTurnHovered: boolean;
   onTurnHoverChange: (messageId: string, hovered: boolean) => void;
+  /** The conversation's newest assistant turn: on mobile its actions rest visible. */
+  isLatestTurn: boolean;
   conversationFontSize: ConversationFontSize;
   /** This row is the live turn's collapsed bottom group: shimmer its label. */
   shimmerGroupHeader?: boolean;
@@ -5451,6 +5851,7 @@ const areAssistantChatItemPropsEqual = (
   prev.isForking === next.isForking &&
   prev.isTurnHovered === next.isTurnHovered &&
   prev.onTurnHoverChange === next.onTurnHoverChange &&
+  prev.isLatestTurn === next.isLatestTurn &&
   prev.conversationFontSize === next.conversationFontSize &&
   prev.shimmerGroupHeader === next.shimmerGroupHeader &&
   prev.liveStatusFollowsSurface === next.liveStatusFollowsSurface &&
@@ -5472,6 +5873,7 @@ const AssistantChatItem = memo(function AssistantChatItem({
   onWorkedGroupExpandedChange,
   isTurnHovered,
   onTurnHoverChange,
+  isLatestTurn,
   conversationFontSize,
   shimmerGroupHeader = false,
   liveStatus = null,
@@ -5479,6 +5881,7 @@ const AssistantChatItem = memo(function AssistantChatItem({
 }: AssistantChatItemProps) {
   const message = row.item.message;
   const { content } = row;
+  const isMobile = useIsMobile();
   const handleMouseLeave = (event: ReactMouseEvent<HTMLDivElement>) => {
     const nextTurn =
       event.relatedTarget instanceof Element
@@ -5597,6 +6000,7 @@ const AssistantChatItem = memo(function AssistantChatItem({
               showDuration={content.showDuration}
               isLive={content.isLive}
               isTurnHovered={isTurnHovered}
+              isLatestTurn={isLatestTurn}
               onFork={onFork}
               forkWorktreeAvailability={forkWorktreeAvailability}
               onForkWorktreeMenuOpen={onForkWorktreeMenuOpen}
@@ -5655,13 +6059,20 @@ const AssistantChatItem = memo(function AssistantChatItem({
         row.isFirstRowForMessage && conversationSurface.firstRow,
         row.isLastRowForMessage && conversationSurface.lastRow,
         row.endsRound &&
-          (content.kind === 'footer'
+          (content.kind === 'footer' && !isMobile
             ? conversationSurface.roundFooterRow
             : conversationSurface.roundLastRow)
       )}
       data-assistant-turn-id={message.id}
       onMouseEnter={() => onTurnHoverChange(message.id, true)}
       onMouseLeave={handleMouseLeave}
+      onClick={
+        isMobile
+          ? (event) => {
+              if (isMessageActionsToggleTap(event.target)) toggleMobileMessageActions(message.id);
+            }
+          : undefined
+      }
     >
       <div className={cn('w-full', hasWideContent && 'scrollbar-pro overflow-x-auto')}>
         <div
@@ -5681,7 +6092,10 @@ const AssistantChatItem = memo(function AssistantChatItem({
           style={conversationTextFontSizeStyle(conversationFontSize)}
           data-native-selection-allow
         >
-          {row.endsRound && content.kind === 'footer' ? (
+          {/* Desktop footer actions rest hidden, so they may sit inside the round
+              reserve. Mobile always shows the footer: the reserve goes below it
+              (`roundLastRow` above) or the next round reads as crowded. */}
+          {row.endsRound && content.kind === 'footer' && !isMobile ? (
             <div {...stylex.props(conversationSurface.roundFooter)}>{rowBody}</div>
           ) : (
             rowBody
@@ -5692,7 +6106,7 @@ const AssistantChatItem = memo(function AssistantChatItem({
   );
 }, areAssistantChatItemPropsEqual);
 
-const UserChatBubble = ({
+export const UserChatBubble = ({
   message,
   sessionId,
   conversationFontSize,
@@ -5703,7 +6117,7 @@ const UserChatBubble = ({
    */
   variant = 'full',
 }: {
-  message: SessionHistoryParsed;
+  message: Pick<SessionHistoryParsed, 'id' | 'items'>;
   sessionId: SessionId;
   conversationFontSize: ConversationFontSize;
   variant?: 'full' | 'attachments';
@@ -6863,9 +7277,7 @@ const UserPlainTextBlock = ({
           )}
           style={{
             ...conversationReadingFontSizeStyle(fontSize),
-            ...(isLong && !isFullTextVisible
-              ? { maxHeight: userTextCollapsedHeight(fontSize) }
-              : {}),
+            ...(isLong && !isFullTextVisible ? userTextCollapsedStyle(fontSize) : {}),
           }}
           data-search-block-id={searchBlockId}
         >

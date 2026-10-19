@@ -1,19 +1,14 @@
 import { useAtom, useAtomValue } from 'jotai';
 import { useTranslation } from 'react-i18next';
 import { Switch } from '@lody/ui/switch';
-import {
-  experimentalFeaturesEnabledAtom,
-  roostHistoryExperimentEnabledAtom,
-} from '@/atoms/settings';
+import { experimentalFeaturesEnabledAtom } from '@/atoms/settings';
 import { CompactRow, CompactSection } from './compact-layout';
 
 /**
  * User-facing experimental features.
  *
- * Unlike the Developer-mode beta section, the master switch is always visible:
- * a feature nobody can find is a feature nobody evaluates. Turning the master
- * switch off hides the list but keeps each opt-in, so flipping it back on
- * restores the previous choices rather than silently resetting them.
+ * Unlike the Developer-mode beta section, the master switch is always visible.
+ * It does not control developer-only features.
  */
 export function ExperimentalFeaturesSection() {
   const { t } = useTranslation();
@@ -24,38 +19,19 @@ export function ExperimentalFeaturesSection() {
   );
 }
 
-/** The master switch and, while it is on, each feature's own switch. */
+/** The user-facing experimental features master switch. */
 export function ExperimentalFeatureRows() {
   const { t } = useTranslation();
   const [experimentalEnabled, setExperimentalEnabled] = useAtom(experimentalFeaturesEnabledAtom);
-  const [roostHistoryEnabled, setRoostHistoryEnabled] = useAtom(roostHistoryExperimentEnabledAtom);
 
   return (
-    <>
-      <CompactRow label={t('settings.experimental.enable', 'Enable experimental features')}>
-        <Switch
-          checked={experimentalEnabled}
-          onCheckedChange={setExperimentalEnabled}
-          aria-label={t('settings.experimental.enable', 'Enable experimental features')}
-        />
-      </CompactRow>
-
-      {experimentalEnabled ? (
-        <CompactRow
-          label={t('settings.experimental.roostHistory', 'Roost history')}
-          helper={t(
-            'settings.experimental.roostHistoryHelper',
-            'Use Roost for new conversations. Existing conversations keep their current history backend.'
-          )}
-        >
-          <Switch
-            checked={roostHistoryEnabled}
-            onCheckedChange={setRoostHistoryEnabled}
-            aria-label={t('settings.experimental.roostHistory', 'Roost history')}
-          />
-        </CompactRow>
-      ) : null}
-    </>
+    <CompactRow label={t('settings.experimental.enable', 'Enable experimental features')}>
+      <Switch
+        checked={experimentalEnabled}
+        onCheckedChange={setExperimentalEnabled}
+        aria-label={t('settings.experimental.enable', 'Enable experimental features')}
+      />
+    </CompactRow>
   );
 }
 

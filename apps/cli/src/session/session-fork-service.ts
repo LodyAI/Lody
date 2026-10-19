@@ -235,10 +235,10 @@ export class SessionForkService {
    * each room and pull each stream (see ../lib/loro/AGENTS.md). Recovery stays
    * O(in-flight forks), never O(session docs).
    *
-   * Race discipline (same rules as the speculative-worktree sweep): every
-   * candidate is re-read under `withForkOperationLock`, and liveness comes from
-   * `activeOperations`, never from timestamps — a same-target retry that
-   * already restarted must never be rolled back as "interrupted".
+   * Race discipline: every candidate is re-read under `withForkOperationLock`,
+   * and liveness comes from `activeOperations`, never from timestamps — a
+   * same-target retry that already restarted must never be rolled back as
+   * "interrupted".
    */
   async recoverPendingForks(): Promise<void> {
     let markers: SessionForkOperationMarker[];
@@ -876,6 +876,7 @@ export class SessionForkService {
             mcpServerIds: resolveSessionMcpSelection(historyResult.history),
             customAcp: agentConfig.customAcp,
             runtimeOverrides: agentConfig.runtimeOverrides,
+            magpieGatewayUrl: agentConfig.magpieGatewayUrl,
             env: agentConfig.env,
             project: source.project,
             sessionId: targetSessionId,
@@ -1017,6 +1018,7 @@ export class SessionForkService {
       mcpServerIds: resolveSessionMcpSelection(historyResult.history),
       customAcp: agentConfig.customAcp,
       runtimeOverrides: agentConfig.runtimeOverrides,
+      magpieGatewayUrl: agentConfig.magpieGatewayUrl,
       env: agentConfig.env,
       project: targetProject,
       sessionId: targetSessionId,

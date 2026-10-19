@@ -34,6 +34,7 @@ import {
 } from './account-setting-pure';
 import { WorkspaceJoinRequestsSettings } from './workspace-join-requests-settings';
 import { WorkspaceOwnershipTransfer } from './workspace-ownership-transfer';
+import { DeletedWorkspaceBilling } from './deleted-workspace-billing';
 import { AccountMachinesOverview } from './account-machines-overview';
 
 const styles = stylex.create({
@@ -42,6 +43,26 @@ const styles = stylex.create({
 
 const getInviteLink = (invitation: Invitation) => getAppShareUrl(`/invite/${invitation.id}`);
 const FREE_WORKSPACE_MEMBER_LIMIT_REACHED_CODE = 'free_workspace_member_limit_reached';
+
+type UpdateUserAvatarState = {
+  url: string;
+  updateUser: (input: { image: string }) => Promise<{ error: { message?: string } | null }>;
+  refetchSession: () => Promise<unknown>;
+  refetchActiveOrganization: () => Promise<unknown>;
+};
+
+export async function persistUserAvatar({
+  url,
+  updateUser,
+  refetchSession,
+  refetchActiveOrganization,
+}: UpdateUserAvatarState): Promise<string> {
+  const { error } = await updateUser({ image: url });
+  if (error) throw new Error(error.message ?? 'Failed to update avatar');
+  void refetchSession();
+  void refetchActiveOrganization().catch(console.error);
+  return url;
+}
 
 export function AccountSettingsComponent({
   surface = 'account',
@@ -83,15 +104,14 @@ function CloudAccountSettings({ surface }: { surface: AccountSettingsSurface }) 
     cloudOperations.billing.getWorkspaceMemberLimitState,
     activeOrganizationId ? { workspaceId: activeOrganizationId } : 'skip'
   );
-  // Accepting an invitation adds a billed seat and Stripe invoices the
-  // prorated difference immediately, so the invite dialog quotes it up front.
+  // Admission accrues any additional seat fee; collection is deferred to the billing date.
   const seatInvitePreview = useCloudQuery(
     cloudOperations.billing.getWorkspaceSeatInvitePreview,
     activeOrganizationId ? { workspaceId: activeOrganizationId } : 'skip'
   );
   // Deleting a paid workspace needs a billing-aware guard: a live subscription
   // blocks deletion (cancel first); a cancel-scheduled one gets a warning that
-  // deleting now ends it immediately.
+  // deletion preserves its scheduled end and any accrued charges.
   const billingOverview = useCloudQuery(
     cloudOperations.billing.getBillingOverview,
     activeOrganizationId ? { workspaceId: activeOrganizationId } : 'skip'
@@ -379,15 +399,25 @@ function CloudAccountSettings({ surface }: { surface: AccountSettingsSurface }) 
         file,
       });
       if (kind === 'user') {
-        const { error } = await authClient.updateUser({ image: url });
-        if (error) throw new Error(error.message ?? 'Failed to update avatar');
-        void refetchSession();
+        await persistUserAvatar({
+          url,
+          updateUser: (input) => authClient.updateUser(input),
+          refetchSession,
+          refetchActiveOrganization,
+        });
       } else {
         await updateOrganization(activeOrganizationId, { logo: url });
       }
       return url;
     },
-    [activeOrganizationId, authClient, refetchSession, sessionToken, updateOrganization]
+    [
+      activeOrganizationId,
+      authClient,
+      refetchActiveOrganization,
+      refetchSession,
+      sessionToken,
+      updateOrganization,
+    ]
   );
 
   const handleChangePassword = useCallback(
@@ -671,7 +701,12 @@ function CloudAccountSettings({ surface }: { surface: AccountSettingsSurface }) 
   }
 
   if (!activeOrganization) {
-    return <p {...stylex.props(styles.empty)}>No organization</p>;
+    return (
+      <>
+        <p {...stylex.props(styles.empty)}>No organization</p>
+        {surface === 'account' && billingUiAvailable ? <DeletedWorkspaceBilling /> : null}
+      </>
+    );
   }
 
   return (
@@ -684,6 +719,9 @@ function CloudAccountSettings({ surface }: { surface: AccountSettingsSurface }) 
       members={sortedMembers}
       pendingInvitations={pendingInvitations}
       accountMachinesSlot={surface === 'account' ? <AccountMachinesOverview /> : undefined}
+      accountBillingSlot={
+        surface === 'account' && billingUiAvailable ? <DeletedWorkspaceBilling /> : undefined
+      }
       workspaceOwnershipSlot={
         role === 'owner' && currentUserId ? (
           <WorkspaceOwnershipTransfer

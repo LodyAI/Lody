@@ -2,7 +2,7 @@ import { SessionPendingSendsHost } from '../components/chat/session-pending-send
 import { useEffect, useRef, type ReactNode } from 'react';
 import { useAtomValue, useSetAtom, useStore } from 'jotai';
 import { LODY_PRESENCE_HEARTBEAT_MS, type MachineId, type WorkspaceId } from '@lody/shared';
-import { authTokenAtom, runtimeAtom } from '@/atoms/runtime';
+import { authTokenAtom, runtimeAtom, workspaceRuntimeInitFailureAtom } from '@/atoms/runtime';
 import { setSessionRunConfigDraftAccountAtom } from '@/atoms/session-run-config-drafts';
 import { currentWorkspaceIdAtom, currentWorkspaceSlugAtom, userAtom } from '@/atoms';
 import {
@@ -29,6 +29,7 @@ import {
 } from '@/atoms/control-connection';
 import { API_BASE_URL } from '@/lib';
 import { getCachedWorkspaceId } from '@/lib/local-storage-cache';
+import { recordClientLog } from '@/lib/client-log';
 import { usePostHog } from '@posthog/react';
 import { createWorkspaceRuntime } from './create-workspace-runtime';
 import { resolveCloudPlatformRuntimePolicy } from './cloud-platform-runtime-policy';
@@ -38,6 +39,7 @@ import { getLocalWorkspaceSlug, useImplicitLocalWorkspace } from './local-platfo
 import { isWarmWindow } from '@/lib/desktop-window';
 import { capturePostHogEvent } from '@/lib/posthog-analytics';
 import { maybeClearLodyCacheOnBoot } from '@/lib/clear-local-cache';
+import { describeErrorType } from '@/lib/workspace-data-scope';
 import { isElectronRenderer } from '@/lib/electron';
 import { isNativeAppShell } from '@/lib/native-platform';
 import { usePlatform } from '@lody/platform/react';
@@ -56,7 +58,9 @@ const logRuntimeOperationError = (operation: string, error: unknown): void => {
     console.info(`RuntimeProvider: ${operation} skipped during shutdown`);
     return;
   }
-  console.error(`RuntimeProvider: ${operation} failed`, error);
+  const errorType = describeErrorType(error);
+  console.error(`RuntimeProvider: ${operation} failed`, { errorType });
+  recordClientLog('error', 'runtime.operation_failed', undefined, { operation, errorType });
 };
 
 const resolveRuntimeEagerSyncSurface = (): EagerSyncSurface => {
@@ -80,9 +84,11 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
   const localAgentEnabled = useAtomValue(localAgentEnabledAtom);
   const token = useAtomValue(authTokenAtom);
   const currentUser = useAtomValue(userAtom);
-  const previousShutdown = useRef<Promise<void>>(Promise.resolve());
+  // A failed owner fences only its storage, and remains retryable on return.
+  const retiringWorkspaces = useRef(new Map<string, Set<() => Promise<void>>>());
   const runtime = useAtomValue(runtimeAtom);
   const setRuntime = useSetAtom(runtimeAtom);
+  const setRuntimeInitFailure = useSetAtom(workspaceRuntimeInitFailureAtom);
   const store = useStore();
   const setControlConnectionState = useSetAtom(lodyControlConnectionStateAtom);
   const setRuntimeInitializing = useSetAtom(runtimeInitializingAtom);
@@ -232,6 +238,8 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
   // - If cached id exists for this slug: initialize immediately (offline-first)
   // - Otherwise: wait for server to respond with workspaceId
   useEffect(() => {
+    // A failure describes one attempt; every new attempt starts without one.
+    setRuntimeInitFailure(null);
     if (!workspaceSlug) {
       console.info('RuntimeProvider: clear runtime due to missing workspaceSlug');
       setRuntime(null);
@@ -266,6 +274,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
       return undefined;
     }
 
+    const retirements = retiringWorkspaces.current;
     let disposed = false;
     const initializationAbort = new AbortController();
     let workspaceRuntime: Awaited<ReturnType<typeof createWorkspaceRuntime>> | null = null;
@@ -277,7 +286,15 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
 
     const initialization = (async () => {
       try {
-        await previousShutdown.current;
+        const retired = retirements.get(effectiveWorkspaceId);
+        if (retired) {
+          const outcomes = await Promise.allSettled([...retired].map((close) => close()));
+          const failures = outcomes.flatMap((outcome) =>
+            outcome.status === 'rejected' ? [outcome.reason] : []
+          );
+          if (failures.length)
+            throw new AggregateError(failures, 'Previous workspace cleanup failed');
+        }
         if (disposed) return;
         // If the user requested a cache clear before the last reload, delete all
         // lody* IndexedDB + Cache Storage now — before the runtime opens the repo
@@ -380,6 +397,10 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
           return;
         }
         setRuntime(null);
+        setRuntimeInitFailure({
+          workspaceSlug,
+          errorType: describeErrorType(error),
+        });
         setControlConnectionState('error');
         setRuntimeInitializing(false);
       }
@@ -397,10 +418,25 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
       setRuntimeInitializing(true);
       clearDocMetaCache();
       clearPresenceStates();
-      previousShutdown.current = initialization.then(async () => {
-        if (workspaceRuntime) await workspaceRuntime.dispose();
-      });
-      void previousShutdown.current.catch((error: unknown) => {
+      const retired = retirements.get(effectiveWorkspaceId) ?? new Set();
+      retirements.set(effectiveWorkspaceId, retired);
+      let receipt: Promise<void> | undefined;
+      const close = (): Promise<void> => {
+        if (receipt) return receipt;
+        receipt = initialization
+          .then(async () => {
+            if (workspaceRuntime) await workspaceRuntime.dispose();
+            retired.delete(close);
+            if (!retired.size && retirements.get(effectiveWorkspaceId) === retired)
+              retirements.delete(effectiveWorkspaceId);
+          })
+          .finally(() => {
+            receipt = undefined;
+          });
+        return receipt;
+      };
+      retired.add(close);
+      void close().catch((error: unknown) => {
         logRuntimeOperationError('cleanup dispose', error);
       });
     };
@@ -413,6 +449,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
     setControlConnectionState,
     setRuntimeInitializing,
     setRuntime,
+    setRuntimeInitFailure,
     setPresenceStates,
     setPresenceSyncState,
     store,

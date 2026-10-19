@@ -2,6 +2,7 @@ import { useCallback, useMemo } from 'react';
 import { useAtomValue } from 'jotai';
 import { selectAtom } from 'jotai/utils';
 import {
+  getAgentRoleTargets,
   listAccessibleAgentRoles,
   machineSupportsMemoryProviders,
   resolveAgentRoleAvailability,
@@ -47,6 +48,10 @@ export function useWorkspaceAgentRoles(): WorkspaceAgentRolesSnapshot {
 }
 
 export type AgentRoleAvailabilityResolver = {
+  /**
+   * Availability of the Role's inline (first or bound) target. Pass a Role
+   * bound with `bindAgentRoleTarget` to judge another machine's target.
+   */
   resolve: (role: AgentRole) => AgentRoleAvailability;
 };
 
@@ -64,7 +69,15 @@ export function useAgentRoleAvailability(
   roles: readonly AgentRole[]
 ): AgentRoleAvailabilityResolver {
   const roleMachineIdsKey = useMemo(
-    () => [...new Set(roles.map((role) => role.machineId))].filter(Boolean).sort().join('\0'),
+    () =>
+      [
+        ...new Set(
+          roles.flatMap((role) => getAgentRoleTargets(role).map((target) => target.machineId))
+        ),
+      ]
+        .filter(Boolean)
+        .sort()
+        .join('\0'),
     [roles]
   );
   const roleMachineIds = useMemo(

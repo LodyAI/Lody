@@ -1,47 +1,76 @@
-# E2EE foundations
+# E2EE core
 
-Contract: [foundation Spec](../../specs/e2ee-foundations.md). Entry map: [README](README.md).
+`CLAUDE.md` is a symlink to this file. Edit `AGENTS.md` only.
 
-- This package has no production entrypoint, transport host, snapshot trust,
-  private-key export or signing API. Keep the root export map explicit; ledger
-  records/replay live only under the explicit `./ledger` subentry. Local submission
-  workflow/storage live under `./submission` and `./submission/sqlite`; the root stays platform-neutral.
-- Preserve candidate wire algorithms, domains and versions. Expected malformed
-  input returns Effect 4 Result errors; never silently repair or downgrade bytes.
-- Enforce CBOR limits before full expansion or copying: charge shared values by
-  their expanded wire size and reject cycles without unbounded traversal.
-- Trusted Org genesis, resource, epoch, purpose and signer come from the caller's
-  independently verified context. Frame metadata is unverified. Signature success
-  establishes neither current permission nor AEAD validity.
-- Ed25519 requires canonical nonzero prime-subgroup A and canonical prime-subgroup
-  R with `zip215: false`. No caller-supplied point cache or verifier bypass.
-- Public byte wrappers own copies. Secret epoch keys have no public byte export;
-  native private-key custody belongs to platform adapters, not this module.
-- Tests use fixed synthetic vectors and negative cases. Record extraction changes
-  and source SHA-256 fingerprints in provenance.json; never copy private designs,
-  captured transcripts, Lab hosts or unrelated candidate modules.
+Start at the [reading guide](README.md) ([中文](README.zh.md)): it indexes the
+whitepaper, Specs, decisions and this package's docs. Contract:
+[foundations Spec](../../specs/e2ee-foundations.md). Rationale for the layout:
+[service architecture note](../../.agents/notes/implemented/architecture/2026-10-16-e2ee-core-service-architecture.md).
 
-- Content crypto lives in `src/crypto`; ledger work uses its own directory/entry.
-  AEAD primitives do not authenticate authors or grant permissions. Use trusted
-  caller scope/header and retain v0 key/AAD domains. New seals require host secure
-  randomness; no nonce override, plaintext fallback or implicit retry encryption.
-  Keep derived key material opaque, and validate size before copying large inputs.
+## Structure
 
-- Ledger authority starts only at caller-pinned genesis plus an expected head/count,
-  or a module-created verified view. No arbitrary-state constructor, injected verifier,
-  snapshot placeholder, or journal-derived trust. Failed suffixes preserve the prior view.
-- Reject legacy non-atomic member removal; its replacement belongs to P12.
+- Entries are exactly `.` (workflows), `./services` (ports), `./protocol`,
+  `./host`, `./adapters/node-sqlite`, `./adapters/loro-streams` and the unstable
+  `./internal`. Add an export only to the entry whose role it serves.
+- Protocol code is pure (Result, plus Effect only for async crypto/verification)
+  and imports no service or adapter. Workflows depend only on protocol code and
+  `services/` tags; never on an adapter, Node API or SQLite. Adapters never decide
+  authority. `./host` stays platform-neutral.
+- Every remote system, platform capability and local store is a port. Do not
+  add a workflow input that bypasses one (callbacks, paths, SDK objects).
+- Workflows capture ports once with `own()`, declare complete failure unions,
+  use `Effect.fn('@lody/e2ee-core/<Service>.<method>')` for public ledger/key workflow methods and
+  `Effect.fnUntraced` internally, and never call `Effect.run*`.
+- Close behavior is part of the contract: the admission gate (waits) only where
+  native protection is borrowed; the close guard elsewhere.
+- `KeyProtector` and `CandidateProtector` stay distinct ports: an unpublished
+  rotation key is never protected through the installed-key capability.
 
-- Submission persists original signed bytes before CAS, retries exact bytes, and
-  reads back before reporting success. Conflicts never re-sign. Terminal result,
-  pending removal and verified rollback pin save atomically; explicit consumption
-  is required. Application Scope owns storage; closing never deletes pending.
-- Journal bytes/checkpoints do not establish permissions. Reverify complete history
-  from external trusted genesis, including stored terminal results. No legacy-state
-  import, checkpoint restore, implicit repinning or bad-history skipping.
+## Documentation
 
-- HPKE is the fixed Base X25519/HKDF-SHA-256/ChaCha20-Poly1305 epoch
-  primitive, not an authorized envelope workflow. Keep the existing info and
-  canonical AAD; never accept an algorithm/info override. Caller-owned native
-  device key handles stay external; no key generation, storage or delivery here.
-  Await non-cancellable native work and temporary-buffer cleanup on interruption.
+- Every public export, namespace export and service member has JSDoc; `test/public-docs.test.ts` enforces it and that
+  `docs/surface*.md` lists exactly each entry's exports. Presence is not quality:
+  explain ownership, failure and retry semantics when applicable. Update the bilingual
+  docs (`README*`, `docs/*`) in the same change as the behavior or surface.
+- Port contracts live in their JSDoc and `docs/services.md`; backend rules in
+  `docs/backend-guide.md` and `./host`. Keep them in agreement with the code.
+
+## Invariants
+
+- Preserve wire algorithms, domains and versions. Expected malformed input
+  returns typed errors; never silently repair or downgrade bytes. Current format
+  only: no legacy import, conversion or downgrade.
+- Enforce CBOR limits before full expansion or copying; charge shared values by
+  expanded size and reject cycles without unbounded traversal.
+- Trusted genesis, resource, epoch, purpose and signer come from independently
+  verified context; frame metadata is unverified. A valid signature establishes
+  neither permission nor AEAD validity.
+- Ed25519 requires canonical nonzero prime-subgroup A and R and S<L
+  (`zip215: false`); fixed native Effects and private exact caches keep these checks.
+- Byte wrappers own copies. Epoch keys have no public byte export; private keys
+  stay with the platform. Every key copy and plaintext buffer is disposed with
+  `acquireUseRelease`; native calls are uninterruptible.
+- Ledger authority starts only at caller-pinned genesis plus expected head/count,
+  or a module-created view. `VerifiedLedger` is the only source of ledger state
+  for workflows; it remembers genuine views even when the pin write fails.
+- Historical attribution and epoch packets come only from verified views.
+  Revocation keeps old author identity but grants no current write permission;
+  Recovery and Guest never write; a required rotation blocks new seals.
+- Documents: current write/rotation checks precede encryption and repeat after
+  signing; historical signature evidence is neither permission nor AEAD validity.
+  Host admission (header 3 batches, position-bound header 4 snapshots) checks the
+  genuine current writer, submitting signer, resource/model/epoch and the complete
+  original before forwarding. Snapshot publication keeps exact signer/offset/digest
+  identities; uncertain native outcomes stay Pending; one owner serializes writes.
+- Durable workflows persist exact originals before any network step, retry
+  those bytes, never re-sign, and keep results until explicit acknowledgement.
+  Remote hints never end a task; only genuine ledger changes do.
+- Local store mutations are atomic, verify their own write and binding in the
+  same transaction, and never become authority. No transaction spans crypto or
+  network I/O.
+- Tests use fixed synthetic vectors, real SQLite and crypto, explicit signals;
+  never captured transcripts, real keychains or private designs.
+- TypeScript Worker fixtures preload `test/worker-loader.mjs` to register tsx
+  inside the worker; `--import tsx` alone does not resolve their imports on Node 22.
+
+Module rules: [ledger](src/internal/ledger/AGENTS.md), [keys](src/internal/keys/AGENTS.md).

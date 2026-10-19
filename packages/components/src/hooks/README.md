@@ -18,8 +18,7 @@ preparing, or one queued behind such a send in the same conversation, is held
 only in the runtime's in-memory `pendingSends` and written when ready. Nothing
 persists it: closing the page mid-upload loses it, and the page asks first.
 Archive and delete cancel held sends of their targets and join in-flight writes.
-`use-session-preparation` holds an owned warmup lease; attachment takeover cancels
-and joins it. See the [attachment draft Spec](../../../../specs/session-files.md).
+See the [attachment draft Spec](../../../../specs/session-files.md).
 
 | Area                   | Entry point                                                                                                        | Responsibility                                                                             |
 | ---------------------- | ------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------ |
@@ -229,10 +228,12 @@ still paid for a full summary rebuild — hence the leading-edge throttle on the
 anchored to the last emit. The permission candidate is a fresh object per scan, so
 depending on it re-runs the payload memo every render.
 
-The 250ms bridge debounce stays for a different job: a flush lands in the commit
-after the change that requested it, and without the debounce the bridge gets both,
-the stale one marking the alert shown so the fresh one is dropped by the
-already-alerted early return.
+The 250ms bridge debounce coalesces the render requesting a flush with its committed
+snapshot. Permission candidates only accelerate that snapshot; they never add an
+alert. Ordinary Push owns reminders. The previous alert-key Set and early return
+were removed because they both duplicated reminders and froze other conversations
+while one request was pending. The optional bridge alert field remains for legacy
+native clients, but this hook never sends it.
 
 `iosLiveActivitiesEnabledAtom` defaults to true, so without the native-shell check
 every desktop build would rebuild a summary it can never show. The activity id is

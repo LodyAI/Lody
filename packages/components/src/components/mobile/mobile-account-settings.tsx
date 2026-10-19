@@ -67,6 +67,7 @@ export function MobileAccountSettings({
   workspaceJoinRequestsSlot,
   workspaceOwnershipSlot,
   accountMachinesSlot,
+  accountBillingSlot,
   memberLimit = null,
   memberLimitReached = false,
   billingUiAvailable = true,
@@ -443,7 +444,12 @@ export function MobileAccountSettings({
         </MobileSettingsSection>
       ) : null}
 
-      {surface === 'account' ? accountMachinesSlot : null}
+      {surface === 'account' ? (
+        <>
+          {accountMachinesSlot}
+          {accountBillingSlot}
+        </>
+      ) : null}
 
       {isWorkspaceSurface ? (
         <MobileSettingsSection title={t('settings.workspace.title')}>
@@ -990,7 +996,8 @@ export function MobileAccountSettings({
           <AlertDialog.Header>
             <AlertDialog.Title>{t('workspace.removeMember.title')}</AlertDialog.Title>
             <AlertDialog.Description>
-              {t('workspace.removeMember.description')}
+              {t('workspace.removeMember.description')}{' '}
+              {billingUiAvailable ? t('billing.seatRemovalConsequences') : null}
             </AlertDialog.Description>
           </AlertDialog.Header>
           <AlertDialog.Footer>
@@ -1017,7 +1024,8 @@ export function MobileAccountSettings({
             <AlertDialog.Description>
               {t('workspace.danger.leaveWorkspace.confirmDescription', {
                 workspace: organization.name,
-              })}
+              })}{' '}
+              {billingUiAvailable ? t('billing.seatRemovalConsequences') : null}
             </AlertDialog.Description>
           </AlertDialog.Header>
           <AlertDialog.Footer>
@@ -1061,6 +1069,7 @@ export function MobileAccountSettings({
         onOpenChange={setDeleteDialogOpen}
         workspaceName={organization.name}
         onConfirm={onDeleteOrganization}
+        warningText={billingUiAvailable ? t('billing.workspaceDeletionCharges') : null}
       />
 
       {/* Workspaces with active billing must be managed outside the mobile app. */}

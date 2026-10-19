@@ -39,7 +39,18 @@ export function terminalTextFontSizeStyle(fontSize: ConversationFontSize): CSSPr
   };
 }
 
-/** Collapsed-height cap (px) for long user text, scaled so ~the same line count shows. */
-export function userTextCollapsedHeight(fontSize: ConversationFontSize): number {
-  return Math.round((fontSize / 14) * 160);
+const USER_TEXT_COLLAPSED_LINES = 7;
+
+/**
+ * Collapsed clip for long user text. The height is a whole number of the user
+ * text's own line boxes, so the clip edge falls between rows, and the last row
+ * fades out to say the text continues. A mask, not an overlay, so it needs no
+ * colour matched to the bubble fill.
+ */
+export function userTextCollapsedStyle(fontSize: ConversationFontSize): CSSProperties {
+  const leading = conversationTextToken(conversation.readingLeading, fontSize);
+  return {
+    maxHeight: `calc(${leading} * ${USER_TEXT_COLLAPSED_LINES})`,
+    maskImage: `linear-gradient(to bottom, #000 calc(100% - ${leading}), transparent)`,
+  };
 }

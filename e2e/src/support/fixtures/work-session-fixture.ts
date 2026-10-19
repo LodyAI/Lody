@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { expect } from '@playwright/test';
 import { quoteCommandArgument } from './command-line.js';
+import { isFixtureProcessAlive } from './process-liveness.js';
 
 const execFileAsync = promisify(execFile);
 const SCRIPTED_ACP_ENTRY = resolve(
@@ -23,19 +24,6 @@ export type ScriptedAcpEvent = {
   marker?: string;
   stopReason?: string;
 };
-
-function isProcessAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (error) {
-    return !(
-      error instanceof Error &&
-      'code' in error &&
-      (error as NodeJS.ErrnoException).code === 'ESRCH'
-    );
-  }
-}
 
 export class WorkSessionFixture {
   readonly projectName = 'lody-e2e-work';
@@ -119,6 +107,20 @@ export class WorkSessionFixture {
     return this.readAcpEvents().filter((entry) => entry.event === event);
   }
 
+  async waitForCompletedAgentPrompts(minimumCount = 1): Promise<ScriptedAcpEvent[]> {
+    const completedAgentPrompts = (): ScriptedAcpEvent[] =>
+      this.readAcpEvents().filter(
+        (entry) => entry.event === 'prompt-end' && entry.mode !== 'title'
+      );
+    await expect
+      .poll(() => completedAgentPrompts().length, {
+        timeout: 30_000,
+        intervals: [50, 100, 250, 500],
+      })
+      .toBeGreaterThanOrEqual(minimumCount);
+    return completedAgentPrompts();
+  }
+
   getStartedAgentPids(): number[] {
     return [
       ...new Set(
@@ -132,10 +134,18 @@ export class WorkSessionFixture {
   async expectAgentProcessesExited(pids = this.getStartedAgentPids()): Promise<void> {
     expect(pids.length, 'The scripted ACP process never started').toBeGreaterThan(0);
     await expect
-      .poll(() => pids.filter(isProcessAlive), {
-        timeout: 30_000,
-        intervals: [50, 100, 250, 500],
-      })
+      .poll(
+        async () =>
+          await Promise.all(
+            pids.map(async (pid) =>
+              (await isFixtureProcessAlive(pid, this.acpEventLogPath)) ? pid : null
+            )
+          ).then((results) => results.filter((pid): pid is number => pid !== null)),
+        {
+          timeout: 60_000,
+          intervals: [1_000, 2_000],
+        }
+      )
       .toEqual([]);
   }
 

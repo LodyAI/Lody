@@ -14,9 +14,19 @@ import path from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Flock } from '@loro-dev/flock-wasm';
 import { LoroDoc } from 'loro-crdt';
-import { getLoroMetaStreamId, type WorkspaceId } from '@lody/shared';
-import type { LoroStreamsTokenProvider } from '@lody/platform';
-import { LoroRepo } from 'loro-repo';
+import {
+  CODE_COLLAB_FILE_INDEX_FLOCK_TTL_MS,
+  getCodeCollabFileIndexFlockDocId,
+  getLoroMetaStreamId,
+  getLoroStreamIdForDocId,
+  getSessionRoomId,
+  type SessionId,
+  type WorkspaceId,
+} from '@lody/shared';
+import type { LoroStreamsTokenProviderLegacy } from '@lody/platform';
+import { WorkspaceRepoLegacy as LoroRepo } from '@lody/shared/workspace-data/repo-legacy';
+import { Effect } from 'effect';
+import { nativeTransportHarness } from '../../../packages/shared/test-support/workspace-transport';
 import {
   createCliSqliteRepoStore,
   createDocumentRemoteCursorStore,
@@ -24,6 +34,7 @@ import {
   type DocumentCursorScope,
 } from '../src/lib/loro/sqlite-repo-store';
 import { createCliStreamsTransport } from '../src/lib/loro/streams-transport';
+import type { getLoroSnapshotDiagnostic } from '@lody/shared/loro-sync-errors';
 import type { Logger } from '../src/utils/logger';
 
 const workspaceId = 'ws-replica-checkpoints' as WorkspaceId;
@@ -39,7 +50,7 @@ const tokenProvider = {
   getShardHostSuffix: () => undefined,
   invalidate: () => {},
   createAuthCallback: () => async () => 'streams-jwt',
-} as unknown as LoroStreamsTokenProvider;
+} as unknown as LoroStreamsTokenProviderLegacy;
 
 const toArrayBuffer = (value: Uint8Array): ArrayBuffer => value.slice().buffer as ArrayBuffer;
 
@@ -49,15 +60,50 @@ const metaSnapshotWithA = (): Uint8Array => {
   return server.exportFile();
 };
 
-/** Streams serving `snapshot` at offset 100; catch-up from 100 has nothing new. */
-function createStreamsServer(snapshot: Uint8Array) {
+/**
+ * Streams serving `snapshot` at offset 100; catch-up from 100 has nothing new.
+ * With `missingUntilCreated`, every stream answers 404 until a stream-level PUT
+ * creates it, like a Session the renderer never pre-created.
+ */
+function createStreamsServer(snapshot: Uint8Array, options: { missingUntilCreated?: true } = {}) {
   const requests: URL[] = [];
+  const uploads: { byteLength: number; requestId: string | null }[] = [];
+  const creates: { streamPath: string; ttl: string | null }[] = [];
+  const appends: string[] = [];
+  const created = new Set<string>();
+  const streamPathOf = (url: URL) => url.pathname.replace(/\/(bootstrap|snapshot\/.*)$/, '');
   vi.stubGlobal(
     'fetch',
     vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
       const url = new URL(input instanceof Request ? input.url : input);
       requests.push(url);
+      const streamPath = streamPathOf(url);
+      if (options.missingUntilCreated && !created.has(streamPath)) {
+        if (init?.method === 'PUT' && streamPath === url.pathname) {
+          created.add(streamPath);
+          creates.push({ streamPath, ttl: new Headers(init.headers).get('Stream-TTL') });
+          return new Response(null, {
+            status: 201,
+            headers: {
+              'Content-Type': 'application/octet-stream',
+              'Stream-Next-Offset': '00000000000000000000',
+            },
+          });
+        }
+        return Response.json(
+          { code: 'stream_not_found', message: 'Stream not found' },
+          { status: 404 }
+        );
+      }
+      if (init?.method === 'PUT' && url.pathname.includes('/snapshot/')) {
+        uploads.push({
+          byteLength: (await new Response(init.body).arrayBuffer()).byteLength,
+          requestId: new Headers(init.headers).get('X-Request-ID'),
+        });
+        return new Response(null, { status: 204 });
+      }
       if (init?.method === 'POST') {
+        appends.push(streamPath);
         const headers = new Headers(init.headers);
         return new Response(null, {
           headers: {
@@ -85,6 +131,34 @@ function createStreamsServer(snapshot: Uint8Array) {
           }
         );
       }
+      if (url.searchParams.get('live') === 'sse') {
+        const stream = new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.enqueue(
+              new TextEncoder().encode(
+                `event: control\ndata: ${JSON.stringify({ streamNextOffset: tail100, upToDate: true })}\n\n`
+              )
+            );
+            init?.signal?.addEventListener(
+              'abort',
+              () => {
+                try {
+                  controller.close();
+                } catch {
+                  /* Reader cancellation already closed it. */
+                }
+              },
+              { once: true }
+            );
+          },
+        });
+        return new Response(stream, {
+          headers: {
+            'Content-Type': 'text/event-stream',
+            'Stream-SSE-Data-Encoding': 'base64',
+          },
+        });
+      }
       return new Response(null, {
         headers: {
           'Content-Type': 'application/octet-stream',
@@ -95,7 +169,7 @@ function createStreamsServer(snapshot: Uint8Array) {
     })
   );
   const bootstraps = () => requests.filter((url) => url.pathname.endsWith('/bootstrap')).length;
-  return { bootstraps };
+  return { bootstraps, uploads, creates, appends };
 }
 
 type CliProcess = {
@@ -111,14 +185,15 @@ const originalDataDir = process.env.LODY_DATA_DIR;
 /** One daemon or one-shot command: its own connection and in-memory replica. */
 async function openCliProcess(scope: DocumentCursorScope = 'shared-durable'): Promise<CliProcess> {
   const store = await createCliSqliteRepoStore(workspaceId);
+  const documentRemoteCursorStore = createDocumentRemoteCursorStore(store, scope);
   const repo = await LoroRepo.create({
+    documentRemoteCursorStore,
     storageAdapter: store.storageAdapter,
-    metaDebounceCommitMs: 0,
   });
   const cliProcess = {
     store,
     repo,
-    documentRemoteCursorStore: createDocumentRemoteCursorStore(store, scope),
+    documentRemoteCursorStore,
   };
   openProcesses.add(cliProcess);
   return cliProcess;
@@ -132,19 +207,20 @@ async function closeCliProcess(cliProcess: CliProcess): Promise<void> {
 
 async function withTransport<T>(
   cliProcess: CliProcess,
-  run: (adapter: Awaited<ReturnType<typeof createCliStreamsTransport>>['adapter']) => Promise<T>
+  run: (adapter: ReturnType<typeof nativeTransportHarness>) => Promise<T>
 ): Promise<T> {
   const { adapter } = await createCliStreamsTransport({
     workspaceId,
     tokenProvider,
-    repo: cliProcess.repo,
+    auth: () => Effect.succeed('streams-jwt'),
     documentRemoteCursorStore: cliProcess.documentRemoteCursorStore,
     logger: silentLogger,
   });
+  const transport = nativeTransportHarness(cliProcess.repo, adapter);
   try {
-    return await run(adapter);
+    return await run(transport);
   } finally {
-    await adapter.close();
+    await transport.close();
   }
 }
 
@@ -153,6 +229,9 @@ const syncMeta = (cliProcess: CliProcess) =>
 
 const syncDoc = (cliProcess: CliProcess, docId: string, doc: LoroDoc) =>
   withTransport(cliProcess, (adapter) => adapter.syncDoc(docId, doc));
+
+const syncFlockDoc = (cliProcess: CliProcess, flockDocId: string, flock: Flock) =>
+  withTransport(cliProcess, (adapter) => adapter.syncFlockDoc(flockDocId, flock));
 
 beforeEach(async () => {
   dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'lody-replica-checkpoints-'));
@@ -168,6 +247,64 @@ afterEach(async () => {
 });
 
 describe('CLI Streams checkpoints are bound to the replica that loaded them', () => {
+  it('logs native snapshot stages, request correlation and encoded length without private content', async () => {
+    const secret = 'synthetic-private-cli-document-body';
+    const remote = new LoroDoc();
+    remote.getMap('data').set('private', secret);
+    remote.commit();
+    const server = createStreamsServer(remote.export({ mode: 'snapshot' }));
+    const cliProcess = await openCliProcess();
+    const doc = (await cliProcess.repo.openPersistedDoc('doc-a')).doc;
+    const lines: string[] = [];
+    const logger = new Proxy(silentLogger, {
+      get: (target, key) =>
+        key === 'debug' || key === 'warn'
+          ? (message: string) => {
+              lines.push(message);
+            }
+          : Reflect.get(target, key),
+    });
+    const { adapter } = await createCliStreamsTransport({
+      workspaceId,
+      tokenProvider,
+      auth: () => Effect.succeed('streams-jwt'),
+      documentRemoteCursorStore: cliProcess.documentRemoteCursorStore,
+      logger,
+    });
+    const transport = nativeTransportHarness(cliProcess.repo, adapter);
+    try {
+      expect((await transport.syncDoc('doc-a', doc)).ok).toBe(true);
+      expect(await transport.uploadSnapshot({ kind: 'doc', id: 'doc-a' })).toBe(true);
+      const events = lines.map(
+        (line) =>
+          JSON.parse(line.slice('Streams snapshot '.length)) as ReturnType<
+            typeof getLoroSnapshotDiagnostic
+          >
+      );
+      expect(new Set(events.map((event) => event.stage))).toEqual(
+        new Set(['permission', 'auth', 'head', 'export', 'encode', 'put'])
+      );
+      const completed = events.find(
+        (event) => event.stage === 'put' && event.outcome === 'succeeded'
+      );
+      expect(completed).toMatchObject({
+        snapshotId: expect.any(String),
+        requestOperation: 'put-snapshot',
+        requestId: server.uploads[0]?.requestId,
+        snapshotByteLength: server.uploads[0]?.byteLength,
+        elapsedMs: 0,
+        snapshotElapsedMs: 0,
+        uploadMode: 'total-only',
+      });
+      expect(completed?.snapshotByteLength).toBeGreaterThan(0);
+      expect(completed?.requestId).toEqual(expect.any(String));
+      for (const privateValue of [secret, 'streams-jwt', gatewayBaseUrl, 'fullCause'])
+        expect(lines.join('\n')).not.toContain(privateValue);
+    } finally {
+      await transport.close();
+    }
+  });
+
   it('bootstraps a process that hydrated before another process advanced the shared file', async () => {
     const server = createStreamsServer(metaSnapshotWithA());
     // The one-shot command opens first, while the file is still empty.
@@ -258,5 +395,46 @@ describe('CLI Streams checkpoints are bound to the replica that loaded them', ()
     expect(restarted.repo.getMeta().get(keyA)).toBe('A');
     expect((await syncMeta(restarted)).ok).toBe(true);
     expect(server.bootstraps()).toBe(1);
+  });
+});
+
+describe('CLI Streams rooms create their missing remote stream', () => {
+  // Only the renderer pre-creates a Session doc stream. A Session created by
+  // the CLI or an MCP `lody_session_create` relies on the daemon's first join;
+  // without creation it stays local-only and remote clients get 404 forever.
+  it('creates a Session doc stream the renderer never created and uploads local turns', async () => {
+    const server = createStreamsServer(new LoroDoc().export({ mode: 'snapshot' }), {
+      missingUntilCreated: true,
+    });
+    const daemon = await openCliProcess();
+    const docId = getSessionRoomId('session-created-by-mcp' as SessionId);
+    const doc = (await daemon.repo.openPersistedDoc(docId)).doc;
+    doc.getText('t').insert(0, 'child turn');
+    doc.commit();
+
+    expect((await syncDoc(daemon, docId, doc)).ok).toBe(true);
+    expect(server.creates).toHaveLength(1);
+    const [docStream] = server.creates;
+    expect(docStream?.streamPath).toMatch(
+      new RegExp(`/${encodeURIComponent(getLoroStreamIdForDocId(workspaceId, docId))}$`)
+    );
+    expect(server.appends).toContain(docStream?.streamPath);
+  });
+
+  it('creates a Code Collab file-index stream with its retention TTL', async () => {
+    const server = createStreamsServer(new Flock('server').exportFile(), {
+      missingUntilCreated: true,
+    });
+    const daemon = await openCliProcess();
+    const flockDocId = getCodeCollabFileIndexFlockDocId(workspaceId, 'session-a' as SessionId);
+    const flock = (await daemon.repo.openFlockDoc(flockDocId)).flock;
+
+    expect((await syncFlockDoc(daemon, flockDocId, flock)).ok).toBe(true);
+    expect(server.creates).toEqual([
+      {
+        streamPath: expect.stringContaining(encodeURIComponent(flockDocId)),
+        ttl: String(CODE_COLLAB_FILE_INDEX_FLOCK_TTL_MS / 1000),
+      },
+    ]);
   });
 });

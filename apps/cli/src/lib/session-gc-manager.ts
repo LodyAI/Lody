@@ -46,6 +46,16 @@ import type { MemoryPressureSnapshotSource } from '@/monitor/memory-pressure-sam
  *   neither raw number is grounds for failing a user's turn on its own.
  */
 
+/** Why GC retires a session: idle past its timeout, or evicted under memory pressure. */
+export type SessionCleanupReason = 'idle' | 'memory-pressure';
+
+/**
+ * Memory pressure still never evicts a session used in the last minute. Legacy
+ * one-shot document borrows hold no lease past their call, so this grace keeps
+ * a just-borrowed document from being destroyed under its caller.
+ */
+const MEMORY_PRESSURE_MIN_IDLE_MS = 60_000;
+
 export interface SessionGCConfig {
   /** Idle timeout before a session is fully cleaned up (default: 20 minutes) */
   idleTimeoutMs: number;
@@ -100,7 +110,14 @@ export interface SessionGCDeps {
   hasPendingUpdates: (sessionId: SessionId) => boolean;
   hasPendingUserWork: (sessionId: SessionId) => boolean | Promise<boolean>;
   isArchiveInFlight: (sessionId: SessionId) => boolean;
-  cleanSession: (sessionId: SessionId) => Promise<void>;
+  /**
+   * Retire an idle session. Resolves false when it was kept because a lease
+   * holder, a recent use or a veto surfaced under the session's gate.
+   */
+  cleanSession: (
+    sessionId: SessionId,
+    options: { reason: SessionCleanupReason; minIdleMs: number }
+  ) => Promise<boolean>;
   getSessionIds: () => SessionId[];
   memoryPressure: MemoryPressureSnapshotSource;
   logger: Logger;
@@ -371,8 +388,16 @@ export class SessionGCManager {
       }
 
       try {
-        await this.deps.cleanSession(sessionId);
-        cleaned++;
+        if (
+          await this.deps.cleanSession(sessionId, {
+            reason: 'idle',
+            minIdleMs: this.config.idleTimeoutMs,
+          })
+        ) {
+          cleaned++;
+        } else {
+          skipped++;
+        }
       } catch (error) {
         this.deps.logger.error(
           `[GC] Failed to clean session ${sessionId}: ${formatErrorMessage(error)}`
@@ -470,7 +495,14 @@ export class SessionGCManager {
         this.deps.logger.debug(
           `[GC] Evicting session ${sessionId} (idle ${Math.round(idleMs / 1000)}s) due to memory pressure`
         );
-        await this.deps.cleanSession(sessionId);
+        if (
+          !(await this.deps.cleanSession(sessionId, {
+            reason: 'memory-pressure',
+            minIdleMs: MEMORY_PRESSURE_MIN_IDLE_MS,
+          }))
+        ) {
+          continue;
+        }
         evictedSessionIds.push(sessionId);
         // Re-check memory after eviction
         memorySnapshot = await this.deps.memoryPressure.refresh();

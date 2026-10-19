@@ -8,6 +8,8 @@ const HEADS = 'heads';
 const ROWS = 'rows';
 
 export type RoostCachedHead = {
+  checkpoint?: string;
+  directoryRevision?: number;
   revision: number;
   count: number;
   start: number;
@@ -124,7 +126,13 @@ export function createRoostHistoryCache(scope: string) {
       const request = tx.objectStore(HEADS).get(key('head'));
       request.onsuccess = () => {
         const head = request.result as RoostCachedHead | undefined;
-        if (!head || (before && before.revision !== head.revision)) return done(undefined);
+        if (
+          !head ||
+          (before &&
+            (before.revision > head.revision ||
+              before.revision < (head.directoryRevision ?? head.revision)))
+        )
+          return done(undefined);
         const end = before?.end ?? head.count;
         const start = Math.max(before ? 0 : head.start, end - limit);
         if (end > head.count || start < head.start) return done(undefined);
@@ -155,7 +163,8 @@ export function createRoostHistoryCache(scope: string) {
     page: SessionHistoryDirectoryPage,
     turns: readonly SessionHistoryInput[],
     revision: number,
-    change?: SessionHistoryChange | null
+    change?: SessionHistoryChange | null,
+    replaceSnapshot = false
   ) =>
     transact<boolean>('readwrite', (tx, done) => {
       if (
@@ -183,7 +192,7 @@ export function createRoostHistoryCache(scope: string) {
       request.onsuccess = () => {
         const head = request.result as RoostCachedHead | undefined;
         if (head && head.revision > revision) return done(false);
-        if (head?.revision === revision && head.count !== page.totalCount) {
+        if (!replaceSnapshot && head?.revision === revision && head.count !== page.totalCount) {
           tx.abort();
           return;
         }
@@ -195,6 +204,8 @@ export function createRoostHistoryCache(scope: string) {
           heads.put(
             {
               revision,
+              directoryRevision: revision,
+              ...(page.checkpoint ? { checkpoint: page.checkpoint } : {}),
               count: page.totalCount,
               start: page.startPosition,
               slot: 0,
@@ -203,15 +214,23 @@ export function createRoostHistoryCache(scope: string) {
           );
           return done(true);
         }
-        if (head.revision === revision && head.count === page.totalCount) {
+        if (!replaceSnapshot && head.revision === revision && head.count === page.totalCount) {
           put(head.slot);
           if (end >= head.start)
-            heads.put({ ...head, start: Math.min(head.start, page.startPosition) }, key('head'));
+            heads.put(
+              {
+                ...head,
+                ...(page.checkpoint ? { checkpoint: page.checkpoint } : {}),
+                start: Math.min(head.start, page.startPosition),
+              },
+              key('head')
+            );
           return done(false);
         }
         // A complete consecutive delta can advance the existing projection in
         // place. Streaming normally updates just this latest page.
         const coversDelta =
+          !replaceSnapshot &&
           revision === head.revision + 1 &&
           ((change === null && head.count === page.totalCount) ||
             (change?.kind === 'changed' &&
@@ -228,6 +247,9 @@ export function createRoostHistoryCache(scope: string) {
             {
               ...head,
               revision,
+              directoryRevision:
+                change?.kind === 'structure' ? revision : (head.directoryRevision ?? head.revision),
+              ...(page.checkpoint ? { checkpoint: page.checkpoint } : {}),
               count: page.totalCount,
               start: Math.min(head.start, page.startPosition),
             },
@@ -241,10 +263,22 @@ export function createRoostHistoryCache(scope: string) {
           let staging = pending.result as RoostCachedHead | undefined;
           if (staging && staging.revision > revision) return done(false);
           const slot = 1 - head.slot;
-          if (!staging || staging.revision !== revision || staging.count !== page.totalCount) {
+          if (
+            !staging ||
+            staging.revision !== revision ||
+            staging.count !== page.totalCount ||
+            staging.checkpoint !== page.checkpoint
+          ) {
             if (!isLatest) return done(false);
             store.delete(positions(slot));
-            staging = { revision, count: page.totalCount, start: page.startPosition, slot };
+            staging = {
+              revision,
+              directoryRevision: revision,
+              ...(page.checkpoint ? { checkpoint: page.checkpoint } : {}),
+              count: page.totalCount,
+              start: page.startPosition,
+              slot,
+            };
           } else if (end < staging.start) return done(false);
           staging = { ...staging, start: Math.min(staging.start, page.startPosition) };
           put(slot);
@@ -266,6 +300,96 @@ export function createRoostHistoryCache(scope: string) {
     readPage,
     readRows,
     acceptPage,
+    readAffected: (ids: readonly string[]) =>
+      transact<CachedRow[]>('readonly', (tx, done) => {
+        const request = tx.objectStore(HEADS).get(key('head'));
+        request.onsuccess = () => {
+          const head = request.result as RoostCachedHead | undefined;
+          if (!head || ids.length === 0) return done([]);
+          const found: CachedRow[] = [];
+          let remaining = ids.length;
+          for (const id of ids) {
+            const row = tx.objectStore(ROWS).index('turn').get([scope, head.slot, id]);
+            row.onsuccess = () => {
+              if (row.result) found.push(row.result);
+              if (--remaining === 0) done(found);
+            };
+          }
+        };
+      }),
+    applyChanges: (
+      expected: RoostCachedHead,
+      revision: number,
+      count: number,
+      checkpoint: string,
+      from: number | undefined,
+      replacements: readonly { position: number; turn: SessionHistoryInput }[]
+    ) =>
+      transact<boolean>('readwrite', (tx, done) => {
+        const heads = tx.objectStore(HEADS);
+        const rows = tx.objectStore(ROWS);
+        const request = heads.get(key('head'));
+        request.onsuccess = () => {
+          const head = request.result as RoostCachedHead | undefined;
+          if (
+            !head ||
+            head.slot !== expected.slot ||
+            head.count !== expected.count ||
+            head.revision !== expected.revision ||
+            head.start !== expected.start ||
+            head.checkpoint !== expected.checkpoint ||
+            revision < head.revision
+          )
+            return done(false);
+          if (from === undefined && count !== head.count) {
+            tx.abort();
+            return;
+          }
+          const start =
+            head.start >= count && count > 0
+              ? Math.max(0, count - 40)
+              : Math.min(head.start, count);
+          if (from !== undefined) {
+            const first = Math.max(start, Math.min(from, count));
+            const replacedPositions = new Set(replacements.map((row) => row.position));
+            for (let position = first; position < count; position++) {
+              if (!replacedPositions.has(position)) {
+                tx.abort();
+                return;
+              }
+            }
+            rows.delete(positions(head.slot, Math.min(from, count)));
+          }
+          for (const replacement of replacements) {
+            if (replacement.position < start || replacement.position >= count) {
+              tx.abort();
+              return;
+            }
+            rows.put({
+              scope,
+              slot: head.slot,
+              position: replacement.position,
+              turnId: replacement.turn.id,
+              turn: replacement.turn,
+              row: createRoostDirectoryRow(replacement.position, replacement.turn as SessionEntry),
+            } satisfies CachedRow);
+          }
+          heads.put(
+            {
+              ...head,
+              revision,
+              count,
+              start,
+              checkpoint,
+              directoryRevision:
+                from === undefined ? (head.directoryRevision ?? head.revision) : revision,
+            },
+            key('head')
+          );
+          heads.delete(key('staging'));
+          done(true);
+        };
+      }),
     updateTurns: (revision: number, count: number, turns: readonly SessionHistoryInput[]) =>
       transact<boolean>('readwrite', (tx, done) => {
         const heads = tx.objectStore(HEADS);
@@ -286,7 +410,10 @@ export function createRoostHistoryCache(scope: string) {
                 });
             };
           }
-          heads.put({ ...head, revision }, key('head'));
+          heads.put(
+            { ...head, revision, directoryRevision: head.directoryRevision ?? head.revision },
+            key('head')
+          );
           heads.delete(key('staging'));
           done(true);
         };

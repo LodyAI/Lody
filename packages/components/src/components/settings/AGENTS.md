@@ -62,6 +62,8 @@ rolls back — is in the root [AGENTS.md](../../../../../AGENTS.md).
   names stay on the default interface font. Five tiers write `--ui-font-size`;
   sizes use `@lody/ui` text tokens. Font ligatures in the Text group writes
   `--lody-font-ligatures` for conversation, code, and tool output.
+- Quota UI requires Core `rateLimits`; refresh also requires `query: true`.
+  Keep cached values while the shared Provider RPC refreshes.
 - Provider rows show identity, read-only remaining quota, a direct flat forecast
   action, and a persistent Provider `…` menu. The forecast action opens its dialog
   in one step; no quota-details interstitial or forecast probability belongs in
@@ -93,13 +95,13 @@ component details.
 
 - Before changing Role settings or dispatch, read the authoritative
   [shared Role contracts](../../../../shared/AGENTS.md#workspace-mcp-and-agent-roles).
-  The editor clears its memory reference when the target machine changes;
+  Each machine tab of the editor owns that target's agent, run config and memory;
   discovery and creation use that exact machine's Provider RPC. Memory settings
   reuse Agents machine tabs/pills and catalog rows. A missing nmem install stays
-  on the page with the provider URL; it must not open a blocking dialog.
-  The Role Memory tab lists saved machine-Flock associations and shares the
-  Configuration tab's draft/save boundary. Role settings retain all machine groups;
-  memory shortcuts locate a group without adding machine tabs or filtering. Only a ready Provider
+  on the page with the provider URL; it must not open a blocking dialog. Adding a
+  target suggests, never silently drops: unsupported values show as issues.
+  The Role list is one flat list naming each row's machines; memory shortcuts
+  scroll to a Role without filtering. Only a ready Provider
   inventory can mark an identity missing; deleting a link never deletes provider data.
 
 ## Workspace ownership
@@ -111,3 +113,13 @@ component details.
   failed. Card changes use the billing Portal separately; transfer keeps the current card.
 
 - Nightly downloads live below Download apps in desktop/Web About.
+
+## Seat billing
+
+- Reuse `SeatCostNotice` in invitation and approval entry points. Approval must show
+  the current cost and deferred collection policy before committing membership.
+- Removal/leave do not cancel accrued service fees. Deleted workspace invoices stay
+  reachable for the retained billing owner through `deleted-workspace-billing.tsx`
+  in personal Account settings; invoice details reuse `BillingInvoiceDetails`.
+
+- Billing telemetry: never infer payment from returns; exclude URLs, codes and raw errors.

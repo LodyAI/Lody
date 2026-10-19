@@ -73,8 +73,9 @@ execution/consent rules. These rules also bind CLI callers outside that director
 - Child Sessions are one level deep. An independent Session created inside another persists exact
   provenance in `openedBySessionId`, plus `openedByRootSessionId` when the opener is a child Tab;
   never rewrite the exact opener to the root or treat either as `parentSessionId`.
-- INVARIANT: reasoning effort and fast mode are per MODEL, because an ACP probe's `configOptions`
-  describe only the model current at probe time. Validate effort against the TARGET model using
+- INVARIANT: reasoning effort and fast mode are per MODEL. Apply mode, then model, then dependent
+  options, for both top-level and config-option selections. A probe's `configOptions` describe only
+  its current model. Validate effort against the TARGET model using
   `getModelEffortChoices` (the stored per-model declaration first, then
   `modelReasoningEfforts`) and skip the resulting `validatedConfigIds` in
   `validateTurnConfigOptionValues`; dispatch what cannot be checked offline as requested. Keep

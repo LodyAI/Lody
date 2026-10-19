@@ -1,3 +1,5 @@
+import { LODY_EXTENSION_METHODS } from 'acp-extension-core';
+import { parseLodyExtensionCapabilities, parseRateLimitsSnapshot } from './lody-acp-extension';
 import { toShared } from '@/platform/process-options';
 import type { ChildProcess } from 'child_process';
 import os from 'os';
@@ -5,6 +7,8 @@ import path from 'path';
 import * as fs from 'fs';
 import {
   ndJsonStream,
+  ClientSideConnection,
+  PROTOCOL_VERSION,
   type Stream,
   type RequestPermissionRequest,
   type RequestPermissionResponse,
@@ -28,7 +32,6 @@ import {
   type ImageGenerationEndEvent,
   type AcpStartupStageEvent,
   type AcpStartupTimeoutOptions,
-  type AcpSessionStartTarget,
 } from './agent-client';
 import { getLoginShellEnvLegacy } from './login-shell-env';
 import {
@@ -121,7 +124,6 @@ export type CreateAcpClientOptions = {
   sessionId?: SessionId;
   startupTimeouts?: AcpStartupTimeoutOptions;
   startupAbort?: Promise<never>;
-  resolveSessionStart?: () => Promise<AcpSessionStartTarget>;
 };
 
 export const createAcpClient = async (options: CreateAcpClientOptions) => {
@@ -161,7 +163,6 @@ export const createAcpClient = async (options: CreateAcpClientOptions) => {
     options.resumeSessionId,
     options.startupTimeouts,
     options.startupAbort,
-    options.resolveSessionStart,
     options.forkSessionId,
     options.forkSessionTurnId
   );
@@ -211,6 +212,7 @@ export type SpawnAcpProcessOptions = {
   agentType: string;
   customAcp?: CustomAcpLaunchSpec;
   runtimeOverrides?: BuiltinRuntimeOverrides;
+  magpieGatewayUrl?: string;
   workdir: string;
   env: NodeJS.ProcessEnv;
   args?: string[];
@@ -231,6 +233,7 @@ export const spawnAcpProcess = (options: SpawnAcpProcessOptions): ChildProcess =
       agentType: options.agentType,
       customAcp: options.customAcp,
       runtimeOverrides: options.runtimeOverrides,
+      magpieGatewayUrl: options.magpieGatewayUrl,
     });
     command = command ?? launch.command;
     args = args ?? launch.args;
@@ -261,6 +264,8 @@ export type StartLocalAcpAgentOptions = {
   agentType: string;
   customAcp?: CustomAcpLaunchSpec;
   runtimeOverrides?: BuiltinRuntimeOverrides;
+  agentConfigId?: string;
+  magpieGatewayUrl?: string;
   workdir: string;
   env?: NodeJS.ProcessEnv;
   logger: Logger;
@@ -333,7 +338,75 @@ export const __test__ = {
   withTitleAgentCodexConfig,
 };
 
-export const startLocalAcpAgent = async (options: StartLocalAcpAgentOptions) => {
+export const startLocalAcpAgent = (options: StartLocalAcpAgentOptions) =>
+  startLocalAcpProtocol(options, createAcpClient);
+
+export class AcpQuotaCleanupError extends Error {
+  constructor(
+    readonly child: ChildProcess,
+    cause: unknown
+  ) {
+    super('Quota ACP process cleanup was not confirmed', { cause });
+  }
+}
+
+export async function initializeAndReadAcpRateLimits(stream: Stream) {
+  const connection = new ClientSideConnection(
+    () => ({
+      requestPermission: async () => ({ outcome: { outcome: 'cancelled' as const } }),
+      sessionUpdate: async () => {},
+    }),
+    stream
+  );
+  const initialized = await connection.initialize({
+    protocolVersion: PROTOCOL_VERSION,
+    clientCapabilities: { terminal: false, fs: { readTextFile: false, writeTextFile: false } },
+  });
+  const capabilities = parseLodyExtensionCapabilities(initialized.agentCapabilities?._meta);
+  if (capabilities.rateLimits?.query !== true) throw new Error('Rate-limit query unsupported');
+  return parseRateLimitsSnapshot(
+    await connection.request(LODY_EXTENSION_METHODS.rateLimitsGet, {})
+  );
+}
+
+/** Read-only ACP initialization: no session, MCP servers, file access or prompts. */
+export async function queryLocalAcpRateLimits(options: StartLocalAcpAgentOptions) {
+  const started = await startLocalAcpProtocol(
+    options,
+    async ({ stream, startupAbort }) => {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        const snapshot = await Promise.race([
+          initializeAndReadAcpRateLimits(stream),
+          ...(startupAbort ? [startupAbort] : []),
+          new Promise<never>((_, reject) => {
+            timer = setTimeout(() => reject(new Error('Rate-limit query timed out')), 20_000);
+          }),
+        ]);
+        return { snapshot };
+      } finally {
+        clearTimeout(timer);
+      }
+    },
+    true
+  );
+  try {
+    await terminateAcpProcessTree(started.agentProcess, {
+      logger: options.logger,
+      sessionLabel: 'provider-rate-limits',
+      exitTimeoutMs: 3000,
+    });
+  } catch (cause) {
+    throw new AcpQuotaCleanupError(started.agentProcess, cause);
+  }
+  return started.snapshot;
+}
+
+async function startLocalAcpProtocol<T>(
+  options: StartLocalAcpAgentOptions,
+  startClient: (options: CreateAcpClientOptions) => Promise<T>,
+  retainCleanupFailure = false
+) {
   options.signal?.throwIfAborted();
   // Async resolve so registry agents distributed as a platform binary are
   // downloaded/unpacked on demand before spawn (no-op for builtin/npx/uvx/local).
@@ -342,6 +415,8 @@ export const startLocalAcpAgent = async (options: StartLocalAcpAgentOptions) => 
     agentType: options.agentType,
     customAcp: options.customAcp,
     runtimeOverrides: options.runtimeOverrides,
+    agentConfigId: options.agentConfigId,
+    magpieGatewayUrl: options.magpieGatewayUrl,
     env: options.env,
     extraArgs: options.extraArgs,
     onManagedRuntimeProgress: options.onManagedRuntimeProgress
@@ -562,7 +637,7 @@ export const startLocalAcpAgent = async (options: StartLocalAcpAgentOptions) => 
     try {
       options.signal?.throwIfAborted();
       options.logger.debug('[acp-startup] creating ACP client');
-      const started = await createAcpClient({
+      const started = await startClient({
         stream,
         workdir: options.workdir,
         logger: options.logger,
@@ -581,12 +656,9 @@ export const startLocalAcpAgent = async (options: StartLocalAcpAgentOptions) => 
           : startupMonitor.abortPromise,
       });
       options.signal?.throwIfAborted();
-      options.logger.debug(`[acp-startup] ACP client ready (acpSessionId=${started.acpSessionId})`);
       return {
         agentProcess,
-        client: started.client as AgentClient,
-        acpSessionId: started.acpSessionId as ACPSessionId,
-        sessionResponse: started.sessionResponse,
+        ...started,
         capabilitySourceVersion: launch.capabilitySourceVersion,
       };
     } catch (error) {
@@ -603,6 +675,7 @@ export const startLocalAcpAgent = async (options: StartLocalAcpAgentOptions) => 
         sessionLabel: 'acp-startup',
         exitTimeoutMs: 3000,
       }).catch((terminationError: unknown) => {
+        if (retainCleanupFailure) throw new AcpQuotaCleanupError(agentProcess, terminationError);
         options.logger.warn(
           `[acp-startup] ACP agent process could not be terminated after a failed start: ${formatErrorMessage(terminationError)}`
         );
@@ -629,6 +702,7 @@ export const startLocalAcpAgent = async (options: StartLocalAcpAgentOptions) => 
     },
     async () =>
       await runNpxStartupWithRecovery({
+        maxAttempts: retainCleanupFailure ? 1 : undefined,
         command: launch.command,
         args: launch.args,
         env: envWithAcpStartup,
@@ -638,7 +712,7 @@ export const startLocalAcpAgent = async (options: StartLocalAcpAgentOptions) => 
         getStderrTail: () => lastStderrTail,
       })
   );
-};
+}
 
 export type ShutdownLocalAcpAgentOptions = {
   agentProcess: ChildProcess;

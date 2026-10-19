@@ -177,6 +177,12 @@ void test('6. root package.json is always-full', () => {
   assert.equal(scope.mode, 'full');
 });
 
+void test('Effect lint configuration changes run full static checks', () => {
+  const scope = select(['.oxlintrc.effect.json']);
+  assert.equal(scope.mode, 'full');
+  assert.equal(scope.runCheckQuick, true);
+});
+
 void test('7. test-only in a leaf does not fan out', () => {
   const scope = select(['packages/ignore/test/gitignore.test.ts']);
   assert.equal(scope.mode, 'affected');

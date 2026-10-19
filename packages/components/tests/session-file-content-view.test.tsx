@@ -1511,33 +1511,51 @@ describe('SessionFileContentView', () => {
     expect(view.querySelector('button[aria-label="Preview HTML (runs scripts)"]')).not.toBeNull();
   });
 
-  it('does not offer script execution without credentialless iframe support', async () => {
+  it('opens mobile HTML without credentialless support and toggles source without executing it', async () => {
     delete (HTMLIFrameElement.prototype as HTMLIFrameElement & { credentialless?: boolean })
       .credentialless;
-    try {
-      const provider = createFakeSessionFileProvider({
-        files: [{ path: 'result.html', kind: 'text', sourceState: 'live-readonly' }],
-        snapshots: { 'result.html': { kind: 'text', text: '<h1>Preview</h1>' } },
+    const text = '<h1>Preview</h1><script>window.executed = true</script>';
+    const provider = createFakeSessionFileProvider({
+      files: [{ path: 'result.html', kind: 'text', sourceState: 'live-readonly' }],
+      snapshots: { 'result.html': { kind: 'text', text } },
+    });
+    const renderView = (active = true) =>
+      createElement(SessionFileContentView, {
+        sessionId: session.id,
+        session,
+        filePath: 'result.html',
+        fileProvider: provider,
+        fileProviderPending: false,
+        defaultHtmlPreview: true,
+        active,
       });
-      const view = await render(
-        createElement(SessionFileContentView, {
-          sessionId: session.id,
-          session,
-          filePath: 'result.html',
-          fileProvider: provider,
-          fileProviderPending: false,
-        })
-      );
-      await flushMicrotasks();
-
-      expect(view.querySelector('[data-testid="monaco-viewer"]')).not.toBeNull();
-      expect(view.querySelector('button[aria-label="Preview HTML (runs scripts)"]')).toBeNull();
-    } finally {
-      installCredentiallessIframeSupportForTest();
-    }
+    const view = await render(renderView());
+    await flushMicrotasks();
+    const frame = view.querySelector('iframe');
+    expect(frame?.getAttribute('sandbox')).toBe('');
+    expect(frame?.srcdoc).toContain('<h1>Preview</h1>');
+    expect(frame?.srcdoc).not.toContain('<script>');
+    expect(view.querySelector('[data-testid="managed-html-preview"]')).toBeNull();
+    expect(view.querySelector('button[aria-label="Reload"]')).toBeNull();
+    await act(async () =>
+      view.querySelector<HTMLButtonElement>('button[aria-label="Hide preview"]')?.click()
+    );
+    expect(view.querySelector('iframe')).toBeNull();
+    expect(view.querySelector('[data-testid="monaco-viewer"]')?.getAttribute('data-text')).toBe(
+      text
+    );
+    await act(async () =>
+      view.querySelector<HTMLButtonElement>('button[aria-label="Preview"]')?.click()
+    );
+    expect(view.querySelector('iframe')).not.toBeNull();
+    await rerender(renderView(false));
+    expect(view.querySelector('iframe')).toBeNull();
+    await rerender(renderView());
+    expect(view.querySelector('iframe')).not.toBeNull();
+    installCredentiallessIframeSupportForTest();
   });
 
-  it('does not execute a truncated HTML snapshot', async () => {
+  it('does not preview a truncated HTML snapshot even with mobile default preview', async () => {
     Object.defineProperty(window, '__LODY_ELECTRON__', {
       configurable: true,
       value: true,
@@ -1573,6 +1591,7 @@ describe('SessionFileContentView', () => {
         sessionId: githubSession.id,
         session: githubSession,
         filePath: 'large.html',
+        defaultHtmlPreview: true,
         fileProvider: null,
         fileProviderPending: false,
         active: true,
@@ -1884,5 +1903,53 @@ describe('independent preview remount investigation', () => {
     expect(view.textContent).toContain('Original');
     await click('Hide preview');
     expect(textarea()?.value).toBe('# Original');
+  });
+});
+
+describe('failed file preview recovery', () => {
+  it.each(['reopen', 'retry button'])('reads the recovered file through %s', async (action) => {
+    let available = false;
+    const provider = createCodeCollabProvider(
+      createCodeCollabRuntime({
+        previewFile: async () =>
+          available
+            ? filePreviewResult('recovered file', DIGEST_1)
+            : { status: 'error', v: 3, code: 'file_not_found', message: 'File was not found.' },
+      })
+    );
+    const viewNode = (focusRequestSeq: number) =>
+      createElement(SessionFileContentView, {
+        sessionId: session.id,
+        session,
+        filePath: 'src/live.ts',
+        fileId: 'src/live.ts',
+        fileProvider: provider,
+        fileProviderPending: false,
+        fileProviderRole: 'write',
+        active: true,
+        focusRequestSeq,
+      });
+    const view = await render(viewNode(1));
+    expect(view.textContent).toContain('File not found');
+    available = true;
+    if (action === 'reopen') await rerender(viewNode(2));
+    else
+      await act(async () => {
+        const retry = [...view.querySelectorAll('button')].find(
+          (button) => button.textContent === 'Retry'
+        );
+        expect(retry).toBeDefined();
+        retry?.click();
+      });
+    expect(view.querySelector('[data-testid="session-file-error-state"]')).toBeNull();
+    expect(view.querySelector('[data-testid="monaco-viewer"]')?.getAttribute('data-text')).toBe(
+      'recovered file'
+    );
+    // Focusing a successful preview must not replace its accepted snapshot.
+    available = false;
+    await rerender(viewNode(3));
+    expect(view.querySelector('[data-testid="monaco-viewer"]')?.getAttribute('data-text')).toBe(
+      'recovered file'
+    );
   });
 });

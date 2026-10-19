@@ -1,6 +1,7 @@
 import { existsSync } from 'node:fs';
 import { expect, type Page } from '@playwright/test';
-import { isProcessAlive, SessionForkFixture } from '../fixtures/session-fork-fixture.js';
+import { SessionForkFixture } from '../fixtures/session-fork-fixture.js';
+import { isFixtureProcessAlive } from '../fixtures/process-liveness.js';
 import { openSidebarArchive } from './sidebar-footer.js';
 
 const AGENT_NAME = 'Deterministic Session Fork Agent';
@@ -149,19 +150,26 @@ export class SessionForkPage {
     await expect(this.assistantResponse()).toBeVisible();
 
     await this.navigateToSession(resources.targetSessionId);
+    await expect
+      .poll(
+        () => isFixtureProcessAlive(resources.sourceAgentPid, this.fixture.eventLogPath),
+        { intervals: [1_000, 2_000] }
+      )
+      .toBe(true);
     await this.archiveAndDeleteCurrentSession(resources.targetSessionId);
     await expect
       .poll(
         async () => ({
           terminals: await this.listTerminalsDuringCleanup(resources.targetSessionId),
           worktreeExists: existsSync(resources.targetWorktreePath),
-          targetAgentAlive: isProcessAlive(resources.targetAgentPid),
+          targetAgentAlive: await isFixtureProcessAlive(
+            resources.targetAgentPid,
+            this.fixture.eventLogPath
+          ),
         }),
-        { timeout: 60_000, intervals: [50, 100, 250, 500, 1_000] }
+        { timeout: 60_000, intervals: [1_000, 2_000] }
       )
       .toEqual({ terminals: [], worktreeExists: false, targetAgentAlive: false });
-    expect(isProcessAlive(resources.sourceAgentPid)).toBe(true);
-
     await expect(this.sessionRow(resources.targetSessionId)).toHaveCount(0);
     await expect(this.archivedRow(resources.targetSessionId)).toHaveCount(0);
     await this.navigateToSession(resources.sourceSessionId);
@@ -169,7 +177,10 @@ export class SessionForkPage {
     await expect(this.assistantResponse()).toBeVisible();
     await this.archiveAndDeleteCurrentSession(resources.sourceSessionId);
     await expect
-      .poll(() => isProcessAlive(resources.sourceAgentPid), { timeout: 30_000 })
+      .poll(
+        () => isFixtureProcessAlive(resources.sourceAgentPid, this.fixture.eventLogPath),
+        { timeout: 30_000, intervals: [1_000, 2_000] }
+      )
       .toBe(false);
   }
 

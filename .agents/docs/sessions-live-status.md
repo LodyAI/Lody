@@ -7,8 +7,14 @@ pointer to this page live in
 [that directory's AGENTS.md](../../packages/components/src/components/sessions/AGENTS.md);
 this page is the full text of the rules summarised there.
 
-- `floating-permission-request.tsx`: floating permissions + ask-user-question;
-  hidden-composer mobile keyboard lift/scroll lives there.
+- `floating-permission-request.tsx` owns the live permission/question queue and
+  hidden-composer mobile keyboard lift/scroll. Pending question forms retain their
+  local state by session and request identity; inactive forms remain hidden, inert,
+  and disabled, including while an ordinary permission prompt is displayed.
+  Removing a request unmounts its form. The response owner supplies localized write
+  failures to both branches; the question card renders its compact notice above the
+  actions, preserving the answer for retry.
+  [Request contract](../../specs/permission-requests.md) owns the retention lifetime.
   `notification-permission-prompt.tsx` and the inner content of `session-pin.tsx`
   use the same `ConversationColumn` as the stream and composer; keep full-bleed
   bands outside that column, but never let their interactive content span the pane.

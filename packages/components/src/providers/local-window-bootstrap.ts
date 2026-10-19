@@ -1,4 +1,5 @@
-import type { LoroRepo, StorageAdapter } from 'loro-repo';
+import type { WorkspaceRepoLegacy } from '@lody/shared/workspace-data/repo-legacy';
+import type { StorageAdapter } from 'loro-repo';
 import { LoroDoc } from 'loro-crdt';
 
 const MAX_SNAPSHOT_BYTES = 16 * 1024 * 1024;
@@ -37,7 +38,7 @@ function createBrowserPeerRegistry(scope: string, id: string): PeerRegistry {
 
 /** Shares rebuildable CRDT state, never replica persistence or Streams cursors. */
 export function createLocalWindowBootstrap(
-  repo: LoroRepo,
+  repo: WorkspaceRepoLegacy,
   workspaceId: string,
   documents: ReadonlyMap<string, LoroDoc>,
   createChannel: (name: string) => Channel = (name) => new BroadcastChannel(name),
@@ -177,8 +178,8 @@ export function createSessionSnapshotLoader(storage: Pick<StorageAdapter, 'loadD
       return persisted;
     }
   };
-  return async (
-    repo: Pick<LoroRepo, 'openPersistedDoc'>,
+  return async <Handle extends { readonly doc: LoroDoc }>(
+    repo: { openPersistedDoc(id: string): Promise<Handle> },
     room: string,
     readSnapshot: () => Promise<Uint8Array | undefined>
   ) => {

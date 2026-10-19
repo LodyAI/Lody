@@ -1,6 +1,6 @@
 import { updateTestHistory } from './history-port-fixture';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { LoroRepo } from 'loro-repo';
+import { WorkspaceRepoLegacy } from '@lody/shared/workspace-data/repo-legacy';
 
 import type { SessionHistoryInput, SessionId, WorkspaceId } from '@lody/shared';
 
@@ -32,7 +32,7 @@ type MessageHandlerHost = {
 
 const createHandlerHarness = async (sessionId: SessionId) => {
   const logger = createSilentLogger();
-  const repo = await LoroRepo.create({});
+  const repo = await WorkspaceRepoLegacy.create({});
   const doc = new SessionDocument(repo, sessionId);
   await doc.initOffline();
 

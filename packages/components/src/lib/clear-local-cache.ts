@@ -33,6 +33,13 @@ import { getIpcServices } from './electron-ipc-client';
 import { isWarmWindow } from './desktop-window';
 import { PROMPT_SHORTCUT_DATA_PREFIX } from './prompt-shortcut-storage';
 import { ROOST_HISTORY_CACHE_DB } from './roost-history-cache';
+import { SESSION_INPUT_DATABASE } from './session-input-storage';
+import {
+  CLIENT_LOG_DATABASE,
+  flushClientLog,
+  recordClientError,
+  recordClientLog,
+} from './client-log';
 
 /**
  * Prefix for the per-workspace meta remote-cursor startup-bypass marker.
@@ -60,6 +67,8 @@ export type PendingLocalClearMode = 'cache' | 'hard';
 
 /** IndexedDB databases created with static names (not suffixed per workspace). */
 const KNOWN_INDEXEDDB_NAMES = [
+  SESSION_INPUT_DATABASE,
+  CLIENT_LOG_DATABASE,
   ROOST_HISTORY_CACHE_DB,
   // Durable session-send journal of earlier builds; no longer written, but an
   // upgraded install may still hold it, and a cache clear should remove it.
@@ -159,30 +168,59 @@ function clearLodyLocalStorageCaches(): void {
 /** Bound how long boot waits on a single delete that another tab is blocking. */
 const DELETE_TIMEOUT_MS = 3000;
 
-function deleteDatabaseBestEffort(name: string): Promise<void> {
-  return new Promise<void>((resolve) => {
+/** `blocked` means another connection still held the database when the wait ended. */
+type DeleteOutcome = 'deleted' | 'failed' | 'blocked';
+
+function deleteDatabaseBestEffort(name: string): Promise<DeleteOutcome> {
+  return new Promise<DeleteOutcome>((resolve) => {
     let settled = false;
-    const done = () => {
+    const done = (outcome: DeleteOutcome) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
-      resolve();
+      resolve(outcome);
     };
     // If another open connection (e.g. a second tab) blocks the delete, don't
     // hang boot forever — give up after a bounded wait and move on.
-    const timer = setTimeout(done, DELETE_TIMEOUT_MS);
+    const timer = setTimeout(() => done('blocked'), DELETE_TIMEOUT_MS);
     try {
       const request = indexedDB.deleteDatabase(name);
-      request.addEventListener('success', done);
-      request.addEventListener('error', done);
+      request.addEventListener('success', () => done('deleted'));
+      request.addEventListener('error', () => {
+        // A storage backend that cannot open the database usually cannot delete
+        // it either. Say so: a silent failure here reads as "clear did nothing".
+        console.warn(`[Lody] deleteDatabase failed for ${name}`, request.error);
+        done('failed');
+      });
       request.addEventListener('blocked', () => {
         console.warn(`[Lody] deleteDatabase blocked by an open connection: ${name}`);
       });
     } catch (error) {
       console.warn(`[Lody] deleteDatabase threw for ${name}`, error);
-      done();
+      done('failed');
     }
   });
+}
+
+/** What a clear could not delete. Empty when every targeted database is gone. */
+export type LocalClearReport = { failed: string[] };
+
+/**
+ * Delete `names`, then re-enumerate where the engine can: a database that still
+ * exists afterwards was not cleared, whatever its request reported.
+ */
+async function deleteDatabases(names: string[]): Promise<string[]> {
+  const outcomes = await Promise.all(names.map(deleteDatabaseBestEffort));
+  const failed = new Set(names.filter((_, index) => outcomes[index] !== 'deleted'));
+  try {
+    const remaining = new Set(
+      ((await indexedDB.databases?.()) ?? []).map((database) => database.name)
+    );
+    for (const name of names) if (remaining.has(name)) failed.add(name);
+  } catch {
+    // No enumeration (e.g. Firefox): the request outcomes are all there is.
+  }
+  return [...failed];
 }
 
 /**
@@ -197,7 +235,8 @@ function deleteDatabaseBestEffort(name: string): Promise<void> {
  *   the current workspace's databases, in case its info isn't cached yet. All
  *   visited workspaces are already covered via the cached workspace-info map.
  */
-export async function clearAllLodyLocalCache(extraNames: string[] = []): Promise<void> {
+export async function clearAllLodyLocalCache(extraNames: string[] = []): Promise<LocalClearReport> {
+  let failed: string[] = [];
   if (typeof indexedDB !== 'undefined') {
     const names = new Set<string>([
       ...KNOWN_INDEXEDDB_NAMES,
@@ -216,11 +255,15 @@ export async function clearAllLodyLocalCache(extraNames: string[] = []): Promise
       // known static names plus any per-workspace names the caller passed.
     }
     // A Shortcut outbox may contain the only copy of an offline save. Only the
-    // explicitly destructive hard reset below may remove these databases.
-    await Promise.all(
-      [...names]
-        .filter((name) => !name.startsWith(PROMPT_SHORTCUT_DATA_PREFIX))
-        .map(deleteDatabaseBestEffort)
+    // explicitly destructive hard reset below may remove these databases. The
+    // client log is what explains why a clear was needed, so it stays too.
+    failed = await deleteDatabases(
+      [...names].filter(
+        (name) =>
+          !name.startsWith(PROMPT_SHORTCUT_DATA_PREFIX) &&
+          name !== SESSION_INPUT_DATABASE &&
+          name !== CLIENT_LOG_DATABASE
+      )
     );
   }
 
@@ -237,6 +280,7 @@ export async function clearAllLodyLocalCache(extraNames: string[] = []): Promise
 
   // Last: `knownWorkspaceDatabaseNames()` above needs `lody:workspaceInfo`.
   clearLodyLocalStorageCaches();
+  return { failed };
 }
 
 /**
@@ -245,10 +289,11 @@ export async function clearAllLodyLocalCache(extraNames: string[] = []): Promise
  * reset: it also removes the auth token and preferences, so the app comes back
  * signed out and factory-fresh.
  */
-export async function clearAllLodyLocalData(extraNames: string[] = []): Promise<void> {
+export async function clearAllLodyLocalData(extraNames: string[] = []): Promise<LocalClearReport> {
   clearWebStorage();
   clearCookies();
 
+  let failed: string[] = [];
   if (typeof indexedDB !== 'undefined') {
     const names = new Set<string>([
       ...KNOWN_INDEXEDDB_NAMES,
@@ -268,7 +313,7 @@ export async function clearAllLodyLocalData(extraNames: string[] = []): Promise<
       // `indexedDB.databases()` is unsupported (e.g. Firefox) — fall back to the
       // known static names plus any per-workspace names the caller passed.
     }
-    await Promise.all([...names].map(deleteDatabaseBestEffort));
+    failed = await deleteDatabases([...names]);
   }
 
   if (typeof caches !== 'undefined') {
@@ -281,6 +326,7 @@ export async function clearAllLodyLocalData(extraNames: string[] = []): Promise<
   }
 
   await unregisterServiceWorkers();
+  return { failed };
 }
 
 /** Wipe both synchronous web stores. Removes the auth token and preferences. */
@@ -355,6 +401,37 @@ export function markCacheClearPending(): void {
   writePendingFlag(CACHE_CLEAR_VALUE);
 }
 
+/**
+ * Restart into the recoverable-cache clear: set the boot flag and reload this
+ * window, as the settings action always has. Returns false when the flag could
+ * not be persisted, so the caller can say so instead of reloading into the same
+ * state.
+ *
+ * `relaunch` is for a retry after a clear that could not delete everything: a
+ * renderer reload keeps the desktop's main process and Chromium's storage
+ * backend, which may be what failed. The desktop then relaunches through the
+ * one-shot request `lody app reset-cache` writes, running the clear in a fresh
+ * process. That quits the whole app, including the embedded CLI and its running
+ * agents, so it is never the default; the quit asks every window first, and a
+ * Stay answer returns false with nothing armed.
+ */
+export async function restartIntoCacheClear(
+  options: { relaunch?: boolean } = {}
+): Promise<boolean> {
+  const services = getIpcServices();
+  if (options.relaunch === true && services) {
+    try {
+      return (await services.app.relaunchIntoLocalReset('cache')) === 'quitting';
+    } catch (error) {
+      console.warn('[Lody] relaunch into a cache clear failed; reloading instead', error);
+    }
+  }
+  markCacheClearPending();
+  if (readPendingLocalClearMode() === null) return false;
+  reloadApp();
+  return true;
+}
+
 /** Cap on how long the escape hatch waits for the server to revoke the session. */
 const SIGN_OUT_TIMEOUT_MS = 1500;
 
@@ -386,20 +463,137 @@ async function revokeServerSessionBestEffort(): Promise<void> {
 /**
  * Wipe everything reachable synchronously (auth token, preferences, cookies),
  * arm the boot-time wipe for the asynchronous stores, and reload into the app
- * root signed out.
+ * root signed out. Resolves false when the desktop quit for the native wipe was
+ * cancelled and nothing was wiped.
  *
  * Storage is cleared BEFORE the flag is written, otherwise `clearWebStorage`
  * would remove the flag we just set and boot would skip the IndexedDB pass.
  * Navigating to `/` first means the reload does not land back on the route that
  * crashed.
  */
-export async function startHardReset(): Promise<void> {
+export async function startHardReset(): Promise<boolean> {
   await revokeServerSessionBestEffort();
+  const native = await startNativeHardReset();
+  if (native === 'started') return true;
+  // The desktop quit was answered Stay (or its cleanup failed): the person
+  // chose to keep the app running, so do not wipe it from under them.
+  if (native === 'cancelled') return false;
   clearWebStorage();
   clearCookies();
   writePendingFlag(HARD_RESET_VALUE);
   replaceAppWindowLocation('/');
   reloadApp();
+  return true;
+}
+
+/**
+ * Installed by a native mobile shell as `window.__LODY_NATIVE_RESET__`.
+ * `resetAllData` removes every website data type of the WebView's data store at
+ * the file level, clears the shell's own credential storage and cookies, and
+ * reloads the WebView at the app root — the in-app equivalent of reinstalling.
+ * It may never resolve, because the page it was called from goes away.
+ */
+export type LodyNativeResetBridge = {
+  version: 1;
+  resetAllData: () => Promise<void>;
+};
+
+/**
+ * The hard reset done by the host instead of through web APIs, which can only
+ * delete what the storage backend will still open. Electron relaunches into the
+ * native wipe the CLI's `--hard` uses; a mobile shell uses its bridge.
+ * `unavailable` (neither exists, or the host refused) falls back to the web
+ * wipe; `cancelled` means the desktop quit was answered Stay.
+ */
+async function startNativeHardReset(): Promise<'started' | 'cancelled' | 'unavailable'> {
+  const services = getIpcServices();
+  const bridge =
+    typeof window === 'undefined'
+      ? undefined
+      : (window as Window & { __LODY_NATIVE_RESET__?: LodyNativeResetBridge })
+          .__LODY_NATIVE_RESET__;
+  try {
+    if (services) {
+      return (await services.app.relaunchIntoLocalReset('hard')) === 'quitting'
+        ? 'started'
+        : 'cancelled';
+    }
+    if (bridge?.version === 1) {
+      await bridge.resetAllData();
+      return 'started';
+    }
+  } catch (error) {
+    console.warn('[Lody] native hard reset failed; wiping through web storage', error);
+  }
+  return 'unavailable';
+}
+
+/**
+ * What the last boot-time clear did, kept outside the cache-clear DELETE list
+ * (and rewritten after a hard wipe) so the recovery screen can tell a clear
+ * that ran from one that could not delete what it targeted. Nothing re-runs a
+ * clear on its own: a retry deletes everything again, which after the person
+ * signed back in would sign them out again. Whether to retry is theirs.
+ */
+const LAST_LOCAL_CLEAR_KEY = 'lody:lastLocalClear';
+/** A clear older than this says nothing about the wait in front of the person. */
+export const LOCAL_CLEAR_RECORD_RELEVANCE_MS = 24 * 60 * 60 * 1000;
+
+export type LocalClearRecord = {
+  mode: PendingLocalClearMode;
+  atMs: number;
+  ok: boolean;
+  failedCount: number;
+};
+
+/** The last clear if it ran within `LOCAL_CLEAR_RECORD_RELEVANCE_MS`. */
+export function readRecentLocalClear(nowMs: number): LocalClearRecord | null {
+  const record = readLastLocalClear();
+  if (!record) return null;
+  const ageMs = nowMs - record.atMs;
+  return ageMs >= 0 && ageMs < LOCAL_CLEAR_RECORD_RELEVANCE_MS ? record : null;
+}
+
+export function readLastLocalClear(): LocalClearRecord | null {
+  try {
+    const raw = localStorage.getItem(LAST_LOCAL_CLEAR_KEY);
+    if (raw === null) return null;
+    const parsed: unknown = JSON.parse(raw);
+    if (typeof parsed !== 'object' || parsed === null) return null;
+    const value: Partial<Record<keyof LocalClearRecord, unknown>> = parsed;
+    if (
+      (value.mode !== 'cache' && value.mode !== 'hard') ||
+      typeof value.atMs !== 'number' ||
+      typeof value.ok !== 'boolean'
+    ) {
+      return null;
+    }
+    return {
+      mode: value.mode,
+      atMs: value.atMs,
+      ok: value.ok,
+      failedCount: typeof value.failedCount === 'number' ? value.failedCount : 0,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function writeLastLocalClear(record: LocalClearRecord): void {
+  try {
+    localStorage.setItem(LAST_LOCAL_CLEAR_KEY, JSON.stringify(record));
+  } catch (error) {
+    console.warn('[Lody] failed to record the local clear result', error);
+  }
+}
+
+/** The clear this page load ran at boot, handed once to the outcome reporter. */
+let bootClearRecord: LocalClearRecord | null = null;
+
+export function takeBootLocalClear(): LocalClearRecord | null {
+  const record = bootClearRecord;
+  bootClearRecord = null;
+  return record;
 }
 
 export function readPendingLocalClearMode(): PendingLocalClearMode | null {
@@ -453,18 +647,31 @@ async function runPendingClearOnBoot(): Promise<PendingLocalClearMode | null> {
   if (!mode) return null;
   await getIpcServices()?.app.prepareCacheClear();
 
+  let failed: string[] = ['unknown'];
   try {
-    if (mode === 'hard') {
-      await clearAllLodyLocalData();
-    } else {
-      await clearAllLodyLocalCache();
-    }
-  } finally {
-    try {
-      localStorage.removeItem(CACHE_CLEAR_FLAG);
-    } catch (error) {
-      console.warn('[Lody] failed to clear cache-clear flag', error);
-    }
+    ({ failed } = mode === 'hard' ? await clearAllLodyLocalData() : await clearAllLodyLocalCache());
+  } catch (error) {
+    console.warn('[Lody] local clear threw', error);
+    recordClientError('cache.clear_on_boot_threw', error, { mode });
+  }
+  const record: LocalClearRecord = {
+    mode,
+    atMs: Date.now(),
+    ok: failed.length === 0,
+    failedCount: failed.length,
+  };
+  writeLastLocalClear(record);
+  bootClearRecord = record;
+  if (!record.ok) console.warn('[Lody] local clear left databases behind', record);
+  recordClientLog(record.ok ? 'info' : 'error', 'cache.clear_on_boot', undefined, {
+    mode,
+    ok: record.ok,
+    failedCount: record.failedCount,
+  });
+  try {
+    localStorage.removeItem(CACHE_CLEAR_FLAG);
+  } catch (error) {
+    console.warn('[Lody] failed to clear cache-clear flag', error);
   }
   return mode;
 }
@@ -487,16 +694,29 @@ export async function maybeClearLodyCacheOnBoot(extraNames: string[] = []): Prom
   const mode = await bootClearPromise;
   // Nothing was pending, or this caller has no extra databases to contribute.
   if (!mode || extraNames.length === 0) return;
-  await Promise.all(
-    extraNames
-      .filter((name) => mode === 'hard' || !name.startsWith(PROMPT_SHORTCUT_DATA_PREFIX))
-      .map(deleteDatabaseBestEffort)
+  const failed = await deleteDatabases(
+    extraNames.filter(
+      (name) =>
+        mode === 'hard' ||
+        (!name.startsWith(PROMPT_SHORTCUT_DATA_PREFIX) && name !== SESSION_INPUT_DATABASE)
+    )
   );
+  if (failed.length > 0) recordLateClearFailures(failed.length);
+}
+
+/** Fold failures from a caller's extra databases into this boot's clear record. */
+function recordLateClearFailures(count: number): void {
+  const record = readLastLocalClear();
+  if (!record) return;
+  const updated = { ...record, ok: false, failedCount: record.failedCount + count };
+  writeLastLocalClear(updated);
+  if (bootClearRecord) bootClearRecord = updated;
 }
 
 /** Test-only: forget the per-page-load memo so each case starts clean. */
 export function resetBootClearMemoForTests(): void {
   bootClearPromise = null;
+  bootClearRecord = null;
 }
 
 /**
@@ -507,6 +727,9 @@ export function resetBootClearMemoForTests(): void {
  */
 export function reloadApp(): void {
   if (typeof window === 'undefined') return;
+  // The reload will not wait for IndexedDB; the page-hide spill keeps this entry.
+  recordClientLog('warn', 'app.reload_requested', undefined, { path: window.location.pathname });
+  void flushClientLog();
   if (window.__LODY_ELECTRON__ === true) {
     if (getIpcServices()) {
       void getIpcServices()!.app.requestRendererReload();

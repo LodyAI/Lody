@@ -27,6 +27,8 @@ const styles = stylex.create({
   },
   icon: { width: '1.15em', height: '1.15em', flexShrink: 0 },
   name: {
+    // A narrow bar keeps only the icon; the name stays in the label and card.
+    display: { default: null, '@container (max-width: 360px)': 'none' },
     maxWidth: { default: '12em', '@container (max-width: 560px)': '8em' },
     overflow: 'hidden',
     textOverflow: 'ellipsis',

@@ -26,13 +26,15 @@ tuning shortcut are in [`README.md`](README.md).
 - These pages use `marketing-shell`: ice ink, restrained aqua, **seamless nav**
   (gradient fade — no frosted bar / hard divider), `--mkt-panel-*` frosted panels on the
   shared ~208 navy-teal atmosphere hue. Light and dark are both supported.
-- Ambient field: `components/marketing-atmosphere.tsx` — one fixed full-screen WebGL fragment
-  shader with `uTheme` (tracks `html.dark`), mid-density caustics, dpr≤1.5, paused on
-  hidden tab / reduced-motion; CSS gradient fallback until ready. Texture allocation
-  failure must retain the direct 30fps renderer. Do not fold the two gradient taps
-  feeding `ridge` into a cheaper finite difference — they look redundant but carry the
-  filigree. Do not lower temporal texture resolution or shader quality as a performance
-  shortcut.
+- Ambient field: `components/marketing-atmosphere.tsx` (GLSL in
+  `marketing-atmosphere-shaders.ts`) — one fixed full-screen WebGL field with `uTheme`
+  (tracks `html.dark`), mid-density caustics, dpr≤1.5, paused on hidden tab; reduced
+  motion and software rasterisers get one still frame; CSS gradient fallback until
+  ready. Texture allocation failure must retain the direct 30fps renderer. Do not fold
+  the two gradient taps feeding `ridge` into a cheaper finite difference — they carry
+  the filigree; the split sampler reads them as exact neighbour texels of the full
+  `warped()` field. Do not lower temporal texture resolution or shader quality as a
+  performance shortcut.
 - The field is **hosted once** via `MarketingAtmosphereHost` in `site-root-provider`
   (price / download / changelog share one GL context; off-route pauses without teardown).
 - Pricing content lives in `components/pricing-page.tsx` + `app/pricing.css` (Vue-ported table +

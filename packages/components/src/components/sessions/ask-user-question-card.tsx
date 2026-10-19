@@ -9,7 +9,16 @@ import {
   type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent,
 } from 'react';
-import { ArrowUp, Check, ChevronLeft, ChevronRight, Clock3, Info, X } from 'lucide-react';
+import {
+  ArrowUp,
+  Check,
+  ChevronLeft,
+  ChevronRight,
+  CircleAlert,
+  Clock3,
+  Info,
+  X,
+} from 'lucide-react';
 import * as stylex from '@stylexjs/stylex';
 import { Spinner } from '@lody/ui/spinner';
 import { useTranslation } from 'react-i18next';
@@ -32,6 +41,7 @@ import { Tooltip } from '@/ui/armed-overlays';
 import { colors, shadow, sheen } from '@lody/ui/tokens/colors.stylex';
 import { corner, duration, ease, focus, radius, space, text } from '@lody/ui/tokens/scales.stylex';
 import { withClassName } from '@/lib/stylex';
+import { isImeComposingKeyboardEvent } from '@/lib/ime';
 
 const REDUCED_MOTION = '@media (prefers-reduced-motion: reduce)';
 const RING = `0 0 0 ${focus.ringWidth} ${colors.accent}`;
@@ -257,6 +267,7 @@ const styles = stylex.create({
     color: colors.secondaryLabel,
   },
   noticeMark: { marginTop: '1px', color: colors.tertiaryLabel },
+  noticeErrorMark: { color: colors.destructive },
 
   preview: {
     maxHeight: '60vh',
@@ -308,6 +319,7 @@ type AskUserQuestionInteractiveMode = {
   isPendingSubmit: boolean;
   isPendingCancel: boolean;
   disabled: boolean;
+  error?: string | null;
   onSubmit: (answers: AskUserQuestionAnswers) => void;
   onCancel: () => void;
 };
@@ -658,7 +670,7 @@ export function AskUserQuestionCard({ meta, mode, className }: AskUserQuestionCa
   const handleCustomAnswerKeyDown = (
     event: KeyboardEvent<HTMLTextAreaElement | HTMLInputElement>
   ) => {
-    if (event.key !== 'Enter' || event.shiftKey || event.nativeEvent.isComposing) return;
+    if (event.key !== 'Enter' || event.shiftKey || isImeComposingKeyboardEvent(event)) return;
     if (!question || disabled) return;
     event.preventDefault();
     if (mode.kind !== 'interactive') return;
@@ -898,6 +910,16 @@ export function AskUserQuestionCard({ meta, mode, className }: AskUserQuestionCa
             <Textarea rows={2} {...noteInputProps} />
           )}
         </label>
+      ) : null}
+
+      {mode.kind === 'interactive' && mode.error ? (
+        <div role="alert" {...stylex.props(styles.notice)}>
+          <CircleAlert
+            {...stylex.props(styles.glyph14, styles.noticeMark, styles.noticeErrorMark)}
+            aria-hidden="true"
+          />
+          <span>{mode.error}</span>
+        </div>
       ) : null}
 
       {/* Custom answer is an inline option row in the list above; Submit is a
