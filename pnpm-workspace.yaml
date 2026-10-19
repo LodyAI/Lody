@@ -1,4 +1,5 @@
 packages:
+  - scripts/effect-lint
   - packages/*
   # Full upstream-derived runtime workspace; built and validated independently.
   - '!packages/acp-extension-kimi'
@@ -25,11 +26,11 @@ catalog:
   '@devframes/plugin-inspect--assets': 1.0.0
   '@devframes/plugin-terminals': 1.0.0
   '@devframes/plugin-terminals--assets': 1.0.0
-  '@loro-dev/flock-wasm': ^0.4.3
+  '@loro-dev/flock-wasm': ^0.4.4
   '@loro-dev/loro-cli': 0.6.0
   '@loro-dev/sqlite-riverrun': 0.2.0
-  '@loro-dev/streams-client': 0.9.0
-  '@loro-dev/streams-crdt': 0.16.2
+  '@loro-dev/streams-client': 0.12.0
+  '@loro-dev/streams-crdt': 0.19.0
   '@tanstack/react-router': ^1.127.9
   '@tanstack/react-router-devtools': ^1.127.9
   '@tanstack/router-plugin': ^1.127.9
@@ -56,7 +57,7 @@ catalog:
   loro-mirror-jotai: 2.3.2
   loro-mirror-react: 2.3.2
   loro-protocol: ^0.3.0
-  loro-repo: 0.22.0
+  loro-repo: 0.23.2
   loro-websocket: ^0.6.2
   lucide-react: ^0.523.0
   react: 19.2.0
@@ -86,15 +87,15 @@ minimumReleaseAgeExclude:
   - '@effect/vitest@4.0.2'
   - '@effect/platform-node-shared@4.0.2'
   # Keep the split release's complete optional platform graph available on every host.
-  - '@loro-dev/roost-node@0.1.1'
-  - '@loro-dev/roost-node-darwin-arm64@0.1.1'
-  - '@loro-dev/roost-node-darwin-x64@0.1.1'
-  - '@loro-dev/roost-node-linux-arm64-gnu@0.1.1'
-  - '@loro-dev/roost-node-linux-x64-gnu@0.1.1'
-  - '@loro-dev/roost-node-win32-arm64-msvc@0.1.1'
-  - '@loro-dev/roost-node-win32-x64-msvc@0.1.1'
+  - '@loro-dev/roost-node@0.1.2'
+  - '@loro-dev/roost-node-darwin-arm64@0.1.2'
+  - '@loro-dev/roost-node-darwin-x64@0.1.2'
+  - '@loro-dev/roost-node-linux-arm64-gnu@0.1.2'
+  - '@loro-dev/roost-node-linux-x64-gnu@0.1.2'
+  - '@loro-dev/roost-node-win32-arm64-msvc@0.1.2'
+  - '@loro-dev/roost-node-win32-x64-msvc@0.1.2'
   # Use the pinned npm release instead of requiring a sibling Roost checkout.
-  - '@loro-dev/roost@0.1.2'
+  - '@loro-dev/roost@0.1.3'
   # pnpm 10.20 uses the first rule per package; keep exact Codex versions together.
   - '@openai/codex@0.154.0 || 0.156.0 || 0.156.0-darwin-arm64 || 0.156.0-darwin-x64 || 0.156.0-linux-arm64 || 0.156.0-linux-x64 || 0.156.0-win32-arm64 || 0.156.0-win32-x64 || 0.159.2 || 0.159.2-darwin-arm64 || 0.159.2-darwin-x64 || 0.159.2-linux-arm64 || 0.159.2-linux-x64 || 0.159.2-win32-arm64 || 0.159.2-win32-x64'
   # Exact transitive dependencies already selected for werift.
@@ -108,6 +109,8 @@ minimumReleaseAgeExclude:
   - '@peculiar/asn1-csr@2.10.0'
   - '@peculiar/asn1-cms@2.10.0'
   - mediabunny@1.61.0
+  # Mermaid renderer for chat diagrams; reviewed: no dependencies or install scripts.
+  - pele@1.6.0
   - '@peculiar/asn1-schema@2.10.0'
   # Electron 44.7.0 matches DSH's native loader runtime support.
   # electron-vite 6.0.0-beta.2+ is the first release
@@ -154,10 +157,15 @@ minimumReleaseAgeExclude:
   # Explicit Loro fix for concurrent-import replay stalls, reviewed in this change.
   - loro-crdt@1.16.3
   # Safe error provenance and context, reviewed with loro-repo#144.
-  - '@loro-dev/streams-crdt@0.16.2'
-  - '@loro-dev/streams-client@0.9.0'
-  # Reviewed host AAD helper and safe protection reasons (loro-dev/loro-repo#146).
-  - loro-repo@0.22.0
+  # Native lifecycle/upload contracts reviewed in loro-streams#425; exact releases approved.
+  - '@loro-dev/streams-crdt@0.16.2 || 0.17.0 || 0.19.0'
+  - '@loro-dev/streams-client@0.9.0 || 0.10.0 || 0.12.0'
+  # Reviewed Repo native capabilities and fixes (loro-dev/loro-repo#150-#153);
+  # 0.23.1 stops Flock persistence queue amplification (loro-dev/loro-repo#154);
+  # 0.23.2 serializes compaction and keeps its retries bounded (loro-dev/loro-repo#156).
+  - 'loro-repo@0.22.0 || 0.23.0 || 0.23.1 || 0.23.2'
+  # Reviewed upgrade; 0.4.4 was published today once the release pipeline was fixed.
+  - '@loro-dev/flock-wasm@0.4.4'
   # Adds the `remend` option the streaming Markdown renderer passes (lobehub/streamdown#5).
   - '@lobehub/streamdown@1.4.0'
   # Replaces the removed @lody/virtua fork: this release's source plus unused keyed changes.
@@ -232,6 +240,8 @@ onlyBuiltDependencies:
   - workerd
 
 overrides:
+  # The local Lab server shares the approved Node-API 10 SQLite runtime.
+  '@loro-dev/sqlite-riverrun>better-sqlite3': 13.0.3
   # ASN.1 decorators and consumers must share one schema registry for WebRTC DTLS certificates.
   '@peculiar/x509>@peculiar/asn1-schema': 2.10.0
   acp-extension-core: workspace:*
@@ -251,6 +261,8 @@ packageExtensions:
 packageManagerStrictVersion: true
 
 patchedDependencies:
+  '@loro-dev/sqlite-riverrun@0.3.0': patches/@loro-dev__sqlite-riverrun@0.3.0.patch
+  pdfjs-dist@6.3.289: patches/pdfjs-dist@6.3.289.patch
   '@shinyoshiaki/binary-data@0.6.1': patches/@shinyoshiaki__binary-data@0.6.1.patch
   werift@0.24.4: patches/werift@0.24.4.patch
   '@radix-ui/react-scroll-area@1.2.10': patches/@radix-ui__react-scroll-area@1.2.10.patch

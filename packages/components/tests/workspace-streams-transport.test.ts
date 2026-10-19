@@ -16,14 +16,15 @@ import {
   Bytes,
   contentSigningBytes,
   encodeContentHeader,
+  inspectContentFrame,
   deriveContentKey,
   sealContentAead,
   openContentAead,
   verifyContentSignature,
   type ContentScope,
-} from '@lody/e2ee-core';
-import { hashRecordBytes, recordSigningBytes, verifyLedger } from '@lody/e2ee-core/ledger';
-import { encodeCbor } from '@lody/e2ee-core';
+} from '@lody/e2ee-core/protocol';
+import { hashRecordBytes, recordSigningBytes, verifyLedger } from '@lody/e2ee-core/protocol';
+import { encodeCbor } from '@lody/e2ee-core/protocol';
 import { encodeStreamsRoomAdditionalData } from 'loro-repo/transport/streams';
 import { PayloadProtectionError } from '@loro-dev/streams-crdt';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -864,7 +865,7 @@ const syntheticScope = {
 type CryptoFault = 'signature' | 'tag' | 'missing-key';
 
 /** Independently compose public P07 primitives; never accept a verifier callback.
- * Header 3/4, whole-batch v0 and encrypted snapshot offset follow the existing
+ * Header 3/4, whole-batch v0 and authenticated content-frame snapshot offset follow the current
  * content contract. Missing production signing/history ports remain blockers.
  */
 function cryptoTestProtection(
@@ -888,31 +889,26 @@ function cryptoTestProtection(
     seal(input) {
       const snapshot = input.context.kind === 'snapshot';
       const scope = scopeFor(snapshot);
-      const trustedHeader = { ...scope, docEpoch: 0 as const, device: syntheticDevice };
+      const trustedHeader = {
+        ...scope,
+        docEpoch: 0 as const,
+        device: syntheticDevice,
+        ...(snapshot ? { continuationOffset: input.context.continuationOffset } : {}),
+      };
       const header = Uint8Array.of(snapshot ? 4 : 3);
       const binding = input.additionalData(header);
-      const offset = snapshot
-        ? new TextEncoder().encode(input.context.continuationOffset!)
-        : new Uint8Array();
-      const plaintext = snapshot
-        ? new Uint8Array(2 + offset.length + input.plaintext.length)
-        : input.plaintext;
-      if (snapshot) {
-        new DataView(plaintext.buffer).setUint16(0, offset.length);
-        plaintext.set(offset, 2);
-        plaintext.set(input.plaintext, 2 + offset.length);
-      }
+      const prefix = unwrap(encodeContentHeader(trustedHeader), 'encrypt_failed');
       const key = unwrap(deriveContentKey(syntheticEpochKey, scope), 'encrypt_failed');
       const encrypted = unwrap(
-        sealContentAead(key, trustedHeader, plaintext, binding),
+        sealContentAead(key, trustedHeader, input.plaintext, binding),
         'encrypt_failed'
       );
       if (options.fault === 'tag' && (!options.snapshotOnly || snapshot))
         encrypted.ciphertext[0] ^= 1;
-      const unsigned = new Uint8Array(39 + 24 + encrypted.ciphertext.length);
-      unsigned.set(unwrap(encodeContentHeader(trustedHeader), 'encrypt_failed'));
-      unsigned.set(encrypted.nonce, 39);
-      unsigned.set(encrypted.ciphertext, 63);
+      const unsigned = new Uint8Array(prefix.length + 24 + encrypted.ciphertext.length);
+      unsigned.set(prefix);
+      unsigned.set(encrypted.nonce, prefix.length);
+      unsigned.set(encrypted.ciphertext, prefix.length + 24);
       const signature = sign(
         null,
         unwrap(contentSigningBytes(scope, unsigned, binding), 'encrypt_failed'),
@@ -929,29 +925,35 @@ function cryptoTestProtection(
       expect(syntheticAuthority.inspectState().devices.has(syntheticDevice)).toBe(true);
       // Scope and signer are supplied independently; frame metadata never
       // selects a trusted Org, purpose, document, epoch or public key.
-      unwrap(
+      const metadata = unwrap(
         verifyContentSignature(input.sealed, scope, syntheticSigner, input.additionalData),
         'decrypt_failed'
       );
       if (options.fault === 'missing-key')
         throw new PayloadProtectionError('missing_read_key', 'synthetic key detail');
+      const trustedHeader = {
+        ...scope,
+        docEpoch: 0 as const,
+        device: syntheticDevice,
+        ...(snapshot ? { continuationOffset: metadata.continuationOffset } : {}),
+      };
+      const prefix = unwrap(encodeContentHeader(trustedHeader), 'decrypt_failed');
       const key = unwrap(deriveContentKey(syntheticEpochKey, scope), 'decrypt_failed');
       const bytes = unwrap(
         openContentAead(
           key,
-          { ...scope, docEpoch: 0, device: syntheticDevice },
-          input.sealed.slice(39, 63),
-          input.sealed.slice(63, -64),
+          trustedHeader,
+          input.sealed.slice(prefix.length, prefix.length + 24),
+          input.sealed.slice(prefix.length + 24, -64),
           input.additionalData
         ),
         'decrypt_failed'
       );
-      if (!snapshot) return bytes;
-      const length = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).getUint16(0);
-      const offset = new TextDecoder().decode(bytes.slice(2, 2 + length));
-      if (offset !== input.context.continuationOffset)
+      if (snapshot && metadata.continuationOffset !== input.context.continuationOffset) {
+        bytes.fill(0);
         throw new PayloadProtectionError('decrypt_failed');
-      return bytes.slice(2 + length);
+      }
+      return bytes;
     },
   };
 }
@@ -1135,8 +1137,13 @@ describe('P10 public crypto and published SDK preparation', () => {
           )
         )
       ).toBe(fault !== 'signature');
-      // SDK prefix/header remain public; continuationOffset is encrypted.
+      // Provider field stays [4]; the continuation follows the signer inside
+      // the signed/AEAD-bound content frame, not the encrypted plaintext.
       expect([snapshot!.body[10], snapshot!.body[11]]).toEqual([4, 0]);
+      expect(
+        Result.getOrThrow(inspectContentFrame(snapshot!.body.slice(11), 'doc-snapshot'))
+          .continuationOffset
+      ).toBe(snapshot!.offset);
       if (fault === 'position') snapshot!.offset = server.offset(Number(snapshot!.offset) + 1);
       subscription.unsubscribe();
       const readerId = `v0-snapshot-r-${sequence}` as WorkspaceId;

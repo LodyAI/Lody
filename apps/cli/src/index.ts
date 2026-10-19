@@ -11,14 +11,19 @@ import {
   LoginShellCacheLive,
   LoginShellCacheReporter,
   loginShellEnvLayer,
-  recoverLoginShellCacheShutdown,
 } from '@lody/shared/node/login-shell-env';
-import { squashProcessFailure } from '@lody/shared/node/process';
 import {
   bindLoginShellCacheLegacy,
   closeLoginShellApplicationLegacy,
 } from './agent/login-shell-env';
 import { toShared } from './platform/process-options';
+import { presencePlatformLayer } from './platform/presence';
+import { WorkspacePresenceOwnersLive } from './lib/loro/workspace-presence';
+import {
+  bindWorkspacePresenceApplicationLegacy,
+  recoverCliPresenceApplicationShutdown,
+  WorkspacePresenceLegacyFailure,
+} from './lib/loro/presence-legacy';
 import { version } from '@/pkg';
 import { startCommand } from './commands/start';
 
@@ -33,6 +38,8 @@ import { workspaceCommand } from './commands/workspace';
 import { agentConfigCommand } from './commands/agent-config';
 import { machineCommand } from './commands/machine';
 import { exportCommand } from './commands/export';
+import { migrateCommand } from './commands/migrate';
+import { getCliPlatformKind } from './lib/cli-platform';
 import { reviewCommand } from './commands/review';
 import { githubCommand } from './commands/github';
 import { daemonCommand } from './commands/daemon';
@@ -71,12 +78,18 @@ const shellCache = LoginShellCacheLive.pipe(
     )
   )
 );
-bindLoginShellCacheLegacy(
-  makeApplicationRuntime(shellCache, {
-    recover: recoverLoginShellCacheShutdown,
-    project: squashProcessFailure,
-  })
+const application = makeApplicationRuntime(
+  Layer.merge(
+    shellCache,
+    WorkspacePresenceOwnersLive.pipe(Layer.provide(presencePlatformLayer(cliLogger)))
+  ),
+  {
+    recover: recoverCliPresenceApplicationShutdown,
+    project: (cause) => new WorkspacePresenceLegacyFailure(cause),
+  }
 );
+bindLoginShellCacheLegacy(application);
+bindWorkspacePresenceApplicationLegacy(application);
 
 const program = new Command();
 
@@ -102,6 +115,7 @@ program.addCommand(agentRoleCommand);
 program.addCommand(operationCommand);
 program.addCommand(machineCommand);
 program.addCommand(exportCommand);
+if (getCliPlatformKind() === 'cloud') program.addCommand(migrateCommand);
 program.addCommand(reviewCommand);
 program.addCommand(githubCommand);
 program.addCommand(daemonCommand);

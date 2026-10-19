@@ -1,6 +1,6 @@
 import type { HistoryAction } from './history-actions';
 import type { SessionGoalMessage } from '../goal';
-import type { PermissionOutcome } from '../message';
+import type { PermissionOutcome, SessionHistoryChanges } from '../message';
 import type { SessionId } from '../ids';
 import type { HistoryImportInput } from './history-import';
 import type { SessionSnapshotService } from './snapshot';
@@ -122,6 +122,8 @@ export type SessionDataChangeListener = (change: SessionDataChange) => void;
 
 /** One bounded directory window from a backend with reverse pagination. */
 export type SessionHistoryDirectoryPage = {
+  /** Optional owner-scoped checkpoint, negotiated separately from paging. */
+  readonly checkpoint?: string;
   readonly startPosition: number;
   readonly totalCount: number;
   readonly rows: readonly SessionDirectoryRow[];
@@ -177,6 +179,10 @@ export interface SessionHistoryReader {
     from: number,
     to: number
   ): readonly SessionDirectoryRow[] | Promise<readonly SessionDirectoryRow[]>;
+  getCheckpoint?(): Promise<string>;
+  readChanges?(checkpoint: string): Promise<SessionHistoryChanges>;
+  /** Bounded commit observation; it owns no database transaction while waiting. */
+  waitForChanges?(checkpoint: string, waitMs: number, signal?: AbortSignal): Promise<void>;
   /** Latest bounded directory page for windowed-history backends. */
   readLatestDirectoryPage?(limit: number): Promise<SessionHistoryDirectoryPage>;
   /** Bounded page immediately older than `cursor`. */
@@ -224,7 +230,22 @@ export interface SessionHistoryCommands {
   applyHistoryImport(input: HistoryImportInput): Promise<SessionImportResult>;
 }
 
+export type SessionInputAcceptanceResult =
+  | { readonly status: 'accepted'; readonly turnId: string; readonly active: boolean }
+  | { readonly status: 'unobserved' };
+
+/** Owner receipt for immutable user input, independent of mutable history state. */
+export interface SessionInputAcceptance {
+  /** The renderer capability is bound to this owner, independently of mutable metadata. */
+  readonly targetMachineId?: string;
+  accept(entry: SessionTurn): Promise<SessionInputAcceptanceResult>;
+  /** Negotiated owner-side history acceptance and ordinary dispatch handoff. */
+  acceptAndDispatch?(entry: SessionTurn): Promise<SessionInputAcceptanceResult>;
+  lookup(entry: SessionTurn): Promise<SessionInputAcceptanceResult>;
+}
+
 export interface SessionData {
+  readonly inputAcceptance?: SessionInputAcceptance;
   readonly sessionId: SessionId;
   readonly history: SessionHistoryReader;
   readonly commands: SessionHistoryCommands;

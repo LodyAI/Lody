@@ -1,5 +1,162 @@
 import { expect, test } from '@playwright/test';
 
+test.describe('permission option wrapping', () => {
+  for (const width of [320, 390, 1280]) {
+    for (const story of ['long-options', 'long-chinese-options']) {
+      test(`${story} stays readable at ${width}px`, async ({ page }) => {
+        await page.setViewportSize({ width, height: 900 });
+        await page.goto(`/iframe.html?id=sessions-permissionprompt--${story}&viewMode=story`);
+        const prompt = page.getByRole('group').filter({
+          has: page.getByRole('button', { name: 'Decline', exact: true }),
+        });
+        const refusal = prompt.getByRole('button', { name: 'Decline', exact: true });
+        await expect(refusal).toBeVisible();
+        await expect
+          .poll(() =>
+            prompt.evaluate((card) => {
+              const bounds = card.getBoundingClientRect();
+              return Array.from(card.querySelectorAll('button')).every((button) => {
+                const box = button.getBoundingClientRect();
+                return box.left >= bounds.left && box.right <= bounds.right;
+              });
+            })
+          )
+          .toBe(true);
+
+        const expectWrapped = async (label: typeof refusal) => {
+          await expect
+            .poll(() =>
+              label.evaluate((element) => {
+                const bounds = element.getBoundingClientRect();
+                const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
+                const lines: DOMRect[] = [];
+                while (walker.nextNode()) {
+                  const text = document.createRange();
+                  text.selectNodeContents(walker.currentNode);
+                  lines.push(...text.getClientRects());
+                }
+                return (
+                  lines.length > 1 &&
+                  lines.every(
+                    (line) =>
+                      line.left >= bounds.left - 1 &&
+                      line.right <= bounds.right + 1 &&
+                      line.top >= bounds.top - 1 &&
+                      line.bottom <= bounds.bottom + 1
+                  ) &&
+                  Array.from(element.querySelectorAll('*')).every(
+                    (child) => child.scrollWidth <= child.clientWidth + 1
+                  )
+                );
+              })
+            )
+            .toBe(true);
+        };
+        const controls = prompt.getByRole('button');
+        for (const control of await controls.all()) {
+          expect((await control.boundingBox())!.height).toBeLessThanOrEqual(32);
+        }
+        await expect(page.getByRole('status', { name: 'Selected option' })).toBeEmpty();
+
+        const menus = prompt.locator('button[aria-haspopup="menu"]');
+        for (let index = 0; index < (await menus.count()); index += 1) {
+          await menus.nth(index).click();
+          const option = page.getByRole('menuitem');
+          await expect(option.first()).toBeVisible();
+          for (const item of await option.all()) await expectWrapped(item);
+          const box = await page.getByRole('menu').boundingBox();
+          expect(box!.x).toBeGreaterThanOrEqual(0);
+          expect(box!.x + box!.width).toBeLessThanOrEqual(width);
+          await page.keyboard.press('Escape');
+          await expect(option.first()).toBeHidden();
+        }
+        await refusal.focus();
+        await page.keyboard.press('Enter');
+        const originalRefusal = page.getByRole('menuitem', {
+          name: /^(Deny this request|拒绝本次请求)/,
+        });
+        await expect(originalRefusal).toBeVisible();
+        await expect(page.getByRole('status', { name: 'Selected option' })).toBeEmpty();
+        await originalRefusal.click();
+        await expect(page.getByRole('status', { name: 'Selected option' })).toHaveText('reject');
+        expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(
+          width
+        );
+      });
+    }
+  }
+});
+
+test.describe('permission controls in the chat footer', () => {
+  for (const viewport of [
+    { width: 1280, height: 800 },
+    { width: 390, height: 844 },
+    { width: 390, height: 420 },
+  ]) {
+    test(`joins split buttons and opens above at ${viewport.width}x${viewport.height}`, async ({
+      page,
+    }) => {
+      await page.setViewportSize(viewport);
+      const frame = viewport.width < 640 ? 'mobile' : 'desktop';
+      await page.goto(
+        `/iframe.html?id=sessions-sessionconversationpage--${frame}-permission-approval&viewMode=story`
+      );
+      const allow = page.getByRole('button', { name: 'Allow once', exact: true });
+      const more = page.getByRole('button', { name: 'More answers', exact: true });
+      await expect(allow).toBeVisible();
+      const segments = await allow.evaluate((button) => {
+        const arrow = button.parentElement!.querySelector('button[aria-haspopup="menu"]')!;
+        const mainBox = button.getBoundingClientRect();
+        const arrowBox = arrow.getBoundingClientRect();
+        return {
+          role: button.parentElement?.getAttribute('role'),
+          gap: arrowBox.left - mainBox.right,
+          mainInnerRadius: parseFloat(getComputedStyle(button).borderTopRightRadius),
+          arrowInnerRadius: parseFloat(getComputedStyle(arrow).borderTopLeftRadius),
+          bottom: mainBox.bottom,
+        };
+      });
+      expect(segments.role).toBe('group');
+      expect(segments.gap).toBeCloseTo(1, 0);
+      expect(segments.mainInnerRadius).toBe(0);
+      expect(segments.arrowInnerRadius).toBe(0);
+      expect(segments.bottom).toBeGreaterThan(viewport.height - 120);
+      for (const trigger of [more, page.getByRole('button', { name: 'Decline', exact: true })]) {
+        await trigger.click();
+        const menu = page.getByRole('menu');
+        await expect(menu).toBeVisible();
+        await expect(menu).toHaveAttribute('data-side', 'top');
+        await expect
+          .poll(() =>
+            more.evaluate((button) => parseFloat(getComputedStyle(button).borderTopRightRadius))
+          )
+          .toBeGreaterThan(0);
+        await expect
+          .poll(() =>
+            menu.evaluate((element) => {
+              const box = element.getBoundingClientRect();
+              const hit = document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2);
+              return (
+                box.top >= 0 &&
+                box.bottom <= innerHeight &&
+                box.left >= 0 &&
+                box.right <= innerWidth &&
+                !!hit &&
+                element.contains(hit)
+              );
+            })
+          )
+          .toBe(true);
+        const anchor = await trigger.boundingBox();
+        const popup = await menu.boundingBox();
+        expect(popup!.y + popup!.height).toBeLessThanOrEqual(anchor!.y);
+        await page.keyboard.press('Escape');
+        await expect(menu).toBeHidden();
+      }
+    });
+  }
+});
+
 for (const openWith of ['click', 'keyboard'] as const) {
   test(`project search receives focus on ${openWith} and on reopening`, async ({ page }) => {
     await page.goto('/iframe.html?id=chat-unifiedprojectselector--selected-private&viewMode=story');
@@ -567,3 +724,199 @@ test.describe('composer selector leading column', () => {
     });
   }
 });
+
+test('a previous queued edit acknowledgement preserves the next edit and its focus', async ({
+  page,
+}) => {
+  await page.goto('/iframe.html?id=sessions-messagequeuedisplay--deferred-editing&viewMode=story');
+  await page.getByRole('button', { name: 'Edit queued message', exact: true }).first().click();
+  const input = page.getByRole('textbox', { name: 'Edit queued message', exact: true });
+  await input.fill('Refactor the queue; preserve existing ordering.');
+  await page.getByRole('button', { name: 'Edit queued message', exact: true }).click();
+  await expect(input).toHaveValue(
+    'Add tests for the Loro mirror schema migrations around session history'
+  );
+  await input.fill('Add regression tests for message ordering and cancellation.');
+  await page.evaluate(() => window.dispatchEvent(new Event('storybook:release-queue-save')));
+  await expect(input).toHaveValue('Add regression tests for message ordering and cancellation.');
+  await expect(input).toBeFocused();
+  await input.press('Enter');
+  await expect(input).toHaveCount(0);
+  await expect(
+    page.getByText('Refactor the queue; preserve existing ordering.', { exact: true })
+  ).toBeVisible();
+  await expect(
+    page.getByText('Add regression tests for message ordering and cancellation.', { exact: true })
+  ).toBeVisible();
+});
+
+test.describe('question request recovery', () => {
+  test('shows a failed answer, retains its fields, and accepts the unchanged retry', async ({
+    page,
+  }) => {
+    await page.addInitScript(() => {
+      const writes: unknown[] = [];
+      (window as typeof window & { questionWrites: unknown[] }).questionWrites = writes;
+      window.addEventListener('storybook:question-write', (event) =>
+        writes.push((event as CustomEvent).detail)
+      );
+    });
+    for (const width of [390, 1000]) {
+      await page.setViewportSize({ width, height: 650 });
+      await page.goto(
+        '/iframe.html?id=sessions-floatingpermissionrequest--question-send-recovery&viewMode=story'
+      );
+      const choice = page.getByRole('button', { name: 'Small change', exact: true });
+      const note = page.getByRole('textbox', { name: 'Additional context', exact: true });
+      await choice.click();
+      await note.fill('Keep the public API stable.');
+      const submit = page.getByRole('button', { name: 'Submit', exact: true });
+      await submit.click();
+      await expect(page.getByRole('alert')).toHaveText(
+        "Your answer didn't reach the agent. Try again."
+      );
+      await expect(choice).toHaveAttribute('aria-pressed', 'true');
+      await expect(note).toHaveValue('Keep the public API stable.');
+      await expect(submit).toBeEnabled();
+      const card = await note.evaluate((node) => {
+        const bounds = node.closest('label')!.parentElement!.getBoundingClientRect();
+        return { x: bounds.x, y: bounds.y, right: bounds.right, bottom: bounds.bottom };
+      });
+      const feedback = await page.getByRole('alert').boundingBox();
+      const action = await submit.boundingBox();
+      expect(feedback).not.toBeNull();
+      expect(action).not.toBeNull();
+      expect(feedback!.x).toBeGreaterThanOrEqual(card.x);
+      expect(feedback!.x + feedback!.width).toBeLessThanOrEqual(card.right);
+      expect(feedback!.y).toBeGreaterThanOrEqual(card.y);
+      expect(feedback!.y + feedback!.height).toBeLessThanOrEqual(card.bottom);
+      expect(feedback!.y + feedback!.height).toBeLessThanOrEqual(action!.y);
+
+      await submit.click();
+      await expect(page.getByText('Which constraints matter?', { exact: true })).toBeVisible();
+      await expect(page.getByRole('alert')).toHaveCount(0);
+      const writes = await page.evaluate(
+        () => (window as typeof window & { questionWrites: unknown[] }).questionWrites
+      );
+      expect(writes).toEqual([
+        { requestId: 'request-approach', accepted: false },
+        {
+          requestId: 'request-approach',
+          accepted: true,
+          outcome: {
+            outcome: 'selected',
+            optionId: 'answer',
+            _meta: {
+              lody: {
+                elicitation: {
+                  version: 1,
+                  answers: {
+                    approach: 'Small change',
+                    approach_note: 'Keep the public API stable.',
+                  },
+                },
+              },
+            },
+          },
+        },
+      ]);
+    }
+  });
+
+  for (const touch of [false, true]) {
+    test.describe(`request navigation touch=${touch}`, () => {
+      test.use({ hasTouch: touch });
+      test('keeps independent drafts and removes each form after its answer is accepted', async ({
+        page,
+      }) => {
+        await page.goto(
+          '/iframe.html?id=sessions-floatingpermissionrequest--parallel-questions&viewMode=story'
+        );
+        const press = async (locator: import('@playwright/test').Locator) =>
+          touch ? locator.tap() : locator.click();
+        const custom = page.getByRole('textbox', { name: 'Type a custom answer...', exact: true });
+        const note = page.getByRole('textbox', { name: 'Additional context', exact: true });
+        await custom.fill('Use a small, reversible change.');
+        await note.fill('Keep the public API stable.');
+        await press(page.getByRole('button', { name: 'Next request', exact: true }));
+        await expect(page.getByText('Which constraints matter?', { exact: true })).toBeVisible();
+        await press(page.getByRole('button', { name: 'Offline', exact: true }));
+        await press(page.getByRole('button', { name: 'Compatibility', exact: true }));
+        await note.fill('Must work without network access.');
+        await press(page.getByRole('button', { name: 'Previous request', exact: true }));
+        await expect(custom).toHaveValue('Use a small, reversible change.');
+        await expect(note).toHaveValue('Keep the public API stable.');
+        await press(page.getByRole('button', { name: 'Submit', exact: true }));
+        await expect(page.getByText('Which approach should we use?', { exact: true })).toHaveCount(
+          0
+        );
+        await expect(page.getByRole('button', { name: 'Offline', exact: true })).toHaveAttribute(
+          'aria-pressed',
+          'true'
+        );
+        await expect(
+          page.getByRole('button', { name: 'Compatibility', exact: true })
+        ).toHaveAttribute('aria-pressed', 'true');
+        await expect(note).toHaveValue('Must work without network access.');
+        await press(page.getByRole('button', { name: 'Submit', exact: true }));
+        await expect(page.getByRole('textbox')).toHaveCount(0);
+        await expect(page.locator('textarea,input')).toHaveCount(0);
+      });
+    });
+  }
+
+  test('retains a question draft across an ordinary permission prompt and cancellation', async ({
+    page,
+  }) => {
+    await page.goto(
+      '/iframe.html?id=sessions-floatingpermissionrequest--mixed-requests&viewMode=story'
+    );
+    const choice = page.getByRole('button', { name: 'Small change', exact: true });
+    const note = page.getByRole('textbox', { name: 'Additional context', exact: true });
+    await choice.click();
+    await note.fill('Keep the public API stable.');
+    await page.getByRole('button', { name: 'Next request', exact: true }).click();
+    await expect(page.getByRole('button', { name: 'Allow once', exact: true })).toBeVisible();
+    await expect(page.getByRole('textbox')).toHaveCount(0);
+    await page.getByRole('button', { name: 'Previous request', exact: true }).click();
+    await expect(choice).toHaveAttribute('aria-pressed', 'true');
+    await expect(note).toHaveValue('Keep the public API stable.');
+    await page.getByRole('button', { name: 'Cancel', exact: true }).click();
+    await expect(page.getByText('Which approach should we use?', { exact: true })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Allow once', exact: true })).toBeVisible();
+  });
+});
+
+for (const imeSignal of [{ isComposing: true }, { keyCode: 229 }, { which: 229 }]) {
+  test(`custom question answer retains IME candidate confirmation ${JSON.stringify(imeSignal)}`, async ({
+    page,
+  }) => {
+    await page.goto(
+      '/iframe.html?id=sessions-askuserquestioncard--legacy-custom-answer&viewMode=story'
+    );
+    const input = page.getByRole('textbox', { name: 'Type a custom answer...', exact: true });
+    await input.fill('保留现有接口，先修改队列编辑。');
+    const prevented = await input.evaluate((node, signal) => {
+      const event = new KeyboardEvent('keydown', {
+        key: 'Enter',
+        bubbles: true,
+        cancelable: true,
+        ...signal,
+      });
+      // Chromium derives `which` from keyCode and ignores it in KeyboardEventInit.
+      // Override the readonly field to exercise the legacy native-event signal.
+      if (signal.which !== undefined)
+        Object.defineProperty(event, 'which', { value: signal.which });
+      node.dispatchEvent(event);
+      return event.defaultPrevented;
+    }, imeSignal);
+    expect(prevented).toBe(false);
+    await expect(page.getByText('Answered', { exact: true })).toHaveCount(0);
+    await expect(input).toBeEnabled();
+    await expect(input).toBeFocused();
+    await expect(input).toHaveValue('保留现有接口，先修改队列编辑。');
+    await input.press('Enter');
+    await expect(page.getByText('Answered', { exact: true })).toBeVisible();
+    await expect(input).toHaveValue('保留现有接口，先修改队列编辑。');
+  });
+}

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { createLoroStreamsTokenProvider } from '@lody/shared';
+import { createLoroStreamsTokenProviderLegacy } from '@lody/shared';
 import { LoroDoc, VersionVector } from 'loro-crdt';
 import {
   base64ToBytes,
@@ -414,7 +414,7 @@ describe('eager-sync cloud auth bridge', () => {
   it('refreshes a rejected JWT through the held provider callback instead of returning it', async () => {
     const bodies: Array<{ workspaceId: string; rejectedToken?: string }> = [];
     let issued = 0;
-    const provider = createLoroStreamsTokenProvider({
+    const provider = createLoroStreamsTokenProviderLegacy({
       endpoint: 'https://convex.example.com/api/loro-streams/token',
       workspaceId: 'workspace',
       authToken: 'raw-token',

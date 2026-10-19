@@ -6,6 +6,17 @@ import type { SessionWriteState } from './session-mirror';
 
 const immer = new Immer({ autoFreeze: false, useStrictShallowCopy: true });
 
+const CANCEL_REQUEST_PREFIX = 'cancel-request:';
+
+/** Distinguishes control-document requests from legacy metadata turn IDs. */
+export function getSessionCancelRequestMarker(requestId: string): string {
+  return `${CANCEL_REQUEST_PREFIX}${requestId}`;
+}
+
+export function isSessionCancelRequestMarker(marker: string): boolean {
+  return marker.startsWith(CANCEL_REQUEST_PREFIX);
+}
+
 // # Session control-plane Mirror
 //
 // A session doc's `history` grows without bound, so a control-plane Mirror keeps

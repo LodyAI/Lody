@@ -336,7 +336,7 @@ describe('resolveHistoryACPProcessLaunch', () => {
   });
 
   it('uses the same registry ACP local launch as normal sessions', async () => {
-    const provider = { cliType: 'registry', agentType: 'amp-acp' } as const;
+    const provider = { cliType: 'registry', agentType: 'goose' } as const;
     const sessionLaunch = resolveACPProcessLaunch(provider);
     const historyLaunch = await resolveHistoryACPProcessLaunch({
       provider,
@@ -345,7 +345,7 @@ describe('resolveHistoryACPProcessLaunch', () => {
 
     expect(historyLaunch.command).toBe(sessionLaunch.command);
     expect(historyLaunch.args).toEqual(sessionLaunch.args);
-    expect(historyLaunch.command).toBe('npx');
-    expect(historyLaunch.args).toEqual(['--prefer-offline', '-y', 'amp-acp']);
+    expect(historyLaunch.command).toBe('goose');
+    expect(historyLaunch.args).toEqual(['--acp=true']);
   });
 });

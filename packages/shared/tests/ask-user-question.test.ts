@@ -382,6 +382,7 @@ describe('AskUserQuestion form elicitation bridge (Claude >= 0.44.0)', () => {
         question_0: {
           type: 'string',
           title: 'Database',
+          description: 'Legacy field description',
           oneOf: [
             { const: 'Postgres', title: 'Postgres — Use PostgreSQL' },
             { const: 'SQLite', title: 'SQLite' },
@@ -593,6 +594,104 @@ describe('AskUserQuestion form elicitation bridge (Lody extension)', () => {
     },
     _meta: { lody: { elicitation: { version: 1, autoResolveAfterSeconds: 60 } } },
   } as unknown as CreateElicitationRequest;
+
+  it.each([
+    { description: undefined, message: 'Which path?', expected: 'Which path?' },
+    { description: '', message: '', expected: 'Next step' },
+  ])('falls back when a Core question has no prompt: %#', ({ description, message, expected }) => {
+    const parsed = parseAskUserQuestionElicitationRequest({
+      ...request,
+      message,
+      requestedSchema: {
+        type: 'object',
+        properties: { next_step: { type: 'string', title: 'Next step', description } },
+      },
+    } as unknown as CreateElicitationRequest);
+    expect(parsed?.meta.questions[0]?.question).toBe(expected);
+  });
+
+  it.each(['choice', 'free text'])(
+    'preserves a single Core %s question through history and its answer',
+    (kind) => {
+      const main = request.requestedSchema.properties.next_step;
+      const singleRequest = {
+        ...request,
+        requestedSchema: {
+          type: 'object',
+          properties: {
+            next_step:
+              kind === 'choice'
+                ? main
+                : {
+                    type: 'string',
+                    title: 'Next step',
+                    description: 'How should I proceed?',
+                  },
+          },
+        },
+      } as unknown as CreateElicitationRequest;
+      const parsed = parseAskUserQuestionElicitationRequest(singleRequest)!;
+      expect(parsed.meta.questions[0]).toMatchObject({
+        id: 'next_step',
+        header: 'Next step',
+        question: 'How should I proceed?',
+        options:
+          kind === 'choice'
+            ? [
+                { label: 'Revise plan', description: 'Review edge cases first' },
+                { label: 'Start implementation' },
+              ]
+            : [],
+      });
+      const doc = new Loro();
+      const open = (document: Loro) =>
+        createSessionMirror({
+          doc: document,
+          initialState: { session: { id: 'single-question' as SessionId }, history: [] },
+        });
+      const mirror = open(doc);
+      mirror.historyWriter.append({
+        id: 'turn',
+        role: 'assistant',
+        timestamp: '2026-10-13T00:00:00Z',
+        items: [
+          {
+            type: 'tool_call',
+            toolCallId: 'ask',
+            status: 'pending',
+            permissionRequest: {
+              requestId: 'request',
+              options: [],
+              _meta: { lody: { elicitation: { version: 1, questions: parsed.meta.questions } } },
+            },
+          },
+        ],
+      });
+      const answers = { next_step: kind === 'choice' ? 'Revise plan' : 'Keep the patch small' };
+      const outcome = createAskUserQuestionPermissionOutcome('answer', answers, parsed.meta);
+      expect(mirror.historyWriter.respondPermission('request', outcome)).toBe(true);
+      const reopened = new Loro();
+      reopened.import(doc.export({ mode: 'snapshot' }));
+      const replay = open(reopened);
+      const item = replay.historyWriter.read('turn')?.items?.[0];
+      if (item?.type !== 'tool_call') throw new Error('Missing persisted question');
+      const restored = parseAskUserQuestionPermissionMeta(item.permissionRequest?._meta)!;
+      expect(restored.questions).toEqual(parsed.meta.questions);
+      expect(getAskUserQuestionDisplayTitle(item.permissionRequest?._meta)).toBe(
+        'How should I proceed?'
+      );
+      expect(
+        extractAskUserQuestionAnswersFromOutcome(restored, item.permissionRequest?.outcome)
+      ).toEqual(answers);
+      expect(
+        buildAskUserQuestionElicitationResponse(parsed, {
+          outcome: item.permissionRequest!.outcome!,
+        })
+      ).toEqual({ action: 'accept', content: answers });
+      replay.dispose();
+      mirror.dispose();
+    }
+  );
 
   it('parses options, free text, secrets, Other fields, and automatic resolution', () => {
     expect(parseAskUserQuestionElicitationRequest(request)).toEqual({

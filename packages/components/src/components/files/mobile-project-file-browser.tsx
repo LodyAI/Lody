@@ -11,7 +11,18 @@ import {
   type ReactNode,
 } from 'react';
 import { useTranslation } from 'react-i18next';
-import { ChevronRight, CloudOff, FileText, FolderOpen, Home, Loader2 } from 'lucide-react';
+import {
+  ChevronRight,
+  CloudOff,
+  Eye,
+  EyeClosed,
+  FileText,
+  FolderOpen,
+  Home,
+  Loader2,
+} from 'lucide-react';
+import { Button } from '@lody/ui/button';
+import { ReadOnlyHtmlPreview } from '@/components/sessions/read-only-html-preview';
 import { Spinner } from '@/ui/spinner';
 import type { FileTreeItem } from '@lody/shared';
 
@@ -746,6 +757,7 @@ function MobileFilePreview({
     <MobileTextPreview
       path={content.path}
       text={snapshot.text}
+      truncated={snapshot.truncated}
       onScrollActivity={onScrollActivity}
       bottomClearanceClassName={bottomClearanceClassName}
     />
@@ -784,19 +796,59 @@ function MobileImagePreview({
 function MobileTextPreview({
   path,
   text,
+  truncated,
   onScrollActivity,
   bottomClearanceClassName,
 }: {
   readonly path: string;
   readonly text: string;
+  readonly truncated?: boolean;
   readonly onScrollActivity?: (scrollTop: number) => void;
   readonly bottomClearanceClassName: string;
 }) {
+  const { t } = useTranslation();
+  const [showHtml, setShowHtml] = useState(true);
   const resolvedTheme = useResolvedTheme();
   const activeVSCodeTheme = useActiveVSCodeTheme();
   const conversationFontSize = useAtomValue(conversationFontSizeAtom);
   const extendedCodeLanguagesEnabled = useAtomValue(extendedCodeLanguagesEnabledAtom);
   const language = getSessionFileLanguageId(path, extendedCodeLanguagesEnabled);
+
+  if (/\.(?:html|htm)$/iu.test(path) && !truncated) {
+    return (
+      <div className={cn(stylex.props(htmlStyles.root).className, bottomClearanceClassName)}>
+        <div {...stylex.props(htmlStyles.toolbar)}>
+          <Button
+            variant="ghost"
+            icon
+            aria-pressed={showHtml}
+            aria-label={
+              showHtml
+                ? t('sessions.fileViewer.preview.hide', 'Hide preview')
+                : t('sessions.fileViewer.preview.show', 'Preview')
+            }
+            onClick={() => setShowHtml((value) => !value)}
+          >
+            {showHtml ? <EyeClosed size={16} /> : <Eye size={16} />}
+          </Button>
+        </div>
+        {showHtml ? (
+          <ReadOnlyHtmlPreview text={text} />
+        ) : (
+          <SessionMonacoTextViewer
+            key={path}
+            text={text}
+            language="html"
+            resolvedTheme={resolvedTheme}
+            vscodeTheme={activeVSCodeTheme ?? null}
+            readOnly
+            className={stylex.props(htmlStyles.source).className}
+            onScrollChange={({ scrollTop }) => onScrollActivity?.(scrollTop)}
+          />
+        )}
+      </div>
+    );
+  }
 
   if (isSessionMarkdownPath(path)) {
     return (
@@ -883,3 +935,9 @@ function StatusPanel({
     </div>
   );
 }
+
+const htmlStyles = stylex.create({
+  root: { display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, overflow: 'hidden' },
+  toolbar: { display: 'flex', flexShrink: 0 },
+  source: { flex: 1, minHeight: 0 },
+});

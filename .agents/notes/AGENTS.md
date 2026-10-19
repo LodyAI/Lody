@@ -27,6 +27,10 @@ Record the problem, responsibilities, evidence-backed discoveries, genuine
 alternatives, trade-offs, outcome, verification limits, and PR link when available.
 Do not invent alternatives or PRs.
 
+Under the root compact-documentation rule, consolidate redundant PR-local notes,
+retaining decisions, reproducible evidence and unresolved limits; repair inbound
+links. The root rule also covers guides and READMEs outside this directory.
+
 A note is not overflow space for an oversized `AGENTS.md`. Nothing makes an agent
 read a dated note before changing a file, so a constraint that still binds stays
 in the nearest `AGENTS.md` even when its rationale moves here; leave the one-line

@@ -5,6 +5,7 @@ import { STATIC_HTML_PREVIEW_DOCUMENT_MARKER } from '@lody/shared';
 
 import {
   buildStaticHtmlPreviewDocument,
+  buildReadOnlyHtmlPreviewDocument,
   getStaticHtmlPreviewLogicalUrl,
   STATIC_HTML_PREVIEW_CONTENT_SECURITY_POLICY,
 } from '../src/components/sessions/static-html-preview-document';
@@ -44,6 +45,31 @@ describe('static HTML preview document', () => {
     expect(document.querySelector('script[data-lody-visual-annotation-runtime="true"]')).not.toBe(
       null
     );
+  });
+
+  it('preserves layout while removing executable and navigable content for a readonly frame', () => {
+    const preview = buildReadOnlyHtmlPreviewDocument(`
+      <style>h1 { color: red; }</style><h1>Report</h1>
+      <script>location = 'https://example.com'</script>
+      <meta http-equiv="refresh" content="0;url=https://example.com">
+      <a href="https://example.com" onclick="alert(1)">Link</a>
+      <svg><a xlink:href="https://example.com">SVG link</a><set attributeName="href" to="https://example.com" /></svg>
+      <template shadowrootmode="open"><a href="https://example.com">Shadow link</a></template>
+      <iframe srcdoc="<a href='https://example.com'>Link</a>"></iframe>
+      <form action="https://example.com"><button formaction="https://example.com">Submit</button></form>
+      <img src="data:image/png;base64,AA==">
+    `);
+    const document = new DOMParser().parseFromString(preview, 'text/html');
+    expect(document.querySelector('h1')?.textContent).toBe('Report');
+    expect(document.querySelector('style')?.textContent).toContain('color: red');
+    expect(document.querySelector('img')?.getAttribute('src')).toBe('data:image/png;base64,AA==');
+    expect(
+      document.querySelector(
+        'script, template, iframe, set, [href], [onclick], [action], [formaction]'
+      )
+    ).toBeNull();
+    expect(document.querySelector('meta[http-equiv="refresh"]')).toBeNull();
+    expect(document.head.firstElementChild?.getAttribute('content')).toContain("script-src 'none'");
   });
 
   it('maps comments to the file path without exposing a filesystem or capability URL', () => {

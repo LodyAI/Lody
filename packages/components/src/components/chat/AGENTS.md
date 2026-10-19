@@ -19,7 +19,7 @@ Index and rationale: [README.md](README.md).
 - Single-member workspaces pass no project-sharing state. Otherwise local project
   options and the selected desktop trigger show only effective `Private`; hide Team
   and unresolved states. Effective access is `machine.sharedWithTeam &&
-  project.sharedWithTeam`. The selected Private segment opens `ProjectShareDialog`;
+project.sharedWithTeam`. The selected Private segment opens `ProjectShareDialog`;
   its project share mutation also shares the machine atomically. Use
   `useConvexErrorMessage` for failures (auth recovery, no raw Convex toast).
   GitHub options have no access badge. A desktop machine option is local only when
@@ -62,7 +62,7 @@ Index and rationale: [README.md](README.md).
   replace (incomplete selection → empty search). Plain `/chat` stays plain; restored
   defaults/auto-selection never rewrite it. Mobile keeps base context with no callback.
 - `use-chat-landing-draft-session.ts` owns the landing's reserved session id, and
-  images, files, ACP preparation, and `startSession({ sessionId }, firstTurn)`
+  images, files, and `startSession({ sessionId }, firstTurn)`
   MUST consume that same identity. Attachment hooks never reset it independently;
   reset only after a full draft clear. Submit blocks while `hasBlockingImages` or
   `hasBlockingFiles`.
@@ -80,13 +80,9 @@ Index and rationale: [README.md](README.md).
   `startSession` accepts. Failure must reveal the unchanged draft; only acceptance
   may clear resources or reset the reserved id. The accepted history entry is
   direct-authored into the renderer's own session store.
-- Draft ACP preparation uses that same reserved id. It carries no prompt, env, or
-  secret-shaped ACP option values; it may include the current sanitized
-  mode/model/options. It is debounced/best-effort, replaced when routing or run
-  config changes, cancelled on idle, and never awaited by submit. Once the initial
-  user turn is locally accepted, submit MUST hand the lease to the durable session
-  before clearing the draft or navigating; a successful handoff must not send
-  `session/prepare-cancel`.
+- The landing never warms an agent for a draft: the machine starts ACP and the
+  worktree when the first turn is dispatched. Do not reintroduce `session/prepare`
+  ([decision](../../../../../.agents/notes/implemented/simplification/2026-10-16-remove-draft-session-preparation.md)).
 - `chat-landing-view.tsx` renders `ChatComposer`; stateful loading stays in
   `chat-landing.tsx`, session-mention drop handling in the view. Paint the page-level
   `ConversationDropOverlay` when sidebar drag starts, before `dragenter`. Desktop

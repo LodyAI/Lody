@@ -80,11 +80,16 @@ pricing boundary may differ from billing. Unreported runtime activity cannot be 
 
 Each assistant history entry may carry `tokenUsage` (input, output, cache
 read/write, reasoning; disjoint like Core buckets): the sum of the `delta.usage`
-reports routed to that entry. The CLI writes a live turn's sum at finalization
-and adds late reports to the finished entry; a reopened turn keeps adding. It is
-display data only, never an accounting source, and adapters without `delta`
-leave it absent. The turn details popover shows input, output (including
-reasoning) and cache (read + write) in compact product-language units.
+reports routed to that entry, plus optional `costUSD`. The cost is the sum of the
+delta costs only when every contribution has a known tariff; it stays absent when
+no contribution reported one and becomes `null` once any contribution is unknown,
+so a partial estimate is never shown as the turn's cost. The CLI writes a live
+turn's sum at finalization and adds late reports to the finished entry; a reopened
+turn keeps adding. It is display data only, never an accounting source, and
+adapters without `delta` leave it absent. The turn details popover shows input,
+output (including reasoning) and cache (read + write) in compact product-language
+units, and a cost-estimate row in that section when `costUSD` is a number. Cost is
+a provider bill or adapter estimate, not an invoice.
 
 ## Evidence and rollout
 

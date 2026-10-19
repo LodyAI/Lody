@@ -13,7 +13,9 @@ Resource links use `lody://` in every channel; startup never replaces an existin
 default handler. Packaged Windows fills an absent handler on first launch. Forward
 legacy cloud routes only to Stable's private alias, never through the common scheme;
 OSS must not exchange cloud credentials. Callback schemes stay channel-specific. Validate session resources before
-product-window dispatch, preserving the explicit workspace. See [deep links](../../../../specs/deep-links.md).
+product-window dispatch, preserving the explicit workspace. Provider import links stay local to
+the chosen installation and only stage user confirmation; never dispatch cloud auth or write
+Provider settings from a URL. Contract: [Magpie import](../../../../specs/magpie-provider-import.md). See [deep links](../../../../specs/deep-links.md).
 
 Main-process `console` output, lifecycle, and embedded-CLI supervision reach the
 CLI daily log through `desktop-log.ts`; write synchronously, never persist
@@ -36,3 +38,30 @@ The [window Spec](../../../../specs/desktop-windows.md) owns the behavior contra
   never reaches that store. Every `conf` store built at import or startup goes through
   `createSettingsStoreWithFallback` (`createMainSettingsStore` for new `userData` stores):
   `conf` validates in its constructor, so a malformed file would otherwise stop launch.
+
+## E2EE key custody
+
+`e2ee-custody.mts` owns an explicit main-process Scope, an OS-wrapped KEK and
+XChaCha20-Poly1305 protected blobs. It never joins the renderer IPC registry or
+starts from application bootstrap; the product E2EE switch remains closed.
+`e2ee-custody-electron.ts` is the readiness-gated native composition factory.
+Reject unavailable native encryption and Linux `basic_text`/unknown backends;
+never reuse auth cookie plaintext overrides or fall back to plaintext files.
+
+All installed/candidate binding fields are authenticated AAD and encrypted in the
+core payload. For new workspaces, use `prepareDevice` only for local genesis signing, then
+`retainDevice(actualGenesis, prepared)` before any network/CAS; failed preparations
+use `discardDevice` and never delete retained originals. Device private keys are
+encrypted on disk and imported as nonextractable native handles; Recovery secrets have no persistence method.
+Hand custody to `@lody/e2ee-core` only through `desktopE2eePorts` (KeyProtector,
+CandidateProtector, DeviceIdentity); keep the two protection purposes distinct.
+Caller-owned recipient handles must remain within the custody owner's Scope:
+WebCrypto provides no deterministic handle destruction or JS-string erasure.
+Stop admission before shutdown, await actual native work, then clear owned KEK
+bytes. Failed opens preserve originals; no key deletion or migration. Interrupted
+KEK rewrap recovers only a validated same-key wrapper under the native OS mutex;
+never infer lock ownership from PID/age or generate a replacement KEK on failure.
+
+The owning test uses synthetic authenticated safeStorage plus real crypto,
+filesystem and another OS process. It does not prove an OS keychain or all-platform
+packaging result; native safeStorage assurance needs an isolated platform run.

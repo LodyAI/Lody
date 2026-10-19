@@ -8,7 +8,7 @@ import { RouteMessage } from '@/components/route-message';
 import { useEffect, useState } from 'react';
 import { useStableSession } from '@/hooks/useStableSession';
 import { getAppCurrentPathWithSearch } from '@/lib/app-location';
-import { LoadingPlaceholder } from '@/components/loading-placeholder';
+import { BlockingWaitPlaceholder } from '@/components/blocking-wait-placeholder';
 import { isLocalAppPlatform } from '@/lib/app-platform';
 import {
   getLocalWorkspaceSlug,
@@ -40,6 +40,7 @@ function LocalHomeRoute() {
   if (workspacesState.status === 'error') {
     return (
       <RouteMessage
+        gate="workspace_list_error"
         title={t('workspace.route.loadingWorkspacesErrorTitle')}
         description={t('workspace.route.loadingWorkspacesErrorDescription')}
       />
@@ -48,7 +49,8 @@ function LocalHomeRoute() {
 
   if (!workspace) {
     return (
-      <LoadingPlaceholder
+      <BlockingWaitPlaceholder
+        gate="local_workspace_starting"
         variant="boot"
         title={t('workspace.route.localStartingTitle')}
         description={t('workspace.route.localStartingDescription')}
@@ -88,7 +90,8 @@ function CloudHomeRoute() {
 
   if (isPending || isRetrying) {
     return (
-      <LoadingPlaceholder
+      <BlockingWaitPlaceholder
+        gate="session_loading"
         variant="boot"
         title={t('workspace.route.signingInTitle')}
         description={t('workspace.route.signingInDescription')}
@@ -112,7 +115,9 @@ function AuthedHomeRoute() {
     activeOrganization,
     organizations,
     organizationsLoading,
-    error: organizationsError,
+    // Only the list decides the landing target; the active organization is
+    // optional here and is activated in the background.
+    organizationsError,
     refetchOrganizations,
     refetchActiveOrganization,
   } = useOrganization();
@@ -124,7 +129,8 @@ function AuthedHomeRoute() {
 
   if (!orgSettled) {
     return (
-      <LoadingPlaceholder
+      <BlockingWaitPlaceholder
+        gate="workspace_list_loading"
         variant="boot"
         title={t('workspace.route.loadingWorkspacesTitle')}
         description={t('workspace.route.loadingWorkspacesDescription')}
@@ -135,6 +141,7 @@ function AuthedHomeRoute() {
   if (organizationsError) {
     return (
       <RouteMessage
+        gate="workspace_list_error"
         title={t('workspace.route.loadingWorkspacesErrorTitle')}
         description={t('workspace.route.loadingWorkspacesErrorDescription')}
         onRetry={() => {
@@ -147,7 +154,8 @@ function AuthedHomeRoute() {
 
   if (organizationsLoading || organizations === undefined) {
     return (
-      <LoadingPlaceholder
+      <BlockingWaitPlaceholder
+        gate="workspace_list_loading"
         variant="boot"
         title={t('workspace.route.loadingWorkspacesTitle')}
         description={t('workspace.route.loadingWorkspacesDescription')}

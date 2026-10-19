@@ -3,7 +3,10 @@ import type { Meta, StoryObj } from '@storybook/react';
 import { MessageTextWithChips } from '@/components/mentions/message-text-chips';
 import { applyTextRewrites, type MessageTextSpan } from '@lody/shared';
 import { cn } from '@/lib/utils';
-import { userTextCollapsedHeight } from '@/components/ai-gui/conversation-font-size-classes';
+import {
+  conversationReadingFontSizeStyle,
+  userTextCollapsedStyle,
+} from '@/components/ai-gui/conversation-font-size-classes';
 import { getUserTextRenderSlice } from '@/components/ai-gui/message-copy';
 
 /**
@@ -77,6 +80,7 @@ function Bubble({
   spans,
   collapsed = false,
   className,
+  fontSize = 14,
 }: {
   title: string;
   text: string;
@@ -85,6 +89,7 @@ function Bubble({
   collapsed?: boolean;
   /** Narrows the column, the way a phone or a split pane does. */
   className?: string;
+  fontSize?: number;
 }) {
   // `getUserTextRenderSlice` is what production truncates with, so the story
   // sees what production sees. Re-implementing the cut here is how the pasted
@@ -97,10 +102,13 @@ function Bubble({
       <div className="min-w-0 max-w-full rounded-2xl bg-foreground/[0.05] px-4 py-2.5">
         <div
           className={cn(
-            'min-w-0 max-w-full whitespace-pre-wrap text-sm [overflow-wrap:anywhere]',
+            'min-w-0 max-w-full whitespace-pre-wrap [overflow-wrap:anywhere]',
             collapsed && 'overflow-hidden'
           )}
-          style={collapsed ? { maxHeight: userTextCollapsedHeight(14) } : undefined}
+          style={{
+            ...conversationReadingFontSizeStyle(fontSize),
+            ...(collapsed ? userTextCollapsedStyle(fontSize) : {}),
+          }}
         >
           <MessageTextWithChips text={slice?.text ?? text} spans={slice ? slice.spans : spans} />
         </div>
@@ -110,7 +118,7 @@ function Bubble({
 }
 
 /**
- * Long enough that `UserPlainTextBlock` collapses it under its fixed
+ * Long enough that `UserPlainTextBlock` collapses it under its
  * `maxHeight`. That height is a whole number of line boxes, so anything that
  * makes one line taller than the rest shows up here as a half-clipped row —
  * which no short fixture can reveal.
@@ -194,5 +202,48 @@ export const WithSpans: Story = { args: { withSpans: true } };
 
 export const WithSpansDark: Story = {
   args: { withSpans: true },
+  globals: { theme: 'dark' },
+};
+
+/** Chinese prose and a paste chip must share a baseline at every text size. */
+export const PastedTextAlignment: Story = {
+  args: { withSpans: true },
+  render: () => {
+    const prefix = '请分析这段示例日志，并说明处理步骤 ';
+    const pasted = applyTextRewrites(`${prefix}[Pasted]`, [
+      {
+        start: prefix.length,
+        end: prefix.length + '[Pasted]'.length,
+        replacement: PASTED_BLOB,
+        span: {
+          kind: 'pasted_text',
+          label: `Pasted ${PASTED_BLOB.length.toLocaleString('en-US')} chars`,
+        },
+      },
+    ]);
+    return (
+      <div className="mx-auto flex max-w-3xl flex-col gap-8 bg-background p-8">
+        {[12, 14, 18].map((fontSize) => (
+          <Bubble
+            key={fontSize}
+            title={`${fontSize}px`}
+            text={pasted.text}
+            spans={pasted.spans}
+            fontSize={fontSize}
+          />
+        ))}
+        <Bubble
+          title="Narrow column"
+          text={pasted.text}
+          spans={pasted.spans}
+          className="max-w-[16rem] self-end"
+        />
+      </div>
+    );
+  },
+};
+
+export const PastedTextAlignmentDark: Story = {
+  ...PastedTextAlignment,
   globals: { theme: 'dark' },
 };

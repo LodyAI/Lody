@@ -1,4 +1,5 @@
 import { expect, test, type Locator } from '@playwright/test';
+import { OPEN_SOURCE_ATTRIBUTION_BUNDLE } from '../../src/lib/open-source-attributions.generated';
 
 const rolesStory = '/iframe.html?id=settings-desktopsettingsmodal--agent-roles-tab&viewMode=story';
 
@@ -12,6 +13,65 @@ async function expectInside(element: Locator, container: Locator) {
   expect(inner!.x + inner!.width).toBeLessThanOrEqual(outer!.x + outer!.width + 1);
   expect(inner!.y).toBeGreaterThanOrEqual(outer!.y - 1);
   expect(inner!.y + inner!.height).toBeLessThanOrEqual(outer!.y + outer!.height + 1);
+}
+
+for (const viewportSize of [
+  { width: 1180, height: 800 },
+  { width: 707, height: 394 },
+  { width: 400, height: 360 },
+]) {
+  test(`scrolls to the last open-source notice at ${viewportSize.width}×${viewportSize.height}`, async ({
+    page,
+  }) => {
+    await page.setViewportSize(viewportSize);
+    await page.goto(
+      '/iframe.html?id=settings-desktopsettingsmodal--about-tab&viewMode=story&globals=locale:en'
+    );
+    const about = page.getByRole('dialog', { name: 'About', exact: true });
+    await about.getByRole('button', { name: 'Open Source Licenses', exact: true }).click();
+    const notices = page.getByRole('dialog', { name: 'Open Source Licenses', exact: true });
+    await expect(notices).toBeVisible();
+    const viewport = notices.locator('[data-radix-scroll-area-viewport]');
+    await expect
+      .poll(() =>
+        viewport.evaluate((el) => el.clientHeight > 0 && el.scrollHeight > el.clientHeight)
+      )
+      .toBe(true);
+    await expectInside(viewport, notices);
+    await expectInside(notices, page.locator('body'));
+
+    await viewport.hover();
+    await page.mouse.wheel(0, 500);
+    await expect.poll(() => viewport.evaluate((el) => el.scrollTop)).toBeGreaterThan(0);
+    await viewport.evaluate((el) => {
+      el.scrollTop = el.scrollHeight;
+    });
+    const bundled = OPEN_SOURCE_ATTRIBUTION_BUNDLE.entries.filter(
+      (entry) => entry.kind === 'vendored'
+    );
+    await expect(notices.getByText(bundled.at(-1)!.name, { exact: true })).toBeInViewport({
+      ratio: 1,
+    });
+
+    await notices.getByRole('button', { name: /^Dependencies/ }).click();
+    const mitEntries = OPEN_SOURCE_ATTRIBUTION_BUNDLE.entries.filter(
+      (entry) => entry.kind === 'package' && entry.license === 'MIT'
+    );
+    await notices.getByRole('combobox').click();
+    await page.getByRole('option', { name: `MIT (${mitEntries.length})`, exact: true }).click();
+    await viewport.evaluate((el) => {
+      el.scrollTop = el.scrollHeight;
+    });
+    await expect(notices.getByText(mitEntries.at(-1)!.name, { exact: true })).toBeInViewport({
+      ratio: 1,
+    });
+    await expectInside(notices.getByRole('button', { name: 'Close', exact: true }), notices);
+    await page.keyboard.press('Escape');
+    await expect(notices).toBeHidden();
+    await expect(
+      about.getByRole('button', { name: 'Open Source Licenses', exact: true })
+    ).toBeFocused();
+  });
 }
 
 for (const width of [400, 500, 707, 900, 1180]) {

@@ -321,5 +321,5 @@ export const roostHistoryExperimentEnabledAtom = atomWithStorage<boolean>(
 
 /** The single gate for selecting Roost when a new session is accepted. */
 export const roostHistoryFeatureEnabledAtom = atom(
-  (get) => get(experimentalFeaturesEnabledAtom) && get(roostHistoryExperimentEnabledAtom)
+  (get) => get(developerModeEnabledAtom) && get(roostHistoryExperimentEnabledAtom)
 );

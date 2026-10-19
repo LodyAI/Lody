@@ -18,6 +18,14 @@ File attachments use `file` blocks; the product contract is in
   in-flight spinner, and the primary affordance keeps reading as preview.
 - `session-file-preview-dialog.tsx` — `SessionFilePreviewPanel` (status-driven;
   markdown reuses `MarkdownRenderer`, raw toggle, copy=raw, truncation) and dialog wrapper.
+  Complete HTML fallback attachments open in the shared `ReadOnlyHtmlPreview`, with
+  an eye toggle beside Copy in the existing header. Source mode and Copy retain
+  the original text; loading, errors and truncated HTML never mount the iframe.
+  On mobile, all these file types use a bottom Drawer/Sheet taking approximately
+  94dvh (respecting top and bottom safe areas), with a fixed header and scrolling
+  body; HTML fills the available body. Desktop retains the centered Dialog and
+  55vh content cap. Preview uses the script-free sandbox, with no
+  live-file provenance or Browser connection required.
   Story: `SessionFilePreviewPanel.stories.tsx`.
 - `view.tsx` `SessionFileGroup` owns atoms/download/preview-fetch and resolves the pending
   machine name. Both render switches and `UserChatBubble` route `file` blocks through it.
@@ -41,6 +49,21 @@ File attachments use `file` blocks; the product contract is in
   for screens. Tiles keep `shrink-0` (flex shrinks before it wraps) and hug the
   speaker's side. Decision:
   [image attachment row](../../../../../.agents/notes/implemented/bug-fix/2026-09-15-image-attachment-row-wraps.md).
+
+## Codex file citations
+
+Markdown prose recognizes `:codex-file-citation{path="..."}` as a local file card,
+including paths wrapped in whitespace/newlines and optional `purpose` / `artifact_kind`
+attributes. It reuses `SessionFileCardLayout` and the Markdown file-link action/menu
+boundary; it does not fabricate an uploaded attachment, size, expiry, or download URL.
+Filename punctuation is URL-encoded for transport through the existing href resolver.
+Windows drive prefixes stay unescaped and backslash separators normalize to slashes,
+so absolute artifact targets retain their drive. The citation walk leaves non-container
+Markdown nodes untouched, including inline/display math.
+Without a session opener, clicking copies the path. Invalid/incomplete citations and
+code examples do not become cards. The inline card uses a span frame to keep paragraph
+markup valid. Coverage lives in the Markdown file-link and streaming renderer suites;
+`MarkdownCodexFileCitations` provides the visual states.
 
 ## Upload-to-history continuity
 

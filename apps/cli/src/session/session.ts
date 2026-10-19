@@ -124,6 +124,8 @@ function createAbortPromise(signal?: AbortSignal):
 }
 
 export class Session extends EventEmitter<SessionEvents> implements ISession {
+  private sandboxCleanupFailed = false;
+
   readonly sessionId: SessionId;
   private readonly config: SessionConfig;
   private readonly logger: Logger;
@@ -203,26 +205,6 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
     return this.getWorkdir();
   }
 
-  setWorkdir(workdir: string): void {
-    let stat: fs.Stats;
-    try {
-      stat = fs.statSync(workdir);
-    } catch (error) {
-      const code =
-        error && typeof error === 'object' && 'code' in error
-          ? (error as { code?: unknown }).code
-          : null;
-      if (code === 'ENOENT') {
-        throw new Error(`Session workdir does not exist: ${workdir}`, { cause: error });
-      }
-      throw error;
-    }
-    if (!stat.isDirectory()) {
-      throw new Error(`Session workdir is not a directory: ${workdir}`);
-    }
-    this.fixedWorkdir = workdir;
-  }
-
   getParentSessionId(): SessionId | undefined {
     return this.config.parentSessionId;
   }
@@ -231,6 +213,13 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
     await this.sandbox.applyLimits(limits);
   }
 
+  watchInboxRecoveryResources(
+    persist: (identity: import('./session-sandbox').SessionRecoveryResources) => void
+  ): Promise<() => void> {
+    if (!this.sandbox.watchRecoveryResources)
+      return Promise.reject(new Error('Complete Session resource ownership is unavailable'));
+    return this.sandbox.watchRecoveryResources(persist);
+  }
   async getMonitorRuntimeInfo(): Promise<SessionMonitorRuntimeInfo> {
     let accounting: SessionMonitorRuntimeInfo['accounting'];
     try {
@@ -270,8 +259,9 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
    * processes since, and a failed attempt deserves a retry rather than its
    * stale rejection. Each process tree gets a bounded SIGTERM grace (none when
    * forced) and a bounded wait after SIGKILL. A tree that survives both still
-   * ends the Session's bookkeeping, but the returned promise rejects with the
-   * `TerminationFailed`: a caller must not treat that agent as idle and reuse it.
+   * retains process handles, sandbox and credentials, and rejects with an
+   * AggregateError containing the original failures. Callers must not reuse
+   * that agent; independent recovery retries physical termination first.
    */
   terminate(force: boolean = false): Promise<void> {
     const current = this.termination;
@@ -344,19 +334,16 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
     const activeProcess = this.activeProcess;
     const agentProcess = this.agentProcess;
 
-    // The per-process trees first, then the sandbox as a whole: the latter also
-    // reaches terminal commands and groups whose leader already exited.
+    // The sandbox as a whole also reaches terminal commands and groups whose
+    // leader already exited. It tracks the per-process trees too, so ending
+    // them one after the other would double every bounded wait on a survivor.
     const failures: unknown[] = [];
     for (const outcome of await Promise.allSettled([
       activeProcess?.terminate(termination.force),
       agentProcess?.terminate(termination.force),
+      this.sandbox.terminate(termination.force),
     ])) {
       if (outcome.status === 'rejected') failures.push(outcome.reason);
-    }
-    try {
-      await this.sandbox.terminate(termination.force);
-    } catch (error) {
-      failures.push(error);
     }
     await terminalsDisposed;
     for (const failure of failures) {
@@ -365,12 +352,22 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
       );
     }
 
+    if (failures.length > 0) {
+      this.status = 'failed';
+      // Keep the sandbox registry, process handles and credentials for explicit recovery.
+      // An exited waiter is not a release receipt, and closing its Scope cannot retry cleanup.
+      throw new AggregateError(failures, `Session ${this.sessionId} resources were not released`);
+    }
+
     try {
-      await this.sandbox.cleanup();
+      if (this.sandboxCleanupFailed && this.sandbox.recoverCleanup)
+        await this.sandbox.recoverCleanup();
+      else await this.sandbox.cleanup();
+      this.sandboxCleanupFailed = false;
     } catch (error) {
-      this.logger.debug(
-        `[${this.sessionId}] Failed to clean up sandbox state: ${formatErrorMessage(error)}`
-      );
+      this.sandboxCleanupFailed = true;
+      this.status = 'failed';
+      throw new Error(`Session ${this.sessionId} sandbox cleanup is unresolved`, { cause: error });
     }
 
     await this.credentials.release();
@@ -752,13 +749,13 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
           startupAbort: externalAbort
             ? Promise.race([startupMonitor.abortPromise, externalAbort.promise])
             : startupMonitor.abortPromise,
-          resolveSessionStart: callbacks.resolveSessionStart,
         });
         client = started.client;
         acpSessionId = started.acpSessionId;
         acpCapabilities = normalizeAcpSessionCapabilities(started.sessionResponse, {
           sessionFork: started.client.supportsSessionFork(),
           sessionTitle: started.client.supportsSessionTitleGeneration(),
+          rateLimits: started.client.getRateLimitsCapability(),
           acknowledgedSteer: started.client.supportsAcknowledgedSteer(),
           goalActions: started.client.getGoalCapability()?.actions.slice(),
           agent: { cliType: this.config.agentCliType, agentType: this.config.agentType },

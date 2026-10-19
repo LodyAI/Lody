@@ -12,6 +12,7 @@ export const makeApplicationRuntime = <R, E>(
   const state = Ref.makeUnsafe<{
     disposed: boolean;
     failure?: Cause.Cause<unknown>;
+    recovery?: Cause.Cause<unknown>;
     active?: Deferred.Deferred<void, unknown>;
   }>({ disposed: false });
   const closeEffect = Effect.uninterruptible(
@@ -32,16 +33,27 @@ export const makeApplicationRuntime = <R, E>(
       const result = yield* (
         claim.previous.disposed
           ? claim.previous.failure
-            ? options.recover(claim.previous.failure)
+            ? options.recover(claim.previous.recovery ?? claim.previous.failure)
             : Effect.void
           : runtime.disposeEffect
       ).pipe(Effect.exit);
+      const receipt =
+        Exit.isFailure(result) && claim.previous.failure
+          ? Exit.failCause(Cause.combine(claim.previous.failure, result.cause))
+          : result;
       yield* Ref.set(state, {
         disposed: true,
-        ...(Exit.isFailure(result) ? { failure: claim.previous.failure ?? result.cause } : {}),
+        ...(Exit.isFailure(receipt)
+          ? {
+              failure: receipt.cause,
+              // Retry the original transferred owners; accumulated reporting failures
+              // must not turn their recovery classifier into an unrelated error path.
+              recovery: claim.previous.recovery ?? receipt.cause,
+            }
+          : {}),
       });
-      yield* Deferred.done(claim.done, result);
-      return yield* result;
+      yield* Deferred.done(claim.done, receipt);
+      return yield* receipt;
     })
   );
   return {

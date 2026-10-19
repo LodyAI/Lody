@@ -1,4 +1,5 @@
 import { existsSync } from 'node:fs';
+import { prepareMagpieRuntime } from './magpie-runtime';
 import { createHash } from 'node:crypto';
 import { homedir } from 'node:os';
 import { delimiter, dirname, join, normalize, resolve } from 'node:path';
@@ -73,6 +74,8 @@ export type ResolveACPSettingInput = {
    */
   customAcp?: CustomAcpLaunchSpec;
   runtimeOverrides?: BuiltinRuntimeOverrides;
+  agentConfigId?: string;
+  magpieGatewayUrl?: string;
   /** Environment values that can alter an agent's advertised capabilities. */
   env?: NodeJS.ProcessEnv;
 };
@@ -266,6 +269,13 @@ export function getAcpCapabilitySourceVersion(
   input: ResolveACPSettingInput,
   managedRuntimeVersion?: string
 ): string {
+  if (input.cliType === 'builtin' && input.magpieGatewayUrl) {
+    const { magpieGatewayUrl: gateway, ...nativeInput } = input;
+    const base = getAcpCapabilitySourceVersion(nativeInput, managedRuntimeVersion);
+    const suffix = getBuiltinRuntimeOverrideSourceVersionSuffix(input.runtimeOverrides);
+    const prefix = suffix && base.endsWith(suffix) ? base.slice(0, -suffix.length) : base;
+    return `${prefix}+magpie-v1:${createHash('sha256').update(gateway).digest('hex').slice(0, 12)}${suffix}`;
+  }
   if (input.cliType === 'custom') {
     // Derive from the launch spec itself so editing the command invalidates
     // cached capabilities; there is no package version to key on.
@@ -398,8 +408,7 @@ export async function resolveExpectedAcpCapabilitySourceVersion(
 
 export function resolveRegistryAgentACPSetting(agent: RegistryAcpAgent): ResolvedACPSetting {
   if (agent.distribution.local?.command) {
-    const isNpx = agent.distribution.local.command === 'npx';
-    const args = [...(isNpx ? [NPX_CACHE_MODE_ARG] : []), ...(agent.distribution.local.args ?? [])];
+    const args = [...(agent.distribution.local.args ?? [])];
     return {
       status: {
         agent: `${agent.name}@${agent.version}`,
@@ -551,6 +560,7 @@ async function resolveBuiltinACPProcessLaunch(
     const [adapterPath] = resolveCliAdapterEntry('deepseek-acp');
     const launch = await resolveDeepSeekHarnessProcessLaunch({
       adapterPath,
+      providerId: input.agentConfigId,
       extraArgs: input.extraArgs,
     });
     return {
@@ -746,7 +756,15 @@ export async function resolveACPProcessLaunchAsync(
   input: ResolveACPProcessLaunchInput
 ): Promise<ResolvedACPProcessLaunch> {
   if (input.cliType === 'builtin') {
-    return await resolveBuiltinACPProcessLaunch(input);
+    const launch = await resolveBuiltinACPProcessLaunch(input);
+    const gateway = input.magpieGatewayUrl;
+    if (!gateway) return launch;
+    const magpie = await prepareMagpieRuntime(input.agentType, gateway, input.signal);
+    return {
+      ...launch,
+      env: { ...launch.env, ...magpie.env },
+      args: [...launch.args, ...magpie.args],
+    };
   }
   if (input.cliType === 'registry') {
     const agent = registryAgentsById[input.agentType];

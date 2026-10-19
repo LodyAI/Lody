@@ -10,7 +10,10 @@ import {
   useSessionFileProviderTree,
 } from '../src/hooks/use-code-session';
 import { createSessionFileProviderFromSource } from '../src/lib/session-file-provider-selection';
-import type { SessionFileProvider } from '../src/lib/session-file-provider';
+import type {
+  SessionFileProvider,
+  SessionFileProviderEntry,
+} from '../src/lib/session-file-provider';
 
 vi.mock('../src/hooks/use-code-collab-requested-role', () => ({
   useCodeCollabRequestedRole: () => 'read',
@@ -46,6 +49,88 @@ async function render(node: ReactNode): Promise<HTMLDivElement> {
 }
 
 describe('buildFileTreeFromSessionFileProviderEntries', () => {
+  it('merges lazy ancestors with loaded files while retaining ids, modified flags and ordering', () => {
+    const entries = [
+      lazyDirectory('src/z'),
+      lazyDirectory('assets/icons'),
+      lazyDirectory('src', 'old-src'),
+      { path: 'src/cache.ts', kind: 'text', sourceState: 'live-readonly', modifiedTime: 123 },
+      { path: 'readme.md', kind: 'text', sourceState: 'live-readonly' },
+      lazyDirectory('/src//a/', 'a-id'),
+      lazyDirectory('src', 'current-src'),
+      lazyDirectory('', 'empty-id'),
+      { ...lazyDirectory('ignored'), directoryId: undefined },
+    ] satisfies SessionFileProviderEntry[];
+    expect(buildFileTreeFromSessionFileProviderEntries(Object.freeze(entries))).toEqual([
+      {
+        path: 'assets',
+        type: 'directory',
+        children: [
+          {
+            path: 'assets/icons',
+            type: 'directory',
+            children: [],
+            lazyDirectoryId: 'assets/icons',
+          },
+        ],
+      },
+      {
+        path: 'src',
+        type: 'directory',
+        modified: true,
+        lazyDirectoryId: 'current-src',
+        children: [
+          { path: 'src/a', type: 'directory', children: [], lazyDirectoryId: 'a-id' },
+          { path: 'src/z', type: 'directory', children: [], lazyDirectoryId: 'src/z' },
+          { path: 'src/cache.ts', type: 'file', modified: true },
+        ],
+      },
+      { path: 'readme.md', type: 'file', modified: false },
+    ]);
+  });
+
+  it('keeps a lazy directory distinct from a file at the same path', () => {
+    expect(
+      buildFileTreeFromSessionFileProviderEntries([
+        { path: 'same', kind: 'text', sourceState: 'live-readonly', modifiedTime: 123 },
+        lazyDirectory('same/child'),
+        lazyDirectory('same', 'replacement-id'),
+      ])
+    ).toEqual([
+      {
+        path: 'same',
+        type: 'directory',
+        lazyDirectoryId: 'replacement-id',
+        children: [
+          { path: 'same/child', type: 'directory', children: [], lazyDirectoryId: 'same/child' },
+        ],
+      },
+      { path: 'same', type: 'file', modified: true },
+    ]);
+  });
+
+  it('retains every directory and its identity in a broad reverse-ordered snapshot', () => {
+    const paths = Array.from(
+      { length: 4096 },
+      (_, index) => `packages/pkg-${String(index).padStart(4, '0')}`
+    );
+    const tree = buildFileTreeFromSessionFileProviderEntries(
+      [...paths].reverse().map((path) => lazyDirectory(path, `id:${path}`))
+    );
+    expect(tree).toEqual([
+      {
+        path: 'packages',
+        type: 'directory',
+        children: paths.map((path) => ({
+          path,
+          type: 'directory',
+          children: [],
+          lazyDirectoryId: `id:${path}`,
+        })),
+      },
+    ]);
+  });
+
   it('maps provider entries into the shared file tree shape', () => {
     expect(
       buildFileTreeFromSessionFileProviderEntries([
@@ -100,6 +185,38 @@ describe('buildFileTreeFromSessionFileProviderEntries', () => {
     expect(rendered.textContent).toContain('ready:true');
     expect(rendered.textContent).toContain('synced:false');
     expect(rendered.textContent).toContain('Files are unavailable');
+  });
+
+  it('replaces lazy and loaded nodes when the provider publishes a new snapshot', async () => {
+    const listeners = new Set<(files: readonly SessionFileProviderEntry[]) => void>();
+    const provider: SessionFileProvider = {
+      ...createReadyProvider([lazyDirectory('old')]),
+      subscribeFiles(listener) {
+        listeners.add(listener);
+        return () => {
+          listeners.delete(listener);
+        };
+      },
+    };
+    const rendered = await render(createElement(ProviderTreeProbe, { provider }));
+    expect(rendered.textContent).toContain('old');
+    act(() => {
+      for (const listener of listeners)
+        listener([
+          lazyDirectory('src'),
+          { path: 'src/new.ts', kind: 'text', sourceState: 'live-readonly', modifiedTime: 123 },
+        ]);
+    });
+    expect(JSON.parse(rendered.querySelector('pre')!.textContent!)).toEqual([
+      {
+        path: 'src',
+        type: 'directory',
+        modified: true,
+        lazyDirectoryId: 'src',
+        children: [{ path: 'src/new.ts', type: 'file', modified: true }],
+      },
+    ]);
+    expect(rendered.textContent).toContain('ready:true synced:true');
   });
 
   it('treats an empty Code Collab file list as a normal empty directory', async () => {
@@ -196,6 +313,17 @@ function ProviderTreeProbe({ provider }: { readonly provider: SessionFileProvide
     null,
     `ready:${String(tree.ready)} synced:${String(tree.synced)} roots:${tree.state.length} message:${
       tree.message ?? ''
-    }`
+    }`,
+    createElement('pre', null, JSON.stringify(tree.state))
   );
+}
+
+function lazyDirectory(path: string, directoryId = path): SessionFileProviderEntry {
+  return {
+    path,
+    directoryId,
+    entryType: 'lazy-directory',
+    kind: 'special',
+    sourceState: 'live-readonly',
+  };
 }

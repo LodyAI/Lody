@@ -2,6 +2,8 @@ import { isElectronRenderer } from '@/lib/electron';
 import { openSessionOnModifiedClick } from '@/lib/desktop-window';
 import { SessionWindowMenuItem } from './session-window-menu-item';
 import { cn } from '@/lib/utils';
+import * as stylex from '@stylexjs/stylex';
+import { SIDEBAR_ROW_LINE_CLASS, sidebarSurface } from './sidebar-surface';
 import {
   closestCenter,
   DndContext,
@@ -40,6 +42,7 @@ import {
   useCallback,
   useLayoutEffect,
   useMemo,
+  useRef,
   useState,
   type MouseEvent as ReactMouseEvent,
   type ReactNode,
@@ -63,6 +66,7 @@ import {
   sidebarShowFullListAtom,
   toggleSidebarCollapsedOpenedBySessionAtom,
 } from '@/atoms/focus-layer';
+import { sidebarShowBranchNamesAtom } from '@/atoms/sidebar-state';
 import {
   buildOpenedBySessionTree,
   countOpenedByTreeRoots,
@@ -93,6 +97,7 @@ import {
   SIDEBAR_GROUP_LABEL_CLASS,
   SIDEBAR_ROW_TEXT_CLASS,
   SIDEBAR_CAPTION_TEXT_CLASS,
+  SidebarSessionMetaLine,
   SIDEBAR_GROUP_LABEL_COLOR_CLASS,
   SidebarGroupActivityMark,
   SIDEBAR_UNSENT_TITLE_CLASS,
@@ -569,9 +574,46 @@ type SessionGroupRowProps = Pick<
   groupKind: SessionRowGroup['kind'];
   groupRepoFullName: SessionRowGroup['repoFullName'];
   showTreeGutter: boolean;
+  /** The previous visible row is a top-level one, so this child is the first under its opener. */
+  followsOpener: boolean;
   moreActionsLabel: string;
   beginRename: (sessionId: string, currentTitle: string) => void;
 };
+
+function measureSidebarSessionTitle(row: HTMLElement, isMobile: boolean) {
+  if (isMobile) return;
+  const title = row.querySelector<HTMLElement>('[data-sidebar-session-title]');
+  if (!title) return;
+  const distance = title.scrollWidth - title.clientWidth;
+  if (distance <= 8) {
+    row.removeAttribute('data-sidebar-title-overflow');
+    return;
+  }
+  row.setAttribute('data-sidebar-title-overflow', 'true');
+  title.style.setProperty('--sidebar-title-distance', `${-distance}px`);
+  title.style.setProperty('--sidebar-title-duration', `${Math.max(3.8, 2.4 + distance / 30)}s`);
+}
+
+function getSidebarSessionTitleOffset(title: HTMLElement) {
+  const transform = getComputedStyle(title).transform;
+  return transform === 'none' ? 0 : new DOMMatrixReadOnly(transform).m41;
+}
+
+function setSidebarSessionTitleSwipeOffset(
+  row: HTMLElement,
+  title: HTMLElement,
+  distance: number,
+  offset: number
+) {
+  row.setAttribute('data-sidebar-title-overflow', 'true');
+  row.setAttribute('data-sidebar-title-swiping', 'true');
+  title.style.setProperty('--sidebar-title-distance', `${-distance}px`);
+  title.style.setProperty('--sidebar-title-duration', `${Math.max(3.8, 2.4 + distance / 30)}s`);
+  title.style.setProperty(
+    '--sidebar-title-swipe-offset',
+    `${Math.max(-distance, Math.min(0, offset))}px`
+  );
+}
 
 /**
  * One session row of a group. Memoized on its own props so a selection change
@@ -585,6 +627,7 @@ const SessionGroupRow = memo(function SessionGroupRow({
   groupKind,
   groupRepoFullName,
   showTreeGutter,
+  followsOpener,
   isMobile,
   moreActionsLabel,
   beginRename,
@@ -604,6 +647,15 @@ const SessionGroupRow = memo(function SessionGroupRow({
   archiveConfirmLabel,
   contextMenuLabels,
 }: SessionGroupRowProps) {
+  const titleSwipeRef = useRef<{
+    pointerId: number;
+    startX: number;
+    startY: number;
+    startOffset: number;
+    distance: number;
+    started: boolean;
+  } | null>(null);
+  const suppressTitleClickRef = useRef(false);
   const { t } = useTranslation();
   const isSelectable = typeof onSelectSession === 'function';
   const session = node.item;
@@ -667,16 +719,20 @@ const SessionGroupRow = memo(function SessionGroupRow({
   const useAnchor = typeof sessionHref === 'string' && sessionHref.length > 0;
   const isUnsent = useSessionUnsentNewConversation(session.sessionId);
   const renderTitle = (extraClassName?: string) => (
-    <span
-      className={cn(
-        'truncate font-normal',
-        isUnsent && !showSelectedState && SIDEBAR_UNSENT_TITLE_CLASS,
-        extraClassName
-      )}
-    >
-      {session.title}
+    <span className="sidebar-session-title-clip min-w-0 flex-1" data-sidebar-title-clip>
+      <span
+        className={cn(
+          'sidebar-session-title block max-w-full truncate font-normal',
+          isUnsent && !showSelectedState && SIDEBAR_UNSENT_TITLE_CLASS,
+          extraClassName
+        )}
+        data-sidebar-session-title
+      >
+        {session.title}
+      </span>
     </span>
   );
+  const lineBoxClassName = cn('flex shrink-0 items-center', SIDEBAR_ROW_LINE_CLASS);
   const handleAnchorClick = useAnchor
     ? (event: ReactMouseEvent<HTMLAnchorElement>) => {
         if (openSessionOnModifiedClick(event, session.sessionId)) return;
@@ -697,11 +753,26 @@ const SessionGroupRow = memo(function SessionGroupRow({
   // menu (and its ⋯ button) is desktop-only. Computed before the row so
   // the leading slot can show the ⋯ affordance.
   const canGoToOpener = Boolean(openerSessionId && isSelectable);
-  const openedByTreeSlot = buildSessionRowOpenedByTreeSlot(
+  const baseOpenedByTreeSlot = buildSessionRowOpenedByTreeSlot(
     node,
     t,
     onToggleOpenedBySessions ? () => onToggleOpenedBySessions(session.sessionId) : undefined
   );
+  // Desktop repo rows that are not nested carry a second line (branch and time),
+  // so the first child's trunk has to climb past it to reach its opener's
+  // chevron. Chats, nested children, mobile rows and rows whose branch detail
+  // line is turned off stay one line.
+  const showBranchNames = useAtomValue(sidebarShowBranchNamesAtom);
+  const showMetaLine =
+    showBranchNames && !isMobile && !isChatSession && baseOpenedByTreeSlot?.kind !== 'child';
+  const openedByTreeSlot =
+    baseOpenedByTreeSlot?.kind === 'child' && !isMobile && !isChatSession
+      ? {
+          ...baseOpenedByTreeSlot,
+          isFirstChild: followsOpener,
+          tallOpener: followsOpener && (showBranchNames || hasPr),
+        }
+      : baseOpenedByTreeSlot;
   const openedByOpener = openedByTreeSlot?.kind === 'opener' ? openedByTreeSlot : null;
   const canToggleOpenedSessions = openedByOpener !== null;
   const isNestedChild = node.depth === 1;
@@ -709,6 +780,8 @@ const SessionGroupRow = memo(function SessionGroupRow({
   const hasLeadingTreeAffordance = isNestedChild || isOpener;
   const showLeadingPr = hasPr && !hasLeadingTreeAffordance;
   const showTrailingPr = hasPr && hasLeadingTreeAffordance;
+  const showRowSubtitle = hasPr && !isMobile && baseOpenedByTreeSlot?.kind !== 'child';
+  const hasSecondLine = (showRowSubtitle || showMetaLine) && !isMobile && !isChatSession;
   const hasStandardMenuActions = Boolean(
     onRenameSession ||
     onTogglePinSession ||
@@ -730,29 +803,32 @@ const SessionGroupRow = memo(function SessionGroupRow({
       aria-current={isSelected ? 'page' : undefined}
       data-id={`session:${session.sessionId}`}
       data-scope-item="row"
+      data-sidebar-session-row
       data-sidebar-session-id={session.sessionId}
       // Drag a conversation onto a chat surface to mention it there.
       draggable
       onDragStart={(event) =>
-        startSessionMentionDrag(event, {
-          sessionId: session.sessionId,
-          title: session.title,
-        })
+        titleSwipeRef.current?.started
+          ? event.preventDefault()
+          : startSessionMentionDrag(event, {
+              sessionId: session.sessionId,
+              title: session.title,
+            })
       }
       className={cn(
-        'group relative w-full rounded-md text-left',
-        // Both chat and repo rows are a single line now; the repo row's
-        // low-signal metadata (time / repo / branch / PR) moves to the
-        // desktop hover info card so both organize modes read equally compact.
-        hasPr ? 'py-1.5' : 'py-1',
-        'border border-transparent bg-transparent',
-        !showSelectedState &&
-          isSelectable &&
-          !isMobile &&
-          // Hover marks the row with its fill only; the title keeps its color.
-          'hover:bg-sidebar-hover',
-        showSelectedState &&
-          'bg-sidebar-selection text-sidebar-selection-foreground hover:bg-sidebar-selection',
+        'group relative w-full text-left',
+        // A desktop repo row is two lines (title, then branch/time or PR); chats,
+        // nested children and every mobile row stay one. The rest of the metadata (repo /
+        // PR / line totals) stays in the desktop hover info card.
+        // Hover marks the row with its fill only; the title keeps its color.
+        stylex.props(
+          sidebarSurface.row,
+          hasSecondLine ? sidebarSurface.tall : sidebarSurface.snug,
+          showSelectedState
+            ? sidebarSurface.selected
+            : isSelectable && !isMobile && sidebarSurface.hover
+        ).className,
+        'border border-transparent',
         // Keyboard-only focus ring. Plain :focus-within also matches
         // after a mouse click (the overlay <a> keeps focus), which
         // left a permanent inset ring on the selected row that read
@@ -762,6 +838,157 @@ const SessionGroupRow = memo(function SessionGroupRow({
         !isSelectable && 'cursor-default',
         isSelectable && 'cursor-pointer'
       )}
+      onMouseOver={(event) => {
+        if (!event.currentTarget.hasAttribute('data-sidebar-title-measured')) {
+          event.currentTarget.setAttribute('data-sidebar-title-measured', 'true');
+          measureSidebarSessionTitle(event.currentTarget, isMobile);
+        }
+      }}
+      onWheel={(event) => {
+        const rowElement = event.currentTarget;
+        const clip = rowElement.querySelector<HTMLElement>('[data-sidebar-title-clip]');
+        const title = rowElement.querySelector<HTMLElement>('[data-sidebar-session-title]');
+        if (!clip || !title) return;
+        const bounds = clip.getBoundingClientRect();
+        if (
+          event.clientX < bounds.left ||
+          event.clientX > bounds.right ||
+          event.clientY < bounds.top ||
+          event.clientY > bounds.bottom
+        ) {
+          return;
+        }
+
+        const delta = Math.abs(event.deltaX) > 0 ? event.deltaX : event.shiftKey ? event.deltaY : 0;
+        if (Math.abs(delta) < 1) return;
+        if (!rowElement.hasAttribute('data-sidebar-title-overflow')) {
+          measureSidebarSessionTitle(rowElement, false);
+        }
+        const distance = Math.abs(
+          Number.parseFloat(title.style.getPropertyValue('--sidebar-title-distance'))
+        );
+        if (!Number.isFinite(distance) || distance <= 8) return;
+        const offset = getSidebarSessionTitleOffset(title) - delta;
+        setSidebarSessionTitleSwipeOffset(rowElement, title, distance, offset);
+        event.preventDefault();
+      }}
+      onMouseLeave={(event) => {
+        if (!titleSwipeRef.current?.started) {
+          event.currentTarget.removeAttribute('data-sidebar-title-measured');
+          event.currentTarget.removeAttribute('data-sidebar-title-overflow');
+          event.currentTarget.removeAttribute('data-sidebar-title-swiping');
+          event.currentTarget
+            .querySelector<HTMLElement>('[data-sidebar-session-title]')
+            ?.style.removeProperty('--sidebar-title-swipe-offset');
+        }
+      }}
+      onPointerDown={(event) => {
+        if (event.button !== 0) return;
+        const rowElement = event.currentTarget;
+        const clip = rowElement.querySelector<HTMLElement>('[data-sidebar-title-clip]');
+        const title = rowElement.querySelector<HTMLElement>('[data-sidebar-session-title]');
+        if (!clip || !title) return;
+        const bounds = clip.getBoundingClientRect();
+        if (
+          event.clientX < bounds.left ||
+          event.clientX > bounds.right ||
+          event.clientY < bounds.top ||
+          event.clientY > bounds.bottom
+        ) {
+          return;
+        }
+
+        const distance = Math.max(0, title.scrollWidth - clip.clientWidth);
+        if (distance <= 8) return;
+        const offset = getSidebarSessionTitleOffset(title);
+        titleSwipeRef.current = {
+          pointerId: event.pointerId,
+          startX: event.clientX,
+          startY: event.clientY,
+          startOffset: Math.max(-distance, Math.min(0, offset)),
+          distance,
+          started: false,
+        };
+      }}
+      onPointerMove={(event) => {
+        const swipe = titleSwipeRef.current;
+        if (!swipe || swipe.pointerId !== event.pointerId) return;
+        const deltaX = event.clientX - swipe.startX;
+        const deltaY = event.clientY - swipe.startY;
+        if (!swipe.started) {
+          if (Math.max(Math.abs(deltaX), Math.abs(deltaY)) < 5) return;
+          if (Math.abs(deltaY) >= Math.abs(deltaX)) {
+            titleSwipeRef.current = null;
+            return;
+          }
+
+          swipe.started = true;
+          const title = event.currentTarget.querySelector<HTMLElement>(
+            '[data-sidebar-session-title]'
+          );
+          if (title) {
+            setSidebarSessionTitleSwipeOffset(
+              event.currentTarget,
+              title,
+              swipe.distance,
+              swipe.startOffset
+            );
+          }
+          event.currentTarget.setPointerCapture(event.pointerId);
+        }
+
+        event.preventDefault();
+        const title = event.currentTarget.querySelector<HTMLElement>(
+          '[data-sidebar-session-title]'
+        );
+        if (!title) return;
+        setSidebarSessionTitleSwipeOffset(
+          event.currentTarget,
+          title,
+          swipe.distance,
+          swipe.startOffset + deltaX
+        );
+      }}
+      onPointerUp={(event) => {
+        const swipe = titleSwipeRef.current;
+        if (swipe?.pointerId !== event.pointerId) return;
+        if (swipe.started) {
+          suppressTitleClickRef.current = true;
+          window.setTimeout(() => {
+            suppressTitleClickRef.current = false;
+          }, 0);
+          if (!event.currentTarget.matches(':hover')) {
+            event.currentTarget.removeAttribute('data-sidebar-title-overflow');
+            event.currentTarget.removeAttribute('data-sidebar-title-swiping');
+          }
+        }
+        titleSwipeRef.current = null;
+      }}
+      onPointerCancel={(event) => {
+        const swipe = titleSwipeRef.current;
+        if (swipe?.started) {
+          event.currentTarget.removeAttribute('data-sidebar-title-overflow');
+          event.currentTarget.removeAttribute('data-sidebar-title-swiping');
+        }
+        titleSwipeRef.current = null;
+        suppressTitleClickRef.current = false;
+      }}
+      onClickCapture={(event) => {
+        if (!suppressTitleClickRef.current) return;
+        suppressTitleClickRef.current = false;
+        event.preventDefault();
+        event.stopPropagation();
+      }}
+      onFocus={(event) => {
+        event.currentTarget.setAttribute('data-sidebar-title-measured', 'true');
+        measureSidebarSessionTitle(event.currentTarget, isMobile);
+      }}
+      onBlur={(event) => {
+        if (!event.currentTarget.matches(':hover')) {
+          event.currentTarget.removeAttribute('data-sidebar-title-measured');
+          event.currentTarget.removeAttribute('data-sidebar-title-overflow');
+        }
+      }}
       onClick={
         useAnchor
           ? undefined
@@ -798,28 +1025,35 @@ const SessionGroupRow = memo(function SessionGroupRow({
           onClick={handleAnchorClick}
         />
       ) : null}
-      <div className={cn('flex min-w-0 items-center', isMobile ? 'gap-1.5' : 'gap-2')}>
-        <SessionRowLeadingSlot
-          showMenuButton={hasMenuActions}
-          menuLabel={moreActionsLabel}
-          openedByTree={openedByTreeSlot}
-          prIcon={
-            showLeadingPr ? (
-              <SessionPrIcon compact prStatus={prStatus} prCiState={session.prCiState} />
-            ) : undefined
-          }
-        />
-        <div
-          className={cn(
-            'min-w-0 flex-1 flex flex-col justify-center',
-            showSelectedState ? 'text-sidebar-selection-foreground' : 'text-sidebar-row-foreground'
-          )}
-        >
+      <div
+        className={cn(
+          'flex min-w-0',
+          hasSecondLine ? 'items-start' : 'items-center',
+          isMobile ? 'gap-1.5' : 'gap-2'
+        )}
+      >
+        {/* On a two-line row the leading and end slots sit in a box one title line
+            tall, so they stay on the title line; otherwise the box disappears. */}
+        <div className={hasSecondLine ? lineBoxClassName : 'contents'}>
+          <SessionRowLeadingSlot
+            showMenuButton={hasMenuActions}
+            menuLabel={moreActionsLabel}
+            openedByTree={openedByTreeSlot}
+            prIcon={
+              showLeadingPr ? (
+                <SessionPrIcon prStatus={prStatus} prCiState={session.prCiState} />
+              ) : undefined
+            }
+          />
+        </div>
+        <div className={hasSecondLine ? 'flex min-w-0 flex-1 flex-col gap-1' : 'contents'}>
           <div
             className={cn(
               // Body role: conversation titles match prose in every organize mode.
-              'min-w-0 flex items-center gap-1 truncate',
-              SIDEBAR_ROW_TEXT_CLASS
+              'flex items-center gap-1',
+              SIDEBAR_ROW_TEXT_CLASS,
+              stylex.props(sidebarSurface.title, showSelectedState && sidebarSurface.titleSelected)
+                .className
             )}
             // Double-click to rename is scoped to the title only, so it can't
             // be triggered by double-clicking the Archive confirm button.
@@ -839,59 +1073,66 @@ const SessionGroupRow = memo(function SessionGroupRow({
             ) : null}
             {renderTitle()}
           </div>
-          {hasPr ? (
+          {showRowSubtitle ? (
             <SessionRowSubtitle
               prNumber={prNumber}
               prStatus={prStatus}
               branchName={session.branchName}
             />
+          ) : showMetaLine ? (
+            <SidebarSessionMetaLine
+              branchName={session.branchName}
+              latestMessageAt={session.latestMessageAt}
+            />
           ) : null}
         </div>
         {/* Keep PR at the right edge when not shown leading. Line totals stay in the hover card. */}
-        <SidebarRowEndSlot
-          sessionId={session.sessionId}
-          isWaitingPermission={session.isWaitingPermission}
-          isWorking={session.isWorking}
-          hasUnreadMessages={session.hasUnreadMessages}
-          restIcon={
-            isChatSession ? (
-              <span className={cn('flex items-center gap-1.5', useAnchor && 'z-20')}>
-                <SessionRowTime
-                  latestMessageAt={session.latestMessageAt}
-                  className={cn(SIDEBAR_CAPTION_TEXT_CLASS, 'text-muted-foreground')}
-                />
-              </span>
-            ) : showTrailingPr || showMergeablePill || isMobile ? (
-              <span
-                className={cn(
-                  SIDEBAR_CAPTION_TEXT_CLASS,
-                  'flex select-none items-center gap-1.5 tabular-nums text-sidebar-foreground-muted/80',
-                  useAnchor && 'z-20'
-                )}
-              >
-                {isMobile ? (
+        <div className={hasSecondLine ? lineBoxClassName : 'contents'}>
+          <SidebarRowEndSlot
+            sessionId={session.sessionId}
+            isWaitingPermission={session.isWaitingPermission}
+            isWorking={session.isWorking}
+            hasUnreadMessages={session.hasUnreadMessages}
+            restIcon={
+              isChatSession ? (
+                <span className={cn('flex items-center gap-1.5', useAnchor && 'z-20')}>
                   <SessionRowTime
                     latestMessageAt={session.latestMessageAt}
-                    className="text-muted-foreground"
+                    className={cn(SIDEBAR_CAPTION_TEXT_CLASS, 'text-muted-foreground')}
                   />
-                ) : null}
-                {showMergeablePill ? <SessionMergeablePill /> : null}
-                {showTrailingPr ? (
-                  <SessionPrIcon compact prStatus={prStatus} prCiState={session.prCiState} />
-                ) : null}
-              </span>
-            ) : undefined
-          }
-          archive={
-            showInlineArchive ? (
-              <SidebarRowArchiveButton
-                label={archiveTooltipLabel}
-                confirmLabel={archiveConfirmLabel}
-                onConfirm={() => onArchiveSession?.(session.sessionId)}
-              />
-            ) : undefined
-          }
-        />
+                </span>
+              ) : showTrailingPr || showMergeablePill || isMobile ? (
+                <span
+                  className={cn(
+                    SIDEBAR_CAPTION_TEXT_CLASS,
+                    'flex select-none items-center gap-1.5 tabular-nums text-sidebar-foreground-muted/80',
+                    useAnchor && 'z-20'
+                  )}
+                >
+                  {isMobile ? (
+                    <SessionRowTime
+                      latestMessageAt={session.latestMessageAt}
+                      className="text-muted-foreground"
+                    />
+                  ) : null}
+                  {showMergeablePill ? <SessionMergeablePill /> : null}
+                  {showTrailingPr ? (
+                    <SessionPrIcon compact prStatus={prStatus} prCiState={session.prCiState} />
+                  ) : null}
+                </span>
+              ) : undefined
+            }
+            archive={
+              showInlineArchive ? (
+                <SidebarRowArchiveButton
+                  label={archiveTooltipLabel}
+                  confirmLabel={archiveConfirmLabel}
+                  onConfirm={() => onArchiveSession?.(session.sessionId)}
+                />
+              ) : undefined
+            }
+          />
+        </div>
       </div>
     </div>
   );
@@ -1233,12 +1474,11 @@ const SessionGroupSection = memo(function SessionGroupSection({
   // the shared group label type (small, bold, faint, no icon), no hover fill,
   // and it scrolls with its conversations.
   const isGroupLabel = group.kind !== 'repo';
-  const headerBaseColorClass = isGroupLabel
-    ? SIDEBAR_GROUP_LABEL_COLOR_CLASS
-    : 'text-sidebar-row-foreground';
+  // A repo row takes its ink from `sidebarSurface.row`.
+  const headerBaseColorClass = isGroupLabel ? SIDEBAR_GROUP_LABEL_COLOR_CLASS : undefined;
   const headerTypographyClass = isGroupLabel
     ? SIDEBAR_GROUP_LABEL_CLASS
-    : cn(SIDEBAR_ROW_TEXT_CLASS, 'font-normal');
+    : cn(SIDEBAR_ROW_TEXT_CLASS, 'font-medium');
 
   return (
     <div
@@ -1257,23 +1497,28 @@ const SessionGroupSection = memo(function SessionGroupSection({
           data-scope-item="row"
           data-sidebar-group-key={group.key}
           className={cn(
-            'relative flex w-full select-none items-center rounded-md px-2 text-left',
+            'relative flex w-full select-none items-center text-left',
             isGroupLabel ? 'h-[26px] gap-1.5' : cn('h-7', isMobile ? 'gap-1' : 'gap-0.5'),
             'border border-transparent',
             'min-w-0 flex-1 transition-colors',
             headerTypographyClass,
+            stylex.props(
+              sidebarSurface.row,
+              showActiveGroupState
+                ? sidebarSurface.selected
+                : canNavigate && !isMobile && !isGroupLabel && sidebarSurface.hover
+            ).className,
             showActiveGroupState
-              ? 'cursor-pointer border-sidebar-ring/30 bg-sidebar-selection text-sidebar-selection-foreground hover:bg-sidebar-selection'
+              ? 'cursor-pointer border-sidebar-ring/30'
               : canNavigate
                 ? cn(
-                    'cursor-pointer bg-transparent',
+                    'cursor-pointer',
                     headerBaseColorClass,
-                    !isMobile &&
-                      (isGroupLabel ? 'hover:text-sidebar-foreground' : 'hover:bg-sidebar-hover')
+                    !isMobile && isGroupLabel && 'hover:text-sidebar-foreground'
                   )
                 : canToggle
-                  ? cn('cursor-pointer bg-transparent', headerBaseColorClass)
-                  : cn('cursor-default bg-transparent', headerBaseColorClass)
+                  ? cn('cursor-pointer', headerBaseColorClass)
+                  : cn('cursor-default', headerBaseColorClass)
           )}
           onClick={canNavigate ? handleNavigate : handleToggleGroup}
           onKeyDown={
@@ -1373,7 +1618,7 @@ const SessionGroupSection = memo(function SessionGroupSection({
 
       {!group.collapsed && (
         <div className={SIDEBAR_ROW_LIST_CLASS}>
-          {visibleNodes.map((node) => (
+          {visibleNodes.map((node, nodeIndex) => (
             <SessionGroupRow
               key={node.item.sessionId}
               node={node}
@@ -1381,6 +1626,7 @@ const SessionGroupSection = memo(function SessionGroupSection({
               groupKind={group.kind}
               groupRepoFullName={group.repoFullName}
               showTreeGutter={showTreeGutter}
+              followsOpener={visibleNodes[nodeIndex - 1]?.depth === 0}
               isMobile={isMobile}
               moreActionsLabel={moreActionsLabel}
               beginRename={beginRename}
@@ -1408,9 +1654,9 @@ const SessionGroupSection = memo(function SessionGroupSection({
               data-scope-item="row"
               data-sidebar-show-more={group.key}
               className={cn(
-                // Same 30px pitch as a conversation row (py-1 + 1px borders + 20px line).
+                // Same height as a conversation row (3px padding + 1px borders + 18px line).
                 SIDEBAR_CAPTION_TEXT_CLASS,
-                'flex h-[30px] select-none items-center gap-2 rounded-md px-2 text-left text-sidebar-foreground-muted/80',
+                'flex h-[26px] select-none items-center gap-2 rounded-md px-2 text-left text-sidebar-foreground-muted/80',
                 'transition-colors',
                 'hover:bg-sidebar-hover hover:text-sidebar-hover-foreground',
                 'focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-sidebar-ring/40'

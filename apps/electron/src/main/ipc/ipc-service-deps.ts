@@ -23,6 +23,7 @@ export type IpcServiceDeps = {
   globalShortcutsService: GlobalShortcutsService
   getMainWindow: () => BrowserWindow | null
   completeOnboarding: (window: BrowserWindow) => void
+  restartOnboarding: (window: BrowserWindow) => void
   reloadMainWindowForDevbar: (window: BrowserWindow, enabled: boolean) => Promise<void>
 }
 

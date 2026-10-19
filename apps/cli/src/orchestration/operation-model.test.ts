@@ -1,362 +1,99 @@
-import { describe, expect, it } from 'vitest';
-import { LODY_MAX_CHAIN_DEPTH } from '@lody/shared';
-
+import { describe, it, expect } from 'vitest';
 import {
-  assertOrchestrationModelSafety,
-  enumerateOrchestrationModel,
   initialOrchestrationModelState,
   stepOrchestrationModel,
+  enumerateOrchestrationModel,
+  type InboxEvent,
 } from './operation-model';
-
-const trace = (...actions: Parameters<typeof stepOrchestrationModel>[1][]) =>
-  actions.reduce(stepOrchestrationModel, initialOrchestrationModelState());
-
-describe('Operation delivery executable model', () => {
-  it('exhaustively preserves safety over bounded race traces', () => {
-    expect(enumerateOrchestrationModel(9).length).toBeGreaterThan(50);
+const trace = (...events: InboxEvent[]) =>
+  events.reduce(stepOrchestrationModel, initialOrchestrationModelState());
+describe('current Inbox scheduling contract', () => {
+  it('exhaustively preserves nonempty at-most-once batches over bounded interleavings', () => {
+    expect(enumerateOrchestrationModel(9).length).toBeGreaterThan(100);
   });
-
-  it('prioritizes queued user input and later dispatches the Delivery separately', () => {
-    const afterUser = trace('accept', 'materialize_success', 'finish', 'enqueue_user', 'schedule');
-    expect(afterUser).toMatchObject({ activeTurn: 'user', delivery: 'pending' });
-    const afterDelivery = stepOrchestrationModel(
-      stepOrchestrationModel(afterUser, 'complete_turn'),
-      'schedule'
-    );
-    expect(afterDelivery).toMatchObject({
-      activeTurn: 'delivery',
-      delivery: 'claimed',
-      completionTurnWrites: 0,
-    });
-    const prepared = stepOrchestrationModel(afterDelivery, 'prepare_turn');
-    const started = stepOrchestrationModel(prepared, 'start_turn');
-    expect(started).toMatchObject({ delivery: 'started', completionTurnWrites: 1 });
-    expect(stepOrchestrationModel(started, 'complete_turn').delivery).toBe('consumed');
-  });
-
-  it('submits one completion across duplicate starts, interruption and Worker recovery', () => {
-    const state = trace(
-      'accept',
-      'materialize_success',
-      'finish',
-      'schedule',
-      'prepare_turn',
-      'start_turn',
-      'start_turn',
-      'interrupt_turn',
-      'restart',
-      'recover_orphans',
-      'schedule',
-      'complete_finalization',
-      'flush_progress',
-      'expire_result',
-      'accept',
-      'schedule',
-      'start_turn'
-    );
-    expect(state).toMatchObject({
-      operation: 'retired',
-      providerSubmissions: 1,
-      completionTurnWrites: 1,
-      delivery: 'consumed',
-      activeTurn: 'none',
+  it('wakeable results coalesce before an idle conversation is scheduled', () => {
+    expect(trace('result', 'result', 'schedule')).toMatchObject({
+      active: 'automatic',
+      batch: [1, 2],
+      queue: [1, 2],
+      receipts: [],
     });
   });
-
-  it('keeps archived delivery pending until restore', () => {
-    const archived = trace('accept', 'materialize_success', 'archive', 'finish', 'schedule');
-    expect(archived).toMatchObject({ delivery: 'pending', completionTurnWrites: 0 });
-    const restored = trace('accept', 'materialize_success', 'archive', 'finish', 'restore');
-    const claimed = stepOrchestrationModel(restored, 'schedule');
-    expect(claimed.delivery).toBe('claimed');
-    const prepared = stepOrchestrationModel(claimed, 'prepare_turn');
-    const started = stepOrchestrationModel(prepared, 'start_turn');
-    expect(started.delivery).toBe('started');
-  });
-
-  it('writes the result once without starting an assistant when configuration is gone', () => {
-    const finalizing = trace(
-      'accept',
-      'materialize_success',
-      'delete_configuration',
-      'finish',
-      'schedule'
-    );
-    expect(finalizing).toMatchObject({
-      delivery: 'finalizing',
-      deliveryClaimOwner: 'current',
-      activeTurn: 'none',
-      completionTurnWrites: 0,
-    });
-    expect(stepOrchestrationModel(finalizing, 'complete_finalization')).toMatchObject({
-      delivery: 'consumed',
-      activeTurn: 'none',
-      completionTurnWrites: 1,
-    });
-  });
-
-  it('retains terminal ownership through repeated history and consume failures', () => {
-    const failed = trace(
-      'accept',
-      'materialize_success',
-      'delete_configuration',
-      'finish',
-      'schedule',
-      'history_write_fail',
-      'schedule',
-      'history_write_fail',
-      'finalization_consume_fail',
-      'schedule',
-      'finalization_consume_fail'
-    );
-    expect(failed).toMatchObject({
-      delivery: 'finalizing',
-      deliveryClaimOwner: 'current',
-      completionTurnWrites: 1,
-      deliveryAttempts: 0,
-      activeTurn: 'none',
-    });
-    expect(stepOrchestrationModel(failed, 'complete_finalization')).toMatchObject({
-      delivery: 'consumed',
-      deliveryClaimOwner: 'none',
-      completionTurnWrites: 1,
-      deliveryAttempts: 0,
-    });
-  });
-
-  it('uses deadline as a terminal backstop', () => {
-    expect(trace('accept', 'deadline')).toMatchObject({
-      operation: 'finished',
-      delivery: 'pending',
-    });
-  });
-
-  it('permits one confirmed pre-provider recovery and consumes without a third attempt', () => {
-    const firstAttempt = trace(
-      'accept',
-      'materialize_success',
-      'finish',
-      'schedule',
-      'prepare_turn'
-    );
-    const secondAttempt = stepOrchestrationModel(
-      stepOrchestrationModel(stepOrchestrationModel(firstAttempt, 'interrupt_turn'), 'schedule'),
-      'prepare_turn'
-    );
-    expect(secondAttempt).toMatchObject({ delivery: 'prepared', deliveryAttempts: 2 });
-    const exhausted = stepOrchestrationModel(
-      stepOrchestrationModel(secondAttempt, 'interrupt_turn'),
-      'schedule'
-    );
-    expect(exhausted).toMatchObject({
-      delivery: 'finalizing',
-      deliveryClaimOwner: 'current',
-      deliveryAttempts: 2,
-      activeTurn: 'none',
-    });
-    expect(stepOrchestrationModel(exhausted, 'complete_finalization').delivery).toBe('consumed');
-  });
-
-  it('consumes a user cancellation without reopening the Delivery', () => {
-    const started = trace(
-      'accept',
-      'materialize_success',
-      'finish',
-      'schedule',
-      'prepare_turn',
-      'start_turn'
-    );
-    const cancelled = stepOrchestrationModel(started, 'cancel_turn');
-    expect(cancelled).toMatchObject({
-      delivery: 'consumed',
-      deliveryClaimOwner: 'none',
-      activeTurn: 'none',
-      deliveryAttempts: 1,
-    });
-    expect(stepOrchestrationModel(cancelled, 'schedule')).toEqual(cancelled);
-  });
-
-  it('keeps a crashed attempt fenced until a replacement Worker recovers the old boot', () => {
-    const firstAttempt = trace(
-      'accept',
-      'materialize_success',
-      'finish',
-      'schedule',
-      'prepare_turn',
-      'start_turn'
-    );
-    const afterExit = stepOrchestrationModel(firstAttempt, 'restart');
-    expect(afterExit).toMatchObject({
-      delivery: 'started',
-      deliveryClaimOwner: 'previous',
-      activeTurn: 'none',
-      deliveryAttempts: 1,
-    });
-    expect(stepOrchestrationModel(afterExit, 'schedule')).toEqual(afterExit);
-
-    const recovered = stepOrchestrationModel(afterExit, 'recover_orphans');
-    expect(recovered).toMatchObject({
-      delivery: 'uncertain',
-      deliveryClaimOwner: 'none',
-      activeTurn: 'none',
-      deliveryAttempts: 1,
-    });
-    const finalizing = stepOrchestrationModel(recovered, 'schedule');
-    expect(finalizing).toMatchObject({
-      delivery: 'uncertain_finalizing',
-      deliveryClaimOwner: 'current',
-      activeTurn: 'none',
-    });
-    expect(stepOrchestrationModel(finalizing, 'complete_finalization').delivery).toBe('consumed');
-  });
-
-  it('releases pre-start claims without spending the execution budget', () => {
-    const firstClaim = trace('accept', 'materialize_success', 'finish', 'schedule');
-    expect(firstClaim).toMatchObject({
-      delivery: 'claimed',
-      deliveryAttempts: 0,
-      completionTurnWrites: 0,
-    });
-    const firstFailure = stepOrchestrationModel(firstClaim, 'history_write_fail');
-    const secondClaim = stepOrchestrationModel(firstFailure, 'schedule');
-    const secondFailure = stepOrchestrationModel(secondClaim, 'history_write_fail');
-    expect(secondFailure).toMatchObject({
-      delivery: 'pending',
-      deliveryAttempts: 0,
-      deliveryClaimOwner: 'none',
-    });
-    const recovered = stepOrchestrationModel(
-      stepOrchestrationModel(stepOrchestrationModel(secondFailure, 'schedule'), 'prepare_turn'),
-      'start_turn'
-    );
-    expect(recovered).toMatchObject({ delivery: 'started', deliveryAttempts: 1 });
-  });
-
-  it('keeps terminal history finalization fenced across Worker replacement', () => {
-    const finalizing = trace(
-      'accept',
-      'materialize_success',
-      'delete_configuration',
-      'finish',
-      'schedule'
-    );
-    const afterExit = stepOrchestrationModel(finalizing, 'restart');
-    expect(afterExit).toMatchObject({
-      delivery: 'finalizing',
-      deliveryClaimOwner: 'previous',
-      completionTurnWrites: 0,
-    });
-    expect(stepOrchestrationModel(afterExit, 'schedule')).toEqual(afterExit);
-
-    const recovered = stepOrchestrationModel(afterExit, 'recover_orphans');
-    const reclaimed = stepOrchestrationModel(recovered, 'schedule');
-    expect(reclaimed).toMatchObject({
-      delivery: 'finalizing',
-      deliveryClaimOwner: 'current',
-      completionTurnWrites: 0,
-    });
-    expect(stepOrchestrationModel(reclaimed, 'complete_finalization')).toMatchObject({
-      delivery: 'consumed',
-      deliveryClaimOwner: 'none',
-      completionTurnWrites: 1,
-    });
-  });
-
-  it('keeps a failed materialization pending until its owned retry fires', () => {
-    const failed = trace('accept', 'materialize_fail', 'finish');
-    expect(failed).toMatchObject({
-      operation: 'active',
-      targetInput: 'retry_scheduled',
-      delivery: 'absent',
-    });
+  it('claim includes late results without duplicate release creating another wake', () => {
     expect(
-      stepOrchestrationModel(
-        stepOrchestrationModel(failed, 'materialization_retry'),
-        'materialize_success'
+      trace(
+        'human',
+        'schedule',
+        'submit',
+        'result',
+        'result',
+        'normal',
+        'result',
+        'duplicate_release',
+        'restart',
+        'schedule',
+        'submit'
       )
-    ).toMatchObject({ operation: 'active', targetInput: 'durable' });
-  });
-
-  it('clears a scheduled materialization retry at the deadline', () => {
-    expect(stepOrchestrationModel(trace('accept', 'materialize_fail'), 'deadline')).toMatchObject({
-      operation: 'finished',
-      targetInput: 'missing',
-      delivery: 'pending',
+    ).toMatchObject({
+      active: 'automatic',
+      batch: [1, 2, 3],
+      receipts: [[1, 2, 3]],
+      queue: [1, 2, 3],
     });
   });
-
-  it('accepts work at depth 15 and rejects new Commands at depth 16 or above', () => {
-    const lastAllowed = { ...initialOrchestrationModelState(), chainDepth: 15 };
-    expect(stepOrchestrationModel(lastAllowed, 'accept')).toMatchObject({
-      operation: 'active',
-      targetInput: 'missing',
+  it('Stop blocks automatic work until fresh human input, which carries saved results', () => {
+    expect(
+      trace(
+        'human',
+        'schedule',
+        'submit',
+        'result',
+        'stop',
+        'restart',
+        'schedule',
+        'human',
+        'schedule',
+        'submit'
+      )
+    ).toMatchObject({ active: 'human', batch: [1], receipts: [[1]], paused: false });
+  });
+  it('consuming a batch cannot create an empty successor', () => {
+    expect(
+      trace(
+        'human',
+        'schedule',
+        'submit',
+        'result',
+        'normal',
+        'schedule',
+        'submit',
+        'normal',
+        'schedule'
+      )
+    ).toMatchObject({ active: 'none', queue: [], pending: [], receipts: [[1]] });
+  });
+  it('a pending human wins over automatic preparation', () => {
+    expect(
+      trace('human', 'schedule', 'submit', 'result', 'normal', 'human', 'schedule', 'submit')
+    ).toMatchObject({ active: 'human', receipts: [[1]], pending: [] });
+  });
+  it('unreleased work blocks even a fresh human until resource recovery', () => {
+    expect(trace('human', 'schedule', 'submit', 'unreleased', 'human', 'schedule')).toMatchObject({
+      blocked: true,
+      active: 'human',
+      human: true,
     });
-    for (const chainDepth of [16, 17, 32]) {
-      const capped = { ...initialOrchestrationModelState(), chainDepth };
-      expect(stepOrchestrationModel(capped, 'accept')).toEqual(capped);
-    }
   });
-
-  it('can falsify duplicate completion writes and excess chain depth', () => {
-    expect(() =>
-      assertOrchestrationModelSafety({
-        ...initialOrchestrationModelState(),
-        completionTurnWrites: 2,
-      })
-    ).toThrow(/more than one visible completion/);
-    expect(() =>
-      assertOrchestrationModelSafety({
-        ...initialOrchestrationModelState(),
-        chainDepth: LODY_MAX_CHAIN_DEPTH + 1,
-      })
-    ).toThrow(/exceeded the fixed depth cap/);
-    expect(() =>
-      assertOrchestrationModelSafety({
-        ...initialOrchestrationModelState(),
-        providerSubmissions: 2,
-      })
-    ).toThrow(/provider more than once/);
-    expect(() =>
-      assertOrchestrationModelSafety({
-        ...initialOrchestrationModelState(),
-        deliveryAttempts: 3,
-      })
-    ).toThrow(/bounded attempt count/);
-    expect(() =>
-      assertOrchestrationModelSafety({
-        ...initialOrchestrationModelState(),
-        deliveryClaimOwner: 'current',
-      })
-    ).toThrow(/claim state/);
+  it('withdrawing an unverified human execution reschedules the same results once', () => {
+    expect(
+      trace('result', 'human', 'schedule', 'withdraw', 'schedule', 'submit', 'withdraw', 'normal')
+    ).toMatchObject({ active: 'none', receipts: [[1]], consumed: [1], human: false });
   });
-});
-
-it('retains UI observation after a deadline Delivery without scheduling another continuation', () => {
-  const delivered = trace(
-    'accept',
-    'materialize_success',
-    'deadline',
-    'schedule',
-    'prepare_turn',
-    'start_turn',
-    'complete_turn',
-    'flush_progress'
-  );
-  expect(delivered).toMatchObject({
-    delivery: 'consumed',
-    progress: 'pending',
-    targetTerminal: false,
-    completionTurnWrites: 1,
-  });
-  const settled = stepOrchestrationModel(
-    stepOrchestrationModel(delivered, 'observe_target_terminal'),
-    'flush_progress'
-  );
-  expect(settled).toMatchObject({
-    delivery: 'consumed',
-    progress: 'settled',
-    targetTerminal: true,
-    activeTurn: 'none',
-    completionTurnWrites: 1,
+  it('failure retains results without automatic intent', () => {
+    expect(trace('human', 'schedule', 'submit', 'result', 'failed', 'schedule')).toMatchObject({
+      active: 'none',
+      queue: [1],
+      pending: [],
+    });
   });
 });

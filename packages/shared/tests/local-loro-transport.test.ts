@@ -1,7 +1,14 @@
+import { beforeEach, afterEach } from 'vitest';
+import { Effect, Layer } from 'effect';
+import { LocalLoroWriterTurn } from '../src/local-loro-writer';
+import {
+  makeLocalLoroWriterLegacy,
+  type LocalLoroWriterLegacy,
+} from '../src/local-loro-writer/legacy';
 import { describe, expect, it, vi } from 'vitest';
 import { EphemeralStore, LoroDoc } from 'loro-crdt';
 import { LocalLoroTransportAdapter } from '../src/local-loro-transport';
-import { LocalLoroDataPlaneServer } from '../src/local-loro-data-plane-server';
+import { LocalLoroDataPlaneServerLegacy } from '../src/local-loro-data-plane-server';
 import {
   base64ToBytes,
   LOCAL_LORO_DATA_PLANE_PROTOCOL_VERSION,
@@ -18,7 +25,7 @@ class Harness {
   private readonly tasks: Array<() => void | Promise<void>> = [];
   private readonly serverDocs = new Map<string, LoroDoc>();
   private readonly serverFlocks = new Map<string, MemoryFlock>();
-  readonly server: LocalLoroDataPlaneServer;
+  readonly server: LocalLoroDataPlaneServerLegacy;
   private connSeq = 0;
 
   constructor(
@@ -28,7 +35,8 @@ class Harness {
     // metaFlock (the dispatch-critical path), not a named flock doc.
     metaFlock?: MemoryFlock
   ) {
-    this.server = new LocalLoroDataPlaneServer({
+    this.server = new LocalLoroDataPlaneServerLegacy({
+      writerLegacy,
       workspaceId,
       resolveDoc: async (docId) => this.serverDoc(docId),
       resolveFlockDoc: async (flockDocId) => this.serverFlock(flockDocId),
@@ -95,7 +103,8 @@ class Harness {
     const setConnected = (next: boolean) => {
       if (connected === next) return;
       connected = next;
-      if (!next) this.server.handleDisconnect(id);
+      if (!next) void this.server.handleDisconnectLegacy(serverConnection.id);
+      else serverConnection.id += ':redial';
       for (const listener of statusListeners) listener(next);
     };
     return { adapter, setConnected, received };
@@ -104,14 +113,14 @@ class Harness {
   async settle(): Promise<void> {
     for (let round = 0; round < 200; round += 1) {
       if (this.tasks.length === 0) {
-        await new Promise((resolve) => setTimeout(resolve, 0));
+        await vi.advanceTimersByTimeAsync(1);
         if (this.tasks.length === 0) return;
       }
       const batch = this.tasks.splice(0);
       for (const task of batch) {
         await task();
       }
-      await new Promise((resolve) => setTimeout(resolve, 0));
+      await vi.advanceTimersByTimeAsync(1);
     }
     throw new Error('settle_did_not_converge');
   }
@@ -613,7 +622,8 @@ describe('LocalLoroTransportAdapter push+delta sync', () => {
     const notify = () => {
       for (const listener of listeners) listener();
     };
-    const server = new LocalLoroDataPlaneServer({
+    const server = new LocalLoroDataPlaneServerLegacy({
+      writerLegacy,
       workspaceId: 'ws',
       resolveDoc: async () => new LoroDoc(),
       resolveFlockDoc: async () => {
@@ -665,4 +675,23 @@ describe('LocalLoroTransportAdapter push+delta sync', () => {
     mirror.apply(base64ToBytes(last.dataBase64));
     expect(mirror.keys().sort()).toEqual(['machine:m1', 'session:s1']);
   });
+});
+
+let writerLegacy: LocalLoroWriterLegacy;
+beforeEach(() => {
+  vi.useFakeTimers();
+  writerLegacy = makeLocalLoroWriterLegacy(
+    Layer.succeed(LocalLoroWriterTurn, {
+      next: Effect.callback<void>((resume) => {
+        const handle = setTimeout(() => resume(Effect.void), 0);
+        return Effect.sync(() => clearTimeout(handle));
+      }),
+    })
+  );
+});
+afterEach(async () => {
+  const closed = writerLegacy.closeLegacy();
+  await vi.runAllTimersAsync();
+  await closed;
+  vi.useRealTimers();
 });

@@ -3,6 +3,10 @@
 Status: implemented
 Translation: current
 
+> Update (2026-10-18): the bottom lone switch and its disabled/tooltip
+> mechanics are superseded by a Details group of segment switches — see
+> [row details group](2026-10-18-sidebar-row-details-group.md).
+
 [中文](2026-09-20-sidebar-updated-project-display-preference.zh.md)
 
 ## Abstract

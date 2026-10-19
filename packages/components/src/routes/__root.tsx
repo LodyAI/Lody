@@ -1,3 +1,5 @@
+import { receiveMagpieImportAtom } from '@/atoms/magpie-import';
+import { isMagpieImportLink } from '@lody/shared';
 import {
   createRootRouteWithContext,
   Outlet,
@@ -19,6 +21,7 @@ import { trackDeferredPostHogPageView } from '../lib/deferred-posthog';
 import { scheduleIdleTask } from '../lib/idle-task';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { keepAppRootOffBodyTail } from '../lib/body-tail-sentinel';
+import { BootShellBoundary } from '@/components/boot-shell-boundary';
 import { ErrorBoundary } from '@/components/error-boundary';
 import { isMissingEmail } from '@lody/shared';
 import { cloudOperations } from '@/lib/cloud-api-operations';
@@ -390,8 +393,10 @@ function RootOutletBoundary() {
       showErrorDetails
       propagateAuthErrors={false}
     >
-      <ErrorBoundaryProbe />
-      <Outlet />
+      <BootShellBoundary>
+        <ErrorBoundaryProbe />
+        <Outlet />
+      </BootShellBoundary>
     </ErrorBoundary>
   );
 }
@@ -536,6 +541,7 @@ function DesktopDeepLinkRouter() {
   const navigate = useNavigate();
   const postHog = usePostHog();
   const localMachineId = useAtomValue(localMachineIdAtom);
+  const receiveMagpieImport = useSetAtom(receiveMagpieImportAtom);
   const currentUser = useAtomValue(userAtom);
   const { isAuthenticated: isConvexAuthenticated, isLoading: isConvexAuthLoading } =
     useAuthenticatedConvex();
@@ -602,6 +608,14 @@ function DesktopDeepLinkRouter() {
       return undefined;
     }
     return onIpcEvent('app.deepLink', (url) => {
+      if (isMagpieImportLink(url)) {
+        try {
+          receiveMagpieImport(url);
+        } catch {
+          toast.error(i18next.t('magpieImport.invalidLink', 'This Magpie import link is invalid.'));
+        }
+        return;
+      }
       if (parseSessionLink(url)) {
         window.dispatchEvent(new CustomEvent(SESSION_DEEP_LINK_EVENT, { detail: url }));
         return;
@@ -667,7 +681,7 @@ function DesktopDeepLinkRouter() {
 
       navigateToResolvedPath(navigate, targetPath);
     });
-  }, [location.pathname, navigate, postHog]);
+  }, [location.pathname, navigate, postHog, receiveMagpieImport]);
 
   return null;
 }

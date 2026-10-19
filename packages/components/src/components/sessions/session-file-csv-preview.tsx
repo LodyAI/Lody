@@ -1,13 +1,24 @@
 import * as stylex from '@stylexjs/stylex';
+import { DocumentCaptureButton, useDocumentSelection } from './document-selection-surface';
 import { useCallback, useDeferredValue, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useVirtualizer } from '@tanstack/react-virtual';
-import { ChevronDown, ChevronUp, Copy, ZoomIn, ZoomOut } from 'lucide-react';
+import {
+  ChevronDown,
+  ChevronUp,
+  Copy,
+  MessageSquarePlus,
+  Search,
+  X,
+  ZoomIn,
+  ZoomOut,
+} from 'lucide-react';
+import { DocumentSelectionTooltip as Tooltip } from './document-selection-tooltip';
 import { Button } from '@lody/ui/button';
 import { Input } from '@lody/ui/input';
 import { Spinner } from '@lody/ui/spinner';
-import { colors } from '@lody/ui/tokens/colors.stylex';
-import { space } from '@lody/ui/tokens/scales.stylex';
+import { colors, shadow } from '@lody/ui/tokens/colors.stylex';
+import { radius, space } from '@lody/ui/tokens/scales.stylex';
 import {
   createSpreadsheetClipboard,
   writeSpreadsheetClipboard,
@@ -38,24 +49,40 @@ const styles = stylex.create({
     flexDirection: 'column',
     height: '100%',
     minHeight: 0,
+    position: 'relative',
+    minWidth: 0,
     color: colors.label,
     backgroundColor: colors.background,
   },
   toolbar: {
     display: 'flex',
     flex: '0 0 auto',
-    flexWrap: 'wrap',
+    flexWrap: 'nowrap',
     alignItems: 'center',
-    gap: space[2],
-    paddingInline: space[3],
-    paddingBlock: space[2],
+    gap: space[1],
+    paddingInline: space[2],
+    paddingBlock: space[1],
     borderBottomWidth: '1px',
     borderBottomStyle: 'solid',
     borderBottomColor: colors.separator,
   },
   group: { display: 'inline-flex', alignItems: 'center', gap: space[1] },
   spacer: { flex: '1 1 auto' },
-  search: { width: 'min(100%, 13rem)' },
+  search: { minWidth: 0, flex: '1 1 auto' },
+  find: {
+    position: 'absolute',
+    zIndex: 3,
+    right: space[2],
+    top: 'calc(28px + 12px)',
+    width: 'min(380px, calc(100% - 16px))',
+    display: 'flex',
+    alignItems: 'center',
+    gap: space[1],
+    backgroundColor: colors.elevatedBackground,
+    boxShadow: shadow.popover,
+    padding: space[1],
+    borderRadius: radius.small,
+  },
   label: { color: colors.secondaryLabel, fontSize: '0.75rem' },
   gridViewport: {
     flex: '1 1 auto',
@@ -143,6 +170,7 @@ export function SessionFileCsvPreview({
   readonly active: boolean;
 }) {
   const { t } = useTranslation();
+  const select = useDocumentSelection();
   const workerRef = useRef<Worker | null>(null);
   const viewportRef = useRef<HTMLDivElement>(null);
   const [rows, setRows] = useState<string[][] | null>(null);
@@ -166,6 +194,7 @@ export function SessionFileCsvPreview({
     setCopyStatus(null);
   }, [path, text]);
 
+  const [searchOpen, setSearchOpen] = useState(false);
   const [query, setQuery] = useState('');
   const deferredQuery = useDeferredValue(query);
   const queryRef = useRef(deferredQuery);
@@ -364,7 +393,7 @@ export function SessionFileCsvPreview({
       {...stylex.props(styles.root)}
       aria-label={t('sessions.fileViewer.csv.viewer', 'CSV viewer')}
     >
-      <div {...stylex.props(styles.toolbar)}>
+      <div {...stylex.props(styles.toolbar)} data-document-toolbar>
         <span {...stylex.props(styles.label)}>
           {rows
             ? t('sessions.fileViewer.csv.dimensions', '{{rows}} rows · {{columns}} columns', {
@@ -378,12 +407,43 @@ export function SessionFileCsvPreview({
           type="button"
           variant="ghost"
           size="mini"
+          icon
+          aria-label={t('sessions.fileViewer.spreadsheet.copySelection', 'Copy selection')}
           disabled={!selection || !rows}
           onClick={copySelection}
         >
           <Copy size={16} aria-hidden />
-          {t('sessions.fileViewer.spreadsheet.copySelection', 'Copy selection')}
         </Button>
+        {select ? (
+          <Tooltip
+            content={t('sessions.fileViewer.selection.annotateCells', 'Annotate selected cells')}
+          >
+            <Button
+              icon
+              aria-label={t(
+                'sessions.fileViewer.selection.annotateCells',
+                'Annotate selected cells'
+              )}
+              size="mini"
+              variant="ghost"
+              disabled={!selection || !rows}
+              onClick={(event) =>
+                select(async () => {
+                  const data = clipboardData();
+                  if (!data || !bounds) throw new Error('No selected cells');
+                  return {
+                    path,
+                    location: `${columnLabel(bounds.left)}${bounds.top + 1}:${columnLabel(bounds.right)}${bounds.bottom + 1}`,
+                    text: data.text,
+                  };
+                }, event.currentTarget)
+              }
+            >
+              <MessageSquarePlus size={16} aria-hidden />
+            </Button>
+          </Tooltip>
+        ) : null}
+        <DocumentCaptureButton />
         <div {...stylex.props(styles.group)}>
           <Button
             type="button"
@@ -409,43 +469,69 @@ export function SessionFileCsvPreview({
             <ZoomIn size={16} aria-hidden />
           </Button>
         </div>
-        <span {...stylex.props(styles.search)}>
-          <Input
-            type="search"
-            size="small"
-            value={query}
-            onChange={(event) => setQuery(event.currentTarget.value)}
-            placeholder={t('sessions.fileViewer.csv.search', 'Search cells')}
-            aria-label={t('sessions.fileViewer.csv.search', 'Search cells')}
-          />
-        </span>
-        <span {...stylex.props(styles.label)} aria-live="polite">
-          {matchTotal > 0
-            ? `${matchIndex + 1}/${matches.length}${matchTotal > matches.length ? '+' : ''}`
-            : ''}
-        </span>
         <Button
-          type="button"
-          variant="ghost"
           size="mini"
-          icon
-          aria-label={t('sessions.fileViewer.csv.previousMatch', 'Previous match')}
-          disabled={matches.length === 0}
-          onClick={() => goToMatch(matchIndex - 1)}
-        >
-          <ChevronUp size={16} aria-hidden />
-        </Button>
-        <Button
-          type="button"
           variant="ghost"
-          size="mini"
           icon
-          aria-label={t('sessions.fileViewer.csv.nextMatch', 'Next match')}
-          disabled={matches.length === 0}
-          onClick={() => goToMatch(matchIndex + 1)}
+          aria-label={t('sessions.fileViewer.csv.search', 'Search cells')}
+          aria-expanded={searchOpen}
+          onClick={() => setSearchOpen((value) => !value)}
         >
-          <ChevronDown size={16} aria-hidden />
+          <Search size={16} aria-hidden />
         </Button>
+        {searchOpen ? (
+          <div {...stylex.props(styles.find)}>
+            <span {...stylex.props(styles.search)}>
+              <Input
+                type="search"
+                size="small"
+                value={query}
+                onChange={(event) => setQuery(event.currentTarget.value)}
+                placeholder={t('sessions.fileViewer.csv.search', 'Search cells')}
+                aria-label={t('sessions.fileViewer.csv.search', 'Search cells')}
+              />
+            </span>
+            <span {...stylex.props(styles.label)} aria-live="polite">
+              {matchTotal > 0
+                ? `${matchIndex + 1}/${matches.length}${matchTotal > matches.length ? '+' : ''}`
+                : ''}
+            </span>
+            <Button
+              type="button"
+              variant="ghost"
+              size="mini"
+              icon
+              aria-label={t('sessions.fileViewer.csv.previousMatch', 'Previous match')}
+              disabled={matches.length === 0}
+              onClick={() => goToMatch(matchIndex - 1)}
+            >
+              <ChevronUp size={16} aria-hidden />
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="mini"
+              icon
+              aria-label={t('sessions.fileViewer.csv.nextMatch', 'Next match')}
+              disabled={matches.length === 0}
+              onClick={() => goToMatch(matchIndex + 1)}
+            >
+              <ChevronDown size={16} aria-hidden />
+            </Button>{' '}
+            <Button
+              size="mini"
+              variant="ghost"
+              icon
+              aria-label={t('sessions.fileViewer.pdf.closeSearch', 'Close search')}
+              onClick={() => {
+                setSearchOpen(false);
+                setQuery('');
+              }}
+            >
+              <X size={16} aria-hidden />
+            </Button>
+          </div>
+        ) : null}
       </div>
       {failed ? (
         <div {...stylex.props(styles.status)} role="alert">

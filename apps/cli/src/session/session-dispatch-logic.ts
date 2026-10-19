@@ -18,6 +18,8 @@ import {
   resolveSessionHistoryStatus,
   getPendingUserTurnActivationId,
   hasPendingUserTurnActivation,
+  getSessionCancelRequestMarker,
+  isSessionCancelRequestMarker,
   type MachineId,
   type SessionHistoryInput,
   type SessionInputBlock,
@@ -38,6 +40,8 @@ export type SessionDispatchSnapshot = {
   hasReusableSession: boolean;
   /** True while edit-and-resend is replacing the durable history tail. */
   hasRewriteBarrier: boolean;
+  /** Present while the previous turn's release is unconfirmed; it still blocks successors. */
+  releaseBlocked?: { reason: string };
 };
 
 /** Metadata and process-local signals that decide whether to open a Session Doc room. */
@@ -83,15 +87,29 @@ export function isActivationAwaitingHistory(
 export type DispatchAction =
   | {
       type: 'noop';
-      reason: 'not-owned' | 'archived' | 'rewrite-barrier' | 'pending-create' | 'active-session';
+      reason:
+        | 'not-owned'
+        | 'archived'
+        | 'rewrite-barrier'
+        | 'pending-create'
+        | 'release-blocked'
+        | 'active-session';
     }
   | { type: 'reset-stale-status'; statusType: string }
   | { type: 'no-dispatchable-turn' }
   | { type: 'dispatch'; mode: 'create' | 'continue'; turn: SessionHistoryInput };
 
 export type CancelAction =
-  | { type: 'noop'; reason: 'not-owned' | 'archived' | 'no-cancel-turn' | 'already-seen' }
-  | { type: 'cancel'; turnId: string };
+  | {
+      type: 'noop';
+      reason:
+        | 'not-owned'
+        | 'archived'
+        | 'no-cancel-turn'
+        | 'already-seen'
+        | 'awaiting-cancel-request';
+    }
+  | { type: 'cancel'; turnId: string; cancelId?: string };
 
 export type DispatchTurnInput = {
   inputBlocks: SessionInputBlock[];
@@ -193,6 +211,9 @@ export function resolveSessionDispatchAction(
   if (hasBlockingPendingCreate) {
     return { type: 'noop', reason: 'pending-create' };
   }
+  if (snapshot.releaseBlocked) {
+    return { type: 'noop', reason: 'release-blocked' };
+  }
   if (hasActiveTurn) {
     return { type: 'noop', reason: 'active-session' };
   }
@@ -224,12 +245,14 @@ export function resolveSessionDispatchAction(
  * Given cancel-related state, determine whether to send a cancel request.
  *
  * The web client writes `meta.lastCanceledTurn` to request cancellation.
- * This function deduplicates by comparing against `lastSeenCancelTurn`.
+ * New markers name a control-document request; legacy values name a turn.
+ * Metadata arriving first must wait for the matching control payload.
  */
 export function resolveSessionCancelAction(
   meta: SessionMeta | undefined,
   lastSeenCancelTurn: string | undefined,
-  machineId: MachineId
+  machineId: MachineId,
+  cancelRequest?: { id: string; turnId: string }
 ): CancelAction {
   if (!meta || meta.machineId !== machineId) {
     return { type: 'noop', reason: 'not-owned' };
@@ -246,6 +269,18 @@ export function resolveSessionCancelAction(
     return { type: 'noop', reason: 'already-seen' };
   }
 
+  if (isSessionCancelRequestMarker(lastCanceledTurn)) {
+    if (
+      typeof cancelRequest?.id !== 'string' ||
+      !cancelRequest.id ||
+      typeof cancelRequest.turnId !== 'string' ||
+      !cancelRequest.turnId ||
+      getSessionCancelRequestMarker(cancelRequest.id) !== lastCanceledTurn
+    ) {
+      return { type: 'noop', reason: 'awaiting-cancel-request' };
+    }
+    return { type: 'cancel', turnId: cancelRequest.turnId, cancelId: cancelRequest.id };
+  }
   return { type: 'cancel', turnId: lastCanceledTurn };
 }
 

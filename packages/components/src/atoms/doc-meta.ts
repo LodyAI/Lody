@@ -26,6 +26,7 @@ import { mergeBootstrapMetaCache } from '@/lib/doc-meta-bootstrap';
 import { listDocMetaEntries, type DocMetaCacheSnapshot } from '@/lib/doc-meta-batch';
 import { jsonValueEqual } from '@/lib/json-value-equal';
 import { getDocMetaRoomKind, withDerivedDocMetaId } from '@/lib/doc-meta-room';
+import { describeErrorType } from '@/lib/workspace-data-scope';
 
 // ---------------------------------------------------------------------------
 // Runtime guard for metadata entering the cache.
@@ -1018,7 +1019,7 @@ export const docMetaSubscriptionAtom = atomEffect((get, set) => {
         workspaceId: runtime.workspaceId,
         workspaceSlug: runtime.workspaceSlug,
         ready: false,
-        scanFailure: { errorType: error instanceof Error ? error.name || 'Error' : typeof error },
+        scanFailure: { errorType: describeErrorType(error) },
       });
     }
   );

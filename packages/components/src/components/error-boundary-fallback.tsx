@@ -182,9 +182,18 @@ export function ErrorBoundaryFallback({
 
   const handleHardReset = useCallback(() => {
     setHardResetting(true);
-    // Ends in a reload, so there is no success state to render — the dialog just
-    // stays in its progress state until the app comes back.
-    void Promise.resolve(startHardReset()).catch(() => setHardResetting(false));
+    // Ends in a reload or relaunch, so there is no success state to render — the
+    // dialog stays in its progress state until the app comes back. A desktop
+    // quit answered Stay resolves false: nothing was wiped, so close the dialog.
+    void startHardReset().then(
+      (started) => {
+        if (!started) {
+          setHardResetting(false);
+          setHardResetOpen(false);
+        }
+      },
+      () => setHardResetting(false)
+    );
   }, []);
 
   const copyLabel = copied

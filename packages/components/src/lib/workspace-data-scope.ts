@@ -1,5 +1,5 @@
 import type { WorkspaceId } from '@lody/shared';
-import type { WorkspaceRuntime } from '@/atoms/runtime';
+import type { WorkspaceRuntime, WorkspaceRuntimeInitFailure } from '@/atoms/runtime';
 import type { DocMetaCacheScope } from '@/atoms/doc-meta';
 
 /**
@@ -9,6 +9,8 @@ import type { DocMetaCacheScope } from '@/atoms/doc-meta';
 export type WorkspaceDataScopeBlocker =
   /** No active runtime yet. */
   | 'runtime_missing'
+  /** Creating the runtime for the target rejected; nothing retries it. */
+  | 'runtime_init_failed'
   /** The active runtime still belongs to the previous workspace. */
   | 'runtime_other_workspace'
   /** The runtime's first doc-metadata scan has not resolved. */
@@ -19,6 +21,19 @@ export type WorkspaceDataScopeBlocker =
   | 'workspace_not_in_organizations'
   /** The organization's workspace id disagrees with the runtime's. */
   | 'workspace_id_mismatch';
+
+/**
+ * The name a stuck-scope diagnostic keeps for a failure. Read off any object,
+ * since a `DOMException` is not an `Error` everywhere; never the message, which
+ * can carry stream URLs.
+ */
+export function describeErrorType(error: unknown): string {
+  if (typeof error === 'object' && error !== null && 'name' in error) {
+    const { name } = error;
+    if (typeof name === 'string' && name) return name;
+  }
+  return error instanceof Error ? 'Error' : typeof error;
+}
 
 export type WorkspaceDataScopeState =
   | { status: 'switching'; targetSlug: string; blocker: WorkspaceDataScopeBlocker }
@@ -32,18 +47,25 @@ export type WorkspaceDataScopeState =
 export function resolveWorkspaceDataScope({
   targetSlug,
   runtime,
+  runtimeInitFailure,
   docMetaScope,
   organizationsReady,
   expectedWorkspaceId,
 }: {
   targetSlug: string;
   runtime: WorkspaceRuntime | null;
+  runtimeInitFailure: WorkspaceRuntimeInitFailure | null;
   docMetaScope: DocMetaCacheScope | null;
   organizationsReady: boolean;
   expectedWorkspaceId: string | null;
 }): WorkspaceDataScopeState {
   if (!runtime) {
-    return { status: 'switching', targetSlug, blocker: 'runtime_missing' };
+    const failed = runtimeInitFailure?.workspaceSlug === targetSlug;
+    return {
+      status: 'switching',
+      targetSlug,
+      blocker: failed ? 'runtime_init_failed' : 'runtime_missing',
+    };
   }
   if (runtime.workspaceSlug !== targetSlug) {
     return { status: 'switching', targetSlug, blocker: 'runtime_other_workspace' };

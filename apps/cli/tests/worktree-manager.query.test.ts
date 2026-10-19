@@ -85,7 +85,7 @@ describe('WorktreeManager', () => {
       });
       expect(await manager.inspectWorktree(sessionId)).toMatchObject({
         state: 'failed',
-        path: cwd,
+        path: fs.realpathSync(cwd),
       });
       await expect(manager.getCurrentBranchName(sessionId)).rejects.toMatchObject({
         _tag: 'WorktreeGitCommandFailed',

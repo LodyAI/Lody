@@ -64,6 +64,7 @@ import {
 } from '@lody/shared';
 import { useMachineFlockRowsByMachineIds } from '@/hooks/use-machine-flock-rows';
 import { buildArchivedSessionTree } from '@/lib/archived-session-tree';
+import { formatCompactRelativeTime } from '@/lib/format-relative-time';
 import {
   flattenVisibleArchiveRows,
   type ArchiveVirtualRow,
@@ -594,32 +595,6 @@ const PR_STATUS_META: Record<PrStatus, PrStatusMeta> = {
   },
 };
 
-function formatRelativeTime(dateValue: number | string | undefined, now: Date): string {
-  if (!dateValue) return '--';
-
-  const date = typeof dateValue === 'number' ? new Date(dateValue) : new Date(dateValue);
-  if (!Number.isFinite(date.getTime())) return '--';
-
-  const diffMs = Math.max(0, now.getTime() - date.getTime());
-  const minutes = Math.floor(diffMs / 60_000);
-  if (minutes < 60) return `${minutes}m`;
-
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}h`;
-
-  const days = Math.floor(hours / 24);
-  if (days < 7) return `${days}d`;
-
-  const weeks = Math.floor(days / 7);
-  if (weeks < 4) return `${weeks}w`;
-
-  const months = Math.floor(days / 30);
-  if (months < 12) return `${months}mo`;
-
-  const years = Math.floor(days / 365);
-  return `${years}y`;
-}
-
 type ArchiveSortMode = 'newest' | 'oldest' | 'title';
 type ArchiveGroupMode = 'project' | 'flat';
 
@@ -784,7 +759,7 @@ function getArchivedSessionItemViewModel(
   now: Date
 ): ArchivedSessionItemViewModel {
   const title = session.title?.trim() || 'Untitled session';
-  const relativeTime = formatRelativeTime(session.lastMessageAt, now);
+  const relativeTime = formatCompactRelativeTime(session.lastMessageAt, now);
   const branchName = session.branchName?.trim() || '';
   const diffStats = session.diffStats ?? { allChange: { add: 0, del: 0 } };
   const hasChanges = diffStats.allChange.add !== 0 || diffStats.allChange.del !== 0;

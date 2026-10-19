@@ -153,6 +153,7 @@ const openView = (
     maxHydrated?: number;
     hydrateChunkSize?: number;
     hydrateItemBudget?: number;
+    now?: () => number;
   } = {}
 ) => {
   const history = fixtureHistory(rounds);
@@ -166,6 +167,7 @@ const openView = (
     yieldToEventLoop: () => Promise.resolve(),
     hydrateChunkSize: options.hydrateChunkSize ?? 2,
     hydrateItemBudget: options.hydrateItemBudget ?? 10_000,
+    ...(options.now ? { now: options.now } : {}),
   });
   // Raw membership/order mutation (not expressible as a domain command): the
   // Loro arm goes through the shared writer, the memory arm through the peer
@@ -690,6 +692,38 @@ describe.each(backends)('createConversationViewFromReader over $name', (backend)
       expect(probe.directories.every(([from, to]) => to - from === 1 && from === last)).toBe(true);
       expect(probe.turns).toEqual([lastId]);
       probeView.dispose();
+    } finally {
+      harness.teardown();
+    }
+  });
+
+  it('stamps lastUpdateAt from backend changes only, never from opening or hydration', async () => {
+    let clock = 1_000;
+    const harness = openView(backend, 12, { tailKeep: 4, now: () => clock });
+    const { view, idle, data } = harness;
+    try {
+      await settle(idle, view);
+      const older = view.acquireRange(0, 5);
+      await older.ready;
+      older.release();
+      // Opening and hydrating read stored history; nothing arrived yet.
+      expect(view.lastUpdateAt).toBeNull();
+
+      clock = 5_000;
+      const last = view.turn(view.turnCount - 1)!;
+      await data.commands.replaceTurn(last.id, {
+        ...(last as unknown as SessionTurn),
+        items: [...(last.items ?? []), { type: 'text', text: ' streamed' }],
+      } as unknown as SessionTurn);
+      await flush();
+      expect(view.lastUpdateAt).toBe(5_000);
+
+      clock = 9_000;
+      const again = view.acquireRange(4, 8);
+      await again.ready;
+      again.release();
+      expect(view.lastUpdateAt).toBe(5_000);
+      view.dispose();
     } finally {
       harness.teardown();
     }

@@ -35,289 +35,287 @@ type EventCounters = Record<string, number>;
  * limits, kernel accounting, and `cgroup.kill` to end every member at once,
  * including daemonized descendants that left their process group.
  */
-export const makeCgroupContainer = (options: {
+export const makeCgroupContainer = Effect.fnUntraced(function* (options: {
   readonly sessionId: string;
   readonly cgroupMount: string;
   readonly fs: CgroupFs;
   readonly readSelfCgroupPath: () => Promise<string>;
   readonly configureProcess: (pid: number) => Effect.Effect<void>;
-}): Effect.Effect<
+}): Effect.fn.Return<
   ProcessContainer,
   SandboxUnavailable,
   NodeProcess | ChildProcessSpawner.ChildProcessSpawner | Scope.Scope
-> =>
-  Effect.gen(function* () {
-    const np = yield* NodeProcess;
-    const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
-    const scope = yield* Effect.scope;
-    const io = <A>(operation: string, run: () => Promise<A>) =>
-      Effect.tryPromise({
-        try: run,
-        catch: (cause) =>
-          new SandboxIoError({
-            operation,
-            message: `cgroup ${operation} failed: ${formatErrorMessage(cause)}`,
-            cause,
-          }),
-      });
-    const exists = (filePath: string) =>
-      io(`access ${path.basename(filePath)}`, () => options.fs.access(filePath)).pipe(
-        Effect.as(true),
-        Effect.catch(() => Effect.succeed(false))
-      );
-
-    const cgroupDir = yield* initializeCgroup(options, io, exists).pipe(
-      Effect.mapError((cause) => new SandboxUnavailable({ message: cause.message, cause }))
-    );
-    const currentDir = yield* Ref.make<string | null>(cgroupDir);
-    const limits = yield* Ref.make<SessionSandboxLimits>({});
-    const registry = yield* makeProcessTreeRegistry;
-
-    const requireDir = Effect.flatMap(Ref.get(currentDir), (dir) =>
-      dir
-        ? Effect.succeed(dir)
-        : Effect.fail(
-            new SandboxIoError({
-              operation: 'lookup',
-              message: 'Session sandbox is not initialized',
-              cause: null,
-            })
-          )
-    );
-    const readText = (fileName: string) =>
-      Effect.flatMap(requireDir, (dir) =>
-        io(`read ${fileName}`, async () =>
-          String(await options.fs.readFile(path.join(dir, fileName), 'utf8'))
-        )
-      );
-    const readEvents = (fileName: string) =>
-      readText(fileName).pipe(
-        Effect.map(parseEventCounters),
-        Effect.catch(() => Effect.succeed<EventCounters>({}))
-      );
-    const readMembership = (fileName: string) =>
-      Effect.flatMap(Ref.get(currentDir), (dir) => {
-        if (!dir) return Effect.succeed(Option.none<string>());
-        return io(`read ${fileName}`, async () =>
-          String(await options.fs.readFile(path.join(dir, fileName), 'utf8'))
-        ).pipe(
-          Effect.map(Option.some),
-          Effect.catch((error) =>
-            Effect.gen(function* () {
-              if (errnoCode(error.cause) !== 'ENOENT') return yield* Effect.fail(error);
-              const directory = yield* Effect.result(
-                io('probe session cgroup', () => options.fs.access(dir))
-              );
-              // Only an absent directory proves the entire cgroup is gone. A missing
-              // control file, denied read, or failed probe remains an error.
-              if (Result.isFailure(directory) && errnoCode(directory.failure.cause) === 'ENOENT')
-                return Option.none<string>();
-              return yield* Effect.fail(error);
-            })
-          )
-        );
-      });
-    const readPids = Effect.map(readMembership('cgroup.procs'), (raw) =>
-      Option.isSome(raw) ? parsePids(raw.value) : []
-    );
-    const readPopulated = Effect.flatMap(readMembership('cgroup.events'), (raw) => {
-      if (Option.isNone(raw)) return Effect.succeed(false);
-      const populated = parseEventCounters(raw.value).populated;
-      return populated === 0 || populated === 1
-        ? Effect.succeed(populated === 1)
-        : Effect.fail(
-            new SandboxIoError({
-              operation: 'read cgroup.events',
-              message: 'cgroup.events does not contain a valid populated state',
-              cause: null,
-            })
-          );
+> {
+  const np = yield* NodeProcess;
+  const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+  const scope = yield* Effect.scope;
+  const io = <A>(operation: string, run: () => Promise<A>) =>
+    Effect.tryPromise({
+      try: run,
+      catch: (cause) =>
+        new SandboxIoError({
+          operation,
+          message: `cgroup ${operation} failed: ${formatErrorMessage(cause)}`,
+          cause,
+        }),
     });
-    const tree = cgroupTree(np, cgroupDir, readPids, readPopulated, exists, (value) =>
-      io('write cgroup.kill', () =>
-        options.fs.writeFile(path.join(cgroupDir, 'cgroup.kill'), value)
+  const exists = (filePath: string) =>
+    io(`access ${path.basename(filePath)}`, () => options.fs.access(filePath)).pipe(
+      Effect.as(true),
+      Effect.catch(() => Effect.succeed(false))
+    );
+
+  const cgroupDir = yield* initializeCgroup(options, io, exists).pipe(
+    Effect.mapError((cause) => new SandboxUnavailable({ message: cause.message, cause }))
+  );
+  const currentDir = yield* Ref.make<string | null>(cgroupDir);
+  const limits = yield* Ref.make<SessionSandboxLimits>({});
+  const registry = yield* makeProcessTreeRegistry;
+
+  const requireDir = Effect.flatMap(Ref.get(currentDir), (dir) =>
+    dir
+      ? Effect.succeed(dir)
+      : Effect.fail(
+          new SandboxIoError({
+            operation: 'lookup',
+            message: 'Session sandbox is not initialized',
+            cause: null,
+          })
+        )
+  );
+  const readText = (fileName: string) =>
+    Effect.flatMap(requireDir, (dir) =>
+      io(`read ${fileName}`, async () =>
+        String(await options.fs.readFile(path.join(dir, fileName), 'utf8'))
       )
     );
+  const readEvents = (fileName: string) =>
+    readText(fileName).pipe(
+      Effect.map(parseEventCounters),
+      Effect.catch(() => Effect.succeed<EventCounters>({}))
+    );
+  const readMembership = (fileName: string) =>
+    Effect.flatMap(Ref.get(currentDir), (dir) => {
+      if (!dir) return Effect.succeed(Option.none<string>());
+      return io(`read ${fileName}`, async () =>
+        String(await options.fs.readFile(path.join(dir, fileName), 'utf8'))
+      ).pipe(
+        Effect.map(Option.some),
+        Effect.catch((error) =>
+          Effect.gen(function* () {
+            if (errnoCode(error.cause) !== 'ENOENT') return yield* Effect.fail(error);
+            const directory = yield* Effect.result(
+              io('probe session cgroup', () => options.fs.access(dir))
+            );
+            // Only an absent directory proves the entire cgroup is gone. A missing
+            // control file, denied read, or failed probe remains an error.
+            if (Result.isFailure(directory) && errnoCode(directory.failure.cause) === 'ENOENT')
+              return Option.none<string>();
+            return yield* Effect.fail(error);
+          })
+        )
+      );
+    });
+  const readPids = Effect.map(readMembership('cgroup.procs'), (raw) =>
+    Option.isSome(raw) ? parsePids(raw.value) : []
+  );
+  const readPopulated = Effect.flatMap(readMembership('cgroup.events'), (raw) => {
+    if (Option.isNone(raw)) return Effect.succeed(false);
+    const populated = parseEventCounters(raw.value).populated;
+    return populated === 0 || populated === 1
+      ? Effect.succeed(populated === 1)
+      : Effect.fail(
+          new SandboxIoError({
+            operation: 'read cgroup.events',
+            message: 'cgroup.events does not contain a valid populated state',
+            cause: null,
+          })
+        );
+  });
+  const tree = cgroupTree(np, cgroupDir, readPids, readPopulated, exists, (value) =>
+    io('write cgroup.kill', () => options.fs.writeFile(path.join(cgroupDir, 'cgroup.kill'), value))
+  );
 
-    const container: ProcessContainer = {
-      enabled: true,
-      description: 'linux-cgroup-v2',
-      spawn: (spec) =>
-        Effect.suspend(() =>
-          scope.state._tag === 'Closed'
-            ? Effect.fail(
-                new SpawnFailed({
-                  command: spec.command,
-                  message: 'Session sandbox is not initialized',
-                  cause: null,
-                })
-              )
-            : Effect.acquireUseRelease(
-                Scope.fork(scope),
-                (childScope) =>
-                  Scope.provide(
-                    Effect.gen(function* () {
-                      // After cleanup removed the cgroup, a spawn would run outside every limit.
-                      yield* requireDir.pipe(
-                        Effect.mapError(
-                          (error) =>
-                            new SpawnFailed({
-                              command: spec.command,
-                              message: error.message,
-                              cause: error,
-                            })
-                        )
-                      );
-                      const baseline = {
-                        memory: yield* readEvents('memory.events'),
-                        pids: yield* readEvents('pids.events'),
-                      };
-                      const limitsAtSpawn = yield* Ref.get(limits);
-                      const managed = yield* spawnProcess({ ...spec, processGroup: true }).pipe(
-                        Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner)
-                      );
-                      // Track before attachment: a wrapper can fork children before
-                      // its leader joins, or exit with ESRCH while they remain outside.
-                      const releaseWhenDone = yield* registry.track(managed);
-                      const attached = yield* managed.started.pipe(
-                        Effect.tap((pid) => options.configureProcess(pid)),
-                        Effect.flatMap((pid) =>
-                          io('attach process', () =>
-                            options.fs.writeFile(path.join(cgroupDir, 'cgroup.procs'), `${pid}\n`)
-                          )
-                        ),
-                        Effect.result
-                      );
-                      if (attached._tag === 'Failure') {
-                        const cause =
-                          attached.failure instanceof SandboxIoError ||
-                          attached.failure instanceof SpawnFailed
-                            ? attached.failure.cause
-                            : attached.failure;
-                        // Every attachment failure fails acquisition. Closing the
-                        // child Scope rolls back; failed trees remain in the registry.
-                        return yield* Effect.fail(
+  const container: ProcessContainer = {
+    enabled: true,
+    description: 'linux-cgroup-v2',
+    spawn: (spec) =>
+      Effect.suspend(() =>
+        scope.state._tag === 'Closed'
+          ? Effect.fail(
+              new SpawnFailed({
+                command: spec.command,
+                message: 'Session sandbox is not initialized',
+                cause: null,
+              })
+            )
+          : Effect.acquireUseRelease(
+              Scope.fork(scope),
+              (childScope) =>
+                Scope.provide(
+                  Effect.gen(function* () {
+                    // After cleanup removed the cgroup, a spawn would run outside every limit.
+                    yield* requireDir.pipe(
+                      Effect.mapError(
+                        (error) =>
                           new SpawnFailed({
                             command: spec.command,
-                            message: `Failed to start ${spec.command} in the session sandbox: ${formatErrorMessage(cause)}`,
-                            cause,
+                            message: error.message,
+                            cause: error,
                           })
-                        );
-                      }
-                      yield* releaseWhenDone(childScope);
-                      return {
-                        ...managed,
-                        inspectExit: (exit: ProcessExit) =>
-                          Effect.gen(function* () {
-                            const memory = yield* readEvents('memory.events');
-                            const pids = yield* readEvents('pids.events');
-                            return detectLimitViolation(
-                              baseline,
-                              { memory, pids },
-                              exit,
-                              limitsAtSpawn
-                            );
-                          }),
-                      };
-                    }),
-                    childScope
-                  ),
-                (childScope, exit) =>
-                  Exit.isFailure(exit) ? Scope.close(childScope, exit) : Effect.void
-              )
-        ),
-      terminateAll: (policy) =>
-        Effect.gen(function* () {
-          const outcomes = yield* Effect.all(
-            [
-              Effect.result(terminateTree(tree, policy)),
-              Effect.result(registry.terminateAll(policy)),
-            ],
-            { concurrency: 'unbounded' }
-          );
-          const failure = outcomes.find(Result.isFailure);
-          if (failure) yield* Effect.fail(failure.failure);
-        }),
-      applyLimits: (next) =>
-        Effect.gen(function* () {
-          const dir = yield* requireDir;
-          const normalized = normalizeSessionSandboxLimits(next);
-          yield* Ref.set(limits, normalized);
-          // Rewritten whenever SessionManager rebalances active sessions, so each
-          // cgroup reflects its current share of the machine's execution budget.
-          yield* io('write memory.max', () =>
+                      )
+                    );
+                    const baseline = {
+                      memory: yield* readEvents('memory.events'),
+                      pids: yield* readEvents('pids.events'),
+                    };
+                    const limitsAtSpawn = yield* Ref.get(limits);
+                    const managed = yield* spawnProcess({ ...spec, processGroup: true }).pipe(
+                      Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner)
+                    );
+                    // Track before attachment: a wrapper can fork children before
+                    // its leader joins, or exit with ESRCH while they remain outside.
+                    const releaseWhenDone = yield* registry.track(managed);
+                    const attached = yield* managed.started.pipe(
+                      Effect.tap((pid) => options.configureProcess(pid)),
+                      Effect.flatMap((pid) =>
+                        io('attach process', () =>
+                          options.fs.writeFile(path.join(cgroupDir, 'cgroup.procs'), `${pid}\n`)
+                        )
+                      ),
+                      Effect.result
+                    );
+                    if (attached._tag === 'Failure') {
+                      const cause =
+                        attached.failure instanceof SandboxIoError ||
+                        attached.failure instanceof SpawnFailed
+                          ? attached.failure.cause
+                          : attached.failure;
+                      // Every attachment failure fails acquisition. Closing the
+                      // child Scope rolls back; failed trees remain in the registry.
+                      return yield* Effect.fail(
+                        new SpawnFailed({
+                          command: spec.command,
+                          message: `Failed to start ${spec.command} in the session sandbox: ${formatErrorMessage(cause)}`,
+                          cause,
+                        })
+                      );
+                    }
+                    yield* releaseWhenDone(childScope);
+                    return {
+                      ...managed,
+                      inspectExit: (exit: ProcessExit) =>
+                        Effect.gen(function* () {
+                          const memory = yield* readEvents('memory.events');
+                          const pids = yield* readEvents('pids.events');
+                          return detectLimitViolation(
+                            baseline,
+                            { memory, pids },
+                            exit,
+                            limitsAtSpawn
+                          );
+                        }),
+                    };
+                  }),
+                  childScope
+                ),
+              (childScope, exit) =>
+                Exit.isFailure(exit) ? Scope.close(childScope, exit) : Effect.void
+            )
+      ),
+    recoveryRoots: registry.rootPids,
+    terminateAll: (policy) =>
+      Effect.gen(function* () {
+        const outcomes = yield* Effect.all(
+          [
+            Effect.result(terminateTree(tree, policy)),
+            Effect.result(registry.terminateAll(policy)),
+          ],
+          { concurrency: 'unbounded' }
+        );
+        const failure = outcomes.find(Result.isFailure);
+        if (failure) yield* Effect.fail(failure.failure);
+      }),
+    applyLimits: (next) =>
+      Effect.gen(function* () {
+        const dir = yield* requireDir;
+        const normalized = normalizeSessionSandboxLimits(next);
+        yield* Ref.set(limits, normalized);
+        // Rewritten whenever SessionManager rebalances active sessions, so each
+        // cgroup reflects its current share of the machine's execution budget.
+        yield* io('write memory.max', () =>
+          options.fs.writeFile(
+            path.join(dir, 'memory.max'),
+            formatMemoryLimit(normalized.memoryMaxBytes)
+          )
+        );
+        if (yield* exists(path.join(dir, 'memory.high'))) {
+          yield* io('write memory.high', () =>
             options.fs.writeFile(
-              path.join(dir, 'memory.max'),
-              formatMemoryLimit(normalized.memoryMaxBytes)
+              path.join(dir, 'memory.high'),
+              formatMemoryLimit(normalized.memoryHighBytes)
             )
           );
-          if (yield* exists(path.join(dir, 'memory.high'))) {
-            yield* io('write memory.high', () =>
-              options.fs.writeFile(
-                path.join(dir, 'memory.high'),
-                formatMemoryLimit(normalized.memoryHighBytes)
-              )
-            );
-          }
-          yield* io('write cpu.max', () =>
-            options.fs.writeFile(path.join(dir, 'cpu.max'), formatCpuLimit(normalized.cpuMax))
-          );
-          yield* io('write pids.max', () =>
-            options.fs.writeFile(path.join(dir, 'pids.max'), formatPidsLimit(normalized.pidsMax))
-          );
-        }),
-      readAccounting: Effect.gen(function* () {
-        const memoryBytes = yield* Effect.flatMap(readText('memory.current'), (raw) =>
-          parseNonNegative('memory.current', raw)
+        }
+        yield* io('write cpu.max', () =>
+          options.fs.writeFile(path.join(dir, 'cpu.max'), formatCpuLimit(normalized.cpuMax))
         );
-        const cpuCounters = parseEventCounters(yield* readText('cpu.stat'));
-        const processCount = yield* Effect.flatMap(readText('pids.current'), (raw) =>
-          parseNonNegative('pids.current', raw)
+        yield* io('write pids.max', () =>
+          options.fs.writeFile(path.join(dir, 'pids.max'), formatPidsLimit(normalized.pidsMax))
         );
-        const cpuTimeMicros = cpuCounters.usage_usec;
-        if (cpuTimeMicros === undefined) {
-          return yield* Effect.fail(
-            new SandboxIoError({
-              operation: 'read cpu.stat',
-              message: 'cpu.stat does not contain usage_usec',
-              cause: null,
-            })
-          );
-        }
-        const current = yield* Ref.get(limits);
-        return {
-          kind: 'cgroup-v2',
-          memoryBytes,
-          cpuTimeMicros,
-          processCount,
-          memoryLimitBytes: current.memoryMaxBytes ?? null,
-          cpuLimitCores: parseCpuLimitCores(current.cpuMax),
-          pidsLimit: current.pidsMax ?? null,
-        } satisfies SessionResourceAccounting;
       }),
-      cleanup: Effect.gen(function* () {
-        const terminated = yield* Effect.result(container.terminateAll(FORCED_TERMINATION));
-        if (Result.isFailure(terminated)) {
-          yield* Effect.logWarning(terminated.failure.message);
-          return;
-        }
-        const dir = yield* Ref.get(currentDir);
-        if (!dir) return;
-        const removed = yield* io('remove cgroup', () => options.fs.rmdir(dir)).pipe(Effect.result);
-        if (removed._tag === 'Success') {
-          yield* Ref.set(currentDir, null);
-        } else {
-          yield* Effect.logDebug(
-            `[${options.sessionId}] Failed to remove session cgroup ${dir}: ${removed.failure.message}`
-          );
-        }
-      }),
-    };
-    yield* Effect.addFinalizer(() => container.cleanup);
-    return container;
-  });
+    readAccounting: Effect.gen(function* () {
+      const memoryBytes = yield* Effect.flatMap(readText('memory.current'), (raw) =>
+        parseNonNegative('memory.current', raw)
+      );
+      const cpuCounters = parseEventCounters(yield* readText('cpu.stat'));
+      const processCount = yield* Effect.flatMap(readText('pids.current'), (raw) =>
+        parseNonNegative('pids.current', raw)
+      );
+      const cpuTimeMicros = cpuCounters.usage_usec;
+      if (cpuTimeMicros === undefined) {
+        return yield* Effect.fail(
+          new SandboxIoError({
+            operation: 'read cpu.stat',
+            message: 'cpu.stat does not contain usage_usec',
+            cause: null,
+          })
+        );
+      }
+      const current = yield* Ref.get(limits);
+      return {
+        kind: 'cgroup-v2',
+        memoryBytes,
+        cpuTimeMicros,
+        processCount,
+        memoryLimitBytes: current.memoryMaxBytes ?? null,
+        cpuLimitCores: parseCpuLimitCores(current.cpuMax),
+        pidsLimit: current.pidsMax ?? null,
+      } satisfies SessionResourceAccounting;
+    }),
+    cleanup: Effect.gen(function* () {
+      const terminated = yield* Effect.result(container.terminateAll(FORCED_TERMINATION));
+      if (Result.isFailure(terminated)) {
+        yield* Effect.logWarning(terminated.failure.message);
+        return;
+      }
+      const dir = yield* Ref.get(currentDir);
+      if (!dir) return;
+      const removed = yield* io('remove cgroup', () => options.fs.rmdir(dir)).pipe(Effect.result);
+      if (removed._tag === 'Success') {
+        yield* Ref.set(currentDir, null);
+      } else {
+        yield* Effect.logDebug(
+          `[${options.sessionId}] Failed to remove session cgroup ${dir}: ${removed.failure.message}`
+        );
+      }
+    }),
+  };
+  yield* Effect.addFinalizer(() => container.cleanup);
+  return container;
+});
 
-const initializeCgroup = (
+const initializeCgroup = Effect.fnUntraced(function* (
   options: {
     readonly sessionId: string;
     readonly cgroupMount: string;
@@ -326,56 +324,55 @@ const initializeCgroup = (
   },
   io: <A>(operation: string, run: () => Promise<A>) => Effect.Effect<A, SandboxIoError>,
   exists: (filePath: string) => Effect.Effect<boolean>
-): Effect.Effect<string, SandboxIoError> =>
-  Effect.gen(function* () {
-    if (!(yield* exists(path.join(options.cgroupMount, 'cgroup.controllers')))) {
+): Effect.fn.Return<string, SandboxIoError> {
+  if (!(yield* exists(path.join(options.cgroupMount, 'cgroup.controllers')))) {
+    return yield* Effect.fail(
+      new SandboxIoError({
+        operation: 'probe',
+        message: `cgroup v2 mount not available at ${options.cgroupMount}`,
+        cause: null,
+      })
+    );
+  }
+  const selfCgroupPath = yield* io('read self cgroup', options.readSelfCgroupPath);
+  const parentDir = path.join(
+    options.cgroupMount,
+    selfCgroupPath.replace(/^\/+/, ''),
+    SESSION_CGROUP_PARENT
+  );
+  const cgroupDir = path.join(
+    parentDir,
+    `lody-session-${options.sessionId.replace(/[^a-zA-Z0-9._-]/g, '-')}`
+  );
+  yield* io('create parent', () => options.fs.mkdir(parentDir, { recursive: true }));
+  yield* io('create session cgroup', () => options.fs.mkdir(cgroupDir, { recursive: true }));
+
+  for (const fileName of [
+    'cgroup.procs',
+    'cgroup.events',
+    'memory.events',
+    'memory.max',
+    'cpu.max',
+    'pids.max',
+    'pids.events',
+  ]) {
+    if (!(yield* exists(path.join(cgroupDir, fileName)))) {
       return yield* Effect.fail(
         new SandboxIoError({
           operation: 'probe',
-          message: `cgroup v2 mount not available at ${options.cgroupMount}`,
+          message: `required controller file is unavailable in delegated cgroup subtree: ${fileName}`,
           cause: null,
         })
       );
     }
-    const selfCgroupPath = yield* io('read self cgroup', options.readSelfCgroupPath);
-    const parentDir = path.join(
-      options.cgroupMount,
-      selfCgroupPath.replace(/^\/+/, ''),
-      SESSION_CGROUP_PARENT
+  }
+  if (yield* exists(path.join(cgroupDir, 'memory.oom.group'))) {
+    yield* io('write memory.oom.group', () =>
+      options.fs.writeFile(path.join(cgroupDir, 'memory.oom.group'), '1\n')
     );
-    const cgroupDir = path.join(
-      parentDir,
-      `lody-session-${options.sessionId.replace(/[^a-zA-Z0-9._-]/g, '-')}`
-    );
-    yield* io('create parent', () => options.fs.mkdir(parentDir, { recursive: true }));
-    yield* io('create session cgroup', () => options.fs.mkdir(cgroupDir, { recursive: true }));
-
-    for (const fileName of [
-      'cgroup.procs',
-      'cgroup.events',
-      'memory.events',
-      'memory.max',
-      'cpu.max',
-      'pids.max',
-      'pids.events',
-    ]) {
-      if (!(yield* exists(path.join(cgroupDir, fileName)))) {
-        return yield* Effect.fail(
-          new SandboxIoError({
-            operation: 'probe',
-            message: `required controller file is unavailable in delegated cgroup subtree: ${fileName}`,
-            cause: null,
-          })
-        );
-      }
-    }
-    if (yield* exists(path.join(cgroupDir, 'memory.oom.group'))) {
-      yield* io('write memory.oom.group', () =>
-        options.fs.writeFile(path.join(cgroupDir, 'memory.oom.group'), '1\n')
-      );
-    }
-    return cgroupDir;
-  });
+  }
+  return cgroupDir;
+});
 
 /**
  * The whole cgroup as one tree: alive while it or a nested cgroup has a

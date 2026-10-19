@@ -13,11 +13,35 @@ Child directories such as `sessions/`, `mobile/`, `chat/`, and `archive/` own th
 | Session controls    | [`shared/workdir-mode-selector.tsx`](shared/workdir-mode-selector.tsx), [`shared/session-relation-card.tsx`](shared/session-relation-card.tsx) | Selects workdir mode and navigates session provenance.           |
 | Conversation access | [`session-sharing.tsx`](session-sharing.tsx), [`sharing/`](sharing/)                                                                           | Presents team visibility and static sharing controls.            |
 
+## About notices
+
+[`settings/open-source-attributions-dialog.tsx`](settings/open-source-attributions-dialog.tsx)
+keeps its heading outside one scrolling body containing the summary and both
+notice groups. The height-capped ScrollArea is a flex column, and its viewport
+can shrink to fit the dialog's available height. This keeps the last notice
+reachable even when summary cards stack in a short window. See the
+[scrolling fix](../../../../.agents/notes/implemented/bug-fix/2026-10-15-open-source-notices-scroll.md).
+
 ## Sidebar and session rows
+
+Machine-section ordering uses [`sidebar-machine-order.ts`](sidebar-machine-order.ts)
+and the presentation identity in [`local-probe.ts`](../atoms/local-probe.ts).
+CLI outages preserve the known desktop machine's position; local actions still
+use the live identity. See the [ordering Spec](../../../../specs/sidebar-project-ordering.md).
 
 The sidebar spans `loro-sidebar.tsx`, `loro-app-sidebar.tsx`, `session-list.tsx`, and
 `sidebar-*.tsx`. `sessions/session-list-rows.ts` resolves row relationships, while
 `lib/session-opened-by-tree.ts` builds the presentation tree.
+
+Header controls use the local `CuidaSidebarExpandOutline` SVG for the sidebar toggle
+and Lucide `ChevronLeft` / `ChevronRight` for history navigation, in 16px boxes.
+Cuida's source and Apache-2.0 license are retained beside the icon component.
+
+The Add folder and view controls use Lucide `FolderPlus` and `SlidersHorizontal`
+with 16px boxes and a 1.5 stroke width. Section-header actions both use the `mini`
+ghost Button: 24px square, 6px corner radius, and shared colors and hover treatment.
+The filter accepts `triggerSize` so callers use the Button size contract rather than
+overriding its dimensions with CSS.
 
 Section labels scroll with their rows, per the
 [sidebar section scrolling Spec](../../../../specs/sidebar-section-scrolling.md).
@@ -32,32 +56,52 @@ explains why exact opener navigation and root-row indentation use separate ids.
 A child Tab may open an independent Session: the row sits under the root, but its
 navigation must still return to the precise creating Tab.
 
-Updated organize mode is a mixed recency list. The sidebar view popover exposes
-`Show Project` as a switch below the View and Tasks menu groups. It controls the
-second line with folder / muted GitHub owner mark + project name. The complete
-row acts as the Switch hover target, changing only the track color. It remains
-visible but disabled in Project mode, with a right-side tooltip explaining that
-it is available in Updated view. Touch users open the same hint by tapping the
-disabled row, while keyboard focus also exposes it. GitHub owner marks keep
-their original colors at a fixed 60% opacity in every row state. Nested opened
-Sessions stay one title line so the 30px tree trunk still meets. Workspace-mode
-Pinned omits the line.
+Updated organize mode is a mixed recency list. The sidebar view popover hosts a
+`Details` group under the View and Tasks groups with a switch per second-line
+segment: `Show Project` (folder / muted GitHub owner mark + project name) and
+`Show Branch`. Both switches are persistent content preferences and stay
+interactive in every organize mode — each segment appears on the rows that
+carry it, and the Workspace branch/time line collapses entirely when the
+branch switch is off. A new or unset branch preference starts off; a previously
+saved choice is preserved. See the [default decision](../../../../.agents/notes/implemented/feature/2026-10-19-sidebar-branch-details-off-by-default.md).
+GitHub owner marks keep their original colors at a fixed
+60% opacity in every row state. Nested opened Sessions stay one title line so
+the tree trunk still meets. Workspace-mode Pinned omits the project line.
 Decisions:
-[project context](../../../../.agents/notes/implemented/feature/2026-09-20-sidebar-updated-project-context.md)
-and [display preference](../../../../.agents/notes/implemented/feature/2026-09-20-sidebar-updated-project-display-preference.md).
+[project context](../../../../.agents/notes/implemented/feature/2026-09-20-sidebar-updated-project-context.md),
+[display preference](../../../../.agents/notes/implemented/feature/2026-09-20-sidebar-updated-project-display-preference.md),
+and [details group](../../../../.agents/notes/implemented/feature/2026-10-18-sidebar-row-details-group.md).
 
 ## Entry points and layout
 
-- Entry and workspace-gate redirects use `BootNavigate`; `PreloadedMainLayout`
-  owns its boot-shell Suspense fallback for local and cloud paths. The ready layout
-  keeps the existing content gate while workspace data resolves. See
-  [startup intent](../../../../specs/app-startup-landing.md) and the
-  [first-paint decision](../../../../.agents/notes/implemented/feature/2026-09-26-boot-shell-first-paint.md).
+- Remote Add folder: `local-projects/use-remote-directory-picker.ts` owns navigation,
+  creation and registration state. Both layouts use `remote-directory-new-folder-control.tsx`
+  for a single-name form, shown only when the target advertises
+  `localProjectCreateDirectory`. Creation enters the new directory; Add registers it
+  separately. Errors preserve the name, and pending operations cannot be repeated.
+  [Decision and verification](../../../../.agents/notes/implemented/feature/2026-10-14-remote-directory-creation.md).
+
+- Entry and workspace-gate redirects use `BootNavigate` to hint target geometry;
+  `PreloadedMainLayout` owns the boot-shell Suspense fallback. Inside `RootOutlet`'s
+  error boundary, `BootShellBoundary` supplies live route/sidebar/viewport state and
+  router `state.isLoading || state.status === 'pending'` to one persistent frame:
+  `isLoading` alone can clear before the pending match renders. Committed gates own its
+  path and status; if Suspense cleans up the outgoing owner, pending navigation
+  retains the last committed presentation. With no owners and navigation settled,
+  the provider releases the frame and clears that memory so later session navigation
+  cannot revive it. Static BootShell and `WorkspaceCard`
+  share frame geometry. `DocumentStyle` replaces the inline first-paint sheet
+  after commit and keeps live CSS mutable during updates; React's immutable
+  `style href` resources cannot own it. The card's content `LoadingPlaceholder` retains the
+  same mark while workspace data resolves. See [startup intent](../../../../specs/app-startup-landing.md),
+  the [first-paint decision](../../../../.agents/notes/implemented/feature/2026-09-26-boot-shell-first-paint.md),
+  and its [layout-handoff follow-up](../../../../.agents/notes/implemented/feature/2026-10-19-boot-shell-layout-handoff.md).
 
 - Sidebar footer: Help (`?`), Archive, Settings, in that order. Help retains the
   documentation, GitHub repository, community, GitHub Issues feedback, and bug-report menu; Archive is a direct
-  button and becomes the return action while open. Desktop controls share the UI
-  primitive's small size; mobile actions retain their touch targets. See the
+  button and becomes the return action while open. Desktop controls are 28px and use
+  the navigation rows' ink and fills (`sidebarSurface.iconButton`, shared with the
+  header's icon buttons); mobile actions retain their touch targets. See the
   [footer Spec](../../../../specs/sidebar-footer.md).
 
 - [Zen layout](../../../../specs/zen-layout.md): `AppCommands` dispatches the shared
@@ -72,6 +116,15 @@ and [display preference](../../../../.agents/notes/implemented/feature/2026-09-2
   keeps an accessible name and a hover tooltip. The page and its editors stay
   mounted through resizing; header actions wrap within the pane. [Decision and
   verification](../../../../.agents/notes/implemented/bug-fix/2026-10-01-narrow-settings-panel.md).
+- Machine settings' connected Agent badges in
+  [`settings/my-machine-connected-resources.tsx`](settings/my-machine-connected-resources.tsx)
+  use the shared `AgentIcon`, including provider-brand inference and custom/unknown
+  Agent fallbacks, in the Badge's leading icon slot.
+- GitHub personal identity authorization stays available in cloud-capable native
+  clients: Authorize opens the current workspace's `/settings/github` on
+  `VITE_SITE_URL` (default `https://lody.ai`) in the external browser. Complete
+  account linking there with the same Lody account; the client's reactive settings
+  query reflects completion. Browser settings keep their existing OAuth flow.
 - Browser desktop sign-in handoff: `login-page.tsx` under `?client_id=electron`,
   the page the desktop app opens in the system browser. A desktop sign-out leaves
   this browser signed in as the previous account, so the page names that account
@@ -152,3 +205,14 @@ companion `useSessionShareStatus` answering the header's "already shared?".
 `sessions/session-chat-interface.tsx` owns the editor instance both the control
 and the "…" menu open. Rationale:
 [header share control](../../../../.agents/notes/implemented/feature/2026-09-14-session-header-share-control.md).
+
+## PR auto-archive
+
+`auto-archive-pr-watcher.tsx` keeps observed PR transitions separate from unfinished
+archive attempts. Its owning window retries the existing Session action with capped
+backoff and drops superseded work on scope changes. The action's automatic-only
+progress receipt records accepted targets; its cancellation check uses the
+authoritative snapshot before retry side effects, so restoring a partially archived
+Session or Tab supersedes the unfinished operation. Startup and restore still only
+establish the PR baseline.
+See the [retry decision](../../../../.agents/notes/implemented/bug-fix/2026-10-17-pr-auto-archive-retry.md).

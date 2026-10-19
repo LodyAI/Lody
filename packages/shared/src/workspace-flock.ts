@@ -1,9 +1,6 @@
-import { normalizeAgentRole, type AgentRole } from './agent-role';
+import { normalizeAgentRole, serializeAgentRoleRow, type AgentRole } from './agent-role';
 import type { AgentRoleId, McpServerId, WorkspaceId } from './ids';
-import {
-  isWorkspaceMcpServerMeta,
-  type WorkspaceMcpServerMeta,
-} from './workspace-mcp';
+import { isWorkspaceMcpServerMeta, type WorkspaceMcpServerMeta } from './workspace-mcp';
 
 export const WORKSPACE_FLOCK_DOC_STREAM_SEGMENT = 'wf';
 const WORKSPACE_FLOCK_DOC_NAME = 'workspace';
@@ -206,7 +203,7 @@ const writeWorkspaceFlockRow = (
   if (workspaceFlockRowsEqual(previous, row)) {
     return false;
   }
-  flock.set(row.key, row.value);
+  flock.set(row.key, isAgentRoleRow(row) ? serializeAgentRoleRow(row.value) : row.value);
   flock.commit();
   return true;
 };

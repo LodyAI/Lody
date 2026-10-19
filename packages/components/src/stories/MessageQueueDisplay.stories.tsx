@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
 import type { Meta, StoryObj } from '@storybook/react';
 import { userEvent, within } from 'storybook/test';
 import { Provider, createStore } from 'jotai';
@@ -261,6 +261,51 @@ export const InactiveSession: Story = {
     ...commonArgs,
     items: makeItems(3),
     showSteerAction: false,
+  },
+};
+
+/** Hold the first save acknowledgement while the user edits the next queued turn. */
+export const DeferredEditing: Story = {
+  args: { ...commonArgs, items: makeItems(2) },
+  render: function DeferredEditingStory(args) {
+    const [items, setItems] = useState(args.items);
+    return (
+      <MessageQueueDisplay
+        {...args}
+        items={items}
+        onEditStart={(item) => {
+          setItems((current) =>
+            current.map((row) => (row.$cid === item.$cid ? { ...row, isEditing: true } : row))
+          );
+        }}
+        onEditCancel={(item) => {
+          setItems((current) =>
+            current.map((row) => (row.$cid === item.$cid ? { ...row, isEditing: false } : row))
+          );
+        }}
+        onEditSave={async (item, task) => {
+          setItems((current) =>
+            current.map((row) =>
+              row.$cid === item.$cid
+                ? {
+                    ...row,
+                    task,
+                    isEditing: false,
+                    acpSessionConfig: { ...row.acpSessionConfig, prompt: task },
+                  }
+                : row
+            )
+          );
+          if (item.$cid === 'cid-0') {
+            await new Promise<void>((resolve) => {
+              window.addEventListener('storybook:release-queue-save', () => resolve(), {
+                once: true,
+              });
+            });
+          }
+        }}
+      />
+    );
   },
 };
 

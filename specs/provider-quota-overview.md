@@ -26,3 +26,7 @@ Eligible first-party Codex Providers keep the action even without reported quota
 - [Browser behavior](../packages/components/tests/e2e/desktop-settings-layout.spec.ts)
 - [Provider tests](../packages/components/tests/provider-row-reauthentication.test.tsx)
 - [Decision](../.agents/notes/implemented/bug-fix/2026-10-10-codex-reset-provider-actions.md)
+
+## Capability-gated refresh
+
+Subscription quota requires the Provider’s advertised Core `rateLimits` capability. Active refresh additionally requires `query: true`; builtin account-mode applicability remains enforced. Opening the composer or Agent settings and opening the usage popover revalidates through the existing Machine RPC route while keeping cached values visible. Unsupported providers show no subscription quota; context occupancy and Codex reset forecasts retain their independent eligibility. Failure or ambiguous empty v1 results preserve cached quota.

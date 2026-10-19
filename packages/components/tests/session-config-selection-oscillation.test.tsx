@@ -27,6 +27,9 @@ import {
 } from '../src/atoms/session-run-config-drafts';
 import type { WorkspaceRuntime } from '../src/atoms/runtime';
 import { acceptSessionUserTurn } from '../src/lib/session-send-admission';
+import { LoroDoc } from 'loro-crdt';
+import { createConversationSession } from '../src/lib/conversation-view';
+import { createSessionSendResources } from '../src/lib/session-send-resources';
 import { flushSync } from 'react-dom';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -448,6 +451,7 @@ describe('composer configuration across attachment sends', () => {
 });
 
 describe('existing-session run-config drafts', () => {
+  const closeSendResources: Array<() => Promise<void>> = [];
   let container: HTMLDivElement;
   let root: Root;
   let store: ReturnType<typeof createStore>;
@@ -506,6 +510,21 @@ describe('existing-session run-config drafts', () => {
     const started = Promise.withResolvers<void>();
     const write = Promise.withResolvers<void>();
     const written: SessionHistory[] = [];
+    const doc = new LoroDoc();
+    const control = createConversationSession(doc, { sessionId: 'a' as SessionId });
+    const sendResources = createSessionSendResources({
+      acquire: async () =>
+        ({
+          getState: () => control.mirror.getState(),
+          setState: control.mirror.setState.bind(control.mirror),
+        }) as never,
+      releaseRef: () => {},
+    });
+    closeSendResources.push(async () => {
+      await sendResources.dispose();
+      control.dispose();
+      doc.free();
+    });
     const entry: SessionHistory = {
       id: 'local-turn',
       role: 'user',
@@ -521,6 +540,7 @@ describe('existing-session run-config drafts', () => {
     const runtime = {
       workspaceId: 'workspace',
       pendingSends: null,
+      sendResources,
       repo: { getDocMeta: async () => ({ meta: { id: 'a', machineId: 'machine' } }) },
       writer: {
         appendSessionTurn: async (_session: SessionId, turn: SessionHistory) => {
@@ -551,9 +571,10 @@ describe('existing-session run-config drafts', () => {
     document.body.appendChild(container);
     root = createRoot(container);
   });
-  afterEach(() => {
+  afterEach(async () => {
     flushSync(() => root.unmount());
     container.remove();
+    for (const close of closeSendResources.splice(0)) await close();
   });
 
   it('preserves Fast on and explicit off across A/B/A remounts and remote turns', () => {

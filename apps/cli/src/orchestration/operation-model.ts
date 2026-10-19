@@ -1,383 +1,182 @@
-import { LODY_MAX_CHAIN_DEPTH } from '@lody/shared';
-
-/**
- * Small executable contract model for Operation/Delivery scheduling races.
- * It deliberately omits storage fields and models only state that can change a
- * safety or liveness decision. Tests exhaustively explore bounded traces.
- */
-export type OrchestrationModelState = {
-  operation: 'absent' | 'active' | 'finished' | 'retired';
-  targetInput: 'absent' | 'missing' | 'retry_scheduled' | 'durable';
-  delivery:
-    | 'absent'
-    | 'pending'
-    | 'claimed'
-    | 'prepared'
-    | 'started'
-    | 'uncertain'
-    | 'finalizing'
-    | 'uncertain_finalizing'
-    | 'consumed';
-  deliveryClaimOwner: 'none' | 'current' | 'previous';
-  deliveryAttempts: number;
-  progress: 'absent' | 'pending' | 'settled';
-  targetTerminal: boolean;
-  activeTurn: 'none' | 'user' | 'delivery';
-  queuedUsers: number;
-  archived: boolean;
-  configurationAvailable: boolean;
-  completionTurnWrites: number;
-  providerSubmissions: number;
-  chainDepth: number;
+/** Reduced current Inbox contract. SQLite and execution suites verify the real boundaries. */
+export type InboxModel = {
+  next: number;
+  queue: number[];
+  consumed: number[];
+  pending: number[];
+  paused: boolean;
+  blocked: boolean;
+  human: boolean;
+  active: 'none' | 'human' | 'automatic';
+  batch: number[];
+  submitted: boolean;
+  receipts: number[][];
+  boundary: number[] | undefined;
 };
-
-export type OrchestrationModelAction =
-  | 'accept'
-  | 'expire_result'
-  | 'materialize_fail'
-  | 'materialization_retry'
-  | 'materialize_success'
-  | 'finish'
-  | 'deadline'
-  | 'observe_target_terminal'
-  | 'flush_progress'
-  | 'enqueue_user'
+export type InboxEvent =
+  | 'result'
+  | 'human'
   | 'schedule'
-  | 'prepare_turn'
-  | 'start_turn'
-  | 'history_write_fail'
-  | 'complete_turn'
-  | 'interrupt_turn'
-  | 'cancel_turn'
-  | 'complete_finalization'
-  | 'finalization_consume_fail'
+  | 'submit'
+  | 'normal'
+  | 'stop'
+  | 'failed'
+  | 'unreleased'
   | 'restart'
-  | 'recover_orphans'
-  | 'archive'
-  | 'restore'
-  | 'delete_configuration';
-
-export const initialOrchestrationModelState = (): OrchestrationModelState => ({
-  operation: 'absent',
-  targetInput: 'absent',
-  delivery: 'absent',
-  deliveryClaimOwner: 'none',
-  deliveryAttempts: 0,
-  progress: 'absent',
-  targetTerminal: false,
-  activeTurn: 'none',
-  queuedUsers: 0,
-  archived: false,
-  configurationAvailable: true,
-  completionTurnWrites: 0,
-  providerSubmissions: 0,
-  chainDepth: 0,
+  | 'recover'
+  | 'withdraw'
+  | 'duplicate_release';
+export const initialOrchestrationModelState = (): InboxModel => ({
+  next: 1,
+  queue: [],
+  consumed: [],
+  pending: [],
+  paused: false,
+  blocked: false,
+  human: false,
+  active: 'none',
+  batch: [],
+  submitted: false,
+  receipts: [],
+  boundary: undefined,
 });
-
-export const stepOrchestrationModel = (
-  state: OrchestrationModelState,
-  action: OrchestrationModelAction
-): OrchestrationModelState => {
-  const next = { ...state };
-  switch (action) {
-    case 'accept':
-      if (next.operation === 'absent' && next.chainDepth < LODY_MAX_CHAIN_DEPTH) {
-        next.operation = 'active';
-        next.targetInput = 'missing';
-        next.progress = 'pending';
+export function stepOrchestrationModel(before: InboxModel, event: InboxEvent): InboxModel {
+  const s = structuredClone(before);
+  const consume = () => {
+    if (s.submitted) {
+      s.consumed.push(...s.batch);
+      s.queue = s.queue.filter((n) => !s.batch.includes(n));
+    }
+  };
+  const release = () => {
+    s.active = 'none';
+    s.batch = [];
+    s.submitted = false;
+  };
+  switch (event) {
+    case 'result':
+      if (s.next <= 3) {
+        s.queue.push(s.next++);
+        if (s.active === 'none' && !s.paused && !s.blocked && !s.human) s.pending = [...s.queue];
       }
       break;
-    case 'expire_result':
-      if (
-        next.operation === 'finished' &&
-        next.delivery === 'consumed' &&
-        next.progress === 'settled'
-      ) {
-        next.operation = 'retired';
-      }
-      break;
-    case 'materialize_fail':
-      if (next.operation === 'active' && next.targetInput === 'missing') {
-        next.targetInput = 'retry_scheduled';
-      }
-      break;
-    case 'materialization_retry':
-      if (next.operation === 'active' && next.targetInput === 'retry_scheduled') {
-        next.targetInput = 'missing';
-      }
-      break;
-    case 'materialize_success':
-      if (
-        next.operation === 'active' &&
-        (next.targetInput === 'missing' || next.targetInput === 'retry_scheduled')
-      ) {
-        next.targetInput = 'durable';
-      }
-      break;
-    case 'finish':
-      if (next.operation === 'active' && next.targetInput === 'durable') {
-        next.targetTerminal = true;
-        next.operation = 'finished';
-        next.delivery = 'pending';
-      }
-      break;
-    case 'deadline':
-      if (next.operation === 'active') {
-        next.operation = 'finished';
-        if (next.targetInput === 'retry_scheduled') next.targetInput = 'missing';
-        next.delivery = 'pending';
-      }
-      break;
-    case 'observe_target_terminal':
-      if (next.targetInput === 'durable') next.targetTerminal = true;
-      break;
-    case 'flush_progress':
-      if (next.operation === 'finished' && (next.targetInput !== 'durable' || next.targetTerminal))
-        next.progress = 'settled';
-      break;
-    case 'enqueue_user':
-      next.queuedUsers = Math.min(2, next.queuedUsers + 1);
+    case 'human':
+      s.human = true;
+      s.paused = false;
+      s.pending = [];
       break;
     case 'schedule':
-      if (next.archived || next.activeTurn !== 'none') break;
-      if (next.queuedUsers > 0) {
-        next.queuedUsers -= 1;
-        next.activeTurn = 'user';
-      } else if (next.delivery === 'uncertain') {
-        next.delivery = 'uncertain_finalizing';
-        next.deliveryClaimOwner = 'current';
-      } else if (next.delivery === 'pending') {
-        if (!next.configurationAvailable || next.deliveryAttempts >= 2) {
-          next.delivery = 'finalizing';
-          next.deliveryClaimOwner = 'current';
-        } else {
-          next.delivery = 'claimed';
-          next.deliveryClaimOwner = 'current';
-          next.activeTurn = 'delivery';
-        }
+      if (s.active !== 'none' || s.paused || s.blocked) break;
+      if (s.human) {
+        s.active = 'human';
+        s.human = false;
+        s.batch = [...s.queue];
+        s.pending = [];
+        s.boundary = undefined;
+      } else if (s.pending.length) {
+        s.active = 'automatic';
+        s.batch = [...s.queue];
+        s.pending = [];
+        s.boundary = undefined;
+        if (!s.batch.length) release();
       }
       break;
-    case 'prepare_turn':
-      if (
-        next.activeTurn === 'delivery' &&
-        next.delivery === 'claimed' &&
-        next.deliveryClaimOwner === 'current' &&
-        next.deliveryAttempts < 2
-      ) {
-        next.completionTurnWrites = Math.max(1, next.completionTurnWrites);
-        next.delivery = 'prepared';
-        if (next.deliveryAttempts === 0) {
-          next.chainDepth += 1;
-        }
-        next.deliveryAttempts += 1;
-      }
+    case 'submit':
+      if (s.active === 'none' || s.submitted || s.paused || s.blocked) break;
+      if (s.active === 'automatic' && (!s.batch.length || s.human)) break;
+      if (s.batch.length) s.receipts.push([...s.batch]);
+      s.submitted = true;
       break;
-    case 'start_turn':
-      if (
-        next.activeTurn === 'delivery' &&
-        next.delivery === 'prepared' &&
-        next.deliveryClaimOwner === 'current'
-      ) {
-        next.delivery = 'started';
-        next.providerSubmissions += 1;
-      }
+    case 'normal':
+      if (s.active === 'none' || s.blocked || !s.submitted) break;
+      consume();
+      s.boundary = [...s.queue];
+      s.pending = s.paused || s.human ? [] : [...s.queue];
+      release();
       break;
-    case 'history_write_fail':
-      if (
-        next.activeTurn === 'delivery' &&
-        next.delivery === 'claimed' &&
-        next.deliveryClaimOwner === 'current'
-      ) {
-        next.delivery = 'pending';
-        next.deliveryClaimOwner = 'none';
-        next.activeTurn = 'none';
-      }
+    case 'stop':
+      s.paused = true;
+      s.human = false;
+      s.pending = [];
+      consume();
+      release();
       break;
-    case 'complete_turn':
-      if (
-        next.activeTurn === 'delivery' &&
-        (next.delivery === 'prepared' || next.delivery === 'started')
-      ) {
-        next.delivery = 'consumed';
-        next.deliveryClaimOwner = 'none';
-      }
-      next.activeTurn = 'none';
+    case 'failed':
+      if (s.active === 'none') break;
+      consume();
+      s.pending = [];
+      release();
       break;
-    case 'interrupt_turn':
-      if (next.activeTurn === 'delivery' && next.delivery === 'started') {
-        next.delivery = 'uncertain';
-        next.deliveryClaimOwner = 'none';
-      } else if (
-        next.activeTurn === 'delivery' &&
-        (next.delivery === 'claimed' || next.delivery === 'prepared')
-      ) {
-        next.delivery = 'pending';
-        next.deliveryClaimOwner = 'none';
-      }
-      next.activeTurn = 'none';
-      break;
-    case 'cancel_turn':
-      if (
-        next.activeTurn === 'delivery' &&
-        (next.delivery === 'claimed' || next.delivery === 'prepared' || next.delivery === 'started')
-      ) {
-        next.delivery = 'consumed';
-        next.deliveryClaimOwner = 'none';
-      }
-      next.activeTurn = 'none';
-      break;
-    case 'finalization_consume_fail':
-      if (
-        (next.delivery === 'finalizing' || next.delivery === 'uncertain_finalizing') &&
-        next.deliveryClaimOwner === 'current'
-      ) {
-        next.completionTurnWrites = Math.max(1, next.completionTurnWrites);
-      }
-      break;
-    case 'complete_finalization':
-      if (
-        (next.delivery === 'finalizing' || next.delivery === 'uncertain_finalizing') &&
-        next.deliveryClaimOwner === 'current'
-      ) {
-        next.completionTurnWrites = Math.max(1, next.completionTurnWrites);
-        next.delivery = 'consumed';
-        next.deliveryClaimOwner = 'none';
-      }
+    case 'unreleased':
+      if (s.active === 'none') break;
+      consume();
+      s.blocked = true;
+      s.pending = [];
       break;
     case 'restart':
-      if (
-        (next.delivery === 'claimed' ||
-          next.delivery === 'prepared' ||
-          next.delivery === 'started' ||
-          next.delivery === 'finalizing' ||
-          next.delivery === 'uncertain_finalizing') &&
-        next.deliveryClaimOwner === 'current'
-      ) {
-        next.deliveryClaimOwner = 'previous';
-      }
-      next.activeTurn = 'none';
-      break;
-    case 'recover_orphans':
-      if (
-        (next.delivery === 'claimed' ||
-          next.delivery === 'prepared' ||
-          next.delivery === 'started' ||
-          next.delivery === 'finalizing' ||
-          next.delivery === 'uncertain_finalizing') &&
-        next.deliveryClaimOwner === 'previous'
-      ) {
-        next.delivery =
-          next.delivery === 'started' || next.delivery === 'uncertain_finalizing'
-            ? 'uncertain'
-            : 'pending';
-        next.deliveryClaimOwner = 'none';
+      if (s.active !== 'none') {
+        consume();
+        s.blocked = true;
+        s.pending = [];
       }
       break;
-    case 'archive':
-      next.archived = true;
+    case 'recover':
+      if (s.blocked) {
+        s.blocked = false;
+        release();
+      }
       break;
-    case 'restore':
-      next.archived = false;
+    case 'withdraw':
+      // An unverified human execution returns its input before submission.
+      if (s.active !== 'human' || s.submitted || s.blocked) break;
+      s.active = 'none';
+      s.batch = [];
+      s.human = true;
       break;
-    case 'delete_configuration':
-      next.configurationAvailable = false;
-      break;
+    case 'duplicate_release':
+      break; // duplicate release cannot create another intent
   }
-  return next;
-};
-
-export const assertOrchestrationModelSafety = (state: OrchestrationModelState): void => {
-  if (state.progress === 'settled' && state.targetInput === 'durable' && !state.targetTerminal) {
-    throw new Error('progress ownership ended before the published target was terminal');
-  }
-  if (state.providerSubmissions > 1) {
-    throw new Error('one Delivery submitted its completion to the provider more than once');
-  }
-  if (state.completionTurnWrites > 1) {
-    throw new Error('one Delivery created more than one visible completion Turn');
-  }
-  if (state.delivery === 'pending' && state.operation !== 'finished') {
-    throw new Error('a pending Delivery exists without a finished Operation');
-  }
-  if (state.operation === 'absent' && state.targetInput !== 'absent') {
-    throw new Error('target materialization exists before Operation acceptance');
-  }
-  if (state.operation === 'finished' && state.targetInput === 'retry_scheduled') {
-    throw new Error('a terminal Operation retained a materialization retry');
-  }
-  if (
-    state.activeTurn === 'delivery' &&
-    state.delivery !== 'claimed' &&
-    state.delivery !== 'prepared' &&
-    state.delivery !== 'started'
-  ) {
-    throw new Error('a Delivery continuation is active without a durable attempt claim');
-  }
-  if (
-    (state.delivery === 'claimed' ||
-      state.delivery === 'prepared' ||
-      state.delivery === 'started' ||
-      state.delivery === 'finalizing' ||
-      state.delivery === 'uncertain_finalizing') !==
-    (state.deliveryClaimOwner !== 'none')
-  ) {
-    throw new Error('Delivery claim state and its fenced owner disagree');
-  }
-  if (state.activeTurn === 'delivery' && state.deliveryClaimOwner !== 'current') {
-    throw new Error('a Delivery turn is active under a non-current Worker boot');
-  }
-  if (state.deliveryAttempts > 2) {
-    throw new Error('a Delivery exceeded its bounded attempt count');
-  }
-  if (state.chainDepth > LODY_MAX_CHAIN_DEPTH) {
-    throw new Error('machine-originated chain exceeded the fixed depth cap');
-  }
-};
-
-export const enumerateOrchestrationModel = (maxDepth: number): OrchestrationModelState[] => {
-  const actions: OrchestrationModelAction[] = [
-    'accept',
-    'expire_result',
-    'materialize_fail',
-    'materialization_retry',
-    'materialize_success',
-    'finish',
-    'deadline',
-    'observe_target_terminal',
-    'flush_progress',
-    'enqueue_user',
+  assertOrchestrationModelSafety(s);
+  return s;
+}
+export function assertOrchestrationModelSafety(s: InboxModel) {
+  const delivered = s.receipts.flat();
+  if (new Set(delivered).size !== delivered.length) throw new Error('Result submitted twice');
+  if (s.receipts.some((batch) => batch.length === 0)) throw new Error('Empty automatic batch');
+  if (s.paused && s.pending.length) throw new Error('Paused session has automatic intent');
+  if (s.pending.some((n) => !s.queue.includes(n)))
+    throw new Error('Intent does not own queued data');
+}
+export function enumerateOrchestrationModel(depth = 8) {
+  const actions: InboxEvent[] = [
+    'result',
+    'human',
     'schedule',
-    'prepare_turn',
-    'start_turn',
-    'history_write_fail',
-    'complete_turn',
-    'interrupt_turn',
-    'cancel_turn',
-    'complete_finalization',
-    'finalization_consume_fail',
+    'submit',
+    'normal',
+    'stop',
+    'failed',
+    'unreleased',
     'restart',
-    'recover_orphans',
-    'archive',
-    'restore',
-    'delete_configuration',
+    'recover',
+    'withdraw',
+    'duplicate_release',
   ];
   const initial = initialOrchestrationModelState();
-  const seen = new Map([[JSON.stringify(initial), initial]]);
+  const states = new Map([[JSON.stringify(initial), initial]]);
   let frontier = [initial];
-  for (let depth = 0; depth < maxDepth; depth += 1) {
-    const nextFrontier: OrchestrationModelState[] = [];
-    for (const state of frontier) {
-      for (const action of actions) {
-        const next = stepOrchestrationModel(state, action);
-        assertOrchestrationModelSafety(next);
-        const key = JSON.stringify(next);
-        if (!seen.has(key)) {
-          seen.set(key, next);
-          nextFrontier.push(next);
+  for (let d = 0; d < depth; d++) {
+    const next: InboxModel[] = [];
+    for (const state of frontier)
+      for (const event of actions) {
+        const s = stepOrchestrationModel(state, event),
+          key = JSON.stringify(s);
+        if (!states.has(key)) {
+          states.set(key, s);
+          next.push(s);
         }
       }
-    }
-    frontier = nextFrontier;
+    frontier = next;
   }
-  return [...seen.values()];
-};
+  return [...states.values()];
+}

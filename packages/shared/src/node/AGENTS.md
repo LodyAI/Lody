@@ -67,6 +67,7 @@ record: [process tree layer](../../../../.agents/notes/implemented/architecture/
 - Never signal a child without a pid (pid 0 is the caller's own group), and
   never resolve a Windows command from the working directory.
 - Liveness covers the whole tree (process group, cgroup), not just the root.
+  A group left with only zombies is gone; only an exact member scan proves it.
 - A command that exits on its own keeps what it deliberately left running; only
   a caller that stops waiting (timeout, interruption, output limit) ends the tree.
 - Scope owns process acquisition before configuration or other interruptible
@@ -97,9 +98,28 @@ record: [process tree layer](../../../../.agents/notes/implemented/architecture/
   candidates and giving unidentified preparation a 30-minute grace period. Decision and limits:
   [file lock lifecycle](../../../../.agents/notes/implemented/architecture/2026-10-10-effect-file-lock-lifecycle.md).
 
-- Bound each release wait independently (5 seconds), retain and join the original
-  pending OS deletion, and block replacement until actual completion. A timeout
-  never proves unlink stopped. Only settled failures permit a new deletion attempt.
-- Retry acquisition only; body/release failures preserve the full Cause. Use
-  `squashFileLockFailure` at Legacy boundaries to retain every lock cleanup owner
-  alongside process leases and the original operation failure.
+- The holder waits once (5 seconds) for its file and scratch. A slow or failed
+  deletion never fails that holder: the service retains it, and successors join
+  it within their acquisition deadline, charged once per attempt (later ones fail fast).
+  Only `LockOwnershipLost` fails the holder.
+  Only settled failures permit a new deletion attempt.
+- Retry acquisition only. Use `squashFileLockFailure` at Legacy boundaries
+  ([holder release](../../../../.agents/notes/implemented/architecture/2026-10-16-file-lock-holder-release.md)).
+
+## Supervised Inbox compatibility
+
+Supervisor launch contract v3 requires Inbox protocol v2. TS and CJS constants agree.
+A mismatched supervised worker exits 45 before host ownership/storage; do not downgrade
+to an earlier worker contract. Foreground arbitrary old binaries are unsupported.
+
+## Local Loro writer boundary
+
+`local-loro-writer.ts` owns the real Node turn and socket write/drain adapters.
+Applications provide one process-wide writer; never add a workspace scheduler.
+Native workflow and release rules: [writer](../local-loro-writer/AGENTS.md).
+
+## Local session control
+
+Keep history requests and receipts aligned in the Zod protocol and both lightweight
+TS/CJS guards. The declared-operation suite must admit each supported operation;
+advertising a capability alone does not prove the local IPC path accepts it.

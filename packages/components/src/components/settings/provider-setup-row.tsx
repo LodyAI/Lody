@@ -122,7 +122,6 @@ export function ProviderSetupRow({
 }: ProviderSetupRowProps) {
   const { t } = useTranslation();
   const [actionPending, setActionPending] = useState<'retry' | 'delete' | null>(null);
-  const [commandCopied, setCommandCopied] = useState(false);
   const config = setup.config;
   const isBubSetup = config.cliType === 'builtin' && config.agentType === 'bub';
   const isDimcodeSetup = config.cliType === 'builtin' && config.agentType === 'dimcode';
@@ -312,26 +311,7 @@ export function ProviderSetupRow({
               values={{ command: DIMCODE_INSTALL_COMMAND }}
               components={{
                 command: <code {...stylex.props(styles.command)} />,
-                copy: (
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="mini"
-                    icon
-                    aria-label={
-                      commandCopied ? t('common.copied', 'Copied') : t('common.copy', 'Copy')
-                    }
-                    onClick={() => {
-                      void writeTextToClipboard(DIMCODE_INSTALL_COMMAND).then(setCommandCopied);
-                    }}
-                  >
-                    {commandCopied ? (
-                      <Check {...stylex.props(catalog.icon)} />
-                    ) : (
-                      <Copy {...stylex.props(catalog.icon)} />
-                    )}
-                  </Button>
-                ),
+                copy: <DimcodeInstallCopyButton />,
               }}
             />
           </p>
@@ -371,6 +351,31 @@ export function ProviderSetupRow({
         ) : null}
       </div>
     </div>
+  );
+}
+
+// Keep the Trans slot childless: a self-closing slot with JSX children gets a
+// new wrapper type on every Trans render, remounting the button during a press.
+function DimcodeInstallCopyButton() {
+  const { t } = useTranslation();
+  const [copied, setCopied] = useState(false);
+  return (
+    <Button
+      type="button"
+      variant="ghost"
+      size="mini"
+      icon
+      aria-label={copied ? t('common.copied', 'Copied') : t('common.copy', 'Copy')}
+      onClick={() => {
+        void writeTextToClipboard(DIMCODE_INSTALL_COMMAND).then(setCopied);
+      }}
+    >
+      {copied ? (
+        <Check {...stylex.props(catalog.icon)} />
+      ) : (
+        <Copy {...stylex.props(catalog.icon)} />
+      )}
+    </Button>
   );
 }
 

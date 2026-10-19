@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { act, createElement } from 'react';
+import { act, createElement, StrictMode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createStore, Provider as JotaiProvider } from 'jotai';
@@ -12,6 +12,8 @@ import {
 import { PlatformContext } from '@lody/platform/react';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+const analytics = vi.hoisted(() => ({ capture: vi.fn() }));
+vi.mock('@posthog/react', () => ({ usePostHog: () => analytics }));
 
 vi.mock('@/hooks/use-authenticated-convex', () => ({
   useAuthenticatedConvex: () => ({ authSessionId: 'session-1' }),
@@ -94,6 +96,7 @@ describe('billing checkout return confirmation', () => {
   let container: HTMLDivElement | undefined;
 
   beforeEach(async () => {
+    analytics.capture.mockClear();
     await initI18n('en');
     vi.useFakeTimers();
     window.history.replaceState({}, '', '/acme/settings/billing');
@@ -132,7 +135,7 @@ describe('billing checkout return confirmation', () => {
             createElement(
               PlatformContext.Provider,
               { value: platform },
-              createElement(BillingSettingsComponent)
+              createElement(StrictMode, null, createElement(BillingSettingsComponent))
             )
           )
         );
@@ -166,6 +169,36 @@ describe('billing checkout return confirmation', () => {
     expect(container!.textContent).not.toContain('Payment received');
     expect(container!.textContent).toContain('Plus');
     expect(readBillingCheckoutReturn('workspace-1')).toBeNull();
+    expect(
+      analytics.capture.mock.calls.filter(([event]) => event === 'billing/page_viewed')
+    ).toHaveLength(1);
+    expect(
+      analytics.capture.mock.calls.filter(([event]) => event === 'billing/checkout_returned')
+    ).toEqual([
+      ['billing/checkout_returned', { workspace_id: 'workspace-1', return_status: 'success' }],
+    ]);
+    expect(analytics.capture.mock.calls.some(([event]) => event === 'billing/invoice_paid')).toBe(
+      false
+    );
+  });
+
+  it('still reconciles a checkout return when analytics throws', async () => {
+    analytics.capture
+      .mockImplementationOnce(() => {
+        throw new Error('capture failed');
+      })
+      .mockImplementationOnce(() => {
+        throw new Error('capture failed');
+      });
+    window.history.replaceState(
+      {},
+      '',
+      '/acme/settings/billing?checkout=success&session_id=secret'
+    );
+    await renderBilling({ current: overview() });
+    expect(readBillingCheckoutReturn('workspace-1')).not.toBeNull();
+    expect(window.location.search).toBe('');
+    expect(container!.textContent).toContain('Payment received');
   });
 
   it('pretends nothing happened when the return says the checkout was canceled', async () => {
@@ -175,6 +208,13 @@ describe('billing checkout return confirmation', () => {
 
     expect(container!.textContent).not.toContain('Payment received');
     expect(readBillingCheckoutReturn('workspace-1')).toBeNull();
+    expect(analytics.capture.mock.calls).toContainEqual([
+      'billing/checkout_returned',
+      { workspace_id: 'workspace-1', return_status: 'canceled' },
+    ]);
+    expect(analytics.capture.mock.calls.some(([event]) => event === 'billing/payment_failed')).toBe(
+      false
+    );
   });
 
   it('keeps unpaid checkout available during and after the background check, including remount', async () => {

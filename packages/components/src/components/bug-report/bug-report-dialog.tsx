@@ -21,7 +21,12 @@ export type BugReportMachineOption = {
 export type BugReportSubmitState =
   | { status: 'idle' }
   | { status: 'submitting' }
-  | { status: 'success'; bugReportId: string; withLogs: boolean }
+  | {
+      status: 'success';
+      bugReportId: string;
+      withLogs: boolean;
+      clientDiagnostics: 'uploading' | 'uploaded' | 'failed';
+    }
   | { status: 'error'; message: string };
 
 export type BugReportDialogProps = {
@@ -31,9 +36,10 @@ export type BugReportDialogProps = {
   /** Machine preselected when the dialog opens (e.g. the user's most recently used online machine). */
   initialMachineId?: MachineId | null;
   state: BugReportSubmitState;
-  /** `machineId: null` files a description-only report without machine logs. */
+  /** `machineId: null` files a report with client diagnostics and no machine logs. */
   onSubmit: (args: { machineId: MachineId | null; description: string }) => void;
   onClose: () => void;
+  onRetryClientDiagnostics?: () => void;
 };
 
 const NO_MACHINE_VALUE = '__no_machine__';
@@ -102,6 +108,7 @@ export function BugReportDialog({
   state,
   onSubmit,
   onClose,
+  onRetryClientDiagnostics,
 }: BugReportDialogProps) {
   const { t } = useTranslation();
   const [description, setDescription] = useState('');
@@ -132,7 +139,7 @@ export function BugReportDialog({
           <span {...stylex.props(styles.option)}>
             <span {...stylex.props(styles.dot, styles.dotNone)} />
             <span {...stylex.props(styles.optionLabel)}>
-              {t('bugReport.noMachineOption', 'No machine (description only)')}
+              {t('bugReport.noMachineOption', 'No machine (client diagnostics only)')}
             </span>
           </span>
         ),
@@ -155,7 +162,7 @@ export function BugReportDialog({
 
   const handleOpenChange = (nextOpen: boolean) => {
     // Closing is always an explicit user action; the success panel stays up
-    // until then. Only block dismissal while logs are still uploading.
+    // until then. Optional client diagnostics never block dismissal.
     if (!nextOpen && !submitting) {
       onClose();
     }
@@ -189,7 +196,28 @@ export function BugReportDialog({
               <code {...stylex.props(styles.reportIdText)}>{state.bugReportId}</code>
               <CopyButton value={state.bugReportId} />
             </div>
+            <p
+              role="status"
+              {...stylex.props(state.clientDiagnostics === 'failed' ? styles.error : styles.hint)}
+            >
+              {state.clientDiagnostics === 'uploading'
+                ? t(
+                    'bugReport.clientDiagnosticsUploading',
+                    'Client diagnostics are uploading. You can close this window.'
+                  )
+                : state.clientDiagnostics === 'failed'
+                  ? t(
+                      'bugReport.clientDiagnosticsFailed',
+                      'Your report is saved, but client diagnostics could not be attached. Retry to upload them.'
+                    )
+                  : t('bugReport.clientDiagnosticsUploaded', 'Client diagnostics were uploaded.')}
+            </p>
             <Dialog.Footer>
+              {state.clientDiagnostics === 'failed' && onRetryClientDiagnostics ? (
+                <Button variant="secondary" onClick={onRetryClientDiagnostics}>
+                  {t('bugReport.retryClientDiagnostics', 'Retry diagnostics')}
+                </Button>
+              ) : null}
               <Button onClick={onClose}>{t('bugReport.close', 'Close')}</Button>
             </Dialog.Footer>
           </>
@@ -200,7 +228,7 @@ export function BugReportDialog({
               <Dialog.Description>
                 {t(
                   'bugReport.dialogDescription',
-                  "Describe the bug and pick the machine where it happened. Lody uploads that machine's logs from today and yesterday along with your description."
+                  "Your report includes this client's version, system, device/browser information and recent errors. Select a machine to also include its recent CLI logs."
                 )}
               </Dialog.Description>
               <p {...stylex.props(styles.hint)}>
@@ -235,7 +263,7 @@ export function BugReportDialog({
                   <p {...stylex.props(styles.hint)}>
                     {t(
                       'bugReport.noMachines',
-                      'No machines are online — only your description will be uploaded.'
+                      'No machines are online. Client diagnostics will still be uploaded.'
                     )}
                   </p>
                 ) : (
@@ -267,7 +295,7 @@ export function BugReportDialog({
                       <p {...stylex.props(styles.hint)}>
                         {t(
                           'bugReport.noMachineHint',
-                          'No machine selected — only your description will be uploaded.'
+                          'Client diagnostics will be uploaded without machine logs.'
                         )}
                       </p>
                     ) : null}

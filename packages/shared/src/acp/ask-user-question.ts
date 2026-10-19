@@ -641,11 +641,12 @@ export function parseAskUserQuestionElicitationRequest(
     const description = typeof prop.description === 'string' ? prop.description : '';
     const noteFieldId = noteFieldKeyByQuestionId.get(key);
     const noteProp = noteFieldId === undefined ? undefined : schema.properties[noteFieldId];
-    // For a single-question form the prompt rides on the request `message`;
-    // multi-question forms carry each prompt in the field `description`.
-    const question = singleQuestion
-      ? message || description || header
-      : description || message || header;
+    // Core forms carry each prompt in the field description, even for one
+    // question. Legacy Claude single-question forms use the request message.
+    const question =
+      singleQuestion && !isLodyForm
+        ? message || description || header
+        : description || message || header;
 
     questions.push({
       ...(isLodyForm ? { id: key } : {}),

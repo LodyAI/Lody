@@ -122,6 +122,13 @@ export interface ConversationView {
    * token rate, and rebuilding a per-turn layout that often is pure waste.
    */
   readonly structureVersion: number;
+  /**
+   * Wall-clock ms (this process's clock) at which the backend last reported a
+   * history change to this view; `null` until one arrives after opening. In
+   * memory only: liveness UI reads it on its own tick, so it never bumps
+   * `version`, and hydration or paging never moves it.
+   */
+  readonly lastUpdateAt: number | null;
   /** Resolves once the initial directory and retained tail are ready; offscreen summaries stay lazy. */
   readonly ready: Promise<void>;
   /** True when this backend can page toward older history. */

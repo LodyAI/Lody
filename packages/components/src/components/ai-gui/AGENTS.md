@@ -10,23 +10,24 @@ Ownership: [README.md](README.md).
   output. Never wire `searchBlockId` to tool, terminal, or diff renderers.
 - Window stream readiness must use the same hydration/initial-scroll conditions as
   viewport visibility; hydrated history alone cannot reveal a native window.
-- `SessionChatStreamView` scrolls through `conversation-list/`'s
-  `ConversationListHandle` and [scroll engine](../../lib/conversation-scroll/AGENTS.md)
-  only. Keep row keys stable; map history indexes to rows. Collapsed activity is one
-  row; expanded details are siblings, never nested scrollers or fixed-height panels.
+- Stream scrolling uses `ConversationListHandle` and the
+  [engine](../../lib/conversation-scroll/AGENTS.md) only. Use turn-ID keys through
+  local/history handoff. Local UI stays outside history/outline/export and owner
+  facts; its selection has no history lease.
+  Map history indexes to rows. Collapsed activity is one row; expanded details
+  are siblings, never nested scrollers or fixed-height panels.
 - Native selection retains its row corridor and history leases: hold prose/folding,
   keep actions live, release on clear. [Contract](README.md#native-text-selection).
 - `buildChatStreamItems()` must drop empty assistant entries and de-duplicate
   history ids.
 - `leadingContent` is a real first row: include it in sticky counts and scroll
   targets; never overlay or persist it.
-- Empty-state presentation stays outside the list, even with an empty leading Fragment:
-  zero-height caches can hide the first user row. Preserve live activity labels/tones.
-  Apply the header inset once to the whole scroller.
-- Create `operation_progress` cards update in place per materialized target; bind
-  status to its exact Turn and subscribe only to its title. `progressMessageId`
-  suppresses duplicate completion cards; legacy completions keep successful-target
-  cards. Rationale: [README.md](README.md#creation-progress).
+- Empty state stays outside the list even with an empty leading Fragment; zero-height
+  caches can hide the first user row. Keep activity labels/tones and one header inset.
+- Creation cards: [contract](README.md#creation-progress). Bind status to the
+  target Turn and subscribe only to its title; `progressMessageId` prevents
+  duplicates. Consecutive creation records share a five-card scroller with
+  disclosure; retain their full hydration range. Legacy successes keep cards.
 
 ## Turn Folding And Layout
 
@@ -42,12 +43,12 @@ Ownership: [README.md](README.md).
 - `shouldUseWorkedGroup` requires a finished turn, foldable work, and visible
   final content outside `workBlockKeys`. A cancelled/interrupted or tool-only
   turn with no answer stays expanded; `message.finished` cannot prove
-  completion alone. A reused assistant entry that
-  reopens upstream must clear `finished` and `endedAt` (see
+  completion alone. A reused entry reopening upstream
+  must clear `finished` and `endedAt` (see
   `apps/cli/src/session/AGENTS.md`).
-- Thought and tool rows share one compact transparent timeline and 13px
-  hierarchy, with no glyphs: the verb says the kind of step. Execute calls are not cards. Desktop disclosure headers use
-  body type, a hover-only trailing chevron, no fill. Only builtin DeepSeek Harness retains thought rows in expandable
+- Thought and tool rows share one compact transparent timeline, 13px, no glyphs:
+  the verb says the kind of step. Execute calls are not cards. Disclosure labels
+  lead; the chevron trails (desktop: hover-only, body type, no fill). Only builtin DeepSeek Harness retains thought rows in expandable
   activity groups; pure thoughts default open unless explicitly collapsed. Other providers
   keep thoughts hidden.
   Assistant footers show config, not author identity.
@@ -59,18 +60,18 @@ Ownership: [README.md](README.md).
   the footer after buttons otherwise; mobile always uses the footer before
   buttons, and the worked header suppresses its copy. Preserve
   `MOBILE_TURN_ACTION_LEADING_INSET_PX` so actions clear the edge-back strip.
+  Mobile buttons rest hidden but the newest turn's; a tap reveals one message's.
 - Live status precedes a trailing subagent task summary, including when the turn
   has no footer.
 - Streaming replies use a direct Copy action and turn-config info (set at open);
   Fork controls and loading need a finished turn.
-- `ConversationColumn` owns the gutter; the list and row shells add no horizontal
-  pad. EVERY row, including expanded details, shares one left rail. Expansion never
-  shifts content right; the chevron carries hierarchy. Prose and desktop process
-  labels/steps share StyleX `conversation.railInset` (4px). Steps have no negative
-  margin; footer bleed is trailing-only (`-mr-[7px]`).
-  See `AssistantTurnAlignment.stories`.
+- `ConversationColumn` owns the gutter; row shells add no horizontal pad. EVERY
+  row shares one rail: prose, process labels/steps, live status and the mobile
+  footer sit at `conversation.railInset`; expansion never shifts content right.
+  Footer bleed is trailing-only (`-mr-[7px]`). See `AssistantTurnAlignment.stories`.
 - Follow the StyleX [spacing contract](../../../../../specs/conversation-rhythm.md).
-  User rows own `responseGap`; assistant tails own `roundGap` including footer/metadata.
+  User rows own `responseGap`; assistant tails own `roundGap` (desktop: including
+  footer/metadata; mobile: below the footer).
   Cache/memo include boundaries. Expanded work preserves prose and summary gaps.
 
 ## Conversation Outline
@@ -121,6 +122,6 @@ Ownership: [README.md](README.md).
   [session-files-rendering.md](session-files-rendering.md).
 - Markdown images remember each source's natural size or failure for the page's
   life: a virtualized remount must render at its final height (failed sources show alt text).
-- Live file Markdown images use the owning file provider: same-machine reads are
-  automatic; remote reads require a per-image click. Never grant this resolver to
-  anonymous shares. Release owned Blob URLs on cleanup and ignore late reads.
+- Live file Markdown images and plain-text image links use the owning file provider:
+  same-machine reads are automatic; remote ones need a per-image click. Anonymous
+  shares never get this resolver. Release own Blob URLs; drop late reads.

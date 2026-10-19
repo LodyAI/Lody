@@ -40,6 +40,14 @@ the reasoning behind those rules.
   Rendering and search extraction share CJK-friendly emphasis parsing, so bold
   sentences ending in punctuation can touch subsequent prose without exposing
   their markers; see [CJK emphasis](../../../../../specs/markdown-cjk-emphasis.md).
+  After mounting in the browser, the renderer loads KaTeX's bundled Copy-tex
+  extension through `markdown-math-copy.ts`, keeping Node imports free of DOM
+  access. The extension converts selected rendered formulas to LaTeX
+  in the clipboard's plain text (`$...$` inline, `$$...$$` display), including
+  selections mixed with prose; the selected HTML is preserved. Partial formula
+  selections expand to the complete formula. The native selection guard stops
+  incomplete copy events before the extension can write clipboard data; see the
+  [integration note](../../../../../.agents/notes/implemented/feature/2026-10-16-math-selection-copy.md).
   `markdown-code-block.tsx` owns fenced
   blocks, wrap, and Markdown-fence preview (`markdown-code-highlight.ts` the Shiki
   tokens); `markdown-diff-block.tsx` is the inline diff; `markdown-mermaid-block.tsx`
@@ -59,6 +67,29 @@ the reasoning behind those rules.
   Only a known source workspace supplies a missing ID; anonymous readers do not
   borrow the viewer's workspace.
 - `message-content-guards.ts` gates which shared `MessageContent` variants render.
+- `assistant-turn-timing.ts` builds the turn popover's timing rows (Started,
+  Ended, Duration, and Last update for a running turn) and the live status
+  line's "no output for N m" suffix. Durations reuse the "Worked for" resolvers.
+  "Running" means presence reports the session active (`liveTurnActivity`),
+  never an unfinished history entry. The age reads `ConversationView.lastUpdateAt`,
+  an in-memory stamp of backend history notifications. It counts only inside the
+  live window from `hooks/use-history-live-window.ts`, which the session page
+  opens each time room sync becomes live. Otherwise the row states a reason:
+  syncing, disconnected, or waiting on the user. `view.tsx` passes all of this
+  through `LiveTurnContext`. Thresholds are constants in the module.
+  [Decision](../../../../../.agents/notes/implemented/feature/2026-10-15-turn-timing-liveness.md).
+- The stream and `SessionChatInterface` derive the last completed assistant id
+  directly from the same `resolveLastAssistantTurnIds` index query. The parent
+  uses its existing conversation-version subscription; the stream does not copy
+  this derived value into parent state through an effect. The query retains the
+  empty-entry and duplicate-id rules and does not hydrate message bodies.
+  [Decision](../../../../../.agents/notes/implemented/simplification/2026-10-13-completed-assistant-derived-state.md).
+- The scroll engine also bounds synchronous unsettled commits across transaction
+  restarts. Budget exhaustion records `update-loop`, then reaches the existing
+  message-list fallback instead of continuing until React's nested-update limit.
+  The fallback preserves the composer and requires explicit retry. The reset
+  microtask is counter bookkeeping, not a layout retry or delay.
+  [Guard and scope](../../../../../.agents/notes/implemented/bug-fix/2026-10-13-scroll-update-loop-guard.md).
 - `markdown-file-image.tsx` binds live file Markdown to its owning provider. Local
   resources load automatically; remote file images show a one-line recessed slot
   (alt, file name, Load image) and load on click. Relative paths use the opened document; Blob URLs last only for the mounted
@@ -121,6 +152,9 @@ See the [global scale decision](../../../../../.agents/notes/implemented/simplif
 for scope and retained exceptions.
 `AssistantTurnAlignment.ConversationRhythm` renders a synthetic two-round conversation;
 `ConversationRhythmTheme` applies a scoped StyleX theme to the same components.
+`MobileConversationRhythm` renders the same rounds at phone width: one left rail,
+the round gap below the always-visible footer, and only the newest turn's
+buttons at rest (`tests/assistant-turn-action-inset.test.ts` covers tap reveal).
 `ConversationRhythmReading` and its streaming variant add continuous mixed-script
 paragraphs to verify real wrapped-line pitch and compare reading density.
 `ConversationRhythmProgress` and its streaming variant interleave long progress
@@ -151,6 +185,12 @@ uses a synthetic upward wheel because a real scrollbar gesture is not reliable i
 the Storybook canvas.
 The [compact duration Spec](../../../../../specs/compact-duration-spacing.md)
 defines locale-specific spacing for these labels.
+Turn timing is covered by `tests/assistant-turn-timing.test.ts` (rows, liveness
+states, thresholds, local-time formatting) and by `tests/agent-activity-row.test.tsx`
+(running and finished popovers, the stale warning, catch-up, waiting and offline
+states, and the "no output" status).
+`DesktopTurnTimingLive` and `DesktopTurnTimingFinished` in
+`AssistantTurnAlignment.stories.tsx` show both popover states.
 
 ## Why the rules read the way they do
 
@@ -164,12 +204,32 @@ defines locale-specific spacing for these labels.
   ([note](../../../../../.agents/notes/implemented/architecture/2026-09-27-conversation-scroll-engine.md)).
   `bufferSize` is a trade between blank space during a fast scroll and keeping
   resizing rows mounted.
+- **Local send continuity.** Ready accepted inputs have individual turn-ID keys
+  in the same scroll engine, so a send can anchor before owner history arrives.
+  A directory placeholder keeps the local body until formal history is hydrated;
+  the formal row then wins once under the same key. These rows stay outside
+  authoritative history and outline/export facts. Sending feedback does not imply
+  owner delivery or execution. [Decision](../../../../../.agents/notes/proposed/architecture/2026-10-13-backend-independent-send-acceptance.md#local-row-anchoring-and-hydrated-handoff).
 - **Touch input before scroll delivery.** The adapter releases following on a single
   upward conversation pan, including its final touch position when no move was
   delivered. The controller adopts post-touch momentum as reader movement even if
   a resize samples it before the scroll event. Taps, pinches, horizontal gestures,
   cancelled touches and nested scrolling do not leave momentum evidence. Model and
   adapter tests cover these orderings; iOS device behavior still needs verification.
+- **Native bottom arrival.** The controller samples elastic `scrollTop` in the
+  valid range, so overshoot/rebound does not fight a programmatic bottom reset.
+  Only conversation input can re-arm follow. An exact-edge arrival retains native
+  input; the 4px near-edge and remembered stale-bottom cases snap on `scrollend`.
+  Unconfirmed wheel/key evidence expires 100ms after the first animation callback,
+  allowing compositor-driven motion to start. Body keys require actual viewport
+  movement before releasing follow.
+  Boundary inputs, button Space and prevented bubbling keys cannot arm a new
+  sequence. Relative layout compensation uses the raw
+  elastic offset as its write baseline, while intent and anchors use bounded offsets.
+  Focus, pointer input or editing outside the viewport clears previous evidence,
+  including when the composer already has focus. Hosts without `scrollend` still
+  follow at the exact edge; near-edge recovery needs that native signal.
+  [Decision and verification](../../../../../.agents/notes/implemented/bug-fix/2026-10-11-mobile-conversation-bottom-ownership.md).
 - **`buildChatStreamItems()` filtering.** An empty assistant entry renders `null`,
   which Virtua cannot measure, and a duplicate history id produces a duplicate key
   that desyncs the list.
@@ -218,9 +278,15 @@ No `searchBlockId` is passed: search indexes the conversation, not a dialog.
 `subagent-task-panel.tsx` owns rows and the selected task;
 `subagent-task-detail.tsx` owns the dialog body and cancellation. Panel, detail and
 run-history styles each live in their adjacent `.stylex.ts` file and use shared
-conversation spacing and UI text tokens. Background command briefs use the same
-`ToolCommandSection` and `ToolDetailSheet` as tool steps, including shell highlighting
-and conversation font sizing. The brief and activity share one vertical scroller.
+conversation spacing and UI text tokens. Claude `local_bash` tasks display as `Bash`,
+including Core metadata that carries the type in `actor`. Aggregation joins their
+`toolUseId` to an execute tool's `toolCallId` within the same turn and derives the
+command from its stored `terminal_command` block. The dialog retains the description
+as Brief and shows a resolved command separately using `ToolCommandSection` and
+`ToolDetailSheet`, including shell highlighting and conversation font sizing.
+Missing tool evidence leaves only the Brief; descriptions are never guessed to be
+commands. This is a render-time association and does not rewrite stored history.
+The brief and activity share one vertical scroller.
 
 State comes from `run.snapshot.state` when present; the legacy `status` cannot
 say cancelled or unknown. `unknown` means Lody lost sight of the run, so the
@@ -248,6 +314,19 @@ from the creating Operation's target Turn, not later Session activity. Completio
 rows linked by `progressMessageId` show a summary without creating a second set of
 cards. Older histories without progress rows retain successful-target cards.
 
+`created-session-list.tsx` uses the Subagent Task panel surface and ruled rows,
+with leading status marks and no repeated “Session created” labels. The header
+reports the total and expands/collapses lists longer than five rows; the default
+viewport holds five compact rows with internal scrolling. Expanded lists retain
+the Subagent Task panel’s 22rem height cap and internal scrollbar. Controls use `@lody/ui`.
+`buildChatVirtualRows` combines consecutive pure creation records (including
+separate MCP calls) under the first record's key; a different message or an
+unhydrated turn ends the group. The row retains its final turn index so visible
+range reporting keeps every grouped turn hydrated. Failure summaries
+remain outside the bounded card list, and card navigation/title/status remain live.
+Message-selection mode keeps original rows so each selected id matches one record.
+See the [decision note](../../../../../.agents/notes/implemented/feature/2026-10-11-created-session-list.md).
+
 Coverage: `SessionRelationCard.stories.tsx`, `tests/session-relation-card.test.tsx`,
 and CLI `tests/operation-progress-history.test.ts`. The latter uses real Loro Mirror
 validation and snapshot reloads, because schema-free document fakes cannot detect
@@ -272,3 +351,10 @@ Assistant replies do not show an author identity entry or its popover. It reads 
 in `view.tsx`; execution controls continue to describe the receiving turn. The
 [identity contract](../../../../../specs/message-author-identity.md) defines capture,
 recovery and legacy behavior.
+
+## Completed work batches
+
+Render `operation_completion_batch` as one result group with total count and delivery
+uncertainty. Its bounded member preview reuses existing completion/creation cards and
+`progressMessageId` deduplication. Rendering is passive: it never resumes a session or
+reads every omitted result. The `CompletedWorkBatch` story covers the uncertain state.

@@ -7,7 +7,19 @@ Translation: current
 
 ## 行为
 
-用户在 `DSH_HOME` 下的 `settings.yaml` 配置模型路由，默认位置为 `~/.dsh`。
+每个 Lody DSH Provider 使用 `<Lody 数据目录>/dsh/providers/<编码后的 Provider ID>`
+作为独立 `DSH_HOME`。改名不换目录，不同 Provider 的目录不同。用户可在其中的
+`settings.yaml` 配置支持 settings 的插件。详情页通过目标机器发布的数据目录及
+`dshProviderIsolation: 1` 能力显示「配置路径: <绝对 YAML 路径>」，指向
+`profiles/lody-acp/cordis.patch.yml`；旧机器不显示猜测的路径。
+
+该用户 patch 仅在缺失时创建。启动、并发启动及适配器升级都保留它和 `settings.yaml`，
+生成的宿主配置独立更新。最后的宿主层保持 ACP 入口、会话存储路径及禁用产品服务和遥测，
+不重置用户模型路由。已有原生会话和查询数据库仍使用原 DSH 会话目录。
+旧全局设置和带指纹 profile 保持原样，不自动从多个旧 profile 中任选一个或复制给全部
+Provider；需要的自定义项由用户迁入显示的路径。Magpie 默认的全局 DSH 扫描不会自动发现
+这些私有 home，Lody 导入仍直接配置 Provider 环境变量。
+
 Harness 0.2 ACP 组合将旧 `llm-deepseek`、`llm-pi-ai` 节传入对应原生 provider
 Config schema，并保留 `agent-presets.default` 与 `.agent-presets` 下的用户预置身份。
 组合不能执行上游自动设置迁移：将共享文档改名并导入生成的 profile，会让持久配置

@@ -23,7 +23,7 @@ Based on merged P07-a #1405 and main
 ciphers 2.1.1 matches the candidate and already exists in the root lockfile.
 Only the importer is added. Existing E2EE PRs were checked for duplicate work.
 
-[Provenance](../../../../packages/e2ee-core/provenance.json) extends the
+[Provenance](https://github.com/LodyAI/Lody/blob/5f97599e60700d6185834632df85922ea0d73ec6/packages/e2ee-core/provenance.json) extends the
 [P07-a record](2026-10-10-e2ee-foundations.md) with selected content-frame and
 platform-content fingerprints. Both match candidate commit
 `bd5a9c1ec71ed7fa8085e51faec4f1e8dbe985b8`; staged SDK fixes are excluded.

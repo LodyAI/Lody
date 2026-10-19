@@ -60,7 +60,7 @@ There is no Electron/CLI product call path yet; the actual local process entry
 
 Implementation base: `f1ba33a61244e2da07aaea93a30f06227311c4b6`, fetched only after
 P08 #1418 actually merged. P07-b #1417 is also in this base. No unmerged branch or
-candidate journal was copied. [Source fingerprints](../../../../packages/e2ee-core/src/submission/provenance.json)
+candidate journal was copied. [Source fingerprints](https://github.com/LodyAI/Lody/blob/5f97599e60700d6185834632df85922ea0d73ec6/packages/e2ee-core/src/submission/provenance.json)
 identify the merged dependency closure and new implementation files.
 The candidate's seven core and two Lab failures were not rerun or closed.
 

@@ -1,3 +1,4 @@
+import { turnNotificationAudience } from '@/lib/notifications/turn-notification-audience';
 import { MemoryBindingSchema } from '@lody/shared';
 import type { RepoTransportRoomStatus, RepoWatchHandle } from 'loro-repo';
 import { Effect, Fiber } from 'effect';
@@ -7,6 +8,7 @@ import {
   buildSessionTurnInputConfig,
   normalizeSessionTurnInputConfig,
   getSessionRoomId,
+  isSessionCancelRequestMarker,
   type ChatFailedReason,
   isLoroRepoDocDeleted,
   isSessionDocRoomId,
@@ -78,10 +80,6 @@ type SessionDispatchWatcherDeps = {
   // instead of the daemon host's git config.
   userResolver: SessionUserResolverLike;
   accessPolicy?: SessionAccessPolicyService;
-  getPreparedSessionLaunchConfig?: (input: {
-    sessionMeta: SessionMeta;
-    requesterUserId: string;
-  }) => { config: SessionLaunchConfig | undefined } | null;
   // Three-way result (allowed / definitive deny / indeterminate). The
   // indeterminate case is what keeps a transient outage from dropping the turn —
   // see {@link verifyMachineAccessWithRetry}.
@@ -103,6 +101,14 @@ type SessionDispatchWatcherDeps = {
   // (definitive online deny) clears it, so the next dispatch falls back to the
   // remote three-state check. Indeterminate verdicts never reach this.
   recordOwnerAccessSnapshot?: (verdict: 'allowed' | 'denied') => Promise<void>;
+  // Member counterpart: every backend verdict for a requester who is not the
+  // machine owner refreshes ('allowed') or clears ('denied') that requester's
+  // TTL-bounded cached allow. Indeterminate verdicts never reach this.
+  recordMemberAccessSnapshot?: (input: {
+    requesterUserId: string;
+    localProjectId?: string;
+    verdict: 'allowed' | 'denied';
+  }) => Promise<void>;
   // Optional so existing callers/tests can omit it. When provided, a definitive
   // access denial surfaces a visible chat_failed notice instead of silently
   // marking the turn failed (which the web UI renders as "Delivered").
@@ -175,6 +181,7 @@ type LifecycleCancelSubscriber = {
 
 /** A user turn pushed over Machine RPC ahead of history CRDT sync. */
 export type SessionRpcTurnOffer = {
+  inputOrigin?: 'human' | 'agent';
   sessionId: SessionId;
   userTurnId: string;
   userId: string;
@@ -288,8 +295,9 @@ const isConfigOptionValueRecord = (
  *
  * ```
  * 1. Guard: not owned / archived / no lastCanceledTurn → noop
- * 2. Guard: lastCanceledTurn === already-seen turn     → noop (deduplicate)
- * 3. Execute cancel, record the turn as seen.
+ * 2. Guard: lastCanceledTurn === already-seen marker   → noop (deduplicate)
+ * 3. New marker: await its matching control-document payload.
+ * 4. Execute cancel, record the marker as seen.
  * ```
  *
  * ### Concurrency Model
@@ -388,9 +396,9 @@ export class SessionDispatchWatcher {
   private readonly cancelCheckChains = new Map<SessionId, Promise<void>>();
 
   /**
-   * Tracks the last `meta.lastCanceledTurn` value we have already processed per session.
-   * Used to deduplicate cancel requests — the same `lastCanceledTurn` value should
-   * only trigger one cancel call.
+   * Tracks the last Stop marker processed per session (legacy markers are turn IDs).
+   * RPC and the durable control payload share one request; a new Stop for the same execution
+   * has a new request identity.
    */
   private readonly cancelSeenTurn = new Map<SessionId, string>();
 
@@ -736,6 +744,15 @@ export class SessionDispatchWatcher {
       });
       if (!pendingEntry) {
         return finish('error');
+      }
+
+      if (offer.inputOrigin === 'human') {
+        await this.deps.executionService.acceptInboxHumanInput?.({
+          sessionId,
+          inputId: userTurnId,
+          userId: offer.userId,
+          config: offer.inputConfig,
+        });
       }
 
       // Sweep expired entries across all sessions on every accept. A turn that
@@ -1226,6 +1243,7 @@ export class SessionDispatchWatcher {
         if (!this.watchedSessions.has(sessionId)) {
           const unsubscribe = subscribeSessionChanges(sessionDoc, () => {
             if (isActive()) {
+              void this.enqueueCancelCheck(sessionId, lifecycleGeneration);
               void this.enqueueSessionCheck(sessionId, { lifecycleGeneration });
             }
           });
@@ -1354,6 +1372,13 @@ export class SessionDispatchWatcher {
       // ── Handle guard/stale-status results (no history needed) ──
       if (guardAction.type === 'noop') {
         outcome = `guard-noop-${guardAction.reason}`;
+        if (guardAction.reason === 'release-blocked') {
+          // This input is waiting on an unconfirmed release: ask for recovery and
+          // re-check once the slot is free, instead of waiting for another trigger.
+          void this.deps.executionService.requestReleaseRecovery?.(sessionId).then((released) => {
+            if (released) void this.enqueueSessionCheck(sessionId);
+          });
+        }
         return;
       }
 
@@ -1461,23 +1486,14 @@ export class SessionDispatchWatcher {
         requesterUserId,
         localProjectId,
       });
-      const preparedLaunchConfig =
-        dispatchAction.mode === 'create'
-          ? this.deps.getPreparedSessionLaunchConfig?.({
-              sessionMeta: freshMeta,
-              requesterUserId,
-            })
-          : null;
-      const launchConfigPromise = preparedLaunchConfig
-        ? Promise.resolve(preparedLaunchConfig.config)
-        : dispatchTurnPromise.then((turn) =>
-            traceAsync(
-              this.deps.logger,
-              'dispatch.resolve_launch_config',
-              { sessionId, userTurnId: turn.nextUserTurn.id },
-              async () => await this.resolveSessionLaunchConfig(turn.freshMeta)
-            )
-          );
+      const launchConfigPromise = dispatchTurnPromise.then((turn) =>
+        traceAsync(
+          this.deps.logger,
+          'dispatch.resolve_launch_config',
+          { sessionId, userTurnId: turn.nextUserTurn.id },
+          async () => await this.resolveSessionLaunchConfig(turn.freshMeta)
+        )
+      );
       void launchConfigPromise.catch(() => undefined);
       const userResolution = this.startUserResolution(sessionId, nextUserTurn.id, requesterUserId);
       const userForRequestPromise = dispatchTurnPromise.then((turn) =>
@@ -1552,6 +1568,9 @@ export class SessionDispatchWatcher {
       });
       let executionAccessPromise: Promise<MachineAccessVerification> = accessPromise;
       let ownerRecheckStarted = false;
+      // A member's dispatch-path verification is always a real backend call, so
+      // its verdict maintains the member cache whether or not dispatch waits on it.
+      this.recordMemberAccessVerdict(sessionId, requesterUserId, localProjectId, accessPromise);
       // Local-first access gate (P5/R1): the catalog policy is offline-authoritative
       // for owner-cached allow and for remote_missing workspaces; only a `remote`
       // outcome falls through to the pre-started backend verify DAG node, so the
@@ -1564,6 +1583,8 @@ export class SessionDispatchWatcher {
                 workspaceId: this.deps.workspaceId,
                 currentUserId: this.deps.currentUserId,
                 requesterUserId,
+                machineId: this.deps.machineId,
+                ...(localProjectId ? { localProjectId } : {}),
               })
             )
           : ({ outcome: 'remote' } as const);
@@ -1584,11 +1605,12 @@ export class SessionDispatchWatcher {
         return;
       }
       if (localAccess.outcome === 'allow') {
-        // Owner-cached fast path: dispatch immediately. The pre-started verify
-        // is discarded (its owner fast-path answer carries no new information);
-        // the REAL backend re-verification runs in the background instead, so
-        // an online revocation clears the snapshot and sends the NEXT dispatch
-        // back to remote verification.
+        // Cached fast path: dispatch immediately. For the owner, the pre-started
+        // verify is discarded (its owner fast-path answer carries no new
+        // information) and the REAL backend re-verification runs in the
+        // background instead. For a member, the pre-started verify already is
+        // that backend check and refreshes/clears the member entry. Either way an
+        // online revocation sends the NEXT dispatch back to remote verification.
         this.interruptAccessRetry(sessionId);
         void accessPromise.catch(() => undefined);
         this.fireOwnerAccessRecheck(sessionId, requesterUserId, localProjectId);
@@ -1614,6 +1636,10 @@ export class SessionDispatchWatcher {
               sourceTurnId: nextUserTurn.id,
               requesterUserId: nextUserTurn.userId,
               inputConfig: nextUserTurn.inputConfig ?? {},
+              notificationAudience:
+                dispatchSource === 'rpc'
+                  ? { kind: 'unknown' }
+                  : turnNotificationAudience(nextUserTurn.author),
             },
             dispatchSource,
             accessPromise: executionAccessPromise,
@@ -1709,6 +1735,37 @@ export class SessionDispatchWatcher {
   }
 
   /**
+   * Maintain the member optimistic-allow cache from a backend verdict for a
+   * requester who is not the machine owner. Only definitive verdicts write;
+   * fire-and-forget like the owner recheck, so it never affects dispatch.
+   */
+  private recordMemberAccessVerdict(
+    sessionId: SessionId,
+    requesterUserId: string,
+    localProjectId: string | undefined,
+    verdict: Promise<MachineAccessVerification>
+  ): void {
+    const record = this.deps.recordMemberAccessSnapshot;
+    if (!record || !this.deps.currentUserId || requesterUserId === this.deps.currentUserId) {
+      void verdict.catch(() => undefined);
+      return;
+    }
+    void (async () => {
+      const access = await verdict;
+      if (access.outcome === 'indeterminate') return;
+      await record({
+        requesterUserId,
+        ...(localProjectId ? { localProjectId } : {}),
+        verdict: access.outcome,
+      });
+    })().catch((error: unknown) => {
+      this.deps.logger.debug(
+        `[${sessionId}] Failed to record member access verdict: ${formatErrorMessage(error)}`
+      );
+    });
+  }
+
+  /**
    * Fork a background verify-with-retry for a transient access failure on `turnId`.
    *
    * Writes NOTHING to the session doc: the turn stays `pending` (and therefore
@@ -1754,6 +1811,12 @@ export class SessionDispatchWatcher {
     }).pipe(
       Effect.flatMap(() =>
         Effect.sync(() => {
+          this.recordMemberAccessVerdict(
+            sessionId,
+            verifyArgs.requesterUserId,
+            verifyArgs.localProjectId,
+            Promise.resolve({ outcome: 'allowed' })
+          );
           // Clear the handle BEFORE re-enqueuing so the re-check's dedup guard
           // passes and the inline path actually dispatches (no stall).
           this.clearAccessFiberIf(sessionId, turnId);
@@ -1763,6 +1826,12 @@ export class SessionDispatchWatcher {
       Effect.catchTag('AccessDenied', (denied) =>
         Effect.promise(async () => {
           this.clearAccessFiberIf(sessionId, turnId);
+          this.recordMemberAccessVerdict(
+            sessionId,
+            verifyArgs.requesterUserId,
+            verifyArgs.localProjectId,
+            Promise.resolve({ outcome: 'denied', reason: denied.reason })
+          );
           await this.markDispatchAccessDenied(sessionId, sessionDoc, turnId, denied.reason).catch(
             (error: unknown) => {
               this.deps.logger.error(
@@ -1888,10 +1957,17 @@ export class SessionDispatchWatcher {
       return;
     }
 
+    const cancelRequest =
+      typeof meta?.lastCanceledTurn === 'string' &&
+      isSessionCancelRequestMarker(meta.lastCanceledTurn)
+        ? (await sessionDoc.getDocState())?.cancelRequest
+        : undefined;
+    if (!isActive()) return;
     const action = resolveSessionCancelAction(
       meta ?? undefined,
       this.cancelSeenTurn.get(sessionId),
-      this.deps.machineId
+      this.deps.machineId,
+      cancelRequest
     );
 
     if (action.type === 'noop') {
@@ -1901,7 +1977,7 @@ export class SessionDispatchWatcher {
     if (!isActive()) {
       return;
     }
-    this.cancelSeenTurn.set(sessionId, action.turnId);
+    this.cancelSeenTurn.set(sessionId, meta!.lastCanceledTurn!);
     await this.deps.executionService.cancelSession(
       {
         type: 'session/cancel',
@@ -1909,8 +1985,9 @@ export class SessionDispatchWatcher {
         machineId: this.deps.machineId,
         workspaceId: this.deps.workspaceId,
         turnId: action.turnId,
+        cancelId: action.cancelId,
       },
-      { pendingInput: 'promote', prePromptSession: 'discard' }
+      { pendingInput: 'preserve', prePromptSession: 'discard' }
     );
     if (!isActive()) {
       return;
@@ -2002,6 +2079,7 @@ export class SessionDispatchWatcher {
         agentType: entry.inputConfig?.agentType ?? meta.agentType,
         customAcp: launchConfig?.customAcp,
         runtimeOverrides: launchConfig?.runtimeOverrides,
+        magpieGatewayUrl: launchConfig?.magpieGatewayUrl,
         modeId: entry.inputConfig?.modeId,
         modelId: entry.inputConfig?.modelId,
         configOptionValues: entry.inputConfig?.configOptionValues,
@@ -2047,6 +2125,7 @@ export class SessionDispatchWatcher {
         agentType: entry.inputConfig?.agentType ?? meta.agentType,
         customAcp: launchConfig?.customAcp,
         runtimeOverrides: launchConfig?.runtimeOverrides,
+        magpieGatewayUrl: launchConfig?.magpieGatewayUrl,
         modeId: entry.inputConfig?.modeId,
         modelId: entry.inputConfig?.modelId,
         configOptionValues: entry.inputConfig?.configOptionValues,
@@ -2290,6 +2369,25 @@ export class SessionDispatchWatcher {
       }
 
       const queuedTurnId = queuedItem.userTurnId?.trim() || `queued-${queuedItem.$cid}`;
+      if (this.deps.executionService.isInboxInputCanceled?.(meta.id, queuedTurnId)) {
+        const canceled = this.buildQueuedMessageEntry(queuedItem, meta, queuedTurnId);
+        if (canceled) {
+          await backend.applyHistoryAction({
+            kind: 'upsert-turn',
+            turn: {
+              ...canceled,
+              status: 'canceled',
+              read: true,
+              cancellationReason: this.deps.executionService.getInboxInputCancellationReason?.(
+                meta.id,
+                queuedTurnId
+              ),
+            },
+          });
+          await backend.removeMessageQueueItem(queuedItem.$cid);
+        }
+        return null;
+      }
       const operationId = backend.getQueueOperationId(queuedItem);
       const existing = findLastHistoryEntry(history, queuedTurnId);
       if (existing) {
@@ -2922,7 +3020,51 @@ export class SessionDispatchWatcher {
       if (!isActive()) {
         return { turn: null, history };
       }
-      const turn = findNextDispatchableUserTurn(history, meta);
+      for (const entry of history) {
+        if (
+          entry.role === 'user' &&
+          ['pending', 'seen', 'prepared', 'pending_apply'].includes(entry.status ?? '') &&
+          this.deps.executionService.isInboxInputCanceled?.(meta.id, entry.id)
+        ) {
+          await backend.applyHistoryAction({
+            kind: 'user-status',
+            turnId: entry.id,
+            status: 'canceled',
+            cancellationReason: this.deps.executionService.getInboxInputCancellationReason?.(
+              meta.id,
+              entry.id
+            ),
+          });
+          entry.status = 'canceled';
+          entry.cancellationReason = this.deps.executionService.getInboxInputCancellationReason?.(
+            meta.id,
+            entry.id
+          );
+        }
+      }
+      let preferred = this.deps.executionService.getPreferredInboxHumanInput?.(meta.id);
+      if (
+        preferred &&
+        (meta.lastMissingHistoryUserMsgId === preferred ||
+          meta.lastHandledUserMsgId === preferred ||
+          history.some(
+            (e) =>
+              e.id === preferred &&
+              ['handled', 'failed', 'canceled', 'delivery_unknown'].includes(e.status ?? '')
+          ))
+      ) {
+        await this.deps.executionService.abandonInboxInput?.(meta.id, preferred);
+        preferred = this.deps.executionService.getPreferredInboxHumanInput?.(meta.id);
+      }
+      const turn = preferred
+        ? (history.find(
+            (e) =>
+              e.id === preferred &&
+              e.role === 'user' &&
+              ['pending', 'seen', 'prepared'].includes(e.status ?? '')
+          ) ?? this.peekStashedRpcTurn(meta.id, meta, history))
+        : findNextDispatchableUserTurn(history, meta);
+      if (preferred && !turn) return { turn: null, history };
       if (turn) {
         if (repairedTurnIds.has(turn.id)) {
           this.deps.logger.warn(
@@ -2985,6 +3127,8 @@ export class SessionDispatchWatcher {
       sessionId,
       turn.id
     );
+    if (this.deps.executionService.isInboxInputCanceled?.(sessionId, turn.id))
+      terminalStatus = 'canceled';
     if (!terminalStatus && ['pending', 'seen', 'processing'].includes(turn.status ?? '')) {
       // Restart backstop (in-memory record is gone): a completed assistant
       // entry linked to this user turn is positive proof it ran to completion.
@@ -3021,6 +3165,10 @@ export class SessionDispatchWatcher {
       kind: 'user-status',
       turnId: turn.id,
       status,
+      cancellationReason:
+        status === 'canceled'
+          ? this.deps.executionService.getInboxInputCancellationReason?.(sessionId, turn.id)
+          : undefined,
     });
     this.deps.executionService.clearTerminalUserTurnStatusWithoutEntry?.(sessionId, turn.id);
     this.consumeStashedRpcTurn(sessionId, turn.id);

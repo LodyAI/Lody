@@ -10,7 +10,7 @@
 import type { Meta, StoryObj } from '@storybook/react';
 import { Provider, createStore, useAtomValue } from 'jotai';
 import { expect, waitFor } from 'storybook/test';
-import type { ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
 import type { MessageContent, SessionHistoryParsed, SessionId } from '@lody/shared';
 import type { ChatStreamItem, SessionChatStreamViewProps } from '@/components/ai-gui/view';
 import { MessageRowView, SessionChatStreamView } from '@/components/ai-gui/view';
@@ -22,6 +22,9 @@ import { colors } from '@lody/ui/tokens/colors.stylex';
 import { conversation } from '../components/ai-gui/conversation.tokens.stylex';
 import { conversationFontSizeAtom } from '@/atoms/settings';
 import { InterfaceFontController } from '@/components/interface-font-controller';
+import { ForceMobileLayoutProvider } from '@/hooks/use-mobile';
+import { SessionPinContext } from '@/components/sessions/session-pin-context';
+import { createConversationViewFromHistory, type ConversationView } from '@/lib/conversation-view';
 
 /**
  * `usePermissionResponse` reports `isReady: !!runtime`, and a NOT-ready card
@@ -61,6 +64,7 @@ const renderMessageRow: SessionChatStreamViewProps['renderMessageRow'] = ({
 
 const rhythmStyles = stylex.create({
   frame: { height: '1500px', width: '100%', backgroundColor: colors.background },
+  phone: { width: '390px' },
 });
 const rhythmTheme = stylex.createTheme(conversation, {
   bubbleFill: 'rgb(24 64 80)',
@@ -153,9 +157,142 @@ const rhythmItems: ChatStreamItem[] = rhythmMessages.map((message, turnIndex) =>
   turnIndex,
 }));
 
+// Finished turns with a recorded end, so the mobile footer leads with its duration.
+const mobileRhythmItems: ChatStreamItem[] = rhythmItems.map((item) =>
+  item.type === 'message' && item.message.role === 'assistant'
+    ? {
+        ...item,
+        message: { ...item.message, endedAt: Date.parse(item.message.timestamp) + 8_000 },
+      }
+    : item
+);
+
 export const ConversationRhythm: Story = {
   args: { sessionId, items: rhythmItems, renderMessageRow },
   render: () => <ConversationRhythmScene />,
+};
+
+/**
+ * The same rounds on a phone. Every left edge — prose, the "Ran N commands"
+ * label, and the footer's "Worked for …" — sits on one rail; only the newest
+ * turn's buttons rest visible, and a tap on an older turn reveals its own. The
+ * round gap sits below the always-visible footer instead of around it.
+ */
+export const MobileConversationRhythm: Story = {
+  args: { sessionId, items: rhythmItems, renderMessageRow },
+  render: () => (
+    <ForceMobileLayoutProvider force>
+      <div {...stylex.props(rhythmStyles.phone)}>
+        <ConversationRhythmScene
+          items={mobileRhythmItems}
+          lastAssistantMessageId="rhythm-assistant-2"
+        />
+      </div>
+    </ForceMobileLayoutProvider>
+  ),
+};
+
+const phoneTool = (id: string, kind: 'read' | 'execute', title: string): MessageContent => ({
+  type: 'tool_call',
+  toolCallId: id,
+  kind,
+  title,
+  status: 'completed',
+});
+
+/** A phone session mid-turn, shaped like the bug report: an answered round, a
+ *  short follow-up, and a live turn with folded command groups. */
+// The live turn started 2m 34s before the story opens, as in the report.
+const phoneLiveStart = new Date(Date.now() - 154_000).toISOString();
+const phoneModelInfo = { modelId: 'claude-opus-5-5', name: 'Opus 5.5' };
+const phoneMessages: SessionHistoryParsed[] = [
+  {
+    id: 'phone-assistant-1',
+    role: 'assistant',
+    timestamp: '2026-10-14T06:48:00.000Z',
+    endedAt: Date.parse('2026-10-14T06:48:08.000Z'),
+    read: true,
+    finished: true,
+    modelInfo: phoneModelInfo,
+    items: [
+      {
+        type: 'text',
+        text: '5. 补回归测试：新写法和现有的全量写法得到相同的历史，且没改到的记录原样保留。\n\n要现在开始实现吗？如果你想先小步验证，可以只做第 1、2 步加测试，后面几步拆到另一个 PR。',
+      },
+    ],
+  },
+  {
+    id: 'phone-user-1',
+    role: 'user',
+    timestamp: '2026-10-14T06:49:00.000Z',
+    read: true,
+    items: [{ type: 'text', text: '好，请完成实现' }],
+  },
+  {
+    id: 'phone-assistant-2',
+    role: 'assistant',
+    timestamp: phoneLiveStart,
+    read: true,
+    finished: false,
+    modelInfo: phoneModelInfo,
+    items: [
+      {
+        type: 'text',
+        text: "I'll start by reading the parts of the writer and the applier the change will touch, then measure how fast the history can be scanned for tool calls without `toJSON`.",
+      },
+      phoneTool('phone-run-1', 'execute', 'rg -n applyHistoryAction'),
+      phoneTool('phone-run-2', 'execute', 'git log --oneline -5'),
+      phoneTool('phone-run-3', 'execute', 'node bench/scan-history.mjs'),
+      phoneTool('phone-read-1', 'read', 'Read history-writer.ts'),
+      phoneTool('phone-read-2', 'read', 'Read history-applier.ts'),
+      {
+        type: 'text',
+        text: 'Now the applier itself. I need to know every way it can change a turn, to decide what a partial view has to include.',
+      },
+      phoneTool('phone-run-4', 'execute', 'rg -n "case ." history-applier.ts'),
+      phoneTool('phone-read-3', 'read', 'Read history-applier.test.ts'),
+    ],
+  },
+];
+const phoneItems: ChatStreamItem[] = phoneMessages.map((message, turnIndex) => ({
+  type: 'message',
+  sessionId,
+  message,
+  turnIndex,
+}));
+const phonePin = { pinnedHistoryId: null, onPin: () => undefined };
+
+/**
+ * The reported phone screen, for before/after comparison of the left rail,
+ * round spacing, and resting message actions.
+ */
+export const MobileReportedSession: Story = {
+  args: { sessionId, items: phoneItems, renderMessageRow },
+  render: () => (
+    <ForceMobileLayoutProvider force>
+      <SessionPinContext.Provider value={phonePin}>
+        <div {...stylex.props(rhythmStyles.frame, rhythmStyles.phone)}>
+          <SessionChatStreamView
+            sessionId={sessionId}
+            items={phoneItems}
+            lastAssistantMessageId="phone-assistant-2"
+            lastCompletedAssistantMessageId="phone-assistant-1"
+            onCopyContext={() => undefined}
+            onForkLastAssistant={() => undefined}
+            agentActivityLabel="Working"
+            agentActivityShimmer
+            renderMessageRow={({ message, sessionId: id }) => (
+              <MessageRowView
+                message={message}
+                sessionId={id}
+                onEdit={() => Promise.resolve(true)}
+              />
+            )}
+          />
+        </div>
+      </SessionPinContext.Provider>
+    </ForceMobileLayoutProvider>
+  ),
 };
 
 export const ConversationRhythmTheme: Story = {
@@ -281,12 +418,51 @@ export const ConversationRhythmWithFiles: Story = {
   render: () => <ConversationRhythmScene items={rhythmWithFiles} />,
 };
 
+/** Long enough to collapse behind "Show more", with wrapped and short lines mixed. */
+const rhythmLongUserItems = rhythmItems.map((item) =>
+  item.type === 'message' && item.message.id === 'rhythm-user-1'
+    ? {
+        ...item,
+        message: {
+          ...item.message,
+          items: [
+            {
+              type: 'text' as const,
+              text: [
+                'Verification only — do not edit, commit, or push anything.',
+                '',
+                '1. Fetch the review branch and confirm HEAD is the expected commit ("fix: keep line breaks in shell output").',
+                '2. Initialize the workspace submodules: packages/extension-core packages/extension-alpha packages/extension-beta.',
+                '3. 安装依赖后运行与终端输出相关的测试，确认中文、English、数字 512 和标点都能正常换行。',
+                '4. Run the static checks and record any failure with its full output.',
+                '5. Open the conversation and compare the collapsed and expanded message.',
+                '6. Report the results in a short summary.',
+                '7. Note which checks were skipped and why.',
+                '8. Keep every command read-only.',
+                '9. Attach the exact commit you verified.',
+                '',
+                'Do not reuse any running application or its data.',
+              ].join('\n'),
+            },
+          ],
+        },
+      }
+    : item
+);
+
+export const ConversationRhythmLongUser: Story = {
+  ...ConversationRhythm,
+  render: () => <ConversationRhythmScene items={rhythmLongUserItems} />,
+};
+
 function ConversationRhythmScene({
   themed = false,
   items = rhythmItems,
+  lastAssistantMessageId = null,
 }: {
   themed?: boolean;
   items?: ChatStreamItem[];
+  lastAssistantMessageId?: string | null;
 }) {
   const fontSize = useAtomValue(conversationFontSizeAtom);
   return (
@@ -295,6 +471,7 @@ function ConversationRhythmScene({
       <SessionChatStreamView
         sessionId={sessionId}
         items={items}
+        lastAssistantMessageId={lastAssistantMessageId}
         conversationFontSize={fontSize}
         renderMessageRow={({ message, sessionId: id }) => (
           <MessageRowView message={message} sessionId={id} conversationFontSize={fontSize} />
@@ -559,6 +736,141 @@ export const DesktopFinishedTurn: Story = {
       />
     </div>
   ),
+};
+
+/**
+ * A view whose last history update landed `silentForMs` ago: the same turns
+ * arriving once more from the "backend", stamped by an injected clock.
+ */
+function useSilentConversationView(turn: SessionHistoryParsed, silentForMs: number) {
+  const [view] = useState<ConversationView>(() => {
+    let history = [turn];
+    let notify: () => void = () => undefined;
+    const next = createConversationViewFromHistory({
+      sessionId,
+      getHistory: () => history as never,
+      subscribe: (listener) => {
+        notify = listener;
+        return () => undefined;
+      },
+      now: () => Date.now() - silentForMs,
+    });
+    history = history.slice();
+    notify();
+    return next;
+  });
+  return view;
+}
+
+async function openTurnInfo(canvasElement: HTMLElement): Promise<HTMLElement> {
+  const findTrigger = () =>
+    waitFor(() => {
+      const node = canvasElement.querySelector<HTMLElement>('[aria-label="Turn configuration"]');
+      if (!node) throw new Error('Turn configuration button is not mounted');
+      return node;
+    });
+  // Row overlays mount once a pointer arms their row; arming remounts the trigger.
+  (await findTrigger())
+    .closest('[data-virtual-index]')
+    ?.dispatchEvent(new MouseEvent('pointerover', { bubbles: true }));
+  await new Promise((resolve) => requestAnimationFrame(resolve));
+  // Click once: a retried click would toggle the popover shut again.
+  (await findTrigger()).click();
+  return await waitFor(() => {
+    const timing = document.querySelector<HTMLElement>('[data-turn-timing]');
+    if (!timing) throw new Error('Turn timing did not open');
+    return timing;
+  });
+}
+
+const timingModelInfo = {
+  modelId: 'claude-opus-5-5',
+  name: 'Claude Opus 5.5',
+  _meta: { lodyThoughtLevel: 'high' },
+};
+
+const silentLiveTurn: SessionHistoryParsed = {
+  id: 'alignment-timing-live',
+  role: 'assistant',
+  // Opened later, the story still reads "8m 40s" in, "4m" silent.
+  timestamp: new Date(Date.now() - 520_000).toISOString(),
+  read: true,
+  finished: false,
+  modelInfo: timingModelInfo,
+  items: [
+    {
+      type: 'tool_call',
+      toolCallId: 'alignment-timing-lint',
+      title: 'Run pnpm check',
+      kind: 'execute',
+      status: 'in_progress',
+    },
+    { type: 'text', text: 'Running the lint gate before committing.' },
+  ],
+};
+
+/**
+ * A live turn that has received nothing for four minutes: the status line says
+ * so, and the turn popover shows start, running time and a warned Last update.
+ */
+export const DesktopTurnTimingLive: Story = {
+  args: { sessionId, items: [], renderMessageRow },
+  globals: { theme: 'dark' },
+  render: function Render() {
+    const view = useSilentConversationView(silentLiveTurn, 250_000);
+    // Live sync opened well before the last update, so that update counts.
+    const [historyLive] = useState(() => ({ sync: 'live' as const, since: Date.now() - 600_000 }));
+    return (
+      <div className="h-[520px] w-full bg-background">
+        <SessionChatStreamView
+          items={[{ type: 'message', sessionId, message: silentLiveTurn, turnIndex: 0 }]}
+          sessionId={sessionId}
+          conversationView={view}
+          liveTurnActivity="working"
+          historyLive={historyLive}
+          renderMessageRow={renderMessageRow}
+          lastAssistantMessageId={silentLiveTurn.id}
+          agentActivityLabel="Working"
+          agentActivityTone="primary"
+          agentActivityShimmer
+        />
+      </div>
+    );
+  },
+  play: async ({ canvasElement }) => {
+    const timing = await openTurnInfo(canvasElement);
+    // Seconds keep ticking while the story loads; assert the minute.
+    await expect(timing.textContent).toMatch(/running 8m \d\ds/);
+    await expect(timing.querySelector('[data-stale]')?.textContent).toMatch(/^4m \d\ds ago$/);
+  },
+};
+
+const timedFinishedTurn: SessionHistoryParsed = {
+  ...finishedTurn,
+  id: 'alignment-timing-finished',
+  modelInfo: timingModelInfo,
+};
+
+/** A finished turn: Started, Ended and the Worked-for duration; no liveness row. */
+export const DesktopTurnTimingFinished: Story = {
+  args: { sessionId, items: [], renderMessageRow },
+  globals: { theme: 'dark' },
+  render: () => (
+    <div className="h-[520px] w-full bg-background">
+      <SessionChatStreamView
+        items={[{ type: 'message', sessionId, message: timedFinishedTurn, turnIndex: 0 }]}
+        sessionId={sessionId}
+        renderMessageRow={renderMessageRow}
+        lastAssistantMessageId={timedFinishedTurn.id}
+        lastCompletedAssistantMessageId={timedFinishedTurn.id}
+      />
+    </div>
+  ),
+  play: async ({ canvasElement }) => {
+    const timing = await openTurnInfo(canvasElement);
+    await expect(timing.textContent).toContain('Ended');
+    await expect(timing.textContent).not.toContain('Last update');
+  },
 };
 
 export const DesktopForkingTurn: Story = {

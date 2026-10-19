@@ -133,6 +133,12 @@ unknown，不把新执行并入旧执行。映射持久化是后续实现工作�
 保留各 provider 现有 prompt 完成契约，本提案不新增后台调度器。
 
 接收的任务状态和内容通过现有 SessionMirror / HistoryWriter 唯一写入者保存。
+与根会话工具历史一致，丢弃子工具内容中的 ACP 图片块和内嵌图片 blob resource；
+非图片 resource 的未使用 blob 字节清空，保留资源和下载 URI；data URI 引用保留显示标签，
+URI 清空，因为 UI 已拒绝此协议。保留音频、可读输出、完整 diff 和工具状态。子工具 raw
+输入保留用于展示的计划，标量或数组 raw 输出仅保留一份可读内容，不在 metadata 中复制。
+权限补全保留已有存储内容；非法新字段必须原子拒绝，不能静默丢弃。
+这项存储投影不改变 provider 的执行输出或普通会话图片附件。
 建议在所属 Lody 会话内建模每个 run 的 transcript；原生孙 agent 可以在其中嵌套，
 不额外创建 Lody 子 Session，也不改变其一层创建规则。可选的 `subagent_task.run`
 保存根 `sessionId`、快照、最新进度和 items，`taskId` 为 run ID；子文本与思考使用

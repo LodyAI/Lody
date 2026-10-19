@@ -144,9 +144,9 @@ describe('ContextChip actions', () => {
     expect(createPrButton?.className).toContain('focus-visible:ring-0');
     expect(createPrButton?.className).toContain('text-muted-foreground/80');
     expect(menuButton?.className).toContain('focus-visible:ring-0');
-    // Light theme uses a soft hairline border + faint fill; dark keeps muted fill only.
-    expect(createPrButton?.parentElement?.className).toContain('border-foreground/[0.08]');
-    expect(createPrButton?.parentElement?.className).toContain('bg-foreground/[0.03]');
+    // One borderless tinted surface in both themes — the bar keeps controls flat.
+    expect(createPrButton?.parentElement?.className).not.toContain('border');
+    expect(createPrButton?.parentElement?.className).toContain('bg-foreground/[0.05]');
     expect(createPrButton?.parentElement?.className).toContain('dark:bg-muted-foreground/[0.08]');
 
     await act(async () => createPrButton?.click());
@@ -302,7 +302,8 @@ describe('ContextChip actions', () => {
     const methodButton = buttons.find(
       (button) => button.getAttribute('aria-label') === 'Choose merge method'
     );
-    expect(mergeControl?.className).toContain('border-status-success/35');
+    expect(mergeControl?.className).not.toContain('border');
+    expect(mergeControl?.className).toContain('bg-status-success/[0.08]');
     expect(mergeButton).toBeInstanceOf(HTMLButtonElement);
     expect(methodButton).toBeInstanceOf(HTMLButtonElement);
 

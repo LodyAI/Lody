@@ -90,15 +90,17 @@ export const WorktreeObservationsLive = Layer.effect(
     const filesystem = yield* FileSystem.FileSystem;
     const git = yield* WorktreeGit;
     const locks = yield* FileLocks;
-    const hostPath = (source: WorktreeObservationSource, sessionId: SessionId) =>
-      Effect.gen(function* () {
-        yield* checkSessionId(sessionId);
-        const root = yield* optionalFile(
-          filesystem.realPath(source.worktreesDir),
-          source.worktreesDir
-        );
-        return path.join(root, sessionId);
-      });
+    const hostPath = Effect.fnUntraced(function* (
+      source: WorktreeObservationSource,
+      sessionId: SessionId
+    ) {
+      yield* checkSessionId(sessionId);
+      const root = yield* optionalFile(
+        filesystem.realPath(source.worktreesDir),
+        source.worktreesDir
+      );
+      return path.join(root, sessionId);
+    });
     const currentBranchAt = (cwd: string): Effect.Effect<string | null, GitError> =>
       recoverExit(
         git
@@ -111,40 +113,45 @@ export const WorktreeObservationsLive = Layer.effect(
                 .pipe(Effect.map((branch) => branch || null))
             : Effect.fail(error)
       );
-    const currentBranch = (source: WorktreeObservationSource, sessionId: SessionId) =>
-      Effect.gen(function* () {
-        const cwd = yield* hostPath(source, sessionId);
-        if (!(yield* observeFile(filesystem.exists(cwd)))) return null;
-        return yield* currentBranchAt(cwd);
-      });
-    const infoAt = (source: WorktreeObservationSource, sessionId: SessionId, cwd: string) =>
-      Effect.gen(function* () {
-        const current = yield* currentBranchAt(cwd);
-        const status = yield* git.run({ args: ['status', '--porcelain'], cwd });
-        const headSha = yield* recoverExit<string | null>(
-          git.run({ args: ['rev-parse', '--verify', 'HEAD^{commit}'], cwd }),
-          (error) =>
-            Effect.gen(function* () {
-              if (error.code !== 128 || !current) return yield* Effect.fail(error);
-              // An unborn branch has no ref. An existing broken ref must keep failing.
-              const unborn = yield* recoverExit(
-                git
-                  .run({ args: ['show-ref', '--verify', '--quiet', `refs/heads/${current}`], cwd })
-                  .pipe(Effect.as(false)),
-                (refError) => (refError.code === 1 ? Effect.succeed(true) : Effect.fail(refError))
-              );
-              if (!unborn) return yield* Effect.fail(error);
-              return null;
-            })
-        );
-        return {
-          sessionId,
-          hostPath: cwd,
-          branch: current ?? getAllocatedSessionBranchName(sessionId, source.localShared),
-          headSha,
-          isClean: status.length === 0,
-        };
-      });
+    const currentBranch = Effect.fnUntraced(function* (
+      source: WorktreeObservationSource,
+      sessionId: SessionId
+    ) {
+      const cwd = yield* hostPath(source, sessionId);
+      if (!(yield* observeFile(filesystem.exists(cwd)))) return null;
+      return yield* currentBranchAt(cwd);
+    });
+    const infoAt = Effect.fnUntraced(function* (
+      source: WorktreeObservationSource,
+      sessionId: SessionId,
+      cwd: string
+    ) {
+      const current = yield* currentBranchAt(cwd);
+      const status = yield* git.run({ args: ['status', '--porcelain'], cwd });
+      const headSha = yield* recoverExit<string | null>(
+        git.run({ args: ['rev-parse', '--verify', 'HEAD^{commit}'], cwd }),
+        (error) =>
+          Effect.gen(function* () {
+            if (error.code !== 128 || !current) return yield* Effect.fail(error);
+            // An unborn branch has no ref. An existing broken ref must keep failing.
+            const unborn = yield* recoverExit(
+              git
+                .run({ args: ['show-ref', '--verify', '--quiet', `refs/heads/${current}`], cwd })
+                .pipe(Effect.as(false)),
+              (refError) => (refError.code === 1 ? Effect.succeed(true) : Effect.fail(refError))
+            );
+            if (!unborn) return yield* Effect.fail(error);
+            return null;
+          })
+      );
+      return {
+        sessionId,
+        hostPath: cwd,
+        branch: current ?? getAllocatedSessionBranchName(sessionId, source.localShared),
+        headSha,
+        isClean: status.length === 0,
+      };
+    });
     const info = (source: WorktreeObservationSource, sessionId: SessionId) =>
       Effect.flatMap(hostPath(source, sessionId), (cwd) => infoAt(source, sessionId, cwd));
     const withRepoLock = <A, E>(source: WorktreeObservationSource, body: Effect.Effect<A, E>) =>

@@ -8,6 +8,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Flock } from '@loro-dev/flock-wasm';
 import {
   getSessionRoomId,
+  getMachineRoomId,
+  type MachineMeta,
   readCodeCollabFileIndexFromFlock,
   type MachineId,
   type SessionId,
@@ -19,7 +21,7 @@ import {
   useCodeCollabSessionFileProvider,
   type UseCodeCollabSessionFileProviderResult,
 } from '../src/hooks/use-code-collab-session-file-provider';
-import { sessionMetaCacheAtom } from '../src/atoms/doc-meta';
+import { sessionMetaCacheAtom, machineMetaCacheAtom } from '../src/atoms/doc-meta';
 import { runtimeAtom, type WorkspaceRuntime } from '../src/atoms/runtime';
 import {
   createCodeCollabFileIndexCache,
@@ -40,6 +42,7 @@ afterEach(async () => {
   container?.remove();
   container = null;
   await Promise.all(fileIndexCaches.splice(0).map((cache) => cache.dispose()));
+  vi.unstubAllGlobals();
 });
 
 const makeSyncedFlockRoom = (firstSyncedWithRemote: Promise<void> = Promise.resolve()) => {
@@ -174,6 +177,91 @@ describe('materializeCodeCollabV2FileIndexForFileProvider', () => {
 });
 
 describe('useCodeCollabSessionFileProvider', () => {
+  it.each([null, '/original/workspace'])(
+    'opens a desktop file while the daemon index is unavailable (root %s)',
+    async (workspaceRoot) => {
+      (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+      vi.stubGlobal('window', Object.assign(window, { __LODY_ELECTRON__: true }));
+      const store = createStore();
+      const sessionId = 'offline-session' as SessionId;
+      const machineId = 'offline-machine' as MachineId;
+      const ownerSessionId = 'offline-parent' as SessionId;
+      store.set(
+        runtimeAtom,
+        createRuntime({
+          prepareSessionTarget: async () => {
+            throw new Error('daemon offline');
+          },
+          repo: {
+            openFlockDoc: async () => {
+              throw new Error('metadata unavailable');
+            },
+          },
+          requestFilePreview: async (
+            _machine: MachineId,
+            request: { path: string },
+            options: unknown
+          ) => {
+            expect(options).toMatchObject({ ownerSessionId, workspaceRoot });
+            return {
+              status: 'ok',
+              v: 3,
+              path: request.path,
+              external: true,
+              digest: `sha256:${'0'.repeat(64)}`,
+              kind: 'text',
+              sizeBytes: 7,
+              readonly: true,
+              content: { encoding: 'utf8-plain', text: 'offline', rawBytes: 7 },
+            };
+          },
+        })
+      );
+      store.set(sessionMetaCacheAtom, {
+        [getSessionRoomId(sessionId)]: {
+          id: sessionId,
+          machineId,
+          parentSessionId: ownerSessionId,
+          userId: 'user-1',
+        } as SessionMeta,
+        [getSessionRoomId(ownerSessionId)]: {
+          id: ownerSessionId,
+          machineId,
+          project: { kind: 'local', localProjectId: 'project-1' },
+        } as SessionMeta,
+      });
+      if (workspaceRoot)
+        store.set(machineMetaCacheAtom, {
+          [getMachineRoomId(machineId)]: {
+            id: machineId,
+            localProjects: { 'project-1': { rootPath: workspaceRoot } },
+          } as unknown as MachineMeta,
+        });
+      const updates: UseCodeCollabSessionFileProviderResult[] = [];
+      render(
+        createElement(
+          Provider,
+          { store },
+          createElement(ProviderHarness, {
+            sessionId,
+            machineId,
+            onUpdate: (result) => updates.push(result),
+          })
+        )
+      );
+      await flushMicrotasks(8);
+      expect(updates.at(-1)?.status).toBe('error');
+      await expect(updates.at(-1)?.provider?.openFile('/absolute/notes.md')).resolves.toMatchObject(
+        {
+          status: 'ready',
+          snapshot: { kind: 'text', text: 'offline' },
+          entry: { readonly: true },
+        }
+      );
+      delete window.__LODY_ELECTRON__;
+    }
+  );
+
   it('uses the local IPC snapshot before subscribing to Flock updates', async () => {
     (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
     const store = createStore();

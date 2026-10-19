@@ -1,22 +1,18 @@
-import { spawnSync } from 'node:child_process';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { runNativeChild } from '../native-child';
+import { mkdtempSync, rmSync, openSync, closeSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { createRequire } from 'node:module';
 import Database from 'better-sqlite3';
 import { describe, expect, it } from 'vitest';
-import { Deferred, Effect, Fiber, Result, Scope, Exit } from 'effect';
-import {
-  SubmissionJournal,
-  SubmissionRemote,
-  SubmissionRemoteError,
-  submitRecord,
-  resumeSubmission,
-  acknowledgeSubmission,
-} from '@lody/e2ee-core/submission';
-import { sqliteSubmissionJournal } from '@lody/e2ee-core/submission/sqlite';
+import { Deferred, Effect, Fiber, Result, Scope, Exit, Tracer } from 'effect';
+import { SubmissionJournal, LedgerLog, LedgerLogError } from '@lody/e2ee-core/services';
+import { LedgerSubmission } from '@lody/e2ee-core';
+import { submissionLayer, submitRecord, resumeSubmission, acknowledgeSubmission } from './fixture';
+import { sqliteSubmissionJournal } from '@lody/e2ee-core/adapters/node-sqlite';
+import { openSqliteStore } from '@lody/e2ee-core/internal';
 import { anchor, checkpoint, filled, genesis, host, keys, owner, rotate, signed } from './fixture';
-import { hashRecordBytes } from '../../src/ledger';
+import { hashRecordBytes } from '../../src/internal/ledger';
 const fixture = () => {
   const dir = mkdtempSync(path.join(os.tmpdir(), 'p09-'));
   const journal = path.join(dir, 'journal.sqlite');
@@ -32,18 +28,141 @@ const fixture = () => {
   };
 };
 const errorCode = <A, E>(r: Result.Result<A, E>) =>
-  Result.isFailure(r) ? (r.failure as { code: string }).code : 'success';
+  Result.isFailure(r)
+    ? ((r.failure as { reason?: string; code?: string }).reason ??
+      (r.failure as { code?: string }).code)
+    : 'success';
 const using = <A, E, R>(
   f: ReturnType<typeof fixture>,
   effect: Effect.Effect<A, E, R>,
   remote = f.remote.service
 ) =>
   effect.pipe(
-    Effect.provideService(SubmissionRemote, remote),
-    Effect.provide(sqliteSubmissionJournal(f.journal))
+    Effect.provideService(LedgerLog, remote),
+    Effect.provide(sqliteSubmissionJournal({ path: f.journal }))
   );
 
 describe('durable submission', () => {
+  it('traces pending and acknowledgement while retaining then consuming the committed original', async () => {
+    const f = fixture();
+    const spans: Tracer.Span[] = [];
+    const tracer = Tracer.make({
+      span(options) {
+        const span = Tracer.nativeTracer.span(options);
+        spans.push(span);
+        return span;
+      },
+    });
+    try {
+      const record = rotate();
+      await Effect.runPromise(
+        using(
+          f,
+          Effect.gen(function* () {
+            const submission = yield* LedgerSubmission;
+            const result = yield* submission.submit(record);
+            expect(yield* submission.pending()).toMatchObject({ record, outcome: 'Committed' });
+            const mutable = { ...result, record: new Uint8Array(result.record) };
+            const acknowledgement = submission.acknowledge(mutable);
+            mutable.record.fill(0);
+            mutable.outcome = 'Conflict';
+            yield* acknowledgement;
+            expect(yield* submission.pending()).toMatchObject({
+              record: null,
+              outcome: null,
+              checkpoint: checkpoint(f.remote.read()),
+            });
+          }).pipe(
+            Effect.provide(submissionLayer(anchor)),
+            Effect.provideService(Tracer.Tracer, tracer)
+          )
+        )
+      );
+      for (const method of ['pending', 'acknowledge']) {
+        expect(
+          spans.find((span) => span.name === `@lody/e2ee-core/LedgerSubmission.${method}`)?.status
+        ).toMatchObject({ _tag: 'Ended', exit: { _tag: 'Success' } });
+      }
+    } finally {
+      f.close();
+    }
+  });
+
+  it.each(['empty-file', 'rolled-back-initialization'] as const)(
+    'initializes an existing %s without treating it as a legacy journal',
+    async (kind) => {
+      const f = fixture();
+      try {
+        closeSync(openSync(f.journal, 'wx', 0o600));
+        if (kind === 'rolled-back-initialization') {
+          const interrupted = new Database(f.journal);
+          try {
+            interrupted.exec('BEGIN IMMEDIATE;CREATE TABLE interrupted(value TEXT);ROLLBACK;');
+          } finally {
+            interrupted.close();
+          }
+        }
+        const before = readFileSync(f.journal);
+        const explicit = await Effect.runPromise(
+          Effect.result(
+            Effect.scoped(
+              openSqliteStore({
+                path: f.journal,
+                mode: 'open',
+                applicationId: 0x4c455031,
+                version: 1,
+                error: (code) => ({ code }),
+                initialize: () => {
+                  throw new Error('explicit open must not initialize');
+                },
+              })
+            )
+          )
+        );
+        expect(explicit).toMatchObject({ _tag: 'Failure', failure: { code: 'corrupt' } });
+        expect(readFileSync(f.journal)).toEqual(before);
+        const record = rotate();
+        expect(await Effect.runPromise(using(f, submitRecord(anchor, record)))).toEqual({
+          outcome: 'Committed',
+          record,
+        });
+        const disk = new Database(f.journal, { readonly: true });
+        try {
+          expect(disk.pragma('application_id', { simple: true })).toBe(0x4c455031);
+          expect(disk.pragma('user_version', { simple: true })).toBe(1);
+        } finally {
+          disk.close();
+        }
+      } finally {
+        f.close();
+      }
+    }
+  );
+  it.each(['unrelated-schema', 'wrong-version'] as const)(
+    'rejects %s before changing a foreign file',
+    async (kind) => {
+      const f = fixture();
+      try {
+        const foreign = new Database(f.journal);
+        try {
+          if (kind === 'unrelated-schema')
+            foreign.exec(
+              "CREATE TABLE unrelated(value TEXT);INSERT INTO unrelated VALUES('retained');"
+            );
+          else foreign.exec('PRAGMA application_id=1279610929;PRAGMA user_version=2;');
+        } finally {
+          foreign.close();
+        }
+        const before = readFileSync(f.journal);
+        const refused = await Effect.runPromise(Effect.result(using(f, resumeSubmission(anchor))));
+        expect(refused).toMatchObject({ _tag: 'Failure', failure: { reason: 'corrupt' } });
+        expect(readFileSync(f.journal)).toEqual(before);
+      } finally {
+        f.close();
+      }
+    }
+  );
+
   it('persists before CAS; lost response reads back the original, result survives close', async () => {
     const f = fixture();
     const record = rotate();
@@ -71,7 +190,7 @@ describe('durable submission', () => {
               disk.close();
             }
             yield* f.remote.service.appendCas(_anchor, expected, raw);
-            return yield* new SubmissionRemoteError();
+            return yield* new LedgerLogError();
           }),
       };
       const result = await Effect.runPromise(using(f, submitRecord(anchor, record), service));
@@ -99,12 +218,12 @@ describe('durable submission', () => {
 
   it.each(['before-cas', 'lost-response'])(
     'independent process crash at %s recovers exact bytes',
-    (mode) => {
+    async (mode) => {
       const f = fixture();
       try {
         const require = createRequire(import.meta.url);
         const run = (processMode: string) =>
-          spawnSync(
+          runNativeChild(
             process.execPath,
             [
               '--import',
@@ -114,14 +233,12 @@ describe('durable submission', () => {
               f.journal,
               path.join(f.dir, 'host.sqlite'),
             ],
-            { encoding: 'utf8', timeout: 30000, env: { ...process.env, NODE_OPTIONS: '' } }
+            { env: { ...process.env, NODE_OPTIONS: '' } }
           );
-        const crashed = run(mode);
-        expect(crashed.error).toBeUndefined();
+        const crashed = await run(mode);
         expect(crashed.signal).toBeNull();
         expect(crashed.status).toBe(mode === 'before-cas' ? 71 : 72);
-        const reopened = run('reopen');
-        expect(reopened.error, reopened.stderr).toBeUndefined();
+        const reopened = await run('reopen');
         expect(reopened.signal).toBeNull();
         expect(reopened.status, reopened.stderr).toBe(0);
         expect(JSON.parse(reopened.stdout)).toEqual({
@@ -258,7 +375,7 @@ describe('durable submission', () => {
       disk.close();
       expect(
         errorCode(await Effect.runPromise(using(f, Effect.result(resumeSubmission(anchor)))))
-      ).toBe('corrupt-journal');
+      ).toBe('corrupt');
     } finally {
       f.close();
     }
@@ -342,13 +459,13 @@ describe('durable submission', () => {
         ...f.remote.service,
         read: () =>
           f.remote.read().length > 1
-            ? Effect.fail(new SubmissionRemoteError())
+            ? Effect.fail(new LedgerLogError())
             : f.remote.service.read(anchor),
       };
       const failed = await Effect.runPromise(
         using(f, Effect.result(submitRecord(anchor, record)), service)
       );
-      expect(Result.isFailure(failed) && failed.failure._tag).toBe('SubmissionRemoteError');
+      expect(Result.isFailure(failed) && failed.failure._tag).toBe('LedgerLogError');
       const entry = await Effect.runPromise(
         using(
           f,
@@ -429,7 +546,7 @@ describe('durable submission', () => {
         errorCode(
           await Effect.runPromise(using(old, submitRecord(anchor, record)).pipe(Effect.result))
         )
-      ).toBe('corrupt-journal');
+      ).toBe('corrupt');
     } finally {
       old.close();
     }
@@ -440,7 +557,7 @@ describe('durable submission', () => {
     const phone = keys(2);
     try {
       const proofBody = Result.getOrThrow(
-        (await import('../../src/cbor')).encodeCbor([
+        (await import('../../src/internal/foundation/cbor')).encodeCbor([
           anchor.toBytes(),
           filled(10, 16),
           phone.pk,
@@ -497,7 +614,7 @@ describe('durable submission', () => {
         )
       );
       expect(errorCode(await Effect.runPromise(Effect.result(captured!.load(anchor))))).toBe(
-        'storage'
+        'closed'
       );
       expect(await Effect.runPromise(using(f, resumeSubmission(anchor)))).toEqual({
         outcome: 'Committed',
@@ -583,7 +700,7 @@ describe('durable submission', () => {
             )
           )
         )
-      ).toBe('busy');
+      ).toBe('conflict');
       const result = await Effect.runPromise(using(f, submitRecord(anchor, rotate())));
       expect(result.outcome).toBe('Committed');
       expect(

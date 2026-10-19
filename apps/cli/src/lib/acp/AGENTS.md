@@ -85,9 +85,10 @@ remain JSON, while malformed known blocks are rejected. Deterministic HistoryWri
 notifications are isolated and reported, never requeued as transient failures; the
 consumed-prefix watermark includes these explicit rejections so healthy output continues.
 
-Targeted text/thought-only batches use the SessionDocument `onlyEntryId` path into
-HistoryWriter. Tool/subagent updates retain full-history ownership routing because
-their original item may be in an older turn; a mixed batch must not be narrowed.
+Text/thought-only batches may be entry-bound. Tools, subagent events, legacy task
+lifecycle and mixed batches use HistoryWriter's indexed window across their original
+owning turns; never force them into the active turn. Nested child output is windowed
+too. Structural/singleton updates and unwindowable storage retain the legacy fallback.
 
 These bind `../message-handler.ts` and `../session-transient-store.ts`, which drive
 this pipeline. Flush retries retain notification-level progress and cached

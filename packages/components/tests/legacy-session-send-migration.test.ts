@@ -14,6 +14,7 @@ import {
   migrateLegacySessionSends,
 } from '../src/lib/legacy-session-send-migration';
 import type { SessionSendRuntime } from '../src/lib/session-send-delivery';
+import { dispatchUserTurn, writeUserTurn } from '../src/lib/session-send-delivery';
 
 const SESSION = 'session' as SessionId;
 const BROKEN = 'broken' as SessionId;
@@ -70,11 +71,13 @@ async function remainingIds(factory: IDBFactory) {
 function fixture() {
   const sessions = new Map<SessionId, ReturnType<typeof createConversationSession>>();
   const docs: LoroDoc[] = [];
+  const sessionDocs = new Map<SessionId, LoroDoc>();
   const open = (sessionId: SessionId) => {
     let session = sessions.get(sessionId);
     if (!session) {
       const doc = new LoroDoc();
       docs.push(doc);
+      sessionDocs.set(sessionId, doc);
       session = createConversationSession(doc, { sessionId });
       sessions.set(sessionId, session);
     }
@@ -90,6 +93,7 @@ function fixture() {
       return {
         sessionData: session.sessionData,
         getState: () => session.mirror.getState(),
+        setState: session.mirror.setState.bind(session.mirror),
         waitUntilSynced: async () => {},
       } as never;
     },
@@ -120,6 +124,8 @@ function fixture() {
   });
   const factory = new IDBFactory();
   return {
+    runtime,
+    snapshot: () => sessionDocs.get(SESSION)!.export({ mode: 'snapshot' }),
     factory,
     metas,
     turns: (sessionId = SESSION) => open(sessionId).historyWriter.readStored(),
@@ -163,6 +169,48 @@ const record = (id: string, overrides: Record<string, unknown> = {}) => ({
   stage: 'saved',
   ...overrides,
 });
+
+it.each(['rpc-lost', 'oversized'] as const)(
+  'persists human authorization independently of the %s dispatch fast path',
+  async (mode) => {
+    const f = fixture();
+    const input = entry('new-human');
+    if (mode === 'oversized') {
+      input.inputConfig!.prompt = 'x'.repeat(300 * 1024);
+      input.inputConfig!.inputBlocks = [{ type: 'text', text: input.inputConfig!.prompt }];
+      input.items = [{ type: 'text', text: input.inputConfig!.prompt }];
+    }
+    f.runtime.requestSessionDispatchTurn = async () => {
+      throw new Error('RPC disconnected');
+    };
+    await writeUserTurn(f.runtime, {
+      sessionId: SESSION,
+      entry: input,
+      delivery: { kind: 'dispatch' },
+    });
+    await dispatchUserTurn(f.runtime, SESSION, input.id);
+    const reopened = new LoroDoc();
+    try {
+      reopened.import(f.snapshot());
+      const control = createConversationSession(reopened, { sessionId: SESSION });
+      try {
+        expect(control.mirror.getState().humanInputReceipts?.[input.id]).toMatchObject({
+          userId: 'account',
+        });
+        expect(
+          control.historyWriter!.readStored().find((turn) => turn.id === input.id)?.items
+        ).toEqual(input.items);
+        expect(f.metas.get(getSessionRoomId(SESSION))?.latestUserMsgId).toBe(input.id);
+        await f.append(entry('agent-task'));
+        expect(control.mirror.getState().humanInputReceipts?.['agent-task']).toBeUndefined();
+      } finally {
+        control.dispose();
+      }
+    } finally {
+      reopened.free();
+    }
+  }
+);
 
 it('does not create the database when it is absent', async () => {
   const f = fixture();

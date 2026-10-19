@@ -215,6 +215,84 @@ lody project list --help
 lody project delete --help
 ```
 
+## 创建和更新 Agent 角色
+
+CLI 和 MCP 可以提出新建角色，或修改你拥有的角色。提案会显示在活跃会话的确认卡片中，
+在 Lody 点击**保存**后才生效；忽略卡片不会修改角色。命令成功表示提案已生成，
+不表示角色已经保存。
+
+```bash
+lody agent-role create --name "代码审查" --description "检查代码问题" \
+  --prompt-prefix "关注正确性和安全问题" \
+  --machine-id MACHINE_ID --agent-config-id CONFIG_ID --session SESSION_ID
+
+lody agent-role update ROLE_ID --name "代码审查员" \
+  --description "" --prompt-prefix "新的默认指令" --session SESSION_ID
+```
+
+| 参数 | 创建 | 更新 |
+| --- | --- | --- |
+| `--name <name>` | 必填 | 可选 |
+| `--description <text>` | 可选 | 可选；`""` 表示清空 |
+| `--prompt-prefix <text>` | 可选 | 可选；`""` 表示清空 |
+| `--machine-id <id>` | 必填 | 不支持 |
+| `--agent-config-id <id>` | 必填 | 不支持 |
+
+更新至少传一个字段，省略的字段保持不变。新角色默认私有，使用所绑定 Agent 的默认运行配置。
+模型、权限、共享及其他设置仍可在角色编辑器中修改。
+
+通过 `--session` 或环境变量 `LODY_SESSION_ID` 指定活跃会话；工作区不明确时，
+使用 `--workspace <id或slug>`。重试时用相同输入和 `--request-id <id>`，
+命令会返回已有提案的状态。
+
+也可以继续使用 JSON 文件：
+
+```bash
+lody agent-role create --file role.json --session SESSION_ID
+lody agent-role update ROLE_ID --file patch.json --session SESSION_ID
+```
+
+创建文件包含 `name`、`machineId`、`agentConfigId`，以及可选的 `description` 和
+`promptPrefix`。更新文件只包含要修改的 `name`、`description` 或 `promptPrefix`。
+`--file` 不能与角色字段参数混用。如果指令保存在 Markdown 中，可以直接传
+`--prompt-prefix "$(cat reviewer.md)"`。
+
+
+`role.json`:
+
+```json
+{
+  "name": "Reviewer",
+  "machineId": "MACHINE_ID",
+  "agentConfigId": "CONFIG_ID",
+  "description": "Review code",
+  "promptPrefix": "Check correctness.\nReport actionable bugs."
+}
+```
+
+`patch.json`:
+
+```json
+{
+  "description": "",
+  "promptPrefix": "Focus on correctness.\nExplain each finding."
+}
+```
+
+文件必须是 UTF-8 编码的单个 JSON 对象，字段名使用示例中的 camelCase。
+更新文件本身就是补丁，**不要再包一层 `patch`**；角色 ID 放在命令的位置参数中，
+重试 ID 通过 `--request-id` 传入。JSON 字符串中的换行写作 `\n`，不支持注释或尾逗号。
+
+所有字段值都是字符串。创建必填 `name`、`machineId` 和 `agentConfigId`；更新至少包含
+一个支持的字段。更新时省略字段表示保持原值，`""` 清空描述或默认指令，`null` 不合法。
+名称去除首尾空白后不能为空、最多 60 个字符，且须能生成有效的提及名称；描述最多
+140 个 Unicode 码点；默认指令最多 32,768 个字符（去除首尾空白前）。机器和配置 ID
+去除首尾空白后不能为空、最多 128 个字符。不支持的字段会被拒绝。
+
+MCP 的 `lody_agent_role_create` 和 `lody_agent_role_update` 使用同一确认流程。
+创建工具接收 `requestId` 和上述创建字段；更新工具接收 `requestId`、`roleId`，
+以及包含修改字段的 `patch`。角色的使用方式见 [Agent 角色](/zh/docs/agent-roles)。
+
 ## 桌面端命令
 
 | 命令                   | 作用                                 | 帮助命令                      |
@@ -276,6 +354,7 @@ lody session create --workspace my-team --agent-config codex --repo owner/repo "
 
 - `--workspace <idOrSlug>`：指定目标 workspace
 - `--agent-config <idOrName>`：选择[代理配置](/zh/docs/quickstart)
+- `--agent-role <idOrName>`：基于工作区 Agent Role 创建；Role 的 machine、代理配置和运行配置会覆盖 `--machine`、`--agent`/`--agent-config`、`--mode`、`--model` 和 `--config-option`（被忽略的参数会输出警告）
 - `--repo <owner/repo>`：绑定 GitHub 仓库
 - `--local-project <id|name|path>`：绑定一个已注册的本地项目
 - `--repo` 与 `--local-project` 二选一

@@ -37,6 +37,7 @@ function createSuccessfulStartupResult(sessionResponse?: Record<string, unknown>
     agentProcess: {} as never,
     client: {
       supportsSessionTitleGeneration: () => false,
+      getRateLimitsCapability: () => undefined,
       supportsAcknowledgedSteer: () => false,
       getGoalCapability: () => undefined,
     } as never,
@@ -140,10 +141,22 @@ describe('fetchAcpCapabilities', () => {
     expect(result.sessionTitle).toBe(true);
   });
 
+  it.each([undefined, { version: 1 }, { version: 1, query: true }])(
+    'preserves the initialized quota capability %j',
+    async (capability) => {
+      const startup = createSuccessfulStartupResult();
+      Object.assign(startup.client, { getRateLimitsCapability: () => capability });
+      mocks.startLocalAcpAgent.mockResolvedValue(startup);
+      const result = await fetchAcpCapabilities('custom', 'quota-agent', createSilentLogger());
+      expect(result.rateLimits).toEqual(capability);
+    }
+  );
+
   it('records the goal actions the live client advertised', async () => {
     const startupResult = createSuccessfulStartupResult();
     startupResult.client = {
       supportsSessionTitleGeneration: () => false,
+      getRateLimitsCapability: () => undefined,
       supportsAcknowledgedSteer: () => false,
       getGoalCapability: () => ({ version: 1, actions: ['pause', 'resume'] }),
     } as never;
@@ -166,6 +179,7 @@ describe('fetchAcpCapabilities', () => {
     const startupResult = createSuccessfulStartupResult();
     startupResult.client = {
       supportsSessionTitleGeneration: () => false,
+      getRateLimitsCapability: () => undefined,
       supportsAcknowledgedSteer: () => true,
       getGoalCapability: () => undefined,
     } as never;

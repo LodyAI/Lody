@@ -17,7 +17,7 @@ PR: [#1405](https://github.com/LodyAI/Lody/pull/1405)
 
 从公共 main `249661be340af5a20b8d0b7334d2e923fe5b5a99` 开始，复用 Effect 4.0.2。
 新包不依赖 Streams/repo；主线保持 repo 0.21.2、CRDT 0.16.2。固定候选密码学库版本，不换算法。
-[来源指纹](../../../../packages/e2ee-core/provenance.json)记录候选
+[来源指纹](https://github.com/LodyAI/Lody/blob/5f97599e60700d6185834632df85922ea0d73ec6/packages/e2ee-core/provenance.json)记录候选
 `bd5a9c1ec71ed7fa8085e51faec4f1e8dbe985b8`、准确源码哈希及提取调整。
 候选有暂存改动，但所选源码均与该提交一致，始终只读。
 
@@ -64,7 +64,7 @@ A/R 额外扭转分量回归用例验证：即使库的带余因子方程接受�
 现在返回 `Failure/oversize`。原独立探针七组通过。聚焦套件 46/46 通过，包含准确
 8192/8193 字节、共享值、循环、深度 8/9 和固定头部向量。
 带遍历保护的回归测试放回旧编码器为 45 通过、1 失败，不必让测试进程 OOM。
-来源指纹不变；[provenance](../../../../packages/e2ee-core/provenance.json)仅刷新迁入
+来源指纹不变；[provenance](https://github.com/LodyAI/Lody/blob/5f97599e60700d6185834632df85922ea0d73ec6/packages/e2ee-core/provenance.json)仅刷新迁入
 代码指纹并记录调整。重跑全仓 `pnpm check` 仅复现下述相同 CLI Git 用例失败；
 类型、lint、格式、文档和边界检查通过。原审查者仍需独立复验；本修正不改变协议算法或生产入口。
 

@@ -222,8 +222,10 @@ describe('workspace identity capability boundary', () => {
 
     const placeholder = container?.querySelector('[data-loading-placeholder-scope]');
     expect(placeholder?.getAttribute('data-loading-placeholder-scope')).toBe('content');
-    expect(placeholder?.className).toContain('h-full');
-    expect(placeholder?.className).not.toContain('min-h-[100dvh]');
+    expect(placeholder?.querySelector('[role="status"]')?.textContent).toContain(
+      'Switching workspace'
+    );
+    expect(placeholder?.querySelector('[data-lody-boot-shell]')).toBeNull();
   });
 
   it('renders the mobile local workspace identity without a dialog trigger', () => {

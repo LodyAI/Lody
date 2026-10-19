@@ -47,19 +47,20 @@ context/acp-agent-edit-evidence.md; adapter repos: [apps/cli/AGENTS.md](../../AG
 - Builtins use `setting.ts`'s `resolveACPProcessLaunchAsync()`. [Codex profiles](../../../../specs/codex-account-profiles.md)
   forbid upstream keys in shared/child env. Process records delay deletion, never
   restrict same-profile concurrency.
-- `deepseek-harness-runtime.ts` is NOT managed: no download, prefetch, override, or
-  auth integration. Preserve logical npx argv for recovery; Windows uses npm's JS
-  entry without cmd.exe. Keep npm, the forwarder, DSH and native Job children
-  windowless without changing stdio, environment or containment. `dsh --profile` uses `process.execPath` with inherited `ELECTRON_RUN_AS_NODE`.
-  Credentials stay in env, never config. Model/reasoning use the Agent request
-  waterfall; permissions use Harness presets; `agent_preset` uses
-  `AgentPresets.mount/recompose`, never UI-only state.
-  Presets change only before the first prompt. Per-Agent ACP stdio/HTTP MCP
-  belongs in the adapter. Never modify JSONL artifacts; mixed roots fail naming both paths.
-- `managed-agent-runtime.ts`: Codex/Claude/Grok/Devin pins come only from their
-  `<name>-runtime-manifest.json`; reject dependency/manifest version mismatches and never
-  duplicate pins beside the manager. Do not loosen the metadata
-  schema or accept unknown legacy fields. Definition drift is a miss; cleanup and update scans are best effort. Grok/Devin submodules never build official runtime binaries, and the desktop must not depend on the Kimi submodule workspace. Custom
+- `deepseek-harness-runtime.ts` is not managed: no download/prefetch/override/auth.
+  Keep npx argv for recovery. Windows uses npm JS without cmd.exe;
+  npm, forwarder, DSH and Job children stay windowless, preserving stdio/env/containment.
+  DSH uses `process.execPath` and `ELECTRON_RUN_AS_NODE`.
+  Provider ID isolates homes; preserve user YAML/settings and legacy history:
+  [contract](../../../../specs/deepseek-harness-settings.md).
+  Credentials stay in env. Models/reasoning use the Agent request waterfall;
+  permissions use Harness presets. `agent_preset` uses `AgentPresets.mount/recompose`
+  only before the first prompt. Per-Agent ACP stdio/HTTP MCP belongs in the adapter.
+  Never modify JSONL; mixed roots fail naming both paths.
+- `managed-agent-runtime.ts`: native pins live only in `<name>-runtime-manifest.json`.
+  Reject version mismatches and unknown legacy fields; do not duplicate pins or weaken the schema.
+  Read Claude metadata from the adapter's installed SDK; the CLI dev SDK may differ.
+  Definition drift is a miss; cleanup and update scans are best effort. Grok/Devin submodules never build official runtime binaries, and the desktop must not depend on the Kimi submodule workspace. Custom
   methods stay capability-gated. Inject the artifact base URL from
   `CloudPort.runtimeArtifacts`; never read deployment environment or derive the channel here.
   `LODY_RUNTIME_BASE_URL` is an explicit mirror override only.
@@ -102,11 +103,12 @@ context/acp-agent-edit-evidence.md; adapter repos: [apps/cli/AGENTS.md](../../AG
   the cache, and requests/responses carry that id to keep configs of one provider isolated.
   `ManagedRuntimeUpdateCoordinator` never hot-swaps a running ACP process, and Machine Flock
   writes ignore `fetchedAt` when comparing entries.
-- Core `sessionTitle` v1 transfers titles to ACP after initialization, except builtin Codex.
-  Codex uses Lody title settings; its adapter never generates titles.
-  Accept tagged `generated`/`explicit`, never `fallback`/`unset`. Legacy managed
-  Claude/Grok retain ownership without overrides and alone allow untagged titles.
-  Strip internal instructions; preserve user titles. [Contract](../../../../specs/acp-session-titles.md).
+- Core `sessionTitle` v1 owns titles after init except builtin Codex.
+  Lody owns Codex titles/settings; never the adapter. Accept `generated`/`explicit`,
+  not `fallback`/`unset`. Untagged titles: only legacy managed Claude/Grok without overrides.
+  Strip internal instructions; keep user titles.
+  Isolated titles: accept absent phases; prefer final answers; discard commentary/pre-prompt
+  text; sanitize. [Rules](README.md#session-titles).
 - NEVER derive a git ref from prompt text: refs reach the remote and no filter proves a
   prompt secret-free. Worktree sessions keep their allocated ref unless the agent renames it.
 

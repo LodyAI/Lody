@@ -21,7 +21,15 @@ export interface SessionCommandHost {
     sessionId: SessionId,
     turnId?: string
   ): Promise<{ success: boolean; error?: string }>;
-  dispatchSession(sessionId: SessionId): Promise<void>;
+  dispatchSession(
+    sessionId: SessionId,
+    input?: {
+      inputId: string;
+      userId: string;
+      config: import('@lody/shared').SessionTurnInputConfig;
+      inputOrigin: 'human' | 'agent';
+    }
+  ): Promise<void>;
 }
 
 /** A daemon-owned workspace, never a second replica opened by an MCP process. */
@@ -44,6 +52,35 @@ export const runWithSessionCommandEnvironment = <T>(
   environment: SessionCommandEnvironment,
   run: () => T
 ): T => environments.run(environment, run);
+
+/**
+ * The daemon's own workspace replica, lent to a command the daemon executes.
+ * It changes only which replica a command uses; platform behavior is unchanged.
+ * The daemon owns its lifecycle, so a borrowing command never cleans it up.
+ */
+export interface DaemonWorkspace {
+  workspaceId: WorkspaceId;
+  userId: string;
+  machineId: MachineId;
+  manager: LoroDocumentManager;
+  readInvocation(sessionId: SessionId): SessionActiveInvocationContextResult;
+}
+
+const daemonWorkspaces = new AsyncLocalStorage<DaemonWorkspace>();
+export const runWithDaemonWorkspace = <T>(workspace: DaemonWorkspace, run: () => T): T =>
+  daemonWorkspaces.run(workspace, run);
+/** A local environment is itself a daemon workspace. */
+export const getDaemonWorkspace = (): DaemonWorkspace | undefined => {
+  const environment = environments.getStore();
+  if (!environment) return daemonWorkspaces.getStore();
+  return {
+    workspaceId: environment.workspace.id as WorkspaceId,
+    userId: environment.auth.userId,
+    machineId: environment.auth.machineId,
+    manager: environment.manager,
+    readInvocation: (sessionId) => environment.host.readInvocation(sessionId),
+  };
+};
 
 export function createLocalSessionCommandEnvironment(args: {
   manager: LoroDocumentManager;

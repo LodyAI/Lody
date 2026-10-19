@@ -84,6 +84,8 @@ export const SessionActiveInvocationContextResultSchema = z.discriminatedUnion('
       requesterUserId: z.string().trim().min(1),
       sourceTurnId: z.string().trim().min(1),
       inputConfig: z.record(z.string(), z.unknown()),
+      notificationOriginTurnIds: z.array(z.string().min(1)).optional(),
+      notificationProvenancePending: z.boolean().optional(),
     })
     .strict(),
 ]);
@@ -218,6 +220,8 @@ export const LocalMachineRpcRequestSchema = z.discriminatedUnion('method', [
       .object({
         sessionId: SessionIdSchema,
         turnId: z.string().trim().min(1),
+        cancelId: z.string().uuid().optional(),
+        pauseInbox: z.boolean().optional(),
         subagentTaskId: z.string().trim().min(1).optional(),
       })
       .strict(),
@@ -238,6 +242,7 @@ export const LocalMachineRpcRequestSchema = z.discriminatedUnion('method', [
         userTurnId: z.string().trim().min(1),
         userId: z.string().trim().min(1),
         timestamp: z.string().trim().min(1),
+        inputOrigin: z.enum(['human', 'agent']).optional(),
         // Opaque at the transport layer; the CLI normalizes it with
         // `normalizeSessionTurnInputConfig` before offering the turn, the same
         // guard the Loro Streams Machine RPC server applies.

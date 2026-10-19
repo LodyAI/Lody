@@ -11,6 +11,7 @@ import {
   Pin,
   Search,
   Settings as SettingsIcon,
+  SlidersHorizontal,
   X,
 } from 'lucide-react';
 import { Spinner } from '@lody/ui/spinner';
@@ -31,7 +32,6 @@ import {
   SessionRowAuthorAvatar,
   type SessionRowOpenedByTreeSlot,
 } from '@/components/sidebar-row-shared';
-import { CarbonSettingsAdjust } from '@/components/icons/carbon-settings-adjust';
 import { MobileEdgeBackSwipeZone } from './mobile-edge-back-swipe';
 import { MobileFilterPillBar, type FilterPill } from './mobile-filter-pill-bar';
 import {
@@ -1144,7 +1144,7 @@ function ProjectListFilterToggle({
         open && 'border-primary/40 bg-primary/15 text-primary'
       )}
     >
-      <CarbonSettingsAdjust className="h-4 w-4 text-current" aria-hidden="true" />
+      <SlidersHorizontal className="h-4 w-4 text-current" strokeWidth={1.8} aria-hidden="true" />
       {hasActiveFilters && !open ? (
         <span
           aria-hidden="true"

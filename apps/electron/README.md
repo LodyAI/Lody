@@ -43,6 +43,14 @@ instance.
 an OSS build that has already been prepared. It deliberately skips rebuilding
 and should not be used as the normal development command.
 
+CLI diagnostics share `<data dir>/logs/<local date>.log`. The `cli-probe` scope
+records failed runtime-state requests and recovery, including error type, duration,
+PID and consecutive request failures; healthy polling stays silent. The count
+includes startup/reconcile reads, so it differs from the supervisor's poll counter.
+Use these traces with `cli-supervisor` state transitions to distinguish local probe
+failure from backend reconnecting with an available runtime. See the
+[identity investigation](../../.agents/notes/implemented/bug-fix/2026-10-11-sidebar-machine-order-stability.md).
+
 ### Cloud browser login
 
 Cloud composition uses a main-process login coordinator; the OSS composition never

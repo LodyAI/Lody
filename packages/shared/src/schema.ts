@@ -10,7 +10,6 @@ import {
   AgentType,
   AcpCapabilityCacheEntry,
   BuiltinRuntimeOverrides,
-  CliType,
   CustomAcpLaunchSpec,
   LocalProjectHistoryProvider,
   LocalProjectId,
@@ -42,7 +41,7 @@ const PROVIDER_RATE_LIMIT_ENTRY_KEY_PREFIX = 'provider';
 export const CODEX_SPARK_LIMIT_ID = 'codex_bengalfox';
 
 export const getRateLimitEntryKey = (
-  cliType: CliType,
+  cliType: string,
   limitId: string | null | undefined,
   agentConfigId?: AgentConfigId | null
 ): string => {
@@ -51,7 +50,7 @@ export const getRateLimitEntryKey = (
     return [
       PROVIDER_RATE_LIMIT_ENTRY_KEY_PREFIX,
       encodeURIComponent(agentConfigId),
-      cliType,
+      encodeURIComponent(cliType),
       encodeURIComponent(id),
     ].join(RATE_LIMIT_ENTRY_KEY_SEPARATOR);
   }
@@ -76,7 +75,7 @@ export const parseRateLimitEntryKey = (
     try {
       return {
         agentConfigId: decodeURIComponent(parts[1]) as AgentConfigId,
-        cliType: parts[2],
+        cliType: decodeURIComponent(parts[2]),
         limitId: decodeURIComponent(parts[3]),
       };
     } catch {
@@ -177,6 +176,8 @@ export type AgentConfigMeta = {
    * advanced override; normal builtin agents use Lody-managed runtimes.
    */
   runtimeOverrides?: BuiltinRuntimeOverrides;
+  /** Local gateway metadata consumed by Lody before launch, outside process env. */
+  magpieGatewayUrl?: string;
   env: Record<string, string>;
   prompt?: string;
   /** Title generation settings. When set, enables automatic title generation for this agent. */
@@ -402,6 +403,13 @@ const historyMessageItemSchema = schema
               )
               ? true
               : 'Missing operation progress metadata';
+          case 'operation_completion_batch':
+            return typeof v.batchId === 'string' &&
+              typeof v.memberCount === 'number' &&
+              Number.isInteger(v.memberCount) &&
+              v.memberCount > 0
+              ? true
+              : 'Missing operation batch metadata';
           case 'operation_completion':
             return typeof v.deliveryId === 'string' &&
               typeof v.operationId === 'string' &&
@@ -684,6 +692,15 @@ export const sessionHistorySchema = schema.LoroMap({
   permissionWaitMs: schema.Number({ required: false }),
   role: schema.String<Role>(),
   status: schema.String<SessionHistoryStatus>({ required: false }),
+  scheduleRun: schema.LoroMap(
+    {
+      scheduleId: schema.String(),
+      turnId: schema.String(),
+      title: schema.String(),
+    },
+    { required: false }
+  ),
+  cancellationReason: schema.String<'user_stop'>({ required: false }),
   inputConfig: acpSessionConfigSchema,
   /**
    * @deprecated Use `status` instead.
@@ -693,8 +710,9 @@ export const sessionHistorySchema = schema.LoroMap({
   userId: schema.String({ required: false }),
   author: schema.Any({ required: false }),
   modelInfo: schema.Any({ required: false }),
-  // Assistant turns: tokens this turn consumed, summed from adapter usage deltas.
-  // A primitive JSON value (`SessionTurnTokenUsage`), replaced whole on each write.
+  // Assistant turns: tokens and optional estimated cost this turn consumed,
+  // summed from adapter usage deltas. A primitive JSON value
+  // (`SessionTurnTokenUsage`), replaced whole on each write.
   tokenUsage: schema.Any({ required: false }),
   // FileDiff 此次对话有哪些文件变更，和具体变更行数
   fileDiff: schema.Any(),
@@ -908,6 +926,7 @@ export type SessionLaunchConfig = {
   codexAuth?: import('./codex-auth-profile').CodexAuthProfile;
   customAcp?: CustomAcpLaunchSpec;
   runtimeOverrides?: BuiltinRuntimeOverrides;
+  magpieGatewayUrl?: string;
   env?: Record<string, string>;
   worktreeSetup?: WorktreeSetupScriptConfig;
   worktreeCleanup?: WorktreeCleanupScriptConfig;
@@ -1013,6 +1032,8 @@ export type SessionMeta = {
   createdAt: string;
   /** Feedback post id bound at session start, when the session originates from lody-feedback. */
   fromFeedbackPostId?: string;
+  /** 36-byte UUID activation index; content lives in the session control doc. */
+  notificationId?: string;
   lastMessageAt?: number;
   lastReadAt?: number;
   /**
@@ -1094,7 +1115,7 @@ export type SessionMeta = {
   steerOperationLedger?: Record<string, SessionSteerOperationRecord>;
   /** Recoverable queue promotion receipts, keyed by the stable operation id. */
   queuePromotionLedger?: Record<string, SessionQueuePromotionRecord>;
-  /** Assistant turn id the client wants to stop; cancel is ignored unless it matches the machine's in-memory active turn. */
+  /** Stop request marker into the Session control doc; legacy values directly name the target turn. */
   lastCanceledTurn?: string;
   /** Latest user history entry id that the machine has fully handled. */
   lastHandledUserMsgId?: string;
@@ -1344,8 +1365,37 @@ export const sessionDocSchema = schema({
   session: sessionSchema,
   history: schema.LoroList(sessionHistorySchema, (item) => item.id),
   mq: schema.LoroMovableList(messageQueueItemSchema, (item) => item.$cid, { required: false }),
+  /** Explicit human-send outbox. Never inferred from user role or Agent authors. */
+  humanInputReceipts: schema
+    .LoroMap({}, { required: false })
+    .catchall(schema.LoroMap({ userId: schema.String() })),
+  /** Latest Stop only; metadata carries its marker, not its payload. */
+  cancelRequest: schema.LoroMap(
+    { id: schema.String(), turnId: schema.String() },
+    { required: false }
+  ),
   /** Temporary durable state for an asynchronous Session fork. Removed on success. */
   forkOperation: sessionForkOperationDocSchema,
+  notification: schema.LoroMap(
+    {
+      id: schema.String(),
+      recipientId: schema.String(),
+      turnId: schema.String(),
+      outcome: schema.String(),
+      presentation: schema.LoroMap(
+        {
+          kind: schema.String<'conversation' | 'schedule'>(),
+          conversationTitle: schema.String({ required: false }),
+          scheduleName: schema.String({ required: false }),
+          projectName: schema.String({ required: false }),
+          pullRequestNumber: schema.Number({ required: false }),
+        },
+        { required: false }
+      ),
+      createdAt: schema.Number(),
+    },
+    { required: false }
+  ),
   preview: sessionPreviewDocSchema,
   externalHistoryCursor: sessionExternalHistoryCursorDocSchema,
   roostHistoryCursor: sessionRoostHistoryCursorDocSchema,

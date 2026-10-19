@@ -15,6 +15,49 @@ and durable state/cursor retention. This [P10 preparation](../notes/implemented/
 does not supply historical-author authorization, a production signer, host snapshot
 admission or client recovery from an unusable remote snapshot.
 
+## Startup frame and handoff
+
+The [startup intent](../../specs/app-startup-landing.md) keeps destination selection
+and workspace readiness separate. Static BootShell and real `WorkspaceCard` share
+`lib/workspace-frame.ts`'s document-safe `WORKSPACE_FRAME_CSS`: an 8px gutter,
+10px radius, 0.5px border and shadow, with the real card's values mapped to UI StyleX
+tokens. The shadow is a single 1px-down, 2px-blur black layer at 3% opacity.
+`DocumentStyle` renders mutable React style elements and retires the inline
+first-paint sheet in a layout effect after its replacement commits. A hoisted
+`style href` ignores later content changes, so it must not own these live styles.
+Before paint, the boot script records plain/workspace layout, stored width,
+theme and mobile/compact state. A collapsed sidebar still leaves workspace-card
+geometry; it does not imply plain layout.
+
+Inside `RootOutlet`'s error boundary, `BootShellBoundary` reads live route, sidebar
+and viewport state, plus router `state.isLoading || state.status === 'pending'`
+as the provider's `pending` input. Both conditions matter: `isLoading` can become
+false before the pending match renders.
+`BootShellProvider` keeps one dormant visual frame mounted;
+committed `BootShell` gates register path/status in layout effects. The latest
+committed owner wins, and cleanup removes only that owner's ID. Suspense can clean
+up outgoing layout effects before the destination is ready, so with no owners the
+provider retains the last committed presentation while `pending` is true. Once no
+owners remain and `pending` is false, it releases the frame and clears that memory;
+later ordinary session navigation cannot revive the fullscreen boot overlay. `BootNavigate`
+hints destination geometry before navigation completes. Login's `BrowserRedirect`
+uses BootShell during asynchronous handoff; Electron completion uses the boot variant.
+
+Presentation proceeds from static shell through React gates, redirect hints and
+`PreloadedMainLayout`'s lazy fallback to the actual card. Content readiness keeps
+its existing `LoadingPlaceholder`, using the same mark. No workspace UI or provider
+mounts merely to draw boot presentation, and unresolved scope still fails closed.
+Release after owners are gone and navigation has settled immediately makes the
+frame inert and `aria-hidden` and removes live status; its 160ms fade and 320ms
+geometry transitions are decorative.
+Reduced motion disables animation. No timer or animation event decides readiness.
+The outer error boundary unmounts the coordinator on failure, and
+`BlockingWaitPlaceholder` recovery replaces its gate with immediately usable controls.
+
+The [handoff decision](../notes/implemented/feature/2026-10-19-boot-shell-layout-handoff.md)
+explains the retained DOM and owner-protocol trade-off, partially revising the
+[first-paint note](../notes/implemented/feature/2026-09-26-boot-shell-first-paint.md)'s
+overlay decision without changing startup guarantees.
 
 ## Crash surfaces
 
@@ -49,8 +92,124 @@ user wedged before any workspace still gets the wipe, and so the repo IndexedDB 
 opened before the pending clear has run.
 
 `stuck-connection-banner.tsx` is observational because a slow first sync is not a
-failure: the banner offers the cache-clear flow after 45s of continuous `loading` while
-the connection attempt completes exactly as it would without it.
+failure: after 45s of continuous `loading` the banner reports once
+(`workspace/boot_wait_stuck`, gate `control_connection_loading`) and offers the recovery
+page below, while the connection attempt completes exactly as it would without it. A cache
+clear alone was not enough there: it keeps the sign-in credential, which a reinstall
+replaces.
+
+No screen may leave a user with reinstalling as the only way out. Every route wait
+(`routes/index.tsx`, `$workspaceName.tsx`, `$workspaceName/_auth.tsx`) renders
+`blocking-wait-placeholder.tsx` with a `gate` naming what it waits for. It stays a
+spinner until the wait fails or lasts 30s, then becomes a recovery page:
+
+1. reload;
+2. clear the local cache;
+3. copy diagnostics: gate, scope blocker, idle gap before launch, last clear;
+4. clear all local data and sign out.
+
+Route failures go through `RouteMessage` with a `gate`. It always offers a retry
+(reload when the caller has none, since the mobile app cannot refresh) and the same
+recovery page. `gate: null` marks a message that is not a failure, such as a plan limit.
+
+The two scope blockers nothing retries within a page load, `runtime_init_failed` and
+`doc_meta_scan_failed`, show the recovery page at once instead of after 30s. The page
+says local data may be damaged only for a storage error: a scan failure, or a runtime
+that failed with an IndexedDB or `RepoStorageError` name. Nothing clears
+automatically: the repo replica can hold edits that never synced, and a failure that
+looks terminal can be transient, so every deletion is the person's choice.
+
+A session check that keeps failing (offline, a 5xx, a timeout) is deliberately not
+treated as a sign-out, so a wait can be stuck on the server rather than on local
+data. `lib/boot-request-failures.ts` keeps the latest failing session, workspace-list,
+active-workspace or switch request; while one is failing, the recovery page names it
+(network, server with its HTTP status, rate limit, rejected sign-in) and says the
+device is not the problem.
+
+Clears take effect at the next boot:
+
+- **Restarting into a clear.** Clearing the cache reloads the one window, as Settings
+  always has. Relaunching the desktop stops the embedded CLI and its running agents,
+  so it is used only to retry a clear that left databases behind earlier the same
+  day, because the storage backend that failed lives on in this process. The relaunch
+  goes through the same one-shot request as `lody app reset-cache`. A quit answered
+  Stay arms nothing and withdraws the request.
+- **Verifying a clear.** The boot clear re-enumerates databases and writes
+  `lody:lastLocalClear`. A clear is never re-run on its own: a re-run deletes
+  everything again, which after a hard reset would sign the person out a second time.
+  Within a day of a clear that left databases behind, the recovery page says so.
+- **Hard reset.** It prefers the host: the desktop relaunches into the native wipe, and
+  a mobile shell implements `window.__LODY_NATIVE_RESET__`. Only those delete at the
+  file level, which is what reinstalling did.
+
+A spent workspace-list retry burst retries again on `online`, on return to the
+foreground and every 30s while the page is visible. [Decision](../notes/implemented/bug-fix/2026-10-13-workspace-open-recovery.md).
+
+## Locally accepted messages
+
+Loro ready messages commit to the live local history document. A ready Roost
+input instead appears from the workspace's immutable input projection and saves
+to account/workspace-scoped IndexedDB without waiting for owner RPC. Normal rows
+reuse `UserChatBubble`, including ready media and mention spans, with the ordinary
+pending delivery circle and no separate acceptance badge. The circle remains
+through local saving and unconfirmed owner work. A positive active owner receipt
+publishes the existing delivery overlay; both the local row and authoritative row
+use it, so history handoff cannot flash back to sending. A persisted `confirmed`
+source state alone is not a receipt. First paint precedes the storage transaction
+and does not prove crash durability.
+
+Background persistence is independent of displaying that input, but owner handoff
+waits for source save, the session lease and the persisted unknown-outcome marker.
+Ready local inputs are individual `SessionChatStreamView.localUserMessages` engine
+rows, keyed by their immutable turn IDs. Send anchoring can resolve before owner
+history; a matching directory placeholder retains the local body, then hydrated
+formal history replaces it once under the same key. Cleanup requires the hydrated
+body, not just index membership. Unprepared attachments remain in `trailingContent`.
+Local rows never enter authoritative history, outline, export or history selection
+leases. Native text copy can still retain their mounted UI without fabricating a
+history body. Local ordinary input displays truthful sending activity while its
+outcome is unresolved and error-free; actual presence and formal pre-start take
+priority. Startup/Stop derivation still requires the existing formal evidence. The
+[current send comparison](../notes/proposed/architecture/2026-10-13-backend-independent-send-acceptance.md#current-lororoost-send-comparison-2026-10-15)
+records the original integration gap, controlled ordering probes and repair limits.
+
+The metadata circle is separate from the loading spinner beside the bubble.
+Ready Roost input uses the same 500 ms loading delay as the ordinary Loro row,
+with the same narrow-column visibility threshold. Its delay follows unresolved
+owner confirmation, rather than synchronization of the Loro control document.
+An input error stops the spinner; retry starts a new delay, and a real delivery
+receipt removes it immediately.
+
+Creating a Roost conversation commits routing metadata before admission, without
+opening its history store on that path. Background delivery persists the trusted
+`humanInputReceipts` control record before accepting owner history; Loro writes
+and control queues preserve the same provenance-before-activation ordering.
+Receipt lookup stays read-only.
+
+Ordinary Roost sends negotiate `sessionInputDispatch` v1 and use one
+`accept_input_and_dispatch` owner request. The native writer queue commits trusted
+human provenance and immutable history, checks current status/metadata, and publishes
+activation before replying; the host wakes its existing history dispatcher without
+awaiting execution. The sender neither rereads history nor sends a second dispatch
+RPC. Recovery queries remain read-only and retry the same combined operation for
+activation, without recreating removed input. Older owners refuse admission before
+draft consumption. Guide application and its no-replay fence remain separate.
+
+New input uses ordinary history-write normalization before storage validation,
+including ready file/image records with `text: undefined`. Persisted records still
+decode strictly, and same-ID content conflicts still fail. After attachment
+preparation hands input to the durable owner, retry targets that owner even while
+the memory queue awaits it; preparation-only failures still retry preparation.
+
+The workspace owns restoration, session Web Locks and input reconciliation.
+History operations resolve the fixed owner's current local/cloud plane, including
+after a late local identity probe; cached stores do not freeze that transport.
+Unknown history outcomes query or repeat the same immutable accept operation;
+execution delivery follows only its owner receipt. The projection stays until
+the authoritative view contains the same ID. Control queues keep the Loro writer
+and wait behind earlier input under the same lease. Unprepared attachments remain
+in the existing memory queue. Cache recovery preserves saved input; full reset
+may delete it. See the [owning decision](../notes/proposed/architecture/2026-10-13-backend-independent-send-acceptance.md).
 
 ## File preview versus Code Collab
 
@@ -86,7 +245,15 @@ CSS variables and dimensions when no equivalent token exists. Keep runtime
 geometry and styles owned by external rendering engines at their existing dynamic
 boundary. Configure shared primitives through their documented props when those
 props reproduce the existing appearance. The [progressive StyleX migration note](../notes/implemented/simplification/2026-10-04-complex-surfaces-stylex.md) records the retained legacy overrides and
-the current application of these rules.
+current application of these rules.
+
+Lody Light's neutral surfaces, text, gray ramp and shadow ink use zero saturation
+at their existing lightness; the blue primary and links remain semantic accents. Their
+sources are the bundled VS Code theme, `@lody/ui`'s light palette and the Tailwind
+fallbacks. `boot-shell.ts` mirrors the sidebar, edge and status colors before the
+renderer starts. Keep those sources aligned when changing this palette. The
+[neutral gray decision](../notes/implemented/bug-fix/2026-10-17-neutral-light-grays.md)
+records the color correction and its verification limits.
 
 Settings' `CompactRow` keeps its label and helper in separate text nodes. Its
 optional `labelId` and `helperId` let a caller associate a control with those

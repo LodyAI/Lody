@@ -10,6 +10,7 @@ import {
   type SessionHistoryInput,
   type SessionId,
   type SessionMeta,
+  type SessionTurnInputConfig,
 } from '@lody/shared';
 import type { ReplaceEditableTailInput } from '@lody/shared/session-data';
 import { SessionEditAndResendService } from './session-edit-and-resend-service';
@@ -169,6 +170,14 @@ function createHarness(
   };
   let barrierHeld = false;
   const executionService = {
+    acceptInboxHumanInput: vi.fn(
+      async (_args: {
+        sessionId: SessionId;
+        inputId: string;
+        userId: string;
+        config: SessionTurnInputConfig;
+      }) => {}
+    ),
     getExecutionSnapshot: vi.fn(() => ({
       hasActiveTurn: options.active === true,
       activeTurnId: options.active ? 'assistant-2' : undefined,
@@ -294,6 +303,13 @@ describe('SessionEditAndResendService', () => {
         resume: 'acp-new',
       },
     });
+    const receipt = harness.executionService.acceptInboxHumanInput.mock.calls[0]?.[0];
+    expect(receipt).toMatchObject({
+      sessionId: spec.sessionId,
+      inputId: spec.replacementUserTurnId,
+      userId: spec.requestedByUserId,
+    });
+    expect(receipt?.config).toEqual(harness.sessionData.history.readAll().at(-1)?.inputConfig);
     expect(harness.repo.upsertDocMeta).toHaveBeenCalledWith(
       expect.any(String),
       expect.objectContaining({

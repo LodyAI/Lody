@@ -12,7 +12,7 @@ import {
   type PlatformProvider,
 } from '@lody/platform';
 import { PlatformContext } from '@lody/platform/react';
-import { resetTimeSync } from '@lody/shared';
+import { resetTimeSync, getServerTimeOffset, isTimeSynced } from '@lody/shared';
 import AppInitializer from '../src/components/AppInitializer';
 
 (
@@ -58,6 +58,7 @@ describe('AppInitializer platform time synchronization', () => {
   afterEach(() => {
     act(() => root.unmount());
     container.remove();
+    vi.restoreAllMocks();
     vi.unstubAllGlobals();
     resetTimeSync();
   });
@@ -83,9 +84,12 @@ describe('AppInitializer platform time synchronization', () => {
   });
 
   it('calibrates against the time endpoint when cloud synchronization is available', async () => {
+    const wall = 2_000_000_000_000;
+    vi.spyOn(Date, 'now').mockReturnValue(wall);
+    vi.spyOn(performance, 'now').mockReturnValue(0);
     const fetchMock = vi.fn(
       async () =>
-        new Response(JSON.stringify({ serverTime: Date.now() }), {
+        new Response(JSON.stringify({ serverTime: wall + 5_000 }), {
           status: 200,
           headers: { 'content-type': 'application/json' },
         })
@@ -94,7 +98,31 @@ describe('AppInitializer platform time synchronization', () => {
 
     await renderWith(createProvider(CLOUD_PLATFORM_CAPABILITIES));
 
-    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    expect(isTimeSynced()).toBe(true);
+    expect(getServerTimeOffset()).toBe(5_000);
     expect(String(fetchMock.mock.calls[0]?.[0])).toMatch(/\/api\/time$/);
+  });
+
+  it('cancels a pending time request when cloud capability is removed', async () => {
+    const started = Promise.withResolvers<void>();
+    const aborted = Promise.withResolvers<void>();
+    vi.stubGlobal('fetch', (_url: string, init: RequestInit) => {
+      started.resolve();
+      return new Promise((_resolve, reject) => {
+        init.signal?.addEventListener(
+          'abort',
+          () => {
+            aborted.resolve();
+            reject(init.signal?.reason);
+          },
+          { once: true }
+        );
+      });
+    });
+    await renderWith(createProvider(CLOUD_PLATFORM_CAPABILITIES));
+    await started.promise;
+    await renderWith(createProvider(LOCAL_PLATFORM_CAPABILITIES));
+    await aborted.promise;
+    expect(isTimeSynced()).toBe(false);
   });
 });

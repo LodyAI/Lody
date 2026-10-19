@@ -1,3 +1,10 @@
+import { beforeEach, afterEach, vi } from 'vitest';
+import { Effect, Layer } from 'effect';
+import { LocalLoroWriterTurn } from '../src/local-loro-writer';
+import {
+  makeLocalLoroWriterLegacy,
+  type LocalLoroWriterLegacy,
+} from '../src/local-loro-writer/legacy';
 /**
  * Regression tests for the 2026-07-04 adversarial review of the local Loro data
  * plane (P4 protocol + R3/R4 remediation). Each test originally REPRODUCED a
@@ -42,7 +49,7 @@
 import { describe, expect, it } from 'vitest';
 import { LoroDoc } from 'loro-crdt';
 import { LocalLoroTransportAdapter } from '../src/local-loro-transport';
-import { LocalLoroDataPlaneServer } from '../src/local-loro-data-plane-server';
+import { LocalLoroDataPlaneServerLegacy } from '../src/local-loro-data-plane-server';
 import {
   base64ToBytes,
   bytesToBase64,
@@ -59,20 +66,7 @@ import { MemoryFlock } from './helpers/memory-flock';
  */
 class RelayHarness {
   private readonly tasks: Array<() => void | Promise<void>> = [];
-  private readonly scheduler = {
-    scheduleDataWork: (work: () => void | Promise<void>) => {
-      const scheduled = { cancelled: false };
-      this.tasks.push(async () => {
-        if (!scheduled.cancelled) {
-          await work();
-        }
-      });
-      return () => {
-        scheduled.cancelled = true;
-      };
-    },
-  };
-  private readonly engines = new Map<string, LocalLoroDataPlaneServer>();
+  private readonly engines = new Map<string, LocalLoroDataPlaneServerLegacy>();
   private readonly serverDocs = new Map<string, LoroDoc>();
   private readonly serverMetaFlocks = new Map<string, MemoryFlock>();
   private readonly rendererListeners = new Set<(m: LocalLoroDataPlaneServerMessage) => void>();
@@ -100,15 +94,15 @@ class RelayHarness {
     },
   };
 
-  engineFor(workspaceId: string): LocalLoroDataPlaneServer {
+  engineFor(workspaceId: string): LocalLoroDataPlaneServerLegacy {
     const existing = this.engines.get(workspaceId);
     if (existing) return existing;
-    const engine = new LocalLoroDataPlaneServer({
+    const engine = new LocalLoroDataPlaneServerLegacy({
+      writerLegacy,
       workspaceId,
       resolveDoc: async (docId) => this.serverDoc(workspaceId, docId),
       resolveFlockDoc: async () => new MemoryFlock(),
       resolveMetaFlock: async () => this.serverMetaFlock(workspaceId),
-      scheduler: this.scheduler,
     });
     this.engines.set(workspaceId, engine);
     return engine;
@@ -178,9 +172,10 @@ class RelayHarness {
   setConnected(next: boolean): void {
     if (this.connected === next) return;
     this.connected = next;
+    if (next) this.sharedConnection.id += ':redial';
     if (!next) {
       for (const engine of this.engines.values()) {
-        engine.handleDisconnect(this.sharedConnection.id);
+        void engine.handleDisconnectLegacy(this.sharedConnection.id);
       }
     }
     for (const listener of this.statusListeners) listener(next);
@@ -189,14 +184,14 @@ class RelayHarness {
   async settle(): Promise<void> {
     for (let round = 0; round < 200; round += 1) {
       if (this.tasks.length === 0) {
-        await new Promise((resolve) => setTimeout(resolve, 0));
+        await vi.advanceTimersByTimeAsync(1);
         if (this.tasks.length === 0) return;
       }
       const batch = this.tasks.splice(0);
       for (const task of batch) {
         await task();
       }
-      await new Promise((resolve) => setTimeout(resolve, 0));
+      await vi.advanceTimersByTimeAsync(1);
     }
     throw new Error('settle_did_not_converge');
   }
@@ -597,7 +592,6 @@ describe('local Loro data plane — review regression suite (F1/F2/F3/F5/F8)', (
       // bound to the instance the repo just evicted. That is the original bug
       // with no recovery signal at all, and it is reachable because
       // `unloadDocRoom` awaits `repo.unloadDoc` before it invalidates.
-      const tasks: Array<() => void | Promise<void>> = [];
       const currentDocs = new Map<string, LoroDoc>();
       let openGate = (): void => {};
       const gate = new Promise<void>((resolve) => {
@@ -605,7 +599,8 @@ describe('local Loro data plane — review regression suite (F1/F2/F3/F5/F8)', (
       });
       let parkNextResolve = true;
 
-      const engine = new LocalLoroDataPlaneServer({
+      const engine = new LocalLoroDataPlaneServerLegacy({
+        writerLegacy,
         workspaceId: 'ws',
         resolveDoc: async (docId) => {
           // Capture BEFORE parking: this models the real race, where
@@ -622,12 +617,6 @@ describe('local Loro data plane — review regression suite (F1/F2/F3/F5/F8)', (
           return doc;
         },
         resolveFlockDoc: async () => new MemoryFlock(),
-        scheduler: {
-          scheduleDataWork: (work) => {
-            tasks.push(work);
-            return () => {};
-          },
-        },
       });
 
       const evicted = new LoroDoc();
@@ -653,7 +642,7 @@ describe('local Loro data plane — review regression suite (F1/F2/F3/F5/F8)', (
 
       openGate();
       await joining;
-      for (const task of tasks.splice(0)) await task();
+      await vi.advanceTimersByTimeAsync(1);
 
       // A peer upload must reach the repo's CURRENT doc, not the orphan.
       const peer = new LoroDoc();
@@ -690,10 +679,10 @@ describe('local Loro data plane — review regression suite (F1/F2/F3/F5/F8)', (
     // invariant to hold at every one. Deterministic: same depths every run.
     for (const depth of [0, 1, 2, 3, 4, 5, 6, 7]) {
       it(`answers a join whose room is invalidated ${depth} microtask(s) into the build`, async () => {
-        const tasks: Array<() => void | Promise<void>> = [];
         const currentDocs = new Map<string, LoroDoc>();
         let armed = true;
-        const engine = new LocalLoroDataPlaneServer({
+        const engine = new LocalLoroDataPlaneServerLegacy({
+          writerLegacy,
           workspaceId: 'ws',
           resolveDoc: async (docId) => {
             const doc = currentDocs.get(docId);
@@ -714,12 +703,6 @@ describe('local Loro data plane — review regression suite (F1/F2/F3/F5/F8)', (
             return doc;
           },
           resolveFlockDoc: async () => new MemoryFlock(),
-          scheduler: {
-            scheduleDataWork: (work) => {
-              tasks.push(work);
-              return () => {};
-            },
-          },
         });
 
         const seeded = new LoroDoc();
@@ -741,7 +724,7 @@ describe('local Loro data plane — review regression suite (F1/F2/F3/F5/F8)', (
           peerId: 'renderer:1',
           room: { scope: 'doc', docId: 'doc-1' },
         });
-        for (const task of tasks.splice(0)) await task();
+        await vi.advanceTimersByTimeAsync(1);
 
         // The invariant: the peer is never left silent. Either the join is
         // answered, or it is told the room is gone so it re-joins. Silence is
@@ -759,7 +742,7 @@ describe('local Loro data plane — review regression suite (F1/F2/F3/F5/F8)', (
           const current = currentDocs.get('doc-1');
           if (!current) throw new Error('missing current doc');
           insert(current, text(current).length, '|after');
-          for (const task of tasks.splice(0)) await task();
+          await vi.advanceTimersByTimeAsync(1);
           const peerDoc = new LoroDoc();
           for (const frame of frames) {
             if (
@@ -774,4 +757,23 @@ describe('local Loro data plane — review regression suite (F1/F2/F3/F5/F8)', (
       });
     }
   });
+});
+
+let writerLegacy: LocalLoroWriterLegacy;
+beforeEach(() => {
+  vi.useFakeTimers();
+  writerLegacy = makeLocalLoroWriterLegacy(
+    Layer.succeed(LocalLoroWriterTurn, {
+      next: Effect.callback<void>((resume) => {
+        const handle = setTimeout(() => resume(Effect.void), 0);
+        return Effect.sync(() => clearTimeout(handle));
+      }),
+    })
+  );
+});
+afterEach(async () => {
+  const closed = writerLegacy.closeLegacy();
+  await vi.runAllTimersAsync();
+  await closed;
+  vi.useRealTimers();
 });

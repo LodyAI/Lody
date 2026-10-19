@@ -14,3 +14,6 @@ telemetry.
 Display and diagnostics use the same scalar projection; error detail serializes
 that projection as JSON rather than maintaining another list of display fields.
 Binding rules: [AGENTS.md](AGENTS.md).
+
+The projected failure type uses public `RepoStreamsErrorContext` so declaration
+emission does not expose the SDK's private context type.

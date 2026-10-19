@@ -2,9 +2,7 @@
 
 `CLAUDE.md` is a symlink to this file. Edit `AGENTS.md` only.
 
-CLI/MCP commands and daemon dispatch.
-[apps/cli/AGENTS.md](../../AGENTS.md) applies; session-side rules are in
-[../session/AGENTS.md](../session/AGENTS.md).
+Parent rules apply; see [Session rules](../session/AGENTS.md).
 
 ## Process and daemon lifecycle
 
@@ -38,6 +36,8 @@ CLI/MCP commands and daemon dispatch.
   connecting/disconnected transitions and clear only on connected. Keep them in the top-level
   `connectionAges` v1 extension: older consumers reject unknown keys inside the strict
   backend/workspace objects. Status reports a red connection error at 60 seconds.
+
+`runSessionCommand`: JSON/JSONL diagnostics go to stderr through setup, cleanup and exit.
 
 ## Read commands and workspace sync
 
@@ -86,22 +86,22 @@ Metadata idle/Presence loss is not completion; sequence is local.
 - `--local-project … --worktree` sets `ProjectRef.useWorktree`; daemon startup consumes it in
   `../session/session-execution-service.ts` and worktree creation happens in
   `../session/session-manager.ts`.
-- Local create records the GitHub repository identified by the local Git remote for both direct
-  and worktree sessions, matching desktop creation. Remote identity is not authorization:
-  the machine PR reconciler verifies access through authenticated GitHub reads, without a
-  product-cloud repository registry. An absent/unreadable remote leaves creation local.
+- Direct/worktree local create records the Git remote's GitHub repository, matching desktop.
+  Remote identity is not authorization: the PR reconciler uses authenticated GitHub reads,
+  never a product-cloud registry. Absent/unreadable remotes leave creation local.
 - Dispatch point-of-no-rollback (`createSessionResult` / `sendSessionChatResult`):
-  `writeDispatchPointer` commits `latestUserMsgId`, after which execution may start.
-  AWAIT `confirmDispatchSyncedBestEffort` before tearing down the one-shot transport,
-  but it must NEVER throw: the durable pointer and SQLite Operation own delivery.
+  `writeDispatchPointer` commits `latestUserMsgId` and enables execution. AWAIT
+  `confirmDispatchSyncedBestEffort` before transport teardown; it must NEVER throw.
+  The durable pointer and SQLite Operation own delivery.
   Create/chat may unwind only before dispatch (`if (!dispatched)`). Never roll back
   a dispatched Session or introduce a hard-fail Streams acknowledgement.
-- MCP create combines semantic controls with explicit `modeId`/`configOptionValues`.
-  Shared `acp-run-config.ts` maps semantic controls; CLI validators check advertised
-  ids, types and values without requiring permission categories. Explicit raw selectors
-  override inherited scalar selectors. Reject conflicting legacy Plan/mode selections.
+- MCP create combines semantic controls with `modeId`/`configOptionValues` via shared
+  `acp-run-config.ts`. Validate advertised ids/types/values without requiring permission
+  categories. Raw selectors override inherited scalars; reject legacy Plan/mode conflicts.
   `validateSessionCreateOptions({ dispatchConfig })` validates before acceptance;
   freeze each effective target config and use it for recovery, never mutable history.
+- `--agent-role` uses shared `../lib/agent-role-create.ts`: clear manual target/run-config
+  flags with a stderr warning; freeze Role id/revision/snapshot. Preserve work context/parent.
 - Local daemon IPC sends the real control request once; do not restore a health preflight. Native
   `LocalDaemonAvailabilityError` must be thrown outside the Effect runtime boundary so MCP can
   preserve `DAEMON_NOT_RUNNING` versus retryable `DAEMON_BUSY`: a connection refusal means not

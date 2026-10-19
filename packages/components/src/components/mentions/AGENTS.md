@@ -8,8 +8,8 @@ Pipeline background: [ui-mentions.md](../../../../../.agents/docs/ui-mentions.md
 ## Triggers, menu, and candidates
 
 - `@` reaches every mention type through the two-level menu. Skills keep their
-  direct `$`/`￥` menu, `/` and `、` open commands directly, and `#` opens no menu but
-  keeps its hydrator, so a pasted `#123` still expands before send.
+  direct `$`/`￥`/`¥` menu, `/` and `、` open commands directly, and `#` opens no menu but
+  keeps hydration, so pasted `#123` still expands before send.
 - `enableAtMentions` is the ONE list of what `@` reaches, gating both trigger
   registration and mounting `<Mention>`; every source with its own `enabled`
   rule (sessions: having any) belongs there too. Placeholder hints advertise `$`
@@ -117,12 +117,12 @@ true })`. The fetch timestamp rides on the cached entry (survives IndexedDB).
 
 ## Agent Roles
 
-- An Agent Role mention has the session mention's shape (plain `@<token>`,
-  stable Role id on the committed RANGE), but its rewrite asks the agent to
-  CREATE a Session and carries the Role id only (root `AGENTS.md` owns MCP
-  create/freeze). An unavailable Role stays plain text at send time. The token
-  is DERIVED from the Role's name
-  (`getAgentRoleMentionSlug`); renaming changes it, and uniqueness uses that token.
+- An Agent Role mention has the session mention's shape (plain `@<token>`; the
+  RANGE carries `formatAgentRoleMentionValue`: Role id, plus machine for a
+  multi-machine Role), but its rewrite asks the agent to CREATE a Session and
+  names only that id/machine (root `AGENTS.md` owns MCP create/freeze). An
+  unavailable or bare multi-machine Role stays plain text. Tokens derive from
+  the name or alias; uniqueness uses them.
 - A Role candidate's emoji REPLACES the category glyph
   (`MentionCandidate.iconEmoji`), defaulted through `getAgentRoleEmoji`, and its
   candidate sets no detail `title`. The committed range shows that emoji through

@@ -9,15 +9,22 @@ When an assistant links to a local source file or build artifact, the user can
 open it in the session's right-side preview. The inline link uses blue text and
 a matching file-type icon, without a pill background or border. Hover and keyboard
 focus remain visible, and line references retain their existing navigation behavior.
+Clicking a link with a line reference opens the file and brings that line into view
+on the first click, with a visible line-range highlight. Initial content loading,
+language setup, and panel expansion must not require a second click. Clicking the
+same link again returns to its referenced line after the user has scrolled elsewhere.
 
 When Electron opens a conversation on its own machine, file links may preview any
 readable regular local file, including files outside the session workspace and in
 another worktree. Worktree prefixes must not redirect these links into the current
 workspace. This applies to both Markdown links and tool file entries. External
 files remain readonly, and genuinely missing files still show a not-found error.
-Same-machine preview uses the local communication channel and does not require a
-running agent. Absolute and home-rooted paths remain previewable when the session's
-working directory is unavailable, after validating session and machine ownership.
+Same-machine preview reads directly in Electron and does not require a running
+agent, daemon, or file index. Electron verifies the target against its persistent
+local machine identity. Absolute and home-rooted paths remain previewable when
+the session working directory is unavailable; relative paths use the original
+owner-session workspace root from local metadata. Session lifecycle is not a
+filesystem read permission gate for the desktop user.
 These files remain readonly. Relative paths require the original workspace; they
 must never be resolved against a substitute directory. Remote preview authorization
 remains restricted to its existing allowed roots.
@@ -116,6 +123,10 @@ creation occurs before that action. Loading keeps the placeholder; failure offer
 Retry without hiding the document. Successful remote reads become browser Blob
 URLs. Leaving the preview releases those URLs and discards late responses; a new
 document or provider must not inherit the previous image's load request.
+
+A plain-text link whose target is an image file, such as `[plot](./plot.png)`,
+renders as that image under the same rules instead of a copy-path file link. A link
+with a line reference or its own image markup stays a file link.
 
 This capability is supplied only by live file providers. Chat Markdown, standalone
 uploaded Markdown without a filesystem provider, and anonymous publications do not

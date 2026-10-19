@@ -77,7 +77,7 @@ describe('queued message editing commits', () => {
 
   // The save promise stays pending until the test releases it, so the row is
   // observable in its mid-write state instead of racing a microtask.
-  const renderQueue = async (options?: { holdSave?: boolean }) => {
+  const renderQueue = async (options?: { holdSave?: boolean; failSaveOnce?: boolean }) => {
     const items = [makeItem()];
     await act(async () => {
       root?.render(
@@ -92,6 +92,8 @@ describe('queued message editing commits', () => {
           },
           onEditSave: (item: MessageQueueItem, task: string) => {
             saved.push({ cid: item.$cid, task });
+            if (options?.failSaveOnce && saved.length === 1)
+              return Promise.reject(new Error('Synthetic save failure'));
             if (!options?.holdSave) return undefined;
             return new Promise<void>((resolve) => {
               releaseSave = resolve;
@@ -206,6 +208,99 @@ describe('queued message editing commits', () => {
     expect(saved).toEqual([{ cid: 'cid-0', task: 'Clarified queued instruction' }]);
   });
 
+  for (const nextEditPending of [false, true]) {
+    it(`keeps the next editor when an earlier save settles (next pending=${nextEditPending})`, async () => {
+      let finishSave!: () => void;
+      let finishStart!: () => void;
+      function QueueWithOverlappingEdits() {
+        const [items, setItems] = useState([
+          makeItem(),
+          {
+            ...makeItem(),
+            $cid: 'cid-1',
+            userTurnId: 'turn-1',
+            task: 'Add regression tests',
+            acpSessionConfig: { ...makeItem().acpSessionConfig, prompt: 'Add regression tests' },
+          },
+        ]);
+        return createElement(MessageQueueDisplay, {
+          sessionId: 'session-test' as SessionId,
+          items,
+          onRemove: () => undefined,
+          onReorder: () => undefined,
+          onSteer: () => undefined,
+          onEditStart: (item) => {
+            setItems((current) =>
+              current.map((row) => (row.$cid === item.$cid ? { ...row, isEditing: true } : row))
+            );
+            if (nextEditPending && item.$cid === 'cid-1')
+              return new Promise<void>((resolve) => {
+                finishStart = resolve;
+              });
+            return undefined;
+          },
+          onEditCancel: (item) => {
+            setItems((current) =>
+              current.map((row) => (row.$cid === item.$cid ? { ...row, isEditing: false } : row))
+            );
+          },
+          onEditSave: (item, task) => {
+            saved.push({ cid: item.$cid, task });
+            setItems((current) =>
+              current.map((row) =>
+                row.$cid === item.$cid
+                  ? {
+                      ...row,
+                      isEditing: false,
+                      task,
+                      acpSessionConfig: { ...row.acpSessionConfig, prompt: task },
+                    }
+                  : row
+              )
+            );
+            if (item.$cid === 'cid-0')
+              return new Promise<void>((resolve) => {
+                finishSave = resolve;
+              });
+            return undefined;
+          },
+        });
+      }
+      await act(async () => root?.render(createElement(QueueWithOverlappingEdits)));
+      const first = await startEditing(container!);
+      await act(async () => setTextareaValue(first, 'Preserve queue ordering'));
+      await act(async () => first.blur());
+      const nextButton = container!.querySelector<HTMLButtonElement>(
+        'button[aria-label="Edit queued message"]'
+      );
+      await act(async () => nextButton!.click());
+      let next = container!.querySelector('textarea')!;
+      expect(next.value).toBe(nextEditPending ? 'Preserve queue ordering' : 'Add regression tests');
+      if (!nextEditPending)
+        await act(async () => setTextareaValue(next, 'Cover ordering and cancellation'));
+      await act(async () => finishSave());
+      expect(container!.querySelector('textarea')).toBe(next);
+      expect(next.value).toBe(
+        nextEditPending ? 'Preserve queue ordering' : 'Cover ordering and cancellation'
+      );
+      if (nextEditPending) {
+        await act(async () => finishStart());
+        next = container!.querySelector('textarea')!;
+        expect(next.value).toBe('Add regression tests');
+        await act(async () => setTextareaValue(next, 'Cover ordering and cancellation'));
+      }
+      expect(document.activeElement).toBe(next);
+      await pressEnter(next);
+      expect(container!.querySelector('textarea')).toBeNull();
+      expect(container!.textContent).toContain('Preserve queue ordering');
+      expect(container!.textContent).toContain('Cover ordering and cancellation');
+      expect(saved).toEqual([
+        { cid: 'cid-0', task: 'Preserve queue ordering' },
+        { cid: 'cid-1', task: 'Cover ordering and cancellation' },
+      ]);
+    });
+  }
+
   it('leaves Shift+Enter to the textarea as a newline', async () => {
     const view = await renderQueue();
     const textarea = await startEditing(view);
@@ -256,6 +351,25 @@ describe('queued message editing commits', () => {
 
     expect(saved).toEqual([{ cid: 'cid-0', task: 'Confirmed by button' }]);
     expect(cancelled).toEqual([]);
+  });
+
+  it('preserves a rejected draft and lets the user save it again', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const view = await renderQueue({ failSaveOnce: true });
+      const textarea = await startEditing(view);
+      await act(async () => setTextareaValue(textarea, 'Keep this clarification'));
+      await pressEnter(textarea);
+      expect(view.querySelector('textarea')).toBe(textarea);
+      expect(textarea.disabled).toBe(false);
+      expect(textarea.value).toBe('Keep this clarification');
+      expect(document.activeElement).toBe(textarea);
+      await pressEnter(textarea);
+      expect(view.querySelector('textarea')).toBeNull();
+      expect(saved.at(-1)).toEqual({ cid: 'cid-0', task: 'Keep this clarification' });
+    } finally {
+      consoleError.mockRestore();
+    }
   });
 
   it('reverts instead of writing when the text is unchanged', async () => {

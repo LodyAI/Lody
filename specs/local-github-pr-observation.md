@@ -53,10 +53,13 @@ and exhaustion. GitHub observation remains independent of this hosted linkage bu
 
 The desktop reads the same metadata for local and hosted projects. Without hosted
 GitHub integration, PR links open GitHub in the browser; detailed checks, review
-and mutation APIs are not enabled by local summary access. When hosted detail
-reads fail — including an unconfirmed repository identity — a recorded PR keeps
+and mutation APIs are not enabled by local summary access. In hosted PR views, an unconfirmed association must not block reading a public
+repository: successful anonymous GitHub metadata establishes read access, without
+granting authenticated access or enabling mutations. A known numeric repository ID
+remains binding. Public reads stay separate from authenticated caches and tokens.
+When neither hosted nor public detail reads succeed, a recorded PR keeps
 a recoverable presentation with its GitHub link rather than a bare failure, and
-mutation affordances stay unavailable until details load. Branch observation is
+mutation affordances require both loaded details and confirmed hosted identity. Branch observation is
 event-driven; PR discovery and status use bounded background polling, not a new
 polling loop per view. Product-cloud requests remain forbidden in local mode.
 

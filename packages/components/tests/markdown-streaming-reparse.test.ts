@@ -102,6 +102,7 @@ describe('MarkdownRenderer streaming rendering', () => {
       });
     }
     root = undefined;
+    document.getSelection()?.removeAllRanges();
     container?.remove();
     container = undefined;
     localStorage.removeItem('lody-inline-math-enabled');
@@ -559,6 +560,82 @@ End of synthetic document.`,
     expect(container?.querySelectorAll('.katex-display')).toHaveLength(0);
   });
 
+  const copyRange = async (range: Range) => {
+    await vi.dynamicImportSettled();
+    const selection = document.getSelection()!;
+    selection.removeAllRanges();
+    selection.addRange(range);
+    const contents = new Map<string, string>();
+    const event = new Event('copy', { bubbles: true, cancelable: true });
+    Object.defineProperty(event, 'clipboardData', {
+      value: { setData: (format: string, value: string) => contents.set(format, value) },
+    });
+    container!.dispatchEvent(event);
+    return { event, contents };
+  };
+
+  it.each([false, true])(
+    'copies inline math with surrounding prose while streaming=%s',
+    async (isStreaming) => {
+      const store = createStore();
+      store.set(inlineMathEnabledAtom, true);
+      await renderMarkdownWithStore(String.raw`Before $\frac{a}{b}$ after.`, store, {
+        isStreaming,
+      });
+      if (isStreaming)
+        await act(async () => {
+          await import('@lobehub/streamdown');
+        });
+
+      const range = document.createRange();
+      range.selectNodeContents(container!.querySelector('p')!);
+      const { event, contents } = await copyRange(range);
+
+      expect(event.defaultPrevented).toBe(true);
+      expect(contents.get('text/plain')).toBe(String.raw`Before $\frac{a}{b}$ after.`);
+      const html = document.createElement('div');
+      html.innerHTML = contents.get('text/html')!;
+      expect(html.querySelector('.katex')).not.toBeNull();
+      expect(html.textContent).toContain('Before ');
+      expect(html.textContent).toContain(' after.');
+    }
+  );
+
+  it.each([false, true])('copies display math as LaTeX while streaming=%s', async (isStreaming) => {
+    await renderMarkdown('$$\nx^2 + y^2 = z^2\n$$', { isStreaming });
+    if (isStreaming)
+      await act(async () => {
+        await import('@lobehub/streamdown');
+      });
+
+    const range = document.createRange();
+    range.selectNode(container!.querySelector('.katex-display')!);
+    const { contents } = await copyRange(range);
+
+    expect(contents.get('text/plain')?.trim()).toBe('$$x^2 + y^2 = z^2$$');
+  });
+
+  it('copies the complete formula when only part of its rendered text is selected', async () => {
+    const store = createStore();
+    store.set(inlineMathEnabledAtom, true);
+    await renderMarkdownWithStore('Before $x+y$ after.', store);
+
+    const range = document.createRange();
+    range.selectNodeContents(container!.querySelector('.katex-html .mord')!);
+    expect(range.toString()).toBe('x');
+    expect((await copyRange(range)).contents.get('text/plain')).toBe('$x+y$');
+  });
+
+  it('leaves ordinary prose copying to the browser', async () => {
+    await renderMarkdown('Plain text and `literal code`.');
+    const range = document.createRange();
+    range.selectNodeContents(container!.querySelector('p')!);
+    const { event, contents } = await copyRange(range);
+
+    expect(event.defaultPrevented).toBe(false);
+    expect(contents.size).toBe(0);
+  });
+
   it('renders parenthesis inline math through the streaming path when enabled', async () => {
     const store = createStore();
     store.set(inlineMathEnabledAtom, true);
@@ -771,6 +848,41 @@ End of synthetic document.`,
     expect(container?.textContent).toContain('\\[list_literal\\]');
     expect(container?.textContent).toContain('\\(nested_literal\\)');
     expect(container?.textContent).toContain('\\(ordered_list_literal\\)');
+  });
+
+  it('renders multiline Codex citations as file cards and opens their exact target', async () => {
+    let opened = '';
+    await renderMarkdown(
+      'Ready: :codex-file-citation{path="\n/tmp/exports/预算 draft.xlsx\n" purpose="output" artifact_kind="workbook"} Done.',
+      {
+        onAgentFileLinkClick: (href) => {
+          opened = decodeURIComponent(href);
+        },
+      }
+    );
+    const button = container?.querySelector<HTMLButtonElement>(
+      'button[aria-label="预算 draft.xlsx"]'
+    );
+    expect(button).not.toBeNull();
+    expect(container?.textContent).not.toContain('codex-file-citation');
+    expect(container?.textContent).toContain('Ready:');
+    expect(container?.textContent).toContain('Done.');
+    expect(container?.querySelector('p div')).toBeNull();
+    await act(async () => {
+      button?.click();
+    });
+    expect(opened).toBe('/tmp/exports/预算 draft.xlsx');
+  });
+
+  it('leaves code examples and incomplete citations as text until completed', async () => {
+    const citation = ':codex-file-citation{path="/tmp/report.pdf"}';
+    await renderMarkdown('`' + citation + '`\n\n```text\n' + citation + '\n```');
+    expect(container?.querySelector('button[aria-label="report.pdf"]')).toBeNull();
+    expect(container?.querySelector('code')?.textContent).toBe(citation);
+    await renderMarkdown(citation.slice(0, -1));
+    expect(container?.querySelector('button[aria-label="report.pdf"]')).toBeNull();
+    await renderMarkdown(citation + ' ' + citation);
+    expect(container?.querySelectorAll('button[aria-label="report.pdf"]')).toHaveLength(2);
   });
 
   it('does not parse dollars inside code spans or link labels as LaTeX', async () => {

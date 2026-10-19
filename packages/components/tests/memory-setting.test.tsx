@@ -18,6 +18,7 @@ Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
 const mocks = vi.hoisted(() => ({
   entries: [] as MemoryAssociation[],
   failSave: false,
+  beforeLink: async (_entry: MemoryAssociation) => {},
   remote: true,
   inPane: false,
   online: 'online' as 'online' | 'offline' | 'unknown',
@@ -66,6 +67,7 @@ vi.mock('../src/hooks/use-memory-associations', () => ({
   useMemoryAssociations: (machineId: string) => ({
     entries: mocks.entries.filter((entry) => entry.machineId === machineId),
     link: async (entry: MemoryAssociation) => {
+      await mocks.beforeLink(entry);
       if (mocks.failSave) throw new Error('storage unavailable');
       mocks.entries = [...mocks.entries, entry];
     },
@@ -126,6 +128,7 @@ beforeEach(async () => {
   await initI18n('en');
   mocks.entries = [];
   mocks.failSave = false;
+  mocks.beforeLink = async () => {};
   mocks.remote = true;
   mocks.inPane = false;
   mocks.online = 'online';
@@ -246,7 +249,7 @@ it('shows only saved associations and links exactly one external identity using 
   await click('Import');
   expect(document.querySelector('[role="dialog"] dl')).toBeNull();
   await act(async () =>
-    document.querySelector<HTMLButtonElement>('[role="radio"][aria-label="Designer"]')!.click()
+    document.querySelector<HTMLButtonElement>('[role="checkbox"][aria-label="Designer"]')!.click()
   );
   expect(document.querySelector('[role="dialog"] dl')).toBeNull();
   expect(document.querySelector('[role="dialog"] dl input')).toBeNull();
@@ -259,10 +262,87 @@ it('shows only saved associations and links exactly one external identity using 
   await click('Add memory');
   await click('Import');
   const linked = document.querySelector<HTMLButtonElement>(
-    '[role="radio"][aria-label="Designer"]'
+    '[role="checkbox"][aria-label="Designer"]'
   )!;
   expect(linked.disabled).toBe(true);
   expect(document.querySelector('[role="dialog"]')?.textContent).toContain('Designer · Imported');
+});
+
+function checkbox(name: string) {
+  return document.querySelector<HTMLButtonElement>(`[role="checkbox"][aria-label="${name}"]`)!;
+}
+function importButton() {
+  return document.querySelector<HTMLButtonElement>('button[type="submit"]')!;
+}
+
+it('imports multiple checked identities and disables submission when all are unchecked', async () => {
+  ready();
+  await renderSetting();
+  await click('Add memory');
+  await click('Import');
+  expect(importButton().disabled).toBe(true);
+  await click('Reviewer');
+  await click('Reviewer');
+  expect(checkbox('Reviewer').getAttribute('aria-checked')).toBe('false');
+  expect(importButton().disabled).toBe(true);
+  await click('Reviewer');
+  await click('Designer');
+  expect(checkbox('Reviewer').getAttribute('aria-checked')).toBe('true');
+  expect(checkbox('Designer').getAttribute('aria-checked')).toBe('true');
+  await submit();
+  expect(mocks.entries).toEqual([
+    saved,
+    { ...saved, memoryId: 'designer', name: 'Designer', description: 'Design lessons' },
+  ]);
+  expect(document.querySelector('[role="dialog"]')).toBeNull();
+});
+
+it('retains successful imports and retries only the remaining selections after a failure', async () => {
+  ready();
+  mocks.beforeLink = async (entry) => {
+    if (entry.memoryId === 'designer') throw new Error('storage unavailable');
+  };
+  await renderSetting();
+  await click('Add memory');
+  await click('Import');
+  await click('Reviewer');
+  await click('Designer');
+  await submit();
+  expect(mocks.entries).toEqual([saved]);
+  await renderSetting();
+  expect(document.querySelector('[role="dialog"]')).not.toBeNull();
+  expect(checkbox('Reviewer').disabled).toBe(true);
+  expect(checkbox('Reviewer').getAttribute('aria-checked')).toBe('false');
+  expect(checkbox('Designer').getAttribute('aria-checked')).toBe('true');
+  mocks.beforeLink = async () => {};
+  await submit();
+  expect(mocks.entries.map((entry) => entry.memoryId)).toEqual(['reviewer', 'designer']);
+  expect(document.querySelector('[role="dialog"]')).toBeNull();
+});
+
+it('locks selection and navigation until the batch finishes saving', async () => {
+  ready();
+  let release!: () => void;
+  const pending = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  mocks.beforeLink = async () => pending;
+  await renderSetting();
+  await click('Add memory');
+  await click('Import');
+  await click('Reviewer');
+  await click('Designer');
+  await submit();
+  expect(checkbox('Reviewer').disabled).toBe(true);
+  expect(checkbox('Designer').disabled).toBe(true);
+  expect(importButton().disabled).toBe(true);
+  expect(button('Cancel').disabled).toBe(true);
+  await click('Create');
+  expect(checkbox('Designer')).not.toBeNull();
+  expect(document.querySelector('[aria-label="Agent ID"]')).toBeNull();
+  await act(async () => release());
+  expect(mocks.entries.map((entry) => entry.memoryId)).toEqual(['reviewer', 'designer']);
+  expect(document.querySelector('[role="dialog"]')).toBeNull();
 });
 
 it('creates in nmem then retries only the Lody association if saving fails', async () => {

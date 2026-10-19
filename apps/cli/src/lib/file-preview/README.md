@@ -7,8 +7,9 @@ the reasoning behind those rules.
 
 - `file-preview-service.ts` — resolves the workspace, authorizes the path, reads,
   classifies text vs binary, encodes, and answers.
-- `file-preview-path-policy.ts` — the security boundary: allowed roots, symlink
-  resolution, case/NFC-tolerant path resolution, and missing-path classification.
+- `file-preview-path-policy.ts` — CLI default allowed roots and the shared
+  `@lody/shared/node/file-preview-path-policy` resolver, also used by Electron.
+  The shared resolver preserves symlink, case/NFC and failure classification rules.
 - `file-preview-path-policy.test.ts` — exercises the fold walk through an injected
   `FilePreviewDirectoryReader`.
 
@@ -55,12 +56,17 @@ directory. Missing or invalid owner metadata and unavailable project/worktree
 roots never fall back to another chat directory. This neither starts an agent nor
 activates Code Collab; see the [cold-chat fix](../../../../../.agents/notes/implemented/bug-fix/2026-10-09-cold-chat-file-preview-workspace.md).
 
-`file/resolve-local` validates durable session, machine, and child-owner identity
+The legacy `file/resolve-local` validates durable session, machine, and child-owner identity
 before resolving the canonical path without reading contents. If the workspace is
 unavailable, absolute and home-rooted paths still resolve as external readonly files;
 relative paths fail rather than using a substitute directory. Remote preview and
 Code Collab retain their workspace requirement. See the
 [local workspace independence fix](../../../../../.agents/notes/implemented/bug-fix/2026-10-10-local-preview-workspace-independence.md).
+
+Current Electron verifies its on-disk machine identity and resolves paths directly,
+without calling `file/resolve-local`. Its cached owner-session workspace root is
+path context, not a filesystem authorization grant. Absolute/home paths work
+without that root; remote reads still use this service's restricted policy.
 
 Electron's `local-file-resource.ts` provides small full text for
 editing and opaque resource URLs for paged text or streaming images. Per-read budgets,
@@ -77,3 +83,19 @@ real per-append ceiling is not asserted anywhere in this repo.
 The generic `permission-denied` copy ("Access denied") misdescribes a policy
 rejection as a filesystem one, so the web surface keys a dedicated presentation off
 the phrase "File is outside the workspace".
+
+## Failure classification and diagnostics
+
+Only ENOENT/ENOTDIR imply absence. Both realpath implementations may fail; retain
+permission and other I/O errors, including directory-listing failures during the
+case/Unicode fallback. Remote unresolved paths still require every candidate to
+be inside an allowed root before exposing a filesystem classification.
+
+The daily log's `[file-preview]` JSON events distinguish `resolve-workspace`,
+`resolve-owner`, `resolve-path`, and Electron/remote `read` failures. Resolution
+records the requested path, session/owner, workspace root, canonical path on
+success, and up to eight failed probes with operation/path/errno. Electron records
+read outcome and duration with machine/workspace/session identity. These are local
+diagnostics, contain no content or resource tokens, and are not protocol fields.
+Pair events by session and requested path to distinguish a wrong root, a missing
+file, a permission failure, and a file disappearing between resolution and read.

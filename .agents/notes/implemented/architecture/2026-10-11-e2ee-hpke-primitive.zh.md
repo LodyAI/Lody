@@ -15,7 +15,7 @@ main 已有格式、验签和内容加密基础，但缺 HPKE 原语。本切片
 
 最终固定 main base 为 `26726a46b11a9b8ae9f1f7f8a0e89ef7d430b760`，已包含 #1417/#1418。初查使用 `978fb404cd2ef0de6c6e35322c226103704167b2`。初查 #1418 仍开放，未使用未合入实现。clone 与 pnpm store 独立，不修改候选、主协调计划或其他作者目录。
 
-候选 `bd5a9c1ec71ed7fa8085e51faec4f1e8dbe985b8` 同时保留旧 JSON 原型和现行账本信封。现行账本规范 §8.5 固定 Base 0x0020/0x0001/0x0003、info `lody-e2ee/hpke-epoch/v1\0`、规范 CBOR `[genesis32, epoch, senderSign32, recipientSign32]`、32 字节明文和 `AAD || enc32 || ct48 || signature64`。外层签名域保留 `lody-e2ee/epoch-env/v1\0`。白皮书 v0.16 保留 epoch 信封；不迁入使用 `lody-epoch-key-hpke/v1` 的旧 JSON 格式。不选择新协议字段或恢复格式。[来源指纹](../../../../packages/e2ee-core/provenance.json)记录源/目标 SHA-256。
+候选 `bd5a9c1ec71ed7fa8085e51faec4f1e8dbe985b8` 同时保留旧 JSON 原型和现行账本信封。现行账本规范 §8.5 固定 Base 0x0020/0x0001/0x0003、info `lody-e2ee/hpke-epoch/v1\0`、规范 CBOR `[genesis32, epoch, senderSign32, recipientSign32]`、32 字节明文和 `AAD || enc32 || ct48 || signature64`。外层签名域保留 `lody-e2ee/epoch-env/v1\0`。白皮书 v0.16 保留 epoch 信封；不迁入使用 `lody-epoch-key-hpke/v1` 的旧 JSON 格式。不选择新协议字段或恢复格式。[来源指纹](https://github.com/LodyAI/Lody/blob/5f97599e60700d6185834632df85922ea0d73ec6/packages/e2ee-core/provenance.json)记录源/目标 SHA-256。
 
 新增依赖只包含候选闭包 core 1.9.0、chacha20poly1305 1.8.0 和 common 1.10.1。Effect 仍为 4.0.2。已撤掉 pnpm add 附带的锁文件重排/间接升级，冻结安装验证最小锁文件。
 

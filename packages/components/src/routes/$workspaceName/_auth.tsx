@@ -30,7 +30,7 @@ import { identifyPostHogUser } from '@/lib/posthog-identity';
 import { scheduleOneSignalTask } from '@/lib/onesignal';
 import { PreloadedMainLayout } from '@/components/preloaded-main-layout';
 import { RouteMessage } from '@/components/route-message';
-import { LoadingPlaceholder } from '@/components/loading-placeholder';
+import { BlockingWaitPlaceholder } from '@/components/blocking-wait-placeholder';
 import { useVisibleMachineMetas } from '@/hooks/use-visible-machine-metas';
 import { useFireOncePerKey } from '@/hooks/use-fire-once';
 import { type LodyLiveActivityBridge, useLodyLiveActivity } from '@/hooks/use-lody-live-activity';
@@ -38,6 +38,11 @@ import { isNativeIOSAppShell } from '@/lib/native-platform';
 import { isLocalAppPlatform } from '@/lib/app-platform';
 import { useResolvedWorkspaceScope } from '../../hooks/use-resolved-workspace-scope';
 import { WorkspaceSyncStuckReporter } from '@/components/workspace-sync-stuck-reporter';
+import {
+  resolveWorkspaceDataWaitKind,
+  useRecordWorkspaceDataReady,
+  WorkspaceDataWait,
+} from '@/components/workspace-data-wait';
 import { useBillingOverviewPreload } from '../../hooks/use-billing-overview-preload';
 
 const AUTH_ROUTE_ONESIGNAL_LOGIN_IDLE_TIMEOUT_MS = 10_000;
@@ -278,7 +283,8 @@ function CloudMainLayoutComponent({ workspaceName }: { workspaceName: string }) 
 
   if (!sessionSettled) {
     return (
-      <LoadingPlaceholder
+      <BlockingWaitPlaceholder
+        gate="session_loading"
         variant="boot"
         title={t('workspace.route.signingInTitle')}
         description={t('workspace.route.signingInDescription')}
@@ -288,7 +294,8 @@ function CloudMainLayoutComponent({ workspaceName }: { workspaceName: string }) 
 
   if (isPending || isRetrying) {
     return (
-      <LoadingPlaceholder
+      <BlockingWaitPlaceholder
+        gate="session_loading"
         variant="boot"
         title={t('workspace.route.signingInTitle')}
         description={t('workspace.route.signingInDescription')}
@@ -299,6 +306,7 @@ function CloudMainLayoutComponent({ workspaceName }: { workspaceName: string }) 
   if (error) {
     return (
       <RouteMessage
+        gate="session_load_error"
         title={t('workspace.route.sessionLoadErrorTitle')}
         description={t('workspace.route.sessionLoadErrorDescription')}
       />
@@ -359,6 +367,7 @@ function AuthedLayoutRoutes({
   useBillingOverviewPreload(user ? currentWorkspaceId : null);
   const [orgSettled, setOrgSettled] = useState(!organizationsLoading);
   const [userSettled, setUserSettled] = useState(Boolean(user) && Boolean(currentWorkspaceId));
+  useRecordWorkspaceDataReady(currentWorkspaceId ? workspaceName : null, user?.id ?? null);
 
   useEffect(() => {
     if (!organizationsLoading) {
@@ -378,13 +387,13 @@ function AuthedLayoutRoutes({
     }
 
     if (!currentWorkspaceId) {
+      const waitKind = resolveWorkspaceDataWaitKind(workspaceName, user?.id ?? null);
+      if (waitKind === 'cold-start') {
+        return <WorkspaceDataWait kind={waitKind} />;
+      }
       return (
         <PreloadedMainLayout workspaceReady={false}>
-          <LoadingPlaceholder
-            variant="content"
-            title={t('workspace.route.switchingTitle')}
-            description={t('workspace.route.switchingDescription')}
-          />
+          <WorkspaceDataWait kind={waitKind} />
         </PreloadedMainLayout>
       );
     }
@@ -398,7 +407,8 @@ function AuthedLayoutRoutes({
 
   if (!orgSettled || !userSettled) {
     return (
-      <LoadingPlaceholder
+      <BlockingWaitPlaceholder
+        gate="workspace_setup"
         variant="boot"
         title={t('workspace.route.loadingTitle')}
         description={t('workspace.route.setupLoadingDescription')}
@@ -409,6 +419,7 @@ function AuthedLayoutRoutes({
   if (organizationsError) {
     return (
       <RouteMessage
+        gate="workspace_list_error"
         title={t('workspace.route.loadingWorkspacesErrorTitle')}
         description={t('workspace.route.loadingWorkspacesErrorDescription')}
         onRetry={() => {
@@ -421,7 +432,8 @@ function AuthedLayoutRoutes({
 
   if (organizationsLoading) {
     return (
-      <LoadingPlaceholder
+      <BlockingWaitPlaceholder
+        gate="workspace_list_loading"
         variant="boot"
         title={t('workspace.route.loadingWorkspacesTitle')}
         description={t('workspace.route.loadingWorkspacesDescription')}
@@ -432,6 +444,7 @@ function AuthedLayoutRoutes({
   if (organizations === undefined) {
     return (
       <RouteMessage
+        gate="workspace_list_error"
         title={t('workspace.route.loadingWorkspacesErrorTitle')}
         description={t('workspace.route.loadingWorkspacesErrorDescription')}
         onRetry={() => {
@@ -448,7 +461,8 @@ function AuthedLayoutRoutes({
 
   if (!user || !currentWorkspaceId) {
     return (
-      <LoadingPlaceholder
+      <BlockingWaitPlaceholder
+        gate="workspace_setup"
         variant="boot"
         title={t('workspace.route.loadingTitle')}
         description={t('workspace.route.setupLoadingDescription')}

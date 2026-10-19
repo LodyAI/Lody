@@ -31,7 +31,8 @@ Performance comparisons must use the current full-Mirror baseline.
 ## Lightweight hosted entries
 
 - `lib/client-build-info.ts` owns build provenance for About and reports. Bug report
-  metadata contains only build constants, distinct from remote machine logs.
+  diagnostics use `lib/client-diagnostics.ts`'s environment allowlist and a bounded
+  tail from `lib/client-log.ts`, distinct from remote machine logs.
 
 - Public/auth entry points that bypass the full product router import route-agnostic
   surfaces. Keep host navigation behind callback props so those surfaces do not import
@@ -86,11 +87,12 @@ Performance comparisons must use the current full-Mirror baseline.
 
 ## Workspace transitions
 
-- Default app entry opens the workspace chat landing; never persist or restore the
-  last visited route. Explicit deep links and requested window targets retain their destination.
-  Entry/workspace gate redirects use `BootNavigate`; `PreloadedMainLayout` owns its
-  boot-shell Suspense fallback. Keep a visible shell until the destination commits;
-  the hidden warm window's `/` remains neutral.
+- Default to chat; never restore the last route; preserve deep links and window
+  targets. `BootNavigate` hints geometry; `PreloadedMainLayout` owns code fallback.
+  `BootShellBoundary` inside the route error boundary holds one shell through gates
+  until recovery or destination commits; animation never gates readiness. Boot and
+  real cards share frames. `DocumentStyle` owns updates; retire inline first-paint
+  styles only after live commit. Keep the hidden warm window's `/` neutral.
 
 - Dock counts derive from complete active metadata and the sidebar's child activity
   summary. Publish absolute snapshots, including zero, on change and every 30 seconds;
@@ -105,13 +107,15 @@ Performance comparisons must use the current full-Mirror baseline.
   and the mobile workspace stack do not start early. The workspace identity's
   syncing state follows that same scoped readiness, not the coarser connection
   state; an online transport does not imply that workspace data is ready.
+  A cold start (no workspace ready yet in this page) has no layout to keep: it
+  continues the boot shell, and only a real switch says "Switching workspace"
+  ([decision](../../../.agents/notes/implemented/bug-fix/2026-10-16-cold-start-workspace-wait.md)).
 
 ## Billing data
 
-- When authenticated user and workspace resolution completes, preload the billing
-  overview into the existing session-scoped billing-page cache. The preload is only
-  a latency optimization: billing permissions, quota checks, destructive-operation
-  guards, and Stripe invoice history keep their existing live/on-demand data paths.
+- After auth/workspace resolution, preload billing overview into the session-scoped
+  cache for latency only. Permissions, quotas, destructive guards, and Stripe invoice
+  history remain live/on-demand.
 
 ## ACP selectors
 

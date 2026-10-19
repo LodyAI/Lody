@@ -159,8 +159,8 @@ describe('desktop sidebar toggle', () => {
     expect(container!.querySelector('[data-sidebar-identity]')).toBe(sidebar);
     expect(wrapper.getAttribute('aria-hidden')).toBe('true');
     expect(wrapper.hasAttribute('inert')).toBe(true);
-    expect(wrapper.style.marginRight).toBe('-280px');
-    expect(wrapper.style.transform).toBe('translateX(-280px)');
+    expect(wrapper.style.marginRight).toBe('-300px');
+    expect(wrapper.style.transform).toBe('translateX(-300px)');
     expect(wrapper.style.transitionProperty).toBe('transform, margin-right');
     expect(wrapper.style.transitionDuration).toBe('220ms');
     expect(document.activeElement).toBe(

@@ -15,187 +15,14 @@
 
 import { useLocation } from '@tanstack/react-router';
 import { useEffect, useRef, useState } from 'react';
-
-const VERT = /* glsl */ `
-attribute vec2 aPos;
-varying vec2 vUv;
-void main() {
-  vUv = aPos * 0.5 + 0.5;
-  gl_Position = vec4(aPos, 0.0, 1.0);
-}
-`;
-
-const PRESENT_FRAG = /* glsl */ `
-precision highp float;
-varying vec2 vUv;
-uniform sampler2D uFrom;
-uniform sampler2D uTo;
-uniform float uMix;
-
-void main() {
-  if (uMix <= 0.0) {
-    gl_FragColor = texture2D(uFrom, vUv);
-  } else if (uMix >= 1.0) {
-    gl_FragColor = texture2D(uTo, vUv);
-  } else {
-    gl_FragColor = mix(texture2D(uFrom, vUv), texture2D(uTo, vUv), uMix);
-  }
-}
-`;
-
-// uTheme: 0 = dark abyss, 1 = light shallow (landing BG_FRAG palette).
-const FRAG = /* glsl */ `
-precision highp float;
-uniform vec2 uRes;
-uniform float uTime;
-uniform float uMotion;
-uniform float uTheme;
-
-float hash(vec2 p) {
-  return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123);
-}
-
-float noise(vec2 p) {
-  vec2 i = floor(p);
-  vec2 f = fract(p);
-  f = f * f * (3.0 - 2.0 * f);
-  float a = hash(i);
-  float b = hash(i + vec2(1.0, 0.0));
-  float c = hash(i + vec2(0.0, 1.0));
-  float d = hash(i + vec2(1.0, 1.0));
-  return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
-}
-
-float fbm(vec2 p) {
-  float v = 0.0;
-  float a = 0.5;
-  mat2 m = mat2(1.6, 1.2, -1.2, 1.6);
-  for (int i = 0; i < 5; i++) {
-    v += a * noise(p);
-    p = m * p;
-    a *= 0.5;
-  }
-  return v;
-}
-
-// NOTE: the ridge highlights in main() need a finite difference of this whole
-// function. Holding the warp fixed and stepping inside warped space is ~5x cheaper
-// per tap but destroys the filigree — the warp's own gradient over e is larger than
-// e itself, so it carries most of the line structure. Do not "optimise" that away.
-float warped(vec2 p, float t) {
-  vec2 q = vec2(
-    fbm(p + vec2(1.4, 0.6) + vec2(0.0, t * 0.12)),
-    fbm(p + vec2(4.1, 2.8) - vec2(t * 0.09, 0.0))
-  );
-  vec2 r = vec2(
-    fbm(p + 3.4 * q + vec2(2.4, 7.1) + t * 0.055),
-    fbm(p + 3.4 * q + vec2(6.8, 1.9) - t * 0.04)
-  );
-  return fbm(p + 3.0 * r);
-}
-
-float causticNet(vec2 p, float t) {
-  vec2 w = p + 0.35 * vec2(
-    fbm(p * 0.9 + vec2(t * 0.05, 0.0)),
-    fbm(p * 0.9 + vec2(3.1, t * 0.04))
-  );
-  float c = 0.0;
-  c += sin(w.x * 7.5 + t * 0.35) * sin(w.y * 6.2 - t * 0.28);
-  c += 0.65 * sin((w.x + w.y) * 5.4 - t * 0.22);
-  c += 0.4 * sin((w.x - w.y) * 8.1 + t * 0.18);
-  return c * 0.5 + 0.5;
-}
-
-void main() {
-  vec2 uv = gl_FragCoord.xy / uRes;
-  float aspect = uRes.x / max(uRes.y, 1.0);
-  vec2 p = (uv - 0.5) * vec2(aspect, 1.0);
-  float y = uv.y;
-  float t = uTime;
-  float light = clamp(uTheme, 0.0, 1.0);
-
-  // --- Dark base (landing abyss) ------------------------------------------
-  vec3 dTop = vec3(0.028, 0.095, 0.168);
-  vec3 dMid = vec3(0.055, 0.175, 0.285);
-  vec3 dBot = vec3(0.022, 0.068, 0.138);
-  vec3 darkBase = y > 0.5
-    ? mix(dMid, dTop, (y - 0.5) * 2.0)
-    : mix(dBot, dMid, y * 2.0);
-
-  // --- Light base (shallow water — richer mid blue so structure has room) ---
-  // Not pure white: more saturation/depth so caustics don't wash out.
-  vec3 lTop  = vec3(0.88, 0.93, 0.98);
-  vec3 lMid  = vec3(0.62, 0.78, 0.92);
-  vec3 lBot  = vec3(0.48, 0.66, 0.84);
-  vec3 lightBase = y > 0.5
-    ? mix(lMid, lTop, (y - 0.5) * 2.0)
-    : mix(lBot, lMid, y * 2.0);
-
-  vec3 base = mix(darkBase, lightBase, light);
-
-  // Accents: bright caustics on dark; deeper teal veins on light (higher contrast).
-  vec3 dAqua = vec3(0.14, 0.66, 0.82);
-  vec3 dIce  = vec3(0.58, 0.80, 0.93);
-  vec3 lAqua = vec3(0.12, 0.42, 0.62);
-  vec3 lInk  = vec3(0.06, 0.22, 0.38);
-  vec3 aqua = mix(dAqua, lAqua, light);
-  vec3 ice  = mix(dIce, vec3(0.95, 0.98, 1.0), light);
-  vec3 deep = mix(vec3(0.03, 0.10, 0.19), lBot, light);
-
-  vec2 pField = p * 0.95 + vec2(0.18, -0.12);
-  float n = warped(pField + vec2(0.0, -t * 0.024), t * 0.075);
-  float n2 = warped(pField * 1.7 + vec2(t * 0.016, 0.08), t * 0.05 + 1.9);
-
-  float body = smoothstep(0.35, 0.72, n);
-  // Light: stronger body modulation so the field isn't a flat wash.
-  vec3 col = mix(base, deep, mix(0.22, 0.28, light) * (1.0 - body));
-  col = mix(col, mix(dMid * 1.15, lMid * 0.92, light), body * mix(0.28, 0.38, light));
-  col = mix(col, aqua * mix(0.14, 0.16, light) + base, body * mix(0.18, 0.22, light));
-
-  float e = 0.016;
-  float nx = warped(pField + vec2(e, 0.0) + vec2(0.0, -t * 0.024), t * 0.075) - n;
-  float ny = warped(pField + vec2(0.0, e) + vec2(0.0, -t * 0.024), t * 0.075) - n;
-  float ridge = 1.0 - smoothstep(0.0, 0.065, abs(nx) + abs(ny));
-  ridge *= smoothstep(0.2, 0.58, n) * (0.4 + 0.6 * n2);
-  float heightMask = smoothstep(0.0, 0.72, y) * 0.75 + 0.25;
-
-  // Dark: additive aqua light. Light: ink veins — boosted so they read clearly.
-  float ridgeAmt = mix(0.2, 0.28, light);
-  col += mix(aqua, lInk, light) * ridge * ridgeAmt * heightMask;
-  col += ice * ridge * ridge * mix(0.07, 0.09, light) * heightMask;
-
-  float net = causticNet(pField * 1.15 + vec2(0.0, -t * 0.03), t);
-  // Light: wider/soft threshold + higher weight so the net isn't lost.
-  net = smoothstep(mix(0.42, 0.32, light), mix(0.78, 0.72, light), net);
-  net *= heightMask * (0.55 + 0.45 * n);
-  col += mix(aqua, lInk, light) * net * mix(0.11, 0.2, light);
-  col += ice * net * net * mix(0.035, 0.06, light);
-
-  float veins = smoothstep(0.46, 0.58, n2) - smoothstep(0.58, 0.72, n2);
-  veins = max(veins, 0.0);
-  col += mix(aqua, lInk, light) * veins * mix(0.07, 0.12, light) * heightMask;
-
-  float shaft = pow(max(0.0, 1.0 - length((uv - vec2(0.42, 1.1)) * vec2(1.15, 1.65))), 2.0);
-  // Light: cooler top wash that still leaves mid-field free for structure.
-  col += mix(mix(aqua, ice, 0.35) * 0.11, ice * 0.12, light) * shaft;
-
-  float bands = sin((n * 3.8 + y * 2.0 - t * 0.05) * 3.14159);
-  bands = bands * bands;
-  col += mix(aqua, lInk, light) * bands * mix(0.015, 0.028, light) * heightMask;
-
-  // Vignette: darken edges on dark; cool rim on light (helps structure pop).
-  float vigAmt = mix(0.24, 0.2, light);
-  float vig = 1.0 - vigAmt * smoothstep(0.25, 1.15, length((uv - 0.5) * vec2(1.12, 1.0)));
-  col *= vig;
-  // Light only: slight blue push in the rim so edges aren't flat grey.
-  col = mix(col, col * vec3(0.92, 0.96, 1.02), light * (1.0 - vig) * 0.85);
-
-  col = pow(max(col, 0.0), vec3(mix(0.9, 0.94, light)));
-  col *= mix(1.05, 1.02, light);
-
-  gl_FragColor = vec4(col, 1.0);
-}
-`;
+import {
+  FIELD_FRAG,
+  FIELD_SAMPLE_FRAG,
+  FIELD_SHADE_FRAG,
+  PRESENT_FRAG,
+  ridgeTapPixels,
+  VERT,
+} from './marketing-atmosphere-shaders';
 
 /** Curated phase so first paint is mid-cycle (not the harsh t=0 warp). */
 const TIME_ORIGIN = 23.6;
@@ -207,11 +34,21 @@ const TIME_ORIGIN = 23.6;
  */
 const SAMPLE_FPS = 15;
 const SAMPLE_INTERVAL_MS = 1000 / SAMPLE_FPS;
-const SOFTWARE_SAMPLE_FPS = 8;
-const SOFTWARE_SAMPLE_INTERVAL_MS = 1000 / SOFTWARE_SAMPLE_FPS;
+/**
+ * Blends of a 15Hz signal gain nothing above 60fps, while every presented frame
+ * also makes the compositor re-blur each frosted panel over the canvas.
+ */
+const PRESENT_FPS = 60;
+const PRESENT_INTERVAL_MS = 1000 / PRESENT_FPS;
 const SLOW_PRESENT_FPS = 30;
 const SLOW_PRESENT_INTERVAL_MS = 1000 / SLOW_PRESENT_FPS;
-const SLOW_FIELD_GPU_MS = 12;
+/**
+ * Drop blends to 30fps only for a GPU the field genuinely saturates. Once timer
+ * queries worked, a 12ms floor fired on an M2 Max at dpr 2 (samples just over
+ * 12ms) and halved its blend rate although sample pacing already held the field
+ * near its GPU share.
+ */
+const SLOW_FIELD_GPU_MS = 25;
 const TARGET_FIELD_GPU_SHARE = 0.2;
 const DIRECT_FALLBACK_FPS = 30;
 const DIRECT_FALLBACK_FRAME_MS = 1000 / DIRECT_FALLBACK_FPS;
@@ -231,16 +68,42 @@ type DisjointTimerQueryExtension = {
   getQueryObjectEXT(query: TimerQuery, pname: number): unknown;
 };
 
-type TemporalTarget = {
+type DisjointTimerQueryWebGL2Extension = {
+  TIME_ELAPSED_EXT: number;
+  GPU_DISJOINT_EXT: number;
+};
+
+/**
+ * Completion probe for one field sample. `exact` results come from a GPU timer
+ * query; fence results only say the sample finished, so the caller estimates
+ * its cost from the wall-clock latency.
+ */
+type ProbeResult =
+  | { done: false }
+  | { done: true; exact: true; gpuMs: number | null }
+  | { done: true; exact: false };
+
+type GpuProbe = {
+  poll(): ProbeResult;
+  dispose(): void;
+};
+
+type RenderTarget = {
   texture: WebGLTexture;
   framebuffer: WebGLFramebuffer;
+};
+
+type FieldTarget = RenderTarget & {
+  width: number;
+  height: number;
+  tap: number;
 };
 
 type PendingSample = {
   index: number;
   submittedAt: number;
   assumeReadyAt: number;
-  query: TimerQuery | null;
+  probe: GpuProbe | null;
   seed: boolean;
   gpuDurationMs: number | null;
 };
@@ -250,6 +113,14 @@ type TemporalTransition = {
   toIndex: number;
   startedAt: number;
   durationMs: number;
+};
+
+type FieldUniforms = {
+  aPos: number;
+  uRes: WebGLUniformLocation | null;
+  uTime: WebGLUniformLocation | null;
+  uMotion: WebGLUniformLocation | null;
+  uTheme: WebGLUniformLocation | null;
 };
 
 function isDarkTheme(): boolean {
@@ -292,6 +163,38 @@ function link(
   return program;
 }
 
+function buildProgram(
+  gl: WebGLRenderingContext,
+  vert: WebGLShader,
+  fragSource: string
+): WebGLProgram | null {
+  const frag = compile(gl, gl.FRAGMENT_SHADER, fragSource);
+  if (!frag) return null;
+  const program = link(gl, vert, frag);
+  gl.deleteShader(frag);
+  return program;
+}
+
+function fieldUniforms(gl: WebGLRenderingContext, program: WebGLProgram): FieldUniforms {
+  return {
+    aPos: gl.getAttribLocation(program, 'aPos'),
+    uRes: gl.getUniformLocation(program, 'uRes'),
+    uTime: gl.getUniformLocation(program, 'uTime'),
+    uMotion: gl.getUniformLocation(program, 'uMotion'),
+    uTheme: gl.getUniformLocation(program, 'uTheme'),
+  };
+}
+
+const CONTEXT_ATTRIBUTES: WebGLContextAttributes = {
+  alpha: false,
+  antialias: false,
+  depth: false,
+  stencil: false,
+  premultipliedAlpha: false,
+  powerPreference: 'low-power',
+  preserveDrawingBuffer: false,
+};
+
 /**
  * Marketing routes that share this atmosphere. Hosted once at the app root so
  * price ↔ download ↔ changelog navigation never recompiles WebGL.
@@ -324,22 +227,16 @@ export function MarketingAtmosphere({
     const canvas = canvasRef.current;
     if (!canvas) return undefined;
 
-    const gl =
-      canvas.getContext('webgl', {
-        alpha: false,
-        antialias: false,
-        depth: false,
-        stencil: false,
-        premultipliedAlpha: false,
-        powerPreference: 'low-power',
-        preserveDrawingBuffer: false,
-      }) ||
+    // WebGL2 adds fences and the timer-query extension browsers still expose, so
+    // sample pacing can see the GPU. The shaders are GLSL ES 1.00 either way.
+    const gl2 = canvas.getContext('webgl2', CONTEXT_ATTRIBUTES);
+    const gl: WebGLRenderingContext | null =
+      gl2 ||
+      canvas.getContext('webgl', CONTEXT_ATTRIBUTES) ||
       (canvas.getContext('experimental-webgl', {
-        alpha: false,
-        antialias: false,
-        depth: false,
-        stencil: false,
-        premultipliedAlpha: false,
+        ...CONTEXT_ATTRIBUTES,
+        powerPreference: undefined,
+        preserveDrawingBuffer: undefined,
       }) as WebGLRenderingContext | null);
 
     if (!gl) {
@@ -348,85 +245,104 @@ export function MarketingAtmosphere({
     }
 
     const vert = compile(gl, gl.VERTEX_SHADER, VERT);
-    const fieldFrag = compile(gl, gl.FRAGMENT_SHADER, FRAG);
-    if (!vert || !fieldFrag) {
-      canvas.dataset.fallback = 'true';
-      return undefined;
-    }
-    const fieldProgram = link(gl, vert, fieldFrag);
-    gl.deleteShader(fieldFrag);
-    if (!fieldProgram) {
-      gl.deleteShader(vert);
+    const fieldProgram = vert ? buildProgram(gl, vert, FIELD_FRAG) : null;
+    if (!vert || !fieldProgram) {
+      if (vert) gl.deleteShader(vert);
       canvas.dataset.fallback = 'true';
       return undefined;
     }
 
-    // Temporal presentation is optional. Failure here retains the previous
-    // direct full-resolution renderer rather than losing the atmosphere.
-    const presentFrag = compile(gl, gl.FRAGMENT_SHADER, PRESENT_FRAG);
-    const presentProgram = presentFrag ? link(gl, vert, presentFrag) : null;
+    // Temporal presentation and the split field are optional. Failure here
+    // retains the previous direct full-resolution renderer rather than losing
+    // the atmosphere.
+    const presentProgram = buildProgram(gl, vert, PRESENT_FRAG);
+    let sampleProgram = buildProgram(gl, vert, FIELD_SAMPLE_FRAG);
+    let shadeProgram = sampleProgram ? buildProgram(gl, vert, FIELD_SHADE_FRAG) : null;
+    if (!shadeProgram && sampleProgram) {
+      gl.deleteProgram(sampleProgram);
+      sampleProgram = null;
+    }
     gl.deleteShader(vert);
-    if (presentFrag) gl.deleteShader(presentFrag);
+
+    const deletePrograms = () => {
+      gl.deleteProgram(fieldProgram);
+      if (presentProgram) gl.deleteProgram(presentProgram);
+      if (sampleProgram) gl.deleteProgram(sampleProgram);
+      if (shadeProgram) gl.deleteProgram(shadeProgram);
+    };
 
     const buf = gl.createBuffer();
     if (!buf) {
-      gl.deleteProgram(fieldProgram);
-      if (presentProgram) gl.deleteProgram(presentProgram);
+      deletePrograms();
       canvas.dataset.fallback = 'true';
       return undefined;
     }
     gl.bindBuffer(gl.ARRAY_BUFFER, buf);
     gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
 
-    const fieldAPos = gl.getAttribLocation(fieldProgram, 'aPos');
-    const uRes = gl.getUniformLocation(fieldProgram, 'uRes');
-    const uTime = gl.getUniformLocation(fieldProgram, 'uTime');
-    const uMotion = gl.getUniformLocation(fieldProgram, 'uMotion');
-    const uTheme = gl.getUniformLocation(fieldProgram, 'uTheme');
+    const directUniforms = fieldUniforms(gl, fieldProgram);
+    const sampleUniforms = sampleProgram ? fieldUniforms(gl, sampleProgram) : null;
+    const shadeUniforms = shadeProgram ? fieldUniforms(gl, shadeProgram) : null;
+    const uField = shadeProgram ? gl.getUniformLocation(shadeProgram, 'uField') : null;
+    const uFieldSize = shadeProgram ? gl.getUniformLocation(shadeProgram, 'uFieldSize') : null;
+    const uTap = shadeProgram ? gl.getUniformLocation(shadeProgram, 'uTap') : null;
     const presentAPos = presentProgram ? gl.getAttribLocation(presentProgram, 'aPos') : -1;
     const uFrom = presentProgram ? gl.getUniformLocation(presentProgram, 'uFrom') : null;
     const uTo = presentProgram ? gl.getUniformLocation(presentProgram, 'uTo') : null;
     const uMix = presentProgram ? gl.getUniformLocation(presentProgram, 'uMix') : null;
 
-    gl.useProgram(fieldProgram);
-    gl.bindBuffer(gl.ARRAY_BUFFER, buf);
-    gl.enableVertexAttribArray(fieldAPos);
-    gl.vertexAttribPointer(fieldAPos, 2, gl.FLOAT, false, 0, 0);
     gl.disable(gl.DEPTH_TEST);
     gl.disable(gl.BLEND);
 
-    let timerExt = gl.getExtension(
-      'EXT_disjoint_timer_query'
-    ) as DisjointTimerQueryExtension | null;
+    let timerExt = gl2
+      ? null
+      : (gl.getExtension('EXT_disjoint_timer_query') as DisjointTimerQueryExtension | null);
+    let timerExt2 = gl2
+      ? (gl2.getExtension(
+          'EXT_disjoint_timer_query_webgl2'
+        ) as DisjointTimerQueryWebGL2Extension | null)
+      : null;
     const rendererInfo = gl.getExtension('WEBGL_debug_renderer_info');
     const renderer = rendererInfo
       ? String(gl.getParameter(rendererInfo.UNMASKED_RENDERER_WEBGL)).toLowerCase()
       : '';
+    // A CPU rasteriser spends seconds of every core per full-screen sample, so
+    // it gets the still frame that reduced motion gets.
     const softwareRenderer = /swiftshader|llvmpipe|software/.test(renderer);
 
     const motionMq = window.matchMedia('(prefers-reduced-motion: reduce)');
-    let motion = motionMq.matches ? 0 : 1;
+    const readMotion = () => (motionMq.matches || softwareRenderer ? 0 : 1);
+    let motion = readMotion();
     let theme = isDarkTheme() ? 0 : 1; // 0 dark, 1 light
     let themeTarget = theme;
     let tabVisible = document.visibilityState === 'visible';
     let raf = 0;
     let running = true;
-    // Presentation follows display frames on capable GPUs. Heavy field samples
-    // are separately paced and never overlap on the GPU.
+    // Presentation follows display frames up to PRESENT_FPS on capable GPUs.
+    // Heavy field samples are separately paced and never overlap on the GPU.
     let lastPaintAt = -1;
     let lastDirectPaintAt = -1;
     const start = performance.now();
     const maxDpr = 1.5;
-    let temporalTargets: TemporalTarget[] = [];
+    let temporalTargets: RenderTarget[] = [];
+    let fieldTarget: FieldTarget | null = null;
     let temporalUnavailable = !presentProgram;
+    let splitUnavailable = !sampleProgram;
     let temporalResetNeeded = true;
     let endpointIndex: number | null = null;
     let pendingSample: PendingSample | null = null;
     let transition: TemporalTransition | null = null;
     let nextSampleAt = 0;
-    let sampleIntervalMs = softwareRenderer ? SOFTWARE_SAMPLE_INTERVAL_MS : SAMPLE_INTERVAL_MS;
-    let presentIntervalMs = softwareRenderer ? SLOW_PRESENT_INTERVAL_MS : 0;
+    let sampleIntervalMs = SAMPLE_INTERVAL_MS;
+    let presentIntervalMs = PRESENT_INTERVAL_MS;
     let lastPresentAt = -1;
+    // What the canvas currently shows, so an unchanged frame is not redrawn.
+    let shownKey = '';
+    let presentedThisFrame = false;
+    // Without a GPU timer, a fence after a cheap present frame measures the
+    // browser's own readback delay; a sample fence beyond that is field work.
+    let referenceFence: { probe: GpuProbe; submittedAt: number } | null = null;
+    let referenceLatencyMs: number | null = null;
 
     const pageActive = () => activeRef.current;
 
@@ -440,82 +356,226 @@ export function MarketingAtmosphere({
       canvas.dataset.pageActive = on ? 'true' : 'false';
     };
 
-    const deletePendingQuery = () => {
-      if (pendingSample?.query && timerExt) {
-        timerExt.deleteQueryEXT(pendingSample.query);
+    const timerProbe2 = (ctx: WebGL2RenderingContext, ext: DisjointTimerQueryWebGL2Extension) => {
+      const query = ctx.createQuery();
+      if (!query) return null;
+      ctx.beginQuery(ext.TIME_ELAPSED_EXT, query);
+      return (): GpuProbe => {
+        ctx.endQuery(ext.TIME_ELAPSED_EXT);
+        return {
+          poll: () => {
+            if (!ctx.getQueryParameter(query, ctx.QUERY_RESULT_AVAILABLE)) return { done: false };
+            if (ctx.getParameter(ext.GPU_DISJOINT_EXT))
+              return { done: true, exact: true, gpuMs: null };
+            const elapsedNs = Number(ctx.getQueryParameter(query, ctx.QUERY_RESULT));
+            return {
+              done: true,
+              exact: true,
+              gpuMs: Number.isFinite(elapsedNs) && elapsedNs > 0 ? elapsedNs / 1_000_000 : null,
+            };
+          },
+          dispose: () => ctx.deleteQuery(query),
+        };
+      };
+    };
+
+    const timerProbe1 = (ext: DisjointTimerQueryExtension) => {
+      const query = ext.createQueryEXT();
+      if (!query) return null;
+      ext.beginQueryEXT(ext.TIME_ELAPSED_EXT, query);
+      return (): GpuProbe => {
+        ext.endQueryEXT(ext.TIME_ELAPSED_EXT);
+        return {
+          poll: () => {
+            if (!ext.getQueryObjectEXT(query, ext.QUERY_RESULT_AVAILABLE_EXT))
+              return { done: false };
+            // Read the result before deleting it. It controls both field duty
+            // cycle and presentation pacing when the GPU cannot keep up cheaply.
+            if (gl.getParameter(ext.GPU_DISJOINT_EXT))
+              return { done: true, exact: true, gpuMs: null };
+            const elapsedNs = Number(ext.getQueryObjectEXT(query, ext.QUERY_RESULT_EXT));
+            return {
+              done: true,
+              exact: true,
+              gpuMs: Number.isFinite(elapsedNs) && elapsedNs > 0 ? elapsedNs / 1_000_000 : null,
+            };
+          },
+          dispose: () => ext.deleteQueryEXT(query),
+        };
+      };
+    };
+
+    const fenceProbe = (ctx: WebGL2RenderingContext): GpuProbe | null => {
+      const sync = ctx.fenceSync(ctx.SYNC_GPU_COMMANDS_COMPLETE, 0);
+      if (!sync) return null;
+      return {
+        poll: () =>
+          ctx.getSyncParameter(sync, ctx.SYNC_STATUS) === ctx.SIGNALED
+            ? { done: true, exact: false }
+            : { done: false },
+        dispose: () => ctx.deleteSync(sync),
+      };
+    };
+
+    /** Starts timing a sample; the returned function closes it after the draws. */
+    const openProbe = (): (() => GpuProbe | null) => {
+      try {
+        if (gl2 && timerExt2) {
+          const close = timerProbe2(gl2, timerExt2);
+          if (close) return close;
+        }
+        if (timerExt) {
+          const close = timerProbe1(timerExt);
+          if (close) return close;
+        }
+      } catch {
+        timerExt = null;
+        timerExt2 = null;
       }
+      return () => (gl2 ? fenceProbe(gl2) : null);
+    };
+
+    const disposeProbe = (sample: PendingSample) => {
+      if (!sample.probe) return;
+      try {
+        sample.probe.dispose();
+      } catch {
+        // The context may already be lost; nothing left to free.
+      }
+      sample.probe = null;
+    };
+
+    const deletePendingSample = () => {
+      if (pendingSample) disposeProbe(pendingSample);
       pendingSample = null;
     };
 
-    const deleteTemporalTargets = () => {
-      for (const target of temporalTargets) {
-        gl.deleteFramebuffer(target.framebuffer);
-        gl.deleteTexture(target.texture);
+    const deleteReferenceFence = () => {
+      if (!referenceFence) return;
+      try {
+        referenceFence.probe.dispose();
+      } catch {
+        // The context may already be lost; nothing left to free.
       }
+      referenceFence = null;
+    };
+
+    // Only while no sample is queued, so the reference never waits on one.
+    const trackReferenceFence = (now: number, presented: boolean) => {
+      if (referenceFence) {
+        let done = false;
+        try {
+          done = referenceFence.probe.poll().done;
+        } catch {
+          deleteReferenceFence();
+          return;
+        }
+        if (!done) return;
+        const latency = now - referenceFence.submittedAt;
+        referenceLatencyMs =
+          referenceLatencyMs === null
+            ? latency
+            : referenceLatencyMs + (latency - referenceLatencyMs) * 0.25;
+        deleteReferenceFence();
+        return;
+      }
+      if (!presented || pendingSample || !gl2 || timerExt2) return;
+      const probe = fenceProbe(gl2);
+      if (probe) referenceFence = { probe, submittedAt: now };
+    };
+
+    const deleteTarget = (target: RenderTarget) => {
+      gl.deleteFramebuffer(target.framebuffer);
+      gl.deleteTexture(target.texture);
+    };
+
+    const deleteTemporalTargets = () => {
+      for (const target of temporalTargets) deleteTarget(target);
       temporalTargets = [];
     };
 
+    const deleteFieldTarget = () => {
+      if (fieldTarget) deleteTarget(fieldTarget);
+      fieldTarget = null;
+    };
+
     const resetTemporalState = () => {
-      deletePendingQuery();
+      deletePendingSample();
+      deleteReferenceFence();
       endpointIndex = null;
       transition = null;
       nextSampleAt = 0;
       lastPresentAt = -1;
+      shownKey = '';
       temporalResetNeeded = true;
+    };
+
+    const createTarget = (width: number, height: number, filter: number): RenderTarget | null => {
+      const texture = gl.createTexture();
+      const framebuffer = gl.createFramebuffer();
+      if (!texture || !framebuffer) {
+        if (texture) gl.deleteTexture(texture);
+        if (framebuffer) gl.deleteFramebuffer(framebuffer);
+        return null;
+      }
+      gl.bindTexture(gl.TEXTURE_2D, texture);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, filter);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, filter);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, width, height, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, texture, 0);
+      const complete = gl.checkFramebufferStatus(gl.FRAMEBUFFER) === gl.FRAMEBUFFER_COMPLETE;
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      gl.bindTexture(gl.TEXTURE_2D, null);
+      if (!complete) {
+        deleteTarget({ texture, framebuffer });
+        return null;
+      }
+      return { texture, framebuffer };
     };
 
     const allocateTemporalTargets = (width: number, height: number) => {
       if (temporalUnavailable || !presentProgram) return false;
-      deletePendingQuery();
+      deletePendingSample();
       deleteTemporalTargets();
 
-      const allocated: TemporalTarget[] = [];
+      const allocated: RenderTarget[] = [];
       for (let index = 0; index < 2; index++) {
-        const texture = gl.createTexture();
-        const framebuffer = gl.createFramebuffer();
-        if (!texture || !framebuffer) {
-          if (texture) gl.deleteTexture(texture);
-          if (framebuffer) gl.deleteFramebuffer(framebuffer);
-          for (const target of allocated) {
-            gl.deleteFramebuffer(target.framebuffer);
-            gl.deleteTexture(target.texture);
-          }
+        const target = createTarget(width, height, gl.LINEAR);
+        if (!target) {
+          for (const done of allocated) deleteTarget(done);
           temporalUnavailable = true;
           canvas.dataset.temporal = 'false';
           return false;
         }
-
-        gl.bindTexture(gl.TEXTURE_2D, texture);
-        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, width, height, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
-        gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
-        gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, texture, 0);
-        if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE) {
-          gl.deleteFramebuffer(framebuffer);
-          gl.deleteTexture(texture);
-          for (const target of allocated) {
-            gl.deleteFramebuffer(target.framebuffer);
-            gl.deleteTexture(target.texture);
-          }
-          gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-          temporalUnavailable = true;
-          canvas.dataset.temporal = 'false';
-          return false;
-        }
-        allocated.push({ texture, framebuffer });
+        allocated.push(target);
       }
 
-      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-      gl.bindTexture(gl.TEXTURE_2D, null);
       temporalTargets = allocated;
       temporalResetNeeded = true;
       endpointIndex = null;
       transition = null;
+      shownKey = '';
       canvas.dataset.temporal = 'true';
       return true;
+    };
+
+    // n / n2 at the canvas size plus the ridge tap on the right and top edges,
+    // read back texel-exact (NEAREST) by the shade pass.
+    const allocateFieldTarget = (width: number, height: number) => {
+      deleteFieldTarget();
+      if (splitUnavailable) return;
+      const tap = ridgeTapPixels(height);
+      const target = createTarget(width + tap, height + tap, gl.NEAREST);
+      if (!target) {
+        splitUnavailable = true;
+        canvas.dataset.split = 'false';
+        return;
+      }
+      fieldTarget = { ...target, width: width + tap, height: height + tap, tap };
+      canvas.dataset.split = 'true';
     };
 
     const resize = () => {
@@ -526,6 +586,7 @@ export function MarketingAtmosphere({
         canvas.width = w;
         canvas.height = h;
         gl.viewport(0, 0, w, h);
+        allocateFieldTarget(w, h);
         if (!temporalUnavailable) allocateTemporalTargets(w, h);
         else resetTemporalState();
         return true;
@@ -547,15 +608,35 @@ export function MarketingAtmosphere({
       lastPaintAt = now;
     };
 
+    const runField = (program: WebGLProgram, uniforms: FieldUniforms, fieldTime: number) => {
+      bindTriangle(program, uniforms.aPos);
+      gl.uniform2f(uniforms.uRes, canvas.width, canvas.height);
+      gl.uniform1f(uniforms.uTime, TIME_ORIGIN + fieldTime);
+      gl.uniform1f(uniforms.uMotion, motion);
+      gl.uniform1f(uniforms.uTheme, theme);
+      gl.drawArrays(gl.TRIANGLES, 0, 3);
+    };
+
     const drawField = (framebuffer: WebGLFramebuffer | null, fieldTime: number) => {
+      if (fieldTarget && sampleProgram && shadeProgram && sampleUniforms && shadeUniforms) {
+        gl.bindFramebuffer(gl.FRAMEBUFFER, fieldTarget.framebuffer);
+        gl.viewport(0, 0, fieldTarget.width, fieldTarget.height);
+        runField(sampleProgram, sampleUniforms, fieldTime);
+
+        gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
+        gl.viewport(0, 0, canvas.width, canvas.height);
+        gl.useProgram(shadeProgram);
+        gl.activeTexture(gl.TEXTURE0);
+        gl.bindTexture(gl.TEXTURE_2D, fieldTarget.texture);
+        gl.uniform1i(uField, 0);
+        gl.uniform2f(uFieldSize, fieldTarget.width, fieldTarget.height);
+        gl.uniform1f(uTap, fieldTarget.tap);
+        runField(shadeProgram, shadeUniforms, fieldTime);
+        return;
+      }
       gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
       gl.viewport(0, 0, canvas.width, canvas.height);
-      bindTriangle(fieldProgram, fieldAPos);
-      gl.uniform2f(uRes, canvas.width, canvas.height);
-      gl.uniform1f(uTime, TIME_ORIGIN + fieldTime);
-      gl.uniform1f(uMotion, motion);
-      gl.uniform1f(uTheme, theme);
-      gl.drawArrays(gl.TRIANGLES, 0, 3);
+      runField(fieldProgram, directUniforms, fieldTime);
     };
 
     const beginTimedSample = (
@@ -564,61 +645,56 @@ export function MarketingAtmosphere({
       now: number,
       seed: boolean
     ): PendingSample => {
-      let query: TimerQuery | null = null;
-      if (timerExt) {
-        try {
-          query = timerExt.createQueryEXT();
-          if (query) timerExt.beginQueryEXT(timerExt.TIME_ELAPSED_EXT, query);
-        } catch {
-          query = null;
-          timerExt = null;
-        }
-      }
-
+      const closeProbe = openProbe();
       drawField(temporalTargets[index].framebuffer, fieldTime);
-      if (query && timerExt) timerExt.endQueryEXT(timerExt.TIME_ELAPSED_EXT);
+      let probe: GpuProbe | null = null;
+      try {
+        probe = closeProbe();
+      } catch {
+        timerExt = null;
+        timerExt2 = null;
+      }
       gl.flush();
       return {
         index,
         submittedAt: now,
         assumeReadyAt: now + sampleIntervalMs,
-        query,
+        probe,
         seed,
         gpuDurationMs: null,
       };
     };
 
-    const sampleReady = (sample: PendingSample, now: number) => {
-      if (!sample.query || !timerExt) return now >= sample.assumeReadyAt;
+    const sampleReady = (pending: PendingSample, now: number) => {
+      if (!pending.probe) return now >= pending.assumeReadyAt;
+      let result: ProbeResult;
       try {
-        const available = Boolean(
-          timerExt.getQueryObjectEXT(sample.query, timerExt.QUERY_RESULT_AVAILABLE_EXT)
-        );
-        if (!available) return false;
-        const disjoint = Boolean(gl.getParameter(timerExt.GPU_DISJOINT_EXT));
-        // Read the result before deleting it. It controls both field duty cycle
-        // and presentation pacing when the GPU cannot keep up cheaply.
-        if (!disjoint) {
-          const elapsedNs = Number(
-            timerExt.getQueryObjectEXT(sample.query, timerExt.QUERY_RESULT_EXT)
-          );
-          if (Number.isFinite(elapsedNs) && elapsedNs > 0) {
-            sample.gpuDurationMs = elapsedNs / 1_000_000;
-          }
-        }
-        timerExt.deleteQueryEXT(sample.query);
-        sample.query = null;
-        return true;
+        result = pending.probe.poll();
       } catch {
         timerExt = null;
-        sample.query = null;
-        return now >= sample.assumeReadyAt;
+        timerExt2 = null;
+        disposeProbe(pending);
+        return now >= pending.assumeReadyAt;
       }
+      if (!result.done) return false;
+      disposeProbe(pending);
+      if (result.exact) {
+        pending.gpuDurationMs = result.gpuMs;
+      } else if (referenceLatencyMs !== null) {
+        // Fence status reaches script frames after the GPU finishes, and that
+        // delay varies by browser; only latency beyond a cheap frame's counts.
+        pending.gpuDurationMs = Math.max(0, now - pending.submittedAt - referenceLatencyMs);
+      }
+      return true;
     };
 
     const present = (fromIndex: number, toIndex: number, mix: number, now: number) => {
       if (!presentProgram) return false;
-      if (lastPresentAt >= 0 && now - lastPresentAt < presentIntervalMs - 1) {
+      const key =
+        mix <= 0 ? `${fromIndex}` : mix >= 1 ? `${toIndex}` : `${fromIndex}>${toIndex}@${mix}`;
+      if (key === shownKey) return true;
+      // Tolerate rAF jitter: a 60Hz display keeps every frame at a 60fps cap.
+      if (lastPresentAt >= 0 && now - lastPresentAt < presentIntervalMs * 0.75) {
         return false;
       }
       gl.bindFramebuffer(gl.FRAMEBUFFER, null);
@@ -633,17 +709,21 @@ export function MarketingAtmosphere({
       gl.uniform1f(uMix, mix);
       gl.drawArrays(gl.TRIANGLES, 0, 3);
       lastPresentAt = now;
+      shownKey = key;
+      presentedThisFrame = true;
       return true;
     };
 
-    const paintTemporal = (now: number, fieldTime: number) => {
+    const paintTemporalFrame = (now: number, fieldTime: number) => {
       if (temporalResetNeeded || endpointIndex === null) {
-        deletePendingQuery();
+        deletePendingSample();
         transition = null;
         endpointIndex = 0;
         pendingSample = beginTimedSample(0, fieldTime, now, true);
         nextSampleAt = now + sampleIntervalMs;
         temporalResetNeeded = false;
+        shownKey = '';
+        lastPresentAt = -1;
         present(0, 0, 0, now);
         return;
       }
@@ -653,7 +733,7 @@ export function MarketingAtmosphere({
         pendingSample = null;
         if (completed.gpuDurationMs !== null) {
           sampleIntervalMs = Math.max(
-            softwareRenderer ? SOFTWARE_SAMPLE_INTERVAL_MS : SAMPLE_INTERVAL_MS,
+            SAMPLE_INTERVAL_MS,
             completed.gpuDurationMs / TARGET_FIELD_GPU_SHARE
           );
           if (completed.gpuDurationMs >= SLOW_FIELD_GPU_MS) {
@@ -682,16 +762,22 @@ export function MarketingAtmosphere({
         return;
       }
 
-      const didPresent = present(endpointIndex, endpointIndex, 0, now);
+      const shown = present(endpointIndex, endpointIndex, 0, now);
 
       // Present the completed endpoint before queuing the next heavy pass. This
       // gives the compositor a cheap frame ahead of the field work and keeps at
       // most one sample in flight on slow GPUs.
-      if (didPresent && !pendingSample && now >= nextSampleAt) {
+      if (shown && !pendingSample && now >= nextSampleAt) {
         const freeIndex = endpointIndex === 0 ? 1 : 0;
         pendingSample = beginTimedSample(freeIndex, fieldTime, now, false);
         nextSampleAt = now + sampleIntervalMs;
       }
+    };
+
+    const paintTemporal = (now: number, fieldTime: number) => {
+      presentedThisFrame = false;
+      paintTemporalFrame(now, fieldTime);
+      trackReferenceFence(now, presentedThisFrame);
     };
 
     const paint = (now: number) => {
@@ -708,6 +794,8 @@ export function MarketingAtmosphere({
       if (now - lastDirectPaintAt >= DIRECT_FALLBACK_FRAME_MS - 1 || lastDirectPaintAt < 0) {
         drawField(null, fieldTime);
         lastDirectPaintAt = now;
+        // The canvas no longer shows a temporal endpoint.
+        shownKey = '';
       }
     };
 
@@ -744,7 +832,7 @@ export function MarketingAtmosphere({
     };
 
     const onMotion = () => {
-      motion = motionMq.matches ? 0 : 1;
+      motion = readMotion();
       resetTemporalState();
       lastDirectPaintAt = -1;
       kick();
@@ -796,11 +884,12 @@ export function MarketingAtmosphere({
       window.removeEventListener('resize', onResize);
       document.documentElement.classList.remove('marketing-atmosphere-active');
       document.documentElement.classList.remove('marketing-atmosphere-light');
-      deletePendingQuery();
+      deletePendingSample();
+      deleteReferenceFence();
       deleteTemporalTargets();
+      deleteFieldTarget();
       gl.deleteBuffer(buf);
-      gl.deleteProgram(fieldProgram);
-      if (presentProgram) gl.deleteProgram(presentProgram);
+      deletePrograms();
       // Deliberately NOT calling WEBGL_lose_context.loseContext() here. A canvas
       // hands the same context object back to every getContext() call, and a lost
       // one is never revived implicitly (restoreContext() is async). React

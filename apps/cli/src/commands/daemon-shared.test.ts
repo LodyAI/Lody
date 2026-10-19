@@ -9,6 +9,7 @@ import { startProcessLegacy } from '@lody/shared/node/process';
 import type { NodeProcessApi } from '@lody/shared/node/process';
 import { FakeProcessTable } from '@lody/shared/node/process-testing';
 import {
+  DAEMON_RUNNER_READY_TIMEOUT_MS,
   interpretDaemonRunnerLaunchOutcome,
   readPidFileRecord,
   removePidFile,
@@ -162,6 +163,42 @@ describe('daemon runner launch cleanup', () => {
       windowsHide: true,
       stdio: ['ignore', 'ignore', 'ignore', 'pipe'],
     });
+  });
+
+  it('keeps waiting for a slow cold start instead of killing the replacement', async () => {
+    const { table, api, readyPipes } = runnerProcessTable();
+    const launch = spawnDaemonRunnerAndAwaitReady([], {
+      nodeProcess: api,
+      pidFilePath: createPidPath(),
+    });
+    const runnerPid = 1000;
+    const workerPid = table.addDescendant(runnerPid);
+
+    // A Worker on a slow machine took about 40 seconds to reach ready.
+    await vi.advanceTimersByTimeAsync(45_000);
+    readyPipes[0]?.write(
+      `${JSON.stringify({ status: 'ready', pid: runnerPid, instanceId: 'slow' })}\n`
+    );
+
+    expect(await launch).toMatchObject({ status: 'ready', pid: runnerPid, instanceId: 'slow' });
+    expect(table.isAlive(runnerPid)).toBe(true);
+    expect(table.isAlive(workerPid)).toBe(true);
+  });
+
+  it('ends the runner and its Worker when it never reports readiness', async () => {
+    const { table, api } = runnerProcessTable();
+    const launch = spawnDaemonRunnerAndAwaitReady([], {
+      nodeProcess: api,
+      pidFilePath: createPidPath(),
+    });
+    const runnerPid = 1000;
+    const workerPid = table.addDescendant(runnerPid);
+
+    await vi.advanceTimersByTimeAsync(DAEMON_RUNNER_READY_TIMEOUT_MS);
+
+    expect(await launch).toEqual({ status: 'timeout', runnerPid });
+    expect(table.isAlive(runnerPid)).toBe(false);
+    expect(table.isAlive(workerPid)).toBe(false);
   });
 
   it('ends the runner and its Worker when the readiness report is invalid', async () => {

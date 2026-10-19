@@ -84,7 +84,7 @@ export function PrMergeButton({
     <div
       className={cn(
         'flex shrink-0 items-stretch overflow-hidden rounded-md',
-        compact && 'h-6 border border-status-success/35 bg-status-success/[0.08]'
+        compact && 'h-6 bg-status-success/[0.08]'
       )}
       data-pr-merge-control=""
     >
@@ -121,7 +121,7 @@ export function PrMergeButton({
                 type="button"
                 disabled={isMerging || !onSelectMethod}
                 aria-label={t('sessions.prTab.chooseMergeMethod', 'Choose merge method')}
-                className="relative flex w-5 items-center justify-center border-l border-status-success/20 text-status-success outline-none transition-colors enabled:hover:bg-status-success/[0.10] focus-visible:bg-status-success/[0.12] disabled:opacity-50"
+                className="relative flex w-5 items-center justify-center text-status-success outline-none transition-colors before:absolute before:left-0 before:h-3 before:w-px before:bg-status-success/25 enabled:hover:bg-status-success/[0.10] focus-visible:bg-status-success/[0.12] disabled:opacity-50"
               >
                 <ChevronDown className="h-3.5 w-3.5" />
               </button>

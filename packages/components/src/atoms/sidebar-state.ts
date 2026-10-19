@@ -276,8 +276,14 @@ export const sidebarCollapsedAtom: ReturnType<typeof atomWithStorage<boolean>> =
 /**
  * Last expanded width in px. Restored when the user re-opens the sidebar so
  * width preference survives collapse/expand cycles. 0 means "use default".
+ * Read synchronously so React's first boot frame matches the document shell.
  */
-export const sidebarLastWidthAtom = atomWithStorage<number>('lody-sidebar-last-width', 0);
+export const sidebarLastWidthAtom = atomWithStorage<number>(
+  'lody-sidebar-last-width',
+  0,
+  undefined,
+  { getOnInit: true }
+);
 
 // ============================================================================
 // Sidebar Organize Mode (Workspace vs Updated)
@@ -304,6 +310,20 @@ export const sidebarOrganizeModeAtom = atomWithStorage<SidebarOrganizeMode>(
 export const sidebarUpdatedShowProjectNamesAtom = atomWithStorage<boolean>(
   'lody-sidebar-updated-show-project-names',
   true
+);
+
+/**
+ * Whether rows show the branch on their second (meta) line wherever one
+ * exists: top-level GitHub and local-worktree rows in Workspace mode and
+ * top-level repo rows in Updated mode. It defaults off so branch metadata does
+ * not add a second line until the user opts in. Pairs with
+ * `sidebarUpdatedShowProjectNamesAtom` as the two switches of the filter
+ * popover's Details group — both stay interactive in every organize mode and
+ * each segment simply appears where the row carries it.
+ */
+export const sidebarShowBranchNamesAtom = atomWithStorage<boolean>(
+  'lody-sidebar-show-branch-names',
+  false
 );
 
 /**

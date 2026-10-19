@@ -6,6 +6,7 @@ import ampAcpSvg from './registry-assets/amp-acp.svg?raw';
 import antigravityAcpSvg from './registry-assets/antigravity-acp.svg?raw';
 import auggieSvg from './registry-assets/auggie.svg?raw';
 import autohandSvg from './registry-assets/autohand.svg?raw';
+import bobSvg from './registry-assets/bob.svg?raw';
 import clineSvg from './registry-assets/cline.svg?raw';
 import codebuddyCodeSvg from './registry-assets/codebuddy-code.svg?raw';
 import cortexCodeSvg from './registry-assets/cortex-code.svg?raw';
@@ -48,6 +49,7 @@ export const REGISTRY_AGENT_ICON_SVGS: Partial<Record<string, string>> = {
   'antigravity-acp': antigravityAcpSvg,
   auggie: auggieSvg,
   autohand: autohandSvg,
+  bob: bobSvg,
   cline: clineSvg,
   'codebuddy-code': codebuddyCodeSvg,
   'cortex-code': cortexCodeSvg,

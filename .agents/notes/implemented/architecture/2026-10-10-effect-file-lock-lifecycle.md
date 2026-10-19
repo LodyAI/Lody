@@ -128,3 +128,7 @@ recovery after Scope closure, successor protection, and combined body/file-relea
 failure. Deferred readiness and TestClock drive deadlines; no real sleeps are used.
 Temporary ablation scripts remain outside the repository. Application/session
 ownership and non-cooperative cross-process path replacement remain separate limits.
+
+Later change (2026-10-16): a holder no longer receives its own release failure;
+the service retains it for the next holder and disposal. See
+[holder release](2026-10-16-file-lock-holder-release.md).

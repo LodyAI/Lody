@@ -21,6 +21,20 @@ executable model, and this Spec.
 The experimental Review agent automation is retired. It no longer runs outside
 this delegation chain; see [Review agent retirement](review-agent-retirement.md).
 
+## Replying to the current task sender
+
+When an Agent-authored input from A drives B's active turn, B must not create a
+new chat back to A. Single and legacy chats fail before dispatch with non-retryable
+`REVERSE_CHAT_FORBIDDEN`. Batch items targeting A fail independently; a batch of
+only such targets is rejected before Operation acceptance. Other targets remain
+available, and already accepted retries retain their fixed identity.
+
+This restriction uses the exact active input's sender, not Session containment or
+older conversation history. A later human input or an input from another Session
+replaces this scope. Known Agent sender provenance is required; legacy inputs
+without it remain readable and retain existing behavior. This change does not add
+note tools or change result delivery timing.
+
 ## Session creation configuration
 
 An orchestrator can select the target Agent's advertised configuration on
@@ -45,6 +59,12 @@ a different explicit mode rather than silently overwriting it. An explicit Role
 remains authoritative: manual target and configuration fields are ignored before
 capability validation, command identity and dispatch.
 
+The CLI `lody session create --agent-role <idOrName>` resolves the same catalog
+Role by fixed id or unique name. The Role's machine, agent config, run
+configuration and Prompt prefix take precedence; overridden manual flags are
+reported as ignored, and the work-context flags (`--repo`, `--local-project`,
+`--branch`, `--worktree`) still apply.
+
 An explicit permission selection may be broader than the parent's. The caller
 must act within its user authorization. This interface introduces no permission
 ranking, escalation approval rule or safety boundary relative to CLI creation.
@@ -54,7 +74,18 @@ Explicit selectors participate in the canonical command fingerprint. Reordering
 map keys is the same request; changing selections under an accepted Operation id
 is `OPERATION_ID_REUSED`. Acceptance freezes each effective target dispatch config.
 Retry and recovery use that config rather than recomputing requester defaults or
-Role configuration. No Operation storage migration is required.
+Role configuration. Effective inherited mode/model/options retain internal provenance;
+replay keeps compatible values and drops incompatible inherited values, even when catalog
+freshness is unconfirmed. Current explicit selections remain strict. Effort and Fast use
+the effective target model on both initial validation and frozen replay.
+
+Internally synthesized builtin modes retain separate provenance so replay does not
+reinterpret a fallback default as an explicit user selection. Before the fixed UserTurn
+is authored, the default is re-derived against available capabilities. Interrupted
+materialization preserves only authored values reachable from its frozen inherited or
+synthesized provenance, without rewriting history or relaxing the complete immutable-input
+identity check. Provenance fields are not public MCP input or Session history. Existing
+stored inherited-default markers remain readable; no storage migration is required.
 
 ## Runtime model rejection
 
@@ -94,8 +125,9 @@ Recovery uses the frozen prompt, Role revision and dispatch configuration. Befor
 replaying a missing target input, cloud confirms remote document catch-up; OSS
 confirms the authoritative daemon repo and rechecks the fixed Turn under the
 existing materialization claim. Missing cloud connectivity never counts as local
-authority in a cloud workspace. Completion uses the existing single-owner Delivery
-protocol. No persisted schema or hosted API changes are required.
+authority in a cloud workspace. Completion writes directly to the native Inbox in
+the same Operation transaction; the result-consumption rules below control execution.
+This changes local persisted storage, not the hosted API.
 
 ## User-controlled conversation-tree stop
 
@@ -114,39 +146,72 @@ not promise simultaneous cancellation or rollback of already performed work.
 
 ## Idempotent message consumption
 
-When A sends work to B and B finishes, repeated notifications, retries and Worker
-replacement must not make A consume the same completion again. Identity is the
-machine-local pair `(requesterSessionId, operationId)`, with a fixed target input,
-Delivery and completion Turn. Retries retain that pair and the original source
-Turn, requester and command. A different Operation id denotes new work, even if
-its text is identical; content equality is not a deduplication key.
+Operation completion receipts enter the durable Inbox with wake eligibility. If a
+Session is idle, unpaused and has no unreleased resources or accepted queued input,
+one wakeable receipt grants a persistent automatic intent. Busy Sessions defer
+consumption until normal completion and actual release. Stop blocks receipt-driven
+wakes until fresh human or Agent-chat input. Result persistence and wake intent creation
+share the completion transaction; reopen recovers an unsubmitted intent without a new event.
+Suppressing user-facing completion notifications for Agent-initiated turns does not
+suppress Operation receipts or their wake eligibility.
 
-Acceptance and completion use SQLite transactions. The Host-lease Worker claims
-Delivery under the requester Session mutex, writes the fixed completion Turn,
-then records `prepared`. Its `started` fence commits before submitting to ACP.
-Confirmed pre-provider interruption may release preparation for bounded recovery.
-Once submitted, a Delivery prompt is never automatically submitted again. A
-disconnected transport, even without observed output, is uncertain consumption;
-retain the completion/output and surface `DELIVERY_EXECUTION_UNCERTAIN`. Startup
-recovery applies the same rule. Successful/cancelled settlement consumes the
-claim; a failed settlement write retries settlement rather than provider execution.
+Wake eligibility is distinct from membership: one wakeable receipt carries all
+unconsumed, unclaimed results in the same Session/User queue, including passive
+results. Snapshot the queue watermark and freeze members only when claiming the
+batch. Arrivals before claim coalesce; arrivals after claim stay queued for a later
+batch. Duplicate receipts/releases never create duplicate execution; empty queues
+never start a model. Submitted or unknown members never re-enter another batch.
 
-Persistence and consumption acknowledgement belong to the message orchestration
-store, not a model-provider protocol. This behavior applies to every runtime
-without changing ACP clients, adapters or negotiated capabilities. Duplicate
-notifications only reconcile the same durable Delivery. Successful settlement
-records its consumption; retries after a failed write settle the same claim.
-This guarantees at most one submission for a completion, not guaranteed successful
-model execution under a crash between the durable start fence and submission.
-Ordinary user-turn stale-connection recovery retains its existing behavior.
+Stop, fresh input acceptance and actual transport initiation share Session admission.
+Inbox-aware Stop persists pause before cancellation and cancels pre-Stop queued input eligibility
+while retaining history. The pause blocks only automatic completion wakes. Input sent
+after Stop by a human or by another Session's Agent chat ranks the same: it is admitted,
+clears the pause and carries saved results; old instructions require a new send.
+Receipts still decide only whether an input is recorded as human. Failed exits
+never auto-continue; unreleased resources block all successors. Normal future human
+turns resume the same receipt-driven scheduling rule. A failed exit alone grants no
+wake, but a later wakeable receipt may grant one after physical resource release.
 
-Consumed results may expire after seven days, but cleanup atomically retains a
-small retired-id record without prompts or outputs. That id can never be accepted
-again in the same store, including by older writers using the database triggers.
-Modern callers receive non-retryable `OPERATION_ID_REUSED`; lookup of the expired
-result still reports absence. Records grow with completed Operations. Deleting
-the store resets this guarantee; ids already removed before this migration
-cannot be reconstructed. Downgraded Workers retain their old ACP retry behavior.
+Missing or incomplete recovery journals must remain visible and recoverable. A local
+operator may explicitly attest that all old resources, including unrecorded ones,
+have been released while holding exclusive Host ownership; known live resources or
+uncertain probes still block recovery. Atomically retire the exact old execution and
+pause the session. Do not replay unknown submissions or manufacture a normal-release
+intent. Only fresh human or Agent-chat input resumes work afterward. A dead daemon PID alone
+is not release evidence. This maintenance action is not available through Agent/MCP tools.
+
+An automatic batch yields atomically to pre-submission human acceptance. A human input
+already being prepared survives later queued human input. Keep admission from the
+submission fence through synchronous transport initiation, without an intervening
+async check. Fresh input cannot revive a Stop-canceled execution. Execution identities
+and queued input identities remain distinct.
+
+Members and batchId are fixed. Preserve human text, attachments, config and causal
+depth; results are reference data. Automatic depth advances the maximum current/member
+depth by one. Never submit an empty automatic batch. Preview is bounded to 64 KiB;
+read complete contents through Session/user-bound pages of at most 128 KiB. Large
+individual members use ordered JSON fragments, not additional model turns.
+
+Post-fence uncertainty is permanent unknown submission, never replay. Human-plus-batch
+inputs also disable whole-input stale-ACP replay. Retry settlement writes only. Raw
+request/resource release differs from waiter cancellation or Scope close: retain full
+failures, shared shutdown receipts and independent recovery owners until actual release.
+
+Preserve released Operation rows, author/input snapshots, recovery state and retired
+IDs across upgrade; active Operations continue reconciliation. Delete only per-Delivery
+storage/execution and unclaimed compatibility result copies. Never import or replay
+the old completion-notification backlog. Preserve current Inbox pause, resource ownership and
+unknown/submitted batch evidence; deleting data is not proof of physical release.
+Schema/protocol v2 requires host launch v3. Supported launches end the previous
+Worker before ownership transfer and reject earlier contracts before storage access.
+Passive result data does not count as running work. Preserve ordinary no-batch user
+recovery, retired current Operation IDs and tree-stop rules.
+
+Stop producers negotiate Inbox v2 before adding cancelId/pauseInbox or publishing a
+control-request marker. Without it, use the released cancel fields and assistant Turn
+ID marker. A new CLI treats Stop without pause-protocol fields as ordinary execution
+cancellation, without persistent Inbox pause that an old client cannot resume. Missing
+receipts still do not imply human authority. Inbox-aware Stop retains the pause rules above.
 
 ## Implementation evidence
 
@@ -162,3 +227,15 @@ transport failure, claim/settlement races, restart and result expiry.
 
 This draft records the requested limit of 16. Runtime and deployed-client
 acceptance remain to be verified after dependencies are installed.
+
+## User Stop of delegated work
+
+When a user manually stops the exact input delegated to a target Session, that
+target is terminally cancelled and remains queryable, but its cancellation is
+not an automatic receipt to the delegating Agent. It cannot enter a later human
+or automatic batch, including after restart or deadline reconciliation. A new
+user message in the target starts independent work and never revives this receipt.
+In a multi-target Operation, only the manually stopped targets are omitted from
+the automatic receipt; other targets retain normal result delivery. If all
+targets are omitted, no receipt or wake is created. Errors, deadlines, and
+explicit requester Operation cancellation keep their existing behavior.

@@ -73,7 +73,7 @@ export function nextCycledTheme(current: Theme): Theme {
 }
 
 /**
- * The app ships exactly two palettes: Lody Light (cool white) and Vesper
+ * The app ships exactly two palettes: neutral Lody Light and Vesper
  * (dark). Users pick light, dark, or system (follow the OS). The underlying
  * VS Code theme selection is FIXED — there is no per-mode theme picker or
  * persistence. The bundled VS Code theme machinery stays only to drive syntax

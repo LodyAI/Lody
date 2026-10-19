@@ -56,7 +56,8 @@ import {
 } from '@/lib/cloud-cli-port';
 import { getCliPlatformKind } from '@/lib/cli-platform';
 import type { CloudSessionSharingPort } from '@lody/platform';
-import { getSessionCommandEnvironment } from './session-command-environment';
+import { getDaemonWorkspace, getSessionCommandEnvironment } from './session-command-environment';
+import { makeWorkspaceCommandManagers } from './workspace-command-manager';
 
 export function getCommandSessionSharingPort(): CloudSessionSharingPort | null {
   if (getCliPlatformKind() !== 'cloud') return null;
@@ -266,7 +267,7 @@ export async function withMachineRpcClient<T>(
     authBaseUrl: LODY_AUTH_URL,
     authSiteUrl: LODY_AUTH_SITE_URL,
     logger,
-  }).createTokenProvider({ workspaceId: args.workspaceId });
+  }).createTokenProviderLegacy({ workspaceId: args.workspaceId });
   const baseUrl = await prepareCliStreamsGatewayBaseUrl(streamsTokenProvider);
   const configuredTimeout = Number.parseInt(process.env.LODY_LORO_RPC_CONNECT_TIMEOUT_MS ?? '', 10);
   const streamClient = createLoroStreamsJsonStreamClient({
@@ -340,6 +341,8 @@ export function createCommandSessionHistoryFactory(
   });
 }
 
+const withCommandManager = makeWorkspaceCommandManagers<LoroDocumentManager>();
+
 export async function withWorkspaceManager<T>(
   auth: AuthContext,
   workspace: WorkspaceSummary,
@@ -352,39 +355,67 @@ export async function withWorkspaceManager<T>(
       throw new Error('Session command workspace mismatch');
     return fn(environment.manager);
   }
+  const daemon = getDaemonWorkspace();
+  if (daemon) {
+    // A daemon-executed command never opens a second replica of its own workspace,
+    // and never writes into it under a different identity.
+    if (workspace.id !== daemon.workspaceId) throw new Error('Daemon command workspace mismatch');
+    if (auth.userId !== daemon.userId || auth.machineId !== daemon.machineId)
+      throw new Error(
+        'The CLI login no longer matches the running Lody daemon; restart the daemon to use the new login.'
+      );
+    return fn(daemon.manager);
+  }
   // One-shot commands write directly into the workspace repo and rely on
   // Loro Streams to reach the cloud (and the daemon); without the remote
   // transport the write would silently strand in the local SQLite store.
-  if (!LODY_AUTH_URL) {
+  const authBaseUrl = LODY_AUTH_URL;
+  const authSiteUrl = LODY_AUTH_SITE_URL;
+  if (!authBaseUrl) {
     throw new Error('Cloud workspace commands require LODY_AUTH_URL');
   }
+  const commandAuth = { ...auth };
   const logger = getLogger(loggerName);
-  let manager: LoroDocumentManager;
-  manager = await LoroDocumentManager.create(workspace.id as WorkspaceId, auth.userId, logger, {
-    attachRemoteOnCreate: true,
-    streamsTokens: createCloudStreamsTokenPort({
-      token: auth.token,
-      authBaseUrl: LODY_AUTH_URL,
-      authSiteUrl: LODY_AUTH_SITE_URL,
-      logger,
-    }),
-    cloudBilling: createCloudBillingPort({ token: auth.token }),
-    sessionHistoryFactory: createCommandSessionHistoryFactory(
-      () => manager,
-      auth,
-      workspace.id as WorkspaceId
-    ),
-  });
-
-  try {
-    return await fn(manager);
-  } finally {
-    await manager.cleanUp({ fast: true, preserveSessionStatus: true }).catch((error: unknown) => {
+  return withCommandManager(
+    workspace.id,
+    {
+      userId: commandAuth.userId,
+      token: commandAuth.token,
+      machineId: commandAuth.machineId,
+      authBaseUrl,
+      authSiteUrl,
+    },
+    async () => {
+      let manager: LoroDocumentManager;
+      manager = await LoroDocumentManager.create(
+        workspace.id as WorkspaceId,
+        commandAuth.userId,
+        logger,
+        {
+          attachRemoteOnCreate: true,
+          streamsTokens: createCloudStreamsTokenPort({
+            token: commandAuth.token,
+            authBaseUrl,
+            authSiteUrl,
+            logger,
+          }),
+          cloudBilling: createCloudBillingPort({ token: commandAuth.token }),
+          sessionHistoryFactory: createCommandSessionHistoryFactory(
+            () => manager,
+            commandAuth,
+            workspace.id as WorkspaceId
+          ),
+        }
+      );
+      return manager;
+    },
+    fn,
+    (error) => {
       getLogger(loggerName).debug(
         `Failed to clean up workspace manager for ${workspace.id}: ${formatErrorMessage(error)}`
       );
-    });
-  }
+    }
+  );
 }
 
 export async function ensureWorkspaceMetaSynced(

@@ -1,0 +1,38 @@
+{
+  "$schema": "./scripts/effect-lint/node_modules/@effect/tsgo/oxlint-schema.json",
+  "plugins": ["effecttsgo"],
+  "jsPlugins": ["./scripts/effect-lint/node_modules/effect-rules/dist/index.js"],
+  "options": {
+    "typeAware": true
+  },
+  "categories": {
+    "correctness": "off"
+  },
+  "ignorePatterns": [
+    "**/node_modules/**",
+    "**/dist/**",
+    "**/out/**",
+    "**/build/**",
+    "**/coverage/**",
+    "scripts/**",
+    "**/scripts/**",
+    "**/public/**",
+    "**/_generated/**",
+    "packages/acp-extension-*/**",
+    ".agents/**",
+    ".codex/**",
+    ".claude/**",
+    ".opencode/**",
+    ".gemini/**",
+    "site/**",
+    "functions/**"
+  ],
+  "rules": {
+    "effecttsgo/floating-effect": "warn",
+    "effecttsgo/run-effect-inside-effect": "warn",
+    "effecttsgo/missing-star-in-yield-effect-gen": "warn",
+    "effecttsgo/return-effect-in-gen": "warn",
+    "effecttsgo/lazy-promise-in-effect-sync": "warn",
+    "effect/prefer-effect-fn": "warn"
+  }
+}

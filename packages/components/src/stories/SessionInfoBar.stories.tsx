@@ -1,6 +1,6 @@
 import type { Meta, StoryObj } from '@storybook/react';
 import { useState } from 'react';
-import { fn } from 'storybook/test';
+import { fn, userEvent, within } from 'storybook/test';
 import { useTranslation } from 'react-i18next';
 import {
   getServerNow,
@@ -15,7 +15,8 @@ import {
 } from '@lody/shared';
 import { getSessionGitHubState } from '@/lib/session-github-state';
 import { resolveSessionInfoBarGitHubActionIds } from '@/components/sessions/session-info-action-state';
-import { SessionInfoBar } from '@/components/sessions/session-info-bar';
+import { SessionInfoBar, type SessionInfoBarProps } from '@/components/sessions/session-info-bar';
+import type { SessionMachineInfo } from '@/components/sessions/session-machine-info';
 import type { ContextChipAction, PrCiRun } from '@/components/sessions/session-info-chips';
 import type { SessionStatusStripState } from '@/components/sessions/session-status-strip';
 
@@ -101,6 +102,9 @@ const CI_RUNNING: PrCiRun[] = [
 
 function StoryHarness({
   status = null,
+  machine,
+  compactMachineInfo = false,
+  privateAccessStatus,
   goal = null,
   goalPending = null,
   scheduledTasks,
@@ -119,6 +123,9 @@ function StoryHarness({
   syncing = false,
 }: {
   status?: SessionStatusStripState | null;
+  machine?: SessionMachineInfo;
+  compactMachineInfo?: boolean;
+  privateAccessStatus?: SessionInfoBarProps['privateAccessStatus'];
   goal?: SessionGoalMessage | null;
   goalPending?: SessionGoalCommand | null;
   scheduledTasks?: PendingScheduledTask[];
@@ -169,6 +176,9 @@ function StoryHarness({
       <div className="h-72" />
       <SessionInfoBar
         status={status}
+        machine={machine}
+        compactMachineInfo={compactMachineInfo}
+        privateAccessStatus={privateAccessStatus}
         goal={currentGoal}
         goalCommands={SESSION_GOAL_COMMANDS}
         goalPendingCommand={goalPending}
@@ -210,6 +220,113 @@ type Story = StoryObj<typeof meta>;
 /* ── Context / status matrix ─────────────────────────────────────────── */
 
 export const ContextOnly: Story = { args: {} };
+
+const LOCAL_MACHINE: SessionMachineInfo = {
+  machineId: 'story-machine' as SessionMachineInfo['machineId'],
+  name: 'MacBook-Pro.local',
+  isOwn: true,
+  isCurrent: true,
+  onlineStatus: 'online',
+};
+
+export const MachineOnly: Story = {
+  args: {
+    machine: LOCAL_MACHINE,
+    projectName: null,
+    branch: null,
+    pr: null,
+    diffStat: null,
+  },
+};
+
+export const MachineWithContext: Story = { args: { machine: LOCAL_MACHINE } };
+
+export const MachineDetails: Story = {
+  args: { machine: { ...LOCAL_MACHINE, isOwn: false, ownerName: 'Maya Chen' } },
+  globals: { locale: 'en' },
+  play: async ({ canvasElement }) => {
+    await userEvent.click(
+      await within(canvasElement).findByRole('button', {
+        name: 'Machine details: MacBook-Pro.local',
+      })
+    );
+  },
+};
+
+export const MachineWithContextNarrow: Story = {
+  args: {
+    machine: { ...LOCAL_MACHINE, name: 'Maya-Engineering-MacBook-Pro.local' },
+    width: 420,
+    projectName: 'LodyAI/Lody',
+    branch: 'feat/machine-info',
+  },
+};
+
+/** Side-chat width: the machine keeps only its icon and nothing leaves the bar. */
+export const MachineWithPrSideChatWidth: Story = {
+  args: {
+    machine: { ...LOCAL_MACHINE, name: 'codex-happy' },
+    width: 260,
+    workspaceLocation: { kind: 'github-worktree', path: '/tmp/lody' },
+    projectName: null,
+    branch: null,
+    prCiRuns: CI_PASSING,
+    diffStat: { add: 10365, del: 2048 },
+    actionLabels: ['Commit & Push', 'Fix CI Errors'],
+  },
+};
+
+export const MachineUnknownStatus: Story = {
+  ...MachineOnly,
+  args: {
+    ...MachineOnly.args,
+    machine: { ...LOCAL_MACHINE, isOwn: false, onlineStatus: 'unknown' },
+  },
+};
+
+export const MobileMachineWithActions: Story = {
+  args: {
+    machine: LOCAL_MACHINE,
+    compactMachineInfo: true,
+    width: 375,
+    projectName: 'LodyAI/Lody',
+    branch: null,
+    pr: null,
+    goal: makeGoal(),
+    scheduledTasks: [makeWakeup(12 * 60_000)],
+    actionLabels: ['Create PR', 'Commit & Push'],
+  },
+};
+
+export const MobilePrivateMachineWithAction: Story = {
+  args: {
+    machine: LOCAL_MACHINE,
+    compactMachineInfo: true,
+    width: 375,
+    projectName: 'LodyAI/Lody',
+    branch: null,
+    pr: null,
+    privateAccessStatus: {
+      label: 'Private · Only you',
+      description: 'Only you can access this private session',
+      onAction: fn(),
+    },
+    actionLabels: ['Create PR'],
+  },
+};
+
+export const MobileMachineLongName: Story = {
+  args: {
+    ...MachineWithContextNarrow.args,
+    compactMachineInfo: true,
+    width: 375,
+    branch: null,
+  },
+};
+
+export const MobileMachineUnknownStatus: Story = {
+  args: { ...MachineUnknownStatus.args, compactMachineInfo: true, width: 375 },
+};
 
 export const ContextWithMachineOffline: Story = {
   args: { status: { kind: 'machine-offline', machineName: 'zx MacBook-Pro.local' } },

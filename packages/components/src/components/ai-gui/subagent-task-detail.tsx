@@ -28,19 +28,20 @@ import { ToolCommandSection, ToolDetailSheet } from './tool-call-detail';
 const SCROLLBAR = 'scrollbar-pro';
 const FOLLOW_SLACK_PX = 24;
 
-/** The brief, whole, with one-tap copy. A background command reads as code. */
+/** A brief or a linked command, whole, with one-tap copy. */
 function TaskBrief({
   task,
   body,
   fontSize,
+  isCommand = false,
 }: {
   task: SubagentTask;
   body: string;
   fontSize: ConversationFontSize;
+  isCommand?: boolean;
 }) {
   const { t } = useTranslation();
   const [copied, setCopied] = useState(false);
-  const isCommand = task.taskType === 'local_bash';
   return (
     <div {...stylex.props(styles.bodyWrap)}>
       <div
@@ -270,15 +271,15 @@ export function SubagentTaskDetail({
         onScroll={onScroll}
         {...withClassName(stylex.props(styles.detail), SCROLLBAR)}
       >
-        {body ? (
-          <Section
-            label={
-              task.taskType === 'local_bash'
-                ? t('sessions.subagentTasks.command', 'Command')
-                : t('sessions.subagentTasks.brief', 'Brief')
-            }
-          >
+        {body && body !== task.command ? (
+          <Section label={t('sessions.subagentTasks.brief', 'Brief')}>
             <TaskBrief task={task} body={body} fontSize={fontSize} />
+          </Section>
+        ) : null}
+
+        {task.command ? (
+          <Section label={t('sessions.subagentTasks.command', 'Command')}>
+            <TaskBrief task={task} body={task.command} fontSize={fontSize} isCommand />
           </Section>
         ) : null}
 

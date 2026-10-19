@@ -34,7 +34,7 @@ import {
 /**
  * Persistent, push-capable link to the CLI data-plane server. The renderer wires
  * this to the Electron relay (send → IPC send, onMessage → IPC event); the
- * in-memory test harness wires it straight to a LocalLoroDataPlaneServer.
+ * in-memory test harness wires it straight to a LocalLoroDataPlaneServerLegacy.
  *
  * The link is a BROADCAST pipe: `onMessage` may deliver frames addressed to
  * other peers, other rooms, and other workspaces (the Electron relay fans every

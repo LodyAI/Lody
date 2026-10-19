@@ -21,14 +21,46 @@
       "binding": "",
       "key": "ae28e34da70206addbbc84bd5381e85dfa3728c35ff5c84f1f65b8fe0ef4c4d1",
       "plaintext": "73796e74686574696320636f6e74656e74207630",
-      "ciphertext": "3168d65b4ce77c62660367ca7addb3e2bd678a4772e9fd757e22d7cebe46acc39d12a801"
+      "ciphertext": "3168d65b4ce77c62660367ca7addb3e2bd678a479d3bb15833e15d88cee9c2b13f20e658",
+      "continuationOffset": "opaque:0_123"
     },
     {
       "purpose": "doc-snapshot",
       "binding": "abcd",
       "key": "ae28e34da70206addbbc84bd5381e85dfa3728c35ff5c84f1f65b8fe0ef4c4d1",
       "plaintext": "73796e74686574696320636f6e74656e74207630",
-      "ciphertext": "3168d65b4ce77c62660367ca7addb3e2bd678a475b095515d681e05135756d8ea9554f6c"
+      "ciphertext": "3168d65b4ce77c62660367ca7addb3e2bd678a4749b4b6d0a3ece7df8e11290af534b1fd",
+      "continuationOffset": "opaque:0_123"
+    },
+    {
+      "purpose": "flock-update",
+      "binding": "",
+      "key": "ae28e34da70206addbbc84bd5381e85dfa3728c35ff5c84f1f65b8fe0ef4c4d1",
+      "plaintext": "73796e74686574696320636f6e74656e74207630",
+      "ciphertext": "3168d65b4ce77c62660367ca7addb3e2bd678a4791de9b39f8f3aa6ec01e3fddf6cdfcfc"
+    },
+    {
+      "purpose": "flock-update",
+      "binding": "abcd",
+      "key": "ae28e34da70206addbbc84bd5381e85dfa3728c35ff5c84f1f65b8fe0ef4c4d1",
+      "plaintext": "73796e74686574696320636f6e74656e74207630",
+      "ciphertext": "3168d65b4ce77c62660367ca7addb3e2bd678a47ed22aed02a7d2e494dab9bcf1f6f1d19"
+    },
+    {
+      "purpose": "flock-snapshot",
+      "binding": "",
+      "key": "ae28e34da70206addbbc84bd5381e85dfa3728c35ff5c84f1f65b8fe0ef4c4d1",
+      "plaintext": "73796e74686574696320636f6e74656e74207630",
+      "ciphertext": "3168d65b4ce77c62660367ca7addb3e2bd678a474f1f7d8a368f845b404ecf2fd08d32f0",
+      "continuationOffset": "opaque:0_123"
+    },
+    {
+      "purpose": "flock-snapshot",
+      "binding": "abcd",
+      "key": "ae28e34da70206addbbc84bd5381e85dfa3728c35ff5c84f1f65b8fe0ef4c4d1",
+      "plaintext": "73796e74686574696320636f6e74656e74207630",
+      "ciphertext": "3168d65b4ce77c62660367ca7addb3e2bd678a476de768474de383cebe7d858ce1674d57",
+      "continuationOffset": "opaque:0_123"
     },
     {
       "purpose": "blob",

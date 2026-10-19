@@ -17,6 +17,8 @@ maintenance commands here.
   dependencies/imports, unresolved `workspace:` dependencies, closed-path
   documentation, internal absolute paths in any publishable text, and captured
   transcript fixtures.
+- `check-local-loro-writer-boundary.mjs` protects native writer execution/platform
+  boundaries and the single CLI repo unloader; behavior suites prove its effects.
 - Root `specs/` and the `.agents/` tree may contain public client and protocol
   documentation and may be linked from other documents. Root `docs/` stays a
   closed path. Their contents still undergo the same private-path, internal-path,
@@ -29,6 +31,9 @@ maintenance commands here.
   target but under the 8192-byte gate, never do. Status, check, and diff are read-only; only explicit `confirm` writes a
   topic record. Confirmation requires recoverable committed inputs and evidence,
   never changes Spec approval, and never auto-refreshes a stale baseline.
+  Await Git subprocesses throughout the command chain and retain Buffer output.
+  Only no-index content comparison accepts exit code 1; launch errors, signals,
+  other nonzero exits, and output truncation must fail with diagnostics.
   `docs/anchors.mjs` uses TypeScript to hash declarations below `@dec:`
   markers. Check both directions against adjacent `.anchors.json` records;
   unrelated declarations must not invalidate the reviewed block.
@@ -56,6 +61,11 @@ maintenance commands here.
   Lody revision; rebuilds must never overwrite published immutable bytes.
 
 ## Install ownership
+
+- Effect lint uses the installing workspace's pinned tools. Patch Oxlint only
+  (`--no-typescript --oxlint`); never install a second store in an embedded
+  checkout. `lint:effect` must show warnings and disable nested config discovery;
+  keep `lint:fast` free of type-aware rules.
 
 - `package-pi-runtime.mjs` builds a frozen isolated Pi dependency closure, including
   all supported optional platform packages. Windows Job binaries must be supplied

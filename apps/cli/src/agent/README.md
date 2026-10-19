@@ -26,7 +26,10 @@ context/message-flow.md "Upstream".
   at `agentCapabilities._meta.lody`, session metadata at `_meta.lody`, and custom methods
   use the Core `_lody/...` names. Session initialization advertises Core answer notes
   alongside standard form elicitation; the shared Ask Question bridge retains the
-  selection and separately keyed note through durable permission history.
+  selection and separately keyed note through durable permission history. Core forms
+  use each property's `description` as the full question and `title` as its short
+  header, including single-question forms whose request message is generic. Legacy
+  Claude single-question forms retain their request-message prompt.
 - `acp-runner.ts` — process spawn/restart around the client. Spawn + initialize +
   `newSession`/`loadSession` share `acp-session-start-gate.ts`.
 - `acp-session-start-gate.ts` — process-wide start semaphore used by
@@ -36,7 +39,7 @@ context/message-flow.md "Upstream".
   upstream auto-update in its child process and never downloads a fallback. Credentials
   remain in Dimcode's own configuration or provider environment. Refresh capabilities
   after upgrading. Existing registry configurations retain their saved launch contract.
-- `deepseek-harness-runtime.ts` — Harness-home (`DSH_HOME`, then `~/.dsh`), atomic-config,
+- `deepseek-harness-runtime.ts` — Provider-scoped Harness homes, atomic host bundles,
   and npx launch wrapper around the `packages/acp-extension-dsh` submodule. It converts
   the adapter entry to a file URL for Cordis ESM imports, including Windows drive paths,
   while preset and session directories remain filesystem paths. Its Windows bootstrap
@@ -133,22 +136,28 @@ fails; ending a local waiter never manufactures a provider refusal.
 
 ### DeepSeek Harness is not a managed runtime
 
-`deepseek-harness-runtime.ts` publishes Lody's content-addressed ACP profile beside (without
-replacing) user Harness config and launches the pinned package closure through
-`dsh --profile`. The generated profile composes `@deepseek-ai/dsh-base` with a Lody overlay
-that disables the product telemetry, request-inventory, and LLM-title rows, so the host keeps
+`deepseek-harness-runtime.ts` assigns each bound Provider a stable home under
+`<Lody data root>/dsh/providers/<encoded Provider ID>` and launches the pinned closure
+through `dsh --profile lody-acp`. Its profile composes `@deepseek-ai/dsh-base`, a
+content-addressed Lody bundle, the user-owned `cordis.patch.yml`, and a final host guard.
+Only missing user patches are created. DSH itself recreates the empty `cordis.yml`
+include root; Lody does not duplicate that write. The host guard preserves ACP and
+history paths and disables product telemetry, inventory and logging, so the host keeps
 the upstream base composition without inheriting the web product surface. Never compose the
 product app bundles, and install every launcher package as an exact `name@version` (the Cordis
 ecosystem rides its own releases). CLI production and dev
 builds copy the extension's pinned official presets beside `deepseek-acp.js`; the generated
 roster also discovers `$DSH_HOME/.agent-presets`. The host mounts Harness's file settings
-provider for `$DSH_HOME/settings.yaml` (default `~/.dsh/settings.yaml`); refresh provider
+provider for each Provider's `$DSH_HOME/settings.yaml`; refresh provider
 capabilities after editing the model catalog. An explicit `DEEPSEEK_BASE_URL` still uses
 the endpoint's `/models` list rather than local catalog additions. Official Chat-era
 URLs are normalized by the extension to the Messages `/anthropic` root before provider
 construction; official model discovery always uses `https://api.deepseek.com/models`. Harness JSONL roots are single-encoding
 stores: an empty or zstd root uses upstream's `zstd`, a raw-only legacy root keeps `none`,
-and a mixed root fails with both paths named.
+and a mixed root fails with both paths named. Existing sessions/query data remain under
+the daemon's previous `DSH_HOME` (or `~/.dsh`). Old settings/profiles are left untouched;
+move desired customizations to the YAML path shown in Provider details. See the
+[settings contract](../../../../specs/deepseek-harness-settings.md).
 
 On Windows, both session and probe/title spawns resolve the selected npx shim from
 the final child PATH and execute its adjacent `node_modules/npm/bin/npx-cli.js`
@@ -286,6 +295,13 @@ requested options fail to the existing prompt-derived fallback. The bundled adap
 has no automatic generator, so neither the main nor title session starts an extra
 naming turn. Main conversation settings and Provider authentication are preserved.
 
+Title output accepts normal assistant text with an absent message phase, as Codex
+providers do not all emit that optional field. Explicit `commentary` is excluded;
+when a final-answer stream exists, it takes precedence over unphased text. Both
+buffers are cleared immediately before prompting so startup/configuration banners
+are excluded. The selected stream still passes through error-payload and internal
+instruction sanitization; failed prompts retain the prompt-derived fallback.
+
 The daemon does not name branches. A worktree session starts on the temporary branch
 `worktree-manager.ts` created for it (`session/<id>` for GitHub, `lody/<id>` for shared-local
 projects, with collision suffixes). [WorkspaceGitService](../session/workspace-git-service.ts)
@@ -327,9 +343,17 @@ send a local project identity. See the [draft contract](../../../../specs/local-
 
 `SessionConfig.modelId` carries the driving Turn's choice through prepared and cold creation into `AgentClient`. Core's `_meta.lody.sessionConfig` includes it before new/load/resume/fork. Codex translates the model and reasoning into native startup configuration, so resume does not transiently use a different global model. Live configuration remains necessary for reused sessions and older adapters. See the [startup contract](../../../../specs/acp-startup-model.md).
 
+Magpie Provider launch preparation and isolated native catalogs are owned by
+`magpie-runtime.ts`; the public [import contract](../../../../specs/magpie-provider-import.md)
+defines its local-only endpoint and confirmation boundary. Claude/Codex/Pi/DSH,
+Kimi Code and Grok use their native endpoint/catalog contracts; Bub uses its
+OpenAI environment configuration and requires a user-installed ACP plugin.
+
 ## Login-shell cache
 
 `login-shell-env.ts` contains only Legacy launcher/binding boundaries. CLI index owns
 the native LoginShellCache runtime and waits for its producer at daemon/command exit.
 
 [Ownership decision](../../../../.agents/notes/implemented/architecture/2026-10-10-effect-login-shell-probe.md).
+
+Provider quota refresh uses `queryLocalAcpRateLimits`: initialize a separately owned ACP process, verify Core `rateLimits.query`, query without a session, and await process-tree cleanup. The session execution service owns Provider coalescing and guarded Flock publication. See the [quota refresh decision](../../../../.agents/notes/implemented/architecture/2026-10-13-provider-quota-refresh.md).

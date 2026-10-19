@@ -1,3 +1,4 @@
+import { notificationMessages } from '@lody/shared/notifications';
 import i18next from 'i18next';
 import { initReactI18next } from 'react-i18next';
 import React, { useEffect } from 'react';
@@ -15,11 +16,11 @@ import zhCN from '../../../../locales/zh_CN.json';
 
 export const resources = {
   en: {
-    translation: en,
+    translation: { ...en, ...notificationMessages.en },
     lang: lang_en,
   },
   zh_CN: {
-    translation: zhCN,
+    translation: { ...zhCN, ...notificationMessages.zh },
     lang: lang_zhCN,
   },
 };

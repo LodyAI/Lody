@@ -8,6 +8,10 @@
 export type MachineProtocolCapabilities = Record<string, number>;
 
 export const MACHINE_PROTOCOL_CAPABILITIES = {
+  operationInbox: 'operationInbox',
+  magpieImport: 'magpieImport',
+  dshProviderIsolation: 'dshProviderIsolation',
+  terminalNotifications: 'terminalNotifications',
   memoryProviders: 'memoryProviders',
   mcpToolDiscovery: 'mcpToolDiscovery',
   localProjectHistoryProvider: 'localProjectHistoryProvider',
@@ -17,6 +21,7 @@ export const MACHINE_PROTOCOL_CAPABILITIES = {
   subagentEvents: 'subagentEvents',
   acpAuthenticationInteractions: 'acpAuthenticationInteractions',
   localProjectRemoval: 'localProjectRemoval',
+  localProjectCreateDirectory: 'localProjectCreateDirectory',
   providerSetup: 'providerSetup',
   schedules: 'schedules',
   preparedSessionInput: 'preparedSessionInput',
@@ -29,10 +34,17 @@ export const MACHINE_PROTOCOL_CAPABILITIES = {
   iosSimulatorExterior: 'iosSimulatorExterior',
   piExtensions: 'piExtensions',
   acpCapabilityRefreshCache: 'acpCapabilityRefreshCache',
+  providerRateLimitsRefresh: 'providerRateLimitsRefresh',
   sessionHistory: 'sessionHistory',
+  sessionHistoryIncremental: 'sessionHistoryIncremental',
+  sessionHistoryWatch: 'sessionHistoryWatch',
+  sessionInputAcceptance: 'sessionInputAcceptance',
+  sessionInputDispatch: 'sessionInputDispatch',
   sessionCollaborationControl: 'sessionCollaborationControl',
+  bugReportClientLog: 'bugReportClientLog',
 } as const;
 
+export const OPERATION_INBOX_PROTOCOL_VERSION = 2;
 export const MEMORY_PROVIDERS_PROTOCOL_VERSION = 1;
 export const MCP_TOOL_DISCOVERY_PROTOCOL_VERSION = 1;
 export const LOCAL_PROJECT_HISTORY_PROVIDER_PROTOCOL_VERSION = 1;
@@ -41,6 +53,7 @@ export const ACP_AUTHENTICATION_INTERACTIONS_PROTOCOL_VERSION = 2;
 export const SUBAGENT_CANCELLATION_PROTOCOL_VERSION = 1;
 export const SUBAGENT_EVENTS_PROTOCOL_VERSION = 1;
 export const LOCAL_PROJECT_REMOVAL_PROTOCOL_VERSION = 1;
+export const LOCAL_PROJECT_CREATE_DIRECTORY_PROTOCOL_VERSION = 1;
 export const PROVIDER_SETUP_PROTOCOL_VERSION = 1;
 // v2 preserves ACP string/boolean values and reads legacy stringified booleans.
 export const SCHEDULES_PROTOCOL_VERSION = 2;
@@ -54,6 +67,12 @@ export const IOS_SIMULATOR_CONTROLS_PROTOCOL_VERSION = 1;
 export const PI_EXTENSIONS_PROTOCOL_VERSION = 1;
 export const ACP_CAPABILITY_REFRESH_CACHE_PROTOCOL_VERSION = 1;
 export const SESSION_HISTORY_PROTOCOL_VERSION = 2;
+export const SESSION_HISTORY_INCREMENTAL_PROTOCOL_VERSION = 1;
+export const SESSION_HISTORY_WATCH_PROTOCOL_VERSION = 1;
+export const SESSION_INPUT_ACCEPTANCE_PROTOCOL_VERSION = 1;
+export const SESSION_INPUT_DISPATCH_PROTOCOL_VERSION = 1;
+/** `machine/bug-report` accepts an optional `clientLog` and merges it into the upload. */
+export const BUG_REPORT_CLIENT_LOG_PROTOCOL_VERSION = 1;
 
 type MachineProtocolCapabilityCarrier = {
   protocolCapabilities?: MachineProtocolCapabilities;
@@ -103,6 +122,11 @@ export function machineSupportsSubagentCancellation(
  * in the "supported" direction and there is no version fallback to catch it.
  */
 export const CURRENT_MACHINE_PROTOCOL_CAPABILITIES: MachineProtocolCapabilities = {
+  [MACHINE_PROTOCOL_CAPABILITIES.operationInbox]: OPERATION_INBOX_PROTOCOL_VERSION,
+  providerRateLimitsRefresh: 1,
+  [MACHINE_PROTOCOL_CAPABILITIES.magpieImport]: 1,
+  [MACHINE_PROTOCOL_CAPABILITIES.dshProviderIsolation]: 1,
+  [MACHINE_PROTOCOL_CAPABILITIES.terminalNotifications]: 1,
   [MACHINE_PROTOCOL_CAPABILITIES.sessionCollaborationControl]: 1,
   [MACHINE_PROTOCOL_CAPABILITIES.memoryProviders]: MEMORY_PROVIDERS_PROTOCOL_VERSION,
   [MACHINE_PROTOCOL_CAPABILITIES.mcpToolDiscovery]: MCP_TOOL_DISCOVERY_PROTOCOL_VERSION,
@@ -114,6 +138,8 @@ export const CURRENT_MACHINE_PROTOCOL_CAPABILITIES: MachineProtocolCapabilities 
   [MACHINE_PROTOCOL_CAPABILITIES.acpAuthenticationInteractions]:
     ACP_AUTHENTICATION_INTERACTIONS_PROTOCOL_VERSION,
   [MACHINE_PROTOCOL_CAPABILITIES.localProjectRemoval]: LOCAL_PROJECT_REMOVAL_PROTOCOL_VERSION,
+  [MACHINE_PROTOCOL_CAPABILITIES.localProjectCreateDirectory]:
+    LOCAL_PROJECT_CREATE_DIRECTORY_PROTOCOL_VERSION,
   [MACHINE_PROTOCOL_CAPABILITIES.providerSetup]: PROVIDER_SETUP_PROTOCOL_VERSION,
   [MACHINE_PROTOCOL_CAPABILITIES.schedules]: SCHEDULES_PROTOCOL_VERSION,
   [MACHINE_PROTOCOL_CAPABILITIES.preparedSessionInput]: PREPARED_SESSION_INPUT_PROTOCOL_VERSION,
@@ -128,7 +154,59 @@ export const CURRENT_MACHINE_PROTOCOL_CAPABILITIES: MachineProtocolCapabilities 
   [MACHINE_PROTOCOL_CAPABILITIES.acpCapabilityRefreshCache]:
     ACP_CAPABILITY_REFRESH_CACHE_PROTOCOL_VERSION,
   [MACHINE_PROTOCOL_CAPABILITIES.sessionHistory]: SESSION_HISTORY_PROTOCOL_VERSION,
+  [MACHINE_PROTOCOL_CAPABILITIES.sessionHistoryIncremental]:
+    SESSION_HISTORY_INCREMENTAL_PROTOCOL_VERSION,
+  [MACHINE_PROTOCOL_CAPABILITIES.sessionHistoryWatch]: SESSION_HISTORY_WATCH_PROTOCOL_VERSION,
+  [MACHINE_PROTOCOL_CAPABILITIES.sessionInputAcceptance]: SESSION_INPUT_ACCEPTANCE_PROTOCOL_VERSION,
+  [MACHINE_PROTOCOL_CAPABILITIES.sessionInputDispatch]: SESSION_INPUT_DISPATCH_PROTOCOL_VERSION,
+  [MACHINE_PROTOCOL_CAPABILITIES.bugReportClientLog]: BUG_REPORT_CLIENT_LOG_PROTOCOL_VERSION,
 };
+
+/**
+ * Whether `machine/bug-report` may carry `clientLog`. Its request schema is
+ * strict, so an older daemon rejects the whole report when the field is present.
+ */
+export function machineSupportsBugReportClientLog(
+  machine: MachineProtocolCapabilityCarrier | null | undefined
+): boolean {
+  return machineSupportsProtocolCapability(
+    machine,
+    MACHINE_PROTOCOL_CAPABILITIES.bugReportClientLog,
+    BUG_REPORT_CLIENT_LOG_PROTOCOL_VERSION
+  );
+}
+
+export function machineSupportsSessionInputDispatch(
+  machine: MachineProtocolCapabilityCarrier | null | undefined
+): boolean {
+  return machineSupportsProtocolCapability(
+    machine,
+    MACHINE_PROTOCOL_CAPABILITIES.sessionInputDispatch,
+    SESSION_INPUT_DISPATCH_PROTOCOL_VERSION
+  );
+}
+
+export function machineSupportsSessionHistoryWatch(
+  machine: MachineProtocolCapabilityCarrier | null | undefined
+): boolean {
+  return (
+    machineSupportsProtocolCapability(
+      machine,
+      MACHINE_PROTOCOL_CAPABILITIES.sessionHistoryWatch,
+      SESSION_HISTORY_WATCH_PROTOCOL_VERSION
+    ) && machineSupportsSessionHistoryIncremental(machine)
+  );
+}
+
+export function machineSupportsSessionInputAcceptance(
+  machine: MachineProtocolCapabilityCarrier | null | undefined
+): boolean {
+  return machineSupportsProtocolCapability(
+    machine,
+    MACHINE_PROTOCOL_CAPABILITIES.sessionInputAcceptance,
+    SESSION_INPUT_ACCEPTANCE_PROTOCOL_VERSION
+  );
+}
 
 /** Whether the target daemon exposes the Roost-backed session history RPC. */
 export function machineSupportsSessionHistoryProtocol(
@@ -342,5 +420,15 @@ export function machineSupportsIosSimulatorExterior(
     machine,
     MACHINE_PROTOCOL_CAPABILITIES.iosSimulatorExterior,
     1
+  );
+}
+
+export function machineSupportsSessionHistoryIncremental(
+  machine: MachineProtocolCapabilityCarrier | null | undefined
+): boolean {
+  return machineSupportsProtocolCapability(
+    machine,
+    MACHINE_PROTOCOL_CAPABILITIES.sessionHistoryIncremental,
+    SESSION_HISTORY_INCREMENTAL_PROTOCOL_VERSION
   );
 }

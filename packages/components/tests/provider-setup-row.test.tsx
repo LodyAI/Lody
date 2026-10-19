@@ -146,6 +146,22 @@ describe('ProviderSetupRow installation recovery', () => {
     expect(container.querySelector('button[aria-label="Copy"]') !== null).toBe(!success);
   });
 
+  it('preserves a focused Dimcode copy button across setup row updates', async () => {
+    await renderSetup('runtime-unavailable', 'dimcode');
+    const copy = container.querySelector<HTMLButtonElement>('button[aria-label="Copy"]')!;
+    act(() => copy.focus());
+    await renderSetup('runtime-unavailable', 'dimcode');
+
+    expect(document.activeElement).toBe(copy);
+    expect(container.querySelector('button[aria-label="Copy"]')).toBe(copy);
+    await act(async () => copy.click());
+    expect(container.querySelector('button[aria-label="Copied"]')).toBe(copy);
+
+    await renderSetup('runtime-unavailable', 'dimcode');
+    expect(container.querySelector('button[aria-label="Copied"]')).toBe(copy);
+    expect(document.activeElement).toBe(copy);
+  });
+
   it('keeps unrelated Dimcode verification failures visible without an installation command', async () => {
     await renderSetup('verification-failed', 'dimcode');
     expect(container.textContent).toContain('Provider verification failed. Try again.');

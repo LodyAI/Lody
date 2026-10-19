@@ -172,8 +172,8 @@ on projected history. This is not arbitrary downgrade safety.
 
 ### Backend selection and display reads
 
-New sessions use Loro by default. With both experimental switches enabled, the
-renderer prefers Roost only when the target advertises the required history
+New sessions use Loro by default. With Developer mode and the Roost developer
+switch enabled, the renderer prefers Roost only when the target advertises the required history
 protocol. Missing or older capabilities retain Loro before any session write.
 An explicit Roost request to an unsupported target fails before metadata, history
 or warm-up is created. Legacy sessions and non-renderer creation paths without an
@@ -189,10 +189,31 @@ than selecting a database on the calling machine. Control metadata and
 delivery state remain in Loro. Local history acceptance does not establish remote
 Roost synchronization.
 
+Roost signing identities use the existing application-data security boundary,
+independent of login credentials. Each writable execution replica creates and
+persists its own identity once; normal startup never requires a system credential
+store or a user-supplied seed. A signing identity establishes the physical writer,
+not a human principal or permission grant. Multiple authorized members/devices may
+use the same execution replica; per-turn human identity and existing Workspace and
+machine authorization remain authoritative. Private signing material never enters
+history sync, exports, RPC or diagnostics. Missing or damaged identity state must
+not silently rotate an established writer. Migration from experimental Nightly
+keyring identities is outside this change; existing unpaired data is retained and
+explicitly refused rather than silently adopted or erased.
+
 Desktop sidebar session hover cards display the session's persisted history
 backend as Roost or Loro in Workspace, Updated and Pinned lists. Missing backend
 metadata on a legacy session resolves to Loro; the current experimental preference
 does not determine this label. Showing the label does not read the history body.
+
+Roost initialization or storage failure must not switch an existing session to
+Loro or replay a write with an unknown outcome. Preserve the distinction between
+an undispatched request and an indeterminate dispatched write. The owner records
+original Worker causes, abnormal exits and runtime/build information in local
+logs. Renderer and remote history RPC report these failures with a content-free
+stage, stable error code and diagnostic ID; raw causes, paths, credentials and history content
+remain outside those error responses. The UI explains that an unsuccessful write
+does not confirm acceptance and exposes the reference for the owner's local log.
 
 Performance work must preserve the existing Lody conversation identity and its
 owner workflow. Edit & Resend may reuse an immutable prefix through the storage
@@ -227,10 +248,25 @@ including reopening the conversation, searching and navigating older cached turn
 The renderer persists a read-only projection scoped by account, workspace, machine
 and session. Owner read responses bind page content, count and a durable revision
 to the same observation. Consecutive changes update the affected cached rows
-atomically; a missed revision stages a replacement through bounded pages while
-retaining the previous coherent snapshot. Reconnection refreshes through the
+atomically. Independently negotiated incremental recovery uses an owner-issued,
+durable checkpoint to cover missed changes: notification coalescing alone must
+not require rereading unchanged historical bodies. Cache bodies, membership and
+checkpoint advance together. Missing or foreign recovery evidence stages a
+replacement through bounded pages while retaining the previous coherent snapshot. Reconnection refreshes through the
 existing owner transport. The cache never accepts or replays user commands, and
 cannot supply history this device has never synchronized.
+
+Independently negotiated history observation follows the owner's committed
+checkpoint through the existing owner transport. Initial reads and subsequent
+observation resume from durable checkpoints, including changes committed between
+them and during disconnection; a separate Loro control hint is not the only
+update signal. Idle observation reads no unchanged historical bodies and its
+bounded wait must not occupy foreground execution capacity. Pending backend
+identity is distinct from a confirmed empty history or legacy backend; resolved
+cached content remains readable while recovering. Unsupported owners keep the
+explicit legacy protocol path. This observation guarantee is draft intent;
+implementation and the watch contract are recorded in the
+[peer-reader repair](../.agents/notes/implemented/bug-fix/2026-10-16-roost-peer-reader-readiness.md).
 
 ### Verification limits
 
@@ -256,6 +292,8 @@ sealed turn from looking like a hash conflict once such skeletons exist.
 - `apps/cli/src/lib/local-project-history-sync-service.ts`
 - `apps/cli/src/session/{roost-node-session,roost-history-generation,roost-rpc-session}.ts`
 - `apps/cli/tests/roost-session-backend-contract.test.ts`
+- `apps/cli/src/session/roost-history-diagnostics.ts` and `apps/cli/tests/roost-history-local-owner.test.ts`
+- `packages/components/src/lib/roost-history-error.ts` and `packages/components/tests/conversation-session-backend-factory.test.ts`
 - `packages/shared/tests/history-writer.test.ts`, `history-writer.contract.ts`,
   `history-storage-policy.test.ts` and `session-history-import-port.test.ts`
 - `apps/cli/tests/local-project-history-sync-service.test.ts` and `local-project-history-sync-writer.test.ts`

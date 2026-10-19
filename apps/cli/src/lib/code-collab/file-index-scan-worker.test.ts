@@ -1,14 +1,95 @@
 import { execFile } from 'node:child_process';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readFile, rm, unlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
 
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { scanGitDirectoryEntries } from './file-index-scan-core';
 import fileIndexScanWorker from './file-index-scan-worker';
 
 const execFileAsync = promisify(execFile);
+
+// Real subprocesses; the wrapper only signals when a `git ls-files --cached` rejection
+// has reached the scan core, so the test can check what happens next without timers.
+const gitCommandFailures = vi.hoisted(() => ({
+  onCachedListingRejected: undefined as (() => void) | undefined,
+}));
+
+vi.mock('@lody/shared/node/process', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@lody/shared/node/process')>();
+  return {
+    ...actual,
+    runCommandTextLegacy: async (...args: Parameters<typeof actual.runCommandTextLegacy>) => {
+      try {
+        return await actual.runCommandTextLegacy(...args);
+      } catch (error) {
+        if (args[0].args.includes('--cached')) {
+          gitCommandFailures.onCachedListingRejected?.();
+        }
+        throw error;
+      }
+    },
+  };
+});
+
+afterEach(() => {
+  gitCommandFailures.onCachedListingRejected = undefined;
+  vi.unstubAllEnvs();
+});
+
+// `ls-files --cached` fails only after `ls-files --deleted` is running; the latter then
+// blocks on a FIFO until the test kills it, so it outlives its sibling deterministically.
+const FAKE_GIT_SCRIPT = `#!/bin/sh
+case " $* " in
+  *" --deleted "*)
+    printf '%s' "$$" > "$LODY_TEST_GIT_DIR/deleted.pid.tmp"
+    mv "$LODY_TEST_GIT_DIR/deleted.pid.tmp" "$LODY_TEST_GIT_DIR/deleted.pid"
+    : > "$LODY_TEST_GIT_DIR/ready.fifo"
+    exec cat "$LODY_TEST_GIT_DIR/gate.fifo"
+    ;;
+  *" --cached "*)
+    cat "$LODY_TEST_GIT_DIR/ready.fifo" > /dev/null
+    echo 'fatal: simulated ls-files failure' >&2
+    exit 1
+    ;;
+esac
+exit 128
+`;
+
+async function withFailingFakeGit<T>(fn: (fakeGitDir: string) => Promise<T>): Promise<T> {
+  const fakeGitDir = await mkdtemp(path.join(tmpdir(), 'lody-file-index-fake-git-'));
+  try {
+    const gitPath = path.join(fakeGitDir, 'git');
+    await writeFile(gitPath, FAKE_GIT_SCRIPT);
+    await chmod(gitPath, 0o755);
+    await execFileAsync('mkfifo', [
+      path.join(fakeGitDir, 'ready.fifo'),
+      path.join(fakeGitDir, 'gate.fifo'),
+    ]);
+    vi.stubEnv('PATH', `${fakeGitDir}${path.delimiter}${process.env.PATH ?? ''}`);
+    vi.stubEnv('LODY_TEST_GIT_DIR', fakeGitDir);
+    return await fn(fakeGitDir);
+  } finally {
+    const deletedPid = await readFile(path.join(fakeGitDir, 'deleted.pid'), 'utf8').catch(() => '');
+    if (deletedPid && isProcessPresent(Number(deletedPid))) {
+      process.kill(Number(deletedPid), 'SIGKILL');
+    }
+    await rm(fakeGitDir, { recursive: true, force: true });
+  }
+}
+
+/** True while `pid` exists at all, including as an unreaped zombie. */
+function isProcessPresent(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ESRCH') return false;
+    throw error;
+  }
+}
 
 async function git(cwd: string, args: readonly string[]): Promise<void> {
   await execFileAsync('git', ['-c', 'commit.gpgsign=false', ...args], { cwd });
@@ -154,4 +235,62 @@ describe('fileIndexScanWorker', () => {
       expect(result.pathCount).toBe(Object.keys(result.fileIndex).length);
     });
   });
+  it('excludes paths deleted from the worktree from the Git scan', async () => {
+    await withGitWorkspace(async (workspaceRoot) => {
+      await unlink(path.join(workspaceRoot, 'README.md'));
+
+      const result = await fileIndexScanWorker({
+        directoryAbsolutePath: workspaceRoot,
+        directoryWorkspacePath: '',
+        maxRawTextBytes: 1024 * 1024,
+        entryBudget: 1000,
+        recursive: true,
+      });
+
+      expect(new Map(result.entries)).toEqual(
+        new Map([
+          ['src', { kind: 'lazy' }],
+          ['src/app.ts', true],
+          ['src/new.ts', true],
+        ])
+      );
+    });
+  });
+
+  it.runIf(process.platform !== 'win32')(
+    'joins the sibling Git listing before falling back when one listing fails',
+    async () => {
+      await withPlainWorkspace(async (workspaceRoot) => {
+        await withFailingFakeGit(async (fakeGitDir) => {
+          let resolveCachedListingRejected!: () => void;
+          const cachedListingRejected = new Promise<void>((resolve) => {
+            resolveCachedListingRejected = resolve;
+          });
+          gitCommandFailures.onCachedListingRejected = resolveCachedListingRejected;
+          let scanSettled = false;
+          const scan = scanGitDirectoryEntries({
+            directoryAbsolutePath: workspaceRoot,
+            directoryWorkspacePath: '',
+            entryBudget: 1000,
+            recursive: true,
+          }).finally(() => {
+            scanSettled = true;
+          });
+
+          await cachedListingRejected;
+          // One macrotask turn drains every continuation of the rejection.
+          await new Promise<void>((resolve) => setImmediate(resolve));
+          const deletedPid = Number(await readFile(path.join(fakeGitDir, 'deleted.pid'), 'utf8'));
+          expect(scanSettled).toBe(false);
+          expect(isProcessPresent(deletedPid)).toBe(true);
+
+          process.kill(deletedPid, 'SIGTERM');
+
+          // `null` sends the worker and service callers to the FS scan fallback.
+          await expect(scan).resolves.toBeNull();
+          expect(isProcessPresent(deletedPid)).toBe(false);
+        });
+      });
+    }
+  );
 });

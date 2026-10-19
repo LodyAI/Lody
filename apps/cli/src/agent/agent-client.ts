@@ -16,6 +16,7 @@ import {
   type LodyExtensionCapabilities,
   type LodyElicitationMeta,
   type LodyGoalCapability,
+  type LodySessionActivityUpdate,
   type LodySubagentSnapshot,
   type RateLimit,
   type RateLimitsGetRequest,
@@ -345,11 +346,6 @@ export type AcpStartupTimeoutOptions = {
   resumeSessionTimeoutMs?: number;
 };
 
-export type AcpSessionStartTarget = {
-  workdir: string;
-  resumeSessionId?: ACPSessionId;
-};
-
 const LegacyCodexGoalStatusSchema = z.enum([
   'active',
   'paused',
@@ -614,6 +610,9 @@ export interface AgentClientOptions {
   onWriteTextFile?(event: AcpWriteTextFileEvidence): void | Promise<void>;
 }
 
+/** See {@link AgentClient.getNativeWork}. */
+export type NativeAgentWork = 'running' | 'background' | null;
+
 export type AcpWriteTextFileEvidence = {
   readonly path: string;
   readonly oldText: string | null;
@@ -635,6 +634,8 @@ export class AgentClient implements acp.Client {
   private supportsForkAtTurn = false;
   private lodyExtensionCapabilities: LodyExtensionCapabilities = {};
   private readonly subagentSnapshots = new Map<string, LodySubagentSnapshot>();
+  /** Latest Core activity level, kept with the ACP session it describes. */
+  private nativeActivity: LodySessionActivityUpdate | null = null;
   private readonly devinSubagentTaskIds = new Set<string>();
   private worktreeProject?: LodyWorktreeProject;
   private authMethods: acp.AuthMethod[] = [];
@@ -1365,6 +1366,10 @@ export class AgentClient implements acp.Client {
     return {};
   }
 
+  getRateLimitsCapability() {
+    return this.lodyExtensionCapabilities.rateLimits;
+  }
+
   async getRateLimits(request: RateLimitsGetRequest = {}): Promise<RateLimitsSnapshot> {
     if (this.lodyExtensionCapabilities.rateLimits?.query !== true) {
       throw new Error('[ACP_RATE_LIMITS_UNSUPPORTED] Agent did not advertise rate-limit queries');
@@ -1582,6 +1587,15 @@ export class AgentClient implements acp.Client {
         );
         return;
       }
+      case 'sessionActivity':
+        if (
+          this.reportsSessionActivity() &&
+          this.acpSessionId !== null &&
+          event.update.sessionId === this.acpSessionId
+        ) {
+          this.nativeActivity = event.update;
+        }
+        return;
       case 'rateLimits':
         for (const rateLimit of event.snapshot.rateLimits) {
           this.options.onRateLimitUpdate?.(rateLimit);
@@ -1861,7 +1875,6 @@ export class AgentClient implements acp.Client {
     resumeSessionId?: ACPSessionId,
     timeoutOptions: AcpStartupTimeoutOptions = {},
     startupAbort?: Promise<never>,
-    resolveSessionStart?: () => Promise<AcpSessionStartTarget>,
     forkSessionId?: ACPSessionId,
     forkSessionTurnId?: string
   ): Promise<acp.NewSessionResponse> {
@@ -2024,12 +2037,6 @@ export class AgentClient implements acp.Client {
         this.acknowledgedSteerCapability ? 'yes' : 'no'
       } fork=${this.supportsFork ? 'yes' : 'no'} forkMethod=${hasForkMethod ? 'yes' : 'no'})`
     );
-
-    if (resolveSessionStart) {
-      const target = await withAbort(resolveSessionStart(), startupAbort);
-      workdir = target.workdir;
-      resumeSessionId = target.resumeSessionId;
-    }
 
     if (
       this.lodyExtensionCapabilities.worktreeProject?.version === 1 &&
@@ -2599,6 +2606,25 @@ export class AgentClient implements acp.Client {
         signal.removeEventListener('abort', abortListener);
       }
     }
+  }
+
+  /**
+   * What the agent does that no Lody turn accounts for, from the Core
+   * `sessionActivity` level: `running` while it works by itself or waits on a
+   * permission request, else `background` while background tasks it will be
+   * woken by are live. Null when it is idle, reported nothing for the current
+   * ACP session, or does not advertise the capability.
+   */
+  /** Whether the agent advertised the Core `sessionActivity` level. */
+  reportsSessionActivity(): boolean {
+    return this.lodyExtensionCapabilities.sessionActivity?.version === 1;
+  }
+
+  getNativeWork(): NativeAgentWork {
+    const activity = this.nativeActivity;
+    if (!activity || activity.sessionId !== this.acpSessionId) return null;
+    if (activity.state !== 'idle') return 'running';
+    return activity.backgroundTaskCount > 0 ? 'background' : null;
   }
 
   /** Raw prompts and steer submissions remain owned after their local waits end. */

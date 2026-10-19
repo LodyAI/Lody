@@ -21,11 +21,7 @@ import {
   type GitHubReview,
   type GitHubReviewThread,
 } from '@lody/shared';
-import {
-  isGitHubUnauthorizedTokenError,
-  withGitHubOperationTokenRetry,
-  withGitHubTokenRetry,
-} from '@/lib/github-token';
+import { isGitHubUnauthorizedTokenError } from '@/lib/github-token';
 import { runWithRetry } from '@/lib/async-retry';
 import {
   EMPTY_PR_CACHE_VERSIONS,
@@ -70,6 +66,7 @@ export interface GitHubPrDetailsData {
 }
 
 export interface UseGitHubPrDetailsResult {
+  canWrite: boolean;
   state: GitHubPrDetailsState;
   data: GitHubPrDetailsData | null;
   error: Error | null;
@@ -287,9 +284,12 @@ export function useGitHubPrDetails({
   });
   const {
     serverVersions,
+    publicRead,
     repositoryId,
     repoFullName: normalizedRepoFullName,
-    ready: enabledWithInputs,
+    readReady: enabledWithInputs,
+    runRead: withGitHubTokenRetry,
+    runOperation: withGitHubOperationTokenRetry,
     retry: retryIdentity,
   } = identity;
 
@@ -299,7 +299,8 @@ export function useGitHubPrDetails({
   // JWT refreshes. Reuse the shared authed-query gate the other authed hooks
   // use so we never fire a doomed request.
   const { isAuthenticated, isLoading: isConvexAuthLoading } = useAuthenticatedConvex();
-  const canFetch = enabledWithInputs && canRunAuthedWorkspaceQuery(workspaceId, isAuthenticated);
+  const canFetch =
+    enabledWithInputs && (publicRead || canRunAuthedWorkspaceQuery(workspaceId, isAuthenticated));
 
   const [payload, setPayload] = useState<PrCachePayload | null>(null);
   // The PR `payload`/`state` describe. A switched view keeps the previous PR's
@@ -346,7 +347,7 @@ export function useGitHubPrDetails({
 
   const cacheKey =
     enabledWithInputs && workspaceId && normalizedRepoFullName && prNumber
-      ? getPrCacheKey(workspaceId, normalizedRepoFullName, prNumber, repositoryId)
+      ? `${publicRead ? 'public:' : ''}${getPrCacheKey(workspaceId, normalizedRepoFullName, prNumber, repositoryId)}`
       : null;
 
   // --- Convex subscription for cache invalidation -------------------------
@@ -388,12 +389,9 @@ export function useGitHubPrDetails({
     // new fetchSlice call below isn't deduped onto the abandoned fetch.
     inFlightPromisesRef.current.clear();
     void (async () => {
-      const entry = await readPrCacheEntry(
-        workspaceId,
-        normalizedRepoFullName,
-        prNumber,
-        repositoryId
-      );
+      const entry = publicRead
+        ? null
+        : await readPrCacheEntry(workspaceId, normalizedRepoFullName, prNumber, repositoryId);
       if (cancelled || cacheKeyRef.current !== cacheKey) return;
       setLoadedCacheKey(cacheKey);
       if (entry) {
@@ -418,6 +416,7 @@ export function useGitHubPrDetails({
     cacheKey,
     repositoryId,
     cancelPendingBranchProbe,
+    publicRead,
     enabledWithInputs,
     normalizedRepoFullName,
     prNumber,
@@ -433,12 +432,7 @@ export function useGitHubPrDetails({
       targetRepo: string,
       targetPrNumber: number
     ) => {
-      const targetCacheKey = getPrCacheKey(
-        targetWorkspaceId,
-        targetRepo,
-        targetPrNumber,
-        repositoryId
-      );
+      const targetCacheKey = `${publicRead ? 'public:' : ''}${getPrCacheKey(targetWorkspaceId, targetRepo, targetPrNumber, repositoryId)}`;
       const isCurrentTarget = cacheKeyRef.current === targetCacheKey;
       if (isCurrentTarget) {
         payloadRef.current = nextPayload;
@@ -455,9 +449,9 @@ export function useGitHubPrDetails({
         versions: nextVersions,
         lastWriteAt: Date.now(),
       };
-      void writePrCacheEntry(entry);
+      if (!publicRead) void writePrCacheEntry(entry);
     },
-    [repositoryId]
+    [repositoryId, publicRead]
   );
 
   // Probe whether the merged PR's head branch still exists on GitHub, gating the
@@ -512,7 +506,7 @@ export function useGitHubPrDetails({
     } finally {
       branchProbeInFlightRef.current = false;
     }
-  }, [canFetch, normalizedRepoFullName, prNumber, workspaceId, repositoryId]);
+  }, [canFetch, normalizedRepoFullName, prNumber, workspaceId, repositoryId, withGitHubTokenRetry]);
   useEffect(() => {
     runBranchProbeRef.current = () => void runBranchProbe();
   }, [runBranchProbe]);
@@ -545,7 +539,7 @@ export function useGitHubPrDetails({
               switch (slice) {
                 case 'prDetails': {
                   const fetchedPullRequest = await shareGitHubRead(
-                    `prDetails:${workspaceId}:${normalizedRepoFullName}#${prNumber}:${requestOptions?.cache ?? ''}`,
+                    `prDetails:${cacheKey}:${normalizedRepoFullName}#${prNumber}:${requestOptions?.cache ?? ''}`,
                     () =>
                       githubFetchPullRequestDetails(
                         token,
@@ -571,7 +565,7 @@ export function useGitHubPrDetails({
                 }
                 case 'reviewComments': {
                   const reviewThreads = await shareGitHubRead(
-                    `reviewComments:${workspaceId}:${normalizedRepoFullName}#${prNumber}:${requestOptions?.cache ?? ''}`,
+                    `reviewComments:${cacheKey}:${normalizedRepoFullName}#${prNumber}:${requestOptions?.cache ?? ''}`,
                     () =>
                       githubFetchPRReviewComments(
                         token,
@@ -593,7 +587,7 @@ export function useGitHubPrDetails({
                 }
                 case 'reviews': {
                   const reviews = await shareGitHubRead(
-                    `reviews:${workspaceId}:${normalizedRepoFullName}#${prNumber}:${requestOptions?.cache ?? ''}`,
+                    `reviews:${cacheKey}:${normalizedRepoFullName}#${prNumber}:${requestOptions?.cache ?? ''}`,
                     () =>
                       githubFetchPullRequestReviews(
                         token,
@@ -615,7 +609,7 @@ export function useGitHubPrDetails({
                 }
                 case 'issueComments': {
                   const issueComments = await shareGitHubRead(
-                    `issueComments:${workspaceId}:${normalizedRepoFullName}#${prNumber}:${requestOptions?.cache ?? ''}`,
+                    `issueComments:${cacheKey}:${normalizedRepoFullName}#${prNumber}:${requestOptions?.cache ?? ''}`,
                     () =>
                       githubFetchPRIssueComments(
                         token,
@@ -642,7 +636,7 @@ export function useGitHubPrDetails({
                   if (!ref) return;
                   try {
                     const checkRuns = await shareGitHubRead(
-                      `checkRuns:${workspaceId}:${normalizedRepoFullName}@${ref}:${requestOptions?.cache ?? ''}`,
+                      `checkRuns:${cacheKey}:${normalizedRepoFullName}@${ref}:${requestOptions?.cache ?? ''}`,
                       () =>
                         githubFetchCheckRuns(token, normalizedRepoFullName, ref, requestOptions),
                       sharing
@@ -720,6 +714,7 @@ export function useGitHubPrDetails({
       workspaceId,
       writeCache,
       repositoryId,
+      withGitHubTokenRetry,
     ]
   );
 
@@ -742,7 +737,7 @@ export function useGitHubPrDetails({
   // background job completing, so keep polling the PR details while the merge
   // box is in the "checking" state.
   useEffect(() => {
-    if (!canFetch || !cacheKey || !visible) return undefined;
+    if (publicRead || !canFetch || !cacheKey || !visible) return undefined;
     if (!isPullRequestMergeabilityPending(payload?.pullRequest)) return undefined;
 
     const intervalId = window.setInterval(() => {
@@ -752,7 +747,7 @@ export function useGitHubPrDetails({
     return () => {
       window.clearInterval(intervalId);
     };
-  }, [cacheKey, canFetch, fetchSlice, payload?.pullRequest, visible]);
+  }, [cacheKey, canFetch, fetchSlice, payload?.pullRequest, visible, publicRead]);
 
   // GitHub check runs change asynchronously and, when the webhook fan-out is
   // delayed/absent, without any client push. Keep polling the check-runs slice
@@ -797,7 +792,8 @@ export function useGitHubPrDetails({
         pollPausedRef.current = false;
         poll();
       }
-      if (intervalId === null) intervalId = window.setInterval(poll, CHECK_RUNS_POLL_INTERVAL_MS);
+      if (intervalId === null)
+        intervalId = window.setInterval(poll, publicRead ? 300_000 : CHECK_RUNS_POLL_INTERVAL_MS);
     };
     const onWatchedChange = () => {
       if (isWatched()) resume();
@@ -811,7 +807,7 @@ export function useGitHubPrDetails({
       document.removeEventListener('visibilitychange', onWatchedChange);
       stop();
     };
-  }, [cacheKey, canFetch, fetchSlice, prMerged, prState, visible]);
+  }, [cacheKey, canFetch, fetchSlice, prMerged, prState, visible, publicRead]);
 
   // --- Per-slice invalidation from Convex ---------------------------------
   useEffect(() => {
@@ -873,7 +869,14 @@ export function useGitHubPrDetails({
       writeCache(next, nextVersions, workspaceId, normalizedRepoFullName, prNumber);
       return pullRequest;
     },
-    [normalizedRepoFullName, prNumber, workspaceId, writeCache, repositoryId]
+    [
+      normalizedRepoFullName,
+      prNumber,
+      workspaceId,
+      writeCache,
+      repositoryId,
+      withGitHubOperationTokenRetry,
+    ]
   );
 
   const refreshCheckRuns = useCallback(async (): Promise<GitHubPrDetailsData | null> => {
@@ -921,6 +924,7 @@ export function useGitHubPrDetails({
     workspaceId,
     writeCache,
     repositoryId,
+    withGitHubOperationTokenRetry,
   ]);
 
   // --- Mutations ----------------------------------------------------------
@@ -966,7 +970,15 @@ export function useGitHubPrDetails({
         }
       }
     },
-    [cacheKey, normalizedRepoFullName, prNumber, workspaceId, writeCache, repositoryId]
+    [
+      cacheKey,
+      normalizedRepoFullName,
+      prNumber,
+      workspaceId,
+      writeCache,
+      repositoryId,
+      withGitHubOperationTokenRetry,
+    ]
   );
 
   const mergePullRequest = useCallback(
@@ -1036,6 +1048,7 @@ export function useGitHubPrDetails({
       workspaceId,
       writeCache,
       repositoryId,
+      withGitHubOperationTokenRetry,
     ]
   );
 
@@ -1071,7 +1084,15 @@ export function useGitHubPrDetails({
         }
       }
     },
-    [cacheKey, normalizedRepoFullName, prNumber, workspaceId, writeCache, repositoryId]
+    [
+      cacheKey,
+      normalizedRepoFullName,
+      prNumber,
+      workspaceId,
+      writeCache,
+      repositoryId,
+      withGitHubOperationTokenRetry,
+    ]
   );
 
   const markReadyForReview = useCallback(async () => {
@@ -1123,6 +1144,7 @@ export function useGitHubPrDetails({
     prNumber,
     workspaceId,
     repositoryId,
+    withGitHubOperationTokenRetry,
   ]);
 
   const deleteBranch = useCallback(async () => {
@@ -1159,6 +1181,7 @@ export function useGitHubPrDetails({
     prNumber,
     workspaceId,
     repositoryId,
+    withGitHubOperationTokenRetry,
   ]);
 
   // Schedule the head-branch probe for merged PRs — the actual fetch + retry
@@ -1195,7 +1218,8 @@ export function useGitHubPrDetails({
   // confirmed-expiry redirect in the product.
   const payloadIsCurrent = loadedCacheKey === cacheKey;
   const data = payloadToData(payloadIsCurrent ? payload : null);
-  const settledUnauthenticated = enabledWithInputs && !isConvexAuthLoading && !isAuthenticated;
+  const settledUnauthenticated =
+    !publicRead && enabledWithInputs && !isConvexAuthLoading && !isAuthenticated;
   const unauthedAndEmpty = settledUnauthenticated && !data;
   const hasUnauthorizedError = error !== null && isGitHubUnauthorizedTokenError(error);
   const recoverableAuthError = (unauthedAndEmpty || hasUnauthorizedError) && !data;
@@ -1248,6 +1272,7 @@ export function useGitHubPrDetails({
   }, [cacheKey, enabledWithInputs, recoverableAuthError, refresh]);
 
   return {
+    canWrite: identity.ready,
     state: identity.error ? 'error' : effectiveState,
     data: enabledWithInputs ? data : null,
     error: identity.error ?? error,

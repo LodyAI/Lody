@@ -86,25 +86,24 @@ export function makeHostIdentityStore<P extends HostKeyPurpose>(
   purpose: P,
   backend: HostIdentityBackend
 ): HostIdentityStore<P> {
-  const inspect = (input: HostKeyRef) => {
-    const ref = { ...input };
-    return Effect.gen(function* () {
-      const actual = yield* backend.read(purpose, ref);
-      if (!validKeys(actual)) return yield* Effect.fail(hostKeyFailure('invalid-record'));
-      return { ...actual };
-    });
-  };
+  const inspectSnapshot = Effect.fnUntraced(function* (ref: HostKeyRef) {
+    const actual = yield* backend.read(purpose, ref);
+    if (!validKeys(actual)) return yield* Effect.fail(hostKeyFailure('invalid-record'));
+    return { ...actual };
+  });
+  const inspect = (input: HostKeyRef) => inspectSnapshot({ ...input });
+  const readSnapshot = Effect.fnUntraced(function* (ref: HostKeyRef, expected: HostPublicKeys) {
+    if (!validKeys(expected)) return yield* Effect.fail(hostKeyFailure('invalid-record'));
+    const actual = yield* inspect(ref);
+    if (!equalKeys(actual, expected)) {
+      return yield* Effect.fail(hostKeyFailure('identity-mismatch'));
+    }
+    return { ...actual };
+  });
   const read = (input: HostKeyRef, expectedInput: HostPublicKeys) => {
     const ref = { ...input };
     const expected = { ...expectedInput };
-    return Effect.gen(function* () {
-      if (!validKeys(expected)) return yield* Effect.fail(hostKeyFailure('invalid-record'));
-      const actual = yield* inspect(ref);
-      if (!equalKeys(actual, expected)) {
-        return yield* Effect.fail(hostKeyFailure('identity-mismatch'));
-      }
-      return { ...actual };
-    });
+    return readSnapshot(ref, expected);
   };
   return {
     purpose,

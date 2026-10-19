@@ -21,7 +21,7 @@ import {
 } from '@/components/mentions/issue-pr-hash-mention';
 import {
   SKILL_MENTION_TRIGGER,
-  SKILL_MENTION_TRIGGER_ALIAS,
+  SKILL_MENTION_TRIGGER_ALIASES,
   selectSkillMentionCandidates,
   type SkillMentionItem,
 } from '@/components/mentions/mention-skill-source';
@@ -381,8 +381,9 @@ export function selectMentionMenuViewForTrigger(
       rankedCandidates,
     };
   }
-  const canonicalTrigger =
-    trigger === SKILL_MENTION_TRIGGER_ALIAS ? SKILL_MENTION_TRIGGER : trigger;
+  const canonicalTrigger = SKILL_MENTION_TRIGGER_ALIASES.includes(trigger)
+    ? SKILL_MENTION_TRIGGER
+    : trigger;
   const direct = categories.find((entry) => entry.directTrigger === canonicalTrigger);
   if (!direct) return null;
   return {
@@ -577,13 +578,13 @@ export function toAgentRoleCandidate(
   return {
     // The range payload is the stable Role id; the text only carries the token
     // derived from the name, which its owner may rename at any time.
-    value: role.id,
+    value: item.value,
     label: item.slug,
     insertText: `${MENTION_TRIGGER}${item.slug}`,
     kind: 'agent_role',
     icon: 'agent_role',
     iconEmoji: emoji,
-    title: role.name,
+    title: item.label,
     // Who does the work and where: two Roles named alike on two machines are
     // told apart here without opening the pane.
     hint: [item.agentConfig?.name, item.machine?.name].filter(Boolean).join(' · ') || undefined,

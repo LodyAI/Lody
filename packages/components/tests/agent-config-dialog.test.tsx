@@ -547,6 +547,38 @@ describe('AgentConfigDialog', () => {
     expect(closed).toEqual([false]);
   });
 
+  it('names saved Pi extensions by package or folder before a scan', async () => {
+    const config: AgentConfigMeta = {
+      id: 'saved-pi' as AgentConfigId,
+      machineId,
+      name: 'Pi',
+      cliType: 'builtin',
+      agentType: 'pi',
+      env: {},
+      runtimeOverrides: {
+        piExtensions: [
+          '/u/.pi/agent/npm/node_modules/pi-smart-fetch/dist/index.js',
+          '/u/.pi/agent/npm/node_modules/@fradser/pi-vision/index.ts',
+          '/u/.pi/agent/npm/node_modules/@ff-labs/pi-fff/src/index.ts',
+          'C:\\Users\\u\\ext\\my-ext\\index.ts',
+          '/u/ext/single.ts',
+        ],
+      },
+    };
+    await renderDialog(
+      { kind: 'edit', config },
+      createMachine('Pi machine', { piExtensions: 1 }),
+      vi.fn(async () => {})
+    );
+    const field = document.querySelector('[aria-label="Pi extensions"]')!;
+    const paths = config.runtimeOverrides!.piExtensions!;
+    expect(Array.from(field.querySelectorAll('label')).map((row) => row.textContent)).toEqual(
+      ['pi-smart-fetch', '@fradser/pi-vision', '@ff-labs/pi-fff', 'my-ext', 'single.ts'].map(
+        (name, index) => `${name}${paths[index]}`
+      )
+    );
+  });
+
   it('creates a Pi provider with selected extensions through the live-probe path', async () => {
     const saved: AgentConfigSubmitPayload[] = [];
     const scan = async () => ({
@@ -1099,6 +1131,49 @@ describe('AgentConfigDialog', () => {
         })
       );
     });
+  });
+
+  it('shows the owning machine DSH YAML path per Provider and hides it for old daemons', async () => {
+    const workspaceId = 'dsh-path-workspace' as WorkspaceId;
+    const pathKey = machineFlockKeys.dotlodyPath();
+    const rows = [{ key: pathKey, value: '/remote/lody-data' }];
+    store.set(runtimeAtom, {
+      workspaceId,
+      workspaceSlug: 'dsh-path-workspace',
+      repo: { openFlockDoc: async () => ({ flock: { scan: () => rows.values() } }) },
+      getMachineAcpBinaryProgress: () => null,
+      subscribeMachineAcpBinaryProgress: () => () => {},
+    } as unknown as WorkspaceRuntime);
+    store.set(currentWorkspaceIdAtom, workspaceId);
+    store.set(currentWorkspaceSlugAtom, 'dsh-path-workspace');
+    store.set(setMachineFlockRowsForMachineAtom, {
+      workspaceId,
+      machineId,
+      rows: { [serializeMachineFlockKey(pathKey)]: rows[0]! },
+    });
+    const mode = (id: string): AgentConfigDialogMode => ({
+      kind: 'edit',
+      config: {
+        id: id as AgentConfigId,
+        machineId,
+        name: 'Same DSH name',
+        cliType: 'builtin',
+        agentType: 'deepseek',
+        env: {},
+      },
+    });
+    const machine = createMachine('Remote machine', { dshProviderIsolation: 1 });
+    await renderDialog(mode('provider-a'), machine);
+    expect(document.body.textContent).toContain(
+      'Configuration path: /remote/lody-data/dsh/providers/provider-a/profiles/lody-acp/cordis.patch.yml'
+    );
+    await renderDialog(mode('provider-b'), machine);
+    expect(document.body.textContent).toContain(
+      '/remote/lody-data/dsh/providers/provider-b/profiles/lody-acp/cordis.patch.yml'
+    );
+    expect(document.body.textContent).not.toContain('/providers/provider-a/');
+    await renderDialog(mode('provider-b'), createMachine('Old daemon'));
+    expect(document.body.textContent).not.toContain('Configuration path:');
   });
 
   it('requires a valid custom DeepSeek endpoint and saves the trimmed URL as-is', async () => {

@@ -45,6 +45,7 @@ import {
 import { useDiffFocusScroll } from './use-diff-focus-scroll';
 import { useSessionAllChangesDiffData } from './use-session-all-changes-diff-data';
 import { useSessionConversationDiffData } from './use-session-conversation-diff-data';
+import { useDiffViewport } from './use-diff-viewport';
 import { useGitHubReviewComments } from '@/hooks/use-github-review-comments';
 import {
   getPullRequestNumber,
@@ -106,6 +107,7 @@ const styles = stylex.create({
     fontSize: '14px',
     lineHeight: '20px',
   },
+  diffCardHeaderOnly: { borderBottomWidth: 0 },
   skeletonBody: {
     display: 'flex',
     flexDirection: 'column',
@@ -122,7 +124,9 @@ const styles = stylex.create({
   },
   root: { display: 'flex', height: '100%', minHeight: 0, flexDirection: 'column' },
   fileBlock: { width: '100%' },
+  deferredBody: { height: '160px' },
   panelContent: {
+    overflowAnchor: 'none',
     display: 'flex',
     width: '100%',
     flexDirection: 'column',
@@ -144,14 +148,18 @@ const styles = stylex.create({
 
 function FileDiffSkeleton({
   filePath,
+  showBody,
   onOpenFile,
+  expanded,
 }: {
   filePath: string;
+  showBody: boolean;
   onOpenFile?: (path: string) => void;
+  expanded: boolean;
 }) {
   return (
     <div {...stylex.props(styles.diffCard)}>
-      <div {...stylex.props(styles.diffCardHeader)}>
+      <div {...stylex.props(styles.diffCardHeader, !expanded && styles.diffCardHeaderOnly)}>
         <FileIcon filePath={filePath} className={stylex.props(styles.fileIcon).className} />
         <div {...stylex.props(styles.filePathRow)}>
           <span {...stylex.props(styles.filePath)} title={filePath}>
@@ -160,15 +168,47 @@ function FileDiffSkeleton({
           <DiffFileHeaderActions path={filePath} onOpenFile={onOpenFile} />
         </div>
       </div>
-      <div {...stylex.props(styles.skeletonBody)}>
-        <Skeleton width="100%" height={12} />
-        <Skeleton width="91%" height={12} />
-        <Skeleton width="80%" height={12} />
-        <Skeleton width="100%" height={12} />
-        <Skeleton width="75%" height={12} />
-      </div>
+      {expanded &&
+        (showBody ? (
+          <div {...stylex.props(styles.skeletonBody)}>
+            <Skeleton width="100%" height={12} />
+            <Skeleton width="91%" height={12} />
+            <Skeleton width="80%" height={12} />
+            <Skeleton width="100%" height={12} />
+            <Skeleton width="75%" height={12} />
+          </div>
+        ) : (
+          <div {...stylex.props(styles.deferredBody)} />
+        ))}
     </div>
   );
+}
+
+/**
+ * How many loading cards may draw a skeleton body. Every skeleton line pulses,
+ * and WebKit composites each pulsing element into its own layer, so one body
+ * per file turned a diff of a few thousand files into a WebContent process
+ * kill on iOS before any diff arrived. The first few open cards fill the
+ * screen; the rest use static placeholders.
+ */
+export const MAX_DIFF_SKELETON_BODIES = 3;
+
+/**
+ * The loading cards that draw a skeleton body: only cards that will open (a
+ * collapsed card has no body to stand in for), and at most
+ * {@link MAX_DIFF_SKELETON_BODIES} of them, in list order.
+ */
+export function selectDiffSkeletonBodyPaths(input: {
+  readonly paths: readonly string[];
+  readonly isLoaded: (path: string) => boolean;
+  readonly opensByDefault: (path: string) => boolean;
+}): ReadonlySet<string> {
+  const selected = new Set<string>();
+  for (const path of input.paths) {
+    if (selected.size >= MAX_DIFF_SKELETON_BODIES) break;
+    if (!input.isLoaded(path) && input.opensByDefault(path)) selected.add(path);
+  }
+  return selected;
 }
 
 function getThreadsForPath<T extends { anchor: { path: string } }>(
@@ -246,6 +286,7 @@ export function shouldOpenDiffFileByDefault(input: {
 }
 
 export type SessionConversationDiffPanelProps = {
+  active?: boolean;
   sessionId: SessionId;
   turnId?: string;
   filePaths: string[];
@@ -267,9 +308,12 @@ export type SessionConversationDiffPanelProps = {
 };
 
 type DiffFileBlockProps = {
+  renderContent: boolean;
   filePath: string;
   data: FileDiffData | undefined;
   defaultOpen: boolean;
+  /** Whether a card still loading draws a skeleton body; see {@link selectDiffSkeletonBodyPaths}. */
+  showSkeletonBody: boolean;
   commentsEnabled: boolean;
   currentUser: CommentUser | null;
   githubThreads: GitHubReviewThread[];
@@ -294,9 +338,11 @@ export function createConversationDiffViewerParseCacheKey(input: {
 }
 
 const DiffFileBlock = memo(function DiffFileBlock({
+  renderContent,
   filePath,
   data,
   defaultOpen,
+  showSkeletonBody,
   commentsEnabled,
   currentUser,
   githubThreads,
@@ -317,7 +363,14 @@ const DiffFileBlock = memo(function DiffFileBlock({
   });
 
   if (!data) {
-    return <FileDiffSkeleton filePath={filePath} onOpenFile={onOpenFile} />;
+    return (
+      <FileDiffSkeleton
+        filePath={filePath}
+        onOpenFile={onOpenFile}
+        expanded={defaultOpen}
+        showBody={showSkeletonBody}
+      />
+    );
   }
 
   if (data.status === 'error') {
@@ -327,6 +380,8 @@ const DiffFileBlock = memo(function DiffFileBlock({
   if (data.status === 'ready-parsed') {
     return (
       <DiffViewer
+        preferParseWorker
+        renderContent={renderContent}
         key={`${mode}:${defaultOpen ? 'open' : 'closed'}`}
         path={filePath}
         oldText=""
@@ -355,6 +410,8 @@ const DiffFileBlock = memo(function DiffFileBlock({
   if (data.status === 'ready-text-source') {
     return (
       <DiffViewer
+        preferParseWorker
+        renderContent={renderContent}
         key={`${mode}:${defaultOpen ? 'open' : 'closed'}`}
         path={filePath}
         oldText=""
@@ -416,6 +473,8 @@ const DiffFileBlock = memo(function DiffFileBlock({
 
   return (
     <DiffViewer
+      preferParseWorker
+      renderContent={renderContent}
       key={`${mode}:${defaultOpen ? 'open' : 'closed'}`}
       path={filePath}
       oldText={data.oldSnapshot.kind === 'text' ? data.oldSnapshot.text : ''}
@@ -442,6 +501,7 @@ const DiffFileBlock = memo(function DiffFileBlock({
 DiffFileBlock.displayName = 'DiffFileBlock';
 
 function SessionConversationDiffPanelImpl({
+  active = true,
   sessionId,
   turnId,
   filePaths,
@@ -510,6 +570,14 @@ function SessionConversationDiffPanelImpl({
     () => getMatchingPath(normalizedInputPaths, focusFilePath),
     [focusFilePath, normalizedInputPaths]
   );
+  const viewportRef = useRef<HTMLDivElement | null>(null);
+  const { loadPaths, registerPath, anchorTarget } = useDiffViewport({
+    active,
+    paths: normalizedInputPaths,
+    priorityPath: focusedLoadPath,
+    scrollContainerRef: viewportRef,
+  });
+  const visiblePaths = useMemo(() => new Set(loadPaths), [loadPaths]);
   // "All Changes" (base) mode loads every file's diff with one batched RPC; conversation/turn
   // mode keeps the per-file loader. Both hooks are called (rules of hooks) but only the active
   // one fetches — the other is gated inert via `enabled`.
@@ -522,19 +590,20 @@ function SessionConversationDiffPanelImpl({
     fileDiffsPending,
     mode,
     priorityFilePath: focusedLoadPath,
-    loadFilePaths: normalizedInputPaths,
+    loadFilePaths: loadPaths,
     loadPaused: isUserScrolling,
     fileProvider,
     fileProviderPending,
-    enabled: !isBaseMode,
+    enabled: active && !isBaseMode,
   });
   const allChangesDiffData = useSessionAllChangesDiffData({
     sessionId,
     filePaths: normalizedInputPaths,
+    loadFilePaths: loadPaths,
     focusPath: focusedLoadPath,
     fileProvider,
     fileProviderPending,
-    enabled: isBaseMode,
+    enabled: active && isBaseMode,
   });
   const { cacheKey, normalizedPaths, resolvedByPath, isDiffUnavailable } = isBaseMode
     ? allChangesDiffData
@@ -553,7 +622,7 @@ function SessionConversationDiffPanelImpl({
     workspaceId: currentWorkspaceId,
     repoFullName: getPullRequestRepoFullName(latestPr) ?? repoFullName,
     prNumber: latestPrNumber,
-    enabled: normalizedPaths.length > 0 && Boolean(latestPrNumber),
+    enabled: active && normalizedPaths.length > 0 && Boolean(latestPrNumber),
   });
   const {
     threads: githubReviewCommentThreads,
@@ -608,12 +677,33 @@ function SessionConversationDiffPanelImpl({
   const focusCommentForScroll = focusComment?.source === 'github' ? focusComment : null;
 
   const { scrollContainerRef, registerPathBlock } = useDiffFocusScroll({
+    onScrollTarget: anchorTarget,
     focusFilePath,
     focusComment: focusCommentForScroll,
     focusRequestSeq,
-    isFocusTargetResolved: isFocusFileResolved && isFocusCommentResolved,
+    isFocusTargetResolved: active && isFocusFileResolved && isFocusCommentResolved,
     contextKey: cacheKey,
   });
+  const pathRefs = useMemo(
+    () =>
+      new Map(
+        normalizedPaths.map((path) => [
+          path,
+          (node: HTMLDivElement | null) => {
+            registerPathBlock(path, node);
+            registerPath(path, node);
+          },
+        ])
+      ),
+    [normalizedPaths, registerPath, registerPathBlock]
+  );
+  const setConversationScroll = useCallback(
+    (node: HTMLDivElement | null) => {
+      viewportRef.current = node;
+      scrollContainerRef.current = node;
+    },
+    [scrollContainerRef]
+  );
 
   const baseViewportScrollCleanupRef = useRef<(() => void) | null>(null);
   useEffect(
@@ -631,10 +721,12 @@ function SessionConversationDiffPanelImpl({
       if (mode !== 'base') return;
       if (!node) {
         scrollContainerRef.current = null;
+        viewportRef.current = null;
         return;
       }
       const viewport = node.querySelector('[data-radix-scroll-area-viewport]');
       scrollContainerRef.current = viewport instanceof HTMLDivElement ? viewport : null;
+      viewportRef.current = scrollContainerRef.current;
       if (viewport instanceof HTMLDivElement) {
         viewport.addEventListener('scroll', handleDiffScroll, { passive: true });
         baseViewportScrollCleanupRef.current = () => {
@@ -770,16 +862,27 @@ function SessionConversationDiffPanelImpl({
     );
   }
 
+  const skeletonBodyPaths = selectDiffSkeletonBodyPaths({
+    paths: normalizedPaths,
+    isLoaded: (path) => resolvedByPath[path] !== undefined,
+    opensByDefault: (path) =>
+      visiblePaths.has(path) &&
+      shouldOpenDiffFileByDefault({ mode, filePath: path, focusFilePath }),
+  });
+
   const renderFileBlock = (filePath: string) => (
     <div
       key={filePath}
-      ref={(node) => registerPathBlock(filePath, node)}
+      ref={pathRefs.get(filePath)}
+      data-diff-path={filePath}
       {...stylex.props(styles.fileBlock)}
     >
       <DiffFileBlock
+        renderContent={visiblePaths.has(filePath)}
         filePath={filePath}
         data={resolvedByPath[filePath]}
         defaultOpen={shouldOpenDiffFileByDefault({ mode, filePath, focusFilePath })}
+        showSkeletonBody={skeletonBodyPaths.has(filePath)}
         commentsEnabled={Boolean(latestPrNumber && repoFullName)}
         currentUser={currentUser}
         githubThreads={githubThreadsByPath.get(filePath) ?? EMPTY_GITHUB_THREADS}
@@ -821,7 +924,7 @@ function SessionConversationDiffPanelImpl({
         </div>
       ) : (
         <div
-          ref={scrollContainerRef}
+          ref={setConversationScroll}
           {...withClassName(stylex.props(styles.conversationScroll), 'scrollbar-pro')}
           onScroll={handleDiffScroll}
         >
@@ -873,6 +976,7 @@ export const areSessionConversationDiffPanelPropsEqual = (
   prev: SessionConversationDiffPanelProps,
   next: SessionConversationDiffPanelProps
 ): boolean =>
+  prev.active === next.active &&
   prev.sessionId === next.sessionId &&
   prev.turnId === next.turnId &&
   prev.focusFilePath === next.focusFilePath &&

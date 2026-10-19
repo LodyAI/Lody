@@ -122,7 +122,11 @@ export function resolveLodyBin(): string {
 
 export const DAEMON_RUNNER_READY_FD_ENV = 'LODY_DAEMON_RUNNER_READY_FD';
 const DAEMON_RUNNER_READY_FD = 3;
-const DAEMON_RUNNER_READY_TIMEOUT_MS = 30_000;
+// Only a hang backstop: Worker failures already end the handshake through an
+// error report or EOF. A cold start on a slow machine (about 40 seconds was
+// observed) plus retryable-startup backoff must fit, because an upgrade handoff
+// that times out kills the replacement and restarts the old version.
+export const DAEMON_RUNNER_READY_TIMEOUT_MS = 3 * 60_000;
 const DAEMON_RUNNER_READY_MAX_BUFFER = 8 * 1024;
 const DAEMON_RUNNER_SHUTDOWN_GRACE_MS = 40_000;
 const DAEMON_RUNNER_FORCE_KILL_WAIT_MS = 5_000;

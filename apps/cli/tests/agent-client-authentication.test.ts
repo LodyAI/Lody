@@ -162,6 +162,49 @@ describe('AgentClient Kimi authentication and resume', () => {
     expect(await client.requestPermission(request)).toEqual({ outcome: { outcome: 'cancelled' } });
   });
 
+  it('reports native work from the Core activity level of the current ACP session', async () => {
+    const activity = (state: string, backgroundTaskCount: number, sessionId = 'new-session') =>
+      client.extNotification?.('_lody/session/activity_update', {
+        version: 1,
+        sessionId,
+        state,
+        backgroundTaskCount,
+      });
+    const client = createClient('claude');
+    connectionMocks.initialize.mockResolvedValue({
+      ...initializeResponse(),
+      agentCapabilities: { _meta: { lody: { sessionActivity: { version: 1 } } } },
+    });
+    await client.startSession({} as never, '/tmp');
+    expect(client.getNativeWork()).toBeNull();
+
+    await activity('idle', 1);
+    expect(client.getNativeWork()).toBe('background');
+    await activity('running', 1);
+    expect(client.getNativeWork()).toBe('running');
+    await activity('requires_action', 0);
+    expect(client.getNativeWork()).toBe('running');
+    // A level for another ACP session never replaces this session's level.
+    await activity('idle', 0, 'other-session');
+    expect(client.getNativeWork()).toBe('running');
+    await activity('idle', 0);
+    expect(client.getNativeWork()).toBeNull();
+  });
+
+  it('ignores activity levels from an agent that did not advertise them', async () => {
+    const client = createClient('claude');
+    await client.startSession({} as never, '/tmp');
+
+    await client.extNotification?.('_lody/session/activity_update', {
+      version: 1,
+      sessionId: 'new-session',
+      state: 'running',
+      backgroundTaskCount: 2,
+    });
+
+    expect(client.getNativeWork()).toBeNull();
+  });
+
   it('retains terminal auth methods and surfaces -32000 as a structured error', async () => {
     const protocolError = Object.assign(new Error('Authentication required'), { code: -32000 });
     connectionMocks.newSession.mockRejectedValue(protocolError);

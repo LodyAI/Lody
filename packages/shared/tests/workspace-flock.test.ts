@@ -171,4 +171,49 @@ describe('workspace Flock helpers', () => {
       configOptionValues: { fast: true },
     });
   });
+
+  it('stores a multi-machine role as v2 and a single-machine role as the unchanged v1 row', () => {
+    const flock = new FakeWorkspaceFlock();
+    const key = workspaceFlockKeys.agentRole('role-1' as AgentRoleId);
+    const single = agentRole('role-1', { runConfig: { modelId: 'gpt-5.6' } });
+    writeWorkspaceAgentRoleToFlock(flock, single);
+    const storedSingle = flock.rows.get(JSON.stringify(key))?.value as Record<string, unknown>;
+    // Exactly what an older client wrote and still reads.
+    expect(storedSingle).toMatchObject({ v: 1, machineId: 'machine-1', agentConfigId: 'config-1' });
+    expect(storedSingle).not.toHaveProperty('additionalTargets');
+    expect(storedSingle).not.toHaveProperty('targets');
+
+    const multi: AgentRole = {
+      ...single,
+      alias: 'Reviewer-Mac',
+      additionalTargets: [
+        {
+          machineId: 'machine-2' as MachineId,
+          agentConfigId: 'config-2' as AgentConfigId,
+          runConfig: { modelId: 'gpt-5.6-luna' },
+        },
+      ],
+    };
+    expect(writeWorkspaceAgentRoleToFlock(flock, multi)).toBe(true);
+    const storedMulti = flock.rows.get(JSON.stringify(key))?.value as Record<string, unknown>;
+    // Older clients accept only v1, so they skip this row instead of rewriting
+    // it without the second machine.
+    expect(storedMulti.v).toBe(2);
+    expect(storedMulti).not.toHaveProperty('machineId');
+    expect(storedMulti.targets).toEqual([
+      {
+        machineId: 'machine-1',
+        agentConfigId: 'config-1',
+        runConfig: { modelId: 'gpt-5.6' },
+        alias: 'Reviewer-Mac',
+      },
+      { machineId: 'machine-2', agentConfigId: 'config-2', runConfig: { modelId: 'gpt-5.6-luna' } },
+    ]);
+    expect(listWorkspaceAgentRoles(readWorkspaceFlockRowsFromFlock(flock))).toEqual([multi]);
+    expect(writeWorkspaceAgentRoleToFlock(flock, multi)).toBe(false);
+
+    // Back to one machine: the row returns to the v1 shape and the alias goes.
+    writeWorkspaceAgentRoleToFlock(flock, single);
+    expect(flock.rows.get(JSON.stringify(key))?.value).toMatchObject({ v: 1 });
+  });
 });

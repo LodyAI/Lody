@@ -28,6 +28,10 @@ vi.mock('../src/lib/auth-bootstrap', () => ({
 }));
 
 import { useStableSessionInternal, type StableSessionValue } from '../src/hooks/useStableSession';
+import {
+  readLatestBootRequestFailure,
+  resetBootRequestFailuresForTests,
+} from '../src/lib/boot-request-failures';
 
 (
   globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
@@ -52,6 +56,7 @@ describe('useStableSessionInternal', () => {
     mocks.getSession.mockReset();
     mocks.getSession.mockResolvedValue({ error: { status: 401 } });
     current = null;
+    resetBootRequestFailuresForTests();
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
@@ -95,6 +100,23 @@ describe('useStableSessionInternal', () => {
     await act(async () => vi.advanceTimersByTimeAsync(300));
 
     expect(mocks.session.refetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('records a failing session check for the recovery screen, and clears it on success', async () => {
+    mocks.session.error = Object.assign(new Error('Client disconnected'), { status: 500 });
+
+    await act(async () => root.render(<Consumer />));
+
+    expect(readLatestBootRequestFailure()).toMatchObject({
+      source: 'session',
+      kind: 'server',
+      status: 500,
+    });
+
+    mocks.session.error = null;
+    await act(async () => root.render(<Consumer />));
+
+    expect(readLatestBootRequestFailure()).toBeNull();
   });
 
   it('does not accept a stale 401 after the current credential succeeds', async () => {

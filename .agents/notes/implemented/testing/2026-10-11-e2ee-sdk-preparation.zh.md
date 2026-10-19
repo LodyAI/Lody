@@ -13,7 +13,7 @@ PR: [#1433](https://github.com/LodyAI/Lody/pull/1433)
 
 ## 边界与证据
 
-固定输入是公共 main `f1ba33a61244e2da07aaea93a30f06227311c4b6`，包含 P07-b 与 P08。[输入指纹](../../../../packages/components/tests/workspace-streams-crypto-provenance.json) 标明实际已合入源码，没有迁入候选模块或 Lab 宿主。唯一依赖新增是 components 对现有 core 的 **devDependency**。Effect 保持 4.0.2、Repo 0.22.0、Streams CRDT 0.16.2、Loro 1.16.3。P07-c 密码学与 P09 journal 目录不在本次范围。
+固定输入是公共 main `f1ba33a61244e2da07aaea93a30f06227311c4b6`，包含 P07-b 与 P08。[输入指纹](https://github.com/LodyAI/Lody/blob/5f97599e60700d6185834632df85922ea0d73ec6/packages/components/tests/workspace-streams-crypto-provenance.json) 标明实际已合入源码，没有迁入候选模块或 Lab 宿主。唯一依赖新增是 components 对现有 core 的 **devDependency**。Effect 保持 4.0.2、Repo 0.22.0、Streams CRDT 0.16.2、Loro 1.16.3。P07-c 密码学与 P09 journal 目录不在本次范围。
 
 ```text
 合成原生签名端 -> 公开 v0 AEAD 与签名字节 -> 真实 SDK batch/快照
@@ -23,7 +23,7 @@ PR: [#1433](https://github.com/LodyAI/Lody/pull/1433)
 
 测试宿主只保存字节，不接纳签名或授予权限。发布版 `encodeStreamsRoomAdditionalData` 重建真实快照 AAD，供单独验签。坏 tag 会重新签名，说明签名有效仍须另验 AEAD。错误组织、逻辑文档、用途和代次失败；包内信息不能建立可信上下文。真实安全随机源失败时不上传。读取失败保留已存内容与旧游标；同一传输中的另一文档继续工作。有效压缩快照可导入；坏签名、密文认证失败和错误续读位置在解压前拒绝。只使用公开 RFC 8032 测试种子与可丢弃合成数据。
 
-P08 公开 `verifyLedger` 从固定创世与链尾/数量认证合成当前个人 Owner。公开 `LedgerState.devices` 描述当前设备，未暴露撤权或重新加入后所需的原作者/成员实例映射。[P08 限制](../../../../packages/e2ee-core/src/ledger/README.md) 明确把历史作者 API 与快照信任留到后续。[P07-b](../architecture/2026-10-11-e2ee-content-crypto.zh.md) 仅提供 AEAD，没有 signer 或完整签名流程。直接搬候选 ContentCipher、权限或签名宿主会掩盖依赖缺失，因此先交付可独立运行的准备测试。
+P08 公开 `verifyLedger` 从固定创世与链尾/数量认证合成当前个人 Owner。公开 `LedgerState.devices` 描述当前设备，未暴露撤权或重新加入后所需的原作者/成员实例映射。[P08 限制](../../../../packages/e2ee-core/src/internal/ledger/README.md) 明确把历史作者 API 与快照信任留到后续。[P07-b](../architecture/2026-10-11-e2ee-content-crypto.zh.md) 仅提供 AEAD，没有 signer 或完整签名流程。直接搬候选 ContentCipher、权限或签名宿主会掩盖依赖缺失，因此先交付可独立运行的准备测试。
 
 现有传输 Spec 仍说失败范围未决定；相对已定单文档行为，这是旧文档。测试证明一篇文档失败不必停止另一篇，不新增空间监督器或用户体验。空间授权失效另处理。本次不改 Spec 意图，不决定新协议、恢复格式、期限或用户体验。
 

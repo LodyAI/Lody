@@ -157,3 +157,33 @@ void test('Android uses its own version and does not require desktop metadata', 
   assert.throws(() => parseNightlyAndroidRelease(android, 'http://example.test/nightly'));
   assert.throws(() => parseNightlyAndroidRelease(manifest, base));
 });
+
+void test('Linux ARM64 is additive for old manifests but requires a complete matching pair', () => {
+  const armFiles = ['AppImage', 'deb'].map(
+    (extension) => `Lody-${version}-arm64-nightly.${extension}`
+  );
+  const arm = {
+    ...manifest,
+    files: [...files, ...armFiles],
+    downloads: {
+      ...manifest.downloads,
+      ...Object.fromEntries(armFiles.map((file) => [file, file])),
+    },
+  };
+  assert.deepEqual(parseNightlyRelease(arm, base).downloads.slice(-2), [
+    { platform: 'linux', label: 'AppImage · ARM64', href: `${base}/${armFiles[0]}` },
+    { platform: 'linux', label: 'Debian / Ubuntu · ARM64', href: `${base}/${armFiles[1]}` },
+  ]);
+  assert.equal(parseNightlyRelease(manifest, base).downloads.length, 6);
+  for (const file of armFiles) {
+    assert.throws(() =>
+      parseNightlyRelease({ ...arm, files: arm.files.filter((name) => name !== file) }, base)
+    );
+    const downloads = { ...arm.downloads };
+    delete downloads[file];
+    assert.throws(() => parseNightlyRelease({ ...arm, downloads }, base));
+    assert.throws(() =>
+      parseNightlyRelease({ ...arm, downloads: { ...arm.downloads, [file]: '../bad' } }, base)
+    );
+  }
+});

@@ -1,3 +1,4 @@
+import { getIpcServices } from '@/lib/electron-ipc-client';
 import { buildDraftUserHistoryEntry } from '@/lib/session-attachment-draft';
 import { pendingSessionLinkAtom } from '@/lib/session-deep-link';
 import { windowPreparationAtom } from '@/lib/window-preparation';
@@ -19,14 +20,12 @@ import {
   Link,
   LockKeyhole,
   Monitor,
-  PanelBottom,
-  PanelLeft,
-  PanelRight,
   Pencil,
   Search,
   Trash2,
   Users,
 } from 'lucide-react';
+import { CuidaSidebarExpandOutline } from '@lody/ui';
 import { Spinner } from '@lody/ui/spinner';
 import { useTranslation } from 'react-i18next';
 import { Button } from '@lody/ui/button';
@@ -182,6 +181,7 @@ import { buildSessionLink } from '@lody/shared/session-link';
 import { getCommandKeybindings, useCommand } from '@/lib/commands';
 import { useDesktopTabCloser } from '@/lib/desktop-tab-or-window-close';
 import { useSemanticActionRouter } from '@/lib/commands/use-semantic-action-router';
+import type { SemanticActionRouter } from '@/lib/commands/semantic-action-router';
 import { semanticShortcutsFeatureEnabledAtom } from '@/atoms/settings';
 import { cn, getBasename } from '@/lib';
 
@@ -192,10 +192,7 @@ import {
 import { isSessionMarkdownPath } from '@/lib/session-file-language';
 import { SessionNotFound } from './session-not-found';
 import { SessionSyncingIndicator } from './session-syncing-indicator';
-// Aliased while the vaul drawer below still holds the bare name; the two
-// merge when the mobile drawers migrate onto this primitive.
-import { Drawer as UiDrawer } from '@lody/ui/drawer';
-import { SessionMobileDiffDrawerContent } from './session-mobile-diff-drawer-content';
+import { SessionMobileDiffDrawer, type MobileDiffView } from './session-mobile-diff-drawer';
 import { Drawer, DrawerContent, DrawerTitle } from '@/ui/drawer';
 import { VaulDrawerBody } from '@/components/mobile/vaul-drawer-edge-back-zone';
 import { Dialog } from '@/ui/dialog';
@@ -385,6 +382,7 @@ type MobileDiffState = {
   focusComment?: DiffCommentFocusTarget | null;
   focusRequestSeq: number;
   mode?: 'conversation' | 'base';
+  view?: MobileDiffView;
 } | null;
 
 type PendingSessionShare = {
@@ -533,6 +531,8 @@ const detailStyles = stylex.create({
     width: '16px',
     height: '16px',
   },
+  bottomPanelIcon: { rotate: '-90deg' },
+  rightPanelIcon: { rotate: '180deg' },
   rootFill: {
     height: '100%',
   },
@@ -560,11 +560,6 @@ const detailStyles = stylex.create({
     fontSize: '0.875rem',
     lineHeight: '1.25rem',
     color: 'hsl(var(--muted-foreground))',
-  },
-  drawerBody: {
-    minHeight: 0,
-    flex: 1,
-    overflow: 'hidden',
   },
   columnFill: {
     display: 'flex',
@@ -957,7 +952,10 @@ const TerminalDockToggleButton = memo(function TerminalDockToggleButton() {
       title={label}
       className={stylex.props(detailStyles.shrink).className}
     >
-      <PanelBottom {...stylex.props(detailStyles.icon16)} />
+      <CuidaSidebarExpandOutline
+        {...stylex.props(detailStyles.icon16, detailStyles.bottomPanelIcon)}
+        aria-hidden="true"
+      />
     </Button>
   );
 });
@@ -1016,6 +1014,7 @@ const SessionDetail = ({
   const sendingDraftIdsRef = useRef<Set<DraftSessionTab['id']>>(new Set());
   const desktopTabFocusRegionRef = useRef<SessionTabFocusRegion>('conversation');
   const desktopActionRootRef = useRef<HTMLDivElement>(null);
+  const semanticRouterRef = useRef<SemanticActionRouter | null>(null);
   const semanticShortcutsEnabled = useAtomValue(semanticShortcutsFeatureEnabledAtom);
   const initialTabState = getSessionDetailInitialTabState(sessionId, urlTab, {
     oneActiveSurface: isMobile,
@@ -3410,7 +3409,10 @@ const SessionDetail = ({
   );
 
   const upsertViewerTab = useCallback(
-    (tab: ViewerTab) => {
+    (
+      tab: ViewerTab,
+      claimCloseTarget = () => semanticRouterRef.current?.activate('side-panel')
+    ) => {
       setViewerTabs((prev) => {
         const idx = prev.findIndex((item) => item.id === tab.id);
         if (idx === -1) {
@@ -3436,6 +3438,7 @@ const SessionDetail = ({
       } else {
         selectSidePanelTab(tab.id);
         revealRightSidebar();
+        claimCloseTarget();
       }
     },
     [isMobile, revealRightSidebar, selectSidePanelTab]
@@ -3578,6 +3581,38 @@ const SessionDetail = ({
     setMobileDiffState(null);
   }, []);
 
+  const handleSelectMobileChange = useCallback(
+    (filePath: string, filePaths: string[]) => {
+      const requestSeq = nextFocusRequestSeq();
+      setMobileDiffState((current) =>
+        current?.mode === 'base'
+          ? {
+              ...current,
+              filePaths,
+              focusFilePath: filePath,
+              focusComment: null,
+              focusRequestSeq: requestSeq,
+              view: 'diff',
+            }
+          : current
+      );
+      captureSessionDetailEvent('session/viewer_diff_opened', {
+        source: 'changes_sidebar',
+        turn_id: 'all-changes',
+        mode: 'base',
+        file_count: filePaths.length,
+        focus_file_extension: getFileExtension(filePath),
+        surface: 'mobile_sheet',
+      });
+    },
+    [captureSessionDetailEvent, nextFocusRequestSeq]
+  );
+  const handleBackToMobileChanges = useCallback(() => {
+    setMobileDiffState((current) =>
+      current?.mode === 'base' ? { ...current, view: 'files-with-diff' } : current
+    );
+  }, []);
+
   useEffect(() => {
     const nextViewerTabs = viewerTabs.map((tab) => {
       if (tab.type !== 'diff') {
@@ -3682,17 +3717,18 @@ const SessionDetail = ({
         focusComment: null,
         focusRequestSeq: nextFocusRequestSeq(),
         mode: 'base',
+        view: 'files',
       });
-      captureSessionDetailEvent('session/viewer_diff_opened', {
+      captureSessionDetailEvent('session/sidebar_tab_selected', {
         source: 'info_bar_diff_stat',
-        turn_id: 'all-changes',
-        mode: 'base',
-        file_count: filePaths.length,
+        sidebar_tab: 'changes',
+        change_file_count: filePaths.length,
         surface: 'mobile_sheet',
       });
     } else {
       revealRightSidebar();
       activateSidebarTab('changes');
+      semanticRouterRef.current?.activate('side-panel');
       captureSessionDetailEvent('session/sidebar_tab_selected', {
         source: 'info_bar_diff_stat',
         sidebar_tab: 'changes',
@@ -3727,6 +3763,7 @@ const SessionDetail = ({
         }
         revealRightSidebar();
         activateSidebarTab('pr');
+        semanticRouterRef.current?.activate('side-panel');
       }
       captureSessionDetailEvent('session/pr_tab_opened', {
         pr_number: args.prNumber,
@@ -3805,6 +3842,7 @@ const SessionDetail = ({
       } else {
         revealRightSidebar();
         activateSidebarTab('browser');
+        semanticRouterRef.current?.activate('side-panel');
       }
       captureSessionDetailEvent('session/browser_tab_opened', {
         tab_session_id: tabSessionId ?? activeTabSessionId,
@@ -3836,6 +3874,7 @@ const SessionDetail = ({
     } else {
       revealRightSidebar();
       activateSidebarTab('ios-simulator');
+      semanticRouterRef.current?.activate('side-panel');
     }
   }, [activateSidebarTab, isMobile, replaceSessionUrlSimulator, revealRightSidebar]);
 
@@ -3857,15 +3896,24 @@ const SessionDetail = ({
 
   const handleOpenFile = useStableCallback(
     (filePath: string, options: SessionDetailOpenFileOptions = {}) => {
+      const claimCloseTarget = semanticRouterRef.current?.deferActivation('side-panel');
       setFileProviderRequestedByInteraction(true);
       void (async () => {
         // Where the path came from decides whether it may be rewritten at all;
         // `resolveSessionFileOpenTarget` owns that rule and documents why.
+        const preserveWorktreePath =
+          isElectronRenderer() &&
+          (isActiveSessionLocalMachine ||
+            (activeSessionMachineId
+              ? await getIpcServices()
+                  ?.machineRpc.isLocalFileMachine(activeSessionMachineId)
+                  .catch(() => false)
+              : false));
         const target = resolveSessionFileOpenTarget({
           rawPath: filePath,
           pathKind: options.pathKind ?? 'markdown-href',
           workspacePath: activeSessionWorkspacePath,
-          preserveWorktreePath: isElectronRenderer() && isActiveSessionLocalMachine,
+          preserveWorktreePath,
           ...(options.startLine === undefined ? {} : { startLine: options.startLine }),
           ...(options.endLine === undefined ? {} : { endLine: options.endLine }),
         });
@@ -3879,17 +3927,20 @@ const SessionDetail = ({
         const resolvedFilePath = resolution.path;
 
         const requestSeq = nextFocusRequestSeq();
-        upsertViewerTab({
-          id: getFileViewerTabId(resolvedFilePath, resolution.fileId),
-          type: 'file',
-          filePath: resolvedFilePath,
-          ...(resolution.fileId === undefined ? {} : { fileId: resolution.fileId }),
-          label: getBasename(resolvedFilePath),
-          startLine: target.startLine,
-          endLine: target.endLine,
-          focusRequestSeq: requestSeq,
-          ...(options.previewHtml ? { htmlPreviewRequestSeq: requestSeq } : {}),
-        });
+        upsertViewerTab(
+          {
+            id: getFileViewerTabId(resolvedFilePath, resolution.fileId),
+            type: 'file',
+            filePath: resolvedFilePath,
+            ...(resolution.fileId === undefined ? {} : { fileId: resolution.fileId }),
+            label: getBasename(resolvedFilePath),
+            startLine: target.startLine,
+            endLine: target.endLine,
+            focusRequestSeq: requestSeq,
+            ...(options.previewHtml ? { htmlPreviewRequestSeq: requestSeq } : {}),
+          },
+          () => claimCloseTarget?.()
+        );
         captureSessionDetailEvent('session/viewer_file_opened', {
           source: target.fromMarkdownLink ? 'markdown_link' : (options.source ?? 'file_tree'),
           file_extension: getFileExtension(resolvedFilePath),
@@ -4045,6 +4096,7 @@ const SessionDetail = ({
   const handleSessionTabSelect = useCallback(
     (tabId: string) => {
       desktopTabFocusRegionRef.current = 'conversation';
+      semanticRouterRef.current?.activate('conversation');
       // A user-driven switch PUSHES so tabs participate in history back.
       navigateToSessionTab(tabId, { push: true });
       if (isMobile) {
@@ -4199,6 +4251,7 @@ const SessionDetail = ({
       } else {
         selectSidePanelTab(tabId);
         revealRightSidebar();
+        semanticRouterRef.current?.activate('side-panel');
       }
       captureSessionDetailEvent('session/viewer_tab_selected', {
         viewer_tab_id: tabId,
@@ -4214,6 +4267,7 @@ const SessionDetail = ({
         desktopTabFocusRegionRef.current = 'side-panel';
       }
       activateSidebarTab(tabId);
+      semanticRouterRef.current?.activate('side-panel');
       if (tabId === 'pr' && latestPrNumber != null) {
         replaceSessionUrlPr(latestPrNumber, { push: true });
       }
@@ -5000,6 +5054,7 @@ const SessionDetail = ({
   const handleSidePanelTabSelect = useCallback(
     (tabId: string) => {
       desktopTabFocusRegionRef.current = 'side-panel';
+      semanticRouterRef.current?.activate('side-panel');
       if (isViewerTabId(tabId)) {
         handleViewerTabSelect(tabId);
         return;
@@ -5055,7 +5110,8 @@ const SessionDetail = ({
 
   const semanticCloseEnabled =
     semanticShortcutsEnabled && isElectronRenderer() && !isMobile && Boolean(activeSession);
-  const semanticRouterRef = useSemanticActionRouter({
+  useSemanticActionRouter({
+    routerRef: semanticRouterRef,
     rootRef: desktopActionRootRef,
     enabled: semanticCloseEnabled,
     resetKey: sessionId,
@@ -5657,7 +5713,20 @@ const SessionDetail = ({
         htmlPreviewRequestSeq={tab.htmlPreviewRequestSeq}
         saveRequestSeq={viewerTabSaveStates[tab.id]?.saveRequestSeq ?? 0}
         copyMarkdownRequestSeq={viewerTabSaveStates[tab.id]?.copyMarkdownRequestSeq ?? 0}
+        defaultHtmlPreview={isMobile}
         preferNativeMarkdownSelection={isMobile}
+        onAddSelectionToChat={
+          activeSession.isArchived
+            ? undefined
+            : (selection) => {
+                const chat = chatRefsMap.current.get(activeSession.id);
+                return !closedConversationIds.has(activeSession.id) &&
+                  chat &&
+                  'addDocumentSelection' in chat
+                  ? chat.addDocumentSelection(selection)
+                  : false;
+              }
+        }
         fileProvider={activeSessionFileProvider}
         fileProviderPending={activeSessionFileProviderPending}
         fileProviderMessage={activeSessionFileProviderMessage}
@@ -5694,6 +5763,7 @@ const SessionDetail = ({
       />
     ) : (
       <SessionConversationDiffPanel
+        active={active}
         sessionId={activeSession.id}
         turnId={tab.turnId}
         filePaths={tab.filePaths}
@@ -6187,63 +6257,64 @@ const SessionDetail = ({
         </div>
 
         {/* Mobile diff sheet */}
-        <UiDrawer.Root
-          side="bottom"
+        <SessionMobileDiffDrawer
           open={mobileDiffState !== null}
           onOpenChange={(open) => !open && handleCloseMobileDiff()}
+          view={mobileDiffState?.view}
+          onBackToFiles={mobileDiffState?.mode === 'base' ? handleBackToMobileChanges : undefined}
+          changes={{
+            ready: sessionDiffReady,
+            synced: sessionDiffSynced,
+            unavailableMessage: sessionDiffUnavailableMessage,
+            changeEntries,
+            changeFilePaths,
+            onOpenChangesDiff: handleSelectMobileChange,
+          }}
         >
-          <SessionMobileDiffDrawerContent side="bottom" className="h-[85vh] flex flex-col p-0">
-            <UiDrawer.Header className="shrink-0 border-b border-border px-4 py-3">
-              <UiDrawer.Title className="text-sm font-medium">
-                {t('sessions.diffTab', 'Changes')}
-              </UiDrawer.Title>
-            </UiDrawer.Header>
-            <div {...stylex.props(detailStyles.drawerBody)}>
-              {mobileDiffState && (
-                <SessionConversationDiffPanel
-                  sessionId={activeSession.id}
-                  turnId={mobileDiffState.turnId}
-                  filePaths={mobileDiffState.filePaths}
-                  focusFilePath={mobileDiffState.focusFilePath}
-                  focusComment={mobileDiffState.focusComment}
-                  focusRequestSeq={mobileDiffState.focusRequestSeq}
-                  mode={mobileDiffState.mode ?? 'conversation'}
-                  refreshToken={
-                    (mobileDiffState.mode ?? 'conversation') === 'base'
-                      ? allChangesRefreshToken
-                      : undefined
-                  }
-                  fileDiffs={
-                    (mobileDiffState.mode ?? 'conversation') === 'base'
-                      ? []
-                      : resolveTurnFileDiffs(mobileDiffState.turnId)
-                  }
-                  fileDiffsPending={!sessionDiffReady}
-                  session={activeSession}
-                  workspaceSession={workspaceOwnerSession}
-                  onSendToChat={handleAddCommentReferenceToActiveChatInput}
-                  commentReferenceKeys={activeCommentReferenceKeys}
-                  fileProvider={
-                    (mobileDiffState.mode ?? 'conversation') === 'base' ||
-                    canOpenHistoricalDiffs ||
-                    activeSessionFileProviderRequested
-                      ? activeSessionFileProvider
-                      : null
-                  }
-                  fileProviderPending={
-                    (mobileDiffState.mode ?? 'conversation') === 'base' ||
-                    canOpenHistoricalDiffs ||
-                    activeSessionFileProviderRequested
-                      ? activeSessionFileProviderPending
-                      : false
-                  }
-                  onOpenFile={handleOpenFileFromDiff}
-                  className={stylex.props(detailStyles.rootFill).className}
-                />
-              )}
-            </div>
-          </SessionMobileDiffDrawerContent>
-        </UiDrawer.Root>
+          {mobileDiffState && (
+            <SessionConversationDiffPanel
+              active={mobileDiffState.view === undefined || mobileDiffState.view === 'diff'}
+              sessionId={activeSession.id}
+              turnId={mobileDiffState.turnId}
+              filePaths={mobileDiffState.filePaths}
+              focusFilePath={mobileDiffState.focusFilePath}
+              focusComment={mobileDiffState.focusComment}
+              focusRequestSeq={mobileDiffState.focusRequestSeq}
+              mode={mobileDiffState.mode ?? 'conversation'}
+              refreshToken={
+                (mobileDiffState.mode ?? 'conversation') === 'base'
+                  ? allChangesRefreshToken
+                  : undefined
+              }
+              fileDiffs={
+                (mobileDiffState.mode ?? 'conversation') === 'base'
+                  ? []
+                  : resolveTurnFileDiffs(mobileDiffState.turnId)
+              }
+              fileDiffsPending={!sessionDiffReady}
+              session={activeSession}
+              workspaceSession={workspaceOwnerSession}
+              onSendToChat={handleAddCommentReferenceToActiveChatInput}
+              commentReferenceKeys={activeCommentReferenceKeys}
+              fileProvider={
+                (mobileDiffState.mode ?? 'conversation') === 'base' ||
+                canOpenHistoricalDiffs ||
+                activeSessionFileProviderRequested
+                  ? activeSessionFileProvider
+                  : null
+              }
+              fileProviderPending={
+                (mobileDiffState.mode ?? 'conversation') === 'base' ||
+                canOpenHistoricalDiffs ||
+                activeSessionFileProviderRequested
+                  ? activeSessionFileProviderPending
+                  : false
+              }
+              onOpenFile={handleOpenFileFromDiff}
+              className={stylex.props(detailStyles.rootFill).className}
+            />
+          )}
+        </SessionMobileDiffDrawer>
         {viewerTabs
           .filter((tab): tab is Extract<ViewerTab, { type: 'file' }> => tab.type === 'file')
           .map((tab) => {
@@ -6682,7 +6753,10 @@ const SessionDetail = ({
           .className
       }
     >
-      <PanelRight {...stylex.props(detailStyles.icon16)} />
+      <CuidaSidebarExpandOutline
+        {...stylex.props(detailStyles.icon16, detailStyles.rightPanelIcon)}
+        aria-hidden="true"
+      />
     </Button>
   );
 
@@ -6696,7 +6770,7 @@ const SessionDetail = ({
       aria-label={t('sessions.leftSidebar.show', 'Show navigation sidebar')}
       className={stylex.props(detailStyles.shrink).className}
     >
-      <PanelLeft {...stylex.props(detailStyles.icon16)} />
+      <CuidaSidebarExpandOutline {...stylex.props(detailStyles.icon16)} aria-hidden="true" />
     </Button>
   ) : null;
 

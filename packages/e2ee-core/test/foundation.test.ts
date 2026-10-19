@@ -1,7 +1,9 @@
-import { describe, expect, it } from 'vitest';
-import { Effect, Result } from 'effect';
+import { describe, expect, it, vi } from 'vitest';
+import { Cause, Effect, Exit, Fiber, Result } from 'effect';
 import { Point } from '@noble/ed25519';
-import { createPublicKey, verify } from 'node:crypto';
+import { createPrivateKey, createPublicKey, sign, verify } from 'node:crypto';
+import { verifySignatureEffect } from '../src/internal/foundation/signature';
+import { signVerified } from '../src/internal/foundation/signing';
 import {
   Bytes,
   decodeCbor,
@@ -19,7 +21,7 @@ import {
   type ContentScope,
   type ContentPurpose,
   type CborValue,
-} from '../src/index';
+} from '../src/protocol';
 import vector from './content-vector.json';
 
 const hex = (s: string) => Uint8Array.from(Buffer.from(s, 'hex'));
@@ -184,6 +186,53 @@ describe('bounded canonical CBOR', () => {
 });
 
 describe('strict Ed25519', () => {
+  it('keeps warmed key validation bound to owned bytes without trusting wrappers or signatures', () => {
+    const input = hex(vector.publicKey);
+    const first = ok(Bytes.signingPublicKey(input));
+    const second = ok(Bytes.signingPublicKey(input));
+    expect(second).not.toBe(first);
+    second.toBytes().fill(0);
+    expect(first.toBytes()).toEqual(hex(vector.publicKey));
+    expect(ok(verifySignature(input, new Uint8Array(), rfcSig))).toBeUndefined();
+
+    const other = Point.BASE.multiply(2n).toBytes();
+    input.set(other);
+    expect(ok(Bytes.signingPublicKey(input)).toBytes()).toEqual(other);
+    expect(Result.isFailure(verifySignature(input, new Uint8Array(), rfcSig))).toBe(true);
+    input.set(hex(vector.publicKey));
+    expect(ok(verifySignature(input, new Uint8Array(), rfcSig))).toBeUndefined();
+    expect(Result.isFailure(verifySignature(input, new Uint8Array([1]), rfcSig))).toBe(true);
+
+    const Constructor = Object.getPrototypeOf(first).constructor as new (
+      kind: string,
+      bytes: Uint8Array
+    ) => Bytes.SigningPublicKey;
+    const torsion = hex('ec' + 'ff'.repeat(30) + '7f');
+    const mixed = Point.fromBytes(first.toBytes(), false)
+      .add(Point.fromBytes(torsion, false))
+      .toBytes();
+    for (const bytes of [
+      hex('01' + '00'.repeat(31)),
+      new Uint8Array(32),
+      new Uint8Array(32).fill(255),
+      mixed,
+    ]) {
+      const forged = new Constructor('SigningPublicKey', bytes);
+      expect(Result.isFailure(Bytes.signingPublicKey(forged))).toBe(true);
+      expect(Result.isFailure(verifySignature(forged, new Uint8Array(), rfcSig))).toBe(true);
+      input.set(forged.toBytes());
+      expect(Result.isFailure(Bytes.signingPublicKey(input))).toBe(true);
+      expect(Result.isFailure(verifySignature(input, new Uint8Array(), rfcSig))).toBe(true);
+    }
+    // Churn beyond the retained key budget, then reuse and mutate the original input.
+    for (let scalar = 3n; scalar < 261n; scalar++)
+      ok(Bytes.signingPublicKey(Point.BASE.multiply(scalar).toBytes()));
+    input.set(hex(vector.publicKey));
+    expect(ok(verifySignature(input, new Uint8Array(), rfcSig))).toBeUndefined();
+    input.fill(0);
+    expect(Result.isFailure(verifySignature(input, new Uint8Array(), rfcSig))).toBe(true);
+    expect(first.toBytes()).toEqual(hex(vector.publicKey));
+  });
   it('accepts the RFC vector through Result and existing Effect', async () => {
     expect(ok(verifySignature(key.toBytes(), new Uint8Array(), rfcSig))).toBeUndefined();
     await Effect.runPromise(
@@ -218,6 +267,220 @@ describe('strict Ed25519', () => {
     sig.fill(255, 32);
     for (const s of [sig, rfcSig.slice(1), new Uint8Array(65)])
       expect(Result.isFailure(verifySignature(key.toBytes(), new Uint8Array(), s))).toBe(true);
+  });
+});
+
+describe('fixed native Ed25519 verification', () => {
+  const privateKey = createPrivateKey({
+    format: 'der',
+    type: 'pkcs8',
+    key: Buffer.from(
+      '302e020100300506032b6570042204209d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60',
+      'hex'
+    ),
+  });
+  const native = (pk: unknown, message: Uint8Array, sig: unknown) =>
+    Effect.runPromise(Effect.result(verifySignatureEffect(pk, message, sig)));
+  it('agrees with the strict synchronous verifier on RFC/native signatures and malformed tuples', async () => {
+    const pk = key.toBytes(),
+      message = Uint8Array.of(173, 1, 2),
+      sig = new Uint8Array(sign(null, message, privateKey));
+    for (const [data, signed] of [
+      [new Uint8Array(), rfcSig],
+      [message, sig],
+    ] as const) {
+      expect(Result.isSuccess(verifySignature(pk, data, signed))).toBe(true);
+      expect(Result.isSuccess(await native(pk, data, signed))).toBe(true);
+    }
+    const torsion = Point.fromBytes(hex('ec' + 'ff'.repeat(30) + '7f'), false);
+    const mixedKey = Point.fromBytes(pk, false).add(torsion).toBytes();
+    const mixedR = sig.slice();
+    mixedR.set(Point.fromBytes(sig.subarray(0, 32), false).add(torsion).toBytes());
+    const noncanonicalR = sig.slice();
+    noncanonicalR.fill(255, 0, 32);
+    const scalar = sig.slice();
+    scalar.fill(255, 32);
+    const malformed = [
+      [pk, Uint8Array.of(173, 1, 3), sig],
+      [Point.BASE.toBytes(), message, sig],
+      [hex('01' + '00'.repeat(31)), message, sig],
+      [new Uint8Array(32), message, sig],
+      [new Uint8Array(32).fill(255), message, sig],
+      [mixedKey, message, sig],
+      [pk, message, mixedR],
+      [pk, message, noncanonicalR],
+      [pk, message, scalar],
+      [pk, message, sig.slice(1)],
+      [pk, message, new Uint8Array(65)],
+    ] as const;
+    for (const [publicKey, data, signed] of malformed) {
+      const expected = verifySignature(publicKey, data, signed),
+        actual = await native(publicKey, data, signed);
+      expect(Result.isFailure(expected)).toBe(true);
+      expect(Result.isFailure(actual) && actual.failure.code).toBe(
+        Result.isFailure(expected) && expected.failure.code
+      );
+    }
+  });
+  it('owns all inputs before awaiting native import, reuses exact successes and rejects changed messages', async () => {
+    const pk = key.toBytes(),
+      message = Uint8Array.of(173, 2, 3),
+      sig = new Uint8Array(sign(null, message, privateKey));
+    const original = { pk: pk.slice(), message: message.slice(), sig: sig.slice() };
+    const subtle = globalThis.crypto.subtle,
+      importKey = subtle.importKey.bind(subtle);
+    let entered!: () => void, release!: () => void, scratch: Uint8Array | undefined;
+    const arrived = new Promise<void>((resolve) => {
+        entered = resolve;
+      }),
+      gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+    const spy = vi.spyOn(subtle, 'importKey').mockImplementation(async (...args) => {
+      scratch = args[1] as Uint8Array;
+      entered();
+      await gate;
+      return importKey(...args);
+    });
+    try {
+      const work = native(pk, message, sig);
+      await arrived;
+      pk.fill(0);
+      message.fill(0);
+      sig.fill(0);
+      expect(scratch).toEqual(original.pk);
+      release();
+      expect(Result.isSuccess(await work)).toBe(true);
+      expect(scratch).toEqual(new Uint8Array(32));
+      expect(Result.isSuccess(verifySignature(original.pk, original.message, original.sig))).toBe(
+        true
+      );
+      expect(
+        Result.isFailure(verifySignature(original.pk, Uint8Array.of(173, 2, 4), original.sig))
+      ).toBe(true);
+    } finally {
+      release();
+      spy.mockRestore();
+    }
+  });
+  it('awaits an interrupted native verify and clears owned scratch after actual settlement', async () => {
+    const pk = key.toBytes(),
+      message = Uint8Array.of(173, 3, 4),
+      sig = new Uint8Array(sign(null, message, privateKey));
+    const subtle = globalThis.crypto.subtle,
+      verifyNative = subtle.verify.bind(subtle);
+    let scratchMessage: Uint8Array | undefined, scratchSignature: Uint8Array | undefined;
+    let entered!: () => void, release!: () => void;
+    const arrived = new Promise<void>((resolve) => {
+        entered = resolve;
+      }),
+      gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+    const spy = vi.spyOn(subtle, 'verify').mockImplementation(async (...args) => {
+      scratchSignature = args[2] as Uint8Array;
+      scratchMessage = args[3] as Uint8Array;
+      entered();
+      await gate;
+      return verifyNative(...args);
+    });
+    try {
+      await Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const worker = yield* Effect.forkChild(verifySignatureEffect(pk, message, sig));
+            yield* Effect.promise(() => arrived);
+            worker.interruptUnsafe();
+            expect(worker.pollUnsafe()).toBeUndefined();
+            expect(scratchMessage).toEqual(message);
+            expect(scratchSignature).toEqual(sig);
+            release();
+            const exit = yield* Fiber.await(worker);
+            expect(Exit.isFailure(exit) && Cause.hasInterrupts(exit.cause)).toBe(true);
+            expect(scratchMessage).toEqual(new Uint8Array(message.length));
+            expect(scratchSignature).toEqual(new Uint8Array(64));
+          })
+        )
+      );
+      expect(message).toEqual(Uint8Array.of(173, 3, 4));
+    } finally {
+      release();
+      spy.mockRestore();
+    }
+  });
+  it('separates backend failure from bad signatures and clears failed import scratch', async () => {
+    const message = Uint8Array.of(173, 4, 5),
+      sig = new Uint8Array(sign(null, message, privateKey));
+    let scratch: Uint8Array | undefined;
+    const spy = vi
+      .spyOn(globalThis.crypto.subtle, 'importKey')
+      .mockImplementation(async (...args) => {
+        scratch = args[1] as Uint8Array;
+        throw new Error('synthetic native unavailable');
+      });
+    try {
+      const result = await native(key.toBytes(), message, sig);
+      expect(Result.isFailure(result) && result.failure).toMatchObject({
+        _tag: 'NativeSignatureError',
+        code: 'native-unavailable',
+      });
+      expect(scratch).toEqual(new Uint8Array(32));
+      expect(Result.isSuccess(verifySignature(key.toBytes(), message, sig))).toBe(true);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+  it('preserves native-unavailable when checking a borrowed signer result', async () => {
+    const message = Uint8Array.of(173, 6, 7);
+    const signer = {
+      publicKey: key,
+      sign: (data: Uint8Array) =>
+        Effect.sync(() => ok(Bytes.signature(new Uint8Array(sign(null, data, privateKey))))),
+    };
+    const spy = vi
+      .spyOn(globalThis.crypto.subtle, 'importKey')
+      .mockRejectedValue(new Error('synthetic native unavailable'));
+    try {
+      const result = await Effect.runPromise(Effect.result(signVerified(signer, message)));
+      expect(Result.isFailure(result) && result.failure).toMatchObject({
+        _tag: 'ContentError',
+        code: 'native-unavailable',
+      });
+    } finally {
+      spy.mockRestore();
+    }
+  });
+  it('bounds successful tuples and does not retain messages above 8192 bytes', async () => {
+    const pk = key.toBytes(),
+      original = Uint8Array.of(173, 5, 0),
+      originalSig = new Uint8Array(sign(null, original, privateKey));
+    expect(Result.isSuccess(await native(pk, original, originalSig))).toBe(true);
+    for (let i = 0; i < 257; i++) {
+      const message = Uint8Array.of(174, i >>> 8, i & 255),
+        signed = new Uint8Array(sign(null, message, privateKey));
+      expect(Result.isSuccess(await native(pk, message, signed))).toBe(true);
+    }
+    const big = new Uint8Array(8193).fill(175),
+      bigSig = new Uint8Array(sign(null, big, privateKey));
+    expect(Result.isSuccess(await native(pk, big, bigSig))).toBe(true);
+    const limit = new Uint8Array(8192).fill(176),
+      limitSig = new Uint8Array(sign(null, limit, privateKey));
+    expect(Result.isSuccess(await native(pk, limit, limitSig))).toBe(true);
+    const spy = vi
+      .spyOn(globalThis.crypto.subtle, 'importKey')
+      .mockRejectedValue(new Error('synthetic native unavailable'));
+    try {
+      expect(Result.isSuccess(await native(pk, limit, limitSig))).toBe(true);
+      for (const [message, signed] of [
+        [original, originalSig],
+        [big, bigSig],
+      ] as const) {
+        const result = await native(pk, message, signed);
+        expect(Result.isFailure(result) && result.failure.code).toBe('native-unavailable');
+      }
+    } finally {
+      spy.mockRestore();
+    }
   });
 });
 
@@ -316,8 +579,8 @@ describe('v0 content context and signature', () => {
   });
 });
 
-it('rejects mixed-torsion A and R even when the cofactored equation accepts them', async () => {
-  const { utils, verify: cofactoredVerify } = await import('@noble/ed25519');
+it('agrees across backends on strict Ed25519 subgroup-edge vectors', async () => {
+  const { utils } = await import('@noble/ed25519');
   const { sha512 } = await import('@noble/hashes/sha2.js');
   const L = 2n ** 252n + 27742317777372353535851937790883648493n;
   const le = (bytes: Uint8Array) => {
@@ -334,7 +597,8 @@ it('rejects mixed-torsion A and R even when the cofactored equation accepts them
   const torsion = Point.fromBytes(hex('ec' + 'ff'.repeat(30) + '7f'), false);
   const message = new Uint8Array([4, 5]);
   const r = le(sha512(new Uint8Array([...ext.prefix, ...message]))) % L;
-  for (const shift of ['A', 'R']) {
+  const vectors: { name: string; A: Uint8Array; sig: Uint8Array; accepted: boolean }[] = [];
+  for (const shift of ['neither', 'A', 'R']) {
     const A = shift === 'A' ? ext.point.add(torsion).toBytes() : ext.pointBytes;
     const R =
       shift === 'R'
@@ -342,7 +606,60 @@ it('rejects mixed-torsion A and R even when the cofactored equation accepts them
         : Point.BASE.multiply(r).toBytes();
     const k = le(sha512(new Uint8Array([...R, ...A, ...message]))) % L;
     const sig = new Uint8Array([...R, ...le32((r + k * ext.scalar) % L)]);
-    expect(cofactoredVerify(sig, message, A, { zip215: false })).toBe(true);
-    expect(Result.isFailure(verifySignature(A, message, sig))).toBe(true);
+    // Establish the cofactored equation directly; noble's verify policy is
+    // independent of the strict public verifier under test.
+    const S = le(sig.subarray(32));
+    const left = Point.BASE.multiply(S).multiply(8n);
+    const right = Point.fromBytes(R, false).add(Point.fromBytes(A, false).multiply(k)).multiply(8n);
+    expect(left.equals(right)).toBe(true);
+    vectors.push({ name: `torsion shift ${shift}`, A, sig, accepted: shift === 'neither' });
+  }
+  // r=0 gives a valid prime-subgroup equation, but native providers disagree on
+  // this identity R. Both public paths must reject it before native verification.
+  const R = Point.ZERO.toBytes(),
+    k = le(sha512(new Uint8Array([...R, ...ext.pointBytes, ...message]))) % L;
+  const zeroNonceSignature = new Uint8Array([...R, ...le32((k * ext.scalar) % L)]);
+  expect(
+    Point.BASE.multiply(le(zeroNonceSignature.subarray(32))).equals(ext.point.multiply(k))
+  ).toBe(true);
+  vectors.push({ name: 'identity R', A: ext.pointBytes, sig: zeroNonceSignature, accepted: false });
+  // Identity A can satisfy the equation without a signing secret; key validation
+  // rejects it independently of the provider's policy.
+  vectors.push({
+    name: 'identity A',
+    A: Point.ZERO.toBytes(),
+    sig: new Uint8Array([...Point.BASE.multiply(r).toBytes(), ...le32(r)]),
+    accepted: false,
+  });
+  const noncanonicalScalar = vectors[0]!.sig.slice();
+  noncanonicalScalar.set(le32(L), 32);
+  vectors.push({
+    name: 'noncanonical S',
+    A: ext.pointBytes,
+    sig: noncanonicalScalar,
+    accepted: false,
+  });
+  const noncanonicalR = vectors[0]!.sig.slice();
+  noncanonicalR.fill(255, 0, 32);
+  vectors.push(
+    { name: 'noncanonical R', A: ext.pointBytes, sig: noncanonicalR, accepted: false },
+    {
+      name: 'noncanonical A',
+      A: new Uint8Array(32).fill(255),
+      sig: vectors[0]!.sig,
+      accepted: false,
+    }
+  );
+  for (const edgeVector of vectors) {
+    const pure = verifySignature(edgeVector.A, message, edgeVector.sig),
+      native = await Effect.runPromise(
+        Effect.result(verifySignatureEffect(edgeVector.A, message, edgeVector.sig))
+      );
+    expect(Result.isSuccess(pure), edgeVector.name).toBe(edgeVector.accepted);
+    expect(Result.isSuccess(native), edgeVector.name).toBe(edgeVector.accepted);
+    if (Result.isFailure(pure))
+      expect(Result.isFailure(native) && native.failure.code, edgeVector.name).toBe(
+        pure.failure.code
+      );
   }
 });

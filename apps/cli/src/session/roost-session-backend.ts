@@ -89,6 +89,10 @@ export class RoostSessionBackend implements SessionBackend {
     return this.services.sessionData.history;
   }
 
+  get inputAcceptance() {
+    return this.services.sessionData.inputAcceptance;
+  }
+
   async initialize(options: { skipAutoRead: boolean }): Promise<void> {
     await this.services.initialize?.(options);
     if (options.skipAutoRead) return;
@@ -160,21 +164,7 @@ export class RoostSessionBackend implements SessionBackend {
   }
 
   async readLatestTurn(role: SessionTurn['role']): Promise<SessionTurn | undefined> {
-    const paged = this.history.readLatestDirectoryPage;
-    const older = this.history.readOlderDirectoryPage;
-    if (!paged || !older) return readLatestHistoryTurn(this.history, role);
-
-    let page = await paged(40);
-    for (;;) {
-      for (let index = page.rows.length - 1; index >= 0; index -= 1) {
-        const row = page.rows[index];
-        if (!row?.turnId || row.scalars?.role !== role) continue;
-        const read = await this.history.readTurn(row.turnId);
-        if (read.state === 'ready' && read.turn.role === role) return read.turn;
-      }
-      if (!page.hasMoreOlder || !page.cursor) return undefined;
-      page = await older(page.cursor, 40);
-    }
+    return readLatestHistoryTurn(this.history, role);
   }
 
   readTurn(turnId: string): Promise<SessionTurnRead> {

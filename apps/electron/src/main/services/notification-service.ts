@@ -130,7 +130,7 @@ export class NotificationService {
       return { shown: false, reason: 'notification_not_supported' }
     }
 
-    if ([...productWindows].some((window) => window.isFocused())) {
+    if (!input.allowWhileForeground && [...productWindows].some((window) => window.isFocused())) {
       return { shown: false, reason: 'app_foreground' }
     }
     const title = input.title.trim()

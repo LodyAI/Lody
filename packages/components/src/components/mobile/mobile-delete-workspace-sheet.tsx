@@ -18,8 +18,7 @@ export type MobileDeleteWorkspaceSheetProps = {
   /** Caller's destructive action. The sheet awaits this and shows
      a spinner on the delete button while it's in flight. */
   onConfirm: () => Promise<void>;
-  /** Extra billing warning (e.g. deleting ends a cancel-scheduled
-     subscription immediately). Rendered above the type-to-confirm card. */
+  /** Remaining billing obligations, rendered above the type-to-confirm card. */
   warningText?: string | null;
 };
 

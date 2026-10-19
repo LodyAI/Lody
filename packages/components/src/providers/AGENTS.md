@@ -13,20 +13,15 @@ Replacement contract: [shared rules](../../../shared/AGENTS.md#session-history).
 
 ## Streams connection cardinality
 
-- Capability discovery and refresh must reuse the workspace runtime's existing Machine
-  Flock and Machine RPC transports.
-- Never create or retain a Streams/Flock subscription per agent config or refresh request.
-  Live connection cardinality must stay bounded by workspace/machine topology and must not
-  grow with the number of agent configs. More configs may add serialized RPC requests, not
-  live Streams connections.
-- Release any one-shot document handle or subscription that is not already owned by the
-  workspace runtime.
-- Startup capability discovery is once per agent config per runtime, recorded in the
-  runtime-owned `refreshedConfigKeys` set. A pass aborted by presence leaving `synced` is
-  re-armed, so a pass-level flag is not the gate: reconnecting must never re-probe a config that
-  already answered, because each probe starts and kills a real agent process. Refresh requests
-  default to the machine's cache; only a user action or a setup/authentication workflow sets
-  `force`. Intent: [capability refresh cache](../../../../specs/acp-capability-refresh-cache.md).
+- Discovery/refresh reuse existing workspace Machine Flock/RPC transports, with no
+  subscription per config/request. Connections stay bounded by workspace/machine
+  topology; more configs add serialized RPCs only. Release unowned one-shot handles
+  and subscriptions.
+- Discover startup capabilities once per config/runtime, tracked in `refreshedConfigKeys`.
+  Re-arm passes aborted when presence leaves `synced`; reconnect must not re-probe answered
+  configs or use a pass-level gate. Probes launch real agents. Refresh defaults to machine
+  cache; only user or setup/authentication actions set `force`.
+  Intent: [capability refresh cache](../../../../specs/acp-capability-refresh-cache.md).
 
 ## Workspace switching
 
@@ -45,6 +40,10 @@ Replacement contract: [shared rules](../../../shared/AGENTS.md#session-history).
   [Stuck report](../../../../.agents/notes/implemented/feature/2026-09-26-workspace-sync-stuck-telemetry.md).
 
 ## Workspace runtime
+
+- Readers require backend identity and their Meta plane. Provisional absence/empty
+  history is not legacy evidence; release waits on resolve/retire. Keep Roost
+  capabilities live and wake its bridge on arrival.
 
 - A neutral local warm spare may initialize the implicit workspace runtime without
   publishing route context. A matching claim must retain that runtime or its in-flight
@@ -113,10 +112,11 @@ Replacement contract: [shared rules](../../../shared/AGENTS.md#session-history).
 
 ## Attachment transfer ownership
 
-Workspace `sendResources` owns preparation, cancellation and store borrows across
-React unmount. Close before transports/caches; join IPC, cancel I/O, fence late
-results and await multipart cleanup. Only the cache disposes stores.
-
-Ready sends: local commits, then best-effort RPC; no persistence or retry. Unready
-sends live only in `pendingSends`; archive/delete cancel/join them. Never
-replay uncertain steers. [Why](../../../../.agents/notes/implemented/simplification/2026-09-29-remove-session-send-journal.md).
+`sendResources` owns preparation/I/O/borrows; cancel/join before transports/caches
+close. Only caches dispose stores. Loro commits locally, then dispatches best-effort.
+Roost freezes input/target and shares ordered leases with queues. Ordinary input
+negotiates `sessionInputDispatch` v1: one owner request commits history and activation;
+the sender uses its receipt without history readback or a second dispatch RPC.
+Guide handoff still needs an owner receipt. Archive/delete cancel durable work beyond local
+snapshots and join leases. Unready Blobs stay in memory; uncertain steers never replay.
+[Decision](../../../../.agents/notes/proposed/architecture/2026-10-13-backend-independent-send-acceptance.md).

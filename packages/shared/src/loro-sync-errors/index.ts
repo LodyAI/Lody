@@ -1,11 +1,25 @@
-import type { RepoTransportError, RepoDiagnosticEvent } from 'loro-repo';
+import type { RepoTransportError, RepoDiagnosticEvent, RepoStreamsErrorContext } from 'loro-repo';
 
 type RepoErrorRuntime = Pick<typeof import('loro-repo'), 'RepoTransportError' | 'RepoSyncError'>;
 
+type LoroSyncFailure = {
+  code: RepoTransportError['code'];
+  phase: RepoTransportError['phase'];
+  retryable: boolean;
+  transportId: string | undefined;
+  roomKind: RepoTransportError['roomKind'];
+  roomId: string | undefined;
+  failureKind: NonNullable<RepoTransportError['failureKind']>;
+  streamsCode: string | undefined;
+  // Public alias. Indexing RepoTransportError['streamsContext'] expands through
+  // unexported TransportErrorContext and fails declaration emit with TS4023.
+  streamsContext: RepoStreamsErrorContext | undefined;
+};
+
 // Select approved fields; never serialize an exception or its legacy payload.
-const projectFailure = (error: RepoTransportError, transportId?: string) => {
+const projectFailure = (error: RepoTransportError, transportId?: string): LoroSyncFailure => {
   const context = error.streamsContext;
-  const streamsContext: RepoTransportError['streamsContext'] = context && {
+  const streamsContext: RepoStreamsErrorContext | undefined = context && {
     source: context.source,
     operation: context.operation,
     stage: context.stage,

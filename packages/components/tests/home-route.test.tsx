@@ -8,9 +8,11 @@ import {
   createRoute,
   createRouter,
   RouterProvider,
+  Outlet,
 } from '@tanstack/react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { HomeRoute } from '../src/routes/index';
+import { BootShellBoundary } from '../src/components/boot-shell-boundary';
 import { BOOT_SHELL_MARKUP } from '../src/lib/boot-shell';
 
 const state = vi.hoisted(() => ({
@@ -23,7 +25,15 @@ const state = vi.hoisted(() => ({
 }));
 
 vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (key: string) => key }) }));
-vi.mock('@/lib/desktop-window', () => ({ isWarmWindow: () => state.warm }));
+vi.mock('@/hooks/use-mobile', () => ({
+  useIsMobile: () => false,
+  useIsCompactDesktop: () => false,
+}));
+vi.mock('@/lib/desktop-window', () => ({
+  isWarmWindow: () => state.warm,
+  isSessionWindow: () => false,
+  windowStorage: () => localStorage,
+}));
 vi.mock('@/lib/app-platform', () => ({ isLocalAppPlatform: () => state.local }));
 vi.mock('@/lib/workspace', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../src/lib/workspace')>()),
@@ -105,7 +115,13 @@ describe('default app entry', () => {
       localStorage.setItem('lody:lastAppRoute', legacy);
       sessionStorage.setItem('lody:lastAppRoute', legacy);
 
-      const rootRoute = createRootRoute();
+      const rootRoute = createRootRoute({
+        component: () => (
+          <BootShellBoundary>
+            <Outlet />
+          </BootShellBoundary>
+        ),
+      });
       const indexRoute = createRoute({
         getParentRoute: () => rootRoute,
         path: '/',
@@ -158,6 +174,9 @@ describe('default app entry', () => {
         'true'
       );
       expect(container.querySelector('.lody-boot-shell__mark')).not.toBeNull();
+      expect(container.querySelector('[data-lody-boot-shell]')?.getAttribute('data-layout')).toBe(
+        expected === '/login' || expected === '/workspace/create' ? 'plain' : 'workspace'
+      );
       await act(async () => {
         finishNavigation();
         await router.load();

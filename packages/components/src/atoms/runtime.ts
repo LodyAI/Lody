@@ -19,10 +19,6 @@ import type {
   SessionCancelResponse,
   SessionChatResponse,
   SessionDispatchTurnResponse,
-  SessionPreparationCancelSpec,
-  SessionPreparationSpec,
-  SessionPrepareCancelResponse,
-  SessionPrepareResponse,
   SessionSteerResponse,
   SessionGoalAction,
   SessionGoalResponse,
@@ -45,6 +41,7 @@ import type {
   MachineAcpBinaryStatusResponse,
   MachineAcpBinaryInstallResponse,
   MachineAcpBinaryProgressMessage,
+  BugReportClientLog,
   MachineBugReportResponse,
   SessionPreviewCreateResponse,
   SessionPreviewEndpointAcquireResponse,
@@ -284,6 +281,10 @@ export type WorkspaceRuntime = {
     requestId: string,
     options?: { timeoutMs?: number }
   ) => Promise<MachineUpgradeResponse | null>;
+  requestProviderRateLimitsRefresh?: (
+    machineId: MachineId,
+    configId: AgentConfigId
+  ) => Promise<boolean>;
   requestMachineAcpCapabilitiesRefresh: (
     request: Extract<ClientToServer, { type: 'machine/acp-capabilities-refresh' }>,
     options?: {
@@ -324,7 +325,7 @@ export type WorkspaceRuntime = {
     machineId: MachineId,
     sessionId: SessionId,
     turnId: string,
-    options?: { timeoutMs?: number; subagentTaskId?: string }
+    options?: { timeoutMs?: number; subagentTaskId?: string; cancelId?: string }
   ) => Promise<SessionCancelResponse | null>;
   requestSessionSteer: (
     machineId: MachineId,
@@ -374,16 +375,6 @@ export type WorkspaceRuntime = {
     },
     options?: { timeoutMs?: number }
   ) => Promise<SessionDispatchTurnResponse | null>;
-  requestSessionPrepare: (
-    machineId: MachineId,
-    spec: SessionPreparationSpec,
-    options?: { timeoutMs?: number }
-  ) => Promise<SessionPrepareResponse | null>;
-  requestSessionPrepareCancel: (
-    machineId: MachineId,
-    args: SessionPreparationCancelSpec,
-    options?: { timeoutMs?: number }
-  ) => Promise<SessionPrepareCancelResponse | null>;
   requestSessionPreviewCreate: (
     machineId: MachineId,
     sessionId: SessionId,
@@ -416,7 +407,11 @@ export type WorkspaceRuntime = {
   requestFilePreview: (
     machineId: MachineId,
     request: Omit<FilePreviewV3Request, 'v'>,
-    options?: { timeoutMs?: number; ownerSessionId?: SessionId | string }
+    options?: {
+      timeoutMs?: number;
+      ownerSessionId?: SessionId | string;
+      workspaceRoot?: string | null;
+    }
   ) => Promise<FilePreviewV3Response | LocalFilePreviewResource>;
   /**
    * Electron-only initial Code Collab tree/current-All-Changes snapshot. This
@@ -510,7 +505,13 @@ export type WorkspaceRuntime = {
   ) => Promise<McpToolListResult>;
   requestMachineBugReport: (
     machineId: MachineId,
-    args: { description: string; reporterUserId: string; requestToken: string },
+    args: {
+      description: string;
+      reporterUserId: string;
+      requestToken: string;
+      /** Dropped for a machine that does not advertise `bugReportClientLog`. */
+      clientLog?: BugReportClientLog;
+    },
     options?: { timeoutMs?: number }
   ) => Promise<MachineBugReportResponse | null>;
   requestMemoryProvider: (
@@ -537,6 +538,14 @@ export type WorkspaceRuntime = {
 };
 
 export const runtimeAtom = atom<WorkspaceRuntime | null>(null);
+
+/**
+ * Why the last attempt to create a runtime rejected, kept until the next
+ * attempt. Only the error name is kept: a message can carry stream URLs.
+ */
+export type WorkspaceRuntimeInitFailure = { workspaceSlug: string; errorType: string };
+
+export const workspaceRuntimeInitFailureAtom = atom<WorkspaceRuntimeInitFailure | null>(null);
 
 export type ActiveWorkspaceRuntimeState =
   | { status: 'ready'; runtime: WorkspaceRuntime }

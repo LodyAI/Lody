@@ -25,8 +25,8 @@ import claudePackageJson from '../../../../packages/acp-extension-claude/package
 import codexPackageJson from '../../../../packages/acp-extension-codex/package.json';
 import grokPackageJson from '../../../../packages/acp-extension-grok/package.json';
 import grokRuntimeManifestJson from '../../../../packages/acp-extension-grok/runtime-manifest.json';
-import claudeSdkManifestJson from '../../node_modules/@anthropic-ai/claude-agent-sdk/manifest.json';
-import claudeSdkPackageJson from '../../node_modules/@anthropic-ai/claude-agent-sdk/package.json';
+import claudeSdkManifestJson from '../../../../packages/acp-extension-claude/node_modules/@anthropic-ai/claude-agent-sdk/manifest.json';
+import claudeSdkPackageJson from '../../../../packages/acp-extension-claude/node_modules/@anthropic-ai/claude-agent-sdk/package.json';
 import devinPackageJson from '../../../../packages/acp-extension-devin/package.json';
 import devinAdapterManifest from '../../../../packages/acp-extension-devin/runtime-manifest.json';
 import devinPinsJson from './devin-runtime-manifest.json';

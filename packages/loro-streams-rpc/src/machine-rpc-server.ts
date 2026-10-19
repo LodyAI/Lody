@@ -1,4 +1,8 @@
-import type { MemoryProviderRequest, MemoryProviderResponse } from '@lody/shared';
+import type {
+  BugReportClientLog,
+  MemoryProviderRequest,
+  MemoryProviderResponse,
+} from '@lody/shared';
 import {
   IosSimulatorRemoteResponseSchema,
   type RpcSecretPublicKey,
@@ -33,6 +37,7 @@ import type {
   MachineAcpAuthenticateResponse,
   MachineAcpAuthenticationProgressMessage,
   MachineAcpCapabilitiesRefreshResponse,
+  MachineProviderRateLimitsRefreshResponse,
   MachineBugReportResponse,
   MachineId,
   MachinePiExtensionsResponse,
@@ -93,6 +98,7 @@ import {
   type LoroJsonStreamState,
   type LoroStreamsJsonStreamClient,
   LoroStreamsGatewayError,
+  LoroStreamsRpcHandlerError,
   LORO_STREAMS_RPC_ERROR_CODES,
   LORO_STREAMS_RPC_RETENTION_SECONDS,
   LORO_STREAMS_RPC_VERSION,
@@ -101,6 +107,7 @@ import {
   type LocalProjectGitStateRpcResponse,
   type LoroSessionLiveStatusRpcResponse,
   LoroStreamsRpcRequestSchema,
+  type LoroStreamsRpcRequest,
   type LoroStreamsRpcMethod,
   getLoroMachineRpcRequestStreamId,
 } from './rpc';
@@ -147,6 +154,34 @@ const CONTROL_METHODS: ReadonlySet<string> = new Set([
 ]);
 const REQUEST_LOOP_RETRY_DELAY_MS = 1000;
 const REQUEST_LOOP_REPEAT_WARN_INTERVAL_MS = 30_000;
+
+export const SESSION_HISTORY_PRECONDITION_CODES = [
+  'session_metadata_pending',
+  'session_owner_mismatch',
+  'session_unavailable',
+  'session_identity_mismatch',
+  'session_backend_mismatch',
+] as const;
+export type SessionHistoryRpcRejection = {
+  readonly code: (typeof SESSION_HISTORY_PRECONDITION_CODES)[number];
+  readonly message: string;
+};
+export type SessionHistoryRpcRequest = Extract<
+  LoroStreamsRpcRequest,
+  { method: 'session/history-read' | 'session/history-watch' | 'session/history-write' }
+>;
+/** Host-owned durable refusals. A failed lookup/save must fail closed before history. */
+export type SessionHistoryRpcRejectionStore = {
+  get(request: SessionHistoryRpcRequest): Promise<SessionHistoryRpcRejection | null>;
+  put(
+    request: SessionHistoryRpcRequest,
+    rejection: SessionHistoryRpcRejection
+  ): Promise<SessionHistoryRpcRejection>;
+};
+const isHistoryRequest = (request: LoroStreamsRpcRequest): request is SessionHistoryRpcRequest =>
+  request.method === 'session/history-read' ||
+  request.method === 'session/history-watch' ||
+  request.method === 'session/history-write';
 
 const redactRpcRequestForLog = (raw: unknown): unknown => {
   if (typeof raw !== 'object' || raw === null) return raw;
@@ -312,6 +347,10 @@ type RpcServerDeps = {
    * Defaults to {@link DEFAULT_MAX_CONCURRENT_REQUESTS}.
    */
   maxConcurrentRequests?: number;
+  /** Ordinary admitted tasks, including queued handlers; foreground pools are reserved. */
+  maxPendingRequests?: number;
+  /** Required for history writes; retain a refusal until the original request expires. */
+  historyRequestRejections?: SessionHistoryRpcRejectionStore;
   getMachineStatus: () => Promise<MachineStatusResponse>;
   getPreviewControl?: () => Promise<MachinePreviewControlResponse>;
   pingMachine?: (args: { requestId: string }) => Promise<MachinePingResponse>;
@@ -332,6 +371,9 @@ type RpcServerDeps = {
       | { action: 'restart'; response: MachineRestartResponse }
       | { action: 'upgrade'; response: MachineUpgradeResponse }
   ) => void;
+  refreshMachineProviderRateLimits?: (
+    configId: AgentConfigId
+  ) => Promise<MachineProviderRateLimitsRefreshResponse>;
   refreshMachineAcpCapabilities: (args: {
     configId: AgentConfigId;
     force?: boolean;
@@ -373,11 +415,14 @@ type RpcServerDeps = {
     description: string;
     reporterUserId: string;
     requestToken: string;
+    clientLog?: BugReportClientLog;
   }) => Promise<MachineBugReportResponse>;
   cancelSession?: (args: {
     sessionId: SessionId;
     turnId: string;
     subagentTaskId?: string;
+    cancelId?: string;
+    pauseInbox?: boolean;
   }) => Promise<SessionCancelResponse>;
   getSessionLiveStatus?: (args: {
     sessionId: SessionId;
@@ -412,6 +457,7 @@ type RpcServerDeps = {
     userTurnId: string;
     userId: string;
     timestamp: string;
+    inputOrigin?: 'human' | 'agent';
     inputConfig: SessionTurnInputConfig;
   }) => Promise<SessionDispatchTurnResponse>;
   prepareSession?: (args: SessionPreparationSpec) => Promise<SessionPrepareResponse>;
@@ -422,13 +468,23 @@ type RpcServerDeps = {
   readSessionHistory?: (args: {
     sessionId: SessionId;
     query: SessionHistoryReadQuery;
+    signal?: AbortSignal;
   }) => Promise<SessionHistoryReadResponse>;
+  waitForSessionHistoryChanges?: (args: {
+    sessionId: SessionId;
+    checkpoint: string;
+    waitMs: number;
+    signal: AbortSignal;
+  }) => Promise<void>;
   writeSessionHistory?: (args: {
     sessionId: SessionId;
     operation: SessionHistoryWriteOperation;
     payload: Record<string, unknown>;
   }) => Promise<SessionHistoryWriteResponse>;
-  resolveSessionHistoryOwnerSessionId?: (sessionId: SessionId) => Promise<SessionId>;
+  resolveSessionHistoryOwnerSessionId?: (
+    sessionId: SessionId,
+    options: { signal: AbortSignal }
+  ) => Promise<SessionId>;
   openCodeCollabText?: (args: CodeCollabV2OpenTextRequest) => Promise<CodeCollabV2OpenTextOk>;
   resolveCodeCollabOwnerSessionId?: (sessionId: SessionId) => Promise<SessionId>;
   /** File Preview v3 — a plain read; must not activate Code Collab. */
@@ -505,8 +561,17 @@ export class LoroStreamsMachineRpcServer {
   private readonly requestState: LoroJsonStreamState = { nextOffset: '-1' };
   private readonly stopController = new AbortController();
   private readonly requestConcurrency: Semaphore;
+  private readonly historyWriteConcurrency = new Semaphore(4);
+  private readonly overloadConcurrency = new Semaphore(4);
+  private readonly ordinaryTasks = new Set<Promise<void>>();
+  private readonly historyWatchConcurrency = new Semaphore(128);
+  private readonly historyWatchTasks = new Set<Promise<void>>();
+  private readonly historyWriteTasks = new Set<Promise<void>>();
+  private readonly controlTasks = new Set<Promise<void>>();
+  private readonly overloadTasks = new Set<Promise<void>>();
   private readonly controlConcurrency = new Semaphore(DEFAULT_MAX_CONCURRENT_CONTROL_REQUESTS);
   private readonly inFlightRequests = new Set<Promise<void>>();
+  private readonly historyRequests = new Map<string, { identity: string; task: Promise<void> }>();
   private readonly acpAuthorizationCodeRecipients = new Map<string, RpcSecretRecipient>();
   private readonly acpCapabilitiesRefreshControllers = new Map<string, AbortController>();
   private requestLoopFailure: {
@@ -683,42 +748,119 @@ export class LoroStreamsMachineRpcServer {
     this.requestState.nextOffset = batch.nextOffset ?? this.requestState.nextOffset;
     this.requestState.cursor = batch.cursor;
 
-    // Dispatch each request concurrently instead of awaiting them in series. The
-    // request stream is shared by every client of this machine and every method,
-    // so a single slow handler (e.g. materializing a large turn diff, or a handler
-    // that stalls on git/fs) must not head-of-line block independent reads like
-    // open-file/refresh. Handlers run as tracked tasks; the semaphore bounds how
-    // many execute at once and backpressures this loop (pausing intake of new
-    // requests) once saturated rather than spawning unbounded work.
-    for (const raw of batch.messages) {
-      if (this.stopped) {
-        return;
-      }
-      // Control-plane requests never wait for the shared semaphore at intake:
-      // their tasks acquire from the dedicated control pool inside the task, so
-      // a burst of slow code-collab handlers cannot delay a chat dispatch or a
-      // cancel sitting behind them in the same batch. The peek at `method` is
-      // classification only — full schema validation still happens in
-      // handleRawRequest.
-      if (this.isControlRequest(raw)) {
-        const task = this.runRequestTask(raw, this.controlConcurrency, { deferredAcquire: true });
-        this.inFlightRequests.add(task);
-        void task.finally(() => {
-          this.inFlightRequests.delete(task);
-        });
+    // Inspect foreground requests before admitting background work from this
+    // batch. Handler permits are acquired inside tracked tasks, not at intake.
+    // A separate history-write pool keeps immutable input acceptance independent
+    // of background reads; owner writers still serialize their own mutations.
+    const classifyPriority = (raw: unknown) =>
+      this.isControlRequest(raw)
+        ? 0
+        : this.isHistoryWrite(raw)
+          ? 1
+          : raw &&
+              typeof raw === 'object' &&
+              'method' in raw &&
+              raw.method === 'session/history-watch'
+            ? 3
+            : 2;
+    const ordered = batch.messages
+      .map((raw, index) => ({ raw, index, priority: classifyPriority(raw) }))
+      .sort((left, right) => left.priority - right.priority || left.index - right.index);
+    const limit = Math.max(
+      this.deps.maxConcurrentRequests ?? DEFAULT_MAX_CONCURRENT_REQUESTS,
+      this.deps.maxPendingRequests ?? 128
+    );
+    for (const { raw, priority } of ordered) {
+      if (this.stopped) return;
+      const tasks =
+        priority === 0
+          ? this.controlTasks
+          : priority === 1
+            ? this.historyWriteTasks
+            : priority === 3
+              ? this.historyWatchTasks
+              : this.ordinaryTasks;
+      if (priority >= 2 && tasks.size >= (priority === 3 ? 128 : limit)) {
+        // Shed unstarted ordinary work rather than blocking intake of a later
+        // human send. Busy replies have their own bounded ownership too.
+        if (this.overloadTasks.size < 128) {
+          const task = this.rejectOrdinaryOverload(raw);
+          this.trackRequestTask(task, this.overloadTasks);
+        } else {
+          this.deps.logger.warn(
+            `[rpc-server:${this.deps.machineId}] ordinary request and busy-response capacity exhausted`
+          );
+        }
         continue;
       }
-      await this.requestConcurrency.acquire();
-      if (this.stopped) {
-        this.requestConcurrency.release();
-        return;
-      }
-      const task = this.runRequestTask(raw, this.requestConcurrency);
-      this.inFlightRequests.add(task);
-      void task.finally(() => {
-        this.inFlightRequests.delete(task);
-      });
+      if (priority < 2)
+        while (!this.stopped && tasks.size >= 128) {
+          let stop!: () => void;
+          const stopped = new Promise<void>((resolve) => {
+            stop = resolve;
+          });
+          this.stopController.signal.addEventListener('abort', stop, { once: true });
+          try {
+            await Promise.race([...tasks, stopped]);
+          } finally {
+            this.stopController.signal.removeEventListener('abort', stop);
+          }
+        }
+      if (this.stopped) return;
+      const lane =
+        priority === 0
+          ? this.controlConcurrency
+          : priority === 1
+            ? this.historyWriteConcurrency
+            : priority === 3
+              ? this.historyWatchConcurrency
+              : this.requestConcurrency;
+      this.trackRequestTask(this.runRequestTask(raw, lane), tasks);
     }
+  }
+
+  private trackRequestTask(task: Promise<void>, tasks: Set<Promise<void>>): void {
+    tasks.add(task);
+    this.inFlightRequests.add(task);
+    void task.finally(() => {
+      tasks.delete(task);
+      this.inFlightRequests.delete(task);
+    });
+  }
+
+  private async rejectOrdinaryOverload(raw: unknown): Promise<void> {
+    await this.overloadConcurrency.acquire();
+    try {
+      if (this.stopped) return;
+      const parsed = LoroStreamsRpcRequestSchema.safeParse(raw);
+      if (!parsed.success) return;
+      const request = parsed.data;
+      if (
+        request.workspaceId !== this.deps.workspaceId ||
+        request.machineId !== this.deps.machineId ||
+        request.expiresAt <= this.now()
+      )
+        return;
+      await this.appendErrorResponse(request.replyTo, request.id, request.method, {
+        code: 'rpc_request_capacity_exceeded',
+        message: 'The machine request queue is full.',
+      });
+    } catch (error) {
+      this.deps.logger.warn(
+        `[rpc-server:${this.deps.machineId}] failed to return request capacity refusal: ${formatRpcStartupError(error)}`
+      );
+    } finally {
+      this.overloadConcurrency.release();
+    }
+  }
+
+  private isHistoryWrite(raw: unknown): boolean {
+    return (
+      typeof raw === 'object' &&
+      raw !== null &&
+      'method' in raw &&
+      raw.method === 'session/history-write'
+    );
   }
 
   private isControlRequest(raw: unknown): boolean {
@@ -739,17 +881,11 @@ export class LoroStreamsMachineRpcServer {
     return action === 'cancel' || action === 'submit-code' || action === 'submit-input';
   }
 
-  private async runRequestTask(
-    raw: unknown,
-    lane: Semaphore,
-    options?: { deferredAcquire?: boolean }
-  ): Promise<void> {
-    if (options?.deferredAcquire) {
-      await lane.acquire();
-      if (this.stopped) {
-        lane.release();
-        return;
-      }
+  private async runRequestTask(raw: unknown, lane: Semaphore): Promise<void> {
+    await lane.acquire();
+    if (this.stopped) {
+      lane.release();
+      return;
     }
     try {
       await this.handleRawRequest(raw);
@@ -800,8 +936,59 @@ export class LoroStreamsMachineRpcServer {
       return;
     }
 
-    let codeCollabOwnerSessionId: string | undefined;
+    if (!isHistoryRequest(request)) return await this.handleRequest(request);
+    const identity = JSON.stringify(request);
+    const existing = this.historyRequests.get(request.id);
+    if (existing) {
+      if (existing.identity !== identity) {
+        await this.appendErrorResponse(request.replyTo, request.id, request.method, {
+          code: 'rpc_request_identity_mismatch',
+          message: 'RPC request ID was reused with different parameters.',
+        });
+        return;
+      }
+      return await existing.task;
+    }
+    const task = this.handleRequest(request);
+    this.historyRequests.set(request.id, { identity, task });
     try {
+      await task;
+    } finally {
+      this.historyRequests.delete(request.id);
+    }
+  }
+
+  private async handleRequest(request: LoroStreamsRpcRequest): Promise<void> {
+    let codeCollabOwnerSessionId: string | undefined;
+    let historyOperationStarted = false;
+    let replayedRejection = false;
+    try {
+      if (isHistoryRequest(request)) {
+        if (request.method === 'session/history-write' && !this.deps.historyRequestRejections) {
+          throw new LoroStreamsRpcHandlerError(
+            'session_history_request_state_unavailable',
+            'This machine cannot durably track rejected history requests.'
+          );
+        }
+        let rejection: SessionHistoryRpcRejection | null | undefined;
+        try {
+          rejection = await this.deps.historyRequestRejections?.get(request);
+        } catch (cause) {
+          if (cause instanceof LoroStreamsRpcHandlerError) throw cause;
+          const failure = new LoroStreamsRpcHandlerError(
+            'session_history_request_state_unavailable',
+            'Session history request state is unavailable on the target machine.'
+          );
+          failure.cause = cause;
+          throw failure;
+        }
+        if (rejection) {
+          replayedRejection = true;
+          throw new LoroStreamsRpcHandlerError(rejection.code, rejection.message, {
+            replayedRejection: 'true',
+          });
+        }
+      }
       switch (request.method) {
         case 'machine/status': {
           const response = await this.deps.getMachineStatus();
@@ -871,6 +1058,15 @@ export class LoroStreamsMachineRpcServer {
             action: 'upgrade',
             response,
           });
+          return;
+        }
+        case 'machine/provider-rate-limits-refresh': {
+          if (!this.deps.refreshMachineProviderRateLimits)
+            throw new Error('Quota refresh unsupported');
+          const response = await this.deps.refreshMachineProviderRateLimits(
+            request.params.configId as AgentConfigId
+          );
+          await this.appendResultResponse(request.replyTo, request.id, request.method, response);
           return;
         }
         case 'machine/acp-capabilities-refresh': {
@@ -1139,6 +1335,7 @@ export class LoroStreamsMachineRpcServer {
             description: request.params.description,
             reporterUserId: request.params.reporterUserId,
             requestToken: request.params.requestToken,
+            ...(request.params.clientLog ? { clientLog: request.params.clientLog } : {}),
           });
           await this.appendResultResponse(request.replyTo, request.id, request.method, response);
           return;
@@ -1155,6 +1352,10 @@ export class LoroStreamsMachineRpcServer {
             sessionId: request.params.sessionId,
             turnId: request.params.turnId,
             subagentTaskId: request.params.subagentTaskId,
+            ...(request.params.cancelId ? { cancelId: request.params.cancelId } : {}),
+            ...(request.params.pauseInbox === undefined
+              ? {}
+              : { pauseInbox: request.params.pauseInbox }),
           });
           await this.appendResultResponse(request.replyTo, request.id, request.method, response);
           return;
@@ -1294,6 +1495,7 @@ export class LoroStreamsMachineRpcServer {
             userTurnId: request.params.userTurnId,
             userId: request.params.userId,
             timestamp: request.params.timestamp,
+            inputOrigin: request.params.inputOrigin,
             inputConfig,
           });
           await this.appendResultResponse(request.replyTo, request.id, request.method, response);
@@ -1323,11 +1525,21 @@ export class LoroStreamsMachineRpcServer {
           await this.appendResultResponse(request.replyTo, request.id, request.method, response);
           return;
         }
-        case 'session/history-read': {
+        case 'session/history-read':
+        case 'session/history-watch': {
           const decoded = await this.decryptCodeCollabV2RequestParams(request.params);
           codeCollabOwnerSessionId = decoded.ownerSessionId;
           const params = SessionHistoryReadRpcPayloadSchema.parse(decoded.payload);
+          if (
+            (request.method === 'session/history-watch') !==
+            (params.query.kind === 'watchChanges')
+          )
+            throw new LoroStreamsRpcHandlerError(
+              'invalid_request',
+              'History observation method mismatch'
+            );
           await this.verifySessionHistoryOwnerSession(decoded.ownerSessionId, params.sessionId);
+          if (this.stopController.signal.aborted || request.expiresAt <= this.now()) return;
           if (!this.deps.readSessionHistory) {
             await this.appendErrorResponse(
               request.replyTo,
@@ -1341,10 +1553,41 @@ export class LoroStreamsMachineRpcServer {
             );
             return;
           }
-          const response = await this.deps.readSessionHistory({
-            sessionId: params.sessionId as SessionId,
-            query: params.query,
-          });
+          historyOperationStarted = true;
+          let query = params.query;
+          let readPermit = false;
+          if (query.kind === 'watchChanges') {
+            if (!this.deps.waitForSessionHistoryChanges)
+              throw new LoroStreamsRpcHandlerError(
+                LORO_STREAMS_RPC_ERROR_CODES.methodUnavailable,
+                'History observation unavailable'
+              );
+            await this.deps.waitForSessionHistoryChanges({
+              sessionId: params.sessionId,
+              checkpoint: query.checkpoint,
+              waitMs: Math.min(query.waitMs, Math.max(0, request.expiresAt - this.now() - 1000)),
+              signal: this.stopController.signal,
+            });
+            if (this.stopped || request.expiresAt <= this.now()) return;
+            query = {
+              kind: 'readChanges',
+              checkpoint: query.checkpoint,
+              includeBodiesFrom: query.includeBodiesFrom,
+            };
+            await this.requestConcurrency.acquire();
+            readPermit = true;
+          }
+          let response: SessionHistoryReadResponse;
+          try {
+            if (this.stopped || request.expiresAt <= this.now()) return;
+            response = await this.deps.readSessionHistory({
+              sessionId: params.sessionId as SessionId,
+              query,
+              signal: this.stopController.signal,
+            });
+          } finally {
+            if (readPermit) this.requestConcurrency.release();
+          }
           await this.appendResultResponse(request.replyTo, request.id, request.method, response, {
             codeCollabOwnerSessionId,
           });
@@ -1355,6 +1598,7 @@ export class LoroStreamsMachineRpcServer {
           codeCollabOwnerSessionId = decoded.ownerSessionId;
           const params = SessionHistoryWriteRpcPayloadSchema.parse(decoded.payload);
           await this.verifySessionHistoryOwnerSession(decoded.ownerSessionId, params.sessionId);
+          if (this.stopController.signal.aborted || request.expiresAt <= this.now()) return;
           if (!this.deps.writeSessionHistory) {
             await this.appendErrorResponse(
               request.replyTo,
@@ -1368,6 +1612,7 @@ export class LoroStreamsMachineRpcServer {
             );
             return;
           }
+          historyOperationStarted = true;
           const response = await this.deps.writeSessionHistory({
             sessionId: params.sessionId as SessionId,
             operation: params.operation,
@@ -1702,18 +1947,71 @@ export class LoroStreamsMachineRpcServer {
         }
       }
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
+      if (
+        this.stopController.signal.aborted &&
+        (request.method === 'session/history-read' ||
+          request.method === 'session/history-watch' ||
+          request.method === 'session/history-write')
+      )
+        return;
+      let failure = error;
+      if (
+        isHistoryRequest(request) &&
+        !historyOperationStarted &&
+        !replayedRejection &&
+        error instanceof LoroStreamsRpcHandlerError &&
+        SESSION_HISTORY_PRECONDITION_CODES.some((code) => code === error.code) &&
+        this.deps.historyRequestRejections
+      ) {
+        try {
+          const rejection = await this.deps.historyRequestRejections.put(request, {
+            code: error.code as SessionHistoryRpcRejection['code'],
+            message: error.message,
+          });
+          failure = new LoroStreamsRpcHandlerError(
+            rejection.code,
+            rejection.message,
+            error.context
+          );
+        } catch (cause) {
+          this.deps.logger.warn(
+            `[rpc-server:${this.deps.machineId}] could not persist history refusal (request=${request.id})`
+          );
+          const unavailable = new LoroStreamsRpcHandlerError(
+            'session_history_request_state_unavailable',
+            'Session history request state could not be saved.'
+          );
+          unavailable.cause = cause;
+          failure = unavailable;
+        }
+      }
+      const message = failure instanceof Error ? failure.message : String(failure);
+      if (isHistoryRequest(request) && this.stopController.signal.aborted) return;
+      if (failure instanceof LoroStreamsRpcHandlerError) {
+        this.deps.logger.warn(
+          `[rpc-server:${this.deps.machineId}] request rejected ${JSON.stringify({
+            rpcRequestId: request.id,
+            method: request.method,
+            code: failure.code,
+            ...failure.context,
+          })}`
+        );
+      }
       const codeCollabError = request.method.startsWith('code-collab/')
-        ? toCodeCollabRpcError(error)
+        ? toCodeCollabRpcError(failure)
         : request.method === 'file/preview'
-          ? toFilePreviewRpcError(error, message)
+          ? toFilePreviewRpcError(failure, message)
           : null;
       await this.appendErrorResponse(
         request.replyTo,
         request.id,
         request.method,
         {
-          code: codeCollabError?.code ?? LORO_STREAMS_RPC_ERROR_CODES.internalError,
+          code:
+            codeCollabError?.code ??
+            (failure instanceof LoroStreamsRpcHandlerError
+              ? failure.code
+              : LORO_STREAMS_RPC_ERROR_CODES.internalError),
           message: codeCollabError?.message ?? message,
           ...(codeCollabError?.data === undefined ? {} : { data: codeCollabError.data }),
         },
@@ -1792,7 +2090,9 @@ export class LoroStreamsMachineRpcServer {
   ): Promise<void> {
     const resolveOwnerSessionId = this.deps.resolveSessionHistoryOwnerSessionId;
     const expectedOwnerSessionId = resolveOwnerSessionId
-      ? await resolveOwnerSessionId(businessSessionId as SessionId)
+      ? await resolveOwnerSessionId(businessSessionId as SessionId, {
+          signal: this.stopController.signal,
+        })
       : businessSessionId;
     if (expectedOwnerSessionId !== envelopeOwnerSessionId) {
       throw new Error('Session history RPC owner session mismatch.');
@@ -1807,6 +2107,7 @@ export class LoroStreamsMachineRpcServer {
       | MachineStatusResponse
       | MachinePreviewControlResponse
       | MachinePingResponse
+      | MachineProviderRateLimitsRefreshResponse
       | MachineAcpCapabilitiesRefreshResponse
       | MachineAcpAuthenticateResponse
       | MachineAcpAuthenticationProgressMessage

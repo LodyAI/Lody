@@ -9,6 +9,7 @@ import { TerminationFailed } from '@lody/shared/node/process';
 import { Session } from '../src/session/session';
 import type { TerminalManager } from '../src/session/terminal-manager';
 import {
+  createNoopSessionSandbox,
   createSessionSandboxFactory,
   type SessionProcessHandle,
   type SessionSandbox,
@@ -246,22 +247,50 @@ describe('Session terminate cleanup', () => {
   });
 
   // A survivor may still hold the ACP prompt; reuse would feed it a new turn.
-  it('rejects when a process tree survives, after finishing its bookkeeping', async () => {
+  // Both track the same process group: ending them in turn doubled every
+  // bounded wait on a survivor before the turn could fail or proceed.
+  it('ends the sandbox while the agent tree is still being waited on', async () => {
+    const sandbox = createNoopSessionSandbox();
+    let sandboxTerminating = false;
+    vi.spyOn(sandbox, 'terminate').mockImplementation(async () => {
+      sandboxTerminating = true;
+    });
+    const session = createSession(sandbox);
+    let sandboxTerminatingDuringAgentWait = false;
+    // @ts-expect-error - exercising private process handle wiring
+    session.agentProcess = createProcessHandle(async () => {
+      await Promise.resolve();
+      sandboxTerminatingDuringAgentWait = sandboxTerminating;
+    });
+
+    await session.terminate(true);
+
+    expect(sandboxTerminatingDuringAgentWait).toBe(true);
+  });
+
+  it('retains the process owner and original failure until independent cleanup succeeds', async () => {
     const survivor = new TerminationFailed({
       target: 'process group 4321',
       reason: 'still-alive',
       message: 'process group 4321 was still running 5000ms after SIGKILL',
     });
     const session = createSession();
-    session.agentClient = { isCreated: vi.fn(() => false) } as never;
+    const client = { isCreated: () => false };
+    session.agentClient = client as never;
+    let released = false;
     // @ts-expect-error - exercising private process handle wiring
     session.agentProcess = createProcessHandle(async () => {
-      throw survivor;
+      if (!released) throw survivor;
     });
     const terminated: unknown[] = [];
     session.on('terminated', (event) => terminated.push(event));
 
-    await expect(session.terminate(true)).rejects.toBe(survivor);
+    await expect(session.terminate(true)).rejects.toMatchObject({ errors: [survivor] });
+    expect(terminated).toEqual([]);
+    expect(session.agentClient).toBe(client);
+    await expect(session.terminate(true)).rejects.toMatchObject({ errors: [survivor] });
+    released = true;
+    await session.terminate(true);
     expect(terminated).toHaveLength(1);
     expect(session.agentClient).toBeNull();
   });

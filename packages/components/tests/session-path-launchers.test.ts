@@ -134,6 +134,43 @@ describe('custom path launcher command templates', () => {
 });
 
 describe('built-in path launchers', () => {
+  it.each(['darwin', 'linux', 'win32'])(
+    'opens a Delta worktree on %s with the path as one argument',
+    (platform) => {
+      const options = getAvailablePathLauncherOptions({
+        customLaunchers: [],
+        isElectron: true,
+        platform,
+      });
+      const delta = options.find(
+        (launcher) => launcher.kind === 'builtin' && launcher.id === 'delta'
+      );
+      expect(delta).toBeDefined();
+      const targetPath =
+        platform === 'win32' ? 'C:\\code\\My Project' : '/tmp/My Project; $(echo example)';
+      const input = buildPathLauncherLaunchInput(delta!, targetPath, platform);
+      expect(input).toEqual({
+        kind: 'command',
+        command: { command: 'delta', args: ['open', targetPath] },
+        targetPath,
+        label: 'Delta',
+      });
+      expect(buildPathLauncherProbes([delta!], targetPath, platform)).toEqual([
+        { launcherId: 'delta', input },
+      ]);
+      expect(
+        pathLauncherPreferenceSchema.parse({ selectedLauncherId: 'delta' }).selectedLauncherId
+      ).toBe('delta');
+      expect(
+        getAvailablePathLauncherOptions({
+          customLaunchers: [],
+          isElectron: false,
+          platform,
+        }).some((launcher) => launcher.kind === 'builtin' && launcher.id === 'delta')
+      ).toBe(false);
+    }
+  );
+
   it('builds an xed launch request for Xcode', () => {
     const xcode = getAvailablePathLauncherOptions({
       customLaunchers: [],

@@ -53,6 +53,7 @@ const styles = stylex.create({
     display: 'grid',
     gridTemplateColumns: { default: '1fr', [WIDE]: 'repeat(3, minmax(0, 1fr))' },
     gap: space[3],
+    marginBlockEnd: space[3],
   },
   summaryCard: {
     display: 'flex',
@@ -73,7 +74,10 @@ const styles = stylex.create({
   summaryValue: { fontSize: text.titleSize, fontWeight: 400, color: colors.label },
   icon: { width: '16px', height: '16px', flexShrink: 0, color: colors.tertiaryLabel },
   smallIcon: { width: '14px', height: '14px', flexShrink: 0 },
-  scroll: { maxHeight: '70vh', minHeight: 0 },
+  // A max-height alone clips the root while its percentage-height viewport
+  // grows with the list. Flex layout lets the actual viewport shrink to fit.
+  scroll: { display: 'flex', flexDirection: 'column', maxHeight: '70vh', minHeight: 0 },
+  scrollViewport: { minHeight: 0 },
   triggerLabel: { display: 'flex', alignItems: 'center', gap: space[2] },
   panelBody: { display: 'flex', flexDirection: 'column', gap: space[3] },
   /** The records are one list: a region of the panel, its rows ruled apart. */
@@ -284,25 +288,28 @@ export function OpenSourceAttributionsDialog({
           </Dialog.Description>
         </Dialog.Header>
 
-        <div {...stylex.props(styles.summary)}>
-          <SummaryCard
-            icon={Boxes}
-            label={t('settings.about.dependencies', 'Dependencies')}
-            value={String(dependencyEntries.length)}
-          />
-          <SummaryCard
-            icon={Palette}
-            label={t('settings.about.bundledAssets', 'Bundled assets')}
-            value={String(bundledEntries.length)}
-          />
-          <SummaryCard
-            icon={FolderTree}
-            label={t('settings.about.licenses', 'Licenses')}
-            value={String(uniqueLicenses)}
-          />
-        </div>
+        <ScrollArea
+          {...stylex.props(styles.scroll)}
+          viewportClassName={stylex.props(styles.scrollViewport).className}
+        >
+          <div {...stylex.props(styles.summary)}>
+            <SummaryCard
+              icon={Boxes}
+              label={t('settings.about.dependencies', 'Dependencies')}
+              value={String(dependencyEntries.length)}
+            />
+            <SummaryCard
+              icon={Palette}
+              label={t('settings.about.bundledAssets', 'Bundled assets')}
+              value={String(bundledEntries.length)}
+            />
+            <SummaryCard
+              icon={FolderTree}
+              label={t('settings.about.licenses', 'Licenses')}
+              value={String(uniqueLicenses)}
+            />
+          </div>
 
-        <ScrollArea {...stylex.props(styles.scroll)}>
           <Accordion.Root multiple defaultValue={['bundled-assets']}>
             <Accordion.Item value="bundled-assets">
               <Accordion.Trigger>

@@ -1,3 +1,4 @@
+import { ReadOnlyHtmlPreview } from './read-only-html-preview';
 import { PagedFileViewer } from './paged-file-viewer';
 import * as stylex from '@stylexjs/stylex';
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
@@ -62,6 +63,8 @@ import {
 import { normalizePinnedProviderOpenResult } from '@/lib/session-file-provider-open-result';
 import { SessionFileBinaryPreview } from './session-file-binary-preview';
 import { SessionFileCsvPreview } from './session-file-csv-preview';
+import { DocumentSelectionSurface } from './document-selection-surface';
+import type { DocumentSelection } from '@/lib/document-selection';
 import { SessionFileImagePreview } from './session-file-image-preview';
 import { MarkdownRenderer } from '../ai-gui/markdown-renderer';
 import { MarkdownFileResources } from '../ai-gui/markdown-file-image';
@@ -456,6 +459,8 @@ export type SessionFileContentViewProps = {
   focusRequestSeq?: number;
   /** Explicit user request to enter rendered HTML for this open action. */
   htmlPreviewRequestSeq?: number;
+  /** Mobile file opens start in preview; desktop keeps explicit script opt-in. */
+  defaultHtmlPreview?: boolean;
   saveRequestSeq?: number;
   copyMarkdownRequestSeq?: number;
   /**
@@ -491,6 +496,7 @@ export type SessionFileContentViewProps = {
   }) => void;
   visualAnnotationReferenceKeys?: readonly string[];
   onAddVisualAnnotationToChat?: (reference: VisualAnnotationReferencePayload) => boolean | void;
+  onAddSelectionToChat?: (selection: DocumentSelection) => boolean;
   onToggleVisualAnnotationInChat?: (reference: VisualAnnotationReferencePayload) => boolean | void;
 };
 
@@ -519,6 +525,7 @@ function SessionFileContentViewImpl({
   endLine,
   focusRequestSeq,
   htmlPreviewRequestSeq,
+  defaultHtmlPreview = false,
   saveRequestSeq,
   copyMarkdownRequestSeq,
   preferNativeMarkdownSelection = false,
@@ -532,6 +539,7 @@ function SessionFileContentViewImpl({
   onOpenFile,
   visualAnnotationReferenceKeys,
   onAddVisualAnnotationToChat,
+  onAddSelectionToChat,
   onToggleVisualAnnotationInChat,
 }: SessionFileContentViewProps) {
   const { t } = useTranslation();
@@ -614,8 +622,9 @@ function SessionFileContentViewImpl({
   // The source remains one toggle away in the editable source surface.
   const [markdownRenderMode, setMarkdownRenderMode] = useState<'rendered' | 'code'>('rendered');
   const [csvRenderMode, setCsvRenderMode] = useState<'rendered' | 'code'>('rendered');
-  // HTML starts as source because entering preview executes its inline scripts.
-  const [htmlRenderMode, setHtmlRenderMode] = useState<'rendered' | 'code'>('code');
+  const [htmlRenderMode, setHtmlRenderMode] = useState<'rendered' | 'code'>(
+    defaultHtmlPreview ? 'rendered' : 'code'
+  );
   const handledHtmlPreviewRequestSeqRef = useRef<number | undefined>(undefined);
   const [htmlAnnotationEnabled, setHtmlAnnotationEnabled] = useState(false);
   const [htmlAnnotationAvailable, setHtmlAnnotationAvailable] = useState(false);
@@ -644,6 +653,27 @@ function SessionFileContentViewImpl({
   const markProviderConflictPendingRef = useRef<((message?: string) => void) | null>(null);
 
   const normalizedPath = useMemo(() => filePath.trim(), [filePath]);
+  const [retryRevision, setRetryRevision] = useState(0);
+  const [lastOpenRequest, setLastOpenRequest] = useState({ path: normalizedPath, focusRequestSeq });
+  // Reopening an already-active failed tab is a new read, not just cursor focus.
+  // Successful previews (especially unsaved drafts) retain their current snapshot.
+  if (
+    lastOpenRequest.path !== normalizedPath ||
+    lastOpenRequest.focusRequestSeq !== focusRequestSeq
+  ) {
+    setLastOpenRequest({ path: normalizedPath, focusRequestSeq });
+    if (
+      lastOpenRequest.path === normalizedPath &&
+      (data.status === 'error' || (data.status === 'ready' && data.snapshot.kind === 'missing'))
+    ) {
+      setRetryRevision((revision) => revision + 1);
+      setData({ status: 'loading' });
+    }
+  }
+  const retryFile = useCallback(() => {
+    setData({ status: 'loading' });
+    setRetryRevision((revision) => revision + 1);
+  }, []);
   const selectedLines = useMemo<SessionMonacoSelectedLines>(
     () => createSelectedLines(startLine, endLine, focusRequestSeq),
     [endLine, focusRequestSeq, startLine]
@@ -897,6 +927,7 @@ function SessionFileContentViewImpl({
       cancelled = true;
     };
   }, [
+    retryRevision,
     fileContentSource,
     fileProviderMessage,
     currentUserId,
@@ -1151,7 +1182,6 @@ function SessionFileContentViewImpl({
   const isTextFileReady = data.status === 'ready' && data.snapshot.kind === 'text';
   const supportsHtmlPreview = supportsCredentiallessManagedPreviewFrames();
   const htmlPreviewSource =
-    supportsHtmlPreview &&
     data.status === 'ready' &&
     data.snapshot.kind === 'text' &&
     data.snapshot.truncated !== true &&
@@ -1162,10 +1192,10 @@ function SessionFileContentViewImpl({
   const showHtmlRendered = isActiveSurface && isHtmlTextFile && htmlRenderMode === 'rendered';
   const htmlPreviewDocument = useMemo(
     () =>
-      showHtmlRendered && htmlPreviewSource !== null
+      showHtmlRendered && supportsHtmlPreview && htmlPreviewSource !== null
         ? buildStaticHtmlPreviewDocument(htmlPreviewSource)
         : null,
-    [htmlPreviewSource, showHtmlRendered]
+    [htmlPreviewSource, showHtmlRendered, supportsHtmlPreview]
   );
   const htmlPreviewLogicalUrl = useMemo(
     () => getStaticHtmlPreviewLogicalUrl(normalizedPath),
@@ -1551,6 +1581,7 @@ function SessionFileContentViewImpl({
       <SessionFileErrorState
         message={data.message}
         reason={data.reason}
+        onRetry={retryFile}
         {...(fileErrorActions ? { fileActions: fileErrorActions } : {})}
       />
     );
@@ -1571,6 +1602,7 @@ function SessionFileContentViewImpl({
         url={data.snapshot.url}
         active={isActiveSurface}
         fileActions={sessionFileActions.buildErrorActions(normalizedPath, data.snapshot)}
+        onAddSelectionToChat={onAddSelectionToChat}
       />
     );
   } else if (data.snapshot.kind === 'missing') {
@@ -1578,8 +1610,11 @@ function SessionFileContentViewImpl({
       <SessionFileErrorState
         message={t('sessions.fileViewer.missing', 'File not found.')}
         reason="deleted"
+        onRetry={retryFile}
       />
     );
+  } else if (showHtmlRendered && !supportsHtmlPreview && htmlPreviewSource !== null) {
+    body = <ReadOnlyHtmlPreview text={htmlPreviewSource} />;
   } else if (showHtmlRendered && htmlPreviewDocument !== null) {
     body = (
       <div {...stylex.props(styles.previewFrame)}>
@@ -1615,11 +1650,18 @@ function SessionFileContentViewImpl({
     );
   } else if (showCsvRendered && data.snapshot.kind === 'text') {
     body = (
-      <SessionFileCsvPreview
-        text={latestEditorTextRef.current ?? data.snapshot.text}
+      <DocumentSelectionSurface
         path={normalizedPath}
+        source={latestEditorTextRef.current ?? data.snapshot.text}
         active={isActiveSurface}
-      />
+        onAdd={onAddSelectionToChat}
+      >
+        <SessionFileCsvPreview
+          text={latestEditorTextRef.current ?? data.snapshot.text}
+          path={normalizedPath}
+          active={isActiveSurface}
+        />
+      </DocumentSelectionSurface>
     );
   } else if (showSvgRendered || showMarkdownRendered) {
     body = previewSurface;
@@ -1813,7 +1855,7 @@ function SessionFileContentViewImpl({
                   }
                 }}
                 showLabel={
-                  isHtmlTextFile
+                  isHtmlTextFile && supportsHtmlPreview
                     ? t('sessions.fileViewer.htmlPreview.show', 'Preview HTML (runs scripts)')
                     : t('sessions.fileViewer.preview.show', 'Preview')
                 }
@@ -1839,7 +1881,7 @@ function SessionFileContentViewImpl({
                 <Copy {...stylex.props(styles.icon)} aria-hidden="true" />
               </button>
             ) : null}
-            {showHtmlRendered ? (
+            {showHtmlRendered && supportsHtmlPreview ? (
               <button
                 type="button"
                 aria-pressed={htmlAnnotationEnabled}
@@ -1855,7 +1897,7 @@ function SessionFileContentViewImpl({
                 <MessageCircle {...stylex.props(styles.icon)} aria-hidden="true" />
               </button>
             ) : null}
-            {showHtmlRendered ? (
+            {showHtmlRendered && supportsHtmlPreview ? (
               <button
                 type="button"
                 onClick={handleReloadHtmlPreview}

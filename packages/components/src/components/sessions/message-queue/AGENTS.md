@@ -34,6 +34,10 @@ real item exists. Upload progress is subscribed only inside the sheet; the page
 reads `useHasPendingQueueRecords`. Decisions: [local queue rows](../../../../../../.agents/notes/implemented/feature/2026-09-28-local-queue-pending-rows.md),
 [in-memory held sends](../../../../../../.agents/notes/implemented/simplification/2026-09-29-remove-session-send-journal.md).
 
+Only the latest edit operation may change the local editor or pending state;
+an earlier blur-save acknowledgement must preserve the next row's draft and focus.
+[Decision](../../../../../../.agents/notes/implemented/bug-fix/2026-10-13-queued-edit-operation-ownership.md).
+
 The queue disclosure is local display state, initially expanded. Keep its editing
 rows mounted while folded; focusing the disclosure must not commit or discard a
 row draft. Folded summaries retain pending/failed-send awareness. Intent:
