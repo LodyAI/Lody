@@ -52,7 +52,7 @@ Fresh Ed25519 key pairs per member and device, real join and possession signatur
 | 1,000 members + 1,000 devices + 2,000 rotations | 4,001 | 1.1 MB | 641 KB | 624 KB | 424 KB | 10.3 ms/record | 7.9 ms/record |
 | 4,000 members + 4,000 devices | 8,001 | 2.4 MB | 1.69 MB | 1.64 MB | 851 KB | 31.9 → **13.5** ms/record after the fix below | — |
 
-- Synthetic filled-byte data compressed 20–40× and was misleading. Real state is mostly high-entropy, so gzip saves ~1–3%; brotli saves ~⅓–½ on member-heavy states because each key and membership ID recurs in several state sets beyond gzip's window. Compress retained state with brotli.
+- Synthetic filled-byte data compressed 20–40× and was misleading. Real state is mostly high-entropy, so gzip saves ~1–3%; brotli saves ~⅓–½ on member-heavy states because each key and membership ID recurs in several state sets beyond gzip's window. Compression was later dropped (see below).
 - Member admission was quadratic: each admit scanned every current member for a duplicate user. A derived index of current member user IDs (rebuilt on snapshot import, never encoded) fixed it; per-record cost is now constant across ledger sizes.
 - The remaining cost is noble curve arithmetic (~70% of the profile). Member and device records carry two signatures. The native Web Crypto path only halves the cost because the strict prime-subgroup check on each signature's R still runs in pure JS.
 - Core snapshots are capped at 2 MiB; a state of about 5,000 members plus devices would exceed it, which needs a core encoding change regardless of the host.
@@ -78,11 +78,25 @@ Same real-data ledgers as above (one Node process, idle host):
 | 1k members + 1k devices + 2k rotations | 53 ms | 165 ms | 5 ms | 427 KB, 21 ms | 428 KB, 1.8 s | 6 ms |
 | 4k members + 4k devices | 177 ms | 576 ms | 6 ms | 863 KB, 77 ms | 853 KB, 3.7 s | 7 ms |
 
-The first version's restore took 14.5 s and 58 s for the last two rows. Use brotli quality 6: the default 11 gains under 1% at 50× the time. Restore's remaining cost is per-element generator overhead in the shared decoder; a write-path restore under 0.6 s at 8,000 records is accepted for now.
+The first version's restore took 14.5 s and 58 s for the last two rows. Compression is not used (owner decision): quality 11 costs seconds, and even quality 6 adds 20–80 ms per rewrite to save space only on member-heavy states. Retained state is stored uncompressed. Restore's remaining cost is per-element generator overhead in the shared decoder; a write-path restore under 0.6 s at 8,000 records is accepted for now.
+
+## Capacity of one 900 KiB chunk
+
+The host needs more than the current membership: verifying the next record also needs every replay fact, which never shrinks (all signing and encryption keys, membership IDs and join requests ever used, and every epoch commitment). Retained state is exactly the comparison-note state, so its size follows from the CBOR rows:
+
+| Fact | Bytes, permanent part | Bytes, removed later |
+|---|---|---|
+| Member admitted with one personal device | 137 (keys, membership ID, closed join) | 140 (member and device rows) |
+| Additional device | 68 (both keys) | 87 (device row) |
+| Epoch rotation (also every removal or revocation) | 112 (commitment and 72-byte history packet) | — |
+
+One uncompressed 900 KiB chunk (921,600 bytes) therefore holds about 3,300 current members with one device each, 2,100 with two, 1,570 with three, or 8,200 rotations. A workspace with 100 current members on two devices, 50 departed members and 1,000 rotations uses about 165 KB, under a fifth of one chunk. Rotations dominate long-term growth: ten a week for ten years add about 580 KB. These sizes match the benchmark states within 0.1%.
+
+A host-only encoding could omit the 72-byte history packets, which only clients use, cutting each rotation to 38 bytes. It would no longer be the comparison-note state, so its digest would not match, and it would be a second format; it is not proposed.
 
 ## Platform review (2026-10-19)
 
-- **Convex** (docs.convex.dev limits and pricing): the plan fits. Cost is dominated by database I/O, the bytes moved between functions and the database: each write reads and rewrites the state. At 10 writes/day per workspace and 0.5 MiB state, Pro overage is about $53/month for 1,000 workspaces and $620 for 10,000; rewriting the snapshot only every 64 appends roughly halves it, and brotli reduces it further. Storage and function calls stay within included amounts. The current full-replay code breaks Starter's 64-action concurrency near 10,000 workspaces.
+- **Convex** (docs.convex.dev limits and pricing): the plan fits. Cost is dominated by database I/O, the bytes moved between functions and the database: each write reads and rewrites the state. At 10 writes/day per workspace and 0.5 MiB state, Pro overage is about $53/month for 1,000 workspaces and $620 for 10,000; rewriting the snapshot only every 64 appends roughly halves it. Storage and function calls stay within included amounts. The current full-replay code breaks Starter's 64-action concurrency near 10,000 workspaces.
 - **Loro Streams** (repo code and specs): reading from a saved offset seeks directly. Full-stream reads are risky: rare writes leave many small cold segments that are never compacted, and a forward page can exceed the gateway's 5 s read timeout. Ledger tokens should list only `stream-read`, `stream-head` and `stream-append-cas` (delete only for erasure), and be cached per stream for their 15-minute lifetime. No prices exist in the repo.
 - **Cloudflare** (for a later audit): Workers Paid with Workflows fits, chunked with state in R2; about $11/month for 1,000 and $82 for 10,000 daily audits at 2,000 records each.
 
@@ -95,7 +109,7 @@ The first version's restore took 14.5 s and 58 s for the last two rows. Use brot
 
 ## Open questions
 
-- Size: a Convex document is limited to 1 MiB, so large organizations need chunked storage (planned: brotli, chunks under about 900 KiB, switched by generation).
+- Size: a Convex document is limited to 1 MiB, so large organizations need chunked storage (planned: uncompressed chunks under 900 KiB, switched by generation; see capacity above).
 - Whether the client local stores adopt restore-on-open, which changes the "revalidates stored ledger records on open" rule in the foundations Spec.
 
 ## Verification limits
