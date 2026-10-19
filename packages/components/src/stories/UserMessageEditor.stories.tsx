@@ -180,26 +180,28 @@ export const ShortMessage: Story = {
   render: () => <EditorHarness initialValue={SHORT_TEXT} />,
 };
 
-function FromMessageEditHarness() {
+function FromMessageEditHarness({ fullWidth = false }: { fullWidth?: boolean }) {
   const store = useMemo(() => createStoryStore(), []);
   return (
     <PlatformContext.Provider value={storyPlatform}>
       <Provider store={store}>
-        <MessageRowView
-          sessionId={STORY_SESSION_ID}
-          message={
-            {
-              id: 'editable-user-message',
-              role: 'user',
-              timestamp: '2026-09-12T10:00:00.000Z',
-              status: 'seen',
-              read: true,
-              items: [{ type: 'text', text: 'Clarify this instruction' }],
-            } satisfies SessionHistoryParsed
-          }
-          onEdit={async () => true}
-          editMentionContext={storyEditMentionContext}
-        />
+        <div className={fullWidth ? '@container w-full' : undefined}>
+          <MessageRowView
+            sessionId={STORY_SESSION_ID}
+            message={
+              {
+                id: 'editable-user-message',
+                role: 'user',
+                timestamp: '2026-09-12T10:00:00.000Z',
+                status: 'seen',
+                read: true,
+                items: [{ type: 'text', text: 'Clarify this instruction' }],
+              } satisfies SessionHistoryParsed
+            }
+            onEdit={async () => true}
+            editMentionContext={storyEditMentionContext}
+          />
+        </div>
       </Provider>
     </PlatformContext.Provider>
   );
@@ -207,6 +209,12 @@ function FromMessageEditHarness() {
 
 export const FromMessageEdit: Story = {
   render: () => <FromMessageEditHarness />,
+};
+
+/** Full-width user row: the 70% stack is wider than the editor's 800px cap. */
+export const FullWidthFromMessageEdit: Story = {
+  render: () => <FromMessageEditHarness fullWidth />,
+  parameters: { layout: 'fullscreen' },
 };
 
 /**
