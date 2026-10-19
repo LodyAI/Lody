@@ -6,7 +6,7 @@ import { createStore, Provider } from 'jotai';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SessionId, SessionMeta } from '@lody/shared';
 
-import { experimentalFeaturesEnabledAtom } from '../src/atoms/settings';
+import { conversationWideModeAtom, experimentalFeaturesEnabledAtom } from '../src/atoms/settings';
 import { SessionHeaderMenu } from '../src/components/sessions/session-chat-interface';
 import { Tooltip } from '@lody/ui/tooltip';
 
@@ -75,6 +75,7 @@ describe('SessionHeaderMenu', () => {
         new TestPointerEvent('mousedown', {
           bubbles: true,
           button: 0,
+          detail: 1,
           pointerType: 'mouse',
         })
       );
@@ -120,6 +121,66 @@ describe('SessionHeaderMenu', () => {
     await act(async () => trigger.click());
     expect(container?.querySelector('[data-testid="fork-result"]')?.textContent).toBe('none');
   }
+
+  it('leaves pointer-opened actions unhighlighted and toggles full width only on activation', async () => {
+    const store = createStore();
+    store.set(conversationWideModeAtom, false);
+    await act(async () => {
+      root?.render(
+        <Provider store={store}>
+          <ForkMenuHarness />
+        </Provider>
+      );
+    });
+    await openMenu();
+
+    const menu = document.querySelector('[role="menu"]');
+    const fullWidth = menuItem('Full width');
+    const toggle = fullWidth.querySelector<HTMLButtonElement>('[role="switch"]')!;
+    expect(document.activeElement).toBe(menu);
+    expect(menu?.querySelector('[data-highlighted]')).toBeNull();
+    expect(store.get(conversationWideModeAtom)).toBe(false);
+
+    await act(async () => {
+      menu?.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
+      await vi.advanceTimersByTimeAsync(40);
+    });
+    expect(document.activeElement).toBe(fullWidth);
+    expect(fullWidth.hasAttribute('data-highlighted')).toBe(true);
+
+    await act(async () => {
+      fullWidth.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    });
+    expect(store.get(conversationWideModeAtom)).toBe(true);
+    expect(document.querySelector('[role="menu"]')).toBe(menu);
+
+    await act(async () => toggle.click());
+    expect(store.get(conversationWideModeAtom)).toBe(false);
+    expect(document.querySelector('[role="menu"]')).toBe(menu);
+  });
+
+  it('focuses the first action when the menu is opened with the keyboard', async () => {
+    await act(async () => root?.render(<ForkMenuHarness />));
+    const trigger = container!.querySelector<HTMLButtonElement>(
+      'button[aria-label="More actions"]'
+    )!;
+    await act(async () => {
+      trigger.focus();
+      trigger.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
+      await vi.advanceTimersByTimeAsync(40);
+    });
+    const fullWidth = menuItem('Full width');
+    expect(document.activeElement).toBe(fullWidth);
+    expect(fullWidth.hasAttribute('data-highlighted')).toBe(true);
+
+    await act(async () => {
+      fullWidth.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(40);
+    });
+    expect(document.querySelector('[role="menu"]')).toBeNull();
+  });
 
   it('opens the submenu and forks to a new tab', async () => {
     await act(async () => root?.render(<ForkMenuHarness />));

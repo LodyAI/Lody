@@ -1677,6 +1677,9 @@ export function SessionHeaderMenu({
             icon={MoveHorizontal}
             endContent={
               <Switch
+                // The menu row owns keyboard focus. A tabbable nested switch
+                // otherwise receives initial focus even when opened by mouse.
+                tabIndex={-1}
                 checked={conversationWide}
                 onCheckedChange={(checked) => setConversationWide(checked === true)}
                 onClick={(event) => event.stopPropagation()}

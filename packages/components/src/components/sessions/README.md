@@ -14,6 +14,11 @@ The navigation-sidebar, terminal-dock and right-panel toggles reuse
 rotated -90 degrees and the right-panel glyph 180 degrees so the filled strip
 marks the panel's edge; their buttons and toggle behavior stay shared.
 
+The header's Full width row owns keyboard navigation; its trailing switch stays
+outside the tab order. Pointer opening focuses the menu surface without
+highlighting an action, while keyboard opening and arrow navigation focus rows.
+Both the row and the switch toggle the preference without dismissing the menu.
+
 `ask-user-question-card.tsx` owns interactive and read-only question presentation,
 including independent optional notes and secret masking. Its dedicated
 `AskUserQuestionCard` stories cover editing, replay, multiple questions and legacy
