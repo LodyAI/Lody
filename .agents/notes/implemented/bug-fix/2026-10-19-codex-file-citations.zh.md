@@ -22,8 +22,9 @@ remark 转换在网址和路径自动链接之前执行，去掉路径首尾空�
 这扩展了[文件链接操作决策](../feature/2026-09-17-markdown-file-link-context-menu.zh.md)，
 当前行为记录在[文件渲染文档](../../../../packages/components/src/components/ai-gui/session-files-rendering.md)。
 使用按锁文件安装依赖的独立检出目录，Markdown 文件链接、流式渲染和文件卡片三个套件共 106 项测试全部通过，
-包括既有行内/块级数学公式测试和新增 Windows 盘符路径测试。交付前还执行完整静态检查与 2 GiB 桌面构建验证。
+包括既有行内/块级数学公式测试和新增 Windows 盘符路径测试。交付前还执行完整静态检查与 CLI 2 GiB 与桌面默认预算构建验证。
 
-PR 冒烟构建显式设置 `NODE_OPTIONS=--max-old-space-size=2048`，与既有 CLI 构建预算一致；
+PR 冒烟的 CLI 构建显式设置 `NODE_OPTIONS=--max-old-space-size=2048`，与既有 CLI 构建预算一致；
 此前 macOS runner 使用较低的主机推导默认值，在 CLI chunk 渲染阶段内存耗尽。
+桌面构建单独执行，保留 `build-app.mjs` 既有渲染器预算，不继承 CLI 专用上限。
 静态 CI 发现的无关测试夹具重复 `now` 属性也已删除，保留其原值。

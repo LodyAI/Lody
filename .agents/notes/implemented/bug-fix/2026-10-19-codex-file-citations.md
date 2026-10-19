@@ -31,9 +31,10 @@ and is documented in [file rendering](../../../../packages/components/src/compon
 An isolated checkout with the frozen dependency lock passed all 106 tests in the
 Markdown/file-link, streaming renderer and file-card suites, including the existing
 inline/display-math tests and new Windows drive-path cases. The full static and
-2 GiB desktop build checks are also exercised before delivery.
+CLI 2 GiB and normal-budget desktop build checks are also exercised before delivery.
 
-The PR smoke build pins `NODE_OPTIONS=--max-old-space-size=2048`, matching the
+The PR smoke CLI build pins `NODE_OPTIONS=--max-old-space-size=2048`, matching the
 existing CLI build budget: its macOS runner otherwise failed during CLI chunk
-rendering under a lower host-derived default. The unrelated duplicate `now` fixture
+rendering under a lower host-derived default. The separate desktop build retains
+`build-app.mjs`’s existing renderer budget; it must not inherit the CLI-only cap. The unrelated duplicate `now` fixture
 property reported by static CI is removed without changing its value.
