@@ -49,7 +49,7 @@ export function SidebarMachineOfflinePill({ machineId }: { machineId: MachineId 
   const status = useMachineOnlineStatus(machineId);
   if (status !== 'offline') return null;
   return (
-    <span className="inline-flex h-4 shrink-0 items-center rounded-full border border-foreground/[0.12] px-1.5 text-[10px] font-normal leading-none tracking-normal text-muted-foreground">
+    <span className="inline-flex h-4 shrink-0 items-center rounded-full border border-sidebar-foreground-muted/30 px-1.5 text-[10px] font-normal leading-none tracking-normal text-sidebar-foreground-muted">
       {t('workspace.machines.offline', 'Offline')}
     </span>
   );

@@ -38,6 +38,7 @@ import { Button } from '@lody/ui/button';
 import { writeTextToClipboard } from '@/lib/clipboard';
 import { getGoalStatusPresentation } from '@/lib/session-goal-status';
 import { formatDurationCompact, getDurationUnitLabels } from '@/lib/format-duration';
+import { INFO_BAR_PROSE_CLASS, INFO_BAR_TEXT_CLASS } from './info-bar-type';
 import { ClusterChip, StageChip } from './info-chip';
 import { WorktreeIcon } from '@/components/icons/worktree-icon';
 import { Tooltip } from '@lody/ui/tooltip';
@@ -197,19 +198,14 @@ export function GoalChip({
         kind: 'popover',
         ariaLabel: t('sessions.goal.banner.label', 'Goal'),
         content: (
-          <div className="flex flex-col gap-2 p-3 text-xs">
+          <div className={cn('flex flex-col gap-2 p-3', INFO_BAR_TEXT_CLASS)}>
             <div className="flex items-center gap-2">
               <Target className={cn('h-4 w-4 shrink-0', meta.textClassName)} aria-hidden="true" />
-              <span
-                className={cn(
-                  'text-[11px] font-semibold uppercase tracking-wide',
-                  meta.textClassName
-                )}
-              >
+              <span className={cn('font-medium  ', meta.textClassName)}>
                 {t('sessions.goal.banner.label', 'Goal')}
               </span>
               <span className={cn('font-medium', meta.textClassName)}>{statusLabel}</span>
-              <span className="ml-auto flex shrink-0 items-center gap-2 text-[11px] text-muted-foreground">
+              <span className="ml-auto flex shrink-0 items-center gap-2 text-muted-foreground">
                 {timeLabel ? (
                   <span
                     className="inline-flex items-center gap-1 tabular-nums leading-none"
@@ -222,7 +218,12 @@ export function GoalChip({
                 {tokensLabel ? <span className="tabular-nums">{tokensLabel}</span> : null}
               </span>
             </div>
-            <p className="scrollbar-pro max-h-48 overflow-y-auto whitespace-pre-wrap break-words text-sm leading-snug text-foreground">
+            <p
+              className={cn(
+                'scrollbar-pro max-h-48 overflow-y-auto whitespace-pre-wrap break-words text-foreground',
+                INFO_BAR_PROSE_CLASS
+              )}
+            >
               {objective}
             </p>
             {showPause || showResume || showClear || showDismiss ? (
@@ -339,7 +340,7 @@ export function ScheduleChip({
         ariaLabel: heading,
         content: (
           <div className="flex flex-col gap-1.5 p-3">
-            <div className="flex items-center gap-1.5 text-xs">
+            <div className={cn('flex items-center gap-1.5', INFO_BAR_TEXT_CLASS)}>
               <AlarmClock className="h-3.5 w-3.5 shrink-0 text-primary" aria-hidden="true" />
               <span className="font-medium text-foreground">{heading}</span>
               <span className="text-muted-foreground">· {summary}</span>
@@ -414,7 +415,10 @@ function ContextChipActions({ actions }: { actions: readonly ContextChipAction[]
         onClick={primaryAction.onClick}
         disabled={primaryAction.disabled}
         title={primaryAction.label}
-        className="flex min-w-0 shrink select-none items-center px-1.5 py-0.5 text-xs font-medium text-muted-foreground outline-none transition-colors enabled:hover:bg-foreground/[0.05] enabled:hover:text-foreground focus:outline-none focus:ring-0 focus:ring-offset-0 focus:shadow-none focus-visible:bg-foreground/[0.05] focus-visible:text-foreground focus-visible:outline-none focus-visible:ring-0 focus-visible:ring-offset-0 disabled:opacity-50 dark:text-muted-foreground/80 dark:enabled:hover:bg-muted-foreground/[0.08] dark:focus-visible:bg-muted-foreground/[0.08]"
+        className={cn(
+          'flex min-w-0 shrink select-none items-center px-1.5 py-0.5 font-medium text-muted-foreground outline-none transition-colors enabled:hover:bg-foreground/[0.05] enabled:hover:text-foreground focus:outline-none focus:ring-0 focus:ring-offset-0 focus:shadow-none focus-visible:bg-foreground/[0.05] focus-visible:text-foreground focus-visible:outline-none focus-visible:ring-0 focus-visible:ring-offset-0 disabled:opacity-50 dark:text-muted-foreground/80 dark:enabled:hover:bg-muted-foreground/[0.08] dark:focus-visible:bg-muted-foreground/[0.08]',
+          INFO_BAR_TEXT_CLASS
+        )}
       >
         <span className="truncate">{primaryAction.label}</span>
       </button>
@@ -650,7 +654,10 @@ export function ContextChip({
         onClick={onOpenPr}
         aria-label={t('sessions.pr.openTab', 'Open pull request')}
         title={t('sessions.pr.openTab', 'Open pull request')}
-        className="flex h-6 shrink-0 select-none items-center gap-1 rounded-md px-1 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted-foreground/10"
+        className={cn(
+          'flex h-6 shrink-0 select-none items-center gap-1 rounded-md px-1 font-medium text-muted-foreground transition-colors hover:bg-muted-foreground/10',
+          INFO_BAR_TEXT_CLASS
+        )}
       >
         <SessionPrIcon prStatus={status ?? 'open'} prCiState={compactCiState} />
         {value ? (
@@ -697,7 +704,10 @@ export function ContextChip({
       disabled={!onOpenAllChanges}
       aria-label={t('sessions.detailTabs.allChanges', 'All Changes')}
       title={t('sessions.detailTabs.allChanges', 'All Changes')}
-      className="flex h-5 min-w-0 shrink items-center gap-1.5 overflow-hidden rounded-md bg-foreground/[0.06] px-1.5 text-[11px] font-medium tabular-nums transition-colors enabled:hover:bg-foreground/[0.1] disabled:pointer-events-none"
+      className={cn(
+        'flex h-5 min-w-0 shrink items-center gap-1.5 overflow-hidden rounded-md bg-foreground/[0.06] px-1.5 font-medium tabular-nums transition-colors enabled:hover:bg-foreground/[0.1] disabled:pointer-events-none',
+        INFO_BAR_TEXT_CLASS
+      )}
     >
       <span className="text-github-addition">+{diffStat.add}</span>
       <span className="text-github-deletion">−{diffStat.del}</span>
@@ -841,13 +851,15 @@ function PrCiPopoverBody({
   const { settled, overallLabel, toneClassName } = usePrCiPresentation(runs);
   return (
     <div className="flex flex-col gap-1.5 p-3">
-      <div className="flex items-center gap-1.5 text-xs">
+      <div className={cn('flex items-center gap-1.5', INFO_BAR_TEXT_CLASS)}>
         <span className={cn('font-medium', toneClassName)}>{overallLabel}</span>
         <span className="text-muted-foreground">
           · {settled}/{runs.length}
         </span>
       </div>
-      <ul className="scrollbar-pro flex max-h-56 flex-col overflow-y-auto text-xs">
+      <ul
+        className={cn('scrollbar-pro flex max-h-56 flex-col overflow-y-auto', INFO_BAR_TEXT_CLASS)}
+      >
         {runs.map((run) => {
           const { Icon: RunIcon, className: runClassName } = PR_CI_RUN_ICON[run.status];
           const duration =
@@ -917,7 +929,8 @@ export function PrCiPill({
             aria-label={label}
             title={label}
             className={cn(
-              'flex h-6 shrink-0 select-none items-center gap-1 rounded-md px-1 text-[11px] text-muted-foreground transition-colors hover:bg-muted-foreground/10',
+              'flex h-6 shrink-0 select-none items-center gap-1 rounded-md px-1 text-muted-foreground transition-colors hover:bg-muted-foreground/10',
+              INFO_BAR_TEXT_CLASS,
               open && 'bg-muted-foreground/10'
             )}
           >

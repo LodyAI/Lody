@@ -145,6 +145,7 @@ import { useIsMobile } from '../../hooks/use-mobile';
 import { useStableCallback } from '@/hooks/use-stable-callback';
 import { useAppCapability } from '@/lib/app-platform';
 import { SessionShareDialog } from '@/components/sharing/session-share-dialog';
+import { SessionShareEditorPanel } from '@/components/sharing/session-share-panel';
 import { useSessionShareStatus } from '@/hooks/use-session-share-management';
 import {
   conversationFontSizeAtom,
@@ -212,6 +213,8 @@ import type { SessionSharingState } from '@/lib/session-sharing';
 import {
   SessionAccessControl,
   SessionArchivedBadge,
+  type SessionAccessAction,
+  type SessionShareEditorContext,
   getSessionSharingDescription,
   getSessionSharingLabel,
   type SessionSharingTranslator,
@@ -6560,8 +6563,43 @@ export const SessionChatInterface = memo(
     // `sharing` — a solo workspace resolves no team visibility but can still
     // publish — and an absent editor, which is the local build.
     const headerPublicShare = publicShareWorkspaceId
-      ? { status: publicShareStatus, onOpen: () => setPublicShareSessionId(session.id) }
+      ? {
+          status: publicShareStatus,
+          // The panel hosts the editor itself; the `⋯` menu's "Share" still opens the dialog.
+          renderEditor: ({ onClose, onBusyChange }: SessionShareEditorContext) => (
+            <SessionShareEditorPanel
+              workspaceId={publicShareWorkspaceId}
+              session={session}
+              onClose={onClose}
+              onBusyChange={onBusyChange}
+            />
+          ),
+        }
       : undefined;
+    // What leaves the conversation: the same handlers as the `⋯` menu's Copy
+    // submenu and "Share as image…". Path and base branch describe the working
+    // directory, not the conversation, so they stay in `⋯` only.
+    const headerExportActions: SessionAccessAction[] = [
+      {
+        id: 'copy-markdown',
+        label: t('sessions.copyAsMarkdown', 'Copy as Markdown'),
+        icon: Copy,
+        onSelect: () =>
+          hideMessageArea && onCopyConversationHistoryExternal
+            ? onCopyConversationHistoryExternal()
+            : handleCopyConversationHistory(),
+      },
+      ...(onShareAsImage
+        ? [
+            {
+              id: 'share-image',
+              label: t('sessions.shareAsImage', 'Share as image…'),
+              icon: Image,
+              onSelect: onShareAsImage,
+            },
+          ]
+        : []),
+    ];
     const headerAccessNode =
       !isMobile && (sharing || headerPublicShare) ? (
         <div {...stylex.props(styles.headerPills)}>
@@ -6569,6 +6607,8 @@ export const SessionChatInterface = memo(
             state={sharing}
             onShareWithTeam={onShareWithTeam}
             publicShare={headerPublicShare}
+            onCopyLink={handleCopySessionLink}
+            exportActions={headerExportActions}
           />
         </div>
       ) : null;

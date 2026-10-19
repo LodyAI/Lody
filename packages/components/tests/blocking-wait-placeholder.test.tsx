@@ -39,6 +39,7 @@ import {
   type WorkspaceRuntime,
 } from '../src/atoms/runtime';
 import { setWorkspaceContextAtom } from '../src/atoms/workspace-context';
+import { BootShellProvider } from '../src/components/boot-shell';
 import {
   BLOCKING_WAIT_RECOVERY_DELAY_MS,
   BlockingWaitPlaceholder,
@@ -115,11 +116,13 @@ function renderNode(store: ReturnType<typeof createStore>, node: ReactNode, slug
   act(() => {
     root.render(
       <Provider store={store}>
-        {slug ? (
-          <WorkspaceRouteTargetProvider slug={slug}>{node}</WorkspaceRouteTargetProvider>
-        ) : (
-          node
-        )}
+        <BootShellProvider path={slug ? `/${slug}/chat` : '/'}>
+          {slug ? (
+            <WorkspaceRouteTargetProvider slug={slug}>{node}</WorkspaceRouteTargetProvider>
+          ) : (
+            node
+          )}
+        </BootShellProvider>
       </Provider>
     );
   });
@@ -139,7 +142,11 @@ function render(store: ReturnType<typeof createStore>) {
   );
 }
 
-const text = () => container.textContent ?? '';
+const text = () => {
+  const visible = container.cloneNode(true) as HTMLElement;
+  visible.querySelectorAll('style').forEach((style) => style.remove());
+  return visible.textContent ?? '';
+};
 const buttonLabels = () =>
   Array.from(container.querySelectorAll('button')).map((button) => button.textContent);
 const click = (label: string) => {
@@ -285,6 +292,8 @@ describe('BlockingWaitPlaceholder', () => {
       null
     );
     expect(text()).toContain('Signing you in');
+    const shell = container.querySelector('[data-lody-boot-shell]');
+    expect(shell).not.toBeNull();
 
     act(() => {
       vi.advanceTimersByTime(RECOVERY_DELAY_MS);
@@ -293,6 +302,11 @@ describe('BlockingWaitPlaceholder', () => {
     expect(text()).toContain('Lody is taking too long to open');
     expect(text()).toContain(GENERIC);
     expect(buttonLabels()).toContain('Reload Lody');
+    expect(container.querySelector('[data-lody-boot-shell]')).toBeNull();
+    expect(shell?.hasAttribute('inert')).toBe(true);
+    expect(shell?.querySelector('[role="status"]')).toBeNull();
+    click('Reload Lody');
+    expect(app.reloads).toBe(1);
     expect(eventsNamed('workspace/boot_wait_stuck')[0]?.properties).toMatchObject({
       gate: 'session_loading',
       failed: false,

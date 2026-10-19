@@ -28,9 +28,14 @@ subdirectory; this file is the navigation index. Cross-module explanations live 
 - `resource-discovery-runtime.ts` — workspace readers and caller-specific authorization.
   Daemon reads wait briefly for the first baseline, then return cached results with
   `catalog_syncing` uncertainty until confirmed; later reads never force catch-up.
-  `loro/workspace-catalog-sync.ts` holds the daemon workspace Flock reader room,
-  including headless startup; native transport recovery keeps it current.
-  Role proposal target validation requires fresh metadata/target synchronization.
+  `loro/workspace-catalog-sync.ts` holds metadata, workspace and authorized Machine
+  readers on the existing Promise Repo using its public room and replica leases.
+  Failed baseline barriers retry with capped backoff on the same binding, so a
+  temporary storage error can recover without replacing the reader or reconnecting.
+  `workspace-catalog-sync-legacy.ts` owns the manager-facing Scope and closes it
+  before Repo shutdown; transport recovery keeps live rooms current.
+  Role create/update proposals require confirmed metadata/workspace synchronization;
+  creation also confirms the authorized target catalog before publishing a card.
   Standalone CLI calls synchronize unless `--offline`. Authorization and cloud presence
   remain online-aware independently of the catalog read policy.
   Intent and limits: [resource discovery](../../../../specs/resource-discovery.md).
@@ -106,7 +111,10 @@ subdirectory; this file is the navigation index. Cross-module explanations live 
   `session-file-backfill.ts`, `acp-agent-attachments.ts` — the attachment lifecycle;
   see
   [`.agents/docs/cli-lib-session-files.md`](../../../../.agents/docs/cli-lib-session-files.md).
-- `session-gc-manager.ts` — idle cleanup plus memory-pressure reclamation. Per-OS
+- `session-gc-manager.ts` — idle cleanup plus memory-pressure reclamation. Idle also
+  asks the native agent (`AgentClient.getNativeWork`, from Core `sessionActivity`)
+  whether it still runs or waits on background tasks
+  ([decision](../../../../.agents/notes/implemented/bug-fix/2026-10-18-gc-respects-native-agent-work.md)). Per-OS
   measurement rationale:
   [`.agents/docs/cli-lib-memory-pressure.md`](../../../../.agents/docs/cli-lib-memory-pressure.md).
 - `session-transient-store.ts` — buffered ACP updates and their turn ownership.

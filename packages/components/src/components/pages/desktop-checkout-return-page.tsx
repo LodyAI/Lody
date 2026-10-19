@@ -1,8 +1,8 @@
 import { useTranslation } from 'react-i18next';
+import { CreditCard } from 'lucide-react';
 
 import { Button } from '@lody/ui/button';
-import { Card } from '@lody/ui/card';
-import lodyLogo from '@/assets/lody-icon.png';
+import { SecondaryPage } from '@/components/pages/secondary-page';
 
 export interface DesktopCheckoutReturnPageProps {
   deepLink: string | null;
@@ -21,37 +21,33 @@ export function DesktopCheckoutReturnPage({
 }: DesktopCheckoutReturnPageProps) {
   const { t } = useTranslation();
   const openLabel = t('desktopCheckoutReturn.openButton', 'Open Lody Desktop');
-  const title =
-    checkoutResult === 'success'
-      ? t('desktopCheckoutReturn.successTitle', 'Payment received')
-      : t('desktopCheckoutReturn.title', 'Continue in Lody Desktop');
-  const subtitle =
-    checkoutResult === 'success'
-      ? t(
-          'desktopCheckoutReturn.successDescription',
-          'Your subscription is being activated. Head back to Lody Desktop to continue.'
-        )
-      : t('desktopCheckoutReturn.description', 'You can now return to Lody Desktop.');
+  const settled = checkoutResult === 'success';
+  const title = settled
+    ? t('desktopCheckoutReturn.successTitle', 'Payment received')
+    : t('desktopCheckoutReturn.title', 'Continue in Lody Desktop');
+  const subtitle = settled
+    ? t(
+        'desktopCheckoutReturn.successDescription',
+        'Your subscription is being activated. Head back to Lody Desktop to continue.'
+      )
+    : t('desktopCheckoutReturn.description', 'You can now return to Lody Desktop.');
 
   return (
-    <div className="flex min-h-screen w-full items-center justify-center bg-background p-4">
-      <Card.Root className="w-full max-w-md">
-        <span className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl bg-primary/10">
-          <img src={lodyLogo} alt="Lody" className="h-11 w-11 object-contain" draggable={false} />
-        </span>
-        <Card.Header className="text-center">
-          <Card.Title as="h1">{title}</Card.Title>
-          <Card.Description>{subtitle}</Card.Description>
-        </Card.Header>
+    <SecondaryPage
+      state={settled ? 'done' : 'ask'}
+      from={<CreditCard size={22} strokeWidth={1.6} aria-hidden="true" />}
+      markLabel={t('desktopCheckoutReturn.markLabel', 'Stripe and Lody')}
+      title={title}
+      description={subtitle}
+      actions={
         <Button
           render={deepLink ? <a href={deepLink} /> : undefined}
           size="large"
-          className="w-full"
           disabled={!deepLink}
         >
           {openLabel}
         </Button>
-      </Card.Root>
-    </div>
+      }
+    />
   );
 }

@@ -1123,6 +1123,15 @@ describe('LoroDocumentManager.create degraded startup behavior', () => {
           outcome: 'no-route',
           transports: [],
         });
+        await expect(manager.syncMetaOrThrow()).resolves.toBeUndefined();
+        const metaConfirmation = manager.syncMetaOrThrow({ requireRemoteConfirmation: true });
+        if (cloudEnabled) {
+          await expect(metaConfirmation).rejects.toMatchObject({
+            cause: { message: 'No remote Streams route confirmed metadata synchronization' },
+          });
+        } else {
+          await expect(metaConfirmation).resolves.toBeUndefined();
+        }
         await expect(manager.syncFlockDocOrThrow(docId)).resolves.toBeUndefined();
         const confirmation = manager.syncFlockDocOrThrow(docId, {
           requireRemoteConfirmation: true,

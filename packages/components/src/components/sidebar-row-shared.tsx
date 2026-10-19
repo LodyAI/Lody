@@ -20,6 +20,7 @@ import {
   CircleDot,
   CornerLeftUp,
   Github,
+  GitBranch,
   Hand,
   X,
   type LucideIcon,
@@ -47,6 +48,9 @@ import { CachedAvatarImg } from '@/components/cached-avatar-img';
 import { UserAvatar } from '@/components/user-avatar';
 import { WorktreeIcon } from '@/components/icons/worktree-icon';
 import { getGitHubOwnerAvatarUrl } from '@/lib/github-avatar';
+import { useStableNow } from '@/hooks/use-stable-now';
+import { formatCompactRelativeTime, type RelativeTimeValue } from '@/lib/format-relative-time';
+import { sidebarSurface } from './sidebar-surface';
 
 /**
  * Shared building blocks for the single-line sidebar session rows. All three
@@ -262,7 +266,7 @@ export function SessionRowStatusIndicator({
     icon = <CircleAlert className="h-3 w-3 text-destructive" strokeWidth={2.25} />;
     label = sendLabel;
   } else if (isWaitingPermission === true) {
-    icon = <Hand className="h-3 w-3 text-status-warning" />;
+    icon = <Hand className="h-3 w-3 text-primary" />;
   } else if (isWorking !== true && sendState === 'sending') {
     icon = <SessionSendProgressRing progress={sendProgress} />;
     label = sendLabel;
@@ -363,6 +367,8 @@ export function SidebarSessionTitleText({
  */
 /** A filter, not opacity: the mark keeps its full lightness, only its hue is muted. */
 const SIDEBAR_PR_ICON_COMPACT_CLASS = 'saturate-[0.55]';
+/** Sidebar PR marks read as one quiet glyph; only the CI verdict keeps a hue. */
+const SIDEBAR_PR_ICON_COMPACT_TONE_CLASS = 'text-sidebar-foreground-muted';
 
 export function SessionPrIcon({
   prStatus,
@@ -405,7 +411,7 @@ export function SessionPrIcon({
       <MaskedPrCiIcon
         BaseIcon={BaseIcon}
         VerdictIcon={VerdictIcon}
-        baseToneClassName={meta.iconColorClassName}
+        baseToneClassName={compact ? SIDEBAR_PR_ICON_COMPACT_TONE_CLASS : meta.iconColorClassName}
         verdict={verdict}
         className={cn(
           compact && SIDEBAR_PR_ICON_COMPACT_CLASS,
@@ -421,7 +427,7 @@ export function SessionPrIcon({
       className={cn(
         compact ? ['h-3 w-3', SIDEBAR_PR_ICON_COMPACT_CLASS] : 'h-3.5 w-3.5',
         'shrink-0',
-        meta.iconColorClassName,
+        compact ? SIDEBAR_PR_ICON_COMPACT_TONE_CLASS : meta.iconColorClassName,
         className
       )}
       strokeWidth={2.25}
@@ -574,7 +580,12 @@ export function SessionOpenedByTreeRow({
   if (!gutter) return <>{children}</>;
   return (
     <div
-      className="relative min-w-0"
+      // Every direct child of a row list is paint-contained (`sidebar-row-list`),
+      // so a trunk cannot draw into the list's 1px `gap-px`: the line broke there
+      // at every row. The wrapper owns that pixel as its own padding and gives it
+      // back with a negative margin, so the pitch is unchanged and the trunk's last
+      // pixel lands inside the box that clips it.
+      className="relative min-w-0 pb-px -mb-px"
       data-session-tree-depth={depth}
       data-session-tree-indent={depth === 1 ? 'child' : undefined}
     >
@@ -922,22 +933,34 @@ export function GitHubOwnerIcon({
 
 // Shared section-header metrics. Every sidebar organize mode (Workspace local
 // project / GitHub Worktrees sections and the flat Updated list) uses these so
-// section labels read identically (the footnote role, in the sidebar row color — not
-// brighter than the session titles under them, and not a further /55 fade: that
-// made "Pinned"/"Chats" and the filter icon nearly illegible on light sidebars).
+// section labels read identically (the footnote role, in the sidebar's muted
+// ink — a step quieter than the session titles under them, but not a further
+// fade: /55 and then /70 left "Pinned"/"Chats" and the filter icon nearly
+// illegible on light sidebars).
 /**
  * Top-level group label (a machine, GitHub Worktrees, Chats). Projects and
  * repos sit flush below it, so the header is told apart by type alone: about
- * 12px bold at the default tier, faint, a 26px row with no hover fill, above 14px regular rows
- * with a hover fill. Every group label uses exactly this class — one size
- * (from the interface font size, not the parent's `em`), one color — so the
- * groups read as one consistent layer.
+ * 12px medium at the default tier, muted, a 26px row with no hover fill, above
+ * the 13px rows with a hover fill. Every group label uses exactly this class —
+ * one size (from the interface font size, not the parent's `em`), one color — so
+ * the groups read as one consistent layer. The color is its own step, the muted
+ * ink at 80% (about #868686, 3.2:1 in Lody Light): at the full muted ink a label
+ * matched the icons and details beside it and stopped reading as a heading over
+ * the rows, while the earlier 70% (1.9:1) read as disabled.
  */
-export const SIDEBAR_GROUP_LABEL_COLOR_CLASS = 'text-sidebar-foreground-muted/70';
+export const SIDEBAR_GROUP_LABEL_COLOR_CLASS = 'text-sidebar-foreground-muted/80';
 const sidebarTypography = stylex.create({
   group: { fontSize: text.footnoteSize, lineHeight: text.footnoteLeading },
-  row: { fontSize: text.bodySize, lineHeight: text.bodyLeading },
-  caption: { fontSize: text.captionSize, lineHeight: text.captionLeading },
+  row: { fontSize: text.subheadlineSize, lineHeight: text.subheadlineLeading },
+  groupLabel: {
+    fontSize: text.footnoteSize,
+    lineHeight: text.footnoteLeading,
+    fontWeight: 500,
+  },
+  // The sidebar has two type sizes below the row: the footnote (12px) for group
+  // labels and every trailing detail. A separate 11px caption step sat one pixel
+  // under it, which read as noise rather than hierarchy.
+  caption: { fontSize: text.footnoteSize, lineHeight: text.footnoteLeading },
   control: { fontSize: text.subheadlineSize, lineHeight: text.subheadlineLeading },
 });
 export const SIDEBAR_ROW_TEXT_CLASS = stylex.props(sidebarTypography.row).className;
@@ -945,10 +968,58 @@ export const SIDEBAR_CAPTION_TEXT_CLASS = stylex.props(sidebarTypography.caption
 export const SIDEBAR_HELPER_TEXT_CLASS = stylex.props(sidebarTypography.group).className;
 export const SIDEBAR_CONTROL_TEXT_CLASS = stylex.props(sidebarTypography.control).className;
 export const SIDEBAR_GROUP_LABEL_CLASS = cn(
-  stylex.props(sidebarTypography.group).className,
-  'font-bold tracking-[0.01em]',
+  stylex.props(sidebarTypography.groupLabel).className,
   SIDEBAR_GROUP_LABEL_COLOR_CLASS
 );
+
+/**
+ * One branch segment of a row meta line: the GitBranch mark and the
+ * truncating branch name. Shared by Workspace rows (`SidebarSessionMetaLine`)
+ * and Updated rows, which compose their available detail segments into the
+ * same second line.
+ */
+export function SidebarBranchSegment({ branchName }: { branchName?: string | null }) {
+  const branch = typeof branchName === 'string' ? branchName.trim() : '';
+  if (!branch) return null;
+  return (
+    <span className="flex min-w-0 items-center gap-1">
+      <GitBranch className="h-3 w-3 shrink-0" strokeWidth={1.75} aria-hidden="true" />
+      <span className="min-w-0 truncate">{branch}</span>
+    </span>
+  );
+}
+
+/**
+ * The second line of a two-line session row: the branch, then the relative time.
+ * The branch is the one that gives way (it truncates), the time never does.
+ * Chats have no branch and stay one line, so they never render this. Rows that carry it use
+ * `sidebarSurface.tall`; the 4px gap and one footnote line are what
+ * `session-row-leading-slot.tsx` adds to the first child's trunk, so keep them
+ * in step. The label ticks here, in the leaf, not in the memoized row around it.
+ */
+export function SidebarSessionMetaLine({
+  branchName,
+  latestMessageAt,
+}: {
+  branchName?: string | null;
+  latestMessageAt: RelativeTimeValue;
+}) {
+  const now = useStableNow();
+  const relativeTime = formatCompactRelativeTime(latestMessageAt, now);
+  return (
+    <div
+      data-sidebar-session-meta=""
+      className={cn(
+        'flex min-w-0 items-center gap-1.5',
+        SIDEBAR_CAPTION_TEXT_CLASS,
+        stylex.props(sidebarSurface.meta).className
+      )}
+    >
+      <SidebarBranchSegment branchName={branchName} />
+      <span className="shrink-0 select-none tabular-nums">{relativeTime}</span>
+    </div>
+  );
+}
 
 const SECTION_HEADER_BUTTON_CLASS = cn(
   'relative flex h-[26px] min-w-0 flex-1 select-none items-center gap-1.5 rounded-md px-2 text-left',

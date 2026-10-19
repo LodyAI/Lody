@@ -191,7 +191,7 @@ describe('SessionList PR badge', () => {
     expect(passedPrIcon?.querySelector('mask')).not.toBeNull();
     expect(passedBase?.getAttribute('width')).toBe('14');
     expect(passedBase?.getAttribute('height')).toBe('14');
-    expect(passedBase?.classList.contains('text-github-open')).toBe(true);
+    expect(passedBase?.classList.contains('text-sidebar-foreground-muted')).toBe(true);
     expect(passedVerdict).not.toBeNull();
     expect(passedVerdict?.parentElement?.getAttribute('transform')).toBe('translate(7 7)');
     expect(passedVerdict?.getAttribute('width')).toBe('10');

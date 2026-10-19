@@ -1,7 +1,7 @@
 import type { LodyRateLimitsCapability } from 'acp-extension-core';
 import { terminalNotificationSchema, type TerminalNotification } from '@lody/shared/notifications';
 import { createSessionAgentWrites, type SessionAgentWrites } from './session-agent-writes';
-import { makeWorkspaceCatalogSync, type WorkspaceCatalogSync } from './workspace-catalog-sync';
+import { WorkspaceCatalogSyncLegacy } from './workspace-catalog-sync-legacy';
 import { createSessionBackend, disposeSessionBackend } from '@/session/session-backend';
 import type { SessionBackend, SessionBackendFactory } from '@/session/session-backend';
 import { readLatestTurn } from '@lody/shared/session-data';
@@ -386,17 +386,15 @@ export class LoroDocumentManager {
   public readonly cloudBilling: CloudBillingPort | null;
   private readonly sessionHistoryFactory?: SessionBackendFactory;
   private readonly ownerHistoryRouter?: SessionBackendFactory;
-  private catalogSync?: WorkspaceCatalogSync;
+  private catalogSync?: WorkspaceCatalogSyncLegacy;
 
   /** Reader interest belongs to the daemon, never to a discovery request. */
   async holdCatalogFlockDoc(flockDocId: string): Promise<void> {
-    if (this.catalogSync) await this.repo.runLegacy(this.catalogSync.hold(flockDocId));
+    await this.catalogSync?.hold(flockDocId);
   }
 
   async catalogBaselineReady(flockDocId: string | undefined, timeoutMs: number): Promise<boolean> {
-    return this.catalogSync
-      ? this.repo.runLegacy(this.catalogSync.ready(flockDocId, timeoutMs))
-      : true;
+    return this.catalogSync ? this.catalogSync.ready(flockDocId, timeoutMs) : true;
   }
 
   static async create(
@@ -517,12 +515,11 @@ export class LoroDocumentManager {
         ownerHistoryRouter: options.ownerHistoryRouter,
       });
       if (options.keepWorkspaceCatalogJoined) {
-        const catalogOwner = await createdRepo.acquireScopeLegacy('workspace catalog');
-        manager.catalogSync = await createdRepo.runLegacy(
-          Scope.provide(
-            makeWorkspaceCatalogSync(createdRepo.native, workspaceId, logger),
-            catalogOwner.scope
-          )
+        manager.catalogSync = new WorkspaceCatalogSyncLegacy(
+          createdRepo,
+          workspaceId,
+          logger,
+          options.streamsTokens != null
         );
       }
     } catch (error) {
@@ -978,13 +975,35 @@ export class LoroDocumentManager {
   // failure, preserving the throw-on-failure contract below. With ZERO
   // transports attached (offline, nothing registered) `repo.sync()` resolves
   // vacuously — same as the old local placeholder member, so parity holds.
-  async syncMetaOrThrow(options: { timeoutMs?: number; reason?: string } = {}): Promise<void> {
+  async syncMetaOrThrow(
+    options: { timeoutMs?: number; reason?: string; requireRemoteConfirmation?: boolean } = {}
+  ): Promise<void> {
     const reason = options.reason ?? 'explicit-sync';
     const timeoutMs = options.timeoutMs ?? readTimeoutEnv('LODY_LORO_SYNC_META_TIMEOUT_MS', 20_000);
     const timeoutMessage = `Timeout waiting for workspace metadata sync (workspace=${this.workspaceId})`;
 
     try {
-      await withTimeout(this.repo.sync({ scope: 'meta' }), timeoutMs, timeoutMessage);
+      const generation = this.remoteStreamsGeneration;
+      const report = await withTimeout(
+        this.repo.sync({ scope: 'meta' }),
+        timeoutMs,
+        timeoutMessage
+      );
+      if (options.requireRemoteConfirmation) {
+        if (!report.ok) throw new RepoSyncError(report);
+        if (this.streamsTokens !== null || this.remoteStreamsGeneration > 0) {
+          if (
+            !report.transports.some(
+              (transport) => transport.transportId === 'streams' && transport.ok
+            )
+          ) {
+            throw new Error('No remote Streams route confirmed metadata synchronization');
+          }
+          if (!this.remoteStreamsAttached || generation !== this.remoteStreamsGeneration) {
+            throw new Error('Remote Streams transport changed during metadata synchronization');
+          }
+        }
+      }
       this.initialMetaSyncCompleted = true;
     } catch (error) {
       throw new Error(`Workspace metadata sync failed (${reason}): ${formatErrorMessage(error)}`, {
@@ -1794,6 +1813,11 @@ export class LoroDocumentManager {
   async cleanUp(options: { fast?: boolean; preserveSessionStatus?: boolean } = {}) {
     this.cleaningUp = true;
     let presenceCleanupFailure: unknown;
+    try {
+      await this.catalogSync?.close();
+    } catch (error) {
+      presenceCleanupFailure = error;
+    }
     this.localDocRoomBridgeGeneration += 1;
     for (const docId of [...this.localDocRoomBridges.keys()]) {
       this.cancelLocalDocRoomBridge(docId);
@@ -1817,7 +1841,9 @@ export class LoroDocumentManager {
       try {
         await this.detachRemoteStreamsTransport();
       } catch (error) {
-        presenceCleanupFailure = error;
+        presenceCleanupFailure = presenceCleanupFailure
+          ? new AggregateError([presenceCleanupFailure, error], 'Workspace cleanup failed')
+          : error;
       }
     }
     try {

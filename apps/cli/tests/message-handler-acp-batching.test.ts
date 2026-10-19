@@ -785,6 +785,46 @@ describe('MessageHandler ACP batching', () => {
     }
   });
 
+  it.each([
+    { reportsSessionActivity: true, restartsClock: true },
+    { reportsSessionActivity: false, restartsClock: false },
+  ])(
+    'post-turn output restarts the GC idle clock only for activity-reporting agents (%o)',
+    async ({ reportsSessionActivity, restartsClock }) => {
+      const sessionId = 'late-output-activity' as SessionId;
+      const { repo, handler, sessionManagerMock } = await createHandlerHarness([sessionId]);
+      sessionManagerMock.getSession.mockImplementation(
+        () => ({ agentClient: { reportsSessionActivity: () => reportsSessionActivity } }) as never
+      );
+      const host = handler as unknown as {
+        beginConversationTurn(sessionId: SessionId): string;
+        enqueueACPUpdate(sessionId: SessionId, update: AcpSessionNotification): void;
+        finalizeACPState(sessionId: SessionId, turnId?: string): Promise<void>;
+      };
+      const text = (value: string): AcpSessionNotification => ({
+        sessionId,
+        update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: value } },
+      });
+
+      try {
+        const turnId = host.beginConversationTurn(sessionId);
+        const beforeOutput = handler.getLastActivity(sessionId);
+        await vi.advanceTimersByTimeAsync(1_000);
+        // The open turn already keeps the session from GC.
+        host.enqueueACPUpdate(sessionId, text('during the turn'));
+        expect(handler.getLastActivity(sessionId)).toBe(beforeOutput);
+        await host.finalizeACPState(sessionId, turnId);
+
+        // Claude was woken later by a finished background shell.
+        await vi.advanceTimersByTimeAsync(30 * 60 * 1000);
+        host.enqueueACPUpdate(sessionId, text('after the background task'));
+        expect(handler.getLastActivity(sessionId)).toBe(restartsClock ? Date.now() : beforeOutput);
+      } finally {
+        await destroyRepoOnRealTimers(repo);
+      }
+    }
+  );
+
   it('records each turn its own token usage deltas, including late reports', async () => {
     vi.useRealTimers();
     const sessionId = 'turn-token-usage' as SessionId;

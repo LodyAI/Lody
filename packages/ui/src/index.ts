@@ -206,3 +206,4 @@ export { ThemeRoot, forcedThemeClassNames } from './theme/theme';
 export type { ThemeMode } from './theme/theme';
 export { Tooltip } from './tooltip/tooltip';
 export type { TooltipContentProps, TooltipTriggerProps } from './tooltip/tooltip';
+export * from './external-icon';

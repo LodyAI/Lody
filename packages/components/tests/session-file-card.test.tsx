@@ -180,4 +180,38 @@ describe('SessionFileCard download action', () => {
 
     expect(downloadButton(view)).toBeNull();
   });
+
+  const statusLine = (view: HTMLElement) =>
+    view.querySelector('button[aria-label]')?.querySelector('[title]')?.textContent;
+
+  it('spells the type beside the size, and leaves the size alone without a short extension', async () => {
+    const markdown = await render({
+      file: file({ fileName: 'README.md', mimeType: 'text/markdown', sizeBytes: 12_400 }),
+    });
+    expect(statusLine(markdown)).toBe('MD · 12.1 KB');
+
+    const dockerfile = await render({
+      file: file({ fileName: 'Dockerfile', mimeType: 'text/plain', sizeBytes: 300 }),
+    });
+    expect(statusLine(dockerfile)).toBe('300 B');
+
+    // An extension too long to be a type label reads as part of the name.
+    const notebook = await render({
+      file: file({ fileName: 'analysis.ipynb', mimeType: 'application/json', sizeBytes: 300 }),
+    });
+    expect(statusLine(notebook)).toBe('300 B');
+  });
+
+  it('states a file that cannot be opened under its name', async () => {
+    const expired = await render({
+      file: file({ uploadedAt: getServerNow() - SESSION_FILE_RETENTION_MS - 1000 }),
+    });
+    expect(expired.textContent).toContain('File expired');
+
+    const pending = await render({
+      file: file({ transport: 'local', machineId: 'machine-abc' }),
+      pendingMachineName: 'Studio Mac',
+    });
+    expect(pending.textContent).toContain('Uploading from Studio Mac');
+  });
 });

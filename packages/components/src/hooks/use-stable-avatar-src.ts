@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { peekAvatarBlobUrl, resolveAvatarBlobUrl } from '@/lib/avatar-cache';
+import { peekAvatarBlobUrl, preloadAvatarBlobUrl, resolveAvatarBlobUrl } from '@/lib/avatar-cache';
 
 /**
  * Resolve an avatar URL to a locally-cached blob URL, cache-first, and swap to
@@ -15,19 +15,25 @@ import { peekAvatarBlobUrl, resolveAvatarBlobUrl } from '@/lib/avatar-cache';
  *   - No hot blob yet: paint the raw URL now — it IS the current remote, served
  *     from the browser HTTP cache — and fill the blob cache in the background
  *     WITHOUT swapping. The bytes are identical, so a raw→blob swap would only
- *     cause a re-decode flicker; the blob is used on the next mount.
+ *     cause a re-decode flicker; the cache warms the blob for the next mount.
  *
  * `useCachedAvatarSrc` deliberately DOES swap raw→blob on first load — it is
  * tuned for GitHub owner avatars whose short `max-age` makes the raw URL an
  * unreliable paint, so the blob is the first dependable one. Don't conflate.
  */
 export function useStableAvatarSrc(src?: string | null): string | undefined {
-  const [avatarSrc, setAvatarSrc] = useState<string | null | undefined>(
-    () => peekAvatarBlobUrl(src) ?? src
-  );
+  const [avatar, setAvatar] = useState(() => ({ src, resolved: peekAvatarBlobUrl(src) ?? src }));
+  // A profile/source change must paint its own image in this commit, including
+  // undefined → URL after metadata arrives, without showing the previous user.
+  const avatarSrc = avatar.src === src ? avatar.resolved : (peekAvatarBlobUrl(src) ?? src);
 
   useEffect(() => {
     let cancelled = false;
+    const setAvatarSrc = (resolved: string | null | undefined) => {
+      setAvatar((current) =>
+        current.src === src && current.resolved === resolved ? current : { src, resolved }
+      );
+    };
 
     if (src == null) {
       setAvatarSrc(src);
@@ -35,6 +41,7 @@ export function useStableAvatarSrc(src?: string | null): string | undefined {
       const cachedBlobUrl = peekAvatarBlobUrl(src);
       if (cachedBlobUrl != null) {
         // Local copy is hot: paint it now, revalidate the remote, swap on change.
+        preloadAvatarBlobUrl(src);
         setAvatarSrc(cachedBlobUrl);
         void resolveAvatarBlobUrl(src, {
           onUpdate: (updated) => {
@@ -48,9 +55,11 @@ export function useStableAvatarSrc(src?: string | null): string | undefined {
         // cache in the background; deliberately don't swap, to avoid a re-decode
         // flicker when the bytes are the same.
         setAvatarSrc(src);
-        void resolveAvatarBlobUrl(src).catch(() => {
-          /* Already showing the raw URL; a failed hydration retries next mount. */
-        });
+        void resolveAvatarBlobUrl(src)
+          .then(() => preloadAvatarBlobUrl(src))
+          .catch(() => {
+            /* Already showing the raw URL; a failed hydration retries next mount. */
+          });
       }
     }
 

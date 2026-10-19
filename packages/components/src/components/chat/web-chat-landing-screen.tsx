@@ -1,4 +1,7 @@
-import type { ReactNode, Ref } from 'react';
+import { useMemo, useState, type ReactNode, type Ref } from 'react';
+import * as stylex from '@stylexjs/stylex';
+import { colors } from '@lody/ui/tokens/colors.stylex';
+import { space } from '@lody/ui/tokens/scales.stylex';
 import type { DropZone } from '@/hooks/use-drop-zone';
 import { cn } from '@/lib/utils';
 import { isElectronRenderer, isMacOSElectronRenderer, useElectronFullscreen } from '@/lib/electron';
@@ -13,9 +16,49 @@ import { FocusScope } from '@/ui/focus-scope';
 import { WINDOW_DRAG_EXEMPT_CLASS, WindowDragStrip } from '@/ui/window-drag-region';
 
 import { WORKSPACE_FOCUS_SCOPES } from '@/atoms';
+import { LandingStageContext, type LandingStage } from './landing-stage';
+
+/*
+ * The stage above the docked composer: the heading, the ambient boards and the context switch
+ * sit centred in THIS band, not on the whole page, so the group reads a touch above the page's
+ * middle (the docked composer keeps its own height at the bottom). Both spacers shrink to
+ * nothing before the content does, and the stage scrolls when the iPad soft keyboard shrinks
+ * the area (the composer band lifts itself).
+ */
+const stage = stylex.create({
+  root: {
+    display: 'flex',
+    flex: '1 1 0%',
+    flexDirection: 'column',
+    minHeight: 0,
+    overflow: 'auto',
+    paddingInline: space[4],
+  },
+  above: { flex: '1 1 0%', minHeight: 0 },
+  below: { flex: '1 1 0%', minHeight: 0 },
+  group: {
+    display: 'flex',
+    flexShrink: 0,
+    flexDirection: 'column',
+    alignItems: 'center',
+    gap: '20px',
+  },
+  /* A plain heading in the interface font; named so it glides when the boards below change
+     height (`tailwind/index.css`). */
+  heading: {
+    margin: 0,
+    fontSize: 'calc(var(--ui-font-size, 14px) * 36 / 14)',
+    lineHeight: 'calc(var(--ui-font-size, 14px) * 40 / 14)',
+    fontWeight: 600,
+    letterSpacing: '-0.025em',
+    color: colors.label,
+  },
+});
 
 export type WebChatLandingScreenProps = {
   title: string;
+  /** What sits under the greeting, in the composer's column (the last seven days). */
+  ambient?: ReactNode;
   contextSwitch?: ReactNode;
   composer: ReactNode;
   noMachineHint?: ReactNode;
@@ -32,6 +75,7 @@ export type WebChatLandingScreenProps = {
 
 export function WebChatLandingScreen({
   title,
+  ambient,
   contextSwitch,
   composer,
   noMachineHint,
@@ -44,6 +88,13 @@ export function WebChatLandingScreen({
 }: WebChatLandingScreenProps) {
   const isElectron = isElectronRenderer();
   const isElectronFullscreen = useElectronFullscreen();
+  // The stage and its group, for what in the group fits itself to the window (`landing-stage.ts`).
+  const [stageElement, setStageElement] = useState<HTMLElement | null>(null);
+  const [groupElement, setGroupElement] = useState<HTMLElement | null>(null);
+  const landingStage = useMemo<LandingStage | null>(
+    () => (stageElement && groupElement ? { stage: stageElement, group: groupElement } : null),
+    [stageElement, groupElement]
+  );
 
   return (
     <div
@@ -62,11 +113,12 @@ export function WebChatLandingScreen({
           className={cn(
             'absolute top-3 z-20',
             WINDOW_DRAG_EXEMPT_CLASS,
-            // macOS Electron: `top-[9px]` centers the h-7 button at 23px, on the
-            // traffic-light centerline (`trafficLightPosition.y` 16 + 7px radius
-            // in apps/electron/src/main/window.ts); `left-[96px]` leaves a 20px
-            // buffer after the light cluster (which ends at x=76).
-            isMacOSElectronRenderer() && !isElectronFullscreen ? 'top-[9px] left-[96px]' : 'left-3'
+            // macOS Electron: `top-px` plus the shell card's 8px inset centers the h-7
+            // button at 23px, on the traffic-light centerline (`trafficLightPosition.y`
+            // 16 + 7px radius in apps/electron/src/main/window.ts); `left-[88px]` plus
+            // the card's 8px margin (the sidebar is hidden whenever this shows) leaves
+            // a 20px buffer after the light cluster (which ends at x=76).
+            isMacOSElectronRenderer() && !isElectronFullscreen ? 'top-px left-[88px]' : 'left-3'
           )}
         >
           {leftSidebarExpandSlot}
@@ -84,12 +136,21 @@ export function WebChatLandingScreen({
           }
         }}
       >
-        {/* Greeting fills the space above the docked composer and stays vertically
-            centered. overflow-auto lets it yield when the iPad soft keyboard shrinks the
-            area (the composer band lifts itself — see the note below). */}
-        <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-5 overflow-auto px-4">
-          <h1 className="text-4xl font-semibold tracking-tight text-foreground">{title}</h1>
-          {contextSwitch}
+        <div ref={setStageElement} {...stylex.props(stage.root)}>
+          <div aria-hidden="true" {...stylex.props(stage.above)} />
+          <div ref={setGroupElement} {...stylex.props(stage.group)}>
+            <h1 {...stylex.props(stage.heading)} style={{ viewTransitionName: 'home-heading' }}>
+              {title}
+            </h1>
+            {/* The same column as the composer, so the card and the input share edges. */}
+            {ambient != null ? (
+              <LandingStageContext.Provider value={landingStage}>
+                <ConversationColumn>{ambient}</ConversationColumn>
+              </LandingStageContext.Provider>
+            ) : null}
+            {contextSwitch}
+          </div>
+          <div aria-hidden="true" {...stylex.props(stage.below)} />
         </div>
 
         {/* Docked composer. Reuse the session composer's shell class verbatim so the

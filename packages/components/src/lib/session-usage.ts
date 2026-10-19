@@ -84,6 +84,23 @@ export function formatRateLimitWindowShortLabel(windowDurationSeconds: number | 
   return `${windowDurationSeconds / 60}m`;
 }
 
+/** "5 hours", "Weekly", or the short `3d` form for any other window the provider reports. */
+export function formatRateLimitWindowDurationLabel(
+  windowDurationSeconds: number | null,
+  t: TFunction
+): string {
+  if (windowDurationSeconds === SEVEN_DAY_WINDOW_SECONDS) {
+    return t('sessions.usage.weekly', 'Weekly');
+  }
+  if (windowDurationSeconds === FIVE_HOUR_WINDOW_SECONDS) {
+    return t('sessions.usage.fiveHour', '5 hours');
+  }
+  if (windowDurationSeconds === null) {
+    return t('sessions.usage.limit', 'Usage');
+  }
+  return formatRateLimitWindowShortLabel(windowDurationSeconds);
+}
+
 export function formatAgentRateLimitWindowLabel(
   window: AgentRateLimitWindow,
   durationLabel: string,

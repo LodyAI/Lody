@@ -20,13 +20,14 @@ import {
 import type { AttachmentAddMenuMcp } from '@/components/chat/attachment-add-menu';
 import { ErrorBoundary } from '@/components/error-boundary';
 import type { MentionProjectSource } from '@/components/mentions/mention-project-file-source';
-import { ArrowUp, Bug, Download, ExternalLink, Settings } from 'lucide-react';
+import { ArrowUp, Settings } from 'lucide-react';
 import { Spinner } from '@lody/ui/spinner';
 import type { PastedTextDraft } from '@/lib/pasted-text-draft';
 import { getDroppedFileLocalPath, toPathMentionInsertion } from '@/lib/dropped-local-path';
 import { isPlainLinkPasteShortcut, parseAppSessionUrl } from '@/lib/session-app-url';
 import { capturePostHogEvent } from '@/lib/posthog-analytics';
 import { MobileChatLandingScreen } from '@/components/mobile/mobile-chat-landing-screen';
+import { NoMachineHint, type NoMachineHintVariant } from './no-machine-hint';
 import { WebChatLandingScreen } from './web-chat-landing-screen';
 
 export type ChatLandingTone = 'light' | 'dark';
@@ -107,6 +108,8 @@ export interface ChatLandingViewProps {
   composerStatusTone?: 'error' | 'warning' | 'info';
   /** Context switch (Local Projects / GitHub Worktrees) shown below the title */
   contextSwitch?: ReactNode;
+  /** Shown under the desktop greeting; the mobile landing ignores it. */
+  ambient?: ReactNode;
   /** Whether the submit button is disabled */
   submitDisabled?: boolean;
   /** Draft is handed off for durable acceptance but remains restorable on failure. */
@@ -125,12 +128,14 @@ export interface ChatLandingViewProps {
    * Electron client we instead reassure that the local daemon is still coming
    * up (`daemon-starting`).
    */
-  noMachineVariant?: 'download-client' | 'daemon-starting';
+  noMachineVariant?: NoMachineHintVariant;
   /** No-machine hint message shown to web/mobile users without a client. */
+  hintDownloadClientTitle?: string;
   hintDownloadClientMessage?: string;
   /** Label for the download-client button. */
   hintDownloadClientLabel?: string;
   /** No-machine hint message shown in the Electron client while the daemon boots. */
+  hintDaemonStartingTitle?: string;
   hintDaemonStartingMessage?: string;
   /** Label for the report-bug button in the daemon-starting hint. */
   hintReportBugLabel?: string;
@@ -228,6 +233,7 @@ export function ChatLandingView({
   composerStatusMessage,
   composerStatusTone = 'info',
   contextSwitch,
+  ambient,
   submitDisabled = false,
   submissionPending = false,
   onSubmit,
@@ -235,8 +241,10 @@ export function ChatLandingView({
   submittingLabel = 'Sending...',
   hintType = null,
   noMachineVariant = 'download-client',
-  hintDownloadClientMessage = "It looks like the desktop client isn't running yet. Download it to get started:",
+  hintDownloadClientTitle = "Nothing's plugged in yet",
+  hintDownloadClientMessage = 'Your agents run on the desktop client. Install and open it, and your machine will show up here.',
   hintDownloadClientLabel = 'Download the client',
+  hintDaemonStartingTitle = 'Plugging in…',
   hintDaemonStartingMessage = "The local daemon doesn't seem to have finished starting yet. If you run into trouble, report a bug and we'll take a look.",
   hintReportBugLabel = 'Report a Bug',
   hintNoAgentConfigMessage = 'No agent configured. Go to settings to create one:',
@@ -251,7 +259,6 @@ export function ChatLandingView({
   resetKeys = [],
   errorLabels = {},
 }: ChatLandingViewProps) {
-  const isDark = tone === 'dark';
   const postHog = usePostHog();
   const { mentionActionsRef, dropZone, overlayActive } = useSessionMentionDrop(
     !isMobile && !submissionPending
@@ -343,50 +350,17 @@ export function ChatLandingView({
   const isDaemonStartingHint = noMachineVariant === 'daemon-starting';
   const noMachineHintNode =
     hintType === 'no-machine' ? (
-      <div
-        className={cn(
-          'flex items-start gap-3 rounded-lg border px-4 py-3',
-          'border-border/60 bg-background/60 text-muted-foreground'
-        )}
-      >
-        {isDaemonStartingHint ? (
-          <Spinner className="mt-0.5 h-4 w-4 opacity-70 text-muted-foreground" />
-        ) : (
-          <Download className={cn('mt-0.5 h-4 w-4 shrink-0 opacity-70', 'text-muted-foreground')} />
-        )}
-        <div className="flex flex-1 flex-col gap-2">
-          <p className="text-sm">
-            {isDaemonStartingHint ? hintDaemonStartingMessage : hintDownloadClientMessage}
-          </p>
-          {isDaemonStartingHint ? (
-            <button type="button" onClick={onReportBug} className={hintButtonClassName}>
-              <Bug className="h-3.5 w-3.5 opacity-70" />
-              <span>{hintReportBugLabel}</span>
-            </button>
-          ) : (
-            <button type="button" onClick={onDownloadClient} className={hintButtonClassName}>
-              <span>{hintDownloadClientLabel}</span>
-              <ExternalLink className="h-3.5 w-3.5 opacity-50 transition-opacity group-hover:opacity-100" />
-            </button>
-          )}
-          <p
-            className={cn(
-              'text-xs',
-              isDark ? 'text-muted-foreground/80' : 'text-muted-foreground/90'
-            )}
-          >
-            {hintDiscordMessage}{' '}
-            <a
-              href="https://discord.gg/E8mZtMu38s"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-foreground/70 underline transition-colors hover:text-foreground/90"
-            >
-              {hintDiscordLabel}
-            </a>
-          </p>
-        </div>
-      </div>
+      <NoMachineHint
+        variant={noMachineVariant}
+        title={isDaemonStartingHint ? hintDaemonStartingTitle : hintDownloadClientTitle}
+        message={isDaemonStartingHint ? hintDaemonStartingMessage : hintDownloadClientMessage}
+        downloadLabel={hintDownloadClientLabel}
+        reportBugLabel={hintReportBugLabel}
+        discordMessage={hintDiscordMessage}
+        discordLabel={hintDiscordLabel}
+        onDownloadClient={onDownloadClient}
+        onReportBug={onReportBug}
+      />
     ) : null;
 
   const primaryActionNode = (
@@ -532,6 +506,7 @@ export function ChatLandingView({
       dropHandlers={dropZone.handlers}
       navRootRef={navRootRef}
       contextSwitch={contextSwitch}
+      ambient={ambient}
       composer={composerNode}
       noMachineHint={noMachineHintNode}
       agentConfigHint={agentConfigHintNode}

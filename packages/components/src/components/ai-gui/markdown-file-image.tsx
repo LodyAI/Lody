@@ -36,7 +36,7 @@ const styles = stylex.create({
     paddingBlock: space[2],
     paddingInlineStart: space[3],
     paddingInlineEnd: space[2],
-    borderRadius: radius.medium,
+    borderRadius: radius.small,
     cornerShape: corner.shape,
     backgroundColor: colors.wellBackground,
     boxShadow: shadow.inset,

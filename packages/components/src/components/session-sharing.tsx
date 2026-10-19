@@ -1,4 +1,16 @@
-import { Archive, ChevronDown, LockKeyhole, Monitor, Share2, Users } from 'lucide-react';
+import { useLayoutEffect, useRef, useState, type ReactNode } from 'react';
+import {
+  Archive,
+  ChevronDown,
+  ChevronLeft,
+  Globe,
+  Link2,
+  LockKeyhole,
+  Share2,
+  Users,
+  type LucideIcon,
+} from 'lucide-react';
+import * as stylex from '@stylexjs/stylex';
 import { Spinner } from '@lody/ui/spinner';
 import { useTranslation } from 'react-i18next';
 import { cn } from '@/lib/utils';
@@ -8,9 +20,14 @@ import {
   type SessionSharingState,
 } from '@/lib/session-sharing';
 import { Tooltip } from '@lody/ui/tooltip';
-import { Menu } from '@/ui/menu';
+import { Popover } from '@lody/ui/popover';
+import { Separator } from '@lody/ui/separator';
+import { Tabs } from '@lody/ui/tabs';
 import { Button } from '@lody/ui/button';
+import { colors } from '@lody/ui/tokens/colors.stylex';
+import { ease, space, text } from '@lody/ui/tokens/scales.stylex';
 import { AlertDialog } from '@/ui/dialog';
+import { shareSurface } from './sharing/surface';
 
 export type SessionSharingTranslator = (
   key: string,
@@ -179,9 +196,9 @@ function getSessionShareActionLabel(
  * tuned for dividers and nearly vanishes as a transparent button's only edge
  * on the dark canvas. */
 export const SESSION_HEADER_STATUS_PILL_CLASS =
-  'inline-flex h-6 shrink-0 select-none items-center gap-1.5 rounded-md border border-foreground/[0.16] bg-transparent px-2 ' +
+  'inline-flex h-7 shrink-0 select-none items-center gap-1.5 rounded-md border border-transparent bg-transparent px-2 ' +
   'text-[0.7rem] font-medium leading-[normal] text-muted-foreground transition-colors ' +
-  'hover:border-foreground/[0.28] hover:text-foreground ' +
+  'hover:bg-foreground/[0.05] hover:text-foreground ' +
   'outline-hidden focus-visible:ring-2 focus-visible:ring-ring/50 ' +
   'text-foreground/80';
 
@@ -217,38 +234,196 @@ export function SessionArchivedBadge({ className }: { className?: string }) {
   );
 }
 
+const REDUCED_MOTION = '@media (prefers-reduced-motion: reduce)';
+
+/** The watermark arrives from the corner it is cropped by, turning a little as it lands.
+ * It ends on the opacity it rests at (0.07, below): a keyframe that ended on 1 would
+ * flash the mark dark until the animation finished. */
+const markIn = stylex.keyframes({
+  from: { opacity: 0, transform: 'translate(8px, 6px) rotate(-8deg) scale(0.92)' },
+  to: { opacity: 0.07, transform: 'none' },
+});
+
+/** The next view arrives from the side it lives on, and the way back reverses it. */
+const enterFromRight = stylex.keyframes({
+  from: { opacity: 0, transform: 'translateX(14px)' },
+  to: { opacity: 1, transform: 'none' },
+});
+const enterFromLeft = stylex.keyframes({
+  from: { opacity: 0, transform: 'translateX(-14px)' },
+  to: { opacity: 1, transform: 'none' },
+});
+
+const accessPanel = stylex.create({
+  /**
+   * Height follows the content with a small overshoot, so the panel settles into
+   * each view instead of snapping. The wrapper's inset is given back by a negative
+   * margin: the clip then lands on the popup's own edge, so the watermark is still
+   * cropped by the panel and a focus ring at the content's edge is not.
+   */
+  elastic: {
+    margin: `calc(-1 * ${space[2]})`,
+    padding: space[2],
+    // The measured height is the content's, so the inset must sit outside it: under
+    // the app's global `border-box` the same number would swallow the padding and
+    // clip the last row.
+    boxSizing: 'content-box',
+    overflow: 'hidden',
+    transitionProperty: { default: 'height', [REDUCED_MOTION]: 'none' },
+    transitionDuration: '460ms',
+    transitionTimingFunction: 'cubic-bezier(0.3, 1.2, 0.5, 1)',
+  },
+  enterRight: {
+    animationName: { default: enterFromRight, [REDUCED_MOTION]: 'none' },
+    animationDuration: '260ms',
+    animationTimingFunction: ease.standard,
+  },
+  enterLeft: {
+    animationName: { default: enterFromLeft, [REDUCED_MOTION]: 'none' },
+    animationDuration: '260ms',
+    animationTimingFunction: ease.standard,
+  },
+  /** The publish view's header: the way back, and what this view is. */
+  publishHead: { display: 'flex', alignItems: 'center', gap: space[1], paddingBottom: space[3] },
+
+  /** The panel's own box: the watermark is placed against it and cropped by the popup. */
+  root: { position: 'relative', display: 'flex', flexDirection: 'column' },
+  /** A faint mark of how far the conversation reaches. Decoration, so it takes no pointer. */
+  watermark: {
+    position: 'absolute',
+    top: '-2px',
+    right: '-6px',
+    width: '52px',
+    height: '52px',
+    color: colors.label,
+    opacity: 0.07,
+    pointerEvents: 'none',
+    animationName: { default: markIn, [REDUCED_MOTION]: 'none' },
+    animationDuration: '550ms',
+    animationTimingFunction: ease.standard,
+  },
+  /** Sits above the watermark; the right gutter keeps text off it. */
+  head: {
+    position: 'relative',
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '2px',
+    paddingInline: space[1],
+    paddingRight: space[8],
+  },
+  title: {
+    margin: 0,
+    fontSize: text.subheadlineSize,
+    lineHeight: text.subheadlineLeading,
+    fontWeight: 600,
+    color: colors.label,
+  },
+  description: {
+    margin: 0,
+    fontSize: text.footnoteSize,
+    lineHeight: text.footnoteLeading,
+    color: colors.secondaryLabel,
+  },
+  stops: { position: 'relative', marginTop: space[2] },
+  /** The one rule: who can open it above, what to do with it below. */
+  rule: { position: 'relative', marginBlock: space[2], marginInline: space[1] },
+  /** Plain rows in the density of the app's menus: ghost, left-aligned, one per action. */
+  actions: { position: 'relative', display: 'flex', flexDirection: 'column' },
+});
+
 /** Static publication offered by the header control, when this build has a cloud. */
 export type SessionPublicShareControl = {
   status: SessionPublicShareStatus;
-  /** Opens the publication editor. */
-  onOpen: () => void;
+  /**
+   * The publication editor, drawn inside the panel's publish view. It is called
+   * only while that view is open, so a closed header loads nothing. The editor
+   * reports `onBusyChange(true)` for as long as a publication is under way, and the
+   * panel will not be dismissed meanwhile; `onClose` returns to the panel's front.
+   */
+  renderEditor: (context: SessionShareEditorContext) => ReactNode;
 };
+
+export type SessionShareEditorContext = {
+  onClose: () => void;
+  onBusyChange: (busy: boolean) => void;
+};
+
+/** One row of the access panel: Manage link, Copy URL, or a copy that leaves this conversation. */
+export type SessionAccessAction = {
+  id: string;
+  label: string;
+  icon: LucideIcon;
+  onSelect: () => void | Promise<void>;
+  disabled?: boolean;
+  /** Why it is unavailable. */
+  title?: string;
+  /** Leaves the panel open: the action carries on inside it. */
+  keepOpen?: boolean;
+};
+
+type AccessStop = 'you' | 'team' | 'web';
+type AccessView = 'home' | 'publish';
+
+/** Lets the panel's height follow whatever view or step is showing. */
+function ElasticHeight({ children }: { children: ReactNode }) {
+  const inner = useRef<HTMLDivElement>(null);
+  const [height, setHeight] = useState<number>();
+  useLayoutEffect(() => {
+    const node = inner.current;
+    if (!node) return undefined;
+    const observer = new ResizeObserver(() => setHeight(node.offsetHeight));
+    observer.observe(node);
+    setHeight(node.offsetHeight);
+    return () => observer.disconnect();
+  }, []);
+  return (
+    <div {...stylex.props(accessPanel.elastic)} style={{ height }}>
+      <div ref={inner}>{children}</div>
+    </div>
+  );
+}
 
 /** The one conversation-access control in the desktop toolbar.
  *
- * A reader asks a header a single question — who can see this conversation —
- * so both access axes answer it in one place. Team visibility picks the shape:
- * a private conversation keeps the menu that explains its inherited
- * machine/project scope before offering either sharing action, and anything
- * else is a plain button. A published static link picks the label in both
- * shapes, because a link anyone can forward is the wider disclosure and
- * outranks "Private" as the status worth reading at a glance; the private
- * scope is still the first thing inside the menu.
+ * A reader asks a header a single question — who can open this conversation —
+ * so the panel leads with the answer, in a title and a faint watermark that name
+ * how far it reaches, and makes the answer the control: a sliding strip of
+ * audiences (you, team, web). The strip shows what IS; it never previews what
+ * will be, because widening the audience is a decision the page confirms in its
+ * own dialog, and a thumb that moved before that answer would lie. Audiences
+ * that cannot be reached from here — narrowing, or a device the person does not
+ * own — are disabled with the reason in the caption. Copy link and the copies
+ * that leave the conversation (Markdown, image) sit below.
  *
- * `publicShare` is omitted when the build or workspace cannot publish, which
- * is also why a team-visible conversation can still render nothing at all. */
+ * Team visibility and a published link both pick the stop: published is "web",
+ * otherwise a private conversation is "you" and anything else is "team". The
+ * trigger's label follows the same rule, a published link being the wider
+ * disclosure.
+ *
+ * `publicShare` is omitted when the build or workspace cannot publish, which is
+ * also why a team-visible conversation can still render nothing at all. */
 export function SessionAccessControl({
   state,
   onShareWithTeam,
   publicShare,
+  onCopyLink,
+  exportActions,
   className,
 }: {
   state?: SessionSharingState | null;
   onShareWithTeam?: () => void | Promise<void>;
   publicShare?: SessionPublicShareControl;
+  onCopyLink?: () => void | Promise<void>;
+  exportActions?: SessionAccessAction[];
   className?: string;
 }) {
   const { t } = useTranslation();
+  const [open, setOpen] = useState(false);
+  const [view, setView] = useState<AccessView>('home');
+  // True once the person has moved between views, so the first opening is not animated.
+  const [moved, setMoved] = useState(false);
+  // A publication is under way: the panel stays open until it finishes.
+  const [busy, setBusy] = useState(false);
 
   const isPrivate = shouldShowPrivateSharingStatus(state);
   if (!isPrivate && !publicShare) {
@@ -264,142 +439,259 @@ export function SessionAccessControl({
     'Anyone with the link can read a published copy of this conversation.'
   );
   const shareLabel = t('sharing.manager.title', 'Share');
-  const shareDescription = t(
-    'sharing.header.shareDescription',
-    'Publish a read-only copy of this conversation as a link.'
-  );
+  const hasTeamScope = state?.visibility === 'private' || state?.visibility === 'team';
+  // Without a sharing state (a solo workspace) nobody else can open it, so "only
+  // you" is true; while the state is still being resolved it is not yet known, so
+  // that stop is withheld instead of claiming privacy the control plane has not
+  // confirmed.
+  const canSayOnlyYou = !state || hasTeamScope;
 
-  if (!isPrivate) {
-    return (
-      <Tooltip.Root>
-        <Tooltip.Trigger
-          delay={300}
-          render={
-            <button
-              type="button"
-              aria-label={isShared ? `${sharedLabel}: ${sharedDescription}` : shareLabel}
-              className={cn(SESSION_HEADER_STATUS_PILL_CLASS, className)}
-              onClick={() => {
-                publicShare?.onOpen();
-              }}
-            >
-              <Share2 className="h-3.5 w-3.5" aria-hidden="true" />
-              <span>{isShared ? sharedLabel : shareLabel}</span>
-            </button>
-          }
-        />
-        <Tooltip.Content side="bottom" align="end" className="max-w-72 px-2.5 py-2">
-          {isShared ? sharedDescription : shareDescription}
-        </Tooltip.Content>
-      </Tooltip.Root>
-    );
-  }
+  const current: AccessStop = isShared ? 'web' : state?.visibility === 'team' ? 'team' : 'you';
+  const privateTitle = t('sessions.sharing.privateToYou', 'Private to you');
+  const scopeTitle = !state
+    ? privateTitle
+    : isPrivate
+      ? privateTitle
+      : state.visibility === 'team'
+        ? t('sessions.sharing.sharedWithTeam', 'Shared with team')
+        : getSessionSharingLabel(t, state);
+  const scopeDescription = state
+    ? getSessionSharingDescription(t, state)
+    : t(
+        'sharing.header.shareDescription',
+        'Publish a read-only copy of this conversation as a link.'
+      );
+  const ariaLabel = isShared
+    ? `${sharedLabel}: ${sharedDescription}`
+    : isPrivate
+      ? `${scopeTitle}: ${scopeDescription}`
+      : shareLabel;
 
-  const triggerLabel = isShared ? sharedLabel : t('sessions.sharing.private', 'Private');
-  const title = t('sessions.sharing.privateToYou', 'Private to you');
-  const description = getSessionSharingDescription(t, state);
-  const shareDisabled =
-    !onShareWithTeam || state.privateReason === 'machine-not-registered' || !state.canManage;
+  const notRegistered = isPrivate && state.privateReason === 'machine-not-registered';
+  const teamReachable = isPrivate && !!onShareWithTeam && !notRegistered && state.canManage;
+  const teamBlocked = isPrivate
+    ? !state.canManage
+      ? t('sessions.sharing.onlyOwnerCanShare', 'Only the device owner can share')
+      : notRegistered
+        ? t('sessions.sharing.registerDeviceToShare', 'Register this device before sharing')
+        : null
+    : null;
+  const teamActionLabel = isPrivate ? getSessionShareActionLabel(t, state) : undefined;
+
+  const heading = isShared
+    ? t('sharing.header.anyoneWithLink', 'Anyone with the link')
+    : scopeTitle;
+  const caption = isShared ? sharedDescription : (teamBlocked ?? scopeDescription);
+  const WatermarkIcon = { you: LockKeyhole, team: Users, web: Globe }[current];
+
+  const stops: Array<{ id: AccessStop; label: string; icon: LucideIcon; disabled: boolean }> = [
+    ...(canSayOnlyYou
+      ? [
+          {
+            id: 'you' as const,
+            label: t('sharing.header.audienceYou', 'Only you'),
+            icon: LockKeyhole,
+            // Narrowing is not offered from here; the current stop is never disabled.
+            disabled: current !== 'you',
+          },
+        ]
+      : []),
+    ...(hasTeamScope
+      ? [
+          {
+            id: 'team' as const,
+            label: t('sharing.header.audienceTeam', 'Team'),
+            icon: Users,
+            disabled: current !== 'team' && !teamReachable,
+          },
+        ]
+      : []),
+    ...(publicShare
+      ? [
+          {
+            id: 'web' as const,
+            label: t('sharing.header.audienceWeb', 'Web'),
+            icon: Globe,
+            disabled: false,
+          },
+        ]
+      : []),
+  ];
+
+  const act = (run: () => void | Promise<void>) => {
+    setOpen(false);
+    void run();
+  };
+
+  const goTo = (next: AccessView) => {
+    setMoved(true);
+    setView(next);
+  };
+
+  const handleOpenChange = (next: boolean) => {
+    if (!next && busy) return;
+    setOpen(next);
+    if (!next) {
+      setView('home');
+      setMoved(false);
+    }
+  };
+
+  const choose = (next: AccessStop) => {
+    if (next === current) return;
+    if (next === 'team') act(() => onShareWithTeam?.());
+    else if (next === 'web') goTo('publish');
+  };
+
+  const rows: SessionAccessAction[] = [
+    ...(isShared && publicShare
+      ? [
+          {
+            id: 'manage-link',
+            label: t('sharing.header.manageLink', 'Manage link'),
+            icon: Globe,
+            keepOpen: true,
+            onSelect: () => goTo('publish'),
+          },
+        ]
+      : []),
+    ...(onCopyLink
+      ? [
+          {
+            id: 'copy-url',
+            label: t('sessions.copyUrl', 'Copy URL'),
+            icon: Link2,
+            onSelect: onCopyLink,
+          },
+        ]
+      : []),
+    ...(exportActions ?? []),
+  ];
 
   return (
-    <Menu.Root>
-      <Menu.Trigger
+    <Popover.Root open={open} onOpenChange={handleOpenChange}>
+      <Popover.Trigger
         render={
           <button
             type="button"
-            aria-label={
-              isShared ? `${sharedLabel}: ${sharedDescription}` : `${title}: ${description}`
-            }
+            aria-label={ariaLabel}
             className={cn(
               SESSION_HEADER_STATUS_PILL_CLASS,
-              'data-[state=open]:border-border data-[state=open]:text-foreground',
+              'data-[popup-open]:bg-foreground/[0.07] data-[popup-open]:text-foreground',
               className
             )}
           >
-            {isShared ? (
-              <Share2 className="h-3.5 w-3.5" aria-hidden="true" />
-            ) : (
+            {isPrivate && !isShared ? (
               <LockKeyhole className="h-3.5 w-3.5" aria-hidden="true" />
+            ) : (
+              <Share2 className="h-3.5 w-3.5" aria-hidden="true" />
             )}
-            <span>{triggerLabel}</span>
+            <span>{isShared ? sharedLabel : shareLabel}</span>
             <ChevronDown className="h-3 w-3 opacity-45" aria-hidden="true" />
           </button>
         }
-      >
-        <button
-          type="button"
-          aria-label={
-            isShared ? `${sharedLabel}: ${sharedDescription}` : `${title}: ${description}`
-          }
-          className={cn(
-            SESSION_HEADER_STATUS_PILL_CLASS,
-            'data-[state=open]:border-border data-[state=open]:text-foreground',
-            className
-          )}
-        >
-          {isShared ? (
-            <Share2 className="h-3.5 w-3.5" aria-hidden="true" />
-          ) : (
-            <LockKeyhole className="h-3.5 w-3.5" aria-hidden="true" />
-          )}
-          <span>{triggerLabel}</span>
-          <ChevronDown className="h-3 w-3 opacity-45" aria-hidden="true" />
-        </button>
-      </Menu.Trigger>
-      <Menu.Content align="end" className="w-72 p-1.5">
-        <div className="flex items-start gap-2.5 px-2 py-2">
-          <LockKeyhole
-            className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground"
-            aria-hidden="true"
-          />
-          <div className="min-w-0">
-            <div className="text-sm font-medium text-foreground">{title}</div>
-            <div className="mt-0.5 text-xs leading-4 text-muted-foreground">{description}</div>
-          </div>
-        </div>
-        {isShared ? (
-          <div className="flex items-start gap-2.5 px-2 pb-2">
-            <Share2 className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
-            <div className="min-w-0">
-              <div className="text-sm font-medium text-foreground">{sharedLabel}</div>
-              <div className="mt-0.5 text-xs leading-4 text-muted-foreground">
-                {sharedDescription}
-              </div>
-            </div>
-          </div>
-        ) : null}
-        <Menu.Separator />
-        <Menu.Item
-          disabled={shareDisabled}
-          onClick={() => {
-            void onShareWithTeam?.();
-          }}
-          icon={
-            state.privateReason === 'machine-not-registered' ? (
-              <Monitor size="100%" />
-            ) : state.canManage ? (
-              Users
-            ) : (
-              LockKeyhole
-            )
-          }
-        >
-          {state.canManage
-            ? getSessionShareActionLabel(t, state)
-            : t('sessions.sharing.onlyOwnerCanShare', 'Only the device owner can share')}
-        </Menu.Item>
-        {publicShare ? (
-          <Menu.Item
-            icon={Share2}
-            onClick={() => {
-              publicShare.onOpen();
-            }}
+      />
+      <Popover.Content align="end" sideOffset={6} className="w-[18.5rem] gap-0 p-2">
+        <Popover.Title {...stylex.props(shareSurface.visuallyHidden)}>
+          {t('sessions.sharing.panelTitle', 'Share this conversation')}
+        </Popover.Title>
+        <ElasticHeight>
+          <div
+            key={view}
+            {...stylex.props(
+              moved && (view === 'publish' ? accessPanel.enterRight : accessPanel.enterLeft)
+            )}
           >
-            {shareLabel}
-          </Menu.Item>
-        ) : null}
-      </Menu.Content>
-    </Menu.Root>
+            {view === 'publish' && publicShare ? (
+              <>
+                <div {...stylex.props(accessPanel.publishHead)}>
+                  <Button
+                    variant="ghost"
+                    size="small"
+                    icon
+                    disabled={busy}
+                    aria-label={t('common.back', 'Back')}
+                    onClick={() => goTo('home')}
+                  >
+                    <ChevronLeft {...stylex.props(shareSurface.glyph)} aria-hidden="true" />
+                  </Button>
+                  <p {...stylex.props(accessPanel.title)}>
+                    {t('sharing.header.publishTitle', 'Publish to the web')}
+                  </p>
+                </div>
+                {publicShare.renderEditor({
+                  onClose: () => goTo('home'),
+                  onBusyChange: setBusy,
+                })}
+              </>
+            ) : (
+              <div {...stylex.props(accessPanel.root)}>
+                <WatermarkIcon
+                  key={current}
+                  {...stylex.props(accessPanel.watermark)}
+                  aria-hidden="true"
+                />
+                <div {...stylex.props(accessPanel.head)}>
+                  <p {...stylex.props(accessPanel.title)}>{heading}</p>
+                  <p {...stylex.props(accessPanel.description)}>{caption}</p>
+                </div>
+                {stops.length > 1 ? (
+                  <div {...stylex.props(accessPanel.stops)}>
+                    <Tabs.Root value={current} onValueChange={(next) => choose(next as AccessStop)}>
+                      <Tabs.List
+                        size="small"
+                        stretch
+                        aria-label={t('sharing.header.whoCanOpen', 'Who can open this')}
+                      >
+                        {stops.map((stop) => (
+                          <Tabs.Tab
+                            key={stop.id}
+                            value={stop.id}
+                            disabled={stop.disabled}
+                            title={
+                              stop.id === 'team' && teamReachable ? teamActionLabel : undefined
+                            }
+                          >
+                            <stop.icon
+                              {...stylex.props(shareSurface.glyphSmall)}
+                              aria-hidden="true"
+                            />
+                            {stop.label}
+                          </Tabs.Tab>
+                        ))}
+                      </Tabs.List>
+                    </Tabs.Root>
+                  </div>
+                ) : null}
+                {rows.length > 0 ? (
+                  <div {...stylex.props(accessPanel.rule)}>
+                    <Separator />
+                  </div>
+                ) : null}
+                {rows.length > 0 ? (
+                  <div {...stylex.props(accessPanel.actions)}>
+                    {rows.map((row) => (
+                      <Button
+                        key={row.id}
+                        variant="ghost"
+                        size="small"
+                        className="justify-start"
+                        disabled={row.disabled}
+                        title={row.title}
+                        onClick={() => (row.keepOpen ? void row.onSelect() : act(row.onSelect))}
+                      >
+                        <row.icon {...stylex.props(shareSurface.glyphSmall)} aria-hidden="true" />
+                        {row.label}
+                      </Button>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+            )}
+          </div>
+        </ElasticHeight>
+      </Popover.Content>
+    </Popover.Root>
   );
 }
 

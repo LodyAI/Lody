@@ -14,11 +14,13 @@ GitHub 在外部浏览器打开 `https://github.com/LodyAI/Lody`；
 帮助和设置始终可用。共享的桌面和移动侧边栏使用相同顺序。
 
 桌面端的 workspace 控件与三个操作按钮统一为 28px 高，垂直中心对齐。
-操作按钮的点击区域为正方形，图标为 16px；workspace 头像保持 20px。
-底栏上下各留 4px，所有相邻控件之间统一间隔 4px，包括 workspace 与帮助按钮。
+操作按钮的点击区域为正方形，图标为 16px。
+workspace 控件按导航行的方式排布，头像为 16px。
+底栏上下各留 4px、左右各留 12px，头像与设置图标距边缘同为 18px；
+所有相邻控件之间统一间隔 4px，包括 workspace 与帮助按钮。
 长名称省略，不增加行高；
 同步中的 workspace 与本地静态身份保持相同尺寸。workspace 菜单向上打开。
-悬停和键盘焦点使用共享 ghost 按钮样式，归档打开时标识当前页面。
+底栏没有顶部分隔线；其控件与顶部图标按钮共用导航行的静止颜色、悬停填充和选中填充，归档打开时标识当前页面。
 移动端保持 48px 操作按钮与 20px 图标，workspace 身份继续位于侧栏顶部。
 
 ## 依据
@@ -26,3 +28,4 @@ GitHub 在外部浏览器打开 `https://github.com/LodyAI/Lody`；
 - 实现：[LoroSidebar](../packages/components/src/components/loro-sidebar.tsx)。
 - 决策与验证限制：[底部入口记录](../.agents/notes/implemented/feature/2026-09-26-sidebar-footer.zh.md)。
 - 控件尺寸：[紧凑底栏记录](../.agents/notes/implemented/feature/2026-10-04-sidebar-footer-density.zh.md)。
+- 视觉语言：[底栏视觉语言记录](../.agents/notes/implemented/feature/2026-10-17-sidebar-footer-visual-language.zh.md)。

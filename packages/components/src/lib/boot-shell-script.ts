@@ -1,29 +1,12 @@
-/**
- * The boot shell's `<head>` script (see `boot-shell.ts`). It lives in its own
- * module with no imports so the desktop CSP test can load it directly under
- * Node and hash it.
- */
-
-/** Mirrors `LoroSidebar`'s `defaultWidth` / `minWidth` / `maxWidth`. */
+/** Import-free startup decisions, also consumed by the document's inline script. */
 export const BOOT_SHELL_SIDEBAR_WIDTH = { default: 280, min: 240, max: 420 } as const;
 
-/**
- * Storage keys the boot script reads. Each belongs to the atom or helper named
- * beside it; the script only reads them and never writes.
- */
 export const BOOT_SHELL_STORAGE_KEYS = {
-  /** `ThemeProvider` (next-themes `storageKey`): 'light' | 'dark' | 'system'. */
   theme: 'vite-ui-theme',
-  /** `sidebarCollapsedAtom`, JSON boolean in the window's storage. */
   sidebarCollapsed: 'lody-sidebar-collapsed',
-  /** `sidebarLastWidthAtom`, JSON number in localStorage; 0 means default. */
   sidebarWidth: 'lody-sidebar-last-width',
 } as const;
 
-/**
- * Top-level route segments that are not workspace slugs. None of them render
- * the workspace sidebar, so the shell draws only the centred mark there.
- */
 export const BOOT_SHELL_NON_WORKSPACE_SEGMENTS = [
   'app',
   'complete-email',
@@ -39,12 +22,20 @@ export const BOOT_SHELL_NON_WORKSPACE_SEGMENTS = [
   'workspace',
 ] as const;
 
-/**
- * Runs synchronously in `<head>`, before the shell is parsed. It resolves the
- * same theme `ThemeProvider` will (stored choice, else the OS preference) and
- * whether the workspace sidebar will be visible, and records both on `<html>`.
- * Any storage failure leaves the defaults: light canvas, mark only.
- */
+export type BootShellLayout = 'plain' | 'workspace';
+
+/** A destination hint describes geometry only; it grants no workspace access. */
+export function resolveBootShellLayout(path: string): BootShellLayout {
+  const segments = path.split(/[?#]/)[0]!.split('/');
+  const segment = segments[1] ?? '';
+  return segment &&
+    !(BOOT_SHELL_NON_WORKSPACE_SEGMENTS as readonly string[]).includes(segment) &&
+    segments[2] !== 'settings'
+    ? 'workspace'
+    : 'plain';
+}
+
+/** Runs before parsing the shell. Storage is read only; no last-route restoration. */
 export function createBootShellScript(): string {
   const keys = JSON.stringify(BOOT_SHELL_STORAGE_KEYS);
   const nonWorkspace = JSON.stringify(BOOT_SHELL_NON_WORKSPACE_SEGMENTS);
@@ -60,10 +51,13 @@ export function createBootShellScript(): string {
     "var sw=/[?&]window=session(&|$)/.test(h)||w.getItem('lody:sessionWindow')==='1';" +
     'var c=j(w,K.sidebarCollapsed);if(typeof c!=="boolean")c=sw;' +
     "var p=location.hash.charAt(1)==='/'?location.hash.slice(1):location.pathname;" +
-    "var g=p.split(/[?#]/)[0].split('/'),s=g[1]||'';" +
-    "if(!c&&s&&N.indexOf(s)<0&&g[2]!=='settings'){" +
+    "var g=p.split(/[?#]/)[0].split('/'),s=g[1]||'',v=!!s&&N.indexOf(s)<0&&g[2]!=='settings';" +
+    "d.setAttribute('data-lody-boot-layout',v?'workspace':'plain');" +
+    'var u=window.navigator.userAgent.toLowerCase(),m=!window.__LODY_ELECTRON__&&(/mobi|iphone|ipod|android|ipad|tablet|playbook|silk/.test(u)||window.navigator.userAgentData&&window.navigator.userAgentData.mobile===true)&&window.innerWidth<768;' +
+    "d.setAttribute('data-lody-boot-mobile',m?'true':'false');" +
     `var x=j(L,K.sidebarWidth);x=typeof x==='number'&&x>0?Math.min(${max},Math.max(${min},x)):${defaultWidth};` +
-    "d.setAttribute('data-lody-boot-sidebar','');d.style.setProperty('--lody-boot-sidebar-width',x+'px')}" +
+    "d.style.setProperty('--lody-boot-sidebar-width',x+'px');" +
+    "if(v&&!c&&window.innerWidth>=768)d.setAttribute('data-lody-boot-sidebar','');" +
     '}catch(e){}})()'
   );
 }

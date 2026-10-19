@@ -15,6 +15,50 @@ and durable state/cursor retention. This [P10 preparation](../notes/implemented/
 does not supply historical-author authorization, a production signer, host snapshot
 admission or client recovery from an unusable remote snapshot.
 
+## Startup frame and handoff
+
+The [startup intent](../../specs/app-startup-landing.md) keeps destination selection
+and workspace readiness separate. Static BootShell and real `WorkspaceCard` share
+`lib/workspace-frame.ts`'s document-safe `WORKSPACE_FRAME_CSS`: an 8px gutter,
+10px radius, 0.5px border and shadow, with the real card's values mapped to UI StyleX
+tokens. The shadow is a single 1px-down, 2px-blur black layer at 3% opacity.
+`DocumentStyle` renders mutable React style elements and retires the inline
+first-paint sheet in a layout effect after its replacement commits. A hoisted
+`style href` ignores later content changes, so it must not own these live styles.
+Before paint, the boot script records plain/workspace layout, stored width,
+theme and mobile/compact state. A collapsed sidebar still leaves workspace-card
+geometry; it does not imply plain layout.
+
+Inside `RootOutlet`'s error boundary, `BootShellBoundary` reads live route, sidebar
+and viewport state, plus router `state.isLoading || state.status === 'pending'`
+as the provider's `pending` input. Both conditions matter: `isLoading` can become
+false before the pending match renders.
+`BootShellProvider` keeps one dormant visual frame mounted;
+committed `BootShell` gates register path/status in layout effects. The latest
+committed owner wins, and cleanup removes only that owner's ID. Suspense can clean
+up outgoing layout effects before the destination is ready, so with no owners the
+provider retains the last committed presentation while `pending` is true. Once no
+owners remain and `pending` is false, it releases the frame and clears that memory;
+later ordinary session navigation cannot revive the fullscreen boot overlay. `BootNavigate`
+hints destination geometry before navigation completes. Login's `BrowserRedirect`
+uses BootShell during asynchronous handoff; Electron completion uses the boot variant.
+
+Presentation proceeds from static shell through React gates, redirect hints and
+`PreloadedMainLayout`'s lazy fallback to the actual card. Content readiness keeps
+its existing `LoadingPlaceholder`, using the same mark. No workspace UI or provider
+mounts merely to draw boot presentation, and unresolved scope still fails closed.
+Release after owners are gone and navigation has settled immediately makes the
+frame inert and `aria-hidden` and removes live status; its 160ms fade and 320ms
+geometry transitions are decorative.
+Reduced motion disables animation. No timer or animation event decides readiness.
+The outer error boundary unmounts the coordinator on failure, and
+`BlockingWaitPlaceholder` recovery replaces its gate with immediately usable controls.
+
+The [handoff decision](../notes/implemented/feature/2026-10-19-boot-shell-layout-handoff.md)
+explains the retained DOM and owner-protocol trade-off, partially revising the
+[first-paint note](../notes/implemented/feature/2026-09-26-boot-shell-first-paint.md)'s
+overlay decision without changing startup guarantees.
+
 ## Crash surfaces
 
 Recovery and diagnostic contracts, including callers outside `lib/`, are owned by
@@ -201,7 +245,15 @@ CSS variables and dimensions when no equivalent token exists. Keep runtime
 geometry and styles owned by external rendering engines at their existing dynamic
 boundary. Configure shared primitives through their documented props when those
 props reproduce the existing appearance. The [progressive StyleX migration note](../notes/implemented/simplification/2026-10-04-complex-surfaces-stylex.md) records the retained legacy overrides and
-the current application of these rules.
+current application of these rules.
+
+Lody Light's neutral surfaces, text, gray ramp and shadow ink use zero saturation
+at their existing lightness; the blue primary and links remain semantic accents. Their
+sources are the bundled VS Code theme, `@lody/ui`'s light palette and the Tailwind
+fallbacks. `boot-shell.ts` mirrors the sidebar, edge and status colors before the
+renderer starts. Keep those sources aligned when changing this palette. The
+[neutral gray decision](../notes/implemented/bug-fix/2026-10-17-neutral-light-grays.md)
+records the color correction and its verification limits.
 
 Settings' `CompactRow` keeps its label and helper in separate text nodes. Its
 optional `labelId` and `helperId` let a caller associate a control with those

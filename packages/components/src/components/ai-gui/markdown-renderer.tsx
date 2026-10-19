@@ -1005,7 +1005,6 @@ const AgentFileLink = ({
       inline
       fileName={markdownLinkText(children)}
       subtitle={hasOpenAction ? openAgentFileLabel : copyAgentFileLabel}
-      icon={<MonochromeFileIcon filePath={iconPath} />}
       actionIcon={hasOpenAction ? null : didCopy ? <Check /> : <Copy />}
       isInteractive
       onClick={() => {

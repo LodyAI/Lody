@@ -16,6 +16,7 @@ import {
 import type { SessionBackend } from '@/session/session-backend';
 import { createSessionBackend } from '@/session/session-backend';
 import type { LoroDocumentManager } from './loro/doc';
+import { WorkspaceSyncUnavailableError } from './command-runtime';
 
 /** The durable notice is the retry receipt. Publishing never changes the Role catalog. */
 export async function publishAgentRoleProposal(
@@ -72,8 +73,23 @@ export async function proposeAgentRole(args: {
   const backend = await createSessionBackend(session);
   const result = await publishAgentRoleProposal(backend, command, userId, async () => {
     const docId = getWorkspaceFlockDocId(workspaceId);
-    if (!args.localOnly)
-      await manager.syncFlockDocOrThrow(docId, { reason: 'agent-role:proposal' });
+    if (!args.localOnly) {
+      try {
+        await manager.syncMetaOrThrow({
+          reason: 'agent-role:proposal',
+          requireRemoteConfirmation: true,
+        });
+        await manager.syncFlockDocOrThrow(docId, {
+          reason: 'agent-role:proposal',
+          requireRemoteConfirmation: true,
+        });
+      } catch (cause) {
+        throw new WorkspaceSyncUnavailableError({
+          message: 'Role catalog synchronization is unavailable; retry the request.',
+          cause,
+        });
+      }
+    }
     const handle = await manager.repo.openFlockDoc(docId);
     const roles = listWorkspaceAgentRoles(readWorkspaceFlockRowsFromFlock(handle.flock));
     const existing =

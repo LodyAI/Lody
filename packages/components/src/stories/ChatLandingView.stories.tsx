@@ -3,7 +3,12 @@ import { useRef, useState } from 'react';
 import { Bot, Github, Monitor } from 'lucide-react';
 import { fn } from 'storybook/test';
 
+import { createLocalPlatformProvider, createStaticStore } from '@lody/platform';
+import { PlatformContext } from '@lody/platform/react';
+import type { WorkspaceId } from '@lody/shared';
+
 import { ChatLandingView } from '@/components/chat/chat-landing-view';
+import { HomeDashboard } from '@/components/chat/home/home-dashboard';
 import { useChatLandingKeyboardNav } from '@/hooks/use-chat-landing-keyboard-nav';
 import { ContextSwitch } from '@/components/chat/context-switch';
 import type { SessionContextType } from '@/components/chat/context-switch';
@@ -17,9 +22,33 @@ import type {
   AcpConfigOptionValue,
 } from '@/components/shared/acp-selector-options';
 import { getPastedTextCharacterCount, type PastedTextDraft } from '@/lib/pasted-text-draft';
+import {
+  HOME_WEEK_NOW,
+  HOME_WEEK_USAGE_SOURCES,
+  homeNowFixture,
+  homeWeekFixture,
+  homeWeekAgentIcon,
+  homeWeekAgentLabel,
+  homeWeekUsageFixture,
+} from './fixtures/home-week';
 
 const samplePromptPlaceholder = "Press '/' for commands, '@' for mentions.";
 const sampleZhCnPromptPlaceholder = "按 '/' 使用命令，'@' 添加提及。";
+
+const STORY_WORKSPACE_ID = 'workspace-storybook-chat-landing' as WorkspaceId;
+const storyPlatform = createLocalPlatformProvider({
+  session: createStaticStore({
+    status: 'authenticated',
+    user: { id: 'local:storybook-user', name: 'Storybook user' },
+  }),
+  workspaces: createStaticStore({
+    status: 'ready',
+    workspaces: [
+      { id: STORY_WORKSPACE_ID, name: 'Storybook Workspace', slug: 'storybook', role: 'owner' },
+    ],
+    activeWorkspaceId: STORY_WORKSPACE_ID,
+  }),
+});
 
 const meta = {
   title: 'Chat/ChatLandingView',
@@ -241,7 +270,7 @@ interface DemoLandingProps {
   enableKeyboardNav?: boolean;
 }
 
-function DemoLanding({
+function DemoLandingContent({
   tone,
   isMobile = false,
   hintType = null,
@@ -409,6 +438,21 @@ function DemoLanding({
       tone={tone}
       isMobile={isMobile}
       title={title}
+      ambient={
+        isMobile ? undefined : (
+          <HomeDashboard
+            now={homeNowFixture('busy')}
+            week={homeWeekFixture('busy')}
+            agentLabel={homeWeekAgentLabel}
+            agentIcon={homeWeekAgentIcon}
+            usage={homeWeekUsageFixture()}
+            usageSources={HOME_WEEK_USAGE_SOURCES}
+            usageSourceId={HOME_WEEK_USAGE_SOURCES[0]!.id}
+            nowMs={HOME_WEEK_NOW.getTime()}
+            animate={false}
+          />
+        )
+      }
       promptValue={prompt}
       onPromptChange={setPrompt}
       promptPlaceholder={promptPlaceholder}
@@ -426,6 +470,14 @@ function DemoLanding({
       onGoToAgentSettings={handleGoToAgentSettings}
       onOpenMobileDrawer={handleOpenMobileDrawer}
     />
+  );
+}
+
+function DemoLanding(props: DemoLandingProps) {
+  return (
+    <PlatformContext.Provider value={storyPlatform}>
+      <DemoLandingContent {...props} />
+    </PlatformContext.Provider>
   );
 }
 

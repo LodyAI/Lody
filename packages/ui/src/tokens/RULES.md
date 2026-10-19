@@ -51,6 +51,8 @@ One rung per component. The rung fixes background and shadow together.
 - Disabled is 45% opacity on the whole control, not a color.
 - Semantic first, gray second. `gray…gray6` only for things with no role:
   scrollbar, tracks, kbd, skeleton, an avatar's stand-in.
+- Lody Light's neutral color roles, gray ramp and shadow ink use zero saturation.
+  Keep hue for named semantic colors such as the accent, success and warning.
 
 ## Fields
 

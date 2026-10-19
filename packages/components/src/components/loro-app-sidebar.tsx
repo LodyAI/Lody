@@ -4,6 +4,7 @@ import { jsonValueEqual } from '@/lib/json-value-equal';
 import { usePostHog } from '@posthog/react';
 import { capturePostHogEvent } from '@/lib/posthog-analytics';
 import { SessionWindowMenuItem } from './session-window-menu-item';
+import { SIDEBAR_ROW_LINE_CLASS } from './sidebar-surface';
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { startSessionMentionDrag } from '@/lib/session-mention-drag';
 import {
@@ -109,6 +110,7 @@ import {
   sidebarCollapsedAtom,
   sidebarLastWidthAtom,
   sidebarOrganizeModeAtom,
+  sidebarShowBranchNamesAtom,
   sidebarUpdatedShowProjectNamesAtom,
   sidebarUpdatedBucketCollapseStateAtom,
   sidebarUpdatedBucketShowFullStateAtom,
@@ -202,6 +204,7 @@ import {
   SidebarRowEndSlot,
   SidebarSectionHeader,
   SidebarGroupActivityMark,
+  SidebarSessionMetaLine,
   SessionRowOpenedByMenuItems,
   buildSessionRowOpenedByTreeSlot,
   summarizeSidebarGroupActivity,
@@ -610,6 +613,10 @@ type LocalProjectSessionItemProps = {
   /** Root route that owns `openerSessionId` when it is a child Tab. */
   openerRootSessionId?: string | null;
   openedByTree?: SessionRowOpenedByTreeSlot;
+  /** The previous visible row is a top-level one, so this is its first child. */
+  followsOpener?: boolean;
+  /** The first child follows a local worktree opener, which has the taller metadata line. */
+  followsTallOpener?: boolean;
   sharing?: SessionSharingState;
   archiveTooltipLabel: string;
   archiveActionLabel: string;
@@ -637,7 +644,9 @@ const LocalProjectSessionItem = memo(function LocalProjectSessionItem({
   onShareWithTeam,
   openerSessionId,
   openerRootSessionId,
-  openedByTree,
+  openedByTree: baseOpenedByTree,
+  followsOpener = false,
+  followsTallOpener = false,
   sharing,
   archiveTooltipLabel,
   archiveActionLabel,
@@ -652,6 +661,27 @@ const LocalProjectSessionItem = memo(function LocalProjectSessionItem({
   const now = useStableNow(SIDEBAR_RELATIVE_TIME_REFRESH_MS);
   const relativeTime = formatCompactRelativeTime(effectiveLatestMessageAt, now);
   const showSelectedState = isSelected && !isMobile;
+  const showBranchNames = useAtomValue(sidebarShowBranchNamesAtom);
+  // A local project row only carries branch/time on the second line when its
+  // session has its own worktree. A repo association alone does not make this a
+  // worktree. The Details turn-off collapses the line entirely (the first
+  // child's tall connector follows via `followsTallOpener`).
+  const showMetaLine =
+    showBranchNames &&
+    !isMobile &&
+    session.isWorktree === true &&
+    baseOpenedByTree?.kind !== 'child';
+  const openedByTree =
+    baseOpenedByTree?.kind === 'child' && !isMobile
+      ? {
+          ...baseOpenedByTree,
+          isFirstChild: followsOpener,
+          tallOpener: followsOpener && followsTallOpener,
+        }
+      : baseOpenedByTree;
+  const lineBoxClassName = showMetaLine
+    ? cn('flex shrink-0 items-center', SIDEBAR_ROW_LINE_CLASS)
+    : 'contents';
   const showInlineArchive = !isMobile;
   const showWorktreeIcon = session.isWorktree === true;
   const isPinned = Boolean(session.isPinned);
@@ -736,7 +766,7 @@ const LocalProjectSessionItem = memo(function LocalProjectSessionItem({
       onDragStart={(event) => startSessionMentionDrag(event, { sessionId: session.id, title })}
       className={cn(
         'group w-full rounded-md px-2 text-left',
-        'py-1',
+        showMetaLine ? 'py-1.5' : 'py-1',
         'border border-transparent bg-transparent',
         !showSelectedState &&
           !isMobile &&
@@ -755,31 +785,52 @@ const LocalProjectSessionItem = memo(function LocalProjectSessionItem({
         onNavigate(session.id);
       }}
     >
-      <div className={cn('flex items-center', isMobile ? 'gap-1.5' : 'gap-2')}>
-        <SessionRowLeadingSlot
-          showMenuButton={hasContextMenuActions}
-          menuLabel={moreActionsLabel}
-          openedByTree={openedByTree}
-        />
-        <div
-          className={cn(
-            SIDEBAR_ROW_TEXT_CLASS,
-            'min-w-0 flex-1 flex items-center gap-1 truncate text-current'
-          )}
-          // Double-click to rename is scoped to the title only, so it can't be
-          // triggered by double-clicking the Archive confirm button.
-          onDoubleClick={(event) => {
-            if (!canRename) return;
-            event.preventDefault();
-            event.stopPropagation();
-            beginRename();
-          }}
-        >
-          <SessionRowAuthorAvatar author={author} />
-          {isPinned ? (
-            <Pin aria-hidden="true" className="h-3 w-3 shrink-0 text-sidebar-foreground-muted/80" />
+      <div
+        className={cn(
+          'flex',
+          showMetaLine ? 'items-start' : 'items-center',
+          isMobile ? 'gap-1.5' : 'gap-2'
+        )}
+      >
+        {/* On a two-line row the leading and end slots sit in a box one title line
+            tall, so they stay on the title line; otherwise the box disappears. */}
+        <div className={lineBoxClassName}>
+          <SessionRowLeadingSlot
+            showMenuButton={hasContextMenuActions}
+            menuLabel={moreActionsLabel}
+            openedByTree={openedByTree}
+          />
+        </div>
+        <div className={showMetaLine ? 'flex min-w-0 flex-1 flex-col gap-1' : 'contents'}>
+          <div
+            className={cn(
+              SIDEBAR_ROW_TEXT_CLASS,
+              'min-w-0 flex-1 flex items-center gap-1 truncate text-current'
+            )}
+            // Double-click to rename is scoped to the title only, so it can't be
+            // triggered by double-clicking the Archive confirm button.
+            onDoubleClick={(event) => {
+              if (!canRename) return;
+              event.preventDefault();
+              event.stopPropagation();
+              beginRename();
+            }}
+          >
+            <SessionRowAuthorAvatar author={author} />
+            {isPinned ? (
+              <Pin
+                aria-hidden="true"
+                className="h-3 w-3 shrink-0 text-sidebar-foreground-muted/80"
+              />
+            ) : null}
+            {titleContent}
+          </div>
+          {showMetaLine ? (
+            <SidebarSessionMetaLine
+              branchName={session.branchName}
+              latestMessageAt={effectiveLatestMessageAt}
+            />
           ) : null}
-          {titleContent}
         </div>
         {/* ③ A relative time on mobile only (no hover info card on touch); on desktop
             the time / branch live in the hover info card, so nothing sits here. */}
@@ -796,31 +847,33 @@ const LocalProjectSessionItem = memo(function LocalProjectSessionItem({
         {/* ④ Fixed end slot: the PR status sits here at rest when the session
             has one, with a faint worktree glyph just to its left; the Archive
             button replaces it on desktop hover. */}
-        <SidebarRowEndSlot
-          sessionId={session.id}
-          isWaitingPermission={isWaitingPermission}
-          isWorking={isWorking}
-          hasUnreadMessages={hasUnreadMessages}
-          restIcon={
-            showPr || showWorktreeIcon ? (
-              <span className="flex items-center gap-1.5">
-                <SessionRowWorktreeIndicator isWorktree={showWorktreeIcon} />
-                {showPr ? (
-                  <SessionPrIcon compact prStatus={prStatus} prCiState={prInfo.ciState} />
-                ) : null}
-              </span>
-            ) : undefined
-          }
-          archive={
-            showInlineArchive ? (
-              <SidebarRowArchiveButton
-                label={archiveTooltipLabel}
-                confirmLabel={archiveConfirmLabel}
-                onConfirm={() => onArchive(session.id)}
-              />
-            ) : undefined
-          }
-        />
+        <div className={lineBoxClassName}>
+          <SidebarRowEndSlot
+            sessionId={session.id}
+            isWaitingPermission={isWaitingPermission}
+            isWorking={isWorking}
+            hasUnreadMessages={hasUnreadMessages}
+            restIcon={
+              showPr || showWorktreeIcon ? (
+                <span className="flex items-center gap-1.5">
+                  <SessionRowWorktreeIndicator isWorktree={showWorktreeIcon} />
+                  {showPr ? (
+                    <SessionPrIcon compact prStatus={prStatus} prCiState={prInfo.ciState} />
+                  ) : null}
+                </span>
+              ) : undefined
+            }
+            archive={
+              showInlineArchive ? (
+                <SidebarRowArchiveButton
+                  label={archiveTooltipLabel}
+                  confirmLabel={archiveConfirmLabel}
+                  onConfirm={() => onArchive(session.id)}
+                />
+              ) : undefined
+            }
+          />
+        </div>
       </div>
     </div>
   );
@@ -1166,6 +1219,9 @@ export const LocalProjectItem = memo(function LocalProjectItem({
   dragHandle,
 }: LocalProjectItemProps) {
   const { t } = useTranslation();
+  // Whether the branch/time detail line is shown at all — a child's tall
+  // connector must match whether its opener actually renders that line.
+  const showBranchNames = useAtomValue(sidebarShowBranchNamesAtom);
   const groupKey = getLocalProjectSessionGroupKey(machineId, project.id);
   // Same opened-by presentation the GitHub/Chats groups use: MCP-opened
   // independent Sessions indent under the Session that created them, and a
@@ -1325,16 +1381,23 @@ export const LocalProjectItem = memo(function LocalProjectItem({
           onToggleCollapsed(machineId, project.id);
         }}
       >
-        {/* Open folder while expanded, closed while collapsed. */}
+        {/* Open folder while expanded, closed while collapsed. Same stroke and
+            resting ink as the navigation icons above, coming up to the row's
+            ink with the hover or selected fill. */}
         <ProjectFolderIcon
+          strokeWidth={1.5}
           className={cn(
-            'absolute left-0 top-1/2 h-4 w-4 -translate-y-1/2 text-current transition-opacity duration-100',
+            'absolute left-0 top-1/2 h-4 w-4 -translate-y-1/2 transition-[opacity,color] duration-100',
+            showSelectedState
+              ? 'text-current'
+              : 'text-sidebar-foreground-muted group-hover:text-current',
             // Mobile: chevron is always visible so the folder icon must hide
             // permanently to avoid stacking. Desktop keeps the hover swap.
             isMobile ? 'opacity-0' : 'group-hover:opacity-0'
           )}
         />
         <ChevronDown
+          strokeWidth={1.5}
           className={cn(
             'absolute left-0 top-1/2 h-4 w-4 -translate-y-1/2 text-current',
             'transition-[opacity,translate,scale,rotate] duration-100',
@@ -1509,7 +1572,7 @@ export const LocalProjectItem = memo(function LocalProjectItem({
           empty folder would nudge everything below it. */}
       {!collapsed && sessionNodes.length > 0 ? (
         <div className={SIDEBAR_ROW_LIST_CLASS}>
-          {sessionNodes.map((node) => {
+          {sessionNodes.map((node, nodeIndex) => {
             const session = node.item;
             const activity = getEffectiveSessionActivitySummary(
               session,
@@ -1545,6 +1608,12 @@ export const LocalProjectItem = memo(function LocalProjectItem({
                     session.openedByRootSessionId ?? resolveOpenerRowId(session.openedBySessionId)
                   }
                   openedByTree={openedByTree}
+                  followsOpener={sessionNodes[nodeIndex - 1]?.depth === 0}
+                  followsTallOpener={
+                    sessionNodes[nodeIndex - 1]?.depth === 0 &&
+                    sessionNodes[nodeIndex - 1]?.item.isWorktree === true &&
+                    showBranchNames
+                  }
                   sharing={sessionSharingById.get(session.id)}
                   archiveTooltipLabel={archiveTooltipLabel}
                   archiveActionLabel={archiveActionLabel}
@@ -1847,6 +1916,7 @@ export function LoroAppSidebar({
   const [showUpdatedProjectNames, setShowUpdatedProjectNames] = useAtom(
     sidebarUpdatedShowProjectNamesAtom
   );
+  const [showBranchNames, setShowBranchNames] = useAtom(sidebarShowBranchNamesAtom);
   const setSidebarCollapsed = useSetAtom(sidebarCollapsedAtom);
   const [sidebarLastWidth, setSidebarLastWidth] = useAtom(sidebarLastWidthAtom);
   const handleChatScopeChanged = useCallback(
@@ -1871,6 +1941,16 @@ export function LoroAppSidebar({
       setShowUpdatedProjectNames(next);
     },
     [postHog, setShowUpdatedProjectNames]
+  );
+  const handleShowBranchNamesChange = useCallback(
+    (next: boolean) => {
+      capturePostHogEvent(postHog, 'settings/changed', {
+        key: 'sidebar_show_branch_names',
+        value: next,
+      });
+      setShowBranchNames(next);
+    },
+    [postHog, setShowBranchNames]
   );
   const sessionSidebarCodeChangesOnly = useAtomValue(sessionSidebarCodeChangesOnlyAtom);
   const { archiveSession, markSessionUnread, setSessionPinned, updateSessionTitle } =
@@ -2753,11 +2833,9 @@ export function LoroAppSidebar({
       showHeading: t('sidebar.filter.showHeading', 'Tasks'),
       organizeProject: t('sidebar.filter.organizeProject', 'Project'),
       organizeUpdated: t('sidebar.filter.organizeUpdated', 'Updated'),
+      detailsHeading: t('sidebar.filter.detailsHeading', 'Details'),
       updatedProjectNames: t('sidebar.filter.updatedProjectNames', 'Show Project'),
-      updatedProjectNamesUnavailable: t(
-        'sidebar.filter.updatedProjectNamesUnavailable',
-        'Available in Updated view'
-      ),
+      showBranchNames: t('sidebar.filter.showBranchNames', 'Show Branch'),
       showMyTasks: t('sessions.sidebar.my', 'My Tasks'),
       showAllTasks: t('sessions.sidebar.team', 'All Tasks'),
       emptyMyTasks: t('sidebar.filter.emptyMyTasks', 'No tasks match this view'),
@@ -2789,12 +2867,14 @@ export function LoroAppSidebar({
       onScopeChange={handleChatScopeChanged}
       showUpdatedProjectNames={showUpdatedProjectNames}
       onShowUpdatedProjectNamesChange={handleShowUpdatedProjectNamesChange}
+      showBranchNames={showBranchNames}
+      onShowBranchNamesChange={handleShowBranchNamesChange}
       labels={filterLabels}
       open={sidebarFilterOpen}
       onOpenChange={setSidebarFilterOpen}
       side="right"
       align="start"
-      triggerClassName="h-5 w-5 [&_svg]:h-4 [&_svg]:w-4"
+      triggerSize="mini"
     />
   ) : null;
   const firstSectionFilterAction = pinnedItems.length === 0 ? sidebarFilterPopover : null;
@@ -2846,21 +2926,19 @@ export function LoroAppSidebar({
               : null;
           const dividerRight =
             section.canImport && isElectron ? (
-              <button
+              <Button
                 type="button"
-                className={cn(
-                  'inline-flex h-6 w-6 items-center justify-center rounded-sm',
-                  'text-muted-foreground/80 hover:bg-muted/30 hover:text-foreground',
-                  'focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring/60'
-                )}
+                variant="ghost"
+                size="mini"
+                icon
                 aria-label={importProjectLabel}
                 onClick={(event) => {
                   event.stopPropagation();
                   void handleImportLocalProject();
                 }}
               >
-                <FolderPlus className="h-4 w-4" />
-              </button>
+                <FolderPlus className="h-4 w-4" strokeWidth={1.5} />
+              </Button>
             ) : undefined;
           const headerAction =
             dividerRight || headerFilter ? (
@@ -3673,9 +3751,7 @@ export function LoroAppSidebar({
       {!isMobile ? <WindowDragStrip /> : null}
       <LoroSidebar
         className={cn(
-          isMobile
-            ? 'h-full w-full'
-            : 'h-full w-full border-r-[0.5px] border-sidebar-border/70 bg-sidebar',
+          isMobile ? 'h-full w-full' : 'h-full w-full bg-sidebar',
           isElectron && !isElectronFullscreen && 'z-20'
         )}
         workspaceName={resolvedWorkspaceName}
@@ -3709,6 +3785,8 @@ export function LoroAppSidebar({
         onOrganizeModeChange={handleOrganizeModeChange}
         showUpdatedProjectNames={showUpdatedProjectNames}
         onShowUpdatedProjectNamesChange={handleShowUpdatedProjectNamesChange}
+        showBranchNames={showBranchNames}
+        onShowBranchNamesChange={handleShowBranchNamesChange}
         onChatScopeChange={handleChatScopeChanged}
         onSelectUpdatedItem={handleSelectUpdatedItem}
         onTogglePinnedSection={handleTogglePinnedSection}

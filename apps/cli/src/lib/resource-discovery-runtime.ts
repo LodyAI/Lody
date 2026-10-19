@@ -41,7 +41,21 @@ export async function createResourceDiscovery(args: {
   // without making catalog availability depend on another remote catch-up.
   const isDaemon = getDaemonWorkspace()?.manager === manager;
   const shouldSync = args.offline !== true && (!isDaemon || args.requireFreshCatalogs === true);
-  if (shouldSync) await syncWorkspaceMetaForRead(manager, 'resource.discovery');
+  if (args.requireFreshCatalogs) {
+    try {
+      await manager.syncMetaOrThrow({
+        reason: 'resource.discovery',
+        requireRemoteConfirmation: true,
+      });
+    } catch (cause) {
+      throw new WorkspaceSyncUnavailableError({
+        message: 'Workspace metadata synchronization is unavailable; retry the request.',
+        cause,
+      });
+    }
+  } else if (shouldSync) {
+    await syncWorkspaceMetaForRead(manager, 'resource.discovery');
+  }
   const synced = new Set<string>();
   const baselines = new Map<string | undefined, boolean>();
   const machineBaselines = new Map<MachineId, boolean>();

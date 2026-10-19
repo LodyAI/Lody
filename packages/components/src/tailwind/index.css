@@ -883,38 +883,38 @@ pre,
 }
 
 @layer base {
-  /* Cool-gray Linear-like fallbacks (overridden by Lody Light VS Code theme).
-     Hierarchy: light conversation canvas → darker sidebar → near-white composer
+  /* Neutral-gray fallbacks (overridden by the bundled Lody Light theme).
+     Hierarchy: light conversation canvas → neutral sidebar → near-white composer
      → visible hover → slightly deeper selection pill. */
   :root {
-    --background: 0 0% 97.6%;
-    --foreground: 225 7% 11%;
-    --card: 240 14% 94.1%;
-    --card-foreground: 225 7% 11%;
+    --background: 240 9.1% 97.8%;
+    --foreground: 0 0% 11%;
+    --card: 240 3.2% 93.9%;
+    --card-foreground: 0 0% 11%;
     --popover: 0 0% 100%;
-    --popover-foreground: 225 7% 11%;
+    --popover-foreground: 0 0% 11%;
     --composer: 0 0% 100%;
     --primary: 220 82% 65%;
     --primary-foreground: 0 0% 100%;
-    --secondary: 220 16% 97%;
-    --secondary-foreground: 225 7% 11%;
-    --muted: 220 16% 96%;
-    --muted-foreground: 220 6% 42%;
+    --secondary: 0 0% 97%;
+    --secondary-foreground: 0 0% 11%;
+    --muted: 0 0% 96%;
+    --muted-foreground: 0 0% 42%;
     --highlight: var(--primary);
     --highlight-foreground: var(--primary-foreground);
     --hover: 0 0% 94.5%;
     --hover-foreground: var(--foreground);
-    --selection: 220 12% 87%;
+    --selection: 0 0% 87%;
     --selection-foreground: var(--foreground);
     --selection-inactive: var(--selection);
     --selection-inactive-foreground: var(--selection-foreground);
     --destructive: 0 72% 51%;
     --destructive-foreground: 0 0% 100%;
-    --border: 220 12% 86%;
-    --input: 220 12% 92%;
+    --border: 0 0% 86%;
+    --input: 0 0% 92%;
     --input-foreground: var(--foreground);
     --input-placeholder: var(--muted-foreground);
-    --input-border: 220 12% 86%;
+    --input-border: 0 0% 86%;
     /* Fill of an editable control. `--input` stays the recessed slab used by
        the composer and by muted chips; a form field on a light canvas must not
        be darker than the page or it reads as disabled, so it sits on white and
@@ -926,34 +926,34 @@ pre,
        them in `vscode-theme-css.ts`; unthemed they are the plain foregrounds. */
     --reading-foreground: var(--foreground);
     --foreground-strong: var(--foreground);
-    --sidebar-row-foreground: var(--sidebar-foreground);
-    --switch-track: 220 9% 64%;
+    --sidebar-row-foreground: 0 0% 28%;
+    --switch-track: 0 0% 64%;
     --ring: 220 82% 65%;
     --chart-1: 220 82% 65%;
     --chart-2: 210 70% 45%;
     --chart-3: 262 60% 55%;
     --chart-4: 24 90% 50%;
     --chart-5: 151 55% 40%;
-    --sidebar-background: 240 14% 94.1%;
-    --sidebar-foreground: 225 7% 11%;
-    --sidebar-foreground-muted: 220 6% 46%;
+    --sidebar-background: 240 3.2% 93.9%;
+    --sidebar-foreground: 0 0% 11%;
+    --sidebar-foreground-muted: 0 0% 42%;
     --sidebar-primary: 220 82% 65%;
     --sidebar-primary-foreground: 0 0% 100%;
     --sidebar-highlight: var(--sidebar-primary);
     --sidebar-highlight-foreground: var(--sidebar-primary-foreground);
-    --sidebar-hover: 240 6% 89%;
+    --sidebar-hover: 0 0% 91.5%;
     --sidebar-hover-foreground: var(--sidebar-foreground);
-    --sidebar-selection: 240 6% 87%;
+    --sidebar-selection: 0 0% 84%;
     --sidebar-selection-foreground: var(--sidebar-foreground);
-    --sidebar-border: 220 12% 88%;
+    --sidebar-border: 0 0% 88%;
     --sidebar-ring: 220 82% 65%;
     --button-hover: 219 65% 57%;
     --button-secondary: var(--secondary);
     --button-secondary-foreground: var(--secondary-foreground);
     --button-secondary-hover: var(--hover);
     --bottom-bar: 0 0% 100%;
-    --bottom-bar-foreground: 225 7% 11%;
-    --tab-bar: 220 14% 97%;
+    --bottom-bar-foreground: 0 0% 11%;
+    --tab-bar: 0 0% 97%;
     --tab-active: var(--background);
     --tab-active-foreground: var(--foreground);
     --tab-inactive: var(--tab-bar);
@@ -1022,12 +1022,13 @@ pre,
     --terminal-ansi-bright-magenta: var(--vscode-terminal-ansiBrightMagenta, #bc05bc);
     --terminal-ansi-bright-cyan: var(--vscode-terminal-ansiBrightCyan, #0598bc);
     --terminal-ansi-bright-white: var(--vscode-terminal-ansiBrightWhite, #a5a5a5);
-    /* PingFang SC (macOS / iOS) first, for CJK and Latin alike; it is Apple's
-       system font and cannot be bundled. Windows falls back to Microsoft YaHei.
-       Inter stays self-hosted for the interface-font setting and diagrams. */
+    /* Latin runs set in self-hosted Inter; it has no CJK glyphs, so Chinese
+       falls through per glyph to PingFang SC (macOS / iOS, Apple's system font,
+       which cannot be bundled) or Microsoft YaHei on Windows. PingFang first
+       rendered Latin too, with wide hyphens in file and repo names. */
     --font-sans-default:
-      'PingFang SC', -apple-system, BlinkMacSystemFont, 'Hiragino Sans GB', 'Microsoft YaHei',
-      'Helvetica Neue', Arial, 'Apple Color Emoji', 'Segoe UI Emoji', sans-serif;
+      'Inter Variable', 'PingFang SC', -apple-system, BlinkMacSystemFont, 'Hiragino Sans GB',
+      'Microsoft YaHei', 'Helvetica Neue', Arial, 'Apple Color Emoji', 'Segoe UI Emoji', sans-serif;
     --font-sans: var(--lody-interface-font-family, var(--font-sans-default));
     --font-serif: serif;
     --font-wordmark:
@@ -1130,14 +1131,15 @@ pre,
     --chart-5: 154 68% 52%;
     --sidebar-background: 222 55% 9.6%;
     --sidebar-foreground: 210 40% 96%;
+    --sidebar-row-foreground: var(--sidebar-foreground);
     --sidebar-foreground-muted: 216 18% 70%;
     --sidebar-primary: 210 90% 62%;
     --sidebar-primary-foreground: 220 50% 12%;
     --sidebar-highlight: var(--sidebar-primary);
     --sidebar-highlight-foreground: var(--sidebar-primary-foreground);
-    --sidebar-hover: 220 44% 14%;
+    --sidebar-hover: 220 44% 13%;
     --sidebar-hover-foreground: var(--sidebar-foreground);
-    --sidebar-selection: 220 44% 20%;
+    --sidebar-selection: 220 44% 22%;
     --sidebar-selection-foreground: var(--sidebar-foreground);
     --sidebar-border: 220 32% 18%;
     --sidebar-ring: 210 90% 62%;
@@ -1551,31 +1553,31 @@ pre,
    * because Radix portals escape this subtree.
    */
   :root:not(.dark) .tasks-surface {
-    --background: 220 16% 98%;
-    --foreground: 222 18% 12%;
+    --background: 0 0% 98%;
+    --foreground: 0 0% 12%;
     --card: 0 0% 100%;
-    --card-foreground: 222 18% 12%;
+    --card-foreground: 0 0% 12%;
     --popover: 0 0% 100%;
-    --popover-foreground: 222 18% 12%;
-    --muted: 220 12% 95%;
-    --muted-foreground: 220 9% 40%;
-    --secondary: 220 12% 95%;
-    --secondary-foreground: 222 18% 12%;
-    --hover: 220 12% 94%;
-    --hover-foreground: 222 18% 12%;
-    --selection: 220 14% 92%;
-    --selection-foreground: 222 18% 12%;
-    --border: 220 10% 90%;
+    --popover-foreground: 0 0% 12%;
+    --muted: 0 0% 95%;
+    --muted-foreground: 0 0% 40%;
+    --secondary: 0 0% 95%;
+    --secondary-foreground: 0 0% 12%;
+    --hover: 0 0% 94%;
+    --hover-foreground: 0 0% 12%;
+    --selection: 0 0% 92%;
+    --selection-foreground: 0 0% 12%;
+    --border: 0 0% 90%;
     --input: 0 0% 100%;
-    --input-border: 220 10% 88%;
+    --input-border: 0 0% 88%;
     --sidebar-background: 0 0% 100%;
-    --sidebar-foreground: 222 18% 12%;
-    --sidebar-foreground-muted: 220 9% 40%;
-    --sidebar-border: 220 10% 90%;
-    --sidebar-hover: 220 12% 91%;
-    --sidebar-hover-foreground: 222 18% 12%;
-    --sidebar-selection: 220 12% 88%;
-    --sidebar-selection-foreground: 222 18% 12%;
+    --sidebar-foreground: 0 0% 12%;
+    --sidebar-foreground-muted: 0 0% 40%;
+    --sidebar-border: 0 0% 90%;
+    --sidebar-hover: 0 0% 94%;
+    --sidebar-hover-foreground: 0 0% 12%;
+    --sidebar-selection: 0 0% 87%;
+    --sidebar-selection-foreground: 0 0% 12%;
     color-scheme: light;
   }
 
@@ -2230,4 +2232,107 @@ html[data-focus-modality='pointer']
   :focus-visible:not(input, textarea, select, [contenteditable='true'], [contenteditable='']) {
   --tw-ring-shadow: 0 0 #0000;
   --tw-ring-offset-shadow: 0 0 #0000;
+}
+
+/* The new-chat page's typed transition (`components/chat/home/home-dashboard.tsx`). Keep
+   the page still while the board, heading and every part of the switch follow one curve.
+   Named snapshots are siblings in the overlay, regardless of DOM nesting or z-index:
+   the pill must be below the segments, and the persistent labels above both. The pill
+   carries an own snapshot only across a board change, when it glides between the
+   segments; appearing or leaving with the fold, it is unnamed and part of its segment's.
+   Segment snapshots hold the changing summaries; clip them to their animated width without
+   stretching their text. Reduced motion never starts a transition. */
+html:active-view-transition-type(home-board)::view-transition-old(root),
+html:active-view-transition-type(home-board)::view-transition-new(root) {
+  animation: none;
+}
+
+html:active-view-transition-type(home-board)::view-transition-group(home-board),
+html:active-view-transition-type(home-board)::view-transition-group(home-pill),
+html:active-view-transition-type(home-board)::view-transition-group(home-now-segment),
+html:active-view-transition-type(home-board)::view-transition-group(home-week-segment),
+html:active-view-transition-type(home-board)::view-transition-group(home-now-label),
+html:active-view-transition-type(home-board)::view-transition-group(home-week-label),
+html:active-view-transition-type(home-board)::view-transition-group(home-fold),
+html:active-view-transition-type(home-board)::view-transition-group(home-heading) {
+  animation-duration: 240ms;
+  animation-timing-function: cubic-bezier(0.2, 0, 0, 1);
+}
+
+html:active-view-transition-type(home-board)::view-transition-group(home-pill) {
+  z-index: 1;
+}
+
+html:active-view-transition-type(home-board)::view-transition-group(home-now-segment),
+html:active-view-transition-type(home-board)::view-transition-group(home-week-segment) {
+  z-index: 2;
+  overflow: clip;
+}
+
+html:active-view-transition-type(home-board)::view-transition-group(home-now-label),
+html:active-view-transition-type(home-board)::view-transition-group(home-week-label),
+html:active-view-transition-type(home-board)::view-transition-group(home-fold) {
+  z-index: 3;
+}
+
+/* The label remains readable throughout: only its position moves, never its bitmap size. */
+html:active-view-transition-type(home-board)::view-transition-old(home-now-label),
+html:active-view-transition-type(home-board)::view-transition-old(home-week-label) {
+  animation: none;
+  opacity: 0;
+}
+
+html:active-view-transition-type(home-board)::view-transition-new(home-now-label),
+html:active-view-transition-type(home-board)::view-transition-new(home-week-label) {
+  animation: none;
+  width: auto;
+  height: auto;
+}
+
+html:active-view-transition-type(home-board)::view-transition-old(home-now-segment),
+html:active-view-transition-type(home-board)::view-transition-new(home-now-segment),
+html:active-view-transition-type(home-board)::view-transition-old(home-week-segment),
+html:active-view-transition-type(home-board)::view-transition-new(home-week-segment) {
+  width: auto;
+  height: auto;
+  animation-duration: 200ms;
+  animation-timing-function: linear;
+}
+
+html:active-view-transition-type(home-board)::view-transition-group(home-board) {
+  overflow: clip;
+}
+
+html:active-view-transition-type(home-board)::view-transition-old(home-board),
+html:active-view-transition-type(home-board)::view-transition-new(home-board) {
+  height: auto;
+  animation-duration: 200ms;
+  animation-timing-function: linear;
+}
+
+/* One-shot entry for the new-chat landing heading: blur + fade in. */
+@keyframes home-heading-in {
+  from {
+    opacity: 0;
+    filter: blur(12px);
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    filter: blur(0);
+    transform: translateY(0);
+  }
+}
+
+.animate-home-heading-in {
+  animation: home-heading-in 0.55s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-home-heading-in {
+    animation: none;
+    filter: none;
+    transform: none;
+    opacity: 1;
+  }
 }

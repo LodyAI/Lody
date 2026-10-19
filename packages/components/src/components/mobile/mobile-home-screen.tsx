@@ -30,6 +30,7 @@ import {
   Search,
   Settings,
   Share2,
+  SlidersHorizontal,
   Terminal,
   X,
 } from 'lucide-react';
@@ -46,7 +47,6 @@ import { getDownloadPageUrl } from '@/lib/lody-urls';
 import { observeResizeOnAnimationFrame } from '@/lib/resize-observer';
 import { cn } from '@/lib/utils';
 import { usePullToRefresh } from '@/hooks/use-pull-to-refresh';
-import { CarbonSettingsAdjust } from '@/components/icons/carbon-settings-adjust';
 import { GlassIconButton } from '@/components/mobile/glass-icon-button';
 import { type MobileConversationItem } from './mobile-project-screen';
 import {
@@ -824,7 +824,7 @@ function ChatListFilterToggle({
         open && 'border-primary/40 bg-primary/15 text-primary'
       )}
     >
-      <CarbonSettingsAdjust className="h-4 w-4 text-current" aria-hidden="true" />
+      <SlidersHorizontal className="h-4 w-4 text-current" strokeWidth={1.8} aria-hidden="true" />
       {hasActiveFilters && !open ? (
         <span
           aria-hidden="true"

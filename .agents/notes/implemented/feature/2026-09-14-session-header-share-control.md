@@ -18,7 +18,7 @@ costs one extra control-plane subscription per open conversation, which is the
 deliberate trade for a header that can state it; that read is capability-gated,
 so the local open-source build makes no request and renders no share
 affordance at all. What is still not answered is the pre-existing gap that a
-conversation can be readable through a share rooted at a *different*
+conversation can be readable through a share rooted at a _different_
 conversation, and this control says nothing about that either.
 
 ## Decision
@@ -79,7 +79,7 @@ presence is what renders the item. The state stays keyed by session id rather
 than a boolean: a tab that switches underneath an open editor must not retarget
 it at the newly shown conversation.
 
-The "…" menu keeps its entry. The request was for the header *in addition to*
+The "…" menu keeps its entry. The request was for the header _in addition to_
 the menu, and the menu is still the only desktop surface that lists every
 session action in one place.
 
@@ -135,8 +135,9 @@ published private conversation reads "Shared" while its menu still names the
 private scope and the link disclosure. `use-session-share-management.test.tsx`
 gains the status hook: active reads `shared`, absent and `draft`/`revoked` read
 `none`, an unanswered query stays `unknown`, and no workspace reports `none`
-whatever the control plane holds. Both files, plus the existing header-menu,
-share-manager and mobile-menu suites, pass.
+whatever the control plane holds. The audience tablist has the accessible name
+"Who can open this". Both files, plus the existing header-menu, share-manager
+and mobile-menu suites, pass.
 
 Layout was reviewed from rendered Storybook screenshots of
 `Sessions/SessionAccessControl` in both themes, covering the plain share button,
@@ -151,3 +152,75 @@ publication flow itself, its confirmation and its credential handling are
 untouched; see
 [the dialog and reader layout note](2026-09-09-session-share-dialog-and-reader-layout.md)
 and [static session sharing](2026-09-09-session-sharing.md).
+
+## Follow-up: the Share popover answers "who can open this"
+
+The private pill read "Private" and opened a two-row menu, which named the state
+instead of the action a reader came to take, while the real sharing actions sat
+split between it and the `⋯` menu. The trigger now reads "Share" (a published
+link still outranks it as "Shared"; the lock stays as its glyph and
+`Private to you: …` as its accessible name) and opens one `@lody/ui` Popover
+built around the question a reader has:
+
+- **The answer first.** An eyebrow, a title ("Private to you", "Shared with
+  team", "Anyone with the link"), one line of reason, and a faint icon
+  watermark of the reach, cropped by the panel's corner. Decoration only.
+- **The answer is the control.** A `Tabs` strip of audiences (Only you, Team,
+  Web) with the primary stop selected: published is Web, otherwise a private
+  conversation is Only you and anything else is Team. It shows what IS. Picking
+  Team hands off to the page's existing confirmation dialog (`onShareWithTeam`)
+  and picking Web opens the publish editor; either closes the panel and the
+  selection moves only when the state actually changes, because a thumb that
+  slid before the page's answer would lie. Only you is disabled once left (no
+  narrowing exists from here) and Team is disabled, with the reason in the
+  caption, for a device the person does not own or has not registered. A lone
+  audience draws no strip.
+- **Then the actions**, as plain ghost rows in the density of the app's menus
+  (a black full-width button and a labelled section were tried and read as
+  foreign): "Manage link" once published, Copy URL, Copy as Markdown and Share as
+  image…, which are the `⋯` menu's handlers.
+- **No sharing state.** A solo workspace resolves none; it reads as "only you"
+  (true) with Web offered, never as "Shared with team". While visibility is
+  still `unknown`, the "only you" stop is withheld and the title says so.
+
+Earlier attempts in this change used a Share/Publish/Export tab strip, soft
+blocks with large icons, a `cmdk` search list and a concentric-ring emblem; each
+was rejected for weight or for answering a different question than the one the
+header exists for. Copy path and Copy base branch describe the working directory,
+not the conversation, so they stay in `⋯` only. A team-visible conversation that
+can publish now opens this panel instead of a one-click button. The old
+implementation also nested a button inside `Menu.Trigger`'s rendered button.
+
+Not done: an inline confirmation inside the panel (the page's dialog is the one
+confirmation, so a second would double it), stepping back to private or
+unpublishing from here (no such action exists in this surface; the
+project-settings share toggle stops team sharing), and shortcut keys.
+
+`session-access-control.test.tsx` drives the panel (`role="dialog"`, tabs).
+Not run in the authoring environment, which had no Node toolchain: typecheck,
+the suite, `pnpm format`, `lint:i18n` and a Storybook review of
+`Sessions/SessionAccessControl` in both themes are owed.
+
+### Publishing moves into the panel
+
+The publish editor used to open a dialog over the page, which broke the motion
+the panel starts: pick Web, then a modal. It now opens in the same popover as a
+second view. A header with a way back, then the existing manager (`embedded`),
+whose setup, publishing and published steps replace each other while the panel's
+height follows with a small overshoot. A first cut was the dialog's prose and a
+dark button dropped into the popover, which read as empty; the embedded editor now
+keeps one preview card on screen through every step (the title, two bars standing
+for its text, a link chip) and changes how it looks instead of replacing it: setup
+shows a placeholder link, publishing sweeps a highlight across the bars (no
+progress claimed; the bar under it stays the only number), and published rings the
+chip in the outcome colour with a tick drawn once. Notices shrink to footnotes
+there. The `⋯` menu's Share still opens
+the dialog around the same manager and hook, now via `share-editor-model.ts`.
+
+Three consequences of leaving the dialog, each handled rather than left to
+chance: the panel is not dismissible while a publication is under way (the editor
+reports busy through the control, so an outside press or Escape cannot unmount it
+mid-commit); revoke and reset confirm in place (a modal opened from a popover is
+an outside press and would dismiss the editor it confirms for); and the hint reads
+"panel", not "dialog". The panel width is fixed across views so only height moves.
+Not run in the authoring environment: the sequence is unverified end to end.

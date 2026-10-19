@@ -277,9 +277,6 @@ describe('LoroSidebar pinned section', () => {
     expect(parent?.children[0]).toBe(collapse);
     expect(parent?.children[1]).toBe(back);
     expect(parent?.children[2]).toBe(forward);
-    // Arrows with a shaft, not chevrons.
-    expect(back?.querySelector('svg.lucide-arrow-left')).not.toBeNull();
-    expect(forward?.querySelector('svg.lucide-arrow-right')).not.toBeNull();
   });
 
   it('renders pinned conversations before Workspace groups', () => {

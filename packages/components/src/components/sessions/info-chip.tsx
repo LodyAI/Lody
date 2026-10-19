@@ -2,6 +2,7 @@ import { useRef, useState, type ComponentType, type ReactNode, type SVGProps } f
 import { ArrowUpRight } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Popover } from '@lody/ui/popover';
+import { INFO_BAR_TEXT_CLASS } from './info-bar-type';
 
 export type InfoChipIcon = ComponentType<SVGProps<SVGSVGElement> & { className?: string }>;
 
@@ -26,8 +27,10 @@ export type InfoChipIcon = ComponentType<SVGProps<SVGSVGElement> & { className?:
  * hover treatment; width varies only by the glanceable short `value`
  * ("12m", "#2857", "2/5") that some items keep while collapsed.
  */
-const CHIP_BUTTON_CLASS =
-  'flex h-6 shrink-0 select-none items-center gap-1 rounded-md px-1 text-xs transition-colors hover:bg-muted-foreground/10';
+const CHIP_BUTTON_CLASS = cn(
+  'flex h-6 shrink-0 select-none items-center gap-1 rounded-md px-1 transition-colors hover:bg-muted-foreground/10',
+  INFO_BAR_TEXT_CLASS
+);
 
 function ChipFace({ icon: Icon, value }: { icon: InfoChipIcon; value?: string }) {
   return (
@@ -191,7 +194,8 @@ export function StageChip({
   const iconBadge = iconOverride ?? (
     <span
       className={cn(
-        'flex h-6 shrink-0 select-none items-center gap-1 px-1 text-xs',
+        'flex h-6 shrink-0 select-none items-center gap-1 px-1',
+        INFO_BAR_TEXT_CLASS,
         textClassName ?? 'text-muted-foreground'
       )}
     >
@@ -212,7 +216,8 @@ export function StageChip({
   );
 
   const summaryClassName = cn(
-    'flex h-6 min-w-0 flex-1 items-center gap-1 rounded-md px-1 text-xs',
+    'flex h-6 min-w-0 flex-1 items-center gap-1 rounded-md px-1',
+    INFO_BAR_TEXT_CLASS,
     textClassName ?? 'text-muted-foreground'
   );
 
