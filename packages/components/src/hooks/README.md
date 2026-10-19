@@ -36,6 +36,19 @@ Missing or mismatched Providers expose no catalog; extension changes invalidate
 old capabilities until a matching probe arrives. A matching extension catalog
 must not be read as though no extensions were selected.
 
+## Avatar sources
+
+`use-stable-avatar-src.ts` keeps the initial remote URL on a cold mount while
+filling the byte cache, then asks `lib/avatar-cache.ts` to preload and asynchronously
+decode that local blob for a return visit. Only avatars used by this hook are
+decoded; startup restoration does not decode the entire persistent cache. The
+cache entry retains the off-DOM image for the same lifetime as its blob URL.
+Source changes select the current URL synchronously, including delayed profile
+arrival and image removal, while background callbacks remain tied to their source.
+First paint and cache reads never await decoding. Fully cold images and missing
+profile data can still show a fallback. Evidence and limits:
+[avatar continuity](../../../../.agents/notes/proposed/bug-fix/2026-10-20-message-avatar-switch-continuity.md).
+
 ## Cloud query recovery
 
 `use-recoverable-convex-query.ts` owns the authenticated query adapter. Each client,
