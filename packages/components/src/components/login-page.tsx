@@ -1,8 +1,12 @@
-import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Trans, useTranslation } from 'react-i18next';
-import { AnimatePresence, motion } from 'framer-motion';
+import { motion, useReducedMotion, type Variants } from 'framer-motion';
 import { ArrowLeft, ArrowRight, ExternalLink, Github, Mail } from 'lucide-react';
+import * as stylex from '@stylexjs/stylex';
+import { Badge } from '@lody/ui/badge';
 import { Spinner } from '@lody/ui/spinner';
+import { colors } from '@lody/ui/tokens/colors.stylex';
+import { corner, radius, space } from '@lody/ui/tokens/scales.stylex';
 import { usePostHog } from '@posthog/react';
 import { useAtomValue, useSetAtom } from 'jotai';
 import isEmail from 'validator/lib/isEmail';
@@ -18,7 +22,11 @@ import { Field as UiField } from '@lody/ui/field';
 import { PasswordInput } from '@lody/ui/password-input';
 import { isDevEmailPasswordLoginEnabled } from '@lody/shared/electron-ipc';
 import { setLoginHintCookie } from '@/lib/login-hint-cookie';
+import { readLastLoginMethod, writeLastLoginMethod } from '@/lib/last-login-method';
+import { LoginDitherVisual } from '@/components/login-dither-visual';
+import { LoginExpandingRow, LoginViewSlot } from '@/components/login-view-slot';
 import { formatPasswordValidationFailure, validateNewPassword } from '@/lib/password-validation';
+import { BootShell } from '@/components/boot-shell';
 import { LoadingPlaceholder } from '@/components/loading-placeholder';
 import { useStableSession } from '@/hooks/useStableSession';
 import { hasUsableSessionUser } from '@/hooks/stable-session-state';
@@ -69,11 +77,20 @@ type EmailAuthMode = 'sign-in' | 'sign-up';
 type EmailAuthStatus = 'idle' | 'verification-sent' | 'unverified';
 type LoginView = 'oauth' | 'email';
 
-const PROVIDER_ICON_SIZE = 18;
-const PROVIDER_ICON_GAP = 8;
+const REDUCED_MOTION = '@media (prefers-reduced-motion: reduce)';
+const DARK = '@media (prefers-color-scheme: dark)';
 
-const VIEW_TRANSITION = { duration: 0.22, ease: [0.4, 0, 0.2, 1] as const };
-
+// Entrance: the column's parts rise in one after another while the visual
+// develops, so the page does not arrive all at once.
+const ENTRANCE_EASE = [0.22, 1, 0.36, 1] as const;
+const ENTRANCE_STAGGER: Variants = {
+  hidden: {},
+  shown: { transition: { staggerChildren: 0.07, delayChildren: 0.15 } },
+};
+const ENTRANCE_ITEM: Variants = {
+  hidden: { opacity: 0, y: 10 },
+  shown: { opacity: 1, y: 0, transition: { duration: 0.5, ease: ENTRANCE_EASE } },
+};
 const normalizeBasePath = () => {
   const baseUrl = import.meta.env.BASE_URL || '/';
   return baseUrl === '/' || baseUrl === './' || baseUrl === '.' ? '' : baseUrl.replace(/\/$/, '');
@@ -401,7 +418,7 @@ function BrowserRedirect({
     };
   }, [beforeNavigate, navigate, to]);
 
-  return null;
+  return <BootShell path={to} />;
 }
 
 function ProviderIcon({ className, children }: { className?: string; children: React.ReactNode }) {
@@ -497,35 +514,30 @@ const PROVIDER_CONFIG: {
   icon: React.ComponentType;
   labelKey: string;
   labelDefault: string;
-  variant: 'primary' | 'secondary';
 }[] = [
   {
     id: 'github',
     icon: GitHubIcon,
     labelKey: 'login.githubSignIn',
     labelDefault: 'Continue with GitHub',
-    variant: 'primary',
   },
   {
     id: 'google',
     icon: GoogleIcon,
     labelKey: 'login.googleSignIn',
     labelDefault: 'Continue with Google',
-    variant: 'secondary',
   },
   {
     id: 'apple',
     icon: AppleIcon,
     labelKey: 'login.appleSignIn',
     labelDefault: 'Continue with Apple',
-    variant: 'secondary',
   },
   {
     id: 'discord',
     icon: DiscordIcon,
     labelKey: 'login.discordSignIn',
     labelDefault: 'Continue with Discord',
-    variant: 'secondary',
   },
 ];
 
@@ -611,9 +623,13 @@ export function LoginPage({
   const electronLoginErrorDetail = useAtomValue(electronLoginErrorDetailAtom);
   const isCompletingElectronSignIn = electronLoginPhase === 'exchanging';
   const setNativeSignInInProgress = useSetAtom(nativeSignInInProgressAtom);
-  const [providerContentWidth, setProviderContentWidth] = useState<number | null>(null);
-  const providerLabelMeasureRef = useRef<HTMLDivElement | null>(null);
+  const [lastLoginMethod] = useState(readLastLoginMethod);
+  const prefersReducedMotion = useReducedMotion();
+  const taglineRef = useRef<HTMLParagraphElement | null>(null);
   const emailInputRef = useRef<HTMLInputElement | null>(null);
+  const focusEmailInput = useCallback(() => {
+    emailInputRef.current?.focus({ preventScroll: true });
+  }, []);
   const loginViewedRef = useRef(false);
   const electronOAuthQuery = getElectronOAuthQuery();
   const isElectronOAuthFlow = electronOAuthQuery != null;
@@ -696,10 +712,6 @@ export function LoginPage({
       : t(config.labelKey, config.labelDefault);
   };
 
-  const githubLabel = getProviderLabel('github');
-  const googleLabel = getProviderLabel('google');
-  const appleLabel = getProviderLabel('apple');
-  const discordLabel = getProviderLabel('discord');
   const emailEntryLabel = t('login.continueWithEmail', 'Continue with email');
 
   // Warm the workspace layout while this page waits on the user, so the
@@ -715,10 +727,7 @@ export function LoginPage({
   // It is deliberately NOT gated on a sign-in click — a social login navigates
   // away immediately, so a fetch started at click time is usually discarded,
   // and the whole point is to have the chunk before the redirect returns.
-  useEffect(
-    () => scheduleIdleTask(() => void preloadMainLayout().catch(() => {})),
-    []
-  );
+  useEffect(() => scheduleIdleTask(() => void preloadMainLayout().catch(() => {})), []);
 
   useEffect(() => {
     if (loginViewedRef.current) {
@@ -759,6 +768,7 @@ export function LoginPage({
       return;
     }
     oauthSucceededFiredRef.current = true;
+    writeLastLoginMethod(pending.provider);
     const sessionUser = session?.user;
     identifyPostHogUser(
       postHog,
@@ -773,40 +783,6 @@ export function LoginPage({
       oauth_round_trip_ms: Date.now() - pending.started_at_ms,
     });
   }, [canRedirectAuthenticatedUser, isElectronRenderer, postHog, session]);
-
-  useLayoutEffect(() => {
-    const labelContainer = providerLabelMeasureRef.current;
-    if (!labelContainer) {
-      return;
-    }
-
-    const labelElements = Array.from(
-      labelContainer.querySelectorAll<HTMLElement>('[data-provider-label]')
-    );
-    if (labelElements.length === 0) {
-      return;
-    }
-
-    const maxLabelWidth = Math.max(
-      ...labelElements.map((element) => Math.ceil(element.getBoundingClientRect().width))
-    );
-    const nextWidth = maxLabelWidth + PROVIDER_ICON_SIZE + PROVIDER_ICON_GAP;
-    setProviderContentWidth((currentWidth) =>
-      currentWidth === nextWidth ? currentWidth : nextWidth
-    );
-  }, [githubLabel, googleLabel, appleLabel, discordLabel, emailEntryLabel]);
-
-  useEffect(() => {
-    if (view !== 'email') {
-      return undefined;
-    }
-    // Defer focus until the slide-in transition has settled so the browser does
-    // not interrupt the framer-motion animation by scrolling the input into view.
-    const handle = window.setTimeout(() => {
-      emailInputRef.current?.focus();
-    }, 220);
-    return () => window.clearTimeout(handle);
-  }, [view]);
 
   const handleEnterEmailView = useCallback(() => {
     setError('');
@@ -941,6 +917,7 @@ export function LoginPage({
             return;
           }
 
+          writeLastLoginMethod('email');
           capturePostHogEvent(postHog, 'auth/email_sign_in_succeeded', {
             login_surface: loginSurface,
             launch_mode: detectAppLaunchMode(isElectronRenderer),
@@ -1150,6 +1127,7 @@ export function LoginPage({
             // The session atom may not be hydrated yet, so identify by the user id
             // resolved from a fresh getSession() rather than the stale React state.
             readAndClearPendingOAuth();
+            writeLastLoginMethod(provider);
             const refreshedSession = await authClient.getSession().catch(() => null);
             const nativeUser =
               refreshedSession && typeof refreshedSession === 'object'
@@ -1436,84 +1414,67 @@ export function LoginPage({
   if (isElectronRendererLogin && isCompletingElectronSignIn) {
     return (
       <LoadingPlaceholder
+        variant="boot"
         title={t('login.completingSignIn', 'Signing you in...')}
         description={t('login.completingSignInDescription', 'Finishing sign-in from your browser.')}
       />
     );
   }
 
+  const lastUsedBadge = <Badge>{t('login.lastUsed', 'Last used')}</Badge>;
+
+  // One group of equal buttons: a provider is a choice, not a recommendation,
+  // so none is filled. The method this device last completed carries a badge.
   const renderOAuthPanel = () => (
-    <motion.div
-      key="oauth"
-      initial={{ opacity: 0, x: -12 }}
-      animate={{ opacity: 1, x: 0 }}
-      exit={{ opacity: 0, x: -12 }}
-      transition={VIEW_TRANSITION}
-      className="flex flex-col gap-2.5"
-    >
-      {PROVIDER_CONFIG.map((provider) => {
-        const Icon = provider.icon;
-        return (
-          <Button
-            key={provider.id}
-            onClick={() => {
-              void handleSocialLogin(provider.id);
-            }}
-            className="h-10 w-full"
-            disabled={isButtonsDisabled}
-            variant={provider.variant}
-          >
-            <SocialLoginButtonContent
-              icon={<Icon />}
-              label={getProviderLabel(provider.id)}
-              width={providerContentWidth}
-            />
-          </Button>
-        );
-      })}
+    <div {...stylex.props(styles.methods)}>
+      <div {...stylex.props(styles.providerGroup)}>
+        {PROVIDER_CONFIG.map((provider) => {
+          const Icon = provider.icon;
+          return (
+            <Button
+              key={provider.id}
+              variant="secondary"
+              size="large"
+              onClick={() => {
+                void handleSocialLogin(provider.id);
+              }}
+              disabled={isButtonsDisabled}
+            >
+              <span {...stylex.props(styles.methodContent)}>
+                <Icon />
+                <span {...stylex.props(styles.methodLabel)}>{getProviderLabel(provider.id)}</span>
+                {lastLoginMethod === provider.id ? lastUsedBadge : null}
+              </span>
+            </Button>
+          );
+        })}
+      </div>
 
       {canUseEmailPasswordLogin ? (
-        <>
-          <div className="my-1 flex items-center gap-3 text-[11px] uppercase tracking-[0.14em] text-muted-foreground/70">
-            <span className="h-px flex-1 bg-border/70" />
-            <span>{t('login.orContinueWith', 'or')}</span>
-            <span className="h-px flex-1 bg-border/70" />
-          </div>
-
-          <Button
-            type="button"
-            variant="secondary"
-            onClick={handleEnterEmailView}
-            className="h-10 w-full"
-            disabled={isButtonsDisabled}
-          >
-            <SocialLoginButtonContent
-              icon={
-                <ProviderIcon>
-                  <Mail strokeWidth={1.75} />
-                </ProviderIcon>
-              }
-              label={emailEntryLabel}
-              width={providerContentWidth}
-            />
-          </Button>
-        </>
+        <Button
+          type="button"
+          variant="ghost"
+          size="large"
+          onClick={handleEnterEmailView}
+          disabled={isButtonsDisabled}
+        >
+          <span {...stylex.props(styles.methodContent)}>
+            <ProviderIcon>
+              <Mail strokeWidth={1.75} />
+            </ProviderIcon>
+            <span {...stylex.props(styles.methodLabel)}>{emailEntryLabel}</span>
+            {lastLoginMethod === 'email' ? lastUsedBadge : null}
+          </span>
+        </Button>
       ) : null}
-    </motion.div>
+    </div>
   );
 
   const renderVerificationSentPanel = () => (
-    <motion.div
-      key="verification-sent"
-      initial={{ opacity: 0, x: 12 }}
-      animate={{ opacity: 1, x: 0 }}
-      exit={{ opacity: 0, x: -12 }}
-      transition={VIEW_TRANSITION}
-      className="flex flex-col gap-5"
-    >
+    <div className="flex flex-col gap-5">
       <div className="flex flex-col items-center gap-3 pt-1 text-center">
-        <div className="flex h-12 w-12 items-center justify-center rounded-full bg-primary/10">
-          <Mail className="size-6 text-primary" strokeWidth={1.75} aria-hidden="true" />
+        <div className="flex h-12 w-12 items-center justify-center rounded-full bg-muted">
+          <Mail className="size-6 text-foreground" strokeWidth={1.75} aria-hidden="true" />
         </div>
         <p className="text-sm leading-relaxed text-muted-foreground">
           <Trans
@@ -1558,7 +1519,7 @@ export function LoginPage({
           {t('login.backToSignIn', 'Back to sign-in options')}
         </button>
       </div>
-    </motion.div>
+    </div>
   );
 
   const renderEmailFormPanel = () => {
@@ -1572,12 +1533,7 @@ export function LoginPage({
         : t('login.emailSignIn', 'Sign in with email');
 
     return (
-      <motion.form
-        key="email-form"
-        initial={{ opacity: 0, x: 12 }}
-        animate={{ opacity: 1, x: 0 }}
-        exit={{ opacity: 0, x: -12 }}
-        transition={VIEW_TRANSITION}
+      <form
         className="flex flex-col gap-4"
         onSubmit={(event) => {
           void handleEmailSubmit(event);
@@ -1586,40 +1542,29 @@ export function LoginPage({
         aria-describedby={effectiveError ? 'login-form-error' : undefined}
         aria-busy={isEmailSubmitting}
       >
-        <div className="flex flex-col gap-3">
-          <AnimatePresence initial={false}>
-            {isSignUp ? (
-              <motion.div
-                key="name-field"
-                initial={{ height: 0, opacity: 0 }}
-                animate={{ height: 'auto', opacity: 1 }}
-                exit={{ height: 0, opacity: 0 }}
-                transition={VIEW_TRANSITION}
-                className="overflow-hidden"
-              >
-                <div className="grid gap-1.5 pb-3">
-                  <UiField.Label htmlFor="email-auth-name" className="text-xs font-medium">
-                    {t('login.nameLabel', 'Name')}
-                  </UiField.Label>
-                  <Input
-                    id="email-auth-name"
-                    autoComplete="name"
-                    value={emailName}
-                    required
-                    disabled={isButtonsDisabled}
-                    onChange={(event) => {
-                      setEmailName(event.target.value);
-                      setError('');
-                    }}
-                    placeholder={t('login.namePlaceholder', 'Jane Doe')}
-                    className="h-10"
-                  />
-                </div>
-              </motion.div>
-            ) : null}
-          </AnimatePresence>
+        <div {...stylex.props(styles.fields)}>
+          <LoginExpandingRow open={isSignUp} reducedMotion={!!prefersReducedMotion}>
+            <div {...stylex.props(styles.nameField)}>
+              <UiField.Label htmlFor="email-auth-name" className="text-xs font-medium">
+                {t('login.nameLabel', 'Name')}
+              </UiField.Label>
+              <Input
+                id="email-auth-name"
+                autoComplete="name"
+                value={emailName}
+                required={isSignUp}
+                disabled={isButtonsDisabled || !isSignUp}
+                onChange={(event) => {
+                  setEmailName(event.target.value);
+                  setError('');
+                }}
+                placeholder={t('login.namePlaceholder', 'Jane Doe')}
+                className="h-10"
+              />
+            </div>
+          </LoginExpandingRow>
 
-          <div className="grid gap-1.5">
+          <div {...stylex.props(styles.emailField)}>
             <UiField.Label htmlFor="email-auth-email" className="text-xs font-medium">
               {t('login.emailLabel', 'Email address')}
             </UiField.Label>
@@ -1641,55 +1586,62 @@ export function LoginPage({
             />
           </div>
 
-          <div className="grid gap-1.5">
-            <div className="flex items-center justify-between">
-              <UiField.Label htmlFor="email-auth-password" className="text-xs font-medium">
-                {t('login.passwordLabel', 'Password')}
-              </UiField.Label>
+          <div {...stylex.props(styles.passwordField)}>
+            <div className="grid gap-1.5">
+              <div className="flex items-center justify-between">
+                <UiField.Label htmlFor="email-auth-password" className="text-xs font-medium">
+                  {t('login.passwordLabel', 'Password')}
+                </UiField.Label>
+              </div>
+              <PasswordInput
+                id="email-auth-password"
+                autoComplete={isSignUp ? 'new-password' : 'current-password'}
+                value={password}
+                required
+                disabled={isButtonsDisabled}
+                onChange={(event) => {
+                  setPassword(event.target.value);
+                  setError('');
+                }}
+                placeholder={
+                  isSignUp
+                    ? t('login.passwordSignUpPlaceholder', 'Letters and numbers, 8+ characters')
+                    : t('login.passwordPlaceholder', 'At least 8 characters')
+                }
+                className="h-10"
+                labels={{
+                  show: t('login.showPassword', 'Show password'),
+                  hide: t('login.hidePassword', 'Hide password'),
+                }}
+              />
             </div>
-            <PasswordInput
-              id="email-auth-password"
-              autoComplete={isSignUp ? 'new-password' : 'current-password'}
-              value={password}
-              required
-              disabled={isButtonsDisabled}
-              onChange={(event) => {
-                setPassword(event.target.value);
-                setError('');
-              }}
-              placeholder={
-                isSignUp
-                  ? t('login.passwordSignUpPlaceholder', 'Letters and numbers, 8+ characters')
-                  : t('login.passwordPlaceholder', 'At least 8 characters')
-              }
-              className="h-10"
-              labels={{
-                show: t('login.showPassword', 'Show password'),
-                hide: t('login.hidePassword', 'Hide password'),
-              }}
-            />
-            {!isSignUp ? (
-              <div className="flex justify-end">
+            <LoginExpandingRow open={!isSignUp} reducedMotion={!!prefersReducedMotion}>
+              <div className="flex justify-end pt-1.5">
                 <button
                   type="button"
                   onClick={handleForgotPassword}
-                  disabled={isButtonsDisabled}
+                  disabled={isButtonsDisabled || isSignUp}
                   className="text-xs text-muted-foreground transition-colors hover:text-foreground disabled:opacity-50"
                 >
                   {t('login.forgotPassword', 'Forgot password?')}
                 </button>
               </div>
-            ) : null}
+            </LoginExpandingRow>
           </div>
 
-          <Button type="submit" className="mt-1 h-10 w-full" disabled={isButtonsDisabled}>
+          <Button
+            type="submit"
+            aria-label={submitLabel}
+            className="mt-1 h-10 w-full"
+            disabled={isButtonsDisabled}
+          >
             {isEmailSubmitting ? (
               <>
                 <Spinner className="mr-2 h-4 w-4" />
                 {submitLabel}
               </>
             ) : (
-              <span className="flex items-center justify-center gap-2">
+              <span aria-hidden="true" className="flex items-center justify-center gap-2">
                 {submitLabel}
                 <ArrowRight className="size-4 opacity-80" strokeWidth={1.75} />
               </span>
@@ -1741,34 +1693,17 @@ export function LoginPage({
             )}
           </div>
         ) : null}
-      </motion.form>
+      </form>
     );
   };
 
-  const renderEmailPanel = () => (
-    <motion.div
-      key="email"
-      initial={{ opacity: 0, x: 12 }}
-      animate={{ opacity: 1, x: 0 }}
-      exit={{ opacity: 0, x: 12 }}
-      transition={VIEW_TRANSITION}
-    >
-      <AnimatePresence mode="wait" initial={false}>
-        {emailAuthStatus === 'verification-sent'
-          ? renderVerificationSentPanel()
-          : renderEmailFormPanel()}
-      </AnimatePresence>
-    </motion.div>
-  );
+  const renderEmailPanel = () =>
+    emailAuthStatus === 'verification-sent'
+      ? renderVerificationSentPanel()
+      : renderEmailFormPanel();
 
   const renderElectronRendererPanel = () => (
-    <motion.div
-      key="electron"
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      transition={VIEW_TRANSITION}
-      className="flex flex-col gap-3"
-    >
+    <div className="flex flex-col gap-3">
       <Button
         onClick={() => void handleElectronBrowserLogin()}
         className="h-10 w-full"
@@ -1811,17 +1746,11 @@ export function LoginPage({
           />
         </Button>
       ) : null}
-    </motion.div>
+    </div>
   );
 
   const renderElectronBrowserHandoffPanel = () => (
-    <motion.div
-      key="electron-handoff"
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      transition={VIEW_TRANSITION}
-      className="flex flex-col gap-3"
-    >
+    <div className="flex flex-col gap-3">
       {electronHandoffAccountLabel ? (
         <div className="rounded-lg border border-border/60 bg-muted/40 px-3 py-2 text-center">
           <div className="text-[11px] uppercase tracking-[0.12em] text-muted-foreground/80">
@@ -1885,7 +1814,7 @@ export function LoginPage({
           ? t('login.desktopHandoff.switching', 'Signing out of this browser...')
           : t('login.desktopHandoff.switchAccount', 'Use a different account')}
       </Button>
-    </motion.div>
+    </div>
   );
 
   const isEmailVerificationSent = view === 'email' && emailAuthStatus === 'verification-sent';
@@ -1933,83 +1862,78 @@ export function LoginPage({
     return t('login.emailViewDescription', 'Use your email address and password to continue.');
   })();
 
+  const showElectronRendererPanel =
+    isElectronRendererLogin && !(isDevElectronEmailPasswordLoginEnabled && view === 'email');
+  const showBackButton = view === 'email' && canUseEmailPasswordLogin;
+  // On a phone the visual sits above the form; the email form needs the room
+  // (and the keyboard takes the rest), so the visual folds away there.
+  const isVisualFolded = view === 'email';
+  const entranceInitial = prefersReducedMotion ? false : 'hidden';
+
   return (
-    <div className="relative flex h-screen w-full items-center justify-center bg-background p-4">
+    <div {...stylex.props(styles.page)}>
       <WindowDragStrip />
-      <motion.div
-        layout
-        transition={VIEW_TRANSITION}
-        className="relative w-full max-w-sm overflow-hidden rounded-2xl border border-border/60 bg-card shadow-[0_8px_30px_-12px_rgba(0,0,0,0.12)]"
+      <section {...stylex.props(styles.visual, isVisualFolded && styles.visualFolded)}>
+        <LoginDitherVisual keepClearRef={taglineRef} />
+        {/* Temporarily hidden: bottom-left tagline, pending design feedback.
+        <motion.p
+          ref={taglineRef}
+          initial={entranceInitial}
+          animate="shown"
+          variants={ENTRANCE_TAGLINE}
+          {...stylex.props(styles.tagline)}
+        >
+          {t('login.tagline', 'A shared workspace for the coding agents your team already uses.')}
+        </motion.p>
+        */}
+      </section>
+
+      <motion.main
+        initial={entranceInitial}
+        animate="shown"
+        variants={ENTRANCE_STAGGER}
+        {...stylex.props(styles.panel)}
       >
-        <AnimatePresence initial={false}>
-          {view === 'email' &&
-          (!isElectronRendererLogin || isDevElectronEmailPasswordLoginEnabled) ? (
-            <motion.button
-              key="back"
-              type="button"
-              aria-label={t('login.back', 'Back')}
-              onClick={handleExitEmailView}
-              disabled={isButtonsDisabled}
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              transition={VIEW_TRANSITION}
-              className={cn(
-                'absolute left-3 top-3 z-10 inline-flex h-8 w-8 items-center justify-center rounded-full text-muted-foreground transition-colors',
-                'hover:bg-hover hover:text-foreground',
-                'focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring',
-                'disabled:opacity-50'
-              )}
-            >
-              <ArrowLeft className="size-4" strokeWidth={1.75} />
-            </motion.button>
-          ) : null}
-        </AnimatePresence>
+        <motion.div variants={ENTRANCE_ITEM} {...stylex.props(styles.brand)}>
+          <img src={lodyLogo} alt="Lody" draggable={false} {...stylex.props(styles.brandMark)} />
+        </motion.div>
 
-        <div className="px-7 pb-6 pt-7">
-          <div className="flex flex-col items-center gap-3 pb-6 text-center">
-            <img src={lodyLogo} alt="Lody" className="h-12 w-12 object-contain" draggable={false} />
-            <div className="space-y-1">
-              <h1
-                id="login-title"
-                className="text-xl font-semibold leading-tight tracking-tight text-foreground"
+        <motion.div variants={ENTRANCE_ITEM} {...stylex.props(styles.body)}>
+          <div {...stylex.props(styles.scene)}>
+            <div {...stylex.props(styles.header)}>
+              <LoginExpandingRow open={showBackButton} reducedMotion={!!prefersReducedMotion}>
+                <div {...stylex.props(styles.back)}>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="small"
+                    onClick={handleExitEmailView}
+                    disabled={isButtonsDisabled}
+                  >
+                    <ArrowLeft size={14} strokeWidth={1.75} aria-hidden="true" />
+                    {t('login.back', 'Back')}
+                  </Button>
+                </div>
+              </LoginExpandingRow>
+              <LoginExpandingRow
+                open
+                reducedMotion={!!prefersReducedMotion}
+                contentKey={`${headerTitle}:${headerDescription}:${isEmailVerificationSent}`}
               >
-                {headerTitle}
-              </h1>
-              {isEmailVerificationSent ? null : (
-                <p className="text-sm text-muted-foreground">{headerDescription}</p>
-              )}
+                <h1 id="login-title" {...stylex.props(styles.title)}>
+                  {headerTitle}
+                </h1>
+                {isEmailVerificationSent ? null : (
+                  <p {...stylex.props(styles.description)}>{headerDescription}</p>
+                )}
+              </LoginExpandingRow>
             </div>
-          </div>
 
-          {!isElectronRendererLogin ? (
-            <div
-              ref={providerLabelMeasureRef}
-              aria-hidden="true"
-              className="pointer-events-none absolute left-0 top-0 -z-10 opacity-0"
-            >
-              <div className="flex flex-col gap-2 text-sm font-medium">
-                {PROVIDER_CONFIG.map((provider) => (
-                  <span key={provider.id} data-provider-label>
-                    {getProviderLabel(provider.id)}
-                  </span>
-                ))}
-                <span data-provider-label>{emailEntryLabel}</span>
-              </div>
-            </div>
-          ) : null}
-
-          <AnimatePresence initial={false} mode="wait">
             {effectiveError ? (
-              <motion.p
-                key={effectiveError}
-                initial={{ opacity: 0, y: -4 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -4 }}
-                transition={VIEW_TRANSITION}
+              <p
                 id="login-form-error"
                 role="alert"
-                className="mb-3 rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-center text-xs text-destructive"
+                className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive"
               >
                 {effectiveError}
                 {effectiveErrorDetail ? (
@@ -2017,51 +1941,240 @@ export function LoginPage({
                     {effectiveErrorDetail}
                   </span>
                 ) : null}
-              </motion.p>
+              </p>
             ) : null}
-          </AnimatePresence>
 
-          <AnimatePresence mode="wait" initial={false}>
-            {isElectronBrowserHandoff
-              ? renderElectronBrowserHandoffPanel()
-              : isElectronRendererLogin &&
-                  !(isDevElectronEmailPasswordLoginEnabled && view === 'email')
-                ? renderElectronRendererPanel()
-                : view === 'oauth'
-                  ? renderOAuthPanel()
-                  : renderEmailPanel()}
-          </AnimatePresence>
-
-          {view === 'email' && emailAuthStatus === 'verification-sent' ? null : (
-            <p className="mt-6 text-center text-[11px] leading-5 text-muted-foreground/80">
-              <Trans
-                i18nKey="login.legalNotice"
-                components={{
-                  br: <br />,
-                  terms: (
-                    <a
-                      href={termsUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="underline underline-offset-4 hover:text-foreground"
-                      onClick={(event) => void handleLegalLinkClick(event, termsUrl)}
-                    />
-                  ),
-                  privacy: (
-                    <a
-                      href={privacyUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="underline underline-offset-4 hover:text-foreground"
-                      onClick={(event) => void handleLegalLinkClick(event, privacyUrl)}
-                    />
-                  ),
-                }}
+            {isElectronBrowserHandoff ? (
+              renderElectronBrowserHandoffPanel()
+            ) : (
+              <LoginViewSlot
+                active={view === 'email' && !showElectronRendererPanel ? 1 : 0}
+                reducedMotion={!!prefersReducedMotion}
+                onEntered={focusEmailInput}
+                panels={[
+                  isElectronRendererLogin ? renderElectronRendererPanel() : renderOAuthPanel(),
+                  canUseEmailPasswordLogin ? renderEmailPanel() : null,
+                ]}
               />
-            </p>
-          )}
-        </div>
-      </motion.div>
+            )}
+
+            {isEmailVerificationSent ? null : (
+              <p {...stylex.props(styles.legal)}>
+                <Trans
+                  i18nKey="login.legalNotice"
+                  components={{
+                    br: <br />,
+                    terms: (
+                      <a
+                        href={termsUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        onClick={(event) => void handleLegalLinkClick(event, termsUrl)}
+                        {...stylex.props(styles.legalLink)}
+                      />
+                    ),
+                    privacy: (
+                      <a
+                        href={privacyUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        onClick={(event) => void handleLegalLinkClick(event, privacyUrl)}
+                        {...stylex.props(styles.legalLink)}
+                      />
+                    ),
+                  }}
+                />
+              </p>
+            )}
+          </div>
+        </motion.div>
+      </motion.main>
     </div>
   );
 }
+
+const NARROW = '@media (max-width: 860px)';
+// A phone on its side, or a very short window: no room for a visual above the form.
+const NARROW_SHORT = '@media (max-width: 860px) and (max-height: 600px)';
+const SAFE_TOP = 'max(12px, env(safe-area-inset-top))';
+const SAFE_BOTTOM = 'max(12px, env(safe-area-inset-bottom))';
+
+const styles = stylex.create({
+  // The window holds two things: an inset visual surface and the sign-in
+  // column. On a narrow window they stack, the visual on top.
+  page: {
+    boxSizing: 'border-box',
+    display: 'grid',
+    gridTemplateColumns: { default: 'minmax(0, 1fr) minmax(360px, 440px)', [NARROW]: '1fr' },
+    gridTemplateRows: { default: '1fr', [NARROW]: 'auto minmax(0, 1fr)' },
+    width: '100%',
+    height: { default: '100vh', '@supports (height: 100dvh)': '100dvh' },
+    paddingTop: SAFE_TOP,
+    paddingBottom: SAFE_BOTTOM,
+    paddingInline: '12px',
+    backgroundColor: colors.background,
+    color: colors.label,
+  },
+  visual: {
+    position: 'relative',
+    display: { default: 'block', [NARROW_SHORT]: 'none' },
+    gridRow: { default: 'auto', [NARROW]: '1' },
+    minWidth: 0,
+    height: { default: 'auto', [NARROW]: 'clamp(200px, 42svh, 360px)' },
+    overflow: 'hidden',
+    borderRadius: radius.large,
+    cornerShape: corner.shape,
+    // Paper and ink of the dither: a step off the page, and the page's ink.
+    // In dark mode the ink is mixed toward black so the jellyfish reads a
+    // touch dimmer than interface white. (The dither resolves this colour by
+    // painting it, which ignores alpha, so it must dim via colour, not opacity.)
+    backgroundColor: `color-mix(in oklab, ${colors.label} 5%, ${colors.background})`,
+    color: {
+      default: colors.label,
+      [DARK]: `color-mix(in oklab, ${colors.label} 88%, black)`,
+    },
+    transitionProperty: {
+      default: 'none',
+      [NARROW]: 'height, opacity',
+      [REDUCED_MOTION]: 'none',
+    },
+    transitionDuration: '320ms',
+    transitionTimingFunction: 'cubic-bezier(0.4, 0, 0.2, 1)',
+  },
+  // Only a stacked layout folds; side by side there is room for both.
+  visualFolded: {
+    height: { default: null, [NARROW]: '0px' },
+    opacity: { default: null, [NARROW]: 0 },
+  },
+  tagline: {
+    position: 'absolute',
+    insetInlineStart: { default: '40px', [NARROW]: '20px' },
+    bottom: { default: '36px', [NARROW]: '20px' },
+    maxWidth: { default: '460px', [NARROW]: 'calc(100% - 40px)' },
+    margin: 0,
+    fontFamily: 'var(--font-wordmark)',
+    fontSize: { default: '30px', [NARROW]: '22px' },
+    lineHeight: 1.15,
+    letterSpacing: '-0.01em',
+    color: colors.label,
+  },
+  // Anchored top and bottom: the mark meets the visual's top edge, the sign-in
+  // group sits on the same baseline as the tagline. Stacked, the mark sits under
+  // the visual and the group stays at the bottom, within reach of a thumb.
+  panel: {
+    boxSizing: 'border-box',
+    display: 'flex',
+    flexDirection: 'column',
+    justifyContent: 'space-between',
+    gap: { default: '32px', [NARROW]: '24px' },
+    // Its own row when stacked, so a hidden visual leaves it the full height.
+    gridRow: { default: 'auto', [NARROW]: '2' },
+    minHeight: 0,
+    overflowY: 'auto',
+    paddingTop: { default: '28px', [NARROW]: '24px' },
+    paddingBottom: { default: '36px', [NARROW]: '12px' },
+    paddingInlineStart: { default: '52px', [NARROW]: '20px' },
+    paddingInlineEnd: { default: '40px', [NARROW]: '20px' },
+  },
+  brand: {
+    display: 'flex',
+    alignItems: 'center',
+  },
+  brandMark: {
+    width: '28px',
+    height: '28px',
+    objectFit: 'contain',
+  },
+  body: {
+    width: '100%',
+    maxWidth: { default: '360px', [NARROW]: 'none' },
+  },
+  scene: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: space[6],
+  },
+  header: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'start',
+  },
+  fields: {
+    display: 'flex',
+    flexDirection: 'column',
+  },
+  nameField: {
+    display: 'grid',
+    gap: space[1.5],
+    paddingBottom: space[3],
+  },
+  emailField: {
+    display: 'grid',
+    gap: space[1.5],
+    marginBottom: space[3],
+  },
+  passwordField: {
+    display: 'grid',
+    marginBottom: space[3],
+  },
+  back: {
+    marginInlineStart: '-10px',
+    paddingBottom: space[2],
+  },
+  title: {
+    margin: 0,
+    fontSize: '28px',
+    lineHeight: 1.2,
+    fontWeight: 600,
+    letterSpacing: '-0.025em',
+    color: colors.label,
+  },
+  description: {
+    margin: 0,
+    marginTop: space[2],
+    fontSize: '14px',
+    lineHeight: 1.5,
+    color: colors.secondaryLabel,
+  },
+  methods: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '12px',
+  },
+  providerGroup: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '8px',
+  },
+  // Icon and label start at the button's edge so every row lines up, and the
+  // badge takes the far end.
+  methodContent: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '10px',
+    width: '100%',
+    minWidth: 0,
+  },
+  methodLabel: {
+    flexGrow: 1,
+    minWidth: 0,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    textAlign: 'start',
+  },
+  legal: {
+    margin: 0,
+    paddingTop: '16px',
+    borderTopWidth: '1px',
+    borderTopStyle: 'solid',
+    borderTopColor: colors.separator,
+    fontSize: '11px',
+    lineHeight: 1.6,
+    color: colors.tertiaryLabel,
+  },
+  legalLink: {
+    color: { default: colors.secondaryLabel, ':hover': colors.label },
+    textDecoration: 'underline',
+    textUnderlineOffset: '3px',
+  },
+});

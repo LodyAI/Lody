@@ -4,10 +4,29 @@ File attachments use `file` blocks; the product contract is in
 `specs/session-files.md`.
 
 - `session-file-card.tsx` — `SessionFileCardLayout` is shared by pending and delivered
-  cards. The delivered card shows the extension-derived icon, name, and size;
-  transport and `getServerNow()` expiry determine pending/expired/previewable/
-  downloadable state. `SessionFileCardList` aggregates adjacent blocks. Story: `SessionFileCard.stories.tsx`,
-  test: `tests/session-file-card.test.tsx`.
+  cards. The delivered card is evidence, so it rests quietly under the answer, but it is the thing
+  the agent made and reads as a small sheet of paper laid on a tray. Two surfaces only: the tray is
+  `secondaryBackground` with no outline or shadow; the sheet is `raisedBackground` with
+  `shadow.card`, the only shadow, so no edge is drawn twice. The sheet's top-right corner is not
+  painted (the tray shows through, whatever tint it has) and the fold lies in the remaining half.
+  The sheet (`session-file-sheet.tsx`) is narrow and portrait and prints no glyph (one was tried and
+  made it read as a badge) and no extension, which the line beneath the name spells. It carries
+  faint tonal marks of ink instead, drawn per file kind so a column of files reads as different
+  pages: ruled lines (text, document, binary), indented lines (code), brace-like lines (data), a
+  header-and-cells grid (spreadsheet), a zipper (archive), a waveform (audio), a picture over two
+  captions (image) and the same with a play mark (video). The marks are a step of `label` over the
+  paper, never a hue, and the first line of every page stops short of the fold.
+  Beside it, the name is the only line at full ink; under it, `secondaryLabel` spells the type and
+  size ("PDF · 2.4 MB", via `formatSessionFileMeta`, which the pending row shares so the handoff
+  to history does not change the text; no short extension means the size alone) or the status. The
+  action chip trails and rests at `secondaryLabel` (a dimmer rest read as disabled), sinking into a
+  well on hover of the main button. The sheet scales with Appearance (`captionSize` units). On a card that opens something
+  the sheet lifts and tilts a hair and takes `shadow.raised`; pending and expired dim it, and a
+  failed card tints the tray toward `destructive` and its reason takes label ink. Under
+  `prefers-reduced-motion` the lift is instant, not animated. There is no colour per file kind,
+  because colour is reserved for outcomes. Transport and `getServerNow()` expiry determine pending/expired/previewable/
+  downloadable state. `SessionFileCardList` aggregates adjacent blocks. Story:
+  `SessionFileCard.stories.tsx`, test: `tests/session-file-card.test.tsx`.
 - Static shares pass `retention='publication'`: the copied object has no dependency
   on the source upload's expiry. Its manifest-gated reader decides availability.
 - One card, one primary action — EXCEPT an HTML attachment, which also gets a separate

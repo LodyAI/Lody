@@ -9,6 +9,11 @@ Session control event meanings and retired request events are described in the
 
 ## Page shell and tabs
 
+The navigation-sidebar, terminal-dock and right-panel toggles reuse
+`CuidaSidebarExpandOutline` from `@lody/ui` in 16px boxes. The terminal glyph is
+rotated -90 degrees and the right-panel glyph 180 degrees so the filled strip
+marks the panel's edge; their buttons and toggle behavior stay shared.
+
 `ask-user-question-card.tsx` owns interactive and read-only question presentation,
 including independent optional notes and secret masking. Its dedicated
 `AskUserQuestionCard` stories cover editing, replay, multiple questions and legacy

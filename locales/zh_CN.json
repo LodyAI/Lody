@@ -1048,7 +1048,6 @@
   "login.noAccountPrompt": "还没有账号？",
   "login.openBrowserSignIn": "打开浏览器登录",
   "login.openingBrowser": "正在打开浏览器...",
-  "login.orContinueWith": "或",
   "login.passwordComplexity": "密码必须同时包含字母和数字。",
   "login.passwordEmpty": "请输入密码。",
   "login.passwordLabel": "密码",
@@ -5094,5 +5093,7 @@
   "sessions.fileViewer.selection.drawHint": "选好工具后，在截图上拖动绘制。",
   "sessions.fileViewer.selection.screenshotPreview": "选区截图预览",
   "sidebar.filter.showBranchNames": "显示分支",
-  "sidebar.filter.detailsHeading": "详情"
+  "sidebar.filter.detailsHeading": "详情",
+  "login.lastUsed": "上次使用",
+  "login.tagline": "为团队正在使用的 Coding Agents 提供一个共享工作空间。"
 }

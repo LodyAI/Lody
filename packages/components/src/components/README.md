@@ -125,6 +125,23 @@ and [details group](../../../../.agents/notes/implemented/feature/2026-10-18-sid
   `VITE_SITE_URL` (default `https://lody.ai`) in the external browser. Complete
   account linking there with the same Lody account; the client's reactive settings
   query reflects completion. Browser settings keep their existing OAuth flow.
+- Login page: `login-page.tsx` is an inset dithered visual
+  (`login-dither-visual.tsx`, WebGL, theme-coloured, reduced-motion aware) beside an
+  anchored sign-in column; on narrow screens the visual stacks on top and folds
+  away for the email form. The header and legal notice stay mounted in ordinary
+  CSS flow. `login-view-slot.tsx` keeps the OAuth and email panels mounted in a
+  clipped horizontal track; one MotionValue drives translation and interpolated
+  intrinsic height together. Email sign-in and sign-up reuse the same form and
+  input elements. Only the name and forgot-password rows expand or contract,
+  with the viewport following their flow height in the same frame. Switching
+  never fades the form or scales its controls. Reversals start from current
+  numeric values, offscreen panels are inert and excluded from accessibility,
+  and email focuses after the slide completes without scrolling. Reduced motion
+  commits directly. Providers are one group of equal secondary buttons; the
+  method this device last completed is marked "Last used" via
+  `lib/last-login-method.ts`, written only on a completed sign-in.
+  [Decision](../../../../.agents/notes/implemented/feature/2026-10-17-login-inset-visual-last-used.md),
+  [retained sign-up transition fix](../../../../.agents/notes/implemented/bug-fix/2026-10-18-login-view-switching.md).
 - Browser desktop sign-in handoff: `login-page.tsx` under `?client_id=electron`,
   the page the desktop app opens in the system browser. A desktop sign-out leaves
   this browser signed in as the previous account, so the page names that account

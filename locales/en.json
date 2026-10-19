@@ -1048,7 +1048,6 @@
   "login.noAccountPrompt": "Don't have an account?",
   "login.openBrowserSignIn": "Open browser to sign in",
   "login.openingBrowser": "Opening browser...",
-  "login.orContinueWith": "or",
   "login.passwordComplexity": "Password must include both letters and numbers.",
   "login.passwordEmpty": "Please enter your password.",
   "login.passwordLabel": "Password",
@@ -5094,5 +5093,7 @@
   "sessions.fileViewer.selection.drawHint": "Drag on the screenshot to draw.",
   "sessions.fileViewer.selection.screenshotPreview": "Selected screenshot",
   "sidebar.filter.showBranchNames": "Show Branch",
-  "sidebar.filter.detailsHeading": "Details"
+  "sidebar.filter.detailsHeading": "Details",
+  "login.lastUsed": "Last used",
+  "login.tagline": "A shared workspace for the coding agents your team already uses."
 }
