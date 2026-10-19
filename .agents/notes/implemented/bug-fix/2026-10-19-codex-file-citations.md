@@ -18,14 +18,22 @@ Code examples and incomplete or invalid citations remain non-card content.
 
 A remark transform runs before URL/path linkification. It trims surrounding path
 whitespace, rejects ambiguous duplicate paths and URI targets, and encodes literal
-filename punctuation before passing the target to the existing resolver. Optional
+filename punctuation before passing the target to the existing resolver. Windows drive
+prefixes are exempt from URI rejection and stay literal while separators normalize.
+Only nodes with a children array are traversed: adding `children: undefined` to a
+math leaf changes how mdast-to-hast classifies it and crashes rendering. Optional
 artifact metadata does not assert file type, size, or existence. The shared card
 layout accepts a span frame so cards remain valid inside paragraphs. No opener means
 copying the original path, matching existing file-link behavior.
 
 This extends the [file-link action decision](../feature/2026-09-17-markdown-file-link-context-menu.md)
 and is documented in [file rendering](../../../../packages/components/src/components/ai-gui/session-files-rendering.md).
-The Markdown/file-link suite passed 30 tests under an isolated test configuration
-using available dependencies, including real Markdown parsing and React rendering.
-The full UI suite is blocked by missing `@stylexjs/unplugin` in the available dependency
-installation; card interaction tests and Storybook states are added but not verified there.
+An isolated checkout with the frozen dependency lock passed all 106 tests in the
+Markdown/file-link, streaming renderer and file-card suites, including the existing
+inline/display-math tests and new Windows drive-path cases. The full static and
+2 GiB desktop build checks are also exercised before delivery.
+
+The PR smoke build pins `NODE_OPTIONS=--max-old-space-size=2048`, matching the
+existing CLI build budget: its macOS runner otherwise failed during CLI chunk
+rendering under a lower host-derived default. The unrelated duplicate `now` fixture
+property reported by static CI is removed without changing its value.

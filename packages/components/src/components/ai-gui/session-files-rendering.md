@@ -57,6 +57,9 @@ including paths wrapped in whitespace/newlines and optional `purpose` / `artifac
 attributes. It reuses `SessionFileCardLayout` and the Markdown file-link action/menu
 boundary; it does not fabricate an uploaded attachment, size, expiry, or download URL.
 Filename punctuation is URL-encoded for transport through the existing href resolver.
+Windows drive prefixes stay unescaped and backslash separators normalize to slashes,
+so absolute artifact targets retain their drive. The citation walk leaves non-container
+Markdown nodes untouched, including inline/display math.
 Without a session opener, clicking copies the path. Invalid/incomplete citations and
 code examples do not become cards. The inline card uses a span frame to keep paragraph
 markup valid. Coverage lives in the Markdown file-link and streaming renderer suites;

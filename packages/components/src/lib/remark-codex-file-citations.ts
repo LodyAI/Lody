@@ -12,7 +12,7 @@ type MdastNode = {
 // Code spans and fences remain literal examples, just like ordinary Markdown.
 export const remarkCodexFileCitations = () => (tree: unknown) => {
   const transform = (child: MdastNode): MdastNode[] | undefined => {
-    if (child.type !== 'text' || !child.value?.includes(':codex-file-citation{')) return;
+    if (child.type !== 'text' || !child.value?.includes(':codex-file-citation{')) return undefined;
     const pattern = /:codex-file-citation\{((?:\s*[\w-]+\s*=\s*(?:"[^"]*"|'[^']*'))*\s*)\}/gu;
     const nodes: MdastNode[] = [];
     let cursor = 0;
@@ -21,27 +21,36 @@ export const remarkCodexFileCitations = () => (tree: unknown) => {
       const paths = attributes.filter((attribute) => attribute[1] === 'path');
       if (paths.length !== 1) continue;
       const path = (paths[0]![2] ?? paths[0]![3] ?? '').trim();
-      if (!path || /[\r\n\0]/u.test(path)) continue;
+      if (!path || /[\r\n]/u.test(path) || path.includes(String.fromCharCode(0))) continue;
       // Encode literal filename punctuation before the existing href boundary decodes it.
-      const href = path.split('/').map(encodeURIComponent).join('/');
-      if (!isMarkdownAgentFileHref(href) || /^[a-z][a-z\d+.-]*:/iu.test(path)) continue;
+      const windowsDrivePath = /^[a-z]:[\\/]/iu.test(path);
+      if (!windowsDrivePath && /^[a-z][a-z\d+.-]*:/iu.test(path)) continue;
+      const normalizedPath = path.replace(/\\/gu, '/');
+      const href = normalizedPath
+        .split('/')
+        .map((segment, index) =>
+          windowsDrivePath && index === 0 ? segment : encodeURIComponent(segment)
+        )
+        .join('/');
+      if (!isMarkdownAgentFileHref(href)) continue;
       if (match.index > cursor)
         nodes.push({ type: 'text', value: child.value.slice(cursor, match.index) });
       nodes.push({
         type: 'link',
         url: href,
-        children: [{ type: 'text', value: path.split('/').pop() ?? path }],
+        children: [{ type: 'text', value: normalizedPath.split('/').pop() ?? path }],
         data: { hProperties: { 'data-codex-file-citation': true } },
       });
       cursor = match.index + match[0].length;
     }
-    if (!nodes.length) return;
+    if (!nodes.length) return undefined;
     if (cursor < child.value.length) nodes.push({ type: 'text', value: child.value.slice(cursor) });
     return nodes;
   };
   const walk = (node: MdastNode) => {
     if (['link', 'linkReference', 'code', 'inlineCode'].includes(node.type)) return;
-    node.children = node.children?.flatMap((child) => {
+    if (!Array.isArray(node.children)) return;
+    node.children = node.children.flatMap((child) => {
       const replacement = transform(child);
       if (replacement) return replacement;
       walk(child);

@@ -1,6 +1,7 @@
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import Markdown from 'react-markdown';
+import Markdown, { defaultUrlTransform } from 'react-markdown';
+import remarkMath from 'remark-math';
 import { remarkCodexFileCitations } from '../src/lib/remark-codex-file-citations';
 import { describe, expect, it } from 'vitest';
 import {
@@ -190,21 +191,26 @@ describe('normalizeMarkdownAgentFilePath', () => {
 describe('Codex file citations through Markdown', () => {
   const renderCitation = (text: string) =>
     renderToStaticMarkup(
-      createElement(Markdown, {
-        remarkPlugins: [remarkCodexFileCitations],
-        components: {
-          a: ({ node, href, children }) =>
-            createElement(
-              'span',
-              {
-                'data-card': node?.properties?.['data-codex-file-citation'] === true,
-                'data-path': href ? decodeURIComponent(href) : '',
-              },
-              children
-            ),
+      createElement(
+        Markdown,
+        {
+          remarkPlugins: [remarkMath, remarkCodexFileCitations],
+          urlTransform: (href) =>
+            isMarkdownAgentFileHref(href) ? href : defaultUrlTransform(href),
+          components: {
+            a: ({ node, href, children }) =>
+              createElement(
+                'span',
+                {
+                  'data-card': node?.properties?.['data-codex-file-citation'] === true,
+                  'data-path': href ? decodeURIComponent(href) : '',
+                },
+                children
+              ),
+          },
         },
-        children: text,
-      })
+        text
+      )
     );
 
   it('preserves surrounding prose and literal path punctuation', () => {
@@ -216,6 +222,30 @@ describe('Codex file citations through Markdown', () => {
     expect(html).toContain('Before ');
     expect(html).toContain(' after');
     expect(html).not.toContain('codex-file-citation');
+  });
+
+  it.each([
+    String.raw`C:\Users\agent\预算 draft.xlsx`,
+    'C:/Users/agent/预算 draft.xlsx',
+    String.raw`d:\exports\report 100% #1.xlsx`,
+  ])('preserves drive-qualified artifact targets: %s', (path) => {
+    const normalized = path.replace(/\\/gu, '/');
+    const html = renderCitation(`:codex-file-citation{path="${path}" purpose="output"}`);
+    expect(html).toContain('data-card="true"');
+    expect(html).toContain(`data-path="${normalized}"`);
+    expect(html).toContain(`>${normalized.split('/').pop()}</span>`);
+    expect(normalizeMarkdownAgentFilePath(normalized, 'C:/workspace', true)).toBe(normalized);
+  });
+
+  it('preserves math leaf nodes alongside citation cards', () => {
+    const html = renderCitation(
+      'Before $x^2$ after.\n\n$$\ny = x + 1\n$$\n\n:codex-file-citation{path="/tmp/report.pdf"}'
+    );
+    expect(html).toContain('math-inline');
+    expect(html).toContain('math-display');
+    expect(html).toContain('x^2');
+    expect(html).toContain('y = x + 1');
+    expect(html).toContain('data-card="true"');
   });
 
   it.each([

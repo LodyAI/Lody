@@ -100,6 +100,9 @@ jobs:
         run: pnpm --filter @lody/e2e check
 
       - name: Build OSS desktop and bundled CLI
+        env:
+          # Match the CLI's documented 2 GiB build budget instead of Node's host-derived default.
+          NODE_OPTIONS: --max-old-space-size=2048
         run: pnpm --dir apps/electron build
 
       - name: Run selected desktop journeys
