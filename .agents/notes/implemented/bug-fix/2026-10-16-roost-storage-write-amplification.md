@@ -135,6 +135,7 @@ columns for either format, with an explicit accepted-version assertion. Update
 bytes, receipt count and projection-row budgets remain unchanged. This is test
 diagnostics only: production reads, SDK pins, migrations and data cleanup do not
 change. Companion storage work: [Roost #15](https://github.com/loro-dev/roost/pull/15).
+Diagnostic compatibility PR: [#1735](https://github.com/LodyAI/Lody/pull/1735).
 
 The same sustained-streaming/reopen case passed separately with the installed
 Native SDK (v3) and the rebuilt v4 addon: one passed and 75 filtered in each run.

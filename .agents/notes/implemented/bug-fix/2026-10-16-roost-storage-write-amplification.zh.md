@@ -111,6 +111,7 @@ container v3（`roost_kv.space`）和 namespace 整数引用的 v4（通过 `spa
 `space/key/value` 列，并显式断言支持的版本；更新字节、回执行数和投影行数预算不变。
 这里只调整测试统计，不改生产读取、SDK 固定版本、迁移或数据清理。
 配套存储改动：[Roost #15](https://github.com/loro-dev/roost/pull/15)。
+统计兼容 PR：[#1735](https://github.com/LodyAI/Lody/pull/1735)。
 
 同一个持续流式输出及重开用例分别在当前 Native SDK（v3）和重建的 v4 addon 上通过：
 每次 1 项通过、75 项按名称过滤。全仓格式、所有 package 类型检查、带类型 lint 和
