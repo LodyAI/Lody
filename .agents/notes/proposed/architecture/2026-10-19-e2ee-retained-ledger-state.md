@@ -42,6 +42,21 @@ read:  serve pages by offset from Streams without host verification; clients ver
 audit: deferred; may run outside Convex (e.g. a separate worker)
 ```
 
+## Real-data measurements (2026-10-19)
+
+Fresh Ed25519 key pairs per member and device, real join and possession signatures, SHA-256 epoch commitments and random 72-byte packets:
+
+| Ledger | Records | Ledger | State | gzip | brotli | Pure-JS verify | Web Crypto path |
+|---|---|---|---|---|---|---|---|
+| 4,096 rotations | 4,097 | 1.0 MB | 448 KB | 446 KB | 437 KB | 7.2 ms/record | 3.2 ms/record |
+| 1,000 members + 1,000 devices + 2,000 rotations | 4,001 | 1.1 MB | 641 KB | 624 KB | 424 KB | 10.3 ms/record | 7.9 ms/record |
+| 4,000 members + 4,000 devices | 8,001 | 2.4 MB | 1.69 MB | 1.64 MB | 851 KB | 31.9 → **13.5** ms/record after the fix below | — |
+
+- Synthetic filled-byte data compressed 20–40× and was misleading. Real state is mostly high-entropy, so gzip saves ~1–3%; brotli saves ~⅓–½ on member-heavy states because each key and membership ID recurs in several state sets beyond gzip's window. Compress retained state with brotli.
+- Member admission was quadratic: each admit scanned every current member for a duplicate user. A derived index of current member user IDs (rebuilt on snapshot import, never encoded) fixed it; per-record cost is now constant across ledger sizes.
+- The remaining cost is noble curve arithmetic (~70% of the profile). Member and device records carry two signatures. The native Web Crypto path only halves the cost because the strict prime-subgroup check on each signature's R still runs in pure JS.
+- Core snapshots are capped at 2 MiB; a state of about 5,000 members plus devices would exceed it, which needs a core encoding change regardless of the host.
+
 ## Convex platform limits
 
 From the Convex limits documentation: queries and mutations have 1 s of user-code time, so verification stays in actions; Convex-runtime actions get 30 min and 64 MiB; Node actions 10 min and 512 MiB; documents are at most 1 MiB; arrays at most 8,192 elements; actions share a deployment-wide concurrency pool (64 on Free/Starter, 512 on Pro).
@@ -50,6 +65,12 @@ From the Convex limits documentation: queries and mutations have 1 s of user-cod
 - `finishWrite` and `observeHistory` receive every record hash as an array argument, which the platform rejects beyond 8,192 elements regardless of the backend's own cap. Pass length and head instead.
 - Retained state is stored as bytes; state above 1 MiB needs chunking (core snapshots are bounded at 2 MiB).
 - Per-record cost inside the Convex runtime is assumed similar to Node (both V8, pure-JS noble Ed25519) but has not been measured there.
+
+## Platform review (2026-10-19)
+
+- **Convex** (docs.convex.dev limits and pricing): the plan fits. Cost is dominated by database I/O, the bytes moved between functions and the database: each write reads and rewrites the state. At 10 writes/day per workspace and 0.5 MiB state, Pro overage is about $53/month for 1,000 workspaces and $620 for 10,000; rewriting the snapshot only every 64 appends roughly halves it, and brotli reduces it further. Storage and function calls stay within included amounts. The current full-replay code breaks Starter's 64-action concurrency near 10,000 workspaces.
+- **Loro Streams** (repo code and specs): reading from a saved offset seeks directly. Full-stream reads are risky: rare writes leave many small cold segments that are never compacted, and a forward page can exceed the gateway's 5 s read timeout. Ledger tokens should list only `stream-read`, `stream-head` and `stream-append-cas` (delete only for erasure), and be cached per stream for their 15-minute lifetime. No prices exist in the repo.
+- **Cloudflare** (for a later audit): Workers Paid with Workflows fits, chunked with state in R2; about $11/month for 1,000 and $82 for 10,000 daily audits at 2,000 records each.
 
 ## Alternatives considered
 

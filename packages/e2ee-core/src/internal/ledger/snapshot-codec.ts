@@ -419,6 +419,7 @@ function claimedSnapshotState(
       usedSigningKeys: HashSet.fromIterable(usedSigningKeys),
       usedEncKeys: HashSet.fromIterable(usedEncKeys),
       usedMembershipIds: HashSet.fromIterable(usedMembershipIds),
+      memberUsers: HashSet.fromIterable([...members.values()].map((member) => id(member.userId))),
       closedJoins: HashSet.fromIterable(closedJoins),
       usedCommitments: HashSet.fromIterable(usedCommitments),
       hashes,

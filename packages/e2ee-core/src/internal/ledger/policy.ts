@@ -54,6 +54,8 @@ export interface InternalState {
   usedSigningKeys: HashSet.HashSet<string>;
   usedEncKeys: HashSet.HashSet<string>;
   usedMembershipIds: HashSet.HashSet<string>;
+  /** Derived index of current members' user IDs; never encoded, rebuilt on snapshot import. */
+  memberUsers: HashSet.HashSet<string>;
   closedJoins: HashSet.HashSet<string>;
   usedCommitments: HashSet.HashSet<string>;
   /** Only verified consecutive hashes; no invented pre-snapshot entries. */
@@ -106,6 +108,7 @@ export function genesisState(
     usedSigningKeys: HashSet.fromIterable([id(body.signer)]),
     usedEncKeys: HashSet.fromIterable([id(body.encryptionPublicKey)]),
     usedMembershipIds: HashSet.fromIterable([id(body.membershipId)]),
+    memberUsers: HashSet.fromIterable([id(body.userId)]),
     closedJoins: HashSet.empty(),
     usedCommitments: HashSet.fromIterable([id(body.epochCommitment)]),
     hashes: Chunk.of(hash),
@@ -160,13 +163,14 @@ export function applyOperation(
         const join = `${sign}:${id(op.request.requestId)}`;
         if (
           HashSet.has(s.usedMembershipIds, membership) ||
-          [...HashMap.values(s.members)].some((m) => id(m.userId) === user) ||
+          HashSet.has(s.memberUsers, user) ||
           HashSet.has(s.closedJoins, join) ||
           HashSet.has(s.usedSigningKeys, sign) ||
           HashSet.has(s.usedEncKeys, enc)
         )
           return yield* fail('replay');
         s.usedMembershipIds = HashSet.add(s.usedMembershipIds, membership);
+        s.memberUsers = HashSet.add(s.memberUsers, user);
         s.closedJoins = HashSet.add(s.closedJoins, join);
         s.usedSigningKeys = HashSet.add(s.usedSigningKeys, sign);
         s.usedEncKeys = HashSet.add(s.usedEncKeys, enc);
@@ -293,6 +297,8 @@ export function applyOperation(
         if (op.epoch !== s.epoch.number + 1) return yield* fail('invalid-operation');
         if (HashSet.has(s.usedCommitments, id(op.commitment))) return yield* fail('replay');
         if (op.type === 'removeMemberAndPublishEpoch') {
+          const removed = stateGet(s.members, id(op.membershipId))!;
+          s.memberUsers = HashSet.remove(s.memberUsers, id(removed.userId));
           s.members = HashMap.remove(s.members, id(op.membershipId));
           // Retain author identity, used keys and membership IDs. Only current
           // membership/devices disappear in this same epoch transition.

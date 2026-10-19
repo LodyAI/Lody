@@ -1668,6 +1668,23 @@ describe('authenticated snapshot migration reproduction', () => {
         .members.get(keyId(id(11)))!.role
     ).toBe('member');
   });
+  it('tracks current member users: a removed user may rejoin, a current one never twice, also after import', () => {
+    const o = org();
+    o.append(owner, o.join(bob, 11));
+    const rejoin = o.join(carol, 11); // same user as bob, fresh keys and request
+    const withBob = ok(o.verify());
+    const duplicate = o.append(owner, [1, id(12), rejoin[2]]);
+    expect(code(o.verify())).toBe('replay');
+    const imported = ok(Snapshots.verifyLedgerSnapshot(endorsed(withBob)));
+    expect(code(Ledger.extendLedger(imported, [duplicate], checkpoint(o.records)))).toBe('replay');
+
+    const removed = org();
+    removed.append(owner, removed.join(bob, 11));
+    removed.append(owner, [8, id(11), 1, filled(21), filled(30, 72)]);
+    removed.append(owner, [1, id(12), removed.join(carol, 11)[2]]);
+    expect(code(removed.verify())).toBe('accepted');
+  });
+
   it('retains replay prevention after endorsement import and rejects malformed complete-state facts', () => {
     const o = org();
     o.append(owner, o.join(bob, 11));
