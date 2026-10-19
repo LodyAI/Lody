@@ -2,6 +2,7 @@
 
 Status: implemented
 Translation: current
+PR: [#1744](https://github.com/LodyAI/Lody/pull/1744)
 
 [English](2026-10-20-ui-pr-comparison-screenshots.md)
 
