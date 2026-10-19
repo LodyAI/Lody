@@ -22,7 +22,7 @@
 ## Dispatch
 
 - Queue promotion preserves frozen fields; remove only after history+activation succeed.
-- Absent session meta is "unknown", not foreign: hold the TTL-bounded RPC stash until meta lands;
+- Meta absent or without `machineId` is "unknown", not foreign: keep the TTL-bounded RPC stash;
   drop it only on a definitive verdict.
 - Subscribe to RPC offers BEFORE awaiting Doc Room join/sync and never dispatch from the RPC
   handler; history sync is the durable fallback, not a fast path.

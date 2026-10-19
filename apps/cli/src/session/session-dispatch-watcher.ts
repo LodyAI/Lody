@@ -1202,11 +1202,16 @@ export class SessionDispatchWatcher {
         this.cancelCheckChains.delete(sessionId);
         this.cancelSeenTurn.delete(sessionId);
         // Absent metadata is "unknown", not "foreign": a freshly created
-        // session's RPC turn can arrive before its meta syncs to this machine.
-        // Keep the TTL-bounded stash so the metadata watch dispatches it once
-        // the meta lands; only a definitive verdict — deleted doc, another
-        // machine's session, or an archived one — drops the stashed turn.
-        if (meta || docDeleted) {
+        // session's RPC turn can arrive before its meta syncs to this machine,
+        // and the record can exist before its `machineId` does. Keep the
+        // TTL-bounded stash so the metadata watch dispatches it once ownership
+        // lands; only a definitive verdict — deleted doc, another machine's
+        // session, or an archived one — drops the stashed turn.
+        if (
+          docDeleted ||
+          meta?.isArchived === true ||
+          (meta?.machineId && meta.machineId !== this.deps.machineId)
+        ) {
           this.rpcTurnStash.delete(sessionId);
         }
         this.interruptAccessRetry(sessionId);
