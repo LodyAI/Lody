@@ -51,7 +51,9 @@ Any supporting artifact must be reachable by reviewers; a local HTML file is not
 For UI changes, consider adding labeled Before/After screenshots of the actual UI.
 Agents: capture the baseline and final result during the implementation loop when
 practical, using synthetic data and comparable viewport, theme, and UI state.
-Inspect both images for private content before uploading or committing.
+Inspect both images for private content before uploading.
+Upload with GitHub CLI (`gh pr create --attach` or `gh pr edit --attach`).
+Keep PR-only screenshots in temporary or ignored paths, out of commits.
 Screenshots are encouraged, not mandatory; authors may omit them without explanation.
 This recommendation adds no automated check.
 Capture and privacy guidance: .agents/docs/visual-explanations.md#ui-screenshots

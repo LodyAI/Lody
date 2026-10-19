@@ -142,17 +142,30 @@ comparable viewport, theme, and interaction state so the difference is clear.
 Prepare a safe scene before capture: prefer demo or synthetic fixtures and an
 isolated development data directory over a personal workspace. Crop to the
 relevant UI while retaining enough context to judge the change. Inspect both
-images before uploading or committing for conversation text, source contents,
+images before uploading for conversation text, source contents,
 names, avatars, local paths, repository details, notifications, credentials, and
 other private content. If cropping or redaction is needed, inspect the final
 export and share only that sanitized file; do not upload or commit the private
 original alongside it. Follow the repository's prohibition on captured user or
 agent transcripts.
 
-Attach safe images inline or link to an artifact reviewers can access; a local
-filesystem path alone is not reviewable in a PR. A small side-by-side table works
-well for a pair. Captions should identify the relevant state and any deliberate
-comparison differences.
+Keep PR-only screenshots in temporary or ignored paths and out of Git commits.
+Upload safe images as GitHub attachments with `gh pr create --attach` or
+`gh pr edit --attach`.
+For an existing PR, keep its complete body in `/tmp/pr-body.md` and put
+`![Before](/tmp/before.png)` and `![After](/tmp/after.png)` in its Before / After
+table, then upload the referenced files:
+
+```sh
+gh pr edit 123 --body-file /tmp/pr-body.md \
+  --attach /tmp/before.png --attach /tmp/after.png
+```
+
+The CLI replaces matching local image references with uploaded attachment URLs.
+Without a body file, `--attach` appends the images to the existing PR body. Check
+`gh pr edit --help` for the installed CLI's attachment support. Any linked artifact
+must be accessible to reviewers; a local filesystem path alone is not reviewable.
+Captions should identify the relevant state and any deliberate comparison differences.
 
 Screenshots are recommended, not mandatory, and add no submission requirement or
 automated gate. Authors may omit screenshots without explanation. The existing
