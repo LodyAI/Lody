@@ -3,6 +3,8 @@
 Status: implemented
 Translation: current
 
+PR: [#1743](https://github.com/LodyAI/Lody/pull/1743)
+
 [中文](2026-10-20-machine-filter-menu-density.zh.md)
 
 ## Abstract
