@@ -1076,6 +1076,18 @@ pre,
     --safe-area-bottom: env(safe-area-inset-bottom, 0px);
     --safe-area-left: env(safe-area-inset-left, 0px);
     --native-keyboard-height: 0px;
+    /*
+     * The strip the OS caption buttons occupy over web content. Electron's
+     * Windows `titleBarOverlay` turns on Window Controls Overlay, whose
+     * `titlebar-area-*` rect is the part of that strip left free for the app;
+     * the caption buttons sit to its right. Everywhere else, and in native
+     * fullscreen where the overlay hides, those variables are undefined and
+     * both insets fall back to 0, so a surface can always reserve them.
+     */
+    --window-caption-height: env(titlebar-area-height, 0px);
+    --window-caption-inset-right: calc(
+      100vw - env(titlebar-area-x, 100vw) - env(titlebar-area-width, 0px)
+    );
   }
   .dark {
     --background: 222 55% 9.6%;

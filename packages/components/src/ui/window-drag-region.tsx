@@ -10,7 +10,13 @@ export const WINDOW_DRAG_REGION_HEIGHT_CLASS = 'h-11';
 export const WINDOW_DRAG_REGION_CLASS = 'app-region-drag';
 export const WINDOW_DRAG_EXEMPT_CLASS = 'app-region-no-drag';
 export const WINDOW_DRAG_HEADER_CLASS = `${WINDOW_DRAG_REGION_CLASS} relative z-20`;
-export const WINDOWS_CAPTION_PAD_CLASS = 'pr-[144px]';
+// `--window-caption-*` (tailwind/index.css) is the measured caption-button
+// strip, 0 when there is none. A header that shares its row with the buttons
+// pads by the strip's width plus a gap; a full-window overlay with no such row
+// starts its chrome below `WINDOW_CAPTION_CLEAR_TOP` instead.
+export const WINDOWS_CAPTION_PAD_CLASS = 'pr-[calc(var(--window-caption-inset-right)+0.5rem)]';
+export const WINDOW_CAPTION_CLEAR_TOP =
+  'max(var(--safe-area-top, env(safe-area-inset-top, 0px)), var(--window-caption-height, 0px))';
 
 export function useWindowDragRegionClass(): string | undefined {
   const fullscreen = useElectronFullscreen();

@@ -360,7 +360,7 @@ describe('mermaid full-screen viewer', () => {
     expect(viewerSurface()?.querySelector('svg[data-diagram="sequence"]')).toBeTruthy();
   });
 
-  it('keeps its controls clear of the top safe-area inset', async () => {
+  it('keeps its controls clear of the top safe-area inset and the Windows caption strip', async () => {
     await renderMarkdown();
     await openViewer();
 
@@ -370,6 +370,9 @@ describe('mermaid full-screen viewer', () => {
     // the status bar on a phone. The control bar must reserve that inset.
     const controlBar = close?.parentElement;
     expect(controlBar?.style.paddingTop).toContain('safe-area');
+    // The OS draws the Windows caption buttons above every web layer, so the
+    // bar starts below that strip too (0 wherever there is none).
+    expect(controlBar?.style.paddingTop).toContain('--window-caption-height');
     expect(close?.className).toContain('h-11');
     expect(close?.className).toContain('w-11');
     // Above dialogs and popovers, on the app's z-index scale.
