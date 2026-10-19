@@ -1,13 +1,13 @@
 import { resolveNotificationPresentation } from '@lody/shared/notifications';
 import { describe, expect, it } from 'vitest';
-import { WorkspaceRepoLegacy } from '@lody/shared/workspace-data/repo-legacy';
+import { LoroRepo } from 'loro-repo';
 import { v4 as uuid } from 'uuid';
 import { getSessionRoomId, type SessionId } from '@lody/shared';
 import { SessionDocument } from '../src/lib/loro/doc';
 
 describe('terminal notification projection', () => {
   it('preserves scheduled input identity through the real history writer without marking later human inputs', async () => {
-    const repo = await WorkspaceRepoLegacy.create({});
+    const repo = await LoroRepo.create({});
     const id = uuid() as SessionId;
     const session = new SessionDocument(repo, id, (roomId) => repo.unloadDoc(roomId));
     try {
@@ -51,7 +51,7 @@ describe('terminal notification projection', () => {
   });
 
   it('publishes a small discovery index and replaces only the latest projection', async () => {
-    const repo = await WorkspaceRepoLegacy.create({});
+    const repo = await LoroRepo.create({});
     const id = uuid() as SessionId;
     const session = new SessionDocument(repo, id, (roomId) => repo.unloadDoc(roomId));
     try {

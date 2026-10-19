@@ -24,14 +24,7 @@ import { getMemoryPressureSnapshot } from '@/utils/memory';
 const mockedGetMemoryPressureSnapshot = vi.mocked(getMemoryPressureSnapshot);
 
 describe('SessionGCManager', () => {
-  let cleanMock: ReturnType<
-    typeof vi.fn<
-      (
-        sessionId: SessionId,
-        options: { reason: 'idle' | 'memory-pressure'; minIdleMs: number }
-      ) => Promise<boolean>
-    >
-  >;
+  let cleanMock: ReturnType<typeof vi.fn<(sessionId: SessionId) => Promise<void>>>;
   let loggerMock: {
     info: ReturnType<typeof vi.fn>;
     debug: ReturnType<typeof vi.fn>;
@@ -49,14 +42,7 @@ describe('SessionGCManager', () => {
   beforeEach(() => {
     vi.useFakeTimers();
     sleepCalls = [];
-    cleanMock = vi
-      .fn<
-        (
-          sessionId: SessionId,
-          options: { reason: 'idle' | 'memory-pressure'; minIdleMs: number }
-        ) => Promise<boolean>
-      >()
-      .mockResolvedValue(true);
+    cleanMock = vi.fn<(sessionId: SessionId) => Promise<void>>().mockResolvedValue(undefined);
     loggerMock = {
       info: vi.fn(),
       debug: vi.fn(),
@@ -172,7 +158,7 @@ describe('SessionGCManager', () => {
       await manager.sweep();
 
       expect(cleanMock).toHaveBeenCalledTimes(1);
-      expect(cleanMock).toHaveBeenCalledWith(s1, expect.anything());
+      expect(cleanMock).toHaveBeenCalledWith(s1);
     });
 
     it('does not clean sessions with pending updates', async () => {
@@ -260,14 +246,22 @@ describe('SessionGCManager', () => {
       expect(cleanMock.mock.calls[2]![0]).toBe(s3);
     });
 
-    it('retires with the idle timeout as the minimum idle time under the session gate', async () => {
+    it('skips sessions that became active between candidate selection and cleanup', async () => {
       const manager = createManager({ idleTimeoutMs: 1000 });
+      const now = Date.now();
       const s1 = 'session-1' as SessionId;
-      sessionActivities.set(s1, Date.now() - 2000);
+
+      sessionActivities.set(s1, now - 2000);
+
+      // Simulate the session becoming active during cleanup
+      cleanMock.mockImplementationOnce(async () => {
+        sessionActivities.set(s1, Date.now()); // touch the session
+      });
 
       await manager.sweep();
 
-      expect(cleanMock).toHaveBeenCalledWith(s1, { reason: 'idle', minIdleMs: 1000 });
+      // It was called because it was eligible at candidate selection time
+      expect(cleanMock).toHaveBeenCalledTimes(1);
     });
   });
 
@@ -314,27 +308,7 @@ describe('SessionGCManager', () => {
       await manager.evictForMemoryPressure();
 
       expect(cleanMock).toHaveBeenCalledTimes(1);
-      expect(cleanMock).toHaveBeenCalledWith(s1, expect.anything()); // longest idle first
-    });
-
-    it('moves past a session kept under its gate and reports only real evictions', async () => {
-      const manager = createManager();
-      const now = Date.now();
-      const s1 = 'session-1' as SessionId;
-      const s2 = 'session-2' as SessionId;
-      sessionActivities.set(s1, now - 60000);
-      sessionActivities.set(s2, now - 30000);
-      // s1 gained a lease (a turn started) after GC listed it.
-      cleanMock.mockImplementation(async (sessionId) => sessionId !== s1);
-      mockedGetMemoryPressureSnapshot.mockResolvedValue({
-        availableMemoryBytes: 500 * 1024 * 1024,
-        effectiveMemoryLimitBytes: 32 * 1024 * 1024 * 1024,
-      });
-
-      const result = await manager.evictForMemoryPressure();
-
-      expect(result.evictedSessionIds).toEqual([s2]);
-      expect(cleanMock).toHaveBeenCalledWith(s1, { reason: 'memory-pressure', minIdleMs: 60_000 });
+      expect(cleanMock).toHaveBeenCalledWith(s1); // longest idle first
     });
 
     it('evicts multiple sessions until memory is above threshold', async () => {
@@ -399,7 +373,7 @@ describe('SessionGCManager', () => {
       await manager.evictForMemoryPressure(s1); // exclude s1
 
       expect(cleanMock).toHaveBeenCalledTimes(1);
-      expect(cleanMock).toHaveBeenCalledWith(s2, expect.anything()); // s1 excluded, so s2 is evicted
+      expect(cleanMock).toHaveBeenCalledWith(s2); // s1 excluded, so s2 is evicted
     });
 
     it('skips sessions with pending updates', async () => {
@@ -429,7 +403,7 @@ describe('SessionGCManager', () => {
       await manager.evictForMemoryPressure();
 
       expect(cleanMock).toHaveBeenCalledTimes(1);
-      expect(cleanMock).toHaveBeenCalledWith(s2, expect.anything());
+      expect(cleanMock).toHaveBeenCalledWith(s2);
     });
 
     it('skips sessions with pending user work', async () => {
@@ -459,7 +433,7 @@ describe('SessionGCManager', () => {
       await manager.evictForMemoryPressure();
 
       expect(cleanMock).toHaveBeenCalledTimes(1);
-      expect(cleanMock).toHaveBeenCalledWith(s2, expect.anything());
+      expect(cleanMock).toHaveBeenCalledWith(s2);
     });
 
     it('skips sessions with active goals', async () => {
@@ -489,7 +463,7 @@ describe('SessionGCManager', () => {
       await manager.evictForMemoryPressure();
 
       expect(cleanMock).toHaveBeenCalledTimes(1);
-      expect(cleanMock).toHaveBeenCalledWith(s2, expect.anything());
+      expect(cleanMock).toHaveBeenCalledWith(s2);
     });
 
     it('returns stillUnderPressure when nothing eligible can be evicted', async () => {
@@ -585,7 +559,7 @@ describe('SessionGCManager', () => {
       const result = await manager.evictForMemoryPressure();
 
       expect(cleanMock).toHaveBeenCalledTimes(1);
-      expect(cleanMock).toHaveBeenCalledWith(s1, expect.anything());
+      expect(cleanMock).toHaveBeenCalledWith(s1);
       expect(result.evictedSessionIds).toEqual([s1]);
       expect(result.stillUnderPressure).toBe(false);
       expect(result.pressureReason).toBeNull();

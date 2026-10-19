@@ -67,7 +67,7 @@ import {
   type LocalLoroDataPlaneServerMessage,
 } from '@lody/shared/local-loro-data-plane';
 import { LocalLoroDataPlaneServerLegacy } from '@lody/shared/local-loro-data-plane-server';
-import { LocalLoroTransportAdapter } from '../../../packages/shared/test-support/local-loro-v7-client';
+import { LocalLoroTransportAdapter } from '@lody/shared/local-loro-transport';
 
 const decoder = new TextDecoder();
 

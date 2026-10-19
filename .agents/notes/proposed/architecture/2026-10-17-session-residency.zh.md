@@ -7,7 +7,9 @@ Translation: current
 
 ## 摘要
 
-空闲 GC 曾经销毁了一个 Inbox turn 两毫秒前刚拿到的 Session 文档，turn 随之以一种让 Session 直到 daemon 重启都无法使用的方式失败。根因在所有权：CLI 的 Session 文档缓存没有引用计数，GC 又按"先检查后执行"做决定，并发的 turn 总能挤进这个窗口。本 Note 提议为每个 Session 设一个 residency owner：所有使用方都持有 lease，回收只在没有 lease 时、在每个 Session 自己的门内执行；回收期间到来的 acquire 会等待并拿到全新的一代。释放 lease 从不终止 agent 进程，进程照旧在空闲 20 分钟后才回收。内核、文档缓存、GC 和 turn 的 lease 都已接入；把其余一次性借用改为持有的 lease 是后续堆叠的 PR，这些都尚未在生产中验证。
+2026-10-19 已撤回 #1607 的消费者实现及其后续依赖补丁，保留依赖升级。以下章节记录历史实现和验证，不代表当前产品边界；见[撤回决策](../../implemented/simplification/2026-10-19-repo-upgrade-without-consumer-migration.zh.md)。
+
+## 历史实现（已撤回）
 
 ## 问题
 

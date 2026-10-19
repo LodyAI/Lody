@@ -1,5 +1,4 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { Effect as NativeEffect } from 'effect';
 import { mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -122,9 +121,8 @@ import {
   MachineFlockReadUnavailableError,
   resolveEffectiveSessionCreateDispatchConfig,
 } from '@/commands/session';
-import { RepoTransportError } from 'loro-repo';
-import { WorkspaceRepoLegacy as LoroRepo } from '@lody/shared/workspace-data/repo-legacy';
-import { workspaceStreamsTransport } from '@lody/shared/workspace-data/streams';
+import { LoroRepo, RepoTransportError } from 'loro-repo';
+import { StreamsTransportAdapter } from 'loro-repo/transport/streams';
 import { LoroDocumentManager } from '@/lib/loro/doc';
 import { getLogger } from '@/utils/logger';
 import type { AgentConfigMeta, WorkspaceId } from '@lody/shared';
@@ -900,19 +898,17 @@ describe('session create prevalidation failures', () => {
       cliType: 'builtin',
       agentType: 'codex',
     };
-    const adapter = workspaceStreamsTransport(
-      {
-        bucketId: 'test-bucket',
-        baseUrl: 'https://streams.invalid',
-        persistence: 'volatile',
-        reconnectConfig: { maxAttempts: 0 },
-        flockDocStreamId: (id) => id,
-      },
-      () => NativeEffect.succeed('private-token-sentinel')
-    );
+    const adapter = new StreamsTransportAdapter({
+      bucketId: 'test-bucket',
+      baseUrl: 'https://streams.invalid',
+      auth: async () => 'private-token-sentinel',
+      persistence: { mode: 'ephemeral' },
+      flockDocStreamId: (id) => id,
+    });
     let manager: LoroDocumentManager | undefined;
     try {
       await repo.addTransport('streams', adapter);
+      const sync = vi.spyOn(repo, 'sync');
       manager = new LoroDocumentManager({
         repo,
         workspaceId,
@@ -922,32 +918,29 @@ describe('session create prevalidation failures', () => {
         logger: getLogger('catalog-http-503-test'),
       });
       const activeManager = manager;
-      let refusal: unknown;
-      mocks.validateSessionCreateOptions.mockImplementation(async () => {
-        try {
-          return await resolveEffectiveSessionCreateDispatchConfig({
-            manager: activeManager,
-            workspaceId,
-            agentConfig,
-            dispatchConfig: { modelId: 'missing-model' },
-          });
-        } catch (error) {
-          refusal = error;
-          throw error;
-        }
-      });
+      mocks.validateSessionCreateOptions.mockImplementation(() =>
+        resolveEffectiveSessionCreateDispatchConfig({
+          manager: activeManager,
+          workspaceId,
+          agentConfig,
+          dispatchConfig: { modelId: 'missing-model' },
+        })
+      );
       const result = await callAndMapMcpError(() =>
         startSessionCreateManyOperation({
           operationId: 'real-server-error-create',
           items: [{ label: 'server-error', prompt: 'start', agentConfigId: agentConfig.id }],
         })
       );
-      const response = JSON.parse(result.content[0].text);
-      expect(refusal).toBeInstanceOf(MachineFlockReadUnavailableError);
-      expect((refusal as MachineFlockReadUnavailableError).toLodyError()).toMatchObject({
-        code: 'SYNC_UNAVAILABLE',
+      const transportError = await sync.mock.results[0]?.value.catch((error: unknown) => error);
+      expect(transportError).toBeInstanceOf(RepoTransportError);
+      expect(transportError).toMatchObject({
+        code: 'internal',
+        streamsCode: 'server_error',
         retryable: true,
+        streamsContext: { source: 'http', status: 503 },
       });
+      const response = JSON.parse(result.content[0].text);
       expect(response).toMatchObject({
         ok: false,
         error: { code: 'SYNC_UNAVAILABLE', retryable: true },

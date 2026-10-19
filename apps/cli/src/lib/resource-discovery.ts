@@ -34,11 +34,27 @@ export type DiscoveryRow = {
   availability?: DiscoveryAvailability;
   [key: string]: unknown;
 };
+export class CatalogSyncingError extends Error {
+  constructor() {
+    super(
+      'CATALOG_SYNCING: catalog has not completed its first synchronization; retry the request.'
+    );
+  }
+  toLodyError() {
+    return { code: 'CATALOG_SYNCING', message: this.message, retryable: true };
+  }
+}
+
 export type DiscoverySource = {
   workspaceId: string;
   userId: string;
   /** Undefined means there is no active Turn selection to report. */
   selectedMcpServerIds?: readonly string[];
+  catalogReadiness?(): {
+    metadata: boolean;
+    workspace: boolean;
+    machines: ReadonlyMap<MachineId, boolean>;
+  };
   machines(): Promise<MachineMeta[]>;
   onlineMachineIds(): Promise<ReadonlySet<MachineId> | null>;
   canAccess(machineId: MachineId, projectId?: string): Promise<boolean>;
@@ -100,6 +116,18 @@ export class ResourceDiscovery {
     const match = matches[0];
     if (!match) throw new Error('Machine not found or not readable.');
     return match.id;
+  }
+
+  private catalogSyncing(resource: DiscoveryResource): boolean {
+    const state = this.source.catalogReadiness?.();
+    if (!state) return false;
+    if (resource === 'mcp') return !state.workspace;
+    if (!state.metadata) return true;
+    if (resource === 'machine') return false;
+    return (
+      (resource === 'agent_role' && !state.workspace) ||
+      [...state.machines.values()].some((ready) => !ready)
+    );
   }
 
   private async rows(
@@ -220,6 +248,12 @@ export class ResourceDiscovery {
       else if (config.machineId !== role.machineId)
         state = { state: 'unavailable', reason: 'agent_config_machine_mismatch' };
       else state = availability(role.machineId);
+      const catalogState = source.catalogReadiness?.();
+      const pending =
+        catalogState &&
+        (!catalogState.metadata ||
+          !catalogState.workspace ||
+          catalogState.machines.get(role.machineId) === false);
       const capability = config ? capabilityOf(config) : undefined;
       if (state.state === 'available' && !capability)
         state = { state: 'unknown', reason: 'capabilities_unreported' };
@@ -250,6 +284,17 @@ export class ResourceDiscovery {
       });
       if (state.state === 'available' && capability && (unavailableMode || unavailablePermission))
         state = { state: 'unavailable', reason: 'mode_unavailable' };
+      if (
+        pending &&
+        (state.reason === 'agent_config_missing' ||
+          state.reason === 'capabilities_unreported' ||
+          state.reason === 'model_unavailable' ||
+          state.reason === 'mode_unavailable' ||
+          (state.reason === 'machine_inaccessible_or_missing' &&
+            !catalogState.metadata &&
+            !machines.some((machine) => machine.id === role.machineId)))
+      )
+        state = { state: 'unknown', reason: 'catalog_syncing' };
       return {
         id: role.id,
         name: role.name,
@@ -287,6 +332,9 @@ export class ResourceDiscovery {
     return {
       ok: true as const,
       workspaceId: this.source.workspaceId,
+      ...(this.catalogSyncing(resource) && !(resource === 'project' && query.kind === 'github')
+        ? { sync: { state: 'syncing' as const, reason: 'catalog_syncing', retryable: true } }
+        : {}),
       ...discoveryPage(
         rows,
         query,
@@ -296,15 +344,23 @@ export class ResourceDiscovery {
     };
   }
 
-  async get(resource: 'agent_config' | 'agent_role', id: string) {
-    const rows = (await this.rows(resource, {}, id)).filter((candidate) => candidate.id === id);
+  async get(resource: 'agent_config' | 'agent_role', id: string, machineId?: string) {
+    const rows = (await this.rows(resource, machineId ? { machineId } : {}, id)).filter(
+      (candidate) => candidate.id === id
+    );
     const [row] = rows;
-    if (!row) throw new Error('RESOURCE_NOT_FOUND: resource does not exist or is not readable.');
+    if (!row) {
+      if (this.catalogSyncing(resource)) throw new CatalogSyncingError();
+      throw new Error('RESOURCE_NOT_FOUND: resource does not exist or is not readable.');
+    }
     // A Role on several machines has one row per machine; all are returned.
     return {
       ok: true as const,
       workspaceId: this.source.workspaceId,
       item: row,
+      ...(this.catalogSyncing(resource)
+        ? { sync: { state: 'syncing' as const, reason: 'catalog_syncing', retryable: true } }
+        : {}),
       ...(rows.length > 1 ? { targets: rows } : {}),
     };
   }

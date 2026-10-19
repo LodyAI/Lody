@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { WorkspaceRepoLegacy } from '@lody/shared/workspace-data/repo-legacy';
+import { LoroRepo } from 'loro-repo';
 import {
   AgentRoleProposalMetaSchema,
   applyAgentRoleProposal,
@@ -24,7 +24,7 @@ const command: AgentRoleProposalCommand = {
 
 describe('Role proposal history', () => {
   it('persists a pending card, rejects different retries and returns the saved outcome', async () => {
-    const repo = await WorkspaceRepoLegacy.create({});
+    const repo = await LoroRepo.create({});
     const doc = new SessionDocument(repo, 'role-proposal-test' as SessionId, async () => undefined);
     await doc.initOffline(undefined, { historyBackend: 'loro' });
     const backend = await createSessionBackend(doc, { historyBackend: 'loro' });
@@ -74,7 +74,7 @@ describe('Role proposal history', () => {
   });
 
   it('publishes owned updates and rejects missing or unowned Roles without adding history', async () => {
-    const repo = await WorkspaceRepoLegacy.create({});
+    const repo = await LoroRepo.create({});
     const sessionId = 'role-proposal-ownership' as SessionId;
     const workspaceId = 'workspace' as WorkspaceId;
     const doc = new SessionDocument(repo, sessionId, async () => undefined);
@@ -150,7 +150,7 @@ describe('Role proposal history', () => {
   });
 
   it('does not publish a card when validation fails', async () => {
-    const repo = await WorkspaceRepoLegacy.create({});
+    const repo = await LoroRepo.create({});
     const doc = new SessionDocument(
       repo,
       'role-proposal-failure' as SessionId,

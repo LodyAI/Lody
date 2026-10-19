@@ -2,8 +2,8 @@ import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { WorkspaceRepoLegacy } from '@lody/shared/workspace-data/repo-legacy';
 import { createRequire } from 'node:module';
+import { LoroRepo } from 'loro-repo';
 import { LoroDoc } from 'loro-crdt';
 import { Cause, Effect, Exit, Fiber } from 'effect';
 import { TestClock } from 'effect/testing';
@@ -113,7 +113,7 @@ async function nativeFixture(
   queued = false,
   factory?: SessionBackendFactory
 ) {
-  const repo = await WorkspaceRepoLegacy.create({});
+  const repo = await LoroRepo.create({});
   const sessionId = id as SessionId;
   await repo.upsertDocMeta(getSessionRoomId(sessionId), {
     id: sessionId,
@@ -129,7 +129,7 @@ async function nativeFixture(
     undefined,
     factory
   );
-  doc.handle = await repo.acquireDocHandleLegacy(getSessionRoomId(sessionId));
+  doc.handle = await repo.openPersistedDoc(getSessionRoomId(sessionId));
   doc.composeSessionData(doc.handle.doc, undefined, { historyBackend: 'roost' });
   if (queued)
     await doc.pushMessageQueue({
@@ -215,7 +215,7 @@ const nativeContractFixture: SessionBackendContractFixtureFactory = async (optio
 defineSessionBackendContract('Production Roost SQLite', nativeContractFixture);
 
 async function coldHistoryHandlerFixture(count: number) {
-  const repo = await WorkspaceRepoLegacy.create({});
+  const repo = await LoroRepo.create({});
   const docs = new Map<SessionId, SessionDocument>();
   for (let index = 0; index < count; index++) {
     const id = `pending-handler-${ordinal++}` as SessionId;
@@ -239,7 +239,7 @@ async function coldHistoryHandlerFixture(count: number) {
       getOrCreateSessionDoc: async (id: SessionId) => {
         const doc = docs.get(id)!;
         if (!doc.handle) {
-          doc.handle = await repo.acquireDocHandleLegacy(getSessionRoomId(id));
+          doc.handle = await repo.openPersistedDoc(getSessionRoomId(id));
           doc.composeSessionData(doc.handle.doc, undefined, await doc.getMetaState());
         }
         return doc;
@@ -641,7 +641,7 @@ describe('Production Roost history semantics', () => {
   it.each(['absent', 'existence-only', 'owner-pending', 'backend-pending'] as const)(
     'accepts the first cold write after %s metadata arrives without opening Loro history',
     async (phase) => {
-      const repo = await WorkspaceRepoLegacy.create({});
+      const repo = await LoroRepo.create({});
       const sessionId = `metadata-${phase}-${ordinal++}` as SessionId;
       const roomId = getSessionRoomId(sessionId);
       if (phase !== 'absent') {
@@ -688,7 +688,7 @@ describe('Production Roost history semantics', () => {
           repo,
           getOrCreateSessionDoc: async () => {
             if (!doc.handle) {
-              doc.handle = await repo.acquireDocHandleLegacy(roomId);
+              doc.handle = await repo.openPersistedDoc(roomId);
               // Resolve from metadata, like a cold production SessionDocument.
               doc.composeSessionData(doc.handle.doc, undefined, await doc.getMetaState());
             }
@@ -761,7 +761,7 @@ describe('Production Roost history semantics', () => {
     'cancelled',
   ] as const)('refuses %s metadata without leaving a live observer', (scenario) =>
     Effect.gen(function* () {
-      const repo = yield* Effect.promise(() => WorkspaceRepoLegacy.create({}));
+      const repo = yield* Effect.promise(() => LoroRepo.create({}));
       yield* Effect.addFinalizer(() => Effect.promise(() => repo.destroy()));
       const sessionId = `metadata-refusal-${scenario}` as SessionId;
       const roomId = getSessionRoomId(sessionId);
@@ -1203,8 +1203,7 @@ describe('Production Roost history semantics', () => {
       armed.resolve();
       return value;
     });
-    // Keep native worker/Effect scheduling live while controlling observer deadlines.
-    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    vi.useFakeTimers();
     const observed = history.waitForChanges(checkpoint, 15_000);
     await armed.promise;
     await fixture.backend.appendHistoryTurn(nativeUser('watched-owner-write'));

@@ -3,16 +3,19 @@ import {
   AgentRoleUpdateProposalSchema,
   type AgentRoleProposalCommand,
 } from '@lody/shared';
+import type { CallToolResult } from '@modelcontextprotocol/server';
 import type { createSessionToolRegistrar } from './session-tool-router';
 
 export function registerAgentRoleTools(
   register: ReturnType<typeof createSessionToolRegistrar>,
-  execute: (command: AgentRoleProposalCommand) => Promise<unknown>
+  execute: (command: AgentRoleProposalCommand) => Promise<unknown>,
+  errorResult?: (error: unknown) => CallToolResult
 ) {
   const call = async (command: AgentRoleProposalCommand) => {
     try {
       return { content: [{ type: 'text' as const, text: JSON.stringify(await execute(command)) }] };
     } catch (error) {
+      if (errorResult) return errorResult(error);
       return {
         isError: true,
         content: [

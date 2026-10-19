@@ -63,3 +63,5 @@ Translation: current
 - 对于存储永久拒绝的原样字节，原生 Repo 没有整本文件兜底：payload 会一直留在队列里，游标一直被挡住，但不会丢数据。
 
 Lody 升级：[#1672](https://github.com/LodyAI/Lody/pull/1672)（0.23.1），0.23.2 见后续升级。相关：[原生工作区 Repo](../../proposed/architecture/2026-10-16-native-workspace-repo.zh.md)。
+
+当前边界（2026-10-19）：已撤回原生消费者及其后续应用补丁，仍选择 Repo 0.23.2；恢复的 Promise transport 自带远端 Stream 创建行为。见[撤回决策](../simplification/2026-10-19-repo-upgrade-without-consumer-migration.zh.md)。

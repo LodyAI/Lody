@@ -355,7 +355,7 @@ export class MachineRuntime {
       hasPendingUpdates: (sessionId) => handler.hasPendingUpdates(sessionId),
       hasPendingUserWork: async (sessionId) => await handler.hasPendingUserWork(sessionId),
       isArchiveInFlight: (sessionId) => handler.isArchiveInFlight(sessionId),
-      cleanSession: (sessionId, options) => handler.cleanSessionForGC(sessionId, options),
+      cleanSession: (sessionId) => handler.cleanSessionForGC(sessionId),
       getSessionIds: () => handler.getTrackedSessionIds(),
       memoryPressure: this.options.memoryPressure,
       logger: this.options.logger,

@@ -116,3 +116,5 @@ A pre-existing filesystem detached-read race is tracked in
   lost.
 
 Lody upgrades: [#1672](https://github.com/LodyAI/Lody/pull/1672) (0.23.1), 0.23.2 in the follow-up bump. Related: [native workspace Repo](../../proposed/architecture/2026-10-16-native-workspace-repo.md).
+
+Current boundary (2026-10-19): native consumers and their dependent application patches were withdrawn; Repo 0.23.2 remains selected. The former Promise transport supplies stream creation again. See the [rollback decision](../simplification/2026-10-19-repo-upgrade-without-consumer-migration.md).

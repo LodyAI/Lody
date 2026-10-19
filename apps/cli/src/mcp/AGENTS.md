@@ -62,11 +62,11 @@ Parent instructions apply. Background: [README.md](README.md).
   the daemon resolves the active user. Return operation handles, never viewer URLs or
   raw preview/transport errors. Reuse simulator lifecycle/schema, never a second owner.
 
-- Resource discovery uses `lib/resource-discovery.ts` for CLI and MCP. Resolve the
-  active Turn user for MCP, never the daemon owner. Role list/get use
-  `canReadAgentRole`; explicit Role creation retains its separate existing contract.
-  Preserve unavailable readable Roles and three-state presence. List MCP entries
-  through the allowlisted summary, never return launch/connection credentials.
+- Discovery shares `lib/resource-discovery.ts`: daemon caches report `catalog_syncing`
+  until first baseline; Role target validation requires fresh sync. Standalone CLI
+  syncs unless `--offline`. Use active Turn identity and `canReadAgentRole`;
+  explicit creation keeps its separate grant contract. Keep unavailable readable Roles,
+  three-state presence and credential allowlists.
 - Directory cursors bind resource, workspace, user and filters. Operations additionally
   bind requester Session and query only that user's machine-local rows; list replies
   contain no canonical prompt or assistant output. See

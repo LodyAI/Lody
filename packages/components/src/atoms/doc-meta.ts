@@ -1,10 +1,9 @@
-import type { WorkspaceRepoLegacy } from '@lody/shared/workspace-data/repo-legacy';
 import { atom, type createStore, type PrimitiveAtom } from 'jotai';
 
 type JotaiStore = ReturnType<typeof createStore>;
 import { atomFamily } from 'jotai/utils';
 import { atomEffect } from 'jotai-effect';
-
+import type { LoroRepo } from 'loro-repo';
 import {
   isLoroRepoDocDeleted,
   getSessionRoomId,
@@ -259,7 +258,7 @@ export const docMetaCacheScopeAtom = atom<DocMetaCacheScope | null>(null);
  */
 export function readReadyDocMetaCache(
   store: Pick<JotaiStore, 'get'>,
-  repo: WorkspaceRepoLegacy
+  repo: LoroRepo
 ): DocMetaCacheSnapshot | null {
   const scope = store.get(docMetaCacheScopeAtom);
   if (!scope?.ready || scope.runtime.repo !== repo) return null;
@@ -512,7 +511,7 @@ export const clearDocMetaCacheAtom = atom(null, (_get, set) => {
 });
 
 // 初始扫描
-async function buildDocMetaCache(repo: WorkspaceRepoLegacy) {
+async function buildDocMetaCache(repo: LoroRepo) {
   const sessions: Record<string, SessionMeta> = {};
   const machines: Record<string, MachineMeta> = {};
   const agents: Record<string, AgentConfigMeta> = {};
@@ -551,7 +550,7 @@ async function buildDocMetaCache(repo: WorkspaceRepoLegacy) {
 
 // Helper to fetch metadata for a single doc through loro-repo's public API.
 async function fetchDocMeta(
-  repo: WorkspaceRepoLegacy,
+  repo: LoroRepo,
   docId: string
 ): Promise<Record<string, unknown> | null> {
   const entry = await repo.getDocMeta(docId);

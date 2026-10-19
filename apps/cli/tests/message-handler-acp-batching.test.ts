@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import crypto from 'crypto';
 import { RequestError } from '@agentclientprotocol/sdk';
-import { WorkspaceRepoLegacy } from '@lody/shared/workspace-data/repo-legacy';
+import { LoroRepo } from 'loro-repo';
 import { getSessionRoomId, type ACPSessionId, type MachineId } from '@lody/shared';
 
 import type {
@@ -79,8 +79,7 @@ const jsonResponse = (body: unknown, status = 200): Response =>
 // (native libuv async), NOT via the timers vitest fakes. Awaiting them while fake
 // timers are installed leaves the resolution to real wall time, which on a loaded CI
 // runner can be starved past the 30s test timeout. So run repo setup/teardown on real
-// timers and only fake the batch timeout/Date afterward. Keep setImmediate and
-// microtasks real so native Effect fibers continue while assertions await writes.
+// timers and only keep the fake clock for the batch-window assertions.
 const destroyRepoOnRealTimers = async (repo: LoroRepo) => {
   if (vi.isFakeTimers()) {
     vi.useRealTimers();
@@ -97,7 +96,7 @@ const createHandlerHarness = async (
   if (fakeTimersActive) {
     vi.useRealTimers();
   }
-  const repo = await WorkspaceRepoLegacy.create({});
+  const repo = await LoroRepo.create({});
   const docs = new Map<SessionId, SessionDocument>();
   for (const sessionId of sessionIds) {
     const doc = new SessionDocument(repo, sessionId);
@@ -105,7 +104,7 @@ const createHandlerHarness = async (
     docs.set(sessionId, doc);
   }
   if (fakeTimersActive) {
-    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+    vi.useFakeTimers();
   }
 
   const workspaceDocument = {
@@ -128,11 +127,6 @@ const createHandlerHarness = async (
       }
       return doc;
     }),
-    // Turns hold a residency lease; it is independent of the borrow counts asserted below.
-    acquireSessionDocLegacy: vi.fn(async (sessionId: SessionId) => ({
-      doc: docs.get(sessionId),
-      release: async () => {},
-    })),
   };
 
   const sessionManagerMock = {
@@ -436,7 +430,7 @@ describe('MessageHandler ACP batching', () => {
   });
 
   beforeEach(() => {
-    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+    vi.useFakeTimers();
     process.env.LODY_SERVER_URL = 'https://server.example.test';
     loadEnv();
   });
@@ -1579,7 +1573,7 @@ describe('MessageHandler ACP batching', () => {
         .spyOn(host, 'persistCodeCollabTurnDiffs')
         .mockRejectedValueOnce(new Error('transient persistence failure'))
         .mockResolvedValueOnce(true);
-      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+      vi.useFakeTimers();
 
       host.enqueueACPUpdate(sessionId, {
         sessionId,

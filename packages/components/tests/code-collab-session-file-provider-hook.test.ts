@@ -93,7 +93,7 @@ const createRuntime = (overrides: Record<string, unknown>): WorkspaceRuntime => 
     return handlePromise;
   };
   const cache = createCodeCollabFileIndexCache({
-    acquireFlockDocHandleLegacy: async (flockDocId) => ({
+    acquireFlockDoc: async (flockDocId) => ({
       flock: (await getFileIndexHandle(flockDocId)).flock,
       release: async () => undefined,
     }),

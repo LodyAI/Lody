@@ -22,7 +22,7 @@ import {
  */
 import { describe, expect, it } from 'vitest';
 import { LoroDoc } from 'loro-crdt';
-import { LocalLoroTransportAdapter } from '../test-support/local-loro-v7-client';
+import { LocalLoroTransportAdapter } from '../src/local-loro-transport';
 import { LocalLoroDataPlaneServerLegacy } from '../src/local-loro-data-plane-server';
 import {
   DocUpdateChunkAssembler,

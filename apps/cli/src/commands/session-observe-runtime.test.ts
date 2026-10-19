@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { WorkspaceRepoLegacy } from '@lody/shared/workspace-data/repo-legacy';
+import { LoroRepo } from 'loro-repo';
 import { getSessionRoomId, type SessionId, type SessionMeta, type WorkspaceId } from '@lody/shared';
 import { LoroDocumentManager, SessionDocument } from '@/lib/loro/doc';
 import { getLogger } from '@/utils/logger';
@@ -12,7 +12,7 @@ describe('Session observation document ownership', () => {
   it('opens and releases the real document without auto-read, model-summary or status writes', async () => {
     const baseDir = await mkdtemp(path.join(os.tmpdir(), 'lody-observe-read-only-'));
     const storage = new FileSystemStorageAdaptor({ baseDir });
-    const repo = await WorkspaceRepoLegacy.create({ storageAdapter: storage });
+    const repo = await LoroRepo.create({ storageAdapter: storage });
     const manager = new LoroDocumentManager({
       repo,
       workspaceId: 'workspace' as WorkspaceId,
@@ -34,7 +34,7 @@ describe('Session observation document ownership', () => {
         status: { type: 'running' },
       };
       await repo.upsertDocMeta(roomId, meta);
-      const handle = await repo.acquireDocHandleLegacy(roomId);
+      const handle = await repo.openPersistedDoc(roomId);
       const seed = new SessionDocument(repo, id, async (docId) => {
         await manager.unloadDocRoom(docId);
       });

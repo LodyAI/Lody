@@ -80,3 +80,5 @@ A Session doc join creates its stream and appends the local turn. A file-index
 Flock join creates its stream with the retention TTL. Both tests fail with the
 option set to `false`. Recovery of the four production Sessions has not been
 observed yet: it needs a daemon with this fix to rejoin them.
+
+Current boundary (2026-10-19): native consumers and their dependent application patches were withdrawn; Repo 0.23.2 remains selected. The former Promise transport supplies stream creation again. See the [rollback decision](../simplification/2026-10-19-repo-upgrade-without-consumer-migration.md).

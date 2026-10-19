@@ -126,7 +126,6 @@ vi.mock('../src/hooks/use-authenticated-convex', () => ({
 }));
 
 import { runtimeAtom, type WorkspaceRuntime } from '../src/atoms/runtime';
-import { WorkspaceRepoLegacy } from '../../shared/src/workspace-data/repo-legacy';
 import { userAtom } from '../src/atoms';
 import { autoArchiveOnPrClosedAtom, autoArchiveOnPrMergedAtom } from '../src/atoms/settings';
 import { AutoArchivePrWatcher } from '../src/components/auto-archive-pr-watcher';
@@ -721,88 +720,6 @@ describe('useSessionActions', () => {
         expect(test.metaRepo.getSession(test.tree.openedSession.id)?.isArchived).toBe(false);
       }
     );
-
-    it('preserves a restored target when native Repo observers coalesce both archive/restore edges', async () => {
-      const native = await WorkspaceRepoLegacy.create({});
-      let subscription: { unsubscribe: () => void } | undefined;
-      try {
-        const store = createStore();
-        store.set(userAtom, { id: 'user-1' } as never);
-        store.set(autoArchiveOnPrMergedAtom, true);
-        const tree = createContainmentSessions('native-pr-retry', false);
-        for (const session of tree.sessions) {
-          session.userId = 'user-1';
-          if (session === tree.rootSession)
-            session.pullRequests = [
-              { url: 'https://github.com/example/repo/pull/1', status: 'open' },
-            ];
-          await native.upsertDocMeta(getSessionRoomId(session.id), session);
-        }
-        const runtime = createRuntime({ repo: native });
-        const rootRoom = getSessionRoomId(tree.rootSession.id);
-        const observed: unknown[] = [];
-        const observedRestoration = Promise.withResolvers<void>();
-        const failed = Promise.withResolvers<void>();
-        let restoreAtFirstAcceptedRoot = true;
-        runtime.writer.upsertDocMeta = async (roomId, patch) => {
-          if (roomId === rootRoom && patch.isArchived === true && restoreAtFirstAcceptedRoot) {
-            restoreAtFirstAcceptedRoot = false;
-            subscription = native.watch(
-              (event) => {
-                if (event.kind !== 'doc-metadata' || event.docId !== rootRoom) return;
-                observed.push(event.patch.isArchived);
-                store.set(sessionMetaCacheAtom, (cache) => ({
-                  ...cache,
-                  [rootRoom]: { ...cache[rootRoom], ...event.patch } as SessionMeta,
-                }));
-                if (observed.length >= 2) observedRestoration.resolve();
-              },
-              { kinds: ['doc-metadata'] }
-            );
-            await native.upsertDocMeta(roomId, patch);
-            // Another actor restores the accepted root before observer delivery.
-            await native.upsertDocMeta(roomId, { isArchived: false });
-            return;
-          }
-          if (roomId === getSessionRoomId(tree.tabSession.id) && patch.isArchived === true) {
-            failed.resolve();
-            throw new Error('Synthetic descendant failure');
-          }
-          await native.upsertDocMeta(roomId, patch);
-        };
-        await renderActions(runtime, {
-          store,
-          sessionMetaCache: tree.sessionMetaCache,
-          watchPr: true,
-        });
-        const merged = {
-          ...tree.rootSession,
-          pullRequests: [
-            { url: 'https://github.com/example/repo/pull/1', status: 'merged' as const },
-          ],
-        };
-        await native.upsertDocMeta(rootRoom, merged);
-        await act(async () =>
-          store.set(sessionMetaCacheAtom, (cache) => ({ ...cache, [rootRoom]: merged }))
-        );
-        await act(async () => {
-          await failed.promise;
-          await observedRestoration.promise;
-        });
-        expect(observed.length).toBeGreaterThanOrEqual(2);
-        expect(observed.every((value) => value === false)).toBe(true);
-        await act(async () => vi.advanceTimersByTimeAsync(60_000));
-        expect((await native.getDocMeta(rootRoom))?.meta.isArchived).toBe(false);
-        expect(
-          (await native.getDocMeta(getSessionRoomId(tree.tabSession.id)))?.meta.isArchived
-        ).toBe(false);
-      } finally {
-        await act(async () => root?.unmount());
-        root = undefined;
-        subscription?.unsubscribe();
-        await native.destroy();
-      }
-    });
 
     it('does not cancel a new held send when a restored root invalidates its retry', async () => {
       const test = await mountWatcher();

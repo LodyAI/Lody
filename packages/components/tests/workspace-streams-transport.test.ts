@@ -11,12 +11,7 @@
  */
 import 'fake-indexeddb/auto';
 import { createPrivateKey, sign } from 'node:crypto';
-import { Effect, Result } from 'effect';
-import { WorkspaceRepoLegacy as LoroRepo } from '@lody/shared/workspace-data/repo-legacy';
-import { workspaceSyncFailuresLegacy } from '@lody/shared/workspace-data/repo-legacy';
-import { createLoroSyncErrorTools, getLoroSnapshotDiagnostic } from '@lody/shared/loro-sync-errors';
-import { RepoSyncError, RepoTransportError } from 'loro-repo';
-import { nativeTransportHarness } from '../../shared/test-support/workspace-transport';
+import { Result } from 'effect';
 import {
   Bytes,
   contentSigningBytes,
@@ -43,7 +38,7 @@ import {
 } from '@lody/shared';
 import { LoroDoc } from 'loro-crdt';
 import type { PayloadProtectionProvider, RemoteCursorStore } from '@loro-dev/streams-crdt';
-import type { StorageSavePayload } from 'loro-repo';
+import { LoroRepo, type StorageSavePayload } from 'loro-repo';
 import { IndexedDBStorageAdaptor } from 'loro-repo/storage/indexeddb';
 import { createResilientRemoteCursorStore } from '../src/providers/resilient-remote-cursor-store';
 import { resolveWorkspaceRuntimeCacheIdentity } from '../src/providers/create-workspace-runtime';
@@ -113,46 +108,28 @@ function createMetaServer() {
   return { bootstraps };
 }
 
-type Tab = {
-  repo: LoroRepo;
-  workspaceId: WorkspaceId;
-  cursorDbName: string;
-  cursor: { current: RemoteCursorStore };
-};
-const makeTransport = (options: Parameters<typeof createWorkspaceStreamsTransport>[0]) =>
-  nativeTransportHarness(options.repo, createWorkspaceStreamsTransport(options));
+type Tab = { repo: LoroRepo; workspaceId: WorkspaceId; cursorDbName: string };
 const openTabs = new Set<Tab>();
-const openTransports = new Set<ReturnType<typeof makeTransport>>();
+const openTransports = new Set<ReturnType<typeof createWorkspaceStreamsTransport>>();
 
 /** One tab of the workspace: same databases as its siblings, its own replica. */
 async function openTab(workspaceId: WorkspaceId, storage?: IndexedDBStorageAdaptor): Promise<Tab> {
   const identity = resolveWorkspaceRuntimeCacheIdentity(workspaceId, '');
-  const cursor = {
-    current: createResilientRemoteCursorStore({
-      dbName: identity.remoteCursorDbName,
-    }) as RemoteCursorStore,
-  };
   const repo = await LoroRepo.create({
-    documentRemoteCursorStore: {
-      load: (url) => cursor.current.load(url),
-      save: (value) => cursor.current.save(value),
-      delete: async (url) => {
-        await cursor.current.delete?.(url);
-      },
-    },
     storageAdapter: storage ?? new IndexedDBStorageAdaptor({ dbName: identity.repoDbName }),
+    metaDebounceCommitMs: 0,
   });
-  const tab = { repo, workspaceId, cursor, cursorDbName: identity.remoteCursorDbName };
+  const tab = { repo, workspaceId, cursorDbName: identity.remoteCursorDbName };
   openTabs.add(tab);
   return tab;
 }
 
 async function syncMeta(tab: Tab) {
-  const transport = makeTransport({
+  const transport = createWorkspaceStreamsTransport({
     repo: tab.repo,
     workspaceId: tab.workspaceId,
     documentRemoteCursorStore: createResilientRemoteCursorStore({ dbName: tab.cursorDbName }),
-    auth: () => Effect.succeed('streams-jwt'),
+    auth: async () => 'streams-jwt',
     streamsBaseUrl,
     shardHostSuffix: undefined,
   });
@@ -213,12 +190,12 @@ function transportFor(
   content?: WorkspaceStreamsContent,
   cursorStore?: RemoteCursorStore
 ) {
-  if (cursorStore) tab.cursor.current = cursorStore;
-  const transport = makeTransport({
+  const transport = createWorkspaceStreamsTransport({
     repo: tab.repo,
     workspaceId: tab.workspaceId,
-    documentRemoteCursorStore: tab.cursor.current,
-    auth: () => Effect.succeed('streams-jwt'),
+    documentRemoteCursorStore:
+      cursorStore ?? createResilientRemoteCursorStore({ dbName: tab.cursorDbName }),
+    auth: async () => 'streams-jwt',
     streamsBaseUrl,
     shardHostSuffix: undefined,
     content,
@@ -235,36 +212,12 @@ const docUrl = (workspaceId: WorkspaceId, docId: string) =>
   });
 
 /** Byte storage only: CRDT encoding, merge, protection and cursor logic all run in the SDK. */
-function createByteServer(
-  beforeRequest?: (url: URL, method: string, init?: RequestInit) => Promise<void>
-) {
+function createByteServer() {
   type Room = { batches: Uint8Array[]; snapshot?: { offset: string; body: Uint8Array } };
   const rooms = new Map<string, Room>();
-  const requests: {
-    url: URL;
-    method: string;
-    body: Uint8Array;
-    auth: string | null;
-    requestId: string | null;
-  }[] = [];
+  const requests: { url: URL; method: string; body: Uint8Array; auth: string | null }[] = [];
   const live = new Map<string, ReadableStreamDefaultController<Uint8Array>>();
   const liveReady = Promise.withResolvers<void>();
-  const liveWaiters = new Map<string, Array<() => void>>();
-  const snapshotWaiters = new Map<string, Array<() => void>>();
-  const nextLive = (path: string) =>
-    new Promise<void>((resolve) => {
-      const waiters = liveWaiters.get(path) ?? [];
-      waiters.push(resolve);
-      liveWaiters.set(path, waiters);
-    });
-  const snapshotWritten = (path: string) =>
-    room(path).snapshot
-      ? Promise.resolve()
-      : new Promise<void>((resolve) => {
-          const waiters = snapshotWaiters.get(path) ?? [];
-          waiters.push(resolve);
-          snapshotWaiters.set(path, waiters);
-        });
   const room = (path: string) => {
     let value = rooms.get(path);
     if (!value) {
@@ -281,14 +234,7 @@ function createByteServer(
     const method = init?.method ?? 'GET';
     const body = new Uint8Array(await new Response(init?.body).arrayBuffer());
     const headers = new Headers(init?.headers);
-    requests.push({
-      url,
-      method,
-      body,
-      auth: headers.get('Authorization'),
-      requestId: headers.get('X-Request-ID'),
-    });
-    await beforeRequest?.(url, method, init);
+    requests.push({ url, method, body, auth: headers.get('Authorization') });
     const path = url.pathname.replace(/\/(bootstrap|snapshot(?:\/.*)?)$/, '');
     const value = room(path);
     const currentTail = () => tail(path);
@@ -304,11 +250,8 @@ function createByteServer(
       });
     }
     if (method === 'PUT') {
-      if (url.pathname.includes('/snapshot/')) {
+      if (url.pathname.includes('/snapshot/'))
         value.snapshot = { offset: decodeURIComponent(url.pathname.split('/').at(-1)!), body };
-        for (const resolve of snapshotWaiters.get(path) ?? []) resolve();
-        snapshotWaiters.delete(path);
-      }
       return new Response(null, { status: 204 });
     }
     if (method === 'HEAD')
@@ -330,7 +273,7 @@ function createByteServer(
           headers: {
             'Content-Type': 'multipart/mixed; boundary=bytes',
             'Stream-Snapshot-Offset': snapshot?.offset ?? '-1',
-            'Stream-Next-Offset': snapshot?.offset ?? offset(0),
+            'Stream-Next-Offset': snapshot?.offset ?? '-1',
             'Stream-Up-To-Date': String((snapshot?.offset ?? offset(0)) === currentTail()),
           },
         }
@@ -351,8 +294,6 @@ function createByteServer(
         start(controller) {
           live.set(path, controller);
           liveReady.resolve();
-          for (const resolve of liveWaiters.get(path) ?? []) resolve();
-          liveWaiters.delete(path);
           const backlog = Buffer.concat(value.batches.slice(start));
           const data = backlog.length ? `event: data\ndata: ${backlog.toString('base64')}\n\n` : '';
           controller.enqueue(
@@ -382,16 +323,7 @@ function createByteServer(
     });
   };
   vi.stubGlobal('fetch', fetch);
-  return {
-    room,
-    requests,
-    live,
-    liveReady: liveReady.promise,
-    nextLive,
-    snapshotWritten,
-    offset,
-    tail,
-  };
+  return { room, requests, live, liveReady: liveReady.promise, offset, tail };
 }
 
 /** Synthetic reversible provider: verifies SDK AAD binding; deliberately not cryptography. */
@@ -443,253 +375,6 @@ class FailingStorage extends IndexedDBStorageAdaptor {
 }
 
 describe('workspace Streams content boundary', () => {
-  it.each([
-    { protected: false, timeout: false },
-    { protected: true, timeout: false },
-    { protected: true, timeout: true },
-  ])(
-    'logs safe snapshot stages, correlated requests and actual elapsed time (%j)',
-    async (scenario) => {
-      const diagnostics: ReturnType<typeof getLoroSnapshotDiagnostic>[] = [];
-      const capture = (
-        _message: unknown,
-        diagnostic: ReturnType<typeof getLoroSnapshotDiagnostic>
-      ) => {
-        diagnostics.push(diagnostic);
-        if (scenario.protected && !scenario.timeout)
-          throw new Error('synthetic private diagnostic sink failure');
-      };
-      const debug = vi.spyOn(console, 'debug').mockImplementation(capture);
-      const warn = vi.spyOn(console, 'warn').mockImplementation(capture);
-      const entered = Promise.withResolvers<void>();
-      const release = Promise.withResolvers<void>();
-      const privateText = 'synthetic-private-snapshot-body-token';
-      const server = createByteServer(async (url, method, init) => {
-        if (method !== 'PUT' || !url.pathname.includes('/snapshot/')) return;
-        entered.resolve();
-        await new Promise<void>((resolve, reject) => {
-          init?.signal?.addEventListener(
-            'abort',
-            () => reject(new Error(`${privateText} ${url.href}`)),
-            { once: true }
-          );
-          void release.promise.then(resolve, reject);
-        });
-      });
-      const tab = await openTab(`diagnostics-${++sequence}` as WorkspaceId);
-      const doc = (await tab.repo.openPersistedDoc('doc-a')).doc;
-      doc.getMap('data').set('private', privateText);
-      doc.commit();
-      const observed: string[] = [];
-      const content = scenario.protected
-        ? protectedContent({
-            snapshotUpload: {
-              canUpload: () => true,
-              // eslint-disable-next-line @typescript-eslint/no-misused-promises -- The SDK isolates rejected observer promises despite its void callback type.
-              onDiagnostic: async (event) => {
-                observed.push(event.stage);
-                if (event.stage === 'export') throw new Error('synthetic private observer failure');
-              },
-            },
-          })
-        : undefined;
-      const transport = transportFor(tab, content);
-      try {
-        expect((await transport.syncDoc('doc-a', doc)).ok).toBe(true);
-        const result = transport.uploadSnapshot({ kind: 'doc', id: 'doc-a' }).then(
-          (value) => ({ ok: true as const, value }),
-          (error: unknown) => ({ ok: false as const, error })
-        );
-        await entered.promise;
-        const elapsed = scenario.timeout ? 60_000 : 275;
-        await transport.advance(elapsed);
-        if (!scenario.timeout) release.resolve();
-        const uploaded = await result;
-        expect(uploaded.ok).toBe(!scenario.timeout);
-        expect(new Set(diagnostics.map((event) => event.stage))).toEqual(
-          new Set(['permission', 'auth', 'head', 'export', 'encode', 'put'])
-        );
-        expect(new Set(diagnostics.map((event) => event.snapshotId)).size).toBe(1);
-        const started = diagnostics.find(
-          (event) => event.stage === 'put' && event.outcome === 'started'
-        );
-        const completed = diagnostics.find(
-          (event) =>
-            event.stage === 'put' && event.outcome === (scenario.timeout ? 'failed' : 'succeeded')
-        );
-        const put = server.requests.find(
-          (request) => request.method === 'PUT' && request.url.pathname.includes('/snapshot/')
-        );
-        expect(completed).toMatchObject({
-          requestId: put?.requestId,
-          requestOperation: 'put-snapshot',
-          snapshotByteLength: put?.body.byteLength,
-          elapsedMs: elapsed,
-          snapshotElapsedMs: elapsed,
-          uploadMode: 'total-only',
-        });
-        expect(started?.requestId).toEqual(expect.any(String));
-        expect(started?.requestId).toBe(completed?.requestId);
-        if (scenario.protected) expect(observed).toContain('put');
-        if (!uploaded.ok) {
-          const tools = createLoroSyncErrorTools({
-            RepoSyncError,
-            RepoTransportError,
-            nativeFailures: workspaceSyncFailuresLegacy,
-          });
-          const formatted = tools.formatLoroSyncError(uploaded.error);
-          expect(formatted).toContain('"abortKind":"deadline"');
-          expect(formatted).toContain('"timeoutKind":"total"');
-          // Fetch provides no actual transmission progress, so its upload substage stays unknown.
-          expect(formatted).not.toContain('"uploadStage":');
-          expect(formatted).toContain('"elapsedMs":60000');
-          expect(completed?.error).toMatchObject({ abortKind: 'deadline', timeoutKind: 'total' });
-          expect(formatted).not.toContain(privateText);
-          expect(formatted).not.toContain(streamsBaseUrl);
-          expect(formatted).not.toContain('fullCause');
-        }
-        const logged = JSON.stringify(diagnostics);
-        for (const secret of [
-          privateText,
-          'streams-jwt',
-          streamsBaseUrl,
-          'fullCause',
-          'private observer failure',
-        ])
-          expect(logged).not.toContain(secret);
-      } finally {
-        release.resolve();
-        debug.mockRestore();
-        warn.mockRestore();
-      }
-    }
-  );
-
-  it('waits for the current write upload ACK after the real SDK already has a baseline', async () => {
-    const entered = Promise.withResolvers<void>();
-    const release = Promise.withResolvers<void>();
-    let block = false;
-    const server = createByteServer(async (_url, method) => {
-      if (block && method === 'POST') {
-        entered.resolve();
-        await release.promise;
-      }
-    });
-    const tab = await openTab(`upload-barrier-${++sequence}` as WorkspaceId);
-    const { repo } = tab;
-    await repo.addTransport(
-      'cloud',
-      createWorkspaceStreamsTransport({
-        repo,
-        workspaceId: tab.workspaceId,
-        documentRemoteCursorStore: tab.cursor.current,
-        auth: () => Effect.succeed('streams-jwt'),
-        streamsBaseUrl,
-        shardHostSuffix: undefined,
-      })
-    );
-    const room = await repo.joinDocRoom('doc-a');
-    const binding = room.subscription('cloud');
-    try {
-      await binding.firstSyncedWithRemote;
-      await repo.runLegacy(room.native.awaitSynced('cloud'));
-      block = true;
-      const doc = (await repo.openPersistedDoc('doc-a')).doc;
-      doc.getMap('data').set('value', 'must reach server');
-      doc.commit();
-      let confirmed = false;
-      const uploaded = binding.waitUntilSynced().then(() => {
-        confirmed = true;
-      });
-      await entered.promise;
-      // Let already-ready waiters settle before checking the held POST barrier.
-      await repo.runLegacy(Effect.yieldNow);
-      expect(confirmed).toBe(false);
-      const path = new URL(docUrl(tab.workspaceId, 'doc-a')).pathname;
-      expect(server.room(path).batches).toEqual([]);
-      const retired = await repo.joinDocRoom('doc-a');
-      const cancelled = retired
-        .subscription('cloud')
-        .waitUntilSynced()
-        .then(
-          () => 'confirmed',
-          () => 'cancelled'
-        );
-      retired.unsubscribe();
-      expect(await cancelled).toBe('cancelled');
-      expect(confirmed).toBe(false);
-      release.resolve();
-      await uploaded;
-      const received = new LoroDoc();
-      for (const batch of server.room(path).batches) {
-        for (let cursor = 0; cursor < batch.length;) {
-          const length = new DataView(batch.buffer, batch.byteOffset).getUint32(cursor);
-          received.import(batch.slice(cursor + 4, cursor + 4 + length));
-          cursor += 4 + length;
-        }
-      }
-      expect(received.toJSON()).toEqual(doc.toJSON());
-    } finally {
-      release.resolve();
-      room.unsubscribe();
-    }
-  });
-
-  it('revokes a real Streams attachment while its initial room join is still pending', async () => {
-    const entered = Promise.withResolvers<void>();
-    const release = Promise.withResolvers<void>();
-    createByteServer();
-    const tab = await openTab(`remove-connecting-${++sequence}` as WorkspaceId);
-    const { repo } = tab;
-    const room = await repo.joinDocRoom('doc-a');
-    const specification = createWorkspaceStreamsTransport({
-      repo,
-      workspaceId: tab.workspaceId,
-      documentRemoteCursorStore: tab.cursor.current,
-      auth: () => Effect.succeed('streams-jwt'),
-      streamsBaseUrl,
-      shardHostSuffix: undefined,
-    });
-    const added = repo
-      .addTransport('cloud', {
-        ...specification,
-        make: (id) =>
-          specification.make(id).pipe(
-            Effect.map((transport) => ({
-              ...transport,
-              connect: transport.connect.pipe(
-                Effect.andThen(
-                  Effect.promise(() => {
-                    entered.resolve();
-                    return release.promise;
-                  }).pipe(Effect.uninterruptible)
-                )
-              ),
-            }))
-          ),
-      })
-      .then(
-        () => 'attached',
-        () => 'cancelled'
-      );
-    try {
-      await entered.promise;
-      expect(await repo.runLegacy(repo.native.transportIds)).toContain('cloud');
-      const removed = repo.removeTransport('cloud');
-      release.resolve();
-      await removed;
-      expect(await added).toBe('cancelled');
-      expect(await repo.runLegacy(repo.native.transportIds)).toEqual([]);
-      expect(repo.hasTransport()).toBe(false);
-      await repo.addTransport('cloud', specification);
-      await room.subscription('cloud').firstSyncedWithRemote;
-      expect(await repo.runLegacy(repo.native.transportIds)).toEqual(['cloud']);
-    } finally {
-      release.resolve();
-      room.unsubscribe();
-    }
-  });
-
   it.each([
     null,
     { mode: 'unknown' },
@@ -961,10 +646,9 @@ describe('workspace Streams content boundary', () => {
     a.getMap('data').set('value', 1);
     a.commit();
     expect((await ta.syncDoc('doc-a', a)).ok).toBe(true);
-    const readerLive = server.nextLive(new URL(docUrl(workspaceId, 'doc-a')).pathname);
     const subscription = tb.joinDocRoom('doc-a', b);
     await subscription.firstSyncedWithRemote;
-    await readerLive;
+    await server.liveReady;
     expect(b.toJSON()).toEqual(a.toJSON());
     const originalVersion = b.version().toJSON();
     const disconnected = Promise.withResolvers<void>();
@@ -1029,10 +713,9 @@ describe('workspace Streams content boundary', () => {
       doc.getMap('data').set('value', permission);
       doc.commit();
       await subscription.waitUntilSynced();
-      await Promise.all([...openTransports].map((activeTransport) => activeTransport.advance(10)));
+      await vi.advanceTimersByTimeAsync(10);
       if (permission !== 'allow') expect(server.room(path).snapshot).toBeUndefined();
     }
-    await server.snapshotWritten(path);
     const snapshot = server.room(path).snapshot;
     expect(snapshot).toBeDefined();
     expect(snapshot!.body[0]).not.toBe(42);
@@ -1064,8 +747,7 @@ describe('workspace Streams content boundary', () => {
     await subscription.waitUntilSynced();
     const path = new URL(docUrl(tab.workspaceId, 'doc-a')).pathname;
     expect(Number(server.tail(path))).toBeGreaterThan(102400);
-    await Promise.all([...openTransports].map((transport) => transport.advance(10_000)));
-    await server.snapshotWritten(path);
+    await vi.advanceTimersByTimeAsync(10_000);
     const snapshot = server.room(path).snapshot;
     expect(snapshot?.offset).toBe(server.tail(path));
     const restored = new LoroDoc();
@@ -1429,9 +1111,8 @@ describe('P10 public crypto and published SDK preparation', () => {
       doc.getMap('data').set('snapshot', 'verified before decompression');
       doc.commit();
       await subscription.waitUntilSynced();
-      await Promise.all([...openTransports].map((activeTransport) => activeTransport.advance(10)));
+      await vi.advanceTimersByTimeAsync(10);
       const url = docUrl(writer.workspaceId, 'doc-a');
-      await server.snapshotWritten(new URL(url).pathname);
       const snapshot = server.room(new URL(url).pathname).snapshot;
       expect(snapshot).toBeDefined();
       // Published host helper reconstructs identical room AAD. This verifies

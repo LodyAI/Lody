@@ -8,7 +8,9 @@ PR: [#1607](https://github.com/LodyAI/Lody/pull/1607)
 
 ## 摘要
 
-用户要求在[正式依赖升级](../../implemented/architecture/2026-10-16-streams-repo-release-adoption.zh.md)的同一个 PR 中接入原生消费者。CLI、renderer、预取 worker 和私有快捷指令 room 使用已发布的 Repo/SDK；一个 workspace Repo 拥有副本，现有 Promise API 经过唯一的废弃 facade。审查发现局部释放失败会截断清理链，并留下无法从正常获取入口恢复的隔离状态；现改为继续独立清理，并在下次获取时重试保留的 owner。包括 host 存储迁移和上层 Session/Turn 工作在内的 [WorkspaceData 设计](2026-10-14-workspace-data-services.zh.md)仍是提案。
+2026-10-19 已撤回 #1607 的消费者实现及其后续依赖补丁，保留依赖升级。以下章节记录历史实现和验证，不代表当前产品边界；见[撤回决策](../../implemented/simplification/2026-10-19-repo-upgrade-without-consumer-migration.zh.md)。
+
+## 历史实现（已撤回）
 
 ## 职责与行为
 

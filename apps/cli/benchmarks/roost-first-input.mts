@@ -23,7 +23,7 @@ import {
   type SessionInputAcceptance,
   type SessionTurn,
 } from '@lody/shared/session-data';
-import { WorkspaceRepoLegacy } from '@lody/shared/workspace-data/repo-legacy';
+import { LoroRepo } from 'loro-repo';
 import { SessionDocument } from '../src/lib/loro/doc';
 import { installRoostNodeSessionBackend } from '../src/session/roost-node-session';
 import type { SessionBackend } from '../src/session/session-backend';
@@ -64,7 +64,7 @@ const oldHistory = (size: number): Array<SessionHistoryInput & SessionTurn> =>
   }));
 
 async function open(kind: BackendKind, size: number) {
-  const repo = await WorkspaceRepoLegacy.create({});
+  const repo = await LoroRepo.create({});
   const sessionId = sessionIdFor(size);
   const roomId = getSessionRoomId(sessionId);
   await repo.upsertDocMeta(roomId, {

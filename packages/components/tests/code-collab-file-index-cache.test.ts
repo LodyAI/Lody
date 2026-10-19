@@ -1,8 +1,5 @@
-import 'fake-indexeddb/auto';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Flock } from '@loro-dev/flock-wasm';
-import { IndexedDBStorageAdaptor } from 'loro-repo/storage/indexeddb';
-import { WorkspaceRepoLegacy } from '@lody/shared/workspace-data/repo-legacy';
 import type { RepoRoomSubscription } from 'loro-repo';
 
 import {
@@ -63,90 +60,17 @@ function deferred<T = void>(): {
 }
 
 describe('createCodeCollabFileIndexCache', () => {
-  it('reopens the same dirty Flock after failed eviction and saves it after storage recovers', async () => {
-    const adapter = new IndexedDBStorageAdaptor({ dbName: 'file-index-retained-flock' });
-    const saveMany = adapter.saveMany.bind(adapter);
-    let blocked = false;
-    adapter.saveMany = async (payloads) => {
-      if (blocked) throw new DOMException('synthetic quota', 'QuotaExceededError');
-      await saveMany(payloads);
-    };
-    const repo = await WorkspaceRepoLegacy.create({ storageAdapter: adapter });
-    const replicas = new Map<string, Flock>();
-    const views: CodeCollabFileIndexCache[] = [];
-    const create = () => {
-      const cache = createCodeCollabFileIndexCache({
-        acquireFlockDocHandleLegacy: async (id) => {
-          const lease = await repo.acquireFlockDocHandleLegacy(id);
-          replicas.set(id, lease.flock);
-          return lease;
-        },
-        joinFlockDocRoom: async () => syncedRoom(),
-        unloadFlockDoc: (id) => repo.unloadFlockDoc(id),
-      });
-      views.push(cache);
-      return cache;
-    };
-    try {
-      let cache = create();
-      let lease = await cache.acquire('quota');
-      const original = replicas.get('quota');
-      if (!original) throw new Error('Missing index replica');
-      const remote = new Flock('remote-file-index');
-      remote.set(['README.md'], { kind: 'text', change: { diff: [1, 0] } });
-      remote.commit();
-      original.importJson(remote.exportJson({}));
-      original.commit();
-      blocked = true;
-      for (let attempt = 0; attempt < 2; attempt++) {
-        await lease.release();
-        await expect(cache.dispose()).rejects.toThrow();
-        cache = create();
-        lease = await cache.acquire('quota');
-        expect(replicas.get('quota')).toBe(original);
-        expect(lease.resource.getSnapshot()).toMatchObject({
-          status: 'ready',
-          snapshot: { fileIndex: { 'README.md': { kind: 'text' } } },
-        });
-        const sibling = await repo.acquireFlockDocHandleLegacy('sibling');
-        sibling.flock.set(['available'], true);
-        sibling.flock.commit();
-        expect(sibling.flock.get(['available'])).toBe(true);
-        await sibling.release();
-        const doc = await repo.acquireDocHandleLegacy('independent');
-        doc.doc.getMap('state').set('available', true);
-        doc.doc.commit();
-        expect(doc.doc.getMap('state').get('available')).toBe(true);
-        await doc.release();
-      }
-      blocked = false;
-      await lease.release();
-      await cache.dispose();
-      expect((await adapter.loadFlockDoc('quota'))?.get(['README.md'])).toMatchObject({
-        kind: 'text',
-      });
-      const next = await repo.acquireFlockDocHandleLegacy('quota');
-      expect(next.flock).not.toBe(original);
-      expect(next.flock.get(['README.md'])).toMatchObject({ kind: 'text' });
-      await next.release();
-    } finally {
-      blocked = false;
-      await Promise.allSettled(views.map((cache) => cache.dispose()));
-      await repo.destroy();
-    }
-  });
-
   it('shares one cold scan and room across concurrent scoped borrowers', async () => {
     const flock = new Flock('file-index-cache-test');
     flock.set(['README.md'], { kind: 'text', change: { diff: [1, 0] } });
     flock.commit();
     const scan = vi.spyOn(flock, 'scan');
     const releaseRepoLease = vi.fn(async () => undefined);
-    const acquireFlockDocHandleLegacy = vi.fn(async () => ({ flock, release: releaseRepoLease }));
+    const acquireFlockDoc = vi.fn(async () => ({ flock, release: releaseRepoLease }));
     const joinFlockDocRoom = vi.fn(async () => syncedRoom());
     const unloadFlockDoc = vi.fn(async () => undefined);
     const cache = createCodeCollabFileIndexCache({
-      acquireFlockDocHandleLegacy,
+      acquireFlockDoc,
       joinFlockDocRoom,
       unloadFlockDoc,
     });
@@ -157,7 +81,7 @@ describe('createCodeCollabFileIndexCache', () => {
       cache.acquire('workspace:fi:session'),
     ]);
 
-    expect(acquireFlockDocHandleLegacy).toHaveBeenCalledTimes(1);
+    expect(acquireFlockDoc).toHaveBeenCalledTimes(1);
     expect(scan).toHaveBeenCalledTimes(1);
     expect(joinFlockDocRoom).toHaveBeenCalledTimes(1);
     expect(first.resource).toBe(second.resource);
@@ -167,7 +91,7 @@ describe('createCodeCollabFileIndexCache', () => {
     await second.release();
 
     const warm = await cache.acquire('workspace:fi:session');
-    expect(acquireFlockDocHandleLegacy).toHaveBeenCalledTimes(1);
+    expect(acquireFlockDoc).toHaveBeenCalledTimes(1);
     expect(scan).toHaveBeenCalledTimes(1);
     await warm.release();
 
@@ -178,12 +102,12 @@ describe('createCodeCollabFileIndexCache', () => {
 
   it('evicts the least recently used inactive resource at capacity', async () => {
     const unloadedDocIds: string[] = [];
-    const acquireFlockDocHandleLegacy = vi.fn(async (_flockDocId: string) => ({
+    const acquireFlockDoc = vi.fn(async (_flockDocId: string) => ({
       flock: versionedFlock(() => [], vi.fn()),
       release: async () => undefined,
     }));
     const cache = createCodeCollabFileIndexCache({
-      acquireFlockDocHandleLegacy,
+      acquireFlockDoc,
       joinFlockDocRoom: async () => syncedRoom(),
       unloadFlockDoc: async (flockDocId) => {
         unloadedDocIds.push(flockDocId);
@@ -196,19 +120,19 @@ describe('createCodeCollabFileIndexCache', () => {
       await lease.release();
     }
 
-    expect(acquireFlockDocHandleLegacy).toHaveBeenCalledTimes(9);
+    expect(acquireFlockDoc).toHaveBeenCalledTimes(9);
     expect(unloadedDocIds).toContain('workspace:fi:session-0');
     expect(unloadedDocIds).not.toContain('workspace:fi:session-8');
   });
 
   it('keeps an active resource addressable while evicting inactive entries', async () => {
     const unloadedDocIds: string[] = [];
-    const acquireFlockDocHandleLegacy = vi.fn(async (_flockDocId: string) => ({
+    const acquireFlockDoc = vi.fn(async (_flockDocId: string) => ({
       flock: versionedFlock(() => [], vi.fn()),
       release: async () => undefined,
     }));
     const cache = createCodeCollabFileIndexCache({
-      acquireFlockDocHandleLegacy,
+      acquireFlockDoc,
       joinFlockDocRoom: async () => syncedRoom(),
       unloadFlockDoc: async (flockDocId) => {
         unloadedDocIds.push(flockDocId);
@@ -225,7 +149,7 @@ describe('createCodeCollabFileIndexCache', () => {
     expect(unloadedDocIds).not.toContain('workspace:fi:pinned');
     const samePinned = await cache.acquire('workspace:fi:pinned');
     expect(samePinned.resource).toBe(pinned.resource);
-    expect(acquireFlockDocHandleLegacy).toHaveBeenCalledTimes(9);
+    expect(acquireFlockDoc).toHaveBeenCalledTimes(9);
     await samePinned.release();
     await pinned.release();
     expect(unloadedDocIds).not.toContain('workspace:fi:pinned');
@@ -236,12 +160,12 @@ describe('createCodeCollabFileIndexCache', () => {
 
   it('invalidates a failed Effect lookup so the next acquire can retry', async () => {
     const flock = versionedFlock(() => []);
-    const acquireFlockDocHandleLegacy = vi
+    const acquireFlockDoc = vi
       .fn()
       .mockRejectedValueOnce(new Error('IndexedDB unavailable'))
       .mockResolvedValue({ flock, release: async () => undefined });
     const cache = createCodeCollabFileIndexCache({
-      acquireFlockDocHandleLegacy,
+      acquireFlockDoc,
       joinFlockDocRoom: async () => syncedRoom(),
       unloadFlockDoc: async () => undefined,
     });
@@ -250,7 +174,7 @@ describe('createCodeCollabFileIndexCache', () => {
     await expect(cache.acquire('workspace:fi:retry')).rejects.toThrow('IndexedDB unavailable');
     const retry = await cache.acquire('workspace:fi:retry');
 
-    expect(acquireFlockDocHandleLegacy).toHaveBeenCalledTimes(2);
+    expect(acquireFlockDoc).toHaveBeenCalledTimes(2);
     await retry.release();
   });
 
@@ -262,7 +186,7 @@ describe('createCodeCollabFileIndexCache', () => {
       throw new Error('scan failed');
     }, unsubscribe);
     const cache = createCodeCollabFileIndexCache({
-      acquireFlockDocHandleLegacy: async () => ({ flock, release: releaseRepoLease }),
+      acquireFlockDoc: async () => ({ flock, release: releaseRepoLease }),
       joinFlockDocRoom: async () => syncedRoom(),
       unloadFlockDoc,
     });
@@ -277,7 +201,7 @@ describe('createCodeCollabFileIndexCache', () => {
 
   it('rebuilds an inactive resource after its room catchup fails', async () => {
     const firstSync = deferred();
-    const acquireFlockDocHandleLegacy = vi.fn(async () => ({
+    const acquireFlockDoc = vi.fn(async () => ({
       flock: versionedFlock(() => []),
       release: async () => undefined,
     }));
@@ -287,7 +211,7 @@ describe('createCodeCollabFileIndexCache', () => {
       .mockResolvedValueOnce(syncedRoom());
     const unloadFlockDoc = vi.fn(async () => undefined);
     const cache = createCodeCollabFileIndexCache({
-      acquireFlockDocHandleLegacy,
+      acquireFlockDoc,
       joinFlockDocRoom,
       unloadFlockDoc,
     });
@@ -306,7 +230,7 @@ describe('createCodeCollabFileIndexCache', () => {
     await first.release();
 
     const retry = await cache.acquire('workspace:fi:remote-retry');
-    expect(acquireFlockDocHandleLegacy).toHaveBeenCalledTimes(2);
+    expect(acquireFlockDoc).toHaveBeenCalledTimes(2);
     expect(joinFlockDocRoom).toHaveBeenCalledTimes(2);
     expect(unloadFlockDoc).toHaveBeenCalledWith('workspace:fi:remote-retry');
     await retry.release();
@@ -318,7 +242,7 @@ describe('createCodeCollabFileIndexCache', () => {
     const releaseRepoLease = vi.fn(async () => undefined);
     const unloadFlockDoc = vi.fn(async () => undefined);
     const cache = createCodeCollabFileIndexCache({
-      acquireFlockDocHandleLegacy: async () => ({
+      acquireFlockDoc: async () => ({
         flock: versionedFlock(() => []),
         release: releaseRepoLease,
       }),
@@ -346,7 +270,7 @@ describe('createCodeCollabFileIndexCache', () => {
     const unloadFlockDoc = vi.fn(async () => undefined);
     const roomUnsubscribe = vi.fn();
     const cache = createCodeCollabFileIndexCache({
-      acquireFlockDocHandleLegacy: async () => ({
+      acquireFlockDoc: async () => ({
         flock: versionedFlock(
           () => [],
           () => {
@@ -371,7 +295,7 @@ describe('createCodeCollabFileIndexCache', () => {
     const unloadStarted = deferred();
     const finishUnload = deferred();
     const cache = createCodeCollabFileIndexCache({
-      acquireFlockDocHandleLegacy: async () => ({
+      acquireFlockDoc: async () => ({
         flock: versionedFlock(() => []),
         release: async () => undefined,
       }),

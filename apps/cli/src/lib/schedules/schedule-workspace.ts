@@ -1,5 +1,5 @@
 import { notificationLabel } from '@lody/shared/notifications';
-import type { WorkspaceRoom as RepoRoomSubscription } from '@lody/shared/workspace-data/repo-legacy';
+import type { RepoRoomSubscription } from 'loro-repo';
 import {
   canonicalScheduleJson,
   getScheduleRegistryFlockDocId,

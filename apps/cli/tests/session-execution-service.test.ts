@@ -11192,15 +11192,6 @@ describe('Operation Inbox execution boundary', () => {
     const sending = createDeferred<void>();
     const delivered = createDeferred<void>();
     const f = inboxExecutionFixture(async () => ({ stopReason: 'end_turn' }));
-    let held = 0;
-    f.deps.leaseSessionDoc = async () => {
-      held++;
-      return {
-        release: async () => {
-          held--;
-        },
-      };
-    };
     f.deps.turnFinalization.onTurnOutcome = async () => {
       sending.resolve();
       await delivered.promise;
@@ -11216,7 +11207,6 @@ describe('Operation Inbox execution boundary', () => {
         false
       );
       await running;
-      expect(held).toBe(0);
       delivered.resolve();
     } finally {
       delivered.resolve();
@@ -11281,34 +11271,6 @@ describe('Operation Inbox execution boundary', () => {
       await f.service.continueSession(f.message);
       expect(prompt).toHaveBeenCalledOnce();
       expect(facts.flatMap((fact) => projectTurnAttention(fact) ?? [])).toEqual([]);
-    } finally {
-      await f.close();
-    }
-  });
-
-  it('holds a document lease for the whole turn and keeps the agent process after it', async () => {
-    let held = 0;
-    const heldDuringPrompt: number[] = [];
-    const f = inboxExecutionFixture(async () => {
-      heldDuringPrompt.push(held);
-      return { stopReason: 'end_turn' };
-    });
-    f.deps.leaseSessionDoc = async () => {
-      held += 1;
-      return {
-        release: async () => {
-          held -= 1;
-        },
-      };
-    };
-    try {
-      await f.accept();
-      await f.service.continueSession(f.message);
-      expect(heldDuringPrompt).toEqual([1]);
-      expect(held).toBe(0);
-      // Ending the turn released its lease; the agent process stays for the next turn.
-      expect(f.client.isCreated()).toBe(true);
-      expect(f.service.getExecutionSnapshot(f.message.sessionId).hasReusableSession).toBe(true);
     } finally {
       await f.close();
     }

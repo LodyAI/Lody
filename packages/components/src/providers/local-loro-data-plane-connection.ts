@@ -1,4 +1,4 @@
-import type { LocalLoroDataPlaneConnection } from '@lody/shared/local-loro-data-plane';
+import type { LocalLoroDataPlaneConnection } from '@lody/shared/local-loro-transport';
 import { getIpcServices, onIpcEvent, sendIpc } from '@/lib/electron-ipc-client';
 
 export function createLocalLoroDataPlaneConnection(): {

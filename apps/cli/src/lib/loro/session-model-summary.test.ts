@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { LoroDoc, LoroMap, LoroList, LoroText } from 'loro-crdt';
-import type { WorkspaceRepoLegacy as LoroRepo } from '@lody/shared/workspace-data/repo-legacy';
+import type { LoroRepo } from 'loro-repo';
 import { SessionDocument } from './doc';
 import type { Logger } from '@/utils/logger';
 import {
@@ -43,7 +43,7 @@ describe('session model summary', () => {
       let stored = initial;
       const raw = new LoroDoc();
       const repo = {
-        acquireDocHandleLegacy: async () => ({ doc: raw, release: async () => {} }),
+        openPersistedDoc: async () => ({ doc: raw }),
         getDocMeta: async () => stored,
         upsertDocMeta: async (_id: string, patch: Partial<SessionMeta>) => {
           stored = { ...stored, meta: { ...stored?.meta, ...patch } };
@@ -71,7 +71,7 @@ describe('session model summary', () => {
       const writes: unknown[] = [];
       const raw = new LoroDoc();
       const repo = {
-        acquireDocHandleLegacy: async () => ({ doc: raw, release: async () => {} }),
+        openPersistedDoc: async () => ({ doc: raw }),
         getDocMeta: async () => stored,
         upsertDocMeta: async (_id: string, patch: object) => {
           writes.push(patch);
@@ -185,7 +185,7 @@ describe('session model summary', () => {
     let stored: { meta: Partial<SessionMeta> } | undefined;
     const raw = new LoroDoc();
     const repo = {
-      acquireDocHandleLegacy: async () => ({ doc: raw, release: async () => {} }),
+      openPersistedDoc: async () => ({ doc: raw }),
       getDocMeta: async () => stored,
       upsertDocMeta: async (_id: string, patch: Partial<SessionMeta>) => {
         stored = { meta: { ...stored?.meta, ...patch } };

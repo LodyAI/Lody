@@ -7,18 +7,9 @@ Translation: current
 
 ## Abstract
 
-Idle GC once destroyed a Session document that an Inbox turn had picked up two
-milliseconds earlier. The turn then failed in a way that made the Session
-unusable until a daemon restart. The root cause is ownership: the CLI's Session
-document cache has no reference counts, and GC decides with a check-then-act
-sequence that a concurrent turn can always slip into. This note proposes a
-per-Session residency owner. Every user holds a lease, and retirement runs under
-a per-Session gate only while no lease is held; an acquire that arrives during
-retirement waits for a fresh generation. Releasing a lease never terminates the
-agent process, which stays resident for 20 minutes of idleness as before. The
-kernel, the document cache, GC and turn leases are wired. Converting the
-remaining one-shot borrows into held leases is a stacked follow-up, and none of
-this is yet verified in production.
+The #1607 consumer implementation and its dependent patches were withdrawn on 2026-10-19. The dependency upgrade remains. The sections below preserve historical implementation and verification, not the current product boundary. See the [rollback decision](../../implemented/simplification/2026-10-19-repo-upgrade-without-consumer-migration.md).
+
+## Historical implementation (withdrawn)
 
 ## Problem
 

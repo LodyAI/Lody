@@ -35,10 +35,7 @@ import {
   type SessionPreviewStatusResponse,
   type WorkspaceId,
 } from '@lody/shared';
-import type { LoroDocumentManager, SessionDocument } from '@/lib/loro/doc';
-
-/** The document a GC retirement is closing, or undefined when none is open. */
-export type PreviewResidentDocument = { readonly sessionDoc: SessionDocument | undefined };
+import type { LoroDocumentManager } from '@/lib/loro/doc';
 import type { Logger } from '@/utils/logger';
 import { formatErrorMessage } from '@/utils/format-error';
 import { LocalPreviewProxyManager } from './local-preview-proxy';
@@ -828,29 +825,17 @@ export class PreviewService {
     };
   }
 
-  /**
-   * `resident` is set by GC retirement: write through that document (or skip the
-   * document write when none is open) instead of acquiring the Session.
-   */
-  async closeSessionPreviewForCleanup(
-    sessionId: SessionId,
-    reason: string,
-    resident?: PreviewResidentDocument
-  ): Promise<void> {
+  async closeSessionPreviewForCleanup(sessionId: SessionId, reason: string): Promise<void> {
     this.candidateReports.delete(sessionId);
     this.reportedStarts.get(sessionId)?.cancellation.abort(new Error(reason));
     this.cancelled.get(sessionId)?.abort(new Error(reason));
     this.activeTunnels.get(sessionId)?.cancel('session_ended');
     return this.serialize(sessionId, async () => {
-      await this.closeSessionPreviewExclusive(sessionId, reason, resident);
+      await this.closeSessionPreviewExclusive(sessionId, reason);
     });
   }
 
-  private async closeSessionPreviewExclusive(
-    sessionId: SessionId,
-    reason: string,
-    resident?: PreviewResidentDocument
-  ): Promise<void> {
+  private async closeSessionPreviewExclusive(sessionId: SessionId, reason: string): Promise<void> {
     const [remote, local, session] = await Promise.allSettled([
       this.closeActiveTunnel(sessionId, 'session_ended'),
       this.localProxyManager.closeSession(sessionId, reason),
@@ -864,21 +849,16 @@ export class PreviewService {
     const current = session.value.meta.previewConnection;
     if (!shouldMarkPreviewClosedForCleanup(current)) return;
     const now = this.now();
-    await this.patchSessionPreview(
-      sessionId,
-      {
-        previewConnection: {
-          ...current,
-          status: 'closed',
-          publicUrl: undefined,
-          updatedAt: now,
-          closedReason: 'session_ended',
-          error: undefined,
-        },
+    await this.patchSessionPreview(sessionId, {
+      previewConnection: {
+        ...current,
+        status: 'closed',
+        publicUrl: undefined,
+        updatedAt: now,
+        closedReason: 'session_ended',
+        error: undefined,
       },
-      undefined,
-      resident
-    );
+    });
   }
 
   async closeAllActiveTunnelsForCleanup(reason: string): Promise<void> {
@@ -1238,8 +1218,7 @@ export class PreviewService {
   private async patchSessionPreview(
     sessionId: SessionId,
     patch: SessionPreviewStatePatch,
-    isCurrent: () => boolean = () => true,
-    resident?: PreviewResidentDocument
+    isCurrent: () => boolean = () => true
   ): Promise<void> {
     // Reports and lifecycle updates share a document. Serialize the complete
     // read/modify/write so a report cannot restore an obsolete connection.
@@ -1248,12 +1227,8 @@ export class PreviewService {
       async () => {
         if (!isCurrent()) return;
         try {
-          // GC cleanup hands over the document it is retiring (or none): acquiring
-          // the Session here would wait on the retirement gate it already holds.
-          const sessionDoc = resident
-            ? resident.sessionDoc
-            : await this.deps.workspaceDocument.getOrCreateSessionDoc(sessionId);
-          const current = (await sessionDoc?.getPreviewState()) ?? {};
+          const sessionDoc = await this.deps.workspaceDocument.getOrCreateSessionDoc(sessionId);
+          const current = (await sessionDoc.getPreviewState()) ?? {};
           const next: SessionPreviewDocState = {
             ...current,
           };
@@ -1264,11 +1239,9 @@ export class PreviewService {
             next.connection = patch.previewConnection;
           }
           if (!isCurrent()) return;
-          await sessionDoc?.setPreviewState(next);
+          await sessionDoc.setPreviewState(next);
           await this.deps.workspaceDocument.repo.upsertDocMeta(getSessionRoomId(sessionId), {
-            ...(sessionDoc || hasPreviewPatchKey(patch, 'previewCandidate')
-              ? { previewCandidate: summarizePreviewCandidateForMeta(next.candidate) }
-              : {}),
+            previewCandidate: summarizePreviewCandidateForMeta(next.candidate),
             previewConnection: summarizePreviewConnectionForMeta(next.connection),
           } satisfies Partial<Pick<SessionMeta, 'previewCandidate' | 'previewConnection'>>);
         } catch (error) {

@@ -69,3 +69,5 @@ Lody 的两个 transport 都没有传这个选项。渲染端仍会为自己发�
 join 时会建好 stream 并追加本地 turn。file-index Flock join 时会带着保留期 TTL
 建好 stream。把选项改成 `false` 时，这两个测试都会失败。生产环境那四个会话的
 恢复还没有实际观察到：需要装有此修复的 daemon 重新 join 它们。
+
+当前边界（2026-10-19）：已撤回原生消费者及其后续应用补丁，仍选择 Repo 0.23.2；恢复的 Promise transport 自带远端 Stream 创建行为。见[撤回决策](../simplification/2026-10-19-repo-upgrade-without-consumer-migration.zh.md)。

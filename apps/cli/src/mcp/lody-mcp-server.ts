@@ -3826,33 +3826,38 @@ export function buildSessionToolServer(handlers?: SessionToolHandlers): McpServe
     handlers
   );
 
-  registerAgentRoleTools(registerSessionTool, async (command) => {
-    const ctx = getSessionContext();
-    const source = await resolveInvokingTurnSource();
-    const auth = getCliAuthContextOrThrow('mcp');
-    const workspace = await resolveWorkspaceOrThrow(auth, getMcpWorkspaceId(ctx));
-    return withWorkspaceManager(auth, workspace, 'agent-role-proposal', async (manager) =>
-      proposeAgentRole({
-        manager,
-        workspaceId: workspace.id as WorkspaceId,
-        sessionId: ctx.sessionId,
-        userId: source.userId,
-        command,
-        localOnly: !!getSessionCommandEnvironment(),
-        validateTarget: async (machineId, agentConfigId) => {
-          const discovery = await createResourceDiscovery({
-            manager,
-            auth,
-            workspaceId: workspace.id as WorkspaceId,
-            delegatedRequester: { userId: source.userId },
-          });
-          const config = await discovery.get('agent_config', agentConfigId);
-          if (config.item.machineId !== machineId)
-            throw new Error('Agent configuration does not belong to the selected machine');
-        },
-      })
-    );
-  });
+  registerAgentRoleTools(
+    registerSessionTool,
+    async (command) => {
+      const ctx = getSessionContext();
+      const source = await resolveInvokingTurnSource();
+      const auth = getCliAuthContextOrThrow('mcp');
+      const workspace = await resolveWorkspaceOrThrow(auth, getMcpWorkspaceId(ctx));
+      return withWorkspaceManager(auth, workspace, 'agent-role-proposal', async (manager) =>
+        proposeAgentRole({
+          manager,
+          workspaceId: workspace.id as WorkspaceId,
+          sessionId: ctx.sessionId,
+          userId: source.userId,
+          command,
+          localOnly: !!getSessionCommandEnvironment(),
+          validateTarget: async (machineId, agentConfigId) => {
+            const discovery = await createResourceDiscovery({
+              manager,
+              auth,
+              workspaceId: workspace.id as WorkspaceId,
+              delegatedRequester: { userId: source.userId },
+              requireFreshCatalogs: true,
+            });
+            const config = await discovery.get('agent_config', agentConfigId, machineId);
+            if (config.item.machineId !== machineId)
+              throw new Error('Agent configuration does not belong to the selected machine');
+          },
+        })
+      );
+    },
+    mcpErrorResult
+  );
 
   registerDiscoveryTools(registerSessionTool, async (read) => {
     const ctx = getSessionContext();
