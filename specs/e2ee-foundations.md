@@ -57,6 +57,21 @@ Ledger evolution is append-only:
 
 Every other format remains current-only. Content, journal, local-store and snapshot formats have no deployed data: support only the current format for each entrypoint, with no old-format decoders, dual readers, schema upgrades, legacy imports or compatibility facades. Snapshots can always be rebuilt from full v1 history, so a snapshot format change does not break ledger compatibility. Unsupported formats fail without rewriting their input. Normal reopening of current stores, verified history within the current ledger and epoch-key history recovery remain required. This scope choice does not select any pending replacement format or approve production activation.
 
+## Retained verified state (proposed)
+
+Full replay costs about 5.4 ms per record on an idle desktop-class host (4,096 records: 22 s); extending a held view by one record costs about 5 ms. Replaying from genesis on every request is therefore not viable for a host or a client. This section proposes a core entry that lets a party resume from **its own** previously verified state. It does not change the ledger v1 record format. See the [proposal note](../.agents/notes/proposed/architecture/2026-10-19-e2ee-retained-ledger-state.md).
+
+- **Export.** `exportVerifiedState(view)` returns the canonical state encoding (the same deterministic encoding that snapshot bodies use, so one state has exactly one byte representation), its genesis, length, head and `stateDigest`. The digest is computed once, at export.
+- **Restore.** `restoreVerifiedState({ bytes, genesis, length, head })` decodes canonically and rejects malformed input with typed errors. It does not re-verify signatures and does not recompute the digest: the bytes come from the same party's own storage, which that party already trusts, so a recomputation adds cost and no protection. A restored view supports `extendLedger` exactly like the view that was exported.
+- **Scope of authority.** Retained state is authority only for the party that exported it, for its own decisions (a host's write admission, a client's local view). It is never accepted from another party. Joining another party's state still uses endorsed snapshots.
+- **Continuation.** New records are read from the retained length onward; the first must reference the retained head. A mismatch means the external store rolled back or forked and fails closed. This check is about untrusted storage, not about the retained state.
+- **Completeness.** Retained state must contain every replay fact needed to verify the next record identically to a full replay: members, devices, roles, used signing/encryption keys and membership IDs, closed joins, epoch state, history packets, used epoch commitments, and declared capabilities once any exist. Whether historical content attribution and original epoch publication records are retained, or reported unavailable by a restored view, is an open decision.
+- **Digest use.** `stateDigest` identifies a state for cross-party comparison (comparison notes) and for background audits. It is not a hot-path self-check.
+- **Background audit.** A host periodically replays from genesis off the request path and compares the result with its retained digest. A mismatch is an incident: the host refuses new writes for that ledger until it is resolved.
+- **Format.** The retained encoding is current-format only. After an encoding change, a party discards its retained state and rebuilds it by one full replay of v1 history.
+- **Reads.** A host serving history pages needs no verification on the read path; clients verify what they receive. Host verification belongs to write admission.
+- **Local stores.** If adopted, clients may restore their local retained state on open instead of revalidating all stored records, which supersedes the full revalidation described below.
+
 ## Local epoch protection boundary
 
 A recipient must be able to reopen a durably retained installed epoch key without
