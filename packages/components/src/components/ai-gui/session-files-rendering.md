@@ -50,6 +50,18 @@ File attachments use `file` blocks; the product contract is in
   speaker's side. Decision:
   [image attachment row](../../../../../.agents/notes/implemented/bug-fix/2026-09-15-image-attachment-row-wraps.md).
 
+## Codex file citations
+
+Markdown prose recognizes `:codex-file-citation{path="..."}` as a local file card,
+including paths wrapped in whitespace/newlines and optional `purpose` / `artifact_kind`
+attributes. It reuses `SessionFileCardLayout` and the Markdown file-link action/menu
+boundary; it does not fabricate an uploaded attachment, size, expiry, or download URL.
+Filename punctuation is URL-encoded for transport through the existing href resolver.
+Without a session opener, clicking copies the path. Invalid/incomplete citations and
+code examples do not become cards. The inline card uses a span frame to keep paragraph
+markup valid. Coverage lives in the Markdown file-link and streaming renderer suites;
+`MarkdownCodexFileCitations` provides the visual states.
+
 ## Upload-to-history continuity
 
 Pending file attachments reuse `SessionFileCardLayout` and `SessionFileCardList`,

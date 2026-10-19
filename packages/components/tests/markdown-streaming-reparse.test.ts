@@ -850,6 +850,41 @@ End of synthetic document.`,
     expect(container?.textContent).toContain('\\(ordered_list_literal\\)');
   });
 
+  it('renders multiline Codex citations as file cards and opens their exact target', async () => {
+    let opened = '';
+    await renderMarkdown(
+      'Ready: :codex-file-citation{path="\n/tmp/exports/预算 draft.xlsx\n" purpose="output" artifact_kind="workbook"} Done.',
+      {
+        onAgentFileLinkClick: (href) => {
+          opened = decodeURIComponent(href);
+        },
+      }
+    );
+    const button = container?.querySelector<HTMLButtonElement>(
+      'button[aria-label="预算 draft.xlsx"]'
+    );
+    expect(button).not.toBeNull();
+    expect(container?.textContent).not.toContain('codex-file-citation');
+    expect(container?.textContent).toContain('Ready:');
+    expect(container?.textContent).toContain('Done.');
+    expect(container?.querySelector('p div')).toBeNull();
+    await act(async () => {
+      button?.click();
+    });
+    expect(opened).toBe('/tmp/exports/预算 draft.xlsx');
+  });
+
+  it('leaves code examples and incomplete citations as text until completed', async () => {
+    const citation = ':codex-file-citation{path="/tmp/report.pdf"}';
+    await renderMarkdown('`' + citation + '`\n\n```text\n' + citation + '\n```');
+    expect(container?.querySelector('button[aria-label="report.pdf"]')).toBeNull();
+    expect(container?.querySelector('code')?.textContent).toBe(citation);
+    await renderMarkdown(citation.slice(0, -1));
+    expect(container?.querySelector('button[aria-label="report.pdf"]')).toBeNull();
+    await renderMarkdown(citation + ' ' + citation);
+    expect(container?.querySelectorAll('button[aria-label="report.pdf"]')).toHaveLength(2);
+  });
+
   it('does not parse dollars inside code spans or link labels as LaTeX', async () => {
     await renderMarkdown(
       [

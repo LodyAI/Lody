@@ -81,6 +81,8 @@ import { MermaidFullscreenButton, useMermaidDiagramCanvas } from './use-mermaid-
 import { SessionReadonlyContext } from './session-readonly-context';
 import type { MarkdownAgentFileLinkMenuItem } from '@/hooks/use-session-file-actions';
 import { ContextMenu } from '@/ui/armed-overlays';
+import { remarkCodexFileCitations } from '@/lib/remark-codex-file-citations';
+import { SessionFileCardLayout } from './session-file-card';
 import { MarkdownFileImage, MarkdownFileResourcesContext } from './markdown-file-image';
 import { resolveMarkdownImagePath } from '@/lib/session-file-open-target';
 import { getImageMimeTypeForPath } from '@/lib/image-file-preview';
@@ -99,9 +101,7 @@ type MarkdownCodeProps = ComponentPropsWithoutRef<'code'> & {
   node?: unknown;
 };
 
-type MarkdownLinkProps = ComponentPropsWithoutRef<'a'> & {
-  node?: unknown;
-};
+type MarkdownLinkProps = ComponentPropsWithoutRef<'a'> & ExtraProps;
 
 type MarkdownPictureProps = ComponentPropsWithoutRef<'picture'> & {
   node?: unknown;
@@ -870,6 +870,7 @@ const remarkMarkUnclosedFences = () => (tree: unknown, file: MarkdownFile) => {
 const MARKDOWN_REMARK_PLUGINS = [
   remarkGfm,
   remarkCjkFriendly,
+  remarkCodexFileCitations,
   remarkRepairMalformedGfmAutolinks,
   remarkLinkifyPlainUrls,
   remarkLinkifyFilePaths,
@@ -971,8 +972,10 @@ const AgentFileLink = ({
   copyAgentFileLabel,
   openAgentFileLabel,
   getContextMenuItems,
+  fileCard = false,
 }: {
   href: string;
+  fileCard?: boolean;
   children: ReactNode;
   onFilePathClick?: (href: string) => void;
   copyAgentFileLabel: string;
@@ -990,14 +993,26 @@ const AgentFileLink = ({
       return;
     }
 
-    const ok = await writeTextToClipboard(href);
+    const ok = await writeTextToClipboard(fileCard ? decodeURIComponent(href) : href);
     if (!ok) return;
 
     setDidCopy(true);
     window.setTimeout(() => setDidCopy(false), 1200);
-  }, [href, onFilePathClick]);
+  }, [fileCard, href, onFilePathClick]);
 
-  const link = (
+  const link = fileCard ? (
+    <SessionFileCardLayout
+      inline
+      fileName={markdownLinkText(children)}
+      subtitle={hasOpenAction ? openAgentFileLabel : copyAgentFileLabel}
+      icon={<MonochromeFileIcon filePath={iconPath} />}
+      actionIcon={hasOpenAction ? null : didCopy ? <Check /> : <Copy />}
+      isInteractive
+      onClick={() => {
+        void handleClick();
+      }}
+    />
+  ) : (
     <button
       type="button"
       onClick={() => {
@@ -1284,22 +1299,23 @@ const createMarkdownComponents = ({
     }
 
     if (isMarkdownAgentFileHref(href)) {
-      return (
-        <MarkdownFileImageLink
+      const fileCard = _node?.properties?.['data-codex-file-citation'] === true;
+      const link = (
+        <AgentFileLink
           href={href}
-          label={children}
-          fallback={
-            <AgentFileLink
-              href={href}
-              onFilePathClick={onAgentFileLinkClick}
-              copyAgentFileLabel={copyAgentFileLabel}
-              openAgentFileLabel={openAgentFileLabel}
-              getContextMenuItems={getAgentFileLinkContextMenuItems}
-            >
-              {children}
-            </AgentFileLink>
-          }
-        />
+          fileCard={fileCard}
+          onFilePathClick={onAgentFileLinkClick}
+          copyAgentFileLabel={copyAgentFileLabel}
+          openAgentFileLabel={openAgentFileLabel}
+          getContextMenuItems={getAgentFileLinkContextMenuItems}
+        >
+          {children}
+        </AgentFileLink>
+      );
+      return fileCard ? (
+        link
+      ) : (
+        <MarkdownFileImageLink href={href} label={children} fallback={link} />
       );
     }
 

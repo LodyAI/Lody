@@ -122,6 +122,7 @@ const styles = stylex.create({ frame: { position: 'relative', overflow: 'hidden'
 
 /** The delivered card layout, also used while attachment preparation is pending. */
 export function SessionFileCardLayout({
+  inline = false,
   fileName,
   subtitle,
   icon,
@@ -134,6 +135,7 @@ export function SessionFileCardLayout({
   progress,
   className,
 }: {
+  inline?: boolean;
   fileName: string;
   subtitle: string;
   icon: ReactNode;
@@ -146,8 +148,9 @@ export function SessionFileCardLayout({
   progress?: ReactNode;
   className?: string;
 }) {
+  const Frame = inline ? 'span' : 'div';
   return (
-    <div
+    <Frame
       className={cn(
         stylex.props(styles.frame).className,
         'group flex w-full max-w-sm items-center gap-1 rounded-xl border px-3 py-2.5 text-left',
@@ -211,7 +214,7 @@ export function SessionFileCardLayout({
       </button>
       {secondaryAction}
       {progress}
-    </div>
+    </Frame>
   );
 }
 

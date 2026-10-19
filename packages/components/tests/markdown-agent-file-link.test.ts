@@ -1,3 +1,7 @@
+import { createElement } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
+import Markdown from 'react-markdown';
+import { remarkCodexFileCitations } from '../src/lib/remark-codex-file-citations';
 import { describe, expect, it } from 'vitest';
 import {
   isMarkdownAgentFileHref,
@@ -180,5 +184,51 @@ describe('normalizeMarkdownAgentFilePath', () => {
     expect(
       normalizeMarkdownAgentFilePath('/home/agent/project/README.md:L100C12', '/home/agent/project')
     ).toBe('README.md:L100C12');
+  });
+});
+
+describe('Codex file citations through Markdown', () => {
+  const renderCitation = (text: string) =>
+    renderToStaticMarkup(
+      createElement(Markdown, {
+        remarkPlugins: [remarkCodexFileCitations],
+        components: {
+          a: ({ node, href, children }) =>
+            createElement(
+              'span',
+              {
+                'data-card': node?.properties?.['data-codex-file-citation'] === true,
+                'data-path': href ? decodeURIComponent(href) : '',
+              },
+              children
+            ),
+        },
+        children: text,
+      })
+    );
+
+  it('preserves surrounding prose and literal path punctuation', () => {
+    const html = renderCitation(
+      'Before :codex-file-citation{purpose="output" path="\n/tmp/预算 100% #1.xlsx\n" artifact_kind="workbook"} after'
+    );
+    expect(html).toContain('data-card="true"');
+    expect(html).toContain('data-path="/tmp/预算 100% #1.xlsx"');
+    expect(html).toContain('Before ');
+    expect(html).toContain(' after');
+    expect(html).not.toContain('codex-file-citation');
+  });
+
+  it.each([
+    ':codex-file-citation{path=""}',
+    ':codex-file-citation{path="https://example.com/a.xlsx"}',
+    ':codex-file-citation{path="javascript:alert(1)"}',
+    ':codex-file-citation{path="//example.com/a.xlsx"}',
+    ':codex-file-citation{path="/tmp/a\nb.xlsx"}',
+    ':codex-file-citation{path="/tmp/a.xlsx" path="/tmp/b.xlsx"}',
+    ':codex-file-citation{path="/tmp/a.xlsx"',
+    '` :codex-file-citation{path="/tmp/a.xlsx"} `',
+    '```text\n:codex-file-citation{path="/tmp/a.xlsx"}\n```',
+  ])('does not create a card for %s', (text) => {
+    expect(renderCitation(text)).not.toContain('data-card="true"');
   });
 });
