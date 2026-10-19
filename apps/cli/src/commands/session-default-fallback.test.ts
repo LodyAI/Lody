@@ -5,6 +5,7 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   getMachineRoomId,
+  getWorkspaceFlockDocId,
   getSessionRoomId,
   snapshotAgentRole,
   type AcpCapabilityCacheEntry,
@@ -156,7 +157,8 @@ function createFixture(agentType: 'codex' | 'claude', capability?: AcpCapability
     getAgentConfigById: async () => agentConfig,
     syncMetaOrThrow: async () => undefined,
     syncDocOrThrow: async () => undefined,
-    syncFlockDocOrThrow: async () => {
+    syncFlockDocOrThrow: async (docId: string) => {
+      if (docId === getWorkspaceFlockDocId(workspaceId)) return;
       if (!freshnessConfirmed) {
         throw new FlockSyncTimeoutError('Synthetic Machine Flock freshness deadline');
       }
