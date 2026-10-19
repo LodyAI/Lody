@@ -125,6 +125,24 @@ consumer chain, including a committed-but-lost native reply. Its discovered rese
 fall-through is a renderer recovery defect; no further native write change is
 required by that correction.
 
+## SQLite namespace diagnostics
+
+The streaming-budget test inspects a temporary Native SQLite database directly.
+Its three statistics queries must support both the installed container v3
+(`roost_kv.space`) and container v4's interned namespaces (`roost_spaces.name`
+joined by `space_id`). A test-local relation exposes the same `space/key/value`
+columns for either format, with an explicit accepted-version assertion. Update
+bytes, receipt count and projection-row budgets remain unchanged. This is test
+diagnostics only: production reads, SDK pins, migrations and data cleanup do not
+change. Companion storage work: [Roost #15](https://github.com/loro-dev/roost/pull/15).
+
+The same sustained-streaming/reopen case passed separately with the installed
+Native SDK (v3) and the rebuilt v4 addon: one passed and 75 filtered in each run.
+Repository format, all-package typechecking, type-aware lint and documentation
+checks passed. Full `pnpm check` stopped at Effect lint because the reused build
+dependencies lacked `@effect/tsgo`; it did not reach the full repository test
+suite. The two Native runs and unchanged budgets do not stand in for that suite.
+
 ## Outbox and existing data
 
 Outbox rows are not pending-delivery counts. The installed TypeScript Store's ACK

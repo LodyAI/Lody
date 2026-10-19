@@ -2516,18 +2516,25 @@ describe('Production Roost history semantics', () => {
     }
     const db = new Database(join(nativeDirectory, 'history.db'), { readonly: true });
     try {
+      const containerVersion = db.pragma('user_version', { simple: true });
+      expect([3, 4]).toContain(containerVersion);
+      const kvRows =
+        containerVersion === 4
+          ? `(SELECT roost_spaces.name AS space, key, value
+              FROM roost_kv JOIN roost_spaces ON roost_spaces.id = roost_kv.space_id)`
+          : 'roost_kv';
       const stats = db
         .prepare(`SELECT COUNT(*) AS rows, SUM(LENGTH(key) + LENGTH(value)) AS bytes
-        FROM roost_kv WHERE space LIKE ?`)
+        FROM ${kvRows} WHERE space LIKE ?`)
         .get(`%${fixture.doc.sessionId}%:updates`) as { rows: number; bytes: number };
       expect(stats.rows).toBeGreaterThan(128);
       expect(stats.bytes).toBeLessThan(1024 * 1024);
       const receipts = db
-        .prepare(`SELECT COUNT(*) AS count FROM roost_kv WHERE space LIKE ?`)
+        .prepare(`SELECT COUNT(*) AS count FROM ${kvRows} WHERE space LIKE ?`)
         .get(`%${fixture.doc.sessionId}%:lody_agent_operation_receipts_v1`) as { count: number };
       expect(receipts.count).toBe(128);
       const projection = db
-        .prepare(`SELECT COUNT(*) AS count FROM roost_kv WHERE space LIKE ?`)
+        .prepare(`SELECT COUNT(*) AS count FROM ${kvRows} WHERE space LIKE ?`)
         .get(`%${fixture.doc.sessionId}%:projection`) as { count: number };
       expect(projection.count).toBeGreaterThan(0);
       expect(projection.count).toBeLessThan(1000);

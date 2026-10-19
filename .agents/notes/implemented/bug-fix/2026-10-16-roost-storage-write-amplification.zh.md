@@ -103,6 +103,20 @@ Native 写入与其他客户端的增量正文读取，不足以作为发行验�
 把生产 RPC 加解密端点和两个渲染器副本加入同一消费者链路，并覆盖原生提交成功但回复丢失。
 其中发现的 reset 快捷路径是渲染器恢复缺陷；这项更正不需要继续修改原生写入。
 
+## SQLite namespace 统计
+
+流式预算测试直接检查临时 Native SQLite 数据库。三处统计查询同时支持当前安装的
+container v3（`roost_kv.space`）和 namespace 整数引用的 v4（通过 `space_id`
+关联 `roost_spaces.name`）。测试内的查询关系为两种格式提供相同的
+`space/key/value` 列，并显式断言支持的版本；更新字节、回执行数和投影行数预算不变。
+这里只调整测试统计，不改生产读取、SDK 固定版本、迁移或数据清理。
+配套存储改动：[Roost #15](https://github.com/loro-dev/roost/pull/15)。
+
+同一个持续流式输出及重开用例分别在当前 Native SDK（v3）和重建的 v4 addon 上通过：
+每次 1 项通过、75 项按名称过滤。全仓格式、所有 package 类型检查、带类型 lint 和
+文档检查通过。完整 `pnpm check` 在 Effect lint 阶段因复用的构建依赖缺少
+`@effect/tsgo` 而停止，尚未进入全仓测试；两次 Native 用例及原有预算不能替代全仓套件。
+
 ## Outbox 与既有数据
 
 Outbox 行数不等于待发送数量。已安装 TypeScript Store 的 ACK 推进消费者游标而不删除行，
