@@ -4,6 +4,7 @@ Status: implemented
 Translation: current
 PR: [LodyAI/Lody#1456](https://github.com/LodyAI/Lody/pull/1456)
 Follow-up PR: [LodyAI/Lody#1473](https://github.com/LodyAI/Lody/pull/1473)
+Correction Issue: [LodyAI/Lody#1723](https://github.com/LodyAI/Lody/issues/1723)
 
 [English](2026-10-11-drop-tool-images-from-history.md)
 
@@ -14,6 +15,8 @@ Follow-up PR: [LodyAI/Lody#1473](https://github.com/LodyAI/Lody/pull/1473)
 blob 字节，保留下载引用，并移除子工具重复的 raw 副本。音频、可读输出、完整 diff、审批计划
 以及权限和调度 metadata 保留。权限补全不改写已有内容，非法新输入仍进入 writer 校验。
 这是针对未使用数据的清理，不是通用二进制大小上限。
+后续修正对子工具数组输出的可读副本应用同一图片规则；此前子代理读取的图片会以文本形式
+写入历史。
 
 ## 最初的图片决策（#1456）
 
@@ -60,3 +63,19 @@ content 列表；writer 继续原子拒绝非法新字段，且允许随后提�
 审批计划保留。CLI 批处理和权限 writer 套件覆盖非法通知隔离、原子拒绝与旧容器身份。
 普通会话附件和 provider 执行输出保持不变。音频、可见或不透明输出仍可能很大；改为引用
 需要另行设计并保留现有消费者。
+
+## 修正：子工具数组输出中的图片
+
+上一次后续改动把子工具的标量或数组 raw 输出保存为一个可读文本块，但数组可能就是工具结果
+本身。Claude 转发子代理 `Read` 图片的结果时，形如
+`[{ type: 'image', source: { type: 'base64', … } }]`；序列化成文本块后，图片绕过了只匹配
+图片块的过滤。根历史不受影响，因为那里不保存读取输出。在已报告的会话（#1723）中，子代理
+反复查看幻灯片截图，使会话文档增长到 502 MB，随后快照上传返回 HTTP 413。
+
+现在生成可读副本之前，数组输出会按内容块的同一图片规则（图片条目，或以图片 MIME 类型或
+data URI 标识的 blob resource）去掉匹配项；只含图片的数组不再保留副本。其他条目和标量输出
+不变。这延续了此前不使用 base64 猜测和大小上限的取舍。对象形式的 raw 输出仍按原样保存，
+存量历史不迁移，已经膨胀的文档仍会超限。
+
+真实 Loro HistoryWriter 测试通过子事件发送混合数组和纯图片数组（Claude 结果格式）：修改前
+两者都被原样保存；修改后图片都不会进入文档，文本条目保留。

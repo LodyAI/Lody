@@ -254,6 +254,55 @@ describe('single history writer', () => {
     expect(replaced.run?.items).toMatchObject([
       { toolCallId: 'child-tool', status: 'completed', content: [] },
     ]);
+    // Claude forwards a child Read's raw tool_result array as rawOutput. Its image
+    // entries must not reach history through the readable output copy.
+    const rawImage = (data: string) => ({
+      type: 'image',
+      source: { type: 'base64', media_type: 'image/png', data },
+    });
+    emit({
+      type: 'output',
+      update: {
+        sessionUpdate: 'tool_call',
+        toolCallId: 'child-image-read',
+        title: 'Read slide.png',
+        kind: 'read',
+        status: 'completed',
+        rawOutput: [rawImage('DROP_CHILD_RAW_IMAGE'), { type: 'text', text: 'Readable note' }],
+      },
+    });
+    emit({
+      type: 'output',
+      update: {
+        sessionUpdate: 'tool_call',
+        toolCallId: 'child-image-only',
+        title: 'Read chart.png',
+        kind: 'read',
+        status: 'completed',
+        rawOutput: [rawImage('DROP_CHILD_RAW_ONLY')],
+      },
+    });
+    const imageReads = (
+      writer.read('first')!.items[0] as Extract<MessageContent, { type: 'subagent_task' }>
+    ).run?.items.slice(-2);
+    expect(imageReads).toMatchObject([
+      {
+        toolCallId: 'child-image-read',
+        content: [
+          {
+            type: 'content',
+            content: {
+              type: 'text',
+              text: JSON.stringify([{ type: 'text', text: 'Readable note' }]),
+            },
+          },
+        ],
+      },
+      { toolCallId: 'child-image-only' },
+    ]);
+    const imageOnly = imageReads?.[1] as Extract<MessageContent, { type: 'tool_call' }>;
+    expect(imageOnly.content ?? []).toEqual([]);
+    expect(JSON.stringify(doc.toJSON())).not.toContain('DROP_CHILD');
     const plan = 'Useful approval plan. '.repeat(6000);
     emit({
       type: 'output',

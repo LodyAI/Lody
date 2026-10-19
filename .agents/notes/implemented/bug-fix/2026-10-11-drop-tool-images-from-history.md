@@ -4,6 +4,7 @@ Status: implemented
 Translation: current
 PR: [LodyAI/Lody#1456](https://github.com/LodyAI/Lody/pull/1456)
 Follow-up PR: [LodyAI/Lody#1473](https://github.com/LodyAI/Lody/pull/1473)
+Correction Issue: [LodyAI/Lody#1723](https://github.com/LodyAI/Lody/issues/1723)
 
 [中文](2026-10-11-drop-tool-images-from-history.zh.md)
 
@@ -17,6 +18,8 @@ and removes redundant child raw copies. Audio, readable output, complete diffs,
 approval plans and permission/scheduling metadata remain available. Existing stored
 content is preserved during permission enrichment; malformed new input still
 reaches writer validation. This is a targeted cleanup, not a general binary-size cap.
+A later correction applies the same image rule to the readable copy of child array
+output, which had let subagent image reads into history as text.
 
 ## Initial image decision (#1456)
 
@@ -76,3 +79,24 @@ writer suites cover invalid-input isolation, atomic rejection and legacy contain
 identity. Ordinary conversation attachments and provider execution output remain
 unchanged. Audio and visible/opaque output can still be large; storing those through
 references requires a separate design that preserves their consumers.
+
+## Correction: images in child array output
+
+The follow-up stored scalar/array child raw output as one readable text block, but
+an array can carry the tool result itself. Claude forwards a child `Read` of an
+image as `[{ type: 'image', source: { type: 'base64', … } }]`; serialized into a
+text block, the image bypassed the image filter, which only matched image blocks.
+Root history was unaffected because read output is not persisted there. In a
+reported session (#1723), subagents viewing slide screenshots made the session
+document grow to 502 MB, which then failed snapshot upload with HTTP 413.
+
+Array output now drops entries matching the same image rule as content blocks
+(an image entry, or a blob resource with an image MIME type or data URI) before
+the readable copy is made; an array with only images leaves no copy. Other
+entries and scalar output are unchanged. This keeps the earlier exclusion of
+base64 heuristics and size caps. Object raw output is still stored as-is, and
+existing histories are not migrated, so already-grown documents stay oversized.
+
+A real Loro HistoryWriter test sends mixed and image-only Claude-shaped arrays
+through child events: on the previous code both were stored verbatim; now neither
+image reaches the document and the text entry survives.
