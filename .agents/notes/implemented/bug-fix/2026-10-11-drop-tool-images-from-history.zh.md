@@ -5,6 +5,7 @@ Translation: current
 PR: [LodyAI/Lody#1456](https://github.com/LodyAI/Lody/pull/1456)
 Follow-up PR: [LodyAI/Lody#1473](https://github.com/LodyAI/Lody/pull/1473)
 Correction Issue: [LodyAI/Lody#1723](https://github.com/LodyAI/Lody/issues/1723)
+Correction PR: [LodyAI/Lody#1724](https://github.com/LodyAI/Lody/pull/1724)
 
 [English](2026-10-11-drop-tool-images-from-history.md)
 
