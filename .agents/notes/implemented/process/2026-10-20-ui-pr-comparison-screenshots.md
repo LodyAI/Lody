@@ -12,8 +12,8 @@ UI pull requests can describe a visible change without showing the result,
 leaving reviewers to reproduce both versions. The PR template now recommends
 labeled before/after screenshots, and the visual guide explains how Agents can
 capture them during implementation using synthetic data. Privacy takes priority:
-authors inspect the exported images before sharing and explain when a safe pair
-is unavailable. This guidance adds no screenshot requirement or automated gate.
+authors inspect the exported images before sharing. Screenshots are optional
+and may be omitted without explanation; this guidance adds no automated gate.
 
 ## Decision
 
@@ -33,10 +33,9 @@ private content before either a public upload or a commit. Captured user/agent
 transcripts remain prohibited. Reviewers receive accessible safe artifacts, not
 local-only paths.
 
-Requiring a pair would pressure authors to expose private content or manufacture
-a missing baseline. Instead, authors describe capture limitations and provide
-the safe evidence available. Existing required template headings and the
-structural-view validator remain unchanged.
+Authors decide whether to include screenshots and may omit them without
+explanation. Existing required template headings and the structural-view
+validator remain unchanged.
 
 ## Verification
 

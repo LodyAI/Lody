@@ -154,12 +154,9 @@ filesystem path alone is not reviewable in a PR. A small side-by-side table work
 well for a pair. Captions should identify the relevant state and any deliberate
 comparison differences.
 
-This is a recommendation, not an additional submission requirement or automated
-gate. If the baseline cannot be reproduced, safe capture is unavailable, or the
-change is not visible in a still image, explain that limit and provide the safe
-evidence available, such as an after screenshot and a written before description.
-Do not invent a baseline capture or disclose private content to complete a pair.
-The existing structural-view rules still apply independently.
+Screenshots are recommended, not mandatory, and add no submission requirement or
+automated gate. Authors may omit screenshots without explanation. The existing
+structural-view rules still apply independently.
 
 ## Choosing and placing a view
 

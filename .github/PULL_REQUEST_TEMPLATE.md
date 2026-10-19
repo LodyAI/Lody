@@ -51,9 +51,9 @@ Any supporting artifact must be reachable by reviewers; a local HTML file is not
 For UI changes, consider adding labeled Before/After screenshots of the actual UI.
 Agents: capture the baseline and final result during the implementation loop when
 practical, using synthetic data and comparable viewport, theme, and UI state.
-Inspect both images for private content before uploading or committing. If a safe
-pair is unavailable, explain the limitation and include the safe evidence available.
-Screenshots are recommended, not a new requirement or automated check.
+Inspect both images for private content before uploading or committing.
+Screenshots are encouraged, not mandatory; authors may omit them without explanation.
+This recommendation adds no automated check.
 Capture and privacy guidance: .agents/docs/visual-explanations.md#ui-screenshots
 -->
 
