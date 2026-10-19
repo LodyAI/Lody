@@ -1,6 +1,7 @@
 import type { Meta, StoryObj } from '@storybook/react';
 import { useMemo, useState } from 'react';
 import { fn } from 'storybook/test';
+import { Button } from '@lody/ui/button';
 import type {
   AgentConfigId,
   AgentConfigMeta,
@@ -450,4 +451,37 @@ export const OfflinePrivateMachine: Story = {
 
 export const WaitingForResourceSample: Story = {
   args: { resourcePending: true },
+};
+
+/** A real card with controlled presence, for motion and reduced-motion inspection. */
+function MachineOnlineStatusPreview() {
+  const [isOnline, setIsOnline] = useState(true);
+  const previewMeta: WorkspaceMachineAccordionMeta = {
+    machine: {
+      id: 'machine-status-preview' as MachineId,
+      name: 'Docker Agent Workspace',
+      os: 'Linux',
+      cliVersion: '0.57.1',
+      sessions: [],
+      raceLimits: {},
+    },
+    isOnline,
+    isLocal: true,
+    isPrivate: false,
+    owner: null,
+    directoryCount: 4,
+    agentCount: 3,
+  };
+  return (
+    <div className="space-y-4">
+      <WorkspaceMachineCollapsedRow meta={previewMeta} onExpand={fn()} />
+      <Button variant="secondary" size="small" onClick={() => setIsOnline((online) => !online)}>
+        Toggle online status
+      </Button>
+    </div>
+  );
+}
+
+export const OnlineStatusMotion: Story = {
+  render: () => <MachineOnlineStatusPreview />,
 };
