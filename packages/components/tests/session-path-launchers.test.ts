@@ -229,6 +229,40 @@ describe('built-in path launchers', () => {
     );
   });
 
+  it('opens Devin Desktop in a new window via its CLI', () => {
+    const devinDesktop = getEditor('devin-desktop', 'darwin');
+    expect(devinDesktop).toBeDefined();
+    expect(buildPathLauncherLaunchInput(devinDesktop!, '/Users/me/My Project', 'darwin')).toEqual({
+      kind: 'command',
+      command: { command: 'devin-desktop', args: ['-n', '/Users/me/My Project'] },
+      fallbackCommands: [
+        { command: '/usr/local/bin/devin-desktop', args: ['-n', '/Users/me/My Project'] },
+        {
+          command: '/Applications/Devin.app/Contents/Resources/app/bin/devin-desktop',
+          args: ['-n', '/Users/me/My Project'],
+        },
+      ],
+      targetPath: '/Users/me/My Project',
+      label: 'Devin Desktop',
+    });
+
+    expect(
+      buildPathLauncherLaunchInput(getEditor('devin-desktop', 'win32')!, 'C:\\code\\app', 'win32')
+        .fallbackCommands
+    ).toEqual([{ command: 'C:\\Program Files\\Devin\\Devin.exe', args: ['-n', 'C:\\code\\app'] }]);
+
+    expect(
+      buildPathLauncherLaunchInput(
+        getEditor('devin-desktop', 'linux')!,
+        '/home/me/project',
+        'linux'
+      ).fallbackCommands
+    ).toEqual([
+      { command: '/usr/bin/devin-desktop', args: ['-n', '/home/me/project'] },
+      { command: '/opt/devin-desktop/devin-desktop', args: ['-n', '/home/me/project'] },
+    ]);
+  });
+
   it('opens Cursor in a new window via its CLI on Linux', () => {
     const cursor = getEditor('cursor', 'linux');
     expect(buildPathLauncherLaunchInput(cursor!, '/home/me/project', 'linux')).toEqual({

@@ -113,6 +113,7 @@ describe('PathLaunchersSettings', () => {
     const options = Array.from(document.querySelectorAll<HTMLElement>('[role="option"]'));
     const optionLabels = options.map((option) => option.textContent?.trim());
     expect(optionLabels).toContain('VS Code');
+    expect(optionLabels).toContain('Devin Desktop');
     expect(optionLabels).toContain('PhpStorm');
     expect(optionLabels.at(-1)).toBe('Custom launcher');
     expect(options.every((option) => option.querySelector('svg, img'))).toBe(true);
