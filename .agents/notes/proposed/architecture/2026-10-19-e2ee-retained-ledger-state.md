@@ -39,12 +39,21 @@ write: load retained state (+ Streams tail offset) → restore → read only rec
        → existing single-writer CAS + readback → save new state and digest with the
        checkpoint in one transaction
 read:  serve pages by offset from Streams without host verification; clients verify
-audit: off-path full replay from genesis, compare digest; mismatch blocks writes
+audit: deferred; may run outside Convex (e.g. a separate worker)
 ```
+
+## Convex platform limits
+
+From the Convex limits documentation: queries and mutations have 1 s of user-code time, so verification stays in actions; Convex-runtime actions get 30 min and 64 MiB; Node actions 10 min and 512 MiB; documents are at most 1 MiB; arrays at most 8,192 elements; actions share a deployment-wide concurrency pool (64 on Free/Starter, 512 on Pro).
+
+- Full replay per request fits the time limit but holds an action slot for about 22 s at 4,096 records, so a few concurrent history readers can saturate the pool for unrelated features. Its memory peak (up to 8 MiB of raw records plus copies and state) is unmeasured against 64 MiB.
+- `finishWrite` and `observeHistory` receive every record hash as an array argument, which the platform rejects beyond 8,192 elements regardless of the backend's own cap. Pass length and head instead.
+- Retained state is stored as bytes; state above 1 MiB needs chunking (core snapshots are bounded at 2 MiB).
+- Per-record cost inside the Convex runtime is assumed similar to Node (both V8, pure-JS noble Ed25519) but has not been measured there.
 
 ## Alternatives considered
 
-- **Recompute the digest on every restore.** Rejected: the bytes and the digest live in the same trusted store, so whoever can alter one can alter both. It only catches bugs or corruption, which the background audit already covers off the hot path.
+- **Recompute the digest on every restore.** Rejected: the bytes and the digest live in the same trusted store, so whoever can alter one can alter both. It only catches bugs or corruption, which belongs to an optional, deferred background audit off the hot path.
 - **Keep full replay and raise limits.** Rejected: cost stays linear per request.
 - **Server-endorsed snapshots.** Not possible: endorsement requires an Owner/Admin personal device signature.
 - **MAC the retained bytes with a server key.** Rejected for the same reason as recomputation: same trust domain.
@@ -57,4 +66,4 @@ audit: off-path full replay from genesis, compare digest; mismatch blocks writes
 
 ## Verification limits
 
-The timings come from one local benchmark with synthetic records and Node's native Ed25519 signing; production action runtimes may differ. No code, cache table or audit job exists yet.
+The timings come from one local Node benchmark with synthetic records (signed with Node's crypto, verified through core's pure-JS noble path); the Convex runtime may differ. No code, cache table or audit job exists yet.
