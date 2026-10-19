@@ -5,6 +5,8 @@ Translation: current
 
 [中文](2026-10-20-machine-online-motion.zh.md)
 
+PR: [#1742](https://github.com/LodyAI/Lody/pull/1742)
+
 ## Abstract
 
 The user requested motion for the static green online mark on machine cards.

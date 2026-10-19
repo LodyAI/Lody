@@ -5,6 +5,8 @@ Translation: current
 
 [English](2026-10-20-machine-online-motion.md)
 
+PR: [#1742](https://github.com/LodyAI/Lody/pull/1742)
+
 ## 摘要
 
 用户希望机器卡片原本静态的绿色在线标记具有动态效果。
