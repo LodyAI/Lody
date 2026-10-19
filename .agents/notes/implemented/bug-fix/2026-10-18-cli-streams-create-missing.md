@@ -67,6 +67,9 @@ Alternatives considered:
 - **Restore the default in the renderer as well.** The renderer's own Session
   starts are not affected. Whether its Flock rooms need the option is a separate
   question, and this fix does not decide it.
+  Correction (2026-10-19): they were affected. The renderer's pre-create is not
+  awaited and can lose the race to the room's first bootstrap; see
+  [the renderer fix](2026-10-19-renderer-streams-create-missing.md).
 
 Trade-off: a CLI join of a room whose stream was deleted remotely recreates an
 empty stream instead of surfacing the 404. That was the CLI's behavior before

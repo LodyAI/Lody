@@ -44,6 +44,7 @@ import {
   type RemoveTransportOptions,
 } from 'loro-repo';
 import type { RemoteCursorStore } from '@loro-dev/streams-crdt';
+import type { DurableHealth } from '@loro-dev/streams-crdt/effect';
 import type { NativeWorkspaceTransport, WorkspaceNativeTransport } from './transport';
 export type { NativeWorkspaceTransport } from './transport';
 import { make as makeWorkspaceRepo } from 'loro-repo/effect';
@@ -126,7 +127,10 @@ type TransportOwner = WorkspaceOwnedScope & {
 export type WorkspaceRoomBinding = Pick<
   RepoTransportRoomSubscription,
   'status' | 'onStatusChange' | 'firstSyncedWithRemote' | 'waitUntilSynced'
->;
+> & {
+  /** Read on demand; no status change announces it. See `initializationEnded`. */
+  readonly initializationFailed: boolean;
+};
 /** Native ownership plus the status view still consumed by application UI. */
 export type WorkspaceRoom = Pick<
   RepoRoomSubscription,
@@ -147,6 +151,16 @@ const descriptor = (target: RoomTarget): RepoRoomDescriptor =>
     ? { kind: 'meta', id: 'meta' }
     : { kind: target.kind === 'flock' ? 'flock-doc' : 'doc', id: target.id };
 const keyOf = (target: RoomTarget) => JSON.stringify(target);
+/**
+ * The SDK stopped initializing this generation and will not retry it, while Repo
+ * still projects the room as joining: only a per-room sync restarts it. The hard
+ * initial-sync deadline ends initialization even though its error is retryable.
+ */
+const initializationEnded = (health: DurableHealth | undefined): boolean =>
+  !!health &&
+  !health.ready &&
+  health.releasePending <= 0 &&
+  (health.lastError?.retryable === false || health.lastError?.code === 'initial_sync_timeout');
 const roomStatus = (state: RoomState): RepoTransportRoomStatus => {
   switch (state.connection) {
     case 'joined':
@@ -714,20 +728,11 @@ export class WorkspaceRepoLegacy {
                     ({ target, status: bindingStatus }) =>
                       Effect.gen(function* () {
                         if (bindingStatus === 'joining') {
-                          // SDK initialization may have failed while Repo still says
-                          // joining. The hard initial-sync deadline ends initialization
-                          // even though its error is retryable. Keep active retries owned.
+                          // Keep active SDK retries owned.
                           const health = transport?.health
                             ? yield* transport.health(target)
                             : undefined;
-                          if (
-                            !health ||
-                            health.ready ||
-                            (health.lastError?.retryable !== false &&
-                              health.lastError?.code !== 'initial_sync_timeout') ||
-                            health.releasePending > 0
-                          )
-                            return undefined;
+                          if (!initializationEnded(health)) return undefined;
                         }
                         yield* native.syncOnce(target, id);
                         return undefined;
@@ -844,6 +849,12 @@ export class WorkspaceRepoLegacy {
           : roomStatus(state);
       };
       const status = () => project(this.syncLegacy(lease.stateSnapshot(id)));
+      const initializationFailed = () => {
+        const health = this.attachments.get(id)?.transport?.health;
+        return (
+          !closed.signal.aborted && !!health && initializationEnded(this.syncLegacy(health(target)))
+        );
+      };
       const firstSyncedWithRemote = () => {
         const wait = this.runLegacy(
           lease.state(id).pipe(
@@ -873,6 +884,9 @@ export class WorkspaceRepoLegacy {
         },
         get firstSyncedWithRemote() {
           return firstSyncedWithRemote();
+        },
+        get initializationFailed() {
+          return initializationFailed();
         },
         onStatusChange: (listener) => {
           const scope = this.syncLegacy(Scope.fork(owned.scope));

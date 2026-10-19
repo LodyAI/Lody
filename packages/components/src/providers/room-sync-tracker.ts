@@ -11,6 +11,11 @@ export type TrackedRoomSubscription = {
   readonly status: RepoTransportRoomStatus;
   readonly onStatusChange: (listener: (status: RepoTransportRoomStatus) => void) => () => void;
   readonly firstSyncedWithRemote: Promise<void>;
+  /**
+   * The SDK ended initialization without a retry while the status still says
+   * (re)connecting. Absent on transports without SDK health, such as local.
+   */
+  readonly initializationFailed?: boolean;
 };
 
 const isTerminalRoomStatus = (status: RepoTransportRoomStatus | null): boolean =>
@@ -177,7 +182,11 @@ export function createRoomSyncTracker(roomId: string): RoomSyncTracker {
       !disposed &&
       !stopped &&
       status !== 'detached' &&
-      (isTerminalRoomStatus(status) || (initialSyncFailed && !isReconnectStatus(status))),
+      (isTerminalRoomStatus(status) ||
+        (initialSyncFailed && !isReconnectStatus(status)) ||
+        // No status change announces this, so the loop finds it on its
+        // level-triggered backstop and repairs it with its own backoff.
+        (isReconnectStatus(status) && activeSubscription?.initializationFailed === true)),
     hasReconnectSignal: (localReconnectActive) =>
       !disposed &&
       (status === 'reconnecting' || (tracker.needsReconnect() && localReconnectActive)),

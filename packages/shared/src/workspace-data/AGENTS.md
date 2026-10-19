@@ -22,8 +22,11 @@
 - Read inventory and transport snapshots from native leases. Keep local room
   records only for ownership release. On an online transport, retry only failed/
   offline rooms and SDK-proven failed initialization still projected as joining,
-  through native sync/reconcile. Pending/retrying baselines stay owned; a room
-  failure never requests a shared server reset, including wake/auth/force triggers.
+  through native sync/reconcile. Bindings expose that proof as `initializationFailed`;
+  renderer trackers count it as needing reconnect, repaired with the loop's backoff
+  ([note](../../../../.agents/notes/implemented/bug-fix/2026-10-19-renderer-streams-create-missing.md)).
+  Pending/retrying baselines stay owned; a room failure never requests a shared
+  server reset, including wake/auth/force triggers.
   Reset a server transport only when its own status is offline/closed/failed.
   Preserve forced peer reconnect for local v7 worker recovery. Do not rebuild
   the full Promise Repo subscription or query APIs.

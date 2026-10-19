@@ -6,6 +6,11 @@ import {
   type LocalReconnectLoop,
   type LocalReconnectTriggerReason,
 } from '../src/providers/local-reconnect-loop';
+import { createRoomSyncRegistry } from '../src/providers/room-sync-registry';
+import {
+  createRoomSyncTracker,
+  type TrackedRoomSubscription,
+} from '../src/providers/room-sync-tracker';
 
 // Let the run() promise chain (reconnect await + finally) settle between
 // virtual-clock steps.
@@ -297,6 +302,73 @@ describe('createLocalReconnectLoop', () => {
         yield* flushMicrotasks;
         expect(calls.length).toBe(2);
       })
+    );
+  });
+
+  it('repairs a room whose SDK initialization ended without a retry, backing off while it stays failed', async () => {
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const services = yield* Effect.context<never>();
+        // The binding never changes status: Repo keeps projecting 'connecting'
+        // after the SDK gave up, so only the level-triggered backstop sees it.
+        let initializationFailed = true;
+        const binding: TrackedRoomSubscription & { readonly initializationFailed: boolean } = {
+          status: 'connecting',
+          onStatusChange: (listener) => {
+            listener('connecting');
+            return () => undefined;
+          },
+          firstSyncedWithRemote: new Promise<void>(() => undefined),
+          get initializationFailed() {
+            return initializationFailed;
+          },
+        };
+        const registry = createRoomSyncRegistry({ clock: { now: () => 0 } });
+        const tracker = createRoomSyncTracker('session-room');
+        registry.track(tracker);
+        tracker.attach(binding);
+        // Records `force`: every repair here is a scheduled one, no external trigger.
+        const repairs: boolean[] = [];
+        const loop = createLocalReconnectLoop({
+          services,
+          canRun: () => true,
+          hasProblem: () => registry.anyNeedsReconnect(),
+          reconnect: async ({ force }) => {
+            // A persistent refusal (auth, forbidden): each per-room sync fails again.
+            repairs.push(force);
+          },
+          onStateChange: () => {},
+          computeDelayMs: (attempt) => (attempt + 1) * 1_000,
+        });
+
+        // The runtime's backstop tick.
+        loop.update();
+        yield* TestClock.adjust(Duration.millis(0));
+        yield* flushMicrotasks;
+        expect(repairs).toEqual([false]);
+
+        // Still failed: the next scheduled attempt owes 1s, then 2s.
+        yield* TestClock.adjust(Duration.millis(999));
+        yield* flushMicrotasks;
+        expect(repairs).toHaveLength(1);
+        yield* TestClock.adjust(Duration.millis(1));
+        yield* flushMicrotasks;
+        expect(repairs).toHaveLength(2);
+        yield* TestClock.adjust(Duration.millis(1_999));
+        yield* flushMicrotasks;
+        expect(repairs).toHaveLength(2);
+        yield* TestClock.adjust(Duration.millis(1));
+        yield* flushMicrotasks;
+        expect(repairs).toEqual([false, false, false]);
+
+        // The repaired generation reports no failed initialization; the pending
+        // retry finds nothing to do.
+        initializationFailed = false;
+        yield* TestClock.adjust(Duration.minutes(5));
+        yield* flushMicrotasks;
+        expect(repairs).toHaveLength(3);
+        loop.stop();
+      }).pipe(Effect.provide(TestClock.layer()))
     );
   });
 });

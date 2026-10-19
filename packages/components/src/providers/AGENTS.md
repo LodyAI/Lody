@@ -82,6 +82,7 @@ Replacement contract: [shared rules](../../../shared/AGENTS.md#session-history).
   Meta/Flock cursors stay repo-owned; delete Meta progress via `repo.getReplicaCheckpointStore`.
 - Required Streams protection rejects missing providers or plaintext rooms
   ([contract](../../../../specs/workspace-streams-content.md)).
+- Renderer Streams keeps `createStreamIfMissing: true`: Session pre-create is a warm-up.
 - Transport state is selected per room, never merged. Runtime stores use
   `getReadinessTransportForRoom`; hooks without the router use the structural binding in
   `src/lib/room-readiness.ts`. Keep those selection rules aligned.

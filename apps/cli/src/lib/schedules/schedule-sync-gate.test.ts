@@ -16,6 +16,7 @@ it('requires the initial and each current connection sync, ignoring stale comple
     get status() {
       return status;
     },
+    initializationFailed: false,
     onStatusChange: (callback) => {
       notify = () => callback(status);
       return () => {};

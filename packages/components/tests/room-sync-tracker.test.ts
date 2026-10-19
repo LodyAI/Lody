@@ -35,15 +35,20 @@ function createDeferred() {
 }
 
 function createControlledSubscription(initialStatus: TransportRoomStatus): {
-  sub: TransportSubscription;
+  sub: TransportSubscription & { readonly initializationFailed?: boolean };
   emit: (status: TransportRoomStatus) => void;
   setFirstSyncedWithRemote: (promise: Promise<void>) => void;
+  setInitializationFailed: (value: boolean | undefined) => void;
 } {
   let status = initialStatus;
   let firstSyncedWithRemote = Promise.resolve();
+  let initializationFailed: boolean | undefined;
   const listeners = new Set<(status: TransportRoomStatus) => void>();
   return {
     sub: {
+      get initializationFailed() {
+        return initializationFailed;
+      },
       unsubscribe: () => undefined,
       get firstSyncedWithRemote() {
         return firstSyncedWithRemote;
@@ -68,6 +73,9 @@ function createControlledSubscription(initialStatus: TransportRoomStatus): {
     },
     setFirstSyncedWithRemote: (promise) => {
       firstSyncedWithRemote = promise;
+    },
+    setInitializationFailed: (value) => {
+      initializationFailed = value;
     },
   };
 }
@@ -158,5 +166,54 @@ describe('createRoomSyncTracker', () => {
 
     expect(tracker.getSyncState()).toBe('error');
     expect(tracker.needsReconnect()).toBe(true);
+  });
+
+  // The SDK ends a generation's initialization on a non-retryable error (or its
+  // hard deadline) while Repo still projects the room as joining, and no SDK
+  // retry follows. Only the reconnect loop's per-room sync can restart it.
+  it.each(['connecting', 'reconnecting'] as const)(
+    'flags a %s room whose SDK initialization ended without a retry',
+    (status) => {
+      const controlled = createControlledSubscription(status);
+      controlled.setInitializationFailed(true);
+      const tracker = createRoomSyncTracker('room-stuck');
+      tracker.attach(controlled.sub);
+
+      expect(tracker.needsReconnect()).toBe(true);
+      expect(tracker.hasReconnectSignal(true)).toBe(true);
+
+      // A repaired generation joins; the probe clears with it.
+      controlled.setInitializationFailed(false);
+      controlled.emit('joined');
+      tracker.markFirstSynced();
+      expect(tracker.needsReconnect()).toBe(false);
+    }
+  );
+
+  it.each([false, undefined])(
+    'leaves a connecting room to the SDK while its initialization runs or retries (probe=%s)',
+    (initializationFailed) => {
+      const controlled = createControlledSubscription('connecting');
+      controlled.setInitializationFailed(initializationFailed);
+      const tracker = createRoomSyncTracker('room-initializing');
+      tracker.attach(controlled.sub);
+
+      expect(tracker.getSyncState()).toBe('connecting');
+      expect(tracker.needsReconnect()).toBe(false);
+      expect(tracker.hasReconnectSignal(true)).toBe(false);
+    }
+  );
+
+  it('never flags a failed initialization once the room is detached or stopped', () => {
+    const controlled = createControlledSubscription('connecting');
+    controlled.setInitializationFailed(true);
+    const tracker = createRoomSyncTracker('room-released');
+    tracker.attach(controlled.sub);
+    controlled.emit('detached' as TransportRoomStatus);
+    expect(tracker.needsReconnect()).toBe(false);
+
+    controlled.emit('connecting');
+    tracker.markStopped();
+    expect(tracker.needsReconnect()).toBe(false);
   });
 });

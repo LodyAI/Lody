@@ -156,7 +156,9 @@ export function createSessionSubmission(ports: SessionSubmissionPorts) {
     const metaWrite = runtime.writer.upsertDocMeta(sessionRoomId, sessionMeta);
     // Stream pre-creation is a warm-up, not part of accepting the user's turn.
     // Rejected: awaiting it here lets a stuck createStream() prevent history
-    // and dispatch writes. Room join/retry handles stream_not_found recovery.
+    // and dispatch writes. It can lose the race to the room's first bootstrap,
+    // which then creates the stream itself (`createStreamIfMissing` in
+    // workspace-streams-transport.ts); SDK retries never recover a 404.
     void runtime.ensureDocStream(sessionRoomId).catch((error: unknown) => {
       console.warn('Failed to pre-create session doc stream', { sessionId, error });
     });

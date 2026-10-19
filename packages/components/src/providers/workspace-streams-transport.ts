@@ -4,10 +4,13 @@ import type {
   SnapshotUploadOptions,
 } from '@loro-dev/streams-crdt';
 import {
+  CODE_COLLAB_FILE_INDEX_FLOCK_TTL_MS,
   createLoroStreamUrl,
   getLoroMetaStreamId,
   getLoroStreamIdForDocId,
   getLoroStreamsShardUrls,
+  isCodeCollabFileIndexFlockDocId,
+  isCodeCollabFileIndexSignalFlockDocId,
   LORO_STREAMS_BUCKET_ID,
   streamsSnapshotCodec,
   type WorkspaceId,
@@ -89,6 +92,17 @@ export const createWorkspaceStreamsTransport = (options: WorkspaceStreamsTranspo
       metaStreamId: getLoroMetaStreamId(options.workspaceId),
       docStreamId: (docId) => getLoroStreamIdForDocId(options.workspaceId, docId),
       flockDocStreamId: (flockDocId) => flockDocId,
+      // A new Session's stream pre-create is fire-and-forget on another SDK
+      // instance, so the room's first bootstrap can reach the server first; a
+      // native 404 there ends initialization for good. Native loro-repo
+      // defaults to false, unlike the Legacy transport this replaced.
+      createStreamIfMissing: true,
+      // Whichever client creates a file-index stream first sets its retention.
+      flockDocStreamTtlMs: (flockDocId) =>
+        isCodeCollabFileIndexFlockDocId(flockDocId) ||
+        isCodeCollabFileIndexSignalFlockDocId(flockDocId)
+          ? CODE_COLLAB_FILE_INDEX_FLOCK_TTL_MS
+          : undefined,
       snapshotCodec:
         content?.mode === 'protected'
           ? (content.snapshotCodec ?? streamsSnapshotCodec)

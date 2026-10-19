@@ -35,10 +35,14 @@ import { PayloadProtectionError } from '@loro-dev/streams-crdt';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Flock } from '@loro-dev/flock-wasm';
 import {
+  CODE_COLLAB_FILE_INDEX_FLOCK_TTL_MS,
   createLoroStreamUrl,
+  getCodeCollabFileIndexFlockDocId,
   getLoroStreamIdForDocId,
+  getSessionRoomId,
   LORO_STREAMS_BUCKET_ID,
   streamsSnapshotCodec,
+  type SessionId,
   type WorkspaceId,
 } from '@lody/shared';
 import { LoroDoc } from 'loro-crdt';
@@ -234,12 +238,19 @@ const docUrl = (workspaceId: WorkspaceId, docId: string) =>
     baseUrl: streamsBaseUrl,
   });
 
-/** Byte storage only: CRDT encoding, merge, protection and cursor logic all run in the SDK. */
+/**
+ * Byte storage only: CRDT encoding, merge, protection and cursor logic all run in the SDK.
+ * `beforeRequest` may answer a request itself. With `missingUntilCreated`, every
+ * stream answers 404 until a stream-level PUT creates it.
+ */
 function createByteServer(
-  beforeRequest?: (url: URL, method: string, init?: RequestInit) => Promise<void>
+  beforeRequest?: (url: URL, method: string, init?: RequestInit) => Promise<Response | void>,
+  options: { missingUntilCreated?: true } = {}
 ) {
   type Room = { batches: Uint8Array[]; snapshot?: { offset: string; body: Uint8Array } };
   const rooms = new Map<string, Room>();
+  const created = new Set<string>();
+  const creates: { path: string; ttl: string | null }[] = [];
   const requests: {
     url: URL;
     method: string;
@@ -288,8 +299,18 @@ function createByteServer(
       auth: headers.get('Authorization'),
       requestId: headers.get('X-Request-ID'),
     });
-    await beforeRequest?.(url, method, init);
+    const answered = await beforeRequest?.(url, method, init);
+    if (answered) return answered;
     const path = url.pathname.replace(/\/(bootstrap|snapshot(?:\/.*)?)$/, '');
+    if (method === 'PUT' && url.pathname === path) {
+      created.add(path);
+      creates.push({ path, ttl: headers.get('Stream-TTL') });
+    } else if (options.missingUntilCreated && !created.has(path)) {
+      return Response.json(
+        { code: 'stream_not_found', message: 'Stream not found' },
+        { status: 404 }
+      );
+    }
     const value = room(path);
     const currentTail = () => tail(path);
     if (method === 'POST') {
@@ -384,6 +405,7 @@ function createByteServer(
   vi.stubGlobal('fetch', fetch);
   return {
     room,
+    creates,
     requests,
     live,
     liveReady: liveReady.promise,
@@ -1123,6 +1145,159 @@ describe('workspace Streams content boundary', () => {
     expect((await tb.syncDoc('doc-a', reader)).ok).toBe(true);
     expect(reader.toJSON()).toEqual(writer.toJSON());
     expect((await cursor.load(url))?.nextOffset).not.toBe(before?.nextOffset);
+  });
+});
+
+/** Ordinary POST bodies are length-prefixed raw Loro updates. */
+const docFromBatches = (batches: Uint8Array[]) => {
+  const doc = new LoroDoc();
+  for (const batch of batches) {
+    for (let cursor = 0; cursor < batch.length;) {
+      const length = new DataView(batch.buffer, batch.byteOffset).getUint32(cursor);
+      doc.import(batch.slice(cursor + 4, cursor + 4 + length));
+      cursor += 4 + length;
+    }
+  }
+  return doc;
+};
+
+const attachCloud = (tab: Tab) =>
+  tab.repo.addTransport(
+    'cloud',
+    createWorkspaceStreamsTransport({
+      repo: tab.repo,
+      workspaceId: tab.workspaceId,
+      documentRemoteCursorStore: tab.cursor.current,
+      auth: () => Effect.succeed('streams-jwt'),
+      streamsBaseUrl,
+      shardHostSuffix: undefined,
+    })
+  );
+
+describe('renderer Streams rooms create their missing remote stream', () => {
+  // A new Session's stream pre-create is fire-and-forget and runs on another SDK
+  // instance, so the room's first bootstrap can reach the server before it.
+  it('creates a Session doc stream on its first join and uploads the turn written right after', async () => {
+    const server = createByteServer(undefined, { missingUntilCreated: true });
+    const tab = await openTab(`create-missing-doc-${++sequence}` as WorkspaceId);
+    await attachCloud(tab);
+    const docId = getSessionRoomId('session-started-in-renderer' as SessionId);
+    const room = await tab.repo.joinDocRoom(docId);
+    const binding = room.subscription('cloud');
+    try {
+      const doc = (await tab.repo.openPersistedDoc(docId)).doc;
+      doc.getMap('history').set('turn', 'first user message');
+      doc.commit();
+      await binding.waitUntilSynced();
+      await binding.firstSyncedWithRemote;
+      expect(binding.status).toBe('joined');
+      const path = new URL(docUrl(tab.workspaceId, docId)).pathname;
+      expect(server.creates).toEqual([{ path, ttl: null }]);
+      expect(docFromBatches(server.room(path).batches).toJSON()).toEqual(doc.toJSON());
+    } finally {
+      room.unsubscribe();
+    }
+  });
+
+  it('creates a Code Collab file-index stream with its retention TTL', async () => {
+    const server = createByteServer(undefined, { missingUntilCreated: true });
+    const tab = await openTab(`create-missing-flock-${++sequence}` as WorkspaceId);
+    await attachCloud(tab);
+    const flockDocId = getCodeCollabFileIndexFlockDocId(
+      tab.workspaceId,
+      'session-with-files' as SessionId
+    );
+    const room = await tab.repo.joinFlockDocRoom(flockDocId);
+    try {
+      await room.subscription('cloud').waitUntilSynced();
+      expect(server.creates).toEqual([
+        {
+          path: expect.stringContaining(encodeURIComponent(flockDocId)),
+          ttl: String(CODE_COLLAB_FILE_INDEX_FLOCK_TTL_MS / 1000),
+        },
+      ]);
+    } finally {
+      room.unsubscribe();
+    }
+  });
+});
+
+describe('a room whose first bootstrap failed without an SDK retry', () => {
+  it('reports the failed initialization while still connecting, and Repo reconnect repairs it', async () => {
+    let refuse = true;
+    const server = createByteServer(async (url, method) => {
+      if (refuse && method === 'GET' && url.pathname.endsWith('/bootstrap')) {
+        return Response.json({ code: 'bad_request', message: 'Rejected' }, { status: 400 });
+      }
+      return undefined;
+    });
+    const tab = await openTab(`failed-initialization-${++sequence}` as WorkspaceId);
+    await attachCloud(tab);
+    const room = await tab.repo.joinDocRoom('doc-a');
+    const binding = room.subscription('cloud');
+    try {
+      const doc = (await tab.repo.openPersistedDoc('doc-a')).doc;
+      doc.getMap('data').set('value', 'written before the room was ready');
+      doc.commit();
+      // The upload barrier waits on the same initialization, so its rejection is
+      // the signal that the SDK stopped initializing this generation.
+      await expect(binding.waitUntilSynced()).rejects.toThrow();
+      expect(binding.status).toBe('connecting');
+      expect(binding.initializationFailed).toBe(true);
+
+      refuse = false;
+      const report = await tab.repo.reconnect();
+      expect(report.ok).toBe(true);
+      await binding.firstSyncedWithRemote;
+      await binding.waitUntilSynced();
+      expect(binding.status).toBe('joined');
+      expect(binding.initializationFailed).toBe(false);
+      const path = new URL(docUrl(tab.workspaceId, 'doc-a')).pathname;
+      expect(docFromBatches(server.room(path).batches).toJSON()).toEqual(doc.toJSON());
+    } finally {
+      room.unsubscribe();
+    }
+  });
+
+  it('leaves a room to the SDK while its first bootstrap is in flight or being retried', async () => {
+    const first = Promise.withResolvers<void>();
+    const retried = Promise.withResolvers<void>();
+    const failFirst = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    let bootstraps = 0;
+    createByteServer(async (url, method) => {
+      if (method !== 'GET' || !url.pathname.endsWith('/bootstrap')) return undefined;
+      bootstraps += 1;
+      if (bootstraps === 1) {
+        first.resolve();
+        await failFirst.promise;
+        return Response.json({ code: 'unavailable', message: 'Busy' }, { status: 503 });
+      }
+      retried.resolve();
+      await release.promise;
+      return undefined;
+    });
+    const tab = await openTab(`initializing-${++sequence}` as WorkspaceId);
+    await attachCloud(tab);
+    const room = await tab.repo.joinDocRoom('doc-a');
+    const binding = room.subscription('cloud');
+    try {
+      await first.promise;
+      expect(binding.status).toBe('connecting');
+      expect(binding.initializationFailed).toBe(false);
+      failFirst.resolve();
+      // The SDK's own retry of a retryable failure keeps ownership of the room.
+      await retried.promise;
+      expect(binding.status).toBe('connecting');
+      expect(binding.initializationFailed).toBe(false);
+      release.resolve();
+      await binding.firstSyncedWithRemote;
+      expect(binding.initializationFailed).toBe(false);
+    } finally {
+      failFirst.resolve();
+      release.resolve();
+      room.unsubscribe();
+    }
   });
 });
 
