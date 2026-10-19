@@ -34,6 +34,7 @@ import { colors } from '@lody/ui/tokens/colors.stylex';
 import { radius, space } from '@lody/ui/tokens/scales.stylex';
 import { Kbd } from '@lody/ui/kbd';
 import { Tooltip } from '@lody/ui/tooltip';
+import { WorkingGrid } from '@/ui/working-grid';
 import { commands, formatKeyBinding, type ShortcutCommandId } from '@/lib/commands';
 import { setCommandPaletteOpen } from '@/lib/commands/palette-state';
 import { Menu } from '@/ui/menu';
@@ -60,7 +61,6 @@ import {
 } from 'lucide-react';
 import { MynauiEditOne } from '@lody/ui';
 import { CuidaSidebarExpandOutline } from './icons/cuida-sidebar-expand-outline';
-import { Spinner } from '@lody/ui/spinner';
 import {
   SessionList,
   type SessionListProps,
@@ -494,7 +494,7 @@ function ConnectionPill({
   return (
     <Badge
       tone={isLoading ? 'running' : 'danger'}
-      icon={isLoading ? <Spinner className="h-3 w-3" label={null} /> : undefined}
+      icon={isLoading ? <WorkingGrid className="h-3 w-3" /> : undefined}
       aria-label={label}
       data-workspace-status={state}
     >
