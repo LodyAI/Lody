@@ -22,4 +22,4 @@ Translation: current
 
 ## Pull request
 
-- 待创建。
+- [PR #1738](https://github.com/LodyAI/Lody/pull/1738)（草稿）。
