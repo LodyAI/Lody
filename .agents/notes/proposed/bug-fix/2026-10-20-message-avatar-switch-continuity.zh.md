@@ -2,6 +2,7 @@
 
 Status: proposed
 Translation: current
+PR: https://github.com/LodyAI/Lody/pull/1736
 
 [English](2026-10-20-message-avatar-switch-continuity.md)
 
