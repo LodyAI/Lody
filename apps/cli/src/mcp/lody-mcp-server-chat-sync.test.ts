@@ -48,7 +48,8 @@ vi.mock('@/lib/command-runtime', async (importOriginal) => {
         await fn({
           repo: { getDocMeta: mocks.getDocMeta },
           getOnlineMachineIds: vi.fn(async () => new Set(['machine-id'])),
-          getOrCreateSessionDoc: vi.fn(async () => ({})),
+          syncDocOrThrow: async () => undefined,
+          getOrCreateSessionDoc: vi.fn(async () => ({ getMetaState: async () => ({}) })),
         })
     ),
   };
@@ -91,7 +92,7 @@ vi.mock('@/session/session-backend', async (importOriginal) => {
     createSessionBackend: vi.fn(async (doc, meta) =>
       doc?.sessionData
         ? actual.createSessionBackend(doc, meta)
-        : { history: { readTurn: mocks.readTurn } }
+        : { history: { readTurn: mocks.readTurn }, readHistory: async () => [] }
     ),
   };
 });
@@ -450,7 +451,7 @@ describe('turn-scoped reverse chat rejection', () => {
             userTurnId: 'recovered-input',
             delegatedRequester,
           },
-          { inheritSessionDefaults: false },
+          { inheritSessionDefaults: false, mcpServerIds: [] },
           {
             targetMachine: { id: 'machine-id', ownerUserId: recovered.requesterUserId },
             agentConfig: {
@@ -923,7 +924,7 @@ describe('session create prevalidation failures', () => {
           manager: activeManager,
           workspaceId,
           agentConfig,
-          dispatchConfig: { modelId: 'missing-model' },
+          dispatchConfig: { modelId: 'missing-model', mcpServerIds: [] },
         })
       );
       const result = await callAndMapMcpError(() =>
