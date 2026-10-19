@@ -7,6 +7,26 @@ pointer to this page live in
 [that directory's AGENTS.md](../../packages/components/src/components/sessions/AGENTS.md);
 this page is the full text of the rules summarised there.
 
+The execution-machine control sits before the canonical cluster and never
+takes the stage. `session-machine-info.tsx` shows a monitor icon and machine name
+on desktop, or a compact icon-only button on mobile (`compactMachineInfo`).
+Its tap/click popover (also hover on desktop) exposes ownership from machine
+metadata, device identity when known, and connection status. Unknown presence
+stays neutral, while confirmed offline presence tints the control. Unknown local
+identity omits the device row.
+Below a 360px bar the desktop control also drops its name (icon only), and the
+bar's leading inset is trimmed so the machine glyph sits where a chip's would.
+Under squeeze nothing leaves the bar: summary text truncates first, then the
+repository action label, and the ±diff chip clips last inside itself.
+Mobile controls remain in the same 32px row. With only machine information the bar
+is a transparent row; existing items and actions retain the raised bar surface. The
+[draft Spec](../../specs/composer-machine-owner.md) owns the presentation intent.
+The parent passes already-resolved metadata and presence without new subscriptions.
+With the compact mobile control, a private-access label collapses to its lock icon
+at container widths up to 420px, leaving room for repository actions. Its full
+access description remains in the accessible name/title, and tap still opens
+sharing when permitted.
+
 - `info-chip.tsx` + `session-info-chips.tsx` + `session-info-bar.tsx`: the
   info bar follows the "canonical cluster + fixed stage" model. Cluster =
   collapsed items as uniform icon chips in CONSTANT order (status > goal >
@@ -16,8 +36,9 @@ this page is the full text of the rules summarised there.
   appending, and must never reorder the others. Note the separate, deliberately
   different order in `session-info-bar.tsx` for choosing which item opens on the
   stage (context first, as the most informative default) — that is stage
-  preference, not cluster order, and the two are not meant to match. Stage = the rightmost item. Invariants: no items → the bar
-  hides; with items, EXACTLY one is always expanded on the stage (there is no
+  preference, not cluster order, and the two are not meant to match. Stage = the rightmost item.
+  The bar hides only when items, actions, private-access status, machine information
+  and ambient sync are all absent. With items, EXACTLY one is always expanded on the stage (there is no
   fully-collapsed state, and the stage never empties). Click semantics
   (researched; do not overload a second click): cluster chip = promote onto
   stage; stage ICON = inert marker (NOT a button — clicking the rightmost
@@ -50,8 +71,7 @@ this page is the full text of the rules summarised there.
 labelClassName`) so the stage diffstat never clips. Wired from
   `session-chat-interface.tsx` as `!isMobile && effectiveTitleSyncing` (the
   same `isSyncingRoomSyncState` + 400ms `useDelayedFlag` signal the mobile
-  header uses). With NO items the bar still hides UNLESS syncing — catch-up
-  is the one state allowed to render the bar alone on a context-less chat
+  header uses). Syncing can render the bar on a context-less chat
   session (no staged item, no divider; the spinner keeps its right-edge pin
   via an `ml-auto` wrapper). Regression coverage:
   `tests/session-info-bar-syncing.test.tsx` + the `SyncOnly` /
@@ -187,3 +207,14 @@ are hidden unless current. Each pill is agent icon, live title, and the sidebar'
 highlighted. Tab pills navigate with root + exact tab ids. The page reads only
 a boolean (`useHasSessionRelations`); the chip builds the tree in the leaf.
 Decision: [relations note](../notes/implemented/feature/2026-09-24-session-relations-chip.md).
+
+The tree header provides **Stop all conversation collaboration**, with a nested
+confirmation popover and Cancel/Confirm actions. The user-owned stop flag is
+persisted across the authoritative tree (including hidden descendants); the root
+is stopped first and restored last. All participating machines must advertise
+`sessionCollaborationControl`. Runtime entry and MCP delegation check inherited
+flags, active turns are canceled, and late completions are recorded without waking
+the requester. **Restore collaboration** explicitly removes the barrier. Offline
+machines act after metadata sync; this is not an instantaneous cross-machine stop.
+The scope follows creation/containment edges, not every unrelated session that
+has exchanged a message. See the [decision](../notes/implemented/feature/2026-10-11-stop-conversation-tree.md).

@@ -71,6 +71,7 @@ import { SessionInfoHoverCard } from '@/components/session-info-hover-card';
 import type {
   LocalProjectHistoryProvider,
   PrStatus,
+  SessionHistoryBackendKind,
   SessionId,
   SessionPullRequestCiState,
   SessionPullRequestReadiness,
@@ -126,6 +127,7 @@ export type SidebarUpdatedItem = {
   branchName?: string | null;
   /** Name of the machine the session runs on, shown in the hover info card. */
   machineName?: string | null;
+  historyBackend?: SessionHistoryBackendKind;
   latestMessageAt: Date | number | string;
   isPinned?: boolean;
   isWorking?: boolean;
@@ -1231,6 +1233,7 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
       // so a local session in the Updated list isn't left with only title + time.
       folderName={item.kind === 'local' ? (item.subtitle ?? undefined) : undefined}
       machineName={item.machineName}
+      historyBackend={item.historyBackend}
       branchName={branchName}
       prStatus={showPr ? prStatus : undefined}
       prCiState={item.prCiState}

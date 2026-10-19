@@ -1,0 +1,16 @@
+{
+  "name": "@lody/effect-lint",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "format": "oxfmt *.mjs",
+    "format:check": "oxfmt --check *.mjs"
+  },
+  "devDependencies": {
+    "@effect/tsgo": "0.48.1",
+    "effect-rules": "0.3.5",
+    "oxfmt": "^0.65.0",
+    "oxlint": "1.86.0",
+    "oxlint-tsgolint": "7.0.2003"
+  }
+}

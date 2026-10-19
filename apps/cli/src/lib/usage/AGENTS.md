@@ -17,9 +17,11 @@
   scopes. Unmarked adapters retain their existing cumulative identity, which
   under-counts after an adapter restart. No CLI reset offsets or model guessing.
   Preserve provider costs; unknown tariffs remain unknown.
-- Per-turn display tokens sum only Core `delta.usage` into the assistant entry
+- Per-turn display usage sums only Core `delta.usage` into the assistant entry
   that owns ACP output (`assistant-token-usage` adds, never replaces). A live
-  turn writes at finalization; late reports add to the finished entry. Never
-  derive them from cumulative totals; an adapter without `delta` shows none.
+  turn writes at finalization; late reports add to the finished entry. Cost is
+  the delta's `costUSD` only when every contribution has one; an unknown tariff
+  makes the turn's cost `null`, never a partial sum. Never derive either from
+  cumulative totals; an adapter without `delta` shows none.
 - The queue is process-local; it is not a restart-safe ledger. Local composition still
   has no cloud usage service. See [delivery Spec](../../../../../specs/usage-delivery.md).

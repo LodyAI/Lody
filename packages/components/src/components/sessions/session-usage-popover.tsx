@@ -29,6 +29,7 @@ import {
 } from '@/lib/session-usage';
 
 export type SessionUsagePopoverProps = {
+  onRefreshQuota?: () => void;
   contextWindowUsage?: SessionContextWindowUsage | null;
   rateLimits?: MachineRateLimits | null;
   agentType: string;
@@ -48,6 +49,7 @@ export type SessionUsagePopoverProps = {
 };
 
 export const SessionUsagePopover = memo(function SessionUsagePopover({
+  onRefreshQuota,
   contextWindowUsage,
   rateLimits,
   agentType,
@@ -130,7 +132,11 @@ export const SessionUsagePopover = memo(function SessionUsagePopover({
 
   return (
     <>
-      <Popover.Root>
+      <Popover.Root
+        onOpenChange={(open) => {
+          if (open) onRefreshQuota?.();
+        }}
+      >
         <Popover.Trigger
           render={
             <Button

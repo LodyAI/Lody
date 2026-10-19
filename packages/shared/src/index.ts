@@ -1,6 +1,7 @@
 export * from './preview-control';
 import { CliType } from './ai';
 export * from './history-writer';
+export type { AgentHistoryTargets } from './history-agent-window';
 export * from './history-write-schema';
 export * from './session-mirror';
 export * from './session-control-plane';
@@ -19,7 +20,6 @@ export type {
   MachineId,
   McpServerId,
   RepoId,
-  ReviewRunId,
   SessionId,
   TaskId,
   WorkspaceId,
@@ -56,6 +56,7 @@ export * from './cron-next-fire';
 export * from './scheduled-tasks-from-history';
 export * from './project';
 export * from './time-sync';
+export * from './time-sync-maintenance';
 export * from './session-status-machine';
 export * from './session-archive-targets';
 export * from './session-operation-targets';
@@ -90,7 +91,7 @@ export * from './machine-protocol-capabilities';
 export * from './pi-extensions';
 export * from './repo-doc-meta';
 export * from './session-input';
-export * from './session-preparation';
+export * from './acp-config-option-sensitivity';
 export * from './session-bootstrap';
 export * from './goal';
 export * from './comment-reference-format';
@@ -99,8 +100,7 @@ export * from './preview-comment-types';
 export * from './preview-comment-schema';
 export * from './task-types';
 export * from './task-index';
-export * from './review';
-export * from './review-prompts';
+export * from './pr-prompts';
 export * from './preview-comment-mutation';
 export * from './account-data';
 export * from './visual-annotation-types';
@@ -120,6 +120,7 @@ export * from './file-preview';
 export * from './machine-flock';
 export * from './workspace-mcp';
 export * from './agent-role';
+export * from './agent-role-proposal';
 export * from './workspace-flock';
 export * from './local-machine-rpc';
 export * from './local-loro-data-plane';
@@ -495,3 +496,5 @@ export * from './session-acp-identity';
 
 export * from './memory-provider';
 export * from './message-author';
+
+export * from './magpie-import';

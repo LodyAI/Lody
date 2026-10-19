@@ -15,7 +15,11 @@ vi.mock('@/atoms', () => ({
   currentWorkspaceSlugAtom: atom<string | null>(null),
   currentWorkspaceIdAtom: atom<string | null>(null),
 }));
-vi.mock('@/atoms/runtime', () => ({ authTokenAtom: atom(null), runtimeAtom: atom(null) }));
+vi.mock('@/atoms/runtime', () => ({
+  authTokenAtom: atom(null),
+  runtimeAtom: atom(null),
+  workspaceRuntimeInitFailureAtom: atom(null),
+}));
 vi.mock('@/atoms/doc-meta', () => ({
   sessionMetaCacheAtom: atom({}),
   docMetaCacheReadyAtom: atom(false),
@@ -66,7 +70,7 @@ vi.mock('@/providers/create-workspace-runtime', () => ({ createWorkspaceRuntime:
 import { RuntimeProvider } from '../src/providers/runtime-provider';
 import { createWorkspaceRuntime } from '../src/providers/create-workspace-runtime';
 import { currentWorkspaceSlugAtom, userAtom } from '../src/atoms';
-import { runtimeAtom } from '../src/atoms/runtime';
+import { runtimeAtom, workspaceRuntimeInitFailureAtom } from '../src/atoms/runtime';
 import {
   editSessionRunConfigDraftAtom,
   registerSessionRunConfigDraftLeaseAtom,
@@ -145,6 +149,30 @@ describe('RuntimeProvider warm workspace preparation', () => {
     expect(prepared.disposed).toBe(false);
   });
 
+  it('records a rejected runtime creation for its workspace until the next attempt', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.mocked(createWorkspaceRuntime).mockRejectedValueOnce(
+      new DOMException('The database connection is closing.', 'InvalidStateError')
+    );
+    await render();
+    expect(store.get(runtimeAtom)).toBeNull();
+    expect(store.get(workspaceRuntimeInitFailureAtom)).toEqual({
+      workspaceSlug: 'local',
+      errorType: 'InvalidStateError',
+    });
+
+    await act(async () => {
+      environment.workspace = { id: 'local:workspace-2', slug: 'local' };
+      root.render(
+        <Provider store={store}>
+          <RuntimeProvider>{null}</RuntimeProvider>
+        </Provider>
+      );
+    });
+    expect(store.get(workspaceRuntimeInitFailureAtom)).toBeNull();
+    expect(store.get(runtimeAtom)).toBe(prepared);
+  });
+
   it('establishes an editable real draft lease after StrictMode owner replay', async () => {
     let selection!: ReturnType<typeof useSessionRunConfigDraft>;
     function DraftProbe() {
@@ -202,6 +230,27 @@ describe('RuntimeProvider warm workspace preparation', () => {
     });
     expect(store.get(runtimeAtom)).toBe(prepared);
     expect(prepared.disposed).toBe(false);
+  });
+
+  it('cancels a retired initialization and publishes only the latest account runtime', async () => {
+    const late = Promise.withResolvers<never>();
+    const replacement = runtimeFixture();
+    vi.mocked(createWorkspaceRuntime)
+      .mockReturnValueOnce(late.promise)
+      .mockResolvedValue(replacement as never);
+    await render();
+    const signal = vi.mocked(createWorkspaceRuntime).mock.calls[0]![0].signal!;
+    await act(async () => {
+      store.set(userAtom, { id: 'new-account' });
+    });
+    expect(signal.aborted).toBe(true);
+    expect(store.get(runtimeAtom)).toBeNull();
+    await act(async () => {
+      late.resolve(prepared as never);
+    });
+    expect(prepared.disposed).toBe(true);
+    expect(store.get(runtimeAtom)).toBe(replacement);
+    expect(replacement.disposed).toBe(false);
   });
 
   it('disposes the prepared runtime when the route changes scope', async () => {

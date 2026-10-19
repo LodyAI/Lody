@@ -3,6 +3,7 @@ import { SessionId } from '@lody/shared';
 import {
   SessionGCManager,
   SessionGCConfig,
+  type SessionNativeWork,
   loadGCConfig,
   evaluateMemoryPressure,
 } from './session-gc-manager';
@@ -24,7 +25,7 @@ import { getMemoryPressureSnapshot } from '@/utils/memory';
 const mockedGetMemoryPressureSnapshot = vi.mocked(getMemoryPressureSnapshot);
 
 describe('SessionGCManager', () => {
-  let cleanMock: ReturnType<typeof vi.fn>;
+  let cleanMock: ReturnType<typeof vi.fn<(sessionId: SessionId) => Promise<void>>>;
   let loggerMock: {
     info: ReturnType<typeof vi.fn>;
     debug: ReturnType<typeof vi.fn>;
@@ -37,12 +38,13 @@ describe('SessionGCManager', () => {
   let pendingUpdates: Set<SessionId>;
   let pendingUserWork: Set<SessionId>;
   let archiveInFlight: Set<SessionId>;
+  let nativeWork: Map<SessionId, SessionNativeWork>;
   let sleepCalls: number[];
 
   beforeEach(() => {
     vi.useFakeTimers();
     sleepCalls = [];
-    cleanMock = vi.fn().mockResolvedValue(undefined);
+    cleanMock = vi.fn<(sessionId: SessionId) => Promise<void>>().mockResolvedValue(undefined);
     loggerMock = {
       info: vi.fn(),
       debug: vi.fn(),
@@ -55,6 +57,7 @@ describe('SessionGCManager', () => {
     pendingUpdates = new Set();
     pendingUserWork = new Set();
     archiveInFlight = new Set();
+    nativeWork = new Map();
     mockedGetMemoryPressureSnapshot.mockResolvedValue({
       availableMemoryBytes: 4 * 1024 * 1024 * 1024,
       effectiveMemoryLimitBytes: 32 * 1024 * 1024 * 1024,
@@ -74,6 +77,7 @@ describe('SessionGCManager', () => {
     const defaultConfig: SessionGCConfig = {
       idleTimeoutMs: 20 * 60 * 1000, // 20 minutes
       sweepIntervalMs: 60 * 1000, // 1 minute
+      nativeBackgroundMaxIdleMs: 24 * 60 * 60 * 1000,
       enabled: true,
       memoryThresholdBytes: 1024 * 1024 * 1024, // 1 GB
       maxEvictionsPerCall: 100,
@@ -85,6 +89,7 @@ describe('SessionGCManager', () => {
       defaultConfig,
       {
         getSessionLastActivity: (sessionId) => sessionActivities.get(sessionId),
+        getNativeWork: (sessionId) => nativeWork.get(sessionId) ?? null,
         hasActiveTurn: (sessionId) => activeTurns.has(sessionId),
         hasActiveGoal: async (sessionId) => activeGoals.has(sessionId),
         hasPendingUpdates: (sessionId) => pendingUpdates.has(sessionId),
@@ -111,6 +116,7 @@ describe('SessionGCManager', () => {
       const config = loadGCConfig();
       expect(config.idleTimeoutMs).toBe(20 * 60 * 1000);
       expect(config.sweepIntervalMs).toBe(60 * 1000);
+      expect(config.nativeBackgroundMaxIdleMs).toBe(24 * 60 * 60 * 1000);
       expect(config.enabled).toBe(true);
       // Default threshold = 10% of effective memory (32 GB mock), clamped to [1 GB, 4 GB]
       // = floor(32 * 1024^3 * 0.1) = 3,435,973,836 bytes (~3.2 GB)
@@ -213,6 +219,47 @@ describe('SessionGCManager', () => {
       expect(cleanMock).not.toHaveBeenCalled();
     });
 
+    it('never cleans a session whose agent is running outside a turn', async () => {
+      // A model turn Claude started by itself after a background task finished.
+      const manager = createManager({ idleTimeoutMs: 1000, nativeBackgroundMaxIdleMs: 5000 });
+      const s1 = 'session-1' as SessionId;
+      sessionActivities.set(s1, Date.now() - 60_000);
+      nativeWork.set(s1, 'running');
+
+      await manager.sweep();
+
+      expect(cleanMock).not.toHaveBeenCalled();
+    });
+
+    it('spares a session waiting on background tasks until the ceiling', async () => {
+      const manager = createManager({ idleTimeoutMs: 1000, nativeBackgroundMaxIdleMs: 5000 });
+      const waiting = 'session-waiting' as SessionId;
+      const forgotten = 'session-forgotten' as SessionId;
+      const now = Date.now();
+      sessionActivities.set(waiting, now - 2000);
+      sessionActivities.set(forgotten, now - 6000);
+      nativeWork.set(waiting, 'background');
+      nativeWork.set(forgotten, 'background');
+
+      await manager.sweep();
+
+      expect(cleanMock.mock.calls).toEqual([[forgotten]]);
+    });
+
+    it('cleans the session once its background tasks are gone', async () => {
+      const manager = createManager({ idleTimeoutMs: 1000 });
+      const s1 = 'session-1' as SessionId;
+      sessionActivities.set(s1, Date.now() - 2000);
+      nativeWork.set(s1, 'background');
+
+      await manager.sweep();
+      expect(cleanMock).not.toHaveBeenCalled();
+
+      nativeWork.delete(s1);
+      await manager.sweep();
+      expect(cleanMock.mock.calls).toEqual([[s1]]);
+    });
+
     it('does not clean sessions in archive flight', async () => {
       const manager = createManager({ idleTimeoutMs: 1000 });
       const now = Date.now();
@@ -266,6 +313,25 @@ describe('SessionGCManager', () => {
   });
 
   describe('evictForMemoryPressure', () => {
+    it('may evict a session waiting on background tasks, never a running one', async () => {
+      const manager = createManager();
+      const now = Date.now();
+      const running = 'session-running' as SessionId;
+      const background = 'session-background' as SessionId;
+      sessionActivities.set(running, now - 90_000);
+      sessionActivities.set(background, now - 60_000);
+      nativeWork.set(running, 'running');
+      nativeWork.set(background, 'background');
+      mockedGetMemoryPressureSnapshot.mockResolvedValue({
+        availableMemoryBytes: 500 * 1024 * 1024,
+        effectiveMemoryLimitBytes: 32 * 1024 * 1024 * 1024,
+      });
+
+      const result = await manager.evictForMemoryPressure();
+
+      expect(result.evictedSessionIds).toEqual([background]);
+    });
+
     it('does nothing when memory is above threshold', async () => {
       const manager = createManager();
       const s1 = 'session-1' as SessionId;

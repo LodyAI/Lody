@@ -40,6 +40,7 @@ import {
   useCallback,
   useLayoutEffect,
   useMemo,
+  useRef,
   useState,
   type MouseEvent as ReactMouseEvent,
   type ReactNode,
@@ -52,6 +53,7 @@ import type {
   LocalProjectHistoryProvider,
   MachineId,
   PrStatus,
+  SessionHistoryBackendKind,
   SessionId,
   SessionPullRequestCiState,
   SessionPullRequestReadiness,
@@ -139,6 +141,7 @@ export type SessionListRow = {
   machineId?: MachineId;
   /** Resolved machine display name, surfaced in the desktop hover info card. */
   machineName?: string | null;
+  historyBackend?: SessionHistoryBackendKind;
   repoFullName?: string | null;
   branchName: string;
   prUrl?: string | null;
@@ -570,6 +573,41 @@ type SessionGroupRowProps = Pick<
   beginRename: (sessionId: string, currentTitle: string) => void;
 };
 
+function measureSidebarSessionTitle(row: HTMLElement, isMobile: boolean) {
+  if (isMobile) return;
+  const title = row.querySelector<HTMLElement>('[data-sidebar-session-title]');
+  if (!title) return;
+  const distance = title.scrollWidth - title.clientWidth;
+  if (distance <= 8) {
+    row.removeAttribute('data-sidebar-title-overflow');
+    return;
+  }
+  row.setAttribute('data-sidebar-title-overflow', 'true');
+  title.style.setProperty('--sidebar-title-distance', `${-distance}px`);
+  title.style.setProperty('--sidebar-title-duration', `${Math.max(3.8, 2.4 + distance / 30)}s`);
+}
+
+function getSidebarSessionTitleOffset(title: HTMLElement) {
+  const transform = getComputedStyle(title).transform;
+  return transform === 'none' ? 0 : new DOMMatrixReadOnly(transform).m41;
+}
+
+function setSidebarSessionTitleSwipeOffset(
+  row: HTMLElement,
+  title: HTMLElement,
+  distance: number,
+  offset: number
+) {
+  row.setAttribute('data-sidebar-title-overflow', 'true');
+  row.setAttribute('data-sidebar-title-swiping', 'true');
+  title.style.setProperty('--sidebar-title-distance', `${-distance}px`);
+  title.style.setProperty('--sidebar-title-duration', `${Math.max(3.8, 2.4 + distance / 30)}s`);
+  title.style.setProperty(
+    '--sidebar-title-swipe-offset',
+    `${Math.max(-distance, Math.min(0, offset))}px`
+  );
+}
+
 /**
  * One session row of a group. Memoized on its own props so a selection change
  * re-renders only the previously and newly selected rows: a group can hold
@@ -601,6 +639,15 @@ const SessionGroupRow = memo(function SessionGroupRow({
   archiveConfirmLabel,
   contextMenuLabels,
 }: SessionGroupRowProps) {
+  const titleSwipeRef = useRef<{
+    pointerId: number;
+    startX: number;
+    startY: number;
+    startOffset: number;
+    distance: number;
+    started: boolean;
+  } | null>(null);
+  const suppressTitleClickRef = useRef(false);
   const { t } = useTranslation();
   const isSelectable = typeof onSelectSession === 'function';
   const session = node.item;
@@ -664,14 +711,17 @@ const SessionGroupRow = memo(function SessionGroupRow({
   const useAnchor = typeof sessionHref === 'string' && sessionHref.length > 0;
   const isUnsent = useSessionUnsentNewConversation(session.sessionId);
   const renderTitle = (extraClassName?: string) => (
-    <span
-      className={cn(
-        'truncate font-normal',
-        isUnsent && !showSelectedState && SIDEBAR_UNSENT_TITLE_CLASS,
-        extraClassName
-      )}
-    >
-      {session.title}
+    <span className="sidebar-session-title-clip min-w-0 flex-1" data-sidebar-title-clip>
+      <span
+        className={cn(
+          'sidebar-session-title block max-w-full truncate font-normal',
+          isUnsent && !showSelectedState && SIDEBAR_UNSENT_TITLE_CLASS,
+          extraClassName
+        )}
+        data-sidebar-session-title
+      >
+        {session.title}
+      </span>
     </span>
   );
   const handleAnchorClick = useAnchor
@@ -722,14 +772,17 @@ const SessionGroupRow = memo(function SessionGroupRow({
       aria-current={isSelected ? 'page' : undefined}
       data-id={`session:${session.sessionId}`}
       data-scope-item="row"
+      data-sidebar-session-row
       data-sidebar-session-id={session.sessionId}
       // Drag a conversation onto a chat surface to mention it there.
       draggable
       onDragStart={(event) =>
-        startSessionMentionDrag(event, {
-          sessionId: session.sessionId,
-          title: session.title,
-        })
+        titleSwipeRef.current?.started
+          ? event.preventDefault()
+          : startSessionMentionDrag(event, {
+              sessionId: session.sessionId,
+              title: session.title,
+            })
       }
       className={cn(
         'group relative w-full rounded-md text-left',
@@ -754,6 +807,157 @@ const SessionGroupRow = memo(function SessionGroupRow({
         !isSelectable && 'cursor-default',
         isSelectable && 'cursor-pointer'
       )}
+      onMouseOver={(event) => {
+        if (!event.currentTarget.hasAttribute('data-sidebar-title-measured')) {
+          event.currentTarget.setAttribute('data-sidebar-title-measured', 'true');
+          measureSidebarSessionTitle(event.currentTarget, isMobile);
+        }
+      }}
+      onWheel={(event) => {
+        const rowElement = event.currentTarget;
+        const clip = rowElement.querySelector<HTMLElement>('[data-sidebar-title-clip]');
+        const title = rowElement.querySelector<HTMLElement>('[data-sidebar-session-title]');
+        if (!clip || !title) return;
+        const bounds = clip.getBoundingClientRect();
+        if (
+          event.clientX < bounds.left ||
+          event.clientX > bounds.right ||
+          event.clientY < bounds.top ||
+          event.clientY > bounds.bottom
+        ) {
+          return;
+        }
+
+        const delta = Math.abs(event.deltaX) > 0 ? event.deltaX : event.shiftKey ? event.deltaY : 0;
+        if (Math.abs(delta) < 1) return;
+        if (!rowElement.hasAttribute('data-sidebar-title-overflow')) {
+          measureSidebarSessionTitle(rowElement, false);
+        }
+        const distance = Math.abs(
+          Number.parseFloat(title.style.getPropertyValue('--sidebar-title-distance'))
+        );
+        if (!Number.isFinite(distance) || distance <= 8) return;
+        const offset = getSidebarSessionTitleOffset(title) - delta;
+        setSidebarSessionTitleSwipeOffset(rowElement, title, distance, offset);
+        event.preventDefault();
+      }}
+      onMouseLeave={(event) => {
+        if (!titleSwipeRef.current?.started) {
+          event.currentTarget.removeAttribute('data-sidebar-title-measured');
+          event.currentTarget.removeAttribute('data-sidebar-title-overflow');
+          event.currentTarget.removeAttribute('data-sidebar-title-swiping');
+          event.currentTarget
+            .querySelector<HTMLElement>('[data-sidebar-session-title]')
+            ?.style.removeProperty('--sidebar-title-swipe-offset');
+        }
+      }}
+      onPointerDown={(event) => {
+        if (event.button !== 0) return;
+        const rowElement = event.currentTarget;
+        const clip = rowElement.querySelector<HTMLElement>('[data-sidebar-title-clip]');
+        const title = rowElement.querySelector<HTMLElement>('[data-sidebar-session-title]');
+        if (!clip || !title) return;
+        const bounds = clip.getBoundingClientRect();
+        if (
+          event.clientX < bounds.left ||
+          event.clientX > bounds.right ||
+          event.clientY < bounds.top ||
+          event.clientY > bounds.bottom
+        ) {
+          return;
+        }
+
+        const distance = Math.max(0, title.scrollWidth - clip.clientWidth);
+        if (distance <= 8) return;
+        const offset = getSidebarSessionTitleOffset(title);
+        titleSwipeRef.current = {
+          pointerId: event.pointerId,
+          startX: event.clientX,
+          startY: event.clientY,
+          startOffset: Math.max(-distance, Math.min(0, offset)),
+          distance,
+          started: false,
+        };
+      }}
+      onPointerMove={(event) => {
+        const swipe = titleSwipeRef.current;
+        if (!swipe || swipe.pointerId !== event.pointerId) return;
+        const deltaX = event.clientX - swipe.startX;
+        const deltaY = event.clientY - swipe.startY;
+        if (!swipe.started) {
+          if (Math.max(Math.abs(deltaX), Math.abs(deltaY)) < 5) return;
+          if (Math.abs(deltaY) >= Math.abs(deltaX)) {
+            titleSwipeRef.current = null;
+            return;
+          }
+
+          swipe.started = true;
+          const title = event.currentTarget.querySelector<HTMLElement>(
+            '[data-sidebar-session-title]'
+          );
+          if (title) {
+            setSidebarSessionTitleSwipeOffset(
+              event.currentTarget,
+              title,
+              swipe.distance,
+              swipe.startOffset
+            );
+          }
+          event.currentTarget.setPointerCapture(event.pointerId);
+        }
+
+        event.preventDefault();
+        const title = event.currentTarget.querySelector<HTMLElement>(
+          '[data-sidebar-session-title]'
+        );
+        if (!title) return;
+        setSidebarSessionTitleSwipeOffset(
+          event.currentTarget,
+          title,
+          swipe.distance,
+          swipe.startOffset + deltaX
+        );
+      }}
+      onPointerUp={(event) => {
+        const swipe = titleSwipeRef.current;
+        if (swipe?.pointerId !== event.pointerId) return;
+        if (swipe.started) {
+          suppressTitleClickRef.current = true;
+          window.setTimeout(() => {
+            suppressTitleClickRef.current = false;
+          }, 0);
+          if (!event.currentTarget.matches(':hover')) {
+            event.currentTarget.removeAttribute('data-sidebar-title-overflow');
+            event.currentTarget.removeAttribute('data-sidebar-title-swiping');
+          }
+        }
+        titleSwipeRef.current = null;
+      }}
+      onPointerCancel={(event) => {
+        const swipe = titleSwipeRef.current;
+        if (swipe?.started) {
+          event.currentTarget.removeAttribute('data-sidebar-title-overflow');
+          event.currentTarget.removeAttribute('data-sidebar-title-swiping');
+        }
+        titleSwipeRef.current = null;
+        suppressTitleClickRef.current = false;
+      }}
+      onClickCapture={(event) => {
+        if (!suppressTitleClickRef.current) return;
+        suppressTitleClickRef.current = false;
+        event.preventDefault();
+        event.stopPropagation();
+      }}
+      onFocus={(event) => {
+        event.currentTarget.setAttribute('data-sidebar-title-measured', 'true');
+        measureSidebarSessionTitle(event.currentTarget, isMobile);
+      }}
+      onBlur={(event) => {
+        if (!event.currentTarget.matches(':hover')) {
+          event.currentTarget.removeAttribute('data-sidebar-title-measured');
+          event.currentTarget.removeAttribute('data-sidebar-title-overflow');
+        }
+      }}
       onClick={
         useAnchor
           ? undefined
@@ -1039,6 +1243,7 @@ const SessionGroupRow = memo(function SessionGroupRow({
       latestMessageAt={session.latestMessageAt}
       repoFullName={groupRepoFullName}
       machineName={session.machineName}
+      historyBackend={session.historyBackend}
       branchName={session.branchName}
       prStatus={hasPr ? prStatus : undefined}
       prCiState={session.prCiState}

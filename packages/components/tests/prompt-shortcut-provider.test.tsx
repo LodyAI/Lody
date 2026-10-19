@@ -42,7 +42,10 @@ vi.mock('@lody/platform/react', () => ({
   useCloudQuery: () => fixture.directory,
 }));
 vi.mock('@/lib/cloud-api-operations', () => ({ cloudOperations: { promptShortcuts: {} } }));
-vi.mock('loro-repo', () => ({ LoroRepo: { create: fixture.createRepo } }));
+vi.mock('loro-repo', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('loro-repo')>();
+  return { ...actual, LoroRepo: { create: fixture.createRepo } };
+});
 vi.mock('loro-repo/storage/indexeddb', () => ({ IndexedDBStorageAdaptor: class {} }));
 vi.mock('@lody/shared/prompt-shortcuts', async () => {
   const { PromptShortcutRuntime: ActualRuntime } =

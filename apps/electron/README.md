@@ -2,6 +2,18 @@
 
 Lody desktop application built with Electron, React, and TypeScript.
 
+The desktop pins Electron 44.7.0 and requires macOS 13 or newer on Mac.
+This runtime is compatible with the pinned DeepSeek Harness native loader;
+see the [runtime compatibility decision](../../.agents/notes/implemented/bug-fix/2026-10-10-dsh-electron-runtime.md).
+
+## Conversation links
+
+All versions generate `lody://session/<id>?workspace=<id>`. In-app links stay in
+the current installation; external links use the OS default selected in Settings →
+About. Startup does not replace an existing default; packaged Windows fills an absent handler after first launch. Version-specific schemes remain for
+explicit handoff and login callbacks. The shared packaging hook advertises both
+resource and callback protocols; see the [deep-link contract](../../specs/deep-links.md).
+
 ## Recommended IDE Setup
 
 - [VSCode](https://code.visualstudio.com/) + [ESLint](https://marketplace.visualstudio.com/items?itemName=dbaeumer.vscode-eslint) + [Oxc](https://marketplace.visualstudio.com/items?itemName=oxc.oxc-vscode)
@@ -30,6 +42,14 @@ instance.
 `pnpm --dir apps/electron preview:local` is a lower-level smoke/e2e command for
 an OSS build that has already been prepared. It deliberately skips rebuilding
 and should not be used as the normal development command.
+
+CLI diagnostics share `<data dir>/logs/<local date>.log`. The `cli-probe` scope
+records failed runtime-state requests and recovery, including error type, duration,
+PID and consecutive request failures; healthy polling stays silent. The count
+includes startup/reconcile reads, so it differs from the supervisor's poll counter.
+Use these traces with `cli-supervisor` state transitions to distinguish local probe
+failure from backend reconnecting with an available runtime. See the
+[identity investigation](../../.agents/notes/implemented/bug-fix/2026-10-11-sidebar-machine-order-stability.md).
 
 ### Cloud browser login
 

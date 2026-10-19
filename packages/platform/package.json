@@ -13,6 +13,10 @@
     "./react": {
       "types": "./src/react.ts",
       "import": "./src/react.ts"
+    },
+    "./host-keys": {
+      "types": "./src/host-keys.ts",
+      "import": "./src/host-keys.ts"
     }
   },
   "scripts": {
@@ -22,7 +26,8 @@
     "check": "pnpm typecheck && pnpm test"
   },
   "dependencies": {
-    "@lody/shared": "workspace:*"
+    "@lody/shared": "workspace:*",
+    "effect": "catalog:"
   },
   "devDependencies": {
     "@types/node": "catalog:",

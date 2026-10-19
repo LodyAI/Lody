@@ -52,9 +52,9 @@ Exact deletion bypasses discovery: [relations](../../specs/session-relations.md)
   never mutate the original RPC schemas. Parsing filters and validates in one pass.
   `readStored` returns detached JSON for hashing, not stored-copy provenance. Keep `capture`
   protection for callers that can author copies from an old snapshot.
-- Target-local streaming uses `updateEntry`; it must not produce/plan the entire history.
-  Resolve the live turn on each call, preserve immutable ids, and preflight before writing.
-  Generic history updates remain for operations with cross-turn ownership or structural edits.
+- Streaming/mixed writes use indexed `updateTail`/`updateEntry`, with child output windows;
+  snapshot/progress never reads transcripts. Preserve ownership/ids, preflight all writes,
+  invalidate stale indexes. Full-history updates: structural commands or unwindowable storage.
 - Permission responses inspect request metadata and materialize only the matching turn;
   a supplied turn id restricts lookup to that turn. Preserve legacy JSON metadata on lookup.
 - Mirror's text-event optimization ships upstream in pinned `loro-mirror`; no local patch
@@ -100,21 +100,22 @@ Exact deletion bypasses discovery: [relations](../../specs/session-relations.md)
   Preserve explicit `mcpServerIds: []`; dispatch the driving turn's selection to ACP,
   never reread history.
 - MCP/Role catalog writes resolve on local Flock durability, followed by explicit
-  upload. Settings neither await nor report upload; upload failure must not fail or
-  roll back a durable write. CLI reports its sync result. See
+  upload. Settings neither await nor report upload; its failure never fails or rolls
+  back a durable write. CLI reports its sync result. See
   [catalog explanation](../../.agents/docs/workspace-catalog-durability.md).
 - Roles use one workspace Flock `agentRole` family; sharing changes `visibility`.
   No secrets, API keys, MCP selections or memory contents. Apply
   `isSensitiveAgentRoleConfigOptionKey` on read/write. Permission pins use
-  `runConfig.modeId` or `_permission`: hide the separate composer permission
-  button but retain warning-tone markings. No Role-level auto-approval policy.
+  `runConfig.modeId` or `_permission`: hide the composer permission button,
+  keep warning-tone markings. No Role-level auto-approval policy.
   Settings/mentions use `canReadAgentRole`/`canManageAgentRole`; explicit MCP
   lookup needs no mention grant.
-- Roles bind `machineId + agentConfigId`; no fallback. Unavailable machine/config/model/mode
-  stays listed with reasons, unmentionable. Freeze Role prompt/target/revision/config
-  at acceptance; retries/recovery ignore edits/deletion. Session Role metadata:
-  provenance only. `resolveSessionExecutionInputBlocks` owns text; raw blocks supply attachments.
-- Memory stores provider/id references, frozen per turn. Daemon commands and env
-  mapping follow the [memory contract](../../specs/agent-role-memory.md).
+- Each Role target binds `machineId + agentConfigId`; never guess or fall back. One
+  target is a v1 row, more are v2 ([Spec](../../specs/agent-role-machine-targets.md)).
+  Unavailable targets stay listed, unmentionable. Freeze prompt/target/revision/config
+  at acceptance; retries ignore edits. Session Role metadata: provenance only.
+  `resolveSessionExecutionInputBlocks` owns text; raw blocks supply attachments.
+- Memory stores provider/id references, frozen per turn; daemon/env rules:
+  [memory contract](../../specs/agent-role-memory.md).
 - Keep `author`, human `userId`, and recipient execution config separate.
   [Contract](../../specs/message-author-identity.md).

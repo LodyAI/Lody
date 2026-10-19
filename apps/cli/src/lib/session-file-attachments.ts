@@ -1,10 +1,9 @@
+import { toShared } from '@/platform/process-options';
 import * as crypto from 'crypto';
-import { execFile } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
-import { promisify } from 'util';
 
-const execFileAsync = promisify(execFile);
+import { runCommandTextLegacy } from '@lody/shared/node/process';
 
 /**
  * Directory (relative to the session workspace root) where human→agent file
@@ -124,11 +123,15 @@ export const computeExcludeFileContent = (existingContent: string): string | nul
 export const resolveGitInfoExcludePath = async (workspaceRoot: string): Promise<string | null> => {
   try {
     // `--git-path info/exclude` resolves correctly for worktrees/submodules.
-    const { stdout } = await execFileAsync('git', ['rev-parse', '--git-path', 'info/exclude'], {
-      cwd: workspaceRoot,
-      encoding: 'utf8',
-      windowsHide: true,
-    });
+    const { stdout } = await runCommandTextLegacy(
+      {
+        command: 'git',
+        args: ['rev-parse', '--git-path', 'info/exclude'],
+        cwd: workspaceRoot,
+        check: 'exit-0',
+      },
+      toShared()
+    );
     const raw = stdout.trim();
     if (!raw) {
       return null;

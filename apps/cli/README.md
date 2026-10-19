@@ -14,6 +14,14 @@ Install the CLI package:
 npm install -g lody@next
 ```
 
+## Development type checking
+
+`tsconfig.json` includes source and tests so editor language servers resolve the
+CLI's `@/*` imports in both. `pnpm typecheck` uses `tsconfig.typecheck.json` to
+retain the production-only check. `tsconfig.tests.json` remains the explicit
+test-inclusive check; existing test typing errors are not part of the production
+check.
+
 ## Daemon upgrades and autostart
 
 Remote upgrades install globally using the daemon's npm environment, resolve the
@@ -45,6 +53,19 @@ An already-running old watchdog cannot acquire this fix merely by downloading it
 the one-time launcher correction and restart are needed for that deployment.
 Older releases without versioned readiness cannot be verified by the new remote
 handoff and must be started explicitly if a rollback is required.
+
+The launcher waits up to three minutes for the new Worker to become ready.
+Releases before this change waited 30 seconds, and the old watchdog applies
+its own limit during the handoff. So on a machine where cold start exceeds
+30 seconds, remote upgrades from those releases keep falling back to the old
+version. They also fail `daemon start`. Install the fixed release globally,
+then run `daemon stop` and `daemon start` with its launcher (steps 2 and 4
+above). Later remote upgrades use the longer limit.
+
+## Structured Session output
+
+Session commands with `--json` or `--jsonl` reserve stdout for structured results.
+Diagnostic logs, including workspace transport cleanup, go to stderr.
 
 ## Workspace discovery
 
@@ -78,7 +99,12 @@ CLI `--mode` and `--config-option` validation against target capabilities.
 For example, a Grok target may use `configOptionValues: { permission_mode: "ask" }`;
 its ACP mode `default` is not a permission policy. Explicit permissions may exceed
 the parent; callers must follow their user authorization. Roles still override
-manual configuration. Merge, Plan and retry behavior: [creation contract](../../specs/session-orchestration.md#session-creation-configuration).
+manual configuration. `lody session create --agent-role <idOrName>` resolves a
+workspace Role the same way: the Role's machine, agent config, run configuration,
+and prompt prefix win over `--machine`/`--agent`/`--agent-config`/`--mode`/`--model`/
+`--config-option` (ignored flags are listed in a warning), while `--repo`/
+`--local-project`/`--branch`/`--worktree` still supply the work context.
+Merge, Plan and retry behavior: [creation contract](../../specs/session-orchestration.md#session-creation-configuration).
 
 `project list` without catalog options retains the local daemon project listing.
 Workspace project listing now spans authorized machines and enabled GitHub repositories;
@@ -118,3 +144,16 @@ opt in to secret output, or migrate to `envKeys`. The output is a presentation
 contract, not a full configuration backup; runtime/auth/custom-launch fields are
 not exported. No masked placeholder is stored or returned as an environment value.
 Assignment errors report entry/line numbers without echoing their contents.
+
+## Importing OSS records into cloud
+
+In the cloud CLI, run `lody migrate --from-oss`, select an existing workspace, and
+confirm the source/target summary. Close the OSS app and CLI first. For scripts,
+use `lody migrate --from-oss --workspace <id> --yes`; `--source <directory>` selects
+a custom OSS data root. No workspace is created automatically.
+
+This imports full Loro history and referenced local file attachments, keeps existing
+cloud conversations/settings, and disables execution of imported sessions/schedules.
+Roost and unsupported formats fail before record uploads. Source data is retained;
+rerunning resumes the frozen snapshot. It does not copy code directories or native
+agent credentials. See [migration and recovery](src/lib/oss-migration/README.md).

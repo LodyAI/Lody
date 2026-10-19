@@ -72,6 +72,63 @@ export const deriveLocationsFromRawInput = (rawInput: unknown): ToolCallLocation
   return Array.from(unique).map((path) => ({ path }));
 };
 
+/** An image block, or a blob resource identified as an image by MIME type or data URI. */
+const isToolImagePayload = (value: unknown): boolean => {
+  if (!value || typeof value !== 'object') return false;
+  const { type, resource } = value as { type?: unknown; resource?: unknown };
+  if (type === 'image') return true;
+  if (type !== 'resource' || !resource || typeof resource !== 'object') return false;
+  if (!('blob' in resource)) return false;
+  const { mimeType, uri } = resource as { mimeType?: unknown; uri?: unknown };
+  return (
+    (typeof mimeType === 'string' && mimeType.trim().toLowerCase().startsWith('image/')) ||
+    (typeof uri === 'string' && uri.trim().toLowerCase().startsWith('data:image/'))
+  );
+};
+
+/**
+ * Applies the tool image rule to a raw tool result array, such as Claude's
+ * `[{ type: 'image', source }, { type: 'text', text }]`, before it is stored as
+ * readable child output.
+ */
+export const stripRawOutputImagesForHistory = (output: readonly unknown[]): unknown[] =>
+  output.filter((item) => !isToolImagePayload(item));
+
+/** Tool images are execution output, not durable conversation attachments. */
+export const stripToolCallPayloadsForHistory = (content: ToolCallContent): ToolCallContent =>
+  content
+    .filter((block) => block.type !== 'content' || !isToolImagePayload(block.content))
+    .map((block) => {
+      if (block.type !== 'content') return block;
+      const value = block.content;
+      // The detail view downloads resources through their URI; it never reads
+      // non-image blob bytes. Keep the resource and link instead of dropping it.
+      if (value.type === 'resource') {
+        const resource = value.resource;
+        const clearBlob =
+          'blob' in resource && typeof resource.blob === 'string' && resource.blob !== '';
+        const clearUri = typeof resource.uri === 'string' && /^\s*data:/i.test(resource.uri);
+        if (!clearBlob && !clearUri) return block;
+        return {
+          ...block,
+          content: {
+            ...value,
+            resource: {
+              ...resource,
+              ...(clearBlob ? { blob: '' } : {}),
+              ...(clearUri ? { uri: '' } : {}),
+            },
+          },
+        };
+      }
+      // data: links already render only their label under the UI's URL policy.
+      if (value.type === 'resource_link' && /^\s*data:/i.test(value.uri))
+        return { ...block, content: { ...value, uri: '' } };
+      // Do not parse, truncate or "repair" other blocks here. New malformed
+      // values must reach writer validation; unchanged legacy content must survive.
+      return block;
+    });
+
 /**
  * Removes large data payloads from tool call blocks before persisting to session history.
  *
@@ -93,6 +150,5 @@ export const stripToolCallContentForHistory = (
     // Some agents also emit a human-readable success `content` block; keep history lean by dropping it.
     return content.filter((block) => block.type !== 'diff' && block.type !== 'content');
   }
-  return content;
+  return stripToolCallPayloadsForHistory(content);
 };
-

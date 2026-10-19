@@ -6,6 +6,24 @@ Repo checkouts, worktrees, branch allocation, and setup scripts for sessions.
 [../AGENTS.md](../AGENTS.md) and [apps/cli/AGENTS.md](../../../AGENTS.md) apply. Background
 and file responsibilities: [../README.md](../README.md).
 
+## Effect execution boundary
+
+- Native Git commands/helper probes compose `WorktreeGit` / `WorktreeGitLive`.
+  Layers supply official filesystem, host environment and the existing process
+  spawner. Preserve full Cause; Legacy projection uses squashFileLockFailure.
+  Pinned v4 mapError/catch can discard release defects beside a typed failure.
+- `worktreeGitLegacy` is the temporary command facade; keep Legacy
+  visible; delete it when the manager becomes native. Infrastructure,
+  FileLockCleanupFailed/LockReleaseFailed escape fallback/forced-removal catches.
+  `WorktreeObservations` uses owner-provided FileLocks: inspect/list acquire;
+  info borrows the mutation lease. Preserve missing/unborn/corrupt and mixed Cause.
+  `LocalWorktreePreparation.prepareLocked` borrows that lease; own scratch before
+  writing, publish complete metadata exclusively, retain bounded recovery on
+  failed release. `runWorktreeLegacy` executes both via fileLocksLegacy;
+  runObservationLegacy only composes. Never add a second coordinator.
+  Mutation/setup/GC remains unfinished.
+  Decision: [worktree Git](../../../../../.agents/notes/implemented/architecture/2026-10-10-effect-worktree-git-execution.md).
+
 ## Git credential broker
 
 - Local projects and their worktrees use native Git/GitHub auth, even with GitHub
@@ -40,11 +58,17 @@ and file responsibilities: [../README.md](../README.md).
 
 ## Worktrees, branches, and setup
 
+- First-task branch naming is agent guidance for ordinary new independent GitHub/local
+  worktree Sessions. The daemon verifies the actual branch
+  after setup against this Session's allocation (numeric collisions included); unknown or
+  descriptive refs receive no rename instruction. Exclude direct folders, child Tabs,
+  prior/resumed ACP Sessions, later turns, and Fork; never restore a host prompt-to-ref
+  generator. Contract: [workspace branches](../../../../../specs/workspace-branch-state.md).
 - Turn finalization NEVER commits or pushes on the session's behalf, in any project shape.
   A PR-linked session that ends with unpublished work is reported through
   `SessionMeta.workspaceDirty` AND `workspaceUnpushed`, which raise the Info Bar's
   `Commit & Push` action; the agent is asked to keep the branch current by the Create PR
-  prompt (`packages/shared/src/review-prompts.ts`), which the user can override in
+  prompt (`packages/shared/src/pr-prompts.ts`), which the user can override in
   conversation. Do not re-add an automatic post-turn commit/push.
 - Publish BOTH flags or the signal has a hole: `git status` goes clean the moment the agent
   commits, so a commit whose push failed reads as "all clear" and the Info Bar offers Merge
@@ -70,15 +94,12 @@ and file responsibilities: [../README.md](../README.md).
 - Worktree setup scripts are per worktree-directory lifetime: session runtime restore after
   idle GC must skip setup when the session's worktree directory already exists, but setup still
   runs when a missing worktree directory is materialized again.
-- INVARIANT: speculative-worktree marker mutations are read-check-act on one file and are
-  serialized per session (`withSessionMarkerLock` in `speculative-worktree.ts`) — a superseded
-  preparation's dispose racing its replacement's materialization must never delete the
-  replacement's directory.
-- A prepared worktree may be adopted only when the durable claim did not return `mismatch` AND
-  its directory still exists on disk; otherwise discard the prepared runtime (its ACP process
-  cwd points at a dead inode) and let the cold path rebuild via `createWorktree`. A `mismatch`
-  claim deletes the mismatched directory, so adoption after it hands the session a path that is
-  not on disk.
+- Nothing writes speculative-worktree markers any more; `legacy-speculative-worktrees.ts`
+  handles those older daemons left. Creation claims its marker before probing the directory
+  and reruns setup before dropping it. NEVER destroy a worktree a Session adopted
+  (`durable-pending-setup`, or a `restoreBranchName`) over a target mismatch: removal deletes
+  the branch resume restores. Only unadopted mismatches rebuild. The sweep removes orphans of
+  non-durable, inactive Sessions under the shared per-session lock, re-checking liveness.
 - `worktree-config-resolver.ts` follows the durable launch-config rule in
   [../AGENTS.md](../AGENTS.md): do not write per-session `sessionLaunchConfig`.
 - Archive and delete never delete a Session branch; only the worktree directory goes

@@ -118,6 +118,75 @@ const source = (overrides: Partial<DiscoverySource> = {}): DiscoverySource => ({
 });
 
 describe('resource discovery across MCP and CLI', () => {
+  it('marks unconfirmed catalogs as syncing instead of inventing missing configurations or capabilities', async () => {
+    const readiness = {
+      metadata: true,
+      workspace: true,
+      machines: new Map([['one' as MachineId, false]]),
+    };
+    const discovery = new ResourceDiscovery(
+      source({
+        roles: async () => [role('cold')],
+        configs: async () => [],
+        catalogReadiness: () => readiness,
+      })
+    );
+    expect((await discovery.list('agent_role')).items[0]?.availability).toEqual({
+      state: 'unknown',
+      reason: 'catalog_syncing',
+    });
+    expect(await discovery.list('agent_config')).toMatchObject({
+      items: [],
+      sync: { state: 'syncing', retryable: true },
+    });
+    await expect(discovery.get('agent_config', 'agent')).rejects.toThrow('CATALOG_SYNCING');
+    readiness.machines.set('one' as MachineId, true);
+    expect((await discovery.list('agent_role')).items[0]?.availability).toEqual({
+      state: 'unavailable',
+      reason: 'agent_config_missing',
+    });
+    await expect(discovery.get('agent_config', 'agent')).rejects.toThrow('RESOURCE_NOT_FOUND');
+  });
+
+  it('downgrades stale model and capability negatives while preserving denied machine access', async () => {
+    const readiness = {
+      metadata: false,
+      workspace: false,
+      machines: new Map([['one' as MachineId, false]]),
+    };
+    const stale = new ResourceDiscovery(
+      source({
+        roles: async () => [role('model', { runConfig: { modelId: 'new-model' } })],
+        catalogReadiness: () => readiness,
+      })
+    );
+    expect((await stale.list('agent_role')).items[0]?.availability).toEqual({
+      state: 'unknown',
+      reason: 'catalog_syncing',
+    });
+    const denied = new ResourceDiscovery(
+      source({
+        roles: async () => [role('denied')],
+        canAccess: async () => false,
+        catalogReadiness: () => readiness,
+      })
+    );
+    expect((await denied.list('agent_role')).items[0]?.availability?.reason).toBe(
+      'machine_inaccessible_or_missing'
+    );
+    const capabilities = new ResourceDiscovery(
+      source({
+        roles: async () => [role('caps')],
+        capabilities: async () => ({}),
+        catalogReadiness: () => readiness,
+      })
+    );
+    expect((await capabilities.list('agent_role')).items[0]?.availability).toEqual({
+      state: 'unknown',
+      reason: 'catalog_syncing',
+    });
+  });
+
   it('enumerates beyond 20, preserves stable continuation after insertion and rejects cursor scope changes', async () => {
     const configs = Array.from({ length: 45 }, (_, n) => config(`a-${String(n).padStart(2, '0')}`));
     const deps = source({ configs: async (id) => (id === 'one' ? configs : []) });
@@ -220,6 +289,47 @@ describe('resource discovery across MCP and CLI', () => {
     });
   });
 
+  it('checks a Role permission pin against the agent `_permission` option', async () => {
+    const discovery = new ResourceDiscovery(
+      source({
+        capabilities: async () => ({
+          // Shaped like Grok's catalog; bound to the fixture's agent config.
+          agent: {
+            cliType: 'builtin',
+            agentType: 'codex',
+            fetchedAt: 1,
+            modes: [],
+            models: [{ modelId: 'model', name: 'Model' }],
+            configOptions: [
+              {
+                id: 'permission_mode',
+                name: 'Permission Mode',
+                category: '_permission',
+                type: 'select',
+                currentValue: 'ask',
+                options: [
+                  { value: 'ask', name: 'Ask Every Time' },
+                  { value: 'always-approve', name: 'Always Approve' },
+                ],
+              },
+            ],
+          },
+        }),
+        roles: async () => [
+          role('approve', {
+            runConfig: { configOptionValues: { permission_mode: 'always-approve' } },
+          }),
+          role('retired', { runConfig: { configOptionValues: { permission_mode: 'yolo' } } }),
+        ],
+      })
+    );
+    const page = await discovery.list('agent_role');
+    expect(page.items.find((row) => row.id === 'approve')?.availability?.state).toBe('available');
+    expect(page.items.find((row) => row.id === 'retired')?.availability?.reason).toBe(
+      'mode_unavailable'
+    );
+  });
+
   it('filters Roles by their binding while retaining unavailable matches', async () => {
     const discovery = new ResourceDiscovery(
       source({ roles: async () => [role('one'), role('two', { machineId: 'two' as MachineId })] })
@@ -227,6 +337,27 @@ describe('resource discovery across MCP and CLI', () => {
     const page = await discovery.list('agent_role', { machineId: 'two' });
     expect(page.items.map((row) => row.id)).toEqual(['two']);
     expect(page.items[0]?.availability?.state).toBe('unavailable');
+  });
+
+  it('lists a multi-machine Role once per machine and returns every machine on get', async () => {
+    const both = role('both', {
+      alias: 'Both-One',
+      additionalTargets: [
+        { machineId: 'two' as MachineId, agentConfigId: 'cfg-two' as never, runConfig: {} },
+      ],
+    });
+    const discovery = new ResourceDiscovery(source({ roles: async () => [both] }));
+    const page = await discovery.list('agent_role');
+    expect(page.items.map((row) => [row.id, row.machineId, row.machineCount])).toEqual([
+      ['both', 'one', 2],
+      ['both', 'two', 2],
+    ]);
+    expect(page.items[0]?.alias).toBe('Both-One');
+    const got = await discovery.get('agent_role', 'both');
+    expect(got.targets?.map((row) => row.machineId)).toEqual(['one', 'two']);
+    expect(
+      (await discovery.list('agent_role', { machineId: 'two' })).items.map((row) => row.machineId)
+    ).toEqual(['two']);
   });
 
   it('reads GitHub-only projects independently of the local machine catalog', async () => {

@@ -93,7 +93,8 @@ function capabilityForOperation(name: string): PlatformCapability {
   if (name.startsWith('promptShortcuts:')) return 'cloudAccount';
   if (name.startsWith('billing:')) return 'billing';
   if (name.startsWith('usage:')) return 'usageAnalytics';
-  if (name.startsWith('github:')) return 'githubIntegration';
+  if (name.startsWith('github:') || name.startsWith('githubPersonalAuthorization:'))
+    return 'githubIntegration';
   if (name.startsWith('activity:')) return 'telemetry';
   if (name.startsWith('deviceAuth:') || name === 'auth:getUserById') return 'cloudAccount';
   if (name.startsWith('auth:')) return 'multiWorkspace';
@@ -234,6 +235,9 @@ export const cloudOperations = {
     ),
   },
   billing: {
+    listDeletedWorkspaceBillingAccounts: query<
+      ConvexApi['billing']['listDeletedWorkspaceBillingAccounts']
+    >('billing:listDeletedWorkspaceBillingAccounts'),
     createBillingPortalSession: action<ConvexApi['billing']['createBillingPortalSession']>(
       'billing:createBillingPortalSession'
     ),
@@ -264,6 +268,15 @@ export const cloudOperations = {
     getWorkspaceSeatInvitePreview: query<ConvexApi['billing']['getWorkspaceSeatInvitePreview']>(
       'billing:getWorkspaceSeatInvitePreview'
     ),
+    purchaseWorkspaceMemberSeat: action<ConvexApi['billing']['purchaseWorkspaceMemberSeat']>(
+      'billing:purchaseWorkspaceMemberSeat'
+    ),
+    getBillingInvoice: action<ConvexApi['billing']['getBillingInvoice']>(
+      'billing:getBillingInvoice'
+    ),
+    cancelPendingSeatInvoice: action<ConvexApi['billing']['cancelPendingSeatInvoice']>(
+      'billing:cancelPendingSeatInvoice'
+    ),
     listBillingInvoices: action<ConvexApi['billing']['listBillingInvoices']>(
       'billing:listBillingInvoices'
     ),
@@ -286,6 +299,12 @@ export const cloudOperations = {
   github: {
     createGitHubInstallState: action<ConvexApi['github']['createGitHubInstallState']>(
       'github:createGitHubInstallState'
+    ),
+    beginPersonalAuthorization: action<ConvexApi['githubPersonalAuthorization']['begin']>(
+      'githubPersonalAuthorization:begin'
+    ),
+    completePersonalAuthorization: action<ConvexApi['githubPersonalAuthorization']['complete']>(
+      'githubPersonalAuthorization:complete'
     ),
     getPersonalOperationSettings: query<ConvexApi['github']['getPersonalOperationSettings']>(
       'github:getPersonalOperationSettings'

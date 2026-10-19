@@ -9,6 +9,8 @@ export {
   createAssistantTurn,
   markTurnSeenBlocked,
   resolveEditableTail,
+  planEditableTailReplacement,
+  EditableTailRefusedError,
   type EditableTail,
   type EditableTailTurn,
 } from './planner';
@@ -19,12 +21,26 @@ export {
 } from './visible-transcript';
 
 export { createLoroSessionData, type LoroSessionData, type LoroSessionDataOptions } from './loro';
+export {
+  createRoostHistoryReader,
+  createRoostSessionData,
+  projectRoostSegments,
+  createRoostDirectoryRow,
+  ROOST_CLEAR_FIELDS_KEY,
+  type RoostHistoryChange,
+  type RoostHistoryObservation,
+  type RoostHistoryPort,
+  type RoostHistorySegment,
+  type RoostSessionData,
+  type RoostSessionDataOptions,
+} from './roost';
 
 export * from './history-import';
 
-export type { HistoryAction } from './history-actions';
+export { applyHistoryAction, historyActionTarget, type HistoryAction } from './history-actions';
 
 export {
+  findProgressMessageId,
   getOperationProgressTurnId,
   getOperationProgressTargetKey,
   buildOperationProgressContent,
@@ -32,7 +48,7 @@ export {
   type OperationProgressStatusByTarget,
 } from './operation-progress';
 
-export { readLatestTurn, readSessionHistory } from './read';
+export { readLatestTurn, readSessionHistory, selectTurnOutput } from './read';
 
 export { markAssistantTurnFinished } from './assistant-finalize';
 export * from './token-usage';

@@ -12,6 +12,11 @@ Parent AGENTS apply. Edit `AGENTS.md`, not its `CLAUDE.md` symlink. Background: 
 - A cached session renders in the frame after its click: no promise tick,
   effect-only state or deferred setState before its first cycle.
 
+## GitHub PR access
+
+- Public PR reads grant no hosted write access and never reuse authenticated
+  caches. Known repository IDs must match.
+
 ## Sharing errors
 
 - Keep error operation context independent of React progress state (which resets in
@@ -19,6 +24,16 @@ Parent AGENTS apply. Edit `AGENTS.md`, not its `CLAUDE.md` symlink. Background: 
   never display raw errors or claim a lost mutation response proves failure.
 
 ## Session, auth, and app shell
+
+- Authenticated cloud queries share one subscription/retry budget per client,
+  session and arguments. Retry only opaque server failures; return loading instead
+  of stale access rows, then throw on exhaustion. Keep auth recovery separate and
+  crash-screen recovery user initiated. [Implementation](README.md#cloud-query-recovery).
+
+- Cloud auth recovery has a per-session attempt budget and per-attempt deadline.
+  Loading/visibility transitions must not reset it; exhausted recovery requires
+  explicit retry or sign-in. Preserve mounted routes and local data.
+  [Contract](../../../../specs/auth-recovery.md).
 
 - Session ACP catalogs use the bound Provider's runtime overrides.
 
@@ -65,10 +80,7 @@ Parent AGENTS apply. Edit `AGENTS.md`, not its `CLAUDE.md` symlink. Background: 
   preserve snapshot identity across mounts.
 - Role/MCP catalog `upsert`/`remove` resolve on DURABILITY; upload runs independently
   and no surface waits for or reports it.
-- Composer MCP selection (`use-session-mcp-selection.ts`): existing Sessions keep recorded
-  ids (unrecorded = empty); new ones use target-project defaults and cannot send until the
-  room has read them. Edits are scoped per workspace/scope/project and reset in render, never
-  an effect. Project-default writes check authority in `putProjectMcpDefault`, not the UI.
+- MCP: [rules](../../../../specs/project-default-mcp.md).
 - Role filtering uses shared `listAccessibleAgentRoles` / `resolveAgentRoleAvailability`,
   never local predicates. Availability stays `unknown` until bound machine configs load;
   subscribe exactly those machines. Settings rows describe their own binding;
@@ -111,10 +123,10 @@ Parent AGENTS apply. Edit `AGENTS.md`, not its `CLAUDE.md` symlink. Background: 
   EVERY summary input goes through one leading-edge throttle whose trailing deadline
   is anchored to the last EMIT; one input left outside it restores starvation.
 - Nothing reaching the payload memo may carry a per-render identity: depend on the
-  permission candidate's key and title.
+  permission candidate's key.
 - Keep the 250ms bridge debounce.
-- Scan a pending permission request from the UNTHROTTLED list and flush the window, so
-  the alert ships promptly with it; `shownPermissionAlertKeysRef` shows one per key.
+- Pending permissions from the UNTHROTTLED list flush the window. Summaries stay
+  silent and refresh all rows; ordinary Push owns alerts.
 - Compute nothing when the feature is off: `iosLiveActivitiesEnabledAtom` and the
   native iOS shell are BOTH required and are not equivalent. Derive the activity id
   separately from that gate so the disable and unmount paths can still end an activity

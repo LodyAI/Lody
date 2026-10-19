@@ -133,6 +133,24 @@ export function useAddLocalProjectController(
           'local-project/browse-dir',
           timeoutMessage
         ),
+      createDirectory: async (machineId, args) => {
+        if (!runtime)
+          return { ok: false, errorCode: 'daemon_unavailable', message: timeoutMessage };
+        return normalizeResponse(
+          await runtime.requestLocalProjectControl(
+            {
+              type: 'local-project/create-directory',
+              machineId,
+              workspaceId: runtime.workspaceId,
+              parentPath: args.parentPath,
+              name: args.name,
+            },
+            { timeoutMs: 30_000 }
+          ),
+          'local-project/create-directory',
+          timeoutMessage
+        );
+      },
       addProject: async (machineId, args) => {
         if (!runtime) {
           return { ok: false, errorCode: 'timeout', message: timeoutMessage };

@@ -23,8 +23,19 @@ reasoning behind those rules.
 
 Attachment preparation and history publication share the final card layout;
 see [attachment rendering](../ai-gui/session-files-rendering.md#upload-to-history-continuity).
+`useSessionPendingMessages` separates ready accepted inputs into individually keyed
+UI rows and leaves attachment preparation in the trailing slot. It retains local
+bodies until matching formal history is hydrated; only real owner receipts mark
+delivery. The wrapper component keeps the standalone pending-message surface.
 
 ## Why the rules read the way they do
+
+- **Composer measurement outside layout.** `chat-composer.tsx` uses
+  `textarea-measurement.ts` to measure a hidden fixed textarea with resolved text
+  and box metrics. The live textarea receives its final height once. Resetting
+  the live height to `auto` temporarily expands the sibling conversation viewport
+  and can clamp its reading offset even if the final height does not change.
+  Empty drafts still skip measurement and use the minimum height.
 
 - **MCP as a second menu level.** The workspace MCP catalog is multi-select and
   unbounded, so it cannot sit in the footer selector row. Desktop has hover and
@@ -59,5 +70,7 @@ see [attachment rendering](../ai-gui/session-files-rendering.md#upload-to-histor
   sidebar writes a mention into the composer this layout renders, and nothing above
   it participates, so plumbing the handle up to `chat-landing.tsx` would buy
   nothing.
-- Draft ACP preparation has a longer contract that remains in the private
-  architecture context.
+
+Chat Landing no longer emits the legacy onboarding project-source, project-selection,
+or agent-selection events. Onboarding owns its route-scoped flow, step and operation
+telemetry; see [event semantics](../../../../../specs/onboarding-analytics.md).

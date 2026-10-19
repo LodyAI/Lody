@@ -2,6 +2,7 @@ import type { MessageContent, SessionHistory, SessionHistoryParsed, SessionId } 
 import {
   isEmptyAssistantIndexRow,
   resolveLastAssistantTurnIds,
+  isUnloadedTurnId,
   type ConversationView,
   type TurnIndexRow,
 } from '@/lib/conversation-view';
@@ -195,6 +196,10 @@ export function buildChatStreamItems(
   for (let turnIndex = 0; turnIndex < view.turnCount; turnIndex += 1) {
     const row = view.index(turnIndex);
     if (!row) continue;
+    // Reverse-page views keep absolute positions with sentinel rows until the
+    // user requests the older page. A sentinel is layout space, never a chat
+    // message or a placeholder that should reach the renderer.
+    if (isUnloadedTurnId(row.id)) continue;
     const entry = view.turn(turnIndex);
 
     // A leased predecessor supplies configuration even when its body is offscreen.

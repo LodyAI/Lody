@@ -326,6 +326,14 @@ export function isLocalProjectControlRequest(value: unknown): value is LocalProj
     );
   }
 
+  if (value.type === 'local-project/create-directory') {
+    return (
+      typeof value.workspaceId === 'string' &&
+      typeof value.parentPath === 'string' &&
+      typeof value.name === 'string'
+    );
+  }
+
   if (value.type === 'local-project/delete') {
     return typeof value.workspaceId === 'string' && typeof value.localProjectId === 'string';
   }
@@ -517,6 +525,10 @@ export function isLocalProjectControlResponse(
 
   if (value.type === 'local-project/browse-dir') {
     return isLocalProjectBrowseDirectoryResult(value.result);
+  }
+
+  if (value.type === 'local-project/create-directory') {
+    return isObjectRecord(value.result) && typeof value.result.path === 'string';
   }
 
   if (value.type === 'local-project/delete') {

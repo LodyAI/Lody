@@ -320,3 +320,73 @@ describe('agent role draft hydration', () => {
     });
   });
 });
+
+describe('a role on several machines', () => {
+  const multi = role({
+    alias: undefined,
+    additionalTargets: [
+      {
+        machineId: 'machine-2' as MachineId,
+        agentConfigId: 'config-2' as AgentConfigId,
+        runConfig: { modelId: 'gpt-5.6-luna' },
+        alias: 'Reviewer-Linux',
+      },
+    ],
+  });
+  const names: Record<string, string> = { 'machine-1': 'Studio', 'machine-2': 'Linux box' };
+  const targetItems = (preferred?: MachineId) =>
+    buildAgentRoleMentionItems(
+      [multi],
+      {
+        availability: () => ({ kind: 'available' }),
+        machine: (id) => ({ name: names[id] ?? id }),
+        agentConfig: () => agentConfig,
+      },
+      preferred
+    );
+
+  it('offers one row per machine, labelled by alias or name and machine', () => {
+    const rows = targetItems();
+    expect(rows.map((item) => [item.label, item.slug, item.value])).toEqual([
+      ['Code Reviewer · Studio', 'Code-Reviewer-Studio', 'role-1@machine-1'],
+      ['Reviewer-Linux', 'Reviewer-Linux', 'role-1@machine-2'],
+    ]);
+    // Each row is that machine's binding, which the detail pane and dispatch read.
+    expect(rows[1]?.role).toMatchObject({ machineId: 'machine-2', agentConfigId: 'config-2' });
+  });
+
+  it("puts the composer's own machine first", () => {
+    expect(targetItems('machine-2' as MachineId).map((item) => item.value)).toEqual([
+      'role-1@machine-2',
+      'role-1@machine-1',
+    ]);
+  });
+
+  it('names the picked machine in the instruction and on the frozen span', () => {
+    const text = 'ask @Reviewer-Linux';
+    const rewrites = buildAgentRoleMentionRewrites(
+      text,
+      [{ start: 4, end: 19, kind: 'agent_role', value: 'role-1@machine-2' }],
+      targetItems()
+    );
+    expect(rewrites[0]?.replacement).toBe(
+      'use lody mcp to create a session with agent role[id: role-1, agentRoleMachineId: machine-2, name: Code Reviewer]'
+    );
+    expect(rewrites[0]?.span?.target).toBe('role-1@machine-2');
+    // A bare id from an older draft names no machine: it stays plain text.
+    expect(
+      buildAgentRoleMentionRewrites(
+        text,
+        [{ start: 4, end: 19, kind: 'agent_role', value: 'role-1' }],
+        targetItems()
+      )
+    ).toEqual([]);
+  });
+
+  it('hydrates each machine token to its own target', () => {
+    expect(
+      hydrateAgentRoleMentionsFromText('@Reviewer-Linux and @Code-Reviewer-Studio', targetItems())
+        .values
+    ).toEqual(['role-1@machine-2', 'role-1@machine-1']);
+  });
+});

@@ -203,3 +203,33 @@ describe('session doc forward compatibility', () => {
     expect(olderDoc.toJSON().futureFeature).toEqual({ id: 'op-1', state: 'failed' });
   });
 });
+
+it('preserves a terminal projection when a pre-notification client edits the session', () => {
+  const { notification: _notification, ...oldDefinition } = sessionDocSchema.definition;
+  const newer = new Loro();
+  const current = createSessionMirror(newer);
+  const notification = {
+    id: 'a42f1111-1111-4111-8111-111111111111',
+    recipientId: 'user',
+    turnId: 'turn',
+    outcome: 'failed',
+    createdAt: 100,
+  };
+  current.setState({ notification });
+  const older = new Loro();
+  older.import(newer.export({ mode: 'snapshot' }));
+  const oldMirror = new Mirror({
+    doc: older,
+    schema: schema(oldDefinition),
+    ignoreUnknownProperties: true,
+  });
+  oldMirror.setState((state) => ({
+    ...state,
+    externalHistoryCursor: { importedTurnHashes: ['legacy-write'] },
+  }));
+  newer.import(older.export({ mode: 'update', from: newer.version() }));
+  expect(current.getState().notification).toEqual(notification);
+  expect(current.getState().externalHistoryCursor?.importedTurnHashes).toEqual(['legacy-write']);
+  oldMirror.dispose();
+  current.dispose();
+});

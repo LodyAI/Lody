@@ -58,6 +58,13 @@ control connections must have structured cleanup owned by their provider.
 - Run `pnpm format` before committing. The normal full validation command is
   `pnpm check`; use narrower type/build/static checks while iterating.
 
+## Effect lint
+
+`pnpm lint:effect` shows Effect correctness and function-style warnings and runs
+inside `pnpm check:quick` and `pnpm check`. It keeps `lint:fast` syntax-only.
+See the [Effect guide](.agents/docs/cli-effect-ts.md#effect-lint) for installation,
+file selection, and the initial advisory policy.
+
 ## Documentation
 
 Public contributor constraints belong in the nearest scoped `AGENTS.md` or a

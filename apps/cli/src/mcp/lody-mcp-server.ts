@@ -1,28 +1,35 @@
+import { turnNotificationAudience } from '@/lib/notifications/turn-notification-audience';
+import { registerAgentRoleTools } from './agent-role-tools';
+import { proposeAgentRole } from '@/lib/agent-role-proposal';
+import { batchPage } from '@/orchestration/inbox/batch-page';
+import { isSessionCollaborationStopped } from '@lody/shared';
+import { MACHINE_CATALOG_RETRY_GUIDANCE } from '@/commands/session-catalog-read';
+import { getMachineRoomId } from '@lody/shared';
+import { machineSupportsProtocolCapability, MACHINE_PROTOCOL_CAPABILITIES } from '@lody/shared';
+import { prepareSessionInputAttachments } from '@/lib/session-input-attachments';
+import { createCommandAttachmentTransfer } from '@/lib/cloud-cli-port';
 import { snapshotAgentRole, readMessageAuthor, type AgentMessageAuthor } from '@lody/shared';
 import { resolveSessionMessageAuthor } from '@/session/message-author';
-import { spawn } from 'child_process';
+import { resolveSessionLinkId } from '@lody/shared/session-link';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { createHash, randomUUID } from 'node:crypto';
 import path from 'path';
 import { McpServer } from '@modelcontextprotocol/server';
-import { StdioServerTransport } from '@modelcontextprotocol/server/stdio';
 import { Effect } from 'effect';
 import { z } from 'zod';
 import { requestSessionShare } from '@/lib/session-share-delivery';
+
 import {
   ACP_CAPABILITY_ROW_FAMILIES,
   getAcpCapabilityCacheKey,
   getMachineFlockAcpCapabilities,
   getMachineFlockDocId,
-  getWorkspaceFlockDocId,
   getServerNow,
   getSessionRoomId,
   hasAgentRunConfigSelection,
   isLoroRepoDocDeleted,
   isMachineDocRoomId,
   readMachineFlockRowsFromFlock,
-  readWorkspaceFlockRowsFromFlock,
-  listWorkspaceAgentRoles,
   type AcpCapabilityCacheEntry,
   type AgentRunConfigSelection,
   LocalSessionControlResponseSchema,
@@ -36,7 +43,10 @@ import {
   SessionImageUploadRequestSchema,
   SessionImageUploadResponseSchema,
   SessionIdSchema,
+  bindAgentRoleTarget,
   collectViewedSessionIdsFromPresence,
+  getAgentRoleTargets,
+  isMultiTargetAgentRole,
   findFreshSessionPresenceState,
   shouldBypassSessionQuota,
   type LodySessionPresenceState,
@@ -62,9 +72,6 @@ import {
   resolveProjectGitHubRepo,
   type LodyOperationItemResult,
   type SessionTurnInputConfig,
-  REVIEW_SEVERITY_VALUES,
-  REVIEW_VERDICT_VALUES,
-  ReviewSubmissionSchema,
   hasPendingUserTurnActivation,
   normalizeSessionTurnInputConfig,
 } from '@lody/shared';
@@ -86,19 +93,21 @@ import {
 } from '@/lib/command-runtime';
 import { listMergedAgentConfigs } from '@/lib/agent-config-machine-flock';
 import {
-  findReviewRunByReviewerSession,
-  syncReviewFlockOnce,
-  writeReviewRun,
-} from '@/lib/review-automation/review-automation-store';
-import { applyReviewSubmission } from '@/lib/review-automation/review-automation-submit';
+  bindAgentRoleCreateOptions,
+  composeAgentRolePrompt,
+  loadWorkspaceAgentRoleCatalog,
+} from '@/lib/agent-role-create';
 import type { LoroDocumentManager } from '@/lib/loro/doc';
 import { readMachineLocalProjects } from '@/lib/local-project-meta';
 import { listWorkspaceGitHubRepositoriesForCliToken } from '@/lib/workspace';
 import {
+  cancelSessionTurn,
   createSessionResult,
+  MachineFlockReadUnavailableError,
   readLocalProjectGitStateOnMachine,
   readSessionLiveStatusesMany,
   readSessionMachineAccess,
+  runSessionOperationWithSyncedMetadata,
   selectDefaultAgentConfigForCreate,
   resolveTurnDispatchConfig,
   readSessionMcpIdsForAuthoring,
@@ -137,10 +146,16 @@ import { captureSessionCommandEvent } from '@/commands/analytics-events';
 import { captureCli, initCliAnalytics } from '@/lib/analytics/posthog';
 import { registerDiscoveryTools } from './discovery-tools';
 import { createResourceDiscovery } from '@/lib/resource-discovery-runtime';
-import { getCliPlatformKind } from '@/lib/cli-platform';
 import { summarizeDiscoveryAgent as summarizeAgentConfig } from '@/lib/resource-discovery';
-import { SessionDiscoveryFilterShape, matchesSessionDiscovery } from '@/lib/discovery-query';
-import { getSessionCommandEnvironment } from '@/lib/session-command-environment';
+import {
+  SessionDiscoveryFilterShape,
+  matchesSessionDiscovery,
+  discoveryCursor,
+} from '@/lib/discovery-query';
+import {
+  getDaemonWorkspace,
+  getSessionCommandEnvironment,
+} from '@/lib/session-command-environment';
 import { createSessionToolRegistrar, type SessionToolHandlers } from './session-tool-router';
 
 import { registerIosSimulatorPreviewTool } from './ios-simulator-tool';
@@ -164,11 +179,14 @@ const SESSION_RENAME_TOOL_NAME = 'lody_session_rename';
 const SESSION_RENAME_MANY_TOOL_NAME = 'lody_session_rename_many';
 const OPERATION_GET_TOOL_NAME = 'lody_operation_get';
 const OPERATION_CANCEL_TOOL_NAME = 'lody_operation_cancel';
-const REVIEW_SUBMIT_TOOL_NAME = 'lody_review_submit';
 const SESSION_FILE_MAX_SIZE_MB = Math.floor(SESSION_FILE_MAX_SIZE_BYTES / (1024 * 1024));
 const SESSION_CONTROL_TIMEOUT_MS = 30_000;
-const LODY_CLI_DEFAULT_TIMEOUT_MS = 10 * 60_000;
 const MAX_MCP_SESSION_WAIT_TIMEOUT_SECONDS = 3_600;
+// Daemon-executed Session tools keep the bound the child-CLI path had; only a
+// legacy reply wait gets enough time to outlast its own maximum.
+const DAEMON_SESSION_TOOL_TIMEOUT_MS = 10 * 60_000;
+const DAEMON_SESSION_TOOL_WAIT_TIMEOUT_MS =
+  MAX_MCP_SESSION_WAIT_TIMEOUT_SECONDS * 1000 + DAEMON_SESSION_TOOL_TIMEOUT_MS;
 const MAX_MCP_COMMAND_BATCH_SIZE = 20;
 const MAX_MCP_STATUS_BATCH_SIZE = 50;
 const MAX_MCP_CREATE_OPTION_MATCHES = 20;
@@ -386,7 +404,15 @@ const McpServerIdsInputSchema = z
     'Workspace MCP ids for this turn. Omit for project defaults on create or the target conversation selection on chat; [] selects none.'
   );
 
+const InputAttachmentPathsSchema = z
+  .array(z.string().min(1))
+  .max(SESSION_FILE_MAX_COUNT)
+  .optional()
+  .describe(
+    'Files on the calling machine, absolute or relative to the calling Session workspace; must remain inside that workspace. Uploaded as input to the target Session.'
+  );
 const SessionCreateCommandInputShape = {
+  attachments: InputAttachmentPathsSchema,
   mcpServerIds: McpServerIdsInputSchema,
   deadlineSeconds: z
     .number()
@@ -394,7 +420,11 @@ const SessionCreateCommandInputShape = {
     .min(LODY_OPERATION_MIN_DEADLINE_SECONDS)
     .max(LODY_OPERATION_MAX_DEADLINE_SECONDS)
     .optional(),
-  prompt: z.string().trim().min(1).describe('Initial user prompt for the new session.'),
+  prompt: z
+    .string()
+    .trim()
+    .default('')
+    .describe('Initial user prompt; may be omitted when attachments are provided.'),
   agentRoleId: z
     .string()
     .trim()
@@ -402,6 +432,14 @@ const SessionCreateCommandInputShape = {
     .optional()
     .describe(
       'Agent Role id from the workspace catalog. When set, machine, agent config, and run config come from the current Role row.'
+    ),
+  agentRoleMachineId: z
+    .string()
+    .trim()
+    .min(1)
+    .optional()
+    .describe(
+      'Machine id of the Agent Role target to run. Required when the Role runs on several machines; otherwise must match its machine.'
     ),
   machineId: z.string().trim().min(1).optional().describe('Target machine id.'),
   agentConfigId: z.string().trim().min(1).optional().describe('Target agent config id.'),
@@ -499,7 +537,8 @@ const SessionCreateRuntimeInputSchema = z.xor([
 const SessionCreateToolInputSchema = z
   .object({
     ...SessionCreateCommandInputShape,
-    prompt: SessionCreateCommandInputShape.prompt.optional(),
+    // Preserve absence for resume: the runtime command branches apply the default.
+    prompt: z.string().trim().optional(),
     operationId: LodyOperationIdSchema.optional().describe(
       'Caller-chosen durable Operation id, or the id of an Operation to resume.'
     ),
@@ -530,6 +569,18 @@ const SessionCreateToolInputSchema = z
   })
   .strict()
   .superRefine((value, ctx) => {
+    if (value.attachments?.length && !value.operationId)
+      ctx.addIssue({
+        code: 'custom',
+        path: ['operationId'],
+        message: 'Attachments require a durable operationId',
+      });
+    if (!value.resume && !value.prompt?.trim() && !value.attachments?.length)
+      ctx.addIssue({
+        code: 'custom',
+        path: ['prompt'],
+        message: 'Text or attachments are required',
+      });
     const result = SessionCreateRuntimeInputSchema.safeParse(value);
     if (result.success) return;
     for (const issue of result.error.issues) {
@@ -550,7 +601,12 @@ const SessionChatToolInputSchema = z
       .max(LODY_OPERATION_MAX_DEADLINE_SECONDS)
       .optional(),
     sessionId: z.string().trim().min(1).describe('Target session id.'),
-    prompt: z.string().trim().min(1).describe('User prompt to append to the target session.'),
+    prompt: z
+      .string()
+      .trim()
+      .default('')
+      .describe('User prompt; may be omitted when attachments are provided.'),
+    attachments: InputAttachmentPathsSchema,
     wait: z.boolean().optional().describe('Wait for the assistant reply and return it.'),
     timeoutSeconds: z
       .number()
@@ -562,6 +618,18 @@ const SessionChatToolInputSchema = z
   })
   .strict()
   .superRefine((value, ctx) => {
+    if (value.attachments?.length && !value.operationId)
+      ctx.addIssue({
+        code: 'custom',
+        path: ['operationId'],
+        message: 'Attachments require a durable operationId',
+      });
+    if (!value.prompt && !value.attachments?.length)
+      ctx.addIssue({
+        code: 'custom',
+        path: ['prompt'],
+        message: 'Text or attachments are required',
+      });
     if (value.wait === true && value.operationId !== undefined) {
       ctx.addIssue({
         code: 'custom',
@@ -587,6 +655,12 @@ const SessionCreateBatchItemShape = {
     .min(1)
     .optional()
     .describe('Agent Role id from the workspace catalog.'),
+  agentRoleMachineId: z
+    .string()
+    .trim()
+    .min(1)
+    .optional()
+    .describe('Machine id of the Agent Role target; required for a Role on several machines.'),
   machineId: z.string().trim().min(1).optional(),
   agentConfigId: z.string().trim().min(1).optional(),
   ...SessionRunConfigInputShape,
@@ -851,7 +925,7 @@ const SessionHistoryToolInputSchema = z
       .min(1)
       .optional()
       .describe(
-        'Target session id, or current. Defaults to current. Also accepts a `session://<sessionId>` URI from a session mention link.'
+        'Target session id, or current. Defaults to current. Accepts a full lody://session/<sessionId>?workspace=<workspaceId> link (workspace must match this tool context), or a legacy session:// URI.'
       ),
     cursor: z.string().trim().min(1).optional(),
     limit: z
@@ -995,7 +1069,10 @@ const normalizeMcpError = (error: unknown) => {
   if (error instanceof LocalDaemonAvailabilityError) {
     return error.toLodyError();
   }
-  if (error instanceof WorkspaceSyncUnavailableError) {
+  if (
+    error instanceof WorkspaceSyncUnavailableError ||
+    error instanceof MachineFlockReadUnavailableError
+  ) {
     return error.toLodyError();
   }
   const machineAccessError = toMachineAccessMcpError(error);
@@ -1037,8 +1114,8 @@ const postSessionControl = async (
 const readActiveInvocationContext = async (
   ctx: McpSessionContext
 ): Promise<SessionActiveInvocationContextResult> => {
-  const environment = getSessionCommandEnvironment();
-  if (environment) return environment.host.readInvocation(ctx.sessionId);
+  const daemon = getDaemonWorkspace();
+  if (daemon) return daemon.readInvocation(ctx.sessionId);
   const response = await Effect.runPromise(
     makeLocalControlClientAuto({ socketPath: ctx.localControlSocketPath })
       .machineRpc(
@@ -1125,73 +1202,6 @@ const resolveUploadPath = (filePath: string, workdir: string): string => {
   return path.isAbsolute(trimmed) ? trimmed : path.resolve(workdir, trimmed);
 };
 
-const resolveCliEntrypoint = (): string => {
-  const entrypoint = process.argv[1];
-  if (!entrypoint) {
-    throw new Error('Cannot resolve current lody CLI entrypoint.');
-  }
-  return entrypoint;
-};
-
-const runLodyCli = async (
-  args: string[],
-  timeoutMs = LODY_CLI_DEFAULT_TIMEOUT_MS
-): Promise<{ stdout: string; stderr: string }> =>
-  await new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, [resolveCliEntrypoint(), ...args], {
-      env: process.env,
-      stdio: ['ignore', 'pipe', 'pipe'],
-      windowsHide: true,
-    });
-    const stdout: Buffer[] = [];
-    const stderr: Buffer[] = [];
-    const timeout = setTimeout(() => {
-      child.kill('SIGTERM');
-      reject(new Error(`lody ${args.join(' ')} timed out after ${timeoutMs}ms`));
-    }, timeoutMs);
-
-    child.stdout.on('data', (chunk: Buffer) => stdout.push(chunk));
-    child.stderr.on('data', (chunk: Buffer) => stderr.push(chunk));
-    child.on('error', (error) => {
-      clearTimeout(timeout);
-      reject(error);
-    });
-    child.on('close', (code, signal) => {
-      clearTimeout(timeout);
-      const stdoutText = Buffer.concat(stdout).toString('utf8');
-      const stderrText = Buffer.concat(stderr).toString('utf8');
-      if (code !== 0) {
-        reject(
-          new Error(
-            `lody ${args.join(' ')} failed${signal ? ` (${signal})` : code !== null ? ` (${code})` : ''}: ${stderrText.trim() || stdoutText.trim()}`
-          )
-        );
-        return;
-      }
-      resolve({ stdout: stdoutText, stderr: stderrText });
-    });
-  });
-
-const parseJsonCliOutput = (stdout: string): unknown => {
-  const line = stdout
-    .split(/\r?\n/)
-    .map((item) => item.trim())
-    .filter(Boolean)
-    .at(-1);
-  if (!line) {
-    throw new Error('lody CLI returned empty JSON output.');
-  }
-  return JSON.parse(line);
-};
-
-const runLodyCliJson = async (args: string[], timeoutMs?: number): Promise<unknown> =>
-  parseJsonCliOutput((await runLodyCli(args, timeoutMs)).stdout);
-
-const SESSION_URI_PREFIX = 'session://';
-
-const stripSessionUriPrefix = (value: string): string =>
-  value.startsWith(SESSION_URI_PREFIX) ? value.slice(SESSION_URI_PREFIX.length) : value;
-
 const resolveMcpSessionId = (
   sessionId: string | undefined,
   ctx: ReturnType<typeof getSessionContext>
@@ -1200,8 +1210,8 @@ const resolveMcpSessionId = (
   if (!normalized || normalized === 'current') {
     return ctx.sessionId;
   }
-  // Mentions arrive as `session://<id>`; accept that form as well as a bare id.
-  return stripSessionUriPrefix(normalized);
+  // Preserve the explicit workspace boundary when dereferencing copied links.
+  return resolveSessionLinkId(normalized, ctx.workspaceId);
 };
 
 const getMcpWorkspaceId = (ctx: ReturnType<typeof getSessionContext>) =>
@@ -1284,34 +1294,11 @@ type ResolvedMcpSessionCreate = {
   role?: AgentRole;
 };
 
-const composeAgentRolePrompt = (promptPrefix: string | undefined, prompt: string): string => {
-  const prefix = promptPrefix?.trim();
-  return prefix ? `${prefix}\n\n${prompt}` : prompt;
-};
-
-const loadWorkspaceAgentRoleCatalog = async (
-  manager: LoroDocumentManager,
-  workspaceId: WorkspaceId
-): Promise<ReadonlyMap<string, AgentRole>> => {
-  const docId = getWorkspaceFlockDocId(workspaceId);
-  await manager.syncFlockDocOrThrow(docId, {
-    timeoutMs: 10_000,
-    reason: 'mcp-agent-role-read',
-  });
-  const handle = await manager.repo.openFlockDoc(docId);
-  return new Map(
-    listWorkspaceAgentRoles(readWorkspaceFlockRowsFromFlock(handle.flock)).map((role) => [
-      role.id,
-      role,
-    ])
-  );
-};
-
 const resolveMcpSessionCreate = (
   input: SessionCreateCommandInput,
   invoking: InvokingTurnContext | undefined,
   requester: Pick<SessionMeta, 'machineId' | 'project'>,
-  role: AgentRole | undefined
+  catalogRole: AgentRole | undefined
 ): ResolvedMcpSessionCreate => {
   if (!input.agentRoleId) {
     return {
@@ -1321,10 +1308,32 @@ const resolveMcpSessionCreate = (
     };
   }
 
-  if (!role || role.id !== input.agentRoleId) {
+  if (!catalogRole || catalogRole.id !== input.agentRoleId) {
     throw new LodyOperationStoreError(
       'AGENT_ROLE_NOT_FOUND',
       `Agent Role ${input.agentRoleId} does not exist in the workspace catalog.`,
+      false
+    );
+  }
+  // The target is named, never chosen: a Role on several machines needs
+  // agentRoleMachineId, and a named machine must be one the Role runs on.
+  const targetMachines = getAgentRoleTargets(catalogRole)
+    .map((target) => target.machineId)
+    .join(', ');
+  if (!input.agentRoleMachineId && isMultiTargetAgentRole(catalogRole)) {
+    throw new LodyOperationStoreError(
+      'AGENT_ROLE_MACHINE_REQUIRED',
+      `Agent Role ${catalogRole.id} runs on several machines; pass agentRoleMachineId (one of: ${targetMachines}).`,
+      false
+    );
+  }
+  const role = input.agentRoleMachineId
+    ? bindAgentRoleTarget(catalogRole, input.agentRoleMachineId as MachineId)
+    : catalogRole;
+  if (!role) {
+    throw new LodyOperationStoreError(
+      'AGENT_ROLE_MACHINE_NOT_FOUND',
+      `Agent Role ${catalogRole.id} does not run on machine ${input.agentRoleMachineId} (machines: ${targetMachines}).`,
       false
     );
   }
@@ -1353,8 +1362,10 @@ const resolveMcpSessionCreate = (
     useCurrentSessionAsParent = true;
   }
 
+  const { agentRoleMachineId: _agentRoleMachineId, ...withoutTarget } =
+    omitAgentRoleManualOverrides(input);
   const resolvedInput = {
-    ...omitAgentRoleManualOverrides(input),
+    ...withoutTarget,
     machineId: role.machineId,
     agentConfigId: role.agentConfigId,
     ...(useCurrentSessionAsParent !== undefined ? { useCurrentSessionAsParent } : {}),
@@ -1380,6 +1391,7 @@ const buildResolvedMcpCreateCanonicalCommand = (
   ...(resolved.input.mcpServerIds !== undefined
     ? { mcpServerIds: resolved.input.mcpServerIds }
     : {}),
+  ...(resolved.input.attachments?.length ? { attachments: resolved.input.attachments } : {}),
   ...(resolved.input.machineId ? { machineId: resolved.input.machineId } : {}),
   ...(resolved.input.agentConfigId ? { agentConfigId: resolved.input.agentConfigId } : {}),
   ...(resolved.role
@@ -1395,13 +1407,6 @@ const buildResolvedMcpCreateCanonicalCommand = (
   ...(resolved.input.workContext ? { workContext: resolved.input.workContext } : {}),
   ...(deadlineSeconds !== undefined ? { deadlineSeconds } : {}),
 });
-
-const bindAgentRoleCreateOptions = (options: CreateOptions, role: AgentRole | undefined): void => {
-  if (!role) return;
-  options.agentRoleId = role.id;
-  options.agentRoleRevision = role.revision;
-  options.agentRoleSnapshot = snapshotAgentRole(role);
-};
 
 const buildMcpCreateOptions = (
   input: SessionCreateCommandInput,
@@ -1895,6 +1900,25 @@ const buildSessionList = async (input: SessionListToolInput): Promise<unknown> =
   });
 };
 
+const readMcpSessionStatusTargets = async (
+  ids: readonly string[],
+  ctx: ReturnType<typeof getSessionContext>,
+  read: (id: SessionId) => Promise<SessionMeta | undefined>
+) =>
+  Promise.all(
+    ids.map(async (rawSessionId) => {
+      let sessionId: SessionId;
+      try {
+        sessionId = resolveMcpSessionId(rawSessionId, ctx) as SessionId;
+      } catch {
+        // Status-many is ordered and independently fallible. Invalid/foreign references
+        // must neither abort valid siblings nor reach the authorized workspace reader.
+        return { sessionId: rawSessionId, session: undefined };
+      }
+      return { sessionId, session: await read(sessionId) };
+    })
+  );
+
 const buildSessionStatusMany = async (input: SessionStatusManyToolInput): Promise<unknown> => {
   assertBatchSize(input.sessionIds.length, MAX_MCP_STATUS_BATCH_SIZE);
   const ctx = getSessionContext();
@@ -1902,24 +1926,21 @@ const buildSessionStatusMany = async (input: SessionStatusManyToolInput): Promis
   const workspace = await resolveWorkspaceOrThrow(auth, getMcpWorkspaceId(ctx));
   return await withWorkspaceManager(auth, workspace, 'mcp', async (manager) => {
     await syncWorkspaceMetaForRead(manager, `mcp.session_status_many:${ctx.sessionId}`);
-    const sessions = await Promise.all(
-      input.sessionIds.map(
-        async (rawSessionId) =>
-          await readCurrentSessionMeta(manager, resolveMcpSessionId(rawSessionId, ctx) as SessionId)
-      )
+    const targets = await readMcpSessionStatusTargets(input.sessionIds, ctx, (id) =>
+      readCurrentSessionMeta(manager, id)
     );
     const liveStatuses = await readSessionLiveStatusesMany({
       auth,
       workspaceId: workspace.id as WorkspaceId,
-      sessions: sessions.filter((session): session is SessionMeta => session !== undefined),
+      sessions: targets
+        .map(({ session }) => session)
+        .filter((session): session is SessionMeta => session !== undefined),
     });
     const presence = manager.getPresenceStates() ?? {};
     const nowMs = getServerNow();
     const viewed = collectViewedSessionIdsFromPresence(presence, nowMs);
     const items = await Promise.all(
-      input.sessionIds.map(async (rawSessionId, index) => {
-        const sessionId = resolveMcpSessionId(rawSessionId, ctx) as SessionId;
-        const session = sessions[index];
+      targets.map(async ({ sessionId, session }) => {
         if (!session) {
           return {
             sessionId,
@@ -2145,6 +2166,7 @@ const toDelegatedSessionRequester = (identity: InvocationIdentity): DelegatedSes
 type InvokingTurnContext = {
   chainDepth: number;
   frozenInputConfig: SessionTurnInputConfig;
+  notificationOriginTurnIds: string[];
   identity: InvocationIdentity;
 };
 
@@ -2167,6 +2189,8 @@ type InvokingTurnSource = {
   id: string;
   userId: string;
   inputConfig: SessionTurnInputConfig;
+  notificationOriginTurnIds: string[];
+  notificationProvenancePending?: boolean;
 };
 
 const resolveInvokingTurnSource = async (): Promise<InvokingTurnSource> => {
@@ -2192,6 +2216,8 @@ const resolveInvokingTurnSource = async (): Promise<InvokingTurnSource> => {
     id: active.sourceTurnId,
     userId: active.requesterUserId,
     inputConfig,
+    notificationOriginTurnIds: active.notificationOriginTurnIds ?? [],
+    notificationProvenancePending: active.notificationProvenancePending,
   };
 };
 
@@ -2220,8 +2246,34 @@ const freezeInvokingAuthor = async (
   invoking.identity.author = author;
 };
 
-const resolveInvokingTurnContext = async (session: SessionMeta): Promise<InvokingTurnContext> => {
+const resolveInvokingTurnContext = async (
+  session: SessionMeta,
+  manager: LoroDocumentManager
+): Promise<InvokingTurnContext> => {
   const source = await resolveInvokingTurnSource();
+  const notificationOriginTurnIds = [...source.notificationOriginTurnIds];
+  if (source.notificationProvenancePending) {
+    // RPC/steer can execute before the history writer resolves input provenance.
+    // Admission must not permanently freeze that temporary unknown as delegated.
+    const doc = await manager.getOrCreateSessionDoc(session.id);
+    const input = await (await createSessionBackend(doc)).history.readTurn(source.id);
+    if (input.state !== 'ready') {
+      throw new LodyOperationStoreError(
+        'INVOKING_INPUT_NOT_READY',
+        'The invoking input is not synchronized yet. Retry this operation after synchronization.',
+        true
+      );
+    }
+    if (input.turn.role === 'user' && turnNotificationAudience(input.turn.author).kind === 'user')
+      notificationOriginTurnIds.push(source.id);
+  }
+  if (await isSessionCollaborationStopped(manager.repo, session.id)) {
+    throw new LodyOperationStoreError(
+      'COLLABORATION_STOPPED',
+      'The user stopped this conversation tree. Only the user can restore collaboration.',
+      false
+    );
+  }
   const chainDepth = source.inputConfig.chainDepth ?? 0;
   if (chainDepth >= LODY_MAX_CHAIN_DEPTH) {
     throw new LodyOperationStoreError(
@@ -2233,6 +2285,7 @@ const resolveInvokingTurnContext = async (session: SessionMeta): Promise<Invokin
   return {
     chainDepth,
     identity: buildInvocationIdentity(source),
+    notificationOriginTurnIds: [...new Set(notificationOriginTurnIds)],
     frozenInputConfig: {
       ...source.inputConfig,
       cliType: source.inputConfig.cliType ?? session.cliType,
@@ -2325,6 +2378,33 @@ const assertDifferentMcpSession = (
   if (source.id === target.id) {
     throw new Error('An MCP agent cannot send a chat prompt to its own active session.');
   }
+};
+
+const reverseChatError = (): LodyOperationStoreError =>
+  new LodyOperationStoreError(
+    'REVERSE_CHAT_FORBIDDEN',
+    'This turn was started by the target Session. Return your result in this conversation; do not send a new chat back to that Session.',
+    false
+  );
+
+/** Read only the exact input owned by the active invocation, never earlier conversation turns. */
+const readInvokingChatSender = async (
+  manager: LoroDocumentManager,
+  session: SessionMeta,
+  invoking: InvokingTurnContext
+): Promise<string | undefined> => {
+  const doc = await manager.getOrCreateSessionDoc(session.id);
+  const backend = await createSessionBackend(doc);
+  const input = await backend.history.readTurn(invoking.identity.sourceTurnId);
+  if (input.state !== 'ready') {
+    throw new LodyOperationStoreError(
+      'INVOKING_TURN_NOT_FOUND',
+      'The exact input driving this chat invocation is unavailable.',
+      false
+    );
+  }
+  const author = readMessageAuthor(input.turn.author);
+  return input.turn.role === 'user' && author?.kind === 'agent' ? author.sessionId : undefined;
 };
 
 /**
@@ -2466,7 +2546,7 @@ const buildSessionCreateOptions = async (
     if (!currentSession) {
       throw new Error(`Session not found: ${ctx.sessionId}`);
     }
-    const invoking = await resolveInvokingTurnContext(currentSession);
+    const invoking = await resolveInvokingTurnContext(currentSession, manager);
     const requesterUserId = invoking.identity.userId;
     const delegatedRequester = toDelegatedSessionRequester(invoking.identity);
     const machineEntries = await listAliveDocMetas<MachineMeta>(manager, isMachineDocRoomId);
@@ -2614,7 +2694,7 @@ const startSessionCreateOperation = async (args: SessionCreateCommandInput): Pro
         false
       );
     }
-    const invoking = await resolveInvokingTurnContext(currentSession);
+    const invoking = await resolveInvokingTurnContext(currentSession, manager);
     const roleCatalog = args.agentRoleId
       ? await loadWorkspaceAgentRoleCatalog(manager, workspace.id as WorkspaceId)
       : undefined;
@@ -2655,7 +2735,11 @@ const startSessionCreateOperation = async (args: SessionCreateCommandInput): Pro
         skipMachineAvailabilityCheck: true,
       });
     } catch (error) {
-      if (error instanceof LocalDaemonAvailabilityError) {
+      if (
+        error instanceof LocalDaemonAvailabilityError ||
+        error instanceof WorkspaceSyncUnavailableError ||
+        error instanceof MachineFlockReadUnavailableError
+      ) {
         throw error;
       }
       const machineAccessError = toMachineAccessMcpError(error);
@@ -2670,6 +2754,36 @@ const startSessionCreateOperation = async (args: SessionCreateCommandInput): Pro
     }
     const preallocatedSessionId = randomUUID() as SessionId;
     const preallocatedUserTurnId = randomUUID();
+    if (args.attachments?.length) {
+      const sourceMachine = await manager.repo.getDocMeta(
+        getMachineRoomId(ctx.machineId as MachineId)
+      );
+      if (
+        !machineSupportsProtocolCapability(
+          sourceMachine?.meta as MachineMeta | undefined,
+          MACHINE_PROTOCOL_CAPABILITIES.sessionInputAttachments
+        )
+      ) {
+        throw new Error('Update the calling machine daemon before sending input attachments');
+      }
+    }
+    const inputAttachments = await prepareSessionInputAttachments({
+      paths: args.attachments ?? [],
+      cwd: ctx.workdir,
+      containWithin: ctx.workdir,
+      workspaceId: workspace.id as WorkspaceId,
+      sessionId: preallocatedSessionId,
+      sourceMachineId: ctx.machineId as MachineId,
+      targetMachineId,
+      ...(args.attachments?.length
+        ? {
+            relay: createCommandAttachmentTransfer(
+              auth.token,
+              Boolean(getSessionCommandEnvironment())
+            ),
+          }
+        : {}),
+    });
     await freezeInvokingAuthor(manager, currentSession, invoking);
     const materializationClaimToken = randomUUID();
     const timing = operationDeadline(args.deadlineSeconds);
@@ -2683,6 +2797,7 @@ const startSessionCreateOperation = async (args: SessionCreateCommandInput): Pro
           author: invoking.identity.author,
           operationId: args.operationId!,
           kind: 'session_create',
+          ...(inputAttachments.length ? { targetInputAttachments: [inputAttachments] } : {}),
           targetRoleSnapshots: [resolved.role ? snapshotAgentRole(resolved.role) : null],
           canonicalCommand,
           frozenContinuationConfig: {
@@ -2691,6 +2806,7 @@ const startSessionCreateOperation = async (args: SessionCreateCommandInput): Pro
               : {}),
             inputConfig: invoking.frozenInputConfig,
             sourceTurnId: invoking.identity.sourceTurnId,
+            notificationOriginTurnIds: invoking.notificationOriginTurnIds,
             targetDispatchConfigs: [effectiveDispatchConfig],
           },
           initiatorChainDepth: invoking.chainDepth,
@@ -2710,6 +2826,7 @@ const startSessionCreateOperation = async (args: SessionCreateCommandInput): Pro
     if (!pendingItem.inputDurable && accepted.claimedItemIndexes.includes(0)) {
       createOptions.delegatedRequester = toDelegatedSessionRequester(invoking.identity);
       createOptions.sessionId = pendingItem.target.sessionId;
+      createOptions.inputAttachments = accepted.operation.targetInputAttachments?.[0];
       createOptions.userTurnId = pendingItem.target.userTurnId;
       createOptions.chainDepth = invoking.chainDepth + 1;
       let result;
@@ -2775,11 +2892,12 @@ const startSessionChatOperation = async (args: SessionChatToolInput): Promise<un
         false
       );
     }
-    const invoking = await resolveInvokingTurnContext(currentSession);
+    const invoking = await resolveInvokingTurnContext(currentSession, manager);
     const canonicalCommand = {
       sessionId: args.sessionId,
       prompt: args.prompt,
       ...(args.mcpServerIds !== undefined ? { mcpServerIds: args.mcpServerIds } : {}),
+      ...(args.attachments?.length ? { attachments: args.attachments } : {}),
       ...(args.deadlineSeconds !== undefined ? { deadlineSeconds: args.deadlineSeconds } : {}),
     };
     const retry = await withOperationStore((store) =>
@@ -2795,6 +2913,8 @@ const startSessionChatOperation = async (args: SessionChatToolInput): Promise<un
     if (retry) {
       return await withOperationStore((store) => store.snapshot(retry));
     }
+    const senderSessionId = await readInvokingChatSender(manager, currentSession, invoking);
+    if (args.sessionId === senderSessionId) throw reverseChatError();
     const targetSession = await readCurrentSessionMeta(manager, args.sessionId as SessionId);
     if (!targetSession) {
       throw new LodyOperationStoreError(
@@ -2835,6 +2955,36 @@ const startSessionChatOperation = async (args: SessionChatToolInput): Promise<un
       ),
     };
     const preallocatedUserTurnId = randomUUID();
+    if (args.attachments?.length) {
+      const sourceMachine = await manager.repo.getDocMeta(
+        getMachineRoomId(ctx.machineId as MachineId)
+      );
+      if (
+        !machineSupportsProtocolCapability(
+          sourceMachine?.meta as MachineMeta | undefined,
+          MACHINE_PROTOCOL_CAPABILITIES.sessionInputAttachments
+        )
+      ) {
+        throw new Error('Update the calling machine daemon before sending input attachments');
+      }
+    }
+    const inputAttachments = await prepareSessionInputAttachments({
+      paths: args.attachments ?? [],
+      cwd: ctx.workdir,
+      containWithin: ctx.workdir,
+      workspaceId: workspace.id as WorkspaceId,
+      sessionId: targetSession.id,
+      sourceMachineId: ctx.machineId as MachineId,
+      targetMachineId: targetSession.machineId,
+      ...(args.attachments?.length
+        ? {
+            relay: createCommandAttachmentTransfer(
+              auth.token,
+              Boolean(getSessionCommandEnvironment())
+            ),
+          }
+        : {}),
+    });
     await freezeInvokingAuthor(manager, currentSession, invoking);
     const materializationClaimToken = randomUUID();
     const timing = operationDeadline(args.deadlineSeconds);
@@ -2848,6 +2998,7 @@ const startSessionChatOperation = async (args: SessionChatToolInput): Promise<un
           author: invoking.identity.author,
           operationId: args.operationId!,
           kind: 'session_chat',
+          ...(inputAttachments.length ? { targetInputAttachments: [inputAttachments] } : {}),
           canonicalCommand,
           frozenContinuationConfig: {
             ...(currentSession.agentConfigId
@@ -2856,6 +3007,7 @@ const startSessionChatOperation = async (args: SessionChatToolInput): Promise<un
             inputConfig: invoking.frozenInputConfig,
             sourceTurnId: invoking.identity.sourceTurnId,
             targetDispatchConfigs: [targetDispatchConfig],
+            notificationOriginTurnIds: invoking.notificationOriginTurnIds,
           },
           initiatorChainDepth: invoking.chainDepth,
           ...timing,
@@ -2885,7 +3037,8 @@ const startSessionChatOperation = async (args: SessionChatToolInput): Promise<un
           userTurnId: pendingItem.target.userTurnId,
           chainDepth: invoking.chainDepth + 1,
         },
-        toDelegatedSessionRequester(invoking.identity)
+        toDelegatedSessionRequester(invoking.identity),
+        { attachments: accepted.operation.targetInputAttachments?.[0] }
       );
       if (result.userTurnId !== pendingItem.target.userTurnId) {
         throw new Error('Chat result did not preserve the preallocated target turn id.');
@@ -3001,19 +3154,22 @@ const renameSessionItems = async (
   });
 };
 
-const buildOperationTargetCancelArgs = (
-  workspaceId: string,
-  item: Extract<LodyOperationItemResult, { status: 'active' }>
-): string[] => [
-  'session',
-  'cancel',
-  '--workspace',
-  workspaceId,
-  '--json',
-  '--turn-id',
-  `assistant:${item.target.userTurnId}`,
-  item.target.sessionId,
-];
+/** Cancel through the daemon's workspace replica, never a child CLI with its own. */
+const cancelSessionTurnForMcp = async (sessionId: SessionId, turnId?: string) => {
+  const ctx = getSessionContext();
+  const auth = getCliAuthContextOrThrow('mcp');
+  const workspace = await resolveWorkspaceOrThrow(auth, getMcpWorkspaceId(ctx));
+  return await withWorkspaceManager(auth, workspace, 'mcp', (manager) =>
+    cancelSessionTurn({
+      auth,
+      workspaceId: workspace.id as WorkspaceId,
+      manager,
+      sessionId,
+      turnId,
+      operationCancel: true,
+    })
+  );
+};
 
 const batchFailure = (
   code: string,
@@ -3059,7 +3215,7 @@ const startSessionCreateManyOperation = async (
       );
     }
     const expanded = args.items.map((item) => ({ ...(args.defaults ?? {}), ...item }));
-    const invoking = await resolveInvokingTurnContext(requester);
+    const invoking = await resolveInvokingTurnContext(requester, manager);
     const roleCatalog = expanded.some((item) => Boolean(item.agentRoleId))
       ? await loadWorkspaceAgentRoleCatalog(manager, workspace.id as WorkspaceId)
       : undefined;
@@ -3070,6 +3226,7 @@ const startSessionCreateManyOperation = async (
           operationId: args.operationId,
           prompt: item.prompt,
           ...(item.agentRoleId ? { agentRoleId: item.agentRoleId } : {}),
+          ...(item.agentRoleMachineId ? { agentRoleMachineId: item.agentRoleMachineId } : {}),
           ...(item.machineId ? { machineId: item.machineId } : {}),
           ...(item.agentConfigId ? { agentConfigId: item.agentConfigId } : {}),
           ...buildMcpRunConfigCanonicalCommand(item),
@@ -3202,6 +3359,23 @@ const startSessionCreateManyOperation = async (
             dispatchConfig: effectiveDispatchConfig,
           };
         } catch (error) {
+          if (
+            error instanceof WorkspaceSyncUnavailableError ||
+            error instanceof MachineFlockReadUnavailableError
+          ) {
+            const syncError = error.toLodyError();
+            const itemContext = `Create item ${index + 1}${label ? ` (${JSON.stringify(label.slice(0, 120))})` : ''}`;
+            const message = `${itemContext}: ${syncError.message}`;
+            // Retryable uncertainty aborts before any item is accepted. A
+            // permanent/unknown failure belongs to this item, not its siblings.
+            if (syncError.retryable) {
+              throw new LodyOperationStoreError(syncError.code, message, true);
+            }
+            return {
+              operationItem: batchFailure(syncError.code, message, false, label),
+              dispatchConfig: null,
+            };
+          }
           if (error instanceof LocalDaemonAvailabilityError) {
             return {
               operationItem: batchFailure(error.code, error.message, error.retryable, label),
@@ -3250,6 +3424,7 @@ const startSessionCreateManyOperation = async (
             ...(requester.agentConfigId ? { agentConfigId: requester.agentConfigId } : {}),
             inputConfig: invoking.frozenInputConfig,
             sourceTurnId: invoking.identity.sourceTurnId,
+            notificationOriginTurnIds: invoking.notificationOriginTurnIds,
             targetDispatchConfigs,
           },
           initiatorChainDepth: invoking.chainDepth,
@@ -3355,7 +3530,7 @@ const startSessionChatManyOperation = async (args: SessionChatManyToolInput): Pr
       );
     }
     const expanded = args.items.map((item) => ({ ...(args.defaults ?? {}), ...item }));
-    const invoking = await resolveInvokingTurnContext(requester);
+    const invoking = await resolveInvokingTurnContext(requester, manager);
     const canonicalCommand = {
       items: expanded,
       ...(args.deadlineSeconds !== undefined ? { deadlineSeconds: args.deadlineSeconds } : {}),
@@ -3373,6 +3548,10 @@ const startSessionChatManyOperation = async (args: SessionChatManyToolInput): Pr
     if (retry) {
       return await withOperationStore((store) => store.snapshot(retry));
     }
+    const senderSessionId = await readInvokingChatSender(manager, requester, invoking);
+    if (senderSessionId && expanded.every((item) => item.sessionId === senderSessionId)) {
+      throw reverseChatError();
+    }
     const machineLiveness = makeMachineLivenessLookupForMcp(manager, ctx);
     const initialItems = await mapWithConcurrency(
       expanded,
@@ -3385,6 +3564,10 @@ const startSessionChatManyOperation = async (args: SessionChatManyToolInput): Pr
             false,
             item.label
           );
+        }
+        if (item.sessionId === senderSessionId) {
+          const error = reverseChatError();
+          return batchFailure(error.code, error.message, error.retryable, item.label);
         }
         const target = await readCurrentSessionMeta(manager, item.sessionId as SessionId);
         if (!target) {
@@ -3469,6 +3652,7 @@ const startSessionChatManyOperation = async (args: SessionChatManyToolInput): Pr
             inputConfig: invoking.frozenInputConfig,
             sourceTurnId: invoking.identity.sourceTurnId,
             targetDispatchConfigs,
+            notificationOriginTurnIds: invoking.notificationOriginTurnIds,
           },
           initiatorChainDepth: invoking.chainDepth,
           ...timing,
@@ -3543,57 +3727,6 @@ const startSessionChatManyOperation = async (args: SessionChatManyToolInput): Pr
   });
 };
 
-/**
- * Mirrors `ReviewSubmissionSchema` as a plain object so the MCP SDK can publish
- * the JSON Schema. The shared schema's `superRefine` (a blocking finding must
- * carry a failure scenario) is re-applied on the parsed value below: a refinement
- * does not survive JSON Schema generation, but it is the one rule that keeps a
- * reviewer from labelling every opinion blocking, so it is enforced anyway.
- */
-const ReviewSubmitToolInputSchema = z
-  .object({
-    verdict: z
-      .enum(REVIEW_VERDICT_VALUES)
-      .describe('`approve` only when nothing blocking remains.'),
-    findings: z
-      .array(
-        z.object({
-          file: z.string().trim().min(1),
-          line: z.number().int().positive().optional(),
-          severity: z.enum(REVIEW_SEVERITY_VALUES),
-          title: z.string().trim().min(1).max(200),
-          detail: z.string().trim().min(1).max(4000),
-          failureScenario: z
-            .string()
-            .trim()
-            .max(2000)
-            .optional()
-            .describe(
-              'Required for blocking findings: specific inputs or state, and the wrong result they produce.'
-            ),
-        })
-      )
-      .max(100)
-      .optional(),
-    resolutions: z
-      .array(
-        z.object({
-          findingId: z.string().trim().min(1),
-          state: z.enum(['resolved', 'unresolved', 'disputed']),
-          note: z.string().trim().max(2000).optional(),
-        })
-      )
-      .max(100)
-      .optional()
-      .describe(
-        'Verdict on each previously raised finding. Use `disputed` to escalate to a human.'
-      ),
-    summary: z.string().trim().max(2000).optional(),
-  })
-  .strict();
-
-type ReviewSubmitToolInput = z.infer<typeof ReviewSubmitToolInputSchema>;
-
 export const __lodyMcpServerInternals = {
   FeedbackToolInputSchema,
   FileUploadToolInputSchema,
@@ -3626,11 +3759,12 @@ export const __lodyMcpServerInternals = {
   applySessionRenameItems,
   persistSessionRenameItems,
   buildInvocationIdentity,
-  buildOperationTargetCancelArgs,
   summarizeProjectRefForMcp,
   resolveSessionExecutionSnapshot,
   readSessionExecutionSnapshot,
   makeMachineLivenessLookupForMcp,
+  startSessionCreateOperation,
+  startSessionCreateManyOperation,
   startSessionChatOperation,
   startSessionChatManyOperation,
   getSessionContext,
@@ -3643,7 +3777,16 @@ export const __lodyMcpServerInternals = {
   truncateUtf8HeadTail,
   SESSION_CONTROL_TIMEOUT_MS,
   resolveMcpSessionId,
+  readMcpSessionStatusTargets,
 };
+
+const SESSION_COLLABORATION_GUIDANCE = [
+  'Send inter-session messages only when they advance the user task with actionable work, a necessary question, or material new information.',
+  'Do not send acknowledgment-only, thank-you, goodbye, redundant status, or repeated completion messages; do not ask another agent to acknowledge receipt.',
+  'Delegated work returns its result automatically. Finish with your result in your own conversation instead of sending the same result back through a session tool. On receiving a completion, follow up only if substantive work remains; otherwise report to the user and stop.',
+  'During a turn started by another Session, do not send a new chat back to that sender. REVERSE_CHAT_FORBIDDEN is not retryable; finish with your result instead.',
+  `The causal delegation chain is limited to ${LODY_MAX_CHAIN_DEPTH} hops. If CHAIN_DEPTH_EXCEEDED is returned, stop delegating and report the remaining work to the user; do not retry or create another session to evade the limit.`,
+].join(' ');
 
 export function buildLodyMcpServer(): McpServer {
   return buildSessionToolServer();
@@ -3661,19 +3804,22 @@ export function buildSessionToolServer(handlers?: SessionToolHandlers): McpServe
     },
     {
       instructions: [
-        'Session mentions in user messages may appear as markdown links of the form [@Title](session://<sessionId>).',
-        'To read that conversation, call lody_session_history with sessionId set to the <sessionId> (the part after session://), or pass the full session:// URI.',
+        'Session mentions use [@Title](lody://session/<sessionId>?workspace=<workspaceId>); old transcripts may use session://<sessionId>.',
+        'To read that conversation, pass the full URI as sessionId to lody_session_history. The workspace must match this tool context. Bare session IDs are also accepted; use the exact child session ID to read a child conversation.',
         'Paginate with nextCursor when you need older turns.',
+        SESSION_COLLABORATION_GUIDANCE,
       ].join(' '),
     }
   );
   registerScheduleTools(server, {
     execute: async (command) => {
       const ctx = getSessionContext();
-      const { sendScheduleCommand } = await import('@/lib/schedules/schedule-command-client');
-      return sendScheduleCommand(command, {
-        workspace: getMcpWorkspaceId(ctx),
-        requesterSessionId: ctx.sessionId,
+      const { sendDaemonScheduleCommand } = await import('@/lib/schedules/schedule-command-client');
+      return sendDaemonScheduleCommand(command, {
+        machineId: ctx.machineId,
+        workspaceId: ctx.workspaceId,
+        requesterSessionId: ctx.sessionId as SessionId,
+        socketPath: ctx.localControlSocketPath,
       });
     },
   });
@@ -3681,7 +3827,9 @@ export function buildSessionToolServer(handlers?: SessionToolHandlers): McpServe
   const registerSessionTool = createSessionToolRegistrar(
     server,
     async (name, args, execute) => {
-      if (getCliPlatformKind() !== 'local' || getSessionCommandEnvironment()) return execute();
+      // Session tools run against the daemon's workspace replica in every
+      // composition; an MCP process never opens a second one.
+      if (getDaemonWorkspace()) return execute();
       try {
         const ctx = getSessionContext();
         const outcome = await Effect.runPromise(
@@ -3698,12 +3846,17 @@ export function buildSessionToolServer(handlers?: SessionToolHandlers): McpServe
                   arguments: z.record(z.string(), z.json()).parse(args),
                 },
               },
-              { timeoutMs: SESSION_CONTROL_TIMEOUT_MS }
+              {
+                timeoutMs:
+                  typeof args === 'object' && args !== null && 'wait' in args && args.wait === true
+                    ? DAEMON_SESSION_TOOL_WAIT_TIMEOUT_MS
+                    : DAEMON_SESSION_TOOL_TIMEOUT_MS,
+              }
             )
-            .pipe(Effect.either)
+            .pipe(Effect.result)
         );
-        if (outcome._tag === 'Left') throw classifyLocalDaemonIpcError(outcome.left);
-        const response = outcome.right;
+        if (outcome._tag === 'Failure') throw classifyLocalDaemonIpcError(outcome.failure);
+        const response = outcome.success;
         if (!response.ok) throw new Error(response.error);
         if (!('type' in response.result) || response.result.type !== 'session/tool-result')
           throw new Error('Unexpected Session tool response');
@@ -3713,6 +3866,39 @@ export function buildSessionToolServer(handlers?: SessionToolHandlers): McpServe
       }
     },
     handlers
+  );
+
+  registerAgentRoleTools(
+    registerSessionTool,
+    async (command) => {
+      const ctx = getSessionContext();
+      const source = await resolveInvokingTurnSource();
+      const auth = getCliAuthContextOrThrow('mcp');
+      const workspace = await resolveWorkspaceOrThrow(auth, getMcpWorkspaceId(ctx));
+      return withWorkspaceManager(auth, workspace, 'agent-role-proposal', async (manager) =>
+        proposeAgentRole({
+          manager,
+          workspaceId: workspace.id as WorkspaceId,
+          sessionId: ctx.sessionId,
+          userId: source.userId,
+          command,
+          localOnly: !!getSessionCommandEnvironment(),
+          validateTarget: async (machineId, agentConfigId) => {
+            const discovery = await createResourceDiscovery({
+              manager,
+              auth,
+              workspaceId: workspace.id as WorkspaceId,
+              delegatedRequester: { userId: source.userId },
+              requireFreshCatalogs: true,
+            });
+            const config = await discovery.get('agent_config', agentConfigId, machineId);
+            if (config.item.machineId !== machineId)
+              throw new Error('Agent configuration does not belong to the selected machine');
+          },
+        })
+      );
+    },
+    mcpErrorResult
   );
 
   registerDiscoveryTools(registerSessionTool, async (read) => {
@@ -3804,7 +3990,7 @@ export function buildSessionToolServer(handlers?: SessionToolHandlers): McpServe
     }
   );
 
-  server.registerTool(
+  registerSessionTool(
     MCP_CONFIGURE_TOOL_NAME,
     {
       title: 'Configure a workspace MCP server',
@@ -4032,7 +4218,10 @@ export function buildSessionToolServer(handlers?: SessionToolHandlers): McpServe
     {
       title: 'Create a Lody session',
       description:
-        'Start durable asynchronous work that creates a Lody session. Supply operationId; the result arrives automatically as a continuation, so do not poll operation_get. To use an Agent Role, pass agentRoleId; the current workspace catalog row supplies the exact Machine, Agent config, model, reasoning, and permission mode. If manual machine or run-config fields are also present, the Role takes precedence and those fields are ignored. A Role may run on any Machine the owner of this Machine can use; to work in a project there, pass workContext for a local project on that Machine (find it with lody_session_create_options machineId + localProjectQuery). Without workContext a Role on another Machine starts as a plain chat there. To recover an already accepted create without resending its prompt, send only operationId with resume=true. useCurrentSessionAsParent=true and workContext are mutually exclusive schema branches. Machine/config ids and runConfig values for non-Role creates come from lody_session_create_options. The wait field is temporary legacy compatibility only.',
+        'Start durable asynchronous work that creates a Lody session. Supply operationId; results are queued and batched after a normal turn release, or with your next user input, so do not poll operation_get. To use an Agent Role, pass agentRoleId; the current workspace catalog row supplies the exact Machine, Agent config, model, reasoning, and permission mode. A Role that runs on several machines also needs agentRoleMachineId naming the target machine. If manual machine or run-config fields are also present, the Role takes precedence and those fields are ignored. A Role may run on any Machine the owner of this Machine can use; to work in a project there, pass workContext for a local project on that Machine (find it with lody_session_create_options machineId + localProjectQuery). Without workContext a Role on another Machine starts as a plain chat there. To recover an already accepted create without resending its prompt, send only operationId with resume=true. useCurrentSessionAsParent=true and workContext are mutually exclusive schema branches. Machine/config ids and runConfig values for non-Role creates come from lody_session_create_options. The wait field is temporary legacy compatibility only. ' +
+        SESSION_COLLABORATION_GUIDANCE +
+        ' For retryable Machine catalog SYNC_UNAVAILABLE errors:' +
+        MACHINE_CATALOG_RETRY_GUIDANCE,
       inputSchema: SessionCreateToolInputSchema,
     },
     async (input) => {
@@ -4056,7 +4245,7 @@ export function buildSessionToolServer(handlers?: SessionToolHandlers): McpServe
           if (!currentSession) {
             throw new Error(`Session not found: ${ctx.sessionId}`);
           }
-          const invoking = await resolveInvokingTurnContext(currentSession);
+          const invoking = await resolveInvokingTurnContext(currentSession, manager);
           const roleCatalog = args.agentRoleId
             ? await loadWorkspaceAgentRoleCatalog(manager, workspace.id as WorkspaceId)
             : undefined;
@@ -4127,7 +4316,10 @@ export function buildSessionToolServer(handlers?: SessionToolHandlers): McpServe
     {
       title: 'Send a prompt to a Lody session',
       description:
-        'Start durable asynchronous work by appending a prompt to another authorized online Lody session. Supply operationId; the tool returns immediately and completion arrives automatically as a continuation, so do not poll operation_get in a loop. The wait field is temporary legacy compatibility only.',
+        'Start durable asynchronous work by appending a prompt to another authorized online Lody session. Supply operationId; the tool returns immediately and results are queued and batched after a normal turn release, or with your next user input, so do not poll operation_get in a loop. The wait field is temporary legacy compatibility only. ' +
+        SESSION_COLLABORATION_GUIDANCE +
+        ' For retryable Machine catalog SYNC_UNAVAILABLE errors:' +
+        MACHINE_CATALOG_RETRY_GUIDANCE,
       inputSchema: SessionChatToolInputSchema,
     },
     async (args: SessionChatToolInput) => {
@@ -4150,7 +4342,10 @@ export function buildSessionToolServer(handlers?: SessionToolHandlers): McpServe
             throw new Error(`Session not found: ${sessionId}`);
           }
           assertDifferentMcpSession(currentSession, targetSession);
-          const invoking = await resolveInvokingTurnContext(currentSession);
+          const invoking = await resolveInvokingTurnContext(currentSession, manager);
+          if (sessionId === (await readInvokingChatSender(manager, currentSession, invoking))) {
+            throw reverseChatError();
+          }
           await freezeInvokingAuthor(manager, currentSession, invoking);
           const result = await sendSessionChatResult(
             auth,
@@ -4193,7 +4388,10 @@ export function buildSessionToolServer(handlers?: SessionToolHandlers): McpServe
     {
       title: 'Create multiple Lody sessions',
       description:
-        'Start one durable batch Operation for 1-20 Session creates. defaults and items shallow-merge; nested objects replace wholesale. Each item may use an agentRoleId from the workspace catalog. When a Role item also includes manual machine, agent config, or run-config fields, the Role takes precedence and those fields are ignored. Non-Role items accept modeId, configOptionValues, modelId, reasoningEffort, fastMode, and planMode using target advertised capabilities from lody_session_create_options. Explicit permissions may be broader than the parent; choose only within the user authorization granted to the caller. Ordered item failures are isolated. Completion arrives automatically as one continuation, so do not poll operation_get in a loop.',
+        'Start one durable batch Operation for 1-20 Session creates. defaults and items shallow-merge; nested objects replace wholesale. Each item may use an agentRoleId from the workspace catalog. When a Role item also includes manual machine, agent config, or run-config fields, the Role takes precedence and those fields are ignored. Non-Role items accept modeId, configOptionValues, modelId, reasoningEffort, fastMode, and planMode using target advertised capabilities from lody_session_create_options. Explicit permissions may be broader than the parent; choose only within the user authorization granted to the caller. Ordered item failures are isolated. Results are queued and batched after a normal turn release, or with your next user input, so do not poll operation_get in a loop. ' +
+        SESSION_COLLABORATION_GUIDANCE +
+        ' For retryable Machine catalog SYNC_UNAVAILABLE errors:' +
+        MACHINE_CATALOG_RETRY_GUIDANCE,
       inputSchema: SessionCreateManyToolInputSchema,
     },
     async (input) => {
@@ -4211,7 +4409,10 @@ export function buildSessionToolServer(handlers?: SessionToolHandlers): McpServe
     {
       title: 'Chat multiple Lody sessions',
       description:
-        'Start one durable batch Operation for 1-20 Session chats. defaults and items shallow-merge; nested objects replace wholesale. Ordered item failures are isolated. Completion arrives automatically as one continuation, so do not poll operation_get in a loop.',
+        'Start one durable batch Operation for 1-20 Session chats. defaults and items shallow-merge; nested objects replace wholesale. Ordered item failures are isolated. Results are queued and batched after a normal turn release, or with your next user input, so do not poll operation_get in a loop. ' +
+        SESSION_COLLABORATION_GUIDANCE +
+        ' For retryable Machine catalog SYNC_UNAVAILABLE errors:' +
+        MACHINE_CATALOG_RETRY_GUIDANCE,
       inputSchema: SessionChatManyToolInputSchema,
     },
     async (args: SessionChatManyToolInput) => {
@@ -4235,24 +4436,15 @@ export function buildSessionToolServer(handlers?: SessionToolHandlers): McpServe
         const ctx = getSessionContext();
         const auth = getCliAuthContextOrThrow('mcp');
         await resolveWorkspaceOrThrow(auth, getMcpWorkspaceId(ctx));
+        const sessionId = resolveMcpSessionId(args.sessionId, ctx) as SessionId;
         const environment = getSessionCommandEnvironment();
         if (environment) {
-          const sessionId = resolveMcpSessionId(args.sessionId, ctx) as SessionId;
           const session = await readCurrentSessionMeta(environment.manager, sessionId);
           if (!session || session.machineId !== auth.machineId)
             throw new Error('Session not found on this machine');
           return jsonTextResult(await environment.host.cancelSession(sessionId));
         }
-        return jsonTextResult(
-          await runLodyCliJson([
-            'session',
-            'cancel',
-            '--workspace',
-            getMcpWorkspaceId(ctx),
-            '--json',
-            args.sessionId,
-          ])
-        );
+        return jsonTextResult(await cancelSessionTurnForMcp(sessionId));
       } catch (error) {
         return mcpErrorResult(error);
       }
@@ -4263,7 +4455,7 @@ export function buildSessionToolServer(handlers?: SessionToolHandlers): McpServe
     'lody_operation_list',
     {
       description:
-        'List durable Operation summaries owned by the current Session and invoking user. Optional state filter and keyset pagination. Completion is automatic; do not poll.',
+        'List durable Operation summaries owned by the current Session and invoking user. Optional state filter and keyset pagination. Completion is saved immediately and delivered at the next permitted input boundary; do not poll.',
       inputSchema: OperationListQuerySchema,
       annotations: { readOnlyHint: true },
     },
@@ -4290,11 +4482,72 @@ export function buildSessionToolServer(handlers?: SessionToolHandlers): McpServe
   );
 
   registerSessionTool(
+    'lody_operation_batch_get',
+    {
+      title: 'Read completed work batch',
+      description:
+        'Read a fixed batch of completed Operation results for the invoking Session and user. Page omitted results without starting another task. Oversized members are returned as member-json fragments; concatenate jsonChunk in offset order and parse once complete.',
+      annotations: { readOnlyHint: true },
+      inputSchema: z
+        .object({
+          batchId: z.string().uuid(),
+          cursor: z.string().max(2048).optional(),
+          limit: z.number().int().min(1).max(50).default(20),
+        })
+        .strict(),
+    },
+    async (args) => {
+      try {
+        const ctx = getSessionContext();
+        const invoking = await resolveInvokingTurnSource();
+        return jsonTextResult(
+          await withOperationStore((store) => {
+            const scope = {
+              workspaceId: getMcpWorkspaceId(ctx),
+              sessionId: ctx.sessionId,
+              userId: invoking.userId,
+            };
+            const batch = store.inbox.getBatch(args.batchId, scope);
+            if (!batch)
+              throw new LodyOperationStoreError('BATCH_NOT_FOUND', 'Batch not found.', false);
+            const page = discoveryCursor(
+              { cursor: args.cursor, limit: args.limit },
+              JSON.stringify([scope, args.batchId])
+            );
+            const position = page.after?.split(':') ?? ['0', '0'];
+            if (position.length !== 2) throw new Error('Invalid batch cursor');
+            const after = z.coerce.number().int().nonnegative().parse(position[0]);
+            const offset = z.coerce.number().int().nonnegative().parse(position[1]);
+            const candidates = store.inbox.members(
+              batch,
+              offset ? after - 1 : after,
+              page.limit + 1
+            );
+            if (offset && candidates[0]?.sequence !== after)
+              throw new Error('Invalid batch content cursor');
+            const { items, hasMore, next } = batchPage(candidates, page.limit, offset);
+            return {
+              batchId: batch.batchId,
+              total: batch.memberCount,
+              state: batch.state,
+              items,
+              hasMore,
+              ...(next ? { nextCursor: page.encode(next) } : {}),
+            };
+          })
+        );
+      } catch (error) {
+        return mcpErrorResult(error);
+      }
+    }
+  );
+
+  registerSessionTool(
     OPERATION_GET_TOOL_NAME,
     {
       title: 'Get a Lody Operation snapshot',
       description:
-        'Return one durable Operation owned by the current Session. Completion is delivered automatically; use this for an occasional snapshot, not polling loops.',
+        'Return one durable Operation owned by the current Session. Completion is saved immediately and delivered at the next permitted input boundary; use this for an occasional snapshot, not polling loops.',
       inputSchema: OperationGetToolInputSchema,
     },
     async (args: OperationGetToolInput) => {
@@ -4337,7 +4590,10 @@ export function buildSessionToolServer(handlers?: SessionToolHandlers): McpServe
               item.status === 'active'
                 ? environment
                   ? environment.host.cancelSession(item.target.sessionId, item.target.userTurnId)
-                  : runLodyCliJson(buildOperationTargetCancelArgs(getMcpWorkspaceId(ctx), item))
+                  : cancelSessionTurnForMcp(
+                      item.target.sessionId,
+                      `assistant:${item.target.userTurnId}`
+                    )
                 : Promise.resolve()
             )
           );
@@ -4391,7 +4647,7 @@ export function buildSessionToolServer(handlers?: SessionToolHandlers): McpServe
     }
   );
 
-  server.registerTool(
+  registerSessionTool(
     SESSION_ARCHIVE_TOOL_NAME,
     {
       title: 'Archive a Lody session',
@@ -4400,24 +4656,24 @@ export function buildSessionToolServer(handlers?: SessionToolHandlers): McpServe
       inputSchema: SessionArchiveToolInputSchema,
     },
     async (args: SessionArchiveToolInput) => {
+      let sessionId = args.sessionId;
       try {
         const ctx = getSessionContext();
         const auth = getCliAuthContextOrThrow('mcp');
-        await resolveWorkspaceOrThrow(auth, getMcpWorkspaceId(ctx));
-        return jsonTextResult(
-          await runLodyCliJson([
-            'session',
-            'archive',
-            '--workspace',
-            getMcpWorkspaceId(ctx),
-            '--json',
-            args.sessionId,
-          ])
+        const workspace = await resolveWorkspaceOrThrow(auth, getMcpWorkspaceId(ctx));
+        sessionId = resolveMcpSessionId(args.sessionId, ctx);
+        const archivedChildSessionIds = await withWorkspaceManager(
+          auth,
+          workspace,
+          'mcp',
+          (manager) =>
+            runSessionOperationWithSyncedMetadata(manager, sessionId as SessionId, 'archive')
         );
+        return jsonTextResult({ ok: true, sessionId, archivedChildSessionIds });
       } catch (error) {
         const message = formatMcpErrorMessage(error);
         if (message.includes('already archived')) {
-          return jsonTextResult({ ok: true, sessionId: args.sessionId });
+          return jsonTextResult({ ok: true, sessionId });
         }
         return mcpErrorResult(error);
       }
@@ -4462,7 +4718,7 @@ export function buildSessionToolServer(handlers?: SessionToolHandlers): McpServe
     SESSION_HISTORY_TOOL_NAME,
     {
       title: 'Read Lody session history',
-      description: `Read one bounded visible transcript page, oldest-to-newest. Use this for [@Title](session://<sessionId>) mention links: pass sessionId as the <sessionId> or the full session:// URI. Omit cursor for the newest page; nextCursor reads older entries. Defaults to ${DEFAULT_MCP_SESSION_HISTORY_LIMIT}, max ${MAX_MCP_SESSION_HISTORY_LIMIT}, with a 128 KiB response cap.`,
+      description: `Read one bounded visible transcript page, oldest-to-newest. For session mentions pass the full lody://session/<sessionId>?workspace=<workspaceId> URI as sessionId; its workspace must match this tool context. Bare IDs and legacy session:// URIs are also accepted. Omit cursor for the newest page; nextCursor reads older entries. Defaults to ${DEFAULT_MCP_SESSION_HISTORY_LIMIT}, max ${MAX_MCP_SESSION_HISTORY_LIMIT}, with a 128 KiB response cap.`,
       inputSchema: SessionHistoryToolInputSchema,
     },
     async (args: SessionHistoryToolInput) => {
@@ -4474,139 +4730,5 @@ export function buildSessionToolServer(handlers?: SessionToolHandlers): McpServe
     }
   );
 
-  server.registerTool(
-    REVIEW_SUBMIT_TOOL_NAME,
-    {
-      title: 'Submit a code review',
-      description:
-        'Report the result of reviewing a branch. Call this exactly once per review round. Only a session acting as a review agent can use it.',
-      inputSchema: ReviewSubmitToolInputSchema,
-    },
-    async (args: ReviewSubmitToolInput) => {
-      try {
-        const ctx = getSessionContext();
-        const auth = getCliAuthContextOrThrow('mcp');
-        const workspace = await resolveWorkspaceOrThrow(auth, getMcpWorkspaceId(ctx));
-        return await withWorkspaceManager(auth, workspace, 'mcp', async (manager) => {
-          const workspaceId = workspace.id as WorkspaceId;
-          const reviewerSessionId = ctx.sessionId as SessionId;
-          const run = await findReviewRunByReviewerSession(
-            manager.repo,
-            workspaceId,
-            reviewerSessionId
-          );
-          if (!run) {
-            return jsonTextResult(
-              {
-                ok: false,
-                error: makeLodyError(
-                  'REVIEW_RUN_NOT_FOUND',
-                  'This session is not acting as a review agent for any branch.',
-                  false
-                ),
-              },
-              true
-            );
-          }
-          // An agent-callable tool must not write outside the state it belongs
-          // to: a submission arriving while the run is merging or already
-          // finished would record findings nothing will ever act on.
-          if (run.state !== 'reviewing') {
-            return jsonTextResult(
-              {
-                ok: false,
-                error: makeLodyError(
-                  'REVIEW_NOT_AWAITING_SUBMISSION',
-                  `This review is not waiting for a submission (state: ${run.state}).`,
-                  false
-                ),
-              },
-              true
-            );
-          }
-          // "Exactly once" is otherwise only prompt-enforced, and the run stays
-          // in `reviewing` until the engine's next pass — so a second call would
-          // append a duplicate set of findings with fresh ids.
-          if (run.submittedRound === run.round) {
-            // The submission may be durable here but never uploaded — exactly
-            // what a previous call that failed to sync leaves behind. Retrying
-            // is the reviewer's only repair, so push before refusing.
-            try {
-              await syncReviewFlockOnce(manager.repo, workspaceId);
-              return jsonTextResult({
-                ok: true,
-                round: run.round,
-                findings: run.findings.length,
-                note: 'This round was already submitted; the pending write has now been synced.',
-              });
-            } catch {
-              return jsonTextResult(
-                {
-                  ok: false,
-                  error: makeLodyError(
-                    'REVIEW_SUBMIT_NOT_SYNCED',
-                    'A review for this round is saved locally but could not be uploaded. Call the tool again.',
-                    true
-                  ),
-                },
-                true
-              );
-            }
-          }
-
-          // Re-apply the shared refinement the published JSON Schema cannot carry.
-          const parsed = ReviewSubmissionSchema.safeParse(args);
-          if (!parsed.success) {
-            const message =
-              parsed.error.issues[0]?.message ?? 'The submission did not match the expected shape.';
-            return jsonTextResult(
-              { ok: false, error: makeLodyError('REVIEW_SUBMISSION_INVALID', message, true) },
-              true
-            );
-          }
-
-          const applied = applyReviewSubmission(run, parsed.data);
-          try {
-            // Confirmed, not best-effort: this process is about to exit, so an
-            // unsynced write is a lost submission that the engine would later
-            // read as "the reviewer never submitted".
-            await writeReviewRun(manager.repo, workspaceId, applied.run, { confirmSync: true });
-          } catch (error) {
-            return jsonTextResult(
-              {
-                ok: false,
-                error: makeLodyError(
-                  'REVIEW_SUBMIT_NOT_SYNCED',
-                  `The review could not be saved: ${
-                    error instanceof Error ? error.message : String(error)
-                  }. Call the tool again.`,
-                  true
-                ),
-              },
-              true
-            );
-          }
-          return jsonTextResult({
-            ok: true,
-            round: applied.run.round,
-            findings: applied.run.findings.length,
-            ...(applied.droppedSuggestions > 0
-              ? {
-                  droppedSuggestions: applied.droppedSuggestions,
-                  note: 'A re-check round cannot raise new suggestions; those were dropped.',
-                }
-              : {}),
-          });
-        });
-      } catch (error) {
-        return mcpErrorResult(error);
-      }
-    }
-  );
-
   return server;
-}
-
-export async function runLodyMcpServer(): Promise<void> {
-  await buildLodyMcpServer().connect(new StdioServerTransport());
 }

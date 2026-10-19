@@ -1,7 +1,7 @@
 import type { Meta, StoryObj } from '@storybook/react';
 import { Provider, createStore } from 'jotai';
 import { useState } from 'react';
-import { fn } from 'storybook/test';
+import { fn, userEvent, within } from 'storybook/test';
 import {
   getLodySessionPresenceKey,
   getServerNow,
@@ -86,16 +86,20 @@ function buildPresenceStates() {
 function StoryHarness({
   currentSessionId,
   defaultOpen,
+  initialStopped = false,
 }: {
   currentSessionId: string;
   defaultOpen?: boolean;
+  initialStopped?: boolean;
 }) {
   const [store] = useState(() => {
     const next = createStore();
     next.set(lodyPresenceStatesAtom, buildPresenceStates());
     return next;
   });
+  const [stopped, setStopped] = useState(initialStopped);
   const tree = buildSessionRelationTree(SESSIONS, currentSessionId as SessionId)!;
+  tree.session = { ...tree.session, collaborationStopped: stopped };
   return (
     <Provider store={store}>
       <div className="flex max-w-full flex-col" style={{ width: 720 }}>
@@ -113,6 +117,7 @@ function StoryHarness({
               currentSessionId={currentSessionId as SessionId}
               onOpenSession={fn()}
               defaultOpen={defaultOpen}
+              onSetCollaborationStopped={async (next) => setStopped(next)}
             />
           }
         />
@@ -146,4 +151,20 @@ export const OpenFromTab: Story = {
 
 export const OpenFromLeaf: Story = {
   args: { currentSessionId: 'mobile', defaultOpen: true },
+};
+
+export const ConfirmStop: Story = {
+  args: { currentSessionId: 'relations', defaultOpen: true },
+  play: async ({ canvasElement }) => {
+    const page = within(canvasElement.ownerDocument.body);
+    await userEvent.click(
+      await page.findByRole('button', {
+        name: /Stop all conversation collaboration|终止全部对话协作/,
+      })
+    );
+  },
+};
+
+export const CollaborationStopped: Story = {
+  args: { currentSessionId: 'relations', defaultOpen: true, initialStopped: true },
 };

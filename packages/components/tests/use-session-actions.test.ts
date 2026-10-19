@@ -14,20 +14,25 @@ import { applyHistoryAction } from '../../shared/src/session-data/history-action
 import type { HistoryAction, SessionEntry } from '@lody/shared/session-data';
 // @vitest-environment jsdom
 
-import { act, createElement, useEffect } from 'react';
+import { act, createElement, Fragment, useEffect } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { Provider, createStore } from 'jotai';
+import { Provider, createStore, atom, useAtomValue } from 'jotai';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { LoroRepo } from 'loro-repo';
+import { LoroDoc } from 'loro-crdt';
 import {
   FREE_SESSION_LIMIT_PER_WORKSPACE,
   SESSION_DOC_PREFIX,
   getMachineRoomId,
+  CURRENT_MACHINE_PROTOCOL_CAPABILITIES,
   getSessionRoomId,
+  getSessionCancelRequestMarker,
+  createSessionControlPlaneMirror,
   isLoroRepoDocDeleted,
   machineFlockKeys,
   type LocalProjectId,
   readSessionOperationTargets,
+  isSessionCollaborationStopped,
   type MachineId,
   type SessionHistory,
   type SessionId,
@@ -96,6 +101,23 @@ vi.mock('convex/react', () => ({
   })),
 }));
 
+vi.mock('../src/hooks/use-visible-session-metas', async () => {
+  const { useAtomValue: useTestAtomValue } = await import('jotai');
+  const { sessionMetaCacheAtom: projectedSessionCacheAtom } = await import('../src/atoms/doc-meta');
+  return {
+    useVisibleSessionMetas: () => ({
+      sessions: Object.values(useTestAtomValue(projectedSessionCacheAtom)).filter(
+        (session) => !session.isArchived
+      ),
+    }),
+    useVisibleArchivedSessionMetas: () => ({
+      archivedSessions: Object.values(useTestAtomValue(projectedSessionCacheAtom)).filter(
+        (session) => session.isArchived
+      ),
+    }),
+  };
+});
+
 vi.mock('../src/hooks/use-authenticated-convex', () => ({
   useAuthenticatedConvex: () => ({
     isAuthenticated: convexAuthState.isAuthenticated,
@@ -104,6 +126,10 @@ vi.mock('../src/hooks/use-authenticated-convex', () => ({
 }));
 
 import { runtimeAtom, type WorkspaceRuntime } from '../src/atoms/runtime';
+import { userAtom } from '../src/atoms';
+import { autoArchiveOnPrClosedAtom, autoArchiveOnPrMergedAtom } from '../src/atoms/settings';
+import { AutoArchivePrWatcher } from '../src/components/auto-archive-pr-watcher';
+import { WorkspaceWindowOwnerContext } from '../src/lib/desktop-window';
 import { docMetaCacheReadyAtom, sessionMetaCacheAtom } from '../src/atoms/doc-meta';
 import {
   editSessionRunConfigDraftAtom,
@@ -113,6 +139,11 @@ import {
 } from '../src/atoms/session-run-config-drafts';
 import { currentWorkspaceIdAtom, currentWorkspaceSlugAtom } from '../src/atoms/workspace-context';
 import {
+  developerModeEnabledAtom,
+  experimentalFeaturesEnabledAtom,
+  roostHistoryExperimentEnabledAtom,
+} from '../src/atoms/settings';
+import {
   countSessionMentions,
   SessionCreateBillingError,
   resolveSessionChatType,
@@ -120,6 +151,16 @@ import {
   type SessionActions,
 } from '../src/hooks/use-session-actions';
 import { buildResendInputBlocks } from '../src/lib/undelivered-user-turn';
+
+const archiveWatcherOwnerAtom = atom(true);
+function ArchiveWatcherOwner() {
+  const owner = useAtomValue(archiveWatcherOwnerAtom);
+  return createElement(
+    WorkspaceWindowOwnerContext.Provider,
+    { value: owner },
+    createElement(AutoArchivePrWatcher)
+  );
+}
 
 (
   globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
@@ -293,7 +334,11 @@ const createRuntime = (
     ({
       upsertDocMeta: vi.fn(async () => undefined),
       getDocMeta: vi.fn(async (roomId: string) => ({
-        meta: { id: roomId.slice(SESSION_DOC_PREFIX.length), machineId: 'machine-1' },
+        meta: {
+          id: roomId.slice(SESSION_DOC_PREFIX.length),
+          machineId: 'machine-1',
+          protocolCapabilities: CURRENT_MACHINE_PROTOCOL_CAPABILITIES,
+        },
       })),
     } as unknown as WorkspaceRuntime['repo']);
 
@@ -444,18 +489,24 @@ function createContainmentSessions(prefix: string, isArchived: boolean) {
   };
 }
 
-function createSessionMetaRepo(sessions: readonly SessionMeta[]) {
+function createSessionMetaRepo(
+  sessions: readonly SessionMeta[],
+  onChange?: (sessions: Record<string, SessionMeta>) => void
+) {
   const docs = new Map<string, Record<string, unknown>>(
     sessions.map((session) => [getSessionRoomId(session.id), { ...session }])
   );
+  const publish = () => onChange?.(Object.fromEntries(docs) as Record<string, SessionMeta>);
   const repo = {
     listDoc: async () => [...docs].map(([docId, meta]) => ({ docId, meta: { ...meta } })),
     getDocMeta: vi.fn(async (roomId: string) => ({ meta: docs.get(roomId) ?? {} })),
     upsertDocMeta: vi.fn(async (roomId: string, patch: Record<string, unknown>) => {
       docs.set(roomId, { ...(docs.get(roomId) ?? {}), ...patch });
+      publish();
     }),
     deleteDoc: vi.fn(async (roomId: string) => {
       docs.delete(roomId);
+      publish();
     }),
     openFlockDoc: vi.fn(async () => ({
       flock: { scan: () => [], set: vi.fn(), delete: vi.fn(), commit: vi.fn() },
@@ -470,6 +521,7 @@ function createSessionMetaRepo(sessions: readonly SessionMeta[]) {
       docs.get(getSessionRoomId(sessionId)) as SessionMeta | undefined,
     setMeta: (roomId: string, meta: Record<string, unknown>) => {
       docs.set(roomId, { ...meta });
+      publish();
     },
   };
 }
@@ -503,6 +555,7 @@ describe('useSessionActions', () => {
     container?.remove();
     container = undefined;
     vi.restoreAllMocks();
+    vi.useRealTimers();
   });
 
   const renderActions = async (
@@ -513,6 +566,7 @@ describe('useSessionActions', () => {
       docMetaCacheReady?: boolean;
       sessionMetaCache?: Record<string, SessionMeta>;
       store?: ReturnType<typeof createStore>;
+      watchPr?: boolean;
     } = {}
   ): Promise<SessionActions> => {
     const jotaiStore = options.store ?? createStore();
@@ -535,11 +589,16 @@ describe('useSessionActions', () => {
           createElement(
             Provider,
             { store: jotaiStore },
-            createElement(ActionsProbe, {
-              onReady: (nextActions) => {
-                actions = nextActions;
-              },
-            })
+            createElement(
+              Fragment,
+              null,
+              createElement(ActionsProbe, {
+                onReady: (nextActions) => {
+                  actions = nextActions;
+                },
+              }),
+              options.watchPr ? createElement(ArchiveWatcherOwner) : null
+            )
           )
         )
       );
@@ -550,6 +609,416 @@ describe('useSessionActions', () => {
     }
     return actions;
   };
+
+  describe('PR auto-archive recovery', () => {
+    beforeEach(() => {
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+      vi.spyOn(console, 'error').mockImplementation(() => {});
+    });
+
+    const mountWatcher = async (
+      options: { initialStatus?: 'open' | 'merged'; archived?: boolean } = {}
+    ) => {
+      const store = createStore();
+      store.set(userAtom, { id: 'user-1' } as never);
+      store.set(autoArchiveOnPrMergedAtom, true);
+      store.set(autoArchiveOnPrClosedAtom, true);
+      const tree = createContainmentSessions('pr-recovery', options.archived ?? false);
+      for (const session of tree.sessions) session.userId = 'user-1';
+      tree.rootSession.pullRequests = [
+        { url: 'https://github.com/example/repo/pull/1', status: options.initialStatus ?? 'open' },
+      ];
+      const metaRepo = createSessionMetaRepo(tree.sessions, (cache) =>
+        store.set(sessionMetaCacheAtom, cache)
+      );
+      const write = metaRepo.repo.upsertDocMeta.bind(metaRepo.repo);
+      const control = {
+        failSession: tree.rootSession.id as SessionId | null,
+        failures: 1,
+        hold: undefined as ReturnType<typeof createDeferred> | undefined,
+        inFlight: 0,
+        maxInFlight: 0,
+      };
+      metaRepo.repo.upsertDocMeta = async (roomId, patch) => {
+        if (patch.isArchived !== true) return write(roomId, patch);
+        control.inFlight++;
+        control.maxInFlight = Math.max(control.maxInFlight, control.inFlight);
+        try {
+          await control.hold?.promise;
+          if (roomId === getSessionRoomId(control.failSession ?? '') && control.failures > 0) {
+            control.failures--;
+            throw new Error('Synthetic archive write failure');
+          }
+          await write(roomId, patch);
+        } finally {
+          control.inFlight--;
+        }
+      };
+      const runtime = createRuntime({ repo: metaRepo.repo });
+      const actions = await renderActions(runtime, {
+        store,
+        sessionMetaCache: tree.sessionMetaCache,
+        watchPr: true,
+      });
+      const change = async (sessionId: SessionId, patch: Partial<SessionMeta>) => {
+        await act(async () =>
+          metaRepo.setMeta(getSessionRoomId(sessionId), {
+            ...metaRepo.getSession(sessionId),
+            ...patch,
+          })
+        );
+      };
+      const transition = (status: 'merged' | 'closed') =>
+        change(tree.rootSession.id, {
+          pullRequests: [{ url: 'https://github.com/example/repo/pull/1', status }],
+        });
+      const advance = async (ms: number) => {
+        await act(async () => vi.advanceTimersByTimeAsync(ms));
+      };
+      return { store, tree, metaRepo, control, runtime, actions, change, transition, advance };
+    };
+
+    it.each(['merged', 'closed'] as const)(
+      'eventually archives the whole tree after a failed %s transition without another PR event',
+      async (status) => {
+        const test = await mountWatcher();
+        await test.transition(status);
+        expect(test.metaRepo.getSession(test.tree.rootSession.id)?.isArchived).toBe(false);
+        // Metadata traffic cannot turn the retry into a hot loop or consume it.
+        await test.change(test.tree.rootSession.id, { title: 'unrelated update' });
+        await test.advance(999);
+        expect(test.metaRepo.getSession(test.tree.rootSession.id)?.isArchived).toBe(false);
+        await test.advance(1);
+        for (const session of test.tree.sessions)
+          expect(test.metaRepo.getSession(session.id)?.isArchived).toBe(true);
+        expect(vi.getTimerCount()).toBe(0);
+      }
+    );
+
+    it('repairs descendants after the root has already entered the archive', async () => {
+      const test = await mountWatcher();
+      test.control.failSession = test.tree.tabSession.id;
+      await test.transition('merged');
+      expect(test.metaRepo.getSession(test.tree.rootSession.id)?.isArchived).toBe(true);
+      expect(test.metaRepo.getSession(test.tree.tabSession.id)?.isArchived).toBe(false);
+      await test.advance(1_000);
+      for (const session of test.tree.sessions)
+        expect(test.metaRepo.getSession(session.id)?.isArchived).toBe(true);
+    });
+
+    it.each(['root', 'tab'] as const)(
+      'a manual %s restore cancels the unfinished automatic archive',
+      async (selected) => {
+        const test = await mountWatcher();
+        test.control.failSession = test.tree.openedSession.id;
+        await test.transition('merged');
+        const restored = selected === 'root' ? test.tree.rootSession : test.tree.tabSession;
+        expect(test.metaRepo.getSession(restored.id)?.isArchived).toBe(true);
+        await act(async () => test.actions.restoreSession(restored.id));
+        await test.advance(60_000);
+        expect(test.metaRepo.getSession(restored.id)?.isArchived).toBe(false);
+        expect(test.metaRepo.getSession(test.tree.openedSession.id)?.isArchived).toBe(false);
+      }
+    );
+
+    it('does not cancel a new held send when a restored root invalidates its retry', async () => {
+      const test = await mountWatcher();
+      test.control.failSession = test.tree.tabSession.id;
+      await test.transition('merged');
+      await act(async () => test.actions.restoreSession(test.tree.rootSession.id));
+      const held = await test.actions.addSessionHistory(
+        test.tree.rootSession.id,
+        userInput('after restore'),
+        {
+          dispatch: true,
+          attachments: [imageDraft('after-restore')],
+        }
+      );
+      await test.advance(1_000);
+      expect(test.runtime.pendingSends?.getSnapshot().map((send) => send.id)).toEqual([held.id]);
+      expect(heldPreparations[0].signal.aborted).toBe(false);
+      heldPreparations[0].finish();
+      await whenSessionDrained(test.runtime.pendingSends!, test.tree.rootSession.id);
+      expect(
+        (await readHistory(test.runtime, test.tree.rootSession.id)).map((turn) => turn.id)
+      ).toContain(held.id);
+      expect(test.metaRepo.getSession(test.tree.rootSession.id)?.isArchived).toBe(false);
+    });
+
+    it('keeps persistent failures isolated and uses capped retry delays', async () => {
+      const test = await mountWatcher();
+      test.control.failures = Infinity;
+      await test.transition('merged');
+      const sibling = {
+        ...test.tree.rootSession,
+        id: 'independent-pr-session' as SessionId,
+        pullRequests: [{ url: 'https://github.com/example/repo/pull/2', status: 'open' as const }],
+      };
+      await act(async () => test.metaRepo.setMeta(getSessionRoomId(sibling.id), sibling));
+      await test.change(sibling.id, {
+        pullRequests: [{ url: sibling.pullRequests[0]!.url, status: 'merged' }],
+      });
+      expect(test.metaRepo.getSession(sibling.id)?.isArchived).toBe(true);
+      // 1 + 2 + 4 + 8 + 16 seconds; the next delay is capped at 30 seconds.
+      await test.advance(31_000);
+      test.control.failures = 0;
+      await test.advance(29_999);
+      expect(test.metaRepo.getSession(test.tree.rootSession.id)?.isArchived).toBe(false);
+      await test.advance(1);
+      expect(test.metaRepo.getSession(test.tree.rootSession.id)?.isArchived).toBe(true);
+    });
+
+    it('shares the actual in-flight write across metadata and timer updates', async () => {
+      const test = await mountWatcher();
+      test.control.hold = createDeferred();
+      await test.transition('merged');
+      await test.change(test.tree.rootSession.id, { title: 'while archive is writing' });
+      await test.advance(60_000);
+      expect(test.metaRepo.getSession(test.tree.rootSession.id)?.isArchived).toBe(false);
+      await act(async () => test.control.hold?.resolve());
+      test.control.hold = undefined;
+      await test.advance(1_000);
+      for (const session of test.tree.sessions)
+        expect(test.metaRepo.getSession(session.id)?.isArchived).toBe(true);
+      expect(test.control.maxInFlight).toBe(1);
+    });
+
+    it.each([
+      'setting',
+      'user',
+      'workspace',
+      'owner',
+      'session-owner',
+      'pr',
+      'reopen',
+      'delete',
+      'unmount',
+    ] as const)('retires a pending retry after %s changes', async (kind) => {
+      const test = await mountWatcher();
+      await test.transition('merged');
+      await act(async () => {
+        if (kind === 'setting') {
+          test.store.set(autoArchiveOnPrMergedAtom, false);
+          test.store.set(autoArchiveOnPrMergedAtom, true);
+        } else if (kind === 'user') {
+          test.store.set(userAtom, { id: 'other-user' } as never);
+          test.store.set(userAtom, { id: 'user-1' } as never);
+        } else if (kind === 'workspace') {
+          test.store.set(
+            runtimeAtom,
+            createRuntime({ workspaceId: 'other-workspace' as WorkspaceId })
+          );
+          test.store.set(runtimeAtom, test.runtime);
+        } else if (kind === 'owner') {
+          test.store.set(archiveWatcherOwnerAtom, false);
+        } else if (kind === 'session-owner') {
+          test.metaRepo.setMeta(getSessionRoomId(test.tree.rootSession.id), {
+            ...test.metaRepo.getSession(test.tree.rootSession.id),
+            userId: 'other-user',
+          });
+        } else if (kind === 'delete') {
+          await test.metaRepo.repo.deleteDoc(getSessionRoomId(test.tree.rootSession.id));
+        } else if (kind === 'unmount') {
+          root?.unmount();
+          root = undefined;
+        } else {
+          test.metaRepo.setMeta(getSessionRoomId(test.tree.rootSession.id), {
+            ...test.metaRepo.getSession(test.tree.rootSession.id),
+            pullRequests: [
+              {
+                url:
+                  kind === 'pr'
+                    ? 'https://github.com/example/repo/pull/2'
+                    : 'https://github.com/example/repo/pull/1',
+                status: kind === 'reopen' ? 'open' : 'merged',
+              },
+            ],
+          });
+        }
+      });
+      if (kind === 'owner') await act(async () => test.store.set(archiveWatcherOwnerAtom, true));
+      await test.advance(60_000);
+      expect(test.metaRepo.getSession(test.tree.rootSession.id)?.isArchived).not.toBe(true);
+      expect(vi.getTimerCount()).toBe(0);
+    });
+
+    it('does not revive retries when a raw archive fails after unmount', async () => {
+      const test = await mountWatcher();
+      test.control.hold = createDeferred();
+      await test.transition('merged');
+      await act(async () => {
+        root?.unmount();
+        root = undefined;
+      });
+      await act(async () => test.control.hold?.reject());
+      await test.advance(60_000);
+      expect(test.metaRepo.getSession(test.tree.rootSession.id)?.isArchived).toBe(false);
+      expect(vi.getTimerCount()).toBe(0);
+    });
+
+    it('does not retroactively archive startup or restored terminal PRs', async () => {
+      const test = await mountWatcher({ initialStatus: 'merged', archived: true });
+      await act(async () => test.actions.restoreSession(test.tree.rootSession.id));
+      await test.advance(60_000);
+      for (const session of [test.tree.rootSession, test.tree.tabSession])
+        expect(test.metaRepo.getSession(session.id)?.isArchived).toBe(false);
+      expect(vi.getTimerCount()).toBe(0);
+    });
+  });
+
+  it('uses released Stop wire fields and turn marker when the target has no Inbox capability', async () => {
+    const sessionId = 'legacy-stop' as SessionId;
+    const metaRepo = createSessionMetaRepo([
+      { id: sessionId, machineId: 'old-machine', userId: 'user-1' } as SessionMeta,
+    ]);
+    const runtime = createRuntime({ repo: metaRepo.repo });
+    const received: unknown[] = [];
+    runtime.requestSessionCancel = async (_machine, _session, turnId, options) => {
+      expect(Object.keys(options ?? {})).toEqual(['timeoutMs']);
+      received.push(turnId);
+      return { success: true } as never;
+    };
+    const actions = await renderActions(runtime);
+    await actions.requestSessionCancel(sessionId, 'assistant-legacy');
+    expect(received).toEqual(['assistant-legacy']);
+    expect(metaRepo.getSession(sessionId)?.lastCanceledTurn).toBe('assistant-legacy');
+  });
+
+  it('persists Stop details before publishing only its marker, and reuses the request on RPC', async () => {
+    const sessionId = 'session-stop-control' as SessionId;
+    const metaRepo = createSessionMetaRepo([
+      {
+        id: sessionId,
+        machineId: 'machine-1',
+        userId: 'user-1',
+        createdAt: '2026-10-13T00:00:00.000Z',
+        cliType: 'builtin',
+        agentType: 'codex',
+      },
+    ]);
+    metaRepo.setMeta(getMachineRoomId('machine-1'), {
+      protocolCapabilities: CURRENT_MACHINE_PROTOCOL_CAPABILITIES,
+    });
+    const doc = new LoroDoc();
+    const control = createSessionControlPlaneMirror({
+      doc,
+      initialState: { session: { id: sessionId } },
+    });
+    const runtime = createRuntime({ repo: metaRepo.repo });
+    runtime.withSessionStore = async (_id, fn) =>
+      fn({ ...control, sessionData: sessionDataOver([]) } as never);
+    const flushEntered = createDeferred();
+    const durable = createDeferred();
+    let holdFlush = true;
+    runtime.repo.flush = async () => {
+      if (holdFlush) {
+        flushEntered.resolve();
+        await durable.promise;
+      }
+    };
+    const rpcReceipts: { turnId: string; cancelId?: string }[] = [];
+    runtime.requestSessionCancel = async (_machine, _session, turnId, options) => {
+      rpcReceipts.push({ turnId, cancelId: options?.cancelId });
+      return undefined; // RPC timeout/loss still leaves a complete durable request.
+    };
+    try {
+      const actions = await renderActions(runtime);
+      const stopped = actions.requestSessionCancel(sessionId, 'assistant-stop');
+      await flushEntered.promise;
+      expect(control.getState().cancelRequest?.turnId).toBe('assistant-stop');
+      expect(metaRepo.getSession(sessionId)?.lastCanceledTurn).toBeUndefined();
+      expect(rpcReceipts).toEqual([
+        {
+          turnId: 'assistant-stop',
+          cancelId: control.getState().cancelRequest!.id,
+        },
+      ]);
+      holdFlush = false;
+      durable.resolve();
+      await stopped;
+      const first = control.getState().cancelRequest!;
+      expect(metaRepo.getSession(sessionId)?.lastCanceledTurn).toBe(
+        getSessionCancelRequestMarker(first.id)
+      );
+      expect(Object.keys(metaRepo.getSession(sessionId)!)).toEqual([
+        'id',
+        'machineId',
+        'userId',
+        'createdAt',
+        'cliType',
+        'agentType',
+        'lastCanceledTurn',
+      ]);
+      expect(rpcReceipts).toEqual([{ turnId: 'assistant-stop', cancelId: first.id }]);
+
+      await actions.requestSessionCancel(sessionId, 'assistant-stop');
+      const second = control.getState().cancelRequest!;
+      expect(second.id).not.toBe(first.id);
+      expect(metaRepo.getSession(sessionId)?.lastCanceledTurn).toBe(
+        getSessionCancelRequestMarker(second.id)
+      );
+      const reopened = new LoroDoc();
+      reopened.import(doc.export({ mode: 'snapshot' }));
+      const reopenedControl = createSessionControlPlaneMirror({
+        doc: reopened,
+        initialState: { session: { id: sessionId } },
+      });
+      try {
+        expect(reopenedControl.getState().cancelRequest).toMatchObject({
+          id: second.id,
+          turnId: 'assistant-stop',
+        });
+      } finally {
+        reopenedControl.dispose();
+      }
+    } finally {
+      durable.resolve();
+      control.dispose();
+    }
+  });
+
+  it('stops and restores the whole authoritative tree from a leaf, including hidden descendants', async () => {
+    const tree = createContainmentSessions('collaboration', false);
+    const unrelated = { ...tree.rootSession, id: 'unrelated' as SessionId };
+    const metaRepo = createSessionMetaRepo([...tree.sessions, unrelated]);
+    for (const session of [...tree.sessions, unrelated]) {
+      metaRepo.setMeta(getMachineRoomId(session.machineId), {
+        id: session.machineId,
+        protocolCapabilities: CURRENT_MACHINE_PROTOCOL_CAPABILITIES,
+      });
+    }
+    const actions = await renderActions(createRuntime({ repo: metaRepo.repo }), {
+      sessionMetaCache: {},
+    });
+    await actions.setTreeCollaborationStopped(tree.openedFromTabSession.id, true);
+    for (const session of tree.sessions) {
+      expect(metaRepo.getSession(session.id)?.collaborationStopped).toBe(true);
+    }
+    expect(metaRepo.getSession(unrelated.id)?.collaborationStopped).toBeUndefined();
+    const lateChild = 'late-child' as SessionId;
+    metaRepo.setMeta(getSessionRoomId(lateChild), {
+      ...tree.openedSession,
+      id: lateChild,
+      openedBySessionId: tree.rootSession.id,
+    });
+    expect(await isSessionCollaborationStopped(metaRepo.repo, lateChild)).toBe(true);
+    await actions.setTreeCollaborationStopped(tree.rootSession.id, false);
+    for (const id of [...tree.sessions.map((session) => session.id), lateChild]) {
+      expect(await isSessionCollaborationStopped(metaRepo.repo, id)).toBe(false);
+    }
+  });
+
+  it('rejects collaboration control before writes when a target daemon lacks support', async () => {
+    const tree = createContainmentSessions('unsupported-collaboration', false);
+    const metaRepo = createSessionMetaRepo(tree.sessions);
+    const actions = await renderActions(createRuntime({ repo: metaRepo.repo }));
+    await expect(actions.setTreeCollaborationStopped(tree.rootSession.id, true)).rejects.toThrow(
+      'Update every machine'
+    );
+    expect(
+      tree.sessions.map((session) => metaRepo.getSession(session.id)?.collaborationStopped)
+    ).toEqual([undefined, undefined, undefined, undefined]);
+  });
 
   it('does not block session creation on remote stream pre-creation', async () => {
     const sessionId = 'session-create-stream-pending' as SessionId;
@@ -779,7 +1248,8 @@ describe('useSessionActions', () => {
         },
       },
     ];
-    const setState = vi.fn();
+    const control: { humanInputReceipts?: Record<string, { userId: string }> } = {};
+    const setState = (update: (draft: typeof control) => void) => update(control);
     const waitUntilSynced = vi.fn(async () => undefined);
     const upsertDocMeta = vi.fn(() => metaWrite.promise);
     const requestSessionDispatchTurn = vi.fn(async () => ({
@@ -818,7 +1288,7 @@ describe('useSessionActions', () => {
     expect(upsertDocMeta).toHaveBeenCalledWith(getSessionRoomId(sessionId), {
       latestUserMsgId: userTurnId,
     });
-    expect(setState).not.toHaveBeenCalled();
+    expect(control.humanInputReceipts?.[userTurnId]).toEqual({ userId: 'user-1' });
     expect(waitUntilSynced).toHaveBeenCalledTimes(1);
 
     metaWrite.resolve();
@@ -1032,6 +1502,80 @@ describe('useSessionActions', () => {
       lastMessageAt: expect.any(Number),
     });
     expect(result.historyEntry.inputConfig?.inputBlocks).toEqual([{ type: 'text', text: 'hi' }]);
+  });
+
+  it('selects Roost for new sessions with developer opt-in while experiments are off', async () => {
+    const store = createStore();
+    store.set(developerModeEnabledAtom, true);
+    store.set(experimentalFeaturesEnabledAtom, false);
+    store.set(roostHistoryExperimentEnabledAtom, true);
+    const runtime = createRuntime({});
+    const actions = await renderActions(runtime, { store });
+
+    const result = await actions.createSession(
+      createSessionPayload('session-roost-gated' as SessionId)
+    );
+
+    expect(result.sessionMeta.historyBackend).toBe('roost');
+  });
+
+  it.each([
+    { developerMode: false, roostHistory: true },
+    { developerMode: true, roostHistory: false },
+  ])('keeps Loro when a developer gate is off: %j', async ({ developerMode, roostHistory }) => {
+    const store = createStore();
+    store.set(developerModeEnabledAtom, developerMode);
+    store.set(experimentalFeaturesEnabledAtom, true);
+    store.set(roostHistoryExperimentEnabledAtom, roostHistory);
+    const runtime = createRuntime({});
+    const actions = await renderActions(runtime, { store });
+
+    const result = await actions.createSession(
+      createSessionPayload('session-roost-developer-gate-off' as SessionId)
+    );
+
+    expect(result.sessionMeta.historyBackend).toBe('loro');
+  });
+
+  it('keeps creating ordinary Loro sessions on targets without Roost capability', async () => {
+    const store = createStore();
+    store.set(developerModeEnabledAtom, true);
+    store.set(experimentalFeaturesEnabledAtom, false);
+    store.set(roostHistoryExperimentEnabledAtom, true);
+    const metaRepo = createSessionMetaRepo([]);
+    const runtime = createRuntime({ repo: metaRepo.repo });
+    const actions = await renderActions(runtime, { store });
+    const result = await actions.createSession(
+      createSessionPayload('old-machine-session' as SessionId)
+    );
+    expect(result.sessionMeta.historyBackend).toBe('loro');
+    expect(metaRepo.repo.upsertDocMeta).toHaveBeenCalledWith(
+      getSessionRoomId(result.sessionId),
+      expect.objectContaining({ historyBackend: 'loro' })
+    );
+  });
+
+  it('rejects explicit Roost creation before metadata, history or warm-up on unsupported targets', async () => {
+    const metaRepo = createSessionMetaRepo([]);
+    const runtime = createRuntime({ repo: metaRepo.repo });
+    const actions = await renderActions(runtime);
+    const payload = {
+      ...createSessionPayload('unsupported-roost-session' as SessionId),
+      historyBackend: 'roost' as const,
+    };
+    await expect(actions.createSession(payload)).rejects.toThrow('Update the machine');
+    await expect(
+      actions.startSession(payload, {
+        role: 'user',
+        userId: 'user-1',
+        timestamp: '2026-10-09T00:00:00.000Z',
+        items: [{ type: 'text', text: 'hello' }],
+        fileDiff: [],
+        inputConfig: { inputBlocks: [{ type: 'text', text: 'hello' }] },
+      } as never)
+    ).rejects.toThrow('Update the machine');
+    expect(metaRepo.repo.upsertDocMeta).not.toHaveBeenCalled();
+    expect(runtime.ensureDocStream).not.toHaveBeenCalled();
   });
 
   it('keeps a local branch selector out of baseBranch until the target machine resolves it', async () => {

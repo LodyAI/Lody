@@ -5,6 +5,7 @@ import { colors } from '@lody/ui/tokens/colors.stylex';
 import { useTranslation } from 'react-i18next';
 import { Button } from '@lody/ui/button';
 import { Spinner } from '@lody/ui/spinner';
+import { useIsMobile } from '@/hooks/use-mobile';
 import { SessionBrowserToolbar } from './session-browser-toolbar';
 import {
   PreviewConnectionPlaceholder,
@@ -98,6 +99,7 @@ export function SessionBrowserPanelView({
   children,
 }: SessionBrowserPanelViewProps) {
   const { t } = useTranslation();
+  const isMobile = useIsMobile();
   const hasContent = Boolean(children);
   // When remote content is absent the placeholder owns the single recovery
   // action; keeping it out of the popover avoids two simultaneous Restore
@@ -152,9 +154,15 @@ export function SessionBrowserPanelView({
             <Globe2 {...stylex.props(styles.emptyIcon)} aria-hidden />
             <p {...stylex.props(styles.emptyText)}>
               {suggestedAddress
-                ? t('sessions.browser.emptyWithCandidate', 'Press Enter to open {{url}}', {
-                    url: suggestedAddress,
-                  })
+                ? isMobile
+                  ? t(
+                      'sessions.browser.emptyWithCandidateMobile',
+                      'Open {{url}} from the address bar',
+                      { url: suggestedAddress }
+                    )
+                  : t('sessions.browser.emptyWithCandidate', 'Press Enter to open {{url}}', {
+                      url: suggestedAddress,
+                    })
                 : t(
                     'sessions.browser.emptyNoCandidate',
                     'No preview address reported yet. Enter a URL above, or ask the agent to report its dev server.'

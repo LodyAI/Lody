@@ -1,18 +1,8 @@
-import {
-  Cause,
-  Context,
-  Effect,
-  ExecutionStrategy,
-  Exit,
-  Fiber,
-  Layer,
-  ManagedRuntime,
-  Scope,
-} from 'effect';
+import { Cause, Context, Effect, Exit, Fiber, Layer, ManagedRuntime, Scope } from 'effect';
 import type { SessionId } from '@lody/shared';
 import type { SessionDocStore } from '@/atoms/runtime';
 
-class SendScope extends Context.Tag('lody/SessionSendScope')<SendScope, Scope.CloseableScope>() {}
+class SendScope extends Context.Service<SendScope, Scope.Closeable>()('lody/SessionSendScope') {}
 
 export const throwIfSendAborted = (signal?: AbortSignal): void => {
   if (signal?.aborted) throw new DOMException('Attachment operation aborted', 'AbortError');
@@ -20,7 +10,7 @@ export const throwIfSendAborted = (signal?: AbortSignal): void => {
 
 /** Interruption stops cooperative I/O and joins raw work before releasing its owner. */
 function ownedPromise<A>(work: (signal: AbortSignal) => Promise<A>): Effect.Effect<A, unknown> {
-  return Effect.async<A, unknown>((resume) => {
+  return Effect.callback<A, unknown>((resume) => {
     const controller = new AbortController();
     const raw = Promise.resolve().then(() => {
       throwIfSendAborted(controller.signal);
@@ -46,11 +36,9 @@ export function createSessionSendResources(stores: {
   releaseRef: (sessionId: SessionId) => void;
 }) {
   const managed = ManagedRuntime.make(
-    Layer.scoped(
+    Layer.effect(
       SendScope,
-      Effect.acquireRelease(Scope.make(ExecutionStrategy.parallel), (scope) =>
-        Scope.close(scope, Exit.void)
-      )
+      Effect.acquireRelease(Scope.make('parallel'), (scope) => Scope.close(scope, Exit.void))
     )
   );
   let closing: Promise<void> | undefined;
@@ -65,7 +53,8 @@ export function createSessionSendResources(stores: {
     const fiber = await managed.runPromise(
       Effect.gen(function* () {
         const scope = yield* SendScope;
-        return yield* Effect.forkIn(ownedPromise(work), scope);
+        // v4 forks are lazy by default; start owned I/O at this boundary as before.
+        return yield* Effect.forkIn(ownedPromise(work), scope, { startImmediately: true });
       })
     );
     const interrupt = () => {
@@ -78,7 +67,7 @@ export function createSessionSendResources(stores: {
       const exit = await Effect.runPromise(Fiber.await(fiber));
       throwIfSendAborted(signal);
       if (Exit.isSuccess(exit)) return exit.value;
-      if (Cause.isInterrupted(exit.cause)) {
+      if (Cause.hasInterrupts(exit.cause)) {
         throw new DOMException('Attachment operation aborted', 'AbortError');
       }
       throw Cause.squash(exit.cause);

@@ -4,6 +4,27 @@ import { createContext, useContext, type ReactNode, type RefObject } from 'react
 /** What Base UI's Portal accepts as its mount point. */
 export type PopupContainer = HTMLElement | RefObject<HTMLElement | null> | null | undefined;
 
+// Modal hosts are separate from floating popup hosts: a centered panel's
+// transform must not become the containing block for the next fixed modal.
+const ModalContainerContext = createContext<PopupContainer>(undefined);
+
+/** A host modal's interaction scope for nested modal portals. */
+export function ModalContainerProvider({
+  container,
+  children,
+}: {
+  container: PopupContainer;
+  children: ReactNode;
+}) {
+  return (
+    <ModalContainerContext.Provider value={container}>{children}</ModalContainerContext.Provider>
+  );
+}
+
+export function useModalContainer(): PopupContainer {
+  return useContext(ModalContainerContext);
+}
+
 const PopupContainerContext = createContext<PopupContainer>(undefined);
 
 /**

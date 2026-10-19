@@ -18,6 +18,9 @@ it('joins native cleanup when its IPC lifecycle lease ends', async () => {
       bundle: true,
       platform: 'node',
       format: 'esm',
+      banner: {
+        js: "import { createRequire as __lodyCreateRequire } from 'node:module'; const require = __lodyCreateRequire(import.meta.url);",
+      },
       outfile: worker,
       logLevel: 'silent',
     });
@@ -51,6 +54,9 @@ it('joins descendants even when the native parent exits first', async () => {
       bundle: true,
       platform: 'node',
       format: 'esm',
+      banner: {
+        js: "import { createRequire as __lodyCreateRequire } from 'node:module'; const require = __lodyCreateRequire(import.meta.url);",
+      },
       outfile: worker,
       logLevel: 'silent',
     });
@@ -116,6 +122,9 @@ it('joins an active host command before resolving worker closure on owner discon
       bundle: true,
       platform: 'node',
       format: 'esm',
+      banner: {
+        js: "import { createRequire as __lodyCreateRequire } from 'node:module'; const require = __lodyCreateRequire(import.meta.url);",
+      },
       outfile: worker,
       logLevel: 'silent',
       plugins: [

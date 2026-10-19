@@ -42,6 +42,81 @@ const backends: Backend[] = [
   },
 ];
 
+it('reveals adjacent reverse pages without replacing retained rows or bodies and keeps edits observable', async () => {
+  const history = buildFixtureHistory(60);
+  const doc = buildSessionDoc(history);
+  const data = createLoroSessionData({ sessionId: FIXTURE_SESSION_ID, doc });
+  const page = async (end: number, limit: number) => {
+    const start = Math.max(0, end - limit);
+    return {
+      startPosition: start,
+      totalCount: history.length,
+      rows: await data.history.readDirectory(start, end),
+      hasMoreOlder: start > 0,
+      cursor: start > 0 ? String(start) : null,
+    };
+  };
+  const reader: SessionHistoryReader = {
+    ...data.history,
+    readLatestDirectoryPage: (limit) => page(history.length, limit),
+    readOlderDirectoryPage: (cursor, limit) => page(Number(cursor), limit),
+    observe(listener) {
+      const observation = data.history.observe(listener);
+      return { ...observation, initialPage: page(history.length, 40) };
+    },
+  };
+  const idle = createManualIdle();
+  const view = createConversationViewFromReader(reader, {
+    sessionId: FIXTURE_SESSION_ID,
+    tailKeep: 2,
+    scheduleIdle: idle.scheduleIdle,
+    yieldToEventLoop: () => Promise.resolve(),
+  });
+  try {
+    await flushReaderChanges();
+    idle.runAll();
+    await view.ready;
+    const retained = view.acquireRange(118, 120);
+    await retained.ready;
+    try {
+      const row = view.index(119);
+      const body = view.turn(119);
+      const changes: { from: number; to: number }[] = [];
+      const unsubscribe = view.subscribe((change) => {
+        if (change.kind === 'structure') changes.push(change);
+      });
+      expect(await view.loadOlder?.()).toBe(true);
+      expect(view.indexOf('u-20')).toBe(40);
+      expect(view.index(119)).toBe(row);
+      expect(view.turn(119)).toBe(body);
+      expect(await view.loadOlder?.()).toBe(true);
+      expect(view.hasMoreOlder).toBe(false);
+      expect(changes).toEqual([
+        { kind: 'structure', from: 40, to: 80 },
+        { kind: 'structure', from: 0, to: 40 },
+      ]);
+      for (let index = 0; index < history.length; index += 1)
+        expect(view.indexOf(history[index]!.id)).toBe(index);
+      data.writer.updateEntry('a-59', (entry) => {
+        entry.items = [{ type: 'text', text: 'still streaming after reverse paging' }];
+        return entry;
+      });
+      doc.commit();
+      await flushReaderChanges();
+      expect(view.turn(119)?.items).toEqual([
+        { type: 'text', text: 'still streaming after reverse paging' },
+      ]);
+      unsubscribe();
+    } finally {
+      retained.release();
+    }
+  } finally {
+    view.dispose();
+    data.dispose();
+    doc.free();
+  }
+});
+
 const customUserTurn = (): SessionHistory =>
   ({
     id: 'u-empty-mcp',
@@ -78,6 +153,7 @@ const openView = (
     maxHydrated?: number;
     hydrateChunkSize?: number;
     hydrateItemBudget?: number;
+    now?: () => number;
   } = {}
 ) => {
   const history = fixtureHistory(rounds);
@@ -91,6 +167,7 @@ const openView = (
     yieldToEventLoop: () => Promise.resolve(),
     hydrateChunkSize: options.hydrateChunkSize ?? 2,
     hydrateItemBudget: options.hydrateItemBudget ?? 10_000,
+    ...(options.now ? { now: options.now } : {}),
   });
   // Raw membership/order mutation (not expressible as a domain command): the
   // Loro arm goes through the shared writer, the memory arm through the peer
@@ -615,6 +692,38 @@ describe.each(backends)('createConversationViewFromReader over $name', (backend)
       expect(probe.directories.every(([from, to]) => to - from === 1 && from === last)).toBe(true);
       expect(probe.turns).toEqual([lastId]);
       probeView.dispose();
+    } finally {
+      harness.teardown();
+    }
+  });
+
+  it('stamps lastUpdateAt from backend changes only, never from opening or hydration', async () => {
+    let clock = 1_000;
+    const harness = openView(backend, 12, { tailKeep: 4, now: () => clock });
+    const { view, idle, data } = harness;
+    try {
+      await settle(idle, view);
+      const older = view.acquireRange(0, 5);
+      await older.ready;
+      older.release();
+      // Opening and hydrating read stored history; nothing arrived yet.
+      expect(view.lastUpdateAt).toBeNull();
+
+      clock = 5_000;
+      const last = view.turn(view.turnCount - 1)!;
+      await data.commands.replaceTurn(last.id, {
+        ...(last as unknown as SessionTurn),
+        items: [...(last.items ?? []), { type: 'text', text: ' streamed' }],
+      } as unknown as SessionTurn);
+      await flush();
+      expect(view.lastUpdateAt).toBe(5_000);
+
+      clock = 9_000;
+      const again = view.acquireRange(4, 8);
+      await again.ready;
+      again.release();
+      expect(view.lastUpdateAt).toBe(5_000);
+      view.dispose();
     } finally {
       harness.teardown();
     }

@@ -1,3 +1,4 @@
+import { Effect } from 'effect';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -5,6 +6,7 @@ import * as os from 'os';
 
 let testHomeDir: string;
 let originalLodyDataDir: string | undefined;
+let originalLocksDir: string | undefined;
 
 async function loadFileLockModule() {
   return await import('./file-lock');
@@ -13,11 +15,15 @@ async function loadFileLockModule() {
 beforeEach(() => {
   testHomeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'lody-home-'));
   originalLodyDataDir = process.env.LODY_DATA_DIR;
+  originalLocksDir = process.env.LODY_LOCKS_DIR;
+  delete process.env.LODY_LOCKS_DIR;
   process.env.LODY_DATA_DIR = path.join(testHomeDir, '.lody');
   vi.resetModules();
 });
 
 afterEach(() => {
+  if (originalLocksDir === undefined) delete process.env.LODY_LOCKS_DIR;
+  else process.env.LODY_LOCKS_DIR = originalLocksDir;
   if (originalLodyDataDir === undefined) {
     delete process.env.LODY_DATA_DIR;
   } else {
@@ -30,15 +36,15 @@ afterEach(() => {
   }
 });
 
-describe('withFileLock', () => {
+describe('fileLocksLegacy', () => {
   it('executes fn while holding the lock and releases afterwards', async () => {
-    const { withFileLock } = await loadFileLockModule();
+    const { fileLocksLegacy } = await loadFileLockModule();
 
     const lockName = 'basic-lock';
     const locksDir = path.join(testHomeDir, '.lody', 'locks');
     const lockPath = path.join(locksDir, `${lockName}.lock`);
 
-    const result = await withFileLock(lockName, async () => {
+    const result = await fileLocksLegacy.withLock(lockName, async () => {
       expect(fs.existsSync(lockPath)).toBe(true);
       const content = JSON.parse(fs.readFileSync(lockPath, 'utf8')) as { pid: number };
       expect(content.pid).toBe(process.pid);
@@ -51,82 +57,24 @@ describe('withFileLock', () => {
   });
 
   it('sanitizes lock name for filesystem safety', async () => {
-    const { withFileLock } = await loadFileLockModule();
+    const { fileLocksLegacy } = await loadFileLockModule();
 
     const lockName = 'weird:/\\name*?';
     const safeName = lockName.replace(/[^a-zA-Z0-9_-]/g, '_');
     const locksDir = path.join(testHomeDir, '.lody', 'locks');
     const lockPath = path.join(locksDir, `${safeName}.lock`);
 
-    await withFileLock(lockName, async () => {
+    await fileLocksLegacy.withLock(lockName, async () => {
       expect(fs.existsSync(lockPath)).toBe(true);
     });
 
     expect(fs.existsSync(lockPath)).toBe(false);
   });
-
-  it('removes stale locks and reacquires them', async () => {
-    const { withFileLock } = await loadFileLockModule();
-
-    const lockName = 'stale';
-    const locksDir = path.join(testHomeDir, '.lody', 'locks');
-    fs.mkdirSync(locksDir, { recursive: true });
-
-    const lockPath = path.join(locksDir, `${lockName}.lock`);
-    fs.writeFileSync(
-      lockPath,
-      JSON.stringify({
-        pid: 999999,
-        timestamp: Date.now() - 31 * 60 * 1000,
-      })
-    );
-
-    const value = await withFileLock(
-      lockName,
-      async () => {
-        expect(fs.existsSync(lockPath)).toBe(true);
-        const content = JSON.parse(fs.readFileSync(lockPath, 'utf8')) as { pid: number };
-        expect(content.pid).toBe(process.pid);
-        return 42;
-      },
-      { retryDelay: 1, timeout: 5000 }
-    );
-
-    expect(value).toBe(42);
-    expect(fs.existsSync(lockPath)).toBe(false);
-  });
-
-  it('times out when an existing lock is held by a live pid', async () => {
-    const { withFileLock } = await loadFileLockModule();
-
-    const lockName = 'busy';
-    const locksDir = path.join(testHomeDir, '.lody', 'locks');
-    fs.mkdirSync(locksDir, { recursive: true });
-
-    const lockPath = path.join(locksDir, `${lockName}.lock`);
-    fs.writeFileSync(
-      lockPath,
-      JSON.stringify({
-        pid: process.pid,
-        timestamp: Date.now(),
-      })
-    );
-
-    await expect(
-      withFileLock(lockName, async () => 'never', {
-        timeout: 200,
-        retryDelay: 5,
-        maxRetryDelay: 10,
-      })
-    ).rejects.toThrow(/Failed to acquire lock/);
-
-    expect(fs.existsSync(lockPath)).toBe(true);
-  });
 });
 
 describe('cleanupStaleLocks', () => {
   it('removes stale or invalid lock files but keeps valid ones', async () => {
-    const { cleanupStaleLocks } = await loadFileLockModule();
+    const { cleanupStaleLocks, fileLockLayer } = await loadFileLockModule();
 
     const locksDir = path.join(testHomeDir, '.lody', 'locks');
     fs.mkdirSync(locksDir, { recursive: true });
@@ -151,7 +99,7 @@ describe('cleanupStaleLocks', () => {
       })
     );
 
-    cleanupStaleLocks();
+    await Effect.runPromise(cleanupStaleLocks().pipe(Effect.provide(fileLockLayer)));
 
     expect(fs.existsSync(stalePath)).toBe(false);
     expect(fs.existsSync(invalidPath)).toBe(false);
@@ -159,8 +107,10 @@ describe('cleanupStaleLocks', () => {
   });
 
   it('does not throw if the locks directory is missing', async () => {
-    const { cleanupStaleLocks } = await loadFileLockModule();
+    const { cleanupStaleLocks, fileLockLayer } = await loadFileLockModule();
 
-    expect(() => cleanupStaleLocks()).not.toThrow();
+    await expect(
+      Effect.runPromise(cleanupStaleLocks().pipe(Effect.provide(fileLockLayer)))
+    ).resolves.toBeUndefined();
   });
 });

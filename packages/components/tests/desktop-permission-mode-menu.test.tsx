@@ -54,41 +54,93 @@ describe('DesktopPermissionModeButton menu', () => {
     container = undefined;
   });
 
-  const openMenu = async () => {
+  const renderButton = async (
+    props: Parameters<typeof DesktopPermissionModeButton>[0] = {
+      modeOptions,
+      selectedModeId: 'agent',
+      onModeChange: () => undefined,
+    }
+  ) => {
     await act(async () => {
       root?.render(
-        createElement(
-          Tooltip.Provider,
-          null,
-          createElement(DesktopPermissionModeButton, {
-            modeOptions,
-            selectedModeId: 'agent',
-            onModeChange: () => undefined,
-          })
-        )
+        createElement(Tooltip.Provider, null, createElement(DesktopPermissionModeButton, props))
       );
     });
+  };
+
+  const openMenu = async () => {
+    await renderButton();
     await act(async () => {
       container
-        ?.querySelector('button[aria-label^="Permission"]')
+        ?.querySelector('button[aria-label^="Mode"]')
         ?.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0 }));
       await new Promise((resolve) => setTimeout(resolve, 40));
     });
     return document.querySelector('[role="menu"]') as HTMLElement;
   };
 
-  it('shows the mode as an icon, naming the selected mode in its label and tooltip', async () => {
+  it('names a mode control "Mode", not "Permission"', async () => {
     await openMenu();
-    const trigger = container?.querySelector('button[aria-label^="Permission"]');
-    expect(trigger?.getAttribute('aria-label')).toBe('Permission: Agent');
-    expect(trigger?.getAttribute('title')).toBe('Permission: Agent');
+    const trigger = container?.querySelector('button[aria-label^="Mode"]');
+    expect(trigger?.getAttribute('aria-label')).toBe('Mode: Agent');
+    expect(trigger?.getAttribute('title')).toBe('Mode: Agent');
     // No visible text: the icon carries the mode.
     expect(trigger?.textContent?.trim()).toBe('');
   });
 
+  it('keeps the "Permission" noun only for an explicit _permission selector', async () => {
+    await renderButton({
+      modeOptions: [],
+      selectedModeId: null,
+      onModeChange: () => undefined,
+      configOptionSelectors: [
+        {
+          configId: 'permission_mode',
+          label: 'Permission Mode',
+          category: '_permission',
+          type: 'select',
+          currentValue: 'ask',
+          options: [
+            { value: 'ask', label: 'Ask Every Time' },
+            { value: 'always-approve', label: 'Always Approve' },
+          ],
+        },
+      ],
+      configOptionValues: { permission_mode: 'always-approve' },
+    });
+    const trigger = container?.querySelector('button[aria-label^="Permission"]');
+    expect(trigger?.getAttribute('aria-label')).toBe('Permission: Always Approve');
+    expect(trigger?.getAttribute('title')).toBe('Permission: Always Approve');
+  });
+
+  it('names a mode-category selector standing in for permission after the provider', async () => {
+    await renderButton({
+      modeOptions: [],
+      selectedModeId: null,
+      onModeChange: () => undefined,
+      configOptionSelectors: [
+        {
+          configId: 'mode',
+          label: 'Mode',
+          category: 'mode',
+          type: 'select',
+          currentValue: 'agent',
+          options: [
+            { value: 'agent', label: 'Agent' },
+            { value: 'plan', label: 'Plan' },
+            { value: 'ask', label: 'Ask' },
+          ],
+        },
+      ],
+      configOptionValues: {},
+    });
+    const trigger = container?.querySelector('button[aria-label^="Mode"]');
+    expect(trigger?.getAttribute('aria-label')).toBe('Mode: Agent');
+  });
+
   it('lists options without a group label and hides descriptions on the row', async () => {
     const menu = await openMenu();
-    // The trigger already carries the "Permission" label, so the menu must not
+    // The trigger already carries the control's noun, so the menu must not
     // repeat it as a heading.
     const labelClasses = menuGroupLabelClassName.split(/\s+/).filter(Boolean);
     expect(labelClasses.length).toBeGreaterThan(0);

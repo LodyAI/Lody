@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { sessionFileOpenResultToContentLoadResult } from '../src/lib/session-file-content-snapshot';
 
 import {
   LocalProjectRpcFileProvider,
@@ -135,6 +136,28 @@ describe('LocalProjectRpcFileProvider.openFile (images)', () => {
     expect(result.snapshot.kind).toBe('binary');
     if (result.snapshot.kind !== 'binary') return;
     expect(result.snapshot.bytes).toBeUndefined();
+  });
+
+  it('retains truncated text through the provider and viewer conversion', async () => {
+    const provider = new LocalProjectRpcFileProvider({
+      transport: createTransport({
+        readFile: async () => ({
+          path: 'large.html',
+          content: '<h1>Partial',
+          truncated: true,
+          encoding: 'utf8',
+        }),
+      }),
+    });
+    const result = await provider.openFile('large.html');
+    expect(result).toMatchObject({
+      status: 'ready',
+      snapshot: { kind: 'text', text: '<h1>Partial', truncated: true },
+    });
+    expect(sessionFileOpenResultToContentLoadResult(result)).toEqual({
+      status: 'ready',
+      snapshot: { kind: 'text', text: '<h1>Partial', truncated: true },
+    });
   });
 
   it('returns a text snapshot for utf8 reads', async () => {

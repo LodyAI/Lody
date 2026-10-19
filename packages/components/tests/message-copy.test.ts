@@ -23,6 +23,13 @@ describe('getTextContentFromMessageItems', () => {
 });
 
 describe('getCopyTextFromMessageItems', () => {
+  it('normalizes copied session references without changing edit-and-resend content', () => {
+    const items = [text('See [Old](session://child)')];
+    expect(getCopyTextFromMessageItems(items, 'ws_1')).toBe(
+      'See [Old](lody://session/child?workspace=ws_1)'
+    );
+    expect(getTextContentFromMessageItems(items)).toBe('See [Old](session://child)');
+  });
   const rolePrompt = 'use lody mcp to create a session with agent role[id: role-1, name: Reviewer]';
   const roleMessage: MessageContent = {
     type: 'text',

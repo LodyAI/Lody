@@ -13,20 +13,15 @@ Replacement contract: [shared rules](../../../shared/AGENTS.md#session-history).
 
 ## Streams connection cardinality
 
-- Capability discovery and refresh must reuse the workspace runtime's existing Machine
-  Flock and Machine RPC transports.
-- Never create or retain a Streams/Flock subscription per agent config or refresh request.
-  Live connection cardinality must stay bounded by workspace/machine topology and must not
-  grow with the number of agent configs. More configs may add serialized RPC requests, not
-  live Streams connections.
-- Release any one-shot document handle or subscription that is not already owned by the
-  workspace runtime.
-- Startup capability discovery is once per agent config per runtime, recorded in the
-  runtime-owned `refreshedConfigKeys` set. A pass aborted by presence leaving `synced` is
-  re-armed, so a pass-level flag is not the gate: reconnecting must never re-probe a config that
-  already answered, because each probe starts and kills a real agent process. Refresh requests
-  default to the machine's cache; only a user action or a setup/authentication workflow sets
-  `force`. Intent: [capability refresh cache](../../../../specs/acp-capability-refresh-cache.md).
+- Discovery/refresh reuse existing workspace Machine Flock/RPC transports, with no
+  subscription per config/request. Connections stay bounded by workspace/machine
+  topology; more configs add serialized RPCs only. Release unowned one-shot handles
+  and subscriptions.
+- Discover startup capabilities once per config/runtime, tracked in `refreshedConfigKeys`.
+  Re-arm passes aborted when presence leaves `synced`; reconnect must not re-probe answered
+  configs or use a pass-level gate. Probes launch real agents. Refresh defaults to machine
+  cache; only user or setup/authentication actions set `force`.
+  Intent: [capability refresh cache](../../../../specs/acp-capability-refresh-cache.md).
 
 ## Workspace switching
 
@@ -45,6 +40,10 @@ Replacement contract: [shared rules](../../../shared/AGENTS.md#session-history).
   [Stuck report](../../../../.agents/notes/implemented/feature/2026-09-26-workspace-sync-stuck-telemetry.md).
 
 ## Workspace runtime
+
+- Readers require backend identity and their Meta plane. Provisional absence/empty
+  history is not legacy evidence; release waits on resolve/retire. Keep Roost
+  capabilities live and wake its bridge on arrival.
 
 - A neutral local warm spare may initialize the implicit workspace runtime without
   publishing route context. A matching claim must retain that runtime or its in-flight
@@ -65,9 +64,10 @@ Replacement contract: [shared rules](../../../shared/AGENTS.md#session-history).
   state into the existing repo document; never replace unsent local edits or share
   the UI repo's persistence/cursors with the worker. Intent:
   [background prefetch](../../../../specs/session-background-prefetch.zh.md).
-- `create-workspace-runtime.ts` maintains one Repo view. `WorkspaceTargetRouter` owns
-  target ownership and transport selection; do not restore a second writer or a
-  proxy-authoring/write-intent mirror.
+- Keep one Repo view; `WorkspaceTargetRouter` owns target/transport selection.
+  Never restore a second writer or proxy-authoring/write-intent mirror.
+- Runtime close cancels auth, joins attach/reconnect work, then destroys Repo.
+  Failed startup shares this close path.
 - Local-only window bootstrap may exchange same-workspace CRDT snapshots from
   already owned documents. Merge into the receiving Repo; never treat peer state
   as authoritative sync or open stores solely to answer bootstrap requests.
@@ -77,11 +77,11 @@ Replacement contract: [shared rules](../../../shared/AGENTS.md#session-history).
   adoption; storage-loaded versions must be durable before cursor advancement. Never
   replace a live document. Import before constructing the history reader to avoid
   replaying bulk-import events through an initialized projection.
-- Repo storage, LoroDoc Streams cursors, and eager-sync high-water state must use the
-  same per-renderer cache namespace. A checkpoint must never be shared by independently
-  persisted Repo views. Meta/Flock cursors are replica-bound
-  (`workspace-streams-transport.ts`): never route them through a separate cursor store;
-  delete Meta progress via `repo.getReplicaCheckpointStore`.
+- Repo storage, LoroDoc cursors and eager-sync high-water state share a per-renderer
+  cache namespace. Independently persisted replicas must not share checkpoints.
+  Meta/Flock cursors stay repo-owned; delete Meta progress via `repo.getReplicaCheckpointStore`.
+- Required Streams protection rejects missing providers or plaintext rooms
+  ([contract](../../../../specs/workspace-streams-content.md)).
 - Transport state is selected per room, never merged. Runtime stores use
   `getReadinessTransportForRoom`; hooks without the router use the structural binding in
   `src/lib/room-readiness.ts`. Keep those selection rules aligned.
@@ -112,10 +112,11 @@ Replacement contract: [shared rules](../../../shared/AGENTS.md#session-history).
 
 ## Attachment transfer ownership
 
-Workspace `sendResources` owns preparation, cancellation and store borrows across
-React unmount. Dispose before transports/caches; join noncancelable IPC. Only the
-cache disposes stores. Cancel I/O, fence late results, await multipart cleanup.
-
-Ready sends: local commits, then best-effort RPC; no persistence or retry. Unready
-sends live only in `pendingSends`; archive/delete cancel/join them. Never
-replay uncertain steers. [Why](../../../../.agents/notes/implemented/simplification/2026-09-29-remove-session-send-journal.md).
+`sendResources` owns preparation/I/O/borrows; cancel/join before transports/caches
+close. Only caches dispose stores. Loro commits locally, then dispatches best-effort.
+Roost freezes input/target and shares ordered leases with queues. Ordinary input
+negotiates `sessionInputDispatch` v1: one owner request commits history and activation;
+the sender uses its receipt without history readback or a second dispatch RPC.
+Guide handoff still needs an owner receipt. Archive/delete cancel durable work beyond local
+snapshots and join leases. Unready Blobs stay in memory; uncertain steers never replay.
+[Decision](../../../../.agents/notes/proposed/architecture/2026-10-13-backend-independent-send-acceptance.md).

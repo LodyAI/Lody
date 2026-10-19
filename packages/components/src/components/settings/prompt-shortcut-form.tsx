@@ -1,6 +1,8 @@
-import { useId, useMemo, useState, type ReactNode } from 'react';
+import { useId, useMemo, useRef, useState, type ReactNode } from 'react';
 import * as stylex from '@stylexjs/stylex';
+import { AlertTriangle } from 'lucide-react';
 import { Spinner } from '@lody/ui/spinner';
+import { Popover } from '@lody/ui/popover';
 import { useTranslation } from 'react-i18next';
 import { parsePromptShortcut } from '@lody/shared/prompt-shortcuts/compiler';
 import {
@@ -91,6 +93,24 @@ const styles = stylex.create({
   },
   mono: { fontFamily: 'var(--font-mono, ui-monospace, monospace)' },
   shareBlock: { display: 'flex', flexDirection: 'column', gap: space[2] },
+  /** The command's live warning floats above the field rather than pushing the
+      form down while the draft settles. */
+  slugWarning: {
+    display: 'flex',
+    alignItems: 'flex-start',
+    gap: space[1.5],
+    maxWidth: '240px',
+    fontSize: '12px',
+    lineHeight: 1.375,
+    color: colors.label,
+  },
+  slugWarningMark: {
+    flexShrink: 0,
+    width: '14px',
+    height: '14px',
+    marginTop: '1px',
+    color: colors.warning,
+  },
 });
 
 export type ShortcutScopeOptions = {
@@ -112,6 +132,9 @@ const slugify = (name: string) =>
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '')
     .slice(0, PROMPT_SHORTCUT_LIMITS.slug);
+
+/** The schema's command rule, without the length `maxLength` already caps. */
+const SLUG_PATTERN = /^[a-z0-9][a-z0-9-]*$/;
 
 /**
  * The Prompt Shortcut editor body.
@@ -159,6 +182,14 @@ export function PromptShortcutForm({
   // A slug the author has typed is theirs; only an untouched one follows the
   // name, so renaming an existing Shortcut never silently moves its command.
   const [slugTouched, setSlugTouched] = useState(() => !isNew || initial.slug.length > 0);
+  const slugFieldRef = useRef<HTMLDivElement>(null);
+  // The field keeps what is typed rather than rejecting mid-token characters:
+  // `a-` is a draft on the way to `a-b`, not an error to undo. Validity is
+  // reported, not enforced — a valid draft is already the value when focus
+  // leaves, and an invalid one keeps its warning instead of being reset.
+  const slugInvalid =
+    !SLUG_PATTERN.test(value.slug) || value.slug.length > PROMPT_SHORTCUT_LIMITS.slug;
+  const showSlugWarning = slugTouched && slugInvalid;
   const scopeIssues = useMemo(() => {
     try {
       return shortcutTemplateMentions(value.prompt, ranges).flatMap((mention) => {
@@ -182,6 +213,9 @@ export function PromptShortcutForm({
   const submit = async () => {
     if (saving || blocked) return;
     setError(undefined);
+    // A rejected save is when the field warning has to be honest too: a
+    // command that never passed validation stops following the name.
+    setSlugTouched(true);
     try {
       const parsed = parsePromptShortcut({
         ...value,
@@ -254,7 +288,7 @@ export function PromptShortcutForm({
                 }}
               />
             </div>
-            <div {...stylex.props(styles.command)}>
+            <div {...stylex.props(styles.command)} ref={slugFieldRef}>
               <Input
                 id="shortcut-slug"
                 autoComplete="off"
@@ -263,14 +297,35 @@ export function PromptShortcutForm({
                 leading={<span aria-hidden="true">/</span>}
                 value={value.slug}
                 maxLength={PROMPT_SHORTCUT_LIMITS.slug}
-                pattern="[a-z0-9][a-z0-9-]*"
                 required
                 disabled={saving}
+                aria-invalid={showSlugWarning || undefined}
                 onChange={(event) => {
                   setSlugTouched(true);
-                  setValue((previous) => ({ ...previous, slug: slugify(event.target.value) }));
+                  setValue((previous) => ({ ...previous, slug: event.target.value }));
                 }}
               />
+              <Popover.Root open={showSlugWarning}>
+                <Popover.Content
+                  anchor={slugFieldRef}
+                  side="top"
+                  align="start"
+                  sideOffset={6}
+                  // Purely informational: it never takes focus, and the pointer
+                  // owns dismissal by fixing or leaving the draft.
+                  initialFocus={false}
+                  finalFocus={false}
+                  className="pointer-events-none"
+                >
+                  <div {...stylex.props(styles.slugWarning)}>
+                    <AlertTriangle aria-hidden="true" {...stylex.props(styles.slugWarningMark)} />
+                    {t(
+                      'settings.promptShortcuts.commandRule',
+                      'Lowercase letters, numbers and dashes, starting with a letter or number.'
+                    )}
+                  </div>
+                </Popover.Content>
+              </Popover.Root>
             </div>
           </div>
           <Input

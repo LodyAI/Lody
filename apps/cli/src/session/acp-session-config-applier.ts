@@ -138,37 +138,42 @@ export async function applyAcpSessionRunConfig(args: {
     agentConfigOptions.find((option) => option.category === 'mode')?.id ?? 'mode';
   const modelConfigId =
     agentConfigOptions.find((option) => option.category === 'model')?.id ?? 'model';
+  const configOptionModeId = configOptionValues?.[modeConfigId];
+  const targetModeId =
+    config.modeId ?? (typeof configOptionModeId === 'string' ? configOptionModeId : undefined);
   const configOptionModelId = configOptionValues?.[modelConfigId];
   const targetModelId =
     config.modelId ?? (typeof configOptionModelId === 'string' ? configOptionModelId : undefined);
 
-  if (config.modeId) {
+  // Modes can change the model, and models can reset model-dependent options.
+  // Resolve both representations before applying effort, regardless of key order.
+  if (targetModeId) {
     assertNotAborted();
     try {
-      await agentClient.setSessionMode?.(acpSessionId, config.modeId);
-      confirmedLegacyModeId = config.modeId;
+      await agentClient.setSessionMode?.(acpSessionId, targetModeId);
+      confirmedLegacyModeId = targetModeId;
     } catch (error) {
       assertNotAborted();
       recordRejection(
-        `mode=${JSON.stringify(config.modeId)}`,
-        suppressKnownRunConfigWarnings && config.modeId === ACP_PLAN_PERMISSION_MODE_ID
+        `mode=${JSON.stringify(targetModeId)}`,
+        suppressKnownRunConfigWarnings && targetModeId === ACP_PLAN_PERMISSION_MODE_ID
       );
       logger.debug(
-        `[${sessionId}] Failed to set ACP mode ${JSON.stringify(config.modeId)}: ${String(error)}`
+        `[${sessionId}] Failed to set ACP mode ${JSON.stringify(targetModeId)}: ${String(error)}`
       );
     }
     assertNotAborted();
   }
-  if (config.modelId) {
+  if (targetModelId) {
     assertNotAborted();
     try {
-      await agentClient.unstable_setSessionModel?.(acpSessionId, config.modelId);
-      confirmedLegacyModelId = config.modelId;
+      await agentClient.unstable_setSessionModel?.(acpSessionId, targetModelId);
+      confirmedLegacyModelId = targetModelId;
     } catch (error) {
       assertNotAborted();
-      recordRejection(`model=${JSON.stringify(config.modelId)}`, suppressKnownRunConfigWarnings);
+      recordRejection(`model=${JSON.stringify(targetModelId)}`, false);
       logger.debug(
-        `[${sessionId}] Failed to set ACP model ${JSON.stringify(config.modelId)}: ${String(error)}`
+        `[${sessionId}] Failed to set ACP model ${JSON.stringify(targetModelId)}: ${String(error)}`
       );
     }
     assertNotAborted();
@@ -176,40 +181,7 @@ export async function applyAcpSessionRunConfig(args: {
 
   for (const [configId, value] of configOptionEntries) {
     assertNotAborted();
-    if (configId === modeConfigId) {
-      if (!config.modeId && typeof value === 'string') {
-        try {
-          await agentClient.setSessionMode?.(acpSessionId, value);
-          confirmedLegacyModeId = value;
-        } catch (error) {
-          assertNotAborted();
-          logger.debug(
-            `[${sessionId}] Failed to set ACP mode option ${configId}=${formatAcpConfigValueForLog(
-              configId,
-              value
-            )}: ${String(error)}`
-          );
-        }
-        assertNotAborted();
-      }
-      continue;
-    }
-    if (configId === modelConfigId) {
-      if (!config.modelId && typeof value === 'string') {
-        try {
-          await agentClient.unstable_setSessionModel?.(acpSessionId, value);
-          confirmedLegacyModelId = value;
-        } catch (error) {
-          assertNotAborted();
-          logger.debug(
-            `[${sessionId}] Failed to set ACP model option ${configId}=${formatAcpConfigValueForLog(
-              configId,
-              value
-            )}: ${String(error)}`
-          );
-        }
-        assertNotAborted();
-      }
+    if (configId === modeConfigId || configId === modelConfigId) {
       continue;
     }
     if (shouldSkipFableFastModeDisable({ modelId: targetModelId, configId, value })) {

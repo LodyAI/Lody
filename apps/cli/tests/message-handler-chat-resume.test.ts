@@ -117,7 +117,7 @@ describe('MessageHandler chat resume', () => {
       hasSession: vi.fn(),
       initialize: vi.fn(),
       releaseGitHubRepoOwner: vi.fn(),
-      refreshGhTokenForSession: vi.fn(async () => {}),
+      validateSessionCredentials: vi.fn(async () => {}),
     };
 
     const handler = new MessageHandler(

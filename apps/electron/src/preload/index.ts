@@ -10,6 +10,10 @@ setupRenderer()
 
 const platformInfo = {
   os: process.platform,
+  osVersion: process.getSystemVersion(),
+  architecture: process.arch,
+  electronVersion: process.versions.electron,
+  chromiumVersion: process.versions.chrome,
   homeDir: os.homedir(),
   machineName: os.hostname(),
   preferredSystemLanguages: readPreferredSystemLanguagesArgument(process.argv)

@@ -9,6 +9,12 @@ import { buildChatStreamItems } from '../src/components/ai-gui/build-chat-stream
 import { SessionChatStreamView } from '../src/components/ai-gui/view';
 import { initI18n } from '../src/i18n';
 import { createConversationViewFromHistory } from '../src/lib/conversation-view';
+import type {
+  HistoryLiveSync,
+  HistoryLiveWindow,
+  LiveTurnActivity,
+} from '../src/components/ai-gui/assistant-turn-timing';
+import { useHistoryLiveWindow } from '../src/hooks/use-history-live-window';
 import { clearSavedScrollStates } from '../src/lib/conversation-scroll/saved-state';
 
 (
@@ -78,29 +84,51 @@ describe('live agent status', () => {
   const render = async (
     history: unknown[],
     status: { label: string; tone?: 'primary' | 'warning' },
-    options: { withTurnFooter?: boolean; scrollAway?: boolean } = {}
+    options: {
+      withTurnFooter?: boolean;
+      scrollAway?: boolean;
+      /** Presence and the live-sync window as the session page reports them. */
+      live?: { activity: LiveTurnActivity | null; window: HistoryLiveWindow };
+    } = {}
   ) => {
+    let current = history;
+    let notify: () => void = () => {};
     const view = createConversationViewFromHistory({
       sessionId,
-      getHistory: () => history as never,
-      subscribe: () => () => {},
+      getHistory: () => current as never,
+      subscribe: (listener) => {
+        notify = listener;
+        return () => {};
+      },
     });
     const { items } = buildChatStreamItems(view, sessionId);
-    view.dispose();
-    await act(async () =>
-      root.render(
-        createElement(SessionChatStreamView, {
-          items,
-          sessionId,
-          renderMessageRow: () => null,
-          lastAssistantMessageId: 'assistant-turn',
-          agentActivityLabel: status.label,
-          agentActivityTone: status.tone ?? 'primary',
-          // Copy-context makes a live turn render its footer (copy/fork actions).
-          ...(options.withTurnFooter ? { onCopyContext: () => {} } : {}),
-        })
-      )
-    );
+    const renderWith = (window: HistoryLiveWindow | undefined) =>
+      act(async () =>
+        root.render(
+          createElement(SessionChatStreamView, {
+            items,
+            sessionId,
+            conversationView: view,
+            renderMessageRow: () => null,
+            lastAssistantMessageId: 'assistant-turn',
+            agentActivityLabel: status.label,
+            agentActivityTone: status.tone ?? 'primary',
+            liveTurnActivity: options.live?.activity ?? null,
+            ...(window ? { historyLive: window } : {}),
+            // Copy-context makes a live turn render its footer (copy/fork actions).
+            ...(options.withTurnFooter ? { onCopyContext: () => {} } : {}),
+          })
+        )
+      );
+    await renderWith(options.live?.window);
+    const controls = {
+      /** The same turns arriving again from the backend: an update, not an edit. */
+      deliverUpdate: async () => {
+        current = history.slice();
+        await act(async () => notify());
+      },
+      setLiveWindow: (window: HistoryLiveWindow) => renderWith(window),
+    };
 
     if (options.scrollAway) {
       const viewport = container.querySelector<HTMLElement>('[data-message-selection-scroll]');
@@ -108,12 +136,25 @@ describe('live agent status', () => {
       Object.defineProperties(viewport, {
         clientHeight: { configurable: true, value: 400 },
         scrollHeight: { configurable: true, value: 1000 },
+        // The synthetic wheel must start somewhere it can actually scroll up.
+        scrollTop: { configurable: true, writable: true, value: 600 },
       });
       await act(async () => {
         viewport!.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -20 }));
       });
     }
+    return controls;
   };
+
+  /** Moves the clock and every interval (the live tickers) together. */
+  const useTickingClock = (iso: string) => {
+    vi.useRealTimers();
+    vi.useFakeTimers({ toFake: ['Date', 'setInterval', 'clearInterval'] });
+    vi.setSystemTime(new Date(iso));
+  };
+  const advance = (ms: number) => act(async () => vi.advanceTimersByTime(ms));
+  /** A live window that opened at the current (fake) instant. */
+  const liveNow = (): HistoryLiveWindow => ({ sync: 'live', since: Date.now() });
 
   const statusRow = () => container.querySelector('[data-agent-activity-row]');
   const shimmering = () =>
@@ -135,6 +176,36 @@ describe('live agent status', () => {
     expect(shimmering()).toEqual(['Working (Worked for 30s)']);
   });
 
+  it('says how long a working turn has gone without output once that passes two minutes', async () => {
+    useTickingClock('2026-09-19T00:04:29Z');
+    const { deliverUpdate } = await render(
+      liveTurn([toolCall('a'), { type: 'text', text: 'Running the lint gate.' }]),
+      { label: 'Working' },
+      { live: { activity: 'working', window: liveNow() } }
+    );
+    // Advances stay on the label's 300ms sample grid, so each read is exact.
+    await advance(2_100);
+    await deliverUpdate();
+    // 30s of silence is ordinary streaming: no notice yet.
+    await advance(30_000);
+    expect(statusRow()?.textContent).toBe('Working (Worked for 5m 00s)');
+    await advance(219_900);
+    expect(statusRow()?.textContent).toBe('Working (Worked for 8m 40s · no output for 4m)');
+  });
+
+  it('never reports silence while the agent waits on the user', async () => {
+    useTickingClock('2026-09-19T00:04:29Z');
+    const { deliverUpdate } = await render(
+      liveTurn([{ type: 'text', text: 'May I run this?' }]),
+      { label: 'Waiting for permission', tone: 'warning' },
+      { live: { activity: 'awaitingUser', window: liveNow() } }
+    );
+    await advance(2_000);
+    await deliverUpdate();
+    await advance(250_000);
+    expect(statusRow()?.textContent).toBe('Waiting for permission (Worked for 8m 40s)');
+  });
+
   it('keeps a still status row while waiting on the user', async () => {
     await render(liveTurn([{ type: 'text', text: 'May I run this?' }]), {
       label: 'Waiting for permission',
@@ -144,7 +215,7 @@ describe('live agent status', () => {
     expect(shimmering()).toEqual([]);
   });
 
-  it('shows the working state on the scroll-to-latest button while output streams', async () => {
+  it('keeps the scroll-to-latest button actionable while output streams', async () => {
     await render(
       liveTurn([{ type: 'text', text: 'Still writing.' }]),
       { label: 'Working' },
@@ -153,6 +224,9 @@ describe('live agent status', () => {
     const button = container.querySelector<HTMLButtonElement>('[data-scroll-to-latest]');
     expect(button).not.toBeNull();
     expect(button!.querySelector('.animate-spin')).not.toBeNull();
+    expect(button!.querySelector('.lucide-arrow-down')).not.toBeNull();
+    await act(async () => button!.click());
+    expect(container.querySelector('[data-scroll-to-latest]')).toBeNull();
   });
 
   it('keeps the scroll-to-latest arrow while waiting for permission', async () => {
@@ -264,6 +338,139 @@ describe('live agent status', () => {
       container.querySelector<HTMLButtonElement>('[aria-label="Turn configuration"]')!.click()
     );
     expect(document.body.textContent).toContain('Claude Opus 5');
+  });
+
+  const openTurnInfo = async () => {
+    const info = container.querySelector<HTMLButtonElement>('[aria-label="Turn configuration"]');
+    // Row overlays mount once their row is armed by a pointer entry.
+    await act(async () => {
+      info!
+        .closest('[data-virtual-index]')!
+        .dispatchEvent(new MouseEvent('pointerover', { bubbles: true }));
+    });
+    await act(async () =>
+      container.querySelector<HTMLButtonElement>('[aria-label="Turn configuration"]')!.click()
+    );
+  };
+  const popoverValue = (label: string) =>
+    [...document.body.querySelectorAll('dt')].find((dt) => dt.textContent === label)
+      ?.nextElementSibling;
+
+  const modelInfo = { modelId: 'claude-opus-5', name: 'Claude Opus 5' };
+  const streamingTurn = () => liveTurn([{ type: 'text', text: 'Partial answer' }], { modelInfo });
+
+  it('times a running turn in its info popover and warns when updates stop', async () => {
+    useTickingClock('2026-09-19T00:00:05Z');
+    const { deliverUpdate } = await render(
+      streamingTurn(),
+      { label: 'Working' },
+      { live: { activity: 'working', window: liveNow() } }
+    );
+    await advance(2_000);
+    await deliverUpdate();
+    await advance(12_000);
+    await openTurnInfo();
+    expect(popoverValue('Started')?.textContent).toMatch(/ · running 18s$/);
+    expect(popoverValue('Last update')?.textContent).toBe('12s ago');
+    expect(popoverValue('Last update')?.hasAttribute('data-stale')).toBe(false);
+    expect(popoverValue('Ended')).toBeUndefined();
+
+    await advance(48_000);
+    const stale = popoverValue('Last update');
+    expect(stale?.textContent).toBe('1m 00s ago');
+    expect(stale?.hasAttribute('data-stale')).toBe(true);
+    expect(stale?.getAttribute('title')).toContain('may be stuck');
+  });
+
+  it('does not read a catch-up import as fresh output', async () => {
+    useTickingClock('2026-09-19T00:00:05Z');
+    const { deliverUpdate, setLiveWindow } = await render(
+      streamingTurn(),
+      { label: 'Working' },
+      { live: { activity: 'working', window: { sync: 'syncing', since: null } } }
+    );
+    await openTurnInfo();
+    expect(popoverValue('Last update')?.textContent).toBe('—');
+    expect(popoverValue('Last update')?.getAttribute('title')).toContain('Catching up');
+
+    // Joining imports what was missed, and the room reports synced around it.
+    await deliverUpdate();
+    await setLiveWindow(liveNow());
+    await deliverUpdate();
+    await advance(30_000);
+    expect(popoverValue('Last update')?.textContent).toBe('—');
+    expect(popoverValue('Last update')?.hasAttribute('data-stale')).toBe(false);
+
+    // Only output that arrives while live counts.
+    await deliverUpdate();
+    await advance(5_000);
+    expect(popoverValue('Last update')?.textContent).toBe('5s ago');
+  });
+
+  it('says the agent waits on the user, or that this device is offline, instead of a time', async () => {
+    useTickingClock('2026-09-19T00:00:05Z');
+    const { deliverUpdate, setLiveWindow } = await render(
+      streamingTurn(),
+      { label: 'Waiting for permission', tone: 'warning' },
+      { live: { activity: 'awaitingUser', window: liveNow() } }
+    );
+    await advance(2_000);
+    await deliverUpdate();
+    await advance(300_000);
+    await openTurnInfo();
+    expect(popoverValue('Last update')?.textContent).toBe('Waiting for you');
+    expect(popoverValue('Last update')?.hasAttribute('data-stale')).toBe(false);
+
+    await setLiveWindow({ sync: 'offline', since: null });
+    expect(popoverValue('Last update')?.textContent).toBe('Disconnected');
+    expect(popoverValue('Last update')?.hasAttribute('data-stale')).toBe(true);
+  });
+
+  it('shows an unfinished turn nothing is running as started, without running time or liveness', async () => {
+    // The daemon died before finalizing: history stays unfinished, presence is gone.
+    await render(
+      streamingTurn(),
+      { label: 'Working' },
+      { live: { activity: null, window: liveNow() } }
+    );
+    await openTurnInfo();
+    expect(popoverValue('Started')?.textContent).not.toContain('running');
+    expect(popoverValue('Last update')).toBeUndefined();
+  });
+
+  it('opens a new live window each time live sync resumes, and none while it is down', async () => {
+    useTickingClock('2026-09-19T00:00:05Z');
+    const seen: HistoryLiveWindow[] = [];
+    const Probe = ({ sync }: { sync: HistoryLiveSync }) => {
+      seen.push(useHistoryLiveWindow(sync));
+      return null;
+    };
+    await act(async () => root.render(createElement(Probe, { sync: 'live' })));
+    expect(seen.at(-1)).toEqual({ sync: 'live', since: Date.parse('2026-09-19T00:00:05Z') });
+    await advance(10_000);
+    await act(async () => root.render(createElement(Probe, { sync: 'offline' })));
+    expect(seen.at(-1)).toEqual({ sync: 'offline', since: null });
+    await advance(10_000);
+    await act(async () => root.render(createElement(Probe, { sync: 'live' })));
+    expect(seen.at(-1)).toEqual({ sync: 'live', since: Date.parse('2026-09-19T00:00:25Z') });
+  });
+
+  it('times a finished turn by its start, end and Worked-for duration', async () => {
+    await render(
+      liveTurn([{ type: 'text', text: 'Done.' }], {
+        finished: true,
+        endedAt: Date.parse('2026-09-19T00:00:25Z'),
+        modelInfo: { modelId: 'claude-opus-5', name: 'Claude Opus 5' },
+      }),
+      { label: 'Working' },
+      { withTurnFooter: true }
+    );
+    await openTurnInfo();
+    expect(popoverValue('Started')?.textContent).not.toContain('running');
+    expect(popoverValue('Started')?.getAttribute('title')).toBeTruthy();
+    expect(popoverValue('Ended')?.textContent).toBeTruthy();
+    expect(popoverValue('Duration')?.textContent).toBe('24s');
+    expect(popoverValue('Last update')).toBeUndefined();
   });
 
   it('labels command steps with the Run verb in the expanded group', async () => {
@@ -417,6 +624,52 @@ describe('live agent status', () => {
     expect(taskStop.textContent).toBe('{"task_id":"b7q2"}');
   });
 
+  it('shows a shell step text result verbatim instead of reflowing it as Markdown', async () => {
+    // Pi sessions recorded before its results became terminal output stored
+    // them as plain text content.
+    const output = '==== one ====\nline 1\n==== two ====\nline 2';
+    await render(
+      liveTurn([
+        {
+          type: 'tool_call',
+          toolCallId: 'pi-bash-1',
+          title: 'bash',
+          kind: 'execute',
+          status: 'completed',
+          content: [
+            { type: 'content', content: { type: 'text', text: output } },
+            { type: 'terminal_command', command: 'echo one; echo two' },
+          ],
+        },
+        {
+          type: 'tool_call',
+          toolCallId: 'pi-bash-2',
+          title: 'pwd',
+          kind: 'execute',
+          status: 'completed',
+          content: [{ type: 'terminal_command', command: 'pwd' }],
+        },
+      ]),
+      { label: 'Working' }
+    );
+
+    const button = (text: string) =>
+      [...container.querySelectorAll('button')].find((candidate) =>
+        candidate.textContent?.includes(text)
+      )!;
+    await act(async () => button('Ran 2 commands').click());
+    if (button('Ran bash').getAttribute('aria-expanded') !== 'true') {
+      await act(async () => button('Ran bash').click());
+    }
+
+    const sheet = [...container.querySelectorAll('[data-tool-detail-sheet]')].find((candidate) =>
+      candidate.textContent?.includes('echo one; echo two')
+    );
+    expect(sheet).toBeDefined();
+    expect(sheet!.querySelector('.markdown-renderer')).toBeNull();
+    expect([...sheet!.querySelectorAll('pre')].map((pre) => pre.textContent)).toContain(output);
+  });
+
   it('shows the turn token usage in compact units with exact values on hover', async () => {
     await render(
       liveTurn([{ type: 'text', text: 'Done.' }], {
@@ -427,6 +680,7 @@ describe('live agent status', () => {
           cacheReadInputTokens: 1_500_000,
           cacheCreationInputTokens: 2000,
           reasoningOutputTokens: 200,
+          costUSD: 0.0182,
         },
       }),
       { label: 'Working' }
@@ -453,6 +707,10 @@ describe('live agent status', () => {
     expect(value('Output')?.getAttribute('title')).toBe('500 · Reasoning 200');
     expect(value('Cache')?.textContent).toBe('1.5M');
     expect(value('Cache')?.getAttribute('title')).toBe('1,502,000 · Read 1,500,000 · Write 2,000');
+    // The cost estimate is one more row of the same token section.
+    expect(document.body.textContent).toContain('Cost estimate');
+    expect(value('Cost estimate')?.textContent).toBe('$0.0182');
+    expect(value('Cost estimate')?.getAttribute('title')).toContain('not an invoice');
     expect(document.body.textContent).not.toContain('No configuration recorded');
   });
 });

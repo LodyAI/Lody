@@ -1,4 +1,4 @@
-import { Effect, Either, Schema } from 'effect';
+import { Effect, Semaphore, Result, Schema } from 'effect';
 import {
   getServerNow,
   type PrStatus,
@@ -168,7 +168,7 @@ const BatchResponseSchema = Schema.Struct({
   data: Schema.NullOr(
     Schema.Struct({
       // Alias keys are dynamic (`p0`, `d0o`, ...), validated per alias below.
-      repository: Schema.NullOr(Schema.Record({ key: Schema.String, value: Schema.Unknown })),
+      repository: Schema.NullOr(Schema.Record(Schema.String, Schema.Unknown)),
       rateLimit: Schema.NullOr(RateLimitSchema),
     })
   ),
@@ -272,11 +272,11 @@ export function parsePrPollBatchResponse(
   body: unknown,
   batch: Pick<PrPollBatchQuery, 'statusAliases' | 'discoveryAliases'>
 ): PrPollQueryOutcome {
-  const decoded = Schema.decodeUnknownEither(BatchResponseSchema)(body);
-  if (Either.isLeft(decoded)) {
+  const decoded = Schema.decodeUnknownResult(BatchResponseSchema)(body);
+  if (Result.isFailure(decoded)) {
     return { kind: 'network-error', message: 'Malformed GraphQL response body' };
   }
-  const response = decoded.right;
+  const response = decoded.success;
   const errors = response.errors ?? [];
 
   const rateLimited = errors.find((error) => error.type === 'RATE_LIMITED');
@@ -317,8 +317,8 @@ export function parsePrPollBatchResponse(
       pullRequests.push({ prNumber, pr: null, ok: value === null });
       continue;
     }
-    const node = Schema.decodeUnknownEither(PullRequestNodeSchema)(value);
-    const pr = Either.isRight(node) ? projectPullRequestNode(node.right) : null;
+    const node = Schema.decodeUnknownResult(PullRequestNodeSchema)(value);
+    const pr = Result.isSuccess(node) ? projectPullRequestNode(node.success) : null;
     pullRequests.push({ prNumber, pr, ok: pr !== null });
   }
 
@@ -334,12 +334,12 @@ export function parsePrPollBatchResponse(
       entry.ok = false;
       continue;
     }
-    const list = Schema.decodeUnknownEither(DiscoveryAliasSchema)(value);
-    if (Either.isLeft(list)) {
+    const list = Schema.decodeUnknownResult(DiscoveryAliasSchema)(value);
+    if (Result.isFailure(list)) {
       entry.ok = false;
       continue;
     }
-    for (const node of list.right.nodes) {
+    for (const node of list.success.nodes) {
       const pr = projectPullRequestNode(node);
       if (pr) {
         entry.prs.push(pr);
@@ -390,19 +390,19 @@ export class GitHubGraphQlClient {
   private readonly timeoutMs: number;
   private readonly endpoint: string;
   private readonly nowMs: () => number;
-  private readonly semaphore: Effect.Semaphore;
+  private readonly semaphore: Semaphore.Semaphore;
 
   constructor(private readonly options: GitHubGraphQlClientOptions) {
     this.fetchFn = options.fetchFn ?? fetch;
     this.timeoutMs = options.timeoutMs ?? 30_000;
     this.endpoint = options.endpoint ?? GITHUB_GRAPHQL_ENDPOINT;
     this.nowMs = options.nowMs ?? getServerNow;
-    this.semaphore = Effect.runSync(Effect.makeSemaphore(options.concurrency ?? 2));
+    this.semaphore = Effect.runSync(Semaphore.make(options.concurrency ?? 2));
   }
 
   async executeBatch(batch: PrPollBatchQuery, token: string): Promise<PrPollQueryOutcome> {
     return await Effect.runPromise(
-      this.semaphore.withPermits(1)(Effect.promise(() => this.doFetch(batch, token)))
+      Semaphore.withPermits(this.semaphore, 1)(Effect.promise(() => this.doFetch(batch, token)))
     );
   }
 

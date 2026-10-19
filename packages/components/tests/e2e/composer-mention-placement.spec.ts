@@ -1,5 +1,144 @@
 import { expect, test } from '@playwright/test';
 
+for (const { trigger, query, count } of [
+  { trigger: '/', query: 'review', count: 2 },
+  { trigger: '$', query: 'imagegen', count: 8 },
+]) {
+  test(`${trigger} caret measurements preserve the body's positional selector state`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.goto(
+      '/iframe.html?id=mentions-mentiontwolevelmenu--floating-in-composer&viewMode=story'
+    );
+    const input = page.getByRole('combobox');
+    await expect(input).toBeVisible();
+    await page.evaluate(() => {
+      const samples: boolean[] = [];
+      // Observe the synchronous layout boundary: a MutationObserver runs too late,
+      // after the temporary mirror has already been removed. Keep real geometry.
+      const original = Element.prototype.getBoundingClientRect;
+      Element.prototype.getBoundingClientRect = function () {
+        if (this.parentElement === document.documentElement && this.tagName === 'DIV') {
+          samples.push(document.body.matches(':last-child'));
+        }
+        return original.call(this);
+      };
+      Object.assign(window, { caretBodyTailSamples: samples });
+    });
+
+    await input.fill(trigger);
+    const menu = page.getByRole('listbox');
+    await expect(page.getByRole('option')).toHaveCount(count);
+    await input.pressSequentially(query);
+    await expect(page.getByRole('option')).toHaveCount(1);
+    await input.press('Enter');
+    await expect(menu).toBeHidden();
+    await expect(input).toHaveValue(`${trigger}${query} `);
+    await expect(input).toBeFocused();
+    await input.fill('');
+    await input.pressSequentially(trigger);
+    await expect(page.getByRole('option')).toHaveCount(count);
+    await input.press('Escape');
+    await expect(menu).toBeHidden();
+
+    const samples = await page.evaluate(
+      () => (window as typeof window & { caretBodyTailSamples: boolean[] }).caretBodyTailSamples
+    );
+    expect(samples.length).toBeGreaterThan(0);
+    expect(samples.every(Boolean)).toBe(true);
+    await expect(page.locator('html > div')).toHaveCount(0);
+  });
+}
+
+test('caret geometry survives soft wraps, textarea scroll, transform and zoom', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.goto(
+    '/iframe.html?id=mentions-mentiontwolevelmenu--floating-in-composer&viewMode=story'
+  );
+  const input = page.getByRole('combobox');
+  const frame = page.locator('[data-mention-frame]');
+  await frame.evaluate((node: HTMLElement) => {
+    Object.assign(node.style, { position: 'fixed', top: '100px', left: '100px', width: '1000px' });
+  });
+  await input.evaluate((node: HTMLTextAreaElement) => {
+    Object.assign(node.style, {
+      font: '16px / 20px monospace',
+      width: '20ch',
+      height: '60px',
+      minHeight: '0',
+      padding: '0',
+      border: '0',
+      letterSpacing: '0',
+    });
+  });
+  const menu = page.getByRole('listbox');
+  const assertCaret = async (column: number, line: number) => {
+    await expect(page.getByRole('option')).toHaveCount(1);
+    await expect
+      .poll(async () => {
+        const expected = await input.evaluate(
+          (node: HTMLTextAreaElement, position) => {
+            const box = node.getBoundingClientRect();
+            const scale = box.height / node.offsetHeight;
+            return {
+              x: box.x + ((position.column * node.clientWidth) / 20 - node.scrollLeft) * scale,
+              y: box.y + ((position.line + 1) * 20 - node.scrollTop) * scale + 8,
+            };
+          },
+          { column, line }
+        );
+        const actual = await menu.boundingBox();
+        return actual
+          ? Math.max(Math.abs(actual.x - expected.x), Math.abs(actual.y - expected.y))
+          : Infinity;
+      })
+      .toBeLessThan(2);
+  };
+
+  await input.fill('aaaa $imagegen');
+  await assertCaret(14, 0);
+  await input.fill(`${'word '.repeat(4)}$imagegen`);
+  await assertCaret(9, 1);
+  await input.fill(`${'a\n'.repeat(6)}$imagegen`);
+  await expect.poll(() => input.evaluate((node) => node.scrollTop)).toBeGreaterThan(0);
+  await assertCaret(9, 6);
+  for (const mode of ['transform', 'zoom']) {
+    await frame.evaluate((node: HTMLElement, scaleMode) => {
+      node.style.transformOrigin = 'top left';
+      node.style.transform = scaleMode === 'transform' ? 'scale(1.25)' : '';
+      node.style.zoom = scaleMode === 'zoom' ? '1.25' : '';
+    }, mode);
+    await assertCaret(9, 6);
+  }
+  await input.press('Enter');
+  await expect(input).toHaveValue(/\$imagegen $/);
+  await expect(menu).toBeHidden();
+  await expect(input).toBeFocused();
+});
+
+test('dialog composer filters and selects a caret menu within the viewport', async ({ page }) => {
+  await page.setViewportSize({ width: 800, height: 700 });
+  await page.goto('/iframe.html?id=chat-chatcomposer--dialog-mention-stress&viewMode=story');
+  const input = page.getByRole('combobox', { name: 'Message' });
+  await input.fill('/');
+  await expect(page.getByRole('option')).toHaveCount(24);
+  await input.pressSequentially('command-23');
+  await expect(page.getByRole('option')).toHaveCount(1);
+  const menu = page.getByRole('listbox');
+  const box = await menu.boundingBox();
+  expect(box).not.toBeNull();
+  expect(box!.x).toBeGreaterThanOrEqual(0);
+  expect(box!.y).toBeGreaterThanOrEqual(0);
+  expect(box!.x + box!.width).toBeLessThanOrEqual(800);
+  expect(box!.y + box!.height).toBeLessThanOrEqual(700);
+  await page.getByRole('option').click();
+  await expect(menu).toBeHidden();
+  await expect(input).toBeFocused();
+});
+
 test('No project session searches preserve candidates and report query misses', async ({
   page,
 }) => {
@@ -231,10 +370,12 @@ test('the open session menu tracks editor scale and window resize', async ({ pag
   });
   await page.setViewportSize({ width: 650, height: 600 });
   await expect(menu).toBeVisible();
-  const resized = await menu.boundingBox();
-  expect(resized).not.toBeNull();
-  expect(resized!.x).toBeGreaterThanOrEqual(16);
-  expect(resized!.x + resized!.width).toBeLessThanOrEqual(650);
+  await expect
+    .poll(async () => {
+      const resized = await menu.boundingBox();
+      return resized ? resized.x >= 16 && resized.x + resized.width <= 650 : false;
+    })
+    .toBe(true);
   await expect(input).toBeFocused();
   await page.keyboard.press('Escape');
   await expect(menu).toBeHidden();

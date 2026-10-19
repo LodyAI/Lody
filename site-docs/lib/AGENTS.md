@@ -27,6 +27,9 @@ Root `AGENTS.md` and `site-docs/AGENTS.md` also apply.
   Fetch desktop `version.json` and Android `android-version.json` independently;
   each keeps its own version, availability and retry state. Show Android links only
   when its exact versioned filename appears in both `files` and `downloads`.
+  Linux ARM64 is additive for older manifests; if either ARM64 installer is advertised,
+  require both AppImage and deb in both manifest lists. Stable ARM64 links also wait
+  for published download mappings.
   The Nightly display sequence is non-negative: accept `.0` at the start of a
   release cycle, while rejecting leading-zero counters. It is not a CI build number.
 - `blog-reading-time.generated.ts` and `docs-faq.generated.ts` are generated and

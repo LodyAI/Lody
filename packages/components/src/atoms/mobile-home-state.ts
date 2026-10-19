@@ -1,5 +1,5 @@
 import { useCallback, useMemo } from 'react';
-import { useAtom, type PrimitiveAtom } from 'jotai';
+import { atom, useAtom, type PrimitiveAtom } from 'jotai';
 import { atomWithStorage } from 'jotai/utils';
 
 /**
@@ -74,6 +74,12 @@ export const mobileHomeProjectsSubTabAtom = atomWithStorage<MobileProjectsSubTab
   'lody-mobile-home-projects-sub-tab',
   'local'
 );
+
+/* One-shot handoff when a phone leaves the schedule editor (or opens the
+   bare /schedules URL). The home screen reads it on mount and then clears
+   it, so a later visit to Chat does not stay stuck on Schedules. Not
+   persisted: this only has to survive the navigation that remounts home. */
+export const mobileHomeReturnTabAtom = atom<'schedules' | null>(null);
 
 /**
  * Thin adapter that exposes a `string[]`-backed atom as if it were a

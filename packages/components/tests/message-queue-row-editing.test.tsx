@@ -8,7 +8,8 @@ import type { MessageQueueItem, SessionId, WorkspaceId } from '@lody/shared';
 
 import { MessageQueueDisplay } from '../src/components/sessions/message-queue';
 import { currentWorkspaceIdAtom } from '../src/atoms';
-import { authTokenAtom } from '../src/atoms/runtime';
+import { authTokenAtom, runtimeAtom, type WorkspaceRuntime } from '../src/atoms/runtime';
+import type { PendingSessionSend } from '../src/lib/session-pending-sends';
 import { initI18n } from '../src/i18n';
 
 // Each variant resolves to a distinct URL so the test can tell the row's
@@ -76,7 +77,7 @@ describe('queued message editing commits', () => {
 
   // The save promise stays pending until the test releases it, so the row is
   // observable in its mid-write state instead of racing a microtask.
-  const renderQueue = async (options?: { holdSave?: boolean }) => {
+  const renderQueue = async (options?: { holdSave?: boolean; failSaveOnce?: boolean }) => {
     const items = [makeItem()];
     await act(async () => {
       root?.render(
@@ -91,6 +92,8 @@ describe('queued message editing commits', () => {
           },
           onEditSave: (item: MessageQueueItem, task: string) => {
             saved.push({ cid: item.$cid, task });
+            if (options?.failSaveOnce && saved.length === 1)
+              return Promise.reject(new Error('Synthetic save failure'));
             if (!options?.holdSave) return undefined;
             return new Promise<void>((resolve) => {
               releaseSave = resolve;
@@ -129,6 +132,30 @@ describe('queued message editing commits', () => {
     });
     return event;
   };
+
+  it('folds and reopens without committing or losing an editing draft', async () => {
+    const view = await renderQueue();
+    const textarea = await startEditing(view);
+    await act(async () => setTextareaValue(textarea, 'Keep this unfinished draft'));
+    const toggle = view.querySelector<HTMLButtonElement>('[data-message-queue-toggle]')!;
+    expect(toggle.getAttribute('aria-expanded')).toBe('true');
+
+    // The focus transition is shared by pointer presses and keyboard navigation.
+    await act(async () => toggle.focus());
+    await act(async () => toggle.click());
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+    expect(view.querySelector('textarea')).toBe(textarea);
+    expect(textarea.value).toBe('Keep this unfinished draft');
+    expect(saved).toEqual([]);
+    expect(cancelled).toEqual([]);
+
+    await act(async () => toggle.click());
+    expect(toggle.getAttribute('aria-expanded')).toBe('true');
+    expect(view.querySelector('textarea')).toBe(textarea);
+    await act(async () => textarea.focus());
+    await pressEnter(textarea);
+    expect(saved).toEqual([{ cid: 'cid-0', task: 'Keep this unfinished draft' }]);
+  });
 
   it('saves the edit when Enter is pressed', async () => {
     const view = await renderQueue();
@@ -180,6 +207,99 @@ describe('queued message editing commits', () => {
     await pressEnter(textarea);
     expect(saved).toEqual([{ cid: 'cid-0', task: 'Clarified queued instruction' }]);
   });
+
+  for (const nextEditPending of [false, true]) {
+    it(`keeps the next editor when an earlier save settles (next pending=${nextEditPending})`, async () => {
+      let finishSave!: () => void;
+      let finishStart!: () => void;
+      function QueueWithOverlappingEdits() {
+        const [items, setItems] = useState([
+          makeItem(),
+          {
+            ...makeItem(),
+            $cid: 'cid-1',
+            userTurnId: 'turn-1',
+            task: 'Add regression tests',
+            acpSessionConfig: { ...makeItem().acpSessionConfig, prompt: 'Add regression tests' },
+          },
+        ]);
+        return createElement(MessageQueueDisplay, {
+          sessionId: 'session-test' as SessionId,
+          items,
+          onRemove: () => undefined,
+          onReorder: () => undefined,
+          onSteer: () => undefined,
+          onEditStart: (item) => {
+            setItems((current) =>
+              current.map((row) => (row.$cid === item.$cid ? { ...row, isEditing: true } : row))
+            );
+            if (nextEditPending && item.$cid === 'cid-1')
+              return new Promise<void>((resolve) => {
+                finishStart = resolve;
+              });
+            return undefined;
+          },
+          onEditCancel: (item) => {
+            setItems((current) =>
+              current.map((row) => (row.$cid === item.$cid ? { ...row, isEditing: false } : row))
+            );
+          },
+          onEditSave: (item, task) => {
+            saved.push({ cid: item.$cid, task });
+            setItems((current) =>
+              current.map((row) =>
+                row.$cid === item.$cid
+                  ? {
+                      ...row,
+                      isEditing: false,
+                      task,
+                      acpSessionConfig: { ...row.acpSessionConfig, prompt: task },
+                    }
+                  : row
+              )
+            );
+            if (item.$cid === 'cid-0')
+              return new Promise<void>((resolve) => {
+                finishSave = resolve;
+              });
+            return undefined;
+          },
+        });
+      }
+      await act(async () => root?.render(createElement(QueueWithOverlappingEdits)));
+      const first = await startEditing(container!);
+      await act(async () => setTextareaValue(first, 'Preserve queue ordering'));
+      await act(async () => first.blur());
+      const nextButton = container!.querySelector<HTMLButtonElement>(
+        'button[aria-label="Edit queued message"]'
+      );
+      await act(async () => nextButton!.click());
+      let next = container!.querySelector('textarea')!;
+      expect(next.value).toBe(nextEditPending ? 'Preserve queue ordering' : 'Add regression tests');
+      if (!nextEditPending)
+        await act(async () => setTextareaValue(next, 'Cover ordering and cancellation'));
+      await act(async () => finishSave());
+      expect(container!.querySelector('textarea')).toBe(next);
+      expect(next.value).toBe(
+        nextEditPending ? 'Preserve queue ordering' : 'Cover ordering and cancellation'
+      );
+      if (nextEditPending) {
+        await act(async () => finishStart());
+        next = container!.querySelector('textarea')!;
+        expect(next.value).toBe('Add regression tests');
+        await act(async () => setTextareaValue(next, 'Cover ordering and cancellation'));
+      }
+      expect(document.activeElement).toBe(next);
+      await pressEnter(next);
+      expect(container!.querySelector('textarea')).toBeNull();
+      expect(container!.textContent).toContain('Preserve queue ordering');
+      expect(container!.textContent).toContain('Cover ordering and cancellation');
+      expect(saved).toEqual([
+        { cid: 'cid-0', task: 'Preserve queue ordering' },
+        { cid: 'cid-1', task: 'Cover ordering and cancellation' },
+      ]);
+    });
+  }
 
   it('leaves Shift+Enter to the textarea as a newline', async () => {
     const view = await renderQueue();
@@ -233,6 +353,25 @@ describe('queued message editing commits', () => {
     expect(cancelled).toEqual([]);
   });
 
+  it('preserves a rejected draft and lets the user save it again', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const view = await renderQueue({ failSaveOnce: true });
+      const textarea = await startEditing(view);
+      await act(async () => setTextareaValue(textarea, 'Keep this clarification'));
+      await pressEnter(textarea);
+      expect(view.querySelector('textarea')).toBe(textarea);
+      expect(textarea.disabled).toBe(false);
+      expect(textarea.value).toBe('Keep this clarification');
+      expect(document.activeElement).toBe(textarea);
+      await pressEnter(textarea);
+      expect(view.querySelector('textarea')).toBeNull();
+      expect(saved.at(-1)).toEqual({ cid: 'cid-0', task: 'Keep this clarification' });
+    } finally {
+      consoleError.mockRestore();
+    }
+  });
+
   it('reverts instead of writing when the text is unchanged', async () => {
     const view = await renderQueue();
     const textarea = await startEditing(view);
@@ -260,6 +399,68 @@ describe('queued message images', () => {
   afterEach(async () => {
     await act(async () => root?.unmount());
     container?.remove();
+  });
+
+  it('keeps live pending and failed-send counts visible while folded', async () => {
+    const store = createStore();
+    store.set(currentWorkspaceIdAtom, 'workspace-test' as WorkspaceId);
+    const record = (id: string, error?: string) =>
+      ({
+        id,
+        error,
+        sessionId: 'session-test',
+        workspaceId: 'workspace-test',
+        sequence: 1,
+        attachments: [],
+        delivery: { kind: 'queue' },
+        queue: { task: id },
+        entry: { id, role: 'user', items: [] },
+      }) as PendingSessionSend;
+    let records = [record('uploading'), record('failed', 'offline')];
+    const listeners = new Set<() => void>();
+    store.set(runtimeAtom, {
+      workspaceId: 'workspace-test',
+      pendingSends: {
+        getSnapshot: () => records,
+        subscribe: (listener: () => void) => {
+          listeners.add(listener);
+          return () => listeners.delete(listener);
+        },
+      },
+    } as unknown as WorkspaceRuntime);
+    await act(async () =>
+      root?.render(
+        createElement(
+          Provider,
+          { store },
+          createElement(MessageQueueDisplay, {
+            sessionId: 'session-test' as SessionId,
+            items: [makeItem()],
+            onRemove: () => undefined,
+            onReorder: () => undefined,
+            onEditStart: () => undefined,
+            onEditCancel: () => undefined,
+            onEditSave: () => undefined,
+            onSteer: () => undefined,
+          })
+        )
+      )
+    );
+    const toggle = container!.querySelector<HTMLButtonElement>('[data-message-queue-toggle]')!;
+    await act(async () => toggle.click());
+    expect(toggle.textContent).toContain('3 queued');
+    expect(container!.querySelector('[role="status"]')?.textContent).toBe('1 not sent1 preparing');
+
+    await act(async () => {
+      records = [...records, record('new-upload')];
+      listeners.forEach((listener) => listener());
+    });
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+    expect(toggle.textContent).toContain('4 queued');
+    expect(container!.querySelector('[role="status"]')?.textContent).toBe('1 not sent2 preparing');
+    await act(async () => toggle.click());
+    expect(container!.querySelectorAll('[data-pending-queue-row]').length).toBe(3);
+    expect(container!.querySelector('[aria-label="Continue sending"]')).toBeTruthy();
   });
 
   it('opens the full-size image in the viewer without editing the row', async () => {

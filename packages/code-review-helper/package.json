@@ -48,6 +48,7 @@
   "dependencies": {
     "@fontsource/jetbrains-mono": "^5.2.8",
     "@lody/components": "workspace:*",
+    "@lody/shared": "workspace:*",
     "@pierre/diffs": "^1.0.5",
     "@radix-ui/react-dropdown-menu": "^2.1.6",
     "@radix-ui/react-separator": "^1.1.8",

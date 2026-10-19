@@ -1,7 +1,11 @@
 import type { z } from 'zod';
 import type { HistoryWriter, SessionHistory, SessionHistoryInput } from '@lody/shared';
 import { HistoryEntryWriteSchema, HistoryWriteError, parseHistoryWrite } from '@lody/shared';
-import { applyMessageContentsBatch, applyNotificationOnHistory } from '@lody/shared';
+import {
+  applyMessageContentsBatch,
+  applyNotificationOnHistory,
+  targetLocalHistoryTargets,
+} from '@lody/shared';
 import {
   applyMarkTurnSeen,
   markTurnSeenBlocked,
@@ -20,9 +24,10 @@ import type { MessageContent, ModelInfo, AcpSessionNotification } from '@lody/sh
  * One bound batch of agent output. The target assistant turn is part of the
  * input, never re-selected at flush time. `entryBound` means the caller has
  * already proved every message belongs to `targetAssistantEntryId` (text/thought
- * chunks); the adapter then rewrites only that located turn. Otherwise the
- * adapter routes through the whole history because a tool/subagent update can
- * belong to an older turn.
+ * chunks). Independently, notification batches (text, plans, tools and subagents
+ * matched by their stored ownership) write through `HistoryWriter.updateTail`. Only
+ * the rest (singleton/structural updates, rich contents, unwindowable storage) route through
+ * the whole history.
  */
 export type ApplyAgentBatchInput = {
   readonly notifications?: readonly AcpSessionNotification[];
@@ -116,21 +121,25 @@ export function createSessionAgentWrites(writer: HistoryWriter): SessionAgentWri
         }
         return next;
       };
-      if (input.entryBound) {
-        if (targetId === undefined)
-          throw new HistoryWriteError([
-            { path: ['targetAssistantEntryId'], code: 'invalid_input' },
-          ]);
-        // A bound batch whose target does not exist yet still creates it with the
-        // caller's id, matching the historical targeted-then-create fallthrough.
-        if (writer.read(targetId)) {
-          writer.updateEntry(targetId, (entry) => {
-            const next = applyTo([entry as unknown as SessionHistoryInput]);
-            return (next[0] ?? entry) as unknown as SessionHistoryInput;
-          });
-          return;
-        }
-      }
+      if (input.entryBound && targetId === undefined)
+        throw new HistoryWriteError([{ path: ['targetAssistantEntryId'], code: 'invalid_input' }]);
+      // Resolve tools and subagents in their original turns, including nested child
+      // output. Mixed batches use the same sparse write and preserve event order.
+      const targets =
+        targetId !== undefined && contents.length === 0
+          ? targetLocalHistoryTargets(notifications)
+          : undefined;
+      if (targets && writer.updateTail(targetId!, targets, applyTo)) return;
+      // A bound batch whose target does not exist yet still creates it with the
+      // caller's id, matching the historical targeted-then-create fallthrough.
+      if (
+        input.entryBound &&
+        writer.updateEntry(targetId!, (entry) => {
+          const next = applyTo([entry as unknown as SessionHistoryInput]);
+          return (next[0] ?? entry) as unknown as SessionHistoryInput;
+        })
+      )
+        return;
       writer.update((turns) => applyTo(turns));
       return;
     },

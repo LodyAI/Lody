@@ -99,6 +99,73 @@ for (const storyId of CODE_COLLAB_STORY_IDS) {
   });
 }
 
+test('file line links reveal and highlight their range on first open and later navigation', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 320, height: 700 });
+  await page.goto('/iframe.html?id=sessions-codecollabmonacoeditor--line-anchors&viewMode=story');
+  const editor = page.locator('.monaco-editor');
+  await expect(editor).toHaveCount(0);
+
+  const expectHighlightedLine = async (line: number) => {
+    const row = editor.locator('.view-line').filter({ hasText: `// synthetic line ${line}:` });
+    await expect(row).toBeInViewport();
+    await expect
+      .poll(() =>
+        row.evaluate((element) => {
+          const target = element.getBoundingClientRect();
+          return Array.from(
+            element.closest('.monaco-editor')!.querySelectorAll('.rangeHighlight')
+          ).some((highlight) => {
+            const rect = highlight.getBoundingClientRect();
+            const color = getComputedStyle(highlight).backgroundColor;
+            return (
+              rect.top <= target.top + 1 &&
+              rect.bottom >= target.bottom - 1 &&
+              rect.width > 0 &&
+              color !== 'transparent' &&
+              color !== 'rgba(0, 0, 0, 0)'
+            );
+          });
+        })
+      )
+      .toBe(true);
+  };
+
+  const farLink = page.getByRole('link', { name: 'source.ts:6303-6305', exact: true });
+  await farLink.click();
+  await expect(page.getByLabel('Caret line', { exact: true })).toHaveText('6303');
+  await expectHighlightedLine(6303);
+  await expectHighlightedLine(6305);
+
+  await page.setViewportSize({ width: 920, height: 700 });
+  await expect
+    .poll(
+      async () => (await editor.locator('.monaco-scrollable-element').boundingBox())?.width ?? 0
+    )
+    .toBeGreaterThan(800);
+  await expectHighlightedLine(6303);
+
+  await page.getByRole('link', { name: 'source.ts:47-47', exact: true }).click();
+  await expectHighlightedLine(47);
+  await farLink.click();
+  await expectHighlightedLine(6303);
+
+  const isMac = await page.evaluate(() => /Mac/.test(navigator.platform));
+  await editor
+    .getByRole('textbox', { name: 'Code file preview', exact: true })
+    .press(isMac ? 'Meta+ArrowUp' : 'Control+Home');
+  await expect(
+    editor.locator('.view-line').filter({ hasText: '// synthetic line 1:' })
+  ).toBeInViewport();
+  await expect(
+    editor.locator('.view-line').filter({ hasText: '// synthetic line 6303:' })
+  ).toHaveCount(0);
+  await farLink.click();
+  await expectHighlightedLine(6303);
+  await expectHighlightedLine(6305);
+});
+
 // Storage is synthetic; the editor, undo stack, save hook and toolbar are real.
 test('undo to saved text clears dirty state, redo restores it, and Save advances the baseline', async ({
   page,
@@ -166,4 +233,46 @@ test('undo to saved text clears dirty state, redo restores it, and Save advances
   await expect(refresh).toBeEnabled();
   await refresh.click();
   await expect(editorText).toHaveText(draft);
+});
+
+test('mobile HTML opens as a readonly preview on WebKit and toggles source', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  // Exercise the unsupported-engine path in Chromium runs too.
+  await page.addInitScript(() => {
+    delete (HTMLIFrameElement.prototype as HTMLIFrameElement & { credentialless?: boolean })
+      .credentialless;
+  });
+  await page.goto('/iframe.html?id=sessions-codecollabhtmlpreview--mobile-preview&viewMode=story');
+  const frame = page.frameLocator('iframe[title="Preview"]');
+  await expect(frame.getByRole('heading', { name: 'Self-contained HTML preview' })).toBeVisible({
+    timeout: 30_000,
+  });
+  await expect(page.locator('iframe[title="Preview"]')).toHaveAttribute('sandbox', '');
+  await frame.getByRole('button', { name: 'Clicked 0 times' }).click();
+  await expect(frame.getByRole('button', { name: 'Clicked 0 times' })).toBeVisible();
+  await frame.getByText('Try blocked navigation').click();
+  await expect(frame.getByRole('heading', { name: 'Self-contained HTML preview' })).toBeVisible();
+  await page.getByRole('button', { name: 'Hide preview', exact: true }).click();
+  await expect(page.locator('iframe[title="Preview"]')).toHaveCount(0);
+  await expect(page.locator('.monaco-editor')).toBeVisible();
+  await page.getByRole('button', { name: 'Preview', exact: true }).click();
+  await expect(frame.getByRole('heading', { name: 'Self-contained HTML preview' })).toBeVisible();
+});
+
+test('mobile project HTML opens from its file row and toggles back to the original source', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto('/iframe.html?id=files-mobileprojectfilebrowser--default&viewMode=story');
+  await page.getByRole('button', { name: 'preview.html', exact: true }).click();
+  const frame = page.frameLocator('iframe[title="Preview"]');
+  await expect(frame.getByRole('heading', { name: 'Mobile HTML report' })).toBeVisible();
+  await expect(frame.locator('body')).not.toHaveAttribute('data-executed', 'yes');
+  await frame.getByText('External link').click();
+  await expect(frame.getByRole('heading', { name: 'Mobile HTML report' })).toBeVisible();
+  await page.getByRole('button', { name: 'Hide preview', exact: true }).click();
+  await expect(page.locator('iframe[title="Preview"]')).toHaveCount(0);
+  await expect(page.locator('.monaco-editor')).toBeVisible();
+  await page.getByRole('button', { name: 'Preview', exact: true }).click();
+  await expect(frame.getByRole('heading', { name: 'Mobile HTML report' })).toBeVisible();
 });

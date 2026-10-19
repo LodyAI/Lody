@@ -143,3 +143,183 @@ describe('title generation ignores adapter output emitted outside the title turn
     expect(result.title).toBe(TITLE);
   });
 });
+
+describe('builtin Codex isolated title configuration', () => {
+  it.each([
+    { configured: undefined, expected: 'gpt-5.6-luna low agent-full-access' },
+    {
+      configured: { model: 'gpt-5.6-sol', reasoning_effort: 'high', mode: 'read-only' },
+      expected: 'gpt-5.6-sol high read-only',
+    },
+  ])('generates with $expected', async ({ configured, expected }) => {
+    const active: Record<string, string | boolean> = {};
+    const configOptions = [
+      {
+        id: 'model',
+        name: 'Model',
+        type: 'select' as const,
+        category: 'model' as const,
+        currentValue: 'gpt-5.6-sol',
+        options: ['gpt-5.6-luna', 'gpt-5.6-sol'].map((value) => ({ value, name: value })),
+      },
+      {
+        id: 'mode',
+        name: 'Mode',
+        type: 'select' as const,
+        category: 'mode' as const,
+        currentValue: 'read-only',
+        options: ['read-only', 'agent-full-access'].map((value) => ({ value, name: value })),
+      },
+      {
+        id: 'reasoning_effort',
+        name: 'Reasoning',
+        type: 'select' as const,
+        category: 'thought_level' as const,
+        currentValue: 'high',
+        options: ['low', 'high'].map((value) => ({ value, name: value })),
+      },
+    ];
+    mocks.startLocalAcpAgent.mockImplementation(
+      async (options: { onUpdateMessage: (msg: AcpSessionNotification) => void }) => ({
+        agentProcess: {} as never,
+        acpSessionId: SESSION_ID,
+        sessionResponse: { sessionId: SESSION_ID, configOptions },
+        client: {
+          setSessionConfigOption: async (
+            _sessionId: string,
+            key: string,
+            value: string | boolean
+          ) => {
+            active[key] = value;
+            return configOptions;
+          },
+          prompt: async () => {
+            const notification = agentChunk(
+              `${active.model} ${active.reasoning_effort} ${active.mode}`
+            );
+            notification.update._meta = { lody: { messagePhase: 'final_answer' } };
+            options.onUpdateMessage(notification);
+            return { stopReason: 'end_turn' };
+          },
+        },
+      })
+    );
+    const title = await generateTitleIsolated({
+      cliType: 'builtin',
+      agentType: 'codex',
+      taskPrompt: 'Fix session titles',
+      logger: createSilentLogger(),
+      titleConfig: configured ? { configOptionValues: configured } : undefined,
+    });
+    expect(title).toBe(expected);
+  });
+});
+
+describe('configured Codex title models without message phases', () => {
+  it.each([
+    {
+      name: 'unphased answer',
+      chunks: [
+        ['Custom ', undefined],
+        ['endpoint title', undefined],
+      ],
+      expected: 'Custom endpoint title',
+    },
+    {
+      name: 'explicit commentary before unphased answer',
+      chunks: [
+        ['Working...', 'commentary'],
+        ['Custom endpoint title', undefined],
+      ],
+      expected: 'Custom endpoint title',
+    },
+    {
+      name: 'explicit final answer wins over unphased text',
+      chunks: [
+        ['Interim text', undefined],
+        ['Final ', 'final_answer'],
+        ['title', 'final_answer'],
+        ['Trailing text', undefined],
+      ],
+      expected: 'Final title',
+    },
+    {
+      name: 'fragmented error envelope',
+      chunks: [
+        ['{"type":"error",', undefined],
+        ['"error":"unavailable"}', undefined],
+      ],
+      expected: 'Original task',
+    },
+    {
+      name: 'HTTP error',
+      chunks: [['HTTP 400 Bad Request', undefined]],
+      expected: 'Original task',
+    },
+    {
+      name: 'prompt failure after partial output',
+      chunks: [['Partial title', undefined]],
+      expected: 'Original task',
+      fail: true,
+    },
+  ])('$name', async ({ chunks, expected, fail }) => {
+    const configOptions = [
+      {
+        id: 'model',
+        name: 'Model',
+        type: 'select' as const,
+        category: 'model' as const,
+        currentValue: 'default-model',
+        options: ['default-model', 'custom-title-model'].map((value) => ({ value, name: value })),
+      },
+    ];
+    let activeModel = 'default-model';
+    mocks.startLocalAcpAgent.mockImplementation(
+      async (options: {
+        env: Record<string, string>;
+        onUpdateMessage: (msg: AcpSessionNotification) => void;
+      }) => {
+        const send = (text: string, phase?: string) => {
+          const notification = agentChunk(text);
+          if (phase) notification.update._meta = { lody: { messagePhase: phase } };
+          options.onUpdateMessage(notification);
+        };
+        send('Startup banner');
+        return {
+          agentProcess: {} as never,
+          acpSessionId: SESSION_ID,
+          sessionResponse: { sessionId: SESSION_ID, configOptions },
+          client: {
+            setSessionConfigOption: async (_session: string, _key: string, value: string) => {
+              activeModel = value;
+              send('Configuration banner');
+              return configOptions;
+            },
+            prompt: async () => {
+              // Fail at the boundary if the saved model or provider environment was lost.
+              if (
+                activeModel !== 'custom-title-model' ||
+                options.env.TEST_PROVIDER_KEY !== 'synthetic-key'
+              ) {
+                throw new Error('Provider configuration was not preserved');
+              }
+              for (const [text, phase] of chunks) send(text ?? '', phase);
+              if (fail) throw new Error('Synthetic provider failure');
+              return { stopReason: 'end_turn' };
+            },
+          },
+        };
+      }
+    );
+    expect(
+      await generateTitleIsolated({
+        cliType: 'builtin',
+        agentType: 'codex',
+        taskPrompt: 'Original task',
+        logger: createSilentLogger(),
+        env: { TEST_PROVIDER_KEY: 'synthetic-key' },
+        titleConfig: { configOptionValues: { model: 'custom-title-model' } },
+      })
+    ).toBe(expected);
+  });
+});

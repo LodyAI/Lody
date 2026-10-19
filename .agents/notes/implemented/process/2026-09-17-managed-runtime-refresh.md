@@ -33,3 +33,13 @@ Claude includes eight targets, Codex six, and Grok six. The pnpm seven-day relea
 ## Limits
 
 Kimi was deliberately excluded from this refresh. Pi and the non-managed DSH adapter did not require new objects. A full workspace install reached Electron's native rebuild after resolving the new lockfile, but that rebuild cannot run on this machine until the local Xcode license is accepted; the adapter-level checks do not depend on that native build. Claude's standalone lint still reports the pre-existing unused `thinkingTokens` declaration in `src/tests/usage.test.ts`; this refresh does not change that file.
+
+## 2026-10-13 incomplete upgrade rollback
+
+Main commit `3d9b7cf1fe2872d8e5baa52916cf1cb1a0a6f0ea` advanced the Claude, Codex, Grok, and Pi gitlinks without updating the root lockfile, CLI SDK dependency, or managed-runtime manifests. CI at `567afa18d1f0d45ebbe78fca7dde2a5dde3a7536` failed frozen installation before tests. Updating only the lockfile would still leave Claude SDK 0.3.293, Codex 0.160.1, and Grok 1.0.46 inconsistent with the CLI's 0.3.284/2.1.284, 0.159.2, and 1.0.40 runtime contracts.
+
+Restore all four gitlinks to the combination from `0b46cc2d8e33c6feafd08c00f51089456ab1e732`, whose CI succeeded. Retain the later registry refresh and all unrelated main changes. This restores dependency and runtime agreement without publishing new production artifacts or introducing release-age exceptions. The upgrade can return only with its complete dependency graph, matching SDK/manifests, and verified published artifacts; local build manifests are not production publication evidence. Frozen-lockfile and integrity checks remain enabled.
+
+Validation: frozen installation, full `pnpm check`, formatting and format checks, documentation checks, and 113 GitHub automation tests passed. The CLI built with the required 2 GiB heap, passed published-bundle dependency/adapter smoke, and started with `--help` under an isolated data directory. All 20 restored canonical artifact URLs returned HTTP 206 to public range requests; this availability check is not a new integrity readback. The full check used the installed native Git helper path and CI's signing configuration: the session-injected broker helper otherwise makes one recursive SSH fixture fail with `context_unreadable`; all 18 Git transport tests passed with native helpers, and all 4119 CLI tests passed (4 skipped). Exact pushed-main Actions remain separate from this local evidence.
+
+Public CI evidence: [failing main](https://github.com/LodyAI/Lody/actions/runs/38377855941), [successful rollback baseline](https://github.com/LodyAI/Lody/actions/runs/38370031341).

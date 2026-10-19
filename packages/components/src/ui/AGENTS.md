@@ -6,7 +6,7 @@ feature directory.
 
 ## Drawer popups
 
-- `DrawerContent` provides an internal boxless no-drag popup host via state.
+- `DrawerContent` provides a state-backed no-drag host for popups and modals.
   Keep portals inside that modal and outside scrolling children: body portals
   inherit Vaul's pointer lock and clicks pass through to the underlying content.
 
@@ -54,8 +54,8 @@ strings on i18n rather than the registry's inline English.
 - Dialog-contained `OptionSelector` menus must portal into the nearest
   `[data-lody-dialog-content]`; a body portal is outside the modal's scroll and
   focus guards. `src/ui/dialog.tsx` emits that attribute on every panel.
-- `DiffViewer` uses the shared `@pierre/diffs` worker pools for syntax work regardless
-  of file size. Do not create or terminate a worker pool per viewer.
+- `DiffViewer` bounds standalone inline parsing by characters AND lines; syntax
+  and other parsing share Workers. Preserve context/fallbacks; no per-viewer pools.
 - Every floating surface passes `useSafeAreaCollisionPadding` as
   `collisionPadding`; the default parks a colliding surface flush against the
   screen edge and caps `--available-height` there too.

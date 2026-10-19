@@ -31,6 +31,7 @@ const SMALL_DIFF_MAX_PENDING_DIFF_LOADS_PER_EFFECT = 4;
 const DIFF_LOAD_START_DELAY_MS = 1200;
 const DIFF_LOAD_IDLE_TIMEOUT_MS = 1000;
 const resolvedDiffCache = new Map<string, Record<string, FileDiffData>>();
+const EMPTY_RESOLVED_DIFFS: Record<string, FileDiffData> = {};
 
 export function getDiffDataLoadScheduling(targetLoadCount: number): {
   maxConcurrentLoads: number;
@@ -187,6 +188,7 @@ export const useSessionConversationDiffData = ({
   fileDiffs,
   fileDiffsPending = false,
   enabled = true,
+  requestScope,
 }: {
   sessionId: SessionId;
   turnId?: string;
@@ -202,6 +204,8 @@ export const useSessionConversationDiffData = ({
   // When false the per-file loader is inert (no RPC). Used so the panel can hand "All Changes"
   // (base) mode off to the batched useSessionAllChangesDiffData without this hook also fanning out.
   enabled?: boolean;
+  /** Identifies an authoritative live batch, even when its path set is unchanged. */
+  requestScope?: object;
 }): {
   cacheKey: string | null;
   normalizedPaths: string[];
@@ -278,8 +282,36 @@ export const useSessionConversationDiffData = ({
     }
     return `${sessionId}:${mode}:${turnId}:${fileDiffCacheKey}`;
   }, [fileDiffCacheKey, mode, sessionId, turnId]);
+  const loadContext = useMemo(
+    () => ({
+      cacheKey,
+      fileDiffCacheKey,
+      fileProvider,
+      mode,
+      normalizedPathsKey,
+      requestScope,
+      turnId,
+    }),
+    [cacheKey, fileDiffCacheKey, fileProvider, mode, normalizedPathsKey, requestScope, turnId]
+  );
+  const loadContextRef = useRef(loadContext);
+  loadContextRef.current = loadContext;
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
 
   const [resolvedByPath, setResolvedByPath] = useState<Record<string, FileDiffData>>({});
+  const [loadSettlements, setLoadSettlements] = useState(0);
+  const resolvedContext = useRef(loadContext);
+  const visibleResolvedByPath =
+    resolvedContext.current === loadContext ||
+    (mode === 'conversation' && cacheKey !== null && resolvedContext.current.cacheKey === cacheKey)
+      ? resolvedByPath
+      : EMPTY_RESOLVED_DIFFS;
   const resolvedByPathRef = useRef(resolvedByPath);
   const resolvedStateVersionRef = useRef(0);
   const resolvedTransitionSeqRef = useRef(0);
@@ -313,8 +345,8 @@ export const useSessionConversationDiffData = ({
   );
 
   const hasAllResolved = useMemo(
-    () => normalizedPaths.every((filePath) => Boolean(resolvedByPath[filePath])),
-    [normalizedPaths, resolvedByPath]
+    () => normalizedPaths.every((filePath) => Boolean(visibleResolvedByPath[filePath])),
+    [normalizedPaths, visibleResolvedByPath]
   );
 
   const shouldFetchMissingDiff =
@@ -339,16 +371,16 @@ export const useSessionConversationDiffData = ({
     }
     retryTimeoutsRef.current.clear();
     retryAttemptsRef.current.clear();
-    inFlightPathsRef.current.clear();
+    resolvedContext.current = loadContext;
     replaceResolvedByPath({});
-  }, [cacheKey, fileDiffCacheKey, normalizedPathsKey, replaceResolvedByPath]);
+  }, [loadContext, replaceResolvedByPath]);
 
   useEffect(() => {
     if (loadPaused) {
       return;
     }
 
-    const cachedResolvedByPath = readCachedResolvedData(cacheKey, normalizedPaths);
+    const cachedResolvedByPath = readCachedResolvedData(loadContext.cacheKey, normalizedPaths);
     if (Object.keys(cachedResolvedByPath).length === 0) {
       return;
     }
@@ -364,7 +396,7 @@ export const useSessionConversationDiffData = ({
       }
       return changed ? next : prev;
     });
-  }, [cacheKey, loadPaused, normalizedPaths, scheduleResolvedByPathUpdate]);
+  }, [loadContext, loadPaused, normalizedPaths, scheduleResolvedByPathUpdate]);
 
   useEffect(() => {
     const retryTimeouts = retryTimeoutsRef.current;
@@ -417,13 +449,16 @@ export const useSessionConversationDiffData = ({
     }
 
     let cancelled = false;
+    // Changing the viewport cancels queued starts, not valid in-flight results.
+    // Their settlement must publish/wake the next pass and release the slot.
+    const isCurrentLoad = () => mounted.current && loadContextRef.current === loadContext;
 
     const loadSinglePath = async (filePath: string): Promise<void> => {
       const loadStartedAt = getDiffPerfNow();
 
       if (isFilteredDiffFile(filePath)) {
         inFlightPathsRef.current.delete(filePath);
-        if (!cancelled) {
+        if (isCurrentLoad()) {
           const data: FileDiffData = {
             status: 'ready',
             oldSnapshot: { kind: 'filtered' },
@@ -465,6 +500,10 @@ export const useSessionConversationDiffData = ({
             matchedFileDiff
           )
         );
+        if (!isCurrentLoad()) {
+          if (data.status === 'ready-text-source') data.source.dispose?.();
+          return;
+        }
         if (data.status === 'error' && shouldRetrySessionProviderDiffErrorMessage(data.message)) {
           throw new Error(data.message);
         }
@@ -478,7 +517,7 @@ export const useSessionConversationDiffData = ({
         retryAttemptsRef.current.delete(filePath);
         inFlightPathsRef.current.delete(filePath);
 
-        if (!cancelled) {
+        if (isCurrentLoad()) {
           scheduleResolvedByPathUpdate((prev) => {
             const next = { ...prev, [filePath]: data };
             writeCachedResolvedData(cacheKey, next);
@@ -515,6 +554,7 @@ export const useSessionConversationDiffData = ({
           );
         }
       } catch (error) {
+        if (!isCurrentLoad()) return;
         const message = getSessionDiffErrorMessage(error);
         const attempts = (retryAttemptsRef.current.get(filePath) ?? 0) + 1;
         retryAttemptsRef.current.set(filePath, attempts);
@@ -527,7 +567,7 @@ export const useSessionConversationDiffData = ({
           retryTimeoutsRef.current.delete(filePath);
         }
 
-        if (!cancelled) {
+        if (isCurrentLoad()) {
           const data: FileDiffData = { status: 'error', message };
           scheduleResolvedByPathUpdate((prev) => {
             const next = { ...prev, [filePath]: data };
@@ -569,6 +609,9 @@ export const useSessionConversationDiffData = ({
             retryTimeoutsRef.current.set(filePath, retryTimeoutId);
           }
         }
+      } finally {
+        inFlightPaths.delete(filePath);
+        if (mounted.current) setLoadSettlements((version) => version + 1);
       }
     };
 
@@ -655,6 +698,8 @@ export const useSessionConversationDiffData = ({
     fileDiffsPending,
     fileProvider,
     loadPaused,
+    loadContext,
+    loadSettlements,
     mode,
     normalizedPaths.length,
     priorityFilePath,
@@ -670,7 +715,7 @@ export const useSessionConversationDiffData = ({
   return {
     cacheKey,
     normalizedPaths,
-    resolvedByPath,
+    resolvedByPath: visibleResolvedByPath,
     hasAllResolved,
     isDiffUnavailable,
     isPanelLoading,

@@ -105,6 +105,21 @@ describe('PermissionPrompt', () => {
     expect(container.textContent).toContain('in /repo');
   });
 
+  it('warns that a command cut short in history is not fully shown', async () => {
+    await render(
+      makeRequest([ALLOW_ONCE, REJECT_ONCE], {
+        toolCall: {
+          content: [{ type: 'terminal_command', command: 'echo AAAA…', truncated: true }],
+        },
+      })
+    );
+    expect(container.textContent).toContain('echo AAAA…');
+    expect(container.textContent).toContain('only its beginning is shown');
+
+    await render(makeRequest([ALLOW_ONCE, REJECT_ONCE]));
+    expect(container.textContent).not.toContain('only its beginning is shown');
+  });
+
   it('falls back to a question from the tool kind when the provider sent none', async () => {
     await render(makeRequest([ALLOW_ONCE, REJECT_ONCE]));
     expect(prompt().getAttribute('aria-label')).toBe('Run this command?');
@@ -214,11 +229,23 @@ describe('resolvePermissionSubject', () => {
     );
   });
 
+  it('flags a title that history cut short', () => {
+    const cut = `${'a'.repeat(1018)}…`;
+    expect(resolvePermissionSubject(toolCall({ kind: 'execute', title: cut }))).toMatchObject({
+      type: 'command',
+      truncated: true,
+    });
+    expect(
+      resolvePermissionSubject(toolCall({ kind: 'execute', title: 'Wait…' }))
+    ).toMatchObject({ truncated: false });
+  });
+
   it('reads a command from the title when no command block was sent', () => {
     expect(resolvePermissionSubject(toolCall({ kind: 'execute', title: 'git push' }))).toEqual({
       type: 'command',
       command: 'git push',
       cwd: null,
+      truncated: false,
     });
   });
 });

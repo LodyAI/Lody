@@ -18,8 +18,7 @@ preparing, or one queued behind such a send in the same conversation, is held
 only in the runtime's in-memory `pendingSends` and written when ready. Nothing
 persists it: closing the page mid-upload loses it, and the page asks first.
 Archive and delete cancel held sends of their targets and join in-flight writes.
-`use-session-preparation` holds an owned warmup lease; attachment takeover cancels
-and joins it. See the [attachment draft Spec](../../../../specs/session-files.md).
+See the [attachment draft Spec](../../../../specs/session-files.md).
 
 | Area                   | Entry point                                                                                                        | Responsibility                                                                             |
 | ---------------------- | ------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------ |
@@ -36,6 +35,20 @@ atom and passes its current runtime overrides to both models and slash commands.
 Missing or mismatched Providers expose no catalog; extension changes invalidate
 old capabilities until a matching probe arrives. A matching extension catalog
 must not be read as though no extensions were selected.
+
+## Cloud query recovery
+
+`use-recoverable-convex-query.ts` owns the authenticated query adapter. Each client,
+session and semantic query shares one watch and three retries after 1, 2 and 4 seconds.
+All consumers release the failed watch before a new one starts, which waits for a
+server update rather than reading the SDK's cached error. Opaque server failures
+return loading during bounded recovery; application errors and exhausted failures throw to the nearest
+boundary. Auth expiry continues through the central supervisor and retains only a
+matching committed snapshot. Brief success and temporary auth skips do not replenish
+attempts; 30 seconds of continuously observed success resets the budget. Skipped or
+unmounted queries stop retries, and session/query identity fences callbacks and results.
+Public queries, mutations/actions and local-only clients keep their existing behavior.
+See the [decision](../../../../.agents/notes/implemented/bug-fix/2026-10-10-cloud-query-server-recovery.md).
 
 ## Session lifecycle
 
@@ -90,6 +103,12 @@ reading window. A new view, even with the same session id, must pass initial
 loading again. Before the first viewport report, the window is the
 retained tail plus the turn of the engine's restored reading anchor, so a restored
 position opens on real rows instead of placeholders.
+
+Paged histories acquire a directory lease through the saved turn ID before
+reporting initial readiness. Search and complete index/fact consumers acquire the
+whole directory through the same cancellable page loader. They do not depend on
+the user scrolling back manually; bodies still follow their existing leases and
+are released after a fact chunk, preview, or search completes.
 
 The rendered body set belongs to the reading window, the retained 40-turn tail,
 and native text selection. Other consumers may hydrate the same cache for facts,
@@ -209,12 +228,25 @@ still paid for a full summary rebuild — hence the leading-edge throttle on the
 anchored to the last emit. The permission candidate is a fresh object per scan, so
 depending on it re-runs the payload memo every render.
 
-The 250ms bridge debounce stays for a different job: a flush lands in the commit
-after the change that requested it, and without the debounce the bridge gets both,
-the stale one marking the alert shown so the fresh one is dropped by the
-already-alerted early return.
+The 250ms bridge debounce coalesces the render requesting a flush with its committed
+snapshot. Permission candidates only accelerate that snapshot; they never add an
+alert. Ordinary Push owns reminders. The previous alert-key Set and early return
+were removed because they both duplicated reminders and froze other conversations
+while one request was pending. The optional bridge alert field remains for legacy
+native clients, but this hook never sends it.
 
 `iosLiveActivitiesEnabledAtom` defaults to true, so without the native-shell check
 every desktop build would rebuild a summary it can never show. The activity id is
 derived outside that gate so the disable and unmount paths can still end an activity
 the payload no longer describes.
+
+## Public PR reads
+
+`use-github-pr-identity.ts` keeps hosted repository identity separate from public
+read access. When a session association is unresolved, an anonymous GitHub metadata
+request may establish a public repository ID for details, reviews and diffs. It
+never grants write access or mints a token. An existing numeric ID must still match;
+redirects, private repositories and failed probes retain the recoverable error.
+Public details do not hydrate or write authenticated caches; review caches and
+in-flight detail reads use a separate public key. Public CI polling runs every
+five minutes without the fast mergeability loop; manual refresh remains available.

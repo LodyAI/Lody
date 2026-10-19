@@ -5,9 +5,25 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import i18next from 'i18next';
 import { initReactI18next } from 'react-i18next';
+import { createStore, Provider } from 'jotai';
 import type { ScheduleRegistryRow } from '@lody/shared';
 import en from '../../../locales/en.json';
+import { sidebarCollapsedAtom } from '../src/atoms/sidebar-state';
+import { navigationSidebarVisibleAtom } from '../src/atoms/layout-state';
 import { ScheduleListView } from '../src/components/schedules/schedule-view';
+
+const layout = vi.hoisted(() => ({ mobile: false, macElectron: false }));
+
+vi.mock('../src/hooks/use-mobile', () => ({
+  useIsMobile: () => layout.mobile,
+}));
+vi.mock('../src/lib/electron', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../src/lib/electron')>();
+  return {
+    ...actual,
+    isMacOSElectronRenderer: () => layout.macElectron,
+  };
+});
 
 (
   globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
@@ -219,5 +235,144 @@ describe('schedule list rows', () => {
     click(container.querySelector('[data-testid="split"]')!);
     expect(onBlankClick).toHaveBeenCalledTimes(2);
     portal.remove();
+  });
+
+  it('clears the status bar on the edge-to-edge list and stays flush when embedded', () => {
+    const header = () => container.querySelector('header')!;
+    const embeddedClass = header().className;
+    expect(header().hasAttribute('data-safe-area-inset')).toBe(false);
+    act(() =>
+      root.render(
+        <ScheduleListView
+          insetSafeArea
+          rows={[manual, timed]}
+          runtimes={[]}
+          ready
+          now={NOW}
+          contextForRow={context}
+          {...handlers}
+        />
+      )
+    );
+    expect(header().hasAttribute('data-safe-area-inset')).toBe(true);
+    // The safe-area rule replaces the fixed 44px height. jsdom does not
+    // apply the StyleX sheet, so the class change is the check.
+    expect(header().className).not.toBe(embeddedClass);
+  });
+
+  it('uses the home search text and hides the standalone header', () => {
+    act(() =>
+      root.render(
+        <ScheduleListView
+          hideHeader
+          query="night"
+          rows={[manual, timed]}
+          runtimes={[]}
+          ready
+          now={NOW}
+          contextForRow={context}
+          {...handlers}
+        />
+      )
+    );
+    expect(container.querySelector('header')).toBeNull();
+    expect(container.textContent).toContain('Nightly review');
+    expect(container.textContent).not.toContain('Deploy checklist');
+  });
+});
+
+describe('schedule list sidebar chrome', () => {
+  let container: HTMLDivElement;
+  let root: Root;
+  const handlers = {
+    onOpen: vi.fn(),
+    onNew: vi.fn(),
+  };
+
+  beforeAll(async () => {
+    if (!i18next.isInitialized)
+      await i18next.use(initReactI18next).init({
+        lng: 'en',
+        resources: { en: { translation: en } },
+        interpolation: { escapeValue: false },
+      });
+  });
+
+  beforeEach(() => {
+    layout.mobile = false;
+    layout.macElectron = false;
+    container = document.createElement('div');
+    document.body.append(container);
+    root = createRoot(container);
+  });
+
+  afterEach(() => {
+    act(() => root.unmount());
+    container.remove();
+    window.localStorage.removeItem('lody-sidebar-collapsed');
+  });
+
+  function render(store: ReturnType<typeof createStore>) {
+    act(() =>
+      root.render(
+        <Provider store={store}>
+          <ScheduleListView
+            rows={[manual]}
+            runtimes={[]}
+            ready
+            now={NOW}
+            contextForRow={context}
+            {...handlers}
+          />
+        </Provider>
+      )
+    );
+  }
+
+  it('hides the expand control while the navigation sidebar is on screen', () => {
+    const store = createStore();
+    store.set(sidebarCollapsedAtom, false);
+    render(store);
+    expect(container.querySelector('button[aria-label="Show navigation sidebar"]')).toBeNull();
+    expect(container.querySelector('header')?.hasAttribute('data-beside-traffic-lights')).toBe(
+      false
+    );
+  });
+
+  it('shows the expand control on desktop when the navigation sidebar is hidden', () => {
+    const store = createStore();
+    store.set(sidebarCollapsedAtom, true);
+    render(store);
+    const toggle = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="Show navigation sidebar"]'
+    );
+    expect(toggle).not.toBeNull();
+    expect(store.get(navigationSidebarVisibleAtom)).toBe(false);
+    act(() => toggle!.click());
+    expect(store.get(navigationSidebarVisibleAtom)).toBe(true);
+    expect(store.get(sidebarCollapsedAtom)).toBe(false);
+  });
+
+  it('keeps the expand control off the mobile list', () => {
+    layout.mobile = true;
+    const store = createStore();
+    store.set(sidebarCollapsedAtom, true);
+    render(store);
+    expect(container.querySelector('button[aria-label="Show navigation sidebar"]')).toBeNull();
+  });
+
+  it('insets the header beside macOS traffic lights when the sidebar is hidden', () => {
+    layout.macElectron = true;
+    const store = createStore();
+    store.set(sidebarCollapsedAtom, true);
+    render(store);
+    expect(container.querySelector('header')?.hasAttribute('data-beside-traffic-lights')).toBe(
+      true
+    );
+    store.set(sidebarCollapsedAtom, false);
+    render(store);
+    expect(container.querySelector('header')?.hasAttribute('data-beside-traffic-lights')).toBe(
+      false
+    );
   });
 });

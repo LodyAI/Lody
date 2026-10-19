@@ -1,8 +1,9 @@
-import { useEffect, useLayoutEffect, useRef } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from 'react';
 import { createPortal } from 'react-dom';
 import { FloatingFocusManager, useFloating } from '@floating-ui/react';
 import * as stylex from '@stylexjs/stylex';
 import { Button } from '@lody/ui/button';
+import { Menu } from '@lody/ui/menu';
 import { forcedThemeClassNames } from '@lody/ui/theme';
 import { space } from '@lody/ui/tokens/scales.stylex';
 import { ChevronLeft, ChevronRight, X } from 'lucide-react';
@@ -16,6 +17,10 @@ import {
   useElectronFullscreen,
 } from '@/lib/electron';
 import {
+  canCopyImagePreview,
+  canShareImagePreview,
+  prepareImagePreviewFile,
+  runTouchImagePreviewAction,
   getImagePreviewExportBridge,
   runImagePreviewContextMenu,
   type ImagePreviewExportOutcome,
@@ -55,6 +60,8 @@ const styles = stylex.create({
     pointerEvents: 'none',
   },
   toolbar: { pointerEvents: 'auto' },
+  menuLayer: { position: 'relative', zIndex: 'calc(var(--z-image-viewer, 95) + 2)' },
+  menuDismiss: { position: 'fixed', inset: 0 },
   close: { marginInlineStart: 'auto', paddingInline: space[2] },
   previous: {
     position: 'absolute',
@@ -226,6 +233,212 @@ function useImagePreviewContextMenu(images: ZoomableImageViewerItem[]) {
   }, [t]);
 }
 
+type TouchImageMenuTarget = {
+  item: ZoomableImageViewerItem & { src: string };
+  anchor: { getBoundingClientRect: () => DOMRect };
+};
+
+/** Observe touch without capturing it or cancelling PhotoSlider's pan/pinch events. */
+function useImagePreviewLongPress(
+  container: HTMLElement | null,
+  item: ZoomableImageViewerItem | undefined
+) {
+  const [menu, setMenu] = useState<TouchImageMenuTarget | null>(null);
+  const key = item?.key;
+  const src = item?.src;
+  const fileName = item?.fileName;
+  useEffect(() => {
+    if (!container || !src || key === undefined) return undefined;
+    let timer: number | undefined;
+    let start: { id: number; x: number; y: number } | undefined;
+    let fired = false;
+    let touch = false;
+    const pointers = new Set<number>();
+    const cancel = () => {
+      window.clearTimeout(timer);
+      timer = undefined;
+      start = undefined;
+    };
+    const down = (event: PointerEvent) => {
+      touch = event.pointerType === 'touch';
+      if (!touch) return;
+      // A removed touch target may not deliver its final event to this document.
+      if (event.isPrimary) pointers.clear();
+      pointers.add(event.pointerId);
+      cancel();
+      fired = false;
+      if (pointers.size !== 1 || !event.isPrimary || !(event.target instanceof Element)) return;
+      const photo = event.target.closest<HTMLImageElement>(PHOTO_SELECTOR);
+      if (!photo || !container.contains(photo) || (photo.currentSrc || photo.src) !== src) return;
+      start = { id: event.pointerId, x: event.clientX, y: event.clientY };
+      const { x, y } = start;
+      timer = window.setTimeout(() => {
+        timer = undefined;
+        fired = true;
+        setMenu({
+          item: { key, src, fileName },
+          anchor: {
+            getBoundingClientRect: () => new DOMRect(x, y, 0, 0),
+          },
+        });
+      }, 500);
+    };
+    const move = (event: PointerEvent) => {
+      if (
+        start?.id === event.pointerId &&
+        Math.hypot(event.clientX - start.x, event.clientY - start.y) > 10
+      )
+        cancel();
+    };
+    const up = (event: PointerEvent) => {
+      pointers.delete(event.pointerId);
+      cancel();
+    };
+    const contextMenu = (event: MouseEvent) => {
+      if (touch && event.target instanceof Element && event.target.closest(PHOTO_SELECTOR)) {
+        event.preventDefault();
+        event.stopPropagation();
+      }
+    };
+    const click = (event: MouseEvent) => {
+      if (!fired || !(event.target instanceof Element) || !event.target.closest(PHOTO_SELECTOR))
+        return;
+      fired = false;
+      event.preventDefault();
+      event.stopPropagation();
+    };
+    const deactivate = () => {
+      cancel();
+      pointers.clear();
+    };
+    document.addEventListener('pointerdown', down, true);
+    document.addEventListener('pointermove', move, true);
+    document.addEventListener('pointerup', up, true);
+    document.addEventListener('pointercancel', up, true);
+    container.addEventListener('contextmenu', contextMenu, true);
+    container.addEventListener('click', click, true);
+    window.addEventListener('blur', deactivate);
+    document.addEventListener('visibilitychange', deactivate);
+    return () => {
+      cancel();
+      document.removeEventListener('pointerdown', down, true);
+      document.removeEventListener('pointermove', move, true);
+      document.removeEventListener('pointerup', up, true);
+      document.removeEventListener('pointercancel', up, true);
+      container.removeEventListener('contextmenu', contextMenu, true);
+      container.removeEventListener('click', click, true);
+      window.removeEventListener('blur', deactivate);
+      document.removeEventListener('visibilitychange', deactivate);
+    };
+  }, [container, key, src, fileName]);
+  // A replacement/removal/slide change must never retarget an already-open menu.
+  const currentMenu = menu?.item.key === item?.key && menu?.item.src === item?.src ? menu : null;
+  useEffect(() => setMenu(null), [item?.key, item?.src, item?.fileName]);
+  return { menu: currentMenu, closeMenu: () => setMenu(null) };
+}
+
+function TouchImageMenu({
+  target,
+  close,
+  finalFocus,
+}: {
+  target: TouchImageMenuTarget;
+  close: () => void;
+  finalFocus: RefObject<HTMLElement | null>;
+}) {
+  const { t } = useTranslation();
+  const [container, setContainer] = useState<HTMLDivElement | null>(null);
+  const [file, setFile] = useState<File | null>(null);
+  const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    const controller = new AbortController();
+    void prepareImagePreviewFile(target.item.src, target.item.fileName, controller.signal).then(
+      (value) => {
+        if (!controller.signal.aborted) setFile(value);
+      },
+      () => {
+        if (!controller.signal.aborted) setFailed(true);
+      }
+    );
+    return () => controller.abort();
+  }, [target]);
+  const run = (action: 'copy' | 'save' | 'share') => {
+    if (!file) return;
+    // Invoke before closing/awaiting so browser clipboard/share retain activation.
+    const result = runTouchImagePreviewAction(action, target.item.src, file);
+    close();
+    void result.then((outcome) => {
+      if (outcome.kind === 'copied') toast.success(t('sessions.imagePreview.copied'));
+      else if (outcome.kind === 'saved') toast.success(t('sessions.imagePreview.saved'));
+      else if (outcome.kind === 'download-started')
+        toast.success(t('sessions.imagePreview.downloadStarted'));
+      else if (outcome.kind.endsWith('-failed')) {
+        toast.error(t(`sessions.imagePreview.${action}Failed`), {
+          description: 'error' in outcome ? outcome.error : undefined,
+        });
+      }
+    });
+  };
+  return (
+    <div ref={setContainer} {...stylex.props(styles.menuLayer)}>
+      {/* Shield the entire dismiss gesture from PhotoSlider's touchend close path. */}
+      <div
+        aria-hidden="true"
+        data-image-menu-dismiss=""
+        {...stylex.props(styles.menuDismiss)}
+        onPointerDown={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          close();
+        }}
+      />
+      {container && (
+        <Menu.Root
+          open
+          onOpenChange={(open) => {
+            if (!open) close();
+          }}
+          modal={false}
+        >
+          <Menu.Content
+            container={container}
+            anchor={target.anchor}
+            positionMethod="fixed"
+            finalFocus={finalFocus}
+          >
+            {!file && (
+              <Menu.Group>
+                <Menu.GroupLabel>
+                  {t(failed ? 'sessions.imageLoadFailed' : 'common.loading')}
+                </Menu.GroupLabel>
+              </Menu.Group>
+            )}
+            <Menu.Item disabled={!file || !canCopyImagePreview()} onClick={() => run('copy')}>
+              {t(
+                canCopyImagePreview()
+                  ? 'sessions.imagePreview.copy'
+                  : 'sessions.imagePreview.copyUnavailable'
+              )}
+            </Menu.Item>
+            <Menu.Item disabled={!file} onClick={() => run('save')}>
+              {t('sessions.imagePreview.saveImage')}
+            </Menu.Item>
+            <Menu.Item disabled={!file || !canShareImagePreview(file)} onClick={() => run('share')}>
+              {t(
+                file && !canShareImagePreview(file)
+                  ? 'sessions.imagePreview.shareUnavailable'
+                  : 'sessions.imagePreview.share'
+              )}
+            </Menu.Item>
+            <Menu.Separator />
+            <Menu.Item onClick={close}>{t('common.cancel')}</Menu.Item>
+          </Menu.Content>
+        </Menu.Root>
+      )}
+    </div>
+  );
+}
+
 /**
  * Split out so a CLOSED viewer costs nothing: a conversation mounts one of
  * these per image block, and the surface hooks below install viewport and
@@ -260,6 +473,7 @@ function OpenZoomableImageViewer({
   const isMobile = useIsMobile();
   const isElectronFullscreen = useElectronFullscreen();
   useImagePreviewContextMenu(images);
+  const { menu, closeMenu } = useImagePreviewLongPress(elements.floating, images[index]);
 
   // Native window controls are drawn ABOVE web content, so the top bar clears
   // them horizontally and centers its own controls on their line (the y=23
@@ -301,6 +515,11 @@ function OpenZoomableImageViewer({
         data-vaul-no-drag=""
         tabIndex={-1}
         onKeyDown={(event) => {
+          if (menu) {
+            if (event.key === 'Escape') closeMenu();
+            event.stopPropagation();
+            return;
+          }
           // Do not also run PhotoSlider's window listener or background shortcuts.
           if (event.key === 'Escape') {
             event.preventDefault();
@@ -337,6 +556,7 @@ function OpenZoomableImageViewer({
             portalContainer={elements.floating}
           />
         )}
+        {menu && <TouchImageMenu target={menu} close={closeMenu} finalFocus={closeRef} />}
         <div
           className={cn(
             sliderClassName,

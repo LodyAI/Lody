@@ -1,4 +1,5 @@
 import type { Meta, StoryObj } from '@storybook/react';
+import { useState } from 'react';
 import type { MessageContent } from '@lody/shared';
 import { PermissionPrompt } from '@/components/sessions/floating-permission-request';
 
@@ -6,9 +7,10 @@ type ToolCall = Extract<MessageContent, { type: 'tool_call' }>;
 type Permission = NonNullable<ToolCall['permissionRequest']>;
 
 /*
- * Every story is a request a provider really sends, with the provider's own
+ * Provider stories use requests a provider really sends, with the provider's own
  * option names (see the permission note for where each comes from): the prompt
- * never rewrites them, so the stories must not either.
+ * never rewrites them, so the stories must not either. Long-label cases use
+ * synthetic requests to exercise wrapping.
  */
 
 const request = (
@@ -73,6 +75,16 @@ const meta = {
 export default meta;
 type Story = StoryObj<typeof meta>;
 
+function SelectablePermissionPrompt(args: Parameters<typeof PermissionPrompt>[0]) {
+  const [selected, setSelected] = useState('');
+  return (
+    <>
+      <PermissionPrompt {...args} onSelect={setSelected} />
+      <output aria-label="Selected option">{selected}</output>
+    </>
+  );
+}
+
 /** Claude asking to run a command: its own heading and reason, its own answers. */
 export const ClaudeCommand: Story = {};
 
@@ -119,6 +131,55 @@ export const CodexEdit: Story = {
         {
           optionId: 'cancel',
           name: 'No, and tell Codex what to do differently',
+          kind: 'reject_once',
+        },
+      ],
+    }
+  ),
+};
+
+export const LongOptions: Story = {
+  render: (args) => <SelectablePermissionPrompt {...args} />,
+  args: request(
+    { kind: 'edit', title: 'Edit files', locations: [{ path: 'src/example.ts' }] } as never,
+    {
+      options: [
+        { optionId: 'allow', name: 'Allow once', kind: 'allow_once' },
+        {
+          optionId: 'always',
+          name: 'Always allow edits to files under /workspace/example/packages/components for the rest of this session, including newly created files in that directory.',
+          kind: 'allow_always',
+        },
+        {
+          optionId: 'reject',
+          name: 'Deny this request because the proposed change touches files outside the agreed scope. Ask the agent to revise the change before continuing.',
+          kind: 'reject_once',
+        },
+        {
+          optionId: 'block',
+          name: 'Always deny edits to /workspace/example/packages/components/src/components/deeply/nested/example-with-a-very-long-unbroken-filename-and-authorization-scope.tsx for the rest of this session.',
+          kind: 'reject_always',
+        },
+      ],
+    }
+  ),
+};
+
+export const LongChineseOptions: Story = {
+  render: (args) => <SelectablePermissionPrompt {...args} />,
+  args: request(
+    { kind: 'edit', title: 'Edit files', locations: [{ path: 'src/example.ts' }] } as never,
+    {
+      options: [
+        { optionId: 'allow', name: '仅允许本次操作', kind: 'allow_once' },
+        {
+          optionId: 'always',
+          name: '始终允许修改当前工作目录及其子目录下的文件，包括后续新建的文件；授权仅在本次会话中有效，会话结束后需要重新确认。',
+          kind: 'allow_always',
+        },
+        {
+          optionId: 'reject',
+          name: '拒绝本次请求，因为拟议的修改涉及约定范围之外的文件。请先让 Agent 调整修改范围，保留现有内容，确认后再继续执行。',
           kind: 'reject_once',
         },
       ],

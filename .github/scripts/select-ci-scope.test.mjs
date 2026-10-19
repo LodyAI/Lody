@@ -177,6 +177,12 @@ void test('6. root package.json is always-full', () => {
   assert.equal(scope.mode, 'full');
 });
 
+void test('Effect lint configuration changes run full static checks', () => {
+  const scope = select(['.oxlintrc.effect.json']);
+  assert.equal(scope.mode, 'full');
+  assert.equal(scope.runCheckQuick, true);
+});
+
 void test('7. test-only in a leaf does not fan out', () => {
   const scope = select(['packages/ignore/test/gitignore.test.ts']);
   assert.equal(scope.mode, 'affected');
@@ -238,7 +244,7 @@ void test('14. site-docs public asset is site-docs test-only', () => {
 });
 
 void test('14a. site-docs MDX only is not skip-tests', () => {
-  const scope = select(['site-docs/content/docs/en/(features)/session-handoff.mdx']);
+  const scope = select(['site-docs/content/docs/en/(guides)/session-handoff.mdx']);
   assert.equal(scope.mode, 'affected');
   assert.deepEqual(scope.testPackages, ['@lody/site-docs']);
   assert.deepEqual(scope.fanoutPackages, []);

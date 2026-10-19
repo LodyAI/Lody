@@ -1,3 +1,4 @@
+import { closeLoginShellApplicationLegacy } from '@/agent/login-shell-env';
 import { Command } from 'commander';
 import chalk from 'chalk';
 import os from 'os';
@@ -204,11 +205,6 @@ export const startCommand = new Command('start')
       applyLocalPlatformEnv();
       logger.info('Starting in local platform mode (no account, no cloud services).');
     }
-
-    const startupTimeSync =
-      platformKind !== 'local' && LODY_SERVER_URL
-        ? syncCliServerTime(logger, LODY_SERVER_URL)
-        : undefined;
 
     const machineNameOverride = options.machineName?.trim();
     const defaultMachineName = machineNameOverride || os.hostname();
@@ -465,6 +461,10 @@ export const startCommand = new Command('start')
       return recovery;
     };
 
+    const startupTimeSync =
+      platformKind !== 'local' && LODY_SERVER_URL
+        ? syncCliServerTime(logger, LODY_SERVER_URL)
+        : undefined;
     try {
       await startAgentService(
         options,
@@ -485,6 +485,7 @@ export const startCommand = new Command('start')
         platformKind
       );
     } catch (error) {
+      await startupTimeSync?.stop();
       captureAgentServiceEvent('agent_service_startup_failed', {
         failure_stage: runtimeStateReporter.snapshot().startupStage ?? 'unknown',
       });
@@ -516,7 +517,7 @@ async function startAgentService(
   logger: Logger,
   runtimeStateReporter: CliRuntimeStateReporter,
   authMethod: StartAuthMethod,
-  startupTimeSync: Promise<void> | undefined,
+  startupTimeSync: ReturnType<typeof syncCliServerTime> | undefined,
   recoverRejectedCredential: () => Promise<RejectedCredentialRecovery>,
   foregroundHostLease: LocalCliHostLease | null,
   supervisorIdentity: LocalSupervisorIdentity | null,
@@ -599,7 +600,7 @@ async function startAgentService(
       machineName,
       runtimeStateReporter,
       cloudPort,
-      startupTimeSync,
+      startupTimeSync: startupTimeSync?.ready,
       machineLifecycleCapability,
       onFatalAuthFailure: (error) => triggerFatalAuthShutdown?.(error),
       onProcessLifecycleAction: (action) => triggerProcessLifecycleAction?.(action),
@@ -615,10 +616,27 @@ async function startAgentService(
     foregroundHostLease = null;
     await lease?.close();
   };
+  const stopDaemonAndApplication = async () => {
+    const failures: unknown[] = [];
+    for (const stop of [
+      () => startupTimeSync?.stop(),
+      () => managedRuntimeUpdates.shutdown(),
+      () => fleet.shutdown(),
+      closeLoginShellApplicationLegacy,
+    ]) {
+      try {
+        await stop();
+      } catch (error) {
+        failures.push(error);
+      }
+    }
+    if (failures.length === 1) throw failures[0];
+    if (failures.length > 1)
+      throw new AggregateError(failures, 'Daemon and application cleanup failed');
+  };
   registerProcessCleanup(async () => {
     eventLoopLagMonitor.stop();
-    await managedRuntimeUpdates.shutdown();
-    await fleet.shutdown();
+    await stopDaemonAndApplication();
     await closeForegroundHostLease();
   });
   const shutdownSignals: NodeJS.Signals[] =
@@ -635,8 +653,7 @@ async function startAgentService(
       unregisterProcessCleanup();
       stopActivePing();
       eventLoopLagMonitor.stop();
-      await managedRuntimeUpdates.shutdown();
-      await fleet.shutdown();
+      await stopDaemonAndApplication();
       await closeForegroundHostLease();
     },
     flushTelemetry: async () => {
@@ -738,6 +755,7 @@ async function startAgentService(
     // 保持进程活跃
     await new Promise<void>(() => {});
   } catch (error) {
+    let failure = error;
     unregisterSupervisorControl();
     runtimeStateReporter.upsertIssue({
       code: 'agent_service_failed',
@@ -749,15 +767,16 @@ async function startAgentService(
     unregisterProcessCleanup();
     stopActivePing();
     eventLoopLagMonitor.stop();
-    await managedRuntimeUpdates.shutdown();
-    await fleet.shutdown().catch((err: unknown) => {
-      logger.error('Cleanup failed:', err);
-    });
+    try {
+      await stopDaemonAndApplication();
+    } catch (cleanupError) {
+      failure = new AggregateError([error, cleanupError], 'Startup and resource cleanup failed');
+    }
     await closeForegroundHostLease();
-    await reportError('start:agent', error, {
+    await reportError('start:agent', failure, {
       message: 'Agent service failed to start',
       logger,
     });
-    throw error;
+    throw failure;
   }
 }

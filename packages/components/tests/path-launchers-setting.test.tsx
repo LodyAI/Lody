@@ -105,6 +105,18 @@ describe('PathLaunchersSettings', () => {
     });
   });
 
+  it('persists Delta as a standard default launcher', async () => {
+    writeStoredPathLauncherPreference({
+      selectedLauncherId: 'delta',
+      customLaunchers: [],
+    });
+    await renderSettings();
+    expect(getSelectTrigger().textContent).toContain('Delta');
+    expect(getSelectTrigger().querySelector('svg')).not.toBeNull();
+    expect(container.textContent).toContain("The app a session header's Open button uses.");
+    expect(readStoredPathLauncherPreference().selectedLauncherId).toBe('delta');
+  });
+
   it('lists logo and name options with the custom action last', async () => {
     seedCustomLauncher();
     await renderSettings();

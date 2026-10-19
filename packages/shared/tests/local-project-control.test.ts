@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { createRequire } from 'node:module';
 import {
   LocalProjectControlResponseSchema,
   safeParseLocalProjectControlRequest,
@@ -10,6 +11,57 @@ import {
 
 const codexProvider = { cliType: 'builtin', agentType: 'codex' } as const;
 const claudeProvider = { cliType: 'builtin', agentType: 'claude' } as const;
+
+describe('remote directory creation protocol', () => {
+  const cjs = createRequire(import.meta.url)('../src/node/local-project-control.cjs') as {
+    isLocalProjectControlRequest: typeof isLocalProjectControlRequest;
+    isLocalProjectControlResponse: typeof isLocalProjectControlResponse;
+  };
+  const request = {
+    type: 'local-project/create-directory',
+    machineId: 'machine-1',
+    workspaceId: 'workspace-1',
+    parentPath: '/home/user',
+    name: 'New project',
+  };
+  it('round-trips creation through Zod and both IPC guards', () => {
+    expect(safeParseLocalProjectControlRequest(JSON.stringify(request))).toMatchObject({
+      success: true,
+      data: request,
+    });
+    const response = { ok: true, type: request.type, result: { path: '/home/user/New project' } };
+    expect(LocalProjectControlResponseSchema.parse(response)).toEqual(response);
+    for (const guard of [isLocalProjectControlRequest, cjs.isLocalProjectControlRequest])
+      expect(guard(request)).toBe(true);
+    for (const guard of [isLocalProjectControlResponse, cjs.isLocalProjectControlResponse]) {
+      expect(guard(response)).toBe(true);
+      expect(guard({ ...response, result: { path: 1 } })).toBe(false);
+    }
+    expect(LocalProjectControlResponseSchema.safeParse({ ...response, result: {} }).success).toBe(
+      false
+    );
+  });
+  it.each(['workspaceId', 'parentPath', 'name'])('rejects missing or invalid %s', (field) => {
+    for (const value of [undefined, 1, null]) {
+      const invalid = { ...request, [field]: value };
+      expect(safeParseLocalProjectControlRequest(JSON.stringify(invalid)).success).toBe(false);
+      expect(isLocalProjectControlRequest(invalid)).toBe(false);
+      expect(cjs.isLocalProjectControlRequest(invalid)).toBe(false);
+    }
+    expect(
+      safeParseLocalProjectControlRequest(JSON.stringify({ ...request, [field]: '' })).success
+    ).toBe(false);
+  });
+  it.each(['access_denied', 'path_invalid', 'already_exists', 'daemon_unavailable'])(
+    'preserves %s errors',
+    (error) => {
+      const response = { type: request.type, ok: false, error, message: 'Synthetic failure' };
+      expect(LocalProjectControlResponseSchema.parse(response)).toEqual(response);
+      expect(isLocalProjectControlResponse(response)).toBe(true);
+      expect(cjs.isLocalProjectControlResponse(response)).toBe(true);
+    }
+  );
+});
 
 describe('local project control request schema', () => {
   it('preserves an exact Provider selection for custom ACP history requests', () => {

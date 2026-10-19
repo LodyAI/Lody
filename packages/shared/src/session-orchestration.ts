@@ -11,7 +11,7 @@ export const LODY_OPERATION_MIN_DEADLINE_SECONDS = 60;
 export const LODY_OPERATION_MAX_DEADLINE_SECONDS = 604_800;
 export const LODY_OPERATION_COMMAND_MAX_BYTES = 256 * 1024;
 export const LODY_OPERATION_COMPLETION_MAX_BYTES = 64 * 1024;
-export const LODY_MAX_CHAIN_DEPTH = 32;
+export const LODY_MAX_CHAIN_DEPTH = 16;
 
 export const LodyOperationIdSchema = z
   .string()
@@ -67,6 +67,7 @@ export const LodyOperationItemSchema = z.discriminatedUnion('status', [
   z
     .object({
       status: z.literal('cancelled'),
+      cancellationReason: z.literal('user_stop').optional(),
       label: z.string().optional(),
       target: OperationTargetSchema.optional(),
     })
@@ -168,6 +169,7 @@ export type LodyOperationItemResult =
     }
   | {
       status: 'cancelled';
+      cancellationReason?: 'user_stop';
       label?: string;
       target?: LodyOperationItemTarget;
     };
@@ -215,12 +217,24 @@ export type FrozenOperationContinuationConfig = {
   inputConfig: SessionTurnInputConfig;
   /** Frozen causal Turn for delegated Operations; recovery must not re-resolve it. */
   sourceTurnId?: string;
+  /** Human requests whose result this requester is still assembling. Not authorization. */
+  notificationOriginTurnIds?: string[];
   /**
    * Effective per-target create config captured at acceptance. Null entries
    * correspond to batch items rejected before a target was accepted.
    */
   targetDispatchConfigs?: Array<{
     mcpServerIds?: string[];
+    /** Internal derived-default provenance; never accepted from public MCP input. */
+    builtinDefaultModeId?: string;
+    /** Legacy inherited-mode provenance, retained for stored config compatibility. */
+    inheritedBuiltinDefaultModeId?: string;
+    /** Effective inherited selections; never promoted to explicit input during replay. */
+    inheritedDispatchConfig?: {
+      modeId?: string;
+      modelId?: string;
+      configOptionValues?: Record<string, string | boolean>;
+    };
     modeId?: string;
     modelId?: string;
     configOptionValues?: Record<string, string | boolean>;
@@ -229,6 +243,11 @@ export type FrozenOperationContinuationConfig = {
 };
 
 export type StoredLodyOperation = {
+  /** Frozen attachment references, stored atomically in the input side table. */
+  targetInputAttachments?: Array<
+    Array<Extract<import('./ai').SessionInputBlock, { type: 'image' | 'file' }>>
+  >;
+
   /** Immutable source presentation; stored separately for old reader compatibility. */
   author?: AgentMessageAuthor;
   targetRoleSnapshots?: Array<import('./message-author').AgentRoleSnapshot | null>;
@@ -250,23 +269,6 @@ export type StoredLodyOperation = {
   finishedAt?: string;
 };
 
-export type StoredLodyDelivery = {
-  sequence: number;
-  workspaceId: WorkspaceId;
-  requesterSessionId: SessionId;
-  operationId: string;
-  deliveryId: string;
-  systemTurnId: string;
-  state: 'pending' | 'consumed';
-  executionPhase: 'ready' | 'claimed' | 'prepared' | 'started' | 'uncertain';
-  attemptCount: number;
-  activeClaimId?: string;
-  activeClaimWorkerBootId?: string;
-  initiatorChainDepth: number;
-  completion: LodyOperationCompletion;
-  consumedAt?: string;
-};
-
 export type OperationCompletionContent = {
   type: 'operation_completion';
   deliveryId: string;
@@ -275,16 +277,6 @@ export type OperationCompletionContent = {
   /** Stable system history entry id for the matching operation_progress card, when one exists. */
   progressMessageId?: string;
   completion: LodyOperationCompletion;
-  continuation?: {
-    status: 'not_started' | 'uncertain';
-    reason: {
-      code:
-        | 'CONFIGURATION_UNAVAILABLE'
-        | 'DELIVERY_ATTEMPTS_EXHAUSTED'
-        | 'DELIVERY_EXECUTION_UNCERTAIN';
-      message: string;
-    };
-  };
 };
 
 export const makeLodyError = (code: string, message: string, retryable: boolean): LodyError => ({

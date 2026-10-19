@@ -1,6 +1,7 @@
 import { ChildProcess } from 'node:child_process';
 import { PassThrough } from 'node:stream';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import type { NodeProcessApi } from '@lody/shared/node/process';
 import { startCloudflaredNative, type CloudflaredProcess } from './cloudflared-native';
 
 class ControlledChild extends ChildProcess {
@@ -14,12 +15,21 @@ class ControlledChild extends ChildProcess {
     null,
     null,
   ];
+  // A started child always has a pid; `launch` routes the process layer's
+  // signals for it back to `kill` below.
+  override pid: number | undefined = 4242;
   signals: Array<NodeJS.Signals | number> = [];
   exitOnSignal = true;
   override kill(signal: NodeJS.Signals | number = 'SIGTERM'): boolean {
     this.signals.push(signal);
-    if (this.exitOnSignal) this.emit('close', 0, signal);
+    if (this.exitOnSignal) this.exit(null, typeof signal === 'string' ? signal : null);
     return true;
+  }
+  /** What Node does when the OS reports the exit: set the exit fields, then emit. */
+  exit(code: number | null, signal: NodeJS.Signals | null) {
+    Object.assign(this, { exitCode: code, signalCode: signal });
+    this.emit('exit', code, signal);
+    this.emit('close', code, signal);
   }
   log(message: string, level = 'info', error?: string) {
     this.stderr.write(`${JSON.stringify({ message, level, error })}\n`);
@@ -38,15 +48,35 @@ afterEach(async () => {
 
 function launch() {
   const spawned = Promise.withResolvers<ControlledChild>();
+  let current: ControlledChild | undefined;
   const result = startCloudflaredNative({
     binary: '/managed/cloudflared',
     proxyOrigin: 'http://127.0.0.1:5173',
     signal: new AbortController().signal,
-    spawn: () => {
-      const child = new ControlledChild();
-      spawned.resolve(child);
-      return child;
-    },
+    nodeProcess: {
+      platform: 'linux',
+      spawn: () => {
+        const child = new ControlledChild();
+        current = child;
+        spawned.resolve(child);
+        return child;
+      },
+      spawnSync: () => {
+        throw new Error('cloudflared is never run synchronously');
+      },
+      kill: (target, signal) => {
+        const child = current;
+        if (
+          !child ||
+          Math.abs(target) !== child.pid ||
+          child.exitCode !== null ||
+          child.signalCode !== null
+        ) {
+          throw Object.assign(new Error('kill ESRCH'), { code: 'ESRCH' });
+        }
+        if (signal !== 0) child.kill(signal);
+      },
+    } satisfies NodeProcessApi,
   });
   launches.push(result);
   return { result, spawned: spawned.promise };
@@ -82,7 +112,7 @@ describe('cloudflared process ownership', () => {
     const registrationFailure = handle.registered.catch((error: unknown) => error);
     child.stderr.write(`${line}\n`);
     child.log('Failed to initialize DNS local resolver', 'error', 'operation was canceled');
-    child.emit('close', 0, null);
+    child.exit(0, null);
     const failure = await handle.closed;
     expect(failure?.message).toBe(
       _label === 'oversized diagnostic'
@@ -111,7 +141,7 @@ describe('cloudflared process ownership', () => {
       'error',
       'dial timeout https://proxy.test/?credential=secret'
     );
-    child.emit('close', 1, null);
+    child.exit(1, null);
     const failure = await handle.closed;
     expect(failure?.message).toContain('Unable to reach edge [url]');
     expect(failure?.message).toContain('dial timeout [url]');
@@ -127,7 +157,7 @@ describe('cloudflared process ownership', () => {
     void handle.registered.catch((error: unknown) => {
       registrationFailure = error;
     });
-    child.emit('close', 1, null);
+    child.exit(1, null);
     const failure = await handle.closed;
     expect(failure?.message).toContain('cloudflared exited');
     expect(registrationFailure).toBe(failure);
@@ -152,7 +182,9 @@ describe('cloudflared process ownership', () => {
     expect(child.signals).toEqual(['SIGTERM']);
     await vi.advanceTimersByTimeAsync(3_000);
     expect(child.signals).toEqual(['SIGTERM', 'SIGKILL']);
-    child.emit('close', null, 'SIGKILL');
+    child.exit(null, 'SIGKILL');
+    // Exit is confirmed on the termination's next liveness poll.
+    await vi.advanceTimersByTimeAsync(5_000);
     await rejected;
   });
 });

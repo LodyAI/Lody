@@ -291,7 +291,13 @@ export class AgentProviderLifecyclePage {
   private async deleteProvider(settings: Locator, name: string): Promise<void> {
     const row = settings.getByText(name, { exact: true }).locator('xpath=../../../..');
     await expect(row).toBeVisible();
-    await row.getByRole('button', { name: /^(Delete|删除)$/u }).click();
+    const manage = row.getByRole('button', { name: /^(Manage|管理) /u });
+    if ((await manage.count()) > 0) {
+      await manage.click();
+      await this.page.getByRole('menuitem', { name: /^(Delete|删除)$/u }).click();
+    } else {
+      await row.getByRole('button', { name: /^(Delete|删除)$/u }).click();
+    }
     const confirmation = this.page.getByRole('alertdialog');
     await expect(confirmation).toContainText(name);
     await confirmation.getByRole('button', { name: /^(Delete|删除)$/u }).click();

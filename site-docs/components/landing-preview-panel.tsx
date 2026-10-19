@@ -119,9 +119,9 @@ function MockLandingSite({ state }: { state: LandingPreviewDemoState }) {
       {/* Hero: the three copy lines the ghost cursor inspects. */}
       <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-4 px-8 pb-10 text-center">
         <CopyLine index={0} state={state}>
-          <h1 className="text-balance text-2xl font-bold leading-tight tracking-tight text-white sm:text-3xl">
+          <h2 className="text-balance text-2xl font-bold leading-tight tracking-tight text-white sm:text-3xl">
             {lines[0]}
-          </h1>
+          </h2>
         </CopyLine>
         <CopyLine index={1} state={state}>
           <p className="text-pretty text-sm leading-6 text-slate-300 sm:text-base">{lines[1]}</p>

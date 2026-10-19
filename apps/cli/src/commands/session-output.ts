@@ -32,6 +32,26 @@ export type CompletedAssistantTurn = {
 
 export type SessionTurnWaitErrorCode = 'failed' | 'canceled' | 'timeout';
 
+export type SessionTurnOutcome = 'completed' | 'failed' | 'canceled';
+
+/** Durable turn evidence shared by one-turn waits and independent observers. */
+export function classifySessionTurnOutcome(
+  userTurn: Pick<SessionHistoryInput, 'status'> | undefined,
+  assistantTurn: Pick<SessionHistoryInput, 'finished' | 'endedAt'> | undefined
+): SessionTurnOutcome | undefined {
+  if (userTurn?.status === 'failed' || userTurn?.status === 'canceled') {
+    return userTurn.status;
+  }
+  if (
+    userTurn?.status === 'handled' &&
+    assistantTurn &&
+    (assistantTurn.finished === true || typeof assistantTurn.endedAt === 'number')
+  ) {
+    return 'completed';
+  }
+  return undefined;
+}
+
 export class SessionTurnWaitError extends Error {
   constructor(
     public readonly code: SessionTurnWaitErrorCode,
@@ -172,7 +192,9 @@ export async function waitForTurnCompletion(options: {
       }
 
       const userTurn = findUserTurn(history, options.userTurnId);
-      if (userTurn?.status === 'failed') {
+      const assistantEntry = findAssistantEntryForUserTurn(history, options.userTurnId);
+      const outcome = classifySessionTurnOutcome(userTurn, assistantEntry);
+      if (outcome === 'failed') {
         rejectWith(
           new SessionTurnWaitError(
             'failed',
@@ -184,7 +206,7 @@ export async function waitForTurnCompletion(options: {
         return;
       }
 
-      if (userTurn?.status === 'canceled') {
+      if (outcome === 'canceled') {
         rejectWith(
           new SessionTurnWaitError(
             'canceled',
@@ -195,8 +217,6 @@ export async function waitForTurnCompletion(options: {
         );
         return;
       }
-
-      const assistantEntry = findAssistantEntryForUserTurn(history, options.userTurnId);
 
       if (assistantEntry) {
         const items = normalizeMessageItems(assistantEntry.items);
@@ -220,10 +240,7 @@ export async function waitForTurnCompletion(options: {
           lastSerializedItems = nextSerializedItems;
         }
 
-        if (
-          userTurn?.status === 'handled' &&
-          (assistantEntry.finished === true || typeof assistantEntry.endedAt === 'number')
-        ) {
+        if (outcome === 'completed') {
           const completedTurn: CompletedAssistantTurn = {
             sessionId: options.sessionDoc.sessionId,
             userTurnId: options.userTurnId,

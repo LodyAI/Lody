@@ -204,8 +204,7 @@ describe('LoroConnectionRecoveryController watchdog room sweep', () => {
     // Rooms are back to merely joining: nothing is disconnected or errored
     // anymore, so this is the end of the recovery episode.
     instance.setTransportStatus('connecting');
-    await vi.advanceTimersByTimeAsync(0);
-    expect(metaSynced).toHaveBeenCalledTimes(1);
+    await vi.waitFor(() => expect(metaSynced).toHaveBeenCalledTimes(1));
 
     instance.setTransportStatus('connected');
     await vi.advanceTimersByTimeAsync(0);
@@ -235,9 +234,8 @@ describe('LoroConnectionRecoveryController watchdog room sweep', () => {
     expect(metaSynced).not.toHaveBeenCalled();
 
     instance.setTransportStatus('connected');
-    await vi.advanceTimersByTimeAsync(0);
+    await vi.waitFor(() => expect(metaSynced).toHaveBeenCalledTimes(1));
     expect(metaSub.waitUntilSynced).toHaveBeenCalledTimes(1);
-    expect(metaSynced).toHaveBeenCalledTimes(1);
 
     instance.setTransportStatus('connected');
     await vi.advanceTimersByTimeAsync(0);
@@ -332,8 +330,8 @@ describe('LoroConnectionRecoveryController watchdog room sweep', () => {
     await vi.advanceTimersByTimeAsync(1_000);
 
     expect(joinMetaRoom).toHaveBeenCalledTimes(1);
+    await vi.waitFor(() => expect(metaSynced).toHaveBeenCalledTimes(1));
     expect(replacementMetaSub.waitUntilSynced).toHaveBeenCalledTimes(1);
-    expect(metaSynced).toHaveBeenCalledTimes(1);
   });
 
   it('drops a stale joined event when the meta room degrades before sync handling', async () => {

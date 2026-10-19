@@ -78,8 +78,9 @@ a repository connected to the workspace. This follows existing client-side
 management boundaries, not a new server-side row authorization mechanism.
 
 UI Designer reported 4,910 passing component tests and light/dark Storybook checks.
-Integration reran 76 tests across selection, catalog room, writer and input
-submission. The packaged Electron app was not walked through. Mobile project
+After integrating current main, 83 tests across selection, catalog room, writer
+and input submission passed, along with 22 shared and 244 CLI tests. Attachment
+inputs, Role/default provenance and Operation origin metadata from main are retained. The packaged Electron app was not walked through. Mobile project
 settings retain their existing layout. A failed catalog open retries after all
 room consumers release; a loaded local snapshot remains usable offline.
 No additional project policy is resolved at ACP startup, and Role rows do not gain

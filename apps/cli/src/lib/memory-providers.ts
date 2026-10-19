@@ -1,5 +1,6 @@
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
+import { toShared } from '@/platform/process-options';
+import { runCommandTextLegacy } from '@lody/shared/node/process';
+
 import { z } from 'zod';
 import {
   MemoryBindingSchema,
@@ -10,21 +11,27 @@ import {
   type MemoryProviderRequest,
   type MemoryProviderResponse,
 } from '@lody/shared';
-import { getLoginShellEnv } from '@/agent/login-shell-env';
+import { getLoginShellEnvLegacy } from '@/agent/login-shell-env';
 
-const execFileAsync = promisify(execFile);
 type CommandResult = { stdout: string; code?: string | number };
 export type MemoryCommandRunner = (args: string[]) => Promise<CommandResult>;
 const runNmem: MemoryCommandRunner = async (args) => {
   try {
-    const result = await execFileAsync('nmem', args, {
-      env: { ...process.env, ...(await getLoginShellEnv()) },
-      timeout: 15_000,
-      maxBuffer: 1024 * 1024,
-      encoding: 'utf8',
-      windowsHide: true,
-    });
-    return { stdout: result.stdout };
+    const result = await runCommandTextLegacy(
+      {
+        command: 'nmem',
+        args,
+        check: 'none',
+        env: { ...process.env, ...(await getLoginShellEnvLegacy()) },
+        timeout: 15_000,
+        maxOutputBytes: 1024 * 1024,
+      },
+      toShared()
+    );
+    return {
+      stdout: result.stdout,
+      code: result.code === 0 ? undefined : (result.code ?? 'failed'),
+    };
   } catch (error) {
     const parsed = z
       .object({ code: z.union([z.string(), z.number()]).optional(), stdout: z.string().optional() })

@@ -19,13 +19,13 @@ Specs and Agent Notes follow the bilingual policy below.
 An `AGENTS.md` that outgrows 8 KiB is not a formatting problem; it is content in
 the wrong place. Route it rather than delete it:
 
-| Content                                       | Home                              | Why there                                  |
-| --------------------------------------------- | --------------------------------- | ------------------------------------------ |
-| A constraint that still binds                 | Nearest `AGENTS.md`               | Only this chain is read for every change   |
-| One directory's file-by-file responsibilities | That directory's `README.md`      | It changes whenever the directory does     |
-| An explanation crossing modules               | [`.agents/docs/`](docs/AGENTS.md) | It answers a reader, not a directory       |
-| Product intent, guarantees, protocol          | [`specs/`](../specs/AGENTS.md)    | It needs explicit human approval           |
-| Why a choice was made, what was rejected      | [Notes](notes/AGENTS.md)          | It is dated history, not current authority |
+| Content                                              | Home                              | Why there                                                                 |
+| ---------------------------------------------------- | --------------------------------- | ------------------------------------------------------------------------- |
+| A constraint that still binds                        | Nearest `AGENTS.md`               | Only this chain is read for every change                                  |
+| One directory's file-by-file responsibilities        | That directory's `README.md`      | It changes whenever the directory does                                    |
+| An explanation crossing modules                      | [`.agents/docs/`](docs/AGENTS.md) | It answers a reader, not a directory                                      |
+| Consequential intent/guarantees needing human review | [`specs/`](../specs/AGENTS.md)    | Keep only the decision and essential guarantees; prefer an existing owner |
+| Why a choice was made, what was rejected             | [Notes](notes/AGENTS.md)          | It is dated history, not current authority                                |
 
 Explanations live under `.agents/` rather than a root `docs/`: `site-docs/` already
 owns the user-facing documentation at `lody.ai/docs`, and a second root `docs/`
@@ -69,6 +69,12 @@ files, and stale or broken registered topics. Warnings, including an `AGENTS.md`
 nearing the size gate, are reported separately and never fail the check. Errors in one topic do not hide others. Pending
 translation or Spec approval alone does not fail the check.
 
+The Node implementation awaits asynchronous Git subprocesses, preserving binary
+blob and NUL-separated path output. Imported command/report functions return
+Promises. Git failures retain exit/signal and stderr diagnostics; only the content
+comparison accepts `git diff --no-index` exit code 1 as a successful difference.
+Truncated output remains an error.
+
 The [communication architecture draft](../specs/communication-architecture.zh.md)
 is the pilot. SHA tooling exists, but protection scopes and baselines still need
 review and registration. Unregistered topics have no SHA protection.
@@ -104,9 +110,10 @@ Translation cannot approve a Spec, and the tool does not assess translation accu
 
 ## Finishing work
 
-1. Use the actual diff and research/design conclusions to identify affected explanations and diagrams. Prepare a Spec
-   draft for changes to human intent, update `.agents/docs/` for cross-module explanation
-   and the owning README for directory navigation. Non-trivial work adds or updates
+1. Use the actual diff and research/design conclusions to identify affected explanations and diagrams.
+   Apply the [Spec selection rules](../specs/AGENTS.md); a routine behavior change does
+   not require a new Spec. Update `.agents/docs/` for cross-module explanation and
+   the owning README for implementation behavior and directory navigation. Non-trivial work adds or updates
    an Agent Note in the same PR under the [note rules](notes/AGENTS.md#when-to-write);
    design-only work records its conclusions without inventing a PR.
 2. Search earlier decisions before writing a note. Identify additions, partial

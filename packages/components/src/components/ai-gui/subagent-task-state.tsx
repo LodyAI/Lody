@@ -5,9 +5,16 @@ import { formatDurationCompact, getDurationUnitLabels } from '@/lib/format-durat
 import { formatCompactNumber } from '@/lib/format-compact-number';
 import { toIntlLocaleOrEn } from '@/lib/intl-locale';
 import { useStableNow } from '@/hooks/use-stable-now';
+import { formatToolCommand } from './tool-call-command';
 
-export type SubagentTask = Extract<MessageContent, { type: 'subagent_task' }>;
+export type SubagentTask = Extract<MessageContent, { type: 'subagent_task' }> & {
+  /** Derived from the spawning tool in this turn; never persisted as task metadata. */
+  command?: string;
+};
 type SubagentRunItem = NonNullable<SubagentTask['run']>['items'][number];
+
+const isBashTask = (task: SubagentTask): boolean =>
+  task.actor === 'local_bash' || task.taskType === 'local_bash';
 
 /**
  * A task's state. A task carrying a normalized run reads its snapshot, which
@@ -36,11 +43,19 @@ export const isRunning = (task: SubagentTask): boolean => {
  */
 export const collectSubagentTasks = (items: readonly MessageContent[]): SubagentTask[] => {
   const byId = new Map<string, SubagentTask>();
+  const commands = new Map<string, string>();
   for (const item of items) {
+    if (item.type === 'tool_call' && item.kind === 'execute') {
+      const block = item.content?.find((content) => content.type === 'terminal_command');
+      if (block) commands.set(item.toolCallId, formatToolCommand(block));
+    }
     if (item.type !== 'subagent_task' || item.skipTranscript) continue;
     byId.set(item.taskId, item);
   }
-  return [...byId.values()];
+  return [...byId.values()].map((task) => {
+    const command = isBashTask(task) && task.toolUseId ? commands.get(task.toolUseId) : undefined;
+    return command ? { ...task, command } : task;
+  });
 };
 
 /** Deepest indent a nested run takes; deeper ones share it rather than run off the card. */
@@ -121,12 +136,12 @@ export function LiveElapsed({ startedAtEpochSeconds }: { startedAtEpochSeconds: 
 }
 
 export const actorOf = (task: SubagentTask, t: TFunction): string =>
-  task.actor ||
-  task.subagentType ||
-  task.workflowName ||
-  (task.taskType === 'local_bash'
+  isBashTask(task)
     ? t('sessions.subagentTasks.bashActor', 'Bash')
-    : t('sessions.subagentTasks.defaultActor', 'Task'));
+    : task.actor ||
+      task.subagentType ||
+      task.workflowName ||
+      t('sessions.subagentTasks.defaultActor', 'Task');
 
 export const durationOf = (task: SubagentTask): number | null =>
   typeof task.startedAtEpochSeconds === 'number' && typeof task.endedAtEpochSeconds === 'number'

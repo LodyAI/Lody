@@ -14,8 +14,11 @@ import {
   type LocalMachineRpcResponse,
   type MachineLifecycleCapability,
 } from '@lody/shared';
-import { getLoginShellEnv } from '@/agent/login-shell-env';
+import { getLoginShellEnvLegacy } from '@/agent/login-shell-env';
 import { SessionManager } from '@/session/session-manager';
+import { installRoostNodeSessionBackend } from '@/session/roost-node-session';
+import { routeRemoteOwnedSessionHistory } from '@/session/session-backend';
+import { createCommandSessionHistoryFactory } from '@/lib/command-runtime';
 import pkg from '@/pkg';
 import { formatErrorMessage } from '@/utils/format-error';
 import type { LocalWorkspaceCatalogService } from '@/lib/local-workspace-catalog';
@@ -67,7 +70,35 @@ export class Lody {
   private builtinAgentRegistrationStarted = false;
 
   static async create(options: LodyOptions): Promise<Lody> {
-    const manager = await traceAsync(
+    // Register the optional local Roost adapter before any session document can
+    // resolve its backend. The selector remains metadata-driven, so legacy and
+    // new Loro sessions continue to use the built-in backend by default.
+    installRoostNodeSessionBackend();
+    let manager: LoroDocumentManager | undefined;
+    // Commands the daemon executes may touch Sessions owned by other machines; their
+    // Roost history lives with that owner, never in this machine's database.
+    const ownerHistoryRouter =
+      options.cloudPort.kind === 'local'
+        ? undefined
+        : routeRemoteOwnedSessionHistory(
+            options.machineId,
+            createCommandSessionHistoryFactory(
+              () => {
+                if (!manager) throw new Error('Workspace document manager is unavailable');
+                return manager;
+              },
+              {
+                token: options.token,
+                userId: options.userId,
+                userName: options.userId,
+                userEmail: '',
+                machineId: options.machineId,
+                machineName: options.machineName,
+              },
+              options.workspaceId
+            )
+          );
+    manager = await traceAsync(
       options.logger,
       'startup.loro_document_manager',
       { workspaceId: options.workspaceId },
@@ -76,8 +107,10 @@ export class Lody {
           // The daemon is the only process that resumes LoroDoc rooms from the
           // shared SQLite cursors; one-shot commands keep theirs in memory.
           documentCursorScope: 'shared-durable',
+          keepWorkspaceCatalogJoined: true,
           streamsTokens: options.cloudPort.streamsTokens,
           cloudBilling: options.cloudPort.billing,
+          ownerHistoryRouter,
         })
     );
     return new Lody(options, manager);
@@ -136,9 +169,9 @@ export class Lody {
   async start(): Promise<void> {
     // Warm the login-shell env probe (~100-300ms) concurrently with startup so
     // synchronous terminal environment callbacks usually read a populated PATH.
-    // ACP startup awaits the same cached probe before spawning. Fire-and-forget:
-    // getLoginShellEnv swallows failures and fails open to an empty overlay.
-    void getLoginShellEnv();
+    // ACP startup awaits the same cached probe before spawning. The Legacy cache
+    // retains and reports failures; launchers receive them on later reads.
+    void getLoginShellEnvLegacy().catch(() => undefined);
     await traceAsync(
       this.logger,
       'startup.machine_runtime',

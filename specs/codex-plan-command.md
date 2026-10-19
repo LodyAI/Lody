@@ -13,4 +13,4 @@ The Codex adapter owns command parsing and mode changes. It advertises optional 
 
 - [Command handling](../packages/acp-extension-codex/src/CodexCommands.ts)
 - [Configuration tests](../packages/acp-extension-codex/src/__tests__/CodexACPAgent/session-config-options.test.ts)
-- [ACP v2 lifecycle tests](../packages/acp-extension-codex/src/__tests__/CodexACPAgent/prompt-v2.test.ts)
+- [Adapter lifecycle tests](../packages/acp-extension-codex/src/__tests__/CodexACPAgent/)

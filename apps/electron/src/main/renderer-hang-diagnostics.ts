@@ -1,5 +1,4 @@
 import { app, type BrowserWindow, type Session } from 'electron'
-import { execFile } from 'node:child_process'
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
 import { createRendererHangLog, withDiagnosticTimeout } from './renderer-hang-log'
@@ -80,18 +79,16 @@ async function captureNativeSample(pid: number, entry: Record<string, unknown>):
   lastSampleAt = Date.now()
   try {
     if (!Number.isSafeInteger(pid) || pid <= 0) throw new Error('Renderer PID unavailable')
-    const output = await new Promise<string>((resolve, reject) => {
-      // -file /dev/stdout avoids sample's own unbounded temporary output files.
-      execFile(
-        '/usr/bin/sample',
-        [String(pid), '2', '10', '-file', '/dev/stdout'],
-        {
-          timeout: 8000,
-          maxBuffer: SAMPLE_LIMIT,
-          killSignal: 'SIGKILL'
-        },
-        (error, stdout) => (error ? reject(error) : resolve(stdout))
-      )
+    // Loaded on demand: desktop-bootstrap imports this module before the
+    // desktop lease is held, and the process layer must stay out of that graph.
+    const { runCommandTextLegacy } = await import('@lody/shared/node/process')
+    // -file /dev/stdout avoids sample's own unbounded temporary output files.
+    const { stdout: output } = await runCommandTextLegacy({
+      command: '/usr/bin/sample',
+      args: [String(pid), '2', '10', '-file', '/dev/stdout'],
+      timeout: 8000,
+      maxOutputBytes: SAMPLE_LIMIT,
+      check: 'exit-0'
     })
     const directory = path.join(app.getPath('logs'), 'renderer-hang-samples')
     await fs.mkdir(directory, { recursive: true })

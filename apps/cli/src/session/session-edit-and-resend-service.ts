@@ -110,6 +110,17 @@ export class SessionEditAndResendService {
     const history = await backend.readHistory();
     const lastUser = lastUserIndex(history);
     if (history[lastUser]?.id === spec.replacementUserTurnId) {
+      try {
+        await this.deps.executionService.acceptInboxHumanInput({
+          sessionId: spec.sessionId,
+          inputId: spec.replacementUserTurnId,
+          userId: spec.requestedByUserId,
+          config: history[lastUser]?.inputConfig ?? spec.inputConfig,
+        });
+      } catch (cause) {
+        return sessionEditAndResendFailure(spec, 'HISTORY_WRITE_FAILED', formatErrorMessage(cause));
+      }
+      this.deps.enqueueDispatch(spec.sessionId);
       return this.success(spec);
     }
     if (history[lastUser]?.id !== spec.expectedUserTurnId) {
@@ -130,7 +141,7 @@ export class SessionEditAndResendService {
 
     const legacyMeta = meta as SessionMeta & SessionLegacyMetaFields;
     const latestGoal = resolveLatestSessionGoalFromHistory(history) ?? legacyMeta.latestGoal;
-    if (meta.autoReview || isSessionGoalActive(latestGoal)) {
+    if (isSessionGoalActive(latestGoal)) {
       return sessionEditAndResendFailure(
         spec,
         'ACTIVE_AUTOMATION',
@@ -224,7 +235,7 @@ export class SessionEditAndResendService {
         const freshGoal =
           resolveLatestSessionGoalFromHistory(freshHistory) ?? freshLegacyMeta.latestGoal;
         const freshExecution = this.deps.executionService.getExecutionSnapshot(spec.sessionId);
-        if (freshMeta.autoReview || isSessionGoalActive(freshGoal)) {
+        if (isSessionGoalActive(freshGoal)) {
           await this.closePrepared(runtime, preparedSessionId);
           preparedSessionId = null;
           return sessionEditAndResendFailure(
@@ -258,7 +269,7 @@ export class SessionEditAndResendService {
               workspaceId: this.deps.workspaceId as never,
               turnId: activeTurnId,
             },
-            { pendingInput: 'preserve', prePromptSession: 'keep' }
+            { pendingInput: 'preserve', prePromptSession: 'keep', pauseInbox: false }
           );
           if (!cancelled.success) {
             await this.closePrepared(runtime, preparedSessionId);
@@ -287,15 +298,6 @@ export class SessionEditAndResendService {
             spec,
             'STALE_USER_TURN',
             'The session changed before the replacement could be committed.'
-          );
-        }
-        if (preCommitMeta.autoReview) {
-          await this.closePrepared(runtime, preparedSessionId);
-          preparedSessionId = null;
-          return sessionEditAndResendFailure(
-            spec,
-            'ACTIVE_AUTOMATION',
-            'Session automation started before the replacement could be committed.'
           );
         }
         commitMeta = preCommitMeta;
@@ -415,8 +417,14 @@ export class SessionEditAndResendService {
         agentClient.adoptPreparedSession(prepared);
         runtime.acpSessionId = preparedSessionId;
         committed = true;
+        await this.deps.executionService.acceptInboxHumanInput({
+          sessionId: spec.sessionId,
+          inputId: spec.replacementUserTurnId,
+          userId: spec.requestedByUserId,
+          config: inputConfig,
+        });
       } catch (error) {
-        if (preparedSessionId && runtime) {
+        if (!committed && preparedSessionId && runtime) {
           await this.closePrepared(runtime, preparedSessionId);
           preparedSessionId = null;
         }
@@ -503,6 +511,7 @@ export class SessionEditAndResendService {
         mcpServerIds,
         customAcp: agentConfig.customAcp,
         runtimeOverrides: agentConfig.runtimeOverrides,
+        magpieGatewayUrl: agentConfig.magpieGatewayUrl,
         env: agentConfig.env,
         project: meta.project,
         sessionId: meta.id,

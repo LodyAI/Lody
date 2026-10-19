@@ -80,15 +80,17 @@ describe('AgentRoleDetailPane', () => {
     return term?.parentElement?.querySelector('dd')?.textContent ?? undefined;
   };
 
-  it('reads a pinned permission mode as permission, not as reasoning', async () => {
+  it('reads a pinned permission mode as the mode control, not as reasoning', async () => {
     // `runConfig.modeId` is the legacy ACP PERMISSION mode. The mention menu's
     // own rows used to print it under "Reasoning", which is what sent this pane
-    // to both surfaces.
+    // to both surfaces. Its label follows what the control IS — Codex's knob is
+    // a mode selector, so the row is named "Mode", not "Permission".
     const view = await render({
       role: role({ runConfig: { modelId: 'gpt-5.6-sol', modeId: 'bypassPermissions' } }),
     });
-    expect(rowValue(view, 'Permission')).toBe('bypassPermissions');
+    expect(rowValue(view, 'Mode')).toBe('bypassPermissions');
     expect(rowValue(view, 'Reasoning')).toBeUndefined();
+    expect(rowValue(view, 'Permission')).toBeUndefined();
   });
 
   it('states only what the Role pins, never the agent current value', async () => {
@@ -98,7 +100,7 @@ describe('AgentRoleDetailPane', () => {
     // This Role pins no reasoning level, so the pane must not borrow one from
     // the bound agent's own defaults and present it as the Role's.
     expect(rowValue(view, 'Reasoning')).toBeUndefined();
-    expect(rowValue(view, 'Permission')).toBeUndefined();
+    expect(rowValue(view, 'Mode')).toBeUndefined();
   });
 
   it('names the machine only where the surface passes one', async () => {

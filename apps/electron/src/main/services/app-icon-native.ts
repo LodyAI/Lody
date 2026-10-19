@@ -1,7 +1,4 @@
-import { execFile } from 'node:child_process'
-import { promisify } from 'node:util'
-
-const execFileAsync = promisify(execFile)
+import { runCommandTextLegacy } from '@lody/shared/node/process'
 
 // Use the system Objective-C bridge; no runtime compiler or downloaded helper.
 // Paths are argv, never executable script text. This changes Finder's custom icon,
@@ -24,12 +21,11 @@ function run(args) {
 `
 
 export async function setMacApplicationIcon(bundlePath: string, imagePath: string | null) {
-  await execFileAsync(
-    '/usr/bin/osascript',
-    ['-l', 'JavaScript', '-e', script, bundlePath, imagePath ?? ''],
-    {
-      timeout: 15_000,
-      maxBuffer: 64 * 1024
-    }
-  )
+  await runCommandTextLegacy({
+    command: '/usr/bin/osascript',
+    args: ['-l', 'JavaScript', '-e', script, bundlePath, imagePath ?? ''],
+    timeout: 15_000,
+    maxOutputBytes: 64 * 1024,
+    check: 'exit-0'
+  })
 }

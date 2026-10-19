@@ -1,6 +1,6 @@
 import * as React from 'react';
 import { Drawer as DrawerPrimitive } from 'vaul';
-import { PopupContainerProvider } from '@lody/ui/popup-container';
+import { ModalContainerProvider, PopupContainerProvider } from '@lody/ui/popup-container';
 
 import { cn } from '@/lib/utils';
 import { isNativeAppShell, isNativeIOSAppShell } from '@/lib/native-platform';
@@ -124,7 +124,9 @@ function DrawerContent({
            `bg-muted`, which equals `--background` in the dark theme and renders
            invisible) so the handle actually reads as draggable. */}
         <div className="bg-muted-foreground/40 mx-auto mt-3 hidden h-1.5 w-10 shrink-0 rounded-full group-data-[vaul-drawer-direction=bottom]/drawer-content:block" />
-        <PopupContainerProvider container={popupContainer}>{children}</PopupContainerProvider>
+        <ModalContainerProvider container={popupContainer}>
+          <PopupContainerProvider container={popupContainer}>{children}</PopupContainerProvider>
+        </ModalContainerProvider>
         {/* Body portals inherit Vaul's pointer lock and leave its focus scope.
             Keep floating controls inside the modal, outside scrolling content;
             a boxless host adds no flex item, and menu gestures never drag Vaul. */}

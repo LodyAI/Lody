@@ -121,6 +121,41 @@ describe('where a proposed schedule runs', () => {
     });
   });
 
+  it('runs a multi-machine Role on the named machine, else the conversation’s, never a guess', () => {
+    const everywhere = {
+      ...role,
+      additionalTargets: [
+        { machineId: 'macbook', agentConfigId: 'reviewer', runConfig: { modelId: 'haiku' } },
+      ],
+    } as unknown as AgentRole;
+    const resolve = (target: ScheduleProposalMeta['target'], from = conversation) =>
+      resolveScheduleProposalTarget({
+        meta: meta(target),
+        conversation: from,
+        agents,
+        roles: [everywhere],
+      });
+
+    expect(resolve({ agentRoleId: 'role-1', machineId: 'studio' })).toMatchObject({
+      ok: true,
+      target: { agent: { agentConfigId: 'writer', modelId: 'sonnet' } },
+    });
+    // The conversation runs on the MacBook, where the Role also runs.
+    expect(resolve({ agentRoleId: 'role-1' })).toMatchObject({
+      ok: true,
+      target: { agent: { agentConfigId: 'reviewer', modelId: 'haiku' } },
+    });
+    const elsewhere = { ...conversation, session: { ...session, machineId: 'ci' } as SessionMeta };
+    expect(resolve({ agentRoleId: 'role-1' }, elsewhere)).toEqual({
+      ok: false,
+      problem: 'role_machine_required',
+    });
+    expect(resolve({ agentRoleId: 'role-1', machineId: 'ci' })).toEqual({
+      ok: false,
+      problem: 'machine_mismatch',
+    });
+  });
+
   it('gives a named Agent the builtin default mode, never the conversation’s', () => {
     // The conversation's mode belongs to the conversation's Agent; carrying it
     // onto a different Agent could hand that Agent an elevated mode nobody chose.

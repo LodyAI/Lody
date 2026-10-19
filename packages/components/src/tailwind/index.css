@@ -410,6 +410,22 @@ pre,
     --markdown-mermaid-muted: hsl(var(--muted-foreground));
     --markdown-mermaid-control-bg: hsl(var(--background) / 0.86);
     --markdown-mermaid-control-border: hsl(var(--border) / 0.78);
+    /* Diagram colors come from the app palette's tokens (Lody Light or Vesper),
+       so they match the surrounding chrome. Labels are content, so they use the
+       prose foreground. `--pele-bg` backs edge labels, so it is the block's own
+       fill made opaque. Chart series keep Pele's categorical palette: status
+       tokens carry meaning (a "danger" slice misreads) and are not built to be
+       told apart as categories. */
+    --pele-bg: color-mix(in srgb, hsl(var(--muted)) 32%, hsl(var(--background)));
+    --pele-fg: hsl(var(--reading-foreground));
+    --pele-muted: hsl(var(--muted-foreground));
+    --pele-line: hsl(var(--muted-foreground));
+    --pele-surface: hsl(var(--background));
+    --pele-surface-alt: color-mix(in srgb, hsl(var(--muted)) 72%, hsl(var(--background)));
+    --pele-border: color-mix(in srgb, hsl(var(--primary)) 50%, hsl(var(--muted-foreground)));
+    --pele-accent: hsl(var(--primary));
+    --pele-critical: hsl(var(--destructive));
+    --pele-error: hsl(var(--destructive));
     position: relative;
     display: block !important;
     width: 100%;
@@ -492,7 +508,9 @@ pre,
        Mermaid sequence diagrams are often taller than a phone viewport too. */
     max-height: min(70vh, 36rem) !important;
     overflow: auto !important;
-    overscroll-behavior: contain;
+    /* Let wheel/touch scrolling continue into the conversation at either edge,
+       including when the diagram fits and has no vertical scroll range. */
+    overscroll-behavior: auto;
     padding: 1rem;
     /* An inactive preview does not pan, it activates on click
        (`use-mermaid-diagram-canvas.tsx` tags it `role="button"`). */
@@ -1058,6 +1076,18 @@ pre,
     --safe-area-bottom: env(safe-area-inset-bottom, 0px);
     --safe-area-left: env(safe-area-inset-left, 0px);
     --native-keyboard-height: 0px;
+    /*
+     * The strip the OS caption buttons occupy over web content. Electron's
+     * Windows `titleBarOverlay` turns on Window Controls Overlay, whose
+     * `titlebar-area-*` rect is the part of that strip left free for the app;
+     * the caption buttons sit to its right. Everywhere else, and in native
+     * fullscreen where the overlay hides, those variables are undefined and
+     * both insets fall back to 0, so a surface can always reserve them.
+     */
+    --window-caption-height: env(titlebar-area-height, 0px);
+    --window-caption-inset-right: calc(
+      100vw - env(titlebar-area-x, 100vw) - env(titlebar-area-width, 0px)
+    );
   }
   .dark {
     --background: 222 55% 9.6%;
@@ -1229,6 +1259,13 @@ pre,
     -webkit-touch-callout: default;
     -webkit-user-select: text;
     user-select: text;
+  }
+
+  /* No WKWebView link preview inside selectable text: after its "Open Link",
+     every later tap in the app reopened that link. Links open with a tap. */
+  body.native-mobile-shell [data-native-selection-allow] a[href],
+  body.native-mobile-shell [data-native-selection-allow] a[href] * {
+    -webkit-touch-callout: none;
   }
 
   button,
@@ -2118,6 +2155,70 @@ pre,
     animation: none;
     transform: translateX(50%);
   }
+}
+
+/* A long desktop sidebar title only travels while its row is hovered or
+   keyboard-focused. The distance and duration come from the measured overflow,
+   so short labels keep their ordinary ellipsis and the full row layout stays put. */
+@keyframes sidebar-session-title-marquee {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(var(--sidebar-title-distance));
+  }
+}
+
+[data-sidebar-session-row][data-sidebar-title-overflow='true']:hover [data-sidebar-session-title],
+[data-sidebar-session-row][data-sidebar-title-overflow='true']:focus-within
+  [data-sidebar-session-title] {
+  width: max-content;
+  min-width: 100%;
+  max-width: none;
+  overflow: visible;
+  text-overflow: clip;
+  animation: sidebar-session-title-marquee var(--sidebar-title-duration, 5s) ease-in-out 600ms
+    infinite alternate;
+  will-change: transform;
+}
+
+[data-sidebar-session-row][data-sidebar-title-overflow='true']:hover [data-sidebar-title-clip],
+[data-sidebar-session-row][data-sidebar-title-overflow='true']:focus-within
+  [data-sidebar-title-clip] {
+  overflow: hidden;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-sidebar-session-row][data-sidebar-title-overflow='true']:hover [data-sidebar-session-title],
+  [data-sidebar-session-row][data-sidebar-title-overflow='true']:focus-within
+    [data-sidebar-session-title] {
+    width: auto;
+    min-width: 0;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    mask-image: none;
+    animation: none;
+    transform: none;
+    will-change: auto;
+  }
+}
+
+[data-sidebar-session-row][data-sidebar-title-overflow='true'][data-sidebar-title-swiping='true']
+  [data-sidebar-session-title] {
+  width: max-content;
+  min-width: 100%;
+  max-width: none;
+  overflow: visible;
+  text-overflow: clip;
+  animation: none;
+  transform: translateX(var(--sidebar-title-swipe-offset, 0px));
+  will-change: transform;
+  user-select: none;
+}
+
+[data-sidebar-session-row][data-sidebar-title-swiping='true'] [data-sidebar-title-clip] {
+  overflow: hidden;
 }
 
 /* Focus rings are for keyboard navigation. `installFocusModality` (@lody/ui)

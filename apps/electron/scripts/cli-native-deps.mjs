@@ -33,6 +33,7 @@ const require = createRequire(import.meta.url)
 // strict layout exposes transitive deps only next to the package that
 // declares them (.pnpm/<pkg>/node_modules/<dep>), not under apps/cli.
 const CLI_RUNTIME_PACKAGE_CHAIN = [
+  { name: '@loro-dev/roost-node', from: 'cli', entry: '@loro-dev/roost-node/native' },
   { name: '@napi-rs/keyring', from: 'cli' },
   { name: 'better-sqlite3', from: 'cli' },
   { name: 'loro-crdt', from: 'cli' },
@@ -61,6 +62,85 @@ export const stagedCliDir = path.join(electronAppRoot, 'resources', 'cli')
 export const stagedNodeModulesDir = path.join(stagedCliDir, 'node_modules')
 export const stagedSqliteDir = path.join(stagedNodeModulesDir, 'better-sqlite3')
 export const stagedNodePtyDir = path.join(stagedNodeModulesDir, '@lydell', 'node-pty')
+export const stagedRoostDir = path.join(stagedNodeModulesDir, '@loro-dev', 'roost-node')
+
+export function roostPrebuildFileName({ platform, arch }) {
+  if (!['darwin', 'linux', 'win32'].includes(platform) || !['arm64', 'x64'].includes(arch)) {
+    throw new Error(`No Roost native binding for ${platform}-${arch}`)
+  }
+  const suffix = platform === 'linux' ? '-gnu' : platform === 'win32' ? '-msvc' : ''
+  return `roost.${platform}-${arch}${suffix}.node`
+}
+
+export function stagedRoostBindingPath(target) {
+  return path.join(stagedRoostDir, roostPrebuildFileName(target))
+}
+
+// Keep the client's relative Worker and binding paths; ship one target prebuild.
+export function installEmbeddedRoostBinding(target) {
+  const sourceDir = resolvePackageDir(
+    '@loro-dev/roost-node',
+    cliAppRoot,
+    '@loro-dev/roost-node/native'
+  )
+  stageRoostBinding(sourceDir, stagedRoostDir, target)
+}
+
+export function stageRoostBinding(
+  sourceDir,
+  destinationDir,
+  target,
+  { fetchBinaryPackage = fetchNativeBinaryPackage } = {}
+) {
+  const name = roostPrebuildFileName(target)
+  if (
+    !fs.existsSync(path.join(destinationDir, 'client.mjs')) ||
+    !fs.existsSync(path.join(sourceDir, 'package.json'))
+  ) {
+    throw new Error(
+      `Roost native runtime for ${target.platform}-${target.arch} is missing; run pnpm install and sync:cli`
+    )
+  }
+  let source = path.join(sourceDir, name)
+  let downloaded
+  try {
+    if (!fs.existsSync(source)) {
+      const packageName = `@loro-dev/roost-node-${name.slice('roost.'.length, -'.node'.length)}`
+      const metadata = JSON.parse(fs.readFileSync(path.join(sourceDir, 'package.json'), 'utf8'))
+      const version = metadata.optionalDependencies?.[packageName]
+      if (!version || version !== metadata.version) {
+        throw new Error(
+          `Roost native runtime for ${target.platform}-${target.arch} is missing an exact platform dependency`
+        )
+      }
+      let platformDir
+      try {
+        platformDir = resolvePackageDir(packageName, sourceDir)
+      } catch (error) {
+        if (error.code !== 'MODULE_NOT_FOUND') throw error
+        downloaded = fetchBinaryPackage(packageName, version)
+        platformDir = downloaded.packageDir
+      }
+      const platform = JSON.parse(fs.readFileSync(path.join(platformDir, 'package.json'), 'utf8'))
+      if (platform.name !== packageName || platform.version !== version) {
+        throw new Error(
+          `Roost platform package version mismatch: expected ${packageName}@${version}`
+        )
+      }
+      source = path.join(platformDir, name)
+      if (!fs.existsSync(source))
+        throw new Error(`Roost platform package ${packageName}@${version} is missing ${name}`)
+    }
+    // Resolve and read the complete replacement before touching the working runtime.
+    const binary = fs.readFileSync(source)
+    fs.writeFileSync(path.join(destinationDir, name), binary)
+    for (const entry of fs.readdirSync(destinationDir)) {
+      if (entry.endsWith('.node') && entry !== name) fs.rmSync(path.join(destinationDir, entry))
+    }
+  } finally {
+    downloaded?.cleanup()
+  }
+}
 
 /**
  * better-sqlite3 >=13 resolves `prebuilds/<target>.node` from process.platform/arch
@@ -99,7 +179,7 @@ export function installEmbeddedKeyringBinding(target) {
   }
   const sibling = path.join(path.dirname(wrapper), packageName.slice('@napi-rs/'.length))
   const installed = fs.existsSync(path.join(sibling, 'package.json')) ? sibling : undefined
-  const downloaded = installed ? undefined : fetchNodePtyBinaryPackage(packageName, version)
+  const downloaded = installed ? undefined : fetchNativeBinaryPackage(packageName, version)
   try {
     copyPackageDir(
       installed ?? downloaded.packageDir,
@@ -143,16 +223,16 @@ export function stagedNodePtySpawnHelperPath({ platform, arch }) {
   )
 }
 
-function resolvePackageDir(packageName, fromDir) {
+function resolvePackageDir(packageName, fromDir, entry = packageName) {
   const resolveOptions = { paths: [fromDir] }
   try {
     // Packages with no `exports` map expose package.json directly.
     return path.dirname(require.resolve(`${packageName}/package.json`, resolveOptions))
   } catch (error) {
     if (error.code !== 'ERR_PACKAGE_PATH_NOT_EXPORTED') throw error
-    // @lydell/node-pty restricts `exports` to ".", so walk up from its entry point to
-    // the directory that owns package.json.
-    let dir = path.dirname(require.resolve(packageName, resolveOptions))
+    // Restricted exports need a public entry. Roost's root is import-only;
+    // its explicit ./native export also supports require.resolve.
+    let dir = path.dirname(require.resolve(entry, resolveOptions))
     while (!fs.existsSync(path.join(dir, 'package.json'))) {
       const parent = path.dirname(dir)
       if (parent === dir) {
@@ -182,13 +262,30 @@ function copyPackageDir(fromDir, toDir, { isTopLevel }) {
   }
 }
 
+export function stageLoroRuntimePackage(fromDir, toDir) {
+  // CLI workers resolve the Node entry, which loads its adjacent WASM. Browser,
+  // bundler, web and base64 distributions belong to renderer builds, not here.
+  fs.mkdirSync(toDir, { recursive: true })
+  for (const name of ['package.json', 'LICENSE']) {
+    fs.copyFileSync(path.join(fromDir, name), path.join(toDir, name))
+  }
+  copyPackageDir(path.join(fromDir, 'nodejs'), path.join(toDir, 'nodejs'), {
+    isTopLevel: false
+  })
+}
+
 export function stageCliRuntimePackages() {
   fs.rmSync(stagedNodeModulesDir, { recursive: true, force: true })
   const resolvedDirs = { cli: cliAppRoot }
-  for (const { name, from } of CLI_RUNTIME_PACKAGE_CHAIN) {
-    const fromDir = resolvePackageDir(name, resolvedDirs[from])
+  for (const { name, from, entry } of CLI_RUNTIME_PACKAGE_CHAIN) {
+    const fromDir = resolvePackageDir(name, resolvedDirs[from], entry)
     resolvedDirs[name] = fromDir
-    copyPackageDir(fromDir, path.join(stagedNodeModulesDir, name), { isTopLevel: true })
+    const toDir = path.join(stagedNodeModulesDir, name)
+    if (name === 'loro-crdt') {
+      stageLoroRuntimePackage(fromDir, toDir)
+    } else {
+      copyPackageDir(fromDir, toDir, { isTopLevel: true })
+    }
   }
 }
 
@@ -268,8 +365,8 @@ function resolveInstalledNodePtyBinaryDir(packageName) {
  * install across its `os`/`cpu` fields without `--force`; the download itself is
  * platform-agnostic. Installed into a throwaway prefix so the workspace tree is untouched.
  */
-function fetchNodePtyBinaryPackage(packageName, version) {
-  const downloadDir = fs.mkdtempSync(path.join(os.tmpdir(), 'lody-node-pty-'))
+function fetchNativeBinaryPackage(packageName, version) {
+  const downloadDir = fs.mkdtempSync(path.join(os.tmpdir(), 'lody-native-binding-'))
   const result = spawnSync(
     process.platform === 'win32' ? 'npm.cmd' : 'npm',
     [
@@ -290,7 +387,7 @@ function fetchNodePtyBinaryPackage(packageName, version) {
   if (result.status !== 0 || !fs.existsSync(path.join(packageDir, 'package.json'))) {
     fs.rmSync(downloadDir, { recursive: true, force: true })
     throw new Error(
-      `Failed to download ${packageName}@${version} for the embedded CLI pty binding. ` +
+      `Failed to download ${packageName}@${version} for an embedded CLI native binding. ` +
         `It is fetched from the npm registry because the build host is ` +
         `${process.platform}-${process.arch}; set a registry mirror on restricted networks.`
     )
@@ -322,7 +419,7 @@ export function installEmbeddedNodePtyBinding({ platform, arch }) {
   removeStagedNodePtyBinaryPackages()
 
   const installedDir = resolveInstalledNodePtyBinaryDir(packageName)
-  const downloaded = installedDir ? undefined : fetchNodePtyBinaryPackage(packageName, version)
+  const downloaded = installedDir ? undefined : fetchNativeBinaryPackage(packageName, version)
   const targetDir = stagedNodePtyBinaryDir({ platform, arch })
   try {
     // Copied as a non-top-level dir so the `prebuilds/` exclusion does not apply: in this
@@ -378,7 +475,7 @@ const SPAWN_HELPER_ASAR_REWRITES = [
  *
  * Applied here rather than through pnpm `patchedDependencies` because the affected file
  * ships inside the per-platform binary package, and the foreign-arch package is fetched
- * straight from the registry by fetchNodePtyBinaryPackage — a pnpm patch would never
+ * straight from the registry by fetchNativeBinaryPackage — a pnpm patch would never
  * reach it, silently leaving the `--x64` slice of a mac release broken.
  */
 function repairStagedSpawnHelperAsarPath(targetDir, packageName) {

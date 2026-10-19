@@ -352,6 +352,72 @@ function DeepSeekWarningShell() {
   );
 }
 
+/** A provider-prefixed id longer than the old 10rem face cap. */
+const longModelOptions: AcpSessionSelectOption[] = [
+  {
+    value: 'openrouter/anthropic/claude-sonnet-5-5-thinking',
+    label: 'openrouter/anthropic/claude-sonnet-5-5-thinking',
+  },
+];
+
+/**
+ * The model label at several composer widths, inside the same
+ * `@container/composer-face` slot the composer footer gives it: in full while
+ * there is room, then losing its prefix, then the compact square.
+ */
+function LongModelNameShell() {
+  const store = useMemo(() => {
+    const next = createStore();
+    next.set(
+      agentConfigMetaCacheAtom,
+      Object.fromEntries(agents.map((agent) => [getAgentConfigRoomId(agent.id), agent]))
+    );
+    return next;
+  }, []);
+  const [values, setValues] = useState<Record<string, AcpConfigOptionValue>>(() =>
+    Object.fromEntries(selectors.map((sel) => [sel.configId, sel.currentValue]))
+  );
+  const updateConfig = (id: string, value: AcpConfigOptionValue) =>
+    setValues((previous) => ({ ...previous, [id]: value }));
+
+  return (
+    <Provider store={store}>
+      <div className="flex min-h-dvh flex-col items-start justify-end gap-4 bg-background p-8">
+        {[720, 480, 360, 260].map((width) => (
+          <div
+            key={width}
+            data-long-model-row={width}
+            style={{ width }}
+            className="flex items-center gap-1.5 rounded-xl bg-input/90 px-2 py-1.5"
+          >
+            <div className="@container/composer-face flex min-w-0 flex-1 flex-nowrap items-center gap-x-1.5 overflow-hidden">
+              <DesktopRunConfigMenu
+                agentSelection={{ agentId: codexId, machineId }}
+                allowedMachineIds={[machineId]}
+                availableAgentConfigs={agents}
+                agentLocked
+                modelOptions={longModelOptions}
+                selectedModelId={longModelOptions[0]!.value}
+                configOptionSelectors={selectors}
+                configOptionValues={values}
+                onConfigOptionChange={updateConfig}
+              />
+              <DesktopPermissionModeButton
+                modeOptions={modeOptions}
+                selectedModeId={modeOptions[0]?.value ?? null}
+                configOptionSelectors={selectors}
+                configOptionValues={values}
+                onConfigOptionChange={updateConfig}
+              />
+            </div>
+            <div className="size-7 shrink-0 rounded-full bg-foreground/80" />
+          </div>
+        ))}
+      </div>
+    </Provider>
+  );
+}
+
 function EmptyMachineScopeShell() {
   return (
     <div className="flex min-h-dvh items-center justify-center bg-background p-8">
@@ -398,4 +464,8 @@ export const MachineScope: Story = {
 export const MachineScopeEmpty: Story = {
   args: { isEmptyConversation: true },
   render: () => <EmptyMachineScopeShell />,
+};
+export const LongModelName: Story = {
+  args: { isEmptyConversation: false },
+  render: () => <LongModelNameShell />,
 };

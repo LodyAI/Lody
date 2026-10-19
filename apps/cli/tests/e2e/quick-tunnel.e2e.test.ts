@@ -47,6 +47,10 @@ describe.skipIf(process.env.LODY_QUICK_TUNNEL_E2E !== '1')('real Quick Tunnel tr
         platform: 'node',
         format: 'esm',
         target: 'node22',
+        // Bundled CommonJS dependencies (cross-spawn) require Node built-ins.
+        banner: {
+          js: "import { createRequire as __lodyCreateRequire } from 'node:module'; const require = __lodyCreateRequire(import.meta.url);",
+        },
       });
       server.listen(0, '127.0.0.1');
       await once(server, 'listening');

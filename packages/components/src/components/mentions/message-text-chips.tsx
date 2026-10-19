@@ -1,4 +1,6 @@
 import * as React from 'react';
+import * as stylex from '@stylexjs/stylex';
+import { space } from '@lody/ui/tokens/scales.stylex';
 import { useTranslation } from 'react-i18next';
 
 import { sanitizeMessageTextSpans, type MessageTextSpan } from '@lody/shared';
@@ -50,28 +52,24 @@ import {
 const CHIP_CLASS_NAME = '[overflow-wrap:anywhere]';
 
 /**
- * The pasted-text chip is a `<button>`, which no engine breaks across lines
- * whatever its `display` says — and it has no reason to: its label is a fixed
- * `[Pasted N chars]`, short by construction. So it keeps the boxed form, and
- * with it the two rules that form needs.
- *
- * The line-height is the load-bearing one. `truncate` on the label means
- * `overflow: hidden`, so the label's box has to be tall enough to contain its
- * own glyphs — at `leading-none` it is exactly one font-size tall, about a
- * pixel short of what a descender or a CJK glyph needs, and the bottom of
- * `$imagegen` or 会话 gets shaved off.
- *
- * It also may not be so tall that it grows the line box, which would break the
- * collapsed-message height (a whole number of line boxes) into a half-clipped
- * row. `1.15` clears the glyphs and still sits under the smallest line-height
- * ratio any conversation font size uses, so it scales with all three.
- *
- * `align-middle` rather than `align-baseline` for the same reason: a
- * baseline-aligned flex box sits entirely above the baseline and pushes the
- * line taller.
+ * The label supplies the button's baseline, matching the surrounding prose.
+ * The icon opts out of baseline participation and stays vertically centered.
+ * Keep the short line-height so collapsed messages retain their line boxes.
  */
-const CHIP_BUTTON_CLASS_NAME =
-  'inline-flex max-w-full items-center gap-1 align-middle leading-[1.15]';
+const styles = stylex.create({
+  pasteButton: {
+    display: 'inline-flex',
+    maxWidth: '100%',
+    alignItems: 'baseline',
+    verticalAlign: 'baseline',
+    gap: space[1],
+    lineHeight: 1.15,
+  },
+  pasteIcon: {
+    display: 'inline-flex',
+    alignSelf: 'center',
+  },
+});
 
 /**
  * Inline content has no flex `gap` to separate the glyph from the label and no
@@ -115,7 +113,7 @@ function MessageTextChip({
 }) {
   const isBoxed = Boolean(onToggle);
   const className = cn(
-    isBoxed ? CHIP_BUTTON_CLASS_NAME : CHIP_CLASS_NAME,
+    !isBoxed && CHIP_CLASS_NAME,
     span.kind === 'pasted_text' ? MENTION_NEUTRAL_CHIP_CLASS_NAME : MENTION_CHIP_CLASS_NAME,
     // With no fill to darken, the hover affordance has to be typographic.
     onToggle && 'cursor-pointer hover:underline'
@@ -145,7 +143,7 @@ function MessageTextChip({
   // to keep.
   const content = isBoxed ? (
     <>
-      {icon}
+      <span {...stylex.props(styles.pasteIcon)}>{icon}</span>
       <span className="truncate">{label}</span>
     </>
   ) : (
@@ -159,7 +157,12 @@ function MessageTextChip({
   );
 
   return onToggle ? (
-    <button type="button" className={className} onClick={onToggle}>
+    <button
+      type="button"
+      {...stylex.props(styles.pasteButton)}
+      className={cn(stylex.props(styles.pasteButton).className, className)}
+      onClick={onToggle}
+    >
       {content}
     </button>
   ) : (

@@ -1,3 +1,10 @@
+import { resolveGitIdentityPolicyLegacy } from './git-identity-policy';
+import {
+  acquireSessionCredentialsLegacy,
+  nativeSessionCredentials,
+  type SessionCredentials,
+} from './session-credentials';
+import { GitCredentialContextError } from '@/lib/git-credential-broker';
 import { applyNonOwnerShellEnv } from '@/lib/non-owner-shell-env';
 import path from 'node:path';
 import {
@@ -6,10 +13,6 @@ import {
 } from '@/lib/git-credential-helper-script';
 import { EventEmitter } from 'eventemitter3';
 import os from 'os';
-import { existsSync } from 'node:fs';
-import { rm } from 'node:fs/promises';
-import { createHash } from 'node:crypto';
-import { isDeepStrictEqual } from 'node:util';
 
 import {
   SessionId,
@@ -19,40 +22,27 @@ import {
   type MessageContent,
   SessionStatusFactory,
   MachineId,
-  CliType,
   getManagedBuiltinRuntimeByAgentType,
   getManagedBuiltinRuntimeByRuntimeName,
   isManagedBuiltinAgentType,
   RepoId,
   SessionContextWindowUsage,
   WorkspaceId,
-  type SessionPreparationSpec,
-  type SessionPreparationCancelSpec,
-  type SessionPrepareCancelResponse,
-  type SessionPrepareResponse,
   type AgentConfigId,
-  type AgentConfigMeta,
   type LocalProjectId,
   type ProjectRef,
-  buildSessionPreparationClaimKey,
-  buildSessionPreparationRequestKey,
-  buildSessionLaunchConfig,
-  getMachineFlockDocId,
   getSessionRoomId,
-  normalizeSessionPreparationRunConfigForDedup,
   isLoroRepoDocDeleted,
-  type SessionLaunchConfig,
   type SessionMeta,
-  type McpServerId,
 } from '@lody/shared';
 import { Logger } from '@/utils/logger';
 import { SessionConfig, SessionOutputEvent, SessionErrorEvent, SessionExitEvent } from './types';
+import { recordIncompleteStartCleanup, type SessionStartStage } from './session-start-stage';
 import { LoroDocumentManager } from '../lib/loro/doc';
 import {
   AgentClient,
   type AcpWriteTextFileEvidence,
   type AcpStartupStageEvent,
-  type AcpSessionStartTarget,
   type AgentClientOptions,
   type AgentSessionWarning,
   type ImageGenerationBeginEvent,
@@ -89,7 +79,6 @@ import type { RateLimit, SessionUsageUpdate } from 'acp-extension-core';
 import { getWorktreeManager } from './worktree/worktree-manager';
 import type {
   GitCredentialBrokerAuth,
-  WorktreeInfo,
   WorktreeManager,
   WorktreeManagerConfig,
   WorktreeManagerSource,
@@ -100,21 +89,16 @@ import { createWorktreeScriptHistoryRecorder } from './worktree/worktree-script-
 import { createSessionBackend } from './session-backend';
 import { runWorktreeSetup } from './worktree/worktree-setup-runner';
 import { deriveRepoIdFromLocalProjectPath } from '@lody/shared/node/worktree-paths';
-import {
-  normalizeLocalProjectRootPath,
-  parseLocalProjectBranchRefAtRootPath,
-  resolveLocalProjectLegacyBaseBranchAtRootPath,
-} from '@lody/shared/node/local-project';
-import { ensureDefaultSessionWorkdir, getDefaultSessionWorkdir, Session } from './session';
+import { localProjectsLegacy } from '@lody/shared/node/local-project';
+import { ensureDefaultSessionWorkdir, Session } from './session';
 import {
   calculateAutomaticSessionSandboxLimits,
   createSessionSandboxFactory,
-  type SessionSandbox,
   type SessionSandboxFactory,
   type SessionSandboxLimits,
   type SessionResourceAccounting,
 } from './session-sandbox';
-import { formatErrorMessage } from '@/utils/format-error';
+import { formatErrorMessage, formatErrorWithCauses } from '@/utils/format-error';
 import { captureCli } from '@/lib/analytics/posthog';
 import { getEffectiveMemoryLimitBytes } from '@/utils/memory';
 import { withSlowOperationWarning } from '@/utils/slow-operation-warning';
@@ -123,24 +107,11 @@ import type { AcpCapabilitiesResult } from '@/agent/acp-capability-normalization
 import { resolveWorkspaceLocalProjectRootPathWithRetry } from '@/lib/local-project-meta';
 import { readTimeoutEnv } from '@/lib/loro/timeout-utils';
 import { loadSessionMcpCatalog } from '@/agent/session-mcp-resolver';
-import { SessionUserResolver } from './session-user-resolver';
 import {
-  SessionPreparationService,
-  type SessionPreparationResource,
-} from './session-preparation-service';
-import {
-  readMachineSessionLaunchSnapshotFromFlock,
-  type SessionLaunchConfigResolution,
-} from './session-launch-config-resolver';
-import { applyAcpSessionRunConfig } from './acp-session-config-applier';
-import {
-  claimSpeculativeWorktreeForDurableSession,
-  completeSpeculativeWorktreeSetup,
-  materializeSpeculativeWorktree,
-  recoverStaleSpeculativeWorktrees,
-  type PreparedWorktree,
-  type SpeculativeWorktreeTarget,
-} from './worktree/speculative-worktree';
+  claimLegacySpeculativeWorktree,
+  completeLegacySpeculativeWorktreeSetup,
+  recoverLegacySpeculativeWorktrees,
+} from './worktree/legacy-speculative-worktrees';
 
 function formatManagedRuntimeProgressDetail(event: ManagedRuntimeProgressEvent): string {
   const runtimeLabel =
@@ -198,7 +169,6 @@ const tryDeriveGitHubRepoFromUrl = (rawUrl?: string): string | null => {
   }
 };
 
-const SESSION_PREPARATION_HARD_TTL_MS = 120_000;
 /**
  * How long teardown waits for an in-flight create to reach a terminable state
  * before detaching it. Generous enough for a cold ACP start (the slowest healthy
@@ -207,105 +177,12 @@ const SESSION_PREPARATION_HARD_TTL_MS = 120_000;
 const PENDING_CREATE_TERMINATE_TIMEOUT_MS = 300_000;
 const PENDING_CREATE_TERMINATE_TIMED_OUT = Symbol('pending-create-terminate-timed-out');
 
-const MAX_CONCURRENT_SESSION_PREPARATIONS = 1;
-
-function getSessionPreparationSandboxId(sessionId: SessionId, preparationId: string): SessionId {
-  const preparationHash = createHash('sha256').update(preparationId).digest('hex').slice(0, 16);
-  return `${sessionId}-prepare-${preparationHash}` as SessionId;
-}
-
-type Deferred<T> = {
-  promise: Promise<T>;
-  resolve(value: T): void;
-  reject(error: unknown): void;
-};
-
-type PreparedSessionRuntime = SessionPreparationResource & {
-  session: Session;
-  config: SessionConfig;
-  compatibility: ReturnType<typeof buildSessionPreparationCompatibility>;
-  readCurrentLaunchConfig?: (sessionMeta: SessionMeta) => SessionLaunchConfigResolution | null;
-  workspaceReady: Promise<PreparedWorktree | null>;
-  agentResult: Promise<string>;
-  adopt(): Promise<void>;
-};
-
 type SessionWorktreeTarget = {
   manager: WorktreeManager;
   managerConfig: Omit<WorktreeManagerConfig, 'logger'>;
-  target: SpeculativeWorktreeTarget;
 };
 
 type ResolvedAcpProcessLaunch = Awaited<ReturnType<typeof resolveACPProcessLaunchAsync>>;
-
-function createDeferred<T>(): Deferred<T> {
-  let resolvePromise!: (value: T) => void;
-  let rejectPromise!: (error: unknown) => void;
-  let settled = false;
-  const promise = new Promise<T>((resolve, reject) => {
-    resolvePromise = resolve;
-    rejectPromise = reject;
-  });
-  return {
-    promise,
-    resolve(value) {
-      if (settled) return;
-      settled = true;
-      resolvePromise(value);
-    },
-    reject(error) {
-      if (settled) return;
-      settled = true;
-      rejectPromise(error);
-    },
-  };
-}
-
-/**
- * The two halves come from different objects on the re-check paths — the launch
- * config from the prepared process, the selection from the session that wants to
- * claim it — so they stay separate parameters instead of one spliced record.
- */
-function buildSessionPreparationCompatibility(
-  launchSource: Partial<SessionLaunchConfig> | null | undefined,
-  mcpServerIds: readonly McpServerId[] | undefined,
-  configOptionValues: SessionConfig['configOptionValues'],
-  memory?: SessionConfig['memory']
-) {
-  return {
-    launch: buildSessionLaunchConfig({
-      codexAuth: launchSource?.codexAuth,
-      customAcp: launchSource?.customAcp,
-      runtimeOverrides: launchSource?.runtimeOverrides,
-      env: launchSource?.env,
-    }),
-    runConfig: normalizeSessionPreparationRunConfigForDedup({
-      memory,
-      mcpServerIds: mcpServerIds ? [...mcpServerIds] : undefined,
-      configOptionValues,
-    }),
-  };
-}
-
-function agentConfigMatchesPreparation(
-  agentConfig: {
-    machineId: MachineId;
-    cliType: AgentConfigCliType;
-    agentType: string;
-  },
-  spec: SessionPreparationSpec,
-  machineId: MachineId
-): boolean {
-  return (
-    agentConfig.machineId === machineId &&
-    agentConfig.cliType === spec.cliType &&
-    agentConfig.agentType === spec.agentType
-  );
-}
-
-export type PreparedSessionLaunchConfigSnapshot = {
-  config: SessionLaunchConfig | undefined;
-};
 
 export interface ISession {
   agentClient: AgentClient | null;
@@ -326,6 +203,9 @@ export interface ISession {
   getParentSessionId(): SessionId | undefined;
   applyExecutionPlaneLimits(limits: SessionSandboxLimits): Promise<void>;
   getMonitorRuntimeInfo(): Promise<SessionMonitorRuntimeInfo>;
+  watchInboxRecoveryResources?(
+    persist: (identity: import('./session-sandbox').SessionRecoveryResources) => void
+  ): Promise<() => void>;
   exec(command: string, args: string[], workdir: string, isAI: boolean): Promise<string>;
   terminate(force?: boolean): Promise<void>;
   /**
@@ -352,7 +232,7 @@ export interface ISession {
    * Takes effect on all subsequent exec() calls (each exec spawns a new process).
    */
   updateEnv(env: Record<string, string | undefined>): void;
-  updateGitHubCredentialPolicy(allowLocalAuth: boolean): void;
+  getGitHubCredentials(): SessionCredentials;
 }
 
 export type SessionMonitorRuntimeInfo = {
@@ -385,12 +265,6 @@ export interface CreateAgentConfig {
   forkSessionId?: ACPSessionId;
   /** Provider-native turn id used as the source boundary for a turn-addressed fork. */
   forkSessionTurnId?: string;
-  /**
-   * Optional claim gate used by speculative preparation. ACP initialize may
-   * finish before the durable session workspace exists; newSession waits here
-   * for the final cwd without blocking the RPC handler.
-   */
-  resolveSessionStart?: () => Promise<AcpSessionStartTarget>;
   abortSignal?: AbortSignal;
   onStartupStage?: (event: AcpStartupStageEvent) => void;
   onUpdateMessage: (message: AcpSessionNotification) => void;
@@ -448,7 +322,7 @@ interface SessionManagerEvents {
   onRateLimitUpdate: (
     machineId: MachineId,
     agentConfigId: AgentConfigId | undefined,
-    cliType: CliType,
+    cliType: string,
     limits: RateLimit
   ) => void;
   onThreadGoalUpdated: (
@@ -475,17 +349,15 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
   /** Per-instance listener teardown for `detachSession`; see `registerSessionEvents`. */
   private readonly sessionEventDetachers = new WeakMap<ISession, () => void>();
   private readonly pendingSessionCreates = new Map<SessionId, Promise<ISession>>();
+  private readonly pendingCreateControllers = new Map<SessionId, AbortController>();
   private readonly pendingTerminationPromises = new Map<SessionId, Promise<void>>();
-  private readonly preparationSessions = new Map<SessionId, Session>();
   private readonly sessionSandboxFactory: SessionSandboxFactory;
-  private readonly preparationUserResolver: SessionUserResolver;
-  private readonly preparationService: SessionPreparationService<PreparedSessionRuntime>;
   private readonly cloudPort: CloudPort;
-  private detachPreparationRecovery: (() => void) | null = null;
-  private preparationRecoveryChain: Promise<void> = Promise.resolve();
+  private detachSpeculativeWorktreeRecovery: (() => void) | null = null;
+  private speculativeWorktreeRecoveryChain: Promise<void> = Promise.resolve();
   /** Coalescing latch for {@link enqueueSpeculativeWorktreeRecovery}. */
-  private preparationRecoveryQueued = false;
-  private preparationRecoveryGeneration = 0;
+  private speculativeWorktreeRecoveryQueued = false;
+  private speculativeWorktreeRecoveryGeneration = 0;
   // Rebalance requests are serialized because the per-session limit is derived from a
   // shared machine-wide budget. This avoids create/exit races briefly applying stale
   // shares of the 90% execution-plane budget. See docs/exec-sandbox.md.
@@ -519,20 +391,6 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
     this.cloudPort = options.cloudPort;
     this.sessionSandboxFactory =
       options.sessionSandboxFactory ?? createSessionSandboxFactory({ logger: this.logger });
-    this.preparationUserResolver = new SessionUserResolver(
-      this.logger,
-      this.workspaceId,
-      async (userId) =>
-        await this.cloudPort.access.resolveWorkspaceUser({
-          workspaceId: this.workspaceId,
-          userId,
-        }),
-      this.cloudPort.identity.userId
-    );
-    this.preparationService = new SessionPreparationService(this.logger, {
-      hardTtlMs: SESSION_PREPARATION_HARD_TTL_MS,
-      maxConcurrent: MAX_CONCURRENT_SESSION_PREPARATIONS,
-    });
   }
 
   /**
@@ -557,8 +415,8 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
    * stall. Callers that have given up (the initialization stall watchdog) must
    * detach it here instead.
    *
-   * The underlying work cannot be cancelled — there is no abort signal through
-   * `createSessionFromPreparationOrCold` — so it is reaped instead: if the
+   * Git identity preflight is cancelled immediately. Other dependencies may
+   * still finish after cancellation, so they are reaped instead: if the
    * abandoned create ever produces a Session, that Session is terminated rather
    * than left as an orphan process. Returns whether an entry was detached.
    */
@@ -567,6 +425,8 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
     if (!pending) {
       return false;
     }
+    this.pendingCreateControllers.get(sessionId)?.abort(new Error(reason));
+    this.pendingCreateControllers.delete(sessionId);
     this.pendingSessionCreates.delete(sessionId);
     this.logger.warn(
       `[${sessionId}] Abandoning in-flight session create (${reason}); a retry will start a new one`
@@ -599,95 +459,6 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
     return true;
   }
 
-  requestSessionPreparation(spec: SessionPreparationSpec): SessionPrepareResponse {
-    const { sessionId } = spec;
-    if (this.sessions.has(sessionId) || this.pendingSessionCreates.has(sessionId)) {
-      return {
-        type: 'session/prepare_response',
-        preparationId: spec.preparationId,
-        sessionId,
-        accepted: true,
-        disposition: 'duplicate',
-      };
-    }
-    const disposition = this.preparationService.start({
-      preparationId: spec.preparationId,
-      sessionId,
-      requesterUserId: spec.requestedByUserId,
-      requestKey: buildSessionPreparationRequestKey(spec),
-      claimKey: buildSessionPreparationClaimKey(spec),
-      create: async (signal) => await this.createPreparedSessionRuntime(spec, signal),
-    });
-    return {
-      type: 'session/prepare_response',
-      preparationId: spec.preparationId,
-      sessionId,
-      accepted: disposition !== 'busy',
-      disposition,
-    };
-  }
-
-  cancelSessionPreparation(args: SessionPreparationCancelSpec): SessionPrepareCancelResponse {
-    const { sessionId } = args;
-    const disposition = this.preparationService.cancel({
-      preparationId: args.preparationId,
-      sessionId,
-      requesterUserId: args.requestedByUserId,
-    });
-    return {
-      type: 'session/prepare-cancel_response',
-      preparationId: args.preparationId,
-      sessionId,
-      cancelled: disposition === 'cancelled',
-      disposition,
-    };
-  }
-
-  getPreparedSessionLaunchConfig(input: {
-    sessionMeta: SessionMeta;
-    requesterUserId: string;
-  }): PreparedSessionLaunchConfigSnapshot | null {
-    const { sessionMeta } = input;
-    if (
-      sessionMeta.machineId !== this.machineId ||
-      !sessionMeta.agentConfigId ||
-      !sessionMeta.cliType ||
-      !sessionMeta.agentType
-    ) {
-      return null;
-    }
-    const resource = this.preparationService.peek({
-      sessionId: sessionMeta.id,
-      requesterUserId: input.requesterUserId,
-      claimKey: buildSessionPreparationClaimKey({
-        requestedByUserId: input.requesterUserId,
-        agentConfigId: sessionMeta.agentConfigId,
-        cliType: sessionMeta.cliType,
-        agentType: sessionMeta.agentType,
-        project: sessionMeta.project,
-      }),
-    });
-    if (!resource?.readCurrentLaunchConfig) {
-      return null;
-    }
-    const current = resource.readCurrentLaunchConfig(sessionMeta);
-    if (
-      !current ||
-      !isDeepStrictEqual(
-        resource.compatibility,
-        buildSessionPreparationCompatibility(
-          current.config,
-          resource.config.mcpServerIds,
-          resource.config.configOptionValues,
-          resource.config.memory
-        )
-      )
-    ) {
-      return null;
-    }
-    return { config: current.config };
-  }
-
   async createSession(config: SessionConfig, agentStart?: AgentStartConfig): Promise<ISession> {
     if (!config.assumeDocExisting) {
       const sessionId = await this.workspaceDocument.createSession(
@@ -709,83 +480,23 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
       return await existing;
     }
 
-    // Register durable ownership before claim/cold-start work begins. Besides
-    // deduplicating concurrent creates, this prevents an abandoned preparation
-    // from deleting a default workdir that the authoritative create is taking over.
+    // Register ownership before any startup work so concurrent creates share one attempt.
+    const controller = new AbortController();
+    this.pendingCreateControllers.set(sessionId, controller);
     const promise = Promise.resolve()
-      .then(async () => await this.createSessionFromPreparationOrCold(config, agentStart))
+      .then(
+        async () => await this.createSessionInnerWithAgent(config, agentStart, controller.signal)
+      )
       .finally(() => {
         if (this.pendingSessionCreates.get(sessionId) === promise) {
           this.pendingSessionCreates.delete(sessionId);
         }
+        if (this.pendingCreateControllers.get(sessionId) === controller) {
+          this.pendingCreateControllers.delete(sessionId);
+        }
       });
     this.pendingSessionCreates.set(sessionId, promise);
     return await promise;
-  }
-
-  private async createSessionFromPreparationOrCold(
-    config: SessionConfig,
-    agentStart?: AgentStartConfig
-  ): Promise<ISession> {
-    await this.freezeCodexProfile(config);
-    const sessionId = config.sessionId!;
-    const preparationIdentity = config.agentConfigId
-      ? {
-          requestedByUserId: config.requesterUserId,
-          agentConfigId: config.agentConfigId,
-          cliType: config.agentCliType,
-          agentType: config.agentType,
-          project: config.project,
-        }
-      : null;
-    if (!preparationIdentity || agentStart?.resumeSessionId || agentStart?.forkSessionId) {
-      await this.preparationService.discard(sessionId);
-      return await this.createSessionInnerWithAgent(config, agentStart);
-    }
-
-    const compatibility = buildSessionPreparationCompatibility(
-      config,
-      config.mcpServerIds,
-      config.configOptionValues,
-      config.memory
-    );
-    const claim = this.preparationService.claim({
-      sessionId,
-      requesterUserId: config.requesterUserId,
-      claimKey: buildSessionPreparationClaimKey(preparationIdentity),
-      isCompatible: (resource) => {
-        if (!isDeepStrictEqual(resource.compatibility, compatibility)) {
-          return false;
-        }
-        if (!resource.readCurrentLaunchConfig) {
-          return true;
-        }
-        const current = resource.readCurrentLaunchConfig({
-          id: sessionId,
-          machineId: this.machineId,
-          agentConfigId: config.agentConfigId,
-          cliType: config.agentCliType,
-          agentType: config.agentType,
-        } as SessionMeta);
-        return (
-          current !== null &&
-          isDeepStrictEqual(
-            resource.compatibility,
-            buildSessionPreparationCompatibility(
-              current.config,
-              config.mcpServerIds,
-              config.configOptionValues,
-              config.memory
-            )
-          )
-        );
-      },
-    });
-    if (claim.status === 'miss') {
-      await claim.cleanup;
-      return await this.createSessionInnerWithAgent(config, agentStart);
-    }
-    return await this.finishPreparedSession(config, claim.resource, agentStart);
   }
 
   /**
@@ -796,6 +507,9 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
     sessionId: SessionId,
     force: boolean = true
   ): Promise<'terminated' | 'not-found'> {
+    this.pendingCreateControllers
+      .get(sessionId)
+      ?.abort(new Error('Session initialization cancelled'));
     const existingTermination = this.pendingTerminationPromises.get(sessionId);
     if (existingTermination) {
       await existingTermination;
@@ -846,26 +560,21 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
       }
       return 'terminated';
     }
-    const pendingPreparationCleanup = this.preparationService.discard(sessionId);
-    if (pendingPreparationCleanup) {
-      await pendingPreparationCleanup;
-      return 'terminated';
-    }
     return 'not-found';
   }
 
   async initialize(): Promise<void> {
-    const recoveryGeneration = ++this.preparationRecoveryGeneration;
-    this.detachPreparationRecovery?.();
-    this.detachPreparationRecovery = this.workspaceDocument.onMetaRoomSynced((reason) => {
-      if (this.preparationRecoveryGeneration === recoveryGeneration) {
+    const recoveryGeneration = ++this.speculativeWorktreeRecoveryGeneration;
+    this.detachSpeculativeWorktreeRecovery?.();
+    this.detachSpeculativeWorktreeRecovery = this.workspaceDocument.onMetaRoomSynced((reason) => {
+      if (this.speculativeWorktreeRecoveryGeneration === recoveryGeneration) {
         this.enqueueSpeculativeWorktreeRecovery(`meta-room-synced:${reason}`);
       }
     });
     void this.workspaceDocument
-      .waitUntilMetaSynced({ reason: 'session-preparation-recovery' })
+      .waitUntilMetaSynced({ reason: 'legacy-speculative-worktree-recovery' })
       .then((synced) => {
-        if (synced && this.preparationRecoveryGeneration === recoveryGeneration) {
+        if (synced && this.speculativeWorktreeRecoveryGeneration === recoveryGeneration) {
           this.enqueueSpeculativeWorktreeRecovery('initialize');
         }
       })
@@ -884,23 +593,21 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
     // filesystem sweep on a recovery signal, and without a latch every
     // transport edge appended another full pass to the chain — the dispatch
     // bootstrap scan has had this latch all along, this one was missing it.
-    if (this.preparationRecoveryQueued) {
+    if (this.speculativeWorktreeRecoveryQueued) {
       return;
     }
-    this.preparationRecoveryQueued = true;
-    this.preparationRecoveryChain = this.preparationRecoveryChain
+    this.speculativeWorktreeRecoveryQueued = true;
+    this.speculativeWorktreeRecoveryChain = this.speculativeWorktreeRecoveryChain
       .then(async () => {
         // Released before the sweep runs, so a signal arriving DURING it still
         // gets its own follow-up pass and nothing is silently skipped.
-        this.preparationRecoveryQueued = false;
-        await recoverStaleSpeculativeWorktrees({
+        this.speculativeWorktreeRecoveryQueued = false;
+        await recoverLegacySpeculativeWorktrees({
           workspaceId: this.workspaceId,
           machineId: this.machineId,
           logger: this.logger,
           isActiveSession: (sessionId) =>
-            this.preparationService.getState(sessionId) !== null ||
-            this.pendingSessionCreates.has(sessionId) ||
-            this.sessions.has(sessionId),
+            this.pendingSessionCreates.has(sessionId) || this.sessions.has(sessionId),
           isDurableSession: async (sessionId) => {
             const record = await this.workspaceDocument.repo.getDocMeta(
               getSessionRoomId(sessionId)
@@ -910,413 +617,11 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
         });
       })
       .catch((error: unknown) => {
-        this.preparationRecoveryQueued = false;
+        this.speculativeWorktreeRecoveryQueued = false;
         this.logger.debug(
           `Failed speculative worktree recovery (${reason}): ${formatErrorMessage(error)}`
         );
       });
-  }
-
-  private async createPreparedSessionRuntime(
-    spec: SessionPreparationSpec,
-    signal: AbortSignal
-  ): Promise<PreparedSessionRuntime> {
-    signal.throwIfAborted();
-    const { sessionId } = spec;
-    const preparationSessionMeta = {
-      id: sessionId,
-      machineId: this.machineId,
-      agentConfigId: spec.agentConfigId as AgentConfigId,
-      cliType: spec.cliType,
-      agentType: spec.agentType,
-    } as SessionMeta;
-    let readCurrentLaunchConfig: PreparedSessionRuntime['readCurrentLaunchConfig'];
-    let agentConfig: AgentConfigMeta | null = null;
-    try {
-      const handle = await this.workspaceDocument.repo.openFlockDoc(
-        getMachineFlockDocId(this.workspaceId, this.machineId)
-      );
-      const preparedSnapshot = readMachineSessionLaunchSnapshotFromFlock({
-        flock: handle.flock,
-        sessionId,
-        sessionMeta: preparationSessionMeta,
-      });
-      agentConfig = preparedSnapshot.agentConfig;
-      if (agentConfig) {
-        readCurrentLaunchConfig = (sessionMeta) => {
-          try {
-            const current = readMachineSessionLaunchSnapshotFromFlock({
-              flock: handle.flock,
-              sessionId,
-              sessionMeta,
-            });
-            if (
-              !current.agentConfig ||
-              !agentConfigMatchesPreparation(current.agentConfig, spec, this.machineId)
-            ) {
-              return null;
-            }
-            return current.resolution;
-          } catch {
-            return null;
-          }
-        };
-      }
-    } catch (error) {
-      this.logger.debug(
-        `[${sessionId}] Failed to open machine launch config for preparation: ${formatErrorMessage(
-          error
-        )}`
-      );
-    }
-    agentConfig ??= await this.workspaceDocument.getAgentConfigById(
-      spec.agentConfigId as AgentConfigId,
-      this.machineId
-    );
-    if (!agentConfig) {
-      throw new Error(`Agent config not found: ${spec.agentConfigId}`);
-    }
-    if (!agentConfigMatchesPreparation(agentConfig, spec, this.machineId)) {
-      throw new Error(`Agent config no longer matches preparation ${spec.preparationId}`);
-    }
-    const user = await this.preparationUserResolver.resolve(spec.requestedByUserId);
-    signal.throwIfAborted();
-
-    let provisionalWorkdir = os.homedir();
-    let establishBeforeClaim = false;
-    if (!spec.project) {
-      provisionalWorkdir = getDefaultSessionWorkdir(sessionId);
-      establishBeforeClaim = true;
-    } else if (spec.project.kind === 'local') {
-      const localRoot = await resolveWorkspaceLocalProjectRootPathWithRetry(
-        this.workspaceDocument.repo,
-        this.workspaceId,
-        this.machineId,
-        spec.project.localProjectId as LocalProjectId,
-        {
-          requestSync: () =>
-            this.workspaceDocument.syncMachineFlockDoc(this.machineId, {
-              reason: 'session-preparation-local-project-resolve',
-              timeoutMs: readTimeoutEnv('LODY_LOCAL_PROJECT_RESOLVE_SYNC_TIMEOUT_MS', 1_500),
-            }),
-          signal,
-        }
-      );
-      if (!localRoot) {
-        throw new Error(`Local project not found: ${spec.project.localProjectId}`);
-      }
-      provisionalWorkdir = localRoot;
-      establishBeforeClaim = spec.project.useWorktree !== true;
-    }
-
-    const config: SessionConfig = {
-      codexAuth: agentConfig.codexAuth,
-      sessionId,
-      workspaceId: this.workspaceId,
-      requesterUserId: spec.requestedByUserId,
-      machineId: this.machineId,
-      agentConfigId: spec.agentConfigId as AgentConfigId,
-      agentCliType: spec.cliType,
-      agentType: spec.agentType,
-      configOptionValues: spec.runConfig?.configOptionValues,
-      memory: spec.runConfig?.memory,
-      mcpServerIds: spec.runConfig?.mcpServerIds ?? [],
-      customAcp: agentConfig.customAcp,
-      runtimeOverrides: agentConfig.runtimeOverrides,
-      project: spec.project as ProjectRef | undefined,
-      assumeDocExisting: true,
-      env: { ...agentConfig.env },
-      githubRepo:
-        spec.project?.kind === 'github'
-          ? spec.project.repoFullName
-          : spec.project?.githubRepoFullName,
-      branch: spec.project?.branch,
-      workdir: spec.project?.kind === 'local' ? provisionalWorkdir : undefined,
-      userName: user.name,
-      userEmail: user.email,
-    };
-    await this.freezeCodexProfile(config);
-    const compatibility = buildSessionPreparationCompatibility(
-      config,
-      config.mcpServerIds,
-      config.configOptionValues,
-      config.memory
-    );
-    await this.prepareGitHubRepoSessionConfig(config);
-    signal.throwIfAborted();
-    const launch = await resolveACPProcessLaunchAsync({
-      cliType: config.agentCliType,
-      agentType: config.agentType,
-      customAcp: config.customAcp,
-      runtimeOverrides: config.runtimeOverrides,
-      env: config.env,
-    });
-    signal.throwIfAborted();
-    const worktreeTarget = this.resolveSessionWorktreeTarget(config);
-
-    let sandbox: SessionSandbox | null = await this.sessionSandboxFactory(
-      getSessionPreparationSandboxId(sessionId, spec.preparationId)
-    );
-    let session: Session | null = null;
-    let createdDefaultWorkdir = false;
-    let adopted = false;
-    let adoptionPromise: Promise<void> | null = null;
-    let started = false;
-    let cleanupPromise: Promise<void> | null = null;
-    const initialized = createDeferred<void>();
-    const sessionStart = createDeferred<AcpSessionStartTarget>();
-    const workspaceReady = createDeferred<PreparedWorktree | null>();
-    const agentResult = createDeferred<string>();
-    const sessionReady = createDeferred<void>();
-    const rejectAgentPreparation = (error: unknown): void => {
-      agentResult.reject(error);
-      initialized.reject(error);
-      sessionReady.reject(error);
-    };
-    void agentResult.promise.catch(() => undefined);
-    void workspaceReady.promise.catch(() => undefined);
-
-    const cleanup = (): Promise<void> => {
-      if (cleanupPromise) return cleanupPromise;
-      cleanupPromise = (async () => {
-        const abortError = new Error('Session preparation disposed before claim');
-        abortError.name = 'AbortError';
-        sessionStart.reject(abortError);
-        if (!started) {
-          workspaceReady.resolve(null);
-          agentResult.reject(abortError);
-          initialized.reject(abortError);
-          sessionReady.reject(abortError);
-        }
-        try {
-          if (session) {
-            await session.terminate(true);
-          } else if (sandbox) {
-            await sandbox.terminate(true).catch((error: unknown) => {
-              this.logger.debug(
-                `[${sessionId}] Failed to terminate unclaimed preparation sandbox: ${formatErrorMessage(
-                  error
-                )}`
-              );
-            });
-            await sandbox.cleanup().catch((error: unknown) => {
-              this.logger.debug(
-                `[${sessionId}] Failed to clean up unclaimed preparation sandbox: ${formatErrorMessage(
-                  error
-                )}`
-              );
-            });
-          }
-        } finally {
-          await agentResult.promise.catch(() => undefined);
-          const preparedWorktree = await workspaceReady.promise.catch(() => null);
-          if (session && this.preparationSessions.get(sessionId) === session) {
-            this.preparationSessions.delete(sessionId);
-            await this.rebalanceSessionSandboxes();
-          }
-          const durableCreateOwnsWorkdir =
-            this.pendingSessionCreates.has(sessionId) || this.sessions.has(sessionId);
-          if (preparedWorktree && !adopted) {
-            await preparedWorktree.dispose();
-          }
-          if (createdDefaultWorkdir && !adopted && !durableCreateOwnsWorkdir) {
-            await rm(provisionalWorkdir, { recursive: true, force: true }).catch(
-              (error: unknown) => {
-                this.logger.debug(
-                  `[${sessionId}] Failed to remove abandoned preparation workdir: ${formatErrorMessage(
-                    error
-                  )}`
-                );
-              }
-            );
-          }
-        }
-      })();
-      return cleanupPromise;
-    };
-
-    try {
-      signal.throwIfAborted();
-      if (!spec.project && !existsSync(provisionalWorkdir)) {
-        ensureDefaultSessionWorkdir(sessionId);
-        createdDefaultWorkdir = true;
-      }
-      session = new Session(config, this.logger, provisionalWorkdir, sandbox);
-      sandbox = null;
-      this.preparationSessions.set(sessionId, session);
-      await this.rebalanceSessionSandboxes();
-      signal.throwIfAborted();
-
-      if (establishBeforeClaim) {
-        sessionStart.resolve({ workdir: provisionalWorkdir });
-      }
-
-      const ownedSession = session;
-      const runtime: PreparedSessionRuntime = {
-        session: ownedSession,
-        config,
-        compatibility,
-        ...(readCurrentLaunchConfig ? { readCurrentLaunchConfig } : {}),
-        start: () => {
-          if (started) return;
-          started = true;
-          const materialization = worktreeTarget
-            ? materializeSpeculativeWorktree({
-                preparationId: spec.preparationId,
-                sessionId,
-                workspaceId: this.workspaceId,
-                machineId: this.machineId,
-                manager: worktreeTarget.manager,
-                managerConfig: worktreeTarget.managerConfig,
-                baseBranch: config.branch,
-                restoreBranchName: config.restoreBranchName,
-                resolveBrokerAuth: () =>
-                  this.resolveHostGitBrokerAuth(worktreeTarget.target.source, config),
-                logger: this.logger,
-              })
-            : Promise.resolve(null);
-          void materialization.then(
-            (preparedWorktree) => {
-              workspaceReady.resolve(preparedWorktree);
-              if (preparedWorktree) {
-                ownedSession.setWorkdir(preparedWorktree.info.hostPath);
-                sessionStart.resolve({ workdir: preparedWorktree.info.hostPath });
-              }
-            },
-            (error) => {
-              workspaceReady.reject(error);
-              sessionStart.reject(error);
-            }
-          );
-
-          const startedAgent = ownedSession.createAgent(
-            this.buildCreateAgentConfig(ownedSession, config, launch, {
-              abortSignal: signal,
-              resolveSessionStart: async () => await sessionStart.promise,
-              dispatchEvent: (event) => {
-                if (adopted) event();
-              },
-              allowInteractiveRequest: () => adopted,
-              onStartupStage: (event) => {
-                if (event.type === 'initialize_end') {
-                  initialized.resolve(undefined);
-                }
-              },
-            })
-          );
-          void startedAgent.then(async (acpSessionId) => {
-            try {
-              if (spec.runConfig) {
-                await applyAcpSessionRunConfig({
-                  session: ownedSession,
-                  config: {
-                    cliType: spec.cliType,
-                    agentType: spec.agentType,
-                    ...spec.runConfig,
-                  },
-                  logger: this.logger,
-                });
-              }
-              agentResult.resolve(acpSessionId);
-              sessionReady.resolve(undefined);
-            } catch (error) {
-              rejectAgentPreparation(error);
-            }
-          }, rejectAgentPreparation);
-        },
-        initialized: initialized.promise,
-        sessionReady: sessionReady.promise,
-        workspaceReady: workspaceReady.promise,
-        agentResult: agentResult.promise,
-        adopt: async () => {
-          adoptionPromise ??= (async () => {
-            const preparedWorktree = await workspaceReady.promise;
-            await preparedWorktree?.claim();
-            adopted = true;
-          })();
-          await adoptionPromise;
-        },
-        dispose: cleanup,
-      };
-      if (signal.aborted) {
-        await runtime.dispose();
-        signal.throwIfAborted();
-      }
-      return runtime;
-    } catch (error) {
-      await cleanup();
-      throw error;
-    }
-  }
-
-  private async finishPreparedSession(
-    incomingConfig: SessionConfig,
-    prepared: PreparedSessionRuntime,
-    agentStart?: AgentStartConfig
-  ): Promise<ISession> {
-    const sessionId = incomingConfig.sessionId!;
-    await prepared.adopt();
-    const preparedWorktree = await prepared.workspaceReady;
-    const config = prepared.config;
-    const preparedEnv = config.env;
-    Object.assign(config, incomingConfig, {
-      env: { ...preparedEnv, ...incomingConfig.env },
-    });
-    await this.workspaceDocument.getOrCreateSessionDoc(sessionId);
-
-    // The durable config is authoritative for the worktree target. The prepared
-    // worktree was materialized from the preparation-time guess, and its
-    // directory can also have been removed underneath us (a superseded
-    // preparation's late dispose, a cross-process sweep). Adopting the prepared
-    // ACP process anyway would hand it a cwd whose inode no longer exists —
-    // recreating the path does not revive the process's working directory — so
-    // an unusable worktree discards the whole preparation and takes the cold
-    // path, which rebuilds the worktree before spawning a fresh process.
-    if (preparedWorktree) {
-      const worktreeTarget = this.resolveSessionWorktreeTarget(config);
-      const claimOutcome = worktreeTarget
-        ? await claimSpeculativeWorktreeForDurableSession({
-            sessionId: config.sessionId!,
-            workspaceId: config.workspaceId,
-            machineId: this.machineId,
-            target: worktreeTarget.target,
-            logger: this.logger,
-          })
-        : null;
-      const worktreeUsable =
-        worktreeTarget !== null &&
-        claimOutcome !== 'mismatch' &&
-        existsSync(preparedWorktree.info.hostPath);
-      if (!worktreeUsable) {
-        this.logger.warn(
-          `[${sessionId}] Discarding prepared session: prepared worktree is unusable for the durable target (claim=${claimOutcome ?? 'no-worktree-target'} path=${preparedWorktree.info.hostPath})`
-        );
-        await prepared.dispose();
-        return await this.createSessionInnerWithAgent(config, agentStart);
-      }
-    }
-
-    try {
-      const session = await withSlowOperationWarning(
-        this.createSessionInner(config, prepared.session, preparedWorktree?.info),
-        this.logger,
-        'session.createSessionInner.prepared',
-        sessionId
-      );
-      session.updateGitIdentity(
-        config.userName,
-        config.userEmail,
-        config.requesterUserId,
-        await this.resolveGitIdentityOptions(config.requesterUserId)
-      );
-      const acpSessionId = await prepared.agentResult;
-      const sessionDoc = await this.workspaceDocument.getOrCreateSessionDoc(sessionId);
-      await sessionDoc.setACPSessionId(acpSessionId as ACPSessionId);
-      return session;
-    } catch (error) {
-      await prepared.dispose();
-      throw error;
-    }
   }
 
   private buildCreateAgentConfig(
@@ -1328,14 +633,10 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
       forkSessionId?: ACPSessionId;
       forkSessionTurnId?: string;
       abortSignal?: AbortSignal;
-      resolveSessionStart?: () => Promise<AcpSessionStartTarget>;
-      dispatchEvent?: (event: () => void) => void;
-      allowInteractiveRequest?: () => boolean;
       onStartupStage?: (event: AcpStartupStageEvent) => void;
     }
   ): CreateAgentConfig {
     const sessionId = config.sessionId!;
-    const dispatchEvent = options?.dispatchEvent ?? ((event: () => void) => event());
     const localProjectId =
       config.project?.kind === 'local' ? config.project.localProjectId : undefined;
     return {
@@ -1360,15 +661,11 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
       forkSessionId: options?.forkSessionId,
       forkSessionTurnId: options?.forkSessionTurnId,
       abortSignal: options?.abortSignal,
-      resolveSessionStart: options?.resolveSessionStart,
       onStartupStage: options?.onStartupStage,
       onUpdateMessage: (update) => {
-        dispatchEvent(() => this.emit('onACPUpdateMessage', sessionId, update));
+        this.emit('onACPUpdateMessage', sessionId, update);
       },
       onRequestPermission: (requestId, request) => {
-        if (options?.allowInteractiveRequest && !options.allowInteractiveRequest()) {
-          return Promise.resolve({ outcome: { outcome: 'cancelled' } });
-        }
         if (!this.requestPermissionHandler) {
           this.logger.debug(`[${sessionId}] Permission handler not configured`);
           return Promise.resolve({ outcome: { outcome: 'cancelled' } });
@@ -1376,46 +673,41 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
         return this.requestPermissionHandler(sessionId, requestId, request, session.agentClient!);
       },
       onUsageUpdate: (usage: SessionUsageUpdate, accountingId?: string) => {
-        dispatchEvent(() => {
-          const currentAcpSessionId = session.acpSessionId;
-          if (!currentAcpSessionId) {
-            this.logger.debug(
-              `[${sessionId}] Dropping usage update: ACP session ID not available yet`
-            );
-            return;
-          }
-          this.emit('onUsageUpdate', {
-            sessionId,
-            acpSessionId: currentAcpSessionId,
-            usage,
-            accountingId,
-          });
+        const currentAcpSessionId = session.acpSessionId;
+        if (!currentAcpSessionId) {
+          this.logger.debug(
+            `[${sessionId}] Dropping usage update: ACP session ID not available yet`
+          );
+          return;
+        }
+        this.emit('onUsageUpdate', {
+          sessionId,
+          acpSessionId: currentAcpSessionId,
+          usage,
+          accountingId,
         });
       },
       onContextWindowUsageUpdate: (usage: SessionContextWindowUsage) => {
-        dispatchEvent(() => this.emit('onContextWindowUsageUpdate', sessionId, usage));
+        this.emit('onContextWindowUsageUpdate', sessionId, usage);
       },
       onRateLimitUpdate: (limits: RateLimit) => {
-        dispatchEvent(() => {
-          if (config.agentCliType === 'builtin' && isManagedBuiltinAgentType(config.agentType)) {
-            this.emit(
-              'onRateLimitUpdate',
-              this.machineId,
-              config.agentConfigId,
-              config.agentType,
-              limits
-            );
-          }
-        });
+        if (
+          config.agentConfigId ||
+          (config.agentCliType === 'builtin' && isManagedBuiltinAgentType(config.agentType))
+        ) {
+          this.emit(
+            'onRateLimitUpdate',
+            this.machineId,
+            config.agentConfigId,
+            config.agentType,
+            limits
+          );
+        }
       },
-      onThreadGoalUpdated: (goal) =>
-        dispatchEvent(() => this.emit('onThreadGoalUpdated', sessionId, goal)),
-      onThreadGoalCleared: (threadId) =>
-        dispatchEvent(() => this.emit('onThreadGoalCleared', sessionId, threadId)),
-      onSessionTitleUpdate: (title) =>
-        dispatchEvent(() => this.emit('onSessionTitleUpdate', sessionId, title)),
-      onAgentWarning: (warning) =>
-        dispatchEvent(() => this.emit('onAgentWarning', sessionId, warning)),
+      onThreadGoalUpdated: (goal) => this.emit('onThreadGoalUpdated', sessionId, goal),
+      onThreadGoalCleared: (threadId) => this.emit('onThreadGoalCleared', sessionId, threadId),
+      onSessionTitleUpdate: (title) => this.emit('onSessionTitleUpdate', sessionId, title),
+      onAgentWarning: (warning) => this.emit('onAgentWarning', sessionId, warning),
       loadExternalMcpServers: () =>
         loadSessionMcpCatalog({
           repo: this.workspaceDocument.repo,
@@ -1429,189 +721,239 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
           selectedIds: config.mcpServerIds,
           logger: this.logger,
         }),
-      onImageGenerationBegin: (event) =>
-        dispatchEvent(() => this.emit('onImageGenerationBegin', sessionId, event)),
-      onImageGenerationEnd: (event) =>
-        dispatchEvent(() => this.emit('onImageGenerationEnd', sessionId, event)),
+      onImageGenerationBegin: (event) => this.emit('onImageGenerationBegin', sessionId, event),
+      onImageGenerationEnd: (event) => this.emit('onImageGenerationEnd', sessionId, event),
       onWriteTextFile: (event) => {
-        dispatchEvent(() => this.emit('onWriteTextFile', sessionId, event));
+        this.emit('onWriteTextFile', sessionId, event);
       },
     };
   }
 
   private async createSessionInnerWithAgent(
     config: SessionConfig,
-    agentStart?: AgentStartConfig
+    agentStart?: AgentStartConfig,
+    signal?: AbortSignal
   ): Promise<ISession> {
+    signal?.throwIfAborted();
+    this.reportStartStage(config, 'credentials');
     await this.freezeCodexProfile(config);
-    await this.prepareGitHubRepoSessionConfig(config);
-    const requestedResumeSessionId = agentStart?.resumeSessionId;
-    const requestedForkSessionId = agentStart?.forkSessionId;
-    const requestedForkSessionTurnId = agentStart?.forkSessionTurnId;
-    if (requestedResumeSessionId && requestedForkSessionId) {
-      throw new Error('ACP resume and fork startup hints are mutually exclusive');
-    }
-    this.logger.debug(
-      `[${config.sessionId}] Creating session (cliType=${config.agentCliType} agentType=${config.agentType} assumeDocExisting=${
-        config.assumeDocExisting ? 'yes' : 'no'
-      } resumeWorkdir=${config.resume ? 'yes' : 'no'} acpResumeSessionId=${
-        requestedResumeSessionId ?? 'none'
-      } acpForkSessionId=${requestedForkSessionId ?? 'none'} repoId=${
-        config.repoId ?? 'none'
-      } repoUrl=${config.githubRepoUrl ? redactUrlAuth(config.githubRepoUrl) : 'none'})`
-    );
-    await this.workspaceDocument.getOrCreateSessionDoc(config.sessionId!);
-    this.logger.debug(`[${config.sessionId}] Session will enter create inner`);
-    const session = await withSlowOperationWarning(
-      this.createSessionInner(config),
-      this.logger,
-      'session.createSessionInner',
-      config.sessionId!
-    );
-    const sessionId = config.sessionId!;
-    this.logger.debug(`[${sessionId}] Session workdir resolved: ${session.getWorkdir()}`);
-    session.updateGitIdentity(
-      config.userName,
-      config.userEmail,
-      config.requesterUserId,
-      await this.resolveGitIdentityOptions(config.requesterUserId)
-    );
-    let acpSessionId: string | undefined;
-
-    const launchResolutionStartedAt = performance.now();
-    let managedRuntimeReadyLogged = false;
-    const launch = await resolveACPProcessLaunchAsync({
-      cliType: config.agentCliType,
-      agentType: config.agentType,
-      customAcp: config.customAcp,
-      runtimeOverrides: config.runtimeOverrides,
-      env: config.env,
-      onManagedRuntimeProgress: (event) => {
-        config.onPresencePhase?.('managed-runtime', formatManagedRuntimeProgressDetail(event));
-        if (event.phase === 'complete' && !managedRuntimeReadyLogged) {
-          managedRuntimeReadyLogged = true;
-          this.logger.debug(
-            `[${sessionId}] Managed runtime ready in ${Math.round(performance.now() - launchResolutionStartedAt)}ms (runtime=${event.runtimeName})`
-          );
-        }
-      },
-    }).catch((error: unknown) => {
-      if (error instanceof ManagedRuntimeError) {
-        const runtimeName = resolveManagedRuntimeNameForBuiltin(config.agentType);
-        const runtimeDiagnostics = runtimeName
-          ? getManagedAgentRuntimeManager().getDiagnostics(runtimeName)
-          : undefined;
-        captureCli(
-          'managed_runtime/install_failed',
-          {
-            workspace_id: config.workspaceId,
-            session_id: sessionId,
-            machine_id: config.machineId,
-            agent_type: config.agentType,
-            ...(runtimeName ? { runtime_name: runtimeName } : {}),
-            ...(runtimeDiagnostics
-              ? {
-                  runtime_version: runtimeDiagnostics.version,
-                  platform_arch: runtimeDiagnostics.platformArch,
-                  runtime_base_host: runtimeDiagnostics.runtimeBaseHost,
-                  proxy_env_present: runtimeDiagnostics.proxyEnvPresent,
-                  proxy_configured_for_runtime_url: runtimeDiagnostics.proxyConfiguredForRuntimeUrl,
-                }
-              : {}),
-            source: 'session_start',
-            reason: classifyManagedRuntimeFailureReason(error),
-            error_message: truncateAnalyticsString(formatManagedRuntimeFailureMessage(error)),
-          },
-          { tier: 'A' }
-        );
-      }
-      throw error;
-    });
-    const sessionDoc = await this.workspaceDocument.getOrCreateSessionDoc(sessionId);
-    const publishAcpStep = (step: 'spawn' | 'initialize' | 'new-session') => {
-      const detail =
-        step === 'spawn'
-          ? 'Starting agent process'
-          : step === 'initialize'
-            ? 'Negotiating ACP capabilities'
-            : 'Creating ACP session';
-      config.onPresencePhase?.('acp', detail);
-    };
-
-    publishAcpStep('spawn');
-    this.logger.debug(`[${sessionId}] About to call session.createAgent`);
+    signal?.throwIfAborted();
+    const credentials = await this.prepareGitHubRepoSessionConfig(config);
+    let session: Session | undefined;
     try {
-      acpSessionId = await withSlowOperationWarning(
-        session.createAgent(
-          this.buildCreateAgentConfig(session, config, launch, {
-            resumeSessionId: requestedResumeSessionId,
-            forkSessionId: requestedForkSessionId,
-            forkSessionTurnId: requestedForkSessionTurnId,
-            onStartupStage: (event) => {
-              if (event.type === 'initialize_start') {
-                publishAcpStep('initialize');
-              } else if (event.type === 'new_session_start') {
-                publishAcpStep('new-session');
-              }
-            },
-          })
-        ),
+      const requestedResumeSessionId = agentStart?.resumeSessionId;
+      const requestedForkSessionId = agentStart?.forkSessionId;
+      const requestedForkSessionTurnId = agentStart?.forkSessionTurnId;
+      if (requestedResumeSessionId && requestedForkSessionId) {
+        throw new Error('ACP resume and fork startup hints are mutually exclusive');
+      }
+      this.logger.debug(
+        `[${config.sessionId}] Creating session (cliType=${config.agentCliType} agentType=${config.agentType} assumeDocExisting=${
+          config.assumeDocExisting ? 'yes' : 'no'
+        } resumeWorkdir=${config.resume ? 'yes' : 'no'} acpResumeSessionId=${
+          requestedResumeSessionId ?? 'none'
+        } acpForkSessionId=${requestedForkSessionId ?? 'none'} repoId=${
+          config.repoId ?? 'none'
+        } repoUrl=${config.githubRepoUrl ? redactUrlAuth(config.githubRepoUrl) : 'none'})`
+      );
+      await this.workspaceDocument.getOrCreateSessionDoc(config.sessionId!);
+      this.logger.debug(`[${config.sessionId}] Session will enter create inner`);
+      session = await withSlowOperationWarning(
+        this.createSessionInner(config, credentials),
         this.logger,
-        `session.createAgent(resume=${requestedResumeSessionId ? 'yes' : 'no'})`,
+        'session.createSessionInner',
+        config.sessionId!
+      );
+      const sessionId = config.sessionId!;
+      this.logger.debug(`[${sessionId}] Session workdir resolved: ${session.getWorkdir()}`);
+      signal?.throwIfAborted();
+      this.reportStartStage(config, 'git-identity');
+      config.onPresencePhase?.('initializing', 'Resolving Git identity');
+      const gitIdentityOptions = await this.resolveGitIdentityOptions(
+        config.requesterUserId,
+        signal,
         sessionId
       );
-      this.logger.debug(`[${sessionId}] createAgent returned successfully`);
-    } catch (error) {
-      this.logger.error(
-        `[${config.sessionId}] Failed to create agent: ${error instanceof Error ? error.message : 'Unknown error'}`
+      signal?.throwIfAborted();
+      session.updateGitIdentity(
+        config.userName,
+        config.userEmail,
+        config.requesterUserId,
+        gitIdentityOptions
       );
-      // This instance never left `createSession`, so nobody upstream holds it
-      // and nobody may observe its death. Detach it BEFORE terminate: the
-      // Session still emits `terminated`/`exit` while it kills its processes,
-      // and with the manager listeners attached those events reach
-      // MessageHandler as "the session running turn X died". The handler then
-      // finalizes the live turn (clears its ACP update target, stamps the
-      // assistant entry finished) even though the caller is about to recover —
-      // e.g. the execution service falls back from a failed ACP resume to a
-      // history-replay session — and every update from the replacement agent
-      // is dropped for lack of a target. The trade-off: a startup crash no
-      // longer produces an `exit`-driven idle-status write; the rejected
-      // promise is the only signal, and the caller owns the recovery.
-      this.detachSession(session);
+      config.onPresencePhase?.(
+        requestedResumeSessionId ? 'resuming' : 'acp',
+        'Resolving agent runtime'
+      );
+      let acpSessionId: string | undefined;
+
+      this.reportStartStage(config, 'agent-runtime');
+      const launchResolutionStartedAt = performance.now();
+      let managedRuntimeReadyLogged = false;
+      const launch = await resolveACPProcessLaunchAsync({
+        agentConfigId: config.agentConfigId,
+        magpieGatewayUrl: config.magpieGatewayUrl,
+        cliType: config.agentCliType,
+        agentType: config.agentType,
+        customAcp: config.customAcp,
+        runtimeOverrides: config.runtimeOverrides,
+        env: config.env,
+        onManagedRuntimeProgress: (event) => {
+          config.onPresencePhase?.('managed-runtime', formatManagedRuntimeProgressDetail(event));
+          if (event.phase === 'complete' && !managedRuntimeReadyLogged) {
+            managedRuntimeReadyLogged = true;
+            this.logger.debug(
+              `[${sessionId}] Managed runtime ready in ${Math.round(performance.now() - launchResolutionStartedAt)}ms (runtime=${event.runtimeName})`
+            );
+          }
+        },
+      }).catch((error: unknown) => {
+        if (error instanceof ManagedRuntimeError) {
+          const runtimeName = resolveManagedRuntimeNameForBuiltin(config.agentType);
+          const runtimeDiagnostics = runtimeName
+            ? getManagedAgentRuntimeManager().getDiagnostics(runtimeName)
+            : undefined;
+          captureCli(
+            'managed_runtime/install_failed',
+            {
+              workspace_id: config.workspaceId,
+              session_id: sessionId,
+              machine_id: config.machineId,
+              agent_type: config.agentType,
+              ...(runtimeName ? { runtime_name: runtimeName } : {}),
+              ...(runtimeDiagnostics
+                ? {
+                    runtime_version: runtimeDiagnostics.version,
+                    platform_arch: runtimeDiagnostics.platformArch,
+                    runtime_base_host: runtimeDiagnostics.runtimeBaseHost,
+                    proxy_env_present: runtimeDiagnostics.proxyEnvPresent,
+                    proxy_configured_for_runtime_url:
+                      runtimeDiagnostics.proxyConfiguredForRuntimeUrl,
+                  }
+                : {}),
+              source: 'session_start',
+              reason: classifyManagedRuntimeFailureReason(error),
+              error_message: truncateAnalyticsString(formatManagedRuntimeFailureMessage(error)),
+            },
+            { tier: 'A' }
+          );
+        }
+        throw error;
+      });
+      const sessionDoc = await this.workspaceDocument.getOrCreateSessionDoc(sessionId);
+      const publishAcpStep = (step: 'spawn' | 'initialize' | 'new-session') => {
+        const detail =
+          step === 'spawn'
+            ? 'Starting agent process'
+            : step === 'initialize'
+              ? 'Negotiating ACP capabilities'
+              : 'Creating ACP session';
+        config.onPresencePhase?.('acp', detail);
+      };
+
+      signal?.throwIfAborted();
+      this.reportStartStage(config, 'agent-start');
+      publishAcpStep('spawn');
+      this.logger.debug(`[${sessionId}] About to call session.createAgent`);
       try {
-        await session.terminate(true);
-      } catch (terminateError) {
-        this.logger.debug(
-          `[${sessionId}] Failed to terminate session after createAgent failure: ${formatErrorMessage(
-            terminateError
-          )}`
+        acpSessionId = await withSlowOperationWarning(
+          session.createAgent(
+            this.buildCreateAgentConfig(session, config, launch, {
+              resumeSessionId: requestedResumeSessionId,
+              forkSessionId: requestedForkSessionId,
+              forkSessionTurnId: requestedForkSessionTurnId,
+              onStartupStage: (event) => {
+                if (event.type === 'initialize_start') {
+                  publishAcpStep('initialize');
+                } else if (event.type === 'new_session_start') {
+                  publishAcpStep('new-session');
+                }
+              },
+            })
+          ),
+          this.logger,
+          `session.createAgent(resume=${requestedResumeSessionId ? 'yes' : 'no'})`,
+          sessionId
         );
+        this.logger.debug(`[${sessionId}] createAgent returned successfully`);
+      } catch (error) {
+        this.logger.error(
+          `[${config.sessionId}] Failed to create agent: ${error instanceof Error ? error.message : 'Unknown error'}`
+        );
+        // This instance never left `createSession`, so nobody upstream holds it
+        // and nobody may observe its death. Detach it BEFORE terminate: the
+        // Session still emits `terminated`/`exit` while it kills its processes,
+        // and with the manager listeners attached those events reach
+        // MessageHandler as "the session running turn X died". The handler then
+        // finalizes the live turn (clears its ACP update target, stamps the
+        // assistant entry finished) even though the caller is about to recover —
+        // e.g. the execution service falls back from a failed ACP resume to a
+        // history-replay session — and every update from the replacement agent
+        // is dropped for lack of a target. The trade-off: a startup crash no
+        // longer produces an `exit`-driven idle-status write; the rejected
+        // promise is the only signal, and the caller owns the recovery.
+        this.detachSession(session);
+        try {
+          await session.terminate(true);
+        } catch (terminateError) {
+          this.logger.debug(
+            `[${sessionId}] Failed to terminate session after createAgent failure: ${formatErrorMessage(
+              terminateError
+            )}`
+          );
+        }
+        throw error;
       }
+
+      signal?.throwIfAborted();
+      if (requestedResumeSessionId) {
+        if (acpSessionId === requestedResumeSessionId) {
+          this.logger.debug(`[${sessionId}] ACP resume confirmed (acpSessionId=${acpSessionId})`);
+        } else {
+          this.logger.debug(
+            `[${sessionId}] ACP resume not honored (requested=${requestedResumeSessionId} actual=${
+              acpSessionId ?? 'unknown'
+            })`
+          );
+        }
+      }
+
+      this.logger.debug(`[${sessionId}] About to persist ACP session ID to doc`);
+      if (!agentStart?.deferAcpSessionIdPersistence) {
+        await sessionDoc.setACPSessionId(acpSessionId as ACPSessionId);
+      }
+      this.logger.debug(`[${sessionId}] ACP session ID persisted to doc`);
+      this.logger.debug(
+        `[${sessionId}] ACP session established (acpSessionId=${acpSessionId ?? 'unknown'})`
+      );
+      this.logger.debug(`[${sessionId}] createSessionInnerWithAgent returning session`);
+      return session;
+    } catch (error) {
+      // Cleanup runs to the end and never replaces the start failure: callers
+      // classify that error (auth, resume, transient) to decide what happens next.
+      if (session) {
+        this.detachSession(session);
+        await session.terminate(true).catch((terminateError: unknown) => {
+          recordIncompleteStartCleanup(error);
+          this.logger.error(
+            `[${config.sessionId}] Failed to terminate session after start failure: ${formatErrorWithCauses(terminateError)}`
+          );
+        });
+      }
+      await credentials.release().catch((releaseError: unknown) => {
+        recordIncompleteStartCleanup(error);
+        this.logger.error(
+          `[${config.sessionId}] Failed to release credentials after start failure: ${formatErrorWithCauses(releaseError)}`
+        );
+      });
       throw error;
     }
+  }
 
-    if (requestedResumeSessionId) {
-      if (acpSessionId === requestedResumeSessionId) {
-        this.logger.debug(`[${sessionId}] ACP resume confirmed (acpSessionId=${acpSessionId})`);
-      } else {
-        this.logger.debug(
-          `[${sessionId}] ACP resume not honored (requested=${requestedResumeSessionId} actual=${
-            acpSessionId ?? 'unknown'
-          })`
-        );
-      }
-    }
-
-    this.logger.debug(`[${sessionId}] About to persist ACP session ID to doc`);
-    if (!agentStart?.deferAcpSessionIdPersistence) {
-      await sessionDoc.setACPSessionId(acpSessionId as ACPSessionId);
-    }
-    this.logger.debug(`[${sessionId}] ACP session ID persisted to doc`);
-    this.logger.debug(
-      `[${sessionId}] ACP session established (acpSessionId=${acpSessionId ?? 'unknown'})`
-    );
-    this.logger.debug(`[${sessionId}] createSessionInnerWithAgent returning session`);
-    return session;
+  /** Marks the start step that begins now; a failure is reported against it. */
+  private reportStartStage(config: SessionConfig, stage: SessionStartStage): void {
+    this.logger.debug(`[${config.sessionId}] Session start stage: ${stage}`);
+    config.onStartStage?.(stage);
   }
 
   private async freezeCodexProfile(config: SessionConfig): Promise<void> {
@@ -1659,6 +1001,7 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
       env: config.env ?? {},
       customAcp: config.customAcp,
       runtimeOverrides: config.runtimeOverrides,
+      magpieGatewayUrl: config.magpieGatewayUrl,
     });
   }
 
@@ -1669,29 +1012,27 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
    * failures degrade to "not enabled" rather than blocking the turn.
    */
   async resolveGitIdentityOptions(
-    requesterUserId: string
+    requesterUserId: string,
+    signal?: AbortSignal,
+    sessionId?: SessionId
   ): Promise<{ preferMachineIdentity: boolean; personalIdentityEnabled: boolean }> {
+    signal?.throwIfAborted();
     const preferMachineIdentity = requesterUserId === this.cloudPort.identity.userId;
     const tokenManager = this.getGitHubTokenManager();
     if (!tokenManager) return { preferMachineIdentity, personalIdentityEnabled: false };
-    try {
-      const policy = await tokenManager.getCredentialPolicy({
-        requesterUserId,
-        machineId: this.machineId,
-      });
-      return { preferMachineIdentity, personalIdentityEnabled: policy.personalEnabled };
-    } catch (error) {
-      this.logger.warn(
-        `Could not read the GitHub identity preference for ${requesterUserId}; committing without personal identity: ${formatErrorMessage(error)}`
-      );
-      return { preferMachineIdentity, personalIdentityEnabled: false };
-    }
+    const policy = await resolveGitIdentityPolicyLegacy(
+      () => tokenManager.getCredentialPolicy({ requesterUserId, machineId: this.machineId }),
+      this.logger,
+      sessionId ?? 'git-identity',
+      signal
+    );
+    return { preferMachineIdentity, personalIdentityEnabled: policy.personalEnabled };
   }
 
-  private async prepareGitHubRepoSessionConfig(config: SessionConfig): Promise<void> {
+  private async prepareGitHubRepoSessionConfig(config: SessionConfig): Promise<SessionCredentials> {
     // A GitHub remote does not make a local project a managed GitHub checkout.
     // Direct local sessions and their worktrees keep the user's native auth.
-    if (config.project?.kind === 'local') return;
+    if (config.project?.kind === 'local') return nativeSessionCredentials;
 
     const githubRepo = config.githubRepo ?? tryDeriveGitHubRepoFromUrl(config.githubRepoUrl);
     if (githubRepo) {
@@ -1702,79 +1043,90 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
       }
     }
     const brokerEnv = await this.ensureGitCredentialBrokerEnv();
-    if (!brokerEnv) return;
+    if (!brokerEnv) return nativeSessionCredentials;
     if (!config.sessionId) throw new Error('SessionId is required for GitHub credentials');
     const credentialOwner = await this.resolveGitHubOwner(config.sessionId, config.requesterUserId);
-    const allowLocalAuth = credentialOwner === this.cloudPort.identity.userId;
-    config.githubCredentialPolicy = { allowLocalAuth };
-    if (!config.sessionId) throw new Error('SessionId is required for GitHub credentials');
-    const contextToken = this.gitCredentialBroker!.activateSessionContext({
+    const broker = this.gitCredentialBroker;
+    if (!broker) throw new Error('GitHub credential broker is required');
+    const credentials = acquireSessionCredentialsLegacy(broker, {
       sessionId: config.sessionId,
       requesterUserId: credentialOwner,
       machineId: this.machineId,
     });
-    const brokerStateFilePath = this.gitCredentialBroker!.getStateFilePath();
-    if (!brokerStateFilePath) throw new Error('Workspace-scoped GitHub broker is required');
-    config.githubCredentialPolicy.stateFilePath = brokerStateFilePath;
-    const sessionEnv: Record<string, string> = { ...config.env };
-    clearManagedGhTokenEnv(sessionEnv);
-    if (contextToken) sessionEnv[LODY_GIT_CRED_CONTEXT_TOKEN_ENV] = contextToken;
-    const contextFile = this.gitCredentialBroker!.getSessionContextFilePath(config.sessionId);
-    if (contextFile) sessionEnv[LODY_GIT_CRED_CONTEXT_FILE_ENV] = contextFile;
-    this.ensureGhShimSessionEnv(sessionEnv);
-    if (!allowLocalAuth) applyNonOwnerShellEnv(sessionEnv, brokerStateFilePath);
-    // Native Git helper adapters keep remote URLs and wire protocols unchanged.
-    // Save only caller config; each native attempt removes our SSH normalization.
-    sessionEnv.LODY_GIT_LOCAL_CONFIG ??= JSON.stringify(
-      Object.fromEntries(
-        Object.entries({ ...process.env, ...sessionEnv }).filter(([key]) =>
-          /^GIT_CONFIG_(COUNT|KEY_\d+|VALUE_\d+)$/.test(key)
+    if (credentials.mode !== 'managed') throw new Error('Managed credentials are required');
+    try {
+      const brokerStateFilePath = credentials.lease.stateFilePath;
+      if (!brokerStateFilePath) throw new Error('Workspace-scoped GitHub broker is required');
+      const sessionEnv: Record<string, string> = { ...config.env };
+      clearManagedGhTokenEnv(sessionEnv);
+      sessionEnv[LODY_GIT_CRED_CONTEXT_TOKEN_ENV] = credentials.lease.contextToken;
+      if (credentials.lease.contextFilePath)
+        sessionEnv[LODY_GIT_CRED_CONTEXT_FILE_ENV] = credentials.lease.contextFilePath;
+      this.ensureGhShimSessionEnv(sessionEnv);
+      if (!credentials.lease.allowLocalAuth)
+        applyNonOwnerShellEnv(sessionEnv, brokerStateFilePath, this.logger);
+      // Native Git helper adapters keep remote URLs and wire protocols unchanged.
+      // Save only caller config; each native attempt removes our SSH normalization.
+      sessionEnv.LODY_GIT_LOCAL_CONFIG ??= JSON.stringify(
+        Object.fromEntries(
+          Object.entries({ ...process.env, ...sessionEnv }).filter(([key]) =>
+            /^GIT_CONFIG_(COUNT|KEY_\d+|VALUE_\d+)$/.test(key)
+          )
         )
-      )
-    );
-    const localConfig = JSON.parse(sessionEnv.LODY_GIT_LOCAL_CONFIG) as Record<string, string>;
-    for (const key of Object.keys(sessionEnv)) {
-      if (/^GIT_CONFIG_(COUNT|KEY_\d+|VALUE_\d+)$/.test(key)) delete sessionEnv[key];
-    }
-    Object.assign(sessionEnv, localConfig);
-    let configCount = Number(localConfig.GIT_CONFIG_COUNT ?? 0);
-    for (const value of [
-      'git@github.com:',
-      'ssh://git@github.com/',
-      'ssh://git@github.com:22/',
-      'ssh://git@ssh.github.com:443/',
-    ]) {
-      sessionEnv[`GIT_CONFIG_KEY_${configCount}`] = value.includes(':443/')
-        ? 'url.https://github.com:443/.insteadOf'
-        : 'url.https://github.com/.insteadOf';
-      sessionEnv[`GIT_CONFIG_VALUE_${configCount++}`] = value;
-    }
-    // Checkout filters and LFS ask Git for credentials directly, outside HTTP transport.
-    const helperPath = path.join(
-      getGhShimHostBinDir(brokerStateFilePath),
-      'git-credential-lody.cjs'
-    );
-    ensureCredentialHelperAtPath(helperPath);
-    for (const host of ['https://github.com', 'https://www.github.com']) {
-      for (const [key, value] of [
-        [`credential.${host}.helper`, ''],
-        [`credential.${host}.helper`, buildCredentialHelperValueForPath(helperPath)],
-        [`credential.${host}.useHttpPath`, 'true'],
-      ] as const) {
-        sessionEnv[`GIT_CONFIG_KEY_${configCount}`] = key;
+      );
+      const localConfig = JSON.parse(sessionEnv.LODY_GIT_LOCAL_CONFIG) as Record<string, string>;
+      for (const key of Object.keys(sessionEnv)) {
+        if (/^GIT_CONFIG_(COUNT|KEY_\d+|VALUE_\d+)$/.test(key)) delete sessionEnv[key];
+      }
+      Object.assign(sessionEnv, localConfig);
+      let configCount = Number(localConfig.GIT_CONFIG_COUNT ?? 0);
+      for (const value of [
+        'git@github.com:',
+        'ssh://git@github.com/',
+        'ssh://git@github.com:22/',
+        'ssh://git@ssh.github.com:443/',
+      ]) {
+        sessionEnv[`GIT_CONFIG_KEY_${configCount}`] = value.includes(':443/')
+          ? 'url.https://github.com:443/.insteadOf'
+          : 'url.https://github.com/.insteadOf';
         sessionEnv[`GIT_CONFIG_VALUE_${configCount++}`] = value;
       }
+      // Checkout filters and LFS ask Git for credentials directly, outside HTTP transport.
+      const helperPath = path.join(
+        getGhShimHostBinDir(brokerStateFilePath),
+        'git-credential-lody.cjs'
+      );
+      ensureCredentialHelperAtPath(helperPath);
+      for (const host of ['https://github.com', 'https://www.github.com']) {
+        for (const [key, value] of [
+          [`credential.${host}.helper`, ''],
+          [`credential.${host}.helper`, buildCredentialHelperValueForPath(helperPath)],
+          [`credential.${host}.useHttpPath`, 'true'],
+        ] as const) {
+          sessionEnv[`GIT_CONFIG_KEY_${configCount}`] = key;
+          sessionEnv[`GIT_CONFIG_VALUE_${configCount++}`] = value;
+        }
+      }
+      sessionEnv.GIT_CONFIG_COUNT = String(configCount);
+      sessionEnv.GIT_EXEC_PATH = getGhShimHostBinDir(brokerStateFilePath);
+      config.env = {
+        ...sessionEnv,
+        LODY_GIT_CRED_BROKER_URL: brokerEnv.url,
+        LODY_GIT_CRED_BROKER_TOKEN: brokerEnv.token,
+        [LODY_GIT_CRED_BROKER_STATE_FILE_ENV]: brokerStateFilePath,
+        ...(githubRepo ? { LODY_GITHUB_REPO_FULL_NAME: githubRepo } : {}),
+        GIT_TERMINAL_PROMPT: '0',
+      };
+      return credentials;
+    } catch (error) {
+      await credentials.release().catch((releaseError: unknown) => {
+        recordIncompleteStartCleanup(error);
+        this.logger.error(
+          `[${config.sessionId}] Failed to release credentials after preparation failure: ${formatErrorWithCauses(releaseError)}`
+        );
+      });
+      throw error;
     }
-    sessionEnv.GIT_CONFIG_COUNT = String(configCount);
-    sessionEnv.GIT_EXEC_PATH = getGhShimHostBinDir(brokerStateFilePath);
-    config.env = {
-      ...sessionEnv,
-      LODY_GIT_CRED_BROKER_URL: brokerEnv.url,
-      LODY_GIT_CRED_BROKER_TOKEN: brokerEnv.token,
-      [LODY_GIT_CRED_BROKER_STATE_FILE_ENV]: brokerStateFilePath,
-      ...(githubRepo ? { LODY_GITHUB_REPO_FULL_NAME: githubRepo } : {}),
-      GIT_TERMINAL_PROMPT: '0',
-    };
   }
 
   private async resolveGitHubOwner(sessionId: SessionId, initialOwner: string): Promise<string> {
@@ -1786,33 +1138,37 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
     return initialOwner;
   }
 
-  async refreshGhTokenForSession(
-    session: ISession,
-    _githubRepo: string | undefined,
-    requesterUserId: string
-  ): Promise<void> {
-    if (!this.gitCredentialBroker?.hasSessionContext(session.sessionId)) return;
+  async validateSessionCredentials(session: ISession, requesterUserId: string): Promise<void> {
+    const credentials = session.getGitHubCredentials();
+    if (credentials.mode === 'native') return;
+    const { lease } = credentials;
+    if (
+      !lease.active ||
+      lease.context.sessionId !== session.sessionId ||
+      lease.context.machineId !== this.machineId
+    ) {
+      throw new GitCredentialContextError({ message: 'github_runtime_context_invalid' });
+    }
     const owner = await this.resolveGitHubOwner(session.sessionId, requesterUserId);
-    const previousOwner = this.gitCredentialBroker.getSessionOwner(session.sessionId);
-    const contextToken = this.gitCredentialBroker.refreshSessionContext({
-      sessionId: session.sessionId,
-      requesterUserId: owner,
-      machineId: this.machineId,
-    });
-    session.updateGitHubCredentialPolicy(owner === this.cloudPort.identity.userId);
-    if (contextToken) session.updateEnv({ [LODY_GIT_CRED_CONTEXT_TOKEN_ENV]: contextToken });
-    if (previousOwner !== owner) {
-      // Existing children may contain the old owner's raw tokens. Never reuse them.
-      await session.terminate(true);
-      throw new Error(
-        'github_owner_changed: previous session processes were closed; start a new turn with the new owner'
-      );
+    // The runtime may have been retired while trusted metadata was loading.
+    if (!lease.active)
+      throw new GitCredentialContextError({ message: 'github_runtime_context_released' });
+    if (lease.context.requesterUserId !== owner) {
+      try {
+        lease.revoke();
+      } finally {
+        await session.terminate(true);
+      }
+      throw new GitCredentialContextError({
+        message:
+          'github_owner_changed: previous session processes were closed; start a new turn with the new owner',
+      });
     }
   }
 
   private ensureGhShimSessionEnv(sessionEnv: Record<string, string>): void {
     const statePath = this.gitCredentialBroker?.getStateFilePath();
-    ensureGhShimScript(statePath);
+    ensureGhShimScript(statePath, this.logger);
 
     sessionEnv.PATH = prependGhShimBinDirToPath(sessionEnv.PATH ?? process.env.PATH, statePath);
 
@@ -1879,16 +1235,19 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
    */
   private async resolveHostGitBrokerAuth(
     source: WorktreeManagerSource | undefined,
-    config: SessionConfig
+    config: SessionConfig,
+    credentials: SessionCredentials
   ): Promise<GitCredentialBrokerAuth | undefined> {
     if (source && source.kind !== 'github') {
       return undefined;
     }
+    if (credentials.mode === 'native') return undefined;
+    if (!credentials.lease.active)
+      throw new GitCredentialContextError({ message: 'github_runtime_context_released' });
     const brokerEnv = await this.ensureGitCredentialBrokerEnv();
-    if (!brokerEnv) {
-      return undefined;
-    }
-    const contextToken = config.env?.[LODY_GIT_CRED_CONTEXT_TOKEN_ENV];
+    if (!brokerEnv)
+      throw new GitCredentialContextError({ message: 'github_runtime_broker_missing' });
+    const contextToken = credentials.lease.contextToken;
     if (!contextToken) {
       throw new Error(
         'GitHub worktree preparation is missing its requester credential context; no GitHub operation was attempted.'
@@ -1896,7 +1255,7 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
     }
     return {
       workspaceId: this.workspaceId,
-      allowLocalAuth: config.githubCredentialPolicy?.allowLocalAuth === true,
+      allowLocalAuth: credentials.lease.allowLocalAuth,
       url: brokerEnv.url,
       token: brokerEnv.token,
       contextToken,
@@ -1917,7 +1276,8 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
 
   private async resolveSharedWorkdir(
     config: SessionConfig,
-    repoId: RepoId | undefined
+    repoId: RepoId | undefined,
+    credentials: SessionCredentials
   ): Promise<string | undefined> {
     if (!config.parentSessionId) {
       return config.workdir;
@@ -2023,7 +1383,8 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
         undefined,
         await this.resolveHostGitBrokerAuth(
           { kind: 'github', repoUrl: config.githubRepoUrl },
-          config
+          config,
+          credentials
         )
       );
       await parentSessionDoc.setBranchName(sharedWorktree.branch);
@@ -2042,7 +1403,7 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
     if (project?.kind !== 'local' || project.useWorktree !== true || !workdir) {
       return null;
     }
-    const originalRootPath = normalizeLocalProjectRootPath(workdir);
+    const originalRootPath = localProjectsLegacy.normalizeLocalProjectRootPath(workdir);
     return {
       repoId: deriveRepoIdFromLocalProjectPath(originalRootPath),
       originalRootPath,
@@ -2067,11 +1428,6 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
     return {
       managerConfig,
       manager: getWorktreeManager({ ...managerConfig, logger: this.logger }),
-      target: {
-        repoId,
-        source,
-        ...(config.branch ? { baseBranch: config.branch } : {}),
-      },
     };
   }
 
@@ -2095,22 +1451,36 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
       if (!existingRef) throw new Error('Local project branch is required');
       return (
         await (existingRef.startsWith('refs/')
-          ? parseLocalProjectBranchRefAtRootPath(options.originalRootPath, existingRef)
-          : resolveLocalProjectLegacyBaseBranchAtRootPath(options.originalRootPath, existingRef, {
-              useWorktree: true,
-            }))
+          ? localProjectsLegacy.parseLocalProjectBranchRefAtRootPath(
+              options.originalRootPath,
+              existingRef
+            )
+          : localProjectsLegacy.resolveLocalProjectLegacyBaseBranchAtRootPath(
+              options.originalRootPath,
+              existingRef,
+              {
+                useWorktree: true,
+              }
+            ))
       ).refName;
     }
     if (storedBaseBranch && storedBaseBranch !== selector) {
       return (
-        await parseLocalProjectBranchRefAtRootPath(options.originalRootPath, storedBaseBranch)
+        await localProjectsLegacy.parseLocalProjectBranchRefAtRootPath(
+          options.originalRootPath,
+          storedBaseBranch
+        )
       ).refName;
     }
 
     return (
-      await resolveLocalProjectLegacyBaseBranchAtRootPath(options.originalRootPath, selector, {
-        useWorktree: true,
-      })
+      await localProjectsLegacy.resolveLocalProjectLegacyBaseBranchAtRootPath(
+        options.originalRootPath,
+        selector,
+        {
+          useWorktree: true,
+        }
+      )
     ).refName;
   }
 
@@ -2137,57 +1507,57 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
 
   private async createSessionInner(
     config: SessionConfig,
-    preparedSession?: Session,
-    preparedWorktree?: WorktreeInfo
+    credentials: SessionCredentials = nativeSessionCredentials
   ): Promise<Session> {
     let workdir: string | undefined = config.workdir;
     const repoId = config.repoId;
+    this.reportStartStage(config, 'workdir');
     const sessionDoc = await this.workspaceDocument.getOrCreateSessionDoc(config.sessionId!);
     if (config.githubRepo) {
       await sessionDoc.setRepoFullName(config.githubRepo);
     }
 
-    workdir = await this.resolveSharedWorkdir(config, repoId);
+    workdir = await this.resolveSharedWorkdir(config, repoId, credentials);
     const worktreeTarget = this.resolveSessionWorktreeTarget(config);
 
     // Child sessions reuse the parent's workdir — skip worktree creation
     if (worktreeTarget) {
       const worktreeManager = worktreeTarget.manager;
+      this.reportStartStage(config, 'worktree');
       this.logger.debug(
         `[${config.sessionId}] Preparing worktree (repoId=${worktreeTarget.managerConfig.repoId} sessionId=${config.sessionId}) in host`
       );
-      const speculativeClaim = await claimSpeculativeWorktreeForDurableSession({
+      // An older daemon may have prepared this Session's worktree for a draft.
+      // Claim before probing the directory: a mismatched one is removed here.
+      const legacyTarget = {
+        repoId: worktreeTarget.managerConfig.repoId,
+        source: worktreeTarget.managerConfig.source ?? {
+          kind: 'github' as const,
+          repoUrl: worktreeTarget.managerConfig.repoUrl,
+        },
+        ...(config.branch ? { baseBranch: config.branch } : {}),
+      };
+      const legacyClaim = await claimLegacySpeculativeWorktree({
         sessionId: config.sessionId!,
         workspaceId: config.workspaceId,
         machineId: this.machineId,
-        target: worktreeTarget.target,
+        target: legacyTarget,
+        restoreBranchName: config.restoreBranchName,
         logger: this.logger,
       });
-      const speculativeSetupPending = speculativeClaim === 'claimed';
+      const legacySetupPending = legacyClaim === 'setup-pending';
       const worktreeAlreadyExisted = worktreeManager.hasWorktree(config.sessionId!);
-      // A `mismatch` claim just DELETED the prepared directory (it was built for
-      // a different target), and a lost cross-process race can remove it without
-      // any claim outcome. Either way the prepared info now names a path that is
-      // not on disk — fall through to createWorktree, which rebuilds it, instead
-      // of handing the session a dead workdir.
-      const preparedWorktreeUsable =
-        preparedWorktree && speculativeClaim !== 'mismatch' && existsSync(preparedWorktree.hostPath)
-          ? preparedWorktree
-          : undefined;
-      if (preparedWorktree && !preparedWorktreeUsable) {
-        this.logger.warn(
-          `[${config.sessionId}] Prepared worktree is unusable (claim=${speculativeClaim} path=${preparedWorktree.hostPath}); recreating it via the cold path`
-        );
-      }
-      const worktreeInfo =
-        preparedWorktreeUsable ??
-        (await worktreeManager.createWorktree(
-          config.sessionId!,
-          config.branch,
-          config.restoreBranchName,
-          config.worktreeStartPoint,
-          await this.resolveHostGitBrokerAuth(worktreeTarget.target.source, config)
-        ));
+      const worktreeInfo = await worktreeManager.createWorktree(
+        config.sessionId!,
+        config.branch,
+        config.restoreBranchName,
+        config.worktreeStartPoint,
+        await this.resolveHostGitBrokerAuth(
+          worktreeTarget.managerConfig.source,
+          config,
+          credentials
+        )
+      );
       if (!config.deferWorktreeMetaPersistence) {
         await sessionDoc.setBranchName(worktreeInfo.branch);
         await sessionDoc.setIsWorktree(true);
@@ -2197,11 +1567,19 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
       this.logger.debug(
         `[${config.sessionId}] Worktree details (branch=${worktreeInfo.branch} head=${worktreeInfo.headSha ?? 'unknown'}): host=${worktreeInfo.hostPath}`
       );
-      if (config.resume && worktreeAlreadyExisted && !speculativeSetupPending) {
+      if (config.resume && worktreeAlreadyExisted && !legacySetupPending) {
         this.logger.debug(
           `[${config.sessionId}] Skipping worktree setup for restored session because the worktree already exists`
         );
       } else {
+        const setupHistory = createWorktreeScriptHistoryRecorder({
+          sessionDoc,
+          sessionId: config.sessionId!,
+          phase: 'setup',
+          logger: this.logger,
+          backend: await createSessionBackend(sessionDoc, await sessionDoc.getMetaState()),
+          insertBeforeEntryId: config.worktreeScriptHistoryInsertBeforeEntryId,
+        });
         await runWorktreeSetup({
           config: await this.resolveWorktreeSetupConfig(config),
           sessionId: config.sessionId!,
@@ -2212,21 +1590,25 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
           localProjectId:
             config.project?.kind === 'local' ? config.project.localProjectId : undefined,
           logger: this.logger,
-          events: createWorktreeScriptHistoryRecorder({
-            sessionDoc,
+          events: {
+            // Only a script that actually starts makes this start unsafe to repeat.
+            onStart: async (event) => {
+              this.reportStartStage(config, 'worktree-setup');
+              await setupHistory.onStart?.(event);
+            },
+            onStepStart: (event) => setupHistory.onStepStart?.(event),
+            onOutput: (event) => setupHistory.onOutput?.(event),
+            onStepEnd: (event) => setupHistory.onStepEnd?.(event),
+            onEnd: (event) => setupHistory.onEnd?.(event),
+          },
+        });
+        if (legacySetupPending) {
+          await completeLegacySpeculativeWorktreeSetup({
             sessionId: config.sessionId!,
-            phase: 'setup',
-            logger: this.logger,
-            backend: await createSessionBackend(sessionDoc, await sessionDoc.getMetaState()),
-            insertBeforeEntryId: config.worktreeScriptHistoryInsertBeforeEntryId,
-          }),
-        });
-        await completeSpeculativeWorktreeSetup({
-          sessionId: config.sessionId!,
-          workspaceId: config.workspaceId,
-          machineId: this.machineId,
-          target: worktreeTarget.target,
-        });
+            workspaceId: config.workspaceId,
+            machineId: this.machineId,
+          });
+        }
       }
     } else if (config.parentSessionId) {
       const parentSessionDoc = await this.workspaceDocument.getOrCreateSessionDoc(
@@ -2241,29 +1623,32 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
       );
     }
 
-    let session: Session;
-    if (preparedSession) {
-      session = preparedSession;
-      if (workdir) {
-        session.setWorkdir(workdir);
-      }
-      this.preparationSessions.delete(config.sessionId!);
-    } else {
-      const sandbox = await this.sessionSandboxFactory(config.sessionId!);
-      this.logger.debug(`[${config.sessionId}] Session sandbox: ${sandbox.description}`);
-      session = new Session(config, this.logger, workdir, sandbox);
-    }
+    this.reportStartStage(config, 'sandbox');
+    const sandbox = await this.sessionSandboxFactory(config.sessionId!);
+    this.logger.debug(`[${config.sessionId}] Session sandbox: ${sandbox.description}`);
+    const session = new Session(config, this.logger, workdir, sandbox, credentials);
     this.registerSessionEvents(session);
     this.sessions.set(config.sessionId!, session);
-    await this.rebalanceSessionSandboxes();
-    return session;
+    try {
+      await this.rebalanceSessionSandboxes();
+      return session;
+    } catch (error) {
+      this.detachSession(session);
+      await session.terminate(true).catch((terminateError: unknown) => {
+        recordIncompleteStartCleanup(error);
+        this.logger.error(
+          `[${config.sessionId}] Failed to terminate session after sandbox rebalance failure: ${formatErrorWithCauses(terminateError)}`
+        );
+      });
+      throw error;
+    }
   }
 
-  /** Called only between prompts under the execution service's turn ownership. */
+  /** Retire an instance between prompts without ending its execution owner's turn. */
   async retireSessionForReconfiguration(session: ISession): Promise<void> {
     if (this.sessions.get(session.sessionId) !== session)
       throw new Error('Session changed before reconfiguration');
-    // Reconfiguration is not agent death: keep the new turn's history owner alive.
+    // Reconfiguration and stale-prompt replacement preserve the live history owner.
     this.detachSession(session);
     await session.terminate(true);
   }
@@ -2280,13 +1665,10 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
   }
 
   async cleanUp(options: { keepWorkspaceDocumentOpen?: boolean } = {}) {
-    this.preparationRecoveryGeneration += 1;
-    this.detachPreparationRecovery?.();
-    this.detachPreparationRecovery = null;
-    await this.preparationService.disposeAll();
-    await this.preparationRecoveryChain;
-    this.preparationSessions.clear();
-    this.preparationUserResolver.clear();
+    this.speculativeWorktreeRecoveryGeneration += 1;
+    this.detachSpeculativeWorktreeRecovery?.();
+    this.detachSpeculativeWorktreeRecovery = null;
+    await this.speculativeWorktreeRecoveryChain;
     await this.cleanupSessions();
     // MessageHandler owns the final ACP/Code Collab drain. It first stops all
     // session producers through this phase, persists their last callbacks while
@@ -2305,18 +1687,18 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
   private async cleanupSessions(): Promise<void> {
     this.logger.debug('Cleaning up all sessions...');
 
-    const terminations = Array.from(this.sessions.values()).map((session) =>
-      session
-        .terminate(true)
-        .catch((error: unknown) =>
-          this.logger.error(
-            `[${session.sessionId}] Failed to terminate session: ${error instanceof Error ? error.message : 'Unknown error'}`
-          )
-        )
-    );
-
-    await Promise.allSettled(terminations);
-    this.sessions.clear();
+    const sessions = Array.from(this.sessions.values());
+    const outcomes = await Promise.allSettled(sessions.map((session) => session.terminate(true)));
+    const failures: unknown[] = [];
+    outcomes.forEach((outcome, index) => {
+      const session = sessions[index]!;
+      if (outcome.status === 'fulfilled') {
+        if (this.sessions.get(session.sessionId) === session)
+          this.sessions.delete(session.sessionId);
+      } else failures.push(outcome.reason);
+    });
+    if (failures.length)
+      throw new AggregateError(failures, 'Session cleanup retains unreleased resources');
   }
 
   hasSession(sessionId: SessionId): boolean {
@@ -2375,7 +1757,8 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
 
   async cleanupForkWorktree(config: SessionConfig): Promise<void> {
     if (config.project?.kind === 'github' && !config.repoId) {
-      await this.prepareGitHubRepoSessionConfig(config);
+      config.repoId = deriveRepoIdFromGitHubRepo(config.project.repoFullName);
+      config.githubRepoUrl = buildGitHubCloneUrl(config.project.repoFullName);
     }
     const target = this.resolveSessionWorktreeTarget(config);
     if (!target || !config.sessionId) return;
@@ -2457,12 +1840,16 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
       this.emit('error', event);
     };
     const onExit = (event: SessionExitEvent): void => {
-      this.sessions.delete(event.sessionId);
+      const current = this.sessions.get(event.sessionId);
+      if (current && current !== session) return;
+      if (this.sessions.get(event.sessionId) === session) this.sessions.delete(event.sessionId);
       void this.rebalanceSessionSandboxes();
       this.emit('exit', event);
     };
     const onTerminated = (event: SessionExitEvent): void => {
-      this.sessions.delete(event.sessionId);
+      const current = this.sessions.get(event.sessionId);
+      if (current && current !== session) return;
+      if (this.sessions.get(event.sessionId) === session) this.sessions.delete(event.sessionId);
       void this.rebalanceSessionSandboxes();
       const terminatedEvent: SessionTerminatedEvent = {
         sessionId: event.sessionId,
@@ -2500,7 +1887,7 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
 
   private async rebalanceSessionSandboxes(): Promise<void> {
     const run = async (): Promise<void> => {
-      const activeSessions = [...this.sessions.values(), ...this.preparationSessions.values()];
+      const activeSessions = [...this.sessions.values()];
       if (activeSessions.length === 0) {
         return;
       }

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   buildChatFailedErrorReport,
+  buildChatFailedNoticeDetail,
   extractReadableChatFailedMessage,
 } from '../src/components/ai-gui/chat-failed-error-report';
 
@@ -31,6 +32,38 @@ describe('extractReadableChatFailedMessage', () => {
     expect(extractReadableChatFailedMessage('agent exited with code 1')).toBe(
       'agent exited with code 1'
     );
+  });
+});
+
+describe('buildChatFailedNoticeDetail', () => {
+  it('shows a prefixed multiline failure and its embedded advice only once', () => {
+    const action = 'Check your connection and retry.';
+    const message = `Internal error: connection setup timed out\n\n${action}`;
+    expect(buildChatFailedNoticeDetail({ title: 'Restore failed', action, message })).toBe(message);
+  });
+
+  it('keeps upstream JSON and diagnostic fields without adding an extracted summary', () => {
+    const message =
+      'Internal error: API Error: 500 {"error":{"message":"Overloaded"},"request_id":"synthetic-id"}';
+    expect(buildChatFailedNoticeDetail({ title: 'Overloaded', message })).toBe(message);
+  });
+
+  it('adds distinct localized advice while preserving raw whitespace and stack details', () => {
+    const message = '  Internal error: spawn git ENOENT\n    at start (agent.ts:1)\n';
+    const action = '请安装 Git 后重试。';
+    expect(buildChatFailedNoticeDetail({ title: '启动失败', action, message })).toBe(
+      `${action}\n\n${message}`
+    );
+  });
+
+  it('omits empty detail and exact title repeats while keeping distinct advice', () => {
+    expect(buildChatFailedNoticeDetail({ title: 'Failed', message: '  ' })).toBeUndefined();
+    expect(
+      buildChatFailedNoticeDetail({ title: 'Failed', message: ' Failed ', action: 'Failed' })
+    ).toBeUndefined();
+    expect(
+      buildChatFailedNoticeDetail({ title: 'Failed', message: 'Failed', action: 'Retry.' })
+    ).toBe('Retry.');
   });
 });
 

@@ -7,6 +7,7 @@ import {
   type SessionHistory,
   type SessionPreviewDocState,
   type SessionExternalHistoryCursorDocState,
+  type SessionRoostHistoryCursorDocState,
   type SessionAcpRuntimeConfigSnapshot,
 } from './schema';
 import { createHistoryWriter, historyValuesEqual, type HistoryWriter } from './history-writer';
@@ -16,11 +17,12 @@ import type { SessionForkOperation } from './message-schemas';
 const immer = new Immer({ autoFreeze: false, useStrictShallowCopy: true });
 export type SessionWriteState = Omit<
   SessionDocMeta,
-  'forkOperation' | 'preview' | 'externalHistoryCursor' | 'acpRuntimeConfig'
+  'forkOperation' | 'preview' | 'externalHistoryCursor' | 'roostHistoryCursor' | 'acpRuntimeConfig'
 > & {
   forkOperation?: SessionForkOperation;
   preview?: SessionPreviewDocState;
   externalHistoryCursor?: SessionExternalHistoryCursorDocState;
+  roostHistoryCursor?: SessionRoostHistoryCursorDocState;
   acpRuntimeConfig?: SessionAcpRuntimeConfigSnapshot;
 };
 export type SessionWriteUpdater =

@@ -21,11 +21,42 @@ function harness(
     owner?: boolean;
     personal?: boolean;
     offline?: boolean;
-    operation?: string;
+    command?: string;
+    inheritedOperation?: string;
+    helper?: string;
+    readOnly?: boolean;
     denyPersonal?: boolean;
   } = {}
 ) {
   ensureGitHubGitTransport(directory, '/workspace/broker', 'git');
+  const wrapper = fs.readFileSync(path.join(directory, 'git'), 'utf8');
+  const throughWrapper = (command: string, env: Record<string, string>) => {
+    let forwarded = env;
+    vm.runInNewContext(wrapper, {
+      __dirname: directory,
+      require: (name: string) =>
+        name === 'path'
+          ? path
+          : {
+              spawn: (_git: string, _args: string[], init: { env: Record<string, string> }) => {
+                forwarded = init.env;
+                return new EventEmitter();
+              },
+            },
+      process: { argv: ['node', 'git', command], env },
+    });
+    return forwarded;
+  };
+  const env = throughWrapper(
+    options.helper ?? 'remote-https',
+    throughWrapper(options.command ?? 'clone', {
+      PATH: '/synthetic/bin',
+      LODY_GIT_CRED_CONTEXT_TOKEN: 'frozen',
+      ...(options.inheritedOperation === undefined
+        ? {}
+        : { LODY_GIT_OPERATION: options.inheritedOperation }),
+    })
+  );
   const source = fs
     .readFileSync(path.join(directory, 'git-remote-https'), 'utf8')
     .replace(/main\(\)\.catch[\s\S]*$/, 'globalThis.run = main;');
@@ -36,6 +67,9 @@ function harness(
       if (args[0] === 'credential')
         return { status: 0, stdout: 'username=owner\npassword=local-token\n' };
       if (args[0] === 'remote-https') {
+        if (options.readOnly && init.input === 'list for-push\n\n') {
+          return { status: 128, stderr: 'HTTP 403' };
+        }
         const headers = init.env.GIT_CONFIG_PARAMETERS || '';
         attempts.push(headers);
         if (
@@ -73,10 +107,7 @@ function harness(
             },
     process: {
       argv: ['node', 'adapter', 'origin', 'https://github.com/org/repo.git'],
-      env: {
-        LODY_GIT_CRED_CONTEXT_TOKEN: 'frozen',
-        LODY_GIT_OPERATION: options.operation ?? 'read',
-      },
+      env,
     },
     fetch: async (_url: string, init: { body: string }) => {
       if (options.offline) throw Object.assign(new Error('SECRET'), { code: 'ECONNREFUSED' });
@@ -96,6 +127,44 @@ function harness(
   return { run: () => (context.run as () => Promise<void>)(), delegates, attempts, sync };
 }
 describe('native Git credential adapter', () => {
+  it.each(['clone', 'fetch', 'pull', 'ls-remote', 'submodule'])(
+    '%s keeps read-only credentials through helper redispatch',
+    async (command) => {
+      const h = harness({ command, personal: true, readOnly: true });
+      await h.run();
+      expect(h.delegates[0].env.GIT_CONFIG_PARAMETERS).toContain(
+        Buffer.from('x-access-token:personal-token').toString('base64')
+      );
+    }
+  );
+  it('preserves read context through the HTTP helper', async () => {
+    const h = harness({ helper: 'remote-http', personal: true, readOnly: true });
+    await h.run();
+    expect(h.delegates[0].env.GIT_CONFIG_PARAMETERS).toContain(
+      Buffer.from('x-access-token:personal-token').toString('base64')
+    );
+  });
+  it('classifies a new read independently of inherited write context', async () => {
+    const h = harness({ inheritedOperation: 'write', personal: true, readOnly: true });
+    await h.run();
+    expect(h.delegates[0].env.GIT_CONFIG_PARAMETERS).toContain(
+      Buffer.from('x-access-token:personal-token').toString('base64')
+    );
+  });
+  it.each([
+    ['push', 'read'],
+    ['unknown-command', 'read'],
+    ['remote-https', undefined],
+    ['remote-http', 'invalid'],
+    ['remote-https', 'write'],
+  ])(
+    'rejects read-only credentials for %s with inherited %s',
+    async (command, inheritedOperation) => {
+      const h = harness({ command, inheritedOperation, personal: true, readOnly: true });
+      await expect(h.run()).rejects.toMatchObject({ code: 'credentials_exhausted' });
+      expect(h.delegates).toEqual([]);
+    }
+  );
   it('delegates once using personal credentials and keeps standard remote URLs', async () => {
     const h = harness({ personal: true });
     await h.run();
@@ -111,7 +180,7 @@ describe('native Git credential adapter', () => {
     expect(h.sync.mock.calls.some(([, args]) => args[0] === 'credential')).toBe(false);
   });
   it('falls through a denied native advertisement to machine identity before executing a write', async () => {
-    const h = harness({ personal: true, denyPersonal: true, operation: 'write' });
+    const h = harness({ personal: true, denyPersonal: true, command: 'push' });
     await h.run();
     expect(h.attempts).toHaveLength(2);
     expect(h.delegates).toHaveLength(1);
@@ -132,7 +201,7 @@ describe('native Git credential adapter', () => {
     expect(h.sync.mock.calls.some(([, args]) => args[0] === 'credential')).toBe(false);
   });
   it('does not execute an anonymous write when providers fail', async () => {
-    const h = harness({ owner: false, offline: true, operation: 'write' });
+    const h = harness({ owner: false, offline: true, command: 'push' });
     await expect(h.run()).rejects.toMatchObject({ code: 'credentials_exhausted' });
     expect(h.delegates).toEqual([]);
   });
@@ -203,6 +272,8 @@ const args = process.argv.slice(2).join(' ');
 if (process.argv.includes('-G')) process.exit(0);
 const match = args.match(/(git-upload-pack|git-receive-pack).*?org\\/(project|dependency)\\.git/);
 if (!match) process.exit(1);
+// A read-only identity can advertise and fetch, but cannot receive pushes.
+if (match[1] === 'git-receive-pack') process.exit(1);
 fs.appendFileSync(${JSON.stringify(log)}, match[2] + '\\n');
 const roots = ${JSON.stringify({ project, dependency })};
 const child = spawnSync(${JSON.stringify(realGit)}, [match[1].replace('git-', ''), roots[match[2]]], { stdio: 'inherit' });
@@ -272,5 +343,98 @@ process.exit(child.status ?? 1);
         server.close((error) => (error ? reject(error) : resolve()))
       );
     }
+  });
+
+  describe('exec-path probe resilience', () => {
+    const markerPath = () => path.join(directory, 'lody-git-transport.json');
+    const spawnError = (code: string) =>
+      Object.assign(new Error(`spawnSync git ${code}`), { code });
+
+    it('records the resolved layout in a marker after materialization', () => {
+      ensureGitHubGitTransport(directory, '/workspace/broker', 'git');
+      const marker = JSON.parse(fs.readFileSync(markerPath(), 'utf8'));
+      expect(marker).toMatchObject({ version: 1, realGit: 'git', statePath: '/workspace/broker' });
+      expect(fs.existsSync(marker.execPath)).toBe(true);
+      expect(fs.existsSync(marker.nativeGit)).toBe(true);
+    });
+
+    it('skips the probe entirely when the recorded layout matches', () => {
+      ensureGitHubGitTransport(directory, '/workspace/broker', 'git');
+      fs.rmSync(path.join(directory, 'package.json'));
+      const probe = vi.fn(() => {
+        throw spawnError('EAGAIN');
+      });
+      expect(() =>
+        ensureGitHubGitTransport(directory, '/workspace/broker', 'git', {
+          probeExecPathOnce: probe,
+        })
+      ).not.toThrow();
+      expect(probe).not.toHaveBeenCalled();
+      expect(fs.existsSync(path.join(directory, 'package.json'))).toBe(true);
+    });
+
+    it('retries transient spawn failures before succeeding', () => {
+      const realExecPath = execFileSync('git', ['--exec-path'], { encoding: 'utf8' }).trim();
+      let calls = 0;
+      ensureGitHubGitTransport(directory, '/workspace/broker', 'git', {
+        probeExecPathOnce: () => {
+          calls++;
+          if (calls < 3) throw spawnError('EAGAIN');
+          return realExecPath;
+        },
+      });
+      expect(calls).toBe(3);
+      expect(fs.existsSync(path.join(directory, 'git'))).toBe(true);
+    });
+
+    it('does not retry a non-transient probe failure', () => {
+      let calls = 0;
+      expect(() =>
+        ensureGitHubGitTransport(directory, '/workspace/broker', 'git', {
+          probeExecPathOnce: () => {
+            calls++;
+            throw spawnError('ENOENT');
+          },
+        })
+      ).toThrowError(spawnError('ENOENT'));
+      expect(calls).toBe(1);
+    });
+
+    it('fails session preparation only when no recorded layout survives the probe failure', () => {
+      let calls = 0;
+      expect(() =>
+        ensureGitHubGitTransport(directory, '/workspace/broker', 'git', {
+          probeExecPathOnce: () => {
+            calls++;
+            throw spawnError('EAGAIN');
+          },
+        })
+      ).toThrowError(spawnError('EAGAIN'));
+      expect(calls).toBe(4);
+    });
+
+    it('reuses a stale recorded layout and warns when the probe keeps failing', () => {
+      const realExecPath = execFileSync('git', ['--exec-path'], { encoding: 'utf8' }).trim();
+      const nativeGit = path.join(realExecPath, process.platform === 'win32' ? 'git.exe' : 'git');
+      fs.writeFileSync(
+        markerPath(),
+        JSON.stringify({
+          version: 1,
+          realGit: '/previous/git',
+          statePath: '/workspace/broker',
+          execPath: realExecPath,
+          nativeGit: fs.existsSync(nativeGit) ? nativeGit : 'git',
+        })
+      );
+      const warn = vi.fn();
+      ensureGitHubGitTransport(directory, '/workspace/broker', 'git', {
+        logger: { warn },
+        probeExecPathOnce: () => {
+          throw spawnError('EAGAIN');
+        },
+      });
+      expect(warn).toHaveBeenCalledOnce();
+      expect(fs.readFileSync(path.join(directory, 'git'), 'utf8')).toContain(realExecPath);
+    });
   });
 });

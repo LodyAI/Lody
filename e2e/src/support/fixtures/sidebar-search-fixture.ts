@@ -17,6 +17,7 @@ export const TARGET_INITIAL_TITLE = 'Release Checklist Draft';
 export const TARGET_RENAMED_TITLE = 'Release Checklist Final';
 export const SIMILAR_SESSION_TITLE = 'Release Calendar';
 export const UNRELATED_SESSION_TITLE = 'Discovery Notes';
+export const SESSION_AUTO_TITLE = 'Synthetic session title';
 export const SESSION_RESPONSE_TEXT = 'Synthetic response started. Synthetic response complete.';
 export const RELEASE_SEARCH_QUERY = 'RELE';
 export const TARGET_INITIAL_SEARCH_QUERY = 'DRAFT';

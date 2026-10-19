@@ -2,6 +2,7 @@ import { useEffect, type ReactNode } from 'react';
 import posthog from 'posthog-js';
 import { PostHogProvider, usePostHog } from '@posthog/react';
 import { useAtomValue } from 'jotai';
+import { isConvexAuthErrorData } from '@lody/shared';
 import { userAtom } from '@/atoms';
 import {
   deferredPostHog,
@@ -83,6 +84,40 @@ function readMobilePostHogLibrary(): { library: string; nativePlatform: string }
   };
 }
 
+function isUnauthenticatedExceptionMessage(value: unknown): boolean {
+  if (typeof value !== 'string') return false;
+  // PostHog serializes errors before before_send, losing ConvexError.data and
+  // its identifying symbol. Match the namespaced JSON contract, including the
+  // nested ConvexError prefix produced by action -> query failures.
+  const payload = value.match(/\bConvexError:\s*(\{[^{}\r\n]*\})/)?.[1] ?? value;
+  try {
+    return isConvexAuthErrorData(JSON.parse(payload));
+  } catch {
+    return false;
+  }
+}
+
+function isUnauthenticatedPostHogEvent(event: {
+  event: string;
+  properties?: Record<string, unknown>;
+}): boolean {
+  if (event.event !== '$exception') return false;
+  const properties = event.properties;
+  if (!properties) return false;
+  const exceptions = properties.$exception_list;
+  if (Array.isArray(exceptions) && exceptions.length > 0) {
+    // Preserve mixed exception chains: an auth failure must not hide another bug.
+    return exceptions.every((item) => {
+      if (!item || typeof item !== 'object') return false;
+      const exception = item as Record<string, unknown>;
+      return isUnauthenticatedExceptionMessage(exception.value ?? exception.message);
+    });
+  }
+  return isUnauthenticatedExceptionMessage(
+    properties.$exception_message ?? properties.$exception_description
+  );
+}
+
 function isResizeObserverLoopPostHogEvent(event: {
   properties?: Record<string, unknown>;
 }): boolean {
@@ -151,7 +186,7 @@ export const POSTHOG_OPTIONS: PostHogOptions = {
     if (!event) {
       return event;
     }
-    if (isResizeObserverLoopPostHogEvent(event)) {
+    if (isUnauthenticatedPostHogEvent(event) || isResizeObserverLoopPostHogEvent(event)) {
       return null;
     }
 

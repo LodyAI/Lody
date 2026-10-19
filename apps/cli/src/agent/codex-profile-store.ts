@@ -1,3 +1,4 @@
+import { toShared } from '@/platform/process-options';
 import { createHash, randomUUID } from 'node:crypto';
 import { lstat, mkdir, readFile, readdir, realpath, rename, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -10,7 +11,8 @@ import {
 } from '@lody/shared';
 import { getLodyDataDir } from '@lody/shared/node/installation-profile';
 import { SystemCodexCredentialVault, type CodexCredentialVault } from './codex-credential-vault';
-import { execFile } from 'node:child_process';
+import { runCommandTextLegacy } from '@lody/shared/node/process';
+
 import { resolveBuiltinAuthenticationProcessLaunch } from './setting';
 import {
   registerCodexProfileProcess,
@@ -356,21 +358,26 @@ async function logoutNativeProfile(
     if (/^(CODEX_|OPENAI_|LODY_CODEX_|DYLD_|NODE_OPTIONS$|LD_PRELOAD$|LD_LIBRARY_PATH$)/i.test(key))
       delete env[key];
   env.CODEX_HOME = profile.home;
-  await new Promise<void>((resolve, reject) => {
-    const child = execFile(
-      launch.command,
-      [
-        ...(profile.authStore === 'keyring' ? ['-c', 'cli_auth_credentials_store="keyring"'] : []),
-        'logout',
-      ],
-      { env, timeout: 20_000, windowsHide: true },
-      (error) => {
-        if (error) reject(new Error('Codex account cleanup could not complete'));
-        else resolve();
-      }
+  try {
+    await runCommandTextLegacy(
+      {
+        command: launch.command,
+        args: [
+          ...(profile.authStore === 'keyring'
+            ? ['-c', 'cli_auth_credentials_store="keyring"']
+            : []),
+          'logout',
+        ],
+        env,
+        timeout: 20_000,
+        check: 'exit-0',
+        onSpawned: (child) => lease.recordNativePid(child.pid),
+      },
+      toShared()
     );
-    lease.recordNativePid(child.pid);
-  });
+  } catch {
+    throw new Error('Codex account cleanup could not complete');
+  }
 }
 
 let defaultStore: CodexProfileStore | undefined;

@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, test, vi } from 'vitest';
+import { ModalContainerProvider, PopupContainerProvider } from '../src/popup/portal-container';
 import { Button } from '../src/button/button';
 import { AlertDialog } from '../src/dialog/alert-dialog';
 import { Dialog } from '../src/dialog/dialog';
@@ -22,6 +23,46 @@ const buttonNamed = (label: string) => {
 };
 
 describe('Dialog', () => {
+  test('modal hosts are independent of floating hosts, and explicit containers win', async () => {
+    const host = document.createElement('div');
+    const floating = document.createElement('div');
+    const explicit = document.createElement('div');
+    document.body.append(host, floating, explicit);
+    try {
+      mounted = await mount(
+        <ModalContainerProvider container={host}>
+          <PopupContainerProvider container={floating}>
+            <Dialog.Root defaultOpen>
+              <Dialog.Content data-testid="inherited">
+                <Dialog.Title>Inherited</Dialog.Title>
+              </Dialog.Content>
+            </Dialog.Root>
+            <Dialog.Root defaultOpen>
+              <Dialog.Content container={explicit} data-testid="explicit">
+                <Dialog.Title>Explicit</Dialog.Title>
+              </Dialog.Content>
+            </Dialog.Root>
+            <Dialog.Root defaultOpen>
+              <Dialog.Content container={null} data-testid="body">
+                <Dialog.Title>Body</Dialog.Title>
+              </Dialog.Content>
+            </Dialog.Root>
+          </PopupContainerProvider>
+        </ModalContainerProvider>
+      );
+      expect(host.querySelector('[data-testid="inherited"]')).not.toBeNull();
+      expect(explicit.querySelector('[data-testid="explicit"]')).not.toBeNull();
+      expect(floating.querySelector('[role="dialog"]')).toBeNull();
+      expect(document.querySelector('[data-testid="body"]')).toBeNull();
+    } finally {
+      await mounted?.unmount();
+      mounted = undefined;
+      host.remove();
+      floating.remove();
+      explicit.remove();
+    }
+  });
+
   test('a trigger opens the panel, and the panel names itself', async () => {
     mounted = await mount(
       <Dialog.Root>
@@ -209,6 +250,10 @@ describe('Dialog', () => {
       </Dialog.Root>
     );
     expect(panels()).toHaveLength(2);
+    for (const modal of panels()) {
+      expect(document.body.contains(modal)).toBe(true);
+      expect(modal.parentElement?.closest('[role="dialog"]')).toBeNull();
+    }
     // The portal also mounts an internal backdrop for outside-press detection;
     // the veil is the presentation div carrying the open state.
     expect(all('[role="presentation"][data-open]')).toHaveLength(2);

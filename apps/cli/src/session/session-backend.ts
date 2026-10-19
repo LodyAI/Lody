@@ -37,6 +37,7 @@ import type { SessionSnapshot } from '@lody/shared/session-data';
  * projecting physical segments into the same logical history.
  */
 export interface SessionBackend {
+  readonly inputAcceptance?: import('@lody/shared/session-data').SessionInputAcceptance;
   readonly kind: SessionHistoryBackendKind;
   readonly history: SessionHistoryReader;
 
@@ -145,7 +146,7 @@ export type QueuePromotionResult = {
   entry: SessionHistoryInput;
 };
 
-/** Explicit failure until the Roost adapter is registered in a later phase. */
+/** Explicit failure when a persisted backend has no installed product adapter. */
 export class SessionBackendUnavailableError extends Error {
   readonly code = 'session_backend_unavailable';
 
@@ -538,6 +539,24 @@ export function registerSessionBackendFactory(
   };
 }
 
+/**
+ * Daemon composition for Roost history: a Session owned by another machine uses
+ * the owner route; this machine's Sessions, or ones whose owner is not yet known,
+ * keep the installed local owner.
+ */
+export function routeRemoteOwnedSessionHistory(
+  localMachineId: string,
+  remote: SessionBackendFactory
+): SessionBackendFactory {
+  return async (sessionDoc, meta) => {
+    const owner = (await (sessionDoc.getMetaState?.() ?? Promise.resolve(undefined)))?.machineId;
+    if (owner && owner !== localMachineId) return await remote(sessionDoc, meta);
+    const local = sessionBackendFactories.get('roost');
+    if (!local) throw new SessionBackendUnavailableError('roost', sessionDoc.sessionId);
+    return await local(sessionDoc, meta);
+  };
+}
+
 /** Legacy documents without a discriminator remain Loro-backed. */
 export function resolveSessionBackendKind(
   meta?: Pick<SessionMeta, 'historyBackend'> | null
@@ -568,7 +587,10 @@ export async function createSessionBackend(
   const sessionMeta =
     meta === undefined ? await (sessionDoc.getMetaState?.() ?? Promise.resolve(undefined)) : meta;
   const kind = resolveSessionBackendKind(sessionMeta);
-  const factory = sessionBackendFactories.get(kind);
+  const factory =
+    kind === 'roost'
+      ? (sessionDoc.historyBackendFactory ?? sessionBackendFactories.get(kind))
+      : sessionBackendFactories.get(kind);
   if (!factory) throw new SessionBackendUnavailableError(kind, sessionDoc.sessionId);
   const backend = Promise.resolve().then(() => factory(sessionDoc, sessionMeta));
   const binding = { kind, backend };
@@ -596,3 +618,10 @@ export async function disposeSessionBackend(sessionDoc: SessionDocument): Promis
   const backend = await binding.backend;
   await backend.dispose?.();
 }
+
+export {
+  createRoostSessionBackendFactory,
+  RoostSessionBackend,
+  type RoostSessionBackendServiceFactory,
+  type RoostSessionBackendServices,
+} from './roost-session-backend';

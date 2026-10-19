@@ -1,9 +1,5 @@
 /**
- * Pure helpers for the `chat_failed` system notice detail surface.
- *
- * The inline notice only has room for a one-line title, so the raw agent error
- * is shown in a modal (see `chat-failed-detail-dialog.tsx`) and can be copied
- * verbatim — on mobile there is no hover surface to fall back to.
+ * Pure helpers for the `chat_failed` banner and its clipboard report.
  */
 
 /**
@@ -53,6 +49,26 @@ const trimmed = (value: string | undefined): string | undefined => {
   const next = value?.trim();
   return next ? next : undefined;
 };
+
+/** Keep the full payload inline without also repeating its readable extract. */
+export function buildChatFailedNoticeDetail({
+  title,
+  action,
+  message,
+}: Pick<ChatFailedErrorReportInput, 'title' | 'action' | 'message'>): string | undefined {
+  const raw = trimmed(message) ? message : undefined;
+  const suggestedAction = trimmed(action);
+  return (
+    [
+      suggestedAction && suggestedAction !== title.trim() && !raw?.includes(suggestedAction)
+        ? suggestedAction
+        : undefined,
+      raw?.trim() !== title.trim() ? raw : undefined,
+    ]
+      .filter(Boolean)
+      .join('\n\n') || undefined
+  );
+}
 
 /**
  * Builds the clipboard payload for an agent error: identifying fields first,

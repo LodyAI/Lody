@@ -1,31 +1,27 @@
 # apps/cli/src/session
 
-`CLAUDE.md` is a symlink to this file. Edit `AGENTS.md` only.
+`CLAUDE.md` links here; edit this file.
 
-Rules only; rationale: [README.md](README.md). Worktrees and git
-credentials: [worktree/AGENTS.md](worktree/AGENTS.md). Architecture: context/message-flow.md.
-Contract: specs/session-orchestration.md.
+[Module contracts](README.md); [worktree rules](worktree/AGENTS.md).
 
 ## Authorization and identity
 
-- Authorize the target machine through the injected access capability with the source CLI token;
-  MCP delegation verifies the frozen Turn requester; Operation-side rules are in
+- Authorize target machines via injected access with the source CLI token. MCP delegation
+  verifies the frozen Turn requester; Operation rules:
   [../mcp/AGENTS.md](../mcp/AGENTS.md).
-- Never send an untrusted requester through workspace Machine RPC: it authenticates no member
-  identity.
-- Live status is a target-daemon Machine RPC read; durable metadata is not a live-presence
-  substitute.
-- Derive the human identity from the active dispatch/execution runtime and fail closed when none
-  exists; retries and recovery never reread mutable history.
-- Machine/Provider credentials stay host-scoped. Attribution, authorization and commits
-  use the frozen Turn identity; GitHub network auth uses the trusted conversation owner.
+- Never send an untrusted requester through workspace Machine RPC: it authenticates no member identity.
+- Live status is a target-daemon Machine RPC read; durable metadata never substitutes for it.
+- Require frozen human identity and pre-launch `humanInputReceipts`; recover via receipts,
+  never role/author. [Rules](../orchestration/AGENTS.md).
+- Host-scope Machine/Provider credentials. Use frozen Turn identity for attribution,
+  authorization and commits; trusted conversation owner for GitHub network auth.
 - Git: owner uses local config, no profile query; others never read it.
   `CloudPort` profiles: 60s deadline, retry failures, reject placeholders.
   Commit attribution never restarts ACP; owner changes retire the runtime.
 
 ## Dispatch
 
-- Queue promotion preserves frozen fields; remove its row only after history and activation succeed.
+- Queue promotion preserves frozen fields; remove only after history+activation succeed.
 - Absent session meta is "unknown", not foreign: hold the TTL-bounded RPC stash until meta lands;
   drop it only on a definitive verdict.
 - Subscribe to RPC offers BEFORE awaiting Doc Room join/sync and never dispatch from the RPC
@@ -37,60 +33,62 @@ Contract: specs/session-orchestration.md.
 - Never replay late history; recovery is a new send. Use last row per ID; stop no-progress repairs.
 - `hasPendingUserTurnActivation` is the ONLY pending-turn predicate; never compare those two
   pointers in a consumer.
-- Never inspect historical Session documents to infer work, or publish or clear active presence
+- Stop data: control doc; meta: pointer. Never scan old docs for work or change active presence
   here (`../lib/loro/session-active-presence.ts`).
-- Keep bootstrap and live reconciliation bounded as README describes; add no per-trigger scan or
-  extra throttle.
+- Keep reconciliation bounded per README; no per-trigger scans or throttles.
 
 ## Turn execution
 
-- Gate turn-scoped LIST writes on user-entry sync (`turn-history-gate.ts`, 20s), never status/meta.
+- Gate LIST writes on user-entry sync (`turn-history-gate.ts`, 20s), never status/meta.
 - Goals obey [this contract](../../../../specs/session-goal-control.md).
-- Stop ends local steer waits, not the owner fiber. Drain raw prompt/steer/config work before
-  reuse, or confirm termination. Assistant ids use `userTurnId`.
-  `invocation` owns source Turn, requester and config atomically; steer replaces it before tools.
-- Publish `latestUserMsgId` in the SAME write as the history append (`appendUserTurn`). Only
-  dispatch producers publish it. Renderer sends and queue promotion retain the missing-history
-  tombstone; CLI dispatch producers keep their own marker policy.
-- Ordinary turn execution writes only `processingUserMsgId` and `lastHandledUserMsgId`; no start
+- Stop ends steer waits, not the owner fiber. Drain raw ACP or confirm termination, then clear
+  presence before reuse. [Inbox admission](../orchestration/AGENTS.md); execution IDs stay fixed.
+  Assistant ids use `userTurnId`; `invocation` owns source/requester/config; steer replaces it.
+- Only dispatch producers publish `latestUserMsgId`, with history in `appendUserTurn`
+  or Roost's `accept_input_and_dispatch` writer queue. Save human provenance first;
+  guard live history/meta and newer activation; keep producer-specific tombstones.
+- Turn execution writes only `processingUserMsgId` and `lastHandledUserMsgId`; no start
   or terminal path may read-await-rewrite the other slots.
 - Never steer after cancellation or infer delivery from it. Stop uses
-  `pendingInput: promote` / `prePromptSession: discard`; Edit & Resend uses preserve/keep,
+  preserve/discard and cancels pre-Stop queued eligibility; Edit & Resend uses preserve/keep,
   access revocation preserve/discard. Limit create/restore fences to initialization.
 - Promote only proven non-delivery via `steerTurnStatuses`, never producer pointers.
   Unknown never replays; RPC ACKs never revive history. Surface recovery errors.
-- Foreground/steer config uses its owner signal; fence mutations after interrupt.
+- Config uses its owner signal; fence mutations after interrupt.
 - Resume must REOPEN the in-progress assistant entry, clearing
   `finished`/`endedAt`/`permissionWaitMs` there only; never write `finished=false` from teardown.
-- Keep JSON-RPC/transport matching in `acp-error-classification.ts`: disposed/stale `-32603` is
-  `agent_disconnected`, Harness compression mismatch is `acp_session_storage_incompatible`.
-- Continue-session recovery may restore the ACP session and retry the same prompt once, only
-  while that turn has no ACP output.
-- A turn with no ACP updates takes `recordSilentTurnFailure`, not `setDispatchHandled`.
-  Read `turnProducedVisibleOutput` before `finalizeTurn` clears it; still finalize, advance
-  the pointer, and fail open.
+- Keep JSON-RPC/transport matching in `acp-error-classification.ts`: disposed/stale `-32603` =
+  `agent_disconnected`, Harness compression mismatch = `acp_session_storage_incompatible`.
+- Stale ACP: retry once before output; retire, retain cleanup, keep the turn. Never retry submitted
+  Inbox inputs (human-plus-batch too).
+- Agent-input turns skip completion notices only. Use the completed invocation's exact input.
+- No ACP updates: `recordSilentTurnFailure`, not `setDispatchHandled`. Read
+  `turnProducedVisibleOutput` before `finalizeTurn` clears it; finalize, advance pointers, fail open.
 - Diff content comes only from the CLI-local ACP evidence store; GitHub `diffStats` use PR compare
-  semantics, and `session-diff-stats-target.ts` skips rather than overwrites a good total.
+  semantics; `session-diff-stats-target.ts` skips, never overwrites, a good total.
 
 ## Lifecycle
 
-- `Session.createAgent` gates each ACP spawn; failed spawns reject JSON-RPC. Terminals spawn
-  protocol argv (`sh -c` only for unsplit commands). Managed Codex reused-refresh startup
+- [Roost](README.md#roost-history-paging): check owner/backend; no keyring,
+  rotation/fallback, removed-history revival, uncertain steer replay or signed-log/receipt pruning.
+  Commit guarded edits+digests atomically; no SDK retry after uncertainty.
+  Keep input/permission/branch recovery SDK-owned. Local causes; RPC stage/code/ID.
+- `Session.createAgent` gates each ACP spawn; failed spawns reject JSON-RPC. Terminals use protocol argv (`sh -c` for unsplit commands only). Managed Codex reused-refresh startup
   retries once after process cleanup, delay, and live Provider recheck; other auth errors do not.
-- Child tabs reuse the parent workspace. Never write per-session paths into `MachineMeta`:
-  the machine publishes `['dotlodyPath']` for frontends to derive them.
-- INVARIANT: any `sandbox.spawn` whose OUTPUT is the result must pass `captureOutput: true` (ACP
-  stdio deliberately does not), and the capture buffer stays capped at 4 MiB.
-- Shutdown is two-phase: `cleanUp({ keepWorkspaceDocumentOpen: true })`, then plain `cleanUp()`
-  after MessageHandler's final flush. Never tear the document down first.
+- Child tabs reuse parent workspace. No per-session paths in `MachineMeta`:
+  machines publish `['dotlodyPath']`; frontends derive them.
+- `sandbox.spawn` returning OUTPUT requires `captureOutput: true` and a 4 MiB buffer cap;
+  ACP stdio does not capture.
+- Session start failures: [rules](README.md#start-failures).
+- Shutdown: `cleanUp({ keepWorkspaceDocumentOpen: true })`, MessageHandler's final flush,
+  then `cleanUp()`; never close the doc first.
 
 ## Sagas
 
-- Preparation peek/claim never delay cold fallback; peek never transfers ownership. Publish the
-  resource BEFORE `start()`. It may create the marked final worktree and complete `newSession`, but cannot
-  create a session doc, run setup, append history, or publish events before adoption.
-- Dispatch and claim rescan the current row and reject changed compatibility under canonical
-  `buildSessionLaunchConfig` semantics; a published incompatible resource cleans up first.
+- ACP processes and worktrees start at dispatch, never while a draft is typed. Answer
+  `session/prepare`/`-cancel` at once as no-ops (prepare: accepted duplicate), with no access check
+  ([decision](../../../../.agents/notes/implemented/simplification/2026-10-16-remove-draft-session-preparation.md)).
+- Credentials are runtime leases: a failed creation releases that generation; local has none.
 - Nested child Sessions are rejected: ownership resolves one parent hop only.
 - Fork and continuation share `resolveSessionAcpTargetId`; source runtime config copies only at its matching user-turn fence.
 - Fork commits at `persistPendingChanges()`, never cloud sync. Persist its placeholder
@@ -112,10 +110,9 @@ Contract: specs/session-orchestration.md.
 
 - Never write per-session `sessionLaunchConfig`: the first `session/create` payload is transient,
   resume and dispatch resolve from agent config/project, and the legacy row is fallback only.
-- Dispatch access is local policy first, optional-cloud three-state second: owner-cached policy
-  may allow offline, `remote_missing` and a definitive `denied` fail the turn, `indeterminate`
-  leaves it pending behind `verifyMachineAccessWithRetry()`. Never collapse a thrown check into
-  denial.
-- Every owner-allowed dispatch fires `fireOwnerAccessRecheck` with `forceBackendVerification`; a
-  confirmed online allow is the ONLY writer of the access snapshot and `verifiedAt`, a deny clears
-  it, `indeterminate` writes nothing.
+- Dispatch access: local policy, then optional-cloud three-state. The owner cache or a member
+  allow confirmed <1h ago may allow offline; `remote_missing`/definitive `denied` fail the turn;
+  `indeterminate` stays pending behind `verifyMachineAccessWithRetry()`. A throw is never denial.
+- Only confirmed backend verdicts write caches (allow refreshes `verifiedAt`, deny clears,
+  `indeterminate` nothing). Owner hits recheck with `forceBackendVerification`; member
+  entries bind requester, project, CLI account and Machine.

@@ -1,3 +1,4 @@
+import * as stylex from '@stylexjs/stylex';
 import { useCallback, useEffect, useMemo, useRef } from 'react';
 import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
@@ -9,6 +10,7 @@ import { Tooltip } from '@lody/ui/tooltip';
 import { isImeComposingKeyboardEvent } from '@/lib/ime';
 import { cn } from '@/lib/utils';
 import { QueuedImagePreview, type QueuedImageBlock } from './queued-image-preview';
+import { queueSurface } from './surface';
 import { shouldShowQueuedItemSteer } from './queued-message-steer';
 import { getEditableTaskText } from './use-message-queue-editing';
 
@@ -91,7 +93,8 @@ export function MessageQueueRow(props: MessageQueueRowProps) {
       ref={sortable.setNodeRef}
       style={style}
       className={cn(
-        'group/row relative flex items-start gap-2 px-2 py-1.5',
+        'group/row relative items-start gap-2 px-2 py-1.5',
+        stylex.props(queueSurface.row).className,
         // Dividers go between rows only. (`divide-y` on the list also lined the
         // last row, because dnd-kit appends hidden nodes after it, and that
         // line doubled the composer's top border into a shadow-like band.)
@@ -138,26 +141,31 @@ function LeadingHandle({
 
   return (
     <Tooltip.Root>
-      <Tooltip.Trigger delay={300} render={<button
-          type="button"
-          ref={sortable.setActivatorNodeRef}
-          className={cn(
-            LEADING_HANDLE_BOX_CLASS,
-            'rounded',
-            'text-[10px] font-medium tabular-nums text-muted-foreground/60',
-            'cursor-grab transition-colors active:cursor-grabbing',
-            'hover:bg-hover hover:text-foreground',
-            'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40'
-          )}
-          aria-label={label}
-          {...sortable.attributes}
-          {...sortable.listeners}
-        >
-          <span className="block group-hover/row:hidden group-focus-within/row:hidden">
-            {index + 1}
-          </span>
-          <GripVertical className="hidden h-3 w-3 group-hover/row:block group-focus-within/row:block" />
-        </button>}/>
+      <Tooltip.Trigger
+        delay={300}
+        render={
+          <button
+            type="button"
+            ref={sortable.setActivatorNodeRef}
+            className={cn(
+              LEADING_HANDLE_BOX_CLASS,
+              'rounded',
+              'text-[10px] font-medium tabular-nums text-muted-foreground/60',
+              'cursor-grab transition-colors active:cursor-grabbing',
+              'hover:bg-hover hover:text-foreground',
+              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40'
+            )}
+            aria-label={label}
+            {...sortable.attributes}
+            {...sortable.listeners}
+          >
+            <span className="block group-hover/row:hidden group-focus-within/row:hidden">
+              {index + 1}
+            </span>
+            <GripVertical className="hidden h-3 w-3 group-hover/row:block group-focus-within/row:block" />
+          </button>
+        }
+      />
       <Tooltip.Content side="top">{label}</Tooltip.Content>
     </Tooltip.Root>
   );
@@ -214,7 +222,16 @@ function RowBody(props: MessageQueueRowProps & EditCommitProps) {
             disabled={isPending}
             aria-label={t('sessions.messageQueue.editMessage', 'Edit queued message')}
             onChange={(event) => onEditValueChange(event.currentTarget.value)}
-            onBlur={onCommitEdit}
+            onBlur={(event) => {
+              // Folding is display-only: moving to its header must not save or
+              // discard this draft. The panel remains mounted while hidden.
+              if (
+                event.relatedTarget instanceof Element &&
+                event.relatedTarget.closest('[data-message-queue-toggle]')
+              )
+                return;
+              onCommitEdit();
+            }}
             onKeyDown={(event) => {
               if (event.key === 'Escape') {
                 event.preventDefault();
@@ -284,7 +301,10 @@ function RowBody(props: MessageQueueRowProps & EditCommitProps) {
         </div>
       ) : null}
       <div
-        className="min-w-0 flex-1 overflow-hidden text-xs leading-snug text-foreground/80"
+        className={cn(
+          'min-w-0 flex-1 overflow-hidden text-xs leading-snug text-foreground/80',
+          stylex.props(queueSurface.text).className
+        )}
         style={{
           display: '-webkit-box',
           WebkitLineClamp: 2,
@@ -317,9 +337,7 @@ function RowActions(props: MessageQueueRowProps) {
   }
 
   return (
-    // Centered on the task's first line, like the index: the 20px buttons keep
-    // their hit size and spill evenly into the row padding.
-    <div className="flex h-[calc(0.75rem*1.375)] shrink-0 items-center gap-0.5">
+    <div className={cn('flex shrink-0 items-center', stylex.props(queueSurface.actions).className)}>
       {shouldShowQueuedItemSteer({ showSteerAction, isFirst, nativeSteerAvailable }) ? (
         <TextAction
           text={t('sessions.messageQueue.guideAction', 'Steer')}
@@ -364,6 +382,7 @@ export function TextAction({
       aria-label={ariaLabel}
       className={cn(
         'flex h-5 shrink-0 items-center justify-center rounded px-1.5',
+        stylex.props(queueSurface.action).className,
         'text-[11px] font-medium text-muted-foreground transition-colors',
         'hover:bg-hover hover:text-foreground',
         'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40'
@@ -390,22 +409,28 @@ export function IconAction({
 }) {
   return (
     <Tooltip.Root>
-      <Tooltip.Trigger delay={300} render={<button
-          type="button"
-          aria-label={label}
-          disabled={disabled}
-          className={cn(
-            'flex h-5 w-5 items-center justify-center rounded',
-            'text-muted-foreground/60 transition-colors',
-            'hover:bg-hover hover:text-foreground',
-            'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40',
-            'disabled:pointer-events-none disabled:opacity-50',
-            destructive && 'hover:text-destructive'
-          )}
-          onClick={onClick}
-        >
-          <Icon className="h-3 w-3" />
-        </button>}/>
+      <Tooltip.Trigger
+        delay={300}
+        render={
+          <button
+            type="button"
+            aria-label={label}
+            disabled={disabled}
+            className={cn(
+              'flex h-5 w-5 items-center justify-center rounded',
+              stylex.props(queueSurface.action).className,
+              'text-muted-foreground/60 transition-colors',
+              'hover:bg-hover hover:text-foreground',
+              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40',
+              'disabled:pointer-events-none disabled:opacity-50',
+              destructive && 'hover:text-destructive'
+            )}
+            onClick={onClick}
+          >
+            <Icon className="h-3 w-3" />
+          </button>
+        }
+      />
       <Tooltip.Content side="top">{label}</Tooltip.Content>
     </Tooltip.Root>
   );

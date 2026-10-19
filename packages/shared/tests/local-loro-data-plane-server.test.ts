@@ -1,7 +1,20 @@
-import { describe, expect, it, vi } from 'vitest';
-import { LoroDoc } from 'loro-crdt';
+import { beforeEach, afterEach } from 'vitest';
+import { Cause, Deferred, Effect, Exit, Fiber, Layer, Queue, Scope } from 'effect';
+import { it as effectIt } from '@effect/vitest';
+import { TestClock } from 'effect/testing';
 import {
-  LocalLoroDataPlaneServer,
+  LocalLoroWriterTurn,
+  makeLocalLoroWriter,
+  makeLocalLoroWriterOwner,
+} from '../src/local-loro-writer';
+import {
+  makeLocalLoroWriterLegacy,
+  type LocalLoroWriterLegacy,
+} from '../src/local-loro-writer/legacy';
+import { describe, expect, it, vi } from 'vitest';
+import { EphemeralStore, LoroDoc } from 'loro-crdt';
+import {
+  LocalLoroDataPlaneServerLegacy,
   type LocalLoroDataPlaneServerConnection,
 } from '../src/local-loro-data-plane-server';
 import {
@@ -19,7 +32,7 @@ const WORKSPACE_ID = 'ws';
 // running one.
 class CountingFlock extends MemoryFlock {
   exportCount = 0;
-  exportDelayMs = 0;
+  exportGate: Promise<void> | null = null;
   onExport: (() => void) | null = null;
 
   override async exportJson(
@@ -27,9 +40,7 @@ class CountingFlock extends MemoryFlock {
   ): Promise<ReturnType<MemoryFlock['exportJson']>> {
     this.exportCount += 1;
     this.onExport?.();
-    if (this.exportDelayMs > 0) {
-      await new Promise((resolve) => setTimeout(resolve, this.exportDelayMs));
-    }
+    if (this.exportGate) await this.exportGate;
     return super.exportJson(from);
   }
 }
@@ -78,7 +89,7 @@ function makeBackpressureConnection(id = 'conn-bp'): {
   };
 }
 
-const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
+const settle = () => vi.advanceTimersByTimeAsync(100);
 
 function flockEntriesOf(messages: LocalLoroDataPlaneServerMessage[]): Record<string, unknown> {
   const merged: Record<string, unknown> = {};
@@ -94,11 +105,17 @@ function flockEntriesOf(messages: LocalLoroDataPlaneServerMessage[]): Record<str
   return merged;
 }
 
-describe('LocalLoroDataPlaneServer doc room hydration signals', () => {
+describe('LocalLoroDataPlaneServerLegacy doc room hydration signals', () => {
   it('notifies doc room joins and publishes room status to subscribers', async () => {
-    const onDocRoomJoin = vi.fn();
-    const onDocRoomLeave = vi.fn();
-    const server = new LocalLoroDataPlaneServer({
+    const active = new Set<string>();
+    const onDocRoomJoin = (id: string) => {
+      active.add(id);
+    };
+    const onDocRoomLeave = (id: string) => {
+      active.delete(id);
+    };
+    const server = new LocalLoroDataPlaneServerLegacy({
+      writerLegacy,
       workspaceId: WORKSPACE_ID,
       resolveDoc: async () => new LoroDoc(),
       resolveFlockDoc: async () => new CountingFlock(),
@@ -118,7 +135,7 @@ describe('LocalLoroDataPlaneServer doc room hydration signals', () => {
     });
     await settle();
 
-    expect(onDocRoomJoin).toHaveBeenCalledWith('session-1');
+    expect([...active]).toEqual(['session-1']);
 
     server.publishRoomStatus(room, 'connecting');
     await settle();
@@ -142,13 +159,19 @@ describe('LocalLoroDataPlaneServer doc room hydration signals', () => {
     });
     await settle();
 
-    expect(onDocRoomLeave).toHaveBeenCalledWith('session-1');
+    expect(active.size).toBe(0);
   });
 
   it('notifies flock room joins and leaves for local-first cloud bridging', async () => {
-    const onFlockRoomJoin = vi.fn();
-    const onFlockRoomLeave = vi.fn();
-    const server = new LocalLoroDataPlaneServer({
+    const active = new Set<string>();
+    const onFlockRoomJoin = (id: string) => {
+      active.add(id);
+    };
+    const onFlockRoomLeave = (id: string) => {
+      active.delete(id);
+    };
+    const server = new LocalLoroDataPlaneServerLegacy({
+      writerLegacy,
       workspaceId: WORKSPACE_ID,
       resolveDoc: async () => new LoroDoc(),
       resolveFlockDoc: async () => new CountingFlock(),
@@ -168,7 +191,7 @@ describe('LocalLoroDataPlaneServer doc room hydration signals', () => {
     });
     await settle();
 
-    expect(onFlockRoomJoin).toHaveBeenCalledWith('ws:fis:session-1');
+    expect([...active]).toEqual(['ws:fis:session-1']);
 
     server.publishRoomStatus(room, 'connecting');
     await settle();
@@ -192,15 +215,19 @@ describe('LocalLoroDataPlaneServer doc room hydration signals', () => {
     });
     await settle();
 
-    expect(onFlockRoomLeave).toHaveBeenCalledWith('ws:fis:session-1');
+    expect(active.size).toBe(0);
   });
 });
 
-describe('LocalLoroDataPlaneServer machine monitor bridge', () => {
+describe('LocalLoroDataPlaneServerLegacy machine monitor bridge', () => {
   it('applies renderer observer state and pushes the current CLI monitor state', async () => {
     let notifyChange: (() => void) | null = null;
-    const apply = vi.fn();
-    const server = new LocalLoroDataPlaneServer({
+    let applied: Uint8Array | null = null;
+    const apply = (update: Uint8Array) => {
+      applied = update;
+    };
+    const server = new LocalLoroDataPlaneServerLegacy({
+      writerLegacy,
       workspaceId: WORKSPACE_ID,
       resolveDoc: async () => new LoroDoc(),
       resolveFlockDoc: async () => new CountingFlock(),
@@ -226,7 +253,7 @@ describe('LocalLoroDataPlaneServer machine monitor bridge', () => {
     });
     await settle();
 
-    expect(apply).toHaveBeenCalledWith(new Uint8Array([1, 2, 3]));
+    expect(applied).toEqual(new Uint8Array([1, 2, 3]));
     expect(received).toContainEqual(
       expect.objectContaining({
         type: 'machine-monitor',
@@ -239,13 +266,14 @@ describe('LocalLoroDataPlaneServer machine monitor bridge', () => {
     notifyChange?.();
     await settle();
     expect(received.some((message) => message.type === 'machine-monitor')).toBe(true);
-    server.dispose();
+    await server.disposeLegacy();
   });
 });
 
-describe('LocalLoroDataPlaneServer flock write-time coalescing', () => {
+describe('LocalLoroDataPlaneServerLegacy flock write-time coalescing', () => {
   const makeFlockServer = (flock: CountingFlock) =>
-    new LocalLoroDataPlaneServer({
+    new LocalLoroDataPlaneServerLegacy({
+      writerLegacy,
       workspaceId: WORKSPACE_ID,
       resolveDoc: async () => {
         throw new Error('unused');
@@ -254,7 +282,7 @@ describe('LocalLoroDataPlaneServer flock write-time coalescing', () => {
     });
 
   const joinFlockRoom = async (
-    server: LocalLoroDataPlaneServer,
+    server: LocalLoroDataPlaneServerLegacy,
     connection: LocalLoroDataPlaneServerConnection
   ) => {
     await server.handleMessage(connection, {
@@ -314,30 +342,40 @@ describe('LocalLoroDataPlaneServer flock write-time coalescing', () => {
 
   it('a change landing during a running export still gets its own follow-up pass', async () => {
     const flock = new CountingFlock();
-    flock.exportDelayMs = 10;
     const server = makeFlockServer(flock);
     const { connection, received } = makeConnection();
     await joinFlockRoom(server, connection);
 
+    let release = () => {};
+    flock.exportGate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let ready = () => {};
+    const started = new Promise<void>((resolve) => {
+      ready = resolve;
+    });
+    flock.onExport = ready;
     flock.set('first', 1);
-    // Let the first pass START (export in flight)…
-    await settle();
-    // …then land another change mid-export.
+    await vi.advanceTimersByTimeAsync(1);
+    await started;
     flock.set('second', 2);
-    await new Promise((resolve) => setTimeout(resolve, 60));
+    flock.exportGate = null;
+    release();
+    await settle();
 
     const entries = flockEntriesOf(received.filter((m) => m.type === 'update'));
     expect(entries['second']).toBe(2);
   });
 });
 
-describe('LocalLoroDataPlaneServer incremental flock sync', () => {
+describe('LocalLoroDataPlaneServerLegacy incremental flock sync', () => {
   it('a join catch-up above the frame budget is chunked, not failed', async () => {
     const flock = new MemoryFlock();
     for (let index = 0; index < 40; index += 1) {
       flock.set(`key-${String(index).padStart(2, '0')}`, `value-${index}`);
     }
-    const server = new LocalLoroDataPlaneServer({
+    const server = new LocalLoroDataPlaneServerLegacy({
+      writerLegacy,
       workspaceId: WORKSPACE_ID,
       resolveDoc: async () => {
         throw new Error('unused');
@@ -381,7 +419,8 @@ describe('LocalLoroDataPlaneServer incremental flock sync', () => {
     flock.set('old', 'seen');
     const haveVersion = JSON.stringify(flock.version());
     flock.set('new', 'unseen');
-    const server = new LocalLoroDataPlaneServer({
+    const server = new LocalLoroDataPlaneServerLegacy({
+      writerLegacy,
       workspaceId: WORKSPACE_ID,
       resolveDoc: async () => {
         throw new Error('unused');
@@ -426,7 +465,8 @@ describe('LocalLoroDataPlaneServer incremental flock sync', () => {
       }
       return await originalExportJson(from);
     };
-    const server = new LocalLoroDataPlaneServer({
+    const server = new LocalLoroDataPlaneServerLegacy({
+      writerLegacy,
       workspaceId: WORKSPACE_ID,
       resolveDoc: async () => {
         throw new Error('unused');
@@ -444,6 +484,7 @@ describe('LocalLoroDataPlaneServer incremental flock sync', () => {
       peerId: 'peer-1',
       room,
     });
+    await vi.advanceTimersByTimeAsync(1);
     await exportStarted;
     await server.handleMessage(connection, {
       type: 'join',
@@ -466,7 +507,7 @@ describe('LocalLoroDataPlaneServer incremental flock sync', () => {
   });
 });
 
-describe('LocalLoroDataPlaneServer backpressure (drain-aware writer)', () => {
+describe('LocalLoroDataPlaneServerLegacy backpressure (drain-aware writer)', () => {
   const insert = (doc: LoroDoc, value: string): void => {
     doc.getText('t').insert(doc.getText('t').length, value);
     doc.commit();
@@ -474,7 +515,8 @@ describe('LocalLoroDataPlaneServer backpressure (drain-aware writer)', () => {
 
   it('a blocked connection pauses exports and resumes with ONE coalesced delta on drain', async () => {
     const doc = new LoroDoc();
-    const server = new LocalLoroDataPlaneServer({
+    const server = new LocalLoroDataPlaneServerLegacy({
+      writerLegacy,
       workspaceId: WORKSPACE_ID,
       resolveDoc: async () => doc,
       resolveFlockDoc: async () => {
@@ -526,4 +568,494 @@ describe('LocalLoroDataPlaneServer backpressure (drain-aware writer)', () => {
     }
     expect(mirror.getText('t').toString()).toBe('abc');
   });
+});
+
+let writerLegacy: LocalLoroWriterLegacy;
+beforeEach((context) => {
+  if (context.task.suite?.name === 'native process writer ownership') return;
+  vi.useFakeTimers();
+  writerLegacy = makeLocalLoroWriterLegacy(
+    Layer.succeed(LocalLoroWriterTurn, {
+      next: Effect.callback<void>((resume) => {
+        const handle = setTimeout(() => resume(Effect.void), 0);
+        return Effect.sync(() => clearTimeout(handle));
+      }),
+    })
+  );
+});
+afterEach(async (context) => {
+  if (context.task.suite?.name === 'native process writer ownership') return;
+  const closed = writerLegacy.closeLegacy();
+  await vi.runAllTimersAsync();
+  await closed;
+  vi.useRealTimers();
+});
+
+describe('local presence on the shared physical writer', () => {
+  it('pauses every workspace export on write(false) and snapshots the final clear only at execution', async () => {
+    const slow = makeBackpressureConnection('multiplexed-presence');
+    slow.setAccepting(false);
+    const source = () => {
+      const store = new EphemeralStore();
+      const listeners = new Set<() => void>();
+      return {
+        store,
+        listeners,
+        notify: () => {
+          for (const listener of listeners) listener();
+        },
+        presence: {
+          encodeLocalOrigin: () => store.encodeAll(),
+          subscribeLocalOrigin: (listener: () => void) => {
+            listeners.add(listener);
+            return () => {
+              listeners.delete(listener);
+            };
+          },
+        },
+      };
+    };
+    const a = source();
+    const b = source();
+    a.store.set('active-session', 'running');
+    b.store.set('active-session', 'starting');
+    const flock = new CountingFlock();
+    flock.set('latest', 1);
+    const engine = (workspaceId: string, presenceSource: typeof a.presence) =>
+      new LocalLoroDataPlaneServerLegacy({
+        workspaceId,
+        writerLegacy,
+        presenceSource,
+        resolveDoc: async () => new LoroDoc(),
+        resolveFlockDoc: async () => flock,
+      });
+    const first = engine('a', a.presence);
+    const second = engine('b', b.presence);
+    await first.handleMessage(slow.connection, {
+      type: 'detach',
+      protocolVersion: 7,
+      workspaceId: 'a',
+      peerId: 'a',
+    });
+    await settle(); // first presence accepted, physical writer now blocked
+    await second.handleMessage(slow.connection, {
+      type: 'join',
+      protocolVersion: 7,
+      workspaceId: 'b',
+      peerId: 'b',
+      requestId: 'join-b',
+      room: { scope: 'flock-doc', flockDocId: 'f' },
+    });
+    for (let value = 0; value < 20; value++) {
+      a.store.set('active-session', `phase-${value}`);
+      a.notify();
+      b.store.set('active-session', `phase-${value}`);
+      b.notify();
+    }
+    a.store.delete('active-session');
+    a.notify();
+    b.store.set('active-session', 'final');
+    b.notify();
+    await settle();
+    expect(slow.received).toHaveLength(1);
+    expect(flock.exportCount).toBe(0);
+    slow.setAccepting(true);
+    slow.drain();
+    await settle();
+    const snapshots = slow.received.filter((message) => message.type === 'presence');
+    expect(snapshots.map((message) => message.workspaceId)).toEqual(['a', 'b', 'a']);
+    const cleared = new EphemeralStore();
+    cleared.apply(base64ToBytes(snapshots[2].dataBase64));
+    const latest = new EphemeralStore();
+    latest.apply(base64ToBytes(snapshots[1].dataBase64));
+    expect(cleared.get('active-session')).toBeUndefined();
+    expect(latest.get('active-session')).toBe('final');
+    expect(flockEntriesOf(slow.received)).toEqual({ latest: 1 });
+    await Promise.all([first.disposeLegacy(), second.disposeLegacy()]);
+    expect(a.listeners.size + b.listeners.size).toBe(0);
+  });
+
+  it('a change during send leaves one follow-up and delivers its final deletion', async () => {
+    const store = new EphemeralStore();
+    store.set('active-session', 'initial');
+    let notify = () => {};
+    const states: Array<unknown> = [];
+    const connection = {
+      id: 'reentrant-presence',
+      send: (message: LocalLoroDataPlaneServerMessage) => {
+        if (message.type !== 'presence') return;
+        const snapshot = new EphemeralStore();
+        snapshot.apply(base64ToBytes(message.dataBase64));
+        states.push(snapshot.get('active-session'));
+        if (states.length === 1) {
+          for (let i = 0; i < 30; i++) {
+            store.set('active-session', `burst-${i}`);
+            notify();
+          }
+          store.delete('active-session');
+          notify();
+        }
+      },
+    };
+    const server = new LocalLoroDataPlaneServerLegacy({
+      workspaceId: 'ws',
+      writerLegacy,
+      resolveDoc: async () => new LoroDoc(),
+      resolveFlockDoc: async () => new MemoryFlock(),
+      presenceSource: {
+        encodeLocalOrigin: () => store.encodeAll(),
+        subscribeLocalOrigin: (listener) => {
+          notify = listener;
+          return () => {
+            notify = () => {};
+          };
+        },
+      },
+    });
+    await server.handleMessage(connection, {
+      type: 'detach',
+      protocolVersion: 7,
+      workspaceId: 'ws',
+      peerId: 'peer',
+    });
+    await settle();
+    expect(states).toEqual(['initial', undefined]);
+    await server.disposeLegacy();
+  });
+
+  it('disconnect revokes queued frames and awaits the actual raw Flock Promise before a successor exports', async () => {
+    const flock = new CountingFlock();
+    flock.set('durable', 'value');
+    let release = () => {};
+    let started = () => {};
+    const ready = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    flock.exportGate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    flock.onExport = started;
+    const server = new LocalLoroDataPlaneServerLegacy({
+      workspaceId: 'ws',
+      writerLegacy,
+      resolveDoc: async () => new LoroDoc(),
+      resolveFlockDoc: async () => flock,
+    });
+    const old = makeConnection('old-generation');
+    const next = makeConnection('new-generation');
+    const join = (connection: LocalLoroDataPlaneServerConnection, requestId: string) =>
+      server.handleMessage(connection, {
+        type: 'join',
+        protocolVersion: 7,
+        workspaceId: 'ws',
+        peerId: 'peer',
+        requestId,
+        room: { scope: 'flock-doc', flockDocId: 'f' },
+      });
+    await join(old.connection, 'old');
+    await vi.advanceTimersByTimeAsync(1);
+    await ready;
+    let closed = false;
+    const first = server.handleDisconnectLegacy(old.connection.id).then(() => {
+      closed = true;
+    });
+    const second = server.handleDisconnectLegacy(old.connection.id);
+    await join(next.connection, 'next');
+    await vi.advanceTimersByTimeAsync(1);
+    expect(closed).toBe(false);
+    expect(old.received).toEqual([]);
+    expect(next.received).toEqual([]);
+    expect(flock.exportCount).toBe(1);
+    flock.exportGate = null;
+    release();
+    await Promise.all([first, second]);
+    await settle();
+    expect(old.received).toEqual([]);
+    expect(
+      next.received
+        .filter((message) => message.type === 'joined')
+        .map((message) => message.requestId)
+    ).toEqual(['next']);
+    expect(flockEntriesOf(next.received)).toEqual({ durable: 'value' });
+    await server.disposeLegacy();
+  });
+});
+
+describe('native process writer ownership', () => {
+  effectIt.effect(
+    'rotates workspace chunks on one socket and yields exactly one frame per host turn',
+    () =>
+      Effect.gen(function* () {
+        const turns = yield* Queue.make<void>();
+        const requested = yield* Deferred.make<void>();
+        const ungated = yield* Deferred.make<void>();
+        let grants = 0;
+        const writer = yield* makeLocalLoroWriter.pipe(
+          Effect.provideService(LocalLoroWriterTurn, {
+            next: Effect.gen(function* () {
+              yield* Deferred.succeed(requested, undefined);
+              yield* Queue.take(turns);
+              grants += 1;
+            }),
+          })
+        );
+        const seen: string[] = [];
+        const signals = [
+          Deferred.makeUnsafe<void>(),
+          Deferred.makeUnsafe<void>(),
+          Deferred.makeUnsafe<void>(),
+        ];
+        const connection = {
+          id: 'shared-socket',
+          send: (message: LocalLoroDataPlaneServerMessage) => {
+            if (message.type === 'presence') seen.push(message.workspaceId);
+            if (seen.length > grants) Deferred.doneUnsafe(ungated, Effect.void);
+            Deferred.doneUnsafe(signals[seen.length - 1], Effect.void);
+          },
+        };
+        const task = (workspaceId: string, frames: number) => ({
+          owner: makeLocalLoroWriterOwner(),
+          valid: () => true,
+          onCause: () => {},
+          build: Effect.succeed(
+            Array.from({ length: frames }, () => ({
+              type: 'presence' as const,
+              protocolVersion: 7 as const,
+              workspaceId,
+              dataBase64: 'AA==',
+            }))
+          ),
+        });
+        writer.offer(connection, task('workspace-a', 3));
+        writer.offer(connection, task('workspace-b', 1));
+        const admission = yield* Effect.race(
+          Deferred.await(requested).pipe(Effect.as('turn-ready')),
+          Deferred.await(ungated).pipe(Effect.as('ungated-write'))
+        );
+        expect(admission).toBe('turn-ready');
+        expect(seen).toEqual([]);
+        yield* Queue.offer(turns, undefined);
+        yield* Deferred.await(signals[0]);
+        expect(seen).toEqual(['workspace-a']);
+        yield* Queue.offer(turns, undefined);
+        yield* Deferred.await(signals[1]);
+        expect(seen).toEqual(['workspace-a', 'workspace-b']);
+        yield* Queue.offer(turns, undefined);
+        yield* Deferred.await(signals[2]);
+        expect(seen).toEqual(['workspace-a', 'workspace-b', 'workspace-a']);
+        yield* writer.close;
+      })
+  );
+
+  effectIt.effect(
+    'disconnect joins actual SDK settlement and concurrent close shares its bounded receipt',
+    () =>
+      Effect.gen(function* () {
+        const turns = yield* Queue.make<void>();
+        const writer = yield* makeLocalLoroWriter.pipe(
+          Effect.provideService(LocalLoroWriterTurn, { next: Queue.take(turns) })
+        );
+        const started = yield* Deferred.make<void>();
+        const settled = yield* Deferred.make<void>();
+        yield* Effect.addFinalizer(() => Deferred.succeed(settled, undefined));
+        let drainListener: (() => void) | null = null;
+        const seen: LocalLoroDataPlaneServerMessage[] = [];
+        const connection = {
+          id: 'raw-sdk',
+          send: (message: LocalLoroDataPlaneServerMessage) => {
+            seen.push(message);
+          },
+          onDrain: (listener: () => void) => {
+            drainListener = listener;
+            return () => {
+              drainListener = null;
+            };
+          },
+        };
+        const owner = makeLocalLoroWriterOwner();
+        writer.offer(connection, {
+          owner,
+          valid: () => true,
+          onCause: () => {},
+          build: Effect.uninterruptible(
+            Effect.gen(function* () {
+              yield* Deferred.succeed(started, undefined);
+              yield* Deferred.await(settled);
+              return [{ type: 'pong' as const, protocolVersion: 7 as const }];
+            })
+          ),
+        });
+        yield* Queue.offer(turns, undefined);
+        yield* Deferred.await(started);
+        const first = yield* writer.disconnect(connection.id).pipe(Effect.forkChild);
+        const second = yield* writer.disconnect(connection.id).pipe(Effect.forkChild);
+        yield* TestClock.adjust('5 seconds');
+        const a = yield* Fiber.await(first);
+        const b = yield* Fiber.await(second);
+        expect(Exit.isFailure(a)).toBe(true);
+        expect(b).toEqual(a);
+        expect(drainListener).toBeNull();
+        expect(seen).toEqual([]);
+        expect(() =>
+          writer.offer(connection, {
+            owner: makeLocalLoroWriterOwner(),
+            valid: () => true,
+            onCause: () => {},
+            build: Effect.succeed([]),
+          })
+        ).toThrow('release_pending');
+        yield* Deferred.succeed(settled, undefined);
+        yield* writer.disconnect(connection.id);
+        expect(seen).toEqual([]);
+        const delivered = yield* Deferred.make<void>();
+        writer.offer(connection, {
+          owner: makeLocalLoroWriterOwner(),
+          valid: () => true,
+          onCause: () => {},
+          build: Effect.sync(() => {
+            Deferred.doneUnsafe(delivered, Effect.void);
+            return [];
+          }),
+        });
+        yield* Queue.offer(turns, undefined);
+        yield* Deferred.await(delivered);
+        yield* writer.close;
+      })
+  );
+
+  effectIt.effect(
+    'Scope finalizer observation is bounded without abandoning the raw producer',
+    () =>
+      Effect.gen(function* () {
+        const scope = yield* Scope.make();
+        const turns = yield* Queue.make<void>();
+        const writer = yield* Scope.provide(
+          makeLocalLoroWriter.pipe(
+            Effect.provideService(LocalLoroWriterTurn, { next: Queue.take(turns) })
+          ),
+          scope
+        );
+        const started = yield* Deferred.make<void>();
+        const finish = yield* Deferred.make<void>();
+        yield* Effect.addFinalizer(() => Deferred.succeed(finish, undefined));
+        writer.offer(
+          {
+            id: 'finalizer',
+            send: () => {
+              throw new Error('late write');
+            },
+          },
+          {
+            owner: makeLocalLoroWriterOwner(),
+            valid: () => true,
+            onCause: () => {},
+            build: Effect.uninterruptible(
+              Effect.gen(function* () {
+                yield* Deferred.succeed(started, undefined);
+                yield* Deferred.await(finish);
+                return [{ type: 'pong' as const, protocolVersion: 7 as const }];
+              })
+            ),
+          }
+        );
+        yield* Queue.offer(turns, undefined);
+        yield* Deferred.await(started);
+        const closing = yield* Scope.close(scope, Exit.void).pipe(Effect.forkChild);
+        yield* TestClock.adjust('10 seconds');
+        const result = yield* Fiber.await(closing);
+        expect(Exit.isFailure(result)).toBe(true);
+        yield* Deferred.succeed(finish, undefined);
+        // Scope.close is already consumed. Recovery belongs to writer.close.
+        yield* writer.close;
+      })
+  );
+
+  effectIt.effect(
+    'failed drain unsubscribe retains the original complete Cause until recovery',
+    () =>
+      Effect.gen(function* () {
+        const turns = yield* Queue.make<void>();
+        const writer = yield* makeLocalLoroWriter.pipe(
+          Effect.provideService(LocalLoroWriterTurn, { next: Queue.take(turns) })
+        );
+        const defect = new Error('synthetic unsubscribe defect');
+        let removable = false;
+        yield* Effect.addFinalizer(() =>
+          Effect.sync(() => {
+            removable = true;
+          })
+        );
+        let attached = false;
+        const connection = {
+          id: 'release-failure',
+          send: () => {},
+          onDrain: () => {
+            attached = true;
+            return () => {
+              if (!removable) throw defect;
+              attached = false;
+            };
+          },
+        };
+        writer.offer(connection, {
+          owner: makeLocalLoroWriterOwner(),
+          valid: () => true,
+          onCause: () => {},
+          build: Effect.succeed([]),
+        });
+        const first = yield* writer.disconnect(connection.id).pipe(Effect.exit);
+        const second = yield* writer.disconnect(connection.id).pipe(Effect.exit);
+        expect(Exit.isFailure(first)).toBe(true);
+        if (Exit.isFailure(first) && Exit.isFailure(second)) {
+          const a = Cause.findErrorOption(first.cause);
+          const b = Cause.findErrorOption(second.cause);
+          expect(a._tag).toBe('Some');
+          if (a._tag === 'Some' && b._tag === 'Some')
+            expect(a.value.fullCause).toBe(b.value.fullCause);
+        }
+        expect(attached).toBe(true);
+        expect(() =>
+          writer.offer(connection, {
+            owner: makeLocalLoroWriterOwner(),
+            valid: () => true,
+            onCause: () => {},
+            build: Effect.succeed([]),
+          })
+        ).toThrow('release_pending');
+        removable = true;
+        yield* writer.disconnect(connection.id);
+        expect(attached).toBe(false);
+        yield* writer.close;
+      })
+  );
+
+  effectIt.effect(
+    'the native writer reports mixed Fail/Die/Interrupt without selecting only Fail',
+    () =>
+      Effect.gen(function* () {
+        const turns = yield* Queue.make<void>();
+        const writer = yield* makeLocalLoroWriter.pipe(
+          Effect.provideService(LocalLoroWriterTurn, { next: Queue.take(turns) })
+        );
+        const cause = Cause.combine(
+          Cause.fail('synthetic failure'),
+          Cause.combine(Cause.die('synthetic defect'), Cause.interrupt())
+        );
+        const reported = yield* Deferred.make<Cause.Cause<unknown>>();
+        writer.offer(
+          { id: 'cause', send: () => {} },
+          {
+            owner: makeLocalLoroWriterOwner(),
+            valid: () => true,
+            build: Effect.failCause(cause),
+            onCause: (value) => {
+              Deferred.doneUnsafe(reported, Effect.succeed(value));
+            },
+          }
+        );
+        yield* Queue.offer(turns, undefined);
+        expect(yield* Deferred.await(reported)).toEqual(cause);
+        yield* writer.close;
+      })
+  );
 });

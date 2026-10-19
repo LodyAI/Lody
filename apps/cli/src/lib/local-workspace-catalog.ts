@@ -5,7 +5,7 @@ import { Data, Effect } from 'effect';
 import { z } from 'zod';
 import { getServerNow } from '@lody/shared';
 import { getLocalWorkspaceCatalogPath } from '@lody/shared/node/local-workspace-catalog';
-import { withFileLock } from '@/utils/file-lock';
+import { FileLocks, withFileLock } from '@/utils/file-lock';
 
 export { getLocalWorkspaceCatalogPath };
 
@@ -34,6 +34,25 @@ const CatalogAccessSnapshotSchema = z.object({
   verifiedAt: z.string(),
 });
 
+// Bounded optimistic-allow cache for workspace members who are NOT the machine
+// owner. The owner snapshot above never expires; a member allow is trusted only
+// for MEMBER_ACCESS_SNAPSHOT_TTL_MS after the backend last confirmed it, and is
+// keyed by the local project because project sharing is part of the verdict.
+// Each grant is bound to the CLI account and Machine that verified it: a grant
+// for another machine owner says nothing about the current one.
+export const MEMBER_ACCESS_SNAPSHOT_TTL_MS = 60 * 60 * 1000;
+const MEMBER_ACCESS_SNAPSHOT_LIMIT = 64;
+
+const CatalogMemberAccessSnapshotSchema = z.object({
+  requesterUserId: z.string(),
+  localProjectId: z.string().optional(),
+  // Optional only so an unbound entry parses (and never matches) instead of
+  // making the whole catalog corrupt.
+  ownerUserId: z.string().optional(),
+  machineId: z.string().optional(),
+  verifiedAt: z.string(),
+});
+
 const CatalogWorkspaceSchema = z.object({
   workspaceId: z.string(),
   name: z.string(),
@@ -46,6 +65,7 @@ const CatalogWorkspaceSchema = z.object({
     cachedAt: z.number(),
   }).optional(),
   accessSnapshot: CatalogAccessSnapshotSchema.optional(),
+  memberAccessSnapshots: z.array(CatalogMemberAccessSnapshotSchema).optional(),
 });
 
 const CatalogSessionSchema = z.object({
@@ -68,6 +88,7 @@ const CatalogSnapshotSchema = z.object({
 export type LocalCatalogIdentity = z.infer<typeof CatalogIdentitySchema>;
 export type LocalCatalogMachine = z.infer<typeof CatalogMachineSchema>;
 export type LocalCatalogAccessSnapshot = z.infer<typeof CatalogAccessSnapshotSchema>;
+export type LocalCatalogMemberAccessSnapshot = z.infer<typeof CatalogMemberAccessSnapshotSchema>;
 export type LocalCatalogWorkspace = z.infer<typeof CatalogWorkspaceSchema>;
 export type LocalCatalogSession = z.infer<typeof CatalogSessionSchema>;
 export type LocalWorkspaceCatalogSnapshot = z.infer<typeof CatalogSnapshotSchema>;
@@ -109,18 +130,41 @@ export type RecordWorkspaceAccessSnapshotInput = {
   accessSnapshot: LocalCatalogAccessSnapshot | null;
 };
 
+export type RecordMemberAccessSnapshotInput = {
+  workspaceId: string;
+  requesterUserId: string;
+  localProjectId?: string;
+  // The CLI account and Machine whose backend check produced this verdict.
+  ownerUserId: string;
+  machineId: string;
+  // Confirmed backend allow time; `null` clears the entry after a definitive deny.
+  verifiedAt: string | null;
+};
+
+export function isMemberAccessSnapshotFresh(
+  snapshot: Pick<LocalCatalogMemberAccessSnapshot, 'verifiedAt'>,
+  nowMs: number
+): boolean {
+  const ageMs = nowMs - Date.parse(snapshot.verifiedAt);
+  // A future timestamp (clock moved backwards) is not trusted either.
+  return ageMs >= 0 && ageMs < MEMBER_ACCESS_SNAPSHOT_TTL_MS;
+}
+
 export type LocalWorkspaceCatalogService = {
   read: () => Effect.Effect<LocalWorkspaceCatalogSnapshot, LocalWorkspaceCatalogError>;
   listActiveWorkspaces: () => Effect.Effect<LocalCatalogWorkspace[], LocalWorkspaceCatalogError>;
   cacheRemoteWorkspaces: (
     input: CacheRemoteWorkspacesInput
-  ) => Effect.Effect<void, LocalWorkspaceCatalogError>;
+  ) => Effect.Effect<void, LocalWorkspaceCatalogError, FileLocks>;
   recordWorkspaceAccessSnapshot: (
     input: RecordWorkspaceAccessSnapshotInput
-  ) => Effect.Effect<void, LocalWorkspaceCatalogError>;
+  ) => Effect.Effect<void, LocalWorkspaceCatalogError, FileLocks>;
+  recordMemberAccessSnapshot: (
+    input: RecordMemberAccessSnapshotInput
+  ) => Effect.Effect<void, LocalWorkspaceCatalogError, FileLocks>;
   upsertSession: (
     session: Omit<LocalCatalogSession, 'cachedAt'>
-  ) => Effect.Effect<void, LocalWorkspaceCatalogError>;
+  ) => Effect.Effect<void, LocalWorkspaceCatalogError, FileLocks>;
 };
 
 const emptyCatalog = (): LocalWorkspaceCatalogSnapshot => ({
@@ -217,7 +261,6 @@ export function makeLocalWorkspaceCatalog(
   const lockName = options.lockName ?? DEFAULT_CATALOG_LOCK;
   const cacheTtlMs = options.cacheTtlMs ?? 5_000;
   const clock = options.now ?? getServerNow;
-  let writeQueue: Promise<unknown> = Promise.resolve();
   let cacheRevision = 0;
   let cachedRead: { snapshot: LocalWorkspaceCatalogSnapshot; cachedAtMs: number } | null = null;
   let readInFlight: Promise<LocalWorkspaceCatalogSnapshot> | null = null;
@@ -280,25 +323,23 @@ export function makeLocalWorkspaceCatalog(
     });
 
   const mutate = (
-    fn: (
-      snapshot: LocalWorkspaceCatalogSnapshot
-    ) => LocalWorkspaceCatalogSnapshot | Promise<LocalWorkspaceCatalogSnapshot>
-  ): Effect.Effect<void, LocalWorkspaceCatalogError> =>
-    Effect.tryPromise({
-      try: async () => {
-        const run = async () =>
-          await withFileLock(lockName, async () => {
-            const snapshot = await Effect.runPromise(readRecoveringFromDisk());
-            const updated = await fn(snapshot);
-            await writeCatalogFile(filePath, updated);
-            cacheRevision += 1;
-            cachedRead = { snapshot: updated, cachedAtMs: clock() };
+    fn: (snapshot: LocalWorkspaceCatalogSnapshot) => LocalWorkspaceCatalogSnapshot
+  ): Effect.Effect<void, LocalWorkspaceCatalogError, FileLocks> =>
+    withFileLock(
+      lockName,
+      Effect.uninterruptible(
+        Effect.gen(function* () {
+          const snapshot = yield* readRecoveringFromDisk();
+          const updated = fn(snapshot);
+          yield* Effect.tryPromise({
+            try: () => writeCatalogFile(filePath, updated),
+            catch: (error) => toCatalogError(filePath, error),
           });
-        writeQueue = writeQueue.then(run, run);
-        await writeQueue;
-      },
-      catch: (error) => toCatalogError(filePath, error),
-    });
+          cacheRevision += 1;
+          cachedRead = { snapshot: updated, cachedAtMs: clock() };
+        })
+      )
+    ).pipe(Effect.mapError((error) => toCatalogError(filePath, error)));
 
   return {
     read: readCached,
@@ -312,6 +353,10 @@ export function makeLocalWorkspaceCatalog(
       mutate((snapshot) => {
         const now = getServerNow();
         const remoteIds = new Set(input.workspaces.map((workspace) => workspace.id));
+        // Member grants were verified for the previous account and Machine.
+        const keepMemberGrants =
+          snapshot.identity?.userId === input.identity.userId &&
+          snapshot.machine?.machineId === input.machine.machineId;
         const previousById = new Map(
           snapshot.workspaces.map((workspace) => [workspace.workspaceId, workspace])
         );
@@ -329,6 +374,9 @@ export function makeLocalWorkspaceCatalog(
               cachedAt: now,
             },
             ...(previous?.accessSnapshot ? { accessSnapshot: previous.accessSnapshot } : {}),
+            ...(keepMemberGrants && previous?.memberAccessSnapshots
+              ? { memberAccessSnapshots: previous.memberAccessSnapshots }
+              : {}),
           };
         });
         const remoteMissing = snapshot.workspaces
@@ -359,6 +407,39 @@ export function makeLocalWorkspaceCatalog(
           return { ...workspace, accessSnapshot: input.accessSnapshot };
         }),
       })),
+    recordMemberAccessSnapshot: (input) =>
+      mutate((snapshot) => {
+        const nowMs = clock();
+        return {
+          ...snapshot,
+          workspaces: snapshot.workspaces.map((workspace) => {
+            if (workspace.workspaceId !== input.workspaceId) {
+              return workspace;
+            }
+            const others = (workspace.memberAccessSnapshots ?? []).filter(
+              (entry) =>
+                (entry.requesterUserId !== input.requesterUserId ||
+                  entry.localProjectId !== input.localProjectId) &&
+                isMemberAccessSnapshotFresh(entry, nowMs)
+            );
+            const next =
+              input.verifiedAt === null
+                ? others
+                : [
+                    ...others,
+                    {
+                      requesterUserId: input.requesterUserId,
+                      ...(input.localProjectId ? { localProjectId: input.localProjectId } : {}),
+                      ownerUserId: input.ownerUserId,
+                      machineId: input.machineId,
+                      verifiedAt: input.verifiedAt,
+                    },
+                  ].slice(-MEMBER_ACCESS_SNAPSHOT_LIMIT);
+            const { memberAccessSnapshots: _previous, ...rest } = workspace;
+            return next.length > 0 ? { ...rest, memberAccessSnapshots: next } : rest;
+          }),
+        };
+      }),
     upsertSession: (session) =>
       mutate((snapshot) => {
         const now = getServerNow();

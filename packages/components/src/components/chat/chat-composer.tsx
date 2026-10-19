@@ -12,12 +12,13 @@ import {
   type ReactNode,
   type Ref,
 } from 'react';
-import { ClipboardPaste, RefreshCw, X } from 'lucide-react';
+import { ClipboardPaste, RefreshCw, X, Pencil } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
 import type { AcpCommandSummary } from '@lody/shared';
 import { AttachmentAddMenu, type AttachmentAddMenuMcp } from './attachment-add-menu';
 import { ComposerImagePeek } from './composer-image-peek';
+import { measureTextareaScrollHeight } from './textarea-measurement';
 import { CommentReferenceChip, type CommentReferenceChipItem } from './comment-reference-chip';
 import {
   VisualAnnotationReferenceChip,
@@ -51,7 +52,7 @@ import { useIsMobile } from '@/hooks/use-mobile';
 import { Button, type ButtonProps } from '@lody/ui/button';
 import { Dialog } from '@/ui/dialog';
 import { Drawer } from '@lody/ui/drawer';
-import { Textarea, type TextareaProps } from '@lody/ui/textarea';
+import type { TextareaProps } from '@lody/ui/textarea';
 import { hasFileTransfer, readDroppedTransfer } from '@/lib/file-drop';
 import {
   COMPOSER_COMPACT_PLACEHOLDER_MAX_PX,
@@ -62,9 +63,10 @@ import {
 import { Kbd } from '@/components/commands/kbd';
 import { commands, formatKeyBinding } from '@/lib/commands';
 import * as stylex from '@stylexjs/stylex';
-import { text as textScale } from '@lody/ui/tokens/scales.stylex';
+import { text as textScale, space } from '@lody/ui/tokens/scales.stylex';
 
 const typography = stylex.create({
+  imageMarkup: { position: 'absolute', insetInlineStart: space[1], bottom: space[1] },
   prompt: { fontSize: textScale.bodySize, lineHeight: textScale.bodyLeading },
   helper: { fontSize: textScale.footnoteSize, lineHeight: textScale.footnoteLeading },
   code: { fontSize: textScale.subheadlineSize, lineHeight: textScale.subheadlineLeading },
@@ -156,6 +158,7 @@ export interface ChatComposerProps {
    */
   onDirectoryDrop?: (directories: File[]) => void;
   onImageRemove?: (id: string) => void;
+  onImageAnnotate?: (id: string) => void;
   onImageRetry?: (id: string) => void;
   /** Pending file attachments (non-image), rendered as a chip strip. */
   fileItems?: ChatComposerFileItem[];
@@ -269,6 +272,7 @@ export function ChatComposer({
   onImageDrop,
   onDirectoryDrop,
   onImageRemove,
+  onImageAnnotate,
   onImageRetry,
   fileItems = [],
   onFileRemove,
@@ -591,10 +595,8 @@ export function ChatComposer({
     // When empty, the height is simply minHeight — and must be: Chromium includes
     // the wrapped placeholder text in an empty textarea's scrollHeight, so a long
     // placeholder would grow the box past minHeight and then visibly shrink on
-    // the first keystroke. Skipping the measurement also matters for speed: an
-    // `auto` reset followed by a scrollHeight read forces a synchronous layout
-    // of the whole page, and a session switch mounts an empty composer into a
-    // freshly committed conversation (~5ms per switch).
+    // the first keystroke. Skipping measurement also avoids constructing a
+    // mirror and forcing layout while an empty composer mounts on session switch.
     const hasValue = (promptValue ?? '').length > 0;
     if (!hasValue) {
       textarea.style.height = `${minHeight}px`;
@@ -602,9 +604,9 @@ export function ChatComposer({
       return;
     }
 
-    // Reset height to auto to get an accurate scrollHeight, then clamp.
-    textarea.style.height = 'auto';
-    const scrollHeight = textarea.scrollHeight;
+    // Measure outside the flex layout. A temporary height:auto on the live
+    // textarea expands the conversation viewport and can clamp its scrollTop.
+    const scrollHeight = measureTextareaScrollHeight(textarea, computedStyle);
     const newHeight = Math.max(minHeight, Math.min(scrollHeight, maxHeight));
 
     textarea.style.height = `${newHeight}px`;
@@ -861,6 +863,23 @@ export function ChatComposer({
                           )}
                         >
                           {image.progress}%
+                        </div>
+                      ) : null}
+                      {onImageAnnotate && image.status !== 'uploading' ? (
+                        <div {...stylex.props(typography.imageMarkup)}>
+                          <Button
+                            size="mini"
+                            icon
+                            variant="secondary"
+                            onClick={() => onImageAnnotate(image.id)}
+                            aria-label={t(
+                              'sessions.fileViewer.selection.markupNamedImage',
+                              'Mark up {{name}}',
+                              { name: image.name }
+                            )}
+                          >
+                            <Pencil size={14} aria-hidden />
+                          </Button>
                         </div>
                       ) : null}
                       {image.status === 'failed' ? (
@@ -1166,6 +1185,26 @@ export function ChatComposer({
             })
           : '';
 
+        // The pasted text is still composer content, so its editor reads exactly
+        // like the prompt: same face, weight, size and leading. `@lody/ui`'s
+        // Textarea is a form control (medium weight, control tracking), which is
+        // why this is a plain textarea, as the prompt itself is.
+        const pastedTextEditor = (layoutClassName: string) => (
+          <textarea
+            aria-label={pastedTextEditorLabel}
+            value={previewPastedTextEditorValue}
+            onChange={handlePastedTextDraftTextChange}
+            readOnly={!onPastedTextDraftsChange}
+            spellCheck={false}
+            className={cn(
+              'input-scrollbar block min-h-0 w-full flex-1 resize-none overflow-auto border-0 bg-transparent',
+              stylex.props(typography.prompt).className,
+              'text-input-foreground outline-hidden',
+              layoutClassName
+            )}
+          />
+        );
+
         if (isMobile) {
           return (
             <Drawer.Root
@@ -1173,37 +1212,43 @@ export function ChatComposer({
               open={previewPastedTextDraft !== null}
               onOpenChange={handlePastedTextOpenChange}
             >
-              <Drawer.Content
-                side="bottom"
-                className="flex h-[85vh] flex-col gap-0 rounded-t-2xl p-0"
-              >
+              <Drawer.Content side="bottom" closeButton={false} className="gap-0 rounded-t-2xl p-0">
                 {previewPastedTextDraft ? (
-                  <>
+                  // Base UI wraps the children in a block box, so the column
+                  // that lets the editor fill the sheet has to be ours, with a
+                  // definite height for `flex-1` to divide.
+                  <div className="flex h-[85dvh] min-h-0 flex-col">
                     <div className="flex shrink-0 justify-center pt-2 pb-1">
                       <div className="h-1 w-9 rounded-full bg-muted-foreground/30" />
                     </div>
-                    <div className="flex shrink-0 items-center justify-between gap-3 border-b border-border/60 px-4 py-2.5">
-                      <Drawer.Title className="flex items-center gap-2 font-medium">
-                        <ClipboardPaste className="h-3.5 w-3.5 text-muted-foreground" />
-                        {pastedTextDialogTitle}
-                      </Drawer.Title>
-                      <Drawer.Description className="text-muted-foreground tabular-nums">
+                    {/* The close shares the title's row so it centres on that
+                        first line; the summary sits on its own line beneath. */}
+                    <div className="flex shrink-0 flex-col border-b border-border/60 py-2 pr-2 pl-4">
+                      <div className="flex items-center gap-3">
+                        <Drawer.Title className="flex min-w-0 flex-1 items-center gap-2 font-medium">
+                          <ClipboardPaste className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                          {pastedTextDialogTitle}
+                        </Drawer.Title>
+                        <Drawer.Close
+                          render={
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="small"
+                              icon
+                              aria-label={t('common.close', 'Close')}
+                            />
+                          }
+                        >
+                          <X className="size-4" />
+                        </Drawer.Close>
+                      </div>
+                      <Drawer.Description className="truncate pr-2 text-muted-foreground tabular-nums">
                         {summaryText}
                       </Drawer.Description>
                     </div>
-                    <Textarea
-                      aria-label={pastedTextEditorLabel}
-                      value={previewPastedTextEditorValue}
-                      onChange={handlePastedTextDraftTextChange}
-                      readOnly={!onPastedTextDraftsChange}
-                      spellCheck={false}
-                      autoFocus={false}
-                      className={cn(
-                        'input-scrollbar min-h-0 flex-1 resize-none rounded-none border-0 bg-background px-4 py-3 font-mono  text-foreground focus-visible:ring-0 focus-visible:ring-offset-0',
-                        stylex.props(typography.code).className
-                      )}
-                    />
-                  </>
+                    {pastedTextEditor('px-4 py-3')}
+                  </div>
                 ) : null}
               </Drawer.Content>
             </Drawer.Root>
@@ -1240,17 +1285,9 @@ export function ChatComposer({
                     </div>
                   </div>
                   <div className="flex min-h-0 flex-1 px-5 py-4">
-                    <Textarea
-                      aria-label={pastedTextEditorLabel}
-                      value={previewPastedTextEditorValue}
-                      onChange={handlePastedTextDraftTextChange}
-                      readOnly={!onPastedTextDraftsChange}
-                      spellCheck={false}
-                      className={cn(
-                        'input-scrollbar h-full min-h-0 w-full resize-none overflow-auto rounded-md border-transparent bg-muted/30 px-4 py-3 font-mono  text-foreground focus-visible:ring-1 focus-visible:ring-ring/50',
-                        stylex.props(typography.code).className
-                      )}
-                    />
+                    {pastedTextEditor(
+                      'h-full rounded-md bg-muted/30 px-4 py-3 focus-visible:ring-1 focus-visible:ring-ring/50'
+                    )}
                   </div>
                 </>
               ) : null}

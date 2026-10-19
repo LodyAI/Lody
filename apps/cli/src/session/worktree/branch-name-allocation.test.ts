@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { hasLocalBranchNameConflict, resolveAvailableBranchName } from './branch-name-allocation';
+import {
+  getAllocatedSessionBranchName,
+  isAllocatedSessionBranchName,
+  hasLocalBranchNameConflict,
+  resolveAvailableBranchName,
+} from './branch-name-allocation';
 
 describe('resolveAvailableBranchName', () => {
   it('adds increasing suffixes without reusing an existing branch', () => {
@@ -28,4 +33,29 @@ describe('resolveAvailableBranchName', () => {
     expect(result).toHaveLength(50);
     expect(result).toMatch(/-2$/);
   });
+
+  it.each([false, true])(
+    'recognizes allocated branches and their collisions (local: %s)',
+    (localShared) => {
+      const sessionId = '12345678-abcd-4321-abcd-123456789abc';
+      const allocated = getAllocatedSessionBranchName(sessionId, localShared);
+      expect(allocated).toBe(localShared ? 'lody/12345678-abc' : 'session/12345678');
+      for (const existing of [[], [allocated], [allocated.split('/')[0]]]) {
+        const branch = resolveAvailableBranchName(allocated, existing);
+        expect(isAllocatedSessionBranchName(branch, sessionId)).toBe(true);
+      }
+      for (const branch of [
+        '',
+        'HEAD',
+        'feature/task',
+        'lody/fix-checkout',
+        'session/87654321',
+        `${allocated}-task`,
+        `${allocated}-1`,
+        `${allocated}/task`,
+      ]) {
+        expect(isAllocatedSessionBranchName(branch, sessionId)).toBe(false);
+      }
+    }
+  );
 });

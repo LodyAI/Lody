@@ -29,6 +29,12 @@ export type HistoryAction =
     }
   | { kind: 'operation-completion'; operation: StoredLodyOperation; turn: SessionEntry }
   | {
+      kind: 'operation-batch-status';
+      turnId: string;
+      batchId: string;
+      status: 'prepared' | 'submitted' | 'unknown' | 'settled' | 'not_submitted';
+    }
+  | {
       kind: 'upsert-goal';
       goal: Extract<MessageContent, { type: 'goal' }>;
       targetTurnId?: string;
@@ -41,6 +47,7 @@ export type HistoryAction =
       kind: 'user-status';
       turnId: string;
       status: SessionTurnStatus;
+      cancellationReason?: 'user_stop';
       requeueUndelivered?: boolean;
       onlyPendingApply?: boolean;
       deliveredSteer?: boolean;
@@ -67,7 +74,8 @@ export type HistoryAction =
 
 /** Which actions can be committed by reading exactly one body. */
 export function historyActionTarget(action: HistoryAction): string | undefined {
-  return action.kind === 'assistant-items' ||
+  return action.kind === 'operation-batch-status' ||
+    action.kind === 'assistant-items' ||
     action.kind === 'user-status' ||
     action.kind === 'finish-assistant' ||
     action.kind === 'assistant-file-diff' ||
@@ -108,6 +116,8 @@ function applyUserStatus(
   if (!canonical) return action.requeueUndelivered === true;
   const write = (entry: SessionEntry) => {
     entry.status = action.status;
+    if (action.status === 'canceled' && action.cancellationReason)
+      entry.cancellationReason = action.cancellationReason;
     entry.read = action.status !== 'pending' && action.status !== 'pending_apply';
     if (action.deliveredSteer)
       entry.inputConfig = { ...entry.inputConfig, _lodyDeliveryKind: 'steer' };
@@ -128,8 +138,7 @@ function applyUserStatus(
   }
   write(canonical);
   const rank = userStatusRank(action.status);
-  for (const copy of copies.slice(0, -1))
-    if (userStatusRank(copy.status) <= rank) write(copy);
+  for (const copy of copies.slice(0, -1)) if (userStatusRank(copy.status) <= rank) write(copy);
   return true;
 }
 
@@ -160,6 +169,24 @@ export function applyHistoryAction(
         action.statuses
       );
       return { turns, matched: turns !== history };
+    }
+    case 'operation-batch-status': {
+      let matched = false;
+      const turns = history.map((entry) => {
+        if (entry.id !== action.turnId || entry.role !== 'system') return entry;
+        const items = entry.items?.map((item) => {
+          if (
+            item.type !== 'operation_completion_batch' ||
+            item.batchId !== action.batchId ||
+            item.deliveryStatus === action.status
+          )
+            return item;
+          matched = true;
+          return { ...item, deliveryStatus: action.status };
+        });
+        return items === entry.items ? entry : { ...entry, items };
+      });
+      return { turns: matched ? turns : history, matched };
     }
     case 'operation-completion': {
       const turns = planOperationCompletion(history, action.operation, action.turn);

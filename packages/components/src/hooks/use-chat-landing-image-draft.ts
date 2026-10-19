@@ -181,7 +181,7 @@ export function useChatLandingImageDraft(args: {
   const handleRemoveImage = useCallback(
     (localId: string) => {
       // The landing owns the shared draft session id, so removing the last image
-      // cannot orphan file attachments or an in-flight ACP preparation.
+      // cannot orphan file attachments.
       setPendingImages((prev) => {
         const target = prev.find((item) => item.localId === localId);
         if (target) {

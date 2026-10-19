@@ -33,10 +33,18 @@ builds to `site-docs/out/client`. Binding rules live in
   conversation, composer, diff, browser, mobile, and usage/PR views. They take demo
   data as props and import nothing from the app; `scripts/app-boundary.mjs` checks
   that in `test`.
+- `components/docs-replica/` — display-only previews embedded in docs pages. The
+  original sidebar session list and home composer repo/branch pickers share the
+  directory with the Feature List / reference previews for conversation diffs,
+  files, mentions, commands, images, Browser preview, Agent/CLI runtime cards,
+  goals, quota, usage, and notification chrome. They reuse the landing replica's
+  primitives and `.lody-app-preview` token scope, take synthetic mock data plus a
+  locale, and never import the app or real user content.
 - `components/landing-preview-data.ts` — demo copy, session rows, the scripted
   conversations, and the mock diff.
 - `components/marketing-atmosphere.tsx` — the shared marketing ambient field,
-  hosted once by `components/site-root-provider.tsx`.
+  hosted once by `components/site-root-provider.tsx`; its GLSL (single-pass and
+  split field, temporal blend) is in `components/marketing-atmosphere-shaders.ts`.
 - `components/pricing-page.tsx` — pricing table, plans, and FAQ.
 
 Demo sequencing and screenshot notes live in
@@ -70,6 +78,10 @@ The Fumadocs adapter passes the URL's pathname, parsed search, and fragment sepa
 to RouterLink; only the pathname may be affected by `trailingSlash`.
 
 ## Static content and client startup
+
+Docs render one page-title H1. The title reuses the first depth-1 entry's
+Fumadocs-generated TOC anchor because the MDX H1 itself is suppressed. This keeps
+existing title links working even when frontmatter and body titles differ.
 
 Every published URL is prerendered. `src/client.tsx` prepares the current router
 and runs its loaders to populate browser MDX caches before calling React hydration.

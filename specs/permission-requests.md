@@ -35,9 +35,16 @@ their hands already are, and they must not answer by accident.
   subject, and one row of answers at the end — a split button for refusing and
   one for allowing. Each shows its one-time answer (the suggestion is primary)
   and keeps the answers that change what happens from now on ("don't ask
-  again", "block this host") in its menu, in the provider's words.
+  again", "block this host") in its menu, in the provider's words. When the
+  shown answer is too long for a compact control, that family becomes a menu
+  trigger ("Decline", "Allow", or "Choose an answer"). Opening it does not
+  answer the request; the menu shows the family's complete original option
+  names in provider order, left-aligned and wrapping within the viewport.
+  A direct answer and its options chevron form one segmented control. Permission
+  menus prefer opening above the trigger, with viewport collision avoidance.
 - **Keyboard.** The arrows walk the answers, starting on the suggestion; Enter or
-  Space answers the one focused. Escape refuses once and never picks an "always"
+  Space activates the focused control: a direct answer submits, a family trigger
+  opens its menu for selection. Escape on the prompt refuses once and never picks an "always"
   refusal; with no one-time refusal, Escape answers nothing. Enter on the prompt
   itself answers nothing, so an Enter meant for a message that the prompt just
   replaced cannot approve the request.
@@ -52,7 +59,11 @@ their hands already are, and they must not answer by accident.
 - **A way out.** The prompt offers Stop, because the composer that holds Stop is
   hidden while a request is pending.
 - Questions (AskUserQuestion forms) are answered in the same place and queue,
-  with the question form rather than the option list.
+  with the question form rather than the option list. Switching between pending
+  requests preserves each form's choices, replacement answer, notes, and current
+  page within the mounted session surface. Only the displayed form is answerable.
+  Accepted answers, accepted cancellation, withdrawal, or surface unmount release
+  that request's local draft; persistence across app restart is not promised.
 
 ## Open questions
 
@@ -66,5 +77,7 @@ their hands already are, and they must not answer by accident.
 
 - Implementation: `packages/components/src/components/sessions/floating-permission-request.tsx`,
   `packages/components/src/lib/permission-request-presentation.ts`.
-- Validation: `packages/components/tests/permission-prompt.test.tsx`.
+- Validation: `packages/components/tests/permission-prompt.test.tsx` and
+  `packages/components/tests/e2e/composer-submission-focus.spec.ts`.
 - Decision record: [permission prompt note](../.agents/notes/implemented/feature/2026-09-24-permission-prompt.md).
+- [Question recovery decision](../.agents/notes/implemented/bug-fix/2026-10-13-question-request-continuity.md).

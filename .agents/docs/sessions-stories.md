@@ -11,10 +11,22 @@ this page is the full text of the rules summarised there.
   attachment-rich list case is `SessionChatStream` → `HumanAndAgentAttachments`;
   shared full-page session conversation coverage is `SessionConversationPage.stories.tsx`
   using `session-conversation-page.tsx`.
+- `ConversationDiffPanel` uses a synthetic 200-file provider with the real diff panel.
+  `OpenFromChanges` starts without a mounted diff; its Changes button mounts the panel
+  inside the real `DesktopSessionDetailLayout`, including its sidebar transition.
+  Close unmounts it so another click exercises reopening. Reload the preview before
+  assessing a cold first open. The opener is a small synthetic harness; it does not
+  run `SessionDetail`'s turn-summary, tab or RPC controllers, or measure Electron latency.
+  `ManyFiles`, `FocusLastFile` and `AllChanges` cover the already-open panel states.
+- `MobileDiffDrawer` renders the real shared changes list, mobile drawer and diff
+  panel with four synthetic code/doc/test entries. `Changes` exercises list →
+  selected diff → Back, Types/Files selection and retained hidden panel state;
+  `Loading` uses the real summary-loading state. It has no native transport or
+  full SessionDetail runtime and does not validate physical-device gestures.
 - `SessionInfoBar` → `DiscoveredPrAssociationRejected` feeds synthetic owner
   metadata through production PR selection/action gating into the real bar,
   without hosted mutations. Run `pnpm --filter @lody/components exec playwright test
-  tests/e2e/session-info-bar-observation.spec.ts --workers=1` for its browser
+tests/e2e/session-info-bar-observation.spec.ts --workers=1` for its browser
   regression and ignored screenshot output. The optional `B08_SCREENSHOT_FIXTURES`
   directory supplies scheduler-captured `before.json` / `after.json` for comparison;
   see the [observation decision](../notes/proposed/bug-fix/2026-10-01-pr-observation-association.md)
@@ -30,7 +42,7 @@ this page is the full text of the rules summarised there.
   in web Storybook; its unsupported browser state is covered instead. Theme/locale
   controls apply to state stories; controller play assertions run in English.
   Run `pnpm --filter @lody/components exec playwright test
-  tests/e2e/browser-preview-stories.spec.ts --workers=1` for every registered Browser
+tests/e2e/browser-preview-stories.spec.ts --workers=1` for every registered Browser
   story, recovery-button assertions, browser errors, open-popover assertions, and
   per-story screenshots in Playwright's ignored output directory. Screenshots are review
   artifacts, not git files.

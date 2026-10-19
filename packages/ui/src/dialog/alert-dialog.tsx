@@ -2,7 +2,7 @@ import { AlertDialog as BaseAlertDialog } from '@base-ui/react/alert-dialog';
 import * as stylex from '@stylexjs/stylex';
 import { forwardRef, type ComponentProps } from 'react';
 import { appendClassName } from '../internal/class-name';
-import { PopupContainerProvider } from '../popup/portal-container';
+import { useModalContainer, PopupContainerProvider } from '../popup/portal-container';
 import { useForcedThemeClassNames } from '../theme/theme';
 import { DialogBackdrop, type ModalContentProps } from './dialog';
 import {
@@ -58,13 +58,14 @@ export const AlertDialogContent = forwardRef<HTMLDivElement, AlertDialogContentP
     },
     ref
   ) {
+    const modalContainer = useModalContainer();
     const { ref: panelRef, container: panel } = usePanelContainer<HTMLDivElement>(ref);
     const centre = useInlineCentre(centerOn);
     const palette = useForcedThemeClassNames();
     const noTransition = noAnimation ? stylex.props(modal.noTransition).className : undefined;
     return (
       <BaseAlertDialog.Portal
-        container={container}
+        container={container === undefined ? modalContainer : container}
         className={[stylex.props(styles.portal).className, ...palette].filter(Boolean).join(' ')}
       >
         {/* `AlertDialog.Backdrop` is the dialog's backdrop upstream, so the

@@ -85,3 +85,35 @@ export const resolveAvailableBranchName = (
   }
   throw new Error(`Unable to find an available branch name for ${desiredBranchName}`);
 };
+
+/** The allocation scheme is shared by creation and first-task prompt eligibility. */
+export const getAllocatedSessionBranchName = (sessionId: string, localShared: boolean): string => {
+  if (!localShared) return `session/${sessionId.slice(0, 8)}`;
+  const shortId = sessionId
+    .slice(0, 12)
+    .replace(/[^A-Za-z0-9_-]/g, '')
+    .slice(0, 12);
+  return `lody/${shortId || sessionId.slice(0, 8)}`;
+};
+
+const matchesAllocatedPart = (actual: string, allocated: string): boolean => {
+  if (actual === allocated) return true;
+  if (!actual.startsWith(`${allocated}-`)) return false;
+  const suffix = actual.slice(allocated.length + 1);
+  return /^[1-9]\d*$/.test(suffix) && Number(suffix) >= 2;
+};
+
+export const isAllocatedSessionBranchName = (branchName: string, sessionId: string): boolean => {
+  const parts = branchName.split('/');
+  const [actualNamespace, actualName] = parts;
+  if (parts.length !== 2 || !actualNamespace || !actualName) return false;
+  return [false, true].some((localShared) => {
+    const [namespace, name] = getAllocatedSessionBranchName(sessionId, localShared).split('/');
+    return (
+      namespace !== undefined &&
+      name !== undefined &&
+      matchesAllocatedPart(actualNamespace, namespace) &&
+      matchesAllocatedPart(actualName, name)
+    );
+  });
+};

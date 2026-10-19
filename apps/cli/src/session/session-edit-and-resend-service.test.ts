@@ -10,6 +10,7 @@ import {
   type SessionHistoryInput,
   type SessionId,
   type SessionMeta,
+  type SessionTurnInputConfig,
 } from '@lody/shared';
 import type { ReplaceEditableTailInput } from '@lody/shared/session-data';
 import { SessionEditAndResendService } from './session-edit-and-resend-service';
@@ -169,6 +170,14 @@ function createHarness(
   };
   let barrierHeld = false;
   const executionService = {
+    acceptInboxHumanInput: vi.fn(
+      async (_args: {
+        sessionId: SessionId;
+        inputId: string;
+        userId: string;
+        config: SessionTurnInputConfig;
+      }) => {}
+    ),
     getExecutionSnapshot: vi.fn(() => ({
       hasActiveTurn: options.active === true,
       activeTurnId: options.active ? 'assistant-2' : undefined,
@@ -226,6 +235,8 @@ function createHarness(
     getHistory: () => loro.getList('history').toJSON() as SessionHistoryInput[],
     logger,
     realDoc,
+    meta,
+    readStoredMeta: () => storedMeta,
     repo,
     service,
   });
@@ -292,6 +303,13 @@ describe('SessionEditAndResendService', () => {
         resume: 'acp-new',
       },
     });
+    const receipt = harness.executionService.acceptInboxHumanInput.mock.calls[0]?.[0];
+    expect(receipt).toMatchObject({
+      sessionId: spec.sessionId,
+      inputId: spec.replacementUserTurnId,
+      userId: spec.requestedByUserId,
+    });
+    expect(receipt?.config).toEqual(harness.sessionData.history.readAll().at(-1)?.inputConfig);
     expect(harness.repo.upsertDocMeta).toHaveBeenCalledWith(
       expect.any(String),
       expect.objectContaining({
@@ -300,6 +318,25 @@ describe('SessionEditAndResendService', () => {
         lastHandledUserMsgId: 'user-1',
       })
     );
+  });
+
+  it('edits and resends while retaining an inert legacy auto-review pointer', async () => {
+    const harness = createHarness();
+    harness.meta.autoReview = { runId: 'retired-review', t: 1 };
+
+    const result = await harness.service.editAndResend(spec);
+
+    expect(result).toMatchObject({ success: true });
+    expect(harness.sessionData.history.readAll().map((entry) => entry.id)).toEqual([
+      'user-1',
+      'assistant-1',
+      'user-3',
+    ]);
+    expect(harness.readStoredMeta()).toMatchObject({
+      autoReview: { runId: 'retired-review', t: 1 },
+      acpSessionId: 'acp-new',
+      latestUserMsgId: 'user-3',
+    });
   });
 
   it('refuses the commit when the editable tail moved after the eligibility check', async () => {

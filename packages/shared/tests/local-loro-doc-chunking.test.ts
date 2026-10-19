@@ -1,3 +1,10 @@
+import { beforeEach, afterEach, vi } from 'vitest';
+import { Effect, Layer } from 'effect';
+import { LocalLoroWriterTurn } from '../src/local-loro-writer';
+import {
+  makeLocalLoroWriterLegacy,
+  type LocalLoroWriterLegacy,
+} from '../src/local-loro-writer/legacy';
 /**
  * Doc-update chunking on the local Loro data plane (2026-07-24).
  *
@@ -16,7 +23,7 @@
 import { describe, expect, it } from 'vitest';
 import { LoroDoc } from 'loro-crdt';
 import { LocalLoroTransportAdapter } from '../src/local-loro-transport';
-import { LocalLoroDataPlaneServer } from '../src/local-loro-data-plane-server';
+import { LocalLoroDataPlaneServerLegacy } from '../src/local-loro-data-plane-server';
 import {
   DocUpdateChunkAssembler,
   buildDocUpdateChunkPayloads,
@@ -33,7 +40,8 @@ class ChunkHarness {
   private readonly rendererListeners = new Set<(m: LocalLoroDataPlaneServerMessage) => void>();
   private readonly serverDocs = new Map<string, LoroDoc>();
   readonly pushed: LocalLoroDataPlaneServerMessage[] = [];
-  readonly engine = new LocalLoroDataPlaneServer({
+  readonly engine = new LocalLoroDataPlaneServerLegacy({
+    writerLegacy,
     workspaceId: WORKSPACE_ID,
     resolveDoc: async (docId) => this.serverDoc(docId),
     resolveFlockDoc: async () => {
@@ -86,14 +94,14 @@ class ChunkHarness {
   async settle(): Promise<void> {
     for (let round = 0; round < 500; round += 1) {
       if (this.tasks.length === 0) {
-        await new Promise((resolve) => setTimeout(resolve, 0));
+        await vi.advanceTimersByTimeAsync(1);
         if (this.tasks.length === 0) return;
       }
       const batch = this.tasks.splice(0);
       for (const task of batch) {
         await task();
       }
-      await new Promise((resolve) => setTimeout(resolve, 0));
+      await vi.advanceTimersByTimeAsync(1);
     }
     throw new Error('settle_did_not_converge');
   }
@@ -218,4 +226,23 @@ describe('DocUpdateChunkAssembler', () => {
     expect(assembler.push(retry[1]!)).toBeNull();
     expect(assembler.push(retry[2]!)).toBe('abcdefghijkl');
   });
+});
+
+let writerLegacy: LocalLoroWriterLegacy;
+beforeEach(() => {
+  vi.useFakeTimers();
+  writerLegacy = makeLocalLoroWriterLegacy(
+    Layer.succeed(LocalLoroWriterTurn, {
+      next: Effect.callback<void>((resume) => {
+        const handle = setTimeout(() => resume(Effect.void), 0);
+        return Effect.sync(() => clearTimeout(handle));
+      }),
+    })
+  );
+});
+afterEach(async () => {
+  const closed = writerLegacy.closeLegacy();
+  await vi.runAllTimersAsync();
+  await closed;
+  vi.useRealTimers();
 });

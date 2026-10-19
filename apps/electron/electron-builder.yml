@@ -3,6 +3,7 @@ productName: Lody OSS
 protocols:
   - name: Lody OSS Desktop
     schemes:
+      - lody
       - lody-oss
 directories:
   buildResources: build
@@ -19,6 +20,7 @@ files:
   - '!{.env,.env.*,.npmrc,pnpm-lock.yaml}'
   - '!{tsconfig.json,tsconfig.node.json,tsconfig.web.json}'
   - '!**/node_modules/electron-sparkle-updater/native/vendor/**'
+  - '!**/node_modules/electron-sparkle-updater/native/sparkle-chain.tar.xz'
   - '!**/*.map'
   - '!**/*.{md,markdown,mkd}'
   - '!**/{test,tests,__tests__,testing,__mocks__,mocks,spec,examples,example,stories,storybook}/**'

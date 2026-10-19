@@ -68,6 +68,18 @@ describe('computeTextLineCounts', () => {
       expect(computeTextLineCounts(oldText, newText)).toEqual(gitNumstat(oldText, newText));
     }
   });
+
+  it('asks git for exact counts once jsdiff bails on scattered edits', () => {
+    // Every other line changes: far past jsdiff's edit cap, and the prefix/suffix
+    // estimate would call nearly the whole file changed.
+    const oldText = Array.from({ length: 2_000 }, (_, i) => `line ${i}\n`).join('');
+    const newText = Array.from({ length: 2_000 }, (_, i) =>
+      i % 2 === 0 ? `line ${i}\n` : `edited ${i}\n`
+    ).join('');
+
+    expect(computeTextLineCounts(oldText, newText)).toEqual([1_000, 1_000]);
+    expect(prefixSuffixLineCounts(oldText, newText)).not.toEqual([1_000, 1_000]);
+  });
 });
 
 describe('computeLineCounts (nullable sides)', () => {

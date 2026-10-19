@@ -87,6 +87,7 @@ function CreateWorkspace() {
   if (error) {
     return (
       <RouteMessage
+        gate="session_load_error"
         title={t('workspace.route.sessionLoadErrorTitle')}
         description={t('workspace.route.sessionLoadErrorDescription')}
       />
@@ -126,11 +127,10 @@ function CreateWorkspaceAuthed({
   const creationAvailability = useCloudQuery(
     cloudOperations.billing.getWorkspaceCreationAvailability
   );
-  const newWorkspacePricing = useCloudQuery(
-    cloudOperations.billing.getMyNewWorkspacePricing,
-    {}
+  const newWorkspacePricing = useCloudQuery(cloudOperations.billing.getMyNewWorkspacePricing, {});
+  const createPaidWorkspaceCheckout = useCloudAction(
+    cloudOperations.billing.createPaidWorkspaceCheckout
   );
-  const createPaidWorkspaceCheckout = useCloudAction(cloudOperations.billing.createPaidWorkspaceCheckout);
   const {
     slug: workspaceSlug,
     setSlug: setWorkspaceSlug,
@@ -246,6 +246,7 @@ function CreateWorkspaceAuthed({
   if (hidesBillingUi && paidRequired) {
     return (
       <RouteMessage
+        gate={null}
         title={t('organization.mobileWorkspaceLimitReachedTitle')}
         description={t('organization.mobileWorkspaceLimitReachedDescription')}
       />

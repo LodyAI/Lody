@@ -19,7 +19,7 @@ directory index. Stories: `src/stories/Mobile*.stories.tsx`.
   scroll region.
 - `mobile-project-screen.tsx`, `mobile-chat-landing-screen.tsx`,
   `mobile-archive-screen.tsx` — the other top-level screens.
-- `mobile-workspace-layout.tsx`, `mobile-workspace-tabbar.tsx`,
+- `mobile-workspace-layout.tsx`, [`mobile-workspace-tabbar.tsx`](../../../../../specs/mobile-workspace-dock.md),
   `mobile-workspace-stack.tsx` (SessionDetail layered over the always-mounted
   home/chat landing), `mobile-sidebar-drawer.tsx` (swipe-to-open code retained but
   disabled), `mobile-connection-status.tsx`.
@@ -56,7 +56,10 @@ directory index. Stories: `src/stories/Mobile*.stories.tsx`.
   `mobile-session-menu-sheet.tsx` (the `…` button: machine/branch info, optional
   Owner row, Find/Fork/Rename/Copy/Archive).
 - `mobile-file-viewer-drawer.tsx` — full-screen right drawer over the still-mounted
-  conversation. `glass-icon-button.tsx` — the frosted header's `GlassIconButton`
+  conversation. Session HTML opens in preview with an eye toggle for source;
+  WebKit uses the shared script-free HTML/CSS preview. The project file browser
+  also previews complete HTML by default with the same source toggle.
+  `glass-icon-button.tsx` — the frosted header's `GlassIconButton`
   (canvas-drawn glass disc; story `MobileFrostedHeader.stories.tsx`).
 
 ## Run config and pickers
@@ -69,6 +72,9 @@ directory index. Stories: `src/stories/Mobile*.stories.tsx`.
   `permission-mode-face.tsx` (classified by `@lody/shared`
   `classifyPermissionModeFace`), `mobile-inline-picker.tsx`,
   `mobile-settings-picker-trigger.tsx`.
+- Provider-defined pickers have a separate coordinator ID namespace, so an ACP
+  option named `permission` or `model` cannot open or dismiss a built-in row.
+  [Collision fix and builtin audit](../../../../../.agents/notes/implemented/bug-fix/2026-10-09-dimcode-mobile-permission-picker.md).
 - `mobile-session-composer-footer.tsx` still exports the legacy
   `MobileModelPickerLabel` helpers for any remaining chip faces;
   `mobile-fast-plan-toggles.tsx` survives for the in-session composer only.

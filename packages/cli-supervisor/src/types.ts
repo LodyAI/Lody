@@ -1,5 +1,6 @@
 import type { ChildProcess } from 'node:child_process';
 import type { CliRuntimeState } from '@lody/shared/electron-ipc';
+import type { ProcessFacadeOptions } from '@lody/shared/node/process';
 
 export type CliRunResult = {
   code: number | null;
@@ -15,6 +16,12 @@ export type LaunchHandle = {
   result: Promise<CliRunResult>;
   /** Cross-platform graceful shutdown channel. OS signals remain the timeout fallback. */
   requestShutdown?: () => void | Promise<void>;
+  /**
+   * Whether `child` leads its own POSIX process group, i.e. it was started with
+   * `processGroup: true`. Must match the spawn: termination signals the whole
+   * group when true and only the child when false (the default).
+   */
+  processGroup?: boolean;
 };
 
 /**
@@ -78,6 +85,8 @@ export type SupervisorOptions = {
   existingRuntimePolicy?: 'attach' | 'reject';
   terminationGraceMs?: number;
   forceKillWaitMs?: number;
+  /** Process layer used to signal the child's tree: its logger, or a fake OS in tests. */
+  processOptions?: ProcessFacadeOptions;
   fetchRuntimeState: (options: { timeoutMs: number }) => Promise<CliRuntimeState | null>;
   probeIntervalMs?: number;
   probeTimeoutMs?: number;

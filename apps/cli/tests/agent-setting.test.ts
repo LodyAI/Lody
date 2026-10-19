@@ -13,6 +13,7 @@ import { spawn } from 'node:child_process';
 
 import {
   getAcpCapabilitySourceVersion,
+  mergeACPProcessEnv,
   mergeLoginShellEnv,
   resolveACPSetting,
   resolveExpectedAcpCapabilitySourceVersion,
@@ -168,6 +169,30 @@ describe('resolveBuiltinACPSetting', () => {
     expect(() => resolveBuiltinACPSetting('bub')).toThrow(/resolveACPProcessLaunchAsync/);
   });
 
+  it('prepares the Magpie launch from Provider metadata without a private environment switch', async () => {
+    const gateway = 'http://127.0.0.1:3425';
+    const input = { cliType: 'builtin' as const, agentType: 'deepseek', magpieGatewayUrl: gateway };
+    vi.stubGlobal('fetch', async (url: string) =>
+      Response.json(
+        url.endsWith('/api/hello') ? { name: 'magpie' } : { data: [{ id: 'synthetic/model' }] }
+      )
+    );
+    try {
+      const launch = await resolveACPProcessLaunchAsync(input);
+      expect(launch.env).toMatchObject({
+        DEEPSEEK_BASE_URL: `${gateway}/v1`,
+        DEEPSEEK_API_KEY: 'magpie-lody',
+      });
+      expect(launch.env).not.toHaveProperty('LODY_MAGPIE_GATEWAY');
+      expect(launch.capabilitySourceVersion).toBe(getAcpCapabilitySourceVersion(input));
+      expect(launch.capabilitySourceVersion).not.toBe(
+        getAcpCapabilitySourceVersion({ ...input, magpieGatewayUrl: 'http://127.0.0.1:3426' })
+      );
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it('keys builtin capability versions on the bundled adapter and managed runtime', () => {
     expect(getAcpCapabilitySourceVersion({ cliType: 'builtin', agentType: 'codex' })).toBe(
       BUILTIN_CODEX_CAPABILITY_SOURCE_VERSION
@@ -223,10 +248,12 @@ describe('resolveBuiltinACPSetting', () => {
   it('launches DeepSeek Harness through the pinned profile launcher', async () => {
     const dshHome = await mkdtemp(join(tmpdir(), 'lody-deepseek-harness-test-'));
     vi.stubEnv(DEEPSEEK_HARNESS_HOME_ENV, dshHome);
+    vi.stubEnv('LODY_DATA_DIR', dshHome);
     try {
       const launch = await resolveACPProcessLaunchAsync({
         cliType: 'builtin',
         agentType: 'deepseek',
+        agentConfigId: 'synthetic-provider',
       });
 
       expect(launch.command).toBe('npx');
@@ -241,7 +268,7 @@ describe('resolveBuiltinACPSetting', () => {
           '--package',
           `@deepseek-ai/dsh-base@${DEEPSEEK_HARNESS_VERSION}`,
           '--package',
-          `@deepseek-ai/dsh-agent-presets@${DEEPSEEK_HARNESS_VERSION}`,
+          `@deepseek-ai/dsh-agent-preset-registry@${DEEPSEEK_HARNESS_VERSION}`,
           '--package',
           `@deepseek-ai/dsh-mcp-client@${DEEPSEEK_HARNESS_VERSION}`,
           'node',
@@ -258,7 +285,9 @@ describe('resolveBuiltinACPSetting', () => {
       expect(launch.env?.[ACP_EXTENSION_DSH_QUERY_PATH_ENV]).toBe(
         join(dshHome, 'sessions', 'session-query.db')
       );
-      expect(launch.env?.[DEEPSEEK_HARNESS_HOME_ENV]).toBe(dshHome);
+      expect(launch.env?.[DEEPSEEK_HARNESS_HOME_ENV]).toBe(
+        join(dshHome, 'dsh', 'providers', 'synthetic-provider')
+      );
 
       const runtimeArgs: unknown = JSON.parse(
         Buffer.from(launch.env?.LODY_DSH_NODE_ARGS ?? '', 'base64').toString()
@@ -268,13 +297,17 @@ describe('resolveBuiltinACPSetting', () => {
       const profileFlag = runtimeArgs.indexOf('--profile');
       const profileName = runtimeArgs[profileFlag + 1];
       expect(profileName).toBeTruthy();
-      const profileDir = join(dshHome, 'profiles', profileName!);
+      const profileDir = join(launch.env![DEEPSEEK_HARNESS_HOME_ENV]!, 'profiles', profileName!);
       const packageJson = await readFile(join(profileDir, 'package.json'), 'utf8');
-      const patch = await readFile(join(profileDir, 'cordis.patch.yml'), 'utf8');
+      expect(await readFile(join(profileDir, 'cordis.patch.yml'), 'utf8')).toBe('[]\n');
+      const bundle = JSON.parse(packageJson).dsh.profile.bundles.at(-1);
+      const patch = await readFile(
+        join(profileDir, 'node_modules', bundle, 'cordis.patch.yml'),
+        'utf8'
+      );
       expect(packageJson).toContain('@deepseek-ai/dsh-base');
       expect(patch).toContain('deepseek-acp.js');
       expect(patch).not.toContain("name: '@deepseek-ai/dsh-agent-spine-demo'");
-      expect(patch).toContain("name: '@deepseek-ai/dsh-agent-presets'");
       expect(patch).toContain("name: '@deepseek-ai/dsh-tool-subagent/model-selection-settings'");
       expect(patch).toContain('compression: zstd');
       expect(patch).toContain('defaultPreset: workspace-write');
@@ -286,20 +319,22 @@ describe('resolveBuiltinACPSetting', () => {
     }
   });
 
-  it('resolves Dimcode to a pinned npx ACP launch understood by cache recovery', async () => {
+  it('launches the user-installed Dimcode without npx or automatic updates', async () => {
     for (const extraArgs of [undefined, ['--verbose']]) {
       const input = { cliType: 'builtin' as const, agentType: 'dimcode', extraArgs };
       const launch = await resolveACPProcessLaunchAsync(input);
       expect(launch).toEqual({
-        command: 'npx',
-        args: ['--prefer-offline', '-y', 'dimcode@0.5.10', 'acp', ...(extraArgs ?? [])],
+        command: 'dimcode',
+        args: ['acp', ...(extraArgs ?? [])],
+        env: { DIMCODE_DISABLE_AUTOUPDATE: '1', DIMCODE_AUTOUPDATE: '0' },
         capabilitySourceVersion: getAcpCapabilitySourceVersion(input),
       });
-      expect(parseNpxPackageSpecFromArgs(launch.args)).toEqual({
-        name: 'dimcode',
-        version: '0.5.10',
+      expect(launch.capabilitySourceVersion).toBe('builtin-dimcode:local-acp');
+      expect(mergeACPProcessEnv(launch, { DIMCODE_AUTOUPDATE: '1', PATH: '/user/bin' })).toEqual({
+        PATH: '/user/bin',
+        DIMCODE_DISABLE_AUTOUPDATE: '1',
+        DIMCODE_AUTOUPDATE: '0',
       });
-      expect(launch.capabilitySourceVersion).toBe('builtin-dimcode:0.5.10');
     }
     expect(() => resolveBuiltinACPSetting('dimcode')).toThrow(/resolveACPProcessLaunchAsync/);
   });
@@ -629,7 +664,7 @@ describe('resolveBuiltinACPSetting', () => {
 
     it('matches a registry launch without consulting a managed runtime', async () => {
       const getRuntimeStatus = vi.fn();
-      const input = { cliType: 'registry' as const, agentType: 'amp-acp' };
+      const input = { cliType: 'registry' as const, agentType: 'goose' };
 
       const { expected, launched } = await withManagedRuntimeManager(
         { getRuntimeStatus },
@@ -717,13 +752,14 @@ describe('resolveBuiltinACPSetting', () => {
     }
   });
 
-  it('refreshes metadata when a registry local command uses npx', () => {
-    const resolved = resolveACPSetting({ cliType: 'registry', agentType: 'amp-acp' });
-
-    expect(resolved.exec).toMatchObject({
-      command: 'npx',
-      args: ['--prefer-offline', '-y', 'amp-acp'],
-    });
+  it('pins an exact version for every registry npx launch it serves from cache', () => {
+    // --prefer-offline reuses whatever an unpinned spec first installed, forever.
+    for (const agent of REGISTRY_ACP_AGENTS) {
+      expect(agent.distribution.local?.command, agent.id).not.toBe('npx');
+      if (!agent.distribution.npx) continue;
+      const { args } = resolveACPSetting({ cliType: 'registry', agentType: agent.id }).exec;
+      expect(parseNpxPackageSpecFromArgs(args)?.version, agent.id).toMatch(/^\d+\.\d+\.\d+/);
+    }
   });
 
   it('refreshes metadata when a registry npx distribution is used', () => {

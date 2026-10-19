@@ -1,3 +1,4 @@
+import { BugReportClientLogSchema, type BugReportClientLog } from '@lody/shared';
 import {
   MemoryProviderRequestSchema,
   MemoryProviderResponseSchema,
@@ -55,6 +56,7 @@ import type {
   MachineAcpAuthenticateResponse,
   MachineAcpAuthenticationProgressMessage,
   MachineAcpCapabilitiesRefreshResponse,
+  MachineProviderRateLimitsRefreshResponse,
   MachinePiExtensionsResponse,
   RpcSecretEnvelope,
   RpcSecretPublicKey,
@@ -80,11 +82,15 @@ import type {
   SessionForkResponse,
   SessionForkSpec,
   SessionId,
+  SessionHistoryReadQuery,
   SessionSteerResponse,
   SessionPreviewCreateResponse,
   SessionPreviewRevokeResponse,
   SessionPreviewStatusResponse,
   SessionTurnInputConfig,
+  SessionHistoryReadResponse,
+  SessionHistoryWriteOperation,
+  SessionHistoryWriteResponse,
   FilePreviewV3Request,
   FilePreviewV3Response,
 } from '@lody/shared';
@@ -109,6 +115,7 @@ import {
   MachineAcpAuthenticateResponseSchema,
   MachineAcpAuthenticationProgressMessageSchema,
   MachineAcpCapabilitiesRefreshResponseSchema,
+  MachineProviderRateLimitsRefreshResponseSchema,
   MachinePiExtensionsResponseSchema,
   RpcSecretEnvelopeSchema,
   PreviewTargetSchema,
@@ -138,6 +145,10 @@ import {
   SessionPreviewCreateResponseSchema,
   SessionPreviewRevokeResponseSchema,
   SessionPreviewStatusResponseSchema,
+  SessionHistoryReadResponseSchema,
+  SessionHistoryReadQuerySchema,
+  SessionHistoryWriteResponseSchema,
+  SessionHistoryWriteOperationSchema,
 } from '@lody/shared';
 import {
   encryptRpcSecret,
@@ -175,6 +186,32 @@ export const LORO_STREAMS_RPC_ERROR_CODES = {
 export type LoroStreamsRpcErrorCode =
   (typeof LORO_STREAMS_RPC_ERROR_CODES)[keyof typeof LORO_STREAMS_RPC_ERROR_CODES];
 
+/** A handler rejection with a stable wire code and content-free, local-only context. */
+export class LoroStreamsRpcHandlerError extends Error {
+  constructor(
+    readonly code: string,
+    message: string,
+    readonly context?: Readonly<Record<string, string>>
+  ) {
+    super(message);
+    this.name = 'LoroStreamsRpcHandlerError';
+  }
+}
+
+/** Client-side provenance only. These fields are never added to a wire history result. */
+export type SessionHistoryRpcFailure = {
+  readonly source: 'transport' | 'remote' | 'protocol';
+  readonly code: string;
+  readonly requestId: string;
+  readonly machineId: string;
+};
+export type SessionHistoryRpcReadResponse = SessionHistoryReadResponse & {
+  readonly rpcFailure?: SessionHistoryRpcFailure;
+};
+export type SessionHistoryRpcWriteResponse = SessionHistoryWriteResponse & {
+  readonly rpcFailure?: SessionHistoryRpcFailure;
+};
+
 export const LORO_RPC_REQUEST_STREAM_SEGMENT = 'rpc:req';
 export const LORO_RPC_RESPONSE_STREAM_SEGMENT = 'rpc:res';
 
@@ -202,6 +239,7 @@ export const LoroStreamsRpcMethodSchema = z.enum([
   'machine/ping',
   'machine/restart',
   'machine/upgrade',
+  'machine/provider-rate-limits-refresh',
   'machine/acp-capabilities-refresh',
   'machine/acp-capabilities-refresh-cancel',
   'machine/acp-authenticate',
@@ -232,6 +270,9 @@ export const LoroStreamsRpcMethodSchema = z.enum([
   'session/dispatch-turn',
   'session/prepare',
   'session/prepare-cancel',
+  'session/history-read',
+  'session/history-watch',
+  'session/history-write',
   'session/preview-create',
   'session/preview-revoke',
   'session/preview-status',
@@ -304,6 +345,11 @@ export const LoroMachineUpgradeRpcRequestSchema = BaseRpcRequestSchema.extend({
       targetVersion: z.string().trim().min(1).optional(),
     })
     .strict(),
+}).strict();
+
+export const LoroMachineProviderRateLimitsRefreshRpcRequestSchema = BaseRpcRequestSchema.extend({
+  method: z.literal('machine/provider-rate-limits-refresh'),
+  params: z.object({ configId: AgentConfigIdSchema }).strict(),
 }).strict();
 
 export const LoroMachineAcpCapabilitiesRefreshRpcRequestSchema = BaseRpcRequestSchema.extend({
@@ -401,6 +447,7 @@ export const LoroMachineBugReportRpcRequestSchema = BaseRpcRequestSchema.extend(
       description: z.string().trim().min(1),
       reporterUserId: z.string().trim().min(1),
       requestToken: z.string().trim().min(1),
+      clientLog: BugReportClientLogSchema.optional(),
     })
     .strict(),
 }).strict();
@@ -477,7 +524,11 @@ export const LoroFilePreviewRpcRequestSchema = BaseRpcRequestSchema.extend({
  * new method that reuses the envelope.
  */
 export const isOwnerScopedEncryptedRpcMethod = (method: string): boolean =>
-  method.startsWith('code-collab/') || method === 'file/preview';
+  method.startsWith('code-collab/') ||
+  method === 'file/preview' ||
+  method === 'session/history-read' ||
+  method === 'session/history-watch' ||
+  method === 'session/history-write';
 
 export const LoroSessionCancelRpcRequestSchema = BaseRpcRequestSchema.extend({
   method: z.literal('session/cancel'),
@@ -485,6 +536,8 @@ export const LoroSessionCancelRpcRequestSchema = BaseRpcRequestSchema.extend({
     .object({
       sessionId: SessionIdSchema,
       turnId: z.string().trim().min(1),
+      cancelId: z.string().uuid().optional(),
+      pauseInbox: z.boolean().optional(),
       subagentTaskId: z.string().trim().min(1).optional(),
     })
     .strict(),
@@ -560,6 +613,7 @@ export const LoroSessionDispatchTurnRpcRequestSchema = BaseRpcRequestSchema.exte
       userTurnId: z.string().trim().min(1),
       userId: z.string().trim().min(1),
       timestamp: z.string().trim().min(1),
+      inputOrigin: z.enum(['human', 'agent']).optional(),
       // Opaque at the transport layer; the server normalizes it with
       // `normalizeSessionTurnInputConfig` before handing it to the CLI, the
       // same guard used for turn input configs read from CRDT history.
@@ -577,6 +631,34 @@ export const LoroSessionPrepareCancelRpcRequestSchema = BaseRpcRequestSchema.ext
   method: z.literal('session/prepare-cancel'),
   params: SessionPreparationCancelSpecSchema,
 }).strict();
+
+/** Roost history payloads are encrypted with the owner-session envelope. */
+export const LoroSessionHistoryReadRpcRequestSchema = BaseRpcRequestSchema.extend({
+  method: z.literal('session/history-read'),
+  params: CodeCollabV2RpcContentEnvelopeSchema,
+}).strict();
+
+export const LoroSessionHistoryWatchRpcRequestSchema = BaseRpcRequestSchema.extend({
+  method: z.literal('session/history-watch'),
+  params: CodeCollabV2RpcContentEnvelopeSchema,
+}).strict();
+
+export const LoroSessionHistoryWriteRpcRequestSchema = BaseRpcRequestSchema.extend({
+  method: z.literal('session/history-write'),
+  params: CodeCollabV2RpcContentEnvelopeSchema,
+}).strict();
+
+export const SessionHistoryReadRpcPayloadSchema = z
+  .object({ sessionId: SessionIdSchema, query: SessionHistoryReadQuerySchema })
+  .strict();
+
+export const SessionHistoryWriteRpcPayloadSchema = z
+  .object({
+    sessionId: SessionIdSchema,
+    operation: SessionHistoryWriteOperationSchema,
+    payload: z.record(z.string(), z.unknown()),
+  })
+  .strict();
 
 export const LoroSessionPreviewCreateRpcRequestSchema = BaseRpcRequestSchema.extend({
   method: z.literal('session/preview-create'),
@@ -657,6 +739,7 @@ export const LoroStreamsRpcRequestSchema = z.discriminatedUnion('method', [
   LoroMachinePingRpcRequestSchema,
   LoroMachineRestartRpcRequestSchema,
   LoroMachineUpgradeRpcRequestSchema,
+  LoroMachineProviderRateLimitsRefreshRpcRequestSchema,
   LoroMachineAcpCapabilitiesRefreshRpcRequestSchema,
   LoroMachineAcpCapabilitiesRefreshCancelRpcRequestSchema,
   LoroMachineAcpAuthenticateRpcRequestSchema,
@@ -685,6 +768,9 @@ export const LoroStreamsRpcRequestSchema = z.discriminatedUnion('method', [
   LoroSessionDispatchTurnRpcRequestSchema,
   LoroSessionPrepareRpcRequestSchema,
   LoroSessionPrepareCancelRpcRequestSchema,
+  LoroSessionHistoryReadRpcRequestSchema,
+  LoroSessionHistoryWatchRpcRequestSchema,
+  LoroSessionHistoryWriteRpcRequestSchema,
   LoroSessionPreviewCreateRpcRequestSchema,
   LoroSessionPreviewRevokeRpcRequestSchema,
   LoroSessionPreviewStatusRpcRequestSchema,
@@ -827,6 +913,12 @@ export type LoroSessionEditAndResendRpcRequest = z.infer<
 export type LoroSessionPrepareRpcRequest = z.infer<typeof LoroSessionPrepareRpcRequestSchema>;
 export type LoroSessionPrepareCancelRpcRequest = z.infer<
   typeof LoroSessionPrepareCancelRpcRequestSchema
+>;
+export type LoroSessionHistoryReadRpcRequest = z.infer<
+  typeof LoroSessionHistoryReadRpcRequestSchema
+>;
+export type LoroSessionHistoryWriteRpcRequest = z.infer<
+  typeof LoroSessionHistoryWriteRpcRequestSchema
 >;
 export type LoroSessionPreviewCreateRpcRequest = z.infer<
   typeof LoroSessionPreviewCreateRpcRequestSchema
@@ -1101,7 +1193,15 @@ export function createLoroStreamsJsonStreamClient(options: {
         url,
         auth: async () => await options.getToken(),
         fetch: fetchImpl as typeof fetch,
-        timeout: options.timeout,
+        // RPC appends retain their request deadline; SDK bulk uploads default to 60s.
+        timeout:
+          operation === 'append'
+            ? {
+                ...options.timeout,
+                uploadTimeoutMs:
+                  options.timeout?.uploadTimeoutMs ?? options.timeout?.connectTimeoutMs ?? 10_000,
+              }
+            : options.timeout,
       }),
       context: {
         operation: `json.${operation}`,
@@ -1517,6 +1617,7 @@ export type LoroMachineRpcResult =
   | CodeCollabV2RpcResponse
   | CodeCollabV2Error
   | FilePreviewV3Response
+  | MachineProviderRateLimitsRefreshResponse
   | MachineAcpCapabilitiesRefreshResponse
   | MachineAcpAuthenticateResponse
   | MachineAcpAuthenticationProgressMessage
@@ -1536,12 +1637,35 @@ export type LoroMachineRpcResult =
   | SessionDispatchTurnResponse
   | SessionPrepareResponse
   | SessionPrepareCancelResponse
+  | SessionHistoryReadResponse
+  | SessionHistoryWriteResponse
   | SessionPreviewCreateResponse
   | SessionPreviewRevokeResponse
   | SessionPreviewStatusResponse
   | IosSimulatorRemoteResponse
   | LocalProjectGitStateRpcResponse
   | LocalProjectControlResponse;
+
+const historyRpcFailureResponse = (
+  method: 'session/history-read' | 'session/history-watch' | 'session/history-write',
+  context: { sessionId: string; operation?: SessionHistoryWriteOperation } | undefined,
+  error: LoroStreamsRpcError,
+  failure?: SessionHistoryRpcFailure
+): SessionHistoryRpcReadResponse | SessionHistoryRpcWriteResponse => {
+  const common = {
+    sessionId: (context?.sessionId ?? '') as SessionId,
+    success: false,
+    error: `${error.code}: ${error.message}`,
+    ...(failure ? { rpcFailure: failure } : {}),
+  };
+  return method === 'session/history-read' || method === 'session/history-watch'
+    ? { ...common, type: 'session/history-read_response' }
+    : {
+        ...common,
+        type: 'session/history-write_response',
+        operation: context?.operation ?? 'append',
+      };
+};
 
 const toLegacyRpcErrorResponse = (
   method: LoroStreamsRpcMethod,
@@ -1567,7 +1691,9 @@ const toLegacyRpcErrorResponse = (
     type?: LocalProjectControlRequest['type'];
   },
   dispatchContext?: { sessionId: string; userTurnId: string },
-  preparationContext?: { preparationId: string; sessionId: string }
+  preparationContext?: { preparationId: string; sessionId: string },
+  historyContext?: { sessionId: string; operation?: SessionHistoryWriteOperation },
+  historyFailure?: SessionHistoryRpcFailure
 ): LoroMachineRpcResult => {
   if (method === 'machine/preview-control') {
     return {
@@ -1783,6 +1909,14 @@ const toLegacyRpcErrorResponse = (
     };
   }
 
+  if (
+    method === 'session/history-read' ||
+    method === 'session/history-watch' ||
+    method === 'session/history-write'
+  ) {
+    return historyRpcFailureResponse(method, historyContext, error, historyFailure);
+  }
+
   if (method === 'file/preview') {
     const parsedData = FilePreviewV3ErrorSchema.safeParse(error.data);
     if (parsedData.success) {
@@ -1915,6 +2049,10 @@ const parseRpcSuccessResult = async (
     const parsed = MachineUpgradeResponseSchema.safeParse(response.result);
     return parsed.success ? (parsed.data as MachineUpgradeResponse) : null;
   }
+  if (response.method === 'machine/provider-rate-limits-refresh') {
+    const parsed = MachineProviderRateLimitsRefreshResponseSchema.safeParse(response.result);
+    return parsed.success ? (parsed.data as MachineProviderRateLimitsRefreshResponse) : null;
+  }
   if (response.method === 'machine/acp-capabilities-refresh') {
     const parsed = MachineAcpCapabilitiesRefreshResponseSchema.safeParse(response.result);
     return parsed.success ? (parsed.data as MachineAcpCapabilitiesRefreshResponse) : null;
@@ -1992,6 +2130,14 @@ const parseRpcSuccessResult = async (
       envelope.data,
       expectedCodeCollabOwnerSessionId
     );
+    if (response.method === 'session/history-read' || response.method === 'session/history-watch') {
+      const parsed = SessionHistoryReadResponseSchema.safeParse(decrypted);
+      return parsed.success ? (parsed.data as SessionHistoryReadResponse) : null;
+    }
+    if (response.method === 'session/history-write') {
+      const parsed = SessionHistoryWriteResponseSchema.safeParse(decrypted);
+      return parsed.success ? (parsed.data as SessionHistoryWriteResponse) : null;
+    }
     if (response.method === 'file/preview') {
       const previewParsed = FilePreviewV3ResponseSchema.safeParse(decrypted);
       return previewParsed.success ? previewParsed.data : null;
@@ -2049,6 +2195,7 @@ export type LoroStreamsRpcPendingRegistration = {
   };
   dispatchContext?: { sessionId: string; userTurnId: string };
   preparationContext?: { preparationId: string; sessionId: string };
+  historyContext?: { sessionId: string; operation?: SessionHistoryWriteOperation };
   codeCollabOwnerSessionId?: string;
   onAcpBinaryProgress?: (message: MachineAcpBinaryProgressMessage) => void;
   onAcpAuthenticationProgress?: (message: MachineAcpAuthenticationProgressMessage) => void;
@@ -2057,6 +2204,7 @@ export type LoroStreamsRpcPendingRegistration = {
 
 export type LoroStreamsRpcPendingRequest = LoroStreamsRpcPendingRegistration & {
   appendFinishedAtMs?: number;
+  responseRecoveryAtMs?: number;
   resolve: (value: LoroMachineRpcResult | null) => void;
   timeoutId: ReturnType<typeof setTimeout>;
   /**
@@ -2069,6 +2217,9 @@ export type LoroStreamsRpcPendingRequest = LoroStreamsRpcPendingRegistration & {
   progressFrames: number;
 };
 
+/** Renew a stalled response read before an interactive input's RPC expires. */
+export const HISTORY_INPUT_RESPONSE_RECOVERY_MS = 2_000;
+
 export class LoroStreamsRpcResponseDispatcher {
   readonly responseStreamId: string;
   private readonly responseState: LoroJsonStreamState = { nextOffset: '-1' };
@@ -2080,6 +2231,8 @@ export class LoroStreamsRpcResponseDispatcher {
   private lastReportedTransport: LoroStreamsLiveTransport | undefined;
   private startedPromise: Promise<void> | null = null;
   private stopped = false;
+  private responseRecoveryTimer: ReturnType<typeof setTimeout> | undefined;
+  private responseRecoveryAtMs: number | undefined;
 
   constructor(
     private readonly options: {
@@ -2159,8 +2312,7 @@ export class LoroStreamsRpcResponseDispatcher {
     registration: LoroStreamsRpcPendingRegistration
   ): ReturnType<typeof setTimeout> {
     return setTimeout(() => {
-      const pending = this.pending.get(requestId);
-      this.pending.delete(requestId);
+      const pending = this.takePending(requestId);
       const now = Date.now();
       this.options.trace?.('machine rpc transport response timeout', {
         workspaceId: this.options.workspaceId,
@@ -2172,7 +2324,7 @@ export class LoroStreamsRpcResponseDispatcher {
         // The two numbers that separate "never started" from "went quiet
         // halfway": how long the machine had been silent, and whether it had
         // said anything at all before that.
-        silentMs: pending === undefined ? undefined : now - pending.timeoutArmedAtMs,
+        silentMs: pending === null ? undefined : now - pending.timeoutArmedAtMs,
         progressFrames: pending?.progressFrames,
         responseAfterAppendMs:
           pending?.appendFinishedAtMs === undefined ? undefined : now - pending.appendFinishedAtMs,
@@ -2182,7 +2334,31 @@ export class LoroStreamsRpcResponseDispatcher {
       // connection is open but not delivering appends; the transport-level
       // read looks perfectly healthy in that failure.
       this.noteLiveModeResponseTimeout();
-      pending?.resolve(null);
+      if (
+        pending?.historyContext &&
+        (registration.method === 'session/history-read' ||
+          registration.method === 'session/history-watch' ||
+          registration.method === 'session/history-write')
+      ) {
+        pending.resolve(
+          historyRpcFailureResponse(
+            registration.method,
+            pending.historyContext,
+            {
+              code: 'response_timeout',
+              message: 'No history RPC response arrived before the request deadline.',
+            },
+            {
+              source: 'transport',
+              code: 'response_timeout',
+              requestId,
+              machineId: registration.machineId,
+            }
+          )
+        );
+      } else {
+        pending?.resolve(null);
+      }
     }, registration.timeoutMs);
   }
 
@@ -2203,7 +2379,68 @@ export class LoroStreamsRpcResponseDispatcher {
     const pending = this.pending.get(requestId);
     if (pending) {
       pending.appendFinishedAtMs = appendFinishedAtMs;
+      if (
+        this.liveModePolicy &&
+        !this.liveModePolicy.getDiagnostics().pinned &&
+        pending.method === 'session/history-write' &&
+        (pending.historyContext?.operation === 'accept_input_and_dispatch' ||
+          pending.historyContext?.operation === 'accept_input')
+      ) {
+        pending.responseRecoveryAtMs = appendFinishedAtMs + HISTORY_INPUT_RESPONSE_RECOVERY_MS;
+        this.scheduleResponseRecovery();
+      }
     }
+  }
+
+  private scheduleResponseRecovery(): void {
+    let nextAtMs: number | undefined;
+    for (const pending of this.pending.values()) {
+      const due = pending.responseRecoveryAtMs;
+      if (due !== undefined) nextAtMs = Math.min(nextAtMs ?? due, due);
+    }
+    if (this.responseRecoveryAtMs === nextAtMs) return;
+    if (this.responseRecoveryTimer !== undefined) clearTimeout(this.responseRecoveryTimer);
+    this.responseRecoveryTimer = undefined;
+    this.responseRecoveryAtMs = nextAtMs;
+    if (this.stopped || nextAtMs === undefined) return;
+    this.responseRecoveryTimer = setTimeout(
+      () => {
+        this.responseRecoveryTimer = undefined;
+        this.responseRecoveryAtMs = undefined;
+        if (this.stopped) return;
+        // One renewal covers all currently appended inputs. They retain their
+        // original deadlines and identities; never restart the read per input.
+        for (const [requestId, pending] of this.pending) {
+          if (pending.responseRecoveryAtMs === undefined) continue;
+          pending.responseRecoveryAtMs = undefined;
+          try {
+            this.options.trace?.('machine rpc transport pending input recovery', {
+              workspaceId: this.options.workspaceId,
+              machineId: pending.machineId,
+              method: pending.method,
+              rpcRequestId: requestId,
+              responseAfterAppendMs:
+                pending.appendFinishedAtMs === undefined
+                  ? undefined
+                  : Date.now() - pending.appendFinishedAtMs,
+              responseStreamId: this.responseStreamId,
+            });
+          } catch {
+            /* A diagnostic sink cannot prevent response recovery. */
+          }
+        }
+        try {
+          this.liveModePolicy?.recoverPendingWrite();
+          this.reportLiveModeChange();
+        } catch {
+          /* Policy notifications are diagnostic, not an input failure. */
+        }
+        // Renew an already long-polling read too: its connection may be stuck.
+        // The same dispatcher still owns offsets and pending calls.
+        this.currentReadController?.abort();
+      },
+      Math.max(0, nextAtMs - Date.now())
+    );
   }
 
   takePending(requestId: string): LoroStreamsRpcPendingRequest | null {
@@ -2213,6 +2450,7 @@ export class LoroStreamsRpcResponseDispatcher {
     }
     clearTimeout(pending.timeoutId);
     this.pending.delete(requestId);
+    if (pending.responseRecoveryAtMs !== undefined) this.scheduleResponseRecovery();
     return pending;
   }
 
@@ -2225,6 +2463,7 @@ export class LoroStreamsRpcResponseDispatcher {
       pending.resolve(null);
       this.pending.delete(requestId);
     }
+    this.scheduleResponseRecovery();
   }
 
   stop(): void {
@@ -2232,6 +2471,9 @@ export class LoroStreamsRpcResponseDispatcher {
       return;
     }
     this.stopped = true;
+    if (this.responseRecoveryTimer !== undefined) clearTimeout(this.responseRecoveryTimer);
+    this.responseRecoveryTimer = undefined;
+    this.responseRecoveryAtMs = undefined;
     this.stopController.abort();
     for (const [requestId, pending] of this.pending.entries()) {
       clearTimeout(pending.timeoutId);
@@ -2299,6 +2541,7 @@ export class LoroStreamsRpcResponseDispatcher {
         if (this.stopped) {
           return;
         }
+        if (readController.signal.aborted) continue;
 
         if (error instanceof LoroStreamsGatewayError) {
           if (error.status === 404) {
@@ -2428,7 +2671,14 @@ export class LoroStreamsRpcResponseDispatcher {
           finalPending.previewContext,
           finalPending.localProjectContext,
           finalPending.dispatchContext,
-          finalPending.preparationContext
+          finalPending.preparationContext,
+          finalPending.historyContext,
+          {
+            source: error === parsed.data.error ? 'remote' : 'protocol',
+            code: error.code,
+            requestId: parsed.data.id,
+            machineId: parsed.data.machineId,
+          }
         )
       );
       return;
@@ -2461,7 +2711,14 @@ export class LoroStreamsRpcResponseDispatcher {
           finalPending.previewContext,
           finalPending.localProjectContext,
           finalPending.dispatchContext,
-          finalPending.preparationContext
+          finalPending.preparationContext,
+          finalPending.historyContext,
+          {
+            source: 'protocol',
+            code: 'invalid_result',
+            requestId: parsed.data.id,
+            machineId: parsed.data.machineId,
+          }
         )
       );
       return;
@@ -2593,6 +2850,16 @@ export class LoroStreamsMachineRpcClient {
         targetVersion: options.targetVersion,
       },
     })) as MachineUpgradeResponse | null;
+  }
+
+  async requestMachineProviderRateLimitsRefresh(
+    configId: AgentConfigId
+  ): Promise<MachineProviderRateLimitsRefreshResponse | null> {
+    return (await this.sendRequest({
+      method: 'machine/provider-rate-limits-refresh',
+      params: { configId },
+      timeoutMs: 60_000,
+    })) as MachineProviderRateLimitsRefreshResponse | null;
   }
 
   async requestMachineAcpCapabilitiesRefresh(options: {
@@ -2805,6 +3072,8 @@ export class LoroStreamsMachineRpcClient {
     description: string;
     reporterUserId: string;
     requestToken: string;
+    /** Send only to a machine advertising `bugReportClientLog`; older daemons reject it. */
+    clientLog?: BugReportClientLog;
     timeoutMs?: number;
   }): Promise<MachineBugReportResponse | null> {
     return (await this.sendRequest({
@@ -2814,6 +3083,7 @@ export class LoroStreamsMachineRpcClient {
         description: options.description,
         reporterUserId: options.reporterUserId,
         requestToken: options.requestToken,
+        ...(options.clientLog ? { clientLog: options.clientLog } : {}),
       },
     })) as MachineBugReportResponse | null;
   }
@@ -2823,6 +3093,8 @@ export class LoroStreamsMachineRpcClient {
     turnId: string;
     subagentTaskId?: string;
     timeoutMs?: number;
+    cancelId?: string;
+    pauseInbox?: boolean;
   }): Promise<SessionCancelResponse | null> {
     const result = await this.sendRequest({
       method: 'session/cancel',
@@ -2831,6 +3103,8 @@ export class LoroStreamsMachineRpcClient {
         sessionId: options.sessionId,
         turnId: options.turnId,
         subagentTaskId: options.subagentTaskId,
+        ...(options.cancelId ? { cancelId: options.cancelId } : {}),
+        ...(options.pauseInbox === undefined ? {} : { pauseInbox: options.pauseInbox }),
       },
     });
     return result as SessionCancelResponse | null;
@@ -2946,6 +3220,7 @@ export class LoroStreamsMachineRpcClient {
     userTurnId: string;
     userId: string;
     timestamp: string;
+    inputOrigin?: 'human' | 'agent';
     inputConfig: SessionTurnInputConfig;
     timeoutMs?: number;
   }): Promise<SessionDispatchTurnResponse | null> {
@@ -2957,41 +3232,44 @@ export class LoroStreamsMachineRpcClient {
         userTurnId: options.userTurnId,
         userId: options.userId,
         timestamp: options.timestamp,
+        inputOrigin: options.inputOrigin,
         inputConfig: options.inputConfig,
       },
     })) as SessionDispatchTurnResponse | null;
   }
 
-  async requestSessionPrepare(
-    options: SessionPreparationSpec & { timeoutMs?: number }
-  ): Promise<SessionPrepareResponse | null> {
+  async requestSessionHistoryRead(options: {
+    sessionId: SessionId;
+    query: SessionHistoryReadQuery;
+    ownerSessionId?: string;
+    timeoutMs?: number;
+  }): Promise<SessionHistoryRpcReadResponse | null> {
     return (await this.sendRequest({
-      method: 'session/prepare',
-      timeoutMs: options.timeoutMs ?? 5_000,
-      params: {
-        preparationId: options.preparationId,
-        sessionId: options.sessionId,
-        requestedByUserId: options.requestedByUserId,
-        agentConfigId: options.agentConfigId,
-        cliType: options.cliType,
-        agentType: options.agentType,
-        project: options.project,
-      },
-    })) as SessionPrepareResponse | null;
+      method:
+        options.query.kind === 'watchChanges' ? 'session/history-watch' : 'session/history-read',
+      timeoutMs: options.timeoutMs ?? (options.query.kind === 'watchChanges' ? 45_000 : 30_000),
+      ownerSessionId: options.ownerSessionId ?? options.sessionId,
+      params: { sessionId: options.sessionId, query: options.query },
+    })) as SessionHistoryRpcReadResponse | null;
   }
 
-  async requestSessionPrepareCancel(
-    options: SessionPreparationCancelSpec & { timeoutMs?: number }
-  ): Promise<SessionPrepareCancelResponse | null> {
+  async requestSessionHistoryWrite(options: {
+    sessionId: SessionId;
+    ownerSessionId?: string;
+    operation: SessionHistoryWriteOperation;
+    payload: Record<string, unknown>;
+    timeoutMs?: number;
+  }): Promise<SessionHistoryRpcWriteResponse | null> {
     return (await this.sendRequest({
-      method: 'session/prepare-cancel',
-      timeoutMs: options.timeoutMs ?? 5_000,
+      method: 'session/history-write',
+      timeoutMs: options.timeoutMs ?? 30_000,
+      ownerSessionId: options.ownerSessionId ?? options.sessionId,
       params: {
-        preparationId: options.preparationId,
         sessionId: options.sessionId,
-        requestedByUserId: options.requestedByUserId,
+        operation: options.operation,
+        payload: options.payload,
       },
-    })) as SessionPrepareCancelResponse | null;
+    })) as SessionHistoryRpcWriteResponse | null;
   }
 
   async requestCodeCollabOpenText(
@@ -3329,6 +3607,11 @@ export class LoroStreamsMachineRpcClient {
           };
         }
       | {
+          method: 'machine/provider-rate-limits-refresh';
+          timeoutMs: number;
+          params: { configId: AgentConfigId };
+        }
+      | {
           method: 'machine/acp-capabilities-refresh';
           timeoutMs: number;
           onAcpBinaryProgress?: (message: MachineAcpBinaryProgressMessage) => void;
@@ -3388,6 +3671,7 @@ export class LoroStreamsMachineRpcClient {
             description: string;
             reporterUserId: string;
             requestToken: string;
+            clientLog?: BugReportClientLog;
           };
         }
       | {
@@ -3453,6 +3737,7 @@ export class LoroStreamsMachineRpcClient {
             userTurnId: string;
             userId: string;
             timestamp: string;
+            inputOrigin?: 'human' | 'agent';
             inputConfig: SessionTurnInputConfig;
           };
         }
@@ -3465,6 +3750,22 @@ export class LoroStreamsMachineRpcClient {
           method: 'session/prepare-cancel';
           timeoutMs: number;
           params: SessionPreparationCancelSpec;
+        }
+      | {
+          method: 'session/history-read' | 'session/history-watch';
+          timeoutMs: number;
+          ownerSessionId: string;
+          params: { sessionId: SessionId; query: SessionHistoryReadQuery };
+        }
+      | {
+          method: 'session/history-write';
+          timeoutMs: number;
+          ownerSessionId: string;
+          params: {
+            sessionId: SessionId;
+            operation: SessionHistoryWriteOperation;
+            payload: Record<string, unknown>;
+          };
         }
       | {
           method: 'code-collab/open-text';
@@ -3604,7 +3905,10 @@ export class LoroStreamsMachineRpcClient {
       args.method === 'code-collab/init-directory' ||
       args.method === 'code-collab/lsp-definition' ||
       args.method === 'code-collab/lsp-references' ||
-      args.method === 'file/preview'
+      args.method === 'file/preview' ||
+      args.method === 'session/history-read' ||
+      args.method === 'session/history-watch' ||
+      args.method === 'session/history-write'
         ? args.ownerSessionId
         : undefined;
     this.options.trace?.('machine rpc transport request start', traceContext);
@@ -3688,6 +3992,17 @@ export class LoroStreamsMachineRpcClient {
           : args.method === 'local-project/control'
             ? { type: args.params.request.type }
             : undefined,
+      historyContext:
+        args.method === 'session/history-read' ||
+        args.method === 'session/history-watch' ||
+        args.method === 'session/history-write'
+          ? {
+              sessionId: args.params.sessionId,
+              ...(args.method === 'session/history-write'
+                ? { operation: args.params.operation }
+                : {}),
+            }
+          : undefined,
       codeCollabOwnerSessionId,
       onAcpBinaryProgress:
         args.method === 'machine/acp-capabilities-refresh' ||
@@ -3752,6 +4067,7 @@ export class LoroStreamsMachineRpcClient {
         case 'machine/upgrade':
           request = { ...envelope, method: args.method, params: args.params };
           break;
+        case 'machine/provider-rate-limits-refresh':
         case 'machine/acp-capabilities-refresh':
           request = { ...envelope, method: args.method, params: args.params };
           break;
@@ -3802,6 +4118,15 @@ export class LoroStreamsMachineRpcClient {
           break;
         case 'session/prepare-cancel':
           request = { ...envelope, method: args.method, params: args.params };
+          break;
+        case 'session/history-read':
+        case 'session/history-watch':
+        case 'session/history-write':
+          request = {
+            ...envelope,
+            method: args.method,
+            params: await encryptCodeCollabV2RpcPayload(args.ownerSessionId, args.params),
+          };
           break;
         case 'code-collab/open-text':
           request = {
@@ -3981,7 +4306,14 @@ export class LoroStreamsMachineRpcClient {
         pending.previewContext,
         pending.localProjectContext,
         pending.dispatchContext,
-        pending.preparationContext
+        pending.preparationContext,
+        pending.historyContext,
+        {
+          source: 'transport',
+          code: isMissingRequestStream ? 'machine_rpc_unavailable' : 'request_failed',
+          requestId,
+          machineId: this.options.machineId,
+        }
       );
       pending.resolve(errorResponse);
       return errorResponse;

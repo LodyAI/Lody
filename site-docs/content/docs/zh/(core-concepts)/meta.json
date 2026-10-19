@@ -1,4 +1,4 @@
 {
-  "title": "Core Concepts",
-  "pages": ["session", "session-tabs", "local-project", "github", "agents", "cli", "worktrees"]
+  "title": "核心概念",
+  "pages": ["concepts", "session", "session-tabs", "local-project", "github", "worktrees"]
 }

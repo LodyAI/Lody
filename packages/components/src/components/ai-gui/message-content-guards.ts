@@ -161,6 +161,20 @@ export const isMessageContent = (value: unknown): value is MessageContent => {
             ['created', 'running', 'succeeded', 'failed', 'cancelled'].includes(item.status)
         )
       );
+    case 'operation_completion_batch':
+      return (
+        typeof value.batchId === 'string' &&
+        typeof value.memberCount === 'number' &&
+        value.memberCount > 0 &&
+        (value.members === undefined ||
+          (Array.isArray(value.members) &&
+            value.members.every(
+              (member) =>
+                isRecord(member) &&
+                member.type === 'operation_completion' &&
+                isOperationCompletion(member.completion)
+            )))
+      );
     case 'operation_completion':
       return (
         typeof value.deliveryId === 'string' &&
@@ -220,7 +234,14 @@ export const shouldRenderSystemRowItem = <T extends { type: string }>(
   item: T
 ): item is Extract<
   T,
-  { type: 'system_notice' | 'worktree_script' | 'operation_completion' | 'operation_progress' }
+  {
+    type:
+      | 'system_notice'
+      | 'worktree_script'
+      | 'operation_completion'
+      | 'operation_completion_batch'
+      | 'operation_progress';
+  }
 > => {
   if (item.type === 'system_notice' && 'name' in item && item.name === 'task_proposal') {
     return false;
@@ -228,7 +249,18 @@ export const shouldRenderSystemRowItem = <T extends { type: string }>(
   return (
     item.type === 'system_notice' ||
     item.type === 'worktree_script' ||
+    item.type === 'operation_completion_batch' ||
     item.type === 'operation_completion' ||
     item.type === 'operation_progress'
   );
 };
+
+/**
+ * Operation rows paint bordered cards (reply cards, created Sessions, the
+ * batch result list) rather than prose, so the row takes surface spacing
+ * instead of the plain message pad.
+ */
+export const isOperationSurfaceItem = <T extends { type: string }>(item: T): boolean =>
+  item.type === 'operation_completion' ||
+  item.type === 'operation_completion_batch' ||
+  item.type === 'operation_progress';

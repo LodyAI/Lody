@@ -8,8 +8,8 @@ Pipeline background: [ui-mentions.md](../../../../../.agents/docs/ui-mentions.md
 ## Triggers, menu, and candidates
 
 - `@` reaches every mention type through the two-level menu. Skills keep their
-  direct `$`/`￥` menu, `/` and `、` open commands directly, and `#` opens no menu but
-  keeps its hydrator, so a pasted `#123` still expands before send.
+  direct `$`/`￥`/`¥` menu, `/` and `、` open commands directly, and `#` opens no menu but
+  keeps hydration, so pasted `#123` still expands before send.
 - `enableAtMentions` is the ONE list of what `@` reaches, gating both trigger
   registration and mounting `<Mention>`; every source with its own `enabled`
   rule (sessions: having any) belongs there too. Placeholder hints advertise `$`
@@ -43,6 +43,8 @@ Pipeline background: [ui-mentions.md](../../../../../.agents/docs/ui-mentions.md
 true })`. The fetch timestamp rides on the cached entry (survives IndexedDB).
   An unasked source reports `loading`, never `ready` with zero rows.
 
+- File fetch accounting follows [its contract](../../../../../specs/mention-file-fetch.md).
+
 ## Hydration and drafts
 
 - Hydrators only add ranges for known tokens/items, preserve existing external
@@ -64,7 +66,7 @@ true })`. The fetch timestamp rides on the cached entry (survives IndexedDB).
 
 - `useMentionPromptExpansion` owns before-send rewrites (`expand` /
   `getRewrites`). Composer copy reuses them via
-  `getExpandedClipboardTextForSelection` (session → `[@Title](session://…)`,
+  `getExpandedClipboardTextForSelection` (session → `[@Title](lody://session/…)`,
   not `@slug`). Rewritten: `REWRITTEN_SPAN_KINDS`; else verbatim.
 - The transcript chip comes from `MessageTextSpan.mark`, FROZEN at send time,
   never resolved from the catalog at render. A span field must be declared in
@@ -100,10 +102,10 @@ true })`. The fetch timestamp rides on the cached entry (survives IndexedDB).
   insertion, slug resolution, or child-session addressing.
 - A session mention commits as plain `@<title-slug>` (no `session:` marker); the
   range carries `sessionId`, and expansion rewrites to
-  `[@Title](session://<id>)`. A lone app-origin session URL paste becomes that
-  mention unless Cmd/Ctrl+Shift+V. No range → send verbatim; never resolve a
-  slug; hydration skips tokens the file source knows. Evidence:
-  [session:// URI](../../../../../.agents/notes/implemented/feature/2026-09-18-session-mention-uri-and-paste.md).
+  `[@Title](lody://session/<id>?workspace=<id>)`. Paste converts same-workspace
+  resource links or app-origin URLs unless Cmd/Ctrl+Shift+V. No range → send
+  verbatim; never resolve a slug; hydration skips known file tokens.
+  Contract: [deep links](../../../../../specs/deep-links.md).
 - Slugs resolve through the live list, then a synchronous `localStorage` slug →
   id map registered in `lib/clear-local-cache.ts`; skip unchanged writes.
 - A session dragged from the sidebar or a session tab onto a chat surface
@@ -115,12 +117,12 @@ true })`. The fetch timestamp rides on the cached entry (survives IndexedDB).
 
 ## Agent Roles
 
-- An Agent Role mention has the session mention's shape (plain `@<token>`,
-  stable Role id on the committed RANGE), but its rewrite asks the agent to
-  CREATE a Session and carries the Role id only (root `AGENTS.md` owns MCP
-  create/freeze). An unavailable Role stays plain text at send time. The token
-  is DERIVED from the Role's name
-  (`getAgentRoleMentionSlug`); renaming changes it, and uniqueness uses that token.
+- An Agent Role mention has the session mention's shape (plain `@<token>`; the
+  RANGE carries `formatAgentRoleMentionValue`: Role id, plus machine for a
+  multi-machine Role), but its rewrite asks the agent to CREATE a Session and
+  names only that id/machine (root `AGENTS.md` owns MCP create/freeze). An
+  unavailable or bare multi-machine Role stays plain text. Tokens derive from
+  the name or alias; uniqueness uses them.
 - A Role candidate's emoji REPLACES the category glyph
   (`MentionCandidate.iconEmoji`), defaulted through `getAgentRoleEmoji`, and its
   candidate sets no detail `title`. The committed range shows that emoji through

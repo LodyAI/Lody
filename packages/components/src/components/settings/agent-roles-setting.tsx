@@ -5,8 +5,11 @@ import { Plus, Trash2 } from 'lucide-react';
 import { Spinner } from '@lody/ui/spinner';
 import { useTranslation } from 'react-i18next';
 import {
+  bindAgentRoleTarget,
   canManageAgentRole,
   getAgentRoleEmoji,
+  getAgentRoleTarget,
+  getAgentRoleTargets,
   type AgentConfigMeta,
   type AgentRole,
   type AgentRoleAvailability,
@@ -22,11 +25,13 @@ import {
   useWorkspaceAgentRoles,
 } from '@/hooks/use-workspace-agent-roles';
 import { AgentIcon } from '@/components/icons/agent-icon';
-import { buildAgentRoleRunConfigSummary, EMPTY_AGENT_ROLE_FORM_VALUE } from '@/lib/agent-role-form';
+import { buildAgentRoleRunConfigSummary, createAgentRoleFormValue } from '@/lib/agent-role-form';
 import { AGENT_ROLE_UNAVAILABLE_REASON_KEYS } from '@/lib/composer-agent-roles';
 import { AlertDialog } from '@/ui/dialog';
 import { Badge } from '@lody/ui/badge';
 import { Button } from '@lody/ui/button';
+import { Tooltip } from '@lody/ui/tooltip';
+import { colors } from '@lody/ui/tokens/colors.stylex';
 import { SettingsPageActions, SettingsPageLead } from './settings-page-header';
 import { SettingsEmptyList, settingsRecordsCard } from './compact-layout';
 import { settingsCatalog as catalog, settingsSurface as surface } from './surface';
@@ -55,7 +60,8 @@ export function AgentRolesSetting() {
   const selectedMachineId = useAtomValue(settingsSelectedMachineIdAtom);
   const targetMachineId =
     selectedMachineId &&
-    (machines.has(selectedMachineId) || roles.some((role) => role.machineId === selectedMachineId))
+    (machines.has(selectedMachineId) ||
+      roles.some((role) => getAgentRoleTarget(role, selectedMachineId) !== undefined))
       ? selectedMachineId
       : null;
   const { resolve } = useAgentRoleAvailability(roles);
@@ -65,25 +71,35 @@ export function AgentRolesSetting() {
   const [pendingRemoval, setPendingRemoval] = useState<AgentRole | null>(null);
   const [removing, setRemoving] = useState(false);
 
-  // One group per machine the accessible Roles actually point at, ordered by
-  // label so the list does not reshuffle when a machine goes offline.
-  const roleGroups = useMemo(() => {
-    const byMachine = new Map<MachineId, AgentRole[]>();
-    for (const role of roles) {
-      const existing = byMachine.get(role.machineId);
-      if (existing) existing.push(role);
-      else byMachine.set(role.machineId, [role]);
-    }
-    return [...byMachine.entries()]
-      .map(([machineId, machineRoles]) => ({
-        machineId,
-        machineLabel: machines.get(machineId)?.name ?? t('settings.agentRoles.unknownMachine'),
-        roles: machineRoles,
-      }))
-      .sort((left, right) => left.machineLabel.localeCompare(right.machineLabel));
-  }, [machines, roles, t]);
+  // One list of Roles, by name. A Role may run on several machines, so the
+  // machine is a fact each row states rather than what the list is grouped by.
+  const rows = useMemo(() => {
+    const machineCount = machines.size;
+    return roles.map((role) => {
+      const targets = getAgentRoleTargets(role).map((target): AgentRoleRowTarget => {
+        const bound = bindAgentRoleTarget(role, target.machineId) ?? role;
+        return {
+          machineId: target.machineId,
+          label: machines.get(target.machineId)?.name ?? t('settings.agentRoles.unknownMachine'),
+          online: onlineMachineIds.has(target.machineId),
+          availability: resolve(bound),
+          runConfig: target.runConfig,
+          agentConfig: agentConfigs.find((entry) => entry.id === target.agentConfigId),
+        };
+      });
+      const allMachines =
+        targets.length > 1 &&
+        targets.length >= machineCount &&
+        [...machines.keys()].every((machineId) =>
+          targets.some((target) => target.machineId === machineId)
+        );
+      return { role, targets, allMachines };
+    });
+  }, [agentConfigs, machines, onlineMachineIds, resolve, roles, t]);
 
-  const groupElements = useRef(new Map<MachineId, HTMLDivElement>());
+  // Arriving from a memory's "Link to a role" names a machine: bring the first
+  // Role that runs there into view, and open Roles on that machine's tab.
+  const rowElements = useRef(new Map<string, HTMLDivElement>());
   const positionedMachine = useRef<MachineId | null>(null);
   useEffect(() => {
     if (!targetMachineId) {
@@ -91,18 +107,36 @@ export function AgentRolesSetting() {
       return;
     }
     if (positionedMachine.current === targetMachineId) return;
-    const group = groupElements.current.get(targetMachineId);
-    if (group) {
-      group.scrollIntoView({ block: 'nearest' });
+    const first = rows.find((row) =>
+      row.targets.some((target) => target.machineId === targetMachineId)
+    );
+    const element = first ? rowElements.current.get(first.role.id) : undefined;
+    if (element) {
+      element.scrollIntoView({ block: 'nearest' });
       positionedMachine.current = targetMachineId;
     }
-  }, [targetMachineId, roleGroups]);
+  }, [targetMachineId, rows]);
 
+  // A new Role starts on the machine the page was opened for, else an online
+  // one, so the editor opens on a machine tab rather than none.
   const openAdd = () =>
     setEditor(
-      openAgentRoleEditorForCreate({ ...EMPTY_AGENT_ROLE_FORM_VALUE, machineId: targetMachineId })
+      openAgentRoleEditorForCreate(
+        createAgentRoleFormValue(
+          targetMachineId ??
+            [...machines.keys()].find((machineId) => onlineMachineIds.has(machineId)) ??
+            [...machines.keys()][0] ??
+            null
+        )
+      )
     );
-  const openEdit = (role: AgentRole) => setEditor(openAgentRoleEditorForEdit(role));
+  const openEdit = (role: AgentRole) =>
+    setEditor(
+      openAgentRoleEditorForEdit(
+        role,
+        targetMachineId && getAgentRoleTarget(role, targetMachineId) ? targetMachineId : undefined
+      )
+    );
 
   const confirmRemoval = async () => {
     if (!pendingRemoval) return;
@@ -136,46 +170,33 @@ export function AgentRolesSetting() {
         </Button>
       </SettingsPageActions>
 
-      {roleGroups.length === 0 ? (
+      {rows.length === 0 ? (
         <SettingsEmptyList>{t('settings.agentRoles.empty')}</SettingsEmptyList>
       ) : (
-        <div {...stylex.props(catalog.groups)}>
-          {roleGroups.map((group) => (
-            <div
-              key={group.machineId}
-              ref={(element) => {
-                if (element) groupElements.current.set(group.machineId, element);
-                else groupElements.current.delete(group.machineId);
-              }}
-              {...stylex.props(catalog.group)}
-            >
-              {/* The machine leads its group instead of repeating on every row:
-                  a Role binds one machine exactly, so it is what the list is
-                  grouped BY, not a fact about each entry. */}
-              <MachineGroupHeading
-                label={group.machineLabel}
-                online={onlineMachineIds.has(group.machineId)}
-              />
-              <div {...stylex.props(settingsRecordsCard)}>
-                {group.roles.map((role, index) => (
-                  <div
-                    key={role.id}
-                    {...stylex.props(surface.line, index > 0 && surface.lineRuled)}
-                  >
-                    <AgentRoleRow
-                      role={role}
-                      availability={resolve(role)}
-                      agentConfig={agentConfigs.find((entry) => entry.id === role.agentConfigId)}
-                      canManage={canManageAgentRole(role, currentUserId)}
-                      onEdit={() => openEdit(role)}
-                      onRemove={() => setPendingRemoval(role)}
-                    />
-                  </div>
-                ))}
+        // One provider: after the first machine note opens, the next opens at once.
+        <Tooltip.Provider delay={250}>
+          <div {...stylex.props(settingsRecordsCard)}>
+            {rows.map((row, index) => (
+              <div
+                key={row.role.id}
+                ref={(element) => {
+                  if (element) rowElements.current.set(row.role.id, element);
+                  else rowElements.current.delete(row.role.id);
+                }}
+                {...stylex.props(surface.line, index > 0 && surface.lineRuled)}
+              >
+                <AgentRoleRow
+                  role={row.role}
+                  targets={row.targets}
+                  allMachines={row.allMachines}
+                  canManage={canManageAgentRole(row.role, currentUserId)}
+                  onEdit={() => openEdit(row.role)}
+                  onRemove={() => setPendingRemoval(row.role)}
+                />
               </div>
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
+        </Tooltip.Provider>
       )}
 
       <AgentRoleEditorDialog
@@ -218,33 +239,57 @@ export function AgentRolesSetting() {
   );
 }
 
+/** One machine a Role runs on, as its row states it. */
+export type AgentRoleRowTarget = {
+  machineId: MachineId;
+  label: string;
+  online: boolean;
+  availability: AgentRoleAvailability;
+  runConfig: AgentRole['runConfig'];
+  /** The bound config, when it still exists; its icon stands for the agent. */
+  agentConfig?: Pick<AgentConfigMeta, 'cliType' | 'agentType' | 'brandId' | 'env' | 'name'>;
+};
+
 /**
- * One catalog row. It is a line of its machine's card, not a card of its own:
- * the list draws the card and the rule between rows.
+ * One catalog row. It is a line of the list's card, not a card of its own: the
+ * list draws the card and the rule between rows.
  *
- * States the whole binding — machine, provider, model, reasoning — because that
- * is what a Role IS, and says exactly why it cannot run when it cannot. A row
- * whose target is gone stays listed and editable; it never quietly re-points at
- * something that happens to be available.
+ * Always two lines, whatever the Role's state: what it is (name, marks) over
+ * what it runs (agent, model, reasoning), with where it runs in a column of its
+ * own on the right. A machine that cannot run it is marked on that machine, with
+ * the reason on hover, rather than by a third line — so rows in one list keep one
+ * height. A target whose binding is gone stays listed and editable; it never
+ * quietly re-points at something that happens to be available.
  */
 export function AgentRoleRow({
   role,
-  availability,
-  agentConfig,
+  targets,
+  allMachines = false,
   canManage,
   onEdit,
   onRemove,
 }: {
   role: AgentRole;
-  availability: AgentRoleAvailability;
-  /** The bound config, when it still exists; its icon stands for the agent. */
-  agentConfig?: Pick<AgentConfigMeta, 'cliType' | 'agentType' | 'brandId' | 'env' | 'name'>;
+  /** One per machine the Role runs on, first target first. */
+  targets: readonly AgentRoleRowTarget[];
+  /** The Role runs on every machine this user can reach (two or more). */
+  allMachines?: boolean;
   canManage: boolean;
   onEdit: () => void;
   onRemove: () => void;
 }) {
   const { t } = useTranslation();
-  const runConfig = buildAgentRoleRunConfigSummary(role.runConfig);
+  const [first] = targets;
+  const summaries = targets.map((target) => ({
+    text: buildAgentRoleRunConfigSummary(target.runConfig).join(' · '),
+    agent: target.agentConfig?.name ?? '',
+  }));
+  // Two machines running the Role the same way read as one line; when they
+  // differ, the row says so instead of picking one to show.
+  const uniform = summaries.every(
+    (summary) => summary.text === summaries[0]?.text && summary.agent === summaries[0]?.agent
+  );
+  const runConfig = uniform ? (summaries[0]?.text ?? '') : '';
 
   return (
     <div {...stylex.props(catalog.row, surface.pressableLine)}>
@@ -258,7 +303,7 @@ export function AgentRoleRow({
           <span aria-hidden="true">{getAgentRoleEmoji(role)}</span>
         </span>
         <span {...stylex.props(catalog.body)}>
-          <span {...stylex.props(catalog.titleLine)}>
+          <span {...stylex.props(catalog.titleLine, styles.titleLine)}>
             {/* No `@token` here: it is derived from this very name, so printing
                 both says one thing twice. */}
             <span {...stylex.props(catalog.name)}>{role.name}</span>
@@ -270,24 +315,25 @@ export function AgentRoleRow({
             {role.promptPrefix ? <Badge>{t('settings.agentRoles.hasPrompt')}</Badge> : null}
           </span>
           <span {...stylex.props(catalog.meta)}>
-            {agentConfig ? (
+            {uniform && first?.agentConfig ? (
               <AgentIcon
-                cliType={agentConfig.cliType}
-                agentType={agentConfig.agentType}
-                brandId={agentConfig.brandId}
-                env={agentConfig.env}
+                cliType={first.agentConfig.cliType}
+                agentType={first.agentConfig.agentType}
+                brandId={first.agentConfig.brandId}
+                env={first.agentConfig.env}
                 className={stylex.props(catalog.iconSmall).className}
               />
             ) : null}
             <span {...stylex.props(catalog.truncate)}>
-              {runConfig.length > 0
-                ? runConfig.join(' · ')
-                : (agentConfig?.name ?? t('settings.agentRoles.unknownAgentConfig'))}
+              {!uniform
+                ? t('settings.agentRoles.configuredPerMachine')
+                : runConfig ||
+                  (first?.agentConfig?.name ?? t('settings.agentRoles.unknownAgentConfig'))}
             </span>
           </span>
-          <AgentRoleAvailabilityText availability={availability} />
         </span>
       </button>
+      <AgentRoleMachines targets={targets} allMachines={allMachines} />
       <div {...stylex.props(catalog.actions)}>
         {canManage ? (
           <Button
@@ -307,51 +353,154 @@ export function AgentRoleRow({
   );
 }
 
-/** The machine's name above its card of Roles: a heading, not a bordered pill. */
-function MachineGroupHeading({ label, online }: { label: string; online: boolean }) {
-  const { t } = useTranslation();
-  return (
-    <h4 {...stylex.props(catalog.groupHeading)}>
-      <span
-        aria-hidden="true"
-        {...stylex.props(catalog.statusDot, online && catalog.statusDotOnline)}
-      />
-      <span {...stylex.props(catalog.groupHeadingLabel)}>{label}</span>
-      {/* The dot is the whole signal now that rows no longer repeat "its machine
-          is offline", so it needs a text equivalent for anyone not seeing it. */}
-      {online ? null : (
-        <span {...stylex.props(catalog.srOnly)}>{t('settings.agentRoles.status.offline')}</span>
-      )}
-    </h4>
-  );
-}
+/** Machines named in the trailing column before the rest fold into "+N". */
+const MACHINES_SHOWN = 2;
+
+type MachineState = 'ready' | 'offline' | 'checking' | 'problem';
+
+const machineState = (target: AgentRoleRowTarget): MachineState => {
+  const { availability } = target;
+  if (availability.kind === 'unknown') return 'checking';
+  if (availability.kind === 'unavailable' && availability.reason !== 'machine_offline')
+    return 'problem';
+  return target.online ? 'ready' : 'offline';
+};
 
 /**
- * Why a Role cannot run, when the list does not already say so.
- *
- * `machine_offline` says nothing new: the Role sits under its machine's heading,
- * which carries that machine's status — repeating it on every row in the group
- * is the same sentence N times. The reasons that stay are the ones the heading
- * cannot show, because they are about this Role's binding rather than the
- * machine's state.
+ * Where a Role runs, in the row's trailing column: each machine with a dot that
+ * carries its state, or — on every machine — that fact in words, which stays
+ * short however many there are. A machine with a binding problem turns warning
+ * and says why on hover; so does a still-unjudged one, so neither costs a line.
  */
-function AgentRoleAvailabilityText({ availability }: { availability: AgentRoleAvailability }) {
+function AgentRoleMachines({
+  targets,
+  allMachines,
+}: {
+  targets: readonly AgentRoleRowTarget[];
+  allMachines: boolean;
+}) {
   const { t } = useTranslation();
-  if (availability.kind === 'available') return null;
-  if (availability.kind === 'unknown') {
+  const describe = (target: AgentRoleRowTarget): string => {
+    const state = machineState(target);
+    if (state === 'checking') return t('settings.agentRoles.status.checking');
+    if (state === 'offline') return t('settings.agentRoles.status.offline');
+    if (state === 'problem' && target.availability.kind === 'unavailable') {
+      return t('settings.agentRoles.unavailable.label', {
+        reason: t(AGENT_ROLE_UNAVAILABLE_REASON_KEYS[target.availability.reason]),
+      });
+    }
+    return '';
+  };
+  const noteFor = (list: readonly AgentRoleRowTarget[]) =>
+    list
+      .map((target) => {
+        const note = describe(target);
+        return note ? `${target.label}: ${note}` : target.label;
+      })
+      .join('\n');
+
+  if (allMachines) {
+    const problems = targets.filter((target) => machineState(target) === 'problem');
     return (
-      <span {...stylex.props(catalog.meta, catalog.metaHint)}>
-        <span {...stylex.props(catalog.truncate)}>{t('settings.agentRoles.status.checking')}</span>
-      </span>
+      <MachineMark
+        state={problems.length > 0 ? 'problem' : 'ready'}
+        label={t('settings.agentRoles.allMachines', { count: targets.length })}
+        note={problems.length > 0 ? noteFor(problems) : undefined}
+      />
     );
   }
-  if (availability.reason === 'machine_offline') return null;
-  const reason = t(AGENT_ROLE_UNAVAILABLE_REASON_KEYS[availability.reason]);
+
+  const shown = targets.slice(0, MACHINES_SHOWN);
+  const folded = targets.slice(MACHINES_SHOWN);
   return (
-    <span {...stylex.props(catalog.meta, catalog.metaWarning)}>
-      <span {...stylex.props(catalog.truncate)}>
-        {t('settings.agentRoles.unavailable.label', { reason })}
-      </span>
+    <span {...stylex.props(styles.machines)}>
+      {shown.map((target) => (
+        <MachineMark
+          key={target.machineId}
+          state={machineState(target)}
+          label={target.label}
+          note={describe(target) || undefined}
+        />
+      ))}
+      {folded.length > 0 ? (
+        <MachineMark
+          state={folded.some((target) => machineState(target) === 'problem') ? 'problem' : 'none'}
+          label={`+${folded.length}`}
+          note={noteFor(folded)}
+        />
+      ) : null}
     </span>
   );
 }
+
+function MachineMark({
+  state,
+  label,
+  note,
+}: {
+  state: MachineState | 'none';
+  label: string;
+  /** Said on hover and to a screen reader: why this machine is not ready. */
+  note?: string;
+}) {
+  const mark = (
+    <span {...stylex.props(styles.machine, state === 'problem' && styles.machineProblem)}>
+      {state === 'none' ? null : (
+        <span
+          aria-hidden="true"
+          {...stylex.props(
+            catalog.statusDot,
+            state === 'ready' && catalog.statusDotOnline,
+            state === 'problem' && styles.dotProblem,
+            state === 'checking' && styles.dotChecking
+          )}
+        />
+      )}
+      <span {...stylex.props(catalog.truncate, styles.machineLabel)}>{label}</span>
+      {note ? <span {...stylex.props(catalog.srOnly)}>{note}</span> : null}
+    </span>
+  );
+  if (!note) return mark;
+  return (
+    <Tooltip.Root>
+      <Tooltip.Trigger render={mark} />
+      <Tooltip.Content side="top">
+        <span {...stylex.props(styles.note)}>{note}</span>
+      </Tooltip.Content>
+    </Tooltip.Root>
+  );
+}
+
+const styles = stylex.create({
+  /** A badge's height whether or not the Role has one, so every row is one height. */
+  titleLine: { flexWrap: 'nowrap', height: '20px' },
+  machines: {
+    display: 'flex',
+    flexShrink: 0,
+    alignItems: 'center',
+    columnGap: '12px',
+    maxWidth: '45%',
+    minWidth: 0,
+    paddingInlineStart: '12px',
+  },
+  machine: {
+    display: 'inline-flex',
+    flexShrink: 1,
+    alignItems: 'center',
+    gap: '6px',
+    minWidth: 0,
+    fontSize: '12px',
+    lineHeight: '16px',
+    color: colors.secondaryLabel,
+    cursor: 'default',
+  },
+  machineProblem: { color: colors.warning },
+  machineLabel: { maxWidth: '120px' },
+  dotProblem: { backgroundColor: colors.warning },
+  /** Not judged yet: a ring, not a verdict. */
+  dotChecking: {
+    backgroundColor: 'transparent',
+    boxShadow: `inset 0 0 0 1px ${colors.tertiaryLabel}`,
+  },
+  note: { whiteSpace: 'pre-line' },
+});

@@ -23,6 +23,7 @@ export function pickDirectoryScalars(source: unknown): SessionDirectoryScalars |
     timestamp: typeof source.timestamp === 'string' ? source.timestamp : '',
   };
   if (typeof source.status === 'string') scalars.status = source.status;
+  if (source.cancellationReason === 'user_stop') scalars.cancellationReason = 'user_stop';
   if (typeof source.finished === 'boolean') scalars.finished = source.finished;
   if (typeof source.endedAt === 'number') scalars.endedAt = source.endedAt;
   if (source.sendStatus === 'timeout') scalars.sendStatus = 'timeout';

@@ -27,6 +27,10 @@ Record the problem, responsibilities, evidence-backed discoveries, genuine
 alternatives, trade-offs, outcome, verification limits, and PR link when available.
 Do not invent alternatives or PRs.
 
+Under the root compact-documentation rule, consolidate redundant PR-local notes,
+retaining decisions, reproducible evidence and unresolved limits; repair inbound
+links. The root rule also covers guides and READMEs outside this directory.
+
 A note is not overflow space for an oversized `AGENTS.md`. Nothing makes an agent
 read a dated note before changing a file, so a constraint that still binds stays
 in the nearest `AGENTS.md` even when its rationale moves here; leave the one-line
@@ -95,8 +99,10 @@ equal, carry the same Abstract/摘要 meaning, and mark both `Translation: curre
 `Translation: pending` remains available only to a human who cannot write the
 other language; an agent that can write both never merges a note as pending.
 
-Implemented notes preserve the decision in its historical context. Current
-behavior belongs in Specs; important later changes use a new linked note. Identify
+Implemented notes preserve the decision in its historical context. Keep current
+implementation behavior in owning docs; only consequential human-reviewed intent
+belongs in [Specs](../../specs/AGENTS.md). A Note does not require a companion Spec.
+Important later changes use a new linked note. Identify
 factual corrections as corrections. Adding a note includes a scoped search for
 related decisions: link partial replacements and archive obsolete implemented
 records only when their rationale is no longer useful. Do not rewrite an old

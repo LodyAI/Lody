@@ -15,7 +15,7 @@ import {
   type PDFDataRangeTransport,
   type PDFDocumentProxy,
 } from 'pdfjs-dist/legacy/build/pdf.mjs';
-import pdfWorkerUrl from 'pdfjs-dist/legacy/build/pdf.worker.min.mjs?url';
+import pdfWorkerUrl from './session-file-pdf.worker.js?worker&url';
 import 'pdfjs-dist/legacy/web/pdf_viewer.css';
 import {
   ArrowDown,
@@ -23,6 +23,7 @@ import {
   ChevronLeft,
   ChevronRight,
   PanelLeft,
+  MoreHorizontal,
   RotateCcw,
   RotateCw,
   Search,
@@ -30,12 +31,14 @@ import {
   ZoomIn,
   ZoomOut,
 } from 'lucide-react';
+import { Menu } from '@lody/ui/menu';
+import { DocumentCaptureButton } from './document-selection-surface';
 import { Button } from '@lody/ui/button';
 import { Input } from '@lody/ui/input';
 import { Select } from '@lody/ui/select';
 import { Spinner } from '@lody/ui/spinner';
-import { colors } from '@lody/ui/tokens/colors.stylex';
-import { space } from '@lody/ui/tokens/scales.stylex';
+import { colors, shadow } from '@lody/ui/tokens/colors.stylex';
+import { radius, space } from '@lody/ui/tokens/scales.stylex';
 import { withClassName } from '@/lib/stylex';
 import type { SessionFileErrorActions } from '@/lib/session-file-actions';
 import { createLocalPdfRangeTransport, PDF_RANGE_CHUNK_BYTES } from '@/lib/pdf-file-preview';
@@ -61,29 +64,45 @@ const styles = stylex.create({
     flexDirection: 'column',
     height: '100%',
     minHeight: 0,
+    minWidth: 0,
+    containerType: 'inline-size',
+    containerName: 'pdf-reader',
+    position: 'relative',
     color: colors.label,
     backgroundColor: colors.background,
   },
   toolbar: {
     display: 'flex',
     flex: '0 0 auto',
-    flexWrap: 'wrap',
+    flexWrap: 'nowrap',
     alignItems: 'center',
-    gap: space[2],
-    paddingInline: space[3],
-    paddingBlock: space[2],
+    gap: space[1],
+    paddingInline: space[2],
+    paddingBlock: space[1],
     borderBottomWidth: '1px',
     borderBottomStyle: 'solid',
     borderBottomColor: colors.separator,
   },
   group: { display: 'inline-flex', alignItems: 'center', gap: space[1], flexShrink: 0 },
   spacer: { flex: '1 1 auto' },
-  pageInputWell: { width: '3.5rem' },
-  zoomSelect: { minWidth: '6rem' },
+  pageInputWell: { width: '2.75rem' },
+  zoomSelect: { width: '6.25rem' },
+  zoomStep: {
+    display: { default: 'inline-flex', '@container pdf-reader (width < 480px)': 'none' },
+  },
   pageCount: { flexShrink: 0, color: colors.secondaryLabel, fontSize: '0.75rem' },
   findGroup: {
     display: 'flex',
-    flex: '1 1 100%',
+    position: 'absolute',
+    zIndex: 5,
+    top: 'calc(28px + 12px)',
+    right: space[2],
+    width: 'min(380px, calc(100% - 16px))',
+    minHeight: '28px',
+    padding: space[1],
+    borderRadius: radius.small,
+    backgroundColor: colors.elevatedBackground,
+    boxShadow: shadow.popover,
     minWidth: 0,
     alignItems: 'center',
     gap: space[1],
@@ -178,7 +197,10 @@ export function SessionFilePdfPreview({ bytes, url, fileActions }: SessionFilePd
       externalLinkRel: 'noopener noreferrer nofollow',
     });
     const findController = new PDFFindController({ eventBus, linkService });
-    const pdfViewer = new PDFViewer({
+    // PDF.js 6.3 implements abortSignal but omits it from its shipped options type.
+    const viewerOptions: ConstructorParameters<typeof PDFViewer>[0] & {
+      abortSignal: AbortSignal;
+    } = {
       container,
       viewer: viewerElement,
       eventBus,
@@ -186,7 +208,9 @@ export function SessionFilePdfPreview({ bytes, url, fileActions }: SessionFilePd
       findController,
       maxCanvasPixels: MAX_CANVAS_PIXELS,
       textLayerMode: 1,
-    });
+      abortSignal: abortController.signal,
+    };
+    const pdfViewer = new PDFViewer(viewerOptions);
     linkService.setViewer(pdfViewer);
     viewerRef.current = pdfViewer;
     eventBusRef.current = eventBus;
@@ -275,7 +299,6 @@ export function SessionFilePdfPreview({ bytes, url, fileActions }: SessionFilePd
 
     return () => {
       disposed = true;
-      abortController.abort();
       rangeTransport?.abort();
       eventBus.off('pagechanging', handlePageChanging);
       eventBus.off('scalechanging', handleScaleChanging);
@@ -283,7 +306,14 @@ export function SessionFilePdfPreview({ bytes, url, fileActions }: SessionFilePd
       eventBus.off('pagesinit', handlePagesInit);
       eventBus.off('updatefindmatchescount', handleFindMatchesCount);
       eventBus.off('updatefindcontrolstate', handleFindMatchesCount);
-      pdfViewer.cleanup();
+      // cleanup() only trims unfinished page renders. Clearing the document
+      // also retires its event/annotation owners before the viewer lifetime ends.
+      // Its runtime accepts null to detach; the shipped declaration omits null.
+      (
+        pdfViewer as PDFViewer & { setDocument(document: PDFDocumentProxy | null): void }
+      ).setDocument(null);
+      linkService.setDocument(null);
+      abortController.abort();
       viewerElement.replaceChildren();
       viewerRef.current = null;
       eventBusRef.current = null;
@@ -392,7 +422,7 @@ export function SessionFilePdfPreview({ bytes, url, fileActions }: SessionFilePd
         }
       }}
     >
-      <div {...stylex.props(styles.toolbar)}>
+      <div {...stylex.props(styles.toolbar)} data-document-toolbar>
         <div {...stylex.props(styles.group)}>
           <Button
             type="button"
@@ -458,42 +488,20 @@ export function SessionFilePdfPreview({ bytes, url, fileActions }: SessionFilePd
           </Button>
         </div>
         <div {...stylex.props(styles.group)}>
-          <Button
-            type="button"
-            variant="ghost"
-            size="mini"
-            icon
-            aria-label={t('sessions.fileViewer.pdf.rotateLeft', 'Rotate counterclockwise')}
-            title={t('sessions.fileViewer.pdf.rotateLeft', 'Rotate counterclockwise')}
-            disabled={pageCount === 0}
-            onClick={() => rotate(-90)}
-          >
-            <RotateCcw size={16} aria-hidden />
-          </Button>
-          <Button
-            type="button"
-            variant="ghost"
-            size="mini"
-            icon
-            aria-label={t('sessions.fileViewer.pdf.rotateRight', 'Rotate clockwise')}
-            title={t('sessions.fileViewer.pdf.rotateRight', 'Rotate clockwise')}
-            disabled={pageCount === 0}
-            onClick={() => rotate(90)}
-          >
-            <RotateCw size={16} aria-hidden />
-          </Button>
-          <Button
-            type="button"
-            variant="ghost"
-            size="mini"
-            icon
-            aria-label={t('sessions.fileViewer.pdf.zoomOut', 'Zoom out')}
-            title={t('sessions.fileViewer.pdf.zoomOut', 'Zoom out')}
-            disabled={zoom === null || zoom <= MIN_ZOOM}
-            onClick={() => changeZoom(-ZOOM_STEP)}
-          >
-            <ZoomOut size={16} aria-hidden />
-          </Button>
+          <span {...stylex.props(styles.zoomStep)}>
+            <Button
+              type="button"
+              variant="ghost"
+              size="mini"
+              icon
+              aria-label={t('sessions.fileViewer.pdf.zoomOut', 'Zoom out')}
+              title={t('sessions.fileViewer.pdf.zoomOut', 'Zoom out')}
+              disabled={zoom === null || zoom <= MIN_ZOOM}
+              onClick={() => changeZoom(-ZOOM_STEP)}
+            >
+              <ZoomOut size={16} aria-hidden />
+            </Button>
+          </span>
           <span {...stylex.props(styles.zoomSelect)}>
             <Select.Root
               items={zoomOptions}
@@ -518,20 +526,23 @@ export function SessionFilePdfPreview({ bytes, url, fileActions }: SessionFilePd
               </Select.Content>
             </Select.Root>
           </span>
-          <Button
-            type="button"
-            variant="ghost"
-            size="mini"
-            icon
-            aria-label={t('sessions.fileViewer.pdf.zoomIn', 'Zoom in')}
-            title={t('sessions.fileViewer.pdf.zoomIn', 'Zoom in')}
-            disabled={zoom === null || zoom >= MAX_ZOOM}
-            onClick={() => changeZoom(ZOOM_STEP)}
-          >
-            <ZoomIn size={16} aria-hidden />
-          </Button>
+          <span {...stylex.props(styles.zoomStep)}>
+            <Button
+              type="button"
+              variant="ghost"
+              size="mini"
+              icon
+              aria-label={t('sessions.fileViewer.pdf.zoomIn', 'Zoom in')}
+              title={t('sessions.fileViewer.pdf.zoomIn', 'Zoom in')}
+              disabled={zoom === null || zoom >= MAX_ZOOM}
+              onClick={() => changeZoom(ZOOM_STEP)}
+            >
+              <ZoomIn size={16} aria-hidden />
+            </Button>
+          </span>
         </div>
         <span {...stylex.props(styles.spacer)} />
+        <DocumentCaptureButton />
         <Button
           type="button"
           variant="ghost"
@@ -545,6 +556,43 @@ export function SessionFilePdfPreview({ bytes, url, fileActions }: SessionFilePd
         >
           <Search size={16} aria-hidden />
         </Button>
+        <Menu.Root>
+          <Menu.Trigger
+            render={
+              <Button
+                size="mini"
+                variant="ghost"
+                icon
+                aria-label={t('sessions.fileViewer.pdf.more', 'More document controls')}
+              />
+            }
+          >
+            <MoreHorizontal size={16} aria-hidden />
+          </Menu.Trigger>
+          <Menu.Content align="end">
+            <Menu.Item icon={RotateCcw} disabled={pageCount === 0} onClick={() => rotate(-90)}>
+              {t('sessions.fileViewer.pdf.rotateLeft', 'Rotate counterclockwise')}
+            </Menu.Item>
+            <Menu.Item icon={RotateCw} disabled={pageCount === 0} onClick={() => rotate(90)}>
+              {t('sessions.fileViewer.pdf.rotateRight', 'Rotate clockwise')}
+            </Menu.Item>
+            <Menu.Separator />
+            <Menu.Item
+              icon={ZoomOut}
+              disabled={zoom === null || zoom <= MIN_ZOOM}
+              onClick={() => changeZoom(-ZOOM_STEP)}
+            >
+              {t('sessions.fileViewer.pdf.zoomOut', 'Zoom out')}
+            </Menu.Item>
+            <Menu.Item
+              icon={ZoomIn}
+              disabled={zoom === null || zoom >= MAX_ZOOM}
+              onClick={() => changeZoom(ZOOM_STEP)}
+            >
+              {t('sessions.fileViewer.pdf.zoomIn', 'Zoom in')}
+            </Menu.Item>
+          </Menu.Content>
+        </Menu.Root>
         {searchOpen ? (
           <form
             {...stylex.props(styles.findGroup)}

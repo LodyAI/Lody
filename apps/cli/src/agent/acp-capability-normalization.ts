@@ -1,3 +1,4 @@
+import type { LodyRateLimitsCapability } from 'acp-extension-core';
 import {
   deriveModelReasoningEffortsFromLegacyModelIds,
   readAcpModelCapabilitiesMeta,
@@ -18,6 +19,7 @@ export type AcpCapabilitiesResult = {
   sessionFork: boolean;
   acknowledgedSteer: boolean;
   sessionTitle?: boolean;
+  rateLimits?: LodyRateLimitsCapability;
   goalActions?: SessionGoalAction[];
   modelReasoningEfforts?: Record<string, string[]>;
   /** Every model's controls, from the adapter's `_meta.lody.modelCapabilities`. */
@@ -198,6 +200,7 @@ export function normalizeAcpSessionCapabilities(
     sessionFork?: boolean;
     acknowledgedSteer?: boolean;
     sessionTitle?: boolean;
+    rateLimits?: LodyRateLimitsCapability;
     goalActions?: SessionGoalAction[];
     /** The agent that answered; decides whether legacy `model[effort]` ids apply. */
     agent?: { cliType: string; agentType: string };
@@ -238,6 +241,7 @@ export function normalizeAcpSessionCapabilities(
     sessionFork: lifecycleCapabilities.sessionFork === true,
     acknowledgedSteer: lifecycleCapabilities.acknowledgedSteer === true,
     sessionTitle: lifecycleCapabilities.sessionTitle === true,
+    rateLimits: lifecycleCapabilities.rateLimits,
     ...(lifecycleCapabilities.goalActions?.length
       ? { goalActions: lifecycleCapabilities.goalActions }
       : {}),

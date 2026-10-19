@@ -1,12 +1,13 @@
 // @vitest-environment jsdom
 
 import { act, useState } from 'react';
+import { Dialog, AlertDialog } from '../src/ui/dialog';
 import { Menu } from '@lody/ui/menu';
 import { Drawer as UiDrawer } from '@lody/ui/drawer';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Drawer, DrawerContent, DrawerTitle } from '../src/ui/drawer';
-import { SessionMobileDiffDrawerContent } from '../src/components/sessions/session-mobile-diff-drawer-content';
+import { SessionMobileDiffDrawer } from '../src/components/sessions/session-mobile-diff-drawer';
 
 const runtime = vi.hoisted(() => ({ native: true, ios: false }));
 vi.mock('../src/lib/native-platform', () => ({
@@ -173,6 +174,62 @@ function DrawerMenu({ initiallyOpen }: { initiallyOpen: boolean }) {
 }
 
 describe('drawer floating controls', () => {
+  it.each([
+    ['dialog', false],
+    ['dialog', true],
+    ['alert', false],
+    ['alert', true],
+    ['drawer', false],
+    ['drawer', true],
+  ] as const)(
+    'keeps %s in the outer modal scope (initially open: %s)',
+    async (kind, initiallyOpen) => {
+      const Modal = kind === 'alert' ? AlertDialog : kind === 'drawer' ? UiDrawer : Dialog;
+      function NestedModal() {
+        const [open, setOpen] = useState(initiallyOpen);
+        const [value, setValue] = useState('');
+        return (
+          <Drawer direction="right" open repositionInputs={false}>
+            <DrawerContent aria-describedby={undefined}>
+              <DrawerTitle>Conversation</DrawerTitle>
+              <button onClick={() => setOpen(true)}>Open preview</button>
+              <Modal.Root open={open} onOpenChange={setOpen}>
+                <Modal.Content aria-describedby={undefined}>
+                  <Modal.Title>Preview</Modal.Title>
+                  <input
+                    aria-label="Preview field"
+                    value={value}
+                    onChange={(event) => setValue(event.target.value)}
+                  />
+                  <Modal.Close>Done</Modal.Close>
+                </Modal.Content>
+              </Modal.Root>
+            </DrawerContent>
+          </Drawer>
+        );
+      }
+      await act(async () => root.render(<NestedModal />));
+      const outer = document.querySelector<HTMLElement>('[data-slot="drawer-content"]')!;
+      if (!initiallyOpen) await act(async () => outer.querySelector('button')!.click());
+      const field = document.querySelector<HTMLInputElement>('[aria-label="Preview field"]')!;
+      expect(outer.contains(field)).toBe(true);
+      expect(field.closest('[data-vaul-no-drag]')).not.toBeNull();
+      expect(getComputedStyle(document.body).pointerEvents).toBe('none');
+      expect(getComputedStyle(field).pointerEvents).not.toBe('none');
+      await act(async () => {
+        field.focus();
+        await vi.advanceTimersByTimeAsync(32);
+      });
+      expect(document.activeElement).toBe(field);
+      const done = Array.from(outer.querySelectorAll('button')).find(
+        (button) => button.textContent === 'Done'
+      )!;
+      await act(async () => done.click());
+      expect(document.querySelector('[aria-label="Preview field"]')).toBeNull();
+      expect(outer.getAttribute('data-state')).toBe('open');
+    }
+  );
+
   it.each([false, true])(
     'keeps the mobile diff in the session modal scope (initially open: %s)',
     async (initiallyOpen) => {
@@ -185,12 +242,19 @@ describe('drawer floating controls', () => {
               <DrawerTitle>Conversation</DrawerTitle>
               <button onClick={() => setOpen(true)}>Open changes</button>
               <output>{selection}</output>
-              <UiDrawer.Root side="bottom" open={open} onOpenChange={setOpen}>
-                <SessionMobileDiffDrawerContent side="bottom" aria-describedby={undefined}>
-                  <UiDrawer.Title>Changes</UiDrawer.Title>
-                  <button onClick={() => setSelection('Selected line')}>Select line</button>
-                </SessionMobileDiffDrawerContent>
-              </UiDrawer.Root>
+              <SessionMobileDiffDrawer
+                open={open}
+                onOpenChange={setOpen}
+                changes={{
+                  ready: true,
+                  synced: true,
+                  changeEntries: [],
+                  changeFilePaths: [],
+                  onOpenChangesDiff: () => {},
+                }}
+              >
+                <button onClick={() => setSelection('Selected line')}>Select line</button>
+              </SessionMobileDiffDrawer>
             </DrawerContent>
           </Drawer>
         );

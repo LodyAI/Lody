@@ -22,6 +22,7 @@ describe('resolveWorkspaceDataScope', () => {
       resolveWorkspaceDataScope({
         targetSlug: 'workspace-b',
         runtime: runtimeA,
+        runtimeInitFailure: null,
         docMetaScope: createDocMetaScope(runtimeA),
         organizationsReady: false,
         expectedWorkspaceId: null,
@@ -41,6 +42,7 @@ describe('resolveWorkspaceDataScope', () => {
       resolveWorkspaceDataScope({
         targetSlug: 'workspace-b',
         runtime: currentRuntime,
+        runtimeInitFailure: null,
         docMetaScope: createDocMetaScope(oldRuntime),
         organizationsReady: true,
         expectedWorkspaceId: 'workspace-b-id',
@@ -55,6 +57,7 @@ describe('resolveWorkspaceDataScope', () => {
       resolveWorkspaceDataScope({
         targetSlug: 'workspace-b',
         runtime,
+        runtimeInitFailure: null,
         docMetaScope: createDocMetaScope(runtime, false),
         organizationsReady: true,
         expectedWorkspaceId: 'workspace-b-id',
@@ -69,6 +72,7 @@ describe('resolveWorkspaceDataScope', () => {
       resolveWorkspaceDataScope({
         targetSlug: 'workspace-b',
         runtime,
+        runtimeInitFailure: null,
         docMetaScope: createDocMetaScope(runtime),
         organizationsReady: false,
         expectedWorkspaceId: null,
@@ -88,6 +92,7 @@ describe('resolveWorkspaceDataScope', () => {
       resolveWorkspaceDataScope({
         targetSlug: 'workspace-b',
         runtime,
+        runtimeInitFailure: null,
         docMetaScope: createDocMetaScope(runtime),
         organizationsReady: true,
         expectedWorkspaceId: 'server-workspace-b-id',
@@ -101,6 +106,7 @@ describe('resolveWorkspaceDataScope', () => {
       resolveWorkspaceDataScope({
         targetSlug: 'workspace-b',
         runtime,
+        runtimeInitFailure: null,
         docMetaScope: createDocMetaScope(runtime),
         organizationsReady: true,
         expectedWorkspaceId: 'workspace-b-id',
@@ -108,6 +114,19 @@ describe('resolveWorkspaceDataScope', () => {
       });
 
     expect(resolve({ runtime: null })).toMatchObject({ blocker: 'runtime_missing' });
+    expect(
+      resolve({
+        runtime: null,
+        runtimeInitFailure: { workspaceSlug: 'workspace-b', errorType: 'InvalidStateError' },
+      })
+    ).toMatchObject({ blocker: 'runtime_init_failed' });
+    // A failure for the workspace being left says nothing about the target.
+    expect(
+      resolve({
+        runtime: null,
+        runtimeInitFailure: { workspaceSlug: 'workspace-a', errorType: 'InvalidStateError' },
+      })
+    ).toMatchObject({ blocker: 'runtime_missing' });
     expect(resolve({ docMetaScope: null })).toMatchObject({ blocker: 'doc_meta_scan_pending' });
     expect(
       resolve({

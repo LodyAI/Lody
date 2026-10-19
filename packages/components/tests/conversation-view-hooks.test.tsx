@@ -7,6 +7,7 @@ import { LoroMap } from 'loro-crdt';
 import { createHistoryWriter, resolveSessionConversationConfig } from '@lody/shared';
 import {
   useConversationVersion,
+  useConversationIndexRows,
   useConversationTail,
   useTurnRange,
 } from '../src/hooks/use-conversation-view';
@@ -66,6 +67,73 @@ const flush = async () => {
 };
 
 describe('conversation view React readers', () => {
+  it('updates streamed text and summaries without rebuilding unchanged business facts or losing the draft', async () => {
+    const { doc, view } = await openView(2);
+    let facts!: ReturnType<typeof useSessionTurnFacts>;
+    let businessRows!: ReturnType<typeof useConversationIndexRows>;
+    let summaryRows!: ReturnType<typeof useConversationIndexRows>;
+    function Probe() {
+      facts = useSessionTurnFacts(view);
+      businessRows = useConversationIndexRows(view, { includeSummary: false });
+      summaryRows = useConversationIndexRows(view);
+      const tail = useConversationTail(view);
+      const first = tail.turns.at(-1)?.items[0];
+      return (
+        <>
+          <input defaultValue="kept draft" />
+          <output>{first?.type === 'text' ? first.text : ''}</output>
+          <span>{facts.ordered.at(-1)?.goal?.status}</span>
+        </>
+      );
+    }
+    await act(async () => root.render(<Probe />));
+    await flush();
+    const beforeFacts = facts.ordered;
+    const beforeRows = businessRows;
+    const beforeSummary = summaryRows;
+    const input = container.querySelector('input')!;
+    input.focus();
+    input.setSelectionRange(2, 4);
+    const writer = createHistoryWriter(doc);
+    await act(async () => {
+      writer.updateEntry('a-1', (entry) => {
+        entry.items = [
+          { type: 'text', text: 'Streaming text is visible' },
+          ...entry.items.slice(1),
+        ];
+        return entry;
+      });
+      doc.commit();
+      await flushReaderChanges();
+    });
+    await flush();
+    expect(container.querySelector('output')?.textContent).toBe('Streaming text is visible');
+    expect(facts.ordered).toBe(beforeFacts);
+    expect(businessRows).toBe(beforeRows);
+    expect(summaryRows).not.toBe(beforeSummary);
+    expect(summaryRows.at(-1)?.summary?.headText).toContain('Streaming text is visible');
+    expect(container.querySelector('input')).toBe(input);
+    expect(document.activeElement).toBe(input);
+    expect([input.value, input.selectionStart, input.selectionEnd]).toEqual(['kept draft', 2, 4]);
+    await act(async () => {
+      writer.updateEntry('a-1', (entry) => {
+        entry.items.push({
+          type: 'goal',
+          threadId: 'stream-goal',
+          objective: 'Finish safely',
+          status: 'active',
+        });
+        return entry;
+      });
+      doc.commit();
+      await flushReaderChanges();
+    });
+    await flush();
+    expect(container.querySelector('span')?.textContent).toBe('active');
+    expect(facts.ordered).not.toBe(beforeFacts);
+    expect(facts.ordered.at(-1)?.goal?.threadId).toBe('stream-goal');
+  });
+
   it('keeps render membership stable while background facts hydrate and evict older turns', async () => {
     const { view } = await openView(150, 80);
     let stream!: ReturnType<typeof useConversationStreamItems>;

@@ -1,13 +1,18 @@
+import * as stylex from '@stylexjs/stylex';
 import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { toast } from '@/lib/toast';
-import { Check, Copy, Download, FileWarning, X } from 'lucide-react';
+import { Check, Copy, Download, Eye, EyeClosed, FileWarning, X } from 'lucide-react';
 import { Spinner } from '@lody/ui/spinner';
 import type { SessionFilePayload } from '@lody/shared';
 import { Dialog } from '@/ui/dialog';
+import { Drawer } from '@lody/ui/drawer';
+import { space } from '@lody/ui/tokens/scales.stylex';
+import { useIsMobile } from '@/hooks/use-mobile';
 import { Button } from '@lody/ui/button';
 import { Tabs } from '@lody/ui/tabs';
-import { formatFileSize } from '@/lib/session-file-presentation';
+import { ReadOnlyHtmlPreview } from '../sessions/read-only-html-preview';
+import { formatFileSize, isHtmlSessionFile } from '@/lib/session-file-presentation';
 import { MarkdownRenderer } from './markdown-renderer';
 
 const isMarkdownFile = (fileName: string): boolean => {
@@ -21,6 +26,7 @@ export type SessionFilePreviewStatus =
   | { kind: 'loaded'; text: string; truncated: boolean };
 
 export type SessionFilePreviewPanelProps = {
+  mobileSheet?: boolean;
   file: SessionFilePayload;
   status: SessionFilePreviewStatus;
   onDownload: (file: SessionFilePayload) => void;
@@ -30,20 +36,22 @@ export type SessionFilePreviewPanelProps = {
 /**
  * Pure preview body: header (name/size + actions), then the rendered/raw text.
  * Stateless w.r.t. fetching — the container feeds it `status`. Markdown files
- * default to the sanitized rendered view (reusing the chat MarkdownRenderer; a
- * bespoke HTML path is forbidden) with a Raw toggle. Copy always copies the
- * raw source text.
+ * default to the existing sanitized MarkdownRenderer with a Raw toggle. Complete
+ * HTML uses the shared script-free sandbox preview. Copy always copies raw source.
  */
 export function SessionFilePreviewPanel({
   file,
   status,
   onDownload,
   isDownloading = false,
+  mobileSheet = false,
 }: SessionFilePreviewPanelProps) {
   const { t } = useTranslation();
-  const markdown = isMarkdownFile(file.fileName);
-  // Markdown → rendered by default; plain text has no rendered view.
-  const [showRaw, setShowRaw] = useState(!markdown);
+  const html = isHtmlSessionFile(file);
+  const markdown = !html && isMarkdownFile(file.fileName);
+  // Renderable attachments open in preview; original bytes remain one toggle away.
+  const [showRaw, setShowRaw] = useState(!markdown && !html);
+  const canPreviewHtml = html && status.kind === 'loaded' && !status.truncated;
   const [copied, setCopied] = useState(false);
 
   const rawText = status.kind === 'loaded' ? status.text : '';
@@ -64,6 +72,9 @@ export function SessionFilePreviewPanel({
   };
 
   const renderMarkdown = markdown && !showRaw;
+  const renderHtml = canPreviewHtml && !showRaw;
+  const Title = mobileSheet ? Drawer.Title : Dialog.Title;
+  const Close = mobileSheet ? Drawer.Close : Dialog.Close;
 
   return (
     // `min-w-0` is load-bearing: this panel is a grid child of Dialog.Content
@@ -71,17 +82,32 @@ export function SessionFilePreviewPanel({
     // content (long code lines, tables, unbreakable tokens) would stretch the
     // panel past the dialog's `width` cap and bleed out of the modal. Capping
     // the min width forces content to wrap/scroll within the modal width.
-    <div className="flex min-h-0 min-w-0 flex-col">
+    <div {...stylex.props(styles.panel, mobileSheet && styles.sheetPanel)}>
       <div className="flex items-center justify-between gap-3 border-b border-border/50 pb-3">
         <div className="flex min-w-0 flex-col gap-0.5">
-          <Dialog.Title className="truncate text-sm font-semibold leading-tight">
-            {file.fileName}
-          </Dialog.Title>
+          <Title className="truncate text-sm font-semibold leading-tight">{file.fileName}</Title>
           <span className="text-xs text-muted-foreground tabular-nums">
             {formatFileSize(file.sizeBytes)}
           </span>
         </div>
         <div className="flex shrink-0 items-center gap-1">
+          {canPreviewHtml ? (
+            <Button
+              type="button"
+              variant="ghost"
+              size="small"
+              icon
+              aria-pressed={renderHtml}
+              aria-label={
+                renderHtml
+                  ? t('sessions.fileViewer.preview.hide', 'Hide preview')
+                  : t('sessions.fileViewer.preview.show', 'Preview')
+              }
+              onClick={() => setShowRaw((raw) => !raw)}
+            >
+              {renderHtml ? <EyeClosed size={16} /> : <Eye size={16} />}
+            </Button>
+          ) : null}
           {markdown ? (
             <Tabs.Root
               value={showRaw ? 'raw' : 'rendered'}
@@ -122,7 +148,7 @@ export function SessionFilePreviewPanel({
               action (close), and the close sits inline in the same row instead
               of floating in the corner over the buttons. */}
           <span className="mx-0.5 h-4 w-px bg-border" aria-hidden="true" />
-          <Dialog.Close
+          <Close
             render={
               <Button
                 type="button"
@@ -134,7 +160,7 @@ export function SessionFilePreviewPanel({
             }
           >
             <X className="size-4" />
-          </Dialog.Close>
+          </Close>
         </div>
       </div>
 
@@ -160,11 +186,9 @@ export function SessionFilePreviewPanel({
         </div>
       ) : null}
 
-      {/* Body sizes to its content (no flex-1 stretch, so short files leave no
-          dead space) and caps itself with its own scroll. Rendered markdown
-          breathes on the dialog surface; raw text sits on a subtle code
-          surface. The header's border-b is the only separator. */}
-      <div className="mt-3 max-h-[55vh] min-w-0 overflow-y-auto">
+      {/* Desktop caps the body to its content; the mobile sheet fills its
+          remaining height and scrolls below the fixed header. */}
+      <div {...stylex.props(styles.body, mobileSheet && styles.sheetBody)}>
         {status.kind === 'loading' ? (
           <div className="flex items-center justify-center gap-2 py-12 text-sm text-muted-foreground">
             <Spinner className="size-4" />
@@ -177,6 +201,10 @@ export function SessionFilePreviewPanel({
             <Button type="button" variant="secondary" size="small" onClick={() => onDownload(file)}>
               {t('sessions.fileDownload', 'Download')}
             </Button>
+          </div>
+        ) : renderHtml ? (
+          <div {...stylex.props(styles.htmlPreview, mobileSheet && styles.sheetHtmlPreview)}>
+            <ReadOnlyHtmlPreview text={status.text} />
           </div>
         ) : renderMarkdown ? (
           <div className="px-0.5 pb-1">
@@ -197,14 +225,31 @@ export type SessionFilePreviewDialogProps = SessionFilePreviewPanelProps & {
   onOpenChange: (open: boolean) => void;
 };
 
-/** Modal wrapper around the preview panel, matching the app dialog system. */
+/** Mobile bottom sheet / desktop dialog around the shared preview panel. */
 export function SessionFilePreviewDialog({
   open,
   onOpenChange,
   ...panelProps
 }: SessionFilePreviewDialogProps) {
   // Re-key the panel per file so the rendered/raw toggle resets between files.
+  const isMobile = useIsMobile();
   const panelKey = useMemo(() => panelProps.file.fileId, [panelProps.file.fileId]);
+  if (isMobile) {
+    return (
+      <Drawer.Root side="bottom" open={open} onOpenChange={onOpenChange}>
+        <Drawer.Content
+          side="bottom"
+          closeButton={false}
+          style={{
+            maxHeight: 'calc(100dvh - max(6dvh, env(safe-area-inset-top, 0px)))',
+            overflow: 'hidden',
+          }}
+        >
+          <SessionFilePreviewPanel key={panelKey} {...panelProps} mobileSheet />
+        </Drawer.Content>
+      </Drawer.Root>
+    );
+  }
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
       <Dialog.Content closeButton={false} width="48rem">
@@ -213,3 +258,14 @@ export function SessionFilePreviewDialog({
     </Dialog.Root>
   );
 }
+
+const styles = stylex.create({
+  panel: { display: 'flex', flexDirection: 'column', minHeight: 0, minWidth: 0 },
+  sheetPanel: {
+    height: `calc(100dvh - max(6dvh, env(safe-area-inset-top, 0px)) - env(safe-area-inset-bottom, 0px) - ${space[4]} * 2)`,
+  },
+  body: { marginTop: space[3], maxHeight: '55vh', minWidth: 0, overflowY: 'auto' },
+  sheetBody: { flex: 1, minHeight: 0, maxHeight: 'none', overscrollBehavior: 'contain' },
+  sheetHtmlPreview: { height: '100%' },
+  htmlPreview: { display: 'flex', height: '55vh', minWidth: 0, overflow: 'hidden' },
+});

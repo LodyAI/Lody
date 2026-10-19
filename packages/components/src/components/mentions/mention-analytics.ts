@@ -1,4 +1,4 @@
-import { hashAnalyticsId } from '@lody/shared';
+import { GitHubAuthError, hashAnalyticsId } from '@lody/shared';
 
 import { capturePostHogEvent, type PostHogAnalyticsClient } from '@/lib/posthog-analytics';
 
@@ -48,6 +48,7 @@ function toMessage(err: unknown): string {
 }
 
 export function normalizeGithubFetchErrorCode(err: unknown): MentionGithubFetchErrorCode {
+  if (err instanceof GitHubAuthError) return 'auth_failed';
   const message = toMessage(err).toLowerCase();
 
   if (typeof navigator !== 'undefined' && navigator.onLine === false) return 'offline';
@@ -55,6 +56,7 @@ export function normalizeGithubFetchErrorCode(err: unknown): MentionGithubFetchE
   // Surface HTTP status when the fetch layer encodes it in the message.
   const statusMatch = message.match(/\b(4\d\d|5\d\d)\b/);
   const status = statusMatch ? Number.parseInt(statusMatch[1] ?? '', 10) : null;
+  if (status === 429) return 'rate_limited';
   if (status === 401) return 'auth_failed';
   if (status === 403) return message.includes('rate') ? 'rate_limited' : 'forbidden';
   if (status === 404) return 'not_found';

@@ -8,6 +8,28 @@ Binding rules live in [AGENTS.md](AGENTS.md); this file holds the invariants and
 why they read the way they do. Coverage:
 `tests/markdown-mermaid-fullscreen.test.tsx`.
 
+## The renderer produces an inert SVG colored by the theme
+
+- `markdown-mermaid.ts` lazily imports Pele and calls its synchronous `render()`,
+  never `mount()` or `enableZoom()`: those would take resizing and zoom away from
+  the canvas and viewer below. `responsive: false` keeps the natural size those
+  surfaces scale from.
+- Links and images are disabled. An agent's diagram must not make the desktop
+  fetch a remote image or carry a navigable link.
+- Diagram colors come from the app palette, never from the markup. The
+  markdown stylesheet maps `--pele-*` to theme tokens on the block, so an inline
+  diagram matches Lody Light or Vesper and switches without re-rendering, and
+  the SVG cache is keyed by source alone. Labels use the prose foreground; chart
+  series keep Pele's categorical palette, since status tokens carry meaning.
+- A copy that leaves the block carries resolved plain colors:
+  `resolveMermaidColors` reads them where the diagram sits, and SVG/PNG download
+  (`withMermaidColors`) and the portalled viewer clone (`applyMermaidColors`)
+  declare them on their root. Without that, the viewer falls back to Pele's
+  light defaults in a dark theme.
+- Anything Pele rejects (syntax error, ZenUML, a size limit) or a runtime that
+  fails to load renders the source as an SVG listing, so the block's controls keep
+  working. Decision: [Pele renderer note](../../../../../.agents/notes/implemented/feature/2026-10-18-pele-mermaid-renderer.md).
+
 ## A diagram in a message is a still preview until it is clicked
 
 - It NEVER captures an unmodified wheel, activated or not. The only wheel the
@@ -16,6 +38,12 @@ why they read the way they do. Coverage:
   untouched, which keeps the scroll engine's follow (`lib/conversation-scroll`) and outline
   jumps (`view.tsx`) working. An earlier bundled pan/zoom canvas took every wheel
   and turned a page scroll into a zoom; nothing may reintroduce that.
+- Native scrolling must also chain from the bounded preview to the conversation
+  at either edge, including when the diagram has no vertical overflow. The
+  preview uses `overscroll-behavior: auto`; letting the wheel event bubble alone
+  cannot undo CSS scroll containment. Browser coverage lives in
+  `tests/e2e/conversation-scroll-engine.spec.ts`; see the
+  [scroll-chaining decision](../../../../../.agents/notes/implemented/bug-fix/2026-10-09-mermaid-scroll-chaining.md).
 - Clicking a diagram with a mouse, pen, or the keyboard ACTIVATES it: that one
   diagram becomes a canvas, where a trackpad pinch (a ctrl- or meta-modified
   wheel) zooms around the pointer and a held button drags. Escape, a press

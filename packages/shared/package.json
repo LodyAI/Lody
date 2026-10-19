@@ -8,6 +8,22 @@
     "./src/visual-annotation-inspector-global.ts"
   ],
   "exports": {
+    "./notifications": {
+      "types": "./src/notifications/index.ts",
+      "import": "./src/notifications/index.ts"
+    },
+    "./loro-sync-errors": {
+      "types": "./src/loro-sync-errors/index.ts",
+      "import": "./src/loro-sync-errors/index.ts"
+    },
+    "./session-link-export": {
+      "types": "./src/session-link-export.ts",
+      "import": "./src/session-link-export.ts"
+    },
+    "./session-link": {
+      "types": "./src/session-link.ts",
+      "import": "./src/session-link.ts"
+    },
     "./streams-snapshot-codec": {
       "types": "./src/streams-snapshot-codec.ts",
       "import": "./src/streams-snapshot-codec.ts"
@@ -80,10 +96,6 @@
       "types": "./src/local-loro-data-plane-server.ts",
       "import": "./src/local-loro-data-plane-server.ts"
     },
-    "./local-loro-data-plane-scheduler": {
-      "types": "./src/local-loro-data-plane-scheduler.ts",
-      "import": "./src/local-loro-data-plane-scheduler.ts"
-    },
     "./local-loro-transport": {
       "types": "./src/local-loro-transport.ts",
       "import": "./src/local-loro-transport.ts"
@@ -115,6 +127,10 @@
     "./ids": {
       "types": "./src/ids.ts",
       "import": "./src/ids.ts"
+    },
+    "./bug-report-client-log": {
+      "types": "./src/bug-report-client-log.ts",
+      "import": "./src/bug-report-client-log.ts"
     },
     "./platform-kind": {
       "types": "./src/platform-kind.ts",
@@ -152,6 +168,14 @@
       "types": "./src/node/*.ts",
       "import": "./src/node/*.ts",
       "require": "./src/node/*.cjs"
+    },
+    "./local-loro-writer": {
+      "types": "./src/local-loro-writer/index.ts",
+      "import": "./src/local-loro-writer/index.ts"
+    },
+    "./local-loro-writer/legacy": {
+      "types": "./src/local-loro-writer/legacy.ts",
+      "import": "./src/local-loro-writer/legacy.ts"
     }
   },
   "scripts": {
@@ -160,6 +184,7 @@
     "test:watch": "vitest"
   },
   "dependencies": {
+    "mdast-util-from-markdown": "^2.0.2",
     "immer": "^10.2.0",
     "fzstd": "0.1.1",
     "@bokuweb/zstd-wasm": "^0.0.27",
@@ -173,18 +198,20 @@
     "@agentclientprotocol/sdk": "catalog:",
     "acp-extension-core": "workspace:*",
     "zod": "catalog:",
-    "croner": "10.0.1"
+    "croner": "10.0.1",
+    "@effect/platform-node-shared": "catalog:"
   },
   "peerDependencies": {
     "loro-crdt": "catalog:",
     "loro-repo": "catalog:"
   },
   "devDependencies": {
+    "@effect/vitest": "catalog:",
     "@types/cross-spawn": "^6.0.6",
     "@types/dockerode": "^3.3.47",
     "@types/node": "catalog:",
     "loro-repo": "catalog:",
     "typescript": "catalog:",
-    "vitest": "^3.2.4"
+    "vitest": "5.0.2"
   }
 }

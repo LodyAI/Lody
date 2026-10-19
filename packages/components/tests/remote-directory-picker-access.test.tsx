@@ -10,6 +10,7 @@ import {
   type RemoteDirectoryPickerMachine,
 } from '../src/components/local-projects/add-local-project-dialog';
 import { initI18n } from '../src/i18n';
+import { MobileAddLocalProjectFlow } from '../src/components/local-projects/mobile-add-local-project-flow';
 
 const ownMachineId = 'machine-own' as MachineId;
 const teammateMachineId = 'machine-team' as MachineId;
@@ -21,6 +22,7 @@ const machines: RemoteDirectoryPickerMachine[] = [
     online: true,
     ownerName: 'Zoe',
     canAddProjects: true,
+    supportsCreateDirectory: true,
   },
   {
     id: teammateMachineId,
@@ -56,6 +58,7 @@ function createOps() {
   const ops: RemoteDirectoryOps = {
     listRoots,
     browseDir,
+    createDirectory: async () => ({ ok: false, message: 'Unexpected create' }),
     addProject: vi.fn(),
   };
   return { listRoots, browseDir, ops };
@@ -82,6 +85,143 @@ describe('RemoteDirectoryPicker machine ownership', () => {
     container = undefined;
     document.body.innerHTML = '';
     vi.restoreAllMocks();
+  });
+
+  it.each([RemoteDirectoryPicker, MobileAddLocalProjectFlow])(
+    'offers a keyboard-accessible create form and then adds the new path (%#)',
+    async (Picker) => {
+      const { ops } = createOps();
+      const created: string[] = [];
+      const added: string[] = [];
+      ops.browseDir = async (_id, args) => ({
+        ok: true,
+        value: { path: args.absolutePath!, parentPath: '/Users', entries: [], truncated: false },
+      });
+      ops.createDirectory = async (_id, args) => {
+        const target = `${args.parentPath}/${args.name}`;
+        created.push(target);
+        return { ok: true, value: { path: target } };
+      };
+      ops.addProject = async (_id, args) => {
+        added.push(args.rootPath);
+        return { ok: false, message: 'Synthetic registration failure' };
+      };
+      await act(async () =>
+        root?.render(
+          <Picker
+            machines={machines}
+            initialMachineId={ownMachineId}
+            ops={ops}
+            onAdded={vi.fn()}
+            onClose={vi.fn()}
+          />
+        )
+      );
+      const button = (name: string) => {
+        const value = Array.from(container!.querySelectorAll('button')).find(
+          (el) => el.textContent === name
+        );
+        if (!value) throw new Error(`Missing ${name} button`);
+        return value;
+      };
+      await act(async () => button('New folder').click());
+      const input = container!.querySelector<HTMLInputElement>('input[aria-label="Folder name"]')!;
+      expect(document.activeElement).toBe(input);
+      expect(button('Create').disabled).toBe(true);
+      expect(button('Add').disabled).toBe(true);
+      await act(async () => {
+        Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(
+          input,
+          'new'
+        );
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+      });
+      expect(button('Create').disabled).toBe(false);
+      await act(async () => {
+        container!
+          .querySelector('form')!
+          .dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+      });
+      expect(created).toEqual(['/Users/zoe/new']);
+      expect(added).toEqual([]);
+      expect(container!.querySelector('form')).toBeNull();
+      expect(button('Add').disabled).toBe(false);
+      await act(async () => button('Add').click());
+      expect(added).toEqual(['/Users/zoe/new']);
+      expect(container!.textContent).toContain('Synthetic registration failure');
+    }
+  );
+
+  it('hides creation for an older daemon while retaining Add', async () => {
+    const { ops } = createOps();
+    await act(async () =>
+      root?.render(
+        <RemoteDirectoryPicker
+          machines={[{ ...machines[0], supportsCreateDirectory: false }]}
+          initialMachineId={ownMachineId}
+          ops={ops}
+          onAdded={vi.fn()}
+          onClose={vi.fn()}
+        />
+      )
+    );
+    expect(container!.textContent).not.toContain('New folder');
+    expect(
+      Array.from(container!.querySelectorAll('button')).find((el) => el.textContent === 'Add')
+        ?.disabled
+    ).toBe(false);
+  });
+
+  it.each([
+    ['already_exists', 'A file or folder with this name already exists.'],
+    [
+      'execution_failed',
+      "Can't confirm creation. Reconnect and refresh the parent folder before retrying.",
+    ],
+  ])('renders %s and retains the editable name', async (errorCode, message) => {
+    const { ops } = createOps();
+    ops.createDirectory = async () => ({
+      ok: false,
+      errorCode,
+      message: 'Synthetic failure',
+    });
+    await act(async () =>
+      root?.render(
+        <RemoteDirectoryPicker
+          machines={machines}
+          initialMachineId={ownMachineId}
+          ops={ops}
+          onAdded={vi.fn()}
+          onClose={vi.fn()}
+        />
+      )
+    );
+    await act(async () =>
+      Array.from(container!.querySelectorAll('button'))
+        .find((el) => el.textContent === 'New folder')!
+        .click()
+    );
+    const input = container!.querySelector<HTMLInputElement>('input[aria-label="Folder name"]')!;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(
+        input,
+        'existing'
+      );
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await act(async () => {
+      container!
+        .querySelector('form')!
+        .dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    });
+    expect(input.value).toBe('existing');
+    expect(input.disabled).toBe(false);
+    expect(container!.querySelector('[role="alert"]')?.textContent).toBe(message);
+    await act(async () => {
+      input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    });
+    expect(container!.querySelector('form')).toBeNull();
+    expect(container!.querySelector('[role="alert"]')).toBeNull();
   });
 
   it('explains teammate ownership without sending a browse request', async () => {

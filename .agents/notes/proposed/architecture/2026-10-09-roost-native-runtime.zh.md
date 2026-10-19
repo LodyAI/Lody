@@ -1,0 +1,325 @@
+# Roost 原生运行时与共享客户端
+
+Status: proposed
+Type: architecture
+Translation: current
+PR: [#1329](https://github.com/LodyAI/Lody/pull/1329), [#1509](https://github.com/LodyAI/Lody/pull/1509)
+
+[English](2026-10-09-roost-native-runtime.md)
+
+## 摘要
+
+此前 npm 历史适配器依赖另行构建的 Roost 可执行文件，公开 Lody 仓库无法独立构建和打包实验性后端。
+CLI 现在接入已发布的 Node-API 包，在 Worker 内运行 SQLite 实现；Electron 随包携带目标平台的原生产物。
+共享 Web 和移动客户端沿用现有历史 RPC 接口。这次接入不建立浏览器本地 IndexedDB 副本或离线 Streams 同步。
+普通末尾编辑在同一 Session 内复用签名前缀，共享 reader 避免在流式更新时重建未变的业务事实。
+完整历史覆盖和设备级响应速度仍是验收边界。
+
+## 决策与边界
+
+CLI 运行依赖固定为 `@loro-dev/roost-node@0.1.2`，发布冷却期仅豁免该版本及
+六个精确匹配的平台包版本。
+保留 `@loro-dev/roost@0.1.2` 的身份、应用 JSON 和 `NodeLodyHistory` 适配器。
+安装、构建和打包 Lody 无须 Rust 源码或旁边的 Roost 仓库。
+
+直接使用 `RoostNativeClient`，保留数据库位置、系统凭据存储中的种子、允许的签名身份、
+有界队列、共享流租约及最终关闭等待。Worker 初始化失败时先关闭该客户端。
+移除子进程可执行文件和客户端路径的发现逻辑；历史方案见
+[迁移提案](2026-09-30-roost-transition-delivery-lifecycle.zh.md)。
+
+后续[写入身份改动](2026-10-11-roost-writer-identity.zh.md)通过应用管理的持久化移除系统凭据存储前置，
+独立于本次原生运行时接入实现。独立副本的登记与同步仍属于提案，旧 Nightly 钥匙串不迁移。
+
+原生 npm 包保持外置，客户端、Worker 和绑定保留相对路径。
+Electron 将其放在 `resources/cli/node_modules`，签名前复制到 `app.asar.unpacked`。
+每份桌面产物只携带已发布的 macOS、Windows MSVC、Linux GNU 的 arm64/x64 六种绑定中的一种。
+不支持的目标在打包时失败。Linux musl 不受支持，已发布的 Linux 构建要求 glibc 2.35 或更新版本。
+
+复用共享组件的 Web/iOS 不导入 Node 原生包。现有远程历史桥通过所属电脑公布的
+`sessionHistory: 2` RPC 契约读写，因此电脑必须在线。浏览器包提供 Roost 存储实现，
+但本仓库没有组装 IndexedDB 副本，也不因此新增同步调度器。
+Web/移动应用源码不属于本公开仓库范围。
+
+[功能开关](../feature/2026-10-08-roost-history-feature-gate.zh.md) 继续决定新会话选择。
+Loro 仍是默认后端；既有会话的后端标识、历史、Loro 控制元数据及传输授权保持原契约。
+
+## 失败诊断
+
+已发布的 0.1.2 host 通过公开的 `failure` 和 `Error.cause` API 保留 Worker
+`error` 事件、绑定加载异常和 fault 原因。Lody 直接依赖该正式包，无须 pnpm SDK 补丁；
+请求结果分类和重试策略仍由 SDK 管理。所属机器通过既有本地 logger，以同一诊断编号
+关联初始化、写入、RPC 和退出证据，并记录 CLI、Node、Electron 及编译期桌面构建信息。
+内部调用方仍收到原来的异常；所属机器产生的 RPC 报错只返回安全的阶段/错误码/编号字符串，
+渲染端补上本地化说明。Worker 原始异常不进入历史或远程报错响应。本次修复的是证据丢失，并没有确认此前 Nightly
+故障的底层原因，也不因此引入后端回退、重放、遥测上传或存储迁移。
+
+客户端传输失败属于另一个边界。此前向机器请求流追加失败时，Machine
+RPC 会在客户端构造失败的历史响应；远程 Roost bridge 将所有失败响应都包装成
+`RoostHistoryError`，包括 `request_failed`。对真实 Streams Client、JSON/RPC
+客户端和渲染 bridge 注入十秒超时，在没有所属机器 handler 或历史写入的情况下，
+仍会出现 Roost 存储说明及所属机器本地日志提示。这些信息不能证明 Worker 故障，
+也不是所属机器生成的诊断编号。客户端现在在本地历史响应投影中保留传输、远程 handler
+或协议的类型化来源、请求编号和目标机器。追加失败与响应超时返回传输错误，所属机器的
+元数据拒绝保留稳定错误码。这些字段不加入加密的历史结果报文，兼容旧版严格响应解析器。
+渲染端仅对所属机器返回的存储响应使用 Roost 存储说明和本地日志提示。未确认的 POST
+从不授权自动重放历史写入。
+
+### 历史所属机器就绪检查
+
+Windows 界面与 WSL daemon 的独立身份是受支持的目标。配对的 Nightly 日志显示，
+首次创建报 `internal_error` 所有权拒绝，同一会话之后在所属机器成功写入助手记录；
+另一次请求流追加超时的目标是 WSL 机器。这些失败发生在不同边界。RPC 服务端在历史
+handler 之前检查所有权，因此此处的拒绝绕过了 handler 的故障诊断。额外调用本地实例
+产生的所有权拒绝，不能证明界面请求走错路由。
+
+旧 owner resolver 把已有元数据记录却缺少 `machineId` 的会话判成另一台机器所有。
+渲染端创建只等待本地元数据写入，没有等待目标 daemon 收到；元数据与 RPC 经独立流
+传输。确定性探针使用两个真实 Repo，在一次完整元数据 upsert 中捕获仅有存在索引的
+版本，控制其到达所属机器的顺序，并运行真实加密 RPC 客户端/服务端和生产所有权检查。
+首次请求在注入的历史 handler 接受前，被拒绝为报告中的所有权错误；补齐元数据后，
+第二次请求成功。确实属于其他机器的会话仍被拒绝。这证明了可复现的就绪检查缺口，
+没有证明生产环境的实际到达顺序：日志缺少被拒请求的目标及当时读取到的元数据 owner，
+探针也刻意分阶段交付元数据。
+
+修复后的 resolver 在同一个 SDK 边界订阅并读取该会话快照，最多等待十秒，直到会话 ID、
+机器 ID 和持久化的 Roost 后端均匹配。只等所属机器身份不够：`historyBackend` 尚未到达
+时打开存储，可能将冷文档绑定到旧 Loro reader。已确认的其他机器、删除、无效及非 Roost
+身份仍在打开存储前拒绝。超时返回 `session_metadata_pending`，明确历史操作尚未开始。
+本地 pending/ready 诊断记录读取到的所属机器/后端状态及等待时长；服务端拒绝日志以 RPC
+请求编号关联这些不含内容的上下文。这没有诊断另一条独立的网络超时。
+
+就绪内核使用原生 Effect，直接适配第三方 Repo 的 `observeDocs`：每次请求有一个 scope
+管理的订阅，不打开文档正文、不执行共享 transport flush。MessageHandler 是 Promise 执行
+入口。成功、拒绝和超时释放订阅；服务端停止及 MessageHandler 清理会中断等待。取消不
+停止共享的元数据 producer，只有就绪后才移交到存储。已发送且结果未知的写入继续由既有
+存储 owner 管理。这完成了小范围的就绪单元，不代表 Repo、文档或 MessageHandler 生命周期
+迁移完成。
+
+行为测试使用真实 Repo 元数据及冷启动 SQLite 历史，覆盖不存在、仅有存在索引、所属机器
+未到及后端未到的创建状态。原来的首条消息均只接受一次，不写 Loro 历史。其他机器、删除、
+后端拒绝、TestClock 超时和取消都会释放 observer。恢复旧 resolver 后，四个冷写入回归用例
+均失败。真实加密 RPC 测试保留拒绝错误码/请求关联及严格的成功报文；真实 Streams 追加超时
+和 RPC 响应超时测试在两种语言中区分传输失败，不重放。
+
+扩展测试纠正了此前的验证边界：单次请求被拒绝，不代表重启后仍然拒绝。打包后的 Cloud
+客户端先收到 `session_metadata_pending`，当时尚未写入；随后补齐元数据，在原 RPC 仍有效
+时重启 Linux daemon。请求流重放了该请求，SQLite 实际出现了已拒绝的 turn，前端缓存的空
+历史却遮住了这次写入。确定性的加密服务端回归用例无需网络或 sleep 即可复现，在旧实现
+上稳定失败。
+
+CLI 现在在返回所属机器就绪拒绝前，以 FULL 同步事务将结果提交到独立的机器本地 SQLite
+存储。重放原请求时保持最初的拒绝，直到原请求过期；用户可用新请求 ID 重试。指纹将完整
+请求绑定到工作区、机器和请求 ID，不保存历史正文或凭据。相同并发请求共用一个 handler；
+同一 ID 的冲突复用、拒绝存储不可用时均拒绝执行。这个内核用 scope 管理单次 SQLite
+handle，由 MessageHandler 回调执行 Effect，没有后台任务或常驻连接。既有 Promise RPC
+dispatcher 不属于该原生单元。这里不记录已移交写入的结果，也不改变其既有恢复策略。
+dispatcher 在就绪后、移交存储前再次检查过期和停止状态；回归用例覆盖 RPC 过期后才到达
+的元数据。
+
+扩展原生测试检查真实 MessageHandler 关闭时取消六个等待中的写入、单个取消不影响另两条
+首次写入、实时 purge 与无效身份，并覆盖 SQLite 拒绝结果重开、过期、命名空间隔离、冲突
+payload 和存储不可用。加密服务端测试覆盖重启重放、并发重复及读取/保存失败。打包远程
+测试还错开三条元数据等待，同时完成另一条健康写入及 ping；随后向四条会话并发追加 32
+条记录，核对正文、唯一 ID、分页及替换，Loro 历史均为空。
+
+该 Linux daemon 更新为修复后的 CLI 后，捕获两条仍未过期的原始请求：它们此前分别因元
+数据未到、所属机器不匹配而拒绝。在元数据恢复正确后，将请求原样重新追加；所属机器日志
+确认重放并保留原错误码，权威 snapshot 读取仍为空。新请求随后各接受一条记录，另一个
+会话接受 16 条并发追加，分页及 sealed turn 替换均保留身份和正文。通过原生 SDK 检查
+独立 SQLite backup，只读取真实写入者的公钥，18 条已接受记录全部匹配，没有被拒绝的原始
+turn。机器上已有其他活动会话，因此修复后未再次做真实重启；服务端重建和真实 SQLite
+关闭/重开覆盖该边界。
+
+公开 CLI 在 2 GiB 下构建通过。Cloud 验证产物复用了公开 CLI 的按包分块策略：原有未分块
+组合在旧代码及修复代码下均超过 2 GiB。这个本地产物验证修复后的运行时，没有验证原
+Cloud 组合的内存上限。没有升级 SDK 或引入运行时 patch。
+
+macOS arm64 Cloud Nightly 测试 App 通过打包、内置 CLI/原生模块探针及 ad-hoc 签名验证，
+随后复用已有 Nightly profile 和已登录工作区。界面首次发送收到助手回复，读回两条 Roost
+记录，Loro 历史为空。两个冷启动本地历史请求分别缺少机器 ID 或后端字段：所属机器记录元数据
+pending，原请求保持等待；补齐缺失字段后，首条记录只接受一次，读回原始 turn，
+Loro 历史仍为空。合成测试会话随后归档。这验证了打包后的本地路径，没有证明 Windows/WSL
+的实际到达顺序，也没有诊断另一条独立的请求流连接超时。
+
+Roost 开关开启时，向另一台未声明 `sessionHistory` 能力的 Linux daemon 首次发送，
+正常收到助手回复。持久化元数据选择 `loro`，所属机器仍是选中的目标机器，Loro 文档
+保存了用户和助手两条记录。界面未提示目标不支持 Roost。开关传入的是偏好后端，既有
+创建协商会静默降级；只有显式指定 Roost 后端才拒绝不支持的目标。这验证了远程 Loro
+路径，没有验证远程 Roost 或本次就绪修复。
+
+随后将该 Linux daemon 更新为与打包 App 相同的 CLI JavaScript，安装匹配的 Linux
+运行时依赖。原机器身份和登录态保持有效，daemon 声明 `sessionHistory: 2`。新建对话
+首次发送成功收到助手回复，持久化后端为 Roost。未注入延迟，所属机器便观察到仅有存在
+索引的元数据：两个历史请求分别等待 1,164 ms 和 759 ms，直到所属机器和后端匹配后继续。
+通过生产远程历史 reader 读回的记录恰好是用户和助手两条，Loro 历史为空，没有错误提示
+或手动重发。这验证了真实远程 Linux daemon 上的就绪修复，没有证明原 Windows/WSL
+现场的到达顺序，也没有解决另一条独立的连接超时。
+
+验证通过真实 Node Worker 注入启动、绑定加载、请求执行故障及显式异常退出，
+检查原始异常、编号关联和已发出/排队请求的结果分类。所属 SQLite/RPC 测试检查
+安全报错响应和保留的 Roost 历史；渲染端测试覆盖本地、远程 bridge 的中英文说明。
+既有 toast 的 Storybook 用例验证中英文及明暗主题下的呈现。这些故障注入检查本身
+没有复现最初报告的 Nightly 故障。
+
+正式 0.1.2 包通过冻结安装、完整仓库检查、2 GiB 公开 CLI 构建及 OSS 桌面构建。
+六个实际 npm 平台包均正确暂存唯一匹配的绑定；本机 Worker 在 Node 24.14.0 和
+Electron 44.7.0 下通过签名 SQLite 关闭/重开。其他平台桌面执行及发行签名不属于本次验收。
+
+## 历史修改与命令路由
+
+状态修正不能重置 active view 或重新创建 sealed primary。可修改的状态记录绑定到
+对应 primary，读取时投影为同一业务 turn。权限回应使用 SDK 的独立 response 记录，
+reader 将结果合并到对应工具，不封存仍在输出的 assistant。普通变更只刷新受影响的正文。
+
+一般结构复制和导入编辑通过公开 SDK 操作，在独立 generation 中准备完整历史；再以一次
+原生 event-cursor CAS，在旧流中发布应用自有的签名激活记录。准备失败或旧流并发写入
+都会保留旧分支。不复制 SDK envelope/index 格式，也不重写 sealed 数据。
+串行 generation 解析及旧 handle 写入保护，避免并发读写使用被替换的视图。
+激活确认丢失后，数量/位置读取先刷新到已提交视图；本地写入屏障补发该投影，
+RPC 再绑定其持久控制版本。恢复不会重放 indeterminate 操作。
+旧 generation 保留归档；本次修复不建立回收机制或任意旧适配器降级兼容。
+
+ACP 输出与稳定的逐项 receipt 一起提交，包括分块批次；重试可在旧 generation 中查找
+receipt。导入基线和源 cursor 与激活记录同时提交；Loro cursor 写入失败返回 indeterminate，
+重开读取已提交的原生基线。条件式尾部回滚保留后续追加，拒绝覆盖并发编辑。
+Fork 使用共享 writer 唯一的来源校验表，整批检查冲突后再整体前插。
+
+Cloud 的两个 one-shot manager 入口注入相同 owner RPC 组合，覆盖会话命令、导出和 MCP
+历史查询。原生执行仍由 daemon 负责；仅本地 MCP 复用其 manager，访问检查拒绝其他机器。
+RPC directory 读取按 owner count 截断，每次最多 500 行；revision 变化时重读。
+Fork/Edit & Resend 保留 owner saga，不跨 RPC 传递进程内快照和补偿 handle。
+新会话偏好在任何持久写入前检查目标能力。
+
+## 保持同一对话的性能优化
+
+对 `d074e53` 的扩展基线测试表明，整体长对话目标尚未达成：最新窗口读取有界，但
+末尾用户消息的编辑仍复制保留前缀，reader 在普通文字增量时重建全量目录和事实数组。
+单次结构探测测得 1000 行编辑耗时 7881 ms，6000 行耗时 53823 ms（约 3000 组
+合成用户/助手往返）。可重复的打开基线使用七次测量、两次预热；6000 行的 Roost
+最新 40 条打开中位数为 69 ms，Loro 为 531 ms。这些结果不证明绘制、输入延迟或
+完整历史覆盖的性能。
+
+普通尾部编辑现在在同一原生 stream 和 view 中调用公开 SDK 的 fork/restore 操作，
+复用保留前缀的 Turn id 和 sealed 字节；不创建或跳转 Lody Session。封存的应用 epoch
+与激活原子写入。原生 cursor CAS 防止并发写入改变已校验的资格，绑定 epoch 的旧
+handle 不能继续向失效 suffix 写入。若编辑后没有追加，条件回滚恢复原 head；有后续
+追加时沿用整代补偿以保留这些数据。同 id 替换、任意结构编辑及导入/复制仍使用全量暂存。
+重新追加已移除的业务身份时，若旧 SDK binding 仍存在，也暂存新 generation；这样保留
+共享 append 契约，并避免旧内容重新激活。
+
+精确匹配 cursor 的本地目标 projection 避免 active-goal 校验反复物化前缀。它来自
+从尾部连续读取的分页，或一次完整权威读取。writer 记录本次原生 update receipt 和
+可能的 index event，仅当观察到的事件全部有相应证据时推进 projection。其他 writer
+的变更、损坏的缓存、不完整的覆盖或过大的事件范围都会放弃复用并刷新权威状态。
+该索引是可丢弃的派生数据，不是命令 receipt 或同步权威。旧历史可能需先执行一次完整
+目标校验以建立覆盖，不强制迁移。
+
+相邻反向页只替换 sentinel slot。状态/权限 projection 使用八条有界并行通道，目录
+响应复用已投影的页面。共享目录 hook 只更新显式报告的 metadata 身份；业务消费方
+不包含文字摘要，大纲仍读取实时摘要。已 hydration 的事实仅在重新派生并比较语义值
+后复用旧的小对象；被 evict 的修改仍先丢弃旧事实，再后台派生。可见文字、目标/权限
+结果、草稿焦点、选区和顺序继续按原契约更新。
+
+取舍仍需说明：完整事实/搜索覆盖会在有界后台块中读取未见历史，大段可编辑 suffix
+仍有工作量，归档分支尚无回收，保留后续追加的回滚可能复制 generation。浏览器/移动
+部署及设备级帧耗时、输入延迟和内存验收，需要独立证据。
+
+## 验证
+
+### 同一会话性能检查点（2026-10-09）
+
+原生历史窄化测试现在通过 27 项契约，完整检查另包含 4 项 RPC/后端测试。新增用例
+验证物理前缀 Turn id 保留、同一 Session 重开、激活方和其他实例的旧 handle 隔离、
+回滚、重新追加已移除的身份、窗口外 active goal 校验、损坏缓存恢复、其他 writer
+写入，以及 fork 确认丢失。reader/React/derivation 窄化测试通过 52 项。另将现有
+React 流式契约夹具扩展到 6,000 条：业务事实、草稿值、焦点及选区保持稳定，可见
+正文和大纲摘要正常更新，一次文字增量只观察到 25 次索引访问，没有遍历整个目录。
+这是功能证据，不是帧耗时或输入延迟测量。
+
+同步 main 的 `668b0e5` 后，有界 projection 使用 Effect 4.0.2 的公开 Semaphore
+API。冻结安装和完整 `pnpm check` 通过：CLI 3641 项、4 项既有跳过，shared 1331 项、
+共享组件 4920 项、Electron 214 项通过。`pnpm build` 通过。本机原样桌面 smoke 按系统选择
+中文，英文 Settings 选择器失败。使用隔离英文 profile 重跑后完成四条 P0 旅程，
+随后因 macOS 请求 Safe Storage 钥匙串授权而停止；本机完整桌面 smoke 不记作通过。
+两次运行均不修改产品语言行为，也不构成 Roost 桌面性能验收。
+
+最终生产基准使用已发布的真实 SQLite、每次新建 backend/view、已预热的 OS page
+cache，机器为 Apple M4 / macOS arm64 / Node 24.14.0；正文 4 KiB，预热一次，
+正式测量五次。以下是中位数，单位毫秒：
+
+| 历史条数 | Roost 最新 40 条 | Loro 最新 40 条 | Roost 向前 40 条 | Roost 最后用户回合编辑 | Roost 完整目录 |
+| -------- | ---------------- | --------------- | ---------------- | ---------------------- | -------------- |
+| 1,000    | 63.0             | 88.1            | 36.2             | 39.8                   | 910.2          |
+| 6,000    | 68.9             | 550.3           | 44.7             | 60.8                   | 5,721.3        |
+| 10,000   | 58.4             | 820.3           | 42.3             | 56.5                   | 9,374.9        |
+
+6,000 条（约 3,000 轮）的最新窗口 P95 为 74.2 ms，编辑 P95 为 61.4 ms；
+10,000 条分别为 60.7 ms 和 58.7 ms。全部 15 次正式 Roost 编辑都只读取一页
+40 条，没有完整历史读取。此前 53,823 ms 的编辑仅为单次基线探针，不是基线
+分布。本次编辑在完整目录覆盖建立可选 goal projection 后测量；新写会话增量维护
+该缓存，旧会话或失效缓存仍可能先读取完整权威历史执行目标校验。完整后台覆盖
+在 6,000 条时仍约需 5.7 秒，10,000 条约需 9.4 秒。
+
+在 `apps/cli` 内复现：
+
+```sh
+BENCH_STRUCTURAL=1 BENCH_SIZES=1000,6000,10000 BENCH_SAMPLES=5 BENCH_WARMUPS=1 \
+  BENCH_BODY_BYTES=4096 TSX_TSCONFIG_PATH=tsconfig.json \
+  node --import ./node_modules/tsx/dist/loader.mjs benchmarks/roost-history.mts
+```
+
+基准不覆盖 IPC/RPC、React/绘制、完整事实/搜索、IndexedDB、真实 Provider 和设备
+内存验收。Roost 流式写入包含 SQLite 持久化；本基准的 Loro 控制 Repo 无磁盘
+存储，不能把两者写入耗时视作等价持久化比较。结果和验证日志：
+`/private/tmp/lody-roost-performance-main-optimized.json`、
+`/private/tmp/lody-roost-performance-ui-6000-final.log`、
+`/private/tmp/lody-roost-performance-main-check.log` 及
+`/private/tmp/lody-roost-performance-main-desktop-build.log`。
+
+### 生产适配器修复检查点（`d074e53`，2026-10-09）
+
+最终窄化测试 27 项通过：23 项使用真实 SessionDocument、LoroRepo 和已发布原生
+SQLite 的生产历史契约，加上 4 项 RPC/后端测试。覆盖队列七个持久阶段失败、sealed
+状态修正、权限后工具稀疏更新及文字输出、源关闭后跨会话 Fork、不透明已存值、私有
+准备失败、并发 generation 解析、stale 激活/旧 handle、逐项 receipt 重试、条件回滚、
+导入 cursor 失败后重开，以及激活确认丢失后的数量/位置读取。恢复屏障补发已提交
+投影，不重放原操作。
+
+传输测试使用实际 RPC range schema 和 revision 重试。真实 owner SQLite 组合测试
+覆盖共享 Cloud 工厂及 owner 失败传播；renderer 测试验证不支持的显式 Roost 请求
+在创建副作用前失败。完整 `pnpm check` 通过：CLI 3604 项、4 项既有跳过，shared
+1302 项、共享组件 4892 项、Electron 214 项通过。格式、文档、公开仓库/平台检查
+及重新构建的 CLI 发布产物 smoke 也通过。
+
+合成生产基准使用 100/1000 条历史和 4 KiB 正文，预热一次后各测两次。
+Roost 首屏及向前翻页各读取一个 40-turn page；十次流式更新不读取完整历史或
+branch page。基准不覆盖 RPC、renderer 绘制、IndexedDB、真实 Provider 执行及频繁
+切换 generation。日志：`/private/tmp/lody-roost-repair-bench.json`、
+`/private/tmp/lody-roost-native-contract.log`、`/private/tmp/lody-roost-repair-check.log`
+及 `/private/tmp/lody-roost-repair-published-bundle.log`。
+本次继续使用现有 0.1.1 运行时，不需要重新 npm 发布。
+
+### 已发布运行时与打包检查点
+
+用户已发布全部六个平台包和 0.1.1 主包。主包 tarball 校验值与准备好的发行产物一致；
+已安装主包不含绑定，仅解析当前平台。六个目标的实际发布包都通过暂存，分别使用
+已安装的本机包或生产公开 npm 下载路径。夹具覆盖相邻/拆包布局、精确版本不匹配
+及下载失败时保留可用运行时。本机签名 SQLite 重开通过；其他平台的二进制在本机
+仅检查选择结果，上游六平台发行
+[CI](https://github.com/loro-dev/roost/actions/runs/37877651895) 提供相应执行验证。
+
+本次历史修复之前，源码 `8b1073e0ceef32829b0230ab64801f6a34e36c01` 已通过
+[CI](https://github.com/LodyAI/Lody/actions/runs/37889429418)及
+[桌面 E2E](https://github.com/LodyAI/Lody/actions/runs/37889429365)。
+正常 CLI 构建使用 2 GiB 堆限制；renderer 使用其正常配置，产物不含原生 Roost 导入。
+正常 macOS arm64 OSS 0.104.0 目录打包通过实际 CLI 启动、原生绑定及 Worker 的
+签名 SQLite 写入/重开探针。应用包含原生运行时 0.1.1 和唯一一份 8,021,248 字节
+本机绑定，其 SHA-256 为
+`1d0e23d144491d5e566de679a6a9e2477332027a98e86af74849a4c60a983d93`，与发布产物一致。
+此打包检查点早于适配器修复，不代表发布了新的签名应用。
+日志：`/private/tmp/lody-roost-011-check-merged.log`、
+`/private/tmp/lody-roost-011-package.log` 和 `/private/tmp/lody-roost-011-platforms.log`。
+
+私有 Web/移动应用构建、远程部署、浏览器本地离线副本、其他平台完整桌面包、
+发行签名/公证及旧 generation 回收不属于本次验证。
+测试数据库均为隔离的合成数据，没有使用用户历史。

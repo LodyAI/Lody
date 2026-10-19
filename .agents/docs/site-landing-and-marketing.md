@@ -18,14 +18,47 @@ ice ink.
 ## Ambient field cost and pacing
 
 `components/marketing-atmosphere.tsx` samples at up to 15Hz into two
-full-drawing-buffer textures, uses GPU-query backpressure, and blends cached
-endpoints on display frames. Software GPUs start at 8Hz sampling and 30fps
-presentation, and GPU timing may slow sampling further.
+full-drawing-buffer textures and blends cached endpoints on display frames, at
+most 60 per second; a frame identical to the one on screen is not redrawn.
+Every presented frame also makes the compositor re-blur the frosted
+`--mkt-panel-*` panels over the canvas, which is why presentation is capped.
 
-It is an expensive pass — roughly 445 `sin()` calls per pixel, of which the four
-`warped()` calls are about 77%. The two gradient taps feeding `ridge` look
-redundant, but they carry the filigree, which is why the rule forbids folding
-them into a cheaper finite difference.
+The field is an expensive pass: four `warped()` calls per pixel at about 100
+`sin()` each. Two of them are the forward-difference taps feeding `ridge`, one
+ridge step (0.016 field units, about 27px on a 1620px buffer) to the right and
+above. They look redundant but carry the filigree, so they are never replaced
+by a cheaper difference. Temporal samples instead split the field
+(`marketing-atmosphere-shaders.ts`): pass one stores `n` and `n2` as 16-bit
+fixed point in an RGBA8 target that extends one ridge step past the right and
+top edges, and pass two reads the taps as exact neighbour texels. The step is
+rounded to whole buffer pixels (under 2% change on desktop-sized canvases). On
+SwiftShader at 960×540 the split sample is about 1.8× cheaper than the single
+pass, and differs from it by at most 2/255 per channel (mean under 0.07/255).
+The single-pass program remains for still frames when the split target cannot
+be allocated.
+
+Sample pacing keeps the field near 20% of GPU time. It uses a GPU timer query
+where the browser exposes one (`EXT_disjoint_timer_query_webgl2` on WebGL2, the
+WebGL1 extension otherwise). Without a timer, a WebGL2 fence measures the sample;
+because fence status reaches script frames after the GPU finishes, the sampler
+subtracts the latency of a reference fence placed after a cheap present frame.
+A sample that takes 25ms or more drops presentation to 30fps. The floor was
+12ms while no browser exposed the timer the old code read; once timers worked,
+12ms fired on an M2 Max at dpr 2 and halved its blend rate (~38fps measured). Software
+rasterisers (SwiftShader, llvmpipe) get one still frame, as reduced motion does:
+an animated full-screen sample costs them seconds of every CPU core.
+
+## Landing renderer cost
+
+The landing's three.js scene is a fixed layer that stays visible (dimmed)
+behind every post-demo section, so it keeps rendering while the page scrolls;
+the FPS cap (40) and the tier watchdog bound it. The renderer uses the browser's
+default GPU instead of `high-performance`, so dual-GPU laptops do not wake the
+discrete GPU for a background. MSAA is requested only below a 2× drawing
+buffer: at 2× the soft point sprites are already supersampled, and 4× MSAA
+multiplied every blended sample for no visible edge difference in side-by-side
+crops. Software rasterisers render the single still frame used for reduced
+motion.
 
 ## Why pricing carries no clock
 

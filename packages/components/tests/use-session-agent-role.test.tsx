@@ -79,6 +79,7 @@ describe('useSessionAgentRole', () => {
     durableRoleReady?: boolean;
     runConfigHasUserEdits?: boolean;
     selectedModelId: string;
+    planMode?: boolean;
   };
 
   function Harness() {
@@ -98,7 +99,7 @@ describe('useSessionAgentRole', () => {
       modeOptions: [],
       selectedModeId: null,
       configOptionSelectors: [],
-      configOptionValues: {},
+      configOptionValues: hookProps.planMode === undefined ? {} : { plan_mode: hookProps.planMode },
     });
     return null;
   }
@@ -113,6 +114,7 @@ describe('useSessionAgentRole', () => {
     durableRoleReady,
     runConfigHasUserEdits,
     selectedModelId = 'model-1',
+    planMode,
   }: {
     sessionId?: string;
     provenanceRoleId?: AgentRoleId;
@@ -123,6 +125,7 @@ describe('useSessionAgentRole', () => {
     durableRoleReady?: boolean;
     runConfigHasUserEdits?: boolean;
     selectedModelId?: string;
+    planMode?: boolean;
   }) => {
     hookProps = {
       sessionId,
@@ -134,6 +137,7 @@ describe('useSessionAgentRole', () => {
       durableRoleReady,
       runConfigHasUserEdits,
       selectedModelId,
+      planMode,
     };
     await act(async () => root?.render(createElement(Harness)));
   };
@@ -158,6 +162,34 @@ describe('useSessionAgentRole', () => {
     root = null;
     container?.remove();
     container = null;
+  });
+
+  it('preserves Role identity and memory through Plan toggles and navigation', async () => {
+    const planner = role('role-1', 'model-1');
+    planner.runConfig = {
+      ...planner.runConfig,
+      configOptionValues: { plan_mode: true },
+      memory: { providerId: 'nowledge', memoryId: 'planner' },
+    };
+    catalog.roles = [planner];
+    await render({ provenanceRoleId: planner.id, planMode: true });
+    await act(async () => control?.onSelect(planner.id));
+    await render({ provenanceRoleId: planner.id, planMode: false, runConfigHasUserEdits: true });
+    expect(control?.selectedRoleId).toBe(planner.id);
+    expect(control?.turnSelection).toMatchObject({
+      agentRoleId: planner.id,
+      agentRoleRevision: planner.revision,
+      memory: planner.runConfig.memory,
+    });
+    await act(async () => root?.unmount());
+    root = createRoot(container!);
+    await render({ provenanceRoleId: planner.id, planMode: false });
+    expect(control?.selectedRoleId).toBe(planner.id);
+    await render({ provenanceRoleId: planner.id, planMode: true });
+    expect(control?.selectedRoleId).toBe(planner.id);
+    await act(async () => control?.onSelect(null));
+    await render({ provenanceRoleId: planner.id, planMode: false });
+    expect(control?.turnSelection).toBeNull();
   });
 
   it('shows the creating Role after the workspace catalog loads', async () => {

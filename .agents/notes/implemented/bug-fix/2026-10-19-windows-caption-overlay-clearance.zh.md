@@ -1,0 +1,45 @@
+# 用实测宽度避让 Windows 标题栏按钮
+
+Status: implemented
+Translation: current
+
+[English](2026-10-19-windows-caption-overlay-clearance.md)
+
+## 摘要
+
+Windows 的最小化、最大化、关闭按钮由系统绘制，总是盖在所有网页内容之上。
+Mermaid 全屏查看器的缩放和关闭按钮正好落在它们下面。
+原来的避让写死为 `144px`，需要每个界面自己记得加上；查看器只预留了设备安全区，而安全区在桌面端是 0。
+现在渲染层从 Electron 的 Window Controls Overlay 读出系统按钮区域，记为 `--window-caption-height` 和 `--window-caption-inset-right`。
+共用的顶栏按这个宽度留白，Mermaid 查看器把工具栏放在这条区域下方。
+没有系统按钮覆盖层时（包括原生全屏）两个值都是 0，所以任何界面都可以无条件预留。
+
+## 决定与依据
+
+`titleBarOverlay` 会开启 Window Controls Overlay，`env(titlebar-area-*)` 描述的是这条区域里留给页面的部分。
+系统按钮占用的宽度是 `100vw - x - width`。
+在 Electron 44 上启用 `titleBarOverlay` 做了探测（在 Linux 上做的，与 Windows 共用同一套 Chromium 实现）：高度为 36，1000px 宽的窗口里标题栏可用区域为 887px。
+全屏时 `windowControlsOverlay.visible` 为 `false`，这些变量未定义，于是自动取回退值 0，不需要 JS 判断。
+顶栏仍通过 `useWindowsCaptionPadClass` 留白，在实测宽度上再加 0.5rem 间距。
+图片查看器保留原来"工具栏就在这条区域里"的做法，改为读取同一组变量。
+
+覆盖整个窗口的浮层在纵向上避开这条区域，取 `max(safe-area-top, 系统按钮高度)`，而不是和系统按钮共用一行，因为浮层没有可以容纳系统按钮的顶栏。
+让查看器的 ✕ 和系统的 ✕ 不在同一行，也能把"关闭浮层"和"关闭窗口"分开，减少误点。
+
+放弃的方案：
+
+- 右侧内容整体下移：浪费 36px 高度，还会破坏与[系统按钮中线](2026-09-23-windows-caption-centerline.zh.md)的对齐。
+- 在 Windows 上重新定义 `--safe-area-top`：会让 19 个假设桌面端为 0 的使用方一起移位。
+- 自己绘制系统按钮：会失去 Windows 11 的 Snap Layouts。
+
+弹窗是居中的，四周至少留出约 40px，所以顶边碰不到 36px 的系统按钮条。
+
+## 验证与局限
+
+在 Linux 上用临时补丁（未提交）让构建后的桌面应用走 Windows 的覆盖层分支，跑了一次审计。
+审计把每个可交互元素和覆盖层区域做了命中检测。
+修改后，会话页、新对话页、归档、定时任务、终端面板、右侧面板、设置、命令面板和 Mermaid 查看器都没有重叠；查看器的按钮现在位于 y=36–80。
+
+另有一个单独的问题，本次没有修：两侧边栏都打开且窗口宽度小于约 840px 时，面板最小宽度之和超过了窗口宽度，右侧面板会超出窗口边缘约 20px。
+这会把它的切换按钮推到系统按钮区域下面；在所有平台上，这都会导致面板被裁掉一部分。
+系统按钮在真实 Windows 上的宽度没有实测。

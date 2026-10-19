@@ -26,6 +26,7 @@ import {
   shouldShowDeepSeekDelegationWarning,
 } from '@/components/shared/deepseek-delegation-warning';
 import { orderAcpConfigOptionSelectors } from '@/lib/acp-selector-order';
+import { permissionModeControlLabel, resolvePermissionModeFace } from '@/lib/permission-mode-face';
 import {
   AGENT_ROLE_UNAVAILABLE_REASON_KEYS,
   type ComposerAgentRoleItem,
@@ -274,8 +275,6 @@ function MobileRunConfigSheetRows({
   const {
     modelSelectors,
     interactionModeSelectors,
-    permissionModeSelectors,
-    modeSelectors,
     thoughtLevelSelectors,
     planModeSelectors,
     fastModeSelectors,
@@ -470,34 +469,32 @@ function MobileRunConfigSheetRows({
     [thinkingOptions, thinkingValue]
   );
 
-  /* ── Permission / mode (modeOptions first, else the mode selector) ── */
-  const explicitPermissionSelector = permissionModeSelectors[0];
-  const modeConfigSelector: AcpSelectConfigOptionSelector | undefined =
-    explicitPermissionSelector ?? modeSelectors[0];
-  const permissionOptions = useMemo<MobileInlinePickerOption<string>[]>(() => {
-    const source = explicitPermissionSelector
-      ? explicitPermissionSelector.options
-      : modeOptions.length > 0
-        ? modeOptions
-        : (modeConfigSelector?.options ?? []);
-    return source.map((opt) => ({
-      value: opt.value,
-      label: opt.label,
-      searchText: opt.label,
-      description: opt.description,
-      disabled: opt.disabled,
-      icon: permissionModeIcon(opt.value),
-    }));
-  }, [explicitPermissionSelector, modeConfigSelector, modeOptions]);
-  const permissionValue =
-    explicitPermissionSelector || modeOptions.length === 0
-      ? modeConfigSelector
-        ? ((resolveConfigOptionValue(
-            modeConfigSelector,
-            configOptionValues?.[modeConfigSelector.configId]
-          ) as string) ?? null)
-        : null
-      : selectedModeId;
+  /* ── Permission / mode — resolved by the one shared rule, so the sheet, the
+     desktop button, and the Role pane cannot disagree about which knob this
+     is or what to call it. ── */
+  const permissionFace = useMemo(
+    () =>
+      resolvePermissionModeFace({
+        modeOptions,
+        selectedModeId,
+        configOptionSelectors,
+        configOptionValues,
+      }),
+    [configOptionSelectors, configOptionValues, modeOptions, selectedModeId]
+  );
+  const permissionOptions = useMemo<MobileInlinePickerOption<string>[]>(
+    () =>
+      permissionFace.options.map((opt) => ({
+        value: opt.value,
+        label: opt.label,
+        searchText: opt.label,
+        description: opt.description,
+        disabled: opt.disabled,
+        icon: permissionModeIcon(opt.value),
+      })),
+    [permissionFace]
+  );
+  const permissionValue = permissionFace.value;
   const permissionLabel = useMemo(
     () => permissionOptions.find((opt) => opt.value === permissionValue)?.label ?? null,
     [permissionOptions, permissionValue]
@@ -519,7 +516,7 @@ function MobileRunConfigSheetRows({
   const modelSearchPlaceholder = t('chat.runConfig.modelSearchPlaceholder', 'Search models');
   const modelSearchEmptyLabel = t('chat.runConfig.modelSearchEmpty', 'No models match');
   const reasoningLabel = t('chat.runConfig.reasoningLabel', 'Reasoning');
-  const permissionRowLabel = t('chat.runConfig.permissionLabel', 'Permission');
+  const permissionRowLabel = permissionModeControlLabel(permissionFace, t);
   const planRowLabel = t('chat.mobileNewChat.planModeLabel', 'Plan');
   const fastRowLabel = t('chat.runConfig.fastLabel', 'Fast');
 
@@ -620,7 +617,7 @@ function MobileRunConfigSheetRows({
         return (
           <RunConfigRow key={selector.configId} label={selector.label}>
             <MobileInlinePicker<string>
-              id={`run-config-${selector.configId}`}
+              id={`run-config-option:${selector.configId}`}
               value={selectedValue}
               onChange={(nextValue) =>
                 onConfigOptionChange?.(selector.configId, nextValue as AcpConfigOptionValue)
@@ -726,9 +723,9 @@ function MobileRunConfigSheetRows({
             id="run-config-permission"
             value={permissionValue}
             onChange={(value) => {
-              if (explicitPermissionSelector || modeOptions.length === 0) {
-                if (!modeConfigSelector) return;
-                onConfigOptionChange?.(modeConfigSelector.configId, value as AcpConfigOptionValue);
+              const source = permissionFace.source;
+              if (source?.kind === 'configOption') {
+                onConfigOptionChange?.(source.configId, value as AcpConfigOptionValue);
               } else {
                 onModeChange(value);
               }

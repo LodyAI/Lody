@@ -1,3 +1,4 @@
+import * as stylex from '@stylexjs/stylex';
 import { useEffect, useState } from 'react';
 import { CircleAlert, File as FileIcon, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
@@ -6,6 +7,7 @@ import type { SessionAttachmentDraft } from '@/lib/session-attachment-draft';
 import type { PendingSessionSend } from '@/lib/session-pending-sends';
 import { deriveSessionSendProgress } from '@/lib/session-send-status';
 import { cn } from '@/lib/utils';
+import { queueSurface } from './surface';
 import { IconAction, TextAction } from './message-queue-row';
 
 const MAX_INLINE_ATTACHMENTS = 3;
@@ -39,9 +41,8 @@ function queuedText(record: PendingSessionSend): string {
   const task = (record.queue as { task?: unknown } | undefined)?.task;
   if (typeof task === 'string' && task.trim()) return task;
   return (
-    record.entry.items
-      ?.flatMap((item) => (item.type === 'text' ? [item.text] : []))
-      .join('\n') ?? ''
+    record.entry.items?.flatMap((item) => (item.type === 'text' ? [item.text] : [])).join('\n') ??
+    ''
   );
 }
 
@@ -84,7 +85,8 @@ export function PendingQueueRow({
   return (
     <div
       className={cn(
-        'relative flex items-start gap-2 px-2 py-1.5',
+        'relative items-start gap-2 px-2 py-1.5',
+        stylex.props(queueSurface.row).className,
         divided && 'border-t border-border/30'
       )}
       data-pending-queue-row={record.id}
@@ -116,6 +118,7 @@ export function PendingQueueRow({
         <div
           className={cn(
             'min-w-0 flex-1 overflow-hidden text-xs leading-snug',
+            stylex.props(queueSurface.text).className,
             instant ? 'text-foreground/80' : 'text-foreground/55'
           )}
           style={{ display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}
@@ -123,7 +126,12 @@ export function PendingQueueRow({
           {queuedText(record)}
         </div>
       </div>
-      <div className={cn(FIRST_LINE_BOX_CLASS, 'gap-1')}>
+      <div
+        className={cn(
+          'flex shrink-0 items-center',
+          stylex.props(queueSurface.actions, queueSurface.pendingActions).className
+        )}
+      >
         {failed ? (
           <>
             <CircleAlert

@@ -1,4 +1,4 @@
-import { spawn } from 'node:child_process'
+import { startProcessLegacy } from '@lody/shared/node/process'
 import { appendFileSync, existsSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { join } from 'node:path'
@@ -301,8 +301,16 @@ export class AppUpdaterService {
 
     this.installInFlight = true
     try {
-      const result = await runLinuxDebInstall(plan, (command, args) =>
-        spawn(command, args, { stdio: ['ignore', 'ignore', 'pipe'] })
+      // Not a process group: pkexec is setuid, and nothing here signals it.
+      const result = await runLinuxDebInstall(
+        plan,
+        (command, args) =>
+          startProcessLegacy({
+            command,
+            args,
+            options: { stdio: ['ignore', 'ignore', 'pipe'] },
+            processGroup: false
+          }).child
       )
       if (!result.ok) {
         this.recordError(result.error)

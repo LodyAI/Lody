@@ -171,6 +171,8 @@ export function CompactRow({
 interface CompactLinkRowProps extends Omit<ComponentProps<'button'>, 'className' | 'children'> {
   label: string;
   helper?: ReactNode;
+  /** The row's answer, before its end mark (an amount, a count). */
+  detail?: ReactNode;
   /** Where the row leads: out of Lody (`external`) or into a dialog (`open`). */
   to?: 'external' | 'open';
 }
@@ -182,7 +184,10 @@ interface CompactLinkRowProps extends Omit<ComponentProps<'button'>, 'className'
  * A dialog trigger may render it (`render={<CompactLinkRow …/>}`).
  */
 export const CompactLinkRow = forwardRef<HTMLButtonElement, CompactLinkRowProps>(
-  function CompactLinkRow({ label, helper, to = 'external', type = 'button', ...rest }, ref) {
+  function CompactLinkRow(
+    { label, helper, detail, to = 'external', type = 'button', ...rest },
+    ref
+  ) {
     const Mark = to === 'external' ? ArrowUpRight : ChevronRight;
     return (
       <button
@@ -196,6 +201,7 @@ export const CompactLinkRow = forwardRef<HTMLButtonElement, CompactLinkRowProps>
           {helper ? <p {...stylex.props(surface.rowHelper)}>{helper}</p> : null}
         </div>
         <span {...stylex.props(surface.rowControl, surface.linkEnd)}>
+          {detail != null ? <span {...stylex.props(surface.linkValue)}>{detail}</span> : null}
           <Mark {...stylex.props(surface.linkMark)} aria-hidden="true" />
         </span>
       </button>

@@ -9,13 +9,25 @@ When an assistant links to a local source file or build artifact, the user can
 open it in the session's right-side preview. The inline link uses blue text and
 a matching file-type icon, without a pill background or border. Hover and keyboard
 focus remain visible, and line references retain their existing navigation behavior.
+Clicking a link with a line reference opens the file and brings that line into view
+on the first click, with a visible line-range highlight. Initial content loading,
+language setup, and panel expansion must not require a second click. Clicking the
+same link again returns to its referenced line after the user has scrolled elsewhere.
 
 When Electron opens a conversation on its own machine, file links may preview any
 readable regular local file, including files outside the session workspace and in
 another worktree. Worktree prefixes must not redirect these links into the current
 workspace. This applies to both Markdown links and tool file entries. External
 files remain readonly, and genuinely missing files still show a not-found error.
-Remote preview authorization remains restricted to its existing allowed roots.
+Same-machine preview reads directly in Electron and does not require a running
+agent, daemon, or file index. Electron verifies the target against its persistent
+local machine identity. Absolute and home-rooted paths remain previewable when
+the session working directory is unavailable; relative paths use the original
+owner-session workspace root from local metadata. Session lifecycle is not a
+filesystem read permission gate for the desktop user.
+These files remain readonly. Relative paths require the original workspace; they
+must never be resolved against a substitute directory. Remote preview authorization
+remains restricted to its existing allowed roots.
 
 For a binary file without an inline viewer, the preview explains that it cannot
 render the file in the shared rounded notice card, with full-width stacked actions
@@ -32,6 +44,15 @@ sessions never open a path on the
 viewer's machine. Clicking the assistant link itself only opens the preview;
 opening the OS application requires a separate user click.
 
+Session and mobile project file previews offer native video controls for WebM,
+MP4/M4V, MOV, and OGV when the browser can decode the file. Playback is inline on
+mobile and starts only after a user action. Hiding or closing the viewer stops
+playback and releases its source; returning does not automatically resume it.
+Backgrounding the app pauses playback. Read/decode failures show a localized
+notice with the file actions available on that surface. File authorization and
+provider transfer limits remain unchanged, including the 5 MiB remote binary
+limit. This does not promise transcoding or playback of every codec in a container.
+
 Session PDFs open in a paged viewer at fit-width zoom. The toolbar supports direct
 page entry, previous/next page, a toggleable thumbnail sidebar, quarter-turn
 rotation that retains the current page, fit-page/fit-width/automatic and percentage
@@ -47,7 +68,13 @@ DOCX, XLSX, and PPTX open in read-only session viewers. DOCX offers page zoom,
 XLSX offers a virtual worksheet grid and sheet navigation, and PPTX offers slide
 and thumbnail navigation. CSV and TSV open as a virtual table with cell search
 and zoom; the existing Source tab remains available for text editing. These
-previews do not add write or upload actions. The lightweight viewer entry is
+previews do not add write or upload actions. CSV, TSV, and XLSX allow column resizing
+and selection of a cell or rectangular range with pointer, Shift, and keyboard
+navigation. Copy selection and Cmd/Ctrl+C copy displayed values with row/column
+boundaries, including empty cells and embedded line breaks. Oversized selections
+show a smaller-range message instead of silently truncating the copy. Width and
+selection changes belong to the preview only; they never save the file.
+The lightweight viewer entry is
 available with the file panel, but an Office format engine and its worker load
 only after that preview is active and the browser reaches an idle period. CSV/TSV
 parsing and search run in a worker; inactive panels do not start it. Office
@@ -96,6 +123,10 @@ creation occurs before that action. Loading keeps the placeholder; failure offer
 Retry without hiding the document. Successful remote reads become browser Blob
 URLs. Leaving the preview releases those URLs and discards late responses; a new
 document or provider must not inherit the previous image's load request.
+
+A plain-text link whose target is an image file, such as `[plot](./plot.png)`,
+renders as that image under the same rules instead of a copy-path file link. A link
+with a line reference or its own image markup stays a file link.
 
 This capability is supplied only by live file providers. Chat Markdown, standalone
 uploaded Markdown without a filesystem provider, and anonymous publications do not

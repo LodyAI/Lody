@@ -1,5 +1,9 @@
 import { useLayoutEffect, useRef, type RefObject } from 'react';
-import { createSemanticActionRouter, type SemanticActionScope } from './semantic-action-router';
+import {
+  createSemanticActionRouter,
+  type SemanticActionScope,
+  type SemanticActionRouter,
+} from './semantic-action-router';
 
 export function useSemanticActionRouter({
   rootRef,
@@ -7,16 +11,19 @@ export function useSemanticActionRouter({
   resetKey,
   defaultScopeId,
   scopes,
+  routerRef: providedRouterRef,
 }: {
   rootRef: RefObject<HTMLElement | null>;
   enabled: boolean;
   resetKey: string;
   defaultScopeId: string;
   scopes: Record<string, SemanticActionScope['actions']>;
+  routerRef?: RefObject<SemanticActionRouter | null>;
 }) {
   const actionsRef = useRef(scopes);
   actionsRef.current = scopes;
-  const routerRef = useRef<ReturnType<typeof createSemanticActionRouter> | null>(null);
+  const internalRouterRef = useRef<SemanticActionRouter | null>(null);
+  const routerRef = providedRouterRef ?? internalRouterRef;
 
   useLayoutEffect(() => {
     const root = rootRef.current;
@@ -38,7 +45,7 @@ export function useSemanticActionRouter({
       router.dispose();
       routerRef.current = null;
     };
-  }, [rootRef, enabled, resetKey, defaultScopeId]);
+  }, [rootRef, enabled, resetKey, defaultScopeId, routerRef]);
 
   useLayoutEffect(() => {
     routerRef.current?.refresh();

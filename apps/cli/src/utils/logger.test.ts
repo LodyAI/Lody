@@ -4,7 +4,17 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterAll, afterEach, describe, expect, it, vi } from 'vitest';
 import winston from 'winston';
-import { createFileTransport, createLogger, resolveFileLogLevel } from './logger';
+import { Effect } from 'effect';
+import { lodyLoggerLayer } from '@/platform/logger';
+import type { Logger } from './logger';
+import { Console } from 'node:console';
+import { Writable } from 'node:stream';
+import {
+  createFileTransport,
+  createLogger,
+  resolveFileLogLevel,
+  routeLoggerToStderr,
+} from './logger';
 import {
   FILE_LOG_FAILURE_REPORT_INTERVAL_MS,
   FILE_LOG_RETRY_INTERVAL_MS,
@@ -12,6 +22,39 @@ import {
 } from './resilient-file-transport';
 
 describe('WinstonLogger', () => {
+  it('routes root and child diagnostics to stderr while preserving structured stdout', async () => {
+    const out: string[] = [];
+    const err: string[] = [];
+    const stdout = new Writable({
+      write(chunk, _encoding, done) {
+        out.push(String(chunk));
+        done();
+      },
+    });
+    const stderr = new Writable({
+      write(chunk, _encoding, done) {
+        err.push(String(chunk));
+        done();
+      },
+    });
+    vi.stubGlobal('console', new Console({ stdout, stderr }));
+    const logger = createLogger({ level: 'debug' });
+    const restore = routeLoggerToStderr(logger);
+    try {
+      logger.info('root diagnostic');
+      logger.child({ scope: 'child' }).debug('child diagnostic');
+      expect(out.join('')).toBe('');
+      expect(err.join('')).toContain('root diagnostic');
+      expect(err.join('')).toContain('child diagnostic');
+      restore();
+      logger.info('normal console');
+      expect(out.join('')).toContain('normal console');
+    } finally {
+      restore();
+      vi.unstubAllGlobals();
+      await logger.close();
+    }
+  });
   it('keeps nested child logger methods bound when passed as callbacks', () => {
     const rootLogger = createLogger({ transports: 'console', level: 'silent' });
     const createChild = rootLogger.child;
@@ -74,6 +117,62 @@ describe('file sink level', () => {
     process.env.LODY_LOG_TRACE = '1';
     expect((await openFileTransport()).level).toBe('trace');
   });
+
+  it.each([false, true])(
+    'writes safe Effect annotations to the actual file sink (trace=%s)',
+    async (trace) => {
+      if (trace) process.env.LODY_LOG_TRACE = '1';
+      const dirname = fs.mkdtempSync(path.join(logRoot, 'effect-'));
+      const transport = createFileTransport({ file: { dirname } });
+      opened.push(transport);
+      await once(transport, 'new');
+      const sink = winston.createLogger({
+        levels: { error: 0, warn: 1, info: 2, debug: 3, trace: 4 },
+        level: 'trace',
+        transports: [transport],
+      });
+      const forward =
+        (level: string) =>
+        (...args: unknown[]) => {
+          sink.log(level, args.join(' '));
+        };
+      const logger: Logger = {
+        trace: forward('trace'),
+        debug: forward('debug'),
+        info: forward('info'),
+        warn: forward('warn'),
+        error: forward('error'),
+        success: forward('info'),
+        child: () => logger,
+        setLevel() {},
+        setDebug() {},
+        close: async () => {},
+      };
+      await Effect.runPromise(
+        Effect.gen(function* () {
+          yield* Effect.logTrace('individual-success');
+          yield* Effect.logWarning('health-summary');
+        }).pipe(
+          Effect.annotateLogs({
+            stage: 'health',
+            postPending: 1,
+            token: 'secret-token',
+            url: 'https://secret.invalid',
+          }),
+          Effect.provide(lodyLoggerLayer(logger))
+        )
+      );
+      await closeTransport(transport);
+      opened.splice(opened.indexOf(transport), 1);
+      sink.close();
+      const logFile = fs.readdirSync(dirname).find((file) => file.endsWith('.log'));
+      expect(logFile).toBeDefined();
+      const content = fs.readFileSync(path.join(dirname, logFile ?? ''), 'utf8');
+      expect(content).toContain('health-summary {"stage":"health","postPending":1}');
+      expect(content.includes('individual-success')).toBe(trace);
+      expect(content).not.toMatch(/secret|token|url/);
+    }
+  );
 
   it('ignores values that do not read as switched on', () => {
     expect(resolveFileLogLevel({ LODY_LOG_TRACE: '0' })).toBe('debug');

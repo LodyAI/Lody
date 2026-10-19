@@ -1,5 +1,6 @@
 import { existsSync } from 'node:fs';
 import { expect, type Page } from '@playwright/test';
+import { isFixtureProcessAlive } from '../fixtures/process-liveness.js';
 import { openSidebarArchive } from './sidebar-footer.js';
 
 type TerminalSnapshot = {
@@ -13,19 +14,6 @@ export type WorkSessionResources = {
   terminalIds: string[];
   worktreePath: string;
 };
-
-function isProcessAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (error) {
-    return !(
-      error instanceof Error &&
-      'code' in error &&
-      (error as NodeJS.ErrnoException).code === 'ESRCH'
-    );
-  }
-}
 
 export class WorkSessionPage {
   constructor(private readonly page: Page) {}
@@ -168,7 +156,8 @@ export class WorkSessionPage {
 
   async expectResourcesReleased(
     resources: WorkSessionResources,
-    agentPids: readonly number[]
+    agentPids: readonly number[],
+    eventLogPath: string
   ): Promise<void> {
     expect(agentPids.length, 'The ACP process was not observed before deletion').toBeGreaterThan(0);
     await expect
@@ -176,7 +165,13 @@ export class WorkSessionPage {
         async () => ({
           terminals: await this.listTerminalsDuringCleanup(resources.sessionId),
           worktreeExists: existsSync(resources.worktreePath),
-          liveAgentPids: agentPids.filter(isProcessAlive),
+          liveAgentPids: (
+            await Promise.all(
+              agentPids.map(async (pid) =>
+                (await isFixtureProcessAlive(pid, eventLogPath)) ? pid : null
+              )
+            )
+          ).filter((pid): pid is number => pid !== null),
         }),
         { timeout: 60_000, intervals: [50, 100, 250, 500, 1000] }
       )

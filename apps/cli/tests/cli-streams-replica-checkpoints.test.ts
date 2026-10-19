@@ -15,7 +15,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Flock } from '@loro-dev/flock-wasm';
 import { LoroDoc } from 'loro-crdt';
 import { getLoroMetaStreamId, type WorkspaceId } from '@lody/shared';
-import type { LoroStreamsTokenProvider } from '@lody/platform';
+import type { LoroStreamsTokenProviderLegacy } from '@lody/platform';
 import { LoroRepo } from 'loro-repo';
 import {
   createCliSqliteRepoStore,
@@ -39,7 +39,7 @@ const tokenProvider = {
   getShardHostSuffix: () => undefined,
   invalidate: () => {},
   createAuthCallback: () => async () => 'streams-jwt',
-} as unknown as LoroStreamsTokenProvider;
+} as unknown as LoroStreamsTokenProviderLegacy;
 
 const toArrayBuffer = (value: Uint8Array): ArrayBuffer => value.slice().buffer as ArrayBuffer;
 

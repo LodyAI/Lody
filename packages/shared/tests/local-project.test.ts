@@ -1,63 +1,37 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { createRequire } from 'node:module';
 import { execFileSync } from 'node:child_process';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { it as effectIt } from '@effect/vitest';
+import {
+  Cause,
+  Deferred,
+  Effect,
+  Exit,
+  Fiber,
+  FileSystem,
+  Layer,
+  Option,
+  PlatformError,
+} from 'effect';
+import { TestClock } from 'effect/testing';
+import { FakeProcessTable } from '../src/node/process-testing';
+import { processLayer, ProcessReleaseFailed } from '../src/node/process';
 
 import {
-  checkoutLocalProjectBranchAtRootPath,
   createLocalProjectId,
-  getLocalProjectGitStateAtRootPath,
-  getLocalProjectGitHubRepoAtRootPath,
-  getLocalProjectWorkingTreeAtRootPath,
   normalizeLocalProjectRootPath,
-  parseLocalProjectBranchRefAtRootPath,
-  resolveLocalProjectBranchAtRootPath,
-  resolveLocalProjectBranchRefAtRootPath,
-  resolveLocalProjectLegacyBaseBranchAtRootPath,
+  checkoutLocalProjectBranchAtRootPath,
+  localProjectLayer,
+  LocalProjectHost,
+  LocalProjectPaths,
+  LocalProjectPathsLive,
+  LocalProjectsLive,
+  getLocalProjectGitStateAtRootPath,
+  localProjectsLegacy,
   selectLocalProjectBranchSelector,
 } from '../src/node/local-project';
-
-const require = createRequire(import.meta.url);
-const {
-  checkoutLocalProjectBranchAtRootPath: checkoutLocalProjectBranchAtRootPathCjs,
-  getLocalProjectGitStateAtRootPath: getLocalProjectGitStateAtRootPathCjs,
-  getLocalProjectGitHubRepoAtRootPath: getLocalProjectGitHubRepoAtRootPathCjs,
-  resolveLocalProjectBranchAtRootPath: resolveLocalProjectBranchAtRootPathCjs,
-  parseLocalProjectBranchRefAtRootPath: parseLocalProjectBranchRefAtRootPathCjs,
-  resolveLocalProjectBranchRefAtRootPath: resolveLocalProjectBranchRefAtRootPathCjs,
-  resolveLocalProjectLegacyBaseBranchAtRootPath: resolveLocalProjectLegacyBaseBranchAtRootPathCjs,
-  selectLocalProjectBranchSelector: selectLocalProjectBranchSelectorCjs,
-} = require('../src/node/local-project.cjs') as {
-  getLocalProjectGitHubRepoAtRootPath: typeof getLocalProjectGitHubRepoAtRootPath;
-  checkoutLocalProjectBranchAtRootPath: (
-    rootPath: string,
-    branchName: string
-  ) => Promise<{ currentBranch: string }>;
-  getLocalProjectGitStateAtRootPath: (
-    rootPath: string
-  ) => ReturnType<typeof getLocalProjectGitStateAtRootPath>;
-  resolveLocalProjectBranchAtRootPath: (
-    rootPath: string,
-    branchName: string,
-    options?: { preferLocalOnCollision?: boolean }
-  ) => Promise<{ kind: string; branchName: string; refName: string; commitHash: string }>;
-  selectLocalProjectBranchSelector: (branches: string[], branchName: string) => string | null;
-  parseLocalProjectBranchRefAtRootPath: (
-    rootPath: string,
-    refName: string
-  ) => Promise<{ kind: string; branchName: string; refName: string }>;
-  resolveLocalProjectBranchRefAtRootPath: (
-    rootPath: string,
-    refName: string
-  ) => Promise<{ kind: string; branchName: string; refName: string; commitHash: string }>;
-  resolveLocalProjectLegacyBaseBranchAtRootPath: (
-    rootPath: string,
-    branchName: string,
-    options?: { useWorktree?: boolean }
-  ) => Promise<{ kind: string; branchName: string; refName: string; commitHash: string }>;
-};
 
 const GIT_HELPER_TEST_TIMEOUT_MS = 60_000;
 
@@ -175,13 +149,69 @@ describe('local-project helpers', () => {
     const projectDir = path.join(tempDir, 'project');
     fs.mkdirSync(projectDir);
 
-    const first = createLocalProjectId(projectDir);
-    const second = createLocalProjectId(`${projectDir}${path.sep}`);
+    const first = localProjectsLegacy.createLocalProjectId(projectDir);
+    const second = localProjectsLegacy.createLocalProjectId(`${projectDir}${path.sep}`);
 
     expect(first).toBe(second);
-    expect(normalizeLocalProjectRootPath(`${projectDir}${path.sep}`)).toBe(
-      normalizeLocalProjectRootPath(projectDir)
+    expect(localProjectsLegacy.normalizeLocalProjectRootPath(`${projectDir}${path.sep}`)).toBe(
+      localProjectsLegacy.normalizeLocalProjectRootPath(projectDir)
     );
+  });
+
+  it.skipIf(process.platform === 'win32')(
+    'native and synchronous identity share symlink canonicalization',
+    async () => {
+      tempDir = makeTempDir();
+      const root = path.join(tempDir, 'project');
+      const alias = path.join(tempDir, 'alias');
+      fs.mkdirSync(root);
+      fs.symlinkSync(root, alias);
+      const actual = await Effect.runPromise(
+        Effect.gen(function* () {
+          return {
+            root: yield* normalizeLocalProjectRootPath(alias + path.sep),
+            id: yield* createLocalProjectId(alias),
+          };
+        }).pipe(Effect.provide(localProjectLayer))
+      );
+      expect(actual).toEqual({
+        root: localProjectsLegacy.normalizeLocalProjectRootPath(root),
+        id: localProjectsLegacy.createLocalProjectId(root),
+      });
+    }
+  );
+
+  it('reports corrupt Git metadata as failure rather than a non-Git directory', async () => {
+    tempDir = makeTempDir();
+    const root = createGitProjectWithRemotes(tempDir, []);
+    fs.writeFileSync(path.join(root, '.git', 'config'), '[broken');
+    await expect(localProjectsLegacy.getLocalProjectGitStateAtRootPath(root)).rejects.toMatchObject(
+      { _tag: 'LocalProjectGitError' }
+    );
+  });
+
+  it('keeps native Git environment updates visible after the Legacy runtime initializes', async () => {
+    tempDir = makeTempDir();
+    const root = createGitProjectWithRemotes(tempDir, [
+      { name: 'origin', url: 'https://github.com/example/initial.git' },
+    ]);
+    expect(await localProjectsLegacy.getLocalProjectGitHubRepoAtRootPath(root)).toBe(
+      'example/initial'
+    );
+    vi.stubEnv('GIT_CONFIG_COUNT', '1');
+    vi.stubEnv('GIT_CONFIG_KEY_0', 'url.https://github.com/example/updated.git.insteadOf');
+    vi.stubEnv('GIT_CONFIG_VALUE_0', 'https://github.com/example/initial.git');
+    expect(await localProjectsLegacy.getLocalProjectGitHubRepoAtRootPath(root)).toBe(
+      'example/updated'
+    );
+  });
+
+  it('keeps a bare repository outside local-project worktree capabilities', async () => {
+    tempDir = makeTempDir();
+    runGit(tempDir, ['init', '--bare']);
+    expect(await localProjectsLegacy.getLocalProjectGitStateAtRootPath(tempDir)).toEqual({
+      git: false,
+    });
   });
 
   it('returns git=false for plain directories', async () => {
@@ -189,7 +219,9 @@ describe('local-project helpers', () => {
     const projectDir = path.join(tempDir, 'plain-project');
     fs.mkdirSync(projectDir);
 
-    expect(await getLocalProjectGitStateAtRootPath(projectDir)).toEqual({ git: false });
+    expect(await localProjectsLegacy.getLocalProjectGitStateAtRootPath(projectDir)).toEqual({
+      git: false,
+    });
   });
 
   it(
@@ -198,7 +230,7 @@ describe('local-project helpers', () => {
       tempDir = makeTempDir();
       runGit(tempDir, ['init', '-b', 'main']);
 
-      const gitState = await getLocalProjectGitStateAtRootPath(tempDir);
+      const gitState = await localProjectsLegacy.getLocalProjectGitStateAtRootPath(tempDir);
 
       expect(gitState).toMatchObject({
         git: true,
@@ -220,8 +252,9 @@ describe('local-project helpers', () => {
       fs.writeFileSync(path.join(projectDir, 'untracked.txt'), 'dirty parent\n', 'utf8');
       expect(runGit(tempDir, ['status', '--porcelain'])).not.toBe('');
 
-      expect(await getLocalProjectGitStateAtRootPath(projectDir)).toEqual({ git: false });
-      expect(await getLocalProjectGitStateAtRootPathCjs(projectDir)).toEqual({ git: false });
+      expect(await localProjectsLegacy.getLocalProjectGitStateAtRootPath(projectDir)).toEqual({
+        git: false,
+      });
     },
     GIT_HELPER_TEST_TIMEOUT_MS
   );
@@ -248,7 +281,7 @@ describe('local-project helpers', () => {
       runGit(projectDir, ['checkout', '-b', 'feature/local-branch']);
       runGit(projectDir, ['checkout', 'main']);
 
-      const gitState = await getLocalProjectGitStateAtRootPath(projectDir);
+      const gitState = await localProjectsLegacy.getLocalProjectGitStateAtRootPath(projectDir);
 
       expect(gitState.git).toBe(true);
       if (!gitState.git) {
@@ -277,8 +310,14 @@ describe('local-project helpers', () => {
       tempDir = makeTempDir();
       const projectDir = createClonedProjectWithUpstreamRemote(tempDir);
 
-      const local = await resolveLocalProjectBranchAtRootPath(projectDir, 'lody:branch:local:main');
-      const remote = await resolveLocalProjectBranchAtRootPath(projectDir, 'feature/remote-branch');
+      const local = await localProjectsLegacy.resolveLocalProjectBranchAtRootPath(
+        projectDir,
+        'lody:branch:local:main'
+      );
+      const remote = await localProjectsLegacy.resolveLocalProjectBranchAtRootPath(
+        projectDir,
+        'feature/remote-branch'
+      );
 
       expect(local.refName).toBe('refs/heads/main');
       expect(local.commitHash).toMatch(/^[0-9a-f]{40,64}$/);
@@ -295,7 +334,7 @@ describe('local-project helpers', () => {
       const projectDir = createClonedProjectWithUpstreamRemote(tempDir);
 
       await expect(
-        resolveLocalProjectBranchAtRootPath(projectDir, 'feature/missing')
+        localProjectsLegacy.resolveLocalProjectBranchAtRootPath(projectDir, 'feature/missing')
       ).rejects.toThrow('Local project branch not found: feature/missing');
     },
     GIT_HELPER_TEST_TIMEOUT_MS
@@ -313,12 +352,9 @@ describe('local-project helpers', () => {
 
       const expectedMessage =
         'Local project branch is ambiguous: foo. Matches: refs/heads/foo, refs/remotes/origin/foo';
-      await expect(resolveLocalProjectBranchAtRootPath(projectDir, 'foo')).rejects.toThrow(
-        expectedMessage
-      );
-      await expect(resolveLocalProjectBranchAtRootPathCjs(projectDir, 'foo')).rejects.toThrow(
-        expectedMessage
-      );
+      await expect(
+        localProjectsLegacy.resolveLocalProjectBranchAtRootPath(projectDir, 'foo')
+      ).rejects.toThrow(expectedMessage);
     },
     GIT_HELPER_TEST_TIMEOUT_MS
   );
@@ -337,14 +373,14 @@ describe('local-project helpers', () => {
         currentBranch: 'lody:branch:local:main',
         defaultBranch: 'lody:branch:local:main',
       };
-      await expect(getLocalProjectGitStateAtRootPath(projectDir)).resolves.toMatchObject(
-        expectedState
-      );
-      await expect(getLocalProjectGitStateAtRootPathCjs(projectDir)).resolves.toMatchObject(
-        expectedState
-      );
       await expect(
-        resolveLocalProjectBranchAtRootPath(projectDir, 'lody:branch:local:main')
+        localProjectsLegacy.getLocalProjectGitStateAtRootPath(projectDir)
+      ).resolves.toMatchObject(expectedState);
+      await expect(
+        localProjectsLegacy.resolveLocalProjectBranchAtRootPath(
+          projectDir,
+          'lody:branch:local:main'
+        )
       ).resolves.toMatchObject({ kind: 'local', refName: 'refs/heads/main' });
     },
     GIT_HELPER_TEST_TIMEOUT_MS
@@ -357,10 +393,10 @@ describe('local-project helpers', () => {
       const projectDir = createClonedProjectWithUpstreamRemote(tempDir);
 
       await expect(
-        resolveLocalProjectBranchRefAtRootPath(projectDir, 'refs/heads/main')
+        localProjectsLegacy.resolveLocalProjectBranchRefAtRootPath(projectDir, 'refs/heads/main')
       ).resolves.toMatchObject({ kind: 'local', refName: 'refs/heads/main' });
       await expect(
-        resolveLocalProjectBranchRefAtRootPath(
+        localProjectsLegacy.resolveLocalProjectBranchRefAtRootPath(
           projectDir,
           'refs/remotes/upstream/feature/remote-branch'
         )
@@ -369,15 +405,12 @@ describe('local-project helpers', () => {
         refName: 'refs/remotes/upstream/feature/remote-branch',
       });
       await expect(
-        resolveLocalProjectBranchRefAtRootPath(projectDir, 'refs/heads/main~1')
-      ).rejects.toThrow('Local project branch ref not found: refs/heads/main~1');
-      await expect(
-        resolveLocalProjectBranchRefAtRootPathCjs(projectDir, 'refs/heads/main~1')
+        localProjectsLegacy.resolveLocalProjectBranchRefAtRootPath(projectDir, 'refs/heads/main~1')
       ).rejects.toThrow('Local project branch ref not found: refs/heads/main~1');
 
       runGit(projectDir, ['update-ref', '-d', 'refs/remotes/upstream/feature/remote-branch']);
       await expect(
-        parseLocalProjectBranchRefAtRootPath(
+        localProjectsLegacy.parseLocalProjectBranchRefAtRootPath(
           projectDir,
           'refs/remotes/upstream/feature/remote-branch'
         )
@@ -386,13 +419,7 @@ describe('local-project helpers', () => {
         refName: 'refs/remotes/upstream/feature/remote-branch',
       });
       await expect(
-        parseLocalProjectBranchRefAtRootPathCjs(
-          projectDir,
-          'refs/remotes/upstream/feature/remote-branch'
-        )
-      ).resolves.toMatchObject({ kind: 'remote' });
-      await expect(
-        resolveLocalProjectBranchRefAtRootPath(
+        localProjectsLegacy.resolveLocalProjectBranchRefAtRootPath(
           projectDir,
           'refs/remotes/upstream/feature/remote-branch'
         )
@@ -415,15 +442,12 @@ describe('local-project helpers', () => {
       runGit(projectDir, ['checkout', '--track', '-b', 'foo', 'refs/remotes/origin/foo']);
 
       await expect(
-        resolveLocalProjectLegacyBaseBranchAtRootPath(projectDir, 'foo')
+        localProjectsLegacy.resolveLocalProjectLegacyBaseBranchAtRootPath(projectDir, 'foo')
       ).resolves.toMatchObject({
         kind: 'remote',
         refName: 'refs/remotes/origin/foo',
         commitHash: remoteCommit,
       });
-      await expect(
-        resolveLocalProjectLegacyBaseBranchAtRootPathCjs(projectDir, 'foo')
-      ).resolves.toMatchObject({ kind: 'remote', commitHash: remoteCommit });
 
       fs.writeFileSync(path.join(projectDir, 'session.txt'), 'session change\n', 'utf8');
       runGit(projectDir, ['add', 'session.txt']);
@@ -438,15 +462,12 @@ describe('local-project helpers', () => {
       ]);
 
       await expect(
-        resolveLocalProjectLegacyBaseBranchAtRootPath(projectDir, 'foo')
+        localProjectsLegacy.resolveLocalProjectLegacyBaseBranchAtRootPath(projectDir, 'foo')
       ).resolves.toMatchObject({
         kind: 'remote',
         refName: 'refs/remotes/origin/foo',
         commitHash: remoteCommit,
       });
-      await expect(
-        resolveLocalProjectLegacyBaseBranchAtRootPathCjs(projectDir, 'foo')
-      ).resolves.toMatchObject({ kind: 'remote', commitHash: remoteCommit });
     },
     GIT_HELPER_TEST_TIMEOUT_MS
   );
@@ -485,23 +506,21 @@ describe('local-project helpers', () => {
       };
       for (const options of [undefined, { useWorktree: true }, { useWorktree: false }]) {
         await expect(
-          resolveLocalProjectLegacyBaseBranchAtRootPath(projectDir, 'master', options)
-        ).resolves.toMatchObject(expected);
-        await expect(
-          resolveLocalProjectLegacyBaseBranchAtRootPathCjs(projectDir, 'master', options)
+          localProjectsLegacy.resolveLocalProjectLegacyBaseBranchAtRootPath(
+            projectDir,
+            'master',
+            options
+          )
         ).resolves.toMatchObject(expected);
       }
 
       // The strict selector contract is unchanged: only the legacy/human paths
       // fall back to Git's local-first precedence.
-      await expect(resolveLocalProjectBranchAtRootPath(projectDir, 'master')).rejects.toThrow(
-        'Local project branch is ambiguous: master'
-      );
       await expect(
-        resolveLocalProjectBranchAtRootPath(projectDir, 'master', { preferLocalOnCollision: true })
-      ).resolves.toMatchObject(expected);
+        localProjectsLegacy.resolveLocalProjectBranchAtRootPath(projectDir, 'master')
+      ).rejects.toThrow('Local project branch is ambiguous: master');
       await expect(
-        resolveLocalProjectBranchAtRootPathCjs(projectDir, 'master', {
+        localProjectsLegacy.resolveLocalProjectBranchAtRootPath(projectDir, 'master', {
           preferLocalOnCollision: true,
         })
       ).resolves.toMatchObject(expected);
@@ -541,10 +560,9 @@ describe('local-project helpers', () => {
         commitHash: localCommit,
       };
       await expect(
-        resolveLocalProjectLegacyBaseBranchAtRootPath(projectDir, 'main', { useWorktree: true })
-      ).resolves.toMatchObject(worktreeExpected);
-      await expect(
-        resolveLocalProjectLegacyBaseBranchAtRootPathCjs(projectDir, 'main', { useWorktree: true })
+        localProjectsLegacy.resolveLocalProjectLegacyBaseBranchAtRootPath(projectDir, 'main', {
+          useWorktree: true,
+        })
       ).resolves.toMatchObject(worktreeExpected);
 
       // Checkout mode still recovers the upstream, because there the local
@@ -555,10 +573,7 @@ describe('local-project helpers', () => {
         commitHash: remoteCommit,
       };
       await expect(
-        resolveLocalProjectLegacyBaseBranchAtRootPath(projectDir, 'main')
-      ).resolves.toMatchObject(checkoutExpected);
-      await expect(
-        resolveLocalProjectLegacyBaseBranchAtRootPathCjs(projectDir, 'main')
+        localProjectsLegacy.resolveLocalProjectLegacyBaseBranchAtRootPath(projectDir, 'main')
       ).resolves.toMatchObject(checkoutExpected);
     },
     GIT_HELPER_TEST_TIMEOUT_MS
@@ -581,10 +596,11 @@ describe('local-project helpers', () => {
         'Local project branch is ambiguous: release. Matches: refs/remotes/origin/release, refs/remotes/upstream/release';
       for (const options of [undefined, { useWorktree: true }]) {
         await expect(
-          resolveLocalProjectLegacyBaseBranchAtRootPath(projectDir, 'release', options)
-        ).rejects.toThrow(expectedMessage);
-        await expect(
-          resolveLocalProjectLegacyBaseBranchAtRootPathCjs(projectDir, 'release', options)
+          localProjectsLegacy.resolveLocalProjectLegacyBaseBranchAtRootPath(
+            projectDir,
+            'release',
+            options
+          )
         ).rejects.toThrow(expectedMessage);
       }
     },
@@ -601,20 +617,19 @@ describe('local-project helpers', () => {
       'lody:branch:remote:origin:shared',
     ];
 
-    for (const select of [selectLocalProjectBranchSelector, selectLocalProjectBranchSelectorCjs]) {
-      expect(select(branches, 'main')).toBe('lody:branch:local:main');
-      expect(select(branches, 'lody:branch:remote:origin:main')).toBe(
-        'lody:branch:remote:origin:main'
-      );
-      // Exact members win before any precedence rule applies.
-      expect(select(branches, 'origin/release')).toBe('origin/release');
-      // A bare name with a single remote match resolves to that remote.
-      expect(select(branches, 'solo')).toBe('lody:branch:remote:origin:solo');
-      // Several remotes and no local branch stays unresolved.
-      expect(select(branches, 'shared')).toBeNull();
-      expect(select(branches, 'missing')).toBeNull();
-      expect(select(branches, '  ')).toBeNull();
-    }
+    const select = selectLocalProjectBranchSelector;
+    expect(select(branches, 'main')).toBe('lody:branch:local:main');
+    expect(select(branches, 'lody:branch:remote:origin:main')).toBe(
+      'lody:branch:remote:origin:main'
+    );
+    // Exact members win before any precedence rule applies.
+    expect(select(branches, 'origin/release')).toBe('origin/release');
+    // A bare name with a single remote match resolves to that remote.
+    expect(select(branches, 'solo')).toBe('lody:branch:remote:origin:solo');
+    // Several remotes and no local branch stays unresolved.
+    expect(select(branches, 'shared')).toBeNull();
+    expect(select(branches, 'missing')).toBeNull();
+    expect(select(branches, '  ')).toBeNull();
   });
 
   it(
@@ -628,7 +643,7 @@ describe('local-project helpers', () => {
       runGit(projectDir, ['update-ref', 'refs/remotes/origin/feature/shared', 'HEAD']);
       runGit(projectDir, ['update-ref', 'refs/remotes/upstream/feature/shared', 'HEAD']);
 
-      const gitState = await getLocalProjectGitStateAtRootPath(projectDir);
+      const gitState = await localProjectsLegacy.getLocalProjectGitStateAtRootPath(projectDir);
       expect(gitState).toMatchObject({
         git: true,
         branches: expect.arrayContaining(['origin/feature/shared', 'upstream/feature/shared']),
@@ -638,10 +653,10 @@ describe('local-project helpers', () => {
       }
 
       await expect(
-        resolveLocalProjectBranchAtRootPath(projectDir, 'origin/feature/shared')
+        localProjectsLegacy.resolveLocalProjectBranchAtRootPath(projectDir, 'origin/feature/shared')
       ).resolves.toMatchObject({ refName: 'refs/remotes/origin/feature/shared' });
       await expect(
-        resolveLocalProjectBranchAtRootPath(projectDir, 'feature/shared')
+        localProjectsLegacy.resolveLocalProjectBranchAtRootPath(projectDir, 'feature/shared')
       ).rejects.toThrow(
         'Local project branch is ambiguous: feature/shared. Matches: refs/remotes/origin/feature/shared, refs/remotes/upstream/feature/shared'
       );
@@ -675,7 +690,7 @@ describe('local-project helpers', () => {
       const localCommit = runGit(projectDir, ['rev-parse', 'HEAD']);
       runGit(projectDir, ['checkout', 'main']);
 
-      const gitState = await getLocalProjectGitStateAtRootPath(projectDir);
+      const gitState = await localProjectsLegacy.getLocalProjectGitStateAtRootPath(projectDir);
       expect(gitState).toMatchObject({
         git: true,
         branches: expect.arrayContaining([
@@ -684,26 +699,23 @@ describe('local-project helpers', () => {
           'upstream/foo',
         ]),
       });
-      await expect(getLocalProjectGitStateAtRootPathCjs(projectDir)).resolves.toMatchObject({
-        git: true,
-        branches: expect.arrayContaining([
-          'lody:branch:local:origin%2Ffoo',
-          'lody:branch:remote:origin:foo',
-          'upstream/foo',
-        ]),
-      });
 
-      await expect(resolveLocalProjectBranchAtRootPath(projectDir, 'origin/foo')).rejects.toThrow(
+      await expect(
+        localProjectsLegacy.resolveLocalProjectBranchAtRootPath(projectDir, 'origin/foo')
+      ).rejects.toThrow(
         'Local project branch is ambiguous: origin/foo. Matches: refs/heads/origin/foo, refs/remotes/origin/foo'
       );
       await expect(
-        resolveLocalProjectBranchAtRootPath(projectDir, 'lody:branch:local:origin%2Ffoo')
+        localProjectsLegacy.resolveLocalProjectBranchAtRootPath(
+          projectDir,
+          'lody:branch:local:origin%2Ffoo'
+        )
       ).resolves.toMatchObject({ kind: 'local', commitHash: localCommit });
       await expect(
-        resolveLocalProjectBranchAtRootPath(projectDir, 'lody:branch:remote:origin:foo')
-      ).resolves.toMatchObject({ kind: 'remote', commitHash: remoteCommit });
-      await expect(
-        resolveLocalProjectBranchAtRootPathCjs(projectDir, 'lody:branch:remote:origin:foo')
+        localProjectsLegacy.resolveLocalProjectBranchAtRootPath(
+          projectDir,
+          'lody:branch:remote:origin:foo'
+        )
       ).resolves.toMatchObject({
         kind: 'remote',
         refName: 'refs/remotes/origin/foo',
@@ -735,25 +747,22 @@ describe('local-project helpers', () => {
       const namespaceCommit = runGit(projectDir, ['rev-parse', 'HEAD']);
       expect(namespaceCommit).not.toBe(ordinaryCommit);
 
-      const gitState = await getLocalProjectGitStateAtRootPath(projectDir);
+      const gitState = await localProjectsLegacy.getLocalProjectGitStateAtRootPath(projectDir);
       expect(gitState).toMatchObject({
         git: true,
         branches: expect.arrayContaining(['foo', 'refs/heads/foo']),
       });
       await expect(
-        resolveLocalProjectBranchAtRootPath(projectDir, 'refs/heads/foo')
+        localProjectsLegacy.resolveLocalProjectBranchAtRootPath(projectDir, 'refs/heads/foo')
       ).resolves.toMatchObject({
         kind: 'local',
         refName: 'refs/heads/refs/heads/foo',
         commitHash: namespaceCommit,
       });
-      await expect(
-        resolveLocalProjectBranchAtRootPathCjs(projectDir, 'refs/heads/foo')
-      ).resolves.toMatchObject({ commitHash: namespaceCommit });
 
       runGit(projectDir, ['switch', 'main']);
       await expect(
-        checkoutLocalProjectBranchAtRootPath(projectDir, 'refs/heads/foo')
+        localProjectsLegacy.checkoutLocalProjectBranchAtRootPath(projectDir, 'refs/heads/foo')
       ).resolves.toEqual({ currentBranch: 'refs/heads/foo' });
       expect(runGit(projectDir, ['symbolic-ref', 'HEAD'])).toBe('refs/heads/refs/heads/foo');
       expect(runGit(projectDir, ['rev-parse', 'HEAD'])).toBe(namespaceCommit);
@@ -772,13 +781,16 @@ describe('local-project helpers', () => {
       ]);
       runGit(projectDir, ['update-ref', 'refs/remotes/upstream/origin/feature', 'HEAD']);
 
-      const gitState = await getLocalProjectGitStateAtRootPath(projectDir);
+      const gitState = await localProjectsLegacy.getLocalProjectGitStateAtRootPath(projectDir);
       expect(gitState).toMatchObject({
         git: true,
         branches: expect.arrayContaining(['upstream/origin/feature']),
       });
       await expect(
-        resolveLocalProjectBranchAtRootPath(projectDir, 'upstream/origin/feature')
+        localProjectsLegacy.resolveLocalProjectBranchAtRootPath(
+          projectDir,
+          'upstream/origin/feature'
+        )
       ).resolves.toMatchObject({ refName: 'refs/remotes/upstream/origin/feature' });
     },
     GIT_HELPER_TEST_TIMEOUT_MS
@@ -793,10 +805,10 @@ describe('local-project helpers', () => {
       ]);
       runGit(projectDir, ['update-ref', 'refs/remotes/team/upstream/feature', 'HEAD']);
 
-      const gitState = await getLocalProjectGitStateAtRootPath(projectDir);
+      const gitState = await localProjectsLegacy.getLocalProjectGitStateAtRootPath(projectDir);
       expect(gitState).toMatchObject({ git: true, branches: expect.arrayContaining(['feature']) });
       await expect(
-        resolveLocalProjectBranchAtRootPath(projectDir, 'feature')
+        localProjectsLegacy.resolveLocalProjectBranchAtRootPath(projectDir, 'feature')
       ).resolves.toMatchObject({ refName: 'refs/remotes/team/upstream/feature' });
     },
     GIT_HELPER_TEST_TIMEOUT_MS
@@ -815,7 +827,10 @@ describe('local-project helpers', () => {
       runGit(projectDir, ['update-ref', 'refs/remotes/upstream/feature/shared', 'HEAD']);
 
       await expect(
-        checkoutLocalProjectBranchAtRootPath(projectDir, 'origin/feature/shared')
+        localProjectsLegacy.checkoutLocalProjectBranchAtRootPath(
+          projectDir,
+          'origin/feature/shared'
+        )
       ).resolves.toEqual({ currentBranch: 'feature/shared' });
 
       expect(runGit(projectDir, ['symbolic-ref', 'HEAD'])).toBe('refs/heads/feature/shared');
@@ -834,13 +849,16 @@ describe('local-project helpers', () => {
       runGit(projectDir, ['update-ref', 'refs/heads/-f', 'HEAD']);
 
       await expect(
-        checkoutLocalProjectBranchAtRootPath(projectDir, 'lody:branch:local:--detach')
+        localProjectsLegacy.checkoutLocalProjectBranchAtRootPath(
+          projectDir,
+          'lody:branch:local:--detach'
+        )
       ).resolves.toEqual({ currentBranch: '--detach' });
       expect(runGit(projectDir, ['symbolic-ref', '--short', 'HEAD'])).toBe('--detach');
 
       runGit(projectDir, ['switch', 'main']);
       await expect(
-        checkoutLocalProjectBranchAtRootPathCjs(projectDir, 'lody:branch:local:-f')
+        localProjectsLegacy.checkoutLocalProjectBranchAtRootPath(projectDir, 'lody:branch:local:-f')
       ).resolves.toEqual({ currentBranch: '-f' });
       expect(runGit(projectDir, ['symbolic-ref', '--short', 'HEAD'])).toBe('-f');
     },
@@ -864,13 +882,19 @@ describe('local-project helpers', () => {
       runGit(projectDir, ['config', 'branch.-f.merge', 'refs/heads/-f']);
 
       await expect(
-        checkoutLocalProjectBranchAtRootPath(projectDir, 'lody:branch:remote:origin:--detach')
+        localProjectsLegacy.checkoutLocalProjectBranchAtRootPath(
+          projectDir,
+          'lody:branch:remote:origin:--detach'
+        )
       ).resolves.toEqual({ currentBranch: '--detach' });
       expect(runGit(projectDir, ['symbolic-ref', '--short', 'HEAD'])).toBe('--detach');
 
       runGit(projectDir, ['switch', 'main']);
       await expect(
-        checkoutLocalProjectBranchAtRootPathCjs(projectDir, 'lody:branch:remote:origin:-f')
+        localProjectsLegacy.checkoutLocalProjectBranchAtRootPath(
+          projectDir,
+          'lody:branch:remote:origin:-f'
+        )
       ).resolves.toEqual({ currentBranch: '-f' });
       expect(runGit(projectDir, ['symbolic-ref', '--short', 'HEAD'])).toBe('-f');
     },
@@ -886,7 +910,7 @@ describe('local-project helpers', () => {
       ]);
       runGit(projectDir, ['update-ref', 'refs/remotes/origin/--new-option', 'HEAD']);
 
-      const result = await checkoutLocalProjectBranchAtRootPath(
+      const result = await localProjectsLegacy.checkoutLocalProjectBranchAtRootPath(
         projectDir,
         'lody:branch:remote:origin:--new-option'
       );
@@ -912,15 +936,15 @@ describe('local-project helpers', () => {
       runGit(projectDir, ['update-ref', 'refs/remotes/upstream/foo', 'HEAD']);
       runGit(projectDir, ['branch', 'origin']);
 
-      await expect(checkoutLocalProjectBranchAtRootPath(projectDir, 'origin/foo')).resolves.toEqual(
-        { currentBranch: 'foo' }
-      );
+      await expect(
+        localProjectsLegacy.checkoutLocalProjectBranchAtRootPath(projectDir, 'origin/foo')
+      ).resolves.toEqual({ currentBranch: 'foo' });
       expect(runGit(projectDir, ['symbolic-ref', 'HEAD'])).toBe('refs/heads/foo');
       expect(runGit(projectDir, ['config', 'branch.foo.remote'])).toBe('origin');
       runGit(projectDir, ['checkout', 'main']);
-      await expect(checkoutLocalProjectBranchAtRootPath(projectDir, 'origin/foo')).resolves.toEqual(
-        { currentBranch: 'foo' }
-      );
+      await expect(
+        localProjectsLegacy.checkoutLocalProjectBranchAtRootPath(projectDir, 'origin/foo')
+      ).resolves.toEqual({ currentBranch: 'foo' });
       expect(
         runGit(projectDir, ['for-each-ref', '--format=%(refname)', 'refs/heads'])
       ).not.toContain('refs/heads/lody-remote-');
@@ -928,7 +952,7 @@ describe('local-project helpers', () => {
       runGit(projectDir, ['checkout', 'main']);
       runGit(projectDir, ['branch', '-D', 'foo']);
       await expect(
-        checkoutLocalProjectBranchAtRootPathCjs(projectDir, 'origin/foo')
+        localProjectsLegacy.checkoutLocalProjectBranchAtRootPath(projectDir, 'origin/foo')
       ).resolves.toEqual({ currentBranch: 'foo' });
       expect(runGit(projectDir, ['config', 'branch.foo.remote'])).toBe('origin');
     },
@@ -958,14 +982,17 @@ describe('local-project helpers', () => {
       ]);
       const aheadCommit = runGit(projectDir, ['rev-parse', 'HEAD']);
 
-      const first = await checkoutLocalProjectBranchAtRootPath(projectDir, 'origin/foo');
+      const first = await localProjectsLegacy.checkoutLocalProjectBranchAtRootPath(
+        projectDir,
+        'origin/foo'
+      );
       expect(first.currentBranch).toMatch(/^lody-remote-/);
       expect(runGit(projectDir, ['rev-parse', 'HEAD'])).toBe(remoteCommit);
       expect(runGit(projectDir, ['rev-parse', 'foo'])).toBe(aheadCommit);
 
       runGit(projectDir, ['checkout', 'main']);
       await expect(
-        checkoutLocalProjectBranchAtRootPathCjs(projectDir, 'origin/foo')
+        localProjectsLegacy.checkoutLocalProjectBranchAtRootPath(projectDir, 'origin/foo')
       ).resolves.toEqual(first);
       expect(runGit(projectDir, ['rev-parse', 'HEAD'])).toBe(remoteCommit);
       expect(
@@ -991,7 +1018,7 @@ describe('local-project helpers', () => {
       const linkedWorktree = path.join(tempDir, 'linked-foo');
       runGit(projectDir, ['worktree', 'add', linkedWorktree, 'foo']);
 
-      const result = await checkoutLocalProjectBranchAtRootPath(
+      const result = await localProjectsLegacy.checkoutLocalProjectBranchAtRootPath(
         projectDir,
         'lody:branch:remote:origin:foo'
       );
@@ -1012,7 +1039,7 @@ describe('local-project helpers', () => {
       ]);
 
       await expect(
-        checkoutLocalProjectBranchAtRootPath(projectDir, 'feature/missing')
+        localProjectsLegacy.checkoutLocalProjectBranchAtRootPath(projectDir, 'feature/missing')
       ).rejects.toThrow('Local project branch not found: feature/missing');
       expect(runGit(projectDir, ['rev-parse', '--abbrev-ref', 'HEAD'])).toBe('main');
     },
@@ -1026,11 +1053,11 @@ describe('local-project helpers', () => {
       const projectDir = createGitProjectWithRemotes(tempDir, []);
       runGit(projectDir, ['branch', 'foo']);
 
-      await expect(checkoutLocalProjectBranchAtRootPath(projectDir, 'foo~0')).rejects.toThrow(
-        'Local project branch not found: foo~0'
-      );
       await expect(
-        checkoutLocalProjectBranchAtRootPathCjs(projectDir, 'foo^{commit}')
+        localProjectsLegacy.checkoutLocalProjectBranchAtRootPath(projectDir, 'foo~0')
+      ).rejects.toThrow('Local project branch not found: foo~0');
+      await expect(
+        localProjectsLegacy.checkoutLocalProjectBranchAtRootPath(projectDir, 'foo^{commit}')
       ).rejects.toThrow('Local project branch not found: foo^{commit}');
       expect(runGit(projectDir, ['symbolic-ref', '--short', 'HEAD'])).toBe('main');
     },
@@ -1062,7 +1089,7 @@ describe('local-project helpers', () => {
       runGit(projectDir, ['add', 'staged.txt']);
       fs.writeFileSync(path.join(projectDir, 'untracked.txt'), 'new\n', 'utf8');
 
-      expect(await getLocalProjectWorkingTreeAtRootPath(projectDir)).toEqual({
+      expect(await localProjectsLegacy.getLocalProjectWorkingTreeAtRootPath(projectDir)).toEqual({
         clean: false,
         staged: true,
         unstaged: true,
@@ -1132,7 +1159,7 @@ describe('local-project helpers', () => {
       );
       expect(runGit(projectDir, ['status', '--porcelain=v1'])).toContain('UU README.md');
 
-      expect(await getLocalProjectWorkingTreeAtRootPath(projectDir)).toEqual({
+      expect(await localProjectsLegacy.getLocalProjectWorkingTreeAtRootPath(projectDir)).toEqual({
         clean: false,
         staged: false,
         unstaged: false,
@@ -1165,14 +1192,14 @@ describe('local-project helpers', () => {
       runGit(projectDir, ['checkout', '-b', 'feature/local-branch']);
       runGit(projectDir, ['checkout', 'main']);
 
-      const checkoutResult = await checkoutLocalProjectBranchAtRootPath(
+      const checkoutResult = await localProjectsLegacy.checkoutLocalProjectBranchAtRootPath(
         projectDir,
         'feature/local-branch'
       );
 
       expect(checkoutResult.currentBranch).toBe('feature/local-branch');
 
-      const gitState = await getLocalProjectGitStateAtRootPath(projectDir);
+      const gitState = await localProjectsLegacy.getLocalProjectGitStateAtRootPath(projectDir);
       expect(gitState.git).toBe(true);
       if (gitState.git) {
         expect(gitState.currentBranch).toBe('feature/local-branch');
@@ -1205,7 +1232,7 @@ describe('local-project helpers', () => {
       fs.writeFileSync(path.join(projectDir, 'untracked.txt'), 'new\n', 'utf8');
 
       await expect(
-        checkoutLocalProjectBranchAtRootPath(projectDir, 'feature/local-branch')
+        localProjectsLegacy.checkoutLocalProjectBranchAtRootPath(projectDir, 'feature/local-branch')
       ).rejects.toThrow(/Cannot switch branches with local changes/);
     },
     GIT_HELPER_TEST_TIMEOUT_MS
@@ -1217,7 +1244,7 @@ describe('local-project helpers', () => {
       tempDir = makeTempDir();
       const projectDir = createClonedProjectWithUpstreamRemote(tempDir);
 
-      const gitState = await getLocalProjectGitStateAtRootPath(projectDir);
+      const gitState = await localProjectsLegacy.getLocalProjectGitStateAtRootPath(projectDir);
 
       expect(gitState.git).toBe(true);
       if (gitState.git) {
@@ -1242,29 +1269,14 @@ describe('local-project helpers', () => {
         { name: 'upstream', url: 'https://github.com/example/ignored.git' },
       ]);
 
-      const gitState = await getLocalProjectGitStateAtRootPath(projectDir);
+      const gitState = await localProjectsLegacy.getLocalProjectGitStateAtRootPath(projectDir);
       expect(gitState.git).toBe(true);
       if (gitState.git) {
         expect(gitState.githubRepoFullName).toBe('loro-dev/lody');
-        expect(await getLocalProjectGitHubRepoAtRootPath(projectDir)).toBe('loro-dev/lody');
+        expect(await localProjectsLegacy.getLocalProjectGitHubRepoAtRootPath(projectDir)).toBe(
+          'loro-dev/lody'
+        );
       }
-    },
-    GIT_HELPER_TEST_TIMEOUT_MS
-  );
-
-  it(
-    'loads the cjs helper and resolves github remotes',
-    async () => {
-      tempDir = makeTempDir();
-      const projectDir = createGitProjectWithRemotes(tempDir, [
-        { name: 'origin', url: 'git@github.com:loro-dev/lody.git' },
-      ]);
-
-      expect(await getLocalProjectGitHubRepoAtRootPathCjs(projectDir)).toBe('loro-dev/lody');
-      expect(await getLocalProjectGitStateAtRootPathCjs(projectDir)).toMatchObject({
-        git: true,
-        githubRepoFullName: 'loro-dev/lody',
-      });
     },
     GIT_HELPER_TEST_TIMEOUT_MS
   );
@@ -1279,12 +1291,252 @@ describe('local-project helpers', () => {
       ]);
       runGit(projectDir, ['config', 'branch.main.remote', 'mirror']);
 
-      const gitState = await getLocalProjectGitStateAtRootPath(projectDir);
+      const gitState = await localProjectsLegacy.getLocalProjectGitStateAtRootPath(projectDir);
       expect(gitState.git).toBe(true);
       if (gitState.git) {
         expect(gitState.githubRepoFullName).toBe('loro-dev/lody');
       }
     },
     GIT_HELPER_TEST_TIMEOUT_MS
+  );
+});
+
+const nativeFixture = Effect.gen(function* () {
+  const table = new FakeProcessTable();
+  const ready = yield* Deferred.make<{ pid: number; descendant: number }>();
+  const layer = LocalProjectsLive.pipe(
+    Layer.provide(
+      Layer.mergeAll(
+        Layer.succeed(LocalProjectHost, { env: Effect.succeed({}) }),
+        Layer.succeed(LocalProjectPaths, {
+          realPath: (input) => Effect.succeed(input),
+          isDirectory: () => Effect.succeed(true),
+        }),
+        processLayer({
+          nodeProcess: {
+            ...table.api,
+            spawn: (command, args, options) => {
+              const child = table.api.spawn(command, args, options);
+              if (child.pid !== undefined) {
+                const descendant = table.addDescendant(child.pid, { ignores: ['SIGTERM'] });
+                Deferred.doneUnsafe(ready, Effect.succeed({ pid: child.pid, descendant }));
+              }
+              return child;
+            },
+          },
+        })
+      )
+    )
+  );
+  return { table, ready, layer };
+});
+const nativeError = <A, E>(exit: Exit.Exit<A, E>) =>
+  Exit.isFailure(exit) ? Option.getOrUndefined(Cause.findErrorOption(exit.cause)) : undefined;
+
+describe('native local-project ownership', () => {
+  effectIt.effect(
+    'only a missing canonical path can fall back; permission failure preserves its cause',
+    () =>
+      Effect.gen(function* () {
+        for (const tag of ['NotFound', 'PermissionDenied'] as const) {
+          const failure = PlatformError.systemError({
+            _tag: tag,
+            module: 'FileSystem',
+            method: 'realPath',
+            path: '/project',
+          });
+          const layer = LocalProjectsLive.pipe(
+            Layer.provide(
+              Layer.mergeAll(
+                LocalProjectPathsLive.pipe(
+                  Layer.provide(
+                    Layer.succeed(
+                      FileSystem.FileSystem,
+                      FileSystem.makeNoop({ realPath: () => Effect.fail(failure) })
+                    )
+                  )
+                ),
+                Layer.succeed(LocalProjectHost, { env: Effect.succeed({}) }),
+                processLayer({ nodeProcess: new FakeProcessTable().api })
+              )
+            )
+          );
+          const exit = yield* createLocalProjectId('/project').pipe(
+            Effect.provide(layer),
+            Effect.exit
+          );
+          if (tag === 'NotFound') expect(Exit.isSuccess(exit)).toBe(true);
+          else
+            expect(nativeError(exit)).toMatchObject({
+              _tag: 'LocalProjectGitError',
+              cause: failure,
+            });
+        }
+      })
+  );
+  effectIt.effect('a failed tracking probe interrupts and joins its parallel peers', () =>
+    Effect.gen(function* () {
+      const table = new FakeProcessTable();
+      const allStarted = yield* Deferred.make<void>();
+      const cleaning = yield* Deferred.make<void>();
+      const probes = new Map<string, { pid: number; descendant: number }>();
+      const stopping = new Set<number>();
+      const api = {
+        ...table.api,
+        spawn: (
+          command: string,
+          args: readonly string[],
+          options: import('node:child_process').SpawnOptions
+        ) => {
+          const parallel =
+            args[0] === 'symbolic-ref' || args[0] === 'for-each-ref' || args[0] === 'worktree';
+          if (parallel) table.queueSpawn({ ignores: ['SIGTERM'] });
+          const child = table.api.spawn(command, args, options);
+          if (child.pid === undefined) throw new Error('Expected test process pid');
+          if (parallel) {
+            probes.set(args[0]!, {
+              pid: child.pid,
+              descendant:
+                args[0] === 'for-each-ref'
+                  ? child.pid
+                  : table.addDescendant(child.pid, { ignores: ['SIGTERM'] }),
+            });
+            if (probes.size === 3) Deferred.doneUnsafe(allStarted, Effect.void);
+          } else {
+            const output =
+              args[0] === 'rev-parse'
+                ? '/project\n'
+                : args[0] === 'remote'
+                  ? 'origin\n'
+                  : args.includes('--hash')
+                    ? 'a'.repeat(40) + '\n'
+                    : '';
+            const pid = child.pid;
+            queueMicrotask(() => {
+              child.stdout?.push(output);
+              table.exitOnItsOwn(pid);
+            });
+          }
+          return child;
+        },
+        kill: (target: number, signal: NodeJS.Signals | 0) => {
+          table.api.kill(target, signal);
+          if (signal === 'SIGTERM' && target < 0) {
+            stopping.add(-target);
+            if (stopping.size === 2) Deferred.doneUnsafe(cleaning, Effect.void);
+          }
+        },
+      };
+      const layer = LocalProjectsLive.pipe(
+        Layer.provide(
+          Layer.mergeAll(
+            Layer.succeed(LocalProjectHost, { env: Effect.succeed({}) }),
+            Layer.succeed(LocalProjectPaths, {
+              realPath: (input) => Effect.succeed(input),
+              isDirectory: () => Effect.succeed(true),
+            }),
+            processLayer({ nodeProcess: api })
+          )
+        )
+      );
+      const checkout = yield* checkoutLocalProjectBranchAtRootPath(
+        '/project',
+        'lody:branch:remote:origin:feature'
+      ).pipe(Effect.provide(layer), Effect.forkChild);
+      yield* Deferred.await(allStarted);
+      const failed = probes.get('for-each-ref')!;
+      table.childOf(failed.pid)!.stderr.write('permission denied');
+      table.exitOnItsOwn(failed.pid, 128);
+      // The failed probe exited; the other two probes still own live trees.
+      // Their interruption must join tree cleanup before checkout reports failure.
+      yield* Deferred.await(cleaning);
+      expect(checkout.pollUnsafe()).toBeUndefined();
+      yield* TestClock.adjust('2 seconds');
+      expect(nativeError(yield* Fiber.await(checkout))).toMatchObject({
+        _tag: 'LocalProjectGitError',
+      });
+      for (const probe of probes.values()) {
+        expect(table.isAlive(probe.pid)).toBe(false);
+        expect(table.isAlive(probe.descendant)).toBe(false);
+      }
+    })
+  );
+  effectIt.effect('reports startup failure instead of a successful non-Git result', () =>
+    Effect.gen(function* () {
+      const { table, layer } = yield* nativeFixture;
+      table.queueSpawn({
+        failWith: Object.assign(new Error('git unavailable'), { code: 'ENOENT' }),
+      });
+      const exit = yield* getLocalProjectGitStateAtRootPath('/project').pipe(
+        Effect.provide(layer),
+        Effect.exit
+      );
+      expect(nativeError(exit)).toMatchObject({ _tag: 'SpawnFailed' });
+    })
+  );
+  effectIt.effect('times out as failure and joins the entire process tree cleanup', () =>
+    Effect.gen(function* () {
+      const { table, ready, layer } = yield* nativeFixture;
+      table.queueSpawn({ ignores: ['SIGTERM'] });
+      const probe = yield* getLocalProjectGitStateAtRootPath('/project').pipe(
+        Effect.provide(layer),
+        Effect.forkChild
+      );
+      const { pid, descendant } = yield* Deferred.await(ready);
+      yield* TestClock.adjust('5 seconds');
+      expect(table.isAlive(pid)).toBe(true);
+      expect(table.isAlive(descendant)).toBe(true);
+      expect(probe.pollUnsafe()).toBeUndefined();
+      yield* TestClock.adjust('2 seconds');
+      expect(nativeError(yield* Fiber.await(probe))).toMatchObject({ _tag: 'CommandTimedOut' });
+      expect(table.isAlive(pid)).toBe(false);
+      expect(table.isAlive(descendant)).toBe(false);
+    })
+  );
+  effectIt.effect('interruption propagates below Git and waits for resource release', () =>
+    Effect.gen(function* () {
+      const { table, ready, layer } = yield* nativeFixture;
+      table.queueSpawn({ ignores: ['SIGTERM'] });
+      const probe = yield* getLocalProjectGitStateAtRootPath('/project').pipe(
+        Effect.provide(layer),
+        Effect.forkChild
+      );
+      const { pid, descendant } = yield* Deferred.await(ready);
+      const stopping = yield* Fiber.interrupt(probe).pipe(Effect.forkChild);
+      yield* Effect.yieldNow;
+      expect(stopping.pollUnsafe()).toBeUndefined();
+      expect(table.isAlive(descendant)).toBe(true);
+      yield* TestClock.adjust('2 seconds');
+      yield* Fiber.join(stopping);
+      expect(Exit.isFailure(yield* Fiber.await(probe))).toBe(true);
+      expect(table.isAlive(pid)).toBe(false);
+      expect(table.isAlive(descendant)).toBe(false);
+    })
+  );
+  effectIt.effect('unresolved tree release remains observable as a failed result', () =>
+    Effect.gen(function* () {
+      const { table, ready, layer } = yield* nativeFixture;
+      table.queueSpawn({ ignores: ['SIGTERM', 'SIGKILL'] });
+      const probe = yield* getLocalProjectGitStateAtRootPath('/project').pipe(
+        Effect.provide(layer),
+        Effect.forkChild
+      );
+      const { pid } = yield* Deferred.await(ready);
+      yield* TestClock.adjust('20 seconds');
+      const exit = yield* Fiber.await(probe);
+      expect(Exit.isFailure(exit)).toBe(true);
+      expect(table.isAlive(pid)).toBe(true);
+      if (!Exit.isFailure(exit)) throw new Error('Expected cleanup failure');
+      const releases = exit.cause.reasons.flatMap((reason) =>
+        Cause.isDieReason(reason) && reason.defect instanceof ProcessReleaseFailed
+          ? [reason.defect]
+          : []
+      );
+      expect(releases).toHaveLength(1);
+      expect(yield* releases[0]!.isAlive).toBe(true);
+      table.exitOnItsOwn(pid);
+      yield* releases[0]!.retryTermination();
+      expect(yield* releases[0]!.isAlive).toBe(false);
+    })
   );
 });

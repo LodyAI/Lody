@@ -27,9 +27,14 @@ vi.mock('react-i18next', () => ({
 const DIAGRAM_WIDTH = 1200;
 const DIAGRAM_HEIGHT = 800;
 
-vi.mock('beautiful-mermaid', () => ({
-  renderMermaidSVGAsync: async () =>
-    `<svg xmlns="http://www.w3.org/2000/svg" width="${DIAGRAM_WIDTH}" height="${DIAGRAM_HEIGHT}" data-diagram="sequence"><text>Launch game</text></svg>`,
+vi.mock('pele', () => ({
+  render: () => ({
+    svg: `<svg xmlns="http://www.w3.org/2000/svg" width="${DIAGRAM_WIDTH}" height="${DIAGRAM_HEIGHT}" style="color:var(--_fg)" data-diagram="sequence"><text>Launch game</text></svg>`,
+    width: DIAGRAM_WIDTH,
+    height: DIAGRAM_HEIGHT,
+    links: [],
+    type: 'sequence',
+  }),
 }));
 
 const { MarkdownRenderer } = await import('../src/components/ai-gui/markdown-renderer');
@@ -355,7 +360,7 @@ describe('mermaid full-screen viewer', () => {
     expect(viewerSurface()?.querySelector('svg[data-diagram="sequence"]')).toBeTruthy();
   });
 
-  it('keeps its controls clear of the top safe-area inset', async () => {
+  it('keeps its controls clear of the top safe-area inset and the Windows caption strip', async () => {
     await renderMarkdown();
     await openViewer();
 
@@ -365,6 +370,9 @@ describe('mermaid full-screen viewer', () => {
     // the status bar on a phone. The control bar must reserve that inset.
     const controlBar = close?.parentElement;
     expect(controlBar?.style.paddingTop).toContain('safe-area');
+    // The OS draws the Windows caption buttons above every web layer, so the
+    // bar starts below that strip too (0 wherever there is none).
+    expect(controlBar?.style.paddingTop).toContain('--window-caption-height');
     expect(close?.className).toContain('h-11');
     expect(close?.className).toContain('w-11');
     // Above dialogs and popovers, on the app's z-index scale.

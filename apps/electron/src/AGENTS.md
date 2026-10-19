@@ -17,6 +17,9 @@ native-dependency, and OSS-composition rules stay in `apps/electron/AGENTS.md`.
 - Put domain services in `src/main/services/*`, IPC handlers and input validation in
   `src/main/ipc/*`, and local-project worker/storage code in
   `src/main/local-project/*`.
+- Main starts, awaits and signals processes only through `@lody/shared/node/process`
+  (never `child_process` or `kill`); `check:cli-process-boundary` enforces it.
+  Rules: [process layer](../../../packages/shared/src/node/AGENTS.md).
 - Main-process-only helpers belong in `src/main/utils.ts`. Put cross-runtime types and
   pure logic in `@lody/shared`; shared Electron IPC contracts live in the narrow
   `@lody/shared/electron-ipc` export.
@@ -72,8 +75,8 @@ native-dependency, and OSS-composition rules stay in `apps/electron/AGENTS.md`.
   `-webkit-app-region: drag`. Interactive descendants use `app-region-no-drag`.
   Dialog and alert-dialog overlays mount the strip themselves. Hide those
   regions in native fullscreen. Windows caption buttons stay an OS overlay
-  (`MAIN_WINDOW_TITLE_BAR_OVERLAY_HEIGHT`); right-edge headers pad `pr-[144px]`
-  so toolbar controls do not sit under them.
+  (`MAIN_WINDOW_TITLE_BAR_OVERLAY_HEIGHT`), measured by `--window-caption-*`:
+  right-edge headers pad by its width, full-window overlays start below it.
 - The onboarding window must be native Light before its first renderer paint; normal product windows start from the committed theme ([main/AGENTS.md](main/AGENTS.md#startup-theme)).
   An automatic login launch may suppress the initial product window, but onboarding and deep-link launches must remain visible during normal product use. Unpackaged E2E windows are the exception: they stay hidden unless `LODY_E2E_SHOW_WINDOW=1` and always disable background throttling.
 - `sessionControl.send` streams intermediate responses on `sessionControl.response`
@@ -90,9 +93,10 @@ native-dependency, and OSS-composition rules stay in `apps/electron/AGENTS.md`.
 
 ## Local file resources
 
-- CLI `file/resolve-local` owns session/path resolution; Electron owns file IO. Never
-  put local file bytes back into the daemon's JSON response or expose filesystem
-  paths in resource URLs. `local-file-resource.ts` issues opaque renderer-lifetime
+- Electron previews local files directly after matching the target to its on-disk
+  machine identity; never require daemon liveness or protocol metadata. Relative
+  paths need the original workspace root; never guess a substitute. Remote paths
+  stay remote. Never expose filesystem paths in resource URLs. `local-file-resource.ts` issues opaque renderer-lifetime
   capabilities, bounded per renderer, revoked on navigation/destruction.
 - Each resource read opens a regular file without following a substituted symlink
   and checks device/inode/size/mtime/ctime before and during reads. Replacement or

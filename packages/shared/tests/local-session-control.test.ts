@@ -1,5 +1,6 @@
 import { createRequire } from 'node:module';
 import { describe, expect, it } from 'vitest';
+import { SessionHistoryWriteOperationSchema } from '../src/message-schemas';
 
 import {
   isLocalSessionControlRequest,
@@ -16,6 +17,85 @@ const {
 };
 
 describe('local session control node validators', () => {
+  it.each(SessionHistoryWriteOperationSchema.options)(
+    'transports the declared history operation %s',
+    (operation) => {
+      const request = {
+        type: 'session/history-write',
+        machineId: 'machine-1',
+        workspaceId: 'workspace-1',
+        sessionId: 'session-1',
+        operation,
+        payload: {},
+      };
+      const response = {
+        type: 'session/history-write_response',
+        sessionId: 'session-1',
+        operation,
+        success: true,
+        historyRevision: 1,
+        historyCount: 1,
+        historyChange: null,
+      };
+      for (const validate of [isLocalSessionControlRequest, isLocalSessionControlRequestCjs]) {
+        expect(validate(request)).toBe(true);
+      }
+      for (const validate of [isLocalSessionControlResponse, isLocalSessionControlResponseCjs]) {
+        expect(validate(response)).toBe(true);
+      }
+    }
+  );
+
+  it('admits immutable Roost inputs and preserves acceptance and lookup receipts', () => {
+    const entry = { id: 'input-1', role: 'user', userId: 'user-1', items: [], status: 'pending' };
+    const request = {
+      type: 'session/history-write',
+      machineId: 'machine-1',
+      workspaceId: 'workspace-1',
+      sessionId: 'session-1',
+      operation: 'accept_input',
+      payload: { entry },
+    };
+    const response = {
+      type: 'session/history-write_response',
+      sessionId: 'session-1',
+      operation: 'accept_input',
+      success: true,
+      result: { turnId: entry.id, active: true },
+      historyRevision: 1,
+      historyCount: 1,
+      historyChange: { kind: 'structure', from: 0, to: 1 },
+    };
+    const lookup = {
+      type: 'session/history-read',
+      machineId: 'machine-1',
+      workspaceId: 'workspace-1',
+      sessionId: 'session-1',
+      query: { kind: 'inputAcceptance', entry },
+    };
+    const observed = {
+      type: 'session/history-read_response',
+      sessionId: 'session-1',
+      success: true,
+      result: response.result,
+      historyRevision: 1,
+      historyCount: 1,
+    };
+    for (const validate of [isLocalSessionControlRequest, isLocalSessionControlRequestCjs]) {
+      expect(validate(request)).toBe(true);
+      expect(validate(lookup)).toBe(true);
+      expect(validate({ ...request, operation: 'unknown' })).toBe(false);
+      expect(validate({ ...request, payload: null })).toBe(false);
+    }
+    for (const validate of [isLocalSessionControlResponse, isLocalSessionControlResponseCjs]) {
+      expect(validate(response)).toBe(true);
+      expect(validate(observed)).toBe(true);
+      expect(validate({ ...response, historyRevision: -1 })).toBe(false);
+      expect(validate({ ...response, operation: 'unknown' })).toBe(false);
+      expect(validate({ ...observed, result: undefined, historyCount: undefined })).toBe(false);
+    }
+  });
+
   it('accepts the new preview status contract and rejects malformed renewal/expiry fields', () => {
     const request = {
       type: 'session/preview-status',
@@ -838,4 +918,37 @@ describe('local session control node validators', () => {
     expect(isLocalSessionControlResponse({ ...progress, percent: 101 })).toBe(false);
     expect(isLocalSessionControlResponseCjs({ ...progress, percent: 101 })).toBe(false);
   });
+});
+
+it('routes Provider quota refresh by persisted config only in both local validators', () => {
+  const request = {
+    type: 'machine/provider-rate-limits-refresh',
+    machineId: 'm',
+    workspaceId: 'w',
+    configId: 'c',
+  };
+  for (const validate of [isLocalSessionControlRequest, isLocalSessionControlRequestCjs]) {
+    expect(validate(request)).toBe(true);
+    expect(validate({ ...request, configId: '' })).toBe(false);
+    expect(validate({ ...request, env: { KEY: 'synthetic' } })).toBe(false);
+    expect(validate({ ...request, customAcp: { command: 'example' } })).toBe(false);
+  }
+  for (const validate of [isLocalSessionControlResponse, isLocalSessionControlResponseCjs]) {
+    expect(
+      validate({
+        type: 'machine/provider-rate-limits-refresh_response',
+        machineId: 'm',
+        configId: 'c',
+        success: true,
+      })
+    ).toBe(true);
+    expect(
+      validate({
+        type: 'machine/provider-rate-limits-refresh_response',
+        machineId: 'm',
+        configId: 'c',
+        success: 'yes',
+      })
+    ).toBe(false);
+  }
 });

@@ -36,6 +36,11 @@ agent's answer and the agent's own warning about it.
   `chat_failed` modal put the payload one click away on a surface the reader had
   no reason to expect; `chat-failed-detail-dialog.tsx` is no longer reached from
   the conversation.
+- Failure detail uses the full raw message once, without prepending its extracted
+  summary. Prefix stripping and JSON extraction can produce a different string
+  with the same information, so exact-string deduplication cannot prevent echoes.
+  Localized remediation is added only when absent from the raw message and title;
+  an exact title-only payload adds no detail. Copy keeps the full diagnostic report.
 - The block spans the conversation column. An earlier fit-content card left a
   ragged right edge, and a header rule split one short message into two boxes.
 - The surface mixes the tone toward the neutral border rather than fading it, so

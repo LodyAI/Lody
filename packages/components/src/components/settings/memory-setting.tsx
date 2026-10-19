@@ -10,7 +10,7 @@ import { Button } from '@lody/ui/button';
 import { Input } from '@lody/ui/input';
 import { Textarea } from '@lody/ui/textarea';
 import { Tabs } from '@lody/ui/tabs';
-import { Radio, RadioGroup } from '@lody/ui/radio';
+import { Checkbox } from '@lody/ui/checkbox';
 import { Spinner } from '@lody/ui/spinner';
 import { colors } from '@lody/ui/tokens/colors.stylex';
 import { space, text } from '@lody/ui/tokens/scales.stylex';
@@ -18,6 +18,7 @@ import { Dialog } from '@/ui/dialog';
 import {
   MEMORY_PROVIDERS,
   getAgentRoleEmoji,
+  getAgentRoleTarget,
   type AgentRole,
   MemoryCreateInputSchema,
   isMemoryIdentityMissing,
@@ -321,40 +322,43 @@ export function MemoryAssociationList({
   );
 }
 
-/** Single selection of provider identities in the Link tab. */
+/** Multiple selection of provider identities in the Import tab. */
 export function MemoryIdentityList({
   memories,
   linkedIds = [],
-  selected,
+  selected = [],
   onSelect,
+  disabled = false,
 }: {
   memories: MemoryIdentity[];
   linkedIds?: string[];
-  selected?: string;
-  onSelect?: (id: string) => void;
+  selected?: string[];
+  onSelect?: (ids: string[]) => void;
+  disabled?: boolean;
 }) {
   const { t } = useTranslation();
   if (!memories.length) return <SettingsEmptyList>{t('settings.memory.empty')}</SettingsEmptyList>;
   return (
-    <RadioGroup
-      aria-label={t('settings.memory.identities')}
-      value={selected ?? ''}
-      onValueChange={(value) => onSelect?.(String(value))}
-    >
+    <div role="group" aria-label={t('settings.memory.identities')}>
       {memories.map((memory) => (
         <label
           key={memory.id}
           {...stylex.props(
             surface.listRow,
-            selected === memory.id && surface.listRowSelected,
+            selected.includes(memory.id) && surface.listRowSelected,
             styles.row,
             styles.note
           )}
         >
-          <Radio
-            value={memory.id}
+          <Checkbox
+            checked={selected.includes(memory.id) && !linkedIds.includes(memory.id)}
+            onCheckedChange={(checked) =>
+              onSelect?.(
+                checked ? [...selected, memory.id] : selected.filter((id) => id !== memory.id)
+              )
+            }
             aria-label={memory.name}
-            disabled={linkedIds.includes(memory.id)}
+            disabled={disabled || linkedIds.includes(memory.id)}
           />
           <div {...stylex.props(catalog.body)}>
             <span {...stylex.props(catalog.name)}>
@@ -367,7 +371,7 @@ export function MemoryIdentityList({
           </div>
         </label>
       ))}
-    </RadioGroup>
+    </div>
   );
 }
 
@@ -449,12 +453,10 @@ function MachineMemories({ machineId, supported }: { machineId: MachineId; suppo
   const { roles, synced } = useWorkspaceAgentRoles();
   const { openSettings } = useOpenSettings();
   const getAssignedRoles = (entry: MemoryAssociation) =>
-    roles.filter(
-      (role) =>
-        role.machineId === machineId &&
-        role.runConfig.memory?.providerId === entry.providerId &&
-        role.runConfig.memory.memoryId === entry.memoryId
-    );
+    roles.filter((role) => {
+      const memory = getAgentRoleTarget(role, machineId)?.runConfig.memory;
+      return memory?.providerId === entry.providerId && memory.memoryId === entry.memoryId;
+    });
 
   const [editor, setEditor] = useState<Editor | null>(null);
   const [error, setError] = useState(false);
@@ -667,7 +669,7 @@ export function MemoryEditor({
       });
     }
   }, [identity]);
-  const [selected, setSelected] = useState<string>();
+  const [selected, setSelected] = useState<string[]>([]);
   const [idEdited, setIdEdited] = useState(false);
   const [created, setCreated] = useState<MemoryIdentity>();
   const [saving, setSaving] = useState(false);
@@ -679,10 +681,31 @@ export function MemoryEditor({
       (memory) => !entries.some((saved) => saved.memoryId === memory.id)
     ) ?? [];
   const submit = async () => {
-    if (busy) return;
+    if (busy || !available) return;
     setError(false);
     setSaving(true);
     try {
+      const saveIdentity = (memory: MemoryIdentity) =>
+        save(
+          {
+            machineId,
+            providerId: provider.id,
+            memoryId: memory.id,
+            name: memory.name,
+            description: memory.description,
+          },
+          !!entry
+        );
+      if (!entry && tab === 'link') {
+        const pending = candidates.filter((memory) => selected.includes(memory.id));
+        if (!pending.length) return;
+        for (const memory of pending) {
+          await saveIdentity(memory);
+          setSelected((ids) => ids.filter((id) => id !== memory.id));
+        }
+        onClose();
+        return;
+      }
       let savedIdentity: MemoryIdentity | undefined;
       if (entry) {
         const result = await state.update(
@@ -692,8 +715,6 @@ export function MemoryEditor({
           result?.status === 'ready'
             ? result.memories.find((memory) => memory.id === entry.memoryId)
             : undefined;
-      } else if (tab === 'link') {
-        savedIdentity = candidates.find((memory) => memory.id === selected);
       } else {
         savedIdentity = created;
         if (!savedIdentity) {
@@ -707,16 +728,7 @@ export function MemoryEditor({
         }
       }
       if (!savedIdentity) throw new Error('Memory identity unavailable');
-      await save(
-        {
-          machineId,
-          providerId: provider.id,
-          memoryId: savedIdentity.id,
-          name: savedIdentity.name,
-          description: savedIdentity.description,
-        },
-        !!entry
-      );
+      await saveIdentity(savedIdentity);
       onClose();
     } catch {
       setError(true);
@@ -753,7 +765,7 @@ export function MemoryEditor({
                   type="button"
                   role="option"
                   aria-selected={item.id === provider.id}
-                  disabled={(!!entry || busy) && item.id !== provider.id}
+                  disabled={busy || (!!entry && item.id !== provider.id)}
                   onClick={() => onProvider(item.id)}
                   {...stylex.props(
                     surface.listRow,
@@ -871,6 +883,7 @@ export function MemoryEditor({
                     linkedIds={entries.map((saved) => saved.memoryId)}
                     selected={selected}
                     onSelect={setSelected}
+                    disabled={busy}
                   />
                 ) : null}
                 {error ? (
@@ -890,7 +903,8 @@ export function MemoryEditor({
                     (!!entry && (!available || !identity)) ||
                     (!entry &&
                       (!available ||
-                        (tab === 'link' && !candidates.some((memory) => memory.id === selected))))
+                        (tab === 'link' &&
+                          !candidates.some((memory) => selected.includes(memory.id)))))
                   }
                 >
                   {saving ? <Spinner size="small" /> : null}

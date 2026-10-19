@@ -79,9 +79,7 @@ describe('before-send mention rewrite', () => {
       mentions: [{ value: 'review', start: 4, end: 11, kind: 'skill' }],
       skills: [skillItem('review', '.claude/skills/review/SKILL.md')],
     });
-    expect(result.text).toBe(
-      'run use /review [Skill Path](.claude/skills/review/SKILL.md) on it'
-    );
+    expect(result.text).toBe('run use /review [Skill Path](.claude/skills/review/SKILL.md) on it');
     expect(result.spans).toHaveLength(1);
     expect(result.spans?.[0]).toMatchObject({ kind: 'skill', label: '$review' });
     expectSpansAddressOutput(result);
@@ -103,8 +101,18 @@ describe('before-send mention rewrite', () => {
       drafts,
       skills: [skillItem('review', '.claude/skills/review/SKILL.md')],
       mentions: [
-        { value: 'src/a.ts', start: text.indexOf('@src/a.ts'), end: text.indexOf('@src/a.ts') + 9, kind: 'file' },
-        { value: 'sess-9f2c', start: text.indexOf('@my-run'), end: text.indexOf('@my-run') + 7, kind: 'session' },
+        {
+          value: 'src/a.ts',
+          start: text.indexOf('@src/a.ts'),
+          end: text.indexOf('@src/a.ts') + 9,
+          kind: 'file',
+        },
+        {
+          value: 'sess-9f2c',
+          start: text.indexOf('@my-run'),
+          end: text.indexOf('@my-run') + 7,
+          kind: 'session',
+        },
         { value: '42', start: text.indexOf('#42'), end: text.indexOf('#42') + 3, kind: 'issue' },
       ],
     });
@@ -112,7 +120,7 @@ describe('before-send mention rewrite', () => {
     // The agent sees every expansion.
     expect(result.text).toContain(PASTED_BLOB);
     expect(result.text).toContain('use /review [Skill Path](.claude/skills/review/SKILL.md)');
-    expect(result.text).toContain('[@my-run](session://sess-9f2c)');
+    expect(result.text).toContain('[@my-run](lody://session/sess-9f2c)');
 
     // The transcript sees what the user typed, in order, addressing the output.
     expect(result.spans?.map((span) => [span.kind, span.label])).toEqual([
@@ -156,7 +164,14 @@ describe('before-send mention rewrite', () => {
     const text = '\n  see @src/a.ts  \n';
     const result = expand({
       text,
-      mentions: [{ value: 'src/a.ts', start: text.indexOf('@src/a.ts'), end: text.indexOf('@src/a.ts') + 9, kind: 'file' }],
+      mentions: [
+        {
+          value: 'src/a.ts',
+          start: text.indexOf('@src/a.ts'),
+          end: text.indexOf('@src/a.ts') + 9,
+          kind: 'file',
+        },
+      ],
     });
     const trimmed = result.text.trim();
     const spans = reanchorMessageTextSpansForTrim(result.text, trimmed, result.spans);

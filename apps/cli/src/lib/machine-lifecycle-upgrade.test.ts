@@ -1,6 +1,7 @@
 import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { FakeProcessTable } from '@lody/shared/node/process-testing';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const fixture = vi.hoisted(() => ({ home: '' }));
@@ -219,5 +220,40 @@ describe('daemon upgrade command execution', () => {
     await rm(argsFile, { force: true });
     expect(await lifecycle.runDaemonUpgradeFromIntent({ logger: {} })).toBeNull();
     await expect(readFile(argsFile)).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('cancels a running install by ending its whole process tree', async () => {
+    await lifecycle.writeDaemonUpgradeIntent({
+      action: 'upgrade',
+      requestId: 'synthetic-cancel',
+      requesterUserId: 'synthetic-user',
+      targetVersion: '1.2.3',
+      requestedAtMs: 0,
+    });
+    const table = new FakeProcessTable('linux');
+    const spawned = Promise.withResolvers<number>();
+    const controller = new AbortController();
+
+    const upgrade = lifecycle.runDaemonUpgradeFromIntent({
+      logger: {},
+      signal: controller.signal,
+      nodeProcess: {
+        ...table.api,
+        spawn: (command, args, options) => {
+          const child = table.api.spawn(command, args, options);
+          if (typeof child.pid === 'number') spawned.resolve(child.pid);
+          return child;
+        },
+      },
+    });
+    const npmPid = await spawned.promise;
+    // A lifecycle script npm started.
+    const scriptPid = table.addDescendant(npmPid);
+    controller.abort();
+
+    await expect(upgrade).rejects.toMatchObject({ name: 'AbortError' });
+    expect(table.isAlive(npmPid)).toBe(false);
+    expect(table.isAlive(scriptPid)).toBe(false);
+    expect(await lifecycle.readDaemonUpgradeIntent()).toBeNull();
   });
 });

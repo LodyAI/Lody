@@ -1,8 +1,8 @@
+import type { AcpCapabilityCacheEntry } from '@lody/shared';
 import {
   CODEX_SPARK_LIMIT_ID,
   normalizePersistedRateLimit,
   parseRateLimitEntryKey,
-  resolveAgentBrandId,
   type AgentConfigCliType,
   type AgentConfigId,
   type AgentConfigMeta,
@@ -117,28 +117,21 @@ export function getContextWindowUsageData(
 }
 
 export function canShowSubscriptionRateLimits({
+  capability,
   cliType,
-  agentType,
   config,
 }: {
   cliType: AgentConfigCliType;
   agentType: string;
-  config?: Pick<AgentConfigMeta, 'brandId' | 'env'> | null;
+  config?: Pick<AgentConfigMeta, 'brandId' | 'env' | 'codexAuth'> | null;
+  capability?: AcpCapabilityCacheEntry['rateLimits'];
 }): boolean {
-  if (
-    cliType !== 'builtin' ||
-    (agentType !== 'claude' &&
-      agentType !== 'codex' &&
-      agentType !== 'grok' &&
-      agentType !== 'kimi')
-  ) {
-    return false;
-  }
-  if (!config) return true;
-
   return (
-    Object.keys(config.env).length === 0 &&
-    !resolveAgentBrandId({ brandId: config.brandId, env: config.env })
+    capability?.version === 1 &&
+    (cliType !== 'builtin' ||
+      (!config?.brandId &&
+        !Object.keys(config?.env ?? {}).length &&
+        config?.codexAuth?.mode !== 'api-key'))
   );
 }
 
@@ -176,8 +169,7 @@ export function getAgentRateLimitEntries(
         : [];
     })
     .filter(
-      (entry) =>
-        entry.cliType === agentType && entry.agentConfigId === (agentConfigId ?? null)
+      (entry) => entry.cliType === agentType && entry.agentConfigId === (agentConfigId ?? null)
     );
 }
 

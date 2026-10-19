@@ -1,3 +1,7 @@
+import { Effect } from 'effect';
+import { SessionAttachmentTransfer } from './session-attachment-transfer';
+import { getCliPlatformKind } from './cli-platform';
+import { LODY_SERVER_URL } from '@/utils/const';
 import { SimulatorIceServersSchema } from '@/ios-simulator/webrtc-protocol';
 import { ConvexClient, ConvexHttpClient } from 'convex/browser';
 import { z } from 'zod';
@@ -6,7 +10,10 @@ import { ShareDeliveryEnvelopeSchema } from '@lody/shared/session-share-delivery
 import {
   buildLoroStreamsTokenEndpoint,
   PreviewControlVerificationSchema,
-  createLoroStreamsTokenProvider,
+  createLoroStreamsTokenProviderLegacy,
+  makeLoroStreamsTokenProvider,
+  makeLoroStreamsTokenWebPorts,
+  LoroStreamsTokenPorts,
   deriveConvexSiteUrl,
   normalizeBaseUrl,
 } from '@lody/shared';
@@ -96,20 +103,62 @@ export function createCloudStreamsTokenPort(options: {
   authBaseUrl: string;
   authSiteUrl?: string;
   logger: Logger;
-}): CloudStreamsTokenPort {
+}): CloudStreamsTokenPort & { closeLegacy(): Promise<void> } {
   const authBaseUrl = normalizeBaseUrl(options.authBaseUrl);
   const authSiteUrl = normalizeBaseUrl(
     options.authSiteUrl?.trim() || deriveConvexSiteUrl(authBaseUrl)
   );
   const fetchImpl = getCliHttpFetch({ logger: options.logger });
+  let retiring = false;
+  const legacyOwners = new Map<ReturnType<typeof createLoroStreamsTokenProviderLegacy>, boolean>();
   return {
     createTokenProvider: ({ workspaceId }) =>
-      createLoroStreamsTokenProvider({
+      Effect.suspend(() => {
+        if (retiring) return Effect.die(new Error('Streams token port closed'));
+        return makeLoroStreamsTokenProvider({
+          endpoint: buildLoroStreamsTokenEndpoint(authSiteUrl),
+          workspaceId,
+        }).pipe(
+          Effect.provideService(
+            LoroStreamsTokenPorts,
+            makeLoroStreamsTokenWebPorts({
+              credential: Effect.succeed(options.token),
+              fetchImpl,
+            })
+          )
+        );
+      }),
+    createTokenProviderLegacy: ({ workspaceId }) => {
+      if (retiring) throw new Error('Streams token port closed');
+      const provider = createLoroStreamsTokenProviderLegacy({
         endpoint: buildLoroStreamsTokenEndpoint(authSiteUrl),
         workspaceId,
         authToken: () => options.token,
         fetchImpl,
-      }),
+      });
+      legacyOwners.set(provider, false);
+      return provider;
+    },
+    closeLegacy: async () => {
+      retiring = true;
+      const results = await Promise.allSettled(
+        [...legacyOwners].map(async ([provider, failed]) => {
+          if (failed) await provider.retryCleanup();
+          try {
+            await provider.close();
+            legacyOwners.delete(provider);
+          } catch (error) {
+            legacyOwners.set(provider, true);
+            throw error;
+          }
+        })
+      );
+      const failures = results.flatMap((result) =>
+        result.status === 'rejected' ? [result.reason] : []
+      );
+      if (failures.length)
+        throw new AggregateError(failures, 'Streams token provider cleanup failed');
+    },
   };
 }
 
@@ -248,7 +297,11 @@ export function createCloudCliPort(options: CloudCliPortOptions): CloudPort {
             }),
         }),
     },
-    prAssociation: createCloudPrAssociationPort({ token: options.token, authSiteUrl }),
+    prAssociation: createCloudPrAssociationPort({
+      token: options.token,
+      authSiteUrl,
+      logger: options.logger,
+    }),
     attachmentUpload: { serverBaseUrl },
     remotePreview: {
       simulatorIceServers: async (input) => {
@@ -293,7 +346,18 @@ export function createCloudCliPort(options: CloudCliPortOptions): CloudPort {
     dispose: async () => {
       await Promise.allSettled([...tokenManagers].map(async (manager) => await manager.shutdown()));
       tokenManagers.clear();
+      await streamsTokens.closeLegacy();
       await subscriptionClient.close();
     },
   };
+}
+
+/** One-shot command composition; local builds never construct a cloud transfer. */
+export function createCommandAttachmentTransfer(
+  token: string,
+  localWorkspace = false
+): SessionAttachmentTransfer | undefined {
+  if (localWorkspace || getCliPlatformKind() === 'local') return undefined;
+  if (!LODY_SERVER_URL?.trim()) throw new Error('cloud_attachment_upload_unavailable');
+  return new SessionAttachmentTransfer(token, LODY_SERVER_URL);
 }

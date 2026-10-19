@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
   resolveExistingPathIgnoringCaseAndNormalization,
@@ -158,6 +158,52 @@ describe('resolveFilePreviewPath tolerant resolution against a real filesystem',
     created.push(dir);
     return dir;
   };
+  it('resolves absolute and home-rooted local paths without a workspace, but never guesses a relative base', async () => {
+    const homeDir = await makeDir('preview-home-');
+    const file = path.join(homeDir, 'notes.md');
+    await writeFile(file, '# Synthetic note');
+    const absolutePath = fs.realpathSync(file);
+    for (const requestedPath of [file, '~/notes.md']) {
+      expect(
+        resolveFilePreviewPath({
+          workspaceRoot: null,
+          requestedPath,
+          extraRoots: [],
+          options: { allowArbitraryPaths: true, homeDir },
+        })
+      ).toMatchObject({
+        ok: true,
+        resolved: { absolutePath, reportedPath: absolutePath, external: true },
+      });
+      expect(
+        resolveFilePreviewPath({ workspaceRoot: null, requestedPath, extraRoots: [] })
+      ).toMatchObject({ ok: false, rejection: { code: 'workspace_root_unavailable' } });
+    }
+    for (const requestedPath of ['notes.md', '../notes.md']) {
+      expect(
+        resolveFilePreviewPath({
+          workspaceRoot: null,
+          requestedPath,
+          options: { allowArbitraryPaths: true, homeDir },
+        })
+      ).toMatchObject({ ok: false, rejection: { code: 'workspace_root_unavailable' } });
+    }
+    expect(
+      resolveFilePreviewPath({
+        workspaceRoot: null,
+        requestedPath: '~/missing.md',
+        options: { allowArbitraryPaths: true, homeDir },
+      })
+    ).toMatchObject({ ok: false, rejection: { code: 'file_not_found' } });
+    expect(
+      resolveFilePreviewPath({
+        workspaceRoot: null,
+        requestedPath: homeDir,
+        options: { allowArbitraryPaths: true, homeDir },
+      })
+    ).toMatchObject({ ok: false, rejection: { code: 'not_a_file' } });
+  });
+
   const authorize = (workspaceRoot: string, requestedPath: string) =>
     resolveFilePreviewPath({
       workspaceRoot,
@@ -221,5 +267,52 @@ describe('resolveFilePreviewPath tolerant resolution against a real filesystem',
     const result = authorize(workspaceRoot, 'readme.md');
 
     expect(result.ok ? 'ok' : result.rejection.code).toBe('file_not_found');
+  });
+});
+
+describe('filesystem error classification', () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it.each([
+    ['EACCES', 'permission_denied'],
+    ['EPERM', 'permission_denied'],
+    ['EIO', 'transient_io'],
+    ['ELOOP', 'transient_io'],
+    ['ENOENT', 'file_not_found'],
+    ['ENOTDIR', 'file_not_found'],
+  ])('preserves %s instead of guessing absence', async (code, expected) => {
+    const root = await mkdtemp(path.join(tmpdir(), 'preview-error-'));
+    try {
+      const target = path.join(root, 'present.md');
+      await writeFile(target, 'synthetic content');
+      expect(fs.existsSync(target)).toBe(true);
+      const fail = () => {
+        throw Object.assign(new Error('synthetic filesystem failure'), { code });
+      };
+      vi.spyOn(fs.realpathSync, 'native').mockImplementation(fail);
+      vi.spyOn(fs, 'realpathSync').mockImplementation(fail);
+      const failures: unknown[] = [];
+      expect(
+        resolveFilePreviewPath({
+          workspaceRoot: root,
+          requestedPath: target,
+          extraRoots: [],
+          options: { allowArbitraryPaths: true, onIoError: (event) => failures.push(event) },
+        })
+      ).toMatchObject({ ok: false, rejection: { code: expected } });
+      expect(failures).toContainEqual({ operation: 'realpath', path: target, code });
+      // Error classification must not introduce an outside-root existence oracle.
+      expect(
+        resolveFilePreviewPath({
+          workspaceRoot: root,
+          requestedPath: '/outside/private.md',
+          extraRoots: [],
+          options: { allowArbitraryPaths: false },
+        })
+      ).toMatchObject({ ok: false, rejection: { code: 'path_not_allowed' } });
+    } finally {
+      vi.restoreAllMocks();
+      await rm(root, { recursive: true, force: true });
+    }
   });
 });

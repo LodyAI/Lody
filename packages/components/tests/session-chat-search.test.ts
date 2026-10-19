@@ -331,6 +331,9 @@ describe('literal Markdown punctuation', () => {
       'QA_RESUMED_OK italic emphasis strong deleted',
     ],
     ['QA_**RESUMED**_OK', 'QA_RESUMED_OK'],
+    ['**检查完成。**接着执行下一步。', '检查完成。接着执行下一步。'],
+    ['前文**“重点”**后文*“提示”*结束', '前文“重点”后文“提示”结束'],
+    ['`**检查完成。**接着执行下一步。`', '**检查完成。**接着执行下一步。'],
     ['\\_literal\\_ &amp; \\*literal\\*', '_literal_ & *literal*'],
   ])('extracts rendered text from %s', (source, expected) => {
     expect(getSearchableMarkdownText(source)).toBe(expected);
@@ -441,6 +444,17 @@ describe('rendered session search', () => {
     ).toContain(results[1]!.resultId);
     const phantom = await renderSearch(source, 'QARESUMEDOK');
     expect(phantom).toEqual([]);
+    expect(marks()).toEqual([]);
+  });
+
+  it('aligns CJK emphasis search offsets with rendered highlights', async () => {
+    const source = '**检查完成。**接着执行下一步。';
+    const query = '检查完成。接着执行下一步。';
+    const results = await renderSearch(source, query);
+    expect(results).toHaveLength(1);
+    assertResults(results, query);
+    expect(container.querySelector('strong')?.textContent).toBe('检查完成。');
+    expect(await renderSearch(source, '**')).toEqual([]);
     expect(marks()).toEqual([]);
   });
 

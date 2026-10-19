@@ -101,28 +101,30 @@ const many: SubagentTask[] = Array.from({ length: 16 }, (_, index) => ({
   usage: { totalTokens: 4200 + index * 350, toolUses: 2 + (index % 5) },
 }));
 
-/** Claude's background Bash tasks: the row shows the command, a click shows all of it. */
+/** Background Bash tasks keep the brief separate from the linked command. */
 const backgroundCommands: SubagentTask[] = [
   {
     type: 'subagent_task',
     event: 'task_started',
     taskId: 'bash-1',
-    taskType: 'local_bash',
+    actor: 'local_bash',
     isBackgrounded: true,
     status: 'in_progress',
-    description:
+    description: 'Capture the devices page',
+    command:
       'agent-browser set viewport 1280 860 2>&1\nagent-browser open "http://localhost:6019/iframe.html?id=settings-devicesdesktoplayout--own-shared-machine" 2>&1\nagent-browser wait 2500 2>&1\nagent-browser screenshot /tmp/devices-own-shared.png 2>&1',
   },
   {
     type: 'subagent_task',
     event: 'task_notification',
     taskId: 'bash-2',
-    taskType: 'local_bash',
+    actor: 'local_bash',
     isBackgrounded: true,
     status: 'completed',
     startedAtEpochSeconds: 1_789_000_000,
     endedAtEpochSeconds: 1_789_000_042,
-    description: 'git push -u origin refactor/optimize-machine-settings-ui 2>&1',
+    description: 'Push the branch',
+    command: 'git push -u origin refactor/optimize-machine-settings-ui 2>&1',
     summary: 'git push -u origin refactor/optimize-machine-settings-ui 2>&1',
   },
 ];

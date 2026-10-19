@@ -1,0 +1,41 @@
+# Distinguish insufficient Machine Flock caches from invalid input
+
+Status: implemented
+Translation: current
+PR: [#1413](https://github.com/LodyAI/Lody/pull/1413)
+
+[中文](2026-10-10-machine-flock-cache-insufficient.zh.md)
+
+## Abstract
+
+Best-effort Machine Flock reads can use an available local replica, but missing data cannot prove that a current explicit project, provider, or ACP selection is invalid. These explicit misses carry the failed freshness cause as `SYNC_UNAVAILABLE`, preserving typed retryability and existing authorization. Inherited settings instead keep the baseline behavior: retain compatible values, drop incompatible values, and warn after an unconfirmed read. Accepted configs preserve inherited origin and target-model context through recovery so revalidation does not turn defaults into new explicit requests or trap accepted work in retry. Default-only calls remain usable, while immutable authored Turns and public input boundaries stay protected.
+
+## Decision
+
+[PR #487](https://github.com/LodyAI/Lody/pull/487) keeps local data after a failed freshness attempt. This follow-up distinguishes uncertainty from invalid current input without changing the baseline inheritance policy:
+
+- Validate current explicit selections and access normally. A missing requested row/value after failed freshness becomes typed catalog unavailability. Ambiguity, malformed option types, Plan conflicts, and authorization failures keep their rejection paths.
+- Inherited mode/model/options are preferences, not new explicit requests. Filter against readable capabilities, keep compatible values, and warn when an unconfirmed read drops an incompatible selection. No cache does not by itself block default-only create/chat.
+- Filter and validate effort/Fast against the effective target model. Current scalar/raw/semantic model selectors win; a retained inherited model otherwise supplies validation context without becoming explicit. Current option maps replace inherited maps; scalar overrides remove shadowed inherited category options. Model-dependent validation never skips malformed raw types, and custom Fast select values retain ordinary catalog validation.
+- Freeze only the accepted effective inherited fields in internal `inheritedDispatchConfig`. Replay filters that snapshot without rereading mutable history. An explicit override never gains inherited provenance just because it equals a historical value. Legacy `inheritedBuiltinDefaultModeId` remains readable but is no longer emitted.
+- Keep synthesized builtin defaults separately identified by `builtinDefaultModeId`. Before a fixed Turn is authored, re-derive or omit the default according to available capabilities. After an interrupted write, preserve only authored scalar values or option subsets reachable from the frozen provenance, including absence; a matching authored inherited model supplies the context for explicit effort validation before filtering, while full prepared-input identity checks still reject unrelated changes. No provenance fields enter public MCP input or Session history.
+- Only `syncMachineFlockDocsForRead` opts into strict remote confirmation. Cloud-enabled managers need a successful report from the attached, unchanged Streams generation; fulfilled no-route/partial reports cannot confirm freshness. Ordinary sync callers retain best-effort report semantics. Missing routes use an application-owned unavailable error, not a fabricated Repo conflict.
+- Preserve public Repo retryability through causes, aggregates, and multi-transport reports. Explicit `false` dominates; unknown causes stay non-retryable. The existing Flock deadline has a typed timeout; other timeout callers retain their behavior.
+- Retryable explicit catalog uncertainty aborts batch prevalidation before any acceptance. Permanent/unknown failures are item-local while valid siblings continue. Public error context contains only bounded requested ids and batch index/label, never option values, cached records, or transport diagnostics.
+- Transient catalog errors and MCP instructions advise at least five seconds between identical retries, three calls total, then stop and report. Reuse the same Operation id; an active handle means daemon-owned recovery, not another agent retry. This is guidance rather than an enforced counter. Daemon materialization retains its existing 1–30-second backoff and original deadline (24-hour default, configurable up to seven days).
+
+Persisting a retryable prevalidation failure as a terminal item was rejected because a same-id retry would recover that recorded failure instead of validating newly arrived data. Blanket retryability was rejected because storage, CRDT, and authorization failures can be permanent. Freezing all inherited fields as explicit was rejected because later cache changes would strand work that the baseline could execute after dropping stale preferences. This does not add a refresh scheduler, a new authorization policy, or a daemon retry-budget change.
+
+## Review corrections and baseline distinction
+
+The early missing-capability assertion incorrectly blocked default-only calls; the later inherited-selection assertion also changed main's filter/drop behavior into failures, including after chat acceptance. Both are corrected. Strict report confirmation is scoped to catalog validation instead of all Flock consumers. Default replay now distinguishes synthesized values from inherited settings and preserves authored identity across interrupted materialization.
+
+Source comparison against main found two adjacent target-model issues already present before this PR: create-side inherited option filtering omitted the selected model, and semantic effort could use the probe model when only history supplied the target. The correction supplies effective-model context on both prevalidation and frozen replay without weakening explicit validation. Capability `cacheVersion` remains a refresh hint, not a readability gate; runtime-source applicability stays separate.
+
+The rebase retains main's persistent collaboration stop barrier, causal-depth guidance, and CLI Role precedence. Matching authored-model context is applied only after current target authorization; it never relaxes an unsupported or unavailable current explicit control. A native Effect migration was assessed and deferred: this correction is pure selection/error logic at the existing Promise boundary, while the Session/Loro ownership dependencies remain unfinished. The locked Effect 4.0.2 reference and current repository migration criteria were read.
+
+## Evidence and verification limits
+
+Behavioral coverage includes cached ACP reads across versions; explicit transient/permanent/unknown failures; inherited missing models, no cache, nondefault modes, compatible values, and model-b `xhigh` against a model-a probe; actual non-Role MCP mixed batches; accepted follow-up chat through SQLite and coordinator completion; snapshot recovery; both directions of interrupted default replay; and unchanged history on identity conflicts. A genuine Repo + Streams adapter with a synthetic HTTP 503 produces `server_error` through ACP resolution to MCP output. Manager tests distinguish strict and ordinary coalesced callers. Fixtures use synthetic data and no external network or real sleeps.
+
+This revision is rebased onto main's `loro-repo` 0.22.0. Offline source guards, non-type-aware lint, formatting, whitespace, and documentation checks pass. Local behavioral suites, type checking, and type-aware lint remain blocked by incomplete registry dependencies; current-head verification uses ordinary PR CI, not a local pass. An isolated real Repo 0.22.0 probe confirms the no-route and HTTP 503 error contracts. The prior revision's 355-test result does not establish this revision's results. Earlier broad-suite failures were independently reproduced on the baseline, and no complete repository-wide pass is claimed. See [implementation flow](../../../docs/cli-overview.md#machine-catalog-freshness-during-session-creation) and the [cache compatibility decision](2026-09-08-acp-capability-cache-compatibility.md).

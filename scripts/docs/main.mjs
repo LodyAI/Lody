@@ -1,6 +1,5 @@
 #!/usr/bin/env node
 /** Read-only document triage and scoped Git-content review; confirm is the only write command. */
-import { execFileSync, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import {
   existsSync,
@@ -16,6 +15,7 @@ import path from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { extractAnchors, sourceRoots, sourceExtension } from './anchors.mjs';
+import { git } from './git.mjs';
 
 const documentRoots = ['specs', '.agents/docs', '.agents/notes'];
 /** Hard gate, and the budget a relocation should aim for so the next edit still fits. */
@@ -32,8 +32,6 @@ const classes = new Set([
 ]);
 const lifecycles = new Set(['proposed', 'implemented', 'rejected', 'archived']);
 const sha = (bytes) => createHash('sha256').update(bytes).digest('hex');
-const git = (root, args) =>
-  execFileSync('git', args, { cwd: root, stdio: ['pipe', 'pipe', 'pipe'] });
 
 /** Reject path escapes and symlinks so a review cannot silently hash another checkout. */
 function localPath(root, relative) {
@@ -185,8 +183,8 @@ function scopeNames(root) {
     .map((file) => file.slice(0, -recordSuffix.length));
 }
 
-function snapshot(root, scope, topic) {
-  const objectFormat = git(root, ['rev-parse', '--show-object-format']).toString().trim();
+async function snapshot(root, scope, topic) {
+  const objectFormat = (await git(root, ['rev-parse', '--show-object-format'])).toString().trim();
   const files = Object.fromEntries(
     [...scope.documents, ...scope.sources].map((relative) => {
       const file = localPath(root, relative);
@@ -252,10 +250,10 @@ function checkAnchorLinks(root, topic) {
 }
 
 /** Compare bytes and watched membership, not timestamps or HEAD identity. */
-export function inspectTopic(root, topic) {
+export async function inspectTopic(root, topic) {
   const { scope, fingerprint } = readScope(root, topic);
   if (scope.retired) return { topic, status: 'retired', retired: scope.retired, changes: [] };
-  const current = snapshot(root, scope, topic);
+  const current = await snapshot(root, scope, topic);
   const baseline = scope.baseline;
   const changes = [];
   for (const [file, hash] of Object.entries(current.files)) {
@@ -275,15 +273,15 @@ export function inspectTopic(root, topic) {
   const status = !scope.scopeReview
     ? 'scope-pending'
     : !baseline
-    ? 'unreviewed'
-    : changes.length
-    ? 'stale'
-    : 'current';
+      ? 'unreviewed'
+      : changes.length
+        ? 'stale'
+        : 'current';
   return { topic, status, changes };
 }
 
 /** Produce queues directly from document metadata; pending translation is not a check failure. */
-export function documentStatus(root) {
+export async function documentStatus(root) {
   const documents = [];
   const errors = [];
   const warnings = [];
@@ -340,19 +338,19 @@ export function documentStatus(root) {
     }
     documents.push({ file, status, translation, missingTranslation });
   }
-  const markdown = checkRepositoryMarkdown(root);
+  const markdown = await checkRepositoryMarkdown(root);
   errors.push(...markdown.errors);
   warnings.push(...markdown.warnings);
   return { documents, errors, warnings };
 }
 
 /** Check tracked and untracked non-ignored Markdown, including hubs and archives. */
-function checkRepositoryMarkdown(root) {
+async function checkRepositoryMarkdown(root) {
   const errors = [];
   const warnings = [];
   const files = [
     ...new Set(
-      git(root, ['ls-files', '--cached', '--others', '--exclude-standard', '-z'])
+      (await git(root, ['ls-files', '--cached', '--others', '--exclude-standard', '-z']))
         .toString()
         .split('\0')
     ),
@@ -408,7 +406,7 @@ function checkRepositoryMarkdown(root) {
 }
 
 /** Explicit confirmation requires committed, recoverable content and never edits a Spec. */
-export function confirmTopic(root, topic, reason, evidence) {
+export async function confirmTopic(root, topic, reason, evidence) {
   if (!reason?.trim() || !evidence?.trim())
     throw new Error('confirm requires --reason and --evidence.');
   const { scope, file, fingerprint } = readScope(root, topic);
@@ -416,21 +414,21 @@ export function confirmTopic(root, topic, reason, evidence) {
   if (!scope.scopeReview) throw new Error('Human scope confirmation is pending.');
   const linkErrors = checkAnchorLinks(root, topic);
   if (linkErrors.length) throw new Error(linkErrors.join('\n'));
-  const current = snapshot(root, scope, topic);
+  const current = await snapshot(root, scope, topic);
   if (Object.values(current.files).some((hash) => !hash))
     throw new Error('Cannot confirm missing protected files.');
-  const revision = git(root, ['rev-parse', 'HEAD']).toString().trim();
+  const revision = (await git(root, ['rev-parse', 'HEAD'])).toString().trim();
   for (const [relative, hash] of Object.entries({
     ...Object.fromEntries(Object.entries(current.files).filter(([key]) => !key.includes('::'))),
     ...current.sourceBlobs,
   })) {
-    const committed = git(root, ['rev-parse', `${revision}:${relative}`])
-      .toString()
-      .trim();
+    const committed = (await git(root, ['rev-parse', `${revision}:${relative}`])).toString().trim();
     if (committed !== hash) throw new Error(`Commit reviewed content first: ${relative}`);
   }
   if (scope.watch.length) {
-    const committedInventory = git(root, ['ls-tree', '-r', '-z', revision, '--', ...scope.watch])
+    const committedInventory = (
+      await git(root, ['ls-tree', '-r', '-z', revision, '--', ...scope.watch])
+    )
       .toString()
       .split('\0')
       .filter(Boolean)
@@ -447,9 +445,9 @@ export function confirmTopic(root, topic, reason, evidence) {
 }
 
 /** Display recorded bytes against current files without changing Git or the record. */
-export function topicDiff(root, topic) {
+export async function topicDiff(root, topic) {
   const { scope } = readScope(root, topic);
-  const report = inspectTopic(root, topic);
+  const report = await inspectTopic(root, topic);
   const output = [JSON.stringify(report, null, 2)];
   if (!scope.baseline) return output.join('\n');
   const displayed = new Set();
@@ -465,10 +463,11 @@ export function topicDiff(root, topic) {
     if (!gitHash.test(hash)) throw new Error(`Invalid baseline blob: ${source}`);
     let before;
     try {
-      before = git(root, ['cat-file', 'blob', hash]);
-    } catch {
+      before = await git(root, ['cat-file', 'blob', hash]);
+    } catch (error) {
       throw new Error(
-        `Missing baseline blob ${hash} for ${source}; obtain history containing this content before reviewing. No baseline was changed.`
+        `Missing baseline blob ${hash} for ${source}; obtain history containing this content before reviewing. No baseline was changed. ${error.message}`,
+        { cause: error }
       );
     }
     const currentPath = localPath(root, source);
@@ -477,15 +476,13 @@ export function topicDiff(root, topic) {
     try {
       writeFileSync(path.join(temporary, 'before'), before);
       writeFileSync(path.join(temporary, 'after'), after);
-      const result = spawnSync(
-        'git',
+      const result = await git(
+        temporary,
         ['diff', '--no-index', '--no-ext-diff', '--no-textconv', '--', 'before', 'after'],
-        { cwd: temporary, encoding: 'utf8' }
+        { diff: true }
       );
-      if (![0, 1].includes(result.status))
-        throw new Error(result.stderr || 'Could not compare content');
       output.push(
-        result.stdout.replaceAll('a/before', `a/${source}`).replaceAll('b/after', `b/${source}`)
+        result.toString().replaceAll('a/before', `a/${source}`).replaceAll('b/after', `b/${source}`)
       );
     } finally {
       rmSync(temporary, { recursive: true, force: true });
@@ -494,7 +491,7 @@ export function topicDiff(root, topic) {
   return output.join('\n');
 }
 
-export function main(root, args) {
+export async function main(root, args) {
   const [command, ...rest] = args;
   const options = {};
   for (let i = 0; i < rest.length; i += 2) {
@@ -514,44 +511,54 @@ export function main(root, args) {
     command === 'confirm'
       ? ['--topic', '--reason', '--evidence']
       : command === 'diff'
-      ? ['--topic']
-      : command === 'check'
-      ? ['--base']
-      : [];
+        ? ['--topic']
+        : command === 'check'
+          ? ['--base']
+          : [];
   if (Object.keys(options).some((key) => !allowed.includes(key)))
     throw new Error(`Unexpected option for ${command}`);
   if (command === 'confirm' || command === 'diff') {
     if (!options['--topic']) throw new Error('--topic is required');
     console.log(
       command === 'diff'
-        ? topicDiff(root, options['--topic'])
+        ? await topicDiff(root, options['--topic'])
         : JSON.stringify(
-            confirmTopic(root, options['--topic'], options['--reason'], options['--evidence']),
+            await confirmTopic(
+              root,
+              options['--topic'],
+              options['--reason'],
+              options['--evidence']
+            ),
             null,
             2
           )
     );
     return 0;
   }
-  const report = documentStatus(root);
+  const report = await documentStatus(root);
   report.errors.push(...checkAnchorLinks(root));
-  report.topics = scopeNames(root).map((topic) => {
+  report.topics = [];
+  for (const topic of scopeNames(root)) {
     try {
-      return inspectTopic(root, topic);
+      report.topics.push(await inspectTopic(root, topic));
     } catch (error) {
-      return { topic, status: 'error', message: error.message };
+      report.topics.push({ topic, status: 'error', message: error.message });
     }
-  });
+  }
   if (options['--base']) {
-    const base = git(root, [
-      'rev-parse',
-      '--verify',
-      '--end-of-options',
-      `${options['--base']}^{commit}`,
-    ])
+    const base = (
+      await git(root, [
+        'rev-parse',
+        '--verify',
+        '--end-of-options',
+        `${options['--base']}^{commit}`,
+      ])
+    )
       .toString()
       .trim();
-    const previous = git(root, ['ls-tree', '-r', '--name-only', base, '--', ...documentRoots])
+    const previous = (
+      await git(root, ['ls-tree', '-r', '--name-only', base, '--', ...documentRoots])
+    )
       .toString()
       .split('\n')
       .filter((p) => p.endsWith(recordSuffix));
@@ -570,7 +577,10 @@ export function main(root, args) {
 
 if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
   try {
-    process.exitCode = main(path.resolve(import.meta.dirname, '../..'), process.argv.slice(2));
+    process.exitCode = await main(
+      path.resolve(import.meta.dirname, '../..'),
+      process.argv.slice(2)
+    );
   } catch (error) {
     console.error(error.message);
     process.exitCode = 1;

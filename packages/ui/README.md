@@ -331,8 +331,15 @@ A popup mounts on the document by default, and a modal panel is the exception. A
 surface that owns a focus scope and a scroll lock states its panel once with
 `PopupContainerProvider`, and every Select, Combobox, Menu and Popover under it
 mounts inside the panel instead of being treated as outside it. `Dialog.Content`,
-`AlertDialog.Content` and `Sheet.Content` do this for their own panel, so a
+`AlertDialog.Content` and `Drawer.Content` do this for their own panel, so a
 product surface never has to.
+
+A host using another modal implementation can publish `ModalContainerProvider`
+(from `@lody/ui/popup-container`) inside its interaction scope. Dialog, AlertDialog
+and Drawer inherit that host unless `container` is explicitly provided (including Base UI’s `null`
+unmounted state). This context is separate from floating popup containers:
+opening another modal must not anchor it to a centered panel's transform.
+Legacy Vaul drawers provide their existing boxless no-drag host to both contexts.
 
 A `Tooltip` stands on the floating rung with a menu, a popover and a list: the
 raised background under the popover shadow, with the page's own ink, so it is

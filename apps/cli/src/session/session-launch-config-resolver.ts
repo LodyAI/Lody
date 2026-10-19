@@ -28,7 +28,7 @@ type RepoLike = {
 
 export type AgentConfigLaunchFields = Pick<
   AgentConfigMeta,
-  'customAcp' | 'runtimeOverrides' | 'env' | 'codexAuth'
+  'customAcp' | 'runtimeOverrides' | 'magpieGatewayUrl' | 'env' | 'codexAuth'
 >;
 
 type WorkspaceDocumentLike = {
@@ -65,6 +65,7 @@ function resolveSessionLaunchConfigFromSources(input: {
       codexAuth: input.agentConfig.codexAuth,
       customAcp: input.agentConfig.customAcp,
       runtimeOverrides: input.agentConfig.runtimeOverrides,
+      magpieGatewayUrl: input.agentConfig.magpieGatewayUrl,
       env: input.agentConfig.env,
       worktreeSetup: input.legacy?.worktreeSetup,
       worktreeCleanup: input.legacy?.worktreeCleanup,

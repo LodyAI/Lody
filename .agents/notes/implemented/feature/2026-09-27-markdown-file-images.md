@@ -41,6 +41,15 @@ several images do not read as a wall of boxes. The first version (a 160px gray b
 with an unlabeled gray rectangle and a centered button) was rejected after review
 of real screenshots. A loaded image fades in, except under reduced motion.
 
+A plain-text link to an image file (`[plot](./plot.png)`, or a bare linkified
+path) used to render as the copy-path chip, which forced readers to copy the path
+and open it elsewhere. `MarkdownFileImageLink` in the renderer now shows such a
+link through the same `MarkdownFileImage`, so automatic and click-to-load rules
+are shared; the link text becomes the caption. It applies only under live file
+resources and after the anonymous-publication check. Links with a line anchor,
+non-image targets, and links wrapping their own markup (badge images) keep the
+chip, so `[![](a.png)](a.png)` does not render twice.
+
 Intent: [local file links](../../../../specs/local-file-link-actions.md).
 Implementation: [file image renderer](../../../../packages/components/src/components/ai-gui/markdown-file-image.tsx).
 
@@ -58,3 +67,6 @@ local dependencies and isolated temporary dependencies; repository manifests and
 lockfiles were unchanged. Documentation validation still reports missing links
 into uninitialized ACP submodules, with no errors in the changed documents.
 No interactive Electron or remote gateway validation has been performed.
+The image-link follow-up added remote click-to-load, same-machine automatic load,
+chip retention for line-anchored and non-image links, and share isolation cases to
+the Markdown image suite.

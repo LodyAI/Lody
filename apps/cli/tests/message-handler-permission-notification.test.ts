@@ -72,7 +72,7 @@ const createNotificationPort = (
 });
 
 describe('MessageHandler permission notifications', () => {
-  it('records Inbox before a successful Live Activity without fallback push', async () => {
+  it('sends ordinary permission push independently of a successful silent Live Activity', async () => {
     const logger = createSilentLogger();
 
     const sessionId = 's-1' as SessionId;
@@ -235,15 +235,19 @@ describe('MessageHandler permission notifications', () => {
       expect.objectContaining({ awaitingUserSince: expect.any(Number) })
     );
     expect(sessionDoc.setStatus).toHaveBeenLastCalledWith(SessionStatusFactory.running());
-    expect(sessionDoc.waitUntilSynced).toHaveBeenCalledTimes(1);
-    expect(syncLiveActivitySummary).toHaveBeenCalled();
-    const waitCallOrder = sessionDoc.waitUntilSynced.mock.invocationCallOrder[0];
-    const liveActivityCallOrder = syncLiveActivitySummary.mock.invocationCallOrder[0];
-    if (waitCallOrder === undefined || liveActivityCallOrder === undefined) {
-      throw new Error('Expected waitUntilSynced and syncLiveActivitySummary to be called');
-    }
-    expect(waitCallOrder).toBeLessThan(liveActivityCallOrder);
-    expect(notifyPermissionRequested).not.toHaveBeenCalled();
+    expect(notifyPermissionRequested).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId,
+        userId: 'active-user',
+        requestId: 'req1',
+        toolCallId: 'tc1',
+      })
+    );
+    expect(syncLiveActivitySummary).toHaveBeenCalledWith(
+      expect.not.objectContaining({
+        permissionAlert: expect.anything(),
+      })
+    );
     expect(recordPermissionRequested).toHaveBeenCalledWith(
       expect.objectContaining({
         sessionId,

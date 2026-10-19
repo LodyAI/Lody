@@ -14,8 +14,9 @@ Translation: current
 
 宿主从可信会话元数据读取 owner；新会话尚未发布时使用创建者。参与者切换不改变
 网络身份。宿主原子写入工作区本地上下文，包含不透明 token 和机器凭据可用资格。
-helper 每次捕获一个上下文。刷新检测到 owner 变化时，同步 shell 资格与上下文，
-终止旧 ACP/terminal 并报告 github_owner_changed：无法原地清除已启动进程的环境。
+helper 每次捕获一个上下文。发送 prompt 或 steer 前校验当前运行实例的上下文与 owner。
+owner 变化时撤销该上下文与机器资格，终止旧 ACP/terminal 并报告 github_owner_changed：
+无法原地清除已启动进程的环境。
 被中断操作不重放；下一轮为新 owner 创建运行实例。宿主 worktree 的 clone/fetch
 和 checkout 使用固定快照。session 与宿主环境均安装 managed credential helper，
 覆盖 checkout filter 和 LFS 的 /info/lfs 路径；非 owner 宿主 checkout 不继承机器
@@ -23,10 +24,21 @@ GitHub token 环境或 shell 启动文件。
 快照缺失或损坏属于配置错误，不能据此借用机器身份。这是进程凭据隔离，并非防御
 同一系统账户进程的 OS 沙箱。
 
+## 运行实例所有权
+
+同一逻辑 Session 可以先后拥有多个运行实例，例如 owner 变更使旧实例退役之后。每个托管
+实例持有独立的凭据 lease 和固定上下文文件，即便 Session ID 与 owner 相同也不复用。
+启动失败、实例结束只释放精确获取的那一代。旧实例释放不能撤销新实例。
+本地实例没有托管 lease，不从 broker 的历史 Session 注册推断认证模式。
+托管授权缺失或已释放属于错误，不能因此降级使用机器凭据。
+
+相同 Session 的替换必须等待清理成功，包括迟到的资源创建。清理失败保持可观察并
+阻止替换；等待超时或等待方被中断不等于资源已经释放。
+
 ## 凭据来源与可用性
 
-本地 HTTP broker 只提供个人与 App token。云请求截止时间为 2.5 秒，helper 请求为
-3 秒，包含响应正文。成功凭据可缓存至多 60 秒，按仓库、owner、机器、来源隔离，
+本地 HTTP broker 只提供个人与 App token。云请求截止时间为 15 秒，helper 请求等待
+20 秒（包含响应正文），保证 helper 总比 broker 自身的云请求等得更久。成功凭据可缓存至多 60 秒，按仓库、owner、机器、来源隔离，
 且不超过 token 有效期；失败不缓存。配置更新可清空缓存，不承诺离线期间立即撤销。
 
 broker 故障不能阻断具备资格的机器候选。启动失败会报告，但可信本地上下文仍可用；
@@ -66,6 +78,6 @@ repository_required。帮助命令无需凭据且隔离机器配置。
 ## 证据
 
 实现位于 CLI 的 github-credential-runtime.ts、github-git-transport.ts、gh-shim-script.ts、
-token broker/manager 与会话准备逻辑。测试覆盖优先级、服务故障、owner 上下文、
+token broker/manager 与会话创建逻辑。测试覆盖优先级、服务故障、owner 上下文、
 gh 写入不重放、checkout 凭据和 broker 失败时的真实 Git 递归克隆。
 尚未验证生产 GitHub 和 Windows 端到端链路。

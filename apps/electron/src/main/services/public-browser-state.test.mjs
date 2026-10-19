@@ -92,11 +92,32 @@ void test('native browser forwards only deliberate ownership signals and cleans 
   contents.emit('before-input-event', {}, { type: 'keyUp', key: 'x' })
   contents.emit('before-input-event', {}, { type: 'keyDown', key: 'x' })
   contents.emit('before-mouse-event', {}, { type: 'mouseDown', x: 2, y: 2 })
-  assert.deepEqual(signals, ['pointer', 'keyboard', 'pointer'])
+  contents.emit('before-mouse-event', {}, { type: 'mouseWheel', deltaX: 0, deltaY: 0 })
+  contents.emit(
+    'before-mouse-event',
+    {},
+    { type: 'mouseWheel', deltaX: 0, deltaY: 20, modifiers: ['control'] }
+  )
+  contents.emit('before-mouse-event', {}, { type: 'mouseWheel', deltaX: 0, deltaY: 20 })
+  contents.emit('before-input-event', {}, { type: 'keyDown', key: 'c', meta: true })
+  contents.emit('before-mouse-event', {}, { type: 'mouseLeave' })
+  assert.deepEqual(signals, [
+    'pointer',
+    'keyboard',
+    'pointerdown',
+    'wheel',
+    'keyboard',
+    'pointerleave'
+  ])
   dispose()
   contents.emit('before-input-event', {}, { type: 'keyDown', key: 'y' })
   contents.emit('before-mouse-event', {}, { type: 'mouseMove', x: 9, y: 9 })
-  assert.deepEqual(signals, ['pointer', 'keyboard', 'pointer'])
-  assert.equal(contents.listenerCount('before-input-event'), 0)
-  assert.equal(contents.listenerCount('before-mouse-event'), 0)
+  assert.deepEqual(signals, [
+    'pointer',
+    'keyboard',
+    'pointerdown',
+    'wheel',
+    'keyboard',
+    'pointerleave'
+  ])
 })

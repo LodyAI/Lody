@@ -12,11 +12,88 @@ import {
   machineSupportsSubagentEvents,
   machineSupportsIosSimulatorControls,
   negotiatedAcpCapabilitiesRefreshForce,
+  resolveNewSessionHistoryBackend,
+  machineSupportsSessionInputDispatch,
+  machineSupportsSessionHistoryIncremental,
+  machineSupportsSessionHistoryWatch,
 } from '../src/machine-protocol-capabilities';
 import {
   MachineAcpCapabilitiesRefreshRequestSchema,
   safeParseLocalSessionControlRequest,
 } from '../src/message-schemas';
+
+it('requires independent checkpoint observation and validates its bounded wait', () => {
+  expect(machineSupportsSessionHistoryWatch(undefined)).toBe(false);
+  expect(
+    machineSupportsSessionHistoryWatch({ protocolCapabilities: { sessionHistoryIncremental: 1 } })
+  ).toBe(false);
+  expect(
+    machineSupportsSessionHistoryWatch({ protocolCapabilities: { sessionHistoryWatch: 1 } })
+  ).toBe(false);
+  expect(
+    machineSupportsSessionHistoryWatch({
+      protocolCapabilities: CURRENT_MACHINE_PROTOCOL_CAPABILITIES,
+    })
+  ).toBe(true);
+  const request = {
+    type: 'session/history-read',
+    machineId: 'synthetic-machine',
+    workspaceId: 'synthetic-workspace',
+    sessionId: 'synthetic-session',
+    query: {
+      kind: 'watchChanges',
+      checkpoint: 'synthetic-checkpoint',
+      waitMs: 15_000,
+      includeBodiesFrom: 0,
+    },
+  };
+  expect(safeParseLocalSessionControlRequest(JSON.stringify(request)).success).toBe(true);
+  for (const waitMs of [-1, 15_001, 1.5])
+    expect(
+      safeParseLocalSessionControlRequest(
+        JSON.stringify({ ...request, query: { ...request.query, waitMs } })
+      ).success
+    ).toBe(false);
+});
+
+it('requires independently negotiated owner input dispatch, including mixed daemon versions', () => {
+  expect(machineSupportsSessionInputDispatch(undefined)).toBe(false);
+  expect(
+    machineSupportsSessionInputDispatch({
+      protocolCapabilities: { sessionHistory: 2, sessionInputAcceptance: 1 },
+    })
+  ).toBe(false);
+  expect(
+    machineSupportsSessionInputDispatch({ protocolCapabilities: { sessionInputDispatch: 0 } })
+  ).toBe(false);
+  expect(
+    machineSupportsSessionInputDispatch({
+      protocolCapabilities: CURRENT_MACHINE_PROTOCOL_CAPABILITIES,
+    })
+  ).toBe(true);
+});
+
+it('negotiates a new backend preference without changing explicit persisted choices', () => {
+  expect(resolveNewSessionHistoryBackend(undefined, { preferred: 'roost' })).toBe('loro');
+  expect(
+    resolveNewSessionHistoryBackend(
+      { protocolCapabilities: { sessionHistory: 1 } },
+      { preferred: 'roost' }
+    )
+  ).toBe('loro');
+  expect(
+    resolveNewSessionHistoryBackend(
+      { protocolCapabilities: CURRENT_MACHINE_PROTOCOL_CAPABILITIES },
+      { preferred: 'roost' }
+    )
+  ).toBe('roost');
+  expect(() => resolveNewSessionHistoryBackend(undefined, { requested: 'roost' })).toThrow(
+    'Update the machine'
+  );
+  expect(
+    resolveNewSessionHistoryBackend(undefined, { requested: 'loro', preferred: 'roost' })
+  ).toBe('loro');
+});
 
 it('negotiates subagent events and Codex auth profiles independently on the same daemon', () => {
   const machine = { protocolCapabilities: CURRENT_MACHINE_PROTOCOL_CAPABILITIES };
@@ -155,6 +232,23 @@ it('negotiates private simulator controls independently of preview support', () 
   );
   expect(
     machineSupportsIosSimulatorControls({
+      protocolCapabilities: CURRENT_MACHINE_PROTOCOL_CAPABILITIES,
+    })
+  ).toBe(true);
+});
+
+it('negotiates incremental history recovery independently of legacy paging', () => {
+  expect(machineSupportsSessionHistoryIncremental(undefined)).toBe(false);
+  expect(
+    machineSupportsSessionHistoryIncremental({ protocolCapabilities: { sessionHistory: 2 } })
+  ).toBe(false);
+  expect(
+    machineSupportsSessionHistoryIncremental({
+      protocolCapabilities: { sessionHistoryIncremental: 0 },
+    })
+  ).toBe(false);
+  expect(
+    machineSupportsSessionHistoryIncremental({
       protocolCapabilities: CURRENT_MACHINE_PROTOCOL_CAPABILITIES,
     })
   ).toBe(true);

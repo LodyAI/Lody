@@ -533,3 +533,190 @@ describe('useOrganization setActive dedupe', () => {
     ).rejects.toThrow('membership changed');
   });
 });
+
+describe('useOrganization list recovery', () => {
+  let root: Root | undefined;
+  let container: HTMLDivElement | undefined;
+  let networkUp: boolean;
+  let list: { data: TestOrganization[] | null; error: Error | null };
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    latestOrganizationState = null;
+    networkUp = false;
+    list = { data: null, error: new Error('Failed to fetch') };
+    organizationMocks.refetchOrganizations.mockReset();
+    organizationMocks.refetchOrganizations.mockImplementation(async () => {
+      list = networkUp
+        ? {
+            data: [createOrganization('workspace-target', 'target-workspace', 'Target')],
+            error: null,
+          }
+        : { data: null, error: new Error('Failed to fetch') };
+    });
+    const target = createOrganization('workspace-target', 'target-workspace', 'Target');
+    organizationMocks.authClient = {
+      useListOrganizations: () => ({
+        data: list.data,
+        isPending: false,
+        error: list.error,
+        refetch: organizationMocks.refetchOrganizations,
+      }),
+      useActiveOrganization: () => ({
+        data: target,
+        isPending: false,
+        error: null,
+        refetch: organizationMocks.refetchActiveOrganization,
+      }),
+      organization: { setActive: organizationMocks.setActive },
+    };
+  });
+
+  afterEach(async () => {
+    if (root) {
+      await act(async () => {
+        root?.unmount();
+      });
+    }
+    root = undefined;
+    container?.remove();
+    container = undefined;
+    vi.useRealTimers();
+    vi.clearAllMocks();
+  });
+
+  async function renderApp(): Promise<void> {
+    if (!container) {
+      container = document.createElement('div');
+      document.body.appendChild(container);
+      root = createRoot(container);
+    }
+    await act(async () => {
+      root?.render(
+        createElement(TestApp, {
+          targetSlug: 'target-workspace',
+          renderVersion: 0,
+          store: createStore(),
+        })
+      );
+    });
+  }
+
+  /** Let scheduled retries fire, then re-render so the hook reads the new list. */
+  async function advance(ms: number): Promise<void> {
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(ms);
+    });
+    await renderApp();
+  }
+
+  it('loads the list once the network returns after the retry burst was spent', async () => {
+    await renderApp();
+    for (let i = 0; i < 8; i += 1) await advance(5_000);
+    expect(latestOrganizationState?.organizations).toBeUndefined();
+    expect(latestOrganizationState?.error).not.toBeNull();
+
+    networkUp = true;
+    await act(async () => {
+      window.dispatchEvent(new Event('online'));
+    });
+    await advance(5_000);
+    await advance(0);
+
+    expect(latestOrganizationState?.organizations?.map((org) => org.slug)).toEqual([
+      'target-workspace',
+    ]);
+    expect(latestOrganizationState?.error).toBeNull();
+  });
+
+  it('does not poll while hidden, and retries as soon as the page is shown', async () => {
+    let visibility: DocumentVisibilityState = 'visible';
+    const descriptor = Object.getOwnPropertyDescriptor(Document.prototype, 'visibilityState');
+    Object.defineProperty(document, 'visibilityState', {
+      configurable: true,
+      get: () => visibility,
+    });
+    try {
+      await renderApp();
+      for (let i = 0; i < 8; i += 1) await advance(5_000);
+      expect(latestOrganizationState?.organizations).toBeUndefined();
+
+      visibility = 'hidden';
+      await act(async () => {
+        document.dispatchEvent(new Event('visibilitychange'));
+      });
+      networkUp = true;
+      for (let i = 0; i < 6; i += 1) await advance(30_000);
+      // Nothing was requested in three minutes hidden: the list is still unknown.
+      expect(latestOrganizationState?.organizations).toBeUndefined();
+
+      visibility = 'visible';
+      await act(async () => {
+        document.dispatchEvent(new Event('visibilitychange'));
+      });
+      await advance(5_000);
+      await advance(0);
+      expect(latestOrganizationState?.organizations?.map((org) => org.slug)).toEqual([
+        'target-workspace',
+      ]);
+    } finally {
+      delete (document as { visibilityState?: unknown }).visibilityState;
+      if (descriptor) Object.defineProperty(Document.prototype, 'visibilityState', descriptor);
+    }
+  });
+
+  it('keeps loading through a first-login active-organization failure until the list resolves', async () => {
+    const workspace = createOrganization('workspace-first-login', 'target-workspace', 'Target');
+    // Answered before the new session settled; Better Auth only refetches it on setActive.
+    let active: { data: TestOrganization | null; error: Error | null } = {
+      data: null,
+      error: new Error('Unauthorized'),
+    };
+    organizationMocks.refetchOrganizations.mockImplementation(async () => {
+      list = networkUp ? { data: [workspace], error: null } : list;
+    });
+    organizationMocks.setActive.mockImplementation(async () => {
+      active = { data: workspace, error: null };
+      return { data: workspace, error: null };
+    });
+    organizationMocks.authClient = {
+      ...(organizationMocks.authClient as object),
+      useActiveOrganization: () => ({
+        data: active.data,
+        isPending: false,
+        error: active.error,
+        refetch: organizationMocks.refetchActiveOrganization,
+      }),
+    };
+
+    await renderApp();
+    await advance(400);
+    expect(latestOrganizationState?.organizationsLoading).toBe(true);
+    expect(latestOrganizationState?.error).toBeNull();
+
+    networkUp = true;
+    await advance(5_000);
+    await advance(0);
+
+    expect(latestOrganizationState?.organizations?.map((org) => org.slug)).toEqual([
+      'target-workspace',
+    ]);
+    expect(latestOrganizationState?.activeOrganization?.id).toBe('workspace-first-login');
+    expect(latestOrganizationState?.error).toBeNull();
+  });
+
+  it('tries again on its own after a while, without any event', async () => {
+    await renderApp();
+    for (let i = 0; i < 8; i += 1) await advance(5_000);
+    expect(latestOrganizationState?.organizations).toBeUndefined();
+
+    networkUp = true;
+    await advance(30_000);
+    await advance(5_000);
+    await advance(0);
+
+    expect(latestOrganizationState?.organizations?.map((org) => org.slug)).toEqual([
+      'target-workspace',
+    ]);
+  });
+});

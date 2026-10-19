@@ -277,7 +277,14 @@ describe('ProviderSetupManager', () => {
       'runtime-unavailable',
     ],
     ['bub', 'ACP handshake timed out', 'verification-failed'],
-    ['dimcode', 'npm package could not be installed', 'verification-failed'],
+    ['dimcode', 'spawn dimcode ENOENT', 'runtime-unavailable'],
+    [
+      'dimcode',
+      "'dimcode' is not recognized as an internal or external command",
+      'runtime-unavailable',
+    ],
+    ['dimcode', "error: unrecognized subcommand 'acp'", 'runtime-unavailable'],
+    ['dimcode', 'ACP handshake timed out', 'verification-failed'],
     [
       'dimcode',
       'Authentication required: Provider credentials are required',

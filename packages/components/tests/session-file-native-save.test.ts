@@ -1,5 +1,8 @@
 import { beforeEach, expect, it, vi } from 'vitest';
+import { runTouchImagePreviewAction } from '../src/lib/image-preview-export';
 import { shareFileBytesNatively } from '../src/lib/session-file-native-save';
+
+vi.mock('../src/lib/native-platform', () => ({ isNativeAppShell: () => true }));
 
 vi.mock('../src/lib/session-file-upload', () => ({
   buildSessionFileDownloadUrl: () => {
@@ -95,3 +98,21 @@ it.each(['write', 'share'])('cleans up and reports a %s failure', async (step) =
   expect(state.files.size).toBe(0);
   expect(state.received).toEqual([]);
 });
+
+it.each(['save', 'share'] as const)(
+  'image %s hands off original bytes, never claims an album save',
+  async (action) => {
+    const image = new File([Uint8Array.of(255, 216, 255, 1)], 'photo.jpeg', { type: 'image/jpeg' });
+    expect(await runTouchImagePreviewAction(action, 'blob:photo', image)).toEqual({
+      kind: 'shared',
+    });
+    expect(state.received[0].name).toMatch(/photo\.jpeg$/);
+    expect([...state.received[0].bytes]).toEqual([255, 216, 255, 1]);
+    expect(state.files.size).toBe(0);
+    state.failure = 'Share canceled';
+    expect(await runTouchImagePreviewAction(action, 'blob:photo', image)).toEqual({
+      kind: 'dismissed',
+    });
+    expect(state.files.size).toBe(0);
+  }
+);

@@ -641,12 +641,16 @@ export const DraftSessionChatInterface = memo(
             selectedModelId={selectedModelId}
             modeOptions={modeOptions}
             modelOptions={modelOptions}
+            quotaConfig={sessionAgentConfig}
             rateLimits={
               (!draft.agentConfigId || sessionAgentConfig) &&
               canShowSubscriptionRateLimits({
                 cliType: draft.cliType,
                 agentType: draft.agentType,
                 config: sessionAgentConfig,
+                capability: draft.agentConfigId
+                  ? sessionMachine?.acpCapabilities?.[draft.agentConfigId]?.rateLimits
+                  : undefined,
               })
                 ? sessionMachine?.raceLimits
                 : undefined

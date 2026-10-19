@@ -1,30 +1,15 @@
 import fs from 'node:fs';
-import { createRequire } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { checkClaude, checkCodex, detectCliTypes, __test__ } from '../src/node/cli-detection';
-
-const require = createRequire(import.meta.url);
-const {
-  checkClaude: checkClaudeCjs,
-  checkCodex: checkCodexCjs,
-  detectCliTypes: detectCliTypesCjs,
-  __test__: cjsTest,
-} = require('../src/node/cli-detection.cjs') as {
-  checkClaude: (options?: { homeDir?: string }) => string | false;
-  checkCodex: (options?: { homeDir?: string }) => string | false;
-  detectCliTypes: (options?: { homeDir?: string }) => {
-    kimi: string;
-    claude: string | null;
-    codex: string | null;
-    available: string[];
-  };
-  __test__: {
-    resolveHomeDir: (options?: { homeDir?: string }) => string;
-  };
-};
+import {
+  checkClaude,
+  checkCodex,
+  checkOpencode,
+  detectCliTypes,
+  __test__,
+} from '../src/node/cli-detection';
 
 let tempDirs: string[] = [];
 
@@ -138,28 +123,51 @@ describe('CLI auth file detection', () => {
     }
   });
 
-  it('keeps the CommonJS entrypoint aligned with the ESM implementation', () => {
-    const homeDir = makeHomeDir();
-    const originalCodexHome = process.env.CODEX_HOME;
-    delete process.env.CODEX_HOME;
-    try {
-      writeFile(path.join(homeDir, '.claude.json'));
-      writeFile(path.join(homeDir, '.codex', 'auth.json'));
+  it('keeps an injected empty homeDir instead of falling back to the real home', () => {
+    expect(__test__.resolveHomeDir({ homeDir: '' })).toBe('');
+  });
+});
 
-      expect(checkClaudeCjs({ homeDir })).toBe('configured');
-      expect(checkCodexCjs({ homeDir })).toBe('configured');
-      expect(detectCliTypesCjs({ homeDir })).toEqual(detectCliTypes({ homeDir }));
+describe.skipIf(process.platform === 'win32')('CLI version probes', () => {
+  function withFakeOpencode(script: string | null): () => void {
+    const binDir = makeHomeDir();
+    if (script !== null) {
+      const binPath = path.join(binDir, 'opencode');
+      fs.writeFileSync(binPath, `#!/bin/sh\n${script}\n`, 'utf8');
+      fs.chmodSync(binPath, 0o755);
+    }
+    const originalPath = process.env.PATH;
+    // Only the fake bin dir and the system shell: no real opencode can leak in.
+    process.env.PATH = [binDir, '/bin', '/usr/bin'].join(path.delimiter);
+    return () => {
+      process.env.PATH = originalPath;
+    };
+  }
+
+  it('reports the trimmed version printed by a successful probe', async () => {
+    const restore = withFakeOpencode('echo " 1.2.3 "');
+    try {
+      await expect(checkOpencode()).resolves.toBe('1.2.3');
     } finally {
-      if (originalCodexHome === undefined) {
-        delete process.env.CODEX_HOME;
-      } else {
-        process.env.CODEX_HOME = originalCodexHome;
-      }
+      restore();
     }
   });
 
-  it('keeps injected empty homeDir behavior aligned between ESM and CommonJS', () => {
-    expect(__test__.resolveHomeDir({ homeDir: '' })).toBe('');
-    expect(cjsTest.resolveHomeDir({ homeDir: '' })).toBe('');
+  it('treats a non-zero exit as not installed even when it printed output', async () => {
+    const restore = withFakeOpencode('echo 1.2.3; exit 3');
+    try {
+      await expect(checkOpencode()).resolves.toBe(false);
+    } finally {
+      restore();
+    }
+  });
+
+  it('treats a missing binary as not installed', async () => {
+    const restore = withFakeOpencode(null);
+    try {
+      await expect(checkOpencode()).resolves.toBe(false);
+    } finally {
+      restore();
+    }
   });
 });

@@ -1,10 +1,14 @@
-import spawn from 'cross-spawn';
-import { type ChildProcess } from 'child_process';
+import { LODY_EXTENSION_METHODS } from 'acp-extension-core';
+import { parseLodyExtensionCapabilities, parseRateLimitsSnapshot } from './lody-acp-extension';
+import { toShared } from '@/platform/process-options';
+import type { ChildProcess } from 'child_process';
 import os from 'os';
 import path from 'path';
 import * as fs from 'fs';
 import {
   ndJsonStream,
+  ClientSideConnection,
+  PROTOCOL_VERSION,
   type Stream,
   type RequestPermissionRequest,
   type RequestPermissionResponse,
@@ -13,6 +17,11 @@ import { v4 as uuidV4 } from 'uuid';
 import { z } from 'zod';
 
 import type { Logger } from '@/utils/logger';
+import { formatErrorMessage } from '@/utils/format-error';
+import { startProcessLegacy, terminateChildTreeLegacy } from '@lody/shared/node/process';
+import { withSpawn } from '@/platform/process-options';
+
+import type { NodeProcessApi } from '@lody/shared/node/process';
 import type { TerminalManager } from '@/session/terminal-manager';
 import {
   AgentClient,
@@ -23,9 +32,8 @@ import {
   type ImageGenerationEndEvent,
   type AcpStartupStageEvent,
   type AcpStartupTimeoutOptions,
-  type AcpSessionStartTarget,
 } from './agent-client';
-import { getLoginShellEnv } from './login-shell-env';
+import { getLoginShellEnvLegacy } from './login-shell-env';
 import {
   mergeACPProcessEnv,
   mergeLoginShellEnv,
@@ -81,6 +89,7 @@ export type CreateAcpClientOptions = {
     cliType: AgentConfigCliType;
     agentType: string;
   };
+  modelId?: AgentClientOptions['modelId'];
   configOptionValues?: AgentClientOptions['configOptionValues'];
   /** Launcher family (npx/uvx/local) for ACP startup analytics; non-PII. */
   launcher?: AcpLauncher;
@@ -115,7 +124,6 @@ export type CreateAcpClientOptions = {
   sessionId?: SessionId;
   startupTimeouts?: AcpStartupTimeoutOptions;
   startupAbort?: Promise<never>;
-  resolveSessionStart?: () => Promise<AcpSessionStartTarget>;
 };
 
 export const createAcpClient = async (options: CreateAcpClientOptions) => {
@@ -128,6 +136,7 @@ export const createAcpClient = async (options: CreateAcpClientOptions) => {
     machineId: options.machineId,
     terminalManager: options.terminalManager,
     agentConfig: options.agentConfig,
+    modelId: options.modelId,
     configOptionValues: options.configOptionValues,
     resolveWorktreeProject: options.resolveWorktreeProject,
     launcher: options.launcher,
@@ -154,7 +163,6 @@ export const createAcpClient = async (options: CreateAcpClientOptions) => {
     options.resumeSessionId,
     options.startupTimeouts,
     options.startupAbort,
-    options.resolveSessionStart,
     options.forkSessionId,
     options.forkSessionTurnId
   );
@@ -164,68 +172,39 @@ export const createAcpClient = async (options: CreateAcpClientOptions) => {
   return { client, acpSessionId: sessionResponse.sessionId as ACPSessionId, sessionResponse };
 };
 
-function waitForChildProcessExit(child: ChildProcess, timeoutMs: number): Promise<boolean> {
-  if (child.exitCode !== null) {
-    return Promise.resolve(true);
-  }
-
-  return new Promise<boolean>((resolve) => {
-    const onExit = () => {
-      cleanup();
-      resolve(true);
-    };
-    const onTimeout = () => {
-      cleanup();
-      resolve(child.exitCode !== null);
-    };
-    const cleanup = () => {
-      clearTimeout(timeoutHandle);
-      child.off('exit', onExit);
-    };
-
-    const timeoutHandle = setTimeout(onTimeout, timeoutMs);
-    child.once('exit', onExit);
-  });
-}
-
-function signalChildProcess(child: ChildProcess, signal: NodeJS.Signals): void {
-  if (process.platform !== 'win32' && typeof child.pid === 'number' && child.pid > 0) {
-    process.kill(-child.pid, signal);
-    return;
-  }
-
-  child.kill(signal);
-}
-
-async function terminateChildProcess(
+/**
+ * Terminate a child from `spawnAcpProcess` together with everything it
+ * started: SIGTERM to its process group (tree on Windows), `exitTimeoutMs` of
+ * grace, SIGKILL, then a bounded wait. Rejects with `TerminationFailed` when
+ * the tree cannot be proven gone.
+ *
+ * TEMPORARY facade: auxiliary ACP agents become scoped processes once the
+ * ACP connection layer is an Effect.
+ */
+export async function terminateAcpProcessTree(
   child: ChildProcess,
-  logger: Logger,
-  sessionLabel: string,
-  exitTimeoutMs: number
+  options: {
+    logger: Logger;
+    sessionLabel: string;
+    exitTimeoutMs: number;
+    /** Skip SIGTERM: for probes whose output no longer matters. */
+    force?: boolean;
+    nodeProcess?: NodeProcessApi;
+  }
 ): Promise<void> {
-  if (child.exitCode !== null) {
-    return;
-  }
-
-  try {
-    signalChildProcess(child, 'SIGTERM');
-  } catch {
-    return;
-  }
-
-  if (await waitForChildProcessExit(child, exitTimeoutMs)) {
-    return;
-  }
-
-  logger.debug(
-    `[${sessionLabel}] ACP agent process did not exit within ${exitTimeoutMs}ms of SIGTERM; escalating to SIGKILL`
+  await terminateChildTreeLegacy(
+    child,
+    {
+      graceMs: options.force ? 0 : options.exitTimeoutMs,
+      killWaitMs: options.exitTimeoutMs,
+      processGroup: true,
+    },
+    toShared({
+      logger: options.logger,
+      logPrefix: `[${options.sessionLabel}]`,
+      nodeProcess: options.nodeProcess,
+    })
   );
-  try {
-    signalChildProcess(child, 'SIGKILL');
-  } catch {
-    return;
-  }
-  await waitForChildProcessExit(child, exitTimeoutMs);
 }
 
 export type SpawnAcpProcessOptions = {
@@ -233,11 +212,12 @@ export type SpawnAcpProcessOptions = {
   agentType: string;
   customAcp?: CustomAcpLaunchSpec;
   runtimeOverrides?: BuiltinRuntimeOverrides;
+  magpieGatewayUrl?: string;
   workdir: string;
   env: NodeJS.ProcessEnv;
   args?: string[];
   command?: string;
-  spawnImpl?: typeof spawn;
+  spawnImpl?: NodeProcessApi['spawn'];
 };
 
 export const spawnAcpProcess = (options: SpawnAcpProcessOptions): ChildProcess => {
@@ -253,12 +233,11 @@ export const spawnAcpProcess = (options: SpawnAcpProcessOptions): ChildProcess =
       agentType: options.agentType,
       customAcp: options.customAcp,
       runtimeOverrides: options.runtimeOverrides,
+      magpieGatewayUrl: options.magpieGatewayUrl,
     });
     command = command ?? launch.command;
     args = args ?? launch.args;
   }
-  const spawnFn = options.spawnImpl ?? spawn;
-
   const executable = resolveDeepSeekHarnessSpawn({
     command,
     args,
@@ -266,15 +245,17 @@ export const spawnAcpProcess = (options: SpawnAcpProcessOptions): ChildProcess =
     workdir: options.workdir,
   });
 
-  return spawnFn(executable.command, executable.args, {
-    cwd: options.workdir,
-    env: options.env,
-    stdio: ['pipe', 'pipe', 'pipe'],
-    detached: process.platform !== 'win32',
-    // On Windows the daemon has no console; without CREATE_NO_WINDOW each
-    // spawned agent CLI pops a visible console window and steals focus.
-    windowsHide: true,
-  });
+  // Its own process group on POSIX (a tree rooted at it on Windows), so
+  // `terminateAcpProcessTree` reaches everything the agent starts.
+  return startProcessLegacy(
+    {
+      command: executable.command,
+      args: executable.args,
+      options: { cwd: options.workdir, env: options.env, stdio: ['pipe', 'pipe', 'pipe'] },
+      processGroup: true,
+    },
+    toShared(withSpawn(options.spawnImpl))
+  ).child;
 };
 
 export type StartLocalAcpAgentOptions = {
@@ -283,6 +264,8 @@ export type StartLocalAcpAgentOptions = {
   agentType: string;
   customAcp?: CustomAcpLaunchSpec;
   runtimeOverrides?: BuiltinRuntimeOverrides;
+  agentConfigId?: string;
+  magpieGatewayUrl?: string;
   workdir: string;
   env?: NodeJS.ProcessEnv;
   logger: Logger;
@@ -297,7 +280,7 @@ export type StartLocalAcpAgentOptions = {
   onManagedRuntimeProgress?: ManagedRuntimeProgressCallback;
   signal?: AbortSignal;
   extraArgs?: string[];
-  spawnImpl?: typeof spawn;
+  spawnImpl?: NodeProcessApi['spawn'];
 };
 
 const CodexConfigOverrideSchema = z.record(z.string(), z.unknown());
@@ -355,7 +338,75 @@ export const __test__ = {
   withTitleAgentCodexConfig,
 };
 
-export const startLocalAcpAgent = async (options: StartLocalAcpAgentOptions) => {
+export const startLocalAcpAgent = (options: StartLocalAcpAgentOptions) =>
+  startLocalAcpProtocol(options, createAcpClient);
+
+export class AcpQuotaCleanupError extends Error {
+  constructor(
+    readonly child: ChildProcess,
+    cause: unknown
+  ) {
+    super('Quota ACP process cleanup was not confirmed', { cause });
+  }
+}
+
+export async function initializeAndReadAcpRateLimits(stream: Stream) {
+  const connection = new ClientSideConnection(
+    () => ({
+      requestPermission: async () => ({ outcome: { outcome: 'cancelled' as const } }),
+      sessionUpdate: async () => {},
+    }),
+    stream
+  );
+  const initialized = await connection.initialize({
+    protocolVersion: PROTOCOL_VERSION,
+    clientCapabilities: { terminal: false, fs: { readTextFile: false, writeTextFile: false } },
+  });
+  const capabilities = parseLodyExtensionCapabilities(initialized.agentCapabilities?._meta);
+  if (capabilities.rateLimits?.query !== true) throw new Error('Rate-limit query unsupported');
+  return parseRateLimitsSnapshot(
+    await connection.request(LODY_EXTENSION_METHODS.rateLimitsGet, {})
+  );
+}
+
+/** Read-only ACP initialization: no session, MCP servers, file access or prompts. */
+export async function queryLocalAcpRateLimits(options: StartLocalAcpAgentOptions) {
+  const started = await startLocalAcpProtocol(
+    options,
+    async ({ stream, startupAbort }) => {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        const snapshot = await Promise.race([
+          initializeAndReadAcpRateLimits(stream),
+          ...(startupAbort ? [startupAbort] : []),
+          new Promise<never>((_, reject) => {
+            timer = setTimeout(() => reject(new Error('Rate-limit query timed out')), 20_000);
+          }),
+        ]);
+        return { snapshot };
+      } finally {
+        clearTimeout(timer);
+      }
+    },
+    true
+  );
+  try {
+    await terminateAcpProcessTree(started.agentProcess, {
+      logger: options.logger,
+      sessionLabel: 'provider-rate-limits',
+      exitTimeoutMs: 3000,
+    });
+  } catch (cause) {
+    throw new AcpQuotaCleanupError(started.agentProcess, cause);
+  }
+  return started.snapshot;
+}
+
+async function startLocalAcpProtocol<T>(
+  options: StartLocalAcpAgentOptions,
+  startClient: (options: CreateAcpClientOptions) => Promise<T>,
+  retainCleanupFailure = false
+) {
   options.signal?.throwIfAborted();
   // Async resolve so registry agents distributed as a platform binary are
   // downloaded/unpacked on demand before spawn (no-op for builtin/npx/uvx/local).
@@ -364,6 +415,8 @@ export const startLocalAcpAgent = async (options: StartLocalAcpAgentOptions) => 
     agentType: options.agentType,
     customAcp: options.customAcp,
     runtimeOverrides: options.runtimeOverrides,
+    agentConfigId: options.agentConfigId,
+    magpieGatewayUrl: options.magpieGatewayUrl,
     env: options.env,
     extraArgs: options.extraArgs,
     onManagedRuntimeProgress: options.onManagedRuntimeProgress
@@ -405,7 +458,7 @@ export const startLocalAcpAgent = async (options: StartLocalAcpAgentOptions) => 
   // omits user tool dirs, so resolve the login-shell env and overlay it before
   // merging the agent-specific env. withDefaultAcpPathEntries still runs as a
   // last-resort fallback for environments where the shell probe yields nothing.
-  const loginShellEnv = await getLoginShellEnv();
+  const loginShellEnv = await getLoginShellEnvLegacy();
   // withLoopbackNoProxy runs outermost so a proxy contributed by the login
   // shell is covered too: the agent reaches Lody's MCP HTTP host over
   // loopback, and a proxy that intercepts that kills MCP entirely.
@@ -584,7 +637,7 @@ export const startLocalAcpAgent = async (options: StartLocalAcpAgentOptions) => 
     try {
       options.signal?.throwIfAborted();
       options.logger.debug('[acp-startup] creating ACP client');
-      const started = await createAcpClient({
+      const started = await startClient({
         stream,
         workdir: options.workdir,
         logger: options.logger,
@@ -603,12 +656,9 @@ export const startLocalAcpAgent = async (options: StartLocalAcpAgentOptions) => 
           : startupMonitor.abortPromise,
       });
       options.signal?.throwIfAborted();
-      options.logger.debug(`[acp-startup] ACP client ready (acpSessionId=${started.acpSessionId})`);
       return {
         agentProcess,
-        client: started.client as AgentClient,
-        acpSessionId: started.acpSessionId as ACPSessionId,
-        sessionResponse: started.sessionResponse,
+        ...started,
         capabilitySourceVersion: launch.capabilitySourceVersion,
       };
     } catch (error) {
@@ -619,7 +669,17 @@ export const startLocalAcpAgent = async (options: StartLocalAcpAgentOptions) => 
       if (error instanceof AcpStartupProcessExitError || error instanceof AcpStartupProcessError) {
         captureAcpSpawnFailed({ ...spawnAnalyticsProps, reason: classifyCliSpawnReason(error) });
       }
-      await terminateChildProcess(agentProcess, options.logger, 'acp-startup', 3000);
+      // Report a survivor, but keep the startup error: it is why the call failed.
+      await terminateAcpProcessTree(agentProcess, {
+        logger: options.logger,
+        sessionLabel: 'acp-startup',
+        exitTimeoutMs: 3000,
+      }).catch((terminationError: unknown) => {
+        if (retainCleanupFailure) throw new AcpQuotaCleanupError(agentProcess, terminationError);
+        options.logger.warn(
+          `[acp-startup] ACP agent process could not be terminated after a failed start: ${formatErrorMessage(terminationError)}`
+        );
+      });
 
       throw error;
     } finally {
@@ -642,6 +702,7 @@ export const startLocalAcpAgent = async (options: StartLocalAcpAgentOptions) => 
     },
     async () =>
       await runNpxStartupWithRecovery({
+        maxAttempts: retainCleanupFailure ? 1 : undefined,
         command: launch.command,
         args: launch.args,
         env: envWithAcpStartup,
@@ -651,7 +712,7 @@ export const startLocalAcpAgent = async (options: StartLocalAcpAgentOptions) => 
         getStderrTail: () => lastStderrTail,
       })
   );
-};
+}
 
 export type ShutdownLocalAcpAgentOptions = {
   agentProcess: ChildProcess;
@@ -661,6 +722,8 @@ export type ShutdownLocalAcpAgentOptions = {
   sessionLabel: string;
   closeSessionTimeoutMs?: number;
   exitTimeoutMs?: number;
+  /** Test seam for the OS process table. */
+  nodeProcess?: NodeProcessApi;
 };
 
 export async function shutdownLocalAcpAgent(options: ShutdownLocalAcpAgentOptions): Promise<void> {
@@ -679,12 +742,20 @@ export async function shutdownLocalAcpAgent(options: ShutdownLocalAcpAgentOption
     }
   }
 
-  await terminateChildProcess(
-    options.agentProcess,
-    options.logger,
-    options.sessionLabel,
-    exitTimeoutMs
-  );
+  try {
+    await terminateAcpProcessTree(options.agentProcess, {
+      logger: options.logger,
+      sessionLabel: options.sessionLabel,
+      exitTimeoutMs,
+      nodeProcess: options.nodeProcess,
+    });
+  } catch (error) {
+    // These probe, title, and login agents are never reused, so a survivor
+    // cannot receive new work; it is a leak to surface, not a caller failure.
+    options.logger.warn(
+      `[${options.sessionLabel}] ACP agent process could not be terminated: ${formatErrorMessage(error)}`
+    );
+  }
 }
 import {
   codexProfileEnvironment,

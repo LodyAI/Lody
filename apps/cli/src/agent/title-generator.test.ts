@@ -18,31 +18,27 @@ const agentMessage = (text: string, phase?: string): AcpSessionNotification => (
 
 describe('extractTitleChunkFromNotification', () => {
   it('ignores Codex commentary status text', () => {
-    expect(
-      extractTitleChunkFromNotification(agentMessage('Reconnecting...', 'commentary'), 'codex')
-    ).toBe(null);
+    expect(extractTitleChunkFromNotification(agentMessage('Reconnecting...', 'commentary'))).toBe(
+      null
+    );
   });
 
   it('accepts the Codex final answer', () => {
     expect(
-      extractTitleChunkFromNotification(agentMessage('Fix session title', 'final_answer'), 'codex')
+      extractTitleChunkFromNotification(agentMessage('Fix session title', 'final_answer'))
     ).toBe('Fix session title');
   });
 
-  it('rejects untyped chunks from Codex title agents', () => {
-    expect(extractTitleChunkFromNotification(agentMessage('HTTP 400'), 'codex')).toBe(null);
+  it('accepts Codex answers without optional phase metadata', () => {
+    expect(extractTitleChunkFromNotification(agentMessage('Fix session title'))).toBe(
+      'Fix session title'
+    );
   });
 
   it('keeps one-release compatibility with Codex phase metadata', () => {
     const notification = agentMessage('Fix session title');
     notification.update._meta = { codex: { phase: 'final_answer' } };
-    expect(extractTitleChunkFromNotification(notification, 'codex')).toBe('Fix session title');
-  });
-
-  it('keeps compatibility with ACP agents that do not provide phase metadata', () => {
-    expect(extractTitleChunkFromNotification(agentMessage('Fix session title'), 'kimi')).toBe(
-      'Fix session title'
-    );
+    expect(extractTitleChunkFromNotification(notification)).toBe('Fix session title');
   });
 });
 
@@ -82,6 +78,29 @@ describe('sanitizeGeneratedTitle', () => {
 });
 
 describe('applyTitleConfigOptions', () => {
+  it('rejects an unavailable required model instead of generating with another model', async () => {
+    const active = { model: 'other-model' };
+    await expect(
+      applyTitleConfigOptions({
+        client: {
+          setSessionConfigOption: async (_session, _key, value) => {
+            active.model = String(value);
+            return [];
+          },
+          unstable_setSessionModel: async (_session, model) => {
+            active.model = model;
+          },
+        },
+        acpSessionId: 'title-session' as ACPSessionId,
+        sessionResponse: { configOptions: [] },
+        configOptionValues: { model: 'gpt-5.6-luna' },
+        requireAvailable: true,
+        logger: { debug: vi.fn() } as never,
+      })
+    ).rejects.toThrow('Unavailable title config option model=gpt-5.6-luna');
+    expect(active.model).toBe('other-model');
+  });
+
   it('applies a synthetic legacy model selection before title prompting', async () => {
     const setSessionConfigOption = vi.fn(async () => undefined);
     const unstableSetSessionModel = vi.fn(async () => {});

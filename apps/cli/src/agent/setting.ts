@@ -1,4 +1,5 @@
 import { existsSync } from 'node:fs';
+import { prepareMagpieRuntime } from './magpie-runtime';
 import { createHash } from 'node:crypto';
 import { homedir } from 'node:os';
 import { delimiter, dirname, join, normalize, resolve } from 'node:path';
@@ -73,6 +74,8 @@ export type ResolveACPSettingInput = {
    */
   customAcp?: CustomAcpLaunchSpec;
   runtimeOverrides?: BuiltinRuntimeOverrides;
+  agentConfigId?: string;
+  magpieGatewayUrl?: string;
   /** Environment values that can alter an agent's advertised capabilities. */
   env?: NodeJS.ProcessEnv;
 };
@@ -171,7 +174,8 @@ export const BuiltinACPSetting: Record<CliType, ACPSetting> = {
  */
 const BUILTIN_BUB_CAPABILITY_SOURCE_VERSION = 'builtin-bub:acp';
 
-const DIMCODE_VERSION = '0.5.10';
+// User-managed version; refresh capabilities explicitly after upgrading.
+const BUILTIN_DIMCODE_CAPABILITY_SOURCE_VERSION = 'builtin-dimcode:local-acp';
 
 // Serve npx launches from the local cache when the package is already
 // installed; go to the registry only on a cache miss. Registry agent specs are
@@ -265,6 +269,13 @@ export function getAcpCapabilitySourceVersion(
   input: ResolveACPSettingInput,
   managedRuntimeVersion?: string
 ): string {
+  if (input.cliType === 'builtin' && input.magpieGatewayUrl) {
+    const { magpieGatewayUrl: gateway, ...nativeInput } = input;
+    const base = getAcpCapabilitySourceVersion(nativeInput, managedRuntimeVersion);
+    const suffix = getBuiltinRuntimeOverrideSourceVersionSuffix(input.runtimeOverrides);
+    const prefix = suffix && base.endsWith(suffix) ? base.slice(0, -suffix.length) : base;
+    return `${prefix}+magpie-v1:${createHash('sha256').update(gateway).digest('hex').slice(0, 12)}${suffix}`;
+  }
   if (input.cliType === 'custom') {
     // Derive from the launch spec itself so editing the command invalidates
     // cached capabilities; there is no package version to key on.
@@ -310,7 +321,7 @@ export function getAcpCapabilitySourceVersion(
           : DEEPSEEK_HARNESS_CAPABILITY_SOURCE_VERSION;
       }
       if (input.agentType === 'dimcode') {
-        return `builtin-dimcode:${DIMCODE_VERSION}`;
+        return BUILTIN_DIMCODE_CAPABILITY_SOURCE_VERSION;
       }
       if (input.agentType === 'bub') {
         // Bub is a user-installed CLI whose version Lody does not own, so the
@@ -397,8 +408,7 @@ export async function resolveExpectedAcpCapabilitySourceVersion(
 
 export function resolveRegistryAgentACPSetting(agent: RegistryAcpAgent): ResolvedACPSetting {
   if (agent.distribution.local?.command) {
-    const isNpx = agent.distribution.local.command === 'npx';
-    const args = [...(isNpx ? [NPX_CACHE_MODE_ARG] : []), ...(agent.distribution.local.args ?? [])];
+    const args = [...(agent.distribution.local.args ?? [])];
     return {
       status: {
         agent: `${agent.name}@${agent.version}`,
@@ -550,6 +560,7 @@ async function resolveBuiltinACPProcessLaunch(
     const [adapterPath] = resolveCliAdapterEntry('deepseek-acp');
     const launch = await resolveDeepSeekHarnessProcessLaunch({
       adapterPath,
+      providerId: input.agentConfigId,
       extraArgs: input.extraArgs,
     });
     return {
@@ -559,14 +570,10 @@ async function resolveBuiltinACPProcessLaunch(
   }
   if (input.agentType === 'dimcode') {
     return {
-      command: 'npx',
-      args: [
-        NPX_CACHE_MODE_ARG,
-        '-y',
-        `dimcode@${DIMCODE_VERSION}`,
-        'acp',
-        ...(input.extraArgs ?? []),
-      ],
+      command: 'dimcode',
+      args: ['acp', ...(input.extraArgs ?? [])],
+      // Version changes belong to the user, including standalone installations.
+      env: { DIMCODE_DISABLE_AUTOUPDATE: '1', DIMCODE_AUTOUPDATE: '0' },
       capabilitySourceVersion: getAcpCapabilitySourceVersion(input),
     };
   }
@@ -749,7 +756,15 @@ export async function resolveACPProcessLaunchAsync(
   input: ResolveACPProcessLaunchInput
 ): Promise<ResolvedACPProcessLaunch> {
   if (input.cliType === 'builtin') {
-    return await resolveBuiltinACPProcessLaunch(input);
+    const launch = await resolveBuiltinACPProcessLaunch(input);
+    const gateway = input.magpieGatewayUrl;
+    if (!gateway) return launch;
+    const magpie = await prepareMagpieRuntime(input.agentType, gateway, input.signal);
+    return {
+      ...launch,
+      env: { ...launch.env, ...magpie.env },
+      args: [...launch.args, ...magpie.args],
+    };
   }
   if (input.cliType === 'registry') {
     const agent = registryAgentsById[input.agentType];
@@ -854,7 +869,7 @@ export function withDefaultAcpPathEntries(
 }
 
 /**
- * Overlay a login-shell environment (see `getLoginShellEnv`) onto a base env when
+ * Overlay a login-shell environment (see `getLoginShellEnvLegacy`) onto a base env when
  * spawning ACP agents.
  *
  * - Non-PATH vars: base wins. The base carries lody-injected values (e.g.

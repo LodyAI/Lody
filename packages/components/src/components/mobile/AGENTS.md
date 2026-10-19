@@ -37,6 +37,7 @@ before touching gestures.
 
 ## Home and chat lists
 
+- Dock icons must retain identity and size.
 - Inbox renders only on `showInboxTab`. Keep the chat/projects group
   mounted so pull-to-refresh and scroll position survive tab round-trips.
   `../chat/chat-landing.tsx` owns the default home tab; the workspace stack only
@@ -90,11 +91,10 @@ before touching gestures.
 
 ## Run config, pickers, and sheets
 
-- ONE control (`mobile-session-run-config.tsx`) serves both the in-session
-  composer and the new-chat sheet: it takes `agentSelection` (no SessionMeta
-  dependency) plus model/mode/config props. Explicit permission selectors
-  outrank legacy ACP modes, and closing the sheet must not restore focus to the
-  composer.
+- `mobile-session-run-config.tsx` serves both composers using `agentSelection`
+  (no SessionMeta) and model/mode/config props. Explicit permissions outrank
+  legacy ACP modes; closing the sheet must not focus the composer.
+- Provider picker IDs use `run-config-option:`; built-in rows use `run-config-`.
 - The Role row renders whenever the caller passes `agentRoles` — both composers
   do (`../sessions/AGENTS.md`) — even with nothing to list, reading `None`. It
   sits above Agent as an inline picker ordered `None`, Roles by emoji + name,

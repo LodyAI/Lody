@@ -1,5 +1,8 @@
 # Main services
 
+Local session-history watch timeouts include the requested owner wait plus the
+ordinary read allowance. Preserve the shorter deadline for ordinary control reads.
+
 App icons are macOS packaged-app only. `app-icon-service.ts` owns device-local
 preferences and the serialized native apply path; the renderer supplies only a
 catalog identifier. Never edit signed resources or the shared development
@@ -59,6 +62,10 @@ approval, before it destroys relays or stops the CLI; Stay cancels quit with the
 app fully running. A quit close whose renderer hangs or dies is destroyed so quit
 cannot wait forever. Never destroy a normally closing window or add a path that
 bypasses unrelated `beforeunload` guards such as unsaved editors.
+A renderer-requested relaunch (`../relaunch-intent.ts`) calls `app.relaunch()` only at
+`will-quit`; a quit the barrier cancels settles `cancelled`, and the IPC caller
+withdraws any reset request it armed, so a later ordinary quit neither relaunches nor
+resets. Relaunching quits the embedded CLI: never make it a default recovery step.
 
 ## Auto-update
 
@@ -75,3 +82,10 @@ bypasses unrelated `beforeunload` guards such as unsaved editors.
   `downloadedFile` is set, `recordError` keeps `phase: 'downloaded'`; dropping
   to `error` hides the sidebar banner and the About install button, which are
   the only ways to retry.
+
+Login-shell environment uses the application-owned native LoginShellCache Layer.
+getUserShellEnvCachedLegacy is only a launcher boundary. After renderer unload
+approval, quit awaits application disposal alongside CLI exit; retain failed process
+owners for a later quit/recovery. Never substitute failure with null or bind a
+replacement before release. See the
+[decision](../../../../../.agents/notes/implemented/architecture/2026-10-10-effect-login-shell-probe.md).

@@ -1,9 +1,8 @@
+import { toShared } from '@/platform/process-options';
 import fs from 'node:fs';
 import path, { isAbsolute, relative, resolve as resolvePath } from 'node:path';
 import os from 'node:os';
 import { createHash } from 'node:crypto';
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
 import type {
   LocalProjectBrowseDirectoryResult,
   LocalProjectBrowseRootsResult,
@@ -28,10 +27,7 @@ import {
   isBinaryImagePath,
 } from '@lody/shared';
 import {
-  checkoutLocalProjectBranchAtRootPath,
-  createLocalProjectId,
-  ensureLocalProjectRootPath,
-  getLocalProjectGitStateAtRootPath,
+  localProjectsLegacy,
   getLocalProjectNameFromRootPath,
 } from '@lody/shared/node/local-project';
 import {
@@ -41,6 +37,7 @@ import {
 import { getLodyDataDir } from '@lody/shared/node/installation-profile';
 import type { Logger } from '@/utils/logger';
 import { formatErrorMessage } from '@/utils/format-error';
+import { runCommandTextLegacy } from '@lody/shared/node/process';
 
 const DEFAULT_LOCAL_PROJECT_MAX_FILES = 80_000;
 const HARD_LOCAL_PROJECT_MAX_FILES = 200_000;
@@ -58,7 +55,6 @@ const HARD_LOCAL_PROJECT_READ_MAX_BYTES = 5 * 1024 * 1024;
 const GIT_COMMAND_MAX_BUFFER_BYTES = 64 * 1024 * 1024;
 const LOCAL_PROJECT_GIT_COMMAND_TIMEOUT_MS = 5_000;
 const LOCAL_PROJECT_WALK_YIELD_EVERY_ENTRIES = 1_000;
-const execFileAsync = promisify(execFile);
 const LOCAL_REPO_ID_RE = /^local---[0-9a-f]{12}$/;
 
 const yieldToEventLoop = (): Promise<void> =>
@@ -256,39 +252,32 @@ type GitCommandResult = {
 
 async function runGitCommand(rootPath: string, args: string[]): Promise<GitCommandResult> {
   try {
-    const result = await execFileAsync('git', args, {
-      cwd: rootPath,
-      encoding: 'utf8',
-      maxBuffer: GIT_COMMAND_MAX_BUFFER_BYTES,
-      timeout: LOCAL_PROJECT_GIT_COMMAND_TIMEOUT_MS,
-      killSignal: 'SIGTERM',
-      env: {
-        ...process.env,
-        GIT_TERMINAL_PROMPT: '0',
-        GIT_OPTIONAL_LOCKS: '0',
+    const result = await runCommandTextLegacy(
+      {
+        command: 'git',
+        args,
+        cwd: rootPath,
+        maxOutputBytes: GIT_COMMAND_MAX_BUFFER_BYTES,
+        timeout: LOCAL_PROJECT_GIT_COMMAND_TIMEOUT_MS,
+        env: {
+          ...process.env,
+          GIT_TERMINAL_PROMPT: '0',
+          GIT_OPTIONAL_LOCKS: '0',
+        },
+        check: 'none',
       },
-    });
-    return {
-      status: 0,
-      stdout: String(result.stdout ?? ''),
-      stderr: String(result.stderr ?? ''),
-    };
+      toShared()
+    );
+    return { status: result.code, stdout: result.stdout, stderr: result.stderr };
   } catch (error) {
-    const withOutput = error as
-      | (Error & { code?: number | string; stdout?: string; stderr?: string })
-      | undefined;
-    const message = formatErrorMessage(error);
-    return {
-      status: typeof withOutput?.code === 'number' ? withOutput.code : null,
-      stdout: String(withOutput?.stdout ?? ''),
-      stderr: String(withOutput?.stderr ?? message),
-    };
+    // Spawn failure, timeout or output overflow: no exit status to report.
+    return { status: null, stdout: '', stderr: formatErrorMessage(error) };
   }
 }
 
 function normalizeRootPath(rootPath: string): string {
   try {
-    return ensureLocalProjectRootPath(rootPath);
+    return localProjectsLegacy.ensureLocalProjectRootPath(rootPath);
   } catch {
     throw new Error('Local project path not found.');
   }
@@ -338,6 +327,85 @@ function resolveLocalProjectBrowsePath(absolutePath: string | undefined): string
     throw new Error('Browse path must be absolute.');
   }
   return requestedPath;
+}
+
+export type LocalProjectCreateDirectoryErrorCode =
+  | 'invalid_request'
+  | 'path_invalid'
+  | 'access_denied'
+  | 'already_exists';
+
+export class LocalProjectCreateDirectoryError extends Error {
+  constructor(
+    readonly code: LocalProjectCreateDirectoryErrorCode,
+    message: string,
+    options?: ErrorOptions
+  ) {
+    super(message, options);
+    this.name = 'LocalProjectCreateDirectoryError';
+  }
+}
+
+function mapCreateDirectoryFsError(
+  error: unknown,
+  operation: 'parent' | 'create',
+  targetPath: string
+): LocalProjectCreateDirectoryError | null {
+  const code = (error as NodeJS.ErrnoException | null)?.code;
+  if (code === 'EEXIST' && operation === 'create') {
+    return new LocalProjectCreateDirectoryError(
+      'already_exists',
+      `A file or folder named "${path.basename(targetPath)}" already exists.`
+    );
+  }
+  if (code === 'EACCES' || code === 'EPERM' || code === 'EROFS') {
+    return new LocalProjectCreateDirectoryError(
+      'access_denied',
+      `Permission denied creating folder in "${path.dirname(targetPath)}".`
+    );
+  }
+  if (code === 'ENOENT' || code === 'ENOTDIR' || code === 'EINVAL' || code === 'ENAMETOOLONG') {
+    return new LocalProjectCreateDirectoryError(
+      'path_invalid',
+      operation === 'parent'
+        ? 'The parent folder does not exist or is not a directory.'
+        : 'The folder path is no longer available.'
+    );
+  }
+  return null;
+}
+
+function validateLocalProjectDirectoryName(name: string): string {
+  const normalized = name.trim();
+  if (
+    !normalized ||
+    normalized !== name ||
+    normalized === '.' ||
+    normalized === '..' ||
+    Array.from(normalized).some((char) => char.charCodeAt(0) < 32) ||
+    normalized.includes('/') ||
+    normalized.includes('\\') ||
+    path.isAbsolute(normalized)
+  ) {
+    throw new LocalProjectCreateDirectoryError(
+      'invalid_request',
+      'Folder name must be a single directory name.'
+    );
+  }
+  if (process.platform === 'win32') {
+    const stem = normalized.split('.')[0]?.toUpperCase() ?? normalized.toUpperCase();
+    if (
+      /^(CON|PRN|AUX|NUL|CONIN\$|CONOUT\$|COM[1-9¹²³]|LPT[1-9¹²³])$/.test(stem) ||
+      /[<>:"|?*]/.test(normalized) ||
+      /[. ]$/.test(normalized)
+    ) {
+      throw new LocalProjectCreateDirectoryError(
+        'invalid_request',
+        'Folder name is not valid on this machine.'
+      );
+    }
+  }
+  return normalized;
 }
 
 function parseLocalProjectBrowseCursor(cursor: string | undefined): number {
@@ -1328,8 +1396,8 @@ export class LocalProjectControlService {
       throw new Error('Project path is required');
     }
 
-    const resolvedRootPath = ensureLocalProjectRootPath(normalized);
-    const localProjectId = createLocalProjectId(resolvedRootPath);
+    const resolvedRootPath = localProjectsLegacy.ensureLocalProjectRootPath(normalized);
+    const localProjectId = localProjectsLegacy.createLocalProjectId(resolvedRootPath);
 
     this.logger.debug(`[local-project] Prepared path ${resolvedRootPath} as ${localProjectId}`);
 
@@ -1341,7 +1409,7 @@ export class LocalProjectControlService {
   }
 
   async getProjectGitState(rootPath: string): Promise<LocalProjectGitState> {
-    return await getLocalProjectGitStateAtRootPath(rootPath);
+    return await localProjectsLegacy.getLocalProjectGitStateAtRootPath(rootPath);
   }
 
   async listBrowseRoots(): Promise<LocalProjectBrowseRootsResult> {
@@ -1353,6 +1421,38 @@ export class LocalProjectControlService {
       homeDir,
       ...(platform === 'win32' ? { drives: await listWindowsDrives() } : {}),
     };
+  }
+
+  async createDirectory(parentPath: string, name: string): Promise<{ path: string }> {
+    const directoryName = validateLocalProjectDirectoryName(name);
+    if (!path.isAbsolute(parentPath) || parentPath.includes('\0')) {
+      throw new LocalProjectCreateDirectoryError('path_invalid', 'Parent path must be absolute.');
+    }
+
+    let canonicalParent: string;
+    try {
+      canonicalParent = await fs.promises.realpath(parentPath);
+      if (!(await fs.promises.stat(canonicalParent)).isDirectory()) {
+        throw new LocalProjectCreateDirectoryError(
+          'path_invalid',
+          'Parent path is not a directory.'
+        );
+      }
+    } catch (error) {
+      throw (
+        mapCreateDirectoryFsError(error, 'parent', path.join(parentPath, directoryName)) ?? error
+      );
+    }
+
+    const targetPath = path.join(canonicalParent, directoryName);
+    try {
+      // Non-recursive mkdir is atomic for collisions, including files and symlinks.
+      // Never accept an existing target as a successful creation or register it here.
+      await fs.promises.mkdir(targetPath);
+    } catch (error) {
+      throw mapCreateDirectoryFsError(error, 'create', targetPath) ?? error;
+    }
+    return { path: targetPath };
   }
 
   async browseDirectory(options?: {
@@ -1534,7 +1634,10 @@ export class LocalProjectControlService {
     branchName: string
   ): Promise<LocalProjectCheckoutBranchResult> {
     try {
-      const result = await checkoutLocalProjectBranchAtRootPath(rootPath, branchName);
+      const result = await localProjectsLegacy.checkoutLocalProjectBranchAtRootPath(
+        rootPath,
+        branchName
+      );
       return {
         success: true,
         currentBranch: result.currentBranch,
