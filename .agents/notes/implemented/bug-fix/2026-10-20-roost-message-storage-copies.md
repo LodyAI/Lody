@@ -14,8 +14,8 @@ receipts. State now contains operations relative to its exact sealed primary;
 the execution owner uses Roost's local batch recovery journal. A synthetic
 432 KiB unchanged body with 32 corrections retained 4,113 update bytes instead of
 889,477, preserving the sealed primary, logical reads, legacy state reads and
-idempotent recovery. SQLite 3/4 targeted tests pass; the new SDK option still
-requires the coordinated release and dependency update before this consumer merges.
+idempotent recovery. The consumer now uses published Roost 0.2.0 through the
+dependency update in #1735; older SQLite containers are not migrated or reset.
 
 ## Decision and scope
 
@@ -35,9 +35,10 @@ requires the coordinated release and dependency update before this consumer merg
 - This replaces part of the earlier
   [write-amplification decision](2026-10-16-roost-storage-write-amplification.md),
   not the guarded native streaming path, immutable human input or branch saga.
-- Do not change deployment, clean history, truncate WAL, merge PRs or publish
-  packages. Collect the Roost fixes into one later release, update Lody's shared
-  dependency catalog once, then rebase and repeat checks for dependent PRs.
+- Consume the coordinated Roost 0.2.0 release through the dependency update
+  in [#1735](https://github.com/LodyAI/Lody/pull/1735), then merge #1737 after it.
+  Native 0.2.0 requires SQLite container v4. Do not deploy, migrate/reset databases,
+  clean history, truncate WAL, merge PRs or publish packages in this change.
 
 ## Acceptance and failure boundaries
 
@@ -53,34 +54,31 @@ Journal preparation/apply failures remain SDK-owned, with no Lody recovery loop.
 
 The consumer implementation is [Lody #1737](https://github.com/LodyAI/Lody/pull/1737);
 the SDK implementation is [Roost #16](https://github.com/loro-dev/roost/pull/16).
-Package pins remain unchanged until the consolidated release; checks below use
-its locally packed build, not the currently published API.
+The branch is rebased on [#1735](https://github.com/LodyAI/Lody/pull/1735), using
+published SDK and Native 0.2.0 with exact lockfile versions and no local override.
+The earlier SDK 0.1.3 `TS2554` release gate is resolved by this dependency update.
 
-- The two changed CLI test files pass **82 tests** on published native SQLite 3
-  and **82** on native SQLite 4 with the separate
-  [namespace companion #1735](https://github.com/LodyAI/Lody/pull/1735) SQL test patch.
-  Cases cover legacy-state reopen/conversion, a committed first-state reply lost
-  before projection, continued output, permissions, branch/input contracts,
-  Unicode, field removal, invalid bases/paths and own JSON keys.
-- Paired synthetic runs use Lody `7d6695c` with published SDK 0.1.3 versus this
+- The two owning CLI test files pass **82 tests** on published Native SQLite v4.
+  Cases cover legacy whole-message state reopen/conversion, a committed first-state
+  reply lost before projection, continued output, permissions, branch/input
+  contracts, Unicode, field removal, invalid bases/paths and own JSON keys.
+- Earlier paired synthetic runs compare Lody `7d6695c` with SDK 0.1.3 against this
   change with the proposed SDK. Both retain **37 updates** after sealing a
-  442,368-byte unchanged body and applying 32 corrections. Update value bytes
-  fall **889,477 → 4,113 (99.54%)**; the largest update falls **443,344 → 488**.
-  The initial primary, outbox copy, indexes, WAL and stream transport framing are
-  outside this measurement. Both runs preserve old frames, primary immutability,
-  logical content and reopen after the lost reply. The checked-in regression
-  enforces bounded growth, not exact protocol byte counts.
-- With the proposed SDK artifact, formatting, all package typechecks, ordinary
-  typed lint, Effect lint, i18n and all repository boundary checks pass. The full
-  CLI suite passes **4,428 tests, 2 existing skips**; the final focused rerun passes
-  **82 tests**. Documentation check reports no errors or registered stale topics.
-- [Hosted CI](https://github.com/LodyAI/Lody/actions/runs/39295941789) test jobs pass
-  (CLI, components shards, remaining packages, conversation browser and signature
-  matrix). Static checks and the
-  [desktop build](https://github.com/LodyAI/Lody/actions/runs/39295941691) stop with
-  `TS2554` at the three new batch calls: published SDK 0.1.3 accepts two arguments.
-  Desktop smoke itself therefore has not run. These are release dependencies;
-  update the catalog after the coordinated Roost release and repeat standard CI.
-- The broad local `test:ci` invocation was stopped after CLI acceptance when the
-  hosted test jobs had passed, freeing the benchmark machine. Do not claim a clean
-  end-to-end local `pnpm check` run. No deployment or package publication occurred.
+  442,368-byte unchanged body and applying 32 corrections. Update value bytes fall
+  **889,477 → 4,113 (99.54%)**; the largest update falls **443,344 → 488**. The initial
+  primary, outbox copy, indexes, WAL and stream transport framing are excluded.
+  Both preserve old frames, primary immutability, logical content and reopen after
+  the lost reply. The current regression enforces bounded growth, not exact wire bytes.
+- Complete `pnpm check` passes with the published packages, including all package
+  typechecks, ordinary typed lint, Effect lint, repository tests, i18n and boundaries.
+  The full CLI suite passes **4,435 tests with four existing skips**. Repository
+  formatting and documentation checks pass with no documentation errors.
+- The public CLI builds at a **2 GiB heap limit** and passes its published-bundle
+  runtime/Worker probes. Desktop CLI staging succeeds; the actual Electron runtime
+  writes, verifies and reopens signed SQLite history through the staged Native
+  Worker. The four staging tests cover all six target selections with synthetic
+  foreign bindings and execute the installed host binding. This is not a local GUI
+  E2E run or execution of foreign-platform binaries; standard PR CI is rerun.
+
+Merge #1735 before #1737. No application database, deployment or package publication
+was changed during this acceptance.
