@@ -348,6 +348,25 @@ describe('cloud E2EE creation ownership', () => {
     await expect(port.create(request)).resolves.toEqual(committed);
   });
 
+  it('returns a committed creation when only the workspace list refresh fails', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const port = createCloudE2eeWorkspaces({
+        session: authenticated,
+        prepareCreation: async () => ({ ...original }),
+        remote,
+        refreshWorkspaces: async () => {
+          throw new Error('listing unavailable');
+        },
+      });
+      await port.prepareCreation!(original);
+      await expect(port.create(request)).resolves.toEqual(receipt);
+      expect(warn).toHaveBeenCalled();
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
   it('does not publish preparation that settles after account ownership changes', async () => {
     let settle!: (value: E2eeWorkspacePrepared) => void;
     const pending = new Promise<E2eeWorkspacePrepared>((resolve) => {

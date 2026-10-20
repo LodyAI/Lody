@@ -7,6 +7,7 @@ import { E2eeWorkspaceCreationOption } from '@/components/pages/e2ee-workspace-c
 import {
   createPreparedE2eeWorkspace,
   e2eeCreationChoice,
+  e2eeCreationErrorCode,
   isE2eeCreationNotEnabled,
 } from '@/lib/create-e2ee-workspace';
 import {
@@ -308,7 +309,8 @@ function CreateWorkspaceAuthed({
       !organizationsLoading &&
       (!organizations || organizations.length === 0)
     ) {
-      setError(null);
+      // Only the stale "no workspace to open" message; a creation failure stays visible.
+      setError((current) => (current === missingSlugMessage ? null : current));
     }
   }, [
     activeOrganization,
@@ -494,14 +496,27 @@ function CreateWorkspaceAuthed({
     } catch (err) {
       if (accountRef.current !== accountId) return;
       console.error('Failed to create workspace:', err);
+      // A refusal that proves nothing was reserved removed the saved request:
+      // unlock the fields (keeping what was typed) instead of retrying it forever.
+      let removed = false;
+      if (useEncryption && currentPending) {
+        try {
+          const requests = listPendingE2eeWorkspaces(localStorage, accountId);
+          setPendingRequests(requests);
+          removed = !requests.some((request) => request.requestId === currentPending.requestId);
+          if (removed) setPendingCreation(null);
+        } catch {
+          // Storage stays authoritative; the next page load reads it again.
+        }
+      }
       setError(
-        t(
-          !useEncryption
-            ? 'organization.createFailed'
-            : isE2eeCreationNotEnabled(err)
-              ? 'e2ee.create.notEnabled'
-              : 'e2ee.create.failed'
-        )
+        !useEncryption
+          ? t('organization.createFailed')
+          : isE2eeCreationNotEnabled(err)
+            ? t('e2ee.create.notEnabled')
+            : removed
+              ? t('e2ee.create.requestRemoved', { code: e2eeCreationErrorCode(err) })
+              : t('e2ee.create.failed')
       );
       captureCreateFailed('create_rejected', startMs);
     } finally {
@@ -558,6 +573,15 @@ function CreateWorkspaceAuthed({
               setEncrypted(true);
               setError(null);
             }}
+            onSetAside={
+              !creationEnabled && currentPending
+                ? () => {
+                    setPendingCreation(null);
+                    setEncrypted(false);
+                    setError(null);
+                  }
+                : undefined
+            }
             onNewRequest={
               creationEnabled && currentPending
                 ? () => {

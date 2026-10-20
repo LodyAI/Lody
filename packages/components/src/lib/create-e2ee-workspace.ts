@@ -6,7 +6,33 @@ import {
   type PendingE2eeWorkspace,
 } from './e2ee-workspace-storage';
 
-/** Reconcile the durable intent. Any unknown outcome leaves it available for retry. */
+/**
+ * Server refusals that prove this request ID holds no reservation and can never
+ * succeed as saved. The server raises each only after it found no earlier
+ * reservation for the ID, in the same transaction (or, for deleted, behind a
+ * permanent tombstone), so dropping the saved request loses nothing.
+ */
+const UNRESERVED_REFUSALS = new Set([
+  'e2ee_creation_not_enabled',
+  'e2ee_creation_deleted',
+  'e2ee_genesis_already_bound',
+  'workspace_slug_taken',
+]);
+
+/** The server error code of a Convex error, if any. */
+export function e2eeCreationErrorCode(error: unknown): string | undefined {
+  if (typeof error !== 'object' || error === null || !('data' in error)) return undefined;
+  const data = (error as { data?: unknown }).data;
+  return typeof data === 'object' &&
+    data !== null &&
+    'code' in data &&
+    typeof data.code === 'string'
+    ? data.code
+    : undefined;
+}
+
+/** Reconcile the durable intent. Any unknown outcome leaves it available for retry;
+ * a refusal that proves nothing was reserved removes it and rethrows the refusal. */
 export async function createPreparedE2eeWorkspace(
   port: PlatformE2eeWorkspaces,
   storage: Storage,
@@ -21,14 +47,22 @@ export async function createPreparedE2eeWorkspace(
     prepared.slug !== pending.slug
   )
     throw new Error('Creation intent changed');
-  const result = await port.create({
-    accountId: pending.accountId,
-    name: pending.name,
-    slug: pending.slug,
-    requestId: pending.requestId,
-    genesisRecordHex: prepared.genesisRecordHex,
-    developerMode: true,
-  });
+  let result: Awaited<ReturnType<PlatformE2eeWorkspaces['create']>>;
+  try {
+    result = await port.create({
+      accountId: pending.accountId,
+      name: pending.name,
+      slug: pending.slug,
+      requestId: pending.requestId,
+      genesisRecordHex: prepared.genesisRecordHex,
+      developerMode: true,
+    });
+  } catch (error) {
+    const code = e2eeCreationErrorCode(error);
+    if (code !== undefined && UNRESERVED_REFUSALS.has(code))
+      clearPendingE2eeWorkspace(storage, pending);
+    throw error;
+  }
   if (
     result.contentMode !== 'e2ee' ||
     result.contentModeVersion !== 1 ||
@@ -60,15 +94,8 @@ export function e2eeCreationChoice(input: {
 }
 
 /** The server's release switch has not enabled new encrypted workspaces for this
- * account. The saved request is kept: an earlier attempt with the same request ID
- * may still have reserved it, and a later retry reconciles once creation is enabled. */
+ * account. The server checks it only for a request ID without a reservation, so
+ * the refused request was never reserved and is no longer saved. */
 export function isE2eeCreationNotEnabled(error: unknown): boolean {
-  if (typeof error !== 'object' || error === null || !('data' in error)) return false;
-  const data = (error as { data?: unknown }).data;
-  return (
-    typeof data === 'object' &&
-    data !== null &&
-    'code' in data &&
-    data.code === 'e2ee_creation_not_enabled'
-  );
+  return e2eeCreationErrorCode(error) === 'e2ee_creation_not_enabled';
 }

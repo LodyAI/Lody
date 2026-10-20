@@ -93,9 +93,13 @@ export function createCloudE2eeWorkspaces(input: {
       ) {
         throw new Error('e2ee_creation_receipt_mismatch');
       }
-      // Listing is a projection. Failure must not discard a committed creation;
-      // retry keeps the original and reconciles the same server receipt.
-      await input.refreshWorkspaces();
+      // Listing is a projection: its failure must not turn a committed, validated
+      // creation into an error. The next listing refresh shows the workspace.
+      try {
+        await input.refreshWorkspaces();
+      } catch (error) {
+        console.warn('Encrypted workspace created; refreshing the workspace list failed', error);
+      }
       assertAccount(owner);
       return result;
     },

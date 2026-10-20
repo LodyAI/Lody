@@ -35,6 +35,8 @@ export function E2eeWorkspaceCreationOption(props: {
   selectedRequestId?: string | null;
   onSelectRequest?: (requestId: string) => void;
   onNewRequest?: () => void;
+  /** Stop resuming the selected saved request (kept in the list) and edit freely. */
+  onSetAside?: () => void;
 }) {
   const { t } = useTranslation();
   return (
@@ -72,6 +74,11 @@ export function E2eeWorkspaceCreationOption(props: {
           {props.onNewRequest && (
             <Button variant="ghost" disabled={props.disabled} onClick={props.onNewRequest}>
               {t('e2ee.create.newRequest')}
+            </Button>
+          )}
+          {props.onSetAside && (
+            <Button variant="ghost" disabled={props.disabled} onClick={props.onSetAside}>
+              {t('e2ee.create.setAside')}
             </Button>
           )}
         </div>

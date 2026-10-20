@@ -17,6 +17,7 @@ import {
 import {
   createPreparedE2eeWorkspace,
   e2eeCreationChoice,
+  e2eeCreationErrorCode,
   isE2eeCreationNotEnabled,
 } from '../src/lib/create-e2ee-workspace';
 import {
@@ -659,22 +660,17 @@ describe('encrypted workspace creation gate', () => {
   });
 });
 
-describe('encrypted workspace server release switch', () => {
-  it('keeps the saved request when the server has not enabled creation', async () => {
-    const storage = new MemoryStorage();
-    const pending = { accountId: 'account', requestId: 'request-1', name: 'n', slug: 's' };
-    savePendingE2eeWorkspace(storage, pending);
-    const refusal = Object.assign(new Error('not enabled'), {
-      data: { code: 'e2ee_creation_not_enabled' },
-    });
-    const port = {
+describe('saved creation requests after a server refusal', () => {
+  const pending = { accountId: 'account', requestId: 'request-1', name: 'n', slug: 's' };
+  const refusing = (failure: unknown) =>
+    ({
       prepareCreation: async () => ({
         ...pending,
         genesisRecordHex: 'aa',
         genesisHashHex: 'bb'.repeat(32),
       }),
       create: async () => {
-        throw refusal;
+        throw failure;
       },
       describe: async () => {
         throw new Error('unused');
@@ -682,12 +678,42 @@ describe('encrypted workspace server release switch', () => {
       history: async () => {
         throw new Error('unused');
       },
-    } satisfies PlatformE2eeWorkspaces;
-    const error = await createPreparedE2eeWorkspace(port, storage, pending).catch(
-      (reason: unknown) => reason
+    }) satisfies PlatformE2eeWorkspaces;
+  const refusal = (code: string) => Object.assign(new Error(code), { data: { code } });
+
+  it.each([
+    'e2ee_creation_not_enabled',
+    'e2ee_creation_deleted',
+    'e2ee_genesis_already_bound',
+    'workspace_slug_taken',
+  ])(
+    'removes a request the server proved unreserved (%s) and rethrows the refusal',
+    async (code) => {
+      const storage = new MemoryStorage();
+      const other = { ...pending, requestId: 'request-2', slug: 'other' };
+      savePendingE2eeWorkspace(storage, pending);
+      savePendingE2eeWorkspace(storage, other);
+      const error = await createPreparedE2eeWorkspace(
+        refusing(refusal(code)),
+        storage,
+        pending
+      ).catch((reason: unknown) => reason);
+      expect(e2eeCreationErrorCode(error)).toBe(code);
+      expect(isE2eeCreationNotEnabled(error)).toBe(code === 'e2ee_creation_not_enabled');
+      expect(listPendingE2eeWorkspaces(storage, 'account')).toEqual([other]);
+    }
+  );
+
+  it.each([
+    ['an unknown outcome', new Error('reply lost')],
+    ['a reserved conflicting request', refusal('e2ee_creation_conflict')],
+    ['a code only in the message', new Error('e2ee_creation_not_enabled')],
+  ])('keeps the request after %s', async (_label, failure) => {
+    const storage = new MemoryStorage();
+    savePendingE2eeWorkspace(storage, pending);
+    await expect(createPreparedE2eeWorkspace(refusing(failure), storage, pending)).rejects.toBe(
+      failure
     );
-    expect(isE2eeCreationNotEnabled(error)).toBe(true);
-    expect(isE2eeCreationNotEnabled(new Error('e2ee_creation_not_enabled'))).toBe(false);
     expect(readPendingE2eeWorkspace(storage, 'account')).toEqual(pending);
   });
 });

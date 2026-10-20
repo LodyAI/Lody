@@ -1,5 +1,5 @@
 {
-  "e2ee.create.notEnabled": "Encrypted workspace creation is not enabled for this account yet. The saved request is kept and can be resumed once it is enabled.",
+  "e2ee.create.notEnabled": "Encrypted workspace creation is not enabled for this account yet. The server did not reserve this request, so it was removed from this device; you can create a regular workspace instead.",
   "e2ee.mark.list": "Encrypted workspace",
   "e2ee.control.badge": "Encrypted workspace · developer preview",
   "e2ee.control.badgePinned": "Identity matches the record this device saved at creation",
@@ -29,6 +29,8 @@
   "e2ee.control.continuityPending": "Continue loading to check continuity with the last record previously verified on this device.",
   "e2ee.create.savedRequests": "Saved creation requests",
   "e2ee.create.newRequest": "Start another request (keep saved requests)",
+  "e2ee.create.setAside": "Set aside and create a regular workspace",
+  "e2ee.create.requestRemoved": "This saved request can no longer be created ({{code}}), so it was removed from this device. Start a new request with another name or handle, or create a regular workspace.",
   "settings.beta.e2eeWorkspace": "Encrypted workspace creation",
   "settings.beta.e2eeWorkspaceHelper": "Create a workspace with a device identity and signed permission history. Conversation sync and execution are not available yet. Existing workspaces are unchanged.",
   "e2ee.mode.loading": "Checking workspace encryption mode…",
