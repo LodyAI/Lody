@@ -2,6 +2,7 @@
 
 Status: implemented
 Translation: current
+PR: [#1769](https://github.com/LodyAI/Lody/pull/1769)
 
 [English](2026-10-21-usage-range-transition.md)
 
