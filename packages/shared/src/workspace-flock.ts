@@ -318,10 +318,3 @@ export const getProjectMcpDefaults = (
 const isProjectMcpDefaultRow = (
   row: WorkspaceFlockRow
 ): row is WorkspaceFlockProjectMcpDefaultRow => row.key[0] === 'projectMcpDefault';
-
-export const writeProjectMcpDefaultToFlock = (
-  flock: WorkspaceFlockWritableFlock,
-  projectKey: string,
-  preference: ProjectMcpDefault
-): boolean =>
-  writeWorkspaceFlockRow(flock, workspaceFlockKeys.projectMcpDefault(projectKey), preference);

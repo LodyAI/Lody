@@ -14,7 +14,7 @@ import {
 } from '@lody/shared';
 import { runtimeAtom, type WorkspaceRuntime } from '../src/atoms/runtime';
 import { ProjectDefaultMcpTab } from '../src/components/settings/project-default-mcp-tab';
-import { useProjectMcpDefault } from '../src/hooks/use-project-mcp-default';
+import { putProjectMcpDefault } from '../src/lib/workspace-catalog-write';
 import {
   useSessionMcpSelection,
   type SessionMcpDefaultsTarget,
@@ -374,23 +374,40 @@ describe('project Default MCP tab', () => {
     expect(container.textContent).toContain('Only the owner');
 
     // A caller that bypasses the disabled switch is refused by the write itself.
-    let model!: ReturnType<typeof useProjectMcpDefault>;
-    function Probe() {
-      model = useProjectMcpDefault(target, teammate);
-      return null;
-    }
-    act(() =>
-      root.render(
-        <Provider store={store}>
-          <Probe />
-        </Provider>
-      )
-    );
-    await settle();
-    await expect(model.setServerEnabled('search' as McpServerId, true)).rejects.toMatchObject({
-      code: 'forbidden',
-    });
+    await expect(
+      putProjectMcpDefault(workspace.runtime, target, teammate, ['search' as McpServerId])
+    ).rejects.toMatchObject({ code: 'forbidden' });
     expect(workspace.rowOf(workspaceFlockKeys.projectMcpDefault(keyOf(projectA)))).toBeUndefined();
+  });
+
+  it('keeps the saved selection after a failed write and lets the next edit succeed', async () => {
+    const workspace = createWorkspace('workspace-1', catalogRows());
+    const put = workspace.runtime.writer.flockRowPut;
+    let failWrite = true;
+    workspace.runtime.writer.flockRowPut = async (...args) => {
+      if (failWrite) throw new Error('Synthetic storage failure');
+      return put(...args);
+    };
+    store.set(runtimeAtom, workspace.runtime);
+    workspace.open();
+    renderTab(owner);
+    await settle();
+    const search = () => switches().find(({ label }) => label?.includes('Search'))!;
+    await act(async () => search().element.click());
+    await settle();
+    expect(search().checked).toBe(false);
+    expect(search().disabled).toBe(false);
+    expect(container.textContent).toContain('The change wasn’t saved');
+    expect(workspace.rowOf(workspaceFlockKeys.projectMcpDefault(keyOf(projectA)))).toBeUndefined();
+
+    failWrite = false;
+    await act(async () => search().element.click());
+    await settle();
+    expect(search().checked).toBe(true);
+    expect(container.textContent).not.toContain('The change wasn’t saved');
+    expect(workspace.rowOf(workspaceFlockKeys.projectMcpDefault(keyOf(projectA)))).toEqual({
+      ids: ['db', 'files', 'search'],
+    });
   });
 
   it('points an empty catalog at MCP management', async () => {

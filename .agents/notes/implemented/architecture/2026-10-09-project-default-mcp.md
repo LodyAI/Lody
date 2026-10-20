@@ -85,3 +85,26 @@ settings retain their existing layout. A failed catalog open retries after all
 room consumers release; a loaded local snapshot remains usable offline.
 No additional project policy is resolved at ACP startup, and Role rows do not gain
 MCP selections.
+
+## Ablation of the settings adapter
+
+Compared with `b3036abdd`, remove one mechanism at a time and run the existing
+behavior suites. The settings hook had one production consumer; its memoized
+values were passed through a freshly allocated model and callback to a non-memoized
+view, with no identity-sensitive consumer.
+
+| Experiment | Result | Decision |
+| --- | --- | --- |
+| Baseline selection/room/writer/input suites | 83 passed | Comparison baseline |
+| Remove hook model/status exports and memo wrappers | 22 passed | Keep removal |
+| Remove the single-consumer hook and model adapter | 22 passed | Keep removal; Tab owns its edit state |
+| Replace two save flags and catch/rethrow with one save state and one handler | 23 passed | Keep; failed-write/retry scenario passed before and after |
+| Remove exported project-row write helper with no production consumer | 22 shared + 120 CLI passed | Keep; fixtures seed Flock directly, authorized UI writer unchanged |
+| Temporarily remove composer readiness guard | 3 failed, 6 passed | Restore guard |
+
+Production code shrank by 70 lines and one module; the final UI suites passed 84 tests.
+The direct unauthorized-write assertion now uses the real writer rather than a
+probe of the deleted hook. No behavioral test was removed; failed-save recovery
+coverage was added. Permissions, catalog ownership, composer scope isolation and
+click-time snapshots remain unchanged. These experiments establish behavior under
+the tested cases, not a packaged-desktop or performance guarantee.

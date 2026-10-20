@@ -26,7 +26,7 @@ import {
   getWorkspaceFlockDocId,
   getProjectMcpKey,
   writeWorkspaceMcpServerToFlock,
-  writeProjectMcpDefaultToFlock,
+  workspaceFlockKeys,
   ACP_CAPABILITY_CACHE_VERSION,
   getBuiltinRuntimeOverrideSourceVersionSuffix,
   getSessionRoomId,
@@ -2362,9 +2362,10 @@ describe('MCP selection at turn authoring', () => {
           updatedAt: 1,
         });
       }
-      writeProjectMcpDefaultToFlock(handle.flock, key, {
+      handle.flock.set(workspaceFlockKeys.projectMcpDefault(key), {
         ids: ['project' as import('@lody/shared').McpServerId],
       });
+      handle.flock.commit();
       const manager = {
         repo,
         syncFlockDocOrThrow: async () => {
@@ -2386,7 +2387,8 @@ describe('MCP selection at turn authoring', () => {
       };
       const frozen = await resolveEffectiveSessionCreateDispatchConfig(args);
       expect(frozen.mcpServerIds).toEqual(['project']);
-      writeProjectMcpDefaultToFlock(handle.flock, key, { ids: [] });
+      handle.flock.set(workspaceFlockKeys.projectMcpDefault(key), { ids: [] });
+      handle.flock.commit();
       expect(
         (await resolveEffectiveSessionCreateDispatchConfig({ ...args, dispatchConfig: frozen }))
           .mcpServerIds

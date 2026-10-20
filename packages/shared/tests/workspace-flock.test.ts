@@ -5,7 +5,6 @@ import type { AgentConfigId, AgentRoleId, MachineId, McpServerId, WorkspaceId } 
 import {
   applyWorkspaceFlockRowEvents,
   getProjectMcpDefaults,
-  writeProjectMcpDefaultToFlock,
   deleteWorkspaceAgentRoleFromFlock,
   deleteWorkspaceMcpServerFromFlock,
   listWorkspaceAgentRoles,
@@ -220,15 +219,15 @@ describe('workspace Flock helpers', () => {
 });
 
 describe('project MCP preferences', () => {
-  it('persists replacement selections and explicit empty rows without changing catalog entries', () => {
+  it('reads replacement selections and explicit empty rows without changing catalog entries', () => {
     const flock = new FakeWorkspaceFlock();
     const key = getProjectMcpKey({ kind: 'github', repoFullName: 'Example/Repo', branch: 'main' })!;
     writeWorkspaceMcpServerToFlock(flock, entry('a'));
-    writeProjectMcpDefaultToFlock(flock, key, { ids: [id('a'), id('a')] });
+    flock.set(workspaceFlockKeys.projectMcpDefault(key), { ids: [id('a'), id('a')] });
     expect(getProjectMcpDefaults(readWorkspaceFlockRowsFromFlock(flock))[key]).toEqual({
       ids: ['a'],
     });
-    writeProjectMcpDefaultToFlock(flock, key, { ids: [] });
+    flock.set(workspaceFlockKeys.projectMcpDefault(key), { ids: [] });
     const rows = readWorkspaceFlockRowsFromFlock(flock);
     expect(getProjectMcpDefaults(rows)[key]).toEqual({ ids: [] });
     expect(listWorkspaceMcpServers(rows)).toEqual([entry('a')]);
@@ -247,7 +246,7 @@ describe('project MCP preferences', () => {
     expect(parseWorkspaceFlockRow(['projectMcpDefault', key], {})).toBeUndefined();
     const flock = new FakeWorkspaceFlock();
     writeWorkspaceMcpServerToFlock(flock, entry('a'));
-    writeProjectMcpDefaultToFlock(flock, key, { ids: [] });
+    flock.set(workspaceFlockKeys.projectMcpDefault(key), { ids: [] });
     const rows = applyWorkspaceFlockRowEvents(readWorkspaceFlockRowsFromFlock(flock), [
       { key: ['futureFamily', 'unknown'], value: {} },
     ]);

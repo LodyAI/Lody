@@ -1,3 +1,7 @@
+import { useState } from 'react';
+import { useAtomValue } from 'jotai';
+import { activeWorkspaceRuntimeAtom } from '@/atoms/runtime';
+import { useWorkspaceCatalog } from '@/hooks/use-workspace-catalog';
 import { useTranslation } from 'react-i18next';
 import * as stylex from '@stylexjs/stylex';
 import { Button } from '@lody/ui/button';
@@ -5,12 +9,13 @@ import { Spinner } from '@lody/ui/spinner';
 import { Switch } from '@lody/ui/switch';
 import { colors } from '@lody/ui/tokens/colors.stylex';
 import { space, text as uiText } from '@lody/ui/tokens/scales.stylex';
-import type { McpServerId, WorkspaceMcpServerMeta } from '@lody/shared';
-import { useProjectMcpDefault } from '@/hooks/use-project-mcp-default';
-import type {
-  ProjectMcpDefaultAccess,
-  ProjectMcpDefaultManagement,
-  ProjectMcpDefaultTarget,
+import { getEffectiveDefaultMcpIds, getProjectMcpKey, type McpServerId, type WorkspaceMcpServerMeta } from '@lody/shared';
+import {
+  putProjectMcpDefault,
+  resolveProjectMcpDefaultManagement,
+  type ProjectMcpDefaultAccess,
+  type ProjectMcpDefaultManagement,
+  type ProjectMcpDefaultTarget,
 } from '@/lib/workspace-catalog-write';
 import { CompactRow, CompactSection, SettingsEmptyList } from './compact-layout';
 
@@ -172,20 +177,48 @@ export function ProjectDefaultMcpTab({
   access: ProjectMcpDefaultAccess;
   onManageMcp?: () => void;
 }) {
-  const model = useProjectMcpDefault(target, access);
+  const runtime = useAtomValue(activeWorkspaceRuntimeAtom);
+  const catalog = useWorkspaceCatalog();
+  const projectKey = getProjectMcpKey(target.project, target.machineId);
+  const preference = projectKey ? catalog.projectMcpDefaults[projectKey] : undefined;
+  const selectedIds = getEffectiveDefaultMcpIds(catalog.servers, preference);
+  const management = resolveProjectMcpDefaultManagement(target, access);
+  const [saveState, setSaveState] = useState<'idle' | 'saving' | 'failed'>('idle');
+
+  const setServerEnabled = async (id: McpServerId, enabled: boolean) => {
+      // The first edit writes the whole effective list with this change, so a
+      // project that customizes one switch keeps every other default it had.
+      const next = enabled
+        ? [...selectedIds.filter((selected) => selected !== id), id]
+        : selectedIds.filter((selected) => selected !== id);
+      setSaveState('saving');
+      try {
+        if (!runtime) throw new Error('Workspace runtime is unavailable');
+        await putProjectMcpDefault(runtime, target, access, next);
+        setSaveState('idle');
+      } catch (error) {
+        setSaveState('failed');
+        console.error('Failed to save project default MCP servers', error);
+      }
+  };
+
+  const status: 'ready' | 'failed' | 'loading' = catalog.loaded
+    ? 'ready'
+    : catalog.failed
+      ? 'failed'
+      : 'loading';
+
   return (
     <ProjectDefaultMcpView
-      status={model.status}
-      servers={model.servers}
-      selectedIds={model.selectedIds}
-      customized={model.customized}
-      readOnlyReason={model.management.kind === 'read_only' ? model.management.reason : null}
-      saving={model.saving}
-      saveFailed={model.saveFailed}
+      status={status}
+      servers={catalog.servers}
+      selectedIds={selectedIds}
+      customized={preference !== undefined}
+      readOnlyReason={management.kind === 'read_only' ? management.reason : null}
+      saving={saveState === 'saving'}
+      saveFailed={saveState === 'failed'}
       onToggle={(id, enabled) => {
-        model.setServerEnabled(id, enabled).catch((error: unknown) => {
-          console.error('Failed to save project default MCP servers', error);
-        });
+        void setServerEnabled(id, enabled);
       }}
       onManageMcp={onManageMcp}
     />
