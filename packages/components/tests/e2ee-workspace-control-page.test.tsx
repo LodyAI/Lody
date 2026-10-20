@@ -123,7 +123,6 @@ describe('encrypted workspace control page reading', () => {
   it('summarizes who did what and lists current members', () => {
     render({ history: history(vector.anchor) });
     const text = container!.textContent!;
-    expect(text).toContain('e2ee.control.status.verified');
     expect(text).toContain('e2ee.summary.transferOwner');
     const members = [
       ...container!.querySelectorAll('section[aria-label="e2ee.control.members"] li'),
@@ -158,15 +157,26 @@ describe('encrypted workspace control page reading', () => {
     expect(text).toContain('Jordan Lee');
   });
 
-  it('warns when the genesis is not pinned on this device', () => {
+  it('shows no verdict about the genesis pin, only the ledger', () => {
     render({ history: history(null) });
-    expect(container!.textContent).toContain('e2ee.control.status.unpinned');
+    const text = container!.textContent!;
+    expect(text).not.toMatch(/status\.|verifiedPinned|verifiedUnpinned/);
+    expect(container!.querySelector('[aria-label="e2ee.verify.codeLabel"]')).not.toBeNull();
+  });
+
+  it('keeps the explanation behind the help button', () => {
+    render({ history: history(vector.anchor) });
+    expect(container!.textContent).not.toContain('e2ee.verify.hint');
+    act(() =>
+      container!.querySelector<HTMLButtonElement>('button[aria-label="e2ee.control.help"]')!.click()
+    );
+    expect(container!.textContent).toContain('e2ee.verify.hint');
   });
 
   it('stops at an unverifiable capability and asks for an upgrade instead of offering more', () => {
     render({ history: full });
     expect(container!.querySelector('[role="alert"]')?.textContent).toContain(
-      'e2ee.control.status.upgrade'
+      'e2ee.control.upgradeStop'
     );
     expect(button('e2ee.control.loadMore')).toBeUndefined();
   });

@@ -1,14 +1,15 @@
 import * as stylex from '@stylexjs/stylex';
 import { Alert } from '@lody/ui/alert';
 import { Button } from '@lody/ui/button';
+import { Card } from '@lody/ui/card';
 import { Dialog } from '@lody/ui/dialog';
 import { colors, shadow } from '@lody/ui/tokens/colors.stylex';
-import { radius, space } from '@lody/ui/tokens/scales.stylex';
+import { radius, space, text as type } from '@lody/ui/tokens/scales.stylex';
 import jsQR from 'jsqr';
 import QRCode from 'qrcode';
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Copy, Info, ScanLine, ShieldAlert, ShieldCheck } from 'lucide-react';
+import { Copy, ScanLine } from 'lucide-react';
 import type { VerifiedLedgerHistory } from '@/lib/e2ee-ledger-history';
 import {
   compareVerificationCode,
@@ -20,83 +21,65 @@ import {
 
 const styles = stylex.create({
   card: {
-    display: 'grid',
-    gridTemplateColumns: {
-      default: 'auto minmax(0, 1fr)',
-      '@media (max-width: 640px)': 'minmax(0, 1fr)',
-    },
-    columnGap: space[6],
-    rowGap: space[4],
-    padding: space[6],
-    borderRadius: radius.large,
-    backgroundColor: colors.elevatedBackground,
-    boxShadow: shadow.raised,
-  },
-  codeColumn: {
     display: 'flex',
-    flexDirection: 'column',
     alignItems: 'center',
-    gap: space[3],
+    justifyContent: 'space-between',
+    gap: space[6],
+    flexDirection: { default: 'row', '@media (max-width: 520px)': 'column-reverse' },
   },
   qrTile: {
-    padding: space[3],
+    flexShrink: 0,
+    padding: space[2],
     borderRadius: radius.medium,
     // Scanners need dark modules on light ground in either theme.
     backgroundColor: '#ffffff',
-    boxShadow: shadow.inset,
     lineHeight: 0,
   },
-  hash: {
-    display: 'grid',
-    gridTemplateColumns: 'repeat(4, auto)',
-    columnGap: space[3],
-    rowGap: space[1],
-    fontFamily: 'monospace',
-    fontSize: '0.95em',
-    letterSpacing: '0.04em',
-    userSelect: 'text',
-  },
-  details: { display: 'flex', flexDirection: 'column', gap: space[3], minWidth: 0 },
-  verdict: { display: 'flex', alignItems: 'center', gap: space[2], fontWeight: 600 },
-  verified: { color: colors.success },
-  caution: { color: colors.warning },
-  version: { display: 'flex', alignItems: 'baseline', gap: space[2], flexWrap: 'wrap' },
-  versionNumber: { fontSize: '1.75em', fontWeight: 600, fontVariantNumeric: 'tabular-nums' },
-  muted: { color: colors.secondaryLabel, lineHeight: 1.6 },
-  footnote: { color: colors.tertiaryLabel, fontSize: '0.85em', lineHeight: 1.6 },
-  actions: { display: 'flex', flexWrap: 'wrap', gap: space[2], marginTop: 'auto' },
-  hint: {
-    gridColumn: '1 / -1',
+  body: { display: 'flex', flexDirection: 'column', gap: space[3], minWidth: 0 },
+  label: {
     display: 'flex',
-    gap: space[3],
-    padding: space[4],
-    borderRadius: radius.medium,
-    backgroundColor: colors.wellBackground,
+    alignItems: 'baseline',
+    gap: space[2],
+    fontSize: type.footnoteSize,
+    lineHeight: type.footnoteLeading,
     color: colors.secondaryLabel,
-    fontSize: '0.9em',
-    lineHeight: 1.7,
   },
-  hintIcon: { flexShrink: 0, marginTop: 3 },
-  hintBody: { display: 'flex', flexDirection: 'column', gap: space[2] },
-  hintTitle: { color: colors.label, fontWeight: 600 },
-  dialogBody: { display: 'flex', flexDirection: 'column', gap: space[4] },
+  version: { color: colors.tertiaryLabel },
+  code: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(4, max-content)',
+    columnGap: '0.9em',
+    rowGap: space[1],
+    fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+    fontSize: type.headlineSize,
+    lineHeight: type.bodyLeading,
+    letterSpacing: '0.02em',
+    fontVariantNumeric: 'tabular-nums',
+    color: colors.label,
+    userSelect: 'all',
+  },
+  actions: { display: 'flex', flexWrap: 'wrap', gap: space[2] },
+  footnote: { color: colors.tertiaryLabel, fontSize: type.footnoteSize },
+  dialogBody: { display: 'flex', flexDirection: 'column', gap: space[3] },
   video: {
     width: '100%',
     aspectRatio: '1',
     objectFit: 'cover',
     borderRadius: radius.medium,
-    backgroundColor: colors.wellBackground,
+    backgroundColor: colors.secondaryBackground,
   },
   textarea: {
+    boxSizing: 'border-box',
     width: '100%',
-    minHeight: 88,
+    minHeight: 80,
     padding: space[3],
     borderRadius: radius.medium,
     borderWidth: 0,
     backgroundColor: colors.wellBackground,
     boxShadow: shadow.inset,
     color: colors.label,
-    fontFamily: 'monospace',
+    fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+    fontSize: type.footnoteSize,
     resize: 'vertical',
   },
 });
@@ -250,8 +233,9 @@ function VerifyDialog(props: {
     setResult(scanned ? compareVerificationCode(props.history, scanned) : 'unreadable');
   };
   const { video, state } = useQrCamera(props.open && camera, (code) => {
+    // The verdict is what matters; the raw payload is not worth showing.
     setCamera(false);
-    setText(code);
+    setText('');
     check(code);
   });
   useEffect(() => {
@@ -303,15 +287,10 @@ function VerifyDialog(props: {
   );
 }
 
-/** The ledger's current version and its safety-number style verification code. */
-export function LedgerVerificationCard(props: {
-  history: VerifiedLedgerHistory;
-  stats: string;
-  actions: ReactNode;
-}) {
+/** The ledger's verification code: what members compare out of band. */
+export function LedgerVerificationCard(props: { history: VerifiedLedgerHistory }) {
   const { t } = useTranslation();
-  const { history } = props;
-  const code = useMemo(() => ledgerVerificationCode(history), [history]);
+  const code = useMemo(() => ledgerVerificationCode(props.history), [props.history]);
   const groups = groupHash(code.stateDigest);
   const [copied, setCopied] = useState(false);
   const [verifying, setVerifying] = useState(false);
@@ -326,65 +305,36 @@ export function LedgerVerificationCard(props: {
     }
   };
   return (
-    <section aria-label={t('e2ee.verify.title')} {...stylex.props(styles.card)}>
-      <div {...stylex.props(styles.codeColumn)}>
+    <Card.Root>
+      <section aria-label={t('e2ee.verify.title')} {...stylex.props(styles.card)}>
+        <div {...stylex.props(styles.body)}>
+          <div {...stylex.props(styles.label)}>
+            <span>{t('e2ee.verify.codeTitle')}</span>
+            <span {...stylex.props(styles.version)}>
+              {t('e2ee.verify.versionShort', { version: code.version })}
+            </span>
+          </div>
+          <div aria-label={t('e2ee.verify.codeLabel')} {...stylex.props(styles.code)}>
+            {groups.map((group, index) => (
+              <span key={index}>{group}</span>
+            ))}
+          </div>
+          <div {...stylex.props(styles.actions)}>
+            <Button size="small" variant="secondary" onClick={() => setVerifying(true)}>
+              <ScanLine size={14} aria-hidden="true" />
+              {t('e2ee.verify.scan')}
+            </Button>
+            <Button size="small" variant="ghost" onClick={() => void copy()}>
+              <Copy size={14} aria-hidden="true" />
+              {copied ? t('e2ee.verify.copied') : t('e2ee.verify.copy')}
+            </Button>
+          </div>
+        </div>
         <div {...stylex.props(styles.qrTile)}>
-          <LedgerQrCode payload={code.payload} size={176} label={t('e2ee.verify.qrLabel')} />
+          <LedgerQrCode payload={code.payload} size={128} label={t('e2ee.verify.qrLabel')} />
         </div>
-        <div aria-label={t('e2ee.verify.codeLabel')} {...stylex.props(styles.hash)}>
-          {groups.map((group, index) => (
-            <span key={index}>{group}</span>
-          ))}
-        </div>
-      </div>
-      <div {...stylex.props(styles.details)}>
-        <div
-          {...stylex.props(
-            styles.verdict,
-            history.locallyPinned ? styles.verified : styles.caution
-          )}
-        >
-          {history.locallyPinned ? (
-            <ShieldCheck size={18} aria-hidden="true" />
-          ) : (
-            <ShieldAlert size={18} aria-hidden="true" />
-          )}
-          {history.locallyPinned
-            ? t('e2ee.control.status.verified')
-            : t('e2ee.control.status.unpinned')}
-        </div>
-        <p {...stylex.props(styles.muted)}>
-          {history.locallyPinned
-            ? t('e2ee.control.verifiedPinned')
-            : t('e2ee.control.verifiedUnpinned')}
-        </p>
-        <div {...stylex.props(styles.version)}>
-          <span {...stylex.props(styles.muted)}>{t('e2ee.verify.version')}</span>
-          <span {...stylex.props(styles.versionNumber)}>{code.version}</span>
-          <span {...stylex.props(styles.muted)}>{props.stats}</span>
-        </div>
-        <p {...stylex.props(styles.footnote)}>{t('e2ee.control.freshness')}</p>
-        <div {...stylex.props(styles.actions)}>
-          <Button onClick={() => setVerifying(true)}>
-            <ScanLine size={16} aria-hidden="true" />
-            {t('e2ee.verify.scan')}
-          </Button>
-          <Button variant="secondary" onClick={() => void copy()}>
-            <Copy size={16} aria-hidden="true" />
-            {copied ? t('e2ee.verify.copied') : t('e2ee.verify.copy')}
-          </Button>
-          {props.actions}
-        </div>
-      </div>
-      <div {...stylex.props(styles.hint)}>
-        <Info size={16} aria-hidden="true" {...stylex.props(styles.hintIcon)} />
-        <div {...stylex.props(styles.hintBody)}>
-          <span {...stylex.props(styles.hintTitle)}>{t('e2ee.verify.hintTitle')}</span>
-          <span>{t('e2ee.verify.hint')}</span>
-          <span>{t('e2ee.verify.hintCaveat')}</span>
-        </div>
-      </div>
-      <VerifyDialog open={verifying} onOpenChange={setVerifying} history={history} />
-    </section>
+      </section>
+      <VerifyDialog open={verifying} onOpenChange={setVerifying} history={props.history} />
+    </Card.Root>
   );
 }
