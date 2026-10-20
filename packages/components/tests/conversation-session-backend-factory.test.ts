@@ -662,9 +662,8 @@ describe('createConversationSession backend seam', () => {
           state: 'ready',
           turn: history[119],
         });
-        // The new page is readable even while the previous coherent disk snapshot
-        // is retained during replacement; publishing a partial replica is unnecessary.
-        expect(await cache.getHead()).toMatchObject({ revision: 1, start: 80 });
+        // The complete latest window is durable without fetching the unknown prefix.
+        expect(await cache.getHead()).toMatchObject({ revision: 5, start: 80 });
       } finally {
         releaseDuplicate();
         await observation?.initialPage?.catch(() => {});
@@ -1207,169 +1206,92 @@ it('keeps cold-open supersession out of the UI failure path', async () => {
 });
 
 it.each([1, 2, 3])(
-  'retains the old coherent replica until an unknown checkpoint replacement at revision %i is complete',
+  'replaces an unknown checkpoint with a bounded window at revision %i and reads older pages on demand',
   async (revision) => {
-    Object.assign(globalThis, { indexedDB: new IDBFactory(), IDBKeyRange });
-    const sessionId = 'synthetic-reset' as SessionId;
-    const workspaceId = 'synthetic-workspace' as WorkspaceId;
-    const machineId = 'synthetic-machine' as MachineId;
-    const entries: SessionHistoryInput[] = Array.from({ length: 120 }, (_, position) => ({
-      id: `reset-${position}`,
-      role: 'user',
-      timestamp: '2026-10-16T00:00:00Z',
-      items: [{ type: 'text', text: 'old' }],
+    const h = await cachedRecoveryFixture(`window-reset-${revision}`, 120);
+    const timers = controlledRefreshTimers();
+    const latestStarted = Promise.withResolvers<void>();
+    const releaseLatest = Promise.withResolvers<void>();
+    const committed = Promise.withResolvers<void>();
+    const entries = h.entries.map((entry) => ({
+      ...entry,
+      items: [{ type: 'text' as const, text: 'new generation' }],
     }));
-    const cache = createRoostHistoryCache(
-      JSON.stringify(['local', workspaceId, machineId, sessionId])
-    );
-    await cache.acceptPage(
-      {
-        checkpoint: 'unknown-checkpoint',
-        startPosition: 0,
-        totalCount: 120,
-        rows: entries.map((entry, position) => createRoostDirectoryRow(position, entry as never)),
-        hasMoreOlder: false,
-        cursor: null,
-      },
-      entries,
-      1
-    );
-    entries[0]!.items = [{ type: 'text', text: 'new early' }];
-    entries[119]!.items = [{ type: 'text', text: 'new tail' }];
-    let olderStarted!: () => void;
-    const older = new Promise<void>((resolve) => {
-      olderStarted = resolve;
-    });
-    let releaseOlder!: () => void;
-    const holdOlder = new Promise<void>((resolve) => {
-      releaseOlder = resolve;
-    });
-    const unverifiedDelta = Promise.withResolvers<void>();
-    let ready!: () => void;
-    const replaced = new Promise<void>((resolve) => {
-      ready = resolve;
-    });
     const data = createLocalRoostSessionDataFactory({
       incremental: true,
-      workspaceId,
-      machineId,
+      workspaceId: h.workspaceId,
+      machineId: h.machineId,
       sendControl: async (request) => {
         if (request.type !== 'session/history-read') throw new Error('Unexpected write');
         const query = request.query;
         if (query.kind === 'readChanges')
-          return {
-            ok: true,
-            responses: [
-              {
-                type: 'session/history-read_response',
-                sessionId,
-                success: true,
-                result: { state: 'reset', checkpoint: `reset-${revision}` },
-                historyRevision: revision,
-                historyCount: 120,
-                historyChange: { kind: 'changed', ids: ['reset-119'] },
-              },
-            ],
-          };
-        if (query.kind === 'readTurn') {
-          unverifiedDelta.resolve();
-          return {
-            ok: true,
-            responses: [
-              {
-                type: 'session/history-read_response',
-                sessionId,
-                success: true,
-                result: {
-                  state: 'ready',
-                  turn: entries.find((entry) => entry.id === query.turnId),
-                },
-                historyRevision: revision,
-                historyCount: 120,
-                historyChange: { kind: 'changed', ids: ['reset-119'] },
-              },
-            ],
-          };
+          return h.reply(revision, { state: 'reset', checkpoint: `reset-${revision}` });
+        if (query.kind === 'readRange') {
+          expect(query.atCheckpoint).toBe(`reset-${revision}`);
+          return h.reply(
+            revision,
+            entries.slice(query.from, query.to).map((turn) => ({ state: 'ready', turn }))
+          );
         }
-        if (query.kind !== 'readLatestPage' && query.kind !== 'readOlderPage')
-          throw new Error('Unexpected full read');
-        if (query.kind === 'readOlderPage' && query.cursor === '80') {
-          olderStarted();
-          await holdOlder;
-        }
-        const end = query.kind === 'readLatestPage' ? 120 : Number(query.cursor);
-        const start = Math.max(0, end - query.limit);
-        const turns = entries.slice(start, end);
-        return {
-          ok: true,
-          responses: [
-            {
-              type: 'session/history-read_response',
-              sessionId,
-              success: true,
-              result: {
-                checkpoint: `reset-${revision}`,
-                startPosition: start,
-                totalCount: 120,
-                rows: turns.map((turn, offset) =>
-                  createRoostDirectoryRow(start + offset, turn as never)
-                ),
-                hasMoreOlder: start > 0,
-                cursor: start > 0 ? String(start) : null,
-              },
-              pageTurns: turns,
-              historyRevision: revision,
-              historyCount: 120,
-              historyChange: { kind: 'changed', ids: ['reset-119'] },
-            },
-          ],
-        };
+        if (query.kind !== 'readLatestPage') throw new Error('Recovery must not walk older pages');
+        latestStarted.resolve();
+        await releaseLatest.promise;
+        return h.reply(
+          revision,
+          {
+            checkpoint: `reset-${revision}`,
+            startPosition: 80,
+            totalCount: 120,
+            rows: entries
+              .slice(80)
+              .map((turn, offset) => createRoostDirectoryRow(80 + offset, turn)),
+            hasMoreOlder: true,
+            cursor: 'owner-80',
+          },
+          entries.slice(80)
+        );
       },
-    })({ sessionId, doc: new LoroDoc(), backendKind: 'roost' });
+    })({ sessionId: h.sessionId, doc: h.doc, backendKind: 'roost' });
     const observation = data.history.observe(() => {
-      void cache.getHead().then((head) => {
-        if (
-          head?.revision === revision &&
-          head.checkpoint === `reset-${revision}` &&
-          head.start === 0
-        )
-          ready();
+      void h.cache.getHead().then((head) => {
+        if (head?.checkpoint === `reset-${revision}`) committed.resolve();
       });
     });
     try {
       await observation.initial;
-      expect(
-        await Promise.race([
-          older.then(() => 'replacement'),
-          unverifiedDelta.promise.then(() => 'hint-delta'),
-        ])
-      ).toBe('replacement');
-      expect(await cache.getHead()).toMatchObject({
+      (await timers.next()).callback();
+      await latestStarted.promise;
+      expect(await h.cache.getHead()).toMatchObject({
         revision: 1,
-        checkpoint: 'unknown-checkpoint',
+        checkpoint: 'checkpoint-1',
         start: 0,
       });
-      expect((await cache.readRows(0, 1))?.[0]?.turn.items).toEqual([
-        { type: 'text', text: 'old' },
-      ]);
-      releaseOlder();
-      await replaced;
-      expect(await cache.getHead()).toMatchObject({
+      expect((await h.cache.readRows(0, 1))?.[0]?.turn).toEqual(h.entries[0]);
+      releaseLatest.resolve();
+      await committed.promise;
+      expect(await h.cache.getHead()).toMatchObject({
         revision,
         checkpoint: `reset-${revision}`,
-        start: 0,
+        start: 80,
       });
-      expect((await cache.readRows(0, 1))?.[0]?.turn.items).toEqual([
-        { type: 'text', text: 'new early' },
-      ]);
-      expect((await cache.readRows(119, 120))?.[0]?.turn.items).toEqual([
-        { type: 'text', text: 'new tail' },
-      ]);
+      expect(await h.cache.readRows(0, 1)).toBeUndefined();
+      expect((await h.cache.readRows(80, 120))?.map((row) => row.turn)).toEqual(entries.slice(80));
+      const latest = await data.history.readLatestDirectoryPage!(40);
+      const older = await data.history.readOlderDirectoryPage!(latest.cursor!, 40);
+      expect(older.rows.map((row) => row.turnId)).toEqual(
+        entries.slice(40, 80).map((entry) => entry.id)
+      );
+      expect(await data.history.readTurn(entries[40]!.id)).toMatchObject({
+        state: 'ready',
+        turn: entries[40],
+      });
+      expect(await h.cache.getHead()).toMatchObject({ start: 40, checkpoint: `reset-${revision}` });
     } finally {
-      releaseOlder();
+      releaseLatest.resolve();
       observation.unsubscribe();
       data.dispose?.();
-      cache.dispose();
+      h.cache.dispose();
+      timers.restore();
     }
   }
 );
@@ -1813,71 +1735,174 @@ it('adopts late owner capabilities and watches a quiet control document from the
   }
 });
 
-it.each(['turns', 'same-revision page', 'consecutive page', 'different checkpoint'])(
-  'invalidates the patch baseline after an unbound %s and restores only a complete snapshot',
+it.each(['turns', 'consecutive page'])(
+  'retains change coverage after an unbound %s and repairs it without replaying patches',
   async (write) => {
-    Object.assign(globalThis, { indexedDB: new IDBFactory(), IDBKeyRange });
-    const entries: SessionHistoryInput[] = ['prefix', 'tail'].map((id) => ({
-      id,
-      role: 'assistant',
-      timestamp: 'synthetic',
-      items: [{ type: 'text', text: 'base' }],
-    }));
-    const cache = createRoostHistoryCache('synthetic-checkpoint-binding');
-    const page = (turns: SessionHistoryInput[], startPosition: number, checkpoint?: string) => ({
-      startPosition,
+    const h = await cachedRecoveryFixture(`binding-${write}`, 2);
+    const tail = { ...h.entries[1]!, items: [{ type: 'text' as const, text: 'oldA' }] };
+    const page = (checkpoint?: string) => ({
+      startPosition: 1,
       totalCount: 2,
-      rows: turns.map((turn, offset) =>
-        createRoostDirectoryRow(startPosition + offset, turn as never)
-      ),
-      hasMoreOlder: startPosition > 0,
-      cursor: startPosition > 0 ? 'older' : null,
+      rows: [createRoostDirectoryRow(1, tail)],
+      hasMoreOlder: true,
+      cursor: 'older',
       checkpoint,
     });
-    const tail: SessionHistoryInput = { ...entries[1]!, items: [{ type: 'text', text: 'baseA' }] };
     try {
-      await cache.acceptPage(page(entries, 0, 'checkpoint-1'), entries, 1);
-      const prior = (await cache.getHead())!;
-      const revision = write === 'turns' || write === 'consecutive page' ? 2 : 1;
-      if (write === 'turns') await cache.updateTurns(revision, 2, [tail]);
-      else
-        await cache.acceptPage(
-          page([tail], 1, write === 'different checkpoint' ? 'checkpoint-2' : undefined),
-          [tail],
-          revision,
-          { kind: 'changed', ids: [tail.id] }
-        );
-      expect(await cache.getHead()).toMatchObject({ revision, checkpoint: undefined });
-      expect((await cache.readRows(0, 2))?.map((row) => row.turn)).toEqual([entries[0], tail]);
-      expect(
-        await cache.applyChanges((await cache.getHead())!, 3, 2, 'unbound-patch', undefined, [])
-      ).toBe(false);
-      // An in-flight patch must lose its compare-and-swap even if revision did not change.
-      expect(await cache.applyChanges(prior, 3, 2, 'stale-patch', undefined, [])).toBe(false);
-
-      // A protected tail alone cannot certify the untouched retained prefix.
-      await cache.acceptPage(page([tail], 1, 'checkpoint-2'), [tail], revision);
-      expect((await cache.getHead())?.checkpoint).toBeUndefined();
-      await cache.acceptPage(page([tail], 1, 'checkpoint-2'), [tail], revision, undefined, true);
-      expect((await cache.getHead())?.checkpoint).toBeUndefined();
-      await cache.acceptPage(
-        page([entries[0]!], 0, 'checkpoint-2'),
-        [entries[0]!],
-        revision,
-        undefined,
-        true
-      );
-      expect(await cache.getHead()).toMatchObject({
-        revision,
-        start: 0,
-        checkpoint: 'checkpoint-2',
+      const prior = (await h.cache.getHead())!;
+      if (write === 'turns') await h.cache.updateTurns(2, 2, [tail]);
+      else await h.cache.acceptPage(page(), [tail], 2, { kind: 'changed', ids: [tail.id] });
+      const unbound = (await h.cache.getHead())!;
+      expect(unbound).toMatchObject({
+        revision: 2,
+        checkpoint: undefined,
+        recoveryCheckpoint: 'checkpoint-1',
       });
-      expect((await cache.readRows(0, 2))?.map((row) => row.turn)).toEqual([entries[0], tail]);
+      expect((await h.cache.readRows(0, 2))?.map((row) => row.turn)).toEqual([h.entries[0], tail]);
+      expect(await h.cache.applyChanges(unbound, 3, 2, 'unbound-patch', undefined, [])).toBe(false);
+      expect(await h.cache.applyChanges(prior, 3, 2, 'stale-patch', undefined, [])).toBe(false);
+      await h.cache.acceptPage(page('checkpoint-2'), [tail], 2);
+      expect(await h.cache.getHead()).toEqual(unbound);
+      const target = { ...tail, items: [{ type: 'text' as const, text: 'oldAB' }] };
+      expect(
+        await h.cache.applyChanges(
+          unbound,
+          3,
+          2,
+          'checkpoint-3',
+          undefined,
+          [{ position: 1, turn: target }],
+          true
+        )
+      ).toBe(true);
+      expect(await h.cache.getHead()).toMatchObject({
+        checkpoint: 'checkpoint-3',
+        recoveryCheckpoint: undefined,
+      });
+      expect((await h.cache.readRows(0, 2))?.map((row) => row.turn)).toEqual([
+        h.entries[0],
+        target,
+      ]);
     } finally {
-      cache.dispose();
+      h.cache.dispose();
     }
   }
 );
+
+it.each([
+  [undefined, 1],
+  ['different-checkpoint', 1],
+  ['different-checkpoint', 2],
+  ['different-checkpoint', 5],
+  [undefined, 5],
+] as const)(
+  'keeps the verified prefix when a partial page has checkpoint %s at revision %i',
+  async (checkpoint, revision) => {
+    const h = await cachedRecoveryFixture('late-page-binding', 120);
+    const prior = (await h.cache.getHead())!;
+    const tail = { ...h.entries[119]!, items: [{ type: 'text' as const, text: 'unbound page' }] };
+    try {
+      await h.cache.acceptPage(
+        {
+          startPosition: 119,
+          totalCount: 120,
+          rows: [createRoostDirectoryRow(119, tail)],
+          hasMoreOlder: true,
+          cursor: 'older',
+          checkpoint,
+        },
+        [tail],
+        revision
+      );
+      expect(await h.cache.getHead()).toEqual(prior);
+      expect((await h.cache.readRows(119, 120))?.[0]?.turn).toEqual(h.entries[119]);
+      const target = { ...tail, items: [{ type: 'text' as const, text: 'verified next' }] };
+      expect(
+        await h.cache.applyChanges(prior, 2, 120, 'checkpoint-2', undefined, [
+          { position: 119, turn: target },
+        ])
+      ).toBe(true);
+      expect((await h.cache.readRows(119, 120))?.[0]?.turn).toEqual(target);
+    } finally {
+      h.cache.dispose();
+    }
+  }
+);
+
+it('uses complete bodies to repair an unbound window, then resumes patches from the repaired base', async () => {
+  const h = await cachedRecoveryFixture('repair-then-patch', 120);
+  const tail = { ...h.entries[119]!, items: [{ type: 'text' as const, text: 'oldA' }] };
+  await h.cache.updateTurns(2, 120, [tail]);
+  const timers = controlledRefreshTimers();
+  const repaired = Promise.withResolvers<void>();
+  const patched = Promise.withResolvers<void>();
+  const data = createLocalRoostSessionDataFactory({
+    incremental: true,
+    patches: true,
+    watch: true,
+    workspaceId: h.workspaceId,
+    machineId: h.machineId,
+    sendControl: async (request) => {
+      if (request.type !== 'session/history-read') throw new Error('Unexpected write');
+      const query = request.query;
+      if (query.kind === 'readChanges' && query.checkpoint === 'checkpoint-1') {
+        expect(query.withPatches).toBeUndefined();
+        return h.reply(2, {
+          state: 'ready',
+          checkpoint: 'checkpoint-2',
+          ids: [tail.id],
+          bodies: { changed: [tail], suffix: [] },
+        });
+      }
+      if (query.kind !== 'watchChanges') throw new Error('Unexpected page or body fetch');
+      expect(query).toMatchObject({ checkpoint: 'checkpoint-2', withPatches: true });
+      return h.reply(3, {
+        state: 'ready',
+        checkpoint: 'checkpoint-3',
+        ids: [tail.id],
+        bodies: { changed: [], suffix: [] },
+        patches: {
+          baseCheckpoint: 'checkpoint-2',
+          turns: [
+            {
+              turnId: tail.id,
+              operations: [
+                {
+                  kind: 'appendText',
+                  path: [{ key: 'items' }, { index: 0 }, { key: 'text' }],
+                  text: 'B',
+                },
+              ],
+            },
+          ],
+        },
+      });
+    },
+  })({ sessionId: h.sessionId, doc: h.doc, backendKind: 'roost' });
+  const observation = data.history.observe(() => {
+    void h.cache.getHead().then((head) => {
+      if (head?.checkpoint === 'checkpoint-2') repaired.resolve();
+      if (head?.checkpoint === 'checkpoint-3') patched.resolve();
+    });
+  });
+  try {
+    await observation.initial;
+    (await timers.next()).callback();
+    await repaired.promise;
+    expect(await h.cache.readTurn(tail.id)).toEqual(tail);
+    (await timers.next()).callback();
+    await patched.promise;
+    expect((await h.cache.readTurn(tail.id))?.items).toEqual([{ type: 'text', text: 'oldAB' }]);
+    expect((await h.cache.readRows(0, 119))?.map((row) => row.turn)).toEqual(
+      h.entries.slice(0, 119)
+    );
+  } finally {
+    observation.unsubscribe();
+    data.dispose?.();
+    h.cache.dispose();
+    timers.restore();
+  }
+});
 
 it('isolates persisted legacy heads and concurrent old-page writes from patch-capable caches', async () => {
   Object.assign(globalThis, { indexedDB: new IDBFactory(), IDBKeyRange });
@@ -2171,132 +2196,125 @@ it('keeps a local idle watch healthy through the desktop deadline and immediatel
   }
 });
 
-it('backs off repeated reset supersessions while live reads and hint invalidations keep progressing', async () => {
-  const h = await cachedRecoveryFixture('reset', 120);
+it('commits a bounded reset while the owner keeps writing, then catches up incrementally', async () => {
+  const h = await cachedRecoveryFixture('streaming-reset', 120);
   const timers = controlledRefreshTimers();
-  const events: SessionDataChange[] = [];
-  let revision = 2;
-  let writing = true;
-  const ownerEntries = h.entries.map((entry) => ({
+  const committed2 = Promise.withResolvers<void>();
+  const committed3 = Promise.withResolvers<void>();
+  const entries = h.entries.map((entry) => ({
     ...entry,
-    items: [{ type: 'text' as const, text: 'new' }],
+    items: [{ type: 'text' as const, text: 'new generation' }],
   }));
-  const complete = Promise.withResolvers<void>();
-  const visible = Promise.withResolvers<void>();
+  const nextTail = { ...entries[119]!, items: [{ type: 'text' as const, text: 'next chunk' }] };
   const data = createLocalRoostSessionDataFactory({
     incremental: true,
+    patches: true,
     workspaceId: h.workspaceId,
     machineId: h.machineId,
     sendControl: async (request) => {
       if (request.type !== 'session/history-read') throw new Error('Unexpected write');
       const query = request.query;
-      if (query.kind === 'readChanges')
-        return h.reply(revision, { state: 'reset', checkpoint: `checkpoint-${revision}` });
-      if (query.kind === 'count') return h.reply(revision, 120);
-      if (query.kind === 'readAt')
-        return h.reply(revision, { state: 'ready', turn: ownerEntries[query.position] });
-      if (query.kind === 'readTurn')
-        return h.reply(revision, {
+      if (query.kind === 'readChanges') {
+        if (query.checkpoint === 'checkpoint-1')
+          return h.reply(2, { state: 'reset', checkpoint: 'checkpoint-2' });
+        expect(query.checkpoint).toBe('checkpoint-2');
+        return h.reply(3, {
           state: 'ready',
-          turn: ownerEntries.find((entry) => entry.id === query.turnId),
+          checkpoint: 'checkpoint-3',
+          ids: [nextTail.id],
+          bodies: { changed: [nextTail], suffix: [] },
         });
-      if (query.kind === 'readDirectory')
-        return h.reply(
-          revision,
-          ownerEntries
-            .slice(query.from, query.to)
-            .map((entry, offset) => createRoostDirectoryRow(query.from + offset, entry as never))
-        );
-      if (query.kind !== 'readLatestPage' && query.kind !== 'readOlderPage')
-        throw new Error('Unexpected read');
-      if (query.kind === 'readOlderPage' && writing) revision++;
-      const end = query.kind === 'readLatestPage' ? 120 : Number(query.cursor);
-      const start = Math.max(0, end - query.limit);
-      const turns = ownerEntries.slice(start, end);
+      }
+      if (query.kind !== 'readLatestPage') throw new Error('Reset must not scan unchanged history');
+      // The protected page was read before the next write's control hint arrived.
+      h.publish(3);
       return h.reply(
-        revision,
+        2,
         {
-          checkpoint: `checkpoint-${revision}`,
-          startPosition: start,
+          checkpoint: 'checkpoint-2',
+          startPosition: 80,
           totalCount: 120,
-          rows: turns.map((entry, offset) =>
-            createRoostDirectoryRow(start + offset, entry as never)
-          ),
-          hasMoreOlder: start > 0,
-          cursor: start > 0 ? String(start) : null,
+          rows: entries.slice(80).map((turn, index) => createRoostDirectoryRow(80 + index, turn)),
+          hasMoreOlder: true,
+          cursor: 'owner-80',
         },
-        turns
+        entries.slice(80)
       );
     },
   })({ sessionId: h.sessionId, doc: h.doc, backendKind: 'roost' });
-  const observation = data.history.observe((event) => {
-    events.push(event);
+  const observation = data.history.observe(() => {
     void h.cache.getHead().then((head) => {
-      if (head?.revision === revision && head.start === 0) complete.resolve();
+      if (head?.checkpoint === 'checkpoint-2') committed2.resolve();
+      if (head?.checkpoint === 'checkpoint-3') committed3.resolve();
     });
   });
-  let view: ReturnType<typeof createConversationViewFromReader> | undefined;
-  let unsubscribe: (() => void) | undefined;
   try {
     await observation.initial;
-    const delays: number[] = [];
-    for (let i = 0; i < 20; i++) {
-      const next = await timers.next();
-      delays.push(next.delay);
-      next.callback();
-    }
-    const pending = await timers.next();
-    expect(delays.some((delay) => delay > 0)).toBe(true);
-    expect(await h.cache.getHead()).toMatchObject({ revision: 1, checkpoint: 'checkpoint-1' });
-    view = createConversationViewFromReader(data.history, {
-      sessionId: h.sessionId,
-      tailKeep: 1,
-      yieldToEventLoop: () => Promise.resolve(),
-      scheduleIdle: (task) => {
-        queueMicrotask(() => task({ timeRemaining: () => 100 }));
-        return () => {};
-      },
-    });
-    await view.ready;
-    expect(view.turn(119)?.items).toEqual([{ type: 'text', text: 'new' }]);
-    unsubscribe = view.subscribe(() => {
-      const item = view?.turn(119)?.items[0];
-      if (item?.type === 'text' && item.text === 'next streamed chunk') visible.resolve();
-    });
-    const beforeHint = events.length;
-    ownerEntries[119]!.items = [{ type: 'text', text: 'next streamed chunk' }];
-    h.publish(++revision);
-    await visible.promise;
-    await h.cache.getHead();
-    expect(events.slice(beforeHint)).toContainEqual({ kind: 'changed', ids: [h.entries[119]!.id] });
-    expect(timers.pending()).toEqual([]);
-    expect(await data.history.readAt(119)).toMatchObject({
-      state: 'ready',
-      turn: { items: [{ text: 'next streamed chunk' }] },
-    });
-    writing = false;
-    pending.callback();
-    for (let i = 0; i < 5; i++) {
-      const next = await Promise.race([timers.next(), complete.promise.then(() => null)]);
-      if (!next) break;
-      next.callback();
-    }
-    await complete.promise;
+    (await timers.next()).callback();
+    await committed2.promise;
     expect(await h.cache.getHead()).toMatchObject({
-      revision,
-      checkpoint: `checkpoint-${revision}`,
-      start: 0,
+      start: 80,
+      revision: 2,
+      checkpoint: 'checkpoint-2',
     });
-    expect((await h.cache.readRows(0, 1))?.[0]?.turn.items).toEqual([
-      { type: 'text', text: 'new' },
-    ]);
+    expect(await data.history.readTurn(entries[119]!.id)).toMatchObject({
+      state: 'ready',
+      turn: entries[119],
+    });
+    (await timers.next()).callback();
+    await committed3.promise;
+    expect(await data.history.readTurn(nextTail.id)).toMatchObject({
+      state: 'ready',
+      turn: nextTail,
+    });
+    expect(await h.cache.getHead()).toMatchObject({
+      start: 80,
+      revision: 3,
+      checkpoint: 'checkpoint-3',
+    });
+    expect((await h.cache.readRows(80, 119))?.map((row) => row.turn)).toEqual(
+      entries.slice(80, 119)
+    );
+    expect(await h.cache.readTurn(entries[0]!.id)).toBeUndefined();
   } finally {
-    unsubscribe?.();
-    view?.dispose();
     observation.unsubscribe();
     data.dispose?.();
     h.cache.dispose();
     timers.restore();
+  }
+});
+
+it('rejects a late reset window after another tab advances the durable cache', async () => {
+  const h = await cachedRecoveryFixture('reset-cas', 120);
+  try {
+    const prior = (await h.cache.getHead())!;
+    const next = { ...h.entries[119]!, items: [{ type: 'text' as const, text: 'newer tab' }] };
+    expect(
+      await h.cache.applyChanges(prior, 3, 120, 'checkpoint-3', undefined, [
+        { position: 119, turn: next },
+      ])
+    ).toBe(true);
+    expect(
+      await h.cache.acceptPage(
+        {
+          checkpoint: 'checkpoint-4',
+          startPosition: 80,
+          totalCount: 120,
+          rows: h.entries.slice(80).map((turn, index) => createRoostDirectoryRow(80 + index, turn)),
+          hasMoreOlder: true,
+          cursor: 'owner-80',
+        },
+        h.entries.slice(80),
+        // Even a newer window must not replace a head advanced since the reset began.
+        4,
+        undefined,
+        prior
+      )
+    ).toBe(false);
+    expect(await h.cache.getHead()).toMatchObject({ checkpoint: 'checkpoint-3', start: 0 });
+    expect(await h.cache.readTurn(next.id)).toEqual(next);
+  } finally {
+    h.cache.dispose();
   }
 });
 

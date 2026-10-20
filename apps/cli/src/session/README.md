@@ -439,17 +439,23 @@ replacements; an unusable patch recovers its body at the target checkpoint befor
 the existing atomic cache transaction. Old requests and database formats are unchanged.
 See [content patch decision](../../../../.agents/notes/implemented/bug-fix/2026-10-20-roost-history-rpc-patches.md).
 
-The previous coherent projection remains readable on failure. Supersession retries immediately; storage and transport
-failures retain recovery backoff. Initial population, legacy targets and unknown coverage
-retain staged rebuilding. Local control reads have a separate bounded pool from writes;
+Unprotected body writes invalidate patch eligibility while retaining a recovery cursor for
+complete changed bodies. That repair commits before relative patches resume; a partial page
+cannot certify an untouched prefix at a different checkpoint. The previous durable projection
+survives failed repair. Supersession retries immediately; storage and transport failures
+retain recovery backoff. Local control reads have a separate bounded pool from writes;
 remote RPC reserves write/control pools and rejects excess ordinary work without blocking
 send intake. Detailed decision and verification:
 [Roost incremental recovery](../../../../.agents/notes/implemented/bug-fix/2026-10-16-roost-incremental-history.md).
 
-An explicit checkpoint reset forces replacement in the other cache slot even when
-its control revision is equal or consecutive. Last-change hints cannot repair unknown
-coverage. Replacement pages share one checkpoint, and the old snapshot remains readable
-until every replacement page is durable; failed staging retains that recovery mode.
+Initial population and missing or rejected coverage read only the latest coherent window.
+An explicit reset atomically replaces the active cache in the other slot even when its
+control revision is equal or consecutive, provided the captured head has not changed.
+Last-change hints cannot repair unknown coverage. Older pages load on demand, using a
+checkpoint-protected absolute range where supported; ordinary refresh never sweeps the
+whole history. Genuine reset invalidates old pages until fetched again, including for
+offline use; ordinary complete-change repair preserves the retained prefix.
+See [bounded cache recovery](../../../../.agents/notes/implemented/bug-fix/2026-10-21-roost-cache-recovery-network-cost.md).
 
 Cold readers observe backend metadata before composition; provisional absence remains
 pending until explicit identity or the session's selected metadata source restores.

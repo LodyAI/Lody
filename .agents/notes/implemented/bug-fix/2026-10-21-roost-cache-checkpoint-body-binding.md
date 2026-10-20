@@ -28,3 +28,8 @@ The real Native SQLite owner and real IndexedDB bridge reproduce revision 1 / C1
 The owning frontend suite covers legacy changed-turn and page writes, different-checkpoint partial pages, atomic complete recovery, rejection of stale in-flight changes, persisted v1 heads and concurrent old-page writes. All 46 frontend bridge/cache tests and 81 Native backend contract tests pass, including the existing patch-budget and encrypted-RPC tests. These are deterministic synthetic fixtures; they establish the covered transitions, not an exhaustive proof over arbitrary storage corruption.
 
 This corrects the cached-base assumption in the [content-patch decision](2026-10-20-roost-history-rpc-patches.md) without changing its protocol or native eligibility rules.
+
+The subsequent [bounded recovery decision](2026-10-21-roost-cache-recovery-network-cost.md)
+preserves this binding protection while replacing the expensive full-cache rebuild.
+It retains a separate cursor for complete-body repair and restores only a latest
+window when coverage is unavailable.

@@ -53,7 +53,8 @@
   gates; there is no test-only implementation of the complete command API.
 - Roost content patches require independent capability negotiation and an exact
   cached base checkpoint bound to every retained body. Unprotected cache writes
-  invalidate it; older cache writers must stay isolated. Prepare detached bodies and commit them with membership
+  invalidate patch eligibility; a retained recovery cursor permits only complete
+  change replies. Older cache writers must stay isolated. Prepare detached bodies and commit them with membership
   and checkpoint atomically; unusable patches require checkpoint-protected body
   reads. Never reinterpret raw segment edits as logical state/permission projection.
 - Normalized subagent events persist inside `subagent_task.run`, keyed by root ACP
@@ -87,6 +88,8 @@
 - Roost incremental reads bind a complete logical change interval to one owner checkpoint.
   Missing or foreign checkpoint evidence requires explicit reset, never trusting the last hint.
   Persist repaired bodies, membership and checkpoint atomically; the cache grants no write receipt.
+  Reset replaces the latest window atomically; invalidated older pages load on demand,
+  never through an automatic whole-history sweep.
   Independently negotiated checkpoint observation covers admission gaps and missed hints.
   Park bounded waits outside foreground/native execution; resume the same catch-up flow.
 

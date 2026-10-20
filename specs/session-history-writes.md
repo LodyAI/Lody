@@ -251,8 +251,12 @@ to the same observation. Consecutive changes update the affected cached rows
 atomically. Independently negotiated incremental recovery uses an owner-issued,
 durable checkpoint to cover missed changes: notification coalescing alone must
 not require rereading unchanged historical bodies. Cache bodies, membership and
-checkpoint advance together. Missing or foreign recovery evidence stages a
-replacement through bounded pages while retaining the previous coherent snapshot. Reconnection refreshes through the
+checkpoint advance together. Losing patch eligibility alone retains verified
+change coverage for complete-body repair. Missing or foreign recovery evidence
+atomically replaces the latest window, retaining the previous readable snapshot
+until that window commits. Invalidated older pages load on demand and are unavailable
+offline until fetched again; ordinary incremental repair preserves the cached prefix.
+Recovery must not automatically sweep the entire history. Reconnection refreshes through the
 existing owner transport. The cache never accepts or replays user commands, and
 cannot supply history this device has never synchronized.
 

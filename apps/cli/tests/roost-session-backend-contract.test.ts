@@ -58,6 +58,7 @@ import { createTestCloudPort } from './test-cloud-port';
 import { createCommandSessionHistoryFactory, type AuthContext } from '../src/lib/command-runtime';
 import type { LoroDocumentManager } from '../src/lib/loro/doc';
 import {
+  createRoostDirectoryRow,
   hashHistoryEntryForVersion,
   hashText,
   applySessionHistoryPatches,
@@ -3367,7 +3368,7 @@ it('persists one targeted Inbox batch receipt through native Roost reopen withou
   await reopened.close();
 });
 
-it('does not replay text after a legacy refresh when owner capabilities arrive late', async () => {
+it.each([1, 2000])('repairs %i cached turns after a legacy refresh without replaying text or fetching unchanged pages', async (count) => {
   const rendererRequire = createRequire(
     new URL('../../../packages/components/package.json', import.meta.url)
   );
@@ -3403,6 +3404,19 @@ it('does not replay text after a legacy refresh when owner capabilities arrive l
   };
   try {
     await fixture.ready(sessionId);
+    if (count > 1) {
+      const history = Array.from({ length: count - 1 }, (_, index) => ({
+        ...nativeAssistant(`synthetic-prefix-${index}`),
+        finished: true,
+        items: [{ type: 'text' as const, text: `Unchanged synthetic prefix ${index}` }],
+      }));
+      const turnHashes = history.map((turn) => hashHistoryEntryForVersion(turn as never, 2));
+      expect(await fixture.rpc.writeSessionHistoryForRpc(sessionId, 'apply_import', {
+        input: { mode: 'initialize', replay: {
+          history, turnHashes, hashVersion: 2, replayDigest: hashText(turnHashes.join('\n')), droppedNotifications: 0,
+        } },
+      })).toMatchObject({ success: true });
+    }
     const initial = {
       ...nativeAssistant('synthetic-late-cap'),
       items: [{ type: 'text' as const, text: 'base' }],
@@ -3419,7 +3433,13 @@ it('does not replay text after a legacy refresh when owner capabilities arrive l
     const initialRevision = page.historyRevision;
     if (initialRevision === undefined || !page.pageTurns)
       throw new Error('Missing initial page observation');
-    await cache.acceptPage(page.result as never, page.pageTurns, initialRevision);
+    const all = await fixture.rpc.readSessionHistoryForRpc(sessionId, { kind: 'readAll' });
+    const entries = all.result as SessionHistoryInput[];
+    await cache.acceptPage({
+      checkpoint, startPosition: 0, totalCount: count,
+      rows: entries.map((turn, position) => createRoostDirectoryRow(position, turn as never)),
+      hasMoreOlder: false, cursor: null,
+    }, entries, initialRevision);
     const written = await fixture.rpc.writeSessionHistoryForRpc(sessionId, 'apply_action', {
       action: {
         kind: 'assistant-items',
@@ -3435,7 +3455,7 @@ it('does not replay text after a legacy refresh when owner capabilities arrive l
     const doc = new LoroDoc();
     const hints = doc.getMap('roostHistoryCursor');
     hints.set('historyRevision', revision);
-    hints.set('historyCount', 1);
+    hints.set('historyCount', count);
     hints.set('historyChangeJson', JSON.stringify({ kind: 'changed', ids: [initial.id] }));
     doc.commit();
     const legacyCommitted = Promise.withResolvers<void>();
@@ -3487,6 +3507,10 @@ it('does not replay text after a legacy refresh when owner capabilities arrive l
       },
       sendControl: async (request) => {
         if (request.type !== 'session/history-read') throw new Error('Unexpected write');
+        if (supports) {
+          expect(request.query.kind).toBe('readChanges');
+          if (request.query.kind === 'readChanges') expect(request.query.withPatches).toBeUndefined();
+        }
         return {
           ok: true,
           responses: [await fixture.rpc.readSessionHistoryForRpc(sessionId, request.query)],
@@ -3503,8 +3527,8 @@ it('does not replay text after a legacy refresh when owner capabilities arrive l
     await observation.initial;
     (await nextTimer())();
     await legacyCommitted.promise;
-    expect(await cache.getHead()).toMatchObject({ revision });
-    expect((await cache.readRows(0, 1))?.[0]?.turn.items).toEqual([
+    expect(await cache.getHead()).toMatchObject({ revision, checkpoint: undefined, recoveryCheckpoint: checkpoint });
+    expect((await cache.readRows(count - 1, count))?.[0]?.turn.items).toEqual([
       { type: 'text', text: 'baseA' },
     ]);
     supports = true;
@@ -3512,13 +3536,9 @@ it('does not replay text after a legacy refresh when owner capabilities arrive l
     wake();
     (await nextTimer())();
     await patchedCommitted.promise;
-    const complete = await fixture.rpc.readSessionHistoryForRpc(sessionId, {
-      kind: 'readTurn',
-      turnId: initial.id,
-    });
-    expect((await cache.readRows(0, 1))?.[0]?.turn).toEqual(
-      (complete.result as { turn: SessionHistoryInput }).turn
-    );
+    const complete = await fixture.rpc.readSessionHistoryForRpc(sessionId, { kind: 'readAll' });
+    expect((await cache.readRows(0, count))?.map((row) => row.turn)).toEqual(complete.result);
+    expect(await cache.getHead()).toMatchObject({ start: 0, count, recoveryCheckpoint: undefined });
   } finally {
     stop?.();
     data?.dispose?.();
