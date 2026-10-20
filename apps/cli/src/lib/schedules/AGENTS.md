@@ -11,6 +11,8 @@
   an IMMEDIATE transaction. Preserve cursor/run ids across restarts.
 - Session history goes through `sessionData` (`readSessionHistory` reads,
   `commands.appendTurn` appends missing entries); there is no whole-list rewrite.
+- Freeze the task name in `userTurn.scheduleRun`, bound to the exact input id,
+  for notification presentation; never infer scheduled execution from Session metadata.
 - Freeze JSON `PreparedSessionInput` before Session mutation. Its fixed user turn
   uses `prepared`, inert until `latestUserMsgId` is committed. After this pointer,
   the ordinary watcher owns execution. Never retry with another Session or Turn,
@@ -64,6 +66,9 @@
   `SESSION_UNAVAILABLE` as a recoverable configuration problem. The command
   service applies the same rule on create/edit and rejects a project on a
   schedule that sends into a chat.
+- Notifications follow ordinary Session outcomes after handoff: success/failure/unknown
+  may notify the owner, cancellation stays silent. No schedule-specific condition
+  evaluation or aggregation yet; prehandoff failures remain Schedule runtime state.
 - Dispose Schedule workers before tearing down a workspace's Lody runtime.
   Timers and active evaluations must not survive workspace revocation.
 - Deterministic tests use injected clocks, explicit sync barriers and temporary

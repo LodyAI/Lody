@@ -14,9 +14,9 @@ import { applyHistoryAction } from '../../shared/src/session-data/history-action
 import type { HistoryAction, SessionEntry } from '@lody/shared/session-data';
 // @vitest-environment jsdom
 
-import { act, createElement, useEffect } from 'react';
+import { act, createElement, Fragment, useEffect } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { Provider, createStore } from 'jotai';
+import { Provider, createStore, atom, useAtomValue } from 'jotai';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { LoroRepo } from 'loro-repo';
 import { LoroDoc } from 'loro-crdt';
@@ -101,6 +101,23 @@ vi.mock('convex/react', () => ({
   })),
 }));
 
+vi.mock('../src/hooks/use-visible-session-metas', async () => {
+  const { useAtomValue: useTestAtomValue } = await import('jotai');
+  const { sessionMetaCacheAtom: projectedSessionCacheAtom } = await import('../src/atoms/doc-meta');
+  return {
+    useVisibleSessionMetas: () => ({
+      sessions: Object.values(useTestAtomValue(projectedSessionCacheAtom)).filter(
+        (session) => !session.isArchived
+      ),
+    }),
+    useVisibleArchivedSessionMetas: () => ({
+      archivedSessions: Object.values(useTestAtomValue(projectedSessionCacheAtom)).filter(
+        (session) => session.isArchived
+      ),
+    }),
+  };
+});
+
 vi.mock('../src/hooks/use-authenticated-convex', () => ({
   useAuthenticatedConvex: () => ({
     isAuthenticated: convexAuthState.isAuthenticated,
@@ -109,6 +126,10 @@ vi.mock('../src/hooks/use-authenticated-convex', () => ({
 }));
 
 import { runtimeAtom, type WorkspaceRuntime } from '../src/atoms/runtime';
+import { userAtom } from '../src/atoms';
+import { autoArchiveOnPrClosedAtom, autoArchiveOnPrMergedAtom } from '../src/atoms/settings';
+import { AutoArchivePrWatcher } from '../src/components/auto-archive-pr-watcher';
+import { WorkspaceWindowOwnerContext } from '../src/lib/desktop-window';
 import { docMetaCacheReadyAtom, sessionMetaCacheAtom } from '../src/atoms/doc-meta';
 import {
   editSessionRunConfigDraftAtom,
@@ -130,6 +151,16 @@ import {
   type SessionActions,
 } from '../src/hooks/use-session-actions';
 import { buildResendInputBlocks } from '../src/lib/undelivered-user-turn';
+
+const archiveWatcherOwnerAtom = atom(true);
+function ArchiveWatcherOwner() {
+  const owner = useAtomValue(archiveWatcherOwnerAtom);
+  return createElement(
+    WorkspaceWindowOwnerContext.Provider,
+    { value: owner },
+    createElement(AutoArchivePrWatcher)
+  );
+}
 
 (
   globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
@@ -458,18 +489,24 @@ function createContainmentSessions(prefix: string, isArchived: boolean) {
   };
 }
 
-function createSessionMetaRepo(sessions: readonly SessionMeta[]) {
+function createSessionMetaRepo(
+  sessions: readonly SessionMeta[],
+  onChange?: (sessions: Record<string, SessionMeta>) => void
+) {
   const docs = new Map<string, Record<string, unknown>>(
     sessions.map((session) => [getSessionRoomId(session.id), { ...session }])
   );
+  const publish = () => onChange?.(Object.fromEntries(docs) as Record<string, SessionMeta>);
   const repo = {
     listDoc: async () => [...docs].map(([docId, meta]) => ({ docId, meta: { ...meta } })),
     getDocMeta: vi.fn(async (roomId: string) => ({ meta: docs.get(roomId) ?? {} })),
     upsertDocMeta: vi.fn(async (roomId: string, patch: Record<string, unknown>) => {
       docs.set(roomId, { ...(docs.get(roomId) ?? {}), ...patch });
+      publish();
     }),
     deleteDoc: vi.fn(async (roomId: string) => {
       docs.delete(roomId);
+      publish();
     }),
     openFlockDoc: vi.fn(async () => ({
       flock: { scan: () => [], set: vi.fn(), delete: vi.fn(), commit: vi.fn() },
@@ -484,6 +521,7 @@ function createSessionMetaRepo(sessions: readonly SessionMeta[]) {
       docs.get(getSessionRoomId(sessionId)) as SessionMeta | undefined,
     setMeta: (roomId: string, meta: Record<string, unknown>) => {
       docs.set(roomId, { ...meta });
+      publish();
     },
   };
 }
@@ -517,6 +555,7 @@ describe('useSessionActions', () => {
     container?.remove();
     container = undefined;
     vi.restoreAllMocks();
+    vi.useRealTimers();
   });
 
   const renderActions = async (
@@ -527,6 +566,7 @@ describe('useSessionActions', () => {
       docMetaCacheReady?: boolean;
       sessionMetaCache?: Record<string, SessionMeta>;
       store?: ReturnType<typeof createStore>;
+      watchPr?: boolean;
     } = {}
   ): Promise<SessionActions> => {
     const jotaiStore = options.store ?? createStore();
@@ -549,11 +589,16 @@ describe('useSessionActions', () => {
           createElement(
             Provider,
             { store: jotaiStore },
-            createElement(ActionsProbe, {
-              onReady: (nextActions) => {
-                actions = nextActions;
-              },
-            })
+            createElement(
+              Fragment,
+              null,
+              createElement(ActionsProbe, {
+                onReady: (nextActions) => {
+                  actions = nextActions;
+                },
+              }),
+              options.watchPr ? createElement(ArchiveWatcherOwner) : null
+            )
           )
         )
       );
@@ -564,6 +609,262 @@ describe('useSessionActions', () => {
     }
     return actions;
   };
+
+  describe('PR auto-archive recovery', () => {
+    beforeEach(() => {
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+      vi.spyOn(console, 'error').mockImplementation(() => {});
+    });
+
+    const mountWatcher = async (
+      options: { initialStatus?: 'open' | 'merged'; archived?: boolean } = {}
+    ) => {
+      const store = createStore();
+      store.set(userAtom, { id: 'user-1' } as never);
+      store.set(autoArchiveOnPrMergedAtom, true);
+      store.set(autoArchiveOnPrClosedAtom, true);
+      const tree = createContainmentSessions('pr-recovery', options.archived ?? false);
+      for (const session of tree.sessions) session.userId = 'user-1';
+      tree.rootSession.pullRequests = [
+        { url: 'https://github.com/example/repo/pull/1', status: options.initialStatus ?? 'open' },
+      ];
+      const metaRepo = createSessionMetaRepo(tree.sessions, (cache) =>
+        store.set(sessionMetaCacheAtom, cache)
+      );
+      const write = metaRepo.repo.upsertDocMeta.bind(metaRepo.repo);
+      const control = {
+        failSession: tree.rootSession.id as SessionId | null,
+        failures: 1,
+        hold: undefined as ReturnType<typeof createDeferred> | undefined,
+        inFlight: 0,
+        maxInFlight: 0,
+      };
+      metaRepo.repo.upsertDocMeta = async (roomId, patch) => {
+        if (patch.isArchived !== true) return write(roomId, patch);
+        control.inFlight++;
+        control.maxInFlight = Math.max(control.maxInFlight, control.inFlight);
+        try {
+          await control.hold?.promise;
+          if (roomId === getSessionRoomId(control.failSession ?? '') && control.failures > 0) {
+            control.failures--;
+            throw new Error('Synthetic archive write failure');
+          }
+          await write(roomId, patch);
+        } finally {
+          control.inFlight--;
+        }
+      };
+      const runtime = createRuntime({ repo: metaRepo.repo });
+      const actions = await renderActions(runtime, {
+        store,
+        sessionMetaCache: tree.sessionMetaCache,
+        watchPr: true,
+      });
+      const change = async (sessionId: SessionId, patch: Partial<SessionMeta>) => {
+        await act(async () =>
+          metaRepo.setMeta(getSessionRoomId(sessionId), {
+            ...metaRepo.getSession(sessionId),
+            ...patch,
+          })
+        );
+      };
+      const transition = (status: 'merged' | 'closed') =>
+        change(tree.rootSession.id, {
+          pullRequests: [{ url: 'https://github.com/example/repo/pull/1', status }],
+        });
+      const advance = async (ms: number) => {
+        await act(async () => vi.advanceTimersByTimeAsync(ms));
+      };
+      return { store, tree, metaRepo, control, runtime, actions, change, transition, advance };
+    };
+
+    it.each(['merged', 'closed'] as const)(
+      'eventually archives the whole tree after a failed %s transition without another PR event',
+      async (status) => {
+        const test = await mountWatcher();
+        await test.transition(status);
+        expect(test.metaRepo.getSession(test.tree.rootSession.id)?.isArchived).toBe(false);
+        // Metadata traffic cannot turn the retry into a hot loop or consume it.
+        await test.change(test.tree.rootSession.id, { title: 'unrelated update' });
+        await test.advance(999);
+        expect(test.metaRepo.getSession(test.tree.rootSession.id)?.isArchived).toBe(false);
+        await test.advance(1);
+        for (const session of test.tree.sessions)
+          expect(test.metaRepo.getSession(session.id)?.isArchived).toBe(true);
+        expect(vi.getTimerCount()).toBe(0);
+      }
+    );
+
+    it('repairs descendants after the root has already entered the archive', async () => {
+      const test = await mountWatcher();
+      test.control.failSession = test.tree.tabSession.id;
+      await test.transition('merged');
+      expect(test.metaRepo.getSession(test.tree.rootSession.id)?.isArchived).toBe(true);
+      expect(test.metaRepo.getSession(test.tree.tabSession.id)?.isArchived).toBe(false);
+      await test.advance(1_000);
+      for (const session of test.tree.sessions)
+        expect(test.metaRepo.getSession(session.id)?.isArchived).toBe(true);
+    });
+
+    it.each(['root', 'tab'] as const)(
+      'a manual %s restore cancels the unfinished automatic archive',
+      async (selected) => {
+        const test = await mountWatcher();
+        test.control.failSession = test.tree.openedSession.id;
+        await test.transition('merged');
+        const restored = selected === 'root' ? test.tree.rootSession : test.tree.tabSession;
+        expect(test.metaRepo.getSession(restored.id)?.isArchived).toBe(true);
+        await act(async () => test.actions.restoreSession(restored.id));
+        await test.advance(60_000);
+        expect(test.metaRepo.getSession(restored.id)?.isArchived).toBe(false);
+        expect(test.metaRepo.getSession(test.tree.openedSession.id)?.isArchived).toBe(false);
+      }
+    );
+
+    it('does not cancel a new held send when a restored root invalidates its retry', async () => {
+      const test = await mountWatcher();
+      test.control.failSession = test.tree.tabSession.id;
+      await test.transition('merged');
+      await act(async () => test.actions.restoreSession(test.tree.rootSession.id));
+      const held = await test.actions.addSessionHistory(
+        test.tree.rootSession.id,
+        userInput('after restore'),
+        {
+          dispatch: true,
+          attachments: [imageDraft('after-restore')],
+        }
+      );
+      await test.advance(1_000);
+      expect(test.runtime.pendingSends?.getSnapshot().map((send) => send.id)).toEqual([held.id]);
+      expect(heldPreparations[0].signal.aborted).toBe(false);
+      heldPreparations[0].finish();
+      await whenSessionDrained(test.runtime.pendingSends!, test.tree.rootSession.id);
+      expect(
+        (await readHistory(test.runtime, test.tree.rootSession.id)).map((turn) => turn.id)
+      ).toContain(held.id);
+      expect(test.metaRepo.getSession(test.tree.rootSession.id)?.isArchived).toBe(false);
+    });
+
+    it('keeps persistent failures isolated and uses capped retry delays', async () => {
+      const test = await mountWatcher();
+      test.control.failures = Infinity;
+      await test.transition('merged');
+      const sibling = {
+        ...test.tree.rootSession,
+        id: 'independent-pr-session' as SessionId,
+        pullRequests: [{ url: 'https://github.com/example/repo/pull/2', status: 'open' as const }],
+      };
+      await act(async () => test.metaRepo.setMeta(getSessionRoomId(sibling.id), sibling));
+      await test.change(sibling.id, {
+        pullRequests: [{ url: sibling.pullRequests[0]!.url, status: 'merged' }],
+      });
+      expect(test.metaRepo.getSession(sibling.id)?.isArchived).toBe(true);
+      // 1 + 2 + 4 + 8 + 16 seconds; the next delay is capped at 30 seconds.
+      await test.advance(31_000);
+      test.control.failures = 0;
+      await test.advance(29_999);
+      expect(test.metaRepo.getSession(test.tree.rootSession.id)?.isArchived).toBe(false);
+      await test.advance(1);
+      expect(test.metaRepo.getSession(test.tree.rootSession.id)?.isArchived).toBe(true);
+    });
+
+    it('shares the actual in-flight write across metadata and timer updates', async () => {
+      const test = await mountWatcher();
+      test.control.hold = createDeferred();
+      await test.transition('merged');
+      await test.change(test.tree.rootSession.id, { title: 'while archive is writing' });
+      await test.advance(60_000);
+      expect(test.metaRepo.getSession(test.tree.rootSession.id)?.isArchived).toBe(false);
+      await act(async () => test.control.hold?.resolve());
+      test.control.hold = undefined;
+      await test.advance(1_000);
+      for (const session of test.tree.sessions)
+        expect(test.metaRepo.getSession(session.id)?.isArchived).toBe(true);
+      expect(test.control.maxInFlight).toBe(1);
+    });
+
+    it.each([
+      'setting',
+      'user',
+      'workspace',
+      'owner',
+      'session-owner',
+      'pr',
+      'reopen',
+      'delete',
+      'unmount',
+    ] as const)('retires a pending retry after %s changes', async (kind) => {
+      const test = await mountWatcher();
+      await test.transition('merged');
+      await act(async () => {
+        if (kind === 'setting') {
+          test.store.set(autoArchiveOnPrMergedAtom, false);
+          test.store.set(autoArchiveOnPrMergedAtom, true);
+        } else if (kind === 'user') {
+          test.store.set(userAtom, { id: 'other-user' } as never);
+          test.store.set(userAtom, { id: 'user-1' } as never);
+        } else if (kind === 'workspace') {
+          test.store.set(
+            runtimeAtom,
+            createRuntime({ workspaceId: 'other-workspace' as WorkspaceId })
+          );
+          test.store.set(runtimeAtom, test.runtime);
+        } else if (kind === 'owner') {
+          test.store.set(archiveWatcherOwnerAtom, false);
+        } else if (kind === 'session-owner') {
+          test.metaRepo.setMeta(getSessionRoomId(test.tree.rootSession.id), {
+            ...test.metaRepo.getSession(test.tree.rootSession.id),
+            userId: 'other-user',
+          });
+        } else if (kind === 'delete') {
+          await test.metaRepo.repo.deleteDoc(getSessionRoomId(test.tree.rootSession.id));
+        } else if (kind === 'unmount') {
+          root?.unmount();
+          root = undefined;
+        } else {
+          test.metaRepo.setMeta(getSessionRoomId(test.tree.rootSession.id), {
+            ...test.metaRepo.getSession(test.tree.rootSession.id),
+            pullRequests: [
+              {
+                url:
+                  kind === 'pr'
+                    ? 'https://github.com/example/repo/pull/2'
+                    : 'https://github.com/example/repo/pull/1',
+                status: kind === 'reopen' ? 'open' : 'merged',
+              },
+            ],
+          });
+        }
+      });
+      if (kind === 'owner') await act(async () => test.store.set(archiveWatcherOwnerAtom, true));
+      await test.advance(60_000);
+      expect(test.metaRepo.getSession(test.tree.rootSession.id)?.isArchived).not.toBe(true);
+      expect(vi.getTimerCount()).toBe(0);
+    });
+
+    it('does not revive retries when a raw archive fails after unmount', async () => {
+      const test = await mountWatcher();
+      test.control.hold = createDeferred();
+      await test.transition('merged');
+      await act(async () => {
+        root?.unmount();
+        root = undefined;
+      });
+      await act(async () => test.control.hold?.reject());
+      await test.advance(60_000);
+      expect(test.metaRepo.getSession(test.tree.rootSession.id)?.isArchived).toBe(false);
+      expect(vi.getTimerCount()).toBe(0);
+    });
+
+    it('does not retroactively archive startup or restored terminal PRs', async () => {
+      const test = await mountWatcher({ initialStatus: 'merged', archived: true });
+      await act(async () => test.actions.restoreSession(test.tree.rootSession.id));
+      await test.advance(60_000);
+      for (const session of [test.tree.rootSession, test.tree.tabSession])
+        expect(test.metaRepo.getSession(session.id)?.isArchived).toBe(false);
+      expect(vi.getTimerCount()).toBe(0);
+    });
+  });
 
   it('uses released Stop wire fields and turn marker when the target has no Inbox capability', async () => {
     const sessionId = 'legacy-stop' as SessionId;

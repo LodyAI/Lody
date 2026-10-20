@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { WorkspaceRepoLegacy } from '@lody/shared/workspace-data/repo-legacy';
+import { LoroRepo } from 'loro-repo';
 import { LoroDoc, LoroList, LoroMap } from 'loro-crdt';
 import { Mirror, schema } from 'loro-mirror';
 import {
@@ -86,7 +86,7 @@ function notifications(turns: number): AcpSessionNotification[] {
 }
 
 async function createHarness() {
-  const repo = await WorkspaceRepoLegacy.create({});
+  const repo = await LoroRepo.create({});
   disposers.push(() => repo.destroy());
   const docs = new Map<SessionId, SessionDocument>();
   const logger: Logger = {

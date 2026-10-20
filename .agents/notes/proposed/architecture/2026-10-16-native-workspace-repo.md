@@ -8,14 +8,9 @@ PR: [#1607](https://github.com/LodyAI/Lody/pull/1607)
 
 ## Abstract
 
-The owner requested native consumer adoption in the same PR as the
-[released dependency upgrade](../../implemented/architecture/2026-10-16-streams-repo-release-adoption.md).
-CLI, renderer, eager workers and private shortcut rooms consume the published
-native Repo/SDK. One workspace Repo owns replicas; existing Promise APIs enter
-through one deprecated facade. Review exposed cleanup short-circuiting and
-unrecoverable application fences; independent cleanup now continues and ordinary
-acquisition retries retained owners. The [WorkspaceData design](2026-10-14-workspace-data-services.md)
-remains a proposal, including host storage relocation and upper Session/Turn work.
+The #1607 consumer implementation and its dependent patches were withdrawn on 2026-10-19. The dependency upgrade remains. The sections below preserve historical implementation and verification, not the current product boundary. See the [rollback decision](../../implemented/simplification/2026-10-19-repo-upgrade-without-consumer-migration.md).
+
+## Historical implementation (withdrawn)
 
 ## Responsibilities and behavior
 

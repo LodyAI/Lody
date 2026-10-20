@@ -1,4 +1,11 @@
-import { useLayoutEffect, useRef, useState, type ReactNode } from 'react';
+import {
+  createContext,
+  useContext,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from 'react';
 import { useTranslation } from 'react-i18next';
 import { AlertCircle, Check, Copy, Globe } from 'lucide-react';
 import * as stylex from '@stylexjs/stylex';
@@ -13,6 +20,7 @@ import { Progress } from '@lody/ui/progress';
 import { Skeleton } from '@lody/ui/skeleton';
 import { AlertDialog } from '@/ui/dialog';
 import { shareSurface } from './surface';
+import { ShareCard } from './share-card';
 
 const REDUCED_MOTION = '@media (prefers-reduced-motion: reduce)';
 
@@ -24,6 +32,8 @@ const stepIn = stylex.keyframes({
 
 const styles = stylex.create({
   frame: { display: 'flex', flexDirection: 'column', minHeight: '100%' },
+  /** The preview card and the step under it sit a line apart. */
+  frameEmbedded: { gap: space[3] },
   transition: {
     position: 'relative',
     overflow: 'hidden',
@@ -67,6 +77,8 @@ const styles = stylex.create({
     lineHeight: text.footnoteLeading,
     color: colors.secondaryLabel,
   },
+  /** Inside the header panel a notice lines up with the text of the preview card above it. */
+  noteEmbedded: { paddingInline: space[3] },
   linkRow: { display: 'flex', alignItems: 'center', gap: space[1] },
   secretMissing: {
     display: 'flex',
@@ -114,6 +126,10 @@ const styles = stylex.create({
     paddingTop: space[3],
     backgroundColor: colors.elevatedBackground,
   },
+  /** Inside the header panel there is nothing scrolling under the row, so it does not stick. */
+  footerEmbedded: { position: 'static', backgroundColor: 'transparent', paddingTop: 0 },
+  /** The panel's frame sets every block a line apart, so a step adds none of its own. */
+  bodyEmbedded: { paddingBottom: 0 },
   spacer: { flexGrow: 1 },
 });
 
@@ -123,10 +139,17 @@ export type SessionShareManagerProps = ReturnType<typeof useSessionShareManageme
   candidates: ShareCandidate[];
   selectionLocked?: boolean;
   onClose?: () => void;
+  /**
+   * Hosted inside the header's access panel rather than a dialog. The panel
+   * animates every change of height itself, so the manager does not; a revoke or
+   * reset is confirmed in place, because a modal opened from a popover counts as an
+   * outside press and would dismiss the very editor it is confirming for.
+   */
+  embedded?: boolean;
 };
 
 /** Which panel the dialog shows. One screen at a time, one primary action each. */
-type ShareStep = 'loading' | 'setup' | 'publishing' | 'published';
+type ShareStep = 'loading' | 'setup' | 'publishing' | 'published' | 'confirm';
 
 /**
  * Animates the dialog's height between steps so the panel grows into the next
@@ -134,17 +157,31 @@ type ShareStep = 'loading' | 'setup' | 'publishing' | 'published';
  * a step whose own content changes (an error appearing)
  * resizes with the same transition.
  */
-function StepTransition({ step, children }: { step: ShareStep; children: ReactNode }) {
+function StepTransition({
+  step,
+  embedded,
+  children,
+}: {
+  step: ShareStep;
+  embedded?: boolean;
+  children: ReactNode;
+}) {
   const inner = useRef<HTMLDivElement>(null);
   const [height, setHeight] = useState<number>();
   useLayoutEffect(() => {
     const node = inner.current;
-    if (!node) return undefined;
+    if (embedded || !node) return undefined;
     const observer = new ResizeObserver(() => setHeight(node.offsetHeight));
     observer.observe(node);
     setHeight(node.offsetHeight);
     return () => observer.disconnect();
-  }, []);
+  }, [embedded]);
+  if (embedded)
+    return (
+      <div key={step} {...stylex.props(styles.step)}>
+        {children}
+      </div>
+    );
   return (
     <div {...stylex.props(styles.transition)} style={{ height }}>
       <div ref={inner}>
@@ -183,8 +220,12 @@ function ShareLinkField({ url, onCopy, busy }: { url: string; onCopy: () => void
   );
 }
 
+/** Whether the manager sits in the header panel; its notices then take the card's inset. */
+const EmbeddedContext = createContext(false);
+
 /** A hint is secondary copy; a failure is a tint and a mark, never a bordered box. */
 function Note({ tone = 'muted', children }: { tone?: 'muted' | 'alert'; children: ReactNode }) {
+  const embedded = useContext(EmbeddedContext);
   if (tone === 'alert')
     return (
       <div role="alert" {...stylex.props(shareSurface.message, shareSurface.messageDestructive)}>
@@ -195,13 +236,13 @@ function Note({ tone = 'muted', children }: { tone?: 'muted' | 'alert'; children
         <p {...stylex.props(styles.note, shareSurface.messageBody)}>{children}</p>
       </div>
     );
-  return <p {...stylex.props(styles.note)}>{children}</p>;
+  return <p {...stylex.props(styles.note, embedded && styles.noteEmbedded)}>{children}</p>;
 }
 
 /** Pure controls: only a human's action uploads and publishes the frozen package. */
 export function SessionShareManager(props: SessionShareManagerProps) {
   const { t } = useTranslation();
-  const { entry, hasPending, busy, phase, result, conflict, selectionLocked } = props;
+  const { entry, hasPending, busy, phase, result, conflict, selectionLocked, embedded } = props;
   const [confirming, setConfirming] = useState<{
     kind: 'reset' | 'revoke';
     revision: number;
@@ -223,6 +264,7 @@ export function SessionShareManager(props: SessionShareManagerProps) {
   const canPublish = entry === null || !!entry?.canManage || entry?.status === 'revoked';
   const publishing = phase === 'capturing' || phase === 'uploading' || phase === 'publishing';
   const step: ShareStep = (() => {
+    if (embedded && confirming) return 'confirm';
     if (entry === undefined) return 'loading';
     if (publishing) return 'publishing';
     if (result) return 'published';
@@ -234,15 +276,39 @@ export function SessionShareManager(props: SessionShareManagerProps) {
       checked ? [props.sessionId, ...shareableChildren.map((c) => c.sessionId)] : [props.sessionId]
     );
 
+  const confirmTitle =
+    confirming?.kind === 'reset'
+      ? t('sharing.static.reset', 'Reset link')
+      : t('sharing.static.revoke', 'Revoke share');
+  const confirmDisabled = busy || confirming?.revision !== entry?.revision;
+  const runConfirmed = () => {
+    if (!confirming || confirming.revision !== entry?.revision) return;
+    if (confirming.kind === 'reset') void props.onReset();
+    else void props.onRevoke();
+    setConfirming(null);
+  };
+
   const publishLabel = active
     ? t('sharing.static.update', 'Update share')
     : t('sharing.static.share', 'Share conversation');
   const retrying = !!props.error && hasPending;
 
   const body = (() => {
+    if (step === 'confirm')
+      return (
+        <div {...stylex.props(styles.body, embedded && styles.bodyEmbedded)}>
+          <p {...stylex.props(styles.published)}>{confirmTitle}</p>
+          <p {...stylex.props(styles.prose)}>
+            {t(
+              'sharing.static.invalidateNotice',
+              'The previous link will stop working. Downloaded copies cannot be recalled.'
+            )}
+          </p>
+        </div>
+      );
     if (step === 'loading')
       return (
-        <div {...stylex.props(styles.loading)} aria-busy="true">
+        <div {...stylex.props(styles.loading, embedded && styles.bodyEmbedded)} aria-busy="true">
           <Skeleton width="75%" height={16} />
           <Skeleton width="100%" height={12} />
           <Skeleton width="66%" height={12} />
@@ -261,20 +327,24 @@ export function SessionShareManager(props: SessionShareManagerProps) {
             ? t('sharing.static.phasePublishing', 'Publishing…')
             : t('sharing.static.phaseCapturing', 'Freezing this conversation…');
       return (
-        <div {...stylex.props(styles.body)}>
+        <div {...stylex.props(styles.body, embedded && styles.bodyEmbedded)}>
           <p role="status" {...stylex.props(styles.status)}>
             {label}
           </p>
           <Progress value={phase === 'uploading' ? props.progress : null} />
-          <Note>{t('sharing.static.phaseHint', 'Keep this dialog open until it finishes.')}</Note>
+          <Note>
+            {embedded
+              ? t('sharing.static.phaseHintPanel', 'Keep this panel open until it finishes.')
+              : t('sharing.static.phaseHint', 'Keep this dialog open until it finishes.')}
+          </Note>
         </div>
       );
     }
     if (step === 'published')
       return (
-        <div {...stylex.props(styles.body)}>
+        <div {...stylex.props(styles.body, embedded && styles.bodyEmbedded)}>
           <div {...stylex.props(styles.lead)}>
-            <Check {...stylex.props(styles.successIcon)} aria-hidden />
+            {!embedded && <Check {...stylex.props(styles.successIcon)} aria-hidden />}
             <p {...stylex.props(styles.published)}>
               {result?.copied
                 ? t('sharing.static.publishedCopied', 'Shared. Link copied to your clipboard.')
@@ -305,8 +375,12 @@ export function SessionShareManager(props: SessionShareManagerProps) {
         </div>
       );
     return (
-      <div {...stylex.props(styles.body)}>
-        {active ? (
+      <div {...stylex.props(styles.body, embedded && styles.bodyEmbedded)}>
+        {embedded ? (
+          <Note>
+            {t('sharing.static.publicNotice', 'Anyone with the link can view this conversation.')}
+          </Note>
+        ) : active ? (
           <div {...stylex.props(styles.lead, styles.prose)}>
             <Globe {...stylex.props(styles.leadIcon)} aria-hidden />
             <span>
@@ -425,6 +499,23 @@ export function SessionShareManager(props: SessionShareManagerProps) {
   })();
 
   const footer = (() => {
+    if (step === 'confirm')
+      return (
+        <>
+          <div {...stylex.props(styles.spacer)} />
+          <Button variant="ghost" size="small" onClick={() => setConfirming(null)}>
+            {t('common.cancel', 'Cancel')}
+          </Button>
+          <Button
+            variant="destructive"
+            size="small"
+            disabled={confirmDisabled}
+            onClick={runConfirmed}
+          >
+            {t('common.confirm', 'Confirm')}
+          </Button>
+        </>
+      );
     if (step === 'loading' || step === 'publishing') return null;
     if (step === 'published')
       return (
@@ -499,46 +590,49 @@ export function SessionShareManager(props: SessionShareManagerProps) {
   })();
 
   return (
-    <div {...stylex.props(styles.frame)}>
-      <StepTransition step={step}>{body}</StepTransition>
-      {footer && <div {...stylex.props(styles.footer)}>{footer}</div>}
-      <AlertDialog.Root
-        open={confirming !== null}
-        onOpenChange={(open) => {
-          if (!open) setConfirming(null);
-        }}
-      >
-        <AlertDialog.Content>
-          <AlertDialog.Header>
-            <AlertDialog.Title>
-              {confirming?.kind === 'reset'
-                ? t('sharing.static.reset', 'Reset link')
-                : t('sharing.static.revoke', 'Revoke share')}
-            </AlertDialog.Title>
-            <AlertDialog.Description>
-              {t(
-                'sharing.static.invalidateNotice',
-                'The previous link will stop working. Downloaded copies cannot be recalled.'
-              )}
-            </AlertDialog.Description>
-          </AlertDialog.Header>
-          <AlertDialog.Footer>
-            <AlertDialog.Cancel>{t('common.cancel', 'Cancel')}</AlertDialog.Cancel>
-            <AlertDialog.Action
-              variant="destructive"
-              disabled={busy || confirming?.revision !== entry?.revision}
-              onClick={() => {
-                if (!confirming || confirming.revision !== entry?.revision) return;
-                if (confirming.kind === 'reset') void props.onReset();
-                else void props.onRevoke();
-                setConfirming(null);
-              }}
-            >
-              {t('common.confirm', 'Confirm')}
-            </AlertDialog.Action>
-          </AlertDialog.Footer>
-        </AlertDialog.Content>
-      </AlertDialog.Root>
-    </div>
+    <EmbeddedContext.Provider value={!!embedded}>
+      <div {...stylex.props(styles.frame, embedded && styles.frameEmbedded)}>
+        {embedded && (step === 'setup' || step === 'publishing' || step === 'published') && (
+          <ShareCard
+            title={props.candidates.find((c) => c.sessionId === props.sessionId)?.title ?? ''}
+            state={step}
+          />
+        )}
+        <StepTransition step={step} embedded={embedded}>
+          {body}
+        </StepTransition>
+        {footer && (
+          <div {...stylex.props(styles.footer, embedded && styles.footerEmbedded)}>{footer}</div>
+        )}
+        <AlertDialog.Root
+          open={!embedded && confirming !== null}
+          onOpenChange={(open) => {
+            if (!open) setConfirming(null);
+          }}
+        >
+          <AlertDialog.Content>
+            <AlertDialog.Header>
+              <AlertDialog.Title>{confirmTitle}</AlertDialog.Title>
+              <AlertDialog.Description>
+                {t(
+                  'sharing.static.invalidateNotice',
+                  'The previous link will stop working. Downloaded copies cannot be recalled.'
+                )}
+              </AlertDialog.Description>
+            </AlertDialog.Header>
+            <AlertDialog.Footer>
+              <AlertDialog.Cancel>{t('common.cancel', 'Cancel')}</AlertDialog.Cancel>
+              <AlertDialog.Action
+                variant="destructive"
+                disabled={confirmDisabled}
+                onClick={runConfirmed}
+              >
+                {t('common.confirm', 'Confirm')}
+              </AlertDialog.Action>
+            </AlertDialog.Footer>
+          </AlertDialog.Content>
+        </AlertDialog.Root>
+      </div>
+    </EmbeddedContext.Provider>
   );
 }

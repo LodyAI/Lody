@@ -300,6 +300,12 @@ export class CliSupervisor {
         if (ownership.status === 'acquired') await this.ownership.release();
         return;
       }
+      if (ownership.status === 'inaccessible') {
+        // Retrying only repeats the same access check; an explicit restart
+        // tries again once the user has stopped or re-privileged that host.
+        this.markFatal(ownership.description);
+        return;
+      }
       if (ownership.status === 'occupied') {
         const runtime = await this.fetchRuntimeState({ timeoutMs: this.probeTimeoutMs });
         if (!this.isCurrent(generation)) return;

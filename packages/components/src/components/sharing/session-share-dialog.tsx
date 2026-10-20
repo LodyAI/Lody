@@ -1,13 +1,11 @@
-import { useMemo, useRef, type ReactNode } from 'react';
+import { useRef, type ReactNode } from 'react';
 import { useAtomValue } from 'jotai';
 import { useTranslation } from 'react-i18next';
 import type { SessionMeta, WorkspaceId } from '@lody/shared';
 import { userAtom } from '@/atoms';
-import { sessionMetaCacheAtom } from '@/atoms/doc-meta';
 import * as stylex from '@stylexjs/stylex';
 import { Dialog } from '@/ui/dialog';
-import { getSessionShareCandidates } from '@/lib/session-share-candidates';
-import { useSessionShareManagement } from '@/hooks/use-session-share-management';
+import { useShareEditorModel } from './share-editor-model';
 import { SessionShareManager } from './session-share-manager';
 import { useKeyboardAwareScrollIntoView } from '@/hooks/use-keyboard-aware-scroll-into-view';
 
@@ -105,25 +103,7 @@ function ShareEditor({
   onClose: () => void;
   title: string;
 }) {
-  const { t } = useTranslation();
-  const meta = useAtomValue(sessionMetaCacheAtom);
-  // Discovery proposes the explicit set frozen by the publishing client.
-  const candidates = useMemo(
-    () =>
-      [session, ...getSessionShareCandidates(session.id, Object.values(meta)).slice(0, 96)].map(
-        (entry) => ({
-          sessionId: entry.id,
-          title: (entry.title ?? '') || t('sessions.untitled', 'Untitled session'),
-        })
-      ),
-    [meta, session, t]
-  );
-  const management = useSessionShareManagement(
-    workspaceId,
-    session.id,
-    candidates.map((entry) => entry.sessionId),
-    shareId
-  );
+  const { candidates, management } = useShareEditorModel(workspaceId, session, shareId);
   return (
     <SessionShareDialogFrame title={title} onClose={onClose}>
       <SessionShareManager

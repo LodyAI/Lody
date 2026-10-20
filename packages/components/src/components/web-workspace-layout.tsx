@@ -22,6 +22,7 @@ import { FocusScope } from '@/ui/focus-scope';
 import { WindowDragStrip } from '@/ui/window-drag-region';
 import { cn } from '@/lib/utils';
 import { CompactNavigationDialog } from './compact-navigation-dialog';
+import { WorkspaceCard } from './workspace-frame';
 
 const DesktopSidebarContent = memo(function DesktopSidebarContent({
   pathname,
@@ -101,7 +102,11 @@ export function WebWorkspaceLayout({ children }: { children: ReactNode }) {
     MAX_DESKTOP_SIDEBAR_WIDTH
   );
   return (
-    <div ref={setLayoutRoot} className={cn(getWebWorkspaceLayoutRootClassName(), 'relative')}>
+    // `bg-sidebar` after the base class: the sidebar's colour is the window's ground.
+    <div
+      ref={setLayoutRoot}
+      className={cn(getWebWorkspaceLayoutRootClassName(), 'relative bg-sidebar')}
+    >
       {compact ? (
         <CompactNavigationDialog
           open={sidebarVisible}
@@ -142,9 +147,7 @@ export function WebWorkspaceLayout({ children }: { children: ReactNode }) {
       >
         <WindowDragStrip />
         <ErrorBoundary name="AppContent" variant="section" resetKeys={[pathname]}>
-          <div className="flex h-full min-w-0 w-full flex-1 flex-col overflow-hidden">
-            {children}
-          </div>
+          <WorkspaceCard anchored={sidebarVisible && !compact}>{children}</WorkspaceCard>
         </ErrorBoundary>
       </FocusScope>
     </div>

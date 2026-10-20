@@ -128,7 +128,7 @@ function DesktopSidebar({
                 className="inline-flex h-6 w-6 items-center justify-center rounded-sm text-muted-foreground/80 hover:bg-muted/30 hover:text-foreground"
                 aria-label="添加文件夹"
               >
-                <FolderPlus className="h-4 w-4" />
+                <FolderPlus className="h-4 w-4" strokeWidth={1.8} />
               </button>
             }
           />
@@ -202,7 +202,7 @@ function ProjectConversationPane() {
             <p className="min-h-12 text-sm text-muted-foreground">继续讨论这个项目…</p>
             <div className="mt-2 flex items-center justify-between">
               <Button variant="ghost" size="small">
-                <FolderPlus className="h-4 w-4" />
+                <FolderPlus className="h-4 w-4" strokeWidth={1.8} />
                 Lody Desktop
               </Button>
               <Button size="small">发送</Button>
@@ -414,7 +414,7 @@ function RemovedProjectArchive() {
                   <Input className="pl-9" placeholder="搜索归档对话" />
                 </div>
                 <Button variant="secondary" aria-label="筛选归档对话" icon>
-                  <SlidersHorizontal className="h-4 w-4" />
+                  <SlidersHorizontal className="h-4 w-4" strokeWidth={1.8} />
                 </Button>
               </div>
               <div className="mb-3 flex items-center gap-2 text-sm text-muted-foreground">

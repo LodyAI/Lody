@@ -20,6 +20,14 @@ export const resolveSessionLiveStatus = (args: {
   if (args.presence?.type === 'running') {
     return { state: 'running' };
   }
+  if (args.execution.releaseBlocked) {
+    // Still busy (fork and MCP treat `waiting` as busy), but not `initializing`:
+    // the previous turn ended and is waiting to confirm its release.
+    return {
+      state: 'waiting',
+      reason: `The previous turn has not confirmed releasing its resources: ${args.execution.releaseBlocked.reason}`,
+    };
+  }
   if (args.execution.hasActiveTurn || args.execution.hasBlockingPendingCreate) {
     return { state: 'initializing' };
   }

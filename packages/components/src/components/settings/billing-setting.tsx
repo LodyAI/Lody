@@ -1,6 +1,8 @@
 import type { BillingInvoiceDetail } from '@lody/cloud-api';
 import { BillingInvoiceDetails } from './billing-invoice-details';
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { usePostHog } from '@posthog/react';
+import { capturePostHogEvent } from '@/lib/posthog-analytics';
 import { Spinner } from '@lody/ui/spinner';
 import { Button } from '@lody/ui/button';
 import { useCloudAction } from '@lody/platform/react';
@@ -45,6 +47,14 @@ import {
   type BillingUpcomingInvoice,
 } from './billing-setting-pure';
 
+function captureBillingEvent(...args: Parameters<typeof capturePostHogEvent>) {
+  try {
+    capturePostHogEvent(...args);
+  } catch {
+    // Analytics must not interrupt checkout navigation or return reconciliation.
+  }
+}
+
 /** Extract the billing error code from a ConvexError thrown by billing actions. */
 function getBillingErrorCode(error: unknown): string | null {
   if (error instanceof ConvexError) {
@@ -86,6 +96,7 @@ export function BillingSettingsComponent() {
 
 function CloudBillingSettings() {
   const { t } = useTranslation();
+  const postHog = usePostHog();
   const { authSessionId } = useAuthenticatedConvex();
   const workspaceId = useAtomValue(currentWorkspaceIdAtom);
   const workspaceSlug = useAtomValue(currentWorkspaceSlugAtom);
@@ -95,6 +106,18 @@ function CloudBillingSettings() {
     workspaceId ? { workspaceId } : 'skip'
   );
   const overviewScope = workspaceId && authSessionId ? `${authSessionId}:${workspaceId}` : null;
+  // Count visits, not reactive overview refreshes or StrictMode effect replay.
+  const viewedScope = useRef<string | null>(null);
+  useEffect(() => {
+    if (!overviewScope || !postHog || viewedScope.current === overviewScope) return;
+    viewedScope.current = overviewScope;
+    captureBillingEvent(postHog, 'billing/page_viewed', { workspace_id: workspaceId });
+  }, [overviewScope, postHog, workspaceId]);
+
+  const trackBilling = (event: string, properties?: Record<string, unknown>) => {
+    captureBillingEvent(postHog, event, { workspace_id: workspaceId, ...properties });
+  };
+
   const persistedOverview = useMemo(
     () => (workspaceId ? readBillingOverviewCache(workspaceId, authSessionId) : null),
     [authSessionId, workspaceId]
@@ -240,6 +263,12 @@ function CloudBillingSettings() {
     };
     const url = new URL(window.location.href);
     const checkout = url.searchParams.get('checkout');
+    if (checkout === 'success' || checkout === 'canceled') {
+      captureBillingEvent(postHog, 'billing/checkout_returned', {
+        workspace_id: workspaceId,
+        return_status: checkout,
+      });
+    }
     if (checkout === 'success') {
       const now = Date.now();
       markBillingCheckoutReturn(workspaceId, now);
@@ -264,7 +293,7 @@ function CloudBillingSettings() {
       url.searchParams.delete('session_id');
       window.history.replaceState(window.history.state, '', url);
     }
-  }, [workspaceId]);
+  }, [workspaceId, postHog]);
 
   // An ordinary pending checkout gets one background check and keeps its payment
   // entry available. Only a successful return retries transient misses while
@@ -422,9 +451,11 @@ function CloudBillingSettings() {
         workspaceId,
         ...(isDesktop ? { returnTarget: 'desktop' as const } : { returnUrl }),
       });
+      trackBilling('billing/portal_opened');
       await openCheckoutUrl(result.url);
     } catch (error) {
       const code = getBillingErrorCode(error);
+      trackBilling('billing/portal_failed', { reason_code: 'portal_open_failed' });
       toast.error(t((code && BILLING_ERROR_TOAST_KEYS[code]) || 'billing.paymentMethodError'));
     } finally {
       portalInFlight.current = false;
@@ -435,6 +466,7 @@ function CloudBillingSettings() {
   const handleUpgrade = async () => {
     if (!workspaceId) return;
     setPendingAction('checkout');
+    trackBilling('billing/checkout_started', { billing_interval: interval, source: 'upgrade' });
     try {
       const result = await createCheckoutSession({
         workspaceId,
@@ -444,6 +476,11 @@ function CloudBillingSettings() {
           : returnUrl
             ? { successUrl: returnUrl, cancelUrl: returnUrl }
             : {}),
+      });
+      trackBilling('billing/checkout_redirected', {
+        billing_interval: interval,
+        source: 'upgrade',
+        checkout_kind: result.checkoutKind ?? 'subscription',
       });
       if ((await openCheckoutUrl(result.url)) === 'external') {
         setPendingAction(null);
@@ -461,6 +498,12 @@ function CloudBillingSettings() {
     } catch (error) {
       console.error('Failed to start Stripe checkout:', error);
       const code = getBillingErrorCode(error);
+      trackBilling('billing/checkout_failed', {
+        billing_interval: interval,
+        source: 'upgrade',
+        reason_code:
+          code && Object.hasOwn(BILLING_ERROR_TOAST_KEYS, code) ? code : 'checkout_open_failed',
+      });
       const toastKey = (code && BILLING_ERROR_TOAST_KEYS[code]) || 'billing.checkoutError';
       toast.error(t(toastKey));
       setPendingAction(null);
@@ -521,11 +564,20 @@ function CloudBillingSettings() {
     setSwitchIntervalPending(true);
     try {
       await setSubscriptionInterval({ workspaceId, interval: targetInterval });
+      trackBilling('billing/interval_change_result', {
+        billing_interval: targetInterval,
+        outcome: 'success',
+      });
       toast.success(t('billing.switchIntervalSuccess'));
       setSwitchIntervalDialogOpen(false);
       reloadInvoices();
     } catch (error) {
       console.error('Failed to switch billing interval:', error);
+      trackBilling('billing/interval_change_result', {
+        outcome: 'failed',
+        billing_interval: targetInterval,
+        reason_code: 'interval_change_failed',
+      });
       toast.error(t('billing.switchIntervalError'));
     } finally {
       setSwitchIntervalPending(false);
@@ -562,6 +614,7 @@ function CloudBillingSettings() {
   const handleRedeemCode = async (code: string) => {
     if (!workspaceId) return;
     setRedeemPending(true);
+    let checkoutRequired = false;
     try {
       const result = await redeemCode({
         code,
@@ -572,11 +625,21 @@ function CloudBillingSettings() {
             ? { successUrl: returnUrl, cancelUrl: returnUrl }
             : {}),
       });
+      trackBilling('billing/code_redemption_result', {
+        redemption_status: result.status,
+        outcome:
+          result.status === 'gift_redeemed' || result.status === 'checkout_required'
+            ? 'success'
+            : 'failed',
+      });
       if (result.status === 'gift_redeemed') {
         toast.success(t('billing.redeemPlusSuccess', { date: formatDate(result.endsAt) }));
         reloadInvoices();
       } else if (result.status === 'checkout_required') {
+        checkoutRequired = true;
+        trackBilling('billing/checkout_started', { source: 'promotion_code' });
         toast.success(t('billing.redeemFounderSuccess'));
+        trackBilling('billing/checkout_redirected', { source: 'promotion_code' });
         if ((await openCheckoutUrl(result.url)) === 'external') {
           setExternalCheckoutPending(true);
         }
@@ -594,6 +657,17 @@ function CloudBillingSettings() {
         toast.error(t('billing.redeemInvalid'));
       }
     } catch (error) {
+      if (checkoutRequired) {
+        trackBilling('billing/checkout_failed', {
+          source: 'promotion_code',
+          reason_code: 'checkout_open_failed',
+        });
+      } else {
+        trackBilling('billing/code_redemption_result', {
+          outcome: 'failed',
+          reason_code: 'redemption_failed',
+        });
+      }
       console.error('Failed to redeem billing code:', error);
       toast.error(t('billing.redeemInvalid'));
     } finally {

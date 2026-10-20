@@ -227,6 +227,71 @@ describe('LodyOperationStore', () => {
     }
   });
 
+  it('inherits complete scoped batch provenance and waits for every result or descendant', async () => {
+    const store = await makeStore();
+    const base = baseInput();
+    const input = {
+      workspaceId: base.workspaceId,
+      sessionId: base.requesterSessionId,
+      userId: base.requesterUserId,
+      inputId: 'summary',
+      kind: 'human' as const,
+      config: {},
+    };
+    const accept = (id: string, origins: string[], userId = input.userId) =>
+      store.accept({
+        ...base,
+        operationId: id,
+        requesterUserId: userId,
+        frozenContinuationConfig: {
+          ...base.frozenContinuationConfig,
+          notificationOriginTurnIds: origins,
+        },
+      });
+    const finish = (id: string) =>
+      store.finish(input.sessionId, id, { type: 'result', value: { items: [] } });
+    try {
+      store.inbox.activate(input.workspaceId, 'owner');
+      // The second request occurs beyond the 50-member inline preview.
+      for (let i = 0; i < 52; i++) {
+        accept(`child-${i}`, [i < 51 ? 'request-a' : 'request-b']);
+        finish(`child-${i}`);
+      }
+      accept('delegated', []);
+      finish('delegated');
+      accept('another-user', ['foreign-request'], 'user-2');
+      finish('another-user');
+      store.inbox.accept(input);
+      store.inbox.begin(input, 'exec');
+      const batch = store.inbox.prepare(input, 'owner')!;
+      expect(batch.memberCount).toBe(53);
+      expect(store.notificationOriginsForBatch(batch).sort()).toEqual(['request-a', 'request-b']);
+      expect(store.notificationOriginsForBatch({ ...batch, userId: 'user-3' })).toEqual([]);
+      expect(
+        store.pendingNotificationOrigins(input, ['request-a', 'request-b', 'foreign-request'])
+      ).toEqual(new Set(['request-a', 'request-b']));
+      expect(store.inbox.fence(batch, 'exec')).toBe(true);
+      store.inbox.settle(batch, 'settled');
+      expect(store.pendingNotificationOrigins(input, ['request-a', 'request-b'])).toEqual(
+        new Set()
+      );
+      accept('follow-up', ['request-a']);
+      expect(store.pendingNotificationOrigins(input, ['request-a', 'request-b'])).toEqual(
+        new Set(['request-a'])
+      );
+      expect(
+        store.get(input.sessionId, 'follow-up').frozenContinuationConfig.notificationOriginTurnIds
+      ).toEqual(['request-a']);
+      finish('follow-up');
+      // A finished child still has work outstanding until its result is consumed.
+      expect(store.pendingNotificationOrigins(input, ['request-a'])).toEqual(
+        new Set(['request-a'])
+      );
+    } finally {
+      store.close();
+    }
+  });
+
   it('counts wakeable queued receipts and retained execution as work; pause makes receipts passive', async () => {
     const store = await makeStore();
     const op = baseInput();

@@ -90,3 +90,5 @@ unresolved; this dependency change does not claim to fix it or replace Lody's
 existing SQLite versions.
 
 The subsequent native consumer work is recorded in [native workspace ownership](../../proposed/architecture/2026-10-16-native-workspace-repo.md), in the same #1607. The release-only verification above predates that implementation.
+
+Current boundary (2026-10-19): native consumers and their dependent application patches were withdrawn; Repo 0.23.2 remains selected. The former Promise transport supplies stream creation again. See the [rollback decision](../simplification/2026-10-19-repo-upgrade-without-consumer-migration.md).

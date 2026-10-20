@@ -69,15 +69,24 @@ export function CliDaemonSetting() {
   const busy = isRestarting || isTerminating;
   const isStopped = phase === 'stopped';
   const localAgentEnabled = state?.localAgentEnabled === true;
+  // A fatal daemon no longer retries; this is the one reason the user must act on.
+  const hostAccessDenied = phase === 'fatal' && state?.hostAccessDenied === true;
 
   return (
     <div id="cli-daemon" {...stylex.props(styles.anchor)}>
       <CompactRow
         label={t('settings.general.cliDaemon.label', 'Daemon')}
-        helper={t(
-          'settings.general.cliDaemon.helper',
-          'The background process that runs local agents and terminals.'
-        )}
+        helper={
+          hostAccessDenied
+            ? t(
+                'settings.general.cliDaemon.hostAccessDenied',
+                'Another Lody process with different privileges (started as administrator, as another user, or as a service) holds the local agent, and this app is not allowed to connect. Quit that process, or open Lody with the same privileges, then restart.'
+              )
+            : t(
+                'settings.general.cliDaemon.helper',
+                'The background process that runs local agents and terminals.'
+              )
+        }
         alignTop
       >
         <span {...stylex.props(styles.status)}>

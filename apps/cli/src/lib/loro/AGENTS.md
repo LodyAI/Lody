@@ -4,19 +4,19 @@
 
 ## Mirrors over synced docs tolerate unknown root keys
 
-Synced Mirrors use `ignoreUnknownProperties: true`; unknown newer roots must not
-block client writes. Regression:
-`packages/shared/tests/session-doc-forward-compat.test.ts`.
+Synced Mirrors use `ignoreUnknownProperties: true`; unknown roots must not block writes.
+Test: `packages/shared/tests/session-doc-forward-compat.test.ts`.
 
-SessionDocument's private Mirror is control-only. HistoryWriter writes; SessionData
-reads. `session-agent-writes.ts` reuses shared planners over that writer, never
-UI port methods or a second writer.
+SessionDocument Mirror is control-only. HistoryWriter writes; SessionData reads.
+`session-agent-writes.ts` uses shared planners, never UI ports or a second writer.
 Replacement rules: [shared](../../../../../packages/shared/AGENTS.md#session-history).
 
 ## Opening a doc pulls its stream
 
-`getOrCreateSessionDoc()` joins/pulls via `SessionDocument.init()` and stays cached
-until `cleanSessionDoc`; each open subscribes and fully syncs.
+`LoroDocumentManager.getOrCreateSessionDoc()` is not a cheap read.
+`SessionDocument.init()` joins and pulls the room immediately. It stays joined
+in the manager cache until `cleanSessionDoc`; each open costs a subscription and
+full initial sync.
 
 Rules:
 
@@ -41,8 +41,7 @@ Rules:
   teardown write status/meta for docs that must stay hidden (e.g. unfinished
   fork targets).
 
-The dispatch watcher's contract, "session metadata is the activation index", is
-documented in `../../session/AGENTS.md` and applies to any module enumerating rooms.
+Room enumeration follows the metadata activation index: `../../session/AGENTS.md`.
 
 `getOrCreateSessionDoc(..., { skipAutoRead: true })` affects only newly initialized
 wrappers. Use it for observation in an isolated command manager, never to change
@@ -51,12 +50,10 @@ see [observe scopes](../../commands/session-observe-runtime.ts).
 
 ## Streams cursors are replica-bound
 
-Daemon/commands share `repo.sqlite3`, never replicas. Native leases own Meta/Flock
-checkpoints. Daemon Doc cursors use `createDocumentRemoteCursorStore`; no shared
-`remoteCursorStore` or schedule `onPersist*`. Test: `tests/cli-streams-replica-checkpoints.test.ts`.
-
-`WorkspaceRepoLegacy` retains Docs after failed eviction. Reopen destroyed views
-in the same-key owner; share init and retain release ownership. Reject stale joins.
+Daemon/commands share `repo.sqlite3`, not replicas: Meta/Flock cursors use `createRepoStreamsPersistence`, LoroDoc cursors from
+`createDocumentRemoteCursorStore` (shared rows: daemon only). No shared
+`remoteCursorStore` or schedule-only `onPersist*`. Test:
+`tests/cli-streams-replica-checkpoints.test.ts`.
 
 ## Shared ACP runtime config contains no secrets
 
@@ -87,11 +84,12 @@ cannot retire a Turn. Its Legacy entry owns execution/analytics. Intent:
 `specs/session-initialization-deadline.md`.
 
 `workspace-presence.ts` owns Scopes; `presence-replica.ts` is synchronous.
-Only Legacy executes; no kernel Promise/timers, runtimes or POST/SSE queues.
-Failed release retains work/Cause/owner and fences its generations, not the workspace.
-Registry retires failed owners. Close joins; revoke preserves local production.
-CLI owns registry/token Scopes; durable/presence share one provider.
-`platform/presence.ts` consumes the native SDK.
+Only Legacy entries execute. No kernel Promise/timers,
+extra runtime or POST/SSE queue. Failed release retains work/Cause/owner and
+fences its generations; the registry retires it, never blocking the workspace.
+Close joins completion. Revoke preserves local
+production. CLI owns registry/token Scopes; durable/presence share one provider.
+`platform/presence.ts` consumes the published SDK native entry.
 
 ## Device resources use `machine-monitor.ts`
 
@@ -99,6 +97,11 @@ Local renderer observer/snapshot state crosses protocol-v6 `machine-monitor` fra
 and MUST sample without a cloud transport. Cloud observers/snapshots attach only after
 the authorized remote bridge attaches, and detach on offline/revocation. Sampling is
 observer-lease driven; never start OS probes permanently or persist snapshots.
+
+## Catalog readers
+
+Share Promise Repo; close readers first. Timeouts end waiters.
+Retry baseline errors in-place. Role writes confirm remote sync.
 
 ## Machine Flock writes for this machine are local-first
 
@@ -123,18 +126,16 @@ removal rules live in [../AGENTS.md](../AGENTS.md).
 
 ## Streams recovery has TWO signals and they must not be recombined
 
-In `connection-recovery.ts`, `onStreamsOnline` fires unthrottled on every health
-rising edge, releasing dirty Machine Flock docs (no timer) and automation queues.
-`onMetaRoomSynced` waits for meta catch-up before O(rooms) rescans. Defer, never
-drop, fan-out within `LODY_LORO_META_SYNCED_MIN_INTERVAL_MS` (30s): dispatch bootstrap
-is the retry path after reconcile throws. A real meta outage skips that floor;
-a transport-only flap does not.
-
-Health shorter than `LODY_LORO_HEALTH_STABILITY_WINDOW_MS` (5s) charges a failed
-recovery attempt; `force` must not clear flap history. Regression:
-`tests/reconnect-storm-repro.test.ts`.
-
-Session retries and online sweeps use native per-room sync/reconcile with borrower
-cancellation and existing deadlines. SDK health may prove failed initialization
-while Repo still says joining; ordinary baselines/live 4xx keep SDK retry ownership.
-Server force stays per-room; reset only a failed transport. Keep local peer recovery.
+`connection-recovery.ts` has TWO signals. `onStreamsOnline` is cheap, unthrottled, and
+fires on every health rising edge — it RELEASES work parked while offline (dirty
+Machine Flock docs, which arm no timer of their own, plus the scheduled automation
+queues). `onMetaRoomSynced` is the EXPENSIVE "rescan the workspace index" signal whose
+listeners do O(rooms) work: it waits for meta catch-up and is rate-limited to one
+fan-out per `LODY_LORO_META_SYNCED_MIN_INTERVAL_MS` (30s), deferred and never dropped,
+because the dispatch bootstrap scan is the only retry path for a session whose
+reconcile threw. A fan-out after a real meta-room outage skips that floor; a
+transport-only flap does not. Recombining them turned a single stuck room into ~3400
+session reconciles/minute. Backoff is flap-aware for the same reason: health that does
+not survive `LODY_LORO_HEALTH_STABILITY_WINDOW_MS` (5s) counts as a failed recovery and
+charges the attempt counter instead of resetting it, and `force` must not clear that
+history. Regression: `tests/reconnect-storm-repro.test.ts`.

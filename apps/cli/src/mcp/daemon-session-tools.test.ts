@@ -4,13 +4,41 @@ import os from 'node:os';
 import path from 'node:path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { getSessionRoomId, type MachineId, type SessionId, type WorkspaceId } from '@lody/shared';
+import { Effect } from 'effect';
+import { LoroRepo } from 'loro-repo';
+import { makePromiseRepoNetwork } from '@/lib/loro/promise-repo-network.test-support';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import {
+  getSessionRoomId,
+  getMachineFlockDocId,
+  getMachineRoomId,
+  getMachineFlockAgentConfigs,
+  writeAgentConfigToFlock,
+  getWorkspaceFlockDocId,
+  listWorkspaceAgentRoles,
+  readWorkspaceFlockRowsFromFlock,
+  readMachineFlockRowsFromFlock,
+  writeWorkspaceAgentRoleToFlock,
+  type AgentConfigId,
+  type AgentRoleId,
+  type MachineId,
+  type SessionId,
+  type WorkspaceId,
+} from '@lody/shared';
 import { bindTestPresenceApplication } from '../../tests/presence-application-fixture';
 import { withWorkspaceManager } from '@/lib/command-runtime';
+import * as commandRuntime from '@/lib/command-runtime';
+import * as sessionCommands from '@/commands/session';
+import { createResourceDiscovery } from '@/lib/resource-discovery-runtime';
+import { createSessionBackend } from '@/session/session-backend';
 import { LocalControlHandler } from '@/lib/local-control-handler';
 import { LoroDocumentManager } from '@/lib/loro/doc';
-import { runWithDaemonWorkspace, type DaemonWorkspace } from '@/lib/session-command-environment';
+import {
+  createLocalSessionCommandEnvironment,
+  runWithDaemonWorkspace,
+  runWithSessionCommandEnvironment,
+  type DaemonWorkspace,
+} from '@/lib/session-command-environment';
 import type { Logger } from '@/utils/logger';
 import { executeDaemonSessionTool } from './daemon-session-tools';
 import { buildLodyMcpServer, runWithMcpSessionContext } from './lody-mcp-server';
@@ -23,9 +51,18 @@ const createSilentLogger = (): Logger => ({
   debug: () => {},
   trace: () => {},
   setLevel: () => {},
+  setDebug: () => {},
   child: () => createSilentLogger(),
   close: async () => {},
 });
+
+function testSignal() {
+  let resolve: () => void = () => {};
+  const promise = new Promise<void>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+}
 
 const workspaceId = 'synthetic-cloud-workspace' as WorkspaceId;
 const machineId = 'synthetic-daemon-machine' as MachineId;
@@ -45,7 +82,9 @@ describe('daemon-hosted Session tools in the cloud composition', () => {
     tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'lody-daemon-tools-'));
     process.env.LODY_DATA_DIR = path.join(tempDir, '.lody');
     delete process.env.LODY_PLATFORM;
-    manager = await LoroDocumentManager.create(workspaceId, ownerUserId, createSilentLogger());
+    manager = await LoroDocumentManager.create(workspaceId, ownerUserId, createSilentLogger(), {
+      keepWorkspaceCatalogJoined: true,
+    });
     await manager.registerMachine(machineId, {
       id: machineId,
       name: 'Daemon',
@@ -71,6 +110,7 @@ describe('daemon-hosted Session tools in the cloud composition', () => {
   });
 
   afterEach(async () => {
+    vi.restoreAllMocks();
     await manager.cleanUp({ fast: true });
     await presenceApplication.closeLegacy();
     process.env = originalEnv;
@@ -85,12 +125,501 @@ describe('daemon-hosted Session tools in the cloud composition', () => {
     workdir: tempDir,
   });
 
+  const createAuth = () => ({
+    token: 'synthetic-token',
+    userId: ownerUserId,
+    userName: 'Owner',
+    userEmail: 'owner@example.test',
+    machineId,
+    machineName: 'Daemon',
+  });
+
+  async function seedRoles() {
+    const agentConfigId = await manager.createAgentConfig('custom', 'claude', machineId, 'Agent');
+    const handle = await manager.repo.openFlockDoc(getWorkspaceFlockDocId(workspaceId));
+    for (const userId of [ownerUserId, 'synthetic-collaborator']) {
+      writeWorkspaceAgentRoleToFlock(handle.flock, {
+        v: 1,
+        id: userId as AgentRoleId,
+        ownerUserId: userId,
+        visibility: 'private',
+        name: userId,
+        promptPrefix: 'Review carefully.',
+        machineId,
+        agentConfigId,
+        runConfig: {},
+        revision: 1,
+        createdAt: 1,
+        updatedAt: 1,
+      });
+    }
+    await manager.repo.flush();
+    return agentConfigId;
+  }
+
+  it.each(['metadata', 'flock'] as const)(
+    'reads daemon catalogs for the active user when %s synchronization fails',
+    async (failure) => {
+      const agentConfigId = await seedRoles();
+      vi.spyOn(commandRuntime, 'getAuthContextOrThrow').mockImplementation(createAuth);
+      vi.spyOn(commandRuntime, 'resolveWorkspaceOrThrow').mockResolvedValue({
+        id: workspaceId,
+        name: 'Synthetic',
+        slug: 'synthetic',
+        role: 'owner',
+      });
+      vi.spyOn(sessionCommands, 'readSessionMachineAccess').mockImplementation(async (args) => ({
+        ...(args.delegatedRequester?.userId === 'synthetic-collaborator'
+          ? { allowed: true as const }
+          : { allowed: false as const, reason: 'not_visible' as const }),
+      }));
+      vi.spyOn(manager, 'syncMetaOrThrow').mockImplementation(async () => {
+        if (failure === 'metadata')
+          throw new Error(
+            'Workspace metadata sync failed (resource.discovery): Repository adapter operation failed'
+          );
+      });
+      vi.spyOn(manager, 'syncFlockDocOrThrow').mockRejectedValue(
+        new Error('Flock sync unavailable')
+      );
+      for (const [name, args, expected] of [
+        ['lody_agent_role_list', {}, { items: [{ id: 'synthetic-collaborator', machineId }] }],
+        [
+          'lody_agent_role_get',
+          { id: 'synthetic-collaborator' },
+          { item: { promptPrefix: 'Review carefully.' } },
+        ],
+        ['lody_agent_config_list', {}, { items: [{ id: agentConfigId }] }],
+      ] as const) {
+        const result = await runWithDaemonWorkspace(daemon, () =>
+          executeDaemonSessionTool(context(), name, args)
+        );
+        expect(result.isError, JSON.stringify(result)).not.toBe(true);
+        expect(JSON.parse(result.content[0]?.text ?? '{}')).toMatchObject(expected);
+      }
+    }
+  );
+
+  it('keeps standalone discovery sync failures explicit and offline reads available', async () => {
+    await seedRoles();
+    vi.spyOn(manager, 'syncMetaOrThrow').mockRejectedValue(new Error('Metadata unavailable'));
+    const args = { manager, auth: createAuth(), workspaceId };
+    await expect(createResourceDiscovery(args)).rejects.toThrow('Use --offline');
+    vi.spyOn(manager, 'syncMetaOrThrow').mockResolvedValue();
+    vi.spyOn(manager, 'syncFlockDocOrThrow').mockRejectedValue(new Error('Flock unavailable'));
+    await expect((await createResourceDiscovery(args)).list('agent_role')).rejects.toThrow(
+      'Flock unavailable'
+    );
+    // With no machine access, the readable Role still remains listed as unavailable.
+    vi.spyOn(sessionCommands, 'readSessionMachineAccess').mockResolvedValue({
+      allowed: false,
+      reason: 'not_visible',
+    });
+    const offline = await createResourceDiscovery({ ...args, offline: true });
+    expect((await offline.list('agent_role')).items).toMatchObject([{ id: ownerUserId }]);
+  });
+
+  it('reads the local daemon catalog without forcing synchronization', async () => {
+    await seedRoles();
+    vi.spyOn(manager, 'syncMetaOrThrow').mockRejectedValue(new Error('Metadata unavailable'));
+    vi.spyOn(manager, 'syncFlockDocOrThrow').mockRejectedValue(new Error('Flock unavailable'));
+    const environment = createLocalSessionCommandEnvironment({
+      manager,
+      workspaceId,
+      machineId,
+      machineName: 'Daemon',
+      userId: ownerUserId,
+      host: {
+        readInvocation: daemon.readInvocation,
+        readLiveStatus: async () => {
+          throw new Error('Unexpected live status');
+        },
+        cancelSession: async () => {
+          throw new Error('Unexpected cancellation');
+        },
+        dispatchSession: async () => {
+          throw new Error('Unexpected dispatch');
+        },
+      },
+    });
+    await runWithSessionCommandEnvironment(environment, async () => {
+      const discovery = await createResourceDiscovery({
+        manager,
+        workspaceId,
+        auth: environment.auth,
+      });
+      expect((await discovery.list('agent_role')).items).toMatchObject([
+        { id: ownerUserId, machineId },
+      ]);
+    });
+  });
+
   it('executes a Session tool for another requester against the daemon replica', async () => {
     const result = await runWithDaemonWorkspace(daemon, () =>
       executeDaemonSessionTool(context(), 'lody_operation_list', {})
     );
     expect(result.isError).not.toBe(true);
     expect(JSON.parse(result.content[0]?.text ?? '{}')).toMatchObject({ items: [] });
+  });
+
+  it('returns syncing uncertainty for a detached cold catalog and reads normally after its baseline', async () => {
+    await manager.cleanUp({ fast: true });
+    manager = await LoroDocumentManager.create(workspaceId, ownerUserId, createSilentLogger(), {
+      keepWorkspaceCatalogJoined: true,
+      streamsTokens: {
+        createTokenProvider: () => Effect.die(new Error('No real cloud token in this fixture')),
+        createTokenProviderLegacy: () => {
+          throw new Error('No real cloud token in this fixture');
+        },
+      },
+    });
+    daemon = { ...daemon, manager };
+    const remoteMachineId = 'cold-machine' as MachineId;
+    const id = getMachineFlockDocId(workspaceId, remoteMachineId);
+    await manager.repo.upsertDocMeta(getMachineRoomId(remoteMachineId), {
+      id: remoteMachineId,
+      name: 'Remote',
+      ownerUserId,
+    });
+    const roleDoc = await manager.repo.openFlockDoc(getWorkspaceFlockDocId(workspaceId));
+    writeWorkspaceAgentRoleToFlock(roleDoc.flock, {
+      v: 1,
+      id: 'cold-role' as AgentRoleId,
+      name: 'Cold',
+      ownerUserId: 'synthetic-collaborator',
+      visibility: 'private',
+      machineId: remoteMachineId,
+      agentConfigId: 'cold-config' as AgentConfigId,
+      runConfig: { modelId: 'remote-model' },
+      revision: 1,
+      createdAt: 1,
+      updatedAt: 1,
+    });
+    const host = await LoroRepo.create({});
+    const network = makePromiseRepoNetwork();
+    let unsubscribe: (() => void) | undefined;
+    try {
+      const remote = await host.openFlockDoc(id);
+      writeAgentConfigToFlock(remote.flock, {
+        id: 'cold-config' as AgentConfigId,
+        machineId: remoteMachineId,
+        name: 'Remote',
+        description: '',
+        cliType: 'custom',
+        agentType: 'claude',
+        env: {},
+      });
+      await host.addTransport('streams', network.transport());
+      await host.joinMetaRoom();
+      await host.joinFlockDocRoom(id);
+      vi.spyOn(sessionCommands, 'readSessionMachineAccess').mockResolvedValue({ allowed: true });
+      const args = {
+        manager,
+        auth: createAuth(),
+        workspaceId,
+        delegatedRequester: { userId: 'synthetic-collaborator' },
+        initialCatalogWaitMs: 0,
+      };
+      const discovery = await runWithDaemonWorkspace(daemon, () => createResourceDiscovery(args));
+      expect(await discovery.list('agent_role')).toMatchObject({
+        sync: { state: 'syncing', retryable: true },
+        items: [{ availability: { state: 'unknown', reason: 'catalog_syncing' } }],
+      });
+      await expect(discovery.get('agent_config', 'cold-config')).rejects.toThrow('CATALOG_SYNCING');
+      const local = await manager.repo.openFlockDoc(id);
+      const received = testSignal();
+      unsubscribe = local.flock.subscribe(() => {
+        if (
+          getMachineFlockAgentConfigs(readMachineFlockRowsFromFlock(local.flock))[
+            'cold-config' as AgentConfigId
+          ]
+        )
+          received.resolve();
+      });
+      await manager.repo.addTransport('streams', network.transport());
+      await received.promise;
+      // A new request reads the same Promise replica; no forced catch-up is needed.
+      vi.spyOn(manager, 'syncMetaOrThrow').mockRejectedValue(new Error('No request sync'));
+      vi.spyOn(manager, 'syncFlockDocOrThrow').mockRejectedValue(new Error('No request sync'));
+      const ready = await runWithDaemonWorkspace(daemon, () => createResourceDiscovery(args));
+      expect(await ready.get('agent_config', 'cold-config')).toMatchObject({
+        item: { id: 'cold-config', name: 'Remote' },
+      });
+    } finally {
+      unsubscribe?.();
+      await host.destroy();
+    }
+  });
+
+  it('validates Role creation against a cold remote config before publishing the review card', async () => {
+    const network = makePromiseRepoNetwork();
+    const host = await LoroRepo.create({});
+    try {
+      const remoteMachineId = 'remote-role-target' as MachineId;
+      const id = getMachineFlockDocId(workspaceId, remoteMachineId);
+      const room = await host.openFlockDoc(id);
+      writeAgentConfigToFlock(room.flock, {
+        id: 'remote-role-config' as AgentConfigId,
+        machineId: remoteMachineId,
+        name: 'Remote',
+        description: '',
+        cliType: 'custom',
+        agentType: 'claude',
+        env: {},
+      });
+      await host.addTransport('memory', network.transport());
+      await host.joinMetaRoom();
+      await host.joinFlockDocRoom(id);
+      await manager.repo.addTransport('memory', network.transport());
+      await manager.repo.upsertDocMeta(getMachineRoomId(remoteMachineId), {
+        id: remoteMachineId,
+        name: 'Remote',
+        ownerUserId,
+      });
+      const session = await manager.getOrCreateSessionDoc(sessionId, { historyBackend: 'loro' });
+      vi.spyOn(session, 'waitUntilSynced').mockResolvedValue(true);
+      vi.spyOn(commandRuntime, 'getAuthContextOrThrow').mockImplementation(createAuth);
+      vi.spyOn(commandRuntime, 'resolveWorkspaceOrThrow').mockResolvedValue({
+        id: workspaceId,
+        name: 'Synthetic',
+        slug: 'synthetic',
+        role: 'owner',
+      });
+      vi.spyOn(sessionCommands, 'readSessionMachineAccess').mockResolvedValue({ allowed: true });
+      const result = await runWithDaemonWorkspace(daemon, () =>
+        executeDaemonSessionTool(context(), 'lody_agent_role_create', {
+          requestId: 'cold-target',
+          name: 'Remote Role',
+          machineId: remoteMachineId,
+          agentConfigId: 'remote-role-config',
+        })
+      );
+      expect(result.isError, JSON.stringify(result)).not.toBe(true);
+      expect(JSON.parse(result.content[0]?.text ?? '{}')).toMatchObject({ pending: true });
+      const originalSync = manager.syncFlockDocOrThrow.bind(manager);
+      const originalFailure = new Error('Synthetic remote catalog outage');
+      vi.spyOn(manager, 'syncFlockDocOrThrow').mockImplementation((docId, options) =>
+        docId === id ? Promise.reject(originalFailure) : originalSync(docId, options)
+      );
+      const retry = await runWithDaemonWorkspace(daemon, () =>
+        executeDaemonSessionTool(context(), 'lody_agent_role_create', {
+          requestId: 'cold-retry',
+          name: 'Retry Role',
+          machineId: remoteMachineId,
+          agentConfigId: 'remote-role-config',
+        })
+      );
+      expect(retry.isError).toBe(true);
+      expect(JSON.parse(retry.content[0]?.text ?? '{}')).toMatchObject({
+        ok: false,
+        error: { code: 'SYNC_UNAVAILABLE', retryable: true },
+      });
+    } finally {
+      await host.destroy();
+    }
+  });
+
+  it.each([
+    ['create', 'metadata'],
+    ['create', 'workspace'],
+    ['create', 'target'],
+    ['update', 'metadata'],
+    ['update', 'workspace'],
+  ] as const)(
+    'keeps failed %s %s validation retryable without publishing a proposal',
+    async (action, failure) => {
+      const configId = await seedRoles();
+      const session = await manager.getOrCreateSessionDoc(sessionId, { historyBackend: 'loro' });
+      const backend = await createSessionBackend(session);
+      vi.spyOn(session, 'waitUntilSynced').mockResolvedValue(true);
+      vi.spyOn(manager, 'syncDocOrThrow').mockResolvedValue();
+      vi.spyOn(commandRuntime, 'getAuthContextOrThrow').mockImplementation(createAuth);
+      vi.spyOn(commandRuntime, 'resolveWorkspaceOrThrow').mockResolvedValue({
+        id: workspaceId,
+        name: 'Synthetic',
+        slug: 'synthetic',
+        role: 'owner',
+      });
+      vi.spyOn(sessionCommands, 'readSessionMachineAccess').mockResolvedValue({ allowed: true });
+      let unavailable = true;
+      const original = new Error('Synthetic synchronization outage');
+      vi.spyOn(manager, 'syncMetaOrThrow').mockImplementation(async () => {
+        if (unavailable && failure === 'metadata') throw original;
+      });
+      vi.spyOn(manager, 'syncFlockDocOrThrow').mockImplementation(async (id) => {
+        if (
+          unavailable &&
+          id ===
+            (failure === 'target'
+              ? getMachineFlockDocId(workspaceId, machineId)
+              : getWorkspaceFlockDocId(workspaceId))
+        )
+          throw original;
+      });
+      const requestId = `${action}-${failure}`;
+      const args =
+        action === 'create'
+          ? { requestId, name: 'New role', machineId, agentConfigId: configId }
+          : { requestId, roleId: 'synthetic-collaborator', patch: { description: 'Updated' } };
+      const propose = () =>
+        runWithDaemonWorkspace(daemon, () =>
+          executeDaemonSessionTool(context(), `lody_agent_role_${action}`, args)
+        );
+      const failed = await propose();
+      expect(failed.isError).toBe(true);
+      expect(JSON.parse(failed.content[0]?.text ?? '{}')).toMatchObject({
+        error: { code: 'SYNC_UNAVAILABLE', retryable: true },
+      });
+      expect(await backend.readTurn(`agent-role-proposal-${requestId}`)).toMatchObject({
+        state: 'missing',
+      });
+      unavailable = false;
+      expect(JSON.parse((await propose()).content[0]?.text ?? '{}')).toMatchObject({
+        pending: true,
+      });
+      expect(await backend.readTurn(`agent-role-proposal-${requestId}`)).toMatchObject({
+        state: 'ready',
+      });
+    }
+  );
+
+  it('hydrates a cold headless daemon and receives later Role changes without a discovery sync', async () => {
+    const docId = getWorkspaceFlockDocId(workspaceId);
+    const network = makePromiseRepoNetwork();
+    const host = await LoroRepo.create({});
+    const remote = await host.openFlockDoc(docId);
+    const remoteFlock = remote.flock;
+    const local = await manager.repo.openFlockDoc(docId);
+    const received = testSignal();
+    const updated = testSignal();
+    const reattached = testSignal();
+    const detach = local.flock.subscribe(() => {
+      const role = listWorkspaceAgentRoles(readWorkspaceFlockRowsFromFlock(local.flock)).find(
+        (row) => row.id === 'remote-role'
+      );
+      if (role?.revision === 1) received.resolve();
+      if (role?.revision === 2) updated.resolve();
+      if (role?.revision === 3) reattached.resolve();
+    });
+    const detachCallbacks = [detach];
+    try {
+      writeWorkspaceAgentRoleToFlock(remoteFlock, {
+        v: 1,
+        id: 'remote-role' as AgentRoleId,
+        ownerUserId: 'synthetic-collaborator',
+        visibility: 'private',
+        name: 'Remote Role',
+        machineId,
+        agentConfigId: 'remote-config' as AgentConfigId,
+        runConfig: {},
+        revision: 1,
+        createdAt: 1,
+        updatedAt: 1,
+      });
+      await host.addTransport('memory', network.transport());
+      await host.joinMetaRoom();
+      await host.joinFlockDocRoom(docId);
+      await manager.repo.addTransport('memory', network.transport());
+      await received.promise;
+      const remoteMachineId = 'remote-machine' as MachineId;
+      const machineDocId = getMachineFlockDocId(workspaceId, remoteMachineId);
+      const machineRoom = await host.openFlockDoc(machineDocId);
+      const remoteConfig = {
+        id: 'remote-agent' as AgentConfigId,
+        machineId: remoteMachineId,
+        name: 'Remote Agent',
+        description: '',
+        cliType: 'custom' as const,
+        agentType: 'claude' as const,
+        env: {},
+      };
+      writeAgentConfigToFlock(machineRoom.flock, remoteConfig);
+      await host.joinFlockDocRoom(machineDocId);
+      await manager.repo.upsertDocMeta(getMachineRoomId(remoteMachineId), {
+        id: remoteMachineId,
+        name: 'Remote Machine',
+        ownerUserId,
+      });
+      const localMachine = await manager.repo.openFlockDoc(machineDocId);
+      const configReceived = testSignal();
+      const configUpdated = testSignal();
+      const detachMachine = localMachine.flock.subscribe(() => {
+        const config = getMachineFlockAgentConfigs(
+          readMachineFlockRowsFromFlock(localMachine.flock)
+        )[remoteConfig.id];
+        if (config?.name === 'Remote Agent') configReceived.resolve();
+        if (config?.name === 'Updated Agent') configUpdated.resolve();
+      });
+      detachCallbacks.push(detachMachine);
+      vi.spyOn(manager, 'syncMetaOrThrow').mockRejectedValue(new Error('No request sync'));
+      vi.spyOn(manager, 'syncFlockDocOrThrow').mockRejectedValue(new Error('No request sync'));
+      vi.spyOn(commandRuntime, 'getAuthContextOrThrow').mockImplementation(createAuth);
+      vi.spyOn(commandRuntime, 'resolveWorkspaceOrThrow').mockResolvedValue({
+        id: workspaceId,
+        name: 'Synthetic',
+        slug: 'synthetic',
+        role: 'owner',
+      });
+      vi.spyOn(sessionCommands, 'readSessionMachineAccess').mockResolvedValue({ allowed: true });
+      const list = () =>
+        runWithDaemonWorkspace(daemon, () =>
+          executeDaemonSessionTool(context(), 'lody_agent_role_list', {})
+        );
+      expect(JSON.parse((await list()).content[0]?.text ?? '{}').items).toMatchObject([
+        { id: 'remote-role', revision: 1 },
+      ]);
+      const configs = () =>
+        runWithDaemonWorkspace(daemon, () =>
+          executeDaemonSessionTool(context(), 'lody_agent_config_list', {
+            machineId: remoteMachineId,
+          })
+        );
+      // A first read admits background reader interest; it never waits for catch-up.
+      await configs();
+      await configReceived.promise;
+      expect(JSON.parse((await configs()).content[0]?.text ?? '{}').items).toMatchObject([
+        { id: remoteConfig.id, name: 'Remote Agent' },
+      ]);
+      writeAgentConfigToFlock(machineRoom.flock, {
+        ...remoteConfig,
+        name: 'Updated Agent',
+      });
+      await configUpdated.promise;
+      expect(JSON.parse((await configs()).content[0]?.text ?? '{}').items).toMatchObject([
+        { id: remoteConfig.id, name: 'Updated Agent' },
+      ]);
+      const role = listWorkspaceAgentRoles(readWorkspaceFlockRowsFromFlock(remoteFlock))[0];
+      if (!role) throw new Error('Missing Role');
+      writeWorkspaceAgentRoleToFlock(remoteFlock, {
+        ...role,
+        revision: 2,
+        name: 'Updated Role',
+        updatedAt: 2,
+      });
+      await updated.promise;
+      expect(JSON.parse((await list()).content[0]?.text ?? '{}').items).toMatchObject([
+        { id: 'remote-role', name: 'Updated Role', revision: 2 },
+      ]);
+      await manager.repo.removeTransport('memory');
+      writeWorkspaceAgentRoleToFlock(remoteFlock, {
+        ...role,
+        revision: 3,
+        name: 'Reattached Role',
+        updatedAt: 3,
+      });
+      // Cached results stay useful while detached; reattachment refreshes the same replica.
+      expect(JSON.parse((await list()).content[0]?.text ?? '{}').items).toMatchObject([
+        { id: 'remote-role', revision: 2 },
+      ]);
+      await manager.repo.addTransport('memory', network.transport());
+      await reattached.promise;
+      expect(JSON.parse((await list()).content[0]?.text ?? '{}').items).toMatchObject([
+        { id: 'remote-role', name: 'Reattached Role', revision: 3 },
+      ]);
+    } finally {
+      for (const unsubscribe of detachCallbacks) unsubscribe();
+      await host.destroy();
+    }
   });
 
   it('routes an MCP process Session tool to the daemon instead of executing it locally', async () => {
@@ -205,7 +734,7 @@ describe('daemon-hosted Session tools in the cloud composition', () => {
     await expect(
       runWithDaemonWorkspace(daemon, () =>
         executeDaemonSessionTool(
-          { ...context(), sessionId: 'missing-session' },
+          { ...context(), sessionId: 'missing-session' as SessionId },
           'lody_operation_list',
           {}
         )

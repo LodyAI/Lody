@@ -63,8 +63,8 @@ export const composerSurface = stylex.create({
     outlineStyle: 'none',
     fontFamily: 'inherit',
     fontSize: text.subheadlineSize,
-    fontWeight: 500,
-    letterSpacing: text.controlTracking,
+    fontWeight: 550,
+    fontVariationSettings: "'opsz' 18",
     lineHeight: text.subheadlineLeading,
     whiteSpace: 'nowrap',
     textAlign: 'start',
@@ -84,7 +84,6 @@ export const composerSurface = stylex.create({
    * it stays focusable for its tooltip, and drops the pointer's fill.
    */
   triggerInert: {
-    opacity: 0.45,
     backgroundColor: 'transparent',
     color: colors.secondaryLabel,
   },
@@ -237,8 +236,8 @@ export const composerSurface = stylex.create({
     color: colors.label,
     fontFamily: 'inherit',
     fontSize: text.subheadlineSize,
-    fontWeight: 500,
-    letterSpacing: text.controlTracking,
+    fontWeight: 550,
+    fontVariationSettings: "'opsz' 18",
     lineHeight: text.subheadlineLeading,
     whiteSpace: 'nowrap',
     textAlign: 'start',
@@ -289,7 +288,6 @@ export const composerSurface = stylex.create({
     fontSize: text.subheadlineSize,
     lineHeight: text.subheadlineLeading,
     fontWeight: 400,
-    letterSpacing: text.controlTracking,
   },
   /** Groups selector rows without overriding `Menu.Content`'s inset. */
   menuList: {
@@ -330,7 +328,7 @@ export const composerSurface = stylex.create({
   /** Where the keyboard or the pointer is. */
   rowHighlighted: { backgroundColor: POPUP_HIGHLIGHT },
   /** The same 45% the whole library uses, and no pointer. */
-  rowDisabled: { opacity: 0.45, pointerEvents: 'none' },
+  rowDisabled: { color: colors.secondaryLabel, pointerEvents: 'none' },
   /** A row's words: the name, and what it is about under it. */
   rowText: {
     display: 'flex',
@@ -409,8 +407,8 @@ export const composerSurface = stylex.create({
     color: colors.label,
     fontFamily: 'inherit',
     fontSize: text.subheadlineSize,
-    fontWeight: 500,
-    letterSpacing: text.controlTracking,
+    fontWeight: 550,
+    fontVariationSettings: "'opsz' 18",
     '::placeholder': { color: colors.tertiaryLabel, opacity: 1 },
   },
 });

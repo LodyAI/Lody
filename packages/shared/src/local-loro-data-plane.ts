@@ -670,10 +670,3 @@ export function base64ToBytes(encoded: string): Uint8Array {
   }
   return bytes;
 }
-
-export type LocalLoroDataPlaneConnection = {
-  send: (message: LocalLoroDataPlaneClientMessage) => void;
-  onMessage: (listener: (message: LocalLoroDataPlaneServerMessage) => void) => () => void;
-  onStatusChange: (listener: (connected: boolean) => void) => () => void;
-  isConnected: () => boolean;
-};

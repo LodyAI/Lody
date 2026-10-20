@@ -214,6 +214,8 @@ export type LaunchLocalPathResult =
     };
 
 export type ShowSessionCompletionNotificationInput = {
+  /** New renderers already checked visibility of this specific source. */
+  allowWhileForeground?: boolean;
   sessionId: string;
   workspaceSlug?: string;
   title: string;
@@ -355,6 +357,11 @@ export type ElectronCliState = {
   runtime?: CliRuntimeState;
   runtimeOwnership?: 'owned' | 'external';
   message?: string;
+  /**
+   * Fatal because a Host owns the runtime endpoint but refuses this desktop
+   * (on Windows, typically one started elevated or in a service session).
+   */
+  hostAccessDenied?: true;
   retryAttempt?: number;
   retryInMs?: number;
   lastExitCode?: number | null;

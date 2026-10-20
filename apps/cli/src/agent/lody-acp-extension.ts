@@ -16,6 +16,7 @@ import {
   MAX_USAGE_SCOPE_ID_LENGTH,
   normalizeLodyExtensionMethod,
   type LodyExtensionCapabilities,
+  type LodySessionActivityUpdate,
   type RateLimitsSnapshot,
   type SessionUsageUpdate,
 } from 'acp-extension-core';
@@ -81,8 +82,16 @@ const LodyCapabilitiesSchema = z
     compaction: VersionOneSchema.optional(),
     sessionHistory: VersionOneSchema.optional(),
     worktreeProject: VersionOneSchema.optional(),
+    sessionActivity: VersionOneSchema.optional().catch(undefined),
   })
   .partial();
+
+const SessionActivityUpdateSchema = z.object({
+  version: z.literal(1),
+  sessionId: z.string().min(1),
+  state: z.enum(['idle', 'running', 'requires_action']),
+  backgroundTaskCount: z.number().int().nonnegative(),
+});
 
 const ModelUsageSchema = z.object({
   inputTokens: z.number().nonnegative(),
@@ -164,6 +173,7 @@ export type LodyExtensionEvent =
   | { readonly type: 'subagent'; readonly event: LodySubagentEvent }
   | { readonly type: 'usage'; readonly update: SessionUsageUpdate; readonly accountingId?: string }
   | { readonly type: 'rateLimits'; readonly snapshot: RateLimitsSnapshot }
+  | { readonly type: 'sessionActivity'; readonly update: LodySessionActivityUpdate }
   | {
       readonly type: 'legacyProposedPlan';
       readonly plan: z.infer<typeof LegacyProposedPlanSchema>;
@@ -260,6 +270,9 @@ export function parseLodyExtensionMessage(args: {
   }
   if (method === LODY_EXTENSION_METHODS.rateLimitsUpdate) {
     return { type: 'rateLimits', snapshot: parseRateLimitsSnapshot(args.params) };
+  }
+  if (method === LODY_EXTENSION_METHODS.sessionActivityUpdate) {
+    return { type: 'sessionActivity', update: SessionActivityUpdateSchema.parse(args.params) };
   }
 
   // One-release compatibility for pre-Core-v0.1 managed runtimes.

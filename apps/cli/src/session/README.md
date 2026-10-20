@@ -15,6 +15,16 @@ CLI/MCP orchestration contract is specs/session-orchestration.md.
 | Execution        | [Execution service](session-execution-service.ts) | Owns turns, steer results, cancellation, and raw-request drain.                      |
 | Process lifetime | [Session](session.ts)                             | Owns ACP resources, confirmed termination, and bounded Codex refresh-start recovery. |
 
+## Terminal notification facts
+
+Execution publishes typed terminal facts using the frozen invocation requester and
+input turn identity. Input author provenance determines result audience; Session
+containment does not. `onTurnOutcome` is attempted once, even on failure; its consumer
+publishes the latest desktop projection and submits mobile independently. Installing
+this consumer disables the legacy execution completion sender. Older embedders retain
+that callback. No notification journal, retry or replay. See [notification ownership rules](../lib/notifications/AGENTS.md).
+A notification failure cannot replay Agent execution.
+
 ## Files
 
 - `session-dispatch-watcher.ts` — the current dispatch entry: watches
@@ -191,6 +201,13 @@ discard it; Edit & Resend keeps it because preparation has already created the r
 inside that same ACP process. Creation/restoration retain their cancellation fences until
 initialization completes; those fences must not override a later `keep` during configuration.
 Binding a ready session alone does not authorize termination.
+
+An ordinary user turn can retry a stale ACP prompt once before observing output; Inbox
+submissions never retry. Exact-instance retirement detaches lifecycle listeners before
+termination, preserving the assistant entry and output owner through resume. Until retirement
+succeeds, the disconnected-execution release path retains the old Session for cleanup,
+including missing-session errors and Stop. Success clears the old prompt's cancellation drain,
+so Stop reaches the reusable replacement.
 
 History promotion and activation can fail independently. `promotion-failed` preserves proof
 of non-delivery. `recoveryOwned` tells the renderer not to publish a conflicting activation;
@@ -382,6 +399,16 @@ The shared renderer uses the existing local IPC or remote history RPC bridge;
 Web/iOS clients need no Node addon. The owning machine must be available for RPC
 reads; browser-local IndexedDB replicas and offline sync are separate work.
 Runtime packaging and verification: [native runtime note](../../../../.agents/notes/proposed/architecture/2026-10-09-roost-native-runtime.md).
+
+Latest-turn queries share `readLatestTurn` from session-data. It scans the latest
+40-row page first and reads older pages only when no readable match is present.
+The `accept_input_and_dispatch` activation guard uses this path too: a newly
+accepted tail input must not wait for unrelated old history bodies before its
+receipt. The [input acceptance lookup note](../../../../.agents/notes/proposed/bug-fix/2026-10-19-roost-input-acceptance-paging.md)
+records the cold-reopen native regression and its separate rollout from browser recovery.
+The manual [first-input benchmark](../../benchmarks/roost-first-input.mts) reopens
+identical synthetic snapshots, records acceptance timings and page reads, and
+keeps native SQLite durability distinct from the in-memory Loro reference.
 
 ### Incremental replica recovery
 

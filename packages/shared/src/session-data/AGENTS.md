@@ -8,8 +8,9 @@
 - Directory reads contain identities, scalars and input configuration, never
   bodies. Model summary reads use the narrow scalar/count reader, including legacy
   rows; never serialize items, plans, or provider extension metadata. Input configuration projects on first read and memoizes: the
-  projection is a schema parse per user turn, and a directory read covers the
-  whole conversation to answer a question about its tail. Targeted reads materialize only the selected turn. Status queries use
+  projection is a schema parse per user turn. Latest-turn queries use reverse
+  directory pages when available, visiting older pages only until a readable match;
+  non-paged readers scan directory scalars. Targeted reads materialize only the selected turn. Status queries use
   the directory; explicit export/replay uses one consistent `readAll` observation.
   `readTurnOutput` reads the selected assistant and relevant failure notices in
   one observation instead of serializing the transcript on every token.
@@ -59,8 +60,9 @@
   non-image resource blob bytes through `acp/tool-call-history.ts`; replay shares
   the rule. Keep resource/download identity, audio, readable output, complete diffs
   and sparse semantics. Child raw input retains its displayed plan; scalar/array
-  raw output has one readable copy, never a duplicate in metadata. Permission
-  enrichment preserves stored content; malformed new values reach writer validation.
+  raw output has one readable copy, never a duplicate in metadata; array copies
+  drop image entries by the same rule. Permission enrichment preserves stored
+  content; malformed new values reach writer validation.
 
 - Submissions append on the live doc as local commits; transports upload only
   local events. Never author on a fork and import the export: it misses upload,

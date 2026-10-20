@@ -31,7 +31,17 @@ export type LocalCliHostLease = {
 
 export type LocalCliHostLeaseResult =
   | { status: 'acquired'; lease: LocalCliHostLease }
-  | { status: 'occupied'; record: LocalCliHostRecord | null };
+  | {
+      status: 'occupied';
+      record: LocalCliHostRecord | null;
+      /**
+       * The endpoint exists but refused this process (EPERM/EACCES). On Windows
+       * this is a host started under another token — elevated, another user or
+       * a service session — whose default pipe DACL denies us; retrying cannot
+       * change it.
+       */
+      accessDenied?: true;
+    };
 
 type AcquireLocalCliHostLeaseOptions = {
   instanceId: string;
@@ -136,19 +146,34 @@ function listen(server: net.Server, endpoint: LocalCliHostEndpoint): void {
   }
 }
 
+type HostProbe = { record: LocalCliHostRecord | null; accessDenied: boolean };
+
+function isAccessDenied(error: NodeJS.ErrnoException): boolean {
+  // libuv reports Win32 ERROR_ACCESS_DENIED on a pipe connect as EPERM; a Unix
+  // socket the caller may not open fails with EACCES.
+  return error.code === 'EPERM' || error.code === 'EACCES';
+}
+
 export async function inspectLocalCliHost(
   endpoint: LocalCliHostEndpoint = getLocalCliHostEndpoint(),
   timeoutMs = HOST_REQUEST_TIMEOUT_MS
 ): Promise<LocalCliHostRecord | null> {
+  return (await probeLocalCliHost(endpoint, timeoutMs)).record;
+}
+
+async function probeLocalCliHost(
+  endpoint: LocalCliHostEndpoint,
+  timeoutMs = HOST_REQUEST_TIMEOUT_MS
+): Promise<HostProbe> {
   return await new Promise((resolve) => {
     const socket = connect(endpoint);
     let buffer = '';
     let settled = false;
-    const finish = (record: LocalCliHostRecord | null) => {
+    const finish = (record: LocalCliHostRecord | null, accessDenied = false) => {
       if (settled) return;
       settled = true;
       socket.destroy();
-      resolve(record);
+      resolve({ record, accessDenied });
     };
     socket.setTimeout(timeoutMs, () => finish(null));
     socket.on('data', (chunk) => {
@@ -165,9 +190,15 @@ export async function inspectLocalCliHost(
         finish(null);
       }
     });
-    socket.once('error', () => finish(null));
+    socket.once('error', (error: NodeJS.ErrnoException) => finish(null, isAccessDenied(error)));
     socket.once('end', () => finish(null));
   });
+}
+
+function occupiedBy(probe: HostProbe): LocalCliHostLeaseResult {
+  return probe.accessDenied
+    ? { status: 'occupied', record: probe.record, accessDenied: true }
+    : { status: 'occupied', record: probe.record };
 }
 
 function isShutdownRequest(
@@ -281,9 +312,9 @@ export async function acquireLocalCliHostLease(
   const endpoint = options.endpoint ?? getLocalCliHostEndpoint();
   throwIfAborted(options.signal);
 
-  const observed = await inspectLocalCliHost(endpoint);
+  const observed = await probeLocalCliHost(endpoint);
   throwIfAborted(options.signal);
-  if (observed) return { status: 'occupied', record: observed };
+  if (observed.record || observed.accessDenied) return occupiedBy(observed);
 
   const record: LocalCliHostRecord = {
     version: 1,
@@ -294,7 +325,7 @@ export async function acquireLocalCliHostLease(
   };
   const listening = await createListeningHost(endpoint, record, options.shutdownControl);
   if (!listening) {
-    return { status: 'occupied', record: await inspectLocalCliHost(endpoint) };
+    return occupiedBy(await probeLocalCliHost(endpoint));
   }
   if (options.signal?.aborted) {
     await closeListeningHost(listening);

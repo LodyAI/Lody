@@ -121,3 +121,5 @@ component details.
 - Removal/leave do not cancel accrued service fees. Deleted workspace invoices stay
   reachable for the retained billing owner through `deleted-workspace-billing.tsx`
   in personal Account settings; invoice details reuse `BillingInvoiceDetails`.
+
+- Billing telemetry: never infer payment from returns; exclude URLs, codes and raw errors.

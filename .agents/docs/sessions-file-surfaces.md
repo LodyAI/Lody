@@ -24,13 +24,27 @@ bounded Machine RPC reads. Indexing and saving still require the daemon. See the
 - The Changes sidebar's Types view keeps the filename prominent and shows its
   parent workspace path beneath it, so similarly named files remain identifiable
   without relying on a hover-only title.
+  Mobile change-stat presses open this same Types/Files list in
+  `SessionMobileDiffDrawer`; selecting a canonical path enters the All Changes diff
+  with the full path set and a fresh focus request. First-level browsing does not
+  mount a diff panel. Back retains the list's view/expansion/scroll and the mounted
+  diff's state, with its hidden reads paused. Direct conversation-file and comment
+  navigation still enters the precise diff directly. Both levels share one modal
+  and the existing enclosing-session popup host.
+- All Changes compares the resolved merge-base against disk by default. Its header
+  can switch to an uncommitted scope (`HEAD` against disk, including staged,
+  unstaged and untracked non-ignored files) and names the resolved base in both
+  modes. The control is hidden when the machine does not advertise
+  `codeCollabAllChangesScope`; non-Git and unborn worktrees report an explicit
+  unavailable state
+  ([decision](../notes/implemented/feature/2026-10-19-all-changes-diff-scope.md)).
 - Diffs opened with a precise file focus open only that file by default; the other
   cards start collapsed and remain individually expandable. A base (All Changes)
   diff opened without a focus starts with every card collapsed, while a direct
   conversation/turn diff without a file focus keeps its all-files-open default.
-  A card still loading draws a pulsing skeleton body only if it will open, and
-  only the first `MAX_DIFF_SKELETON_BODIES` such cards do; the rest wait as
-  headers. One body per file in a diff of a few thousand files made WebKit
+  A card still loading draws a pulsing skeleton body only if it will open and
+  is near the scrollport; at most `MAX_DIFF_SKELETON_BODIES` such cards pulse.
+  Other open cards use static placeholders. One pulsing body per file in a diff of a few thousand files made WebKit
   composite thousands of pulsing layers and killed the iOS WebContent process
   ([decision](../notes/implemented/bug-fix/2026-10-16-diff-loading-skeleton-cap.md)).
   On mobile, the diff-header action closes the diff sheet before opening the
@@ -40,6 +54,31 @@ bounded Machine RPC reads. Indexing and saving still require the daemon. See the
   on the body; a Base UI drawer portalled there can pass scrolling through to
   the conversation. Keep this choice local to the mobile diff rather than changing
   the default container of every modal.
+- Multi-file diff panels keep filename shells and expansion state mounted, but
+  load turn/deferred snapshots and mount code bodies only near the scrollport
+  (600px overscan, with an explicit file focus always included). Hidden panels
+  pause new reads. `use-diff-viewport.ts` preserves the visible file's offset when
+  earlier bodies grow; at the bottom it anchors the last visible file. Measured
+  body placeholders preserve space when code leaves the viewport. Bodies with
+  pointer or keyboard interaction remain mounted to preserve selections, expanded
+  context and unsent comments. Standalone snippets with at most 8,192 combined
+  characters and 256 combined lines parse inline, so first mounts and uncached
+  remounts do not wait behind a busy parse Worker. Other standalone cache misses
+  use the shared parse Worker when available; explicit multi-file and chunked
+  sources use it regardless of size. Syntax highlighting still uses the shared
+  render Worker for small snippets too. Standalone inputs below the former 200,000-character threshold
+  retain full unchanged-line context and their synchronous availability fallback
+  if a Worker is unavailable or fails. Explicit multi-file/chunked and larger
+  inputs keep bounded metadata and fail visibly rather than parsing inline.
+  In-flight reads keep their slots until settlement across
+  viewport/source changes; live batch identity fences old content, including
+  equal-length edits. All Changes retains its existing batched inline transfer
+  and decoding; only deferred reads become viewport-driven. See the
+  [implementation decision](../notes/implemented/bug-fix/2026-10-17-multi-file-diff-opening.md).
+- File-provider trees attach lazy directories through a per-construction sibling
+  index, then sort each changed sibling array once. Directory ids, loaded children,
+  modified flags and directories-before-files order are preserved; the temporary
+  indexes are discarded with construction, never shared across provider snapshots.
 - Editor window (Monaco): `session-monaco-text-viewer.tsx` inside
   `session-file-content-view.tsx`.
   File-link line anchors move Monaco's cursor as well as its viewport, using an
@@ -157,6 +196,19 @@ bounded Machine RPC reads. Indexing and saving still require the daemon. See the
 - CSV/TSV and XLSX support preview-only resize and rectangular selection copy.
   Clipboard values preserve table structure; XLSX reads from its worker through
   a bounded adapter. See the [decision](../notes/implemented/feature/2026-10-09-spreadsheet-preview-controls.md).
+- PDF/Office/image previews with an open session composer support source-labelled
+  text/cell references and screenshot regions with comments. The screenshot icon shares
+  the reading toolbar; native text selection opens an anchored comment card with
+  retained source highlighting. Typed drafts survive scrolling away and back.
+  PDF rotation lives in More; PDF/CSV search expands below the reading controls.
+  Captures are clipped to
+  the authorized preview, preserve display pixel density within a 4-megapixel
+  output budget, and keep their logical preview size. PDF page crops preserve
+  source alignment, including regions crossing page boundaries. Changing source or hiding
+  the surface discards unfinished preparation. Context uses existing expandable
+  text drafts and images use existing attachments. These are captured snapshots,
+  without revision-aware source navigation. Existing image drafts can be marked
+  up and replaced after acceptance. See the [selection decision](../notes/implemented/feature/2026-10-17-document-selection-and-image-markup.md).
 - **Core viewers are intentionally NOT code-split** (file viewer, diff viewer,
   diff panel, inner Monaco/Markdown remain static imports). The old
   `lazy(() => import())` wrappers produced stale-chunk load failures in the

@@ -200,6 +200,7 @@ describe('workspace identity capability boundary', () => {
     const status = container?.querySelector('[data-workspace-status]');
     expect(status?.getAttribute('data-workspace-status')).toBe('syncing');
     expect(status?.textContent).toBe('Syncing target workspace…');
+    expect(status?.querySelector('[data-working-grid]')).not.toBeNull();
   });
 
   it('keeps connection failures ahead of workspace synchronization', () => {
@@ -215,6 +216,7 @@ describe('workspace identity capability boundary', () => {
     const status = container?.querySelector('[data-workspace-status]');
     expect(status?.getAttribute('data-workspace-status')).toBe('offline');
     expect(status?.textContent).toBe('No connection');
+    expect(status?.querySelector('[data-working-grid]')).toBeNull();
   });
 
   it('supports a content-scoped loading placeholder without taking over the viewport', () => {
@@ -222,8 +224,10 @@ describe('workspace identity capability boundary', () => {
 
     const placeholder = container?.querySelector('[data-loading-placeholder-scope]');
     expect(placeholder?.getAttribute('data-loading-placeholder-scope')).toBe('content');
-    expect(placeholder?.className).toContain('h-full');
-    expect(placeholder?.className).not.toContain('min-h-[100dvh]');
+    expect(placeholder?.querySelector('[role="status"]')?.textContent).toContain(
+      'Switching workspace'
+    );
+    expect(placeholder?.querySelector('[data-lody-boot-shell]')).toBeNull();
   });
 
   it('renders the mobile local workspace identity without a dialog trigger', () => {

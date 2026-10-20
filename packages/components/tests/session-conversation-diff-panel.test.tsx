@@ -1,6 +1,6 @@
 /** @vitest-environment jsdom */
 
-import { act } from 'react';
+import { act, createElement, useRef } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { Provider, createStore } from 'jotai';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -27,6 +27,7 @@ import {
   shouldOpenDiffFileByDefault,
   type SessionConversationDiffPanelProps,
 } from '../src/components/sessions/session-conversation-diff-panel';
+import { useDiffViewport } from '../src/components/sessions/use-diff-viewport';
 
 const checkpointFileDiff = (overrides: Partial<FileDiff> = {}): FileDiff => ({
   filePath: 'docs/README.md',
@@ -268,5 +269,190 @@ describe('SessionConversationDiffPanel loading cards', () => {
 
     expect(container.textContent).toContain('deleted/file-299.md');
     expect(skeletonLines()).toBe(MAX_DIFF_SKELETON_BODIES * 5);
+  });
+});
+
+describe('diff viewport loading', () => {
+  it('loads nearby files and an off-screen focus, pauses hidden panels and resumes on return', async () => {
+    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+    const paths = Array.from({ length: 100 }, (_, index) => `src/file-${index}.ts`);
+    let publish!: (visiblePaths: string[]) => void;
+    vi.stubGlobal(
+      'IntersectionObserver',
+      class {
+        private nodes = new Set<Element>();
+        constructor(callback: IntersectionObserverCallback) {
+          publish = (visiblePaths) =>
+            callback(
+              [...this.nodes].map(
+                (target) =>
+                  ({
+                    target,
+                    isIntersecting: visiblePaths.includes(
+                      (target as HTMLElement).dataset.diffPath!
+                    ),
+                  }) as IntersectionObserverEntry
+              ),
+              this as unknown as IntersectionObserver
+            );
+        }
+        observe(node: Element) {
+          this.nodes.add(node);
+        }
+        unobserve(node: Element) {
+          this.nodes.delete(node);
+        }
+        disconnect() {
+          this.nodes.clear();
+        }
+      }
+    );
+    function Harness({ active }: { active: boolean }) {
+      const scrollContainerRef = useRef<HTMLDivElement | null>(null);
+      const { loadPaths, registerPath } = useDiffViewport({
+        active,
+        paths,
+        priorityPath: paths[99],
+        scrollContainerRef,
+      });
+      return createElement(
+        'div',
+        { ref: scrollContainerRef },
+        createElement('output', null, JSON.stringify(loadPaths)),
+        ...paths.map((path) =>
+          createElement('div', {
+            key: path,
+            'data-diff-path': path,
+            ref: (node: HTMLDivElement | null) => registerPath(path, node),
+          })
+        )
+      );
+    }
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    const loaded = () => JSON.parse(container.querySelector('output')!.textContent!) as string[];
+    try {
+      await act(async () => root.render(createElement(Harness, { active: true })));
+      expect(loaded()).toEqual([paths[0], paths[1], paths[99]]);
+      await act(async () => publish([paths[10], paths[11]]));
+      expect(loaded()).toEqual([paths[10], paths[11], paths[99]]);
+      await act(async () => root.render(createElement(Harness, { active: false })));
+      expect(loaded()).toEqual([]);
+      await act(async () => root.render(createElement(Harness, { active: true })));
+      await act(async () => publish([paths[70]]));
+      expect(loaded()).toEqual([paths[70], paths[99]]);
+    } finally {
+      await act(async () => root.unmount());
+      container.remove();
+      vi.unstubAllGlobals();
+    }
+  });
+});
+
+describe('SessionConversationDiffPanel All Changes scope', () => {
+  (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+
+  const branchBase = '1234567890abcdef1234567890abcdef12345678';
+  const headBase = 'abcdef1234567890abcdef1234567890abcdef12';
+  const readyEntry = {
+    path: 'worktree.txt',
+    diff: {
+      status: 'ready' as const,
+      path: 'worktree.txt',
+      oldSnapshot: { kind: 'text' as const, text: 'old\n' },
+      newSnapshot: { kind: 'text' as const, text: 'old\nnew\n' },
+    },
+  };
+  const committedEntry = {
+    path: 'committed.txt',
+    diff: {
+      status: 'unavailable' as const,
+      path: 'committed.txt',
+      reason: 'metadata-only' as const,
+    },
+  };
+
+  const makeProvider = (unavailable = false) =>
+    ({
+      getAllChangesDiff: async (_focusPath?: string, scope?: 'branch' | 'uncommitted') => {
+        if (unavailable) {
+          return {
+            status: 'unavailable',
+            reason: 'metadata-only',
+            scopeReason: 'no_commits',
+            message: 'no commits',
+          };
+        }
+        return {
+          status: 'ready',
+          base: scope === 'uncommitted' ? headBase : branchBase,
+          truncated: false,
+          entries: scope === 'uncommitted' ? [readyEntry] : [committedEntry, readyEntry],
+        };
+      },
+    }) as unknown as SessionFileProvider;
+
+  let container: HTMLDivElement;
+  let root: Root;
+
+  beforeEach(async () => {
+    await initI18n('en');
+    globalThis.ResizeObserver ??= class {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    };
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+  });
+
+  afterEach(() => {
+    act(() => root.unmount());
+    container.remove();
+  });
+
+  const render = async (props: Partial<SessionConversationDiffPanelProps>) => {
+    await act(async () => {
+      root.render(
+        <Provider store={createStore()}>
+          <TestCloudPlatformProvider>
+            <SessionConversationDiffPanel
+              sessionId={'session-1' as SessionId}
+              turnId="all-changes"
+              mode="base"
+              filePaths={['committed.txt', 'worktree.txt']}
+              fileProvider={makeProvider()}
+              allChangesScopeSupported
+              {...props}
+            />
+          </TestCloudPlatformProvider>
+        </Provider>
+      );
+    });
+  };
+
+  it('renders the uncommitted set and explains a focused committed-only file', async () => {
+    await render({ allChangesScope: 'uncommitted', fileProvider: makeProvider() });
+
+    expect(container.textContent).toContain('worktree.txt');
+    expect(container.textContent).not.toContain('committed.txt');
+    expect(container.textContent).toContain('HEAD · abcdef1');
+
+    await render({
+      allChangesScope: 'uncommitted',
+      focusFilePath: 'committed.txt',
+      fileProvider: makeProvider(),
+    });
+    expect(container.textContent).toContain('This file has no uncommitted changes.');
+  });
+
+  it('hides the selector without capability and reports an explicit scope limitation', async () => {
+    await render({ allChangesScope: 'branch', allChangesScopeSupported: false });
+    expect(container.textContent).not.toContain('Uncommitted');
+
+    await render({ allChangesScope: 'uncommitted', fileProvider: makeProvider(true) });
+    expect(container.textContent).toContain('no commits yet');
   });
 });

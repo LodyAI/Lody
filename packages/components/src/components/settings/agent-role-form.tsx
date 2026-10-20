@@ -41,6 +41,13 @@ import { SettingsLineTabs } from './settings-line-tabs';
 import { settingsCatalog as catalog, settingsSurface as surface } from './surface';
 
 const styles = stylex.create({
+  machineTabs: {
+    minWidth: 0,
+    overflowX: 'auto',
+    // Keep tab focus rings inside this local scroll viewport.
+    padding: space[1],
+    margin: `calc(-1 * ${space[1]})`,
+  },
   dot: {
     flexShrink: 0,
     width: '6px',
@@ -218,31 +225,33 @@ export function AgentRoleForm({
               hint={t('settings.agentRoles.form.sectionTargetHint')}
             >
               {machines.length > 0 ? (
-                <SettingsLineTabs
-                  ruled
-                  label={t('settings.agentRoles.form.machine')}
-                  current={value.activeMachineId ?? ''}
-                  onChange={(machineId) => update({ activeMachineId: machineId as MachineId })}
-                  tabs={machines.map((machine) => {
-                    const configured = value.targets.some(
-                      (candidate) => candidate.machineId === machine.machineId
-                    );
-                    return {
-                      id: machine.machineId as string,
-                      label: machine.label,
-                      // A machine the Role runs on shows its status; one it does
-                      // not yet run on shows what selecting it offers.
-                      leading: configured ? (
-                        <span
-                          aria-hidden="true"
-                          {...stylex.props(styles.dot, machine.online && styles.dotOnline)}
-                        />
-                      ) : (
-                        <Plus aria-hidden="true" {...stylex.props(styles.addGlyph)} />
-                      ),
-                    };
-                  })}
-                />
+                <div {...withClassName(stylex.props(styles.machineTabs), 'scrollbar-pro')}>
+                  <SettingsLineTabs
+                    ruled
+                    label={t('settings.agentRoles.form.machine')}
+                    current={value.activeMachineId ?? ''}
+                    onChange={(machineId) => update({ activeMachineId: machineId as MachineId })}
+                    tabs={machines.map((machine) => {
+                      const configured = value.targets.some(
+                        (candidate) => candidate.machineId === machine.machineId
+                      );
+                      return {
+                        id: machine.machineId as string,
+                        label: machine.label,
+                        // A machine the Role runs on shows its status; one it does
+                        // not yet run on shows what selecting it offers.
+                        leading: configured ? (
+                          <span
+                            aria-hidden="true"
+                            {...stylex.props(styles.dot, machine.online && styles.dotOnline)}
+                          />
+                        ) : (
+                          <Plus aria-hidden="true" {...stylex.props(styles.addGlyph)} />
+                        ),
+                      };
+                    })}
+                  />
+                </div>
               ) : (
                 <FormMessage tone="warning">{t('settings.agentRoles.form.noMachines')}</FormMessage>
               )}

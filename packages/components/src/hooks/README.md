@@ -36,6 +36,19 @@ Missing or mismatched Providers expose no catalog; extension changes invalidate
 old capabilities until a matching probe arrives. A matching extension catalog
 must not be read as though no extensions were selected.
 
+## Avatar sources
+
+`use-stable-avatar-src.ts` keeps the initial remote URL on a cold mount while
+filling the byte cache, then asks `lib/avatar-cache.ts` to preload and asynchronously
+decode that local blob for a return visit. Only avatars used by this hook are
+decoded; startup restoration does not decode the entire persistent cache. The
+cache entry retains the off-DOM image for the same lifetime as its blob URL.
+Source changes select the current URL synchronously, including delayed profile
+arrival and image removal, while background callbacks remain tied to their source.
+First paint and cache reads never await decoding. Fully cold images and missing
+profile data can still show a fallback. Evidence and limits:
+[avatar continuity](../../../../.agents/notes/proposed/bug-fix/2026-10-20-message-avatar-switch-continuity.md).
+
 ## Cloud query recovery
 
 `use-recoverable-convex-query.ts` owns the authenticated query adapter. Each client,
@@ -228,10 +241,12 @@ still paid for a full summary rebuild — hence the leading-edge throttle on the
 anchored to the last emit. The permission candidate is a fresh object per scan, so
 depending on it re-runs the payload memo every render.
 
-The 250ms bridge debounce stays for a different job: a flush lands in the commit
-after the change that requested it, and without the debounce the bridge gets both,
-the stale one marking the alert shown so the fresh one is dropped by the
-already-alerted early return.
+The 250ms bridge debounce coalesces the render requesting a flush with its committed
+snapshot. Permission candidates only accelerate that snapshot; they never add an
+alert. Ordinary Push owns reminders. The previous alert-key Set and early return
+were removed because they both duplicated reminders and froze other conversations
+while one request was pending. The optional bridge alert field remains for legacy
+native clients, but this hook never sends it.
 
 `iosLiveActivitiesEnabledAtom` defaults to true, so without the native-shell check
 every desktop build would rebuild a summary it can never show. The activity id is

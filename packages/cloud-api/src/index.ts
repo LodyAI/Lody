@@ -1,3 +1,5 @@
+import type { NotificationPresentation } from '@lody/shared/notifications';
+import type { TerminalOutcome } from '@lody/shared/notifications';
 import { anyApi, type FunctionReference } from 'convex/server';
 import type {
   WorkspaceAdmissionDescriptor,
@@ -629,6 +631,16 @@ export type CloudApi = {
       { billingInterval: BillingInterval; effectiveAt: number | null }
     >;
   };
+  githubPersonalAuthorization: {
+    begin: Action<
+      { workspaceId: string; challenge: string; callbackURL: string },
+      { state: string; url: string }
+    >;
+    complete: Action<
+      { workspaceId: string; state: string; code: string; verifier: string },
+      { success: true }
+    >;
+  };
   github: {
     createGitHubInstallState: Action<
       { returnTarget?: 'desktop' | 'web'; workspaceSlug?: string; workspaceId: string },
@@ -927,6 +939,8 @@ export type CloudApi = {
         workspaceId: string;
         sessionId: string;
         occurrenceId: string;
+        outcome?: TerminalOutcome;
+        presentation?: NotificationPresentation;
         cliToken: string;
         workspaceSlug: string;
       },
@@ -938,11 +952,13 @@ export type CloudApi = {
         toolTitle?: string;
         toolKind?: string;
         requestKind?: 'permission' | 'ask_user_question';
+        presentation?: NotificationPresentation;
         userId: string;
         workspaceId: string;
         sessionId: string;
         cliToken: string;
         workspaceSlug: string;
+        deliveryVersion?: 1;
         requestId: string;
         toolCallId: string;
       },

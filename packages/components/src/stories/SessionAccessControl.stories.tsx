@@ -1,9 +1,11 @@
 import type { Meta, StoryObj } from '@storybook/react';
 import { fn, userEvent, within } from 'storybook/test';
+import { Copy, Image } from 'lucide-react';
 import type { LocalProjectId, MachineId } from '@lody/shared';
 
 import { SessionAccessControl } from '@/components/session-sharing';
 import { Tooltip } from '@lody/ui/tooltip';
+import { ShareEditorStory } from './ShareEditorStory';
 
 const machineId = 'machine-access-story' as MachineId;
 const localProjectId = 'project-access-story' as LocalProjectId;
@@ -32,6 +34,11 @@ const meta = {
       projectName: 'lody',
     },
     onShareWithTeam: fn(),
+    onCopyLink: fn(),
+    exportActions: [
+      { id: 'md', label: 'Copy as Markdown', icon: Copy, onSelect: fn() },
+      { id: 'image', label: 'Share as image…', icon: Image, onSelect: fn() },
+    ],
   },
 } satisfies Meta<typeof SessionAccessControl>;
 
@@ -40,13 +47,13 @@ type Story = StoryObj<typeof meta>;
 
 export const PrivateProject: Story = {};
 
-export const PrivateProjectMenuOpen: Story = {
+export const PrivateProjectPanelOpen: Story = {
   play: async ({ canvasElement }) => {
     await userEvent.click(within(canvasElement).getByRole('button', { name: /Private to you/ }));
   },
 };
 
-export const PrivateProjectMenuOpenDark: Story = {
+export const PrivateProjectPanelOpenDark: Story = {
   globals: { theme: 'dark' },
   play: async ({ canvasElement }) => {
     await userEvent.click(within(canvasElement).getByRole('button', { name: /Private to you/ }));
@@ -75,32 +82,41 @@ const teamState = {
   projectName: 'lody',
 } as const;
 
-/** A conversation the team can already open publishes from a plain button. */
+/** A conversation the team can already open still gets the panel, minus the team action. */
 export const TeamShareButton: Story = {
-  args: { state: teamState, publicShare: { status: 'none', onOpen: fn() } },
+  args: { state: teamState, publicShare: { status: 'none', renderEditor: ShareEditorStory } },
 };
 
-/** The same button reports the published link once the status resolves. */
+/** The trigger reports the published link once the status resolves. */
 export const TeamShared: Story = {
-  args: { state: teamState, publicShare: { status: 'shared', onOpen: fn() } },
+  args: { state: teamState, publicShare: { status: 'shared', renderEditor: ShareEditorStory } },
 };
 
 export const TeamSharedDark: Story = {
   globals: { theme: 'dark' },
-  args: { state: teamState, publicShare: { status: 'shared', onOpen: fn() } },
+  args: { state: teamState, publicShare: { status: 'shared', renderEditor: ShareEditorStory } },
 };
 
-/** A private conversation keeps one menu for both sharing actions. */
+/** A private conversation answers who can open it, then offers Copy link and copies. */
 export const PrivateWithPublishing: Story = {
-  args: { publicShare: { status: 'none', onOpen: fn() } },
+  args: { publicShare: { status: 'none', renderEditor: ShareEditorStory } },
   play: async ({ canvasElement }) => {
     await userEvent.click(within(canvasElement).getByRole('button', { name: /Private to you/ }));
   },
 };
 
-/** A published link outranks "Private" on the pill; the scope stays in the menu. */
+/** Web opens the editor inside the same panel: publish end to end, then back. */
+export const PublishInPanel: Story = {
+  args: { publicShare: { status: 'none', renderEditor: ShareEditorStory } },
+  play: async ({ canvasElement }) => {
+    await userEvent.click(within(canvasElement).getByRole('button', { name: /Private to you/ }));
+    await userEvent.click(await within(document.body).findByRole('tab', { name: 'Web' }));
+  },
+};
+
+/** A published link outranks the "Share" label on the pill; the scope stays in the popover. */
 export const PrivateAndShared: Story = {
-  args: { publicShare: { status: 'shared', onOpen: fn() } },
+  args: { publicShare: { status: 'shared', renderEditor: ShareEditorStory } },
   play: async ({ canvasElement }) => {
     await userEvent.click(
       within(canvasElement).getByRole('button', { name: /Anyone with the link/ })

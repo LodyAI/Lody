@@ -293,7 +293,7 @@ export class OperationInbox extends Context.Service<
               }).pipe(
                 Effect.tap((accepted) =>
                   Effect.sync(() => {
-                    if (accepted && i.kind === 'human') vetoed.delete(inboxScopeKey(i));
+                    if (accepted) vetoed.delete(inboxScopeKey(i));
                   })
                 ),
                 Effect.uninterruptible

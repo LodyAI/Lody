@@ -2,6 +2,8 @@ import { isElectronRenderer } from '@/lib/electron';
 import { openSessionOnModifiedClick } from '@/lib/desktop-window';
 import { SessionWindowMenuItem } from './session-window-menu-item';
 import { cn } from '@/lib/utils';
+import * as stylex from '@stylexjs/stylex';
+import { SIDEBAR_ROW_LINE_CLASS, sidebarSurface } from './sidebar-surface';
 import {
   closestCenter,
   DndContext,
@@ -64,6 +66,7 @@ import {
   sidebarShowFullListAtom,
   toggleSidebarCollapsedOpenedBySessionAtom,
 } from '@/atoms/focus-layer';
+import { sidebarShowBranchNamesAtom } from '@/atoms/sidebar-state';
 import {
   buildOpenedBySessionTree,
   countOpenedByTreeRoots,
@@ -93,6 +96,7 @@ import {
   SIDEBAR_GROUP_LABEL_CLASS,
   SIDEBAR_ROW_TEXT_CLASS,
   SIDEBAR_CAPTION_TEXT_CLASS,
+  SidebarSessionMetaLine,
   SIDEBAR_GROUP_LABEL_COLOR_CLASS,
   SidebarGroupActivityMark,
   SIDEBAR_UNSENT_TITLE_CLASS,
@@ -569,6 +573,8 @@ type SessionGroupRowProps = Pick<
   groupKind: SessionRowGroup['kind'];
   groupRepoFullName: SessionRowGroup['repoFullName'];
   showTreeGutter: boolean;
+  /** The previous visible row is a top-level one, so this child is the first under its opener. */
+  followsOpener: boolean;
   moreActionsLabel: string;
   beginRename: (sessionId: string, currentTitle: string) => void;
 };
@@ -620,6 +626,7 @@ const SessionGroupRow = memo(function SessionGroupRow({
   groupKind,
   groupRepoFullName,
   showTreeGutter,
+  followsOpener,
   isMobile,
   moreActionsLabel,
   beginRename,
@@ -724,6 +731,7 @@ const SessionGroupRow = memo(function SessionGroupRow({
       </span>
     </span>
   );
+  const lineBoxClassName = cn('flex shrink-0 items-center', SIDEBAR_ROW_LINE_CLASS);
   const handleAnchorClick = useAnchor
     ? (event: ReactMouseEvent<HTMLAnchorElement>) => {
         if (openSessionOnModifiedClick(event, session.sessionId)) return;
@@ -744,11 +752,26 @@ const SessionGroupRow = memo(function SessionGroupRow({
   // menu (and its ⋯ button) is desktop-only. Computed before the row so
   // the leading slot can show the ⋯ affordance.
   const canGoToOpener = Boolean(openerSessionId && isSelectable);
-  const openedByTreeSlot = buildSessionRowOpenedByTreeSlot(
+  const baseOpenedByTreeSlot = buildSessionRowOpenedByTreeSlot(
     node,
     t,
     onToggleOpenedBySessions ? () => onToggleOpenedBySessions(session.sessionId) : undefined
   );
+  // Desktop repo rows that are not nested carry a second line (branch and time),
+  // so the first child's trunk has to climb past it to reach its opener's
+  // chevron. Chats, nested children, mobile rows and rows whose branch detail
+  // line is turned off stay one line.
+  const showBranchNames = useAtomValue(sidebarShowBranchNamesAtom);
+  const showMetaLine =
+    showBranchNames && !isMobile && !isChatSession && baseOpenedByTreeSlot?.kind !== 'child';
+  const openedByTreeSlot =
+    baseOpenedByTreeSlot?.kind === 'child' && !isMobile && !isChatSession
+      ? {
+          ...baseOpenedByTreeSlot,
+          isFirstChild: followsOpener,
+          tallOpener: followsOpener && showBranchNames,
+        }
+      : baseOpenedByTreeSlot;
   const openedByOpener = openedByTreeSlot?.kind === 'opener' ? openedByTreeSlot : null;
   const canToggleOpenedSessions = openedByOpener !== null;
   const hasStandardMenuActions = Boolean(
@@ -785,19 +808,19 @@ const SessionGroupRow = memo(function SessionGroupRow({
             })
       }
       className={cn(
-        'group relative w-full rounded-md text-left',
-        // Both chat and repo rows are a single line now; the repo row's
-        // low-signal metadata (time / repo / branch / PR) moves to the
-        // desktop hover info card so both organize modes read equally compact.
-        'px-2 py-1',
-        'border border-transparent bg-transparent',
-        !showSelectedState &&
-          isSelectable &&
-          !isMobile &&
-          // Hover marks the row with its fill only; the title keeps its color.
-          'hover:bg-sidebar-hover',
-        showSelectedState &&
-          'bg-sidebar-selection text-sidebar-selection-foreground hover:bg-sidebar-selection',
+        'group relative w-full text-left',
+        // A desktop repo row is two lines (title, then branch and time); chats,
+        // nested children and every mobile row stay one. The rest of the metadata (repo /
+        // PR / line totals) stays in the desktop hover info card.
+        // Hover marks the row with its fill only; the title keeps its color.
+        stylex.props(
+          sidebarSurface.row,
+          showMetaLine ? sidebarSurface.tall : sidebarSurface.snug,
+          showSelectedState
+            ? sidebarSurface.selected
+            : isSelectable && !isMobile && sidebarSurface.hover
+        ).className,
+        'border border-transparent',
         // Keyboard-only focus ring. Plain :focus-within also matches
         // after a mouse click (the overlay <a> keeps focus), which
         // left a permanent inset ring on the selected row that read
@@ -994,79 +1017,103 @@ const SessionGroupRow = memo(function SessionGroupRow({
           onClick={handleAnchorClick}
         />
       ) : null}
-      <div className={cn('flex min-w-0 items-center', isMobile ? 'gap-1.5' : 'gap-2')}>
-        <SessionRowLeadingSlot
-          showMenuButton={hasMenuActions}
-          menuLabel={moreActionsLabel}
-          openedByTree={openedByTreeSlot}
-        />
-        <div
-          className={cn(
-            // Body role: conversation titles match prose in every organize mode.
-            'min-w-0 flex-1 flex items-center gap-1 truncate',
-            SIDEBAR_ROW_TEXT_CLASS,
-            showSelectedState ? 'text-sidebar-selection-foreground' : 'text-sidebar-row-foreground'
-          )}
-          // Double-click to rename is scoped to the title only, so it can't
-          // be triggered by double-clicking the Archive confirm button.
-          onDoubleClick={(e) => {
-            if (typeof onRenameSession !== 'function') return;
-            e.preventDefault();
-            e.stopPropagation();
-            beginRename(session.sessionId, session.title);
-          }}
-        >
-          <SessionRowAuthorAvatar author={session.owner} />
-          {session.isPinned ? (
-            <Pin aria-hidden="true" className="h-3 w-3 shrink-0 text-sidebar-foreground-muted/80" />
+      <div
+        className={cn(
+          'flex min-w-0',
+          showMetaLine ? 'items-start' : 'items-center',
+          isMobile ? 'gap-1.5' : 'gap-2'
+        )}
+      >
+        {/* On a two-line row the leading and end slots sit in a box one title line
+            tall, so they stay on the title line; otherwise the box disappears. */}
+        <div className={showMetaLine ? lineBoxClassName : 'contents'}>
+          <SessionRowLeadingSlot
+            showMenuButton={hasMenuActions}
+            menuLabel={moreActionsLabel}
+            openedByTree={openedByTreeSlot}
+          />
+        </div>
+        <div className={showMetaLine ? 'flex min-w-0 flex-1 flex-col gap-1' : 'contents'}>
+          <div
+            className={cn(
+              // Body role: conversation titles match prose in every organize mode.
+              'flex items-center gap-1',
+              SIDEBAR_ROW_TEXT_CLASS,
+              stylex.props(sidebarSurface.title, showSelectedState && sidebarSurface.titleSelected)
+                .className
+            )}
+            // Double-click to rename is scoped to the title only, so it can't
+            // be triggered by double-clicking the Archive confirm button.
+            onDoubleClick={(e) => {
+              if (typeof onRenameSession !== 'function') return;
+              e.preventDefault();
+              e.stopPropagation();
+              beginRename(session.sessionId, session.title);
+            }}
+          >
+            <SessionRowAuthorAvatar author={session.owner} />
+            {session.isPinned ? (
+              <Pin
+                aria-hidden="true"
+                className="h-3 w-3 shrink-0 text-sidebar-foreground-muted/80"
+              />
+            ) : null}
+            {renderTitle()}
+          </div>
+          {showMetaLine ? (
+            <SidebarSessionMetaLine
+              branchName={session.branchName}
+              latestMessageAt={session.latestMessageAt}
+            />
           ) : null}
-          {renderTitle()}
         </div>
         {/* Keep PR at the right edge. Line totals stay in the hover card. */}
-        <SidebarRowEndSlot
-          sessionId={session.sessionId}
-          isWaitingPermission={session.isWaitingPermission}
-          isWorking={session.isWorking}
-          hasUnreadMessages={session.hasUnreadMessages}
-          restIcon={
-            isChatSession ? (
-              <span className={cn('flex items-center gap-1.5', useAnchor && 'z-20')}>
-                <SessionRowTime
-                  latestMessageAt={session.latestMessageAt}
-                  className={cn(SIDEBAR_CAPTION_TEXT_CLASS, 'text-muted-foreground')}
-                />
-              </span>
-            ) : hasPr || showMergeablePill || isMobile ? (
-              <span
-                className={cn(
-                  SIDEBAR_CAPTION_TEXT_CLASS,
-                  'flex select-none items-center gap-1.5 tabular-nums text-sidebar-foreground-muted/80',
-                  useAnchor && 'z-20'
-                )}
-              >
-                {isMobile ? (
+        <div className={showMetaLine ? lineBoxClassName : 'contents'}>
+          <SidebarRowEndSlot
+            sessionId={session.sessionId}
+            isWaitingPermission={session.isWaitingPermission}
+            isWorking={session.isWorking}
+            hasUnreadMessages={session.hasUnreadMessages}
+            restIcon={
+              isChatSession ? (
+                <span className={cn('flex items-center gap-1.5', useAnchor && 'z-20')}>
                   <SessionRowTime
                     latestMessageAt={session.latestMessageAt}
-                    className="text-muted-foreground"
+                    className={cn(SIDEBAR_CAPTION_TEXT_CLASS, 'text-muted-foreground')}
                   />
-                ) : null}
-                {showMergeablePill ? <SessionMergeablePill /> : null}
-                {hasPr ? (
-                  <SessionPrIcon compact prStatus={prStatus} prCiState={session.prCiState} />
-                ) : null}
-              </span>
-            ) : undefined
-          }
-          archive={
-            showInlineArchive ? (
-              <SidebarRowArchiveButton
-                label={archiveTooltipLabel}
-                confirmLabel={archiveConfirmLabel}
-                onConfirm={() => onArchiveSession?.(session.sessionId)}
-              />
-            ) : undefined
-          }
-        />
+                </span>
+              ) : hasPr || showMergeablePill || isMobile ? (
+                <span
+                  className={cn(
+                    SIDEBAR_CAPTION_TEXT_CLASS,
+                    'flex select-none items-center gap-1.5 tabular-nums text-sidebar-foreground-muted/80',
+                    useAnchor && 'z-20'
+                  )}
+                >
+                  {isMobile ? (
+                    <SessionRowTime
+                      latestMessageAt={session.latestMessageAt}
+                      className="text-muted-foreground"
+                    />
+                  ) : null}
+                  {showMergeablePill ? <SessionMergeablePill /> : null}
+                  {hasPr ? (
+                    <SessionPrIcon compact prStatus={prStatus} prCiState={session.prCiState} />
+                  ) : null}
+                </span>
+              ) : undefined
+            }
+            archive={
+              showInlineArchive ? (
+                <SidebarRowArchiveButton
+                  label={archiveTooltipLabel}
+                  confirmLabel={archiveConfirmLabel}
+                  onConfirm={() => onArchiveSession?.(session.sessionId)}
+                />
+              ) : undefined
+            }
+          />
+        </div>
       </div>
     </div>
   );
@@ -1408,12 +1455,11 @@ const SessionGroupSection = memo(function SessionGroupSection({
   // the shared group label type (small, bold, faint, no icon), no hover fill,
   // and it scrolls with its conversations.
   const isGroupLabel = group.kind !== 'repo';
-  const headerBaseColorClass = isGroupLabel
-    ? SIDEBAR_GROUP_LABEL_COLOR_CLASS
-    : 'text-sidebar-row-foreground';
+  // A repo row takes its ink from `sidebarSurface.row`.
+  const headerBaseColorClass = isGroupLabel ? SIDEBAR_GROUP_LABEL_COLOR_CLASS : undefined;
   const headerTypographyClass = isGroupLabel
     ? SIDEBAR_GROUP_LABEL_CLASS
-    : cn(SIDEBAR_ROW_TEXT_CLASS, 'font-normal');
+    : cn(SIDEBAR_ROW_TEXT_CLASS, 'font-medium');
 
   return (
     <div
@@ -1432,23 +1478,28 @@ const SessionGroupSection = memo(function SessionGroupSection({
           data-scope-item="row"
           data-sidebar-group-key={group.key}
           className={cn(
-            'relative flex w-full select-none items-center rounded-md px-2 text-left',
+            'relative flex w-full select-none items-center text-left',
             isGroupLabel ? 'h-[26px] gap-1.5' : cn('h-7', isMobile ? 'gap-1' : 'gap-0.5'),
             'border border-transparent',
             'min-w-0 flex-1 transition-colors',
             headerTypographyClass,
+            stylex.props(
+              sidebarSurface.row,
+              showActiveGroupState
+                ? sidebarSurface.selected
+                : canNavigate && !isMobile && !isGroupLabel && sidebarSurface.hover
+            ).className,
             showActiveGroupState
-              ? 'cursor-pointer border-sidebar-ring/30 bg-sidebar-selection text-sidebar-selection-foreground hover:bg-sidebar-selection'
+              ? 'cursor-pointer border-sidebar-ring/30'
               : canNavigate
                 ? cn(
-                    'cursor-pointer bg-transparent',
+                    'cursor-pointer',
                     headerBaseColorClass,
-                    !isMobile &&
-                      (isGroupLabel ? 'hover:text-sidebar-foreground' : 'hover:bg-sidebar-hover')
+                    !isMobile && isGroupLabel && 'hover:text-sidebar-foreground'
                   )
                 : canToggle
-                  ? cn('cursor-pointer bg-transparent', headerBaseColorClass)
-                  : cn('cursor-default bg-transparent', headerBaseColorClass)
+                  ? cn('cursor-pointer', headerBaseColorClass)
+                  : cn('cursor-default', headerBaseColorClass)
           )}
           onClick={canNavigate ? handleNavigate : handleToggleGroup}
           onKeyDown={
@@ -1548,7 +1599,7 @@ const SessionGroupSection = memo(function SessionGroupSection({
 
       {!group.collapsed && (
         <div className={SIDEBAR_ROW_LIST_CLASS}>
-          {visibleNodes.map((node) => (
+          {visibleNodes.map((node, nodeIndex) => (
             <SessionGroupRow
               key={node.item.sessionId}
               node={node}
@@ -1556,6 +1607,7 @@ const SessionGroupSection = memo(function SessionGroupSection({
               groupKind={group.kind}
               groupRepoFullName={group.repoFullName}
               showTreeGutter={showTreeGutter}
+              followsOpener={visibleNodes[nodeIndex - 1]?.depth === 0}
               isMobile={isMobile}
               moreActionsLabel={moreActionsLabel}
               beginRename={beginRename}
@@ -1583,9 +1635,9 @@ const SessionGroupSection = memo(function SessionGroupSection({
               data-scope-item="row"
               data-sidebar-show-more={group.key}
               className={cn(
-                // Same 30px pitch as a conversation row (py-1 + 1px borders + 20px line).
+                // Same height as a conversation row (3px padding + 1px borders + 18px line).
                 SIDEBAR_CAPTION_TEXT_CLASS,
-                'flex h-[30px] select-none items-center gap-2 rounded-md px-2 text-left text-sidebar-foreground-muted/80',
+                'flex h-[26px] select-none items-center gap-2 rounded-md px-2 text-left text-sidebar-foreground-muted/80',
                 'transition-colors',
                 'hover:bg-sidebar-hover hover:text-sidebar-hover-foreground',
                 'focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-sidebar-ring/40'

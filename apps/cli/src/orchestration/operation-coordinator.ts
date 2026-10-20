@@ -139,11 +139,18 @@ export class LodyOperationCoordinator {
         return { sql: store.inbox, close: () => store.close() };
       },
       quiesce: () => this.options.executionService.quiesceInboxExecutions?.(),
-      ready: (batch) =>
-        this.started &&
-        !this.options.executionService.getExecutionSnapshot(batch.sessionId as SessionId)
-          .hasActiveTurn &&
-        !this.options.dispatchWatcher.hasPendingDispatch(batch.sessionId as SessionId),
+      ready: (batch) => {
+        if (!this.started) return false;
+        const sessionId = batch.sessionId as SessionId;
+        const execution = this.options.executionService.getExecutionSnapshot(sessionId);
+        // A delivery waiting on an unconfirmed release asks for its recovery; a
+        // successful recovery wakes the Inbox, which runs this check again.
+        if (execution.releaseBlocked)
+          void this.options.executionService.requestReleaseRecovery?.(sessionId);
+        return (
+          !execution.hasActiveTurn && !this.options.dispatchWatcher.hasPendingDispatch(sessionId)
+        );
+      },
       admit: (batch) =>
         this.started &&
         (batch.kind !== 'automatic' ||
@@ -156,9 +163,16 @@ export class LodyOperationCoordinator {
       },
       report: (cause) => this.options.logger.warn(`[inbox] ${String(cause)}`),
     });
-    this.options.executionService.setOperationInbox?.(this.inbox, (sessionId) => {
-      void this.options.dispatchWatcher.enqueueSessionCheck?.(sessionId);
-    });
+    this.options.executionService.setOperationInbox?.(
+      this.inbox,
+      (sessionId) => {
+        void this.options.dispatchWatcher.enqueueSessionCheck?.(sessionId);
+      },
+      {
+        originsForBatch: (batch) => this.store!.notificationOriginsForBatch(batch),
+        pendingOrigins: (scope, origins) => this.store!.pendingNotificationOrigins(scope, origins),
+      }
+    );
 
     const epoch = {};
     this.nativeEpoch = epoch;
@@ -373,7 +387,13 @@ export class LodyOperationCoordinator {
           chainDepth: batch.chainDepth,
         },
       },
-      { dispatchSource: 'inbox', inboxBatch: batch }
+      {
+        dispatchSource: 'inbox',
+        inboxBatch: batch,
+        // Synthetic input is not human-authored. Execution inherits result
+        // ownership from the full, scoped Operation membership instead.
+        notificationAudience: { kind: 'unknown' },
+      }
     );
   }
 

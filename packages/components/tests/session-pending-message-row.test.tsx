@@ -420,18 +420,20 @@ describe('PendingMessageRow failure presentation', () => {
 
   // A ready FILE sits beside the failed one on purpose: with only a ready image
   // here, painting every file card red would go unnoticed.
-  it('leaves a finished attachment out of the failure styling', async () => {
+  it('marks only the file that failed with the failure styling', async () => {
     const host = await render(
       record({ error: REASON, attachments: [readyImage, readyFile, failedFile] })
     );
-    const cards = [...host.querySelectorAll('div')].filter((node) =>
-      node.className.includes('border-destructive/')
-    );
+    const failedCard = host.querySelector<HTMLButtonElement>('button[aria-label="evidence.zip"]');
+    const readyCard = host.querySelector<HTMLButtonElement>('button[aria-label="notes.md"]');
+    const failedIcon = failedCard?.querySelector('svg')?.getAttribute('class') ?? '';
+    const readyIcon = readyCard?.querySelector('svg')?.getAttribute('class') ?? '';
 
-    expect(cards).toHaveLength(1);
-    expect(cards[0]?.textContent).toContain('evidence.zip');
-    expect(cards[0]?.textContent).not.toContain('notes.md');
-    expect(cards[0]?.textContent).not.toContain('design.png');
+    expect(failedCard).not.toBeNull();
+    expect(readyCard).not.toBeNull();
+    expect(failedIcon).toContain('text-destructive');
+    expect(readyIcon).not.toContain('text-destructive');
+    expect(host.querySelector('img')).not.toBeNull();
   });
 
   it('keeps the same file card mounted as progress becomes its final size', async () => {
@@ -445,7 +447,7 @@ describe('PendingMessageRow failure presentation', () => {
     await render(record({ attachments: [{ ...readyFile, source: undefined }] }));
     expect(host.querySelector('button[aria-label="notes.md"]')?.parentElement).toBe(card);
     expect(host.querySelector('[role="progressbar"]')).toBeNull();
-    expect(card?.textContent).toBe('notes.md5 B');
+    expect(card?.textContent).toBe('notes.mdMD · 5 B');
 
     // The successful card owns the geometry before and after history publication.
     await act(async () =>
@@ -462,8 +464,9 @@ describe('PendingMessageRow failure presentation', () => {
       )
     );
     const delivered = host.querySelector('button[aria-label="notes.md"]')?.parentElement;
-    expect(delivered?.textContent).toBe('notes.md5 B');
-    expect(delivered?.querySelector('svg')?.outerHTML).toBe(card?.querySelector('svg')?.outerHTML);
+    expect(delivered?.textContent).toBe('notes.mdMD · 5 B');
+    expect(card?.querySelector('svg')?.classList.contains('lucide-download')).toBe(true);
+    expect(delivered?.querySelector('svg')?.classList.contains('lucide-download')).toBe(true);
   });
 
   it('retains the image after preparation releases the source, including remounts', async () => {

@@ -327,7 +327,7 @@ const styles = stylex.create({
   /**
    * The highlighted row's detail, beside the rows on the same surface: the
    * wider column, because it holds sentences. Its height is the list's — the
-   * pane fills the row the list sets and scrolls inside it, down to a floor that
+   * pane fills the row the list sets, down to a floor that
    * keeps the heading and the description readable beside a two-row list — so a
    * long description can no longer set the popup's height.
    */
@@ -355,8 +355,8 @@ const styles = stylex.create({
     width: '300px',
     minHeight: '168px',
   },
-  /** What the pane holds, filling it and scrolling there. */
-  detailScroll: {
+  /** Fixed heading and facts surround the description's share of the pane. */
+  detailContent: {
     boxSizing: 'border-box',
     position: 'absolute',
     inset: 0,
@@ -365,13 +365,11 @@ const styles = stylex.create({
     gap: space[1.5],
     paddingInline: space[3],
     paddingBlock: space[2],
-    overflowY: 'auto',
-    overscrollBehavior: 'contain',
+    overflow: 'clip',
   },
   /**
-   * A pane part keeps its height. The pane is a flex column that scrolls, and a
-   * line with `overflow: hidden` may otherwise shrink to nothing — which is how
-   * a long description pushed the heading out of the pane altogether.
+   * Heading, metadata and facts keep their height; only the description yields
+   * when the pane has less room.
    */
   detailPart: { flexShrink: 0, minWidth: 0, margin: 0 },
   detailTitle: {
@@ -392,20 +390,29 @@ const styles = stylex.create({
     fontSize: text.footnoteSize,
     lineHeight: text.footnoteLeading,
   },
-  /** Five lines at most: enough to say what the skill is for, not a wall. */
+  detailDescriptionSpace: {
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: 0,
+    minHeight: 0,
+    overflow: 'clip',
+  },
+  /** Show as many complete lines as fit above the facts, then an ellipsis. */
   detailDescription: {
     display: '-webkit-box',
     WebkitBoxOrient: 'vertical',
-    WebkitLineClamp: 5,
     overflow: 'hidden',
+    margin: 0,
     whiteSpace: 'pre-line',
     color: colors.secondaryLabel,
     fontSize: text.footnoteSize,
     lineHeight: 1.5,
     textWrap: 'pretty',
   },
+  detailDescriptionLines: (lines: number) => ({ WebkitLineClamp: lines }),
   /** A fact is one line: its label, then its value, which gives way. Values align. */
   detailRows: {
+    marginTop: 'auto',
     display: 'grid',
     gridTemplateColumns: 'auto minmax(0, 1fr)',
     alignItems: 'baseline',
@@ -691,6 +698,43 @@ function MiddleTruncated({ value }: { value: string }) {
   );
 }
 
+function CandidateDescription({ children }: { children: string }) {
+  const spaceRef = React.useRef<HTMLDivElement>(null);
+  const textRef = React.useRef<HTMLParagraphElement>(null);
+  const [lines, setLines] = React.useState(1);
+
+  React.useLayoutEffect(() => {
+    const availableSpace = spaceRef.current;
+    const paragraph = textRef.current;
+    if (!availableSpace || !paragraph) return undefined;
+    const measure = (availableHeight = availableSpace.clientHeight) => {
+      const lineHeight = Number.parseFloat(getComputedStyle(paragraph).lineHeight);
+      if (!Number.isFinite(lineHeight) || lineHeight <= 0) return;
+      setLines(Math.max(1, Math.floor(availableHeight / lineHeight)));
+    };
+    measure();
+    if (typeof ResizeObserver === 'undefined') return undefined;
+    const observer = new ResizeObserver(([entry]) => measure(entry.contentRect.height));
+    observer.observe(availableSpace);
+    return () => observer.disconnect();
+  }, []);
+
+  return (
+    <div
+      ref={spaceRef}
+      data-mention-description=""
+      {...stylex.props(styles.detailDescriptionSpace)}
+    >
+      <p
+        ref={textRef}
+        {...stylex.props(styles.detailDescription, styles.detailDescriptionLines(lines))}
+      >
+        {children}
+      </p>
+    </div>
+  );
+}
+
 function CandidateDetailPane({ detail }: { detail: MentionCandidateDetail }) {
   // A Role is the composer's object, read with the composer's pane: same rows,
   // same wording for the ids, same instruction block — sized to this menu.
@@ -709,7 +753,7 @@ function CandidateDetailPane({ detail }: { detail: MentionCandidateDetail }) {
   }
   return (
     <div data-mention-detail="" {...stylex.props(styles.detail)}>
-      <div {...stylex.props(styles.detailScroll)}>
+      <div {...stylex.props(styles.detailContent)}>
         {detail.title ? (
           <p {...stylex.props(styles.detailPart, styles.detailTitle)}>{detail.title}</p>
         ) : null}
@@ -717,7 +761,7 @@ function CandidateDetailPane({ detail }: { detail: MentionCandidateDetail }) {
           <p {...stylex.props(styles.detailPart, styles.detailMeta)}>{detail.meta.join(' · ')}</p>
         ) : null}
         {detail.description ? (
-          <p {...stylex.props(styles.detailPart, styles.detailDescription)}>{detail.description}</p>
+          <CandidateDescription>{detail.description}</CandidateDescription>
         ) : null}
         {detail.rows?.length ? (
           <dl {...stylex.props(styles.detailPart, styles.detailRows)}>

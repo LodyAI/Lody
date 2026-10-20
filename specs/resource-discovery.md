@@ -63,7 +63,18 @@ prevention, not a new authorization boundary or a full backup format.
 The existing cloud workspace runtime supplies the initial integration. New CLI
 workspace queries fail before cloud I/O in the local composition. Catalog offline
 reads still require authorization connectivity; repository listing is online-only.
-Catalog synchronization failures fail the read rather than claiming an empty result.
+Daemon-hosted discovery reads the daemon's current catalogs without forcing metadata
+or Flock synchronization. The daemon holds a workspace Flock reader room even without
+a renderer or selected external MCP. Queried authorized machine catalogs also keep
+one background reader per key for the daemon lifetime. Acquisition runs in the background with capped
+I/O retry backoff; existing transport recovery owns reconnects. Startup never waits for
+network catch-up. Reads share a short first-baseline budget; before confirmation they
+return cached rows with `sync.state: syncing`, downgrade catalog-dependent negative
+verdicts to `unknown/catalog_syncing`, and report missing get results as retryable
+`CATALOG_SYNCING`. After a baseline, reads do not wait again. Role proposal target
+validation separately synchronizes metadata and the authorized target Machine catalog;
+synchronization failure is retryable and publishes no proposal. Workspace shutdown releases reader interest before destroying the same Repo. Standalone CLI
+catalog synchronization failures fail the read rather than claiming an empty result.
 Operation CLI queries its local store, not a cross-machine aggregation service.
 
 ## Evidence

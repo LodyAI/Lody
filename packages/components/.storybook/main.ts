@@ -28,6 +28,18 @@ const config: StorybookConfig = {
     options: {},
   },
   async viteFinal(viteConfig) {
+    // 1.0.10 declares its source web-component module as a side effect, but ships
+    // dist files. Prebundling drops registration of <diffs-container> entirely.
+    viteConfig.optimizeDeps = {
+      ...viteConfig.optimizeDeps,
+      exclude: [
+        ...(viteConfig.optimizeDeps?.exclude ?? []),
+        '@pierre/diffs',
+        '@pierre/diffs/react',
+        '@pierre/diffs/worker',
+      ],
+      include: [...(viteConfig.optimizeDeps?.include ?? []), '@pierre/diffs > lru_map'],
+    };
     // In an embedded checkout pnpm stores these assets outside the public
     // workspace. Allow only the resolved font packages, not the private repo.
     viteConfig.server = {

@@ -1,8 +1,18 @@
 import { useMemo, useState } from 'react';
 import { ChevronDown } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
+import * as stylex from '@stylexjs/stylex';
 
 import { cn } from '@/lib/utils';
+import { evidenceSurface } from './surface';
+
+const CHANGED_CLASS = stylex.props(evidenceSurface.subtitle).className;
+const FIGURE_CLASS = stylex.props(evidenceSurface.figure).className;
+const FIGURE_UNKNOWN_CLASS = stylex.props(evidenceSurface.figureUnknown).className;
+const NAME_CLASS = stylex.props(evidenceSurface.name).className;
+const DETAIL_CLASS = stylex.props(evidenceSurface.detail).className;
+const CAPTION_CLASS = stylex.props(evidenceSurface.caption).className;
+const ACTION_CLASS = stylex.props(evidenceSurface.action).className;
 
 export type AssistantEditedFileEntry = {
   readonly filePath: string;
@@ -59,18 +69,23 @@ const DiffStats = ({ add, del }: { add?: number; del?: number }) => {
 
   if (add === 0 && del === 0) {
     return (
-      <span className="ml-auto shrink-0 text-[11px] text-muted-foreground">
+      <span className={cn('ml-auto shrink-0', CHANGED_CLASS)}>
         {t('sessions.editedFiles.changed', 'Changed')}
       </span>
     );
   }
 
   return (
-    <span className="ml-auto flex shrink-0 items-center gap-1.5 font-mono text-[11px] tabular-nums">
-      <span className={add === undefined ? 'text-muted-foreground/60' : 'text-github-addition'}>
+    <span
+      className={cn(
+        'ml-auto flex shrink-0 items-center gap-1.5 font-mono tabular-nums',
+        FIGURE_CLASS
+      )}
+    >
+      <span className={add === undefined ? FIGURE_UNKNOWN_CLASS : 'text-github-addition'}>
         +{add ?? '—'}
       </span>
-      <span className={del === undefined ? 'text-muted-foreground/60' : 'text-github-deletion'}>
+      <span className={del === undefined ? FIGURE_UNKNOWN_CLASS : 'text-github-deletion'}>
         -{del ?? '—'}
       </span>
     </span>
@@ -103,12 +118,12 @@ export function AssistantEditedFiles({ files, onFileClick, className }: Assistan
 
   return (
     <div className={cn('w-full text-left', className)}>
-      <div className="overflow-hidden rounded-xl border border-border bg-background">
+      <div className="overflow-hidden rounded-lg border border-border bg-background">
         {/* Multi-file only: summary bar. Single-file cards skip it so we
             don't stack "Edited 1 file" on top of the lone file row. */}
         {!isSingleFile ? (
           <div className="flex min-h-8 items-center gap-3 bg-muted/30 px-2.5 py-1.5">
-            <span className="min-w-0 flex-1 text-xs font-medium text-foreground/80">
+            <span className={cn('min-w-0 flex-1', CAPTION_CLASS)}>
               {t('sessions.editedFiles.summary', {
                 count: uniqueFiles.length,
                 defaultValue: 'Edited {{count}} files',
@@ -118,19 +133,16 @@ export function AssistantEditedFiles({ files, onFileClick, className }: Assistan
           </div>
         ) : null}
         <div
-          className={cn(
-            'divide-y divide-border/70',
-            !isSingleFile && 'border-t border-border/70'
-          )}
+          className={cn('divide-y divide-border/70', !isSingleFile && 'border-t border-border/70')}
         >
           {visibleFiles.map((file) => {
             const { directory, name } = splitFilePath(file.filePath);
             const content = (
               <>
-                <span className="min-w-0 flex-1 truncate text-[length:var(--markdown-body-font-size,1em)] leading-[1.75]">
-                  <span className="text-foreground/90">{name}</span>
+                <span className={cn('min-w-0 flex-1 truncate', NAME_CLASS)}>
+                  <span>{name}</span>
                   {directory ? (
-                    <span className="ml-1.5 text-muted-foreground/70">{directory}</span>
+                    <span className={cn('ml-1.5', DETAIL_CLASS)}>{directory}</span>
                   ) : null}
                 </span>
                 <DiffStats add={file.add} del={file.del} />
@@ -164,7 +176,10 @@ export function AssistantEditedFiles({ files, onFileClick, className }: Assistan
         {hiddenFileCount > 0 ? (
           <button
             type="button"
-            className="flex h-8 w-full items-center justify-center gap-1 border-t border-border/70 px-2.5 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-hover/45 hover:text-foreground focus-visible:bg-hover/45 focus-visible:text-foreground focus-visible:outline-none"
+            className={cn(
+              'flex h-8 w-full items-center justify-center gap-1 border-t border-border/70 px-2.5 transition-colors hover:bg-hover/45 hover:text-foreground focus-visible:bg-hover/45 focus-visible:text-foreground focus-visible:outline-none',
+              ACTION_CLASS
+            )}
             aria-expanded={expanded}
             onClick={() => setExpanded((value) => !value)}
           >

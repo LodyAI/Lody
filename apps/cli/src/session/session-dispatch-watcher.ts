@@ -1,3 +1,4 @@
+import { turnNotificationAudience } from '@/lib/notifications/turn-notification-audience';
 import { MemoryBindingSchema } from '@lody/shared';
 import type { RepoTransportRoomStatus, RepoWatchHandle } from 'loro-repo';
 import { Effect, Fiber } from 'effect';
@@ -1371,6 +1372,13 @@ export class SessionDispatchWatcher {
       // ── Handle guard/stale-status results (no history needed) ──
       if (guardAction.type === 'noop') {
         outcome = `guard-noop-${guardAction.reason}`;
+        if (guardAction.reason === 'release-blocked') {
+          // This input is waiting on an unconfirmed release: ask for recovery and
+          // re-check once the slot is free, instead of waiting for another trigger.
+          void this.deps.executionService.requestReleaseRecovery?.(sessionId).then((released) => {
+            if (released) void this.enqueueSessionCheck(sessionId);
+          });
+        }
         return;
       }
 
@@ -1628,6 +1636,10 @@ export class SessionDispatchWatcher {
               sourceTurnId: nextUserTurn.id,
               requesterUserId: nextUserTurn.userId,
               inputConfig: nextUserTurn.inputConfig ?? {},
+              notificationAudience:
+                dispatchSource === 'rpc'
+                  ? { kind: 'unknown' }
+                  : turnNotificationAudience(nextUserTurn.author),
             },
             dispatchSource,
             accessPromise: executionAccessPromise,

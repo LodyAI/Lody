@@ -1,6 +1,6 @@
 import { updateTestHistory } from './history-port-fixture';
 import { describe, expect, it } from 'vitest';
-import { WorkspaceRepoLegacy } from '@lody/shared/workspace-data/repo-legacy';
+import { LoroRepo } from 'loro-repo';
 import { v4 as uuidv4 } from 'uuid';
 import type { RequestPermissionRequest } from '@agentclientprotocol/sdk';
 import type {
@@ -94,7 +94,7 @@ const readStoredPlanExit = async (
 
 const withDoc = async (run: (doc: SessionDocument, sessionId: SessionId) => Promise<void>) => {
   const sessionId = uuidv4() as SessionId;
-  const repo = await WorkspaceRepoLegacy.create({});
+  const repo = await LoroRepo.create({});
   const doc = new SessionDocument(repo, sessionId);
   await doc.initOffline();
   await updateTestHistory(doc, () => [assistantEntry()]);

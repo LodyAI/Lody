@@ -27,10 +27,29 @@ export function borrowDesktopExecutionHost(lease: LocalCliHostLease): DesktopExe
   }
 }
 
-export function describeDesktopHostConflict(record: LocalCliHostRecord | null): {
+/**
+ * A Host whose endpoint refuses this desktop: on Windows, one started elevated
+ * (Run as administrator, an admin SSH login) or by a service in another logon
+ * session, whose default pipe DACL denies a non-elevated desktop.
+ */
+export const DESKTOP_HOST_ACCESS_DENIED_MESSAGE =
+  'The Lody local agent is held by a process this app is not allowed to connect to, ' +
+  'usually one started as administrator, as another user or as a background service. ' +
+  'Quit that Lody process, or open Lody with the same privileges, then restart the daemon.'
+
+export function describeDesktopHostConflict(
+  record: LocalCliHostRecord | null,
+  accessDenied = false
+): {
   message: string
   detail: string
 } {
+  if (accessDenied) {
+    return {
+      message: 'Another Lody process with different privileges owns the local agent.',
+      detail: DESKTOP_HOST_ACCESS_DENIED_MESSAGE
+    }
+  }
   if (record?.mode === 'daemon') {
     return {
       message: 'Please stop the Lody daemon before opening Nightly.',

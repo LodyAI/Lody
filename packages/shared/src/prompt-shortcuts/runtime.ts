@@ -36,8 +36,6 @@ export type ShortcutRuntimeSnapshot = {
 export class PromptShortcutRuntime {
   private readonly lifetime = new ShortcutLifetime();
   private disposed = false;
-  private released = false;
-  private disposeReceipt?: Promise<void>;
   private listeners = new Set<() => void>();
   private remoteEntries: PromptShortcutIndexEntry[] = [];
   private directory: readonly ShortcutDirectoryEntry[] = [];
@@ -213,7 +211,7 @@ export class PromptShortcutRuntime {
       let unsubscribe: (() => void) | undefined;
       let retained = false;
       try {
-        const lease = await this.store.repo.acquireFlockDocHandleLegacy(id);
+        const lease = await this.store.repo.acquireFlockDoc(id);
         releaseReplica = () => lease.release();
         const catalog = new PromptShortcutCatalog(lease.flock);
         unsubscribe = lease.flock.subscribe(() => this.refreshIndexes());
@@ -501,7 +499,7 @@ export class PromptShortcutRuntime {
       await sync.sync();
       this.assertActive();
       const id = getShortcutIndexStreamId(domain);
-      const lease = await this.store.repo.acquireFlockDocHandleLegacy(id);
+      const lease = await this.store.repo.acquireFlockDoc(id);
       try {
         mutate(new PromptShortcutCatalog(lease.flock));
         await this.store.repo.persistFlockDocNow(id, lease.flock);
@@ -571,37 +569,15 @@ export class PromptShortcutRuntime {
     await this.cacheDiscovery();
   }
 
-  dispose(): Promise<void> {
-    if (this.released) return Promise.resolve();
-    if (this.disposeReceipt) return this.disposeReceipt;
+  async dispose() {
+    if (this.disposed) return;
     this.disposed = true;
     this.lifetime.dispose();
     this.listeners.clear();
-    this.disposeReceipt = (async () => {
-      const failures: unknown[] = [];
-      const attempt = async (close: () => Promise<void> | undefined) => {
-        try {
-          await close();
-        } catch (error) {
-          failures.push(error);
-        }
-      };
-      await attempt(() => this.remote?.dispose());
-      await Promise.allSettled([...this.tasks]);
-      await Promise.all(
-        [...this.indexes].map(([key, index]) =>
-          attempt(async () => {
-            await index.close();
-            this.indexes.delete(key);
-          })
-        )
-      );
-      await attempt(() => this.store.dispose());
-      if (failures.length) throw new AggregateError(failures, 'Shortcut cleanup failed');
-      this.released = true;
-    })().finally(() => {
-      this.disposeReceipt = undefined;
-    });
-    return this.disposeReceipt;
+    await this.remote?.dispose();
+    await Promise.allSettled([...this.tasks]);
+    await Promise.all([...this.indexes.values()].map((index) => index.close()));
+    this.indexes.clear();
+    await this.store.dispose();
   }
 }

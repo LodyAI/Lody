@@ -257,20 +257,23 @@ describe('durable Operation inbox', () => {
     expect(f.sql.prepare(intent.input, 'owner', intent.intentId)).toBeUndefined();
     expect(f.sql.pending('workspace')).toEqual([]);
   });
-  it('Stop keeps old queued input canceled and only a fresh human receipt clears pause', () => {
-    const f = fixture();
-    f.start();
-    const queued = { ...f.input, inputId: 'queued-before-stop' };
-    f.sql.accept(queued);
-    f.add('one');
-    expect(f.sql.pause(f.input, 'execution-1')).toBe(true);
-    f.release('user_stop');
-    expect(f.sql.accept(queued)).toBe(false);
-    expect(f.sql.accept({ ...f.input, kind: 'task', inputId: 'agent-message' })).toBe(false);
-    const human = { ...f.input, inputId: 'fresh-human' };
-    expect(f.sql.accept(human)).toBe(true);
-    expect(f.sql.prepare(human, 'owner')?.memberCount).toBe(1);
-  });
+  it.each(['human', 'task'] as const)(
+    'Stop keeps old queued input canceled and fresh %s input clears pause',
+    (kind) => {
+      const f = fixture();
+      f.start();
+      const queued = { ...f.input, inputId: 'queued-before-stop' };
+      f.sql.accept(queued);
+      f.add('one');
+      expect(f.sql.pause(f.input, 'execution-1')).toBe(true);
+      f.release('user_stop');
+      expect(f.sql.accept(queued)).toBe(false);
+      expect(f.sql.pending('workspace')).toEqual([]);
+      const fresh = { ...f.input, kind, inputId: `fresh-${kind}` };
+      expect(f.sql.accept(fresh)).toBe(true);
+      expect(f.sql.prepare(fresh, 'owner')?.memberCount).toBe(1);
+    }
+  );
   it('Stop still targets running execution after newer input is accepted', () => {
     const f = fixture();
     f.start();
@@ -399,16 +402,17 @@ describe('durable Operation inbox', () => {
       )
     );
   });
-  it('uses one execution slot across requester identities and cannot bypass pause by changing user', () => {
+  it('uses one execution slot across requester identities and Stop cancels their queued input', () => {
     const f = fixture();
     f.start();
     const other = { ...f.input, userId: 'other', inputId: 'other-task', kind: 'task' as const };
     expect(f.sql.accept(other)).toBe(true);
     expect(f.sql.begin(other, 'overlap')).toBe(false);
-    f.sql.pause(f.input, 'execution-1');
+    f.sql.pause(f.input, 'execution-1', [other.inputId]);
     f.release('user_stop');
-    expect(f.sql.accept({ ...other, inputId: 'after-stop' })).toBe(false);
-    const fresh = { ...other, inputId: 'fresh-human', kind: 'human' as const };
+    expect(f.sql.accept(other)).toBe(false);
+    expect(f.sql.begin(other, 'stale-owner')).toBe(false);
+    const fresh = { ...other, inputId: 'after-stop' };
     expect(f.sql.accept(fresh)).toBe(true);
     expect(f.sql.begin(fresh, 'new-owner')).toBe(true);
   });
@@ -1019,7 +1023,7 @@ it('Stop at the normal-release gap supersedes the fixed intent before an extra e
   });
   expect(f.sql.pause(f.input, 'execution-1')).toBe(true);
   expect(f.sql.pending('workspace')).toEqual([]);
-  expect(f.sql.accept({ ...f.input, kind: 'task', inputId: 'reply' })).toBe(false);
+  expect(f.sql.accept({ ...f.input, kind: 'task', inputId: 'reply' })).toBe(true);
 });
 
 it('retries release recording and snapshots all queued arrivals at claim', async () => {
@@ -1399,7 +1403,7 @@ it.each(['unknown', 'paused'] as const)(
     expect(observed.received).toEqual([]);
     expect(observed.pending).toEqual([]);
     if (mode === 'unknown') expect(observed.state).toBe('unknown');
-    else expect(observed.taskAccepted).toBe(false);
+    else expect(observed.taskAccepted).toBe(true);
   }
 );
 

@@ -220,6 +220,13 @@ async function deleteMachineFlockRowsBestEffort(
   }
 }
 
+/** Only PR auto-archive supplies this cancellation check and progress receipt. */
+type AutoArchiveSessionOptions = {
+  /** False retires a superseded request before any archive writes. */
+  shouldContinue: (targets: readonly SessionMeta[]) => boolean;
+  accepted: Set<SessionId>;
+};
+
 export type SessionActions = {
   createSession: (payload: SessionToCreate) => Promise<CreateSessionResult>;
   startSession: (
@@ -269,7 +276,7 @@ export type SessionActions = {
   markSessionUnread: (sessionId: SessionId) => Promise<void>;
   /** Delete exactly the supplied Sessions without discovering related Sessions. */
   deleteSessions: (sessionIds: SessionId[]) => Promise<void>;
-  archiveSession: (sessionId: SessionId) => Promise<void>;
+  archiveSession: (sessionId: SessionId, autoArchive?: AutoArchiveSessionOptions) => Promise<void>;
   setTreeCollaborationStopped: (sessionId: SessionId, stopped: boolean) => Promise<void>;
   setSessionTabClosed: (sessionId: SessionId, closed: boolean) => Promise<void>;
   restoreSession: (sessionId: SessionId) => Promise<void>;
@@ -804,23 +811,27 @@ export function useSessionActions(): SessionActions {
   );
 
   const archiveSession = useCallback(
-    async (sessionId: SessionId) => {
+    async (sessionId: SessionId, autoArchive?: AutoArchiveSessionOptions) => {
       log('[session-archive] start', { sessionId });
       if (!runtime) {
         throw new Error('Runtime not ready');
       }
-      // A conversation whose creation is still held exists only in memory:
-      // archiving it cancels that send (and its pending children) and ends here.
-      const unwritten = runtime.pendingSends?.hasPendingCreation(sessionId) ?? false;
-      await runtime.pendingSends?.cancelSessions([sessionId]);
-      if (unwritten && !(await runtime.repo.getDocMeta(getSessionRoomId(sessionId)))?.meta?.id) {
-        log('[session-archive] canceled unwritten conversation', { sessionId });
-        return;
+      // Automatic intents come only from durable metadata. Keep manual archive's
+      // held-creation cancellation, but let an automatic retry validate its
+      // snapshot before it can cancel any newly held follow-up.
+      if (!autoArchive) {
+        const unwritten = runtime.pendingSends?.hasPendingCreation(sessionId) ?? false;
+        await runtime.pendingSends?.cancelSessions([sessionId]);
+        if (unwritten && !(await runtime.repo.getDocMeta(getSessionRoomId(sessionId)))?.meta?.id) {
+          log('[session-archive] canceled unwritten conversation', { sessionId });
+          return;
+        }
       }
       const archiveTargets = await runtime.readSessionOperationTargets(sessionId, 'archive');
       if (store.get(activeWorkspaceRuntimeAtom) !== runtime) {
         throw new Error('Workspace changed before archiving');
       }
+      if (autoArchive && !autoArchive.shouldContinue(archiveTargets)) return;
       // Held follow-ups would otherwise be written into archived conversations.
       await runtime.pendingSends?.cancelSessions(archiveTargets.map((session) => session.id));
       for (const session of archiveTargets) {
@@ -830,6 +841,7 @@ export function useSessionActions(): SessionActions {
           isArchived: true,
           status: SessionStatusFactory.idle(),
         } as Partial<SessionMeta>);
+        autoArchive?.accepted.add(session.id);
         if (typeof window !== 'undefined') {
           // Cleanup failure cannot undo the accepted archive state.
           try {

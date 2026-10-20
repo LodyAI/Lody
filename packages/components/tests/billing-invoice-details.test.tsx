@@ -6,7 +6,11 @@ import {
   BillingInvoiceDetails,
   type BillingInvoiceDetailsProps,
 } from '../src/components/settings/billing-invoice-details';
-import { invoiceDisplayAmount } from '../src/components/settings/billing-setting-pure';
+import {
+  BillingInvoiceRow,
+  formatDate,
+  invoiceDisplayAmount,
+} from '../src/components/settings/billing-setting-pure';
 import { initI18n } from '../src/i18n';
 
 (
@@ -67,6 +71,30 @@ describe('invoice details', () => {
   function button(text: string) {
     return [...document.querySelectorAll('button')].find((item) => item.textContent === text);
   }
+  it('presents recurring gift invoices as service periods, not repeated grants', async () => {
+    const giftPeriod = {
+      ...invoice,
+      id: 'in_gift_period',
+      status: 'paid',
+      amountPaid: 0,
+      amountDue: 0,
+      amountRemaining: 0,
+      total: 0,
+      kind: 'gift_redemption' as const,
+      giftDurationMonths: 3,
+      periodStart: Date.UTC(2026, 6, 25),
+      periodEnd: Date.UTC(2026, 7, 25),
+      createdAt: Date.UTC(2026, 6, 25),
+    };
+
+    await act(async () => root.render(createElement(BillingInvoiceRow, { invoice: giftPeriod })));
+
+    expect(container.textContent).toContain('Gift Plus period');
+    expect(container.textContent).toContain(
+      `Access ${formatDate(giftPeriod.periodStart)} – ${formatDate(giftPeriod.periodEnd)}`
+    );
+    expect(container.textContent).not.toContain('3-month access');
+  });
   it('uses the unpaid balance for open invoices, including partial payment and legacy responses', () => {
     expect(invoiceDisplayAmount(invoice)).toBe(5741);
     expect(invoiceDisplayAmount({ ...invoice, amountPaid: 1000, amountRemaining: 4741 })).toBe(

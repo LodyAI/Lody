@@ -56,12 +56,10 @@ vi.mock('../src/hooks/use-authenticated-convex', () => ({
     claimAutomaticCommand: () => false,
   }),
 }));
-vi.mock('../src/providers/convex-provider', () => ({
-  useAuthClient: () => ({
-    linkSocial: async ({ callbackURL }: { callbackURL: string }) => {
-      authState.linkedCallback = callbackURL;
-    },
-  }),
+vi.mock('../src/hooks/use-personal-github-authorization', () => ({
+  usePersonalGitHubAuthorization: () => async () => {
+    authState.linkedCallback = 'operation-only';
+  },
 }));
 vi.mock('../src/components/settings/settings-data-cache', () => ({
   useSettingsDataCache: () => ({
@@ -231,10 +229,10 @@ describe('GitHubSettingsView', () => {
     expect(authState.linkedCallback).toBe('');
   });
 
-  it('keeps browser account linking and the local capability gate', async () => {
+  it('starts operation-only browser authorization and keeps the local capability gate', async () => {
     await renderSettings();
     await act(async () => authorizeButton()!.click());
-    expect(authState.linkedCallback).toContain('githubPersonalAuth=1');
+    expect(authState.linkedCallback).toBe('operation-only');
     expect(authState.openedUrls).toEqual([]);
     authState.available = false;
     await renderSettings();

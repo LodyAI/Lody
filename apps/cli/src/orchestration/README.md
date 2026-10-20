@@ -99,8 +99,8 @@ an independent connection to retry only settlement/release/pause writes. The ori
 failed close receipt remains unchanged; requests are never resubmitted.
 
 A wakeable receipt grants an automatic intent when idle; normal release grants one for queued wakeable receipts. Inbox-aware Stop cancels queued
-human execution eligibility and pauses automatic work. Fresh human input carries saved
-results, and a failed/unreleased execution cannot manufacture another wake. See the
+human execution eligibility and pauses automatic work. Fresh human or Agent-chat input
+clears that pause and carries saved results, and a failed/unreleased execution cannot manufacture another wake. See the
 [contract](../../../../specs/session-orchestration.md#idempotent-message-consumption).
 
 New Stop producers negotiate Inbox v2 with the target machine before adding `cancelId`

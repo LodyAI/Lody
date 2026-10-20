@@ -207,6 +207,7 @@ import { wrapPastedTextChipLabel } from '@/components/mentions/mention-chips';
 
 import { ErrorBoundary } from '@/components/error-boundary';
 import { ChatLandingView, type ChatLandingHintType } from './chat-landing-view';
+import { HomeDashboardHost } from './home/home-dashboard-host';
 import { getSessionCreationNavigation } from './submission/use-composer-navigation-focus';
 import { BranchSelector } from './chat-landing-selectors';
 import { composerSurface } from '@/components/shared/composer-surface';
@@ -259,6 +260,7 @@ import { getChatComposerPromptPlaceholderKey } from '@/lib/chat-composer-placeho
 import { selectPastedClipboardFiles, splitImageAndFileAttachments } from '@/lib/file-drop';
 import { canShowSubscriptionRateLimits } from '@/lib/session-usage';
 import { canShowCodexResetForecast } from '@/lib/codex-reset-forecast';
+import { buildHomeWeekUsage, type HomeWeekUsageOption } from '@/lib/home-week-usage';
 import { createMachinePairing } from '@/lib/cli-api-key';
 import { ContextSwitch, type SessionContextType } from './context-switch';
 import {
@@ -1720,6 +1722,59 @@ function WorkspaceChatLanding({
       agentType: selectedConfig.agentType,
       config: selectedConfig,
     });
+  // A row on the new-chat page's "now" board opens its session, as a sidebar row does.
+  const handleOpenHomeSession = useCallback(
+    (sessionId: string) => {
+      void navigate({
+        to: '/$workspaceName/sessions/$sessionId',
+        params: { workspaceName: workspaceSlug, sessionId: sessionId as SessionId },
+      });
+    },
+    [navigate, workspaceSlug]
+  );
+  // The new-chat page's usage tile: every provider on the selected machine that reports a
+  // plan, each read the way the composer's usage popover reads it. The composer's own
+  // provider uses the selected model; the others have none selected.
+  const homeWeekUsageOptions = useMemo<HomeWeekUsageOption[]>(() => {
+    if (!selectedMachine) return [];
+    return executorConfigs.flatMap((config) => {
+      if (config.machineId !== selectedMachine.id) return [];
+      if (
+        !canShowSubscriptionRateLimits({
+          cliType: config.cliType,
+          agentType: config.agentType,
+          config,
+          capability: selectedMachine.acpCapabilities?.[config.id]?.rateLimits,
+        })
+      ) {
+        return [];
+      }
+      const usage = buildHomeWeekUsage({
+        rateLimits: selectedMachine.raceLimits,
+        agentType: config.agentType,
+        agentConfigId: config.id,
+        modelId: config.id === selectedConfig?.id ? selectedModelId : null,
+      });
+      return usage
+        ? [
+            {
+              source: {
+                id: config.id,
+                cliType: config.cliType,
+                agentType: config.agentType,
+                name: config.name,
+              },
+              usage,
+              codexForecast: canShowCodexResetForecast({
+                cliType: config.cliType,
+                agentType: config.agentType,
+                config,
+              }),
+            },
+          ]
+        : [];
+    });
+  }, [executorConfigs, selectedMachine, selectedConfig?.id, selectedModelId]);
   const selectedModelLabel = modelOptions.find((option) => option.value === selectedModelId)?.label;
   /* The Role the composer IS, not the one last clicked. The footer names a Role
      only while every value that Role pins is still what will run, so moving a
@@ -6471,6 +6526,13 @@ function WorkspaceChatLanding({
         availableCommands={availableCommands}
         skillAgent={skillAgent}
         title={title}
+        ambient={
+          <HomeDashboardHost
+            usageOptions={homeWeekUsageOptions}
+            composerAgentId={selectedConfig?.id ?? null}
+            onOpenSession={handleOpenHomeSession}
+          />
+        }
         promptValue={prompt}
         onPromptChange={setPrompt}
         onPromptKeyDown={handlePromptKeyDown}
@@ -6508,8 +6570,10 @@ function WorkspaceChatLanding({
         submittingLabel={t('chat.submitting')}
         hintType={hintType}
         noMachineVariant={isElectron ? 'daemon-starting' : 'download-client'}
+        hintDownloadClientTitle={t('chat.cliHint.downloadClientTitle')}
         hintDownloadClientMessage={t('chat.cliHint.downloadClient')}
         hintDownloadClientLabel={t('chat.cliHint.downloadClientButton')}
+        hintDaemonStartingTitle={t('chat.cliHint.daemonStartingTitle')}
         hintDaemonStartingMessage={t('chat.cliHint.daemonStarting')}
         hintReportBugLabel={t('chat.cliHint.reportBug')}
         hintNoAgentConfigMessage={t('chat.cliHint.noAgentConfig')}

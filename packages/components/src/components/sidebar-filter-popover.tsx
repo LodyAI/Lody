@@ -1,5 +1,14 @@
 import { type ReactElement, type ReactNode, useId, useState } from 'react';
-import { Check, Clock, Eye, Folder, UserRound, Users } from 'lucide-react';
+import {
+  Check,
+  Clock,
+  Eye,
+  Folder,
+  GitBranch,
+  SlidersHorizontal,
+  UserRound,
+  Users,
+} from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import * as stylex from '@stylexjs/stylex';
 import { text } from '@lody/ui/tokens/scales.stylex';
@@ -8,13 +17,11 @@ const typography = stylex.create({
   option: { fontSize: text.subheadlineSize, lineHeight: text.subheadlineLeading },
 });
 
-import { CarbonSettingsAdjust } from '@/components/icons/carbon-settings-adjust';
 import { cn } from '@/lib/utils';
 import { Popover } from '@lody/ui/popover';
-import { Button } from '@lody/ui/button';
+import { Button, type ButtonSize } from '@lody/ui/button';
 import { menuGroupLabelClassName, menuSeparatorClassName } from '@/ui/menu-styles';
 import { Switch } from '@lody/ui/switch';
-import { Tooltip } from '@lody/ui/tooltip';
 import type { SidebarOrganizeMode } from '@/atoms/sidebar-state';
 import type { SidebarChatScope } from '@/atoms/sidebar-state';
 
@@ -24,10 +31,11 @@ export type SidebarFilterLabels = {
   triggerAriaLabel: string;
   organizeHeading: string;
   showHeading: string;
+  detailsHeading: string;
   organizeProject: string;
   organizeUpdated: string;
   updatedProjectNames: string;
-  updatedProjectNamesUnavailable: string;
+  showBranchNames: string;
   showMyTasks: string;
   showAllTasks: string;
   emptyMyTasks: string;
@@ -41,10 +49,11 @@ const defaultLabels: SidebarFilterLabels = {
   triggerAriaLabel: 'Filter sidebar',
   organizeHeading: 'View',
   showHeading: 'Tasks',
+  detailsHeading: 'Details',
   organizeProject: 'Project',
   organizeUpdated: 'Updated',
   updatedProjectNames: 'Show Project',
-  updatedProjectNamesUnavailable: 'Available in Updated view',
+  showBranchNames: 'Show Branch',
   showMyTasks: 'My Tasks',
   showAllTasks: 'All Tasks',
   emptyMyTasks: 'No tasks match this view',
@@ -62,9 +71,14 @@ export type SidebarFilterPopoverProps = {
   /** Whether Updated-mode rows show their project identity line. */
   showUpdatedProjectNames?: boolean;
   onShowUpdatedProjectNamesChange?: (next: boolean) => void;
+  /** Whether rows with a branch show the branch segment on their meta line. */
+  showBranchNames?: boolean;
+  onShowBranchNamesChange?: (next: boolean) => void;
   labels?: Partial<SidebarFilterLabels>;
   className?: string;
   triggerClassName?: string;
+  /** Use the Button size contract so the hit box and corner radius stay aligned. */
+  triggerSize?: ButtonSize;
   /** Render a custom trigger instead of the default IconButton-style filter button. */
   trigger?: ReactElement;
   /** Controlled open state. Provide both props when the trigger can remount at a
@@ -123,6 +137,56 @@ function SectionHeading({ children }: { children: ReactNode }) {
   );
 }
 
+// The switch counterpart of {@link MenuOption}: the same row geometry, with a
+// persistent Switch instead of the mutually exclusive check. Toggling never
+// closes the menu — these are display preferences, not navigation choices.
+function SwitchRow({
+  icon: Icon,
+  label,
+  checked,
+  onCheckedChange,
+  kind,
+}: {
+  icon: LucideIcon;
+  label: string;
+  checked: boolean;
+  onCheckedChange?: (next: boolean) => void;
+  /** Names the segment this switch controls, for tests and story asserts. */
+  kind: 'project' | 'branch';
+}) {
+  const switchId = useId();
+  return (
+    <div
+      data-sidebar-filter-section-row="details"
+      className="flex min-h-7 items-center gap-2 rounded-md px-2 py-[3px] text-popover-foreground"
+    >
+      <Icon
+        className="h-3.5 w-3.5 shrink-0 text-muted-foreground"
+        strokeWidth={1.75}
+        aria-hidden="true"
+      />
+      <label
+        htmlFor={switchId}
+        className={cn(
+          'min-w-0 flex-1 select-none truncate cursor-pointer',
+          stylex.props(typography.option).className
+        )}
+      >
+        {label}
+      </label>
+      <Switch
+        id={switchId}
+        checked={checked}
+        onCheckedChange={onCheckedChange}
+        aria-label={label}
+        data-sidebar-filter-switch=""
+        data-sidebar-filter-project-names={kind === 'project' ? '' : undefined}
+        data-sidebar-filter-branch-names={kind === 'branch' ? '' : undefined}
+      />
+    </div>
+  );
+}
+
 export function SidebarFilterPopover({
   organize,
   scope,
@@ -130,9 +194,12 @@ export function SidebarFilterPopover({
   onScopeChange,
   showUpdatedProjectNames = true,
   onShowUpdatedProjectNamesChange,
+  showBranchNames = false,
+  onShowBranchNamesChange,
   labels,
   className,
   triggerClassName,
+  triggerSize = 'small',
   trigger,
   open: controlledOpen,
   onOpenChange,
@@ -142,14 +209,10 @@ export function SidebarFilterPopover({
   const merged = { ...defaultLabels, ...labels };
   const [uncontrolledOpen, setUncontrolledOpen] = useState(false);
   const open = controlledOpen ?? uncontrolledOpen;
-  const [projectHintOpen, setProjectHintOpen] = useState(false);
-  const sourceLabelsSwitchId = useId();
-  const projectNamesAvailable = organize === 'updated';
 
   const handleOpenChange = (next: boolean) => {
     setUncontrolledOpen(next);
     onOpenChange?.(next);
-    if (!next) setProjectHintOpen(false);
   };
 
   const handleOrganizeSelect = (next: SidebarOrganizeMode) => {
@@ -168,20 +231,13 @@ export function SidebarFilterPopover({
             <Button
               type="button"
               variant="ghost"
+              size={triggerSize}
               icon
               aria-label={merged.triggerAriaLabel}
               data-state-open={open || undefined}
-              className={cn(
-                // Match section-header muted chrome (Pinned / Chats); full
-                // contrast on hover/open so the control still feels interactive.
-                'h-7 w-7 rounded-md text-sidebar-foreground-muted',
-                'hover:bg-sidebar-hover hover:text-sidebar-hover-foreground',
-                'focus-visible:ring-1 focus-visible:ring-sidebar-ring/40',
-                'data-[state=open]:bg-sidebar-hover data-[state=open]:text-sidebar-hover-foreground',
-                triggerClassName
-              )}
+              className={triggerClassName}
             >
-              <CarbonSettingsAdjust className="h-4 w-4" />
+              <SlidersHorizontal className="h-4 w-4" strokeWidth={1.5} />
             </Button>
           )
         }
@@ -226,67 +282,23 @@ export function SidebarFilterPopover({
           />
         </div>
         <div className={menuSeparatorClassName} aria-hidden="true" />
-        <Tooltip.Provider delay={300}>
-          <Tooltip.Root
-            open={projectNamesAvailable ? false : projectHintOpen}
-            onOpenChange={setProjectHintOpen}
-          >
-            <Tooltip.Trigger
-              render={
-                <div
-                  data-sidebar-filter-section="display"
-                  data-disabled={projectNamesAvailable ? undefined : ''}
-                  aria-disabled={projectNamesAvailable ? undefined : true}
-                  tabIndex={projectNamesAvailable ? undefined : 0}
-                  onPointerDownCapture={(event) => {
-                    if (projectNamesAvailable || event.pointerType !== 'touch') return;
-                    event.preventDefault();
-                    setProjectHintOpen((current) => !current);
-                  }}
-                  className={cn(
-                    'group flex min-h-7 items-center gap-2 rounded-md px-2 py-[3px]',
-                    projectNamesAvailable ? 'text-popover-foreground' : 'text-muted-foreground/55'
-                  )}
-                >
-                  <Eye
-                    className={cn(
-                      'h-3.5 w-3.5 shrink-0',
-                      projectNamesAvailable ? 'text-muted-foreground' : 'text-muted-foreground/55'
-                    )}
-                    strokeWidth={1.75}
-                    aria-hidden="true"
-                  />
-                  <label
-                    htmlFor={projectNamesAvailable ? sourceLabelsSwitchId : undefined}
-                    className={cn(
-                      'min-w-0 flex-1 select-none truncate',
-                      stylex.props(typography.option).className,
-                      projectNamesAvailable ? 'cursor-pointer' : 'cursor-default'
-                    )}
-                  >
-                    {merged.updatedProjectNames}
-                  </label>
-                  <Switch
-                    id={sourceLabelsSwitchId}
-                    checked={showUpdatedProjectNames}
-                    disabled={!projectNamesAvailable}
-                    onCheckedChange={onShowUpdatedProjectNamesChange}
-                    aria-label={merged.updatedProjectNames}
-                    aria-description={
-                      projectNamesAvailable ? undefined : merged.updatedProjectNamesUnavailable
-                    }
-                    data-sidebar-filter-project-names=""
-                  />
-                </div>
-              }
-            />
-            {!projectNamesAvailable ? (
-              <Tooltip.Content side="right" sideOffset={8} className="max-w-48">
-                {merged.updatedProjectNamesUnavailable}
-              </Tooltip.Content>
-            ) : null}
-          </Tooltip.Root>
-        </Tooltip.Provider>
+        <div data-sidebar-filter-section="details">
+          <SectionHeading>{merged.detailsHeading}</SectionHeading>
+          <SwitchRow
+            icon={Eye}
+            label={merged.updatedProjectNames}
+            checked={showUpdatedProjectNames}
+            onCheckedChange={onShowUpdatedProjectNamesChange}
+            kind="project"
+          />
+          <SwitchRow
+            icon={GitBranch}
+            label={merged.showBranchNames}
+            checked={showBranchNames}
+            onCheckedChange={onShowBranchNamesChange}
+            kind="branch"
+          />
+        </div>
       </Popover.Content>
     </Popover.Root>
   );

@@ -114,7 +114,10 @@ export const Downloading: Story = {
   render: (args) => wrap(<SessionFileCard {...args} />),
 };
 
-/** All the extension-driven icon buckets at a glance. */
+/**
+ * One of each kind of page the sheet draws, and the type label beside the size. A name
+ * with no short extension (`Dockerfile`, `.env`, a five-letter `ipynb`) shows the size alone.
+ */
 export const IconsByExtension: Story = {
   args: { file: baseFile({}) },
   render: () =>
@@ -131,6 +134,8 @@ export const IconsByExtension: Story = {
           { fileName: 'clip.mp4', mimeType: 'video/mp4' },
           { fileName: 'doc.pdf', mimeType: 'application/pdf' },
           { fileName: 'unknown.bin', mimeType: 'application/octet-stream' },
+          { fileName: 'Dockerfile', mimeType: 'text/plain', textPreview: true },
+          { fileName: 'analysis.ipynb', mimeType: 'application/json', textPreview: true },
         ].map((spec, index) => (
           <SessionFileCard
             key={spec.fileName}
@@ -139,6 +144,23 @@ export const IconsByExtension: Story = {
         ))}
       </div>
     ),
+};
+
+/**
+ * A long name and a long status both truncate with an ellipsis (the status keeps a
+ * hover title), and neither pushes the action off the card.
+ */
+export const LongNameAndStatus: Story = {
+  args: {
+    file: baseFile({
+      fileId: 'file-long',
+      fileName: 'a-very-long-generated-file-name-that-keeps-going-for-the-whole-quarter.pdf',
+      transport: 'local',
+      machineId: 'machine-abc',
+    }),
+    pendingMachineName: "Leon's MacBook Pro in the second-floor studio",
+  },
+  render: (args) => wrap(<SessionFileCard {...args} />),
 };
 
 /** Adjacent file blocks aggregate into one list (decision #3). */

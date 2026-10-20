@@ -107,11 +107,15 @@ export type SupervisorStopOptions = {
 };
 
 export type SupervisorOwnership = {
-  acquire: (
-    signal: AbortSignal
-  ) => Promise<
+  acquire: (signal: AbortSignal) => Promise<
     | { status: 'acquired' }
     | { status: 'occupied'; description?: string; owner?: SupervisorHostIdentity }
+    /**
+     * A host owns the runtime and refuses this process outright (for example a
+     * Windows pipe created under an elevated or service token). It cannot be
+     * attached or outwaited, so the supervisor goes fatal instead of retrying.
+     */
+    | { status: 'inaccessible'; description: string }
   >;
   inspect?: () => Promise<SupervisorHostIdentity | null>;
   release: () => void | Promise<void>;

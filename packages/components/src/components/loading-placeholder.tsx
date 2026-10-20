@@ -1,6 +1,22 @@
+import * as stylex from '@stylexjs/stylex';
+import { colors } from '@lody/ui/tokens/colors.stylex';
 import { Spinner } from '@lody/ui/spinner';
-import { BootShell } from '@/components/boot-shell';
+import { BootLoadingIndicator, BootShell } from '@/components/boot-shell';
 import { cn } from '@/lib/utils';
+
+const styles = stylex.create({
+  content: {
+    position: 'relative',
+    display: 'flex',
+    height: '100%',
+    minHeight: 0,
+    width: '100%',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'hsl(var(--background))',
+    color: colors.secondaryLabel,
+  },
+});
 
 export function LoadingPlaceholder({
   title = 'Loading',
@@ -31,11 +47,26 @@ export function LoadingPlaceholder({
     );
   }
 
+  if (variant === 'content') {
+    return (
+      <div {...stylex.props(styles.content)} data-loading-placeholder-scope="content">
+        <BootLoadingIndicator
+          status={
+            <>
+              <div className="lody-boot-shell__status-title">{title}</div>
+              {description ? <div>{description}</div> : null}
+            </>
+          }
+        />
+      </div>
+    );
+  }
+
   return (
     <div
       className={cn(
         'flex w-full items-center justify-center bg-background p-6 text-muted-foreground',
-        variant === 'viewport' ? 'min-h-[100dvh]' : 'h-full min-h-0'
+        'min-h-[100dvh]'
       )}
       data-loading-placeholder-scope={variant}
     >

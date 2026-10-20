@@ -29,8 +29,8 @@ catalog:
   '@loro-dev/flock-wasm': ^0.4.4
   '@loro-dev/loro-cli': 0.6.0
   '@loro-dev/sqlite-riverrun': 0.2.0
-  '@loro-dev/streams-client': 0.12.0
-  '@loro-dev/streams-crdt': 0.19.0
+  '@loro-dev/streams-client': 0.12.1
+  '@loro-dev/streams-crdt': 0.19.1
   '@tanstack/react-router': ^1.127.9
   '@tanstack/react-router-devtools': ^1.127.9
   '@tanstack/router-plugin': ^1.127.9
@@ -57,7 +57,7 @@ catalog:
   loro-mirror-jotai: 2.3.2
   loro-mirror-react: 2.3.2
   loro-protocol: ^0.3.0
-  loro-repo: 0.23.0
+  loro-repo: 0.23.3
   loro-websocket: ^0.6.2
   lucide-react: ^0.523.0
   react: 19.2.0
@@ -109,6 +109,8 @@ minimumReleaseAgeExclude:
   - '@peculiar/asn1-csr@2.10.0'
   - '@peculiar/asn1-cms@2.10.0'
   - mediabunny@1.61.0
+  # Mermaid renderer for chat diagrams; reviewed: no dependencies or install scripts.
+  - pele@1.6.0
   - '@peculiar/asn1-schema@2.10.0'
   # Electron 44.7.0 matches DSH's native loader runtime support.
   # electron-vite 6.0.0-beta.2+ is the first release
@@ -156,10 +158,14 @@ minimumReleaseAgeExclude:
   - loro-crdt@1.16.3
   # Safe error provenance and context, reviewed with loro-repo#144.
   # Native lifecycle/upload contracts reviewed in loro-streams#425; exact releases approved.
-  - '@loro-dev/streams-crdt@0.16.2 || 0.17.0 || 0.19.0'
-  - '@loro-dev/streams-client@0.9.0 || 0.10.0 || 0.12.0'
-  # Reviewed Repo native capabilities and fixes (loro-dev/loro-repo#150-#153).
-  - 'loro-repo@0.22.0 || 0.23.0'
+  # 0.19.1/0.12.1 stop the live-read spin after a failed flush (loro-dev/loro-streams#429).
+  - '@loro-dev/streams-crdt@0.16.2 || 0.17.0 || 0.19.0 || 0.19.1'
+  - '@loro-dev/streams-client@0.9.0 || 0.10.0 || 0.12.0 || 0.12.1'
+  # Reviewed Repo native capabilities and fixes (loro-dev/loro-repo#150-#153);
+  # 0.23.1 stops Flock persistence queue amplification (loro-dev/loro-repo#154);
+  # 0.23.2 serializes compaction and keeps its retries bounded (loro-dev/loro-repo#156);
+  # 0.23.3 retries SQLITE_BUSY without blocking the event loop (loro-dev/loro-repo#159).
+  - 'loro-repo@0.22.0 || 0.23.0 || 0.23.1 || 0.23.2 || 0.23.3'
   # Reviewed upgrade; 0.4.4 was published today once the release pipeline was fixed.
   - '@loro-dev/flock-wasm@0.4.4'
   # Adds the `remend` option the streaming Markdown renderer passes (lobehub/streamdown#5).

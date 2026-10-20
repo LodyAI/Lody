@@ -74,3 +74,5 @@ workspace 冻结安装、全包类型检查、lint、Effect lint、i18n 及全�
 也不替换 Lody 现有 SQLite 版本。
 
 同一个 #1607 随后的消费者迁移记录在[原生 workspace 所有权](../../proposed/architecture/2026-10-16-native-workspace-repo.zh.md)；上面的依赖接入验证早于该实现。
+
+当前边界（2026-10-19）：已撤回原生消费者及其后续应用补丁，仍选择 Repo 0.23.2；恢复的 Promise transport 自带远端 Stream 创建行为。见[撤回决策](../simplification/2026-10-19-repo-upgrade-without-consumer-migration.zh.md)。

@@ -52,6 +52,40 @@ vi.mock('../src/lib/session-image-upload', async (importOriginal) => ({
   ...(await importOriginal<object>()),
   uploadSessionImage: vi.fn(),
 }));
+vi.mock('../src/components/sessions/pending-image-markup-dialog', async () => {
+  const { createElement: renderElement } = await import('react');
+  return {
+    PendingImageMarkupDialog: ({
+      file,
+      onAdd,
+      onClose,
+    }: {
+      file: File;
+      onAdd: (selection: import('../src/lib/document-selection').DocumentSelection) => boolean;
+      onClose: () => void;
+    }) =>
+      renderElement(
+        'div',
+        {},
+        renderElement(
+          'button',
+          {
+            onClick: () =>
+              onAdd({
+                path: file.name,
+                location: 'Image',
+                comment: 'Fix the header',
+                image: new File(['marked-pixels'], 'screenshot-selection.png', {
+                  type: 'image/png',
+                }),
+              }),
+          },
+          'Apply image markup'
+        ),
+        renderElement('button', { onClick: onClose }, 'Cancel image markup')
+      ),
+  };
+});
 
 vi.mock('../src/components/mentions/mention-session-source', async (importOriginal) => ({
   ...(await importOriginal()),
@@ -504,6 +538,171 @@ describe('SessionChatInputArea submission feedback', () => {
       ])
     );
   }
+
+  it('stages a document selection beside the existing prompt and preserves it after rejected send', async () => {
+    const composerRef = createRef<SessionChatInputAreaHandle>();
+    const submissions: SessionInputBlock[][] = [];
+    const textarea = await renderComposer({
+      composerRef,
+      onSendMessage: async (blocks) => {
+        submissions.push(blocks);
+        return false;
+      },
+    });
+    await act(async () => {
+      composerRef.current!.setInputText('Keep this prompt');
+    });
+    textarea.setSelectionRange(0, 4);
+    await act(async () => {
+      expect(
+        composerRef.current!.addDocumentSelection({
+          path: 'reports/annual.pdf',
+          location: 'Page 3',
+          text: 'Revenue increased.',
+          comment: 'Explain why',
+        })
+      ).toBe(true);
+    });
+    expect(textarea.value).toContain('Keep this prompt');
+    expect(textarea.value).toContain('annual.pdf');
+    await submit('keyboard');
+    expect(submissions[0]).toMatchObject([
+      { type: 'text', text: expect.stringContaining('Keep this prompt\n\nDocument selection') },
+    ]);
+    expect((submissions[0][0] as { text: string }).text).toContain(
+      'File: reports/annual.pdf\nLocation: Page 3\nSelected content:\nRevenue increased.\nComment:\nExplain why'
+    );
+    expect(textarea.value).toContain('annual.pdf');
+    await submit('keyboard');
+    expect(submissions[1]).toEqual(submissions[0]);
+  });
+
+  it('rejects image annotations atomically when image input is disabled or the session is archived', async () => {
+    const composerRef = createRef<SessionChatInputAreaHandle>();
+    const textarea = await renderComposer({
+      composerRef,
+      onSendMessage: async () => true,
+      overrides: { disableImageUpload: true },
+    });
+    const original = textarea.value;
+    await act(async () => {
+      expect(
+        composerRef.current!.addDocumentSelection({
+          path: 'report.pdf',
+          location: 'Page 1',
+          image: new File(['png'], 'selection.png', { type: 'image/png' }),
+        })
+      ).toBe(false);
+    });
+    expect(textarea.value).toBe(original);
+    await renderComposer({ composerRef, isArchived: true, onSendMessage: async () => true });
+    await act(async () => {
+      expect(
+        composerRef.current!.addDocumentSelection({
+          path: 'report.pdf',
+          location: 'Page 1',
+          text: 'excerpt',
+        })
+      ).toBe(false);
+    });
+    expect(container!.textContent).not.toContain('report.pdf');
+  });
+
+  it('hands annotated pixels and source context to the same send without starting uploads', async () => {
+    const composerRef = createRef<SessionChatInputAreaHandle>();
+    const submissions: Parameters<SessionChatInputAreaProps['onSendMessage']>[] = [];
+    await renderComposer({
+      composerRef,
+      onSendMessage: async (...args) => {
+        submissions.push(args);
+        return false;
+      },
+    });
+    Object.defineProperty(URL, 'createObjectURL', {
+      configurable: true,
+      value: () => 'blob:selection',
+    });
+    Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: () => undefined });
+    const image = new File(['annotated-pixels'], 'report-selection.png', { type: 'image/png' });
+    await act(async () => {
+      expect(
+        composerRef.current!.addDocumentSelection({
+          path: 'report.pdf',
+          location: 'Page 1',
+          comment: 'Review layout',
+          image,
+        })
+      ).toBe(true);
+    });
+    await submit('keyboard');
+    expect(submissions[0][0]).toMatchObject([
+      {
+        type: 'text',
+        text: expect.stringContaining(
+          'Annotated image: report-selection.png\nComment:\nReview layout'
+        ),
+      },
+    ]);
+    expect(submissions[0][2]?.attachments).toMatchObject([
+      { kind: 'image', name: 'report-selection.png', source: image },
+    ]);
+    await submit('keyboard');
+    expect(submissions[1][2]?.attachments).toMatchObject([
+      { kind: 'image', name: 'report-selection.png', source: image },
+    ]);
+  });
+
+  it.each([true, false])(
+    'preserves the original screenshot unless markup is accepted: %s',
+    async (accept) => {
+      const composerRef = createRef<SessionChatInputAreaHandle>();
+      const submissions: Parameters<SessionChatInputAreaProps['onSendMessage']>[] = [];
+      await renderComposer({
+        composerRef,
+        onSendMessage: async (...args) => {
+          submissions.push(args);
+          return false;
+        },
+      });
+      Object.defineProperty(URL, 'createObjectURL', {
+        configurable: true,
+        value: () => 'blob:screenshot',
+      });
+      Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: () => undefined });
+      const original = new File(['original-pixels'], 'screenshot.png', { type: 'image/png' });
+      await act(async () => composerRef.current!.handleImageDrop([original]));
+      await act(async () =>
+        container!
+          .querySelector<HTMLButtonElement>('button[aria-label="Mark up screenshot.png"]')!
+          .click()
+      );
+      const label = accept ? 'Apply image markup' : 'Cancel image markup';
+      await act(async () =>
+        Array.from(container!.querySelectorAll('button'))
+          .find((button) => button.textContent === label)!
+          .click()
+      );
+      await submit('keyboard');
+      const attachments = submissions[0][2]?.attachments;
+      expect(attachments).toHaveLength(1);
+      if (accept) {
+        expect(attachments).toMatchObject([
+          { kind: 'image', name: 'screenshot-selection.png', source: { size: 13 } },
+        ]);
+        expect(submissions[0][0]).toMatchObject([
+          { type: 'text', text: expect.stringContaining('Comment:\nFix the header') },
+        ]);
+      } else {
+        expect(attachments).toMatchObject([{ kind: 'image', name: 'screenshot.png' }]);
+        const content = await new Promise((resolve) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(reader.result);
+          reader.readAsText(attachments![0].source);
+        });
+        expect(content).toBe('original-pixels');
+      }
+    }
+  );
 
   it.each(['keyboard', 'button'] as const)(
     'hands off complete drafts through %s without starting uploads in the composer',

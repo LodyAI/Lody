@@ -1,6 +1,6 @@
 import { atom } from 'jotai';
 import { atomWithStorage } from 'jotai/utils';
-import type { MachineId, SupportedLanguage } from '@lody/shared';
+import type { CodeCollabAllChangesScope, MachineId, SupportedLanguage } from '@lody/shared';
 import type { MobileKeyboardAction } from '@/lib/mobile-keyboard-action';
 import { isSymbolFontFamily } from '@/lib/local-fonts';
 import { SETTINGS_DEFAULT_TAB, type SettingsTabId } from '@/components/settings/settings-tabs';
@@ -224,6 +224,21 @@ export const iosLiveActivitiesEnabledAtom = atomWithStorage<boolean>(
 export const sessionSidebarCodeChangesOnlyAtom = atomWithStorage<boolean>(
   'lody-session-sidebar-code-changes-only',
   false
+);
+
+// All Changes workspace diff: branch cumulative (merge-base -> disk) vs uncommitted
+// (HEAD -> disk). Persisted globally; default preserves the existing branch view.
+const allChangesDiffScopeStorageAtom = atomWithStorage<string>(
+  'lody-all-changes-diff-scope',
+  'branch'
+);
+
+export const allChangesDiffScopeAtom = atom(
+  (get): CodeCollabAllChangesScope =>
+    get(allChangesDiffScopeStorageAtom) === 'uncommitted' ? 'uncommitted' : 'branch',
+  (_get, set, nextValue: CodeCollabAllChangesScope) => {
+    set(allChangesDiffScopeStorageAtom, nextValue);
+  }
 );
 
 export const QUEUED_MESSAGE_BEHAVIOR_VALUES = ['queue', 'guide'] as const;

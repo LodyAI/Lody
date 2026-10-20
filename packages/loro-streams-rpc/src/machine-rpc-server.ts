@@ -1706,6 +1706,7 @@ export class LoroStreamsMachineRpcServer {
           const response = await this.deps.openCodeCollabCurrentDiff({
             sessionId: params.sessionId as SessionId,
             path: params.path,
+            ...(params.scope === undefined ? {} : { scope: params.scope }),
           });
           await this.appendResultResponse(request.replyTo, request.id, request.method, response, {
             codeCollabOwnerSessionId: decoded.ownerSessionId,
@@ -1727,6 +1728,7 @@ export class LoroStreamsMachineRpcServer {
           const response = await this.deps.openCodeCollabAllChangesDiff({
             sessionId: params.sessionId as SessionId,
             ...(params.focusPath === undefined ? {} : { focusPath: params.focusPath }),
+            ...(params.scope === undefined ? {} : { scope: params.scope }),
           });
           await this.appendResultResponse(request.replyTo, request.id, request.method, response, {
             codeCollabOwnerSessionId: decoded.ownerSessionId,

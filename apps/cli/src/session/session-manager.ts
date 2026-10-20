@@ -1644,11 +1644,11 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
     }
   }
 
-  /** Called only between prompts under the execution service's turn ownership. */
+  /** Retire an instance between prompts without ending its execution owner's turn. */
   async retireSessionForReconfiguration(session: ISession): Promise<void> {
     if (this.sessions.get(session.sessionId) !== session)
       throw new Error('Session changed before reconfiguration');
-    // Reconfiguration is not agent death: keep the new turn's history owner alive.
+    // Reconfiguration and stale-prompt replacement preserve the live history owner.
     this.detachSession(session);
     await session.terminate(true);
   }

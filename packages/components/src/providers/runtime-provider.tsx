@@ -34,7 +34,7 @@ import {
 } from '@/atoms/control-connection';
 import { API_BASE_URL } from '@/lib';
 import { getCachedWorkspaceId } from '@/lib/local-storage-cache';
-import { recordClientLog } from '@/lib/client-log';
+import { recordClientError } from '@/lib/client-log';
 import { usePostHog } from '@posthog/react';
 import { createWorkspaceRuntime } from './create-workspace-runtime';
 import { resolveCloudPlatformRuntimePolicy } from './cloud-platform-runtime-policy';
@@ -76,9 +76,8 @@ const logRuntimeOperationError = (operation: string, error: unknown): void => {
     console.info(`RuntimeProvider: ${operation} skipped during shutdown`);
     return;
   }
-  const errorType = describeErrorType(error);
-  console.error(`RuntimeProvider: ${operation} failed`, { errorType });
-  recordClientLog('error', 'runtime.operation_failed', undefined, { operation, errorType });
+  console.error(`RuntimeProvider: ${operation} failed`, error);
+  recordClientError('runtime.operation_failed', error, { operation });
 };
 
 const resolveRuntimeEagerSyncSurface = (): EagerSyncSurface => {
@@ -102,8 +101,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
   const localAgentEnabled = useAtomValue(localAgentEnabledAtom);
   const token = useAtomValue(authTokenAtom);
   const currentUser = useAtomValue(userAtom);
-  // A failed owner fences only its storage, and remains retryable on return.
-  const retiringWorkspaces = useRef(new Map<string, Set<() => Promise<void>>>());
+  const previousShutdown = useRef<Promise<void>>(Promise.resolve());
   const runtime = useAtomValue(runtimeAtom);
   const setRuntime = useSetAtom(runtimeAtom);
   const setRuntimeInitFailure = useSetAtom(workspaceRuntimeInitFailureAtom);
@@ -399,11 +397,9 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
       return () => window.clearTimeout(timeout);
     }
 
-    const retirements = retiringWorkspaces.current;
     let disposed = false;
     const initializationAbort = new AbortController();
     let workspaceRuntime: Awaited<ReturnType<typeof createWorkspaceRuntime>> | null = null;
-    let dataPlaneStarted = false;
     // Logging-only workspace id resolution inputs intentionally stay out of
     // this effect's dependency list. A cached id can create the runtime before
     // the server id arrives; server-id arrival must not tear down that runtime.
@@ -412,15 +408,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
 
     const initialization = (async () => {
       try {
-        const retired = retirements.get(effectiveWorkspaceId);
-        if (retired) {
-          const outcomes = await Promise.allSettled([...retired].map((close) => close()));
-          const failures = outcomes.flatMap((outcome) =>
-            outcome.status === 'rejected' ? [outcome.reason] : []
-          );
-          if (failures.length)
-            throw new AggregateError(failures, 'Previous workspace cleanup failed');
-        }
+        await previousShutdown.current;
         if (disposed) return;
         if (platform.e2eeWorkspaces) {
           // Neither a cached organization nor a developer preference authorizes
@@ -474,7 +462,6 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
           workspaceIdSource,
           eagerSyncSurface,
         });
-        dataPlaneStarted = true;
         workspaceRuntime = await createWorkspaceRuntime({
           signal: initializationAbort.signal,
           accountId,
@@ -580,31 +567,12 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
       setRuntimeInitializing(true);
       clearDocMetaCache();
       clearPresenceStates();
-      // A superseded read-only describe owns no data-plane resources. Only a
-      // started Repo can hold storage that the next owner must wait to reclaim.
-      if (dataPlaneStarted) {
-        const retired = retirements.get(effectiveWorkspaceId) ?? new Set();
-        retirements.set(effectiveWorkspaceId, retired);
-        let receipt: Promise<void> | undefined;
-        const close = (): Promise<void> => {
-          if (receipt) return receipt;
-          receipt = initialization
-            .then(async () => {
-              if (workspaceRuntime) await workspaceRuntime.dispose();
-              retired.delete(close);
-              if (!retired.size && retirements.get(effectiveWorkspaceId) === retired)
-                retirements.delete(effectiveWorkspaceId);
-            })
-            .finally(() => {
-              receipt = undefined;
-            });
-          return receipt;
-        };
-        retired.add(close);
-        void close().catch((error: unknown) => {
-          logRuntimeOperationError('cleanup dispose', error);
-        });
-      }
+      previousShutdown.current = initialization.then(async () => {
+        if (workspaceRuntime) await workspaceRuntime.dispose();
+      });
+      void previousShutdown.current.catch((error: unknown) => {
+        logRuntimeOperationError('cleanup dispose', error);
+      });
     };
   }, [
     accountId,

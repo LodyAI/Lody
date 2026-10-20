@@ -16,6 +16,7 @@ import {
 import {
   deriveLocationsFromRawInput,
   deriveLocationsFromToolCallContent,
+  stripRawOutputImagesForHistory,
   stripToolCallContentForHistory,
   stripToolCallPayloadsForHistory,
 } from './tool-call-history';
@@ -1824,8 +1825,13 @@ class NotificationOnHistoryApplier {
           toolName: resolveAcpToolName(update._meta) ?? tool?.toolName,
           _meta: update._meta ?? tool?._meta,
         };
-        const value = update.rawOutput;
-        if (value != null && !asRecordOrUndefined(value)) {
+        // A readable array copy becomes tool content, so its images are dropped too;
+        // an image-only result leaves no copy.
+        const raw: unknown = update.rawOutput;
+        const readable = Array.isArray(raw) ? stripRawOutputImagesForHistory(raw) : undefined;
+        const imageOnly = readable?.length === 0 && (raw as unknown[]).length > 0;
+        const value = readable ?? raw;
+        if (value != null && !imageOnly && !asRecordOrUndefined(value)) {
           // Keep the readable copy; the old _meta.lody.subagentRaw duplicate
           // had no consumer. Preserve full text and arrays, without new limits.
           const text = typeof value === 'string' ? value : JSON.stringify(value);

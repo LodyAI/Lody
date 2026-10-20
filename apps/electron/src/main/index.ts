@@ -77,7 +77,7 @@ async function start(): Promise<void> {
       await dialog.showMessageBox({
         type: 'info',
         title: desktopInstallationProfile.desktopProductName,
-        ...describeDesktopHostConflict(result.record),
+        ...describeDesktopHostConflict(result.record, result.accessDenied),
         buttons: ['OK']
       })
       app.quit()

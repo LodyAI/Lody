@@ -117,6 +117,18 @@ describe('resolveSessionDispatchAction', () => {
     expect(action).toEqual({ type: 'noop', reason: 'active-session' });
   });
 
+  it('keeps a session whose previous turn has an unconfirmed release blocked, not stale', () => {
+    const action = resolveSessionDispatchAction(
+      snap({
+        meta: { ...baseMeta, status: { type: 'initializing' } },
+        hasActiveTurn: true,
+        releaseBlocked: { reason: 'Inbox resource acquisition remains incomplete' },
+      }),
+      MACHINE
+    );
+    expect(action).toEqual({ type: 'noop', reason: 'release-blocked' });
+  });
+
   it('returns reset-stale-status when status is running with no in-memory session', () => {
     const action = resolveSessionDispatchAction(
       snap({ meta: { ...baseMeta, status: { type: 'running' } } }),

@@ -7,6 +7,7 @@ import type { SessionId } from '@lody/shared';
 import { useSessionConversationDiffData } from '../src/components/sessions/use-session-conversation-diff-data';
 import type { SessionConversationDiffMode } from '../src/components/sessions/use-session-conversation-diff-data';
 import type { SessionFileProvider } from '../src/lib/session-file-provider';
+import { useSessionAllChangesDiffData } from '../src/components/sessions/use-session-all-changes-diff-data';
 
 let root: Root | null = null;
 let container: HTMLDivElement | null = null;
@@ -29,6 +30,216 @@ afterEach(() => {
 });
 
 describe('useSessionConversationDiffData', () => {
+  it('retains an immutable turn snapshot while its provider is rebuilt', async () => {
+    const paths = ['immutable.ts'];
+    const checkpoint = {
+      filePath: paths[0],
+      add: 1,
+      del: 1,
+      cc: { v: 1 as const, fileId: 'immutable-file', opId: '2:9', baseOpId: '1:9' },
+    };
+    const provider = createDiffProvider(async (path) => ({
+      status: 'ready',
+      path,
+      oldSnapshot: { kind: 'text', text: 'old' },
+      newSnapshot: { kind: 'text', text: 'saved turn' },
+    }));
+    let state: ReturnType<typeof useSessionConversationDiffData> | undefined;
+    const onUpdate = (result: ReturnType<typeof useSessionConversationDiffData>) => {
+      state = result;
+    };
+    const props = {
+      mode: 'conversation' as const,
+      filePaths: paths,
+      loadFilePaths: paths,
+      fileDiffs: [checkpoint],
+      onUpdate,
+    };
+    render(<DiffDataHarness {...props} fileProvider={provider} />);
+    await flushMicrotasks();
+    expect(state?.resolvedByPath[paths[0]]).toMatchObject({
+      status: 'ready',
+      newSnapshot: { text: 'saved turn' },
+    });
+    const rebuilt = createDiffProvider(() => new Promise(() => {}));
+    rerender(<DiffDataHarness {...props} fileProvider={rebuilt} />);
+    await flushMicrotasks();
+    expect(state?.resolvedByPath[paths[0]]).toMatchObject({
+      status: 'ready',
+      newSnapshot: { text: 'saved turn' },
+    });
+  });
+  it('loads All Changes deferred content on visibility and invalidates it for a new live batch', async () => {
+    const paths = ['inline.ts', 'deferred.ts'];
+    let version = 'first';
+    const provider = createDiffProvider(async (path) => ({
+      status: 'ready',
+      path,
+      oldSnapshot: { kind: 'text', text: 'old' },
+      newSnapshot: { kind: 'text', text: version },
+    }));
+    provider.getAllChangesDiff = async () => ({
+      status: 'ready',
+      base: 'base',
+      truncated: false,
+      entries: [
+        {
+          path: paths[0],
+          diff: {
+            status: 'ready',
+            path: paths[0],
+            oldSnapshot: { kind: 'text', text: 'old' },
+            newSnapshot: { kind: 'text', text: 'inline' },
+          },
+        },
+        { path: paths[1], diff: { status: 'deferred' } },
+      ],
+    });
+    let state: ReturnType<typeof useSessionAllChangesDiffData> | undefined;
+    function Harness({ visible, active = true }: { visible: string[]; active?: boolean }) {
+      const result = useSessionAllChangesDiffData({
+        sessionId: 'all-changes-test' as SessionId,
+        filePaths: paths,
+        loadFilePaths: visible,
+        fileProvider: provider,
+        enabled: active,
+      });
+      useEffect(() => {
+        state = result;
+      }, [result]);
+      return null;
+    }
+    render(<Harness visible={[paths[0]]} />);
+    await flushMicrotasks();
+    expect(state?.resolvedByPath[paths[0]]).toMatchObject({
+      status: 'ready',
+      newSnapshot: { text: 'inline' },
+    });
+    expect(state?.resolvedByPath[paths[1]]).toBeUndefined();
+    rerender(<Harness visible={[paths[1]]} />);
+    await flushMicrotasks();
+    expect(state?.resolvedByPath[paths[1]]).toMatchObject({
+      status: 'ready',
+      newSnapshot: { text: 'first' },
+    });
+    rerender(<Harness visible={[paths[1]]} active={false} />);
+    version = 'other';
+    rerender(<Harness visible={[paths[1]]} />);
+    await flushMicrotasks(8);
+    expect(state?.resolvedByPath[paths[1]]).toMatchObject({
+      status: 'ready',
+      newSnapshot: { text: 'other' },
+    });
+  });
+  it('refetches when the All Changes scope changes and renders the returned uncommitted file set', async () => {
+    const paths = ['committed.ts', 'worktree.ts'];
+    const provider = createDiffProvider(async (path) => ({
+      status: 'ready',
+      path,
+      oldSnapshot: { kind: 'text', text: 'old' },
+      newSnapshot: { kind: 'text', text: 'new' },
+    }));
+    provider.getAllChangesDiff = async (_focusPath, scope) => {
+      const entry = (path: string) => ({
+        path,
+        diff: { status: 'unavailable' as const, path, reason: 'metadata-only' as const },
+      });
+      return {
+        status: 'ready',
+        base: scope === 'uncommitted' ? 'head' : 'base',
+        truncated: false,
+        entries:
+          scope === 'uncommitted'
+            ? [entry('worktree.ts')]
+            : [entry('committed.ts'), entry('worktree.ts')],
+      };
+    };
+    let state: ReturnType<typeof useSessionAllChangesDiffData> | undefined;
+    function Harness({ scope }: { scope: 'branch' | 'uncommitted' }) {
+      const result = useSessionAllChangesDiffData({
+        sessionId: 'all-changes-scope-test' as SessionId,
+        filePaths: paths,
+        fileProvider: provider,
+        scope,
+      });
+      useEffect(() => {
+        state = result;
+      }, [result]);
+      return null;
+    }
+
+    render(<Harness scope="branch" />);
+    await flushMicrotasks();
+    expect(state?.base).toBe('base');
+
+    rerender(<Harness scope="uncommitted" />);
+    await flushMicrotasks();
+    expect(state?.base).toBe('head');
+    expect(state?.normalizedPaths).toEqual(['worktree.ts']);
+  });
+  it('accepts started reads across viewport changes and loads the newly visible file after settlement', async () => {
+    type DiffResult = Awaited<ReturnType<SessionFileProvider['getDiff']>>;
+    const pending = new Map<string, ReturnType<typeof createDeferred<DiffResult>>>();
+    const getDiff: SessionFileProvider['getDiff'] = (path) => {
+      if (pending.has(path)) throw new Error(`Duplicate read: ${path}`);
+      const deferred = createDeferred<DiffResult>();
+      pending.set(path, deferred);
+      return deferred.promise;
+    };
+    const provider = createDiffProvider(getDiff);
+    const paths = ['a.ts', 'b.ts', 'c.ts', 'd.ts', 'e.ts'];
+    let state: ReturnType<typeof useSessionConversationDiffData> | undefined;
+    const onUpdate = (value: ReturnType<typeof useSessionConversationDiffData>) => {
+      state = value;
+    };
+    render(
+      <DiffDataHarness
+        mode="base"
+        filePaths={paths}
+        loadFilePaths={paths.slice(0, 4)}
+        fileProvider={provider}
+        onUpdate={onUpdate}
+      />
+    );
+    await flushMicrotasks();
+    rerender(
+      <DiffDataHarness
+        mode="base"
+        filePaths={paths}
+        loadFilePaths={[paths[4]]}
+        fileProvider={provider}
+        onUpdate={onUpdate}
+      />
+    );
+    await flushMicrotasks();
+    expect(state?.resolvedByPath).toEqual({});
+    await act(async () =>
+      pending.get('a.ts')!.resolve({
+        status: 'ready',
+        path: 'a.ts',
+        oldSnapshot: { kind: 'text', text: 'old-a' },
+        newSnapshot: { kind: 'text', text: 'new-a' },
+      })
+    );
+    await flushMicrotasks();
+    expect(state?.resolvedByPath['a.ts']).toMatchObject({
+      status: 'ready',
+      newSnapshot: { text: 'new-a' },
+    });
+    await act(async () =>
+      pending.get('e.ts')!.resolve({
+        status: 'ready',
+        path: 'e.ts',
+        oldSnapshot: { kind: 'text', text: 'old-e' },
+        newSnapshot: { kind: 'text', text: 'new-e' },
+      })
+    );
+    await flushMicrotasks();
+    expect(state?.resolvedByPath['e.ts']).toMatchObject({
+      status: 'ready',
+      newSnapshot: { text: 'new-e' },
+    });
+  });
   it('matches conversation fileDiff checkpoints by normalized path', async () => {
     vi.useFakeTimers();
     const checkpoint = {
@@ -99,6 +310,29 @@ describe('useSessionConversationDiffData', () => {
     await flushMicrotasks();
 
     expect(getDiff).toHaveBeenCalledWith('./README.md', undefined, undefined);
+  });
+
+  it('passes the uncommitted All Changes scope to per-file reads', async () => {
+    const getDiff = vi.fn<SessionFileProvider['getDiff']>(async (pathOrFileId) => ({
+      status: 'unavailable',
+      path: pathOrFileId,
+      reason: 'not_changed',
+    }));
+
+    render(
+      <DiffDataHarness
+        mode="base"
+        allChangesScope="uncommitted"
+        fileProvider={createDiffProvider(getDiff)}
+        onUpdate={() => undefined}
+      />
+    );
+
+    await flushMicrotasks();
+
+    expect(getDiff).toHaveBeenCalledWith('README.md', undefined, undefined, {
+      allChangesScope: 'uncommitted',
+    });
   });
 
   it('keeps loaded All Changes data when equivalent checkpoints rerender', async () => {
@@ -317,6 +551,7 @@ function DiffDataHarness({
   loadFilePaths = README_PATHS,
   priorityFilePath = 'README.md',
   fileDiffs,
+  allChangesScope,
   onUpdate,
 }: {
   readonly fileProvider: SessionFileProvider;
@@ -325,6 +560,7 @@ function DiffDataHarness({
   readonly loadFilePaths?: string[];
   readonly priorityFilePath?: string;
   readonly fileDiffs?: Parameters<typeof useSessionConversationDiffData>[0]['fileDiffs'];
+  readonly allChangesScope?: 'branch' | 'uncommitted';
   readonly onUpdate: (result: ReturnType<typeof useSessionConversationDiffData>) => void;
 }) {
   const result = useSessionConversationDiffData({
@@ -336,6 +572,7 @@ function DiffDataHarness({
     priorityFilePath,
     fileDiffs,
     fileProvider,
+    allChangesScope,
   });
 
   useEffect(() => {

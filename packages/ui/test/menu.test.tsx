@@ -275,29 +275,39 @@ describe('Menu row', () => {
 });
 
 describe('Menu checkbox and radio rows', () => {
-  test('a checkbox row announces its state and toggles without closing the menu', async () => {
-    function Toggles() {
-      const [notify, setNotify] = useState(false);
-      return (
-        <Actions>
-          <Menu.CheckboxItem checked={notify} onCheckedChange={setNotify}>
-            Notify me
-          </Menu.CheckboxItem>
-        </Actions>
-      );
+  test.each(['start', 'end'] as const)(
+    'a checkbox row with its mark at %s toggles by pointer and keyboard without closing',
+    async (indicatorSide) => {
+      function Toggles() {
+        const [notify, setNotify] = useState(false);
+        return (
+          <Actions>
+            <Menu.CheckboxItem
+              checked={notify}
+              onCheckedChange={setNotify}
+              indicatorSide={indicatorSide}
+            >
+              Notify me
+            </Menu.CheckboxItem>
+          </Actions>
+        );
+      }
+      mounted = await mount(<Toggles />);
+      await click(trigger());
+      const row = () => rows('menuitemcheckbox')[0];
+      expect(row().getAttribute('aria-checked')).toBe('false');
+
+      await click(row());
+
+      expect(row().getAttribute('aria-checked')).toBe('true');
+      // A setting is toggled, not chosen: the menu stays up so a second one can
+      // be toggled without reopening it.
+      expect(trigger().getAttribute('aria-expanded')).toBe('true');
+      await press('Enter');
+      expect(row().getAttribute('aria-checked')).toBe('false');
+      expect(trigger().getAttribute('aria-expanded')).toBe('true');
     }
-    mounted = await mount(<Toggles />);
-    await click(trigger());
-    const row = () => rows('menuitemcheckbox')[0];
-    expect(row().getAttribute('aria-checked')).toBe('false');
-
-    await click(row());
-
-    expect(row().getAttribute('aria-checked')).toBe('true');
-    // A setting is toggled, not chosen: the menu stays up so a second one can
-    // be toggled without reopening it.
-    expect(trigger().getAttribute('aria-expanded')).toBe('true');
-  });
+  );
 
   test('a radio group holds one value and marks the row that has it', async () => {
     function Sort() {

@@ -138,7 +138,7 @@ export type ManagedStoreCache<K, V> = {
   disposeAll(): Promise<void>;
 };
 
-export function createManagedStoreCache<K, V extends { dispose(): void | Promise<void> }>(opts: {
+export function createManagedStoreCache<K, V extends { dispose(): void }>(opts: {
   create: (key: K) => Promise<V>;
   releaseDelayMs: number;
   /**
@@ -156,16 +156,11 @@ export function createManagedStoreCache<K, V extends { dispose(): void | Promise
   // Per-key in-flight dispose+unload chains. `get` serializes re-creation
   // behind these so a new store is only built after the old doc is unloaded.
   const pendingDisposals = new Map<K, Promise<void>>();
-  const retainedDisposals = new Map<K, V>();
-  let closed = false;
 
   // Forward-declared so the tracker's onRelease can call release().
-  const release = async (key: K, unload = true): Promise<void> => {
-    const pending = pendingDisposals.get(key);
-    if (pending) return pending;
+  const release = async (key: K): Promise<void> => {
     tracker.forceRelease(key);
-    const retained = retainedDisposals.get(key);
-    const existing = retained ? Promise.resolve(retained) : stores.get(key);
+    const existing = stores.get(key);
     if (!existing) {
       return;
     }
@@ -178,22 +173,14 @@ export function createManagedStoreCache<K, V extends { dispose(): void | Promise
       } catch {
         // Store creation failure was already surfaced to get() callers.
       }
-      if (store) {
-        try {
-          await store.dispose();
-          retainedDisposals.delete(key);
-        } catch (error) {
-          retainedDisposals.set(key, store);
-          throw error;
-        }
-      }
+      store?.dispose();
       try {
-        if (unload) await opts.unload?.(key);
-      } catch {
+        await opts.unload?.(key);
+      } catch (error) {
         // Do not reject callers: an unload failure leaves the dirty doc in
         // loro-repo's map, so nothing is lost; the retry happens implicitly
         // on the next acquire→release cycle.
-        console.warn('Failed to unload doc for released store; replica retained');
+        console.warn('Failed to unload doc for released store', { key, error });
       }
     })();
     // Registered synchronously so a concurrent get() observes the disposal
@@ -210,31 +197,27 @@ export function createManagedStoreCache<K, V extends { dispose(): void | Promise
 
   const tracker = createStoreRefTracker<K>({
     releaseDelayMs: opts.releaseDelayMs,
-    onRelease: (key) => {
-      void release(key).catch(() => {
-        /* The next acquire or workspace close retries the retained owner. */
-      });
-    },
+    onRelease: (key) => void release(key),
   });
 
   const get = (key: K): Promise<V> => {
-    if (closed) return Promise.reject(new Error('Store cache is disposed'));
     const existing = stores.get(key);
     if (existing) {
       return existing;
     }
     // Serialize behind an in-flight disposal: the new store must be created
     // only after the old doc was unloaded, or it would be yanked from under us.
-    const pending =
-      pendingDisposals.get(key) ?? (retainedDisposals.has(key) ? release(key) : undefined);
-    const created = pending ? pending.then(() => opts.create(key)) : opts.create(key);
+    const pending = pendingDisposals.get(key);
+    const created = pending
+      ? pending.catch(() => {}).then(() => opts.create(key))
+      : opts.create(key);
     const promise = created.then(
       (store) => {
         if (stores.get(key) === promise) settled.set(key, store);
         return store;
       },
       (error: unknown) => {
-        if (stores.get(key) === promise) stores.delete(key);
+        stores.delete(key);
         throw error;
       }
     );
@@ -266,20 +249,22 @@ export function createManagedStoreCache<K, V extends { dispose(): void | Promise
   };
 
   const disposeAll = async (): Promise<void> => {
-    closed = true;
     tracker.dispose();
     // Let in-flight dispose+unload chains settle so destroy doesn't race them.
     await Promise.allSettled([...pendingDisposals.values()]);
-    const keys = new Set([...stores.keys(), ...retainedDisposals.keys()]);
-    const results = await Promise.allSettled([...keys].map((key) => release(key, false)));
-    const failures = results.filter(
-      (result): result is PromiseRejectedResult => result.status === 'rejected'
-    );
-    if (failures.length)
-      throw new AggregateError(
-        failures.map((failure) => failure.reason),
-        'Store release failed'
-      );
+    // Intentionally no per-key unload here: this path is only used on full
+    // workspace destroy, which is immediately followed by repo.destroy();
+    // unloading each doc would serialize N persists for nothing.
+    settled.clear();
+    for (const [key, storePromise] of stores) {
+      stores.delete(key);
+      try {
+        const store = await storePromise;
+        store.dispose();
+      } catch {
+        // ignore — store creation may have failed
+      }
+    }
   };
 
   return { get, release, acquire, peek, releaseRef, releaseIfIdle, releaseIdle, disposeAll };

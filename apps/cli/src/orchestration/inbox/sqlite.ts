@@ -382,21 +382,16 @@ export class InboxSqlite {
           'SELECT canceled FROM inbox_inputs WHERE workspace_id=? AND session_id=? AND input_id=?'
         )
         .get(input.workspaceId, input.sessionId, input.inputId) as { canceled: number } | undefined;
-      const decision = inputAcceptance(
-        input.kind,
-        !!current.paused,
-        old ? old.canceled !== 0 : undefined
-      );
+      const decision = inputAcceptance(old ? old.canceled !== 0 : undefined);
       if (decision !== 'accept') return decision === 'duplicate';
       this.db
         .prepare(
           'UPDATE inbox_sessions SET revision=revision+1 WHERE workspace_id=? AND session_id=? AND user_id<>?'
         )
         .run(input.workspaceId, input.sessionId, input.userId);
-      if (input.kind === 'human')
-        this.db
-          .prepare('UPDATE inbox_sessions SET paused=0 WHERE workspace_id=? AND session_id=?')
-          .run(input.workspaceId, input.sessionId);
+      this.db
+        .prepare('UPDATE inbox_sessions SET paused=0 WHERE workspace_id=? AND session_id=?')
+        .run(input.workspaceId, input.sessionId);
       const revision = current.revision + 1;
       this.db
         .prepare(
@@ -405,9 +400,9 @@ export class InboxSqlite {
         .run(input.workspaceId, input.sessionId, input.userId, input.inputId, input.kind, revision);
       this.db
         .prepare(
-          "UPDATE inbox_sessions SET revision=?,paused=CASE WHEN ?='human' THEN 0 ELSE paused END WHERE workspace_id=? AND session_id=? AND user_id=?"
+          'UPDATE inbox_sessions SET revision=? WHERE workspace_id=? AND session_id=? AND user_id=?'
         )
-        .run(revision, input.kind, input.workspaceId, input.sessionId, input.userId);
+        .run(revision, input.workspaceId, input.sessionId, input.userId);
       const replaceAutomatic = !!this.db
         .prepare(
           "SELECT 1 FROM inbox_batches WHERE workspace_id=? AND session_id=? AND kind='automatic' AND state='prepared'"

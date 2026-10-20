@@ -63,6 +63,8 @@ import {
 import { normalizePinnedProviderOpenResult } from '@/lib/session-file-provider-open-result';
 import { SessionFileBinaryPreview } from './session-file-binary-preview';
 import { SessionFileCsvPreview } from './session-file-csv-preview';
+import { DocumentSelectionSurface } from './document-selection-surface';
+import type { DocumentSelection } from '@/lib/document-selection';
 import { SessionFileImagePreview } from './session-file-image-preview';
 import { MarkdownRenderer } from '../ai-gui/markdown-renderer';
 import { MarkdownFileResources } from '../ai-gui/markdown-file-image';
@@ -494,6 +496,7 @@ export type SessionFileContentViewProps = {
   }) => void;
   visualAnnotationReferenceKeys?: readonly string[];
   onAddVisualAnnotationToChat?: (reference: VisualAnnotationReferencePayload) => boolean | void;
+  onAddSelectionToChat?: (selection: DocumentSelection) => boolean;
   onToggleVisualAnnotationInChat?: (reference: VisualAnnotationReferencePayload) => boolean | void;
 };
 
@@ -536,6 +539,7 @@ function SessionFileContentViewImpl({
   onOpenFile,
   visualAnnotationReferenceKeys,
   onAddVisualAnnotationToChat,
+  onAddSelectionToChat,
   onToggleVisualAnnotationInChat,
 }: SessionFileContentViewProps) {
   const { t } = useTranslation();
@@ -1598,6 +1602,7 @@ function SessionFileContentViewImpl({
         url={data.snapshot.url}
         active={isActiveSurface}
         fileActions={sessionFileActions.buildErrorActions(normalizedPath, data.snapshot)}
+        onAddSelectionToChat={onAddSelectionToChat}
       />
     );
   } else if (data.snapshot.kind === 'missing') {
@@ -1645,11 +1650,18 @@ function SessionFileContentViewImpl({
     );
   } else if (showCsvRendered && data.snapshot.kind === 'text') {
     body = (
-      <SessionFileCsvPreview
-        text={latestEditorTextRef.current ?? data.snapshot.text}
+      <DocumentSelectionSurface
         path={normalizedPath}
+        source={latestEditorTextRef.current ?? data.snapshot.text}
         active={isActiveSurface}
-      />
+        onAdd={onAddSelectionToChat}
+      >
+        <SessionFileCsvPreview
+          text={latestEditorTextRef.current ?? data.snapshot.text}
+          path={normalizedPath}
+          active={isActiveSurface}
+        />
+      </DocumentSelectionSurface>
     );
   } else if (showSvgRendered || showMarkdownRendered) {
     body = previewSurface;

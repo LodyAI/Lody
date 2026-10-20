@@ -232,10 +232,11 @@ export function getLocalDaemonSocketPath(basename: string, platform?: PlatformKi
   if (process.platform === 'win32') {
     // Windows named pipes cannot get an explicit DACL from Node's listen(); we
     // rely on (a) the per-user suffix keeping paths collision-free and (b) the
-    // creating process's default pipe security descriptor, which grants write
-    // access to the owner (and Administrators — who can compromise the user's
-    // processes regardless). If Node ever exposes pipe security attributes,
-    // tighten this to owner-only explicitly.
+    // creating token's default pipe security descriptor. For an ordinary token
+    // that grants write access to the user; an elevated token grants it only to
+    // SYSTEM and Administrators, so the same user's non-elevated desktop is
+    // refused (Win32 error 5) and must report it rather than retry. If Node ever
+    // exposes pipe security attributes, set an explicit user-only DACL.
     return `\\\\.\\pipe\\${basename}-${getUserSocketSuffix()}`;
   }
 

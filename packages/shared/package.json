@@ -8,6 +8,10 @@
     "./src/visual-annotation-inspector-global.ts"
   ],
   "exports": {
+    "./notifications": {
+      "types": "./src/notifications/index.ts",
+      "import": "./src/notifications/index.ts"
+    },
     "./loro-sync-errors": {
       "types": "./src/loro-sync-errors/index.ts",
       "import": "./src/loro-sync-errors/index.ts"
@@ -92,6 +96,10 @@
       "types": "./src/local-loro-data-plane-server.ts",
       "import": "./src/local-loro-data-plane-server.ts"
     },
+    "./local-loro-transport": {
+      "types": "./src/local-loro-transport.ts",
+      "import": "./src/local-loro-transport.ts"
+    },
     "./image-file-types": {
       "types": "./src/image-file-types.ts",
       "import": "./src/image-file-types.ts"
@@ -168,10 +176,6 @@
     "./local-loro-writer/legacy": {
       "types": "./src/local-loro-writer/legacy.ts",
       "import": "./src/local-loro-writer/legacy.ts"
-    },
-    "./workspace-data/*": {
-      "types": "./src/workspace-data/*.ts",
-      "import": "./src/workspace-data/*.ts"
     }
   },
   "scripts": {

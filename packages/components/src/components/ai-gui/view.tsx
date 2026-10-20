@@ -3320,13 +3320,7 @@ const SystemNoticeView = ({
       return null;
   }
 
-  const meta = notice.meta as
-    | {
-        truncated?: boolean;
-        terminalOmitted?: boolean;
-        thinkingOmitted?: boolean;
-      }
-    | undefined;
+  const meta = notice.meta as { truncated?: boolean } | undefined;
 
   // Build the main message
   let mainMessage = t(
@@ -3342,65 +3336,16 @@ const SystemNoticeView = ({
     )}`;
   }
 
-  // Build tooltip content
-  const tooltipContent = t(
-    'sessions.systemNotices.resumeFromExternalChatHistory.tooltip',
-    'Native ACP resume is not yet supported (WIP). Context is restored from chat history.'
-  );
-
   return (
     <div className="relative flex items-center gap-3 py-4">
       {/* Left divider line */}
       <div className="flex-1 h-px bg-border" />
 
-      {/* Center content */}
-      <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-muted/50 border border-border/60">
-        <Tooltip.Provider>
-          <Tooltip.Root>
-            <Tooltip.Trigger
-              delay={500}
-              render={<Info className="h-4 w-4 text-muted-foreground cursor-help" />}
-            />
-            <Tooltip.Content side="top" className="max-w-xs text-center">
-              <p>{tooltipContent}</p>
-              {meta?.terminalOmitted && (
-                <p
-                  className={cn(
-                    stylex.props(activityTypography.footnote).className,
-                    'mt-1 opacity-80'
-                  )}
-                >
-                  {t(
-                    'sessions.systemNotices.resumeFromExternalChatHistory.terminalOmitted',
-                    'Terminal output was omitted to fit context.'
-                  )}
-                </p>
-              )}
-              {meta?.thinkingOmitted && (
-                <p
-                  className={cn(
-                    stylex.props(activityTypography.footnote).className,
-                    'mt-1 opacity-80'
-                  )}
-                >
-                  {t(
-                    'sessions.systemNotices.resumeFromExternalChatHistory.thinkingOmitted',
-                    'Agent thinking was omitted to fit context.'
-                  )}
-                </p>
-              )}
-            </Tooltip.Content>
-          </Tooltip.Root>
-        </Tooltip.Provider>
-        <span
-          className={cn(
-            stylex.props(activityTypography.footnote).className,
-            'text-muted-foreground'
-          )}
-        >
-          {mainMessage}
-        </span>
-      </div>
+      <span
+        className={cn(stylex.props(activityTypography.footnote).className, 'text-muted-foreground')}
+      >
+        {mainMessage}
+      </span>
 
       {/* Right divider line */}
       <div className="flex-1 h-px bg-border" />

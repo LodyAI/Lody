@@ -44,6 +44,32 @@ const styles = stylex.create({
 
   planHeading: { display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: space[2] },
   planName: { margin: 0, fontSize: '1.125em', lineHeight: type.leading, color: colors.label },
+  /**
+   * One plan card for every tier: the plan's identity and narrative on the
+   * left, the one dated fact a subscriber acts on on the right — the same
+   * label-over-value column the upcoming-charge summary below draws.
+   */
+  planStripe: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: space[3],
+  },
+  planIdentity: { minWidth: 0, flexGrow: 1 },
+  planFocus: {
+    flexShrink: 0,
+    textAlign: { default: 'start', [WIDE]: 'end' },
+  },
+  planFocusLabel: { margin: 0, color: colors.secondaryLabel, fontSize: uiText.footnoteSize },
+  planFocusDate: {
+    margin: 0,
+    marginTop: '2px',
+    fontSize: '1.125em',
+    lineHeight: type.leading,
+    color: colors.label,
+    fontVariantNumeric: 'tabular-nums',
+  },
   statusLine: {
     display: 'flex',
     flexWrap: 'wrap',
@@ -147,7 +173,36 @@ const styles = stylex.create({
     borderWidth: 0,
   },
 
-  amountDue: { color: colors.label, fontVariantNumeric: 'tabular-nums' },
+  chargeSummary: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    alignItems: 'flex-end',
+    justifyContent: 'space-between',
+    gap: space[3],
+    paddingBlock: space[4],
+  },
+  chargeDate: {
+    margin: 0,
+    marginTop: space[1],
+    color: colors.label,
+    fontSize: '1.125em',
+    lineHeight: 1.3,
+  },
+  chargeAmount: {
+    color: colors.label,
+    fontSize: '2em',
+    fontVariantNumeric: 'tabular-nums',
+    letterSpacing: '-0.03em',
+    lineHeight: 1,
+  },
+  chargeLabel: { margin: 0, color: colors.secondaryLabel, fontSize: uiText.footnoteSize },
+  chargeValue: { display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: space[1] },
+  chargeBreakdown: {
+    paddingBlock: space[3],
+    borderTopWidth: '1px',
+    borderTopStyle: 'solid',
+    borderTopColor: colors.separator,
+  },
   breakdown: {
     display: 'flex',
     flexDirection: 'column',
@@ -387,12 +442,20 @@ export function BillingInvoiceRow({
   onOpen?: () => void;
 }) {
   const { t } = useTranslation();
-  const label =
-    invoice.kind === 'gift_redemption' && invoice.giftDurationMonths
-      ? t('billing.historyGiftPlusMonths', { count: invoice.giftDurationMonths })
-      : t(invoiceReasonKey(invoice));
+  // Gift schedules create one $0 invoice per covered service period while
+  // repeating the total gift duration in each record. Show the period here so
+  // one three-month gift cannot read as three separate three-month grants.
+  const isGiftPeriod = invoice.kind === 'gift_redemption';
+  const label = t(invoiceReasonKey(invoice));
+  const giftPeriod =
+    isGiftPeriod && invoice.periodStart != null && invoice.periodEnd != null
+      ? t('billing.historyGiftPeriod', {
+          start: formatDate(invoice.periodStart),
+          end: formatDate(invoice.periodEnd),
+        })
+      : null;
   const helper = [
-    formatDate(invoice.createdAt),
+    giftPeriod ?? formatDate(invoice.createdAt),
     invoice.seatChange ? t('billing.invoiceSeatChange', invoice.seatChange) : null,
     invoice.status === 'paid' ? null : t(invoiceStatusKey(invoice.status)),
   ]
@@ -519,6 +582,14 @@ export function BillingSettingsView({
     !overview.canResumeAfterGift &&
     overview.effectivePlanTier === 'plus';
   const showSubscriptionOffer = !entitled || canScheduleAfterGift;
+  const showGiftFocus = isPromotional && hasGiftTimeline && !checkoutInProgress && !isPastDue;
+  const showPaidFocus =
+    overview.entitlementSource === 'stripe' &&
+    isPaid &&
+    overview.currentPeriodEnd !== null &&
+    !checkoutInProgress &&
+    !isPastDue;
+  const planFocusAt = showGiftFocus ? giftEnd : showPaidFocus ? overview.currentPeriodEnd : null;
 
   // `null` = unlimited.
   const sessionLimit = entitled ? null : FREE_SESSION_LIMIT_PER_WORKSPACE;
@@ -539,7 +610,9 @@ export function BillingSettingsView({
   const planIntervalLabel =
     isPaid && !checkoutInProgress && overview.billingInterval
       ? isPromotional
-        ? t('billing.promotionalBadge')
+        ? showGiftFocus
+          ? null
+          : t('billing.promotionalBadge')
         : overview.billingInterval === 'year'
           ? t('billing.yearly')
           : t('billing.monthly')
@@ -595,43 +668,68 @@ export function BillingSettingsView({
     : canScheduleAfterGift
       ? t('billing.subscribeAfterGiftSubtitle', { date: formatDate(giftEnd) })
       : t('billing.upgradeSubtitle');
-  const breakdown = upcomingInvoice
+  const postGiftBillingScheduled =
+    isPromotional && overview.autoRenewAfterGift && overview.nextBillingAt !== null;
+  // During a gift, Stripe may preview the next $0 service invoice. Use its
+  // amount for the first post-gift charge only when it reaches that boundary.
+  const chargePreview = isPromotional
+    ? postGiftBillingScheduled &&
+      upcomingInvoice?.expectedAt != null &&
+      overview.nextBillingAt !== null &&
+      upcomingInvoice.expectedAt >= overview.nextBillingAt
+      ? upcomingInvoice
+      : null
+    : upcomingInvoice;
+  const breakdown = chargePreview
     ? [
-        upcomingInvoice.renewal
+        chargePreview.renewal
           ? {
               key: 'renewal',
               label:
-                upcomingInvoice.renewal.quantity != null
-                  ? t('billing.upcomingRenewalWithSeats', {
-                      count: upcomingInvoice.renewal.quantity,
-                    })
+                chargePreview.renewal.quantity != null
+                  ? isPromotional && overview.autoRenewAfterGift
+                    ? t('billing.upcomingPostGiftRenewalWithSeats', {
+                        count: chargePreview.renewal.quantity,
+                        interval:
+                          overview.scheduledBillingInterval === 'year'
+                            ? t('billing.yearly').toLocaleLowerCase()
+                            : t('billing.monthly').toLocaleLowerCase(),
+                      })
+                    : t('billing.upcomingRenewalWithSeats', {
+                        count: chargePreview.renewal.quantity,
+                      })
                   : t('billing.upcomingRenewal'),
-              amount: upcomingInvoice.renewal.amount,
+              amount: chargePreview.renewal.amount,
             }
           : null,
-        upcomingInvoice.discount
+        chargePreview.discount
           ? {
               key: 'discount',
               label: t('billing.upcomingDiscount'),
-              amount: upcomingInvoice.discount.amount,
+              amount: chargePreview.discount.amount,
             }
           : null,
-        upcomingInvoice.adjustment
+        chargePreview.adjustment
           ? {
               key: 'adjustment',
               label: t('billing.upcomingAdjustment'),
-              amount: upcomingInvoice.adjustment.amount,
+              amount: chargePreview.adjustment.amount,
             }
           : null,
-        upcomingInvoice.creditApplied
+        chargePreview.creditApplied
           ? {
               key: 'credit',
               label: t('billing.upcomingCreditApplied'),
-              amount: upcomingInvoice.creditApplied.amount,
+              amount: chargePreview.creditApplied.amount,
             }
           : null,
       ].filter((line) => line !== null)
     : [];
+  const upcomingChargeAt = chargePreview?.expectedAt ?? overview.nextBillingAt;
+  const showUpcomingCharge =
+    canManage &&
+    ((overview.entitlementSource === 'stripe' && chargePreview !== null) ||
+      postGiftBillingScheduled);
 
   return (
     <div className={settingContainerClass}>
@@ -682,53 +780,76 @@ export function BillingSettingsView({
         </CompactSection>
       ) : null}
 
-      {/* Plan status */}
+      {/* One plan card for gift, paid and free states: identity and narrative
+          on the left, the one dated fact a subscriber acts on on the right.
+          Pending and past-due states keep their status copy in the narrative. */}
       <CompactSection>
-        <div {...stylex.props(styles.block)}>
-          <div {...stylex.props(styles.planHeading)}>
-            <p {...stylex.props(styles.planName)}>{planName}</p>
-            {/* A gift always ends at its schedule boundary; its status line says
-                so already, and a cancel badge would read as an error state. */}
-            {overview.cancelAtPeriodEnd && !isPromotional ? (
-              <Badge>{t('billing.cancelAtPeriodEnd')}</Badge>
-            ) : null}
-            {checkoutInProgress ? <Badge>{t('billing.checkoutPending')}</Badge> : null}
-            {hasGiftTimeline && overview.autoRenewAfterGift ? (
-              <Badge>{t('billing.postGiftBillingScheduled')}</Badge>
-            ) : null}
+        <div {...stylex.props(styles.block, styles.planStripe)}>
+          <div {...stylex.props(styles.planIdentity)}>
+            <div {...stylex.props(styles.planHeading)}>
+              <p {...stylex.props(styles.planName)}>{planName}</p>
+              {showGiftFocus ? <Badge>{t('billing.promotionalBadge')}</Badge> : null}
+              {overview.cancelAtPeriodEnd && !isPromotional ? (
+                <Badge>{t('billing.cancelAtPeriodEnd')}</Badge>
+              ) : null}
+              {checkoutInProgress ? <Badge>{t('billing.checkoutPending')}</Badge> : null}
+            </div>
+            <div {...stylex.props(styles.statusLine)}>
+              {planIntervalLabel ? (
+                <span {...stylex.props(styles.statusInterval)}>
+                  {planIntervalLabel}
+                  {showIntervalSwitch ? (
+                    <button
+                      type="button"
+                      disabled={switchIntervalPending || !overview.billingAccountId}
+                      onClick={onSwitchInterval}
+                      {...stylex.props(styles.inlineAction)}
+                    >
+                      {switchIntervalPending ? (
+                        <Spinner size="small" />
+                      ) : (
+                        <ArrowLeftRight aria-hidden="true" {...stylex.props(styles.glyphSmall)} />
+                      )}
+                      {overview.billingInterval === 'month'
+                        ? t('billing.switchToYearly')
+                        : t('billing.switchToMonthly')}
+                    </button>
+                  ) : null}
+                </span>
+              ) : null}
+              {planIntervalLabel && planFocusAt === null && planStatusDetail ? (
+                <span aria-hidden="true" {...stylex.props(styles.statusDot)}>
+                  ·
+                </span>
+              ) : null}
+              {planFocusAt === null && planStatusDetail ? (
+                <span {...stylex.props(isPastDue && styles.danger)}>{planStatusDetail}</span>
+              ) : showGiftFocus ? (
+                <span>
+                  {overview.autoRenewAfterGift
+                    ? t('billing.giftHeroScheduled', {
+                        interval:
+                          overview.scheduledBillingInterval === 'year'
+                            ? t('billing.yearly').toLocaleLowerCase()
+                            : t('billing.monthly').toLocaleLowerCase(),
+                      })
+                    : t('billing.giftHeroEnds')}
+                </span>
+              ) : null}
+            </div>
           </div>
-          <div {...stylex.props(styles.statusLine)}>
-            {planIntervalLabel ? (
-              <span {...stylex.props(styles.statusInterval)}>
-                {planIntervalLabel}
-                {showIntervalSwitch ? (
-                  <button
-                    type="button"
-                    disabled={switchIntervalPending || !overview.billingAccountId}
-                    onClick={onSwitchInterval}
-                    {...stylex.props(styles.inlineAction)}
-                  >
-                    {switchIntervalPending ? (
-                      <Spinner size="small" />
-                    ) : (
-                      <ArrowLeftRight aria-hidden="true" {...stylex.props(styles.glyphSmall)} />
-                    )}
-                    {overview.billingInterval === 'month'
-                      ? t('billing.switchToYearly')
-                      : t('billing.switchToMonthly')}
-                  </button>
-                ) : null}
-              </span>
-            ) : null}
-            {planIntervalLabel && planStatusDetail ? (
-              <span aria-hidden="true" {...stylex.props(styles.statusDot)}>
-                ·
-              </span>
-            ) : null}
-            {planStatusDetail ? (
-              <span {...stylex.props(isPastDue && styles.danger)}>{planStatusDetail}</span>
-            ) : null}
-          </div>
+          {planFocusAt !== null ? (
+            <div {...stylex.props(styles.planFocus)}>
+              <p {...stylex.props(styles.planFocusLabel)}>
+                {showGiftFocus
+                  ? t('billing.giftHeroTitle')
+                  : overview.cancelAtPeriodEnd
+                    ? t('billing.planEndsAt')
+                    : t('billing.planRenewsAt')}
+              </p>
+              <p {...stylex.props(styles.planFocusDate)}>{formatDate(planFocusAt)}</p>
+            </div>
+          ) : null}
         </div>
       </CompactSection>
 
@@ -951,36 +1072,53 @@ export function BillingSettingsView({
         </CompactSection>
       ) : null}
 
-      {/* Next charge preview: renewal + net seat proration, as its own card
-          above the history so admins see the exact next amount right after
-          inviting members. */}
-      {canManage && overview.entitlementSource === 'stripe' && upcomingInvoice ? (
+      {/* The date and amount lead the next charge; the breakdown below
+          explains the bill. A gift schedule may have a reliable date before
+          Stripe can estimate the amount. */}
+      {showUpcomingCharge ? (
         <CompactSection title={t('billing.upcomingTitle')}>
-          <div {...stylex.props(styles.block)}>
-            <div {...stylex.props(styles.metric)}>
-              <p {...stylex.props(styles.helperFlush)}>
-                {upcomingInvoice.expectedAt
-                  ? t('billing.upcomingChargeOn', {
-                      date: formatDate(upcomingInvoice.expectedAt),
-                    })
-                  : null}
+          <div {...stylex.props(styles.block, styles.chargeSummary)}>
+            <div>
+              <p {...stylex.props(styles.chargeLabel)}>
+                {postGiftBillingScheduled
+                  ? t('billing.upcomingAfterGift')
+                  : t('billing.upcomingChargeDate')}
               </p>
-              <span {...stylex.props(styles.amountDue)}>
-                {formatMoney(upcomingInvoice.amountDue, upcomingInvoice.currency)}
+              {upcomingChargeAt ? (
+                <p {...stylex.props(styles.chargeDate)}>{formatDate(upcomingChargeAt)}</p>
+              ) : null}
+            </div>
+            <div {...stylex.props(styles.chargeValue)}>
+              <span {...stylex.props(styles.chargeAmount)}>
+                {chargePreview ? formatMoney(chargePreview.amountDue, chargePreview.currency) : '—'}
+              </span>
+              <span {...stylex.props(styles.chargeLabel)}>
+                {chargePreview
+                  ? t('billing.upcomingAmountEstimate')
+                  : t('billing.upcomingAmountPending')}
               </span>
             </div>
           </div>
-          {breakdown.length > 0 ? (
-            <ul {...stylex.props(styles.block, styles.breakdown)}>
+          {chargePreview && breakdown.length > 0 ? (
+            <ul {...stylex.props(styles.block, styles.breakdown, styles.chargeBreakdown)}>
               {breakdown.map((line) => (
                 <li key={line.key} {...stylex.props(styles.breakdownLine)}>
                   <span {...stylex.props(styles.truncate)}>{line.label}</span>
                   <span {...stylex.props(styles.tabular)}>
-                    {formatMoney(line.amount, upcomingInvoice.currency)}
+                    {formatMoney(line.amount, chargePreview.currency)}
                   </span>
                 </li>
               ))}
             </ul>
+          ) : !chargePreview && postGiftBillingScheduled ? (
+            <p {...stylex.props(styles.block, styles.helperFlush, styles.chargeBreakdown)}>
+              {t('billing.upcomingPostGiftPending', {
+                interval:
+                  overview.scheduledBillingInterval === 'year'
+                    ? t('billing.yearly').toLocaleLowerCase()
+                    : t('billing.monthly').toLocaleLowerCase(),
+              })}
+            </p>
           ) : null}
         </CompactSection>
       ) : null}

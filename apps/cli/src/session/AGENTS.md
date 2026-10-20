@@ -59,8 +59,8 @@
   `finished`/`endedAt`/`permissionWaitMs` there only; never write `finished=false` from teardown.
 - Keep JSON-RPC/transport matching in `acp-error-classification.ts`: disposed/stale `-32603` =
   `agent_disconnected`, Harness compression mismatch = `acp_session_storage_incompatible`.
-- User turns may restore stale ACP and retry once before output. Inbox batches never retry after
-  submission; this includes human-plus-batch inputs.
+- Stale ACP: retry once before output; retire, retain cleanup, keep the turn. Never retry submitted
+  Inbox inputs (human-plus-batch too).
 - Agent-input turns skip completion notices only. Use the completed invocation's exact input.
 - No ACP updates: `recordSilentTurnFailure`, not `setDispatchHandled`. Read
   `turnProducedVisibleOutput` before `finalizeTurn` clears it; finalize, advance pointers, fail open.

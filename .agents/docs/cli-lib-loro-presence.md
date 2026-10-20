@@ -118,6 +118,12 @@ APIs are a different reachability domain and are NOT gated by it.
 
 ## Reading liveness
 
+Cloud applications maintain the shared server offset throughout their lifetime,
+so native Clock-based heartbeats and renderer freshness use the same epoch
+calibration after a system-clock correction. Failed refreshes preserve the last
+estimate and retry without blocking local publication; offline accuracy remains
+conditional. [Calibration decision](../notes/implemented/bug-fix/2026-10-17-presence-clock-calibration.md).
+
 Machine liveness is three-state, and the states are not interchangeable. A fresh
 heartbeat means online. The absence of one on a SYNCED transport means offline. An
 unsynced transport means unknown. `getOnlineMachineIds()` returning null means the

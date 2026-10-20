@@ -20,11 +20,10 @@ import { DEFAULT_CONVERSATION_FONT_SIZE, type ConversationFontSize } from '@/ato
 import { conversationTextFontSizeStyle } from '@/components/ai-gui/conversation-font-size-classes';
 import { useIsMessageSendingVisible } from '@/components/ai-gui/message-send-status-context';
 import {
-  getSessionFileIcon,
+  formatSessionFileMeta,
   SessionFileCardLayout,
   SessionFileCardList,
 } from '@/components/ai-gui/session-file-card';
-import { formatFileSize } from '@/lib/session-file-presentation';
 import { peekSessionImageUrl } from '@/lib/session-image-cache';
 import { UserChatBubble, type SessionChatUser } from '@/components/ai-gui/view';
 import { ConversationColumn } from '@/components/shared/conversation-column';
@@ -251,15 +250,13 @@ function PendingFileAttachment({
 }) {
   const { state, label } = useAttachmentStatus(attachment, active);
   const failed = state === 'failed';
-  const Icon = getSessionFileIcon(attachment.name, attachment.mimeType);
-
   const ready = attachment.ready?.type === 'file' ? attachment.ready : undefined;
   const ReadyIcon = ready?.transport === 'local' ? Clock3 : ready?.textPreview ? Eye : Download;
   return (
     <SessionFileCardLayout
       fileName={attachment.name}
-      subtitle={ready ? formatFileSize(ready.sizeBytes) : label}
-      icon={<Icon className="size-5" aria-hidden="true" />}
+      mimeType={attachment.mimeType}
+      subtitle={ready ? formatSessionFileMeta(attachment.name, ready.sizeBytes) : label}
       actionIcon={
         failed ? (
           <AlertCircle className="size-4 text-destructive" aria-hidden="true" />

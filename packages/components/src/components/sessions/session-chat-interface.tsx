@@ -1,7 +1,7 @@
 import { useIosSimulatorPreviewRequest } from './ios-simulator/use-ios-simulator-preview-request';
+import type { DocumentSelection } from '@/lib/document-selection';
 import { createLoroSyncErrorTools } from '@lody/shared/loro-sync-errors';
 import { RepoSyncError, RepoTransportError } from 'loro-repo';
-import { workspaceSyncFailuresLegacy } from '@lody/shared/workspace-data/repo-legacy';
 import { useSessionPendingMessages } from '@/components/chat/session-pending-messages';
 import {
   buildDraftUserHistoryEntry,
@@ -145,6 +145,7 @@ import { useIsMobile } from '../../hooks/use-mobile';
 import { useStableCallback } from '@/hooks/use-stable-callback';
 import { useAppCapability } from '@/lib/app-platform';
 import { SessionShareDialog } from '@/components/sharing/session-share-dialog';
+import { SessionShareEditorPanel } from '@/components/sharing/session-share-panel';
 import { useSessionShareStatus } from '@/hooks/use-session-share-management';
 import {
   conversationFontSizeAtom,
@@ -212,6 +213,8 @@ import type { SessionSharingState } from '@/lib/session-sharing';
 import {
   SessionAccessControl,
   SessionArchivedBadge,
+  type SessionAccessAction,
+  type SessionShareEditorContext,
   getSessionSharingDescription,
   getSessionSharingLabel,
   type SessionSharingTranslator,
@@ -362,11 +365,7 @@ import {
 import { AlertDialog } from '@/ui/dialog';
 import { resolveSessionHtmlAttachmentAction } from './session-html-attachment-action';
 
-const { formatLoroSyncError } = createLoroSyncErrorTools({
-  RepoSyncError,
-  RepoTransportError,
-  nativeFailures: workspaceSyncFailuresLegacy,
-});
+const { formatLoroSyncError } = createLoroSyncErrorTools({ RepoSyncError, RepoTransportError });
 
 const styles = stylex.create({
   historyTriggerIcon: { width: 'calc(var(--spacing) * 4)', height: 'calc(var(--spacing) * 4)' },
@@ -1545,7 +1544,6 @@ export function SessionHeaderMenu({
 
               {showBranchInfo ? (
                 <Menu.Item
-                  className="items-start"
                   onClick={() =>
                     copyToClipboard(
                       branchDisplayValue,
@@ -1678,6 +1676,9 @@ export function SessionHeaderMenu({
             icon={MoveHorizontal}
             endContent={
               <Switch
+                // The menu row owns keyboard focus. A tabbable nested switch
+                // otherwise receives initial focus even when opened by mouse.
+                tabIndex={-1}
                 checked={conversationWide}
                 onCheckedChange={(checked) => setConversationWide(checked === true)}
                 onClick={(event) => event.stopPropagation()}
@@ -2262,6 +2263,7 @@ function SpinningLoaderIcon({ className }: { className?: string }) {
 const EMPTY_CHAT_STREAM_EMPTY_STATE = <></>;
 
 export type SessionChatInterfaceHandle = {
+  addDocumentSelection: (selection: DocumentSelection) => boolean;
   focusInput: () => void;
   addCommentReference: (reference: CommentReferencePayload) => boolean;
   toggleCommentReference: (reference: CommentReferencePayload) => boolean;
@@ -5566,6 +5568,8 @@ export const SessionChatInterface = memo(
     useImperativeHandle(
       ref,
       () => ({
+        addDocumentSelection: (selection) =>
+          inputAreaRef.current?.addDocumentSelection(selection) ?? false,
         focusInput: () => {
           inputAreaRef.current?.focusInput();
         },
@@ -6561,8 +6565,43 @@ export const SessionChatInterface = memo(
     // `sharing` — a solo workspace resolves no team visibility but can still
     // publish — and an absent editor, which is the local build.
     const headerPublicShare = publicShareWorkspaceId
-      ? { status: publicShareStatus, onOpen: () => setPublicShareSessionId(session.id) }
+      ? {
+          status: publicShareStatus,
+          // The panel hosts the editor itself; the `⋯` menu's "Share" still opens the dialog.
+          renderEditor: ({ onClose, onBusyChange }: SessionShareEditorContext) => (
+            <SessionShareEditorPanel
+              workspaceId={publicShareWorkspaceId}
+              session={session}
+              onClose={onClose}
+              onBusyChange={onBusyChange}
+            />
+          ),
+        }
       : undefined;
+    // What leaves the conversation: the same handlers as the `⋯` menu's Copy
+    // submenu and "Share as image…". Path and base branch describe the working
+    // directory, not the conversation, so they stay in `⋯` only.
+    const headerExportActions: SessionAccessAction[] = [
+      {
+        id: 'copy-markdown',
+        label: t('sessions.copyAsMarkdown', 'Copy as Markdown'),
+        icon: Copy,
+        onSelect: () =>
+          hideMessageArea && onCopyConversationHistoryExternal
+            ? onCopyConversationHistoryExternal()
+            : handleCopyConversationHistory(),
+      },
+      ...(onShareAsImage
+        ? [
+            {
+              id: 'share-image',
+              label: t('sessions.shareAsImage', 'Share as image…'),
+              icon: Image,
+              onSelect: onShareAsImage,
+            },
+          ]
+        : []),
+    ];
     const headerAccessNode =
       !isMobile && (sharing || headerPublicShare) ? (
         <div {...stylex.props(styles.headerPills)}>
@@ -6570,6 +6609,8 @@ export const SessionChatInterface = memo(
             state={sharing}
             onShareWithTeam={onShareWithTeam}
             publicShare={headerPublicShare}
+            onCopyLink={handleCopySessionLink}
+            exportActions={headerExportActions}
           />
         </div>
       ) : null;

@@ -1,7 +1,7 @@
 import { updateTestHistory } from './history-port-fixture';
 import { describe, expect, it } from 'vitest';
 
-import { WorkspaceRepoLegacy } from '@lody/shared/workspace-data/repo-legacy';
+import { LoroRepo } from 'loro-repo';
 import { v4 as uuidv4 } from 'uuid';
 
 import {
@@ -985,7 +985,7 @@ describe('acp history permission', () => {
   it('merges permission request and outcome onto tool call', async () => {
     const logger = createSilentLogger();
     const sessionId = uuidv4() as SessionId;
-    const repo = await WorkspaceRepoLegacy.create({});
+    const repo = await LoroRepo.create({});
     const doc = new SessionDocument(repo, sessionId);
 
     const initialHistory: SessionHistoryInput[] = [
@@ -1072,7 +1072,7 @@ describe('acp history permission', () => {
 
   it('attaches permission request to active assistant entry when tool call has not arrived yet', async () => {
     const sessionId = uuidv4() as SessionId;
-    const repo = await WorkspaceRepoLegacy.create({});
+    const repo = await LoroRepo.create({});
     const doc = new SessionDocument(repo, sessionId);
 
     const initialHistory: SessionHistoryInput[] = [
@@ -1147,7 +1147,7 @@ describe('acp history permission', () => {
 
   it('does not create a fallback assistant entry when no active assistant entry exists', async () => {
     const sessionId = uuidv4() as SessionId;
-    const repo = await WorkspaceRepoLegacy.create({});
+    const repo = await LoroRepo.create({});
     const doc = new SessionDocument(repo, sessionId);
 
     await doc.initOffline();
@@ -1195,7 +1195,7 @@ describe('acp history permission', () => {
   it('does not persist edit diffs (old/new text) from permission requests', async () => {
     const logger = createSilentLogger();
     const sessionId = uuidv4() as SessionId;
-    const repo = await WorkspaceRepoLegacy.create({});
+    const repo = await LoroRepo.create({});
     const doc = new SessionDocument(repo, sessionId);
 
     await doc.initOffline();

@@ -28,6 +28,27 @@ UI rows and leaves attachment preparation in the trailing slot. It retains local
 bodies until matching formal history is hydrated; only real owner receipts mark
 delivery. The wrapper component keeps the standalone pending-message surface.
 
+## Home dashboard transitions
+
+[`home/home-dashboard.tsx`](home/home-dashboard.tsx) owns board selection, the summary
+segments and their typed View Transition; [`home/home-dashboard-host.tsx`](home/home-dashboard-host.tsx)
+supplies the live models and device-local preference. The landing stage in
+[`web-chat-landing-screen.tsx`](web-chat-landing-screen.tsx) re-centres when board height changes.
+The transition rules in [`../../tailwind/index.css`](../../tailwind/index.css) move the
+segments, labels, fold control and pill with that same stage change. Snapshot stacking
+is explicit: pill below segments, persistent labels above both. Changing summaries
+cross-fade at natural size inside the segments' animated bounds, so their text never
+scales or covers a neighbouring label. DOM z-index alone cannot order extracted snapshots.
+The [owning note](../../../../../.agents/notes/implemented/feature/2026-10-16-home-week-tiles.md#transition-layering-correction-2026-10-18)
+records the failure and browser verification.
+
+The stage also tells its group how tall it is: [`landing-stage.ts`](landing-stage.ts) provides
+the stage and group elements, and `useLandingRoom` turns them into the height the dashboard may
+take (the stage less the rest of the group, independent of the dashboard's own height). The
+dashboard converts that to rows for `layoutHomeNow`, folds the "now" board when one row per list
+does not fit, and `now-board.tsx` opens a whole list by growing the pressed tile over the board
+while the rest steps back (`home/focus-motion.ts`). [Why](../../../../../.agents/notes/implemented/feature/2026-10-16-home-week-tiles.md#fitting-the-window-2026-10-18).
+
 ## Why the rules read the way they do
 
 - **Composer measurement outside layout.** `chat-composer.tsx` uses

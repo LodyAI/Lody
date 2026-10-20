@@ -22,6 +22,12 @@ import type { MemoryPressureSnapshotSource } from '@/monitor/memory-pressure-sam
  * ACP process killed, Loro documents cleaned, session object deleted.
  * Periodic sweep runs every `sweepIntervalMs` (default: 1 minute) to find and clean idle sessions.
  *
+ * Idle means idle for the native agent too, not only for Lody's turns. A session whose agent is
+ * `running` outside a turn (a model turn it started itself) is never cleaned. One whose agent is
+ * only waiting on live background tasks (a `run_in_background` shell, a Monitor) is spared by the
+ * idle sweep for up to `nativeBackgroundMaxIdleMs`, because cleaning it kills those tasks before
+ * they can wake the model; memory pressure may still evict it.
+ *
  * ## Memory Pressure Eviction
  *
  * Before starting a new session, call `evictForMemoryPressure()`. It produces two independent
@@ -51,6 +57,11 @@ export interface SessionGCConfig {
   idleTimeoutMs: number;
   /** Interval to run GC sweep (default: 1 min) */
   sweepIntervalMs: number;
+  /**
+   * How long the idle sweep spares a session whose agent still has live background tasks
+   * (default: 24 hours). Bounded so a forgotten background dev server cannot pin a session forever.
+   */
+  nativeBackgroundMaxIdleMs: number;
   /** Enable GC (default: true) */
   enabled: boolean;
   /** Memory threshold in bytes; below this, memory pressure eviction kicks in (default: 1 GB) */
@@ -91,8 +102,14 @@ export interface MemoryPressureVerdict {
   reason: MemoryPressureReason | null;
 }
 
+/** Native agent work outside Lody's turns; see `AgentClient.getNativeWork`. */
+export type SessionNativeWork = 'running' | 'background' | null;
+
+type CleanupPurpose = 'idle' | 'memory_pressure';
+
 export interface SessionGCDeps {
   getSessionLastActivity: (sessionId: SessionId) => number | undefined;
+  getNativeWork: (sessionId: SessionId) => SessionNativeWork;
   /** Whether the session has an active turn (prompting or finalizing) */
   hasActiveTurn: (sessionId: SessionId) => boolean;
   /** Whether the session has an active background goal that still needs its ACP runtime */
@@ -163,6 +180,10 @@ export function loadGCConfig(): SessionGCConfig {
   return {
     idleTimeoutMs: readEnvNumber('LODY_SESSION_GC_IDLE_TIMEOUT_MS', 20 * 60 * 1000), // 20 minutes
     sweepIntervalMs: readEnvNumber('LODY_SESSION_GC_SWEEP_INTERVAL_MS', 60 * 1000),
+    nativeBackgroundMaxIdleMs: readEnvNumber(
+      'LODY_SESSION_GC_NATIVE_BACKGROUND_MAX_IDLE_MS',
+      24 * 60 * 60 * 1000
+    ),
     enabled: process.env.LODY_SESSION_GC_ENABLED !== 'false',
     memoryThresholdBytes: readEnvNumber(
       'LODY_SESSION_GC_MEMORY_THRESHOLD_BYTES',
@@ -462,7 +483,7 @@ export class SessionGCManager {
         continue;
       }
 
-      if (!(await this.isEligibleForCleanup(sessionId))) {
+      if (!(await this.isEligibleForCleanup(sessionId, 'memory_pressure', idleMs))) {
         continue;
       }
 
@@ -628,7 +649,7 @@ export class SessionGCManager {
         continue;
       }
 
-      if (!(await this.isEligibleForCleanup(session.sessionId))) {
+      if (!(await this.isEligibleForCleanup(session.sessionId, 'idle', session.idleMs))) {
         continue;
       }
 
@@ -660,11 +681,27 @@ export class SessionGCManager {
 
   /**
    * Check if a session is eligible for cleanup.
-   * A session is NOT eligible if it has an active turn, active goal,
-   * pending updates, pending user work, or archive in flight.
+   * A session is NOT eligible if it has an active turn, native agent work (see the class doc),
+   * an active goal, pending updates, pending user work, or archive in flight.
    */
-  private async isEligibleForCleanup(sessionId: SessionId): Promise<boolean> {
+  private async isEligibleForCleanup(
+    sessionId: SessionId,
+    purpose: CleanupPurpose,
+    idleMs: number
+  ): Promise<boolean> {
     if (this.deps.hasActiveTurn(sessionId)) {
+      return false;
+    }
+
+    const nativeWork = this.deps.getNativeWork(sessionId);
+    if (nativeWork === 'running') {
+      return false;
+    }
+    if (
+      nativeWork === 'background' &&
+      purpose === 'idle' &&
+      idleMs < this.config.nativeBackgroundMaxIdleMs
+    ) {
       return false;
     }
 
@@ -692,18 +729,13 @@ export class SessionGCManager {
    * Also verifies the session hasn't become active since candidate selection.
    */
   private async isStillEligibleForGC(sessionId: SessionId): Promise<boolean> {
-    if (!(await this.isEligibleForCleanup(sessionId))) {
+    const lastActivity = this.deps.getSessionLastActivity(sessionId);
+    // No activity record: treat it as just created (idle 0), as candidate selection does.
+    const idleMs = lastActivity === undefined ? 0 : Date.now() - lastActivity;
+    if (lastActivity !== undefined && idleMs < this.config.idleTimeoutMs) {
       return false;
     }
 
-    const lastActivity = this.deps.getSessionLastActivity(sessionId);
-    if (lastActivity !== undefined) {
-      const idleMs = Date.now() - lastActivity;
-      if (idleMs < this.config.idleTimeoutMs) {
-        return false;
-      }
-    }
-
-    return true;
+    return await this.isEligibleForCleanup(sessionId, 'idle', idleMs);
   }
 }

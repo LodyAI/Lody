@@ -692,6 +692,14 @@ export const sessionHistorySchema = schema.LoroMap({
   permissionWaitMs: schema.Number({ required: false }),
   role: schema.String<Role>(),
   status: schema.String<SessionHistoryStatus>({ required: false }),
+  scheduleRun: schema.LoroMap(
+    {
+      scheduleId: schema.String(),
+      turnId: schema.String(),
+      title: schema.String(),
+    },
+    { required: false }
+  ),
   cancellationReason: schema.String<'user_stop'>({ required: false }),
   inputConfig: acpSessionConfigSchema,
   /**
@@ -1024,6 +1032,8 @@ export type SessionMeta = {
   createdAt: string;
   /** Feedback post id bound at session start, when the session originates from lody-feedback. */
   fromFeedbackPostId?: string;
+  /** 36-byte UUID activation index; content lives in the session control doc. */
+  notificationId?: string;
   lastMessageAt?: number;
   lastReadAt?: number;
   /**
@@ -1366,6 +1376,26 @@ export const sessionDocSchema = schema({
   ),
   /** Temporary durable state for an asynchronous Session fork. Removed on success. */
   forkOperation: sessionForkOperationDocSchema,
+  notification: schema.LoroMap(
+    {
+      id: schema.String(),
+      recipientId: schema.String(),
+      turnId: schema.String(),
+      outcome: schema.String(),
+      presentation: schema.LoroMap(
+        {
+          kind: schema.String<'conversation' | 'schedule'>(),
+          conversationTitle: schema.String({ required: false }),
+          scheduleName: schema.String({ required: false }),
+          projectName: schema.String({ required: false }),
+          pullRequestNumber: schema.Number({ required: false }),
+        },
+        { required: false }
+      ),
+      createdAt: schema.Number(),
+    },
+    { required: false }
+  ),
   preview: sessionPreviewDocSchema,
   externalHistoryCursor: sessionExternalHistoryCursorDocSchema,
   roostHistoryCursor: sessionRoostHistoryCursorDocSchema,

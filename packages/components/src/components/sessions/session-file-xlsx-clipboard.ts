@@ -27,6 +27,16 @@ function cellAddress(row: number, col: number): string {
   return `${column}${row + 1}`;
 }
 
+export function getXlsxSelectionLocation(
+  controller: Pick<CopyController, 'activeSheet' | 'selection' | 'activeCell'>
+): string {
+  const range =
+    controller.selection ??
+    (controller.activeCell ? { start: controller.activeCell, end: controller.activeCell } : null);
+  if (!controller.activeSheet || !range) throw new Error('No worksheet selection');
+  return `${controller.activeSheet.name}!${cellAddress(Math.min(range.start.row, range.end.row), Math.min(range.start.col, range.end.col))}:${cellAddress(Math.max(range.start.row, range.end.row), Math.max(range.start.col, range.end.col))}`;
+}
+
 function displayValue(value: unknown): string {
   if (value == null) return '';
   if (typeof value === 'number' || typeof value === 'boolean') return String(value);

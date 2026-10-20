@@ -9,6 +9,7 @@ import { createHash } from 'node:crypto';
 import os from 'node:os';
 import path from 'node:path';
 import { InboxSqlite } from './inbox/sqlite';
+import type { InboxBatch, InboxScope } from './inbox/model';
 import { cancelManuallyStoppedTargets } from './inbox/rules';
 
 import type Database from 'better-sqlite3';
@@ -59,6 +60,7 @@ const FrozenConfigSchema = z
     agentConfigId: z.string().optional(),
     inputConfig: z.record(z.string(), z.unknown()),
     sourceTurnId: z.string().trim().min(1).optional(),
+    notificationOriginTurnIds: z.array(z.string().min(1)).optional(),
     targetDispatchConfigs: z
       .array(
         z
@@ -591,6 +593,35 @@ export class LodyOperationStore {
       hasMore,
       ...(hasMore && last ? { nextCursor: cursor.encode(last.operationId) } : {}),
     };
+  }
+
+  /** Read the entire fixed membership, never just the Agent's bounded preview. */
+  notificationOriginsForBatch(batch: InboxBatch): string[] {
+    return this.db
+      .prepare(`SELECT DISTINCT origin.value AS origin
+      FROM inbox_members m JOIN inbox_results r USING(sequence)
+      JOIN operations o ON o.requester_session_id=r.session_id AND o.operation_id=r.operation_id,
+        json_each(o.frozen_config_json, '$.notificationOriginTurnIds') origin
+      WHERE m.batch_id=? AND o.workspace_id=? AND o.requester_session_id=? AND o.requester_user_id=?`)
+      .all(batch.batchId, batch.workspaceId, batch.sessionId, batch.userId)
+      .map((row) => (row as { origin: string }).origin);
+  }
+
+  /** Pending Operations and unconsumed results are the existing completion authority. */
+  pendingNotificationOrigins(scope: InboxScope, origins: readonly string[]): Set<string> {
+    if (!origins.length) return new Set();
+    return new Set(
+      this.db
+        .prepare(`SELECT DISTINCT origin.value AS origin
+      FROM operations o, json_each(o.frozen_config_json, '$.notificationOriginTurnIds') origin
+      WHERE o.workspace_id=? AND o.requester_session_id=? AND o.requester_user_id=?
+        AND origin.value IN (SELECT value FROM json_each(?))
+        AND (o.state='active' OR EXISTS (
+          SELECT 1 FROM inbox_results r WHERE r.session_id=o.requester_session_id
+            AND r.operation_id=o.operation_id AND r.consumed=0))`)
+        .all(scope.workspaceId, scope.sessionId, scope.userId, JSON.stringify(origins))
+        .map((row) => (row as { origin: string }).origin)
+    );
   }
 
   hasPendingWorkForRequester(workspaceId: WorkspaceId, requesterSessionId: SessionId): boolean {

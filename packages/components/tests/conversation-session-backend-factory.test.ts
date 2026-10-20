@@ -15,7 +15,11 @@ import {
 import { RoostHistoryError, SessionHistoryRequestError } from '../src/lib/roost-history-error';
 import {
   createLoroStreamsJsonStreamClient,
+  encryptCodeCollabV2RpcPayload,
+  HISTORY_INPUT_RESPONSE_RECOVERY_MS,
+  LoroStreamsLiveModePolicy,
   LoroStreamsMachineRpcClient,
+  LoroStreamsRpcResponseDispatcher,
 } from '@lody/loro-streams-rpc';
 import { initI18n } from '../src/i18n';
 import { createConversationViewFromReader } from '../src/lib/conversation-view/create-conversation-view-from-reader';
@@ -23,6 +27,158 @@ import { resolveLocalSessionControlTimeoutMs } from '../../../apps/electron/src/
 import type { SessionDataChange } from '@lody/shared/session-data';
 
 describe('createConversationSession backend seam', () => {
+  it('receives an existing owner acceptance through the real SDK after a silent SSE stall', async () => {
+    vi.useFakeTimers();
+    const connected = Promise.withResolvers<void>();
+    const appended = Promise.withResolvers<void>();
+    const sessionId = 'synthetic-response-recovery' as SessionId;
+    const entry: SessionHistoryInput = {
+      id: 'synthetic-input',
+      role: 'user',
+      userId: 'synthetic-user',
+      timestamp: '2026-10-18T00:00:00Z',
+      status: 'pending',
+      items: [{ type: 'text', text: 'Synthetic input' }],
+    };
+    let response: unknown;
+    const requests: unknown[] = [];
+    const reads: Array<{ mode: string | null; offset: string | null }> = [];
+    const json = createLoroStreamsJsonStreamClient({
+      bucketId: 'synthetic-bucket',
+      getToken: async () => 'synthetic-token',
+      baseUrl: 'https://streams.example.com',
+      fetchImpl: async (input, init) => {
+        const url = new URL(input);
+        if (init?.method === 'HEAD')
+          return new Response(null, {
+            headers: { 'Content-Type': 'application/json', 'Stream-Next-Offset': '42' },
+          });
+        if (init?.method === 'POST') {
+          const request = JSON.parse(await new Response(init.body).text());
+          requests.push(request);
+          response = {
+            jsonrpc: '2.0',
+            id: request.id,
+            method: request.method,
+            rpcVersion: '1',
+            machineId: 'synthetic-machine',
+            result: await encryptCodeCollabV2RpcPayload(sessionId, {
+              type: 'session/history-write_response',
+              sessionId,
+              operation: 'accept_input_and_dispatch',
+              success: true,
+              result: { status: 'accepted', turnId: entry.id, active: true },
+              historyRevision: 1,
+              historyCount: 1,
+              historyChange: null,
+            }),
+          };
+          return new Response(null, { status: 204, headers: { 'Stream-Next-Offset': '1' } });
+        }
+        reads.push({ mode: url.searchParams.get('live'), offset: url.searchParams.get('offset') });
+        if (reads.length === 1) {
+          return new Response(
+            new ReadableStream({
+              start(controller) {
+                controller.enqueue(
+                  new TextEncoder().encode(
+                    'event: control\ndata: {"streamNextOffset":"42","upToDate":true}\n\n'
+                  )
+                );
+                init?.signal?.addEventListener(
+                  'abort',
+                  () => {
+                    controller.error(new DOMException('Aborted', 'AbortError'));
+                  },
+                  { once: true }
+                );
+              },
+            }),
+            { headers: { 'Content-Type': 'text/event-stream' } }
+          );
+        }
+        if (reads.length === 2)
+          return new Response(JSON.stringify([response]), {
+            headers: {
+              'Content-Type': 'application/json',
+              'Stream-Next-Offset': '43',
+              'Stream-Up-To-Date': 'true',
+            },
+          });
+        return new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener(
+            'abort',
+            () => reject(new DOMException('Aborted', 'AbortError')),
+            { once: true }
+          );
+        });
+      },
+    });
+    const streamClient = {
+      ...json,
+      readJsonLive: (...args: Parameters<typeof json.readJsonLive>) =>
+        json.readJsonLive(
+          args[0],
+          args[1],
+          async (batch) => {
+            await args[2](batch);
+            if (batch.upToDate) connected.resolve();
+          },
+          args[3]
+        ),
+    };
+    const dispatcher = new LoroStreamsRpcResponseDispatcher({
+      workspaceId: 'synthetic-workspace',
+      streamClient,
+      liveModePolicy: new LoroStreamsLiveModePolicy(),
+    });
+    const rpc = new LoroStreamsMachineRpcClient({
+      workspaceId: 'synthetic-workspace',
+      machineId: 'synthetic-machine',
+      streamClient,
+      responseDispatcher: dispatcher,
+      trace: (event) => {
+        if (event === 'machine rpc transport append finished') appended.resolve();
+      },
+    });
+    const doc = new LoroDoc();
+    const session = createRemoteRoostSessionDataFactory({
+      workspaceId: 'synthetic-workspace' as WorkspaceId,
+      machineId: 'synthetic-machine' as MachineId,
+      requestHistoryRead: async () => {
+        throw new Error('Acceptance must not read history back');
+      },
+      requestHistoryWrite: async (request) => {
+        const result = await rpc.requestSessionHistoryWrite(request);
+        if (!result) throw new Error('Missing acceptance response');
+        return result;
+      },
+    })({ sessionId, doc, backendKind: 'roost' });
+    try {
+      let accepted = false;
+      const write = session.inputAcceptance!.acceptAndDispatch!(entry).then((receipt) => {
+        accepted = true;
+        return receipt;
+      });
+      void write.catch(() => undefined);
+      await Promise.all([connected.promise, appended.promise]);
+      expect(accepted).toBe(false);
+      await vi.advanceTimersByTimeAsync(HISTORY_INPUT_RESPONSE_RECOVERY_MS);
+      await expect(write).resolves.toEqual({ status: 'accepted', turnId: entry.id, active: true });
+      expect(reads.slice(0, 2)).toEqual([
+        { mode: 'sse', offset: '-1' },
+        { mode: 'long-poll', offset: '42' },
+      ]);
+      expect(requests).toHaveLength(1);
+      expect(doc.getList('history').length).toBe(0);
+    } finally {
+      dispatcher.stop();
+      session.dispose?.();
+      doc.free();
+      vi.useRealTimers();
+    }
+  });
+
   it.each([
     ['accept', 'accept_input'],
     ['acceptAndDispatch', 'accept_input_and_dispatch'],
@@ -138,26 +294,13 @@ describe('createConversationSession backend seam', () => {
   );
 
   it.each([
-    { locale: 'en', phase: 'append', deadlineMs: 10_000 },
-    { locale: 'zh_CN', phase: 'append', deadlineMs: 10_000 },
-    { locale: 'en', phase: 'response', deadlineMs: 30_000 },
-    { locale: 'zh_CN', phase: 'response', deadlineMs: 30_000 },
-    {
-      locale: 'en',
-      phase: 'append',
-      deadlineMs: 1_500,
-      timeout: { connectTimeoutMs: 1_500 },
-    },
-    {
-      locale: 'en',
-      phase: 'append',
-      deadlineMs: 2_500,
-      timeout: { connectTimeoutMs: 1_500, uploadTimeoutMs: 2_500 },
-    },
+    ['en', 'append'],
+    ['zh_CN', 'append'],
+    ['en', 'response'],
+    ['zh_CN', 'response'],
   ] as const)(
-    'distinguishes a $locale $phase transport timeout after $deadlineMs ms from Roost storage',
-    async (testCase) => {
-      const { locale, phase, deadlineMs } = testCase;
+    'distinguishes a %s %s transport timeout from Roost storage',
+    async (locale, phase) => {
       await initI18n(locale);
       vi.useFakeTimers();
       let entered!: () => void;
@@ -168,7 +311,6 @@ describe('createConversationSession backend seam', () => {
         bucketId: 'synthetic-bucket',
         getToken: async () => 'synthetic-token',
         baseUrl: 'https://streams.example.com',
-        timeout: 'timeout' in testCase ? testCase.timeout : undefined,
         fetchImpl: async (_url, init) => {
           entered();
           return new Promise<Response>((_resolve, reject) => {
@@ -220,7 +362,6 @@ describe('createConversationSession backend seam', () => {
         backendKind: 'roost',
       });
       try {
-        let settled = false;
         const writing = session.commands
           .appendTurn({
             id: 'synthetic-turn',
@@ -228,14 +369,9 @@ describe('createConversationSession backend seam', () => {
             timestamp: '2026-10-12T00:00:00Z',
             items: [{ type: 'text', text: 'synthetic input' }],
           })
-          .catch((error: unknown) => error)
-          .finally(() => {
-            settled = true;
-          });
+          .catch((error: unknown) => error);
         await fetching;
-        await vi.advanceTimersByTimeAsync(deadlineMs - 1);
-        expect(settled).toBe(false);
-        await vi.advanceTimersByTimeAsync(1);
+        await vi.advanceTimersByTimeAsync(phase === 'append' ? 10_000 : 30_000);
         const error = await writing;
         expect(error).toBeInstanceOf(SessionHistoryRequestError);
         expect(error).toMatchObject({
@@ -402,6 +538,214 @@ describe('createConversationSession backend seam', () => {
         } finally {
           session.dispose?.();
         }
+      }
+    }
+  );
+
+  it.each(['reader', 'view'] as const)(
+    'makes the initial %s readable without depending on another owner round trip',
+    async (consumer) => {
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+      vi.stubGlobal('indexedDB', new IDBFactory());
+      vi.stubGlobal('IDBKeyRange', IDBKeyRange);
+      const sessionId = 'initial-owner-page' as SessionId;
+      const machineId = 'synthetic-machine' as MachineId;
+      const workspaceId = 'synthetic-workspace' as WorkspaceId;
+      const history: SessionHistoryInput[] = Array.from({ length: 120 }, (_, index) => ({
+        id: `turn-${index}`,
+        role: index % 2 === 0 ? 'user' : 'assistant',
+        timestamp: '2026-10-18T00:00:00Z',
+        items: [{ type: 'text', text: `Current owner body ${index}` }],
+      }));
+      const page = {
+        startPosition: 80,
+        totalCount: history.length,
+        rows: history.slice(80).map((turn, index) => createRoostDirectoryRow(80 + index, turn)),
+        hasMoreOlder: true,
+        cursor: 'synthetic-owner-cursor',
+      };
+      const cache = createRoostHistoryCache(
+        JSON.stringify(['local', workspaceId, machineId, sessionId])
+      );
+      const doc = new LoroDoc();
+      let releaseDuplicate!: () => void;
+      const duplicateGate = new Promise<void>((resolve) => {
+        releaseDuplicate = resolve;
+      });
+      let duplicateStarted!: () => void;
+      const duplicate = new Promise<'duplicate'>((resolve) => {
+        duplicateStarted = () => resolve('duplicate');
+      });
+      let latestReads = 0;
+      const factory = createRemoteRoostSessionDataFactory({
+        workspaceId,
+        machineId,
+        requestHistoryRead: async (
+          _machine,
+          _session,
+          query
+        ): Promise<SessionHistoryReadResponse> => {
+          if (query.kind === 'readTurn') {
+            return {
+              type: 'session/history-read_response',
+              sessionId,
+              success: true,
+              historyRevision: 3,
+              historyCount: history.length,
+              result: { state: 'ready', turn: history[0] },
+            };
+          }
+          if (query.kind !== 'readLatestPage') throw new Error('Unexpected history query');
+          latestReads += 1;
+          if (latestReads > 1) {
+            duplicateStarted();
+            await duplicateGate;
+          }
+          return {
+            type: 'session/history-read_response',
+            sessionId,
+            success: true,
+            historyRevision: 5,
+            historyCount: history.length,
+            result: page,
+            pageTurns: history.slice(80),
+          };
+        },
+        requestHistoryWrite: async () => {
+          throw new Error('Unexpected history write');
+        },
+      });
+      const data = factory({ doc, sessionId, backendKind: 'roost' });
+      let observation: ReturnType<typeof data.history.observe> | undefined;
+      let conversation: ReturnType<typeof createConversationSession> | undefined;
+      try {
+        await cache.acceptPage(
+          page,
+          history
+            .slice(80)
+            .map((turn) => ({ ...turn, items: [{ type: 'text', text: 'Old cache' }] })),
+          1
+        );
+        // An uncached foreground read has already established a newer owner.
+        await data.history.readTurn(history[0]!.id);
+        let readable: Promise<'readable'>;
+        if (consumer === 'reader') {
+          observation = data.history.observe(() => {});
+          void observation.initial.catch(() => {});
+          readable = observation.initialPage!.then((initialPage) => {
+            expect(initialPage).toEqual(page);
+            return 'readable';
+          });
+        } else {
+          conversation = createConversationSession(doc, {
+            sessionId,
+            backendKind: 'roost',
+            createSessionData: () => data,
+            scheduleIdle: (task) => {
+              let cancelled = false;
+              queueMicrotask(() => {
+                if (!cancelled) task({ timeRemaining: () => 50 });
+              });
+              return () => {
+                cancelled = true;
+              };
+            },
+            yieldToEventLoop: () => Promise.resolve(),
+          });
+          readable = conversation.history.ready.then(() => {
+            expect(conversation!.history.turn(119)).toMatchObject(history[119]!);
+            return 'readable';
+          });
+        }
+        expect(await Promise.race([readable, duplicate])).toBe('readable');
+        expect(await data.history.readTurn(history[119]!.id)).toMatchObject({
+          state: 'ready',
+          turn: history[119],
+        });
+        // The new page is readable even while the previous coherent disk snapshot
+        // is retained during replacement; publishing a partial replica is unnecessary.
+        expect(await cache.getHead()).toMatchObject({ revision: 1, start: 80 });
+      } finally {
+        releaseDuplicate();
+        await observation?.initialPage?.catch(() => {});
+        observation?.unsubscribe();
+        if (conversation) conversation.dispose();
+        else data.dispose?.();
+        cache.dispose();
+        doc.free();
+        vi.unstubAllGlobals();
+        vi.useRealTimers();
+      }
+    }
+  );
+
+  it.each([false, true])(
+    'keeps initial history coherent while control advances: incremental=%s',
+    async (incremental) => {
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+      vi.stubGlobal('indexedDB', new IDBFactory());
+      vi.stubGlobal('IDBKeyRange', IDBKeyRange);
+      const sessionId = 'superseded-initial-page' as SessionId;
+      const doc = new LoroDoc();
+      let revision = 5;
+      const turn = (atRevision = revision): SessionHistoryInput => ({
+        id: 'synthetic-turn',
+        role: 'user',
+        timestamp: '2026-10-18T00:00:00Z',
+        items: [{ type: 'text', text: `Owner revision ${atRevision}` }],
+      });
+      const factory = createRemoteRoostSessionDataFactory({
+        incremental,
+        workspaceId: 'synthetic-workspace' as WorkspaceId,
+        machineId: 'synthetic-machine' as MachineId,
+        requestHistoryRead: async () => {
+          const body = turn();
+          return {
+            type: 'session/history-read_response',
+            sessionId,
+            success: true,
+            historyRevision: revision,
+            historyCount: 1,
+            result: {
+              ...(incremental ? { checkpoint: `checkpoint-${revision}` } : {}),
+              startPosition: 0,
+              totalCount: 1,
+              rows: [createRoostDirectoryRow(0, body)],
+              hasMoreOlder: false,
+              cursor: null,
+            },
+            pageTurns: [body],
+          };
+        },
+        requestHistoryWrite: async () => {
+          throw new Error('Unexpected history write');
+        },
+      });
+      const data = factory({ doc, sessionId, backendKind: 'roost' });
+      const observation = data.history.observe(() => {
+        if (revision !== 5) return;
+        revision = 7;
+        const cursor = doc.getMap('roostHistoryCursor');
+        cursor.set('historyRevision', revision);
+        cursor.set('historyCount', 1);
+        doc.commit();
+      });
+      void observation.initial.catch(() => {});
+      try {
+        const expected = turn(incremental ? 5 : 7);
+        const page = await observation.initialPage;
+        expect(page?.rows).toEqual([createRoostDirectoryRow(0, expected)]);
+        if (incremental) expect(page?.checkpoint).toBe('checkpoint-5');
+        expect(await data.history.readTurn('synthetic-turn')).toMatchObject({
+          state: 'ready',
+          turn: expected,
+        });
+      } finally {
+        observation.unsubscribe();
+        data.dispose?.();
+        doc.free();
+        vi.unstubAllGlobals();
+        vi.useRealTimers();
       }
     }
   );

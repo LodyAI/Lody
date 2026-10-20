@@ -7,10 +7,7 @@ import {
   buildDocUpdateChunkPayloads,
 } from '@lody/shared/local-loro-data-plane';
 import { createEagerSyncWorkerClient } from '../src/providers/eager-sync-worker-client';
-import { Effect } from 'effect';
-import { runEagerSyncWorkerTask as eagerSyncTask } from '../src/providers/eager-sync-worker-task';
-const runEagerSyncWorkerTask = (...args: Parameters<typeof eagerSyncTask>) =>
-  Effect.runPromise(eagerSyncTask(...args));
+import { runEagerSyncWorkerTask } from '../src/providers/eager-sync-worker-task';
 import type { EagerSyncSnapshot } from '../src/providers/eager-sync-snapshot-cache';
 import type {
   EagerSyncAuthContext,
@@ -333,13 +330,9 @@ describe('worker raw-document prefetch', () => {
     expect(await runEagerSyncWorkerTask({ ...request, lastMessageAt: 2 }, deps)).toBe('synced');
     expect(joins).toBe(2);
     failWrite = true;
-    await expect(
-      runEagerSyncWorkerTask({ ...request, lastMessageAt: 3 }, deps)
-    ).rejects.toMatchObject({
-      _tag: 'RepoIOError',
-      operation: 'write prefetch snapshot',
-      failure: expect.objectContaining({ message: 'disk full' }),
-    });
+    await expect(runEagerSyncWorkerTask({ ...request, lastMessageAt: 3 }, deps)).rejects.toThrow(
+      'disk full'
+    );
     expect(cached?.lastMessageAt).toBe(2);
     expect(listeners.size).toBe(0);
     remote.free();
@@ -367,12 +360,12 @@ describe('eager-sync cloud auth bridge', () => {
     vi.resetModules();
     let capturedAuth: ((context?: EagerSyncAuthContext) => Promise<string | undefined>) | undefined;
     vi.doMock('../src/providers/eager-sync-worker-task', () => ({
-      runEagerSyncWorkerTask: (
+      runEagerSyncWorkerTask: async (
         _request: unknown,
         deps: { auth(context?: EagerSyncAuthContext): Promise<string | undefined> }
       ) => {
         capturedAuth = deps.auth;
-        return Effect.succeed('synced' as const);
+        return 'synced' as const;
       },
     }));
     const posted: EagerSyncWorkerOutput[] = [];

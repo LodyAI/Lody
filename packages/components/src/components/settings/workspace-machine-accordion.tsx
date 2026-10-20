@@ -23,6 +23,11 @@ export type WorkspaceMachineAccordionMeta = {
   agentCount: number;
 };
 
+const onlineHaloBreathe = stylex.keyframes({
+  '0%, 100%': { transform: 'scale(0.875)', opacity: 0.12 },
+  '50%': { transform: 'scale(1.2)', opacity: 0.28 },
+});
+
 const styles = stylex.create({
   summary: {
     display: 'flex',
@@ -102,6 +107,7 @@ const styles = stylex.create({
     },
   },
   dot: {
+    position: 'relative',
     flexShrink: 0,
     width: '10px',
     height: '10px',
@@ -111,7 +117,23 @@ const styles = stylex.create({
   },
   dotOnline: {
     backgroundColor: colors.success,
-    boxShadow: `0 0 0 3px color-mix(in oklab, ${colors.success} 20%, transparent)`,
+  },
+  /** Only the halo breathes; the solid centre continues to say "online". */
+  onlineHalo: {
+    position: 'absolute',
+    inset: '-3px',
+    borderRadius: radius.full,
+    cornerShape: corner.round,
+    backgroundColor: colors.success,
+    opacity: 0.2,
+    pointerEvents: 'none',
+    animationName: {
+      default: onlineHaloBreathe,
+      '@media (prefers-reduced-motion: reduce)': 'none',
+    },
+    animationDuration: '2.8s',
+    animationTimingFunction: 'linear',
+    animationIterationCount: 'infinite',
   },
   name: {
     flexGrow: 1,
@@ -270,7 +292,9 @@ export function WorkspaceMachineAccordionRow({
           role="img"
           aria-label={statusLabel}
           {...stylex.props(styles.dot, meta.isOnline && styles.dotOnline)}
-        />
+        >
+          {meta.isOnline ? <span aria-hidden {...stylex.props(styles.onlineHalo)} /> : null}
+        </span>
         <span {...stylex.props(styles.name)}>{machineName}</span>
         <Summary meta={meta} showOwner={false} inRow />
         <ChevronDown

@@ -15,6 +15,7 @@ import {
   type SessionListRow,
 } from '../src/components/session-list';
 import { sidebarCollapsedOpenedBySessionsAtom } from '../src/atoms/focus-layer';
+import { sidebarShowBranchNamesAtom } from '../src/atoms/sidebar-state';
 import { initI18n } from '../src/i18n';
 
 const REPO = 'loro-dev/lody';
@@ -160,9 +161,14 @@ describe('SessionList opened-by rendering', () => {
     vi.restoreAllMocks();
   });
 
-  function renderList(sessions: SessionListRow[], collapsed: Record<string, boolean> = {}) {
+  function renderList(
+    sessions: SessionListRow[],
+    collapsed: Record<string, boolean> = {},
+    showBranchNames = false
+  ) {
     const store = createStore();
     store.set(sidebarCollapsedOpenedBySessionsAtom, collapsed);
+    store.set(sidebarShowBranchNamesAtom, showBranchNames);
     const onSelectSession = vi.fn();
     container = document.createElement('div');
     document.body.appendChild(container);
@@ -326,6 +332,40 @@ describe('SessionList opened-by rendering', () => {
     expect(openerEnd?.querySelector('[data-session-working-indicator]')).not.toBeNull();
   });
 
+  it('gives a top-level row a branch and time line and keeps nested children to one line', () => {
+    renderList(
+      [
+        makeRow({ sessionId: 'opener', branchName: 'feat/two-line' }),
+        makeRow({ sessionId: 'opened-1', openedBySessionId: 'opener', branchName: 'feat/child' }),
+      ],
+      {},
+      true
+    );
+
+    const opener = container?.querySelector('[data-sidebar-session-id="opener"]');
+    const child = container?.querySelector('[data-sidebar-session-id="opened-1"]');
+    expect(opener?.querySelector('[data-sidebar-session-meta]')?.textContent).toContain(
+      'feat/two-line'
+    );
+    expect(child?.querySelector('[data-sidebar-session-meta]')).toBeNull();
+  });
+
+  it('collapses repo rows to one line when the branch detail preference is off', () => {
+    const { store } = renderList(
+      [
+        makeRow({ sessionId: 'opener', branchName: 'feat/two-line' }),
+        makeRow({ sessionId: 'opened-1', openedBySessionId: 'opener', branchName: 'feat/child' }),
+      ],
+      {},
+      true
+    );
+    flushSync(() => {
+      store.set(sidebarShowBranchNamesAtom, false);
+    });
+
+    expect(container?.querySelector('[data-sidebar-session-meta]')).toBeNull();
+  });
+
   it('keeps collapse reachable from the context menu while the opener is working', () => {
     renderList([
       makeRow({ sessionId: 'opener', isWorking: true }),
@@ -436,7 +476,7 @@ describe('SessionList opened-by rendering', () => {
     });
 
     const row = container?.querySelector('[data-sidebar-session-id="opened-2"]');
-    expect(row?.className).toContain('bg-sidebar-selection');
+    expect(row?.getAttribute('aria-current')).toBe('page');
     expect(row?.querySelector('[data-session-working-indicator]')).not.toBeNull();
   });
 });

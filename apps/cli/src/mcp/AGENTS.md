@@ -35,11 +35,11 @@ Parent instructions apply. Background: [README.md](README.md).
   Projects default to child Sessions only for same-Machine Roles. `readDelegatedMachineAccess`
   requires access for both executing Machine owner and driving human (owned, or shared with
   shared project), never trusting synced `MachineMeta.ownerUserId`.
-- Derive orchestration identity only from the active execution runtime's dispatch payload;
-  reject absent runtime/userId, never infer from daemon credential, Session owner or history.
-  Freeze `requesterUserId` and `sourceTurnId` at Operation acceptance; requester Session id
-  already identifies the Session. Authors are presentation/provenance only. Recovery uses
-  the owner Machine and current authorization.
+- Operation identity comes only from active Host dispatch; reject absent runtime/userId.
+  Never infer it from credentials, Session owner or history. Freeze requesterUserId/sourceTurnId.
+  Resolve pending notification provenance from exact input before acceptance; unsynced input
+  is retryable, never empty origins. Authors are not authorization. Recovery uses owner
+  Machine/current access.
 - With `agentRoleId`, create tools require `agentRoleMachineId` for multi-machine
   Roles. Strip manual target/run-config before resolution,
   validation, identity, recovery or dispatch; the Role is authoritative.
@@ -62,11 +62,11 @@ Parent instructions apply. Background: [README.md](README.md).
   the daemon resolves the active user. Return operation handles, never viewer URLs or
   raw preview/transport errors. Reuse simulator lifecycle/schema, never a second owner.
 
-- Resource discovery uses `lib/resource-discovery.ts` for CLI and MCP. Resolve the
-  active Turn user for MCP, never the daemon owner. Role list/get use
-  `canReadAgentRole`; explicit Role creation retains its separate existing contract.
-  Preserve unavailable readable Roles and three-state presence. List MCP entries
-  through the allowlisted summary, never return launch/connection credentials.
+- Discovery shares `lib/resource-discovery.ts`: daemon caches report `catalog_syncing`
+  until first baseline; Role target validation requires fresh sync. Standalone CLI
+  syncs unless `--offline`. Use active Turn identity and `canReadAgentRole`;
+  explicit creation keeps its separate grant contract. Keep unavailable readable Roles,
+  three-state presence and credential allowlists.
 - Directory cursors bind resource, workspace, user and filters. Operations additionally
   bind requester Session and query only that user's machine-local rows; list replies
   contain no canonical prompt or assistant output. See

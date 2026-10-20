@@ -180,6 +180,11 @@ export async function resolveAllChangesDiffBase(
     }
   }
 
+  const head = await resolveGitHeadCommit(workspaceRoot);
+  return head;
+}
+
+export async function resolveGitHeadCommit(workspaceRoot: string): Promise<string | null> {
   const head = await runGit(workspaceRoot, ['rev-parse', '--verify', 'HEAD^{commit}']);
   return head.ok && head.stdout.trim() ? head.stdout.trim() : null;
 }

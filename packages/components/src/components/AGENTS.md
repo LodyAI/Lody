@@ -31,6 +31,9 @@ Child directories (`sessions/`, `mobile/`, …) own their own rules.
   Keep geometry in `session-row-leading-slot.tsx`; context-menu expand/collapse uses
   the same toggle.
 - Conversation titles stay `font-normal`; pin with the glyph, never weight.
+- Sidebar row radius, inset, ink, hover/selected fill and title clipping use
+  `sidebar-surface.ts` / `sidebar.tokens.stylex.ts` on conversation, repo and nav rows.
+  Tailwind wins same-property conflicts; keep it only for groups, menu-open and focus states.
 - Desktop work/wait/unread/send status belongs only in `SessionRowStatusIndicator`
   inside `SidebarRowEndSlot`, never the leading slot; it replaces resting `Mergeable`,
   worktree, PR icon or mobile time with one 14px mark. +/- totals: hover card only.
@@ -45,21 +48,17 @@ Child directories (`sessions/`, `mobile/`, …) own their own rules.
   Opener Session", `SessionHeaderMenu.openedByRelations`, and conversation cards for
   successful create Operations / the precise opener. Mobile lists use the same two
   fields and per-bucket tree without disclosure, per [mobile/AGENTS.md](mobile/AGENTS.md).
-- Follow the [Session relation contract](../../../../specs/session-relations.md): root
-  archive recursively includes contained Tabs and opened Sessions, using the shared
-  archive selector and a complete metadata cache. Restore and archived-root permanent
-  delete include only direct child Tabs. `deleteArchivedSession` requires a complete metadata
-  cache before selecting that destructive set; `deleteSessions(ids)` deletes exactly
-  the supplied ids without relation discovery or a cache-readiness requirement so
-  compensation and explicit child/side-session cleanup remain available during
-  hydration. Nested child Sessions are unsupported. Keep dangling `openedBy*`
-  provenance after deleting an opener, but expose reverse navigation only when the
-  exact opener and route root both resolve after hydration. Archived lists still use
-  opened-by provenance for indentation, with child Tabs inside their owning Session's
-  archived-tab UI.
+- Follow the [Session relation Spec](../../../../specs/session-relations.md): root archive includes
+  contained Tabs/opened Sessions; restore and permanent delete include direct child Tabs only.
+  `deleteArchivedSession` needs complete metadata; `deleteSessions(ids)` deletes those ids exactly,
+  without relation discovery. Nested child Sessions are unsupported. Preserve opener provenance;
+  expose reverse navigation only when opener and root resolve after hydration. See
+  [tree rules](../../../../.agents/docs/components-sidebar-session-tree.md).
 
 ## Entry points, drafts, and layout
 
+- The window is `bg-sidebar`; pages use one inset `WorkspaceCard`. Keep the sidebar on the
+  window, never as a floating surface. See [layout docs](../../../../.agents/docs/components-package.md).
 - Child-tab drafts send through the same accept unit as every other first message:
   `handleSendDraft` (`sessions/session-detail.tsx`) writes Session meta plus the first
   user turn together via `startSession` and only then promotes the draft tab;
@@ -82,17 +81,12 @@ Child directories (`sessions/`, `mobile/`, …) own their own rules.
 
 ## Conversation access
 
-- `session-sharing.tsx` owns ONE desktop header control for both access axes.
-  Team visibility picks the shape — private keeps the menu explaining its
-  inherited machine/project scope before either sharing action, anything else is
-  a plain button — and a published link picks the label in both shapes, being
-  the wider disclosure. Never add a second badge beside it; the private scope
-  stays the menu's first block.
-- `useSessionShareStatus` is the only cloud read a header makes while the share
-  editor is CLOSED: the management row, never a source document. `unknown` reads
-  as not-yet-shared, so the label upgrades in place instead of flashing in.
-- The page owns that editor: header control and `…` menu open the same
-  `SessionShareDialog`, keyed by session id so a switching tab cannot retarget it.
+- `session-sharing.tsx` owns one desktop header control for team and web access: team visibility
+  selects menu/button, public status selects the label, and its audience strip shows current access.
+  Unavailable audiences are disabled with a reason; narrowing, tabs, search, and a second badge are
+  forbidden. Paths and base branch stay in `⋯`. Closed headers read only the `useSessionShareStatus`
+  management row (`unknown` means not shared). The inline panel and `⋯` dialog reuse one keyed
+  publisher; the panel stays open while publishing. [Contract](../../../../.agents/notes/implemented/feature/2026-09-14-session-header-share-control.md).
 
 ## Local projects
 

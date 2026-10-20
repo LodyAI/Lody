@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
 
-import { WorkspaceRepoLegacy } from '@lody/shared/workspace-data/repo-legacy';
+import { LoroRepo } from 'loro-repo';
 
 import { parseSessionNotifications, type SessionId } from '@lody/shared';
 
@@ -22,7 +22,7 @@ describe('acp notification fixtures', () => {
       JSON.parse(fs.readFileSync(fixturePath, 'utf8'))
     );
 
-    const repo = await WorkspaceRepoLegacy.create({});
+    const repo = await LoroRepo.create({});
     const doc = new SessionDocument(repo, 'session-sample' as SessionId);
     await doc.initOffline();
 

@@ -42,9 +42,9 @@ vi.mock('@lody/platform/react', () => ({
   useCloudQuery: () => fixture.directory,
 }));
 vi.mock('@/lib/cloud-api-operations', () => ({ cloudOperations: { promptShortcuts: {} } }));
-vi.mock('@lody/shared/workspace-data/repo-legacy', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@lody/shared/workspace-data/repo-legacy')>();
-  return { ...actual, WorkspaceRepoLegacy: { create: fixture.createRepo } };
+vi.mock('loro-repo', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('loro-repo')>();
+  return { ...actual, LoroRepo: { create: fixture.createRepo } };
 });
 vi.mock('loro-repo/storage/indexeddb', () => ({ IndexedDBStorageAdaptor: class {} }));
 vi.mock('@lody/shared/prompt-shortcuts', async () => {
@@ -178,46 +178,6 @@ describe('PromptShortcutProvider lifecycle', () => {
     expect(current).not.toBeNull();
     expect(current).not.toBe(first);
     expect(container.textContent).toBe('workspace-a');
-  });
-
-  it('retains a failed database owner, tries Repo cleanup, and recovers on the next open', async () => {
-    vi.spyOn(console, 'error').mockImplementation(() => {});
-    let blocked = true;
-    let storeClosed = false;
-    let repoCloseAttempted = false;
-    let repoClosed = false;
-    let prematurelyOpened = false;
-    fixture.closeStore.mockImplementation(async () => {
-      if (blocked) throw new Error('synthetic shortcut storage failure');
-      storeClosed = true;
-    });
-    fixture.createRepo.mockResolvedValueOnce({
-      destroy: async () => {
-        repoCloseAttempted = true;
-        if (!storeClosed) throw new Error('Original storage remains owned');
-        repoClosed = true;
-      },
-    });
-    await render();
-    const retired = current!;
-    await render(false);
-    expect(current).toBeNull();
-    expect(repoCloseAttempted).toBe(true);
-    expect(repoClosed).toBe(false);
-    fixture.createRepo.mockImplementationOnce(async () => {
-      prematurelyOpened = !repoClosed;
-      return { destroy: async () => {} };
-    });
-    await render();
-    expect(current).toBeNull();
-    expect(prematurelyOpened).toBe(false);
-    await render(false);
-    blocked = false;
-    await render();
-    expect(repoClosed).toBe(true);
-    expect(prematurelyOpened).toBe(false);
-    expect(current).not.toBeNull();
-    expect(current).not.toBe(retired);
   });
 
   it('fences a replacement platform before publishing its new runtime', async () => {

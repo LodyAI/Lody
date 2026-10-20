@@ -5,7 +5,8 @@ import type {
   SessionId,
   SessionQueuePromotionRecord,
 } from '@lody/shared';
-import { WorkspaceRepoLegacy } from '@lody/shared/workspace-data/repo-legacy';
+import { LoroDoc } from 'loro-crdt';
+import { LoroRepo } from 'loro-repo';
 import { subscribeSessionChanges } from '@/lib/loro/doc';
 import { SessionDocument } from '@/lib/loro/doc';
 import {
@@ -149,7 +150,7 @@ const createBackendHarness = (options: { failOnceAt?: QueuePromotionFailurePoint
 const createRealLoroBackendFixture = async (
   options: { failOnceAt?: QueuePromotionFailurePoint } = {}
 ) => {
-  const repo = await WorkspaceRepoLegacy.create({});
+  const repo = await LoroRepo.create({});
   const sessionDoc = new SessionDocument(
     repo,
     'loro-backend-contract' as SessionId,
@@ -329,9 +330,13 @@ describe('session backend selection', () => {
 
   it('binds an explicitly selected backend before an offline document can default to Loro', async () => {
     const sessionId = 'explicit-backend-session' as SessionId;
-    const repo = await WorkspaceRepoLegacy.create({});
     const sessionDoc = new SessionDocument(
-      repo,
+      {
+        openPersistedDoc: vi.fn(async () => ({ doc: new LoroDoc() })),
+        getDocMeta: vi.fn(async () => undefined),
+        upsertDocMeta: vi.fn(async () => undefined),
+        flush: vi.fn(async () => undefined),
+      } as never,
       sessionId,
       vi.fn(async () => undefined),
       { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() } as never
@@ -344,19 +349,23 @@ describe('session backend selection', () => {
     const unregister = registerSessionBackendFactory('roost', factory);
     try {
       await sessionDoc.initOffline(undefined, { historyBackend: 'roost' });
+      expect(factory).toHaveBeenCalledWith(sessionDoc, { historyBackend: 'roost' });
       expect(sessionDoc.getSessionBackend()).toBe(backend);
     } finally {
       unregister();
       await sessionDoc.destroy({ preserveStatus: true });
-      await repo.destroy();
     }
   });
 
   it('does not compose a Loro history surface for an explicitly selected Roost document', async () => {
     const sessionId = 'roost-without-loro-history' as SessionId;
-    const repo = await WorkspaceRepoLegacy.create({});
     const sessionDoc = new SessionDocument(
-      repo,
+      {
+        openPersistedDoc: vi.fn(async () => ({ doc: new LoroDoc() })),
+        getDocMeta: vi.fn(async () => undefined),
+        upsertDocMeta: vi.fn(async () => undefined),
+        flush: vi.fn(async () => undefined),
+      } as never,
       sessionId,
       vi.fn(async () => undefined),
       { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() } as never
@@ -373,7 +382,6 @@ describe('session backend selection', () => {
     } finally {
       unregister();
       await sessionDoc.destroy({ preserveStatus: true });
-      await repo.destroy();
     }
   });
 });

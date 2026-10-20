@@ -25,8 +25,19 @@ subdirectory; this file is the navigation index. Cross-module explanations live 
   sensitive-field exclusion and list/get behavior shared by MCP and CLI.
   List inputs are validated here against resource-specific allowlists derived from
   the shared query schema; the CLI only translates flags and resolves selectors.
-- `resource-discovery-runtime.ts` — synchronized workspace readers and caller-specific
-  authorization; it supplies the existing workspace command runtime to the query service.
+- `resource-discovery-runtime.ts` — workspace readers and caller-specific authorization.
+  Daemon reads wait briefly for the first baseline, then return cached results with
+  `catalog_syncing` uncertainty until confirmed; later reads never force catch-up.
+  `loro/workspace-catalog-sync.ts` holds metadata, workspace and authorized Machine
+  readers on the existing Promise Repo using its public room and replica leases.
+  Failed baseline barriers retry with capped backoff on the same binding, so a
+  temporary storage error can recover without replacing the reader or reconnecting.
+  `workspace-catalog-sync-legacy.ts` owns the manager-facing Scope and closes it
+  before Repo shutdown; transport recovery keeps live rooms current.
+  Role create/update proposals require confirmed metadata/workspace synchronization;
+  creation also confirms the authorized target catalog before publishing a card.
+  Standalone CLI calls synchronize unless `--offline`. Authorization and cloud presence
+  remain online-aware independently of the catalog read policy.
   Intent and limits: [resource discovery](../../../../specs/resource-discovery.md).
 - `agent-role-create.ts` — Agent Role catalog read and create-path resolution
   shared by the MCP create tools and CLI `session create --agent-role`: the Role
@@ -61,6 +72,10 @@ subdirectory; this file is the navigation index. Cross-module explanations live 
   RPC wiring, local project control, session file upload/send, and the turn cloud
   side-effect gate. Turn execution itself lives in
   `../session/session-execution-service.ts`.
+  Machine registration passes the daemon's `TZ` hint to `getDeviceTimeZone`:
+  when Intl exposes no zone name, named zoneinfo paths and fixed whole-hour
+  POSIX zones such as `HKT-8` are resolved before the legacy UTC fallback.
+  See the [timezone decision](../../../../.agents/notes/implemented/bug-fix/2026-10-18-linux-schedule-timezone.md).
 - `machine-runtime.ts` — machine runtime bootstrap; still hosts the DEPRECATED hosted
   WS control-plane listener, and serializes remote bridge attach/detach/revoke through
   `runBridgeTransition`.
@@ -96,7 +111,10 @@ subdirectory; this file is the navigation index. Cross-module explanations live 
   `session-file-backfill.ts`, `acp-agent-attachments.ts` — the attachment lifecycle;
   see
   [`.agents/docs/cli-lib-session-files.md`](../../../../.agents/docs/cli-lib-session-files.md).
-- `session-gc-manager.ts` — idle cleanup plus memory-pressure reclamation. Per-OS
+- `session-gc-manager.ts` — idle cleanup plus memory-pressure reclamation. Idle also
+  asks the native agent (`AgentClient.getNativeWork`, from Core `sessionActivity`)
+  whether it still runs or waits on background tasks
+  ([decision](../../../../.agents/notes/implemented/bug-fix/2026-10-18-gc-respects-native-agent-work.md)). Per-OS
   measurement rationale:
   [`.agents/docs/cli-lib-memory-pressure.md`](../../../../.agents/docs/cli-lib-memory-pressure.md).
 - `session-transient-store.ts` — buffered ACP updates and their turn ownership.
@@ -146,6 +164,9 @@ provides LocalProjects. See the [decision](../../../../.agents/notes/implemented
   assistant models through shallow scalar/count reads of already-open documents.
   It compares current catalog metadata on each reconciliation so stale overwrites
   are repaired on the next history change or flush.
+  `sqlite-lock-diagnostics.ts` logs, at most once a minute, which processes hold a
+  workspace `repo.sqlite3` open when loro-repo or streams-crdt reports
+  `database is locked`; it only observes (`lsof`) and never retries or blocks.
   `streams-transport.ts` connects safe failure diagnostics to the existing logger;
   it registers the typed error formatter without adding Repo/WASM imports to the
   generic error utility used by standalone workers.

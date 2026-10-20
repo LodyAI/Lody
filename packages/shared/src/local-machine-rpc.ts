@@ -84,6 +84,8 @@ export const SessionActiveInvocationContextResultSchema = z.discriminatedUnion('
       requesterUserId: z.string().trim().min(1),
       sourceTurnId: z.string().trim().min(1),
       inputConfig: z.record(z.string(), z.unknown()),
+      notificationOriginTurnIds: z.array(z.string().min(1)).optional(),
+      notificationProvenancePending: z.boolean().optional(),
     })
     .strict(),
 ]);

@@ -714,6 +714,36 @@ describe('CliSupervisor lifecycle actor', () => {
     expect(supervisor.getState().retryInMs).toBe(1_000);
   });
 
+  it('goes fatal on a Host it may not connect to, and tries again on explicit restart', async () => {
+    const run = createRun(650);
+    const acquire = vi
+      .fn<NonNullable<SupervisorOptions['ownership']>['acquire']>()
+      .mockResolvedValueOnce({ status: 'inaccessible', description: 'Host refused access' })
+      .mockResolvedValueOnce({ status: 'acquired' });
+    const spawn = vi.fn(() => run.handle);
+    const supervisor = createSupervisor(async () => ({ spawn }), {
+      existingRuntimePolicy: 'attach',
+      ownership: { acquire, release: vi.fn() },
+      fetchRuntimeState: vi.fn(async () => null),
+    });
+
+    await supervisor.start();
+    expect(supervisor.getState()).toMatchObject({
+      phase: 'fatal',
+      message: 'Host refused access',
+    });
+    expect(supervisor.getState().retryInMs).toBeUndefined();
+
+    await vi.advanceTimersByTimeAsync(10 * 60_000);
+    await flushMicrotasks();
+    expect(acquire).toHaveBeenCalledOnce();
+    expect(spawn).not.toHaveBeenCalled();
+
+    await supervisor.restart();
+    expect(acquire).toHaveBeenCalledTimes(2);
+    expect(supervisor.getActiveChild()).toBe(run.child);
+  });
+
   it('reacquires ownership before launching after an attached Host disappears', async () => {
     const owner = { instanceId: 'daemon-host', pid: 640, mode: 'daemon' as const };
     const runtime = {

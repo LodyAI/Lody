@@ -421,7 +421,8 @@ describe('createManagedStoreCache', () => {
       await cache.get('x');
       await expect(cache.release('x')).resolves.toBeUndefined();
       expect(warnSpy).toHaveBeenCalledWith(
-        'Failed to unload doc for released store; replica retained'
+        'Failed to unload doc for released store',
+        expect.objectContaining({ key: 'x', error: expect.any(Error) })
       );
 
       // The next acquire→release cycle retries the unload.
@@ -467,38 +468,5 @@ describe('createManagedStoreCache', () => {
     expect(mockStores[0]!.dispose).toHaveBeenCalledTimes(1);
     expect(mockStores[1]!.dispose).toHaveBeenCalledTimes(1);
     expect(unload).not.toHaveBeenCalled();
-  });
-});
-
-describe('asynchronous native store release', () => {
-  it('joins release before replacement and automatically retries a failed owner on the next acquire', async () => {
-    const started = Promise.withResolvers<void>();
-    const finish = Promise.withResolvers<void>();
-    let failing = true;
-    let generation = 0;
-    const first = {
-      generation: ++generation,
-      dispose: async () => {
-        started.resolve();
-        await finish.promise;
-        if (failing) throw new Error('retained native release');
-      },
-    };
-    const cache = createManagedStoreCache({
-      create: async () => (generation === 1 ? first : { generation, dispose: async () => {} }),
-      releaseDelayMs: 0,
-    });
-    expect(await cache.acquire('session-a')).toBe(first);
-    const closing = cache.release('session-a');
-    await started.promise;
-    const reopening = cache.get('session-a');
-    finish.resolve();
-    await expect(closing).rejects.toThrow('retained native release');
-    await expect(reopening).rejects.toThrow('retained native release');
-    await expect(cache.get('session-a')).rejects.toThrow('retained native release');
-    failing = false;
-    generation++;
-    expect((await cache.get('session-a')).generation).toBe(2);
-    await cache.disposeAll();
   });
 });

@@ -8,15 +8,6 @@ Root and shared package rules apply. `CLAUDE.md` symlinks here; edit `AGENTS.md`
 - Callers bind `createLoroSyncErrorTools` to their own Repo error constructors;
   different pnpm peer contexts can have different class identities. Do not replace
   this boundary with arbitrary-object or message-based error recognition.
-- Native workspace formatters bind `workspaceSyncFailuresLegacy`; project only
-  validated native Streams scalars, never its private full Cause.
-- CLI/renderer snapshot observers use `getLoroSnapshotDiagnostic` at the SDK DTO
-  boundary. Retain workflow/request ids, stages, byte lengths, monotonic elapsed
-  time and abort/timeout/upload classifications. Never infer transmission progress
-  for `total-only` uploads or substitute a timeout budget for elapsed time.
-- Snapshot workflow records use debug and failures use warn; ordinary room sync
-  stays silent. Preserve configured protected-content observers, including async
-  rejection isolation, without allowing a log sink failure to affect upload.
 - CLI Streams composition registers its bound formatter with the generic error
   utility. Keep Repo runtime imports out of that utility: standalone process
   workers consume it without a WASM loader.

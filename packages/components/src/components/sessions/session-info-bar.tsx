@@ -14,6 +14,7 @@ import { sanitizeGoalObjective } from '@lody/shared';
 import { INFO_BAR_ELEVATION_CLASS } from '@/components/chat/composer-surface';
 import { ConversationColumn } from '@/components/shared/conversation-column';
 import { cn } from '@/lib/utils';
+import { INFO_BAR_TEXT_CLASS } from './info-bar-type';
 import { ActionChip } from './info-chip';
 import {
   ContextChip,
@@ -352,7 +353,8 @@ export function SessionInfoBar({
   const surfaceProps = hasSurfaceContent
     ? {
         className: cn(
-          '@container flex h-8 w-full min-w-0 select-none items-center gap-1.5 rounded-lg border-[0.5px] border-foreground/[0.10] bg-[hsl(var(--composer))] px-2 text-xs dark:border-input-border/45 dark:bg-input/70',
+          '@container flex h-8 w-full min-w-0 select-none items-center gap-1.5 rounded-lg border-[0.5px] border-foreground/[0.10] bg-[hsl(var(--composer))] px-2 dark:border-input-border/45 dark:bg-input/70',
+          INFO_BAR_TEXT_CLASS,
           // The machine button carries its own 8px padding (chips carry 4px):
           // trim the leading inset so the first glyph sits where a chip's would.
           hasMachine && 'pl-1',

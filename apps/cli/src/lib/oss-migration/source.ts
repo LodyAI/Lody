@@ -1,11 +1,10 @@
-import { WorkspaceRepoLegacy } from '@lody/shared/workspace-data/repo-legacy';
 import fs from 'node:fs/promises';
 import { constants } from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import Database from 'better-sqlite3';
 import { SqliteRepoStore } from 'loro-repo/storage/sqlite';
-
+import { LoroRepo } from 'loro-repo';
 import {
   getMachineRoomId,
   isSessionDocRoomId,
@@ -95,9 +94,7 @@ export async function freezeSource(
     source.close();
   }
   const store = new SqliteRepoStore({ path: backup });
-  const repo = await WorkspaceRepoLegacy.create({
-    storageAdapter: store.storage,
-  });
+  const repo = await LoroRepo.create({ storageAdapter: store.storage, metaDebounceCommitMs: 0 });
   try {
     const scheduleRows = new Map<string, ReturnType<typeof buildScheduleRegistryRow>>();
     const manifest: Manifest = {

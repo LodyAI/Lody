@@ -23,6 +23,10 @@ rules live in [AGENTS.md](AGENTS.md); the pipeline and its reasoning live in
   funnel, both through `hooks/use-fire-once` rather than private refs.
   `category_enter` is reported from the resolved view, not a row callback: a
   navigation item never fires `onMentionSelect`, and the keyboard route counts.
+  Candidate descriptions fill the space between the heading and bottom facts,
+  with an ellipsis after the last complete line that fits. Paths stay visible
+  and the detail pane does not scroll. See the
+  [description sizing decision](../../../../../.agents/notes/implemented/bug-fix/2026-10-20-mention-description-space.md).
 - `file-at-mention.tsx` and `mention-project-file-source.ts` load file paths and
   provide draft hydration. GitHub discovery uses the shared cache and request-level
   failure observer; see [fetch contract](../../../../../specs/mention-file-fetch.md). [`file-search/`](file-search/README.md) owns the

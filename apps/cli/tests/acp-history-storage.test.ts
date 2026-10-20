@@ -1,7 +1,7 @@
 import { updateTestHistory } from './history-port-fixture';
 import { describe, expect, it } from 'vitest';
 
-import { WorkspaceRepoLegacy } from '@lody/shared/workspace-data/repo-legacy';
+import { LoroRepo } from 'loro-repo';
 import { v4 as uuidv4 } from 'uuid';
 
 import type {
@@ -62,7 +62,7 @@ const createTestLogger = (warnings: string[]): Logger => ({
 
 describe('session history storage (integration)', () => {
   it('keeps child edit tools independent across batches and excludes permission mirrors from edit evidence', async () => {
-    const repo = await WorkspaceRepoLegacy.create({});
+    const repo = await LoroRepo.create({});
     const doc = new SessionDocument(repo, uuidv4() as SessionId);
     await doc.initOffline();
     const editsSeen: AcpAgentEditEvidence[] = [];
@@ -281,7 +281,7 @@ describe('session history storage (integration)', () => {
     }
   });
   it('persists negotiated child output through ingress and filtering without polluting the root', async () => {
-    const repo = await WorkspaceRepoLegacy.create({});
+    const repo = await LoroRepo.create({});
     const doc = new SessionDocument(repo, uuidv4() as SessionId);
     await doc.initOffline();
     const warnings: string[] = [];
@@ -405,7 +405,7 @@ describe('session history storage (integration)', () => {
     }
   });
   it('allows undefined optional history fields without pre-stripping', async () => {
-    const repo = await WorkspaceRepoLegacy.create({});
+    const repo = await LoroRepo.create({});
     const sessionId = uuidv4() as SessionId;
     const doc = new SessionDocument(repo, sessionId);
     await doc.initOffline();
@@ -466,7 +466,7 @@ describe('session history storage (integration)', () => {
   });
 
   it('should contain only one of the terminal output and record them by delta', async () => {
-    const repo = await WorkspaceRepoLegacy.create({});
+    const repo = await LoroRepo.create({});
     const sessionId = uuidv4() as SessionId;
     const doc = new SessionDocument(repo, sessionId);
     await doc.initOffline();
@@ -504,7 +504,7 @@ describe('session history storage (integration)', () => {
   });
 
   it('should record notifications', async () => {
-    const repo = await WorkspaceRepoLegacy.create({});
+    const repo = await LoroRepo.create({});
     const sessionId = uuidv4() as SessionId;
     const doc = new SessionDocument(repo, sessionId);
     await doc.initOffline();
@@ -518,7 +518,7 @@ describe('session history storage (integration)', () => {
   });
 
   it('does not persist file contents for read/edit but still triggers editCallback', async () => {
-    const repo = await WorkspaceRepoLegacy.create({});
+    const repo = await LoroRepo.create({});
     const sessionId = uuidv4() as SessionId;
     const doc = new SessionDocument(repo, sessionId);
     await doc.initOffline();
@@ -776,7 +776,7 @@ describe('session history storage (integration)', () => {
   });
 
   it('extracts terminal_command and terminal_output from Kimi shell notifications', async () => {
-    const repo = await WorkspaceRepoLegacy.create({});
+    const repo = await LoroRepo.create({});
     const sessionId = uuidv4() as SessionId;
     const doc = new SessionDocument(repo, sessionId);
     await doc.initOffline();
@@ -879,7 +879,7 @@ describe('session history storage (integration)', () => {
   });
 
   it('logs diagnostics and drops invalid agent text chunks', async () => {
-    const repo = await WorkspaceRepoLegacy.create({});
+    const repo = await LoroRepo.create({});
     const sessionId = uuidv4() as SessionId;
     const doc = new SessionDocument(repo, sessionId);
     await doc.initOffline();

@@ -350,6 +350,7 @@ export class MachineRuntime {
 
     this.gcManager = new SessionGCManager(gcConfig, {
       getSessionLastActivity: (sessionId) => handler.getLastActivity(sessionId),
+      getNativeWork: (sessionId) => handler.getNativeWork(sessionId),
       hasActiveTurn: (sessionId) => handler.hasActiveTurn(sessionId),
       hasActiveGoal: async (sessionId) => await handler.hasActiveGoal(sessionId),
       hasPendingUpdates: (sessionId) => handler.hasPendingUpdates(sessionId),

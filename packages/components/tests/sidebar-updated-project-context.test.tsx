@@ -10,6 +10,7 @@ import {
   SidebarUpdatedSessionList,
   type SidebarUpdatedItem,
 } from '../src/components/sidebar-updated-session-list';
+import { sidebarShowBranchNamesAtom } from '../src/atoms/sidebar-state';
 import { initI18n } from '../src/i18n';
 
 function makeItem(overrides: Partial<SidebarUpdatedItem> & { id: string }): SidebarUpdatedItem {
@@ -81,11 +82,19 @@ describe('SidebarUpdatedSessionList project context', () => {
     vi.restoreAllMocks();
   });
 
-  function render(items: SidebarUpdatedItem[], showProjectContext = true, selectedItemId?: string) {
+  function render(
+    items: SidebarUpdatedItem[],
+    showProjectContext = true,
+    selectedItemId?: string,
+    options?: { branchNames?: boolean }
+  ) {
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
     const store = createStore();
+    if (options?.branchNames !== undefined) {
+      store.set(sidebarShowBranchNamesAtom, options.branchNames);
+    }
     flushSync(() => {
       root?.render(
         React.createElement(
@@ -224,5 +233,95 @@ describe('SidebarUpdatedSessionList project context', () => {
         ?.querySelector('[data-sidebar-updated-id="opened"]')
         ?.querySelector('[data-sidebar-updated-project]')
     ).toBeNull();
+  });
+
+  it('appends the branch segment to a repo row when the preference is on', () => {
+    render(
+      [
+        makeItem({
+          id: 'github',
+          kind: 'github',
+          title: 'GitHub session',
+          subtitle: 'loro-dev/lody',
+          repoFullName: 'loro-dev/lody',
+          branchName: 'feat/repository-identity',
+          sectionLabel: 'loro-dev/lody',
+        }),
+      ],
+      true,
+      undefined,
+      { branchNames: true }
+    );
+
+    const meta = container
+      ?.querySelector('[data-sidebar-updated-id="github"]')
+      ?.querySelector('[data-sidebar-session-meta]');
+    expect(meta?.textContent).toContain('feat/repository-identity');
+    expect(meta?.querySelector('.lucide-git-branch')).not.toBeNull();
+  });
+
+  it('omits the branch segment on rows without a branch and on nested children', () => {
+    render([
+      makeItem({
+        id: 'chat',
+        kind: 'chat',
+        title: 'Chat session',
+        subtitle: null,
+        sectionLabel: 'Chats',
+      }),
+      makeItem({
+        id: 'opener',
+        kind: 'github',
+        title: 'Opener',
+        subtitle: 'loro-dev/lody',
+        repoFullName: 'loro-dev/lody',
+        branchName: 'main',
+        sectionLabel: 'loro-dev/lody',
+      }),
+      makeItem({
+        id: 'opened',
+        kind: 'github',
+        title: 'Opened child',
+        subtitle: 'loro-dev/lody',
+        repoFullName: 'loro-dev/lody',
+        branchName: 'feat/child',
+        openedBySessionId: 'opener',
+        sectionLabel: 'loro-dev/lody',
+      }),
+    ]);
+
+    const chatRow = container?.querySelector('[data-sidebar-updated-id="chat"]');
+    const openedRow = container?.querySelector('[data-sidebar-updated-id="opened"]');
+    // Chat rows have no branch, so the chat keeps its project-only second line.
+    expect(chatRow?.querySelector('.lucide-git-branch')).toBeNull();
+    expect(
+      container
+        ?.querySelector('[data-sidebar-updated-id="opener"]')
+        ?.querySelector('[data-sidebar-session-meta]')
+    ).not.toBeNull();
+    expect(openedRow?.querySelector('[data-sidebar-session-meta]')).toBeNull();
+  });
+
+  it('collapses the second line to the project segment when the branch preference is off', () => {
+    render(
+      [
+        makeItem({
+          id: 'github',
+          kind: 'github',
+          title: 'GitHub session',
+          subtitle: 'loro-dev/lody',
+          repoFullName: 'loro-dev/lody',
+          branchName: 'feat/repository-identity',
+          sectionLabel: 'loro-dev/lody',
+        }),
+      ],
+      true,
+      undefined,
+      { branchNames: false }
+    );
+
+    const row = container?.querySelector('[data-sidebar-updated-id="github"]');
+    expect(row?.querySelector('[data-sidebar-updated-project="github"]')).not.toBeNull();
+    expect(row?.querySelector('.lucide-git-branch')).toBeNull();
   });
 });

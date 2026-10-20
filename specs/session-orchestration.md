@@ -150,7 +150,7 @@ Operation completion receipts enter the durable Inbox with wake eligibility. If 
 Session is idle, unpaused and has no unreleased resources or accepted queued input,
 one wakeable receipt grants a persistent automatic intent. Busy Sessions defer
 consumption until normal completion and actual release. Stop blocks receipt-driven
-wakes until fresh trusted human input. Result persistence and wake intent creation
+wakes until fresh human or Agent-chat input. Result persistence and wake intent creation
 share the completion transaction; reopen recovers an unsubmitted intent without a new event.
 Suppressing user-facing completion notifications for Agent-initiated turns does not
 suppress Operation receipts or their wake eligibility.
@@ -162,10 +162,12 @@ batch. Arrivals before claim coalesce; arrivals after claim stay queued for a la
 batch. Duplicate receipts/releases never create duplicate execution; empty queues
 never start a model. Submitted or unknown members never re-enter another batch.
 
-Stop, trusted human acceptance and actual transport initiation share Session admission.
+Stop, fresh input acceptance and actual transport initiation share Session admission.
 Inbox-aware Stop persists pause before cancellation and cancels pre-Stop queued input eligibility
-while retaining history. Fresh human input carries saved results; old instructions
-require a new send. Agent chat, role, userId and author cannot clear pause. Failed exits
+while retaining history. The pause blocks only automatic completion wakes. Input sent
+after Stop by a human or by another Session's Agent chat ranks the same: it is admitted,
+clears the pause and carries saved results; old instructions require a new send.
+Receipts still decide only whether an input is recorded as human. Failed exits
 never auto-continue; unreleased resources block all successors. Normal future human
 turns resume the same receipt-driven scheduling rule. A failed exit alone grants no
 wake, but a later wakeable receipt may grant one after physical resource release.
@@ -175,7 +177,7 @@ operator may explicitly attest that all old resources, including unrecorded ones
 have been released while holding exclusive Host ownership; known live resources or
 uncertain probes still block recovery. Atomically retire the exact old execution and
 pause the session. Do not replay unknown submissions or manufacture a normal-release
-intent. Only fresh trusted human input resumes work afterward. A dead daemon PID alone
+intent. Only fresh human or Agent-chat input resumes work afterward. A dead daemon PID alone
 is not release evidence. This maintenance action is not available through Agent/MCP tools.
 
 An automatic batch yields atomically to pre-submission human acceptance. A human input

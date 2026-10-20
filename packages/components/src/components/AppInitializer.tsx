@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import i18next from 'i18next';
-import { syncTime, createServerTimeFetcher } from '@lody/shared';
+import { startTimeSyncLegacy } from '@lody/shared';
 import { usePlatformCapability } from '@lody/platform/react';
 import { API_BASE_URL } from '../lib';
 import { registerBuiltInCommands } from '../lib/commands';
@@ -95,11 +95,14 @@ const AppInitializer = ({ children }: { children: React.ReactNode }) => {
   // kind while preserving the local-clock behavior of getServerNow().
   useEffect(() => {
     if (!hasCloudSync) {
-      return;
+      return undefined;
     }
-    syncTime(createServerTimeFetcher(`${API_BASE_URL}/api/time`)).catch(() => {
-      // Silently ignore time sync failures - operations will use local time
-    });
+    const calibration = startTimeSyncLegacy(`${API_BASE_URL}/api/time`);
+    return () => {
+      void calibration.stop().catch(() => {
+        console.warn('Failed to stop server time calibration');
+      });
+    };
   }, [hasCloudSync]);
 
   /* Pre-warm the in-memory avatar blob-URL map from the persistent

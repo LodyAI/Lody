@@ -93,7 +93,10 @@ export interface MenuLinkItemProps
 }
 
 export interface MenuCheckboxItemProps
-  extends Omit<CheckboxItemBaseProps, 'className' | 'children'>, Omit<MenuRowProps, 'icon'> {}
+  extends Omit<CheckboxItemBaseProps, 'className' | 'children'>, Omit<MenuRowProps, 'icon'> {
+  /** Place the tick after the label to leave the start of short filter rows unindented. */
+  indicatorSide?: 'start' | 'end';
+}
 
 export interface MenuRadioItemProps
   extends Omit<RadioItemBaseProps, 'className' | 'children'>, MenuRowProps {
@@ -342,10 +345,24 @@ export const MenuLinkItem = forwardRef<HTMLAnchorElement, MenuLinkItemProps>(fun
  * Base UI unmounts the tick while the row is unticked, so an icon sharing that
  * box would slide sideways every time the row was toggled. A row that needs a
  * glyph as well puts it in `endContent`. The box itself is always reserved, so
- * the list does not reflow as the tick appears.
+ * the list does not reflow as the tick appears. Short filters can move this box
+ * to the end with `indicatorSide="end"`, leaving the label unindented.
  */
 export const MenuCheckboxItem = forwardRef<HTMLDivElement, MenuCheckboxItemProps>(
-  function MenuCheckboxItem({ className, children, shortcut, endContent, ...rest }, ref) {
+  function MenuCheckboxItem(
+    { className, children, shortcut, endContent, indicatorSide = 'start', ...rest },
+    ref
+  ) {
+    const mark = (
+      <span {...stylex.props(surface.indicator)}>
+        <BaseMenu.CheckboxItemIndicator
+          className={stylex.props(surface.indicatorGlyph).className}
+          render={<span />}
+        >
+          <TickGlyph />
+        </BaseMenu.CheckboxItemIndicator>
+      </span>
+    );
     return (
       <BaseMenu.CheckboxItem
         ref={ref}
@@ -353,18 +370,18 @@ export const MenuCheckboxItem = forwardRef<HTMLDivElement, MenuCheckboxItemProps
         className={(state) => rowClassName(state, 'neutral', className)}
       >
         <Row
-          leading={
-            <span {...stylex.props(surface.indicator)}>
-              <BaseMenu.CheckboxItemIndicator
-                className={stylex.props(surface.indicatorGlyph).className}
-                render={<span />}
-              >
-                <TickGlyph />
-              </BaseMenu.CheckboxItemIndicator>
-            </span>
-          }
+          leading={indicatorSide === 'start' ? mark : undefined}
           shortcut={shortcut}
-          endContent={endContent}
+          endContent={
+            indicatorSide === 'end' ? (
+              <>
+                {endContent}
+                {mark}
+              </>
+            ) : (
+              endContent
+            )
+          }
         >
           {children}
         </Row>

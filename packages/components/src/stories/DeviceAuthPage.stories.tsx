@@ -31,6 +31,13 @@ export const ReadyToSubmit: Story = {
   },
 };
 
+export const PastedFormattedCode: Story = {
+  args: {
+    userCode: 'ABCD-EFGH',
+    canSubmit: true,
+  },
+};
+
 export const Verifying: Story = {
   args: {
     userCode: 'ABCD1234',

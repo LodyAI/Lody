@@ -1,4 +1,3 @@
-import type { WorkspaceRepoLegacy } from '@lody/shared/workspace-data/repo-legacy';
 import {
   deleteMachineFlockRowFromFlock,
   getMachineFlockDocId,
@@ -16,7 +15,7 @@ import {
   writeMachineFlockRowToFlock,
 } from '@lody/shared';
 import type { MachineLegacyMetaFields } from '@lody/shared';
-
+import type { LoroRepo } from 'loro-repo';
 import { realpathSync, statSync } from 'node:fs';
 import { localProjectsLegacy } from '@lody/shared/node/local-project';
 
@@ -89,7 +88,7 @@ function readLegacyMachineLocalProjects(
 }
 
 export async function readMachineLocalProjects(
-  repo: WorkspaceRepoLegacy,
+  repo: LoroRepo,
   workspaceId: WorkspaceId,
   machineId: MachineId
 ): Promise<Record<LocalProjectId, LocalProjectMeta>> {
@@ -111,7 +110,7 @@ export async function readMachineLocalProjects(
 }
 
 export async function upsertMachineLocalProject(
-  repo: WorkspaceRepoLegacy,
+  repo: LoroRepo,
   workspaceId: WorkspaceId,
   machineId: MachineId,
   project: LocalProjectMeta,
@@ -146,7 +145,7 @@ export async function upsertMachineLocalProject(
 
 /** Repairs older project rows whose path was stored through a symlink. */
 export async function reconcileMachineLocalProjectRootPaths(
-  repo: WorkspaceRepoLegacy,
+  repo: LoroRepo,
   workspaceId: WorkspaceId,
   machineId: MachineId,
   sync: MachineFlockSyncScheduler
@@ -172,7 +171,7 @@ export async function reconcileMachineLocalProjectRootPaths(
 }
 
 export async function removeMachineLocalProject(
-  repo: WorkspaceRepoLegacy,
+  repo: LoroRepo,
   workspaceId: WorkspaceId,
   machineId: MachineId,
   localProjectId: LocalProjectId,
@@ -206,11 +205,11 @@ export async function removeMachineLocalProject(
   }
   await repo.upsertDocMeta(machineRoomId, {
     localProjects: undefined,
-  } as Parameters<WorkspaceRepoLegacy['upsertDocMeta']>[1]);
+  } as Parameters<LoroRepo['upsertDocMeta']>[1]);
 }
 
 export async function resolveWorkspaceLocalProjectRootPath(
-  repo: WorkspaceRepoLegacy,
+  repo: LoroRepo,
   workspaceId: WorkspaceId,
   machineId: MachineId,
   localProjectId: LocalProjectId
@@ -230,7 +229,7 @@ export async function resolveWorkspaceLocalProjectRootPath(
 }
 
 export async function resolveWorkspaceLocalProject(
-  repo: WorkspaceRepoLegacy,
+  repo: LoroRepo,
   workspaceId: WorkspaceId,
   machineId: MachineId,
   localProjectId: LocalProjectId
@@ -273,7 +272,7 @@ const defaultSleep = (ms: number): Promise<void> =>
   new Promise((resolve) => setTimeout(resolve, ms));
 
 export async function resolveWorkspaceLocalProjectWithSyncOnMiss(
-  repo: WorkspaceRepoLegacy,
+  repo: LoroRepo,
   workspaceId: WorkspaceId,
   machineId: MachineId,
   localProjectId: LocalProjectId,
@@ -308,7 +307,7 @@ export async function resolveWorkspaceLocalProjectWithSyncOnMiss(
  * The happy path (row already local) still costs exactly one read.
  */
 export async function resolveWorkspaceLocalProjectRootPathWithRetry(
-  repo: WorkspaceRepoLegacy,
+  repo: LoroRepo,
   workspaceId: WorkspaceId,
   machineId: MachineId,
   localProjectId: LocalProjectId,

@@ -2,8 +2,8 @@ import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { WorkspaceRepoLegacy } from '@lody/shared/workspace-data/repo-legacy';
 import { createRequire } from 'node:module';
+import { LoroRepo } from 'loro-repo';
 import { LoroDoc } from 'loro-crdt';
 import { Cause, Effect, Exit, Fiber } from 'effect';
 import { TestClock } from 'effect/testing';
@@ -113,7 +113,7 @@ async function nativeFixture(
   queued = false,
   factory?: SessionBackendFactory
 ) {
-  const repo = await WorkspaceRepoLegacy.create({});
+  const repo = await LoroRepo.create({});
   const sessionId = id as SessionId;
   await repo.upsertDocMeta(getSessionRoomId(sessionId), {
     id: sessionId,
@@ -129,7 +129,7 @@ async function nativeFixture(
     undefined,
     factory
   );
-  doc.handle = await repo.acquireDocHandleLegacy(getSessionRoomId(sessionId));
+  doc.handle = await repo.openPersistedDoc(getSessionRoomId(sessionId));
   doc.composeSessionData(doc.handle.doc, undefined, { historyBackend: 'roost' });
   if (queued)
     await doc.pushMessageQueue({
@@ -215,7 +215,7 @@ const nativeContractFixture: SessionBackendContractFixtureFactory = async (optio
 defineSessionBackendContract('Production Roost SQLite', nativeContractFixture);
 
 async function coldHistoryHandlerFixture(count: number) {
-  const repo = await WorkspaceRepoLegacy.create({});
+  const repo = await LoroRepo.create({});
   const docs = new Map<SessionId, SessionDocument>();
   for (let index = 0; index < count; index++) {
     const id = `pending-handler-${ordinal++}` as SessionId;
@@ -239,7 +239,7 @@ async function coldHistoryHandlerFixture(count: number) {
       getOrCreateSessionDoc: async (id: SessionId) => {
         const doc = docs.get(id)!;
         if (!doc.handle) {
-          doc.handle = await repo.acquireDocHandleLegacy(getSessionRoomId(id));
+          doc.handle = await repo.openPersistedDoc(getSessionRoomId(id));
           doc.composeSessionData(doc.handle.doc, undefined, await doc.getMetaState());
         }
         return doc;
@@ -641,7 +641,7 @@ describe('Production Roost history semantics', () => {
   it.each(['absent', 'existence-only', 'owner-pending', 'backend-pending'] as const)(
     'accepts the first cold write after %s metadata arrives without opening Loro history',
     async (phase) => {
-      const repo = await WorkspaceRepoLegacy.create({});
+      const repo = await LoroRepo.create({});
       const sessionId = `metadata-${phase}-${ordinal++}` as SessionId;
       const roomId = getSessionRoomId(sessionId);
       if (phase !== 'absent') {
@@ -688,7 +688,7 @@ describe('Production Roost history semantics', () => {
           repo,
           getOrCreateSessionDoc: async () => {
             if (!doc.handle) {
-              doc.handle = await repo.acquireDocHandleLegacy(roomId);
+              doc.handle = await repo.openPersistedDoc(roomId);
               // Resolve from metadata, like a cold production SessionDocument.
               doc.composeSessionData(doc.handle.doc, undefined, await doc.getMetaState());
             }
@@ -761,7 +761,7 @@ describe('Production Roost history semantics', () => {
     'cancelled',
   ] as const)('refuses %s metadata without leaving a live observer', (scenario) =>
     Effect.gen(function* () {
-      const repo = yield* Effect.promise(() => WorkspaceRepoLegacy.create({}));
+      const repo = yield* Effect.promise(() => LoroRepo.create({}));
       yield* Effect.addFinalizer(() => Effect.promise(() => repo.destroy()));
       const sessionId = `metadata-refusal-${scenario}` as SessionId;
       const roomId = getSessionRoomId(sessionId);
@@ -1203,8 +1203,7 @@ describe('Production Roost history semantics', () => {
       armed.resolve();
       return value;
     });
-    // Keep native worker/Effect scheduling live while controlling observer deadlines.
-    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    vi.useFakeTimers();
     const observed = history.waitForChanges(checkpoint, 15_000);
     await armed.promise;
     await fixture.backend.appendHistoryTurn(nativeUser('watched-owner-write'));
@@ -2561,6 +2560,56 @@ describe('Production Roost immutable input acceptance', () => {
     if (!port) throw new Error('Expected immutable input acceptance');
     return port;
   };
+
+  it('accepts the first input after reopen without hydrating older history pages', async () => {
+    const fixture = await nativeFixture();
+    const history = Array.from({ length: 81 }, (_, index) => ({
+      ...nativeAssistant(`unrelated-old-${index}`),
+      finished: true,
+      items: [{ type: 'text' as const, text: 'Synthetic old output'.repeat(128) }],
+    }));
+    const hashes = history.map((entry) => hashHistoryEntryForVersion(entry as never, 2));
+    expect(
+      await fixture.backend.applyHistoryImport({
+        mode: 'initialize',
+        replay: {
+          history: history as never,
+          turnHashes: hashes,
+          replayDigest: hashText(hashes.join('\n')),
+          hashVersion: 2,
+          droppedNotifications: 0,
+        },
+      })
+    ).toMatchObject({ status: 'accepted' });
+    const sessionId = fixture.doc.sessionId;
+    await fixture.close();
+    const reopened = await nativeFixture(sessionId);
+    const readPage = NodeLodyHistory.prototype.readActiveBranchPage;
+    vi.spyOn(NodeLodyHistory.prototype, 'readActiveBranchPage').mockImplementation(
+      function (id, options) {
+        if (options.before) throw new Error('Unrelated old history is unavailable');
+        return readPage.call(this, id, options);
+      }
+    );
+    const input = nativeUser('first-input-after-reopen');
+    const accept = inputPort(reopened).acceptAndDispatch;
+    if (!accept) throw new Error('Expected combined input dispatch');
+    expect(await accept(input)).toEqual({
+      status: 'accepted',
+      turnId: input.id,
+      active: true,
+    });
+    expect(await inputPort(reopened).lookup(input)).toMatchObject({
+      status: 'accepted',
+      active: true,
+    });
+    expect((await reopened.doc.getMetaState())?.latestUserMsgId).toBe(input.id);
+    expect(await reopened.backend.readHistoryCount()).toBe(history.length + 1);
+    expect(await reopened.backend.readTurn(input.id)).toMatchObject({
+      state: 'ready',
+      turn: input,
+    });
+  });
 
   it('commits human provenance and activation with ordinary acceptance and preserves a newer pointer on retry', async () => {
     const fixture = await nativeFixture();

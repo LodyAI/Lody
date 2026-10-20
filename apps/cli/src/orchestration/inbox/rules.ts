@@ -1,5 +1,5 @@
 import type { LodyOperationCompletion, LodyOperationItemTarget } from '@lody/shared';
-import type { InboxBatch, InboxInput } from './model';
+import type { InboxBatch } from './model';
 
 export type SessionFenceState = {
   revision: number;
@@ -8,18 +8,12 @@ export type SessionFenceState = {
   active_execution: string | null;
   active_input: string | null;
 };
-export const inputAcceptance = (
-  kind: InboxInput['kind'],
-  paused: boolean,
-  previousCanceled?: boolean
-): 'accept' | 'duplicate' | 'reject' =>
-  previousCanceled !== undefined
-    ? previousCanceled
-      ? 'reject'
-      : 'duplicate'
-    : kind === 'task' && paused
-      ? 'reject'
-      : 'accept';
+/**
+ * Stop pauses only automatic result wakes. Fresh human and Agent-chat inputs are
+ * explicit instructions of the same rank: both are admitted and both clear pause.
+ */
+export const inputAcceptance = (previousCanceled?: boolean): 'accept' | 'duplicate' | 'reject' =>
+  previousCanceled !== undefined ? (previousCanceled ? 'reject' : 'duplicate') : 'accept';
 
 export const canFenceBatch = (
   state: SessionFenceState,

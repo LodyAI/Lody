@@ -33,6 +33,7 @@ vi.mock('../src/components/main-layout', async () => {
   };
 });
 import { PreloadedMainLayout, preloadMainLayout } from '../src/components/preloaded-main-layout';
+import { BootShellProvider } from '../src/components/boot-shell';
 import { BOOT_SHELL_MARKUP } from '../src/lib/boot-shell';
 
 const roots: ReturnType<typeof createRoot>[] = [];
@@ -48,10 +49,13 @@ it('prepares without mounting, renders ready code immediately, and retains cold 
   const coldRoot = createRoot(coldContainer);
   roots.push(coldRoot);
   const tree = (label: string, workspaceReady = true) => (
-    <PreloadedMainLayout workspaceReady={workspaceReady}>{label}</PreloadedMainLayout>
+    <BootShellProvider path="/acme/chat">
+      <PreloadedMainLayout workspaceReady={workspaceReady}>{label}</PreloadedMainLayout>
+    </BootShellProvider>
   );
   await act(async () => coldRoot.render(tree('cold', false)));
-  expect(coldContainer.querySelector('[data-lody-boot-shell]')).not.toBeNull();
+  const frame = coldContainer.querySelector('[data-lody-boot-shell]');
+  expect(frame).not.toBeNull();
   expect(coldContainer.querySelector('button')).toBeNull();
   const loading = preloadMainLayout();
   expect(moduleGate.mounted).toBe(false);
@@ -60,6 +64,8 @@ it('prepares without mounting, renders ready code immediately, and retains cold 
     await loading;
   });
   expect(coldContainer.querySelector('[data-lody-boot-shell]')).toBeNull();
+  expect(coldContainer.querySelector('.lody-boot-shell')).toBe(frame);
+  expect(frame?.hasAttribute('inert')).toBe(true);
   expect(coldContainer.querySelector('button')?.textContent).toBe('0:cold');
   expect(coldContainer.querySelector('button')?.getAttribute('data-ready')).toBe('false');
   await act(async () => coldContainer.querySelector('button')!.click());
@@ -72,5 +78,6 @@ it('prepares without mounting, renders ready code immediately, and retains cold 
   roots.push(warmRoot);
   // A synchronous commit must contain the prepared content, without a fallback.
   act(() => warmRoot.render(tree('warm')));
-  expect(warmContainer.textContent).toBe('0:warm');
+  expect(warmContainer.querySelector('button')?.textContent).toBe('0:warm');
+  expect(warmContainer.querySelector('[data-lody-boot-shell]')).toBeNull();
 });

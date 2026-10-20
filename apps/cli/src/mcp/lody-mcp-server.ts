@@ -1,3 +1,4 @@
+import { turnNotificationAudience } from '@/lib/notifications/turn-notification-audience';
 import { registerAgentRoleTools } from './agent-role-tools';
 import { proposeAgentRole } from '@/lib/agent-role-proposal';
 import { batchPage } from '@/orchestration/inbox/batch-page';
@@ -2146,6 +2147,7 @@ const toDelegatedSessionRequester = (identity: InvocationIdentity): DelegatedSes
 type InvokingTurnContext = {
   chainDepth: number;
   frozenInputConfig: SessionTurnInputConfig;
+  notificationOriginTurnIds: string[];
   identity: InvocationIdentity;
 };
 
@@ -2168,6 +2170,8 @@ type InvokingTurnSource = {
   id: string;
   userId: string;
   inputConfig: SessionTurnInputConfig;
+  notificationOriginTurnIds: string[];
+  notificationProvenancePending?: boolean;
 };
 
 const resolveInvokingTurnSource = async (): Promise<InvokingTurnSource> => {
@@ -2193,6 +2197,8 @@ const resolveInvokingTurnSource = async (): Promise<InvokingTurnSource> => {
     id: active.sourceTurnId,
     userId: active.requesterUserId,
     inputConfig,
+    notificationOriginTurnIds: active.notificationOriginTurnIds ?? [],
+    notificationProvenancePending: active.notificationProvenancePending,
   };
 };
 
@@ -2226,6 +2232,22 @@ const resolveInvokingTurnContext = async (
   manager: LoroDocumentManager
 ): Promise<InvokingTurnContext> => {
   const source = await resolveInvokingTurnSource();
+  const notificationOriginTurnIds = [...source.notificationOriginTurnIds];
+  if (source.notificationProvenancePending) {
+    // RPC/steer can execute before the history writer resolves input provenance.
+    // Admission must not permanently freeze that temporary unknown as delegated.
+    const doc = await manager.getOrCreateSessionDoc(session.id);
+    const input = await (await createSessionBackend(doc)).history.readTurn(source.id);
+    if (input.state !== 'ready') {
+      throw new LodyOperationStoreError(
+        'INVOKING_INPUT_NOT_READY',
+        'The invoking input is not synchronized yet. Retry this operation after synchronization.',
+        true
+      );
+    }
+    if (input.turn.role === 'user' && turnNotificationAudience(input.turn.author).kind === 'user')
+      notificationOriginTurnIds.push(source.id);
+  }
   if (await isSessionCollaborationStopped(manager.repo, session.id)) {
     throw new LodyOperationStoreError(
       'COLLABORATION_STOPPED',
@@ -2244,6 +2266,7 @@ const resolveInvokingTurnContext = async (
   return {
     chainDepth,
     identity: buildInvocationIdentity(source),
+    notificationOriginTurnIds: [...new Set(notificationOriginTurnIds)],
     frozenInputConfig: {
       ...source.inputConfig,
       cliType: source.inputConfig.cliType ?? session.cliType,
@@ -2764,6 +2787,7 @@ const startSessionCreateOperation = async (args: SessionCreateCommandInput): Pro
               : {}),
             inputConfig: invoking.frozenInputConfig,
             sourceTurnId: invoking.identity.sourceTurnId,
+            notificationOriginTurnIds: invoking.notificationOriginTurnIds,
             targetDispatchConfigs: [effectiveDispatchConfig],
           },
           initiatorChainDepth: invoking.chainDepth,
@@ -2955,6 +2979,7 @@ const startSessionChatOperation = async (args: SessionChatToolInput): Promise<un
               : {}),
             inputConfig: invoking.frozenInputConfig,
             sourceTurnId: invoking.identity.sourceTurnId,
+            notificationOriginTurnIds: invoking.notificationOriginTurnIds,
           },
           initiatorChainDepth: invoking.chainDepth,
           ...timing,
@@ -3371,6 +3396,7 @@ const startSessionCreateManyOperation = async (
             ...(requester.agentConfigId ? { agentConfigId: requester.agentConfigId } : {}),
             inputConfig: invoking.frozenInputConfig,
             sourceTurnId: invoking.identity.sourceTurnId,
+            notificationOriginTurnIds: invoking.notificationOriginTurnIds,
             targetDispatchConfigs,
           },
           initiatorChainDepth: invoking.chainDepth,
@@ -3584,6 +3610,7 @@ const startSessionChatManyOperation = async (args: SessionChatManyToolInput): Pr
             ...(requester.agentConfigId ? { agentConfigId: requester.agentConfigId } : {}),
             inputConfig: invoking.frozenInputConfig,
             sourceTurnId: invoking.identity.sourceTurnId,
+            notificationOriginTurnIds: invoking.notificationOriginTurnIds,
           },
           initiatorChainDepth: invoking.chainDepth,
           ...timing,
@@ -3799,33 +3826,38 @@ export function buildSessionToolServer(handlers?: SessionToolHandlers): McpServe
     handlers
   );
 
-  registerAgentRoleTools(registerSessionTool, async (command) => {
-    const ctx = getSessionContext();
-    const source = await resolveInvokingTurnSource();
-    const auth = getCliAuthContextOrThrow('mcp');
-    const workspace = await resolveWorkspaceOrThrow(auth, getMcpWorkspaceId(ctx));
-    return withWorkspaceManager(auth, workspace, 'agent-role-proposal', async (manager) =>
-      proposeAgentRole({
-        manager,
-        workspaceId: workspace.id as WorkspaceId,
-        sessionId: ctx.sessionId,
-        userId: source.userId,
-        command,
-        localOnly: !!getSessionCommandEnvironment(),
-        validateTarget: async (machineId, agentConfigId) => {
-          const discovery = await createResourceDiscovery({
-            manager,
-            auth,
-            workspaceId: workspace.id as WorkspaceId,
-            delegatedRequester: { userId: source.userId },
-          });
-          const config = await discovery.get('agent_config', agentConfigId);
-          if (config.item.machineId !== machineId)
-            throw new Error('Agent configuration does not belong to the selected machine');
-        },
-      })
-    );
-  });
+  registerAgentRoleTools(
+    registerSessionTool,
+    async (command) => {
+      const ctx = getSessionContext();
+      const source = await resolveInvokingTurnSource();
+      const auth = getCliAuthContextOrThrow('mcp');
+      const workspace = await resolveWorkspaceOrThrow(auth, getMcpWorkspaceId(ctx));
+      return withWorkspaceManager(auth, workspace, 'agent-role-proposal', async (manager) =>
+        proposeAgentRole({
+          manager,
+          workspaceId: workspace.id as WorkspaceId,
+          sessionId: ctx.sessionId,
+          userId: source.userId,
+          command,
+          localOnly: !!getSessionCommandEnvironment(),
+          validateTarget: async (machineId, agentConfigId) => {
+            const discovery = await createResourceDiscovery({
+              manager,
+              auth,
+              workspaceId: workspace.id as WorkspaceId,
+              delegatedRequester: { userId: source.userId },
+              requireFreshCatalogs: true,
+            });
+            const config = await discovery.get('agent_config', agentConfigId, machineId);
+            if (config.item.machineId !== machineId)
+              throw new Error('Agent configuration does not belong to the selected machine');
+          },
+        })
+      );
+    },
+    mcpErrorResult
+  );
 
   registerDiscoveryTools(registerSessionTool, async (read) => {
     const ctx = getSessionContext();

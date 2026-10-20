@@ -2,6 +2,7 @@ import type { LocalFilePreviewResource } from '@lody/shared/local-file-preview';
 import { createLocalPagedFileSource } from './paged-file-source';
 import {
   CODE_COLLAB_V2_TEXT_LIMITS,
+  type CodeCollabAllChangesScope,
   type CodeCollabFileSourceState,
   type CodeCollabRole,
   type CodeCollabV2AllChangesState,
@@ -22,6 +23,7 @@ import {
   type FilePreviewV3Digest,
   type FilePreviewV3ErrorCode,
   type FilePreviewV3Response,
+  type FileDiff,
   type SessionId,
 } from '@lody/shared';
 import { SaveTextConflictError, SaveTextTransientError } from './code-collab-save-errors';
@@ -70,10 +72,12 @@ export type CodeCollabSessionFileProviderRuntime = {
     format?: CodeCollabV2TextFormat
   ): Promise<CodeCollabV2SaveTextResponse | CodeCollabV2Error | null>;
   openCurrentDiff(
-    path: string
+    path: string,
+    scope?: CodeCollabAllChangesScope
   ): Promise<CodeCollabV2OpenCurrentDiffResponse | CodeCollabV2Error | null>;
   openAllChangesDiff(
-    focusPath?: string
+    focusPath?: string,
+    scope?: CodeCollabAllChangesScope
   ): Promise<CodeCollabV2OpenAllChangesDiffResponse | CodeCollabV2Error | null>;
   openTurnDiff(
     path: string,
@@ -688,7 +692,12 @@ export class CodeCollabSessionFileProvider implements SessionFileProvider {
     this.conflictCache.delete(params.conflictId);
   }
 
-  async getDiff(pathOrFileId: string, turnId?: string): Promise<SessionFileDiffResult> {
+  async getDiff(
+    pathOrFileId: string,
+    turnId?: string,
+    _fileDiff?: FileDiff,
+    options?: { readonly allChangesScope?: CodeCollabAllChangesScope }
+  ): Promise<SessionFileDiffResult> {
     const path = this.resolvePath(pathOrFileId);
     if (!this.runtime) {
       return {
@@ -701,7 +710,9 @@ export class CodeCollabSessionFileProvider implements SessionFileProvider {
     if (turnId) {
       return await this.getTurnDiff(path, turnId);
     }
-    const response = await this.runtime.openCurrentDiff(path);
+    const response = await (options?.allChangesScope === undefined
+      ? this.runtime.openCurrentDiff(path)
+      : this.runtime.openCurrentDiff(path, options.allChangesScope));
     if (!response) {
       return {
         status: 'unavailable',
@@ -801,7 +812,10 @@ export class CodeCollabSessionFileProvider implements SessionFileProvider {
     };
   }
 
-  async getAllChangesDiff(focusPath?: string): Promise<SessionFileAllChangesDiffResult> {
+  async getAllChangesDiff(
+    focusPath?: string,
+    scope?: CodeCollabAllChangesScope
+  ): Promise<SessionFileAllChangesDiffResult> {
     if (!this.runtime) {
       return {
         status: 'unavailable',
@@ -809,7 +823,9 @@ export class CodeCollabSessionFileProvider implements SessionFileProvider {
         message: this.message ?? CODE_COLLAB_V2_UNAVAILABLE_MESSAGE,
       };
     }
-    const response = await this.runtime.openAllChangesDiff(focusPath);
+    const response = await (scope === undefined
+      ? this.runtime.openAllChangesDiff(focusPath)
+      : this.runtime.openAllChangesDiff(focusPath, scope));
     if (!response) {
       return {
         status: 'unavailable',
@@ -828,6 +844,9 @@ export class CodeCollabSessionFileProvider implements SessionFileProvider {
       return {
         status: 'unavailable',
         reason: response.reason === 'transient_io' ? 'transient-io' : 'metadata-only',
+        ...(response.reason === 'not_a_git_worktree' || response.reason === 'no_commits'
+          ? { scopeReason: response.reason }
+          : {}),
         message: response.message ?? response.reason,
       };
     }
@@ -1096,6 +1115,8 @@ function currentDiffUnavailableReasonToContentReason(
   switch (reason) {
     case 'base_unavailable':
     case 'not_changed':
+    case 'not_a_git_worktree':
+    case 'no_commits':
       return 'metadata-only';
     case 'unsupported_binary':
       return 'unsupported-special';

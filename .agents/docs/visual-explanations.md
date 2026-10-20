@@ -130,6 +130,47 @@ function expandSkill(command: string): string {
 Bash(open path/to/show-me-{description}.html)
 ```
 
+## UI screenshots
+
+For a PR that changes visible UI, we recommend a labeled **Before / After**
+screenshot pair in the template's matching section, with a short caption explaining
+the change. Agent authors should try to capture the baseline before editing and the
+final result after verification as part of their implementation loop. Use the
+actual running UI or its owning Storybook fixture, with synthetic data and
+comparable viewport, theme, and interaction state so the difference is clear.
+
+Prepare a safe scene before capture: prefer demo or synthetic fixtures and an
+isolated development data directory over a personal workspace. Crop to the
+relevant UI while retaining enough context to judge the change. Inspect both
+images before uploading for conversation text, source contents,
+names, avatars, local paths, repository details, notifications, credentials, and
+other private content. If cropping or redaction is needed, inspect the final
+export and share only that sanitized file; do not upload or commit the private
+original alongside it. Follow the repository's prohibition on captured user or
+agent transcripts.
+
+Keep PR-only screenshots in temporary or ignored paths and out of Git commits.
+Upload safe images as GitHub attachments with `gh pr create --attach` or
+`gh pr edit --attach`.
+For an existing PR, keep its complete body in `/tmp/pr-body.md` and put
+`![Before](/tmp/before.png)` and `![After](/tmp/after.png)` in its Before / After
+table, then upload the referenced files:
+
+```sh
+gh pr edit 123 --body-file /tmp/pr-body.md \
+  --attach /tmp/before.png --attach /tmp/after.png
+```
+
+The CLI replaces matching local image references with uploaded attachment URLs.
+Without a body file, `--attach` appends the images to the existing PR body. Check
+`gh pr edit --help` for the installed CLI's attachment support. Any linked artifact
+must be accessible to reviewers; a local filesystem path alone is not reviewable.
+Captions should identify the relevant state and any deliberate comparison differences.
+
+Screenshots are recommended, not mandatory, and add no submission requirement or
+automated gate. Authors may omit screenshots without explanation. The existing
+structural-view rules still apply independently.
+
 ## Choosing and placing a view
 
 Place each visual next to the short text it supports. Keep only the calls, files, props, states, and boundaries needed to answer the user's current question or the options to resolve the current discussion point.

@@ -163,11 +163,7 @@ export function MachineListFilterButton({
           </Button>
         }
       />
-      <Menu.Content align="end">
-        <Menu.GroupLabel>
-          {t('settings.agent.machineTabs.filter.label', 'Filter machines')}
-        </Menu.GroupLabel>
-        <Menu.Separator />
+      <Menu.Content align="end" width="compact">
         <FilterItem
           label={t('settings.agent.machineTabs.filter.online', 'Online')}
           checked={filter.onlineOnly}
@@ -382,7 +378,12 @@ function FilterItem({
   onSelect: () => void;
 }) {
   return (
-    <Menu.CheckboxItem checked={checked} closeOnClick={false} onCheckedChange={() => onSelect()}>
+    <Menu.CheckboxItem
+      checked={checked}
+      indicatorSide="end"
+      closeOnClick={false}
+      onCheckedChange={() => onSelect()}
+    >
       {label}
     </Menu.CheckboxItem>
   );
