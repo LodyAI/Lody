@@ -100,6 +100,8 @@ unreviewed.
 
 ## Partner labels (2026-10-21)
 
+PR: [#1767](https://github.com/LodyAI/Lody/pull/1767)
+
 The agents tile now places each injected icon directly before its own name and session share,
 above the existing meter. Grouping the marks in the header made their association with the
 separate labels harder to read. Icons remain decorative, keep their fixed size, and leave the
