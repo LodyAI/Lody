@@ -26,8 +26,8 @@ Ownership: [README.md](README.md).
   caches can hide the first user row. Keep activity labels/tones and one header inset.
 - Creation cards: [contract](README.md#creation-progress). Bind status to the
   target Turn and subscribe only to its title; `progressMessageId` prevents
-  duplicates. Consecutive creation records share a five-card scroller with
-  disclosure; retain their full hydration range. Legacy successes keep cards.
+  duplicates. Share a five-card scroller; retain full hydration.
+  Keep concrete cards; hide contentless successes and their empty batch rows.
 
 ## Turn Folding And Layout
 

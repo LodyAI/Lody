@@ -280,6 +280,10 @@ import { SessionPlanBar } from '@/components/sessions/session-plan-bar';
 import { ContainerQueryProvider } from './container-query-provider';
 import { ScheduleProposalNotice } from '@/components/schedules/schedule-proposal-notice';
 import { isOperationSurfaceItem, shouldRenderSystemRowItem } from './message-content-guards';
+import {
+  getOperationCompletionItems,
+  hasVisibleOperationContent,
+} from './operation-completion-visibility';
 import { getChatFailedDiagnosticCopy } from './chat-failed-diagnostic-copy';
 import {
   buildChatFailedErrorReport,
@@ -1185,6 +1189,12 @@ export const buildChatVirtualRows = ({
     // Rows speak in absolute turn indexes so outline anchors and scroll
     // targets are independent of which turns happen to be hydrated.
     const messageIndex = item.turnIndex;
+    if (
+      item.message.role === 'system' &&
+      item.message.items.length > 0 &&
+      !item.message.items.some(hasVisibleOperationContent)
+    )
+      continue;
     if (item.message.role !== 'assistant') {
       const groupedItems = [item];
       if (groupCreatedSessions && getCreatedSessionCards(item.message)) {
@@ -2835,7 +2845,9 @@ const SystemMessageRowView = ({
     return <CreatedSessionList cards={creationCards} onNavigateSession={onNavigateSession} />;
   }
   const systemItems = message.items.flatMap((item, itemIndex) =>
-    shouldRenderSystemRowItem(item) ? [{ item, itemIndex }] : []
+    shouldRenderSystemRowItem(item) && hasVisibleOperationContent(item)
+      ? [{ item, itemIndex }]
+      : []
   );
 
   if (systemItems.length === 0) {
@@ -2910,6 +2922,7 @@ const OperationCompletionBatchView = ({
   onNavigateSession?: (target: SessionNavigationTarget) => void;
 }) => {
   const { t } = useTranslation();
+  if (!hasVisibleOperationContent(batch)) return null;
   return (
     <div className="flex flex-col gap-1.5">
       <div>
@@ -2926,7 +2939,7 @@ const OperationCompletionBatchView = ({
           }
         )}
       </div>
-      {(batch.members ?? []).map((member) => (
+      {(batch.members ?? []).filter(hasVisibleOperationContent).map((member) => (
         <OperationCompletionView
           key={member.deliveryId}
           completion={member}
@@ -2945,21 +2958,14 @@ const OperationCompletionView = ({
   onNavigateSession?: (target: SessionNavigationTarget) => void;
 }) => {
   const { t } = useTranslation();
-  const resultItems =
-    completion.completion.type === 'result'
-      ? completion.completion.value.items
-      : completion.completion.type === 'cancelled'
-        ? (completion.completion.partial?.items ?? [])
-        : [];
+  if (!hasVisibleOperationContent(completion)) return null;
   const failedCompletion = completion.completion.type === 'error';
   const cancelledCompletion = completion.completion.type === 'cancelled';
   const StatusIcon = failedCompletion ? AlertCircle : cancelledCompletion ? Circle : CheckCircle2;
   const createsSessions =
     completion.operationKind === 'session_create' ||
     completion.operationKind === 'session_create_many';
-  // A create Operation that published progress already shows each target as a
-  // live card above; repeating them here would duplicate every Session.
-  const targetCards = createsSessions && completion.progressMessageId ? [] : resultItems;
+  const targetCards = getOperationCompletionItems(completion);
   const cards = targetCards.flatMap((item) =>
     item.target
       ? [
@@ -2995,10 +3001,9 @@ const OperationCompletionView = ({
       : []
   );
   // The status card carries only what the cards cannot: a whole-Operation
-  // failure or cancellation, targetless failures, or
-  // the plain outcome when there is no Session to show.
+  // failure or cancellation, or targetless problems.
   const showStatusCard =
-    cards.length === 0 || failedCompletion || cancelledCompletion || untargetedProblems.length > 0;
+    failedCompletion || cancelledCompletion || untargetedProblems.length > 0;
 
   return (
     <div className="flex flex-col gap-2" data-operation-completion={completion.operationKind}>

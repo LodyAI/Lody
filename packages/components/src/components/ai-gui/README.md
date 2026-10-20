@@ -358,3 +358,9 @@ Render `operation_completion_batch` as one result group with total count and del
 uncertainty. Its bounded member preview reuses existing completion/creation cards and
 `progressMessageId` deduplication. Rendering is passive: it never resumes a session or
 reads every omitted result. The `CompletedWorkBatch` story covers the uncertain state.
+
+Hide success receipts with no remaining concrete cards, including creation results
+already represented by progress. Hide their entire batch row when every member is
+present and hidden. Preserve concrete session cards, failure/cancellation details,
+unknown delivery and headers for omitted preview members. This is presentation-only;
+history and model delivery retain the original results.

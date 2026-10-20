@@ -484,7 +484,7 @@ describe('Session relation cards', () => {
     );
   });
 
-  it('retains an empty completion summary beside creation records', async () => {
+  it('hides an empty completion summary while retaining creation records', async () => {
     const completion = completionMessage.items[0]!;
     if (completion.type !== 'operation_completion') throw new Error('fixture');
     await act(async () =>
@@ -509,7 +509,7 @@ describe('Session relation cards', () => {
       )
     );
     expect(container.querySelectorAll('[data-session-relation-card="opened"]')).toHaveLength(1);
-    expect(container.textContent).toContain('orchestration.operationCompleted');
+    expect(container.textContent).not.toContain('orchestration.operationCompleted');
   });
 
   it('does not duplicate target cards on completion when progress was published', async () => {
@@ -527,7 +527,102 @@ describe('Session relation cards', () => {
       )
     );
     expect(container.querySelector('[data-session-relation-card="opened"]')).toBeNull();
-    expect(container.textContent).not.toBe('');
+    expect(container.textContent).toBe('');
+  });
+
+  it.each(['prepared', 'submitted', 'settled', 'not_submitted'] as const)(
+    'removes a contentless %s batch from the rendered stream',
+    async (deliveryStatus) => {
+      const completion = completionMessage.items[0];
+      if (completion.type !== 'operation_completion') throw new Error('fixture');
+      const message: SessionHistoryParsed = {
+        ...completionMessage,
+        items: [
+          {
+            type: 'operation_completion_batch',
+            batchId: 'batch',
+            memberCount: 1,
+            deliveryStatus,
+            members: [{ ...completion, progressMessageId: 'progress' }],
+          },
+        ],
+      };
+      await act(async () =>
+        root.render(<MessageRowView message={message} sessionId={openerSessionId} />)
+      );
+      expect(container.textContent).toBe('');
+      expect(
+        buildChatVirtualRows({
+          items: [{ type: 'message', message, sessionId: openerSessionId, turnIndex: 0 }],
+          lastAssistantMessageId: null,
+          expansionVersion: 0,
+        })
+      ).toEqual([]);
+    }
+  );
+
+  it('retains delivery uncertainty even when every preview member is hidden', async () => {
+    const completion = completionMessage.items[0];
+    if (completion.type !== 'operation_completion') throw new Error('fixture');
+    await act(async () =>
+      root.render(
+        <MessageRowView
+          sessionId={openerSessionId}
+          message={{
+            ...completionMessage,
+            items: [
+              {
+                type: 'operation_completion_batch',
+                batchId: 'uncertain-batch',
+                memberCount: 1,
+                deliveryStatus: 'unknown',
+                members: [{ ...completion, progressMessageId: 'progress' }],
+              },
+            ],
+          }}
+        />
+      )
+    );
+    expect(container.textContent).toContain('model delivery is uncertain');
+    expect(container.textContent).not.toContain('orchestration.operationCompleted');
+  });
+
+  it('retains targetless failure details alongside published creation progress', async () => {
+    const completion = completionMessage.items[0];
+    if (completion.type !== 'operation_completion') throw new Error('fixture');
+    await act(async () =>
+      root.render(
+        <MessageRowView
+          sessionId={openerSessionId}
+          message={{
+            ...completionMessage,
+            items: [
+              {
+                ...completion,
+                progressMessageId: 'progress',
+                completion: {
+                  type: 'result',
+                  value: {
+                    items: [
+                      {
+                        status: 'failed',
+                        label: 'Unavailable target',
+                        error: {
+                          code: 'TARGET_FAILED',
+                          message: 'Target unavailable',
+                          retryable: false,
+                        },
+                      },
+                    ],
+                  },
+                },
+              },
+            ],
+          }}
+        />
+      )
+    );
+    expect(container.textContent).toContain('Target unavailable');
   });
 
   it('keeps a long reply to its opening line and shows all of it in a dialog', async () => {
