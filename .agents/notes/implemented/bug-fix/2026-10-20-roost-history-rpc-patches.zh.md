@@ -2,6 +2,7 @@
 
 Status: implemented
 Type: bug-fix
+PR: https://github.com/LodyAI/Lody/pull/1765
 Translation: current
 Date: 2026-10-20
 
