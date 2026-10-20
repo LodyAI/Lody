@@ -137,8 +137,9 @@ relation changes no production read/write behavior. Companion storage work:
 [Roost #15](https://github.com/loro-dev/roost/pull/15).
 Diagnostic compatibility PR: [#1735](https://github.com/LodyAI/Lody/pull/1735).
 
-The coordinated Roost 0.2.0 release is now published. PR #1735 pins both the
-TypeScript and Native packages in the shared catalog and keeps all six exact
+The coordinated Roost 0.2.0 release is now published. PR #1735 pins the
+TypeScript package in the shared catalog and Native exactly in the CLI manifest
+and publication guard, retaining the published-runtime version contract. It keeps all six exact
 platform dependencies in the lockfile and release-age exceptions. This upgrades
 the Native runtime to SQLite container v4; earlier containers are refused, with
 no migration, automatic reset or data cleanup. The dependent
@@ -153,6 +154,8 @@ budgets and reopen. The four Electron native-staging tests pass: foreign target
 selection uses synthetic bindings; the installed host binding executes real
 signed SQLite write/reopen probes. The Native release manifest identifies merged
 Roost source `e85c970`; this is not cross-platform runtime acceptance on this host.
+The public CLI build also passes at a 2 GiB heap, including its published-bundle
+runtime probes; all six existing dependency-version policy tests pass.
 
 ## Outbox and existing data
 

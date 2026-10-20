@@ -21,8 +21,8 @@ history coverage and device-level responsiveness remain validation limits.
 
 ## Decision and boundaries
 
-Pin `@loro-dev/roost-node@0.2.0` as a CLI runtime dependency through the shared
-catalog, with `@loro-dev/roost@0.2.0` for identity, application JSON, and
+Pin `@loro-dev/roost-node@0.2.0` as an exact CLI runtime dependency, with
+`@loro-dev/roost@0.2.0` from the shared catalog for identity, application JSON, and
 `NodeLodyHistory`. Exempt only these exact versions and the six matching platform
 dependencies from the release-age policy. Native 0.2.0 uses SQLite container v4;
 it refuses earlier containers without migration or automatic reset. Neither Rust

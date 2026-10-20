@@ -113,8 +113,9 @@ container v3（`roost_kv.space`）和 namespace 整数引用的 v4（通过 `spa
 配套存储改动：[Roost #15](https://github.com/loro-dev/roost/pull/15)。
 统计兼容 PR：[#1735](https://github.com/LodyAI/Lody/pull/1735)。
 
-Roost 0.2.0 已统一发布。PR #1735 在共享 catalog 固定 TypeScript 和 Native
-两个包，并让锁文件及发布冷却期豁免保留全部六个精确匹配的平台包。Native 运行时
+Roost 0.2.0 已统一发布。PR #1735 在共享 catalog 固定 TypeScript 包，在 CLI
+清单及发布校验中精确固定 Native，沿用运行时依赖发布合同。锁文件及发布冷却期
+豁免保留全部六个精确匹配的平台包。Native 运行时
 因此升级到 SQLite container v4，拒绝更早容器，不迁移、不自动重置、不清理数据。
 依赖它的[消息状态修复 #1737](https://github.com/LodyAI/Lody/pull/1737) 复用同一次
 catalog 更新，在 #1735 后合并。验收改用 npm 正式包，不再使用本地 SDK 产物。
@@ -124,6 +125,7 @@ catalog 更新，在 #1735 后合并。验收改用 npm 正式包，不再使用
 及重开。Electron 四项 Native staging 测试通过：其他平台使用合成绑定验证选择，
 本机安装的真实绑定执行签名 SQLite 写入及重开。Native 发布 manifest 对应已合并的
 Roost 源码 `e85c970`；这不代表在本机完成其他平台的运行时验收。
+公开 CLI 在 2 GiB 堆上限内构建通过，包含发布包运行时探针；六项已有依赖版本策略测试通过。
 
 ## Outbox 与既有数据
 

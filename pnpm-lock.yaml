@@ -66,9 +66,6 @@ catalogs:
     '@loro-dev/roost':
       specifier: 0.2.0
       version: 0.2.0
-    '@loro-dev/roost-node':
-      specifier: 0.2.0
-      version: 0.2.0
     '@loro-dev/streams-client':
       specifier: 0.12.1
       version: 0.12.1
@@ -266,7 +263,7 @@ importers:
         specifier: 'catalog:'
         version: 4.0.2(effect@4.0.2)
       '@loro-dev/roost-node':
-        specifier: 'catalog:'
+        specifier: 0.2.0
         version: 0.2.0
       '@lydell/node-pty':
         specifier: 1.2.0-beta.14
