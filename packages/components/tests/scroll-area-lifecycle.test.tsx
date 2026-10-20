@@ -19,6 +19,7 @@ describe.each([
   let nextFrame: number;
 
   beforeEach(() => {
+    root = undefined;
     vi.useFakeTimers();
     frames = new Map();
     nextFrame = 0;
@@ -98,6 +99,33 @@ describe.each([
     await act(async () => viewport.dispatchEvent(new Event('scroll')));
     await advanceFrames(3);
     expect(readCount()).toBeGreaterThan(stopped);
+  });
+
+  it('keeps its stylesheet and parsed rules when content updates', async () => {
+    const { Root, Viewport } = primitive;
+    const render = async (text: string) => {
+      await act(async () => {
+        root ??= createRoot(host);
+        root.render(
+          <Root>
+            <Viewport>{text}</Viewport>
+          </Root>
+        );
+      });
+    };
+    await render('Initial content');
+    const style = host.querySelector('style')!;
+    const sheet = style.sheet!;
+    const rule = sheet.cssRules[0];
+
+    await render('Updated content');
+
+    expect(host.querySelector('[data-radix-scroll-area-viewport]')?.textContent).toBe(
+      'Updated content'
+    );
+    expect(host.querySelector('style')).toBe(style);
+    expect(style.sheet).toBe(sheet);
+    expect(style.sheet!.cssRules[0]).toBe(rule);
   });
 
   it('releases polling during scroll without accumulating detached viewport reads', async () => {

@@ -61,6 +61,8 @@ import {
 import {
   SessionChatInterface,
   type SessionChatInterfaceHandle,
+  type SessionChatInterfaceProps,
+  type SessionChatToolbar,
 } from '@/components/sessions/session-chat-interface';
 import { WorktreeIcon } from '@/components/icons/worktree-icon';
 import {
@@ -640,6 +642,10 @@ const detailStyles = stylex.create({
     position: 'absolute',
     inset: 0,
   },
+  conversationContainment: {
+    // Absolute inset fixes the surface size; conversation content must not size the shell.
+    contain: 'strict',
+  },
   invisibleFill: {
     visibility: 'hidden',
     pointerEvents: 'none',
@@ -962,10 +968,64 @@ const TerminalDockToggleButton = memo(function TerminalDockToggleButton() {
   );
 });
 
-/**
- * Session detail page component.
- * Displays the chat interface for a single session.
- */
+/** Keeps per-session imperative refs and event handlers stable across parent updates. */
+function SessionChatSurface({
+  registerChatRef,
+  ...props
+}: SessionChatInterfaceProps & {
+  registerChatRef: (id: string, handle: SessionChatInterfaceHandle | null) => void;
+}) {
+  const id = props.session.id;
+  const setChatRef = useCallback(
+    (handle: SessionChatInterfaceHandle | null) => registerChatRef(id, handle),
+    [id, registerChatRef]
+  );
+  const openBrowser = useStableCallback(() => props.onOpenBrowser?.());
+  const openExistingBrowser = useStableCallback(() => props.onOpenExistingBrowser?.());
+  const openIosSimulator = useStableCallback(() => props.onOpenIosSimulator?.());
+  const forkLastAssistant = useStableCallback(
+    (...args: Parameters<NonNullable<SessionChatInterfaceProps['onForkLastAssistant']>>) =>
+      props.onForkLastAssistant?.(...args)
+  );
+  const annotationReferencesSubmitted = useStableCallback(
+    (
+      ...args: Parameters<
+        NonNullable<SessionChatInterfaceProps['onVisualAnnotationReferencesSubmitted']>
+      >
+    ) => props.onVisualAnnotationReferencesSubmitted?.(...args)
+  );
+  const navigateToComment = useStableCallback(
+    (...args: Parameters<NonNullable<SessionChatInterfaceProps['onNavigateToComment']>>) =>
+      props.onNavigateToComment?.(...args)
+  );
+  const openPrTab = useStableCallback(
+    (...args: Parameters<NonNullable<SessionChatInterfaceProps['onOpenPrTab']>>) =>
+      props.onOpenPrTab?.(...args)
+  );
+  const openAllChanges = useStableCallback(() => props.onOpenAllChanges?.());
+  const navigateSession = useStableCallback(
+    (...args: Parameters<NonNullable<SessionChatInterfaceProps['onNavigateSession']>>) =>
+      props.onNavigateSession?.(...args)
+  );
+  return (
+    <SessionChatInterface
+      {...props}
+      ref={setChatRef}
+      onOpenBrowser={props.onOpenBrowser ? openBrowser : undefined}
+      onOpenExistingBrowser={props.onOpenExistingBrowser ? openExistingBrowser : undefined}
+      onOpenIosSimulator={props.onOpenIosSimulator ? openIosSimulator : undefined}
+      onForkLastAssistant={props.onForkLastAssistant ? forkLastAssistant : undefined}
+      onVisualAnnotationReferencesSubmitted={
+        props.onVisualAnnotationReferencesSubmitted ? annotationReferencesSubmitted : undefined
+      }
+      onNavigateToComment={props.onNavigateToComment ? navigateToComment : undefined}
+      onOpenPrTab={props.onOpenPrTab ? openPrTab : undefined}
+      onOpenAllChanges={props.onOpenAllChanges ? openAllChanges : undefined}
+      onNavigateSession={props.onNavigateSession ? navigateSession : undefined}
+    />
+  );
+}
+
 const SessionDetail = ({
   sessionId,
   urlTab,
@@ -1004,6 +1064,7 @@ const SessionDetail = ({
   // Publish ephemeral "viewing this session" presence (drives the owning
   // machine's PR poller priority); actively cleared on switch/hide/unmount.
   usePublishSessionViewing(sessionId);
+  const [desktopToolbarContainer, setDesktopToolbarContainer] = useState<HTMLElement | null>(null);
   const chatRefsMap = useRef<
     Map<string, SessionChatInterfaceHandle | DraftSessionChatInterfaceHandle | null>
   >(new Map());
@@ -1295,6 +1356,9 @@ const SessionDetail = ({
   const [mountedSideSessionIds, setMountedSideSessionIds] = useState<Set<SessionId>>(
     () => new Set()
   );
+  const [mountedChatSessionIds, setMountedChatSessionIds] = useState<Set<SessionId>>(
+    () => new Set()
+  );
   const [tabOrder, setTabOrderState] = useState<string[]>(() => readStoredTabOrder(sessionId));
   const tabRestoreNavigationRequestIdRef = useRef(0);
   const [pendingTabRestoreNavigation, setPendingTabRestoreNavigation] = useState<{
@@ -1328,6 +1392,7 @@ const SessionDetail = ({
     setDirtyForkConfirmation(null);
     setClosingSideSessionIds(new Set());
     setMountedSideSessionIds(new Set());
+    setMountedChatSessionIds(new Set());
     setTabOrderState(readStoredTabOrder(sessionId));
     setViewerTabs(nextInitialTabState.viewerTabs);
     setActiveViewerTabId(nextInitialTabState.activeViewerTabId);
@@ -1510,6 +1575,25 @@ const SessionDetail = ({
     if (activeTabSessionId === sessionId) return sessionId;
     return visibleChildSessions.find((s) => s.id === activeTabSessionId)?.id ?? null;
   }, [activeTabSessionId, sessionId, visibleChildSessions]);
+  const childSessionToMount =
+    activeSessionTabId !== sessionId &&
+    activeSessionTabId !== null &&
+    !closedConversationIds.has(activeSessionTabId)
+      ? activeSessionTabId
+      : null;
+  // Selection remains URL-owned. This set only retains bodies already visited
+  // in this workspace; unopened child tabs must not acquire chat controllers.
+  if (
+    !isMobile &&
+    ((childSessionToMount !== null && !mountedChatSessionIds.has(childSessionToMount)) ||
+      [...mountedChatSessionIds].some((id) => closedConversationIds.has(id)))
+  ) {
+    setMountedChatSessionIds((current) => {
+      const next = new Set([...current].filter((id) => !closedConversationIds.has(id)));
+      if (childSessionToMount) next.add(childSessionToMount);
+      return next;
+    });
+  }
   // The session meta for the currently active tab (may be parent or a child)
   const activeTabSession = useMemo(() => {
     if (activeTabSessionId === EMPTY_SESSION_TAB_ID) return null;
@@ -5478,6 +5562,105 @@ const SessionDetail = ({
     }`
   );
 
+  const sidebarToggleButton = useMemo(
+    () => (
+      <Button
+        type="button"
+        variant="ghost"
+        size="small"
+        icon
+        onClick={handleToggleSidebar}
+        aria-label={
+          isSidebarVisible
+            ? t('sessions.sidebar.hide', 'Hide sidebar')
+            : t('sessions.sidebar.show', 'Show sidebar')
+        }
+        className={
+          stylex.props(detailStyles.shrink, !isSidebarVisible && detailStyles.sidebarToggleMargin)
+            .className
+        }
+      >
+        <CuidaSidebarExpandOutline
+          {...stylex.props(detailStyles.icon16, detailStyles.rightPanelIcon)}
+          aria-hidden="true"
+        />
+      </Button>
+    ),
+    [handleToggleSidebar, isSidebarVisible, t]
+  );
+
+  const desktopToolbar = useMemo<SessionChatToolbar | undefined>(() => {
+    if (!activeSession) return undefined;
+    return {
+      container: desktopToolbarContainer,
+      className: stylex.props(detailStyles.fillNoShrink).className,
+      endSlot: (
+        <>
+          <TerminalDockToggleButton />
+          {!isSidebarVisible ? sidebarToggleButton : null}
+        </>
+      ),
+      actions: {
+        onArchiveSession: handleArchiveCurrentSession,
+        onRestoreSession: handleRestoreCurrentSession,
+        onDeleteSession: handleRequestDeleteCurrentSession,
+        onOpenSearch: handleOpenSearch,
+        onCopyConversationHistory: handleCopyConversationHistory,
+        onRequestRename: !activeDraftTab ? handleRenameCurrentSession : undefined,
+        onForkSession:
+          !activeDraftTab && activeTabSession && canForkSession(activeTabSession)
+            ? handleForkCurrentSession
+            : undefined,
+        forkWorktreeAvailability: activeTabSession
+          ? getForkWorktreeAvailability(activeTabSession)
+          : 'hidden',
+        onForkWorktreeMenuOpen: activeTabSession
+          ? () => {
+              void resolveForkWorktreeAvailability(activeTabSession);
+            }
+          : undefined,
+        forkingAssistantMessageId: activeTabSession
+          ? pendingForks[activeTabSession.id]?.turnId
+          : null,
+        sharing: activeSessionSharing ?? undefined,
+        onShareWithTeam: showSessionSharing
+          ? () => handleRequestShareSession(activeSession)
+          : undefined,
+        onShareAsImage: activeDraftTab
+          ? undefined
+          : () => {
+              void handleShareAsImage().catch((error: unknown) => {
+                console.error('Failed to load conversation for image sharing', error);
+                toast.error(t('sessions.shareImage.empty', 'No conversation to share'));
+              });
+            },
+      },
+    };
+  }, [
+    desktopToolbarContainer,
+    isSidebarVisible,
+    sidebarToggleButton,
+    handleArchiveCurrentSession,
+    handleRestoreCurrentSession,
+    handleRequestDeleteCurrentSession,
+    handleOpenSearch,
+    handleCopyConversationHistory,
+    activeDraftTab,
+    handleRenameCurrentSession,
+    activeTabSession,
+    canForkSession,
+    handleForkCurrentSession,
+    getForkWorktreeAvailability,
+    resolveForkWorktreeAvailability,
+    pendingForks,
+    activeSessionSharing,
+    showSessionSharing,
+    handleRequestShareSession,
+    activeSession,
+    handleShareAsImage,
+    t,
+  ]);
+
   useEffect(() => {
     if (sessionPresenceState === 'loading') {
       return;
@@ -6161,8 +6344,8 @@ const SessionDetail = ({
                 }
                 aria-hidden={!isActive}
               >
-                <SessionChatInterface
-                  ref={(el) => setChatTabRef(tabSession.id, el)}
+                <SessionChatSurface
+                  registerChatRef={setChatTabRef}
                   claimNavigationFocus={
                     isActive && tabSession.id === sessionId ? claimNavigationFocus : undefined
                   }
@@ -6751,30 +6934,6 @@ const SessionDetail = ({
     ? { main: 75, sidebar: 25 }
     : { main: 60, sidebar: 40 };
 
-  const sidebarToggleButton = (
-    <Button
-      type="button"
-      variant="ghost"
-      size="small"
-      icon
-      onClick={handleToggleSidebar}
-      aria-label={
-        isSidebarVisible
-          ? t('sessions.sidebar.hide', 'Hide sidebar')
-          : t('sessions.sidebar.show', 'Show sidebar')
-      }
-      className={
-        stylex.props(detailStyles.shrink, !isSidebarVisible && detailStyles.sidebarToggleMargin)
-          .className
-      }
-    >
-      <CuidaSidebarExpandOutline
-        {...stylex.props(detailStyles.icon16, detailStyles.rightPanelIcon)}
-        aria-hidden="true"
-      />
-    </Button>
-  );
-
   const leftSidebarExpandButton = isLeftSidebarHidden ? (
     <Button
       type="button"
@@ -6789,72 +6948,7 @@ const SessionDetail = ({
     </Button>
   ) : null;
 
-  /* Right-side window controls for the merged top bar: the parent session's
-     header toolbar (IDE launcher / preview / "…" menu) + the sidebar toggle.
-     Rendered by SessionChatInterface (headerVariant="toolbar") so the menu
-     keeps root-scoped presentation while selected-tab actions are delegated. */
-  const desktopHeaderToolbar = (
-    <SessionChatInterface
-      session={activeSession}
-      workspaceSession={activeSession}
-      className={stylex.props(detailStyles.fillNoShrink).className}
-      headerVariant="toolbar"
-      headerEndSlot={
-        <>
-          <TerminalDockToggleButton />
-          {!isSidebarVisible ? sidebarToggleButton : null}
-        </>
-      }
-      titleSyncing={activeSessionDocIsSyncing}
-      hideMessageArea
-      onArchiveSession={handleArchiveCurrentSession}
-      onRestoreSession={handleRestoreCurrentSession}
-      onDeleteSession={handleRequestDeleteCurrentSession}
-      onOpenSearch={handleOpenSearch}
-      onCopyConversationHistory={handleCopyConversationHistory}
-      onRequestRename={!activeDraftTab ? handleRenameCurrentSession : undefined}
-      onForkSession={
-        !activeDraftTab && activeTabSession && canForkSession(activeTabSession)
-          ? handleForkCurrentSession
-          : undefined
-      }
-      forkWorktreeAvailability={
-        activeTabSession ? getForkWorktreeAvailability(activeTabSession) : 'hidden'
-      }
-      onForkWorktreeMenuOpen={
-        activeTabSession
-          ? () => {
-              void resolveForkWorktreeAvailability(activeTabSession);
-            }
-          : undefined
-      }
-      forkingAssistantMessageId={
-        activeTabSession ? pendingForks[activeTabSession.id]?.turnId : null
-      }
-      sharing={activeSessionSharing ?? undefined}
-      onShareWithTeam={
-        showSessionSharing ? () => handleRequestShareSession(activeSession) : undefined
-      }
-      onShareAsImage={
-        activeDraftTab
-          ? undefined
-          : () => {
-              void handleShareAsImage().catch((error: unknown) => {
-                console.error('Failed to load conversation for image sharing', error);
-                toast.error(t('sessions.shareImage.empty', 'No conversation to share'));
-              });
-            }
-      }
-      onOpenPrTab={handleOpenPrTab}
-      onNavigateSession={handleNavigateSession}
-      browserActionSession={activeBrowserSession}
-      onOpenBrowser={() => {
-        if (activeBrowserSession) {
-          handleOpenBrowser(activeBrowserSession.id);
-        }
-      }}
-    />
-  );
+  const desktopHeaderToolbar = <div ref={setDesktopToolbarContainer} />;
 
   /* Single-row desktop top bar: [sidebar expand] [session tabs …] [toolbar].
      Replaces the old two-row header (repo title row + tab bar) — repo identity
@@ -6913,13 +7007,14 @@ const SessionDetail = ({
   ) => {
     const pendingForkSourceId = pendingForkSourceByTargetSessionId.get(chatSession.id);
     return {
-      ref: (element: SessionChatInterfaceHandle | null) => setChatTabRef(chatSession.id, element),
+      registerChatRef: setChatTabRef,
       claimNavigationFocus:
         isActive && chatSession.id === sessionId ? claimNavigationFocus : undefined,
       session: chatSession,
       workspaceSession: activeSession,
       className: stylex.props(detailStyles.rootFill).className,
       hideHeader: true,
+      toolbar: chatSession.id === sessionId ? desktopToolbar : undefined,
       syncEnabled: isActive || pendingForkSourceId !== undefined,
       isVisible,
       onFileDiffClick: handleOpenFileDiffForChat,
@@ -6954,49 +7049,66 @@ const SessionDetail = ({
       excludeSessionId={sessionMentionExcludeId}
       onDropSessionId={handleInsertDroppedSessionMention}
     >
-      {[activeSession, ...visibleChildSessions].map((tabSession) => {
-        const isActive = tabSession.id === activeTabSessionId;
-        const externalHistoryRefresh = externalHistoryRefreshBySessionId[tabSession.id];
-        const externalHistoryProviderLabel = externalHistoryRefresh
-          ? getExternalHistoryProviderLabel(externalHistoryRefresh.provider)
-          : undefined;
-        return (
-          <div
-            key={tabSession.id}
-            className={
-              stylex.props(detailStyles.absoluteFill, !isActive && detailStyles.hidden).className
-            }
-            aria-hidden={!isActive}
-          >
-            <SessionChatInterface
-              {...getSharedChatSurfaceProps(tabSession, isActive)}
-              paintSessionMentionOverlay={false}
-              isChildTab={tabSession.id !== sessionId}
-              isExternalHistoryRefreshing={externalHistoryRefresh !== undefined}
-              externalHistoryProviderLabel={externalHistoryProviderLabel}
-              messageFileDiffEntriesByTurn={
-                tabSession.id === activeSessionTabId ? messageFileDiffEntriesByTurn : undefined
+      {[activeSession, ...visibleChildSessions]
+        .filter(
+          (tabSession) =>
+            tabSession.id === sessionId ||
+            tabSession.id === activeTabSessionId ||
+            mountedChatSessionIds.has(tabSession.id) ||
+            pendingForkSourceByTargetSessionId.has(tabSession.id)
+        )
+        .map((tabSession) => {
+          const isActive = tabSession.id === activeTabSessionId;
+          const externalHistoryRefresh = externalHistoryRefreshBySessionId[tabSession.id];
+          const externalHistoryProviderLabel = externalHistoryRefresh
+            ? getExternalHistoryProviderLabel(externalHistoryRefresh.provider)
+            : undefined;
+          return (
+            <div
+              key={tabSession.id}
+              className={
+                stylex.props(
+                  detailStyles.absoluteFill,
+                  detailStyles.conversationContainment,
+                  !isActive && detailStyles.hidden
+                ).className
               }
-              onOpenBrowser={() => handleOpenBrowser(tabSession.id, true)}
-              changesDiffStat={changesDiffStat}
-              onForkLastAssistant={
-                canForkSession(tabSession)
-                  ? (turnId, destination) => handleForkDestination(tabSession, turnId, destination)
-                  : undefined
-              }
-              forkWorktreeAvailability={getForkWorktreeAvailability(tabSession)}
-              forkingAssistantMessageId={pendingForks[tabSession.id]?.turnId}
-            />
-          </div>
-        );
-      })}
+              aria-hidden={!isActive}
+            >
+              <SessionChatSurface
+                {...getSharedChatSurfaceProps(tabSession, isActive)}
+                paintSessionMentionOverlay={false}
+                isChildTab={tabSession.id !== sessionId}
+                isExternalHistoryRefreshing={externalHistoryRefresh !== undefined}
+                externalHistoryProviderLabel={externalHistoryProviderLabel}
+                messageFileDiffEntriesByTurn={
+                  tabSession.id === activeSessionTabId ? messageFileDiffEntriesByTurn : undefined
+                }
+                onOpenBrowser={() => handleOpenBrowser(tabSession.id, true)}
+                changesDiffStat={changesDiffStat}
+                onForkLastAssistant={
+                  canForkSession(tabSession)
+                    ? (turnId, destination) =>
+                        handleForkDestination(tabSession, turnId, destination)
+                    : undefined
+                }
+                forkWorktreeAvailability={getForkWorktreeAvailability(tabSession)}
+                forkingAssistantMessageId={pendingForks[tabSession.id]?.turnId}
+              />
+            </div>
+          );
+        })}
       {draftTabs.map((draft) => {
         const isActive = draft.id === activeTabSessionId;
         return (
           <div
             key={draft.id}
             className={
-              stylex.props(detailStyles.absoluteFill, !isActive && detailStyles.hidden).className
+              stylex.props(
+                detailStyles.absoluteFill,
+                detailStyles.conversationContainment,
+                !isActive && detailStyles.hidden
+              ).className
             }
             aria-hidden={!isActive}
           >
@@ -7049,11 +7161,15 @@ const SessionDetail = ({
         <div
           key={sideSession.id}
           className={
-            stylex.props(detailStyles.absoluteFill, !isActive && detailStyles.hidden).className
+            stylex.props(
+              detailStyles.absoluteFill,
+              detailStyles.conversationContainment,
+              !isActive && detailStyles.hidden
+            ).className
           }
           aria-hidden={!isActive}
         >
-          <SessionChatInterface
+          <SessionChatSurface
             {...getSharedChatSurfaceProps(sideSession, isActive, isActive && isSidebarVisible)}
             isChildTab
           />

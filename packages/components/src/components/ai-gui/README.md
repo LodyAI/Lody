@@ -26,7 +26,12 @@ the reasoning behind those rules.
   work) and a hover preview; `conversation-outline-arrival-intent.ts` decides when
   a pointer heading for a tick counts as arrival.
 - `markdown-renderer.tsx` renders finished text with react-markdown and a
-  streaming turn with `@lobehub/streamdown`. Its dependency patch reveals text
+  streaming turn with `@lobehub/streamdown`. Finished static text uses
+  `lib/markdown-parse-cache.ts` to reuse only the raw syntax tree across remounts.
+  Each parser configuration retains at most 64 entries, 1,048,576 source characters
+  and 8,192 AST nodes; an input above 131,072 characters is not retained. Each
+  consumer gets a fresh tree, so transformations, sanitization, URL policy and
+  context-dependent components still run. Streaming prefixes bypass the cache. Its dependency patch reveals text
   already present at mount so switching back to a live Session does not replay
   the stream fade ([note](../../../../../.agents/notes/implemented/bug-fix/2026-09-26-streamdown-remount-animation.md)).
   A nonempty session search renders the complete current Markdown without the

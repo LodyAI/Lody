@@ -22,8 +22,6 @@ import {
   type UserMessageEditMentionContext,
   type UserMessageEditSubmission,
 } from './view';
-import { reanchorMessageTextSpansForTrim } from '@lody/shared';
-import { useMentionPromptExpansion } from '@/components/mentions/mention-expansion';
 import { useStableCallback } from '@/hooks/use-stable-callback';
 import { useConversationStreamItems } from '@/hooks/use-conversation-stream-items';
 import { useConversationVersion } from '@/hooks/use-conversation-view';
@@ -221,39 +219,6 @@ const SessionChatStreamImpl = forwardRef<SessionChatStreamHandle, SessionChatStr
       onRetainedTurnIdsChange,
     } = useConversationStreamItems(view, sessionId, { initialFocusTurnId });
 
-    /* The edit-and-resend save path needs the same before-send expansion the
-       composer's send runs; mounting it here (rather than inside each row)
-       keeps the skill/session catalogs single per stream and lets the row's
-       `onEdit` receive already-expanded text. */
-    const { expand: expandEditMentions } = useMentionPromptExpansion({
-      source: editMentionContext?.mentionSource,
-      skillAgent: editMentionContext?.skillAgent,
-      promptValue: '',
-      currentSessionId: sessionId,
-    });
-    const stableExpandEditMentions = useStableCallback(expandEditMentions);
-    const handleEditLastUser = useCallback(
-      async (message: SessionHistoryParsed, submission: UserMessageEditSubmission) => {
-        if (!onEditLastUser) return false;
-        const expanded = stableExpandEditMentions({
-          text: submission.text,
-          mentions: submission.mentions,
-        });
-        const trimmedText = expanded.text.trim();
-        const trimmedSpans = reanchorMessageTextSpansForTrim(
-          expanded.text,
-          trimmedText,
-          expanded.spans
-        );
-        return await onEditLastUser(message, {
-          text: trimmedText,
-          mentions: submission.mentions,
-          spans: trimmedSpans,
-        });
-      },
-      [onEditLastUser, stableExpandEditMentions]
-    );
-
     const stableOnFileDiffClick = useStableCallback((turnId: string, filePath: string) => {
       onFileDiffClick?.(turnId, filePath);
     });
@@ -298,7 +263,7 @@ const SessionChatStreamImpl = forwardRef<SessionChatStreamHandle, SessionChatStr
             showSenderIdentity={showSenderIdentity}
             onNavigateSession={hasNavigateSession ? stableOnNavigateSession : undefined}
             onEditLastUser={
-              onEditLastUser && message.id === lastUserMessageId ? handleEditLastUser : undefined
+              onEditLastUser && message.id === lastUserMessageId ? onEditLastUser : undefined
             }
             editMentionContext={editMentionContext}
             onResendUndelivered={onResendUndelivered}
@@ -310,7 +275,6 @@ const SessionChatStreamImpl = forwardRef<SessionChatStreamHandle, SessionChatStr
       [
         conversationFontSize,
         editMentionContext,
-        handleEditLastUser,
         hasNavigateSession,
         lastUserMessageId,
         onEditLastUser,

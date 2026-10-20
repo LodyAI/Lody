@@ -2,7 +2,7 @@
 
 `CLAUDE.md` symlinks here. Edit `AGENTS.md` only.
 
-Read parent rules and linked context before edits.
+Read parent rules and linked context.
 
 ## [Tabs and `?tab` routing](../../../../../.agents/docs/sessions-tabs-routing.md)
 
@@ -111,6 +111,7 @@ Read parent rules and linked context before edits.
 
 ## [Render cost](../../../../../.agents/docs/sessions-render-cost.md)
 
+- Reuse controller; lazy-mount child bodies.
 - Never subscribe page-level `activeSession` or message rows to Code Collab
   file-index Flock state or full `sessionMetaAtomFamily`; select what a row uses.
 - Session-switch reset stays in the render-phase branch of `session-detail.tsx`;

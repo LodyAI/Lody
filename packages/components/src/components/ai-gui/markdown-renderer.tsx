@@ -87,6 +87,7 @@ import { MarkdownFileImage, MarkdownFileResourcesContext } from './markdown-file
 import { resolveMarkdownImagePath } from '@/lib/session-file-open-target';
 import { getImageMimeTypeForPath } from '@/lib/image-file-preview';
 import { rehypeHeadingAnchors } from './markdown-heading-anchors';
+import { createMarkdownParseCache } from '@/lib/markdown-parse-cache';
 
 /**
  * Conversation surfaces provide this capability at their boundary. Rendering
@@ -881,6 +882,14 @@ const INLINE_MATH_REMARK_PLUGINS = [
   ...MARKDOWN_REMARK_PLUGINS,
   remarkSingleDollarTextMath,
 ] satisfies StreamdownProps['remarkPlugins'];
+const CACHED_MARKDOWN_REMARK_PLUGINS = [
+  ...MARKDOWN_REMARK_PLUGINS,
+  createMarkdownParseCache(),
+] satisfies StreamdownProps['remarkPlugins'];
+const CACHED_INLINE_MATH_REMARK_PLUGINS = [
+  ...INLINE_MATH_REMARK_PLUGINS,
+  createMarkdownParseCache(),
+] satisfies StreamdownProps['remarkPlugins'];
 
 const KATEX_REHYPE_PLUGIN = [
   rehypeKatex,
@@ -1594,7 +1603,13 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
   const staticMarkdown = (
     <Markdown
       components={components}
-      remarkPlugins={remarkPlugins}
+      remarkPlugins={
+        isStreaming || streamingRendererActive
+          ? remarkPlugins
+          : inlineMathEnabled
+            ? CACHED_INLINE_MATH_REMARK_PLUGINS
+            : CACHED_MARKDOWN_REMARK_PLUGINS
+      }
       rehypePlugins={rehypePlugins}
       urlTransform={markdownUrlTransform}
     >

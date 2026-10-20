@@ -47,8 +47,5 @@ export function useSemanticActionRouter({
     };
   }, [rootRef, enabled, resetKey, defaultScopeId, routerRef]);
 
-  useLayoutEffect(() => {
-    routerRef.current?.refresh();
-  });
   return routerRef;
 }

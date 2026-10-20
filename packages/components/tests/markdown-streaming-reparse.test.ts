@@ -534,6 +534,20 @@ End of synthetic document.`,
     expect(container?.querySelector('strong')?.textContent).toBe('raw');
   });
 
+  it('reapplies HTML policy to the same parsed text after static remounts', async () => {
+    const source =
+      'Hello <strong>raw</strong><img src="x" onerror="alert(1)"><script>alert(1)</script>.';
+    for (const allowHtml of [true, false, true]) {
+      await act(async () => root?.render(null));
+      await renderMarkdown(source, { allowHtml });
+      expect(container?.querySelector('strong')?.textContent ?? null).toBe(
+        allowHtml ? 'raw' : null
+      );
+      expect(container?.querySelector('script')).toBeNull();
+      expect(container?.querySelector('[onerror]')).toBeNull();
+    }
+  });
+
   it('keeps inline LaTeX literal while rendering Mermaid blocks', async () => {
     await renderMarkdown(
       [

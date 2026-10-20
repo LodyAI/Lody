@@ -12,7 +12,16 @@ import { isImeComposingKeyboardEvent } from '@/lib/ime';
 import type { Mention as MentionRange } from '@/ui/mention/index';
 import type { MentionProjectSource } from '@/components/mentions/mention-project-file-source';
 import type { SkillMentionAgent } from '@/components/mentions/mention-skill-source';
-import type { AcpCommandSummary } from '@lody/shared';
+import {
+  reanchorMessageTextSpansForTrim,
+  type AcpCommandSummary,
+  type MessageTextSpan,
+} from '@lody/shared';
+import { useMentionPromptExpansion } from '@/components/mentions/mention-expansion';
+import {
+  useSessionMentionSource,
+  type UseSessionMentionSourceArgs,
+} from '@/hooks/use-session-mention-source';
 
 /** Grows with the text instead of reserving a fixed empty block. */
 const MAX_TEXTAREA_HEIGHT_PX = 320;
@@ -21,14 +30,19 @@ export type UserMessageEditorProps = {
   value: string;
   onChange: (value: string) => void;
   onCancel: () => void;
-  /** Receives the expanded text plus the committed mention ranges; the caller
-   *  turns those into transcript spans the same way a send does. */
-  onSave: (payload: { text: string; mentions: readonly MentionRange[] }) => void;
+  /** Receives trimmed, expanded text and its reanchored transcript spans. */
+  onSave: (payload: {
+    text: string;
+    mentions: readonly MentionRange[];
+    spans?: MessageTextSpan[];
+  }) => void;
   isSaving: boolean;
   conversationFontSize: ConversationFontSize;
   /** Same source object the session composer resolves; wires `@` file/session/
    *  role/issue candidates into the editor. Undefined disables the tree. */
   mentionSource?: MentionProjectSource;
+  /** Session data only; file resources are borrowed when this editor mounts. */
+  sessionSource?: Omit<UseSessionMentionSourceArgs, 'enableCodeCollabProvider' | 'debugLabel'>;
   /** `/` command candidates for the agent that owns this session. */
   availableCommands?: AcpCommandSummary[];
   /** Selected provider, narrowing `$` to its skill directories. */
@@ -42,10 +56,10 @@ export type UserMessageEditorProps = {
  *
  * The card owns the editor's focus edge. Inside it sits the same
  * `CombinedMentionTextarea` the composer uses, so `@`, `$` and `/` behave
- * identically to a fresh send — including the before-send expansion, which the
- * caller applies through `useMentionPromptExpansion` over the reported ranges.
+ * identically to a fresh send. Mention expansion belongs to this mounted editor,
+ * so a closed editor does not subscribe the conversation to mention catalogs.
  */
-export function UserMessageEditor({
+function UserMessageEditorContent({
   value,
   onChange,
   onCancel,
@@ -63,6 +77,12 @@ export function UserMessageEditor({
   // on save, alongside the text they were measured against.
   const mentionRangesRef = useRef<MentionRange[]>([]);
   const canSave = value.trim().length > 0 && !isSaving;
+  const { expand: expandMentions } = useMentionPromptExpansion({
+    source: mentionSource,
+    skillAgent,
+    promptValue: value,
+    currentSessionId,
+  });
 
   // Auto-size to the content: reset first so the box can also shrink when text
   // is deleted, then cap it and let the textarea scroll past the cap.
@@ -86,8 +106,14 @@ export function UserMessageEditor({
 
   const handleSave = useCallback(() => {
     if (!canSave) return;
-    onSave({ text: value, mentions: mentionRangesRef.current });
-  }, [canSave, onSave, value]);
+    const expanded = expandMentions({ text: value, mentions: mentionRangesRef.current });
+    const text = expanded.text.trim();
+    onSave({
+      text,
+      mentions: mentionRangesRef.current,
+      spans: reanchorMessageTextSpansForTrim(expanded.text, text, expanded.spans),
+    });
+  }, [canSave, expandMentions, onSave, value]);
 
   return (
     <div
@@ -172,4 +198,26 @@ export function UserMessageEditor({
       </div>
     </div>
   );
+}
+
+export function UserMessageEditor(props: UserMessageEditorProps) {
+  return props.sessionSource ? (
+    <SessionUserMessageEditor {...props} sessionSource={props.sessionSource} />
+  ) : (
+    <UserMessageEditorContent {...props} />
+  );
+}
+
+function SessionUserMessageEditor({
+  sessionSource,
+  ...props
+}: UserMessageEditorProps & {
+  sessionSource: NonNullable<UserMessageEditorProps['sessionSource']>;
+}) {
+  const mentionSource = useSessionMentionSource({
+    ...sessionSource,
+    enableCodeCollabProvider: true,
+    debugLabel: 'session-edit:mention-provider',
+  });
+  return <UserMessageEditorContent {...props} mentionSource={mentionSource} />;
 }

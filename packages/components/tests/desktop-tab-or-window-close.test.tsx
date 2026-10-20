@@ -491,6 +491,38 @@ describe('semantic close routing', () => {
     expect(remaining().panel).toBe(1);
   });
 
+  it('updates the cue for ancestor visibility and portal layers without a React refresh', async () => {
+    click(panel);
+    expect(panel.dataset.lodyActionActive).toBe('true');
+    const wrapper = document.createElement('div');
+    host.append(wrapper);
+    wrapper.append(panel);
+    wrapper.hidden = true;
+    await Promise.resolve();
+    expect(panel.dataset.lodyActionActive).toBeUndefined();
+    close();
+    expect(remaining().panel).toBe(1);
+    wrapper.hidden = false;
+    await Promise.resolve();
+    expect(panel.dataset.lodyActionActive).toBe('true');
+
+    const portal = document.createElement('div');
+    portal.innerHTML = '<div role="menu" data-state="open">menu</div>';
+    document.body.append(portal);
+    try {
+      // Dispatch must see the layer even before the mutation callback runs.
+      close();
+      expect(remaining().panel).toBe(1);
+      await Promise.resolve();
+      expect(host.querySelector('[data-lody-action-active]')).toBeNull();
+      portal.remove();
+      await Promise.resolve();
+      expect(panel.dataset.lodyActionActive).toBe('true');
+    } finally {
+      portal.remove();
+    }
+  });
+
   it('chooses the innermost registered action scope independently of registration order', () => {
     const nested = document.createElement('div');
     nested.textContent = 'nested item';

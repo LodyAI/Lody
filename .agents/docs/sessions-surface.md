@@ -9,8 +9,8 @@ this page is the full text of the rules summarised there.
 
 - `session-chat-interface.tsx` — conversation surface (draft variant:
   `draft-session-chat-interface.tsx`).
-  **Read receipts are gated on VISIBILITY, not on being mounted.** Every child
-  tab and side chat stays mounted behind the active one, so the mark-as-read
+  **Read receipts are gated on VISIBILITY, not on being mounted.** A child tab
+  or side chat stays mounted after its first selection, so the mark-as-read
   effect takes an explicit `isVisible` prop (`../../lib/session-read-receipt.ts`)
   that `session-detail.tsx` derives per surface — top tabs `isActive`, side chats
   `isActive && isSidebarOpen` (a collapsed panel is only `invisible`). Dropping

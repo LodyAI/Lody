@@ -9,7 +9,7 @@ this page is the full text of the rules summarised there.
 
 - Desktop top bar is ONE merged row (no repo-title header row): `SessionTabBar`
   with `leftSlot` (sidebar expand + macOS traffic-light inset via `className`)
-  and `rightSlot` = a `SessionChatInterface headerVariant="toolbar"` instance
+  and `rightSlot` receives a portal from the existing root chat controller
   (IDE launcher / Browser / "…" menu / sidebar toggle — no title, no PR badge).
   All macOS traffic-light insets (sidebar `h-11 pt-[2px]` header, this bar's
   `pl-[4.5rem]`, `reserveMacTrafficLightInset`, landing `left-[96px]`, and the

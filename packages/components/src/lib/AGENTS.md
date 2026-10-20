@@ -8,15 +8,17 @@ Background: [components](../../../../.agents/docs/components-package.md),
 - Retry immutable Roost input; absent receipts stay unknown. Cache/refresh keeps
   all input. Resolve owner routing per call.
 
+- Markdown caches hold bounded raw ASTs per grammar; clone per use; skip streams.
+
 ## Electron IPC types
 
 - `electron-ipc-client.ts` may import `ElectronIpcServices` from main-process
   registration with `import type` only. Browser/mobile bundles must erase the edge;
   never add an Electron runtime/package dependency or allow Node APIs in shared UI.
-- Keep `experimentalDecorators` and the direct catalog-pinned `@types/node` dependency
-  for the source declarations. Service constructors own invoke signatures; never duplicate them in contracts,
-  Specs or platform ports. Fix resolution/erasure here or reconsider ownership.
-  Push events and one-way sends stay in `@lody/shared/electron-ipc`.
+- Keep `experimentalDecorators` and direct catalog-pinned `@types/node` for declarations.
+  Service constructors own invoke signatures; never duplicate them in contracts,
+  Specs or platform ports. Resolve erasure here or reconsider ownership.
+  Push events/one-way sends stay in `@lody/shared/electron-ipc`.
 
 ## Crash recovery and diagnostics
 
@@ -48,12 +50,12 @@ Background: [components](../../../../.agents/docs/components-package.md),
 
 ## File Preview and Code Collab
 
-- Remote file surfaces read the owner-session file-index Flock. Local Electron targets
-  load initial file trees and All Changes from the local `code-collab/get-file-index`
-  Machine RPC snapshot without awaiting Flock, then subscribe to local Flock events.
-  Subscription delay/failure cannot block IPC or trigger cloud fallback. Allow stale
-  join events to converge with the CLI's asynchronous snapshot reconciliation.
-  Machine RPC also serves exact content, save, LSP, and diff requests.
+- Remote file surfaces read the owning session's file-index Flock. Local Electron
+  initial trees and All Changes first use local `code-collab/get-file-index`
+  Machine RPC without awaiting Flock, then subscribe to local Flock events.
+  Delayed/failed subscriptions never block IPC or fall back to cloud. Stale join
+  events converge with CLI asynchronous snapshot reconciliation. Machine RPC
+  also provides exact content, save, LSP and diffs.
 - `openFile` uses File Preview v3 plain reads: no workspace watch, All Changes recompute,
   or Flock publish. Electron verifies disk machine identity and reads via local IPC,
   independent of daemon/index readiness. Unknown targets never fall back to Streams;

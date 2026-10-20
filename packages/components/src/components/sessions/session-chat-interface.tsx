@@ -31,6 +31,7 @@ import {
   useRef,
   useState,
 } from 'react';
+import { createPortal } from 'react-dom';
 import { useOpenSettings } from '../../hooks/use-open-settings';
 import { v4 as uuidv4 } from 'uuid';
 import {
@@ -81,7 +82,6 @@ import {
   type SessionTurnAgentRoleSelection,
 } from './session-chat-input-area';
 import { useSessionMcpSelection } from '@/hooks/use-session-mcp-selection';
-import { useSessionMentionSource } from '@/hooks/use-session-mention-source';
 import {
   MessageQueueDisplay,
   shouldRequestNativeQueueSteer,
@@ -2147,12 +2147,14 @@ export function SessionSearchBar({
   );
 }
 
-interface SessionChatInterfaceProps {
+export interface SessionChatInterfaceProps {
   claimNavigationFocus?: () => boolean;
   session: SessionMeta;
   workspaceSession?: SessionMeta | null;
   className?: string;
   hideHeader?: boolean;
+  /** Renders the root conversation's existing header controller in the desktop tab row. */
+  toolbar?: SessionChatToolbar;
   onFileDiffClick?: (turnId: string, filePath: string) => void;
   onFilePathClick?: (filePath: string) => void;
   /** Opens an agent-uploaded HTML source path directly in rendered file preview. */
@@ -2227,10 +2229,9 @@ interface SessionChatInterfaceProps {
   /** Opens Browser without forcing a newly reported candidate navigation. */
   onOpenExistingBrowser?: () => void;
   /**
-   * 'page' renders the classic full header row. 'toolbar' (desktop
-   * `hideMessageArea` instance) renders ONLY the compact right-side controls
-   * (IDE launcher / browser / "…" menu / end slot) so session-detail can embed
-   * them in the tab row — no title, no PR badge (the context strip owns PR).
+   * 'page' renders the full header; 'toolbar' renders compact controls inline.
+   * Desktop SessionDetail uses `toolbar.container` to portal those controls from
+   * the conversation's existing controller into its tab row.
    */
   headerVariant?: 'page' | 'toolbar';
   /**
@@ -2261,6 +2262,28 @@ function SpinningLoaderIcon({ className }: { className?: string }) {
 }
 
 const EMPTY_CHAT_STREAM_EMPTY_STATE = <></>;
+
+export type SessionChatToolbar = {
+  container: HTMLElement | null;
+  className?: string;
+  endSlot?: React.ReactNode;
+  actions: Pick<
+    SessionChatInterfaceProps,
+    | 'onArchiveSession'
+    | 'onRestoreSession'
+    | 'onDeleteSession'
+    | 'onOpenSearch'
+    | 'onCopyConversationHistory'
+    | 'onRequestRename'
+    | 'onForkSession'
+    | 'forkWorktreeAvailability'
+    | 'onForkWorktreeMenuOpen'
+    | 'forkingAssistantMessageId'
+    | 'sharing'
+    | 'onShareWithTeam'
+    | 'onShareAsImage'
+  >;
+};
 
 export type SessionChatInterfaceHandle = {
   addDocumentSelection: (selection: DocumentSelection) => boolean;
@@ -2357,6 +2380,7 @@ export const SessionChatInterface = memo(
       workspaceSession,
       className,
       hideHeader = false,
+      toolbar,
       onFileDiffClick,
       onFilePathClick,
       onOpenHtmlFile,
@@ -2844,18 +2868,6 @@ export const SessionChatInterface = memo(
       >
     >(new Map());
     const isArchivedSession = session.isArchived === true;
-    /* The edit-and-resend editor shares the composer's mention pipeline: same
-       `@`/`$`/`/` sources, same before-send expansion. The provider is always
-       enabled here (unlike the composer, which gates on the draft containing
-       `@`) because the editor opens with the previous text already loaded and
-       must resolve its tokens on first paint. */
-    const editMentionSource = useSessionMentionSource({
-      session,
-      sessionLocalProjectRootPath: resolvedLocalProjectMeta?.rootPath ?? null,
-      isRepoPublic,
-      enableCodeCollabProvider: true,
-      debugLabel: 'session-edit:mention-provider',
-    });
     const editSkillAgent = useMemo(
       () =>
         !isArchivedSession && session.cliType && session.agentType
@@ -2869,11 +2881,24 @@ export const SessionChatInterface = memo(
     );
     const editMentionContext = useMemo<UserMessageEditMentionContext>(
       () => ({
-        mentionSource: isArchivedSession ? undefined : editMentionSource,
+        sessionSource: isArchivedSession
+          ? undefined
+          : {
+              session,
+              sessionLocalProjectRootPath: resolvedLocalProjectMeta?.rootPath ?? null,
+              isRepoPublic,
+            },
         availableCommands,
         skillAgent: editSkillAgent,
       }),
-      [availableCommands, editMentionSource, editSkillAgent, isArchivedSession]
+      [
+        availableCommands,
+        editSkillAgent,
+        isArchivedSession,
+        isRepoPublic,
+        resolvedLocalProjectMeta?.rootPath,
+        session,
+      ]
     );
     const [pendingGoalCommand, setPendingGoalCommand] = useState<{
       threadId: string;
@@ -6503,6 +6528,15 @@ export const SessionChatInterface = memo(
         )}
       </>
     );
+    const toolbarActions = toolbar?.actions;
+    const headerSharing = toolbarActions ? toolbarActions.sharing : sharing;
+    const headerShareWithTeam = toolbarActions ? toolbarActions.onShareWithTeam : onShareWithTeam;
+    const headerShareAsImage = toolbarActions ? toolbarActions.onShareAsImage : onShareAsImage;
+    const headerCopyConversation = toolbarActions
+      ? toolbarActions.onCopyConversationHistory
+      : hideMessageArea && onCopyConversationHistoryExternal
+        ? onCopyConversationHistoryExternal
+        : handleCopyConversationHistory;
     const headerMenuNode = (
       <SessionHeaderMenu
         key={`${workspaceId}:${session.id}`}
@@ -6513,39 +6547,55 @@ export const SessionChatInterface = memo(
         localProjectMeta={resolvedLocalProjectMeta}
         workspacePath={sessionWorkspacePath}
         machineName={sessionMachine?.name}
-        onCopyConversationHistory={
-          hideMessageArea && onCopyConversationHistoryExternal
-            ? onCopyConversationHistoryExternal
-            : () => {
-                void handleCopyConversationHistory();
-              }
-        }
+        onCopyConversationHistory={headerCopyConversation}
         onCopyUrl={() => {
           void handleCopySessionLink();
         }}
-        sharing={sharing}
-        onShareWithTeam={onShareWithTeam}
-        onShareAsImage={onShareAsImage}
-        onOpenSearch={hideMessageArea ? onOpenSearchExternal : openSearch}
-        onFork={canForkFromMenu ? handleForkFromMenu : undefined}
-        isForking={forkingAssistantMessageId !== null && forkingAssistantMessageId !== undefined}
-        forkWorktreeAvailability={forkWorktreeAvailability}
-        onForkMenuOpen={onForkWorktreeMenuOpen}
+        sharing={headerSharing}
+        onShareWithTeam={headerShareWithTeam}
+        onShareAsImage={headerShareAsImage}
+        onOpenSearch={
+          toolbarActions
+            ? toolbarActions.onOpenSearch
+            : hideMessageArea
+              ? onOpenSearchExternal
+              : openSearch
+        }
+        onFork={
+          toolbarActions
+            ? toolbarActions.onForkSession
+            : canForkFromMenu
+              ? handleForkFromMenu
+              : undefined
+        }
+        isForking={
+          toolbarActions
+            ? toolbarActions.forkingAssistantMessageId != null
+            : forkingAssistantMessageId != null
+        }
+        forkWorktreeAvailability={
+          toolbarActions ? toolbarActions.forkWorktreeAvailability : forkWorktreeAvailability
+        }
+        onForkMenuOpen={
+          toolbarActions ? toolbarActions.onForkWorktreeMenuOpen : onForkWorktreeMenuOpen
+        }
         onRename={
-          headerVariant === 'toolbar'
-            ? onRequestRename
-            : () => {
-                setRenameDialogTarget({
-                  sessionId: session.id,
-                  initialTitle: session.title ?? '',
-                });
-              }
+          toolbarActions
+            ? toolbarActions.onRequestRename
+            : headerVariant === 'toolbar'
+              ? onRequestRename
+              : () => {
+                  setRenameDialogTarget({
+                    sessionId: session.id,
+                    initialTitle: session.title ?? '',
+                  });
+                }
         }
         owner={ownerMenuState}
         openedByRelations={openedByRelations}
-        onArchive={onArchiveSession}
-        onRestore={onRestoreSession}
-        onDelete={onDeleteSession}
+        onArchive={toolbarActions ? toolbarActions.onArchiveSession : onArchiveSession}
+        onRestore={toolbarActions ? toolbarActions.onRestoreSession : onRestoreSession}
+        onDelete={toolbarActions ? toolbarActions.onDeleteSession : onDeleteSession}
         openInIde={
           shouldShowOpenInIdeButton && isElectronRendererForPathLaunch
             ? {
@@ -6586,28 +6636,25 @@ export const SessionChatInterface = memo(
         id: 'copy-markdown',
         label: t('sessions.copyAsMarkdown', 'Copy as Markdown'),
         icon: Copy,
-        onSelect: () =>
-          hideMessageArea && onCopyConversationHistoryExternal
-            ? onCopyConversationHistoryExternal()
-            : handleCopyConversationHistory(),
+        onSelect: () => headerCopyConversation?.(),
       },
-      ...(onShareAsImage
+      ...(headerShareAsImage
         ? [
             {
               id: 'share-image',
               label: t('sessions.shareAsImage', 'Share as image…'),
               icon: Image,
-              onSelect: onShareAsImage,
+              onSelect: headerShareAsImage,
             },
           ]
         : []),
     ];
     const headerAccessNode =
-      !isMobile && (sharing || headerPublicShare) ? (
+      !isMobile && (headerSharing || headerPublicShare) ? (
         <div {...stylex.props(styles.headerPills)}>
           <SessionAccessControl
-            state={sharing}
-            onShareWithTeam={onShareWithTeam}
+            state={headerSharing}
+            onShareWithTeam={headerShareWithTeam}
             publicShare={headerPublicShare}
             onCopyLink={handleCopySessionLink}
             exportActions={headerExportActions}
@@ -6616,9 +6663,28 @@ export const SessionChatInterface = memo(
       ) : null;
     const headerArchivedNode = session.isArchived === true ? <SessionArchivedBadge /> : null;
 
+    const toolbarNode = (
+      <ErrorBoundary name="SessionChatHeader" variant="inline" resetKeys={[session.id]}>
+        <div {...stylex.props(styles.toolbarHeader)}>
+          {headerLauncherActions}
+          {headerArchivedNode}
+          {headerAccessNode}
+          {headerMenuNode}
+          {toolbar ? toolbar.endSlot : headerEndSlot}
+        </div>
+      </ErrorBoundary>
+    );
+
     return (
       <PrLinkProvider prUrl={latestPr?.url} onOpenPrTab={prLinkHandler}>
         <SessionLinkProvider enabled={!!onNavigateSession}>
+          {toolbar?.container &&
+            createPortal(
+              <SessionConversationPage className={toolbar.className} hideMessageArea>
+                {toolbarNode}
+              </SessionConversationPage>,
+              toolbar.container
+            )}
           {isVisible &&
             !preparingWindow &&
             onOpenBrowser &&
@@ -6652,15 +6718,7 @@ export const SessionChatInterface = memo(
                 /* Compact toolbar for the merged desktop tab row: right-side
                  controls only — no title (the context strip owns identity) and
                  no PR badge (the strip owns PR). */
-                <ErrorBoundary name="SessionChatHeader" variant="inline" resetKeys={[session.id]}>
-                  <div {...stylex.props(styles.toolbarHeader)}>
-                    {headerLauncherActions}
-                    {headerArchivedNode}
-                    {headerAccessNode}
-                    {headerMenuNode}
-                    {headerEndSlot}
-                  </div>
-                </ErrorBoundary>
+                toolbarNode
               ) : (
                 <ErrorBoundary name="SessionChatHeader" variant="inline" resetKeys={[session.id]}>
                   <SessionConversationPageHeader

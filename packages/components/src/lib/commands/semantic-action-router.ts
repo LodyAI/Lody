@@ -58,39 +58,43 @@ export function createSemanticActionRouter(
     getScopes().filter((scope) => scope.element && isVisible(scope.element));
   const blocked = () =>
     Array.from(doc.querySelectorAll<HTMLElement>(BLOCKING_LAYER_SELECTOR)).some(isVisible);
-  const scopeAt = (target: EventTarget | null) => {
+  const scopeAt = (target: EventTarget | null, scopes = visibleScopes()) => {
     if (!(target instanceof win.Node)) return undefined;
-    return visibleScopes()
+    return scopes
       .filter((scope) => scope.element!.contains(target))
       .find(
-        (scope, _, scopes) =>
-          !scopes.some((child) => child !== scope && scope.element!.contains(child.element))
+        (scope, _, candidates) =>
+          !candidates.some((child) => child !== scope && scope.element!.contains(child.element))
       );
   };
-  const currentScope = () => {
-    const scopes = visibleScopes();
+  const currentScope = (scopes = visibleScopes()) => {
     const id = selected?.id;
     if (id) return scopes.find((scope) => scope.id === id);
-    return scopeAt(doc.activeElement) ?? scopes.find((scope) => scope.id === defaultScopeId);
+    return (
+      scopeAt(doc.activeElement, scopes) ?? scopes.find((scope) => scope.id === defaultScopeId)
+    );
   };
   const cancelHover = () => {
     if (hover) win.clearTimeout(hover.timer);
     hover = null;
   };
   const paint = () => {
+    const isBlocked = blocked();
+    const scopes = visibleScopes();
     if (
       hover &&
-      (blocked() ||
-        !visibleScopes().some(
-          (scope) => scope.id === hover!.id && scope.element === hover!.element
-        ))
+      (isBlocked ||
+        !scopes.some((scope) => scope.id === hover!.id && scope.element === hover!.element))
     )
       cancelHover();
-    const current = blocked() ? undefined : currentScope();
+    const current = isBlocked ? undefined : currentScope(scopes);
     for (const scope of getScopes()) {
       if (scope.element) {
-        if (scope.id === current?.id) scope.element.dataset.lodyActionActive = 'true';
-        else delete scope.element.dataset.lodyActionActive;
+        if (scope.id === current?.id) {
+          if (scope.element.dataset.lodyActionActive !== 'true') {
+            scope.element.dataset.lodyActionActive = 'true';
+          }
+        } else delete scope.element.dataset.lodyActionActive;
       }
     }
   };
@@ -236,13 +240,38 @@ export function createSemanticActionRouter(
   win.addEventListener('dragstart', onDragStart, true);
   win.addEventListener('dragend', onDragEnd, true);
   root.addEventListener(INTERACTION_EVENT, onExternalInteraction);
-  // Modal/menu transitions also update the cue without waiting for input.
-  const observer = new MutationObserver(paint);
+  // Content updates do not change action ownership. Observe scope/layer
+  // boundaries, including ancestor visibility, instead of measuring every commit.
+  const boundarySelector =
+    '[data-lody-action-scope], [role="dialog"], [role="alertdialog"], ' +
+    '[aria-modal], [role="menu"], [role="listbox"]';
+  const hasBoundary = (node: Node) =>
+    node instanceof win.Element &&
+    (node.matches(boundarySelector) || node.querySelector(boundarySelector) !== null);
+  const observer = new MutationObserver((records) => {
+    if (
+      records.some((record) =>
+        record.type === 'attributes'
+          ? hasBoundary(record.target)
+          : [...record.addedNodes, ...record.removedNodes].some(hasBoundary)
+      )
+    )
+      paint();
+  });
   observer.observe(doc.body, {
     childList: true,
     subtree: true,
     attributes: true,
-    attributeFilter: ['hidden', 'inert', 'aria-hidden', 'aria-modal', 'data-state'],
+    attributeFilter: [
+      'hidden',
+      'inert',
+      'aria-hidden',
+      'aria-modal',
+      'data-state',
+      'data-lody-action-scope',
+      'class',
+      'style',
+    ],
   });
   paint();
 
