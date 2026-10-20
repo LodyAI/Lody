@@ -7,6 +7,12 @@ Main authentication uses `auth-fetch.ts` with Electron Chromium networking after
 app readiness. Preserve Better Auth cookie hooks and cancellation; never bypass
 certificate verification. Behavior: [login Spec](../../../../specs/desktop-browser-login.md).
 
+When `AuthService.getSession` retries a rejected renderer bearer using its durable
+cookie, preserve the fallback's error/result. A network failure or 5xx must never
+be replaced by the earlier 401: shared session verification would interpret two
+such results as confirmed sign-out. Cached identity remains scoped to the auth
+generation and is cleared by explicit sign-out or definitive session rejection.
+
 ## Diagnostics
 
 Resource links use `lody://` in every channel; startup never replaces an existing
