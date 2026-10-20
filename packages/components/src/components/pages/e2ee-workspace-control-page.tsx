@@ -1,11 +1,20 @@
 import * as stylex from '@stylexjs/stylex';
+import { Accordion } from '@lody/ui/accordion';
+import { Alert } from '@lody/ui/alert';
 import { Button } from '@lody/ui/button';
 import { colors, shadow } from '@lody/ui/tokens/colors.stylex';
 import { radius, space } from '@lody/ui/tokens/scales.stylex';
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Lock, ShieldAlert, ShieldCheck } from 'lucide-react';
+import type { TFunction } from 'i18next';
 import { ledgerRecordFields, type VerifiedLedgerHistory } from '@/lib/e2ee-ledger-history';
+import {
+  ledgerOverview,
+  shortId,
+  type LedgerEventSummary,
+  type LedgerMemberLabel,
+  type LedgerOverview,
+} from '@/lib/e2ee-ledger-overview';
 import type { E2eeControlFailure } from '@/lib/e2ee-control-failure';
 
 const styles = stylex.create({
@@ -17,56 +26,83 @@ const styles = stylex.create({
     padding: space[6],
   },
   column: {
-    maxWidth: 880,
+    maxWidth: 760,
     marginInline: 'auto',
     display: 'flex',
     flexDirection: 'column',
     gap: space[6],
   },
-  title: { fontSize: '1.5em', fontWeight: 600, marginBottom: space[2] },
+  titleRow: { display: 'flex', alignItems: 'baseline', flexWrap: 'wrap', gap: space[2] },
+  title: { fontSize: '1.5em', fontWeight: 600 },
+  previewTag: { color: colors.secondaryLabel, fontSize: '0.85em' },
   muted: { color: colors.secondaryLabel, lineHeight: 1.6 },
-  card: {
-    padding: space[4],
-    borderRadius: radius.large,
-    backgroundColor: colors.elevatedBackground,
-    boxShadow: shadow.raised,
-  },
-  notice: { color: colors.warning, lineHeight: 1.6, marginTop: space[4] },
+  footnote: { color: colors.tertiaryLabel, fontSize: '0.85em', lineHeight: 1.6 },
+  section: { display: 'flex', flexDirection: 'column', gap: space[3] },
   heading: {
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'space-between',
     gap: space[3],
-    marginBottom: space[3],
   },
-  records: {
+  sectionTitle: { fontSize: '1.05em', fontWeight: 600 },
+  card: {
     listStyle: 'none',
+    margin: 0,
     padding: 0,
-    marginTop: space[4],
     borderRadius: radius.large,
     backgroundColor: colors.elevatedBackground,
     boxShadow: shadow.raised,
     overflow: 'hidden',
   },
-  record: {
-    padding: space[4],
-    borderBottomWidth: 1,
+  memberRow: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: space[3],
+    paddingBlock: space[3],
+    paddingInline: space[4],
+    borderBottomWidth: { default: 1, ':last-child': 0 },
     borderBottomStyle: 'solid',
     borderBottomColor: colors.separator,
   },
-  recordTitle: { fontSize: '1em', fontWeight: 600, marginBottom: space[3] },
+  memberName: { fontWeight: 600, whiteSpace: 'nowrap' },
+  memberRole: { color: colors.secondaryLabel, whiteSpace: 'nowrap' },
+  grow: { flexGrow: 1, minWidth: 0 },
+  trailing: {
+    color: colors.secondaryLabel,
+    fontSize: '0.85em',
+    whiteSpace: 'nowrap',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+  },
+  eventRow: { display: 'flex', alignItems: 'baseline', gap: space[3], minWidth: 0 },
+  eventIndex: {
+    color: colors.tertiaryLabel,
+    fontVariantNumeric: 'tabular-nums',
+    minWidth: '2ch',
+    textAlign: 'end',
+  },
+  eventText: {
+    flexGrow: 1,
+    minWidth: 0,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    textAlign: 'start',
+  },
   fields: {
     display: 'grid',
     gridTemplateColumns: {
-      default: 'minmax(100px, 160px) minmax(0, 1fr)',
+      default: 'minmax(100px, 180px) minmax(0, 1fr)',
       '@media (max-width: 520px)': 'minmax(0, 1fr)',
     },
-    gap: space[2],
+    columnGap: space[3],
+    rowGap: space[2],
     fontSize: '0.9em',
-    marginBottom: space[3],
+    margin: 0,
   },
-  fieldPair: { display: 'contents' },
+  fieldName: { color: colors.secondaryLabel },
   value: { margin: 0, overflowWrap: 'anywhere', fontFamily: 'monospace', userSelect: 'text' },
+  fieldPair: { display: 'contents' },
   raw: {
     whiteSpace: 'pre-wrap',
     overflowWrap: 'anywhere',
@@ -77,21 +113,8 @@ const styles = stylex.create({
     boxShadow: shadow.inset,
     fontSize: '0.85em',
   },
-  error: { color: colors.destructive },
-  footer: { marginTop: space[4] },
-  badges: { display: 'flex', flexWrap: 'wrap', gap: space[2], marginTop: space[3] },
-  badge: {
-    display: 'inline-flex',
-    alignItems: 'center',
-    gap: space[1],
-    paddingBlock: space[1],
-    paddingInline: space[2],
-    borderRadius: radius.small,
-    backgroundColor: colors.wellBackground,
-    boxShadow: shadow.inset,
-    fontSize: '0.85em',
-  },
-  failure: { display: 'flex', flexDirection: 'column', gap: space[3], marginBlock: space[3] },
+  identity: { padding: space[4] },
+  panel: { display: 'flex', flexDirection: 'column', gap: space[3] },
   actions: { display: 'flex', flexWrap: 'wrap', gap: space[2] },
 });
 
@@ -105,6 +128,10 @@ const failureMessage: Record<E2eeControlFailure['kind'], string> = {
   'progress-conflict': 'e2ee.control.failure.progressConflict',
   'local-corrupt': 'e2ee.control.failure.localCorrupt',
 };
+
+/** Network and sign-in problems clear on their own; the rest stop verification. */
+const failureTone = (kind: E2eeControlFailure['kind']) =>
+  kind === 'network' || kind === 'auth' ? 'warning' : 'danger';
 
 function FailurePanel(props: {
   failure: E2eeControlFailure;
@@ -128,40 +155,48 @@ function FailurePanel(props: {
     }
   };
   return (
-    <div role="alert" {...stylex.props(styles.failure)}>
-      <p {...stylex.props(styles.error)}>
+    <Alert.Root tone={failureTone(props.failure.kind)}>
+      <Alert.Title>
+        {failureTone(props.failure.kind) === 'warning'
+          ? t('e2ee.control.status.unreachable')
+          : t('e2ee.control.status.stopped')}
+      </Alert.Title>
+      <Alert.Description>
         {t(failureMessage[props.failure.kind], { code: props.failure.code })}
-      </p>
-      <div {...stylex.props(styles.actions)}>
-        <Button variant="secondary" onClick={() => void copy()}>
-          {copied === 'copied'
-            ? t('e2ee.control.diagnosticsCopied')
-            : t('e2ee.control.copyDiagnostics')}
-        </Button>
-        {props.failure.kind === 'local-corrupt' && (
-          <Button variant="secondary" onClick={props.onRepairLocal}>
-            {t('e2ee.control.repairLocal')}
-          </Button>
-        )}
-        {props.failure.kind === 'progress-conflict' && !confirmReset && (
-          <Button variant="ghost" onClick={() => setConfirmReset(true)}>
-            {t('e2ee.control.resetProgress')}
-          </Button>
-        )}
-      </div>
+      </Alert.Description>
       {confirmReset && (
-        <div {...stylex.props(styles.failure)}>
-          <p {...stylex.props(styles.muted)}>{t('e2ee.control.resetProgressWarning')}</p>
-          <div {...stylex.props(styles.actions)}>
+        <Alert.Description>{t('e2ee.control.resetProgressWarning')}</Alert.Description>
+      )}
+      <Alert.Actions>
+        {confirmReset ? (
+          <>
             <Button variant="destructive" onClick={props.onResetProgress}>
               {t('e2ee.control.resetProgressConfirm')}
             </Button>
             <Button variant="ghost" onClick={() => setConfirmReset(false)}>
               {t('common.cancel')}
             </Button>
-          </div>
-        </div>
-      )}
+          </>
+        ) : (
+          <>
+            <Button variant="secondary" onClick={() => void copy()}>
+              {copied === 'copied'
+                ? t('e2ee.control.diagnosticsCopied')
+                : t('e2ee.control.copyDiagnostics')}
+            </Button>
+            {props.failure.kind === 'local-corrupt' && (
+              <Button variant="secondary" onClick={props.onRepairLocal}>
+                {t('e2ee.control.repairLocal')}
+              </Button>
+            )}
+            {props.failure.kind === 'progress-conflict' && (
+              <Button variant="ghost" onClick={() => setConfirmReset(true)}>
+                {t('e2ee.control.resetProgress')}
+              </Button>
+            )}
+          </>
+        )}
+      </Alert.Actions>
       {report !== null && (
         <details open={copied === 'shown'}>
           <summary>{t('e2ee.control.diagnostics')}</summary>
@@ -169,7 +204,144 @@ function FailurePanel(props: {
           <pre {...stylex.props(styles.raw)}>{report}</pre>
         </details>
       )}
-    </div>
+    </Alert.Root>
+  );
+}
+
+/** One verdict for what this device has checked so far. */
+function StatusPanel(props: {
+  history: VerifiedLedgerHistory;
+  overview: LedgerOverview;
+  onRefresh: () => void;
+  loading: boolean;
+}) {
+  const { t } = useTranslation();
+  const { history, overview } = props;
+  const upgrade = history.upgradeRequiredAt !== undefined;
+  const tone = upgrade || !history.locallyPinned ? 'warning' : 'success';
+  return (
+    <Alert.Root tone={tone}>
+      <Alert.Title>
+        {upgrade
+          ? t('e2ee.control.status.upgrade')
+          : history.locallyPinned
+            ? t('e2ee.control.status.verified')
+            : t('e2ee.control.status.unpinned')}
+      </Alert.Title>
+      <Alert.Description>
+        {upgrade
+          ? t('e2ee.control.upgradeStop', { position: history.upgradeRequiredAt })
+          : history.locallyPinned
+            ? t('e2ee.control.verifiedPinned')
+            : t('e2ee.control.verifiedUnpinned')}
+      </Alert.Description>
+      <Alert.Description>
+        {[
+          t('e2ee.control.progress', {
+            count: history.view.length,
+            total: history.page.checkpoint.length,
+          }),
+          t('e2ee.control.memberCount', { count: overview.members.length }),
+          t('e2ee.control.deviceCount', { count: overview.deviceCount }),
+          t('e2ee.control.epoch', { epoch: overview.epoch.number }),
+        ].join(' · ')}
+      </Alert.Description>
+      {history.continuityPending && (
+        <Alert.Description>{t('e2ee.control.continuityPending')}</Alert.Description>
+      )}
+      <Alert.Description>
+        <span {...stylex.props(styles.footnote)}>{t('e2ee.control.freshness')}</span>
+      </Alert.Description>
+      <Alert.Actions>
+        <Button variant="secondary" disabled={props.loading} onClick={props.onRefresh}>
+          {t('e2ee.control.refresh')}
+        </Button>
+      </Alert.Actions>
+    </Alert.Root>
+  );
+}
+
+function memberName(t: TFunction, member: LedgerMemberLabel | null) {
+  if (member === null) return t('e2ee.summary.unknownSigner');
+  return member.ordinal === null
+    ? t('e2ee.summary.memberById', { id: shortId(member.membershipId) })
+    : t('e2ee.summary.member', { number: member.ordinal });
+}
+
+function eventSentence(t: TFunction, event: LedgerEventSummary): string {
+  const actor = memberName(t, event.actor);
+  switch (event.type) {
+    case 'genesis':
+      return t('e2ee.summary.genesis', { actor });
+    case 'admitMember':
+      return t('e2ee.summary.admitMember', { actor, member: memberName(t, event.member) });
+    case 'setRole':
+      return t('e2ee.summary.setRole', {
+        actor,
+        member: memberName(t, event.member),
+        role: t(`e2ee.values.${event.role}`),
+      });
+    case 'admitDevice':
+      return t('e2ee.summary.admitDevice', {
+        actor,
+        device: shortId(event.device),
+        kind: t(`e2ee.values.${event.kind}`),
+      });
+    case 'revokeDevice':
+      return event.owner === null
+        ? t('e2ee.summary.revokeUnknownDevice', { actor, device: shortId(event.device) })
+        : t('e2ee.summary.revokeDevice', {
+            actor,
+            owner: memberName(t, event.owner),
+            device: shortId(event.device),
+          });
+    case 'transferOwner':
+      return t('e2ee.summary.transferOwner', { actor, member: memberName(t, event.member) });
+    case 'publishEpoch':
+      return t('e2ee.summary.publishEpoch', { actor, epoch: event.epoch });
+    case 'removeMemberAndPublishEpoch':
+      return t('e2ee.summary.removeMemberAndPublishEpoch', {
+        actor,
+        member: memberName(t, event.member),
+        epoch: event.epoch,
+      });
+    case 'declareCapabilities':
+    default:
+      return t('e2ee.summary.declareCapabilities', { actor, capabilities: event.capabilities });
+  }
+}
+
+function MembersSection(props: { history: VerifiedLedgerHistory; overview: LedgerOverview }) {
+  const { t } = useTranslation();
+  const partial = props.history.view.length < props.history.page.checkpoint.length;
+  return (
+    <section aria-label={t('e2ee.control.members')} {...stylex.props(styles.section)}>
+      <div {...stylex.props(styles.heading)}>
+        <h2 {...stylex.props(styles.sectionTitle)}>{t('e2ee.control.members')}</h2>
+        {partial && (
+          <span {...stylex.props(styles.footnote)}>
+            {t('e2ee.control.membersAsOf', { count: props.history.view.length })}
+          </span>
+        )}
+      </div>
+      <ul {...stylex.props(styles.card)}>
+        {props.overview.members.map((member) => (
+          <li key={member.membershipId} {...stylex.props(styles.memberRow)}>
+            <span {...stylex.props(styles.memberName)}>{memberName(t, member)}</span>
+            <span {...stylex.props(styles.memberRole, styles.grow)}>
+              {t(`e2ee.values.${member.role}`)}
+            </span>
+            <span {...stylex.props(styles.trailing)}>
+              {member.devices.length === 0
+                ? t('e2ee.control.noDevices')
+                : member.devices
+                    .map((device) => `${shortId(device.key)} · ${t(`e2ee.values.${device.kind}`)}`)
+                    .join(', ')}
+            </span>
+          </li>
+        ))}
+      </ul>
+    </section>
   );
 }
 
@@ -195,6 +367,7 @@ export interface E2eeWorkspaceControlPageProps {
 export function E2eeWorkspaceControlPage(props: E2eeWorkspaceControlPageProps) {
   const { t } = useTranslation();
   const { history } = props;
+  const overview = useMemo(() => (history ? ledgerOverview(history) : null), [history]);
   return (
     <main {...stylex.props(styles.page)}>
       <div {...stylex.props(styles.column)}>
@@ -204,125 +377,110 @@ export function E2eeWorkspaceControlPage(props: E2eeWorkspaceControlPageProps) {
           </Button>
         </div>
         <header>
-          <h1 {...stylex.props(styles.title)}>{t('e2ee.control.title')}</h1>
+          <div {...stylex.props(styles.titleRow)}>
+            <h1 {...stylex.props(styles.title)}>{t('e2ee.control.title')}</h1>
+            <span {...stylex.props(styles.previewTag)}>{t('e2ee.control.badge')}</span>
+          </div>
           <p {...stylex.props(styles.muted)}>{t('e2ee.control.description')}</p>
-          <div {...stylex.props(styles.badges)}>
-            <span {...stylex.props(styles.badge)}>
-              <Lock size={14} aria-hidden="true" />
-              {t('e2ee.control.badge')}
-            </span>
-            {history && (
-              <span {...stylex.props(styles.badge)}>
-                {history.locallyPinned ? (
-                  <ShieldCheck size={14} aria-hidden="true" />
-                ) : (
-                  <ShieldAlert size={14} aria-hidden="true" />
-                )}
-                {history.locallyPinned
-                  ? t('e2ee.control.badgePinned')
-                  : t('e2ee.control.badgeUnpinned')}
-              </span>
-            )}
-          </div>
+          <p {...stylex.props(styles.footnote)}>{t('e2ee.control.contentUnavailable')}</p>
         </header>
-        <section {...stylex.props(styles.card)} aria-label={t('e2ee.control.workspace')}>
-          <dl {...stylex.props(styles.fields)}>
-            <dt>{t('e2ee.control.workspace')}</dt>
-            <dd {...stylex.props(styles.value)}>{props.workspaceId}</dd>
-            {props.genesisHash && (
-              <>
-                <dt>{t('e2ee.control.genesis')}</dt>
-                <dd {...stylex.props(styles.value)}>{props.genesisHash}</dd>
-              </>
-            )}
-          </dl>
-          <p {...stylex.props(styles.notice)}>{t('e2ee.control.contentUnavailable')}</p>
-        </section>
-        <section aria-label={t('e2ee.control.history')}>
-          <div {...stylex.props(styles.heading)}>
-            <h2>{t('e2ee.control.history')}</h2>
-            <Button variant="secondary" disabled={props.loading} onClick={props.onRefresh}>
-              {t('e2ee.control.refresh')}
-            </Button>
-          </div>
-          {history && (
-            <div {...stylex.props(styles.muted)}>
-              <p>
-                {t('e2ee.control.progress', {
-                  count: history.view.length,
-                  total: history.page.checkpoint.length,
-                })}
-              </p>
-              <p>
-                {history.locallyPinned
-                  ? t('e2ee.control.verifiedPinned')
-                  : t('e2ee.control.verifiedUnpinned')}
-              </p>
-              {history.continuityPending && <p>{t('e2ee.control.continuityPending')}</p>}
-              {history.upgradeRequiredAt !== undefined && (
-                <p role="status">
-                  {t('e2ee.control.upgradeStop', { position: history.upgradeRequiredAt })}
-                </p>
-              )}
-              <p>{t('e2ee.control.freshness')}</p>
-            </div>
-          )}
-          {props.unavailable && <p role="alert">{t('e2ee.control.unavailable')}</p>}
-          {props.failure && (
-            <FailurePanel
-              failure={props.failure}
-              diagnostics={props.diagnostics}
-              onRepairLocal={props.onRepairLocal}
-              onResetProgress={props.onResetProgress}
-            />
-          )}
-          {props.loading && <p role="status">{t('e2ee.control.loading')}</p>}
-          {history && (
-            <ol {...stylex.props(styles.records)}>
-              {history.records.map((record) => {
-                const type =
-                  record.body.type === 'genesis' ? 'genesis' : record.body.operation.type;
+        {props.unavailable === true && (
+          <Alert.Root tone="neutral">
+            <Alert.Description>{t('e2ee.control.unavailable')}</Alert.Description>
+          </Alert.Root>
+        )}
+        {props.failure && (
+          <FailurePanel
+            failure={props.failure}
+            diagnostics={props.diagnostics}
+            onRepairLocal={props.onRepairLocal}
+            onResetProgress={props.onResetProgress}
+          />
+        )}
+        {history && overview && (
+          <StatusPanel
+            history={history}
+            overview={overview}
+            loading={props.loading}
+            onRefresh={props.onRefresh}
+          />
+        )}
+        {props.loading && (
+          <p role="status" {...stylex.props(styles.muted)}>
+            {t('e2ee.control.loading')}
+          </p>
+        )}
+        {history && overview && <MembersSection history={history} overview={overview} />}
+        {history && overview && (
+          <section aria-label={t('e2ee.control.history')} {...stylex.props(styles.section)}>
+            <h2 {...stylex.props(styles.sectionTitle)}>{t('e2ee.control.history')}</h2>
+            <Accordion.Root multiple>
+              {history.records.map((record, position) => {
+                const event = overview.events[position];
                 return (
-                  <li key={record.hash} {...stylex.props(styles.record)}>
-                    <h3 {...stylex.props(styles.recordTitle)}>
-                      {t('e2ee.control.record', { position: record.index + 1 })} ·{' '}
-                      {t(`e2ee.events.${type}`)}
-                    </h3>
-                    <dl {...stylex.props(styles.fields)}>
-                      <dt>{t('e2ee.fields.hash')}</dt>
-                      <dd {...stylex.props(styles.value)}>{record.hash}</dd>
-                      {Object.entries(ledgerRecordFields(record.body)).map(([key, value]) => (
-                        <div key={key} {...stylex.props(styles.fieldPair)}>
-                          <dt>{t(`e2ee.fields.${key}`)}</dt>
-                          <dd {...stylex.props(styles.value)}>
-                            {value === null
-                              ? t('e2ee.fields.noExpiry')
-                              : key === 'role' || key === 'kind'
-                                ? t(`e2ee.values.${value}`)
-                                : value}
-                          </dd>
-                        </div>
-                      ))}
-                    </dl>
-                    <details>
-                      <summary>{t('e2ee.control.raw')}</summary>
-                      <pre {...stylex.props(styles.raw)}>{record.rawHex}</pre>
-                    </details>
-                  </li>
+                  <Accordion.Item key={record.hash} value={record.hash}>
+                    <Accordion.Trigger>
+                      <span {...stylex.props(styles.eventRow)}>
+                        <span {...stylex.props(styles.eventIndex)}>{record.index + 1}</span>
+                        <span {...stylex.props(styles.eventText)}>{eventSentence(t, event)}</span>
+                      </span>
+                    </Accordion.Trigger>
+                    <Accordion.Panel>
+                      <div {...stylex.props(styles.panel)}>
+                        <dl {...stylex.props(styles.fields)}>
+                          <dt {...stylex.props(styles.fieldName)}>{t('e2ee.control.operation')}</dt>
+                          <dd {...stylex.props(styles.value)}>{t(`e2ee.events.${event.type}`)}</dd>
+                          <dt {...stylex.props(styles.fieldName)}>{t('e2ee.fields.hash')}</dt>
+                          <dd {...stylex.props(styles.value)}>{record.hash}</dd>
+                          {Object.entries(ledgerRecordFields(record.body)).map(([key, value]) => (
+                            <div key={key} {...stylex.props(styles.fieldPair)}>
+                              <dt {...stylex.props(styles.fieldName)}>{t(`e2ee.fields.${key}`)}</dt>
+                              <dd {...stylex.props(styles.value)}>
+                                {value === null
+                                  ? t('e2ee.fields.noExpiry')
+                                  : key === 'role' || key === 'kind'
+                                    ? t(`e2ee.values.${value}`)
+                                    : value}
+                              </dd>
+                            </div>
+                          ))}
+                        </dl>
+                        <details>
+                          <summary>{t('e2ee.control.raw')}</summary>
+                          <pre {...stylex.props(styles.raw)}>{record.rawHex}</pre>
+                        </details>
+                      </div>
+                    </Accordion.Panel>
+                  </Accordion.Item>
                 );
               })}
-            </ol>
-          )}
-          {history?.page.nextCursor && history.upgradeRequiredAt === undefined && (
-            <div {...stylex.props(styles.footer)}>
-              <Button disabled={props.loading} onClick={props.onLoadMore}>
-                {t('e2ee.control.loadMore')}
-              </Button>
-            </div>
-          )}
-          {history?.page.nextCursor === null && history.upgradeRequiredAt === undefined && (
-            <p>{t('e2ee.control.complete')}</p>
-          )}
+            </Accordion.Root>
+            {history.page.nextCursor !== null && history.upgradeRequiredAt === undefined && (
+              <div>
+                <Button disabled={props.loading} onClick={props.onLoadMore}>
+                  {t('e2ee.control.loadMore')}
+                </Button>
+              </div>
+            )}
+            {history.page.nextCursor === null && history.upgradeRequiredAt === undefined && (
+              <p {...stylex.props(styles.footnote)}>{t('e2ee.control.complete')}</p>
+            )}
+          </section>
+        )}
+        <section aria-label={t('e2ee.control.identity')} {...stylex.props(styles.section)}>
+          <h2 {...stylex.props(styles.sectionTitle)}>{t('e2ee.control.identity')}</h2>
+          <div {...stylex.props(styles.card, styles.identity)}>
+            <dl {...stylex.props(styles.fields)}>
+              <dt {...stylex.props(styles.fieldName)}>{t('e2ee.control.workspace')}</dt>
+              <dd {...stylex.props(styles.value)}>{props.workspaceId}</dd>
+              {props.genesisHash !== undefined && (
+                <>
+                  <dt {...stylex.props(styles.fieldName)}>{t('e2ee.control.genesis')}</dt>
+                  <dd {...stylex.props(styles.value)}>{props.genesisHash}</dd>
+                </>
+              )}
+            </dl>
+          </div>
         </section>
       </div>
     </main>

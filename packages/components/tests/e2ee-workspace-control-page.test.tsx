@@ -4,10 +4,16 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ComponentProps } from 'react';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { E2eeWorkspaceControlPage } from '../src/components/pages/e2ee-workspace-control-page';
+import { appendLedgerHistory } from '../src/lib/e2ee-ledger-history';
 
 vi.mock('react-i18next', () => ({
-  useTranslation: () => ({ t: (key: string) => key }),
+  useTranslation: () => ({
+    t: (key: string, options?: Record<string, unknown>) =>
+      options ? `${key} ${JSON.stringify(options)}` : key,
+  }),
 }));
 
 let root: Root | undefined;
@@ -83,5 +89,63 @@ describe('encrypted workspace control page recovery', () => {
     });
     expect(container!.querySelector('details')?.open).toBe(true);
     expect(container!.textContent).toContain('lody-e2ee-workspace-diagnostics');
+  });
+});
+
+describe('encrypted workspace control page reading', () => {
+  // Frozen synthetic ledger v1 vector signed by fixed test keys.
+  const vector = JSON.parse(
+    readFileSync(join(import.meta.dirname, '../../e2ee-core/test/ledger-v1-vector.json'), 'utf8')
+  ) as { anchor: string; records: { hex: string }[] };
+  const page = (count: number, headHash: string) => ({
+    workspaceId: 'w',
+    genesisHash: vector.anchor,
+    checkpoint: { headHash, length: count },
+    startIndex: 0,
+    nextCursor: null,
+    recordsHex: vector.records.slice(0, count).map((record) => record.hex),
+  });
+  const expected = (localPin: string | null) => ({
+    workspaceId: 'w',
+    genesisHash: vector.anchor,
+    localPin,
+  });
+  // Record 10 declares a capability this client cannot verify past.
+  const full = appendLedgerHistory(
+    null,
+    page(10, '678d8a5fc4bb2ab0ef21032aa8d060056057958f15729fc53569158d07f5c0ce'),
+    expected(vector.anchor)
+  );
+  const history = (localPin: string | null) =>
+    appendLedgerHistory(null, page(9, full.records[8]!.hash), expected(localPin));
+
+  it('summarizes who did what and lists current members', () => {
+    render({ history: history(vector.anchor) });
+    const text = container!.textContent!;
+    expect(text).toContain('e2ee.control.status.verified');
+    expect(text).toContain('e2ee.summary.transferOwner');
+    const members = [
+      ...container!.querySelectorAll('section[aria-label="e2ee.control.members"] li'),
+    ];
+    expect(members.map((row) => row.textContent)).toEqual([
+      expect.stringContaining('"number":3'),
+      expect.stringContaining('"number":1'),
+    ]);
+    expect(members[0]!.textContent).toContain('e2ee.values.owner');
+  });
+
+  it('warns when the genesis is not pinned on this device', () => {
+    render({ history: history(null) });
+    expect(container!.querySelector('[role="alert"]')?.textContent).toContain(
+      'e2ee.control.status.unpinned'
+    );
+  });
+
+  it('stops at an unverifiable capability and asks for an upgrade instead of offering more', () => {
+    render({ history: full });
+    expect(container!.querySelector('[role="alert"]')?.textContent).toContain(
+      'e2ee.control.status.upgrade'
+    );
+    expect(button('e2ee.control.loadMore')).toBeUndefined();
   });
 });
