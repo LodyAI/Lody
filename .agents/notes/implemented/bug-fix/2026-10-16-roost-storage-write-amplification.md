@@ -132,17 +132,27 @@ Its three statistics queries must support both the installed container v3
 (`roost_kv.space`) and container v4's interned namespaces (`roost_spaces.name`
 joined by `space_id`). A test-local relation exposes the same `space/key/value`
 columns for either format, with an explicit accepted-version assertion. Update
-bytes, receipt count and projection-row budgets remain unchanged. This is test
-diagnostics only: production reads, SDK pins, migrations and data cleanup do not
-change. Companion storage work: [Roost #15](https://github.com/loro-dev/roost/pull/15).
+bytes, receipt count and projection-row budgets remain unchanged. The diagnostic
+relation changes no production read/write behavior. Companion storage work:
+[Roost #15](https://github.com/loro-dev/roost/pull/15).
 Diagnostic compatibility PR: [#1735](https://github.com/LodyAI/Lody/pull/1735).
 
-The same sustained-streaming/reopen case passed separately with the installed
-Native SDK (v3) and the rebuilt v4 addon: one passed and 75 filtered in each run.
-Repository format, all-package typechecking, type-aware lint and documentation
-checks passed. Full `pnpm check` stopped at Effect lint because the reused build
-dependencies lacked `@effect/tsgo`; it did not reach the full repository test
-suite. The two Native runs and unchanged budgets do not stand in for that suite.
+The coordinated Roost 0.2.0 release is now published. PR #1735 pins both the
+TypeScript and Native packages in the shared catalog and keeps all six exact
+platform dependencies in the lockfile and release-age exceptions. This upgrades
+the Native runtime to SQLite container v4; earlier containers are refused, with
+no migration, automatic reset or data cleanup. The dependent
+[message-state fix #1737](https://github.com/LodyAI/Lody/pull/1737) consumes this
+same catalog update and must merge after #1735. Acceptance is repeated against
+the published packages rather than a local SDK artifact.
+
+Frozen installation, complete `pnpm check`, repository format and documentation
+checks pass with the published 0.2.0 packages and no native override. The full CLI
+suite passes 4,429 tests with four existing skips, including streaming storage
+budgets and reopen. The four Electron native-staging tests pass: foreign target
+selection uses synthetic bindings; the installed host binding executes real
+signed SQLite write/reopen probes. The Native release manifest identifies merged
+Roost source `e85c970`; this is not cross-platform runtime acceptance on this host.
 
 ## Outbox and existing data
 

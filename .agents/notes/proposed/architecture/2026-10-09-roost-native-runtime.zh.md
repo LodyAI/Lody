@@ -17,9 +17,10 @@ CLI 现在接入已发布的 Node-API 包，在 Worker 内运行 SQLite 实现�
 
 ## 决策与边界
 
-CLI 运行依赖固定为 `@loro-dev/roost-node@0.1.2`，发布冷却期仅豁免该版本及
-六个精确匹配的平台包版本。
-保留 `@loro-dev/roost@0.1.2` 的身份、应用 JSON 和 `NodeLodyHistory` 适配器。
+CLI 通过共享 catalog 将运行依赖固定为 `@loro-dev/roost-node@0.2.0`，
+身份、应用 JSON 和 `NodeLodyHistory` 使用 `@loro-dev/roost@0.2.0`。
+发布冷却期仅豁免这两个精确版本和六个匹配的平台包版本。
+Native 0.2.0 使用 SQLite container v4，拒绝更早容器，不迁移或自动重置。
 安装、构建和打包 Lody 无须 Rust 源码或旁边的 Roost 仓库。
 
 直接使用 `RoostNativeClient`，保留数据库位置、系统凭据存储中的种子、允许的签名身份、
