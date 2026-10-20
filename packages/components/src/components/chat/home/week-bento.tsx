@@ -55,10 +55,9 @@ const AREA = {
 const ROWS = gridRows([5.6, 4.3, 5.6]);
 
 const styles = stylex.create({
-  icons: {
-    display: 'flex',
+  agentIcon: {
+    display: 'inline-flex',
     alignItems: 'center',
-    gap: space[1.5],
     flexShrink: 0,
     color: colors.secondaryLabel,
   },
@@ -173,6 +172,10 @@ const styles = stylex.create({
   mix: { display: 'flex', flex: '1 1 0%', flexDirection: 'column', gap: space[1.5], minWidth: 0 },
   agentList: { display: 'flex', gap: space[4], minWidth: 0 },
   names: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: space[1.5],
+    minWidth: 0,
     margin: 0,
     fontSize: text.footnoteSize,
     lineHeight: text.footnoteLeading,
@@ -281,7 +284,7 @@ export function WeekBento({
 }: {
   model: HomeWeekModel;
   agentLabel: (agent: HomeWeekAgent) => string;
-  /** The agent's mark, shown at the top right of the agents tile; injected so the tiles stay light. */
+  /** The agent's mark, shown beside its name; injected so the tiles stay light. */
   agentIcon?: AgentIconRenderer;
   /** Roll the numbers up on first show. Off for tests and for a still frame. */
   animate?: boolean;
@@ -453,13 +456,6 @@ export function WeekBento({
       <Tile area={AREA.agents}>
         <div {...stylex.props(tileStyles.head)}>
           <p {...stylex.props(tileStyles.label)}>{t('home.week.agents', 'Agents')}</p>
-          {agentIcon && model.agents.length > 0 ? (
-            <span aria-hidden="true" {...stylex.props(styles.icons)}>
-              {model.agents.map((agent) => (
-                <span key={`${agent.cliType}:${agent.agentType}`}>{agentIcon(agent)}</span>
-              ))}
-            </span>
-          ) : null}
         </div>
         {model.agents.length > 0 ? (
           <div {...stylex.props(styles.agentList)}>
@@ -468,6 +464,11 @@ export function WeekBento({
               return (
                 <div key={`${agent.cliType}:${agent.agentType}`} {...stylex.props(styles.mix)}>
                   <p {...stylex.props(styles.names)}>
+                    {agentIcon ? (
+                      <span aria-hidden="true" {...stylex.props(styles.agentIcon)}>
+                        {agentIcon(agent)}
+                      </span>
+                    ) : null}
                     <span {...stylex.props(tileStyles.name)}>
                       {t('home.week.agentShare', '{{name}} {{percent}}%', {
                         name: agentLabel(agent),

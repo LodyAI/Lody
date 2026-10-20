@@ -98,6 +98,17 @@ the tile press opening, a row press not expanding, and a fully-shown tile stayin
 real window the press-over-a-row target judgement and the cursor affordance remain visually
 unreviewed.
 
+## Partner labels (2026-10-21)
+
+The agents tile now places each injected icon directly before its own name and session share,
+above the existing meter. Grouping the marks in the header made their association with the
+separate labels harder to read. Icons remain decorative, keep their fixed size, and leave the
+existing translated labels and percentages unchanged. The existing Storybook fixture was
+checked in light and dark themes at 1000px and 720px, with before/after captures kept outside
+Git. All 25 existing week/dashboard component tests pass. Package type checking is blocked
+by unresolved `jsqr` and `@lody/cloud-api` dependencies in the current checkout. The root
+`pnpm check` also stops at the unresolved `@lody/cloud-api` dependency during type checking.
+
 ## Verification and limits
 
 - Pure suites cover the window, lines and comparison, merged PRs, agents, repository, streaks and emptiness, and the plan-usage selection; a jsdom suite covers the tiles' text, the wall's day tooltip and the session count's wide placement, the omitted comparison, both usage windows and their resets, the provider selector's closed states (opening its menu is not exercised in jsdom), the session-count fallback, the forecast line, bar counts and plural units. They use fixed dates but were not run here: the authoring sandbox has no Node runtime, so type checking, linting, formatting, tests, Storybook and documentation checks all remain to be run.

@@ -42,6 +42,9 @@ scales or covers a neighbouring label. DOM z-index alone cannot order extracted 
 The [owning note](../../../../../.agents/notes/implemented/feature/2026-10-16-home-week-tiles.md#transition-layering-correction-2026-10-18)
 records the failure and browser verification.
 
+[`home/week-bento.tsx`](home/week-bento.tsx) keeps each agent's icon beside its name and
+session share, above its own meter, rather than collecting icons in the tile header.
+
 The stage also tells its group how tall it is: [`landing-stage.ts`](landing-stage.ts) provides
 the stage and group elements, and `useLandingRoom` turns them into the height the dashboard may
 take (the stage less the rest of the group, independent of the dashboard's own height). The
