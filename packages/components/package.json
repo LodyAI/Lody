@@ -152,6 +152,7 @@
     "jotai": "catalog:",
     "jotai-effect": "^2.2.1",
     "jsonc-parser": "^3.3.1",
+    "jsqr": "^1.4.0",
     "katex": "^0.16.47",
     "konsta": "^5.0.9",
     "loro-adaptors": "catalog:",

@@ -96,11 +96,20 @@ const vectorHistory = (recorded: typeof vectorPage) =>
     genesisHash: vectorGenesis,
     localPin: vectorGenesis,
   });
+// Synthetic display profiles; the vector's memberships are 0a…, 0b… and 0c….
+const teamProfiles = {
+  you: { name: 'Alex Chen' },
+  memberProfiles: new Map([
+    ['0b'.repeat(16), { name: 'Sam Rivera' }],
+    ['0c'.repeat(16), { name: 'Jordan Lee' }],
+  ]),
+};
 // The first nine records: everything this client can verify.
 export const TeamHistory: Story = {
   args: {
     workspaceId: vectorPage.workspaceId,
     genesisHash: vectorGenesis,
+    ...teamProfiles,
     history: vectorHistory({
       ...vectorPage,
       checkpoint: {
@@ -116,6 +125,7 @@ export const UpgradeRequired: Story = {
   args: {
     workspaceId: vectorPage.workspaceId,
     genesisHash: vectorGenesis,
+    ...teamProfiles,
     history: vectorHistory(vectorPage),
   },
 };

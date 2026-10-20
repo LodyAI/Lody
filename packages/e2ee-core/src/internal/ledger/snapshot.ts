@@ -2,6 +2,7 @@ export {
   verifyLedgerSnapshot,
   prepareLedgerSnapshot,
   comparisonNote,
+  ledgerStateDigest,
   historicalContentIdentity,
   type HistoricalContentIdentity,
   snapshotTrustFromView,

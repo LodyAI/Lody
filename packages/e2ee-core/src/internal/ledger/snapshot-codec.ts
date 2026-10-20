@@ -193,13 +193,9 @@ export function proposalOf(
     };
   });
 }
-export function noteOf(
-  s: InternalState,
-  signer: Bytes.SigningPublicKey
-): Result.Result<ComparisonNote, LedgerError> {
+/** Digest of protocol, genesis, length, head and actual authorization state; it names no signer. */
+export function stateDigestOf(s: InternalState): Result.Result<Bytes.RecordHash, LedgerError> {
   return Result.gen(function* () {
-    const device = stateGet(s.devices, id(signer));
-    if (!device || device.kind !== 'personal') return yield* fail('unauthorized');
     const head = hashAt(s, s.hashes.length - 1)!;
     const body = yield* lift(
       encodeSnapshotCbor([
@@ -210,14 +206,21 @@ export function noteOf(
         authState(s),
       ])
     );
-    const stateDigest = yield* lift(
-      Bytes.recordHash(sha256(concat([domain('snapshot-digest/v1'), body])))
-    );
+    return yield* lift(Bytes.recordHash(sha256(concat([domain('snapshot-digest/v1'), body]))));
+  });
+}
+export function noteOf(
+  s: InternalState,
+  signer: Bytes.SigningPublicKey
+): Result.Result<ComparisonNote, LedgerError> {
+  return Result.gen(function* () {
+    const device = stateGet(s.devices, id(signer));
+    if (!device || device.kind !== 'personal') return yield* fail('unauthorized');
     return Object.freeze({
       genesis: s.genesis,
-      head,
+      head: hashAt(s, s.hashes.length - 1)!,
       length: s.hashesOffset + s.hashes.length,
-      stateDigest,
+      stateDigest: yield* stateDigestOf(s),
       noteSigner: signer,
     });
   });

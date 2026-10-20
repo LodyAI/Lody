@@ -446,6 +446,10 @@ describe('atomic member removal and epoch publication', () => {
       expect(hex(ok(Snapshots.comparisonNote(view, publicKey(owner))).stateDigest)).toBe(
         hex(ok(Snapshots.comparisonNote(full, publicKey(owner))).stateDigest)
       );
+      // A reader holding no device gets the same digest as the members' notes.
+      expect(hex(ok(Snapshots.ledgerStateDigest(view)))).toBe(
+        hex(ok(Snapshots.comparisonNote(full, publicKey(owner))).stateDigest)
+      );
       expect(ok(Ledger.epochHistoryPacket(view, 1)).packet).toEqual(filled(30, 72));
       for (const op of [o.join(attacker, 11), o.join(bob, 13), o.device(phone, 0, id(10))]) {
         const reuse = signed([view.head.toBytes(), owner.pk, op], owner);
@@ -1214,6 +1218,7 @@ describe('authenticated snapshot migration reproduction', () => {
     expect(code(Snapshots.comparisonNote(counterfeit, ok(Bytes.signingPublicKey(owner.pk))))).toBe(
       'unauthorized'
     );
+    expect(code(Snapshots.ledgerStateDigest(counterfeit))).toBe('unauthorized');
     expect(
       code(Snapshots.historicalContentIdentity(counterfeit, ok(Bytes.signingPublicKey(owner.pk))))
     ).toBe('unauthorized');

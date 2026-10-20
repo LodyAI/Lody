@@ -49,7 +49,7 @@
 | 保留状态 | `exportVerifiedState`, `restoreVerifiedState`, `RetainedLedgerState` |
 | 记录签名 | `prepareLedgerRecord`, `signLedgerRecord`, `PreparedLedgerRecord` |
 | 准入与创世 | `prepareJoinRequest`, `prepareDeviceAdmission`, `prepareLedgerCommand`, `signGenesisRecord`, `LedgerCommand` |
-| 快照 | `verifyLedgerSnapshot`, `prepareLedgerSnapshot`, `signLedgerSnapshot`, `snapshotTrustFromView`, `authenticateLedgerSnapshotEvidence`, `encodeSignedSnapshot`, `snapshotSigningBytes`, `headAttestationSigningBytes`, `historicalContentIdentity`, `comparisonNote`, `compareNotes`, `confirmIndependentComparison`, `SnapshotTrust`, `VerifiedViewSnapshotTrust`, `SnapshotIdentityPin`, `SnapshotEvidence`, `SnapshotProposal`, `ComparisonNote`, `Comparison`, `IndependentConfirmation`, `HistoricalContentIdentity` |
+| 快照 | `verifyLedgerSnapshot`, `prepareLedgerSnapshot`, `signLedgerSnapshot`, `snapshotTrustFromView`, `authenticateLedgerSnapshotEvidence`, `encodeSignedSnapshot`, `snapshotSigningBytes`, `headAttestationSigningBytes`, `historicalContentIdentity`, `comparisonNote`, `ledgerStateDigest`, `compareNotes`, `confirmIndependentComparison`, `SnapshotTrust`, `VerifiedViewSnapshotTrust`, `SnapshotIdentityPin`, `SnapshotEvidence`, `SnapshotProposal`, `ComparisonNote`, `Comparison`, `IndependentConfirmation`, `HistoricalContentIdentity` |
 | Feed 分页 | `prepareLedgerPage`, `prepareLedgerPageEffect`, `frameLedgerRecord`, `validLedgerOffset`, `LedgerFeedError`, `LedgerFeedState`, `LedgerReadPage` |
 | 纪元密钥 | `commitEpochKey`, `sealHistoryPacket`, `openHistoryPacket`, `recoverLedgerHistory`, `EpochKeyError` |
 | 信封 | `prepareEpochEnvelope`, `openEpochEnvelope`, `authenticateEpochEnvelope`, `authenticateEpochEnvelopeSignature`, `epochDeliveryId`, `EpochEnvelopeContext` |

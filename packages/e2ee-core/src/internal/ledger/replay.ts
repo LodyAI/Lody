@@ -2,6 +2,7 @@ import {
   verifiedSnapshotState,
   proposalOf,
   noteOf,
+  stateDigestOf,
   encodeRetainedState,
   decodeRetainedState,
   type SnapshotTrust,
@@ -506,6 +507,14 @@ export function prepareLedgerSnapshot(view: LedgerView, signer: SigningPublicKey
 export function comparisonNote(view: LedgerView, signer: SigningPublicKey) {
   const state = states.get(view);
   return state ? noteOf(state, signer) : fail('unauthorized');
+}
+/**
+ * The comparison digest of a genuine view without naming a note signer, for a
+ * reader that holds no device in this ledger. Equal to its comparison notes' digest.
+ */
+export function ledgerStateDigest(view: LedgerView) {
+  const state = states.get(view);
+  return state ? stateDigestOf(state) : fail('unauthorized');
 }
 /** Who authored historical content: the member (when history is available) or only the device. */
 export type HistoricalContentIdentity =

@@ -8,6 +8,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { E2eeWorkspaceControlPage } from '../src/components/pages/e2ee-workspace-control-page';
 import { appendLedgerHistory } from '../src/lib/e2ee-ledger-history';
+import { ledgerVerificationCode } from '../src/lib/e2ee-ledger-verification';
 
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
@@ -134,11 +135,32 @@ describe('encrypted workspace control page reading', () => {
     expect(members[0]!.textContent).toContain('e2ee.values.owner');
   });
 
+  it('shows the verification code for the verified state', () => {
+    render({ history: history(vector.anchor) });
+    const code = container!.querySelector('[aria-label="e2ee.verify.codeLabel"]')!.textContent;
+    expect(code).toBe(ledgerVerificationCode(history(vector.anchor)).stateDigest);
+    expect(container!.querySelector('svg[aria-label="e2ee.verify.qrLabel"] path')).not.toBeNull();
+  });
+
+  it('names the genesis member after this account only when this device holds the pin', () => {
+    const you = { name: 'Alex Chen' };
+    const profiles = new Map([['0c'.repeat(16), { name: 'Jordan Lee' }]]);
+    render({ history: history(vector.anchor), you, memberProfiles: profiles });
+    let text = container!.textContent!;
+    expect(text).toContain('Alex Chen');
+    expect(text).toContain('e2ee.control.you');
+    expect(text).toContain('"actor":"Alex Chen"');
+    expect(text).toContain('Jordan Lee');
+    act(() => root?.unmount());
+    render({ history: history(null), you, memberProfiles: profiles });
+    text = container!.textContent!;
+    expect(text).not.toContain('Alex Chen');
+    expect(text).toContain('Jordan Lee');
+  });
+
   it('warns when the genesis is not pinned on this device', () => {
     render({ history: history(null) });
-    expect(container!.querySelector('[role="alert"]')?.textContent).toContain(
-      'e2ee.control.status.unpinned'
-    );
+    expect(container!.textContent).toContain('e2ee.control.status.unpinned');
   });
 
   it('stops at an unverifiable capability and asks for an upgrade instead of offering more', () => {

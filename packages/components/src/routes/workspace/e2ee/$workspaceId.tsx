@@ -1,5 +1,5 @@
 import { createFileRoute, useNavigate } from '@tanstack/react-router';
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useSetAtom } from 'jotai';
 import { usePlatform, usePlatformSession } from '@lody/platform/react';
 import type { WorkspaceModeDescriptor } from '@lody/cloud-api';
@@ -29,6 +29,17 @@ function WorkspaceControlRoute() {
   const platform = usePlatform();
   const session = usePlatformSession();
   const accountId = session.status === 'authenticated' ? session.user.id : null;
+  const user = session.status === 'authenticated' ? session.user : null;
+  const you = useMemo(
+    () =>
+      user
+        ? {
+            name: [user.name, user.email].find((value) => value != null && value !== '') ?? user.id,
+            image: user.image ?? null,
+          }
+        : undefined,
+    [user]
+  );
   const port = platform.e2eeWorkspaces;
   const navigate = useNavigate();
   const clearWorkspace = useSetAtom(setWorkspaceContextAtom);
@@ -182,6 +193,7 @@ function WorkspaceControlRoute() {
       loading={!current || current.loading || current.scope !== scope}
       failure={current?.failure ?? null}
       unavailable={!port || !accountId}
+      you={you}
       diagnostics={diagnostics}
       onRepairLocal={() => {
         if (!accountId) return;

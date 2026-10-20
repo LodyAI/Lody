@@ -1,11 +1,13 @@
 import * as stylex from '@stylexjs/stylex';
 import { Accordion } from '@lody/ui/accordion';
 import { Alert } from '@lody/ui/alert';
+import { Avatar } from '@lody/ui/avatar';
 import { Button } from '@lody/ui/button';
 import { colors, shadow } from '@lody/ui/tokens/colors.stylex';
 import { radius, space } from '@lody/ui/tokens/scales.stylex';
 import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { ChevronLeft } from 'lucide-react';
 import type { TFunction } from 'i18next';
 import { ledgerRecordFields, type VerifiedLedgerHistory } from '@/lib/e2ee-ledger-history';
 import {
@@ -16,6 +18,7 @@ import {
   type LedgerOverview,
 } from '@/lib/e2ee-ledger-overview';
 import type { E2eeControlFailure } from '@/lib/e2ee-control-failure';
+import { LedgerVerificationCard } from './e2ee-ledger-verification';
 
 const styles = stylex.create({
   page: {
@@ -64,8 +67,15 @@ const styles = stylex.create({
     borderBottomStyle: 'solid',
     borderBottomColor: colors.separator,
   },
-  memberName: { fontWeight: 600, whiteSpace: 'nowrap' },
-  memberRole: { color: colors.secondaryLabel, whiteSpace: 'nowrap' },
+  memberIdentity: { display: 'flex', flexDirection: 'column', minWidth: 0, flexGrow: 1 },
+  memberName: {
+    fontWeight: 600,
+    whiteSpace: 'nowrap',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+  },
+  memberMeta: { color: colors.secondaryLabel, fontSize: '0.85em', whiteSpace: 'nowrap' },
+  youTag: { color: colors.secondaryLabel, fontWeight: 400, marginInlineStart: space[1] },
   grow: { flexGrow: 1, minWidth: 0 },
   trailing: {
     color: colors.secondaryLabel,
@@ -208,77 +218,53 @@ function FailurePanel(props: {
   );
 }
 
-/** One verdict for what this device has checked so far. */
-function StatusPanel(props: {
-  history: VerifiedLedgerHistory;
-  overview: LedgerOverview;
-  onRefresh: () => void;
-  loading: boolean;
-}) {
+/** Display identity for a member. Names come from account profiles, never from the ledger. */
+export interface E2eeMemberProfile {
+  name: string;
+  image?: string | null;
+}
+
+type ResolveMember = (member: LedgerMemberLabel | null) => string;
+
+function useMemberNames(
+  history: VerifiedLedgerHistory | null,
+  overview: LedgerOverview | null,
+  profiles: ReadonlyMap<string, E2eeMemberProfile> | undefined,
+  you: E2eeMemberProfile | undefined
+) {
   const { t } = useTranslation();
-  const { history, overview } = props;
-  const upgrade = history.upgradeRequiredAt !== undefined;
-  const tone = upgrade || !history.locallyPinned ? 'warning' : 'success';
-  return (
-    <Alert.Root tone={tone}>
-      <Alert.Title>
-        {upgrade
-          ? t('e2ee.control.status.upgrade')
-          : history.locallyPinned
-            ? t('e2ee.control.status.verified')
-            : t('e2ee.control.status.unpinned')}
-      </Alert.Title>
-      <Alert.Description>
-        {upgrade
-          ? t('e2ee.control.upgradeStop', { position: history.upgradeRequiredAt })
-          : history.locallyPinned
-            ? t('e2ee.control.verifiedPinned')
-            : t('e2ee.control.verifiedUnpinned')}
-      </Alert.Description>
-      <Alert.Description>
-        {[
-          t('e2ee.control.progress', {
-            count: history.view.length,
-            total: history.page.checkpoint.length,
-          }),
-          t('e2ee.control.memberCount', { count: overview.members.length }),
-          t('e2ee.control.deviceCount', { count: overview.deviceCount }),
-          t('e2ee.control.epoch', { epoch: overview.epoch.number }),
-        ].join(' · ')}
-      </Alert.Description>
-      {history.continuityPending && (
-        <Alert.Description>{t('e2ee.control.continuityPending')}</Alert.Description>
-      )}
-      <Alert.Description>
-        <span {...stylex.props(styles.footnote)}>{t('e2ee.control.freshness')}</span>
-      </Alert.Description>
-      <Alert.Actions>
-        <Button variant="secondary" disabled={props.loading} onClick={props.onRefresh}>
-          {t('e2ee.control.refresh')}
-        </Button>
-      </Alert.Actions>
-    </Alert.Root>
-  );
+  return useMemo(() => {
+    const merged = new Map(profiles);
+    let self: string | null = null;
+    // Only a creation pin on this device ties the genesis member to this account.
+    const genesis = overview?.events[0];
+    if (history?.locallyPinned === true && you && genesis?.type === 'genesis') {
+      self = genesis.actor.membershipId;
+      merged.set(self, you);
+    }
+    const fallback = (member: LedgerMemberLabel) =>
+      member.ordinal === null
+        ? t('e2ee.summary.memberById', { id: shortId(member.membershipId) })
+        : t('e2ee.summary.member', { number: member.ordinal });
+    const name: ResolveMember = (member) =>
+      member === null
+        ? t('e2ee.summary.unknownSigner')
+        : (merged.get(member.membershipId)?.name ?? fallback(member));
+    return { name, profile: (id: string) => merged.get(id), self, fallback };
+  }, [history, overview, profiles, you, t]);
 }
 
-function memberName(t: TFunction, member: LedgerMemberLabel | null) {
-  if (member === null) return t('e2ee.summary.unknownSigner');
-  return member.ordinal === null
-    ? t('e2ee.summary.memberById', { id: shortId(member.membershipId) })
-    : t('e2ee.summary.member', { number: member.ordinal });
-}
-
-function eventSentence(t: TFunction, event: LedgerEventSummary): string {
-  const actor = memberName(t, event.actor);
+function eventSentence(t: TFunction, name: ResolveMember, event: LedgerEventSummary): string {
+  const actor = name(event.actor);
   switch (event.type) {
     case 'genesis':
       return t('e2ee.summary.genesis', { actor });
     case 'admitMember':
-      return t('e2ee.summary.admitMember', { actor, member: memberName(t, event.member) });
+      return t('e2ee.summary.admitMember', { actor, member: name(event.member) });
     case 'setRole':
       return t('e2ee.summary.setRole', {
         actor,
-        member: memberName(t, event.member),
+        member: name(event.member),
         role: t(`e2ee.values.${event.role}`),
       });
     case 'admitDevice':
@@ -292,17 +278,17 @@ function eventSentence(t: TFunction, event: LedgerEventSummary): string {
         ? t('e2ee.summary.revokeUnknownDevice', { actor, device: shortId(event.device) })
         : t('e2ee.summary.revokeDevice', {
             actor,
-            owner: memberName(t, event.owner),
+            owner: name(event.owner),
             device: shortId(event.device),
           });
     case 'transferOwner':
-      return t('e2ee.summary.transferOwner', { actor, member: memberName(t, event.member) });
+      return t('e2ee.summary.transferOwner', { actor, member: name(event.member) });
     case 'publishEpoch':
       return t('e2ee.summary.publishEpoch', { actor, epoch: event.epoch });
     case 'removeMemberAndPublishEpoch':
       return t('e2ee.summary.removeMemberAndPublishEpoch', {
         actor,
-        member: memberName(t, event.member),
+        member: name(event.member),
         epoch: event.epoch,
       });
     case 'declareCapabilities':
@@ -311,8 +297,13 @@ function eventSentence(t: TFunction, event: LedgerEventSummary): string {
   }
 }
 
-function MembersSection(props: { history: VerifiedLedgerHistory; overview: LedgerOverview }) {
+function MembersSection(props: {
+  history: VerifiedLedgerHistory;
+  overview: LedgerOverview;
+  names: ReturnType<typeof useMemberNames>;
+}) {
   const { t } = useTranslation();
+  const { names } = props;
   const partial = props.history.view.length < props.history.page.checkpoint.length;
   return (
     <section aria-label={t('e2ee.control.members')} {...stylex.props(styles.section)}>
@@ -325,21 +316,45 @@ function MembersSection(props: { history: VerifiedLedgerHistory; overview: Ledge
         )}
       </div>
       <ul {...stylex.props(styles.card)}>
-        {props.overview.members.map((member) => (
-          <li key={member.membershipId} {...stylex.props(styles.memberRow)}>
-            <span {...stylex.props(styles.memberName)}>{memberName(t, member)}</span>
-            <span {...stylex.props(styles.memberRole, styles.grow)}>
-              {t(`e2ee.values.${member.role}`)}
-            </span>
-            <span {...stylex.props(styles.trailing)}>
-              {member.devices.length === 0
-                ? t('e2ee.control.noDevices')
-                : member.devices
-                    .map((device) => `${shortId(device.key)} · ${t(`e2ee.values.${device.kind}`)}`)
-                    .join(', ')}
-            </span>
-          </li>
-        ))}
+        {props.overview.members.map((member) => {
+          const profile = names.profile(member.membershipId);
+          const name = names.name(member);
+          return (
+            <li key={member.membershipId} {...stylex.props(styles.memberRow)}>
+              <Avatar.Root size="large">
+                {profile?.image != null && profile.image !== '' ? (
+                  <Avatar.Image src={profile.image} alt="" />
+                ) : null}
+                <Avatar.Fallback>
+                  {profile ? name.slice(0, 1).toUpperCase() : (member.ordinal ?? '?')}
+                </Avatar.Fallback>
+              </Avatar.Root>
+              <span {...stylex.props(styles.memberIdentity)}>
+                <span {...stylex.props(styles.memberName)}>
+                  {name}
+                  {names.self === member.membershipId && (
+                    <span {...stylex.props(styles.youTag)}>{t('e2ee.control.you')}</span>
+                  )}
+                </span>
+                <span {...stylex.props(styles.memberMeta)}>
+                  {[
+                    t(`e2ee.values.${member.role}`),
+                    ...(profile ? [names.fallback(member)] : []),
+                  ].join(' · ')}
+                </span>
+              </span>
+              <span {...stylex.props(styles.trailing)}>
+                {member.devices.length === 0
+                  ? t('e2ee.control.noDevices')
+                  : member.devices
+                      .map(
+                        (device) => `${shortId(device.key)} · ${t(`e2ee.values.${device.kind}`)}`
+                      )
+                      .join(', ')}
+              </span>
+            </li>
+          );
+        })}
       </ul>
     </section>
   );
@@ -352,6 +367,10 @@ export interface E2eeWorkspaceControlPageProps {
   loading: boolean;
   failure: E2eeControlFailure | null;
   unavailable?: boolean;
+  /** The signed-in account; shown on the genesis member only when this device holds the creation pin. */
+  you?: E2eeMemberProfile;
+  /** Server-provided display profiles by membership ID. Display only: verify with the ledger code. */
+  memberProfiles?: ReadonlyMap<string, E2eeMemberProfile>;
   /** Builds the support report on demand; it contains no keys or record bodies. */
   diagnostics: () => string;
   /** Deletes only unreadable optional caches, then refreshes. */
@@ -368,11 +387,13 @@ export function E2eeWorkspaceControlPage(props: E2eeWorkspaceControlPageProps) {
   const { t } = useTranslation();
   const { history } = props;
   const overview = useMemo(() => (history ? ledgerOverview(history) : null), [history]);
+  const names = useMemberNames(history, overview, props.memberProfiles, props.you);
   return (
     <main {...stylex.props(styles.page)}>
       <div {...stylex.props(styles.column)}>
         <div>
           <Button variant="ghost" onClick={props.onBack}>
+            <ChevronLeft size={16} aria-hidden="true" />
             {t('e2ee.control.back')}
           </Button>
         </div>
@@ -397,20 +418,48 @@ export function E2eeWorkspaceControlPage(props: E2eeWorkspaceControlPageProps) {
             onResetProgress={props.onResetProgress}
           />
         )}
+        {history?.upgradeRequiredAt !== undefined && (
+          <Alert.Root tone="warning">
+            <Alert.Title>{t('e2ee.control.status.upgrade')}</Alert.Title>
+            <Alert.Description>
+              {t('e2ee.control.upgradeStop', { position: history.upgradeRequiredAt })}
+            </Alert.Description>
+          </Alert.Root>
+        )}
         {history && overview && (
-          <StatusPanel
+          <LedgerVerificationCard
             history={history}
-            overview={overview}
-            loading={props.loading}
-            onRefresh={props.onRefresh}
+            stats={[
+              t('e2ee.control.memberCount', { count: overview.members.length }),
+              t('e2ee.control.deviceCount', { count: overview.deviceCount }),
+              t('e2ee.control.epoch', { epoch: overview.epoch.number }),
+            ].join(' · ')}
+            actions={
+              <Button variant="ghost" disabled={props.loading} onClick={props.onRefresh}>
+                {t('e2ee.control.refresh')}
+              </Button>
+            }
           />
+        )}
+        {history && history.view.length < history.page.checkpoint.length && (
+          <p {...stylex.props(styles.footnote)}>
+            {t('e2ee.control.progress', {
+              count: history.view.length,
+              total: history.page.checkpoint.length,
+            })}
+          </p>
+        )}
+        {history?.continuityPending === true && (
+          <p {...stylex.props(styles.footnote)}>{t('e2ee.control.continuityPending')}</p>
         )}
         {props.loading && (
           <p role="status" {...stylex.props(styles.muted)}>
             {t('e2ee.control.loading')}
           </p>
         )}
-        {history && overview && <MembersSection history={history} overview={overview} />}
+        {history && overview && (
+          <MembersSection history={history} overview={overview} names={names} />
+        )}
         {history && overview && (
           <section aria-label={t('e2ee.control.history')} {...stylex.props(styles.section)}>
             <h2 {...stylex.props(styles.sectionTitle)}>{t('e2ee.control.history')}</h2>
@@ -422,7 +471,9 @@ export function E2eeWorkspaceControlPage(props: E2eeWorkspaceControlPageProps) {
                     <Accordion.Trigger>
                       <span {...stylex.props(styles.eventRow)}>
                         <span {...stylex.props(styles.eventIndex)}>{record.index + 1}</span>
-                        <span {...stylex.props(styles.eventText)}>{eventSentence(t, event)}</span>
+                        <span {...stylex.props(styles.eventText)}>
+                          {eventSentence(t, names.name, event)}
+                        </span>
                       </span>
                     </Accordion.Trigger>
                     <Accordion.Panel>
