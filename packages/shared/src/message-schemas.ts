@@ -3,6 +3,7 @@ import { isMagpieGatewayUrl } from './magpie-import';
 import { MemoryBindingSchema } from './memory-provider';
 import { AgentRoleSnapshotSchema } from './message-author';
 import { z } from 'zod';
+import { SessionHistoryContentPatchSchema } from './session-data/history-patches';
 import { BugReportClientLogSchema } from './bug-report';
 import { SubagentTaskPayloadSchema } from './acp/claude-subagent-task';
 import {
@@ -2074,6 +2075,7 @@ export const SessionHistoryReadQuerySchema = z
         kind: z.literal('watchChanges'),
         checkpoint: z.string().min(1).max(1024),
         includeBodiesFrom: z.number().int().nonnegative().optional(),
+        withPatches: z.literal(true).optional(),
         waitMs: z.number().int().nonnegative().max(15_000),
       })
       .strict(),
@@ -2122,6 +2124,7 @@ export const SessionHistoryReadQuerySchema = z
         kind: z.literal('readChanges'),
         checkpoint: z.string().min(1).max(1024),
         includeBodiesFrom: z.number().int().nonnegative().optional(),
+        withPatches: z.literal(true).optional(),
       })
       .strict(),
     z.object({ kind: z.literal('readAll') }).strict(),
@@ -2192,6 +2195,26 @@ export const SessionHistoryChangesSchema = z.discriminatedUnion('state', [
       checkpoint: z.string().min(1).max(1024),
       from: z.number().int().nonnegative().optional(),
       ids: z.array(z.string().trim().min(1)),
+      patches: z
+        .object({
+          baseCheckpoint: z.string().min(1).max(1024),
+          turns: z
+            .array(
+              z
+                .object({
+                  turnId: z.string().trim().min(1),
+                  operations: z.array(SessionHistoryContentPatchSchema).min(1).max(256),
+                })
+                .strict()
+            )
+            .max(500)
+            .refine(
+              (turns) => new Set(turns.map((turn) => turn.turnId)).size === turns.length,
+              'Duplicate history patch turn'
+            ),
+        })
+        .strict()
+        .optional(),
       bodies: z
         .object({
           changed: z.array(z.unknown()),

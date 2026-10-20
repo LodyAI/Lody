@@ -1,4 +1,5 @@
 import { createHash, randomBytes } from 'node:crypto';
+import { readRoostHistoryPatches } from './roost-history-patches';
 import { mkdir } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
@@ -960,8 +961,29 @@ const createNodeServicesForLease = async (
     },
     getCheckpoint: () =>
       readStable(async () => historyChanges.checkpoint(await publishedNativeCursor())),
-    readChanges: (checkpoint) =>
-      readStable(async () => historyChanges.read(checkpoint, await publishedNativeCursor())),
+    readChanges: (checkpoint, options) =>
+      readStable(async () => {
+        const through = await publishedNativeCursor();
+        const changes = await historyChanges.read(checkpoint, through);
+        if (changes.state !== 'ready' || !options?.withPatches) return changes;
+        for (const row of currentBranch().messages) {
+          if (
+            row.segmentId === 'primary' &&
+            !row.sealed &&
+            changes.ids.includes(row.businessId) &&
+            (await readState(row))
+          )
+            return changes;
+        }
+        const patches = await readRoostHistoryPatches(
+          historyHost,
+          currentBranch().messages,
+          changes,
+          checkpoint,
+          through
+        );
+        return patches ? { ...changes, patches } : changes;
+      }),
     count: () => readStable(async () => totalHistoryCount),
     readAt: (position) =>
       readStable(async () => {

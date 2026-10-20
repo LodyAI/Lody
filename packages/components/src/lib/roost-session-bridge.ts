@@ -13,6 +13,7 @@ import type {
 } from '@lody/shared';
 import {
   createRoostSessionData,
+  applySessionHistoryPatches,
   type HistoryAction,
   type HistoryImportInput,
   type ReplaceEditableTailInput,
@@ -70,6 +71,7 @@ type RoostHistoryTransport = {
 type RoostHistoryObservationOptions = {
   readonly incremental?: boolean | (() => boolean);
   readonly watch?: boolean | (() => boolean);
+  readonly patches?: boolean | (() => boolean);
   readonly active?: () => boolean;
   readonly subscribeWake?: (wake: () => void) => () => void;
 };
@@ -242,6 +244,9 @@ const createRoostSessionDataFactoryFromTransport =
         ? options.incremental()
         : options.incremental === true;
     const active = () => options.active?.() ?? true;
+    const patchesEnabled = () =>
+      incrementalEnabled() &&
+      (typeof options.patches === 'function' ? options.patches() : options.patches === true);
     const watchEnabled = () =>
       incrementalEnabled() &&
       active() &&
@@ -673,11 +678,13 @@ const createRoostSessionDataFactoryFromTransport =
                   checkpoint: prior.checkpoint,
                   waitMs: 15_000,
                   includeBodiesFrom: prior.start,
+                  ...(patchesEnabled() ? { withPatches: true as const } : {}),
                 }
               : {
                   kind: 'readChanges',
                   checkpoint: prior.checkpoint,
                   includeBodiesFrom: prior.start,
+                  ...(patchesEnabled() ? { withPatches: true as const } : {}),
                 }
           );
           const revision = response.historyRevision!;
@@ -699,6 +706,11 @@ const createRoostSessionDataFactoryFromTransport =
             const from = change.from === undefined ? undefined : Math.min(change.from, count);
             const affected = (await cached(() => cache.readAffected(change.ids))) ?? [];
             const replacements: { position: number; turn: SessionHistoryInput }[] = [];
+            const patches = new Map(
+              change.patches?.baseCheckpoint === prior.checkpoint
+                ? change.patches.turns.map((patch) => [patch.turnId, patch.operations])
+                : []
+            );
             const changedBodies =
               change.bodies === undefined
                 ? undefined
@@ -709,11 +721,30 @@ const createRoostSessionDataFactoryFromTransport =
                   );
             for (const row of affected) {
               if (from !== undefined && row.position >= from) continue;
+              const operations = patches.get(row.turnId);
+              if (operations) {
+                let prepared: SessionHistoryInput | undefined;
+                try {
+                  [prepared] = validateHistory(
+                    [applySessionHistoryPatches(row.turn, operations)],
+                    'Roost content patches'
+                  );
+                } catch {
+                  // Keep the cached checkpoint; repair this body at the owner's target checkpoint.
+                }
+                if (prepared) {
+                  replacements.push({ position: row.position, turn: prepared });
+                  continue;
+                }
+              }
               if (changedBodies) {
                 const turn = changedBodies.get(row.turnId);
-                if (!turn) throw new Error('Roost incremental body is incomplete');
-                replacements.push({ position: row.position, turn });
-                continue;
+                if (turn) {
+                  replacements.push({ position: row.position, turn });
+                  continue;
+                }
+                if (!change.patches?.turns.some((patch) => patch.turnId === row.turnId))
+                  throw new Error('Roost incremental body is incomplete');
               }
               const read = await readOwner({
                 kind: 'readTurn',

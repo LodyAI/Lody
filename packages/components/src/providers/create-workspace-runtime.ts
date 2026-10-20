@@ -1,5 +1,6 @@
 import {
   machineSupportsSessionHistoryIncremental,
+  machineSupportsSessionHistoryPatches,
   machineSupportsSessionHistoryWatch,
 } from '@lody/shared';
 import type { AgentConfigId, MachineProviderRateLimitsRefreshResponse } from '@lody/shared';
@@ -4375,6 +4376,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
         };
         rendererSessionDataFactory = createRoostSessionDataFactoryForMachine({
           incremental: () => machineSupportsSessionHistoryIncremental(ownerMachineMeta),
+          patches: () => machineSupportsSessionHistoryPatches(ownerMachineMeta),
           watch: () => machineSupportsSessionHistoryWatch(ownerMachineMeta),
           active: () =>
             document.visibilityState !== 'hidden' &&

@@ -1374,6 +1374,176 @@ it.each([1, 2, 3])(
   }
 );
 
+it.each(['valid', 'wrong-base', 'invalid-path', 'failed-repair'] as const)(
+  'commits content patches atomically and repairs unusable bases (%s)',
+  async (mode) => {
+    Object.assign(globalThis, { indexedDB: new IDBFactory(), IDBKeyRange });
+    const sessionId = `synthetic-content-patches-${mode}` as SessionId;
+    const workspaceId = 'synthetic-workspace' as WorkspaceId;
+    const machineId = 'synthetic-machine' as MachineId;
+    const entry: SessionHistoryInput = {
+      id: 'patch-tail',
+      role: 'assistant',
+      timestamp: 'synthetic',
+      items: [{ type: 'text', text: 'a🙂bc🚀d' }],
+    };
+    const expected: SessionHistoryInput = {
+      ...entry,
+      items: [{ type: 'text', text: 'a🙂XYZ🚀d尾' }],
+    };
+    const scope = JSON.stringify(['local', workspaceId, machineId, sessionId]);
+    const cache = createRoostHistoryCache(scope);
+    await cache.acceptPage(
+      {
+        checkpoint: 'patch-base',
+        startPosition: 0,
+        totalCount: 1,
+        rows: [createRoostDirectoryRow(0, entry as never)],
+        hasMoreOlder: false,
+        cursor: null,
+      },
+      [entry],
+      1
+    );
+    const scheduled = Promise.withResolvers<() => void>();
+    const backoff = Promise.withResolvers<void>();
+    const setTimer = vi.spyOn(globalThis, 'setTimeout').mockImplementation(((
+      callback: () => void,
+      delay: number
+    ) => {
+      scheduled.resolve(callback);
+      if (delay === 500) backoff.resolve();
+      return callback as never;
+    }) as typeof setTimeout);
+    const clearTimer = vi.spyOn(globalThis, 'clearTimeout').mockImplementation(() => {});
+    const committed = Promise.withResolvers<void>();
+    const repairing = Promise.withResolvers<void>();
+    const releaseRepair = Promise.withResolvers<void>();
+    const data = createLocalRoostSessionDataFactory({
+      incremental: true,
+      patches: true,
+      workspaceId,
+      machineId,
+      sendControl: async (request) => {
+        if (request.type !== 'session/history-read') throw new Error('Unexpected write');
+        if (request.query.kind === 'readTurn') {
+          expect(mode).not.toBe('valid');
+          expect(request.query).toEqual({
+            kind: 'readTurn',
+            turnId: entry.id,
+            atCheckpoint: 'patch-next',
+          });
+          repairing.resolve();
+          await releaseRepair.promise;
+          if (mode === 'failed-repair') throw new Error('Synthetic repair transport failure');
+          return {
+            ok: true,
+            responses: [
+              {
+                type: 'session/history-read_response',
+                sessionId,
+                success: true,
+                historyRevision: 2,
+                historyCount: 1,
+                result: { state: 'ready', turn: expected },
+              },
+            ],
+          };
+        }
+        expect(request.query).toEqual({
+          kind: 'readChanges',
+          checkpoint: 'patch-base',
+          includeBodiesFrom: 0,
+          withPatches: true,
+        });
+        return {
+          ok: true,
+          responses: [
+            {
+              type: 'session/history-read_response',
+              sessionId,
+              success: true,
+              historyRevision: 2,
+              historyCount: 1,
+              historyChange: { kind: 'changed', ids: [entry.id] },
+              result: {
+                state: 'ready',
+                checkpoint: 'patch-next',
+                ids: [entry.id],
+                bodies: { changed: [], suffix: [] },
+                patches: {
+                  baseCheckpoint: mode === 'wrong-base' ? 'unavailable-base' : 'patch-base',
+                  turns: [
+                    {
+                      turnId: entry.id,
+                      operations: [
+                        {
+                          kind: 'spliceText',
+                          path: [{ key: 'items' }, { index: 0 }, { key: 'text' }],
+                          index: 2,
+                          delete: 2,
+                          text: 'XYZ',
+                        },
+                        {
+                          kind: 'appendText',
+                          path: [
+                            { key: 'items' },
+                            { index: mode === 'invalid-path' || mode === 'failed-repair' ? 4 : 0 },
+                            { key: 'text' },
+                          ],
+                          text: '尾',
+                        },
+                      ],
+                    },
+                  ],
+                },
+              },
+            },
+          ],
+        };
+      },
+    })({ sessionId, doc: new LoroDoc(), backendKind: 'roost' });
+    const observation = data.history.observe(() => {
+      void cache.getHead().then((head) => {
+        if (head?.checkpoint === 'patch-next') committed.resolve();
+      });
+    });
+    try {
+      await observation.initial;
+      (await scheduled.promise)();
+      if (mode !== 'valid') {
+        await repairing.promise;
+        expect(await cache.getHead()).toMatchObject({ checkpoint: 'patch-base', revision: 1 });
+        expect((await cache.readRows(0, 1))?.[0]?.turn).toEqual(entry);
+        releaseRepair.resolve();
+      }
+      if (mode === 'failed-repair') {
+        await backoff.promise;
+        expect(await cache.getHead()).toMatchObject({ checkpoint: 'patch-base', revision: 1 });
+        expect((await cache.readRows(0, 1))?.[0]?.turn).toEqual(entry);
+        return;
+      }
+      await committed.promise;
+      expect(await data.history.readTurn(entry.id)).toEqual({ state: 'ready', turn: expected });
+      expect(await cache.getHead()).toMatchObject({ checkpoint: 'patch-next', revision: 2 });
+      const reopened = createRoostHistoryCache(scope);
+      try {
+        expect(await reopened.getHead()).toMatchObject({ checkpoint: 'patch-next', revision: 2 });
+        expect((await reopened.readRows(0, 1))?.[0]?.turn).toEqual(expected);
+      } finally {
+        reopened.dispose();
+      }
+    } finally {
+      releaseRepair.resolve();
+      observation.unsubscribe();
+      data.dispose?.();
+      cache.dispose();
+      setTimer.mockRestore();
+      clearTimer.mockRestore();
+    }
+  }
+);
+
 it('advances coherent streaming replies even while newer control revisions keep arriving', async () => {
   Object.assign(globalThis, { indexedDB: new IDBFactory(), IDBKeyRange });
   const sessionId = 'synthetic-continuous-stream' as SessionId;
@@ -1432,6 +1602,7 @@ it('advances coherent streaming replies even while newer control revisions keep 
       const atRevision = revision;
       expect(request.query.checkpoint).toBe(`checkpoint-${atRevision - 2}`);
       expect(request.query.includeBodiesFrom).toBe(0);
+      expect(request.query).not.toHaveProperty('withPatches');
       revision += 2;
       const cursor = doc.getMap('roostHistoryCursor');
       cursor.set('historyRevision', revision);

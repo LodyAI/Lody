@@ -51,6 +51,10 @@
   with a commit-time guard against regressing an advanced execution status.
 - Test the real Loro reader and writer. Delayed reads use small injected Promise
   gates; there is no test-only implementation of the complete command API.
+- Roost content patches require independent capability negotiation and an exact
+  cached base checkpoint. Prepare detached bodies and commit them with membership
+  and checkpoint atomically; unusable patches require checkpoint-protected body
+  reads. Never reinterpret raw segment edits as logical state/permission projection.
 - Normalized subagent events persist inside `subagent_task.run`, keyed by root ACP
   session plus run id. Bind the initiating turn once; child output never changes root
   turn identity, plan, tools, or accounting. Ignore unregistered/terminal output,

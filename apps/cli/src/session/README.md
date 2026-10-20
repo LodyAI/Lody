@@ -428,6 +428,17 @@ behind newer control hints and immediately catch up again, so streaming does not
 stop for a stable observation. Body-only edits retain cached directory cursor validity.
 A successful delta repair finishes even for a partial tail cache, without rereading
 the unchanged latest page.
+
+`sessionHistoryPatches` v1 additionally negotiates `withPatches` on changes/watches.
+For a verified interval of at most 256 native edits to unsealed primary messages
+without successor segments or state/permission overlays, replies carry content operations instead of accumulated
+bodies. Operations use Unicode scalar offsets and name their exact base checkpoint.
+Structural edits, seals, state/permission records, projection-only defaults and
+unavailable evidence retain complete-body reads. The renderer prepares detached
+replacements; an unusable patch recovers its body at the target checkpoint before
+the existing atomic cache transaction. Old requests and database formats are unchanged.
+See [content patch decision](../../../../.agents/notes/implemented/bug-fix/2026-10-20-roost-history-rpc-patches.md).
+
 The previous coherent projection remains readable on failure. Supersession retries immediately; storage and transport
 failures retain recovery backoff. Initial population, legacy targets and unknown coverage
 retain staged rebuilding. Local control reads have a separate bounded pool from writes;

@@ -6985,6 +6985,7 @@ export class MessageHandler {
           kind: 'readChanges' as const,
           checkpoint: query.checkpoint,
           includeBodiesFrom: query.includeBodiesFrom,
+          ...(query.withPatches ? { withPatches: true as const } : {}),
         };
         return await this.historyWatchReads.enqueue(sessionId, () =>
           this.readSessionHistoryForRpc(sessionId, read, signal)
@@ -7009,7 +7010,10 @@ export class MessageHandler {
           case 'readChanges': {
             if (!history.readChanges)
               throw new Error('History incremental recovery is unavailable');
-            const changes = await history.readChanges(query.checkpoint);
+            const changes = await history.readChanges(
+              query.checkpoint,
+              query.withPatches ? { withPatches: true } : undefined
+            );
             result = changes;
             if (changes.state === 'ready' && query.includeBodiesFrom !== undefined) {
               const count = await history.count();
@@ -7025,7 +7029,9 @@ export class MessageHandler {
               // structural rewrite retains the bounded checkpoint-read path.
               if (changes.ids.length + (from === undefined ? 0 : count - from) <= 500) {
                 const changed: SessionHistoryInput[] = [];
+                const patched = new Set(changes.patches?.turns.map((turn) => turn.turnId));
                 for (const id of changes.ids) {
+                  if (patched.has(id)) continue;
                   const read = await history.readTurn(id);
                   if (read.state === 'ready') changed.push(read.turn as SessionHistoryInput);
                 }

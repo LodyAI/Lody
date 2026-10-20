@@ -1,4 +1,5 @@
 export * from './types';
+export * from './history-patches';
 export { type SessionSnapshot, type SessionSnapshotService } from './snapshot';
 export * from './domain';
 export {

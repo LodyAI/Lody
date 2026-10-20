@@ -60,6 +60,7 @@ import type { LoroDocumentManager } from '../src/lib/loro/doc';
 import {
   hashHistoryEntryForVersion,
   hashText,
+  applySessionHistoryPatches,
   type HistoryImportInput,
 } from '@lody/shared/session-data';
 import { Identity } from '@loro-dev/roost';
@@ -1127,6 +1128,182 @@ describe('Production Roost history semantics', () => {
     }
   });
 
+  it('transmits native streaming edits without resending an unchanged large tool result', async () => {
+    const fixture = await coldHistoryHandlerFixture(1);
+    const id = [...fixture.docs.keys()][0]!;
+    try {
+      await fixture.ready(id);
+      const tool = {
+        type: 'tool_call' as const,
+        toolCallId: 'synthetic-large-tool',
+        status: 'completed' as const,
+        rawOutput: { text: 'unchanged tool result '.repeat(16384) },
+      };
+      const turn = {
+        ...nativeAssistant('rpc-stream'),
+        items: [tool, { type: 'text' as const, text: 'a🙂bc🚀d' }],
+      };
+      expect(
+        await fixture.rpc.writeSessionHistoryForRpc(id, 'append', { entry: turn })
+      ).toMatchObject({ success: true });
+      const page = await fixture.rpc.readSessionHistoryForRpc(id, {
+        kind: 'readLatestPage',
+        limit: 40,
+        withCheckpoint: true,
+      });
+      let checkpoint = (page.result as { checkpoint: string }).checkpoint;
+      let reconstructed = page.pageTurns![0]!;
+      let patchBytes = 0;
+      let completeBytes = 0;
+      for (let step = 0; step < 32; step++) {
+        const items = [tool, { type: 'text' as const, text: `a🙂XYZ🚀d${'尾'.repeat(step + 1)}` }];
+        expect(
+          await fixture.rpc.writeSessionHistoryForRpc(id, 'apply_action', {
+            action: { kind: 'assistant-items', turnId: turn.id, mode: 'replace', items },
+          })
+        ).toMatchObject({ success: true });
+        const query = { checkpoint, includeBodiesFrom: 0 };
+        const legacy = await fixture.rpc.readSessionHistoryForRpc(id, {
+          kind: 'readChanges',
+          ...query,
+        });
+        const response = await fixture.rpc.readSessionHistoryForRpc(
+          id,
+          step % 2
+            ? { kind: 'watchChanges', waitMs: 0, ...query, withPatches: true }
+            : { kind: 'readChanges', ...query, withPatches: true }
+        );
+        expect(response.success).toBe(true);
+        const changes = SessionHistoryChangesSchema.parse(response.result);
+        if (changes.state !== 'ready' || !changes.patches) throw new Error('Expected native patches');
+        expect(changes.patches.baseCheckpoint).toBe(checkpoint);
+        expect(changes.patches.turns.map((row) => row.turnId)).toEqual([turn.id]);
+        expect(changes.bodies).toEqual({ changed: [], suffix: [] });
+        reconstructed = applySessionHistoryPatches(
+          reconstructed,
+          changes.patches.turns[0]!.operations
+        );
+        const complete = SessionHistoryChangesSchema.parse(legacy.result);
+        if (complete.state !== 'ready') throw new Error('Expected legacy complete response');
+        expect(complete.patches).toBeUndefined();
+        expect(complete.bodies?.changed).toEqual([reconstructed]);
+        expect(reconstructed.items).toEqual(items);
+        checkpoint = changes.checkpoint;
+        patchBytes += Buffer.byteLength(JSON.stringify(response));
+        completeBytes += Buffer.byteLength(JSON.stringify(legacy));
+      }
+      expect(patchBytes).toBeLessThan(32 * 4096);
+      expect(patchBytes).toBeLessThan(completeBytes / 50);
+      expect(
+        await fixture.rpc.writeSessionHistoryForRpc(id, 'apply_action', {
+          action: { kind: 'finish-assistant', turnId: turn.id, endedAt: 42 },
+        })
+      ).toMatchObject({ success: true });
+      const sealed = SessionHistoryChangesSchema.parse(
+        (
+          await fixture.rpc.readSessionHistoryForRpc(id, {
+            kind: 'readChanges',
+            checkpoint,
+            includeBodiesFrom: 0,
+            withPatches: true,
+          })
+        ).result
+      );
+      expect(sealed).toMatchObject({
+        state: 'ready',
+        bodies: { changed: [{ finished: true, endedAt: 42 }] },
+      });
+      if (sealed.state !== 'ready') throw new Error('Expected sealed fallback');
+      expect(sealed.patches).toBeUndefined();
+      expect(
+        await fixture.rpc.writeSessionHistoryForRpc(id, 'apply_action', {
+          action: {
+            kind: 'assistant-items',
+            turnId: turn.id,
+            mode: 'replace',
+            items: [tool, { type: 'text', text: 'late state correction' }],
+          },
+        })
+      ).toMatchObject({ success: true });
+      const state = SessionHistoryChangesSchema.parse(
+        (
+          await fixture.rpc.readSessionHistoryForRpc(id, {
+            kind: 'readChanges',
+            checkpoint: sealed.checkpoint,
+            includeBodiesFrom: 0,
+            withPatches: true,
+          })
+        ).result
+      );
+      expect(state).toMatchObject({
+        state: 'ready',
+        bodies: { changed: [{ items: [tool, { type: 'text', text: 'late state correction' }] }] },
+      });
+      if (state.state !== 'ready') throw new Error('Expected state fallback');
+      expect(state.patches).toBeUndefined();
+      expect(
+        (
+          await fixture.rpc.readSessionHistoryForRpc(id, {
+            kind: 'readChanges',
+            checkpoint: 'unrecognized-checkpoint',
+            withPatches: true,
+          })
+        ).result
+      ).toMatchObject({ state: 'reset' });
+    } finally {
+      await fixture.close();
+    }
+  });
+
+  it('recovers coalesced patches after reopen and projects derived fields through complete reads', async () => {
+    let fixture = await nativeFixture();
+    const initial = {
+      ...nativeAssistant('reopened-patches'),
+      items: [
+        { type: 'text' as const, text: 'a🙂bc🚀d' },
+        { type: 'text' as const, text: 'remove' },
+      ],
+    };
+    await fixture.backend.appendHistoryTurn(initial);
+    const checkpoint = await fixture.backend.history.getCheckpoint!();
+    for (const items of [
+      [{ type: 'text' as const, text: 'a🙂XYZ🚀d' }],
+      [
+        { type: 'text' as const, text: 'a🙂XYZ🚀d尾' },
+        { type: 'text' as const, text: 'added' },
+      ],
+    ])
+      await fixture.backend.applyHistoryAction({
+        kind: 'assistant-items',
+        turnId: initial.id,
+        mode: 'replace',
+        items,
+      });
+    const sessionId = fixture.doc.sessionId;
+    await fixture.close();
+    fixture = await nativeFixture(sessionId);
+    const changes = await fixture.backend.history.readChanges!(checkpoint, { withPatches: true });
+    if (changes.state !== 'ready' || !changes.patches)
+      throw new Error('Expected reopened native patches');
+    const expected = applySessionHistoryPatches(initial, changes.patches.turns[0]!.operations);
+    expect(await fixture.backend.readTurn(initial.id)).toEqual({ state: 'ready', turn: expected });
+    await fixture.backend.applyHistoryAction({
+      kind: 'assistant-file-diff',
+      turnId: initial.id,
+      change: { kind: 'clear' },
+    });
+    const derived = await fixture.backend.history.readChanges!(changes.checkpoint, {
+      withPatches: true,
+    });
+    expect(derived).toMatchObject({ state: 'ready', ids: [initial.id] });
+    if (derived.state !== 'ready') throw new Error('Expected derived-field changes');
+    expect(derived.patches).toBeUndefined();
+    expect(await fixture.backend.readTurn(initial.id)).toMatchObject({
+      state: 'ready',
+      turn: { fileDiff: [] },
+    });
+  });
+
   it('preserves Unicode scalar edits and list changes through sealing and state correction', async () => {
     const fixture = await nativeFixture();
     const turn = {
@@ -1815,6 +1992,7 @@ describe('Production Roost history semantics', () => {
         optionId: 'allow',
       })
     ).toBe(true);
+    const permissionCheckpoint = await fixture.backend.history.getCheckpoint!();
     await fixture.backend.applyAgentBatch({
       targetAssistantEntryId: 'live-permission-a',
       notifications: [
@@ -1836,6 +2014,12 @@ describe('Production Roost history semantics', () => {
       ],
       operationIds: ['permission-tool-update', 'permission-text-update'],
     });
+    const permissionChanges = await fixture.backend.history.readChanges!(permissionCheckpoint, {
+      withPatches: true,
+    });
+    expect(permissionChanges.state).toBe('ready');
+    if (permissionChanges.state !== 'ready') throw new Error('Expected permission changes');
+    expect(permissionChanges.patches).toBeUndefined();
     expect(await fixture.backend.readTurn('live-permission-a')).toMatchObject({
       state: 'ready',
       turn: {
@@ -2319,6 +2503,7 @@ describe('Production Roost history semantics', () => {
         streamClient: streams,
       });
       const peers: ReturnType<ReturnType<typeof createRemoteRoostSessionDataFactory>>[] = [];
+      let receivedContentPatches = false;
       const peerDocs = [new LoroDoc(), new LoroDoc()];
       const stops: (() => void)[] = [];
       try {
@@ -2368,9 +2553,19 @@ describe('Production Roost history semantics', () => {
             machineId,
             incremental: true,
             watch: true,
+            patches: index === 0,
             requestHistoryRead: async (_machine, id, query) => {
+              if (query.kind === 'watchChanges' || query.kind === 'readChanges')
+                expect(query.withPatches).toBe(index === 0 ? true : undefined);
               const result = await client.requestSessionHistoryRead({ sessionId: id, query });
               if (!result) throw new Error('Missing history read response');
+              if (query.kind === 'watchChanges' || query.kind === 'readChanges') {
+                const changes = SessionHistoryChangesSchema.parse(result.result);
+                if (changes.state === 'ready' && changes.patches) {
+                  expect(index).toBe(0);
+                  receivedContentPatches = true;
+                }
+              }
               return result;
             },
             requestHistoryWrite: async (args) => {
@@ -2460,6 +2655,7 @@ describe('Production Roost history semantics', () => {
           {},
           {},
         ]);
+        if (!lostNativeReply) expect(receivedContentPatches).toBe(true);
         stops.forEach((stop) => stop());
         peers.forEach((peer) => peer.dispose?.());
         server.stop();

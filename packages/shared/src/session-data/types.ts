@@ -180,7 +180,10 @@ export interface SessionHistoryReader {
     to: number
   ): readonly SessionDirectoryRow[] | Promise<readonly SessionDirectoryRow[]>;
   getCheckpoint?(): Promise<string>;
-  readChanges?(checkpoint: string): Promise<SessionHistoryChanges>;
+  readChanges?(
+    checkpoint: string,
+    options?: { readonly withPatches?: true }
+  ): Promise<SessionHistoryChanges>;
   /** Bounded commit observation; it owns no database transaction while waiting. */
   waitForChanges?(checkpoint: string, waitMs: number, signal?: AbortSignal): Promise<void>;
   /** Latest bounded directory page for windowed-history backends. */

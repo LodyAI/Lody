@@ -31,6 +31,10 @@ const decode = (value: Uint8Array) =>
   receiptSchema.parse(JSON.parse(new TextDecoder().decode(value)));
 const token = (receipt: Receipt) => JSON.stringify([receipt.scope, receipt.through, receipt.nonce]);
 
+/** Only use after read() has verified this checkpoint's complete receipt chain. */
+export const roostCheckpointCursor = (checkpoint: string): bigint =>
+  BigInt(checkpointSchema.parse(JSON.parse(checkpoint))[1]);
+
 /** Semantic receipts over verified native event intervals; no history bodies or commands. */
 export function createRoostHistoryChanges(host: () => RoostNodeStream, scope: () => string) {
   const anchor = async (cursor: bigint): Promise<Receipt> => {

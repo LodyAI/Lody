@@ -1573,6 +1573,7 @@ export class LoroStreamsMachineRpcServer {
               kind: 'readChanges',
               checkpoint: query.checkpoint,
               includeBodiesFrom: query.includeBodiesFrom,
+              ...(query.withPatches ? { withPatches: true as const } : {}),
             };
             await this.requestConcurrency.acquire();
             readPermit = true;
