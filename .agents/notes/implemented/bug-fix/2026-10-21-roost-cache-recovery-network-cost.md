@@ -44,4 +44,6 @@ The read-only matrix shows no growth in backend database/WAL file sizes; it does
 
 The owning IndexedDB bridge/cache suite exercises stale and foreign partial pages, complete repair followed by relative patches, bounded reset publication, retained old state before commit, concurrent-tab replacement rejection, and progress under newer writer hints. The real Native owner regression covers both one and 2,000 retained turns: legacy body refresh, late capability negotiation, one complete change interval and full equality with the authoritative history, without fetching unchanged pages. Existing content-patch, encrypted-RPC, structural-repair and failed-repair coverage remains applicable.
 
+The large Native fixture imports and seals 1,999 unchanged turns in a separately bounded 120-second setup hook. Recovery retains the normal 30-second test deadline and the full-history equality assertions, so preparing a real SQLite history does not consume the recovery test's budget. Both cases still exercise the production owner and cache.
+
 The controlled browser harness and raw results are retained with the local benchmark artifacts. They measure the specified workloads; they are not an exhaustive proof of arbitrary corruption, cross-version application behavior or production latency distributions.
