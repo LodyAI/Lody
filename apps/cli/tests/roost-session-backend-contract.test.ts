@@ -3368,40 +3368,47 @@ it('persists one targeted Inbox batch receipt through native Roost reopen withou
   await reopened.close();
 });
 
-describe.each([1, 2000])('Roost cache recovery with %i retained turns', (count) => {
+const recoveryPerf = process.env.LODY_ROOST_RECOVERY_PERF === '1';
+// Three 40-turn pages catch a full-history sweep without a large native import in CI.
+const recoveryTurnCounts = recoveryPerf ? [2000] : [1, 120];
+
+describe.each(recoveryTurnCounts)('Roost cache recovery with %i retained turns', (count) => {
   let preparedFixture: Awaited<ReturnType<typeof coldHistoryHandlerFixture>> | undefined;
 
   // Importing and sealing the unchanged prefix performs real native SQLite writes.
-  // Give setup its own bounded budget; recovery keeps the normal test timeout.
-  beforeAll(async () => {
-    const fixture = await coldHistoryHandlerFixture(1);
-    preparedFixture = fixture;
-    const sessionId = [...fixture.docs.keys()][0];
-    if (!sessionId) throw new Error('Missing synthetic session');
-    await fixture.ready(sessionId);
-    if (count > 1) {
-      const history = Array.from({ length: count - 1 }, (_, index) => ({
-        ...nativeAssistant(`synthetic-prefix-${index}`),
-        finished: true,
-        items: [{ type: 'text' as const, text: `Unchanged synthetic prefix ${index}` }],
-      }));
-      const turnHashes = history.map((turn) => hashHistoryEntryForVersion(turn as never, 2));
-      expect(
-        await fixture.rpc.writeSessionHistoryForRpc(sessionId, 'apply_import', {
-          input: {
-            mode: 'initialize',
-            replay: {
-              history,
-              turnHashes,
-              hashVersion: 2,
-              replayDigest: hashText(turnHashes.join('\n')),
-              droppedNotifications: 0,
+  // Only the opt-in scale test gets a larger setup budget; recovery stays at 30 seconds.
+  beforeAll(
+    async () => {
+      const fixture = await coldHistoryHandlerFixture(1);
+      preparedFixture = fixture;
+      const sessionId = [...fixture.docs.keys()][0];
+      if (!sessionId) throw new Error('Missing synthetic session');
+      await fixture.ready(sessionId);
+      if (count > 1) {
+        const history = Array.from({ length: count - 1 }, (_, index) => ({
+          ...nativeAssistant(`synthetic-prefix-${index}`),
+          finished: true,
+          items: [{ type: 'text' as const, text: `Unchanged synthetic prefix ${index}` }],
+        }));
+        const turnHashes = history.map((turn) => hashHistoryEntryForVersion(turn as never, 2));
+        expect(
+          await fixture.rpc.writeSessionHistoryForRpc(sessionId, 'apply_import', {
+            input: {
+              mode: 'initialize',
+              replay: {
+                history,
+                turnHashes,
+                hashVersion: 2,
+                replayDigest: hashText(turnHashes.join('\n')),
+                droppedNotifications: 0,
+              },
             },
-          },
-        })
-      ).toMatchObject({ success: true });
-    }
-  }, 120_000);
+          })
+        ).toMatchObject({ success: true });
+      }
+    },
+    recoveryPerf ? 120_000 : 30_000
+  );
 
   afterAll(async () => {
     await preparedFixture?.close();
@@ -3461,6 +3468,7 @@ describe.each([1, 2000])('Roost cache recovery with %i retained turns', (count) 
         throw new Error('Missing initial page observation');
       const all = await fixture.rpc.readSessionHistoryForRpc(sessionId, { kind: 'readAll' });
       const entries = all.result as SessionHistoryInput[];
+      expect(entries).toHaveLength(count);
       await cache.acceptPage(
         {
           checkpoint,

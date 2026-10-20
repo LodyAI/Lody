@@ -23,6 +23,7 @@
     "format:check": "oxfmt --check 'src/**/*.ts'",
     "typecheck": "tsgo --noEmit -p tsconfig.typecheck.json",
     "test": "vitest run",
+    "test:roost-recovery:perf": "LODY_ROOST_RECOVERY_PERF=1 vitest run tests/roost-session-backend-contract.test.ts -t 'Roost cache recovery'",
     "bench:acp-history": "vitest bench tests/acp-history.bench.ts",
     "bench:turn-diff-store": "pnpm --filter @lody/turn-diff-store bench",
     "test:e2e": "LODY_E2E=1 vitest run",

@@ -22,6 +22,23 @@ retain the production-only check. `tsconfig.tests.json` remains the explicit
 test-inclusive check; existing test typing errors are not part of the production
 check.
 
+## Roost cache recovery tests
+
+Regular `pnpm test` runs the Native recovery contract with 1 and 120 retained turns
+(three 40-turn pages). It checks the complete cached history against the owner and
+rejects requests for unchanged pages during recovery.
+
+Run the same assertions with 2,000 turns outside regular CI:
+
+```sh
+corepack pnpm --dir apps/cli test:roost-recovery:perf
+```
+
+Run this command from the repository root. The scale test allows 120 seconds for
+the Native SQLite import; regular setup and recovery each keep a 30-second limit.
+Vitest reports recovery's test-body duration separately from the file duration,
+which also includes setup. This is a scale regression test, not a network benchmark.
+
 ## Daemon upgrades and autostart
 
 Remote upgrades install globally using the daemon's npm environment, resolve the
