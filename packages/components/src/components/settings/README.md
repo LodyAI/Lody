@@ -2,6 +2,15 @@
 
 Binding guidelines live in [AGENTS.md](AGENTS.md).
 
+## Usage range transitions
+
+`usage-calendar-visualization.tsx` keeps a positioned view frame across hourly and
+calendar ranges so exiting charts retain their measured coordinates. The hourly
+ring grid changes inside that frame. Whole-view opacity fades handle the handoff;
+calendar cells render together without individual reveal animations. The
+[transition decision](../../../../../.agents/notes/implemented/bug-fix/2026-10-21-usage-range-transition.md)
+records the misplaced-chart reproduction and browser coverage.
+
 ## Machine connection marks
 
 `workspace-machine-accordion.tsx` renders the connection mark for collapsed and

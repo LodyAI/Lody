@@ -63,10 +63,6 @@ import {
 // Export generation remains available in code while the settings UI focuses on the active views.
 const SHOW_SKYLINE_EXPORTS = false;
 
-const heatmapCellIn = stylex.keyframes({
-  from: { opacity: 0, transform: 'scale(0.45)' },
-  to: { opacity: 1, transform: 'scale(1)' },
-});
 const loadingPulse = stylex.keyframes({
   '0%, 100%': { opacity: 1 },
   '50%': { opacity: 0.5 },
@@ -451,10 +447,6 @@ const styles = stylex.create({
     aspectRatio: '1',
     borderRadius: '20%',
     outline: 'none',
-    animationName: heatmapCellIn,
-    animationDuration: '340ms',
-    animationTimingFunction: 'cubic-bezier(0.22, 1, 0.36, 1)',
-    animationFillMode: 'backwards',
     transitionProperty: 'filter, opacity',
     transitionDuration: '300ms',
     ':hover': {
@@ -462,7 +454,7 @@ const styles = stylex.create({
       boxShadow: '0 0 0 1px color-mix(in oklab, hsl(var(--foreground)) 40%, transparent)',
     },
     ':focus-visible': { boxShadow: '0 0 0 2px hsl(var(--ring))' },
-    '@media (prefers-reduced-motion: reduce)': { animationName: 'none', transition: 'none' },
+    '@media (prefers-reduced-motion: reduce)': { transition: 'none' },
   },
   heatCellInteractive: { cursor: 'pointer' },
   heatCellFuture: { cursor: 'default' },
@@ -755,8 +747,8 @@ const styles = stylex.create({
   },
   controlGroup: { display: 'flex', alignItems: 'center', gap: '6px' },
   cardBody: { padding: '16px' },
+  viewFrame: { position: 'relative', minWidth: 0 },
   ringLayout: {
-    position: 'relative',
     display: 'grid',
     minWidth: 0,
     alignItems: 'center',
@@ -895,9 +887,6 @@ function SegmentedControl<Value extends string>({
 
 /** Columns that open a new month, thinned out so short month names cannot collide. */
 const MIN_COLUMNS_BETWEEN_MONTH_LABELS = 3;
-/** Per-week delay of the reveal sweep; 53 weeks land in roughly 0.6s. */
-const CELL_REVEAL_STAGGER_MS = 11;
-
 function useCalendarFormats() {
   const { i18n } = useTranslation();
   const locale = toIntlLocaleOrEn(i18n.resolvedLanguage ?? i18n.language);
@@ -2135,7 +2124,6 @@ function UsageHeatmap({
                           ? heatColor(intensity)
                           : EMPTY_DAY_COLOR,
                       opacity: outsideWindow ? OUT_OF_WINDOW_OPACITY : 1,
-                      animationDelay: `${cell.column * CELL_REVEAL_STAGGER_MS}ms`,
                     }}
                     onClick={() => toggleDay(index)}
                     onKeyDown={(event) => onKeyDown(event, index)}
@@ -2889,15 +2877,20 @@ export function UsageCalendarVisualization({
 
       <div {...stylex.props(styles.cardBody)}>
         {/* The donut ring is hourly-only chrome with its own fade; it never
-            joins the blur cross-fade of the matrix/heatmap container, it only
+            joins the fade of the matrix/heatmap container, it only
             re-slices itself when the range's composition changes. One key for
             both skyline ranges: 30d and all-time never unmount each other, so
             widening the window only relights days in place. The hourly panel is
             a different object — popLayout cross-fades the swap instead of
             letting the old view vanish before the new one starts. */}
-        <div {...stylex.props(styles.minWidthZero, rings && styles.ringLayout)}>
+        {/* Keep the containing block even after the hourly-only grid goes away:
+            popLayout's measured offsets must retain the same coordinate system. */}
+        <div
+          data-usage-view-frame
+          {...stylex.props(styles.viewFrame, rings && styles.ringLayout)}
+        >
           {/* Hourly ranges only: the ring runs its own plain fade, independent
-              of the matrix container's blur cross-fade. popLayout pops the
+              of the matrix container's fade. popLayout pops the
               leaving ring out of flow at its old spot — otherwise the grid
               collapses to one column first and the exiting ring reflows to
               full width for a frame before fading out. */}
@@ -2931,10 +2924,11 @@ export function UsageCalendarVisualization({
           <AnimatePresence mode="popLayout" initial={false}>
             <motion.div
               key={hourlyTimeline ? 'hourly' : 'skyline'}
+              data-usage-view={hourlyTimeline ? 'hourly' : 'skyline'}
               {...stylex.props(styles.fullWidth)}
-              initial={reduced ? false : { opacity: 0, filter: 'blur(6px)' }}
-              animate={{ opacity: 1, filter: 'blur(0px)' }}
-              exit={reduced ? { opacity: 0 } : { opacity: 0, filter: 'blur(6px)' }}
+              initial={reduced ? false : { opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
               transition={{ duration: reduced ? 0 : 0.2, ease: 'easeOut' }}
             >
               {hourlyTimeline ? (
