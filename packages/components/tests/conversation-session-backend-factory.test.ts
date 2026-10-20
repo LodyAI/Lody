@@ -1813,6 +1813,143 @@ it('adopts late owner capabilities and watches a quiet control document from the
   }
 });
 
+it.each(['turns', 'same-revision page', 'consecutive page', 'different checkpoint'])(
+  'invalidates the patch baseline after an unbound %s and restores only a complete snapshot',
+  async (write) => {
+    Object.assign(globalThis, { indexedDB: new IDBFactory(), IDBKeyRange });
+    const entries: SessionHistoryInput[] = ['prefix', 'tail'].map((id) => ({
+      id,
+      role: 'assistant',
+      timestamp: 'synthetic',
+      items: [{ type: 'text', text: 'base' }],
+    }));
+    const cache = createRoostHistoryCache('synthetic-checkpoint-binding');
+    const page = (turns: SessionHistoryInput[], startPosition: number, checkpoint?: string) => ({
+      startPosition,
+      totalCount: 2,
+      rows: turns.map((turn, offset) =>
+        createRoostDirectoryRow(startPosition + offset, turn as never)
+      ),
+      hasMoreOlder: startPosition > 0,
+      cursor: startPosition > 0 ? 'older' : null,
+      checkpoint,
+    });
+    const tail: SessionHistoryInput = { ...entries[1]!, items: [{ type: 'text', text: 'baseA' }] };
+    try {
+      await cache.acceptPage(page(entries, 0, 'checkpoint-1'), entries, 1);
+      const prior = (await cache.getHead())!;
+      const revision = write === 'turns' || write === 'consecutive page' ? 2 : 1;
+      if (write === 'turns') await cache.updateTurns(revision, 2, [tail]);
+      else
+        await cache.acceptPage(
+          page([tail], 1, write === 'different checkpoint' ? 'checkpoint-2' : undefined),
+          [tail],
+          revision,
+          { kind: 'changed', ids: [tail.id] }
+        );
+      expect(await cache.getHead()).toMatchObject({ revision, checkpoint: undefined });
+      expect((await cache.readRows(0, 2))?.map((row) => row.turn)).toEqual([entries[0], tail]);
+      expect(
+        await cache.applyChanges((await cache.getHead())!, 3, 2, 'unbound-patch', undefined, [])
+      ).toBe(false);
+      // An in-flight patch must lose its compare-and-swap even if revision did not change.
+      expect(await cache.applyChanges(prior, 3, 2, 'stale-patch', undefined, [])).toBe(false);
+
+      // A protected tail alone cannot certify the untouched retained prefix.
+      await cache.acceptPage(page([tail], 1, 'checkpoint-2'), [tail], revision);
+      expect((await cache.getHead())?.checkpoint).toBeUndefined();
+      await cache.acceptPage(page([tail], 1, 'checkpoint-2'), [tail], revision, undefined, true);
+      expect((await cache.getHead())?.checkpoint).toBeUndefined();
+      await cache.acceptPage(
+        page([entries[0]!], 0, 'checkpoint-2'),
+        [entries[0]!],
+        revision,
+        undefined,
+        true
+      );
+      expect(await cache.getHead()).toMatchObject({
+        revision,
+        start: 0,
+        checkpoint: 'checkpoint-2',
+      });
+      expect((await cache.readRows(0, 2))?.map((row) => row.turn)).toEqual([entries[0], tail]);
+    } finally {
+      cache.dispose();
+    }
+  }
+);
+
+it('isolates persisted legacy heads and concurrent old-page writes from patch-capable caches', async () => {
+  Object.assign(globalThis, { indexedDB: new IDBFactory(), IDBKeyRange });
+  const scope = 'synthetic-old-tab';
+  const legacy = await new Promise<IDBDatabase>((resolve, reject) => {
+    const request = indexedDB.open('lody:roost-history-v1', 1);
+    request.onupgradeneeded = () => {
+      request.result.createObjectStore('heads');
+      const rows = request.result.createObjectStore('rows', {
+        keyPath: ['scope', 'slot', 'position'],
+      });
+      rows.createIndex('turn', ['scope', 'slot', 'turnId'], { unique: true });
+    };
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+  const initial: SessionHistoryInput = {
+    id: 'tail',
+    role: 'assistant',
+    timestamp: 'synthetic',
+    items: [{ type: 'text', text: 'base' }],
+  };
+  const advanced: SessionHistoryInput = { ...initial, items: [{ type: 'text', text: 'baseA' }] };
+  const legacyWrite = (turn: SessionHistoryInput) =>
+    new Promise<void>((resolve, reject) => {
+      const tx = legacy.transaction(['heads', 'rows'], 'readwrite');
+      tx.oncomplete = () => resolve();
+      tx.onabort = () => reject(tx.error);
+      tx.objectStore('heads').put(
+        { revision: 2, count: 1, start: 0, slot: 0, checkpoint: 'checkpoint-1' },
+        [scope, 'head']
+      );
+      tx.objectStore('rows').put({
+        scope,
+        slot: 0,
+        position: 0,
+        turnId: turn.id,
+        turn,
+        row: createRoostDirectoryRow(0, turn as never),
+      });
+    });
+  const cache = createRoostHistoryCache(scope);
+  try {
+    await legacyWrite(advanced);
+    expect(await cache.getHead()).toBeUndefined();
+    await cache.acceptPage(
+      {
+        checkpoint: 'checkpoint-1',
+        startPosition: 0,
+        totalCount: 1,
+        rows: [createRoostDirectoryRow(0, initial as never)],
+        hasMoreOlder: false,
+        cursor: null,
+      },
+      [initial],
+      1
+    );
+    const prior = (await cache.getHead())!;
+    await legacyWrite({ ...initial, items: [{ type: 'text', text: 'baseAA' }] });
+    expect(
+      await cache.applyChanges(prior, 2, 1, 'checkpoint-2', undefined, [
+        { position: 0, turn: advanced },
+      ])
+    ).toBe(true);
+    expect((await cache.readRows(0, 1))?.[0]?.turn).toEqual(advanced);
+    expect(await cache.getHead()).toMatchObject({ revision: 2, checkpoint: 'checkpoint-2' });
+  } finally {
+    cache.dispose();
+    legacy.close();
+  }
+});
+
 it('rolls back incomplete cache repairs and removes a truncated suffix with its checkpoint', async () => {
   Object.assign(globalThis, { indexedDB: new IDBFactory(), IDBKeyRange });
   const entries: SessionHistoryInput[] = ['first', 'second', 'third'].map((id) => ({

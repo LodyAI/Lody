@@ -40,3 +40,5 @@ flowchart LR
 快速路径要求完整连续的原生区间，不超过 256 次编辑和 4 MiB 导出帧；每个变化消息只能有一个未封存 primary，且没有后继片段或状态、权限投影。其他区间继续完整读取；本次不减少持久化历史或回执存储。
 
 仓库整体检查记录在 PR 中。本决策补充[已有检查点恢复设计](2026-10-16-roost-incremental-history.md)，不改变其一致性合同。
+
+缓存基准的验证及旧页面隔离见[checkpoint 与正文绑定修复](2026-10-21-roost-cache-checkpoint-body-binding.zh.md)。

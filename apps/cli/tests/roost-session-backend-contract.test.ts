@@ -3366,3 +3366,165 @@ it('persists one targeted Inbox batch receipt through native Roost reopen withou
   expect(history[2]).toEqual(original[2]);
   await reopened.close();
 });
+
+it('does not replay text after a legacy refresh when owner capabilities arrive late', async () => {
+  const rendererRequire = createRequire(
+    new URL('../../../packages/components/package.json', import.meta.url)
+  );
+  const idb = rendererRequire('fake-indexeddb');
+  vi.stubGlobal('indexedDB', new idb.IDBFactory());
+  vi.stubGlobal('IDBKeyRange', idb.IDBKeyRange);
+  const { createRoostHistoryCache } =
+    await import('../../../packages/components/src/lib/roost-history-cache');
+  const { createLocalRoostSessionDataFactory } =
+    await import('../../../packages/components/src/lib/roost-session-bridge');
+  const fixture = await coldHistoryHandlerFixture(1);
+  const sessionId = [...fixture.docs.keys()][0];
+  if (!sessionId) throw new Error('Missing synthetic session');
+  const workspaceId = 'test-workspace' as WorkspaceId;
+  const machineId = 'test-machine' as MachineId;
+  const cache = createRoostHistoryCache(
+    JSON.stringify(['local', workspaceId, machineId, sessionId])
+  );
+  let data: ReturnType<ReturnType<typeof createLocalRoostSessionDataFactory>> | undefined;
+  let stop: (() => void) | undefined;
+  const callbacks: (() => void)[] = [];
+  const waiting: ((fn: () => void) => void)[] = [];
+  const nextTimer = () => {
+    const callback = callbacks.shift();
+    return callback
+      ? Promise.resolve(callback)
+      : new Promise<() => void>((resolve) => waiting.push(resolve));
+  };
+  const enqueue = (fn: () => void) => {
+    const waiter = waiting.shift();
+    if (waiter) waiter(fn);
+    else callbacks.push(fn);
+  };
+  try {
+    await fixture.ready(sessionId);
+    const initial = {
+      ...nativeAssistant('synthetic-late-cap'),
+      items: [{ type: 'text' as const, text: 'base' }],
+    };
+    expect(
+      await fixture.rpc.writeSessionHistoryForRpc(sessionId, 'append', { entry: initial })
+    ).toMatchObject({ success: true });
+    const page = await fixture.rpc.readSessionHistoryForRpc(sessionId, {
+      kind: 'readLatestPage',
+      limit: 40,
+      withCheckpoint: true,
+    });
+    const checkpoint = (page.result as { checkpoint: string }).checkpoint;
+    const initialRevision = page.historyRevision;
+    if (initialRevision === undefined || !page.pageTurns)
+      throw new Error('Missing initial page observation');
+    await cache.acceptPage(page.result as never, page.pageTurns, initialRevision);
+    const written = await fixture.rpc.writeSessionHistoryForRpc(sessionId, 'apply_action', {
+      action: {
+        kind: 'assistant-items',
+        turnId: initial.id,
+        mode: 'replace',
+        items: [{ type: 'text', text: 'baseA' }],
+      },
+    });
+    expect(written.success).toBe(true);
+    const revision = written.historyRevision;
+    if (revision === undefined) throw new Error('Missing updated history revision');
+    expect(revision).toBe(initialRevision + 1);
+    const doc = new LoroDoc();
+    const hints = doc.getMap('roostHistoryCursor');
+    hints.set('historyRevision', revision);
+    hints.set('historyCount', 1);
+    hints.set('historyChangeJson', JSON.stringify({ kind: 'changed', ids: [initial.id] }));
+    doc.commit();
+    const legacyCommitted = Promise.withResolvers<void>();
+    const patchedCommitted = Promise.withResolvers<void>();
+    const put = idb.IDBObjectStore.prototype.put;
+    vi.spyOn(idb.IDBObjectStore.prototype, 'put').mockImplementation(function (
+      value: unknown,
+      ...args: unknown[]
+    ) {
+      const request = put.call(this, value, ...args);
+      if (
+        value &&
+        typeof value === 'object' &&
+        'revision' in value &&
+        value.revision === revision &&
+        (!('checkpoint' in value) ||
+          value.checkpoint === undefined ||
+          value.checkpoint === checkpoint)
+      )
+        this.transaction.addEventListener('complete', () => legacyCommitted.resolve(), {
+          once: true,
+        });
+      return request;
+    });
+    const setTimer = globalThis.setTimeout;
+    vi.spyOn(globalThis, 'setTimeout').mockImplementation(((
+      callback: (...args: unknown[]) => void,
+      delay: number,
+      ...args: unknown[]
+    ) => {
+      if (delay === 0 || delay === 250) {
+        enqueue(() => callback(...args));
+        return callback as never;
+      }
+      return setTimer(callback, delay, ...args);
+    }) as typeof setTimeout);
+    let supports = false;
+    let wake: (() => void) | undefined;
+    data = createLocalRoostSessionDataFactory({
+      workspaceId,
+      machineId,
+      incremental: () => supports,
+      patches: () => supports,
+      subscribeWake: (listener) => {
+        wake = listener;
+        return () => {
+          wake = undefined;
+        };
+      },
+      sendControl: async (request) => {
+        if (request.type !== 'session/history-read') throw new Error('Unexpected write');
+        return {
+          ok: true,
+          responses: [await fixture.rpc.readSessionHistoryForRpc(sessionId, request.query)],
+        };
+      },
+    })({ sessionId, doc, backendKind: 'roost' });
+    const observation = data.history.observe(() => {
+      void cache.getHead().then((head) => {
+        if (head?.checkpoint && head.checkpoint !== checkpoint && head.revision === revision)
+          patchedCommitted.resolve();
+      });
+    });
+    stop = observation.unsubscribe;
+    await observation.initial;
+    (await nextTimer())();
+    await legacyCommitted.promise;
+    expect(await cache.getHead()).toMatchObject({ revision });
+    expect((await cache.readRows(0, 1))?.[0]?.turn.items).toEqual([
+      { type: 'text', text: 'baseA' },
+    ]);
+    supports = true;
+    if (!wake) throw new Error('Missing capability wake subscription');
+    wake();
+    (await nextTimer())();
+    await patchedCommitted.promise;
+    const complete = await fixture.rpc.readSessionHistoryForRpc(sessionId, {
+      kind: 'readTurn',
+      turnId: initial.id,
+    });
+    expect((await cache.readRows(0, 1))?.[0]?.turn).toEqual(
+      (complete.result as { turn: SessionHistoryInput }).turn
+    );
+  } finally {
+    stop?.();
+    data?.dispose?.();
+    cache.dispose();
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+    await fixture.close();
+  }
+});

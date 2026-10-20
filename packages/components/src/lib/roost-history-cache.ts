@@ -3,7 +3,9 @@ import type { SessionDirectoryRow, SessionHistoryDirectoryPage } from '@lody/sha
 import { createRoostDirectoryRow, type SessionEntry } from '@lody/shared/session-data';
 
 /** A durable, read-only projection of owner-accepted history; never an outbox. */
-export const ROOST_HISTORY_CACHE_DB = 'lody:roost-history-v1';
+// Older tabs can retain a checkpoint while replacing its bodies. Keep their
+// writes (and already persisted mismatched heads) out of the patch baseline.
+export const ROOST_HISTORY_CACHE_DB = 'lody:roost-history-v2';
 const HEADS = 'heads';
 const ROWS = 'rows';
 
@@ -198,6 +200,7 @@ export function createRoostHistoryCache(scope: string) {
         }
         const end = page.startPosition + page.rows.length;
         const isLatest = end === page.totalCount;
+        const coversWindow = head && page.startPosition <= head.start && isLatest;
         if (!head) {
           if (!isLatest) return done(false);
           put(0);
@@ -220,7 +223,8 @@ export function createRoostHistoryCache(scope: string) {
             heads.put(
               {
                 ...head,
-                ...(page.checkpoint ? { checkpoint: page.checkpoint } : {}),
+                checkpoint:
+                  head.checkpoint === page.checkpoint || coversWindow ? page.checkpoint : undefined,
                 start: Math.min(head.start, page.startPosition),
               },
               key('head')
@@ -249,7 +253,8 @@ export function createRoostHistoryCache(scope: string) {
               revision,
               directoryRevision:
                 change?.kind === 'structure' ? revision : (head.directoryRevision ?? head.revision),
-              ...(page.checkpoint ? { checkpoint: page.checkpoint } : {}),
+              checkpoint:
+                head.checkpoint !== undefined || coversWindow ? page.checkpoint : undefined,
               count: page.totalCount,
               start: Math.min(head.start, page.startPosition),
             },
@@ -333,6 +338,7 @@ export function createRoostHistoryCache(scope: string) {
           const head = request.result as RoostCachedHead | undefined;
           if (
             !head ||
+            !head.checkpoint ||
             head.slot !== expected.slot ||
             head.count !== expected.count ||
             head.revision !== expected.revision ||
@@ -411,7 +417,12 @@ export function createRoostHistoryCache(scope: string) {
             };
           }
           heads.put(
-            { ...head, revision, directoryRevision: head.directoryRevision ?? head.revision },
+            {
+              ...head,
+              revision,
+              checkpoint: undefined,
+              directoryRevision: head.directoryRevision ?? head.revision,
+            },
             key('head')
           );
           heads.delete(key('staging'));

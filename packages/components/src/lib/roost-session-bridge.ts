@@ -670,6 +670,12 @@ const createRoostSessionDataFactoryFromTransport =
       refreshRequested = false;
       try {
         let prior = await cached(() => cache.getHead());
+        if (incrementalEnabled() && prior && !prior.checkpoint) {
+          // A legacy body refresh has no checkpoint for its retained prefix.
+          // Rebuild coherently before allowing relative content patches.
+          replacingSnapshot = true;
+          bodies.clear();
+        }
         if (incrementalEnabled() && prior?.checkpoint) {
           const response = await readOwner(
             watchEnabled()
