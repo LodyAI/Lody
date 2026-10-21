@@ -108,7 +108,7 @@ import { validateSessionImageFile } from '@/lib/session-image-upload';
 import { formatDocumentSelection, type DocumentSelection } from '@/lib/document-selection';
 import {
   formatSelectionQuote,
-  selectionQuoteLabel,
+  selectionQuoteChipLabel,
   type ConversationSelectionQuote,
 } from '@/lib/conversation-selection-quote';
 import { PendingImageMarkupDialog } from './pending-image-markup-dialog';
@@ -1595,7 +1595,7 @@ export const SessionChatInputArea = memo(
           return false;
         }
         return insertLargePastedTextAtSelection(text, {
-          label: selectionQuoteLabel(quote.text),
+          label: selectionQuoteChipLabel(quote.text),
           append: true,
         });
       },

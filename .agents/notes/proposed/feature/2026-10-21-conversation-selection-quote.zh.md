@@ -36,7 +36,10 @@ Translation: current
 - `session-chat-input-area.tsx` 暴露 `addSelectionQuote`，复用
   `insertLargePastedTextAtSelection` —— 与 `addDocumentSelection` 完全相同的调用 ——
   引用因此成为一个普通的粘贴文本 chip：标签就是引文本身，正文在发送时展开。不新增输入块
-  类型，也不改 wire 或存储格式。
+  类型，也不改 wire 或存储格式。chip 标签带方括号（`[引文…]`），因为这种 chip 会把图标画在
+  开头的 `figure space + [` 上、并让结尾的 `] + figure space` 留空 —— 也就是
+  `[Pasted 4,182 chars]` 所支付的那两个槽位；标签若不自带分隔符，引文自己的首尾字符就会被
+  吃掉。
 
 归属由 turn id 判定：行的 `data-conversation-turn-id` 必须能在该面板自己的
 `ConversationView` 中解析出来。因此当侧边对话和主对话同时挂载时，任何一方都无法捕获另一方
@@ -70,6 +73,9 @@ Translation: current
   超过 50,000 字符的选区同样被忽略 —— 此时不显示该动作，而不是静默截断。
 - 一次草稿可以暂存多条引用，每条各成一个 chip，用户自己的批注是它们之间普通的输入框文本。
 - 引用是快照：之后编辑原消息不会改变已发送的内容，也不存在从已发送消息回到被引用 turn 的链接。
+- 实现时发现、但为控制本次改动范围而**未**一并修复：同一个机制在隔壁的调用点也是错的。
+  `addDocumentSelection` 传入的标签没有分隔符（`report.pdf · p.3`），因此那个 chip 会盖住
+  文件名首字符、并隐藏末字符。修法就是同一对方括号，它属于那个功能而不是这里。
 
 ## 验证限制
 
@@ -80,7 +86,10 @@ Translation: current
   因此 chip 的落位与提交时的展开都被覆盖，而不只是格式化函数。
 - 交互在真实 Chromium 的 Storybook 两个 story 中验证：选中正文会升起操作条，而在其主按钮上的
   真实指针按下 —— 它会在 `click` 到达之前先拆掉原生选区 —— 仍然把格式化后的引用交给草稿。
-  桌面构建带着本次改动可以启动，但未在其中自动化交互。
+- 在本地桌面构建中对着真实 agent 走通了端到端流程：在回答上拖选会升起输入框上方的操作条，
+  主按钮落下一个以引文为标签的 chip，随后返回的回答正是针对被引用的那一段 —— 说明展开后的
+  提示词确实到达了 agent。chip 的图标槽位会盖住自己那对方括号，因此暂存的标签不会丢掉引文的
+  任何字符。
 - iOS 与 Safari 的选择时序未在真机验证 —— 与
   [原生选区笔记](../../implemented/bug-fix/2026-09-20-conversation-text-selection.md) 记录的
   是同一个缺口。

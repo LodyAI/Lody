@@ -5,8 +5,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   formatSelectionQuote,
   MAX_SELECTION_QUOTE_TEXT,
+  selectionQuoteChipLabel,
   selectionQuoteLabel,
 } from '../src/lib/conversation-selection-quote';
+import { getComposerMentionChip, wrapPastedTextChipLabel } from '../src/components/mentions/mention-chips';
 import {
   SelectionQuoteBar,
   useSelectionQuote,
@@ -32,6 +34,19 @@ describe('conversation selection quotes', () => {
   it('labels a chip with the quote itself so several quotes stay tellable apart', () => {
     expect(selectionQuoteLabel('  keep   the total ')).toBe('keep the total');
     expect(selectionQuoteLabel('x'.repeat(40))).toBe(`${'x'.repeat(24)}…`);
+  });
+  it('keeps every character of the quote visible through the chip glyph slots', () => {
+    // The chip paints its clipboard glyph over the leading slots and leaves the
+    // trailing ones blank, so the staged text has to delimit the label: an
+    // undelimited one silently loses the quote's first and last character.
+    const staged = wrapPastedTextChipLabel(selectionQuoteChipLabel('keep the total'));
+    const chip = getComposerMentionChip(
+      { value: '', start: 0, end: staged.length, kind: 'pasted_text' },
+      staged
+    )!;
+    expect(staged.slice(chip.iconSlots, staged.length - (chip.trailingSlots ?? 0))).toBe(
+      'keep the total'
+    );
   });
 });
 

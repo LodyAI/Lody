@@ -600,8 +600,9 @@ describe('SessionChatInputArea submission feedback', () => {
     });
     expect(textarea.value).toContain('Why is this slow?');
     // The chip is labelled with the quote itself, so several quotes stay
-    // tellable apart in one draft.
-    expect(textarea.value).toContain('The filter creates a new');
+    // tellable apart in one draft. The brackets are the chip's glyph slots,
+    // which paint over the label's own first and last character.
+    expect(textarea.value).toContain('[The filter creates a new…]');
     await submit('keyboard');
     expect(submissions[0]).toMatchObject([
       { type: 'text', text: expect.stringContaining('Why is this slow?\n\nMessage selection') },

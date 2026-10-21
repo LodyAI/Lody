@@ -46,6 +46,10 @@ document selections already stage a spreadsheet region or PDF page:
   `insertLargePastedTextAtSelection` — the same call `addDocumentSelection` makes — so
   the quote becomes an ordinary pasted-text chip whose label is the quote itself and
   whose body expands on submit. No new input block type, no wire or storage change.
+  The chip label is bracketed (`[quote…]`) because that chip paints its glyph over the
+  leading `figure space + [` and leaves the trailing `] + figure space` blank — the same
+  slots `[Pasted 4,182 chars]` pays for. An undelimited custom label loses the quote's
+  own first and last character.
 
 Ownership is proved by turn id: the row's `data-conversation-turn-id` must resolve in
 that surface's own `ConversationView`, so a side chat beside the main conversation
@@ -89,6 +93,11 @@ custom menu needs host shell code that lives outside it.
   comment is ordinary composer text between them.
 - The quote is a snapshot: editing the source message afterwards does not change what
   was sent, and nothing links the sent message back to the quoted turn.
+- Found while implementing, and left out of this change to keep it scoped: the same
+  mechanism is wrong one call site away. `addDocumentSelection` passes an undelimited
+  label (`report.pdf · p.3`), so that chip paints over the file name's first character
+  and hides its last. The fix is the same two brackets, and it belongs with that
+  feature rather than here.
 
 ## Verification limits
 
@@ -102,8 +111,12 @@ custom menu needs host shell code that lives outside it.
 - The interaction was exercised in a real Chromium against both Storybook stories:
   selecting prose raises the bar, and a real pointer press on its primary control —
   which tears the native range down before the `click` arrives — still stages the
-  formatted quote. The desktop build boots with the change, but in-app interaction was
-  not automated there.
+  formatted quote.
+- Driven end to end in the local desktop build against a real agent: a drag over an
+  answer raises the bar above the composer, the primary control stages a chip labelled
+  with the quote, and the reply that comes back answers the quoted passage, so the
+  expansion reaches the agent. The chip's glyph slots paint over its brackets, which is
+  why the staged label keeps every character of the quote.
 - iOS and Safari selection ordering is not device-verified — the same gap the
   [native selection note](../../implemented/bug-fix/2026-09-20-conversation-text-selection.md)
   records.
