@@ -1,5 +1,6 @@
 import { useCallback, useMemo, useState } from 'react';
 import { useAtomValue } from 'jotai';
+import { usePlatform } from '@lody/platform/react';
 import {
   getEffectiveDefaultMcpIds,
   getProjectMcpKey,
@@ -62,6 +63,7 @@ export function useSessionMcpSelection(
 ): SessionMcpSelection {
   const { existingSession, disabled, scopeKey, defaultsTarget } = options;
   const runtime = useAtomValue(activeWorkspaceRuntimeAtom);
+  const { sync } = usePlatform();
   const { servers, synced, loaded, failed, projectMcpDefaults } = useWorkspaceCatalog();
   const projectKey = existingSession
     ? undefined
@@ -96,7 +98,11 @@ export function useSessionMcpSelection(
 
   const dependsOnDefaults =
     !existingSession && scopedOverride === undefined && persistedIds === undefined;
-  const ready = !dependsOnDefaults || (runtime != null && loaded);
+  // A locally loaded cloud document can still lack remote project preferences,
+  // even when it already contains servers. Local-only composition has no cloud
+  // authority to wait for and keeps using its durable local snapshot.
+  const ready =
+    !dependsOnDefaults || (runtime != null && loaded && (sync.mode === 'local' || synced));
 
   // Stable per scope so menu props built from this selection do not churn every render.
   const setSelectedIds = useCallback(

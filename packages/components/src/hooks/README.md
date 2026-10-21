@@ -27,6 +27,14 @@ See the [attachment draft Spec](../../../../specs/session-files.md).
 | Workspace catalogs     | [`use-agent-role-schema-reconciliation.ts`](use-agent-role-schema-reconciliation.ts)                               | Reconcile owned Roles after matching runtime probes.                                       |
 | Conversation rendering | [`use-conversation-stream-items.ts`](use-conversation-stream-items.ts), [`use-session-doc.ts`](use-session-doc.ts) | Coordinate the hydration window and history publication.                                   |
 
+## MCP default readiness
+
+`use-session-mcp-selection.ts` allows default-derived creation after the local
+catalog loads on local-only platforms. Cloud/dual composition additionally waits
+for the first catalog sync: a nonempty local catalog can still lack the project's
+preference row. Existing conversations and explicit selections bypass this gate.
+No extra transport or cloud request is created by the hook.
+
 ## Session ACP catalogs
 
 `use-session-acp-selector-context.ts` owns the Provider subscription for persisted

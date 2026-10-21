@@ -1,5 +1,8 @@
 // @vitest-environment jsdom
 import { act } from 'react';
+import { PlatformContext } from '@lody/platform/react';
+import { createLocalPlatformProvider, type PlatformSyncMode } from '@lody/platform';
+import { TEST_CLOUD_PLATFORM } from './test-platform';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createStore, Provider } from 'jotai';
@@ -58,6 +61,10 @@ function createWorkspace(workspaceId: string, rows: Array<[readonly string[], un
     open = resolve;
     fail = reject;
   });
+  let sync!: () => void;
+  const firstSyncedWithRemote = new Promise<void>((resolve) => {
+    sync = resolve;
+  });
   const flock = {
     scan: (options?: { prefix?: readonly unknown[] }) =>
       [...store.values()].filter(({ key }) => key[0] === options?.prefix?.[0]),
@@ -79,7 +86,7 @@ function createWorkspace(workspaceId: string, rows: Array<[readonly string[], un
           flock,
           joinRoom: async () => ({
             unsubscribe: () => {},
-            firstSyncedWithRemote: new Promise(() => {}),
+            firstSyncedWithRemote,
           }),
           syncOnce: async () => {},
         };
@@ -95,6 +102,8 @@ function createWorkspace(workspaceId: string, rows: Array<[readonly string[], un
     runtime,
     open,
     fail,
+    sync,
+    put,
     rowOf: (key: readonly string[]) => store.get(JSON.stringify(key))?.value,
   };
 }
@@ -138,6 +147,7 @@ function renderSelection(props: {
   existingSession?: boolean;
   scopeKey?: string;
   defaultsTarget?: SessionMcpDefaultsTarget;
+  syncMode?: PlatformSyncMode;
 }) {
   const renders: SessionMcpSelection[] = [];
   let latest!: SessionMcpSelection;
@@ -154,7 +164,18 @@ function renderSelection(props: {
     act(() =>
       root.render(
         <Provider store={store}>
-          <Probe {...next} />
+          <PlatformContext.Provider
+            value={
+              next.syncMode && next.syncMode !== 'local'
+                ? { ...TEST_CLOUD_PLATFORM, sync: { mode: next.syncMode } }
+                : createLocalPlatformProvider({
+                    session: TEST_CLOUD_PLATFORM.identity.session,
+                    workspaces: TEST_CLOUD_PLATFORM.workspaces.state,
+                  })
+            }
+          >
+            <Probe {...next} />
+          </PlatformContext.Provider>
         </Provider>
       )
     );
@@ -163,8 +184,8 @@ function renderSelection(props: {
 }
 
 describe('composer MCP selection', () => {
-  it('waits for the document before a new conversation can send its defaults', async () => {
-    const workspace = createWorkspace('workspace-1', catalogRows());
+  it.each([false, true])('local mode waits only for its document (empty=%s)', async (empty) => {
+    const workspace = createWorkspace('workspace-1', empty ? [] : catalogRows());
     store.set(runtimeAtom, workspace.runtime);
     const view = renderSelection({ defaultsTarget: { project: projectA, machineId: 'machine-1' } });
     await settle();
@@ -172,7 +193,54 @@ describe('composer MCP selection', () => {
 
     workspace.open();
     await settle();
-    expect(view.current()).toMatchObject({ ready: true, selectedIds: ['db', 'files'] });
+    expect(view.current()).toMatchObject({
+      ready: true,
+      selectedIds: empty ? [] : ['db', 'files'],
+    });
+  });
+
+  it.each(['cloud', 'dual'] as const)(
+    'waits for %s catch-up even with a partial local catalog',
+    async (syncMode) => {
+      const workspace = createWorkspace('workspace-1', []);
+      store.set(runtimeAtom, workspace.runtime);
+      const view = renderSelection({
+        syncMode,
+        defaultsTarget: { project: projectA, machineId: 'machine-1' },
+      });
+      workspace.open();
+      await settle();
+      expect(view.current()).toMatchObject({ ready: false, selectedIds: [] });
+      // Catalog entries may arrive before the project row; nonempty is not ready.
+      act(() => {
+        for (const [key, value] of catalogRows()) workspace.put(key, value);
+      });
+      await settle();
+      expect(view.current()).toMatchObject({ ready: false, selectedIds: ['db', 'files'] });
+      act(() =>
+        workspace.put(workspaceFlockKeys.projectMcpDefault(keyOf(projectA)), { ids: ['search'] })
+      );
+      workspace.sync();
+      await settle();
+      expect(view.current()).toMatchObject({ ready: true, selectedIds: ['search'] });
+    }
+  );
+
+  it('accepts a confirmed empty cloud catalog and does not gate explicit selections', async () => {
+    const workspace = createWorkspace('workspace-1', []);
+    store.set(runtimeAtom, workspace.runtime);
+    const view = renderSelection({ syncMode: 'cloud' });
+    workspace.open();
+    await settle();
+    view.render({ syncMode: 'cloud', existingSession: true, persistedIds: [] });
+    expect(view.current()).toMatchObject({ ready: true, selectedIds: [] });
+    view.render({ syncMode: 'cloud', persistedIds: [] });
+    expect(view.current()).toMatchObject({ ready: true, selectedIds: [] });
+    view.render({ syncMode: 'cloud' });
+    expect(view.current().ready).toBe(false);
+    workspace.sync();
+    await settle();
+    expect(view.current()).toMatchObject({ ready: true, selectedIds: [] });
   });
 
   it('reports unreadable defaults as a failure, never as an empty selection', async () => {

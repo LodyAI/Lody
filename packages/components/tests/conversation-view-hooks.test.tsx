@@ -1,3 +1,4 @@
+import { TestCloudPlatformProvider } from './test-platform';
 import { openReaderView, flushReaderChanges } from './conversation-view-fixtures';
 // @vitest-environment jsdom
 import { act } from 'react';
@@ -558,7 +559,13 @@ it.each([false, true])(
       );
     }
     try {
-      await act(async () => root.render(<Composer />));
+      await act(async () =>
+        root.render(
+          <TestCloudPlatformProvider>
+            <Composer />
+          </TestCloudPlatformProvider>
+        )
+      );
       await act(async () => vi.runAllTimersAsync());
       act(() => host.querySelector('button')!.click());
       const before = sent;

@@ -82,7 +82,16 @@ After integrating current main, 83 tests across selection, catalog room, writer
 and input submission passed, along with 22 shared and 244 CLI tests. Attachment
 inputs, Role/default provenance and Operation origin metadata from main are retained. The packaged Electron app was not walked through. Mobile project
 settings retain their existing layout. A failed catalog open retries after all
-room consumers release; a loaded local snapshot remains usable offline.
+room consumers release; local-only composition can use its loaded snapshot offline. Cloud/dual default-dependent
+creation waits for the first remote catalog sync, even when local server rows exist:
+project preferences can arrive later. Existing and explicit selections bypass this
+gate. This corrects the earlier local-load-only readiness check, which could persist
+`[]` on a fresh cloud client. Deferred-sync tests reproduce the failure before the
+fix and cover partial catalogs, confirmed empty catalogs, and local-only operation
+with an unresolved remote-sync promise. The existing room owns synchronization;
+this fix adds no transport, polling or cloud requests. Before first catch-up, cloud
+default-dependent sends remain blocked while offline; reconnect/catch-up releases
+the gate, and an explicit selection does not depend on it.
 No additional project policy is resolved at ACP startup, and Role rows do not gain
 MCP selections.
 
