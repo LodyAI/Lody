@@ -349,6 +349,13 @@ const CLOUD_REJOIN_TIMEOUT_MS = 10_000;
 const CLOUD_REJOIN_SWEEP_CONCURRENCY = 4;
 const CLOUD_REJOIN_SWEEP_BUDGET_MS = 30_000;
 
+// Bounding a cold session open: the reader-identity gate waits on Meta
+// restoration plus the session's catalog identity. Without a bound, a stalled
+// Meta binding (sync stall, sign-out, offline) pends acquireSessionStore
+// forever and the conversation shows a permanent skeleton. Aligned with the
+// Meta first-sync budget so a legitimate cold restore never loses the race.
+const SESSION_READER_METADATA_TIMEOUT_MS = META_FIRST_SYNC_TIMEOUT_MS;
+
 const withTimeout = async <TResult>(
   promise: Promise<TResult>,
   timeoutMs: number,
@@ -4198,9 +4205,17 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
       const waitAbort = new AbortController();
       const bindingListeners = new Map<unknown, () => void>();
       const bindingChanges = new Set<unknown>();
+      const metadataTimeout = setTimeout(() => {
+        finish(
+          createTimeoutError(
+            `Session reader metadata for ${roomId} was not ready within ${SESSION_READER_METADATA_TIMEOUT_MS}ms`
+          )
+        );
+      }, SESSION_READER_METADATA_TIMEOUT_MS);
       const finish = (error?: Error) => {
         if (settled) return;
         settled = true;
+        clearTimeout(metadataTimeout);
         waitAbort.abort();
         unsubscribe();
         for (const stop of bindingListeners.values()) stop();
@@ -4218,10 +4233,14 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
           return;
         }
         if (meta.historyBackend) {
-          if (meta.historyBackend !== 'roost' || meta.machineId) finish();
-          return;
-        }
-        if (hasLegacyHistory) {
+          if (meta.historyBackend !== 'roost' || meta.machineId) {
+            finish();
+            return;
+          }
+          // A Roost identity without its owning machine is incomplete: fall
+          // through and register the binding wait so restoration completion
+          // re-checks instead of relying solely on future metadata events.
+        } else if (hasLegacyHistory) {
           finish();
           return;
         }
@@ -4258,6 +4277,11 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
           },
           () => {
             watchedBindings.delete(binding);
+            // A torn-down binding (transport re-attach) rejects its pending
+            // waits. The status change already recorded a binding change while
+            // the wait was still registered; re-evaluate so the replacement
+            // binding gets a fresh wait instead of stranding this open.
+            if (bindingChanges.delete(binding)) evaluate();
           }
         );
       };

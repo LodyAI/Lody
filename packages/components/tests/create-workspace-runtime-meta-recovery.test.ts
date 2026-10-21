@@ -1748,6 +1748,223 @@ describe('createWorkspaceRuntime meta recovery lifecycle', () => {
     }
   );
 
+  it('rejects a cold session open when reader metadata never arrives, then retries cleanly', async () => {
+    const { LoroRepo: RealRepo } = await vi.importActual<typeof import('loro-repo')>('loro-repo');
+    const { createLoroSessionData } = await import('@lody/shared/session-data');
+    const { LoroDoc } = await import('loro-crdt');
+    const repo = await RealRepo.create({
+      metaDebounceCommitMs: 0,
+      resolveRoomTransports: () => ({ transportIds: ['local', 'cloud'] }),
+    });
+    const remoteSync = Promise.withResolvers<void>();
+    const localMetaJoined = Promise.withResolvers<void>();
+    const cloudMetaJoined = Promise.withResolvers<void>();
+    const adapter = (cloud: boolean): TransportAdapter => ({
+      connect: async () => {},
+      close: async () => {},
+      isConnected: () => true,
+      getStatus: () => 'connected',
+      onStatusChange: () => () => {},
+      reconnect: async () => {},
+      syncMeta: async () => ({ ok: true }),
+      syncDoc: async () => ({ ok: true }),
+      joinMetaRoom: () => {
+        (cloud ? cloudMetaJoined : localMetaJoined).resolve();
+        return {
+          status: 'joined',
+          firstSyncedWithRemote: cloud ? remoteSync.promise : Promise.resolve(),
+          onStatusChange: () => () => {},
+          unsubscribe: () => {},
+          waitUntilSynced: async () => {},
+          rejoin: async () => {},
+        };
+      },
+    });
+    const add = repo.addTransport.bind(repo);
+    vi.spyOn(repo, 'addTransport').mockImplementation((id, _adapter, options) =>
+      add(id, adapter(id === 'cloud'), options)
+    );
+    mocks.repoOverride = repo;
+    enableElectronLocalDataPlane();
+    const sessionId = 'synthetic-cold-timeout' as SessionId;
+    const roomId = getSessionRoomId(sessionId);
+    await repo.upsertDocMeta(roomId, { id: sessionId, machineId: 'foreign-machine' });
+    const live = new Set<unknown>();
+    const armed = Promise.withResolvers<void>();
+    const observe = repo.observeDocs.bind(repo);
+    vi.spyOn(repo, 'observeDocs').mockImplementation((listener, options) => {
+      const observation = observe(listener, options);
+      if (!options?.filter?.docIds?.includes(roomId)) return observation;
+      live.add(observation);
+      armed.resolve();
+      return {
+        ...observation,
+        unsubscribe: () => {
+          live.delete(observation);
+          observation.unsubscribe();
+        },
+      };
+    });
+    const body = new LoroDoc();
+    body.getList('history').push({
+      id: 'synthetic-visible-body',
+      role: 'assistant',
+      timestamp: 'synthetic',
+      items: [{ type: 'text', text: 'Visible after retry' }],
+    });
+    body.commit();
+    const runtime = await createWorkspaceRuntime({
+      workspaceSlug: 'workspace',
+      workspaceId: 'workspace-1' as WorkspaceId,
+      apiBaseUrl: 'https://api.example.test',
+      syncMode: 'dual',
+      createSessionData: ({ sessionId: targetSessionId }) =>
+        createLoroSessionData({ sessionId: targetSessionId, doc: body }),
+    });
+    runtime.setLocalMachineId('local-machine' as MachineId);
+    await localMetaJoined.promise;
+    await runtime.setAuthToken('synthetic-token');
+    await cloudMetaJoined.promise;
+    try {
+      // The cloud Meta binding never restores: the open must fail bounded
+      // instead of pending forever behind the skeleton.
+      const opening = runtime.acquireSessionStore(sessionId);
+      const outcome = opening.catch((error) => error);
+      await armed.promise;
+      await vi.advanceTimersByTimeAsync(120_000);
+      const error = (await outcome) as Error;
+      expect(error).toBeInstanceOf(Error);
+      expect(error.name).toBe('TimeoutError');
+      expect(error.message).toContain(roomId);
+      expect(live.size).toBe(0);
+      expect(runtime.peekSessionStore?.(sessionId)).toBeUndefined();
+
+      // A failed create is evicted from the store cache, so re-entering the
+      // session retries instead of reusing the dead pending promise.
+      remoteSync.resolve();
+      const retried = await runtime.acquireSessionStore(sessionId);
+      expect(retried.historyBackend).toBe('loro');
+      expect(
+        await retried.sessionData.history.readTurn('synthetic-visible-body')
+      ).toMatchObject({ state: 'ready' });
+    } finally {
+      remoteSync.resolve();
+      await runtime.dispose();
+    }
+  });
+
+  it('re-registers a restored-phase wait when the binding wait rejects after a status change', async () => {
+    const { LoroRepo: RealRepo } = await vi.importActual<typeof import('loro-repo')>('loro-repo');
+    const { createLoroSessionData } = await import('@lody/shared/session-data');
+    const { LoroDoc } = await import('loro-crdt');
+    const repo = await RealRepo.create({
+      metaDebounceCommitMs: 0,
+      resolveRoomTransports: () => ({ transportIds: ['local', 'cloud'] }),
+    });
+    const remoteSync = Promise.withResolvers<void>();
+    const localMetaJoined = Promise.withResolvers<void>();
+    const cloudMetaJoined = Promise.withResolvers<void>();
+    const adapter = (cloud: boolean): TransportAdapter => ({
+      connect: async () => {},
+      close: async () => {},
+      isConnected: () => true,
+      getStatus: () => 'connected',
+      onStatusChange: () => () => {},
+      reconnect: async () => {},
+      syncMeta: async () => ({ ok: true }),
+      syncDoc: async () => ({ ok: true }),
+      joinMetaRoom: () => {
+        (cloud ? cloudMetaJoined : localMetaJoined).resolve();
+        return {
+          status: 'joined',
+          firstSyncedWithRemote: cloud ? remoteSync.promise : Promise.resolve(),
+          onStatusChange: () => () => {},
+          unsubscribe: () => {},
+          waitUntilSynced: async () => {},
+          rejoin: async () => {},
+        };
+      },
+    });
+    const add = repo.addTransport.bind(repo);
+    vi.spyOn(repo, 'addTransport').mockImplementation((id, _adapter, options) =>
+      add(id, adapter(id === 'cloud'), options)
+    );
+    mocks.repoOverride = repo;
+    enableElectronLocalDataPlane();
+    const sessionId = 'synthetic-cold-rejoin' as SessionId;
+    const roomId = getSessionRoomId(sessionId);
+    // Identity is complete up front: the only remaining gate is the cloud
+    // binding reaching its restored phase.
+    await repo.upsertDocMeta(roomId, { id: sessionId, machineId: 'foreign-machine' });
+    const body = new LoroDoc();
+    body.getList('history').push({
+      id: 'synthetic-visible-body',
+      role: 'assistant',
+      timestamp: 'synthetic',
+      items: [{ type: 'text', text: 'Visible after re-registered wait' }],
+    });
+    body.commit();
+    const runtime = await createWorkspaceRuntime({
+      workspaceSlug: 'workspace',
+      workspaceId: 'workspace-1' as WorkspaceId,
+      apiBaseUrl: 'https://api.example.test',
+      syncMode: 'dual',
+      createSessionData: ({ sessionId: targetSessionId }) =>
+        createLoroSessionData({ sessionId: targetSessionId, doc: body }),
+    });
+    runtime.setLocalMachineId('local-machine' as MachineId);
+    await localMetaJoined.promise;
+    await runtime.setAuthToken('synthetic-token');
+    await cloudMetaJoined.promise;
+    const metaLease = await repo.joinMetaRoom();
+    try {
+      const binding = metaLease.subscription('cloud') as unknown as {
+        onStatusChange: (listener: () => void) => () => void;
+        waitFor: (request: { phase: string }) => Promise<unknown>;
+      };
+      const statusListeners = new Set<() => void>();
+      const originalOnStatusChange = binding.onStatusChange.bind(binding);
+      vi.spyOn(binding, 'onStatusChange').mockImplementation((listener: () => void) => {
+        statusListeners.add(listener);
+        return originalOnStatusChange(listener);
+      });
+      // Only awaitSessionReaderMetadata waits on the restored phase.
+      const tornDownWait = Promise.withResolvers<unknown>();
+      const firstRestoredWait = Promise.withResolvers<void>();
+      const originalWaitFor = binding.waitFor.bind(binding);
+      let restoredWaits = 0;
+      vi.spyOn(binding, 'waitFor').mockImplementation((request: { phase: string }) => {
+        if (request?.phase !== 'restored') return originalWaitFor(request);
+        restoredWaits += 1;
+        if (restoredWaits === 1) {
+          firstRestoredWait.resolve();
+          return tornDownWait.promise;
+        }
+        return originalWaitFor(request);
+      });
+      const opening = runtime.acquireSessionStore(sessionId);
+      await firstRestoredWait.promise;
+      // A transport re-attach tears the binding down: the status change lands
+      // while the wait is registered, then the pending wait rejects.
+      for (const listener of [...statusListeners]) listener();
+      tornDownWait.reject(new Error('subscription closed'));
+      await flushPromises();
+      // The rejection must re-evaluate and register a fresh wait on the
+      // binding; nothing else will wake this open again.
+      expect(restoredWaits).toBe(2);
+      remoteSync.resolve();
+      const store = await opening;
+      expect(store.historyBackend).toBe('loro');
+      expect(
+        await store.sessionData.history.readTurn('synthetic-visible-body')
+      ).toMatchObject({ state: 'ready' });
+    } finally {
+      metaLease.unsubscribe();
+      remoteSync.resolve();
+      await runtime.dispose();
+    }
+  });
+
   it.each([
     { retry: false, outcome: 'resolve' },
     { retry: false, outcome: 'reject' },
