@@ -114,6 +114,12 @@ export const PermissionActivity: Story = {
     agentActivityTone: 'warning',
   },
 };
+export const QuestionActivity: Story = {
+  args: {
+    ...PermissionActivity.args,
+    agentActivityLabel: 'Waiting for your answer',
+  },
+};
 export const MobileLeadingContent: Story = {
   args: { ...PermissionActivity.args, topInset: 64 },
 };

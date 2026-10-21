@@ -2696,6 +2696,7 @@
   "sessions.statusIndicator.managedRuntime": "Preparing agent runtime",
   "sessions.statusIndicator.pendingDispatch": "Starting...",
   "sessions.statusIndicator.received": "Task received",
+  "sessions.statusIndicator.waitingForAnswer": "Waiting for your answer",
   "sessions.statusIndicator.requestPermission": "Waiting for your permission",
   "sessions.statusIndicator.resuming": "Resuming",
   "sessions.statusIndicator.running": "Working",
