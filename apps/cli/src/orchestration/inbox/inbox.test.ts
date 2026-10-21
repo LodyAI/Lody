@@ -1435,6 +1435,20 @@ function operatorEndpoint(root: string) {
   };
 }
 
+// Native workflow coverage independent of OS socket permissions. Host/process adapters
+// retain their separate integration cases below; this does not prove a real Host lease.
+const recoveryPorts = (f: ReturnType<typeof fixture>) => ({
+  blocked: Effect.sync(() => f.sql.blockedExecutions('workspace')),
+  exclusive: <A, E, R>(work: Effect.Effect<A, E, R>) => work,
+  knownResourcesGone: () => Effect.succeed(true),
+  confirm: (record: import('./recovery').BlockedInboxExecution) =>
+    Effect.sync(() =>
+      record.executionId === null
+        ? f.sql.recoverOrphanedBlock(record.scope, record.snapshotToken)
+        : f.sql.recoverBlocked(record.scope, record.executionId, record.snapshotToken)
+    ),
+});
+
 describe('blocked execution operator recovery', () => {
   beforeEach(() => {
     vi.spyOn(processCommands, 'runCommandTextLegacy').mockImplementation(async (spec) => {
@@ -1733,6 +1747,301 @@ describe('blocked execution operator recovery', () => {
     });
     expect(next.status).toBe('acquired');
     if (next.status === 'acquired') await next.lease.close();
+  });
+  it('inspects orphaned blocks read-only, including resource records not joined to an active execution', async () => {
+    const f = fixture();
+    f.start();
+    f.sql.registerResources(f.input, 'execution-1', {
+      platform: process.platform,
+      roots: [123_456_789],
+      complete: false,
+    });
+    const db = new Database(f.filename);
+    try {
+      db.exec(
+        'UPDATE inbox_sessions SET active_execution=NULL,blocked=1; DROP TABLE inbox_recoveries;'
+      );
+      const before = db.serialize();
+      const { openInboxInspection } = await import('../platform/operator-recovery');
+      const inspection = openInboxInspection(f.filename);
+      let records: import('./recovery').BlockedInboxExecution[];
+      try {
+        records = inspection.inbox.blockedExecutions('workspace');
+      } finally {
+        inspection.close();
+      }
+      expect(records).toMatchObject([
+        {
+          executionId: null,
+          reason: 'missing_active_execution',
+          resources: [{ executionId: 'execution-1', identity: { roots: [123_456_789] } }],
+        },
+      ]);
+      expect(records[0]?.snapshotToken).toMatch(/^[a-f0-9]{64}$/);
+      expect(db.serialize()).toEqual(before);
+      expect(
+        db.prepare("SELECT 1 FROM sqlite_master WHERE name='inbox_recoveries'").get()
+      ).toBeUndefined();
+      db.exec("UPDATE orchestration_meta SET value='999' WHERE key='schema_version'");
+      const unsupported = db.serialize();
+      expect(() => openInboxInspection(f.filename)).toThrow('does not support this store schema');
+      expect(db.serialize()).toEqual(unsupported);
+    } finally {
+      db.close();
+    }
+  });
+  it('preserves an inspected legacy v2 snapshot through additive recovery migration', () => {
+    const f = fixture();
+    f.start();
+    f.add('held');
+    f.sql.registerResources(f.input, 'execution-1', {
+      platform: process.platform,
+      roots: [],
+      complete: false,
+    });
+    const db = new Database(f.filename);
+    try {
+      db.exec(
+        'UPDATE inbox_sessions SET blocked=1; DROP TABLE inbox_recoveries; ALTER TABLE inbox_resources DROP COLUMN generation;'
+      );
+      const before = f.sql.blockedExecutions('workspace')[0];
+      if (!before) throw new Error('missing legacy block');
+      const reopened = new LodyOperationStore(f.filename, undefined, { maintenance: false });
+      stores.push(reopened);
+      expect(reopened.inbox.blockedExecutions('workspace')[0]?.snapshotToken).toBe(
+        before.snapshotToken
+      );
+      expect(reopened.inbox.recoverBlocked(f.input, 'execution-1', before.snapshotToken)).toBe(
+        true
+      );
+      expect(db.prepare('SELECT consumed FROM inbox_results').all()).toEqual([{ consumed: 0 }]);
+      expect(db.prepare('SELECT generation FROM inbox_resources').all()).toEqual([
+        { generation: 0 },
+      ]);
+    } finally {
+      db.close();
+    }
+  });
+  it('recovers a snapshot-matched orphan without replay, losing queued input, or waking held results', async () => {
+    const f = fixture();
+    f.start();
+    f.release();
+    f.add('submitted');
+    const [intent] = f.sql.pending('workspace');
+    if (!intent) throw new Error('missing intent');
+    const batch = f.sql.prepare(intent.input, 'owner', intent.intentId);
+    if (!batch) throw new Error('missing batch');
+    expect(f.sql.begin(batch, 'uncertain')).toBe(true);
+    expect(f.sql.fence(batch, 'uncertain')).toBe(true);
+    f.sql.registerResources(batch, 'uncertain', {
+      platform: process.platform,
+      roots: [],
+      complete: false,
+    });
+    f.add('held');
+    const queued = {
+      ...f.input,
+      inputId: 'queued-before-recovery',
+      config: { prompt: 'preserve this text' },
+    };
+    f.sql.accept(queued);
+    const db = new Database(f.filename);
+    try {
+      db.exec('UPDATE inbox_sessions SET active_execution=NULL,blocked=1');
+      const record = f.sql.blockedExecutions('workspace')[0];
+      if (!record) throw new Error('missing block');
+      const { recoverBlockedInboxExecution } = await import('./operator-recovery');
+      await Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const ports = recoveryPorts(f);
+            expect(
+              (yield* Effect.exit(recoverBlockedInboxExecution(ports, 'A', null, true)))._tag
+            ).toBe('Failure');
+            expect(
+              (yield* Effect.exit(recoverBlockedInboxExecution(ports, 'A', null, true, 'stale')))
+                ._tag
+            ).toBe('Failure');
+            yield* recoverBlockedInboxExecution(ports, 'A', null, true, record.snapshotToken);
+            expect(
+              (yield* Effect.exit(
+                recoverBlockedInboxExecution(ports, 'A', null, true, record.snapshotToken)
+              ))._tag
+            ).toBe('Failure');
+          })
+        )
+      );
+      expect(f.sql.state(f.input)).toMatchObject({
+        blocked: 0,
+        paused: 1,
+        active_execution: null,
+        active_input: null,
+      });
+      expect(f.sql.pending('workspace')).toEqual([]);
+      expect(f.sql.getBatch(batch.batchId, batch)?.state).toBe('unknown');
+      expect(f.sql.fence(batch, 'replay')).toBe(false);
+      expect(f.sql.begin(batch, 'replay')).toBe(false);
+      expect(f.sql.inputEnded('workspace', 'A', queued.inputId)).toBe(false);
+      expect(f.sql.begin(queued, 'queued')).toBe(false);
+      expect(db.prepare('SELECT execution_id FROM inbox_recoveries').all()).toEqual([
+        { execution_id: null },
+      ]);
+      const freshTask = { ...f.input, kind: 'task' as const, inputId: 'fresh-agent-chat' };
+      expect(f.sql.accept(freshTask)).toBe(true);
+      const nextBatch = f.sql.prepare(freshTask, 'owner');
+      if (!nextBatch) throw new Error('missing held result');
+      expect(f.sql.members(nextBatch, 0, 10).map((member) => member.operationId)).toEqual(['held']);
+      expect(f.sql.begin(batch, 'old-after-unpause')).toBe(false);
+      expect(f.sql.inputEnded('workspace', 'A', queued.inputId)).toBe(false);
+      expect(f.sql.begin(freshTask, 'fresh')).toBe(true);
+    } finally {
+      db.close();
+    }
+  });
+  it.each(['execution', 'resources', 'input', 'owner'] as const)(
+    'rejects a %s change after resource verification instead of clearing new ownership',
+    async (change) => {
+      const f = fixture();
+      f.start();
+      const db = new Database(f.filename);
+      try {
+        db.exec('UPDATE inbox_sessions SET blocked=1');
+        const { recoverBlockedInboxExecution } = await import('./operator-recovery');
+        await expect(
+          Effect.runPromise(
+            Effect.scoped(
+              Effect.gen(function* () {
+                const ports = recoveryPorts(f);
+                yield* recoverBlockedInboxExecution(
+                  {
+                    ...ports,
+                    knownResourcesGone: (record) =>
+                      ports.knownResourcesGone(record).pipe(
+                        Effect.tap(() =>
+                          Effect.sync(() => {
+                            if (change === 'execution')
+                              db.exec("UPDATE inbox_sessions SET active_execution='new-execution'");
+                            if (change === 'resources')
+                              f.sql.registerResources(f.input, 'late-resource', {
+                                platform: process.platform,
+                                roots: [process.pid],
+                                complete: false,
+                              });
+                            if (change === 'input')
+                              f.sql.accept({ ...f.input, inputId: 'new-input' });
+                            if (change === 'owner')
+                              db.exec("UPDATE inbox_modes SET owner='new-owner'");
+                          })
+                        )
+                      ),
+                  },
+                  'A',
+                  'execution-1',
+                  true
+                );
+              })
+            )
+          )
+        ).rejects.toThrow('changed during recovery');
+        expect(f.sql.state(f.input).blocked).toBe(1);
+        expect(db.prepare('SELECT * FROM inbox_recoveries').all()).toEqual([]);
+      } finally {
+        db.close();
+      }
+    }
+  );
+  it.each(['execution', 'orphan'] as const)(
+    'rejects owner and resource ABA for a %s snapshot',
+    (kind) => {
+      const f = fixture();
+      f.start();
+      const identity = { platform: process.platform, roots: [123_456_789], complete: false };
+      f.sql.registerResources(f.input, 'execution-1', identity);
+      const db = new Database(f.filename);
+      try {
+        db.exec(
+          `UPDATE inbox_sessions SET blocked=1${kind === 'orphan' ? ',active_execution=NULL' : ''}`
+        );
+        f.sql.deactivate('workspace', 'owner');
+        const original = f.sql.blockedExecutions('workspace')[0];
+        if (!original) throw new Error('missing block');
+        f.sql.activate('workspace', 'new-owner');
+        f.sql.deactivate('workspace', 'new-owner');
+        const recover = (token: string) =>
+          kind === 'orphan'
+            ? f.sql.recoverOrphanedBlock(f.input, token)
+            : f.sql.recoverBlocked(f.input, 'execution-1', token);
+        expect(recover(original.snapshotToken)).toBe(false);
+        const beforeAcquisition = f.sql.blockedExecutions('workspace')[0];
+        if (!beforeAcquisition) throw new Error('missing block');
+        f.sql.registerResources(f.input, 'execution-1', { ...identity, complete: true });
+        f.sql.registerResources(f.input, 'execution-1', identity);
+        expect(recover(beforeAcquisition.snapshotToken)).toBe(false);
+        expect(f.sql.state(f.input).blocked).toBe(1);
+      } finally {
+        db.close();
+      }
+    }
+  );
+  it('rejects ambiguous active ownership without clearing either owner', async () => {
+    const f = fixture();
+    f.start();
+    const db = new Database(f.filename);
+    try {
+      db.exec(
+        "UPDATE inbox_sessions SET blocked=1; INSERT INTO inbox_sessions(workspace_id,session_id,user_id,active_execution,blocked) VALUES('workspace','A','other','other-execution',1)"
+      );
+      const record = f.sql.blockedExecutions('workspace')[0];
+      expect(record?.reason).toBe('ambiguous_ownership');
+      const { recoverBlockedInboxExecution } = await import('./operator-recovery');
+      await expect(
+        Effect.runPromise(recoverBlockedInboxExecution(recoveryPorts(f), 'A', 'execution-1', true))
+      ).rejects.toThrow('Multiple execution owners');
+      expect(
+        db.prepare('SELECT active_execution FROM inbox_sessions ORDER BY user_id').all()
+      ).toEqual([{ active_execution: 'execution-1' }, { active_execution: 'other-execution' }]);
+    } finally {
+      db.close();
+    }
+  });
+  it('does not treat a missing active execution as proof that its known resources are gone', async () => {
+    const f = fixture();
+    f.start();
+    f.sql.registerResources(f.input, 'orphan-resource', {
+      platform: process.platform,
+      roots: [process.pid],
+      complete: false,
+    });
+    const db = new Database(f.filename);
+    try {
+      db.exec('UPDATE inbox_sessions SET active_execution=NULL,blocked=1');
+    } finally {
+      db.close();
+    }
+    const record = f.sql.blockedExecutions('workspace')[0];
+    if (!record) throw new Error('missing block');
+    const { knownOperatorResourcesGone } = await import('./recovery');
+    const { readProcessTable } = await import('@/monitor/process-table');
+    // Exercise the real sampler/predicate with the synthetic process table, without OS lease acquisition.
+    const snapshot = await readProcessTable(process.platform);
+    expect(knownOperatorResourcesGone(record, process.platform, snapshot)).toBe(false);
+    expect(knownOperatorResourcesGone(record, process.platform, { ...snapshot, entries: [] })).toBe(
+      true
+    );
+    expect(
+      knownOperatorResourcesGone(record, process.platform, {
+        ...snapshot,
+        entries: [],
+        warnings: ['unverified'],
+      })
+    ).toBe(false);
+    expect(
+      knownOperatorResourcesGone(record, process.platform === 'win32' ? 'linux' : 'win32', {
+        ...snapshot,
+        entries: [],
+      })
+    ).toBe(false);
+    expect(f.sql.state(f.input).blocked).toBe(1);
   });
   it('atomically rolls back pause and release if audit persistence fails', () => {
     const f = fixture();

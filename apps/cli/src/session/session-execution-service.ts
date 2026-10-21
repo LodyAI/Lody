@@ -42,6 +42,11 @@ import { readTimeoutEnv, withTimeout } from '@/lib/loro/timeout-utils';
 import type { MemoryPressureEvictionResult } from '@/lib/session-gc-manager';
 import type { OperationInboxLegacy } from '@/orchestration/inbox/legacy';
 import {
+  blockedInboxRecoveryMessage,
+  InboxExecutionBlocked,
+  InboxExecutionRejected,
+} from '@/orchestration/inbox/admission-failure';
+import {
   batchHistoryMembers,
   batchPreview,
   type InboxBatch,
@@ -4210,7 +4215,13 @@ export class SessionExecutionService {
       }
     } catch (cause) {
       try {
-        if (inboxInput)
+        // A rejected begin acquired nothing. Its deterministic ID can match an
+        // older blocked execution, which only the recovery owner may release.
+        if (
+          inboxInput &&
+          !(cause instanceof InboxExecutionBlocked) &&
+          !(cause instanceof InboxExecutionRejected)
+        )
           await inbox!.release({ ...inboxInput, executionId: turnId, outcome: 'failed' });
         this.releaseTurnRuntime(sessionId, turnId);
       } catch (releaseCause) {
@@ -4218,6 +4229,28 @@ export class SessionExecutionService {
           [cause, releaseCause],
           'Inbox preparation and release failed'
         );
+      }
+      if (cause instanceof InboxExecutionBlocked) {
+        // Inbox preparation precedes the scoped turn error handler. Persist its
+        // verified diagnostic here so a rejected send is not only a daemon log.
+        await this.recordKnownChatFailure({
+          sessionId,
+          sessionDoc,
+          userTurnId,
+          reason: 'turn_pre_prompt_failed',
+          message: blockedInboxRecoveryMessage(
+            cause,
+            { machineId: this.deps.machineId, workspaceId: this.deps.workspaceId, sessionId },
+            process.platform
+          ),
+        });
+        // Keep Inbox eligibility aligned with the terminal visible failure.
+        // A repeated ID must not alter the original active input's evidence;
+        // unrelated queued input is also untouched.
+        if (inboxInput)
+          await inbox!.abandonInput(this.deps.workspaceId, sessionId, inboxInput.inputId, true);
+        span.end({ outcome: 'inbox-blocked' });
+        throw cause;
       }
       if (
         !runtime.releaseFailure &&

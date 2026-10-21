@@ -69,12 +69,12 @@ Root/CLI rules apply; `specs/session-orchestration.md` owns behavior.
   legacy snapshots and interrupted journaling stay blocked. Coordinator recovery calls
   `recoverClose`, not the cached failed `close`; never replay transport. Release finishes
   input; a still-pending turn `withdraw`s before submit/acquisition.
-- Schema/Inbox v2 drops Delivery data/APIs; keep Operation rows and retired IDs.
-  Missing/incomplete journals stay blocked automatically. Offline operator recovery holds the
-  Host lease before opening SQLite, verifies known roots and requires explicit confirmation
-  of all unrecorded resources. Retire the exact execution and pause atomically; no replay or wake.
-  Keep current pause/unknown/resource evidence and monotonic sequences. Host v3 rejects old
-  workers before storage; end the prior Worker before handoff. Passive results are not busy.
+- Inbox v2 removes Delivery APIs/data, not Operations/retired IDs. Missing journals stay
+  blocked. Offline recovery holds the Host lease, probes every known root, and requires
+  all-resource attestation plus snapshot CAS, including orphan blocks. Retire only uncertain
+  input, preserve queued input/results, and pause atomically; no replay/wake. Inspection is
+  read-only. Keep pause/unknown/resource evidence and monotonic sequences. Host v3 rejects old
+  workers before storage; end prior Workers before handoff. Passive results are not busy.
 - Create Operations may also maintain one stable `role: system` `operation_progress`
   Turn in the requester Session, written only by the Host-lease Worker, never by MCP
   replicas. It is durable UI state, never agent input/dispatch. Merge duplicate rows through

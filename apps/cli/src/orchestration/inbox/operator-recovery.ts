@@ -12,8 +12,9 @@ export type InboxOperatorRecoveryPorts = {
 export const recoverBlockedInboxExecution = Effect.fn('Inbox.operatorRecovery')(function* (
   ports: InboxOperatorRecoveryPorts,
   sessionId: string,
-  executionId: string,
-  confirmed: boolean
+  executionId: string | null,
+  confirmed: boolean,
+  snapshotToken?: string
 ) {
   if (!confirmed)
     return yield* Effect.fail(
@@ -25,7 +26,18 @@ export const recoverBlockedInboxExecution = Effect.fn('Inbox.operatorRecovery')(
         (entry) => entry.scope.sessionId === sessionId && entry.executionId === executionId
       );
       if (!record)
-        return yield* Effect.fail(new Error('The specified execution is no longer blocked'));
+        return yield* Effect.fail(
+          new Error('The specified Inbox is no longer blocked; inspect again')
+        );
+      if (record.reason === 'ambiguous_ownership')
+        return yield* Effect.fail(
+          new Error('Multiple execution owners remain; recovery requires investigation')
+        );
+      if (
+        (executionId === null && !snapshotToken) ||
+        (snapshotToken !== undefined && snapshotToken !== record.snapshotToken)
+      )
+        return yield* Effect.fail(new Error('Blocked Inbox snapshot changed; inspect again'));
       if (!(yield* ports.knownResourcesGone(record)))
         return yield* Effect.fail(
           new Error('Known resources are still running or cannot be verified')
@@ -36,7 +48,8 @@ export const recoverBlockedInboxExecution = Effect.fn('Inbox.operatorRecovery')(
         recovered: true,
         executionId,
         paused: true,
-        nextAction: 'Send a new user message after restarting Lody',
+        nextAction:
+          'Restart Lody. Fresh human or Agent-chat input clears the pause; unknown old requests are not replayed. Queued input and saved results are preserved.',
       };
     })
   );

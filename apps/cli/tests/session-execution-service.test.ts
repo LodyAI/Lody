@@ -56,6 +56,13 @@ import { MachineDocument, SessionDocument, type LoroDocumentManager } from '../s
 import type { SessionActivePresencePhase } from '../src/lib/loro/session-active-presence';
 import { SessionActivePresenceControllerLegacy } from '../src/lib/loro/session-active-presence-legacy';
 import { operationInboxLegacy } from '../src/orchestration/inbox/legacy';
+import { recoverBlockedInboxExecution } from '../src/orchestration/inbox/operator-recovery';
+import {
+  InboxExecutionBlocked,
+  InboxExecutionRejected,
+  inboxRecoveryInspectionCommand,
+  quoteInboxRecoveryArgument,
+} from '../src/orchestration/inbox/admission-failure';
 import { LodyOperationStore } from '../src/orchestration/operation-store';
 import { applyAcpSessionRunConfig } from '../src/session/acp-session-config-applier';
 import { Session } from '../src/session/session';
@@ -10885,6 +10892,24 @@ describe('Operation Inbox execution boundary', () => {
           },
         });
       },
+      recordChatFailure: async (_doc, reason, message, code) => {
+        await doc.sessionData.commands.applyHistoryAction({
+          kind: 'upsert-turn',
+          turn: {
+            id: `failure:${(await (await createSessionBackend(doc)).readHistory()).length}`,
+            role: 'system',
+            timestamp: '2026-10-12T00:00:00Z',
+            items: [
+              {
+                type: 'system_notice',
+                name: 'chat_failed',
+                meta: { reason, message, ...(code ? { code } : {}) },
+              },
+            ],
+            fileDiff: [],
+          },
+        });
+      },
     });
     const service = new SessionExecutionService(deps);
     store.inbox.activate('workspace-1', 'owner');
@@ -10982,6 +11007,333 @@ describe('Operation Inbox execution boundary', () => {
       storePath: path.join(root, 'operations.sqlite3'),
     };
   }
+
+  it.each(['missing_identity', 'missing_active_execution', 'other_requester'] as const)(
+    'persists the exact manual recovery entry for a blocked send (%s) without starting transport',
+    async (kind) => {
+      const received: ContentBlock[][] = [];
+      const f = inboxExecutionFixture(async (blocks) => {
+        received.push(blocks);
+        return { stopReason: 'end_turn' };
+      });
+      try {
+        const prior = {
+          workspaceId: 'workspace-1',
+          sessionId: f.message.sessionId,
+          userId: kind === 'other_requester' ? 'earlier-requester' : 'user-1',
+          inputId: 'earlier-input',
+          kind: 'human' as const,
+          config: f.message.acpSessionConfig,
+        };
+        expect(f.store.inbox.accept(prior)).toBe(true);
+        expect(f.store.inbox.begin(prior, 'blocked-execution')).toBe(true);
+        f.store.inbox.release({
+          ...prior,
+          executionId: 'blocked-execution',
+          outcome: 'unreleased',
+        });
+        if (kind === 'missing_active_execution') {
+          const db = new Database(f.storePath);
+          try {
+            db.prepare('UPDATE inbox_sessions SET active_execution=NULL WHERE session_id=?').run(
+              f.message.sessionId
+            );
+          } finally {
+            db.close();
+          }
+        }
+
+        await expect(f.service.continueSession(f.message)).rejects.toBeInstanceOf(
+          InboxExecutionBlocked
+        );
+        const history = await (await createSessionBackend(f.doc)).readHistory();
+        const notices = history
+          .flatMap((turn) => turn.items ?? [])
+          .filter((item) => item.type === 'system_notice' && item.name === 'chat_failed');
+        expect(notices).toHaveLength(1);
+        expect(notices[0]?.meta).toMatchObject({
+          reason: 'turn_pre_prompt_failed',
+          message: expect.stringContaining(
+            'Machine: "machine-1"; workspace: "workspace-1"; session: "inbox-session".'
+          ),
+        });
+        const message = notices[0]?.meta?.message;
+        expect(message).toContain(
+          kind === 'missing_active_execution'
+            ? 'Blocked execution: (missing active execution ID); reason: missing_active_execution.'
+            : 'Blocked execution: "blocked-execution"; reason: missing_identity.'
+        );
+        expect(message).toContain('Quit Lody Desktop and stop the Lody daemon');
+        expect(message).toContain(
+          "lody session recover-inbox --machine 'machine-1' --workspace 'workspace-1' -- 'inbox-session'"
+        );
+        expect(message).not.toContain('--confirm-resources-released');
+        expect(message).not.toContain('--execution');
+        expect(history.find((turn) => turn.id === 'human-input')?.status).toBe('failed');
+        expect(f.service.getExecutionSnapshot(f.message.sessionId).hasActiveTurn).toBe(false);
+        expect(received).toEqual([]);
+        expect(f.store.inbox.blockedExecutions('workspace-1')).not.toEqual([]);
+        expect(f.store.inbox.pending('workspace-1')).toEqual([]);
+      } finally {
+        await f.close();
+      }
+    }
+  );
+
+  it('does not mistake a live admission conflict for blocked recovery', async () => {
+    const received: ContentBlock[][] = [];
+    const f = inboxExecutionFixture(async (blocks) => {
+      received.push(blocks);
+      return { stopReason: 'end_turn' };
+    });
+    try {
+      const prior = {
+        workspaceId: 'workspace-1',
+        sessionId: f.message.sessionId,
+        userId: 'user-1',
+        inputId: 'live-input',
+        kind: 'human' as const,
+        config: f.message.acpSessionConfig,
+      };
+      expect(f.store.inbox.accept(prior)).toBe(true);
+      expect(f.store.inbox.begin(prior, 'live-execution')).toBe(true);
+      const unrelated = { ...prior, sessionId: 'different-session' };
+      expect(f.store.inbox.accept(unrelated)).toBe(true);
+      expect(f.store.inbox.begin(unrelated, 'unrelated-blocked-execution')).toBe(true);
+      f.store.inbox.release({
+        ...unrelated,
+        executionId: 'unrelated-blocked-execution',
+        outcome: 'unreleased',
+      });
+      await expect(f.service.continueSession(f.message)).rejects.toBeInstanceOf(
+        InboxExecutionRejected
+      );
+      const notices = (await (await createSessionBackend(f.doc)).readHistory())
+        .flatMap((turn) => turn.items ?? [])
+        .filter((item) => item.type === 'system_notice' && item.name === 'chat_failed');
+      expect(notices).toEqual([]);
+      expect(f.store.inbox.blockedExecutions('workspace-1', f.message.sessionId)).toEqual([]);
+      expect(received).toEqual([]);
+    } finally {
+      await f.close();
+    }
+  });
+
+  it('retires only the visibly rejected task so later child results can wake after manual recovery', async () => {
+    const received: ContentBlock[][] = [];
+    const automaticFinished = createDeferred<void>();
+    const f = inboxExecutionFixture(
+      async (blocks) => {
+        received.push(structuredClone(blocks));
+        return { stopReason: 'end_turn' };
+      },
+      undefined,
+      () => automaticFinished.resolve()
+    );
+    try {
+      const backend = await createSessionBackend(f.doc);
+      const source = (await backend.readHistory()).find((turn) => turn.id === 'human-input');
+      if (!source) throw new Error('Missing fixture user turn');
+      const prior = {
+        workspaceId: 'workspace-1',
+        sessionId: f.message.sessionId,
+        userId: 'user-1',
+        inputId: 'old-input',
+        kind: 'task' as const,
+        config: f.message.acpSessionConfig,
+      };
+      expect(f.store.inbox.accept(prior)).toBe(true);
+      expect(f.store.inbox.begin(prior, 'old-execution')).toBe(true);
+      f.store.inbox.release({ ...prior, executionId: 'old-execution', outcome: 'unreleased' });
+      const queued = { ...prior, inputId: 'queued-task', config: { prompt: 'QUEUED_REQUEST' } };
+      expect(f.store.inbox.accept(queued)).toBe(true);
+      await f.doc.sessionData.commands.applyHistoryAction({
+        kind: 'upsert-turn',
+        turn: {
+          ...source,
+          id: queued.inputId,
+          inputConfig: queued.config,
+          items: [{ type: 'text', text: queued.config.prompt }],
+        },
+      });
+      // No human receipt: this rejected Agent chat is recorded as a task.
+      await expect(f.service.continueSession(f.message)).rejects.toBeInstanceOf(
+        InboxExecutionBlocked
+      );
+      expect(f.store.inbox.inputEnded('workspace-1', f.message.sessionId, 'human-input')).toBe(
+        true
+      );
+      expect(f.store.inbox.inputEnded('workspace-1', f.message.sessionId, queued.inputId)).toBe(
+        false
+      );
+      expect(received).toEqual([]);
+      // Exercise the native operator workflow with deterministic, resource-free ports.
+      // The platform's exclusive Host lease/probe behavior has its own Inbox suite.
+      await Effect.runPromise(
+        recoverBlockedInboxExecution(
+          {
+            blocked: Effect.sync(() => f.store.inbox.blockedExecutions('workspace-1')),
+            exclusive: (work) => work,
+            knownResourcesGone: () => Effect.succeed(true),
+            confirm: (record) =>
+              Effect.sync(
+                () =>
+                  record.executionId !== null &&
+                  f.store.inbox.recoverBlocked(
+                    record.scope,
+                    record.executionId,
+                    record.snapshotToken
+                  )
+              ),
+          },
+          f.message.sessionId,
+          'old-execution',
+          true
+        )
+      );
+      expect(f.store.inbox.inputEnded('workspace-1', f.message.sessionId, queued.inputId)).toBe(
+        false
+      );
+      expect(f.store.inbox.pending('workspace-1')).toEqual([]);
+
+      const freshConfig = { ...f.message.acpSessionConfig, prompt: 'FRESH_REQUEST' };
+      await f.doc.sessionData.commands.applyHistoryAction({
+        kind: 'upsert-turn',
+        turn: {
+          ...source,
+          id: 'fresh-human',
+          inputConfig: freshConfig,
+          items: [{ type: 'text', text: freshConfig.prompt }],
+        },
+      });
+      await f.service.acceptInboxHumanInput({
+        sessionId: f.message.sessionId,
+        inputId: 'fresh-human',
+        userId: 'user-1',
+        config: freshConfig,
+      });
+      await f.service.continueSession({
+        ...f.message,
+        userTurnId: 'fresh-human',
+        acpSessionConfig: freshConfig,
+      });
+      await f.service.continueSession({
+        ...f.message,
+        userTurnId: queued.inputId,
+        acpSessionConfig: { ...f.message.acpSessionConfig, ...queued.config },
+      });
+      expect(received).toHaveLength(2);
+      expect(f.store.inbox.inputEnded('workspace-1', f.message.sessionId, queued.inputId)).toBe(
+        true
+      );
+      f.add('later-child-result');
+      expect(f.store.inbox.pending('workspace-1')).toHaveLength(1);
+      await f.wake();
+      await automaticFinished.promise;
+      expect(received).toHaveLength(3);
+      expect(
+        f.store.inbox.historyReceipts('workspace-1').every((batch) => batch.state === 'settled')
+      ).toBe(true);
+    } finally {
+      await f.close();
+    }
+  });
+
+  it('does not release or retire an old active input when a rejected restart reuses its IDs', async () => {
+    const received: ContentBlock[][] = [];
+    const f = inboxExecutionFixture(async (blocks) => {
+      received.push(blocks);
+      return { stopReason: 'end_turn' };
+    });
+    try {
+      const old = {
+        workspaceId: 'workspace-1',
+        sessionId: f.message.sessionId,
+        userId: 'user-1',
+        inputId: f.message.userTurnId,
+        kind: 'task' as const,
+        config: f.message.acpSessionConfig,
+      };
+      expect(f.store.inbox.accept(old)).toBe(true);
+      expect(f.store.inbox.begin(old, 'assistant:human-input')).toBe(true);
+      // Restart observation blocks the owner without manufacturing a release receipt.
+      f.store.inbox.activate('workspace-1', 'owner');
+      await expect(f.service.continueSession(f.message)).rejects.toBeInstanceOf(
+        InboxExecutionBlocked
+      );
+      expect(f.store.inbox.blockedExecutions('workspace-1', f.message.sessionId)).toMatchObject([
+        { executionId: 'assistant:human-input' },
+      ]);
+      expect(f.store.inbox.inputEnded('workspace-1', f.message.sessionId, old.inputId)).toBe(false);
+      const db = new Database(f.storePath);
+      try {
+        expect(
+          db
+            .prepare(
+              'SELECT active_execution,active_input,blocked FROM inbox_sessions WHERE session_id=?'
+            )
+            .get(f.message.sessionId)
+        ).toEqual({
+          active_execution: 'assistant:human-input',
+          active_input: old.inputId,
+          blocked: 1,
+        });
+        expect(
+          db.prepare('SELECT * FROM inbox_releases WHERE session_id=?').all(f.message.sessionId)
+        ).toEqual([]);
+      } finally {
+        db.close();
+      }
+      expect(received).toEqual([]);
+    } finally {
+      await f.close();
+    }
+  });
+
+  it('quotes Windows recovery commands as PowerShell literals without adding recovery consent', () => {
+    const command = inboxRecoveryInspectionCommand(
+      { machineId: "host'$(evil)", workspaceId: 'work `space;$env:HOME', sessionId: '-session' },
+      'win32'
+    );
+    expect(command).toBe(
+      "lody session recover-inbox --machine 'host''$(evil)' --workspace 'work `space;$env:HOME' -- '-session'"
+    );
+    expect(quoteInboxRecoveryArgument('', 'win32')).toBe("''");
+    expect(quoteInboxRecoveryArgument('host\u2019; $(evil);\u2018end', 'win32')).toBe(
+      "'host\u2019\u2019; $(evil);\u2018\u2018end'"
+    );
+    expect(quoteInboxRecoveryArgument('host\u201a; $(evil);\u201bend', 'win32')).toBe(
+      "'host\u201a\u201a; $(evil);\u201b\u201bend'"
+    );
+  });
+
+  it.skipIf(process.platform === 'win32')(
+    'passes POSIX recovery identifiers literally, including quotes, substitutions and leading options',
+    () => {
+      const target = {
+        machineId: "host'$(printf injected)",
+        workspaceId: 'work space; "$HOME"\\newline\nnext',
+        sessionId: '--confirm-resources-released',
+      };
+      const command = inboxRecoveryInspectionCommand(target, 'linux');
+      const argumentsSeen = execFileSync(
+        '/bin/sh',
+        ['-c', `lody() { printf '%s\\0' "$@"; }; ${command}`],
+        { encoding: 'utf8' }
+      ).split('\0');
+      expect(argumentsSeen).toEqual([
+        'session',
+        'recover-inbox',
+        '--machine',
+        target.machineId,
+        '--workspace',
+        target.workspaceId,
+        '--',
+        target.sessionId,
+        '',
+      ]);
+    }
+  );
 
   it('notifies once after five children, partial summaries and a follow-up delegation finish', async () => {
     const summaries = [createDeferred<void>(), createDeferred<void>(), createDeferred<void>()];
