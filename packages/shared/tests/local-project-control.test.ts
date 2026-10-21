@@ -598,6 +598,42 @@ describe('local project control response schema', () => {
 });
 
 describe('node local project control guard', () => {
+  const cjs = createRequire(import.meta.url)('../src/node/local-project-control.cjs') as {
+    isLocalProjectControlRequest: typeof isLocalProjectControlRequest;
+  };
+  const historyBase = {
+    machineId: 'machine-1',
+    workspaceId: 'workspace-1',
+    localProjectId: 'project-1',
+  };
+  const customHistoryRequests = [
+    { type: 'local-project/sync-history' },
+    { type: 'local-project/import-history', acpSessionIds: ['acp-1'] },
+    {
+      type: 'local-project/resolve-history-conflict',
+      sessionId: 'session-1',
+      acpSessionId: 'acp-1',
+    },
+  ].map((request) => ({
+    ...historyBase,
+    ...request,
+    provider: { agentConfigId: 'config-1', cliType: 'custom', agentType: 'my-agent' },
+  }));
+
+  it.each(customHistoryRequests)(
+    'accepts custom ACP history providers for $type in Zod and both IPC guards',
+    (request) => {
+      expect(safeParseLocalProjectControlRequest(JSON.stringify(request)).success).toBe(true);
+      expect(isLocalProjectControlRequest(request)).toBe(true);
+      expect(cjs.isLocalProjectControlRequest(request)).toBe(true);
+
+      const unknown = { ...request, provider: { ...request.provider, cliType: 'unknown' } };
+      expect(safeParseLocalProjectControlRequest(JSON.stringify(unknown)).success).toBe(false);
+      expect(isLocalProjectControlRequest(unknown)).toBe(false);
+      expect(cjs.isLocalProjectControlRequest(unknown)).toBe(false);
+    }
+  );
+
   it('accepts remote directory browse request and response', () => {
     expect(
       isLocalProjectControlRequest({
