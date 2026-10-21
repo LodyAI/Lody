@@ -3,6 +3,7 @@
 Date: 2026-10-21
 Status: proposed
 Translation: current
+PR: [#1778](https://github.com/LodyAI/Lody/pull/1778)
 
 [中文](2026-10-21-windows-inbox-containment.zh.md)
 
