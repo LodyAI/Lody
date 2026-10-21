@@ -98,6 +98,7 @@ import {
   type SessionHistoryBackendKind,
   type SessionQuotaKind,
   type SessionTurnInputConfig,
+  type SessionSteerResponse,
   type SessionId,
   type SessionMeta,
   type SessionOperation,
@@ -1361,6 +1362,8 @@ export async function appendUserPromptHistory(args: {
   preallocatedId?: string;
   /** History the caller already read, so the idempotency check can skip a re-read. */
   knownHistory?: readonly SessionHistory[];
+  /** Guide history stays inert until the recipient owns the steer outcome. */
+  pendingApply?: boolean;
 }): Promise<{ id: string; timestamp: string; inputConfig?: SessionTurnInputConfig }> {
   const { sessionDoc, prompt, userId, inputConfig, preallocatedId } = args;
   const historyId = preallocatedId?.trim() || uuidV4();
@@ -1399,7 +1402,7 @@ export async function appendUserPromptHistory(args: {
     role: 'user',
     author: args.author ?? { v: 1, kind: 'human', userId },
     timestamp,
-    status: 'pending',
+    status: args.pendingApply ? 'pending_apply' : 'pending',
     read: false,
     userId,
     items: inputBlocksToHistoryItems(args.inputBlocks ?? buildCommandInputBlocks(prompt)),
@@ -1407,7 +1410,11 @@ export async function appendUserPromptHistory(args: {
     fileDiff: [],
     finished: true,
   };
-  await backend.appendUserTurn(entry);
+  if (args.pendingApply) {
+    await backend.appendHistoryTurn(entry);
+  } else {
+    await backend.appendUserTurn(entry);
+  }
   return {
     id: historyId,
     timestamp,
@@ -2562,6 +2569,55 @@ async function dispatchTurnFastPath(args: {
     );
   } catch {
     // The synchronized Session document is the durable delivery path.
+  }
+}
+
+/** The fixed history input is the retry identity, including its original steer target. */
+async function steerMcpChatTurn(args: {
+  auth: AuthContext;
+  workspaceId: WorkspaceId;
+  machineId: MachineId;
+  sessionId: SessionId;
+  userTurnId: string;
+  userId: string;
+  timestamp: string;
+  inputConfig: SessionTurnInputConfig;
+  expectedTurnId: string;
+}): Promise<void> {
+  const environment = getSessionCommandEnvironment();
+  const input = {
+    sessionId: args.sessionId,
+    expectedTurnId: args.expectedTurnId,
+    userTurnId: args.userTurnId,
+    userId: args.userId,
+    timestamp: args.timestamp,
+    inputConfig: args.inputConfig,
+  };
+  let submitted = false;
+  let response: SessionSteerResponse | null;
+  try {
+    if (environment) {
+      submitted = true;
+      response = await environment.host.steerSession(input);
+    } else {
+      response = await withMachineRpcClient(args, async (client) => {
+        submitted = true;
+        return await client.requestSessionSteer(input);
+      });
+    }
+  } catch (error) {
+    if (!submitted) throw error;
+    // Submission may have reached the provider. The recipient owns its late
+    // outcome; never activate ordinary dispatch after a transport failure.
+    getLogger('session').warn(
+      `MCP steer outcome is unconfirmed (${args.sessionId}:${args.userTurnId}): ${formatErrorMessage(error)}`
+    );
+    return;
+  }
+  if (response && !response.applied && !response.recoveryOwned) {
+    // A pre-submission access/rewrite refusal has no outcome owner. Keep the
+    // inert input for the Operation materializer to retry with this same id.
+    throw new Error(response.error ?? `MCP steer refused: ${response.disposition}`);
   }
 }
 
@@ -4001,6 +4057,15 @@ export async function sendSessionChatResult(
         userTurnId: orchestration?.userTurnId,
       });
   const historyForDefaults = quotaHistory ?? (await backend.readHistory());
+  let existingMcpTurn: SessionHistory | undefined;
+  if (delegatedRequester && orchestration?.userTurnId) {
+    for (let index = historyForDefaults.length - 1; index >= 0; index -= 1) {
+      if (historyForDefaults[index]?.id === orchestration.userTurnId) {
+        existingMcpTurn = historyForDefaults[index];
+        break;
+      }
+    }
+  }
   const inheritedDispatchConfig = resolveTurnDispatchDefaultsFromHistory(
     historyForDefaults,
     session
@@ -4012,6 +4077,7 @@ export async function sendSessionChatResult(
     inheritedDispatchConfig?.modeId === undefined &&
     typeof inheritedDispatchConfig?.configOptionValues?.mode !== 'string';
   const { capability, freshness } =
+    delegatedRequester ||
     dispatchConfig.modeId ||
     dispatchConfig.modelId ||
     dispatchConfig.configOptionValues ||
@@ -4061,31 +4127,44 @@ export async function sendSessionChatResult(
         : {}),
     }));
   const inputBlocks = buildCommandInputBlocks(prompt, attachments);
+  const expectedTurnId =
+    existingMcpTurn?.inputConfig?._lodySteerExpectedTurnId ??
+    (!existingMcpTurn &&
+    delegatedRequester &&
+    orchestration &&
+    freshness.confirmed &&
+    capability?.acknowledgedSteer === true
+      ? resolveActiveAssistantTurnId(historyForDefaults)
+      : undefined);
   const userTurn = await appendUserPromptHistory({
     inputBlocks,
     sessionDoc,
     prompt,
     userId: requesterUserId,
     author,
-    inputConfig: {
-      agentRoleId: roleSelection?.agentRoleId ?? null,
-      agentRoleRevision: roleSelection?.agentRoleRevision,
-      agentRoleSnapshot: roleSelection?.agentRoleSnapshot,
-      ...buildCliHistoryInputConfig({
-        inputBlocks,
-        prompt,
-        cliType: session.cliType,
-        agentType: session.agentType,
-        memory: effectiveDispatchConfig.memory,
-        modeId: effectiveDispatchConfig.modeId,
-        modelId: effectiveDispatchConfig.modelId,
-        configOptionValues: effectiveDispatchConfig.configOptionValues,
-        resume: session.acpSessionId ?? undefined,
-        chainDepth: orchestration?.chainDepth,
-      }),
-    },
+    inputConfig: existingMcpTurn?.inputConfig?._lodySteerExpectedTurnId
+      ? existingMcpTurn.inputConfig
+      : {
+          ...(expectedTurnId ? { _lodySteerExpectedTurnId: expectedTurnId } : {}),
+          agentRoleId: roleSelection?.agentRoleId ?? null,
+          agentRoleRevision: roleSelection?.agentRoleRevision,
+          agentRoleSnapshot: roleSelection?.agentRoleSnapshot,
+          ...buildCliHistoryInputConfig({
+            inputBlocks,
+            prompt,
+            cliType: session.cliType,
+            agentType: session.agentType,
+            memory: effectiveDispatchConfig.memory,
+            modeId: effectiveDispatchConfig.modeId,
+            modelId: effectiveDispatchConfig.modelId,
+            configOptionValues: effectiveDispatchConfig.configOptionValues,
+            resume: session.acpSessionId ?? undefined,
+            chainDepth: orchestration?.chainDepth,
+          }),
+        },
     preallocatedId: orchestration?.userTurnId,
     knownHistory: quotaHistory,
+    pendingApply: Boolean(expectedTurnId),
   });
   const userTurnId = userTurn.id;
   const completionAbortController = structuredOutput ? new AbortController() : undefined;
@@ -4106,6 +4185,35 @@ export async function sendSessionChatResult(
   let dispatched = false;
   try {
     await updateSessionActivityTimestampsBestEffort(manager, sessionId);
+    if (expectedTurnId && userTurn.inputConfig) {
+      await confirmDispatchSyncedBestEffort({
+        manager,
+        sessionDoc,
+        reason: `session.chat-steer:${sessionId}:${userTurnId}`,
+      });
+      // A transport failure after this point cannot authorize removing the input.
+      dispatched = true;
+      if (!existingMcpTurn || existingMcpTurn.status === 'pending_apply') {
+        await steerMcpChatTurn({
+          auth,
+          workspaceId: workspace.id as WorkspaceId,
+          machineId: session.machineId,
+          sessionId,
+          userTurnId,
+          userId: requesterUserId,
+          timestamp: userTurn.timestamp,
+          inputConfig: userTurn.inputConfig,
+          expectedTurnId,
+        });
+      }
+      return {
+        sessionId,
+        machineId: session.machineId,
+        workspaceId: workspace.id as WorkspaceId,
+        userTurnId,
+        completionPromise,
+      };
+    }
     if (!delegatedRequester) sessionDoc.recordHumanInputReceipt(userTurnId, requesterUserId);
     await writeDispatchPointer({ manager, sessionId, userTurnId });
     dispatched = true;
@@ -4140,12 +4248,13 @@ export async function sendSessionChatResult(
     // corrupt a turn the daemon is already executing.
     if (!dispatched) {
       await removeHistoryEntryById(sessionDoc, userTurnId);
-      await manager.repo
-        .upsertDocMeta(getSessionRoomId(sessionId), {
-          latestUserMsgId: undefined,
-          lastMissingHistoryUserMsgId: undefined,
-        } satisfies Partial<SessionMeta>)
-        .catch(() => undefined);
+      if (!expectedTurnId)
+        await manager.repo
+          .upsertDocMeta(getSessionRoomId(sessionId), {
+            latestUserMsgId: undefined,
+            lastMissingHistoryUserMsgId: undefined,
+          } satisfies Partial<SessionMeta>)
+          .catch(() => undefined);
     }
     throw error;
   }

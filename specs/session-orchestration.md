@@ -35,6 +35,17 @@ replaces this scope. Known Agent sender provenance is required; legacy inputs
 without it remain readable and retain existing behavior. This change does not add
 note tools or change result delivery timing.
 
+## Cross-session follow-up delivery
+
+Durable cross-session MCP chat should reach an active recipient through its existing
+acknowledged Steer capability when support is confirmed. Otherwise it remains
+ordinary follow-up work. The recipient verifies the exact target turn; a completed
+or incompatible target may refuse the steer and use existing non-delivery recovery.
+Uncertain application never permits automatic replay. Operation recovery preserves
+the accepted input identity, original steer target, requester and frozen input.
+Completion remains bound to that input's assistant output. This does not change
+ordinary CLI chat, automatic Inbox result delivery or queue controls.
+
 ## Session creation configuration
 
 An orchestrator can select the target Agent's advertised configuration on

@@ -94,6 +94,18 @@ See the [decision and verification](../../../../.agents/notes/implemented/bug-fi
 
 ## Chat configuration
 
+- Durable cross-session chat uses acknowledged Steer when the target history has an active
+  assistant turn and its capability cache confirms support. The input starts as
+  `pending_apply` without ordinary activation; the recipient's existing Steer owner
+  verifies the exact active turn, permissions and configuration. Idle targets and
+  unsupported/unconfirmed capabilities retain ordinary dispatch. A proven refusal
+  uses existing ordinary recovery; an uncertain application never authorizes replay.
+- The frozen `_lodySteerExpectedTurnId`, user-turn id, requester, author and input
+  config survive Operation recovery. Recovery never retargets a prepared guide to a
+  newer turn. Submitted Steer evidence counts as durable input before history
+  projection catches up; `delivery_unknown` settles the target as failed rather than
+  resubmitting. Normal CLI chat, legacy chat without an Operation and automatic
+  Inbox result delivery keep their routes.
 - Chat follow-ups inherit omitted mode/model/options from the target's last model turn
   (else its last matching turn). Explicit fields and category options
   win; a model change drops old options. Validate effort/Fast against the final model:

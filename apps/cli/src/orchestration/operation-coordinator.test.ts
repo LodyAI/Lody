@@ -490,6 +490,59 @@ describe('LodyOperationCoordinator', () => {
     }
   });
 
+  it('adopts submitted MCP steer evidence after restart without rematerializing, and reports uncertainty', async () => {
+    const harness = await makeHarness({ acceptedInputDurable: false, busy: true });
+    const history = harness.histories.get(harness.targetSessionId)!;
+    history[0] = {
+      ...history[0]!,
+      status: 'pending_apply',
+      inputConfig: { _lodySteerExpectedTurnId: 'assistant:old' },
+    };
+    harness.metas.set(harness.targetSessionId, {
+      ...harness.metas.get(harness.targetSessionId)!,
+      latestUserMsgId: 'old',
+      steerOperationLedger: {
+        'steer:turn-1': {
+          operationId: 'steer:turn-1',
+          userTurnId: 'turn-1',
+          expectedTurnId: 'assistant:old',
+          cancellationPolicy: 'promote',
+          phase: 'submitted',
+          delivery: 'unknown',
+          status: 'processing',
+          updatedAt: 1,
+        },
+      },
+    });
+    harness.materializeTarget.mockImplementation(async () => {
+      throw new Error('Submitted steer was replayed');
+    });
+    harness.coordinator.start();
+    const store = new LodyOperationStore(harness.storePath);
+    try {
+      await harness.coordinator.idle();
+      expect(store.get(harness.requesterSessionId, 'review-round-1')).toMatchObject({
+        items: [{ status: 'active', inputDurable: true }],
+      });
+      expect(harness.histories.get(harness.targetSessionId)).toHaveLength(1);
+      history[0] = { ...history[0]!, status: 'delivery_unknown' };
+      await harness.coordinator.wake('steer-outcome');
+      await harness.coordinator.idle();
+      expect(store.get(harness.requesterSessionId, 'review-round-1')).toMatchObject({
+        state: 'finished',
+        items: [
+          {
+            status: 'failed',
+            error: { code: 'TARGET_FAILED', message: expect.stringContaining('uncertain') },
+          },
+        ],
+      });
+    } finally {
+      await harness.coordinator.stop();
+      store.close();
+    }
+  });
+
   it('recovers local creation using daemon authority even when remote Streams is unavailable', async () => {
     const harness = await makeHarness({
       targetInputDurable: false,

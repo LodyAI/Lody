@@ -196,6 +196,9 @@ function createFixture(agentType: 'codex' | 'claude', capability?: AcpCapability
       cancelSession: async () => {
         throw new Error('Unexpected cancellation');
       },
+      steerSession: async () => {
+        throw new Error('Unexpected steer');
+      },
       dispatchSession: async (id) => {
         const doc = await manager.getOrCreateSessionDoc(id);
         const meta = await doc.getMetaState();
@@ -344,6 +347,293 @@ function createFixture(agentType: 'codex' | 'claude', capability?: AcpCapability
 beforeEach(() => {
   vi.stubEnv('LODY_SESSION_ID', '');
   vi.stubEnv('LODY_AGENT_CONFIG_ID', '');
+});
+
+describe('delegated chat native steering', () => {
+  const delegated = {
+    userId,
+    author: {
+      v: 1 as const,
+      kind: 'agent' as const,
+      sessionId: 'source',
+      turnId: 'source-turn',
+      name: 'Source',
+    },
+  };
+  const send = (fixture: ReturnType<typeof createFixture>, turnId = 'delegated-followup') =>
+    runWithSessionCommandEnvironment(fixture.environment, () =>
+      sendSessionChatResult(
+        fixture.environment.auth,
+        fixture.environment.workspace,
+        fixture.manager,
+        sessionId,
+        'Continue',
+        {},
+        undefined,
+        undefined,
+        { userTurnId: turnId, chainDepth: 3, bypassSessionQuota: true },
+        delegated
+      )
+    );
+  const running = async (supported = true, confirmed = true) => {
+    const capability = { ...createModelCapability(), acknowledgedSteer: supported };
+    const fixture = createFixture('codex', capability);
+    fixture.setCapability(capability, confirmed);
+    await fixture.seedChat({
+      prompt: 'Earlier target prompt',
+      cliType: 'builtin',
+      agentType: 'codex',
+      modeId: 'agent-auto-review',
+      modelId: 'model-a',
+    });
+    const doc = await fixture.manager.getOrCreateSessionDoc(sessionId);
+    await doc.sessionData.commands.appendTurn({
+      id: 'assistant:earlier-turn',
+      role: 'assistant',
+      userTurnId: 'earlier-turn',
+      timestamp: '2026-10-21T00:00:00.000Z',
+      items: [],
+      finished: false,
+    });
+    fixture.metadata.set(getSessionRoomId(sessionId), {
+      ...fixture.metadata.get(getSessionRoomId(sessionId)),
+      latestUserMsgId: 'earlier-turn',
+    });
+    return fixture;
+  };
+
+  it.each(['single', 'batch'] as const)(
+    'routes actual %s MCP chat through inert history and the native steer boundary',
+    async (kind) => {
+      const root = await mkdtemp(path.join(os.tmpdir(), 'lody-chat-steer-'));
+      roots.add(root);
+      vi.stubEnv('LODY_DATA_DIR', root);
+      const fixture = await running();
+      const requester = 'steer-requester' as SessionId;
+      await fixture.seedChat({ cliType: 'builtin', agentType: 'codex' }, requester);
+      let steeredId: string | undefined;
+      fixture.environment.host.steerSession = async (input) => {
+        steeredId = input.userTurnId;
+        expect(input.expectedTurnId).toBe('assistant:earlier-turn');
+        const doc = await fixture.manager.getOrCreateSessionDoc(sessionId);
+        const read = await doc.sessionData.history.readTurn(input.userTurnId);
+        expect(read).toMatchObject({
+          state: 'ready',
+          turn: {
+            status: 'pending_apply',
+            author: { kind: 'agent', sessionId: requester },
+            inputConfig: {
+              _lodySteerExpectedTurnId: input.expectedTurnId,
+              chainDepth: 1,
+              modelId: 'model-a',
+            },
+          },
+        });
+        expect(fixture.metadata.get(getSessionRoomId(sessionId))).toMatchObject({
+          latestUserMsgId: 'earlier-turn',
+        });
+        await doc.sessionData.commands.applyHistoryAction({
+          kind: 'user-status',
+          turnId: input.userTurnId,
+          status: 'processing',
+          deliveredSteer: true,
+          onlyPendingApply: true,
+        });
+        await fixture.completeTurn(sessionId, input.userTurnId);
+        return {
+          type: 'session/steer_response',
+          sessionId,
+          userTurnId: input.userTurnId,
+          applied: true,
+          disposition: 'applied',
+        };
+      };
+      const invoke = () =>
+        kind === 'single'
+          ? __lodyMcpServerInternals.startSessionChatOperation({
+              operationId: 'steer-chat',
+              sessionId,
+              prompt: 'Continue',
+            })
+          : __lodyMcpServerInternals.startSessionChatManyOperation({
+              operationId: 'steer-chat',
+              items: [{ sessionId, prompt: 'Continue' }],
+            });
+      await fixture.runMcp(requester, invoke);
+      await fixture.runMcp(requester, invoke);
+      const history = await fixture.history();
+      expect(history.filter((entry) => entry.id === steeredId)).toHaveLength(1);
+      expect(history.find((entry) => entry.id === steeredId)).toMatchObject({
+        status: 'processing',
+        inputConfig: { _lodyDeliveryKind: 'steer' },
+      });
+      expect(fixture.dispatched).toEqual([]);
+      const storePath = getLodyOperationStorePath(machineId);
+      const coordinator = new LodyOperationCoordinator({
+        workspaceId,
+        machineId,
+        userId,
+        workspaceDocument: fixture.manager,
+        executionService: { getExecutionSnapshot: () => ({ hasActiveTurn: true }) } as never,
+        dispatchWatcher: { hasPendingDispatch: () => false } as never,
+        logger: { warn: () => undefined, debug: () => undefined } as never,
+        storePath,
+        storeFactory: () => new LodyOperationStore(storePath),
+        operationStoreWatchFactory: () => ({ close: () => undefined }),
+        materializeTarget: async () => {
+          throw new Error('An applied steer must not be replayed');
+        },
+      });
+      coordinator.start();
+      try {
+        await coordinator.idle();
+        const store = new LodyOperationStore(storePath);
+        try {
+          expect(store.get(requester, 'steer-chat')).toMatchObject({
+            state: 'finished',
+            items: [
+              {
+                status: 'succeeded',
+                target: { userTurnId: steeredId },
+                output: { text: 'Synthetic completed work' },
+              },
+            ],
+          });
+        } finally {
+          store.close();
+        }
+      } finally {
+        await coordinator.stop();
+      }
+    }
+  );
+
+  it.each(['unsupported', 'unconfirmed', 'idle', 'human'] as const)(
+    'retains ordinary dispatch for %s input',
+    async (kind) => {
+      const fixture = await running(kind !== 'unsupported', kind !== 'unconfirmed');
+      fixture.environment.host.steerSession = async () => {
+        throw new Error('Unexpected steer');
+      };
+      if (kind === 'idle') {
+        const doc = await fixture.manager.getOrCreateSessionDoc(sessionId);
+        await doc.sessionData.commands.applyHistoryAction({
+          kind: 'finish-assistant',
+          turnId: 'assistant:earlier-turn',
+          endedAt: 1,
+        });
+      }
+      if (kind === 'human') await fixture.run('chat', {}, 'delegated-followup');
+      else await send(fixture);
+      expect(fixture.dispatched).toMatchObject([{ id: 'delegated-followup', status: 'seen' }]);
+      expect(fixture.metadata.get(getSessionRoomId(sessionId))).toMatchObject({
+        latestUserMsgId: 'delegated-followup',
+      });
+      expect(
+        (await fixture.history()).at(-1)?.inputConfig?._lodySteerExpectedTurnId
+      ).toBeUndefined();
+    }
+  );
+
+  it('recovers inert input using its frozen target and config, without ordinary activation', async () => {
+    const fixture = await running();
+    fixture.environment.host.steerSession = async () => ({
+      type: 'session/steer_response',
+      sessionId,
+      userTurnId: 'delegated-followup',
+      applied: false,
+      disposition: 'busy',
+      error: 'Synthetic rewrite owner',
+    });
+    await expect(send(fixture)).rejects.toThrow('Synthetic rewrite owner');
+    const before = (await fixture.history()).at(-1);
+    expect(before).toMatchObject({ status: 'pending_apply', inputConfig: { modelId: 'model-a' } });
+    const doc = await fixture.manager.getOrCreateSessionDoc(sessionId);
+    await doc.sessionData.commands.appendTurn({
+      id: 'assistant:newer',
+      role: 'assistant',
+      timestamp: '2026-10-21T00:01:00.000Z',
+      items: [],
+      finished: false,
+    });
+    fixture.setCapability(undefined, false);
+    fixture.environment.host.steerSession = async (input) => {
+      expect(input.expectedTurnId).toBe('assistant:earlier-turn');
+      expect(input.inputConfig).toEqual(before?.inputConfig);
+      await doc.sessionData.commands.applyHistoryAction({
+        kind: 'user-status',
+        turnId: input.userTurnId,
+        status: 'pending',
+        requeueUndelivered: true,
+      });
+      return {
+        type: 'session/steer_response',
+        sessionId,
+        userTurnId: input.userTurnId,
+        applied: false,
+        disposition: 'stale-turn',
+        recoveryOwned: true,
+      };
+    };
+    await send(fixture);
+    expect(
+      (await fixture.history()).filter((entry) => entry.id === 'delegated-followup')
+    ).toMatchObject([{ status: 'seen' }]);
+    expect(fixture.dispatched).toEqual([]);
+    expect(fixture.metadata.get(getSessionRoomId(sessionId))).toMatchObject({
+      latestUserMsgId: 'earlier-turn',
+    });
+  });
+
+  it('keeps legacy delegated chat without a durable Operation on ordinary dispatch', async () => {
+    const fixture = await running();
+    fixture.environment.host.steerSession = async () => {
+      throw new Error('Unexpected legacy steer');
+    };
+    const result = await runWithSessionCommandEnvironment(fixture.environment, () =>
+      sendSessionChatResult(
+        fixture.environment.auth,
+        fixture.environment.workspace,
+        fixture.manager,
+        sessionId,
+        'Continue',
+        {},
+        undefined,
+        undefined,
+        undefined,
+        delegated
+      )
+    );
+    expect(fixture.dispatched).toMatchObject([{ id: result.userTurnId, status: 'seen' }]);
+    expect(fixture.metadata.get(getSessionRoomId(sessionId))).toMatchObject({
+      latestUserMsgId: result.userTurnId,
+    });
+  });
+
+  it('never dispatches or resubmits an input after uncertain steer application', async () => {
+    const fixture = await running();
+    fixture.environment.host.steerSession = async (input) => {
+      const doc = await fixture.manager.getOrCreateSessionDoc(sessionId);
+      await doc.sessionData.commands.applyHistoryAction({
+        kind: 'user-status',
+        turnId: input.userTurnId,
+        status: 'delivery_unknown',
+      });
+      throw new Error('Synthetic response transport disconnected');
+    };
+    await send(fixture);
+    fixture.environment.host.steerSession = async () => {
+      throw new Error('Uncertain input was resubmitted');
+    };
+    await send(fixture);
+    expect(
+      (await fixture.history()).filter((entry) => entry.id === 'delegated-followup')
+    ).toMatchObject([{ status: 'delivery_unknown' }]);
+    expect(fixture.dispatched).toEqual([]);
+    expect(fixture.metadata.get(getSessionRoomId(sessionId))).toMatchObject({
+      latestUserMsgId: 'earlier-turn',
+    });
+  });
 });
 
 afterEach(async () => {

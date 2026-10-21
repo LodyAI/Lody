@@ -1947,5 +1947,7 @@ export type ACPSessionConfig = ACPTurnConfig & {
 export type SessionTurnInputConfig = Partial<ACPTurnConfig> & {
   /** An accepted steer has no independently editable provider turn boundary. */
   _lodyDeliveryKind?: import('./message-schemas').SessionHistoryDeliveryKind;
+  /** Frozen recipient turn for an MCP steer; retries must not target a later turn. */
+  _lodySteerExpectedTurnId?: string;
 };
 import type { OperationCompletionContent, OperationProgressContent } from './session-orchestration';

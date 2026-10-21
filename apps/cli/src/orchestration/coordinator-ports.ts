@@ -3,6 +3,7 @@ import type {
   SessionHistoryInput,
   SessionId,
   SessionMeta,
+  SessionSteerOperationRecord,
   StoredLodyOperation,
 } from '@lody/shared';
 import type { HistoryAction, SessionTurnRead } from '@lody/shared/session-data';
@@ -13,6 +14,9 @@ export type CoordinatorHistory = {
   meta: SessionMeta;
   readTurn(id: string): Effect.Effect<SessionTurnRead, unknown>;
   readTurnOutput(id: string): Effect.Effect<SessionHistoryInput[], unknown>;
+  getSteerOperationRecord(
+    id: string
+  ): Effect.Effect<SessionSteerOperationRecord | undefined, unknown>;
   applyHistoryAction(action: HistoryAction): Effect.Effect<unknown, unknown>;
   flushLocalWrites: Effect.Effect<void, unknown>;
   observe(wake: Effect.Effect<void>): Effect.Effect<Effect.Effect<void>, unknown>;

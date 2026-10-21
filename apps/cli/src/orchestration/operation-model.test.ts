@@ -8,6 +8,41 @@ import {
 const trace = (...events: InboxEvent[]) =>
   events.reduce(stepOrchestrationModel, initialOrchestrationModelState());
 describe('current Inbox scheduling contract', () => {
+  it.each(['apply_target_steer', 'uncertain_target_steer'] as const)(
+    'never replays a submitted target after %s and restart',
+    (outcome) => {
+      expect(trace('prepare_target_steer', 'materialize_target')).toMatchObject({
+        targetSteer: 'prepared',
+      });
+      expect(
+        trace(
+          'prepare_target_steer',
+          'submit_target_steer',
+          outcome,
+          'restart',
+          'prepare_target_steer',
+          'submit_target_steer',
+          'materialize_target'
+        )
+      ).toMatchObject({
+        targetSteer: outcome === 'apply_target_steer' ? 'applied' : 'unknown',
+        targetSteerSubmissions: 1,
+      });
+    }
+  );
+  it('allows ordinary recovery only after proven non-application', () => {
+    expect(
+      trace(
+        'prepare_target_steer',
+        'submit_target_steer',
+        'refuse_target_steer',
+        'materialize_target'
+      )
+    ).toMatchObject({
+      targetSteer: 'ordinary',
+      targetSteerSubmissions: 1,
+    });
+  });
   it('exhaustively preserves nonempty at-most-once batches over bounded interleavings', () => {
     expect(enumerateOrchestrationModel(9).length).toBeGreaterThan(100);
   });

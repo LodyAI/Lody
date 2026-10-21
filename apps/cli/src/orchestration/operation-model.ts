@@ -1,5 +1,7 @@
 /** Reduced current Inbox contract. SQLite and execution suites verify the real boundaries. */
 export type InboxModel = {
+  targetSteer: 'absent' | 'prepared' | 'submitted' | 'applied' | 'refused' | 'unknown' | 'ordinary';
+  targetSteerSubmissions: number;
   next: number;
   queue: number[];
   consumed: number[];
@@ -14,6 +16,12 @@ export type InboxModel = {
   boundary: number[] | undefined;
 };
 export type InboxEvent =
+  | 'prepare_target_steer'
+  | 'submit_target_steer'
+  | 'apply_target_steer'
+  | 'refuse_target_steer'
+  | 'uncertain_target_steer'
+  | 'materialize_target'
   | 'result'
   | 'human'
   | 'schedule'
@@ -27,6 +35,8 @@ export type InboxEvent =
   | 'withdraw'
   | 'duplicate_release';
 export const initialOrchestrationModelState = (): InboxModel => ({
+  targetSteer: 'absent',
+  targetSteerSubmissions: 0,
   next: 1,
   queue: [],
   consumed: [],
@@ -54,6 +64,29 @@ export function stepOrchestrationModel(before: InboxModel, event: InboxEvent): I
     s.submitted = false;
   };
   switch (event) {
+    case 'prepare_target_steer':
+      if (s.targetSteer === 'absent') s.targetSteer = 'prepared';
+      break;
+    case 'submit_target_steer':
+      if (s.targetSteer === 'prepared') {
+        s.targetSteer = 'submitted';
+        s.targetSteerSubmissions += 1;
+      }
+      break;
+    case 'apply_target_steer':
+    case 'refuse_target_steer':
+    case 'uncertain_target_steer':
+      if (s.targetSteer === 'submitted')
+        s.targetSteer =
+          event === 'apply_target_steer'
+            ? 'applied'
+            : event === 'refuse_target_steer'
+              ? 'refused'
+              : 'unknown';
+      break;
+    case 'materialize_target':
+      if (s.targetSteer === 'absent' || s.targetSteer === 'refused') s.targetSteer = 'ordinary';
+      break;
     case 'result':
       if (s.next <= 3) {
         s.queue.push(s.next++);
@@ -140,6 +173,7 @@ export function stepOrchestrationModel(before: InboxModel, event: InboxEvent): I
   return s;
 }
 export function assertOrchestrationModelSafety(s: InboxModel) {
+  if (s.targetSteerSubmissions > 1) throw new Error('Target input submitted twice');
   const delivered = s.receipts.flat();
   if (new Set(delivered).size !== delivered.length) throw new Error('Result submitted twice');
   if (s.receipts.some((batch) => batch.length === 0)) throw new Error('Empty automatic batch');
@@ -149,6 +183,12 @@ export function assertOrchestrationModelSafety(s: InboxModel) {
 }
 export function enumerateOrchestrationModel(depth = 8) {
   const actions: InboxEvent[] = [
+    'prepare_target_steer',
+    'submit_target_steer',
+    'apply_target_steer',
+    'refuse_target_steer',
+    'uncertain_target_steer',
+    'materialize_target',
     'result',
     'human',
     'schedule',

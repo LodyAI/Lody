@@ -45,8 +45,8 @@ Exact deletion bypasses discovery: [relations](../../specs/session-relations.md)
 - ACP tool blocks and locations are explicit JSON extension boundaries. Unknown block
   types must not bypass validation of malformed known variants. Preserve declared `_meta`
   and extension keys; closed execution configuration still selects declared fields.
-- Steer provenance is a declared history input-config field, not an unknown extension.
-  Both new writes and read normalization must retain it for edit-and-resend checks.
+- Steer delivery provenance and frozen target ids are declared input config.
+  Preserve both in writes and normalized reads; retain provenance for edit-and-resend.
 - Scalar/fileDiff writes read and diff only the requested field, never the turn's items.
   Writer input parsers derive from schema definitions with all refinements retained;
   never mutate the original RPC schemas. Parsing filters and validates in one pass.

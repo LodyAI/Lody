@@ -7,6 +7,8 @@ import {
   type WorkspaceId,
   type SessionId,
   type SessionActiveInvocationContextResult,
+  type SessionSteerResponse,
+  type SessionTurnInputConfig,
 } from '@lody/shared';
 import type { AuthContext } from './command-runtime';
 import type { LoroDocumentManager } from './loro/doc';
@@ -30,6 +32,14 @@ export interface SessionCommandHost {
       inputOrigin: 'human' | 'agent';
     }
   ): Promise<void>;
+  steerSession(input: {
+    sessionId: SessionId;
+    expectedTurnId: string;
+    userTurnId: string;
+    userId: string;
+    timestamp: string;
+    inputConfig: SessionTurnInputConfig;
+  }): Promise<SessionSteerResponse>;
 }
 
 /** A daemon-owned workspace, never a second replica opened by an MCP process. */

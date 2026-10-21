@@ -2427,6 +2427,11 @@ export class SessionExecutionService {
       if (meta?.lastHandledUserMsgId === userTurnId) {
         return;
       }
+      // A retried MCP steer can arrive after its original runtime ended. Its
+      // persisted submission still forbids ordinary replay, even if history
+      // has not yet projected the provider's outcome.
+      const record = meta?.steerOperationLedger?.[getSteerOperationId(userTurnId)];
+      if (!sessionDoc && (record?.delivery === 'applied' || record?.delivery === 'unknown')) return;
       if (sessionDoc && !(await this.markSteerTurnPending(sessionDoc, userTurnId))) {
         return;
       }

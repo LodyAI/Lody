@@ -77,6 +77,8 @@ export const coordinatorSessionsLayer = (
           meta: record.meta as SessionMeta,
           readTurn: (turn) => io(() => backend.readTurn(turn)),
           readTurnOutput: (turn) => io(() => backend.readTurnOutput(turn)),
+          getSteerOperationRecord: (operationId) =>
+            io(() => backend.getSteerOperationRecord(operationId)),
           applyHistoryAction: (action) => io(() => backend.applyHistoryAction(action)),
           flushLocalWrites: io(() => backend.flushLocalWrites()),
           observe: (wake) =>

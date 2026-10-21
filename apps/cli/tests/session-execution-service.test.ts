@@ -2316,6 +2316,74 @@ describe('SessionExecutionService', () => {
     }
   );
 
+  it.each(['applied', 'unknown'] as const)(
+    'does not requeue a late duplicate %s steer after the runtime ended',
+    async (delivery) => {
+      const sessionId = 'late-duplicate-steer' as SessionId;
+      let meta: Partial<SessionMeta> = {
+        latestUserMsgId: 'newer',
+        steerOperationLedger: {
+          'steer:guide': {
+            operationId: 'steer:guide',
+            userTurnId: 'guide',
+            expectedTurnId: 'assistant:old',
+            cancellationPolicy: 'promote',
+            phase: 'submitted',
+            delivery,
+            status: 'processing',
+            updatedAt: 1,
+          },
+        },
+      };
+      const before = structuredClone(meta);
+      const repo = {
+        getDocMeta: async () => ({ meta }),
+        upsertDocMeta: async (_room: string, patch: Partial<SessionMeta>) => {
+          meta = { ...meta, ...patch };
+        },
+      };
+      const doc = new SessionDocument(
+        repo as never,
+        sessionId,
+        async () => {},
+        createSilentLogger()
+      );
+      composeTestSessionDoc(doc, {
+        history: [
+          {
+            id: 'guide',
+            role: 'user',
+            status: 'pending_apply',
+            timestamp: '2026-10-21T00:00:00Z',
+            items: [{ type: 'text', text: 'follow up' }],
+          },
+        ],
+      });
+      const service = new SessionExecutionService(
+        createBaseDeps({
+          workspaceDocument: {
+            repo,
+            getOrCreateSessionDoc: async () => doc,
+          } as unknown as LoroDocumentManager,
+        })
+      );
+      await service.steerSession({
+        sessionId,
+        expectedTurnId: 'assistant:old',
+        userTurnId: 'guide',
+        userId: 'user',
+        timestamp: '2026-10-21T00:00:00Z',
+        inputConfig: { prompt: 'follow up' },
+      });
+      expect(meta).toEqual(before);
+      const history = await doc.sessionData.history.readAll();
+      expect(history[0]?.status).toBe('pending_apply');
+      expect(
+        findNextDispatchableUserTurn(history as SessionHistoryInput[], meta as SessionMeta)
+      ).toBeNull();
+    }
+  );
+
   it('recovers provider-confirmed steer delivery without degrading it to unknown', async () => {
     const sessionId = 'recover-applied-steer' as SessionId;
     let meta: Partial<SessionMeta> = {

@@ -944,6 +944,17 @@ describe('message-schemas acpSessionConfig', () => {
 });
 
 describe('normalizeSessionTurnInputConfig', () => {
+  it('retains the frozen MCP steer target through parsing and stored read normalization', () => {
+    const input = { prompt: 'follow up', _lodySteerExpectedTurnId: 'assistant:original' };
+    expect(SessionHistoryInputConfigSchema.parse(input)).toEqual(input);
+    expect(normalizeSessionTurnInputConfig(input)).toEqual(input);
+    expect(
+      SessionHistoryInputConfigSchema.safeParse({ _lodySteerExpectedTurnId: '' }).success
+    ).toBe(false);
+    expect(
+      normalizeSessionTurnInputConfig({ prompt: 'follow up', _lodySteerExpectedTurnId: 42 })
+    ).toEqual({ prompt: 'follow up' });
+  });
   it('keeps valid fields and drops invalid ones', () => {
     const normalized = normalizeSessionTurnInputConfig({
       prompt: '  hello  ',

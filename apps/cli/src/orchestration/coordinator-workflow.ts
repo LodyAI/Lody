@@ -438,6 +438,18 @@ export class CoordinatorWorkflow {
           error: makeLodyError('TARGET_FAILED', 'Target Turn failed.', false),
         };
       }
+      if (userTurn?.status === 'delivery_unknown') {
+        return {
+          status: 'failed',
+          ...(item.label ? { label: item.label } : {}),
+          target: item.target,
+          error: makeLodyError(
+            'TARGET_FAILED',
+            'Target input application is uncertain; it will not be resubmitted.',
+            false
+          ),
+        };
+      }
       if (userTurn?.status === 'canceled') {
         return {
           status: 'cancelled',
@@ -488,6 +500,8 @@ export class CoordinatorWorkflow {
       const output = yield* backend.readTurnOutput(userTurnId);
       const userTurn = output.find((entry) => entry.id === userTurnId && entry.role === 'user');
       if (!userTurn) return false;
+      const steer = yield* backend.getSteerOperationRecord(`steer:${userTurnId}`);
+      if (steer?.userTurnId === userTurnId && steer.delivery !== 'not_submitted') return true;
       const meta = metaRecord.meta as SessionMeta;
       const assistantIsTerminal = output.some(
         (entry) =>
@@ -502,6 +516,7 @@ export class CoordinatorWorkflow {
         userTurn.status === 'handled' ||
         userTurn.status === 'failed' ||
         userTurn.status === 'canceled' ||
+        userTurn.status === 'delivery_unknown' ||
         assistantIsTerminal
       );
     }.bind(this)

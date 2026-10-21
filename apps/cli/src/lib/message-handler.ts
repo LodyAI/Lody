@@ -6526,6 +6526,7 @@ export class MessageHandler {
               });
             void this.sessionDispatchWatcher.enqueueSessionCheck(sessionId);
           },
+          steerSession: async (input) => await this.steerSessionWithAccessCheck(input),
         },
       }),
       run

@@ -1,6 +1,6 @@
-# Lody MCP server guidelines
+# MCP server
 
-Parent instructions apply. Background: [README.md](README.md).
+Parent rules apply. See [README](README.md).
 
 - Route Session/catalog tools via `session/call-tool` to the daemon repo in every
   composition, never a second replica or child `lody` CLI. Reuse SDK-parsed arguments
@@ -77,11 +77,13 @@ Parent instructions apply. Background: [README.md](README.md).
   transient post-accept failure returns the active fixed target for daemon replay.
   `session_create({ operationId, resume: true })` recovers without a prompt. Deliver completion
   automatically; expose no wait tool and forbid new callers from using legacy `wait=true`.
-- Chat inherits omitted mode/model/options from the target's last model turn, else last
-  matching turn. Explicit fields/category options win; model changes drop old options.
-  Validate effort/Fast against the final model, never reject on probe mismatch; missing
-  per-model data defers to runtime. Drop incompatible inherited selectors even after
-  unconfirmed freshness; only explicit misses block. Fill builtin mode only if empty. [Inheritance rationale](README.md#chat-configuration).
+- Chat inherits omitted target selectors: last model turn, else last matching.
+  Explicit/category options win; model changes drop inherited options.
+  Effort/Fast use the final model: ignore probe mismatch, defer absent model data.
+  Drop incompatible inherited selectors even if sync is unconfirmed; only explicit
+  misses block. Builtin mode fills empty only. [Config](README.md#chat-configuration).
+  Confirmed Steer freezes the active-turn id; `pending_apply` has no activation.
+  Recovery never retargets or replays unknown input.
 - `lody_session_create_options` publishes modes and option ids/types/choices per agent config,
   never current values. Stay sparse by default (online Machines, one agent config, the current
   local project, no GitHub fetch), expanding only through explicit query inputs.
@@ -90,7 +92,7 @@ Parent instructions apply. Background: [README.md](README.md).
   unknown; block dispatch/report `MACHINE_OFFLINE` only for definite offline. Unknown
   proceeds under its own deadline. Expose three-state liveness, never a boolean.
   Contract: `specs/loro-ephemeral-presence-channel.md`;
-  [cold-start rationale](README.md#machine-presence).
+  [Details](README.md#machine-presence).
 - `session_list` defaults to 20 (maximum 100) and `session_history` to 10 (maximum 50 and 128 KiB);
   keep the MCP surface bounded though the CLI retains `session history --all`. `session_list`
   and `session_status_many` derive busy/idle from the same history, durable queue, presence, and
