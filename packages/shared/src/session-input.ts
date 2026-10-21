@@ -520,6 +520,22 @@ export const resolveSessionExecutionInputBlocks = (input: {
   return prompt ? [...attachments, { type: 'text', text: prompt }] : attachments;
 };
 
+/**
+ * The text the user actually wrote for a turn, for consumers that must name
+ * the task (title generation) rather than run it. Execution `prompt` also
+ * carries accepted Config/Role instructions, so authored text blocks win; only
+ * legacy inputs without any blocks fall back to the prompt. Attachment-only
+ * turns have no authored text and resolve to `''`.
+ */
+export const resolveSessionAuthoredText = (input: {
+  prompt?: string;
+  inputBlocks?: unknown;
+}): string => {
+  const blocks = normalizeSessionInputBlocks(input.inputBlocks, '');
+  if (blocks.length > 0) return extractPromptPreviewFromInputBlocks(blocks);
+  return input.prompt?.trim() ?? '';
+};
+
 export const inputBlocksToHistoryItems = (
   inputBlocks: readonly SessionInputBlock[]
 ): NonNullable<SessionHistoryInput['items']> => {

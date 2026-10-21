@@ -5239,7 +5239,13 @@ describe('SessionExecutionService', () => {
       machineId: 'machine-1',
       workspaceId: 'workspace-1' as WorkspaceId,
       project: { kind: 'github', repoFullName: 'owner/repo', branch: 'main' },
-      acpSessionConfig: { prompt: 'hello', cliType: 'builtin', agentType: 'codex' },
+      acpSessionConfig: {
+        // Execution prompt carries Config/Role instructions; the blocks keep the authored task.
+        prompt: 'CONFIG_INSTRUCTION\n\nROLE_INSTRUCTION\n\nhello',
+        inputBlocks: [{ type: 'text', text: 'hello' }],
+        cliType: 'builtin',
+        agentType: 'codex',
+      },
       userTurnId: 'turn-create-1',
       userId: 'user-2',
       userName: 'User 2',
@@ -5248,6 +5254,16 @@ describe('SessionExecutionService', () => {
     });
 
     expect(sessionManager.createSession).toHaveBeenCalledTimes(1);
+    // The local title generator names the authored task, never the composed instructions.
+    expect(deps.maybeGenerateAndStoreSessionTitle).toHaveBeenCalledWith(
+      'session-2',
+      'builtin',
+      'codex',
+      'hello',
+      undefined,
+      undefined,
+      undefined
+    );
     expect(sessionManager.createSession).toHaveBeenCalledWith(
       expect.objectContaining({
         parentSessionId: 'parent-session-2',

@@ -10,6 +10,7 @@ import {
   historyItemsToInputBlocks,
   inputBlocksToHistoryItems,
   normalizeSessionInputBlocks,
+  resolveSessionAuthoredText,
   resolveSessionExecutionInputBlocks,
   resolveSessionAcpRuntimeConfig,
   resolveSessionConversationConfig,
@@ -148,6 +149,19 @@ describe('session-input helpers', () => {
     );
     expect(config.inputBlocks).toEqual(raw);
     expect(inputBlocksToHistoryItems(raw)[0]).toMatchObject(raw[0]);
+  });
+
+  it('resolves authored text without the composed Config/Role execution prompt', () => {
+    const prompt = 'CONFIG_INSTRUCTION\n\nROLE_INSTRUCTION\n\nReview @src/a.ts';
+    expect(
+      resolveSessionAuthoredText({
+        prompt,
+        inputBlocks: [{ type: 'text', text: '  Review @src/a.ts ' }, r2FilePayload],
+      })
+    ).toBe('Review @src/a.ts');
+    expect(resolveSessionAuthoredText({ prompt, inputBlocks: [r2FilePayload] })).toBe('');
+    expect(resolveSessionAuthoredText({ prompt: ' legacy task ' })).toBe('legacy task');
+    expect(resolveSessionAuthoredText({})).toBe('');
   });
 
   it('distinguishes an absent legacy prompt from explicit empty execution text', () => {

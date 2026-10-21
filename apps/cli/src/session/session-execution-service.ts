@@ -116,6 +116,7 @@ import {
   type ReplayPromptResult,
   resolveBaseBranchPreference,
   resolveProjectGitHubRepo,
+  resolveSessionAuthoredText,
   resolveSessionExecutionInputBlocks,
   serializeCustomAcpLaunchSpec,
   SessionCancelRequestValidated,
@@ -6871,7 +6872,8 @@ export class SessionExecutionService {
               sessionId,
               sessionConfig.agentCliType,
               sessionConfig.agentType,
-              agentConfig.prompt,
+              // Name the user's task, not the composed Config/Role execution prompt.
+              resolveSessionAuthoredText(agentConfig),
               env,
               acpSessionConfig.customAcp,
               acpSessionConfig.runtimeOverrides
