@@ -192,12 +192,10 @@ describe('PrTabView refresh button', () => {
 
     const scrollArea = container.querySelector<HTMLElement>('[data-pr-content-scroll-area]');
     const description = container.querySelector<HTMLElement>('[data-pr-description]');
-    const panelViewport = scrollArea?.querySelector<HTMLElement>(
-      '[data-radix-scroll-area-viewport]'
-    );
+    const panelViewport = scrollArea?.querySelector<HTMLElement>('[data-scroll-area-viewport]');
 
     expect(description).not.toBeNull();
-    expect(description?.closest('[data-radix-scroll-area-viewport]')).toBe(panelViewport);
+    expect(description?.closest('[data-scroll-area-viewport]')).toBe(panelViewport);
   });
 });
 

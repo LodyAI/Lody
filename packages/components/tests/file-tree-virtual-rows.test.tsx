@@ -42,7 +42,7 @@ function installLayoutStubs(): void {
   Object.defineProperty(HTMLElement.prototype, 'offsetHeight', {
     configurable: true,
     get(this: HTMLElement) {
-      return this.hasAttribute('data-radix-scroll-area-viewport') ? viewportHeightPx : 0;
+      return this.hasAttribute('data-scroll-area-viewport') ? viewportHeightPx : 0;
     },
   });
   Object.defineProperty(HTMLElement.prototype, 'offsetWidth', {
@@ -158,7 +158,7 @@ describe('VirtualFileTree row mounting', () => {
       })
     );
 
-    const viewport = host.querySelector('[data-radix-scroll-area-viewport]') as HTMLElement;
+    const viewport = host.querySelector('[data-scroll-area-viewport]') as HTMLElement;
     const ceiling = Math.ceil(VIEWPORT_HEIGHT_PX / ROW_HEIGHT_PX) + 2 * OVERSCAN + 2;
     const firstLabel = () => host.querySelector('[role="treeitem"] span')?.textContent;
 

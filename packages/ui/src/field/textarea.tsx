@@ -1,3 +1,4 @@
+import { nativeScrollbar } from '../scroll-area/surface';
 import { Input as BaseInput } from '@base-ui/react/input';
 import * as stylex from '@stylexjs/stylex';
 import {
@@ -64,6 +65,7 @@ export const Textarea = forwardRef<HTMLTextAreaElement, TextareaProps>(function 
       className={(state) =>
         appendClassName(
           stylex.props(
+            nativeScrollbar,
             appearance === 'bare' ? well.bare : well.base,
             appearance === 'bare' ? styles.bare : styles.textarea,
             resize === 'none' ? styles.resizeNone : styles.resizeVertical,

@@ -1,4 +1,5 @@
 import * as stylex from '@stylexjs/stylex';
+import { nativeScrollbar } from '../scroll-area/surface';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { colors, shadow } from '../tokens/colors.stylex';
 import { corner, radius, space, text } from '../tokens/scales.stylex';
@@ -181,7 +182,7 @@ const styles = stylex.create({
 
 export function Board({ children }: { children: ReactNode }) {
   return (
-    <div {...stylex.props(styles.board)}>
+    <div {...stylex.props(styles.board, nativeScrollbar)}>
       <div {...stylex.props(styles.page)}>{children}</div>
     </div>
   );

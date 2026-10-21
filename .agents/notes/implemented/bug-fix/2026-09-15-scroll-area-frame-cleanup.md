@@ -11,7 +11,7 @@ Radix ScrollArea 1.2.10 can retain a recursive animation-frame loop when its thu
 
 ## Decision
 
-Apply the [dependency patch](../../../../patches/@radix-ui__react-scroll-area@1.2.10.patch) through pnpm's version-scoped patchedDependencies. Cleanup removes the scroll handler, cancels the thumb's active polling loop, and clears its cancellation reference. This also handles effect dependency changes. The scroll-end debounce already cancels polling during normal operation, but its timer is cleared on unmount, so it cannot own unmount cleanup.
+Apply the [dependency patch](https://github.com/LodyAI/Lody/blob/683aaec1fe8cb9f1f1eb18ee447b8cd8341a1697/patches/@radix-ui__react-scroll-area@1.2.10.patch) through pnpm's version-scoped patchedDependencies. Cleanup removes the scroll handler, cancels the thumb's active polling loop, and clears its cancellation reference. This also handles effect dependency changes. The scroll-end debounce already cancels polling during normal operation, but its timer is cleared on unmount, so it cannot own unmount cleanup.
 
 Keep the existing Radix UI and scrolling behavior. Replacing it with native scrollbars or Base UI would expand the change and require interaction and styling validation. Remove this patch only after an upstream release provides equivalent cleanup and passes the [lifecycle tests](../../../../packages/components/tests/scroll-area-lifecycle.test.tsx); the upgrade rule lives in [UI instructions](../../../../packages/components/src/ui/AGENTS.md#scroll-area).
 

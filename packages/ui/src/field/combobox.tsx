@@ -1,3 +1,4 @@
+import { nativeScrollbar } from '../scroll-area/surface';
 import { Combobox as BaseCombobox } from '@base-ui/react/combobox';
 import * as stylex from '@stylexjs/stylex';
 import { createContext, forwardRef, useContext, type ComponentProps, type ReactNode } from 'react';
@@ -443,7 +444,7 @@ export const ComboboxContent = forwardRef<HTMLDivElement, ComboboxContentProps>(
           >
             {search}
             {empty}
-            <BaseCombobox.List className={stylex.props(surface.list).className}>
+            <BaseCombobox.List className={stylex.props(surface.list, nativeScrollbar).className}>
               {children}
             </BaseCombobox.List>
           </BaseCombobox.Popup>

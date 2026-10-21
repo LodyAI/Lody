@@ -43,7 +43,7 @@ import { corner, duration, ease, focus, radius, space } from '@lody/ui/tokens/sc
 import { Avatar, type AvatarSize } from '@lody/ui/avatar';
 import { Button, ButtonGroup } from '@lody/ui/button';
 import { Tabs } from '@lody/ui/tabs';
-import { ScrollArea } from '@/ui/scroll-area';
+import { ScrollArea } from '@lody/ui/scroll-area';
 import { Skeleton } from '@lody/ui/skeleton';
 import { Textarea } from '@lody/ui/textarea';
 import { SessionCommentMarkdown } from '@/ui/diff-viewer/session-comment-markdown';

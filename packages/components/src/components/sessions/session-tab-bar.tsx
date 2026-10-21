@@ -14,7 +14,7 @@ import { WORKSPACE_FOCUS_SCOPES } from '@/atoms/focus-layer';
 import { sessionLiveStatusAtomFamily } from '@/atoms/presence';
 import { Tooltip } from '@lody/ui/tooltip';
 import { useListKeyboardNavigation } from '@/ui/focus-scope';
-import { ScrollArea } from '@/ui/scroll-area';
+import { ScrollArea } from '@lody/ui/scroll-area';
 import { Popover } from '@lody/ui/popover';
 import { AgentIcon } from '@/components/icons/agent-icon';
 import { FileIcon } from '@/components/icons/file-icons';

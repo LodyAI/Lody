@@ -4,6 +4,7 @@
 @import 'tw-animate-css';
 @import 'tailwindcss';
 @import 'konsta/theme.css';
+@import './scrollbars.css';
 
 @config "../../tailwind.config.js";
 @source "../**/*.{ts,tsx}";
@@ -516,8 +517,6 @@ pre,
        (`use-mermaid-diagram-canvas.tsx` tags it `role="button"`). */
     cursor: zoom-in !important;
     scrollbar-gutter: stable;
-    scrollbar-width: thin;
-    scrollbar-color: hsl(var(--scrollbar-thumb) / 0.5) transparent;
   }
 
   .markdown-renderer [data-streamdown='mermaid']:focus-visible {
@@ -536,26 +535,6 @@ pre,
 
   .markdown-renderer [data-streamdown='mermaid'][data-lody-canvas='active'] > div:active {
     cursor: grabbing !important;
-  }
-
-  .markdown-renderer [data-streamdown='mermaid'] > div::-webkit-scrollbar {
-    width: 10px;
-    height: 10px;
-  }
-
-  .markdown-renderer [data-streamdown='mermaid'] > div::-webkit-scrollbar-track {
-    background: transparent;
-  }
-
-  .markdown-renderer [data-streamdown='mermaid'] > div::-webkit-scrollbar-thumb {
-    background-color: hsl(var(--scrollbar-thumb) / 0.5);
-    border: 3px solid transparent;
-    border-radius: 999px;
-    background-clip: content-box;
-  }
-
-  .markdown-renderer [data-streamdown='mermaid'] > div::-webkit-scrollbar-thumb:hover {
-    background-color: hsl(var(--scrollbar-thumb-hover) / 0.65);
   }
 
   .markdown-renderer [data-streamdown='mermaid-svg'] {
@@ -1676,117 +1655,12 @@ pre,
     background-color: hsl(var(--tasks-menu-item-hover));
   }
 
-  /* Pro scrollbar: lightweight, unobtrusive (VS Code/Linear style) */
-  .scrollbar-pro {
-    scrollbar-width: thin;
-    scrollbar-color: hsl(var(--scrollbar-thumb) / 0.5) transparent;
-  }
-
-  .scrollbar-pro::-webkit-scrollbar {
-    width: 10px;
-    height: 10px;
-  }
-
-  .scrollbar-pro::-webkit-scrollbar-track {
-    background: transparent;
-  }
-
-  .scrollbar-pro::-webkit-scrollbar-thumb {
-    background-color: hsl(var(--scrollbar-thumb) / 0.5);
-    border-radius: 999px;
-    border: 3px solid transparent;
-    background-clip: content-box;
-  }
-
-  .scrollbar-pro::-webkit-scrollbar-thumb:hover {
-    background-color: hsl(var(--scrollbar-thumb-hover) / 0.65);
-  }
-
-  /* Thin scrollbar for file tree */
-  .thin-scrollbar {
-    scrollbar-width: thin;
-    scrollbar-color: hsl(var(--scrollbar-thumb) / 0.5) transparent;
-  }
-
-  .thin-scrollbar::-webkit-scrollbar {
-    width: 6px;
-  }
-
-  .thin-scrollbar::-webkit-scrollbar-track {
-    background: transparent;
-  }
-
-  .thin-scrollbar::-webkit-scrollbar-thumb {
-    background-color: hsl(var(--scrollbar-thumb) / 0.5);
-    border-radius: 3px;
-    border: none;
-  }
-
-  .thin-scrollbar::-webkit-scrollbar-thumb:hover {
-    background-color: hsl(var(--scrollbar-thumb-hover) / 0.65);
-  }
-
-  /* Chat message list scrollbar aligned with theme colors */
+  /* Appearance comes from scrollbars.css; keep the conversation's stable gutter. */
   .chat-scrollbar {
-    scrollbar-width: thin;
-    scrollbar-color: hsl(var(--scrollbar-thumb) / 0.5) transparent;
     /* Always reserve the scrollbar gutter so it appearing/disappearing (e.g. when
        the terminal dock pops up and the conversation starts overflowing) never
        shifts the message content sideways. */
     scrollbar-gutter: stable;
-  }
-
-  .chat-scrollbar::-webkit-scrollbar {
-    width: 10px;
-  }
-
-  .chat-scrollbar::-webkit-scrollbar-track {
-    background: transparent;
-  }
-
-  .chat-scrollbar::-webkit-scrollbar-thumb {
-    background-color: hsl(var(--scrollbar-thumb) / 0.5);
-    border-radius: 999px;
-    border: 3px solid transparent;
-    background-clip: content-box;
-  }
-
-  .chat-scrollbar::-webkit-scrollbar-thumb:hover {
-    background-color: hsl(var(--scrollbar-thumb-hover) / 0.65);
-  }
-
-  .chat-scrollbar::-webkit-scrollbar-thumb:active {
-    background-color: hsl(var(--scrollbar-thumb-active) / 0.75);
-  }
-
-  /* Input scrollbar: thin and low-contrast, similar to shadcn textarea usage */
-  .input-scrollbar {
-    scrollbar-width: thin;
-    scrollbar-color: hsl(var(--scrollbar-thumb) / 0.45) transparent;
-  }
-
-  .input-scrollbar::-webkit-scrollbar {
-    width: 8px;
-    height: 8px;
-  }
-
-  .input-scrollbar::-webkit-scrollbar-track {
-    background: transparent;
-  }
-
-  .input-scrollbar::-webkit-scrollbar-thumb {
-    background-color: hsl(var(--scrollbar-thumb) / 0.45);
-    border-radius: 999px;
-    border: 2px solid transparent;
-    background-clip: content-box;
-  }
-
-  .input-scrollbar::-webkit-scrollbar-thumb:hover {
-    background-color: hsl(var(--scrollbar-thumb-hover) / 0.55);
-  }
-
-  .input-scrollbar::-webkit-scrollbar-thumb:active {
-    background-color: hsl(var(--scrollbar-thumb-active) / 0.65);
   }
 
   /* Todo checkbox with consistent minimalist styling */

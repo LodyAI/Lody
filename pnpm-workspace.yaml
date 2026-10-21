@@ -268,7 +268,6 @@ patchedDependencies:
   pdfjs-dist@6.3.289: patches/pdfjs-dist@6.3.289.patch
   '@shinyoshiaki/binary-data@0.6.1': patches/@shinyoshiaki__binary-data@0.6.1.patch
   werift@0.24.4: patches/werift@0.24.4.patch
-  '@radix-ui/react-scroll-area@1.2.10': patches/@radix-ui__react-scroll-area@1.2.10.patch
   app-builder-lib@26.15.3: patches/app-builder-lib@26.15.3.patch
   '@better-auth/api-key@1.6.33': patches/@better-auth__api-key@1.6.33.patch
   '@better-auth/electron@1.6.33': patches/@better-auth__electron@1.6.33.patch

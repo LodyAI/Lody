@@ -83,7 +83,7 @@ trace 支持同一输入任务内出现 React DOM 更新、同步滚动测量、
 | 同文件的桌面工具栏 | `desktopHeaderToolbar` 使用 `hideMessageArea` 和 `headerVariant="toolbar"` 挂载完整 `SessionChatInterface`，正文另有一个实例。 | [聊天接口 Hook](../../../../packages/components/src/components/sessions/session-chat-interface.tsx)在 JSX 隐藏消息区之前执行，只显示头部仍运行许多聊天控制 Hook。trace 没有把其成本从合计 199ms 中单独分离。 |
 | 聊天接口中的编辑 mention source | 编辑器尚未打开就传入 `enableCodeCollabProvider: true`，包括仅头部实例。 | 该组件下 `useSessionMentionSource` 采样约 40ms。如果把获取移到编辑边界，仍需保留编辑器首开就绪。 |
 | [Mention 展开](../../../../packages/components/src/components/mentions/mention-expansion.ts) | 消息流编辑、输入区和 composer 各自调用展开 Hook，涉及会话、Role、Skill 目录。 | 路径包含式采样约 83ms。[已有共享 item 缓存](../../../../packages/components/src/components/mentions/mention-session-source.ts)避免了部分重复 slug 构造，没有消除各消费者自身的 Hook 与订阅。 |
-| [旧 ScrollArea 包装](../../../../packages/components/src/ui/scroll-area.tsx) | Radix 1.2.10 的 viewport 每次 render 都返回新的 `dangerouslySetInnerHTML` 对象，其 CSS 固定。 | React 将其视作属性变化，再次写入 `<style>.innerHTML`。这是已确认的冗余生产者，也是部分重解析的候选，尚不能认定它拥有全部 898 个事件。 |
+| [旧 ScrollArea 包装](https://github.com/LodyAI/Lody/blob/683aaec1fe8cb9f1f1eb18ee447b8cd8341a1697/packages/components/src/ui/scroll-area.tsx) | Radix 1.2.10 的 viewport 每次 render 都返回新的 `dangerouslySetInnerHTML` 对象，其 CSS 固定。 | React 将其视作属性变化，再次写入 `<style>.innerHTML`。这是已确认的冗余生产者，也是部分重解析的候选，尚不能认定它拥有全部 898 个事件。 |
 
 React DOM 在进入 `setProp` 前按对象身份比较 `dangerouslySetInnerHTML` wrapper，setter 赋值时不再比较内部字符串。部署的注册表 `InlineSvg` 已共享 wrapper，下述浏览器对照验证了这一实现的作用，不能再次建议已有 SVG 修复。其他候选包括 Mermaid markup 和旧 ScrollArea CSS，需要定位宿主元素后才能分配实测收益。CPU 栈的 `commitHostUpdate` 没有 Fiber／组件身份，无法还原缺失的归属。
 

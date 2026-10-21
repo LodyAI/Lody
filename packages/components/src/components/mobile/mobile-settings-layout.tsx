@@ -4,7 +4,7 @@ import { ChevronLeft } from 'lucide-react';
 import { useLocation } from '@tanstack/react-router';
 import { useTranslation } from 'react-i18next';
 import { cn } from '@/lib/utils';
-import { ScrollArea } from '@/ui';
+import { ScrollArea } from '@lody/ui/scroll-area';
 import { consumeMobileBackNavigation } from '@/lib/mobile-back-navigation';
 import type { MobileWorkspaceTab, MobileWorkspaceTabBarLabels } from './mobile-workspace-tabbar';
 import { MobileDrillPageLayout, useMobileDrillAnimatedBack } from './mobile-drill-page-layout';

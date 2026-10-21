@@ -49,7 +49,7 @@ import {
   createLocalProjectIpcFileTransport,
   createLocalProjectRpcFileTransport,
 } from '@/lib/local-project-rpc-file-provider';
-import { ScrollArea } from '@/ui/scroll-area';
+import { ScrollArea } from '@lody/ui/scroll-area';
 import {
   hasSessionFileLspProvider,
   type SessionFileProvider,

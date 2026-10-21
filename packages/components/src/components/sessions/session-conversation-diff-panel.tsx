@@ -32,7 +32,7 @@ import {
   classifyGithubThreadError,
 } from './diff-pr-analytics';
 import { DiffViewer } from '@/ui/diff-viewer/diff-viewer';
-import { ScrollArea } from '@/ui/scroll-area';
+import { ScrollArea } from '@lody/ui/scroll-area';
 import { Skeleton } from '@lody/ui/skeleton';
 import { withClassName } from '@/lib/stylex';
 import { observeDiffPerfLongTasks } from '@/lib/diff-perf';
@@ -166,8 +166,6 @@ const styles = stylex.create({
     flex: '1 1 0%',
     overflow: 'auto',
     paddingInline: space[3],
-    scrollbarWidth: 'thin',
-    scrollbarColor: 'hsl(var(--scrollbar-thumb) / 0.5) transparent',
   },
 });
 
@@ -755,17 +753,16 @@ function SessionConversationDiffPanelImpl({
     []
   );
 
-  const setScrollAreaRoot = useCallback(
-    (node: HTMLDivElement | null) => {
+  const setScrollAreaViewport = useCallback(
+    (viewport: HTMLDivElement | null) => {
       baseViewportScrollCleanupRef.current?.();
       baseViewportScrollCleanupRef.current = null;
       if (mode !== 'base') return;
-      if (!node) {
+      if (!viewport) {
         scrollContainerRef.current = null;
         viewportRef.current = null;
         return;
       }
-      const viewport = node.querySelector('[data-radix-scroll-area-viewport]');
       scrollContainerRef.current = viewport instanceof HTMLDivElement ? viewport : null;
       viewportRef.current = scrollContainerRef.current;
       if (viewport instanceof HTMLDivElement) {
@@ -1048,9 +1045,9 @@ function SessionConversationDiffPanelImpl({
           {baseHeader}
           <div {...stylex.props(styles.baseScrollFrame)}>
             <ScrollArea
-              ref={setScrollAreaRoot}
+              viewportRef={setScrollAreaViewport}
               className={stylex.props(styles.baseScrollArea).className}
-              type="auto"
+              visibility="always"
             >
               <div {...stylex.props(styles.baseScrollContent)}>{panelContent}</div>
             </ScrollArea>

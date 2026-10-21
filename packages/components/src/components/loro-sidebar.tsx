@@ -38,7 +38,7 @@ import { WorkingGrid } from '@/ui/working-grid';
 import { commands, formatKeyBinding, type ShortcutCommandId } from '@/lib/commands';
 import { setCommandPaletteOpen } from '@/lib/commands/palette-state';
 import { Menu } from '@/ui/menu';
-import { ScrollArea } from '@/ui/scroll-area';
+import { ScrollArea } from '@lody/ui/scroll-area';
 import {
   AppWindow,
   Archive,
@@ -1457,17 +1457,11 @@ export const LoroSidebar = memo(function LoroSidebar({
             // first group is set off like the 16px between the groups below it.
             isMobile ? 'mt-4 pb-[calc(12px+env(safe-area-inset-bottom,0px))]' : 'mt-3'
           )}
-          // Overlay only while the list is scrolling. Radix defaults to `hover`,
+          // Overlay only while the list is scrolling. ScrollArea defaults to `hover`,
           // which paints the thumb as soon as the pointer enters the sidebar.
-          type="scroll"
-          scrollbarClassName={!isMobile ? 'w-2 p-px' : undefined}
-          scrollbarThumbClassName={
-            !isMobile
-              ? 'bg-[hsl(var(--muted-foreground)/0.35)] hover:bg-[hsl(var(--muted-foreground)/0.45)] active:bg-[hsl(var(--muted-foreground)/0.55)]'
-              : undefined
-          }
+          visibility="scroll"
           // The horizontal gutter must live on the *viewport*, not the ScrollArea
-          // root. Radix's viewport is the scroll/clip container; with rows at
+          // root. The viewport is the scroll/clip container; with rows at
           // `w-full` and the gutter on the root, the selected row's 1px `outline`
           // (painted outside the box) sits flush against the viewport's clip edge
           // and gets shaved on the left/right — only the sides, since the viewport

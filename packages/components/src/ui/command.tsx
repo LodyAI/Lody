@@ -4,7 +4,7 @@ import { Search } from 'lucide-react';
 
 import { cn } from '@/lib/utils';
 import { Dialog } from './dialog';
-import { ScrollArea } from './scroll-area';
+import { ScrollArea } from '@lody/ui/scroll-area';
 
 const Command = React.forwardRef<
   React.ElementRef<typeof CommandPrimitive>,

@@ -1,3 +1,4 @@
+import { nativeScrollbar } from '../scroll-area/surface';
 import { Drawer as BaseDrawer } from '@base-ui/react/drawer';
 import * as stylex from '@stylexjs/stylex';
 import { forwardRef, useSyncExternalStore, type ComponentProps, type ReactNode } from 'react';
@@ -172,6 +173,7 @@ export const DrawerContent = forwardRef<HTMLDivElement, DrawerContentProps>(func
           className={(state) =>
             appendClassName(
               stylex.props(
+                nativeScrollbar,
                 modal.drawerPopup,
                 drawerSizeStyle(side),
                 !inset && drawerFlushStyle(side),

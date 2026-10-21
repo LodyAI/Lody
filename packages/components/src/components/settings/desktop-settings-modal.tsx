@@ -17,7 +17,7 @@ import {
   settingsSelectedMachineIdAtom,
   settingsSelectedProjectKeyAtom,
 } from '@/atoms';
-import { ScrollArea } from '@/ui';
+import { ScrollArea } from '@lody/ui/scroll-area';
 import { Dialog } from '@/ui/dialog';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { isNativeAppShell } from '@/lib/native-platform';

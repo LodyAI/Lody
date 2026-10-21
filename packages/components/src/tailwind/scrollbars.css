@@ -1,0 +1,43 @@
+/* Native scroll containers (including portalled @lody/ui parts) share the
+   @lody/ui ScrollArea tokens without requiring a class on every scrolling element.
+   The base layer lets component-level hidden/compact scrollbars override it. */
+@layer base {
+  :where(*) {
+    scrollbar-width: thin;
+    scrollbar-color: var(--lody-scrollbar-thumb) transparent;
+  }
+
+  /* Non-auto standard properties override WebKit thumb geometry and states in
+     Chromium. Use its pseudo-elements where available; Firefox keeps thin. */
+  @supports selector(::-webkit-scrollbar) {
+    :where(*) {
+      scrollbar-width: auto;
+      scrollbar-color: auto;
+    }
+  }
+
+  :where(*)::-webkit-scrollbar {
+    width: var(--lody-scrollbar-size);
+    height: var(--lody-scrollbar-size);
+  }
+
+  :where(*)::-webkit-scrollbar-track,
+  :where(*)::-webkit-scrollbar-corner {
+    background: transparent;
+  }
+
+  :where(*)::-webkit-scrollbar-thumb {
+    border: var(--lody-scrollbar-inset) solid transparent;
+    border-radius: var(--lody-scrollbar-radius);
+    background-color: var(--lody-scrollbar-thumb);
+    background-clip: content-box;
+  }
+
+  :where(*)::-webkit-scrollbar-thumb:hover {
+    background-color: var(--lody-scrollbar-thumb-hover);
+  }
+
+  :where(*)::-webkit-scrollbar-thumb:active {
+    background-color: var(--lody-scrollbar-thumb-active);
+  }
+}

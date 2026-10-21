@@ -10,7 +10,7 @@ export * from './command';
 export * from './dialog';
 export * from './menu';
 export * from '@lody/ui/popover';
-export * from './scroll-area';
+export * from '@lody/ui/scroll-area';
 // export * from './sidebar-resizer' // Has external dependencies - needs to be refactored
 // export * from './sidebar' // Has external dependencies - needs to be refactored
 export * from './slider';
