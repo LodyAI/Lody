@@ -38,6 +38,7 @@ export type ShortcutCommandId =
   | 'session.cycleProvider'
   | 'session.cycleModel'
   | 'session.cycleThinkEffort'
+  | 'session.sendSteer'
   | 'mention.toggleSessionProjectScope';
 
 type CommandKeybindings = Array<string | KeyBinding>;
@@ -111,6 +112,9 @@ export const COMMAND_SHORTCUTS: Record<ShortcutCommandId, CommandKeybindings> = 
   'session.cycleProvider': [],
   'session.cycleModel': [],
   'session.cycleThinkEffort': [],
+  // Unbound by default: Mod+Enter already sends through the configured behavior, and
+  // Mod+Shift+Enter inverts it. A user binding here always steers a busy prompt.
+  'session.sendSteer': [],
   'mention.toggleSessionProjectScope': [],
 };
 

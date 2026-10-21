@@ -1,3 +1,4 @@
+import { isImeComposingNativeKeyboardEvent } from '../ime';
 import { canonicalizeBinding } from './key-matcher';
 import { getPlatform, getRuntime } from './platform';
 import {
@@ -372,6 +373,9 @@ class CommandRegistry {
     if (this.paused) return;
     if (this.bindings.length === 0) return;
     if (event.defaultPrevented) return;
+    // A key that is still composing belongs to the input method (e.g. Enter
+    // commits CJK candidates), whatever app command it would otherwise match.
+    if (isImeComposingNativeKeyboardEvent(event)) return;
     // A focused text-editing surface gets the key first. Checked per event
     // rather than per binding, so it holds for user-rebound keys too — the
     // whole reason this is not a `when` on the default binding.

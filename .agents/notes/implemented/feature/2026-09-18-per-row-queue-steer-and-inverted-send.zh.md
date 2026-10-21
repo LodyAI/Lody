@@ -66,5 +66,6 @@ steer 时即使到达 handler 也不会执行。
 - `packages/components/src/components/sessions/session-chat-input-area.tsx`
 - `packages/components/src/components/sessions/message-queue/{queued-message-steer,message-queue-row,message-queue-display,AGENTS.md}`
 - `packages/components/tests/{session-message-submit-route,queued-message-steer}.test.ts`
+- 后续：[可配置的 Send and Steer 快捷键](2026-10-07-configurable-send-and-steer-shortcut.zh.md)
 - 相关：[steer stop and recovery ownership](../bug-fix/2026-09-16-steer-stop-recovery-ownership.md)、
   [interrupt pending input exactly once](../bug-fix/2026-09-14-interrupt-pending-input-exactly-once.md)
