@@ -23,6 +23,8 @@ export interface ScrollAreaProps extends Omit<ComponentProps<'div'>, 'children'>
   viewportRef?: Ref<HTMLDivElement>;
   viewportClassName?: string;
   viewportStyle?: CSSProperties;
+  /** Layout/interaction constraints for both tracks; appearance belongs to the tokens. */
+  scrollbarClassName?: string;
 }
 
 /** The native viewport remains the public ref for virtualization and restoration. */
@@ -36,6 +38,7 @@ export const ScrollArea = forwardRef<HTMLDivElement, ScrollAreaProps>(function S
     viewportRef,
     viewportClassName,
     viewportStyle,
+    scrollbarClassName,
     ...rest
   },
   ref
@@ -44,17 +47,20 @@ export const ScrollArea = forwardRef<HTMLDivElement, ScrollAreaProps>(function S
     <BaseScrollArea.Scrollbar
       orientation={orientation}
       className={(state) =>
-        stylex.props(
-          surface.track,
-          orientation === 'vertical' ? surface.verticalTrack : surface.horizontalTrack,
-          compact && surface.compact,
-          compact &&
-            (orientation === 'vertical' ? surface.compactVertical : surface.compactHorizontal),
-          visibility !== 'always' &&
-            !state.scrolling &&
-            !(visibility === 'hover' && state.hovering) &&
-            surface.hidden
-        ).className
+        appendClassName(
+          stylex.props(
+            surface.track,
+            orientation === 'vertical' ? surface.verticalTrack : surface.horizontalTrack,
+            compact && surface.compact,
+            compact &&
+              (orientation === 'vertical' ? surface.compactVertical : surface.compactHorizontal),
+            visibility !== 'always' &&
+              !state.scrolling &&
+              !(visibility === 'hover' && state.hovering) &&
+              surface.hidden
+          ).className,
+          scrollbarClassName
+        )
       }
     >
       <BaseScrollArea.Thumb {...stylex.props(surface.thumb)} />

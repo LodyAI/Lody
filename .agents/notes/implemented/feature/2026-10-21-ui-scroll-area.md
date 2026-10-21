@@ -37,6 +37,10 @@ File-tree virtualization and scroll restoration retain their actual viewport ref
 The diff panel now takes that ref directly; consumers and existing checks use the
 stable `data-scroll-area-viewport` marker instead of a vendor attribute.
 
+The home Now panel also uses the new owner. Its parent-frame animation hides both
+tracks through `scrollbarClassName`, an interaction constraint rather than a second
+appearance API. Viewport ownership, focus and motion completion remain with the panel.
+
 The [Radix polling patch](../bug-fix/2026-09-15-scroll-area-frame-cleanup.md) is
 retired because its production dependency is gone. Historical patch/wrapper links
 point to their original source snapshot. Existing lifecycle checks now target the
@@ -60,7 +64,9 @@ Chromium checks cover wheel scrolling, thumb dragging and keyboard focus; the
 600-file tree retains a bounded row window, compact horizontal tabs scroll, and
 the notices dialog remains scrollable in a short window. Repository typechecks,
 formatting, type-aware lint, i18n, boundary guards and documentation checks pass.
-`NODE_ENV=test pnpm check` passes, including all 594 component test files and
-25 `@lody/ui` test files. Six targeted suites cover the original missing-API
-failures, dialog closure and the controlled exit animation (25 passing tests).
+`NODE_ENV=test pnpm check` passes for the component and primitive suites. Targeted
+cases cover the missing-API boundary, dialog closure, controlled exit animation
+and HomeDashboard. Conversation hydration/scrolling and home browser suites pass;
+the real home focus panel hides tracks during frame motion and keeps its viewport
+scrollable.
 Packaged Electron, touch input and non-Chromium engines remain unverified.

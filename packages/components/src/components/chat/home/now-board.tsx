@@ -32,7 +32,7 @@ import {
   type HomeNowListKey,
   type HomeNowTotals,
 } from '@/lib/home-now-layout';
-import { ScrollArea } from '@/ui/scroll-area';
+import { ScrollArea } from '@lody/ui/scroll-area';
 import { FocusMotion, canAnimateFocus } from './focus-motion';
 import {
   Tile,

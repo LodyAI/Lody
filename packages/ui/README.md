@@ -883,6 +883,8 @@ import { ScrollArea } from '@lody/ui/scroll-area';
 a narrow track for tab strips. The viewport ref remains the real native scroll
 element for virtualization, keyboard handling and scroll restoration. Root and
 viewport classes/styles carry caller layout, not thumb appearance.
+`scrollbarClassName` carries layout or interaction constraints on both tracks,
+such as hiding them during a parent frame's animation; track appearance stays token-owned.
 
 `nativeScrollbar` is a StyleX style for existing scroll owners, including native
 text controls and the popup lists that own keyboard selection. Product-wide CSS
