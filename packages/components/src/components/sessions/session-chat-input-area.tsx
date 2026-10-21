@@ -106,6 +106,11 @@ import { isImeComposingKeyboardEvent } from '@/lib/ime';
 import { toast } from '@/lib/toast';
 import { validateSessionImageFile } from '@/lib/session-image-upload';
 import { formatDocumentSelection, type DocumentSelection } from '@/lib/document-selection';
+import {
+  formatSelectionQuote,
+  selectionQuoteLabel,
+  type ConversationSelectionQuote,
+} from '@/lib/conversation-selection-quote';
 import { PendingImageMarkupDialog } from './pending-image-markup-dialog';
 import {
   SESSION_FILE_MAX_SIZE_MB,
@@ -545,6 +550,8 @@ export type SessionSendMessageOptions = {
 
 export type SessionChatInputAreaHandle = {
   addDocumentSelection: (selection: DocumentSelection) => boolean;
+  /** Quote prose selected inside a conversation message. */
+  addSelectionQuote: (quote: ConversationSelectionQuote) => boolean;
   setInputText: (text: string) => void;
   focusInput: () => void;
   addCommentReference: (reference: CommentReferencePayload) => boolean;
@@ -1575,10 +1582,31 @@ export const SessionChatInputArea = memo(
       ]
     );
 
+    // A quoted message selection is a snapshot: it enters the draft as the same
+    // large-pasted-text chip the document selection uses, so the quoted prose
+    // travels with the message without a new input block type.
+    const addSelectionQuote = useCallback(
+      (quote: ConversationSelectionQuote) => {
+        if (isArchived || submissionPending) return false;
+        let text: string;
+        try {
+          text = formatSelectionQuote(quote);
+        } catch {
+          return false;
+        }
+        return insertLargePastedTextAtSelection(text, {
+          label: selectionQuoteLabel(quote.text),
+          append: true,
+        });
+      },
+      [isArchived, submissionPending, insertLargePastedTextAtSelection]
+    );
+
     useImperativeHandle(
       ref,
       () => ({
         addDocumentSelection,
+        addSelectionQuote,
         setInputText,
         focusInput: () => {
           textareaRef.current?.focus();
@@ -1600,6 +1628,7 @@ export const SessionChatInputArea = memo(
       }),
       [
         addDocumentSelection,
+        addSelectionQuote,
         setInputText,
         addCommentReference,
         toggleCommentReference,

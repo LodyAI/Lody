@@ -134,6 +134,7 @@ import {
   type SessionChatInputAreaProps,
 } from '../src/components/sessions/session-chat-input-area';
 import { initI18n } from '../src/i18n';
+import { MAX_SELECTION_QUOTE_TEXT } from '../src/lib/conversation-selection-quote';
 import { PASTED_TEXT_FILE_MIN_CHAR_COUNT } from '../src/lib/pasted-text-draft';
 import { toast } from '@/lib/toast';
 
@@ -575,6 +576,64 @@ describe('SessionChatInputArea submission feedback', () => {
     expect(textarea.value).toContain('annual.pdf');
     await submit('keyboard');
     expect(submissions[1]).toEqual(submissions[0]);
+  });
+
+  it('stages a quoted conversation selection beside the prompt and expands it on send', async () => {
+    const composerRef = createRef<SessionChatInputAreaHandle>();
+    const submissions: SessionInputBlock[][] = [];
+    const textarea = await renderComposer({
+      composerRef,
+      onSendMessage: async (blocks) => {
+        submissions.push(blocks);
+        return false;
+      },
+    });
+    await act(async () => {
+      composerRef.current!.setInputText('Why is this slow?');
+    });
+    await act(async () => {
+      expect(
+        composerRef.current!.addSelectionQuote({
+          text: 'The filter creates a new array on each render.',
+        })
+      ).toBe(true);
+    });
+    expect(textarea.value).toContain('Why is this slow?');
+    // The chip is labelled with the quote itself, so several quotes stay
+    // tellable apart in one draft.
+    expect(textarea.value).toContain('The filter creates a new');
+    await submit('keyboard');
+    expect(submissions[0]).toMatchObject([
+      { type: 'text', text: expect.stringContaining('Why is this slow?\n\nMessage selection') },
+    ]);
+    expect((submissions[0][0] as { text: string }).text).toContain(
+      'Selected content:\n> The filter creates a new array on each render.'
+    );
+    await submit('keyboard');
+    expect(submissions[1]).toEqual(submissions[0]);
+  });
+
+  it('refuses a quote this draft cannot take without disturbing it', async () => {
+    const composerRef = createRef<SessionChatInputAreaHandle>();
+    const textarea = await renderComposer({
+      composerRef,
+      onSendMessage: async () => true,
+    });
+    const original = textarea.value;
+    await act(async () => {
+      expect(composerRef.current!.addSelectionQuote({ text: '   ' })).toBe(false);
+      expect(
+        composerRef.current!.addSelectionQuote({
+          text: 'x'.repeat(MAX_SELECTION_QUOTE_TEXT + 1),
+        })
+      ).toBe(false);
+    });
+    expect(textarea.value).toBe(original);
+    await renderComposer({ composerRef, isArchived: true, onSendMessage: async () => true });
+    await act(async () => {
+      expect(composerRef.current!.addSelectionQuote({ text: 'quoted prose' })).toBe(false);
+    });
+    expect(container!.textContent).not.toContain('quoted prose');
   });
 
   it('rejects image annotations atomically when image input is disabled or the session is archived', async () => {
