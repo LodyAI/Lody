@@ -51,7 +51,6 @@ describe('ScrollArea lifecycle', () => {
       );
     });
     const viewport = host.querySelector<HTMLDivElement>('[data-scroll-area-viewport]')!;
-    viewport.getAnimations = () => [];
     let reads = 0;
     Object.defineProperty(viewport, 'scrollTop', {
       configurable: true,

@@ -43,6 +43,14 @@ point to their original source snapshot. Existing lifecycle checks now target th
 public component's event-driven sampling, stable viewport identity and detached
 viewport cleanup. No Base UI version or package boundary changes.
 
+The shared jsdom setup supplies an empty `Element.getAnimations()` result when
+the API is absent: jsdom does not run Web Animations, while Base UI checks subtree
+animations before measuring. Keeping this boundary in shared setup covers every
+real ScrollArea consumer. Base UI's no-animation flag preserves the pre-existing
+synchronous dialog/popover teardown in jsdom; the exit-animation fixture explicitly
+enables its controlled animation. Production behavior is unchanged, and test errors
+remain visible.
+
 ## Evidence and limits
 
 The gallery presents the actual component in both forced palettes, its dimensions,
@@ -52,6 +60,7 @@ Chromium checks cover wheel scrolling, thumb dragging and keyboard focus; the
 600-file tree retains a bounded row window, compact horizontal tabs scroll, and
 the notices dialog remains scrollable in a short window. Repository typechecks,
 formatting, type-aware lint, i18n, boundary guards and documentation checks pass.
-Existing test selectors and lifecycle expectations are updated for the new owner;
-automated test suites have not been run in this task.
+`NODE_ENV=test pnpm check` passes, including all 594 component test files and
+25 `@lody/ui` test files. Six targeted suites cover the original missing-API
+failures, dialog closure and the controlled exit animation (25 passing tests).
 Packaged Electron, touch input and non-Chromium engines remain unverified.
