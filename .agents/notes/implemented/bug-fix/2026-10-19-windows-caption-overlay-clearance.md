@@ -54,6 +54,13 @@ schedules, terminal and right panels, Settings, the command palette and the
 Mermaid viewer showed no overlap after the change. The viewer's controls now
 sit at y=36–80.
 
+That audit missed the schedule detail toolbar. The test workspace had no
+schedule, so the panel never opened. The panel always meets the window's
+trailing edge, so its pause, run and delete actions sat under the caption
+buttons. The toolbar now takes the same caption pad and centerline pad as the
+list header. An audit surface counts only when its data opens every panel that
+reaches the window edge.
+
 One finding is separate and unfixed. With both sidebars open below about
 840px of width, the panel minimums exceed the window and the right panel
 overflows its edge by about 20px. That pushes its toggle under the strip, and

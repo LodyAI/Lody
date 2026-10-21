@@ -14,7 +14,12 @@ import { Pause, Play, RotateCcw, Trash2, X } from 'lucide-react';
 import { Button } from '@lody/ui/button';
 import { Tooltip } from '@lody/ui/tooltip';
 import { cn } from '@/lib/utils';
-import { WINDOW_DRAG_EXEMPT_CLASS, useWindowDragRegionClass } from '@/ui/window-drag-region';
+import {
+  WINDOW_DRAG_EXEMPT_CLASS,
+  useWindowDragRegionClass,
+  useWindowsCaptionPadClass,
+  useWindowsCaptionRowPadClass,
+} from '@/ui/window-drag-region';
 
 /** Default width of the list while a schedule is open: the schedule gets the rest. */
 export const SCHEDULE_LIST_DEFAULT_WIDTH = 380;
@@ -348,9 +353,21 @@ export function ScheduleDetailToolbar({
   // On mobile the toolbar is the page's top edge, where Electron's window drag
   // strip lies; joining the drag region with its buttons exempt keeps them clickable.
   const windowDrag = useWindowDragRegionClass();
+  // The panel always meets the window's trailing edge, so on Windows its
+  // actions share the row with the OS caption buttons: clear their width and
+  // center on their line, as the list header does.
+  const windowsCaptionPadClass = useWindowsCaptionPadClass();
+  const windowsCaptionRowPadClass = useWindowsCaptionRowPadClass({ bottomBorder: true });
   return (
     <Tooltip.Provider>
-      <div className={cn(stylex.props(styles.toolbar).className, windowDrag)}>
+      <div
+        className={cn(
+          stylex.props(styles.toolbar).className,
+          windowDrag,
+          windowsCaptionPadClass,
+          windowsCaptionRowPadClass
+        )}
+      >
         <ToolbarButton label={t('schedules.close', 'Close')} onClick={onClose}>
           <X {...stylex.props(styles.icon)} />
         </ToolbarButton>
