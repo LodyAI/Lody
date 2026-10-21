@@ -60,6 +60,7 @@ export type SessionFileOpenTarget = {
   readonly endLine?: number;
   /** True when the path was parsed as an agent-written link, for analytics. */
   readonly fromMarkdownLink: boolean;
+  readonly resolveMarkdownLink?: boolean;
   readonly lineSuffixFormat?: 'github' | 'colon' | 'vscode';
 };
 
@@ -92,6 +93,16 @@ export function resolveSessionFileOpenTarget(
     };
   }
 
+  let sourcePath = input.rawPath;
+  try {
+    sourcePath = decodeURIComponent(sourcePath);
+  } catch {
+    /* Keep malformed escapes verbatim. */
+  }
+  const relativeSource =
+    !/^(?:[\\/]|[a-z]:[\\/]|~)/i.test(sourcePath.trim()) &&
+    !sourcePath.split(/[\\/]/).includes('..');
+
   const normalizedPath = normalizeMarkdownAgentFilePath(
     input.rawPath,
     input.workspacePath,
@@ -105,6 +116,7 @@ export function resolveSessionFileOpenTarget(
     ...(startLine === undefined ? {} : { startLine }),
     ...(endLine === undefined ? {} : { endLine }),
     fromMarkdownLink: parsedTarget != null,
+    ...(relativeSource ? { resolveMarkdownLink: true } : {}),
     ...(parsedTarget?.lineSuffixFormat === undefined
       ? {}
       : { lineSuffixFormat: parsedTarget.lineSuffixFormat }),

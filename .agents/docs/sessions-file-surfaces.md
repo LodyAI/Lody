@@ -16,6 +16,11 @@ session's workspace root; absolute/home paths need no root. Remote targets retai
 bounded Machine RPC reads. Indexing and saving still require the daemon. See the
 [implementation decision](../notes/implemented/bug-fix/2026-10-16-daemon-independent-local-file-preview.md).
 
+Relative Markdown links first resolve candidates across the session root and its
+nested Git worktrees: a unique match opens directly, several show a picker, and the
+chosen canonical path becomes the viewer identity. Old daemons and failed Git
+discovery fall back to the session root. Tree/Diff and explicit paths skip this.
+
 - Diff page: `session-conversation-diff-panel.tsx`, data from
   `use-session-conversation-diff-data.ts`. Each file title copies the
   workspace-relative path and, when wired, opens a file-preview viewer tab

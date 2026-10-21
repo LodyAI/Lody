@@ -22,6 +22,81 @@ afterEach(() => {
 });
 
 describe('createWorkspaceMachineRpcFacade', () => {
+  it('negotiates relative-link discovery without downgrading to an ordinary preview', async () => {
+    const facade = createWorkspaceMachineRpcFacade({
+      workspaceId,
+      getMachineProtocolCapabilities: async () => ({}),
+      getMachineRpcClient: async () => {
+        throw new Error('Must not read an ambiguous path on an old daemon');
+      },
+    });
+    expect(
+      await facade.requestFilePreview(remoteMachineId, {
+        sessionId,
+        path: 'docs/a.md',
+        resolveMarkdownLink: true,
+      })
+    ).toMatchObject({ status: 'error', code: 'unsupported_protocol' });
+  });
+
+  it('forwards negotiated link resolution and returns candidates without content', async () => {
+    const candidates = [
+      {
+        path: 'nested/a.md',
+        absolutePath: '/repo/nested/a.md',
+        worktreeRoot: '/repo/nested',
+        branch: null,
+        head: 'a'.repeat(40),
+        mtimeMs: 1000,
+      },
+    ];
+    const facade = createWorkspaceMachineRpcFacade({
+      workspaceId,
+      getMachineProtocolCapabilities: async () => ({ markdownFileLinks: 1 }),
+      getMachineRpcClient: async () =>
+        ({
+          requestFilePreview: async (request: { resolveMarkdownLink?: boolean }) =>
+            request.resolveMarkdownLink
+              ? { status: 'resolved-link', v: 3, candidates }
+              : { status: 'error', code: 'wrong_mode' },
+        }) as never,
+    });
+    expect(
+      await facade.requestFilePreview(remoteMachineId, {
+        sessionId,
+        path: 'a.md',
+        resolveMarkdownLink: true,
+      })
+    ).toEqual({ status: 'resolved-link', v: 3, candidates });
+  });
+
+  it('resolves same-machine links without consulting daemon capabilities', async () => {
+    const result = { status: 'resolved-link', v: 3, candidates: [{ path: 'a.md' }] };
+    vi.stubGlobal('window', {
+      __LODY_ELECTRON__: true,
+      ipc: {
+        invoke: async (_channel: string, request: { resolveMarkdownLink?: boolean }) =>
+          request.resolveMarkdownLink ? result : null,
+      },
+    });
+    const facade = createWorkspaceMachineRpcFacade({
+      workspaceId,
+      getMachineProtocolCapabilities: async () => {
+        throw new Error('Daemon offline');
+      },
+      getMachineRpcClient: async () => {
+        throw new Error('No cloud fallback');
+      },
+    });
+    expect(
+      await facade.requestFilePreview(
+        localMachineId,
+        { sessionId, path: 'a.md', resolveMarkdownLink: true },
+        { workspaceRoot: '/repo' }
+      )
+    ).toEqual(result);
+  });
+
   it.each([undefined, {}, { previewControl: 0 }])(
     'rejects unsupported remote preview control before handshake or authorization (%j)',
     async (protocolCapabilities) => {

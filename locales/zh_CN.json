@@ -1,4 +1,10 @@
 {
+  "sessions.fileLinks.chooseTitle": "选择文件",
+  "sessions.fileLinks.chooseDescription": "此链接在多个工作树中都有匹配文件，请选择要打开的版本。",
+  "sessions.fileLinks.detached": "分离的 HEAD",
+  "sessions.fileLinks.modified": "修改时间：{{time}}",
+  "sessions.fileLinks.open": "打开此文件",
+  "sessions.fileLinks.resolveFailed": "无法解析此文件链接。请重试，或让智能体提供绝对路径。",
   "e2ee.create.notEnabled": "此账号尚未开放加密工作区创建。服务器没有保留这次请求，已将其从本机移除；你可以改为创建普通工作区。",
   "e2ee.mark.list": "加密工作区",
   "e2ee.control.badge": "开发者预览",

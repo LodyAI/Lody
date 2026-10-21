@@ -104,6 +104,10 @@
       "types": "./src/image-file-types.ts",
       "import": "./src/image-file-types.ts"
     },
+    "./file-preview": {
+      "types": "./src/file-preview.ts",
+      "import": "./src/file-preview.ts"
+    },
     "./local-file-preview": {
       "types": "./src/local-file-preview.ts",
       "import": "./src/local-file-preview.ts"

@@ -1,3 +1,5 @@
+import { FileLinkCandidateDialog } from './file-link-candidate-dialog';
+import type { FileLinkCandidate } from '@lody/shared';
 import { getIpcServices } from '@/lib/electron-ipc-client';
 import { buildDraftUserHistoryEntry } from '@/lib/session-attachment-draft';
 import { pendingSessionLinkAtom } from '@/lib/session-deep-link';
@@ -3987,8 +3989,31 @@ const SessionDetail = ({
     replaceSessionUrlSimulator(false);
   }, [replaceSessionUrlSimulator]);
 
+  // A newer open or a session change supersedes an in-flight link resolution.
+  const fileLinkRequestRef = useRef(0);
+  const fileLinkSessionKey = JSON.stringify([
+    currentWorkspaceId,
+    activeSessionMachineId,
+    activeBrowserSession?.id,
+    activeSessionWorkspacePath,
+  ]);
+  useEffect(
+    () => () => {
+      fileLinkRequestRef.current += 1;
+    },
+    [fileLinkSessionKey, runtime]
+  );
+  const [fileLinkChoice, setFileLinkChoice] = useState<{
+    sessionKey: string;
+    candidates: readonly FileLinkCandidate[];
+    options: SessionDetailOpenFileOptions;
+  } | null>(null);
+
   const handleOpenFile = useStableCallback(
     (filePath: string, options: SessionDetailOpenFileOptions = {}) => {
+      const request = ++fileLinkRequestRef.current;
+      const sessionKey = fileLinkSessionKey;
+      setFileLinkChoice(null);
       const claimCloseTarget = semanticRouterRef.current?.deferActivation('side-panel');
       setFileProviderRequestedByInteraction(true);
       void (async () => {
@@ -4010,11 +4035,52 @@ const SessionDetail = ({
           ...(options.startLine === undefined ? {} : { startLine: options.startLine }),
           ...(options.endLine === undefined ? {} : { endLine: options.endLine }),
         });
+        let openingPath = target.filePath;
+        if (target.resolveMarkdownLink && runtime && activeSessionMachineId && activeBrowserSession) {
+          const link = await runtime.requestFilePreview(
+            activeSessionMachineId,
+            {
+              sessionId: activeBrowserSession.id,
+              path: openingPath,
+              resolveMarkdownLink: true,
+            },
+            {
+              ownerSessionId: activeBrowserSession.parentSessionId ?? activeBrowserSession.id,
+              workspaceRoot: activeSessionWorkspacePath,
+            }
+          );
+          if (request !== fileLinkRequestRef.current) return;
+          if (link.status === 'resolved-link') {
+            if (link.candidates.length > 1) {
+              setFileLinkChoice({
+                sessionKey,
+                candidates: link.candidates,
+                options: {
+                  ...options,
+                  pathKind: 'canonical',
+                  startLine: target.startLine,
+                  endLine: target.endLine,
+                },
+              });
+              return;
+            }
+            openingPath = link.candidates[0]!.path;
+          } else if (link.status === 'error' && link.code !== 'unsupported_protocol') {
+            toast.error(
+              t(
+                'sessions.fileLinks.resolveFailed',
+                'Could not resolve this file link. Retry, or ask the agent for an absolute path.'
+              )
+            );
+            return;
+          }
+          // Older daemons cannot discover worktrees: open against the session root as before.
+        }
         const resolution = await resolveSessionFileProviderOpenPath(
           activeSessionFileProvider,
-          target.filePath
+          openingPath
         ).catch((): SessionFileProviderOpenPathResolution => ({
-          path: target.filePath,
+          path: openingPath,
           redirected: false,
         }));
         const resolvedFilePath = resolution.path;
@@ -4044,6 +4110,15 @@ const SessionDetail = ({
       })();
     }
   );
+
+  const fileLinkDialog =
+    fileLinkChoice?.sessionKey === fileLinkSessionKey ? (
+      <FileLinkCandidateDialog
+        candidates={fileLinkChoice.candidates}
+        onClose={() => setFileLinkChoice(null)}
+        onSelect={(candidate) => handleOpenFile(candidate.path, fileLinkChoice.options)}
+      />
+    ) : null;
 
   const handleOpenHtmlFile = useStableCallback((filePath: string) => {
     handleOpenFile(filePath, {
@@ -6789,6 +6864,7 @@ const SessionDetail = ({
         {deleteConfirmDialog}
         {archiveConfirmDialog}
         {dirtyForkDialog}
+        {fileLinkDialog}
         {worktreeForkObservers}
         <SessionShareDialog
           open={showSessionSharing && pendingSessionShare != null}
@@ -7270,6 +7346,7 @@ const SessionDetail = ({
           doesn't matter. */}
       {archiveConfirmDialog}
       {dirtyForkDialog}
+      {fileLinkDialog}
       {worktreeForkObservers}
       <SessionShareDialog
         open={showSessionSharing && pendingSessionShare != null}

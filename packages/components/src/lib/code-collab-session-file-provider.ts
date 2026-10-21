@@ -360,6 +360,13 @@ export class CodeCollabSessionFileProvider implements SessionFileProvider {
     if (!response) {
       return unavailable(indexed, 'transient-io', 'File preview request timed out.');
     }
+    if (response.status === 'resolved-link') {
+      return unavailable(
+        indexed,
+        'transient-io',
+        'Expected file content, received link candidates.'
+      );
+    }
     if (response.status === 'error') {
       return unavailable(
         indexed,
@@ -1046,6 +1053,7 @@ function filePreviewErrorCodeToUnavailableReason(
     case 'path_not_allowed':
     case 'invalid_path':
       return 'permission-denied';
+    case 'unsupported_protocol':
     case 'session_not_found':
     case 'workspace_root_unavailable':
       return 'metadata-only';

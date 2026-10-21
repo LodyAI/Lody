@@ -1,3 +1,4 @@
+import { resolveMarkdownFileLink } from '@lody/shared/node/file-link-resolution';
 import type { LocalFileResolution } from '@lody/shared/local-file-preview';
 import { createHash } from 'node:crypto';
 import { open } from 'node:fs/promises';
@@ -20,6 +21,7 @@ import {
 import { formatErrorMessage } from '@/utils/format-error';
 import {
   resolveFilePreviewPath,
+  getDefaultFilePreviewExtraRoots,
   type FilePreviewPathPolicyOptions,
   type ResolvedPreviewPath,
   type FilePreviewIoFailure,
@@ -190,6 +192,13 @@ export class FilePreviewService {
       });
     }
 
+    if (request.resolveMarkdownLink)
+      return resolveMarkdownFileLink({
+        workspaceRoot: workspace.workspaceRoot,
+        requestedPath: request.path,
+        extraRoots: this.deps.extraRoots ?? getDefaultFilePreviewExtraRoots(this.deps.pathPolicy),
+        options: this.deps.pathPolicy,
+      });
     const resolution = this.resolvePath(request, workspace, false);
     if (!resolution.ok) {
       return filePreviewV3Error(resolution.rejection.code, {

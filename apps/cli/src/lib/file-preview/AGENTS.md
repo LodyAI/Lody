@@ -20,6 +20,9 @@ save path's text reads.
 
 ## Invariants
 
+- `markdownFileLinks` resolution returns identities only and every realpath-distinct
+  match; never pick one or widen authorization. Canonical previews never discover.
+
 - Cold ordinary-chat previews resolve the existing default workspace from durable
   Session metadata, using the parent owner for child tabs and `getDefaultSessionWorkdir`.
   Do not create a directory, start an agent, or replace an unavailable project with

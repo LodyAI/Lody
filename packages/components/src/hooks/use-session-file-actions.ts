@@ -35,6 +35,8 @@ import {
 } from '@/lib/session-file-actions';
 import { isAbsoluteFilePath, resolveLocalWorkspaceFilePath } from '@/lib/session-local-file-path';
 import { resolveSessionFileOpenTarget } from '@/lib/session-file-open-target';
+import { activeWorkspaceRuntimeAtom } from '@/atoms/runtime';
+import type { FileLinkCandidate } from '@lody/shared';
 import {
   buildPathLauncherLaunchInput,
   buildPathLauncherProbes,
@@ -126,6 +128,14 @@ export type SessionFileActions = {
    * outside the owning local Electron machine it is Copy Path only.
    */
   readonly buildMarkdownLinkMenuItems: (href: string) => readonly MarkdownAgentFileLinkMenuItem[];
+  /**
+   * Pending choice when a Markdown-link action matched files in several
+   * worktrees; the owner renders the picker and calls `choose`.
+   */
+  readonly markdownLinkChoice: {
+    readonly candidates: readonly FileLinkCandidate[];
+    readonly choose: (candidate: FileLinkCandidate | null) => void;
+  } | null;
   /**
    * The same actions as a menu, for the file tree's context menu and the side
    * panel's ⋯ menu. Stable across renders so a memoized tree row can take it.
@@ -655,10 +665,91 @@ export function useSessionFileActions({
     [isElectronRenderer, isLocalMachine, workspacePath]
   );
 
+  // Markdown-link actions act on the same file a click opens: relative links
+  // resolve across nested worktrees first, and several matches require a choice.
+  const runtime = useAtomValue(activeWorkspaceRuntimeAtom);
+  const linkActionRef = useRef(0);
+  useEffect(
+    () => () => {
+      linkActionRef.current += 1;
+    },
+    [session?.id, workspacePath]
+  );
+  const [linkChoice, setLinkChoice] = useState<{
+    readonly sessionId: string | undefined;
+    readonly candidates: readonly FileLinkCandidate[];
+    readonly act: (filePath: string) => void;
+  } | null>(null);
+  const withMarkdownLinkPath = useCallback(
+    (href: string, filePath: string, act: (filePath: string) => void) => {
+      const request = ++linkActionRef.current;
+      setLinkChoice(null);
+      const target = resolveSessionFileOpenTarget({
+        rawPath: href.trim(),
+        pathKind: 'markdown-href',
+        workspacePath,
+        preserveWorktreePath: isElectronRenderer && isLocalMachine,
+      });
+      if (!target.resolveMarkdownLink || !runtime || !session) {
+        act(filePath);
+        return;
+      }
+      void runtime
+        .requestFilePreview(
+          session.machineId,
+          { sessionId: session.id, path: target.filePath, resolveMarkdownLink: true },
+          { ownerSessionId: session.parentSessionId ?? session.id, workspaceRoot: workspacePath }
+        )
+        .then((link) => {
+          if (request !== linkActionRef.current) return;
+          if (link.status === 'resolved-link') {
+            if (link.candidates.length > 1)
+              setLinkChoice({ sessionId: session.id, candidates: link.candidates, act });
+            else act(link.candidates[0]!.absolutePath);
+          } else if (link.status === 'error' && link.code !== 'unsupported_protocol') {
+            toast.error(
+              t(
+                'sessions.fileLinks.resolveFailed',
+                'Could not resolve this file link. Retry, or ask the agent for an absolute path.'
+              )
+            );
+          } else {
+            // Older daemons cannot discover worktrees: keep the session-root path.
+            act(filePath);
+          }
+        })
+        .catch(() => {
+          if (request !== linkActionRef.current) return;
+          toast.error(
+            t(
+              'sessions.fileLinks.resolveFailed',
+              'Could not resolve this file link. Retry, or ask the agent for an absolute path.'
+            )
+          );
+        });
+    },
+    [isElectronRenderer, isLocalMachine, runtime, session, t, workspacePath]
+  );
+  const markdownLinkChoice = useMemo(
+    () =>
+      linkChoice && linkChoice.sessionId === session?.id
+        ? {
+            candidates: linkChoice.candidates,
+            choose: (candidate: FileLinkCandidate | null) => {
+              setLinkChoice(null);
+              if (candidate) linkChoice.act(candidate.absolutePath);
+            },
+          }
+        : null,
+    [linkChoice, session?.id]
+  );
+
   const buildMarkdownLinkMenuItems = useCallback(
     (href: string): readonly MarkdownAgentFileLinkMenuItem[] => {
       const filePath = resolveMarkdownLinkFilePath(href);
       if (!filePath) return [];
+      const withPath = (act: (filePath: string) => void) => () =>
+        withMarkdownLinkPath(href, filePath, act);
 
       const items: MarkdownAgentFileLinkMenuItem[] = [
         {
@@ -666,10 +757,10 @@ export function useSessionFileActions({
           id: 'copy-path',
           label: t('sessions.fileActions.copyPath', 'Copy Path'),
           icon: Copy,
-          run: () => {
-            trackFileAction('copy_path', 'md_link_context_menu', filePath);
-            copyPath(filePath);
-          },
+          run: withPath((path) => {
+            trackFileAction('copy_path', 'md_link_context_menu', path);
+            copyPath(path);
+          }),
         },
       ];
 
@@ -683,10 +774,10 @@ export function useSessionFileActions({
         id: 'open-file',
         label: t('sessions.fileActions.openFile', 'Open File'),
         icon: ExternalLink,
-        run: () => {
-          trackFileAction('open_external', 'md_link_context_menu', filePath);
-          localHost.openInDefaultApp(filePath);
-        },
+        run: withPath((path) => {
+          trackFileAction('open_external', 'md_link_context_menu', path);
+          localHost.openInDefaultApp(path);
+        }),
       });
       if (availableEditorLaunchers) {
         items.push({
@@ -696,10 +787,10 @@ export function useSessionFileActions({
             editor: availableEditorLaunchers.selected.label,
           }),
           icon: ExternalLink,
-          run: () => {
-            trackFileAction('open_in_editor', 'md_link_context_menu', filePath);
-            runEditorAction(availableEditorLaunchers.selected, filePath);
-          },
+          run: withPath((path) => {
+            trackFileAction('open_in_editor', 'md_link_context_menu', path);
+            runEditorAction(availableEditorLaunchers.selected, path);
+          }),
         });
       }
 
@@ -715,10 +806,10 @@ export function useSessionFileActions({
             id: `open-with:${getPathLauncherId(launcher)}`,
             label: launcher.label,
             icon: ExternalLink,
-            run: () => {
-              trackFileAction('open_with', 'md_link_context_menu', filePath);
-              runEditorAction(launcher, filePath);
-            },
+            run: withPath((path) => {
+              trackFileAction('open_with', 'md_link_context_menu', path);
+              runEditorAction(launcher, path);
+            }),
           })),
         });
       }
@@ -728,10 +819,10 @@ export function useSessionFileActions({
         id: 'reveal',
         label: localHost.revealLabel,
         icon: FolderOpen,
-        run: () => {
-          trackFileAction('reveal', 'md_link_context_menu', filePath);
-          localHost.reveal(filePath);
-        },
+        run: withPath((path) => {
+          trackFileAction('reveal', 'md_link_context_menu', path);
+          localHost.reveal(path);
+        }),
       });
       return items;
     },
@@ -744,6 +835,7 @@ export function useSessionFileActions({
       runEditorAction,
       t,
       trackFileAction,
+      withMarkdownLinkPath,
     ]
   );
 
@@ -827,6 +919,7 @@ export function useSessionFileActions({
     download,
     buildErrorActions,
     buildMarkdownLinkMenuItems,
+    markdownLinkChoice,
     menuItems,
   };
 }

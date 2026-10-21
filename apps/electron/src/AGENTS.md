@@ -93,6 +93,9 @@ native-dependency, and OSS-composition rules stay in `apps/electron/AGENTS.md`.
 
 ## Local file resources
 
+- Markdown link discovery uses the shared resolver after disk-machine validation.
+  It returns identities without resources; the selected path is reauthorized on read.
+
 - Electron previews local files directly after matching the target to its on-disk
   machine identity; never require daemon liveness or protocol metadata. Relative
   paths need the original workspace root; never guess a substitute. Remote paths

@@ -268,6 +268,17 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
    * so a transport failure surfaces as a typed `FilePreviewV3Error` instead of a
    * Code Collab error the preview UI would have to translate.
    */
+  const supportsMarkdownLinks = async (machineId: MachineId) =>
+    machineSupportsProtocolCapability(
+      { protocolCapabilities: await deps.getMachineProtocolCapabilities(machineId) },
+      MACHINE_PROTOCOL_CAPABILITIES.markdownFileLinks
+    );
+  const unsupportedMarkdownLinks = () =>
+    filePreviewV3Error('unsupported_protocol', {
+      message: 'The agent machine does not support Markdown link resolution.',
+      retryable: false,
+    });
+
   const requestFilePreview = async (
     machineId: MachineId,
     request: Omit<FilePreviewV3Request, 'v'>,
@@ -277,6 +288,7 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
       v: FILE_PREVIEW_PROTOCOL_VERSION,
       sessionId: request.sessionId,
       path: request.path,
+      ...(request.resolveMarkdownLink ? { resolveMarkdownLink: true as const } : {}),
       ...(request.knownDigest === undefined ? {} : { knownDigest: request.knownDigest }),
       ...(request.maxBytes === undefined ? {} : { maxBytes: request.maxBytes }),
     };
@@ -292,6 +304,7 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
             machineId,
             path: request.path,
             workspaceRoot: options?.workspaceRoot ?? null,
+            ...(request.resolveMarkdownLink ? { resolveMarkdownLink: true as const } : {}),
           });
           if (local !== null) return local;
           const plane = await resolveMachineTargetPlane(machineId);
@@ -301,6 +314,8 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
               path: request.path,
             });
           }
+          if (request.resolveMarkdownLink && !(await supportsMarkdownLinks(machineId)))
+            return unsupportedMarkdownLinks();
           const client = await getMachineRpcClient(machineId);
           return await client.requestFilePreview({
             ...params,
@@ -308,6 +323,8 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
             timeoutMs: options?.timeoutMs ?? 30_000,
           });
         }
+        if (request.resolveMarkdownLink && !(await supportsMarkdownLinks(machineId)))
+          return unsupportedMarkdownLinks();
         const client = await getMachineRpcClient(machineId);
         return await client.requestFilePreview({
           ...params,

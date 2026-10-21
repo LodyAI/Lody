@@ -1,4 +1,10 @@
 {
+  "sessions.fileLinks.chooseTitle": "Choose a file",
+  "sessions.fileLinks.chooseDescription": "This link matches files in more than one worktree. Choose the version to open.",
+  "sessions.fileLinks.detached": "Detached HEAD",
+  "sessions.fileLinks.modified": "Modified: {{time}}",
+  "sessions.fileLinks.open": "Open this file",
+  "sessions.fileLinks.resolveFailed": "Could not resolve this file link. Retry, or ask the agent for an absolute path.",
   "e2ee.create.notEnabled": "Encrypted workspace creation is not enabled for this account yet. The server did not reserve this request, so it was removed from this device; you can create a regular workspace instead.",
   "e2ee.mark.list": "Encrypted workspace",
   "e2ee.control.badge": "Developer preview",
