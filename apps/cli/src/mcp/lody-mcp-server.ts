@@ -1373,7 +1373,9 @@ const resolveMcpSessionCreate = (
   } as SessionCreateCommandInput;
   return {
     input: resolvedInput,
-    prompt: composeAgentRolePrompt(role.promptPrefix, input.prompt),
+    // Authored prompt only; the Role instruction is frozen into the canonical
+    // command and applied to the execution prompt, never the visible turn.
+    prompt: input.prompt,
     dispatchConfig: {
       ...role.runConfig,
       ...(input.mcpServerIds !== undefined ? { mcpServerIds: input.mcpServerIds } : {}),
@@ -1399,6 +1401,9 @@ const buildResolvedMcpCreateCanonicalCommand = (
         agentRoleId: resolved.role.id,
         agentRoleRevision: resolved.role.revision,
         agentRoleRunConfig: resolved.role.runConfig,
+        ...(resolved.role.promptPrefix?.trim()
+          ? { agentRolePromptPrefix: resolved.role.promptPrefix.trim() }
+          : {}),
       }
     : buildMcpRunConfigCanonicalCommand(resolved.input)),
   ...(resolved.input.useCurrentSessionAsParent !== undefined

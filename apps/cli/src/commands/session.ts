@@ -144,6 +144,7 @@ import { getSessionCommandEnvironment } from '@/lib/session-command-environment'
 import { listMergedAgentConfigs } from '@/lib/agent-config-machine-flock';
 import {
   applyAgentRoleCreateTarget,
+  composeAgentRolePrompt,
   resolveAgentRoleCreateFromCatalog,
 } from '@/lib/agent-role-create';
 import { getLogger, rootLogger, routeLoggerToStderr } from '@/utils/logger';
@@ -245,6 +246,11 @@ export type CreateOptions = CommonOptions &
     agentRoleId?: string;
     agentRoleRevision?: number;
     agentRoleSnapshot?: import('@lody/shared').AgentRoleSnapshot;
+    /**
+     * Role instruction frozen at acceptance. It is prepended to the execution
+     * prompt only; the visible user turn keeps the authored prompt.
+     */
+    agentRolePromptPrefix?: string;
     /** Durable batch Operations intentionally bypass cooperative session quotas. */
     bypassSessionQuota?: boolean;
     /**
@@ -3804,7 +3810,10 @@ export async function prepareSessionInput(
           }
         : {}),
       ...buildCliHistoryInputConfig({
-        prompt: buildAgentPrompt(prompt, agentConfig.prompt ?? ''),
+        prompt: buildAgentPrompt(
+          composeAgentRolePrompt(options.agentRolePromptPrefix, prompt),
+          agentConfig.prompt ?? ''
+        ),
         inputBlocks,
         cliType: agentConfig.cliType,
         agentType: agentConfig.agentType,

@@ -667,7 +667,7 @@ describe('session MCP input schemas', () => {
     );
 
     expect(role.revision).toBe(7);
-    expect(resolved.prompt).toBe('Act as a careful reviewer.\n\nReview the current diff.');
+    expect(resolved.prompt).toBe('Review the current diff.');
     expect(resolved.input).toMatchObject({
       machineId: 'remote-machine',
       agentConfigId: 'claude-opus',
@@ -689,7 +689,10 @@ describe('session MCP input schemas', () => {
       inheritSessionDefaults: false,
     });
     expect(buildResolvedMcpCreateCanonicalCommand(resolved)).toMatchObject({
-      prompt: 'Act as a careful reviewer.\n\nReview the current diff.',
+      // Recovery replays the canonical command, so the frozen prefix travels
+      // beside the authored prompt instead of inside it.
+      prompt: 'Review the current diff.',
+      agentRolePromptPrefix: 'Act as a careful reviewer.',
       agentRoleId: 'reviewer',
       agentRoleRevision: 7,
       machineId: 'remote-machine',

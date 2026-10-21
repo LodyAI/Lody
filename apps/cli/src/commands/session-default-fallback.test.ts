@@ -1139,8 +1139,11 @@ describe('Role create with failed Machine Flock freshness', () => {
     expect(history).toMatchObject([
       {
         id: userTurnId,
-        items: [{ type: 'text', text: 'Review carefully.\n\nContinue' }],
+        // The visible turn keeps only the authored prompt; the Role
+        // instruction is injected into the execution prompt.
+        items: [{ type: 'text', text: 'Continue' }],
         inputConfig: {
+          prompt: 'Review carefully.\n\nContinue',
           ...role.runConfig,
           agentRoleId: role.id,
           agentRoleRevision: role.revision,

@@ -2700,6 +2700,11 @@ export class MessageHandler {
       if (typeof command.agentRoleRevision === 'number') {
         options.agentRoleRevision = command.agentRoleRevision;
       }
+      // Operations accepted before the split stored a composed `prompt` and no
+      // prefix; replaying them unchanged keeps their execution text.
+      if (typeof command.agentRolePromptPrefix === 'string') {
+        options.agentRolePromptPrefix = command.agentRolePromptPrefix;
+      }
       if (typeof command.useCurrentSessionAsParent === 'boolean') {
         options.useCurrentSessionAsParent = command.useCurrentSessionAsParent;
       }

@@ -186,7 +186,9 @@ export const resolveAgentRoleCreate = (args: {
   role: args.role,
   machineId: args.role.machineId,
   agentConfigId: args.role.agentConfigId,
-  prompt: composeAgentRolePrompt(args.role.promptPrefix, args.prompt),
+  // The Role instruction travels in CreateOptions (see bindAgentRoleCreateOptions)
+  // so the user turn shows only the authored prompt.
+  prompt: args.prompt,
   dispatchConfig: {
     ...args.role.runConfig,
     inheritSessionDefaults: false,
@@ -226,6 +228,9 @@ export const bindAgentRoleCreateOptions = (
   options.agentRoleId = role.id;
   options.agentRoleRevision = role.revision;
   options.agentRoleSnapshot = snapshotAgentRole(role);
+  const promptPrefix = role.promptPrefix?.trim();
+  if (promptPrefix) options.agentRolePromptPrefix = promptPrefix;
+  else delete options.agentRolePromptPrefix;
 };
 
 /**
