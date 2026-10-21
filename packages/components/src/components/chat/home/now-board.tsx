@@ -14,14 +14,14 @@ import {
   GitMerge,
   GitPullRequest,
   Hand,
+  ChevronDown,
+  ChevronUp,
   History,
   PencilLine,
-  Minimize2,
   type LucideIcon,
 } from 'lucide-react';
 import { flushSync } from 'react-dom';
 import { useTranslation } from 'react-i18next';
-import { Button } from '@lody/ui/button';
 import * as stylex from '@stylexjs/stylex';
 import { colors } from '@lody/ui/tokens/colors.stylex';
 import { corner, radius, space, text } from '@lody/ui/tokens/scales.stylex';
@@ -32,6 +32,7 @@ import {
   type HomeNowListKey,
   type HomeNowTotals,
 } from '@/lib/home-now-layout';
+import { ScrollArea } from '@/ui/scroll-area';
 import { FocusMotion, canAnimateFocus } from './focus-motion';
 import {
   Tile,
@@ -43,15 +44,14 @@ import {
 } from './tiles';
 
 const styles = stylex.create({
-  /* The board is two stacked columns (`layoutHomeNow`), or one spanning both. */
+  /* The board is two stacked columns, each list in its fixed one (`layoutHomeNow`). */
   columns: {
     display: 'grid',
     gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
-    alignItems: 'start',
+    alignItems: 'stretch',
     gap: space[1.5],
     width: '100%',
   },
-  single: { gridTemplateColumns: 'minmax(0, 1fr)' },
   column: { display: 'flex', flexDirection: 'column', gap: space[1.5], minWidth: 0 },
   /* The usage and the Codex reset side by side, inside one column. */
   usagePair: {
@@ -74,6 +74,76 @@ const styles = stylex.create({
     textAlign: 'center',
     color: colors.label,
   },
+  /* A list with nothing: its count is quiet, and the tile is its title. */
+  countEmpty: { color: colors.secondaryLabel },
+  headEmpty: { marginBottom: 0 },
+  /*
+   * "Show all 12" under a tile's last row: where the eye finishes reading the list, a whole row
+   * wide, in a row's box so the tile's rhythm holds. It reads as an action, not a session: a
+   * chevron where a row has its mark, and the quiet label colour. (A fading preview of the next
+   * session was tried here and read as a row that would open that session.)
+   */
+  showAll: {
+    boxSizing: 'border-box',
+    display: 'flex',
+    alignItems: 'center',
+    gap: space[2],
+    width: 'calc(100% + 8px)',
+    height: '1.9em',
+    margin: 0,
+    marginInline: '-4px',
+    paddingInline: '4px',
+    borderWidth: 0,
+    borderRadius: radius.small,
+    backgroundColor: { default: 'transparent', ':hover': colors.hoverFill },
+    boxShadow: { default: 'none', ':focus-visible': `inset 0 0 0 2px ${colors.accent}` },
+    outlineStyle: 'none',
+    fontFamily: 'inherit',
+    fontSize: text.footnoteSize,
+    lineHeight: 1,
+    textAlign: 'start',
+    color: { default: colors.secondaryLabel, ':hover': colors.label },
+    cursor: 'pointer',
+  },
+  /*
+   * The way back from a whole list, at its foot: where "Show all" was pressed, the less is. It
+   * floats over the frame's bottom edge rather than taking height, so at the tile's size, at
+   * either end of the motion, the rows and the "Show all" stand-in have the tile's whole height
+   * (it is invisible then). Rows scrolling under it fade out into an opaque strip in the frame's
+   * own colour instead of showing through the control; the rows keep room for the strip at their
+   * end (`focusRowsFoot`).
+   */
+  focusFootBar: {
+    position: 'absolute',
+    insetInline: 0,
+    bottom: 0,
+    paddingTop: space[2],
+    paddingInline: '10px',
+    paddingBottom: '10px',
+    backgroundImage: `linear-gradient(to bottom, transparent, ${
+      colors.secondaryBackground
+    } ${space[2]})`,
+  },
+  focusFoot: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: '4px',
+    width: '100%',
+    height: '1.9em',
+    margin: 0,
+    borderWidth: 0,
+    borderRadius: radius.small,
+    backgroundColor: { default: colors.trayBackground, ':hover': colors.hoverFill },
+    boxShadow: { default: 'none', ':focus-visible': `inset 0 0 0 2px ${colors.accent}` },
+    outlineStyle: 'none',
+    fontFamily: 'inherit',
+    fontSize: text.footnoteSize,
+    lineHeight: 1,
+    color: colors.secondaryLabel,
+    cursor: 'pointer',
+  },
+  focusFootGlyph: { flexShrink: 0, width: '12px', height: '12px' },
   rows: {
     display: 'flex',
     flexDirection: 'column',
@@ -85,49 +155,34 @@ const styles = stylex.create({
     listStyle: 'none',
   },
   /*
-   * The board, and over it an opened list in the board's own box: the tile that was pressed,
-   * grown to the whole board while the rest steps back (`focus-motion.ts`). The list is laid
-   * out so that, at the tile's size, it is that tile: the same head (the way back sits before
-   * the count, so the count keeps the tile's corner), its first rows in the first column at the
-   * tile's width, and a stand-in for its "Show all" under them.
+   * Each column is a stage of its own, and over it an opened list in the column's box: the tile
+   * that was pressed, grown to its whole column while the rest of that column steps back
+   * (`focus-motion.ts`). The other column stays, in reach. The list is laid out so that, at the
+   * tile's size, it is that tile: the same head and its first rows at the column's width. Its way
+   * back sits at its foot. The two column stages stretch to the taller, so either list opens to
+   * the board's height.
    */
-  stage: { position: 'relative', minWidth: 0 },
-  boardAway: { pointerEvents: 'none' },
+  columnStage: { position: 'relative', minWidth: 0 },
+  columnAway: { pointerEvents: 'none' },
   focus: { position: 'absolute', inset: 0, minHeight: 0, justifyContent: 'flex-start' },
   focusTitle: { flex: '1 1 auto' },
-  /* The mini button is taller than the head's line; it overhangs instead of pushing rows down. */
-  focusBack: {
-    display: 'inline-flex',
-    alignSelf: 'center',
-    marginBlock: '-4px',
-    marginInlineEnd: '-4px',
-  },
-  focusScroll: {
-    flex: '1 1 auto',
-    minHeight: 0,
-    overflowY: 'auto',
-    overscrollBehavior: 'contain',
-  },
-  /* Rows down, then across. 18px is two tiles' padding and the board's 6px column gap, less the
-     4px the rows overhang on each side, so the first column is exactly a half-board tile's rows
-     and the second lands where the right-hand tiles' rows were. */
-  focusRows: {
-    display: 'grid',
-    gridAutoFlow: 'column',
-    gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
-    columnGap: '18px',
-    rowGap: '1px',
-  },
-  focusRowsWhole: { gridTemplateColumns: 'minmax(0, 1fr)' },
+  /* The list scrolls inside the frame with the app's own overlay scrollbar (`ScrollArea`). */
+  focusScroll: { flex: '1 1 auto', minHeight: 0 },
   focusRow: { position: 'relative', minWidth: 0 },
-  /* Where the tile's "Show all" was: under its last row, past the body's 4px gap. Seen only at
-     the tile's size, at either end of the motion. */
+  /* The last rows scroll clear of "Show less" floating over the foot. */
+  focusRowsFoot: { paddingBottom: `calc(${text.footnoteSize} * 1.9 + ${space[2]})` },
+  /*
+   * Where the tile's "Show all" is: under its last row, past the rows' 1px gap, in the row's own
+   * width. Seen only at the tile's size, at either end of the motion (`focus-motion.ts` fades
+   * it); at rest it is not there.
+   */
   focusStandIn: {
     position: 'absolute',
-    top: 'calc(100% + 4px)',
+    top: 'calc(100% + 1px)',
     left: 0,
-    marginBlock: 0,
+    width: '100%',
     marginInline: 0,
+    opacity: 0,
     pointerEvents: 'none',
   },
   row: {
@@ -184,31 +239,12 @@ const styles = stylex.create({
     fontVariantNumeric: 'tabular-nums',
     color: colors.secondaryLabel,
   },
-  /* "Show all 12": a quiet text control under the rows, the tile's own way to the rest.
-     The tile that hides rows is itself one press to the same place; the pointer says so,
-     and nothing more changes on hover (the rows' own hover already answers a point). */
-  toggle: {
-    alignSelf: 'flex-start',
-    margin: 0,
-    marginInline: '-4px',
-    paddingBlock: '2px',
-    paddingInline: '4px',
-    borderWidth: 0,
-    borderRadius: radius.small,
-    backgroundColor: { default: 'transparent', ':hover': colors.hoverFill },
-    boxShadow: { default: 'none', ':focus-visible': `inset 0 0 0 2px ${colors.accent}` },
-    outlineStyle: 'none',
-    fontFamily: 'inherit',
-    fontSize: text.captionSize,
-    lineHeight: text.footnoteLeading,
-    color: colors.secondaryLabel,
-    cursor: 'pointer',
-  },
-  body: { display: 'flex', flexDirection: 'column', gap: space[1], minWidth: 0 },
+  body: { display: 'flex', flexDirection: 'column', gap: '1px', minWidth: 0 },
   pressable: { cursor: 'pointer' },
-  quietHead: { display: 'flex', alignItems: 'center', gap: space[2], minWidth: 0 },
   summary: { display: 'inline-flex', alignItems: 'center', gap: space[2], minWidth: 0 },
   summaryPart: { display: 'inline-flex', alignItems: 'center', gap: '3px' },
+  /* Nothing of its kind: the part keeps its place in the line, faded. */
+  summaryZero: { opacity: 0.45 },
 });
 
 const REASON_GLYPH: Record<HomeNowReason, { glyph: LucideIcon | null; tone: stylex.StyleXStyles }> =
@@ -311,10 +347,11 @@ function NowRow({
 
 /**
  * One list: the rows its share of the board allows (`shown`), most pressing first, and the rest
- * one press away. "Show all" opens the whole list over the board (`NowFocus`), never inside its
- * own tile: a tile that grows in place unbalances the columns and runs into the composer.
- * While the tile hides rows it is itself that same press: a row still opens its session, and
- * with everything shown the tile is left inert.
+ * one press away. "Show all" under the last row opens the whole list over its column
+ * (`NowFocus`), never inside its own tile: a tile that grows in place unbalances the columns and
+ * runs into the composer. While the tile hides rows it is itself that same press: a row still
+ * opens its session, and with everything shown the tile is left inert. A list with nothing is
+ * its title and a quiet zero, so it holds its place on the board.
  */
 function NowList({
   listKey,
@@ -335,6 +372,7 @@ function NowList({
   const meta = useRowMeta(nowMs);
   const [titleKey, titleFallback] = LIST_TITLES[listKey];
   const expandable = list.total > shown;
+  const empty = list.total === 0;
   const press = expandable
     ? (event: MouseEvent<HTMLDivElement>) => {
         if ((event.target as Element).closest('[data-session], [data-show-all]')) return;
@@ -347,46 +385,49 @@ function NowList({
       onPress={press}
       pressProps={expandable && styles.pressable}
     >
-      <div {...stylex.props(tileStyles.head)}>
+      <div {...stylex.props(tileStyles.head, empty && styles.headEmpty)}>
         <p {...stylex.props(tileStyles.label)}>{t(titleKey, titleFallback)}</p>
-        <span {...stylex.props(styles.count)}>{list.total}</span>
+        <span {...stylex.props(styles.count, empty && styles.countEmpty)}>{list.total}</span>
       </div>
-      <div {...stylex.props(styles.body)}>
-        <ul {...stylex.props(styles.rows)}>
-          {list.items.slice(0, shown).map((item) => (
-            <li key={item.id}>
-              <NowRow item={item} meta={meta(item)} onOpenSession={onOpenSession} />
-            </li>
-          ))}
-        </ul>
-        {list.total > shown ? (
-          <button
-            type="button"
-            data-testid={`home-now-${listKey}-toggle`}
-            data-show-all={listKey}
-            onClick={onShowAll}
-            {...stylex.props(styles.toggle)}
-          >
-            {t('home.now.showAll', 'Show all {{count}}', { count: list.total })}
-          </button>
-        ) : null}
-      </div>
+      {empty ? null : (
+        <div {...stylex.props(styles.body)}>
+          <ul {...stylex.props(styles.rows)}>
+            {list.items.slice(0, shown).map((item) => (
+              <li key={item.id}>
+                <NowRow item={item} meta={meta(item)} onOpenSession={onOpenSession} />
+              </li>
+            ))}
+          </ul>
+          {expandable ? (
+            <button
+              type="button"
+              data-testid={`home-now-${listKey}-toggle`}
+              data-show-all={listKey}
+              aria-expanded={false}
+              onClick={onShowAll}
+              {...stylex.props(styles.showAll)}
+            >
+              <ChevronDown aria-hidden="true" {...stylex.props(styles.glyph)} />
+              {t('home.now.showAll', 'Show all {{count}}', { count: list.total })}
+            </button>
+          ) : null}
+        </div>
+      )}
     </Tile>
   );
 }
 
 /**
- * A whole list over the board, opened from its tile's "Show all" or the tile's own press: the
- * pressed tile grown to the board's
- * box (`focus-motion.ts`), its rows down the board's two columns (or one, for a tile that spanned
- * the board), scrolling inside. The way back, Escape, or opening a session returns to the board,
- * and focus returns to the "Show all" that opened it.
+ * A whole list over its column, opened from its tile's "Show all" or the tile's own press: the
+ * pressed tile grown to its column's box (`focus-motion.ts`), its rows down the column at the
+ * tile's width, scrolling inside; the other column stays as it was. "Show less" at its foot,
+ * where "Show all" was pressed, Escape, or opening a session returns to the board, and focus
+ * returns to the "Show all" that opened it.
  */
 function NowFocus({
   listKey,
   list,
   shown,
-  whole,
   nowMs,
   frameRef,
   rowsRef,
@@ -395,10 +436,8 @@ function NowFocus({
 }: {
   listKey: HomeNowListKey;
   list: HomeNowList;
-  /** The rows its tile showed; the rest, and the way back, arrive late. */
+  /** The rows its tile showed; the rest arrive late. */
   shown: number;
-  /** The tile spanned the whole board: one column. */
-  whole: boolean;
   nowMs: number;
   frameRef: RefObject<HTMLDivElement | null>;
   rowsRef: RefObject<HTMLDivElement | null>;
@@ -407,14 +446,12 @@ function NowFocus({
 }) {
   const { t } = useTranslation();
   const meta = useRowMeta(nowMs);
-  const backRef = useRef<HTMLElement>(null);
+  const backRef = useRef<HTMLButtonElement>(null);
   const titleId = useId();
   const [titleKey, titleFallback] = LIST_TITLES[listKey];
   useEffect(() => {
     backRef.current?.focus({ preventScroll: true });
   }, []);
-  // The first column holds at least the tile's rows, so they stay where the tile had them.
-  const perColumn = whole ? list.items.length : Math.max(shown, Math.ceil(list.items.length / 2));
   return (
     <div
       ref={frameRef}
@@ -433,26 +470,16 @@ function NowFocus({
         <p id={titleId} {...stylex.props(tileStyles.label, styles.focusTitle)}>
           {t(titleKey, titleFallback)}
         </p>
-        <span data-focus-late="" {...stylex.props(styles.focusBack)}>
-          <Button
-            ref={backRef}
-            variant="ghost"
-            size="mini"
-            icon
-            data-testid="home-now-back"
-            aria-label={t('home.now.back', 'Back to the board')}
-            onClick={onBack}
-          >
-            <Minimize2 aria-hidden="true" />
-          </Button>
-        </span>
         <span {...stylex.props(styles.count)}>{list.total}</span>
       </div>
-      <div ref={rowsRef} {...stylex.props(styles.focusScroll)}>
-        <ul
-          style={{ gridTemplateRows: `repeat(${Math.max(perColumn, 1)}, auto)` }}
-          {...stylex.props(styles.rows, styles.focusRows, whole && styles.focusRowsWhole)}
-        >
+      <ScrollArea
+        {...stylex.props(styles.focusScroll)}
+        viewportRef={rowsRef}
+        viewportClassName="overscroll-contain"
+        // Hidden while the frame moves (`focus-motion.ts` marks it), so no bar slides with it.
+        scrollbarClassName="[[data-focus-moving]_&]:hidden"
+      >
+        <ul {...stylex.props(styles.rows, styles.focusRowsFoot)}>
           {list.items.map((item, index) => (
             <li
               key={item.id}
@@ -464,14 +491,28 @@ function NowFocus({
                 <span
                   aria-hidden="true"
                   data-focus-early=""
-                  {...stylex.props(styles.toggle, styles.focusStandIn)}
+                  {...stylex.props(styles.showAll, styles.focusStandIn)}
                 >
+                  <ChevronDown aria-hidden="true" {...stylex.props(styles.glyph)} />
                   {t('home.now.showAll', 'Show all {{count}}', { count: list.total })}
                 </span>
               ) : null}
             </li>
           ))}
         </ul>
+      </ScrollArea>
+      <div data-focus-late="" {...stylex.props(styles.focusFootBar)}>
+        <button
+          ref={backRef}
+          type="button"
+          data-testid="home-now-back"
+          aria-expanded={true}
+          onClick={onBack}
+          {...stylex.props(styles.focusFoot)}
+        >
+          <ChevronUp aria-hidden="true" {...stylex.props(styles.focusFootGlyph)} />
+          {t('home.now.showLess', 'Show less')}
+        </button>
       </div>
     </div>
   );
@@ -490,12 +531,10 @@ export function homeNowTotals(model: HomeNowModel): HomeNowTotals {
 /**
  * What the person's agents are doing right now: what needs the person, what is running, what
  * just finished, and what is worth picking back up, beside the plan usage, since running out is
- * something to act on too. How much each list shows and which column it stands in is
+ * something to act on too. Every list keeps its fixed place, and how much each shows is
  * `layoutHomeNow`'s call: a row budget spent by priority, within the rows the window has room
- * for, in two columns with level bottoms. Lists with nothing are left out; with nothing at all
- * going on it is one calm tile. A row opens its session; "Show all" — or the tile itself, while
- * it hides rows — opens its whole list over the board in the board's own frame. A pure picture
- * of its props.
+ * for, in two columns with level bottoms. A row opens its session; "Show all" (or the tile
+ * itself, while it hides rows) opens its whole list over its column. A pure picture of its props.
  */
 export function NowBoard({
   model,
@@ -513,17 +552,12 @@ export function NowBoard({
   maxRows?: number;
   onOpenSession?: (sessionId: string) => void;
 }) {
-  const { t } = useTranslation();
   const stageRef = useRef<HTMLDivElement>(null);
   const boardRef = useRef<HTMLDivElement>(null);
   const frameRef = useRef<HTMLDivElement>(null);
   const rowsRef = useRef<HTMLDivElement>(null);
   // The list opened over the board (and how many rows its tile showed), kept while it closes.
-  const [focus, setFocus] = useState<{
-    key: HomeNowListKey;
-    shown: number;
-    whole: boolean;
-  } | null>(null);
+  const [focus, setFocus] = useState<{ key: HomeNowListKey; shown: number } | null>(null);
   const [closing, setClosing] = useState(false);
   const motion = useRef<{ key: HomeNowListKey; motion: FocusMotion; tile: HTMLElement }>(null);
   // The "Show all" to hand focus back to once the list is gone.
@@ -554,7 +588,7 @@ export function NowBoard({
     }
   };
 
-  const open = (key: HomeNowListKey, shown: number, whole: boolean) => {
+  const open = (key: HomeNowListKey, shown: number) => {
     const current = motion.current;
     if (current && current.key === key && current.motion.closingNow) {
       // Turned around on the way back: it opens again from where it is.
@@ -563,16 +597,17 @@ export function NowBoard({
       return;
     }
     if (current) settle(current.key);
-    setFocus({ key, shown, whole });
+    setFocus({ key, shown });
     setClosing(false);
   };
 
   // Once the opened list is in the DOM, grow it out of the pressed tile.
   useLayoutEffect(() => {
     if (!focus || motion.current?.key === focus.key) return;
-    const stage = stageRef.current;
-    const board = boardRef.current;
     const frame = frameRef.current;
+    // The opened list's column: its stage, and the tiles in it that step back.
+    const stage = frame?.parentElement ?? null;
+    const board = boardRef.current;
     const rows = rowsRef.current;
     const tile = stage?.querySelector<HTMLElement>(`[data-testid="home-now-${focus.key}"]`);
     if (!stage || !board || !frame || !rows || !tile || !canAnimateFocus(frame)) return;
@@ -624,18 +659,6 @@ export function NowBoard({
             />
           </div>
         );
-      case 'quiet':
-        return (
-          <Tile key="quiet" testId="home-now-quiet">
-            <div {...stylex.props(styles.quietHead)}>
-              <CircleCheck aria-hidden="true" {...stylex.props(styles.glyph, styles.good)} />
-              <p {...stylex.props(tileStyles.value)}>{t('home.now.quiet', 'All quiet')}</p>
-            </div>
-            <p {...stylex.props(tileStyles.note)}>
-              {t('home.now.quietNote', 'Nothing is running or waiting on you.')}
-            </p>
-          </Tile>
-        );
       case 'list':
         return (
           <NowList
@@ -644,7 +667,7 @@ export function NowBoard({
             list={model[item.key]}
             shown={item.shown}
             nowMs={nowMs}
-            onShowAll={() => open(item.key, item.shown, layout.columns.length === 1)}
+            onShowAll={() => open(item.key, item.shown)}
             onOpenSession={onOpenSession}
           />
         );
@@ -652,55 +675,55 @@ export function NowBoard({
     return null;
   };
   const opened = focus != null && model[focus.key].total > 0 ? focus : null;
+  const away = opened != null && !closing;
   return (
-    <div
-      ref={stageRef}
-      data-testid="home-now"
-      data-focus={opened?.key}
-      {...stylex.props(styles.stage)}
-    >
-      <div
-        ref={boardRef}
-        inert={opened != null && !closing}
-        {...stylex.props(
-          styles.columns,
-          layout.columns.length === 1 && styles.single,
-          opened != null && !closing && styles.boardAway
-        )}
-      >
-        {layout.columns.map((column, index) => (
-          <div
-            key={index}
-            data-now-column={layout.columns.length === 1 ? 'whole' : index === 0 ? 'left' : 'right'}
-            {...stylex.props(styles.column)}
-          >
-            {column.map(block)}
-          </div>
-        ))}
+    <div ref={stageRef} data-testid="home-now" data-focus={opened?.key}>
+      <div {...stylex.props(styles.columns)}>
+        {layout.columns.map((column, index) => {
+          // The column the opened list belongs to: it opens over this column only.
+          const holds =
+            opened != null &&
+            column.some((item) => item.kind === 'list' && item.key === opened.key);
+          return (
+            <div
+              key={index}
+              data-now-column={index === 0 ? 'left' : 'right'}
+              {...stylex.props(styles.columnStage)}
+            >
+              <div
+                ref={holds ? boardRef : undefined}
+                inert={holds && away}
+                {...stylex.props(styles.column, holds && away && styles.columnAway)}
+              >
+                {column.map(block)}
+              </div>
+              {holds && opened ? (
+                <NowFocus
+                  listKey={opened.key}
+                  list={model[opened.key]}
+                  shown={opened.shown}
+                  nowMs={nowMs}
+                  frameRef={frameRef}
+                  rowsRef={rowsRef}
+                  onBack={back}
+                  onOpenSession={(id) => {
+                    settle(opened.key);
+                    onOpenSession?.(id);
+                  }}
+                />
+              ) : null}
+            </div>
+          );
+        })}
       </div>
-      {opened ? (
-        <NowFocus
-          listKey={opened.key}
-          list={model[opened.key]}
-          shown={opened.shown}
-          whole={opened.whole}
-          nowMs={nowMs}
-          frameRef={frameRef}
-          rowsRef={rowsRef}
-          onBack={back}
-          onOpenSession={(id) => {
-            settle(opened.key);
-            onOpenSession?.(id);
-          }}
-        />
-      ) : null}
     </div>
   );
 }
 
 /**
- * What "now" says while its board is folded into the line: how many things need the person, how
- * many agents run, how many finished; or that all is quiet.
+ * What "now" says in the line: how many things need the person, how many agents run, how many
+ * finished. All three always keep their places (a zero fades), so the line never changes shape
+ * while the counts change.
  */
 export function NowSummary({ model }: { model: HomeNowModel }) {
   const { t } = useTranslation();
@@ -723,18 +746,20 @@ export function NowSummary({ model }: { model: HomeNowModel }) {
       mark: <CircleCheck aria-hidden="true" {...stylex.props(styles.glyph, styles.good)} />,
       label: t('home.now.finished', 'Just finished'),
     },
-  ].filter((part) => part.count > 0);
+  ];
   return (
     <span data-testid="home-now-summary" {...stylex.props(styles.summary)}>
-      {parts.length === 0
-        ? t('home.now.quiet', 'All quiet')
-        : parts.map((part) => (
-            <span key={part.key} data-summary={part.key} {...stylex.props(styles.summaryPart)}>
-              {part.mark}
-              <span {...stylex.props(tileStyles.srOnly)}>{part.label}</span>
-              {part.count}
-            </span>
-          ))}
+      {parts.map((part) => (
+        <span
+          key={part.key}
+          data-summary={part.key}
+          {...stylex.props(styles.summaryPart, part.count === 0 && styles.summaryZero)}
+        >
+          {part.mark}
+          <span {...stylex.props(tileStyles.srOnly)}>{part.label}</span>
+          {part.count}
+        </span>
+      ))}
     </span>
   );
 }

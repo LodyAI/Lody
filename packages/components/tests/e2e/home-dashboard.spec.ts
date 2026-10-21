@@ -95,7 +95,7 @@ async function expectReadableLabels(page: Page, time: number) {
 }
 
 for (const width of [1180, 720]) {
-  test(`keeps labels readable and moves the switch with the stage at ${width}px`, async ({
+  test(`keeps labels readable and the switch in place at ${width}px`, async ({
     page,
   }) => {
     await openLanding(page, width);
@@ -103,9 +103,12 @@ for (const width of [1180, 720]) {
       const label = page.locator(`[data-segment=${board}] > [style*="home-${board}-label"]`);
       const before = await label.boundingBox();
       await switchTo(page, `[data-segment=${board}]`);
+      // Switching boards never moves the switch: the board's slot keeps one height, and both
+      // segments keep their summaries, so the next press lands where this one did.
       const after = await label.boundingBox();
-      expect(Math.abs(after!.y - before!.y)).toBeGreaterThan(5);
-      // At the start of the transition the label still occupies its old stage position.
+      expect(Math.abs(after!.y - before!.y)).toBeLessThan(1);
+      expect(Math.abs(after!.x - before!.x)).toBeLessThan(1);
+      // At the start of the transition the label occupies the same place.
       const startY = await page.evaluate((targetBoard) => {
         const style = getComputedStyle(
           document.documentElement,

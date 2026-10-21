@@ -62,17 +62,17 @@ export const NowWithoutUsage: Story = {
   args: { usage: null },
 };
 
-/** Nothing running or waiting: one calm tile beside the usage, never four empty lists. */
+/** Nothing running or waiting: every list at its title in its place, beside the usage. */
 export const AllQuiet: Story = {
   args: { now: homeNowFixture('quiet') },
 };
 
-/** The last seven days, switched to from the line; "now" waits there as its summary. */
+/** The last seven days, switched to from the line; both segments keep their summaries. */
 export const Week: Story = {
   args: { defaultBoard: 'week' },
 };
 
-/** Everything folded into the line: both summaries, centred. */
+/** Everything folded into the line: the same centred line, with no board under it. */
 export const Folded: Story = {
   args: { defaultBoard: null },
 };
@@ -93,30 +93,29 @@ function landingAt(height: string, storyArgs: Story['args'] = { defaultBoard: 'n
   };
 }
 
-/** The real landing stage re-centres vertically as the boards change height. */
+/** The real landing stage: switching boards keeps the line in place; folding re-centres it. */
 export const Landing: Story = landingAt('100vh', {});
 
 /**
  * A short window under load: the lists give way to the rows the stage has room for, lower lists
- * first, and both columns end on one line. "Show all" opens a whole list in the board's frame.
+ * first, and both columns end on one line. "Show all" opens a whole list over its column.
  */
 export const LandingShortWindow: Story = landingAt('620px');
 
 type MotionArgs = typeof FOCUS_TUNING;
 
 /**
- * Tuning "Show all": press it on any list. The pressed tile grows to the board while the rest
- * steps back; the way back lands it in its tile. Springs: response is the period in seconds,
- * damping 1 means no overshoot. `slow` multiplies every time, to watch it frame by frame.
+ * Tuning the whole list: press a tile's "Show all". The pressed tile grows to its column while the
+ * rest of the column steps back; "Show less" at its foot lands it back in its tile. One spring
+ * for both ways: response is the period in seconds, damping 1 means no overshoot. `slow`
+ * multiplies every time, to watch it frame by frame.
  */
 export const ShowAllMotion: StoryObj<MotionArgs> = {
   parameters: { layout: 'fullscreen' },
   args: { ...FOCUS_TUNING },
   argTypes: {
-    openResponse: { control: { type: 'range', min: 0.2, max: 1, step: 0.02 } },
-    openDamping: { control: { type: 'range', min: 0.5, max: 1, step: 0.02 } },
-    closeResponse: { control: { type: 'range', min: 0.2, max: 1, step: 0.02 } },
-    closeDamping: { control: { type: 'range', min: 0.5, max: 1, step: 0.02 } },
+    response: { control: { type: 'range', min: 0.2, max: 1, step: 0.02 } },
+    damping: { control: { type: 'range', min: 0.5, max: 1, step: 0.02 } },
     depth: { control: { type: 'range', min: 0.8, max: 1, step: 0.01 } },
     slow: { control: { type: 'range', min: 1, max: 6, step: 0.5 } },
   },

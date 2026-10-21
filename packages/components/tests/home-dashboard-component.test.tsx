@@ -2,9 +2,14 @@
 
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { HomeDashboard } from '../src/components/chat/home/home-dashboard';
+import {
+  HOME_BOARD_HANG_SHARE,
+  HOME_BOARD_MAX_TILT,
+  HOME_FOLDED_LIFT,
+  HomeDashboard,
+} from '../src/components/chat/home/home-dashboard';
 import { LandingStageContext, type LandingStage } from '../src/components/chat/landing-stage';
 import { initI18n } from '../src/i18n';
 import type { HomeBoard } from '../src/lib/home-board';
@@ -78,6 +83,15 @@ describe('HomeDashboard', () => {
   let opened: string[];
 
   beforeEach(async () => {
+    // The opened list scrolls in a `ScrollArea`; jsdom has no ResizeObserver.
+    vi.stubGlobal(
+      'ResizeObserver',
+      class {
+        observe() {}
+        unobserve() {}
+        disconnect() {}
+      }
+    );
     await initI18n('en');
     container = document.createElement('div');
     document.body.appendChild(container);
@@ -88,6 +102,7 @@ describe('HomeDashboard', () => {
   afterEach(async () => {
     await act(async () => root.unmount());
     container.remove();
+    vi.unstubAllGlobals();
   });
 
   const render = (
@@ -129,12 +144,20 @@ describe('HomeDashboard', () => {
       );
     });
   };
-  /** jsdom lays nothing out: a stage and group that report the given sizes. */
+  /**
+   * jsdom lays nothing out: a stage and group that report the given sizes. Like a real group,
+   * it is shorter by what the dashboard hangs below it (its negative bottom margin).
+   */
   const landingStage = (height: number, groupHeight: number): LandingStage => {
     const stage = document.createElement('div');
     const group = document.createElement('div');
     Object.defineProperty(stage, 'clientHeight', { value: height });
-    Object.defineProperty(group, 'offsetHeight', { value: groupHeight });
+    Object.defineProperty(group, 'offsetHeight', {
+      get: () => {
+        const hang = Number.parseFloat(byTestId('home-dashboard')?.style.marginBottom ?? '');
+        return groupHeight + (Number.isFinite(hang) ? hang : 0);
+      },
+    });
     return { stage, group };
   };
   const q = (selector: string) => container.querySelector<HTMLElement>(selector);
@@ -172,27 +195,36 @@ describe('HomeDashboard', () => {
       expect(opened).toEqual(['wait']);
     });
 
-    it('leaves an empty list out, and opens the whole of a long one over the board', () => {
+    it('keeps an empty list in its place, and opens a long one from where it goes on', () => {
       render({
-        rows: Array.from({ length: 5 }, (_, index) =>
+        rows: Array.from({ length: 6 }, (_, index) =>
           nowRow(`run-${index}`, { working: true, lastAt: NOW_MS - index * MINUTE })
         ),
       });
-      expect(byTestId('home-now-attention')).toBeNull();
-      expect(byTestId('home-now-quiet')).toBeNull();
-      // Alone and without a plan to sit beside, it takes the whole board.
-      const running = q('[data-now-column="whole"] [data-testid="home-now-running"]')!;
+      // Needs you has nothing, and is still its title at the top of the left column.
+      const attention = q('[data-now-column="left"] [data-testid="home-now-attention"]')!;
+      expect(attention.textContent).toBe('Needs you0');
+      expect(attention.querySelectorAll('[data-session]')).toHaveLength(0);
+      const running = q('[data-now-column="right"] [data-testid="home-now-running"]')!;
       expect(running.querySelectorAll('[data-session]')).toHaveLength(4);
+      // "Show all" under the last row: an action, not a session.
       const toggle = byTestId('home-now-running-toggle')!;
-      expect(toggle.textContent).toBe('Show all 5');
+      expect(toggle.textContent).toBe('Show all 6');
+      expect(toggle.hasAttribute('data-session')).toBe(false);
 
-      // The list takes the board's box; the board under it is out of reach until it closes.
+      // The list opens over its own column only; that column's tiles are out of reach until it
+      // closes, and the other column stays as it was. The way back is at its foot.
       click(toggle);
       const all = byTestId('home-now-running-all')!;
-      expect(all.querySelectorAll('[data-session]')).toHaveLength(5);
+      expect(all.querySelectorAll('[data-session]')).toHaveLength(6);
       expect(byTestId('home-now')?.getAttribute('data-focus')).toBe('running');
+      expect(q('[data-now-column="right"]')?.contains(all)).toBe(true);
       expect(running.closest('[inert]')).not.toBeNull();
-      expect(document.activeElement).toBe(byTestId('home-now-back'));
+      expect(attention.closest('[inert]')).toBeNull();
+      const back = byTestId('home-now-back')!;
+      expect(document.activeElement).toBe(back);
+      expect(back.textContent).toBe('Show less');
+      expect(all.lastElementChild?.contains(back)).toBe(true);
 
       // Back returns to the board and to the "Show all" that opened it.
       click(byTestId('home-now-back')!);
@@ -215,7 +247,7 @@ describe('HomeDashboard', () => {
 
     it('opens the whole list from the tile itself, a row still opening its session', () => {
       render({
-        rows: Array.from({ length: 5 }, (_, index) =>
+        rows: Array.from({ length: 6 }, (_, index) =>
           nowRow(`run-${index}`, { working: true, lastAt: NOW_MS - index * MINUTE })
         ),
       });
@@ -250,11 +282,12 @@ describe('HomeDashboard', () => {
       render({ rows, defaultBoard: 'now', stage: { height: 2000, rest: 100 } });
       expect(byTestId('home-now-attention')?.querySelectorAll('[data-session]')).toHaveLength(6);
 
-      // Room for six rows a column (182px of board): needs you keeps three rows with its
-      // "Show all", and running, levelled beside it, shows three as well.
+      // Room for six rows a column (182px of board): needs you keeps one row and its "Show all"
+      // over just finished's title, and running, in the other column, the same.
       render({ rows, defaultBoard: 'now', stage: { height: 340, rest: 100 } });
-      expect(byTestId('home-now-attention')?.querySelectorAll('[data-session]')).toHaveLength(3);
-      expect(byTestId('home-now-running')?.querySelectorAll('[data-session]')).toHaveLength(3);
+      expect(byTestId('home-now-attention')?.querySelectorAll('[data-session]')).toHaveLength(1);
+      expect(byTestId('home-now-running')?.querySelectorAll('[data-session]')).toHaveLength(1);
+      expect(byTestId('home-now-running-toggle')).not.toBeNull();
       expect(byTestId('home-dashboard')?.hasAttribute('data-auto-folded')).toBe(false);
 
       // No room: folded into the line, without forgetting that now was open.
@@ -266,7 +299,7 @@ describe('HomeDashboard', () => {
       });
       expect(byTestId('home-now')).toBeNull();
       expect(byTestId('home-dashboard')?.hasAttribute('data-auto-folded')).toBe(true);
-      expect(byTestId('home-now-summary')?.textContent).toBe('Needs you9Running6');
+      expect(byTestId('home-now-summary')?.textContent).toBe('Needs you9Running6Just finished0');
       expect(boards).toEqual([]);
 
       // Asked for from the line, it shows anyway.
@@ -275,14 +308,59 @@ describe('HomeDashboard', () => {
       expect(boards).toEqual(['now']);
     });
 
-    it('is one calm tile, not four empty ones, when nothing is going on', () => {
+    it('keeps every list in its place, at its title, when nothing is going on', () => {
       render({ usage: usage() });
-      expect(byTestId('home-now-quiet')?.textContent).toBe(
-        'All quietNothing is running or waiting on you.'
-      );
-      expect(q('[data-now-column="left"] [data-testid="home-now-quiet"]')).not.toBeNull();
-      expect(q('[data-now-column="right"] [data-testid="home-week-usage"]')).not.toBeNull();
+      const left = q('[data-now-column="left"]')!;
+      const right = q('[data-now-column="right"]')!;
+      expect(left.textContent).toBe('Needs you0Just finished0');
+      const firstTile = right.firstElementChild?.firstElementChild;
+      expect(firstTile?.contains(byTestId('home-week-usage'))).toBe(true);
+      expect(right.textContent).toContain('Running0Worth continuing0');
       expect(container.querySelectorAll('[data-testid="home-now"] [data-session]')).toHaveLength(0);
+      expect(byTestId('home-now-attention-toggle')).toBeNull();
+    });
+
+    it('keeps one height for either board, hung a little low but in balance; folded, high', () => {
+      const section = () => byTestId('home-dashboard')!;
+      const slotPx = () => Number.parseFloat(byTestId('home-dashboard-slot')!.style.minHeight);
+      const hang = () => -Number.parseFloat(section().style.marginBottom || '0');
+      // The stage centres the group's box (the rest, the line, the board's gap and slot, less
+      // what hangs); the space under the board is the space above the heading less the hang.
+      const gaps = (stage: number) => {
+        const box = 100 + 28 + slotPx() + 6 - hang();
+        const above = (stage - box) / 2;
+        return { above, below: above - hang() };
+      };
+
+      // A tall stage: part of the board hangs, lifting the heading less than centring would,
+      // with the space above the heading at most `HOME_BOARD_MAX_TILT` times the space under it.
+      render({ defaultBoard: 'now', stage: { height: 2000, rest: 100 } });
+      const height = slotPx();
+      const tall = hang();
+      expect(tall).toBeGreaterThan(0);
+      expect(tall).toBeLessThanOrEqual((height + 6) * HOME_BOARD_HANG_SHARE);
+      expect(gaps(2000).above).toBeLessThanOrEqual(HOME_BOARD_MAX_TILT * gaps(2000).below + 1);
+      // Switching keeps both.
+      click(q('[data-segment="week"]')!);
+      expect(byTestId('home-week')).not.toBeNull();
+      expect(slotPx()).toBe(height);
+      expect(hang()).toBe(tall);
+      // Folded, no slot is held, and a little space is kept under the line instead, so the stage
+      // centres the heading and the line a little above its middle.
+      click(q('[data-segment="week"]')!);
+      expect(byTestId('home-dashboard-slot')).toBeNull();
+      const kept = -hang();
+      expect(kept).toBe(Math.floor(2 * HOME_FOLDED_LIFT * (2000 - 100 - 28)));
+      // Opening never moves the heading down: what the open board does not hang is at least
+      // what the folded page keeps under its line.
+      expect(height + 6 - tall).toBeGreaterThanOrEqual(kept);
+
+      // A middling stage: the balance limit holds the board up off the composer.
+      render({ defaultBoard: 'now', stage: { height: 700, rest: 100 } });
+      expect(hang()).toBeGreaterThan(0);
+      expect(hang()).toBeLessThan((slotPx() + 6) * HOME_BOARD_HANG_SHARE);
+      expect(gaps(700).above).toBeLessThanOrEqual(HOME_BOARD_MAX_TILT * gaps(700).below + 1);
+      expect(gaps(700).below).toBeGreaterThan(12);
     });
   });
 
@@ -356,7 +434,8 @@ describe('HomeDashboard', () => {
       expect(byTestId('home-now')).not.toBeNull();
       expect(byTestId('home-week')).toBeNull();
       expect(segment('now').getAttribute('aria-expanded')).toBe('true');
-      expect(byTestId('home-now-summary')).toBeNull();
+      // Both segments keep their summaries open or folded, so neither changes width.
+      expect(segment('now').contains(byTestId('home-now-summary'))).toBe(true);
       expect(segment('week').contains(byTestId('home-week-summary'))).toBe(true);
     });
 
@@ -365,18 +444,19 @@ describe('HomeDashboard', () => {
       click(segment('week'));
       expect(byTestId('home-now')).toBeNull();
       expect(byTestId('home-week')).not.toBeNull();
-      // Now lives on as its summary: one thing needs you, one agent runs.
-      expect(byTestId('home-now-summary')?.textContent).toBe('Needs you1Running1');
+      // Now's summary: one thing needs you, one agent runs, nothing just finished.
+      expect(byTestId('home-now-summary')?.textContent).toBe('Needs you1Running1Just finished0');
 
       click(segment('week'));
       expect(byTestId('home-week')).toBeNull();
-      expect(byTestId('home-dashboard-line')?.hasAttribute('data-alone')).toBe(true);
+      expect(segment('week').getAttribute('aria-expanded')).toBe('false');
+      expect(segment('week').contains(byTestId('home-week-summary'))).toBe(true);
       expect(fold().getAttribute('aria-label')).toBe('Unfold');
 
       // The control at the end brings back the board that was open last.
       click(fold());
       expect(byTestId('home-week')).not.toBeNull();
-      expect(byTestId('home-dashboard-line')?.hasAttribute('data-alone')).toBe(false);
+      expect(fold().getAttribute('aria-label')).toBe('Fold into one line');
     });
 
     it('folds on Escape from wherever the focus sits', () => {
@@ -430,9 +510,9 @@ describe('HomeDashboard', () => {
       field.remove();
     });
 
-    it('says all is quiet when nothing is going on', () => {
+    it('keeps every count in its place when nothing is going on', () => {
       render({ defaultBoard: null });
-      expect(byTestId('home-now-summary')?.textContent).toBe('All quiet');
+      expect(byTestId('home-now-summary')?.textContent).toBe('Needs you0Running0Just finished0');
     });
 
     it('shows the board it is given when controlled', () => {
