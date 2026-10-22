@@ -21,6 +21,12 @@ nested Git worktrees: a unique match opens directly, several show a picker, and 
 chosen canonical path becomes the viewer identity. Old daemons and failed Git
 discovery fall back to the session root. Tree/Diff and explicit paths skip this.
 
+Rendered Markdown file previews enable Session links only when their caller supplies
+the navigation switch. SessionDetail derives it from the same callback used by chat.
+SessionFileContentView wraps both file-provider paths in SessionLinkProvider, which
+dispatches exact destinations through the existing deep-link mechanism. Standalone
+viewers default to inert links. [Decision and limits](../notes/implemented/bug-fix/2026-10-22-markdown-preview-session-links.md).
+
 - Diff page: `session-conversation-diff-panel.tsx`, data from
   `use-session-conversation-diff-data.ts`. Each file title copies the
   workspace-relative path and, when wired, opens a file-preview viewer tab
