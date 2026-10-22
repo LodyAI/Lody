@@ -11,6 +11,8 @@ import {
 
 const fixture = vi.hoisted(() => ({
   creationEnabled: false,
+  referralLead: false,
+  referralListeners: new Set<() => void>(),
   createOrganization: undefined as unknown as (name: string, slug: string) => Promise<unknown>,
   create: undefined as unknown as PlatformE2eeWorkspaces['create'],
 }));
@@ -22,9 +24,10 @@ vi.mock('@tanstack/react-router', () => ({
 }));
 // Stable references: the page's effects depend on them.
 const stable = vi.hoisted(() => ({
-  translation: { t: (key: string) => key },
+  translation: { t: (key: string) => key, i18n: { language: 'en' } },
   session: { status: 'authenticated', user: { id: 'account' } },
   availability: { canCreateFree: true },
+  pricing: { monthlyAmountCents: 1000, yearlyAmountCents: 9600, yearlyOfferKey: null },
 }));
 vi.mock('react-i18next', async (importOriginal) => ({
   ...(await importOriginal<typeof import('react-i18next')>()),
@@ -54,12 +57,35 @@ const platform = vi.hoisted(() => ({
 const unusedAction = vi.hoisted(() => async () => {
   throw new Error('unused');
 });
-vi.mock('@lody/platform/react', () => ({
-  usePlatformSession: () => stable.session,
-  usePlatform: () => platform,
-  useCloudQuery: () => stable.availability,
-  useCloudAction: () => unusedAction,
-}));
+vi.mock('@lody/platform/react', async () => {
+  const { useSyncExternalStore } = await import('react');
+  return {
+    usePlatformSession: () => stable.session,
+    usePlatform: () => platform,
+    useCloudQuery: (operation: { name: string }, args: unknown) => {
+      const hasLead = useSyncExternalStore(
+        (listener) => {
+          fixture.referralListeners.add(listener);
+          return () => {
+            fixture.referralListeners.delete(listener);
+          };
+        },
+        () => fixture.referralLead
+      );
+      if (operation.name === 'referrals:getCheckoutOffer') {
+        return args === 'skip' ? undefined : { discount: hasLead, sendCode: false, bound: false };
+      }
+      return operation.name === 'billing:getMyNewWorkspacePricing'
+        ? stable.pricing
+        : stable.availability;
+    },
+    useCloudMutation: () => async () => {
+      fixture.referralLead = false;
+      for (const listener of fixture.referralListeners) listener();
+    },
+    useCloudAction: () => unusedAction,
+  };
+});
 vi.mock('@/hooks/useStableSession', () => ({
   useStableSession: () => ({
     data: { user: { id: 'account' } },
@@ -101,6 +127,9 @@ vi.mock('@/lib/native-browser', () => ({ openExternalUrl: async () => false }));
 
 import { Route } from '../src/routes/workspace/create';
 
+(globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT =
+  true;
+
 const pending = { accountId: 'account', requestId: 'request-1', name: 'Saved', slug: 'saved' };
 let root: Root | undefined;
 let container: HTMLDivElement | undefined;
@@ -108,6 +137,8 @@ let container: HTMLDivElement | undefined;
 beforeEach(() => {
   localStorage.clear();
   fixture.creationEnabled = false;
+  fixture.referralLead = false;
+  stable.availability.canCreateFree = true;
   fixture.createOrganization = vi.fn(async (name: string, slug: string) => ({
     id: 'w',
     name,
@@ -207,4 +238,17 @@ describe('create workspace route with a saved encrypted request', () => {
       }
     }
   );
+});
+
+describe('create workspace with an account referral from another device', () => {
+  it('previews and dismisses the saved offer without a browser referral code', async () => {
+    stable.availability.canCreateFree = false;
+    fixture.referralLead = true;
+    await render();
+    expect(localStorage.getItem('lody:referral')).toBeNull();
+    expect(container!.textContent).toContain('referral.offerTitle');
+    await click('referral.remove');
+    expect(fixture.referralLead).toBe(false);
+    expect(container!.textContent).not.toContain('referral.offerTitle');
+  });
 });

@@ -92,7 +92,7 @@ export interface SharingReviewReconcileResult extends SharingReviewState {
 function capabilityForOperation(name: string): PlatformCapability {
   if (name.startsWith('e2eeWorkspaces:')) return 'multiWorkspace';
   if (name.startsWith('promptShortcuts:')) return 'cloudAccount';
-  if (name.startsWith('billing:')) return 'billing';
+  if (name.startsWith('billing:') || name.startsWith('referrals:')) return 'billing';
   if (name.startsWith('usage:')) return 'usageAnalytics';
   if (name.startsWith('github:') || name.startsWith('githubPersonalAuthorization:'))
     return 'githubIntegration';
@@ -239,6 +239,16 @@ export const cloudOperations = {
       'teamSharing',
       'inbox:suppressSharingReview'
     ),
+  },
+  referrals: {
+    createLink: mutation<ConvexApi['referrals']['createLink']>('referrals:createLink'),
+    getOverview: query<ConvexApi['referrals']['getOverview']>('referrals:getOverview'),
+    listLedger: query<ConvexApi['referrals']['listLedger']>('referrals:listLedger'),
+    getCheckoutOffer: query<ConvexApi['referrals']['getCheckoutOffer']>(
+      'referrals:getCheckoutOffer'
+    ),
+    attachLead: mutation<ConvexApi['referrals']['attachLead']>('referrals:attachLead'),
+    dismissLead: mutation<ConvexApi['referrals']['dismissLead']>('referrals:dismissLead'),
   },
   billing: {
     listDeletedWorkspaceBillingAccounts: query<

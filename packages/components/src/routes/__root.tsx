@@ -61,6 +61,7 @@ import { resolveDesktopCheckoutReturnDeepLinkPath } from '@/lib/desktop-checkout
 import { resolveDesktopGitHubInstallDeepLinkPath } from '@/lib/desktop-github-install-deep-link';
 import { LodyPostHogProvider } from '../providers/posthog-provider';
 import { AppLaunchAnalyticsTracker } from '@/components/app-launch-analytics-tracker';
+import { ReferralLeadAttacher } from '@/components/referral-lead-attacher';
 import { ShortcutAnalyticsTracker } from '@/components/commands/shortcut-analytics-tracker';
 import { ERROR_BOUNDARY_PROBE_EVENT, consumeErrorBoundaryProbe } from '@/lib/error-boundary-probe';
 import { capturePostHogEvent } from '@/lib/posthog-analytics';
@@ -223,6 +224,13 @@ function RootApp() {
       {telemetryEnabled && <AppLaunchAnalyticsTracker isElectron={isElectron} />}
       {telemetryEnabled && <ShortcutAnalyticsTracker />}
       <SessionDeepLinkRouter />
+      <ReferralLeadAttacher
+        userId={
+          hasRawUser && !isPending && !isRetrying && !error && !isOptimistic
+            ? (currentUser?.id ?? null)
+            : null
+        }
+      />
       {isElectron && <DesktopDeepLinkRouter />}
       <ThemeProvider>
         <InterfaceFontController enabled={isElectron} />

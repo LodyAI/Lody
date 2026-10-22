@@ -122,6 +122,7 @@ function knownWorkspaceDatabaseNames(): string[] {
  * them; an ordinary cache repair must not force every share link to be reset.
  */
 const LOCAL_STORAGE_CACHE_KEYS = [
+  'lody:referral',
   // slug → workspaceId/name map (`local-storage-cache.ts`). Read by
   // `knownWorkspaceDatabaseNames()` to enumerate per-workspace databases, so
   // the localStorage pass below must run AFTER that enumeration.

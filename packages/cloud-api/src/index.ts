@@ -305,6 +305,7 @@ type BillingOverview = {
   seatCount: number;
   subscriptionQuantity: number | null;
   canManageBilling: boolean;
+  referralRewardsSupported?: boolean;
   pricing: Pricing;
 };
 
@@ -523,17 +524,36 @@ export type CloudApi = {
       } | null
     >;
   };
+  referrals: {
+    createLink: Mutation<{ workspaceId: string }, { code: string; url: string }>;
+    getOverview: Query<{ workspaceId: string }, ReferralOverview | null>;
+    listLedger: Query<
+      { workspaceId: string; paginationOpts: { numItems: number; cursor: string | null } },
+      { page: ReferralLedgerEntry[]; isDone: boolean; continueCursor: string }
+    >;
+    /** Without `workspaceId`, previews a workspace the caller is about to create. */
+    getCheckoutOffer: Query<{ workspaceId?: string; code?: string }, ReferralCheckoutOffer>;
+    /** Remember the referral link the signed-in person followed, across devices. */
+    attachLead: Mutation<{ code: string }, { status: 'attached' | 'kept' | 'self' | 'invalid' }>;
+    /** The person declined the referral discount. */
+    dismissLead: Mutation<Record<string, never>, null>;
+  };
   billing: {
     createBillingPortalSession: Action<
       { workspaceId: string; returnUrl?: string; returnTarget?: 'web' | 'desktop' },
       { url: string }
     >;
     createCheckoutSession: Action<
-      CheckoutUrls & { workspaceId: string; interval: BillingInterval },
+      CheckoutUrls & { workspaceId: string; interval: BillingInterval; referralCode?: string },
       { url: string; checkoutKind?: 'subscription' | 'gift_setup' }
     >;
     createPaidWorkspaceCheckout: Action<
-      CheckoutUrls & { name: string; slug: string; interval: BillingInterval },
+      CheckoutUrls & {
+        name: string;
+        slug: string;
+        interval: BillingInterval;
+        referralCode?: string;
+      },
       { workspaceId: string; workspaceSlug: string; url: string | null; existing: boolean }
     >;
     getBillingOverview: Query<{ workspaceId: string }, BillingOverview | null>;
@@ -1031,3 +1051,31 @@ export type CloudApi = {
  * generated client would construct; `CloudApi` owns the public protocol types.
  */
 export const api = anyApi as unknown as CloudApi;
+
+export interface ReferralOverview {
+  eligible: boolean;
+  code: string | null;
+  url: string | null;
+  issued: number;
+  spent: number;
+  available: number;
+  frozen: number;
+  adjustment: number;
+  newcomerDiscount: boolean;
+}
+/**
+ * Whether a first checkout now would get the newcomer discount. `sendCode`: pass the
+ * stored referral code to checkout. `bound`: the workspace already holds a referral.
+ */
+export interface ReferralCheckoutOffer {
+  discount: boolean;
+  sendCode: boolean;
+  bound: boolean;
+}
+export interface ReferralLedgerEntry {
+  id: string;
+  kind: 'reward' | 'adjustment' | 'freeze' | 'use' | 'release';
+  amount: number;
+  frozen: number;
+  createdAt: number;
+}

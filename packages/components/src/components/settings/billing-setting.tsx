@@ -1,3 +1,5 @@
+import { readReferral, clearReferral, REFERRAL_ERROR_KEYS } from '@/lib/referral-attribution';
+import { ReferralSettings } from './referral-settings';
 import type { BillingInvoiceDetail } from '@lody/cloud-api';
 import { BillingInvoiceDetails } from './billing-invoice-details';
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -14,7 +16,7 @@ import { toast } from '@/lib/toast';
 import { currentWorkspaceIdAtom, currentWorkspaceSlugAtom } from '@/atoms';
 import { sessionMetaCountAtom } from '@/atoms/doc-meta';
 import { useAuthenticatedConvex } from '@/hooks/use-authenticated-convex';
-import { useCloudQuery } from '@lody/platform/react';
+import { useCloudMutation, useCloudQuery } from '@lody/platform/react';
 import { isElectronRenderer } from '@/lib/electron';
 import { useAppCapability } from '@/lib/app-platform';
 import { openExternalUrl } from '@/lib/native-browser';
@@ -72,6 +74,7 @@ function getBillingErrorCode(error: unknown): string | null {
 }
 
 const BILLING_ERROR_TOAST_KEYS: Record<string, string> = {
+  ...REFERRAL_ERROR_KEYS,
   workspace_already_paid: 'billing.alreadyPaidError',
   checkout_processing: 'billing.checkoutProcessingError',
   checkout_already_completed: 'billing.checkoutProcessingError',
@@ -123,6 +126,7 @@ function CloudBillingSettings() {
     [authSessionId, workspaceId]
   );
   const cachedOverview = workspaceId ? (persistedOverview ?? OPTIMISTIC_BILLING_OVERVIEW) : null;
+  const [referralCode, setReferralCode] = useState(() => readReferral());
   const [resolvedOverview, setResolvedOverview] = useState<{
     scope: string;
     value: BillingOverviewData | null;
@@ -463,6 +467,29 @@ function CloudBillingSettings() {
     }
   };
 
+  // Ask the server before promising the newcomer discount: a stored link is only a hint.
+  const referralOffer = useCloudQuery(
+    cloudOperations.referrals.getCheckoutOffer,
+    workspaceId &&
+      overview?.referralRewardsSupported &&
+      overview.canManageBilling &&
+      overview.effectivePlanTier === 'free'
+      ? { workspaceId, ...(referralCode ? { code: referralCode } : {}) }
+      : 'skip'
+  );
+
+  // Credit pays toward the first subscription; members never see the Checkout.
+  const dismissLead = useCloudMutation(cloudOperations.referrals.dismissLead);
+  const referralWallet = useCloudQuery(
+    cloudOperations.referrals.getOverview,
+    workspaceId &&
+      overview?.referralRewardsSupported &&
+      overview.canManageBilling &&
+      overview.effectivePlanTier === 'free'
+      ? { workspaceId }
+      : 'skip'
+  );
+
   const handleUpgrade = async () => {
     if (!workspaceId) return;
     setPendingAction('checkout');
@@ -471,6 +498,7 @@ function CloudBillingSettings() {
       const result = await createCheckoutSession({
         workspaceId,
         interval,
+        ...(referralCode && referralOffer?.sendCode ? { referralCode } : {}),
         ...(isDesktop
           ? { returnTarget: 'desktop' as const }
           : returnUrl
@@ -707,6 +735,31 @@ function CloudBillingSettings() {
           if (overviewScope) setSelectedInvoice({ scope: overviewScope, invoice });
         }}
         onCancelExternalCheckout={() => setExternalCheckoutPending(false)}
+        referralOffer={
+          referralOffer?.discount
+            ? {
+                // A workspace already bound to a referral keeps it; only a stored link can be dropped.
+                onRemove: referralOffer.bound
+                  ? undefined
+                  : () => {
+                      clearReferral();
+                      // Also decline the link remembered on the account.
+                      void dismissLead({}).catch(() => {});
+                      setReferralCode(undefined);
+                    },
+              }
+            : null
+        }
+        referralCreditCents={referralWallet?.available ?? 0}
+        referral={
+          workspaceId && overview?.referralRewardsSupported ? (
+            <ReferralSettings
+              key={overviewScope ?? workspaceId}
+              workspaceId={workspaceId}
+              canManage={overview.canManageBilling}
+            />
+          ) : null
+        }
       />
       {selectedInvoice &&
       selectedInvoice.scope === overviewScope &&
