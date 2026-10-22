@@ -20,7 +20,7 @@ const FALLBACK_DIFF_THEME_NAME = 'pierre-dark';
 
 /**
  * Resolves and applies a bundled VSCode theme (Vesper by default) to the
- * document root, and registers a matching Shiki theme for @pierre/diffs.
+ * document root, and registers matching TextMate and Zed themes for @pierre/diffs.
  *
  * This mirrors the `@lody/components` VSCode theme adaptation so the review
  * helper looks consistent with the rest of Lody when running standalone.

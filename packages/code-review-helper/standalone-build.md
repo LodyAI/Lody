@@ -32,7 +32,15 @@ production. Neither resolves Vite's `?raw` here, and published `lody` ships only
 cleanly in both; the CLI lazy-imports `@lody/code-review-helper/prompt-text` inside the
 command action.
 
-## Shiki size control (the crux)
+## Highlighting
+
+The viewer selects Highlights when `canUseWASM()` succeeds, otherwise `shiki-js`.
+The shared VS Code adapter registers both Zed and TextMate theme formats. WASM is
+embedded in the Highlights JavaScript module, so the single-file viewer needs no
+network fetch for its lexer. Token boundaries may differ from Shiki. Unsupported
+lexer compatibility is tracked in the [migration note](../../.agents/notes/proposed/architecture/2026-10-22-highlights-backend.md).
+
+## Shiki fallback size control
 
 `@pierre/diffs` loads grammars via `bundledLanguages[lang]()`, and shiki's real
 `bundledLanguages` maps ALL 383 grammars (each a `() => import()`), which singlefile
@@ -41,8 +49,7 @@ redirects shiki's `dist/langs.mjs` → `src/standalone/curated-shiki-langs.ts` (
 curated ~40-lang map, identical `() => import('@shikijs/langs/<id>')` loaders, plus a
 Proxy that returns an empty plaintext grammar for non-curated langs so nothing throws)
 and `dist/themes.mjs` → `src/standalone/curated-shiki-themes.ts` (empty: the viewer
-registers its own Vesper-derived theme, never a bundled-by-name theme). Result ≈ 8.5 MB
-single file. To highlight more languages, add canonical ids (+ their real aliases) to
+registers its own Vesper-derived theme, never a bundled-by-name theme). The Highlights migration build is about 11.3 MB uncompressed. To highlight more languages, add canonical ids (+ their real aliases) to
 `curated-shiki-langs.ts`; behavior for a curated id is identical to the full build.
 
 `injectReviewSnapshot` (`src/standalone/inject.ts`) splices the snapshot into the

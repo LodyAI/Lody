@@ -20,7 +20,7 @@ describe('diff-parse.worker', () => {
     vi.resetModules();
   });
 
-  it('strips full old/new parsed text before posting results to the main thread', async () => {
+  it('posts partial indexed diff text with the original changed lines', async () => {
     const worker: WorkerHarness = {
       onmessage: null,
       postMessage: vi.fn(),
@@ -46,8 +46,11 @@ describe('diff-parse.worker', () => {
     expect(response).toMatchObject({ id: 1 });
     const result = readResult(response);
     expect(result.hunks.length).toBeGreaterThan(0);
-    expect(result).not.toHaveProperty('oldLines');
-    expect(result).not.toHaveProperty('newLines');
+    expect(result).toMatchObject({
+      isPartial: true,
+      deletionLines: ['const value = 1;\n'],
+      additionLines: ['const value = 2;\n'],
+    });
   });
 });
 

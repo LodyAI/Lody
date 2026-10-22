@@ -66,16 +66,9 @@ export function boundParsedFileDiffForMainThread(
   }
   return {
     status: 'ready',
-    fileDiff: stripParsedFileDiffFullText(fileDiff),
+    fileDiff: compactParsedFileDiff(fileDiff),
     complexity,
   };
-}
-
-export function stripParsedFileDiffFullText(fileDiff: FileDiffMetadata): FileDiffMetadata {
-  const stripped: FileDiffMetadata = { ...fileDiff };
-  delete stripped.oldLines;
-  delete stripped.newLines;
-  return stripped;
 }
 
 export function measureParsedFileDiffComplexity(
@@ -89,12 +82,13 @@ export function measureParsedFileDiffComplexity(
     changedLines += Math.max(hunk.additionLines, hunk.deletionLines);
     for (const content of hunk.hunkContent) {
       if (content.type === 'context') {
-        hunkLines += content.lines.length;
-        hunkTextLength += countLinesTextLength(content.lines);
+        hunkLines += content.lines;
+        hunkTextLength += countLinesTextLength(fileDiff.additionLines, content.additionLineIndex, content.lines);
       } else {
-        hunkLines += content.additions.length + content.deletions.length;
+        hunkLines += content.additions + content.deletions;
         hunkTextLength +=
-          countLinesTextLength(content.additions) + countLinesTextLength(content.deletions);
+          countLinesTextLength(fileDiff.additionLines, content.additionLineIndex, content.additions) +
+          countLinesTextLength(fileDiff.deletionLines, content.deletionLineIndex, content.deletions);
       }
     }
   }
@@ -107,10 +101,74 @@ export function measureParsedFileDiffComplexity(
   };
 }
 
-function countLinesTextLength(lines: readonly string[]): number {
+function countLinesTextLength(lines: readonly string[], start: number, count: number): number {
   let length = 0;
-  for (const line of lines) {
-    length += line.length;
+  for (let index = start; index < start + count; index++) {
+    length += lines[index]!.length;
   }
   return length;
+}
+
+/** Keep worker transfers bounded to hunks, including their context lines. */
+export function compactParsedFileDiff(fileDiff: FileDiffMetadata): FileDiffMetadata {
+  if (fileDiff.isPartial) return fileDiff;
+  const deletionLines: string[] = [];
+  const additionLines: string[] = [];
+  const hunks = fileDiff.hunks.map((hunk) => {
+    const deletionLineIndex = deletionLines.length;
+    const additionLineIndex = additionLines.length;
+    for (let i = 0; i < hunk.deletionCount; i++) {
+      deletionLines.push(fileDiff.deletionLines[hunk.deletionLineIndex + i]!);
+    }
+    for (let i = 0; i < hunk.additionCount; i++) {
+      additionLines.push(fileDiff.additionLines[hunk.additionLineIndex + i]!);
+    }
+    return rebaseHunk(hunk, deletionLineIndex, additionLineIndex);
+  });
+  return {
+    ...fileDiff,
+    isPartial: true,
+    hunks,
+    deletionLines,
+    additionLines,
+    deletionCharacterCount: countLinesTextLength(deletionLines, 0, deletionLines.length),
+    additionCharacterCount: countLinesTextLength(additionLines, 0, additionLines.length),
+  };
+}
+
+/** Restore expansion only for a caller that already owns the complete text. */
+export function restoreParsedFileDiffContext(
+  fileDiff: FileDiffMetadata,
+  deletionLines: string[],
+  additionLines: string[]
+): FileDiffMetadata {
+  if (!fileDiff.isPartial) return fileDiff;
+  return {
+    ...fileDiff,
+    isPartial: false,
+    hunks: fileDiff.hunks.map((hunk) =>
+      rebaseHunk(hunk, Math.max(0, hunk.deletionStart - 1), Math.max(0, hunk.additionStart - 1))
+    ),
+    deletionLines,
+    additionLines,
+    deletionCharacterCount: countLinesTextLength(deletionLines, 0, deletionLines.length),
+    additionCharacterCount: countLinesTextLength(additionLines, 0, additionLines.length),
+  };
+}
+
+function rebaseHunk(
+  hunk: FileDiffMetadata['hunks'][number],
+  deletionLineIndex: number,
+  additionLineIndex: number
+): FileDiffMetadata['hunks'][number] {
+  return {
+    ...hunk,
+    deletionLineIndex,
+    additionLineIndex,
+    hunkContent: hunk.hunkContent.map((content) => ({
+      ...content,
+      deletionLineIndex: content.deletionLineIndex - hunk.deletionLineIndex + deletionLineIndex,
+      additionLineIndex: content.additionLineIndex - hunk.additionLineIndex + additionLineIndex,
+    })),
+  };
 }

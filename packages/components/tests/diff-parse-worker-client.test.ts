@@ -23,7 +23,11 @@ const diffParseWorkerMock = vi.hoisted(() => {
           this.onmessage?.({
             data: {
               id: message.id,
-              result: { hunks: [], oldLines: ['full old text'], newLines: ['full new text'] },
+              result: {
+                hunks: [],
+                deletionLines: ['full old text'],
+                additionLines: ['full new text'],
+              },
               durationMs: 1,
             },
           } as MessageEvent<unknown>);
@@ -93,9 +97,11 @@ describe('parseDiffInWorker', () => {
 
     const result = await resultPromise;
 
-    expect(result).toEqual({ hunks: [] });
-    expect(result).not.toHaveProperty('oldLines');
-    expect(result).not.toHaveProperty('newLines');
+    expect(result).toEqual({
+      hunks: [],
+      deletionLines: ['full old text'],
+      additionLines: ['full new text'],
+    });
     expect(worker!.messages).toHaveLength(expectedMessageCount);
     expect(worker!.messages[0]).toMatchObject({
       type: 'start',
@@ -156,9 +162,11 @@ describe('parseDiffInWorker', () => {
     expect(worker).toBeDefined();
     const result = await resultPromise;
 
-    expect(result).toEqual({ hunks: [] });
-    expect(result).not.toHaveProperty('oldLines');
-    expect(result).not.toHaveProperty('newLines');
+    expect(result).toEqual({
+      hunks: [],
+      deletionLines: ['full old text'],
+      additionLines: ['full new text'],
+    });
     expect(worker!.messages[0]).toMatchObject({
       type: 'start',
       path: 'src/chunk-source.ts',

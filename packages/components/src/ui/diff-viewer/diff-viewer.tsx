@@ -1,5 +1,8 @@
 'use client';
 
+import { canUseWASM, SPLIT_WITH_NEWLINES } from '@pierre/diffs';
+import { restoreParsedFileDiffContext } from '@/lib/code-collab-diff-metadata-bounds';
+
 import type { CSSProperties, ReactNode } from 'react';
 import { useMemo, useState, useEffect, useRef, useCallback, useLayoutEffect, memo } from 'react';
 import {
@@ -9,7 +12,7 @@ import {
   type WorkerInitializationRenderOptions,
 } from '@pierre/diffs/react';
 import type { DiffLineAnnotation, FileDiffMetadata, SupportedLanguages } from '@pierre/diffs';
-import { parseDiffFromFile, SPLIT_WITH_NEWLINES } from '@pierre/diffs';
+import { parseDiffFromFile } from '@pierre/diffs';
 import { useTranslation } from 'react-i18next';
 import * as stylex from '@stylexjs/stylex';
 
@@ -91,10 +94,10 @@ const viewportStyles = stylex.create({
   placeholder: (height: number) => ({ height }),
 });
 type DiffLineEnterProps = Parameters<
-  NonNullable<NonNullable<FileDiffProps<CommentAnnotationMeta>['options']>['onLineEnter']>
+  NonNullable<NonNullable<FileDiffProps<CommentAnnotationMeta, undefined>['options']>['onLineEnter']>
 >[0];
 type DiffLineClickHandler = NonNullable<
-  NonNullable<FileDiffProps<CommentAnnotationMeta>['options']>['onLineClick']
+  NonNullable<FileDiffProps<CommentAnnotationMeta, undefined>['options']>['onLineClick']
 >;
 
 const MemoizedFileDiff = memo(
@@ -104,14 +107,14 @@ const MemoizedFileDiff = memo(
     prerenderedHTML,
     lineAnnotations,
     renderAnnotation,
-    renderHoverUtility,
+    renderGutterUtility,
   }: {
     fileDiff: FileDiffMetadata;
-    options: FileDiffProps<CommentAnnotationMeta>['options'];
+    options: FileDiffProps<CommentAnnotationMeta, undefined>['options'];
     prerenderedHTML?: string;
     lineAnnotations?: DiffLineAnnotation<CommentAnnotationMeta>[];
     renderAnnotation?: (annotation: DiffLineAnnotation<CommentAnnotationMeta>) => ReactNode;
-    renderHoverUtility?: FileDiffProps<CommentAnnotationMeta>['renderHoverUtility'];
+    renderGutterUtility?: FileDiffProps<CommentAnnotationMeta, undefined>['renderGutterUtility'];
   }) {
     return (
       <FileDiff
@@ -120,7 +123,7 @@ const MemoizedFileDiff = memo(
         prerenderedHTML={prerenderedHTML}
         lineAnnotations={lineAnnotations}
         renderAnnotation={renderAnnotation}
-        renderHoverUtility={renderHoverUtility}
+        renderGutterUtility={renderGutterUtility}
         className="w-full"
       />
     );
@@ -131,7 +134,7 @@ const MemoizedFileDiff = memo(
     prev.prerenderedHTML === next.prerenderedHTML &&
     prev.lineAnnotations === next.lineAnnotations &&
     prev.renderAnnotation === next.renderAnnotation &&
-    prev.renderHoverUtility === next.renderHoverUtility
+    prev.renderGutterUtility === next.renderGutterUtility
 );
 
 const readParsedDiffCache = (cacheKey: string): FileDiffMetadata | undefined => {
@@ -279,7 +282,7 @@ export interface DiffViewerProps {
   /**
    * FileDiff options passed to @pierre/diffs
    */
-  options?: FileDiffProps<undefined>['options'];
+  options?: FileDiffProps<undefined, undefined>['options'];
   /**
    * Custom header render function. Receives fileName, full path, line stats, and a CollapseToggle component.
    * The CollapseToggle can be placed anywhere in your custom header to control collapse state.
@@ -672,11 +675,7 @@ function DiffViewerImpl({
     const publishParsed = (parsed: FileDiffMetadata) => {
       if (cancelled) return;
       const fileDiff = retainStandaloneContext
-        ? {
-            ...parsed,
-            oldLines: oldText.split(SPLIT_WITH_NEWLINES),
-            newLines: newText.split(SPLIT_WITH_NEWLINES),
-          }
+        ? restoreParsedFileDiffContext(parsed, oldText.split(SPLIT_WITH_NEWLINES), newText.split(SPLIT_WITH_NEWLINES))
         : parsed;
       if (parsedDiffCacheKey !== null) {
         writeParsedDiffCache(parsedDiffCacheKey, fileDiff);
@@ -871,11 +870,12 @@ function DiffViewerImpl({
     return total;
   }, [fileDiff]);
 
-  const defaultLineDiffType: NonNullable<FileDiffProps<undefined>['options']>['lineDiffType'] =
+  const defaultLineDiffType: NonNullable<FileDiffProps<undefined, undefined>['options']>['lineDiffType'] =
     changedLinePairCount > MAX_WORD_LEVEL_LINE_DIFF_PAIRS ? 'none' : 'word';
   const diffRenderWorkerOptions = useMemo<WorkerInitializationRenderOptions>(
     () => ({
       lineDiffType: defaultLineDiffType,
+      preferredHighlighter: canUseWASM() ? 'highlights' : 'shiki-js',
       theme: activeDiffThemeName ?? DEFAULT_VSCODE_DIFF_THEME_FALLBACK,
       tokenizeMaxLineLength: 20_000,
     }),
@@ -1002,7 +1002,7 @@ function DiffViewerImpl({
   );
 
   const renderCommentHoverUtility = useCallback<
-    NonNullable<FileDiffProps<CommentAnnotationMeta>['renderHoverUtility']>
+    NonNullable<FileDiffProps<CommentAnnotationMeta, undefined>['renderGutterUtility']>
   >(
     (getHoveredLine) => {
       if (!commentsEnabled) return null;
@@ -1026,21 +1026,22 @@ function DiffViewerImpl({
     [commentsEnabled, hoveredLine, startDraft]
   );
 
-  const mergedOptions: FileDiffProps<CommentAnnotationMeta>['options'] = useMemo(
+  const mergedOptions: FileDiffProps<CommentAnnotationMeta, undefined>['options'] = useMemo(
     () => ({
       diffStyle: effectiveDiffStyle,
       expandUnchanged: false,
       expansionLineCount: 20,
+      preferredHighlighter: canUseWASM() ? 'highlights' : 'shiki-js',
       theme: activeDiffThemeName ?? DEFAULT_VSCODE_DIFF_THEME_FALLBACK,
       themeType: resolvedTheme,
       hunkSeparators: 'line-info' as const,
       lineDiffType: defaultLineDiffType,
       overflow: 'wrap',
       disableFileHeader: true,
-      ...(options as FileDiffProps<CommentAnnotationMeta>['options']),
+      ...(options as FileDiffProps<CommentAnnotationMeta, undefined>['options']),
       ...(commentsEnabled
         ? {
-            enableHoverUtility: !isMobile,
+            enableGutterUtility: !isMobile,
             onLineClick: isMobile ? commentLineClick : undefined,
             onLineEnter: isMobile ? undefined : commentLineEnter,
             onLineLeave: isMobile ? undefined : commentLineLeave,
@@ -1125,7 +1126,7 @@ function DiffViewerImpl({
         prerenderedHTML={commentsEnabled ? undefined : cachedPrerenderedHTML}
         lineAnnotations={commentsEnabled ? commentAnnotations : undefined}
         renderAnnotation={commentsEnabled ? renderCommentAnnotation : undefined}
-        renderHoverUtility={commentsEnabled && !isMobile ? renderCommentHoverUtility : undefined}
+        renderGutterUtility={commentsEnabled && !isMobile ? renderCommentHoverUtility : undefined}
       />
     ) : null;
 

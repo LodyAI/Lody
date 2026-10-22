@@ -1,7 +1,7 @@
 import React from 'react';
 import type { Meta, StoryObj } from '@storybook/react';
 import { fn } from 'storybook/test';
-import type { FileDiffMetadata } from '@pierre/diffs';
+import { parseDiffFromFile } from '@pierre/diffs';
 import { DiffViewer } from '@/ui/diff-viewer/diff-viewer';
 
 const meta = {
@@ -287,47 +287,14 @@ export const DeletedFile: Story = {
   ),
 };
 
-const largePreparsedDiff: FileDiffMetadata = {
-  name: 'src/generated/large-snapshot.ts',
-  prevName: undefined,
-  type: 'change',
-  splitLineCount: 2_402,
-  unifiedLineCount: 2_402,
-  hunks: [
-    {
-      collapsedBefore: 0,
-      splitLineStart: 0,
-      splitLineCount: 2_402,
-      unifiedLineStart: 0,
-      unifiedLineCount: 2_402,
-      additionCount: 1,
-      additionStart: 1,
-      additionLines: 1,
-      deletionCount: 1,
-      deletionStart: 1,
-      deletionLines: 1,
-      hunkContext: undefined,
-      hunkSpecs: '@@ -1,2401 +1,2401 @@\n',
-      hunkContent: [
-        {
-          type: 'context',
-          lines: Array.from(
-            { length: 2_400 },
-            (_, index) => `export const generated_${index} = ${index};\n`
-          ),
-          noEOFCR: false,
-        },
-        {
-          type: 'change',
-          deletions: ['export const mode = "old";\n'],
-          additions: ['export const mode = "new";\n'],
-          noEOFCRDeletions: false,
-          noEOFCRAdditions: false,
-        },
-      ],
-    },
-  ],
-};
+const largeContext = Array.from(
+  { length: 2_400 },
+  (_, index) => `export const generated_${index} = ${index};\n`
+).join('');
+const largePreparsedDiff = parseDiffFromFile(
+  { name: 'src/generated/large-snapshot.ts', contents: `${largeContext}export const mode = "old";\n` },
+  { name: 'src/generated/large-snapshot.ts', contents: `${largeContext}export const mode = "new";\n` }
+);
 
 export const ProviderSidePreparsedLargeDiff: Story = {
   args: {

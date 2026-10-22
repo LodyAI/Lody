@@ -1,13 +1,14 @@
 import type { BundledLanguage } from 'shiki';
+import type { Highlighter, Theme } from '@pierre/highlights';
 
 /**
- * The Shiki highlighter shared by the markdown code-block worker and its
+ * The Highlights token adapter shared by the markdown code-block worker and its
  * main-thread fallback, so both produce the same tokens for the same input.
  */
 
 export const MARKDOWN_CODE_THEME_NAME = 'lody-css-variables';
 
-/** Languages loaded for every user. Keep this list small enough for the first render. */
+/** Languages enabled without the extension setting. Shiki fallback preloads this set. */
 export const MARKDOWN_CORE_CODE_LANGUAGES = [
   'typescript',
   'tsx',
@@ -39,9 +40,8 @@ export const MARKDOWN_CORE_CODE_LANGUAGES = [
 ] as const satisfies readonly BundledLanguage[];
 
 /**
- * Grammars that are available after the user opts into the extension pack.
- * These are loaded on first use, so enabling the pack does not eagerly parse
- * every grammar in this list.
+ * Languages gated by the extension setting. Highlights bundles its lexers;
+ * the Shiki fallback loads these grammars on first use.
  */
 export const MARKDOWN_EXTENDED_CODE_LANGUAGES = [
   'dart',
@@ -85,14 +85,32 @@ export const MARKDOWN_CODE_LANGUAGES = MARKDOWN_CORE_CODE_LANGUAGES;
 
 const EXTENDED_LANGUAGE_SET = new Set<string>(MARKDOWN_EXTENDED_CODE_LANGUAGES);
 
-export type MarkdownHighlighter = Awaited<
+type ShikiHighlighter = Awaited<
   ReturnType<(typeof import('shiki/core'))['createHighlighterCore']>
 >;
 
 /** Tokens for one code block (Shiki's `TokensResult`, structured-clone safe). */
-export type MarkdownTokens = ReturnType<MarkdownHighlighter['codeToTokens']>;
+export type MarkdownTokens = Pick<ReturnType<Highlighter['codeToTokens']>, 'tokens' | 'fg' | 'bg'>;
+
+export type MarkdownHighlighter =
+  | { backend: 'highlights'; highlighter: Highlighter; theme: Theme }
+  | { backend: 'shiki-js'; highlighter: ShikiHighlighter };
 
 export async function createMarkdownHighlighter(): Promise<MarkdownHighlighter> {
+  const { canUseWASM, createCSSVariablesTheme } = await import('@pierre/diffs');
+  if (canUseWASM()) {
+    const { createHighlighter } = await import('@pierre/highlights');
+    const theme = createCSSVariablesTheme({
+      name: MARKDOWN_CODE_THEME_NAME,
+      variablePrefix: '--lody-shiki-',
+    }).zed;
+    if (!theme) throw new Error('Markdown Highlights palette is missing');
+    return { backend: 'highlights', highlighter: createHighlighter(), theme };
+  }
+  return { backend: 'shiki-js', highlighter: await createMarkdownShikiHighlighter() };
+}
+
+async function createMarkdownShikiHighlighter(): Promise<ShikiHighlighter> {
   // @pierre/diffs already imports shiki's bundledLanguages catalog. Reuse it
   // instead of a second shiki/langs/*.mjs graph (duplicate grammar chunks).
   const [
@@ -118,14 +136,16 @@ export async function createMarkdownHighlighter(): Promise<MarkdownHighlighter> 
   });
 }
 
-const loadedExtendedLanguages = new WeakMap<MarkdownHighlighter, Map<string, Promise<void>>>();
+const loadedExtendedLanguages = new WeakMap<ShikiHighlighter, Map<string, Promise<void>>>();
 
 /** Load one optional grammar into an existing highlighter just before use. */
 export async function ensureMarkdownCodeLanguage(
-  highlighter: MarkdownHighlighter,
+  adapter: MarkdownHighlighter,
   language: BundledLanguage,
   extendedLanguagesEnabled: boolean
 ): Promise<void> {
+  if (adapter.backend === 'highlights') return;
+  const highlighter = adapter.highlighter;
   if (!extendedLanguagesEnabled || !EXTENDED_LANGUAGE_SET.has(language)) return;
 
   let languageLoads = loadedExtendedLanguages.get(highlighter);
@@ -158,11 +178,17 @@ export async function ensureMarkdownCodeLanguage(
  * carry `var(--lody-shiki-*)` colors and do not depend on the app theme.
  */
 export function tokenizeMarkdownCode(
-  highlighter: MarkdownHighlighter,
+  adapter: MarkdownHighlighter,
   code: string,
   language: BundledLanguage
 ): MarkdownTokens {
-  return highlighter.codeToTokens(code, {
+  if (adapter.backend === 'highlights') {
+    return adapter.highlighter.codeToTokens(code, {
+      lang: language as import('@pierre/highlights').Lang,
+      themes: { light: adapter.theme, dark: adapter.theme },
+    });
+  }
+  return adapter.highlighter.codeToTokens(code, {
     lang: language,
     themes: { light: MARKDOWN_CODE_THEME_NAME, dark: MARKDOWN_CODE_THEME_NAME },
   });

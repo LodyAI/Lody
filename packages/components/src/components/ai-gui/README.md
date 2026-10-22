@@ -54,7 +54,7 @@ the reasoning behind those rules.
   incomplete copy events before the extension can write clipboard data; see the
   [integration note](../../../../../.agents/notes/implemented/feature/2026-10-16-math-selection-copy.md).
   `markdown-code-block.tsx` owns fenced
-  blocks, wrap, and Markdown-fence preview (`markdown-code-highlight.ts` the Shiki
+  blocks, wrap, and Markdown-fence preview (`markdown-code-highlight.ts` the Highlights
   tokens); `markdown-diff-block.tsx` is the inline diff; `markdown-mermaid-block.tsx`
   renders a closed Mermaid fence. Diagrams are split three ways: `use-mermaid-diagram-canvas.tsx`
   owns activation and the gestures that follow it, `mermaid-inline-canvas.ts` the

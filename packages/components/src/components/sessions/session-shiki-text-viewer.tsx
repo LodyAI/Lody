@@ -1,3 +1,4 @@
+import { canUseWASM } from '@pierre/diffs';
 import { File as ShikiFile, type FileProps } from '@pierre/diffs/react';
 import { useAtomValue } from 'jotai';
 import { useMemo } from 'react';
@@ -25,14 +26,15 @@ export function SessionShikiTextViewer({
   const wordWrap = useAtomValue(fileViewerWordWrapAtom);
   const resolvedTheme = useResolvedTheme();
   const activeDiffThemeName = useActiveVSCodeDiffThemeName();
-  const file = useMemo<FileProps<undefined>['file']>(
+  const file = useMemo<FileProps<undefined, undefined>['file']>(
     () => ({ name: path, lang: language, contents: text }),
     [language, path, text]
   );
-  const options = useMemo<FileProps<undefined>['options']>(
+  const options = useMemo<FileProps<undefined, undefined>['options']>(
     () => ({
       disableFileHeader: true,
       overflow: wordWrap ? 'wrap' : 'scroll',
+      preferredHighlighter: canUseWASM() ? 'highlights' : 'shiki-js',
       theme: activeDiffThemeName ?? DEFAULT_VSCODE_DIFF_THEME_FALLBACK,
       themeType: resolvedTheme,
       tokenizeMaxLineLength: 20_000,

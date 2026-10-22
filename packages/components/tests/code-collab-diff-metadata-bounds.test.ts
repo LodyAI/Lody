@@ -3,31 +3,12 @@ import { describe, expect, it } from 'vitest';
 import {
   boundParsedFileDiffForMainThread,
   measureParsedFileDiffComplexity,
-  stripParsedFileDiffFullText,
+  compactParsedFileDiff,
+  restoreParsedFileDiffContext,
 } from '../src/lib/code-collab-diff-metadata-bounds';
 
 describe('Code Collab parsed diff metadata bounds', () => {
-  it('strips full old/new file lines before returning parsed diff metadata to the main thread', () => {
-    const fileDiff = parseDiffFromFile(
-      { name: 'src/example.ts', contents: 'old\n'.repeat(8), lang: 'ts' },
-      {
-        name: 'src/example.ts',
-        contents: `${'old\n'.repeat(4)}new\n${'old\n'.repeat(3)}`,
-        lang: 'ts',
-      }
-    );
-
-    expect(fileDiff.oldLines?.length).toBeGreaterThan(0);
-    expect(fileDiff.newLines?.length).toBeGreaterThan(0);
-
-    const stripped = stripParsedFileDiffFullText(fileDiff);
-
-    expect('oldLines' in stripped).toBe(false);
-    expect('newLines' in stripped).toBe(false);
-    expect(stripped.hunks).toBe(fileDiff.hunks);
-  });
-
-  it('bounds parsed hunk complexity after removing full file text', () => {
+  it('bounds indexed hunk complexity while retaining expansion context', () => {
     const fileDiff = parseDiffFromFile(
       { name: 'src/example.ts', contents: 'a\nb\nc\n', lang: 'ts' },
       { name: 'src/example.ts', contents: 'a\nchanged\nc\n', lang: 'ts' }
@@ -69,8 +50,30 @@ describe('Code Collab parsed diff metadata bounds', () => {
     });
     expect(bounded.status).toBe('ready');
     if (bounded.status === 'ready') {
-      expect('oldLines' in bounded.fileDiff).toBe(false);
-      expect('newLines' in bounded.fileDiff).toBe(false);
+      expect(bounded.fileDiff.additionLines.join('')).toBe('a\nchanged\nc\n');
+      expect(bounded.fileDiff.deletionLines.join('')).toBe('a\nb\nc\n');
     }
+  });
+});
+
+describe('indexed diff context', () => {
+  it('bounds worker payloads to hunks and restores exact indexes for expansion', () => {
+    const oldText = Array.from({ length: 300 }, (_, i) => `line ${i}\r\n`).join('');
+    const newText = oldText.replace('line 20', 'changed 20').replace('line 280', 'changed 280');
+    const parsed = parseDiffFromFile(
+      { name: 'test.ts', contents: oldText },
+      { name: 'test.ts', contents: newText }
+    );
+    const compact = compactParsedFileDiff(parsed);
+    expect(compact.isPartial).toBe(true);
+    expect(compact.additionLines.length).toBeLessThan(30);
+    expect(compact.deletionLines.length).toBeLessThan(30);
+    expect(measureParsedFileDiffComplexity(compact)).toEqual(
+      measureParsedFileDiffComplexity(parsed)
+    );
+    expect(
+      restoreParsedFileDiffContext(compact, parsed.deletionLines, parsed.additionLines)
+    ).toEqual(parsed);
+    expect(compactParsedFileDiff(compact)).toBe(compact);
   });
 });

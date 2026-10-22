@@ -1,3 +1,4 @@
+import { canUseWASM } from '@pierre/diffs';
 import {
   memo,
   useCallback,
@@ -2675,7 +2676,7 @@ const ReviewDiffBlock = memo(function ReviewDiffBlock({
 
   const { diffThemeName, activeTheme } = useCodeReviewTheme();
 
-  const options = useMemo<FileDiffProps<AnnotationMeta>['options']>(
+  const options = useMemo<FileDiffProps<AnnotationMeta, undefined>['options']>(
     () =>
       ({
         diffStyle,
@@ -2685,6 +2686,7 @@ const ReviewDiffBlock = memo(function ReviewDiffBlock({
         lineDiffType: 'word',
         overflow: 'wrap',
         theme: diffThemeName,
+        preferredHighlighter: canUseWASM() ? 'highlights' : 'shiki-js',
         themeType: activeTheme?.type === 'light' ? 'light' : 'dark',
         disableFileHeader: true,
         enableHoverUtility: true,
@@ -2696,7 +2698,7 @@ const ReviewDiffBlock = memo(function ReviewDiffBlock({
           props.event?.preventDefault?.();
           onStartDraft(block.path, fromPierreSide(props.annotationSide), props.lineNumber);
         },
-      }) as FileDiffProps<AnnotationMeta>['options'],
+      }) as FileDiffProps<AnnotationMeta, undefined>['options'],
     [diffStyle, diffThemeName, activeTheme?.type, onStartDraft, block.path]
   );
 
@@ -2707,7 +2709,7 @@ const ReviewDiffBlock = memo(function ReviewDiffBlock({
     [onFocusComment]
   );
 
-  const renderHoverUtility = useCallback(
+  const renderGutterUtility = useCallback(
     (getHoveredLine: () => { side: PierreSide; lineNumber: number } | undefined) => {
       const hovered = getHoveredLine();
       if (!hovered) {
@@ -2844,7 +2846,7 @@ const ReviewDiffBlock = memo(function ReviewDiffBlock({
                   lineAnnotations={annotations}
                   selectedLines={verifiedSelection}
                   renderAnnotation={renderAnnotation}
-                  renderHoverUtility={renderHoverUtility}
+                  renderGutterUtility={renderGutterUtility}
                 />
               </ErrorBoundary>
             </div>
