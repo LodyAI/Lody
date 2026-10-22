@@ -60,3 +60,119 @@ describe('Markdown Highlights tokens', () => {
     }
   });
 });
+
+import { ensureMarkdownCodeLanguage } from '../src/lib/markdown-highlighter';
+import { getSharedHighlighter as createDiffsHighlighter } from '@pierre/diffs';
+import { highlightStandaloneFile } from '../src/lib/standalone-file-highlighter';
+import type { LodyResolvedVSCodeTheme } from '../src/lib/vscode-theme';
+
+describe('isolated Shiki compatibility', () => {
+  const samples = {
+    coq: '(* comment 世界 *)\nDefinition answer : nat := 42.\n',
+    lean: '/- comment 世界 -/\ndef answer : Nat := 42\n',
+    fish: '# comment 世界\nset answer 42\n',
+    nginx: '# comment 世界\nserver { listen 80; }\n',
+  } as const;
+
+  it('loads missing Markdown grammars concurrently without replacing Highlights', async () => {
+    const adapter = await createMarkdownHighlighter();
+    expect(adapter.backend).toBe('highlights');
+    if (adapter.backend !== 'highlights') throw new Error('Expected Highlights');
+    await ensureMarkdownCodeLanguage(adapter, 'coq', false);
+    expect(adapter.fallback).toBeUndefined();
+    await ensureMarkdownCodeLanguage(adapter, 'lua', true);
+    expect(adapter.fallback).toBeUndefined();
+    await Promise.all(
+      Object.keys(samples).flatMap((language) => [
+        ensureMarkdownCodeLanguage(adapter, language as keyof typeof samples, true),
+        ensureMarkdownCodeLanguage(adapter, language as keyof typeof samples, true),
+      ])
+    );
+    for (const [language, source] of Object.entries(samples)) {
+      const result = tokenizeMarkdownCode(adapter, source, language as keyof typeof samples);
+      expect(
+        result.tokens.map((line) => line.map((token) => token.content).join('')).join('\n')
+      ).toBe(source);
+      expect(
+        result.tokens[0]?.some(
+          (token) =>
+            token.color?.includes('--lody-shiki-token-comment') ||
+            token.htmlStyle?.color?.includes('--lody-shiki-token-comment')
+        ),
+        JSON.stringify({ language, tokens: result.tokens[0] })
+      ).toBe(true);
+    }
+    expect(
+      tokenizeMarkdownCode(adapter, 'const answer = 42;', 'typescript').tokens[0]?.some(
+        (token) => token.htmlStyle?.color === 'var(--lody-shiki-token-keyword)'
+      )
+    ).toBe(true);
+    adapter.fallback?.dispose();
+  });
+
+  it('retries a failed optional grammar load while other languages remain usable', async () => {
+    const adapter = await createMarkdownHighlighter();
+    await ensureMarkdownCodeLanguage(adapter, 'coq', true);
+    if (adapter.backend !== 'highlights' || !adapter.fallback) throw new Error('Missing fallback');
+    const fallback = adapter.fallback;
+    const loading = vi.spyOn(fallback, 'loadLanguage');
+    loading.mockRejectedValueOnce(new Error('synthetic grammar load failure'));
+    await expect(ensureMarkdownCodeLanguage(adapter, 'fish', true)).rejects.toThrow(
+      'synthetic grammar load failure'
+    );
+    expect(tokenizeMarkdownCode(adapter, samples.coq, 'coq').tokens.length).toBe(3);
+    await ensureMarkdownCodeLanguage(adapter, 'fish', true);
+    expect(
+      tokenizeMarkdownCode(adapter, samples.fish, 'fish').tokens[0]?.some((token) =>
+        token.htmlStyle?.color?.includes('token-comment')
+      )
+    ).toBe(true);
+    loading.mockRestore();
+    fallback.dispose();
+  });
+
+  it('preserves Coq/Lean theme colors while Diffs Highlights is active', async () => {
+    const diffs = await createDiffsHighlighter({
+      preferredHighlighter: 'highlights',
+      themes: ['github-dark-default'],
+      langs: ['typescript'],
+    });
+    const theme: LodyResolvedVSCodeTheme = {
+      schemaVersion: 1,
+      id: 'fallback-test',
+      label: 'Fallback test',
+      type: 'dark',
+      source: { kind: 'test-fixture' },
+      colors: { 'editor.foreground': '#eeeeee', 'editor.background': '#101010' },
+      tokenColors: [
+        {
+          scope: 'comment',
+          settings: { foreground: '#12ab34', fontStyle: 'italic bold underline' },
+        },
+      ],
+    };
+    try {
+      for (const language of ['coq', 'lean'] as const) {
+        const result = await highlightStandaloneFile(samples[language], language, theme, 'dark');
+        expect(
+          result.tokens.map((line) => line.map((token) => token.content).join('')).join('\n')
+        ).toBe(samples[language]);
+        expect(
+          result.tokens[0]?.some(
+            (token) => token.color?.toLowerCase() === '#12ab34' && Number(token.fontStyle) === 7
+          ),
+          JSON.stringify({ language, tokens: result.tokens[0] })
+        ).toBe(true);
+        expect(result.bg).toBe('#101010');
+      }
+      expect(
+        diffs
+          .codeToTokens('const answer = 42;', { lang: 'typescript', theme: 'github-dark-default' })
+          .tokens.flat()
+          .some((token) => token.content.includes('const'))
+      ).toBe(true);
+    } finally {
+      diffs.dispose();
+    }
+  });
+});

@@ -85,32 +85,44 @@ export const MARKDOWN_CODE_LANGUAGES = MARKDOWN_CORE_CODE_LANGUAGES;
 
 const EXTENDED_LANGUAGE_SET = new Set<string>(MARKDOWN_EXTENDED_CODE_LANGUAGES);
 
-type ShikiHighlighter = Awaited<
-  ReturnType<(typeof import('shiki/core'))['createHighlighterCore']>
->;
+type ShikiHighlighter = Awaited<ReturnType<(typeof import('shiki/core'))['createHighlighterCore']>>;
 
 /** Tokens for one code block (Shiki's `TokensResult`, structured-clone safe). */
 export type MarkdownTokens = Pick<ReturnType<Highlighter['codeToTokens']>, 'tokens' | 'fg' | 'bg'>;
 
 export type MarkdownHighlighter =
-  | { backend: 'highlights'; highlighter: Highlighter; theme: Theme }
+  | {
+      backend: 'highlights';
+      highlighter: Highlighter;
+      theme: Theme;
+      supportsLanguage: (language: string) => boolean;
+      fallback?: ShikiHighlighter;
+      fallbackLoading?: Promise<ShikiHighlighter>;
+    }
   | { backend: 'shiki-js'; highlighter: ShikiHighlighter };
 
 export async function createMarkdownHighlighter(): Promise<MarkdownHighlighter> {
   const { canUseWASM, createCSSVariablesTheme } = await import('@pierre/diffs');
   if (canUseWASM()) {
-    const { createHighlighter } = await import('@pierre/highlights');
+    const { createHighlighter, isSupportedLanguage } = await import('@pierre/highlights');
     const theme = createCSSVariablesTheme({
       name: MARKDOWN_CODE_THEME_NAME,
       variablePrefix: '--lody-shiki-',
     }).zed;
     if (!theme) throw new Error('Markdown Highlights palette is missing');
-    return { backend: 'highlights', highlighter: createHighlighter(), theme };
+    return {
+      backend: 'highlights',
+      highlighter: createHighlighter(),
+      theme,
+      supportsLanguage: isSupportedLanguage,
+    };
   }
   return { backend: 'shiki-js', highlighter: await createMarkdownShikiHighlighter() };
 }
 
-async function createMarkdownShikiHighlighter(): Promise<ShikiHighlighter> {
+async function createMarkdownShikiHighlighter(
+  languages: readonly BundledLanguage[] = MARKDOWN_CORE_CODE_LANGUAGES
+): Promise<ShikiHighlighter> {
   // @pierre/diffs already imports shiki's bundledLanguages catalog. Reuse it
   // instead of a second shiki/langs/*.mjs graph (duplicate grammar chunks).
   const [
@@ -120,7 +132,7 @@ async function createMarkdownShikiHighlighter(): Promise<ShikiHighlighter> {
   ] = await Promise.all([import('shiki/core'), import('shiki/engine/javascript'), import('shiki')]);
   return createHighlighterCore({
     engine: createJavaScriptRegexEngine(),
-    langs: MARKDOWN_CORE_CODE_LANGUAGES.map((id) => {
+    langs: languages.map((id) => {
       const language = shiki.bundledLanguages[id];
       if (!language) {
         throw new Error(`Missing bundled shiki language: ${id}`);
@@ -144,9 +156,21 @@ export async function ensureMarkdownCodeLanguage(
   language: BundledLanguage,
   extendedLanguagesEnabled: boolean
 ): Promise<void> {
-  if (adapter.backend === 'highlights') return;
-  const highlighter = adapter.highlighter;
   if (!extendedLanguagesEnabled || !EXTENDED_LANGUAGE_SET.has(language)) return;
+  let highlighter: ShikiHighlighter;
+  if (adapter.backend === 'highlights') {
+    if (adapter.supportsLanguage(language)) return;
+    adapter.fallbackLoading ??= createMarkdownShikiHighlighter([]).then(
+      (fallback) => (adapter.fallback = fallback),
+      (error: unknown) => {
+        adapter.fallbackLoading = undefined;
+        throw error;
+      }
+    );
+    highlighter = await adapter.fallbackLoading;
+  } else {
+    highlighter = adapter.highlighter;
+  }
 
   let languageLoads = loadedExtendedLanguages.get(highlighter);
   if (!languageLoads) {
@@ -182,13 +206,15 @@ export function tokenizeMarkdownCode(
   code: string,
   language: BundledLanguage
 ): MarkdownTokens {
-  if (adapter.backend === 'highlights') {
+  if (adapter.backend === 'highlights' && adapter.supportsLanguage(language)) {
     return adapter.highlighter.codeToTokens(code, {
       lang: language as import('@pierre/highlights').Lang,
       themes: { light: adapter.theme, dark: adapter.theme },
     });
   }
-  return adapter.highlighter.codeToTokens(code, {
+  const highlighter = adapter.backend === 'shiki-js' ? adapter.highlighter : adapter.fallback;
+  if (!highlighter) throw new Error(`Markdown language was not prepared: ${language}`);
+  return highlighter.codeToTokens(code, {
     lang: language,
     themes: { light: MARKDOWN_CODE_THEME_NAME, dark: MARKDOWN_CODE_THEME_NAME },
   });

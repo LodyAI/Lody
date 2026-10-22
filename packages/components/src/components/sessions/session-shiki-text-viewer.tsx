@@ -1,17 +1,41 @@
-import { canUseWASM } from '@pierre/diffs';
-import { File as ShikiFile, type FileProps } from '@pierre/diffs/react';
 import { useAtomValue } from 'jotai';
-import { useMemo } from 'react';
+import { Fragment, useEffect, useState } from 'react';
+import * as stylex from '@stylexjs/stylex';
+import type { TokensResult, ThemedToken } from 'shiki';
+import { colors } from '@lody/ui/tokens/colors.stylex';
+import { space, text as typography } from '@lody/ui/tokens/scales.stylex';
 import { fileViewerWordWrapAtom } from '@/atoms/settings';
-import { cn } from '@/lib/utils';
-import { DEFAULT_VSCODE_DIFF_THEME_FALLBACK } from '@/lib/vscode-theme';
-import { useActiveVSCodeDiffThemeName, useResolvedTheme } from '../../theme-provider';
+import { withClassName } from '@/lib/stylex';
+import { highlightStandaloneFile } from '@/lib/standalone-file-highlighter';
+import { useActiveVSCodeTheme, useResolvedTheme } from '../../theme-provider';
 
-/**
- * Read-only file rendering for languages that Shiki supports but Monaco does
- * not. The language is always explicit so @pierre/diffs cannot infer `.v` as
- * Verilog from the filename.
- */
+const styles = stylex.create({
+  container: { height: '100%', minHeight: 240, width: '100%', overflow: 'auto' },
+  code: {
+    display: 'grid',
+    gridTemplateColumns: 'max-content minmax(0, 1fr)',
+    margin: 0,
+    paddingBlock: space[2],
+    fontFamily: 'var(--diffs-font-family, monospace)',
+    fontSize: typography.subheadlineSize,
+    lineHeight: typography.bodyLeading,
+    color: colors.label,
+    backgroundColor: colors.background,
+    minWidth: '100%',
+    width: 'max-content',
+  },
+  wrap: { width: '100%' },
+  number: {
+    userSelect: 'none',
+    textAlign: 'right',
+    paddingInline: space[3],
+    color: colors.secondaryLabel,
+  },
+  line: { whiteSpace: 'pre', paddingRight: space[3], minWidth: 0 },
+  wrappedLine: { whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' },
+});
+
+/** Explicit Coq/Lean grammars, independently owned from Diffs' Highlights backend. */
 export function SessionShikiTextViewer({
   path,
   text,
@@ -24,27 +48,69 @@ export function SessionShikiTextViewer({
   readonly className?: string;
 }) {
   const wordWrap = useAtomValue(fileViewerWordWrapAtom);
-  const resolvedTheme = useResolvedTheme();
-  const activeDiffThemeName = useActiveVSCodeDiffThemeName();
-  const file = useMemo<FileProps<undefined, undefined>['file']>(
-    () => ({ name: path, lang: language, contents: text }),
-    [language, path, text]
-  );
-  const options = useMemo<FileProps<undefined, undefined>['options']>(
-    () => ({
-      disableFileHeader: true,
-      overflow: wordWrap ? 'wrap' : 'scroll',
-      preferredHighlighter: canUseWASM() ? 'highlights' : 'shiki-js',
-      theme: activeDiffThemeName ?? DEFAULT_VSCODE_DIFF_THEME_FALLBACK,
-      themeType: resolvedTheme,
-      tokenizeMaxLineLength: 20_000,
-    }),
-    [activeDiffThemeName, resolvedTheme, wordWrap]
-  );
-
+  const mode = useResolvedTheme();
+  const theme = useActiveVSCodeTheme();
+  const [resolved, setResolved] = useState<{
+    text: string;
+    language: typeof language;
+    theme: typeof theme;
+    mode: typeof mode;
+    result: TokensResult;
+  }>();
+  useEffect(() => {
+    let cancelled = false;
+    void highlightStandaloneFile(text, language, theme, mode).then(
+      (result) => {
+        if (!cancelled) setResolved({ text, language, theme, mode, result });
+      },
+      (error: unknown) => {
+        console.warn('[SessionShikiTextViewer] Highlighting failed', error);
+      }
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [text, language, theme, mode]);
+  const result =
+    resolved?.text === text &&
+    resolved.language === language &&
+    resolved.theme === theme &&
+    resolved.mode === mode
+      ? resolved.result
+      : undefined;
+  const lines: ThemedToken[][] =
+    result?.tokens ?? text.split(/\r\n|\n|\r/u).map((content) => [{ content, offset: 0 }]);
   return (
-    <div className={cn('h-full min-h-[240px] w-full overflow-auto', className)}>
-      <ShikiFile file={file} options={options} className="block min-h-full w-full" />
+    <div {...withClassName(stylex.props(styles.container), className)}>
+      <pre
+        {...stylex.props(styles.code, wordWrap && styles.wrap)}
+        aria-label={path}
+        style={{ color: result?.fg, backgroundColor: result?.bg }}
+      >
+        {lines.map((line, index) => (
+          <Fragment key={index}>
+            <span {...stylex.props(styles.number)} aria-hidden="true">
+              {index + 1}
+            </span>
+            <code {...stylex.props(styles.line, wordWrap && styles.wrappedLine)}>
+              {line.map((token, tokenIndex) => (
+                <span
+                  key={tokenIndex}
+                  style={{
+                    color: token.color,
+                    fontStyle: (token.fontStyle ?? 0) & 1 ? 'italic' : undefined,
+                    fontWeight: (token.fontStyle ?? 0) & 2 ? 'bold' : undefined,
+                    textDecoration: (token.fontStyle ?? 0) & 4 ? 'underline' : undefined,
+                  }}
+                >
+                  {token.content}
+                </span>
+              ))}
+              {index < lines.length - 1 ? '\n' : null}
+            </code>
+          </Fragment>
+        ))}
+      </pre>
     </div>
   );
 }
