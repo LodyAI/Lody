@@ -1,3 +1,7 @@
+import {
+  requirePlaintextWorkspaceStreamsContent,
+  type WorkspaceStreamsContent,
+} from '@lody/shared/workspace-streams-content';
 import type { RemoteCursorStore } from '@loro-dev/streams-crdt';
 import { createLoroSyncErrorTools } from '@lody/shared/loro-sync-errors';
 import { RepoSyncError, RepoTransportError } from 'loro-repo';
@@ -32,6 +36,7 @@ export type CliStreamsTransport = {
 };
 
 export async function createCliStreamsTransport(args: {
+  content: WorkspaceStreamsContent;
   workspaceId: WorkspaceId;
   tokenProvider: LoroStreamsTokenProviderLegacy;
   repo: LoroRepo;
@@ -43,6 +48,7 @@ export async function createCliStreamsTransport(args: {
   documentRemoteCursorStore: RemoteCursorStore;
   logger: Logger;
 }): Promise<CliStreamsTransport> {
+  requirePlaintextWorkspaceStreamsContent(args.content);
   const tokenProvider = args.tokenProvider;
   const gatewayBaseUrl = await prepareCliStreamsGatewayBaseUrl(tokenProvider);
 

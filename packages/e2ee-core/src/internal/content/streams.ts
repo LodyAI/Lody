@@ -27,7 +27,7 @@ import { verifySignatureEffect, NativeSignatureError } from '../foundation/signa
 import { bytesEqual } from '../foundation/cbor';
 
 const error = (code: string) => new ContentError({ code });
-// Released SDK0.17 permits at most 4KiB total provider overhead. Generic content
+// Released catalog SDK permits at most 4KiB total provider overhead. Generic content
 // v0 still supports the full u16 field; this adapter must fit its public contract.
 const STREAMS_MAX_SEAL_OVERHEAD_BYTES = 4096;
 const STREAMS_MAX_SNAPSHOT_OFFSET_BYTES =
@@ -264,7 +264,7 @@ export function makeStreamsUpdateBinding(input: {
   });
 }
 
-/** Decode only released streams-crdt0.17 update framing and header3. Atomic
+/** Decode only released catalog streams-crdt update framing and header3. Atomic
  * preflight of a bounded batch; caller sends these returned originals unchanged.
  * Snapshot/legacy headers, plaintext, unknown kind and empty batches are refused.
  * No SDK private import, key lookup, decryption or injected signature verifier. */
@@ -340,7 +340,7 @@ function captureStreamsUpdateBatch(input: {
   });
 }
 type StreamsAdmission = Parameters<typeof captureStreamsUpdateBatch>[0];
-/** Host check of a released streams-crdt 0.17 update batch: framing, header 3, signatures and current write permission of every frame, all or nothing, before the host forwards the unchanged bytes. */
+/** Host check of a released catalog streams-crdt update batch: framing, header 3, signatures and current write permission of every frame, all or nothing, before the host forwards the unchanged bytes. */
 export function admitStreamsUpdateBatch(input: StreamsAdmission) {
   return Result.gen(function* () {
     const captured = yield* captureStreamsUpdateBatch(input);

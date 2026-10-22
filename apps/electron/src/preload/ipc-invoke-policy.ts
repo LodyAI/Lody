@@ -21,5 +21,15 @@ const IPC_INVOKE_CHANNEL_PATTERN = /^([A-Za-z][A-Za-z0-9]*)\.([A-Za-z][A-Za-z0-9
 export function isIpcInvokeChannel(channel: string): boolean {
   const match = IPC_INVOKE_CHANNEL_PATTERN.exec(channel)
   const group = match?.[1]
+  if (group === 'e2ee')
+    return new Set([
+      'prepareCreation',
+      'recordCreated',
+      'open',
+      'close',
+      'status',
+      'ingestLedgerRecords',
+      'ledgerView'
+    ]).has(match![2]!)
   return group !== undefined && INVOKE_SERVICE_GROUP_VALUES.has(group)
 }

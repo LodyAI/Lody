@@ -8,6 +8,7 @@
     "./src/visual-annotation-inspector-global.ts"
   ],
   "exports": {
+    "./workspace-streams-content": "./src/workspace-streams-content.ts",
     "./notifications": {
       "types": "./src/notifications/index.ts",
       "import": "./src/notifications/index.ts"

@@ -136,3 +136,6 @@
 | `referenceKeyMailbox` | 测试与 Lab | 在进程内把 `makeSqliteKeyMailbox` 宿主绑定到某个设备 |
 
 `@lody/e2ee-core/internal` 下的一切（准入门、封装器、测试辅助）都**仅供内部使用**：不稳定，只服务本仓库测试与 Lab。
+
+`LedgerFeedStore.rebase` 比对完整的预期末尾，在同一事务内替换起点和长度、删除
+已覆盖记录，并写入和读回核对新末尾。末尾不符返回 conflict，不修改数据。

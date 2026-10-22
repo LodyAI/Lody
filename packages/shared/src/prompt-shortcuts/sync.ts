@@ -1,3 +1,4 @@
+import { requirePlaintextWorkspaceStreamsContent, type WorkspaceStreamsMode } from '../workspace-streams-content';
 import {
   StreamsCrdt,
   type CrdtAdapter,
@@ -62,6 +63,7 @@ export class PromptShortcutSync {
 
   constructor(
     private readonly options: {
+      content: WorkspaceStreamsMode;
       repo: LoroRepo;
       grant: (resource: ShortcutResource, write: boolean) => Promise<ShortcutStreamGrant>;
       now: () => number;
@@ -69,6 +71,7 @@ export class PromptShortcutSync {
   ) {}
 
   async acquire(resource: ShortcutResource, write: boolean): Promise<ShortcutSyncLease> {
+    requirePlaintextWorkspaceStreamsContent(this.options.content);
     if (this.disposed) throw new Error('Shortcut sync is disposed');
     const key =
       resource.kind === 'index'

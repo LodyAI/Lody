@@ -383,8 +383,8 @@ describe('desktop live-turn duration', () => {
             null,
             createElement(AgentActivityRow, {
               label: 'Exploring',
-              tone: 'warning',
-              shimmer: false,
+              tone: 'primary',
+              shimmer: true,
               message,
             }),
             createElement(AssistantTurnFooter, {

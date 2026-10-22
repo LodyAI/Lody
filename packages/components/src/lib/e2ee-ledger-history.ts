@@ -5,6 +5,7 @@ import {
   extendLedger,
   hashRecordBytes,
   verifyLedger,
+  restoreVerifiedState,
   type DecodedRecord,
   type LedgerView,
 } from '@lody/e2ee-core/protocol';
@@ -221,4 +222,16 @@ export function ledgerRecordFields(
       return { ...base, capabilities: op.capabilities.join(', ') };
   }
   throw new Error('Unsupported ledger operation');
+}
+
+/** Decode the main process's own verified public view for display. Authority stays in the host. */
+export function hostLedgerHistory(input: import('@lody/platform').E2eeRuntimeLedgerView): VerifiedLedgerHistory {
+  const status = input.status;
+  const view = Result.getOrThrow(restoreVerifiedState({ bytes: hexToBytes(input.stateHex), genesis: Result.getOrThrow(Bytes.genesisHash(hexToBytes(status.genesisHash))), head: Result.getOrThrow(Bytes.recordHash(hexToBytes(status.headHash))), length: status.length, stateDigest: Result.getOrThrow(Bytes.recordHash(hexToBytes(status.stateDigest))) }));
+  if (input.recordsHex.length !== view.length) throw new E2eeHistoryError('local-conflict', 'incomplete-local');
+  const records = input.recordsHex.map((rawHex, index) => {
+    const bytes = hexToBytes(rawHex);
+    return { index, rawHex, hash: bytesToHex(hashRecordBytes(bytes).toBytes()), body: Result.getOrThrow(decodeRecord(bytes)).body };
+  });
+  return { view, records, locallyPinned: true, continuityPending: status.continuityPending, ...(status.upgradeRequiredAt === undefined ? {} : { upgradeRequiredAt: status.upgradeRequiredAt }), page: { workspaceId: status.workspaceId, genesisHash: status.genesisHash, startIndex: 0, recordsHex: [...input.recordsHex], checkpoint: { length: status.length, headHash: status.headHash }, position: status.position ?? '-1', nextCursor: null } };
 }

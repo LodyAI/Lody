@@ -1,3 +1,4 @@
+import { requirePlaintextWorkspaceStreamsContent, type WorkspaceStreamsContent } from '@lody/shared/workspace-streams-content';
 import {
   machineSupportsSessionHistoryIncremental,
   machineSupportsSessionHistoryPatches,
@@ -212,6 +213,7 @@ export function resolveWorkspaceRuntimeCacheIdentity(
 }
 
 type RuntimeDeps = {
+  content: WorkspaceStreamsContent;
   /** Cancels an initialization retired by the provider before publication. */
   signal?: AbortSignal;
   accountId?: string | null;
@@ -3100,6 +3102,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     streamsBaseUrl: string
   ): StreamsTransportAdapter =>
     createWorkspaceStreamsTransport({
+      content: deps.content,
       repo,
       workspaceId,
       documentRemoteCursorStore: remoteCursorStore,
@@ -4069,6 +4072,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
   }
 
   const ensureDocStream = async (roomId: string): Promise<void> => {
+    requirePlaintextWorkspaceStreamsContent(deps.content);
     if (electronLocalDataPlane) {
       const plane = await targetRouter.prepareDocTarget(roomId);
       if (plane === 'local' || !cloudPlaneEnabled) {
@@ -4143,6 +4147,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
   const eagerSyncScope = workspaceId;
   const materializedSessionIds = new Set<SessionId>();
   eagerSyncWorkerClient = createEagerSyncWorkerClient({
+    content: { mode: deps.content.mode },
     workspaceId,
     scope: eagerSyncScope,
     localConnection: createLocalLoroDataPlaneConnection,

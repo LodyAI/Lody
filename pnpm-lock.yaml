@@ -305,6 +305,9 @@ importers:
       '@lody/code-review-helper':
         specifier: workspace:*
         version: link:../../packages/code-review-helper
+      '@lody/e2ee-core':
+        specifier: workspace:*
+        version: link:../../packages/e2ee-core
       '@lody/loro-streams-rpc':
         specifier: workspace:*
         version: link:../../packages/loro-streams-rpc
@@ -1601,8 +1604,8 @@ importers:
         specifier: 'catalog:'
         version: 0.12.1(effect@4.0.2)
       '@loro-dev/streams-crdt':
-        specifier: 0.17.0
-        version: 0.17.0(@loro-dev/flock-wasm@0.4.4)(effect@4.0.2)(loro-crdt@1.16.3)
+        specifier: 'catalog:'
+        version: 0.19.1(@loro-dev/flock-wasm@0.4.4)(effect@4.0.2)(loro-crdt@1.16.3)
       '@types/better-sqlite3':
         specifier: 'catalog:'
         version: 7.6.13
@@ -1637,8 +1640,8 @@ importers:
         specifier: 'catalog:'
         version: 0.12.1(effect@4.0.2)
       '@loro-dev/streams-crdt':
-        specifier: 0.17.0
-        version: 0.17.0(@loro-dev/flock-wasm@0.4.4)(effect@4.0.2)(loro-crdt@1.16.3)
+        specifier: 'catalog:'
+        version: 0.19.1(@loro-dev/flock-wasm@0.4.4)(effect@4.0.2)(loro-crdt@1.16.3)
       better-sqlite3:
         specifier: 'catalog:'
         version: 13.0.3
@@ -3906,10 +3909,6 @@ packages:
     resolution: {integrity: sha512-UGolSlUDMfaRSGzhvwFmqC5HnM5Vs9mGEA8d6xyAB/pO9La+HPDhUCYdQ/wO2XJZVxiNVglIdT5W5iHO+FTr5Q==}
     engines: {node: '>=22'}
 
-  '@loro-dev/streams-client@0.10.0':
-    resolution: {integrity: sha512-FWyrr7AnhJZXsrxubqjjgabD1aRksziU8HNR3WiJoYaPQEX0kDwiqqAJ53xgYI7MurQNfUcGVmSw0aD+TCNSMA==}
-    engines: {node: '>=18'}
-
   '@loro-dev/streams-client@0.12.1':
     resolution: {integrity: sha512-FWx0J0DcKmIk7YIZO8u1Jrc8+O38Wo8Jmvx4+5NSJRrE69O7Bvi5A5HU4dlI5e5sZg9atRRxhTR8VLQ+Y3e7qg==}
     engines: {node: '>=18'}
@@ -3926,18 +3925,6 @@ packages:
   '@loro-dev/streams-client@0.8.0':
     resolution: {integrity: sha512-ILqMGzgIOp8xpfi5oAVdNEm+ldbM5xjdDotkfkc/MI8dziby9yPL29qGWcjeNCwnDTAyseJadgATzWI7M0Thlw==}
     engines: {node: '>=18'}
-
-  '@loro-dev/streams-crdt@0.17.0':
-    resolution: {integrity: sha512-gsuEZgWV86g37ILdGYZP5NlF1hqi4tJ7fpk6IiaRdi0lyFjdVgN88jjqESYPbhVL6ypFhAXiTpX5307mRqLNYg==}
-    peerDependencies:
-      '@loro-dev/flock-wasm': ^0.4.0
-      effect: 4.0.2
-      loro-crdt: ^1.10.3
-    peerDependenciesMeta:
-      '@loro-dev/flock-wasm':
-        optional: true
-      loro-crdt:
-        optional: true
 
   '@loro-dev/streams-crdt@0.19.1':
     resolution: {integrity: sha512-BGCcunydzZsbdVVInmJoUYNXkfGPBAsFyLmIzDio8y5k4fi76cy3rC9x5VTtJKEG9BBM0KiZT56kcX/TJDDtjQ==}
@@ -15686,7 +15673,7 @@ snapshots:
   '@effect/vitest@4.0.2(effect@4.0.2)(vitest@5.0.2)':
     dependencies:
       effect: 4.0.2
-      vitest: 5.0.2(@opentelemetry/api@1.9.0)(@types/node@24.10.12)(@vitest/coverage-v8@5.0.2)(jsdom@26.1.0)(vite@8.2.2(@types/node@24.10.12)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.46.0)(tsx@4.23.13)(yaml@2.8.2))
+      vitest: 5.0.2(@opentelemetry/api@1.9.0)(@types/node@24.10.12)(@vitest/coverage-v8@5.0.2)(jsdom@26.1.0)(vite@7.3.1(@types/node@24.10.12)(jiti@2.6.1)(lightningcss@1.33.0)(terser@5.46.0)(tsx@4.23.7)(yaml@2.8.2))
 
   '@electric-sql/pglite-socket@0.0.20(@electric-sql/pglite@0.3.15)':
     dependencies:
@@ -16633,8 +16620,6 @@ snapshots:
       better-sqlite3: 13.0.3
       loro-crdt: 1.16.3
 
-  '@loro-dev/streams-client@0.10.0': {}
-
   '@loro-dev/streams-client@0.12.1(effect@4.0.2)':
     optionalDependencies:
       effect: 4.0.2
@@ -16642,14 +16627,6 @@ snapshots:
   '@loro-dev/streams-client@0.7.0': {}
 
   '@loro-dev/streams-client@0.8.0': {}
-
-  '@loro-dev/streams-crdt@0.17.0(@loro-dev/flock-wasm@0.4.4)(effect@4.0.2)(loro-crdt@1.16.3)':
-    dependencies:
-      '@loro-dev/streams-client': 0.10.0
-      effect: 4.0.2
-    optionalDependencies:
-      '@loro-dev/flock-wasm': 0.4.4
-      loro-crdt: 1.16.3
 
   '@loro-dev/streams-crdt@0.19.1(@loro-dev/flock-wasm@0.4.4)(effect@4.0.2)(loro-crdt@1.16.3)':
     dependencies:
@@ -20863,7 +20840,7 @@ snapshots:
       obug: 2.2.1
       std-env: 4.2.0
       tinyrainbow: 3.2.0
-      vitest: 5.0.2(@opentelemetry/api@1.9.0)(@types/node@26.1.1)(@vitest/coverage-v8@5.0.2)(jsdom@26.1.0)(vite@8.2.2(@types/node@26.1.1)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.46.0)(tsx@4.23.13)(yaml@2.8.2))
+      vitest: 5.0.2(@opentelemetry/api@1.9.0)(@types/node@24.10.12)(@vitest/coverage-v8@5.0.2)(jsdom@26.1.0)(vite@7.3.1(@types/node@24.10.12)(jiti@2.6.1)(lightningcss@1.33.0)(terser@5.46.0)(tsx@4.23.7)(yaml@2.8.2))
 
   '@vitest/expect@3.2.4':
     dependencies:

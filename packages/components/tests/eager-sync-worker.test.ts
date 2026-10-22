@@ -59,6 +59,7 @@ function clientHarness(
   const sent: LocalSyncMessage[] = [];
   const listeners = new Set<(event: LocalSyncEvent) => void>();
   const client = createEagerSyncWorkerClient({
+    content: { mode: 'plaintext' },
     workspaceId: 'workspace',
     scope: 'scope',
     resolveTransport,
@@ -228,6 +229,7 @@ describe('worker raw-document prefetch', () => {
     };
     const request = {
       type: 'start' as const,
+      content: { mode: 'plaintext' as const },
       scope: 'scope',
       roomId: 'session-doc',
       workspaceId: 'workspace',
@@ -381,6 +383,7 @@ describe('eager-sync cloud auth bridge', () => {
       fakeSelf.onmessage?.({
         data: {
           type: 'start',
+      content: { mode: 'plaintext' },
           scope: 'scope',
           workspaceId: 'workspace',
           roomId: 'room',

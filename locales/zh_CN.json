@@ -2702,6 +2702,7 @@
   "sessions.statusIndicator.managedRuntime": "正在准备代理运行时",
   "sessions.statusIndicator.pendingDispatch": "启动中...",
   "sessions.statusIndicator.received": "已收到任务",
+  "sessions.statusIndicator.waitingForAnswer": "等待你回答问题",
   "sessions.statusIndicator.requestPermission": "等待你确认权限",
   "sessions.statusIndicator.resuming": "正在恢复",
   "sessions.statusIndicator.running": "处理中",

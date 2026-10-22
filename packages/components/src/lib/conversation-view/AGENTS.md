@@ -25,6 +25,9 @@
   the previous small fact only after synchronously deriving and comparing its
   new semantic value. Empty `changed.ids` announces summary/cache bookkeeping;
   `indexIds` names changed metadata independently of body invalidation.
+- Pending permission/question prompts use all hydrated bodies in their leased tail
+  window; an unrelated unloaded body must not hide an available request. Readers
+  that require contiguous history keep the contiguous prefix.
 - Only the reported ids invalidate a body: a directory row cannot tell whether a
   body changed, and merging sparse targets into one span re-read the whole
   conversation. Refresh those rows in contiguous runs; escalate to a structural

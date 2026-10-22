@@ -1,3 +1,4 @@
+import { workspaceContentModeAtom } from '@/atoms/workspace-content-mode';
 import {
   createContext,
   useContext,
@@ -87,10 +88,12 @@ export function PromptShortcutProvider({
   const platform = usePlatform();
   const session = usePlatformSession();
   const workspaceRuntime = useAtomValue(activeWorkspaceRuntimeAtom);
+  const mode = useAtomValue(workspaceContentModeAtom);
   const scope = useResolvedWorkspaceScope({ enabled });
   const userId = session.status === 'authenticated' ? session.user.id : null;
+  const encrypted = mode?.accountId === userId && mode?.workspaceId === scope.workspaceId && mode?.descriptor && 'contentMode' in mode.descriptor && mode.descriptor.contentMode === 'e2ee';
   const workspaceId =
-    scope.enabled && scope.workspaceId === workspaceRuntime?.workspaceId ? scope.workspaceId : null;
+    !encrypted && scope.enabled && scope.workspaceId === workspaceRuntime?.workspaceId ? scope.workspaceId : null;
   const cloud = platform.capabilities.has('cloudAccount');
   const stage = useCloudMutation(api.promptShortcuts.stageDocument);
   const activate = useCloudMutation(api.promptShortcuts.activateDocument);
@@ -164,6 +167,7 @@ export function PromptShortcutProvider({
       const store = await LocalShortcutStore.open({ repo, workspaceId, userId });
       const sync = cloud
         ? new PromptShortcutSync({
+            content: { mode: 'plaintext' },
             repo,
             now: Date.now,
             grant: async (resource, write) => {

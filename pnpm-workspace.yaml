@@ -165,7 +165,7 @@ minimumReleaseAgeExclude:
   # Safe error provenance and context, reviewed with loro-repo#144.
   # Native lifecycle/upload contracts reviewed in loro-streams#425; exact releases approved.
   # 0.19.1/0.12.1 stop the live-read spin after a failed flush (loro-dev/loro-streams#429).
-  - '@loro-dev/streams-crdt@0.16.2 || 0.17.0 || 0.19.0 || 0.19.1'
+  - '@loro-dev/streams-crdt@0.16.2 || 0.19.0 || 0.19.1'
   - '@loro-dev/streams-client@0.9.0 || 0.10.0 || 0.12.0 || 0.12.1'
   # Reviewed Repo native capabilities and fixes (loro-dev/loro-repo#150-#153);
   # 0.23.1 stops Flock persistence queue amplification (loro-dev/loro-repo#154);

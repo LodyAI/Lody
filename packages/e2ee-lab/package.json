@@ -61,7 +61,7 @@
     "@loro-dev/streams-client": "catalog:",
     "@loro-dev/sqlite-riverrun": "0.3.0",
     "effect": "catalog:",
-    "@loro-dev/streams-crdt": "0.17.0",
+    "@loro-dev/streams-crdt": "catalog:",
     "loro-crdt": "catalog:",
     "@loro-dev/flock-wasm": "catalog:",
     "better-sqlite3": "catalog:"

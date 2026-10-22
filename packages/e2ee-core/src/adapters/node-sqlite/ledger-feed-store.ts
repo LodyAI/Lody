@@ -6,7 +6,7 @@ import { WorkspaceScope } from '../../services/workspace';
 import { openSqliteStore, type SqliteFileOptions } from './store';
 
 const APPLICATION_ID = 0x4c454633;
-const MAX_ORIGIN_BYTES = 2 * 1024 * 1024;
+const MAX_ORIGIN_BYTES = 16 * 1024 * 1024;
 const fail = (reason: LocalStoreError['reason']) =>
   new LocalStoreError({ store: 'LedgerFeedStore', reason });
 const sameTail = (a: LedgerFeedTail, b: LedgerFeedTail) =>
@@ -125,6 +125,42 @@ export const sqliteLedgerFeedStore = (options: SqliteFileOptions) =>
                   !bytesEqual(stored.origin, origin) ||
                   stored.originCount !== originCount ||
                   !sameTail(stored.tail, tail)
+                )
+                  throw fail('corrupt');
+              })
+              .immediate()
+          ),
+        rebase: (expected, origin, originCount, tail) =>
+          sql(() =>
+            db
+              .transaction(() => {
+                const stored = meta();
+                if (!stored || !sameTail(stored.tail, expected)) throw fail('conflict');
+                if (
+                  !(origin instanceof Uint8Array) ||
+                  origin.length < 1 ||
+                  origin.length > MAX_ORIGIN_BYTES ||
+                  originCount !== expected.count ||
+                  tail.count !== originCount ||
+                  tail.bootstrap ||
+                  tail.offset !== expected.offset ||
+                  !bytesEqual(tail.head, expected.head) ||
+                  tail.bytes !== origin.length
+                )
+                  throw fail('corrupt');
+                db.prepare('UPDATE feed_meta SET origin=?,origin_count=? WHERE id=1').run(
+                  origin,
+                  originCount
+                );
+                db.prepare('DELETE FROM feed_records WHERE position<=?').run(originCount);
+                writeTail(tail);
+                const after = meta();
+                if (
+                  !after ||
+                  !bytesEqual(after.origin, origin) ||
+                  after.originCount !== originCount ||
+                  !sameTail(after.tail, tail) ||
+                  db.prepare('SELECT 1 FROM feed_records LIMIT 1').get()
                 )
                   throw fail('corrupt');
               })

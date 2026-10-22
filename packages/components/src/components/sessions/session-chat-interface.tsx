@@ -307,6 +307,7 @@ import { useAppStoreReviewPrompt } from '@/hooks/use-app-store-review-prompt';
 import {
   FloatingPermissionRequest,
   hasPendingPermissionRequest,
+  hasPendingAskUserQuestion,
 } from './floating-permission-request';
 import { SessionPin } from './session-pin';
 import { SessionPinContext, type SessionPinContextValue } from './session-pin-context';
@@ -2574,10 +2575,11 @@ export const SessionChatInterface = memo(
     // index for counts and timing, and the per-turn fact table for the few
     // readers that need something from anywhere in the conversation.
     const conversationVersion = useConversationVersion(conversationView);
-    const { turns: sessionTailHistory, from: sessionTailFrom } = useConversationTail(
-      conversationView,
-      { extendToLastUserTurn: true }
-    );
+    const {
+      turns: sessionTailHistory,
+      availableTurns: availableSessionTailHistory,
+      from: sessionTailFrom,
+    } = useConversationTail(conversationView, { extendToLastUserTurn: true });
     const conversationConfigSources = useMemo(
       () =>
         conversationView ? collectConversationConfigSources(conversationView, sessionTailFrom) : [],
@@ -4217,21 +4219,32 @@ export const SessionChatInterface = memo(
       user: pendingSender,
       conversationFontSize,
     });
+    // Presence owns liveness; the same pending queue as the composer supplies
+    // the kind of human input. Core metadata works for every ACP provider.
+    const permissionSessionHistory = availableSessionTailHistory as unknown as Parameters<
+      typeof FloatingPermissionRequest
+    >[0]['sessionHistory'];
+    const isAwaitingQuestion = hasPendingAskUserQuestion(
+      liveSessionStatus ?? undefined,
+      permissionSessionHistory
+    );
     const agentActivityLabel =
       initStatusLabel && !isEmptyConversation
         ? initStatusLabel
         : isSessionActive
-          ? liveSessionStatus?.type === 'requestPermission'
-            ? t('sessions.statusIndicator.requestPermission')
-            : isFinalizing
-              ? t('sessions.statusIndicator.finalizing')
-              : runningActivity === 'imageGenerating'
-                ? t('sessions.statusIndicator.imageGenerating')
-                : // Reading, running and editing all read as "Working"; the
-                  // collapsed tool groups above already say which.
-                  runningActivity === 'exploring' || runningActivity === 'writing'
-                  ? t('sessions.working', 'Working')
-                  : t('sessions.statusIndicator.thinking')
+          ? isAwaitingQuestion
+            ? t('sessions.statusIndicator.waitingForAnswer')
+            : liveSessionStatus?.type === 'requestPermission'
+              ? t('sessions.statusIndicator.requestPermission')
+              : isFinalizing
+                ? t('sessions.statusIndicator.finalizing')
+                : runningActivity === 'imageGenerating'
+                  ? t('sessions.statusIndicator.imageGenerating')
+                  : // Reading, running and editing all read as "Working"; the
+                    // collapsed tool groups above already say which.
+                    runningActivity === 'exploring' || runningActivity === 'writing'
+                    ? t('sessions.working', 'Working')
+                    : t('sessions.statusIndicator.thinking')
           : hasPendingDispatch && statusStripState == null
             ? // Pre-start only while the turn can actually start: any
               // connection/machine problem (browser offline, machine removed or
@@ -4241,13 +4254,15 @@ export const SessionChatInterface = memo(
               ? t('sessions.sendStatus.sendingWithoutSize')
               : null;
     const agentActivityTone =
-      isSessionActive && liveSessionStatus?.type === 'requestPermission' ? 'warning' : 'primary';
+      isSessionActive && (isAwaitingQuestion || liveSessionStatus?.type === 'requestPermission')
+        ? 'warning'
+        : 'primary';
     // Waiting on the user is not work in progress: that status does not shimmer.
     const agentActivityShimmer = agentActivityTone !== 'warning';
     // Presence, not the history's `finished` flag: a turn whose daemon died
     // before finalizing stays unfinished forever but is not running.
     const liveTurnActivity: LiveTurnActivity | null = isSessionActive
-      ? liveSessionStatus?.type === 'requestPermission'
+      ? isAwaitingQuestion || liveSessionStatus?.type === 'requestPermission'
         ? 'awaitingUser'
         : 'working'
       : null;
@@ -6464,10 +6479,6 @@ export const SessionChatInterface = memo(
 
     const headerGitHubActions = headerActionsSlot !== undefined ? headerActionsSlot : prBadge;
 
-    // Pending permission requests live in the active (latest) assistant turn.
-    const permissionSessionHistory = sessionHistory as unknown as Parameters<
-      typeof FloatingPermissionRequest
-    >[0]['sessionHistory'];
     const shouldReplaceComposerWithPermission = hasPendingPermissionRequest(
       liveSessionStatus ?? undefined,
       permissionSessionHistory

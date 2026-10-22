@@ -1,3 +1,4 @@
+import { requirePlaintextWorkspaceStreamsContent, type WorkspaceStreamsMode } from '@lody/shared/workspace-streams-content';
 import { LOCAL_LORO_DATA_PLANE_PROTOCOL_VERSION } from '@lody/shared/local-loro-data-plane';
 import type { LocalLoroDataPlaneConnection } from '@lody/shared/local-loro-transport';
 import type { PrefetchOutcome } from './background-sync-coordinator';
@@ -14,6 +15,7 @@ import type {
 let workerQueue: Promise<unknown> = Promise.resolve();
 
 export type EagerSyncWorkerClientDeps = {
+  content: WorkspaceStreamsMode;
   workspaceId: string;
   scope: string;
   resolveTransport(roomId: string): Promise<EagerSyncTransport>;
@@ -32,6 +34,7 @@ export function createEagerSyncWorkerClient(deps: EagerSyncWorkerClientDeps) {
     lastMessageAt: number,
     signal: AbortSignal
   ): Promise<PrefetchOutcome> => {
+    requirePlaintextWorkspaceStreamsContent(deps.content);
     if (signal.aborted || disposed) return 'skipped';
     let abortSetup: () => void = () => {};
     const cancelled = new Promise<null>((resolve) => {
@@ -137,6 +140,7 @@ export function createEagerSyncWorkerClient(deps: EagerSyncWorkerClientDeps) {
         }
         post({
           type: 'start',
+          content: deps.content,
           scope: deps.scope,
           workspaceId: deps.workspaceId,
           roomId,

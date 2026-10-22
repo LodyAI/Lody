@@ -126,6 +126,7 @@ async function openTab(workspaceId: WorkspaceId, storage?: IndexedDBStorageAdapt
 
 async function syncMeta(tab: Tab) {
   const transport = createWorkspaceStreamsTransport({
+    content: { mode: 'plaintext' },
     repo: tab.repo,
     workspaceId: tab.workspaceId,
     documentRemoteCursorStore: createResilientRemoteCursorStore({ dbName: tab.cursorDbName }),
@@ -191,6 +192,7 @@ function transportFor(
   cursorStore?: RemoteCursorStore
 ) {
   const transport = createWorkspaceStreamsTransport({
+
     repo: tab.repo,
     workspaceId: tab.workspaceId,
     documentRemoteCursorStore:
@@ -198,7 +200,7 @@ function transportFor(
     auth: async () => 'streams-jwt',
     streamsBaseUrl,
     shardHostSuffix: undefined,
-    content,
+    content: content === undefined ? { mode: 'plaintext' } : content,
   });
   openTransports.add(transport);
   return transport;

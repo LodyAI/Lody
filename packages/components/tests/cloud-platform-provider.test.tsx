@@ -9,6 +9,7 @@ import type {
   PlatformSessionState,
   E2eeWorkspacePrepared,
   E2eeWorkspacePrepareInput,
+  E2eeWorkspaceRuntime,
   PlatformE2eeWorkspaces,
 } from '@lody/platform';
 import { usePlatform } from '@lody/platform/react';
@@ -19,7 +20,7 @@ const fixture = vi.hoisted(() => ({
   electron: false,
   native: undefined as
     | {
-        e2ee: {
+        e2ee: E2eeWorkspaceRuntime & {
           prepareCreation: (input: E2eeWorkspacePrepareInput) => Promise<E2eeWorkspacePrepared>;
         };
       }
@@ -170,10 +171,17 @@ describe('CloudPlatformProvider', () => {
       checkpoint: { ...historyRequest.checkpoint },
       startIndex: 1,
       recordsHex: ['02'],
+      position: 'p1:workspace-encrypted:2:offset:0',
       nextCursor: null,
     };
     fixture.electron = true;
-    fixture.native = { e2ee: { prepareCreation: async () => ({ ...prepared }) } };
+    const bindings: Array<{ workspaceId: string; genesisHash: string; requestId?: string }> = [];
+    const unused = async (): Promise<never> => { throw new Error('unused runtime method'); };
+    fixture.native = { e2ee: {
+      prepareCreation: async () => ({ ...prepared }),
+      recordCreated: async binding => { bindings.push({ ...binding }); },
+      open: unused, close: async () => {}, status: unused, ledgerView: unused, ingestLedgerRecords: unused,
+    } };
     fixture.cloudClient.query = async (reference, args) => {
       expect(getFunctionName(reference)).toBe('e2eeWorkspaces:describe');
       expect(args).toEqual({ workspaceId: receipt.workspaceId });
@@ -195,6 +203,7 @@ describe('CloudPlatformProvider', () => {
     const port = seen.at(-1)!.e2eeWorkspaces!;
     await expect(port.prepareCreation!(prepared)).resolves.toEqual(prepared);
     await expect(port.create(createRequest)).resolves.toEqual(receipt);
+    expect(bindings).toEqual([{ workspaceId: receipt.workspaceId, genesisHash: prepared.genesisHashHex, requestId: prepared.requestId }]);
     await expect(port.describe({ workspaceId: receipt.workspaceId })).resolves.toEqual(receipt);
     await expect(port.history(historyRequest)).resolves.toEqual(historyPage);
 

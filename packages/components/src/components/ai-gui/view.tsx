@@ -774,7 +774,11 @@ const AgentActivityStatus = ({
           shimmer && 'agent-shimmer'
         )}
       >
-        {message ? <LiveActivityLabel label={label} message={message} /> : label}
+        {message && tone !== 'warning' ? (
+          <LiveActivityLabel label={label} message={message} />
+        ) : (
+          label
+        )}
       </span>
     </div>
   );

@@ -231,3 +231,23 @@ document key derived from the epoch key, and purpose-bound AAD.
 outbox bytes take precedence over preparing new ones. An `unavailable` backend
 leaves the delivery `Pending` with the original unchanged; other backend
 failures propagate.
+
+### Retained feed origin
+
+A retained origin contains this caller's full exported v2 state and the source
+`offset` immediately after it. Restore preserves full-history versus endorsed-snapshot
+provenance. Corruption, unknown versions or another genesis return `retained-cache-invalid`:
+rebuild that optional cache from independently verified originals. A cache longer than
+its pin is also invalid. Equal lengths require equal heads. If the pin is ahead, provide
+`LedgerFeedSource`; opening verifies the suffix and proves the hash at the pin before
+persisting any catch-up. A missing or conflicting proof is `local-evidence-conflict`,
+never permission to reset the pin.
+
+After at least 64 additional records, call `rebase()` with the same `VerifiedLedger`
+used by the runtime. It first advances the pin, then CAS-replaces the origin and removes
+covered feed rows in one store transaction. Save the returned origin for next open.
+Keep original history separately if the UI needs it. An interrupted compaction must
+rebuild from originals or read a suffix to prove the existing pin; never lower it.
+
+`InstalledEpochKeys.check(epoch)` verifies a stored key's current eligibility and
+commitment, disposing its temporary material instead of returning a secret to a status reader.

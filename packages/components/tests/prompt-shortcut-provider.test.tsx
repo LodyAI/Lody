@@ -16,6 +16,7 @@ const fixture = vi.hoisted(() => {
     makePlatform,
     platform: makePlatform(),
     workspaceId: 'workspace-a',
+    mode: null as unknown,
     directory: [],
     createRepo: vi.fn(),
     openStore: vi.fn(),
@@ -25,8 +26,9 @@ const fixture = vi.hoisted(() => {
 });
 
 vi.mock('jotai', () => ({
-  useAtomValue: () => ({ workspaceId: fixture.workspaceId }),
+  useAtomValue: (atom: string) => atom === 'content-mode' ? fixture.mode : ({ workspaceId: fixture.workspaceId }),
 }));
+vi.mock('@/atoms/workspace-content-mode', () => ({ workspaceContentModeAtom: 'content-mode' }));
 vi.mock('@/atoms/runtime', () => ({ activeWorkspaceRuntimeAtom: 'workspace' }));
 vi.mock('@/hooks/use-resolved-workspace-scope', () => ({
   useResolvedWorkspaceScope: ({ enabled }: { enabled: boolean }) => ({
@@ -104,6 +106,7 @@ describe('PromptShortcutProvider lifecycle', () => {
 
   beforeEach(() => {
     fixture.workspaceId = 'workspace-a';
+    fixture.mode = null;
     fixture.platform = fixture.makePlatform();
     fixture.records = [];
     fixture.closeStore.mockReset().mockResolvedValue(undefined);
@@ -246,4 +249,13 @@ describe('PromptShortcutProvider lifecycle', () => {
     expect(prefetch.mock.calls[0]?.[0]).toEqual([entry]);
     expect(prefetch.mock.calls[0]?.[1]?.signal?.aborted).toBe(false);
   });
+  it('keeps ordinary shortcuts active when another workspace has encrypted evidence', async () => {
+    fixture.mode = { accountId: 'user-a', workspaceId: 'other-workspace', descriptor: { contentMode: 'e2ee' } };
+    await render();
+    expect(container.textContent).toBe('workspace-a');
+    fixture.mode = { accountId: 'user-a', workspaceId: 'workspace-a', descriptor: { contentMode: 'e2ee' } };
+    await render();
+    expect(current).toBeNull();
+  });
+
 });

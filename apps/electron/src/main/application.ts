@@ -1,3 +1,4 @@
+import { closeDesktopE2eeAccount, resumeDesktopE2eeAccount } from './services/e2ee-account-runtime'
 import { makeApplicationRuntime } from '@lody/shared/node/application-runtime'
 import {
   LoginShellCacheLive,
@@ -376,13 +377,14 @@ export function startApplication(executionHost?: DesktopExecutionHost): void {
         loroDataPlaneRelay.destroy()
         appUpdaterService.stop()
         publicBrowserService.destroyAll()
-        const [cliResult, shellResult] = await Promise.allSettled([
+        const [cliResult, shellResult, e2eeResult] = await Promise.allSettled([
           cliService.shutdownForQuit(),
           applicationRuntime.closeLegacy(),
+          closeDesktopE2eeAccount({ quit: true }),
           flushElectronMainErrorReporting(),
           stopDevbarDevframeService()
         ])
-        const failures = [cliResult, shellResult].flatMap((result) =>
+        const failures = [cliResult, shellResult, e2eeResult].flatMap((result) =>
           result.status === 'rejected' ? [result.reason] : []
         )
         if (failures.length > 0)
@@ -390,6 +392,7 @@ export function startApplication(executionHost?: DesktopExecutionHost): void {
       },
       quit: () => app.quit(),
       reportFailure: (error) => {
+        resumeDesktopE2eeAccount()
         // A timeout does not prove exit. Keep ownership until quit succeeds.
         console.error('[Electron] Quit blocked by owned resources', error)
         dialog.showErrorBox(
@@ -400,7 +403,10 @@ export function startApplication(executionHost?: DesktopExecutionHost): void {
         // Quit preparation already closed every window; keep a surface to retry from.
         openOrFocusMainWindow({ icon })
       },
-      cancelled: cancelRequestedRelaunch
+      cancelled: () => {
+        resumeDesktopE2eeAccount()
+        cancelRequestedRelaunch()
+      }
     })
     app.on('will-quit', relaunchIfRequested)
     app.on('before-quit', (event) => {

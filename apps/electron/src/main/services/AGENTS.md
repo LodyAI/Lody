@@ -89,3 +89,15 @@ approval, quit awaits application disposal alongside CLI exit; retain failed pro
 owners for a later quit/recovery. Never substitute failure with null or bind a
 replacement before release. See the
 [decision](../../../../../.agents/notes/implemented/architecture/2026-10-10-effect-login-shell-probe.md).
+
+## E2EE runtime
+
+`e2ee-account-runtime.ts` lazily owns account custody; `e2ee-runtime.mts` owns each
+workspace's core feed/pin/keys. Window leases and account/quit serialization await
+native work before release. Use only main-auth cached identity for E2EE IPC; never
+wait for auth network under the account lock. Recheck identity/generation after native
+open. Availability-only failures retain the pinned renderer read path; evidence conflicts
+never fall back. Originals commit before feed/pin; verification/storage failures close
+the owner. Overlapping pages compare the verified original prefix and append only new
+records; malformed input does not close shared readers. Retain old renderer checkpoints on first takeover; insufficient history
+stays pending. Full boundaries: [M1 note](../../../../../.agents/notes/implemented/architecture/2026-10-21-e2ee-m1-runtime-boundaries.md).

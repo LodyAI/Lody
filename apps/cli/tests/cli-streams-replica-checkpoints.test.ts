@@ -135,6 +135,7 @@ async function withTransport<T>(
   run: (adapter: Awaited<ReturnType<typeof createCliStreamsTransport>>['adapter']) => Promise<T>
 ): Promise<T> {
   const { adapter } = await createCliStreamsTransport({
+    content: { mode: 'plaintext' },
     workspaceId,
     tokenProvider,
     repo: cliProcess.repo,

@@ -491,6 +491,14 @@ export class AuthService {
   // out by themselves.
   private lastResolvedSessionResponse: unknown = null
 
+  /** Main-process identity only; never starts an authentication request. */
+  getCachedSessionIdentity(): { userId: string | null; generation: number } {
+    return {
+      userId: readSessionFromResponse(this.lastResolvedSessionResponse).userId,
+      generation: this.authGeneration
+    }
+  }
+
   private rememberSessionToken(token: string | null | undefined): void {
     if (typeof token === 'string' && token.length > 0) {
       this.lastKnownSessionToken = token
