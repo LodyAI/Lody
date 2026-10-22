@@ -1,5 +1,4 @@
 import { useLayoutEffect, useMemo, useRef, useState, type PointerEvent } from 'react';
-import { Flame } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import * as stylex from '@stylexjs/stylex';
 import { Tooltip } from '@lody/ui/tooltip';
@@ -39,17 +38,19 @@ const fadeIn = stylex.keyframes({ from: { opacity: 0 }, to: { opacity: 1 } });
 /*
  * Placed by hand so the bento stays uneven and cannot shift with the source order:
  *   code   code   repo   repo
- *   code   code   prs    streak
+ *   code   code   prs    prs
  *   agents agents agents agents
- * Code shipped is two rows tall, and beside it sit tiles whose heights add up to about its own
- * (the repository's three lines, then the two short figures), so neither side is stretched into
- * an empty band. A taller code tile beside a three-tile stack left a gap above the wall.
+ * Code shipped is two rows tall, and beside it the repository's three lines and then the one
+ * short figure, so neither side is stretched into an empty band. A taller code tile beside a
+ * three-tile stack left a gap above the wall.
+ *
+ * The active streak used to hold the fourth cell of the second row. It is gone from the page,
+ * and the merged PRs take that cell rather than leave a hole in the bento.
  */
 const AREA = {
   code: { column: '1 / span 2', row: '1 / span 2' },
   repo: { column: '3 / span 2', row: '1' },
-  prs: { column: '3 / span 1', row: '2' },
-  streak: { column: '4 / span 1', row: '2' },
+  prs: { column: '3 / span 2', row: '2' },
   agents: { column: '1 / span 4', row: '3' },
 } as const;
 const ROWS = gridRows([5.6, 4.3, 5.6]);
@@ -205,8 +206,6 @@ const styles = stylex.create({
     backgroundColor: WALL_QUIET,
   },
   summaryUnit: { fontWeight: 400, color: colors.secondaryLabel },
-  summaryGlyph: { flexShrink: 0, width: '14px', height: '14px', color: colors.secondaryLabel },
-  summaryPart: { display: 'inline-flex', alignItems: 'center', gap: '3px' },
 });
 
 const wallLevelStyle = (level: HomeWeekWallLevel) =>
@@ -443,16 +442,6 @@ export function WeekBento({
         </p>
       </Tile>
 
-      <Tile area={AREA.streak}>
-        <p {...stylex.props(tileStyles.label)}>{t('home.week.streak', 'Active streak')}</p>
-        <p {...stylex.props(tileStyles.value)}>
-          <Count value={model.streak} animate={animate} format={formatNumber} />
-          <span {...stylex.props(tileStyles.unit)}>
-            {t('home.week.streakUnit', 'days', { count: model.streak })}
-          </span>
-        </p>
-      </Tile>
-
       <Tile area={AREA.agents}>
         <div {...stylex.props(tileStyles.head)}>
           <p {...stylex.props(tileStyles.label)}>{t('home.week.agents', 'Agents')}</p>
@@ -497,7 +486,7 @@ export function WeekBento({
 
 /**
  * What the week says while its board is folded into the line: seven pebbles (the last seven days
- * of lines, shaded like the wall) with the line count, and the streak.
+ * of lines, shaded like the wall) with the line count.
  */
 export function WeekSummary({ model }: { model: HomeWeekModel }) {
   const { t, i18n } = useTranslation();
@@ -518,14 +507,6 @@ export function WeekSummary({ model }: { model: HomeWeekModel }) {
         {numberFormat.format(model.lines)}{' '}
         <span {...stylex.props(styles.summaryUnit)}>
           {t('home.week.linesUnit', 'lines', { count: model.lines })}
-        </span>
-      </span>
-      <span {...stylex.props(styles.summaryPart)}>
-        <Flame aria-hidden="true" {...stylex.props(styles.summaryGlyph)} />
-        <span {...stylex.props(tileStyles.srOnly)}>{t('home.week.streak', 'Active streak')}</span>
-        {numberFormat.format(model.streak)}{' '}
-        <span {...stylex.props(styles.summaryUnit)}>
-          {t('home.week.streakUnit', 'days', { count: model.streak })}
         </span>
       </span>
     </span>

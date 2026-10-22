@@ -132,28 +132,6 @@ describe('buildHomeWeek repository', () => {
   });
 });
 
-describe('buildHomeWeek streak', () => {
-  const days = (...back: number[]) => back.map((n) => homeWeekDayKey(at(n))).sort();
-
-  it('runs through today', () => {
-    expect(buildHomeWeek(makeWeekInput([], days(0, 1, 2)), NOW).streak).toBe(3);
-  });
-
-  it('does not break because today is still empty', () => {
-    expect(buildHomeWeek(makeWeekInput([], days(1, 2, 3)), NOW).streak).toBe(3);
-  });
-
-  it('stops at the first empty day, and is zero after a quiet stretch', () => {
-    expect(buildHomeWeek(makeWeekInput([], days(0, 2, 3)), NOW).streak).toBe(1);
-    expect(buildHomeWeek(makeWeekInput([], days(3, 4)), NOW).streak).toBe(0);
-  });
-
-  it('is not capped by the seven-day window', () => {
-    const long = Array.from({ length: 20 }, (_, n) => n);
-    expect(buildHomeWeek(makeWeekInput([], days(...long)), NOW).streak).toBe(20);
-  });
-});
-
 describe('buildHomeWeek in a quiet week', () => {
   it('is all zeros, with nothing to compare', () => {
     const model = buildHomeWeek(
@@ -163,7 +141,6 @@ describe('buildHomeWeek in a quiet week', () => {
     expect(model).toMatchObject({
       lines: 0,
       delta: null,
-      streak: 0,
       mergedPrs: 0,
       sessions: 0,
       agents: [],

@@ -28,6 +28,8 @@ import type {
 const NOW = new Date(2026, 9, 16, 10, 0, 0);
 const NOW_MS = NOW.getTime();
 const MINUTE = 60_000;
+/** The board's height, as jsdom reports it: the dashboard measures it for the slot it holds. */
+const BOARD_HEIGHT_PX = 120;
 
 function nowRow(id: string, overrides: Partial<HomeNowRow> = {}): HomeNowRow {
   return {
@@ -90,6 +92,13 @@ describe('HomeDashboard', () => {
         observe() {}
         unobserve() {}
         disconnect() {}
+      }
+    );
+    // jsdom has no layout, so the board's height — which the dashboard measures for the
+    // slot it holds — is a fixed number here.
+    vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockImplementation(
+      function (this: HTMLElement) {
+        return this.dataset?.testid === 'home-dashboard-board' ? BOARD_HEIGHT_PX : 0;
       }
     );
     await initI18n('en');
@@ -308,19 +317,52 @@ describe('HomeDashboard', () => {
       expect(boards).toEqual(['now']);
     });
 
-    it('keeps every list in its place, at its title, when nothing is going on', () => {
-      render({ usage: usage() });
-      const left = q('[data-now-column="left"]')!;
-      const right = q('[data-now-column="right"]')!;
-      expect(left.textContent).toBe('Needs you0Just finished0');
-      const firstTile = right.firstElementChild?.firstElementChild;
-      expect(firstTile?.contains(byTestId('home-week-usage'))).toBe(true);
-      expect(right.textContent).toContain('Running0Worth continuing0');
-      expect(container.querySelectorAll('[data-testid="home-now"] [data-session]')).toHaveLength(0);
-      expect(byTestId('home-now-attention-toggle')).toBeNull();
+    it('keeps breathing room below a busy board in a compact landing', () => {
+      render({
+        rows: [
+          ...Array.from({ length: 14 }, (_, index) => nowRow(`wait-${index}`, { waiting: true })),
+          ...Array.from({ length: 6 }, (_, index) => nowRow(`run-${index}`, { working: true })),
+          ...Array.from({ length: 5 }, (_, index) => nowRow(`done-${index}`, { unread: true })),
+          ...Array.from({ length: 11 }, (_, index) =>
+            nowRow(`ready-${index}`, {
+              pr: { number: 700 + index, status: 'open', ci: 'pass', ready: true },
+            })
+          ),
+        ],
+        usage: usage(),
+        // Mirrors the 620px Storybook landing: a 492px stage with 60px used by the heading.
+        stage: { height: 492, rest: 60 },
+      });
+
+      expect(byTestId('home-now-attention')?.querySelectorAll('[data-session]')).toHaveLength(5);
+      expect(byTestId('home-now-running')?.querySelectorAll('[data-session]')).toHaveLength(1);
+      expect(byTestId('home-now-finished')?.querySelectorAll('[data-session]')).toHaveLength(1);
+      expect(byTestId('home-now-next')?.querySelectorAll('[data-session]')).toHaveLength(1);
+      expect(byTestId('home-dashboard')?.hasAttribute('data-auto-folded')).toBe(false);
     });
 
-    it('keeps one height for either board, hung a little low but in balance; folded, high', () => {
+    it('puts one quiet card beside the usage when nothing is going on', () => {
+      render({ usage: usage() });
+      const quiet = byTestId('home-now-quiet');
+      const usageTile = byTestId('home-week-usage');
+      expect(quiet).not.toBeNull();
+      expect(quiet?.textContent).toContain('All quiet');
+      expect(quiet?.textContent).toContain('Nothing is running or waiting on you.');
+      // The lists take their places back the moment anything is happening.
+      const left = q('[data-now-column="left"]')!;
+      const right = q('[data-now-column="right"]')!;
+      expect(left.contains(quiet)).toBe(true);
+      expect(right.contains(usageTile)).toBe(true);
+      expect(left.textContent).toContain('All quiet');
+      expect(right.textContent).toContain('Plan usage');
+      expect(container.querySelectorAll('[data-testid="home-now"] [data-session]')).toHaveLength(0);
+
+      render({ usage: usage(), rows: [nowRow('a', { working: true })] });
+      expect(byTestId('home-now-quiet')).toBeNull();
+      expect(q('[data-now-column="left"]')?.textContent).toContain('Needs you');
+    });
+
+    it('holds the board at its own height, hung a little low but in balance; folded, high', () => {
       const section = () => byTestId('home-dashboard')!;
       const slotPx = () => Number.parseFloat(byTestId('home-dashboard-slot')!.style.minHeight);
       const hang = () => -Number.parseFloat(section().style.marginBottom || '0');
@@ -340,11 +382,12 @@ describe('HomeDashboard', () => {
       expect(tall).toBeGreaterThan(0);
       expect(tall).toBeLessThanOrEqual((height + 6) * HOME_BOARD_HANG_SHARE);
       expect(gaps(2000).above).toBeLessThanOrEqual(HOME_BOARD_MAX_TILT * gaps(2000).below + 1);
-      // Switching keeps both.
+      // The slot is the board's own height: no band of nothing under the tiles.
+      expect(height).toBe(BOARD_HEIGHT_PX);
+      // Switching boards gives the other board its own height.
       click(q('[data-segment="week"]')!);
       expect(byTestId('home-week')).not.toBeNull();
-      expect(slotPx()).toBe(height);
-      expect(hang()).toBe(tall);
+      expect(slotPx()).toBe(BOARD_HEIGHT_PX);
       // Folded, no slot is held, and a little space is kept under the line instead, so the stage
       // centres the heading and the line a little above its middle.
       click(q('[data-segment="week"]')!);
@@ -354,9 +397,21 @@ describe('HomeDashboard', () => {
       // Opening never moves the heading down: what the open board does not hang is at least
       // what the folded page keeps under its line.
       expect(height + 6 - tall).toBeGreaterThanOrEqual(kept);
+    });
 
-      // A middling stage: the balance limit holds the board up off the composer.
-      render({ defaultBoard: 'now', stage: { height: 700, rest: 100 } });
+    it('holds the board up off the composer in a middling stage', () => {
+      const section = () => byTestId('home-dashboard')!;
+      const slotPx = () => Number.parseFloat(byTestId('home-dashboard-slot')!.style.minHeight);
+      const hang = () => -Number.parseFloat(section().style.marginBottom || '0');
+      const gaps = (stage: number) => {
+        const box = 100 + 28 + slotPx() + 6 - hang();
+        const above = (stage - box) / 2;
+        return { above, below: above - hang() };
+      };
+
+      // Start folded explicitly: the compact quiet card now fits this stage on its own, while
+      // this case is about the geometry after a person opens a board from the line.
+      render({ defaultBoard: null, stage: { height: 700, rest: 100 } });
       expect(byTestId('home-dashboard-slot')).toBeNull();
       click(q('[data-segment="now"]')!);
       expect(hang()).toBeGreaterThan(0);
@@ -512,9 +567,15 @@ describe('HomeDashboard', () => {
       field.remove();
     });
 
-    it('keeps every count in its place when nothing is going on', () => {
+    it('says so in one quiet phrase when nothing at all is going on', () => {
       render({ defaultBoard: null });
-      expect(byTestId('home-now-summary')?.textContent).toBe('Needs you0Running0Just finished0');
+      expect(byTestId('home-now-summary')?.textContent).toBe('All caught up');
+      expect(byTestId('home-now-summary')?.getAttribute('data-summary')).toBe('quiet');
+    });
+
+    it('keeps the three counts once anything is going on', () => {
+      render({ defaultBoard: null, rows: [nowRow('a', { waiting: true })] });
+      expect(byTestId('home-now-summary')?.textContent).toBe('Needs you1Running0Just finished0');
     });
 
     it('shows the board it is given when controlled', () => {

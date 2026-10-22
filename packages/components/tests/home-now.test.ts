@@ -216,6 +216,12 @@ describe("spending the board's height", () => {
           for (const f of sizes)
             for (const n of sizes) {
               const layout = layoutHomeNow(totals(a, r, f, n), hasUsage);
+              // Nothing at all happening is the one case with no lists at all: the board
+              // says so in a single card instead.
+              if (a + r + f + n === 0) {
+                expect(columnOf(layout)).toEqual({});
+                continue;
+              }
               expect(columnOf(layout)).toEqual({ attention: 0, finished: 0, running: 1, next: 1 });
             }
   });
@@ -275,14 +281,9 @@ describe("spending the board's height", () => {
             }
   });
 
-  it('is every list at its title when nothing is going on', () => {
-    expect(shape(layoutHomeNow(totals(0, 0, 0, 0), true))).toEqual([
-      ['attention:0', 'finished:0'],
-      ['usage', 'running:0', 'next:0'],
-    ]);
-    expect(shape(layoutHomeNow(totals(0, 0, 0, 0), false))).toEqual([
-      ['attention:0', 'finished:0'],
-      ['running:0', 'next:0'],
-    ]);
+  it('says so in one card when nothing is going on', () => {
+    // Every list empty: one statement stays beside the usage instead of four empty list tiles.
+    expect(shape(layoutHomeNow(totals(0, 0, 0, 0), true))).toEqual([['quiet'], ['usage']]);
+    expect(shape(layoutHomeNow(totals(0, 0, 0, 0), false))).toEqual([['quiet']]);
   });
 });

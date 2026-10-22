@@ -62,9 +62,14 @@ export const NowWithoutUsage: Story = {
   args: { usage: null },
 };
 
-/** Nothing running or waiting: every list at its title in its place, beside the usage. */
+/** Nothing running or waiting: one quiet card sits beside the usage. */
 export const AllQuiet: Story = {
   args: { now: homeNowFixture('quiet') },
+};
+
+/** The first agent of the afternoon: the quiet card gives way to the lists. */
+export const FirstAgent: Story = {
+  args: { now: homeNowFixture('starting') },
 };
 
 /** The last seven days, switched to from the line; both segments keep their summaries. */
@@ -96,11 +101,22 @@ function landingAt(height: string, storyArgs: Story['args'] = { defaultBoard: 'n
 /** The real landing stage: switching boards keeps the line in place; folding re-centres it. */
 export const Landing: Story = landingAt('100vh', {});
 
+/** The landing with nothing going on: one quiet card sits beside the usage. */
+export const LandingQuiet: Story = landingAt('100vh', {
+  now: homeNowFixture('quiet'),
+});
+
+/** The landing with the first agent of the afternoon running: the lists take their places back. */
+export const LandingFirstAgent: Story = landingAt('100vh', { now: homeNowFixture('starting') });
+
 /**
  * A short window under load: the lists give way to the rows the stage has room for, lower lists
  * first, and both columns end on one line. "Show all" opens a whole list over its column.
  */
-export const LandingShortWindow: Story = landingAt('620px');
+export const LandingShortWindow: Story = landingAt('620px', {
+  usage: homeWeekUsageFixture('nearReset'),
+  forecast: { title: 'Codex reset forecast', chancePercent: 65, when: 'Today 2:00 PM' },
+});
 
 type MotionArgs = typeof FOCUS_TUNING;
 
