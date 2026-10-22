@@ -55,7 +55,10 @@ the reasoning behind those rules.
   [integration note](../../../../../.agents/notes/implemented/feature/2026-10-16-math-selection-copy.md).
   `markdown-code-block.tsx` owns fenced
   blocks, wrap, and Markdown-fence preview (`markdown-code-highlight.ts` the Highlights
-  tokens); `markdown-diff-block.tsx` is the inline diff; `markdown-mermaid-block.tsx`
+  tokens). Unsupported optional languages use an isolated Shiki fallback;
+  its native grammar registry owns loaded-language state, while Lody shares
+  fallback initialization and clears failed initialization for retry.
+  `markdown-diff-block.tsx` is the inline diff; `markdown-mermaid-block.tsx`
   renders a closed Mermaid fence. Diagrams are split three ways: `use-mermaid-diagram-canvas.tsx`
   owns activation and the gestures that follow it, `mermaid-inline-canvas.ts` the
   pure zoom/pan geometry, and `mermaid-diagram-viewer.tsx` the full-screen

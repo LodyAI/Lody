@@ -80,9 +80,6 @@ export const MARKDOWN_EXTENDED_CODE_LANGUAGES = [
   'coq',
 ] as const satisfies readonly BundledLanguage[];
 
-/** Backwards-compatible name for callers that only need the always-loaded set. */
-export const MARKDOWN_CODE_LANGUAGES = MARKDOWN_CORE_CODE_LANGUAGES;
-
 const EXTENDED_LANGUAGE_SET = new Set<string>(MARKDOWN_EXTENDED_CODE_LANGUAGES);
 
 type ShikiHighlighter = Awaited<ReturnType<(typeof import('shiki/core'))['createHighlighterCore']>>;
@@ -148,8 +145,6 @@ async function createMarkdownShikiHighlighter(
   });
 }
 
-const loadedExtendedLanguages = new WeakMap<ShikiHighlighter, Map<string, Promise<void>>>();
-
 /** Load one optional grammar into an existing highlighter just before use. */
 export async function ensureMarkdownCodeLanguage(
   adapter: MarkdownHighlighter,
@@ -172,29 +167,11 @@ export async function ensureMarkdownCodeLanguage(
     highlighter = adapter.highlighter;
   }
 
-  let languageLoads = loadedExtendedLanguages.get(highlighter);
-  if (!languageLoads) {
-    languageLoads = new Map<string, Promise<void>>();
-    loadedExtendedLanguages.set(highlighter, languageLoads);
-  }
-  const existing = languageLoads.get(language);
-  if (existing) return existing;
-
-  const load = (async () => {
-    const shiki = await import('shiki');
-    const grammar = shiki.bundledLanguages[language];
-    if (!grammar) throw new Error(`Missing bundled shiki language: ${language}`);
-    await highlighter.loadLanguage(grammar);
-  })();
-  const trackedLoad = load.then(
-    () => undefined,
-    (error: unknown) => {
-      languageLoads?.delete(language);
-      throw error;
-    }
-  );
-  languageLoads.set(language, trackedLoad);
-  await trackedLoad;
+  // Shiki owns registered grammars and skips duplicate registration after
+  // concurrent imports. Failed loads remain absent and can be retried.
+  if (highlighter.getLoadedLanguages().includes(language)) return;
+  const { bundledLanguages } = await import('shiki');
+  await highlighter.loadLanguage(bundledLanguages[language]);
 }
 
 /**

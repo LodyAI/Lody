@@ -1,6 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
 
 vi.mock('@/atoms', () => ({ extendedCodeLanguagesEnabledAtom: {} }));
+vi.mock('@pierre/diffs', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@pierre/diffs')>();
+  return { ...actual, canUseWASM: vi.fn(actual.canUseWASM) };
+});
 
 import { resolveMarkdownCodeLanguage } from '../src/components/ai-gui/markdown-code-highlight';
 
@@ -63,6 +67,7 @@ describe('Markdown Highlights tokens', () => {
 
 import { ensureMarkdownCodeLanguage } from '../src/lib/markdown-highlighter';
 import { getSharedHighlighter as createDiffsHighlighter } from '@pierre/diffs';
+import * as diffsModule from '@pierre/diffs';
 import { highlightStandaloneFile } from '../src/lib/standalone-file-highlighter';
 import type { LodyResolvedVSCodeTheme } from '../src/lib/vscode-theme';
 
@@ -129,6 +134,45 @@ describe('isolated Shiki compatibility', () => {
     ).toBe(true);
     loading.mockRestore();
     fallback.dispose();
+  });
+
+  it('keeps core and optional grammars usable when WASM is unavailable', async () => {
+    const wasm = vi.spyOn(diffsModule, 'canUseWASM').mockReturnValue(false);
+    const adapter = await createMarkdownHighlighter().finally(() => wasm.mockRestore());
+    expect(adapter.backend).toBe('shiki-js');
+    if (adapter.backend !== 'shiki-js') throw new Error('Expected Shiki');
+    try {
+      await Promise.all([
+        ensureMarkdownCodeLanguage(adapter, 'fish', true),
+        ensureMarkdownCodeLanguage(adapter, 'fish', true),
+        ensureMarkdownCodeLanguage(adapter, 'coq', true),
+      ]);
+      // A warmed grammar remains usable without a second registration attempt.
+      const loading = vi
+        .spyOn(adapter.highlighter, 'loadLanguage')
+        .mockRejectedValue(new Error('synthetic later load failure'));
+      try {
+        await ensureMarkdownCodeLanguage(adapter, 'fish', true);
+        for (const language of ['fish', 'coq'] as const) {
+          const tokens = tokenizeMarkdownCode(adapter, samples[language], language).tokens;
+          expect(tokens.map((line) => line.map((token) => token.content).join('')).join('\n')).toBe(
+            samples[language]
+          );
+          expect(
+            tokens[0]?.some((token) => token.htmlStyle?.color?.includes('token-comment'))
+          ).toBe(true);
+        }
+        expect(
+          tokenizeMarkdownCode(adapter, 'const n = 1;', 'typescript').tokens[0]?.some((token) =>
+            token.htmlStyle?.color?.includes('token-keyword')
+          )
+        ).toBe(true);
+      } finally {
+        loading.mockRestore();
+      }
+    } finally {
+      adapter.highlighter.dispose();
+    }
   });
 
   it('preserves Coq/Lean theme colors while Diffs Highlights is active', async () => {
