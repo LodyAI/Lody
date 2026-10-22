@@ -37,8 +37,8 @@ command action.
 The viewer selects Highlights when `canUseWASM()` succeeds, otherwise `shiki-js`.
 The shared VS Code adapter registers both Zed and TextMate theme formats. WASM is
 embedded in the Highlights JavaScript module, so the single-file viewer needs no
-network fetch for its lexer. Token boundaries may differ from Shiki. Unsupported
-lexer compatibility is tracked in the [migration note](../../.agents/notes/proposed/architecture/2026-10-22-highlights-backend.md).
+network fetch for its lexer. Token boundaries may differ from Shiki. Coq, Lean,
+Fish and Nginx lexer compatibility remains unresolved.
 
 ## Shiki fallback size control
 
