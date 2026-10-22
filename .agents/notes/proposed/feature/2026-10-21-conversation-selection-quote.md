@@ -14,7 +14,8 @@ draft through the existing large-pasted-text chip — the path document selectio
 already use — instead of adding a new `SessionInputBlock` variant. The quote is a
 captured snapshot of the prose, so it cannot follow later edits to the message, and
 a range that belongs to another conversation surface or exceeds the size cap is
-ignored. The implementation accompanies this note and awaits review; it passes the
+ignored. The implementation accompanies this note and awaits review in
+[#1801](https://github.com/LodyAI/Lody/pull/1801); it passes the
 repository-wide check locally, while iOS/Safari long-press ordering is still
 unverified.
 
