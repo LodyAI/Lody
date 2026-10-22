@@ -2,6 +2,7 @@
 
 Status: implemented
 Translation: current
+PR: https://github.com/LodyAI/Lody/pull/1824
 
 [English](2026-10-22-claude-rejected-plan-display.md)
 
