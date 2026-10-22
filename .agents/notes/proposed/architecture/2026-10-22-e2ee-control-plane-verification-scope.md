@@ -40,4 +40,5 @@ The original design had the server verify signatures in many places: a one-time 
 
 - Specs: [whitepaper](../../../../specs/e2ee/whitepaper.md) implementation decisions, §4, §4.1, §5.3, §7; [permission ledger (Chinese)](../../../../specs/e2ee/permission-ledger.zh.md) §4.4, §6.1, §9.
 - Backend guide: [`backend-guide.md`](../../../../packages/e2ee-core/docs/backend-guide.md) authentication, mailbox and staging sections.
+- PR: [LodyAI/Lody#1803](https://github.com/LodyAI/Lody/pull/1803).
 - Related records: [current E2EE decisions](../../implemented/architecture/2026-10-15-e2ee-current-decisions.md), [open contracts](2026-10-15-e2ee-open-contracts.md).

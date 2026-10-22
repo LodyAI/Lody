@@ -40,4 +40,5 @@ Translation: current
 
 - Spec：[白皮书](../../../../specs/e2ee/whitepaper.zh.md) 的"实施规则补充"、§4、§4.1、§5.3、§7；[权限账本](../../../../specs/e2ee/permission-ledger.zh.md) §4.4、§6.1、§9。
 - 后端指南：[`backend-guide.zh.md`](../../../../packages/e2ee-core/docs/backend-guide.zh.md) 的认证、信箱、暂存三节。
+- PR：[LodyAI/Lody#1803](https://github.com/LodyAI/Lody/pull/1803)。
 - 相关记录：[当前 E2EE 决定](../../implemented/architecture/2026-10-15-e2ee-current-decisions.zh.md)、[待定协议与接入](2026-10-15-e2ee-open-contracts.zh.md)。
