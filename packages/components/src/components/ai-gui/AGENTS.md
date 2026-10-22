@@ -35,11 +35,11 @@ Ownership: [README.md](README.md).
   streaming turns stay expanded.
 - The final answer is the contiguous text run before trailing never-collapsed
   items. Walk backward over adjacent text blocks to the first non-text boundary.
-- Plan approval cuts an `AssistantTurnRenderSegment` in a live turn. Match ACP
-  kind `switch_mode`, never a title (`plan-surface.ts`). Keep `workBlockKeys`,
-  `hasVisibleFinalContent`, last-item visibility and `expandedWorkedGroups` per
-  segment; expansion keys include it. Only the last segment shows duration;
-  earlier ones say "Finished working".
+- Plan approval cuts a live turn by ACP kind `switch_mode`, never title.
+  `plan-surface.ts` prefers nonempty `rawInput.plan` over replaceable tool content.
+  Keep `workBlockKeys`, `hasVisibleFinalContent`, last-item visibility and expansion
+  keys per segment. Only the last segment shows duration; earlier segments say
+  "Finished working".
 - `shouldUseWorkedGroup` requires a finished turn, foldable work, and visible
   final content outside `workBlockKeys`. A cancelled/interrupted or tool-only
   turn with no answer stays expanded; `message.finished` cannot prove

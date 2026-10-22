@@ -74,6 +74,13 @@ the reasoning behind those rules.
   shared `session-link-export`, preserving code examples and stored history.
   Only a known source workspace supplies a missing ID; anonymous readers do not
   borrow the viewer's workspace.
+- `plan-surface.ts` resolves plan approval text from nonempty `rawInput.plan` first,
+  then the first nonempty content text block. Claude result updates can replace
+  content with a rejection message while retaining the original plan input.
+  This also restores historical rejected cards without rewriting session data.
+  Content-only adapters retain their fallback; a separate `proposed_plan` row
+  still suppresses the card's duplicate. See the
+  [rejected-plan fix](../../../../../.agents/notes/implemented/bug-fix/2026-10-22-claude-rejected-plan-display.md).
 - `message-content-guards.ts` gates which shared `MessageContent` variants render.
 - `assistant-turn-timing.ts` builds the turn popover's timing rows (Started,
   Ended, Duration, and Last update for a running turn) and the live status

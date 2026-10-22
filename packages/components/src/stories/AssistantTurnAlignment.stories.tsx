@@ -1123,16 +1123,21 @@ const planExitOutcomeTurn = (
       toolCallId: `${id}-plan-exit`,
       title: 'Ready to code?',
       kind: 'switch_mode',
-      status: 'completed',
-      /* CLAUDE's shape: `ExitPlanMode` carries the plan as a `content` text
-         block, so the card renders it above the outcome and there is no
-         separate `proposed_plan` item. */
+      status:
+        outcome.outcome === 'selected' && outcome.optionId === 'reject' ? 'failed' : 'completed',
+      // Claude retains the plan input when rejection replaces the tool content.
+      rawInput: {
+        plan: '**Plan**\n\n1. Drop the per-shell horizontal pads.\n2. Re-measure against the rail guide.',
+      },
       content: [
         {
           type: 'content',
           content: {
             type: 'text',
-            text: '**Plan**\n\n1. Drop the per-shell horizontal pads.\n2. Re-measure against the rail guide.',
+            text:
+              outcome.outcome === 'selected' && outcome.optionId === 'reject'
+                ? "The user doesn't want to proceed with this tool use."
+                : '**Plan**\n\n1. Drop the per-shell horizontal pads.\n2. Re-measure against the rail guide.',
           },
         },
       ],
@@ -1140,7 +1145,7 @@ const planExitOutcomeTurn = (
         requestId: `${id}-permission`,
         options: [
           { optionId: 'approve', name: 'Yes, implement the plan', kind: 'allow_once' },
-          { optionId: 'reject', name: 'No, and tell Codex what to change', kind: 'reject_once' },
+          { optionId: 'reject', name: 'No, keep planning', kind: 'reject_once' },
         ],
         outcome,
       },
