@@ -69,7 +69,7 @@ export const Default: Story = {};
 
 /** Handset width: the quote takes its own line above default-size actions. */
 export const MobileQuote: Story = {
-  parameters: { viewport: { defaultViewport: 'mobile1' } },
+  globals: { viewport: { value: 'mobile1', isRotated: false } },
   render: () => (
     <ForceMobileLayoutProvider force>
       <QuoteHarness />
