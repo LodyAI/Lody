@@ -16,7 +16,7 @@ import { colors } from '@lody/ui/tokens/colors.stylex';
 import { corner, radius, space, text } from '@lody/ui/tokens/scales.stylex';
 import { DEFAULT_HOME_BOARD, type HomeBoard } from '@/lib/home-board';
 import type { HomeNowModel } from '@/lib/home-now';
-import { HOME_NOW_TALLEST_COLUMN, layoutHomeNow } from '@/lib/home-now-layout';
+import { layoutHomeNow } from '@/lib/home-now-layout';
 import type { HomeWeekAgent, HomeWeekModel } from '@/lib/home-week';
 import { LANDING_STAGE_BREATHING_PX, useLandingRoom } from '../landing-stage';
 import { morph, type MorphKind } from './morph';
@@ -124,6 +124,20 @@ const NOW_COLUMN_GAPS_PX = 3 * 6;
  */
 const LINE_AND_GAP_PX = 28 + 6;
 
+/**
+ * Keep up to two rows of air below a busy board when the stage has only just enough room for
+ * more content. Twelve rows still hold the usage tile and one row from every non-empty list, so
+ * the reserve never makes an otherwise viable board fold. Once the stage can hold the board's
+ * natural maximum, this has no effect.
+ */
+const NOW_COMPACT_ROW_RESERVE = 2;
+const NOW_COMPACT_MIN_ROWS = 12;
+
+function compactNowRows(rows: number): number {
+  if (rows <= NOW_COMPACT_MIN_ROWS) return rows;
+  return Math.max(NOW_COMPACT_MIN_ROWS, rows - NOW_COMPACT_ROW_RESERVE);
+}
+
 /** The line itself: what the dashboard is, folded. */
 const LINE_PX = 28;
 
@@ -182,11 +196,6 @@ function foldedReservePx(free: number | null): number {
   return Math.max(0, Math.floor(2 * HOME_FOLDED_LIFT * span));
 }
 
-/** The tallest "now" board in pixels: the tallest column any lists can make, and its gaps. */
-function nowTallestPx(uiFontPx: number): number {
-  return Math.ceil(HOME_NOW_TALLEST_COLUMN * nowRowPx(uiFontPx) + NOW_COLUMN_GAPS_PX);
-}
-
 /**
  * The new-chat page above the composer: a line with one segment per board, and under it the
  * open board, either what the agents are doing now or the last seven days. Pressing the other
@@ -194,11 +203,12 @@ function nowTallestPx(uiFontPx: number): number {
  * where every segment shows its summary. A pure picture of its props (the open board is
  * controlled when `board` is passed); `HomeDashboardHost` supplies the real ones.
  *
- * On the landing stage an open board has a slot of fixed height under the line: the tallest
- * "now" board, or the room the stage has (`useLandingRoom`) when that is less. The slot is the
- * same whichever board is shown and whatever the lists hold, so while a board is open the stage
- * centres the same group every time and the line (with the heading above it) never moves under
- * the pointer; the board hangs from the line and only its own height changes.
+ * On the landing stage an open board has a slot under the line, and the slot is the board's own
+ * measured height: an expanded board is exactly as tall as what it shows. The slot used to
+ * reserve the tallest board the lists could make, which left a band of nothing between the tiles
+ * and the composer and pushed the heading up by it; the rows are still capped by the room the
+ * stage has (`useLandingRoom`), so the board never grows past what the window can hold. The
+ * board hangs from the line and only its own height changes.
  *
  * Folding and unfolding move the group less than centring would: part of an open board is not
  * part of what the stage centres, but hangs below the line toward the composer (its height taken
@@ -211,7 +221,7 @@ function nowTallestPx(uiFontPx: number): number {
  * Folded, the heading and the line sit a little above the stage's middle (`HOME_FOLDED_LIFT`),
  * which also leaves opening less to travel.
  *
- * The "now" board is given the rows the slot holds, and when even one row per list does not fit
+ * The "now" board is given the rows the room holds, and when even one row per list does not fit
  * it shows folded into the line without changing the remembered board. Opening it from the line
  * then shows it anyway, and the stage scrolls: the person asked for it.
  */
@@ -255,15 +265,25 @@ export function HomeDashboard({
   const dashboardRoom = useLandingRoom(sectionRef);
   const room = dashboardRoom == null ? null : Math.max(0, dashboardRoom - LINE_AND_GAP_PX);
   const [uiFontPx, setUiFontPx] = useState(14);
-  const slot = room == null ? null : Math.min(room, nowTallestPx(uiFontPx));
-  // Rows taken back after the board was measured taller than its slot (the row arithmetic is
-  // close, not exact), for the slot they were measured in.
-  const [slack, setSlack] = useState({ slot, rows: 0 });
-  const slackRows = slack.slot === slot ? slack.rows : 0;
-  const maxRows =
-    slot == null
-      ? undefined
-      : Math.floor((slot - NOW_COLUMN_GAPS_PX) / nowRowPx(uiFontPx)) - slackRows;
+  // The rows a column may show: what the window's room allows. The board's own height is
+  // measured, so the room (not a reserved tallest board) is what caps the rows.
+  const rowsRoom =
+    room == null ? null : Math.floor((room - NOW_COLUMN_GAPS_PX) / nowRowPx(uiFontPx));
+  // The board's height, measured: the slot holds the board's own box, so an open board is
+  // exactly as tall as what it shows. Reserving the tallest board the lists could make left
+  // the rest of the space empty under the tiles — a band of nothing between the board and the
+  // composer, and the heading pushed up by it.
+  const [boardHeight, setBoardHeight] = useState<number | null>(null);
+  const slot = boardHeight;
+  // Rows taken back after the board was measured taller than its room (the row arithmetic is
+  // close, not exact), for the room they were measured in.
+  const [slack, setSlack] = useState({ room, rows: 0 });
+  const slackRows = slack.room === room ? slack.rows : 0;
+  // A short stage should not turn every spare pixel into another session row. Keep a small
+  // reserve below the board once the minimum busy layout fits; taller stages still reach the
+  // same natural row budget because the board itself tops out before the available room does.
+  const preferredRows = rowsRoom == null ? null : compactNowRows(rowsRoom);
+  const maxRows = preferredRows == null ? undefined : Math.max(0, preferredRows - slackRows);
   const nowFits = layoutHomeNow(homeNowTotals(now), usage.usage != null, maxRows).fits;
   // Opened from the line although it does not fit: shown anyway until it fits again.
   const [forced, setForced] = useState(false);
@@ -278,14 +298,15 @@ export function HomeDashboard({
 
   useLayoutEffect(() => {
     const section = sectionRef.current;
-    if (!section || slot == null) return;
+    if (!section) return;
     const size = Number.parseFloat(getComputedStyle(section).getPropertyValue('--ui-font-size'));
     if (Number.isFinite(size) && size > 0) setUiFontPx(size);
     const height = boardRef.current?.offsetHeight ?? 0;
-    if (shown === 'now' && nowFits && height > slot) {
-      setSlack({ slot, rows: slackRows + 1 });
+    if (height > 0 && height !== boardHeight) setBoardHeight(height);
+    if (shown === 'now' && nowFits && room != null && height > room) {
+      setSlack({ room, rows: slackRows + 1 });
     }
-  }, [slot, shown, nowFits, slackRows, maxRows]);
+  }, [room, shown, nowFits, slackRows, maxRows, boardHeight]);
 
   // What the line showed when the last render committed, one commit behind
   // `shown`. The pill keeps its own transition name only while it continues
@@ -316,12 +337,16 @@ export function HomeDashboard({
           : order.indexOf(next) > order.indexOf(shown)
             ? 'next'
             : 'previous';
-    morph(kind, () => {
-      if (next) setLastOpen(next);
-      setForced(next === 'now' && !nowFits);
-      if (board === undefined) setOwnBoard(next);
-      onBoardChange?.(next);
-    }, lineRef.current);
+    morph(
+      kind,
+      () => {
+        if (next) setLastOpen(next);
+        setForced(next === 'now' && !nowFits);
+        if (board === undefined) setOwnBoard(next);
+        onBoardChange?.(next);
+      },
+      lineRef.current
+    );
   };
 
   // Escape folds the open board from wherever the landing's focus then sits:
@@ -425,7 +450,11 @@ export function HomeDashboard({
             </Fragment>
           );
         })}
-        <span style={{ viewTransitionName: 'home-fold' }} {...stylex.props(styles.end)}>
+        <span
+          data-testid="home-dashboard-fold-slot"
+          style={{ viewTransitionName: 'home-fold' }}
+          {...stylex.props(styles.end)}
+        >
           <Tooltip.Root>
             <Tooltip.Trigger
               data-testid="home-dashboard-fold"
@@ -452,7 +481,12 @@ export function HomeDashboard({
           data-testid="home-dashboard-slot"
           style={slot == null ? undefined : { minHeight: slot }}
         >
-          <div id={boardId} ref={boardRef} style={{ viewTransitionName: 'home-board' }}>
+          <div
+            id={boardId}
+            ref={boardRef}
+            data-testid="home-dashboard-board"
+            style={{ viewTransitionName: 'home-board' }}
+          >
             {shown === 'now' ? (
               <NowBoard
                 model={now}

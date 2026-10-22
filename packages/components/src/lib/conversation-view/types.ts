@@ -1,4 +1,11 @@
+import type { SessionSubagentRun } from '@lody/shared/session-data';
 import type { SessionHistory, SessionId, SessionTurnInputConfig } from '@lody/shared';
+
+/** Display-only capability, attached non-enumerably to a projected task.
+ * A closed dialog retains no complete child transcript. */
+export type SubagentRunHistorySource = {
+  read(): Promise<SessionSubagentRun | undefined>;
+};
 
 /**
  * Cheap per-turn facts the outline rail, placeholder rows, and height estimates
@@ -138,7 +145,9 @@ export interface ConversationView {
   indexOf(turnId: string): number;
   /** One authoritative, consistent full read for explicit export/replay/hash. */
   readAll(): Promise<SessionHistory[]>;
-  /** The hydrated turn, or `undefined` until an acquired range covers it. */
+  /** Hydrated display turn; child runs may be previews with an on-demand
+   * detail capability. Never use this as export/copy/write input: use readAll
+   * or the authoritative SessionData reader. Undefined until acquired. */
   turn(i: number): SessionHistory | undefined;
   isHydrated(i: number): boolean;
   /** Captures `[from, to)` now. Release the returned handle when done. */

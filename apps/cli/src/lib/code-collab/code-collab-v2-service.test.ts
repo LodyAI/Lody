@@ -133,6 +133,79 @@ function makeWorkspaceWatchCoordinator(): {
 }
 
 describe('CodeCollabV2Service text RPC boundary', () => {
+  it('uses the configured refresh deadline, cancels publication and lets a queued refresh publish newer files', async () => {
+    await withWorkspace(async (workspaceRoot) => {
+      await writeFile(path.join(workspaceRoot, 'old.ts'), 'old');
+      let release = () => {};
+      let started = () => {};
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const entered = new Promise<void>((resolve) => {
+        started = resolve;
+      });
+      let heldSignal: AbortSignal | undefined;
+      let attempts = 0;
+      const snapshots: string[][] = [];
+      const service = new CodeCollabV2Service({
+        resolveWorkspace: makeResolver(workspaceRoot),
+        publishFileIndex: async (publication) => {
+          if (++attempts === 2) {
+            heldSignal = publication.signal;
+            started();
+            await gate;
+          }
+          publication.signal?.throwIfAborted();
+          snapshots.push(Object.keys(publication.fileIndex));
+          return { changed: true };
+        },
+      });
+      try {
+        await service.refreshSharedState({ sessionId: SESSION_ID });
+        vi.stubEnv('LODY_CODE_COLLAB_TASK_TIMEOUT_MS', '100');
+        vi.useFakeTimers();
+        const expired = expect(
+          service.refreshSharedStateAfterTurn({ sessionId: SESSION_ID })
+        ).rejects.toThrow('exceeded 100ms');
+        await entered;
+        await writeFile(path.join(workspaceRoot, 'new.ts'), 'new');
+        // Wait for actual queue admission before advancing the clock; filesystem
+        // resolution of the next request must not race its own deadline.
+        const queueApi = service as unknown as {
+          enqueueSharedStateRefresh: (...args: unknown[]) => Promise<void>;
+        };
+        const enqueue = queueApi.enqueueSharedStateRefresh.bind(service);
+        let admitted = () => {};
+        const queued = new Promise<void>((resolve) => {
+          admitted = resolve;
+        });
+        const admission = vi
+          .spyOn(queueApi, 'enqueueSharedStateRefresh')
+          .mockImplementation((...args) => {
+            const result = enqueue(...args);
+            admitted();
+            return result;
+          });
+        const next = service.refreshSharedStateAfterTurn({ sessionId: SESSION_ID });
+        await queued;
+        admission.mockRestore();
+        await vi.advanceTimersByTimeAsync(100);
+        await expired;
+        await next;
+        expect(heldSignal?.aborted).toBe(true);
+        expect(snapshots.at(-1)).toContain('new.ts');
+        release();
+        await gate;
+        expect(snapshots).toHaveLength(2);
+      } finally {
+        release();
+        service.dispose();
+        vi.useRealTimers();
+        vi.unstubAllEnvs();
+      }
+    });
+  });
+
   it('activates checkout metadata independently of the initial file snapshot and refreshes it without file changes', async () => {
     await withWorkspace(async (workspaceRoot) => {
       let release: () => void = () => {};

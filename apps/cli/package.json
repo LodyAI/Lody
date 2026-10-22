@@ -134,7 +134,7 @@
     "@lydell/node-pty": "1.2.0-beta.14",
     "@napi-rs/keyring": "2.1.0",
     "better-sqlite3": "catalog:",
-    "loro-crdt": "1.16.3",
+    "loro-crdt": "1.17.0",
     "tinypool": "^1.0.0",
     "typescript": "^5.9.3"
   }

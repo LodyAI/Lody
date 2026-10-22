@@ -169,6 +169,53 @@ afterEach(async () => {
 });
 
 describe('CLI Streams checkpoints are bound to the replica that loaded them', () => {
+  it.each(['import', 'importBatch'] as const)(
+    'preserves pending-only %s updates across a SQLite restart',
+    async (method) => {
+      const remote = new LoroDoc();
+      remote.setPeerId(1n);
+      remote.getText('t').insert(0, 'base|');
+      const snapshot = remote.export({ mode: 'snapshot' });
+      const beforeA = remote.oplogVersion();
+      remote.getText('t').push('A');
+      const updateA = remote.export({ mode: 'update', from: beforeA });
+      const beforeB = remote.oplogVersion();
+      remote.getText('t').push('B');
+      const updateB = remote.export({ mode: 'update', from: beforeB });
+
+      const daemon = await openCliProcess();
+      const docId = `session-pending-${method}`;
+      const doc = (await daemon.repo.openPersistedDoc(docId)).doc;
+      doc.import(snapshot);
+      await daemon.repo.flush();
+      const applied = doc.oplogVersion().encode();
+
+      const imported = method === 'import' ? doc.import(updateB) : doc.importBatch([updateB]);
+      // B has been received, but cannot emit an applied change before A arrives.
+      expect(imported.success.size).toBe(0);
+      expect(imported.pending?.size).toBeGreaterThan(0);
+      expect(doc.getText('t').toString()).toBe('base|');
+      expect(doc.oplogVersion().encode()).toEqual(applied);
+      await daemon.repo.flush();
+      await closeCliProcess(daemon);
+
+      const restarted = await openCliProcess();
+      const restored = (await restarted.repo.openPersistedDoc(docId)).doc;
+      expect(restored.getText('t').toString()).toBe('base|');
+      expect(restored.oplogVersion().encode()).toEqual(applied);
+      restored.import(updateA);
+      expect(restored.getText('t').toString()).toBe('base|AB');
+      expect(restored.oplogVersion().encode()).toEqual(remote.oplogVersion().encode());
+      await restarted.repo.flush();
+      await closeCliProcess(restarted);
+
+      const reopened = await openCliProcess();
+      const complete = (await reopened.repo.openPersistedDoc(docId)).doc;
+      expect(complete.getText('t').toString()).toBe('base|AB');
+      expect(complete.oplogVersion().encode()).toEqual(remote.oplogVersion().encode());
+    }
+  );
+
   it('bootstraps a process that hydrated before another process advanced the shared file', async () => {
     const server = createStreamsServer(metaSnapshotWithA());
     // The one-shot command opens first, while the file is still empty.

@@ -8,6 +8,11 @@ File-by-file responsibilities: [README.md](README.md).
 
 ## Invariants
 
+- Turn-end refresh runs here without blocking Turn release.
+  Refresh/publication attempts have configurable deadlines and cancellation;
+  worker cancellation drains Git children. Late results cannot resume snapshot writes.
+  Cancelling an attempt never destroys the shared Repo or its rooms.
+
 - Do not reintroduce per-session Code Collab host runtimes, host handles, bootstrap
   secrets, or synced text CRDT documents here. Turn diff support is CLI-local:
   standard ACP diff blocks are written to `code-collab-v2-diff-store.ts`, and Web

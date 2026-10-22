@@ -95,9 +95,9 @@ describe('conversation view React readers', () => {
       const view = createConversationViewFromReader(
         {
           ...data.history,
-          readTurn: async (id) => {
+          readTurnForDisplay: async (id) => {
             if (id !== active.id) await olderGate;
-            return data.history.readTurn(id);
+            return data.history.readTurnForDisplay(id);
           },
         },
         {

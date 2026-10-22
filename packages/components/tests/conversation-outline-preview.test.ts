@@ -21,9 +21,9 @@ it('opening leaves old previews unread; hover reads the question and reply only'
   const view = createConversationViewFromReader(
     {
       ...data.history,
-      readTurn: (id) => {
+      readTurnForDisplay: (id) => {
         reads.push(id);
-        return data.history.readTurn(id);
+        return data.history.readTurnForDisplay(id);
       },
     },
     {

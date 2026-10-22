@@ -74,6 +74,13 @@ the reasoning behind those rules.
   shared `session-link-export`, preserving code examples and stored history.
   Only a known source workspace supplies a missing ID; anonymous readers do not
   borrow the viewer's workspace.
+- `plan-surface.ts` resolves plan approval text from nonempty `rawInput.plan` first,
+  then the first nonempty content text block. Claude result updates can replace
+  content with a rejection message while retaining the original plan input.
+  This also restores historical rejected cards without rewriting session data.
+  Content-only adapters retain their fallback; a separate `proposed_plan` row
+  still suppresses the card's duplicate. See the
+  [rejected-plan fix](../../../../../.agents/notes/implemented/bug-fix/2026-10-22-claude-rejected-plan-display.md).
 - `message-content-guards.ts` gates which shared `MessageContent` variants render.
 - `assistant-turn-timing.ts` builds the turn popover's timing rows (Started,
   Ended, Duration, and Last update for a running turn) and the live status
@@ -311,6 +318,14 @@ portal is outside that drawer's modal boundary: its scroll lock ate every touch
 scroll and a sideways swipe dragged the session away. So inside a
 `[data-vaul-drawer]` the dialog mounts in the drawer, `data-vaul-no-drag`,
 with a no-drag layer over its backdrop (`InMobileDrawer` story).
+
+The Loro conversation view carries display-only task metadata and a bounded latest
+step, not every child transcript. The task's non-enumerable `history` capability
+reads one exact owned run only after its detail mounts. Activity shows loading or
+retry until that read completes; a preview must never masquerade as the full run.
+Changing the selected task or closing the dialog discards late results and releases
+the full body. Static shares and other readers without this capability keep their
+already complete task data. Export/copy/replay use authoritative full readers.
 
 ## Creation progress
 

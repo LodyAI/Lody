@@ -96,6 +96,7 @@ import { getLocalProjectVisibilityKey } from '@/lib/visible-local-project-index'
 import { selectAndWriteLocalProject } from '@/lib/local-project-import';
 import { importSidebarLocalProject } from '@/components/sidebar-local-project-import';
 import { lodyPresenceNowMsAtom, lodyPresenceStatesAtom } from '@/atoms/presence';
+import { useArchiveSessionWithConfirmation } from '@/components/sessions/session-archive-confirmation';
 import {
   chatScopeAtom,
   chatsCollapsedAtom,
@@ -1960,11 +1961,12 @@ export function LoroAppSidebar({
   const presenceStates = useAtomValue(lodyPresenceStatesAtom);
   const presenceNowMs = useAtomValue(lodyPresenceNowMsAtom);
 
+  const archiveSessionWithConfirmation = useArchiveSessionWithConfirmation(archiveSession);
   const handleArchiveSession = useCallback(
     (sessionId: string) => {
-      void archiveSession(sessionId as SessionId)
-        .then(async () => {
-          if (!workspaceSlug || selectedSessionIdRef.current !== sessionId) return;
+      void archiveSessionWithConfirmation(sessionId as SessionId)
+        .then(async (archived) => {
+          if (!archived || !workspaceSlug || selectedSessionIdRef.current !== sessionId) return;
           await router.navigate({
             to: '/$workspaceName/chat',
             params: { workspaceName: workspaceSlug },
@@ -1974,7 +1976,7 @@ export function LoroAppSidebar({
           toast.error(error instanceof Error ? error.message : String(error));
         });
     },
-    [archiveSession, router, workspaceSlug]
+    [archiveSessionWithConfirmation, router, workspaceSlug]
   );
 
   const handleTogglePinSession = useCallback(

@@ -2807,16 +2807,19 @@ export class MessageHandler {
         const pathCount = Object.keys(state.fileIndex).length;
         const result = await publishCodeCollabFileIndexFlock({
           repo: this.workspaceDocument.repo,
+          signal: state.signal,
           flockDocId: getCodeCollabFileIndexFlockDocId(this.workspaceId, state.ownerSessionId),
           fileIndex: state.fileIndex,
           updatedAtMs: state.updatedAtMs,
           reconcileRemote: state.reconcileRemote,
         });
+        state.signal?.throwIfAborted();
         if (state.persistAllChangesDiffStats && state.allChangesDiffStats) {
           try {
             await this.persistCodeCollabAllChangesDiffStats(
               state.ownerSessionId,
-              state.allChangesDiffStats
+              state.allChangesDiffStats,
+              state.signal
             );
           } catch (error) {
             this.logger.debug(
@@ -2839,6 +2842,7 @@ export class MessageHandler {
         const publishStartedAtMs = Date.now();
         const result = await publishCodeCollabFileIndexSignalFlock({
           repo: this.workspaceDocument.repo,
+          signal: state.signal,
           flockDocId: getCodeCollabFileIndexSignalFlockDocId(
             this.workspaceId,
             state.ownerSessionId
@@ -6429,13 +6433,15 @@ export class MessageHandler {
 
   private async persistCodeCollabAllChangesDiffStats(
     ownerSessionId: SessionId,
-    diffStats: NonNullable<SessionMeta['diffStats']>
+    diffStats: NonNullable<SessionMeta['diffStats']>,
+    signal?: AbortSignal
   ): Promise<void> {
     const ownerRoomId = getSessionRoomId(ownerSessionId);
     const metaRecord = await this.workspaceDocument.repo.getDocMeta(ownerRoomId);
     if (!metaRecord?.meta || isLoroRepoDocDeleted(metaRecord)) {
       return;
     }
+    signal?.throwIfAborted();
     const ownerMeta = readDiffStatsMetadata(metaRecord.meta);
     const target = resolveDiffStatsTarget({ ownerRoomId, ownerMeta });
     const patch = resolveCodeCollabAllChangesDiffStatsPatch({ target, ownerMeta, diffStats });

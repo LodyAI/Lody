@@ -8,6 +8,9 @@
  *   finished on the left, the usage over running over worth continuing on the right. A list with
  *   nothing is a one-line tile, not a gap, so no tile ever changes column or disappears from
  *   under the pointer while the lists change; tiles only grow and shrink in place.
+ * - One statement when nothing happens. With every list empty, one card on the left says that
+ *   all is quiet while usage keeps its place on the right; the busy lists return the moment
+ *   anything is happening.
  * - A row budget. The board shows at most `HOME_NOW_ROW_BUDGET` rows in all. Every list with
  *   something gets one row; the rest goes by priority (needs you, running, just finished, worth
  *   continuing), each up to its own cap. When it is busy the lower lists give way first, never
@@ -38,7 +41,10 @@ export const HOME_NOW_ROW_CAP: Readonly<Record<HomeNowListKey, number>> = {
   next: 3,
 };
 
-export type HomeNowBlock = { kind: 'list'; key: HomeNowListKey; shown: number } | { kind: 'usage' };
+export type HomeNowBlock =
+  | { kind: 'list'; key: HomeNowListKey; shown: number }
+  | { kind: 'usage' }
+  | { kind: 'quiet' };
 
 /**
  * The fixed column of each list. What waits on the person's reply (needs you, just finished)
@@ -54,8 +60,8 @@ const HOME_NOW_COLUMN: Readonly<Record<HomeNowListKey, 0 | 1>> = {
 };
 
 /**
- * Two halves, always. `fits` is false when even one row per list is taller than `maxRows`; the
- * columns are then that smallest layout.
+ * Two halves when usage is present. `fits` is false when even one row per list is taller than
+ * `maxRows`; the columns are then that smallest layout.
  */
 export type HomeNowLayout = { columns: HomeNowBlock[][]; fits: boolean };
 
@@ -89,6 +95,7 @@ export function allocateHomeNowRows(
  */
 export function homeNowBlockHeight(block: HomeNowBlock, totals: HomeNowTotals): number {
   if (block.kind === 'usage') return 4;
+  if (block.kind === 'quiet') return 3;
   return 2 + block.shown + (totals[block.key] > block.shown ? 1 : 0);
 }
 
@@ -98,8 +105,15 @@ function columnHeight(column: readonly HomeNowBlock[], totals: HomeNowTotals): n
 
 function placeHomeNow(
   shown: Record<HomeNowListKey, number>,
-  hasUsage: boolean
+  hasUsage: boolean,
+  nothingHappening: boolean
 ): HomeNowBlock[][] {
+  // Nothing at all is happening: one statement about it, instead of four empty lists.
+  if (nothingHappening) {
+    const columns: HomeNowBlock[][] = [[{ kind: 'quiet' }]];
+    if (hasUsage) columns.push([{ kind: 'usage' }]);
+    return columns;
+  }
   const columns: HomeNowBlock[][] = [[], hasUsage ? [{ kind: 'usage' }] : []];
   for (const key of HOME_NOW_LISTS) {
     columns[HOME_NOW_COLUMN[key]]!.push({ kind: 'list', key, shown: shown[key] });
@@ -146,9 +160,10 @@ export function layoutHomeNow(
   maxRows: number = Number.POSITIVE_INFINITY
 ): HomeNowLayout {
   const lists = HOME_NOW_LISTS.filter((key) => totals[key] > 0).length;
+  const nothingHappening = lists === 0;
   let columns: HomeNowBlock[][] = [];
   for (let budget = HOME_NOW_ROW_BUDGET; budget >= lists; budget -= 1) {
-    columns = placeHomeNow(allocateHomeNowRows(totals, budget), hasUsage);
+    columns = placeHomeNow(allocateHomeNowRows(totals, budget), hasUsage, nothingHappening);
     const tallest = Math.max(...columns.map((column) => columnHeight(column, totals)));
     if (tallest <= maxRows) {
       levelHomeNow(columns, totals);

@@ -1,3 +1,4 @@
+import type { SubagentRunHistorySource } from '@/lib/conversation-view/types';
 import { useTranslation } from 'react-i18next';
 import type { TFunction } from 'i18next';
 import type { MessageContent } from '@lody/shared';
@@ -10,6 +11,8 @@ import { formatToolCommand } from './tool-call-command';
 export type SubagentTask = Extract<MessageContent, { type: 'subagent_task' }> & {
   /** Derived from the spawning tool in this turn; never persisted as task metadata. */
   command?: string;
+  /** Present only on a display projection. Its run.items is a latest-step preview. */
+  history?: SubagentRunHistorySource;
 };
 type SubagentRunItem = NonNullable<SubagentTask['run']>['items'][number];
 
@@ -54,7 +57,7 @@ export const collectSubagentTasks = (items: readonly MessageContent[]): Subagent
   }
   return [...byId.values()].map((task) => {
     const command = isBashTask(task) && task.toolUseId ? commands.get(task.toolUseId) : undefined;
-    return command ? { ...task, command } : task;
+    return command ? { ...task, command, history: task.history } : task;
   });
 };
 

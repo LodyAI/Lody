@@ -1,11 +1,12 @@
 import type { LoroRepo } from 'loro-repo';
 import { getSessionIdFromRoomId, SESSION_DOC_PREFIX } from './index';
 import { isLoroRepoDocDeleted } from './repo-doc-meta';
-import { collectSessionArchiveTargets } from './session-archive-targets';
+import { collectSessionArchiveTargets, collectSessionTreeTargets } from './session-archive-targets';
 import type { SessionId } from './ids';
 import type { SessionMeta } from './schema';
 
-export type SessionOperation = 'archive' | 'restore' | 'delete' | 'collaboration';
+/** `archive-tree` also archives opened Sessions; only an explicit user choice selects it. */
+export type SessionOperation = 'archive' | 'archive-tree' | 'restore' | 'delete' | 'collaboration';
 
 /**
  * Caller establishes source readiness before this read. Root and descendants
@@ -43,8 +44,8 @@ export async function readSessionOperationTargets(
   }
 
   const descendants =
-    operation === 'collaboration'
-      ? collectSessionCollaborationTargets(sessionId, sessions)
+    operation === 'collaboration' || operation === 'archive-tree'
+      ? collectSessionTreeTargets(sessionId, sessions)
       : operation === 'archive'
         ? collectSessionArchiveTargets(sessionId, sessions)
         : sessions.filter(
@@ -69,29 +70,4 @@ export async function isSessionCollaborationStopped(
     current = meta.parentSessionId ?? meta.openedBySessionId;
   }
   return false;
-}
-
-/** Explicit collaboration stop includes opened work, unlike archive/restore/delete. */
-function collectSessionCollaborationTargets(
-  sessionId: SessionId,
-  sessions: readonly SessionMeta[]
-): SessionMeta[] {
-  const children = new Map<SessionId, SessionMeta[]>();
-  for (const session of sessions) {
-    const parentId = session.parentSessionId ?? session.openedBySessionId;
-    if (!parentId) continue;
-    const siblings = children.get(parentId) ?? [];
-    siblings.push(session);
-    children.set(parentId, siblings);
-  }
-  const visited = new Set<SessionId>([sessionId]);
-  const targets: SessionMeta[] = [];
-  for (const parentId of visited) {
-    for (const child of children.get(parentId) ?? []) {
-      if (visited.has(child.id)) continue;
-      visited.add(child.id);
-      targets.push(child);
-    }
-  }
-  return targets;
 }

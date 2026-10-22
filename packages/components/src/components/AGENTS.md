@@ -48,8 +48,9 @@ Child directories (`sessions/`, `mobile/`, …) own their own rules.
   Opener Session", `SessionHeaderMenu.openedByRelations`, and conversation cards for
   successful create Operations / the precise opener. Mobile lists use the same two
   fields and per-bucket tree without disclosure, per [mobile/AGENTS.md](mobile/AGENTS.md).
-- Follow the [Session relation Spec](../../../../specs/session-relations.md): root archive includes
-  contained Tabs/opened Sessions; restore and permanent delete include direct child Tabs only.
+- Follow the [Session relation Spec](../../../../specs/session-relations.md): archive includes
+  contained Tabs; opened Sessions only via `useArchiveSessionWithConfirmation`'s explicit choice.
+  Restore and permanent delete include direct child Tabs only.
   `deleteArchivedSession` needs complete metadata; `deleteSessions(ids)` deletes those ids exactly,
   without relation discovery. Nested child Sessions are unsupported. Preserve opener provenance;
   expose reverse navigation only when opener and root resolve after hydration. See

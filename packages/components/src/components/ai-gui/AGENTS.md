@@ -35,11 +35,11 @@ Ownership: [README.md](README.md).
   streaming turns stay expanded.
 - The final answer is the contiguous text run before trailing never-collapsed
   items. Walk backward over adjacent text blocks to the first non-text boundary.
-- Plan approval cuts an `AssistantTurnRenderSegment` in a live turn. Match ACP
-  kind `switch_mode`, never a title (`plan-surface.ts`). Keep `workBlockKeys`,
-  `hasVisibleFinalContent`, last-item visibility and `expandedWorkedGroups` per
-  segment; expansion keys include it. Only the last segment shows duration;
-  earlier ones say "Finished working".
+- Plan approval cuts a live turn by ACP kind `switch_mode`, never title.
+  `plan-surface.ts` prefers nonempty `rawInput.plan` over replaceable tool content.
+  Keep `workBlockKeys`, `hasVisibleFinalContent`, last-item visibility and expansion
+  keys per segment. Only the last segment shows duration; earlier segments say
+  "Finished working".
 - `shouldUseWorkedGroup` requires a finished turn, foldable work, and visible
   final content outside `workBlockKeys`. A cancelled/interrupted or tool-only
   turn with no answer stays expanded; `message.finished` cannot prove
@@ -82,10 +82,10 @@ Ownership: [README.md](README.md).
 
 ## Content Contracts
 
-- Child cancel needs subagentCancellation v1 and an exact parent turn; never
-  Stop the parent or invent terminal state. Runs also need subagentEvents v1
-  and `support.cancel`. Dialogs share turn renderers/grouping and one scroller:
-  [task rows and dialog](README.md#subagent-tasks).
+- Child cancel requires subagentCancellation/subagentEvents v1, `support.cancel`
+  and an exact parent turn; never Stop the parent or invent state. Dialogs reuse
+  parent renderers/grouping, one scroller, and read run bodies only while open:
+  [task/dialog contract](README.md#subagent-tasks).
 
 - Text roles: `@lody/ui`; prose: `conversation.readingLeading`; compact prose/code:
   subheadline, no nested `em`. Message sizes: `conversation-font-size-classes.ts`;

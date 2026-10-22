@@ -16,9 +16,7 @@ import {
 import {
   deriveLocationsFromRawInput,
   deriveLocationsFromToolCallContent,
-  stripRawOutputImagesForHistory,
   stripToolCallContentForHistory,
-  stripToolCallPayloadsForHistory,
 } from './tool-call-history';
 import {
   parseLodyTaskMeta,
@@ -1312,6 +1310,138 @@ export const targetLocalToolCallIds = (
     : undefined;
 };
 
+/** One storage projection for root and normalized child tools, before any CRDT write. */
+const buildToolCallMessageForHistory = (
+  update: Extract<
+    AcpSessionNotification['update'],
+    { sessionUpdate: 'tool_call' | 'tool_call_update' }
+  >,
+  previousTool?: ToolCallMessage
+): ToolCallMessage => {
+  const kind = (update.kind ?? previousTool?.kind) as ToolKind | null | undefined;
+
+  // `update.content` is untrusted and provider-dependent; some tools include whole file
+  // contents or full old/new text. Strip those early so we never persist them.
+  let baseContent: StoredToolCallContent = update.content ? [...update.content] : [];
+  baseContent = stripToolCallContentForHistory(kind, baseContent);
+
+  // Extract structured terminal command/output from implementation-specific fields.
+  //
+  // rawInput → terminal_command block
+  // _meta.claudeCode.toolResponse / rawOutput → terminal_output blocks
+  //
+  // For file reads, `rawOutput` is usually the full file text; we intentionally do NOT
+  // persist that into session history.
+  //
+  // Priority for terminal output extraction:
+  // 1. Claude Code _meta.claudeCode.toolResponse (v0.19+: {stdout, stderr, ...})
+  // 2. Codex rawOutput (object: {aggregated_output, exit_code, ...})
+  // 3. Claude Code rawOutput (v0.19+: plain string)
+  let derivedCommand = extractTerminalCommandContent(update.rawInput, kind);
+
+  // Fallback: some agents (e.g., Kimi) put the command as JSON in content blocks
+  // instead of rawInput. Try to extract it from content when rawInput yields nothing.
+  if (derivedCommand.length === 0) {
+    derivedCommand = extractTerminalCommandFromContent(baseContent);
+  }
+
+  let derivedOutput: StoredToolCallContent = [];
+  if (kind !== 'read') {
+    // Prefer _meta.claudeCode.toolResponse for Claude Code tools (has separate stdout/stderr)
+    const meta = (update as ToolCallUpdateWithMeta)._meta;
+    if (isClaudeCodeTool(meta)) {
+      derivedOutput = extractClaudeCodeTerminalOutputContent(meta);
+    }
+
+    // Fallback to rawOutput (Codex object format or Claude Code plain string for execute tools)
+    if (derivedOutput.length === 0) {
+      derivedOutput = extractTerminalOutputContent(update.rawOutput, kind);
+    }
+  }
+
+  if (derivedOutput.length > 0) {
+    // ACP uses a `terminal` placeholder block to indicate that terminal output is streaming
+    // in the CLI. Once we have *any* structured terminal output (`terminal_output`) persisted
+    // in history, the placeholder becomes redundant and can cause confusing UI layouts
+    // (e.g. "streaming in your CLI" inserted between command and output).
+    baseContent = baseContent.filter((c) => c.type !== 'terminal');
+
+    // Some agents duplicate terminal output by emitting both:
+    // - `rawOutput.aggregated_output` (with real ANSI escapes), and
+    // - a fenced `content` snapshot (often with escaped sequences like `\\u001b`).
+    //
+    // Agents using ACP terminal RPCs (e.g., Kimi) put the result as plain text content
+    // blocks which are also extracted as rawOutput → terminal_output.
+    //
+    // When we have a derived terminal output, drop any content blocks whose text matches.
+    const candidateOutputs = new Set(
+      derivedOutput
+        .filter((b) => b.type === 'terminal_output')
+        .map((b) => normalizeTerminalOutputForComparison(b.output))
+    );
+    baseContent = baseContent.filter((c) => {
+      if (c.type !== 'content') return true;
+      if (!('content' in c)) return true;
+      if (c.content.type !== 'text') return true;
+      // Check fenced code blocks (Codex style)
+      const fenced = extractSingleFencedBlock(c.content.text);
+      if (fenced && candidateOutputs.has(normalizeTerminalOutputForComparison(fenced.body))) {
+        return false;
+      }
+      // Check plain text match (Kimi/Pi style: content text is identical to terminal
+      // output). Indented output such as `launchctl print` only matches untrimmed.
+      const plainText = c.content.text.trim();
+      if (
+        plainText.length > 0 &&
+        (candidateOutputs.has(normalizeTerminalOutputForComparison(plainText)) ||
+          candidateOutputs.has(normalizeTerminalOutputForComparison(c.content.text)))
+      ) {
+        return false;
+      }
+      return true;
+    });
+  }
+
+  const derived: StoredToolCallContent = [...derivedCommand, ...derivedOutput];
+  const content = compactToolCallContentForHistory([...baseContent, ...derived], { kind });
+  const explicitLocations = Array.isArray(update.locations) ? update.locations : undefined;
+  const locations =
+    explicitLocations ??
+    deriveLocationsFromToolCallContent(update.content) ??
+    deriveLocationsFromRawInput(update.rawInput);
+  // Scheduling tools are the one exception to stripping rawInput/rawOutput: the
+  // scheduled-tasks panel derives entirely from history, so it needs the schedule and
+  // the created job id. Persist them (small, stable) plus the canonical tool name the
+  // deriver switches on; `title` stays whatever the agent chose to show.
+  const toolName =
+    resolveAcpToolName((update as ToolCallUpdateWithMeta)._meta) ?? previousTool?.toolName;
+  const activityKind = getToolCallActivityKind((update as ToolCallUpdateWithMeta)._meta);
+  const isSchedulingTool = toolName !== undefined && SCHEDULING_TOOL_NAMES.has(toolName);
+  const input = asRecordOrUndefined(update.rawInput);
+  return {
+    type: 'tool_call',
+    toolCallId: update.toolCallId,
+    title: truncateToolTitleForHistory(update.title),
+    toolName,
+    kind: kind ?? undefined,
+    status: update.status ?? previousTool?.status ?? 'pending',
+    content: content.length ? content : undefined,
+    locations,
+    // Generic ACP rawInput/rawOutput is excluded because it is unstructured by spec;
+    // scheduling tools keep theirs, and mode switches retain only the displayed plan.
+    rawInput: isSchedulingTool
+      ? input
+      : kind === 'switch_mode' && typeof input?.plan === 'string'
+        ? { plan: input.plan }
+        : undefined,
+    rawOutput: isSchedulingTool ? asRecordOrUndefined(update.rawOutput) : undefined,
+    // Cron is local-time to this machine — record its zone so the panel resolves the
+    // fire time in the right timezone regardless of where it is later viewed.
+    schedulingTimeZone: isSchedulingTool ? resolveMachineTimeZone() : undefined,
+    activityKind,
+  };
+};
+
 export const buildMessageContentFromNotification = (
   message: AcpSessionNotification,
   previousTool?: ToolCallMessage
@@ -1352,125 +1482,7 @@ export const buildMessageContentFromNotification = (
       const subagentTasks = toolUpdateSubagentTasks(update);
       if (subagentTasks.length > 0) return subagentTasks;
 
-      const kind = (update.kind ?? previousTool?.kind) as ToolKind | null | undefined;
-
-      // `update.content` is untrusted and provider-dependent; some tools include whole file
-      // contents or full old/new text. Strip those early so we never persist them.
-      let baseContent: StoredToolCallContent = update.content ? [...update.content] : [];
-      baseContent = stripToolCallContentForHistory(kind, baseContent);
-
-      // Extract structured terminal command/output from implementation-specific fields.
-      //
-      // rawInput → terminal_command block
-      // _meta.claudeCode.toolResponse / rawOutput → terminal_output blocks
-      //
-      // For file reads, `rawOutput` is usually the full file text; we intentionally do NOT
-      // persist that into session history.
-      //
-      // Priority for terminal output extraction:
-      // 1. Claude Code _meta.claudeCode.toolResponse (v0.19+: {stdout, stderr, ...})
-      // 2. Codex rawOutput (object: {aggregated_output, exit_code, ...})
-      // 3. Claude Code rawOutput (v0.19+: plain string)
-      let derivedCommand = extractTerminalCommandContent(update.rawInput, kind);
-
-      // Fallback: some agents (e.g., Kimi) put the command as JSON in content blocks
-      // instead of rawInput. Try to extract it from content when rawInput yields nothing.
-      if (derivedCommand.length === 0) {
-        derivedCommand = extractTerminalCommandFromContent(baseContent);
-      }
-
-      let derivedOutput: StoredToolCallContent = [];
-      if (kind !== 'read') {
-        // Prefer _meta.claudeCode.toolResponse for Claude Code tools (has separate stdout/stderr)
-        const meta = (update as ToolCallUpdateWithMeta)._meta;
-        if (isClaudeCodeTool(meta)) {
-          derivedOutput = extractClaudeCodeTerminalOutputContent(meta);
-        }
-
-        // Fallback to rawOutput (Codex object format or Claude Code plain string for execute tools)
-        if (derivedOutput.length === 0) {
-          derivedOutput = extractTerminalOutputContent(update.rawOutput, kind);
-        }
-      }
-
-      if (derivedOutput.length > 0) {
-        // ACP uses a `terminal` placeholder block to indicate that terminal output is streaming
-        // in the CLI. Once we have *any* structured terminal output (`terminal_output`) persisted
-        // in history, the placeholder becomes redundant and can cause confusing UI layouts
-        // (e.g. "streaming in your CLI" inserted between command and output).
-        baseContent = baseContent.filter((c) => c.type !== 'terminal');
-
-        // Some agents duplicate terminal output by emitting both:
-        // - `rawOutput.aggregated_output` (with real ANSI escapes), and
-        // - a fenced `content` snapshot (often with escaped sequences like `\\u001b`).
-        //
-        // Agents using ACP terminal RPCs (e.g., Kimi) put the result as plain text content
-        // blocks which are also extracted as rawOutput → terminal_output.
-        //
-        // When we have a derived terminal output, drop any content blocks whose text matches.
-        const candidateOutputs = new Set(
-          derivedOutput
-            .filter((b) => b.type === 'terminal_output')
-            .map((b) => normalizeTerminalOutputForComparison(b.output))
-        );
-        baseContent = baseContent.filter((c) => {
-          if (c.type !== 'content') return true;
-          if (!('content' in c)) return true;
-          if (c.content.type !== 'text') return true;
-          // Check fenced code blocks (Codex style)
-          const fenced = extractSingleFencedBlock(c.content.text);
-          if (fenced && candidateOutputs.has(normalizeTerminalOutputForComparison(fenced.body))) {
-            return false;
-          }
-          // Check plain text match (Kimi/Pi style: content text is identical to terminal
-          // output). Indented output such as `launchctl print` only matches untrimmed.
-          const plainText = c.content.text.trim();
-          if (
-            plainText.length > 0 &&
-            (candidateOutputs.has(normalizeTerminalOutputForComparison(plainText)) ||
-              candidateOutputs.has(normalizeTerminalOutputForComparison(c.content.text)))
-          ) {
-            return false;
-          }
-          return true;
-        });
-      }
-
-      const derived: StoredToolCallContent = [...derivedCommand, ...derivedOutput];
-      const content = compactToolCallContentForHistory([...baseContent, ...derived], { kind });
-      const explicitLocations = Array.isArray(update.locations) ? update.locations : undefined;
-      const locations =
-        explicitLocations ??
-        deriveLocationsFromToolCallContent(update.content) ??
-        deriveLocationsFromRawInput(update.rawInput);
-      // Scheduling tools are the one exception to stripping rawInput/rawOutput: the
-      // scheduled-tasks panel derives entirely from history, so it needs the schedule and
-      // the created job id. Persist them (small, stable) plus the canonical tool name the
-      // deriver switches on; `title` stays whatever the agent chose to show.
-      const toolName =
-        resolveAcpToolName((update as ToolCallUpdateWithMeta)._meta) ?? previousTool?.toolName;
-      const activityKind = getToolCallActivityKind((update as ToolCallUpdateWithMeta)._meta);
-      const isSchedulingTool = toolName !== undefined && SCHEDULING_TOOL_NAMES.has(toolName);
-      return [
-        {
-          type: 'tool_call',
-          toolCallId: update.toolCallId,
-          title: truncateToolTitleForHistory(update.title),
-          toolName,
-          kind: kind ?? undefined,
-          status: update.status ?? previousTool?.status ?? 'pending',
-          content: content.length ? content : undefined,
-          locations,
-          // Generic ACP rawInput/rawOutput is excluded because it is unstructured by spec;
-          // scheduling tools keep theirs (see SCHEDULING_TOOL_NAMES).
-          rawInput: isSchedulingTool ? asRecordOrUndefined(update.rawInput) : undefined,
-          rawOutput: isSchedulingTool ? asRecordOrUndefined(update.rawOutput) : undefined,
-          // Cron is local-time to this machine — record its zone so the panel resolves the
-          // fire time in the right timezone regardless of where it is later viewed.
-          schedulingTimeZone: isSchedulingTool ? resolveMachineTimeZone() : undefined,
-          activityKind,
-        },
-      ];
+      return [buildToolCallMessageForHistory(update, previousTool)];
     }
     case 'plan':
       // Plan is now stored as a field on the history entry, not as a MessageContent item.
@@ -1797,56 +1809,12 @@ class NotificationOnHistoryApplier {
         );
         const previous = run.items[index];
         const tool = previous?.type === 'tool_call' ? previous : undefined;
-        const input = asRecordOrUndefined(update.rawInput);
-        // Keep child diffs and read results for the detail view, but discard tool
-        // images just as the parent history does.
+        const incoming = this.stampSchedulingToolCall(buildToolCallMessageForHistory(update, tool));
         const content: Extract<SubagentRunItem, { type: 'tool_call' }> = {
-          ...tool,
+          ...(tool ? mergeToolCallMessage(tool, incoming, update.content != null) : incoming),
           ...(identity.nativeTurnId !== undefined ? { nativeTurnId: identity.nativeTurnId } : {}),
           ...(identity.messageId !== undefined ? { messageId: identity.messageId } : {}),
-          type: 'tool_call',
-          toolCallId: update.toolCallId,
-          status: update.status ?? tool?.status ?? 'pending',
-          title: truncateToolTitleForHistory(update.title ?? tool?.title),
-          kind: update.kind ?? tool?.kind,
-          content:
-            update.content != null
-              ? stripToolCallPayloadsForHistory(update.content)
-              : tool?.content,
-          locations: update.locations ?? tool?.locations,
-          // Plan approval is the UI's sole child raw-input consumer.
-          rawInput:
-            update.rawInput != null
-              ? typeof input?.plan === 'string'
-                ? { plan: input.plan }
-                : undefined
-              : tool?.rawInput,
-          rawOutput: asRecordOrUndefined(update.rawOutput) ?? tool?.rawOutput,
-          toolName: resolveAcpToolName(update._meta) ?? tool?.toolName,
-          _meta: update._meta ?? tool?._meta,
         };
-        // A readable array copy becomes tool content, so its images are dropped too;
-        // an image-only result leaves no copy.
-        const raw: unknown = update.rawOutput;
-        const readable = Array.isArray(raw) ? stripRawOutputImagesForHistory(raw) : undefined;
-        const imageOnly = readable?.length === 0 && (raw as unknown[]).length > 0;
-        const value = readable ?? raw;
-        if (value != null && !imageOnly && !asRecordOrUndefined(value)) {
-          // Keep the readable copy; the old _meta.lody.subagentRaw duplicate
-          // had no consumer. Preserve full text and arrays, without new limits.
-          const text = typeof value === 'string' ? value : JSON.stringify(value);
-          const blocks = content.content ?? [];
-          if (
-            !blocks.some(
-              (block) =>
-                block.type === 'content' &&
-                block.content.type === 'text' &&
-                block.content.text === text
-            )
-          ) {
-            content.content = [...blocks, { type: 'content', content: { type: 'text', text } }];
-          }
-        }
         if (index >= 0) run.items[index] = content;
         else run.items.push(content);
       }

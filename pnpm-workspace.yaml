@@ -53,12 +53,12 @@ catalog:
   '@effect/platform-node-shared': 4.0.2
   jotai: ^2.16.0
   loro-adaptors: ^0.6.1
-  loro-crdt: 1.16.3
+  loro-crdt: 1.17.0
   loro-mirror: 2.3.2
   loro-mirror-jotai: 2.3.2
   loro-mirror-react: 2.3.2
   loro-protocol: ^0.3.0
-  loro-repo: 0.23.3
+  loro-repo: 0.24.0
   loro-websocket: ^0.6.2
   lucide-react: ^0.523.0
   react: 19.2.0
@@ -160,8 +160,8 @@ minimumReleaseAgeExclude:
   - vitest@5.0.2
   - '@vitest/mocker@5.0.2'
   - '@vitest/spy@5.0.2'
-  # Explicit Loro fix for concurrent-import replay stalls, reviewed in this change.
-  - loro-crdt@1.16.3
+  # Concurrent-import replay fixes plus the reviewed pending-export API in loro#1220.
+  - 'loro-crdt@1.16.3 || 1.17.0'
   # Safe error provenance and context, reviewed with loro-repo#144.
   # Native lifecycle/upload contracts reviewed in loro-streams#425; exact releases approved.
   # 0.19.1/0.12.1 stop the live-read spin after a failed flush (loro-dev/loro-streams#429).
@@ -171,7 +171,8 @@ minimumReleaseAgeExclude:
   # 0.23.1 stops Flock persistence queue amplification (loro-dev/loro-repo#154);
   # 0.23.2 serializes compaction and keeps its retries bounded (loro-dev/loro-repo#156);
   # 0.23.3 retries SQLITE_BUSY without blocking the event loop (loro-dev/loro-repo#159).
-  - 'loro-repo@0.22.0 || 0.23.0 || 0.23.1 || 0.23.2 || 0.23.3'
+  # 0.24.0 preserves received pending updates across saves and restarts (loro-dev/loro-repo#165).
+  - 'loro-repo@0.22.0 || 0.23.0 || 0.23.1 || 0.23.2 || 0.23.3 || 0.24.0'
   # Reviewed upgrade; 0.4.4 was published today once the release pipeline was fixed.
   - '@loro-dev/flock-wasm@0.4.4'
   # Adds the `remend` option the streaming Markdown renderer passes (lobehub/streamdown#5).

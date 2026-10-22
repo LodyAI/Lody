@@ -1,4 +1,5 @@
 import { Context, Deferred, Effect, Exit, Semaphore } from 'effect';
+import { InboxExecutionRejected } from './admission-failure';
 import type { InboxBatch, InboxInput, InboxMember, InboxRelease } from './model';
 import { inboxFailureDiagnostic } from './model';
 import type { InboxResourceIdentity } from './recovery';
@@ -66,12 +67,7 @@ export const makeExecutionOwner = Effect.fnUntraced(function* (
   const detach = Effect.suspend(() =>
     Effect.forEach([...resources.values()], (resource) => resource.detach, { discard: true })
   );
-  if (!(yield* inbox.begin(input, id)))
-    return yield* Effect.fail(
-      new Error(
-        'INBOX_EXECUTION_REJECTED: inspect blocked resources with lody session recover-inbox'
-      )
-    );
+  if (!(yield* inbox.begin(input, id))) return yield* Effect.fail(new InboxExecutionRejected());
   if (!batch) batch = yield* inbox.prepare(input);
   const finishWork = Effect.fnUntraced(function* (
     outcome: InboxRelease['outcome'],

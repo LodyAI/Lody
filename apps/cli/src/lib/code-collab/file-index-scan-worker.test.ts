@@ -1,3 +1,4 @@
+import { MessageChannel } from 'node:worker_threads';
 import { execFile } from 'node:child_process';
 import { chmod, mkdir, mkdtemp, readFile, rm, unlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -256,6 +257,42 @@ describe('fileIndexScanWorker', () => {
       );
     });
   });
+
+  it.runIf(process.platform !== 'win32')(
+    'cancels the worker cooperatively and reaps its Git child before returning',
+    async () => {
+      await withPlainWorkspace(async (workspaceRoot) => {
+        await withFailingFakeGit(async (fakeGitDir) => {
+          let ready: () => void = () => {};
+          const started = new Promise<void>((resolve) => {
+            ready = resolve;
+          });
+          gitCommandFailures.onCachedListingRejected = ready;
+          const { port1, port2 } = new MessageChannel();
+          const scan = fileIndexScanWorker({
+            directoryAbsolutePath: workspaceRoot,
+            directoryWorkspacePath: '',
+            maxRawTextBytes: 1024,
+            entryBudget: 1000,
+            recursive: true,
+            cancellationPort: port2,
+          });
+          const cancelled = expect(scan).rejects.toThrow();
+          await started;
+          const pid = Number(await readFile(path.join(fakeGitDir, 'deleted.pid'), 'utf8'));
+          expect(isProcessPresent(pid)).toBe(true);
+          port1.postMessage('abort');
+          try {
+            await cancelled;
+            expect(isProcessPresent(pid)).toBe(false);
+          } finally {
+            port1.close();
+            port2.close();
+          }
+        });
+      });
+    }
+  );
 
   it.runIf(process.platform !== 'win32')(
     'joins the sibling Git listing before falling back when one listing fails',

@@ -1,3 +1,5 @@
+import type { MessageContent } from '../ai';
+
 import type { HistoryAction } from './history-actions';
 import type { SessionGoalMessage } from '../goal';
 import type { PermissionOutcome, SessionHistoryChanges } from '../message';
@@ -5,6 +7,10 @@ import type { SessionId } from '../ids';
 import type { HistoryImportInput } from './history-import';
 import type { SessionSnapshotService } from './snapshot';
 import type { SessionEntry, SessionDirectoryRow, SessionTurn, SessionTurnRead } from './domain';
+
+export type SessionSubagentRun = NonNullable<
+  Extract<MessageContent, { type: 'subagent_task' }>['run']
+>;
 
 // History reads and shared writes use domain DTOs rather than the storage schema.
 // Ordinary commands propagate errors. Import and editable-tail replacement
@@ -169,6 +175,16 @@ export interface SessionHistoryReader {
   readAt(position: number): SessionTurnRead | Promise<SessionTurnRead>;
   /** Authoritative read of one business turn id. */
   readTurn(turnId: string): SessionTurnRead | Promise<SessionTurnRead>;
+  /** Display-only turn: run.items contains at most the latest step's small
+   * summary, not a transcript. Never use this for export, copy, hashes or writes.
+   * Advertise only together with readSubagentRun. */
+  readTurnForDisplay?(turnId: string): SessionTurnRead | Promise<SessionTurnRead>;
+  /** Read exactly one run from its owning turn, preserving root ACP identity. */
+  readSubagentRun?(
+    turnId: string,
+    sessionId: string,
+    runId: string
+  ): SessionSubagentRun | undefined | Promise<SessionSubagentRun | undefined>;
   /** Authoritative read of raw slots `[from, to)`. */
   readRange(
     from: number,

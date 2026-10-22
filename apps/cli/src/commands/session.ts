@@ -1036,7 +1036,7 @@ async function checkSessionTurnQuotaAndReadHistory(args: {
 export async function runSessionOperationWithSyncedMetadata(
   manager: LoroDocumentManager,
   sessionId: SessionId,
-  operation: SessionOperation
+  operation: Extract<SessionOperation, 'archive' | 'restore' | 'delete'>
 ): Promise<SessionId[]> {
   const reason = `session.${operation}:${sessionId}`;
   await syncWorkspaceMetaForRead(manager, `${reason}:prewrite`);

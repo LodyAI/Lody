@@ -2535,6 +2535,7 @@ describe('Production Roost history semantics', () => {
         const visible = peerDocs.map(() => Promise.withResolvers<void>());
         vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
         const ticks: number[] = [];
+        const watchTimeouts: (() => void)[] = [];
         let timerReady = Promise.withResolvers<void>();
         const setTimer = globalThis.setTimeout;
         vi.spyOn(globalThis, 'setTimeout').mockImplementation((...args) => {
@@ -2545,6 +2546,7 @@ describe('Production Roost history semantics', () => {
             ticks.push(args[1]);
             timerReady.resolve();
           }
+          if (args[1] === 15_000) watchTimeouts.push(() => args[0]());
           return timer;
         });
         for (const [index, peerDoc] of peerDocs.entries()) {
@@ -2626,6 +2628,14 @@ describe('Production Roost history semantics', () => {
         }
         await host.flushACPUpdatesNow(sessionId);
         expect(host.store.get(sessionId).acpUpdateBuffer).toEqual([]);
+        if (lostNativeReply) {
+          // A committed write whose reply is lost can miss the owner wakeup.
+          // Release the already parked watches through their timeout callback:
+          // fake time must not leave this production recovery path frozen, and
+          // advancing the global clock could expire unrelated RPC deadlines.
+          expect(watchTimeouts).toHaveLength(2);
+          watchTimeouts.forEach((expire) => expire());
+        }
         const displayed = Promise.all(visible.map((result) => result.promise));
         for (;;) {
           const outcome = await Promise.race([

@@ -141,10 +141,23 @@ async function syncMeta(tab: Tab) {
   }
 }
 
+/** Drain cooperative zero-delay tasks without advancing snapshot debounce timers. */
+async function settle<T>(operation: Promise<T>, timeout = 5_000): Promise<T> {
+  if (!vi.isFakeTimers()) return await operation;
+  const completion = operation.then(
+    (value) => ({ value }),
+    (error: unknown) => ({ error })
+  );
+  const result = await vi.waitFor(() => completion, { interval: 0, timeout });
+  if ('error' in result) throw result.error;
+  return result.value;
+}
+
 afterEach(async () => {
-  for (const transport of openTransports) await transport.close();
+  for (const transport of openTransports)
+    await settle(transport.close(), 10_000);
   openTransports.clear();
-  for (const tab of openTabs) await tab.repo.destroy();
+  for (const tab of openTabs) await settle(tab.repo.destroy(), 10_000);
   openTabs.clear();
   vi.unstubAllGlobals();
   vi.useRealTimers();
@@ -708,13 +721,13 @@ describe('workspace Streams content boundary', () => {
     });
     const transport = transportFor(tab, content);
     const subscription = transport.joinDocRoom('doc-a', doc);
-    await subscription.firstSyncedWithRemote;
+    await settle(subscription.firstSyncedWithRemote);
     const path = new URL(docUrl(tab.workspaceId, 'doc-a')).pathname;
     for (const nextPermission of ['deny', 'throw', 'allow'] as const) {
       permission = nextPermission;
       doc.getMap('data').set('value', permission);
       doc.commit();
-      await subscription.waitUntilSynced();
+      await settle(subscription.waitUntilSynced());
       await vi.advanceTimersByTimeAsync(10);
       if (permission !== 'allow') expect(server.room(path).snapshot).toBeUndefined();
     }
@@ -725,7 +738,7 @@ describe('workspace Streams content boundary', () => {
     const reader = await openTab(`snapshot-reader-${++sequence}` as WorkspaceId);
     reader.workspaceId = tab.workspaceId;
     const restored = (await reader.repo.openPersistedDoc('doc-a')).doc;
-    expect((await transportFor(reader, content).syncDoc('doc-a', restored)).ok).toBe(true);
+    expect((await settle(transportFor(reader, content).syncDoc('doc-a', restored))).ok).toBe(true);
     expect(restored.toJSON()).toEqual({ data: { value: 'allow' } });
     subscription.unsubscribe();
   });
@@ -736,7 +749,7 @@ describe('workspace Streams content boundary', () => {
     const tab = await openTab(`ordinary-upload-${++sequence}` as WorkspaceId);
     const doc = (await tab.repo.openPersistedDoc('doc-a')).doc;
     const subscription = transportFor(tab).joinDocRoom('doc-a', doc);
-    await subscription.firstSyncedWithRemote;
+    await settle(subscription.firstSyncedWithRemote);
     let seed = 123456;
     const text = Array.from({ length: 200_000 }, () => {
       seed ^= seed << 13;
@@ -746,7 +759,7 @@ describe('workspace Streams content boundary', () => {
     }).join('');
     doc.getMap('data').set('text', text);
     doc.commit();
-    await subscription.waitUntilSynced();
+    await settle(subscription.waitUntilSynced());
     const path = new URL(docUrl(tab.workspaceId, 'doc-a')).pathname;
     expect(Number(server.tail(path))).toBeGreaterThan(102400);
     await vi.advanceTimersByTimeAsync(10_000);
@@ -1109,10 +1122,10 @@ describe('P10 public crypto and published SDK preparation', () => {
         snapshotUpload: { canUpload: () => true, debounceMs: 10, minBytesSinceRemoteSnapshot: 0 },
       });
       const subscription = transportFor(writer, content).joinDocRoom('doc-a', doc);
-      await subscription.firstSyncedWithRemote;
+      await settle(subscription.firstSyncedWithRemote);
       doc.getMap('data').set('snapshot', 'verified before decompression');
       doc.commit();
-      await subscription.waitUntilSynced();
+      await settle(subscription.waitUntilSynced());
       await vi.advanceTimersByTimeAsync(10);
       const url = docUrl(writer.workspaceId, 'doc-a');
       const snapshot = server.room(new URL(url).pathname).snapshot;
@@ -1172,14 +1185,14 @@ describe('P10 public crypto and published SDK preparation', () => {
           },
         },
       });
-      const result = await transportFor(reader, readerContent, {
+      const result = await settle(transportFor(reader, readerContent, {
         load: (key) => cursor.load(key),
         async save(value) {
           const disk = await openTab(readerId);
           expect((await disk.repo.openPersistedDoc('doc-a')).doc.toJSON()).toEqual(doc.toJSON());
           await cursor.save(value);
         },
-      }).syncDoc('doc-a', restored);
+      }).syncDoc('doc-a', restored));
       expect(result.ok).toBe(fault === 'valid');
       if (fault === 'valid') {
         expect(decompressed).toHaveLength(1);

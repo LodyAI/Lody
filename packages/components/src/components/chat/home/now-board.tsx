@@ -44,7 +44,7 @@ import {
 } from './tiles';
 
 const styles = stylex.create({
-  /* The board is two stacked columns, each list in its fixed one (`layoutHomeNow`). */
+  /* The board is two stacked columns, or one spanning both (a lone card). */
   columns: {
     display: 'grid',
     gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
@@ -52,6 +52,7 @@ const styles = stylex.create({
     gap: space[1.5],
     width: '100%',
   },
+  columnsSingle: { gridTemplateColumns: 'minmax(0, 1fr)' },
   column: { display: 'flex', flexDirection: 'column', gap: space[1.5], minWidth: 0 },
   /* The usage and the Codex reset side by side, inside one column. */
   usagePair: {
@@ -241,10 +242,14 @@ const styles = stylex.create({
   },
   body: { display: 'flex', flexDirection: 'column', gap: '1px', minWidth: 0 },
   pressable: { cursor: 'pointer' },
+  /* The quiet card's head: the mark and the words on one line. */
+  quietHead: { display: 'flex', alignItems: 'center', gap: space[2], minWidth: 0 },
   summary: { display: 'inline-flex', alignItems: 'center', gap: space[2], minWidth: 0 },
   summaryPart: { display: 'inline-flex', alignItems: 'center', gap: '3px' },
   /* Nothing of its kind: the part keeps its place in the line, faded. */
   summaryZero: { opacity: 0.45 },
+  /* Nothing at all is happening: one quiet phrase, in the same place the counters were. */
+  summaryQuiet: { color: colors.secondaryLabel },
 });
 
 const REASON_GLYPH: Record<HomeNowReason, { glyph: LucideIcon | null; tone: stylex.StyleXStyles }> =
@@ -552,6 +557,7 @@ export function NowBoard({
   maxRows?: number;
   onOpenSession?: (sessionId: string) => void;
 }) {
+  const { t } = useTranslation();
   const stageRef = useRef<HTMLDivElement>(null);
   const boardRef = useRef<HTMLDivElement>(null);
   const frameRef = useRef<HTMLDivElement>(null);
@@ -659,6 +665,18 @@ export function NowBoard({
             />
           </div>
         );
+      case 'quiet':
+        return (
+          <Tile key="quiet" testId="home-now-quiet">
+            <div {...stylex.props(styles.quietHead)}>
+              <CircleCheck aria-hidden="true" {...stylex.props(styles.glyph, styles.good)} />
+              <p {...stylex.props(tileStyles.value)}>{t('home.now.quiet', 'All quiet')}</p>
+            </div>
+            <p {...stylex.props(tileStyles.note)}>
+              {t('home.now.quietNote', 'Nothing is running or waiting on you.')}
+            </p>
+          </Tile>
+        );
       case 'list':
         return (
           <NowList
@@ -678,7 +696,7 @@ export function NowBoard({
   const away = opened != null && !closing;
   return (
     <div ref={stageRef} data-testid="home-now" data-focus={opened?.key}>
-      <div {...stylex.props(styles.columns)}>
+      <div {...stylex.props(styles.columns, layout.columns.length === 1 && styles.columnsSingle)}>
         {layout.columns.map((column, index) => {
           // The column the opened list belongs to: it opens over this column only.
           const holds =
@@ -724,6 +742,11 @@ export function NowBoard({
  * What "now" says in the line: how many things need the person, how many agents run, how many
  * finished. All three always keep their places (a zero fades), so the line never changes shape
  * while the counts change.
+ *
+ * With nothing at all happening, the three zeros are noise: they read as three failures rather
+ * than as a quiet page. Then the line says so in one quiet phrase instead, and the shape of the
+ * segment changes with the state — a phrase is shorter than three counters, and the line is
+ * centred under the heading, so nothing else moves.
  */
 export function NowSummary({ model }: { model: HomeNowModel }) {
   const { t } = useTranslation();
@@ -747,6 +770,16 @@ export function NowSummary({ model }: { model: HomeNowModel }) {
       label: t('home.now.finished', 'Just finished'),
     },
   ];
+  const quiet = parts.every((part) => part.count === 0);
+  if (quiet) {
+    return (
+      <span data-testid="home-now-summary" data-summary="quiet" {...stylex.props(styles.summary)}>
+        <span {...stylex.props(styles.summaryPart, styles.summaryQuiet)}>
+          {t('home.now.allCaughtUp', 'All caught up')}
+        </span>
+      </span>
+    );
+  }
   return (
     <span data-testid="home-now-summary" {...stylex.props(styles.summary)}>
       {parts.map((part) => (

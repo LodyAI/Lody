@@ -1181,11 +1181,10 @@ export class AgentClient implements acp.Client {
       this.options.onImageGenerationBegin?.({ acpSessionId, callId });
     }
 
-    // Any notification that arrives after begin (or a fresh `tool_call` with
-    // a terminal status, which upstream emits when the begin event was lost
-    // on session resume) carries the end-state payload.
-    const carriesEndPayload = !isBegin || isTerminalStatus || Array.isArray(update.content);
-    if (carriesEndPayload && status) {
+    // Publish status on begin as well as updates, even when content is omitted.
+    // This callback also carries in-progress state; it must not depend on the
+    // history schema manufacturing an empty content list.
+    if (status) {
       const contentFields = extractImageGenerationContentFields(update.content);
       const image =
         contentFields.image ??

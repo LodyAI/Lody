@@ -70,8 +70,6 @@ export type HomeWeekModel = {
   wall: HomeWeekWallCell[][];
   /** Whole percent against the seven days before, or null when there is nothing to compare. */
   delta: number | null;
-  /** Consecutive active days up to today (or yesterday while today is still empty). */
-  streak: number;
   mergedPrs: number;
   /** Sessions created in the window. */
   sessions: number;
@@ -128,16 +126,6 @@ function buildWall(input: HomeWeekInput, now: Date): HomeWeekWallCell[][] {
   );
 }
 
-function streakThrough(active: ReadonlySet<string>, now: Date): number {
-  let back = active.has(homeWeekDayKey(now)) ? 0 : 1;
-  let streak = 0;
-  while (active.has(homeWeekDayKey(localDayStart(now, back)))) {
-    streak += 1;
-    back += 1;
-  }
-  return streak;
-}
-
 /** The day a moment inside the window falls on; the window's days are given by their midnights. */
 function dayIndexOf(ms: number, dayStarts: readonly number[]): number {
   let day = dayStarts.length - 1;
@@ -185,8 +173,6 @@ export function buildHomeWeek(input: HomeWeekInput, now: Date): HomeWeekModel {
     }
   }
 
-  const active = new Set(input.activeDays);
-
   let topRepo: HomeWeekRepo | null = null;
   for (const [repo, count] of repoCounts) {
     if (!topRepo || count > topRepo.count || (count === topRepo.count && repo < topRepo.repo)) {
@@ -201,7 +187,6 @@ export function buildHomeWeek(input: HomeWeekInput, now: Date): HomeWeekModel {
     daily,
     wall: buildWall(input, now),
     delta: previousLines > 0 ? Math.round(((lines - previousLines) / previousLines) * 100) : null,
-    streak: streakThrough(active, now),
     mergedPrs,
     sessions,
     agents: [...agentCounts.values()]

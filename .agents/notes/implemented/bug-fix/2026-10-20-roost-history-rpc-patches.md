@@ -33,6 +33,13 @@ flowchart LR
 
 ## Verification and limits
 
+Test correction (2026-10-22): a lost native reply can leave an already parked
+watch without a wakeup, so recovery uses its bounded timeout. The two-replica
+fixture explicitly fires both parked watch timeout callbacks after the injected
+reply loss. Freezing those callbacks while advancing only refresh timers made
+the test depend on whether native I/O had already released a watch. This keeps
+production timing unchanged and avoids expiring unrelated RPC deadlines.
+
 The production Native SQLite and owner RPC test keeps a 352 KiB synthetic tool result unchanged while editing text 32 times. Every patched result equals the complete-body response, including Unicode scalar edits; total response JSON stays below 2% of the complete-body path. This measures streaming transfer, not database size or end-to-end latency.
 
 Production encrypted RPC tests run patch-capable and legacy readers against the same owner and verify identical text/tool output, checkpoint watches, lost-native-reply recovery and durable reopen. The frontend bridge uses the real IndexedDB cache to verify exact-base application, stale-base and invalid-path protected repair, failed repair without checkpoint advancement, and reopen. Coalesced native edits survive reopen; seals, state corrections and removal of the projection-defaulted `fileDiff` field use complete reads. Shared tests cover safe JSON keys, detached failure, immutable identity and negotiation.

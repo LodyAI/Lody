@@ -9,7 +9,12 @@ import {
 } from './model';
 
 type Repository = {
-  abandon(workspaceId: string, sessionId: string, id: string): Effect.Effect<void, unknown>;
+  abandon(
+    workspaceId: string,
+    sessionId: string,
+    id: string,
+    unlessActive?: boolean
+  ): Effect.Effect<void, unknown>;
   deactivate(workspaceId: string, owner: string): Effect.Effect<void, unknown>;
   cancelExecution(
     scope: InboxScope,
@@ -67,7 +72,12 @@ export class OperationInbox extends Context.Service<
       id: string,
       update: () => void
     ): Effect.Effect<void, unknown>;
-    abandon(workspaceId: string, sessionId: string, id: string): Effect.Effect<void, unknown>;
+    abandon(
+      workspaceId: string,
+      sessionId: string,
+      id: string,
+      unlessActive?: boolean
+    ): Effect.Effect<void, unknown>;
     wake: Effect.Effect<void>;
     quiesce: Effect.Effect<void, unknown>;
     cancelExecution(
@@ -262,10 +272,10 @@ export class OperationInbox extends Context.Service<
               )
             );
           }),
-          abandon: (targetWorkspaceId, sessionId, id) =>
+          abandon: (targetWorkspaceId, sessionId, id, unlessActive) =>
             withGate(
               { workspaceId: targetWorkspaceId, sessionId, userId: '' },
-              repo.abandon(targetWorkspaceId, sessionId, id)
+              repo.abandon(targetWorkspaceId, sessionId, id, unlessActive)
             ),
           wake,
           quiesce: submissionGate.withPermit(

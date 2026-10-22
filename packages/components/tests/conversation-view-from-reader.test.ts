@@ -1065,8 +1065,8 @@ describe('createConversationViewFromReader audit regressions', () => {
     let shouldBlock = true;
     const reader: SessionHistoryReader = {
       ...data.history,
-      readTurn: async (id) => {
-        const value = await data.history.readTurn(id);
+      readTurnForDisplay: async (id) => {
+        const value = await data.history.readTurnForDisplay(id);
         if (id === 'a-2' && shouldBlock) {
           shouldBlock = false;
           started();
@@ -1159,8 +1159,8 @@ describe('createConversationViewFromReader audit regressions', () => {
     let shouldBlock = true;
     const reader: SessionHistoryReader = {
       ...data.history,
-      readTurn: async (id) => {
-        const value = await data.history.readTurn(id);
+      readTurnForDisplay: async (id) => {
+        const value = await data.history.readTurnForDisplay(id);
         if (id === 'a-2' && shouldBlock) {
           shouldBlock = false;
           started();
@@ -1212,8 +1212,8 @@ describe('createConversationViewFromReader audit regressions', () => {
     let block = true;
     const reader: SessionHistoryReader = {
       ...data.history,
-      readTurn: async (id) => {
-        const result = await data.history.readTurn(id);
+      readTurnForDisplay: async (id) => {
+        const result = await data.history.readTurnForDisplay(id);
         if (id === 'a-2' && block) {
           block = false;
           entered();
@@ -1315,8 +1315,8 @@ describe('createConversationViewFromReader audit regressions', () => {
     let block = true;
     const reader: SessionHistoryReader = {
       ...data.history,
-      readTurn: async (id) => {
-        const result = await data.history.readTurn(id);
+      readTurnForDisplay: async (id) => {
+        const result = await data.history.readTurnForDisplay(id);
         if (id === 'a-2' && block) {
           block = false;
           entered();
@@ -1365,8 +1365,8 @@ describe('createConversationViewFromReader audit regressions', () => {
     let block = true;
     const reader: SessionHistoryReader = {
       ...data.history,
-      readTurn: async (id) => {
-        const result = await data.history.readTurn(id);
+      readTurnForDisplay: async (id) => {
+        const result = await data.history.readTurnForDisplay(id);
         if (id === 'u-2' && block) {
           block = false;
           entered();
@@ -1416,8 +1416,8 @@ describe('createConversationViewFromReader audit regressions', () => {
     let writes = 0;
     const reader: SessionHistoryReader = {
       ...data.history,
-      readTurn: async (id) => {
-        const result = await data.history.readTurn(id);
+      readTurnForDisplay: async (id) => {
+        const result = await data.history.readTurnForDisplay(id);
         if (id === 'a-2' && writes < 3) {
           writes += 1;
           await writeStoredField(data, 'a-2', 'finished', setFieldTo(writes % 2 === 0));
@@ -1456,9 +1456,9 @@ describe('createConversationViewFromReader audit regressions', () => {
     const startedA2 = new Promise<void>((resolve) => (enteredA2 = resolve));
     const reader: SessionHistoryReader = {
       ...data.history,
-      readTurn: async (id) => {
+      readTurnForDisplay: async (id) => {
         reads.set(id, (reads.get(id) ?? 0) + 1);
-        const result = await data.history.readTurn(id);
+        const result = await data.history.readTurnForDisplay(id);
         if (id === 'a-2') {
           enteredA2();
           await gateA2;
@@ -1511,9 +1511,9 @@ describe('createConversationViewFromReader audit regressions', () => {
     const reads: string[] = [];
     const reader: SessionHistoryReader = {
       ...data.history,
-      readTurn: async (id) => {
+      readTurnForDisplay: async (id) => {
         reads.push(id);
-        const result = await data.history.readTurn(id);
+        const result = await data.history.readTurnForDisplay(id);
         if (id === 'a-2') {
           entered();
           await gate;
@@ -1542,4 +1542,89 @@ describe('createConversationViewFromReader audit regressions', () => {
       doc.free();
     }
   });
+});
+
+it('keeps child bodies out of display hydration while full reads and opened run reads remain complete', async () => {
+  const doc = new LoroDoc();
+  const writer = createHistoryWriter(doc);
+  const body = 'CHILD_TRANSCRIPT_BODY '.repeat(1000);
+  writer.append({
+    id: 'owner',
+    role: 'assistant',
+    timestamp: 'synthetic',
+    items: ['a', 'b'].map((taskId) => ({
+      type: 'subagent_task',
+      taskId,
+      status: 'in_progress',
+      run: {
+        sessionId: 'root',
+        snapshot: {
+          state: 'running',
+          support: {
+            stream: ['text'],
+            progress: false,
+            cancel: false,
+            outputRead: 'none',
+          },
+        },
+        items: [
+          { type: 'text', text: body },
+          { type: 'text', text: 'Latest ' + taskId },
+        ],
+      },
+    })),
+  });
+  doc.commit();
+  const data = createLoroSessionData({ doc, sessionId: FIXTURE_SESSION_ID, writer });
+  const idle = createManualIdle();
+  const view = createConversationViewFromReader(data.history, {
+    sessionId: FIXTURE_SESSION_ID,
+    scheduleIdle: idle.scheduleIdle,
+  });
+  try {
+    await new Promise<void>((resolve) => {
+      const unsubscribe = view.subscribe((event) => {
+        if (event.kind === 'structure') {
+          unsubscribe();
+          resolve();
+        }
+      });
+    });
+    idle.runAll();
+    await view.ready;
+    const task = view.turn(0)
+      ?.items[0] as import('../src/components/ai-gui/subagent-task-state').SubagentTask;
+    expect(task.run?.items).toEqual([{ type: 'text', text: 'Latest a' }]);
+    expect(JSON.stringify(view.turn(0))).not.toContain(body);
+    const opened = await task.history?.read();
+    expect(opened?.items[0]).toEqual({ type: 'text', text: body });
+    expect(JSON.stringify(await view.readAll())).toContain(body);
+    const changed = new Promise<void>((resolve) => {
+      const unsubscribe = view.subscribe(() => {
+        const latest = (view.turn(0)?.items[0] as typeof task)?.run?.items[0];
+        if (latest?.type === 'text' && latest.text === 'Live next step') {
+          unsubscribe();
+          resolve();
+        }
+      });
+    });
+    writer.updateEntry('owner', (turn) => {
+      const first = turn.items?.[0] as typeof task;
+      first.run!.items.push({ type: 'text', text: 'Live next step' });
+      return turn;
+    });
+    doc.commit();
+    await changed;
+    const updated = view.turn(0)?.items[0] as typeof task;
+    expect(updated.run?.items).toEqual([{ type: 'text', text: 'Live next step' }]);
+    expect((await updated.history?.read())?.items.at(-1)).toEqual({
+      type: 'text',
+      text: 'Live next step',
+    });
+    view.dispose();
+    expect(await updated.history?.read()).toBeUndefined();
+  } finally {
+    view.dispose();
+    data.dispose();
+  }
 });

@@ -2174,7 +2174,9 @@ html:active-view-transition-type(home-board)::view-transition-new(home-week-segm
 }
 
 html:active-view-transition-type(home-board)::view-transition-group(home-board) {
-  overflow: clip;
+  /* Switching drifts the old and new pictures beyond this box. Clipping the group shears the
+     leading card edge until the picture arrives, so the short drift must be allowed to paint. */
+  overflow: visible;
 }
 
 html:active-view-transition-type(home-board)::view-transition-old(home-board),
