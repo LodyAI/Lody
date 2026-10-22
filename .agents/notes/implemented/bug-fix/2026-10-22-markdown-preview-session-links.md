@@ -7,29 +7,23 @@ Translation: current
 
 ## Abstract
 
-Markdown file previews rendered Session links as inert text because they lacked the context that enables chat links.
-The file viewer now enables the existing Session link provider through an explicit switch that defaults to off.
-SessionDetail derives that switch from the same navigation callback used by chat.
-Both file-provider paths dispatch exact destinations through the existing deep-link mechanism.
-Component tests cover navigation and disabled behavior. The isolated desktop rejected the synthetic file read, so desktop navigation remains unverified.
+Markdown previews lacked SessionLinkProvider, so Session links were inert.
+The viewer now reuses the chat deep-link mechanism, with navigation disabled by default.
+In a locally built desktop app, the author clicked a `lody://session/...` link in the right-panel Markdown preview and opened its target session.
 
 ## Decision and scope
 
-SessionFileContentView owns the provider around both Markdown rendering branches.
-The alternative was to wrap the viewer in SessionDetail.
-The explicit switch keeps standalone viewers disabled and permits behavioral tests at the real file-preview entry.
-The provider continues to own exact-target dispatch, as required by the [deep-link decision](../architecture/2026-09-29-lody-deep-links.md).
-The switch changes no stored state, so this correction requires no data repair.
+SessionFileContentView wraps both Markdown branches in SessionLinkProvider.
+SessionDetail enables it from the same navigation callback as chat.
+We chose viewer ownership over wrapping it in SessionDetail to test both branches at the viewer entry while keeping standalone viewers disabled.
+Exact-target dispatch follows the existing [deep-link decision](../architecture/2026-09-29-lody-deep-links.md).
 
-MarkdownRenderer, URI parsing, Electron protocol policy, file-link callbacks, and heading anchors remain unchanged.
-Relative file links retain path copying. HTTP(S) links retain external targets, and relative images retain document/provider resolution.
+MarkdownRenderer, URI parsing, Electron protocol policy, file-link callbacks, and heading anchors are unchanged.
+Relative paths still copy, HTTP(S) links open externally, and images use document/provider resolution.
 
-## Evidence and limits
+## Evidence
 
-`NODE_ENV=test pnpm --filter @lody/components exec vitest run tests/session-file-content-view.test.tsx` exercises the real viewer.
-The new cases fail against the unchanged baseline because both Session chips remain spans.
-They pass with the correction, including canonical workspace URIs, historical references, and removal of navigation capability after rendering.
-The existing relative-image case also passes.
-The former tests covered preview rendering and images but did not click Session links.
-These tests observe deep-link events. They do not establish that a desktop router completed the destination switch.
-The desktop build completed and reached the real right-panel viewer, but that viewer displayed Access denied for the synthetic local-project file.
+`NODE_ENV=test pnpm --filter @lody/components exec vitest run tests/session-file-content-view.test.tsx`
+
+The new cases fail on the unchanged baseline. With the fix, all 41 tests pass.
+Coverage includes exact URI dispatch, legacy links, disabled navigation, relative paths, external links, and images.
