@@ -19,9 +19,12 @@ admission or client recovery from an unusable remote snapshot.
 
 The [startup intent](../../specs/app-startup-landing.md) keeps destination selection
 and workspace readiness separate. Static BootShell and real `WorkspaceCard` share
-`lib/workspace-frame.ts`'s document-safe `WORKSPACE_FRAME_CSS`: an 8px gutter,
-10px radius, 0.5px border and shadow, with the real card's values mapped to UI StyleX
-tokens. The shadow is a single 1px-down, 2px-blur black layer at 3% opacity.
+`lib/workspace-frame.ts`'s document-safe `WORKSPACE_FRAME_CSS`: a 4px shell rim,
+14px concentric radius, 0.5px border and shadow, with the real card's values mapped to
+UI StyleX tokens. The rim keeps the page distinct without reading as a floating card.
+On macOS, frame-aware top rows compensate for that 4px origin so their controls retain
+the native traffic lights' y=23 centreline. The shadow is a single 1px-down, 2px-blur
+black layer at 3% opacity.
 `DocumentStyle` renders mutable React style elements and retires the inline
 first-paint sheet in a layout effect after its replacement commits. A hoisted
 `style href` ignores later content changes, so it must not own these live styles.
@@ -57,7 +60,9 @@ The outer error boundary unmounts the coordinator on failure, and
 The [handoff decision](../notes/implemented/feature/2026-10-19-boot-shell-layout-handoff.md)
 explains the retained DOM and owner-protocol trade-off, partially revising the
 [first-paint note](../notes/implemented/feature/2026-09-26-boot-shell-first-paint.md)'s
-overlay decision without changing startup guarantees.
+overlay decision without changing startup guarantees. The
+[thin-frame correction](../notes/implemented/bug-fix/2026-10-23-thin-workspace-frame.md)
+owns the current geometry and traffic-light alignment.
 
 ## Crash surfaces
 

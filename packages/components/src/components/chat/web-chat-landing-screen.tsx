@@ -113,12 +113,12 @@ export function WebChatLandingScreen({
           className={cn(
             'absolute top-3 z-20',
             WINDOW_DRAG_EXEMPT_CLASS,
-            // macOS Electron: `top-px` plus the shell card's 8px inset centers the h-7
-            // button at 23px, on the traffic-light centerline (`trafficLightPosition.y`
-            // 16 + 7px radius in apps/electron/src/main/window.ts); `left-[88px]` plus
-            // the card's 8px margin (the sidebar is hidden whenever this shows) leaves
-            // a 20px buffer after the light cluster (which ends at x=76).
-            isMacOSElectronRenderer() && !isElectronFullscreen ? 'top-px left-[88px]' : 'left-3'
+            // macOS Electron: `top-[5px]` plus the shell card's 4px rim centers the
+            // h-7 button at 23px, on the traffic-light centerline
+            // (`trafficLightPosition.y` 16 + 7px radius in apps/electron/src/main/window.ts).
+            // `left-[92px]` plus the card's 4px rim leaves a 20px buffer after the
+            // light cluster (which ends at x=76).
+            isMacOSElectronRenderer() && !isElectronFullscreen ? 'top-[5px] left-[92px]' : 'left-3'
           )}
         >
           {leftSidebarExpandSlot}
