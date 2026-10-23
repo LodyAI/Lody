@@ -1,4 +1,5 @@
-import { useTranslation } from 'react-i18next';
+import type { ReactNode } from 'react';
+import { Trans, useTranslation } from 'react-i18next';
 import * as stylex from '@stylexjs/stylex';
 import { Check, ChevronRight, Copy, Share } from 'lucide-react';
 import type {
@@ -285,7 +286,27 @@ export function ReferralSettingsView({
           <div {...stylex.props(styles.text)}>
             <p {...stylex.props(surface.rowLabel)}>{t('referral.title')}</p>
             <p {...stylex.props(surface.rowHelper)}>
-              {t('referral.description', policyValues(overview?.policy))}
+              <Trans
+                t={t}
+                i18nKey="referral.description"
+                values={policyValues(overview.policy)}
+                components={{
+                  discount: (
+                    <ReferralComparedValue
+                      previous={
+                        (overview.policy?.discountPercent ?? 10) > 10
+                          ? t('referral.discount', policyValues())
+                          : undefined
+                      }
+                    />
+                  ),
+                  reward: (
+                    <ReferralComparedValue
+                      previous={(overview.policy?.rewardPercent ?? 20) > 20 ? '20%' : undefined}
+                    />
+                  ),
+                }}
+              />
             </p>
             <ReferralCampaignDates policy={overview?.policy} />
           </div>
@@ -544,6 +565,16 @@ export function ReferralCreditNotice({
   );
 }
 
+function ReferralComparedValue({ previous, children }: { previous?: string; children?: ReactNode }) {
+  if (!previous) return <>{children}</>;
+  return (
+    <>
+      <s {...stylex.props(styles.amountMuted)}>{previous}</s>{' '}
+      <strong>{children}</strong>
+    </>
+  );
+}
+
 function policyValues(policy?: ReferralPolicy) {
   return {
     discount: policy?.discountPercent ?? 10,
@@ -559,17 +590,15 @@ function ReferralCampaignDates({ policy }: { policy?: ReferralPolicy }) {
     new Intl.DateTimeFormat(toIntlLocaleOrEn(i18n.language), {
       timeZone: 'Asia/Shanghai',
       year: 'numeric',
-      month: 'numeric',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-      hourCycle: 'h23',
+      month: '2-digit',
+      day: '2-digit',
     }).format(time);
   return (
     <p {...stylex.props(surface.rowHelper)}>
       {t('referral.campaignDates', {
         start: format(policy.startsAt),
-        end: format(policy.endsAt),
+        // The server's exclusive deadline maps to the last included calendar date.
+        end: format(policy.endsAt - 1),
       })}
     </p>
   );

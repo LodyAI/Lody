@@ -23,8 +23,11 @@ The client never receives Coupon IDs or sends a selected reward percentage. Depl
 compatible backend before clients start sending `policyRefreshKey`.
 
 The overview, checkout preview, details and share title use the same returned percentages.
+The referral card strikes through the standard 10% discount and 20% reward beside any
+improved campaign values; ordinary rates remain plain text.
 The annual/monthly first-payment amount derives from the period price; renewal remains
-undiscounted. Campaign dates explicitly display UTC+8, with an exclusive end. Current
+undiscounted. Campaign copy shows only calendar dates in UTC+8, converting the exclusive
+deadline to the last included date; it omits times, timezone labels and payment-time reminders. Current
 new-order pricing and an existing Checkout's retained discount are separate statements,
 because changing plan, seats or return destination can create a new order.
 
