@@ -195,7 +195,8 @@ const buildActivityGroupKey = (messageId: string, first: AssistantActivityRender
 
 const buildAssistantTurnRenderBlocksFromEntries = (
   messageId: string,
-  entries: readonly AssistantMessageRenderItem[]
+  entries: readonly AssistantMessageRenderItem[],
+  separateThoughts = false
 ): AssistantTurnRenderBlock[] => {
   const blocks: AssistantTurnRenderBlock[] = [];
   let pendingActivityEntries: AssistantActivityRenderItem[] = [];
@@ -217,6 +218,14 @@ const buildAssistantTurnRenderBlocksFromEntries = (
       continue;
     }
     if (isActivityGroupEntry(entry)) {
+      const previous = pendingActivityEntries[0];
+      if (
+        separateThoughts &&
+        previous &&
+        (previous.content.type === 'thought') !== (entry.content.type === 'thought')
+      ) {
+        flushActivityGroup();
+      }
       pendingActivityEntries.push(entry);
       continue;
     }
@@ -296,10 +305,11 @@ const collectSegmentEntries = (
 export const buildAssistantTurnRenderLayout = (
   messageId: string,
   items: readonly MessageContent[],
-  isTurnFinished: boolean
+  isTurnFinished: boolean,
+  separateThoughts = false
 ): AssistantTurnRenderLayout => {
   const entries = buildAssistantMessageRenderItems(items);
-  const blocks = buildAssistantTurnRenderBlocksFromEntries(messageId, entries);
+  const blocks = buildAssistantTurnRenderBlocksFromEntries(messageId, entries, separateThoughts);
   const ranges = buildSegmentBlockRanges(blocks);
 
   // Nothing folds while the turn streams, but the segment shape does not depend

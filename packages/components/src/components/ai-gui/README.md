@@ -3,9 +3,12 @@
 Conversation rendering for a Session: the message stream, assistant turn folding,
 the outline rail, and the markdown/terminal/file content surfaces.
 
-Builtin DeepSeek Harness keeps thought prose in expandable activity groups, including
-a default-open Thought disclosure for groups without tools; explicit collapse is retained. Provider visibility is part of the
-virtual-row cache identity; other providers retain their existing filtering.
+Builtin DeepSeek Harness separates thought disclosures from tool groups. Thoughts
+start open, tools closed, and explicit toggles remain respected. DSH skips the outer
+finished-work fold so intermediate prose stays visible in order after completion;
+duration moves to the existing footer. Both layout and virtual-row caches include
+provider visibility. Other providers retain their grouping and filtering. This is
+presentation only: stored thought/text types and provider delivery remain unchanged.
 
 Binding rules live in [AGENTS.md](AGENTS.md); this file is the directory index and
 the reasoning behind those rules.
