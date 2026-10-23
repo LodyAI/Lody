@@ -40,6 +40,22 @@ reply loss. Freezing those callbacks while advancing only refresh timers made
 the test depend on whether native I/O had already released a watch. This keeps
 production timing unchanged and avoids expiring unrelated RPC deadlines.
 
+Test correction (2026-10-23, [PR #1812](https://github.com/LodyAI/Lody/pull/1812)):
+the two-replica fixture now drives live recovery callbacks directly, removing
+them when canceled or fired. Vitest can place a nested zero-delay timer at fake
+`now + 1`; advancing by its requested delay of zero can consume the wake signal
+without running the callback. The fixture uses explicit completion signals for
+both initial parked watches and final replica contents, without advancing global
+time or expiring unrelated RPC deadlines. Parked watch timeout callbacks retain
+the same cancellation and once-only guards. This replaces the delay queue while
+preserving real Native SQLite, encrypted RPC, lost-reply injection and reopen
+assertions; production timers and test timeout limits are unchanged. Watch readiness is asserted
+before the write; afterward only still-live watches need expiry because native
+recovery may already have awakened them. A temporary controlled experiment that
+placed zero-delay timers one fake millisecond later timed out with the old driver
+and passed with the new driver; this isolates the scheduling defect, not the
+exact interleaving of the original CI failure.
+
 The production Native SQLite and owner RPC test keeps a 352 KiB synthetic tool result unchanged while editing text 32 times. Every patched result equals the complete-body response, including Unicode scalar edits; total response JSON stays below 2% of the complete-body path. This measures streaming transfer, not database size or end-to-end latency.
 
 Production encrypted RPC tests run patch-capable and legacy readers against the same owner and verify identical text/tool output, checkpoint watches, lost-native-reply recovery and durable reopen. The frontend bridge uses the real IndexedDB cache to verify exact-base application, stale-base and invalid-path protected repair, failed repair without checkpoint advancement, and reopen. Coalesced native edits survive reopen; seals, state corrections and removal of the projection-defaulted `fileDiff` field use complete reads. Shared tests cover safe JSON keys, detached failure, immutable identity and negotiation.
