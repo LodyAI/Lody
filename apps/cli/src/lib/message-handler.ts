@@ -1,5 +1,6 @@
 import {
   resolveNotificationPresentation,
+  notificationReplyPreview,
   type NotificationPresentation,
 } from '@lody/shared/notifications';
 import type { SessionActivePresencePhase } from './loro/session-active-presence';
@@ -2957,7 +2958,8 @@ export class MessageHandler {
           const { scope, source, outcome } = attention;
           const presentation = await this.buildNotificationPresentation(
             source.sessionId,
-            source.originTurnIds ?? [source.turnId]
+            source.originTurnIds ?? [source.turnId],
+            fact.assistantTurnId
           );
           // Independent channels: a local projection failure cannot block mobile,
           // and cloud latency/failure cannot prevent desktop publication.
@@ -10077,9 +10079,10 @@ export class MessageHandler {
 
   private async buildNotificationPresentation(
     sessionId: SessionId,
-    originTurnIds: readonly string[]
+    originTurnIds: readonly string[],
+    assistantTurnId?: string
   ): Promise<NotificationPresentation | undefined> {
-    // Presentation is optional. Read only exact originating inputs, never the transcript.
+    // Read exact originating inputs and the completed assistant entry, never all history.
     // Mixed/large batches fall back to the conversation name.
     try {
       const sessionDoc = await this.workspaceDocument.getOrCreateSessionDoc(sessionId);
@@ -10108,7 +10111,18 @@ export class MessageHandler {
           /* The repository name remains a useful fallback. */
         }
       }
-      return resolveNotificationPresentation(meta, inputs, projectName);
+      const presentation = resolveNotificationPresentation(meta, inputs, projectName);
+      if (assistantTurnId) {
+        try {
+          const reply = await backend.history.readTurn(assistantTurnId);
+          if (reply.state === 'ready') {
+            presentation.replyPreview = notificationReplyPreview(reply.turn);
+          }
+        } catch {
+          // An unavailable reply must not discard the existing display context.
+        }
+      }
+      return presentation;
     } catch {
       return undefined;
     }

@@ -4,6 +4,8 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Effect, Exit, Scope } from 'effect';
+import type { SessionEntry } from '@lody/shared/session-data';
+import type { NotificationPresentation } from '@lody/shared/notifications';
 import type { SessionActivePresenceControllerLegacy } from '../src/lib/loro/session-active-presence-legacy';
 
 import {
@@ -44,6 +46,11 @@ const createSilentLogger = (): Logger => ({
 });
 
 type MessageHandlerInternals = {
+  buildNotificationPresentation: (
+    sessionId: SessionId,
+    origins: readonly string[],
+    assistantTurnId?: string
+  ) => Promise<NotificationPresentation | undefined>;
   cleanup: () => Promise<void>;
   codeCollabV2DiffStore: { close: () => Promise<void> };
   sessionActivePresence: SessionActivePresenceControllerLegacy;
@@ -72,6 +79,7 @@ type MessageHandlerInternals = {
 };
 
 function createHarness(options?: {
+  history?: SessionEntry[];
   sessionId?: SessionId;
   childSessionIds?: SessionId[];
   closeSessionTerminals?: (sessionId: SessionId) => void;
@@ -114,6 +122,8 @@ function createHarness(options?: {
     if (rowIndex >= 0) machineFlockRows.splice(rowIndex, 1);
   });
   const sessionDoc = withHistoryPort({
+    getHistory: () => options?.history ?? [],
+    getMetaState: async () => ({ title: 'Fix sign-in', repoFullName: 'team/lody' }),
     updateHistory: vi.fn(async (updater: (history: unknown[]) => unknown[]) => {
       updater([]);
     }),
@@ -230,6 +240,7 @@ function createHarness(options?: {
   };
 
   return {
+    sessionDoc,
     handler: internal,
     presenceEntries,
     sessionId,
@@ -247,6 +258,39 @@ function createHarness(options?: {
 }
 
 describe('MessageHandler terminal cleanup', () => {
+  it('reads the completed assistant entry even after a newer reply exists', async () => {
+    const history: SessionEntry[] = ['completed', 'newer'].map((id) => ({
+      id,
+      role: 'assistant',
+      timestamp: '2026-10-23T00:00:00.000Z',
+      items: [{ type: 'text', text: `${id} reply` }],
+    }));
+    const { handler, sessionId, sessionDoc } = createHarness({ history });
+    expect(
+      await handler.buildNotificationPresentation(sessionId, ['input'], 'completed')
+    ).toMatchObject({
+      conversationTitle: 'Fix sign-in',
+      projectName: 'lody',
+      replyPreview: 'completed reply',
+    });
+    expect(
+      (await handler.buildNotificationPresentation(sessionId, ['input'], 'missing'))?.replyPreview
+    ).toBeUndefined();
+    expect(
+      (await handler.buildNotificationPresentation(sessionId, ['input']))?.replyPreview
+    ).toBeUndefined();
+    const readTurn = sessionDoc.sessionData.history.readTurn;
+    sessionDoc.sessionData.history.readTurn = (id) => {
+      if (id === 'completed') throw new Error('Reply unavailable');
+      return readTurn(id);
+    };
+    expect(
+      await handler.buildNotificationPresentation(sessionId, ['input'], 'completed')
+    ).toMatchObject({
+      conversationTitle: 'Fix sign-in',
+      projectName: 'lody',
+    });
+  });
   let isolatedDataRoot: string;
   let previousDataDir: string | undefined;
   let previousLocksDir: string | undefined;
