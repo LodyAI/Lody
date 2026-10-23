@@ -1,3 +1,4 @@
+import type { ReferralCheckoutOffer, ReferralPolicy } from '@lody/cloud-api';
 import { text as uiText } from '@lody/ui/tokens/scales.stylex';
 import { useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -391,7 +392,11 @@ export interface BillingSettingsViewProps {
    * `onRemove` checks out at the regular price instead; absent once the
    * workspace is bound to its referral.
    */
-  referralOffer?: { onRemove?: () => void } | null;
+  referralOffer?: {
+    onRemove?: () => void;
+    policy?: ReferralPolicy;
+    retained?: ReferralCheckoutOffer['retained'];
+  } | null;
   /** The workspace's referral card, placed right under the plan. */
   referral?: ReactNode;
   /** Available referral credit (cents), spent on the first subscription payment. */
@@ -1017,6 +1022,8 @@ export function BillingSettingsView({
                 }
                 disabled={pendingAction !== null}
                 onRemove={referralOffer.onRemove}
+                policy={referralOffer.policy}
+                retained={referralOffer.retained}
               />
             ) : null}
 

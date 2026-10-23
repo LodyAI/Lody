@@ -1,3 +1,4 @@
+import type { ReferralPolicy } from '@lody/cloud-api';
 import { useTranslation } from 'react-i18next';
 import { ArrowLeft, ArrowRight, Building2, CreditCard } from 'lucide-react';
 import { Spinner } from '@lody/ui/spinner';
@@ -36,7 +37,7 @@ export interface CreateWorkspacePageProps {
   /** Per-seat Plus pricing; `undefined`/`null` = not loaded, prices hidden. */
   pricing?: CreateWorkspacePricing | null;
   /** The server confirmed this checkout would get the referral discount. */
-  referralOffer?: { onRemove: () => void } | null;
+  referralOffer?: { onRemove: () => void; policy?: ReferralPolicy } | null;
   onWorkspaceNameChange: (value: string) => void;
   onWorkspaceSlugChange: (value: string) => void;
   onResetWorkspaceSlug: () => void;
@@ -239,6 +240,7 @@ export function CreateWorkspacePage({
                       }
                       disabled={creating}
                       onRemove={referralOffer.onRemove}
+                      policy={referralOffer.policy}
                     />
                   ) : null}
                   <p className="text-xs text-muted-foreground">

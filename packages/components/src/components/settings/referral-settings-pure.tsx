@@ -1,7 +1,12 @@
 import { useTranslation } from 'react-i18next';
 import * as stylex from '@stylexjs/stylex';
 import { Check, ChevronRight, Copy, Share } from 'lucide-react';
-import type { ReferralLedgerEntry, ReferralOverview } from '@lody/cloud-api';
+import type {
+  ReferralCheckoutOffer,
+  ReferralLedgerEntry,
+  ReferralOverview,
+  ReferralPolicy,
+} from '@lody/cloud-api';
 import { Badge } from '@lody/ui/badge';
 import { Button } from '@lody/ui/button';
 import { Input } from '@lody/ui/input';
@@ -279,7 +284,10 @@ export function ReferralSettingsView({
         <div {...stylex.props(styles.head)}>
           <div {...stylex.props(styles.text)}>
             <p {...stylex.props(surface.rowLabel)}>{t('referral.title')}</p>
-            <p {...stylex.props(surface.rowHelper)}>{t('referral.description')}</p>
+            <p {...stylex.props(surface.rowHelper)}>
+              {t('referral.description', policyValues(overview?.policy))}
+            </p>
+            <ReferralCampaignDates policy={overview?.policy} />
           </div>
           <div {...stylex.props(styles.credit)}>
             <span {...stylex.props(styles.creditValue)}>{formatUsd(overview.available)}</span>
@@ -341,7 +349,11 @@ export function ReferralDetailsDialog({
   const { t, i18n } = useTranslation();
   const locale = toIntlLocaleOrEn(i18n.resolvedLanguage ?? i18n.language);
   const dateFormat = new Intl.DateTimeFormat(locale, { dateStyle: 'medium' });
-  const perks = [t('referral.perkDiscount'), t('referral.perkReward'), t('referral.perkShared')];
+  const perks = [
+    t('referral.perkDiscount', policyValues(overview.policy)),
+    t('referral.perkReward', policyValues(overview.policy)),
+    t('referral.perkShared'),
+  ];
   return (
     <Dialog.Root
       open
@@ -450,27 +462,43 @@ export function ReferralDetailsDialog({
 export function ReferralOfferNotice({
   interval,
   regularCents,
+  policy,
+  retained,
   onRemove,
   disabled = false,
 }: {
   interval: 'month' | 'year';
   /** Regular per-seat price for one billing period. */
   regularCents: number;
+  policy?: ReferralPolicy;
+  retained?: ReferralCheckoutOffer['retained'];
   /** Absent when the discount is already bound to this workspace. */
   onRemove?: () => void;
   disabled?: boolean;
 }) {
   const { t } = useTranslation();
   const values = {
-    first: formatUsd(Math.round(regularCents * 0.9)),
+    first: formatUsd(Math.round((regularCents * (100 - (policy?.discountPercent ?? 10))) / 100)),
     regular: formatUsd(regularCents),
   };
   return (
     <div {...stylex.props(surface.formBlock, styles.head)} role="status">
       <div {...stylex.props(styles.text)}>
         <p {...stylex.props(surface.rowLabel)}>
-          {t('referral.offerTitle')} <Badge tone="success">{t('referral.offerBadge')}</Badge>
+          {t('referral.offerTitle')}{' '}
+          <Badge tone="success">{t('referral.offerBadge', policyValues(policy))}</Badge>
         </p>
+        {retained && retained.policy.discountPercent !== (policy?.discountPercent ?? 10) ? (
+          <p {...stylex.props(surface.rowHelper)}>
+            {t('referral.retainedCheckout', {
+              ...policyValues(retained.policy),
+              first: formatUsd(
+                Math.round((regularCents * (100 - retained.policy.discountPercent)) / 100)
+              ),
+            })}
+          </p>
+        ) : null}
+        <ReferralCampaignDates policy={policy} />
         <p {...stylex.props(surface.rowHelper)}>
           {interval === 'year'
             ? t('referral.offerYearly', values)
@@ -513,5 +541,36 @@ export function ReferralCreditNotice({
       </div>
       <span {...stylex.props(styles.creditValue)}>−{formatUsd(creditCents)}</span>
     </div>
+  );
+}
+
+function policyValues(policy?: ReferralPolicy) {
+  return {
+    discount: policy?.discountPercent ?? 10,
+    reward: policy?.rewardPercent ?? 20,
+    rate: (100 - (policy?.discountPercent ?? 10)) / 10,
+  };
+}
+
+function ReferralCampaignDates({ policy }: { policy?: ReferralPolicy }) {
+  const { t, i18n } = useTranslation();
+  if (!policy?.startsAt || !policy.endsAt) return null;
+  const format = (time: number) =>
+    new Intl.DateTimeFormat(toIntlLocaleOrEn(i18n.language), {
+      timeZone: 'Asia/Shanghai',
+      year: 'numeric',
+      month: 'numeric',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      hourCycle: 'h23',
+    }).format(time);
+  return (
+    <p {...stylex.props(surface.rowHelper)}>
+      {t('referral.campaignDates', {
+        start: format(policy.startsAt),
+        end: format(policy.endsAt),
+      })}
+    </p>
   );
 }

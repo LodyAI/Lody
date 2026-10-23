@@ -129,3 +129,24 @@ export const OfferNoticeYearly: StoryObj<typeof ReferralOfferNotice> = {
 export const OfferNoticeMonthlyBound: StoryObj<typeof ReferralOfferNotice> = {
   render: () => <ReferralOfferNotice interval="month" regularCents={1000} />,
 };
+
+const campaignPolicy = {
+  campaignId: 'example-autumn',
+  discountPercent: 20,
+  rewardPercent: 25,
+  startsAt: Date.UTC(2026, 9, 23, 16),
+  endsAt: Date.UTC(2026, 9, 28, 16),
+};
+export const Campaign: Story = { args: { overview: { ...overview, policy: campaignPolicy } } };
+export const CampaignAnnualCheckout: StoryObj<typeof ReferralOfferNotice> = {
+  render: () => <ReferralOfferNotice interval="year" regularCents={9600} policy={campaignPolicy} />,
+};
+export const RetainedCampaignCheckout: StoryObj<typeof ReferralOfferNotice> = {
+  render: () => (
+    <ReferralOfferNotice
+      interval="year"
+      regularCents={9600}
+      retained={{ policy: campaignPolicy, expiresAt: campaignPolicy.endsAt + 31 * 60000 }}
+    />
+  ),
+};

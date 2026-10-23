@@ -6,7 +6,14 @@ import { capturePostHogEvent, type PostHogAnalyticsClient } from './posthog-anal
 export function captureReferralEvent(
   client: PostHogAnalyticsClient | null | undefined,
   event: 'viewed' | 'link_copied' | 'link_shared' | 'details_viewed',
-  properties: { workspace_id: string; referral_code_hash?: string; can_manage?: boolean }
+  properties: {
+    workspace_id: string;
+    referral_code_hash?: string;
+    can_manage?: boolean;
+    campaign_id?: string;
+    discount_percent?: number;
+    reward_percent?: number;
+  }
 ) {
   try {
     capturePostHogEvent(client, `referral/${event}`, properties);

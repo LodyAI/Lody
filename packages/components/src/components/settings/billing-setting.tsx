@@ -1,3 +1,4 @@
+import { useReferralPolicyRefresh } from '@/hooks/use-referral-policy-refresh';
 import { readReferral, clearReferral, REFERRAL_ERROR_KEYS } from '@/lib/referral-attribution';
 import { ReferralSettings } from './referral-settings';
 import type { BillingInvoiceDetail } from '@lody/cloud-api';
@@ -468,14 +469,23 @@ function CloudBillingSettings() {
   };
 
   // Ask the server before promising the newcomer discount: a stored link is only a hint.
+  const [policyRefreshKey, refreshPolicy] = useState(0);
   const referralOffer = useCloudQuery(
     cloudOperations.referrals.getCheckoutOffer,
     workspaceId &&
       overview?.referralRewardsSupported &&
       overview.canManageBilling &&
       overview.effectivePlanTier === 'free'
-      ? { workspaceId, ...(referralCode ? { code: referralCode } : {}) }
+      ? { workspaceId, policyRefreshKey, ...(referralCode ? { code: referralCode } : {}) }
       : 'skip'
+  );
+
+  useReferralPolicyRefresh(
+    Math.min(
+      referralOffer?.policy?.nextChangeAt ?? Infinity,
+      referralOffer?.retained?.expiresAt ?? Infinity
+    ),
+    refreshPolicy
   );
 
   // Credit pays toward the first subscription; members never see the Checkout.
@@ -738,6 +748,8 @@ function CloudBillingSettings() {
         referralOffer={
           referralOffer?.discount
             ? {
+                policy: referralOffer.policy,
+                retained: referralOffer.retained,
                 // A workspace already bound to a referral keeps it; only a stored link can be dropped.
                 onRemove: referralOffer.bound
                   ? undefined

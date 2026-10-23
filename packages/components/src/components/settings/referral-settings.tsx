@@ -1,3 +1,4 @@
+import { useReferralPolicyRefresh } from '@/hooks/use-referral-policy-refresh';
 import { ReferralDetailsDialog, ReferralSettingsView } from './referral-settings-pure';
 import { useEffect, useRef, useState } from 'react';
 import { usePostHog } from '@posthog/react';
@@ -43,7 +44,12 @@ function ReferralSettingsContainer({
   const postHog = usePostHog();
   const telemetry = useAppCapability('telemetry');
   const viewedWorkspace = useRef<string | null>(null);
-  const overview = useCloudQuery(cloudOperations.referrals.getOverview, { workspaceId });
+  const [policyRefreshKey, refreshPolicy] = useState(0);
+  const overview = useCloudQuery(cloudOperations.referrals.getOverview, {
+    workspaceId,
+    policyRefreshKey,
+  });
+  useReferralPolicyRefresh(overview?.policy?.nextChangeAt, refreshPolicy);
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [cursors, setCursors] = useState<Array<string | null>>([null]);
   // History is read only while its dialog is open.
@@ -73,8 +79,14 @@ function ReferralSettingsContainer({
   useEffect(() => {
     if (!telemetry || !visible || viewedWorkspace.current === workspaceId) return;
     viewedWorkspace.current = workspaceId;
-    captureReferralEvent(postHog, 'viewed', { workspace_id: workspaceId, can_manage: canManage });
-  }, [telemetry, visible, workspaceId, canManage, postHog]);
+    captureReferralEvent(postHog, 'viewed', {
+      workspace_id: workspaceId,
+      can_manage: canManage,
+      campaign_id: overview?.policy?.campaignId ?? 'standard',
+      discount_percent: overview?.policy?.discountPercent ?? 10,
+      reward_percent: overview?.policy?.rewardPercent ?? 20,
+    });
+  }, [telemetry, visible, workspaceId, canManage, postHog, overview?.policy]);
   const capture = (
     event: 'link_copied' | 'link_shared' | 'details_viewed',
     code = overview?.code
@@ -82,6 +94,9 @@ function ReferralSettingsContainer({
     if (telemetry)
       captureReferralEvent(postHog, event, {
         workspace_id: workspaceId,
+        campaign_id: overview?.policy?.campaignId ?? 'standard',
+        discount_percent: overview?.policy?.discountPercent ?? 10,
+        reward_percent: overview?.policy?.rewardPercent ?? 20,
         ...(code ? { referral_code_hash: hashAnalyticsId(code) } : {}),
       });
   };
@@ -137,7 +152,13 @@ function ReferralSettingsContainer({
           url && canNativeShare()
             ? () => {
                 void navigator
-                  .share({ title: t('referral.shareTitle'), url })
+                  .share({
+                    title: t('referral.shareTitle', {
+                      discount: overview?.policy?.discountPercent ?? 10,
+                      rate: (100 - (overview?.policy?.discountPercent ?? 10)) / 10,
+                    }),
+                    url,
+                  })
                   .then(() => capture('link_shared'))
                   .catch(() => {
                     /* Dismissing the share sheet is not an error. */

@@ -111,6 +111,22 @@ describe('referral UI analytics', () => {
       );
     });
   };
+  it('attaches the displayed campaign to card and copy events without exposing coupon IDs', async () => {
+    overview!.policy = { campaignId: 'autumn', discountPercent: 20, rewardPercent: 25 };
+    await render();
+    await clickCopy();
+    for (const event of sink.events) {
+      expect(event.properties).toMatchObject({
+        campaign_id: 'autumn',
+        discount_percent: 20,
+        reward_percent: 25,
+      });
+    }
+    expect(sink.events.map((event) => event.event)).toEqual([
+      'referral/viewed',
+      'referral/link_copied',
+    ]);
+  });
   const clickCopy = async () => {
     const button = [...container.querySelectorAll('button')].find((b) =>
       /copy|create|generate/i.test(b.textContent ?? '')

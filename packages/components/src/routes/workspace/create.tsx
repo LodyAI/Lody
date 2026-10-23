@@ -1,3 +1,4 @@
+import { useReferralPolicyRefresh } from '@/hooks/use-referral-policy-refresh';
 import { clearReferral, readReferral, REFERRAL_ERROR_KEYS } from '@/lib/referral-attribution';
 import { ConvexError } from 'convex/values';
 import { createFileRoute, Navigate, useNavigate } from '@tanstack/react-router';
@@ -220,10 +221,12 @@ function CreateWorkspaceAuthed({
   const paidRequired = creationAvailability?.canCreateFree === false;
   const dismissLead = useCloudMutation(cloudOperations.referrals.dismissLead);
   // Preview account leads from other devices even without a browser referral code.
+  const [policyRefreshKey, refreshPolicy] = useState(0);
   const referralOffer = useCloudQuery(
     cloudOperations.referrals.getCheckoutOffer,
-    paidRequired ? (referralCode ? { code: referralCode } : {}) : 'skip'
+    paidRequired ? { policyRefreshKey, ...(referralCode ? { code: referralCode } : {}) } : 'skip'
   );
+  useReferralPolicyRefresh(referralOffer?.policy?.nextChangeAt, refreshPolicy);
   // Mirrors the early-return below: the form is only really shown when creating
   // is allowed for an existing-workspace user, or the user has none.
   const willRenderCreateForm =
@@ -619,6 +622,7 @@ function CreateWorkspaceAuthed({
       referralOffer={
         referralOffer?.discount
           ? {
+              policy: referralOffer.policy,
               onRemove: () => {
                 clearReferral();
                 // Also decline the link remembered on the account.

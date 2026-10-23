@@ -526,13 +526,16 @@ export type CloudApi = {
   };
   referrals: {
     createLink: Mutation<{ workspaceId: string }, { code: string; url: string }>;
-    getOverview: Query<{ workspaceId: string }, ReferralOverview | null>;
+    getOverview: Query<{ workspaceId: string; policyRefreshKey?: number }, ReferralOverview | null>;
     listLedger: Query<
       { workspaceId: string; paginationOpts: { numItems: number; cursor: string | null } },
       { page: ReferralLedgerEntry[]; isDone: boolean; continueCursor: string }
     >;
     /** Without `workspaceId`, previews a workspace the caller is about to create. */
-    getCheckoutOffer: Query<{ workspaceId?: string; code?: string }, ReferralCheckoutOffer>;
+    getCheckoutOffer: Query<
+      { workspaceId?: string; code?: string; policyRefreshKey?: number },
+      ReferralCheckoutOffer
+    >;
     /** Remember the referral link the signed-in person followed, across devices. */
     attachLead: Mutation<{ code: string }, { status: 'attached' | 'kept' | 'self' | 'invalid' }>;
     /** The person declined the referral discount. */
@@ -1052,7 +1055,18 @@ export type CloudApi = {
  */
 export const api = anyApi as unknown as CloudApi;
 
+/** Server-selected display terms. Checkout remains authoritative. */
+export interface ReferralPolicy {
+  campaignId: string;
+  discountPercent: number;
+  rewardPercent: number;
+  startsAt?: number;
+  endsAt?: number;
+  nextChangeAt?: number;
+}
+
 export interface ReferralOverview {
+  policy?: ReferralPolicy;
   eligible: boolean;
   code: string | null;
   url: string | null;
@@ -1068,6 +1082,9 @@ export interface ReferralOverview {
  * stored referral code to checkout. `bound`: the workspace already holds a referral.
  */
 export interface ReferralCheckoutOffer {
+  policy?: ReferralPolicy;
+  /** A previously opened Checkout retains its own terms until its deadline. */
+  retained?: { policy: ReferralPolicy; expiresAt: number };
   discount: boolean;
   sendCode: boolean;
   bound: boolean;
