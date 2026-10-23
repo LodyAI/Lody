@@ -1089,50 +1089,6 @@ export function BillingSettingsView({
         </CompactSection>
       ) : null}
 
-      {/* Gift codes extend both free and paid Plus timelines. Keep redemption
-          independent from the upgrade card so paid subscribers can use it. */}
-      {canManage &&
-      overview.effectivePlanTier !== 'enterprise' &&
-      (!isPaid || overview.giftStackingSupported) ? (
-        <CompactSection>
-          <CompactRow label={t('billing.redeemTitle')} helper={t('billing.redeemSubtitle')}>
-            <label htmlFor="billing-redemption-code" {...stylex.props(styles.srOnly)}>
-              {t('billing.redeemLabel')}
-            </label>
-            <div {...stylex.props(styles.redeemField)}>
-              <Input
-                id="billing-redemption-code"
-                size="small"
-                value={code}
-                onChange={(event) => setCode(event.target.value)}
-                onKeyDown={(event) => {
-                  if (
-                    event.key === 'Enter' &&
-                    code.trim() &&
-                    !redeemPending &&
-                    !checkoutInProgress
-                  ) {
-                    onRedeemCode(code.trim());
-                  }
-                }}
-                placeholder={t('billing.redeemPlaceholder')}
-                autoComplete="off"
-                spellCheck={false}
-              />
-            </div>
-            <Button
-              variant="secondary"
-              size="small"
-              disabled={redeemPending || checkoutInProgress || !code.trim()}
-              onClick={() => onRedeemCode(code.trim())}
-            >
-              {redeemPending ? <Spinner size="small" /> : null}
-              {t('billing.redeemApply')}
-            </Button>
-          </CompactRow>
-        </CompactSection>
-      ) : null}
-
       {/* The date and amount lead the next charge; the breakdown below
           explains the bill. A gift schedule may have a reliable date before
           Stripe can estimate the amount. */}
@@ -1214,6 +1170,50 @@ export function BillingSettingsView({
               ))}
             </ul>
           )}
+        </CompactSection>
+      ) : null}
+
+      {/* Gift codes extend both free and paid Plus timelines. Keep redemption
+          independent from the upgrade card so paid subscribers can use it. */}
+      {canManage &&
+      overview.effectivePlanTier !== 'enterprise' &&
+      (!isPaid || overview.giftStackingSupported) ? (
+        <CompactSection>
+          <CompactRow label={t('billing.redeemTitle')} helper={t('billing.redeemSubtitle')}>
+            <label htmlFor="billing-redemption-code" {...stylex.props(styles.srOnly)}>
+              {t('billing.redeemLabel')}
+            </label>
+            <div {...stylex.props(styles.redeemField)}>
+              <Input
+                id="billing-redemption-code"
+                size="small"
+                value={code}
+                onChange={(event) => setCode(event.target.value)}
+                onKeyDown={(event) => {
+                  if (
+                    event.key === 'Enter' &&
+                    code.trim() &&
+                    !redeemPending &&
+                    !checkoutInProgress
+                  ) {
+                    onRedeemCode(code.trim());
+                  }
+                }}
+                placeholder={t('billing.redeemPlaceholder')}
+                autoComplete="off"
+                spellCheck={false}
+              />
+            </div>
+            <Button
+              variant="secondary"
+              size="small"
+              disabled={redeemPending || checkoutInProgress || !code.trim()}
+              onClick={() => onRedeemCode(code.trim())}
+            >
+              {redeemPending ? <Spinner size="small" /> : null}
+              {t('billing.redeemApply')}
+            </Button>
+          </CompactRow>
         </CompactSection>
       ) : null}
 
