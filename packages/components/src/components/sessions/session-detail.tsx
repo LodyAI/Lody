@@ -4044,7 +4044,12 @@ const SessionDetail = ({
           ...(options.endLine === undefined ? {} : { endLine: options.endLine }),
         });
         let openingPath = target.filePath;
-        if (target.resolveMarkdownLink && runtime && activeSessionMachineId && activeBrowserSession) {
+        if (
+          target.resolveMarkdownLink &&
+          runtime &&
+          activeSessionMachineId &&
+          activeBrowserSession
+        ) {
           const link = await runtime.requestFilePreview(
             activeSessionMachineId,
             {
@@ -5689,6 +5694,8 @@ const SessionDetail = ({
         onDeleteSession: handleRequestDeleteCurrentSession,
         onOpenSearch: handleOpenSearch,
         onCopyConversationHistory: handleCopyConversationHistory,
+        // A draft tab is not a Session yet; the menu then keeps the root link.
+        onCopyUrl: !activeDraftTab ? handleCopyUrl : undefined,
         onRequestRename: !activeDraftTab ? handleRenameCurrentSession : undefined,
         onForkSession:
           !activeDraftTab && activeTabSession && canForkSession(activeTabSession)
@@ -5728,6 +5735,7 @@ const SessionDetail = ({
     handleRequestDeleteCurrentSession,
     handleOpenSearch,
     handleCopyConversationHistory,
+    handleCopyUrl,
     activeDraftTab,
     handleRenameCurrentSession,
     activeTabSession,
