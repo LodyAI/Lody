@@ -241,6 +241,8 @@
   "sessions.prTab.showMore": "展开",
   "sessions.sendConfigLocked": "发送期间无法修改配置",
   "sessions.selectionCopyUnavailable": "所选文本仍在加载或加载失败，请稍后重新复制。",
+  "sessions.selectionQuote.action": "引用并批注",
+  "sessions.selectionQuote.preview": "引用：{{text}}",
   "sharing.request.purpose": "用途：{{purpose}}",
   "sharing.request.deliveryDisclosure": "批准后将发布所选会话，包括思考、工具输出和图片，但不含文件附件。任何获得链接的人都可以免登录查看。完整访问链接会返回给发起请求的 agent，agent 可以使用或转发。你可以在分享管理中撤销链接，但无法收回已经下载的副本。",
   "sharing.request.publishing": "正在自动发布…",
@@ -5404,5 +5406,14 @@
   "e2ee.verify.result.theirsOlderUnconfirmed": "对方的核验码对应版本 {{version}}，比你的旧。请对方刷新后再比较。",
   "e2ee.control.help": "帮助",
   "e2ee.verify.codeTitle": "核验码",
-  "e2ee.verify.versionShort": "版本 {{version}}"
+  "e2ee.verify.versionShort": "版本 {{version}}",
+  "storageGuard.checkFailed": "无法检查磁盘空间。请重试，或退出 Lody，清理空间后重新打开。",
+  "storageGuard.title": "磁盘空间不足",
+  "storageGuard.description": "Lody 数据所在的磁盘只剩 {{free}} 可用，本机已无法保存同步数据。请先清理出至少 {{needed}} 的可用空间（例如清空废纸篓、删除不再需要的大文件），然后重新检查并重启 Lody。",
+  "storageGuard.descriptionUnknownSpace": "磁盘空间不足，Lody 无法在本机保存数据。请先清理磁盘空间（例如清空废纸篓、删除不再需要的大文件），然后重新检查并重启 Lody。",
+  "storageGuard.agentsKeepRunning": "后台正在运行的 agent 不会被中断；重启或退出 Lody 时它们会停止。",
+  "storageGuard.stillLow": "空间仍然不足：当前可用 {{free}}，至少需要 {{needed}}。",
+  "storageGuard.relaunch": "重新检查并重启",
+  "storageGuard.checking": "正在检查…",
+  "storageGuard.quit": "退出 Lody"
 }

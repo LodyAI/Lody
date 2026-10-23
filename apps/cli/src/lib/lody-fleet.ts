@@ -826,6 +826,7 @@ export class LodyFleet {
       try {
         lody = await Lody.create({
           logger: workspaceLogger,
+          onStorageWriteFailure: () => this.runtimeStateReporter.reportStorageWriteFailure(),
           builtinAgentConfigCliTypes: this.builtinAgentConfigCliTypes,
           supportRegistryAgentTypes: this.supportRegistryAgentTypes,
           workspaceId: workspace.id as WorkspaceId,

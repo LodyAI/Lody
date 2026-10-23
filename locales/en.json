@@ -241,6 +241,8 @@
   "sessions.prTab.showMore": "Show more",
   "sessions.sendConfigLocked": "Configuration is locked while sending",
   "sessions.selectionCopyUnavailable": "The selected text is still loading or could not be loaded. Wait and try copying again.",
+  "sessions.selectionQuote.action": "Quote and comment",
+  "sessions.selectionQuote.preview": "Quoted: {{text}}",
   "sharing.request.purpose": "Purpose: {{purpose}}",
   "sharing.request.deliveryDisclosure": "Approval publishes the selected conversations, including thinking, tool output and images, but not file attachments. Anyone with the link can read them without signing in. The complete access link will be returned to the requesting agent, which can use or forward it. You can revoke the link in Share management; downloaded copies cannot be recalled.",
   "sharing.request.publishing": "Publishing automatically…",
@@ -5404,5 +5406,14 @@
   "e2ee.verify.result.theirsOlderUnconfirmed": "Their code is for version {{version}}, older than yours. Ask them to refresh, then compare again.",
   "e2ee.control.help": "Help",
   "e2ee.verify.codeTitle": "Verification code",
-  "e2ee.verify.versionShort": "Version {{version}}"
+  "e2ee.verify.versionShort": "Version {{version}}",
+  "storageGuard.checkFailed": "Could not check disk space. Try again, or quit Lody and restart it after freeing space.",
+  "storageGuard.title": "Your disk is full",
+  "storageGuard.description": "The disk holding Lody's data has only {{free}} free, so Lody can no longer save synced data on this device. Free up space until at least {{needed}} is available — empty the Trash or delete large files you no longer need — then check again and restart Lody.",
+  "storageGuard.descriptionUnknownSpace": "Lody could not save data to this device because the disk is full. Free up space — empty the Trash or delete large files you no longer need — then check again and restart Lody.",
+  "storageGuard.agentsKeepRunning": "Agents already running in the background are not interrupted. Restarting or quitting Lody stops them.",
+  "storageGuard.stillLow": "Still not enough space: {{free}} free, at least {{needed}} needed.",
+  "storageGuard.relaunch": "Check again and restart",
+  "storageGuard.checking": "Checking…",
+  "storageGuard.quit": "Quit Lody"
 }

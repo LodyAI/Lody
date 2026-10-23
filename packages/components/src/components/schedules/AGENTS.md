@@ -58,7 +58,7 @@
 - Time and date are typed only: the native picker button is hidden
   (`[&::-webkit-calendar-picker-indicator]:hidden`), which in Chromium also
   removes the popup. The prompt has no resize handle: it grows with its text
-  from 4 to 6 lines (`[field-sizing:content]` + `lh` bounds), then scrolls.
+  from 4 lines to half the window (`max(6lh, 50dvh)`), then scrolls.
   Field marks float (`absolute`) so they never narrow the text.
 - No time zone control. Input, preview and kind changes use `MachineMeta.timeZone`
   (device zone for older CLIs). Once retains its instant across machine changes;

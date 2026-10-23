@@ -7,18 +7,17 @@ Translation: current
 
 ## Behavior
 
-In a builtin DeepSeek Harness conversation, users can expand an activity group
-and read the provider's emitted thoughts in order alongside tool calls. A group
-containing only thoughts has a Thought disclosure rather than disappearing.
-Thought-only groups default to expanded, including inside an expanded finished-work
-region, while an explicit collapse remains respected. Mixed thought/tool groups
-retain their existing expansion default. This applies to saved history and incoming output.
+Builtin DeepSeek Harness conversations show thoughts in independent default-open
+disclosures and tools in separate default-closed groups, preserving their order.
+Explicit toggles remain respected and search can reveal matching thoughts. Tool
+arrival must not collapse preceding thoughts. Ordinary prose stays visible both
+during streaming and after completion: DSH does not use the outer finished-work
+fold. These rules apply to incoming output and saved history.
 
-Existing activity and finished-turn folding remain available. Thoughts remain
-thoughts: rendering does not convert them into normal assistant text or change
-stored history. Other providers retain their current visibility behavior.
-Provider identity comes from Session metadata, not the selected model name;
-using a DeepSeek model through another provider does not enable this exception.
+Thoughts retain their label and stored type; rendering does not turn them into
+ordinary assistant text or rewrite history. Provider identity comes from Session
+metadata, not the model name. Other providers retain their existing visibility
+and folding, including when using a DeepSeek model.
 
 ## Evidence
 

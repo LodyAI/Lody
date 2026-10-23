@@ -5004,6 +5004,7 @@ export class SessionExecutionService {
       scope: { workspaceId: scope.workspaceId, recipientId: scope.userId },
       sessionId: runtime.sessionId,
       turnId: invocation.sourceTurnId,
+      assistantTurnId: runtime.turnId,
       audience: origins.length
         ? { kind: 'user' }
         : (invocation.notificationAudience ?? { kind: 'unknown' }),

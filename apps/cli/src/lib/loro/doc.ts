@@ -422,6 +422,7 @@ export class LoroDocumentManager {
       cloudBilling?: CloudBillingPort | null;
       sessionHistoryFactory?: SessionBackendFactory;
       ownerHistoryRouter?: SessionBackendFactory;
+      onStorageWriteFailure?: (error: Error) => void;
     } = {}
   ): Promise<LoroDocumentManager> {
     // Configure the CLI's global HTTP dispatcher once (proxy/H2/diagnostics). This
@@ -435,7 +436,7 @@ export class LoroDocumentManager {
       logger,
       'startup.loro_sqlite_store',
       { workspaceId },
-      async () => await createCliSqliteRepoStore(workspaceId)
+      async () => await createCliSqliteRepoStore(workspaceId, options.onStorageWriteFailure)
     );
     const createRepoTimeoutMs = readTimeoutEnv('LODY_LORO_CREATE_REPO_TIMEOUT_MS', 30_000);
     const joinMetaTimeoutMs = readTimeoutEnv('LODY_LORO_JOIN_META_TIMEOUT_MS', 30_000);

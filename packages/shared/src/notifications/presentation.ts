@@ -9,6 +9,7 @@ export const notificationPresentationSchema = z.object({
   scheduleName: z.string().max(320).optional(),
   projectName: z.string().max(128).optional(),
   pullRequestNumber: z.number().int().positive().max(Number.MAX_SAFE_INTEGER).optional(),
+  replyPreview: z.string().max(400).optional(),
 });
 export type NotificationPresentation = z.infer<typeof notificationPresentationSchema>;
 
@@ -26,6 +27,28 @@ export function notificationLabel(value: unknown, max = 160): string | undefined
   if (!text) return undefined;
   const chars = Array.from(text);
   return chars.length > max ? chars.slice(0, max - 1).join('') + '…' : text;
+}
+
+/** Last user-facing text block of the exact completed assistant turn. */
+export function notificationReplyPreview(turn: {
+  role: string;
+  items?: readonly unknown[];
+}): string | undefined {
+  if (turn.role !== 'assistant' || !turn.items) return undefined;
+  for (let index = turn.items.length - 1; index >= 0; index--) {
+    const item = turn.items[index];
+    if (
+      !item ||
+      typeof item !== 'object' ||
+      !('type' in item) ||
+      item.type !== 'text' ||
+      !('text' in item)
+    )
+      continue;
+    const preview = notificationLabel(item.text, 200);
+    if (preview) return preview;
+  }
+  return undefined;
 }
 
 export function notificationProjectName(
@@ -146,11 +169,17 @@ export function formatNotification(
     presentation?.kind === 'schedule' ? notificationLabel(presentation.scheduleName) : undefined;
   const pr = presentation?.pullRequestNumber;
   const reference = pr ? `PR #${pr}` : undefined;
+  const context = [status, project, reference, schedule === title ? undefined : schedule]
+    .filter(Boolean)
+    .join(' ');
+  const reply =
+    event === 'succeeded' || event === 'failed' || event === 'unknown'
+      ? notificationLabel(presentation?.replyPreview, 200)
+      : undefined;
   return {
     title: title ?? translate('notifications.copy.untitled'),
     body:
-      [status, project, reference, schedule === title ? undefined : schedule]
-        .filter(Boolean)
-        .join(' ') || translate('notifications.copy.openConversation'),
+      [context, reply].filter(Boolean).join('\n') ||
+      translate('notifications.copy.openConversation'),
   };
 }

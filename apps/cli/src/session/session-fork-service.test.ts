@@ -534,6 +534,9 @@ describe('SessionForkService durability boundary', () => {
           await vi.runAllTimersAsync();
           await settled.promise;
         }
+        expect(harness.repo.upsertDocMeta.mock.calls.at(-1)?.[1]).toMatchObject({
+          title: 'Original',
+        });
         const stored = loro.getList('history').toJSON();
         expect(stored.map((row) => row.id)).toEqual([
           'user-1',
@@ -956,7 +959,7 @@ describe('SessionForkService fork operation recovery', () => {
     targetSessionId,
     operationId: preparingOperation.id,
     createdAt: preparingOperation.createdAt,
-    title: '(fork) Original',
+    title: 'Original',
     branchName: 'lody/target-ses',
     cleanup: cleanupPayload,
   };
@@ -1089,7 +1092,7 @@ describe('SessionForkService fork operation recovery', () => {
     expect(republished).toMatchObject({
       id: targetSessionId,
       machineId,
-      title: '(fork) Original',
+      title: 'Original',
       branchName: 'lody/target-ses',
       userId: 'user-1',
       isWorktree: true,

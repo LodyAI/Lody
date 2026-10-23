@@ -23,6 +23,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { keepAppRootOffBodyTail } from '../lib/body-tail-sentinel';
 import { BootShellBoundary } from '@/components/boot-shell-boundary';
 import { ErrorBoundary } from '@/components/error-boundary';
+import { StorageFullGuard } from '@/components/storage-full-guard';
 import { isMissingEmail } from '@lody/shared';
 import { cloudOperations } from '@/lib/cloud-api-operations';
 import { ConvexProvider, useAuthClient } from '../providers/convex-provider';
@@ -244,6 +245,8 @@ function RootApp() {
                 />
                 {/* Auth invalidation must remain mounted even if the runtime fails. */}
                 <RootLocationEffects />
+                {/* Outside the runtime boundary: a full disk can be what broke the runtime. */}
+                {isElectron && <StorageFullGuard />}
                 <ErrorBoundary name="RootRuntime" variant="page" propagateAuthErrors={false}>
                   <RuntimeProvider>
                     <RootOutletBoundary />

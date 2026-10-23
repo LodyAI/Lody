@@ -18,6 +18,7 @@ import {
   MessageSelectionToolbar,
   useMessageSelection,
 } from '@/components/ai-gui/message-selection';
+import { SelectionQuoteBar, useSelectionQuote } from '@/components/ai-gui/selection-quote';
 import {
   startTransition,
   forwardRef,
@@ -2912,7 +2913,25 @@ export const SessionChatInterface = memo(
     } | null>(null);
     const chatStreamRef = useRef<SessionChatStreamHandle>(null);
     const shareSelection = useMessageSelection(session.id);
+    const {
+      quoteText: selectionQuoteText,
+      clear: clearSelectionQuote,
+    } = useSelectionQuote({
+      scopeId: session.id,
+      // Share selection owns row gestures while it is active, and an archived
+      // or replaced composer has nothing to quote into.
+      enabled: !hideMessageArea && !isArchivedSession && !shareSelection.active,
+      history: conversationView,
+    });
     const inputAreaRef = useRef<SessionChatInputAreaHandle>(null);
+    // Keep the bar up when the draft refused the quote (archived, or a submit in
+    // flight) instead of dropping the capture without a trace.
+    const handleSelectionQuote = useCallback(
+      (text: string) => {
+        if (inputAreaRef.current?.addSelectionQuote({ text })) clearSelectionQuote();
+      },
+      [clearSelectionQuote]
+    );
     const searchInputRef = useRef<HTMLInputElement>(null);
     const messageAreaRef = useRef<HTMLDivElement>(null);
     const [outlineOverlayRoot, setOutlineOverlayRoot] = useState<HTMLDivElement | null>(null);
@@ -7061,6 +7080,15 @@ export const SessionChatInterface = memo(
                       Hidden while a permission is pending so the response buttons claim
                       the bottom surface; chat queue is bypassed for the same reason. */}
                     <MessageSelectionToolbar selection={shareSelection} />
+                    <SelectionQuoteBar
+                      quote={
+                        shareSelection.active || shouldReplaceComposerWithPermission
+                          ? null
+                          : selectionQuoteText
+                      }
+                      onQuote={handleSelectionQuote}
+                      onDismiss={clearSelectionQuote}
+                    />
                     <div
                       {...stylex.props(
                         styles.composerContents,

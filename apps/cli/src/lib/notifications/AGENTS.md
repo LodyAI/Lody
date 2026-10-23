@@ -40,7 +40,11 @@
 - Presentation reads at most 32 exact originating inputs after execution release,
   under a document lease; larger/mixed batches use the conversation name. Resolve
   project display names locally, never GitHub or full filesystem paths. Mobile
-  display names cross the cloud/provider boundary; raw tool inputs/errors do not.
+  display names and optional reply excerpts cross the cloud/provider boundary.
+  `TurnOutcomeFact.assistantTurnId` freezes the actual output entry before release;
+  `MessageHandler.buildNotificationPresentation` reads that one entry for the excerpt,
+  never the latest reply or the original delegated input. Missing/unreadable output
+  preserves existing context. Raw tool inputs/errors are not separately attached.
 - Scheduled prepared user turns use ordinary result policy; do not special-case
   `SessionMeta.scheduleId` or parse prompt text to choose whether to notify.
 - Public `notifySessionCompleted` cloud/IPC names remain compatibility boundaries.

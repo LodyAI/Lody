@@ -1063,9 +1063,12 @@ const SessionDetail = ({
   const windowsCaptionBorderedRowPadClass = useWindowsCaptionRowPadClass({
     bottomBorder: true,
   });
-  const macTrafficLightRowPadClass = useMacTrafficLightRowPadClass();
+  const macTrafficLightRowPadClass = useMacTrafficLightRowPadClass({
+    insideWorkspaceFrame: true,
+  });
   const macTrafficLightBorderedRowPadClass = useMacTrafficLightRowPadClass({
     bottomBorder: true,
+    insideWorkspaceFrame: true,
   });
   // Publish ephemeral "viewing this session" presence (drives the owning
   // machine's PR poller priority); actively cleared on switch/hide/unmount.
@@ -5952,6 +5955,7 @@ const SessionDetail = ({
         htmlPreviewRequestSeq={tab.htmlPreviewRequestSeq}
         saveRequestSeq={viewerTabSaveStates[tab.id]?.saveRequestSeq ?? 0}
         copyMarkdownRequestSeq={viewerTabSaveStates[tab.id]?.copyMarkdownRequestSeq ?? 0}
+        sessionLinksEnabled={!!handleNavigateSession}
         defaultHtmlPreview={isMobile}
         preferNativeMarkdownSelection={isMobile}
         onAddSelectionToChat={
@@ -7031,11 +7035,9 @@ const SessionDetail = ({
         ).className,
         // The macOS traffic lights sit over the LEFT sidebar (or, when it is
         // collapsed, over the horizontally-cleared `pl-[4.5rem]` gap below),
-        // never over this top bar — so it must not reserve vertical inset.
-        //
-        // Flush with the window/sidebar top so this h-11 row shares y=0 with
-        // the sidebar header; the macOS row pad centers its controls on the
-        // traffic-light centerline. Re-derive if the row or pill height changes.
+        // never over this top bar. The row begins below WorkspaceCard's thin
+        // top rim, so its frame-aware pad lifts controls onto the same y=23
+        // centreline without removing their visual clearance from the card.
         macTrafficLightRowPadClass,
         windowsCaptionRowPadClass,
         !isSidebarVisible && windowsCaptionPadClass

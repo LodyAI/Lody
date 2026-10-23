@@ -29,6 +29,11 @@ access without a new capability/security decision in the owning
 [Spec](../../../../../specs/desktop-devbar.md) and
 [Agent Note](../../../../../.agents/notes/implemented/feature/2026-09-16-devbar-hub-ui.md).
 
+The disk-full guard (`storage-guard.ts`) blocks only after a Lody storage write failed
+AND a volume holding Lody data is then found short of space; never block on space alone.
+It leaves only by relaunch or quit, and never pauses background agents
+([decision](../../../../../.agents/notes/proposed/feature/2026-10-22-desktop-disk-full-guard.md)).
+
 ## Public browser
 
 - The public browser (`services/public-browser-service.ts`) has NO network guard:

@@ -132,7 +132,9 @@ const styles = stylex.create({
     boxSizing: 'border-box',
     width: '100%',
     minHeight: 'calc(4lh)',
-    maxHeight: 'calc(6lh)',
+    // Long prompts are normal here: grow to half the window before scrolling,
+    // so the Agent controls under the box stay within reach.
+    maxHeight: 'max(6lh, 50dvh)',
     resize: 'none',
     overflowY: 'auto',
     backgroundColor: 'transparent',
@@ -430,8 +432,8 @@ export function ScheduleForm({
                   'schedules.promptPlaceholder',
                   'What should the agent do on every run? For example: review yesterday’s commits and summarise anything that looks risky.'
                 )}
-                // Grows with its text from 4 to 6 lines, then scrolls; no
-                // resize handle. `field-sizing` is CSS-only (Chromium).
+                // Grows with its text from 4 lines to half the window, then
+                // scrolls; no resize handle. `field-sizing` is CSS-only (Chromium).
                 {...stylex.props(
                   styles.prompt,
                   attempted && promptMissing && styles.promptIssueSpace

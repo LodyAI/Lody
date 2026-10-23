@@ -11,6 +11,7 @@ export const IPC_INVOKE_SERVICE_GROUPS = [
   'notifications',
   'publicBrowser',
   'sessionControl',
+  'storageGuard',
   'terminal',
   'updater'
 ] as const

@@ -2,6 +2,7 @@
 
 import { describe, expect, it } from 'vitest';
 import type { MessageContent, SessionHistoryParsed, SessionId } from '@lody/shared';
+import { getMessageItemPrefix } from '../src/lib/session-chat-search';
 import {
   areAssistantChatVirtualRowsEqual,
   buildChatVirtualRows,
@@ -240,147 +241,126 @@ it('reports a displaced turn footer as changed when it stops being the live one'
 
 describe('DSH thought visibility', () => {
   const thought: MessageContent = { type: 'thought', text: 'Synthetic reasoning.' };
-
-  const fixture = (id: string, content: MessageContent[], finished = false) => {
-    const item = wrap(makeMessage(id, 'assistant', content, finished));
-    return {
-      items: [item],
-      lastAssistantMessageId: id,
-      expansionVersion: 0,
-      selectionLayouts: new Map([
-        [
-          id,
-          {
-            finished,
-            activeSearchBlockId: null,
-            expandState: {
-              expandedWorkedGroups: {},
-              expandedGroups: { [`activity-group:${id}:0:0`]: true },
-              expandedByIndex: {},
-              planOpen: false,
-            },
-          },
-        ],
-      ]),
-    };
-  };
-
-  it('renders a thought-only group and invalidates cached rows when visibility changes', () => {
-    const args = fixture('dsh-thought-only', [thought]);
-    const hidden = buildChatVirtualRows(args);
-    expect(
-      hidden.some((row) => row.type === 'assistant' && row.content.kind === 'activity_detail')
-    ).toBe(false);
-    const visible = buildChatVirtualRows({ ...args, showThoughts: true });
-    expect(
-      visible.flatMap((row) =>
-        row.type === 'assistant' && row.content.kind === 'activity_detail'
-          ? [row.content.entry.content]
-          : []
-      )
-    ).toEqual([thought]);
-    expect(buildChatVirtualRows({ ...args, showThoughts: true })[0]).toBe(visible[0]);
-    expect(buildChatVirtualRows({ ...args, showThoughts: false })).toEqual(hidden);
+  const nextThought: MessageContent = { type: 'thought', text: 'Continue after the command.' };
+  const fixture = (id: string, content: MessageContent[], finished = false) => ({
+    items: [wrap(makeMessage(id, 'assistant', content, finished))],
+    lastAssistantMessageId: id,
+    expansionVersion: 0,
+    showThoughts: true,
   });
-
-  it('keeps thoughts and tools in order for interrupted DSH turns without exposing them elsewhere', () => {
-    const tool = toolCall();
-    const args = fixture('dsh-mixed', [thought, tool, thought], true);
-    const details = (showThoughts: boolean) =>
-      buildChatVirtualRows({ ...args, showThoughts }).flatMap((row) =>
-        row.type === 'assistant' && row.content.kind === 'activity_detail'
-          ? [row.content.entry.content]
-          : []
-      );
-    expect(details(true)).toEqual([thought, tool, thought]);
-    expect(details(false)).toEqual([tool]);
-  });
-
-  it('opens pure thoughts by default inside expanded work and respects an explicit collapse', () => {
-    const id = 'dsh-default-expanded';
-    const args = fixture(id, [thought, text('Answer')], true);
-    const selection = args.selectionLayouts.get(id)!;
-    const withExpansion = (expandedGroups: Record<string, boolean>) => ({
-      ...args,
-      showThoughts: true,
-      selectionLayouts: new Map([
-        [
-          id,
-          {
-            ...selection,
-            expandState: {
-              ...selection.expandState,
-              expandedWorkedGroups: { [`segment:${id}:0`]: true },
-              expandedGroups,
-            },
-          },
-        ],
-      ]),
+  const visibleContents = (rows: ReturnType<typeof buildChatVirtualRows>) =>
+    rows.flatMap((row) => {
+      if (row.type !== 'assistant') return [];
+      if (row.content.kind === 'activity_detail') return [row.content.entry.content];
+      if (row.content.kind === 'content') return [row.content.block.entry.content];
+      return [];
     });
-    const thoughtRows = (rows: ReturnType<typeof buildChatVirtualRows>) =>
-      rows.flatMap((row) =>
-        row.type === 'assistant' && row.content.kind === 'activity_detail'
-          ? [row.content.entry.content]
-          : []
-      );
-    expect(thoughtRows(buildChatVirtualRows(withExpansion({})))).toEqual([thought]);
-    expect(
-      thoughtRows(
-        buildChatVirtualRows(
-          withExpansion({
-            [`activity-group:${id}:0:0`]: false,
-          })
-        )
-      )
-    ).toEqual([]);
-    expect(
-      thoughtRows(
-        buildChatVirtualRows(
-          withExpansion({
-            [`activity-group:${id}:0:0`]: true,
-          })
-        )
-      )
-    ).toEqual([thought]);
+  const headers = (rows: ReturnType<typeof buildChatVirtualRows>) =>
+    rows.flatMap((row) =>
+      row.type === 'assistant' && row.content.kind === 'activity_group_header' ? [row.content] : []
+    );
+  const expansion = (id: string, expandedGroups: Record<string, boolean>) =>
+    new Map([
+      [
+        id,
+        {
+          finished: true,
+          activeSearchBlockId: null,
+          expandState: {
+            expandedWorkedGroups: {},
+            expandedGroups,
+            expandedByIndex: {},
+            planOpen: false,
+          },
+        },
+      ],
+    ]);
 
-    const mixed = fixture('dsh-default-mixed', [thought, toolCall()]);
-    expect(
-      thoughtRows(
-        buildChatVirtualRows({
-          ...mixed,
-          selectionLayouts: undefined,
-          showThoughts: true,
-        })
-      )
-    ).toEqual([]);
-    expect(
-      thoughtRows(
-        buildChatVirtualRows({
-          ...fixture('dsh-default-live', [thought]),
-          selectionLayouts: undefined,
-          showThoughts: true,
-        })
-      )
-    ).toEqual([thought]);
+  it('keeps visible thought rows and keys when commands stream into the turn', () => {
+    const id = 'dsh-streaming';
+    const before = buildChatVirtualRows(fixture(id, [thought]));
+    const tool = toolCall();
+    const after = buildChatVirtualRows(fixture(id, [thought, tool, nextThought]));
+    expect(visibleContents(after)).toEqual([thought, nextThought]);
+    expect(headers(after).map((header) => header.expanded)).toEqual([true, false, true]);
+    expect(after.slice(0, 2).map((row) => row.key)).toEqual(before.map((row) => row.key));
+    expect(headers(after).map((header) => header.isThinking)).toEqual([false, false, true]);
   });
 
-  it('keeps DSH thought groups collapsible and the completed answer outside folded work', () => {
-    const args = fixture('dsh-folded', [thought, toolCall(), text('Answer')], true);
-    const rows = buildChatVirtualRows({ ...args, selectionLayouts: undefined, showThoughts: true });
+  it.each([false, true])(
+    'preserves prose and ordering with finished=%s and collapsed tools',
+    (finished) => {
+      const tool = toolCall();
+      const progress = text('I will inspect the result.');
+      const answer = text('Answer');
+      const args = fixture(
+        `dsh-prose-${finished}`,
+        [thought, tool, progress, nextThought, answer],
+        finished
+      );
+      const rows = buildChatVirtualRows(args);
+      expect(visibleContents(rows)).toEqual([thought, progress, nextThought, answer]);
+      expect(headers(rows).map((header) => header.expanded)).toEqual([true, false, true]);
+      expect(
+        rows.some((row) => row.type === 'assistant' && row.content.kind === 'worked_group_header')
+      ).toBe(false);
+      expect(buildChatVirtualRows(args).every((row, index) => row === rows[index])).toBe(true);
+    }
+  );
+
+  it('preserves explicit independent toggles and reveals a collapsed thought for search', () => {
+    const id = 'dsh-toggles';
+    const tool = toolCall();
+    const args = fixture(id, [thought, tool, nextThought], true);
+    const defaults = buildChatVirtualRows(args);
+    const [first, command, last] = headers(defaults);
+    const selected = expansion(id, { [first!.block.key]: false, [command!.block.key]: true });
+    const changed = buildChatVirtualRows({ ...args, selectionLayouts: selected });
+    expect(visibleContents(changed)).toEqual([tool, nextThought]);
+    expect(headers(changed).map((header) => header.expanded)).toEqual([false, true, true]);
+    const reopened = expansion(id, {
+      [first!.block.key]: true,
+      [command!.block.key]: false,
+      [last!.block.key]: false,
+    });
+    expect(visibleContents(buildChatVirtualRows({ ...args, selectionLayouts: reopened }))).toEqual([
+      thought,
+    ]);
+    // Search IDs use the original item index, independent of the new group boundaries.
+    const search = new Map([
+      [id, { ...selected.get(id)!, activeSearchBlockId: getMessageItemPrefix(id, 0) }],
+    ]);
+    expect(visibleContents(buildChatVirtualRows({ ...args, selectionLayouts: search }))).toEqual([
+      thought,
+      tool,
+      nextThought,
+    ]);
+  });
+
+  it('invalidates both caches on provider changes and preserves other providers folding', () => {
+    const args = fixture(
+      'dsh-provider-switch',
+      [thought, toolCall(), text('progress'), toolCall(), text('answer')],
+      true
+    );
+    const dsh = buildChatVirtualRows(args);
+    expect(visibleContents(dsh)).toEqual([thought, text('progress'), text('answer')]);
+    const other = buildChatVirtualRows({ ...args, showThoughts: false });
+    expect(visibleContents(other)).toEqual([text('answer')]);
     expect(
-      rows.some((row) => row.type === 'assistant' && row.content.kind === 'worked_group_header')
+      other.some((row) => row.type === 'assistant' && row.content.kind === 'worked_group_header')
     ).toBe(true);
+    expect(buildChatVirtualRows(args)).toEqual(dsh);
+  });
+
+  it('keeps interrupted thoughts readable without exposing them for other providers', () => {
+    const args = fixture('dsh-interrupted', [thought, toolCall(), nextThought], true);
+    expect(visibleContents(buildChatVirtualRows(args))).toEqual([thought, nextThought]);
+    const other = buildChatVirtualRows({ ...args, showThoughts: false });
+    expect(visibleContents(other)).toEqual([]);
+    expect(headers(other)).toHaveLength(1);
     expect(
-      rows.some((row) => row.type === 'assistant' && row.content.kind === 'activity_detail')
+      other.some((row) => row.type === 'assistant' && row.content.kind === 'worked_group_header')
     ).toBe(false);
-    expect(
-      rows.flatMap((row) =>
-        row.type === 'assistant' &&
-        row.content.kind === 'content' &&
-        row.content.block.kind === 'content'
-          ? [row.content.block.entry.content]
-          : []
-      )
-    ).toEqual([text('Answer')]);
   });
 });

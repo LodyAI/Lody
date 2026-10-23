@@ -11,7 +11,14 @@ import type { Meta, StoryObj } from '@storybook/react';
 import { Provider, createStore, useAtomValue } from 'jotai';
 import { expect, waitFor } from 'storybook/test';
 import { useState, type ReactNode } from 'react';
-import type { MessageContent, SessionHistoryParsed, SessionId } from '@lody/shared';
+import {
+  getSessionRoomId,
+  type MessageContent,
+  type SessionHistoryParsed,
+  type SessionId,
+  type SessionMeta,
+} from '@lody/shared';
+import { sessionMetaCacheAtom } from '@/atoms/doc-meta';
 import type { ChatStreamItem, SessionChatStreamViewProps } from '@/components/ai-gui/view';
 import { MessageRowView, SessionChatStreamView } from '@/components/ai-gui/view';
 import { runtimeAtom } from '@/atoms';
@@ -1462,5 +1469,45 @@ export const DesktopPlanModeTurn: Story = {
         <RailGuide />
       </div>
     </WithRuntime>
+  ),
+};
+
+const dshStore = createStore();
+dshStore.set(runtimeAtom, stubRuntime as never);
+dshStore.set(sessionMetaCacheAtom, {
+  [getSessionRoomId(sessionId)]: { cliType: 'builtin', agentType: 'deepseek' } as SessionMeta,
+});
+const dshMessage: SessionHistoryParsed = {
+  id: 'dsh-independent-prose',
+  role: 'assistant',
+  read: true,
+  timestamp: '2026-10-22T08:00:00.000Z',
+  finished: true,
+  items: [
+    { type: 'thought', text: '先检查输入边界，再执行测试。' },
+    {
+      type: 'tool_call',
+      toolCallId: 'dsh-command',
+      kind: 'execute',
+      status: 'completed',
+      title: 'pnpm test',
+      content: [{ type: 'content', content: { type: 'text', text: 'Synthetic command output' } }],
+    },
+    { type: 'text', text: '测试已经返回，继续核对结果。' },
+    { type: 'thought', text: '命令完成后，这段思考仍然独立可读。' },
+    { type: 'text', text: '检查完成。' },
+  ],
+};
+const dshItems: ChatStreamItem[] = [
+  { type: 'message', sessionId, message: dshMessage, turnIndex: 0 },
+];
+
+/** DSH prose stays visible after completion; command details start closed. */
+export const DeepSeekIndependentProse: Story = {
+  args: { sessionId, items: dshItems, renderMessageRow },
+  render: () => (
+    <Provider store={dshStore}>
+      <ConversationRhythmScene items={dshItems} />
+    </Provider>
   ),
 };

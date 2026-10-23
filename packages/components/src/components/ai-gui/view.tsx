@@ -1112,21 +1112,32 @@ type AssistantTurnLayout = ReturnType<typeof buildAssistantTurnRenderLayout> & {
 const EMPTY_SUBAGENT_TASKS: ReturnType<typeof collectSubagentTasks> = [];
 
 // Assistant-turn layout (block grouping + subagent-task collection) is derived
-// purely from the message's id/items/finished state, and `buildChatStreamItems`
+// from the message and provider display policy. `buildChatStreamItems`
 // hands back a stable parsed-message object for unchanged turns and a fresh one
 // whenever the turn changes. Keying the cache by that reference lets only the
 // streaming turn recompute; without it, each streamed token re-runs these
 // O(items) passes for every turn in the whole conversation.
-const assistantTurnLayoutCache = new WeakMap<SessionHistoryParsed, AssistantTurnLayout>();
+const assistantTurnLayoutCache = new WeakMap<
+  SessionHistoryParsed,
+  { showThoughts: boolean; layout: AssistantTurnLayout }
+>();
 
-const getAssistantTurnLayout = (message: SessionHistoryParsed): AssistantTurnLayout => {
+const getAssistantTurnLayout = (
+  message: SessionHistoryParsed,
+  showThoughts: boolean
+): AssistantTurnLayout => {
   const cached = assistantTurnLayoutCache.get(message);
-  if (cached) return cached;
+  if (cached?.showThoughts === showThoughts) return cached.layout;
   const layout: AssistantTurnLayout = {
-    ...buildAssistantTurnRenderLayout(message.id, message.items, message.finished === true),
+    ...buildAssistantTurnRenderLayout(
+      message.id,
+      message.items,
+      message.finished === true,
+      showThoughts
+    ),
     subagentTasks: collectSubagentTasks(message.items),
   };
-  assistantTurnLayoutCache.set(message, layout);
+  assistantTurnLayoutCache.set(message, { showThoughts, layout });
   return layout;
 };
 
@@ -1272,7 +1283,10 @@ export const buildChatVirtualRows = ({
       continue;
     }
 
-    const { blocks, segments, entries, subagentTasks } = getAssistantTurnLayout(message);
+    const { blocks, segments, entries, subagentTasks } = getAssistantTurnLayout(
+      message,
+      showThoughts
+    );
     const cachedState = selectionLayout?.expandState ?? getExpandState(message.id);
     const cachedExpansion = cachedState.expandedGroups;
     // Collapse into a "Worked for …" summary ONLY when the turn both finished and
@@ -1408,6 +1422,9 @@ export const buildChatVirtualRows = ({
         }
       }
       const shouldUseWorkedGroup =
+        // DSH keeps prose and tool summaries in chronological order after completion;
+        // each thought/tool group owns its disclosure instead of an outer work fold.
+        !showThoughts &&
         isTurnFinished &&
         (segment.workBlockKeys.size > 0 || segmentSubagentTasks.length > 0) &&
         hasVisibleFinalContent;

@@ -2740,6 +2740,7 @@ describe('SessionExecutionService', () => {
         {
           scope: { workspaceId: 'workspace-1', recipientId: 'user-1' },
           sessionId: 'notification-source',
+          assistantTurnId: 'assistant:turn-user-1',
           originTurnIds: ['turn-user-1'],
           turnId: 'turn-user-1',
           audience: { kind: 'user' },
@@ -2765,6 +2766,7 @@ describe('SessionExecutionService', () => {
       {
         scope: { workspaceId: 'workspace-1', recipientId: 'user-1' },
         sessionId: 'notification-child',
+        assistantTurnId: 'assistant:turn-user-1',
         originTurnIds: [],
         turnId: 'turn-user-1',
         audience,
@@ -2783,6 +2785,7 @@ describe('SessionExecutionService', () => {
       {
         scope: { workspaceId: 'workspace-1', recipientId: 'user-1' },
         sessionId: 'notification-failure',
+        assistantTurnId: 'assistant:turn-user-1',
         originTurnIds: ['turn-user-1'],
         turnId: 'turn-user-1',
         audience: { kind: 'user' },
@@ -5325,6 +5328,7 @@ describe('SessionExecutionService', () => {
       expect.objectContaining({
         sessionId: 'session-2',
         scope: { workspaceId: 'workspace-1', recipientId: 'user-2' },
+        assistantTurnId: 'turn-1',
         outcome: { kind: 'succeeded' },
       })
     );
@@ -12108,6 +12112,7 @@ describe('Operation Inbox execution boundary', () => {
           sessionId: f.message.sessionId,
           turnId: 'human-input',
           originTurnIds: audience.kind === 'user' ? ['human-input'] : [],
+          assistantTurnId: 'assistant:human-input',
           audience,
           outcome: { kind: 'succeeded' },
         },
