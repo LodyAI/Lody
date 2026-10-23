@@ -147,12 +147,17 @@ function createForkHarness(
       throw new Error(`persist failed: ${reason}`);
     }
   });
+  const docMetadata = new Map<string, unknown>([
+    [getSessionRoomId(targetSessionId), options.targetDocMetaRecord],
+  ]);
   const repo = {
-    getDocMeta: vi.fn(async (roomId: string) =>
-      roomId === getSessionRoomId(targetSessionId) ? options.targetDocMetaRecord : undefined
-    ),
-    upsertDocMeta: vi.fn(async () => undefined),
-    deleteDoc: vi.fn(async () => undefined),
+    getDocMeta: vi.fn(async (roomId: string) => docMetadata.get(roomId)),
+    upsertDocMeta: vi.fn(async (roomId: string, patch: Partial<SessionMeta>) => {
+      docMetadata.set(roomId, Object.assign({}, docMetadata.get(roomId), patch));
+    }),
+    deleteDoc: vi.fn(async (roomId: string) => {
+      docMetadata.delete(roomId);
+    }),
     getMeta: vi.fn(() => ({
       scan: vi.fn(async () =>
         (options.aliveRoomIds ?? []).map((roomId) => ({ key: ['e', roomId], value: true }))
@@ -534,8 +539,10 @@ describe('SessionForkService durability boundary', () => {
           await vi.runAllTimersAsync();
           await settled.promise;
         }
-        expect(harness.repo.upsertDocMeta.mock.calls.at(-1)?.[1]).toMatchObject({
+        expect(await harness.repo.getDocMeta(getSessionRoomId(targetSessionId))).toMatchObject({
           title: 'Original',
+          acpSessionId: 'acp-target',
+          status: SessionStatusFactory.idle(),
         });
         const stored = loro.getList('history').toJSON();
         expect(stored.map((row) => row.id)).toEqual([
