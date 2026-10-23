@@ -1,5 +1,9 @@
 import { ReferralDetailsDialog, ReferralSettingsView } from './referral-settings-pure';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { usePostHog } from '@posthog/react';
+import { hashAnalyticsId } from '@lody/shared';
+import { useAppCapability } from '@/lib/app-platform';
+import { captureReferralEvent } from '@/lib/referral-analytics';
 import { useTranslation } from 'react-i18next';
 import { useCloudMutation, useCloudQuery } from '@lody/platform/react';
 import { cloudOperations } from '@/lib/cloud-api-operations';
@@ -36,6 +40,9 @@ function ReferralSettingsContainer({
   canManage: boolean;
 }) {
   const { t } = useTranslation();
+  const postHog = usePostHog();
+  const telemetry = useAppCapability('telemetry');
+  const viewedWorkspace = useRef<string | null>(null);
   const overview = useCloudQuery(cloudOperations.referrals.getOverview, { workspaceId });
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [cursors, setCursors] = useState<Array<string | null>>([null]);
@@ -56,6 +63,29 @@ function ReferralSettingsContainer({
     return () => clearTimeout(timer);
   }, [copied]);
 
+  const visible =
+    !!overview &&
+    (overview.eligible ||
+      overview.code !== null ||
+      overview.issued > 0 ||
+      overview.spent > 0 ||
+      overview.adjustment > 0);
+  useEffect(() => {
+    if (!telemetry || !visible || viewedWorkspace.current === workspaceId) return;
+    viewedWorkspace.current = workspaceId;
+    captureReferralEvent(postHog, 'viewed', { workspace_id: workspaceId, can_manage: canManage });
+  }, [telemetry, visible, workspaceId, canManage, postHog]);
+  const capture = (
+    event: 'link_copied' | 'link_shared' | 'details_viewed',
+    code = overview?.code
+  ) => {
+    if (telemetry)
+      captureReferralEvent(postHog, event, {
+        workspace_id: workspaceId,
+        ...(code ? { referral_code_hash: hashAnalyticsId(code) } : {}),
+      });
+  };
+
   // `null` = the workspace cannot be read: nothing to show.
   if (overview === null) return null;
   const view = overview;
@@ -63,8 +93,10 @@ function ReferralSettingsContainer({
   const copy = (value: string) =>
     // Started inside the click, before any await, so browsers keep the gesture.
     writeTextToClipboard(value).then((ok) => {
-      if (ok) setCopied(true);
-      else toast.error(t('referral.copyFailed'));
+      if (ok) {
+        setCopied(true);
+        capture('link_copied');
+      } else toast.error(t('referral.copyFailed'));
       return ok;
     });
 
@@ -72,7 +104,10 @@ function ReferralSettingsContainer({
     <>
       <ReferralSettingsView
         overview={view}
-        onOpenDetails={() => setDetailsOpen(true)}
+        onOpenDetails={() => {
+          setDetailsOpen(true);
+          capture('details_viewed');
+        }}
         canManage={canManage}
         linkPending={linkPending}
         copied={copied}
@@ -88,6 +123,7 @@ function ReferralSettingsContainer({
               // The link now shows in its field; copying after a round trip may be refused.
               if (await writeTextToClipboard(created.url)) {
                 setCopied(true);
+                capture('link_copied', created.code);
                 toast.success(t('referral.createdCopied'));
               }
             } catch {
@@ -100,9 +136,12 @@ function ReferralSettingsContainer({
         onShare={
           url && canNativeShare()
             ? () => {
-                void navigator.share({ title: t('referral.shareTitle'), url }).catch(() => {
-                  /* Dismissing the share sheet is not an error. */
-                });
+                void navigator
+                  .share({ title: t('referral.shareTitle'), url })
+                  .then(() => capture('link_shared'))
+                  .catch(() => {
+                    /* Dismissing the share sheet is not an error. */
+                  });
               }
             : undefined
         }
