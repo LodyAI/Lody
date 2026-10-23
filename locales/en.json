@@ -92,7 +92,7 @@
   "e2ee.values.machine": "Machine",
   "e2ee.values.recovery": "Recovery",
   "referral.title": "Referrals",
-  "referral.campaignDates": "Campaign: {{start}}–{{end}}",
+  "referral.campaignDates": "Campaign: {{start}}–{{end}}. The standard discount resumes afterward.",
   "referral.retainedCheckout": "An existing checkout keeps {{discount}}% off until it expires. The prices below apply to new checkouts; changing the plan, seats or checkout destination creates a new one.",
   "referral.description": "They get <discount>{{discount}}% off</discount> their first payment. You earn <reward>{{reward}}%</reward> of it as credit.",
   "referral.discount": "{{discount}}% off",
