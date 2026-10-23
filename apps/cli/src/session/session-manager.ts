@@ -1,4 +1,3 @@
-import { resolveGitIdentityPolicyLegacy } from './git-identity-policy';
 import {
   acquireSessionCredentialsLegacy,
   nativeSessionCredentials,
@@ -417,7 +416,7 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
    * stall. Callers that have given up (the initialization stall watchdog) must
    * detach it here instead.
    *
-   * Git identity preflight is cancelled immediately. Other dependencies may
+   * Abort-aware startup stages stop immediately. Other dependencies may
    * still finish after cancellation, so they are reaped instead: if the
    * abandoned create ever produces a Session, that Session is terminated rather
    * than left as an orphan process. Returns whether an entry was detached.
@@ -771,18 +770,10 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
       signal?.throwIfAborted();
       this.reportStartStage(config, 'git-identity');
       config.onPresencePhase?.('initializing', 'Resolving Git identity');
-      const gitIdentityOptions = await this.resolveGitIdentityOptions(
-        config.requesterUserId,
-        signal,
-        sessionId
-      );
       signal?.throwIfAborted();
-      session.updateGitIdentity(
-        config.userName,
-        config.userEmail,
-        config.requesterUserId,
-        gitIdentityOptions
-      );
+      session.updateGitIdentity(config.userName, config.userEmail, config.requesterUserId, {
+        preferMachineIdentity: config.requesterUserId === this.cloudPort.identity.userId,
+      });
       config.onPresencePhase?.(
         requestedResumeSessionId ? 'resuming' : 'acp',
         'Resolving agent runtime'
@@ -1005,30 +996,6 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
       runtimeOverrides: config.runtimeOverrides,
       magpieGatewayUrl: config.magpieGatewayUrl,
     });
-  }
-
-  /**
-   * Commit identity follows the same precedence as GitHub credentials: a
-   * requester who enabled "Act as you" commits as themselves; otherwise the
-   * machine owner may use the machine's global Git identity. Policy lookup
-   * failures degrade to "not enabled" rather than blocking the turn.
-   */
-  async resolveGitIdentityOptions(
-    requesterUserId: string,
-    signal?: AbortSignal,
-    sessionId?: SessionId
-  ): Promise<{ preferMachineIdentity: boolean; personalIdentityEnabled: boolean }> {
-    signal?.throwIfAborted();
-    const preferMachineIdentity = requesterUserId === this.cloudPort.identity.userId;
-    const tokenManager = this.getGitHubTokenManager();
-    if (!tokenManager) return { preferMachineIdentity, personalIdentityEnabled: false };
-    const policy = await resolveGitIdentityPolicyLegacy(
-      () => tokenManager.getCredentialPolicy({ requesterUserId, machineId: this.machineId }),
-      this.logger,
-      sessionId ?? 'git-identity',
-      signal
-    );
-    return { preferMachineIdentity, personalIdentityEnabled: policy.personalEnabled };
   }
 
   private async prepareGitHubRepoSessionConfig(config: SessionConfig): Promise<SessionCredentials> {

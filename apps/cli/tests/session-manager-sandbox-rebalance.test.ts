@@ -385,14 +385,15 @@ describe('SessionManager sandbox rebalance', () => {
   );
 });
 
-describe('SessionManager identity preflight', () => {
-  it.each(['timeout', 'rejection', 'abandon', 'cancel'] as const)(
+describe('SessionManager identity binding', () => {
+  it.each(['hung-policy', 'rejection', 'abandon', 'cancel'] as const)(
     '%s never leaves startup waiting on identity or revives a retired attempt',
     async (mode) => {
       const directory = mkdtempSync(path.join(os.tmpdir(), 'lody-identity-preflight-'));
       vi.stubEnv('LODY_DATA_DIR', directory);
-      const entered = Promise.withResolvers<void>();
       const answer = Promise.withResolvers<{ personalEnabled: boolean }>();
+      const sessionId = 'identity-preflight' as SessionId;
+      let termination: Promise<'terminated' | 'not-found'> | undefined;
       const doc = createWorkspaceDocument();
       let persistedId: string | undefined;
       vi.mocked(doc.getOrCreateSessionDoc).mockResolvedValue({
@@ -412,26 +413,25 @@ describe('SessionManager identity preflight', () => {
           sessionSandboxFactory: async () => createSandbox(),
         }
       );
-      Object.assign(manager, {
-        githubTokenManager: {
-          getCredentialPolicy: () => {
-            if (!vi.isFakeTimers())
-              vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
-            entered.resolve();
-            return mode === 'rejection' ? Promise.reject(new Error('offline')) : answer.promise;
-          },
-        },
-      });
-      // Keep this fixture on native credentials; it exercises the real manager
-      // startup and identity policy, not the unrelated credential broker.
+      const lookup = vi.fn(() =>
+        mode === 'rejection' ? Promise.reject(new Error('offline')) : answer.promise
+      );
+      Object.assign(manager, { githubTokenManager: { getCredentialPolicy: lookup } });
+      // Native credentials keep network authorization outside this startup fixture.
       const config: SessionConfig = {
-        ...createConfig('identity-preflight'),
+        ...createConfig(sessionId),
         assumeDocExisting: true,
         agentCliType: 'custom',
         agentType: 'custom-fixture',
         customAcp: { command: 'fixture', args: [] },
         project: { kind: 'local', localProjectId: 'fixture' as LocalProjectId },
         workdir: directory,
+        onStartStage: (stage) => {
+          if (stage !== 'git-identity') return;
+          if (mode === 'abandon')
+            manager.abandonPendingSessionCreate(sessionId, 'cancelled fixture');
+          if (mode === 'cancel') termination = manager.requestSessionTerminate(sessionId);
+        },
       };
       let launched = false;
       vi.spyOn(Session.prototype, 'createAgent').mockImplementation(async () => {
@@ -445,42 +445,33 @@ describe('SessionManager identity preflight', () => {
         (error: unknown) => ({ error })
       );
       try {
-        await entered.promise;
         if (mode === 'abandon' || mode === 'cancel') {
-          if (mode === 'abandon')
-            manager.abandonPendingSessionCreate(config.sessionId!, 'cancelled fixture');
-          else await manager.requestSessionTerminate(config.sessionId!);
-          vi.useRealTimers();
           expect(await outcome).toHaveProperty('error');
           answer.resolve({ personalEnabled: true });
           await answer.promise;
           expect(launched).toBe(false);
           expect(persistedId).toBeUndefined();
-          expect(manager.getSession(config.sessionId!)).toBeNull();
-          expect(manager.getPendingSession(config.sessionId!)).toBeNull();
+          expect(manager.getSession(sessionId)).toBeNull();
+          expect(manager.getPendingSession(sessionId)).toBeNull();
           // A new attempt for the same Session must have an independent lifetime.
-          Object.assign(manager, {
-            githubTokenManager: { getCredentialPolicy: async () => ({ personalEnabled: false }) },
-          });
-          const replacement = await manager.createSession({ ...config });
-          expect(manager.getSession(config.sessionId!)).toBe(replacement);
+          await termination;
+          const replacement = await manager.createSession({ ...config, onStartStage: undefined });
+          expect(manager.getSession(sessionId)).toBe(replacement);
           expect(persistedId).toBe('fixture-acp');
           await replacement.terminate(true);
         } else {
-          await vi.advanceTimersByTimeAsync(6_000);
-          vi.useRealTimers();
           const result = await outcome;
           if (!('session' in result)) throw result.error;
           expect(launched).toBe(true);
           expect(persistedId).toBe('fixture-acp');
-          const identity = result.session.getGitIdentityForUser('user-1');
+          expect(result.session.getGitIdentityForUser('user-1')).toBeNull();
           answer.resolve({ personalEnabled: true });
           await answer.promise;
-          expect(result.session.getGitIdentityForUser('user-1')).toEqual(identity);
+          expect(result.session.getGitIdentityForUser('user-1')).toBeNull();
           await result.session.terminate(true);
         }
+        expect(lookup).not.toHaveBeenCalled();
       } finally {
-        vi.useRealTimers();
         vi.unstubAllEnvs();
         rmSync(directory, { recursive: true, force: true });
       }

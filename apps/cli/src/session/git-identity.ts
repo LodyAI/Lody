@@ -1,10 +1,4 @@
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import path from 'node:path';
-import { toShared } from '@/platform/process-options';
 import { isMissingEmail } from '@lody/shared';
-
-import { runCommandTextSyncLegacy } from '@lody/shared/node/process';
 
 export const DEFAULT_AI_GIT_AUTHOR_NAME = 'LodyAI';
 export const DEFAULT_AI_GIT_AUTHOR_EMAIL = 'agent@lody.ai';
@@ -20,14 +14,8 @@ type PartialGitIdentity = {
 };
 
 export type GitIdentityResolutionOptions = {
-  /** Only machine-owner turns may read and prefer the machine's Git identity. */
+  /** Owners leave identity and signing to native Git configuration. */
   preferMachineIdentity: boolean;
-  /**
-   * The requester chose "Act as you" for GitHub. Their Lody identity then wins
-   * over the machine's Git configuration, matching the credential precedence.
-   */
-  personalIdentityEnabled?: boolean;
-  machineIdentity?: PartialGitIdentity;
 };
 
 const trimNonEmpty = (value?: string | null): string | undefined => {
@@ -68,95 +56,17 @@ const normalizeName = (name: string | undefined, email: string): string => {
   return email;
 };
 
-/** `git config` blocks the caller's event loop, so a wedged git cannot stall it for long. */
-const GIT_CONFIG_TIMEOUT_MS = 5_000;
-
-// Git's config quoting differs from JSON (for example, it does not accept \r).
-const quoteConfigPath = (value: string): string =>
-  `"${value.replace(/[\\"\n\t\b]/g, (char) => {
-    if (char === '\n') return '\\n';
-    if (char === '\t') return '\\t';
-    if (char === '\b') return '\\b';
-    return `\\${char}`;
-  })}"`;
-
-// Only global identity is a host default; shared bare-repo config belongs to agents.
-const readGitConfig = (key: 'user.name' | 'user.email'): string | undefined => {
-  try {
-    let configDir: string | undefined;
-    try {
-      let source = ['--global'];
-      const home = process.env.HOME;
-      if (process.env.GIT_CONFIG_GLOBAL === undefined && home) {
-        // --global selects one file, but ordinary Git reads XDG before ~/.gitconfig.
-        // Let Git resolve includes and precedence without querying repository config.
-        // A real file, rather than stdin, lets hasconfig conditions rescan the input.
-        const paths = [
-          path.resolve(process.env.XDG_CONFIG_HOME || path.join(home, '.config'), 'git/config'),
-          path.resolve(home, '.gitconfig'),
-        ];
-        configDir = mkdtempSync(path.join(tmpdir(), 'lody-git-identity-'));
-        const configFile = path.join(configDir, 'config');
-        writeFileSync(
-          configFile,
-          paths.map((file) => `[include]\npath = ${quoteConfigPath(file)}\n`).join('')
-        );
-        source = ['--file', configFile];
-      }
-      const { stdout } = runCommandTextSyncLegacy(
-        {
-          command: 'git',
-          args: ['config', ...source, '--includes', '--get', key],
-          timeout: GIT_CONFIG_TIMEOUT_MS,
-          check: 'exit-0',
-        },
-        toShared()
-      );
-      return trimNonEmpty(stdout);
-    } finally {
-      if (configDir) rmSync(configDir, { recursive: true, force: true });
-    }
-  } catch {
-    return undefined;
-  }
-};
-
-export const readHostDefaultGitIdentity = (): PartialGitIdentity => ({
-  name:
-    trimNonEmpty(process.env.GIT_AUTHOR_NAME) ??
-    trimNonEmpty(process.env.GIT_COMMITTER_NAME) ??
-    readGitConfig('user.name'),
-  email:
-    trimNonEmpty(process.env.GIT_AUTHOR_EMAIL) ??
-    trimNonEmpty(process.env.GIT_COMMITTER_EMAIL) ??
-    readGitConfig('user.email'),
-});
-
 export const resolveSessionGitIdentity = (
   requested: PartialGitIdentity,
   options: GitIdentityResolutionOptions
-): GitIdentity => {
+): GitIdentity | null => {
+  if (options.preferMachineIdentity) return null;
   // Missing-email addresses are auth placeholders, not commit identities. A
   // non-owner must never fall back to the machine owner's Git configuration.
   const requestedEmail = trimNonEmpty(requested.email);
   const requestedIdentity = isUsableEmail(requestedEmail)
     ? { name: normalizeName(trimNonEmpty(requested.name), requestedEmail), email: requestedEmail }
     : undefined;
-  if (options.personalIdentityEnabled && requestedIdentity) {
-    return requestedIdentity;
-  }
-
-  if (options.preferMachineIdentity) {
-    const machineIdentity = options.machineIdentity ?? readHostDefaultGitIdentity();
-    const machineEmail = trimNonEmpty(machineIdentity.email);
-    if (isUsableEmail(machineEmail)) {
-      return {
-        name: normalizeName(trimNonEmpty(machineIdentity.name), machineEmail),
-        email: machineEmail,
-      };
-    }
-  }
-
   if (requestedIdentity) {
     return requestedIdentity;
   }

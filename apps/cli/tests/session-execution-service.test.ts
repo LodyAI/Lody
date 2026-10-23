@@ -2482,7 +2482,7 @@ describe('SessionExecutionService', () => {
     expect(onTurnOutcome).toHaveBeenCalledTimes(1);
   });
 
-  it('restores the ACP process before prompting when the turn Git identity changed', async () => {
+  it('keeps the ACP process when the turn requester changes', async () => {
     const sessionId = 'session-requester-switch' as SessionId;
     let history: Array<Record<string, unknown>> = [
       { id: 'turn-user-2', role: 'user', status: 'pending', read: false },
@@ -2559,11 +2559,12 @@ describe('SessionExecutionService', () => {
     expect(oldSession.terminate).not.toHaveBeenCalled();
     expect(createSession).not.toHaveBeenCalled();
     expect(oldPrompt).toHaveBeenCalledOnce();
+    expect(history[0]?.status).toBe('handled');
     expect(oldSession.updateGitIdentity).toHaveBeenCalledWith(
       'Teammate',
       'teammate@example.com',
       'user-2',
-      { preferMachineIdentity: false, personalIdentityEnabled: false }
+      { preferMachineIdentity: false }
     );
   });
 

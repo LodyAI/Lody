@@ -136,8 +136,7 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
   private agentProcess: SessionProcessHandle | null = null;
   private termination: SessionTermination | null = null;
   private readonly sandbox: SessionSandbox;
-  private personalIdentityEnabled = false;
-  private gitIdentity: { id: string; name: string; email: string };
+  private gitIdentity: { id: string; name: string; email: string } | null = null;
   public agentClient: AgentClient | null = null;
   public acpSessionId: ACPSessionId | null = null;
   private acpCapabilities: AcpCapabilitiesResult | null = null;
@@ -157,11 +156,6 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
     this.fixedWorkdir = workdir;
     this.sandbox = sandbox;
     this.sessionId = config.sessionId!;
-    this.gitIdentity = {
-      id: config.requesterUserId,
-      name: config.userName,
-      email: config.userEmail,
-    };
     this.terminalManager = new ShellTerminalManager({
       logger: this.logger,
       sessionLabel: this.sessionId,
@@ -398,36 +392,24 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
     userName: string,
     userEmail: string,
     userId: string | undefined,
-    options: { preferMachineIdentity: boolean; personalIdentityEnabled?: boolean }
+    options: { preferMachineIdentity: boolean }
   ): void {
-    const configEnv = this.config.env ?? {};
-    if (options.personalIdentityEnabled !== undefined) {
-      this.personalIdentityEnabled = options.personalIdentityEnabled;
-    }
-    // Set git identity using Git's recognized environment variables directly.
-    // The env is per agent process, so a shared machine never mixes requesters.
-    const { name, email } = resolveSessionGitIdentity(
-      { name: userName, email: userEmail },
-      {
-        preferMachineIdentity: options.preferMachineIdentity,
-        personalIdentityEnabled: options.personalIdentityEnabled ?? this.personalIdentityEnabled,
-      }
+    const identity = resolveSessionGitIdentity({ name: userName, email: userEmail }, options);
+    // Keep turn attribution out of config.env so switching back to the owner
+    // restores native config/env without retaining a previous member's overrides.
+    this.gitIdentity = identity
+      ? {
+          id: userId ?? this.gitIdentity?.id ?? this.config.requesterUserId,
+          ...identity,
+        }
+      : null;
+    this.logger.debug(
+      `[${this.sessionId}] Git identity: ${identity ? `${identity.name} <${identity.email}>` : 'native Git configuration'}`
     );
-    configEnv.GIT_AUTHOR_NAME = name;
-    configEnv.GIT_COMMITTER_NAME = name;
-    configEnv.GIT_AUTHOR_EMAIL = email;
-    configEnv.GIT_COMMITTER_EMAIL = email;
-    this.config.env = configEnv;
-    this.gitIdentity = {
-      id: userId ?? this.gitIdentity.id,
-      name,
-      email,
-    };
-    this.logger.debug(`[${this.sessionId}] Git identity updated: ${name} <${email}>`);
   }
 
   getGitIdentityForUser(userId: string): { id: string; name: string; email: string } | null {
-    return this.gitIdentity.id === userId ? { ...this.gitIdentity } : null;
+    return this.gitIdentity?.id === userId ? { ...this.gitIdentity } : null;
   }
 
   getGitHubCredentials(): SessionCredentials {
@@ -468,9 +450,6 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
   ): NodeJS.ProcessEnv {
     const configEnv = this.config.env ?? {};
     const workspaceSessionId = this.config.parentSessionId ?? this.sessionId;
-
-    // Git identity is set directly via GIT_AUTHOR_*/GIT_COMMITTER_* in configEnv
-    // (see updateGitIdentity and session-manager.ts)
 
     const merged: NodeJS.ProcessEnv = {
       ...process.env,
@@ -539,6 +518,23 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
         )
           finalEnv[key] = configEnv[key];
       }
+    }
+    // Commit attribution follows the turn requester, independently of the
+    // conversation owner's network credentials, including native local projects.
+    // Apply last so shell/ACP overrides and managed config cannot undo it.
+    if (this.gitIdentity) {
+      finalEnv.GIT_AUTHOR_NAME = finalEnv.GIT_COMMITTER_NAME = this.gitIdentity.name;
+      finalEnv.GIT_AUTHOR_EMAIL = finalEnv.GIT_COMMITTER_EMAIL = this.gitIdentity.email;
+      let count = Number(finalEnv.GIT_CONFIG_COUNT ?? 0);
+      for (const [key, value] of [
+        ['commit.gpgsign', 'false'],
+        ['tag.gpgsign', 'false'],
+        ['user.signingkey', ''],
+      ]) {
+        finalEnv[`GIT_CONFIG_KEY_${count}`] = key;
+        finalEnv[`GIT_CONFIG_VALUE_${count++}`] = value;
+      }
+      finalEnv.GIT_CONFIG_COUNT = String(count);
     }
     return finalEnv;
   }

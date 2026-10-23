@@ -24,23 +24,12 @@ const createResolver = (queryProfile: ProfileQuery) =>
 describe('SessionUserResolver', () => {
   afterEach(() => vi.useRealTimers());
 
-  it('binds owner turns to machine Git identity without querying the cloud', async () => {
+  it('leaves owner turns to native Git without waiting for the cloud', async () => {
     const query = vi.fn<ProfileQuery>(() => new Promise(() => {}));
     const resolver = new SessionUserResolver(testLogger(), WORKSPACE_ID, query, 'owner');
     const owner = await resolver.resolve('owner');
     expect(owner.id).toBe('owner');
-    expect(
-      resolveSessionGitIdentity(owner, {
-        preferMachineIdentity: true,
-        machineIdentity: { name: 'Local Owner', email: 'local@example.com' },
-      })
-    ).toEqual({ name: 'Local Owner', email: 'local@example.com' });
-    expect(
-      resolveSessionGitIdentity(owner, {
-        preferMachineIdentity: true,
-        machineIdentity: {},
-      })
-    ).toEqual({ name: 'LodyAI', email: 'agent@lody.ai' });
+    expect(resolveSessionGitIdentity(owner, { preferMachineIdentity: true })).toBeNull();
     expect(query).not.toHaveBeenCalled();
   });
 
@@ -55,7 +44,6 @@ describe('SessionUserResolver', () => {
     expect(
       resolveSessionGitIdentity(guest, {
         preferMachineIdentity: false,
-        machineIdentity: { name: 'Owner', email: 'owner@example.com' },
       })
     ).toEqual({ name: 'Guest', email: 'guest@example.com' });
   });
@@ -81,7 +69,6 @@ describe('SessionUserResolver', () => {
     expect(
       resolveSessionGitIdentity(fallback, {
         preferMachineIdentity: false,
-        machineIdentity: { name: 'Owner', email: 'owner@example.com' },
       })
     ).toEqual({ name: 'LodyAI', email: 'agent@lody.ai' });
     expect(vi.getTimerCount()).toBe(0);
