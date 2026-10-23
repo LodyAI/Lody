@@ -33,7 +33,7 @@ Stable 原登录回调也使用 lody；当 OSS 或 Nightly 成为默认程序，
 
 审查基线：浅克隆中陈旧的本地 main 没有共同祖先。本分支已包含 main 提交 `7700f420`；核对改动使用 origin/main 在该提交的共同祖先，不使用不相关的本地 main。
 
-修正（2026-10-23，[#1833](https://github.com/LodyAI/Lody/issues/1833)）：桌面端标签行的"…"菜单对每个标签都复制根会话的链接。工具栏由根对话的 `SessionChatInterface` 渲染，其复制动作用该实例自身的 `session.id` 生成链接；`SessionChatToolbar.actions` 没有 `onCopyUrl`，页面无法把命令面板"复制当前链接"和移动端菜单已经在用的、按激活标签解析的处理函数传进来。本次工作之前，该动作复制的是页面 URL，`?tab=` 里带着子对话，因此这是对上文"直接指定目标对话"规则的回归。现在 `SessionChatToolbar.actions.onCopyUrl` 存在，桌面页面传入 `handleCopyUrl`（草稿标签还不是 Session，保留根链接），头部菜单优先使用工具栏或外部回调，而不是实例本地的链接。已通过类型检查、lint、格式检查和现有头部菜单测试；没有测试渲染带工具栏的 `SessionChatInterface`，这段接线本身没有行为覆盖。
+修正（2026-10-23，[#1833](https://github.com/LodyAI/Lody/issues/1833)，[PR #1834](https://github.com/LodyAI/Lody/pull/1834)）：桌面端标签行的"…"菜单对每个标签都复制根会话的链接。工具栏由根对话的 `SessionChatInterface` 渲染，其复制动作用该实例自身的 `session.id` 生成链接；`SessionChatToolbar.actions` 没有 `onCopyUrl`，页面无法把命令面板"复制当前链接"和移动端菜单已经在用的、按激活标签解析的处理函数传进来。本次工作之前，该动作复制的是页面 URL，`?tab=` 里带着子对话，因此这是对上文"直接指定目标对话"规则的回归。现在 `SessionChatToolbar.actions.onCopyUrl` 存在，桌面页面传入 `handleCopyUrl`（草稿标签还不是 Session，保留根链接），头部菜单优先使用工具栏或外部回调，而不是实例本地的链接。已通过类型检查、lint、格式检查和现有头部菜单测试；没有测试渲染带工具栏的 `SessionChatInterface`，这段接线本身没有行为覆盖。
 
 ## 验证与限制
 
