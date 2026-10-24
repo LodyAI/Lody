@@ -58,10 +58,6 @@ rules live in [AGENTS.md](AGENTS.md); the pipeline and its reasoning live in
 - `mention-chips.tsx` owns the kind → glyph and kind → colour tables for both chip
   surfaces; `message-text-chips.tsx` paints the transcript chip. Its paste button
   shares the prose baseline through its label, while the clipboard icon stays centered.
-  A pasted-text chip's geometry assumes its label delimits itself — as
-  `[Pasted 4,182 chars]` does, and as every custom label a caller passes must: the glyph
-  paints over the leading `figure space + [` and the trailing `] + figure space` stays
-  blank, so an undelimited label loses its own first and last character.
 - `mention-rank.ts` and `vscode-fuzzy-score.ts` own matching for files, sessions,
   Roles, Issues, and PRs. The vendored score is taken from the pinned VS Code
   source identified in its header; AGENTS.md states what must survive an update.

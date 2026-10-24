@@ -365,10 +365,7 @@ owns native range retention, history leases, and incomplete-copy protection.
 `view.tsx` supplies stable row identities, `keepMounted`, folding snapshots, and
 follow suppression; `markdown-renderer.tsx` holds selected prose presentation.
 Session data and action controls continue updating. This is independent of
-`message-selection.tsx`, which selects messages for image sharing, and of
-`selection-quote.tsx`, which captures the same kind of range as a text snapshot
-and stages it into the composer draft; that capture is sticky on purpose, so a
-quote outlives the native range the moment a press on our own controls clears it.
+`message-selection.tsx`, which selects messages for image sharing.
 
 The [decision note](../../../../../.agents/notes/implemented/bug-fix/2026-09-20-conversation-text-selection.md)
 records lifecycle, alternatives, and platform verification limits.
