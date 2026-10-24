@@ -118,17 +118,26 @@ export async function listRemoteLocalProjects(args: {
       }),
     }))
   );
+  const selector = normalizeCliValue(args.machineSelector) ?? args.auth.machineId;
   const authorizedMachines = machineAccess
     .filter((entry) => entry.access.allowed)
     .map((entry) => entry.machine);
-  if (authorizedMachines.length === 0) {
+  const deniedById = machineAccess.find(
+    (entry) => entry.machine.id === selector && !entry.access.allowed
+  );
+  if (!deniedById && authorizedMachines.length === 0) {
     throw new Error('No authorized machines are available in this workspace.');
   }
-
-  const machine = selectRemoteProjectMachine(
-    authorizedMachines,
-    normalizeCliValue(args.machineSelector) ?? args.auth.machineId
-  );
+  const machine = deniedById?.machine ?? selectRemoteProjectMachine(authorizedMachines, selector);
+  const access = machineAccess.find((entry) => entry.machine.id === machine.id)?.access;
+  if (!access?.allowed) {
+    const reason = access?.reason ?? 'machine_not_registered';
+    const guidance =
+      reason === 'machine_not_registered'
+        ? ' Check daemon logs for machine access registration failures.'
+        : '';
+    throw new Error(`Machine access denied for ${machine.id}: ${reason}.${guidance}`);
+  }
   await args.manager.syncFlockDocOrThrow(getMachineFlockDocId(workspaceId, machine.id), {
     reason: `project.list:${machine.id}`,
   });
