@@ -3,6 +3,7 @@ import {
   createRoostMessageState,
   projectRoostMessageState,
   planRoostMessageState,
+  roostMessageStatePatches,
 } from '../src/session/roost-message-state';
 
 import {
@@ -13,6 +14,76 @@ import {
 
 const primaryId = '01'.repeat(16);
 describe('Roost message state', () => {
+  it('relocates an unchanged long patch without reinserting its text or changing program order', () => {
+    const primary = { id: 'a', items: [{ type: 'text', text: 'base🙂' }], flag: 'old' };
+    const state = createRoostMessageState(primary, primaryId, {
+      ...primary,
+      items: [{ type: 'text', text: primary.items[0]!.text + 'long🙂🚀'.repeat(2048) }],
+      flag: 'new',
+    });
+    const text = state.patches.find((patch) => patch.kind === 'appendText');
+    const other = state.patches.find((patch) => patch !== text);
+    if (!text || !other) throw new Error('Expected independent patches');
+    const before = { ...state, patches: [other, text] };
+    const after = { ...state, patches: [text, other] };
+    const original = structuredClone(before);
+    const ops = roostMessageStatePatches(before, after);
+    const baseline = roostContentPatches(before, after);
+    const payloadBytes = (edits: typeof ops) =>
+      edits.reduce(
+        (bytes, op) =>
+          bytes +
+          Buffer.byteLength(
+            'text' in op
+              ? op.text
+              : 'contentJson' in op
+                ? op.contentJson
+                : 'valuesJson' in op
+                  ? op.valuesJson
+                  : ''
+          ),
+        0
+      );
+    expect(payloadBytes(baseline)).toBeGreaterThan(16000);
+    expect(payloadBytes(ops)).toBeLessThan(1024);
+    expect(stageRoostContent(before, ops)).toEqual(after);
+    expect(before).toEqual(original);
+    expect(projectRoostMessageState(primary, primaryId, after)).toEqual(
+      projectRoostMessageState(primary, primaryId, before)
+    );
+    const append = { ...primary, items: [{ type: 'text', text: 'base🙂next' }] };
+    const short = createRoostMessageState(primary, primaryId, append);
+    expect(roostMessageStatePatches(state, short)).toEqual(roostContentPatches(state, short));
+  });
+
+  it('preserves overlapping state operation order and falls back for ambiguous or foreign anchors', () => {
+    const primary = { id: 'a', text: 'base' };
+    const text = 'large🙂'.repeat(2048);
+    const set = { kind: 'set' as const, path: [{ key: 'text' }], contentJson: '"replacement"' };
+    const append = { kind: 'appendText' as const, path: [{ key: 'text' }], text };
+    const marker = { kind: 'set' as const, path: [{ key: 'marker' }], contentJson: 'true' };
+    const base = { format: 'lody-message-state', version: 1, primaryTurnId: primaryId };
+    const before = { ...base, patches: [marker, set, append] };
+    const after = { ...base, patches: [set, append, marker] };
+    const ops = roostMessageStatePatches(before, after);
+    expect(stageRoostContent(before, ops)).toEqual(after);
+    expect(projectRoostMessageState(primary, primaryId, after)).toEqual({
+      ...primary,
+      text: 'replacement' + text,
+      marker: true,
+    });
+    for (const [left, right] of [
+      [{ ...before, patches: [append, append, marker] }, after],
+      [before, { ...after, primaryTurnId: '02'.repeat(16) }],
+      [before, { ...after, unknown: true }],
+    ])
+      expect(roostMessageStatePatches(left, right)).toEqual(roostContentPatches(left, right));
+    const unchanged = { ...before, patches: [marker, set, { ...append, text: text + 'tail' }] };
+    expect(roostMessageStatePatches(before, unchanged)).toEqual(
+      roostContentPatches(before, unchanged)
+    );
+  });
+
   it('preserves the sealed baseline and reconstructs Unicode, deletions and nested arrays', () => {
     const primary = {
       id: 'assistant',

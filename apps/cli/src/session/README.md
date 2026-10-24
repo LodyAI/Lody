@@ -37,6 +37,10 @@ A notification failure cannot replay Agent execution.
 - `session-dispatch-logic.ts` — pure decision functions for the watcher (testable).
 - `roost-node-session.ts` — owns Roost history reads/writes and its bounded active-branch
   page cache; `roost-session-backend.ts` joins it to the existing Loro control plane.
+- `roost-content-patches.ts` preserves an existing text node through a verified
+  tail-item split; `roost-message-state.ts` preserves an unchanged large patch
+  when its array position changes. Both stage and compare the exact final JSON
+  before using cheaper existing ContentOps, otherwise retaining the ordinary diff.
 - `roost-writer-identity.ts` — persists the replica's signing identity in private
   application data, independent of login credentials and the system credential store.
 - `roost-history-generation.ts` — stages structural replacements privately and

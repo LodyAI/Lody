@@ -109,6 +109,7 @@ import {
   createRoostMessageState,
   planRoostMessageState,
   projectRoostMessageState,
+  roostMessageStatePatches,
 } from './roost-message-state';
 import { reportRoostHistoryFailure } from './roost-history-diagnostics';
 import { loadRoostOwnerSeedLegacy } from './roost-writer-identity';
@@ -2005,12 +2006,9 @@ const createNodeServicesForLease = async (
           : undefined;
         const content = statePlan?.content ?? entry;
         const hints = state ? statePlan?.appends : appends;
-        const ops = roostContentPatches(
-          decodedContent(target),
-          content,
-          hints,
-          !state ? fieldChanges : undefined
-        );
+        const ops = state
+          ? roostMessageStatePatches(decodedContent(target), content, hints)
+          : roostContentPatches(decodedContent(target), content, hints, fieldChanges);
         patchTargets.set(bytesHex(target.turnId), {
           primary,
           target,
