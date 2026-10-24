@@ -117,6 +117,9 @@ export const conversationSurface = stylex.create({
     },
   },
   mobileUserStack: { maxWidth: 'min(100%, 28rem)' },
+  // Editing turns the fitting bubble into a full-width column. Keep its capped
+  // content on the stack's inline-end, aligned with the metadata and avatar.
+  userEditContent: { marginInlineStart: 'auto' },
   metadata: {
     display: 'flex',
     minHeight: conversation.metadataPitch,

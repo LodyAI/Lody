@@ -4046,11 +4046,14 @@ const UserMessageRowView = ({
                 <Spinner className="absolute bottom-[13px] right-full mr-1.5 hidden h-4 w-4 text-muted-foreground @[520px]:block" />
               )}
               <div
-                className={cn(
-                  'min-w-0 max-w-full text-foreground',
-                  isEditing ? 'w-full' : 'w-fit',
-                  hasWideContent ? 'min-w-[480px]' : '',
-                  'sm:max-w-[800px]'
+                {...withClassName(
+                  stylex.props(isEditing ? conversationSurface.userEditContent : undefined),
+                  cn(
+                    'min-w-0 max-w-full text-foreground',
+                    isEditing ? 'w-full' : 'w-fit',
+                    hasWideContent ? 'min-w-[480px]' : '',
+                    'sm:max-w-[800px]'
+                  )
                 )}
                 data-native-selection-allow
               >
