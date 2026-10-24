@@ -106,13 +106,20 @@ const styles = stylex.create({
     flexShrink: 0,
     width: { default: '240px', [NARROW]: '48px' },
   },
+  navScrollArea: {
+    flexGrow: 1,
+    minHeight: 0,
+  },
+  navScrollThumb: {
+    outlineStyle: { default: null, '@media (forced-colors: active)': 'solid' },
+    outlineWidth: { default: null, '@media (forced-colors: active)': '1px' },
+    outlineColor: { default: null, '@media (forced-colors: active)': 'CanvasText' },
+    outlineOffset: { default: null, '@media (forced-colors: active)': '-1px' },
+  },
   navScroll: {
     display: 'flex',
     flexDirection: 'column',
     gap: space[4],
-    flexGrow: 1,
-    minHeight: 0,
-    overflowY: 'auto',
     padding: space[3],
     paddingInline: { default: space[3], [NARROW]: space[1.5] },
   },
@@ -359,84 +366,87 @@ function SettingsModalBody() {
             {...stylex.props(styles.nav, surface.nav)}
           >
             <Tooltip.Provider delay={250}>
-              <nav
-                ref={setNavScroller}
-                data-settings-nav-viewport=""
-                {...stylex.props(styles.navScroll)}
+              <ScrollArea
+                type="auto"
+                viewportRef={setNavScroller}
+                scrollbarThumbClassName={stylex.props(styles.navScrollThumb).className}
+                {...stylex.props(styles.navScrollArea)}
               >
-                {groupedSections.map((section) => {
-                  const tabs = navigationTabs.filter((tab) => tab.section === section.id);
-                  const showsAccountEntry = section.id === 'personal' && accountTab;
-                  if (tabs.length === 0 && !showsAccountEntry) return null;
-                  return (
-                    <section key={section.id} aria-label={section.label}>
-                      <h2 {...stylex.props(styles.navGroupHeading)}>{section.label}</h2>
-                      <div {...stylex.props(styles.navGroupRows)}>
-                        {showsAccountEntry ? (
-                          <div
-                            data-id="settings:account"
-                            data-scope-item="row"
-                            data-settings-tab-id="account"
-                          >
-                            <SettingsAccountEntry
-                              user={session?.user}
-                              active={resolvedActiveTab === 'account'}
-                              onSelect={() => selectTab('account')}
-                            />
-                          </div>
-                        ) : null}
-                        {tabs.map((tab) => {
-                          const Icon = tab.icon;
-                          const active = resolvedActiveTab === tab.id;
-                          const label = t(tab.labelKey);
-                          return (
-                            <Tooltip.Root key={tab.id}>
-                              <Tooltip.Trigger
-                                render={
-                                  <button
-                                    type="button"
-                                    aria-label={label}
-                                    aria-current={active ? 'page' : undefined}
-                                    data-id={`settings:${tab.id}`}
-                                    data-scope-item="row"
-                                    data-settings-tab-id={tab.id}
-                                    {...stylex.props(
-                                      surface.listRow,
-                                      styles.navRowRail,
-                                      active && surface.listRowSelected
-                                    )}
-                                    onClick={() => selectTab(tab.id)}
-                                  >
-                                    <Icon
-                                      {...stylex.props(
-                                        surface.listRowIcon,
-                                        active && surface.listRowIconSelected
-                                      )}
-                                      strokeWidth={1.75}
-                                      aria-hidden="true"
-                                    />
-                                    <span
-                                      {...stylex.props(
-                                        surface.listRowLabel,
-                                        styles.navRowLabelRail
-                                      )}
-                                    >
-                                      {label}
-                                    </span>
-                                  </button>
-                                }
+                <div {...stylex.props(styles.navScroll)}>
+                  {groupedSections.map((section) => {
+                    const tabs = navigationTabs.filter((tab) => tab.section === section.id);
+                    const showsAccountEntry = section.id === 'personal' && accountTab;
+                    if (tabs.length === 0 && !showsAccountEntry) return null;
+                    return (
+                      <section key={section.id} aria-label={section.label}>
+                        <h2 {...stylex.props(styles.navGroupHeading)}>{section.label}</h2>
+                        <div {...stylex.props(styles.navGroupRows)}>
+                          {showsAccountEntry ? (
+                            <div
+                              data-id="settings:account"
+                              data-scope-item="row"
+                              data-settings-tab-id="account"
+                            >
+                              <SettingsAccountEntry
+                                user={session?.user}
+                                active={resolvedActiveTab === 'account'}
+                                onSelect={() => selectTab('account')}
                               />
-                              {navIsRail ? (
-                                <Tooltip.Content side="right">{label}</Tooltip.Content>
-                              ) : null}
-                            </Tooltip.Root>
-                          );
-                        })}
-                      </div>
-                    </section>
-                  );
-                })}
-              </nav>
+                            </div>
+                          ) : null}
+                          {tabs.map((tab) => {
+                            const Icon = tab.icon;
+                            const active = resolvedActiveTab === tab.id;
+                            const label = t(tab.labelKey);
+                            return (
+                              <Tooltip.Root key={tab.id}>
+                                <Tooltip.Trigger
+                                  render={
+                                    <button
+                                      type="button"
+                                      aria-label={label}
+                                      aria-current={active ? 'page' : undefined}
+                                      data-id={`settings:${tab.id}`}
+                                      data-scope-item="row"
+                                      data-settings-tab-id={tab.id}
+                                      {...stylex.props(
+                                        surface.listRow,
+                                        styles.navRowRail,
+                                        active && surface.listRowSelected
+                                      )}
+                                      onClick={() => selectTab(tab.id)}
+                                    >
+                                      <Icon
+                                        {...stylex.props(
+                                          surface.listRowIcon,
+                                          active && surface.listRowIconSelected
+                                        )}
+                                        strokeWidth={1.75}
+                                        aria-hidden="true"
+                                      />
+                                      <span
+                                        {...stylex.props(
+                                          surface.listRowLabel,
+                                          styles.navRowLabelRail
+                                        )}
+                                      >
+                                        {label}
+                                      </span>
+                                    </button>
+                                  }
+                                />
+                                {navIsRail ? (
+                                  <Tooltip.Content side="right">{label}</Tooltip.Content>
+                                ) : null}
+                              </Tooltip.Root>
+                            );
+                          })}
+                        </div>
+                      </section>
+                    );
+                  })}
+                </div>
+              </ScrollArea>
               {canReportBug && (
                 <div {...stylex.props(styles.navFooter)}>
                   <Tooltip.Root>
