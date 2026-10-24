@@ -2,8 +2,7 @@
 
 `CLAUDE.md` is a symlink to this file. Edit `AGENTS.md` only.
 
-Node-only helpers shared by the CLI, the desktop main process and the CLI
-supervisor. Package rules: [shared](../../AGENTS.md).
+CLI, desktop main and supervisor helpers. Rules: [shared](../../AGENTS.md).
 
 ## Local-project Git (`local-project.ts`)
 
@@ -21,9 +20,7 @@ supervisor. Package rules: [shared](../../AGENTS.md).
 
 ## Process layer (`process.ts`)
 
-The one implementation that starts, awaits and signals OS processes for the CLI,
-Electron main, the CLI supervisor and these helpers. Effect usage and boundary
-rules: [cli-effect-ts](../../../../.agents/docs/cli-effect-ts.md). Decision
+The sole OS process implementation. Effect and boundary rules: [cli-effect-ts](../../../../.agents/docs/cli-effect-ts.md). Decision
 record: [process tree layer](../../../../.agents/notes/implemented/architecture/2026-09-27-effect-process-tree-layer.md).
 
 - Effect callers use `effect/process` commands and `ChildProcessSpawner`,
@@ -123,3 +120,6 @@ Native workflow and release rules: [writer](../local-loro-writer/AGENTS.md).
 Keep history requests and receipts aligned in the Zod protocol and both lightweight
 TS/CJS guards. The declared-operation suite must admit each supported operation;
 advertising a capability alone does not prove the local IPC path accepts it.
+
+E2EE pairing (`../e2ee-local-pairing.ts`) stays on the same-user socket; no secrets
+or network listener.

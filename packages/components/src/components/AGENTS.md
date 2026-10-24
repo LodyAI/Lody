@@ -1,7 +1,6 @@
 # Product surfaces (`src/components`)
 
-Parent `AGENTS.md` files also apply. `CLAUDE.md` is a symlink; edit `AGENTS.md` only.
-Child directories (`sessions/`, `mobile/`, …) own their own rules.
+Ancestor/scoped rules apply. `CLAUDE.md` links here; edit `AGENTS.md` only.
 
 ## Sidebar and session rows
 
@@ -16,9 +15,8 @@ Child directories (`sessions/`, `mobile/`, …) own their own rules.
   (zero for reduced motion); pause hidden eager-sync/keyboard-nav. Compact/settings
   remounts restore scroll. Compact nav is modal: inert content, restore focus,
   nested Escape first. [Spec](../../../../specs/desktop-windows.md).
-- Every list uses `lib/session-opened-by-tree.ts`: `session-list.tsx` groups, local-project
-  sections, Updated/Pinned in `sidebar-updated-session-list.tsx`, and
-  `sidebar-navigation-model.ts` for matching keyboard navigation.
+- Every list uses `lib/session-opened-by-tree.ts`; keyboard navigation uses
+  `sidebar-navigation-model.ts`.
 - `openedBySessionId` is the precise opener; `openedByRowSessionId` is its row.
   `buildSidebarOpenerRowResolver` in `sessions/session-list-rows.ts` walks
   `parentSessionId` to root using sidebar `allActiveSessions`, not visible rows.
@@ -110,3 +108,5 @@ Child directories (`sessions/`, `mobile/`, …) own their own rules.
   worktree. Always state the original project directory is never deleted; list dirty
   worktrees and keep them by default. A completed cleanup is not pending removal and
   must be visibly acknowledged even when worktrees were kept or failed.
+
+E2EE/terminals: read [rules](e2ee/AGENTS.md).

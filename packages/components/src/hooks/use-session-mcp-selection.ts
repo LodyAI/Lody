@@ -100,9 +100,10 @@ export function useSessionMcpSelection(
     !existingSession && scopedOverride === undefined && persistedIds === undefined;
   // A locally loaded cloud document can still lack remote project preferences,
   // even when it already contains servers. Local-only composition has no cloud
-  // authority to wait for and keeps using its durable local snapshot.
+  // authority to wait for and keeps using its durable local snapshot. E2EE
+  // also accepts locally loaded defaults so offline drafts remain sendable.
   const ready =
-    !dependsOnDefaults || (runtime != null && loaded && (sync.mode === 'local' || synced));
+    !dependsOnDefaults || (runtime != null && loaded && (sync.mode === 'local' || runtime.contentMode === 'e2ee' || synced));
 
   // Stable per scope so menu props built from this selection do not churn every render.
   const setSelectedIds = useCallback(

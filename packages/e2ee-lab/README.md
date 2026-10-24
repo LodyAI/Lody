@@ -330,3 +330,24 @@ cannot delete its group even when providing a genuine occupied tuple.
 Every action records an independent pre-action prediction and measured comparison. Transport/storage failures are not permission-refusal proofs; missing observations remain unavailable. `explore <directory> <goal-and-actors.json>` is optional and manual, using `OPENAI_API_KEY` and `E2EE_LAB_MODEL`. It sends only the explicit synthetic goal, actor configuration and action schema, and never runs in CI. Model expectations are discarded; actual property violations count only after fresh deterministic replay. Tests use recorded replies and no model network. See [Responses JSON mode](https://developers.openai.com/api/docs/guides/structured-outputs).
 
 Snapshot admission uses the backend `record-boundary` HTTP extension rather than internal tables. The exact SQLite 0.3.0 dependency patch carries the matching upstream change; this is not claimed as an unmodified published capability.
+
+## Synthetic exit canary
+
+Run `node packages/e2ee-lab/bin/e2ee-canary.mjs /absolute/manifest.json` from the
+repository root. The manifest contains `canaries` with `message`, `title`,
+`fileName`, `mcpEnvironment`, and `machineConfig` markers (each an ASCII
+`CANARY-` prefix plus at least 24 random characters), and `sources`, an array of
+`{kind: "streams" | "http", id, path}`. Paths are absolute files containing
+server-side Streams storage bytes or captured HTTP request bodies. Include the
+WAL when observing an active SQLite server. Never point this at client caches:
+local plaintext storage is explicitly allowed. Inputs are synthetic only, with
+an aggregate 256 MiB observation limit.
+
+The command checks UTF-8, hexadecimal and base64 representations, reports only
+field/source/offset, and exits 0 for no findings, 2 for a leak or missing exit,
+and 64 for invalid input. Empty observations cannot pass. This is a bounded
+canary check, not a proof against compression, arbitrary encodings, or an
+unobserved route. `test/canary.test.ts` runs real protected Loro/Flock peers over
+local HTTP, captures request bodies, scans native Riverrun entries, and proves
+that an injected plaintext regression fails. Full product acceptance still needs
+all Convex/Worker/Streams requests captured while using the actual application.

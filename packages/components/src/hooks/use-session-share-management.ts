@@ -1,3 +1,4 @@
+import { useWorkspaceFeature } from './use-workspace-feature';
 import { useEffect, useRef, useState } from 'react';
 import { useAtomValue, useStore } from 'jotai';
 import { usePostHog } from '@posthog/react';
@@ -38,7 +39,8 @@ export function useSessionShareLinkActions(workspaceId: WorkspaceId) {
   const { t } = useTranslation();
   const userId = useAtomValue(userAtom)?.id ?? null;
   const store = useStore();
-  const scope = useResolvedWorkspaceScope({ workspaceId });
+  const sharingAllowed = useWorkspaceFeature('sharing');
+  const scope = useResolvedWorkspaceScope({ workspaceId, enabled: sharingAllowed });
   const postHog = usePostHog();
   const [busy, setBusy] = useState(false);
   const busyRef = useRef(false);
@@ -220,7 +222,8 @@ export function useSessionShareStatus(
   workspaceId: WorkspaceId | null | undefined,
   sessionId: string | null | undefined
 ): SessionPublicShareStatus {
-  const scope = useResolvedWorkspaceScope({ workspaceId: workspaceId ?? null });
+  const sharingAllowed = useWorkspaceFeature('sharing');
+  const scope = useResolvedWorkspaceScope({ workspaceId: workspaceId ?? null, enabled: sharingAllowed });
   const userId = useAtomValue(userAtom)?.id;
   const entry = useCloudQuery(
     operations.getManagement,
@@ -269,7 +272,8 @@ export function useSessionShareManagement(
   shareId?: string,
   confirmation?: { requestId: string; sessionIds: string[]; deliveryPublicKey: string }
 ) {
-  const scope = useResolvedWorkspaceScope({ workspaceId });
+  const sharingAllowed = useWorkspaceFeature('sharing');
+  const scope = useResolvedWorkspaceScope({ workspaceId, enabled: sharingAllowed });
   const userId = useAtomValue(userAtom)?.id;
   const store = useStore();
   const meta = useAtomValue(sessionMetaCacheAtom);

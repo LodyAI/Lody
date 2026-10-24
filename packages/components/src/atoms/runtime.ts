@@ -197,6 +197,8 @@ export type WorkspaceRuntime = {
    * The workspace id used for IndexedDB/WebSocket connections.
    */
   readonly workspaceId: WorkspaceId;
+  /** Missing only on older ordinary test/embedded ports; encrypted runtimes set it explicitly. */
+  readonly contentMode?: 'plaintext' | 'e2ee';
   readonly sendResources: SessionSendResources;
   /** In-memory sends whose attachments are still preparing; lost with the page. */
   readonly pendingSends: PendingSessionSends | null;

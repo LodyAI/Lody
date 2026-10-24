@@ -1,12 +1,11 @@
 # Workspace provider guidelines
 
-`CLAUDE.md` is a symlink to this file. Parent `AGENTS.md` files also apply.
+`CLAUDE.md` links here; ancestor rules apply.
 
 ## Mirrors over synced docs tolerate unknown root keys
 
-Synced-doc Mirrors must set `ignoreUnknownProperties: true`: newer peers' unknown
-root keys otherwise reject the whole state and block writes. Test:
-`packages/shared/tests/session-doc-forward-compat.test.ts`.
+Synced Mirrors require `ignoreUnknownProperties: true` or new peers block writes.
+Test: `packages/shared/tests/session-doc-forward-compat.test.ts`.
 
 Session docs use `createSessionMirror`; only its HistoryWriter writes history.
 Replacement contract: [shared rules](../../../shared/AGENTS.md#session-history).
@@ -14,12 +13,10 @@ Replacement contract: [shared rules](../../../shared/AGENTS.md#session-history).
 ## Streams connection cardinality
 
 - Discovery/refresh reuse existing workspace Machine Flock/RPC transports, with no
-  subscription per config/request. Connections stay bounded by workspace/machine
-  topology; more configs add serialized RPCs only. Release unowned one-shot handles
-  and subscriptions.
+  subscription per request. Connections follow workspace/machine topology; more configs
+  add serialized RPCs only. Release unowned handles and subscriptions.
 - Discover startup capabilities once per config/runtime, tracked in `refreshedConfigKeys`.
-  Re-arm passes aborted when presence leaves `synced`; reconnect must not re-probe answered
-  configs or use a pass-level gate. Probes launch real agents. Refresh defaults to machine
+  Re-arm aborted passes after presence recovers; never re-probe answered configs. Probes launch real agents. Refresh defaults to machine
   cache; only user or setup/authentication actions set `force`.
   Intent: [capability refresh cache](../../../../specs/acp-capability-refresh-cache.md).
 
@@ -27,8 +24,7 @@ Replacement contract: [shared rules](../../../shared/AGENTS.md#session-history).
 
 - Prompt Shortcuts instances belong to one initialization effect lifetime. Cleanup
   must retire the published instance immediately, before asynchronous durable close.
-  Returning to the same account/workspace must never reuse a retired instance;
-  render-time fencing also covers platform, cloud capability, and retry generation.
+  Never reuse retired instances; fence platform, cloud capability and retry generation.
 - The `$workspaceName` route owns the render-time target slug. Workspace-scoped UI must
   require that target, the active runtime, and the runtime-owned doc-meta snapshot to agree
   before reading singleton caches. Shared visibility and sharing hooks enforce this gate by
@@ -79,11 +75,14 @@ Replacement contract: [shared rules](../../../shared/AGENTS.md#session-history).
 - Repo storage, LoroDoc cursors and eager-sync high-water state share a per-renderer
   cache namespace. Independently persisted replicas must not share checkpoints.
   Meta/Flock cursors stay repo-owned; delete Meta progress via `repo.getReplicaCheckpointStore`.
-- Required Streams protection rejects missing providers or plaintext rooms
-  ([contract](../../../../specs/workspace-streams-content.md)).
-- Transport state is selected per room, never merged. Runtime stores use
-  `getReadinessTransportForRoom`; hooks without the router use the structural binding in
-  `src/lib/room-readiness.ts`. Keep those selection rules aligned.
+- E2EE must open locally before background sync; keep native-only keys, dedicated
+  bucket, Loro history and waiting-key leases, without plaintext side channels.
+  Epoch/rotation changes stop sends and retain edits with a key-update notice;
+  M3 owns resumption. Reject missing protection/plaintext rooms. Forward rejected
+  tokens for exact cache eviction. Read [M2 boundaries](../../../../.agents/notes/proposed/architecture/2026-10-22-e2ee-m2-product-integration.md)
+  and the [transport contract](../../../../specs/workspace-streams-content.md) before changes.
+- Select transport per room, never merge. Use `getReadinessTransportForRoom`;
+  hooks without the router use `src/lib/room-readiness.ts`. Keep rules aligned.
 - The local renderer identity comes atomically from the Electron local-platform snapshot
   and uses the CLI catalog's persistent `local:*` id. Do not substitute a constant or
   temporary user.
@@ -99,9 +98,8 @@ Replacement contract: [shared rules](../../../shared/AGENTS.md#session-history).
   phase, including one prompted by a rotated token.
 - Workspace-level rooms without a machine owner use the platform fallback.
   Returning no transport silently disables synchronization for those rooms.
-- Resource monitoring follows target ownership: local machines use the local monitor
-  transport, remote machines use the optional remote transport, and unknown ownership
-  remains pending.
+- Resource monitoring follows machine ownership: local or optional remote transport;
+  unknown ownership remains pending.
 - Presence is merged by origin. For an origin represented by the local plane, the local
   snapshot is authoritative, including absence; do not resurrect cleared presence from a
   lagging replica.

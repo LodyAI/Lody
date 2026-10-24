@@ -1,3 +1,4 @@
+import { useWorkspaceFeature } from '@/hooks/use-workspace-feature';
 import {
   useEffect,
   useLayoutEffect,
@@ -298,7 +299,8 @@ export function ChatComposer({
   focusOnContainerClick = false,
 }: ChatComposerProps) {
   const { t, i18n } = useTranslation();
-  const shortcutsEnabled = variant !== 'dialog';
+  const shortcutsAllowed = useWorkspaceFeature('shortcuts');
+  const shortcutsEnabled = variant !== 'dialog' && shortcutsAllowed;
   const intlLocale = useMemo(
     () => toIntlLocale(i18n.resolvedLanguage ?? i18n.language),
     [i18n.language, i18n.resolvedLanguage]

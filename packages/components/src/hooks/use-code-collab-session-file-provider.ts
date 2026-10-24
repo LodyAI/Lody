@@ -1,3 +1,4 @@
+import { useWorkspaceFeature } from './use-workspace-feature';
 import { useSessionWorkspacePath } from './use-session-workspace-path';
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { useAtomValue } from 'jotai';
@@ -329,6 +330,7 @@ function useCodeCollabFileIndexLoadState(args: {
 export function useCodeCollabSessionFileProvider(
   options: UseCodeCollabSessionFileProviderOptions
 ): UseCodeCollabSessionFileProviderResult {
+  const indexAllowed = useWorkspaceFeature('code-collab-index');
   const runtime = useAtomValue(activeWorkspaceRuntimeAtom);
   const sessionId = options.sessionId as SessionId;
   const sessionRoomId = getSessionRoomId(sessionId);
@@ -394,7 +396,7 @@ export function useCodeCollabSessionFileProvider(
     [machineId, ownerSessionId, runtime, sessionId]
   );
   const fileIndexLoadState = useCodeCollabFileIndexLoadState({
-    enabled: options.enabled !== false && !!machineId,
+    enabled: indexAllowed && options.enabled !== false && !!machineId,
     cache: runtime?.codeCollabFileIndexCache ?? null,
     workspaceId,
     ownerSessionId,

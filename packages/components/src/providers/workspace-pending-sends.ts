@@ -181,6 +181,7 @@ export function createWorkspacePendingSends(args: {
         update(next);
       };
       return prepareDraftAttachments({
+        content: { mode: runtime.contentMode === 'e2ee' ? 'protected' : 'plaintext' },
         record: send,
         signal,
         resources: runtime.sendResources,
@@ -262,6 +263,7 @@ export function createWorkspacePendingSends(args: {
     hasPendingCreation: (sessionId: string) =>
       snapshot.some((send) => send.sessionId === sessionId && send.creation),
     enqueue(send: Parameters<typeof held.enqueue>[0]) {
+      if (runtime.contentMode === 'e2ee' && (send.historyBackend === 'roost' || send.attachments.some(attachment => !attachment.ready || (attachment.ready.type !== 'file' || attachment.ready.transport !== 'local')))) throw new Error('e2ee_feature_unavailable');
       admissionOrder.set(send.id, ++nextAdmission);
       if (
         send.historyBackend === 'roost' &&

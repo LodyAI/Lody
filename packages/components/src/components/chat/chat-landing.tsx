@@ -1,3 +1,4 @@
+import { E2eeLocalAgentApproval } from '../e2ee-local-agent-approval';
 import { useProviderQuotaRefresh } from '@/hooks/use-provider-quota-refresh';
 import { bindAgentRoleTarget, snapshotAgentRole } from '@lody/shared';
 import { buildDraftUserHistoryEntry } from '@/lib/session-attachment-draft';
@@ -50,7 +51,7 @@ import {
   type WorkspaceId,
   deriveDraftSessionTitle,
 } from '@lody/shared';
-import { useCloudMutation, useCloudQuery } from '@lody/platform/react';
+import { useCloudMutation, useCloudQuery, usePlatform } from '@lody/platform/react';
 import { usePostHog } from '@posthog/react';
 import {
   ArrowUp,
@@ -89,7 +90,11 @@ import {
   workspaceReposCacheAtomFamily,
 } from '@/atoms';
 import { docMetaCacheReadyAtom, sessionMetaCountAtom } from '@/atoms/doc-meta';
-import { localProbeAttemptedAtom, localProbeResultAtom } from '@/atoms/local-probe';
+import {
+  localAgentEnabledAtom,
+  localProbeAttemptedAtom,
+  localProbeResultAtom,
+} from '@/atoms/local-probe';
 import { lodyPresenceNowMsAtom, lodyPresenceStatesAtom } from '@/atoms/presence';
 import { buildAgentPrompt } from '@/lib';
 import { getAppCurrentPathWithSearch } from '@/lib/app-location';
@@ -580,11 +585,15 @@ function WorkspaceChatLanding({
   const navigate = useNavigate();
   const { openSettings } = useOpenSettings();
   const runtime = useAtomValue(activeWorkspaceRuntimeAtom);
+  const localAgentEnabled = useAtomValue(localAgentEnabledAtom);
+  const nativeE2ee = usePlatform().e2eeWorkspaces?.runtime;
   const workspaceRuntime = useAtomValue(runtimeAtom);
   const postHog = usePostHog();
   const multiWorkspaceAvailable = useAppCapability('multiWorkspace');
   const currentUser = useAtomValue(userAtom);
-  const userId = currentUser?.id;
+  const userId =
+    currentUser?.id ??
+    (runtime?.contentMode === 'e2ee' ? (runtime.accountId ?? undefined) : undefined);
   const { activeOrganization, organizations, switchOrganization } = useOrganization({
     targetSlug: workspaceSlug,
   });
@@ -2989,7 +2998,7 @@ function WorkspaceChatLanding({
       setComposerError(t('chat.validation.missingMachine'));
       return;
     }
-    if (!currentUser || !userId || !workspaceId) {
+    if ((!currentUser && runtime?.contentMode !== 'e2ee') || !userId || !workspaceId) {
       captureSessionInputBlocked('missing_context');
       setComposerError(t('chat.validation.missingContext'));
       return;
@@ -6033,8 +6042,17 @@ function WorkspaceChatLanding({
       setPiMigrationBusy(false);
     }
   };
+  const e2eeLocalAgentNode =
+    runtime?.contentMode === 'e2ee' && localAgentEnabled && isElectron ? (
+      <E2eeLocalAgentApproval
+        key={`${runtime.accountId}:${runtime.workspaceId}`}
+        workspaceId={runtime.workspaceId}
+        runtime={nativeE2ee}
+        enabled
+      />
+    ) : null;
   const composerNoticeNode =
-    sharingReviewNoticeNode || sessionLimitNoticeNode || canMigratePi ? (
+    e2eeLocalAgentNode || sharingReviewNoticeNode || sessionLimitNoticeNode || canMigratePi ? (
       <>
         <PiProviderMigrationCard
           count={migratablePiProviders.length}
@@ -6043,6 +6061,7 @@ function WorkspaceChatLanding({
           canMigrate={canMigratePi}
           onConfirm={() => void confirmPiMigration()}
         />
+        {e2eeLocalAgentNode}
         {sharingReviewNoticeNode}
         {sessionLimitNoticeNode}
       </>

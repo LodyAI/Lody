@@ -1,10 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ACP_CAPABILITY_CACHE_VERSION } from '@lody/shared';
 import { getAcpCapabilitySourceVersion } from '../src/agent/setting';
-import type { LoroDocumentManager } from '../src/lib/loro/doc';
+import { LoroDocumentManager } from '../src/lib/loro/doc';
+import * as encryptedWorkspace from '../src/lib/e2ee/workspace-legacy';
+import type { MachineRuntimeOptions } from '../src/lib/machine-runtime';
+import { createTestCloudPort } from './test-cloud-port';
 import type { Logger } from '../src/utils/logger';
 
 const mocks = vi.hoisted(() => ({
+  runtimeOptions: [] as unknown[],
   initializeRuntime: vi.fn(async () => {}),
   cleanupRuntime: vi.fn(async () => {}),
   attachRemoteBridge: vi.fn(async () => {}),
@@ -29,6 +33,9 @@ vi.mock('@/pkg', () => ({
 
 vi.mock('@/lib/machine-runtime', () => ({
   MachineRuntime: class MockMachineRuntime {
+    constructor(options: unknown) {
+      mocks.runtimeOptions.push(options);
+    }
     initialize = mocks.initializeRuntime;
     cleanup = mocks.cleanupRuntime;
     attachRemoteBridge = mocks.attachRemoteBridge;
@@ -68,6 +75,7 @@ const builtinCodexSourceVersion = getAcpCapabilitySourceVersion({
 describe('Lody.registerAgent', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.runtimeOptions.length = 0;
     mocks.fetchAcpCapabilities.mockResolvedValue({
       modes: [],
       models: [],
@@ -489,4 +497,69 @@ describe('Lody.registerAgent', () => {
     // bail out of the whole loop.
     expect(createAgentConfig).toHaveBeenCalledWith('builtin', 'codex', 'machine-1', 'Codex');
   });
+});
+
+describe('Lody workspace cloud-port composition', () => {
+  it.each([undefined, 'plaintext', 'e2ee'] as const)(
+    'uses host Git credentials only in encrypted workspaces (mode=%s)',
+    async (contentMode) => {
+      const hostedTokenManager = {
+        getCredentialPolicy: async () => ({ personalEnabled: true }),
+      };
+      const cloudPort = createTestCloudPort({
+        kind: 'cloud',
+        e2ee: {} as never,
+        githubTokens: {
+          createTokenManager: () => hostedTokenManager as never,
+        },
+      });
+      const native = vi
+        .spyOn(encryptedWorkspace, 'openCliE2eeWorkspaceLegacy')
+        .mockImplementation(async () => {
+          if (contentMode !== 'e2ee') throw new Error('ordinary workspace opened E2EE custody');
+          return { close: async () => {} } as never;
+        });
+      const documents = vi
+        .spyOn(LoroDocumentManager, 'create')
+        .mockResolvedValue({} as LoroDocumentManager);
+      try {
+        const { Lody } = await import('../src/lib/lody');
+        const lody = await Lody.create({
+          logger: createSilentLogger(),
+          workspaceId: 'synthetic-workspace',
+          contentMode,
+          genesisHash: 'ab'.repeat(32),
+          token: 'synthetic-token',
+          userId: 'user-1',
+          machineId: 'synthetic-machine',
+          machineName: 'Synthetic',
+          cloudPort,
+          memoryPressure: {} as never,
+          machineLifecycleCapability: {
+            launchMode: 'foreground',
+            canRemoteRestart: false,
+            canRemoteUpgrade: false,
+            reason: 'not_daemon',
+          },
+        });
+        const runtime = mocks.runtimeOptions.at(-1) as MachineRuntimeOptions;
+        // Invoke Lody's production factory and the real SessionManager policy
+        // method: a null broker means agent git/gh uses the host credentials.
+        const sessions = runtime.sessionManagerFactory();
+        expect(await sessions.resolveGitIdentityOptions('user-1')).toEqual({
+          preferMachineIdentity: true,
+          personalIdentityEnabled: contentMode !== 'e2ee',
+        });
+        expect(runtime.handlerConfig.cloudPort?.githubTokens).toBe(
+          contentMode === 'e2ee' ? null : cloudPort.githubTokens
+        );
+        expect(lody.options.cloudPort.githubTokens).toBe(
+          contentMode === 'e2ee' ? null : cloudPort.githubTokens
+        );
+      } finally {
+        native.mockRestore();
+        documents.mockRestore();
+      }
+    }
+  );
 });

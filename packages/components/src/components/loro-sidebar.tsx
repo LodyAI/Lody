@@ -1,3 +1,4 @@
+import { useWorkspaceFeature } from '@/hooks/use-workspace-feature';
 import { useTranslation } from 'react-i18next';
 import { isElectronRenderer, isMacOSElectronRenderer } from '@/lib/electron';
 import { ContextMenu } from '@lody/ui/context-menu';
@@ -853,6 +854,7 @@ export const LoroSidebar = memo(function LoroSidebar({
   onRequestCollapse,
   overlay = false,
 }: LoroSidebarProps) {
+  const schedulesAllowed = useWorkspaceFeature('schedules');
   const isMobile = useIsMobile();
   const isElectronFullscreen = useElectronFullscreen();
   const macTrafficLightRowPadClass = useMacTrafficLightRowPadClass();
@@ -1431,7 +1433,7 @@ export const LoroSidebar = memo(function LoroSidebar({
             icon={<MynauiEditOne className="h-4 w-4" />}
             onClick={onHomeClicked}
           />
-          {onSchedulesClicked ? (
+          {onSchedulesClicked && schedulesAllowed ? (
             <NavButton
               active={activeNav === 'schedules'}
               isMobile={isMobile}

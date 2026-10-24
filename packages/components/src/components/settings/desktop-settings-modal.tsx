@@ -1,3 +1,4 @@
+import { useWorkspaceFeature } from '@/hooks/use-workspace-feature';
 import { MemorySetting } from './memory-setting';
 import { text as uiText } from '@lody/ui/tokens/scales.stylex';
 import { useCallback, useId, useLayoutEffect, useMemo, useState, type CSSProperties } from 'react';
@@ -252,7 +253,9 @@ function SettingsModalBody() {
   const { activeOrganization } = useOrganization();
   const { data: session } = useStableSession();
   const resolvedTheme = useResolvedTheme();
-  const platformTabs = useVisibleSettingsTabs();
+  const shortcutsAllowed = useWorkspaceFeature('shortcuts');
+  const sharingAllowed = useWorkspaceFeature('sharing');
+  const platformTabs = useVisibleSettingsTabs().filter(tab => (tab.id !== 'prompt-shortcuts' || shortcutsAllowed) && (tab.id !== 'shares' || sharingAllowed));
   const visibleTabs = isNativeAppShell()
     ? platformTabs.filter((tab) => tab.id !== 'billing')
     : platformTabs;

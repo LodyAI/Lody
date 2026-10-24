@@ -29,6 +29,13 @@ export {
   type DeviceSigner,
 } from '../internal/foundation/signing';
 
+export {
+  deviceCredentialBindingBytes,
+  signDeviceCredentialBinding,
+  verifyDeviceCredentialBinding,
+  type DeviceCredentialBinding,
+} from '../internal/foundation/device-credential-binding';
+
 // Content format and primitives
 export {
   encodeDocumentContext,

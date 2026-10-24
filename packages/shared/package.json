@@ -8,6 +8,7 @@
     "./src/visual-annotation-inspector-global.ts"
   ],
   "exports": {
+    "./e2ee-local-pairing": "./src/e2ee-local-pairing.ts",
     "./workspace-streams-content": "./src/workspace-streams-content.ts",
     "./notifications": {
       "types": "./src/notifications/index.ts",

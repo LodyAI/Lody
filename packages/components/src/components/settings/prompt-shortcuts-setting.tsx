@@ -1,3 +1,4 @@
+import { useWorkspaceFeature } from '@/hooks/use-workspace-feature';
 import { text as uiText } from '@lody/ui/tokens/scales.stylex';
 import React, { useMemo, useState } from 'react';
 import * as stylex from '@stylexjs/stylex';
@@ -150,7 +151,9 @@ const styles = stylex.create({
 });
 
 export function PromptShortcutsSetting() {
+  const allowed = useWorkspaceFeature('shortcuts');
   const state = usePromptShortcuts();
+  if (!allowed) return null;
   return (
     <PromptShortcutsSettingContent
       key={

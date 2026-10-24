@@ -1,3 +1,4 @@
+import { workspaceSupports } from '@lody/shared/workspace-streams-content';
 import {
   type LocalSessionControlRequestValidated,
   type LocalSessionControlResponse,
@@ -259,6 +260,12 @@ export class MachineRuntime {
     message: LocalSessionControlRequestValidated,
     options: { onResponse?: (response: LocalSessionControlResponse) => void } = {}
   ): Promise<LocalSessionControlResponse[]> {
+    if (
+      this.options.handlerConfig.encryptedWorkspace &&
+      (message.type.startsWith('session/preview-') ||
+        message.type === 'session/code-collab-host-start')
+    )
+      throw new Error('e2ee_feature_unavailable');
     const handler = this.requireHandler();
     const dispatchStartedAt = Date.now();
     this.options.logger.debug(
@@ -336,6 +343,17 @@ export class MachineRuntime {
   async dispatchLocalMachineRpc(
     message: LocalMachineRpcRequestValidated
   ): Promise<LocalMachineRpcResponse> {
+    if (
+      !workspaceSupports(
+        { mode: this.options.handlerConfig.encryptedWorkspace ? 'protected' : 'plaintext' },
+        'code-collab-index'
+      ) &&
+      (message.method.startsWith('code-collab/') ||
+        message.method === 'session/dispatch-turn' ||
+        message.method.startsWith('ios-simulator/') ||
+        message.method.startsWith('file/'))
+    )
+      throw new Error('e2ee_feature_unavailable');
     const handler = this.requireHandler();
     return await handler.handleLocalMachineRpc(message);
   }
