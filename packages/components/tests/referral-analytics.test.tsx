@@ -33,6 +33,18 @@ beforeEach(() => {
 });
 
 describe('referral landing observation', () => {
+  it('observes a replacement hint once without restoring the earlier code', () => {
+    captureReferral('?ref=' + 'a'.repeat(32), localStorage, 1000);
+    captureReferralLanding(client, localStorage, 1500);
+    captureReferral('?ref=' + 'b'.repeat(32), localStorage, 2000);
+    captureReferralLanding(client, localStorage, 2500);
+    captureReferralLanding(client, localStorage, 3000);
+    expect(sink.events.map((event) => event.event)).toEqual(['referral/landed', 'referral/landed']);
+    expect(sink.events[0]?.properties.referral_code_hash).not.toBe(
+      sink.events[1]?.properties.referral_code_hash
+    );
+    expect(readReferral(localStorage, 3000)).toBe('b'.repeat(32));
+  });
   it('survives a static redirect, reports only once and keeps attribution and expiry unchanged', () => {
     const code = 'a'.repeat(32);
     localStorage.setItem(

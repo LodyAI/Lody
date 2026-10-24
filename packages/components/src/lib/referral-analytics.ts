@@ -22,7 +22,7 @@ export function captureReferralEvent(
   }
 }
 
-/** First stored referral observed by the app, including a static landing-page redirect.
+/** First app observation of each stored hint, including a static landing-page redirect.
  * This does not count visits that leave before the app/analytics loads.
  */
 export function captureReferralLanding(

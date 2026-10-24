@@ -1,5 +1,10 @@
 import { useReferralPolicyRefresh } from '@/hooks/use-referral-policy-refresh';
-import { readReferral, clearReferral, REFERRAL_ERROR_KEYS } from '@/lib/referral-attribution';
+import {
+  readReferral,
+  clearReferral,
+  attachStoredReferral,
+  REFERRAL_ERROR_KEYS,
+} from '@/lib/referral-attribution';
 import { ReferralSettings } from './referral-settings';
 import type { BillingInvoiceDetail } from '@lody/cloud-api';
 import { BillingInvoiceDetails } from './billing-invoice-details';
@@ -490,6 +495,7 @@ function CloudBillingSettings() {
 
   // Credit pays toward the first subscription; members never see the Checkout.
   const dismissLead = useCloudMutation(cloudOperations.referrals.dismissLead);
+  const attachLead = useCloudMutation(cloudOperations.referrals.attachLead);
   const referralWallet = useCloudQuery(
     cloudOperations.referrals.getOverview,
     workspaceId &&
@@ -505,6 +511,7 @@ function CloudBillingSettings() {
     setPendingAction('checkout');
     trackBilling('billing/checkout_started', { billing_interval: interval, source: 'upgrade' });
     try {
+      if (overview?.referralRewardsSupported) await attachStoredReferral(attachLead);
       const result = await createCheckoutSession({
         workspaceId,
         interval,

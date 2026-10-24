@@ -14,6 +14,8 @@ Translation: current
 
 下文记录的年度门槛界面已于 2026-10-18 被[统一推荐余额](2026-10-18-uniform-referral-credit.zh.md)替代。
 
+推荐来源规则已于 2026-10-24 被[最后点击归因](2026-10-24-referral-last-touch.zh.md)部分替代；下文的首次触达规则保留为历史决策。
+
 ## 决策与职责
 
 `packages/cloud-api` 定义余额概览、明细和链接接口。操作使用现有的 `billing` 平台能力，

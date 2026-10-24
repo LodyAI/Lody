@@ -2,7 +2,7 @@ const KEY = 'lody:referral';
 const VALIDITY_MS = 30 * 24 * 60 * 60 * 1000;
 const validCode = (code: string) => /^[a-f0-9]{32}$/.test(code);
 
-/** First valid click wins. This is an attribution hint, never billing authority. */
+/** Latest valid click wins. This is an attribution hint, never billing authority. */
 export function captureReferral(
   search: string,
   storage?: Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>,
@@ -12,8 +12,8 @@ export function captureReferral(
   if (!code || !validCode(code)) return;
   try {
     storage ??= localStorage;
-    if (readReferral(storage, now)) return;
     storage.setItem(KEY, JSON.stringify({ code, expiresAt: now + VALIDITY_MS }));
+    if (typeof window !== 'undefined') window.dispatchEvent(new Event('lody:referral-changed'));
   } catch {
     /* Referral storage must not block login. */
   }
@@ -22,6 +22,13 @@ export function readReferral(
   storage?: Pick<Storage, 'getItem' | 'removeItem'>,
   now = Date.now()
 ): string | undefined {
+  return readReferralHint(storage, now)?.code;
+}
+
+export function readReferralHint(
+  storage?: Pick<Storage, 'getItem' | 'removeItem'>,
+  now = Date.now()
+): { code: string; clickedAt: number } | undefined {
   try {
     storage ??= localStorage;
     const raw = storage.getItem(KEY);
@@ -38,12 +45,22 @@ export function readReferral(
       value.expiresAt > now &&
       value.expiresAt <= now + VALIDITY_MS
     )
-      return value.code;
+      // Derive the click time from the existing record format, including hints
+      // written by static landing pages and older clients. Reads never renew it.
+      return { code: value.code, clickedAt: value.expiresAt - VALIDITY_MS };
     storage.removeItem(KEY);
   } catch {
     /* Unavailable storage is equivalent to no attribution. */
   }
   return undefined;
+}
+
+/** Wait for the latest browser choice before the server selects a Checkout lead. */
+export async function attachStoredReferral(
+  attach: (hint: { code: string; clickedAt: number }) => Promise<unknown>
+): Promise<void> {
+  const hint = readReferralHint();
+  if (hint) await attach(hint);
 }
 export function clearReferral(): void {
   try {
