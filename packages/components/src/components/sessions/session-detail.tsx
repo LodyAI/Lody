@@ -207,6 +207,7 @@ import { Drawer, DrawerContent, DrawerTitle } from '@/ui/drawer';
 import { VaulDrawerBody } from '@/components/mobile/vaul-drawer-edge-back-zone';
 import { Dialog } from '@/ui/dialog';
 import {
+  isArchivedInputCleanupPendingError,
   isArchivedLocalProjectRestoreUnavailableError,
   SessionCreateBillingError,
   useSessionActions,
@@ -2940,9 +2941,14 @@ const SessionDetail = ({
         }
         console.error('Failed to reopen session tab', error);
         toast.error(
-          restoresArchivedChild
-            ? t('archive.restoreFailed', 'Failed to restore conversation.')
-            : t('sessions.tabReopenFailed', 'Could not reopen this tab')
+          isArchivedInputCleanupPendingError(error)
+            ? t(
+                'archive.restoreInputCleanupPending',
+                'Messages queued before archiving could not be canceled yet. Try restoring again shortly.'
+              )
+            : restoresArchivedChild
+              ? t('archive.restoreFailed', 'Failed to restore conversation.')
+              : t('sessions.tabReopenFailed', 'Could not reopen this tab')
         );
       }
     },
@@ -3014,7 +3020,12 @@ const SessionDetail = ({
   // Archive the parent session from the header menu (desktop)
   const handleArchiveCurrentSession = useCallback(async () => {
     if (!activeSession) return;
-    if (!(await archiveSessionWithConfirmation(activeSession.id))) return;
+    try {
+      if (!(await archiveSessionWithConfirmation(activeSession.id))) return;
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : String(error));
+      return;
+    }
     handleBackToList();
   }, [activeSession, archiveSessionWithConfirmation, handleBackToList]);
 
@@ -3030,12 +3041,16 @@ const SessionDetail = ({
         closeDraftTab(activeDraftTab.id);
         return;
       }
-      if (activeTabSessionId && activeTabSessionId !== sessionId) {
-        await archiveSessionWithConfirmation(activeTabSessionId as SessionId, options);
-      } else {
-        // Archiving the parent
-        if (!(await archiveSessionWithConfirmation(activeSession.id, options))) return;
-        handleBackToList();
+      try {
+        if (activeTabSessionId && activeTabSessionId !== sessionId) {
+          await archiveSessionWithConfirmation(activeTabSessionId as SessionId, options);
+        } else {
+          // Archiving the parent
+          if (!(await archiveSessionWithConfirmation(activeSession.id, options))) return;
+          handleBackToList();
+        }
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : String(error));
       }
     },
     [
@@ -3068,7 +3083,14 @@ const SessionDetail = ({
         return;
       }
       console.error('Failed to restore archived conversation', error);
-      toast.error(t('archive.restoreFailed', 'Failed to restore conversation.'));
+      toast.error(
+        isArchivedInputCleanupPendingError(error)
+          ? t(
+              'archive.restoreInputCleanupPending',
+              'Messages queued before archiving could not be canceled yet. Try restoring again shortly.'
+            )
+          : t('archive.restoreFailed', 'Failed to restore conversation.')
+      );
     }
   }, [activeSession, restoreSession, t]);
 

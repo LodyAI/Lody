@@ -117,5 +117,5 @@ Roost freezes input/target and shares ordered leases with queues. Ordinary input
 negotiates `sessionInputDispatch` v1: one owner request commits history and activation;
 the sender uses its receipt without history readback or a second dispatch RPC.
 Guide handoff still needs an owner receipt. Archive/delete cancel durable work beyond local
-snapshots and join leases. Unready Blobs stay in memory; uncertain steers never replay.
+snapshots and join leases; archive joins after its commit; restore finishes an unconfirmed one first. Unready Blobs stay in memory; uncertain steers never replay.
 [Decision](../../../../.agents/notes/proposed/architecture/2026-10-13-backend-independent-send-acceptance.md).

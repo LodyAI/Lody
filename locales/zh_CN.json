@@ -442,6 +442,7 @@
   "archive.multiSelect.selected": "已选择 {{count}} 项",
   "archive.restore": "恢复会话",
   "archive.restoreFailed": "恢复对话失败。",
+  "archive.restoreInputCleanupPending": "归档前排队的消息尚未取消，请稍后再试恢复。",
   "archive.route.loadingDescription": "正在准备归档会话。",
   "archive.search": "搜索归档",
   "archive.searchPlaceholder": "搜索归档会话…",

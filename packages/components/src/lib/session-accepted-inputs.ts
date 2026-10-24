@@ -291,6 +291,10 @@ export function createAcceptedSessionInputs(ports: InputPorts) {
                   madeProgress = true;
                   continue;
                 }
+                // A cancellation that failed to persist its mark still fences this
+                // window. Skipping is not progress: a later cancellation marks and
+                // removes the row, while relisting it here would spin under the lease.
+                if (canceled.has(row.id)) continue;
                 if (hasCompleted(row.id) && row.state === 'confirmed') continue;
                 if (!(await process(row, signal))) return;
                 madeProgress = true;
