@@ -3,16 +3,20 @@ import type { AcpStartupTimeoutOptions } from './agent-client';
 import { AcpTimeoutError } from './agent-client';
 import type { Logger } from '@/utils/logger';
 import {
+  findNpxCacheDirsForPackage,
   getConfiguredNpxCacheRoot,
   inspectNpxInstallState,
   isLikelyBrokenNpxInstall,
   isLikelyNpmCacheCorruption,
+  isLikelyRuntimeIncompatibleNativeAddon,
   isNpxCommand,
   parseNpxPackageSpecFromArgs,
   purgeBrokenNpxCache,
   purgeBrokenNpxInstall,
   purgeLodyNpmCache,
+  writeNpxRuntimeMarkers,
   type NpxCacheIo,
+  type NpxRuntimeFingerprint,
 } from './npx-cache';
 
 /**
@@ -44,6 +48,12 @@ export type RunNpxStartupWithRecoveryOptions<T> = {
   maxAttempts?: number;
   npxCacheIo?: NpxCacheIo;
   npxCacheRoots?: string[];
+  /**
+   * Opt in to runtime validation for closures with native addons. DeepSeek
+   * Harness passes its runtime identity so an Electron upgrade invalidates the
+   * old closure; other npx agents keep their existing cache behavior.
+   */
+  runtimeFingerprint?: NpxRuntimeFingerprint;
 };
 
 function describeStartupError(error: unknown, stderrTail?: string): string {
@@ -93,6 +103,40 @@ function preferOnlineNpxArgs(args: readonly string[]): readonly string[] {
   return args.map((arg) => (arg === '--prefer-offline' ? '--prefer-online' : arg));
 }
 
+function recordNpxRuntimeMarkers(args: {
+  packageName: string;
+  version: string;
+  env: NodeJS.ProcessEnv;
+  roots: string[] | undefined;
+  allowedRoots: string[];
+  fingerprint: NpxRuntimeFingerprint | undefined;
+  io: NpxCacheIo | undefined;
+  logger: Pick<Logger, 'debug'>;
+  logPrefix: string;
+}): void {
+  if (!args.fingerprint) {
+    return;
+  }
+  try {
+    const dirs = findNpxCacheDirsForPackage(args.packageName, args.version, {
+      env: args.env,
+      roots: args.roots,
+      io: args.io,
+    });
+    writeNpxRuntimeMarkers(dirs, args.fingerprint, {
+      io: args.io,
+      allowedRoots: args.allowedRoots,
+    });
+  } catch (error) {
+    // The agent already started; a marker is an optimization, not a launch condition.
+    args.logger.debug(
+      `${args.logPrefix} could not record the npx runtime marker: ${
+        error instanceof Error ? error.message : String(error)
+      }`
+    );
+  }
+}
+
 export async function runNpxStartupWithRecovery<T>(
   options: RunNpxStartupWithRecoveryOptions<T>
 ): Promise<T> {
@@ -114,29 +158,42 @@ export async function runNpxStartupWithRecovery<T>(
   const allowedRoots = options.npxCacheRoots ?? (npxCacheRoot ? [npxCacheRoot] : []);
   let refreshMetadataOnNextAttempt = false;
   let metadataRefreshAttempted = false;
+  let runtimeRecoveryAttempted = false;
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     let installState = inspectNpxInstallState(npxSpec.name, npxSpec.version, {
       env: options.env,
       roots,
       io: options.npxCacheIo,
+      runtimeFingerprint: options.runtimeFingerprint,
     });
     let installWasCold = installState.kind === 'missing';
 
     if (installState.kind === 'broken') {
+      const hasRuntimeMismatch = installState.problems.some(
+        (problem) => problem.reason === 'runtime-fingerprint-mismatch'
+      );
       const purged = purgeBrokenNpxInstall(installState, {
         io: options.npxCacheIo,
         allowedRoots,
       });
       installWasCold = true;
+      if (hasRuntimeMismatch && purged.length > 0 && options.args.includes('--prefer-offline')) {
+        // The retained packument may resolve the same runtime-incompatible
+        // dependency again; revalidate it before the reinstall.
+        refreshMetadataOnNextAttempt = true;
+        metadataRefreshAttempted = true;
+      }
       options.logger.warn(
-        `${options.logPrefix} ${npxSpec.name}@${npxSpec.version} has a broken npx install; ` +
+        `${options.logPrefix} ${npxSpec.name}@${npxSpec.version} has a broken npx install` +
+          `${hasRuntimeMismatch ? ' for the current runtime' : ''}; ` +
           `purged ${purged.length} npx cache dir(s) before startup (attempt ${attempt}/${maxAttempts})`
       );
       installState = inspectNpxInstallState(npxSpec.name, npxSpec.version, {
         env: options.env,
         roots,
         io: options.npxCacheIo,
+        runtimeFingerprint: options.runtimeFingerprint,
       });
     }
 
@@ -149,11 +206,23 @@ export async function runNpxStartupWithRecovery<T>(
     refreshMetadataOnNextAttempt = false;
 
     try {
-      return await options.attempt({
+      const result = await options.attempt({
         attempt,
         args: attemptArgs,
         startupTimeouts,
       });
+      recordNpxRuntimeMarkers({
+        packageName: npxSpec.name,
+        version: npxSpec.version,
+        env: options.env,
+        roots,
+        allowedRoots,
+        fingerprint: options.runtimeFingerprint,
+        io: options.npxCacheIo,
+        logger: options.logger,
+        logPrefix: options.logPrefix,
+      });
+      return result;
     } catch (error) {
       if (attempt >= maxAttempts) {
         throw error;
@@ -177,6 +246,34 @@ export async function runNpxStartupWithRecovery<T>(
             }/${maxAttempts})`
         );
         continue;
+      }
+
+      if (!runtimeRecoveryAttempted && isLikelyRuntimeIncompatibleNativeAddon(hintText)) {
+        runtimeRecoveryAttempted = true;
+        const purged = purgeBrokenNpxCache({
+          packageName: npxSpec.name,
+          version: npxSpec.version,
+          hintText,
+          env: options.env,
+          roots,
+          allowedRoots,
+          io: options.npxCacheIo,
+        });
+        if (purged.length > 0) {
+          if (options.args.includes('--prefer-offline')) {
+            // The cached packument may still resolve the incompatible native
+            // dependency; revalidate it before reinstalling.
+            refreshMetadataOnNextAttempt = true;
+            metadataRefreshAttempted = true;
+          }
+          await options.cleanupFailedAttempt?.();
+          options.logger.warn(
+            `${options.logPrefix} ${npxSpec.name}@${npxSpec.version} failed with a ` +
+              `runtime-incompatible native dependency; purged ${purged.length} npx cache ` +
+              `dir(s), retrying (attempt ${attempt + 1}/${maxAttempts})`
+          );
+          continue;
+        }
       }
 
       const shouldPurgeLodyNpmCache =

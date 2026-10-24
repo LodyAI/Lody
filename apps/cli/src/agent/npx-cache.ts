@@ -2,7 +2,9 @@ import {
   existsSync as fsExistsSync,
   readdirSync as fsReaddirSync,
   readFileSync as fsReadFileSync,
+  renameSync as fsRenameSync,
   rmSync as fsRmSync,
+  writeFileSync as fsWriteFileSync,
 } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
@@ -47,6 +49,19 @@ const BROKEN_INSTALL_SIGNATURES: readonly string[] = [
   'ERR_INVALID_PACKAGE_TARGET',
 ];
 
+/**
+ * Native addons can reject the active Electron/V8 fingerprint or Node ABI even
+ * though the top-level npx package and its bin are intact. These failures need
+ * the same cache purge as a broken install, plus one online metadata refresh:
+ * the retained packument may resolve the same incompatible dependency again.
+ */
+const RUNTIME_INCOMPATIBLE_SIGNATURES: readonly string[] = [
+  'unsupported Electron runtime fingerprint',
+  'node-addon-require-builtin unsupported',
+  'was compiled against a different Node.js version',
+  'NODE_MODULE_VERSION',
+];
+
 declare const NPX_INSTALL_STATE_BRAND: unique symbol;
 
 type NpxInstallStateBrand = {
@@ -62,7 +77,8 @@ export type NpxInstallProblemReason =
   | 'package-json-invalid'
   | 'package-version-mismatch'
   | 'package-bin-missing'
-  | 'package-bin-target-missing';
+  | 'package-bin-target-missing'
+  | 'runtime-fingerprint-mismatch';
 
 export type NpxInstallProblem = Readonly<{
   dir: string;
@@ -93,6 +109,45 @@ export type BrokenNpxInstallState = Readonly<
 >;
 
 export type NpxInstallState = ReadyNpxInstallState | MissingNpxInstallState | BrokenNpxInstallState;
+
+/**
+ * Identity of the runtime that executes an npx closure. Native prebuilds may
+ * reject a different Electron/V8 fingerprint at load time, so a closure
+ * installed under one Lody runtime must not be reused by another.
+ */
+export type NpxRuntimeFingerprint = Readonly<{
+  electron: string | null;
+  node: string;
+  v8: string;
+  modules: string;
+  platform: string;
+  arch: string;
+}>;
+
+export type NpxRuntimeVersionSource = {
+  readonly electron?: string;
+  readonly node: string;
+  readonly v8: string;
+  readonly modules: string;
+};
+
+export const NPX_RUNTIME_MARKER_FILE = '.lody-runtime.json';
+const NPX_RUNTIME_MARKER_SCHEMA = 1;
+
+export function getNpxRuntimeFingerprint(
+  versions: NpxRuntimeVersionSource = process.versions,
+  platform: string = process.platform,
+  arch: string = process.arch
+): NpxRuntimeFingerprint {
+  return Object.freeze({
+    electron: versions.electron ?? null,
+    node: versions.node,
+    v8: versions.v8,
+    modules: versions.modules,
+    platform,
+    arch,
+  });
+}
 
 const NPM_CACHE_CORRUPTION_SIGNATURES: readonly string[] = [
   'eintegrity',
@@ -177,6 +232,16 @@ export function isLikelyBrokenNpxInstall(text: string | null | undefined): boole
   return BROKEN_INSTALL_SIGNATURES.some((signature) => text.includes(signature));
 }
 
+export function isLikelyRuntimeIncompatibleNativeAddon(text: string | null | undefined): boolean {
+  if (!text) {
+    return false;
+  }
+  const normalized = text.toLowerCase();
+  return RUNTIME_INCOMPATIBLE_SIGNATURES.some((signature) =>
+    normalized.includes(signature.toLowerCase())
+  );
+}
+
 export function isLikelyNpmCacheCorruption(text: string | null | undefined): boolean {
   if (!text) {
     return false;
@@ -231,6 +296,8 @@ export interface NpxCacheIo {
   readFileSync(path: string): string;
   readdirSync(path: string): string[];
   rmSync(path: string): void;
+  writeFileSync(path: string, content: string): void;
+  renameSync(from: string, to: string): void;
 }
 
 const defaultIo: NpxCacheIo = {
@@ -238,6 +305,8 @@ const defaultIo: NpxCacheIo = {
   readFileSync: (path) => fsReadFileSync(path, 'utf8'),
   readdirSync: (path) => fsReaddirSync(path),
   rmSync: (path) => fsRmSync(path, { recursive: true, force: true }),
+  writeFileSync: (path, content) => fsWriteFileSync(path, content, 'utf8'),
+  renameSync: (from, to) => fsRenameSync(from, to),
 };
 
 function listNpxCacheDirs(
@@ -349,6 +418,168 @@ function readJsonRecord(
   }
 }
 
+function readString(record: Record<string, unknown>, key: string): string | undefined {
+  const value = record[key];
+  return typeof value === 'string' ? value : undefined;
+}
+
+function parseRuntimeFingerprint(value: unknown): NpxRuntimeFingerprint | undefined {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+  const electronValue = value.electron;
+  const electron =
+    electronValue === null ? null : typeof electronValue === 'string' ? electronValue : undefined;
+  const node = readString(value, 'node');
+  const v8 = readString(value, 'v8');
+  const modules = readString(value, 'modules');
+  const platform = readString(value, 'platform');
+  const arch = readString(value, 'arch');
+  if (
+    electron === undefined ||
+    node === undefined ||
+    v8 === undefined ||
+    modules === undefined ||
+    platform === undefined ||
+    arch === undefined
+  ) {
+    return undefined;
+  }
+  return { electron, node, v8, modules, platform, arch };
+}
+
+function describeRuntimeFingerprint(fingerprint: NpxRuntimeFingerprint): string {
+  const runtime =
+    fingerprint.electron === null ? `Node ${fingerprint.node}` : `Electron ${fingerprint.electron}`;
+  return (
+    `${runtime}, V8 ${fingerprint.v8}, modules ${fingerprint.modules}, ` +
+    `${fingerprint.platform}-${fingerprint.arch}`
+  );
+}
+
+function runtimeFingerprintsMatch(
+  expected: NpxRuntimeFingerprint,
+  actual: NpxRuntimeFingerprint
+): boolean {
+  return (
+    expected.electron === actual.electron &&
+    expected.node === actual.node &&
+    expected.v8 === actual.v8 &&
+    expected.modules === actual.modules &&
+    expected.platform === actual.platform &&
+    expected.arch === actual.arch
+  );
+}
+
+/**
+ * A missing marker keeps legacy closures healthy: they predate this check, and
+ * invalidating every existing npx install on upgrade is worse than letting the
+ * runtime-incompatible signature recover a closure that is actually broken.
+ */
+function inspectRuntimeMarker(
+  io: Pick<NpxCacheIo, 'existsSync' | 'readFileSync'>,
+  dir: string,
+  expected: NpxRuntimeFingerprint
+): NpxInstallProblem | null {
+  const markerPath = join(dir, NPX_RUNTIME_MARKER_FILE);
+  if (!io.existsSync(markerPath)) {
+    return null;
+  }
+
+  const markerRead = readJsonRecord(io, markerPath);
+  if (!markerRead.ok) {
+    return {
+      dir,
+      reason: 'runtime-fingerprint-mismatch',
+      path: markerPath,
+      message: `invalid runtime marker: ${markerRead.message}`,
+    };
+  }
+
+  const fingerprint = parseRuntimeFingerprint(markerRead.value.fingerprint);
+  if (markerRead.value.schema !== NPX_RUNTIME_MARKER_SCHEMA || !fingerprint) {
+    return {
+      dir,
+      reason: 'runtime-fingerprint-mismatch',
+      path: markerPath,
+      message: 'invalid runtime marker',
+    };
+  }
+
+  if (!runtimeFingerprintsMatch(expected, fingerprint)) {
+    return {
+      dir,
+      reason: 'runtime-fingerprint-mismatch',
+      path: markerPath,
+      message:
+        `expected ${describeRuntimeFingerprint(expected)}, ` +
+        `found ${describeRuntimeFingerprint(fingerprint)}`,
+    };
+  }
+
+  return null;
+}
+
+export interface WriteNpxRuntimeMarkersArgs {
+  io?: Pick<NpxCacheIo, 'writeFileSync' | 'renameSync' | 'rmSync'>;
+  allowedRoots?: readonly string[];
+}
+
+let runtimeMarkerWriteSequence = 0;
+
+/**
+ * Record the runtime that validated a ready npx closure. Best effort: a cache
+ * directory that cannot accept the marker must not prevent agent startup.
+ */
+export function writeNpxRuntimeMarkers(
+  dirs: readonly string[],
+  fingerprint: NpxRuntimeFingerprint,
+  args: WriteNpxRuntimeMarkersArgs = {}
+): string[] {
+  const io = args.io ?? defaultIo;
+  const normalizedAllowedRoots = args.allowedRoots?.map(normalizeCachePathForCompare);
+  const content = `${JSON.stringify(
+    { schema: NPX_RUNTIME_MARKER_SCHEMA, fingerprint },
+    null,
+    2
+  )}\n`;
+  const written: string[] = [];
+
+  for (const dir of new Set(dirs)) {
+    if (normalizedAllowedRoots) {
+      const normalizedDir = normalizeCachePathForCompare(dir);
+      const isAllowed = normalizedAllowedRoots.some(
+        (root) => normalizedDir === root || normalizedDir.startsWith(`${root}/`)
+      );
+      if (!isAllowed) {
+        continue;
+      }
+    }
+
+    const markerPath = join(dir, NPX_RUNTIME_MARKER_FILE);
+    const temporaryPath = `${markerPath}.${process.pid}.${runtimeMarkerWriteSequence++}.tmp`;
+    let writeStarted = false;
+    try {
+      // Rename the completed document into place so a concurrent preflight
+      // never reads a half-written marker and purges a healthy closure.
+      io.writeFileSync(temporaryPath, content);
+      writeStarted = true;
+      io.renameSync(temporaryPath, markerPath);
+      written.push(dir);
+    } catch {
+      if (writeStarted) {
+        try {
+          io.rmSync(temporaryPath);
+        } catch {
+          // Best effort only; the closure is already usable.
+        }
+      }
+    }
+  }
+
+  return written;
+}
+
 function recordHasPackageVersion(
   rootPackageJson: Record<string, unknown>,
   packageName: string,
@@ -428,6 +659,8 @@ export function getNpxCacheRoots(options: NpxCacheLocateOptions = {}): string[] 
 export interface InspectNpxInstallStateOptions extends NpxCacheLocateOptions {
   io?: NpxCacheIo;
   roots?: string[];
+  /** Opt in to invalidating closures installed under a different runtime. */
+  runtimeFingerprint?: NpxRuntimeFingerprint;
 }
 
 export function inspectNpxInstallState(
@@ -533,6 +766,14 @@ export function inspectNpxInstallState(
         path: binTargets[0],
       });
       continue;
+    }
+
+    if (options.runtimeFingerprint) {
+      const runtimeProblem = inspectRuntimeMarker(io, dir, options.runtimeFingerprint);
+      if (runtimeProblem) {
+        problems.push(runtimeProblem);
+        continue;
+      }
     }
 
     readyDirs.push(dir);

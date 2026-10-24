@@ -63,7 +63,7 @@ import {
   AcpStartupProcessExitError,
   createAcpStartupMonitor,
 } from './acp-startup-monitor';
-import { withLodyNpmCacheForNpx } from './npx-cache';
+import { getNpxRuntimeFingerprint, withLodyNpmCacheForNpx } from './npx-cache';
 import { resolveDeepSeekHarnessSpawn } from './deepseek-harness-runtime';
 import { runNpxStartupWithRecovery } from './acp-npx-startup-policy';
 import { truncateLogText } from '@/utils/log-format';
@@ -708,6 +708,8 @@ async function startLocalAcpProtocol<T>(
         env: envWithAcpStartup,
         logger: options.logger,
         logPrefix: '[acp-startup]',
+        runtimeFingerprint:
+          options.agentType === 'deepseek' ? getNpxRuntimeFingerprint() : undefined,
         attempt: ({ args, startupTimeouts }) => attemptStart(args, startupTimeouts),
         getStderrTail: () => lastStderrTail,
       })
