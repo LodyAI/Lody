@@ -6013,23 +6013,7 @@ export class SessionExecutionService {
       let baseCommitHash: string | null = null;
       let turnStartWorkingTreeDiff: GitWorkingTreeDiffBaseline | null = null;
 
-      // A requester switch re-derives commit identity for this turn only;
-      // the bounded policy lookup falls back to owner rules on failure.
-      const gitIdentityOptions = yield* self.tryPromise(async (signal) => {
-        try {
-          return await self.deps.sessionManager.resolveGitIdentityOptions(
-            message.userId,
-            signal,
-            sessionId
-          );
-        } catch {
-          signal.throwIfAborted();
-          return {
-            preferMachineIdentity: message.userId === self.deps.userId,
-            personalIdentityEnabled: false,
-          };
-        }
-      });
+      const gitIdentityOptions = { preferMachineIdentity: message.userId === self.deps.userId };
       const bindReadySession = (nextSession: ISession): void => {
         activeSession = nextSession;
         session = nextSession;

@@ -15,9 +15,9 @@
   never role/author. [Rules](../orchestration/AGENTS.md).
 - Host-scope Machine/Provider credentials. Use frozen Turn identity for attribution,
   authorization and commits; trusted conversation owner for GitHub network auth.
-- Git: owner uses local config, no profile query; others never read it.
-  `CloudPort` profiles: 60s deadline, retry failures, reject placeholders.
-  Commit attribution never restarts ACP; owner changes retire the runtime.
+- Git: owner native config/env, no profile/policy RPC; members use only their
+  identity, no auto-signing/repo writes. Profiles: 60s, retry failures,
+  reject placeholders. Attribution never restarts ACP; owner changes retire runtime.
 
 ## Dispatch
 

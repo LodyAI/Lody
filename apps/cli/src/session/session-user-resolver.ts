@@ -52,8 +52,8 @@ export class SessionUserResolver {
       };
     }
 
-    // The Session reads Git configuration in the actual worktree when binding
-    // the owner turn. Do not block that local path on a cloud profile query.
+    // Owner commits use native Git configuration at the command's cwd.
+    // Do not block that local path on a cloud profile query.
     if (normalizedUserId === this.machineOwnerUserId) {
       return this.fallbackUser(normalizedUserId);
     }

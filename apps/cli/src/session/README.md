@@ -318,25 +318,29 @@ See [the contract](../../../../specs/github-identity-fallback.md) and
 
 ### Commit identity
 
-`git-identity-policy.ts` bounds the complete policy lookup to 3 seconds per attempt,
-retries once, and returns personal identity disabled after two failures. Startup publishes
-`Resolving Git identity`; cancellation interrupts the waiter and fences identity updates
-and agent launch. Late policy results have no side effects. This deadline also covers
-per-turn identity refresh; it is separate from network credential fallback.
+Machine-owner turns leave identity and signing to native Git at each command's cwd.
+Lody injects no author/committer or signing overrides for that owner, performs no
+identity policy/profile query, and does not synthesize a fallback when Git lacks
+identity. Repository config, conditional includes, global/XDG config and explicit
+user environment keep Git's normal precedence. Repository config is never cleaned
+or rewritten for attribution, including the shared managed bare repository.
 
-The effective identity becomes `GIT_AUTHOR_*`/`GIT_COMMITTER_*` in the session env (`session.ts`
-`updateGitIdentity`, re-applied per turn via the execution service's `bindReadySession`). When
-the turn requester is the machine owner, the repository/machine Git identity is used without a cloud profile lookup; missing local
-identity uses neutral LodyAI. Non-owner profile queries have a 60-second deadline; failed or
-timed-out entries are evicted so later turns can retry. A non-owner requester always uses their resolved
-Lody/GitHub identity and can never inherit the machine owner's Git config; if no usable requester
-identity exists, the neutral LodyAI identity is used. The cloud composition root owns hosted
-user resolution because the daemon does not own an end-user browser session; the local access
-port resolves only its synthetic owner and never performs network I/O. PR and push identity
-itself comes from the conversation-owner GitHub credential, not from git config. Identity
-changes update the host Session environment without restarting ACP or its sandbox.
-Existing ACP children retain their launch environment; live
-identity propagation into adapter-owned Git commands remains unresolved.
+Other requesters use their resolved Lody/GitHub identity, or neutral
+`LodyAI <agent@lody.ai>` when their email is missing or a placeholder.
+`Session.updateGitIdentity` stores this turn attribution separately from launch
+config; `buildShellEnv` applies both author and committer after all other env
+merges. It appends `commit.gpgsign=false`, `tag.gpgsign=false` and an empty
+`user.signingkey` to command config, including for native local projects. These
+settings disable automatic signing; explicit Git options can override them.
+Switching back to the owner leaves none of these turn overrides in new commands.
+Network credentials still follow the conversation owner, independently.
+
+Non-owner profile queries retain their 60-second deadline and retry after failure.
+Forks reuse only an exact requester's resolved member identity; owner forks resolve
+Git config in their own directory. Attribution changes never restart ACP or its
+sandbox. Newly launched host terminals receive current attribution, but existing
+ACP children retain their launch environment, including signing settings. Live
+propagation to adapter-owned Git commands remains unresolved.
 
 ### Start failures
 

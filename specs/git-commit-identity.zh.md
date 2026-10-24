@@ -1,38 +1,33 @@
-# Git commit 身份
+# Git 提交身份
 
 Status: draft
 Translation: current
 
 [English](git-commit-identity.md)
 
-Lody 每轮依据机器所有权选择 host Session 的 Git identity，而不是 workspace 成员数或共享状态。
-下述规则约束身份解析；已运行 ACP 的身份更新存在下面说明的限制。
+机器所有者发起的轮次使用命令工作目录中生效的原生 Git 身份和签名配置。
+Lody 不注入作者、提交者或签名覆盖项，也不查询身份策略或云端用户资料。
+仓库配置、条件包含、全局及 XDG 配置、用户显式设置的环境变量保持 Git 原生优先级。
+缺少身份时沿用 Git 原生行为，包括配置错误；Lody 不静默替换为中性身份。
+所有仓库配置均予以保留，托管裸仓库也不例外。
 
-当前轮次由机器 owner 发起时，Lody 使用 session worktree 中生效的 Git identity，
-跳过云端用户资料查询，本机 Electron 操作也适用。如果机器没有可用的 Git email，
-则使用中性的 LodyAI 身份。当前轮次由
-其他 workspace 成员发起时，Lody 只使用该请求者经 Lody/GitHub 解析出的身份，绝不读取
-或回退到机器 Git identity。
+其他请求者只使用经 Lody/GitHub 解析出的自身身份，绝不回退到机器身份。
+缺失邮箱占位符不可用；无法解析成员身份时使用 `LodyAI <agent@lody.ai>`。
+Lody 将该身份同时设置为作者和提交者，并在新命令环境中关闭提交和标签的自动签名、
+清空签名密钥，本地项目也适用。显式 Git 命令选项仍可覆盖签名默认值；
+这不是操作系统层面的密钥隔离。GitHub 鉴权仍由会话所有者独立决定。
 
-云端用户资料查询最多等待 60 秒。失败或超时后，本轮使用占位身份，并最终回退为中性
-Git 身份；下一次查询可以重试。晚到的结果不得覆盖更新的缓存。机器授权和 GitHub 凭据
-仍是独立检查，不会因资料查询兜底而跳过。
+非所有者的云端资料查询最多等待 60 秒。失败或超时后本轮使用占位身份，后续查询可以
+重试。晚到的结果不能覆盖更新的缓存。机器授权和 GitHub 凭据检查独立于身份兜底。
 
-缺失邮箱占位符不是可用身份。如果允许使用的机器身份和请求者解析身份都不可用，Lody
-使用中性的 `LodyAI <agent@lody.ai>` 身份。最终选择的名字和邮箱会同时写入 Git author
-与 committer 环境变量。GitHub 鉴权仍是独立的、绑定请求者的决策，不会改变 commit 对象
-中的 author 或 committer。
-
-切换请求者或 Git identity 不得触发 ACP 进程或 sandbox 重启。
-新身份会更新 host Session 配置，供此后经该配置启动的命令使用。已运行 ACP 仍持有启动时的
-环境，其自行启动的 Git 命令可能继续使用旧身份。无重启的身份传播尚未实现。
+切换请求者或提交身份不得重启 ACP 进程或沙箱。新启动的宿主命令使用当前轮次的策略；
+切回机器所有者后不再附加 Lody 的成员覆盖项。已运行的 ACP 子进程仍保留启动环境，
+其直接执行的 Git 命令可能沿用旧身份和签名设置。无重启的实时传播尚未实现。
 
 ## 证据
 
-身份选择实现在 `apps/cli/src/session/git-identity.ts`。初次创建 session 时，
-`apps/cli/src/session/session-manager.ts` 应用所有权策略；后续轮次由
-`apps/cli/src/session/session-execution-service.ts` 重新应用。
-
-本 draft 记录请求者已确认的策略。有界查询的验证情况记录于
-[实现说明](../.agents/notes/implemented/bug-fix/2026-09-16-bounded-session-user-identity.zh.md)；
-已部署客户端的验收仍未验证。
+身份选择位于 `apps/cli/src/session/git-identity.ts`，`session.ts` 将其应用到命令环境。
+初次创建和后续轮次分别在 `session-manager.ts`、`session-execution-service.ts`
+绑定已冻结的请求者。
+行为测试和限制见[实现说明](../.agents/notes/implemented/bug-fix/2026-10-23-native-git-identity.zh.md)。
+本规范仍为草案，尚未完成已部署客户端的验收。
