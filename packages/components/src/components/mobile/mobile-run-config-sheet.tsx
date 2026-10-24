@@ -20,11 +20,6 @@ import {
 } from '@/components/shared/acp-selector-options';
 import type { AcpSessionSelectOption } from '@/components/shared/acp-session-select';
 import type { AgentSelection } from '@/components/shared/agent-selector';
-import {
-  DEEPSEEK_DELEGATION_DISCUSSION_URL,
-  DeepSeekDelegationWarningContent,
-  shouldShowDeepSeekDelegationWarning,
-} from '@/components/shared/deepseek-delegation-warning';
 import { orderAcpConfigOptionSelectors } from '@/lib/acp-selector-order';
 import { permissionModeControlLabel, resolvePermissionModeFace } from '@/lib/permission-mode-face';
 import {
@@ -32,7 +27,6 @@ import {
   type ComposerAgentRoleItem,
 } from '@/lib/composer-agent-roles';
 import { shouldOfferOptionSearch } from '@/lib/fuzzy-option-filter';
-import { openExternalUrl } from '@/lib/native-browser';
 import { useKeyboardAwareSheet } from '@/hooks/use-keyboard-aware-scroll-into-view';
 import { cn } from '@/lib/utils';
 import { Drawer, DrawerContent, DrawerDescription, DrawerTitle } from '@/ui/drawer';
@@ -113,22 +107,6 @@ const styles = stylex.create({
   emoji: { flexShrink: 0, fontSize: text.headlineSize, lineHeight: 1 },
   /** The mark a picker's value carries: an icon at rest, so a little quieter. */
   valueMark: { opacity: 0.8 },
-  /** A warning about the pick: a tint and a mark, never a fill or a border. */
-  warning: {
-    display: 'flex',
-    alignItems: 'flex-start',
-    gap: space[2],
-    paddingInline: space[3],
-    paddingBlock: '10px',
-    borderRadius: radius.large,
-    cornerShape: corner.shape,
-    backgroundColor: {
-      default: `color-mix(in oklab, ${colors.warning} 8%, transparent)`,
-      ':active': `color-mix(in oklab, ${colors.warning} 14%, transparent)`,
-    },
-    color: colors.label,
-    textDecoration: 'none',
-  },
 });
 
 /**
@@ -407,11 +385,6 @@ function MobileRunConfigSheetRows({
     () => modelPickerOptions.find((opt) => opt.value === modelValue)?.label ?? modelValue,
     [modelPickerOptions, modelValue]
   );
-  const showDeepSeekDelegationWarning = shouldShowDeepSeekDelegationWarning({
-    cliType: selectedAgentConfig?.cliType,
-    agentType: selectedAgentConfig?.agentType,
-    modelId: modelValue,
-  });
 
   /* ── Provider-specific interaction mode (for example Grok Agent / Plan / Ask) ── */
   const interactionSelector = interactionModeSelectors[0];
@@ -662,21 +635,6 @@ function MobileRunConfigSheetRows({
             }
           />
         </RunConfigRow>
-      ) : null}
-
-      {showDeepSeekDelegationWarning ? (
-        <a
-          href={DEEPSEEK_DELEGATION_DISCUSSION_URL}
-          target="_blank"
-          rel="noreferrer"
-          onClick={(event) => {
-            event.preventDefault();
-            void openExternalUrl(DEEPSEEK_DELEGATION_DISCUSSION_URL);
-          }}
-          {...stylex.props(styles.warning)}
-        >
-          <DeepSeekDelegationWarningContent />
-        </a>
       ) : null}
 
       {interactionSelector && interactionOptions.length > 0 ? (
