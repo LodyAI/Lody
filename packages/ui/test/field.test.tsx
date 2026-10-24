@@ -3,7 +3,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, test } from 'vitest';
 import { Field } from '../src/field/field';
 import { field, fieldPaletteTheme } from '../src/field/field.tokens.stylex';
-import { Input } from '../src/field/input';
+import { Input, InputShell } from '../src/field/input';
 import { Textarea } from '../src/field/textarea';
 import { forcedThemeClassNames } from '../src/theme/theme';
 
@@ -229,6 +229,27 @@ describe('Input and Textarea', () => {
     expect(classesOf(html, 'div')).toContain('w-56');
     expect(classesOf(html, 'div')).not.toContain('font-mono');
     expect(classesOf(html, 'input')).toContain('font-mono');
+  });
+
+  test('a trailing part sits after the value inside the same well', () => {
+    const html = renderToStaticMarkup(
+      <Input leading="/" trailing={<span data-toggle="">⌨</span>} placeholder="review-pr" />
+    );
+    const shell = /<div\b[^>]*data-size="medium"[^>]*>([\s\S]*)<\/div>/.exec(html)?.[1] ?? '';
+    expect(shell.indexOf('<input')).toBeGreaterThan(-1);
+    expect(shell.indexOf('data-toggle')).toBeGreaterThan(shell.indexOf('<input'));
+  });
+
+  test('an InputShell is drawn as the shell of an Input with the same slots', () => {
+    const input = renderToStaticMarkup(<Input leading="/" trailing="x" />);
+    const shell = renderToStaticMarkup(
+      <InputShell leading={<span data-lead="" />} trailing={<span data-toggle="" />}>
+        <span data-value="">Enter</span>
+      </InputShell>
+    );
+    expect(classesOf(shell, 'div')).toEqual(classesOf(input, 'div'));
+    expect(shell.indexOf('data-lead')).toBeLessThan(shell.indexOf('data-value'));
+    expect(shell.indexOf('data-value')).toBeLessThan(shell.indexOf('data-toggle'));
   });
 });
 
