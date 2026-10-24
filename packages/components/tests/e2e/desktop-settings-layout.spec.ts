@@ -3,6 +3,93 @@ import { OPEN_SOURCE_ATTRIBUTION_BUNDLE } from '../../src/lib/open-source-attrib
 
 const rolesStory = '/iframe.html?id=settings-desktopsettingsmodal--agent-roles-tab&viewMode=story';
 
+for (const { locale, theme, width, roleTitle, mcpTitle, addRole, addMcp } of [
+  {
+    locale: 'en',
+    theme: 'light',
+    width: 1180,
+    roleTitle: 'No agent roles yet',
+    mcpTitle: 'No MCP servers are configured for this workspace.',
+    addRole: 'Add role',
+    addMcp: 'Add server',
+  },
+  {
+    locale: 'zh_CN',
+    theme: 'dark',
+    width: 500,
+    roleTitle: '还没有 Agent 角色',
+    mcpTitle: '此工作区还没有配置 MCP 服务器。',
+    addRole: '添加角色',
+    addMcp: '添加服务器',
+  },
+]) {
+  test(`illustrated empty catalogs stay centered and keep add actions (${locale}, ${width}px)`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width, height: 800 });
+    const visit = async (story: string) =>
+      page.goto(`/iframe.html?id=${story}&viewMode=story&globals=theme:${theme};locale:${locale}`);
+    for (const { story, title, add } of [
+      {
+        story: 'settings-desktopsettingsmodal--agent-roles-empty-tab',
+        title: roleTitle,
+        add: addRole,
+      },
+      { story: 'settings-desktopsettingsmodal--mcp-empty-tab', title: mcpTitle, add: addMcp },
+      { story: 'settings-memorycatalog--empty' },
+      { story: 'settings-memoryidentitylist--empty' },
+      { story: 'settings-promptshortcutslist--empty' },
+      { story: 'settings-projectskillstab--empty' },
+    ]) {
+      await visit(story);
+      const empty = page.locator('[data-settings-empty-state]');
+      await expect(empty).toBeVisible();
+      const illustration = empty.locator('img');
+      await expect(illustration).toHaveAttribute('alt', '');
+      await expect(illustration).toHaveAttribute('aria-hidden', 'true');
+      await illustration.evaluate((img: HTMLImageElement) => img.decode());
+      const layout = await empty.evaluate((element) => {
+        const box = element.getBoundingClientRect();
+        const image = element.querySelector('img')!.getBoundingClientRect();
+        const copy = element.querySelector('p')!.getBoundingClientRect();
+        const style = getComputedStyle(element);
+        return {
+          imageCenter: image.x + image.width / 2,
+          copyCenter: copy.x + copy.width / 2,
+          center: box.x + box.width / 2,
+          imageBottom: image.bottom,
+          copyTop: copy.top,
+          shadow: style.boxShadow,
+          overflowY: style.overflowY,
+          width: element.clientWidth,
+          scrollWidth: element.scrollWidth,
+        };
+      });
+      expect(Math.abs(layout.imageCenter - layout.center)).toBeLessThanOrEqual(1);
+      expect(Math.abs(layout.copyCenter - layout.center)).toBeLessThanOrEqual(1);
+      expect(layout.copyTop).toBeGreaterThanOrEqual(layout.imageBottom);
+      expect(layout.shadow).toBe('none');
+      expect(layout.overflowY).not.toMatch(/auto|scroll/);
+      expect(layout.scrollWidth).toBeLessThanOrEqual(layout.width + 1);
+      if (title) await expect(empty.getByText(title, { exact: true })).toBeVisible();
+      if (add) {
+        const action = page.getByRole('button', { name: add, exact: true });
+        await expect(action).toHaveCount(1);
+        await action.click();
+        await expect(page.getByRole('textbox').first()).toBeVisible();
+        await page.keyboard.press('Escape');
+        await expect(empty).toBeVisible();
+      }
+    }
+    await visit('settings-promptshortcutslist--loading');
+    await expect(page.getByRole('status')).toBeVisible();
+    await expect(page.locator('[data-settings-empty-state]')).toHaveCount(0);
+    await visit('settings-promptshortcutslist--read-only-empty');
+    await expect(page.getByRole('button')).toBeDisabled();
+    await expect(page.locator('[data-settings-empty-state]')).toBeVisible();
+  });
+}
+
 async function expectInside(element: Locator, container: Locator) {
   await expect(element).toBeVisible();
   const outer = await container.boundingBox();

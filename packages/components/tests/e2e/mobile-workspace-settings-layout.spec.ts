@@ -63,3 +63,34 @@ test('keeps join requests in the mobile section rhythm and centers the edit icon
   expect(editIconBox.height).toBeCloseTo(14, 5);
   expect(Math.abs(iconCenter - textCenter)).toBeLessThan(0.5);
 });
+
+for (const theme of ['light', 'dark']) {
+  test(`keeps empty catalogs readable and actionable in mobile ${theme} settings`, async ({ page }) => {
+    for (const { story, title, add } of [
+      { story: 'agent-roles-empty', title: 'Agent 角色', add: '添加角色' },
+      { story: 'mcp-empty', title: 'MCP', add: '添加服务器' },
+    ]) {
+      await page.goto(
+        `/iframe.html?id=mobile-mobilesettingspages--${story}&viewMode=story&globals=locale:zh_CN;theme:${theme}`
+      );
+      await expect(page.getByRole('heading', { name: title, exact: true })).toBeVisible();
+      await expect(page.getByRole('button', { name: '返回', exact: true })).toBeVisible();
+      const empty = page.locator('[data-settings-empty-state]');
+      await expect(empty).toBeInViewport({ ratio: 1 });
+      const illustration = empty.locator('img');
+      await illustration.evaluate((img: HTMLImageElement) => img.decode());
+      const body = page.getByRole('main');
+      const box = await getVisibleBox(body);
+      const image = await getVisibleBox(illustration);
+      expect(Math.abs(image.x + image.width / 2 - (box.x + box.width / 2))).toBeLessThan(1);
+      expect(await body.evaluate((el) => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(1);
+      await expect(empty.locator('p').last()).toBeInViewport({ ratio: 1 });
+      const action = page.getByRole('button', { name: add, exact: true });
+      await expect(action).toBeInViewport({ ratio: 1 });
+      await action.tap();
+      await expect(page.getByRole('textbox').first()).toBeVisible();
+      await page.keyboard.press('Escape');
+      await expect(empty).toBeVisible();
+    }
+  });
+}

@@ -3,6 +3,7 @@ import { fn } from 'storybook/test';
 import type { ReactNode } from 'react';
 import { Provider as JotaiProvider } from 'jotai';
 import { useHydrateAtoms } from 'jotai/utils';
+import { useTranslation } from 'react-i18next';
 import {
   createCapabilitySet,
   createLocalPlatformProvider,
@@ -12,12 +13,15 @@ import {
 import { PlatformContext } from '@lody/platform/react';
 
 import { currentWorkspaceSlugAtom, userAtom } from '@/atoms';
+import { runtimeAtom, type WorkspaceRuntime } from '@/atoms/runtime';
 import { MobileAboutSettings } from '@/components/mobile/mobile-about-settings';
 import { MobileAccountSettings } from '@/components/mobile/mobile-account-settings';
 import { MobileAppearanceSettings } from '@/components/mobile/mobile-appearance-settings';
 import { MobileGeneralSettings } from '@/components/mobile/mobile-general-settings';
 import { MobileSettingsLayout } from '@/components/mobile/mobile-settings-layout';
 import { SettingsCategoryList } from '@/components/settings/settings-category-list';
+import { AgentRolesSetting } from '@/components/settings/agent-roles-setting';
+import { McpSetting } from '@/components/settings/mcp-setting';
 import { WorkspaceJoinRequestsSettings } from '@/components/settings/workspace-join-requests-settings';
 import { StableSessionContext, type StableSessionValue } from '@/hooks/useStableSession';
 import type { LodyAuthClient } from '@/lib/auth';
@@ -155,21 +159,32 @@ function StoryProviders({ children }: { children: ReactNode }) {
   );
 }
 
-function PhoneFrame({ title, children }: { title: string; children: ReactNode }) {
+type PhoneFrameProps = { title: string; titleKey?: string; children: ReactNode };
+
+function PhoneContent({ title, titleKey, children }: PhoneFrameProps) {
+  const { t } = useTranslation();
+  return (
+    <MobileSettingsLayout
+      title={titleKey ? t(titleKey) : title}
+      isNativeApp={false}
+      isMachineDetail={false}
+      isAgentConfigTab={false}
+      onBack={fn()}
+    >
+      {children}
+    </MobileSettingsLayout>
+  );
+}
+
+function PhoneFrame({ title, titleKey, children }: PhoneFrameProps) {
   return (
     <StoryProviders>
       <RoutedStory>
         <div className="flex min-h-dvh items-center justify-center bg-stone-200 p-0 sm:p-6">
           <div className="h-dvh w-full overflow-hidden bg-background shadow-2xl sm:h-[852px] sm:w-[393px] sm:rounded-[34px]">
-            <MobileSettingsLayout
-              title={title}
-              isNativeApp={false}
-              isMachineDetail={false}
-              isAgentConfigTab={false}
-              onBack={fn()}
-            >
+            <PhoneContent title={title} titleKey={titleKey}>
               {children}
-            </MobileSettingsLayout>
+            </PhoneContent>
           </div>
         </div>
       </RoutedStory>
@@ -181,10 +196,49 @@ const meta = {
   title: 'Mobile/MobileSettingsPages',
   component: PhoneFrame,
   parameters: { layout: 'fullscreen' },
+  args: { title: 'Settings', children: null },
 } satisfies Meta<typeof PhoneFrame>;
 
 export default meta;
 type Story = StoryObj<typeof meta>;
+
+const emptyCatalogRuntime = {
+  workspaceId: storyOrganization.id,
+  workspaceSlug: storyOrganization.slug,
+  repo: {
+    openFlockDoc: async () => ({
+      flock: { scan: () => [], subscribe: () => () => {} },
+      joinRoom: async () => ({ unsubscribe: () => {}, firstSyncedWithRemote: Promise.resolve() }),
+    }),
+  },
+} as unknown as WorkspaceRuntime;
+
+function EmptyCatalogFixture({ children }: { children: ReactNode }) {
+  useHydrateAtoms([[runtimeAtom, emptyCatalogRuntime]]);
+  return <>{children}</>;
+}
+
+function EmptyCatalogPage({ kind }: { kind: 'roles' | 'mcp' }) {
+  return (
+    <PhoneFrame
+      title={kind === 'roles' ? 'Agent Roles' : 'MCP'}
+      titleKey={kind === 'roles' ? 'settings.tabs.agentRoles' : 'settings.tabs.mcp'}
+    >
+      <EmptyCatalogFixture>
+        {kind === 'roles' ? <AgentRolesSetting /> : <McpSetting />}
+      </EmptyCatalogFixture>
+    </PhoneFrame>
+  );
+}
+
+/** Real catalog pages in the mobile settings layout, backed by empty fixtures. */
+export const AgentRolesEmpty: Story = {
+  render: () => <EmptyCatalogPage kind="roles" />,
+};
+
+export const McpEmpty: Story = {
+  render: () => <EmptyCatalogPage kind="mcp" />,
+};
 
 /** Settings home — the iOS-style grouped category list. */
 export const Home: Story = {

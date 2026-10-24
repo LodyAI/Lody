@@ -2,6 +2,7 @@ import React, { forwardRef, type ComponentProps, type ReactNode } from 'react';
 import * as stylex from '@stylexjs/stylex';
 import { ArrowUpRight, ChevronRight } from 'lucide-react';
 import { withClassName } from '@/lib/stylex';
+import emptyJellyfish from '@/assets/settings-empty-jellyfish.png';
 import { settingsBoxed } from './material.stylex';
 import { settingsSurface as surface } from './surface';
 
@@ -224,28 +225,34 @@ export const CompactLinkRow = forwardRef<HTMLButtonElement, CompactLinkRowProps>
 );
 
 /**
- * An empty catalog, in its list's own geometry: the records card it will
- * hold, with one quiet line where the records will be. No centred icon and no
- * second copy of the page's add action; `action` is for the one list whose way
- * in is not the page's add (installing the GitHub App).
+ * An empty catalog stands on the page rather than drawing an empty records
+ * card. The decorative mascot and centered copy explain what belongs here;
+ * the page keeps its add action. `action` supports a different way in, such as
+ * installing the GitHub App.
  */
 export function SettingsEmptyList({
   children,
+  description,
   action,
 }: {
   children: ReactNode;
+  description?: ReactNode;
   action?: ReactNode;
 }) {
   return (
-    <div {...stylex.props(settingsRecordsCard)}>
-      {action ? (
-        <div {...stylex.props(surface.cardNote, surface.cardNoteWithAction)}>
-          <span>{children}</span>
-          {action}
-        </div>
-      ) : (
-        <p {...stylex.props(surface.cardNote)}>{children}</p>
-      )}
+    <div data-settings-empty-state="" {...stylex.props(surface.emptyState)}>
+      <img
+        src={emptyJellyfish}
+        alt=""
+        aria-hidden="true"
+        draggable={false}
+        width={176}
+        height={176}
+        {...stylex.props(surface.emptyIllustration)}
+      />
+      <p {...stylex.props(surface.emptyTitle)}>{children}</p>
+      {description ? <p {...stylex.props(surface.emptyDescription)}>{description}</p> : null}
+      {action ? <div {...stylex.props(surface.emptyAction)}>{action}</div> : null}
     </div>
   );
 }

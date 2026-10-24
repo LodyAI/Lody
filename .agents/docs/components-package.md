@@ -237,6 +237,15 @@ button for a file the machine will refuse, and the user would lose the edit at s
 
 ## Theming and fields
 
+Empty settings catalogs use `SettingsEmptyList`: a centered decorative jellyfish,
+a localized message, and any existing guidance directly on the page. A records
+card appears once there are records. Existing catalog copy is preserved verbatim,
+including punctuation and instructions; no new guidance is added.
+The page owns its add action, while the optional empty-state action supports a
+different entry point such as GitHub installation. Project Skills uses this
+presentation for an empty inventory; its errors and search misses keep their
+existing messages. See the [empty catalog decision](../notes/implemented/feature/2026-10-20-settings-empty-catalogs.md).
+
 Reusable visual primitives and semantic design tokens are owned by
 [`@lody/ui`](../../packages/ui/README.md). `@lody/components` composes those
 primitives into product surfaces and may add layout or interaction constraints,

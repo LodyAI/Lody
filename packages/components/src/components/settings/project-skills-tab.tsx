@@ -5,7 +5,7 @@ import { usePostHog } from '@posthog/react';
 import { formatDistanceToNow, type Locale } from 'date-fns';
 import { enUS } from 'date-fns/locale/en-US';
 import { zhCN } from 'date-fns/locale/zh-CN';
-import { AlertCircle, Boxes, Info, PackageOpen, RefreshCw, Search, User } from 'lucide-react';
+import { AlertCircle, Boxes, Info, RefreshCw, Search, User } from 'lucide-react';
 import * as stylex from '@stylexjs/stylex';
 import { Spinner } from '@/ui/spinner';
 import { DEFAULT_PROJECT_SKILL_DIR, type ProjectSkill, type ProjectSkillScope } from '@lody/shared';
@@ -22,6 +22,7 @@ import { Input } from '@lody/ui/input';
 import { Spinner as LoadingSpinner } from '@lody/ui/spinner';
 import { colors } from '@lody/ui/tokens/colors.stylex';
 import { corner, radius, space } from '@lody/ui/tokens/scales.stylex';
+import { SettingsEmptyList } from './compact-layout';
 
 const MONO = 'var(--font-mono, ui-monospace, monospace)';
 const TRUNCATE = {
@@ -281,15 +282,15 @@ export function ProjectSkillsView({
       );
     }
     return (
-      <SkillsEmptyShell
-        icon={<PackageOpen {...stylex.props(styles.icon16, styles.hint)} />}
-        title={t('workspace.projects.skills.empty', 'No skills found')}
-        body={t('workspace.projects.skills.emptyHint', {
+      <SettingsEmptyList
+        description={t('workspace.projects.skills.emptyHint', {
           defaultValue:
             'Skills live in {{dir}} and other known skill directories. Add a skill there to see it here.',
           dir: DEFAULT_PROJECT_SKILL_DIR,
         })}
-      />
+      >
+        {t('workspace.projects.skills.empty', 'No skills found')}
+      </SettingsEmptyList>
     );
   }
 

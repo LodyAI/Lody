@@ -40,39 +40,56 @@ const storyRole: AgentRole = {
 };
 
 // A read-only catalog fixture: no transport or real workspace writes.
-const rolesStoryRuntime = {
-  workspaceId: 'settings-story-workspace',
-  workspaceSlug: 'lody',
-  repo: {
-    openFlockDoc: async () => ({
-      flock: {
-        scan: (options?: { prefix?: readonly unknown[] }) =>
-          options?.prefix?.[0] === 'agentRole'
-            ? [{ key: workspaceFlockKeys.agentRole(storyRole.id), value: storyRole }]
-            : [],
-        subscribe: () => () => {},
-      },
-      joinRoom: async () => ({ unsubscribe: () => {}, firstSyncedWithRemote: Promise.resolve() }),
-    }),
-  },
-} as unknown as WorkspaceRuntime;
+function createCatalogStoryRuntime(roles: readonly AgentRole[]) {
+  return {
+    workspaceId: 'settings-story-workspace',
+    workspaceSlug: 'lody',
+    repo: {
+      openFlockDoc: async () => ({
+        flock: {
+          scan: (options?: { prefix?: readonly unknown[] }) =>
+            options?.prefix?.[0] === 'agentRole'
+              ? roles.map((role) => ({ key: workspaceFlockKeys.agentRole(role.id), value: role }))
+              : [],
+          subscribe: () => () => {},
+        },
+        joinRoom: async () => ({ unsubscribe: () => {}, firstSyncedWithRemote: Promise.resolve() }),
+      }),
+    },
+  } as unknown as WorkspaceRuntime;
+}
 
-function RolesCatalogFixture({ children }: { children: ReactNode }) {
+const rolesStoryRuntime = createCatalogStoryRuntime([storyRole]);
+const emptyCatalogStoryRuntime = createCatalogStoryRuntime([]);
+
+function RolesCatalogFixture({
+  children,
+  empty = false,
+}: {
+  children: ReactNode;
+  empty?: boolean;
+}) {
   useHydrateAtoms([
-    [runtimeAtom, rolesStoryRuntime],
+    [runtimeAtom, empty ? emptyCatalogStoryRuntime : rolesStoryRuntime],
     [userAtom, { id: storyRole.ownerUserId, name: 'Example user', email: 'user@example.com' }],
   ]);
   return <>{children}</>;
 }
 
-function SettingsModalStory({ tab }: { tab: SettingsTabId }) {
+function SettingsModalStory({
+  tab,
+  emptyCatalog = false,
+}: {
+  tab: SettingsTabId;
+  emptyCatalog?: boolean;
+}) {
   return (
     <SettingsStoryProviders capabilities={['cloudAccount']}>
       <RoutedStory>
         <Provider>
           <OpenModalAt tab={tab}>
-            {tab === 'agent-roles' ? (
-              <RolesCatalogFixture>
+            {tab === 'agent-roles' || emptyCatalog ? (
+              <RolesCatalogFixture empty={emptyCatalog}>
                 <DesktopSettingsModal />
               </RolesCatalogFixture>
             ) : (
@@ -109,13 +126,17 @@ export const KeyboardShortcutsTab: Story = {
   render: () => <SettingsModalStory tab="keyboard-shortcuts" />,
 };
 
-/** An empty catalog: the list's own card with one quiet line. */
+/** An empty, hydrated catalog without a live workspace or personal data. */
 export const McpEmptyTab: Story = {
-  render: () => <SettingsModalStory tab="mcp" />,
+  render: () => <SettingsModalStory tab="mcp" emptyCatalog />,
 };
 
 export const AgentRolesTab: Story = {
   render: () => <SettingsModalStory tab="agent-roles" />,
+};
+
+export const AgentRolesEmptyTab: Story = {
+  render: () => <SettingsModalStory tab="agent-roles" emptyCatalog />,
 };
 
 export const DarkModePreferencesTab: Story = {
