@@ -43,6 +43,7 @@ import { mergeableBadgeTheme } from './sidebar-mergeable-badge.stylex';
 import { ContextMenu } from '@lody/ui/context-menu';
 import { Skeleton } from '@lody/ui/skeleton';
 import { PR_STATUS_META } from '@/components/sessions/pull-request-badge';
+export { PR_STATUS_META } from '@/components/sessions/pull-request-badge';
 import { SidebarConfirmArchiveButton } from '@/components/sidebar-confirm-archive-button';
 import { CachedAvatarImg } from '@/components/cached-avatar-img';
 import { UserAvatar } from '@/components/user-avatar';
@@ -431,6 +432,78 @@ export function SessionPrIcon({
       strokeWidth={2.25}
       aria-hidden="true"
     />
+  );
+}
+
+/**
+ * Resolves the localized label for a PR status using shared PR_STATUS_META.
+ */
+export function formatSessionPrStatusLabel(
+  t: (key: string, fallback?: string) => string,
+  prStatus: PrStatus
+): string {
+  const meta = PR_STATUS_META[prStatus] ?? PR_STATUS_META.open;
+  return t(meta.labelKey, meta.labelFallback);
+}
+
+/**
+ * Secondary line under the session title in two-line or PR-bearing rows.
+ * Formats `#<number> · <Status>` with status tint when a PR exists,
+ * or falls back to project/branch/time context.
+ */
+export function SessionRowSubtitle({
+  prNumber,
+  prStatus,
+  branchName,
+  relativeTime,
+  projectLabel,
+  className,
+}: {
+  prNumber?: number | null;
+  prStatus?: PrStatus | null;
+  branchName?: string | null;
+  relativeTime?: string | null;
+  projectLabel?: string | null;
+  className?: string;
+}) {
+  const { t } = useTranslation();
+  const hasPr = typeof prNumber === 'number' || Boolean(prStatus);
+
+  if (hasPr) {
+    const status = prStatus ?? 'open';
+    const statusMeta = PR_STATUS_META[status] ?? PR_STATUS_META.open;
+    const statusLabel = t(statusMeta.labelKey, statusMeta.labelFallback);
+    const prLabel = prNumber ? `#${prNumber}` : 'PR';
+
+    return (
+      <span
+        data-session-row-subtitle=""
+        className={cn(
+          'flex min-w-0 items-center gap-1 truncate text-[11px] leading-tight text-sidebar-foreground-muted',
+          className
+        )}
+      >
+        {projectLabel ? <span className="truncate">{projectLabel} ·</span> : null}
+        <span className="tabular-nums font-medium">{prLabel}</span>
+        <span>·</span>
+        <span className={statusMeta.iconColorClassName}>{statusLabel}</span>
+      </span>
+    );
+  }
+
+  const parts = [projectLabel, branchName, relativeTime].filter(Boolean);
+  if (!parts.length) return null;
+
+  return (
+    <span
+      data-session-row-subtitle=""
+      className={cn(
+        'min-w-0 truncate text-[11px] leading-tight text-sidebar-foreground-muted',
+        className
+      )}
+    >
+      {parts.join(' · ')}
+    </span>
   );
 }
 

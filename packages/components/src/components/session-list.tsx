@@ -85,6 +85,7 @@ import {
   SessionPrIcon,
   SessionRowAuthorAvatar,
   SessionRowLeadingSlot,
+  SessionRowSubtitle,
   SidebarRowArchiveButton,
   SidebarRowEndSlot,
   SessionMergeablePill,
@@ -769,11 +770,18 @@ const SessionGroupRow = memo(function SessionGroupRow({
       ? {
           ...baseOpenedByTreeSlot,
           isFirstChild: followsOpener,
-          tallOpener: followsOpener && showBranchNames,
+          tallOpener: followsOpener && (showBranchNames || hasPr),
         }
       : baseOpenedByTreeSlot;
   const openedByOpener = openedByTreeSlot?.kind === 'opener' ? openedByTreeSlot : null;
   const canToggleOpenedSessions = openedByOpener !== null;
+  const isNestedChild = node.depth === 1;
+  const isOpener = openedByOpener !== null;
+  const hasLeadingTreeAffordance = isNestedChild || isOpener;
+  const showLeadingPr = hasPr && !hasLeadingTreeAffordance;
+  const showTrailingPr = hasPr && hasLeadingTreeAffordance;
+  const showRowSubtitle = hasPr && !isMobile && baseOpenedByTreeSlot?.kind !== 'child';
+  const hasSecondLine = (showRowSubtitle || showMetaLine) && !isMobile && !isChatSession;
   const hasStandardMenuActions = Boolean(
     onRenameSession ||
     onTogglePinSession ||
@@ -809,13 +817,13 @@ const SessionGroupRow = memo(function SessionGroupRow({
       }
       className={cn(
         'group relative w-full text-left',
-        // A desktop repo row is two lines (title, then branch and time); chats,
+        // A desktop repo row is two lines (title, then branch/time or PR); chats,
         // nested children and every mobile row stay one. The rest of the metadata (repo /
         // PR / line totals) stays in the desktop hover info card.
         // Hover marks the row with its fill only; the title keeps its color.
         stylex.props(
           sidebarSurface.row,
-          showMetaLine ? sidebarSurface.tall : sidebarSurface.snug,
+          hasSecondLine ? sidebarSurface.tall : sidebarSurface.snug,
           showSelectedState
             ? sidebarSurface.selected
             : isSelectable && !isMobile && sidebarSurface.hover
@@ -1020,20 +1028,25 @@ const SessionGroupRow = memo(function SessionGroupRow({
       <div
         className={cn(
           'flex min-w-0',
-          showMetaLine ? 'items-start' : 'items-center',
+          hasSecondLine ? 'items-start' : 'items-center',
           isMobile ? 'gap-1.5' : 'gap-2'
         )}
       >
         {/* On a two-line row the leading and end slots sit in a box one title line
             tall, so they stay on the title line; otherwise the box disappears. */}
-        <div className={showMetaLine ? lineBoxClassName : 'contents'}>
+        <div className={hasSecondLine ? lineBoxClassName : 'contents'}>
           <SessionRowLeadingSlot
             showMenuButton={hasMenuActions}
             menuLabel={moreActionsLabel}
             openedByTree={openedByTreeSlot}
+            prIcon={
+              showLeadingPr ? (
+                <SessionPrIcon prStatus={prStatus} prCiState={session.prCiState} />
+              ) : undefined
+            }
           />
         </div>
-        <div className={showMetaLine ? 'flex min-w-0 flex-1 flex-col gap-1' : 'contents'}>
+        <div className={hasSecondLine ? 'flex min-w-0 flex-1 flex-col gap-1' : 'contents'}>
           <div
             className={cn(
               // Body role: conversation titles match prose in every organize mode.
@@ -1060,15 +1073,21 @@ const SessionGroupRow = memo(function SessionGroupRow({
             ) : null}
             {renderTitle()}
           </div>
-          {showMetaLine ? (
+          {showRowSubtitle ? (
+            <SessionRowSubtitle
+              prNumber={prNumber}
+              prStatus={prStatus}
+              branchName={session.branchName}
+            />
+          ) : showMetaLine ? (
             <SidebarSessionMetaLine
               branchName={session.branchName}
               latestMessageAt={session.latestMessageAt}
             />
           ) : null}
         </div>
-        {/* Keep PR at the right edge. Line totals stay in the hover card. */}
-        <div className={showMetaLine ? lineBoxClassName : 'contents'}>
+        {/* Keep PR at the right edge when not shown leading. Line totals stay in the hover card. */}
+        <div className={hasSecondLine ? lineBoxClassName : 'contents'}>
           <SidebarRowEndSlot
             sessionId={session.sessionId}
             isWaitingPermission={session.isWaitingPermission}
@@ -1082,7 +1101,7 @@ const SessionGroupRow = memo(function SessionGroupRow({
                     className={cn(SIDEBAR_CAPTION_TEXT_CLASS, 'text-muted-foreground')}
                   />
                 </span>
-              ) : hasPr || showMergeablePill || isMobile ? (
+              ) : showTrailingPr || showMergeablePill || isMobile ? (
                 <span
                   className={cn(
                     SIDEBAR_CAPTION_TEXT_CLASS,
@@ -1097,7 +1116,7 @@ const SessionGroupRow = memo(function SessionGroupRow({
                     />
                   ) : null}
                   {showMergeablePill ? <SessionMergeablePill /> : null}
-                  {hasPr ? (
+                  {showTrailingPr ? (
                     <SessionPrIcon compact prStatus={prStatus} prCiState={session.prCiState} />
                   ) : null}
                 </span>

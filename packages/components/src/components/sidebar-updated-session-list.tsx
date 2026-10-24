@@ -37,6 +37,7 @@ import { ContextMenu } from '@lody/ui/context-menu';
 import { SwipeActionRow } from '@/components/shared/swipe-action-row';
 import {
   GitHubOwnerIcon,
+  PR_STATUS_META,
   SessionOpenedByTreeRow,
   SessionPrIcon,
   SessionMergeablePill,
@@ -697,6 +698,7 @@ function UpdatedGitHubOwnerMark({ repoFullName }: { repoFullName: string | null 
 }
 
 function UpdatedItemProjectLine({ item }: { item: SidebarUpdatedItem }) {
+  const { t } = useTranslation();
   const label = resolveUpdatedItemProjectLabel(item);
   if (!label) return null;
   const repoFullName = item.repoFullName ?? (item.kind === 'github' ? label : null);
@@ -708,6 +710,17 @@ function UpdatedItemProjectLine({ item }: { item: SidebarUpdatedItem }) {
   ) : (
     <MessageCircle className="h-3 w-3" strokeWidth={1.75} aria-hidden="true" />
   );
+  const prUrl = typeof item.prUrl === 'string' && item.prUrl.trim() ? item.prUrl.trim() : null;
+  const prNumber =
+    typeof item.prNumber === 'number' && Number.isFinite(item.prNumber)
+      ? item.prNumber
+      : prUrl
+        ? parseGitHubPrNumber(prUrl)
+        : null;
+  const prStatus: PrStatus = item.prStatus ?? 'open';
+  const statusMeta = prUrl ? (PR_STATUS_META[prStatus] ?? PR_STATUS_META.open) : null;
+  const statusLabel = statusMeta ? t(statusMeta.labelKey, statusMeta.labelFallback) : null;
+
   return (
     <div
       data-sidebar-updated-project={item.kind}
@@ -726,6 +739,14 @@ function UpdatedItemProjectLine({ item }: { item: SidebarUpdatedItem }) {
         {mark}
       </span>
       <span className="min-w-0 truncate">{label}</span>
+      {prUrl && statusMeta && statusLabel ? (
+        <>
+          <span className="opacity-60">·</span>
+          <span className="tabular-nums font-medium">{prNumber ? `#${prNumber}` : 'PR'}</span>
+          <span className="opacity-60">·</span>
+          <span className={statusMeta.iconColorClassName}>{statusLabel}</span>
+        </>
+      ) : null}
     </div>
   );
 }
@@ -887,6 +908,10 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
       : undefined;
 
   const isNestedChild = openedByTree?.kind === 'child';
+  const isOpener = openedByTree?.kind === 'opener';
+  const hasLeadingTreeAffordance = isNestedChild || isOpener;
+  const showLeadingPr = showPr && !hasLeadingTreeAffordance;
+  const showTrailingPr = showPr && hasLeadingTreeAffordance;
   const showProjectLine = showProjectContext && !isNestedChild;
   // The branch rides on the same second line as the project segment; nested
   // children skip it like the project context does.
@@ -995,6 +1020,11 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
             showMenuButton={hasMenuActions}
             menuLabel={contextMenuLabels.moreActions}
             openedByTree={openedByTree}
+            prIcon={
+              showLeadingPr ? (
+                <SessionPrIcon prStatus={prStatus} prCiState={item.prCiState} />
+              ) : undefined
+            }
             fadeClassName="group-hover/row:opacity-0 group-data-[menu-open]/row:opacity-0"
             restPointerClassName="group-hover/row:pointer-events-none group-data-[menu-open]/row:pointer-events-none"
             revealClassName="group-hover/row:opacity-100 group-hover/row:pointer-events-auto group-data-[menu-open]/row:opacity-100 group-data-[menu-open]/row:pointer-events-auto"
@@ -1048,7 +1078,7 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
             hasUnreadMessages={item.hasUnreadMessages}
             fadeClassName="group-hover/row:opacity-0 group-data-[menu-open]/row:opacity-0"
             restIcon={
-              showPr ||
+              showTrailingPr ||
               showMergeablePill ||
               isMobile ||
               (item.kind === 'local' && item.isWorktree) ? (
@@ -1065,7 +1095,7 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
                   <SessionRowWorktreeIndicator
                     isWorktree={item.kind === 'local' && item.isWorktree}
                   />
-                  {showPr ? (
+                  {showTrailingPr ? (
                     <SessionPrIcon compact prStatus={prStatus} prCiState={item.prCiState} />
                   ) : null}
                 </span>
