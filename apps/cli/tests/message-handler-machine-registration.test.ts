@@ -185,6 +185,9 @@ describe('MessageHandler machine registration', () => {
     // version reach every client, so adding one must be acknowledged here.
     const hostCapabilities = getHostMachineProtocolCapabilities();
     expect(registeredMeta.protocolCapabilities).toEqual({
+      multiRepoProject: 1,
+      projectFileRoots: 1,
+      projectRepositoryMembers: 1,
       operationInbox: 2,
       providerRateLimitsRefresh: 1,
       codeCollabAllChangesScope: 1,

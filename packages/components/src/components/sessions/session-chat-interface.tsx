@@ -140,6 +140,7 @@ import {
   resolveActiveAssistantTurnId,
   resolveBaseBranchPreference,
   resolveProjectGitHubRepo,
+  decodeProjectPreparationProgress,
   type McpServerId,
 } from '@lody/shared';
 import { useIsMobile } from '../../hooks/use-mobile';
@@ -238,6 +239,8 @@ import { PullRequestBadge } from './pull-request-badge';
 import { SessionInfoBar } from './session-info-bar';
 import { SessionPreviewPreload } from './session-preview-preload';
 import { CurrentSessionRelationsChip, useHasSessionRelations } from './session-relations-chip';
+import { SessionProjectMembersChip } from './session-project-members-chip';
+import { buildSessionProjectMemberRows } from '@/lib/session-project-members';
 import {
   mapGitHubCheckRunToPrCiRun,
   type ContextChipAction,
@@ -271,6 +274,7 @@ import {
   CREATE_PR_ORIGIN_PROMPT,
   PR_BRANCH_UPKEEP_PROMPT,
   withPrBranchUpkeep,
+  withProjectGroupPrScope,
   withQuickActionOrigin,
 } from './create-pr-prompt';
 import { WorktreeIcon } from '@/components/icons/worktree-icon';
@@ -3186,10 +3190,39 @@ export const SessionChatInterface = memo(
         case 'initializing': {
           const stage = liveSessionStatus.stage;
           switch (stage) {
-            case 'git-clone':
-              return tHeartbeat('sessions.statusIndicator.gitClone', {
-                repo: '',
-              });
+            case 'git-clone': {
+              // A Project group says which step it is on; anything else keeps
+              // the plain clone heartbeat.
+              const progress = decodeProjectPreparationProgress(liveSessionStatus.detail);
+              switch (progress?.step) {
+                case 'resolve':
+                  return t(
+                    'sessions.statusIndicator.projectPrep.resolve',
+                    'Finding the group’s repositories on this machine'
+                  );
+                case 'member':
+                  return t(
+                    'sessions.statusIndicator.projectPrep.member',
+                    'Preparing repositories {{done}}/{{total}} · {{path}}',
+                    progress
+                  );
+                case 'submodules':
+                  return t(
+                    'sessions.statusIndicator.projectPrep.submodules',
+                    'Checking out submodules'
+                  );
+                case 'setup':
+                  return t(
+                    'sessions.statusIndicator.projectPrep.setup',
+                    'Running setup for {{path}}',
+                    progress
+                  );
+                default:
+                  return tHeartbeat('sessions.statusIndicator.gitClone', {
+                    repo: '',
+                  });
+              }
+            }
             case 'managed-runtime':
               return (
                 liveSessionStatus.detail ??
@@ -5121,18 +5154,28 @@ export const SessionChatInterface = memo(
     const prBranchUpkeep = t('sessions.prompts.prBranchUpkeep', PR_BRANCH_UPKEEP_PROMPT);
     // The origin line tells the user, reading back, that this message came from
     // the button rather than from something they typed.
+    // A Project group conversation publishes every repository it changed, the
+    // submodules before their parents, so the same actions carry that scope.
+    const scopeToProjectGroup = (prompt: string) =>
+      session.projectRun ? withProjectGroupPrScope(prompt) : prompt;
     const createPrPrompt = withQuickActionOrigin(
       t('sessions.prompts.createPrOrigin', CREATE_PR_ORIGIN_PROMPT),
-      withPrBranchUpkeep(t('sessions.prompts.createPr', CREATE_PR_BASE_PROMPT), prBranchUpkeep)
+      scopeToProjectGroup(
+        withPrBranchUpkeep(t('sessions.prompts.createPr', CREATE_PR_BASE_PROMPT), prBranchUpkeep)
+      )
     );
     const createDraftPrPrompt = withQuickActionOrigin(
       t('sessions.prompts.createDraftPrOrigin', CREATE_DRAFT_PR_ORIGIN_PROMPT),
-      withPrBranchUpkeep(
-        t('sessions.prompts.createDraftPr', CREATE_DRAFT_PR_BASE_PROMPT),
-        prBranchUpkeep
+      scopeToProjectGroup(
+        withPrBranchUpkeep(
+          t('sessions.prompts.createDraftPr', CREATE_DRAFT_PR_BASE_PROMPT),
+          prBranchUpkeep
+        )
       )
     );
-    const commitAndPushPrompt = t('sessions.prompts.commitAndPush', COMMIT_AND_PUSH_PROMPT);
+    const commitAndPushPrompt = scopeToProjectGroup(
+      t('sessions.prompts.commitAndPush', COMMIT_AND_PUSH_PROMPT)
+    );
 
     const handleCreatePr = useCallback(() => {
       captureSessionEvent('session/quick_action_selected', {
@@ -5399,6 +5442,18 @@ export const SessionChatInterface = memo(
       t,
     ]);
     const hasSessionRelations = useHasSessionRelations(session.id);
+    const sessionProjectRun = session.projectRun;
+    const sessionPullRequests = session.pullRequests;
+    const sessionPullRequestState = session.pullRequestState;
+    const projectMemberRows = useMemo(
+      () =>
+        buildSessionProjectMemberRows({
+          projectRun: sessionProjectRun,
+          pullRequests: sessionPullRequests,
+          pullRequestState: sessionPullRequestState,
+        }),
+      [sessionProjectRun, sessionPullRequests, sessionPullRequestState]
+    );
     const openedByConversationStart = useMemo(() => {
       const openedBy = openedByRelations?.openedBy;
       if (!openedBy) return undefined;
@@ -6990,6 +7045,17 @@ export const SessionChatInterface = memo(
                       onOpenAllChanges={onOpenAllChanges}
                       // Opener + every Session/Tab created here: the in-stream
                       // creation cards scroll away with the conversation.
+                      projectMembers={
+                        sessionProjectRun && projectMemberRows.length > 0 ? (
+                          <SessionProjectMembersChip
+                            groupName={sessionProjectRun.name}
+                            rows={projectMemberRows}
+                            onOpenPullRequest={(url) => {
+                              void openExternalUrl(url);
+                            }}
+                          />
+                        ) : undefined
+                      }
                       relations={
                         hasSessionRelations ? (
                           <CurrentSessionRelationsChip

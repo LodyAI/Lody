@@ -19,6 +19,7 @@ import {
  * as stored in session meta (also the write-back upsert key).
  */
 export type PrPollStatusTarget = {
+  nativeCredentials?: boolean;
   url: string;
   repoFullName: string;
   prNumber: number;
@@ -33,8 +34,10 @@ export type PrPollStatusTarget = {
  * still be discovered).
  */
 export type PrPollDiscoveryTarget = {
+  nativeCredentials?: boolean;
   repoFullName: string;
   branch: string;
+  memberId?: string;
 };
 
 /** Polling view of one owner session (child tabs folded into their owner). */
@@ -48,6 +51,8 @@ export type PrPollSessionEntry = {
   runtimeBranch: string | null;
   statusTargets: PrPollStatusTarget[];
   discoveryTarget: PrPollDiscoveryTarget | null;
+  discoveryTargets?: PrPollDiscoveryTarget[];
+  projectMemberIds?: string[];
 };
 
 export type AliveSessionMeta = {
@@ -97,6 +102,34 @@ export function resolveOwnerRepositoryContext(
   };
 }
 
+export function projectMemberRepositoryContext(
+  meta: SessionMeta,
+  memberId?: string,
+  repository?: string
+): { repoFullName: string | null; branch: string | null } {
+  if (!meta.projectRun) return resolveOwnerRepositoryContext(meta);
+  const entries = Object.entries(meta.projectRun.members);
+  const member = memberId
+    ? entries.find(([id]) => id === memberId)?.[1]
+    : entries.find(
+        ([, value]) =>
+          (value.src.kind === 'github'
+            ? value.src.repoFullName
+            : value.repoFullName
+          )?.toLowerCase() === repository?.toLowerCase()
+      )?.[1];
+  return {
+    repoFullName: member
+      ? ((member.src.kind === 'github' ? member.src.repoFullName : member.repoFullName) ?? null)
+      : null,
+    branch: member?.branch?.trim() || null,
+  };
+}
+
+export function discoveryOwnerKey(ownerSessionId: string, memberId?: string): string {
+  return memberId ? `${ownerSessionId}:${memberId}` : ownerSessionId;
+}
+
 /** The current PR is the LAST item of `pullRequests` (shared metadata contract). */
 export function getCurrentPullRequest(
   meta: Pick<SessionMeta, 'pullRequests'> | undefined
@@ -131,6 +164,17 @@ export function computePrPollMetaSignature(
     resolveDiscoveryBranch(meta) ?? '',
     resolveGitHubRepo(meta) ?? '',
     pullRequests,
+    meta.projectRun
+      ? JSON.stringify(
+          Object.entries(meta.projectRun.members).map(([id, member]) => [
+            id,
+            member.src.kind === 'github' ? member.src.repoFullName : member.repoFullName,
+            member.branch,
+            member.repositoryCheckout,
+            member.src.kind,
+          ])
+        )
+      : '',
   ].join('\u0002');
 }
 
@@ -190,7 +234,48 @@ export function enumeratePrPollTargets(
     });
   }
 
-  return Array.from(entries.values());
+  return Array.from(entries.values()).map((entry) => {
+    const ownerMeta = metaBySessionId.get(entry.ownerSessionId)!;
+    if (!ownerMeta.projectRun) return entry;
+    const discoveryTargets: PrPollDiscoveryTarget[] = [];
+    for (const [memberId, member] of Object.entries(ownerMeta.projectRun.members)) {
+      const context = projectMemberRepositoryContext(ownerMeta, memberId);
+      if (!context.repoFullName) continue;
+      const nativeCredentials =
+        member.src.kind === 'local' || member.repositoryCheckout?.kind === 'local';
+      for (const status of entry.statusTargets) {
+        if (status.repoFullName.toLowerCase() === context.repoFullName.toLowerCase())
+          status.nativeCredentials = nativeCredentials;
+      }
+      if (!context.branch) continue;
+      const memberMeta = {
+        ...ownerMeta,
+        project: {
+          kind: 'github' as const,
+          repoFullName: context.repoFullName,
+          branch: member.base,
+        },
+        pullRequests: ownerMeta.pullRequests?.filter(
+          (pr) =>
+            parseGitHubPullRequestUrl(pr.url)?.repoFullName.toLowerCase() ===
+            context.repoFullName!.toLowerCase()
+        ),
+      };
+      const target = collectDiscoveryTarget(
+        memberMeta,
+        context.branch,
+        discoveryFingerprints[discoveryOwnerKey(entry.ownerSessionId, memberId)],
+        defaultResolveGitHubRepo
+      );
+      if (target) discoveryTargets.push({ ...target, memberId, nativeCredentials });
+    }
+    return {
+      ...entry,
+      discoveryTarget: null,
+      discoveryTargets,
+      projectMemberIds: Object.keys(ownerMeta.projectRun.members),
+    };
+  });
 }
 
 function maxNullable(a: number | null, b: number | null): number | null {

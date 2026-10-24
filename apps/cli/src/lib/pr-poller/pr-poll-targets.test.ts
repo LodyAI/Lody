@@ -22,6 +22,74 @@ function alive(sessionId: string, meta: SessionMeta): AliveSessionMeta {
 const githubProject = { kind: 'github', repoFullName: 'owner/repo' } as SessionMeta['project'];
 
 describe('enumeratePrPollTargets', () => {
+  it('discovers each project group member independently and suppresses only its terminal repository', () => {
+    const meta = makeMeta({
+      projectRun: {
+        members: {
+          web: {
+            src: { kind: 'github', repoFullName: 'owner/web' },
+            branch: 'feature/task',
+            base: 'main',
+          },
+          api: {
+            src: { kind: 'local', localProjectId: 'api', machineId: 'machine' },
+            repoFullName: 'owner/api',
+            branch: 'feature/task',
+            base: 'main',
+          },
+        },
+      } as never,
+      pullRequests: [{ url: 'https://github.com/owner/web/pull/1', status: 'merged' }],
+    });
+    const [entry] = enumeratePrPollTargets([alive('s1', meta)], {
+      's1:web': 'owner/web|feature/task',
+    });
+    expect(entry?.discoveryTargets).toEqual([
+      {
+        memberId: 'api',
+        repoFullName: 'owner/api',
+        branch: 'feature/task',
+        nativeCredentials: true,
+      },
+    ]);
+    expect(entry?.projectMemberIds).toEqual(['web', 'api']);
+    const changed = structuredClone(meta);
+    Object.values(changed.projectRun!.members)[0]!.branch = 'feature/next';
+    expect(computePrPollMetaSignature(changed)).not.toBe(computePrPollMetaSignature(meta));
+    expect(
+      enumeratePrPollTargets([alive('s1', changed)], { 's1:web': 'owner/web|feature/task' })[0]
+        ?.discoveryTargets
+    ).toHaveLength(2);
+  });
+
+  it('routes repository local-copy PR status and discovery through native credentials', () => {
+    const meta = makeMeta({
+      projectRun: {
+        members: {
+          web: {
+            src: { kind: 'github', preferLocal: true, repoFullName: 'owner/web' },
+            repositoryCheckout: { kind: 'local', machineId: 'machine', localProjectId: 'copy' },
+            branch: 'task',
+            base: 'main',
+          },
+        },
+      } as never,
+      pullRequests: [{ url: 'https://github.com/owner/web/pull/1', status: 'open' }],
+    });
+    const [entry] = enumeratePrPollTargets([alive('s1', meta)]);
+    expect(entry?.discoveryTargets?.[0]).toMatchObject({
+      repoFullName: 'owner/web',
+      nativeCredentials: true,
+    });
+    expect(entry?.statusTargets[0]).toMatchObject({
+      repoFullName: 'owner/web',
+      nativeCredentials: true,
+    });
+    const before = computePrPollMetaSignature(meta);
+    Object.values(meta.projectRun!.members)[0]!.repositoryCheckout = { kind: 'github' };
+    expect(computePrPollMetaSignature(meta)).not.toBe(before);
+  });
+
   it('collects open/draft PRs as status targets with parsed repo + number', () => {
     const [entry] = enumeratePrPollTargets([
       alive(

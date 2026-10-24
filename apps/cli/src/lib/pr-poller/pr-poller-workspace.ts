@@ -57,7 +57,10 @@ export interface PrPollerWorkspaceHandle {
   subscribePresence(listener: (states: LodyPresenceStateMap) => void): (() => void) | null;
   getPresenceStates(): LodyPresenceStateMap | null;
   waitForInitialSync(timeoutMs?: number): Promise<boolean>;
-  resolveCredential(repoFullName: string): Promise<ResolvedGitHubCredential | null>;
+  resolveCredential(
+    repoFullName: string,
+    nativeCredentials?: boolean
+  ): Promise<ResolvedGitHubCredential | null>;
   invalidateCredential(repoFullName: string, credential: ResolvedGitHubCredential): void;
   /** Optional hosted webhook linkage; failure does not block summary publication. */
   associatePullRequest: ((args: AssociatePullRequestArgs) => Promise<boolean>) | null;
@@ -147,8 +150,8 @@ export function createLodyPrPollerWorkspace(options: {
       );
     },
 
-    resolveCredential(repoFullName: string) {
-      return credentialResolver.resolve(repoFullName);
+    resolveCredential(repoFullName: string, nativeCredentials?: boolean) {
+      return credentialResolver.resolve(repoFullName, nativeCredentials);
     },
 
     invalidateCredential(repoFullName: string, credential: ResolvedGitHubCredential): void {

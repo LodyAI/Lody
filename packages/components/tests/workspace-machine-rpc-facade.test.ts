@@ -554,6 +554,35 @@ describe('createWorkspaceMachineRpcFacade', () => {
     ).toMatchObject({ status: 'ok', content: { text: 'remote document' } });
   });
 
+  it('sends a member-root preview to the machine with its rootId, never to the local fast path', async () => {
+    const invoke = vi.fn(async () => {
+      throw new Error('the Electron fast path resolves against the main root');
+    });
+    vi.stubGlobal('window', { __LODY_ELECTRON__: true, ipc: { invoke } });
+    const facade = createWorkspaceMachineRpcFacade({
+      workspaceId,
+      targetRouter: {
+        getPlaneForMachine: () => 'cloud',
+        resolvePlaneForMachine: async () => 'cloud',
+      },
+      getMachineProtocolCapabilities: async () => undefined,
+      getMachineRpcClient: async () =>
+        ({
+          requestFilePreview: async (request: unknown) => {
+            expect(request).toMatchObject({ sessionId, path: 'guide.md', rootId: 'member:docs' });
+            return { status: 'ok', content: { text: 'member document' } };
+          },
+        }) as never,
+    });
+    expect(
+      await facade.requestFilePreview(remoteMachineId, {
+        sessionId,
+        path: 'guide.md',
+        rootId: 'member:docs',
+      })
+    ).toMatchObject({ status: 'ok', content: { text: 'member document' } });
+  });
+
   it('does not route a local filesystem failure to the cloud', async () => {
     vi.stubGlobal('window', {
       __LODY_ELECTRON__: true,
@@ -649,6 +678,49 @@ describe('createWorkspaceMachineRpcFacade', () => {
         ownerSessionId: sessionId,
       })
     );
+    expect(getMachineRpcClient).not.toHaveBeenCalled();
+  });
+
+  it('previews a member root on this machine through the local daemon with its rootId', async () => {
+    const invoke = vi.fn(async (channel: string) => {
+      expect(channel).toBe('machineRpc.send');
+      return {
+        ok: true as const,
+        result: {
+          status: 'ok',
+          v: 3,
+          path: 'guide.md',
+          digest: { size: 6, sha256: 'a'.repeat(64) },
+          content: { kind: 'text', text: 'member', encoding: 'utf8' },
+        },
+      };
+    });
+    vi.stubGlobal('window', { __LODY_ELECTRON__: true, ipc: { invoke } });
+    const getMachineRpcClient = vi.fn();
+    const facade = createWorkspaceMachineRpcFacade({
+      workspaceId,
+      getMachineProtocolCapabilities: async () => CURRENT_MACHINE_PROTOCOL_CAPABILITIES,
+      targetRouter: {
+        getPlaneForMachine: () => 'local',
+        resolvePlaneForMachine: vi.fn(async () => 'local' as const),
+      },
+      getMachineRpcClient,
+    });
+
+    await facade.requestFilePreview(
+      localMachineId,
+      { sessionId, path: 'guide.md', rootId: 'member:docs' },
+      { ownerSessionId: sessionId }
+    );
+    expect(invoke).toHaveBeenCalledWith(
+      'machineRpc.send',
+      expect.objectContaining({
+        method: 'file/preview',
+        params: expect.objectContaining({ path: 'guide.md', rootId: 'member:docs' }),
+      })
+    );
+    // Neither the main-root fast path nor a remote channel is involved.
+    expect(invoke).not.toHaveBeenCalledWith('machineRpc.previewFile', expect.anything());
     expect(getMachineRpcClient).not.toHaveBeenCalled();
   });
 

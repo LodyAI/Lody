@@ -1,10 +1,14 @@
 import {
+  FilePreviewV3ResponseSchema,
+  MAIN_SESSION_FILE_ROOT_ID,
   MemoryProviderResponseSchema,
+  ProjectProbeLocalMemberResultSchema,
   machineSupportsBugReportClientLog,
   machineSupportsMemoryProviders,
   type BugReportClientLog,
   type MemoryProviderRequest,
   type MemoryProviderResponse,
+  type ProjectProbeLocalMemberResult,
 } from '@lody/shared';
 import { createRpcSecretRecipient } from '@lody/loro-streams-rpc';
 import type { PreviewControlOperation } from '@lody/shared';
@@ -288,14 +292,36 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
       v: FILE_PREVIEW_PROTOCOL_VERSION,
       sessionId: request.sessionId,
       path: request.path,
+      ...(request.rootId === undefined ? {} : { rootId: request.rootId }),
       ...(request.resolveMarkdownLink ? { resolveMarkdownLink: true as const } : {}),
       ...(request.knownDigest === undefined ? {} : { knownDigest: request.knownDigest }),
       ...(request.maxBytes === undefined ? {} : { maxBytes: request.maxBytes }),
     };
+    // A member root's path is relative to a directory only the machine knows;
+    // the Electron fast path resolves against the main workspace root and would
+    // read a different file. Such requests always go to the machine.
+    const memberRoot = request.rootId !== undefined && request.rootId !== MAIN_SESSION_FILE_ROOT_ID;
     try {
       const result = await (async () => {
         const isElectron = typeof window !== 'undefined' && window.__LODY_ELECTRON__;
-        if (isElectron) {
+        // A member root on this machine: ask the local daemon, which resolves the
+        // root from its registry and authorizes the real path. No remote channel
+        // is needed, so this also works in local-only mode.
+        if (memberRoot && (await canUseLocalMachineRpc(machineId))) {
+          const local = await sendLocalMachineRpcRequest({
+            machineId,
+            workspaceId,
+            method: 'file/preview',
+            params,
+            ...(options?.ownerSessionId === undefined
+              ? {}
+              : { ownerSessionId: options.ownerSessionId }),
+            timeoutMs: options?.timeoutMs ?? 30_000,
+          });
+          const parsed = FilePreviewV3ResponseSchema.safeParse(local);
+          return parsed.success ? parsed.data : null;
+        }
+        if (isElectron && !memberRoot) {
           const ipc = getIpcServices();
           if (!ipc) throw new Error('Local file preview is not available.');
           // Main checks persistent machine identity before touching the path. This
@@ -1313,6 +1339,42 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
     }
   };
 
+  /**
+   * Read-only `.gitmodules` probe of a registered local project, used by the
+   * Project group editor. The local plane answers through Local Machine RPC; a
+   * remote machine through Streams. `null` is "no answer", never "no submodules".
+   */
+  const requestProjectProbeLocalMember = async (
+    machineId: MachineId,
+    localProjectId: LocalProjectId,
+    requestedByUserId: string,
+    options?: { timeoutMs?: number }
+  ): Promise<ProjectProbeLocalMemberResult | null> => {
+    try {
+      if (await canUseLocalMachineRpc(machineId)) {
+        const result = await sendLocalMachineRpcRequest({
+          machineId,
+          workspaceId,
+          method: 'project/probe-local-member',
+          params: { localProjectId },
+          timeoutMs: options?.timeoutMs ?? 30_000,
+        });
+        const parsed = ProjectProbeLocalMemberResultSchema.safeParse(result);
+        return parsed.success ? parsed.data : null;
+      }
+      return await (
+        await getMachineRpcClient(machineId)
+      ).requestProjectProbeLocalMember({
+        localProjectId,
+        requestedByUserId,
+        timeoutMs: options?.timeoutMs ?? 30_000,
+      });
+    } catch (error) {
+      console.warn('Project member probe failed', error);
+      return null;
+    }
+  };
+
   const requestLocalProjectControl = async (
     request: LocalProjectControlRequest,
     options?: { timeoutMs?: number }
@@ -1527,6 +1589,7 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
     requestSessionPreviewStatus,
     requestIosSimulatorControl,
     requestLocalProjectGitState,
+    requestProjectProbeLocalMember,
     requestLocalProjectControl,
     requestMachineBugReport,
     requestMemoryProvider,

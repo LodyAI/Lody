@@ -716,6 +716,7 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
           stream,
           workdir: this.getWorkdir(),
           resolveWorktreeProject: callbacks.resolveWorktreeProject,
+          resolveAdditionalDirectories: callbacks.resolveAdditionalDirectories,
           logger: this.logger,
           terminalManager: this.terminalManager,
           agentConfig: {

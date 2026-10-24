@@ -56,6 +56,7 @@ export type WorktreeGcDeps = {
    * written back). Restore reads `branchName`, so the real name must be kept.
    */
   recordArchivedBranch: (sessionId: SessionId, branchName: string) => Promise<void>;
+  archiveProjectGroup?: (input: { sessionId: SessionId; worktreePath: string }) => Promise<void>;
   now?: () => number;
   retryBaseDelayMs?: number;
   retryMaxDelayMs?: number;
@@ -184,6 +185,12 @@ export class WorktreeGarbageCollector {
     meta: SessionMeta | undefined;
   }): Promise<string | null> {
     const { repoId, sessionId, worktreePath, meta } = input;
+    if (repoId.startsWith('project-')) {
+      if (!meta?.projectRun || meta.projectRun.root !== repoId || !this.deps.archiveProjectGroup)
+        throw new Error('Project group snapshot is unavailable; preserving its directory');
+      await this.deps.archiveProjectGroup({ sessionId, worktreePath });
+      return null;
+    }
     // Resolve the owning repository BEFORE anything destructive. A worktree
     // whose repository cannot be found is preserved: the backup commit has
     // nowhere to go, and the directory may hold the only copy of the work.

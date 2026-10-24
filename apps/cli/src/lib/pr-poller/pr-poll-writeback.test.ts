@@ -492,3 +492,41 @@ describe('planPullRequestMetaWrite', () => {
     expect(JSON.stringify(entry).length).toBeLessThanOrEqual(50);
   });
 });
+
+describe('Project group repository ordering', () => {
+  it('selects a current PR within the polled repository without moving another repository', () => {
+    const other = 'https://github.com/owner/api/pull/99';
+    const meta = makeMeta({
+      pullRequests: [
+        { url: URL_1, status: 'open' },
+        { url: URL_2, status: 'open' },
+        { url: other, status: 'open' },
+      ],
+    });
+    const observations = [obs(1, { headRefName: 'feat/current' }), obs(2)];
+    const args = {
+      meta,
+      observations,
+      runtimeBranch: 'feat/current',
+      repoFullName: 'owner/repo',
+      nowSec: NOW_SEC,
+    };
+    const plan = planPullRequestMetaWrite(args);
+    expect(plan?.pullRequests?.map((pr) => pr.url)).toEqual([URL_2, URL_1, other]);
+    const updated = makeMeta({
+      ...meta,
+      pullRequests: plan!.pullRequests!,
+      pullRequestState: plan?.pullRequestState ?? undefined,
+    });
+    expect(planPullRequestMetaWrite({ ...args, meta: updated })).toBeNull();
+    expect(
+      planAssociation({
+        meta,
+        observations: [],
+        discovered: [obs(3, { headRefName: 'feat/current' })],
+        runtimeBranch: 'feat/current',
+        repoFullName: 'owner/repo',
+      })?.prNumber
+    ).toBe(3);
+  });
+});

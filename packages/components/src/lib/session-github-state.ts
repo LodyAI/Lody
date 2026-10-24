@@ -48,6 +48,22 @@ export const getLatestPullRequest = (
   return prList.toSorted((a, b) => comparePullRequestRecency(a, b))[0] ?? null;
 };
 
+/**
+ * The current PR of one repository. A multi-repository Session records PRs of
+ * several repositories in one list; its context stage describes the first
+ * member, so it must show that repository's PR, never another one's.
+ */
+export const getLatestPullRequestForRepository = (
+  session: Pick<SessionMeta, 'pullRequests'> | null | undefined,
+  repoFullName: string
+): SessionPullRequestMeta | null => {
+  const target = repoFullName.toLowerCase();
+  const matching = (session?.pullRequests ?? []).filter(
+    (pr) => parseGitHubPullRequestUrl(pr.url)?.repoFullName.toLowerCase() === target
+  );
+  return getLatestPullRequest({ pullRequests: matching });
+};
+
 const comparePullRequestRecency = (
   left: SessionPullRequestMeta,
   right: SessionPullRequestMeta
@@ -88,7 +104,10 @@ export const getSessionGitHubState = (
   const sourceSession = resolveWorkspaceOwnerSession(session, workspaceSession);
   const repoFullName =
     (resolveProjectGitHubRepo(sourceSession?.project) ?? sourceSession?.repoFullName)?.trim() ?? '';
-  const latestPr = getLatestPullRequest(sourceSession);
+  const latestPr =
+    sourceSession?.projectRun && repoFullName
+      ? getLatestPullRequestForRepository(sourceSession, repoFullName)
+      : getLatestPullRequest(sourceSession);
   const latestPrState = latestPr?.url
     ? (sourceSession?.pullRequestState?.[latestPr.url] ?? null)
     : null;

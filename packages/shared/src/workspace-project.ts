@@ -7,7 +7,18 @@ import { parseGitHubPullRequestUrl } from './github-url';
 export type ProjectId = string & { __brand: 'ProjectId' };
 export type ProjectMemberId = string & { __brand: 'ProjectMemberId' };
 export type ProjectMemberSource =
-  | { kind: 'github'; repoFullName: string; repoId?: number; baseBranch?: string }
+  | {
+      kind: 'github';
+      repoFullName: string;
+      repoId?: number;
+      baseBranch?: string;
+      /**
+       * A repository Member: the execution machine's own copy (a local project
+       * whose GitHub remote is this repository) is used when it has one, and the
+       * Member runs on any machine. Without it this is a managed GitHub clone.
+       */
+      preferLocal?: true;
+    }
   | { kind: 'local'; machineId: MachineId; localProjectId: LocalProjectId; baseBranch?: string };
 export type ProjectMemberPlacement =
   | { kind: 'root'; dir: string }
@@ -28,6 +39,14 @@ export type WorkspaceProject = {
   members: ProjectMember[];
 };
 export type SessionProjectMember = {
+  /** Owner-daemon receipt; pins credentials and durable branch storage across restore. */
+  repositoryCheckout?:
+    | { kind: 'github' }
+    | { kind: 'local'; machineId: MachineId; localProjectId: LocalProjectId };
+  /** Written only by the owner daemon; re-evaluated on ACP startup. */
+  access?: 'worktree' | 'additional' | 'link';
+  /** Owner-observed GitHub identity, including local members with a GitHub remote. */
+  repoFullName?: string;
   o: number;
   src: ProjectMemberSource;
   placement: ProjectMemberPlacement;
@@ -38,6 +57,10 @@ export type SessionProjectMember = {
   unpushed?: boolean;
   diff?: LineChange;
 };
+/** One atomic metadata value. Clients write the creation snapshot only.
+ * Afterwards the owning daemon serializes all read-modify-write operations per session.
+ * A second writer requires separate member rows; nested records do not merge.
+ */
 export type SessionProjectRun = {
   id: ProjectId;
   name: string;
@@ -81,6 +104,7 @@ export const ProjectMemberSourceSchema = z.discriminatedUnion('kind', [
     repoFullName: z.string().regex(/^[\w.-]+\/[\w.-]+$/),
     repoId: z.number().int().positive().optional(),
     baseBranch: z.string().min(1).optional(),
+    preferLocal: z.literal(true).optional(),
   }),
   z.object({
     kind: z.literal('local'),
@@ -174,6 +198,17 @@ export function normalizeWorkspaceProject(value: unknown): WorkspaceProject | un
   return result.success ? result.data : undefined;
 }
 export const SessionProjectMemberSchema = z.object({
+  repositoryCheckout: z
+    .discriminatedUnion('kind', [
+      z.object({ kind: z.literal('github') }),
+      ProjectMemberSourceSchema.options[1].omit({ baseBranch: true }),
+    ])
+    .optional(),
+  access: z.enum(['worktree', 'additional', 'link']).optional(),
+  repoFullName: z
+    .string()
+    .regex(/^[\w.-]+\/[\w.-]+$/)
+    .optional(),
   o: z.number().int().nonnegative(),
   src: ProjectMemberSourceSchema,
   placement: ProjectMemberPlacementSchema,
@@ -269,4 +304,212 @@ export function getCurrentPullRequestsByRepository<T extends { url: string }>(
     current.set(repo, pr);
   }
   return [...current.values()];
+}
+
+/** Remove a deselected member and all its descendants, preserving definition order. */
+export function selectProjectMembers(
+  members: readonly ProjectMember[],
+  selectedMemberIds: Iterable<ProjectMemberId>
+): ProjectMember[] {
+  resolveProjectMemberPaths(members);
+  const selected = new Set(selectedMemberIds);
+  const byId = new Map(members.map((member) => [member.id, member]));
+  for (const id of selected) if (!byId.has(id)) throw new Error('Unknown project group member');
+  const included = (member: ProjectMember): boolean =>
+    selected.has(member.id) &&
+    (member.placement.kind === 'root' || included(byId.get(member.placement.parent)!));
+  return members.filter(included);
+}
+
+export const PROJECT_SUBMODULE_BASE = 'gitlink';
+/** Undefined means use the existing single-repository flow (or disable Create for zero members). */
+export function buildSessionProjectRun(
+  project: WorkspaceProject,
+  selectedMemberIds: Iterable<ProjectMemberId>
+): SessionProjectRun | undefined {
+  const frozen = WorkspaceProjectSchema.parse(project);
+  const members = selectProjectMembers(frozen.members, selectedMemberIds);
+  if (members.length < 2) return undefined;
+  const paths = resolveProjectMemberPaths(members);
+  return SessionProjectRunSchema.parse({
+    id: frozen.id,
+    name: frozen.name,
+    instructions: frozen.instructions,
+    root: getProjectRunRoot(frozen),
+    members: Object.fromEntries(
+      members.map((member, o) => [
+        member.id,
+        {
+          o,
+          src: member.source,
+          placement: member.placement,
+          path: paths[member.id],
+          base:
+            member.placement.kind === 'submodule'
+              ? PROJECT_SUBMODULE_BASE
+              : (member.source.baseBranch ?? 'HEAD'),
+        },
+      ])
+    ),
+  });
+}
+
+/** Git remote spellings, including .gitmodules URLs relative to a GitHub parent remote. */
+export function getProjectRepositoryFullName(
+  url: string,
+  parentRepoFullName?: string
+): string | undefined {
+  let value = url.trim();
+  if (/^\.\.?\//.test(value)) {
+    if (!parentRepoFullName || !/^[\w.-]+\/[\w.-]+$/.test(parentRepoFullName)) return undefined;
+    value = new URL(value, `https://github.com/${parentRepoFullName}/`).href;
+  }
+  const match =
+    /^(?:https?:\/\/github\.com\/|ssh:\/\/(?:git@)?github\.com\/|git@github\.com:)([\w.-]+)\/([\w.-]+)\/?$/i.exec(
+      value
+    );
+  if (!match) return undefined;
+  const owner = match[1]!;
+  const repo = match[2]!.replace(/\.git$/i, '');
+  if (!repo || [owner, repo].some((part) => part === '.' || part === '..')) return undefined;
+  return `${owner}/${repo}`;
+}
+
+export function projectRepositoryUrlIdentity(url: string): string {
+  const name = getProjectRepositoryFullName(url);
+  return name ? `github:${name.toLowerCase()}` : url.replace(/\/$/, '');
+}
+
+/** Ambiguous/unknown identities do not establish a submodule relationship. */
+export function matchProjectSubmoduleMember(
+  submodule: { url: string; repoFullName?: string },
+  members: readonly ProjectMember[],
+  resolveLocal?: ResolveLocalProjectRepository,
+  parentRepoFullName?: string
+): ProjectMember | undefined {
+  const name =
+    submodule.repoFullName ?? getProjectRepositoryFullName(submodule.url, parentRepoFullName);
+  if (!name) return undefined;
+  const matches = members.filter((member) => {
+    const identity =
+      member.source.kind === 'github' ? member.source : resolveLocal?.(member.source);
+    return identity?.repoFullName.toLowerCase() === name.toLowerCase();
+  });
+  return matches.length === 1 ? matches[0] : undefined;
+}
+
+export const ProjectLocalMemberProbeSchema = z
+  .object({
+    // Older probes accepted Git repositories only.
+    isGit: z.boolean().default(true),
+    repoFullName: z
+      .string()
+      .regex(/^[\w.-]+\/[\w.-]+$/)
+      .optional(),
+    submodules: z.array(
+      z
+        .object({
+          path: pathSchema,
+          /** Empty when a machine-local URL was redacted; absolute host paths never cross RPC. */
+          url: z.string(),
+          repoFullName: z
+            .string()
+            .regex(/^[\w.-]+\/[\w.-]+$/)
+            .optional(),
+        })
+        .strict()
+    ),
+  })
+  .strict();
+export type ProjectLocalMemberProbe = z.infer<typeof ProjectLocalMemberProbeSchema>;
+
+/**
+ * The one machine a Project group must run on, from its machine-bound Members
+ * (local sources). `null` when it has none and may run anywhere; `conflict`
+ * when they are on different machines, which the editor never saves.
+ */
+export function getProjectBoundMachineId(
+  members: readonly Pick<ProjectMember, 'source'>[]
+): MachineId | null | 'conflict' {
+  let machineId: MachineId | null = null;
+  for (const { source } of members) {
+    if (source.kind !== 'local') continue;
+    if (machineId !== null && machineId !== source.machineId) return 'conflict';
+    machineId = source.machineId;
+  }
+  return machineId;
+}
+
+/**
+ * The local project a repository Member uses on one machine: among that
+ * machine's projects publishing this GitHub remote, the most recently opened.
+ * Clients use it to preview availability; the daemon re-observes the remote.
+ */
+export function pickProjectRepositoryLocalCopy<
+  T extends {
+    id: LocalProjectId;
+    githubRepoFullName?: string;
+    lastOpenedAtMs?: number;
+    createdAtMs: number;
+  },
+>(repoFullName: string, projects: Iterable<T>): T | undefined {
+  const name = repoFullName.toLowerCase();
+  let best: T | undefined;
+  for (const project of projects) {
+    if (project.githubRepoFullName?.toLowerCase() !== name) continue;
+    const rank = project.lastOpenedAtMs ?? project.createdAtMs;
+    const bestRank = best ? (best.lastOpenedAtMs ?? best.createdAtMs) : -Infinity;
+    if (!best || rank > bestRank || (rank === bestRank && project.id < best.id)) best = project;
+  }
+  return best;
+}
+
+/**
+ * Where a Project group's preparation is, carried as the `detail` of the
+ * `initializing` / `git-clone` presence phase so clients can say it in their
+ * own language. Presence is a liveness channel: the daemon publishes this at
+ * lifecycle steps only (start, each member done, submodules, each setup
+ * script), never per Git output line, and every field is bounded.
+ */
+export type ProjectPreparationProgress =
+  | { step: 'resolve' }
+  | { step: 'member'; done: number; total: number; path: string }
+  | { step: 'submodules' }
+  | { step: 'setup'; path: string };
+
+const PROJECT_PREPARATION_PREFIX = 'lody-project-prep:';
+const PROJECT_PREPARATION_PATH_MAX = 160;
+const ProjectPreparationProgressSchema = z.discriminatedUnion('step', [
+  z.object({ step: z.literal('resolve') }),
+  z.object({
+    step: z.literal('member'),
+    done: z.number().int().nonnegative(),
+    total: z.number().int().positive(),
+    path: z.string().max(PROJECT_PREPARATION_PATH_MAX),
+  }),
+  z.object({ step: z.literal('submodules') }),
+  z.object({ step: z.literal('setup'), path: z.string().max(PROJECT_PREPARATION_PATH_MAX) }),
+]);
+
+export function encodeProjectPreparationProgress(progress: ProjectPreparationProgress): string {
+  const bounded =
+    'path' in progress
+      ? { ...progress, path: progress.path.slice(0, PROJECT_PREPARATION_PATH_MAX) }
+      : progress;
+  return `${PROJECT_PREPARATION_PREFIX}${JSON.stringify(bounded)}`;
+}
+
+/** `undefined` for any other detail, including plain text from older daemons. */
+export function decodeProjectPreparationProgress(
+  detail: string | undefined
+): ProjectPreparationProgress | undefined {
+  if (!detail?.startsWith(PROJECT_PREPARATION_PREFIX)) return undefined;
+  try {
+    const parsed = ProjectPreparationProgressSchema.safeParse(
+      JSON.parse(detail.slice(PROJECT_PREPARATION_PREFIX.length))
+    );
+    return parsed.success ? parsed.data : undefined;
+  } catch {
+    return undefined;
+  }
 }

@@ -138,3 +138,50 @@ describe('getSessionGitHubState', () => {
     expect(getPullRequestRepoFullName(pr)).toBe('loro-dev/lody');
   });
 });
+
+describe('multi-repository sessions', () => {
+  const run = {
+    id: '0b9a4a6e-6d2f-4f3a-9a53-0f3d1f0b2c11',
+    name: 'Shop',
+    root: 'project-shop-0b9a4a6e-6d2f-4f3a-9a53-0f3d1f0b2c11',
+    members: {
+      api: {
+        o: 0,
+        src: { kind: 'github', repoFullName: 'acme/api' },
+        placement: { kind: 'root', dir: 'api' },
+        path: 'api',
+        base: 'HEAD',
+      },
+      web: {
+        o: 1,
+        src: { kind: 'github', repoFullName: 'acme/web' },
+        placement: { kind: 'root', dir: 'web' },
+        path: 'web',
+        base: 'HEAD',
+      },
+    },
+  } as unknown as NonNullable<SessionMeta['projectRun']>;
+
+  it("shows the first member's own PR on the context stage, not the last one recorded", () => {
+    const session = createSession({
+      project: { kind: 'github', repoFullName: 'acme/api', branch: 'main' },
+      repoFullName: 'acme/api',
+      projectRun: run,
+      pullRequests: [
+        { url: 'https://github.com/acme/api/pull/7', status: 'open' },
+        { url: 'https://github.com/acme/web/pull/9', status: 'open' },
+      ],
+    });
+    expect(getSessionGitHubState(session).latestPr?.url).toBe('https://github.com/acme/api/pull/7');
+  });
+
+  it('has no context PR while only another member has one', () => {
+    const session = createSession({
+      project: { kind: 'github', repoFullName: 'acme/api', branch: 'main' },
+      repoFullName: 'acme/api',
+      projectRun: run,
+      pullRequests: [{ url: 'https://github.com/acme/web/pull/9', status: 'open' }],
+    });
+    expect(getSessionGitHubState(session).latestPr).toBeNull();
+  });
+});

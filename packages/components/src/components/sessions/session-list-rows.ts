@@ -346,6 +346,9 @@ export function mapSessionMetaToSessionListRow(
     isWorktree: Boolean(session.isWorktree),
     externalHistoryProvider,
     owner,
+    projectGroup: session.projectRun
+      ? { id: session.projectRun.id, name: session.projectRun.name }
+      : null,
   };
 }
 

@@ -16,7 +16,7 @@ import {
 } from '@lody/shared';
 import type { MachineLegacyMetaFields } from '@lody/shared';
 import type { LoroRepo } from 'loro-repo';
-import { realpathSync, statSync } from 'node:fs';
+import { existsSync, realpathSync, statSync } from 'node:fs';
 import { localProjectsLegacy } from '@lody/shared/node/local-project';
 
 import { readTimeoutEnv, withTimeout } from './loro/timeout-utils';
@@ -115,12 +115,27 @@ export async function upsertMachineLocalProject(
   machineId: MachineId,
   project: LocalProjectMeta,
   nowMs = getServerNow(),
-  options: { sync?: MachineFlockSyncScheduler; reason?: string } = {}
+  options: { sync?: MachineFlockSyncScheduler; reason?: string; refreshGitHubRemote?: boolean } = {}
 ): Promise<void> {
   const handle = await repo.openFlockDoc(getMachineFlockDocId(workspaceId, machineId));
+  const rootPath = canonicalLocalProjectRootPath(project.rootPath);
+  const observed = options.refreshGitHubRemote
+    ? existsSync(rootPath)
+      ? await localProjectsLegacy.getLocalProjectGitHubRepoAtRootPath(rootPath)
+      : null
+    : undefined;
+  const current = getMachineFlockLocalProjects(
+    readMachineFlockRowsFromFlock(handle.flock, { families: ['localProject'] })
+  )[project.id];
   const canonicalProject = {
     ...project,
-    rootPath: canonicalLocalProjectRootPath(project.rootPath),
+    rootPath,
+    githubRepoFullName:
+      observed !== undefined
+        ? (observed ?? undefined)
+        : current
+          ? current.githubRepoFullName
+          : project.githubRepoFullName,
   };
   const changed = writeMachineFlockRowToFlock(
     handle.flock,
@@ -143,18 +158,19 @@ export async function upsertMachineLocalProject(
   }
 }
 
-/** Repairs older project rows whose path was stored through a symlink. */
+/** Startup-only reconciliation of canonical paths and daemon-observed GitHub remotes. */
 export async function reconcileMachineLocalProjectRootPaths(
   repo: LoroRepo,
   workspaceId: WorkspaceId,
   machineId: MachineId,
-  sync: MachineFlockSyncScheduler
+  sync: MachineFlockSyncScheduler,
+  signal?: AbortSignal
 ): Promise<void> {
   await withMachineCatalogWriteLock(getMachineRoomId(machineId), async () => {
     const projects = await readMachineLocalProjects(repo, workspaceId, machineId);
     for (const project of Object.values(projects)) {
+      if (signal?.aborted) return;
       const canonicalRootPath = canonicalLocalProjectRootPath(project.rootPath);
-      if (canonicalRootPath === project.rootPath) continue;
       await upsertMachineLocalProject(
         repo,
         workspaceId,
@@ -164,7 +180,7 @@ export async function reconcileMachineLocalProjectRootPaths(
           rootPath: canonicalRootPath,
         },
         undefined,
-        { sync, reason: 'local-project-path-reconcile' }
+        { sync, reason: 'local-project-path-reconcile', refreshGitHubRemote: true }
       );
     }
   });

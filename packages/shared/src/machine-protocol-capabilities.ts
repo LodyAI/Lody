@@ -9,6 +9,8 @@ export type MachineProtocolCapabilities = Record<string, number>;
 
 export const MACHINE_PROTOCOL_CAPABILITIES = {
   multiRepoProject: 'multiRepoProject',
+  projectFileRoots: 'projectFileRoots',
+  projectRepositoryMembers: 'projectRepositoryMembers',
   operationInbox: 'operationInbox',
   magpieImport: 'magpieImport',
   dshProviderIsolation: 'dshProviderIsolation',
@@ -128,7 +130,15 @@ export function machineSupportsSubagentCancellation(
  * required version must never travel apart, because a mismatch fails silently
  * in the "supported" direction and there is no version fallback to catch it.
  */
+export const MULTI_REPO_PROJECT_PROTOCOL_VERSION = 1;
+export const PROJECT_FILE_ROOTS_PROTOCOL_VERSION = 1;
+export const PROJECT_REPOSITORY_MEMBERS_PROTOCOL_VERSION = 1;
+
 export const CURRENT_MACHINE_PROTOCOL_CAPABILITIES: MachineProtocolCapabilities = {
+  [MACHINE_PROTOCOL_CAPABILITIES.projectRepositoryMembers]:
+    PROJECT_REPOSITORY_MEMBERS_PROTOCOL_VERSION,
+  [MACHINE_PROTOCOL_CAPABILITIES.multiRepoProject]: MULTI_REPO_PROJECT_PROTOCOL_VERSION,
+  [MACHINE_PROTOCOL_CAPABILITIES.projectFileRoots]: PROJECT_FILE_ROOTS_PROTOCOL_VERSION,
   [MACHINE_PROTOCOL_CAPABILITIES.operationInbox]: OPERATION_INBOX_PROTOCOL_VERSION,
   providerRateLimitsRefresh: 1,
   [MACHINE_PROTOCOL_CAPABILITIES.magpieImport]: 1,
@@ -434,7 +444,6 @@ export function machineSupportsIosSimulatorExterior(
   );
 }
 
-export const MULTI_REPO_PROJECT_PROTOCOL_VERSION = 1;
 export function machineSupportsMultiRepoProject(
   machine: MachineProtocolCapabilityCarrier | null | undefined
 ): boolean {
@@ -442,6 +451,31 @@ export function machineSupportsMultiRepoProject(
     machine,
     MACHINE_PROTOCOL_CAPABILITIES.multiRepoProject,
     MULTI_REPO_PROJECT_PROTOCOL_VERSION
+  );
+}
+
+/** Non-Git Project group members and root-aware file RPCs require this capability. */
+export function machineSupportsProjectFileRoots(
+  machine: MachineProtocolCapabilityCarrier | null | undefined
+): boolean {
+  return machineSupportsProtocolCapability(
+    machine,
+    MACHINE_PROTOCOL_CAPABILITIES.projectFileRoots,
+    PROJECT_FILE_ROOTS_PROTOCOL_VERSION
+  );
+}
+
+/**
+ * Project group repository Members (`preferLocal`): the daemon uses its own
+ * copy of the repository when it has one. Older daemons would clone instead.
+ */
+export function machineSupportsProjectRepositoryMembers(
+  machine: MachineProtocolCapabilityCarrier | null | undefined
+): boolean {
+  return machineSupportsProtocolCapability(
+    machine,
+    MACHINE_PROTOCOL_CAPABILITIES.projectRepositoryMembers,
+    PROJECT_REPOSITORY_MEMBERS_PROTOCOL_VERSION
   );
 }
 

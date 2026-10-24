@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { LocalProjectId } from '@lody/shared';
+import { SessionProjectRunSchema, type LocalProjectId } from '@lody/shared';
 
 import { buildPrompt } from '../src/session/session-execution-helpers';
 
@@ -10,6 +10,58 @@ describe('session execution prompt helpers', () => {
     expect(prompt).toBe(
       'inspect the UI\n\nUse the available Lody MCP tools when relevant; rely on their tool descriptions for complete, current capabilities and usage guidance.'
     );
+  });
+
+  it('injects the frozen project group instructions and ordered member directories', () => {
+    const projectRun = SessionProjectRunSchema.parse({
+      id: 'd835a1ee-4f85-4e15-9dca-2bca912e36bf',
+      name: 'Shop',
+      root: 'project-shop-d835a1ee-4f85-4e15-9dca-2bca912e36bf',
+      instructions: 'Keep the API compatible.',
+      members: {
+        api: {
+          o: 1,
+          src: { kind: 'github', repoFullName: 'example/api' },
+          placement: { kind: 'submodule', parent: 'web', path: 'deps/api' },
+          path: 'web/deps/api',
+          base: 'abc123',
+        },
+        web: {
+          o: 0,
+          src: { kind: 'github', repoFullName: 'example/web' },
+          placement: { kind: 'root', dir: 'web' },
+          path: 'web',
+          base: 'main',
+        },
+      },
+    });
+    const prompt = buildPrompt('Fix checkout', undefined, undefined, undefined, { projectRun });
+    expect(prompt).toContain('Project group: "Shop"');
+    expect(prompt).toContain(
+      '"web/deps/api" (example/api), access worktree; base "abc123"; submodule of "web"'
+    );
+    expect(prompt.indexOf('- "web":')).toBeLessThan(prompt.indexOf('- "api":'));
+    expect(prompt).toContain('Project group instructions:\nKeep the API compatible.');
+    expect(prompt).toContain('Fix checkout');
+    const web = Object.values(projectRun.members).find((member) => member.path === 'web')!;
+    web.src = { kind: 'github', repoFullName: 'example/web', preferLocal: true };
+    web.repositoryCheckout = {
+      kind: 'local',
+      machineId: 'm' as never,
+      localProjectId: 'web' as never,
+    };
+    const repositoryPrompt = buildPrompt('Edit repo', undefined, undefined, undefined, {
+      projectRun,
+    });
+    expect(repositoryPrompt).toContain('example/web, local copy, native Git/GitHub credentials');
+    web.src = { kind: 'local', machineId: 'm' as never, localProjectId: 'docs' as never };
+    web.access = 'additional';
+    const directoryPrompt = buildPrompt('Edit notes', undefined, undefined, undefined, {
+      projectRun,
+      projectFileRoots: [{ id: 'member:web', absolutePath: '/registered/notes' }],
+    });
+    expect(directoryPrompt).toContain('"/registered/notes" (non-Git directory, not isolated)');
+    expect(directoryPrompt).not.toContain('base "main"');
   });
 
   it('keeps GitHub guidance without opting into first-task branch naming', () => {

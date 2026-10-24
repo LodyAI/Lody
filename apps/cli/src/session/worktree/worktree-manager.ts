@@ -1,7 +1,7 @@
 import { Context, Effect, Exit } from 'effect';
 import { squashFileLockFailure } from '@lody/shared/node/file-lock';
 import { GITHUB_CREDENTIAL_ENV_KEYS } from '@/lib/gh-token-env';
-import { RepoId, SessionId } from '@lody/shared';
+import { RepoId, SessionId, isSafeProjectPath } from '@lody/shared';
 import { localProjectsLegacy } from '@lody/shared/node/local-project';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -33,6 +33,7 @@ import { LodyDataDirUnavailableError } from '@lody/shared/node/installation-prof
 import { worktreeGitLegacy, rethrowWorktreeGitInfrastructureFailure } from './git-execution-legacy';
 import {
   getAllocatedSessionBranchName,
+  isAllocatedSessionBranchName,
   resolveAvailableBranchName,
 } from './branch-name-allocation';
 
@@ -106,6 +107,9 @@ export type WorktreeManagerSource =
   | { kind: 'local-shared'; sourceGitDir?: string; originalRootPath: string };
 
 export interface WorktreeManagerConfig {
+  /** Frozen Project layout; repository storage and locking still belong to repoId. */
+  projectMember?: { root: string; dir: string };
+
   repoId: RepoId;
   source?: WorktreeManagerSource;
   repoUrl?: string;
@@ -314,6 +318,7 @@ export class WorktreeManager {
   private readonly bareGitDir: string;
   /** Worktrees directory: <active installation data root>/repos/<repoId>/worktrees */
   private readonly worktreesDir: string;
+  private readonly worktreeSubdirectory: string;
   /** Cache directory: <active installation data root>/repos/<repoId>/cache */
   private readonly cacheDir: string;
 
@@ -327,7 +332,22 @@ export class WorktreeManager {
     this.baseDir = path.join(getLodyDataDir(), 'repos');
     this.repoDir = path.join(this.baseDir, this.repoId);
     this.bareGitDir = path.join(this.repoDir, 'bare.git');
-    this.worktreesDir = path.join(this.repoDir, 'worktrees');
+    const placement = config.projectMember;
+    if (
+      placement &&
+      (!placement.root.startsWith('project-') ||
+        !isSafeProjectPath(placement.root) ||
+        placement.root.includes('/') ||
+        !isSafeProjectPath(placement.dir) ||
+        placement.dir.includes('/'))
+    ) {
+      throw new Error('Invalid Project worktree placement');
+    }
+    this.worktreesDir = path.join(
+      placement ? path.join(this.baseDir, placement.root) : this.repoDir,
+      'worktrees'
+    );
+    this.worktreeSubdirectory = placement?.dir ?? '';
     this.cacheDir = path.join(this.repoDir, 'cache');
   }
 
@@ -940,6 +960,7 @@ export class WorktreeManager {
   private async resolveBaseRef(preferredBranch?: string, env?: NodeJS.ProcessEnv): Promise<string> {
     if (this.source.kind === 'local-shared') {
       const preferred = preferredBranch?.trim();
+      if (preferred === 'HEAD') return this.resolveDefaultBranch();
       if (preferred) {
         if (preferred.startsWith('refs/heads/') || preferred.startsWith('refs/remotes/')) {
           if (await this.hasCommitish(preferred, env)) return preferred;
@@ -961,6 +982,16 @@ export class WorktreeManager {
       throw new Error(`[${this.repoId}] Local repository has no commit to use as a worktree base`);
     }
 
+    if (preferredBranch === 'HEAD') {
+      const remoteHead = await this.runGit(
+        ['ls-remote', '--symref', 'origin', 'HEAD'],
+        this.getGitAdminCwd(),
+        env
+      );
+      preferredBranch =
+        /^ref: refs\/heads\/(.+)\tHEAD$/m.exec(remoteHead)?.[1] ??
+        (await this.resolveDefaultBranch());
+    }
     const candidates: string[] = [];
 
     if (preferredBranch) {
@@ -1009,7 +1040,7 @@ export class WorktreeManager {
    */
   getWorktreeHostPath(sessionId: SessionId): string {
     assertSafeSessionId(sessionId);
-    return path.join(this.getWorktreesHostPath(), sessionId);
+    return path.join(this.getWorktreesHostPath(), sessionId, this.worktreeSubdirectory);
   }
 
   private getWorktreesHostPath(): string {
@@ -1249,9 +1280,10 @@ export class WorktreeManager {
     restoreBranchName?: string,
     exactStartPoint?: string,
     brokerAuth?: GitCredentialBrokerAuth
-  ): Promise<WorktreeInfo> {
+  ): Promise<WorktreeInfo & { baseRef?: string }> {
     return withRepoLock(this.repoId, async () => {
       assertSafeSessionId(sessionId);
+      let baseRef: string | undefined;
       const worktreePath = this.getWorktreeHostPath(sessionId);
       const gitAdminCwd = this.getGitAdminCwd();
 
@@ -1335,6 +1367,7 @@ export class WorktreeManager {
           );
         } else {
           const resolvedBase = await this.resolveBaseRef(baseBranch, gitEnv);
+          if (baseBranch === 'HEAD') baseRef = resolvedBase;
           this.logger.debug(
             `[${this.repoId}] Creating new worktree (sessionId=${sessionId} base=${resolvedBase}): ${worktreePath}`
           );
@@ -1353,7 +1386,7 @@ export class WorktreeManager {
       this.logger.debug(
         `[${this.repoId}] Worktree ready (sessionId=${sessionId} branch=${info.branch} head=${info.headSha ?? 'unknown'}): host=${info.hostPath}`
       );
-      return info;
+      return { ...info, ...(baseRef ? { baseRef } : {}) };
     });
   }
 
@@ -1364,6 +1397,7 @@ export class WorktreeManager {
       source: {
         repoId: RepoId;
         worktreesDir: string;
+        worktreeSubdirectory?: string;
         localShared: boolean;
       }
     ) => Effect.Effect<A, E>
@@ -1371,6 +1405,7 @@ export class WorktreeManager {
     const source = {
       repoId: this.repoId,
       worktreesDir: this.worktreesDir,
+      worktreeSubdirectory: this.worktreeSubdirectory,
       localShared: this.isLocalSharedSource(),
     };
     return this.runWorktreeLegacy(
@@ -1444,6 +1479,135 @@ export class WorktreeManager {
     );
   }
 
+  async initializeMissingProjectSubmodules(
+    workdir: string,
+    brokerAuth?: GitCredentialBrokerAuth
+  ): Promise<void> {
+    await withRepoLock(this.repoId, async () => {
+      if (!fs.existsSync(path.join(workdir, '.gitmodules'))) return;
+      const entries = await this.runGit(
+        ['config', '--null', '--file', '.gitmodules', '--get-regexp', '^submodule\\..*\\.path$'],
+        workdir
+      ).catch((error: unknown) => {
+        if (error instanceof WorktreeGitCommandFailed && error.code === 1 && !error.signal)
+          return '';
+        throw error;
+      });
+      const missing: string[] = [];
+      for (const entry of entries.split('\0').filter(Boolean)) {
+        const memberPath = entry.slice(entry.indexOf('\n') + 1);
+        if (!isSafeProjectPath(memberPath)) throw new Error('Invalid project group submodule path');
+        const directory = path.join(workdir, memberPath);
+        if (
+          fs.existsSync(directory) &&
+          realpathIfExists(directory) !== path.join(realpathIfExists(workdir), memberPath)
+        )
+          throw new Error('Project group submodule path is a symlink');
+        if (fs.existsSync(path.join(directory, '.git'))) continue;
+        missing.push(memberPath);
+      }
+      if (missing.length) {
+        await this.runGit(
+          ['submodule', 'update', '--init', '--recursive', '--jobs', '4', '--', ...missing],
+          workdir,
+          buildBrokerAuthEnv(brokerAuth)
+        );
+      }
+    });
+  }
+
+  /** Git requires --force even after deinit; allow it only for the clean saved branch. */
+  async removeBackedUpProjectWorktree(sessionId: SessionId, branch: string): Promise<void> {
+    await withRepoLock(this.repoId, async () => {
+      const workdir = this.getWorktreeHostPath(sessionId);
+      if (!fs.existsSync(workdir)) return;
+      if (await this.runGit(['status', '--porcelain'], workdir))
+        throw new Error('Project group member changed after backup');
+      if ((await this.runGit(['branch', '--show-current'], workdir)) !== branch)
+        throw new Error('Project group member branch changed after backup');
+      const modules = await this.runGit(['submodule', 'status', '--recursive'], workdir);
+      if (modules.split('\n').some((line) => line && !line.startsWith('-')))
+        throw new Error('Project group submodules must be deinitialized before removal');
+      await this.removeWorktreeInternal(sessionId, {
+        force: true,
+        deleteBranch: false,
+        branchName: branch,
+      });
+    });
+  }
+
+  async verifyProjectBranch(branch: string): Promise<void> {
+    await withRepoLock(this.repoId, async () => {
+      await this.runGit(
+        ['rev-parse', '--verify', `refs/heads/${branch}^{commit}`],
+        this.getGitAdminCwd()
+      );
+    });
+  }
+
+  async backupProjectSubmodule(memberPath: string, sessionId: SessionId): Promise<string> {
+    return withRepoLock(this.repoId, () =>
+      worktreeGitLegacy.persistProjectSubmoduleBranch({
+        memberPath,
+        sessionId,
+        repositoryPath:
+          this.source.kind === 'local-shared' ? this.source.originalRootPath : this.bareGitDir,
+      })
+    );
+  }
+
+  /** Submodule storage belongs to this repository; checkout storage belongs to its parent. */
+  async materializeProjectSubmodule(
+    input: {
+      parentPath: string;
+      submodulePath: string;
+      expectedRepositoryUrl: string;
+      sessionId: SessionId;
+      restoreBranch?: string;
+    },
+    brokerAuth?: GitCredentialBrokerAuth
+  ): Promise<{ branch: string; commit: string; path: string; existed?: boolean }> {
+    return withRepoLock(this.repoId, async () => {
+      const memberPath = path.join(input.parentPath, input.submodulePath);
+      if (fs.existsSync(path.join(memberPath, '.git'))) {
+        const actualRoot = await this.runGit(['rev-parse', '--show-toplevel'], memberPath);
+        if (realpathIfExists(actualRoot) !== realpathIfExists(memberPath))
+          throw new Error('Invalid project group submodule checkout');
+        const branch = await this.runGit(['branch', '--show-current'], memberPath);
+        if (
+          branch &&
+          (input.restoreBranch || isAllocatedSessionBranchName(branch, input.sessionId))
+        ) {
+          const tree = await this.runGit(
+            ['ls-tree', 'HEAD', '--', input.submodulePath],
+            input.parentPath
+          );
+          const commit = /^160000 commit ([0-9a-f]+)/.exec(tree)?.[1];
+          if (!commit) throw new Error('Project group member is no longer a submodule');
+          return { branch, commit, path: memberPath, existed: true };
+        }
+        const status = await this.runGit(['status', '--porcelain'], memberPath);
+        if (status) throw new Error('Project group submodule has unrecorded changes');
+      }
+      const repositoryPath =
+        this.source.kind === 'local-shared' ? this.source.originalRootPath : this.bareGitDir;
+      if (this.source.kind === 'github' && !fs.existsSync(this.bareGitDir)) {
+        fs.mkdirSync(this.repoDir, { recursive: true });
+        await this.runGit(['init', '--bare', this.bareGitDir], this.repoDir);
+      }
+      if (this.source.kind === 'github') await this.ensureOriginRemoteConfigured();
+      return worktreeGitLegacy.checkoutProjectSubmodule({
+        ...input,
+        local: this.source.kind === 'local-shared',
+        repositoryPath,
+        ...(input.restoreBranch
+          ? { restore: { repositoryPath, branch: input.restoreBranch } }
+          : {}),
+        env: buildBrokerAuthEnv(brokerAuth),
+      });
+    });
+  }
+
   /**
    * Remove a worktree for a session
    * @param force - If true, remove even if dirty
@@ -1473,7 +1637,10 @@ export class WorktreeManager {
    * If the worktree has non-ignored changes, stage and commit them before removing the worktree directory.
    * The branch is preserved so the worktree can be restored later.
    */
-  async archiveWorktree(sessionId: SessionId): Promise<ArchivedWorktreeResult> {
+  async archiveWorktree(
+    sessionId: SessionId,
+    options?: { retainWorktree?: boolean }
+  ): Promise<ArchivedWorktreeResult> {
     return withRepoLock(this.repoId, async () => {
       assertSafeSessionId(sessionId);
       const worktreePath = this.getWorktreeHostPath(sessionId);
@@ -1517,6 +1684,7 @@ export class WorktreeManager {
         }
       }
 
+      if (options?.retainWorktree) return { branchName, backupCommitCreated };
       const resolvedBranchName = await this.removeWorktreeInternal(sessionId, {
         force: true,
         deleteBranch: false,
@@ -1742,6 +1910,7 @@ const worktreeManagers = new Map<RepoId, WorktreeManager>();
  * Get or create a WorktreeManager for a repository
  */
 export function getWorktreeManager(config: WorktreeManagerConfig): WorktreeManager {
+  if (config.projectMember) return new WorktreeManager(config);
   let manager = worktreeManagers.get(config.repoId);
   if (!manager) {
     manager = new WorktreeManager(config);

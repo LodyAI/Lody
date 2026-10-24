@@ -1,4 +1,6 @@
-import { describe, expect, it } from 'vitest';
+import { checkoutProjectSubmodule, inspectProjectSubmodule, persistProjectSubmoduleBranch } from '../src/session/worktree/project-submodules';
+import { worktreeGitLayer } from '../src/session/worktree/git-execution';
+import { describe, expect, it, vi } from 'vitest';
 import { it as effectIt } from '@effect/vitest';
 import { Cause, Deferred, Effect, Exit, Fiber, FileSystem, Layer, PlatformError } from 'effect';
 import { NodeFileSystem } from '@effect/platform-node-shared';
@@ -32,6 +34,76 @@ describe('WorktreeManager', () => {
   useWorktreeManagerTestFixture((fixture) => {
     ({ testDir, manager } = fixture);
   });
+
+  it('creates, observes, archives and restores a Project Member in its frozen directory', async () => {
+    const originalRootPath = createLocalRepo(testDir);
+    const sessionId = 'project-session' as SessionId;
+    vi.stubEnv('LODY_DATA_DIR', path.join(testDir, 'data'));
+    try {
+      const projectManager = new WorktreeManager({
+        repoId: 'project-member-repo' as RepoId,
+        source: { kind: 'local-shared', originalRootPath },
+        projectMember: { root: 'project-acme-test', dir: 'api' },
+        logger: createLogger({ level: 'error', transports: 'console' }),
+      });
+      const created = await projectManager.createWorktree(sessionId, 'main');
+      expect(created.hostPath).toBe(
+        path.join(testDir, 'data', 'repos', 'project-acme-test', 'worktrees', sessionId, 'api')
+      );
+      expect(runGit(created.hostPath, ['rev-parse', '--git-common-dir'])).toBe(
+        path.join(originalRootPath, '.git')
+      );
+      expect(await projectManager.inspectWorktree(sessionId)).toMatchObject({
+        state: 'clean',
+        info: { branch: created.branch },
+      });
+      fs.writeFileSync(path.join(created.hostPath, 'saved.txt'), 'Project work survives archive');
+      expect(await projectManager.inspectWorktree(sessionId)).toMatchObject({ state: 'dirty' });
+      await projectManager.archiveWorktree(sessionId);
+      expect(fs.existsSync(created.hostPath)).toBe(false);
+      const restored = await projectManager.createWorktree(sessionId, 'main', created.branch);
+      expect(restored.branch).toBe(created.branch);
+      expect(fs.readFileSync(path.join(restored.hostPath, 'saved.txt'), 'utf8')).toBe(
+        'Project work survives archive'
+      );
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  effectIt.live('checks out the gitlink revision and preserves a submodule task branch across deinit', () =>
+    Effect.gen(function* () {
+      const parentPath = createLocalRepo(testDir);
+      const childContainer = path.join(testDir, 'child');
+      fs.mkdirSync(childContainer);
+      const childPath = createLocalRepo(childContainer);
+      const gitlink = runGit(childPath, ['rev-parse', 'HEAD']);
+      runGit(parentPath, ['-c', 'protocol.file.allow=always', 'submodule', 'add', childPath, 'proto']);
+      gitCommit(parentPath, 'Add protocol submodule');
+      runGit(parentPath, ['submodule', 'deinit', '-f', '--', 'proto']);
+      fs.writeFileSync(path.join(childPath, 'later.txt'), 'later default-branch work');
+      gitCommit(childPath, 'Advance default branch after the gitlink');
+      runGit(childPath, ['branch', 'lody/project-subm']);
+      const options = { parentPath, submodulePath: 'proto', expectedRepositoryUrl: childPath,
+        sessionId: 'project-submodule', local: true, repositoryPath: childPath, env: { GIT_ALLOW_PROTOCOL: 'file' } };
+      const member = yield* checkoutProjectSubmodule(options);
+      expect(runGit(member.path, ['rev-parse', 'HEAD'])).toBe(gitlink);
+      expect(member.branch).toBe('lody/project-subm-2');
+      fs.writeFileSync(path.join(member.path, 'saved.txt'), 'uncommitted submodule work');
+      const branch = yield* persistProjectSubmoduleBranch({ memberPath: member.path, repositoryPath: childPath, sessionId: options.sessionId });
+      const saved = runGit(childPath, ['rev-parse', `refs/heads/${branch}`]);
+      expect(saved).toBe(runGit(member.path, ['rev-parse', 'HEAD']));
+      gitCommit(parentPath, 'Save updated gitlink');
+      runGit(parentPath, ['submodule', 'deinit', '-f', '--', 'proto']);
+      // Simulate losing the parent worktree's submodule admin directory.
+      fs.rmSync(path.join(parentPath, '.git', 'modules'), { recursive: true, force: true });
+      const restored = yield* checkoutProjectSubmodule({ ...options, restore: { repositoryPath: childPath, branch } });
+      expect(restored.branch).toBe(branch);
+      expect(fs.readFileSync(path.join(restored.path, 'saved.txt'), 'utf8')).toBe('uncommitted submodule work');
+      const mismatch = yield* Effect.exit(inspectProjectSubmodule({ ...options, expectedRepositoryUrl: '/different/repository' }));
+      expect(Exit.isFailure(mismatch)).toBe(true);
+      expect(runGit(restored.path, ['rev-parse', 'HEAD'])).toBe(saved);
+    }).pipe(Effect.provide(worktreeGitLayer())), 180_000);
 
   describe('ensureRepo', () => {
     it('should create a bare repository when no repoUrl is provided', async () => {
@@ -265,7 +337,7 @@ describe('WorktreeManager', () => {
       expect(info.headSha).not.toBeNull();
     });
 
-    it('should create a session branch based on the specified common branch', async () => {
+    it.each(['develop', 'HEAD'])('should create a session branch from the remote %s base', async (base) => {
       const { sourceDir, remoteBareDir } = createRemoteRepo(testDir, 'main');
       manager.updateRepoUrl(toFileUrl(remoteBareDir));
 
@@ -275,8 +347,12 @@ describe('WorktreeManager', () => {
       runGit(sourceDir, ['push', '-u', 'origin', 'develop']);
       runGit(sourceDir, ['checkout', 'main']);
 
+      runGit(remoteBareDir, ['symbolic-ref', 'HEAD', 'refs/heads/main']);
+      await manager.ensureRepo();
+      runGit(remoteBareDir, ['symbolic-ref', 'HEAD', 'refs/heads/develop']);
       const sessionId = 'rbranch01-remote-develop-1' as SessionId;
-      const info = await manager.createWorktree(sessionId, 'develop');
+      const info = await manager.createWorktree(sessionId, base);
+      expect(info.baseRef).toBe(base === 'HEAD' ? 'origin/develop' : undefined);
       expect(info.headSha).toBe(developHead);
       expect(info.branch).toBe(`session/${sessionId.slice(0, 8)}`);
     });

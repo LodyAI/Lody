@@ -49,8 +49,8 @@ record: [process tree layer](../../../../.agents/notes/implemented/architecture/
   after failed Scope close. Only named Legacy application boundaries execute.
   Preserve timeout/release failure owners; never cache failure as empty success. Read [the decision](../../../../.agents/notes/implemented/architecture/2026-10-10-effect-login-shell-probe.md)
   before changing the probe or either cache consumer.
-- `process.ts` stays one module with no relative imports: Electron's
-  `node --test` cannot resolve extensionless relative imports.
+- `process.ts` stays one module with no relative imports (Electron's
+  `node --test` resolves them only via `node-test-ts-resolve.mjs`).
 - Missing a capability (a new spawn shape, a pid-only kill)? Add it to
   `process.ts` with a test and a facade; never work around the layer in a caller.
 - End processes through the official Effect handle or `terminateTree`; never add another

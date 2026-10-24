@@ -287,10 +287,18 @@ describe('GitCredentialBroker', () => {
         });
         const firstScope = yield* Scope.make();
         const secondScope = yield* Scope.make();
-        const context = { sessionId: 's1', requesterUserId: 'u1', machineId: 'm1' };
+        const context = {
+          sessionId: 's1',
+          requesterUserId: 'u1',
+          machineId: 'm1',
+          nativeRepositories: ['owner/local'],
+        };
         const first = yield* Scope.provide(broker.acquireContext(context), firstScope);
         const second = yield* Scope.provide(broker.acquireContext(context), secondScope);
         expect(second.contextToken).not.toBe(first.contextToken);
+        context.nativeRepositories.push('owner/late');
+        expect(first.context.nativeRepositories).toEqual(['owner/local']);
+        expect(second.context.nativeRepositories).toEqual(['owner/local']);
         const handler = (
           broker as unknown as {
             createHandler(auth: string): ReturnType<typeof createGitCredentialBrokerHandler>;

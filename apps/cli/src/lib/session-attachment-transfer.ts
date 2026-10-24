@@ -1,3 +1,5 @@
+import { resolveProjectFileTarget } from '@/session/worktree/project-member-access';
+import type { SessionFileRoot } from '@lody/shared';
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
@@ -252,15 +254,22 @@ export class SessionAttachmentTransfer {
        * staged in tmpdir by the user's own Electron process.
        */
       containWithin?: string;
+      fileRoots?: readonly SessionFileRoot[];
     }
   ): Promise<ValidatedUploadFile> {
     const trimmed = filePath.trim();
     if (!trimmed) {
       throw new Error('File path is empty');
     }
-    const absolutePath = options?.containWithin
-      ? await resolveContainedUploadPath(trimmed, options.containWithin)
-      : path.resolve(trimmed);
+    const target = options?.fileRoots
+      ? resolveProjectFileTarget(options.fileRoots, trimmed)
+      : undefined;
+    if (options?.fileRoots && !target) throw new Error('File is outside the session roots');
+    const absolutePath = target
+      ? target.absolutePath
+      : options?.containWithin
+        ? await resolveContainedUploadPath(trimmed, options.containWithin)
+        : path.resolve(trimmed);
 
     let handle: fs.promises.FileHandle;
     try {

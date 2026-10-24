@@ -1,4 +1,4 @@
-# Multi-repository Projects
+# Multi-repository projects
 
 Status: draft
 Translation: current
@@ -19,17 +19,23 @@ looks only at that branch.
 
 ## Concepts
 
-- **Project**: a workspace-level group of **Members**. Each Member is a Git
-  repository: a GitHub repository, or a local project that is a Git repository.
-  A local repository may have no remote; it then gets a branch and backups, but no
-  PR. A local directory that is not a Git repository cannot be a Member; adding one
-  prompts the user to run `git init` first. Non-Git directories are deferred
-  until ACP `additionalDirectories` is widely supported.
+- **Multi-repository project** (code type `WorkspaceProject`, called Project below): a workspace-level project made of **Members**. The UI has no separate concept for it: it is a project like a single folder or repository, only with several Members, and shares the project rows, menus and pickers. A Member can be
+  a GitHub repository, a local Git repository (which may have no remote; it then
+  gets a branch and backups, but no PR), or a local non-Git directory. A non-Git
+  directory has no branch, backups or PR, and the conversation edits the original
+  directory; see Member access.
 - Members are deduplicated by **repository identity**: a GitHub repository (by
   numeric ID when known), or a local repository without a GitHub remote,
   identified by `(machineId, localProjectId)`. A repository added once as a local
   folder and once from GitHub, or added from two subdirectories of one monorepo,
   is a single Member.
+- A Member is either a **repository Member** or a **machine-bound Member**. A local
+  folder whose GitHub remote is known joins as a repository Member: it records the
+  repository, not the machine, so the same Project runs on any machine. Only a
+  local repository without a GitHub remote and a non-Git directory are
+  machine-bound. All machine-bound Members of one Project are on one machine, and
+  that machine is the Project's only execution machine; a Project without
+  machine-bound Members can run on any machine.
 - Each flattened Member has a directory name that is unique within the Project. It
   defaults to the repository name and the user can change it. A submodule Member's
   location is set by its submodule path.
@@ -37,6 +43,18 @@ looks only at that branch.
   existing conversations stay where they are, and do not move when the project
   joins a Project.
 - There is no product limit on the number of Members.
+- **Where it appears.** A Project with a machine-bound Member is listed under that
+  machine, with the machine's folders. A Project without one runs anywhere and is
+  listed with the GitHub repositories. This applies to the sidebar and to
+  Settings › Projects.
+- **Creating and editing.** Settings › Projects offers "Several repositories or
+  folders" beside adding a folder or a GitHub repository. A project row's context
+  menu offers "Edit project…": on a multi-repository Project it edits it; on a
+  single folder or GitHub repository it opens the same editor seeded with it, which
+  saves a new Project and leaves the original and its conversations as they are.
+  On a phone the same action is the first row of a project's settings tab, and
+  mobile Settings › Projects offers creating one. The editor's
+  picker adds repositories and folders already known to the workspace.
 
 ## Flat layout
 
@@ -59,11 +77,40 @@ directory. It is also the root for terminals, file search and previews. The main
 directory is not itself a Git repository. Each Member's Git data stays in its own
 repository: in `<data>/repos/<repo>/bare.git` for a GitHub Member, and in the
 original repository's `.git` for a local Member. Lody does not arrange Members by
-their original nesting, and it does not use symbolic links.
+their original nesting. Git Members do not use symbolic links; non-Git Members follow the access rules below.
 
 Directory nesting other than submodules is flattened as well. A repository that
 relies on a relative path such as `../lib` keeps working when the user gives that
 Member its original directory name.
+
+## Member access
+
+When it materializes a conversation, the daemon decides how each Member enters the
+agent's working scope, from the Member's kind and this conversation's provider
+capabilities, and records the result in the snapshot's runtime fields:
+
+| Member                                                             | Access                                                                                                                                   |
+| ------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| GitHub repository                                                  | A worktree under the main directory                                                                                                      |
+| Local Git repository                                               | A worktree under the main directory                                                                                                      |
+| Local non-Git directory, provider declares `additionalDirectories` | The original directory's real path is passed to the provider as an additional directory; nothing is placed in the main directory         |
+| Local non-Git directory, provider does not                         | A symbolic link named after the Member's directory, under the main directory, pointing at the original directory (a junction on Windows) |
+
+- ACP sessions started later (resume, provider change) decide again: when
+  additional directories are unavailable the link is created, and when they are
+  available the link is no longer relied on.
+- Non-Git Members are not isolated: conversations using the same directory edit
+  the same files. The UI says so wherever such a Member is chosen or used. It has
+  no branch, backup commit or PR.
+- Additional directories and link targets are resolved only from the machine's
+  local project registry (`localProjectId` → path). Paths supplied by the agent
+  and link targets read from disk are never trusted; if the agent changes a link,
+  the daemon recreates it from the registry.
+- Archive cleanup removes only the link itself and never recurses into its target:
+  it removes every Member link, confirms no symbolic link remains in the main
+  directory, and only then deletes the main directory. Non-Git Members take no
+  part in backup commits.
+- A non-Git Member can only be top-level, never a submodule.
 
 ## Submodule Members
 
@@ -86,8 +133,8 @@ cannot find it. Once set, the Member is a **submodule Member**:
   are linked correctly. Create PR opens the submodule's PR first, then the parent's
   PR that updates the pointer, and links the child PR from the parent PR.
   Merge-order guidance puts the submodule first.
-- It can be selected only together with its parent Member. If the user unticks the
-  parent, its submodule Members are not materialized either.
+- It is always materialized with its parent; the parent's worktree checks out
+  every submodule it declares anyway.
 - Creating a conversation checks that the path is still a submodule pointing to the
   same repository in the parent's base commit. A mismatch is reported to the user;
   Lody does not silently flatten the Member instead.
@@ -114,21 +161,34 @@ secrets.
 
 Defining a Project only writes the definition. It does not clone, fetch, or create
 worktrees. When a conversation is created, the daemon on the execution machine
-creates a worktree and a new branch for each Member under the main directory.
-All Members are included by default; a Member the user unticks when creating the
-conversation is not fetched. Every Member is editable; there is no read-only mode.
+creates a worktree and a new branch for each Git Member under the main directory; non-Git Members follow the access rules above.
+A conversation always gets every Member, exactly as the Project defines them;
+there is no per-conversation selection. A different set of repositories belongs in
+the Project's settings (or another Project). Every Member is editable; there is no
+read-only mode.
 
 - Each Member allocates its own branch under the existing rules. Branch names are
   not required to match across repositories.
 - A conversation freezes its Member list at creation, so later Project edits
   affect only new conversations.
-- A local Member must have a binding on the execution machine. A Member without
-  one cannot be selected; Lody does not silently clone a copy instead. The
-  open-source desktop runs in local-only mode, so it supports only local Members
-  and observes their PRs with the machine's own credentials.
-- Multi-Member conversations always use worktrees. Single-Member conversations
-  keep today's behavior, including the mode that uses the original directory
-  directly.
+- A machine-bound Member must have a binding on the execution machine; Lody never
+  clones a copy in its place.
+- A repository Member uses a local copy when the execution machine has one: a local
+  project there whose GitHub remote is that repository. Its worktree is created
+  from that copy with the machine's own Git credentials, as for a local Member.
+  Without a local copy, a managed deployment clones the repository like a GitHub
+  Member. The open-source desktop runs in local-only mode and never clones, so a
+  Project with a repository Member the machine has no copy of cannot start there;
+  the picker shows it as unavailable on that machine and says why. Repository Members observe their PRs with the same
+  credentials that created their worktree.
+- Choosing where to run comes first, as for single projects: the new-conversation
+  picker lists the Projects that can run on the selected machine. A Project whose
+  machine-bound Members are on another machine is not listed there, so choosing a
+  Project in that picker never switches the machine. For each listed Project the picker says which
+  repository Members the selected machine lacks.
+- In multi-Member conversations Git Members always use worktrees, and non-Git
+  Members follow Member access. Single-Member conversations keep today's behavior,
+  including the mode that uses the original directory directly.
 
 ## PR association
 
@@ -145,10 +205,13 @@ conversation is not fetched. Every Member is editable; there is no read-only mod
 - Compatibility: `project`, `branchName` and `repoFullName` stay as a projection of
   the first Member for older clients. Only a daemon that advertises this protocol
   capability can create multi-Member conversations.
+  A Project with repository Members starts only on a daemon that advertises the
+  repository-Member capability; an older daemon would treat such a Member as a
+  plain GitHub clone.
 
 ## Lifecycle
 
-Archive makes a backup commit for each Member and removes its worktree, one Member
+Archive makes a backup commit for each Git Member and removes its worktree, one Member
 at a time. The main directory is deleted only after every Member succeeds.
 Submodule Members are processed before their parents. Lody first makes the backup
 commit in the submodule and saves its task branch to a durable location for that
@@ -167,14 +230,26 @@ GC scope extended to `<data>/repos/project-*/worktrees/<session>`.
 ## Data ownership
 
 - A Project definition is a row in the workspace Flock document, alongside the MCP
-  and Agent Role catalogs. A local Member references only
+  and Agent Role catalogs. A machine-bound Member references only
   `(machineId, localProjectId)`; its path still lives only in that machine's Flock.
+- Each machine publishes the GitHub repository of each of its local projects
+  beside the project in its own Flock, observed from the folder's remote by the
+  owning daemon. Clients use it to merge one repository's copies into one entry and
+  to show which machines can run a Project. It names a repository, never a path,
+  and only the owning daemon writes it.
+- A Project saved before repository Members existed keeps its local Members as
+  they are. When the editor saves it again, a local Member whose machine publishes
+  a GitHub remote becomes a repository Member, keeping its ID, directory and
+  submodule placement.
 - Conversation metadata keeps the Member snapshot frozen at creation, including
   the Project name and the main directory name. Deleting or editing a Project does
   not affect existing conversations; after a Project is deleted, its conversations
   are still grouped and restored from the snapshot.
-- Each Member's runtime state is stored separately, keyed by Member ID, so
-  concurrent writes for different Members do not overwrite each other.
+- `projectRun` remains one top-level SessionMeta value. Clients write only the
+  initial snapshot at conversation creation. Afterwards, only the owning daemon
+  writes it, including observations, member additions and legacy projections.
+  Read-modify-write operations are serialized per conversation through the branch
+  observation owner queue. A future second writer requires a separate row per member.
 - The main directory name is fixed at creation and written to conversation
   metadata. It does not change when the Project is renamed.
 - The legacy fields `project`, `branchName`, `repoFullName` and `isWorktree` are a
@@ -203,12 +278,27 @@ directory.
 
 Synced data contains no absolute host paths. A conversation's list of file roots,
 `{ id, absolutePath }`, is kept only on the machine that owns the conversation;
-the main directory is the root `main`. Synced data identifies a file as
-`(rootId, relativePath)`, and paths under the main directory keep today's plain
-relative form. The machine boundary accepts absolute paths and maps them to a root
-through a single resolver; a path under no root is rejected. Supporting local
-directories outside the main directory later only adds roots and does not change
-this format. Survey: [proposal note](../.agents/notes/proposed/architecture/2026-10-16-multi-repo-projects.md#path-dependency-survey-preparing-for-local-directories).
+the main directory is the root `main`, and each Member accessed as an additional
+directory or a link is a root `member:<memberId>`. Synced data identifies a file
+as `(rootId, relativePath)`, and paths under the main directory keep today's
+plain relative form. The machine boundary accepts absolute paths and maps them to
+a root through a single resolver; a path under no root is rejected.
+
+Every root gets the same file capabilities in Lody as the main directory:
+
+- File preview (including remote viewing), opening for edit, saving and LSP are
+  authorized against the list of roots. Authorization resolves the real path
+  first and then checks that it lies in a registered root, so a path that escapes
+  a root through a symbolic link is still rejected. Only a file outside every
+  root is `external` (read-only); same-machine Electron's read-only preview of any
+  path is unchanged.
+- The file tree, All Changes and `@` file search cover every root, grouped by
+  root; each root is scanned and watched separately. Non-Git roots keep the
+  existing non-Git scanning and snapshot approach.
+- Turn diffs, agent output files and attachment source paths are recorded per
+  root, so edits in additional directories are not dropped.
+- Remote clients request files by `rootId` and relative path, never by absolute
+  host path. Survey: [proposal note](../.agents/notes/proposed/architecture/2026-10-16-multi-repo-projects.md#path-dependency-survey-preparing-for-local-directories).
 
 ## Evidence
 
@@ -220,4 +310,14 @@ These describe the current code, not an implementation of this Spec:
   [PR reconciler](../apps/cli/src/lib/pr-poller/AGENTS.md).
 - [Branch observation](workspace-branch-state.md) and
   [local PR observation](local-github-pr-observation.md).
+- Places that recognize only one root today: [preview path policy](../packages/shared/src/node/file-preview-path-policy.ts),
+  [Code Collab path resolution](../apps/cli/src/lib/code-collab/code-collab-v2-service.ts),
+  [turn diff path normalization](../apps/cli/src/lib/code-collab/code-collab-v2-diff-evidence.ts).
 - Decision and alternatives: [proposal note](../.agents/notes/proposed/architecture/2026-10-16-multi-repo-projects.md).
+
+Creation snapshots use `HEAD` for unspecified root bases and `gitlink` for submodule bases;
+the owner daemon resolves root placeholders to base refs and submodule placeholders to commits during materialization. Deselecting a parent
+also deselects all its descendants. Local submodule probing is read-only and returns no
+absolute host paths; machine-local URLs are redacted.
+
+Non-main sync file keys use a NUL-prefixed encoding that cannot collide with real filenames. File RPC uses optional rootId, defaulting to main. See the Note’s multi-root file contract for encoding details.

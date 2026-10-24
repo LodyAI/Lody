@@ -2,7 +2,12 @@ import { describe, expect, vi } from 'vitest';
 import { it } from '@effect/vitest';
 import { Cause, Clock, Deferred, Effect, Exit, Fiber, Scope } from 'effect';
 import { TestClock } from 'effect/testing';
-import { type MachineId, type SessionId, type SessionStatus } from '@lody/shared';
+import {
+  encodeProjectPreparationProgress,
+  type MachineId,
+  type SessionId,
+  type SessionStatus,
+} from '@lody/shared';
 import type { Logger } from '@/utils/logger';
 import { captureMessage, isErrorReportingEnabled } from '@/instrument';
 import {
@@ -249,6 +254,43 @@ describe('native session presence leases', () => {
               budgetMs: 3_000,
             },
           });
+          yield* close(lease);
+        })
+      )
+  );
+
+  it.effect(
+    'gives Project Git preparation its own silence budget and renews on member completion',
+    () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const h = yield* harness({ intervalMs: 30_000 });
+          const lease = yield* Scope.make();
+          yield* Scope.provide(h.owner.hold(sessionId, 'initializing'), lease);
+          yield* Scope.provide(h.owner.hold(otherId, 'initializing'), lease);
+          h.owner.setPhase(
+            sessionId,
+            'git-clone',
+            encodeProjectPreparationProgress({ step: 'resolve' })
+          );
+          yield* TestClock.adjust(180_000);
+          expect(h.events.filter((event) => event.kind === 'stall')).toMatchObject([
+            { sessionId: otherId, stall: { stage: 'initializing', budgetMs: 180_000 } },
+          ]);
+          yield* TestClock.adjust(1_590_000);
+          h.owner.setPhase(
+            sessionId,
+            'git-clone',
+            encodeProjectPreparationProgress({ step: 'member', done: 1, total: 5, path: 'web' })
+          );
+          yield* TestClock.adjust(60_000);
+          expect(
+            h.events.filter((event) => event.kind === 'stall' && event.sessionId === sessionId)
+          ).toEqual([]);
+          yield* TestClock.adjust(1_740_000);
+          expect(
+            h.events.filter((event) => event.kind === 'stall' && event.sessionId === sessionId)
+          ).toMatchObject([{ stall: { stage: 'git-clone', budgetMs: 1_800_000 } }]);
           yield* close(lease);
         })
       )

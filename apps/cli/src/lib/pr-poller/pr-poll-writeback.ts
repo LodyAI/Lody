@@ -101,6 +101,7 @@ export type PrAssociationPlan = {
  */
 export function planAssociation(args: {
   meta: Pick<SessionMeta, 'pullRequests'> | undefined;
+  repoFullName?: string;
   /** All of this round's observations (associated and discovered). */
   observations: readonly PrObservation[];
   /** Exact-branch discovery candidates — the only PRs eligible for a NEW association. */
@@ -110,10 +111,17 @@ export function planAssociation(args: {
   confirmedAssociationUrls?: ReadonlySet<string>;
 }): PrAssociationPlan | null {
   const associatedUrls = new Set((args.meta?.pullRequests ?? []).map((pr) => pr.url));
-  const candidates: SessionPullRequestMeta[] = (args.meta?.pullRequests ?? []).map((pr) => ({
-    url: pr.url,
-    status: pr.status,
-  }));
+  const candidates: SessionPullRequestMeta[] = (args.meta?.pullRequests ?? [])
+    .filter(
+      (pr) =>
+        !args.repoFullName ||
+        parseGitHubPullRequestUrl(pr.url)?.repoFullName.toLowerCase() ===
+          args.repoFullName.toLowerCase()
+    )
+    .map((pr) => ({
+      url: pr.url,
+      status: pr.status,
+    }));
   const observations = new Map<string, PrObservation>();
   for (const pr of [...args.observations, ...args.discovered]) {
     if (!observations.has(pr.url)) {
@@ -164,6 +172,7 @@ export type PrMetaWritePlan = {
 
 export function planPullRequestMetaWrite(args: {
   meta: Pick<SessionMeta, 'pullRequests' | 'pullRequestState'> | undefined;
+  repoFullName?: string;
   /** This round's observations; applied only to already-associated URLs. */
   observations: readonly PrObservation[];
   /** Authenticated exact-branch observations eligible for publication. */
@@ -211,17 +220,30 @@ export function planPullRequestMetaWrite(args: {
 
   // 3. Move the selected current PR to the last position (stable otherwise).
   const currentUrl = selectCurrentPullRequestUrl({
-    associated: nextPrs,
+    associated: nextPrs.filter(
+      (pr) =>
+        !args.repoFullName ||
+        parseGitHubPullRequestUrl(pr.url)?.repoFullName.toLowerCase() ===
+          args.repoFullName.toLowerCase()
+    ),
     observations: observationByUrl,
     runtimeBranch: args.runtimeBranch,
   });
   if (currentUrl !== null) {
     const index = nextPrs.findIndex((pr) => pr.url === currentUrl);
-    if (index >= 0 && index !== nextPrs.length - 1) {
+    const lastIndex = args.repoFullName
+      ? nextPrs.reduce(
+          (last, pr, position) =>
+            parseGitHubPullRequestUrl(pr.url)?.repoFullName.toLowerCase() ===
+            args.repoFullName!.toLowerCase()
+              ? position
+              : last,
+          -1
+        )
+      : nextPrs.length - 1;
+    if (index >= 0 && index !== lastIndex) {
       const [current] = nextPrs.splice(index, 1);
-      if (current) {
-        nextPrs.push(current);
-      }
+      if (current) nextPrs.splice(lastIndex, 0, current);
     }
   }
 
