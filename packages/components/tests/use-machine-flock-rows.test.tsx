@@ -8,8 +8,10 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   ACP_CAPABILITY_CACHE_VERSION,
   getMachineRoomId,
+  BuiltinRuntimeOverridesSchema,
   getBuiltinRuntimeOverrideSourceVersionSuffix,
   type AcpCapabilityCacheEntry,
+  type BuiltinRuntimeOverrides,
   machineFlockKeys,
   serializeMachineFlockKey,
   type AgentConfigId,
@@ -2002,6 +2004,41 @@ describe('useMachineFlockRows', () => {
 });
 
 describe('session ACP catalogs from Machine Flock', () => {
+  const mountPiMachine = (
+    store: ReturnType<typeof createStore>,
+    workspaceId: WorkspaceId,
+    machineId: MachineId,
+    rows: () => MachineFlockRowMap
+  ) => {
+    store.set(runtimeAtom, {
+      workspaceId,
+      workspaceSlug: workspaceId,
+      repo: {
+        openFlockDoc: async () => ({
+          flock: {
+            scan: ({ prefix }: { prefix?: readonly unknown[] } = {}) =>
+              Object.values(rows()).filter(
+                (row) => !prefix || prefix.every((part, i) => row.key[i] === part)
+              ),
+            subscribe: () => () => {},
+          },
+          joinRoom: liveRoom().joinRoom,
+        }),
+      },
+    } as unknown as WorkspaceRuntime);
+    store.set(currentWorkspaceIdAtom, workspaceId);
+    store.set(currentWorkspaceSlugAtom, workspaceId);
+    store.set(machineMetaCacheAtom, {
+      [getMachineRoomId(machineId)]: {
+        id: machineId,
+        name: 'Pi machine',
+        cliVersion: '',
+        os: '',
+        sessions: [],
+      },
+    } as unknown as Record<string, MachineMeta>);
+  };
+
   it('tracks the exact Provider extension selection for models and commands', async () => {
     (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
     const store = createStore();
@@ -2035,33 +2072,7 @@ describe('session ACP catalogs from Machine Flock', () => {
           { key: machineFlockKeys.acpCapability(configId), value: capability },
         ].map((row) => [serializeMachineFlockKey(row.key), row])
       );
-    store.set(runtimeAtom, {
-      workspaceId,
-      workspaceSlug: workspaceId,
-      repo: {
-        openFlockDoc: async () => ({
-          flock: {
-            scan: ({ prefix }: { prefix?: readonly unknown[] } = {}) =>
-              Object.values(rows()).filter(
-                (row) => !prefix || prefix.every((part, i) => row.key[i] === part)
-              ),
-            subscribe: () => () => {},
-          },
-          joinRoom: liveRoom().joinRoom,
-        }),
-      },
-    } as unknown as WorkspaceRuntime);
-    store.set(currentWorkspaceIdAtom, workspaceId);
-    store.set(currentWorkspaceSlugAtom, workspaceId);
-    store.set(machineMetaCacheAtom, {
-      [getMachineRoomId(machineId)]: {
-        id: machineId,
-        name: 'Pi machine',
-        cliVersion: '',
-        os: '',
-        sessions: [],
-      },
-    } as unknown as Record<string, MachineMeta>);
+    mountPiMachine(store, workspaceId, machineId, rows);
     function Composer() {
       const { modelOptions, availableCommands } = useSessionAcpSelectorContext({
         machineId,
@@ -2118,12 +2129,125 @@ describe('session ACP catalogs from Machine Flock', () => {
       expectCatalog(false);
       config = matching;
     }
-    // A missing bound Provider cannot borrow another Pi Provider's catalog.
-    await act(async () => {
-      const remaining = rows();
-      delete remaining[serializeMachineFlockKey(machineFlockKeys.agentConfig(configId))];
-      store.set(setMachineFlockRowsForMachineAtom, { workspaceId, machineId, rows: remaining });
-    });
+    // A dropped Provider row keeps its plain catalog but never revives an
+    // extension-launched one.
+    const dropProvider = async () => {
+      await act(async () => {
+        const remaining = rows();
+        delete remaining[serializeMachineFlockKey(machineFlockKeys.agentConfig(configId))];
+        store.set(setMachineFlockRowsForMachineAtom, { workspaceId, machineId, rows: remaining });
+      });
+    };
+    await dropProvider();
+    expectCatalog(true);
+    capability = {
+      ...capability,
+      sourceVersion: `builtin-pi:test${getBuiltinRuntimeOverrideSourceVersionSuffix({ piExtensions: ['/fixture/plugin.ts'] })}`,
+    };
+    await dropProvider();
     expectCatalog(false);
   });
+
+  it.each<[string, BuiltinRuntimeOverrides | undefined]>([
+    ['no extensions', undefined],
+    ['extensions', { piExtensions: ['/fixture/plugin.ts'] }],
+    ['extensions and a Pi binary', { piExtensions: ['/fixture/plugin.ts'], piPath: '/opt/pi' }],
+    [
+      'padded extensions and a Pi binary',
+      { piExtensions: [' /fixture/plugin.ts'], piPath: '/opt/pi ' },
+    ],
+  ])(
+    'keeps Model and Thinking after the first Pi turn with %s',
+    async (_label, runtimeOverrides) => {
+      (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+      const store = createStore();
+      const workspaceId = 'workspace-pi-first-turn' as WorkspaceId;
+      const machineId = 'machine-pi-first-turn' as MachineId;
+      const configId = 'pi-first-turn' as AgentConfigId;
+      const config: AgentConfigMeta = {
+        id: configId,
+        machineId,
+        name: 'Pi',
+        cliType: 'builtin',
+        agentType: 'pi',
+        env: {},
+        ...(runtimeOverrides ? { runtimeOverrides } : {}),
+      };
+      // The row the first session start writes: Pi's session/new options,
+      // stamped with the overrides as session creation re-parsed them.
+      const sessionOverrides = runtimeOverrides
+        ? BuiltinRuntimeOverridesSchema.parse(runtimeOverrides)
+        : undefined;
+      const capability: AcpCapabilityCacheEntry = {
+        cliType: 'builtin',
+        agentType: 'pi',
+        cacheVersion: ACP_CAPABILITY_CACHE_VERSION,
+        provenance: 'runtime',
+        sourceVersion: `builtin-pi:test${sessionOverrides ? `+override:${JSON.stringify(sessionOverrides)}` : ''}`,
+        modes: [],
+        models: [
+          { modelId: 'fixture/fast', name: 'Fast (fixture)' },
+          { modelId: 'fixture/deep', name: 'Deep (fixture)' },
+        ],
+        configOptions: [
+          {
+            id: 'model',
+            name: 'Model',
+            category: 'model',
+            type: 'select',
+            currentValue: 'fixture/deep',
+            options: [
+              { value: 'fixture/fast', name: 'Fast (fixture)' },
+              { value: 'fixture/deep', name: 'Deep (fixture)' },
+            ],
+          },
+          {
+            id: 'thinking',
+            name: 'Thinking',
+            category: 'thought_level',
+            type: 'select',
+            currentValue: 'high',
+            options: ['off', 'low', 'medium', 'high'].map((value) => ({ value, name: value })),
+          },
+        ],
+        fetchedAt: 1,
+      };
+      const rows: MachineFlockRowMap = Object.fromEntries(
+        [
+          { key: machineFlockKeys.agentConfig(configId), value: config },
+          { key: machineFlockKeys.acpCapability(configId), value: capability },
+        ].map((row) => [serializeMachineFlockKey(row.key), row])
+      );
+      mountPiMachine(store, workspaceId, machineId, () => rows);
+      function Composer() {
+        // The persisted composer's inputs after the first Turn sent Deep/high.
+        const { modelOptions, configOptionSelectors } = useSessionAcpSelectorContext({
+          machineId,
+          configId,
+          cliType: 'builtin',
+          agentType: 'pi',
+          selectedModelId: 'fixture/deep',
+          configOptionValues: { model: 'fixture/deep', thinking: 'high' },
+        });
+        return createElement(
+          'output',
+          null,
+          JSON.stringify({
+            models: modelOptions.map((option) => option.value),
+            thinking: configOptionSelectors
+              .filter((selector) => selector.configId === 'thinking')
+              .flatMap((selector) =>
+                selector.type === 'select' ? selector.options.map((option) => option.value) : []
+              ),
+          })
+        );
+      }
+      render(createElement(Provider, { store }, createElement(Composer)));
+      await flushMicrotasks();
+      expect(JSON.parse(container?.textContent ?? '{}')).toEqual({
+        models: ['fixture/fast', 'fixture/deep'],
+        thinking: ['off', 'low', 'medium', 'high'],
+      });
+    }
+  );
 });
