@@ -3817,8 +3817,11 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     subscribeSyncState: (listener) => presenceTransport.subscribeSyncState(listener),
     needsReconnect: () => presenceTransport.needsReconnect(),
   });
+  // UI liveness reads the display state: a clean SSE recycle briefly reports
+  // 'reconnecting' while the retained snapshot still speaks for every machine.
+  // The room registry above keeps the raw state so recovery is never delayed.
   const unsubscribePresenceSyncState = deps.onPresenceSyncStateChange
-    ? presenceTransport.subscribeSyncState(deps.onPresenceSyncStateChange)
+    ? presenceTransport.subscribeDisplaySyncState(deps.onPresenceSyncStateChange)
     : null;
   const machineMonitorSyncRoomId = `machine-monitor:${workspaceId}`;
   const untrackMachineMonitorSync = roomSyncRegistry.track({
