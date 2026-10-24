@@ -1,3 +1,4 @@
+import type { PushRegistration } from './push-notifications';
 import {
   defineCloudAction,
   defineCloudMutation,
@@ -205,6 +206,20 @@ export const cloudOperations = {
     ),
     isWorkspaceSlugAvailable: query<ConvexApi['auth']['isWorkspaceSlugAvailable']>(
       'auth:isWorkspaceSlugAvailable'
+    ),
+  },
+  pushSubscriptions: {
+    register: defineCloudMutation<PushRegistration, null>(
+      'cloudAccount',
+      'pushSubscriptions:register'
+    ),
+    unregister: defineCloudMutation<{ installationId: string }, null>(
+      'cloudAccount',
+      'pushSubscriptions:unregister'
+    ),
+    sendTest: defineCloudMutation<Record<string, never>, { subscriptions: number }>(
+      'cloudAccount',
+      'pushSubscriptions:sendTest'
     ),
   },
   inbox: {

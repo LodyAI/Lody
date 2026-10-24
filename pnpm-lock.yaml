@@ -1388,9 +1388,6 @@ importers:
       react-markdown:
         specifier: ^10.1.0
         version: 10.1.0(@types/react@19.2.17)(react@19.2.0)
-      react-onesignal:
-        specifier: ^3.4.0
-        version: 3.4.6
       react-photo-view:
         specifier: ^1.2.7
         version: 1.2.7(patch_hash=4ce33a84c4b7ec187b3cdd636a84064e6f7621f214bdbcf51946074d24322f59)(react-dom@19.2.0(react@19.2.0))(react@19.2.0)
@@ -12291,10 +12288,6 @@ packages:
     peerDependencies:
       '@types/react': '>=18'
       react: '>=18'
-
-  react-onesignal@3.4.6:
-    resolution: {integrity: sha512-Jxr5GMdHssaZBVeWjhwn4ImqP5qcc8ekrSIVYrvetlf+7UNn9zUrXFFcAoWGi1BRru/4UcDEB+lOaBEPJVI1yw==}
-    engines: {node: '>=14', npm: '>=6'}
 
   react-photo-view@1.2.7:
     resolution: {integrity: sha512-MfOWVPxuibncRLaycZUNxqYU8D9IA+rbGDDaq6GM8RIoGJal592hEJoRAyRSI7ZxyyJNJTLMUWWL3UIXHJJOpw==}
@@ -26255,8 +26248,6 @@ snapshots:
       vfile: 6.0.3
     transitivePeerDependencies:
       - supports-color
-
-  react-onesignal@3.4.6: {}
 
   react-photo-view@1.2.7(patch_hash=4ce33a84c4b7ec187b3cdd636a84064e6f7621f214bdbcf51946074d24322f59)(react-dom@19.2.0(react@19.2.0))(react@19.2.0):
     dependencies:
