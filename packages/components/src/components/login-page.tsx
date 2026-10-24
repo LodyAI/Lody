@@ -1,7 +1,8 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Trans, useTranslation } from 'react-i18next';
 import { motion, useReducedMotion, type Variants } from 'framer-motion';
-import { ArrowLeft, ArrowRight, ExternalLink, Github, Mail } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Github, Mail } from 'lucide-react';
+import { MajesticonsExternalLinkLine } from '@lody/ui';
 import * as stylex from '@stylexjs/stylex';
 import { Badge } from '@lody/ui/badge';
 import { Spinner } from '@lody/ui/spinner';
@@ -1709,7 +1710,7 @@ export function LoginPage({
         disabled={isButtonsDisabled}
       >
         <SocialLoginButtonContent
-          icon={<ExternalLink />}
+          icon={<MajesticonsExternalLinkLine width={18} height={18} aria-hidden="true" />}
           label={
             isOpeningElectronBrowser
               ? t('login.openingBrowser', 'Opening browser...')
@@ -1772,7 +1773,7 @@ export function LoginPage({
           {/* A real link: the automatic navigation may be refused, and this is
               then the user's way to open the desktop app. */}
           <SocialLoginButtonContent
-            icon={<ExternalLink />}
+            icon={<MajesticonsExternalLinkLine width={18} height={18} aria-hidden="true" />}
             label={t('login.desktopHandoff.openApp', 'Open Lody Desktop')}
             width={null}
           />
