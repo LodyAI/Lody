@@ -5,6 +5,8 @@ Translation: current
 
 [English](2026-10-25-home-running-grid.md)
 
+PR: [#1883](https://github.com/LodyAI/Lody/pull/1883)
+
 ## 摘要
 
 首页原先用单个强调色圆点表示运行中的会话，而侧栏使用动态点阵。

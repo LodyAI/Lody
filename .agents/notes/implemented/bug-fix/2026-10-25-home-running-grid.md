@@ -5,6 +5,8 @@ Translation: current
 
 [中文](2026-10-25-home-running-grid.zh.md)
 
+PR: [#1883](https://github.com/LodyAI/Lody/pull/1883)
+
 ## Abstract
 
 The home dashboard used single accent dots for running sessions while the sidebar
