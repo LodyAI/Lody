@@ -1081,7 +1081,11 @@ export class PrPollScheduler {
           continue;
         }
         const fingerprintKey = `${target.workspaceId}:${discoveryOwnerKey(target.ownerSessionId, target.discovery?.memberId)}`;
-        const fingerprint = computeDiscoveryFingerprint(target.repoFullName, branch);
+        const fingerprint = computeDiscoveryFingerprint(
+          target.repoFullName,
+          branch,
+          target.discovery.activityAtMs ?? null
+        );
         if (this.state.discoveryFingerprints[fingerprintKey] !== fingerprint) {
           this.state.discoveryFingerprints[fingerprintKey] = fingerprint;
           this.deps.stateStore.upsertDiscoveryFingerprint(fingerprintKey, fingerprint);
@@ -1271,7 +1275,7 @@ export class PrPollScheduler {
         nowSec: Math.floor(this.nowMs() / 1000),
       });
       if (plan) {
-        const patch: PrPollMetaPatch = {};
+        const patch: PrPollMetaPatch = { lifecycle: plan.lifecycle };
         if (plan.pullRequests) {
           patch.pullRequests = plan.pullRequests;
         }

@@ -1,3 +1,4 @@
+import { planPullRequestLifecycle, resolveSessionPullRequests } from '@lody/shared';
 import { describe, expect, it } from 'vitest';
 import type {
   SessionMeta,
@@ -16,7 +17,13 @@ const URL_1 = 'https://github.com/owner/repo/pull/1';
 const URL_2 = 'https://github.com/owner/repo/pull/2';
 
 function makeMeta(overrides: Partial<SessionMeta> = {}): SessionMeta {
-  return { userId: 'user-1', ...overrides } as SessionMeta;
+  const meta = { userId: 'user-1', ...overrides } as SessionMeta;
+  // Existing modern fixtures have already published their provider revision.
+  for (const pr of meta.pullRequests ?? []) {
+    const write = planPullRequestLifecycle({ ...pr, updatedAt: '2026-07-17T10:00:00Z' });
+    if (write && !Object.hasOwn(meta, write.field)) meta[write.field] = write.value;
+  }
+  return meta;
 }
 
 function obs(prNumber: number, overrides: Partial<PrObservation> = {}): PrObservation {
@@ -528,5 +535,52 @@ describe('Project group repository ordering', () => {
         repoFullName: 'owner/repo',
       })?.prNumber
     ).toBe(3);
+  });
+});
+
+describe('provider-versioned lifecycle', () => {
+  it('bootstraps legacy metadata once and keeps the next identical observation read-only', () => {
+    const meta = {
+      userId: 'user-1',
+      pullRequests: [{ url: URL_1, status: 'open' }],
+    } as SessionMeta;
+    const args = { meta, observations: [obs(1)], runtimeBranch: null, nowSec: NOW_SEC };
+    const plan = planPullRequestMetaWrite(args)!;
+    expect(plan.pullRequests).toBeNull();
+    expect(plan.lifecycle).toHaveLength(1);
+    const updated = {
+      ...meta,
+      ...Object.fromEntries(plan.lifecycle.map((write) => [write.field, write.value])),
+    };
+    expect(resolveSessionPullRequests(updated)).toEqual(meta.pullRequests);
+    expect(planPullRequestMetaWrite({ ...args, meta: updated })).toBeNull();
+  });
+
+  it('does not regress a newer webhook or update a same-number PR in another repository', () => {
+    const other = 'https://github.com/owner/api/pull/1';
+    const write = planPullRequestLifecycle(
+      { url: URL_1, status: 'closed', updatedAt: '2026-07-18T00:00:00Z' },
+      undefined,
+      'webhook'
+    )!;
+    const meta = makeMeta({
+      pullRequests: [
+        { url: URL_1, status: 'open' },
+        { url: other, status: 'draft' },
+      ],
+      [write.field]: write.value,
+    });
+    const plan = planPullRequestMetaWrite({
+      meta,
+      observations: [obs(1)],
+      repoFullName: 'owner/repo',
+      runtimeBranch: null,
+      nowSec: NOW_SEC,
+    });
+    expect(plan?.pullRequests).toEqual([
+      { url: URL_1, status: 'closed' },
+      { url: other, status: 'draft' },
+    ]);
+    expect(plan?.lifecycle).toEqual([]);
   });
 });

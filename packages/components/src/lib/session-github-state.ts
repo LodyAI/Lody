@@ -5,6 +5,8 @@ import type {
 } from '@lody/shared';
 import {
   getSessionPullRequestLegacyFields,
+  resolveSessionPullRequests,
+  type SessionPullRequestSource,
   parseGitHubPullRequestUrl,
   resolveProjectGitHubRepo,
 } from '@lody/shared';
@@ -36,9 +38,9 @@ export type SessionGitHubState = {
 };
 
 export const getLatestPullRequest = (
-  session: Pick<SessionMeta, 'pullRequests'> | null | undefined
+  session: SessionPullRequestSource | null | undefined
 ): SessionPullRequestMeta | null => {
-  const prList = session?.pullRequests ?? [];
+  const prList = resolveSessionPullRequests(session);
   if (!prList.length) {
     return null;
   }
@@ -54,11 +56,11 @@ export const getLatestPullRequest = (
  * member, so it must show that repository's PR, never another one's.
  */
 export const getLatestPullRequestForRepository = (
-  session: Pick<SessionMeta, 'pullRequests'> | null | undefined,
+  session: SessionPullRequestSource | null | undefined,
   repoFullName: string
 ): SessionPullRequestMeta | null => {
   const target = repoFullName.toLowerCase();
-  const matching = (session?.pullRequests ?? []).filter(
+  const matching = resolveSessionPullRequests(session).filter(
     (pr) => parseGitHubPullRequestUrl(pr.url)?.repoFullName.toLowerCase() === target
   );
   return getLatestPullRequest({ pullRequests: matching });

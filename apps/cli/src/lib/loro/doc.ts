@@ -41,14 +41,12 @@ import {
   SessionStatus,
   SessionContextWindowUsage,
   type ProjectRef,
-  SessionPullRequestMeta,
   SessionPlanEntry,
   type SessionExternalHistoryCursorDocState,
   ACP_CAPABILITY_CACHE_VERSION,
   MessageQueueItem,
   SessionTitleSource,
   getAcpCapabilityCacheKey,
-  normalizeSessionPullRequestMeta,
   getServerNow,
   shouldRenewAcpCapabilityFetchTime,
   isLoroRepoDocDeleted,
@@ -3192,24 +3190,6 @@ export class SessionDocument implements LoroDocument<Omit<SessionDocMeta, 'histo
       return [];
     }
     return (entry.plan ?? []) as SessionPlanEntry[];
-  }
-
-  async addPullRequest(prMeta: SessionPullRequestMeta): Promise<void> {
-    const summary = normalizeSessionPullRequestMeta(prMeta);
-    if (!summary) return;
-    const current = await this.repo.getDocMeta(this.roomId);
-    if (isLoroRepoDocDeleted(current)) return;
-    const existingMeta = current?.meta as SessionMeta | undefined;
-    const existing = (existingMeta?.pullRequests ?? []).flatMap((item) => {
-      const parsed = normalizeSessionPullRequestMeta(item);
-      return parsed ? [parsed] : [];
-    });
-    const filtered = existing.filter((item) => item.url !== summary.url);
-    const updated = [...filtered, summary];
-
-    await this.repo.upsertDocMeta(this.roomId, {
-      pullRequests: updated,
-    });
   }
 
   /**

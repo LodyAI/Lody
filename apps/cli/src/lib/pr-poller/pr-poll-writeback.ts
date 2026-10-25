@@ -1,5 +1,9 @@
 import {
   parseGitHubPullRequestUrl,
+  planPullRequestLifecycle,
+  readPullRequestLifecycle,
+  resolveSessionPullRequests,
+  type SessionPullRequestSource,
   type PrStatus,
   type SessionMeta,
   type SessionPullRequestMeta,
@@ -100,7 +104,7 @@ export type PrAssociationPlan = {
  * could outrank it and trigger a pointless association.
  */
 export function planAssociation(args: {
-  meta: Pick<SessionMeta, 'pullRequests'> | undefined;
+  meta: SessionPullRequestSource | undefined;
   repoFullName?: string;
   /** All of this round's observations (associated and discovered). */
   observations: readonly PrObservation[];
@@ -110,8 +114,8 @@ export function planAssociation(args: {
   /** Omit locally; hosted confirmation is independent of session metadata. */
   confirmedAssociationUrls?: ReadonlySet<string>;
 }): PrAssociationPlan | null {
-  const associatedUrls = new Set((args.meta?.pullRequests ?? []).map((pr) => pr.url));
-  const candidates: SessionPullRequestMeta[] = (args.meta?.pullRequests ?? [])
+  const associatedUrls = new Set(resolveSessionPullRequests(args.meta).map((pr) => pr.url));
+  const candidates: SessionPullRequestMeta[] = resolveSessionPullRequests(args.meta)
     .filter(
       (pr) =>
         !args.repoFullName ||
@@ -156,6 +160,7 @@ export function planAssociation(args: {
 }
 
 export type PrMetaWritePlan = {
+  lifecycle: NonNullable<ReturnType<typeof planPullRequestLifecycle>>[];
   /** New pullRequests array, or null when unchanged. */
   pullRequests: SessionPullRequestMeta[] | null;
   /** New pullRequestState record, or null when unchanged. */
@@ -171,7 +176,7 @@ export type PrMetaWritePlan = {
 };
 
 export function planPullRequestMetaWrite(args: {
-  meta: Pick<SessionMeta, 'pullRequests' | 'pullRequestState'> | undefined;
+  meta: (SessionPullRequestSource & Pick<SessionMeta, 'pullRequestState'>) | undefined;
   repoFullName?: string;
   /** This round's observations; applied only to already-associated URLs. */
   observations: readonly PrObservation[];
@@ -189,12 +194,22 @@ export function planPullRequestMetaWrite(args: {
   //    lifecycle to associated entries.
   const changedStatusUrls: string[] = [];
   const observationByUrl = new Map<string, PrObservation>();
-  for (const observation of args.observations) {
+  for (const observation of [...args.observations, ...(args.newlyAssociated ?? [])]) {
+    const stored = readPullRequestLifecycle(meta, observation.url);
+    // An older provider result cannot undo a webhook received while the query ran.
+    if (
+      stored &&
+      !planPullRequestLifecycle(observation, meta) &&
+      (stored.u !== Date.parse(observation.updatedAt) || stored.s !== observation.status)
+    )
+      continue;
+    const earlier = observationByUrl.get(observation.url);
+    if (earlier && Date.parse(earlier.updatedAt) > Date.parse(observation.updatedAt)) continue;
     observationByUrl.set(observation.url, observation);
   }
   const seenUrls = new Set<string>();
   const nextPrs: SessionPullRequestMeta[] = [];
-  for (const pr of originalPrs) {
+  for (const pr of resolveSessionPullRequests(meta)) {
     if (seenUrls.has(pr.url)) {
       continue;
     }
@@ -213,8 +228,13 @@ export function planPullRequestMetaWrite(args: {
       continue;
     }
     seenUrls.add(pr.url);
-    observationByUrl.set(pr.url, pr);
-    nextPrs.push({ url: pr.url, status: pr.status });
+    nextPrs.push({
+      url: pr.url,
+      status:
+        observationByUrl.get(pr.url)?.status ??
+        readPullRequestLifecycle(meta, pr.url)?.s ??
+        pr.status,
+    });
     changedStatusUrls.push(pr.url);
   }
 
@@ -292,10 +312,16 @@ export function planPullRequestMetaWrite(args: {
     }
   }
 
-  if (!pullRequests && !pullRequestState) {
+  const lifecycle = [...observationByUrl.values()].flatMap((observation) => {
+    if (!associatedUrls.has(observation.url)) return [];
+    const write = planPullRequestLifecycle(observation, meta);
+    return write ? [write] : [];
+  });
+  if (!pullRequests && !pullRequestState && lifecycle.length === 0) {
     return null;
   }
   return {
+    lifecycle,
     pullRequests,
     pullRequestState,
     changedStatusUrls,

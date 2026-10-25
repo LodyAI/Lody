@@ -1,3 +1,4 @@
+import { planPullRequestLifecycle } from '@lody/shared';
 import { describe, expect, it } from 'vitest';
 import type { SessionMeta, SessionId, SessionPullRequestMeta } from '@lody/shared';
 
@@ -250,5 +251,30 @@ describe('multi-repository sessions', () => {
     // the per-Member fallback still has to enable Create PR after a commit.
     expect(state.workspaceDirty).toBe(false);
     expect(state.hasChanges).toBe(true);
+  });
+});
+
+it('keeps repository-qualified PR selection while a webhook updates another repository', () => {
+  const a = 'https://github.com/acme/api/pull/7';
+  const b = 'https://github.com/acme/web/pull/7';
+  const write = planPullRequestLifecycle(
+    { url: b, status: 'merged', updatedAt: '2026-01-01T00:00:00Z' },
+    undefined,
+    'webhook'
+  )!;
+  const session = createSession({
+    pullRequests: [
+      { url: a, status: 'draft' },
+      { url: b, status: 'open' },
+    ],
+    [write.field]: write.value,
+  });
+  expect(getSessionGitHubState(session, undefined, 'acme/api')).toMatchObject({
+    hasExistingPr: true,
+    latestPr: { url: a, status: 'draft' },
+  });
+  expect(getSessionGitHubState(session, undefined, 'acme/web')).toMatchObject({
+    hasExistingPr: true,
+    latestPr: { url: b, status: 'merged' },
   });
 });

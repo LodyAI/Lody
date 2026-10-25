@@ -112,5 +112,5 @@ execution/consent rules. These rules also bind CLI callers outside that director
 - Pi extension scanning runs only the pinned runtime's read-only listing entry under a frozen
   default or saved-profile environment — never caller-supplied launch fields. Selections
   require the pinned extension-aware runtime (`piExtensionsProtocolVersion`), not a fallback.
-- `src/lib/pr-poller/` compensates for the hosted GitHub webhook fan-out. Spec:
+- `src/lib/pr-poller/` owns PR associations and lifecycle reconciliation. Spec:
   `specs/pr-status-reconciler.md`; invariants: [pr-poller](src/lib/pr-poller/AGENTS.md).

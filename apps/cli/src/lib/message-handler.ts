@@ -1,4 +1,4 @@
-import { encodeSessionFilePath } from '@lody/shared';
+import { encodeSessionFilePath, resolveSessionPullRequests } from '@lody/shared';
 import type { SessionFileRoot } from '@lody/shared';
 import { resolveProjectFileRoots } from '@/session/worktree/project-member-access';
 import { worktreeGitLegacy } from '@/session/worktree/git-execution-legacy';
@@ -10259,7 +10259,7 @@ export class MessageHandler {
         outcome,
         presentation,
         sessionTitle: meta?.title,
-        pullRequests: meta?.pullRequests,
+        pullRequests: resolveSessionPullRequests(meta),
         workspaceId: this.workspaceId,
         workspaceSlug,
         userId,

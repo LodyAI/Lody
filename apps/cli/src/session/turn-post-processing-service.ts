@@ -1,3 +1,4 @@
+import { resolveSessionPullRequests } from '@lody/shared';
 import path from 'node:path';
 import { realpath } from 'node:fs/promises';
 import { WorkspaceGitService } from './workspace-git-service';
@@ -41,7 +42,6 @@ type SessionPullRequestMeta = NonNullable<SessionMeta['pullRequests']>[number];
 
 type WorkspaceSessionContext = {
   ownerSessionId: SessionId;
-  ownerDoc: SessionDocument;
   ownerMeta: SessionMeta | undefined;
   /** The active session's own meta, already read to find the owner. */
   activeMeta: SessionMeta | undefined;
@@ -56,11 +56,11 @@ export class TurnPostProcessingService {
     ownerMeta: SessionMeta | undefined,
     activeMeta: SessionMeta | undefined
   ): readonly SessionPullRequestMeta[] {
-    const ownerPullRequests = ownerMeta?.pullRequests ?? [];
+    const ownerPullRequests = resolveSessionPullRequests(ownerMeta);
     if (ownerPullRequests.length > 0) {
       return ownerPullRequests;
     }
-    return activeMeta?.pullRequests ?? [];
+    return resolveSessionPullRequests(activeMeta);
   }
 
   private async resolveWorkspaceSessionContext(
@@ -72,7 +72,6 @@ export class TurnPostProcessingService {
     if (ownerSessionId === activeSessionId) {
       return {
         ownerSessionId,
-        ownerDoc: activeDoc,
         ownerMeta: activeMeta,
         activeMeta,
         ownerRoomId: getSessionRoomId(ownerSessionId),
@@ -84,7 +83,6 @@ export class TurnPostProcessingService {
     const ownerMeta = await ownerDoc.getMetaState();
     return {
       ownerSessionId,
-      ownerDoc,
       ownerMeta,
       activeMeta,
       ownerRoomId: getSessionRoomId(ownerSessionId),
@@ -320,16 +318,8 @@ export class TurnPostProcessingService {
       return detected;
     }
 
-    try {
-      await workspace.ownerDoc.addPullRequest({
-        url: detected.prUrl,
-        status: detected.status,
-      });
-    } catch (error) {
-      this.deps.logger.debug(
-        `[${sessionId}] Failed to write PR to local doc: ${formatErrorMessage(error)}`
-      );
-    }
+    // The reconciler is the only association-list publisher. Turn completion
+    // may establish hosted linkage, but must not race its fresh-meta writeback.
     return detected;
   }
 }

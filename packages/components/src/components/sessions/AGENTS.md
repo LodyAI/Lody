@@ -119,7 +119,7 @@ Read parent rules and linked context.
 - A RESTORED side-panel state must not animate: bump `sidebarRestoreSeq` in the
   same commit as any non-user `isSidebarOpen` write.
 - "Current branch" copy uses `SessionMeta.branchName` only.
-- PR summaries do not enable hosted detail/mutation APIs; local PR links open externally.
+- PR summaries: shared lifecycle reads, no UI writes/API grants; local PRs open externally.
 
 ## [File surfaces](../../../../../.agents/docs/sessions-file-surfaces.md)
 

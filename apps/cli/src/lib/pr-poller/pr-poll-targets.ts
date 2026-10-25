@@ -1,7 +1,10 @@
 import {
   parseGitHubPullRequestUrl,
+  resolveSessionPullRequests,
+  type SessionPullRequestSource,
   resolveProjectGitHubRepo,
   type SessionId,
+  type PrStatus,
   type SessionMeta,
 } from '@lody/shared';
 
@@ -14,7 +17,7 @@ import {
  */
 
 /**
- * An associated PR whose last known status is open/draft: refresh lifecycle,
+ * An active PR, or one whose compatibility status needs projection: refresh lifecycle,
  * CI rollup, and merge/conflict state. Keyed by the canonical PR URL exactly
  * as stored in session meta (also the write-back upsert key).
  */
@@ -23,7 +26,7 @@ export type PrPollStatusTarget = {
   url: string;
   repoFullName: string;
   prNumber: number;
-  status: 'open' | 'draft';
+  status: PrStatus;
 };
 
 /**
@@ -38,6 +41,8 @@ export type PrPollDiscoveryTarget = {
   repoFullName: string;
   branch: string;
   memberId?: string;
+  /** Activity observed before dispatch; never advance this from fresh writeback metadata. */
+  activityAtMs?: number;
 };
 
 /** Polling view of one owner session (child tabs folded into their owner). */
@@ -77,14 +82,13 @@ export function resolveDiscoveryBranch(meta: SessionMeta): string | undefined {
   return branch ? branch : undefined;
 }
 
-/**
- * The idle-terminal fingerprint: "this exact `(repository, branch)` context
- * has already had a successful discovery". Stored per owner in the local
- * scheduling state; a branch switch changes the fingerprint and re-enables
- * discovery automatically.
- */
-export function computeDiscoveryFingerprint(repoFullName: string, branch: string): string {
-  return `${repoFullName}|${branch}`;
+/** Durable discovery checkpoint; v2 invalidates legacy context-only fingerprints once. */
+export function computeDiscoveryFingerprint(
+  repoFullName: string,
+  branch: string,
+  activityAtMs: number | null = null
+): string {
+  return JSON.stringify(['v2', repoFullName, branch, activityAtMs]);
 }
 
 /**
@@ -132,9 +136,9 @@ export function discoveryOwnerKey(ownerSessionId: string, memberId?: string): st
 
 /** The current PR is the LAST item of `pullRequests` (shared metadata contract). */
 export function getCurrentPullRequest(
-  meta: Pick<SessionMeta, 'pullRequests'> | undefined
+  meta: SessionPullRequestSource | undefined
 ): NonNullable<SessionMeta['pullRequests']>[number] | null {
-  return (meta?.pullRequests ?? []).at(-1) ?? null;
+  return resolveSessionPullRequests(meta).at(-1) ?? null;
 }
 
 /**
@@ -153,8 +157,10 @@ export function computePrPollMetaSignature(
   meta: SessionMeta,
   resolveGitHubRepo: ResolveSessionGitHubRepo = defaultResolveGitHubRepo
 ): string {
-  const pullRequests = (meta.pullRequests ?? [])
-    .map((pr) => `${pr.url}\u0000${pr.status}`)
+  const pullRequests = resolveSessionPullRequests(meta)
+    .map(
+      (pr, index) => `${pr.url}\u0000${pr.status}\u0000${meta.pullRequests?.[index]?.status ?? ''}`
+    )
     .join('\u0001');
   return [
     meta.machineId ?? '',
@@ -225,18 +231,24 @@ export function enumeratePrPollTargets(
       ),
       runtimeBranch,
       statusTargets: collectStatusTargets(ownerMeta),
-      discoveryTarget: collectDiscoveryTarget(
-        ownerMeta,
-        runtimeBranch,
-        discoveryFingerprints[ownerSessionId],
-        resolveGitHubRepo
-      ),
+      discoveryTarget: null,
     });
   }
 
   return Array.from(entries.values()).map((entry) => {
     const ownerMeta = metaBySessionId.get(entry.ownerSessionId)!;
-    if (!ownerMeta.projectRun) return entry;
+    // Fold every child tab's activity before deciding whether discovery is idle.
+    if (!ownerMeta.projectRun)
+      return {
+        ...entry,
+        discoveryTarget: collectDiscoveryTarget(
+          ownerMeta,
+          entry.runtimeBranch,
+          discoveryFingerprints[entry.ownerSessionId],
+          resolveGitHubRepo,
+          entry.lastMessageAtMs
+        ),
+      };
     const discoveryTargets: PrPollDiscoveryTarget[] = [];
     for (const [memberId, member] of Object.entries(ownerMeta.projectRun.members)) {
       const context = projectMemberRepositoryContext(ownerMeta, memberId);
@@ -255,7 +267,7 @@ export function enumeratePrPollTargets(
           repoFullName: context.repoFullName,
           branch: member.base,
         },
-        pullRequests: ownerMeta.pullRequests?.filter(
+        pullRequests: resolveSessionPullRequests(ownerMeta).filter(
           (pr) =>
             parseGitHubPullRequestUrl(pr.url)?.repoFullName.toLowerCase() ===
             context.repoFullName!.toLowerCase()
@@ -265,7 +277,8 @@ export function enumeratePrPollTargets(
         memberMeta,
         context.branch,
         discoveryFingerprints[discoveryOwnerKey(entry.ownerSessionId, memberId)],
-        defaultResolveGitHubRepo
+        defaultResolveGitHubRepo,
+        entry.lastMessageAtMs
       );
       if (target) discoveryTargets.push({ ...target, memberId, nativeCredentials });
     }
@@ -287,8 +300,11 @@ function maxNullable(a: number | null, b: number | null): number | null {
 function collectStatusTargets(ownerMeta: SessionMeta): PrPollStatusTarget[] {
   const targets: PrPollStatusTarget[] = [];
   const seen = new Set<string>();
-  for (const pr of ownerMeta.pullRequests ?? []) {
-    if (pr.status !== 'open' && pr.status !== 'draft') {
+  const resolved = resolveSessionPullRequests(ownerMeta);
+  for (const [index, pr] of resolved.entries()) {
+    // Refresh once until legacy readers receive the same lifecycle projection.
+    const needsProjection = ownerMeta.pullRequests?.[index]?.status !== pr.status;
+    if (pr.status !== 'open' && pr.status !== 'draft' && !needsProjection) {
       continue;
     }
     const parsed = parseGitHubPullRequestUrl(pr.url);
@@ -311,7 +327,8 @@ function collectDiscoveryTarget(
   ownerMeta: SessionMeta,
   runtimeBranch: string | null,
   ownerFingerprint: string | undefined,
-  resolveGitHubRepo: ResolveSessionGitHubRepo
+  resolveGitHubRepo: ResolveSessionGitHubRepo,
+  activityAtMs: number | null
 ): PrPollDiscoveryTarget | null {
   const repoFullName = resolveGitHubRepo(ownerMeta);
   if (!repoFullName || !runtimeBranch) {
@@ -319,15 +336,19 @@ function collectDiscoveryTarget(
     return null;
   }
   // Idle-terminal: the current PR (last array item) is terminal AND this exact
-  // (repo, branch) context has already had a successful discovery. Only a
-  // context change (fingerprint mismatch) re-enables discovery.
-  const current = (ownerMeta.pullRequests ?? []).at(-1);
+  // (repo, branch, activity) snapshot has had a successful discovery. New
+  // owner/child activity re-enables each repository independently.
+  const current = resolveSessionPullRequests(ownerMeta).at(-1);
   if (
     current &&
     (current.status === 'merged' || current.status === 'closed') &&
-    ownerFingerprint === computeDiscoveryFingerprint(repoFullName, runtimeBranch)
+    ownerFingerprint === computeDiscoveryFingerprint(repoFullName, runtimeBranch, activityAtMs)
   ) {
     return null;
   }
-  return { repoFullName, branch: runtimeBranch };
+  return {
+    repoFullName,
+    branch: runtimeBranch,
+    ...(activityAtMs === null ? {} : { activityAtMs }),
+  };
 }

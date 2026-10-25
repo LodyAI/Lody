@@ -1,3 +1,4 @@
+import { resolveSessionPullRequests } from '@lody/shared';
 import { sessionHasUnreadMessages } from '@/lib/session-read-receipt';
 import type {
   LocalProjectHistoryProvider,
@@ -247,7 +248,7 @@ export function getLatestPullRequestInfo(session: SessionMeta): LatestPullReques
 }
 
 function computeLatestPullRequestInfo(session: SessionMeta): LatestPullRequestInfo {
-  const pullRequests = session.pullRequests ?? [];
+  const pullRequests = resolveSessionPullRequests(session);
   if (!pullRequests.length) {
     return { url: null, number: null, status: null, ciState: null, readiness: null };
   }

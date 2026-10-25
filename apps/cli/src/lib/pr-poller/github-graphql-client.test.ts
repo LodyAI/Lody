@@ -227,6 +227,16 @@ describe('parsePrPollBatchResponse', () => {
     expect(outcome.batch.discoveries[0]?.prs).toHaveLength(1);
   });
 
+  it('rejects an unversioned observation without suppressing independent PR results', () => {
+    const body = successFixtureBody();
+    (body.data.repository as Record<string, unknown>).p0 = prNode(101, { updatedAt: 'invalid' });
+    const outcome = parsePrPollBatchResponse(body, makeBatch());
+    expect(outcome.kind).toBe('success');
+    if (outcome.kind !== 'success') return;
+    expect(outcome.batch.pullRequests[0]).toEqual({ prNumber: 101, pr: null, ok: false });
+    expect(outcome.batch.pullRequests[1]?.pr?.number).toBe(102);
+  });
+
   it('a malformed/missing discovery alias is NOT a confirmed empty result', () => {
     const missingBucket = successFixtureBody();
     delete (missingBucket.data.repository as Record<string, unknown>).d0o;

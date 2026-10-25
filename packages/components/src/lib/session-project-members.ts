@@ -1,5 +1,7 @@
 import {
   getCurrentPullRequestsByRepository,
+  resolveSessionPullRequests,
+  type SessionPullRequestLifecycleFields,
   parseGitHubPullRequestUrl,
   type PrStatus,
   type ProjectMemberId,
@@ -47,12 +49,13 @@ function getSessionProjectMemberRepository(member: SessionProjectMember): string
  * repositories has up to three current PRs.
  */
 export function buildSessionProjectMemberRows(
-  meta: Pick<SessionMeta, 'projectRun' | 'pullRequests' | 'pullRequestState'>
+  meta: Pick<SessionMeta, 'projectRun' | 'pullRequests' | 'pullRequestState'> &
+    SessionPullRequestLifecycleFields
 ): SessionProjectMemberRow[] {
   const run = meta.projectRun;
   if (!run) return [];
   const currentByRepo = new Map<string, { url: string; status: PrStatus; number: number }>();
-  for (const pr of getCurrentPullRequestsByRepository(meta.pullRequests ?? [])) {
+  for (const pr of getCurrentPullRequestsByRepository(resolveSessionPullRequests(meta))) {
     const parsed = parseGitHubPullRequestUrl(pr.url);
     if (parsed) {
       currentByRepo.set(parsed.repoFullName.toLowerCase(), {

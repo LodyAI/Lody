@@ -2795,17 +2795,8 @@ export const SessionChatInterface = memo(
     const projectMemberOwnerSession = workspaceSession ?? session;
     const sessionProjectRun = projectMemberOwnerSession.projectRun;
     const projectMemberRows = useMemo(
-      () =>
-        buildSessionProjectMemberRows({
-          projectRun: sessionProjectRun,
-          pullRequests: projectMemberOwnerSession.pullRequests,
-          pullRequestState: projectMemberOwnerSession.pullRequestState,
-        }),
-      [
-        projectMemberOwnerSession.pullRequestState,
-        projectMemberOwnerSession.pullRequests,
-        sessionProjectRun,
-      ]
+      () => buildSessionProjectMemberRows(projectMemberOwnerSession),
+      [projectMemberOwnerSession]
     );
     const selectedProjectMemberId = useAtomValue(
       sessionProjectMemberSelectionAtomFamily(projectMemberOwnerSession.id)
