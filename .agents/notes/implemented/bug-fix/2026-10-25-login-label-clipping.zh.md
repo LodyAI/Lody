@@ -2,6 +2,7 @@
 
 Status: implemented
 Translation: current
+PR: [#1879](https://github.com/LodyAI/Lody/pull/1879)
 
 [English](2026-10-25-login-label-clipping.md)
 
