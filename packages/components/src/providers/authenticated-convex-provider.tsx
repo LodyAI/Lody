@@ -14,6 +14,7 @@ import {
 } from '@/hooks/use-authenticated-convex';
 import { useStableSession } from '@/hooks/useStableSession';
 import { AuthRecoveryError } from '@/components/auth-recovery-error';
+import { AuthRecoveryEntryProvider } from '@/components/auth-recovery-entry';
 import { useRestartConvexAuth } from './convex-provider';
 
 type PendingRecovery = {
@@ -44,6 +45,9 @@ export function AuthenticatedConvexProvider({ children }: { children: ReactNode 
   const restartConvexAuth = useRestartConvexAuth();
   const [recoveryAttempt, setRecoveryAttempt] = useState(0);
   const [recoveryAllowed, setRecoveryAllowed] = useState(canRecoverAuthNow);
+  const [isOffline, setIsOffline] = useState(
+    () => typeof navigator !== 'undefined' && !navigator.onLine
+  );
   const [recoveryRequested, setRecoveryRequested] = useState(false);
   const pendingRecoveryRef = useRef<PendingRecovery | null>(null);
   const authSessionId = rawData?.session?.id ?? null;
@@ -113,7 +117,10 @@ export function AuthenticatedConvexProvider({ children }: { children: ReactNode 
   }, [confirmedUnauthenticated, refetch, restartConvexAuth]);
 
   useEffect(() => {
-    const updateRecoveryAllowed = () => setRecoveryAllowed(canRecoverAuthNow());
+    const updateRecoveryAllowed = () => {
+      setRecoveryAllowed(canRecoverAuthNow());
+      setIsOffline(!navigator.onLine);
+    };
     window.addEventListener('online', updateRecoveryAllowed);
     window.addEventListener('offline', updateRecoveryAllowed);
     document.addEventListener('visibilitychange', updateRecoveryAllowed);
@@ -246,8 +253,20 @@ export function AuthenticatedConvexProvider({ children }: { children: ReactNode 
 
   return (
     <AuthenticatedConvexContext.Provider value={value}>
-      {children}
-      {recoveryExhausted ? <AuthRecoveryError onRetry={retryAuthRecovery} /> : null}
+      <AuthRecoveryEntryProvider
+        notice={
+          needsRecovery ? (
+            <AuthRecoveryError
+              key={recoverySessionId}
+              onRetry={retryAuthRecovery}
+              isRecovering={isRecovering}
+              isOffline={isOffline}
+            />
+          ) : null
+        }
+      >
+        {children}
+      </AuthRecoveryEntryProvider>
     </AuthenticatedConvexContext.Provider>
   );
 }

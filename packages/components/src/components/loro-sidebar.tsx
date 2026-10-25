@@ -75,6 +75,7 @@ import {
 } from './sidebar-updated-session-list';
 import { SidebarFilterPopover, type SidebarFilterLabels } from './sidebar-filter-popover';
 import { WorkspaceAvatar } from './workspace-avatar';
+import { AuthRecoveryEntrySlot } from './auth-recovery-entry';
 import type { SidebarOrganizeMode } from '@/atoms/sidebar-state';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { useStableNow } from '@/hooks/use-stable-now';
@@ -309,6 +310,7 @@ const COLLAPSE_DRAG_THRESHOLD = 160;
 
 const footerStyles = stylex.create({
   desktop: { columnGap: space[1] },
+  workspace: { display: 'flex', minWidth: 0, flex: 1, alignItems: 'center' },
   actions: {
     display: 'flex',
     alignItems: 'center',
@@ -1353,7 +1355,10 @@ export const LoroSidebar = memo(function LoroSidebar({
           )}
         >
           {isMobile ? (
-            renderWorkspaceControl('bottom')
+            <div {...stylex.props(footerStyles.workspace)}>
+              {renderWorkspaceControl('bottom')}
+              <AuthRecoveryEntrySlot />
+            </div>
           ) : isElectron ? (
             <span className="min-w-0 flex-1" />
           ) : (
@@ -1655,7 +1660,12 @@ export const LoroSidebar = memo(function LoroSidebar({
           )}
           data-sidebar-footer
         >
-          {!isMobile ? renderWorkspaceControl('top') : null}
+          {!isMobile ? (
+            <div {...stylex.props(footerStyles.workspace)}>
+              {renderWorkspaceControl('top')}
+              <AuthRecoveryEntrySlot />
+            </div>
+          ) : null}
           <div {...stylex.props(footerStyles.actions)}>
             <Menu.Root>
               <Menu.Trigger
