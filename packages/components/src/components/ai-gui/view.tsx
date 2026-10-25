@@ -1422,9 +1422,6 @@ export const buildChatVirtualRows = ({
         }
       }
       const shouldUseWorkedGroup =
-        // DSH keeps prose and tool summaries in chronological order after completion;
-        // each thought/tool group owns its disclosure instead of an outer work fold.
-        !showThoughts &&
         isTurnFinished &&
         (segment.workBlockKeys.size > 0 || segmentSubagentTasks.length > 0) &&
         hasVisibleFinalContent;
@@ -2867,9 +2864,7 @@ const SystemMessageRowView = ({
     return <CreatedSessionList cards={creationCards} onNavigateSession={onNavigateSession} />;
   }
   const systemItems = message.items.flatMap((item, itemIndex) =>
-    shouldRenderSystemRowItem(item) && hasVisibleOperationContent(item)
-      ? [{ item, itemIndex }]
-      : []
+    shouldRenderSystemRowItem(item) && hasVisibleOperationContent(item) ? [{ item, itemIndex }] : []
   );
 
   if (systemItems.length === 0) {
@@ -3024,8 +3019,7 @@ const OperationCompletionView = ({
   );
   // The status card carries only what the cards cannot: a whole-Operation
   // failure or cancellation, or targetless problems.
-  const showStatusCard =
-    failedCompletion || cancelledCompletion || untargetedProblems.length > 0;
+  const showStatusCard = failedCompletion || cancelledCompletion || untargetedProblems.length > 0;
 
   return (
     <div className="flex flex-col gap-2" data-operation-completion={completion.operationKind}>

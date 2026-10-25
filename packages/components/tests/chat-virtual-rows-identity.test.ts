@@ -259,7 +259,11 @@ describe('DSH thought visibility', () => {
     rows.flatMap((row) =>
       row.type === 'assistant' && row.content.kind === 'activity_group_header' ? [row.content] : []
     );
-  const expansion = (id: string, expandedGroups: Record<string, boolean>) =>
+  const expansion = (
+    id: string,
+    expandedGroups: Record<string, boolean>,
+    expandedWorkedGroups: Record<string, boolean> = {}
+  ) =>
     new Map([
       [
         id,
@@ -267,7 +271,7 @@ describe('DSH thought visibility', () => {
           finished: true,
           activeSearchBlockId: null,
           expandState: {
-            expandedWorkedGroups: {},
+            expandedWorkedGroups,
             expandedGroups,
             expandedByIndex: {},
             planOpen: false,
@@ -287,26 +291,53 @@ describe('DSH thought visibility', () => {
     expect(headers(after).map((header) => header.isThinking)).toEqual([false, false, true]);
   });
 
-  it.each([false, true])(
-    'preserves prose and ordering with finished=%s and collapsed tools',
-    (finished) => {
-      const tool = toolCall();
-      const progress = text('I will inspect the result.');
-      const answer = text('Answer');
-      const args = fixture(
-        `dsh-prose-${finished}`,
-        [thought, tool, progress, nextThought, answer],
-        finished
-      );
-      const rows = buildChatVirtualRows(args);
-      expect(visibleContents(rows)).toEqual([thought, progress, nextThought, answer]);
-      expect(headers(rows).map((header) => header.expanded)).toEqual([true, false, true]);
-      expect(
-        rows.some((row) => row.type === 'assistant' && row.content.kind === 'worked_group_header')
-      ).toBe(false);
-      expect(buildChatVirtualRows(args).every((row, index) => row === rows[index])).toBe(true);
-    }
-  );
+  it('folds the process on completion and restores ordered prose when expanded', () => {
+    const id = 'dsh-prose';
+    const tool = toolCall();
+    const progress = text('I will inspect the result.');
+    const answer = text('Answer');
+    const contents = [thought, tool, progress, nextThought, answer];
+    const live = buildChatVirtualRows(fixture(id, contents));
+    expect(visibleContents(live)).toEqual([thought, progress, nextThought, answer]);
+    expect(headers(live).map((header) => header.expanded)).toEqual([true, false, true]);
+
+    const args = fixture(id, contents, true);
+    const rows = buildChatVirtualRows(args);
+    expect(visibleContents(rows)).toEqual([answer]);
+    const header = rows.find(
+      (row) => row.type === 'assistant' && row.content.kind === 'worked_group_header'
+    );
+    expect(header).toMatchObject({ content: { expanded: false } });
+    expect(buildChatVirtualRows(args).every((row, index) => row === rows[index])).toBe(true);
+
+    const expanded = buildChatVirtualRows({
+      ...args,
+      selectionLayouts: expansion(id, {}, { [`segment:${id}:0`]: true }),
+    });
+    expect(visibleContents(expanded)).toEqual([thought, progress, nextThought, answer]);
+    expect(headers(expanded).map((group) => group.expanded)).toEqual([true, false, true]);
+    expect(
+      visibleContents(
+        buildChatVirtualRows({
+          ...args,
+          selectionLayouts: expansion(id, {}, { [`segment:${id}:0`]: false }),
+        })
+      )
+    ).toEqual([answer]);
+
+    // Search opens both the outer process and a manually collapsed thought group.
+    const firstThoughtKey = headers(live)[0]!.block.key;
+    const selected = expansion(id, { [firstThoughtKey]: false });
+    const searched = new Map([
+      [id, { ...selected.get(id)!, activeSearchBlockId: getMessageItemPrefix(id, 0) }],
+    ]);
+    expect(visibleContents(buildChatVirtualRows({ ...args, selectionLayouts: searched }))).toEqual([
+      thought,
+      progress,
+      nextThought,
+      answer,
+    ]);
+  });
 
   it('preserves explicit independent toggles and reveals a collapsed thought for search', () => {
     const id = 'dsh-toggles';
@@ -343,14 +374,22 @@ describe('DSH thought visibility', () => {
       [thought, toolCall(), text('progress'), toolCall(), text('answer')],
       true
     );
-    const dsh = buildChatVirtualRows(args);
+    const expandedArgs = {
+      ...args,
+      selectionLayouts: expansion(
+        'dsh-provider-switch',
+        {},
+        { 'segment:dsh-provider-switch:0': true }
+      ),
+    };
+    const dsh = buildChatVirtualRows(expandedArgs);
     expect(visibleContents(dsh)).toEqual([thought, text('progress'), text('answer')]);
-    const other = buildChatVirtualRows({ ...args, showThoughts: false });
-    expect(visibleContents(other)).toEqual([text('answer')]);
+    const other = buildChatVirtualRows({ ...expandedArgs, showThoughts: false });
+    expect(visibleContents(other)).toEqual([text('progress'), text('answer')]);
     expect(
       other.some((row) => row.type === 'assistant' && row.content.kind === 'worked_group_header')
     ).toBe(true);
-    expect(buildChatVirtualRows(args)).toEqual(dsh);
+    expect(buildChatVirtualRows(expandedArgs)).toEqual(dsh);
   });
 
   it('keeps interrupted thoughts readable without exposing them for other providers', () => {

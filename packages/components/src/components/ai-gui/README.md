@@ -6,10 +6,11 @@ the outline rail, and the markdown/terminal/file content surfaces.
 Builtin DeepSeek Harness separates thought disclosures from tool groups. Thoughts
 start open, tools closed, and explicit toggles remain respected. DSH thought prose
 uses the same Markdown typography and reading color as ordinary answers; tool
-labels and details retain their compact process styling. DSH skips the outer
-finished-work fold so intermediate prose stays visible in order after completion;
-duration moves to the existing footer. Both layout and virtual-row caches include
-provider visibility. Other providers retain their grouping and filtering. This is
+labels and details retain their compact process styling. While streaming,
+intermediate prose stays visible in order. Once a final answer is complete, the shared finished-work disclosure collapses earlier prose and tools;
+expanding it restores their order and independent disclosure states. Interrupted
+turns without an answer remain visible. Duration follows the shared header/footer
+policy. Both layout and virtual-row caches include provider visibility. Other providers retain their grouping and filtering. This is
 presentation only: stored thought/text types and provider delivery remain unchanged.
 
 Binding rules live in [AGENTS.md](AGENTS.md); this file is the directory index and
