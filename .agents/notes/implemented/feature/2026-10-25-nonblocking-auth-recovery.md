@@ -2,6 +2,7 @@
 
 Status: implemented
 Translation: current
+PR: https://github.com/LodyAI/Lody/pull/1872
 
 [中文](2026-10-25-nonblocking-auth-recovery.zh.md)
 
