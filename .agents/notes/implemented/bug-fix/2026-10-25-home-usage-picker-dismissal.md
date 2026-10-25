@@ -3,6 +3,8 @@
 Status: implemented
 Translation: current
 
+PR: [#1882](https://github.com/LodyAI/Lody/pull/1882)
+
 [中文](2026-10-25-home-usage-picker-dismissal.zh.md)
 
 ## Abstract
