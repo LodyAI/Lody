@@ -33,6 +33,7 @@ import {
   type HomeNowTotals,
 } from '@/lib/home-now-layout';
 import { ScrollArea } from '@lody/ui/scroll-area';
+import { WorkingGrid } from '@/ui/working-grid';
 import { FocusMotion, canAnimateFocus } from './focus-motion';
 import {
   Tile,
@@ -209,18 +210,11 @@ const styles = stylex.create({
     cursor: 'pointer',
   },
   glyph: { flexShrink: 0, width: '14px', height: '14px' },
-  /* A running agent: a still accent dot. Nothing on the page pulses. */
-  dot: {
-    flexShrink: 0,
-    boxSizing: 'border-box',
-    width: '14px',
-    height: '14px',
-    borderWidth: '4px',
-    borderStyle: 'solid',
-    borderColor: 'transparent',
-    borderRadius: '50%',
-    backgroundClip: 'content-box',
-    backgroundColor: colors.accent,
+  working: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    color: colors.accent,
   },
   waiting: { color: colors.warning },
   failed: { color: colors.destructive },
@@ -264,9 +258,20 @@ const REASON_GLYPH: Record<HomeNowReason, { glyph: LucideIcon | null; tone: styl
     recent: { glyph: History, tone: styles.quiet },
   };
 
+function RunningMark({ active = true }: { active?: boolean }) {
+  return (
+    <span
+      aria-hidden="true"
+      {...stylex.props(styles.glyph, styles.working, !active && styles.quiet)}
+    >
+      <WorkingGrid {...(active ? {} : { scale: 'none', minOpacity: 1 })} />
+    </span>
+  );
+}
+
 function ReasonMark({ reason }: { reason: HomeNowReason }) {
   const { glyph: Glyph, tone } = REASON_GLYPH[reason];
-  if (!Glyph) return <i aria-hidden="true" {...stylex.props(styles.dot)} />;
+  if (!Glyph) return <RunningMark />;
   return <Glyph aria-hidden="true" {...stylex.props(styles.glyph, tone)} />;
 }
 
@@ -760,7 +765,7 @@ export function NowSummary({ model }: { model: HomeNowModel }) {
     {
       key: 'running',
       count: model.running.total,
-      mark: <i aria-hidden="true" {...stylex.props(styles.dot)} />,
+      mark: <RunningMark active={model.running.total > 0} />,
       label: t('home.now.running', 'Running'),
     },
     {

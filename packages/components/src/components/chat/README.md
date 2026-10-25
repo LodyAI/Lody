@@ -30,6 +30,11 @@ delivery. The wrapper component keeps the standalone pending-message surface.
 
 ## Home dashboard transitions
 
+The Now summary and running session rows reuse the sidebar's
+[`WorkingGrid`](../../ui/working-grid.tsx): a 12px grid centred in the existing
+14px icon slot, with the shared animation and reduced-motion behavior. A zero
+running count keeps a muted static grid, without the active accent colour.
+
 [`home/home-dashboard.tsx`](home/home-dashboard.tsx) owns board selection, the summary
 segments and their typed View Transition; [`home/home-dashboard-host.tsx`](home/home-dashboard-host.tsx)
 supplies the live models and device-local preference. The landing stage in
