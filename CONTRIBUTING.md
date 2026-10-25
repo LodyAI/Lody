@@ -51,7 +51,7 @@ git submodule update --init --recursive
 
 ## Local Development
 
-You need Node.js 22.14-22.x or 23.6+ (Node-API 10+) and the pnpm
+You need Node.js 22.23.4+ (22.x), 24.22.1+ (24.x), or 26.12.1+ (26.x), with Node-API 10+ and the pnpm
 version specified by this project.
 
 ```bash

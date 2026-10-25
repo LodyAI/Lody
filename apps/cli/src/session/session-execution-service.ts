@@ -1,7 +1,11 @@
+import { resolveProjectFileRoots } from './worktree/project-member-access';
 import { type AcpLauncher, resolveAcpLauncher } from '@/agent/acp-analytics';
 import type { LodyRateLimitsCapability } from 'acp-extension-core';
 import { queryLocalAcpRateLimits, AcpQuotaCleanupError } from '@/agent/acp-runner';
-import type { MachineProviderRateLimitsRefreshResponse } from '@lody/shared';
+import {
+  isSubscriptionQuotaEligible,
+  type MachineProviderRateLimitsRefreshResponse,
+} from '@lody/shared';
 import { ProviderQuotaRefreshCache } from './provider-quota-refresh-cache';
 import type { TurnOutcome, TurnOutcomeFact, TurnResultAudience } from '@lody/shared/notifications';
 import {
@@ -30,7 +34,10 @@ import {
   type GitRunner,
   type GitWorkingTreeDiffBaseline,
 } from '@/lib/git/git-diff-stats';
-import { resolveWorkspaceLocalProjectRootPathWithRetry } from '@/lib/local-project-meta';
+import {
+  resolveWorkspaceLocalProjectRootPathWithRetry,
+  readLocalProjectRootResolveSyncTimeoutMs,
+} from '@/lib/local-project-meta';
 import type { LoroDocumentManager, SessionDocument } from '@/lib/loro/doc';
 import { subscribeSessionChanges } from '@/lib/loro/doc';
 import type {
@@ -38,9 +45,14 @@ import type {
   SessionActivePresencePhase,
   SessionInitializationStall,
 } from '@/lib/loro/session-active-presence';
-import { readTimeoutEnv, withTimeout } from '@/lib/loro/timeout-utils';
+import { SYNC_CONFIRMATION_TIMEOUT_MS, withTimeout } from '@/lib/loro/timeout-utils';
 import type { MemoryPressureEvictionResult } from '@/lib/session-gc-manager';
 import type { OperationInboxLegacy } from '@/orchestration/inbox/legacy';
+import {
+  blockedInboxRecoveryMessage,
+  InboxExecutionBlocked,
+  InboxExecutionRejected,
+} from '@/orchestration/inbox/admission-failure';
 import {
   batchHistoryMembers,
   batchPreview,
@@ -116,6 +128,7 @@ import {
   type ReplayPromptResult,
   resolveBaseBranchPreference,
   resolveProjectGitHubRepo,
+  resolveSessionAuthoredText,
   resolveSessionExecutionInputBlocks,
   serializeCustomAcpLaunchSpec,
   SessionCancelRequestValidated,
@@ -199,7 +212,7 @@ const ACP_POST_AUTH_REFRESH_MAX_MS = 60_000;
  * re-join after a daemon restart, short enough that a genuinely broken uplink
  * fails the turn instead of holding the user's message.
  */
-const REPLAYABLE_HISTORY_SYNC_TIMEOUT_MS = 15_000;
+const REPLAYABLE_HISTORY_SYNC_TIMEOUT_MS = SYNC_CONFIRMATION_TIMEOUT_MS;
 
 /**
  * Shown when the agent's own session could not be resumed AND this machine has
@@ -1054,13 +1067,7 @@ export class SessionExecutionService {
       this.deps.machineId
     );
     if (!config) return response;
-    if (
-      config.cliType === 'builtin' &&
-      (config.brandId ||
-        Object.keys(config.env ?? {}).length ||
-        config.codexAuth?.mode === 'api-key')
-    )
-      return response;
+    if (!isSubscriptionQuotaEligible(config)) return response;
     const capability = await this.deps.workspaceDocument.getAcpCapabilities(
       this.deps.machineId,
       configId
@@ -3233,7 +3240,7 @@ export class SessionExecutionService {
         yield* self.ignoreWithWarning(
           options.sessionId,
           'Failed to refresh Code Collab v2 shared state for cancelled turn',
-          self.tryPromise(() => self.refreshCodeCollabSharedStateAfterTurn(options.sessionId))
+          Effect.sync(() => self.refreshCodeCollabSharedStateAfterTurn(options.sessionId))
         );
       }
 
@@ -3695,7 +3702,7 @@ export class SessionExecutionService {
         requestSync: () =>
           this.deps.workspaceDocument.syncMachineFlockDoc(this.deps.machineId, {
             reason: 'session-local-project-resolve',
-            timeoutMs: readTimeoutEnv('LODY_LOCAL_PROJECT_RESOLVE_SYNC_TIMEOUT_MS', 1_500),
+            timeoutMs: readLocalProjectRootResolveSyncTimeoutMs(),
           }),
         onRetry: (attempt, maxAttempts) =>
           this.deps.logger.debug(
@@ -3795,23 +3802,25 @@ export class SessionExecutionService {
       }
     }
 
-    await this.refreshCodeCollabSharedStateAfterTurn(sessionId);
+    this.refreshCodeCollabSharedStateAfterTurn(sessionId);
     await sessionDoc.waitUntilSynced();
     await sessionDoc.setStatus(SessionStatusFactory.idle());
   }
 
-  private async refreshCodeCollabSharedStateAfterTurn(sessionId: SessionId): Promise<void> {
+  private refreshCodeCollabSharedStateAfterTurn(sessionId: SessionId): void {
     const refresh = this.deps.turnFinalization.refreshCodeCollabSharedState;
     if (!refresh) {
       return;
     }
-    try {
-      await refresh(sessionId);
-    } catch (error) {
-      this.deps.logger.debug(
-        `[${sessionId}] Failed to refresh Code Collab v2 shared state after turn: ${formatErrorMessage(error)}`
-      );
-    }
+    // The Code Collab service owns cancellation, deadlines and publication repair.
+    // Optional file-view refresh must never retain the turn's execution/presence lease.
+    void Promise.resolve()
+      .then(() => refresh(sessionId))
+      .catch((error: unknown) => {
+        this.deps.logger.debug(
+          `[${sessionId}] Failed to refresh Code Collab v2 shared state after turn: ${formatErrorMessage(error)}`
+        );
+      });
   }
 
   private async persistCodeCollabTurnDiffsAfterACPFinalization(
@@ -4042,14 +4051,7 @@ export class SessionExecutionService {
       }
     }
 
-    await this.runTurnFinalizationStage(
-      sessionId,
-      turnId,
-      'refreshCodeCollabSharedState',
-      async () => {
-        await this.refreshCodeCollabSharedStateAfterTurn(sessionId);
-      }
-    );
+    this.refreshCodeCollabSharedStateAfterTurn(sessionId);
     await this.runTurnFinalizationStage(
       sessionId,
       turnId,
@@ -4210,7 +4212,13 @@ export class SessionExecutionService {
       }
     } catch (cause) {
       try {
-        if (inboxInput)
+        // A rejected begin acquired nothing. Its deterministic ID can match an
+        // older blocked execution, which only the recovery owner may release.
+        if (
+          inboxInput &&
+          !(cause instanceof InboxExecutionBlocked) &&
+          !(cause instanceof InboxExecutionRejected)
+        )
           await inbox!.release({ ...inboxInput, executionId: turnId, outcome: 'failed' });
         this.releaseTurnRuntime(sessionId, turnId);
       } catch (releaseCause) {
@@ -4218,6 +4226,28 @@ export class SessionExecutionService {
           [cause, releaseCause],
           'Inbox preparation and release failed'
         );
+      }
+      if (cause instanceof InboxExecutionBlocked) {
+        // Inbox preparation precedes the scoped turn error handler. Persist its
+        // verified diagnostic here so a rejected send is not only a daemon log.
+        await this.recordKnownChatFailure({
+          sessionId,
+          sessionDoc,
+          userTurnId,
+          reason: 'turn_pre_prompt_failed',
+          message: blockedInboxRecoveryMessage(
+            cause,
+            { machineId: this.deps.machineId, workspaceId: this.deps.workspaceId, sessionId },
+            process.platform
+          ),
+        });
+        // Keep Inbox eligibility aligned with the terminal visible failure.
+        // A repeated ID must not alter the original active input's evidence;
+        // unrelated queued input is also untouched.
+        if (inboxInput)
+          await inbox!.abandonInput(this.deps.workspaceId, sessionId, inboxInput.inputId, true);
+        span.end({ outcome: 'inbox-blocked' });
+        throw cause;
       }
       if (
         !runtime.releaseFailure &&
@@ -4972,6 +5002,7 @@ export class SessionExecutionService {
       scope: { workspaceId: scope.workspaceId, recipientId: scope.userId },
       sessionId: runtime.sessionId,
       turnId: invocation.sourceTurnId,
+      assistantTurnId: runtime.turnId,
       audience: origins.length
         ? { kind: 'user' }
         : (invocation.notificationAudience ?? { kind: 'unknown' }),
@@ -5362,7 +5393,8 @@ export class SessionExecutionService {
     if (!userTurnId) {
       return false;
     }
-    const history = await this.getSessionHistory(sessionDoc);
+    const backend = await this.getSessionBackend(sessionDoc, sessionDoc.sessionId);
+    const history = await backend.readDispatchHistory([userTurnId]);
     return history.some(
       (entry) => entry.id === userTurnId && entry.role === 'user' && entry.status === 'canceled'
     );
@@ -5725,6 +5757,7 @@ export class SessionExecutionService {
       // part of the workspace state being resumed.
       const restoreBranch = project?.branch?.trim() || undefined;
       const restoreConfig: SessionConfig = {
+        projectRun: meta?.projectRun,
         sessionId,
         agentConfigId: meta?.agentConfigId,
         codexAuth: storedLaunchConfig.config?.codexAuth,
@@ -6605,6 +6638,7 @@ export class SessionExecutionService {
       githubRepo: githubRepoFullName,
       branch,
       project,
+      projectRun: existingMeta?.projectRun ?? message.projectRun,
       worktreeSetup: message.worktreeSetup,
       worktreeCleanup: message.worktreeCleanup,
       fromFeedbackPostId,
@@ -6630,6 +6664,7 @@ export class SessionExecutionService {
       githubRepo: githubRepoFullName,
       branch,
       project,
+      projectRun: existingMeta?.projectRun ?? message.projectRun,
       worktreeSetup: message.worktreeSetup,
       worktreeCleanup: message.worktreeCleanup,
       workdir,
@@ -6642,6 +6677,19 @@ export class SessionExecutionService {
     // latency-critical create path performs one doc-meta upsert instead of five
     // sequential ones.
     const dispatchStartPatch: Partial<SessionMeta> = {};
+    if (!existingMeta?.projectRun && message.projectRun) {
+      // The creation snapshot cannot claim daemon-observed branches or status.
+      const initialRun = structuredClone(message.projectRun);
+      for (const member of Object.values(initialRun.members)) {
+        delete member.branch;
+        delete member.repoFullName;
+        delete member.dirty;
+        delete member.unpushed;
+        delete member.diff;
+      }
+      sessionConfig.projectRun = initialRun;
+      dispatchStartPatch.projectRun = initialRun;
+    }
     if (project) {
       dispatchStartPatch.project = project;
     }
@@ -6808,6 +6856,18 @@ export class SessionExecutionService {
                 );
               }
             }
+            const projectRun =
+              !hasPriorAcpSession && !message.parentSessionId
+                ? (await sessionDoc.getMetaState())?.projectRun
+                : undefined;
+            const projectFileRoots = projectRun
+              ? await resolveProjectFileRoots(
+                  session.getWorkdir(),
+                  projectRun,
+                  self.deps.machineId,
+                  (id) => self.deps.sessionManager.resolveLocalProjectRootPath(id)
+                )
+              : undefined;
             const sessionInputBlocks = resolveSessionExecutionInputBlocks({
               ...agentConfig,
               prompt: buildPrompt(
@@ -6815,7 +6875,11 @@ export class SessionExecutionService {
                 project,
                 agentConfig.issuePRMentions,
                 fromFeedbackPostId,
-                { branchToRename }
+                {
+                  branchToRename,
+                  projectRun,
+                  projectFileRoots,
+                }
               ),
             });
             return traceAsync(
@@ -6871,7 +6935,8 @@ export class SessionExecutionService {
               sessionId,
               sessionConfig.agentCliType,
               sessionConfig.agentType,
-              agentConfig.prompt,
+              // Name the user's task, not the composed Config/Role execution prompt.
+              resolveSessionAuthoredText(agentConfig),
               env,
               acpSessionConfig.customAcp,
               acpSessionConfig.runtimeOverrides
@@ -7097,7 +7162,10 @@ export class SessionExecutionService {
   private async pendingInboxInputIds(sessionId: SessionId): Promise<string[]> {
     const doc = await this.deps.workspaceDocument.getOrCreateSessionDoc(sessionId);
     const backend = await createSessionBackend(doc);
-    const [history, queued] = await Promise.all([backend.readHistory(), backend.getMessageQueue()]);
+    const [history, queued] = await Promise.all([
+      backend.readDispatchHistory([]),
+      backend.getMessageQueue(),
+    ]);
     return [
       ...history
         .filter(

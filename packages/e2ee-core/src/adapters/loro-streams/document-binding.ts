@@ -16,7 +16,7 @@ export interface StreamsDocumentBindingOptions {
 }
 
 /**
- * The payload-protection binding a `@loro-dev/streams-crdt` 0.17 document uses
+ * The payload-protection binding a current catalog `@loro-dev/streams-crdt` document uses
  * to seal updates (header 3) and snapshots (header 4) and to open what it
  * reads, wired to this composition's services: the device signer, the verified
  * ledger and installed epoch keys (including recovered history).

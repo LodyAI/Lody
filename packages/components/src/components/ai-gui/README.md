@@ -3,9 +3,15 @@
 Conversation rendering for a Session: the message stream, assistant turn folding,
 the outline rail, and the markdown/terminal/file content surfaces.
 
-Builtin DeepSeek Harness keeps thought prose in expandable activity groups, including
-a default-open Thought disclosure for groups without tools; explicit collapse is retained. Provider visibility is part of the
-virtual-row cache identity; other providers retain their existing filtering.
+Builtin DeepSeek Harness separates thought disclosures from tool groups. Thoughts
+start open, tools closed, and explicit toggles remain respected. DSH thought prose
+uses the same Markdown typography and reading color as ordinary answers; tool
+labels and details retain their compact process styling. While streaming,
+intermediate prose stays visible in order. Once a final answer is complete, the shared finished-work disclosure collapses earlier prose and tools;
+expanding it restores their order and independent disclosure states. Interrupted
+turns without an answer remain visible. Duration follows the shared header/footer
+policy. Both layout and virtual-row caches include provider visibility. Other providers retain their grouping and filtering. This is
+presentation only: stored thought/text types and provider delivery remain unchanged.
 
 Binding rules live in [AGENTS.md](AGENTS.md); this file is the directory index and
 the reasoning behind those rules.
@@ -54,8 +60,11 @@ the reasoning behind those rules.
   incomplete copy events before the extension can write clipboard data; see the
   [integration note](../../../../../.agents/notes/implemented/feature/2026-10-16-math-selection-copy.md).
   `markdown-code-block.tsx` owns fenced
-  blocks, wrap, and Markdown-fence preview (`markdown-code-highlight.ts` the Shiki
-  tokens); `markdown-diff-block.tsx` is the inline diff; `markdown-mermaid-block.tsx`
+  blocks, wrap, and Markdown-fence preview (`markdown-code-highlight.ts` the Highlights
+  tokens). Unsupported optional languages use an isolated Shiki fallback;
+  its native grammar registry owns loaded-language state, while Lody shares
+  fallback initialization and clears failed initialization for retry.
+  `markdown-diff-block.tsx` is the inline diff; `markdown-mermaid-block.tsx`
   renders a closed Mermaid fence. Diagrams are split three ways: `use-mermaid-diagram-canvas.tsx`
   owns activation and the gestures that follow it, `mermaid-inline-canvas.ts` the
   pure zoom/pan geometry, and `mermaid-diagram-viewer.tsx` the full-screen
@@ -71,6 +80,13 @@ the reasoning behind those rules.
   shared `session-link-export`, preserving code examples and stored history.
   Only a known source workspace supplies a missing ID; anonymous readers do not
   borrow the viewer's workspace.
+- `plan-surface.ts` resolves plan approval text from nonempty `rawInput.plan` first,
+  then the first nonempty content text block. Claude result updates can replace
+  content with a rejection message while retaining the original plan input.
+  This also restores historical rejected cards without rewriting session data.
+  Content-only adapters retain their fallback; a separate `proposed_plan` row
+  still suppresses the card's duplicate. See the
+  [rejected-plan fix](../../../../../.agents/notes/implemented/bug-fix/2026-10-22-claude-rejected-plan-display.md).
 - `message-content-guards.ts` gates which shared `MessageContent` variants render.
 - `assistant-turn-timing.ts` builds the turn popover's timing rows (Started,
   Ended, Duration, and Last update for a running turn) and the live status
@@ -308,6 +324,14 @@ portal is outside that drawer's modal boundary: its scroll lock ate every touch
 scroll and a sideways swipe dragged the session away. So inside a
 `[data-vaul-drawer]` the dialog mounts in the drawer, `data-vaul-no-drag`,
 with a no-drag layer over its backdrop (`InMobileDrawer` story).
+
+The Loro conversation view carries display-only task metadata and a bounded latest
+step, not every child transcript. The task's non-enumerable `history` capability
+reads one exact owned run only after its detail mounts. Activity shows loading or
+retry until that read completes; a preview must never masquerade as the full run.
+Changing the selected task or closing the dialog discards late results and releases
+the full body. Static shares and other readers without this capability keep their
+already complete task data. Export/copy/replay use authoritative full readers.
 
 ## Creation progress
 

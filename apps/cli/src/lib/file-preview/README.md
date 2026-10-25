@@ -99,3 +99,12 @@ read outcome and duration with machine/workspace/session identity. These are loc
 diagnostics, contain no content or resource tokens, and are not protocol fields.
 Pair events by session and requested path to distinguish a wrong root, a missing
 file, a permission failure, and a file disappearing between resolution and read.
+
+## Markdown links in nested worktrees
+
+`markdownFileLinks` v1 adds an opt-in `resolveMarkdownLink: true` to `file/preview`.
+It returns `resolved-link` candidates (no content) from the session root and
+same-repository Git worktrees contained in it, via the shared
+`@lody/shared/node/file-link-resolution`. If Git discovery is unavailable the link
+resolves against the session root alone, as before. See the
+[decision](../../../../../.agents/notes/implemented/bug-fix/2026-10-21-nested-worktree-file-links.md).

@@ -67,25 +67,48 @@ Session admission locks retain both waiters and holders, then evict only at zero
 Projected receipt cache entries follow retained SQLite receipt identities/statuses. Release
 retries own a private mutable receipt, leaving the caller event unchanged.
 
-Missing or incomplete resource journals remain fail-closed across restart, including
-when no record exists between `begin` and first acquisition. Inspect them with the
-local, offline operator command (stop the daemon and desktop first):
+Missing or incomplete journals stay fail-closed across restart, including the gap
+between `begin` and the first acquisition. A rejected send with confirmed blocked
+ownership writes a durable `chat_failed` notice containing exact machine, workspace,
+session and execution context plus an inspection-only command. Ordinary admission
+conflicts are not described as stale-resource proof.
+
+Quit Desktop and stop the daemon on the owning machine. Outside an Agent session,
+run the notice's command using the same local account and `LODY_DATA_DIR`:
 
 ```sh
-lody session recover-inbox <sessionId> --machine <machineId> --workspace <workspaceId>
-# Only AFTER independently checking that all old processes/requests are released:
-lody session recover-inbox <sessionId> --machine <machineId> --workspace <workspaceId> \
-  --execution <executionId> --confirm-resources-released
+lody session recover-inbox --machine '<machineId>' --workspace '<workspaceId>' -- '<sessionId>'
 ```
 
-The scoped platform adapter acquires the exclusive Host lease before opening SQLite,
-checks known PIDs/process groups without sending signals, and rejects live roots,
-probe uncertainty or another platform. The operator must attest unrecorded resources
-as well; a dead daemon PID alone is insufficient. The native workflow rechecks the
-exact blocked identity. Pause, old-input retirement, release and audit commit in one
-transaction. Recovery stays paused, creates no intent and never replays unknown
-submissions; restart Lody and send fresh input from an Inbox-aware client/CLI.
-This is local-account maintenance, not a new MCP tool or remote recovery RPC.
+Inspection holds the Host lease and opens SQLite read-only without migrating. It
+returns resource evidence, a snapshot token and a separate recovery command; an
+unsupported schema fails explicitly. Commands are quoted for POSIX shells or
+PowerShell on Windows. Only after independently verifying **all** old processes and
+requests, including unrecorded descendants, are released, run the matching command:
+
+```sh
+# Exact execution; copy both values from inspection.
+lody session recover-inbox --machine '<machineId>' --workspace '<workspaceId>' --execution '<executionId>' --snapshot '<token>' --confirm-resources-released -- '<sessionId>'
+# blocked=1 with no active execution has a dedicated path, not a fabricated ID.
+lody session recover-inbox --machine '<machineId>' --workspace '<workspaceId>' --orphan '<token>' --confirm-resources-released -- '<sessionId>'
+```
+
+Missing ownership or a dead daemon PID is not release evidence. Known live roots,
+probe warnings, cross-platform records and ambiguous owners reject recovery. The
+transaction compares the snapshot of all session ownership, resource, input, batch
+and intent facts after the probe. Any change requires another inspection. A dedicated
+recovery audit stores the token and nullable real execution ID atomically with pause,
+old-input retirement and resource release. Repeating a completed request performs no
+writes and reports that the Inbox is no longer blocked.
+
+Unlike Stop, operator recovery does not cancel unrelated queued input. History and
+unconsumed results survive; already submitted/unknown results cannot enter another
+batch. Recovery creates no wake intent and stays paused. After restart, fresh human
+**or Agent-chat** input clears the pause and allows saved work to proceed; recovery
+is not a durable human-only hold. Unknown old requests require a new send. No remote
+RPC, MCP recovery tool, automatic Windows unlock, or live-process termination is added.
+See the [manual recovery decision](../../../../.agents/notes/implemented/bug-fix/2026-10-21-manual-inbox-recovery.md)
+and [deferred Windows containment proposal](../../../../.agents/notes/proposed/architecture/2026-10-21-windows-inbox-containment.md).
 
 `session-execution-service.ts` calls the actual prompt primitive while holding admission.
 A batch is one system history item plus one model input, even when details require pages.

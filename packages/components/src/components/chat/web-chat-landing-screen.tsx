@@ -70,12 +70,10 @@ const stage = stylex.create({
   },
   /* The chrome that opens the sidebar, in the window's top-left corner. */
   sidebarToggle: { position: 'absolute', top: themeSpace[3], zIndex: 20 },
-  /* macOS Electron: `top-px` plus the shell card's 8px inset centers the h-7
-     button at 23px, on the traffic-light centerline (`trafficLightPosition.y`
-     16 + 7px radius in apps/electron/src/main/window.ts); `left-[88px]` plus
-     the card's 8px margin (the sidebar is hidden whenever this shows) leaves
-     a 20px buffer after the light cluster (which ends at x=76). */
-  sidebarToggleMac: { top: '1px', left: '88px' },
+  /* The shell card's 4px rim plus 5px top inset centers the h-7 toggle at
+     23px, matching the macOS traffic lights. A 92px left inset leaves 20px
+     after the light cluster, which ends at x=76. */
+  sidebarToggleMac: { top: '5px', left: '92px' },
   sidebarTogglePlain: { left: themeSpace[3] },
   /* The Electron screen is not selectable; its text fields say so again. */
   selectNone: { userSelect: 'none' },

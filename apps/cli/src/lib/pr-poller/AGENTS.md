@@ -2,21 +2,19 @@
 
 `CLAUDE.md` is a symlink to this file. Edit `AGENTS.md` only.
 
-Machine-side reconciler for PR discovery/association, lifecycle, CI rollup,
-and merge/conflict state. Local observation path and compensation for hosted webhook updates.
+Machine PR discovery, lifecycle, CI and merge/conflict reconciliation.
 Local authorization contract: [Spec](../../../../../specs/local-github-pr-observation.md).
 
 ## Architecture: pure decisions, thin effects
 
-Every policy lives in a pure module; `pr-poll-scheduler.ts` only wires
-facts → decisions → effects. Do not add priority/quota/selection/write-back
+Pure modules own policy; `pr-poll-scheduler.ts` wires facts → decisions → effects. Do not add priority/quota/selection/write-back
 logic to the scheduler, the GraphQL client, or the workspace adapter.
 
-Pure modules (deterministic, unit-tested without IO):
+Pure modules:
 
 - `pr-poll-targets.ts` — metadata replica → status/discovery targets; owner
   normalization (`parentSessionId ?? sessionId`); idle-terminal fingerprint
-  rule; archived/deleted exclusion; current PR = LAST `pullRequests` item.
+  rule; archived/deleted exclusion; current PR = LAST `pullRequests` item per repository for Project groups.
 - `pr-poll-priority.ts` — viewing presence + `lastMessageAt` → high/low lane
   (top-100 cap). Priority only shortens intervals; never a precondition.
 - `pr-poll-quota.ts` — per-scope token bucket, provider safety-floor freeze,
@@ -43,7 +41,7 @@ Effect adapters: `pr-poller-workspace.ts` (Loro repo + presence + credentials
   `pr-status-poller.ts` (Effect service facade; fleet wires it in
   `lody-fleet.ts`).
 
-## Invariants (expensive to rediscover — do not break)
+## Invariants
 
 - **Observation and webhook linkage are independent.** Publish authenticated exact-branch
   GitHub observations even if hosted association fails. Retry linkage under existing gates;
@@ -70,14 +68,14 @@ Effect adapters: `pr-poller-workspace.ts` (Loro repo + presence + credentials
   number, discovery keys the branch — a new PR / switched branch is
   never-refreshed and immediately due. Truncated (over-alias-budget) targets
   are NOT stamped as attempted; they stay due and form the next batch.
-- **Current PR is the LAST `pullRequests` item; the reconciler is the
-  ordering authority.** The hosted webhook fan-out is a blind single-PR
-  overwrite and must not load Loro Streams;
-  the reconciler re-discovers and re-associates overwritten current-branch
-  PRs instead of expecting webhook writes to preserve the array. Reconciler
-  rewrites emit `{url, status}` entries only — legacy detail fields
-  (`number/repository/branch/headCommitSha/reportedAt`) are stripped once
-  (ordering bootstrap), and legacy `.r` readiness is deleted on touch.
+- **Associations.** Only the reconciler publishes `pullRequests` membership/order
+  (current = last per repository). Other writers publish independent lifecycle records,
+  never the array. Shared `session-pull-requests.ts` owns URL/source identity, provider
+  revision ordering and read projection; all readers use it. Keep array status for old
+  clients, including one terminal refresh until it matches. Webhooks use fresh,
+  provider-clocked Flock entries; machines use the ordinary local writer. Retain orphan
+  records until session purge.
+  Rewrites strip legacy detail fields and `.r` readiness on touch.
 - **Machine ownership.** Each daemon enumerates only session metas whose
   `machineId` matches the local machine; archived owners are excluded.
 - **Deleted sessions get nothing.** Missing/tombstoned meta stops both writes
@@ -89,10 +87,10 @@ Effect adapters: `pr-poller-workspace.ts` (Loro repo + presence + credentials
   GitHub user/installation scope, never token bytes; token rotation must not
   reset freeze/cooldown/bucket state. A token-invalid retry must pass the
   replacement scope's own gates before the second call.
-- **Discovery requires `branchName`.** Never query by `baseBranch` (the
+- **Discovery requires `branchName` (Member `branch` for Project groups).** Never query by `baseBranch` (the
   starting ref — would associate unrelated PRs). Discovery continues while an
   open/draft PR exists (newer-PR detection); only idle-terminal owners
-  (terminal current PR + unchanged `repo|branch` fingerprint) stop entirely.
+  (terminal PR + checkpoint matching repo, branch and owner/child activity) stop.
 - **GitHub-capable direct local projects are tracked.** A local project using
   its original directory gets the same PR discovery and status targets when
   `githubRepoFullName` and runtime `branchName` are present. Its branch is shared
@@ -107,9 +105,9 @@ Effect adapters: `pr-poller-workspace.ts` (Loro repo + presence + credentials
   cadence so gating never delays a login or account switch;
   scope-wide skips log once per gate window; and a metadata write counts as a
   change only when `computePrPollMetaSignature` moves.
-- **No turn-end hook.** Post-turn freshness comes from the `lastMessageAt`
-  activity rule (high lane for 10 min); do not re-add scheduler callbacks to
-  turn finalization.
+- **No turn-end hook.** `lastMessageAt` wakes terminal discovery. Persist the
+  dispatched activity snapshot only after success; later activity remains due.
+  Checkpoints outlive pruned targets. Never stamp fresh writeback activity.
 - **Bounded initial sync.** Enumeration waits ≤60s for initial meta sync and
   retries outside the serialized scheduler chain; an unhealthy workspace must
   never stall healthy workspaces. After that one full projection, the metadata

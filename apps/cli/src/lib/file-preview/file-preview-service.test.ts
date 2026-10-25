@@ -1,3 +1,4 @@
+import { encodeSessionFilePath } from '@lody/shared';
 import { createHash } from 'node:crypto';
 import { mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -70,6 +71,65 @@ function createService(args: {
 }
 
 describe('FilePreviewService', () => {
+  it('previews registered additional roots as internal and rejects their escaping links', async () => {
+    const main = await makeDir('preview-main-');
+    const docs = await makeDir('preview-member-');
+    const outside = await makeDir('preview-outside-');
+    await writeFile(path.join(docs, 'a.txt'), 'member');
+    await writeFile(path.join(outside, 'secret.txt'), 'private');
+    await symlink(outside, path.join(docs, 'escape'), 'junction');
+    const roots = [
+      { id: 'main', absolutePath: main },
+      { id: 'member:docs', absolutePath: docs },
+    ];
+    const resolveWorkspace: FilePreviewWorkspaceResolver = async (_, rootId) => ({
+      ok: true,
+      ownerSessionId: SESSION_ID,
+      workspaceRoot: roots.find((root) => root.id === (rootId ?? 'main'))!.absolutePath,
+      fileRoots: roots,
+    });
+    const service = new FilePreviewService({
+      resolveWorkspace,
+      resolveLocalWorkspace: resolveWorkspace,
+      extraRoots: [],
+    });
+    const result = await service.previewFile({
+      v: 3,
+      sessionId: SESSION_ID,
+      rootId: 'member:docs',
+      path: 'a.txt',
+    });
+    expect(result).toMatchObject({
+      status: 'ok',
+      path: encodeSessionFilePath({ rootId: 'member:docs', relativePath: 'a.txt' }),
+    });
+    expect('external' in result && result.external).not.toBe(true);
+    expect(
+      await service.previewFile({
+        v: 3,
+        sessionId: SESSION_ID,
+        rootId: 'member:docs',
+        path: 'escape/secret.txt',
+      })
+    ).toMatchObject({ status: 'error', code: 'path_not_allowed' });
+  });
+
+  it('resolves links without reading oversized content, then previews the selected identity normally', async () => {
+    const workspaceRoot = await makeDir('preview-link-');
+    await writeFile(path.join(workspaceRoot, 'large.txt'), 'larger than the preview budget');
+    const service = createService({ workspaceRoot, limits: { maxTextBytes: 1 } });
+    const request = { v: 3 as const, sessionId: SESSION_ID, path: 'large.txt' };
+    const resolution = await service.previewFile({ ...request, resolveMarkdownLink: true });
+    expect(resolution).toMatchObject({
+      status: 'resolved-link',
+      candidates: [{ path: 'large.txt' }],
+    });
+    expect(await service.previewFile(request)).toMatchObject({
+      status: 'error',
+      code: 'too_large',
+    });
+  });
+
   it('reads a workspace text file as plain UTF-8 with its digest and EOL', async () => {
     const workspaceRoot = await makeDir('preview-ws-');
     await mkdir(path.join(workspaceRoot, 'src'), { recursive: true });

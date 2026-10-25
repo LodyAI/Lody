@@ -163,8 +163,15 @@ const pr = (number: number, status: HomeNowPr['status'], ci: HomeNowPr['ci'], re
 });
 
 /** A synthetic afternoon: agents running, two asking for the person, a failed check, drafts. */
-export function homeNowFixture(kind: 'busy' | 'quiet' = 'busy'): HomeNowModel {
+export function homeNowFixture(kind: 'busy' | 'quiet' | 'starting' = 'busy'): HomeNowModel {
   if (kind === 'quiet') return buildHomeNow({ rows: [] }, HOME_WEEK_NOW.getTime());
+  if (kind === 'starting') {
+    // The first agent of the afternoon: the board's quiet card gives way to the lists.
+    return buildHomeNow(
+      { rows: [nowRow('s-first', 'Refactor presence sync', 1, { working: true })] },
+      HOME_WEEK_NOW.getTime()
+    );
+  }
   const rows: HomeNowRow[] = [
     // Needs you: waiting on a reply.
     nowRow('s-auth', 'Fix token refresh on wake', 2, { waiting: true }),

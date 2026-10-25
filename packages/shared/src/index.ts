@@ -44,6 +44,7 @@ export * from './bug-report';
 export * from './billing';
 export * from './agent-brand';
 export * from './agent-authentication';
+export * from './subscription-quota';
 export * from './acp-authentication-limits';
 export * from './schema';
 export * from './schedule-types';
@@ -74,6 +75,7 @@ export * from './acp/devin-subagent-task';
 export * from './acp/schema';
 export * from './acp/tool-call-history';
 export * from './acp/history-apply';
+export { inheritHistoryStreamText } from './history-stream-text';
 export * from './acp/history-replay-import';
 export * from './acp/ask-user-question';
 export * from './acp/lody-rate-limit-migration';
@@ -498,3 +500,9 @@ export * from './memory-provider';
 export * from './message-author';
 
 export * from './magpie-import';
+
+export * from './workspace-project';
+
+export * from './project-path';
+
+export * from './session-pull-requests';

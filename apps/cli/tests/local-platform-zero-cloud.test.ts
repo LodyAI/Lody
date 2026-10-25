@@ -287,11 +287,22 @@ describe('local platform zero-cloud integration', () => {
       });
       expect(history[0]?.inputConfig?.modelId).not.toBe('source-model');
       expect(history[0]?.inputConfig?.mcpServerIds).toEqual(['synthetic-mcp']);
-      expect(history[0]?.items).toEqual([
-        { type: 'text', text: 'Review carefully.\n\nCheck the change.' },
-      ]);
+      expect(history[0]?.items).toEqual([{ type: 'text', text: 'Check the change.' }]);
+      expect(history[0]?.inputConfig?.prompt).toBe('Review carefully.\n\nCheck the change.');
       expect(target?.meta.latestUserMsgId).toBe(history[0]?.id);
       await call('lody_session_create', input);
+      expect(dispatched).toEqual([targetId]);
+      // An Agent that lost the first response retries the same work under a new id.
+      const freshIdRetry = await call('lody_session_create', {
+        ...input,
+        operationId: 'role-create-fresh-id',
+      });
+      expect(freshIdRetry.isError, JSON.stringify(freshIdRetry)).not.toBe(true);
+      expect(JSON.parse(String(freshIdRetry.content[0]?.text))).toMatchObject({
+        id: 'role-create',
+        state: 'active',
+        notice: expect.stringContaining('no new Session was created'),
+      });
       expect(dispatched).toEqual([targetId]);
       const store = new LodyOperationStore(getLodyOperationStorePath(machineId), undefined, {
         maintenance: false,

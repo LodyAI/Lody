@@ -3,6 +3,7 @@ import { executionJournalLayer } from '../platform/execution-journal';
 import { makeInboxQueries } from '../platform/inbox-queries';
 import { inboxRepositoryLayer, recoveryRepositoryLayer } from '../platform/inbox-repository';
 import { inboxRecoveryProbeLayer } from '../platform/recovery-probe';
+import { InboxExecutionBlocked, InboxExecutionRejected } from './admission-failure';
 import { makeInboxCloseOwner } from './close-owner';
 import { makeExecutionOwner, type ExecutionResource } from './execution-owner';
 import type { InboxBatch, InboxInput, InboxRelease, InboxScope } from './model';
@@ -100,10 +101,26 @@ export const operationInboxLegacy = (options: {
     inputKind: (s: InboxScope, id: string) => Effect.runSync(queries.inputKind(s, id)),
     pauseTarget: (w: string, s: string, id: string) =>
       Effect.runSync(queries.pauseTarget(w, s, id)),
-    abandonInput: (w: string, s: string, id: string) =>
-      runtime.runPromise(Effect.flatMap(OperationInbox, (inbox) => inbox.abandon(w, s, id))),
+    abandonInput: (w: string, s: string, id: string, unlessActive?: boolean) =>
+      runtime.runPromise(
+        Effect.flatMap(OperationInbox, (inbox) => inbox.abandon(w, s, id, unlessActive))
+      ),
     openExecution: async (input: InboxInput, id: string, batch?: InboxBatch) => {
-      const owner = await runtime.runPromise(makeExecutionOwner(input, id, batch));
+      const owner = await runtime.runPromise(
+        makeExecutionOwner(input, id, batch).pipe(
+          Effect.catch((cause) => {
+            if (!(cause instanceof InboxExecutionRejected)) return Effect.fail(cause);
+            return Effect.try({
+              try: () => options.sql.blockedExecutions(input.workspaceId, input.sessionId),
+              catch: (error) => error,
+            }).pipe(
+              Effect.flatMap((blocked) =>
+                Effect.fail(blocked.length > 0 ? new InboxExecutionBlocked({ blocked }) : cause)
+              )
+            );
+          })
+        )
+      );
       return {
         get input() {
           return owner.input;

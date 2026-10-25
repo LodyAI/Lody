@@ -87,3 +87,11 @@
 ## `@lody/e2ee-core/cloudflare`
 
 `ed25519WasmActive`。在 Cloudflare Worker 中导入一次该入口即可：workerd 禁止在运行时从字节编译 WebAssembly，因此改由打包器编译包内的严格 Ed25519 模块。不导入时，core 仍会用纯 JS 正确验证，只是更慢。`@lody/e2ee-core/protocol` 也导出 `ed25519WasmActive`（同一个状态），供无法打包本入口的宿主（如 Convex）上报当前是否使用 WebAssembly；首次调用时可能会实例化内嵌模块，与第一次验签的行为相同（失败则回退到纯 JS）；它不会替换或关闭任何验证后端。
+
+## `@lody/e2ee-core/adapters/node-custody`
+
+`KekWrapper`、`NodeE2eeCustodyError`、`PreparedNodeE2eeDevice`、`NodeE2eeDevice`、
+`makeNodeE2eeCustody`、`NodeE2eeCustody`、`nodeE2eePorts`。
+
+仅 Node 可用，由显式 Scope 持有。宿主负责核对 KEK 包装器的实际保护能力；
+文件保护只能创建机器身份，个人身份必须使用系统安全存储。

@@ -3569,7 +3569,7 @@ export function MobileHomeOnboarding({
           </div>
           <p {...stylex.props(styles.onboardingCardHint)}>
             {labels.commandHint ??
-              '在服务器、虚拟机或你的电脑上运行（需 Node.js 22.14+）。命令会发起登录；没有浏览器的机器会打印链接，用这台手机打开即可完成授权。'}
+              '在服务器、虚拟机或你的电脑上运行（需 Node.js 22.23.4+（22.x）、24.22.1+（24.x）或 26.12.1+（26.x））。命令会发起登录；没有浏览器的机器会打印链接，用这台手机打开即可完成授权。'}
           </p>
         </section>
 

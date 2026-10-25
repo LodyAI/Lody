@@ -126,6 +126,8 @@ export type SessionDirectoryScalars = {
   readonly role: SessionTurnRole;
   readonly timestamp: string;
   readonly status?: SessionTurnStatus;
+  /** Legacy dispatch eligibility, read without materializing the body. */
+  readonly read?: boolean;
   readonly cancellationReason?: 'user_stop';
   readonly finished?: boolean;
   readonly endedAt?: number;
@@ -141,6 +143,7 @@ export type SessionDirectoryScalars = {
  * an adapter and any consumer pick the same subset in one place.
  */
 export const SESSION_DIRECTORY_INPUT_CONFIG_KEYS = [
+  '_lodyDeliveryKind',
   'agentRoleId',
   'agentRoleRevision',
   'agentRoleSnapshot',

@@ -1,6 +1,7 @@
 import type { AcpCapabilityCacheEntry } from '@lody/shared';
 import {
   CODEX_SPARK_LIMIT_ID,
+  isSubscriptionQuotaEligible,
   normalizePersistedRateLimit,
   parseRateLimitEntryKey,
   type AgentConfigCliType,
@@ -136,19 +137,16 @@ export function getContextWindowUsageData(
 export function canShowSubscriptionRateLimits({
   capability,
   cliType,
+  agentType,
   config,
 }: {
   cliType: AgentConfigCliType;
   agentType: string;
-  config?: Pick<AgentConfigMeta, 'brandId' | 'env' | 'codexAuth'> | null;
+  config?: Pick<AgentConfigMeta, 'brandId' | 'env' | 'codexAuth' | 'magpieGatewayUrl'> | null;
   capability?: AcpCapabilityCacheEntry['rateLimits'];
 }): boolean {
   return (
-    capability?.version === 1 &&
-    (cliType !== 'builtin' ||
-      (!config?.brandId &&
-        !Object.keys(config?.env ?? {}).length &&
-        config?.codexAuth?.mode !== 'api-key'))
+    capability?.version === 1 && isSubscriptionQuotaEligible({ ...config, cliType, agentType })
   );
 }
 

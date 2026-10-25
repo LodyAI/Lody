@@ -190,7 +190,9 @@ export function PopoverActionChip({
   icon: InfoChipIcon;
   label: string;
   value?: string;
-  content: ReactNode;
+  /** A render prop receives `close`, so a selection inside the panel can
+   *  dismiss it and reveal the surface it just changed. */
+  content: ReactNode | ((close: () => void) => ReactNode);
   /** Storybook/testing aid. */
   defaultOpen?: boolean;
 }) {
@@ -228,7 +230,7 @@ export function PopoverActionChip({
         aria-label={label}
         className="w-[var(--anchor-width)] border-border/60 p-0 shadow-xl"
       >
-        {content}
+        {typeof content === 'function' ? content(() => setOpen(false)) : content}
       </Popover.Content>
     </Popover.Root>
   );

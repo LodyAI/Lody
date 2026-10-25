@@ -8,6 +8,11 @@ File-by-file responsibilities: [README.md](README.md).
 
 ## Invariants
 
+- Turn-end refresh runs here without blocking Turn release.
+  Refresh/publication attempts have configurable deadlines and cancellation;
+  worker cancellation drains Git children. Late results cannot resume snapshot writes.
+  Cancelling an attempt never destroys the shared Repo or its rooms.
+
 - Do not reintroduce per-session Code Collab host runtimes, host handles, bootstrap
   secrets, or synced text CRDT documents here. Turn diff support is CLI-local:
   standard ACP diff blocks are written to `code-collab-v2-diff-store.ts`, and Web
@@ -67,8 +72,8 @@ File-by-file responsibilities: [README.md](README.md).
   snapshots by default, and over-limit paths are returned as deferred for single-file
   loading. Never restore an unbounded candidate array or reconstruct deferred paths twice.
 - File RPCs canonicalize an absolute request path to a workspace-relative path only
-  when the target machine resolves it inside the session workspace root. Absolute
-  paths outside that root remain `invalid_path`; never rely on frontend path stripping
+  when the target machine resolves it inside a registered session file root. Absolute
+  paths outside all roots remain `invalid_path`; never rely on frontend path stripping
   as the filesystem access boundary.
 - Native `fs.watch` handles must stay in `workspace-watch-worker-core.ts`; the main CLI
   Worker owns only subscriptions, refresh timers, scans, file-index/All Changes state,
@@ -90,3 +95,5 @@ File-by-file responsibilities: [README.md](README.md).
   (per-file write chain) so two concurrent saves to the same path can't both pass the
   base-digest check and clobber each other; different paths still save in parallel.
   Pure reads (open/refresh/diff) stay lock-free.
+
+- Root-scoped file state shares the owner publication and physical-file save chains. Watch subscriptions include root identity; wire keys must be decoded before filesystem access.

@@ -991,6 +991,8 @@ export class LoroConnectionRecoveryController {
       return;
     }
 
+    // A timeout only logs, and this wait holds the serialized recovery queue,
+    // so a longer budget would just delay the next reconnect.
     const syncMetaTimeoutMs = readTimeoutEnv('LODY_LORO_SYNC_META_TIMEOUT_MS', 20_000);
     const startedAt = Date.now();
     const metaSource = streamsRoomBinding(metaSub);

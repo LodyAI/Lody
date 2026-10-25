@@ -46,12 +46,18 @@ before(async () => {
     build: { ...config.build, write: false, outDir: root }
   })
   const output = (Array.isArray(result) ? result[0] : result).output
-  entryCode = output.find((item) => item.type === 'chunk' && item.isEntry).code
+  const entry = output.find((item) => item.type === 'chunk' && item.isEntry)
+  entryCode = entry.code
   const application = output.find(
     (item) =>
-      item.type === 'chunk' && item.facadeModuleId === join(electronRoot, 'src/main/application.ts')
+      item.type === 'chunk' &&
+      item.isDynamicEntry &&
+      item.moduleIds.includes(join(electronRoot, 'src/main/application.ts'))
   )
   assert.ok(application, 'business application must remain a separate, lazy module')
+  assert.ok(entry.dynamicImports.includes(application.fileName))
+  assert.ok(!entry.imports.includes(application.fileName))
+  assert.ok(!entry.moduleIds.includes(join(electronRoot, 'src/main/application.ts')))
   applicationImport = `./${application.fileName}`
   const supervisorBuild = await build({
     configFile: false,
@@ -217,7 +223,10 @@ function launch(
         events.push(['application'])
         // Resolve after launch replay, without timing sleeps.
         queueMicrotask(() => queueMicrotask(() => completed.resolve()))
-        return application
+        // Shared modules between dynamic entries can make Rollup expose the
+        // application namespace instead of a facade with direct exports. Both
+        // forms must still reach this require only after ownership is acquired.
+        return { ...application, application }
       }
       if (id.startsWith('node:') || id === 'zod' || id === 'image-dimensions') return require(id)
       throw new Error(`Forbidden pre-ownership dependency: ${id}`)

@@ -1,4 +1,5 @@
 import type { Meta, StoryObj } from '@storybook/react';
+import { useState } from 'react';
 import { fn } from 'storybook/test';
 import {
   getServerNow,
@@ -9,6 +10,8 @@ import {
 
 import { MobileSettingsLayout } from '@/components/mobile/mobile-settings-layout';
 import { MachineDetailPane } from '@/components/settings/machine-detail-pane';
+import { AccountMachinesOverviewView } from '@/components/settings/account-machines-overview';
+import { ForceMobileLayoutProvider } from '@/hooks/use-mobile';
 
 const machineId = 'mobile-device-story' as MachineId;
 const machine: MachineViewMeta = {
@@ -159,4 +162,65 @@ export const AgentConfigTab: Story = {
     title: 'Agent 配置',
     isAgentConfigTab: true,
   },
+};
+
+function AccountMachineNavigation() {
+  const [selected, setSelected] = useState(false);
+  return (
+    <ForceMobileLayoutProvider force>
+      <div style={{ height: '100dvh' }}>
+        <MobileSettingsLayout
+          title="Account"
+          isNativeApp
+          isMachineDetail={selected}
+          isAgentConfigTab={false}
+          onBack={() => setSelected(false)}
+        >
+          {selected ? (
+            <MachineDetailPane
+              mode="devices"
+              machine={machine}
+              configs={[]}
+              isOwn
+              isLocal={false}
+              ownerName={null}
+              sharedWithTeam={false}
+              canDelete={false}
+              onRename={async () => {}}
+              onDelete={async () => {}}
+              onAddConfig={() => {}}
+              onEditConfig={() => {}}
+            />
+          ) : (
+            <AccountMachinesOverviewView
+              items={[
+                {
+                  id: machineId,
+                  name: machine.name,
+                  os: machine.os,
+                  isOnline: true,
+                  sharedWithTeam: false,
+                  agents: [],
+                  directories: [],
+                },
+              ]}
+              onManageMachine={() => setSelected(true)}
+            />
+          )}
+        </MobileSettingsLayout>
+      </div>
+    </ForceMobileLayoutProvider>
+  );
+}
+
+export const AccountMachineManagement: Story = {
+  beforeEach: () => {
+    const nativeWindow = window as Window & { __LODY_NATIVE__?: boolean };
+    const previous = nativeWindow.__LODY_NATIVE__;
+    nativeWindow.__LODY_NATIVE__ = true;
+    return () => {
+      nativeWindow.__LODY_NATIVE__ = previous;
+    };
+  },
+  render: () => <AccountMachineNavigation />,
 };

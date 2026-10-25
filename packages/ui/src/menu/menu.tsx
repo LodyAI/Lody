@@ -1,3 +1,4 @@
+import { nativeScrollbar } from '../scroll-area/surface';
 import { Menu as BaseMenu } from '@base-ui/react/menu';
 import * as stylex from '@stylexjs/stylex';
 import {
@@ -284,6 +285,7 @@ export const MenuContent = forwardRef<HTMLDivElement, MenuContentProps>(function
             return appendClassName(
               stylex.props(
                 surface.popup,
+                nativeScrollbar,
                 surface.popupMenu,
                 width === 'compact' && surface.popupMenuCompact,
                 hidden && hiddenSurfaceForSide(state.side)

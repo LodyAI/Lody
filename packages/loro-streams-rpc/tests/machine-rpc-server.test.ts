@@ -3287,6 +3287,59 @@ describe('LoroStreamsMachineRpcServer', () => {
     server.stop();
   });
 
+  it('returns the project member probe through the request reply stream', async () => {
+    const fake = createFakeStreamClient();
+    const result = {
+      type: 'project/probe-local-member' as const,
+      repoFullName: 'acme/api',
+      isGit: true,
+      submodules: [{ path: 'proto', url: '../proto.git', repoFullName: 'acme/proto' }],
+    };
+    const server = new LoroStreamsMachineRpcServer({
+      now: () => 1,
+      logger: createSilentLogger(),
+      workspaceId: 'workspace-1' as WorkspaceId,
+      machineId: 'machine-1' as MachineId,
+      streamClient: fake.streamClient,
+      getMachineStatus: vi.fn(),
+      refreshMachineAcpCapabilities: vi.fn(),
+      probeLocalProjectMember: async ({ localProjectId, requestedByUserId }) => {
+        if (localProjectId !== 'local-1' || requestedByUserId !== 'user-1')
+          throw new Error('Access denied');
+        return result;
+      },
+    });
+    fake.pushBatch({
+      messages: [
+        {
+          jsonrpc: '2.0',
+          id: 'probe-1',
+          method: 'project/probe-local-member',
+          rpcVersion: '1',
+          machineId: 'machine-1',
+          workspaceId: 'workspace-1',
+          replyTo: 'workspace-1:rpc:res:client',
+          sentAt: 1,
+          expiresAt: 5001,
+          params: { localProjectId: 'local-1', requestedByUserId: 'user-1' },
+        },
+      ],
+      nextOffset: '1',
+      cursor: '1',
+      upToDate: true,
+    });
+    await server.start();
+    try {
+      await fake.waitForAppendedCount(1);
+      expect(fake.appended[0]).toMatchObject({
+        streamId: 'workspace-1:rpc:res:client',
+        value: { id: 'probe-1', method: 'project/probe-local-member', result },
+      });
+    } finally {
+      server.stop();
+    }
+  });
+
   it('handles local project git state RPC requests', async () => {
     const workspaceId = 'workspace-1' as WorkspaceId;
     const machineId = 'machine-1' as MachineId;

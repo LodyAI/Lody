@@ -1371,6 +1371,7 @@ describe('session MCP input schemas', () => {
     expect(waitUntilMetaSynced).toHaveBeenCalledOnce();
     expect(waitUntilMetaSynced).toHaveBeenCalledWith({
       reason: 'mcp.session_rename_many:current-session-id',
+      timeoutMs: 30_000,
     });
   });
 

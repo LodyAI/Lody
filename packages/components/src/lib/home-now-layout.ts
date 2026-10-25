@@ -3,7 +3,14 @@
  * lists, or one long list beside three short ones, in a tall window or a short one. The
  * arithmetic only; the picture is `components/chat/home/now-board.tsx`.
  *
- * Four rules keep it calm under load:
+ * Four rules keep it calm under load, and one keeps it still:
+ * - Fixed places. Every list always has its tile in the same place: needs you over just
+ *   finished on the left, the usage over running over worth continuing on the right. A list with
+ *   nothing is a one-line tile, not a gap, so no tile ever changes column or disappears from
+ *   under the pointer while the lists change; tiles only grow and shrink in place.
+ * - One statement when nothing happens. With every list empty, one card on the left says that
+ *   all is quiet while usage keeps its place on the right; the busy lists return the moment
+ *   anything is happening.
  * - A row budget. The board shows at most `HOME_NOW_ROW_BUDGET` rows in all. Every list with
  *   something gets one row; the rest goes by priority (needs you, running, just finished, worth
  *   continuing), each up to its own cap. When it is busy the lower lists give way first, never
@@ -11,9 +18,6 @@
  * - The window's height. Given the rows the stage has room for (`maxRows`, per column), the
  *   budget shrinks until the taller column fits, down to one row per list. Below that the board
  *   does not fit (`fits: false`) and the dashboard folds it into its line.
- * - Two balanced columns, not rows of pairs. A tile is as tall as what it shows, and each goes,
- *   in priority order, to whichever column is shorter so far (the usage starts the right one),
- *   so a long list never stretches a short neighbour into an empty box.
  * - Level bottoms. The shorter column then shows more of its own lists, row by row, until it
  *   reaches the taller one or has nothing left to show, so the board ends on one line with
  *   real rows rather than an empty band.
@@ -43,8 +47,21 @@ export type HomeNowBlock =
   | { kind: 'quiet' };
 
 /**
- * One column spanning the board, or two halves. `fits` is false when even one row per list is
- * taller than `maxRows`; the columns are then that smallest layout.
+ * The fixed column of each list. What waits on the person's reply (needs you, just finished)
+ * reads first at the left; what is in motion and what can wait sit under the usage at the right.
+ * The two longest lists, needs you and running, stand in different columns, so a busy board
+ * spends both.
+ */
+const HOME_NOW_COLUMN: Readonly<Record<HomeNowListKey, 0 | 1>> = {
+  attention: 0,
+  finished: 0,
+  running: 1,
+  next: 1,
+};
+
+/**
+ * Two halves when usage is present. `fits` is false when even one row per list is taller than
+ * `maxRows`; the columns are then that smallest layout.
  */
 export type HomeNowLayout = { columns: HomeNowBlock[][]; fits: boolean };
 
@@ -72,7 +89,10 @@ export function allocateHomeNowRows(
   return shown;
 }
 
-/** A block's height in rows: its title, its rows, and a "Show all" line when some are hidden. */
+/**
+ * A block's height in rows: its title, its rows, and a "Show all" line when some are hidden. A
+ * list with nothing is its title.
+ */
 export function homeNowBlockHeight(block: HomeNowBlock, totals: HomeNowTotals): number {
   if (block.kind === 'usage') return 4;
   if (block.kind === 'quiet') return 3;
@@ -85,28 +105,18 @@ function columnHeight(column: readonly HomeNowBlock[], totals: HomeNowTotals): n
 
 function placeHomeNow(
   shown: Record<HomeNowListKey, number>,
-  totals: HomeNowTotals,
-  hasUsage: boolean
+  hasUsage: boolean,
+  nothingHappening: boolean
 ): HomeNowBlock[][] {
-  const blocks: HomeNowBlock[] = HOME_NOW_LISTS.filter((key) => shown[key] > 0).map((key) => ({
-    kind: 'list',
-    key,
-    shown: shown[key],
-  }));
-  if (blocks.length === 0) blocks.push({ kind: 'quiet' });
-  // A lone tile takes the whole board rather than half of it beside nothing.
-  if (!hasUsage && blocks.length === 1) return [blocks];
-
-  const columns: HomeNowBlock[][] = [[], []];
-  const heights = [0, 0];
-  if (hasUsage) {
-    columns[1]!.push({ kind: 'usage' });
-    heights[1] = homeNowBlockHeight({ kind: 'usage' }, totals);
+  // Nothing at all is happening: one statement about it, instead of four empty lists.
+  if (nothingHappening) {
+    const columns: HomeNowBlock[][] = [[{ kind: 'quiet' }]];
+    if (hasUsage) columns.push([{ kind: 'usage' }]);
+    return columns;
   }
-  for (const block of blocks) {
-    const column = heights[0]! <= heights[1]! ? 0 : 1;
-    columns[column]!.push(block);
-    heights[column] = (heights[column] ?? 0) + homeNowBlockHeight(block, totals);
+  const columns: HomeNowBlock[][] = [[], hasUsage ? [{ kind: 'usage' }] : []];
+  for (const key of HOME_NOW_LISTS) {
+    columns[HOME_NOW_COLUMN[key]]!.push({ kind: 'list', key, shown: shown[key] });
   }
   return columns;
 }
@@ -117,7 +127,6 @@ function placeHomeNow(
  * hidden row also drops its "Show all" line, so that row costs nothing.
  */
 function levelHomeNow(columns: HomeNowBlock[][], totals: HomeNowTotals): void {
-  if (columns.length < 2) return;
   const target = Math.max(...columns.map((column) => columnHeight(column, totals)));
   for (const column of columns) {
     let grew = true;
@@ -151,9 +160,10 @@ export function layoutHomeNow(
   maxRows: number = Number.POSITIVE_INFINITY
 ): HomeNowLayout {
   const lists = HOME_NOW_LISTS.filter((key) => totals[key] > 0).length;
+  const nothingHappening = lists === 0;
   let columns: HomeNowBlock[][] = [];
   for (let budget = HOME_NOW_ROW_BUDGET; budget >= lists; budget -= 1) {
-    columns = placeHomeNow(allocateHomeNowRows(totals, budget), totals, hasUsage);
+    columns = placeHomeNow(allocateHomeNowRows(totals, budget), hasUsage, nothingHappening);
     const tallest = Math.max(...columns.map((column) => columnHeight(column, totals)));
     if (tallest <= maxRows) {
       levelHomeNow(columns, totals);
@@ -162,3 +172,25 @@ export function layoutHomeNow(
   }
   return { columns, fits: false };
 }
+
+/**
+ * The tallest column any lists can make, in `homeNowBlockHeight` rows: the height the dashboard
+ * keeps for its board, so that what the lists hold never moves the line above them. Levelling
+ * only fills up to the taller column, and a list's rows never pass its cap before it, so lists
+ * up to one past their caps (one more brings the "Show all" line) are every case there is.
+ */
+export const HOME_NOW_TALLEST_COLUMN: number = (() => {
+  let tallest = 0;
+  const range = (key: HomeNowListKey) =>
+    Array.from({ length: HOME_NOW_ROW_CAP[key] + 2 }, (_, index) => index);
+  for (const attention of range('attention'))
+    for (const running of range('running'))
+      for (const finished of range('finished'))
+        for (const next of range('next'))
+          for (const hasUsage of [false, true]) {
+            const totals = { attention, running, finished, next };
+            const { columns } = layoutHomeNow(totals, hasUsage);
+            tallest = Math.max(tallest, ...columns.map((column) => columnHeight(column, totals)));
+          }
+  return tallest;
+})();

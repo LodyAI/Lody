@@ -5,6 +5,7 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { LoroMap } from 'loro-crdt';
+import { createLoroSessionData } from '@lody/shared/session-data';
 import { createHistoryWriter, resolveSessionConversationConfig } from '@lody/shared';
 import {
   useConversationVersion,
@@ -15,6 +16,7 @@ import {
 import { useIncrementalSearchBlocks } from '../src/hooks/use-incremental-search-blocks';
 import {
   createConversationSession,
+  createConversationViewFromReader,
   createConversationDerivation,
   collectConversationConfigSources,
   type ConversationView,
@@ -30,6 +32,8 @@ import {
 import { useConversationStreamItems } from '../src/hooks/use-conversation-stream-items';
 import { useSessionTurnFacts } from '../src/components/sessions/session-turn-facts';
 import { useSessionMcpSelection } from '../src/hooks/use-session-mcp-selection';
+import { FloatingPermissionRequest } from '../src/components/sessions/floating-permission-request';
+import { initI18n } from '../src/i18n';
 
 let root: Root;
 let container: HTMLDivElement;
@@ -68,6 +72,128 @@ const flush = async () => {
 };
 
 describe('conversation view React readers', () => {
+  it.each([false, true])(
+    'shows a synced Core question while older history is blocked (existing tool: %s)',
+    async (existingTool) => {
+      await initI18n('en');
+      const history = buildFixtureHistory(2);
+      const active = history.at(-1)!;
+      active.finished = false;
+      delete active.endedAt;
+      const source = buildSessionDoc(history);
+      const peer = reimport(source);
+      const idle = createManualIdle();
+      const session = createConversationSession(source, {
+        sessionId: FIXTURE_SESSION_ID,
+        scheduleIdle: idle.scheduleIdle,
+      });
+      const data = createLoroSessionData({ sessionId: FIXTURE_SESSION_ID, doc: peer });
+      let releaseOlder!: () => void;
+      const olderGate = new Promise<void>((resolve) => {
+        releaseOlder = resolve;
+      });
+      const view = createConversationViewFromReader(
+        {
+          ...data.history,
+          readTurnForDisplay: async (id) => {
+            if (id !== active.id) await olderGate;
+            return data.history.readTurnForDisplay(id);
+          },
+        },
+        {
+          sessionId: FIXTURE_SESSION_ID,
+          tailKeep: 1,
+          hydrateChunkSize: 1,
+          scheduleIdle: idle.scheduleIdle,
+          yieldToEventLoop: () => Promise.resolve(),
+        }
+      );
+      await flushReaderChanges();
+      views.push(view);
+      function QuestionSurface() {
+        const tail = useConversationTail(view, { extendToLastUserTurn: true });
+        const current = view.turn(view.turnCount - 1);
+        const text = current?.items.filter((item) => item.type === 'text').at(-1);
+        return (
+          <>
+            <output>{text?.type === 'text' ? text.text : ''}</output>
+            <FloatingPermissionRequest
+              sessionId={FIXTURE_SESSION_ID}
+              sessionStatus={{ type: 'requestPermission' }}
+              sessionHistory={
+                tail.availableTurns as Parameters<
+                  typeof FloatingPermissionRequest
+                >[0]['sessionHistory']
+              }
+            />
+          </>
+        );
+      }
+      try {
+        await act(async () => root.render(<QuestionSurface />));
+        await flush();
+        expect(container.textContent).not.toContain('Which storage should we use?');
+        createHistoryWriter(source).updateEntry(active.id, (entry) => {
+          entry.items.push({ type: 'text', text: 'Concurrent output is still arriving' });
+          return entry;
+        });
+        source.commit();
+        const result = await session.sessionData.commands.applyHistoryAction({
+          kind: 'permission-request',
+          requestId: 'question-request',
+          request: {
+            sessionId: 'acp-test',
+            toolCall: { toolCallId: existingTool ? 'tc-1' : 'synthetic-question', kind: 'think' },
+            options: [{ optionId: 'answer', name: 'Submit answers', kind: 'allow_once' }],
+            _meta: {
+              lody: {
+                elicitation: {
+                  version: 1,
+                  questions: [
+                    {
+                      id: 'question_0',
+                      header: 'Storage',
+                      question: 'Which storage should we use?',
+                      options: [{ label: 'SQLite' }, { label: 'Files' }],
+                      multiSelect: false,
+                    },
+                  ],
+                },
+              },
+            },
+          },
+        });
+        expect(result.matched).toBe(true);
+        await act(async () => {
+          peer.import(source.export({ mode: 'update', from: peer.version() }));
+          await flushReaderChanges();
+        });
+        await flush();
+        expect(container.querySelector('output')?.textContent).toBe(
+          'Concurrent output is still arriving'
+        );
+        expect(view.turn(0)).toBeUndefined();
+        expect(view.turn(view.turnCount - 1)?.finished).toBe(false);
+        expect(container.textContent).toContain('Which storage should we use?');
+        expect(container.textContent).toContain('SQLite');
+        expect(container.textContent).toContain('Files');
+        // Resolving unrelated old bodies neither unlocks nor duplicates the form.
+        await act(async () => {
+          releaseOlder();
+          await flushReaderChanges();
+        });
+        await flush();
+        expect(view.turn(0)).toBeDefined();
+        expect(container.textContent?.split('Which storage should we use?')).toHaveLength(2);
+      } finally {
+        releaseOlder();
+        view.dispose();
+        data.dispose();
+        session.dispose();
+      }
+    }
+  );
+
   it('updates streamed text and summaries without rebuilding unchanged business facts or losing the draft', async () => {
     const { doc, view } = await openView(2);
     let facts!: ReturnType<typeof useSessionTurnFacts>;

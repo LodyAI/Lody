@@ -1815,7 +1815,11 @@ const AgentActivityStatus = ({
           shimmer ? 'agent-shimmer' : undefined
         )}
       >
-        {message ? <LiveActivityLabel label={label} message={message} /> : label}
+        {message && tone !== 'warning' ? (
+          <LiveActivityLabel label={label} message={message} />
+        ) : (
+          label
+        )}
       </span>
     </div>
   );
@@ -2142,21 +2146,32 @@ type AssistantTurnLayout = ReturnType<typeof buildAssistantTurnRenderLayout> & {
 const EMPTY_SUBAGENT_TASKS: ReturnType<typeof collectSubagentTasks> = [];
 
 // Assistant-turn layout (block grouping + subagent-task collection) is derived
-// purely from the message's id/items/finished state, and `buildChatStreamItems`
+// from the message and provider display policy. `buildChatStreamItems`
 // hands back a stable parsed-message object for unchanged turns and a fresh one
 // whenever the turn changes. Keying the cache by that reference lets only the
 // streaming turn recompute; without it, each streamed token re-runs these
 // O(items) passes for every turn in the whole conversation.
-const assistantTurnLayoutCache = new WeakMap<SessionHistoryParsed, AssistantTurnLayout>();
+const assistantTurnLayoutCache = new WeakMap<
+  SessionHistoryParsed,
+  { showThoughts: boolean; layout: AssistantTurnLayout }
+>();
 
-const getAssistantTurnLayout = (message: SessionHistoryParsed): AssistantTurnLayout => {
+const getAssistantTurnLayout = (
+  message: SessionHistoryParsed,
+  showThoughts: boolean
+): AssistantTurnLayout => {
   const cached = assistantTurnLayoutCache.get(message);
-  if (cached) return cached;
+  if (cached?.showThoughts === showThoughts) return cached.layout;
   const layout: AssistantTurnLayout = {
-    ...buildAssistantTurnRenderLayout(message.id, message.items, message.finished === true),
+    ...buildAssistantTurnRenderLayout(
+      message.id,
+      message.items,
+      message.finished === true,
+      showThoughts
+    ),
     subagentTasks: collectSubagentTasks(message.items),
   };
-  assistantTurnLayoutCache.set(message, layout);
+  assistantTurnLayoutCache.set(message, { showThoughts, layout });
   return layout;
 };
 
@@ -2302,7 +2317,10 @@ export const buildChatVirtualRows = ({
       continue;
     }
 
-    const { blocks, segments, entries, subagentTasks } = getAssistantTurnLayout(message);
+    const { blocks, segments, entries, subagentTasks } = getAssistantTurnLayout(
+      message,
+      showThoughts
+    );
     const cachedState = selectionLayout?.expandState ?? getExpandState(message.id);
     const cachedExpansion = cachedState.expandedGroups;
     // Collapse into a "Worked for …" summary ONLY when the turn both finished and
@@ -6233,7 +6251,9 @@ const AssistantThoughtVirtualRow = memo(function AssistantThoughtVirtualRow({
   fontSize: ConversationFontSize;
 }) {
   const { t } = useTranslation();
-  /* The thought is prose on the rail, with no glyph: it is the agent's own
+  /* Only builtin DSH exposes these thought rows. Reuse answer typography,
+     preserving thought search identity and the separate disclosure label.
+     The thought is prose on the rail, with no glyph: it is the agent's own
      words, and an icon beside every paragraph of it read as a list of
      objects. The group header already says "Thought". */
   return (
@@ -6243,11 +6263,9 @@ const AssistantThoughtVirtualRow = memo(function AssistantThoughtVirtualRow({
           ? t('sessions.toolActivity.thinking', 'Thinking…')
           : t('sessions.toolActivity.thought', 'Thought')}
       </span>
-      <MarkdownRenderer
+      <MarkdownBlock
         text={text}
         size={fontSize}
-        compact
-        className={ACTIVITY_STEP_BODY_CLASS}
         isStreaming={isStreaming}
         searchBlockId={getThoughtSearchBlockId(messageId, itemIndex)}
       />

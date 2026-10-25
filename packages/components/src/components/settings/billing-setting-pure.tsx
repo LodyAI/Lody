@@ -1,5 +1,6 @@
+import type { ReferralCheckoutOffer, ReferralPolicy } from '@lody/cloud-api';
 import { text as uiText } from '@lody/ui/tokens/scales.stylex';
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import * as stylex from '@stylexjs/stylex';
 import { FREE_SESSION_LIMIT_PER_WORKSPACE, FREE_WORKSPACE_MEMBER_LIMIT } from '@lody/shared';
@@ -18,6 +19,7 @@ import { PricingPageLink } from '../shared/pricing-page-link';
 import { FounderCallLink } from '../shared/founder-call-link';
 import { SubscribeConsentNotice } from '../shared/subscribe-consent-notice';
 import { CompactLinkRow, CompactRow, CompactSection } from './compact-layout';
+import { ReferralCreditNotice, ReferralOfferNotice } from './referral-settings-pure';
 import { settingsSurface as surface } from './surface';
 import { settingContainerClass } from '.';
 import { settingsType as type } from './type.stylex';
@@ -284,6 +286,7 @@ export interface BillingOverviewData {
   currentPeriodEnd: number | null;
   seatCount: number;
   canManageBilling: boolean;
+  referralRewardsSupported?: boolean;
   pricing: {
     monthlyAmountCents: number;
     yearlyAmountCents: number;
@@ -384,6 +387,20 @@ export interface BillingSettingsViewProps {
   onRetryInvoices: () => void;
   onViewInvoice?: (invoice: BillingInvoice) => void;
   onCancelExternalCheckout?: () => void;
+  /**
+   * The server confirmed a first checkout now would get the referral discount.
+   * `onRemove` checks out at the regular price instead; absent once the
+   * workspace is bound to its referral.
+   */
+  referralOffer?: {
+    onRemove?: () => void;
+    policy?: ReferralPolicy;
+    retained?: ReferralCheckoutOffer['retained'];
+  } | null;
+  /** The workspace's referral card, placed right under the plan. */
+  referral?: ReactNode;
+  /** Available referral credit (cents), spent on the first subscription payment. */
+  referralCreditCents?: number;
 }
 
 export function invoiceDisplayAmount(invoice: BillingInvoice): number | null {
@@ -536,6 +553,9 @@ export function BillingSettingsView({
   onRetryInvoices,
   onViewInvoice,
   onCancelExternalCheckout,
+  referralOffer = null,
+  referral = null,
+  referralCreditCents = 0,
 }: BillingSettingsViewProps) {
   const { t } = useTranslation();
   const [code, setCode] = useState('');
@@ -603,6 +623,23 @@ export function BillingSettingsView({
   const yearlyPerMonthPrice = formatUsd(Math.round(overview.pricing.yearlyAmountCents / 12));
   const selectedOfferLabel =
     interval === 'month' && overview.pricing.monthlyOfferKey ? t('billing.founderPrice') : null;
+  // The newcomer discount never stacks with a locked offer price.
+  const selectedOfferKey =
+    interval === 'year' ? overview.pricing.yearlyOfferKey : overview.pricing.monthlyOfferKey;
+  const showReferralOffer = !selectedOfferKey && !canScheduleAfterGift;
+  // Checkout takes one discount: credit pays toward a first payment with no other offer.
+  // An open Checkout already holds its credit, so the notice is only for a new one.
+  const firstPaymentCents =
+    (interval === 'year'
+      ? overview.pricing.yearlyAmountCents
+      : overview.pricing.monthlyAmountCents) * Math.max(1, overview.seatCount);
+  const creditCents = Math.min(referralCreditCents, firstPaymentCents);
+  const showReferralCredit =
+    creditCents > 0 &&
+    !referralOffer &&
+    !selectedOfferKey &&
+    !canScheduleAfterGift &&
+    !checkoutInProgress;
 
   // Plan status line: the interval label carries the inline switch link right
   // beside it, and the status detail (renewal/cancel date, past-due, pending)
@@ -853,6 +890,8 @@ export function BillingSettingsView({
         </div>
       </CompactSection>
 
+      {referral}
+
       {/* Session usage */}
       {!paidCheckoutPending ? (
         <CompactSection>
@@ -973,6 +1012,28 @@ export function BillingSettingsView({
               </Tabs.Panel>
             </Tabs.Root>
 
+            {referralOffer && showReferralOffer ? (
+              <ReferralOfferNotice
+                interval={interval}
+                regularCents={
+                  interval === 'year'
+                    ? overview.pricing.yearlyAmountCents
+                    : overview.pricing.monthlyAmountCents
+                }
+                disabled={pendingAction !== null}
+                onRemove={referralOffer.onRemove}
+                policy={referralOffer.policy}
+                retained={referralOffer.retained}
+              />
+            ) : null}
+
+            {showReferralCredit ? (
+              <ReferralCreditNotice
+                creditCents={creditCents}
+                firstPaymentCents={firstPaymentCents}
+              />
+            ) : null}
+
             {permissionBlocked ? (
               /* The button is gone for members, so its slot has to say why —
                  and who to ask — instead of leaving a silent gap. */
@@ -1025,50 +1086,6 @@ export function BillingSettingsView({
               <FounderCallLink />
             </div>
           </div>
-        </CompactSection>
-      ) : null}
-
-      {/* Gift codes extend both free and paid Plus timelines. Keep redemption
-          independent from the upgrade card so paid subscribers can use it. */}
-      {canManage &&
-      overview.effectivePlanTier !== 'enterprise' &&
-      (!isPaid || overview.giftStackingSupported) ? (
-        <CompactSection>
-          <CompactRow label={t('billing.redeemTitle')} helper={t('billing.redeemSubtitle')}>
-            <label htmlFor="billing-redemption-code" {...stylex.props(styles.srOnly)}>
-              {t('billing.redeemLabel')}
-            </label>
-            <div {...stylex.props(styles.redeemField)}>
-              <Input
-                id="billing-redemption-code"
-                size="small"
-                value={code}
-                onChange={(event) => setCode(event.target.value)}
-                onKeyDown={(event) => {
-                  if (
-                    event.key === 'Enter' &&
-                    code.trim() &&
-                    !redeemPending &&
-                    !checkoutInProgress
-                  ) {
-                    onRedeemCode(code.trim());
-                  }
-                }}
-                placeholder={t('billing.redeemPlaceholder')}
-                autoComplete="off"
-                spellCheck={false}
-              />
-            </div>
-            <Button
-              variant="secondary"
-              size="small"
-              disabled={redeemPending || checkoutInProgress || !code.trim()}
-              onClick={() => onRedeemCode(code.trim())}
-            >
-              {redeemPending ? <Spinner size="small" /> : null}
-              {t('billing.redeemApply')}
-            </Button>
-          </CompactRow>
         </CompactSection>
       ) : null}
 
@@ -1153,6 +1170,50 @@ export function BillingSettingsView({
               ))}
             </ul>
           )}
+        </CompactSection>
+      ) : null}
+
+      {/* Gift codes extend both free and paid Plus timelines. Keep redemption
+          independent from the upgrade card so paid subscribers can use it. */}
+      {canManage &&
+      overview.effectivePlanTier !== 'enterprise' &&
+      (!isPaid || overview.giftStackingSupported) ? (
+        <CompactSection>
+          <CompactRow label={t('billing.redeemTitle')} helper={t('billing.redeemSubtitle')}>
+            <label htmlFor="billing-redemption-code" {...stylex.props(styles.srOnly)}>
+              {t('billing.redeemLabel')}
+            </label>
+            <div {...stylex.props(styles.redeemField)}>
+              <Input
+                id="billing-redemption-code"
+                size="small"
+                value={code}
+                onChange={(event) => setCode(event.target.value)}
+                onKeyDown={(event) => {
+                  if (
+                    event.key === 'Enter' &&
+                    code.trim() &&
+                    !redeemPending &&
+                    !checkoutInProgress
+                  ) {
+                    onRedeemCode(code.trim());
+                  }
+                }}
+                placeholder={t('billing.redeemPlaceholder')}
+                autoComplete="off"
+                spellCheck={false}
+              />
+            </div>
+            <Button
+              variant="secondary"
+              size="small"
+              disabled={redeemPending || checkoutInProgress || !code.trim()}
+              onClick={() => onRedeemCode(code.trim())}
+            >
+              {redeemPending ? <Spinner size="small" /> : null}
+              {t('billing.redeemApply')}
+            </Button>
+          </CompactRow>
         </CompactSection>
       ) : null}
 

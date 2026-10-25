@@ -87,6 +87,9 @@ export type SessionInfoBarProps = {
    *  cluster action with its own popover; never staged. Pass it only when a
    *  relation exists, so an otherwise empty bar still hides. */
   relations?: ReactNode;
+  /** Repositories of a multi-repository conversation: a plain cluster action
+   *  with its own popover, placed before Related sessions; never staged. */
+  projectMembers?: ReactNode;
   /** Open the session Browser panel. Renders a
    *  plain action chip in the cluster zone (no stage form). */
   onOpenBrowser?: () => void;
@@ -272,6 +275,7 @@ export function SessionInfoBar({
   contextActions,
   onOpenAllChanges,
   relations,
+  projectMembers,
   onOpenBrowser,
   onOpenIosSimulator,
   privateAccessStatus,
@@ -363,6 +367,7 @@ export function SessionInfoBar({
   const hasMachine = !!machine?.name.trim();
   const hasSurfaceContent = !!(
     defaultKey ||
+    projectMembers ||
     relations ||
     onOpenBrowser ||
     onOpenIosSimulator ||
@@ -446,7 +451,12 @@ export function SessionInfoBar({
     (key) => present[key] && key !== stagedKey
   );
   const clusterNonEmpty =
-    hasMachine || clusterKeys.length > 0 || !!relations || !!onOpenBrowser || !!onOpenIosSimulator;
+    hasMachine ||
+    clusterKeys.length > 0 ||
+    !!projectMembers ||
+    !!relations ||
+    !!onOpenBrowser ||
+    !!onOpenIosSimulator;
 
   const surfaceStyleProps = stylex.props(
     styles.surface,
@@ -514,6 +524,7 @@ export function SessionInfoBar({
           ) : null}
           {privateAccessStatus &&
           (clusterKeys.length > 0 ||
+            projectMembers ||
             relations ||
             onOpenBrowser ||
             onOpenIosSimulator ||
@@ -521,7 +532,8 @@ export function SessionInfoBar({
             <span aria-hidden="true" {...stylex.props(styles.divider)} />
           ) : null}
           {clusterKeys.map((key) => renderItem(key, 'cluster'))}
-          {/* Relations and Browser are plain actions with no stage form. */}
+          {/* Repositories, Relations and Browser are plain actions with no stage form. */}
+          {projectMembers}
           {relations}
           {onOpenBrowser ? (
             <ActionChip

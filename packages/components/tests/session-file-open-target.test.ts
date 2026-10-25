@@ -78,6 +78,25 @@ describe('resolveSessionFileOpenTarget', () => {
     });
   });
 
+  it.each([
+    ['docs/a.md#L12', true],
+    ['./docs/a.md', true],
+    ['/workspace/project/docs/a.md', undefined],
+    ['%2Fworkspace%2Fproject%2Fdocs%2Fa.md', undefined],
+    ['C:/repo/a.md', undefined],
+    ['~/docs/a.md', undefined],
+    ['../repo/a.md', undefined],
+  ])('limits candidate discovery to ambiguous relative hrefs: %s', (rawPath, expected) => {
+    expect(
+      resolveSessionFileOpenTarget({ rawPath, pathKind: 'markdown-href', workspacePath: WORKSPACE })
+        .resolveMarkdownLink
+    ).toBe(expected);
+    expect(
+      resolveSessionFileOpenTarget({ rawPath, pathKind: 'canonical', workspacePath: WORKSPACE })
+        .resolveMarkdownLink
+    ).toBeUndefined();
+  });
+
   describe('an href an agent wrote', () => {
     const otherWorktree = '/tmp/worktrees/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
 

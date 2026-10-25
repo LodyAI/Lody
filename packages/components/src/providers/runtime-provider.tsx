@@ -661,6 +661,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
           eagerSyncSurface,
         });
         workspaceRuntime = await createWorkspaceRuntime({
+          content: { mode: 'plaintext' },
           signal: initializationAbort.signal,
           accountId,
           workspaceSlug,

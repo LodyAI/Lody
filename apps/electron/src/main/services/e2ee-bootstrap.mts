@@ -48,6 +48,7 @@ export class DesktopE2eeBootstrapError extends Data.TaggedError('DesktopE2eeBoot
     | 'corrupt'
     | 'storage'
     | 'closed'
+    | 'missing-binding'
 }> {}
 
 const fail = (code: DesktopE2eeBootstrapError['code']) => new DesktopE2eeBootstrapError({ code })
@@ -199,6 +200,9 @@ export const makeDesktopE2eeBootstrap = Effect.fn('DesktopE2eeBootstrap.open')(f
           throw cause
         }
       } else if (version !== 1 || id !== applicationId) throw fail('corrupt')
+      db.exec(
+        'CREATE TABLE IF NOT EXISTS workspace_bindings(workspace_id TEXT PRIMARY KEY, genesis TEXT UNIQUE NOT NULL, request_id TEXT NOT NULL)'
+      )
       if (
         db.prepare('SELECT account_id FROM metadata').all().length !== 1 ||
         db.prepare('SELECT account_id FROM metadata').get()?.account_id !== accountId
@@ -371,7 +375,72 @@ export const makeDesktopE2eeBootstrap = Effect.fn('DesktopE2eeBootstrap.open')(f
       genesisHashHex: hex(genesis.toBytes())
     })
   })
+  const recordCreated = (input: { workspaceId: string; genesisHash: string; requestId?: string }) =>
+    withLock(
+      sql(() => {
+        if (
+          !input ||
+          !/^[A-Za-z0-9_-]{1,128}$/.test(input.workspaceId) ||
+          !/^[0-9a-f]{64}$/.test(input.genesisHash)
+        )
+          throw fail('invalid-input')
+        const bound = db
+          .prepare('SELECT genesis,request_id FROM workspace_bindings WHERE workspace_id=?')
+          .get(input.workspaceId)
+        if (
+          bound &&
+          (bound.genesis !== input.genesisHash ||
+            (input.requestId !== undefined && bound.request_id !== input.requestId))
+        )
+          throw fail('conflict')
+        const ids = input.requestId
+          ? [{ request_id: input.requestId }]
+          : db.prepare('SELECT request_id FROM creations WHERE ready=1').all()
+        const found = ids.find((item) => {
+          const row = load(String(item.request_id))
+          return (
+            row?.ready === 1 &&
+            row.record &&
+            hex(hashRecordBytes(row.record).toBytes()) === input.genesisHash
+          )
+        })
+        if (!found) throw fail('missing-binding')
+        db.prepare(
+          'INSERT OR IGNORE INTO workspace_bindings(workspace_id,genesis,request_id) VALUES(?,?,?)'
+        ).run(input.workspaceId, input.genesisHash, String(found.request_id))
+        const actual = db
+          .prepare('SELECT genesis,request_id FROM workspace_bindings WHERE workspace_id=?')
+          .get(input.workspaceId)
+        if (actual?.genesis !== input.genesisHash || actual.request_id !== found.request_id)
+          throw fail('conflict')
+      })
+    )
+  const creationFor = (workspaceId: string) =>
+    withLock(
+      sql(() => {
+        if (!/^[A-Za-z0-9_-]{1,128}$/.test(workspaceId)) throw fail('invalid-input')
+        const bound = db
+          .prepare('SELECT genesis,request_id FROM workspace_bindings WHERE workspace_id=?')
+          .get(workspaceId)
+        if (!bound) throw fail('missing-binding')
+        const row = load(String(bound.request_id))
+        if (
+          !row?.ready ||
+          !row.record ||
+          !row.epoch_blob ||
+          hex(hashRecordBytes(row.record).toBytes()) !== bound.genesis
+        )
+          throw fail('corrupt')
+        return {
+          genesisHash: String(bound.genesis),
+          record: new Uint8Array(row.record),
+          epochBlob: new Uint8Array(row.epoch_blob)
+        }
+      })
+    )
   return Object.freeze({
-    prepareCreation: (input: DesktopE2eeCreationIntent) => withLock(prepare(input))
+    prepareCreation: (input: DesktopE2eeCreationIntent) => withLock(prepare(input)),
+    recordCreated,
+    creationFor
   })
 })

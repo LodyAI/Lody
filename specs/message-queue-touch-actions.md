@@ -13,8 +13,8 @@ retry or cancel a queued message without tapping adjacent controls.
 ## Behavior
 
 At viewport widths up to 600 px or with a coarse pointer, queue action buttons
-have real, non-overlapping boxes at least 44 × 44 px. Actions use a separate line
-so message text keeps its reading width. Fine-pointer desktop controls stay compact.
+have real, non-overlapping boxes at least 44 × 44 px. Actions stay on the
+message line, vertically centered with the index and text, rather than a detached line. Fine-pointer desktop controls stay compact.
 Delivery, edit, reorder and capability rules are unchanged.
 
 ## Evidence and limits

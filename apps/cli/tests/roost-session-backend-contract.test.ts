@@ -3,6 +3,8 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createRequire } from 'node:module';
+import { randomUUID } from 'node:crypto';
+import { execFileSync } from 'node:child_process';
 import { LoroRepo } from 'loro-repo';
 import { LoroDoc } from 'loro-crdt';
 import { Cause, Effect, Exit, Fiber } from 'effect';
@@ -33,9 +35,11 @@ import {
   routeRemoteOwnedSessionHistory,
   type SessionBackendFactory,
 } from '../src/session/session-backend';
-import { NodeLodyHistory } from '@loro-dev/roost/lody-history';
+import { NodeLodyHistory, type HistoryIdentity } from '@loro-dev/roost/lody-history';
 import {
   CURRENT_MACHINE_PROTOCOL_CAPABILITIES,
+  applyNotificationOnHistory,
+  prepareReplacement,
   SessionHistoryReadResponseSchema,
   SessionHistoryWriteResponseSchema,
   getMachineRoomId,
@@ -62,15 +66,29 @@ import {
   hashHistoryEntryForVersion,
   hashText,
   applySessionHistoryPatches,
+  applyHistoryAction,
   type HistoryImportInput,
 } from '@lody/shared/session-data';
-import { Identity } from '@loro-dev/roost';
+import { decodeBatch, Identity } from '@loro-dev/roost';
 import { RoostNativeClient, RoostHostError } from '@loro-dev/roost-node';
 import { describeRoostHistoryFailure } from '../src/session/roost-history-diagnostics';
 import { RoostHistoryGeneration } from '../src/session/roost-history-generation';
+import { RoostDispatchIndex } from '../src/session/roost-dispatch-index';
+import { dispatchEntry, selectDispatchHistory } from '../src/session/session-dispatch-history';
+import { SessionDispatchWatcher } from '../src/session/session-dispatch-watcher';
+import type { SessionExecutionService } from '../src/session/session-execution-service';
+import { readGoalProjection } from '../src/session/roost-goal-projection';
+import { encodeRoostHistoryChange } from '../src/session/roost-history-change-codec';
+import {
+  AGENT_RECEIPTS_TABLE,
+  agentReceiptKey,
+  agentReceiptPut,
+  decodeAgentReceipt,
+} from '../src/session/roost-content-patches';
 import { findNextDispatchableUserTurn } from '../src/session/session-dispatch-logic';
 import type { SessionMeta } from '@lody/shared';
 import { encodeRoostContent } from '../src/session/roost-history-port';
+import { RoostHistoryHead, ROOST_HEAD_KEY } from '../src/session/roost-history-head';
 import { loadRoostOwnerSeedLegacy } from '../src/session/roost-writer-identity';
 import type { SessionBackendContractFixtureFactory } from './session-backend-contract';
 import { defineSessionBackendContract } from './session-backend-contract';
@@ -848,8 +866,22 @@ describe('Production Roost history semantics', () => {
       await fixture.backend.appendHistoryTurn(nativeUser('rpc-retained-user'));
       const workerFailure = new RoostHostError('workerFailed');
       workerFailure.cause = new Error('synthetic private Worker path');
-      const request = vi.spyOn(RoostNativeClient.prototype, 'request');
-      request.mockRejectedValueOnce(workerFailure);
+      const nativeRequest = RoostNativeClient.prototype.request;
+      let rejected = false;
+      const request = vi
+        .spyOn(RoostNativeClient.prototype, 'request')
+        .mockImplementation(function (dto, options) {
+          const target =
+            kind === 'write'
+              ? dto.method === 'writeBatch' && dto.writes?.length
+              : dto.method === 'indexRead' &&
+                dto.keys?.some((key) => key.table === ROOST_HEAD_KEY.table);
+          if (!rejected && dto.stream === `lody-session:${fixture.doc.sessionId}` && target) {
+            rejected = true;
+            return Promise.reject(workerFailure);
+          }
+          return nativeRequest.call(this, dto, options);
+        });
       const noop = () => undefined;
       const handler = new MessageHandler(
         {
@@ -917,8 +949,22 @@ describe('Production Roost history semantics', () => {
     await fixture.backend.appendHistoryTurn(nativeUser('retained-user'));
     const workerFailure = new RoostHostError('workerFailed');
     workerFailure.cause = new Error('synthetic private loader detail');
-    const request = vi.spyOn(RoostNativeClient.prototype, 'request');
-    request.mockRejectedValueOnce(workerFailure);
+    const nativeRequest = RoostNativeClient.prototype.request;
+    let rejected = false;
+    const request = vi
+      .spyOn(RoostNativeClient.prototype, 'request')
+      .mockImplementation(function (dto, options) {
+        if (
+          !rejected &&
+          dto.stream === `lody-session:${fixture.doc.sessionId}` &&
+          dto.method === 'writeBatch' &&
+          dto.writes?.length
+        ) {
+          rejected = true;
+          return Promise.reject(workerFailure);
+        }
+        return nativeRequest.call(this, dto, options);
+      });
     const failure = await fixture.backend
       .appendHistoryTurn(nativeUser('failed-user'))
       .catch((error: unknown) => error);
@@ -1129,6 +1175,325 @@ describe('Production Roost history semantics', () => {
     }
   });
 
+  it('keeps retained projections isolated and refreshes peer corrections before a local patch', async () => {
+    let fixture = await nativeFixture();
+    const id = fixture.doc.sessionId;
+    const previous = {
+      ...nativeAssistant('projection-old'),
+      finished: true,
+      items: [
+        {
+          type: 'tool_call' as const,
+          toolCallId: 'retained-tool',
+          status: 'completed' as const,
+          rawOutput: { text: 'retained output 🙂'.repeat(128) },
+        },
+      ],
+    };
+    await fixture.backend.appendHistoryTurn(nativeUser('projection-u'));
+    await fixture.backend.appendHistoryTurn(previous);
+    await fixture.backend.appendHistoryTurn(nativeUser('projection-next-u'));
+    await fixture.backend.appendHistoryTurn({
+      ...nativeAssistant('projection-active'),
+      items: [{ type: 'text', text: 'start' }],
+    });
+    const snapshot = await fixture.backend.readHistory();
+    const snapshotCopy = structuredClone(snapshot);
+    const exposed = await fixture.backend.readTurn('projection-old');
+    if (exposed.state !== 'ready') throw new Error('Expected retained turn');
+    const tool = exposed.turn.items[0];
+    if (tool?.type !== 'tool_call') throw new Error('Expected retained tool');
+    tool.rawOutput = { text: 'caller mutation' };
+    const append = (operationId: string, text: string) =>
+      fixture.backend.applyAgentBatch({
+        targetAssistantEntryId: 'projection-active',
+        operationIds: [operationId],
+        notifications: [
+          {
+            sessionId: 'synthetic-acp',
+            update: {
+              sessionUpdate: 'agent_message_chunk',
+              content: { type: 'text', text },
+            },
+          },
+        ],
+      });
+    await append('projection-first', '🙂');
+    await append('projection-first', '🙂');
+    expect(snapshot).toEqual(snapshotCopy);
+    expect(await fixture.backend.readTurn('projection-old')).toEqual({
+      state: 'ready',
+      turn: snapshotCopy[1],
+    });
+    expect(await fixture.backend.readTurn('projection-active')).toMatchObject({
+      turn: { items: [{ type: 'text', text: 'start🙂' }] },
+    });
+    const activeSnapshot = await fixture.backend.readTurn('projection-active');
+    if (activeSnapshot.state !== 'ready') throw new Error('Expected active turn');
+    const activeText = activeSnapshot.turn.items[0];
+    if (activeText?.type !== 'text') throw new Error('Expected active text');
+    activeText.text = 'caller mutation of the active path';
+    expect(await fixture.backend.readTurn('projection-active')).toMatchObject({
+      turn: { items: [{ type: 'text', text: 'start🙂' }] },
+    });
+
+    const peer = await nativeFixture(id);
+    await peer.backend.applyHistoryAction({
+      kind: 'upsert-turn',
+      turn: {
+        ...previous,
+        items: [...previous.items, { type: 'text', text: 'peer correction 漢字' }],
+      } as never,
+    });
+    await append('projection-second', '漢字');
+    const complete = await fixture.backend.readHistory();
+    expect(complete.map((entry) => entry.id)).toEqual(snapshotCopy.map((entry) => entry.id));
+    expect(complete[1]).toMatchObject({
+      items: [...previous.items, { type: 'text', text: 'peer correction 漢字' }],
+    });
+    expect(complete[3]).toMatchObject({ items: [{ type: 'text', text: 'start🙂漢字' }] });
+    expect(snapshot).toEqual(snapshotCopy);
+    await peer.close();
+    await fixture.close();
+    fixture = await nativeFixture(id);
+    expect(await fixture.backend.readHistory()).toEqual(complete);
+  });
+
+  it('serves certified text appends while body rereads are unavailable and reopens the same committed content', async () => {
+    let fixture = await nativeFixture();
+    const id = fixture.doc.sessionId;
+    const turnId = 'certified-append';
+    await fixture.backend.appendHistoryTurn({
+      ...nativeAssistant(turnId),
+      items: [
+        {
+          type: 'tool_call',
+          toolCallId: 'retained',
+          status: 'completed',
+          rawOutput: { text: '🙂'.repeat(1024) },
+        },
+        { type: 'text', text: 'start' },
+      ],
+    });
+    const before = await fixture.backend.readTurn(turnId);
+    const beforeCopy = structuredClone(before);
+    const reread = vi
+      .spyOn(NodeLodyHistory.prototype, 'readProjectedMessagesById')
+      .mockRejectedValue(new Error('Synthetic body reread unavailable'));
+    try {
+      for (const [i, text] of ['🙂', '漢字', '\n🚀'].entries()) {
+        await fixture.backend.applyAgentBatch({
+          targetAssistantEntryId: turnId,
+          operationIds: [`certified-${i}`],
+          contents: [{ type: 'text', text }],
+        });
+      }
+      expect(await fixture.backend.readTurn(turnId)).toMatchObject({
+        state: 'ready',
+        turn: {
+          items: [
+            beforeCopy.state === 'ready' ? beforeCopy.turn.items[0] : {},
+            { type: 'text', text: 'start🙂漢字\n🚀' },
+          ],
+        },
+      });
+      expect(before).toEqual(beforeCopy);
+    } finally {
+      reread.mockRestore();
+    }
+    await fixture.backend.applyHistoryAction({ kind: 'finish-assistant', turnId, endedAt: 42 });
+    const complete = await fixture.backend.readHistory();
+    await fixture.close();
+    fixture = await nativeFixture(id);
+    expect(await fixture.backend.readHistory()).toEqual(complete);
+  });
+
+  it('recovers atomically committed text, receipt and active goal after the Native reply is lost', async () => {
+    let fixture = await nativeFixture();
+    const id = fixture.doc.sessionId;
+    const turnId = 'atomic-goal-a';
+    await fixture.backend.appendHistoryTurn(nativeUser('atomic-goal-u'));
+    await fixture.backend.appendHistoryTurn({
+      ...nativeAssistant(turnId),
+      acpTurnId: 'atomic-goal-boundary',
+      items: [
+        {
+          type: 'goal',
+          threadId: 'atomic-goal',
+          objective: 'Preserve this goal',
+          status: 'active',
+        },
+        { type: 'text', text: 'start' },
+      ],
+    });
+    const input = {
+      targetAssistantEntryId: turnId,
+      operationIds: ['atomic-goal-append'],
+      contents: [{ type: 'text' as const, text: '🙂' }],
+    };
+    const original = RoostNativeClient.prototype.request;
+    let committed = false;
+    const lost = vi
+      .spyOn(RoostNativeClient.prototype, 'request')
+      .mockImplementation(async function (...args) {
+        const result = await original.apply(this, args);
+        const command = args[0];
+        if (!committed && command.method === 'writeBatch' && command.derivedIndexes) {
+          const commit = result as Awaited<
+            ReturnType<import('@loro-dev/roost-node').RoostNodeStream['writeBatch']>
+          >;
+          expect(commit.derivedIndexesApplied).toBe(true);
+          const host = this.stream(command.stream);
+          expect(await readGoalProjection(host, commit.through, 2)).toMatchObject({
+            turnId,
+            position: 1,
+            goal: { threadId: 'atomic-goal', status: 'active' },
+          });
+          const receipts = command.indexPuts.map((put) => ({
+            table: put.table,
+            key: Buffer.from(put.keyHex, 'hex'),
+          }));
+          expect((await host.readIndex(receipts)).map((value) => value && [...value])).toEqual(
+            command.indexPuts.map((put) => [...Buffer.from(put.valueHex, 'hex')])
+          );
+          committed = true;
+          // Lose the real Native reply before the SDK adopts its checkpoint.
+          throw new RoostHostError('unknownOutcome');
+        }
+        return result;
+      });
+    try {
+      await expect(fixture.backend.applyAgentBatch(input)).rejects.toMatchObject({
+        code: 'unknownOutcome',
+      });
+    } finally {
+      lost.mockRestore();
+    }
+    expect(committed).toBe(true);
+    await fixture.backend.applyAgentBatch(input);
+    const complete = await fixture.backend.readHistory();
+    expect(complete[1]?.items).toEqual([
+      { type: 'goal', threadId: 'atomic-goal', objective: 'Preserve this goal', status: 'active' },
+      { type: 'text', text: 'start🙂' },
+    ]);
+    expect(
+      await fixture.backend.replaceEditableTail({
+        expectedUserTurnId: 'atomic-goal-u',
+        expectedForkTurnId: 'atomic-goal-boundary',
+        replacement: nativeUser('atomic-goal-replacement') as never,
+      })
+    ).toMatchObject({ status: 'rejected', reason: { code: 'active_goal' } });
+    await fixture.close();
+    fixture = await nativeFixture(id);
+    expect(await fixture.backend.readHistory()).toEqual(complete);
+    await fixture.backend.applyAgentBatch(input);
+    expect(await fixture.backend.readHistory()).toEqual(complete);
+  });
+
+  it('requires authoritative refresh for an uncertified commit and recovers its receipt without duplicating text', async () => {
+    const fixture = await nativeFixture();
+    const turnId = 'uncertified-append';
+    await fixture.backend.appendHistoryTurn({
+      ...nativeAssistant(turnId),
+      items: [{ type: 'text', text: 'start' }],
+    });
+    const input = {
+      targetAssistantEntryId: turnId,
+      operationIds: ['uncertified-operation'],
+      contents: [{ type: 'text' as const, text: '🙂' }],
+    };
+    const commit = RoostHistoryGeneration.prototype.commitPatches;
+    const uncertified = vi
+      .spyOn(RoostHistoryGeneration.prototype, 'commitPatches')
+      .mockImplementationOnce(async function (...args) {
+        return { ...(await commit.apply(this, args)), metadataAttached: false };
+      });
+    const reread = vi
+      .spyOn(NodeLodyHistory.prototype, 'readProjectedMessagesById')
+      .mockRejectedValue(new Error('Synthetic authoritative refresh failure'));
+    try {
+      await expect(fixture.backend.applyAgentBatch(input)).rejects.toThrow(
+        'Synthetic authoritative refresh failure'
+      );
+    } finally {
+      uncertified.mockRestore();
+      reread.mockRestore();
+    }
+    await fixture.backend.applyAgentBatch(input);
+    expect(await fixture.backend.readTurn(turnId)).toMatchObject({
+      state: 'ready',
+      turn: { items: [{ type: 'text', text: 'start🙂' }] },
+    });
+  });
+
+  it('seals an installed primary without rereading the window and preserves its signed parent for the next turn', async () => {
+    let fixture = await nativeFixture();
+    const id = fixture.doc.sessionId;
+    const finish = NodeLodyHistory.prototype.finish;
+    let restoreWindow: (() => void) | undefined;
+    const seal = vi
+      .spyOn(NodeLodyHistory.prototype, 'finish')
+      .mockImplementationOnce(async function (...args) {
+        await finish.apply(this, args);
+        const blocked = vi
+          .spyOn(NodeLodyHistory.prototype, 'readActiveBranchPage')
+          .mockRejectedValue(new Error('Synthetic window reread unavailable'));
+        restoreWindow = () => blocked.mockRestore();
+      });
+    try {
+      await fixture.backend.appendHistoryTurn({
+        ...nativeAssistant('single-seal'),
+        finished: true,
+        items: [{ type: 'text', text: 'sealed 🙂' }],
+      });
+    } finally {
+      restoreWindow?.();
+      seal.mockRestore();
+    }
+    await fixture.backend.appendHistoryTurn(nativeUser('after-single-seal'));
+    const complete = await fixture.backend.readHistory();
+    expect(complete.map((entry) => entry.id)).toEqual(['single-seal', 'after-single-seal']);
+    expect(complete[0]).toMatchObject({
+      finished: true,
+      items: [{ type: 'text', text: 'sealed 🙂' }],
+    });
+    await fixture.close();
+    fixture = await nativeFixture(id);
+    expect(await fixture.backend.readHistory()).toEqual(complete);
+  });
+
+  it('reloads foreign branch work that arrives while sealing an installed primary', async () => {
+    const fixture = await nativeFixture();
+    const peer = await nativeFixture(fixture.doc.sessionId);
+    const finish = NodeLodyHistory.prototype.finish;
+    const seal = vi
+      .spyOn(NodeLodyHistory.prototype, 'finish')
+      .mockImplementationOnce(async function (...args) {
+        await finish.apply(this, args);
+        await peer.backend.appendHistoryTurn(nativeUser('foreign-after-seal'));
+      });
+    try {
+      await fixture.backend.appendHistoryTurn({
+        ...nativeAssistant('local-seal'),
+        finished: true,
+        items: [{ type: 'text', text: 'local content' }],
+      });
+      expect((await fixture.backend.readHistory()).map((entry) => entry.id)).toEqual([
+        'local-seal',
+        'foreign-after-seal',
+      ]);
+      await fixture.backend.appendHistoryTurn(nativeAssistant('local-after-foreign'));
+      expect((await fixture.backend.readHistory()).map((entry) => entry.id)).toEqual([
+        'local-seal',
+        'foreign-after-seal',
+        'local-after-foreign',
+      ]);
+    } finally {
+      seal.mockRestore();
+      await peer.close();
+    }
+  });
+
   it('transmits native streaming edits without resending an unchanged large tool result', async () => {
     const fixture = await coldHistoryHandlerFixture(1);
     const id = [...fixture.docs.keys()][0]!;
@@ -1176,7 +1541,8 @@ describe('Production Roost history semantics', () => {
         );
         expect(response.success).toBe(true);
         const changes = SessionHistoryChangesSchema.parse(response.result);
-        if (changes.state !== 'ready' || !changes.patches) throw new Error('Expected native patches');
+        if (changes.state !== 'ready' || !changes.patches)
+          throw new Error('Expected native patches');
         expect(changes.patches.baseCheckpoint).toBe(checkpoint);
         expect(changes.patches.turns.map((row) => row.turnId)).toEqual([turn.id]);
         expect(changes.bodies).toEqual({ changed: [], suffix: [] });
@@ -1370,93 +1736,168 @@ describe('Production Roost history semantics', () => {
 
   it('reads legacy whole-message states across reopen and converts only the next mutation', async () => {
     let fixture = await nativeFixture();
-    const turn = { ...nativeAssistant('legacy-state'), finished: true,
-      items: [{ type: 'text' as const, text: 'sealed body' }] };
+    const turn = {
+      ...nativeAssistant('legacy-state'),
+      finished: true,
+      items: [{ type: 'text' as const, text: 'sealed body' }],
+    };
     await fixture.backend.appendHistoryTurn(turn);
     const legacy = { ...turn, items: [{ type: 'text' as const, text: 'legacy correction' }] };
     const batch = NodeLodyHistory.prototype.commitHistoryBatch;
-    const previous = vi.spyOn(NodeLodyHistory.prototype, 'commitHistoryBatch').mockImplementation(async function (batchId, commands, options) {
-      return batch.call(this, batchId, commands.map(command =>
-        command.type === 'accept' && command.identity.segmentId.startsWith('state:')
-          ? { ...command, content: encodeRoostContent(legacy) } : command
-      ), options);
-    });
+    const previous = vi
+      .spyOn(NodeLodyHistory.prototype, 'commitHistoryBatch')
+      .mockImplementation(async function (batchId, commands, options) {
+        return batch.call(
+          this,
+          batchId,
+          commands.map((command) =>
+            command.type === 'accept' && command.identity.segmentId.startsWith('state:')
+              ? { ...command, content: encodeRoostContent(legacy) }
+              : command
+          ),
+          options
+        );
+      });
     try {
-      await fixture.backend.applyHistoryAction({ kind: 'assistant-items', turnId: turn.id,
-        mode: 'replace', items: legacy.items });
-    } finally { previous.mockRestore(); }
+      await fixture.backend.applyHistoryAction({
+        kind: 'assistant-items',
+        turnId: turn.id,
+        mode: 'replace',
+        items: legacy.items,
+      });
+    } finally {
+      previous.mockRestore();
+    }
     const sessionId = fixture.doc.sessionId;
     await fixture.close();
     fixture = await nativeFixture(sessionId);
     expect(await fixture.backend.readTurn(turn.id)).toMatchObject({ state: 'ready', turn: legacy });
     const items = [{ type: 'text' as const, text: 'next correction 🙂' }];
-    await fixture.backend.applyHistoryAction({ kind: 'assistant-items', turnId: turn.id,
-      mode: 'replace', items });
+    await fixture.backend.applyHistoryAction({
+      kind: 'assistant-items',
+      turnId: turn.id,
+      mode: 'replace',
+      items,
+    });
     await fixture.close();
     fixture = await nativeFixture(sessionId);
     expect(await fixture.backend.readTurn(turn.id)).toMatchObject({
-      state: 'ready', turn: { ...legacy, items },
+      state: 'ready',
+      turn: { ...legacy, items },
     });
   });
 
   it('keeps post-seal state updates bounded and recovers a lost first-state reply', async () => {
     const fixture = await nativeFixture();
     const untouched = 'sealed synthetic tool body '.repeat(16384);
-    const tool = { type: 'tool_call' as const, toolCallId: 'large-tool', status: 'completed' as const,
-      title: 'Synthetic tool', rawOutput: { text: untouched } };
+    const tool = {
+      type: 'tool_call' as const,
+      toolCallId: 'large-tool',
+      status: 'completed' as const,
+      title: 'Synthetic tool',
+      rawOutput: { text: untouched },
+    };
     const turn = {
       ...nativeAssistant('sealed-state-budget'),
-      items: [
-        tool,
-        { type: 'text' as const, text: 'base🙂' },
-      ],
+      items: [tool, { type: 'text' as const, text: 'base🙂' }],
     };
     let primaryId: Uint8Array | undefined;
     const accept = NodeLodyHistory.prototype.acceptToView;
-    const capture = vi.spyOn(NodeLodyHistory.prototype, 'acceptToView').mockImplementation(async function (...args) {
-      const result = await accept.apply(this, args);
-      if (args[0].input.businessId === turn.id) primaryId = result.turnId.slice();
-      return result;
-    });
-    try { await fixture.backend.appendHistoryTurn(turn); }
-    finally { capture.mockRestore(); }
+    const capture = vi
+      .spyOn(NodeLodyHistory.prototype, 'acceptToView')
+      .mockImplementation(async function (...args) {
+        const result = await accept.apply(this, args);
+        if (args[0].input.businessId === turn.id) primaryId = result.turnId.slice();
+        return result;
+      });
+    try {
+      await fixture.backend.appendHistoryTurn(turn);
+    } finally {
+      capture.mockRestore();
+    }
     if (!primaryId) throw new Error('Expected primary');
-    await fixture.backend.applyHistoryAction({ kind: 'finish-assistant', turnId: turn.id, endedAt: 42 });
-    const updates = () => {
-      const db = new Database(join(nativeDirectory, 'history.db'), { readonly: true });
+    await fixture.backend.applyHistoryAction({
+      kind: 'finish-assistant',
+      turnId: turn.id,
+      endedAt: 42,
+    });
+    const updates = async () => {
+      const dbPath = join(nativeDirectory, 'history.db');
+      const seed = await loadRoostOwnerSeedLegacy(dbPath);
+      const reader = new RoostNativeClient({
+        dbPath,
+        seed,
+        allowedOwners: [Identity.fromSeed(seed).owner()],
+        maxQueuedRequests: 32,
+        maxQueuedBytes: 8 * 1024 * 1024,
+      });
       try {
-        const kv = db.pragma('user_version', { simple: true }) === 4
-          ? '(SELECT roost_spaces.name AS space, key, value FROM roost_kv JOIN roost_spaces ON roost_spaces.id = roost_kv.space_id)'
-          : 'roost_kv';
-        return db.prepare(`SELECT key, value FROM ${kv} WHERE space LIKE ?`)
-          .all(`%${fixture.doc.sessionId}%:updates`) as { key: Buffer; value: Buffer }[];
-      } finally { db.close(); }
+        await reader.ready;
+        const stream = reader.stream(`lody-session:${fixture.doc.sessionId}`);
+        const headers = await stream.latestTurnHeaders(256n);
+        expect(headers.length).toBeLessThan(256);
+        const rows: { key: Buffer; value: Buffer }[] = [];
+        for (const header of headers) {
+          expect(header.nextSeq).toBeLessThan(4096n);
+          for (let seq = 0n; seq < header.nextSeq; seq++) {
+            const value = Buffer.from(await stream.exportUpdates(header.turnId, seq, 1n));
+            expect(decodeBatch(value)).toHaveLength(1);
+            const key = Buffer.alloc(24);
+            key.set(header.turnId);
+            key.writeBigUInt64BE(seq, 16);
+            rows.push({ key, value });
+          }
+        }
+        return rows;
+      } finally {
+        await reader.close();
+      }
     };
-    const before = new Map(updates().map(row => [row.key.toString('hex'), row.value]));
+    const before = new Map((await updates()).map((row) => [row.key.toString('hex'), row.value]));
+    expect(before.size).toBeGreaterThan(0);
     let items = turn.items;
     const batch = NodeLodyHistory.prototype.commitHistoryBatch;
-    const lost = vi.spyOn(NodeLodyHistory.prototype, 'commitHistoryBatch').mockImplementationOnce(async function (...args) {
-      await batch.apply(this, args);
-      throw new Error('Lost first-state reply');
-    });
+    const lost = vi
+      .spyOn(NodeLodyHistory.prototype, 'commitHistoryBatch')
+      .mockImplementationOnce(async function (...args) {
+        await batch.apply(this, args);
+        throw new Error('Lost first-state reply');
+      });
     items = [tool, { type: 'text', text: 'base🙂🚀' }];
     try {
-      await expect(fixture.backend.applyHistoryAction({ kind: 'assistant-items', turnId: turn.id,
-        mode: 'replace', items })).rejects.toThrow('Lost first-state reply');
-    } finally { lost.mockRestore(); }
-    expect(await fixture.backend.readTurn(turn.id)).toMatchObject({ state: 'ready', turn: { items } });
+      await expect(
+        fixture.backend.applyHistoryAction({
+          kind: 'assistant-items',
+          turnId: turn.id,
+          mode: 'replace',
+          items,
+        })
+      ).rejects.toThrow('Lost first-state reply');
+    } finally {
+      lost.mockRestore();
+    }
+    expect(await fixture.backend.readTurn(turn.id)).toMatchObject({
+      state: 'ready',
+      turn: { items },
+    });
     for (let step = 1; step < 32; step++) {
       items = [tool, { type: 'text', text: `base🙂${'🚀'.repeat(step + 1)}` }];
-      await fixture.backend.applyHistoryAction({ kind: 'assistant-items', turnId: turn.id, mode: 'replace', items });
+      await fixture.backend.applyHistoryAction({
+        kind: 'assistant-items',
+        turnId: turn.id,
+        mode: 'replace',
+        items,
+      });
     }
     await fixture.backend.flushLocalWrites();
-    const after = updates();
+    const after = await updates();
     for (const row of after) {
       const old = before.get(row.key.toString('hex'));
       if (old) expect(row.value.equals(old)).toBe(true);
     }
-    expect(after.filter(row => before.has(row.key.toString('hex'))).length).toBe(before.size);
-    const added = after.filter(row => !before.has(row.key.toString('hex')));
+    expect(after.filter((row) => before.has(row.key.toString('hex'))).length).toBe(before.size);
+    const added = after.filter((row) => !before.has(row.key.toString('hex')));
+    expect(added.length).toBeGreaterThan(0);
     expect(added.reduce((sum, row) => sum + row.value.length, 0)).toBeLessThan(128 * 1024);
     for (const row of added) {
       expect(row.key.subarray(0, 16).equals(Buffer.from(primaryId))).toBe(false);
@@ -1466,7 +1907,8 @@ describe('Production Roost history semantics', () => {
     await fixture.close();
     const reopened = await nativeFixture(sessionId);
     expect(await reopened.backend.readTurn(turn.id)).toMatchObject({
-      state: 'ready', turn: { items, finished: true, endedAt: 42 },
+      state: 'ready',
+      turn: { items, finished: true, endedAt: 42 },
     });
     expect((await reopened.backend.readHistory()).length).toBe(1);
   });
@@ -1690,21 +2132,158 @@ describe('Production Roost history semantics', () => {
     ]);
   });
 
-  it('republishes a committed history correction after its control cursor write fails', async () => {
+  it.each([1, 3])(
+    'never replays an applied append after %i publication CAS failures',
+    async (failures) => {
+      const fixture = await nativeFixture();
+      await fixture.backend.appendHistoryTurn({
+        ...nativeAssistant('publish-once'),
+        finished: true,
+        items: [{ type: 'text', text: 'base' }],
+      });
+      const publish = RoostHistoryHead.prototype.publish;
+      let remaining = failures;
+      const spy = vi.spyOn(RoostHistoryHead.prototype, 'publish').mockImplementation(function (
+        ...args
+      ) {
+        if (remaining-- > 0)
+          return Promise.reject(
+            Object.assign(new Error('Synthetic publication race'), { code: 'stale' })
+          );
+        return publish.apply(this, args);
+      });
+      try {
+        const append = fixture.backend.applyHistoryAction({
+          kind: 'assistant-items',
+          turnId: 'publish-once',
+          mode: 'append',
+          items: [{ type: 'text', text: 'once' }],
+        });
+        if (failures === 1) await append;
+        else await expect(append).rejects.toMatchObject({ code: 'publication_stale' });
+      } finally {
+        spy.mockRestore();
+      }
+      const read = await fixture.backend.readTurn('publish-once');
+      if (read.state !== 'ready') throw new Error('Committed body unavailable');
+      expect(
+        read.turn.items
+          .filter((item) => item.type === 'text')
+          .map((item) => item.text)
+          .join('')
+      ).toBe('baseonce');
+      expect(await fixture.backend.history.getPublication!()).toMatchObject({ historyCount: 1 });
+    }
+  );
+
+  it('invalidates an older loaded page after another owner changes it without reading that page again', async () => {
+    const id = `outside-window-${ordinal++}`;
+    const root = `lody-session:${id}`;
+    const hint = Promise.withResolvers<void>();
+    let after: bigint | undefined;
+    let native!: RoostNativeClient;
+    let tapped = false;
+    const onChanges = RoostNativeClient.prototype.onChanges;
+    const tap = vi
+      .spyOn(RoostNativeClient.prototype, 'onChanges')
+      .mockImplementation(function (stream, listener, options) {
+        if (stream !== root || tapped) return onChanges.call(this, stream, listener, options);
+        tapped = true;
+        native = this;
+        return onChanges.call(
+          this,
+          stream,
+          (cursor, indexChange) => {
+            listener(cursor, indexChange);
+            if (after !== undefined && cursor !== null && cursor > after) hint.resolve();
+          },
+          options
+        );
+      });
+    const source = await nativeFixture(id);
+    tap.mockRestore();
+    for (let i = 0; i < 45; i++) await source.backend.appendHistoryTurn(nativeUser(`outside-${i}`));
+    await source.backend.history.readRange(0, 1);
+    const changes: { kind: string; from?: number; ids?: readonly string[] }[] = [];
+    const observation = source.backend.history.observe((change) => changes.push(change));
+    await observation.initial;
+    const events = await native.stream(root).eventsAfter(0n, 1000n);
+    after = events.at(-1)?.cursor ?? 0n;
+    const peer = await nativeFixture(id);
+    try {
+      await peer.backend.applyHistoryAction({
+        kind: 'user-status',
+        turnId: 'outside-0',
+        status: 'seen',
+      });
+      await hint.promise;
+      await source.backend.flushLocalWrites();
+      expect(
+        changes.some((change) =>
+          change.kind === 'changed' ? change.ids?.includes('outside-0') : change.from === 0
+        )
+      ).toBe(true);
+      expect(await source.backend.readTurn('outside-0')).toMatchObject({
+        state: 'ready',
+        turn: { status: 'seen' },
+      });
+    } finally {
+      observation.unsubscribe();
+      await peer.close();
+      await source.close();
+    }
+  });
+
+  it('does not replay an ordinary command after a committed content reply is superseded', async () => {
+    const fixture = await nativeFixture();
+    await fixture.backend.appendHistoryTurn({
+      ...nativeAssistant('commit-once'),
+      items: [{ type: 'text', text: 'base' }],
+    });
+    const commit = RoostHistoryGeneration.prototype.commitPatches;
+    const spy = vi
+      .spyOn(RoostHistoryGeneration.prototype, 'commitPatches')
+      .mockImplementationOnce(async function (...args) {
+        await commit.apply(this, args);
+        throw Object.assign(new Error('Synthetic projection supersession'), { code: 'stale' });
+      });
+    try {
+      await expect(
+        fixture.backend.applyHistoryAction({
+          kind: 'assistant-items',
+          turnId: 'commit-once',
+          mode: 'append',
+          items: [{ type: 'text', text: 'once' }],
+        })
+      ).rejects.toMatchObject({ code: 'write_stale' });
+    } finally {
+      spy.mockRestore();
+    }
+    const read = await fixture.backend.readTurn('commit-once');
+    if (read.state !== 'ready') throw new Error('Committed body unavailable');
+    expect(
+      read.turn.items
+        .filter((item) => item.type === 'text')
+        .map((item) => item.text)
+        .join('')
+    ).toBe('baseonce');
+  });
+
+  it('republishes a committed history correction after its Native head write fails', async () => {
     const fixture = await nativeFixture();
     await fixture.backend.appendHistoryTurn(nativeUser('cursor-u'));
     await fixture.backend.appendHistoryTurn(nativeAssistant('cursor-a'));
-    const before = await fixture.doc.getRoostHistoryCursor();
+    const before = await fixture.backend.history.getPublication!();
     const spy = vi
-      .spyOn(fixture.doc, 'setRoostHistoryCursor')
-      .mockRejectedValueOnce(new Error('Injected cursor failure'));
+      .spyOn(RoostHistoryHead.prototype, 'publish')
+      .mockRejectedValueOnce(new Error('Injected head failure'));
     await expect(
       fixture.backend.applyHistoryAction({
         kind: 'user-status',
         turnId: 'cursor-u',
         status: 'seen',
       })
-    ).rejects.toThrow('Injected cursor failure');
+    ).rejects.toThrow('Injected head failure');
     spy.mockRestore();
     await fixture.backend.applyHistoryAction({
       kind: 'user-status',
@@ -1715,8 +2294,8 @@ describe('Production Roost history semantics', () => {
       state: 'ready',
       turn: { status: 'seen' },
     });
-    expect((await fixture.doc.getRoostHistoryCursor())?.historyRevision).toBeGreaterThan(
-      before!.historyRevision!
+    expect((await fixture.backend.history.getPublication!()).historyRevision).toBeGreaterThan(
+      before.historyRevision
     );
   });
 
@@ -1846,6 +2425,17 @@ describe('Production Roost history semantics', () => {
       acpTurnId: 'concurrent-boundary',
     });
     await first.backend.appendHistoryTurn(nativeUser('concurrent-tail-u'));
+    await first.backend.appendHistoryTurn({
+      ...nativeAssistant('concurrent-tail-a'),
+      items: [{ type: 'text', text: 'start' }],
+    });
+    // Prime an applied content/goal checkpoint, then race its reuse in the next
+    // command. A matching cached cursor must not hide a subsequent peer event.
+    await first.backend.applyAgentBatch({
+      targetAssistantEntryId: 'concurrent-tail-a',
+      operationIds: ['concurrent-goal-prime'],
+      contents: [{ type: 'text', text: 'warm' }],
+    });
     const peer = await nativeFixture(first.doc.sessionId);
     const original = RoostHistoryGeneration.prototype.commitPatches;
     let injected = false;
@@ -1855,6 +2445,7 @@ describe('Production Roost history semantics', () => {
         const result = await original.apply(this, args);
         if (!injected) {
           injected = true;
+          expect(result.derivedIndexesApplied).toBe(true);
           await peer.backend.applyHistoryAction({
             kind: 'upsert-turn',
             turn: {
@@ -1875,10 +2466,10 @@ describe('Production Roost history semantics', () => {
         return result;
       });
     try {
-      await first.backend.applyHistoryAction({
-        kind: 'user-status',
-        turnId: 'concurrent-tail-u',
-        status: 'handled',
+      await first.backend.applyAgentBatch({
+        targetAssistantEntryId: 'concurrent-tail-a',
+        operationIds: ['concurrent-goal-append'],
+        contents: [{ type: 'text', text: '🙂' }],
       });
     } finally {
       spy.mockRestore();
@@ -1895,6 +2486,7 @@ describe('Production Roost history semantics', () => {
       'concurrent-goal-u',
       'concurrent-goal-a',
       'concurrent-tail-u',
+      'concurrent-tail-a',
     ]);
   });
 
@@ -1926,7 +2518,7 @@ describe('Production Roost history semantics', () => {
       turn: { id: 'lost-replacement' },
     });
     await fixture.backend.flushLocalWrites();
-    expect(await fixture.doc.getRoostHistoryCursor()).toMatchObject({ historyCount: 1 });
+    expect(await fixture.backend.history.getPublication!()).toMatchObject({ historyCount: 1 });
     expect((await fixture.backend.readHistory()).map((entry) => entry.id)).toEqual([
       'lost-replacement',
     ]);
@@ -2242,7 +2834,7 @@ describe('Production Roost history semantics', () => {
           { position: 4, turnId: 'target-a' },
         ]);
       await target.backend.flushLocalWrites();
-      expect(await target.doc.getRoostHistoryCursor()).toMatchObject({ historyCount: 5 });
+      expect(await target.backend.history.getPublication!()).toMatchObject({ historyCount: 5 });
       expect((await target.backend.readHistory()).map((entry) => entry.id)).toEqual([
         'copied-one',
         'copied-two',
@@ -2407,9 +2999,13 @@ describe('Production Roost history semantics', () => {
     }
   });
 
-  it.each([false, true])(
-    'updates two independent renderer replicas through encrypted RPC without control hints (lostNativeReply=%s)',
-    async (lostNativeReply) => {
+  it.each([
+    { lostNativeReply: false, lostReadReplies: 0 },
+    { lostNativeReply: true, lostReadReplies: 0 },
+    { lostNativeReply: true, lostReadReplies: 2 },
+  ])(
+    'updates two independent renderer replicas through encrypted RPC without control hints (lostNativeReply=$lostNativeReply, lostReadReplies=$lostReadReplies)',
+    async ({ lostNativeReply, lostReadReplies }) => {
       // The renderer package owns its browser test dependency; the CLI runtime
       // stays free of IndexedDB dependencies.
       const rendererRequire = createRequire(
@@ -2439,9 +3035,24 @@ describe('Production Roost history semantics', () => {
       // Substitute only delivery. Both production RPC endpoints still serialize,
       // encrypt, validate and decrypt every request/result.
       const receivers = new Map<string, LoroJsonLiveBatchHandler>();
+      const replyStarted = Promise.withResolvers<void>();
+      const releaseReply = Promise.withResolvers<void>();
+      let holdNextReply = false;
       const streams: LoroStreamsJsonStreamClient = {
         ensureJsonStream: async () => undefined,
         appendJson: async (streamId, value) => {
+          if (
+            holdNextReply &&
+            streamId.includes(':rpc:res') &&
+            typeof value === 'object' &&
+            value !== null &&
+            'method' in value &&
+            value.method === 'session/history-write'
+          ) {
+            holdNextReply = false;
+            replyStarted.resolve();
+            await releaseReply.promise;
+          }
           const receive = receivers.get(streamId);
           if (!receive) throw new Error('Synthetic stream has no receiver');
           await receive({ messages: [JSON.parse(JSON.stringify(value))], upToDate: true });
@@ -2533,20 +3144,54 @@ describe('Production Roost history semantics', () => {
         const chunks = Array.from({ length: 31 }, (_, index) => `跨端-${index}🙂;`);
         const finalText = chunks.join('');
         const visible = peerDocs.map(() => Promise.withResolvers<void>());
+        const remainingReadFailures = peerDocs.map(() => 0);
         vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
-        const ticks: number[] = [];
+        type Timer = Parameters<typeof clearTimeout>[0];
+        const recoveryTimers = new Map<Timer, () => void>();
+        const watchTimeouts = new Map<Timer, () => void>();
         let timerReady = Promise.withResolvers<void>();
         const setTimer = globalThis.setTimeout;
+        const clearTimer = globalThis.clearTimeout;
         vi.spyOn(globalThis, 'setTimeout').mockImplementation((...args) => {
-          const timer = setTimer(...args);
-          // Advance scheduled recovery explicitly, without expiring a parked
-          // 15-second owner watch or relying on native I/O scheduling speed.
-          if (args[1] === 0 || args[1] === 500) {
-            ticks.push(args[1]);
-            timerReady.resolve();
-          }
+          const scheduled =
+            // The two lost reads below need both the first and second retry.
+            // Do not drive longer timers that also serve as RPC deadlines.
+            args[1] === 0 || args[1] === 500 || args[1] === 1_000
+              ? recoveryTimers
+              : args[1] === 15_000
+                ? watchTimeouts
+                : undefined;
+          if (!scheduled) return setTimer(...args);
+          const run = () => {
+            if (!scheduled.delete(timer)) return;
+            clearTimer(timer);
+            args[0](...args.slice(2));
+          };
+          const timer = setTimer(run, args[1]);
+          scheduled.set(timer, run);
+          if (scheduled === recoveryTimers) timerReady.resolve();
           return timer;
         });
+        vi.spyOn(globalThis, 'clearTimeout').mockImplementation((timer) => {
+          recoveryTimers.delete(timer);
+          watchTimeouts.delete(timer);
+          clearTimer(timer);
+        });
+        const driveRecoveryUntil = async (completed: Promise<unknown>) => {
+          for (;;) {
+            const outcome = await Promise.race([
+              completed.then(() => 'completed' as const),
+              (recoveryTimers.size ? Promise.resolve() : timerReady.promise).then(
+                () => 'recovery' as const
+              ),
+            ]);
+            if (outcome === 'completed') return;
+            timerReady = Promise.withResolvers<void>();
+            // Nested zero-delay timers can land at fake now + 1. Drive live
+            // callbacks, not requested delays, without expiring RPC deadlines.
+            recoveryTimers.values().next().value?.();
+          }
+        };
         for (const [index, peerDoc] of peerDocs.entries()) {
           const peer = createRemoteRoostSessionDataFactory({
             accountId: `synthetic-peer-${index}`,
@@ -2560,6 +3205,11 @@ describe('Production Roost history semantics', () => {
                 expect(query.withPatches).toBe(index === 0 ? true : undefined);
               const result = await client.requestSessionHistoryRead({ sessionId: id, query });
               if (!result) throw new Error('Missing history read response');
+              const remaining = remainingReadFailures[index] ?? 0;
+              if (query.kind === 'watchChanges' && remaining > 0) {
+                remainingReadFailures[index] = remaining - 1;
+                throw new Error('Synthetic history read reply loss');
+              }
               if (query.kind === 'watchChanges' || query.kind === 'readChanges') {
                 const changes = SessionHistoryChangesSchema.parse(result.result);
                 if (changes.state === 'ready' && changes.patches) {
@@ -2588,8 +3238,8 @@ describe('Production Roost history semantics', () => {
           stops.push(observation.unsubscribe);
           await observation.initial;
         }
-        await vi.advanceTimersByTimeAsync(0);
-        await parked.promise;
+        await driveRecoveryUntil(parked.promise);
+        expect(watchTimeouts.size).toBe(2);
         host.enqueueACPUpdate(sessionId, {
           sessionId,
           update: {
@@ -2626,18 +3276,16 @@ describe('Production Roost history semantics', () => {
         }
         await host.flushACPUpdatesNow(sessionId);
         expect(host.store.get(sessionId).acpUpdateBuffer).toEqual([]);
-        const displayed = Promise.all(visible.map((result) => result.promise));
-        for (;;) {
-          const outcome = await Promise.race([
-            displayed.then(() => 'displayed' as const),
-            (ticks.length ? Promise.resolve() : timerReady.promise).then(() => 'tick' as const),
-          ]);
-          if (outcome === 'displayed') break;
-          timerReady = Promise.withResolvers<void>();
-          const delay = ticks.shift();
-          if (delay === undefined) throw new Error('Missing scheduled recovery');
-          await vi.advanceTimersByTimeAsync(delay);
+        remainingReadFailures.fill(lostReadReplies);
+        if (lostNativeReply) {
+          // A committed write whose reply is lost can miss the owner wakeup.
+          // Release the already parked watches through their timeout callback:
+          // fake time must not leave this production recovery path frozen, and
+          // advancing the global clock could expire unrelated RPC deadlines.
+          [...watchTimeouts.values()].forEach((expire) => expire());
         }
+        await driveRecoveryUntil(Promise.all(visible.map((result) => result.promise)));
+        expect(remainingReadFailures).toEqual([0, 0]);
         const expected = {
           id: assistantId,
           items: [
@@ -2657,13 +3305,25 @@ describe('Production Roost history semantics', () => {
           {},
         ]);
         if (!lostNativeReply) expect(receivedContentPatches).toBe(true);
+        // Force a reply to overlap teardown rather than relying on native I/O timing.
+        holdNextReply = true;
+        const finalWrite = client.requestSessionHistoryWrite({
+          sessionId,
+          operation: 'apply_action',
+          payload: { action: { kind: 'user-status', turnId: 'replica-user', status: 'handled' } },
+        });
+        await replyStarted.promise;
         stops.forEach((stop) => stop());
         peers.forEach((peer) => peer.dispose?.());
         server.stop();
-        client.stop();
+        releaseReply.resolve();
+        // Keep the response receiver alive until in-flight server replies settle.
+        // Removing it first makes appendResponse retry on a frozen fake timer.
         await Promise.all(
           (server as unknown as { inFlightRequests: Set<Promise<void>> }).inFlightRequests
         );
+        expect(await finalWrite).toMatchObject({ success: true });
+        client.stop();
         vi.restoreAllMocks();
         vi.useRealTimers();
         await fixture.close();
@@ -2673,14 +3333,21 @@ describe('Production Roost history semantics', () => {
           turn: expected,
         });
         expect(await reopened.backend.readHistoryCount()).toBe(2);
+        expect(await reopened.backend.readTurn('replica-user')).toMatchObject({
+          state: 'ready',
+          turn: { status: 'handled' },
+        });
       } finally {
         stops.forEach((stop) => stop());
         peers.forEach((peer) => peer.dispose?.());
         server.stop();
-        client.stop();
+        releaseReply.resolve();
+        // Keep the response receiver alive until in-flight server replies settle.
+        // Removing it first makes appendResponse retry on a frozen fake timer.
         await Promise.all(
           (server as unknown as { inFlightRequests: Set<Promise<void>> }).inFlightRequests
         );
+        client.stop();
         vi.restoreAllMocks();
         vi.useRealTimers();
         vi.unstubAllGlobals();
@@ -2756,6 +3423,13 @@ describe('Production Roost history semantics', () => {
       state: 'ready',
       turn: { items: [{ type: 'text', text: 'start:samesame' }] },
     });
+    expect(fixture.doc.handle!.doc.getMap('roostHistoryCursor').get('operationId')).toBeUndefined();
+    const progress = await fixture.backend.history.getPublication!();
+    expect(progress).toMatchObject({
+      historyCount: 1,
+      historyChange: { kind: 'changed', ids: ['retry-a'] },
+    });
+    expect(progress.checkpoint).toBeTruthy();
     await expect(
       fixture.backend.applyAgentBatch({
         ...input,
@@ -2773,7 +3447,7 @@ describe('Production Roost history semantics', () => {
   });
 
   it('keeps sustained streaming writes bounded with a large unchanged field and survives reopen', async () => {
-    const fixture = await nativeFixture();
+    const fixture = await nativeFixture(randomUUID());
     const untouched = 'unchanged'.repeat(4096);
     await fixture.backend.appendHistoryTurn({
       ...nativeAssistant('bounded-stream'),
@@ -2814,33 +3488,62 @@ describe('Production Roost history semantics', () => {
       expect(text).toBe(output);
       expect(streamed.turn.items?.[0]).toMatchObject({ rawOutput: { text: untouched } });
     }
-    const db = new Database(join(nativeDirectory, 'history.db'), { readonly: true });
+    const dbPath = join(nativeDirectory, 'history.db');
+    const seed = await loadRoostOwnerSeedLegacy(dbPath);
+    const reader = new RoostNativeClient({
+      dbPath,
+      seed,
+      allowedOwners: [Identity.fromSeed(seed).owner()],
+      maxQueuedRequests: 32,
+      maxQueuedBytes: 8 * 1024 * 1024,
+    });
     try {
-      const containerVersion = db.pragma('user_version', { simple: true });
-      expect([3, 4]).toContain(containerVersion);
-      const kvRows =
-        containerVersion === 4
-          ? `(SELECT roost_spaces.name AS space, key, value
-              FROM roost_kv JOIN roost_spaces ON roost_spaces.id = roost_kv.space_id)`
-          : 'roost_kv';
-      const stats = db
-        .prepare(`SELECT COUNT(*) AS rows, SUM(LENGTH(key) + LENGTH(value)) AS bytes
-        FROM ${kvRows} WHERE space LIKE ?`)
-        .get(`%${fixture.doc.sessionId}%:updates`) as { rows: number; bytes: number };
-      expect(stats.rows).toBeGreaterThan(128);
-      expect(stats.bytes).toBeLessThan(1024 * 1024);
-      const receipts = db
-        .prepare(`SELECT COUNT(*) AS count FROM ${kvRows} WHERE space LIKE ?`)
-        .get(`%${fixture.doc.sessionId}%:lody_agent_operation_receipts_v1`) as { count: number };
-      expect(receipts.count).toBe(128);
-      const projection = db
-        .prepare(`SELECT COUNT(*) AS count FROM ${kvRows} WHERE space LIKE ?`)
-        .get(`%${fixture.doc.sessionId}%:projection`) as { count: number };
-      expect(projection.count).toBeGreaterThan(0);
-      expect(projection.count).toBeLessThan(1000);
+      await reader.ready;
+      const stream = reader.stream(`lody-session:${fixture.doc.sessionId}`);
+      const headers = await stream.latestTurnHeaders(256n);
+      expect(headers.length).toBeLessThan(256);
+      expect(headers.reduce((count, header) => count + header.nextSeq, 0n)).toBeGreaterThan(128n);
+      let updateBytes = 0;
+      for (const header of headers) {
+        expect(header.nextSeq).toBeLessThan(4096n);
+        const exported = await stream.exportUpdates(header.turnId, 0n, 4096n);
+        expect(BigInt(decodeBatch(exported).length)).toBe(header.nextSeq);
+        updateBytes += exported.byteLength;
+      }
+      // Measure decoded/exported history: compression must not conceal repeated
+      // full-body updates or dropped idempotency records behind fewer SQL rows.
+      expect(updateBytes).toBeGreaterThan(0);
+      expect(updateBytes).toBeLessThan(1024 * 1024);
+      const receipts = await stream.scanIndex(AGENT_RECEIPTS_TABLE, new Uint8Array(), 129n);
+      expect(receipts).toHaveLength(128);
+      expect(
+        receipts.reduce((bytes, row) => bytes + row.key.byteLength + row.value.byteLength, 0)
+      ).toBe(128 * 82);
     } finally {
-      db.close();
+      await reader.close();
     }
+    // A second SQLite library must not open/close the live Native-owned file in
+    // this process: its close() can cancel the other library's POSIX file locks.
+    const projection = JSON.parse(
+      execFileSync(
+        process.execPath,
+        [
+          '--input-type=module',
+          '-e',
+          `import { DatabaseSync } from 'node:sqlite';
+           const db = new DatabaseSync(process.argv[1], { readOnly: true });
+           try {
+             const row = db.prepare('SELECT COUNT(*) AS count FROM roost_kv JOIN roost_spaces ON roost_spaces.id = roost_kv.space_id WHERE name LIKE ?').get('%' + process.argv[2] + '%:projection');
+             process.stdout.write(JSON.stringify(row));
+           } finally { db.close(); }`,
+          dbPath,
+          fixture.doc.sessionId,
+        ],
+        { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }
+      )
+    ) as { count: number };
+    expect(projection.count).toBeGreaterThan(0);
+    expect(projection.count).toBeLessThan(1000);
     const sessionId = fixture.doc.sessionId;
     await fixture.close();
     const reopened = await nativeFixture(sessionId);
@@ -2858,6 +3561,279 @@ describe('Production Roost history semantics', () => {
         ],
       },
     });
+  });
+});
+
+describe('Production Roost compact agent receipts', () => {
+  it('preserves exact identity and digest bytes, rejecting malformed receipts instead of falling through', async () => {
+    const seed = new Uint8Array(32).fill(47);
+    const owner = Identity.fromSeed(seed).owner();
+    const client = new RoostNativeClient({
+      dbPath: join(nativeDirectory, 'receipt-encoding.db'),
+      seed,
+      allowedOwners: [owner],
+      maxQueuedRequests: 32,
+      maxQueuedBytes: 8 * 1024 * 1024,
+    });
+    try {
+      await client.ready;
+      const generation = new RoostHistoryGeneration(client, owner, 'receipt-encoding');
+      const identity: HistoryIdentity = {
+        kind: 'publication',
+        businessId: 'abcdef01-2345-6789-abcd-ef0123456789',
+        segmentId: `agent:${'ab'.repeat(32)}`,
+      };
+      const identities = [
+        identity,
+        { ...identity, businessId: identity.businessId.toUpperCase() },
+        { ...identity, businessId: `${identity.businessId}\n` },
+        { ...identity, segmentId: `${identity.segmentId}\n` },
+        { ...identity, segmentId: identity.segmentId.toUpperCase() },
+        ...['non-uuid', '🙂', 'a\u0000b'].map((businessId) => ({
+          ...identity,
+          businessId,
+        })),
+        { ...identity, businessId: identity.businessId.replace('abcdef01', 'abcdef02') },
+        { ...identity, segmentId: `agent:${'ab'.repeat(31)}ac` },
+      ];
+      const receipts = identities.map((id, index) =>
+        agentReceiptPut(id, index.toString(16).padStart(64, '0'))
+      );
+      await generation.commitPatches([], receipts, undefined, []);
+      for (const [index, id] of identities.entries())
+        expect(await generation.lookupOperation(id)).toEqual({
+          digest: index.toString(16).padStart(64, '0'),
+        });
+      expect(await generation.lookupOperation({ ...identity, kind: 'message' })).toBeUndefined();
+      for (const businessId of ['\ud800', '\ud801'])
+        expect(() => agentReceiptKey({ ...identity, businessId })).toThrow('unpaired surrogate');
+      // Identity property order has never been significant in the canonical contract.
+      expect(
+        agentReceiptKey({
+          segmentId: identity.segmentId,
+          kind: identity.kind,
+          businessId: identity.businessId,
+        })
+      ).toEqual(agentReceiptKey(identity));
+      for (const digest of [
+        '',
+        'ab'.repeat(31),
+        'AB'.repeat(32),
+        `${'ab'.repeat(32)}\n`,
+        'gg'.repeat(32),
+      ])
+        expect(() => agentReceiptPut(identity, digest)).toThrow('digest is invalid');
+      const valid = agentReceiptPut(identity, 'ff'.repeat(32));
+      expect(decodeAgentReceipt(valid.value)).toEqual({ digest: 'ff'.repeat(32) });
+      for (const value of [
+        new Uint8Array(),
+        valid.value.slice(1),
+        Buffer.concat([valid.value, Buffer.from([0])]),
+        Buffer.concat([Buffer.from([1]), valid.value.slice(1)]),
+        Buffer.from('{"version":1,"digest":"old"}'),
+      ]) {
+        await generation.host.writeBatch([], { indexPuts: [{ ...valid, value }] });
+        await expect(generation.lookupOperation(identity)).rejects.toThrow('receipt is invalid');
+      }
+    } finally {
+      await client.close();
+    }
+  });
+
+  it.each(['agent', 'renderer-v1', 'renderer-v2'] as const)(
+    'rejects old and mixed %s receipt formats before opening or mutating a session, without deleting data',
+    async (kind) => {
+      const dbPath = join(nativeDirectory, 'history.db');
+      const seed = await loadRoostOwnerSeedLegacy(dbPath);
+      const owner = Identity.fromSeed(seed).owner();
+      const client = new RoostNativeClient({
+        dbPath,
+        seed,
+        allowedOwners: [owner],
+        maxQueuedRequests: 32,
+        maxQueuedBytes: 8 * 1024 * 1024,
+      });
+      try {
+        await client.ready;
+        for (const mixed of [false, true]) {
+          const id = randomUUID();
+          const raw = client.stream(`lody-session:${id}`);
+          const identity: HistoryIdentity = {
+            kind: 'publication',
+            businessId: id,
+            segmentId: `agent:${'ab'.repeat(32)}`,
+          };
+          const previous =
+            kind === 'agent'
+              ? {
+                  table: 'lody_agent_operation_receipts_v1',
+                  key: Buffer.from(JSON.stringify(identity)),
+                  value: Buffer.from(JSON.stringify({ version: 1, digest: 'cd'.repeat(32) })),
+                }
+              : {
+                  table:
+                    kind === 'renderer-v1'
+                      ? 'lody_renderer_history_changes_v1'
+                      : 'lody_renderer_history_changes_v2',
+                  key: Buffer.alloc(8),
+                  value: Buffer.from(
+                    JSON.stringify({
+                      version: 1,
+                      scope: 'ab'.repeat(32),
+                      nonce: id,
+                      before: '0',
+                      through: '0',
+                      reset: false,
+                      ids: [],
+                    })
+                  ),
+                };
+          const current = kind === 'agent' ? agentReceiptPut(identity, 'cd'.repeat(32)) : null;
+          await raw.writeBatch([], {
+            indexPuts: [previous, ...(mixed && current ? [current] : [])],
+          });
+          const scope = Buffer.alloc(32, 0xab);
+          if (mixed && !current)
+            await raw.annotateCommit(scope, 0n, {
+              before: 0n,
+              value: encodeRoostHistoryChange({ nonce: id, reset: false, ids: [] }),
+            });
+          const metadataBefore = await raw.readCommitMetadata(scope, 0n);
+          const generation = new RoostHistoryGeneration(client, owner, id);
+          const error = `Unsupported Roost ${kind === 'agent' ? 'agent' : 'renderer'} receipt format`;
+          await expect(generation.resolve()).rejects.toThrow(error);
+          await expect(generation.lookupOperation(identity)).rejects.toThrow(error);
+          await expect(
+            generation.commitPatches(
+              [],
+              [agentReceiptPut(identity, 'ef'.repeat(32))],
+              undefined,
+              []
+            )
+          ).rejects.toThrow(error);
+          await expect(
+            generation.replace([nativeUser('must-not-write')], 'must-not-activate')
+          ).rejects.toThrow(error);
+          await expect(nativeFixture(id)).rejects.toThrow(error);
+          expect(await raw.readIndex([previous])).toEqual([new Uint8Array(previous.value)]);
+          if (current)
+            expect(await raw.readIndex([current])).toEqual([
+              mixed ? new Uint8Array(current.value) : null,
+            ]);
+          expect(await raw.readCommitMetadata(scope, 0n)).toEqual(metadataBefore);
+          expect(await raw.scanIndex('lody_history_generation_v1', new Uint8Array(), 1n)).toEqual(
+            []
+          );
+        }
+        const fresh = await nativeFixture();
+        await fresh.backend.appendHistoryTurn(nativeUser('independent'));
+        expect(await fresh.backend.readHistory()).toMatchObject([{ id: 'independent' }]);
+      } finally {
+        await client.close();
+      }
+    }
+  );
+
+  it('rolls back output and receipts together, then recovers a partially committed multi-chunk retry after reopen', async () => {
+    let fixture = await nativeFixture(randomUUID());
+    await fixture.backend.appendHistoryTurn({
+      ...nativeAssistant('atomic-output'),
+      items: [{ type: 'text', text: '' }],
+    });
+    const checkpoint = await fixture.backend.history.getCheckpoint!();
+    const original = RoostHistoryGeneration.prototype.commitPatches;
+    const input = {
+      targetAssistantEntryId: 'atomic-output',
+      contents: Array.from({ length: 65 }, (_, i) => ({ type: 'text' as const, text: `🙂${i};` })),
+      operationIds: Array.from({ length: 65 }, (_, i) => `atomic-${i}`),
+    };
+    const rollback = vi
+      .spyOn(RoostHistoryGeneration.prototype, 'commitPatches')
+      .mockImplementation(function (writes, receipts, cursor, changedIds) {
+        const edit = writes.find((write) => write.kind === 'edit');
+        if (!edit) throw new Error('Expected native content edit');
+        return original.call(
+          this,
+          [...writes, { ...edit, expectedNextSeq: edit.expectedNextSeq + 100n }],
+          receipts,
+          cursor,
+          changedIds
+        );
+      });
+    await expect(fixture.backend.applyAgentBatch(input)).rejects.toThrow();
+    rollback.mockRestore();
+    expect(await fixture.backend.readTurn('atomic-output')).toMatchObject({
+      state: 'ready',
+      turn: { items: [{ text: '' }] },
+    });
+    const lostReply = vi
+      .spyOn(RoostHistoryGeneration.prototype, 'commitPatches')
+      .mockImplementationOnce(async function (...args) {
+        await original.apply(this, args);
+        throw new Error('Injected lost chunk reply');
+      });
+    await expect(fixture.backend.applyAgentBatch(input)).rejects.toThrow(
+      'Injected lost chunk reply'
+    );
+    lostReply.mockRestore();
+    const id = fixture.doc.sessionId;
+    await fixture.close();
+    fixture = await nativeFixture(id);
+    await fixture.backend.applyAgentBatch(input);
+    const before = await fixture.backend.readTurn('atomic-output');
+    expect(before).toMatchObject({
+      state: 'ready',
+      turn: { items: [{ text: input.contents.map((item) => item.text).join('') }] },
+    });
+    expect(await fixture.backend.history.readChanges!(checkpoint)).toMatchObject({
+      state: 'ready',
+      ids: ['atomic-output'],
+    });
+    await fixture.backend.applyAgentBatch({
+      ...input,
+      contents: input.contents.slice(25),
+      operationIds: input.operationIds.slice(25),
+    });
+    expect(await fixture.backend.readTurn('atomic-output')).toEqual(before);
+    await expect(
+      fixture.backend.applyAgentBatch({
+        ...input,
+        contents: [{ type: 'text', text: 'conflict' }],
+        operationIds: ['atomic-29'],
+      })
+    ).rejects.toThrow('identity conflict');
+  });
+
+  it('retains agent receipts across branch removal, generation replacement and reopen without reviving removed output', async () => {
+    let fixture = await nativeFixture(randomUUID());
+    await fixture.backend.appendHistoryTurn(nativeUser('branch-user'));
+    await fixture.backend.appendHistoryTurn(nativeAssistant('branch-assistant'));
+    const input = {
+      targetAssistantEntryId: 'branch-assistant',
+      contents: [{ type: 'text' as const, text: 'once' }],
+      operationIds: ['branch-output'],
+    };
+    await fixture.backend.applyAgentBatch(input);
+    expect(
+      await fixture.backend.replaceEditableTail({
+        expectedUserTurnId: 'branch-user',
+        expectedForkTurnId: undefined,
+        replacement: nativeUser('replacement-user') as never,
+      })
+    ).toMatchObject({ status: 'accepted' });
+    await fixture.backend.applyAgentBatch(input);
+    expect((await fixture.backend.readHistory()).map((turn) => turn.id)).toEqual([
+      'replacement-user',
+    ]);
+    await fixture.backend.applyHistoryAction({ kind: 'remove-turn', turnId: 'replacement-user' });
+    const id = fixture.doc.sessionId;
+    await fixture.close();
+    fixture = await nativeFixture(id);
+    await fixture.backend.applyAgentBatch(input);
+    expect(await fixture.backend.readHistory()).toEqual([]);
+    await expect(
+      fixture.backend.applyAgentBatch({ ...input, contents: [{ type: 'text', text: 'conflict' }] })
+    ).rejects.toThrow('identity conflict');
   });
 });
 
@@ -3495,6 +4471,7 @@ describe.each(recoveryTurnCounts)('Roost cache recovery with %i retained turns',
       expect(revision).toBe(initialRevision + 1);
       const doc = new LoroDoc();
       const hints = doc.getMap('roostHistoryCursor');
+      hints.set('cursor', String(revision));
       hints.set('historyRevision', revision);
       hints.set('historyCount', count);
       hints.set('historyChangeJson', JSON.stringify({ kind: 'changed', ids: [initial.id] }));
@@ -3596,5 +4573,621 @@ describe.each(recoveryTurnCounts)('Roost cache recovery with %i retained turns',
       vi.restoreAllMocks();
       vi.unstubAllGlobals();
     }
+  });
+});
+
+describe('Production Roost planned content operations', () => {
+  it('commits mixed markup, tool and plan updates without body readback, including resumed state', async () => {
+    const fixture = await nativeFixture();
+    const id = 'mixed-planned';
+    await fixture.backend.appendHistoryTurn(nativeUser('mixed-user'));
+    await fixture.backend.appendHistoryTurn({
+      ...nativeAssistant(id),
+      items: [
+        {
+          type: 'tool_call',
+          toolCallId: 'retained-tool',
+          status: 'completed',
+          rawOutput: { text: 'retained'.repeat(32768) },
+        },
+        { type: 'text', text: '' },
+      ],
+    });
+    const original = RoostNativeClient.prototype.request;
+    let forbidBody = false;
+    vi.spyOn(RoostNativeClient.prototype, 'request').mockImplementation(async function (...args) {
+      if (forbidBody && ['readTurn', 'readTurns'].includes(args[0].method))
+        throw new Error('Synthetic body readback unavailable');
+      return original.apply(this, args);
+    });
+    const events = [
+      {
+        sessionUpdate: 'agent_message_chunk' as const,
+        content: { type: 'text' as const, text: '\n<thinking>🙂' },
+      },
+      {
+        sessionUpdate: 'agent_message_chunk' as const,
+        content: { type: 'text' as const, text: 'reasoning\n</thinking>\nanswer🚀' },
+      },
+      {
+        sessionUpdate: 'tool_call' as const,
+        toolCallId: 'new-tool',
+        title: 'Synthetic',
+        status: 'in_progress' as const,
+        rawInput: { nested: ['a', '🙂'] },
+      },
+      {
+        sessionUpdate: 'tool_call_update' as const,
+        toolCallId: 'new-tool',
+        status: 'completed' as const,
+        rawOutput: { nested: [1, null, { result: '🚀' }] },
+      },
+      {
+        sessionUpdate: 'plan' as const,
+        entries: [{ content: 'first', priority: 'medium' as const, status: 'pending' as const }],
+      },
+      {
+        sessionUpdate: 'agent_message_chunk' as const,
+        content: {
+          type: 'text' as const,
+          text: '\n<proposed_plan>\nstep 🙂\n</proposed_plan>\nend',
+        },
+      },
+    ];
+    for (const phase of ['primary', 'resumed'] as const) {
+      if (phase === 'resumed') {
+        const action = {
+          kind: 'finish-assistant',
+          turnId: id,
+          endedAt: 42,
+        } as const;
+        const previous = await fixture.backend.readTurn(id);
+        if (previous.state !== 'ready') throw new Error('Expected turn before finish');
+        const reference = applyHistoryAction([structuredClone(previous.turn)], action).turns[0];
+        forbidBody = true;
+        try {
+          await fixture.backend.applyHistoryAction(action);
+        } finally {
+          forbidBody = false;
+        }
+        expect(await fixture.backend.readTurn(id)).toMatchObject({
+          state: 'ready',
+          turn: reference,
+        });
+        await fixture.backend.openAssistantTurn({ turnId: id, userTurnId: 'mixed-user' });
+      }
+      const initial = await fixture.backend.readTurn(id);
+      if (initial.state !== 'ready') throw new Error('Expected planned turn');
+      let reference = [initial.turn] as SessionHistoryInput[];
+      for (const [index, update] of events.entries()) {
+        const notification = { sessionId: 'synthetic-acp', update };
+        const previous = reference;
+        const next = structuredClone(reference);
+        applyNotificationOnHistory(next, [notification], undefined, { targetAssistantEntryId: id });
+        reference = JSON.parse(
+          JSON.stringify(next.map((entry, i) => prepareReplacement(previous[i], entry)))
+        ) as SessionHistoryInput[];
+        forbidBody = true;
+        try {
+          await fixture.backend.applyAgentBatch({
+            targetAssistantEntryId: id,
+            notifications: [notification],
+            operationIds: [`${phase}-${index}`],
+          });
+        } finally {
+          forbidBody = false;
+        }
+        expect(await fixture.backend.readTurn(id)).toMatchObject({
+          state: 'ready',
+          turn: reference[0],
+        });
+      }
+      const fresh = await nativeFixture(fixture.doc.sessionId);
+      expect(JSON.stringify(await fresh.backend.readTurn(id))).toBe(
+        JSON.stringify(await fixture.backend.readTurn(id))
+      );
+      await fresh.close();
+    }
+    const before = JSON.stringify(await fixture.backend.readTurn(id));
+    await fixture.backend.applyAgentBatch({
+      targetAssistantEntryId: id,
+      notifications: [{ sessionId: 'synthetic-acp', update: events[5] as (typeof events)[number] }],
+      operationIds: ['resumed-5'],
+    });
+    expect(JSON.stringify(await fixture.backend.readTurn(id))).toBe(before);
+    const sessionId = fixture.doc.sessionId;
+    await fixture.close();
+    const reopened = await nativeFixture(sessionId);
+    expect(JSON.stringify(await reopened.backend.readTurn(id))).toBe(before);
+  });
+});
+
+describe('Production Roost dispatch projection', () => {
+  it('retries when a foreign writer changes only the selected body during its dispatch observation', async () => {
+    const fixture = await nativeFixture();
+    await fixture.backend.appendHistoryTurn(nativeUser('dispatch-coherent-body'));
+    for (let i = 0; i < 41; i++)
+      await fixture.backend.appendHistoryTurn({
+        ...nativeUser(`coherent-settled-${i}`),
+        status: 'handled',
+        read: true,
+      });
+    const peer = await nativeFixture(fixture.doc.sessionId);
+    const read = NodeLodyHistory.prototype.readProjectedMessagesById;
+    let injected = false;
+    vi.spyOn(NodeLodyHistory.prototype, 'readProjectedMessagesById').mockImplementation(
+      async function (...args) {
+        if (!injected && args[0].some((id) => id !== undefined)) {
+          injected = true;
+          await peer.backend.applyHistoryAction({
+            kind: 'upsert-turn',
+            turn: {
+              ...nativeUser('dispatch-coherent-body'),
+              items: [{ type: 'text', text: 'changed by a foreign writer' }],
+            },
+          });
+        }
+        return read.apply(this, args);
+      }
+    );
+    const selected = await fixture.backend.readDispatchSelection(
+      [],
+      (entries) => entries.find((entry) => entry.id === 'dispatch-coherent-body')?.id
+    );
+    expect(injected).toBe(true);
+    expect(selected.turn).toMatchObject({
+      state: 'ready',
+      turn: {
+        id: 'dispatch-coherent-body',
+        status: 'pending',
+        items: [{ type: 'text', text: 'changed by a foreign writer' }],
+      },
+    });
+    expect(selected.history.map((entry) => entry.id)).toEqual(['dispatch-coherent-body']);
+  });
+
+  it('reads cold positional ranges after reopen without hydrating intervening history', async () => {
+    const fixture = await nativeFixture();
+    await fixture.backend.appendHistoryTurn(nativeUser('position-state-user'));
+    await fixture.backend.appendHistoryTurn({
+      ...nativeAssistant('position-state-assistant'),
+      userTurnId: 'position-state-user',
+      finished: true,
+      items: [{ type: 'text', text: 'sealed base' }],
+    });
+    await fixture.backend.openAssistantTurn({
+      turnId: 'position-state-assistant',
+      userTurnId: 'position-state-user',
+      timestamp: '2026-10-24T00:00:00.000Z',
+    });
+    await fixture.backend.applyAgentBatch({
+      targetAssistantEntryId: 'position-state-assistant',
+      operationIds: ['position-state-append'],
+      contents: [{ type: 'text', text: ' late state' }],
+    });
+    await fixture.backend.applyHistoryAction({
+      kind: 'finish-assistant',
+      turnId: 'position-state-assistant',
+      endedAt: 42,
+    });
+    const turns = Array.from({ length: 65 }, (_, i) => nativeUser(`position-${i}`));
+    for (const turn of turns) await fixture.backend.appendHistoryTurn(turn);
+    await fixture.backend.flushLocalWrites();
+    const expected = await fixture.backend.readHistory();
+    const id = fixture.doc.sessionId;
+    await fixture.close();
+    const reopened = await nativeFixture(id);
+    await reopened.backend.flushLocalWrites();
+    vi.spyOn(NodeLodyHistory.prototype, 'readActiveBranch').mockRejectedValue(
+      new Error('Full branch read forbidden')
+    );
+    vi.spyOn(NodeLodyHistory.prototype, 'readActiveBranchPage').mockRejectedValue(
+      new Error('Intervening page hydration forbidden')
+    );
+    expect(await reopened.backend.history.readDirectory(0, 3)).toEqual(
+      expected.slice(0, 3).map((turn, position) => createRoostDirectoryRow(position, turn))
+    );
+    const selected = await reopened.backend.history.readRange(0, 3);
+    expect(selected.map((read) => (read.state === 'ready' ? read.turn : undefined))).toEqual(
+      expected.slice(0, 3)
+    );
+    if (selected[0]?.state !== 'ready') throw new Error('Expected old indexed turn');
+    selected[0].turn.items = [];
+    expect(await reopened.backend.readTurn('position-state-user')).toMatchObject({
+      state: 'ready',
+      turn: { id: expected[0]?.id, items: expected[0]?.items },
+    });
+    expect(
+      (await reopened.backend.history.readRange(12, 15)).map((read) =>
+        read.state === 'ready' ? read.turn : undefined
+      )
+    ).toEqual(expected.slice(12, 15));
+  });
+
+  it('retries a positional read when a foreign body changes during hydration', async () => {
+    const fixture = await nativeFixture();
+    for (let i = 0; i < 45; i++)
+      await fixture.backend.appendHistoryTurn(nativeUser(`position-race-${i}`));
+    await fixture.backend.flushLocalWrites();
+    const id = fixture.doc.sessionId;
+    await fixture.close();
+    const reopened = await nativeFixture(id);
+    const peer = await nativeFixture(id);
+    const read = NodeLodyHistory.prototype.readProjectedMessagesById;
+    let injected = false;
+    vi.spyOn(NodeLodyHistory.prototype, 'readProjectedMessagesById').mockImplementation(
+      async function (...args) {
+        const result = await read.apply(this, args);
+        if (!injected) {
+          injected = true;
+          await peer.backend.applyHistoryAction({
+            kind: 'user-status',
+            turnId: 'position-race-0',
+            status: 'handled',
+          });
+        }
+        return result;
+      }
+    );
+    expect(await reopened.backend.history.readRange(0, 1)).toMatchObject([
+      { state: 'ready', turn: { id: 'position-race-0', status: 'handled' } },
+    ]);
+    expect(injected).toBe(true);
+    expect(await reopened.backend.readTurn('position-race-0')).toMatchObject({
+      state: 'ready',
+      turn: { status: 'handled' },
+    });
+  });
+
+  it('fences an index-only generation switch during positional hydration without caching the old page', async () => {
+    const id = `native-position-pointer-${ordinal++}`;
+    const root = `lody-session:${id}`;
+    let client: RoostNativeClient | undefined;
+    const onChanges = RoostNativeClient.prototype.onChanges;
+    const capture = vi.spyOn(RoostNativeClient.prototype, 'onChanges').mockImplementation(function (
+      ...args
+    ) {
+      client = this;
+      return onChanges.apply(this, args);
+    });
+    const fixture = await nativeFixture(id);
+    capture.mockRestore();
+    if (!client) throw new Error('Expected Native history owner');
+    for (let i = 0; i < 45; i++)
+      await fixture.backend.appendHistoryTurn(nativeUser(`position-pointer-old-${i}`));
+    await fixture.backend.flushLocalWrites();
+    const seed = await loadRoostOwnerSeedLegacy(join(nativeDirectory, 'history.db'));
+    const generation = new RoostHistoryGeneration(client, Identity.fromSeed(seed).owner(), id);
+    const replacement = nativeUser('position-pointer-new');
+    await generation.replace([replacement], 'position-pointer-activation');
+    const raw = client.stream(root);
+    const pointer = { table: 'lody_history_generation_v1', key: new TextEncoder().encode('next') };
+    const [activation] = await raw.readIndex([pointer]);
+    if (!activation) throw new Error('Expected staged activation proof');
+    // Retain a real sealed activation, but defer its pointer until the read race.
+    await raw.compareAndWriteIndex(
+      [{ ...pointer, value: activation }],
+      [{ ...pointer, value: null }]
+    );
+    await fixture.close();
+    const prepared = await nativeFixture(id);
+    await prepared.backend.readDispatchHistory([]);
+    await prepared.close();
+    let armed = false;
+    vi.spyOn(RoostNativeClient.prototype, 'onChanges').mockImplementation(
+      function (stream, listener, options) {
+        return onChanges.call(
+          this,
+          stream,
+          (cursor, key) => {
+            if (!armed) listener(cursor, key);
+          },
+          options
+        );
+      }
+    );
+    const reopened = await nativeFixture(id);
+    await reopened.backend.flushLocalWrites();
+    const read = NodeLodyHistory.prototype.readProjectedMessagesById;
+    let switched = false;
+    vi.spyOn(NodeLodyHistory.prototype, 'readProjectedMessagesById').mockImplementation(
+      async function (...args) {
+        const result = await read.apply(this, args);
+        if (!switched) {
+          switched = true;
+          const before = await this.observedEventCursor();
+          await this.stream.compareAndWriteIndex(
+            [{ ...pointer, value: null }],
+            [{ ...pointer, value: activation }]
+          );
+          expect(await this.observedEventCursor()).toBe(before);
+        }
+        return result;
+      }
+    );
+    armed = true;
+    expect(await reopened.backend.history.readRange(0, 1)).toMatchObject([
+      { state: 'ready', turn: { id: replacement.id, items: replacement.items } },
+    ]);
+    expect(switched).toBe(true);
+    expect(await reopened.backend.history.readRange(0, 1)).toMatchObject([
+      { state: 'ready', turn: { id: replacement.id, items: replacement.items } },
+    ]);
+    armed = false;
+  });
+
+  it.each(['missing', 'wrong-position', 'uncertified', 'partial'] as const)(
+    'preserves range semantics with a %s position index without forcing a rebuild',
+    async (damage) => {
+      const fixture = await nativeFixture();
+      for (let i = 0; i < 45; i++)
+        await fixture.backend.appendHistoryTurn(nativeUser(`position-fallback-${i}`));
+      await fixture.backend.flushLocalWrites();
+      const id = fixture.doc.sessionId;
+      await fixture.close();
+      const reopened = await nativeFixture(id);
+      await reopened.backend.flushLocalWrites();
+      vi.spyOn(RoostDispatchIndex.prototype, 'rebuild').mockRejectedValue(
+        new Error('Range reads must not force a full-index rebuild')
+      );
+      if (damage === 'uncertified' || damage === 'partial') {
+        vi.spyOn(RoostDispatchIndex.prototype, 'checkpoint').mockResolvedValue(undefined);
+      } else {
+        const range = RoostDispatchIndex.prototype.range;
+        vi.spyOn(RoostDispatchIndex.prototype, 'range').mockImplementationOnce(async function (
+          ...args
+        ) {
+          await this.host.compareAndWriteIndex(
+            [],
+            [
+              {
+                table: 'lody_dispatch_positions_v1',
+                key: new Uint8Array(8),
+                value:
+                  damage === 'missing'
+                    ? null
+                    : new TextEncoder().encode(JSON.stringify('position-fallback-1')),
+              },
+            ]
+          );
+          return range.apply(this, args);
+        });
+      }
+      if (damage === 'partial') {
+        const page = NodeLodyHistory.prototype.readActiveBranchPage;
+        vi.spyOn(NodeLodyHistory.prototype, 'readActiveBranchPage').mockImplementation(
+          async function (...args) {
+            const result = await page.apply(this, args);
+            return args[1]?.before ? { ...result, complete: false, messages: [] } : result;
+          }
+        );
+        await expect(reopened.backend.history.readRange(0, 2)).rejects.toThrow('incomplete');
+        expect(await reopened.backend.readHistoryCount()).toBe(45);
+        expect(await reopened.backend.history.readRange(44, 45)).toMatchObject([
+          { state: 'ready', turn: { id: 'position-fallback-44' } },
+        ]);
+        return;
+      }
+      expect(await reopened.backend.history.readRange(0, 2)).toMatchObject([
+        { state: 'ready', turn: { id: 'position-fallback-0' } },
+        { state: 'ready', turn: { id: 'position-fallback-1' } },
+      ]);
+      expect(await reopened.backend.readHistoryCount()).toBe(45);
+    }
+  );
+
+  it('dispatches an old pending input after reopen without materializing historical pages', async () => {
+    const fixture = await nativeFixture();
+    await fixture.backend.appendHistoryTurn(nativeUser('old-pending-dispatch'));
+    for (let i = 0; i < 44; i++)
+      await fixture.backend.appendHistoryTurn({
+        ...nativeUser(`settled-dispatch-${i}`),
+        status: 'handled',
+        read: true,
+      });
+    await fixture.backend.appendHistoryTurn(nativeUser('new-pending-dispatch'));
+    await fixture.backend.flushLocalWrites();
+    const full = await fixture.backend.readHistory();
+    const id = fixture.doc.sessionId;
+    await fixture.close();
+    const reopened = await nativeFixture(id);
+    await reopened.backend.flushLocalWrites();
+    vi.spyOn(NodeLodyHistory.prototype, 'readActiveBranch').mockRejectedValue(
+      new Error('Full branch read forbidden')
+    );
+    vi.spyOn(NodeLodyHistory.prototype, 'readActiveBranchPage').mockRejectedValue(
+      new Error('Historical page hydration forbidden')
+    );
+    const included = ['settled-dispatch-0'];
+    const selected = await reopened.backend.readDispatchHistory(included);
+    expect(selected).toEqual(selectDispatchHistory(full.map(dispatchEntry), included));
+    selected[0]!.status = 'canceled';
+    expect(await reopened.backend.readDispatchHistory(included)).toEqual(
+      selectDispatchHistory(full.map(dispatchEntry), included)
+    );
+    const watcher = new SessionDispatchWatcher({
+      logger: getDefaultLogger(),
+      machineId: 'test-machine',
+      workspaceId: 'test-workspace',
+      workspaceDocument: { repo: reopened.repo },
+      executionService: {
+        reconcileSteerHistory: async () => {},
+        tryAcquireSessionRewriteConflictLease: () => () => {},
+        isInboxInputCanceled: () => false,
+      } as unknown as SessionExecutionService,
+      userResolver: { resolve: async () => undefined, clear: () => {} },
+      canUseMachine: async () => ({ outcome: 'allowed' }),
+    } as never);
+    const check = (
+      watcher as unknown as {
+        checkHistoryAndQueue(
+          doc: SessionDocument,
+          meta: unknown
+        ): Promise<{ turn: SessionHistoryInput | null }>;
+      }
+    ).checkHistoryAndQueue.bind(watcher);
+    const result = await check(reopened.doc, await reopened.doc.getMetaState());
+    expect(result.turn).toEqual(full.find((entry) => entry.id === 'old-pending-dispatch'));
+    await reopened.backend.applyHistoryAction({
+      kind: 'user-status',
+      turnId: 'old-pending-dispatch',
+      status: 'handled',
+    });
+    expect((await check(reopened.doc, await reopened.doc.getMetaState())).turn?.id).toBe(
+      'new-pending-dispatch'
+    );
+  });
+
+  it('keeps completion evidence exact across finish, reopen and late state updates', async () => {
+    const fixture = await nativeFixture();
+    await fixture.backend.appendHistoryTurn(nativeUser('dispatch-completion-user'));
+    await fixture.backend.openAssistantTurn({
+      turnId: 'dispatch-completion-assistant',
+      userTurnId: 'dispatch-completion-user',
+      timestamp: '2026-10-22T00:00:00.000Z',
+    });
+    await fixture.backend.applyHistoryAction({
+      kind: 'finish-assistant',
+      turnId: 'dispatch-completion-assistant',
+      endedAt: 42,
+    });
+    expect(await fixture.backend.readDispatchHistory([])).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: 'dispatch-completion-assistant',
+          userTurnId: 'dispatch-completion-user',
+          endedAt: 42,
+        }),
+      ])
+    );
+    await fixture.backend.openAssistantTurn({
+      turnId: 'dispatch-completion-assistant',
+      userTurnId: 'dispatch-completion-user',
+      timestamp: '2026-10-22T00:00:00.000Z',
+    });
+    expect(
+      (await fixture.backend.readDispatchHistory([])).some((entry) => entry.role === 'assistant')
+    ).toBe(false);
+    await fixture.backend.applyHistoryAction({
+      kind: 'finish-assistant',
+      turnId: 'dispatch-completion-assistant',
+      endedAt: 84,
+    });
+    expect(await fixture.backend.readDispatchHistory([])).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: 'dispatch-completion-assistant', endedAt: 84 }),
+      ])
+    );
+    await fixture.backend.applyHistoryAction({
+      kind: 'user-status',
+      turnId: 'dispatch-completion-user',
+      status: 'handled',
+    });
+    expect(await fixture.backend.readDispatchHistory([])).toEqual([]);
+    expect(await fixture.backend.readDispatchHistory(['dispatch-completion-user'])).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: 'dispatch-completion-user', status: 'handled' }),
+        expect.objectContaining({ id: 'dispatch-completion-assistant', endedAt: 84 }),
+      ])
+    );
+  });
+
+  it('repairs a missing projection with bounded pages and never revives a removed branch', async () => {
+    const fixture = await nativeFixture();
+    await fixture.backend.appendHistoryTurn(nativeUser('dispatch-removed'));
+    await fixture.backend.appendHistoryTurn(nativeAssistant('dispatch-removed-output'));
+    expect(
+      await fixture.backend.replaceEditableTail({
+        expectedUserTurnId: 'dispatch-removed',
+        expectedForkTurnId: undefined,
+        replacement: nativeUser('dispatch-replacement') as never,
+      })
+    ).toMatchObject({ status: 'accepted' });
+    vi.spyOn(NodeLodyHistory.prototype, 'readActiveBranch').mockRejectedValue(
+      new Error('Full branch read forbidden')
+    );
+    const missing = vi
+      .spyOn(RoostDispatchIndex.prototype, 'checkpoint')
+      .mockResolvedValueOnce(undefined);
+    expect(
+      (await fixture.backend.readDispatchHistory(['dispatch-removed'])).map((entry) => entry.id)
+    ).toEqual(['dispatch-replacement']);
+    missing.mockRestore();
+    expect(await fixture.backend.readTurn('dispatch-removed')).toEqual({ state: 'missing' });
+    expect((await fixture.backend.readDispatchHistory([])).map((entry) => entry.id)).toEqual([
+      'dispatch-replacement',
+    ]);
+  });
+
+  it('rejects stale index publication, refreshes another reader and repairs an interrupted build', async () => {
+    const fixture = await nativeFixture();
+    await fixture.backend.appendHistoryTurn(nativeUser('dispatch-index-fence'));
+    await fixture.backend.flushLocalWrites();
+    const read = RoostDispatchIndex.prototype.read;
+    let owner: RoostDispatchIndex | undefined;
+    const capture = vi.spyOn(RoostDispatchIndex.prototype, 'read').mockImplementation(function (
+      ...args
+    ) {
+      owner = this;
+      return read.apply(this, args);
+    });
+    await fixture.backend.readDispatchHistory([]);
+    capture.mockRestore();
+    if (!owner) throw new Error('Expected dispatch projection owner');
+    const old = owner.current();
+    if (!old) throw new Error('Expected complete dispatch checkpoint');
+    const observer = new RoostDispatchIndex(owner.host);
+    const before = await observer.checkpoint(BigInt(old.header.cursor), old.header.count);
+    if (!before) throw new Error('Expected second dispatch checkpoint');
+    expect((await observer.read(before, []))[0]?.id).toBe('dispatch-index-fence');
+    const stalePlan = await observer.plan(before, BigInt(before.header.cursor) + 1n, 1, [
+      {
+        before: dispatchEntry(nativeUser('dispatch-index-fence')),
+        after: { id: 'dispatch-index-fence', role: 'user', status: 'processing', read: true },
+      },
+    ]);
+    await fixture.backend.applyHistoryAction({
+      kind: 'user-status',
+      turnId: 'dispatch-index-fence',
+      status: 'handled',
+    });
+    await expect(observer.commit(stalePlan)).rejects.toMatchObject({ code: 'stale' });
+    const current = owner.current();
+    if (!current) throw new Error('Expected advanced dispatch checkpoint');
+    const refreshed = await observer.checkpoint(BigInt(current.header.cursor), 1);
+    if (!refreshed) throw new Error('Expected refreshed observer');
+    expect(await observer.read(refreshed, ['dispatch-index-fence'])).toEqual([
+      expect.objectContaining({ id: 'dispatch-index-fence', status: 'handled' }),
+    ]);
+    const stored = await fixture.backend.readHistory();
+    const row = await owner.row('dispatch-index-fence', current);
+    if (!row) throw new Error('Expected persisted dispatch row');
+    await expect(
+      owner.rebuild(
+        BigInt(current.header.cursor),
+        1,
+        (async function* () {
+          yield [row];
+        })(),
+        async () => {
+          throw new Error('Synthetic interrupted projection build');
+        }
+      )
+    ).rejects.toThrow('Synthetic interrupted projection build');
+    await expect(observer.range(refreshed, 0, 1)).rejects.toMatchObject({ code: 'stale' });
+    observer.forget();
+    expect(await observer.checkpoint(BigInt(current.header.cursor), 1)).toBeUndefined();
+    vi.spyOn(NodeLodyHistory.prototype, 'readActiveBranch').mockRejectedValue(
+      new Error('Full branch repair forbidden')
+    );
+    expect(await fixture.backend.readDispatchHistory([])).toEqual([]);
+    expect(await fixture.backend.readDispatchHistory(['dispatch-index-fence'])).toEqual([
+      expect.objectContaining({ id: 'dispatch-index-fence', status: 'handled' }),
+    ]);
+    const rebuilt = await observer.checkpoint(BigInt(current.header.cursor), 1);
+    if (!rebuilt) throw new Error('Expected rebuilt positional checkpoint');
+    expect(await observer.range(rebuilt, 0, 1)).toEqual([row]);
+    vi.restoreAllMocks();
+    expect(await fixture.backend.readHistory()).toEqual(stored);
   });
 });

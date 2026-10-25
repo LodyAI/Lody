@@ -10,6 +10,7 @@ import type {
   ElectronLocalSessionControlResponseEvent,
   ElectronPublicBrowserState,
   ElectronPublicBrowserInteraction,
+  ElectronStorageGuardState,
   ElectronUpdaterState,
   ElectronWindowTarget,
   PreparedWindowTarget,
@@ -28,6 +29,7 @@ export type IpcPushMap = {
   'cli.output': CliOutputEvent;
   'cli.state': ElectronCliState;
   'updater.state': ElectronUpdaterState;
+  'storageGuard.state': ElectronStorageGuardState;
   'publicBrowser.state': ElectronPublicBrowserState;
   'publicBrowser.interaction': ElectronPublicBrowserInteraction;
   'sessionControl.response': ElectronLocalSessionControlResponseEvent;
@@ -64,6 +66,7 @@ export const IPC_PUSH_CHANNELS = {
   cliOutput: 'cli.output',
   cliState: 'cli.state',
   updaterState: 'updater.state',
+  storageGuardState: 'storageGuard.state',
   publicBrowserState: 'publicBrowser.state',
   publicBrowserInteraction: 'publicBrowser.interaction',
   sessionControlResponse: 'sessionControl.response',

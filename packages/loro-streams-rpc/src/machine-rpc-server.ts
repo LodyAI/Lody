@@ -1,3 +1,4 @@
+import type { ProjectProbeLocalMemberResult } from '@lody/shared';
 import type {
   BugReportClientLog,
   MemoryProviderRequest,
@@ -508,12 +509,14 @@ type RpcServerDeps = {
   getCodeCollabLspDefinition?: (args: {
     sessionId: SessionId;
     path: string;
+    rootId?: string;
     line?: number;
     character?: number;
   }) => Promise<CodeCollabV2LspUnsupported>;
   getCodeCollabLspReferences?: (args: {
     sessionId: SessionId;
     path: string;
+    rootId?: string;
     line?: number;
     character?: number;
   }) => Promise<CodeCollabV2LspUnsupported>;
@@ -540,6 +543,10 @@ type RpcServerDeps = {
     proof: PreviewControlProof;
     reason?: string;
   }) => Promise<SessionPreviewRevokeResponse>;
+  probeLocalProjectMember?: (args: {
+    localProjectId: LocalProjectId;
+    requestedByUserId: string;
+  }) => Promise<ProjectProbeLocalMemberResult>;
   getLocalProjectGitState?: (args: {
     localProjectId: LocalProjectId;
     requestedByUserId: string;
@@ -1794,6 +1801,7 @@ export class LoroStreamsMachineRpcServer {
           const response = await this.deps.getCodeCollabLspDefinition({
             sessionId: params.sessionId as SessionId,
             path: params.path,
+            ...(params.rootId === undefined ? {} : { rootId: params.rootId }),
             ...(params.line === undefined ? {} : { line: params.line }),
             ...(params.character === undefined ? {} : { character: params.character }),
           });
@@ -1817,6 +1825,7 @@ export class LoroStreamsMachineRpcServer {
           const response = await this.deps.getCodeCollabLspReferences({
             sessionId: params.sessionId as SessionId,
             path: params.path,
+            ...(params.rootId === undefined ? {} : { rootId: params.rootId }),
             ...(params.line === undefined ? {} : { line: params.line }),
             ...(params.character === undefined ? {} : { character: params.character }),
           });
@@ -1917,6 +1926,21 @@ export class LoroStreamsMachineRpcServer {
             reason: request.params.reason,
           });
           await this.appendResultResponse(request.replyTo, request.id, request.method, response);
+          return;
+        }
+        case 'project/probe-local-member': {
+          if (!this.deps.probeLocalProjectMember) {
+            await this.appendErrorResponse(request.replyTo, request.id, request.method, {
+              code: LORO_STREAMS_RPC_ERROR_CODES.methodUnavailable,
+              message: 'Project group member probing is not available on this machine.',
+            });
+            return;
+          }
+          const result = await this.deps.probeLocalProjectMember({
+            localProjectId: request.params.localProjectId as LocalProjectId,
+            requestedByUserId: request.params.requestedByUserId,
+          });
+          await this.appendResultResponse(request.replyTo, request.id, request.method, result);
           return;
         }
         case 'local-project/git-state': {
@@ -2148,6 +2172,7 @@ export class LoroStreamsMachineRpcServer {
       | SessionPreviewRevokeResponse
       | SessionPreviewStatusResponse
       | IosSimulatorResponse
+      | ProjectProbeLocalMemberResult
       | LocalProjectGitStateRpcResponse
       | LocalProjectControlResponse,
     options: { readonly codeCollabOwnerSessionId?: string } = {}

@@ -28,7 +28,7 @@ void test('requires the workspace Node-API floor before authoring a journey', ()
   );
   assert.doesNotThrow(() =>
     assertJourneyAuthorNodeRuntime({
-      nodeVersion: 'v23.6.0',
+      nodeVersion: 'v24.22.1',
       nodeApiVersion: '10',
     })
   );

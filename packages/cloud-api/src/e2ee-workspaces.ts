@@ -45,6 +45,8 @@ export type E2eeWorkspaceHistoryRequest = {
   workspaceId: string;
   /** Opaque nextCursor from the previous page; omit on the first page. */
   cursor?: string;
+  /** Endpoint-independent position from an earlier response; mutually exclusive with cursor. */
+  after?: string;
   /** Keep the first page's boundary unchanged on every subsequent page. */
   checkpoint?: E2eeLedgerCheckpoint;
 };
@@ -56,6 +58,8 @@ export type E2eeWorkspaceHistoryPage = {
   checkpoint: E2eeLedgerCheckpoint;
   startIndex: number;
   recordsHex: string[];
+  /** Opaque position after the last returned record, also present at an empty suffix; usable as after at a newer endpoint. */
+  position: string;
   /** null means every record through checkpoint.length has been returned. */
   nextCursor: string | null;
 };

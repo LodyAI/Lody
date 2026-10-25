@@ -57,6 +57,23 @@ function installStorage(name: 'localStorage' | 'sessionStorage'): void {
 installStorage('localStorage');
 installStorage('sessionStorage');
 
+if (typeof Element !== 'undefined' && typeof Element.prototype.getAnimations !== 'function') {
+  // jsdom does not run Web Animations. Base UI waits for subtree animations
+  // before measuring scroll areas, so expose the empty animation set here.
+  Object.defineProperty(Element.prototype, 'getAnimations', {
+    configurable: true,
+    writable: true,
+    value: (): Animation[] => [],
+  });
+  // Preserve Base UI's no-animation path for dialog/popover teardown: adding
+  // getAnimations alone would make those parts start waiting for another frame.
+  Object.defineProperty(globalThis, 'BASE_UI_ANIMATIONS_DISABLED', {
+    configurable: true,
+    writable: true,
+    value: true,
+  });
+}
+
 if (typeof window !== 'undefined' && typeof window.PointerEvent !== 'function') {
   class TestPointerEvent extends window.MouseEvent {
     readonly pointerType: string;

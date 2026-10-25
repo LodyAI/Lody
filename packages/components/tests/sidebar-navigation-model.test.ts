@@ -303,4 +303,85 @@ describe('sidebar navigation model opened-by tree', () => {
 
     expect(sessionIds(items)).toEqual(['opener', 'opened', 'unrelated']);
   });
+
+  it('lists a machine-bound project after the folders of its machine and the rest with GitHub', () => {
+    const groupRow = (id: string, at: string, group: { id: string; name: string }) => ({
+      ...sessionRow(id, at, 'acme/web'),
+      projectGroup: group,
+    });
+    const shop = { id: 'shop', name: 'Shop' };
+    const items = buildSidebarNavigationItems({
+      ...baseOptions,
+      workspace: {
+        ...baseOptions.workspace,
+        localSections: [
+          {
+            collapsed: false,
+            projects: [
+              {
+                machineId: 'machine-1',
+                localProjectId: 'notes',
+                collapsed: true,
+                showFull: false,
+                sessions: [],
+              },
+            ],
+            // Shop holds a folder without a remote, so it needs this machine.
+            projectGroups: [{ projectId: 'shop', name: 'Shop', collapsed: false }],
+            projectGroupSessions: [
+              groupRow('group-old', '2026-04-22T08:00:00.000Z', shop),
+              groupRow('group-new', '2026-04-22T09:00:00.000Z', shop),
+            ],
+          },
+        ],
+        // Repository-only projects run anywhere and sit with GitHub; a
+        // deleted project's conversations keep their snapshot name there.
+        projectGroups: [{ projectId: 'empty', name: 'Empty', collapsed: false }],
+        repoSessions: [
+          groupRow('orphan', '2026-04-22T07:00:00.000Z', { id: 'gone', name: 'Gone' }),
+        ],
+        chatSessions: [sessionRow('chat', '2026-04-22T10:00:00.000Z')],
+      },
+    });
+
+    expect(
+      items.flatMap((item) =>
+        item.kind === 'group-header'
+          ? [item.groupKey]
+          : item.kind === 'local-project'
+            ? [`local:${item.localProjectId}`]
+            : []
+      )
+    ).toEqual([
+      'local:notes',
+      'projectGroup:shop',
+      'projectGroup:empty',
+      'projectGroup:gone',
+      ONLY_CHATS_KEY,
+    ]);
+    expect(sessionIds(items)).toEqual(['group-new', 'group-old', 'orphan', 'chat']);
+  });
+
+  it('skips a machine-bound project while its machine is folded', () => {
+    const items = buildSidebarNavigationItems({
+      ...baseOptions,
+      workspace: {
+        ...baseOptions.workspace,
+        localSections: [
+          {
+            collapsed: true,
+            projects: [],
+            projectGroups: [{ projectId: 'shop', name: 'Shop', collapsed: false }],
+            projectGroupSessions: [
+              {
+                ...sessionRow('group-row', '2026-04-22T08:00:00.000Z'),
+                projectGroup: { id: 'shop', name: 'Shop' },
+              },
+            ],
+          },
+        ],
+      },
+    });
+    expect(items).toEqual([]);
+  });
 });

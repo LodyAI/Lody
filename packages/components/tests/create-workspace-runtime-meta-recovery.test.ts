@@ -501,6 +501,7 @@ describe('createWorkspaceRuntime meta recovery lifecycle', () => {
     });
     await expect(
       createWorkspaceRuntime({
+    content: { mode: 'plaintext' },
         workspaceSlug: 'workspace',
         workspaceId: 'workspace-1' as WorkspaceId,
         apiBaseUrl: 'https://api.example.test',
@@ -538,6 +539,7 @@ describe('createWorkspaceRuntime meta recovery lifecycle', () => {
     );
     const controller = new AbortController();
     const creating = createWorkspaceRuntime({
+    content: { mode: 'plaintext' },
       workspaceSlug: 'workspace',
       workspaceId: 'workspace-1' as WorkspaceId,
       apiBaseUrl: 'https://api.example.test',
@@ -562,6 +564,7 @@ describe('createWorkspaceRuntime meta recovery lifecycle', () => {
       return token.promise;
     });
     const runtime = await createWorkspaceRuntime({
+    content: { mode: 'plaintext' },
       workspaceSlug: 'workspace',
       workspaceId: 'workspace-1' as WorkspaceId,
       apiBaseUrl: 'https://api.example.test',
@@ -603,6 +606,7 @@ describe('createWorkspaceRuntime meta recovery lifecycle', () => {
         return createMetaSub(Promise.resolve());
       });
     const runtime = await createWorkspaceRuntime({
+    content: { mode: 'plaintext' },
       workspaceSlug: 'workspace',
       workspaceId: 'workspace-1' as WorkspaceId,
       apiBaseUrl: 'https://api.example.test',
@@ -626,6 +630,7 @@ describe('createWorkspaceRuntime meta recovery lifecycle', () => {
       return joined.promise;
     });
     const runtime = await createWorkspaceRuntime({
+    content: { mode: 'plaintext' },
       workspaceSlug: 'workspace',
       workspaceId: 'workspace-1' as WorkspaceId,
       apiBaseUrl: 'https://api.example.test',
@@ -661,6 +666,7 @@ describe('createWorkspaceRuntime meta recovery lifecycle', () => {
     });
     const controller = new AbortController();
     const creating = createWorkspaceRuntime({
+    content: { mode: 'plaintext' },
       workspaceSlug: 'workspace',
       workspaceId: 'workspace-1' as WorkspaceId,
       apiBaseUrl: 'https://api.example.test',
@@ -696,6 +702,7 @@ describe('createWorkspaceRuntime meta recovery lifecycle', () => {
     const repo = await open();
     mocks.repoOverride = repo;
     const runtime = await createWorkspaceRuntime({
+    content: { mode: 'plaintext' },
       workspaceSlug: 'workspace',
       workspaceId: 'workspace-1' as WorkspaceId,
       apiBaseUrl: 'https://api.example.test',
@@ -733,6 +740,7 @@ describe('createWorkspaceRuntime meta recovery lifecycle', () => {
     mocks.joinMetaRoom.mockRejectedValueOnce(new Error('bootstrap meta timed out'));
 
     const runtime = await createWorkspaceRuntime({
+    content: { mode: 'plaintext' },
       workspaceSlug: 'workspace',
       workspaceId: 'workspace-1' as WorkspaceId,
       apiBaseUrl: 'https://api.example.test',
@@ -768,6 +776,7 @@ describe('createWorkspaceRuntime meta recovery lifecycle', () => {
       new Error('The database connection is closing.')
     );
     const runtime = await createWorkspaceRuntime({
+    content: { mode: 'plaintext' },
       workspaceSlug: 'workspace',
       workspaceId: 'workspace-1' as WorkspaceId,
       apiBaseUrl: 'https://api.example.test',
@@ -832,6 +841,7 @@ describe('createWorkspaceRuntime meta recovery lifecycle', () => {
     const blockedDelete = Promise.withResolvers<void>();
     mocks.metaCheckpointDelete.mockImplementationOnce(async () => await blockedDelete.promise);
     const runtime = await createWorkspaceRuntime({
+    content: { mode: 'plaintext' },
       workspaceSlug: 'workspace',
       workspaceId: 'workspace-1' as WorkspaceId,
       apiBaseUrl: 'https://api.example.test',
@@ -864,6 +874,7 @@ describe('createWorkspaceRuntime meta recovery lifecycle', () => {
       const blockedDelete = Promise.withResolvers<void>();
       mocks.metaCheckpointDelete.mockImplementationOnce(async () => await blockedDelete.promise);
       const runtime = await createWorkspaceRuntime({
+    content: { mode: 'plaintext' },
         workspaceSlug: 'workspace',
         workspaceId: 'workspace-1' as WorkspaceId,
         apiBaseUrl: 'https://api.example.test',
@@ -903,6 +914,7 @@ describe('createWorkspaceRuntime meta recovery lifecycle', () => {
       const blockedAdd = Promise.withResolvers<void>();
       mocks.addTransport.mockImplementationOnce(async () => await blockedAdd.promise);
       const runtime = await createWorkspaceRuntime({
+    content: { mode: 'plaintext' },
         workspaceSlug: 'workspace',
         workspaceId: 'workspace-1' as WorkspaceId,
         apiBaseUrl: 'https://api.example.test',
@@ -934,6 +946,7 @@ describe('createWorkspaceRuntime meta recovery lifecycle', () => {
     const blockedAdd = Promise.withResolvers<void>();
     mocks.addTransport.mockImplementationOnce(async () => await blockedAdd.promise);
     const runtime = await createWorkspaceRuntime({
+    content: { mode: 'plaintext' },
       workspaceSlug: 'workspace',
       workspaceId: 'workspace-1' as WorkspaceId,
       apiBaseUrl: 'https://api.example.test',
@@ -967,6 +980,7 @@ describe('createWorkspaceRuntime meta recovery lifecycle', () => {
       .mockImplementationOnce(async () => await firstAdd.promise)
       .mockImplementationOnce(async () => await secondAdd.promise);
     const runtime = await createWorkspaceRuntime({
+    content: { mode: 'plaintext' },
       workspaceSlug: 'workspace',
       workspaceId: 'workspace-1' as WorkspaceId,
       apiBaseUrl: 'https://api.example.test',
@@ -1008,6 +1022,7 @@ describe('createWorkspaceRuntime meta recovery lifecycle', () => {
         mocks.addTransport.mockImplementationOnce(async () => await blocked.promise);
       }
       const runtime = await createWorkspaceRuntime({
+    content: { mode: 'plaintext' },
         workspaceSlug: 'workspace',
         workspaceId: 'workspace-1' as WorkspaceId,
         apiBaseUrl: 'https://api.example.test',
@@ -1047,6 +1062,7 @@ describe('createWorkspaceRuntime meta recovery lifecycle', () => {
       new Error('The database connection is closing.')
     );
     const runtime = await createWorkspaceRuntime({
+    content: { mode: 'plaintext' },
       workspaceSlug: 'workspace',
       workspaceId: 'workspace-1' as WorkspaceId,
       apiBaseUrl: 'https://api.example.test',
@@ -1106,6 +1122,7 @@ describe('createWorkspaceRuntime meta recovery lifecycle', () => {
       new Error('The database connection is closing.')
     );
     const runtime = await createWorkspaceRuntime({
+    content: { mode: 'plaintext' },
       workspaceSlug: 'workspace',
       workspaceId: 'workspace-1' as WorkspaceId,
       apiBaseUrl: 'https://api.example.test',
@@ -1145,6 +1162,7 @@ describe('createWorkspaceRuntime meta recovery lifecycle', () => {
     enableElectronLocalDataPlane();
     markSuspectMetaCheckpoint();
     const runtime = await createWorkspaceRuntime({
+    content: { mode: 'plaintext' },
       workspaceSlug: 'workspace',
       workspaceId: 'workspace-1' as WorkspaceId,
       apiBaseUrl: 'https://api.example.test',
@@ -1178,6 +1196,7 @@ describe('createWorkspaceRuntime meta recovery lifecycle', () => {
     mocks.joinMetaRoom.mockRejectedValue(new Error('transport connection failed'));
 
     const runtime = await createWorkspaceRuntime({
+    content: { mode: 'plaintext' },
       workspaceSlug: 'workspace',
       workspaceId: 'workspace-1' as WorkspaceId,
       apiBaseUrl: 'https://api.example.test',
@@ -1228,6 +1247,7 @@ describe('createWorkspaceRuntime meta recovery lifecycle', () => {
     mocks.joinMetaRoom.mockReturnValue(pendingMetaJoin);
 
     const runtime = await createWorkspaceRuntime({
+    content: { mode: 'plaintext' },
       workspaceSlug: 'workspace',
       workspaceId: 'workspace-1' as WorkspaceId,
       apiBaseUrl: 'https://api.example.test',
@@ -1266,6 +1286,7 @@ describe('createWorkspaceRuntime meta recovery lifecycle', () => {
       .mockResolvedValueOnce(createMetaSub(recoverySync));
 
     const runtime = await createWorkspaceRuntime({
+    content: { mode: 'plaintext' },
       workspaceSlug: 'workspace',
       workspaceId: 'workspace-1' as WorkspaceId,
       apiBaseUrl: 'https://api.example.test',
@@ -1304,6 +1325,7 @@ describe('createWorkspaceRuntime meta recovery lifecycle', () => {
         { docId: getSessionRoomId(id), meta: { id }, exists: true },
       ]);
       const runtime = await createWorkspaceRuntime({
+    content: { mode: 'plaintext' },
         workspaceSlug: 'workspace',
         workspaceId: 'workspace-1' as WorkspaceId,
         apiBaseUrl: 'https://api.example.test',
@@ -1335,6 +1357,7 @@ describe('createWorkspaceRuntime meta recovery lifecycle', () => {
   it('rejects a snapshot if its runtime is disposed while the query is pending', async () => {
     mocks.joinMetaRoom.mockResolvedValueOnce(createMetaSub(Promise.resolve()));
     const runtime = await createWorkspaceRuntime({
+    content: { mode: 'plaintext' },
       workspaceSlug: 'workspace',
       workspaceId: 'workspace-1' as WorkspaceId,
       apiBaseUrl: 'https://api.example.test',
@@ -1355,6 +1378,7 @@ describe('createWorkspaceRuntime meta recovery lifecycle', () => {
     mocks.joinMetaRoom.mockResolvedValueOnce(createMetaSub(Promise.resolve()));
 
     const runtime = await createWorkspaceRuntime({
+    content: { mode: 'plaintext' },
       workspaceSlug: 'workspace',
       workspaceId: 'workspace-1' as WorkspaceId,
       apiBaseUrl: 'https://api.example.test',
@@ -1402,6 +1426,7 @@ describe('createWorkspaceRuntime meta recovery lifecycle', () => {
     });
 
     const runtime = await createWorkspaceRuntime({
+    content: { mode: 'plaintext' },
       workspaceSlug: 'workspace',
       workspaceId: 'workspace-1' as WorkspaceId,
       apiBaseUrl: 'https://api.example.test',
@@ -1441,6 +1466,7 @@ describe('createWorkspaceRuntime meta recovery lifecycle', () => {
     });
 
     const runtime = await createWorkspaceRuntime({
+    content: { mode: 'plaintext' },
       workspaceSlug: 'workspace',
       workspaceId: 'workspace-1' as WorkspaceId,
       apiBaseUrl: 'https://api.example.test',
@@ -1466,6 +1492,7 @@ describe('createWorkspaceRuntime meta recovery lifecycle', () => {
     });
 
     const runtime = await createWorkspaceRuntime({
+    content: { mode: 'plaintext' },
       workspaceSlug: 'workspace',
       workspaceId: 'workspace-1' as WorkspaceId,
       apiBaseUrl: 'https://api.example.test',
@@ -1491,6 +1518,7 @@ describe('createWorkspaceRuntime meta recovery lifecycle', () => {
     enableElectronLocalDataPlane();
 
     const runtime = await createWorkspaceRuntime({
+    content: { mode: 'plaintext' },
       workspaceSlug: 'workspace',
       workspaceId: 'workspace-1' as WorkspaceId,
       apiBaseUrl: 'https://api.example.test',
@@ -1511,6 +1539,7 @@ describe('createWorkspaceRuntime meta recovery lifecycle', () => {
     enableElectronLocalDataPlane();
 
     const runtime = await createWorkspaceRuntime({
+    content: { mode: 'plaintext' },
       workspaceSlug: 'workspace',
       workspaceId: 'workspace-1' as WorkspaceId,
       apiBaseUrl: 'https://api.example.test',
@@ -1558,6 +1587,7 @@ describe('createWorkspaceRuntime meta recovery lifecycle', () => {
     );
 
     const runtime = await createWorkspaceRuntime({
+    content: { mode: 'plaintext' },
       workspaceSlug: 'workspace',
       workspaceId: 'workspace-1' as WorkspaceId,
       apiBaseUrl: 'https://api.example.test',
@@ -1581,6 +1611,7 @@ describe('createWorkspaceRuntime meta recovery lifecycle', () => {
     Object.assign(navigator, { onLine: false });
 
     const runtime = await createWorkspaceRuntime({
+    content: { mode: 'plaintext' },
       workspaceSlug: 'workspace',
       workspaceId: 'workspace-1' as WorkspaceId,
       apiBaseUrl: 'https://api.example.test',
@@ -1685,6 +1716,7 @@ describe('createWorkspaceRuntime meta recovery lifecycle', () => {
       });
       body.commit();
       const runtime = await createWorkspaceRuntime({
+    content: { mode: 'plaintext' },
         workspaceSlug: 'workspace',
         workspaceId: 'workspace-1' as WorkspaceId,
         apiBaseUrl: 'https://api.example.test',
@@ -1816,6 +1848,7 @@ describe('createWorkspaceRuntime meta recovery lifecycle', () => {
       mocks.repoOverride = repo;
       enableElectronLocalDataPlane();
       const runtime = await createWorkspaceRuntime({
+    content: { mode: 'plaintext' },
         workspaceSlug: 'workspace',
         workspaceId: 'workspace-1' as WorkspaceId,
         apiBaseUrl: 'https://api.example.test',
@@ -1886,6 +1919,7 @@ describe('createWorkspaceRuntime meta recovery lifecycle', () => {
     Object.assign(navigator, { onLine: true });
 
     const runtime = await createWorkspaceRuntime({
+    content: { mode: 'plaintext' },
       workspaceSlug: 'workspace',
       workspaceId: 'workspace-1' as WorkspaceId,
       apiBaseUrl: 'https://api.example.test',
@@ -1975,6 +2009,7 @@ describe('createWorkspaceRuntime meta recovery lifecycle', () => {
     await repo.upsertDocMeta(roomId, { id: sessionId, machineId: 'local-machine' });
 
     const runtime = await createWorkspaceRuntime({
+    content: { mode: 'plaintext' },
       workspaceSlug: 'workspace',
       workspaceId: 'workspace-1' as WorkspaceId,
       apiBaseUrl: 'https://api.example.test',
@@ -2048,6 +2083,7 @@ describe('createWorkspaceRuntime meta recovery lifecycle', () => {
     await repo.upsertDocMeta(roomId, { id: sessionId, machineId: 'local-machine' });
 
     const runtime = await createWorkspaceRuntime({
+    content: { mode: 'plaintext' },
       workspaceSlug: 'workspace',
       workspaceId: 'workspace-1' as WorkspaceId,
       apiBaseUrl: 'https://api.example.test',
@@ -2123,6 +2159,7 @@ describe('createWorkspaceRuntime meta recovery lifecycle', () => {
     });
 
     const runtime = await createWorkspaceRuntime({
+    content: { mode: 'plaintext' },
       workspaceSlug: 'workspace',
       workspaceId: 'workspace-1' as WorkspaceId,
       apiBaseUrl: 'https://api.example.test',
@@ -2204,6 +2241,7 @@ describe('createWorkspaceRuntime meta recovery lifecycle', () => {
     await repo.upsertDocMeta(roomId, { id: sessionId, machineId: 'local-machine' });
 
     const runtime = await createWorkspaceRuntime({
+    content: { mode: 'plaintext' },
       workspaceSlug: 'workspace',
       workspaceId: 'workspace-1' as WorkspaceId,
       apiBaseUrl: 'https://api.example.test',
@@ -2231,6 +2269,7 @@ describe('createWorkspaceRuntime meta recovery lifecycle', () => {
       .mockResolvedValueOnce(createMetaSub(Promise.resolve()));
 
     const runtime = await createWorkspaceRuntime({
+    content: { mode: 'plaintext' },
       workspaceSlug: 'workspace',
       workspaceId: 'workspace-1' as WorkspaceId,
       apiBaseUrl: 'https://api.example.test',
@@ -2260,6 +2299,7 @@ describe('createWorkspaceRuntime meta recovery lifecycle', () => {
     mocks.joinMetaRoom.mockResolvedValueOnce(createMetaSub(Promise.resolve()));
 
     const runtime = await createWorkspaceRuntime({
+    content: { mode: 'plaintext' },
       workspaceSlug: 'workspace',
       workspaceId: 'workspace-1' as WorkspaceId,
       apiBaseUrl: 'https://api.example.test',
@@ -2291,6 +2331,7 @@ describe('createWorkspaceRuntime meta recovery lifecycle', () => {
     mocks.presenceShouldRestartOnExternalWake.mockReturnValue(true);
 
     const runtime = await createWorkspaceRuntime({
+    content: { mode: 'plaintext' },
       workspaceSlug: 'workspace',
       workspaceId: 'workspace-1' as WorkspaceId,
       apiBaseUrl: 'https://api.example.test',
@@ -2324,6 +2365,7 @@ describe('createWorkspaceRuntime meta recovery lifecycle', () => {
   it('gives eager-sync one held auth callback per provider and forwards its context', async () => {
     mocks.joinMetaRoom.mockResolvedValue(createMetaSub(Promise.resolve()));
     const runtime = await createWorkspaceRuntime({
+    content: { mode: 'plaintext' },
       workspaceSlug: 'workspace',
       workspaceId: 'workspace-1' as WorkspaceId,
       apiBaseUrl: 'https://api.example.test',
@@ -2355,6 +2397,7 @@ describe('createWorkspaceRuntime meta recovery lifecycle', () => {
   it('rebinds the eager-sync auth callback when the token provider is replaced', async () => {
     mocks.joinMetaRoom.mockResolvedValue(createMetaSub(Promise.resolve()));
     const runtime = await createWorkspaceRuntime({
+    content: { mode: 'plaintext' },
       workspaceSlug: 'workspace',
       workspaceId: 'workspace-1' as WorkspaceId,
       apiBaseUrl: 'https://api.example.test',
@@ -2377,4 +2420,12 @@ describe('createWorkspaceRuntime meta recovery lifecycle', () => {
 
     await runtime.dispose();
   });
+it('refuses a protected new-session stream before any stream creation', async () => {
+  const runtime = await createWorkspaceRuntime({ content: { mode: 'protected', namespace: 'synthetic-genesis', resolve: () => { throw new Error('no content provider in M1'); }, snapshotUpload: { canUpload: () => false } }, workspaceSlug: 'workspace', workspaceId: 'workspace-1' as WorkspaceId, apiBaseUrl: 'https://api.example.test' });
+  try {
+    await expect(runtime.ensureDocStream('encrypted-session')).rejects.toThrow('Encrypted workspace does not support this operation');
+    expect(cloudAttachCalls()).toEqual([]);
+  } finally { await runtime.dispose(); }
+});
+
 });

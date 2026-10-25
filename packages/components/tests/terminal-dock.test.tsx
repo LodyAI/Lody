@@ -94,7 +94,7 @@ async function toggleDock(): Promise<void> {
 }
 
 function hasOpenPanel(container: HTMLElement): boolean {
-  return container.querySelector('button[aria-label="Hide panel"]') !== null;
+  return container.firstElementChild?.getAttribute('aria-hidden') === 'false';
 }
 
 function getTerminalTab(container: HTMLElement, title: string): HTMLElement {

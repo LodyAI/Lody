@@ -1,3 +1,5 @@
+import { Immer, enablePatches, type Patch } from 'immer';
+import type { AgentHistoryMutationPath } from '../acp/history-apply';
 import { markAssistantTurnFinished } from './assistant-finalize';
 import { planOperationProgress, planOperationCompletion } from './operation-progress';
 import type { StoredLodyOperation } from '../session-orchestration';
@@ -330,4 +332,51 @@ export function applyHistoryAction(
   }
   const unreachable: never = action;
   throw new Error('Unsupported history action', { cause: unreachable });
+}
+
+enablePatches();
+const actionImmer = new Immer({ autoFreeze: false, useStrictShallowCopy: true });
+/** Private write planning; the established mutating action semantics stay shared. */
+export function planHistoryAction(
+  history: SessionEntry[],
+  action: HistoryAction
+): {
+  turns: SessionEntry[];
+  matched: boolean;
+  changes: AgentHistoryMutationPath[];
+} {
+  const owned = structuredClone(action);
+  let matched = false,
+    patches: Patch[] = [];
+  const turns = actionImmer.produce(
+    history,
+    (draft) => {
+      const result = applyHistoryAction(draft as SessionEntry[], owned);
+      matched = result.matched;
+      if (result.turns === draft) return;
+      for (const [index, entry] of result.turns.entries()) {
+        const current = draft[index];
+        if (!current || current.id !== entry.id) {
+          draft[index] = entry;
+          continue;
+        }
+        for (const key of new Set([...Object.keys(current), ...Object.keys(entry)])) {
+          if (Reflect.get(current, key) === Reflect.get(entry, key)) continue;
+          if (Object.hasOwn(entry, key)) Reflect.set(current, key, Reflect.get(entry, key));
+          else Reflect.deleteProperty(current, key);
+        }
+      }
+      draft.length = result.turns.length;
+    },
+    (recorded) => {
+      patches = recorded;
+    }
+  );
+  const changes: AgentHistoryMutationPath[] = [];
+  for (const patch of patches) {
+    const index = patch.path[0];
+    const entry = typeof index === 'number' ? turns[index] : undefined;
+    if (entry) changes.push({ turnId: entry.id, path: patch.path.slice(1) });
+  }
+  return { turns, matched, changes };
 }

@@ -101,6 +101,114 @@ describe('SubagentTaskPanel', () => {
   const rowNamed = (name: string) =>
     container.querySelector<HTMLButtonElement>(`button[aria-label="${name}"]`);
 
+  it('loads only the opened child and ignores a late result after switching tasks', async () => {
+    const first = Promise.withResolvers<Run>();
+    const second = Promise.withResolvers<Run>();
+    const reads: string[] = [];
+    const a = task({
+      taskId: 'a',
+      description: 'First child',
+      status: 'in_progress',
+      run: run('running', [{ type: 'text', text: 'Latest a' }]),
+      history: {
+        read: () => {
+          reads.push('a');
+          return first.promise;
+        },
+      },
+    });
+    const b = task({
+      taskId: 'b',
+      description: 'Second child',
+      status: 'in_progress',
+      run: run('running', [{ type: 'text', text: 'Latest b' }]),
+      history: {
+        read: () => {
+          reads.push('b');
+          return second.promise;
+        },
+      },
+    });
+    render([a, b]);
+    expect(reads).toEqual([]);
+    expect(latestActions()).toEqual(['Latest a', 'Latest b']);
+    await act(async () => rowNamed('Claude task · First child')?.click());
+    expect(reads).toEqual(['a']);
+    // Switching the selected task replaces the detail owner while the earlier
+    // asynchronous read is still pending.
+    render([b]);
+    await act(async () => rowNamed('Claude task · Second child')?.click());
+    expect(reads).toEqual(['a', 'b']);
+    await act(async () => {
+      second.resolve(run('running', [{ type: 'text', text: 'Full second transcript' }]));
+    });
+    expect(steps()).toEqual(['Full second transcript']);
+    await act(async () => {
+      first.resolve(run('running', [{ type: 'text', text: 'Stale first transcript' }]));
+    });
+    expect(steps()).toEqual(['Full second transcript']);
+  });
+
+  it('follows a deferred running transcript and retains content while refreshing without overriding reading position', async () => {
+    const first = Promise.withResolvers<Run>();
+    const next = Promise.withResolvers<Run>();
+    const subject = task({
+      status: 'in_progress',
+      run: run('running'),
+      history: { read: () => first.promise },
+    });
+    render([subject]);
+    await act(async () => rowNamed('Claude task · find skills')?.click());
+    const scroller = peek()?.querySelector<HTMLDivElement>('.scrollbar-pro');
+    expect(scroller).toBeTruthy();
+    if (!scroller) throw new Error('Missing task scroller');
+    Object.defineProperties(scroller, {
+      scrollHeight: { configurable: true, get: () => 1000 },
+      clientHeight: { configurable: true, get: () => 200 },
+    });
+    await act(async () =>
+      first.resolve(run('running', [{ type: 'text', text: 'Initial full transcript' }]))
+    );
+    expect(scroller.scrollTop).toBe(1000);
+    act(() => {
+      scroller.scrollTop = 0;
+      scroller.dispatchEvent(new Event('scroll', { bubbles: true }));
+    });
+    const step = peek()?.querySelector('[data-step]');
+    render([{ ...subject, history: { read: () => next.promise } }]);
+    expect(steps()).toEqual(['Initial full transcript']);
+    expect(step?.isConnected).toBe(true);
+    await act(async () =>
+      next.resolve(run('running', [{ type: 'text', text: 'Updated full transcript' }]))
+    );
+    expect(steps()).toEqual(['Updated full transcript']);
+    expect(scroller.scrollTop).toBe(0);
+  });
+
+  it('retries a failed on-demand transcript read without presenting it as empty', async () => {
+    let fail = true;
+    const subject = task({
+      status: 'in_progress',
+      run: run('running'),
+      history: {
+        read: async () => {
+          if (fail) throw new Error('synthetic read failure');
+          return run('running', [{ type: 'text', text: 'Recovered transcript' }]);
+        },
+      },
+    });
+    render([subject]);
+    await act(async () => rowNamed('Claude task · find skills')?.click());
+    expect(peek()?.textContent).not.toContain('No steps were received');
+    const retry = Array.from(peek()?.querySelectorAll('button') ?? []).find(
+      (button) => button.textContent === 'Retry'
+    );
+    expect(retry).toBeDefined();
+    fail = false;
+    await act(async () => retry?.click());
+    expect(steps()).toEqual(['Recovered transcript']);
+  });
+
   it('states background once in the summary and gives each row the word its state needs', () => {
     render([
       task({

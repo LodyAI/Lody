@@ -13,21 +13,20 @@ Root `AGENTS.md` applies; this file adds CLI context. Build, PR-poller, and adap
   Keep maps and no app code in vendor chunks.
 
 - The public CLI defaults to the local platform, discovers no deployment dotenv files, and must
-  never initialize telemetry in local mode even if PostHog variables exist in the shell.
+  never initialize telemetry in local mode even if PostHog env vars are set.
 - INVARIANT: the dev output layout must match production's — `index.js` plus flat sibling
   `claude-acp.js` / `codex-acp.js` / `*-worker.js` — because worker owners resolve their child by
   FILENAME next to `import.meta.url`. Keep npm packages external by ABSOLUTE path, keep
   `splitting: true`, and keep the no-hoisting assertion.
 - Import the CLI's own `version` from `@/pkg`, never a relative `../package.json`; the package
-  `name` stays `lody` in every composition.
+  `name` is `lody` in every composition.
 - Optional desktop provenance comes from the compiled constant in `utils/desktop-build.ts`,
-  never runtime environment variables. File/hybrid log initialization records it at debug level.
-- Keep `prepare:acp-adapters` before `dev-build.mjs` and Vite: skipping it can silently launch old
-  adapter capabilities from a stale `dist/`.
-- `engines.node` is pinned to `>=22.14.0 <23 || >=23.6.0` by better-sqlite3's
-  `NAPI_VERSION=10`, and
-  `src/utils/sqlite-runtime-support.ts` must stay the FIRST import in `src/index.ts` — older Node
-  segfaults on the SQLite binding instead of throwing.
+  never runtime env vars. File/hybrid log init records it at debug level.
+- Keep `prepare:acp-adapters` before `dev-build.mjs` and Vite: skipping it can launch stale
+  adapter capabilities from an old `dist/`.
+- Keep the [Node security floors](../../.agents/notes/implemented/bug-fix/2026-10-22-node-security-runtime-floor.md)
+  aligned across engines/preinstall/CLI. `sqlite-runtime-support.ts` stays first.
+  Electron skips only the version floor.
 - Read [apps/electron/AGENTS.md](../electron/AGENTS.md) — embedded packaging, native deps/ABI,
   child runtime env, and the three places the Node pin moves together — before changing runtime
   deps, bundle externals, or spawning `process.execPath` with a filtered environment.
@@ -45,19 +44,21 @@ Root `AGENTS.md` applies; this file adds CLI context. Build, PR-poller, and adap
 ## Coding rules
 
 - Prefer Effect v4 for new/refactored CLI code; follow the [Effect guide](../../.agents/docs/cli-effect-ts.md).
-- Processes use `@lody/shared/node/process` (CLI wiring: `src/platform/process-options`);
+- Processes use `@lody/shared/node/process` (wiring: `src/platform/process-options`);
   [rules](../../packages/shared/src/node/AGENTS.md), enforced by `check:cli-process-boundary`.
-- Keep the strict tsconfig, no `any` or non-null assertions, and Zod at every foreign boundary:
+- Strict tsconfig, no `any` or non-null assertions, Zod at every foreign boundary:
   context/cli-type-safety.md.
 - After a remote prompt arrives, only correctness-critical setup may block before ACP
   `agent.prompt`; never await notifications, analytics, or UI summaries
   (context/cli-prompt-hot-path.md).
-- Startup order and timing traces: context/cli-startup.md.
+- Startup order/timing traces: context/cli-startup.md.
 - The daemon file log always keeps `debug`, so a per-token or per-tick `logger.debug` evicts the 20 MB
   rotation window. Move it to `logger.trace` (`LODY_LOG_TRACE=1`) only if its subsystem's failures
   stay diagnosable without it; keep failing/slow branches at `debug`
   ([note](../../.agents/notes/implemented/architecture/2026-09-16-daemon-log-volume.md)).
 - File logs use `createFileTransport`; a raw `DailyRotateFile` makes a full disk crash the daemon.
+- A sync confirmation that fails on timeout waits ≥ `SYNC_CONFIRMATION_TIMEOUT_MS` (30s); waits
+  that continue on timeout may be shorter.
 - Read context/local-agent-ownership.md before changing local ports/sockets, daemon PID state,
   Electron/daemon startup, Supervisor retries, or Worker shutdown; health probes are observation
   only and never authorize PID killing.
@@ -87,7 +88,7 @@ execution/consent rules. These rules also bind CLI callers outside that director
   a `createAgent` failure detaches the instance BEFORE its cleanup `terminate`; otherwise a
   recovery such as the resume-to-replay fallback loses every update of the replacement agent
   ([note](../../.agents/notes/implemented/bug-fix/2026-09-11-failed-session-create-lifecycle-events.md)).
-- `lody feedback` and MCP `lody_feedback` submit only caller-provided suggestion text plus CLI
+- `lody feedback` and MCP `lody_feedback` submit only caller-provided suggestion text and CLI
   version, platform, and architecture — never cwd, paths, hostname, environment, logs, prompts,
   history, or file contents. Keep obvious-secret rejection in the CLI and the hosted API boundary.
 
@@ -111,5 +112,5 @@ execution/consent rules. These rules also bind CLI callers outside that director
 - Pi extension scanning runs only the pinned runtime's read-only listing entry under a frozen
   default or saved-profile environment — never caller-supplied launch fields. Selections
   require the pinned extension-aware runtime (`piExtensionsProtocolVersion`), not a fallback.
-- `src/lib/pr-poller/` compensates for the hosted GitHub webhook fan-out. Spec:
+- `src/lib/pr-poller/` owns PR associations and lifecycle reconciliation. Spec:
   `specs/pr-status-reconciler.md`; invariants: [pr-poller](src/lib/pr-poller/AGENTS.md).

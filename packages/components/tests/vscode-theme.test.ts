@@ -58,7 +58,11 @@ const hslChannelToRgb = (channel: string | undefined): { r: number; g: number; b
             : h < 300
               ? [x, 0, c]
               : [c, 0, x];
-  return { r: Math.round((r + m) * 255), g: Math.round((g + m) * 255), b: Math.round((b + m) * 255) };
+  return {
+    r: Math.round((r + m) * 255),
+    g: Math.round((g + m) * 255),
+    b: Math.round((b + m) * 255),
+  };
 };
 
 describe('VSCode theme adapter', () => {
@@ -678,5 +682,42 @@ describe('VSCode theme adapter', () => {
       themeLabel: 'Broken Theme',
       themeId: 'publisher.broken-theme.broken-theme',
     });
+  });
+});
+
+describe('Highlights VS Code theme adaptation', () => {
+  it('preserves the active editor palette and keyword/comment styles in actual tokens', async () => {
+    const { toHighlightsTheme, registerLodyVSCodeThemeForDiffs } =
+      await import('../src/lib/vscode-theme/vscode-theme-shiki');
+    const { codeToTokens } = await import('@pierre/highlights');
+    const { resolveTheme } = await import('@pierre/diffs');
+    const theme = await resolveVSCodeTheme({
+      id: 'highlights-test',
+      label: 'Highlights test',
+      path: 'theme.json',
+      uiTheme: 'vs-dark',
+      source: { kind: 'test-fixture' },
+      readFile: createMapReader({
+        'theme.json': JSON.stringify({
+          colors: { 'editor.foreground': '#eeeeee', 'editor.background': '#111111' },
+          tokenColors: [
+            { scope: 'keyword', settings: { foreground: '#ff0000' } },
+            { scope: 'comment', settings: { foreground: '#00ff00', fontStyle: 'italic' } },
+          ],
+        }),
+      }),
+    });
+    const palette = toHighlightsTheme(theme);
+    const result = codeToTokens('return 42;\n// comment', { lang: 'typescript', theme: palette });
+    expect(result.fg).toBe('#eeeeee');
+    expect(result.bg).toBe('#111111');
+    expect(result.tokens[0]?.find((token) => token.content.trim() === 'return')?.color).toBe(
+      '#ff0000'
+    );
+    expect(result.tokens[1]?.[0]).toMatchObject({ color: '#00ff00', fontStyle: 1 });
+    const name = await registerLodyVSCodeThemeForDiffs(theme);
+    expect(name).toBeDefined();
+    expect((await resolveTheme(name!, 'highlights')).zed).toEqual(palette);
+    expect((await resolveTheme(name!, 'shiki-js')).textmate?.fg?.toLowerCase()).toBe('#eeeeee');
   });
 });

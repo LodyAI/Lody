@@ -12,6 +12,7 @@ import {
   type HistoryConflictResolutionDecision,
   type HistoryImportInput,
 } from '@lody/shared/session-data';
+import { SYNC_CONFIRMATION_TIMEOUT_MS } from '@/lib/loro/timeout-utils';
 export { decideHistoryRefresh, decideHistoryConflictResolution } from '@lody/shared/session-data';
 export type {
   HistoryRefreshDecision,
@@ -797,7 +798,7 @@ export class LocalProjectHistorySyncService {
       externalHistory: nextExternalHistory,
     } satisfies Partial<SessionMeta>);
 
-    const synced = await backend.waitUntilSynced();
+    const synced = await backend.waitUntilSynced({ timeoutMs: SYNC_CONFIRMATION_TIMEOUT_MS });
     if (!synced) {
       throw new Error(
         `Replaced history for ${args.sessionId} did not confirm sync before timeout.`

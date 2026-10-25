@@ -1,18 +1,11 @@
 // @vitest-environment jsdom
 
-import { createRequire } from 'node:module';
 import { act } from 'react';
 import { createRoot, type Root as ReactRoot } from 'react-dom/client';
-import * as ScrollArea from '@radix-ui/react-scroll-area';
+import { ScrollArea } from '@lody/ui/scroll-area';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const require = createRequire(import.meta.url);
-const commonJS = require('@radix-ui/react-scroll-area') as typeof ScrollArea;
-
-describe.each([
-  ['ESM', ScrollArea],
-  ['CommonJS', commonJS],
-] as const)('ScrollArea lifecycle (%s)', (_entry, primitive) => {
+describe('ScrollArea lifecycle', () => {
   let root: ReactRoot | undefined;
   let host: HTMLDivElement;
   let frames: Map<number, FrameRequestCallback>;
@@ -49,21 +42,15 @@ describe.each([
   });
 
   async function mount() {
-    const { Root, Viewport, Scrollbar, Thumb } = primitive;
     await act(async () => {
       root = createRoot(host);
       root.render(
-        <Root type="always">
-          <Viewport>
-            <div>Synthetic scroll content</div>
-          </Viewport>
-          <Scrollbar orientation="vertical" forceMount>
-            <Thumb forceMount />
-          </Scrollbar>
-        </Root>
+        <ScrollArea visibility="always">
+          <div>Synthetic scroll content</div>
+        </ScrollArea>
       );
     });
-    const viewport = host.querySelector<HTMLDivElement>('[data-radix-scroll-area-viewport]')!;
+    const viewport = host.querySelector<HTMLDivElement>('[data-scroll-area-viewport]')!;
     let reads = 0;
     Object.defineProperty(viewport, 'scrollTop', {
       configurable: true,
@@ -85,12 +72,12 @@ describe.each([
     });
   }
 
-  it('stops polling after scroll end and restarts on the next scroll', async () => {
+  it('samples scroll events without polling the viewport between them', async () => {
     const { viewport, readCount } = await mount();
     await act(async () => viewport.dispatchEvent(new Event('scroll')));
     const before = readCount();
     await advanceFrames(3);
-    expect(readCount()).toBeGreaterThan(before);
+    expect(readCount()).toBe(before);
     await act(async () => vi.advanceTimersByTime(100));
     const stopped = readCount();
     await advanceFrames(3);
@@ -101,31 +88,20 @@ describe.each([
     expect(readCount()).toBeGreaterThan(stopped);
   });
 
-  it('keeps its stylesheet and parsed rules when content updates', async () => {
-    const { Root, Viewport } = primitive;
+  it('keeps the viewport node and its ref stable when content updates', async () => {
     const render = async (text: string) => {
       await act(async () => {
         root ??= createRoot(host);
-        root.render(
-          <Root>
-            <Viewport>{text}</Viewport>
-          </Root>
-        );
+        root.render(<ScrollArea>{text}</ScrollArea>);
       });
     };
     await render('Initial content');
-    const style = host.querySelector('style')!;
-    const sheet = style.sheet!;
-    const rule = sheet.cssRules[0];
+    const viewport = host.querySelector('[data-scroll-area-viewport]');
 
     await render('Updated content');
 
-    expect(host.querySelector('[data-radix-scroll-area-viewport]')?.textContent).toBe(
-      'Updated content'
-    );
-    expect(host.querySelector('style')).toBe(style);
-    expect(style.sheet).toBe(sheet);
-    expect(style.sheet!.cssRules[0]).toBe(rule);
+    expect(host.querySelector('[data-scroll-area-viewport]')?.textContent).toBe('Updated content');
+    expect(host.querySelector('[data-scroll-area-viewport]')).toBe(viewport);
   });
 
   it('releases polling during scroll without accumulating detached viewport reads', async () => {

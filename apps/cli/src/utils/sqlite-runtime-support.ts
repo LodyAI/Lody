@@ -37,10 +37,28 @@ export function isArchSupported(arch: string): boolean {
   return (SUPPORTED_ARCHS as readonly string[]).includes(arch);
 }
 
-/** The reason this runtime cannot load the binding, or `undefined` if it can. */
+/** Standalone Node floors from the October 2026 security release; Electron backports differ. */
+export function isNodeSecurityVersionSupported(nodeVersion: string): boolean {
+  const match = /^v?(\d+)\.(\d+)\.(\d+)$/.exec(nodeVersion);
+  if (match === null) return false;
+  const major = Number(match[1]);
+  const minor = Number(match[2]);
+  const patch = Number(match[3]);
+  const floors: Record<number, readonly [number, number]> = {
+    22: [23, 4],
+    24: [22, 1],
+    26: [12, 1],
+  };
+  const floor = floors[major];
+  return floor !== undefined && (minor > floor[0] || (minor === floor[0] && patch >= floor[1]));
+}
+
+/** Reject unsupported runtimes before CLI application initialization. */
 export function describeUnsupportedRuntime(runtime: {
   napi: string | undefined;
   arch: string;
+  nodeVersion?: string;
+  electronVersion?: string;
 }): string | undefined {
   if (!isArchSupported(runtime.arch)) {
     return (
@@ -51,10 +69,19 @@ export function describeUnsupportedRuntime(runtime: {
   }
   if (!isNodeApiVersionSupported(runtime.napi)) {
     return (
-      `Lody needs Node-API ${REQUIRED_NODE_API_VERSION}, which means Node.js v22.14.0 through v22.x, ` +
-      `v23.6.0+, or a later major release (you are on ${process.version}, ` +
+      `Lody needs Node-API ${REQUIRED_NODE_API_VERSION} (you are on ${process.version}, ` +
       `Node-API ${runtime.napi ?? 'unknown'}).\n` +
       `Its SQLite binding would crash the process instead of failing cleanly here.\n` +
+      `Upgrade Node, then re-run: npx lody@latest`
+    );
+  }
+  if (
+    !runtime.electronVersion &&
+    !isNodeSecurityVersionSupported(runtime.nodeVersion ?? process.versions.node)
+  ) {
+    return (
+      `Lody requires Node.js v22.23.4+ (22.x), v24.22.1+ (24.x), or v26.12.1+ (26.x) ` +
+      `for the October 2026 security fixes (current: ${runtime.nodeVersion ?? process.versions.node}).\n` +
       `Upgrade Node, then re-run: npx lody@latest`
     );
   }
@@ -65,6 +92,8 @@ export function assertSqliteRuntimeSupported(): void {
   const problem = describeUnsupportedRuntime({
     napi: process.versions.napi,
     arch: process.arch,
+    nodeVersion: process.versions.node,
+    electronVersion: process.versions.electron,
   });
   if (problem === undefined) {
     return;

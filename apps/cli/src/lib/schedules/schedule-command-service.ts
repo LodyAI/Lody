@@ -24,6 +24,7 @@ import {
   type SessionMeta,
   type WorkspaceId,
 } from '@lody/shared';
+import { SYNC_CONFIRMATION_TIMEOUT_MS } from '@/lib/loro/timeout-utils';
 import type { AuthContext } from '../command-runtime';
 import type { LoroDocumentManager } from '../loro/doc';
 import type { WorkspaceSummary } from '../workspace';
@@ -34,6 +35,8 @@ import {
   destinationSessionProblem,
   scheduleDestinationSessionId,
 } from './schedule-run-preparation';
+
+const SYNC_CONFIRMATION = { timeoutMs: SYNC_CONFIRMATION_TIMEOUT_MS };
 
 export type ScheduleCommandContext = {
   manager: LoroDocumentManager;
@@ -121,7 +124,11 @@ export async function executeScheduleCommand(
       }
     );
     await manager.repo.flush();
-    if (!localOnly && (!(await backend.waitUntilSynced()) || !(await session.waitUntilSynced())))
+    if (
+      !localOnly &&
+      (!(await backend.waitUntilSynced(SYNC_CONFIRMATION)) ||
+        !(await session.waitUntilSynced(SYNC_CONFIRMATION)))
+    )
       throw new Error('Proposal saved locally; sync pending. Retry with the same requestId.');
     return { ok: true, requestId: command.requestId, enabled: false, ...outcome };
   }
@@ -285,7 +292,11 @@ export async function executeScheduleCommand(
         finished: true,
       });
     await manager.repo.flush();
-    if (!localOnly && (!(await backend.waitUntilSynced()) || !(await session.waitUntilSynced())))
+    if (
+      !localOnly &&
+      (!(await backend.waitUntilSynced(SYNC_CONFIRMATION)) ||
+        !(await session.waitUntilSynced(SYNC_CONFIRMATION)))
+    )
       throw new Error('Pause saved; notification sync pending. Retry with the same requestId.');
   }
   return { ok: true, scheduleId: id };

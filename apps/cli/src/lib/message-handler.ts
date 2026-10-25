@@ -1,5 +1,13 @@
+import { encodeSessionFilePath, resolveSessionPullRequests } from '@lody/shared';
+import type { SessionFileRoot } from '@lody/shared';
+import { resolveProjectFileRoots } from '@/session/worktree/project-member-access';
+import { worktreeGitLegacy } from '@/session/worktree/git-execution-legacy';
+import { resolveSessionFilePath } from '@lody/shared';
+import { projectGroupDirectory } from '@/session/worktree/project-worktrees';
+import { archiveProjectGroup } from '@/session/worktree/project-worktree-archive';
 import {
   resolveNotificationPresentation,
+  notificationReplyPreview,
   type NotificationPresentation,
 } from '@lody/shared/notifications';
 import type { SessionActivePresencePhase } from './loro/session-active-presence';
@@ -80,8 +88,6 @@ import {
   getMachineRoomId,
   getSessionIdFromRoomId,
   getSessionRoomId,
-  SessionHistoryChangeSchema,
-  type SessionHistoryChange,
   type IssuePRMention,
   type SessionImageGroupContent,
   type SessionInputBlock,
@@ -373,6 +379,7 @@ import {
   isSessionInLocalProjectRemovalScope,
   shouldApplyMachineDeleteLocalProjectCommand,
   upsertMachineLocalProject,
+  readLocalProjectRootResolveSyncTimeoutMs,
 } from '@/lib/local-project-meta';
 import {
   isACPAgentRichContentNotification,
@@ -1334,6 +1341,11 @@ export class MessageHandler {
       notification,
       logger: this.logger,
       resolveSessionWorkspaceRoot: (sessionId) => this.resolveSessionWorkspaceRoot(sessionId),
+      resolveSessionFileRoots: async (sessionId) => {
+        const resolved = await this.resolveCodeCollabV2Workspace(sessionId);
+        if (!resolved.ok) throw new Error('Session file roots are unavailable');
+        return resolved.fileRoots ?? [{ id: 'main', absolutePath: resolved.workspaceRoot }];
+      },
       validateSessionImageUploadPath: async (filePath) =>
         await this.validateSessionImageUploadPath(filePath),
       uploadSessionImageFile: async (uploadArgs) => await this.uploadSessionImageFile(uploadArgs),
@@ -2395,6 +2407,24 @@ export class MessageHandler {
     return promptBlocks;
   }
 
+  private async probeProjectLocalMember(localProjectId: LocalProjectId) {
+    try {
+      const rootPath = await resolveWorkspaceLocalProjectRootPath(
+        this.workspaceDocument.repo,
+        this.workspaceId,
+        this.machineId,
+        localProjectId
+      );
+      if (!rootPath) throw new Error('Project group member is unavailable');
+      return {
+        type: 'project/probe-local-member' as const,
+        ...(await worktreeGitLegacy.probeLocalProjectMember(rootPath)),
+      };
+    } catch {
+      throw new Error('Unable to probe project group member');
+    }
+  }
+
   private async getLocalProjectGitStateForRpc(args: {
     localProjectId: LocalProjectId;
     requestedByUserId: string;
@@ -2434,7 +2464,7 @@ export class MessageHandler {
         requestSync: () =>
           this.workspaceDocument.syncMachineFlockDoc(this.machineId, {
             reason: 'local-project-git-state-resolve',
-            timeoutMs: readTimeoutEnv('LODY_LOCAL_PROJECT_RESOLVE_SYNC_TIMEOUT_MS', 1_500),
+            timeoutMs: readLocalProjectRootResolveSyncTimeoutMs(),
           }),
       }
     );
@@ -2806,16 +2836,19 @@ export class MessageHandler {
         const pathCount = Object.keys(state.fileIndex).length;
         const result = await publishCodeCollabFileIndexFlock({
           repo: this.workspaceDocument.repo,
+          signal: state.signal,
           flockDocId: getCodeCollabFileIndexFlockDocId(this.workspaceId, state.ownerSessionId),
           fileIndex: state.fileIndex,
           updatedAtMs: state.updatedAtMs,
           reconcileRemote: state.reconcileRemote,
         });
+        state.signal?.throwIfAborted();
         if (state.persistAllChangesDiffStats && state.allChangesDiffStats) {
           try {
             await this.persistCodeCollabAllChangesDiffStats(
               state.ownerSessionId,
-              state.allChangesDiffStats
+              state.allChangesDiffStats,
+              state.signal
             );
           } catch (error) {
             this.logger.debug(
@@ -2838,6 +2871,7 @@ export class MessageHandler {
         const publishStartedAtMs = Date.now();
         const result = await publishCodeCollabFileIndexSignalFlock({
           repo: this.workspaceDocument.repo,
+          signal: state.signal,
           flockDocId: getCodeCollabFileIndexSignalFlockDocId(
             this.workspaceId,
             state.ownerSessionId
@@ -2856,13 +2890,14 @@ export class MessageHandler {
     this.filePreviewService = new FilePreviewService({
       onDiagnostic: (event) => this.logger.debug(`[file-preview] ${JSON.stringify(event)}`),
       resolveLocalWorkspace: this.resolveLocalFilePreviewWorkspace,
-      resolveWorkspace: async (sessionId) => {
-        const resolved = await this.resolveCodeCollabV2Workspace(sessionId);
+      resolveWorkspace: async (sessionId, rootId) => {
+        const resolved = await this.resolveCodeCollabV2Workspace(sessionId, { rootId });
         return resolved.ok
           ? {
               ok: true,
               ownerSessionId: resolved.ownerSessionId,
               workspaceRoot: resolved.workspaceRoot,
+              fileRoots: resolved.fileRoots,
             }
           : { ok: false, code: resolved.code, message: resolved.message };
       },
@@ -2952,7 +2987,8 @@ export class MessageHandler {
           const { scope, source, outcome } = attention;
           const presentation = await this.buildNotificationPresentation(
             source.sessionId,
-            source.originTurnIds ?? [source.turnId]
+            source.originTurnIds ?? [source.turnId],
+            fact.assistantTurnId
           );
           // Independent channels: a local projection failure cannot block mobile,
           // and cloud latency/failure cannot prevent desktop publication.
@@ -3056,6 +3092,16 @@ export class MessageHandler {
       isRuntimeActive: (sessionId) =>
         this.archiveInFlight.has(sessionId) || this.sessionManager.hasSession(sessionId),
       runCleanupScript: (input) => this.runArchivedWorktreeCleanupScript(input),
+      archiveProjectGroup: (input) =>
+        archiveProjectGroup({
+          ...input,
+          machineId: this.machineId,
+          workspaceDocument: this.workspaceDocument,
+          logger: this.logger,
+          resolveLocalRoot: (id) => this.sessionManager.resolveLocalProjectRootPath(id),
+          allowManagedClone: this.cloudPort.githubTokens !== null,
+          cleanup: (cleanupInput) => this.runArchivedWorktreeCleanupScript(cleanupInput),
+        }),
       // Restore reattaches by `branchName`; a branch renamed in a terminal is
       // only known to git, so the name archiving reports is written back.
       recordArchivedBranch: async (sessionId, branchName) => {
@@ -3391,8 +3437,10 @@ export class MessageHandler {
           await this.codeCollabV2Service.openTurnDiff(request),
         initCodeCollabDirectory: async (request) =>
           await this.codeCollabV2Service.initDirectory(request),
-        getCodeCollabLspDefinition: async () => await this.codeCollabV2Service.lspDefinition(),
-        getCodeCollabLspReferences: async () => await this.codeCollabV2Service.lspReferences(),
+        getCodeCollabLspDefinition: async (request) =>
+          await this.codeCollabV2Service.lspDefinition(request),
+        getCodeCollabLspReferences: async (request) =>
+          await this.codeCollabV2Service.lspReferences(request),
         controlIosSimulator: async ({ proof, responseKey, ...request }) =>
           this.iosSimulatorService.control(request, true, () =>
             this.previewService.authorizeRemoteControl(
@@ -3443,6 +3491,16 @@ export class MessageHandler {
             machineId: this.machineId,
             workspaceId: this.workspaceId,
           });
+        },
+        probeLocalProjectMember: async ({ localProjectId, requestedByUserId }) => {
+          const access = await this.cloudPort.access.verifyMachineAccess({
+            workspaceId: this.workspaceId,
+            machineId: this.machineId,
+            requesterUserId: requestedByUserId,
+            localProjectId,
+          });
+          if (!access.allowed) throw new Error('Project group member access denied');
+          return this.probeProjectLocalMember(localProjectId);
         },
         getLocalProjectGitState: async ({ localProjectId, requestedByUserId }) =>
           await this.getLocalProjectGitStateForRpc({
@@ -4968,6 +5026,11 @@ export class MessageHandler {
           notification,
           logger: this.logger,
           resolveSessionWorkspaceRoot: (sessionId) => this.resolveSessionWorkspaceRoot(sessionId),
+          resolveSessionFileRoots: async (sessionId) => {
+            const resolved = await this.resolveCodeCollabV2Workspace(sessionId);
+            if (!resolved.ok) throw new Error('Session file roots are unavailable');
+            return resolved.fileRoots ?? [{ id: 'main', absolutePath: resolved.workspaceRoot }];
+          },
           validateSessionImageUploadPath: async (filePath) =>
             await this.validateSessionImageUploadPath(filePath),
           uploadSessionImageFile: async (uploadArgs) =>
@@ -5230,6 +5293,7 @@ export class MessageHandler {
     for (const diff of diffs) {
       const event = await pendingEventFromStandardDiffEvidence({
         workspaceRoot: resolved.workspaceRoot,
+        fileRoots: resolved.fileRoots,
         diff,
       });
       if (event) {
@@ -5291,14 +5355,15 @@ export class MessageHandler {
     workspaceRoot: string,
     ownerSessionId: SessionId,
     acpEvents: readonly CodeCollabV2PendingDiffStoreEvent[],
-    editEvidence: readonly AcpAgentEditEvidence[]
+    editEvidence: readonly AcpAgentEditEvidence[],
+    fileRoots?: readonly SessionFileRoot[]
   ): Promise<CodeCollabV2PendingDiffStoreEvent[]> {
     if (editEvidence.length === 0) {
       return [];
     }
     const coveredRelativePaths = new Set<string>();
     for (const event of acpEvents) {
-      const resolved = resolveCodeCollabV2EvidencePath(workspaceRoot, event.path);
+      const resolved = resolveCodeCollabV2EvidencePath(workspaceRoot, event.path, fileRoots);
       if (resolved) {
         coveredRelativePaths.add(resolved.relativePath);
       }
@@ -5311,7 +5376,7 @@ export class MessageHandler {
     }
     const gapEvents: CodeCollabV2PendingDiffStoreEvent[] = [];
     for (const edit of latestEditByPath.values()) {
-      const resolved = resolveCodeCollabV2EvidencePath(workspaceRoot, edit.path);
+      const resolved = resolveCodeCollabV2EvidencePath(workspaceRoot, edit.path, fileRoots);
       if (!resolved || coveredRelativePaths.has(resolved.relativePath)) {
         continue;
       }
@@ -5329,6 +5394,7 @@ export class MessageHandler {
       let event = hasDirectOldEvidence
         ? await pendingEventFromAgentEditEvidence({
             workspaceRoot,
+            fileRoots,
             edit: normalizedEdit,
             latestText,
           })
@@ -5341,6 +5407,7 @@ export class MessageHandler {
         });
         event = await pendingEventFromAgentEditEvidence({
           workspaceRoot,
+          fileRoots,
           edit: normalizedEdit,
           latestText,
         });
@@ -5391,7 +5458,8 @@ export class MessageHandler {
         resolved.workspaceRoot,
         resolved.ownerSessionId,
         acpEvents,
-        editEvidence
+        editEvidence,
+        resolved.fileRoots
       );
       const mergedEvents = this.mergeCodeCollabTurnDiffEvents([...acpEvents, ...gapEvents]);
       if (mergedEvents.length === 0) {
@@ -5404,6 +5472,7 @@ export class MessageHandler {
       const capturedAtMs = turnStorageMetadata?.capturedAtMs ?? recordedAtMs;
       const fileDiff = await this.codeCollabV2DiffStore.recordTurnDiffs({
         workspaceRoot: resolved.workspaceRoot,
+        fileRoots: resolved.fileRoots,
         ownerSessionId: resolved.ownerSessionId,
         turnId,
         events: mergedEvents,
@@ -6076,6 +6145,34 @@ export class MessageHandler {
 
     const project = meta.project;
     const ownerSessionId = (meta.parentSessionId ?? sessionId) as SessionId;
+    const groupMeta =
+      ownerSessionId === sessionId
+        ? meta
+        : await this.resolveCodeCollabOwnerSessionMeta(ownerSessionId);
+    if (groupMeta?.projectRun) {
+      if (
+        groupMeta.isArchived ||
+        groupMeta.machineId !== this.machineId ||
+        meta.machineId !== this.machineId
+      )
+        return {
+          ok: false,
+          error: 'permission_denied',
+          message: 'Project group ownership is invalid.',
+        };
+      const workspaceRoot = path.join(
+        projectGroupDirectory(groupMeta.projectRun),
+        'worktrees',
+        ownerSessionId
+      );
+      if (!fs.existsSync(workspaceRoot))
+        return {
+          ok: false,
+          error: 'workspace_unavailable',
+          message: 'Project group workspace is unavailable.',
+        };
+      return { ok: true, workspaceRoot, ownerSessionId, source: 'project-group' };
+    }
     if (project?.kind === 'local') {
       const originalRootPath = await resolveWorkspaceLocalProjectRootPath(
         this.workspaceDocument.repo,
@@ -6323,10 +6420,33 @@ export class MessageHandler {
             message: 'Code Collab write access is denied for this user.',
           };
         }
+        const fileRoots = await resolveProjectFileRoots(
+          resolved.workspaceRoot,
+          ownerMeta?.projectRun,
+          this.machineId,
+          (id) => this.sessionManager.resolveLocalProjectRootPath(id),
+          (id) => this.logger.debug(`Project group file root unavailable: ${id}`)
+        );
+        const rootId = options?.rootId ?? 'main';
+        const selected = fileRoots.find((root) => root.id === rootId);
+        if (!selected)
+          return {
+            ok: false,
+            code:
+              rootId.startsWith('member:') &&
+              ownerMeta?.projectRun?.members[
+                rootId.slice(7) as keyof typeof ownerMeta.projectRun.members
+              ]
+                ? 'workspace_root_unavailable'
+                : 'permission_denied',
+            message: 'Session file root is unavailable.',
+          };
         return {
           ok: true,
           ownerSessionId,
-          workspaceRoot: resolved.workspaceRoot,
+          workspaceRoot: selected.absolutePath,
+          fileRoots,
+          projectRun: rootId === 'main' ? ownerMeta?.projectRun : undefined,
           allChangesBaseBranch: this.resolveGitHubProjectBranch(ownerMeta),
         };
       }
@@ -6359,7 +6479,8 @@ export class MessageHandler {
   };
 
   private readonly resolveLocalFilePreviewWorkspace: FilePreviewLocalWorkspaceResolver = async (
-    sessionId
+    sessionId,
+    rootId
   ) => {
     // Local IPC grants filesystem reads, but must retain the session/machine and
     // child-owner checks without requiring a live agent or an existing directory.
@@ -6394,8 +6515,14 @@ export class MessageHandler {
         message: 'Local file preview session ownership is invalid.',
       };
     }
-    const resolved = await this.resolveCodeCollabV2Workspace(sessionId);
-    if (resolved.ok) return { ok: true, ownerSessionId, workspaceRoot: resolved.workspaceRoot };
+    const resolved = await this.resolveCodeCollabV2Workspace(sessionId, { rootId });
+    if (resolved.ok)
+      return {
+        ok: true,
+        ownerSessionId,
+        workspaceRoot: resolved.workspaceRoot,
+        fileRoots: resolved.fileRoots,
+      };
     if (resolved.code === 'workspace_root_unavailable') {
       return { ok: true, ownerSessionId, workspaceRoot: null };
     }
@@ -6428,13 +6555,16 @@ export class MessageHandler {
 
   private async persistCodeCollabAllChangesDiffStats(
     ownerSessionId: SessionId,
-    diffStats: NonNullable<SessionMeta['diffStats']>
+    diffStats: NonNullable<SessionMeta['diffStats']>,
+    signal?: AbortSignal
   ): Promise<void> {
     const ownerRoomId = getSessionRoomId(ownerSessionId);
     const metaRecord = await this.workspaceDocument.repo.getDocMeta(ownerRoomId);
     if (!metaRecord?.meta || isLoroRepoDocDeleted(metaRecord)) {
       return;
     }
+    signal?.throwIfAborted();
+    if ((metaRecord.meta as SessionMeta).projectRun) return;
     const ownerMeta = readDiffStatsMetadata(metaRecord.meta);
     const target = resolveDiffStatsTarget({ ownerRoomId, ownerMeta });
     const patch = resolveCodeCollabAllChangesDiffStatsPatch({ target, ownerMeta, diffStats });
@@ -6565,6 +6695,15 @@ export class MessageHandler {
     };
 
     switch (request.method) {
+      case 'project/probe-local-member': {
+        if (
+          request.machineId !== this.machineId ||
+          request.workspaceId !== this.workspaceId ||
+          request.ownerSessionId
+        )
+          throw new Error('Project group probe scope mismatch');
+        return this.probeProjectLocalMember(request.params.localProjectId as LocalProjectId);
+      }
       case 'mcp/list-tools':
         return await listMcpTools(request.params.server);
       case 'session/call-tool': {
@@ -6620,10 +6759,10 @@ export class MessageHandler {
         return await this.codeCollabV2Service.initDirectory(request.params);
       case 'code-collab/lsp-definition':
         await assertOwner(request.params.sessionId as SessionId);
-        return await this.codeCollabV2Service.lspDefinition();
+        return await this.codeCollabV2Service.lspDefinition(request.params);
       case 'code-collab/lsp-references':
         await assertOwner(request.params.sessionId as SessionId);
-        return await this.codeCollabV2Service.lspReferences();
+        return await this.codeCollabV2Service.lspReferences(request.params);
       case 'file/preview':
         await assertOwner(request.params.sessionId as SessionId);
         return await this.filePreviewService.previewFile(request.params);
@@ -7004,7 +7143,8 @@ export class MessageHandler {
         // The read and its revision must straddle no unpublished history write.
         // These are local durability barriers, never remote synchronization.
         await backend.flushLocalWrites();
-        const before = await sessionDoc.getRoostHistoryCursor();
+        if (!history.getPublication) throw new Error('Native history publication is unavailable');
+        const before = await history.getPublication();
         let result: unknown;
         let pageTurns: SessionHistoryReadResponse['pageTurns'];
         switch (query.kind) {
@@ -7121,8 +7261,12 @@ export class MessageHandler {
             break;
         }
         await backend.flushLocalWrites();
-        const after = await sessionDoc.getRoostHistoryCursor();
-        if (before?.historyRevision !== after?.historyRevision) continue;
+        const after = await history.getPublication();
+        if (
+          before.checkpoint !== after.checkpoint ||
+          before.historyRevision !== after.historyRevision
+        )
+          continue;
         const protectedRead =
           query.kind === 'readChanges' ||
           ((query.kind === 'readLatestPage' || query.kind === 'readOlderPage') &&
@@ -7138,19 +7282,6 @@ export class MessageHandler {
           if (current !== expected)
             throw Object.assign(new Error('History checkpoint was superseded'), { code: 'stale' });
         }
-        if (after?.historyRevision === undefined || after.historyCount === undefined) {
-          throw new Error('Roost history has no durable revision');
-        }
-        let historyChange: SessionHistoryReadResponse['historyChange'];
-        if (after.historyChangeJson) {
-          try {
-            historyChange = SessionHistoryChangeSchema.nullable().parse(
-              JSON.parse(after.historyChangeJson)
-            );
-          } catch {
-            historyChange = { kind: 'structure', from: 0, to: after.historyCount };
-          }
-        }
         return {
           type: 'session/history-read_response',
           sessionId,
@@ -7158,7 +7289,7 @@ export class MessageHandler {
           result,
           historyRevision: after.historyRevision,
           historyCount: after.historyCount,
-          historyChange,
+          historyChange: after.historyChange,
           ...(pageTurns ? { pageTurns } : {}),
         };
       }
@@ -7292,36 +7423,19 @@ export class MessageHandler {
           break;
         }
       }
-      const historyCursor = await sessionDoc.getRoostHistoryCursor();
-      let historyChange: SessionHistoryChange | null = null;
-      if (historyCursor?.historyChangeJson) {
-        try {
-          historyChange = SessionHistoryChangeSchema.nullable().parse(
-            JSON.parse(historyCursor.historyChangeJson)
-          );
-        } catch {
-          historyChange = {
-            kind: 'structure',
-            from: 0,
-            to: historyCursor.historyCount ?? 0,
-          };
-        }
-      }
+      await backend.flushLocalWrites();
+      if (!backend.history.getPublication)
+        throw new Error('Native history publication is unavailable');
+      const historyCursor = await backend.history.getPublication();
       return {
         type: 'session/history-write_response',
         sessionId,
         operation,
         success: true,
         ...(result === undefined ? {} : { result }),
-        ...(historyCursor?.historyRevision === undefined
-          ? {}
-          : {
-              historyRevision: historyCursor.historyRevision,
-              ...(historyCursor.historyCount === undefined
-                ? {}
-                : { historyCount: historyCursor.historyCount }),
-              ...(historyChange === undefined ? {} : { historyChange }),
-            }),
+        historyRevision: historyCursor.historyRevision,
+        historyCount: historyCursor.historyCount,
+        historyChange: historyCursor.historyChange,
       };
     } catch (error) {
       const detail =
@@ -7670,7 +7784,10 @@ export class MessageHandler {
    * symlink final component), reject non-files/empty/oversize, compute sha256
    * and text-previewability by streaming (bounded memory).
    */
-  private validateSessionFileUploadPath(filePath: string, options?: { containWithin?: string }) {
+  private validateSessionFileUploadPath(
+    filePath: string,
+    options?: { containWithin?: string; fileRoots?: readonly SessionFileRoot[] }
+  ) {
     return this.attachmentTransfer().validateSessionFileUploadPath(filePath, options);
   }
 
@@ -7803,13 +7920,15 @@ export class MessageHandler {
       return;
     }
 
+    const rootResolution = await this.resolveCodeCollabV2Workspace(sessionId);
+    const fileRoots = rootResolution.ok
+      ? (rootResolution.fileRoots ?? [{ id: 'main', absolutePath: workspaceRoot }])
+      : [];
     // Validate every path up front (existence/readable/size + sha256/textPreview).
     let validatedFiles: ValidatedUploadFile[];
     try {
       validatedFiles = await Promise.all(
-        message.paths.map((filePath) =>
-          this.validateSessionFileUploadPath(filePath, { containWithin: workspaceRoot })
-        )
+        message.paths.map((filePath) => this.validateSessionFileUploadPath(filePath, { fileRoots }))
       );
     } catch (error) {
       respond({
@@ -7823,7 +7942,7 @@ export class MessageHandler {
 
     const uploadedFiles: UploadedSessionFile[] = [];
     const failures: string[] = [];
-    const canonicalWorkspaceRoot = await fs.promises.realpath(workspaceRoot);
+
     for (const file of validatedFiles) {
       try {
         const uploaded = await this.uploadValidatedSessionFile({
@@ -7834,9 +7953,9 @@ export class MessageHandler {
         // Validation above canonicalized the path and proved containment. Keep
         // only the workspace-relative provenance in history so a local Lody
         // client can reopen the live artifact without publishing a host path.
-        const sourcePath = normalizeSessionFileSourcePath(
-          path.relative(canonicalWorkspaceRoot, file.absolutePath)
-        );
+        const source = resolveSessionFilePath(fileRoots, file.absolutePath);
+        if (!source) throw new Error('File is outside the session workspace');
+        const sourcePath = encodeSessionFilePath(source);
         uploadedFiles.push({ ...uploaded, sourcePath });
       } catch (error) {
         failures.push(`${file.fileName}: ${formatErrorMessage(error)}`);
@@ -9667,7 +9786,7 @@ export class MessageHandler {
         lastOpenedAtMs: nowMs,
       },
       nowMs,
-      { sync: this.workspaceDocument, reason: 'local-project-add' }
+      { sync: this.workspaceDocument, reason: 'local-project-add', refreshGitHubRemote: true }
     );
   }
 
@@ -10070,9 +10189,10 @@ export class MessageHandler {
 
   private async buildNotificationPresentation(
     sessionId: SessionId,
-    originTurnIds: readonly string[]
+    originTurnIds: readonly string[],
+    assistantTurnId?: string
   ): Promise<NotificationPresentation | undefined> {
-    // Presentation is optional. Read only exact originating inputs, never the transcript.
+    // Read exact originating inputs and the completed assistant entry, never all history.
     // Mixed/large batches fall back to the conversation name.
     try {
       const sessionDoc = await this.workspaceDocument.getOrCreateSessionDoc(sessionId);
@@ -10101,7 +10221,18 @@ export class MessageHandler {
           /* The repository name remains a useful fallback. */
         }
       }
-      return resolveNotificationPresentation(meta, inputs, projectName);
+      const presentation = resolveNotificationPresentation(meta, inputs, projectName);
+      if (assistantTurnId) {
+        try {
+          const reply = await backend.history.readTurn(assistantTurnId);
+          if (reply.state === 'ready') {
+            presentation.replyPreview = notificationReplyPreview(reply.turn);
+          }
+        } catch {
+          // An unavailable reply must not discard the existing display context.
+        }
+      }
+      return presentation;
     } catch {
       return undefined;
     }
@@ -10128,7 +10259,7 @@ export class MessageHandler {
         outcome,
         presentation,
         sessionTitle: meta?.title,
-        pullRequests: meta?.pullRequests,
+        pullRequests: resolveSessionPullRequests(meta),
         workspaceId: this.workspaceId,
         workspaceSlug,
         userId,

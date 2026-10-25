@@ -29,6 +29,11 @@ access without a new capability/security decision in the owning
 [Spec](../../../../../specs/desktop-devbar.md) and
 [Agent Note](../../../../../.agents/notes/implemented/feature/2026-09-16-devbar-hub-ui.md).
 
+The disk-full guard (`storage-guard.ts`) blocks only after a Lody storage write failed
+AND a volume holding Lody data is then found short of space; never block on space alone.
+It leaves only by relaunch or quit, and never pauses background agents
+([decision](../../../../../.agents/notes/proposed/feature/2026-10-22-desktop-disk-full-guard.md)).
+
 ## Public browser
 
 - The public browser (`services/public-browser-service.ts`) has NO network guard:
@@ -89,3 +94,15 @@ approval, quit awaits application disposal alongside CLI exit; retain failed pro
 owners for a later quit/recovery. Never substitute failure with null or bind a
 replacement before release. See the
 [decision](../../../../../.agents/notes/implemented/architecture/2026-10-10-effect-login-shell-probe.md).
+
+## E2EE runtime
+
+`e2ee-account-runtime.ts` lazily owns account custody; `e2ee-runtime.mts` owns each
+workspace's core feed/pin/keys. Window leases and account/quit serialization await
+native work before release. Use only main-auth cached identity for E2EE IPC; never
+wait for auth network under the account lock. Recheck identity/generation after native
+open. Availability-only failures retain the pinned renderer read path; evidence conflicts
+never fall back. Originals commit before feed/pin; verification/storage failures close
+the owner. Overlapping pages compare the verified original prefix and append only new
+records; malformed input does not close shared readers. Retain old renderer checkpoints on first takeover; insufficient history
+stays pending. Full boundaries: [M1 note](../../../../../.agents/notes/implemented/architecture/2026-10-21-e2ee-m1-runtime-boundaries.md).

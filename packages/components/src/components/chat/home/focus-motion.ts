@@ -1,26 +1,30 @@
 import { prefersReducedMotion } from './tiles';
 
 /**
- * The motion of a "now" list opening over its board and closing back into its tile
+ * The motion of a "now" list opening over its column and closing back into its tile
  * (`now-board.tsx`). Real elements animated with the Web Animations API, never snapshots, so the
  * list is live while it moves and a press midway turns it around from where it is.
  *
  * The list's frame is the tile at the tile's size: the frame's own box moves between the tile's
- * and the board's (its head lays out at every size, so the title and count keep the tile's
- * places), its rows hold the board's width throughout (so they never reflow, and the first
- * column is the tile's rows), and a stand-in sits where the tile's "Show all" was. Both ends of
- * the motion are therefore the tile itself, and the swap with the real tile cannot be seen.
- * Positions are offsets, not client rects, so the board's step back does not skew them, and
+ * and its column's (its head lays out at every size, so the title and count keep the tile's
+ * places), and its rows hold the column's width, the tile's, throughout (so they never reflow).
+ * `stage` and `board` are the column, not the whole board: the other column stays as it is. Both
+ * ends of the motion are therefore the tile itself, and the swap with the real tile cannot be
+ * seen. Positions are offsets, not client rects, so the board's step back does not skew them, and
  * closing measures the tile again.
  *
  * Choreographed, not simultaneous: one thing leads at a time, so the eye has something to follow.
- * - Opening. The rest of the board steps back (scaling toward the pressed tile and dimming
- *   out) as the frame grows. The stand-in goes at once; what the tile did not have (the rows it
- *   hid and the way back) rises in while the frame grows, a few rows at a time, so it reads as
- *   more of the same list coming out.
- * - Closing is its own motion, not opening played backwards (a finished ease-out reversed starts
- *   slowly): the list scrolls home, the extra rows go first and quickly, the frame lands in its
- *   tile without bouncing, the stand-in returns as it lands, and the board comes forward with it.
+ * - Opening. The rest of its column steps back (scaling toward the pressed tile and dimming out)
+ *   as the frame grows. The tile's "Show all" goes at once; what the tile did not have (the rows
+ *   it hid, and "Show less" at the foot) rises in while the frame grows, a few rows at a time, so
+ *   it reads as more of the same list coming out.
+ * - Closing is one motion, not opening played backwards (a finished ease-out reversed starts
+ *   slowly) and not a sequence: the list scrolls home, and at once the frame lands in its tile on
+ *   the same spring it opened with while the board comes forward with it; what the tile does not
+ *   show is clipped by the shrinking frame and fades over its first third, and the tile's "Show
+ *   all" fades back in as it lands, so the real tile replaces it unseen. Letting the extra rows
+ *   leave first and the frame and board follow on delays read as things leaving one after another,
+ *   the pace dropping halfway.
  *
  * Motion is springs, written as CSS `linear()` easings: their speed follows the distance, the
  * bulk of the move is over in about a third of a second, and they settle without a visible tail.
@@ -29,42 +33,46 @@ import { prefersReducedMotion } from './tiles';
 type Box = { top: number; left: number; right: number; bottom: number };
 
 export type FocusParts = {
-  /** The board's box, which the opened frame fills. */
+  /** The column's box, which the opened frame fills. */
   stage: HTMLElement;
   /** The pressed tile, hidden under the frame while it is open. */
   tile: HTMLElement;
   /** The opened list's frame. */
   frame: HTMLElement;
-  /** The frame's scrolling rows, held at the board's width while the frame moves. */
+  /** The frame's scrolling rows (the scroll area's viewport), scrolled home before closing. */
   rows: HTMLElement;
-  /** The board under it, which steps back. */
+  /** The rest of the column under it, which steps back. */
   board: HTMLElement;
   /** What the tile did not show, which rises in while the frame grows. */
   late: readonly HTMLElement[];
-  /** What only the tile showed (its "Show all"), there at the tile's size only. */
+  /**
+   * What only the tile shows (a stand-in for its "Show all"), there at the tile's size only: it
+   * goes as the frame leaves the tile and is back by the time it lands, so the swap with the
+   * real tile shows nothing appearing.
+   */
   early: readonly HTMLElement[];
 };
 
 /**
- * The spring constants (response: the period of the undamped spring, in seconds; damping: 1 for
- * no overshoot, lower for a little) and the depth the board steps back to. `slow` multiplies
- * every time, for looking at the motion frame by frame (Storybook's `ShowAllMotion`).
+ * The one spring that opening and closing share (response: the period of the undamped spring,
+ * in seconds; damping: 1 for no overshoot, lower for a little), so the list leaves exactly as it
+ * came, and the depth the board steps back to. `slow` multiplies every time, for looking at the
+ * motion frame by frame (Storybook's `ShowAllMotion`).
  */
 export type FocusTuning = {
-  openResponse: number;
-  openDamping: number;
-  closeResponse: number;
-  closeDamping: number;
+  response: number;
+  damping: number;
   /** The board's scale when stepped back. */
   depth: number;
   slow: number;
 };
 
+/* About 95% of the way at 256ms, a hint of give (0.15% past) and settled by about 660ms. Opening
+   once used a softer spring (0.5s, 0.86) and closing a stiffer one (0.3s, 1); the two read as
+   two different things. */
 export const FOCUS_TUNING: FocusTuning = {
-  openResponse: 0.5,
-  openDamping: 0.86,
-  closeResponse: 0.4,
-  closeDamping: 1,
+  response: 0.4,
+  damping: 0.9,
   depth: 0.94,
   slow: 1,
 };
@@ -162,8 +170,13 @@ const px = (box: Box) => ({
 });
 const WHOLE = { top: '0px', left: '0px', right: '0px', bottom: '0px' };
 
-/** The frame's horizontal padding (`tileStyles.tile`), which the held rows leave room for. */
-const FRAME_PADDING_PX = 2 * 10;
+/** Where every moving part is right now, read from the running animations. */
+type Pose = {
+  frame: Keyframe;
+  board: Keyframe;
+  late: Keyframe[];
+  early: Keyframe[];
+};
 
 /**
  * One list's motion, from opening to gone. `close` resolves `true` once it is back in its tile,
@@ -181,21 +194,22 @@ export class FocusMotion {
     this.releaseWhenOpen();
   }
 
-  /** While the frame moves: rows at the board's width with no scrollbar, and the board's
-      centre of depth at the tile. */
+  /**
+   * While the frame moves: marked moving (its scrollbar stays hidden, `now-board.tsx`), and the
+   * column's centre of depth at the tile. The frame keeps the column's width throughout (a tile
+   * is as wide as its column), so its rows never reflow and need no holding.
+   */
   private hold(): void {
-    const { stage, tile, rows, board } = this.parts;
-    rows.style.width = `${stage.clientWidth - FRAME_PADDING_PX}px`;
-    rows.style.overflowY = 'hidden';
+    const { tile, frame, board } = this.parts;
+    frame.dataset.focusMoving = '';
     board.style.transformOrigin = `${this.box.left + tile.offsetWidth / 2}px ${
       this.box.top + tile.offsetHeight / 2
     }px`;
   }
 
-  /** Open and still: the rows follow the board again, so a window resize reflows them. */
+  /** Open and still: the scrollbar may show again. */
   private release(): void {
-    this.parts.rows.style.width = '';
-    this.parts.rows.style.overflowY = '';
+    delete this.parts.frame.dataset.focusMoving;
   }
 
   private releaseWhenOpen(): void {
@@ -204,26 +218,55 @@ export class FocusMotion {
     });
   }
 
-  private opening(): Animation[] {
+  /**
+   * Where the motion is now. A turn starts a new motion from here rather than reversing the old
+   * one: a spring's settling tail is long and unseen (opening looks done at about 300ms and ends
+   * at about 870ms), so played backwards it held still while the rows faded and only then moved.
+   */
+  private pose(): Pose {
+    const { frame, board, late, early } = this.parts;
+    const style = getComputedStyle(frame);
+    const boardStyle = getComputedStyle(board);
+    return {
+      frame: { top: style.top, left: style.left, right: style.right, bottom: style.bottom },
+      board: { transform: boardStyle.transform, opacity: boardStyle.opacity },
+      late: late.map((element) => {
+        const lateStyle = getComputedStyle(element);
+        return { opacity: lateStyle.opacity, transform: lateStyle.transform };
+      }),
+      early: early.map((element) => ({ opacity: getComputedStyle(element).opacity })),
+    };
+  }
+
+  /** Replaces the running motion with `next`, which holds its first frame before the old goes. */
+  private turn(next: (from: Pose | null) => Animation[]): void {
+    const from = this.running() ? this.pose() : null;
+    const previous = this.animations;
+    this.animations = next(from);
+    for (const animation of previous) animation.cancel();
+  }
+
+  private opening(from: Pose | null = null): Animation[] {
     const { frame, board, late, early } = this.parts;
     const slow = tuning.slow;
-    const grow = spring(tuning.openResponse, tuning.openDamping);
-    const back = spring(tuning.closeResponse, 1);
+    const move = spring(tuning.response, tuning.damping);
+    const moves = move.duration * slow;
     return [
-      frame.animate([px(this.box), WHOLE], {
-        duration: grow.duration * slow,
-        easing: grow.easing,
+      frame.animate([from?.frame ?? px(this.box), WHOLE], {
+        duration: moves,
+        easing: move.easing,
         fill: 'both',
       }),
       board.animate(
         [
-          { transform: 'scale(1)', opacity: 1 },
+          from?.board ?? { transform: 'scale(1)', opacity: 1 },
           { transform: `scale(${tuning.depth})`, opacity: 0 },
         ],
-        { duration: back.duration * slow, easing: back.easing, fill: 'both' }
+        { duration: moves, easing: move.easing, fill: 'both' }
       ),
-      ...early.map((element) =>
-        element.animate([{ opacity: 1 }, { opacity: 0 }], {
+      // The tile's "Show all" goes as soon as the frame leaves the tile.
+      ...early.map((element, index) =>
+        element.animate([from?.early[index] ?? { opacity: 1 }, { opacity: 0 }], {
           duration: 80 * slow,
           easing: 'linear',
           fill: 'both',
@@ -232,12 +275,13 @@ export class FocusMotion {
       ...late.map((element, index) =>
         element.animate(
           [
-            { opacity: 0, transform: 'translateY(4px)' },
+            from?.late[index] ?? { opacity: 0, transform: 'translateY(4px)' },
             { opacity: 1, transform: 'translateY(0px)' },
           ],
           {
             duration: 200 * slow,
-            delay: (30 + Math.min(index, STAGGERED_ROWS) * 14) * slow,
+            // Turned back mid-close, the rows are already on their way: no stagger.
+            delay: from ? 0 : (30 + Math.min(index, STAGGERED_ROWS) * 14) * slow,
             easing: EASE_OUT,
             fill: 'both',
           }
@@ -246,41 +290,44 @@ export class FocusMotion {
     ];
   }
 
-  private closing(): Animation[] {
+  private closing(from: Pose | null = null): Animation[] {
     const { frame, board, late, early } = this.parts;
     const slow = tuning.slow;
-    const land = spring(tuning.closeResponse, tuning.closeDamping);
-    const lands = land.duration * slow;
+    // The same spring as opening: the list leaves exactly as it came.
+    const move = spring(tuning.response, tuning.damping);
+    const moves = move.duration * slow;
+    // One start for everything: the frame, the board and the rows it takes away move together.
     return [
-      ...late.map((element) =>
-        element.animate([{ opacity: 1 }, { opacity: 0 }], {
-          duration: 90 * slow,
-          easing: 'linear',
-          fill: 'both',
-        })
-      ),
-      frame.animate([WHOLE, px(this.box)], {
-        duration: lands,
-        delay: 40 * slow,
-        easing: land.easing,
+      frame.animate([from?.frame ?? WHOLE, px(this.box)], {
+        duration: moves,
+        easing: move.easing,
         fill: 'both',
       }),
-      // The tile's "Show all" returns as the frame arrives (nine tenths of the way at 35%).
-      ...early.map((element) =>
-        element.animate([{ opacity: 0 }, { opacity: 1 }], {
-          duration: 120 * slow,
-          delay: 40 * slow + lands * 0.35,
+      board.animate(
+        [
+          from?.board ?? { transform: `scale(${tuning.depth})`, opacity: 0 },
+          { transform: 'scale(1)', opacity: 1 },
+        ],
+        { duration: moves, easing: move.easing, fill: 'both' }
+      ),
+      // Clipped by the shrinking frame anyway; the fade keeps them from showing cut. The spring
+      // covers most of its distance in its first third, so they are gone by then.
+      ...late.map((element, index) =>
+        element.animate([from?.late[index] ?? { opacity: 1 }, { opacity: 0 }], {
+          duration: moves * 0.35,
           easing: 'linear',
           fill: 'both',
         })
       ),
-      // The board comes forward as the frame lands, arriving with it.
-      board.animate(
-        [
-          { transform: `scale(${tuning.depth})`, opacity: 0 },
-          { transform: 'scale(1)', opacity: 1 },
-        ],
-        { duration: lands, delay: 100 * slow, easing: land.easing, fill: 'both' }
+      // The tile's "Show all" is back as the frame arrives (about three quarters of the way at a
+      // fifth of the motion, nearly all of it by two fifths), so the real tile replaces it unseen.
+      ...early.map((element, index) =>
+        element.animate([from?.early[index] ?? { opacity: 0 }, { opacity: 1 }], {
+          duration: moves * 0.2,
+          delay: moves * 0.2,
+          easing: 'linear',
+          fill: 'both',
+        })
       ),
     ];
   }
@@ -302,19 +349,13 @@ export class FocusMotion {
   close(): Promise<boolean> {
     if (this.phase === 'closing') return this.settled('closing');
     this.phase = 'closing';
-    if (this.running()) {
-      // Still opening: turn the same motion around from where it is.
-      for (const animation of this.animations) animation.reverse();
-    } else {
-      // The tile may have moved while the list was open: land where it is now.
-      this.box = tileBox(this.parts.stage, this.parts.tile);
-      this.parts.rows.scrollTop = 0;
-      this.hold();
-      const previous = this.animations;
-      // The new motion holds its first frame (`fill: both`) before the old one lets go.
-      this.animations = this.closing();
-      for (const animation of previous) animation.cancel();
-    }
+    // Read where the motion is before anything changes, then land where the tile is now (it may
+    // have moved while the list was open), everything starting together from there.
+    const from = this.running() ? this.pose() : null;
+    this.box = tileBox(this.parts.stage, this.parts.tile);
+    this.parts.rows.scrollTop = 0;
+    this.hold();
+    this.turn(() => this.closing(from));
     return this.settled('closing');
   }
 
@@ -322,7 +363,7 @@ export class FocusMotion {
   reopen(): void {
     if (this.phase === 'opening') return;
     this.phase = 'opening';
-    for (const animation of this.animations) animation.reverse();
+    this.turn((from) => this.opening(from));
     this.releaseWhenOpen();
   }
 

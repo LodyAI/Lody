@@ -63,6 +63,7 @@ import type { SessionAccessPolicyService } from './session-access-policy';
 import { mapWithConcurrency } from '@/lib/bounded-concurrency';
 import { listAliveRoomIds } from '@/lib/loro/repo-existence';
 import { createSessionBackend, type SessionBackend } from './session-backend';
+import { sameDispatchEntry, type SessionDispatchEntry } from './session-dispatch-history';
 
 const SESSION_RECONCILE_CONCURRENCY = 4;
 
@@ -825,7 +826,7 @@ export class SessionDispatchWatcher {
   private peekStashedRpcTurn(
     sessionId: SessionId,
     meta: SessionMeta,
-    history: SessionHistoryInput[] = []
+    history: SessionDispatchEntry[] = []
   ): SessionHistoryInput | null {
     const stash = this.rpcTurnStash.get(sessionId);
     if (!stash) {
@@ -2353,7 +2354,7 @@ export class SessionDispatchWatcher {
   private async promoteNextQueuedMessage(
     sessionDoc: Awaited<ReturnType<LoroDocumentManager['getOrCreateSessionDoc']>>,
     meta: SessionMeta,
-    history: SessionHistoryInput[]
+    history: SessionDispatchEntry[]
   ): Promise<SessionHistoryInput | null> {
     const releaseQueueMutation = this.deps.executionService.tryAcquireSessionRewriteConflictLease(
       meta.id
@@ -2389,7 +2390,23 @@ export class SessionDispatchWatcher {
         return null;
       }
       const operationId = backend.getQueueOperationId(queuedItem);
-      const existing = findLastHistoryEntry(history, queuedTurnId);
+      // The queue can acquire a different head after the dispatch observation.
+      // Refresh its exact identity and completion evidence before promotion.
+      const selection = await backend.readDispatchSelection(
+        [queuedTurnId],
+        (entries) => findLastHistoryEntry(entries, queuedTurnId)?.id
+      );
+      history = selection.history;
+      const existingSummary = findLastHistoryEntry(history, queuedTurnId);
+      let existing: SessionHistoryInput | undefined;
+      if (existingSummary) {
+        const read = selection.turn;
+        if (read?.state !== 'ready' || !sameDispatchEntry(existingSummary, read.turn)) return null;
+        existing = {
+          ...read.turn,
+          inputConfig: normalizeSessionTurnInputConfig(read.turn.inputConfig),
+        } as SessionHistoryInput;
+      }
       if (existing) {
         if (existing.role === 'user' && isActivationAwaitingHistory(history, queuedTurnId)) {
           const currentMeta = await backend.getMetaState();
@@ -2469,7 +2486,7 @@ export class SessionDispatchWatcher {
   private hasQueuedTurnSettled(
     meta: SessionMeta,
     turnId: string,
-    history: SessionHistoryInput[]
+    history: SessionDispatchEntry[]
   ): boolean {
     return (
       meta.lastHandledUserMsgId === turnId ||
@@ -3010,16 +3027,38 @@ export class SessionDispatchWatcher {
     sessionDoc: Awaited<ReturnType<LoroDocumentManager['getOrCreateSessionDoc']>>,
     meta: SessionMeta,
     isActive: () => boolean = () => true
-  ): Promise<{ turn: SessionHistoryInput | null; history: SessionHistoryInput[] }> {
+  ): Promise<{ turn: SessionHistoryInput | null; history: SessionDispatchEntry[] }> {
     const repairedTurnIds = new Set<string>();
+    let changedReads = 0;
     while (true) {
       await this.deps.executionService.reconcileSteerHistory(meta.id, sessionDoc);
       const backend = await createSessionBackend(sessionDoc, meta);
       await this.recoverIncompleteQueuePromotions(sessionDoc, meta);
-      const history = await backend.readHistory();
+      const queued = await backend.peekReadyMessageQueue();
+      let preferred = this.deps.executionService.getPreferredInboxHumanInput?.(meta.id);
+      const requestedIds = () =>
+        [
+          meta.latestUserMsgId,
+          meta.processingUserMsgId,
+          getPendingUserTurnActivationId(meta),
+          preferred,
+          queued ? queued.userTurnId?.trim() || `queued-${queued.$cid}` : undefined,
+          ...Object.keys(meta.steerTurnStatuses ?? {}),
+          ...(this.rpcTurnStash.get(meta.id)?.keys() ?? []),
+        ].filter((id): id is string => typeof id === 'string' && id.length > 0);
+      const select = (entries: readonly SessionDispatchEntry[]): string | undefined => {
+        if (!preferred) return findNextDispatchableUserTurn(entries, meta)?.id;
+        const last = findLastHistoryEntry(entries, preferred);
+        return last?.role === 'user' && ['pending', 'seen', 'prepared'].includes(last.status ?? '')
+          ? last.id
+          : undefined;
+      };
+      let selection = await backend.readDispatchSelection(requestedIds(), select);
+      let history = selection.history;
       if (!isActive()) {
         return { turn: null, history };
       }
+      let canceledInput = false;
       for (const entry of history) {
         if (
           entry.role === 'user' &&
@@ -3036,13 +3075,11 @@ export class SessionDispatchWatcher {
             ),
           });
           entry.status = 'canceled';
-          entry.cancellationReason = this.deps.executionService.getInboxInputCancellationReason?.(
-            meta.id,
-            entry.id
-          );
+          canceledInput = true;
         }
       }
-      let preferred = this.deps.executionService.getPreferredInboxHumanInput?.(meta.id);
+      const observedPreferred = preferred;
+      preferred = this.deps.executionService.getPreferredInboxHumanInput?.(meta.id);
       if (
         preferred &&
         (meta.lastMissingHistoryUserMsgId === preferred ||
@@ -3056,14 +3093,27 @@ export class SessionDispatchWatcher {
         await this.deps.executionService.abandonInboxInput?.(meta.id, preferred);
         preferred = this.deps.executionService.getPreferredInboxHumanInput?.(meta.id);
       }
-      const turn = preferred
-        ? (history.find(
-            (e) =>
-              e.id === preferred &&
-              e.role === 'user' &&
-              ['pending', 'seen', 'prepared'].includes(e.status ?? '')
-          ) ?? this.peekStashedRpcTurn(meta.id, meta, history))
-        : findNextDispatchableUserTurn(history, meta);
+      if (canceledInput || preferred !== observedPreferred) {
+        selection = await backend.readDispatchSelection(requestedIds(), select);
+        history = selection.history;
+      }
+      const selected = selection.turnId
+        ? findLastHistoryEntry(history, selection.turnId)
+        : undefined;
+      let turn: SessionHistoryInput | null = null;
+      if (selected) {
+        const read = selection.turn;
+        if (read?.state !== 'ready' || !sameDispatchEntry(selected, read.turn)) {
+          if (++changedReads < 3) continue;
+          throw new Error('Session history changed while reading the dispatch candidate');
+        }
+        turn = {
+          ...read.turn,
+          inputConfig: normalizeSessionTurnInputConfig(read.turn.inputConfig),
+        } as SessionHistoryInput;
+      } else if (preferred) {
+        turn = this.peekStashedRpcTurn(meta.id, meta, history);
+      }
       if (preferred && !turn) return { turn: null, history };
       if (turn) {
         if (repairedTurnIds.has(turn.id)) {
@@ -3113,7 +3163,7 @@ export class SessionDispatchWatcher {
     sessionDoc: SessionDocumentHandle,
     meta: SessionMeta,
     turn: SessionHistoryInput,
-    history: SessionHistoryInput[]
+    history: SessionDispatchEntry[]
   ): Promise<boolean> {
     const sessionId = meta.id;
     if (meta.processingUserMsgId === turn.id) {

@@ -1,3 +1,4 @@
+import { resolveSessionPullRequests } from '@lody/shared';
 import { turnNotificationAudience } from '@/lib/notifications/turn-notification-audience';
 import { registerAgentRoleTools } from './agent-role-tools';
 import { proposeAgentRole } from '@/lib/agent-role-proposal';
@@ -5,6 +6,7 @@ import { batchPage } from '@/orchestration/inbox/batch-page';
 import { isSessionCollaborationStopped } from '@lody/shared';
 import { MACHINE_CATALOG_RETRY_GUIDANCE } from '@/commands/session-catalog-read';
 import { getMachineRoomId } from '@lody/shared';
+import { getLogger } from '@/utils/logger';
 import { machineSupportsProtocolCapability, MACHINE_PROTOCOL_CAPABILITIES } from '@lody/shared';
 import { prepareSessionInputAttachments } from '@/lib/session-input-attachments';
 import { createCommandAttachmentTransfer } from '@/lib/cloud-cli-port';
@@ -57,6 +59,7 @@ import {
   type MachineMeta,
   type ProjectRef,
   type SessionId,
+  type StoredLodyOperation,
   type SessionMeta,
   SessionActiveInvocationContextResultSchema,
   type SessionActiveInvocationContextResult,
@@ -1697,7 +1700,7 @@ const sessionSummaryForMcp = (
     : {}),
   ...(session.parentSessionId ? { parentSessionId: session.parentSessionId } : {}),
   executionContext: summarizeProjectRefForMcp(session.project),
-  pullRequests: (session.pullRequests ?? [])
+  pullRequests: resolveSessionPullRequests(session)
     .map(normalizeSessionPullRequestMeta)
     .filter((item): item is NonNullable<typeof item> => item !== null)
     .slice(0, 10)
@@ -1802,7 +1805,7 @@ const matchesSessionListFilters = (
   }
   const prFilter = input.pullRequest;
   if (prFilter) {
-    const prs = (session.pullRequests ?? [])
+    const prs = resolveSessionPullRequests(session)
       .map(normalizeSessionPullRequestMeta)
       .filter((item): item is NonNullable<typeof item> => item !== null);
     if (prFilter.exists === false) return prs.length === 0;
@@ -2682,6 +2685,20 @@ const buildSessionCreateOptions = async (
   });
 };
 
+// The store may adopt an identical active create from the same source Turn
+// under its original id; say so, or the caller would treat it as new work.
+const snapshotAcceptedCreate = async (
+  operation: StoredLodyOperation,
+  requestedOperationId: string
+): Promise<unknown> => {
+  const snapshot = await withOperationStore((store) => store.snapshot(operation));
+  if (operation.operationId === requestedOperationId) return snapshot;
+  return {
+    ...snapshot,
+    notice: `An identical create from this turn is already running as Operation ${operation.operationId}; no new Session was created. Use that operationId from now on. To start the same work again instead, cancel that Operation first.`,
+  };
+};
+
 const startSessionCreateOperation = async (args: SessionCreateCommandInput): Promise<unknown> => {
   if (!args.operationId) {
     throw new Error('operationId is required');
@@ -2721,7 +2738,7 @@ const startSessionCreateOperation = async (args: SessionCreateCommandInput): Pro
       )
     );
     if (retry) {
-      return await withOperationStore((store) => store.snapshot(retry));
+      return await snapshotAcceptedCreate(retry, args.operationId!);
     }
     const targetMachineId = (resolved.input.machineId ?? currentSession.machineId) as MachineId;
     await assertMachineNotOfflineForSingleCommand(manager, targetMachineId, ctx);
@@ -2821,8 +2838,11 @@ const startSessionCreateOperation = async (args: SessionCreateCommandInput): Pro
         { materializationClaimToken }
       )
     );
-    if (accepted.operation.state === 'finished') {
-      return await withOperationStore((store) => store.snapshot(accepted.operation));
+    if (
+      accepted.operation.state === 'finished' ||
+      accepted.operation.operationId !== args.operationId
+    ) {
+      return await snapshotAcceptedCreate(accepted.operation, args.operationId!);
     }
     const pendingItem = accepted.operation.items[0];
     if (!pendingItem || pendingItem.status !== 'active') {
@@ -2844,10 +2864,13 @@ const startSessionCreateOperation = async (args: SessionCreateCommandInput): Pro
           createOptions,
           effectiveDispatchConfig
         );
-      } catch {
+      } catch (error) {
         // The durable Operation already owns fixed target ids. A transport
         // failure is ambiguous, so leave it active for level-checked replay
         // instead of making the caller resend the prompt.
+        getLogger('mcp').warn(
+          `[mcp] Create ${args.operationId} left active for replay: ${formatMcpErrorMessage(error)}`
+        );
         return snapshotOperation(ctx.sessionId as SessionId, args.operationId);
       }
       if (
@@ -2856,14 +2879,23 @@ const startSessionCreateOperation = async (args: SessionCreateCommandInput): Pro
       ) {
         throw new Error('Create result did not preserve preallocated target ids.');
       }
-      await withOperationStore((store) =>
-        store.markItemInputDurable(
-          ctx.sessionId as SessionId,
-          args.operationId!,
-          0,
-          materializationClaimToken
-        )
-      );
+      try {
+        await withOperationStore((store) =>
+          store.markItemInputDurable(
+            ctx.sessionId as SessionId,
+            args.operationId!,
+            0,
+            materializationClaimToken
+          )
+        );
+      } catch (error) {
+        // The Session and its input already exist. The Coordinator marks the
+        // item durable from that history evidence, so a busy store must not
+        // report a finished create as failed and invite a duplicate.
+        getLogger('mcp').warn(
+          `[mcp] Create ${args.operationId} is materialized but not yet marked durable: ${formatMcpErrorMessage(error)}`
+        );
+      }
       captureSessionCommandEvent(
         'session_create_succeeded',
         {
@@ -4223,7 +4255,7 @@ export function buildSessionToolServer(handlers?: SessionToolHandlers): McpServe
     {
       title: 'Create a Lody session',
       description:
-        'Start durable asynchronous work that creates a Lody session. Supply operationId; results are queued and batched after a normal turn release, or with your next user input, so do not poll operation_get. To use an Agent Role, pass agentRoleId; the current workspace catalog row supplies the exact Machine, Agent config, model, reasoning, and permission mode. A Role that runs on several machines also needs agentRoleMachineId naming the target machine. If manual machine or run-config fields are also present, the Role takes precedence and those fields are ignored. A Role may run on any Machine the owner of this Machine can use; to work in a project there, pass workContext for a local project on that Machine (find it with lody_session_create_options machineId + localProjectQuery). Without workContext a Role on another Machine starts as a plain chat there. To recover an already accepted create without resending its prompt, send only operationId with resume=true. useCurrentSessionAsParent=true and workContext are mutually exclusive schema branches. Machine/config ids and runConfig values for non-Role creates come from lody_session_create_options. The wait field is temporary legacy compatibility only. ' +
+        'Start durable asynchronous work that creates a Lody session. Supply operationId; results are queued and batched after a normal turn release, or with your next user input, so do not poll operation_get. To use an Agent Role, pass agentRoleId; the current workspace catalog row supplies the exact Machine, Agent config, model, reasoning, and permission mode. A Role that runs on several machines also needs agentRoleMachineId naming the target machine. If manual machine or run-config fields are also present, the Role takes precedence and those fields are ignored. A Role may run on any Machine the owner of this Machine can use; to work in a project there, pass workContext for a local project on that Machine (find it with lody_session_create_options machineId + localProjectQuery). Without workContext a Role on another Machine starts as a plain chat there. To recover an already accepted create without resending its prompt, send only operationId with resume=true. If a call times out or fails, retry with the same operationId; a fresh id for the same work risks a duplicate Session. useCurrentSessionAsParent=true and workContext are mutually exclusive schema branches. Machine/config ids and runConfig values for non-Role creates come from lody_session_create_options. The wait field is temporary legacy compatibility only. ' +
         SESSION_COLLABORATION_GUIDANCE +
         ' For retryable Machine catalog SYNC_UNAVAILABLE errors:' +
         MACHINE_CATALOG_RETRY_GUIDANCE,

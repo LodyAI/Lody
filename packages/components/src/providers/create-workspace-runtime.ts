@@ -1,4 +1,8 @@
 import {
+  requirePlaintextWorkspaceStreamsContent,
+  type WorkspaceStreamsContent,
+} from '@lody/shared/workspace-streams-content';
+import {
   machineSupportsSessionHistoryIncremental,
   machineSupportsSessionHistoryPatches,
   machineSupportsSessionHistoryWatch,
@@ -41,7 +45,7 @@ import {
   type RepoRoomSubscription,
   type RepoWatchHandle,
 } from 'loro-repo';
-import { IndexedDBStorageAdaptor } from 'loro-repo/storage/indexeddb';
+import { createWorkspaceRepoStorage } from './workspace-repo-storage';
 import type { StreamsTransportAdapter } from 'loro-repo/transport/streams';
 import { StreamsCrdt, createLoroDocAdapter } from '@loro-dev/streams-crdt/loro';
 import type { PlatformSyncMode } from '@lody/platform';
@@ -212,6 +216,7 @@ export function resolveWorkspaceRuntimeCacheIdentity(
 }
 
 type RuntimeDeps = {
+  content: WorkspaceStreamsContent;
   /** Cancels an initialization retired by the provider before publication. */
   signal?: AbortSignal;
   accountId?: string | null;
@@ -483,7 +488,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
   let resolveRoomTransportsImpl:
     | ((room: WorkspaceTransportRoom) => WorkspaceTransportRoute)
     | null = null;
-  const repoStorage = new IndexedDBStorageAdaptor({ dbName: cacheIdentity.repoDbName });
+  const repoStorage = createWorkspaceRepoStorage(cacheIdentity.repoDbName);
   const openSessionWithSnapshot = createSessionSnapshotLoader(repoStorage);
   const repo = await LoroRepo.create({
     storageAdapter: repoStorage,
@@ -1878,6 +1883,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     requestSessionPreviewStatus,
     requestIosSimulatorControl,
     requestLocalProjectGitState,
+    requestProjectProbeLocalMember,
     requestLocalProjectControl,
     requestMachineBugReport,
     requestLocalMcpTools,
@@ -3100,6 +3106,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     streamsBaseUrl: string
   ): StreamsTransportAdapter =>
     createWorkspaceStreamsTransport({
+      content: deps.content,
       repo,
       workspaceId,
       documentRemoteCursorStore: remoteCursorStore,
@@ -3811,8 +3818,11 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     subscribeSyncState: (listener) => presenceTransport.subscribeSyncState(listener),
     needsReconnect: () => presenceTransport.needsReconnect(),
   });
+  // UI liveness reads the display state: a clean SSE recycle briefly reports
+  // 'reconnecting' while the retained snapshot still speaks for every machine.
+  // The room registry above keeps the raw state so recovery is never delayed.
   const unsubscribePresenceSyncState = deps.onPresenceSyncStateChange
-    ? presenceTransport.subscribeSyncState(deps.onPresenceSyncStateChange)
+    ? presenceTransport.subscribeDisplaySyncState(deps.onPresenceSyncStateChange)
     : null;
   const machineMonitorSyncRoomId = `machine-monitor:${workspaceId}`;
   const untrackMachineMonitorSync = roomSyncRegistry.track({
@@ -4069,6 +4079,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
   }
 
   const ensureDocStream = async (roomId: string): Promise<void> => {
+    requirePlaintextWorkspaceStreamsContent(deps.content);
     if (electronLocalDataPlane) {
       const plane = await targetRouter.prepareDocTarget(roomId);
       if (plane === 'local' || !cloudPlaneEnabled) {
@@ -4143,6 +4154,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
   const eagerSyncScope = workspaceId;
   const materializedSessionIds = new Set<SessionId>();
   eagerSyncWorkerClient = createEagerSyncWorkerClient({
+    content: { mode: deps.content.mode },
     workspaceId,
     scope: eagerSyncScope,
     localConnection: createLocalLoroDataPlaneConnection,
@@ -4185,9 +4197,10 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     // A persisted Loro history is enough to read a legacy session offline. An
     // empty provisional control doc is not evidence that its backend is Loro.
     const legacyHistory = doc.getByPath('history');
-    const hasRoostCursor = doc.getByPath('roostHistoryCursor/cursor') !== undefined;
+    // A removed experimental marker can veto legacy fallback, never publish history.
+    const hasRetiredRoostMarker = doc.getByPath('roostHistoryCursor/cursor') !== undefined;
     const hasLegacyHistory =
-      legacyHistory instanceof LoroList && legacyHistory.length > 0 && !hasRoostCursor;
+      legacyHistory instanceof LoroList && legacyHistory.length > 0 && !hasRetiredRoostMarker;
     return new Promise((resolve, reject) => {
       let meta: { historyBackend?: SessionHistoryBackendKind; machineId?: MachineId } = {};
       let exists = false;
@@ -4240,7 +4253,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
             })
           );
         if (readyBindings.has(binding)) {
-          if (exists && meta.machineId && !hasRoostCursor) finish();
+          if (exists && meta.machineId && !hasRetiredRoostMarker) finish();
           // Restoration is a completed barrier, not a polling loop. Missing
           // identity is woken by metadata/route events; a known Roost cursor
           // cannot turn into a legacy identity merely because Meta is late.
@@ -5536,6 +5549,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     requestSessionPreviewStatus,
     requestIosSimulatorControl,
     requestLocalProjectGitState,
+    requestProjectProbeLocalMember,
     requestLocalProjectControl,
     requestMachineBugReport,
     requestLocalMcpTools,

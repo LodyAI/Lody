@@ -48,7 +48,7 @@ import { WorkingGrid } from '@/ui/working-grid';
 import { commands, formatKeyBinding, type ShortcutCommandId } from '@/lib/commands';
 import { setCommandPaletteOpen } from '@/lib/commands/palette-state';
 import { Menu } from '@/ui/menu';
-import { ScrollArea } from '@/ui/scroll-area';
+import { ScrollArea } from '@lody/ui/scroll-area';
 import {
   AppWindow,
   Archive,
@@ -85,6 +85,7 @@ import {
 } from './sidebar-updated-session-list';
 import { SidebarFilterPopover, type SidebarFilterLabels } from './sidebar-filter-popover';
 import { WorkspaceAvatar } from './workspace-avatar';
+import { AuthRecoveryEntrySlot } from './auth-recovery-entry';
 import type { SidebarOrganizeMode } from '@/atoms/sidebar-state';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { useStableNow } from '@/hooks/use-stable-now';
@@ -162,16 +163,6 @@ const shellStyles = stylex.create({
   trayPadding: { padding: themeSpace[1] },
   trayItem: { marginBottom: { default: themeSpace[1], ':last-child': 0 } },
   chatsPadding: { paddingTop: themeSpace[2] },
-  sash: {
-    position: 'absolute',
-    right: 'calc(var(--spacing) * -1.5)',
-    top: 0,
-    zIndex: 20,
-    height: '100%',
-    width: themeSpace[3],
-    cursor: 'col-resize',
-    backgroundColor: 'transparent',
-  },
   viewportDesktop: { paddingInline: themeSpace[1.5], paddingBottom: themeSpace[3] },
   viewportMobile: {
     paddingLeft: 'calc(12px + env(safe-area-inset-left, 0px))',
@@ -705,6 +696,38 @@ export interface LoroSidebarProps {
  */
 const COLLAPSE_DRAG_THRESHOLD = 160;
 
+const resizeStyles = stylex.create({
+  handle: {
+    position: 'absolute',
+    right: '-3.5px',
+    top: radius.large,
+    bottom: `calc(${space[8]} + ${space[2]})`,
+    zIndex: 20,
+    width: '7px',
+    cursor: 'col-resize',
+    touchAction: 'none',
+    color: colors.label,
+    '--sidebar-resize-opacity': {
+      default: 0,
+      ':hover': 0.42,
+    },
+  },
+  dragging: {
+    '--sidebar-resize-opacity': 0.56,
+  },
+  feedback: {
+    position: 'absolute',
+    insetBlock: 0,
+    left: '50%',
+    width: '1px',
+    transform: 'translateX(-50%)',
+    borderRadius: radius.full,
+    backgroundImage: 'linear-gradient(to bottom, transparent, currentColor, transparent)',
+    pointerEvents: 'none',
+    opacity: 'var(--sidebar-resize-opacity)',
+  },
+});
+
 const footerStyles = stylex.create({
   layout: { display: 'flex', flexShrink: 0, alignItems: 'center', justifyContent: 'space-between' },
   mobile: {
@@ -718,6 +741,7 @@ const footerStyles = stylex.create({
   },
   paddingDesktop: { paddingInline: themeSpace[2.5], paddingBlock: themeSpace[1.5] },
   desktop: { columnGap: space[1] },
+  workspace: { display: 'flex', minWidth: 0, flex: 1, alignItems: 'center' },
   actions: {
     display: 'flex',
     alignItems: 'center',
@@ -1730,29 +1754,18 @@ export const LoroSidebar = memo(function LoroSidebar({
           : { width: sidebarWidth, minWidth: resolvedMinWidth, maxWidth: resolvedMaxWidth }
       }
     >
-      {!isMobile &&
-        !overlay && (
-          // VSCode-style sash: a 12px pointer hit area straddling the border
-          // (6px inside + 6px outside, so hovering ON or just past the edge
-          // still triggers); the visible affordance is a thin 2px line covering
-          // the border itself. Slight hover delay so it doesn't flash when the
-          // cursor merely passes over the edge.
-          <div
-            className={cn(
-              stylex.props(shellStyles.sash).className,
-              // 2px line covers the panel's `border-r` for the full height.
-              'after:absolute after:right-[5px] after:top-0 after:bottom-0 after:w-[2px]',
-              'after:bg-transparent after:transition-colors after:duration-150',
-              isResizing
-                ? 'after:bg-sidebar-ring/70'
-                : 'hover:after:bg-sidebar-ring/50 hover:after:delay-150'
-            )}
-            onPointerDown={handleResizeStart}
-            onPointerMove={handleResizeMove}
-            onPointerUp={handleResizeEnd}
-            onPointerCancel={handleResizeEnd}
-          />
-        )}
+      {!isMobile && !overlay && (
+        <div
+          data-sidebar-resize-handle
+          {...stylex.props(resizeStyles.handle, isResizing && resizeStyles.dragging)}
+          onPointerDown={handleResizeStart}
+          onPointerMove={handleResizeMove}
+          onPointerUp={handleResizeEnd}
+          onPointerCancel={handleResizeEnd}
+        >
+          <div aria-hidden="true" {...stylex.props(resizeStyles.feedback)} />
+        </div>
+      )}
 
       <div {...stylex.props(shellStyles.column)}>
         <div
@@ -1766,7 +1779,10 @@ export const LoroSidebar = memo(function LoroSidebar({
           )}
         >
           {isMobile ? (
-            renderWorkspaceControl('bottom')
+            <div {...stylex.props(footerStyles.workspace)}>
+              {renderWorkspaceControl('bottom')}
+              <AuthRecoveryEntrySlot />
+            </div>
           ) : isElectron ? (
             <span {...stylex.props(shellStyles.flexFill)} />
           ) : (
@@ -1870,17 +1886,11 @@ export const LoroSidebar = memo(function LoroSidebar({
               isMobile ? shellStyles.scrollColumnMobile : shellStyles.scrollColumnDesktop
             ).className
           )}
-          // Overlay only while the list is scrolling. Radix defaults to `hover`,
+          // Overlay only while the list is scrolling. ScrollArea defaults to `hover`,
           // which paints the thumb as soon as the pointer enters the sidebar.
-          type="scroll"
-          scrollbarClassName={!isMobile ? 'w-2 p-px' : undefined}
-          scrollbarThumbClassName={
-            !isMobile
-              ? 'bg-[hsl(var(--muted-foreground)/0.35)] hover:bg-[hsl(var(--muted-foreground)/0.45)] active:bg-[hsl(var(--muted-foreground)/0.55)]'
-              : undefined
-          }
+          visibility="scroll"
           // The horizontal gutter must live on the *viewport*, not the ScrollArea
-          // root. Radix's viewport is the scroll/clip container; with rows at
+          // root. The viewport is the scroll/clip container; with rows at
           // `w-full` and the gutter on the root, the selected row's 1px `outline`
           // (painted outside the box) sits flush against the viewport's clip edge
           // and gets shaved on the left/right — only the sides, since the viewport
@@ -2097,7 +2107,12 @@ export const LoroSidebar = memo(function LoroSidebar({
           )}
           data-sidebar-footer
         >
-          {!isMobile ? renderWorkspaceControl('top') : null}
+          {!isMobile ? (
+            <div {...stylex.props(footerStyles.workspace)}>
+              {renderWorkspaceControl('top')}
+              <AuthRecoveryEntrySlot />
+            </div>
+          ) : null}
           <div {...stylex.props(footerStyles.actions)}>
             <Menu.Root>
               <Menu.Trigger

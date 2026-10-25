@@ -69,7 +69,7 @@ changes dependencies, native boundaries, consumers or ownership.
   artifact and versioned ACP contract. Shared ACP extension contracts belong in the
   public `LodyAI/acp-extension-core` submodule, consumed through the root workspace;
   never duplicate them locally.
-- Magpie: require local desktop confirmation, fixed loopback mappings and public token.
+- Magpie: desktop confirmation or explicit local CLI import; loopback mappings and public token.
   Keep gateway metadata outside env and catalogs under Lody data, never user profiles.
   [Contract](specs/magpie-provider-import.md).
 - Pi provider migration requires owner confirmation and the target's `builtinPi`
@@ -84,8 +84,8 @@ changes dependencies, native boundaries, consumers or ownership.
   `Leeeon233`, or `wibus-wee`; otherwise community. Before planning a community
   contribution, read [.github/AGENTS.md](.github/AGENTS.md) for size/assignment rules.
   Read it before any PR/Issue work as well.
-- Node.js 22.14-22.x or 23.6+ (Node-API 10+); use the pnpm in `package.json`. See the
-  [runtime-floor decision](.agents/notes/implemented/bug-fix/2026-09-09-node-api-runtime-floor.md).
+- Node.js 22.23.4+ (22.x), 24.22.1+ (24.x), or 26.12.1+ (26.x), with Node-API 10+; use the pnpm in `package.json`. See the
+  [runtime security decision](.agents/notes/implemented/bug-fix/2026-10-22-node-security-runtime-floor.md).
   `pnpm install` (nested checkouts skip it); standalone work uses a separate clone.
   `pnpm start:local` starts the desktop; root `pnpm build` uses the same local composition.
 - Before commit: `pnpm check` and `pnpm format`. Root packages share `.oxfmtrc.json`;

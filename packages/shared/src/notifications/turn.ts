@@ -22,6 +22,8 @@ export type TurnOutcomeFact = {
   readonly scope: NotificationScope;
   readonly sessionId: SessionId;
   readonly turnId: string;
+  /** Exact assistant entry owned by this execution, independent of input origins. */
+  readonly assistantTurnId?: string;
   readonly audience: TurnResultAudience;
   readonly outcome: TurnOutcome;
   readonly originTurnIds?: readonly string[];

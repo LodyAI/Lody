@@ -1,5 +1,7 @@
+import { encodeSessionFilePath, decodeSessionFilePath, type SessionFileRoot } from '@lody/shared';
+import { resolveProjectFileTarget } from '@/session/worktree/project-member-access';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, realpathSync } from 'node:fs';
+import { existsSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
@@ -32,6 +34,7 @@ export type CodeCollabV2DiffStoreEvent = {
 
 export type CodeCollabV2DiffStoreRecordInput = {
   readonly workspaceRoot: string;
+  readonly fileRoots?: readonly SessionFileRoot[];
   readonly ownerSessionId: SessionId;
   readonly turnId: string;
   readonly events: readonly CodeCollabV2DiffStoreEvent[];
@@ -108,7 +111,7 @@ export class CodeCollabV2DiffStore {
     const startedAtMs = Date.now();
     const recordedAtMs = input.recordedAtMs ?? this.now();
     const capturedAtMs = input.capturedAtMs ?? recordedAtMs;
-    const aggregated = aggregateDiffStoreEvents(input.workspaceRoot, input.events);
+    const aggregated = aggregateDiffStoreEvents(input.workspaceRoot, input.events, input.fileRoots);
     if (aggregated.length === 0) return [];
     // One durable token per persistence attempt orders current-state proofs even
     // when an older multi-file turn finishes compression after a newer turn.
@@ -119,7 +122,11 @@ export class CodeCollabV2DiffStore {
       const analysis = await computeTurnEvidenceAsync(
         event.oldText,
         event.newText,
-        path.resolve(input.workspaceRoot, event.path)
+        resolveProjectFileTarget(
+          input.fileRoots ?? [{ id: 'main', absolutePath: input.workspaceRoot }],
+          decodeSessionFilePath(event.path)!.relativePath,
+          decodeSessionFilePath(event.path)!.rootId
+        )!.absolutePath
       );
       return {
         ...analysis,
@@ -137,7 +144,7 @@ export class CodeCollabV2DiffStore {
         const analysis = analyses[index];
         if (!analysis) throw new Error(`Missing turn analysis for turn-diff path ${event.path}.`);
         return {
-          path: event.path,
+          path: toStorePath(event.path),
           oldText: event.oldText,
           newText: event.newText,
           newIsCurrent: analysis.newIsCurrent,
@@ -148,7 +155,7 @@ export class CodeCollabV2DiffStore {
       }),
     });
     const fileDiff = result.files.map((file) => ({
-      filePath: file.path,
+      filePath: fromStorePath(file.path),
       add: file.add,
       del: file.del,
     }));
@@ -178,10 +185,12 @@ export class CodeCollabV2DiffStore {
     readonly ownerSessionId: SessionId;
     readonly nowMs?: number;
   }): Promise<readonly string[]> {
-    return await this.store.listChangedPaths({
-      ownerId: input.ownerSessionId,
-      ...(input.nowMs === undefined ? {} : { nowMs: input.nowMs }),
-    });
+    return (
+      await this.store.listChangedPaths({
+        ownerId: input.ownerSessionId,
+        ...(input.nowMs === undefined ? {} : { nowMs: input.nowMs }),
+      })
+    ).map(fromStorePath);
   }
 
   async getEarliestOldSnapshot(input: {
@@ -192,7 +201,7 @@ export class CodeCollabV2DiffStore {
   }): Promise<CodeCollabV2DiffStoreSnapshot> {
     return await this.store.getEarliestOldSnapshot({
       ownerId: input.ownerSessionId,
-      path: input.path,
+      path: toStorePath(input.path),
       ...(input.nowMs === undefined ? {} : { nowMs: input.nowMs }),
       ...(input.maxRawBytes === undefined ? {} : { maxRawBytes: input.maxRawBytes }),
     });
@@ -208,7 +217,7 @@ export class CodeCollabV2DiffStore {
     return await this.store.getTurnSnapshot({
       ownerId: input.ownerSessionId,
       turnId: input.turnId,
-      path: input.path,
+      path: toStorePath(input.path),
       ...(input.nowMs === undefined ? {} : { nowMs: input.nowMs }),
       ...(input.maxRawBytes === undefined ? {} : { maxRawBytes: input.maxRawBytes }),
     });
@@ -221,7 +230,7 @@ export class CodeCollabV2DiffStore {
   }): Promise<LatestTurnDiffText> {
     return await this.store.getLatestText({
       ownerId: input.ownerSessionId,
-      path: input.path,
+      path: toStorePath(input.path),
       ...(input.maxRawBytes === undefined ? {} : { maxRawBytes: input.maxRawBytes }),
     });
   }
@@ -236,7 +245,11 @@ export class CodeCollabV2DiffStore {
       turnId: input.turnId,
       ...(input.nowMs === undefined ? {} : { nowMs: input.nowMs }),
     });
-    return files.map((file) => ({ filePath: file.path, add: file.add, del: file.del }));
+    return files.map((file) => ({
+      filePath: fromStorePath(file.path),
+      add: file.add,
+      del: file.del,
+    }));
   }
 
   async gc(nowMs?: number): Promise<void> {
@@ -280,12 +293,13 @@ export function getCodeCollabV2DiffStoreDbPath(workspaceId: string): string {
 
 function aggregateDiffStoreEvents(
   workspaceRoot: string,
-  events: readonly CodeCollabV2DiffStoreEvent[]
+  events: readonly CodeCollabV2DiffStoreEvent[],
+  fileRoots?: readonly SessionFileRoot[]
 ): readonly CodeCollabV2DiffStoreEvent[] {
   const root = path.resolve(workspaceRoot);
   const byPath = new Map<string, CodeCollabV2DiffStoreEvent>();
   for (const event of events) {
-    const normalizedPath = normalizeEvidencePath(root, event.path);
+    const normalizedPath = normalizeEvidencePath(root, event.path, fileRoots);
     if (!normalizedPath) continue;
     const existing = byPath.get(normalizedPath);
     byPath.set(normalizedPath, {
@@ -306,38 +320,16 @@ function sumEventTextBytes(events: readonly CodeCollabV2DiffStoreEvent[]): numbe
   return total;
 }
 
-function normalizeEvidencePath(workspaceRoot: string, evidencePath: string): string | null {
-  if (evidencePath.includes('\0')) return null;
-  const realWorkspaceRoot = realpathOrSelf(workspaceRoot);
-  const absolutePath = path.isAbsolute(evidencePath)
-    ? path.resolve(evidencePath)
-    : path.resolve(workspaceRoot, evidencePath);
-  const realAbsolutePath = realpathOrSelf(absolutePath);
-  for (const candidatePath of uniqueStrings([absolutePath, realAbsolutePath])) {
-    for (const candidateRoot of uniqueStrings([workspaceRoot, realWorkspaceRoot])) {
-      const relative = path.relative(candidateRoot, candidatePath).replace(/\\/g, '/');
-      if (!relative || relative.startsWith('..') || path.isAbsolute(relative)) continue;
-      return path.posix.normalize(relative.normalize('NFC'));
-    }
-  }
-  return null;
-}
-
-function realpathOrSelf(inputPath: string): string {
-  try {
-    return realpathSync.native(inputPath);
-  } catch {
-    const parent = path.dirname(inputPath);
-    if (parent !== inputPath) {
-      const realParent = realpathOrSelf(parent);
-      if (realParent !== parent) return path.join(realParent, path.basename(inputPath));
-    }
-    return inputPath;
-  }
-}
-
-function uniqueStrings(values: readonly string[]): string[] {
-  return [...new Set(values)];
+function normalizeEvidencePath(
+  workspaceRoot: string,
+  evidencePath: string,
+  fileRoots?: readonly SessionFileRoot[]
+): string | null {
+  const resolved = resolveProjectFileTarget(
+    fileRoots ?? [{ id: 'main', absolutePath: workspaceRoot }],
+    evidencePath
+  );
+  return resolved && resolved.relativePath ? encodeSessionFilePath(resolved) : null;
 }
 
 function normalizeRetentionDays(value: number | undefined): number {
@@ -351,4 +343,22 @@ function safeWorkspaceSegment(workspaceId: string): string {
   const safe = workspaceId.replace(/[^A-Za-z0-9._-]/g, '_').slice(0, 80) || 'workspace';
   const hash = createHash('sha256').update(workspaceId).digest('hex').slice(0, 12);
   return `${safe}-${hash}`;
+}
+
+// The local snapshot package forbids NUL in opaque keys. A leading slash cannot
+// collide with legacy workspace-relative keys; these keys never reach the filesystem.
+function toStorePath(wirePath: string): string {
+  const file = decodeSessionFilePath(wirePath);
+  return file && file.rootId !== 'main'
+    ? `/lody-roots/${file.rootId}/${file.relativePath}`
+    : wirePath;
+}
+function fromStorePath(storedPath: string): string {
+  if (!storedPath.startsWith('/lody-roots/')) return storedPath;
+  const value = storedPath.slice('/lody-roots/'.length);
+  const slash = value.indexOf('/');
+  return encodeSessionFilePath({
+    rootId: value.slice(0, slash),
+    relativePath: value.slice(slash + 1),
+  });
 }

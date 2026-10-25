@@ -15,7 +15,7 @@ import {
 import { Spinner } from '@lody/ui/spinner';
 import { FileIcon } from '@/components/icons/file-icons';
 import { useHorizontalWheelScroll } from '@/hooks/use-horizontal-wheel-scroll';
-import { ScrollArea } from '@/ui/scroll-area';
+import { ScrollArea } from '@lody/ui/scroll-area';
 import { Menu } from '@/ui/menu';
 import { cn } from '@/lib/utils';
 import { WINDOW_DRAG_EXEMPT_CLASS, useWindowDragRegionClass } from '@/ui/window-drag-region';
@@ -536,13 +536,10 @@ export const SessionSidePanelTabBar = memo(function SessionSidePanelTabBar({
   return (
     <div className={cn(stylex.props(styles.container).className, windowDragClass, className)}>
       <ScrollArea
-        scrollableX
-        horizontalOnly
+        axis="horizontal"
+        compact
         viewportRef={viewportRef}
         className={stylex.props(styles.viewport).className}
-        // Compact overlay bar: default horizontal track is too tall in this h-11 strip.
-        horizontalScrollbarClassName="h-1 border-0 p-0"
-        horizontalScrollbarThumbClassName="bg-[hsl(var(--scrollbar-thumb)/0.35)] hover:bg-[hsl(var(--scrollbar-thumb-hover)/0.5)]"
       >
         <div role="tablist" {...stylex.props(styles.tabList)}>
           {tabs.map((tab) => {

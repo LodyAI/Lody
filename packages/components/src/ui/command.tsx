@@ -5,7 +5,7 @@ import { Search } from 'lucide-react';
 
 import { cn } from '@/lib/utils';
 import { Dialog } from './dialog';
-import { ScrollArea } from './scroll-area';
+import { ScrollArea } from '@lody/ui/scroll-area';
 import { themeColors } from '../style/theme-colors.stylex';
 import {
   themeFontSize,

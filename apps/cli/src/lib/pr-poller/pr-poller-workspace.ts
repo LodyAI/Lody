@@ -12,6 +12,7 @@ import {
   type SessionPullRequestStateMeta,
   type WorkspaceId,
 } from '@lody/shared';
+import type { PrMetaWritePlan } from './pr-poll-writeback';
 import type { LoroDocumentManager } from '@/lib/loro/doc';
 import { listAliveSessionMetas } from '@/lib/command-runtime';
 import type { Logger } from '@/utils/logger';
@@ -40,6 +41,7 @@ export type AssociatePullRequestArgs = {
 };
 
 export type PrPollMetaPatch = {
+  lifecycle?: PrMetaWritePlan['lifecycle'];
   pullRequests?: SessionPullRequestMeta[];
   pullRequestState?: Record<string, SessionPullRequestStateMeta>;
 };
@@ -57,7 +59,10 @@ export interface PrPollerWorkspaceHandle {
   subscribePresence(listener: (states: LodyPresenceStateMap) => void): (() => void) | null;
   getPresenceStates(): LodyPresenceStateMap | null;
   waitForInitialSync(timeoutMs?: number): Promise<boolean>;
-  resolveCredential(repoFullName: string): Promise<ResolvedGitHubCredential | null>;
+  resolveCredential(
+    repoFullName: string,
+    nativeCredentials?: boolean
+  ): Promise<ResolvedGitHubCredential | null>;
   invalidateCredential(repoFullName: string, credential: ResolvedGitHubCredential): void;
   /** Optional hosted webhook linkage; failure does not block summary publication. */
   associatePullRequest: ((args: AssociatePullRequestArgs) => Promise<boolean>) | null;
@@ -112,7 +117,11 @@ export function createLodyPrPollerWorkspace(options: {
     },
 
     async writeOwnerMeta(ownerSessionId: SessionId, patch: PrPollMetaPatch): Promise<void> {
-      await documentManager.repo.upsertDocMeta(getSessionRoomId(ownerSessionId), patch);
+      const { lifecycle = [], ...legacyPatch } = patch;
+      await documentManager.repo.upsertDocMeta(getSessionRoomId(ownerSessionId), {
+        ...legacyPatch,
+        ...Object.fromEntries(lifecycle.map((write) => [write.field, write.value])),
+      });
     },
 
     watchSessionMetadata(listener: (sessionId: SessionId) => void): (() => void) | null {
@@ -147,8 +156,8 @@ export function createLodyPrPollerWorkspace(options: {
       );
     },
 
-    resolveCredential(repoFullName: string) {
-      return credentialResolver.resolve(repoFullName);
+    resolveCredential(repoFullName: string, nativeCredentials?: boolean) {
+      return credentialResolver.resolve(repoFullName, nativeCredentials);
     },
 
     invalidateCredential(repoFullName: string, credential: ResolvedGitHubCredential): void {

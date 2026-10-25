@@ -1,4 +1,4 @@
-import type { SessionHistory, SessionId } from '@lody/shared';
+import type { MessageContent, SessionHistory, SessionId } from '@lody/shared';
 import type {
   SessionDataChange,
   SessionDirectoryRow,
@@ -15,6 +15,7 @@ import {
   type ConversationView,
   type ConversationViewChange,
   type ConversationViewListener,
+  type SubagentRunHistorySource,
   type TurnIndexRow,
   UNLOADED_TURN_PREFIX,
   isUnloadedTurnId,
@@ -114,6 +115,26 @@ const validatePage = (page: SessionHistoryDirectoryPage, latest = false): void =
   }
 };
 
+type DisplayHistoryReader = {
+  active: boolean;
+  readTurn: NonNullable<SessionHistoryReader['readTurnForDisplay']>;
+  readRun: NonNullable<SessionHistoryReader['readSubagentRun']>;
+};
+
+// Render-item caches can outlive their conversation. A task capability must
+// not retain the reader, its view closure, or the underlying CRDT document.
+const runHistorySource = (
+  reader: WeakRef<DisplayHistoryReader>,
+  turnId: string,
+  rootSessionId: string,
+  runId: string
+): SubagentRunHistorySource => ({
+  read: async () => {
+    const target = reader.deref();
+    return target?.active ? await target.readRun(turnId, rootSessionId, runId) : undefined;
+  },
+});
+
 export function createConversationViewFromReader(
   reader: SessionHistoryReader,
   options: CreateConversationViewFromReaderOptions
@@ -151,6 +172,31 @@ export function createConversationViewFromReader(
   const listeners = new Set<ConversationViewListener>();
   let version = 0;
   let disposed = false;
+  const displayReader: DisplayHistoryReader | undefined =
+    reader.readTurnForDisplay && reader.readSubagentRun
+      ? {
+          active: true,
+          readTurn: reader.readTurnForDisplay.bind(reader),
+          readRun: reader.readSubagentRun.bind(reader),
+        }
+      : undefined;
+  const readBody = (id: string) =>
+    displayReader ? displayReader.readTurn(id) : reader.readTurn(id);
+  const displayBody = (read: Extract<SessionTurnRead, { state: 'ready' }>): SessionHistory => {
+    const turn = read.turn as unknown as SessionHistory;
+    if (!displayReader) return turn;
+    const items = (turn.items ?? []).map((item) => {
+      if (!item || typeof item !== 'object' || !('type' in item) || item.type !== 'subagent_task')
+        return item;
+      const task = item as Extract<MessageContent, { type: 'subagent_task' }>;
+      if (!task.run) return item;
+      const rootSessionId = task.run.sessionId;
+      return Object.defineProperty({ ...task }, 'history', {
+        value: runHistorySource(new WeakRef(displayReader), turn.id, rootSessionId, task.taskId),
+      });
+    });
+    return { ...turn, items };
+  };
   /**
    * Membership/order epoch. Bumped as soon as a structural change is observed
    * (and again when it is applied), so a read that started before it can never
@@ -372,7 +418,7 @@ export function createConversationViewFromReader(
         const chunk = pending.slice(start, start + hydrateChunkSize);
         const tokens = chunk.map((id) => turnToken(id));
         const reads: readonly SessionTurnRead[] = await Promise.all(
-          chunk.map((id) => reader.readTurn(id))
+          chunk.map((id) => readBody(id))
         );
         if (disposed || cancelled?.()) return;
         let lo = Infinity;
@@ -392,7 +438,7 @@ export function createConversationViewFromReader(
             hydrated.delete(id);
             return;
           }
-          const turn = read.turn as unknown as SessionHistory;
+          const turn = displayBody(read);
           const pos = indexById.get(id);
           hydrated.set(id, turn);
           if (pos === undefined) return;
@@ -476,7 +522,7 @@ export function createConversationViewFromReader(
         const token = turnToken(id);
         let read: SessionTurnRead;
         try {
-          read = await reader.readTurn(id);
+          read = await readBody(id);
         } catch {
           if (indexById.has(id)) dirtyIds.add(id);
           scheduleFlushRetry();
@@ -494,7 +540,7 @@ export function createConversationViewFromReader(
           hydrated.delete(id);
           continue;
         }
-        const turn = read.turn as unknown as SessionHistory;
+        const turn = displayBody(read);
         const pos = indexById.get(id);
         hydrated.set(id, turn);
         if (pos !== undefined) {
@@ -1273,6 +1319,7 @@ export function createConversationViewFromReader(
     dispose: () => {
       if (disposed) return;
       disposed = true;
+      if (displayReader) displayReader.active = false;
       for (const release of directoryLeases) release();
       structureEpoch += 1;
       observation.unsubscribe();

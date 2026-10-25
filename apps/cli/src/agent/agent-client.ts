@@ -567,6 +567,7 @@ function extractImageGenerationContentFields(content: unknown): {
 export interface AgentClientOptions {
   /** Resolve logical project identity only after worktreeProject capability negotiation. */
   resolveWorktreeProject?: () => Promise<LodyWorktreeProject>;
+  resolveAdditionalDirectories?: (supported: boolean) => Promise<string[]>;
   sessionId: SessionId;
   workspaceId?: WorkspaceId;
   machineId?: MachineId;
@@ -638,6 +639,7 @@ export class AgentClient implements acp.Client {
   private nativeActivity: LodySessionActivityUpdate | null = null;
   private readonly devinSubagentTaskIds = new Set<string>();
   private worktreeProject?: LodyWorktreeProject;
+  private additionalDirectories: string[] = [];
   private authMethods: acp.AuthMethod[] = [];
   private authenticationRequired = false;
   private acknowledgedSteerCapability: AcknowledgedSteerCapability | null = null;
@@ -1181,11 +1183,10 @@ export class AgentClient implements acp.Client {
       this.options.onImageGenerationBegin?.({ acpSessionId, callId });
     }
 
-    // Any notification that arrives after begin (or a fresh `tool_call` with
-    // a terminal status, which upstream emits when the begin event was lost
-    // on session resume) carries the end-state payload.
-    const carriesEndPayload = !isBegin || isTerminalStatus || Array.isArray(update.content);
-    if (carriesEndPayload && status) {
+    // Publish status on begin as well as updates, even when content is omitted.
+    // This callback also carries in-progress state; it must not depend on the
+    // history schema manufacturing an empty content list.
+    if (status) {
       const contentFields = extractImageGenerationContentFields(update.content);
       const image =
         contentFields.image ??
@@ -1793,8 +1794,12 @@ export class AgentClient implements acp.Client {
           }
         : {}),
     };
-    if (clientIdentifier === undefined && Object.keys(lody).length === 0) return {};
+    const roots = this.additionalDirectories.length
+      ? { additionalDirectories: this.additionalDirectories }
+      : {};
+    if (clientIdentifier === undefined && Object.keys(lody).length === 0) return roots;
     return {
+      ...roots,
       _meta: {
         ...(clientIdentifier !== undefined ? { clientIdentifier } : {}),
         ...(Object.keys(lody).length > 0 ? { lody } : {}),
@@ -1892,6 +1897,7 @@ export class AgentClient implements acp.Client {
     const grokClientIdentifier = this.getGrokClientIdentifier();
     const devinClientCapabilitiesMeta = this.getDevinClientCapabilitiesMeta();
     this.worktreeProject = undefined;
+    this.additionalDirectories = [];
     this.logger.debug(
       `[${this.options.sessionId}] Starting ACP client (workdir=${workdir} resumeSessionId=${
         resumeSessionId ?? 'none'
@@ -2043,6 +2049,14 @@ export class AgentClient implements acp.Client {
       this.options.resolveWorktreeProject
     ) {
       this.worktreeProject = await withAbort(this.options.resolveWorktreeProject(), startupAbort);
+    }
+    if (this.options.resolveAdditionalDirectories) {
+      this.additionalDirectories = await withAbort(
+        this.options.resolveAdditionalDirectories(
+          initResponse.agentCapabilities?.sessionCapabilities?.additionalDirectories != null
+        ),
+        startupAbort
+      );
     }
     const sessionStartMeta = this.getSessionStartMeta();
 

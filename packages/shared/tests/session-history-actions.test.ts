@@ -7,6 +7,9 @@ import {
   type SessionTurn,
   type SessionEntry,
   type SessionTurnStatus,
+  applyHistoryAction,
+  planHistoryAction,
+  type HistoryAction,
 } from '../src/session-data';
 import type { SessionId } from '../src/ids';
 import type { StoredLodyOperation } from '../src/session-orchestration';
@@ -23,6 +26,88 @@ const row = (id: string, role: SessionTurn['role'] = 'assistant'): SessionEntry 
   timestamp: '2026-01-01T00:00:00Z',
   items: [{ type: 'text', text: id }],
   fileDiff: [],
+});
+
+describe('immutable history action plans', () => {
+  it('matches shared action semantics, owns new input, and preserves previous snapshots', () => {
+    const initial: SessionEntry[] = [
+      row('u', 'user'),
+      {
+        ...row('a'),
+        items: [
+          { type: 'text', text: 'retained'.repeat(32768) },
+          {
+            type: 'tool_call',
+            toolCallId: 'permission',
+            status: 'pending',
+            permissionRequest: { requestId: 'r', options: [] },
+          },
+          {
+            type: 'tool_call',
+            toolCallId: 'compact-old',
+            status: 'in_progress',
+            activityKind: 'context_compaction',
+          },
+          {
+            type: 'tool_call',
+            toolCallId: 'compact-last',
+            status: 'in_progress',
+            activityKind: 'context_compaction',
+          },
+        ],
+      },
+      row('other'),
+    ];
+    const actions: HistoryAction[] = [
+      { kind: 'user-status', turnId: 'u', status: 'processing', deliveredSteer: true },
+      {
+        kind: 'assistant-items',
+        turnId: 'a',
+        mode: 'append',
+        items: [{ type: 'text', text: 'new' }],
+      },
+      { kind: 'finish-assistant', turnId: 'a', endedAt: 42, permissionWaitMs: 7 },
+      { kind: 'finish-assistant', turnId: 'a', endedAt: 99 },
+      { kind: 'upsert-turn', turn: row('inserted'), beforeTurnId: 'other' },
+      { kind: 'remove-turn', turnId: 'inserted' },
+      { kind: 'remove-turn', turnId: 'missing' },
+    ];
+    let current = initial;
+    for (const action of actions) {
+      const before = structuredClone(current);
+      const reference = applyHistoryAction(structuredClone(current), structuredClone(action));
+      const planned = planHistoryAction(current, action);
+      expect(planned.turns).toEqual(reference.turns);
+      expect(planned.matched).toBe(reference.matched);
+      expect(current).toEqual(before);
+      if (action.kind === 'finish-assistant') {
+        expect(planned.turns[1]?.items?.[0]).toBe(current[1]?.items?.[0]);
+        expect(planned.turns[1]).toMatchObject({
+          endedAt: 42,
+          permissionWaitMs: 7,
+          items: [
+            { type: 'text' },
+            { toolCallId: 'permission', permissionRequest: { outcome: { outcome: 'cancelled' } } },
+            { toolCallId: 'compact-last', status: 'failed' },
+            { type: 'text', text: 'new' },
+          ],
+        });
+      }
+      if (action.kind === 'assistant-items') {
+        (action.items[0] as { text: string }).text = 'caller mutation';
+        expect(planned.turns[1]?.items?.at(-1)).toEqual({ type: 'text', text: 'new' });
+      }
+      if (action.kind === 'upsert-turn') {
+        action.turn.items = [];
+        expect(planned.turns[2]?.items).toEqual([{ type: 'text', text: 'inserted' }]);
+      }
+      if (action.kind === 'finish-assistant' && action.endedAt === 99)
+        expect(planned.changes).toEqual([]);
+      current = planned.turns;
+    }
+    expect(initial[1]?.finished).toBeUndefined();
+    expect(initial[1]?.items?.length).toBe(4);
+  });
 });
 
 describe('operation progress local history writes', () => {

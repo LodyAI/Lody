@@ -49,6 +49,7 @@ interface LodyOptions {
     localProjectId: LocalProjectId
   ) => Promise<void>;
   onFatalAuthFailure?: (error: Error) => void;
+  onStorageWriteFailure?: (error: Error) => void;
   onProcessLifecycleAction?: (action: MachineProcessLifecycleAction) => void;
   workspaceWatchCoordinator?: WorkspaceWatchCoordinatorApi;
   cloudPort: CloudPort;
@@ -111,6 +112,7 @@ export class Lody {
           streamsTokens: options.cloudPort.streamsTokens,
           cloudBilling: options.cloudPort.billing,
           ownerHistoryRouter,
+          onStorageWriteFailure: options.onStorageWriteFailure,
         })
     );
     return new Lody(options, manager);

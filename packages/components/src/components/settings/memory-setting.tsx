@@ -77,8 +77,17 @@ const styles = stylex.create({
     display: 'flex',
     alignItems: 'center',
     flexWrap: 'wrap',
+    // Keep the cluster at its content width: a shrinking cluster wraps its
+    // avatar under the label, so the label's position depends on how long the
+    // description happens to be.
+    flexShrink: 0,
+    // The title line is the stable anchor. Centring against the row would move
+    // the label whenever a description wraps to another line. The small start
+    // margin centres the avatar controls with the name, not the row.
+    alignSelf: 'flex-start',
     gap: space[1],
     maxWidth: '45%',
+    marginBlockStart: space[1],
   },
   assignedLabel: { whiteSpace: 'nowrap' },
   unlinkRow: { display: 'flex', justifyContent: 'flex-end' },
@@ -105,6 +114,10 @@ const styles = stylex.create({
     filter: 'grayscale(1)',
   },
   description: {
+    display: '-webkit-box',
+    WebkitBoxOrient: 'vertical',
+    WebkitLineClamp: 2,
+    overflow: 'hidden',
     fontSize: text.footnoteSize,
     color: colors.secondaryLabel,
     overflowWrap: 'anywhere',

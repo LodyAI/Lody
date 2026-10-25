@@ -9,9 +9,16 @@
  */
 import type { Meta, StoryObj } from '@storybook/react';
 import { Provider, createStore, useAtomValue } from 'jotai';
-import { expect, waitFor } from 'storybook/test';
+import { expect, userEvent, waitFor } from 'storybook/test';
 import { useState, type ReactNode } from 'react';
-import type { MessageContent, SessionHistoryParsed, SessionId } from '@lody/shared';
+import {
+  getSessionRoomId,
+  type MessageContent,
+  type SessionHistoryParsed,
+  type SessionId,
+  type SessionMeta,
+} from '@lody/shared';
+import { sessionMetaCacheAtom } from '@/atoms/doc-meta';
 import type { ChatStreamItem, SessionChatStreamViewProps } from '@/components/ai-gui/view';
 import { MessageRowView, SessionChatStreamView } from '@/components/ai-gui/view';
 import { runtimeAtom } from '@/atoms';
@@ -1123,16 +1130,21 @@ const planExitOutcomeTurn = (
       toolCallId: `${id}-plan-exit`,
       title: 'Ready to code?',
       kind: 'switch_mode',
-      status: 'completed',
-      /* CLAUDE's shape: `ExitPlanMode` carries the plan as a `content` text
-         block, so the card renders it above the outcome and there is no
-         separate `proposed_plan` item. */
+      status:
+        outcome.outcome === 'selected' && outcome.optionId === 'reject' ? 'failed' : 'completed',
+      // Claude retains the plan input when rejection replaces the tool content.
+      rawInput: {
+        plan: '**Plan**\n\n1. Drop the per-shell horizontal pads.\n2. Re-measure against the rail guide.',
+      },
       content: [
         {
           type: 'content',
           content: {
             type: 'text',
-            text: '**Plan**\n\n1. Drop the per-shell horizontal pads.\n2. Re-measure against the rail guide.',
+            text:
+              outcome.outcome === 'selected' && outcome.optionId === 'reject'
+                ? "The user doesn't want to proceed with this tool use."
+                : '**Plan**\n\n1. Drop the per-shell horizontal pads.\n2. Re-measure against the rail guide.',
           },
         },
       ],
@@ -1140,7 +1152,7 @@ const planExitOutcomeTurn = (
         requestId: `${id}-permission`,
         options: [
           { optionId: 'approve', name: 'Yes, implement the plan', kind: 'allow_once' },
-          { optionId: 'reject', name: 'No, and tell Codex what to change', kind: 'reject_once' },
+          { optionId: 'reject', name: 'No, keep planning', kind: 'reject_once' },
         ],
         outcome,
       },
@@ -1457,5 +1469,79 @@ export const DesktopPlanModeTurn: Story = {
         <RailGuide />
       </div>
     </WithRuntime>
+  ),
+};
+
+const dshStore = createStore();
+dshStore.set(runtimeAtom, stubRuntime as never);
+dshStore.set(sessionMetaCacheAtom, {
+  [getSessionRoomId(sessionId)]: { cliType: 'builtin', agentType: 'deepseek' } as SessionMeta,
+});
+const dshMessage: SessionHistoryParsed = {
+  id: 'dsh-independent-prose',
+  role: 'assistant',
+  read: true,
+  timestamp: '2026-10-22T08:00:00.000Z',
+  finished: true,
+  items: [
+    { type: 'thought', text: '先检查输入边界，再执行测试。' },
+    {
+      type: 'tool_call',
+      toolCallId: 'dsh-command',
+      kind: 'execute',
+      status: 'completed',
+      title: 'pnpm test',
+      content: [{ type: 'content', content: { type: 'text', text: 'Synthetic command output' } }],
+    },
+    { type: 'text', text: '测试已经返回，继续核对结果。' },
+    { type: 'thought', text: '命令完成后，这段思考仍然独立可读。' },
+    { type: 'text', text: '检查完成。' },
+  ],
+};
+const dshItems: ChatStreamItem[] = [
+  { type: 'message', sessionId, message: dshMessage, turnIndex: 0 },
+];
+
+/** Completed DSH work folds together; expanded prose retains answer typography. */
+export const DeepSeekIndependentProse: Story = {
+  play: async ({ canvasElement }) => {
+    const workedButton = () =>
+      canvasElement.querySelector<HTMLButtonElement>('button[aria-expanded]')!;
+    await waitFor(async () => {
+      await expect(workedButton()).not.toBeNull();
+      await expect(canvasElement.textContent).toContain('检查完成。');
+      await expect(canvasElement.textContent).not.toContain('先检查输入边界，再执行测试。');
+      await expect(canvasElement.textContent).not.toContain('测试已经返回，继续核对结果。');
+    });
+    await userEvent.click(workedButton());
+    await waitFor(async () => {
+      const paragraphs = Array.from(canvasElement.querySelectorAll('p'));
+      const thought = paragraphs.find(
+        (node) => node.textContent === '先检查输入边界，再执行测试。'
+      );
+      const answer = paragraphs.find((node) => node.textContent === '检查完成。');
+      await expect(thought).toBeDefined();
+      await expect(answer).toBeDefined();
+      const thoughtStyle = getComputedStyle(thought!);
+      const answerStyle = getComputedStyle(answer!);
+      for (const property of ['font-family', 'font-size', 'font-weight', 'line-height', 'color']) {
+        await expect(thoughtStyle.getPropertyValue(property)).toBe(
+          answerStyle.getPropertyValue(property)
+        );
+      }
+      await expect(canvasElement.textContent).not.toContain('Synthetic command output');
+      await expect(canvasElement.textContent).toContain('测试已经返回，继续核对结果。');
+    });
+    await userEvent.click(workedButton());
+    await waitFor(async () => {
+      await expect(canvasElement.textContent).not.toContain('先检查输入边界，再执行测试。');
+      await expect(canvasElement.textContent).toContain('检查完成。');
+    });
+  },
+  args: { sessionId, items: dshItems, renderMessageRow },
+  render: () => (
+    <Provider store={dshStore}>
+      <ConversationRhythmScene items={dshItems} />
+    </Provider>
   ),
 };

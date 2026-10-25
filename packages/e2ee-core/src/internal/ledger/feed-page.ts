@@ -13,7 +13,11 @@ import {
 /** A ledger feed page, frame or local feed operation failed; `code` names the reason. */
 export class LedgerFeedError extends Data.TaggedError('LedgerFeedError')<{
   readonly cause?: unknown;
+  readonly position?: number;
   readonly code:
+    | 'upgrade-required'
+    | 'retained-cache-invalid'
+    | 'local-evidence-conflict'
     | 'invalid-frame'
     | 'read-too-large'
     | 'invalid-offset'
@@ -158,7 +162,15 @@ export const prepareLedgerPageEffect = Effect.fnUntraced(function* (
     Effect.mapError(
       (error) =>
         new LedgerFeedError({
-          code: error.code === 'native-unavailable' ? 'native-unavailable' : 'wrong-parent',
+          code:
+            error.code === 'native-unavailable'
+              ? 'native-unavailable'
+              : error.code === 'upgrade-required'
+                ? 'upgrade-required'
+                : 'wrong-parent',
+          ...(error.code === 'upgrade-required' && error.position !== undefined
+            ? { position: error.position }
+            : {}),
         })
     )
   );

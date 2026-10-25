@@ -203,3 +203,7 @@ specific situations:
 Everything under `@lody/e2ee-core/internal` (admission gates, sealers, test
 helpers) is **internal-only**: unstable, for this repository's tests and the
 Lab.
+
+`LedgerFeedStore.rebase` CAS-checks the entire expected tail, replaces the origin
+and its count, removes covered records, and writes/read-checks the new tail in
+one transaction. A stale tail returns conflict without mutation.

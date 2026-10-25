@@ -4,6 +4,7 @@
 @import 'tw-animate-css';
 @import 'tailwindcss';
 @import 'konsta/theme.css';
+@import './scrollbars.css';
 
 @config "../../tailwind.config.js";
 @source "../**/*.{ts,tsx}";
@@ -516,8 +517,6 @@ pre,
        (`use-mermaid-diagram-canvas.tsx` tags it `role="button"`). */
     cursor: zoom-in !important;
     scrollbar-gutter: stable;
-    scrollbar-width: thin;
-    scrollbar-color: hsl(var(--scrollbar-thumb) / 0.5) transparent;
   }
 
   .markdown-renderer [data-streamdown='mermaid']:focus-visible {
@@ -536,26 +535,6 @@ pre,
 
   .markdown-renderer [data-streamdown='mermaid'][data-lody-canvas='active'] > div:active {
     cursor: grabbing !important;
-  }
-
-  .markdown-renderer [data-streamdown='mermaid'] > div::-webkit-scrollbar {
-    width: 10px;
-    height: 10px;
-  }
-
-  .markdown-renderer [data-streamdown='mermaid'] > div::-webkit-scrollbar-track {
-    background: transparent;
-  }
-
-  .markdown-renderer [data-streamdown='mermaid'] > div::-webkit-scrollbar-thumb {
-    background-color: hsl(var(--scrollbar-thumb) / 0.5);
-    border: 3px solid transparent;
-    border-radius: 999px;
-    background-clip: content-box;
-  }
-
-  .markdown-renderer [data-streamdown='mermaid'] > div::-webkit-scrollbar-thumb:hover {
-    background-color: hsl(var(--scrollbar-thumb-hover) / 0.65);
   }
 
   .markdown-renderer [data-streamdown='mermaid-svg'] {
@@ -1676,117 +1655,12 @@ pre,
     background-color: hsl(var(--tasks-menu-item-hover));
   }
 
-  /* Pro scrollbar: lightweight, unobtrusive (VS Code/Linear style) */
-  .scrollbar-pro {
-    scrollbar-width: thin;
-    scrollbar-color: hsl(var(--scrollbar-thumb) / 0.5) transparent;
-  }
-
-  .scrollbar-pro::-webkit-scrollbar {
-    width: 10px;
-    height: 10px;
-  }
-
-  .scrollbar-pro::-webkit-scrollbar-track {
-    background: transparent;
-  }
-
-  .scrollbar-pro::-webkit-scrollbar-thumb {
-    background-color: hsl(var(--scrollbar-thumb) / 0.5);
-    border-radius: 999px;
-    border: 3px solid transparent;
-    background-clip: content-box;
-  }
-
-  .scrollbar-pro::-webkit-scrollbar-thumb:hover {
-    background-color: hsl(var(--scrollbar-thumb-hover) / 0.65);
-  }
-
-  /* Thin scrollbar for file tree */
-  .thin-scrollbar {
-    scrollbar-width: thin;
-    scrollbar-color: hsl(var(--scrollbar-thumb) / 0.5) transparent;
-  }
-
-  .thin-scrollbar::-webkit-scrollbar {
-    width: 6px;
-  }
-
-  .thin-scrollbar::-webkit-scrollbar-track {
-    background: transparent;
-  }
-
-  .thin-scrollbar::-webkit-scrollbar-thumb {
-    background-color: hsl(var(--scrollbar-thumb) / 0.5);
-    border-radius: 3px;
-    border: none;
-  }
-
-  .thin-scrollbar::-webkit-scrollbar-thumb:hover {
-    background-color: hsl(var(--scrollbar-thumb-hover) / 0.65);
-  }
-
-  /* Chat message list scrollbar aligned with theme colors */
+  /* Appearance comes from scrollbars.css; keep the conversation's stable gutter. */
   .chat-scrollbar {
-    scrollbar-width: thin;
-    scrollbar-color: hsl(var(--scrollbar-thumb) / 0.5) transparent;
     /* Always reserve the scrollbar gutter so it appearing/disappearing (e.g. when
        the terminal dock pops up and the conversation starts overflowing) never
        shifts the message content sideways. */
     scrollbar-gutter: stable;
-  }
-
-  .chat-scrollbar::-webkit-scrollbar {
-    width: 10px;
-  }
-
-  .chat-scrollbar::-webkit-scrollbar-track {
-    background: transparent;
-  }
-
-  .chat-scrollbar::-webkit-scrollbar-thumb {
-    background-color: hsl(var(--scrollbar-thumb) / 0.5);
-    border-radius: 999px;
-    border: 3px solid transparent;
-    background-clip: content-box;
-  }
-
-  .chat-scrollbar::-webkit-scrollbar-thumb:hover {
-    background-color: hsl(var(--scrollbar-thumb-hover) / 0.65);
-  }
-
-  .chat-scrollbar::-webkit-scrollbar-thumb:active {
-    background-color: hsl(var(--scrollbar-thumb-active) / 0.75);
-  }
-
-  /* Input scrollbar: thin and low-contrast, similar to shadcn textarea usage */
-  .input-scrollbar {
-    scrollbar-width: thin;
-    scrollbar-color: hsl(var(--scrollbar-thumb) / 0.45) transparent;
-  }
-
-  .input-scrollbar::-webkit-scrollbar {
-    width: 8px;
-    height: 8px;
-  }
-
-  .input-scrollbar::-webkit-scrollbar-track {
-    background: transparent;
-  }
-
-  .input-scrollbar::-webkit-scrollbar-thumb {
-    background-color: hsl(var(--scrollbar-thumb) / 0.45);
-    border-radius: 999px;
-    border: 2px solid transparent;
-    background-clip: content-box;
-  }
-
-  .input-scrollbar::-webkit-scrollbar-thumb:hover {
-    background-color: hsl(var(--scrollbar-thumb-hover) / 0.55);
-  }
-
-  .input-scrollbar::-webkit-scrollbar-thumb:active {
-    background-color: hsl(var(--scrollbar-thumb-active) / 0.65);
   }
 
   /* Todo checkbox with consistent minimalist styling */
@@ -2300,7 +2174,9 @@ html:active-view-transition-type(home-board)::view-transition-new(home-week-segm
 }
 
 html:active-view-transition-type(home-board)::view-transition-group(home-board) {
-  overflow: clip;
+  /* Switching drifts the old and new pictures beyond this box. Clipping the group shears the
+     leading card edge until the picture arrives, so the short drift must be allowed to paint. */
+  overflow: visible;
 }
 
 html:active-view-transition-type(home-board)::view-transition-old(home-board),
@@ -2308,6 +2184,99 @@ html:active-view-transition-type(home-board)::view-transition-new(home-board) {
   height: auto;
   animation-duration: 200ms;
   animation-timing-function: linear;
+}
+
+/* Where the board comes from (`morph.ts`). The line holds still while a board is open, so the
+   board carries the direction: switching, it drifts toward the segment left behind as the new
+   one arrives from the side of the one pressed. Short drifts, never scaled, on the switch's
+   curve. */
+@keyframes home-board-out-start {
+  to {
+    opacity: 0;
+    transform: translateX(-20px);
+  }
+}
+
+@keyframes home-board-out-end {
+  to {
+    opacity: 0;
+    transform: translateX(20px);
+  }
+}
+
+@keyframes home-board-in-end {
+  from {
+    opacity: 0;
+    transform: translateX(28px);
+  }
+}
+
+@keyframes home-board-in-start {
+  from {
+    opacity: 0;
+    transform: translateX(-28px);
+  }
+}
+
+/* Unfolding and folding, the stage re-centres and the heading and the line travel. The board
+   travels with them as one piece, fixed under the line on the same curve, fading in as it rides
+   into place or out as it rides away (`morph.ts` measures the line's travel). Nothing grows,
+   unrolls or is revealed; its group is not clipped, since the picture moves outside its box. */
+@keyframes home-board-ride-in {
+  from {
+    opacity: 0;
+    transform: translateY(calc(-1 * var(--home-line-travel, 0px)));
+  }
+  60% {
+    opacity: 1;
+  }
+}
+
+@keyframes home-board-ride-out {
+  40% {
+    opacity: 0;
+  }
+  to {
+    opacity: 0;
+    transform: translateY(var(--home-line-travel, 0px));
+  }
+}
+
+html:active-view-transition-type(home-board-next)::view-transition-old(home-board) {
+  /* Offset pictures must not add up where they overlap. */
+  mix-blend-mode: normal;
+  animation: home-board-out-start 160ms cubic-bezier(0.4, 0, 1, 1) both;
+}
+
+html:active-view-transition-type(home-board-next)::view-transition-new(home-board) {
+  /* Offset pictures must not add up where they overlap. */
+  mix-blend-mode: normal;
+  animation: home-board-in-end 300ms cubic-bezier(0.2, 0, 0, 1) 40ms both;
+}
+
+html:active-view-transition-type(home-board-previous)::view-transition-old(home-board) {
+  /* Offset pictures must not add up where they overlap. */
+  mix-blend-mode: normal;
+  animation: home-board-out-end 160ms cubic-bezier(0.4, 0, 1, 1) both;
+}
+
+html:active-view-transition-type(home-board-previous)::view-transition-new(home-board) {
+  /* Offset pictures must not add up where they overlap. */
+  mix-blend-mode: normal;
+  animation: home-board-in-start 300ms cubic-bezier(0.2, 0, 0, 1) 40ms both;
+}
+
+html:active-view-transition-type(home-board-unfold)::view-transition-group(home-board),
+html:active-view-transition-type(home-board-fold)::view-transition-group(home-board) {
+  overflow: visible;
+}
+
+html:active-view-transition-type(home-board-unfold)::view-transition-new(home-board) {
+  animation: home-board-ride-in 240ms cubic-bezier(0.2, 0, 0, 1) both;
+}
+
+html:active-view-transition-type(home-board-fold)::view-transition-old(home-board) {
+  animation: home-board-ride-out 240ms cubic-bezier(0.2, 0, 0, 1) both;
 }
 
 /* One-shot entry for the new-chat landing heading: blur + fade in. */

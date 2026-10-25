@@ -26,7 +26,7 @@ import {
   type SessionStatus,
 } from '@lody/shared';
 import { Menu } from '@/ui/menu';
-import { ScrollArea } from '@/ui/scroll-area';
+import { ScrollArea } from '@lody/ui/scroll-area';
 import { withClassName } from '@/lib/stylex';
 import { ConversationColumn } from '@/components/shared/conversation-column';
 import { usePermissionResponse } from '@/hooks/use-permission-response';

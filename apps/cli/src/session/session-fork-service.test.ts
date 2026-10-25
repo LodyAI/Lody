@@ -147,12 +147,17 @@ function createForkHarness(
       throw new Error(`persist failed: ${reason}`);
     }
   });
+  const docMetadata = new Map<string, unknown>([
+    [getSessionRoomId(targetSessionId), options.targetDocMetaRecord],
+  ]);
   const repo = {
-    getDocMeta: vi.fn(async (roomId: string) =>
-      roomId === getSessionRoomId(targetSessionId) ? options.targetDocMetaRecord : undefined
-    ),
-    upsertDocMeta: vi.fn(async () => undefined),
-    deleteDoc: vi.fn(async () => undefined),
+    getDocMeta: vi.fn(async (roomId: string) => docMetadata.get(roomId)),
+    upsertDocMeta: vi.fn(async (roomId: string, patch: Partial<SessionMeta>) => {
+      docMetadata.set(roomId, Object.assign({}, docMetadata.get(roomId), patch));
+    }),
+    deleteDoc: vi.fn(async (roomId: string) => {
+      docMetadata.delete(roomId);
+    }),
     getMeta: vi.fn(() => ({
       scan: vi.fn(async () =>
         (options.aliveRoomIds ?? []).map((roomId) => ({ key: ['e', roomId], value: true }))
@@ -534,6 +539,11 @@ describe('SessionForkService durability boundary', () => {
           await vi.runAllTimersAsync();
           await settled.promise;
         }
+        expect(await harness.repo.getDocMeta(getSessionRoomId(targetSessionId))).toMatchObject({
+          title: 'Original',
+          acpSessionId: 'acp-target',
+          status: SessionStatusFactory.idle(),
+        });
         const stored = loro.getList('history').toJSON();
         expect(stored.map((row) => row.id)).toEqual([
           'user-1',
@@ -956,7 +966,7 @@ describe('SessionForkService fork operation recovery', () => {
     targetSessionId,
     operationId: preparingOperation.id,
     createdAt: preparingOperation.createdAt,
-    title: '(fork) Original',
+    title: 'Original',
     branchName: 'lody/target-ses',
     cleanup: cleanupPayload,
   };
@@ -1089,7 +1099,7 @@ describe('SessionForkService fork operation recovery', () => {
     expect(republished).toMatchObject({
       id: targetSessionId,
       machineId,
-      title: '(fork) Original',
+      title: 'Original',
       branchName: 'lody/target-ses',
       userId: 'user-1',
       isWorktree: true,

@@ -530,3 +530,43 @@ it('production startup retry recovers the retained owner before attempting anoth
     vi.useRealTimers();
   }
 });
+
+it('joins background project observation before closing its workspace document', async () => {
+  const fleet = createFleetHarness(createCatalogStub(() => Effect.succeed(catalogSnapshot({}))))
+    .fleet as unknown as {
+    runtimes: Map<string, unknown>;
+    stopWorkspace(id: string): Promise<void>;
+  };
+  const stop = new AbortController();
+  const interrupted = Promise.withResolvers<void>();
+  const observed = Promise.withResolvers<void>();
+  stop.signal.addEventListener('abort', () => interrupted.resolve(), { once: true });
+  const steps: string[] = [];
+  fleet.runtimes.set('observing', {
+    workspace: { id: 'observing' },
+    localProjectReconciliation: { stop, done: observed.promise },
+    schedules: {
+      dispose: async () => {
+        steps.push('schedules');
+      },
+    },
+    lody: {
+      cleanup: async () => {
+        steps.push('document');
+      },
+    },
+    unsubscribeTerminalCleanup: () => {},
+    prPollerWorkspace: {
+      dispose: async () => {
+        steps.push('poller');
+      },
+    },
+  });
+  const closing = fleet.stopWorkspace('observing');
+  await interrupted.promise;
+  expect(steps).toEqual([]);
+  observed.resolve();
+  await closing;
+  expect(steps).toEqual(['schedules', 'document', 'poller']);
+  expect(fleet.runtimes.has('observing')).toBe(false);
+});

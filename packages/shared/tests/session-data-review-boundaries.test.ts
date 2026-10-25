@@ -210,3 +210,108 @@ it('distinguishes turn identity edits from nested IDs and ordinary content chang
     doc.free();
   }
 });
+
+it('reads display task summaries without materializing child bodies and loads one exact run on demand', () => {
+  const doc = new LoroDoc();
+  const writer = createHistoryWriter(doc);
+  const body = 'SYNTHETIC_CHILD_BODY '.repeat(5000);
+  writer.append({
+    id: 'owner',
+    role: 'assistant',
+    timestamp: 'synthetic',
+    items: ['a', 'b'].map((taskId) => ({
+      type: 'subagent_task',
+      taskId,
+      status: 'in_progress',
+      run: {
+        sessionId: 'root',
+        snapshot: {
+          state: 'running',
+          support: {
+            stream: ['text', 'tool'],
+            progress: false,
+            cancel: false,
+            outputRead: 'none',
+          },
+        },
+        items: [
+          {
+            type: 'tool_call',
+            toolCallId: taskId,
+            status: 'completed',
+            kind: 'edit',
+            content: [{ type: 'diff', path: '/synthetic.txt', oldText: body, newText: body }],
+          },
+          { type: 'text', text: body + '\nLatest action' },
+        ],
+      },
+    })),
+  });
+  doc.commit();
+  const data = createLoroSessionData({ doc, sessionId, writer });
+  const version = doc.oplogVersion().encode();
+  const owner = doc.getList('history').get(0) as LoroMap;
+  const tasks = owner.get('items') as LoroList;
+  const taskA = tasks.get(0) as LoroMap;
+  const runA = taskA.get('run') as LoroMap;
+  const runB = (tasks.get(1) as LoroMap).get('run') as LoroMap;
+  const childrenA = runA.get('items') as LoroList;
+  const childrenB = runB.get('items') as LoroList;
+  const forbidden = new Set([owner.id, taskA.id, runA.id, runB.id]);
+  const json = LoroMap.prototype.toJSON;
+  const guard = vi.spyOn(LoroMap.prototype, 'toJSON').mockImplementation(function (this: LoroMap) {
+    if (forbidden.has(this.id)) throw new Error('eager subtree read');
+    return json.call(this);
+  });
+  const get = LoroList.prototype.get;
+  const listGuard = vi
+    .spyOn(LoroList.prototype, 'get')
+    .mockImplementation(function (this: LoroList, index) {
+      if ((this.id === childrenA.id || this.id === childrenB.id) && index === 0)
+        throw new Error('offscreen child body was read');
+      return get.call(this, index);
+    });
+  try {
+    const read = data.history.readTurnForDisplay('owner');
+    expect(read.state).toBe('ready');
+    if (read.state !== 'ready') throw new Error('missing display turn');
+    expect(read.turn.items).toMatchObject([
+      { taskId: 'a', run: { items: [{ type: 'text' }] } },
+      { taskId: 'b', run: { items: [{ type: 'text' }] } },
+    ]);
+    const preview = JSON.stringify(read);
+    expect(preview.length).toBeLessThan(3000);
+    expect(preview).toContain('Latest action');
+    expect(preview).not.toContain(body);
+    expect(data.history.readSubagentRun('owner', 'other-root', 'a')).toBeUndefined();
+    expect(data.history.readSubagentRun('other-owner', 'root', 'a')).toBeUndefined();
+    forbidden.delete(runA.id);
+    const run = data.history.readSubagentRun('owner', 'root', 'a');
+    expect(run?.items).toHaveLength(2);
+    expect(run?.items[1]).toEqual({ type: 'text', text: body + '\nLatest action' });
+  } finally {
+    guard.mockRestore();
+    listGuard.mockRestore();
+  }
+  expect(data.history.readAll()[0]?.items).toHaveLength(2);
+  expect(JSON.stringify(data.history.readAll())).toContain(body);
+  expect(doc.oplogVersion().encode()).toEqual(version);
+  data.dispose();
+});
+
+it('preserves stored extension keys that overlap Object prototype methods in display reads', () => {
+  const doc = new LoroDoc();
+  const row = doc.getList('history').insertContainer(0, new LoroMap());
+  row.set('id', 'owner');
+  row.set('role', 'assistant');
+  row.set('timestamp', 'synthetic');
+  row.set('toString', 'opaque-future-field');
+  row.set('constructor', 'opaque-constructor');
+  doc.commit();
+  const data = createLoroSessionData({ doc, sessionId });
+  try {
+    expect(data.history.readTurnForDisplay('owner')).toEqual(data.history.readTurn('owner'));
+  } finally {
+    data.dispose();
+  }
+});

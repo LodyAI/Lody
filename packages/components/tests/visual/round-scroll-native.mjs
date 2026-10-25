@@ -1,4 +1,4 @@
-/** Native wheel, keyboard and thumb-drag evidence for the real Radix adapter. */
+/** Native wheel, keyboard and thumb-drag evidence for the shared Base UI scroll area. */
 import { createHash } from 'node:crypto';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
@@ -76,7 +76,7 @@ for (const viewport of viewports)
           globals: `theme:${theme};locale:en`,
         });
         await page.goto(url.href);
-        const vp = page.locator('[data-radix-scroll-area-viewport]');
+        const vp = page.locator('[data-scroll-area-viewport]');
         await vp.waitFor({ state: 'visible' });
         await page.evaluate(() => document.fonts.ready);
         const horizontal = suffix === 'horizontal';
@@ -114,12 +114,12 @@ for (const viewport of viewports)
         await vp.hover();
         await page.mouse.wheel(horizontal ? 300 : 0, horizontal ? 0 : 300);
         await page.waitForFunction(
-          ({ c }) => document.querySelector('[data-radix-scroll-area-viewport]')[c] === 300,
+          ({ c }) => document.querySelector('[data-scroll-area-viewport]')[c] === 300,
           { c: coordinate }
         );
         await shot('wheel');
         const thumb = page.locator(
-          `[data-orientation="${horizontal ? 'horizontal' : 'vertical'}"] > [data-state="visible"]`
+          `[data-orientation="${horizontal ? 'horizontal' : 'vertical'}"] > div`
         );
         const box = await thumb.boundingBox();
         if (!box) throw new Error('Missing real thumb');
@@ -131,7 +131,7 @@ for (const viewport of viewports)
         await page.mouse.move(x + (horizontal ? 30 : 0), y + (horizontal ? 0 : 30), { steps: 6 });
         await page.mouse.up();
         await page.waitForFunction(
-          ({ c }) => document.querySelector('[data-radix-scroll-area-viewport]')[c] > 300,
+          ({ c }) => document.querySelector('[data-scroll-area-viewport]')[c] > 300,
           { c: coordinate }
         );
         await page.mouse.move(0, 0);
@@ -150,7 +150,7 @@ for (const viewport of viewports)
         await page.keyboard.press('End');
         await page.waitForFunction(
           ({ c, h }) => {
-            const e = document.querySelector('[data-radix-scroll-area-viewport]');
+            const e = document.querySelector('[data-scroll-area-viewport]');
             return (
               Math.abs(
                 e[c] - (h ? e.scrollWidth - e.clientWidth : e.scrollHeight - e.clientHeight)
@@ -162,7 +162,7 @@ for (const viewport of viewports)
         await shot('keyboard-end');
         await page.keyboard.press('Home');
         await page.waitForFunction(
-          ({ c }) => document.querySelector('[data-radix-scroll-area-viewport]')[c] === 0,
+          ({ c }) => document.querySelector('[data-scroll-area-viewport]')[c] === 0,
           { c: coordinate }
         );
         await shot('keyboard-home');

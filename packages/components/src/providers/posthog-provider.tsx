@@ -13,6 +13,7 @@ import { isElectronRenderer } from '@/lib/electron';
 import { readNativeAppInfo } from '@/lib/native-app-info';
 import { isNativeAppShell } from '@/lib/native-platform';
 import { POSTHOG_INIT_PROPERTY_DENYLIST } from '@/lib/posthog-analytics';
+import { captureReferralLanding } from '@/lib/referral-analytics';
 import { identifyPostHogUser } from '@/lib/posthog-identity';
 import { isResizeObserverLoopError } from '@/lib/resize-observer';
 import { usePlatformCapability } from '@lody/platform/react';
@@ -243,9 +244,20 @@ export function LodyPostHogProvider({ children }: { children: ReactNode }) {
     <PostHogProvider client={client}>
       {enabled && <PostHogIdentitySync />}
       {enabled && <PostHogInitialPageView />}
+      {enabled && import.meta.env.VITE_PUBLIC_POSTHOG_KEY && POSTHOG_HOST && (
+        <ReferralLandingAnalytics />
+      )}
       {children}
     </PostHogProvider>
   );
+}
+
+function ReferralLandingAnalytics() {
+  const postHog = usePostHog();
+  useEffect(() => {
+    captureReferralLanding(postHog);
+  }, [postHog]);
+  return null;
 }
 
 function PostHogInitialPageView() {

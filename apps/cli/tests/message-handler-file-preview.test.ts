@@ -89,6 +89,24 @@ describe('MessageHandler file preview workspace lifecycle', () => {
     fs.rmSync(dataDir, { recursive: true, force: true });
   });
 
+  it('rejects cross-machine, cross-workspace and session-scoped project probes before filesystem access', async () => {
+    for (const scope of [
+      { machineId: 'other' },
+      { workspaceId: 'other' },
+      { ownerSessionId: sessionId },
+    ]) {
+      expect(
+        await handler.handleLocalMachineRpc({
+          machineId,
+          workspaceId,
+          ...scope,
+          method: 'project/probe-local-member',
+          params: { localProjectId: 'unregistered' },
+        })
+      ).toEqual({ ok: false, error: 'Project group probe scope mismatch' });
+    }
+  });
+
   function writeArtifact(id = sessionId, text = content) {
     const root = getDefaultSessionWorkdir(id);
     fs.mkdirSync(root, { recursive: true });

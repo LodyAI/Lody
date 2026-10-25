@@ -351,6 +351,10 @@ Local-project Git is native as described above; full worktree ownership is separ
 
 ## Worktree Git execution
 
+The read-only Project group member probe also uses this boundary through
+`worktreeGitLegacy.probeLocalProjectMember`; the RPC owns the finite request and awaits
+command release. Remove this adapter when its dispatcher uses the native daemon runtime.
+
 `WorktreeGit` / `WorktreeGitLive` own native command execution, status checking and
 bounded credential-helper protocol. Layers provide official FileSystem, the process
 spawner and a per-command environment Effect. Each command owns its process Scope;

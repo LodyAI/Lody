@@ -1,3 +1,13 @@
+import { WorkspaceGitService } from './workspace-git-service';
+import {
+  reconcileProjectMemberLink,
+  resolveProjectFileRoots,
+} from './worktree/project-member-access';
+import {
+  materializeProjectGroup,
+  projectGroupDirectory,
+  resolveProjectGroupRepositories,
+} from './worktree/project-worktrees';
 import { resolveGitIdentityPolicyLegacy } from './git-identity-policy';
 import {
   acquireSessionCredentialsLegacy,
@@ -34,6 +44,7 @@ import {
   getSessionRoomId,
   isLoroRepoDocDeleted,
   type SessionMeta,
+  encodeProjectPreparationProgress,
 } from '@lody/shared';
 import { Logger } from '@/utils/logger';
 import { SessionConfig, SessionOutputEvent, SessionErrorEvent, SessionExitEvent } from './types';
@@ -104,8 +115,11 @@ import { getEffectiveMemoryLimitBytes } from '@/utils/memory';
 import { withSlowOperationWarning } from '@/utils/slow-operation-warning';
 import { resolveGitHubRepoWorktreeConfig } from './worktree/worktree-config-resolver';
 import type { AcpCapabilitiesResult } from '@/agent/acp-capability-normalization';
-import { resolveWorkspaceLocalProjectRootPathWithRetry } from '@/lib/local-project-meta';
-import { readTimeoutEnv } from '@/lib/loro/timeout-utils';
+import {
+  resolveWorkspaceLocalProjectRootPathWithRetry,
+  readMachineLocalProjects,
+  readLocalProjectRootResolveSyncTimeoutMs,
+} from '@/lib/local-project-meta';
 import { loadSessionMcpCatalog } from '@/agent/session-mcp-resolver';
 import {
   claimLegacySpeculativeWorktree,
@@ -247,6 +261,7 @@ export type SessionMonitorRuntimeInfo = {
 
 export interface CreateAgentConfig {
   resolveWorktreeProject?: AgentClientOptions['resolveWorktreeProject'];
+  resolveAdditionalDirectories?: AgentClientOptions['resolveAdditionalDirectories'];
   cliType: AgentConfigCliType;
   agentType: string;
   command: string;
@@ -645,13 +660,51 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
       command: launch.command,
       args: launch.args,
       env: launch.env,
-      resolveWorktreeProject: localProjectId
-        ? async () => {
-            const originProjectPath = await this.resolveLocalProjectRootPath(localProjectId);
-            if (!originProjectPath) throw new Error(`Local project not found: ${localProjectId}`);
-            return { version: 1, originProjectPath };
+      resolveAdditionalDirectories: config.projectRun
+        ? async (supported) => {
+            const ownerId = config.parentSessionId ?? config.sessionId!;
+            const owner = new WorkspaceGitService({
+              workspaceDocument: this.workspaceDocument,
+              logger: this.logger,
+            });
+            let directories: string[] = [];
+            await owner.updateProjectRun(ownerId, async (snapshot) => {
+              const roots = await resolveProjectFileRoots(
+                session.getWorkdir(),
+                snapshot,
+                this.machineId,
+                (id) => this.resolveLocalProjectRootPath(id),
+                undefined,
+                false
+              );
+              for (const [id, member] of Object.entries(snapshot.members)) {
+                if (member.access !== 'additional' && member.access !== 'link') continue;
+                const target = roots.find((root) => root.id === `member:${id}`)!;
+                if (member.placement.kind !== 'root') throw new Error('Invalid directory member');
+                await reconcileProjectMemberLink(
+                  roots[0]!.absolutePath,
+                  member.placement.dir,
+                  target.absolutePath,
+                  supported
+                );
+                member.access = supported ? 'additional' : 'link';
+              }
+              config.projectRun = snapshot;
+              directories = supported ? roots.slice(1).map((root) => root.absolutePath) : [];
+              return snapshot;
+            });
+            return directories;
           }
         : undefined,
+      resolveWorktreeProject: config.projectRun
+        ? async () => ({ version: 1, originProjectPath: projectGroupDirectory(config.projectRun!) })
+        : localProjectId
+          ? async () => {
+              const originProjectPath = await this.resolveLocalProjectRootPath(localProjectId);
+              if (!originProjectPath) throw new Error(`Local project not found: ${localProjectId}`);
+              return { version: 1, originProjectPath };
+            }
+          : undefined,
       capabilitySourceVersion: launch.capabilitySourceVersion,
       revalidateManagedCodexProfile:
         config.codexProfile?.profile.mode === 'chatgpt'
@@ -1030,9 +1083,48 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
   }
 
   private async prepareGitHubRepoSessionConfig(config: SessionConfig): Promise<SessionCredentials> {
-    // A GitHub remote does not make a local project a managed GitHub checkout.
-    // Direct local sessions and their worktrees keep the user's native auth.
-    if (config.project?.kind === 'local') return nativeSessionCredentials;
+    if (config.parentSessionId && !config.projectRun) {
+      const ownerDoc = await this.workspaceDocument.getOrCreateSessionDoc(
+        config.parentSessionId ?? config.sessionId
+      );
+      config.projectRun = (await ownerDoc.getMetaState())?.projectRun;
+    }
+    // Resolve each repository before enrolling a managed credential lease. The same
+    // pinned receipt is used by materialization, refresh, PR observation and restore.
+    if (config.projectRun) {
+      config.onPresencePhase?.('git-clone', encodeProjectPreparationProgress({ step: 'resolve' }));
+      let hasManagedMember = false;
+      const owner = new WorkspaceGitService({
+        workspaceDocument: this.workspaceDocument,
+        logger: this.logger,
+      });
+      await owner.updateProjectRun(config.parentSessionId ?? config.sessionId!, async (run) => {
+        const resolved = await resolveProjectGroupRepositories(run, {
+          machineId: this.machineId,
+          resolveLocalRoot: (id) => this.resolveLocalProjectRootPath(id),
+          listLocalProjects: async () =>
+            Object.values(
+              await readMachineLocalProjects(
+                this.workspaceDocument.repo,
+                this.workspaceId,
+                this.machineId
+              )
+            ),
+          allowManagedClone: this.cloudPort.githubTokens !== null,
+        });
+        for (const [id, target] of resolved) {
+          const member = run.members[id as keyof typeof run.members];
+          if (!member) throw new Error('Missing resolved project member');
+          if (target.repoFullName) member.repoFullName = target.repoFullName;
+          if (target.repositoryCheckout) member.repositoryCheckout = target.repositoryCheckout;
+          else delete member.repositoryCheckout;
+        }
+        hasManagedMember = [...resolved.values()].some((target) => target.source.kind === 'github');
+        config.projectRun = run;
+        return run;
+      });
+      if (!hasManagedMember) return nativeSessionCredentials;
+    } else if (config.project?.kind === 'local') return nativeSessionCredentials;
 
     const githubRepo = config.githubRepo ?? tryDeriveGitHubRepoFromUrl(config.githubRepoUrl);
     if (githubRepo) {
@@ -1052,6 +1144,13 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
       sessionId: config.sessionId,
       requesterUserId: credentialOwner,
       machineId: this.machineId,
+      nativeRepositories: Object.values(config.projectRun?.members ?? {}).flatMap((member) =>
+        member.repositoryCheckout?.kind === 'local' && member.src.kind === 'github'
+          ? [member.src.repoFullName]
+          : member.src.kind === 'local' && member.repoFullName
+            ? [member.repoFullName]
+            : []
+      ),
     });
     if (credentials.mode !== 'managed') throw new Error('Managed credentials are required');
     try {
@@ -1411,7 +1510,7 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
   }
 
   private resolveSessionWorktreeTarget(config: SessionConfig): SessionWorktreeTarget | null {
-    if (config.parentSessionId) return null;
+    if (config.parentSessionId || config.projectRun) return null;
     const localSource = this.resolveLocalWorktreeSource(config.project, config.workdir);
     const repoId = localSource?.repoId ?? config.repoId;
     if (!repoId) return null;
@@ -1513,12 +1612,75 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
     const repoId = config.repoId;
     this.reportStartStage(config, 'workdir');
     const sessionDoc = await this.workspaceDocument.getOrCreateSessionDoc(config.sessionId!);
-    if (config.githubRepo) {
+    const ownerDoc = config.parentSessionId
+      ? await this.workspaceDocument.getOrCreateSessionDoc(config.parentSessionId)
+      : sessionDoc;
+    config.projectRun = (await ownerDoc.getMetaState())?.projectRun ?? config.projectRun;
+    if (config.githubRepo && !config.projectRun)
       await sessionDoc.setRepoFullName(config.githubRepo);
-    }
 
-    workdir = await this.resolveSharedWorkdir(config, repoId, credentials);
-    const worktreeTarget = this.resolveSessionWorktreeTarget(config);
+    if (config.projectRun) {
+      const prepared = await materializeProjectGroup({
+        onProgress: (detail) => config.onPresencePhase?.('git-clone', detail),
+        sessionId: config.parentSessionId ?? config.sessionId!,
+        machineId: this.machineId,
+        workspaceDocument: this.workspaceDocument,
+        logger: this.logger,
+        resolveLocalRoot: (id) => this.resolveLocalProjectRootPath(id),
+        listLocalProjects: async () =>
+          Object.values(
+            await readMachineLocalProjects(
+              this.workspaceDocument.repo,
+              this.workspaceId,
+              this.machineId
+            )
+          ),
+        allowManagedClone: this.cloudPort.githubTokens !== null,
+        brokerAuth: (source) => this.resolveHostGitBrokerAuth(source, config, credentials),
+        setup: async (member, memberWorkdir) => {
+          const localProjectId =
+            member.src.kind === 'local'
+              ? member.src.localProjectId
+              : member.repositoryCheckout?.kind === 'local'
+                ? member.repositoryCheckout.localProjectId
+                : undefined;
+          const memberConfig: SessionConfig = {
+            ...config,
+            project:
+              member.src.kind === 'github' && !localProjectId
+                ? { kind: 'github', repoFullName: member.src.repoFullName, branch: member.base }
+                : {
+                    kind: 'local',
+                    localProjectId: localProjectId!,
+                    branch: member.base,
+                    useWorktree: true,
+                  },
+            githubRepo: member.src.kind === 'github' ? member.src.repoFullName : undefined,
+          };
+          await runWorktreeSetup({
+            config: await this.resolveWorktreeSetupConfig(memberConfig),
+            sessionId: config.parentSessionId ?? config.sessionId!,
+            workspaceId: config.workspaceId,
+            workdir: memberWorkdir,
+            branch: member.branch!,
+            repoFullName: memberConfig.githubRepo,
+            localProjectId,
+            logger: this.logger,
+            events: createWorktreeScriptHistoryRecorder({
+              sessionDoc: ownerDoc,
+              sessionId: config.parentSessionId ?? config.sessionId!,
+              phase: 'setup',
+              logger: this.logger,
+              backend: await createSessionBackend(ownerDoc, await ownerDoc.getMetaState()),
+              insertBeforeEntryId: config.worktreeScriptHistoryInsertBeforeEntryId,
+            }),
+          });
+        },
+      });
+      workdir = prepared.workdir;
+      config.projectRun = prepared.run;
+    } else workdir = await this.resolveSharedWorkdir(config, repoId, credentials);
+    const worktreeTarget = config.projectRun ? null : this.resolveSessionWorktreeTarget(config);
 
     // Child sessions reuse the parent's workdir — skip worktree creation
     if (worktreeTarget) {
@@ -1732,7 +1894,7 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
             requestSync: () =>
               this.workspaceDocument.syncMachineFlockDoc(this.machineId, {
                 reason: 'session-fork-workdir-resolve',
-                timeoutMs: readTimeoutEnv('LODY_LOCAL_PROJECT_RESOLVE_SYNC_TIMEOUT_MS', 1_500),
+                timeoutMs: readLocalProjectRootResolveSyncTimeoutMs(),
               }),
           }
         ),
@@ -1749,7 +1911,7 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
         requestSync: () =>
           this.workspaceDocument.syncMachineFlockDoc(this.machineId, {
             reason: 'session-fork-local-project-resolve',
-            timeoutMs: readTimeoutEnv('LODY_LOCAL_PROJECT_RESOLVE_SYNC_TIMEOUT_MS', 1_500),
+            timeoutMs: readLocalProjectRootResolveSyncTimeoutMs(),
           }),
       }
     );

@@ -1,3 +1,11 @@
+/**
+ * Minimum budget for a sync confirmation whose timeout fails the operation and
+ * invites a retry. A shorter deadline turns a slow but healthy sync into a
+ * failure that every retry repeats. Best-effort waits that continue on timeout
+ * may stay shorter.
+ */
+export const SYNC_CONFIRMATION_TIMEOUT_MS = 30_000;
+
 /** Recognized only for the Machine Flock freshness deadline. */
 export class FlockSyncTimeoutError extends Error {}
 

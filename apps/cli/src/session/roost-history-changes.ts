@@ -3,65 +3,63 @@ import { z } from 'zod';
 import type { SessionHistoryChanges } from '@lody/shared';
 import type { RoostHistoryChange } from '@lody/shared/session-data';
 import type { RoostNodeStream } from '@loro-dev/roost-node';
+import {
+  encodeRoostHistoryChange as encode,
+  decodeRoostHistoryChange as decode,
+  type RoostHistoryChangeReceipt as Receipt,
+} from './roost-history-change-codec';
 
-const TABLE = 'lody_renderer_history_changes_v1';
 const cursorSchema = z
   .string()
-  .regex(/^\d+$/)
+  .regex(/^(0|[1-9][0-9]*)$/)
   .refine((value) => BigInt(value) <= 0xffffffffffffffffn);
-const receiptSchema = z.object({
-  version: z.literal(1),
-  scope: z.string(),
-  nonce: z.string(),
-  before: cursorSchema,
-  through: cursorSchema,
-  reset: z.boolean(),
-  from: z.number().int().nonnegative().optional(),
-  ids: z.array(z.string()),
-});
 const checkpointSchema = z.tuple([z.string(), cursorSchema, z.string()]);
-type Receipt = z.infer<typeof receiptSchema>;
-const key = (cursor: bigint) => {
-  const bytes = Buffer.alloc(8);
-  bytes.writeBigUInt64BE(cursor);
-  return bytes;
+const scopeBytes = (scope: string) => {
+  if (scope.length !== 64 || !/^[0-9a-f]{64}$/.test(scope))
+    throw new Error('Roost history scope is invalid');
+  return Buffer.from(scope, 'hex');
 };
-const encode = (receipt: Receipt) => new TextEncoder().encode(JSON.stringify(receipt));
-const decode = (value: Uint8Array) =>
-  receiptSchema.parse(JSON.parse(new TextDecoder().decode(value)));
-const token = (receipt: Receipt) => JSON.stringify([receipt.scope, receipt.through, receipt.nonce]);
 
 /** Only use after read() has verified this checkpoint's complete receipt chain. */
 export const roostCheckpointCursor = (checkpoint: string): bigint =>
   BigInt(checkpointSchema.parse(JSON.parse(checkpoint))[1]);
 
-/** Semantic receipts over verified native event intervals; no history bodies or commands. */
+export function roostCommitMetadata(scope: string, ids: readonly string[]) {
+  return {
+    scope: scopeBytes(scope),
+    value: encode({ nonce: randomUUID(), reset: false, ids: [...new Set(ids)] }),
+  };
+}
+
+/** Semantic payloads attached to native events; gaps require a full recovery. */
 export function createRoostHistoryChanges(host: () => RoostNodeStream, scope: () => string) {
-  const anchor = async (cursor: bigint): Promise<Receipt> => {
-    const stream = host();
-    const entry = { table: TABLE, key: key(cursor) };
-    const [stored] = await stream.readIndex([entry]);
-    if (stored) return decode(stored);
-    const receipt: Receipt = {
-      version: 1,
-      scope: scope(),
-      nonce: randomUUID(),
-      before: cursor.toString(),
-      through: cursor.toString(),
-      reset: false,
-      ids: [],
-    };
-    const accepted = await stream.compareAndWriteIndex(
-      [{ ...entry, value: null }],
-      [{ ...entry, value: encode(receipt) }]
+  const token = (boundScope: string, cursor: bigint, receipt: Receipt) =>
+    JSON.stringify([boundScope, cursor.toString(), receipt.nonce]);
+  const anchor = async (
+    stream: RoostNodeStream,
+    bound: string,
+    cursor: bigint
+  ): Promise<Receipt> => {
+    const boundScope = scopeBytes(bound);
+    const stored = await stream.readCommitMetadata(boundScope, cursor);
+    if (stored) return decode(stored.value);
+    const result = await stream.annotateCommit(
+      boundScope,
+      cursor,
+      {
+        before: cursor,
+        value: encode({ nonce: randomUUID(), reset: false, ids: [] }),
+      },
+      { ifAbsent: true }
     );
-    if (accepted) return receipt;
-    const [winner] = await stream.readIndex([entry]);
-    if (!winner) throw new Error('Roost history checkpoint is unavailable');
-    return decode(winner);
+    return decode(result.value);
   };
   return {
-    checkpoint: async (cursor: bigint) => token(await anchor(cursor)),
+    checkpoint: async (cursor: bigint) => {
+      const stream = host();
+      const boundScope = scope();
+      return token(boundScope, cursor, await anchor(stream, boundScope, cursor));
+    },
     record: async (
       before: bigint,
       through: bigint,
@@ -71,62 +69,58 @@ export function createRoostHistoryChanges(host: () => RoostNodeStream, scope: ()
     ) => {
       if (through === before) return;
       const receipt: Receipt = {
-        version: 1,
-        scope: scope(),
         nonce: randomUUID(),
-        before: before.toString(),
-        through: through.toString(),
         reset: !verified,
         ...(change?.kind === 'structure' ? { from: change.from } : {}),
         ids: [
           ...new Set([...changedIds, ...(change?.kind === 'changed' ? change.businessIds : [])]),
         ],
       };
-      // An intervening native mutation refuses this receipt. The index is local
-      // derived state and emits no event or outgoing history mutation itself.
-      await host().writeBatch([], {
-        expectedEventCursor: through,
-        indexPuts: [{ table: TABLE, key: key(through), value: encode(receipt) }],
-      });
+      // Verified multi-stage SDK operations use this guard. Hot patches already
+      // attach their summary in the content transaction, avoiding this extra write.
+      await host().annotateCommit(scopeBytes(scope()), through, { before, value: encode(receipt) });
     },
     read: async (checkpoint: string, through: bigint): Promise<SessionHistoryChanges> => {
-      const current = await anchor(through);
-      const reset = (): SessionHistoryChanges => ({ state: 'reset', checkpoint: token(current) });
+      const stream = host();
+      const boundScope = scope();
+      const bytes = scopeBytes(boundScope);
+      const current = await anchor(stream, boundScope, through);
+      const reset = (): SessionHistoryChanges => ({
+        state: 'reset',
+        checkpoint: token(boundScope, through, current),
+      });
       let parsed: z.infer<typeof checkpointSchema>;
       try {
         parsed = checkpointSchema.parse(JSON.parse(checkpoint));
       } catch {
         return reset();
       }
-      const [boundScope, after, nonce] = parsed;
-      if (boundScope !== scope() || BigInt(after) > through) return reset();
-      const [stored] = await host().readIndex([{ table: TABLE, key: key(BigInt(after)) }]);
-      if (!stored || decode(stored).nonce !== nonce) return reset();
-      let cursor = BigInt(after);
+      const [previousScope, after, nonce] = parsed;
+      if (previousScope !== boundScope || BigInt(after) > through) return reset();
+      const stored = await stream.readCommitMetadata(bytes, BigInt(after));
+      if (!stored || decode(stored.value).nonce !== nonce) return reset();
+      let scanned = BigInt(after);
+      let covered = scanned;
       let from: number | undefined;
       const ids = new Set<string>();
-      while (cursor < through) {
-        const rows = await host().scanIndex(TABLE, key(cursor + 1n), 128n);
-        if (!rows.length) return reset();
-        for (const row of rows) {
+      while (scanned < through) {
+        const page = await stream.commitMetadataAfter(bytes, scanned, 128n);
+        if (page.through <= scanned) return reset();
+        for (const row of page.records) {
+          if (row.through > through) break;
+          if (row.through <= covered || row.before !== covered) return reset();
           const receipt = decode(row.value);
-          if (
-            BigInt(receipt.through) <= cursor ||
-            !Buffer.from(row.key).equals(key(BigInt(receipt.through)))
-          )
-            throw new Error('Roost history change receipt is inconsistent');
-          if (BigInt(receipt.through) > through) return reset();
-          if (receipt.scope !== boundScope || BigInt(receipt.before) !== cursor || receipt.reset)
-            return reset();
+          if (receipt.reset) return reset();
           if (receipt.from !== undefined) from = Math.min(from ?? receipt.from, receipt.from);
           for (const id of receipt.ids) ids.add(id);
-          cursor = BigInt(receipt.through);
-          if (cursor === through) break;
+          covered = row.through;
         }
+        scanned = page.through;
       }
+      if (covered !== through) return reset();
       return {
         state: 'ready',
-        checkpoint: token(current),
+        checkpoint: token(boundScope, through, current),
         ...(from === undefined ? {} : { from }),
         ids: [...ids],
       };

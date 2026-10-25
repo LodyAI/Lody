@@ -870,6 +870,76 @@ describe('LodyOperationStore', () => {
     }
   });
 
+  it('adopts an identical active create retried from the same source Turn under a fresh id', async () => {
+    const store = await makeStore();
+    try {
+      const create = { ...baseInput(), kind: 'session_create' as const };
+      const first = store.accept(create, { materializationClaimToken: 'claim-1' });
+      const retried = { ...create, operationId: 'review-round-1-retry' };
+
+      expect(
+        store.findMatchingRetry(
+          retried.requesterSessionId,
+          retried.operationId,
+          retried.kind,
+          { target: 'target-1', prompt: 'review' },
+          retried.requesterUserId,
+          retried.frozenContinuationConfig.sourceTurnId
+        )
+      ).toMatchObject({ operationId: 'review-round-1' });
+      const adopted = store.accept(
+        {
+          ...retried,
+          items: [
+            {
+              status: 'active' as const,
+              target: { sessionId: 'target-2' as SessionId, userTurnId: 'turn-2' },
+              inputDurable: false,
+            },
+          ],
+        },
+        { materializationClaimToken: 'claim-2' }
+      );
+
+      expect(first).toMatchObject({ created: true, claimedItemIndexes: [0] });
+      expect(adopted).toMatchObject({ created: false, claimedItemIndexes: [] });
+      expect(adopted.operation.operationId).toBe('review-round-1');
+      expect(adopted.operation.items[0]).toMatchObject({ target: { sessionId: 'target-1' } });
+      expect(() => store.get(retried.requesterSessionId, retried.operationId)).toThrowError(
+        expect.objectContaining<LodyOperationStoreError>({ code: 'OPERATION_NOT_FOUND' })
+      );
+
+      // Different work, another Turn, and non-create kinds stay independent.
+      const otherPrompt = store.accept({
+        ...create,
+        operationId: 'other-prompt',
+        canonicalCommand: { prompt: 'implement', target: 'target-1' },
+      });
+      const otherTurn = store.accept({
+        ...create,
+        operationId: 'other-turn',
+        frozenContinuationConfig: {
+          ...create.frozenContinuationConfig,
+          sourceTurnId: 'source-turn-2',
+        },
+      });
+      store.accept({ ...baseInput(), operationId: 'chat-1' });
+      const chat = store.accept({ ...baseInput(), operationId: 'chat-2' });
+      expect([otherPrompt.created, otherTurn.created, chat.created]).toEqual([true, true, true]);
+
+      // A finished create is history, not an in-flight request to adopt.
+      store.finish(create.requesterSessionId, create.operationId, {
+        type: 'result',
+        value: { items: [] },
+      });
+      const again = store.accept({ ...create, operationId: 'review-round-1-again' });
+      expect(again.created).toBe(true);
+      expect(again.operation.operationId).toBe('review-round-1-again');
+    } finally {
+      store.close();
+    }
+  });
+
   it('binds accept and retry lookup to requester and source Turn identity', async () => {
     const store = await makeStore();
     try {

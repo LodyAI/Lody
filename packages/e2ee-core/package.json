@@ -8,6 +8,7 @@
     "./services": "./src/services/index.ts",
     "./protocol": "./src/protocol/index.ts",
     "./host": "./src/host/index.ts",
+    "./adapters/node-custody": "./src/adapters/node-custody/index.ts",
     "./adapters/node-sqlite": "./src/adapters/node-sqlite/index.ts",
     "./adapters/loro-streams": "./src/adapters/loro-streams/index.ts",
     "./cloudflare": "./src/cloudflare/index.ts",
@@ -38,6 +39,6 @@
     "@types/better-sqlite3": "catalog:",
     "tsx": "4.23.7",
     "@loro-dev/streams-client": "catalog:",
-    "@loro-dev/streams-crdt": "0.17.0"
+    "@loro-dev/streams-crdt": "catalog:"
   }
 }

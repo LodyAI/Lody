@@ -1,4 +1,5 @@
 import * as stylex from '@stylexjs/stylex';
+import { ScrollAreaDemo } from './scroll-area-demo';
 import {
   Fragment,
   useEffect,
@@ -3834,6 +3835,15 @@ export function UiGallery({ palettes = 'both' }: UiGalleryProps) {
               <Swatch key={token.name} {...token} />
             ))}
           </Grid>
+        </PaletteSplit>
+      </Section>
+
+      <Section
+        title="Scroll area"
+        rule="A neutral position mark: a transparent track, a rounded thumb, and the same gray ramp for native controls. Hover reveals the area; scroll-only visibility follows the list's activity."
+      >
+        <PaletteSplit palettes={palettes}>
+          <ScrollAreaDemo />
         </PaletteSplit>
       </Section>
 

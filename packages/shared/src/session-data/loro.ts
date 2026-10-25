@@ -1,3 +1,5 @@
+import type { SubagentRunItem } from '../ai';
+import type { SessionSubagentRun } from './types';
 import { selectTurnOutput } from './read';
 import { applyHistoryAction, historyActionTarget } from './history-actions';
 import {
@@ -16,6 +18,7 @@ import {
   type LoroEventBatch,
   type LoroList,
   type LoroMap,
+  type LoroText,
 } from 'loro-crdt';
 import type { SessionId } from '../ids';
 import type { SessionHistory, SessionHistoryInput } from '../schema';
@@ -118,6 +121,97 @@ const readString = (value: unknown): string | undefined => {
 const readLength = (value: unknown): number => {
   if (Array.isArray(value)) return value.length;
   return isContainer(value) && value.kind() === 'List' ? (value as LoroList).length : 0;
+};
+
+/** Convert a map except its explicitly projected children, without a recursive
+ * toJSON crossing those children. Plain legacy JSON has already been decoded. */
+const projectMap = (
+  value: unknown,
+  projections: Record<string, (field: unknown) => unknown>
+): Record<string, unknown> => {
+  const raw =
+    isContainer(value) && value.kind() === 'Map'
+      ? (value as LoroMap).getShallowValue()
+      : value && typeof value === 'object' && !Array.isArray(value)
+        ? (value as Record<string, unknown>)
+        : {};
+  const result: Record<string, unknown> = {};
+  for (const key of Object.keys(raw)) {
+    const field = readField(value, key);
+    const project = Object.prototype.hasOwnProperty.call(projections, key)
+      ? projections[key]
+      : undefined;
+    result[key] = project ? project(field) : isContainer(field) ? field.toJSON() : field;
+  }
+  return result;
+};
+
+const listValueAt = (value: unknown, index: number): unknown =>
+  Array.isArray(value)
+    ? value[index]
+    : isContainer(value) && value.kind() === 'List'
+      ? (value as LoroList).get(index)
+      : undefined;
+
+const displayTextTail = (value: unknown): string | undefined =>
+  typeof value === 'string'
+    ? value.slice(-512)
+    : isContainer(value) && value.kind() === 'Text'
+      ? (value as LoroText).slice(
+          Math.max(0, (value as LoroText).length - 512),
+          (value as LoroText).length
+        )
+      : undefined;
+
+/** The inline task row only needs a latest-action line. Never read tool content,
+ * raw output or an entire child text just to derive that line. */
+const latestRunStep = (items: unknown): SubagentRunItem[] => {
+  for (let index = readLength(items) - 1; index >= 0; index--) {
+    const item = listValueAt(items, index);
+    const type = readString(readField(item, 'type'));
+    if (type === 'tool_call')
+      return [
+        {
+          type,
+          toolCallId: readString(readField(item, 'toolCallId')) ?? '',
+          status: (readString(readField(item, 'status')) ?? 'pending') as Extract<
+            SubagentRunItem,
+            { type: 'tool_call' }
+          >['status'],
+          title: displayTextTail(readField(item, 'title')),
+          toolName: displayTextTail(readField(item, 'toolName')),
+        },
+      ];
+    if (type === 'thought') return [{ type, text: '' }];
+    if (type === 'plan') return [{ type, entries: [] }];
+    if (type === 'text') {
+      const tail = displayTextTail(readField(item, 'text')) ?? '';
+      if (tail.trim()) return [{ type, text: tail }];
+    }
+  }
+  return [];
+};
+
+const displayTurn = (value: unknown): SessionTurn | undefined => {
+  if (
+    !value ||
+    typeof value !== 'object' ||
+    Array.isArray(value) ||
+    (isContainer(value) && value.kind() !== 'Map')
+  )
+    return undefined;
+  const turn = projectMap(value, {
+    items: (items) =>
+      Array.from({ length: readLength(items) }, (_, index) => {
+        const item = listValueAt(items, index);
+        if (readString(readField(item, 'type')) !== 'subagent_task')
+          return isContainer(item) ? item.toJSON() : item;
+        return projectMap(item, {
+          run: (run) => (run == null ? run : projectMap(run, { items: latestRunStep })),
+        });
+      }),
+  });
+  return turn as unknown as SessionTurn;
 };
 
 export function createLoroSessionData(options: LoroSessionDataOptions) {
@@ -374,6 +468,35 @@ export function createLoroSessionData(options: LoroSessionDataOptions) {
       ensureIdentityIndex();
       const position = positions.get(turnId);
       return position === undefined ? { state: 'missing' } : readSlot(list, position);
+    },
+    readTurnForDisplay(turnId: string): SessionTurnRead {
+      ensureIdentityIndex();
+      const position = positions.get(turnId);
+      if (position === undefined) return { state: 'missing' };
+      const turn = displayTurn(list.get(position));
+      return turn ? { state: 'ready', turn } : { state: 'invalid' };
+    },
+    readSubagentRun(
+      turnId: string,
+      rootSessionId: string,
+      runId: string
+    ): SessionSubagentRun | undefined {
+      ensureIdentityIndex();
+      const position = positions.get(turnId);
+      if (position === undefined) return undefined;
+      const items = readField(list.get(position), 'items');
+      for (let index = 0; index < readLength(items); index++) {
+        const item = listValueAt(items, index);
+        if (
+          readString(readField(item, 'type')) !== 'subagent_task' ||
+          readString(readField(item, 'taskId')) !== runId
+        )
+          continue;
+        const run = readField(item, 'run');
+        if (readString(readField(run, 'sessionId')) !== rootSessionId) continue;
+        return (isContainer(run) ? run.toJSON() : run) as SessionSubagentRun;
+      }
+      return undefined;
     },
     readRange(from: number, to: number) {
       const lo = Math.max(0, Math.min(from, list.length));

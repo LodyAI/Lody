@@ -1,3 +1,4 @@
+import { resolveSessionPullRequests } from '@lody/shared';
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { useAtom, useAtomValue, useSetAtom } from 'jotai';
 import { useTranslation } from 'react-i18next';
@@ -764,7 +765,7 @@ function getArchivedSessionItemViewModel(
   const diffStats = session.diffStats ?? { allChange: { add: 0, del: 0 } };
   const hasChanges = diffStats.allChange.add !== 0 || diffStats.allChange.del !== 0;
 
-  const pullRequests = session.pullRequests ?? [];
+  const pullRequests = resolveSessionPullRequests(session);
   const latestPr =
     pullRequests.length > 0
       ? pullRequests.some((pr) => getSessionPullRequestLegacyFields(pr).reportedAt)

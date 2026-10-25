@@ -16,35 +16,39 @@ Session A
 ```
 
 Tab T is part of A. Sessions B and C are first-class Sessions even though A or T
-caused their creation. Archive includes the opened descendants so that closing a
-conversation tree closes its work. Restore and deletion retain containment ownership.
+caused their creation. Archive always takes contained Tabs, but opened descendants
+only when the user chooses to: before archiving a conversation with active opened
+sub-conversations, the client asks, naming how many there are and how many are
+working, and offers to archive all of them or this conversation only. Restore and
+deletion retain containment ownership.
 
 ## Relation contract
 
-| Relation                | Meaning                                                                  | Operational consequence                                                                              |
-| ----------------------- | ------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------- |
-| `parentSessionId`       | Direct containment. A child Tab shares the root Session workspace.       | Root archive, restore, and archived-root deletion include the direct child.                          |
-| `openedBySessionId`     | The precise Session or Tab that created this Session.                    | Follow recursively for archive; preserve provenance without inferring restore or deletion ownership. |
-| `openedByRootSessionId` | The root route for a precise opener that is a child Tab.                 | Use with the precise opener for navigation; never use it to select state-operation targets.          |
-| Resource metadata       | The machine, project, branch, workspace, or worktree owned by a Session. | Clean up resources only when that Session is an operation target.                                    |
+| Relation                | Meaning                                                                  | Operational consequence                                                                     |
+| ----------------------- | ------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------- |
+| `parentSessionId`       | Direct containment. A child Tab shares the root Session workspace.       | Root archive, restore, and archived-root deletion include the direct child.                 |
+| `openedBySessionId`     | The precise Session or Tab that created this Session.                    | Follow recursively only for an opted-in archive; never infer restore or deletion ownership. |
+| `openedByRootSessionId` | The root route for a precise opener that is a child Tab.                 | Use with the precise opener for navigation; never use it to select state-operation targets. |
+| Resource metadata       | The machine, project, branch, workspace, or worktree owned by a Session. | Clean up resources only when that Session is an operation target.                           |
 
 `openedByRootSessionId` complements rather than replaces `openedBySessionId`: one
 identifies a routable root and the other preserves the exact causal source.
 
 Only direct Tab containment is supported. Supported creation paths reject a child whose
 parent already has `parentSessionId`. Opened Sessions can create further Sessions;
-archive follows those descendants with cycle protection and deduplication. Containment
+an opted-in archive follows those descendants with cycle protection and deduplication. Containment
 takes precedence when a Session carries both relationship fields. `openedByRootSessionId`
 alone never selects an archive target.
 
 ## Operation contract
 
-| Operation                           | Targets                                                                                         | Metadata readiness                                                           |
-| ----------------------------------- | ----------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
-| Archive a Session                   | The selected Session and recursive descendants through containment and precise opened-by links. | Read one ready Repo metadata snapshot, independent of the UI projection.     |
-| Restore a Session                   | The selected Session and the same direct children.                                              | Read one ready Repo metadata snapshot, independent of the UI projection.     |
-| Permanently delete an archived root | The selected Session and the same direct children.                                              | Read one ready Repo metadata snapshot, independent of the UI projection.     |
-| Delete exact Session ids            | Exactly the ids supplied by the caller.                                                         | Must not wait for global metadata hydration or discover additional Sessions. |
+| Operation                           | Targets                                                                                      | Metadata readiness                                                           |
+| ----------------------------------- | -------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
+| Archive a Session                   | The selected Session and its contained Tabs.                                                 | Read one ready Repo metadata snapshot, independent of the UI projection.     |
+| Archive a Session with its opened   | The above plus recursive descendants through precise opened-by links (explicit user choice). | Read one ready Repo metadata snapshot, independent of the UI projection.     |
+| Restore a Session                   | The selected Session and the same direct children.                                           | Read one ready Repo metadata snapshot, independent of the UI projection.     |
+| Permanently delete an archived root | The selected Session and the same direct children.                                           | Read one ready Repo metadata snapshot, independent of the UI projection.     |
+| Delete exact Session ids            | Exactly the ids supplied by the caller.                                                      | Must not wait for global metadata hydration or discover additional Sessions. |
 
 Every side effect follows the same target set as the state or document operation.
 Terminal closure, machine commands and queues, launch-config removal, and worktree
@@ -55,8 +59,9 @@ knows the complete set, including a partially created child, an empty child Tab,
 side Session whose runtime was terminated. Requiring a complete metadata scan in
 these paths would prevent cleanup during hydration and could leave partial state.
 
-For the opening scenario, archive of A affects A, T, B and C, including further
-opened descendants. Restore of A affects A and T only; B and C can be restored separately.
+For the opening scenario, archive of A affects A and T; when the user also archives
+its sub-conversations, it affects A, T, B and C, including further opened descendants
+and their Tabs. CLI and MCP archive stay containment-only. Restore of A affects A and T only; B and C can be restored separately.
 Archived-root deletion of A deletes A and T while B and C survive. Exact deletion of
 T deletes only T.
 
@@ -121,7 +126,9 @@ and
 
 The containment-only baseline was implemented by #569. The
 [archive descendants decision](../.agents/notes/implemented/bug-fix/2026-09-13-session-archive-descendants.md)
-supersedes its archive target rule. This revised contract remains a draft.
+made archive recursive; #1772 returned it to containment, and the
+[sub-conversation confirmation](../.agents/notes/implemented/feature/2026-10-22-archive-sub-conversation-confirmation.md)
+makes the recursive tree an explicit choice. This revised contract remains a draft.
 The [Repo snapshot decision](../.agents/notes/implemented/architecture/2026-09-17-session-operation-metadata-snapshots.md)
 addresses [#574](https://github.com/LodyAI/Lody/issues/574)'s discovery gap without
 changing those relation rules.

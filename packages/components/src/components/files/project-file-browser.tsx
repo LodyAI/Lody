@@ -7,7 +7,7 @@ import { Spinner } from '@lody/ui/spinner';
 import { useTranslation } from 'react-i18next';
 import { FileTreeProviderView } from '@/components/sessions/components/file-tree-view';
 import type { FileWorkspaceProvider, FileWorkspaceSnapshot } from '@/lib/file-workspace-provider';
-import { ScrollArea } from '@/ui/scroll-area';
+import { ScrollArea } from '@lody/ui/scroll-area';
 import { cn } from '@/lib/utils';
 
 type ProjectFileBrowserProps = {

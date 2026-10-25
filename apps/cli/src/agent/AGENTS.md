@@ -97,12 +97,12 @@ context/acp-agent-edit-evidence.md; adapter repos: [apps/cli/AGENTS.md](../../AG
 
 ## Capabilities and titles
 
-- `getStaticBuiltinAcpCapabilities()` applies only to `cliType: 'builtin'` without runtime
-  overrides. `machine/acp-capabilities-refresh` is always a real runtime probe, cached per
-  `agentConfigId` and the launched runtime version; an aborted probe must NOT update
-  the cache, and requests/responses carry that id to keep configs of one provider isolated.
-  `ManagedRuntimeUpdateCoordinator` never hot-swaps a running ACP process, and Machine Flock
-  writes ignore `fetchedAt` when comparing entries.
+- Static capabilities: builtins without overrides only. Refresh probes the runtime,
+  cached by `agentConfigId` + launched version; requests/responses carry that id. Aborted
+  probes never update cache. Updates never hot-swap ACP; Flock ignores `fetchedAt`.
+- Capability probes own unique temporary workdirs, never inherited cwd/projects. Remove
+  after shutdown even on failure/cancellation; removal errors never replace probe
+  outcomes. Keep provider homes unchanged.
 - Core `sessionTitle` v1 owns titles after init except builtin Codex.
   Lody owns Codex titles/settings; never the adapter. Accept `generated`/`explicit`,
   not `fallback`/`unset`. Untagged titles: only legacy managed Claude/Grok without overrides.

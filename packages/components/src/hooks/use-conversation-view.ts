@@ -306,23 +306,29 @@ export function useConversationIndexRows(
 /**
  * The hydrated tail as a contiguous array, identity-stable while its turns are
  * unchanged. This is what the "latest turn" readers that used to scan the whole
- * history read instead.
+ * history read instead. `availableTurns` includes hydrated bodies beyond gaps
+ * in the same leased window, for independent pending permission/question prompts.
  */
 export function useConversationTail(
   view: ConversationView | null | undefined,
   options: { extendToLastUserTurn?: boolean } = {}
-): { turns: readonly SessionHistory[]; from: number } {
+): { turns: readonly SessionHistory[]; availableTurns: readonly SessionHistory[]; from: number } {
   const version = useConversationVersion(view);
   const extend = options.extendToLastUserTurn === true;
   const from = view ? resolveTailStart(view, { extendToLastUserTurn: extend }) : 0;
   const to = view?.turnCount ?? 0;
   useTurnRange(view, from, to);
-  const previousRef = useRef<{ from: number; turns: readonly SessionHistory[] }>({
+  const previousRef = useRef<{
+    from: number;
+    turns: readonly SessionHistory[];
+    availableTurns: readonly SessionHistory[];
+  }>({
     from: 0,
     turns: EMPTY_TURNS,
+    availableTurns: EMPTY_TURNS,
   });
   return useMemo(() => {
-    if (!view) return { turns: EMPTY_TURNS, from: 0 };
+    if (!view) return { turns: EMPTY_TURNS, availableTurns: EMPTY_TURNS, from: 0 };
     const next = collectHydratedRange(view, from, to);
     const previous = previousRef.current;
     const same =
@@ -330,8 +336,14 @@ export function useConversationTail(
       previous.turns.length === next.length &&
       previous.turns.every((turn, i) => turn === next[i]);
     const turns = same ? previous.turns : next;
-    previousRef.current = { from, turns };
-    return { turns, from };
+    const available = collectHydratedRange(view, from, to, { skipGaps: true });
+    const sameAvailable =
+      previous.from === from &&
+      previous.availableTurns.length === available.length &&
+      previous.availableTurns.every((turn, i) => turn === available[i]);
+    const availableTurns = sameAvailable ? previous.availableTurns : available;
+    previousRef.current = { from, turns, availableTurns };
+    return { turns, availableTurns, from };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [view, from, to, version]);
 }

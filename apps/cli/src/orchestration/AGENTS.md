@@ -28,7 +28,8 @@ Root/CLI rules apply; `specs/session-orchestration.md` owns behavior.
 - Accepted Operations freeze `requesterUserId`, `sourceTurnId` and notification origins; `requesterSessionId` names
   its source. Recovery uses that user for attribution/authorization and the current owner
   Machine credential to execute. Completion preserves userId. Matching includes both ids, kind,
-  and fingerprint; reuse from another Turn is `OPERATION_ID_REUSED`, not a retry.
+  and fingerprint; reuse from another Turn is `OPERATION_ID_REUSED`, not a retry. A same-Turn
+  identical single create under a new id adopts the active original.
   Author/attachment snapshots in `operation_authors` / `operation_inputs` freeze atomically.
   Missing authors retain frozen Session/Turn provenance, never human identity.
 - `operation-coordinator.ts` is owned only by the local Host-lease Worker. MCP
@@ -69,12 +70,12 @@ Root/CLI rules apply; `specs/session-orchestration.md` owns behavior.
   legacy snapshots and interrupted journaling stay blocked. Coordinator recovery calls
   `recoverClose`, not the cached failed `close`; never replay transport. Release finishes
   input; a still-pending turn `withdraw`s before submit/acquisition.
-- Schema/Inbox v2 drops Delivery data/APIs; keep Operation rows and retired IDs.
-  Missing/incomplete journals stay blocked automatically. Offline operator recovery holds the
-  Host lease before opening SQLite, verifies known roots and requires explicit confirmation
-  of all unrecorded resources. Retire the exact execution and pause atomically; no replay or wake.
-  Keep current pause/unknown/resource evidence and monotonic sequences. Host v3 rejects old
-  workers before storage; end the prior Worker before handoff. Passive results are not busy.
+- Inbox v2 removes Delivery APIs/data, not Operations/retired IDs. Missing journals stay
+  blocked. Offline recovery holds the Host lease, probes every known root, and requires
+  all-resource attestation plus snapshot CAS, including orphan blocks. Retire only uncertain
+  input, preserve queued input/results, and pause atomically; no replay/wake. Inspection is
+  read-only. Keep pause/unknown/resource evidence and monotonic sequences. Host v3 rejects old
+  workers before storage; end prior Workers before handoff. Passive results are not busy.
 - Create Operations may also maintain one stable `role: system` `operation_progress`
   Turn in the requester Session, written only by the Host-lease Worker, never by MCP
   replicas. It is durable UI state, never agent input/dispatch. Merge duplicate rows through
@@ -89,15 +90,13 @@ Root/CLI rules apply; `specs/session-orchestration.md` owns behavior.
   Unchanged progress must return before `updateHistory` / `Mirror.setState` to prevent
   self-waking loops. Test with real Mirror subscriptions.
 - Missing Session metadata, a recoverable tombstone, or an unsynchronized
-  Machine Flock document is uncertainty, not permanent deletion/configuration
-  absence. Keep the item/result pending until positive evidence or deadline.
+  Machine Flock document is uncertainty, not permanent absence. Keep the item/result pending until positive evidence or deadline.
 - Deadlines finish the root with item `TARGET_TIMEOUT` results but never cancel
   target Turns. Operation cancel is the only best-effort remote-cancel path.
-- Store paths require explicit machineId (`getLodyOperationStorePath` has no default).
-  MCP resolves it from trusted Session context, never its environment or a local fallback.
+- Store paths require explicit machineId (`getLodyOperationStorePath` has no default),
+  resolved by MCP from trusted Session context, never its environment or a fallback.
 - `session_create_many` and `session_chat_many` target writes bypass cooperative
   Session/Turn quotas. Preserve the bypass in both MCP-process materialization
   and daemon recovery replay; otherwise quota rejection degrades into a false
   `TARGET_TIMEOUT`.
-- Tests use injected clocks and explicit reconciliation/idle barriers. Do not
-  add polling sleeps or wall-clock races.
+- Tests use injected clocks and explicit reconciliation/idle barriers.

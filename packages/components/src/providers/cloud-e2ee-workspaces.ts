@@ -30,6 +30,7 @@ export function createCloudE2eeWorkspaces(input: {
   session: () => PlatformSessionState;
   remote: Pick<PlatformE2eeWorkspaces, 'create' | 'describe' | 'history'>;
   prepareCreation?: PlatformE2eeWorkspaces['prepareCreation'];
+  runtime?: PlatformE2eeWorkspaces['runtime'];
   refreshWorkspaces: () => Promise<void>;
 }): PlatformE2eeWorkspaces {
   const prepared = new Map<string, E2eeWorkspacePrepared>();
@@ -45,6 +46,7 @@ export function createCloudE2eeWorkspaces(input: {
   const intentKey = (owner: string, requestId: string) => JSON.stringify([owner, requestId]);
 
   return {
+    ...(input.runtime ? { runtime: input.runtime } : {}),
     ...(prepareCreation
       ? {
           prepareCreation: async (request: E2eeWorkspacePrepareInput) => {
@@ -92,6 +94,10 @@ export function createCloudE2eeWorkspaces(input: {
         !result.workspaceId
       ) {
         throw new Error('e2ee_creation_receipt_mismatch');
+      }
+      if (input.runtime) {
+        await input.runtime.recordCreated({ workspaceId: result.workspaceId, genesisHash: original.genesisHashHex, requestId: original.requestId });
+        assertAccount(owner);
       }
       // Listing is a projection: its failure must not turn a committed, validated
       // creation into an error. The next listing refresh shows the workspace.

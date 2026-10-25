@@ -31,7 +31,7 @@ for (const viewportSize of [
     await about.getByRole('button', { name: 'Open Source Licenses', exact: true }).click();
     const notices = page.getByRole('dialog', { name: 'Open Source Licenses', exact: true });
     await expect(notices).toBeVisible();
-    const viewport = notices.locator('[data-radix-scroll-area-viewport]');
+    const viewport = notices.locator('[data-scroll-area-viewport]');
     await expect
       .poll(() =>
         viewport.evaluate((el) => el.clientHeight > 0 && el.scrollHeight > el.clientHeight)

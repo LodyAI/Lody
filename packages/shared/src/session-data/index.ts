@@ -38,7 +38,12 @@ export {
 
 export * from './history-import';
 
-export { applyHistoryAction, historyActionTarget, type HistoryAction } from './history-actions';
+export {
+  applyHistoryAction,
+  planHistoryAction,
+  historyActionTarget,
+  type HistoryAction,
+} from './history-actions';
 
 export {
   findProgressMessageId,

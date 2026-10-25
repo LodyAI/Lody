@@ -27,6 +27,13 @@ import {
 import type { SessionDocument } from '@/lib/loro/doc';
 import type { AcpSessionNotification, MessageContent, ModelInfo } from '@lody/shared';
 import type { SessionSnapshot } from '@lody/shared/session-data';
+import {
+  readDispatchHistory,
+  readDispatchSelection,
+  type SessionDispatchEntry,
+  type SessionDispatchSelection,
+  type SessionDispatchSelector,
+} from './session-dispatch-history';
 
 /**
  * Logical history and delivery operations consumed by session orchestration.
@@ -43,6 +50,11 @@ export interface SessionBackend {
 
   initialize(options: { skipAutoRead: boolean }): Promise<void>;
   readHistory(): Promise<SessionHistoryInput[]>;
+  readDispatchHistory(includeTurnIds: readonly string[]): Promise<SessionDispatchEntry[]>;
+  readDispatchSelection(
+    includeTurnIds: readonly string[],
+    select: SessionDispatchSelector
+  ): Promise<SessionDispatchSelection>;
   captureForkSnapshot(): Promise<SessionBackendForkSnapshot>;
   importForkHistory(
     snapshot: SessionBackendForkSnapshot,
@@ -209,6 +221,17 @@ class LoroSessionBackend implements SessionBackend {
 
   async readHistory(): Promise<SessionHistoryInput[]> {
     return readSessionHistory(this.sessionDoc.sessionData.history) as SessionHistoryInput[];
+  }
+
+  readDispatchHistory(includeTurnIds: readonly string[]): Promise<SessionDispatchEntry[]> {
+    return readDispatchHistory(this.history, includeTurnIds);
+  }
+
+  readDispatchSelection(
+    includeTurnIds: readonly string[],
+    select: SessionDispatchSelector
+  ): Promise<SessionDispatchSelection> {
+    return readDispatchSelection(this.history, includeTurnIds, select);
   }
 
   async captureForkSnapshot(): Promise<SessionBackendForkSnapshot> {

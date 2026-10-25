@@ -1,3 +1,4 @@
+import { resolveSessionFilePath } from '@lody/shared';
 import { toShared } from '@/platform/process-options';
 import * as crypto from 'crypto';
 import * as fs from 'fs';
@@ -265,7 +266,8 @@ export const resolveContainedUploadPath = async (
     throw new Error(`File not found: ${filePath}`, { cause: error });
   }
 
-  const contained = realParent === realRoot || realParent.startsWith(realRoot + path.sep);
+  const contained =
+    resolveSessionFilePath([{ id: 'main', absolutePath: realRoot }], realParent) !== undefined;
   if (!contained) {
     throw new Error(
       `File is outside the session workspace: ${filePath}. ` +

@@ -9,6 +9,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   describeUnsupportedRuntime,
   isArchSupported,
+  isNodeSecurityVersionSupported,
   isNodeApiVersionSupported,
   REQUIRED_NODE_API_VERSION,
   SUPPORTED_ARCHS,
@@ -17,11 +18,12 @@ import {
   assertNodeRuntimeSupported,
   describeUnsupportedNodeRuntime,
   isNodeApiVersionSupported as isWorkspaceNodeApiVersionSupported,
+  isNodeSecurityVersionSupported as isWorkspaceNodeSecurityVersionSupported,
 } from '../../../scripts/check-node-runtime.mjs';
 
 const require = createRequire(import.meta.url);
 const sqliteDir = dirname(require.resolve('better-sqlite3/package.json'));
-const supportedNodeEngineRange = '>=22.14.0 <23 || >=23.6.0';
+const supportedNodeEngineRange = '>=22.23.4 <23 || >=24.22.1 <25 || >=26.12.1 <27';
 
 describe('SQLite runtime support guard', () => {
   it('rejects every runtime below the Node-API version the binding is built against', () => {
@@ -48,7 +50,7 @@ describe('SQLite runtime support guard', () => {
     expect(message).toContain('arm');
     expect(message).not.toContain('Upgrade Node');
 
-    expect(describeUnsupportedRuntime({ napi: '9', arch: 'x64' })).toContain('v22.14.0');
+    expect(describeUnsupportedRuntime({ napi: '9', arch: 'x64' })).toContain('Node-API 10');
     expect(describeUnsupportedRuntime({ napi: '10', arch: 'x64' })).toBeUndefined();
   });
 
@@ -110,34 +112,41 @@ describe('SQLite runtime support guard', () => {
     );
   });
 
-  it('documents the exact Node-API 10 runtime boundary in current setup guidance', () => {
-    const englishQuickstart = readFileSync(
-      new URL(
-        '../../../site-docs/content/docs/en/(getting-started)/quickstart.mdx',
-        import.meta.url
-      ),
-      'utf8'
-    );
-    const chineseQuickstart = readFileSync(
-      new URL(
-        '../../../site-docs/content/docs/zh/(getting-started)/quickstart.mdx',
-        import.meta.url
-      ),
-      'utf8'
-    );
-    const llmsCompatibilityAsset = readFileSync(
-      new URL('../../../site-docs/public/_docs-assets/llms-full.txt', import.meta.url),
-      'utf8'
-    );
-    const e2eContributorGuide = readFileSync(
-      new URL('../../../e2e/README.md', import.meta.url),
-      'utf8'
-    );
+  it.each([
+    ['22.23.3', false],
+    ['22.23.4', true],
+    ['22.24.0', true],
+    ['23.6.0', false],
+    ['24.21.0', false],
+    ['24.22.0', false],
+    ['24.22.1', true],
+    ['25.0.0', false],
+    ['26.12.0', false],
+    ['26.12.1', true],
+    ['26.13.0', true],
+    ['27.0.0', false],
+    ['24.22.1-rc.1', false],
+    ['garbage', false],
+  ])('enforces the security boundary for Node %s', (nodeVersion, supported) => {
+    expect(isNodeSecurityVersionSupported(nodeVersion)).toBe(supported);
+    expect(isWorkspaceNodeSecurityVersionSupported(nodeVersion)).toBe(supported);
+    const runtime = { napi: '10', arch: 'x64', nodeVersion };
+    expect(describeUnsupportedRuntime(runtime) === undefined).toBe(supported);
+    expect(
+      describeUnsupportedNodeRuntime({ nodeVersion, nodeApiVersion: '10' }) === undefined
+    ).toBe(supported);
+  });
 
-    expect(englishQuickstart).toContain('Node.js 22.14-22.x or 23.6+ (Node-API 10+)');
-    expect(chineseQuickstart).toContain('Node.js 22.14-22.x 或 23.6+（Node-API 10+）');
-    expect(llmsCompatibilityAsset).toContain('Node.js 22.14-22.x or 23.6+ (Node-API 10+)');
-    expect(e2eContributorGuide).toContain('Node.js 22.14-22.x or 23.6+ (Node-API 10+)');
+  it('keeps Electron separate from standalone Node security floors, retaining native guards', () => {
+    const runtime = {
+      napi: '10',
+      arch: 'arm64',
+      nodeVersion: '24.21.0',
+      electronVersion: '44.7.0',
+    };
+    expect(describeUnsupportedRuntime(runtime)).toBeUndefined();
+    expect(describeUnsupportedRuntime({ ...runtime, napi: '9' })).toContain('Node-API 10');
+    expect(describeUnsupportedRuntime({ ...runtime, arch: 'arm' })).toContain('architecture');
   });
 
   it('hard-fails workspace installs below Node-API 10', () => {
@@ -151,9 +160,9 @@ describe('SQLite runtime support guard', () => {
       nodeApiVersion: '9',
     });
     expect(unsupportedDescription).toContain('Node-API 10');
-    expect(unsupportedDescription).toContain('v22.14.0 through v22.x');
+    expect(unsupportedDescription).toContain('v22.23.4+');
     expect(
-      describeUnsupportedNodeRuntime({ nodeVersion: 'v23.6.0', nodeApiVersion: '10' })
+      describeUnsupportedNodeRuntime({ nodeVersion: 'v24.22.1', nodeApiVersion: '10' })
     ).toBeUndefined();
 
     const originalExitCode = process.exitCode;
@@ -184,6 +193,15 @@ describe('SQLite runtime support guard', () => {
     });
     expect(unsupported.status).toBe(1);
     expect(unsupported.stderr).toContain('Node-API 10');
+
+    const spoofVulnerableNode = `data:text/javascript,${encodeURIComponent(
+      "Object.defineProperty(process, 'version', { value: 'v24.22.0' });"
+    )}`;
+    const vulnerable = spawnSync(process.execPath, ['--import', spoofVulnerableNode, scriptPath], {
+      encoding: 'utf8',
+    });
+    expect(vulnerable.status).toBe(1);
+    expect(vulnerable.stderr).toContain('v24.22.1+');
 
     const importOnly = spawnSync(
       process.execPath,

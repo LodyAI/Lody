@@ -164,6 +164,10 @@ provides LocalProjects. See the [decision](../../../../.agents/notes/implemented
   assistant models through shallow scalar/count reads of already-open documents.
   It compares current catalog metadata on each reconciliation so stale overwrites
   are repaired on the next history change or flush.
+  Loro 1.17.0 and LoroRepo 0.24.0 preserve received remote updates that are still
+  waiting for causal dependencies through the existing SQLite journal. A durable
+  save does not establish complete synchronization or advance another replica's
+  cursor. See the [persistence decision](../../../../.agents/notes/implemented/bug-fix/2026-10-22-loro-pending-persistence.md).
   `sqlite-lock-diagnostics.ts` logs, at most once a minute, which processes hold a
   workspace `repo.sqlite3` open when loro-repo or streams-crdt reports
   `database is locked`; it only observes (`lsof`) and never retries or blocks.

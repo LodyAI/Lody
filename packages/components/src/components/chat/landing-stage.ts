@@ -11,7 +11,7 @@ export type LandingStage = { stage: HTMLElement; group: HTMLElement };
 export const LandingStageContext = createContext<LandingStage | null>(null);
 
 /** Space kept free above and below the group, so the heading never sits on the window's edge. */
-const LANDING_STAGE_BREATHING_PX = 24;
+export const LANDING_STAGE_BREATHING_PX = 24;
 
 /**
  * The height `target` may take without the stage scrolling: the stage's height less everything
@@ -30,7 +30,11 @@ export function useLandingRoom(target: RefObject<HTMLElement | null>): number | 
     }
     const { stage, group } = landing;
     const measure = () => {
-      const own = target.current?.offsetHeight ?? 0;
+      const element = target.current;
+      // A target may hang out of the group with a negative bottom margin (the home boards);
+      // what it takes back is its own, not the rest's.
+      const margin = element ? Number.parseFloat(getComputedStyle(element).marginBottom) || 0 : 0;
+      const own = (element?.offsetHeight ?? 0) + margin;
       const rest = group.offsetHeight - own;
       setRoom(Math.max(0, stage.clientHeight - rest - LANDING_STAGE_BREATHING_PX));
     };

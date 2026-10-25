@@ -10,6 +10,7 @@ import {
 import {
   ProjectSettingsView,
   type AddableProjectMachine,
+  type MultiRepoProjectRow,
   type ProjectSettingsSection,
   type ProjectSettingsRow,
   type GithubProjectSettingsSection,
@@ -160,6 +161,7 @@ const baseAddableMachines: AddableProjectMachine[] = [
 
 function StoryWrapper({
   sections = baseSections,
+  multiRepoProjects,
   githubSections = baseGithubSections,
   addableMachines = baseAddableMachines,
   isLoading = false,
@@ -168,6 +170,7 @@ function StoryWrapper({
   initialProjectKey = null,
 }: {
   sections?: ProjectSettingsSection[];
+  multiRepoProjects?: readonly MultiRepoProjectRow[];
   githubSections?: GithubProjectSettingsSection[];
   addableMachines?: AddableProjectMachine[];
   isLoading?: boolean;
@@ -182,6 +185,7 @@ function StoryWrapper({
     <div className="mx-auto h-[min(90vh,950px)] max-w-[1100px] overflow-hidden rounded-xl border border-border bg-background p-4">
       <ProjectSettingsView
         sections={currentSections}
+        multiRepoProjects={multiRepoProjects}
         githubSections={currentGithubSections}
         isLoading={isLoading}
         githubProjectsLoading={false}
@@ -457,6 +461,20 @@ export default meta;
 type Story = StoryObj<typeof meta>;
 
 export const Default: Story = {};
+
+export const ProjectTypes: Story = {
+  args: {
+    multiRepoProjects: [
+      {
+        id: 'multi-repo',
+        name: 'Lody',
+        memberCount: 5,
+        boundMachineId: machineLocal,
+        canManage: false,
+      },
+    ],
+  },
+};
 
 export const SingleMachine: Story = {
   args: {

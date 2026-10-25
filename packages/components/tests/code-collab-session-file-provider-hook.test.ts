@@ -174,6 +174,34 @@ describe('materializeCodeCollabV2FileIndexForFileProvider', () => {
     });
     expect(state?.files.map((entry) => entry.path)).toEqual(['.git', 'docs', 'large', 'README.md']);
   });
+
+  it('shows a member root at its directory and rebuilds when the mounts change', () => {
+    const fileIndex = {
+      'api/main.go': true as const,
+      '\0lody-root:member:docs/guide.md': {
+        kind: 'file' as const,
+        change: { diff: [2, 0] as [number, number] },
+      },
+    };
+    const mounts = [{ rootId: 'member:docs', memberId: 'docs', mountPath: 'docs' }] as never;
+    const state = materializeCodeCollabV2FileIndexForFileProvider({
+      fileIndex,
+      revision: 1,
+      sourceState: 'live-collaborative',
+      mounts,
+    });
+    expect(state?.files.map((entry) => entry.path)).toEqual(['api/main.go', 'docs/guide.md']);
+    expect(state?.allChanges).toEqual({ 'docs/guide.md': { diff: [2, 0] } });
+    // Same revision, new mounts: the display paths must not be reused.
+    const renamed = materializeCodeCollabV2FileIndexForFileProvider({
+      fileIndex,
+      revision: 1,
+      sourceState: 'live-collaborative',
+      previous: state,
+      mounts: [{ rootId: 'member:docs', memberId: 'docs', mountPath: 'notes' }] as never,
+    });
+    expect(renamed?.files.map((entry) => entry.path)).toContain('notes/guide.md');
+  });
 });
 
 describe('useCodeCollabSessionFileProvider', () => {

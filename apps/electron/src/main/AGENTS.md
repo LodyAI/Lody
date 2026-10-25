@@ -47,11 +47,10 @@ The [window Spec](../../../../specs/desktop-windows.md) owns the behavior contra
 
 ## E2EE key custody
 
-`e2ee-custody.mts` owns an explicit main-process Scope, an OS-wrapped KEK and
+`e2ee-custody.mts` selects Electron OS protection for core node-custody, which owns an explicit Scope, a wrapped KEK and
 XChaCha20-Poly1305 protected blobs. It never joins the renderer IPC registry or
-starts from application bootstrap. The narrow `e2ee.prepareCreation` IPC creates
-or reopens an account-bound local pending request; it exposes signed public genesis
-bytes only, with no arbitrary signing or key export. It rejects local composition
+starts from application bootstrap. The explicit E2EE IPC methods create
+or reopen an account-bound local pending request and workspace runtime; they expose public state and signed genesis bytes only, with no arbitrary signing or key export. It rejects local composition
 before authentication/native access and checks the main-process account session.
 Content synchronization remains closed until its separate encrypted adapter exists.
 `e2ee-custody-electron.ts` is the readiness-gated native composition factory.

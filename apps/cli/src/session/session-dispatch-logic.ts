@@ -25,6 +25,7 @@ import {
   type SessionInputBlock,
   type SessionMeta,
 } from '@lody/shared';
+import type { SessionDispatchEntry } from './session-dispatch-history';
 
 // ── Snapshot types ──────────────────────────────────────────────────────────
 
@@ -52,10 +53,10 @@ export type SessionWatchSnapshot = {
   hasAccessRetry: boolean;
 };
 
-export function findLastHistoryEntry(
-  history: SessionHistoryInput[],
+export function findLastHistoryEntry<T extends SessionDispatchEntry>(
+  history: readonly T[],
   turnId: string
-): SessionHistoryInput | undefined {
+): T | undefined {
   for (let index = history.length - 1; index >= 0; index--) {
     const entry = history[index];
     if (entry?.id === turnId) return entry;
@@ -71,7 +72,7 @@ export function findLastHistoryEntry(
  * arrived yet. Once it is here and terminal, waiting cannot change the answer.
  */
 export function isActivationAwaitingHistory(
-  history: SessionHistoryInput[],
+  history: readonly SessionDispatchEntry[],
   pendingUserTurnId: string
 ): boolean {
   const entry = findLastHistoryEntry(history, pendingUserTurnId);
@@ -160,7 +161,7 @@ function getImportedAcpSourceAcpSessionId(meta: SessionMeta): string | undefined
   return externalHistory?.sourceAcpSessionId;
 }
 
-function isImportedAcpReplayUserTurn(entry: SessionHistoryInput, meta: SessionMeta): boolean {
+function isImportedAcpReplayUserTurn(entry: SessionDispatchEntry, meta: SessionMeta): boolean {
   const provider = meta.externalHistory
     ? getLocalProjectHistoryProviderKey(meta.externalHistory.provider)
     : null;
@@ -313,10 +314,10 @@ export function resolveSessionCancelAction(
  *
  * Returns the first matching entry (chronological scan), or null.
  */
-export function findNextDispatchableUserTurn(
-  history: SessionHistoryInput[],
+export function findNextDispatchableUserTurn<T extends SessionDispatchEntry>(
+  history: readonly T[],
   meta: SessionMeta
-): SessionHistoryInput | null {
+): T | null {
   // Concurrent queue promotion and steering can insert the same turn twice.
   // Match readTurn/updateEntry: only the last stored copy owns that identity.
   const lastPositions = new Map(history.map((entry, index) => [entry.id, index]));

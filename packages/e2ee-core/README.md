@@ -182,3 +182,6 @@ Tests use fixed synthetic vectors, real SQLite, real Ed25519/HPKE and child
 processes; the `test/generate-*.py` scripts regenerate vectors (optional).
 
 [Non-gating benchmarks](bench/README.md) emit environment-qualified JSON.
+
+Streams adapters and the Lab use the workspace catalog version. Node hosts can share
+[KEK custody](docs/surface.md#lodye2ee-coreadaptersnode-custody) while supplying their own OS wrapper.

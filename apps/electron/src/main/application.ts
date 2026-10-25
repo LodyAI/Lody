@@ -1,3 +1,4 @@
+import { closeDesktopE2eeAccount, resumeDesktopE2eeAccount } from './services/e2ee-account-runtime'
 import { makeApplicationRuntime } from '@lody/shared/node/application-runtime'
 import {
   LoginShellCacheLive,
@@ -36,6 +37,8 @@ import {
   setWindowsTrayAvailable
 } from './window-state'
 import { CliService } from './services/cli-service'
+import { createElectronStorageGuard } from './services/storage-guard-electron'
+import { observeCliStorageWriteFailures } from './services/storage-guard-cli'
 import type { DesktopExecutionHost } from './services/desktop-execution-host'
 import { createDesktopQuitBarrier } from './services/desktop-shutdown'
 import { cancelRequestedRelaunch, relaunchIfRequested } from './relaunch-intent'
@@ -228,8 +231,15 @@ export function startApplication(executionHost?: DesktopExecutionHost): void {
         void cliService.restartAutoStart().catch(() => console.warn('[Auth] CLI restart failed'))
       }
     )
+    const storageGuard = createElectronStorageGuard()
+    const observeStorageFailure = observeCliStorageWriteFailures(storageGuard)
     const cliService = new CliService({
       executionHost,
+      onRuntimeState: (runtime) => {
+        void observeStorageFailure(runtime).catch((error) =>
+          console.warn('[Storage guard] Could not observe CLI storage failure', error)
+        )
+      },
       resolveBootstrapSession: async () => {
         return await authService.getBootstrapSession()
       }
@@ -309,6 +319,7 @@ export function startApplication(executionHost?: DesktopExecutionHost): void {
       notificationService,
       terminalRelay,
       publicBrowserService,
+      storageGuard,
       loroDataPlaneRelay,
       windowBadgeService,
       globalShortcutsService,
@@ -376,13 +387,14 @@ export function startApplication(executionHost?: DesktopExecutionHost): void {
         loroDataPlaneRelay.destroy()
         appUpdaterService.stop()
         publicBrowserService.destroyAll()
-        const [cliResult, shellResult] = await Promise.allSettled([
+        const [cliResult, shellResult, e2eeResult] = await Promise.allSettled([
           cliService.shutdownForQuit(),
           applicationRuntime.closeLegacy(),
+          closeDesktopE2eeAccount({ quit: true }),
           flushElectronMainErrorReporting(),
           stopDevbarDevframeService()
         ])
-        const failures = [cliResult, shellResult].flatMap((result) =>
+        const failures = [cliResult, shellResult, e2eeResult].flatMap((result) =>
           result.status === 'rejected' ? [result.reason] : []
         )
         if (failures.length > 0)
@@ -390,6 +402,7 @@ export function startApplication(executionHost?: DesktopExecutionHost): void {
       },
       quit: () => app.quit(),
       reportFailure: (error) => {
+        resumeDesktopE2eeAccount()
         // A timeout does not prove exit. Keep ownership until quit succeeds.
         console.error('[Electron] Quit blocked by owned resources', error)
         dialog.showErrorBox(
@@ -400,7 +413,10 @@ export function startApplication(executionHost?: DesktopExecutionHost): void {
         // Quit preparation already closed every window; keep a surface to retry from.
         openOrFocusMainWindow({ icon })
       },
-      cancelled: cancelRequestedRelaunch
+      cancelled: () => {
+        resumeDesktopE2eeAccount()
+        cancelRequestedRelaunch()
+      }
     })
     app.on('will-quit', relaunchIfRequested)
     app.on('before-quit', (event) => {

@@ -1,4 +1,5 @@
-import { type IssuePRMention, type ProjectRef } from '@lody/shared';
+import type { SessionFileRoot } from '@lody/shared';
+import { type IssuePRMention, type ProjectRef, type SessionProjectRun } from '@lody/shared';
 
 export {
   extractPromptPreviewFromInputBlocks,
@@ -74,9 +75,28 @@ export const buildPrompt = (
   project?: ProjectRef,
   issuePRMentions?: IssuePRMention[],
   feedbackPostId?: string,
-  options?: { branchToRename?: string }
+  options?: {
+    branchToRename?: string;
+    projectRun?: SessionProjectRun;
+    projectFileRoots?: readonly SessionFileRoot[];
+  }
 ): string => {
-  const promptWithReferences = appendIssuePrMentionsToPrompt(prompt, issuePRMentions);
+  const group = options?.projectRun;
+  const groupContext = group
+    ? `\n\nProject group: ${JSON.stringify(group.name)}\nMembers are listed below. Run Git only in worktree members. Non-Git directory members are not isolated and modify their registered original directory directly:\n${Object.entries(
+        group.members
+      )
+        .sort(([, a], [, b]) => a.o - b.o)
+        .map(
+          ([id, member]) =>
+            `- ${JSON.stringify(id)}: ${JSON.stringify(member.access === 'additional' ? (options?.projectFileRoots?.find((root) => root.id === `member:${id}`)?.absolutePath ?? member.path) : member.path)} (${member.src.kind === 'github' ? `${member.src.repoFullName}${member.repositoryCheckout?.kind === 'local' ? ', local copy, native Git/GitHub credentials' : ''}` : member.access === 'additional' || member.access === 'link' ? 'non-Git directory, not isolated' : 'local repository'}), access ${member.access ?? 'worktree'}${member.access === 'additional' ? `; additional directory member:${id} supplied to the Provider` : ''}${member.access === 'additional' || member.access === 'link' ? '' : `; base ${JSON.stringify(member.base)}`}${member.placement.kind === 'submodule' ? `; submodule of ${JSON.stringify(member.placement.parent)}` : ''}`
+        )
+        .join(
+          '\n'
+        )}${group.instructions ? `\n\nProject group instructions:\n${group.instructions}` : ''}`
+    : '';
+  const promptWithReferences =
+    appendIssuePrMentionsToPrompt(prompt, issuePRMentions) + groupContext;
   const normalizedFeedbackPostId = feedbackPostId?.trim();
   const feedbackInstruction = normalizedFeedbackPostId
     ? `\n\nThe postId is ${normalizedFeedbackPostId}. Use the feedback-progress-reporter skill when appropriate.`

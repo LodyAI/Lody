@@ -5,7 +5,7 @@ import { clsx } from 'clsx';
 import { useLocation } from '@tanstack/react-router';
 import { useTranslation } from 'react-i18next';
 import * as stylex from '@stylexjs/stylex';
-import { ScrollArea } from '@/ui';
+import { ScrollArea } from '@lody/ui/scroll-area';
 import { consumeMobileBackNavigation } from '@/lib/mobile-back-navigation';
 import { withClassName } from '@/lib/stylex';
 // The theme tokens are imported by path, not by the `@/` alias: the StyleX

@@ -8,6 +8,7 @@ import { useCallback, useEffect, useRef, useState, type PointerEvent } from 'rea
 import { useSetAtom } from 'jotai';
 import { usePostHog } from '@posthog/react';
 import * as stylex from '@stylexjs/stylex';
+import { space } from '@lody/ui/tokens/scales.stylex';
 
 import { capturePostHogEvent } from '@/lib/posthog-analytics';
 import { cn } from '@/lib/utils';
@@ -54,6 +55,7 @@ const styles = stylex.create({
     transitionTimingFunction: themeEasing.out,
   },
   panel: {
+    position: 'relative',
     display: 'flex',
     minWidth: 0,
     flexDirection: 'column',
@@ -63,7 +65,15 @@ const styles = stylex.create({
     borderTopColor: 'hsl(var(--sidebar-border) / 0.8)',
     backgroundColor: themeColors.sidebar,
   },
-  resizeHandle: { height: themeSpace[1.5], flex: 'none', cursor: 'ns-resize' },
+  resizeHandle: {
+    position: 'absolute',
+    top: 0,
+    insetInline: 0,
+    height: space[1.5],
+    zIndex: 1,
+    cursor: 'ns-resize',
+    touchAction: 'none',
+  },
   header: {
     display: 'flex',
     height: themeSpace[8],
@@ -181,12 +191,8 @@ const styles = stylex.create({
   },
 });
 
-// Chrome above the resizable body: the drag zone (h-1.5 = 6px) + the top tab
-// strip (h-8 = 32px). Added to `bodyHeight` for the dock's height.
-const RESIZE_HANDLE_HEIGHT = 6;
 const HEADER_HEIGHT = 32;
-const DOCK_CHROME_HEIGHT = RESIZE_HANDLE_HEIGHT + HEADER_HEIGHT;
-const DOCK_TOTAL_CHROME_HEIGHT = DOCK_CHROME_HEIGHT;
+const DOCK_CHROME_HEIGHT = HEADER_HEIGHT + 1;
 
 const MIN_BODY_HEIGHT = 140;
 const MAX_BODY_HEIGHT = 680;
@@ -611,7 +617,7 @@ export function TerminalDock({
         stylex.props(styles.root, !isResizing && styles.heightTransition).className,
         className
       )}
-      style={{ height: isOpen ? bodyHeight + DOCK_TOTAL_CHROME_HEIGHT : 0 }}
+      style={{ height: isOpen ? bodyHeight + DOCK_CHROME_HEIGHT : 0 }}
       aria-hidden={!isOpen}
     >
       {isOpen ? (
@@ -718,7 +724,6 @@ export function TerminalDock({
                   });
                 }}
                 onTitleChange={updateActiveTitle}
-                className="px-2 py-1"
               />
             ) : (
               <div {...stylex.props(styles.empty, Boolean(terminalError) && styles.error)}>

@@ -109,6 +109,12 @@ vi.mock('../src/hooks/use-authenticated-convex', () => ({
 }));
 
 import { runtimeAtom, type WorkspaceRuntime } from '../src/atoms/runtime';
+import { lodyPresenceNowMsAtom, lodyPresenceStatesAtom } from '../src/atoms/presence';
+import {
+  SessionArchiveConfirmationDialog,
+  useArchiveSessionWithConfirmation,
+} from '../src/components/sessions/session-archive-confirmation';
+import { initI18n } from '../src/i18n';
 import { docMetaCacheReadyAtom, sessionMetaCacheAtom } from '../src/atoms/doc-meta';
 import {
   editSessionRunConfigDraftAtom,
@@ -166,6 +172,16 @@ function editRunConfigDraft(
     edit: { type: 'config', configId: 'fast', value: false },
   });
   return lease;
+}
+
+type ConfirmedArchive = (sessionId: SessionId, options?: { confirm?: boolean }) => Promise<boolean>;
+
+function ConfirmedArchiveProbe({ onReady }: { onReady: (archive: ConfirmedArchive) => void }) {
+  const archive = useArchiveSessionWithConfirmation(useSessionActions().archiveSession);
+  useEffect(() => {
+    onReady(archive);
+  }, [archive, onReady]);
+  return createElement(SessionArchiveConfirmationDialog);
 }
 
 function ActionsProbe({ onReady }: { onReady: (actions: SessionActions) => void }) {
@@ -2041,6 +2057,185 @@ describe('useSessionActions', () => {
     for (const session of [rootSession, openedSession, openedFromTabSession]) {
       expect(metaRepo.getMeta(getMachineRoomId(session.machineId))).toBeUndefined();
     }
+  });
+
+  describe('archive confirmation for opened sub-conversations', () => {
+    const renderConfirmedArchive = async (runtime: WorkspaceRuntime, workingIds: SessionId[]) => {
+      await initI18n('en');
+      const jotaiStore = createStore();
+      jotaiStore.set(runtimeAtom, runtime);
+      jotaiStore.set(docMetaCacheReadyAtom, true);
+      jotaiStore.set(currentWorkspaceIdAtom, 'workspace-1' as WorkspaceId);
+      jotaiStore.set(currentWorkspaceSlugAtom, 'workspace-slug');
+      const nowMs = 1_000_000;
+      jotaiStore.set(lodyPresenceNowMsAtom, nowMs);
+      jotaiStore.set(
+        lodyPresenceStatesAtom,
+        Object.fromEntries(
+          workingIds.map((sessionId) => [
+            `presence-${sessionId}`,
+            {
+              kind: 'session',
+              sessionId,
+              machineId: 'machine' as MachineId,
+              instanceId: 'instance',
+              status: { type: 'running' },
+              updatedAt: nowMs,
+            },
+          ])
+        ) as never
+      );
+      let archive: ConfirmedArchive | null = null;
+      container = document.createElement('div');
+      document.body.appendChild(container);
+      root = createRoot(container);
+      await act(async () => {
+        root?.render(
+          createElement(
+            PlatformContext.Provider,
+            { value: testPlatform },
+            createElement(
+              Provider,
+              { store: jotaiStore },
+              createElement(ConfirmedArchiveProbe, {
+                onReady: (next) => {
+                  archive = next;
+                },
+              })
+            )
+          )
+        );
+      });
+      if (!archive) throw new Error('Confirmed archive was not initialized');
+      return archive as ConfirmedArchive;
+    };
+
+    const dialog = () => document.querySelector<HTMLElement>('[role="alertdialog"]');
+    // Wrapped: returning the pending promise would make the caller await the answer.
+    const startArchive = async (
+      archive: ConfirmedArchive,
+      sessionId: SessionId,
+      options?: { confirm?: boolean }
+    ) => {
+      let result!: Promise<boolean>;
+      await act(async () => {
+        result = archive(sessionId, options);
+      });
+      await vi.waitFor(() => expect(dialog()).not.toBeNull());
+      return { result };
+    };
+    const answer = async (label: string) => {
+      const button = Array.from(dialog()!.querySelectorAll('button')).find(
+        (candidate) => candidate.textContent?.trim() === label
+      );
+      expect(button).toBeInstanceOf(HTMLButtonElement);
+      await act(async () => button!.click());
+    };
+
+    const createTree = (prefix: string) => {
+      const tree = createContainmentSessions(prefix, false);
+      const openedTab = {
+        ...tree.tabSession,
+        id: `${prefix}-opened-tab` as SessionId,
+        parentSessionId: tree.openedSession.id,
+        openedBySessionId: tree.openedSession.id,
+      };
+      const archivedOpened = {
+        ...tree.openedSession,
+        id: `${prefix}-archived-opened` as SessionId,
+        isArchived: true,
+      };
+      const metaRepo = createSessionMetaRepo([...tree.sessions, openedTab, archivedOpened]);
+      return { ...tree, openedTab, archivedOpened, metaRepo };
+    };
+
+    it('counts active and working sub-conversations, then archives the whole tree', async () => {
+      const tree = createTree('confirm-all');
+      const runtime = createRuntime({ repo: tree.metaRepo.repo });
+      // Work in an opened Session's own Tab makes that sub-conversation working.
+      const archive = await renderConfirmedArchive(runtime, [tree.openedTab.id]);
+
+      const { result } = await startArchive(archive, tree.rootSession.id);
+      expect(dialog()?.textContent).toContain(
+        'This conversation opened 2 active sub-conversations.'
+      );
+      expect(dialog()?.textContent).toContain('1 is still working; archiving it stops that work.');
+      // Nothing is written while the user decides.
+      expect(tree.metaRepo.getSession(tree.rootSession.id)?.isArchived).toBe(false);
+
+      await answer('Archive all');
+      await expect(result).resolves.toBe(true);
+      for (const session of [
+        tree.rootSession,
+        tree.tabSession,
+        tree.openedSession,
+        tree.openedTab,
+        tree.openedFromTabSession,
+      ]) {
+        expect(tree.metaRepo.getSession(session.id)?.isArchived).toBe(true);
+      }
+      expect(dialog()).toBeNull();
+    });
+
+    it('archives only the conversation and its Tabs, or nothing on cancel', async () => {
+      const tree = createTree('confirm-only');
+      const runtime = createRuntime({ repo: tree.metaRepo.repo });
+      const archive = await renderConfirmedArchive(runtime, []);
+
+      const { result: cancelled } = await startArchive(archive, tree.rootSession.id);
+      expect(dialog()?.textContent).toContain('None of them is working right now.');
+      await answer('Cancel');
+      await expect(cancelled).resolves.toBe(false);
+      expect(tree.metaRepo.getSession(tree.rootSession.id)?.isArchived).toBe(false);
+
+      const { result: onlyThis } = await startArchive(archive, tree.rootSession.id);
+      await answer('Archive this only');
+      await expect(onlyThis).resolves.toBe(true);
+      for (const session of [tree.rootSession, tree.tabSession]) {
+        expect(tree.metaRepo.getSession(session.id)?.isArchived).toBe(true);
+      }
+      for (const session of [tree.openedSession, tree.openedTab, tree.openedFromTabSession]) {
+        expect(tree.metaRepo.getSession(session.id)?.isArchived).toBe(false);
+      }
+    });
+
+    it('archives directly when every opened sub-conversation is already archived', async () => {
+      const tree = createTree('confirm-none');
+      const runtime = createRuntime({ repo: tree.metaRepo.repo });
+      const archive = await renderConfirmedArchive(runtime, []);
+
+      await act(async () => {
+        await expect(archive(tree.archivedOpened.id)).resolves.toBe(true);
+      });
+      expect(dialog()).toBeNull();
+      expect(tree.metaRepo.getSession(tree.archivedOpened.id)?.isArchived).toBe(true);
+    });
+
+    it('asks one question when confirmation is always required', async () => {
+      const tree = createTree('confirm-always');
+      const runtime = createRuntime({ repo: tree.metaRepo.repo });
+      const archive = await renderConfirmedArchive(runtime, []);
+
+      // Without sub-conversations, the shared dialog asks the plain question.
+      const { result: plain } = await startArchive(archive, tree.archivedOpened.id, {
+        confirm: true,
+      });
+      expect(dialog()?.textContent).toContain('Archive chat?');
+      expect(dialog()?.textContent).not.toContain('sub-conversation');
+      await answer('Archive');
+      await expect(plain).resolves.toBe(true);
+      expect(tree.metaRepo.getSession(tree.archivedOpened.id)?.isArchived).toBe(true);
+
+      // With them, the sub-conversation choice is the only dialog.
+      const { result: treeArchive } = await startArchive(archive, tree.rootSession.id, {
+        confirm: true,
+      });
+      expect(document.querySelectorAll('[role="alertdialog"]')).toHaveLength(1);
+      expect(dialog()?.textContent).toContain('Archive sub-conversations too?');
+      await answer('Archive all');
+      await expect(treeArchive).resolves.toBe(true);
+      expect(tree.metaRepo.getSession(tree.openedSession.id)?.isArchived).toBe(true);
+    });
   });
 
   it.each([

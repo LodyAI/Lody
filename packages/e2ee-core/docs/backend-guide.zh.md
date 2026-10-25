@@ -12,7 +12,9 @@
 
 `@lody/e2ee-core/host` 与平台无关（不依赖 Node API），可在后端内运行。邮箱规则的完整可运行参考实现是 `@lody/e2ee-core/adapters/node-sqlite` 中的 `makeSqliteKeyMailbox`（`src/adapters/node-sqlite/reference-mailbox-host.ts`）。
 
-**认证。** 每个邮箱和暂存请求都由已认证的设备发起。服务器从会话中得出*主体*（设备签名公钥），从不从请求体中读取。
+**认证。** 每个邮箱和暂存请求都由已认证的设备发起。服务器从会话，或设备入账时绑定的设备访问凭证中得出*主体*（设备签名公钥），从不从请求体中读取。
+
+**签名在哪里验证。** 检查分两层。必需层是每个宿主都必须执行的检查；可选层在此基础上，用 `@lody/e2ee-core/host` 的辅助函数在服务端验证签名。Lody 云端只实现必需层：接受账本记录时验证签名，对信箱和暂存请求只做下面列出的结构检查。接收端总会自己验证签名和密钥承诺，所以省略可选层时，一台设备最多只能在自己的槽位和自己发出的信封上作恶，并且受每个发送者的数量上限约束。
 
 ## 1. 账本日志
 
@@ -31,7 +33,7 @@ Loro / Durable Streams 直接提供这些能力：`@lody/e2ee-core/adapters/loro
 **`put(id, frame)`**：保存主体撰写的信封。
 
 1. `envelopeRouting(frame)` 必须得到 `sender = 主体` 且属于本工作区。
-2. `authenticateEpochEnvelope(view, context, frame)` 在当前视图下必须通过：发送者是有资格的当前设备（恢复设备不能发送），接收者是当前设备。
+2. 在当前视图下：发送者是有资格的当前设备（恢复设备不能发送），接收者是当前设备，纪元是当前纪元。可选层：`authenticateEpochEnvelope(view, context, frame)` 另外验证信封签名。
 3. `id` 是 16 字节投递 ID（十六进制）。已存在且摘要不同的 `(epoch, sender, id)` 拒绝（`replay`）；完全相同的字节为空操作。
 4. 每个发送者、接收者、纪元最多保留 16 个有效（未被拒绝）信封，拒绝第 17 个不同的帧。
 
@@ -41,7 +43,7 @@ Loro / Durable Streams 直接提供这些能力：`@lody/e2ee-core/adapters/loro
 
 **`status(slot)`**：接收者不是当前设备时为 `Ineligible`；纪元不是当前纪元时为 `Obsolete`；当前版本已有报告时为 `InstallationReported`；存在有效信封时为 `EnvelopeStored`；否则为 `NeedsEnvelope`。同时返回修复版本号。
 
-**`report(report, publication?)`**：以主体为接收者，在当前视图下执行 `authenticateInstallationReport`；本地发布时 `checkLocalPublication` 必须接受所附记录。报告中的版本必须等于槽位当前版本，信封来源必须仍然存在且未被拒绝。记录该版本已报告。
+**`report(report, publication?)`**：解析出的报告在当前视图下以主体为接收者。可选层：`authenticateInstallationReport`，本地发布时再加 `checkLocalPublication`。报告中的版本必须等于槽位当前版本，信封来源必须仍然存在且未被拒绝。记录该版本已报告。
 
 **`repair(slot, id, rejected?)`**：只针对主体自己在当前纪元的槽位。按 `id` 幂等（`rejected` 相同时），否则拒绝（`replay`）。`rejected` 摘要必须对应一个已存信封；将其标记为被拒绝（不再出现在 fetch 中，但保留）。版本号加一并清除其已报告标记。
 
@@ -51,9 +53,9 @@ Loro / Durable Streams 直接提供这些能力：`@lody/e2ee-core/adapters/loro
 
 一次换代完整信封组的不可变存储，键为 `(genesis, epoch, commitment, recordHash)`。使用 DTO `EpochStagedGroupDto` / `EpochStagedGroupKeyDto` 及其 `decode…`/`encode…` 辅助函数。
 
-- **暂存**：校验设备持有证明，即主体对 `epochStagingRequestSigningBytes({ operation: 'stage', workspaceId, group })` 的签名，`workspaceId` 为你自己的工作区标识；然后 `checkEpochStageRequest({ genesis, principal, group })` 必须通过。组不存在时保存；重试必须每个字节一致，否则拒绝。
+- **暂存**：主体必须是该组声明的记录签名设备。可选层：验证主体对 `epochStagingRequestSigningBytes({ operation: 'stage', workspaceId, group })` 的签名（`workspaceId` 为你自己的工作区标识），并执行 `checkEpochStageRequest({ genesis, principal, group })`。组不存在时保存；重试必须每个字节一致，否则拒绝。客户端使用暂存组之前，用 `authenticateEpochStagedGroup` 验证。
 - **读取**：返回已存组或空。工作区内任何人都可以读取（组是密文）。
-- **删除**：只能由记录的签名设备发起，带签名的 `delete` 请求需注明一个与该组承诺不同的 `occupied` 纪元与承诺。所有权检查与删除必须原子完成；客户端已验证占用的承诺是真实的。
+- **删除**：只能由记录的签名设备（即主体）发起，请求需注明一个与该组承诺不同的 `occupied` 纪元与承诺。可选层：同时要求请求签名。所有权检查与删除必须原子完成；客户端已验证占用的承诺是真实的。
 
 暂存服务器从不读取或解释账本；在账本包含确切记录之前，已存组没有任何效力。
 

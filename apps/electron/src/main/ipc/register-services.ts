@@ -15,6 +15,7 @@ import { MachineRpcIpc } from './services/machine-rpc-ipc'
 import { NotificationsIpc } from './services/notifications-ipc'
 import { PublicBrowserIpc } from './services/public-browser-ipc'
 import { SessionControlIpc } from './services/session-control-ipc'
+import { StorageGuardIpc } from './services/storage-guard-ipc'
 import { TerminalIpc } from './services/terminal-ipc'
 import { UpdaterIpc } from './services/updater-ipc'
 import { setIpcServiceDeps, type IpcServiceDeps } from './ipc-service-deps'
@@ -34,6 +35,7 @@ export const IPC_SERVICE_CONSTRUCTORS = [
   NotificationsIpc,
   PublicBrowserIpc,
   SessionControlIpc,
+  StorageGuardIpc,
   TerminalIpc,
   UpdaterIpc
 ] as const

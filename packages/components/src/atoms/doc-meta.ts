@@ -6,6 +6,7 @@ import { atomEffect } from 'jotai-effect';
 import type { LoroRepo } from 'loro-repo';
 import {
   isLoroRepoDocDeleted,
+  resolveSessionPullRequests,
   getSessionRoomId,
   isAgentConfigDocRoomId,
   isMachineDocRoomId,
@@ -133,8 +134,8 @@ const DOC_META_EVENT_FLUSH_BATCH_SIZE = 50;
 
 function sessionListEntryEqual(a: SessionMeta, b: SessionMeta): boolean {
   for (const key of SESSION_LIST_VISIBLE_KEYS) {
-    const av = a[key];
-    const bv = b[key];
+    const av = key === 'pullRequests' ? resolveSessionPullRequests(a) : a[key];
+    const bv = key === 'pullRequests' ? resolveSessionPullRequests(b) : b[key];
     if (av === bv) continue;
     if (!jsonValueEqual(av, bv)) return false;
   }

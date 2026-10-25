@@ -441,7 +441,7 @@ preserves module boundaries; the complete build was exercised through multiple
 actual entry points before capturing. Desktop production configuration retains
 its own target and WASM contracts.
 
-The latest component suite passes all 598 files / 5,917 tests with
+The pre-integration component suite passes all 598 files / 5,917 tests with
 `NODE_OPTIONS=--no-experimental-webstorage NODE_ENV=test`. Node 26's native
 Storage otherwise interferes with jsdom's Storage fixtures; the initial ten
 failures disappear under that environment without changing product behavior.
@@ -451,15 +451,35 @@ type-aware lint, desktop builds and documentation checks also pass. Root typed
 lint has zero errors and 17,396 warnings, with public-boundary, i18n and formatting
 checks passing. Existing repository lint/documentation warnings remain warnings.
 
-Draft packaging ran root `pnpm check`: typecheck, typed lint, Effect lint and
-root script tests completed, but CLI tests stopped the command with 16 failures
-across four files (4,444 tests passed). Failures include unavailable Git signing
-keys in synthetic repositories, a Git identity assertion and a Role-history
-prompt expectation. Those CLI files are unchanged by this migration; a clean
-baseline rerun has not established their status. Later aggregate stages did not
-complete. Root `pnpm format` passed without further changes. The tested snapshot
-starts at `3cbd87970`; current `main` had advanced 177 commits when the draft was
-prepared, so synchronization and renewed integration/visual acceptance remain.
+Integration with `main` at `cebc2e6171` resolves 17 conflicting paths while
+preserving upstream multi-repository groups, ordering and launch capability gates,
+PR status hues, queue touch alignment, terminal geometry and the updated diff
+renderer API. The deleted Radix scroll adapter stays deleted; fixtures and native
+scroll checks now consume Base UI's axis/visibility API. Unsupported old thumb
+appearance and viewport-as-child fixture cases are removed rather than revived.
+
+After integration, all 614 component test files / 6,083 tests pass. Root typecheck,
+typed lint, Effect lint and root script tests complete. Root `pnpm check` then
+stops in CLI testing: one SQLite-runtime suite cannot load under installed Node
+26.11.1 (below upstream's new supported patch floor), and one Git identity test
+fails. The CLI result is 330 files / 4,631 tests passed, two failed files and one
+failed test; later aggregate stages do not complete. Fixture commits run with
+command-local signing disabled, without changing Git configuration. Root format,
+public-boundary and i18n checks pass. These results do not establish supported
+Node-runtime or Electron integration acceptance.
+
+The merged immutable Storybook build provides 240 real browser captures: 160
+component states, 48 page states and 32 native wheel/drag/keyboard states, plus a
+production-component geometry probe for the landing toggle's 5px/92px offsets.
+This is post-integration smoke evidence, not whole-main pixel equivalence. Earlier
+migration reports remain evidence for their original immutable source versions;
+their 20 unresolved native frames / 115 threshold pixels remain unresolved.
+The landing board/tab overlap also appears in an isolated, unchanged current-main
+product build: 320 matched nodes have equal geometry, with 323 raw screenshot
+pixels differing by at most two channel levels and zero threshold pixels. The
+phone Command dialog's clipped left edge is byte-identical to the pre-merge
+build. Both remain visible limits, not silent layout patches or new acceptance
+claims. `main-merge-acceptance.html` embeds the integration captures and controls.
 
 ## Remaining work
 
@@ -473,11 +493,14 @@ Across the preceding nine-file continuation, the component inventory falls from
 2,377 to 2,100 compiler-confirmed occurrences, leaving a lower bound of 3,093
 with 605 unresolved expressions in the component scan. The subsequent seven-file batch reduces
 components from 2,100 to 1,907. The shared-adapter batch reduces `src/ui` from
-992 to 742. The Emoji Picker / Drawer batch reduces `src/ui` further to 626. The Diff Viewer batch reduces `src/ui` further to 518. The current audited
+992 to 742. The Emoji Picker / Drawer batch reduces `src/ui` further to 626. The Diff Viewer batch reduces `src/ui` further to 518. The pre-integration audited
 lower bound is 2,421 occurrences after the alpha follow-up: components 1,902, `src/ui` 518 and routes 1,
 across 188 affected files. The scanner separately
 reports 690 unresolved expressions: 600 in components and 90 in `src/ui`.
-These are lower bounds, not a project completion percentage.
+After integrating upstream additions, the current scan reports 2,572 occurrences
+(components 2,054, `src/ui` 517, routes 1) across 188 files, with 692 unresolved
+expressions (611 components, 81 `src/ui`). These are lower bounds, not a project
+completion percentage.
 
 The unconsumed `src/ui/sidebar.tsx` retains 324 occurrences and is not re-exported
 by `src/ui/index.ts`; direct public wildcard imports remain possible.

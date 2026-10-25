@@ -1,3 +1,4 @@
+import type { SessionProjectRun } from './workspace-project';
 import type { SessionEntry, SessionFileDiff } from './session-data/domain';
 import { InferInputType, InferType, schema } from 'loro-mirror';
 import {
@@ -892,31 +893,10 @@ export type SessionExternalHistoryCursorDocState = {
   storedHistoryBaseline?: string;
 };
 
-/** Durable notification cursor for a Roost-backed session history. The cursor
- * lives in the session control document so every renderer can observe a
- * history commit without polling the history store. */
+/** Logical changes in an owner history publication. */
 export type SessionHistoryChange =
   | { readonly kind: 'structure'; readonly from: number; readonly to: number }
   | { readonly kind: 'changed'; readonly ids: readonly string[] };
-
-export type SessionRoostHistoryCursorDocState = {
-  cursor: string;
-  operationId?: string;
-  historyRevision?: number;
-  historyCount?: number;
-  historyChangeJson?: string;
-};
-
-const sessionRoostHistoryCursorDocSchema = schema.LoroMap(
-  {
-    cursor: schema.String(),
-    operationId: schema.String({ required: false }),
-    historyRevision: schema.Number({ required: false }),
-    historyCount: schema.Number({ required: false }),
-    historyChangeJson: schema.String({ required: false }),
-  },
-  { required: false }
-);
 
 /**
  * Legacy/fallback launch config shape. New writers must not persist this per session;
@@ -1024,7 +1004,13 @@ export type SessionSteerOperationRecord = {
   updatedAt: number;
 };
 
-export type SessionMeta = {
+/** Independent lifecycle register per canonical GitHub PR URL (not association membership). */
+export type SessionPullRequestLifecycle = { s: PrStatus; u: number };
+export type SessionPullRequestLifecycleFields = {
+  [field: `prLifecycle:${string}`]: SessionPullRequestLifecycle | undefined;
+};
+
+export type SessionMeta = SessionPullRequestLifecycleFields & {
   /** Latest assistant's actual model; null means no assistant history, absent means unknown. */
   lastModel?: { modelId?: string; name?: string } | null;
   id: SessionId;
@@ -1085,6 +1071,7 @@ export type SessionMeta = {
   openedByRootSessionId?: SessionId;
   /** Project binding for this session (GitHub repo or local project). */
   project?: ProjectRef;
+  projectRun?: SessionProjectRun;
   repoFullName?: string;
   /** Base branch selected when the session starts (starting point). */
   baseBranch?: string;
@@ -1092,12 +1079,12 @@ export type SessionMeta = {
   branchName?: string;
   /** True if this session runs inside a git worktree (local or GitHub). */
   isWorktree?: boolean;
+  /** Machine-owned association order; status is a compatibility projection. */
   pullRequests?: SessionPullRequestMeta[];
   /**
    * CI rollup + merge/readiness per associated PR URL, written by the CLI PR
-   * poller (compact single-letter codes, ≤50B/entry). Kept outside
-   * `pullRequests` because the webhook fan-out replaces that array wholesale
-   * and strips it to `{url, status}`.
+   * poller (compact single-letter codes, ≤50B/entry). Independent of both
+   * association ordering and provider-versioned lifecycle registers.
    */
   pullRequestState?: Record<string, SessionPullRequestStateMeta>;
   contextWindowUsage?: SessionContextWindowUsage;
@@ -1398,7 +1385,6 @@ export const sessionDocSchema = schema({
   ),
   preview: sessionPreviewDocSchema,
   externalHistoryCursor: sessionExternalHistoryCursorDocSchema,
-  roostHistoryCursor: sessionRoostHistoryCursorDocSchema,
   acpRuntimeConfig: sessionAcpRuntimeConfigDocSchema,
 });
 

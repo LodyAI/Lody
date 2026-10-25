@@ -2,7 +2,7 @@ import type { Meta, StoryObj } from '@storybook/react';
 import { useRef, useState } from 'react';
 import * as stylex from '@stylexjs/stylex';
 import { Button } from '@lody/ui/button';
-import { ScrollArea } from '../ui/scroll-area';
+import { ScrollArea } from '@lody/ui/scroll-area';
 import { themeColors } from '../style/theme-colors.stylex';
 import { themeSpace } from '../style/theme-scale.stylex';
 
@@ -24,13 +24,11 @@ const styles = stylex.create({
 
 function Fixture({
   mode = 'vertical',
-  overrides = false,
-  asChild = false,
+  labelledContent = false,
   empty = false,
 }: {
   mode?: 'vertical' | 'horizontal' | 'both';
-  overrides?: boolean;
-  asChild?: boolean;
+  labelledContent?: boolean;
   empty?: boolean;
 }) {
   const viewport = useRef<HTMLDivElement>(null);
@@ -75,23 +73,13 @@ function Fixture({
         <output>{position}</output>
       </div>
       <ScrollArea
-        type="always"
+        visibility="always"
         {...stylex.props(styles.area)}
         viewportRef={viewport}
-        scrollableX={mode !== 'vertical'}
-        horizontalOnly={horizontalOnly}
-        viewportAsChild={asChild}
-        viewportClassName={overrides ? 'rounded-none' : undefined}
-        scrollbarClassName={overrides ? 'w-4 p-0' : undefined}
-        scrollbarThumbClassName={
-          overrides ? 'rounded-none bg-primary/40 hover:bg-primary/60' : undefined
-        }
-        horizontalScrollbarClassName={overrides ? 'h-3 p-0' : undefined}
-        horizontalScrollbarThumbClassName={
-          overrides ? 'rounded-none bg-primary/40 hover:bg-primary/60' : undefined
-        }
+        axis={mode}
+        data-migration-scroll-area=""
       >
-        {asChild ? (
+        {labelledContent ? (
           <div tabIndex={0} aria-label="Scrollable content">
             {content}
           </div>
@@ -112,6 +100,5 @@ type Story = StoryObj<typeof meta>;
 export const Vertical: Story = { render: () => <Fixture /> };
 export const Horizontal: Story = { render: () => <Fixture mode="horizontal" /> };
 export const Both: Story = { render: () => <Fixture mode="both" /> };
-export const CallerOverrides: Story = { render: () => <Fixture mode="both" overrides /> };
-export const ViewportAsChild: Story = { render: () => <Fixture asChild /> };
+export const ViewportContent: Story = { render: () => <Fixture labelledContent /> };
 export const NoOverflow: Story = { render: () => <Fixture empty /> };

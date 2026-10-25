@@ -1,3 +1,7 @@
+import {
+  buildSessionFileRootMounts,
+  toSessionFileDisplayPath,
+} from '@/lib/session-file-root-mounts';
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import * as stylex from '@stylexjs/stylex';
@@ -32,7 +36,7 @@ import {
   classifyGithubThreadError,
 } from './diff-pr-analytics';
 import { DiffViewer } from '@/ui/diff-viewer/diff-viewer';
-import { ScrollArea } from '@/ui/scroll-area';
+import { ScrollArea } from '@lody/ui/scroll-area';
 import { Skeleton } from '@lody/ui/skeleton';
 import { withClassName } from '@/lib/stylex';
 import { observeDiffPerfLongTasks } from '@/lib/diff-perf';
@@ -166,8 +170,6 @@ const styles = stylex.create({
     flex: '1 1 0%',
     overflow: 'auto',
     paddingInline: space[3],
-    scrollbarWidth: 'thin',
-    scrollbarColor: 'hsl(var(--scrollbar-thumb) / 0.5) transparent',
   },
 });
 
@@ -534,10 +536,10 @@ function SessionConversationDiffPanelImpl({
   active = true,
   sessionId,
   turnId,
-  filePaths,
-  fileDiffs,
+  filePaths: rawFilePaths,
+  fileDiffs: rawFileDiffs,
   fileDiffsPending,
-  focusFilePath,
+  focusFilePath: rawFocusFilePath,
   focusComment,
   focusRequestSeq,
   mode = 'conversation',
@@ -558,6 +560,32 @@ function SessionConversationDiffPanelImpl({
   const postHog = usePostHog();
   const currentWorkspaceId = useAtomValue(currentWorkspaceIdAtom);
   const user = useAtomValue(userAtom);
+  // Turn diffs of Project group members outside the main directory are
+  // recorded under encoded keys. Shown, matched and opened as display paths;
+  // the file provider splits them back into `rootId` for the machine.
+  const projectRun = (workspaceSession ?? session)?.projectRun;
+  const mounts = useMemo(() => buildSessionFileRootMounts(projectRun), [projectRun]);
+  const filePaths = useMemo(
+    () =>
+      mounts.length === 0 && !rawFilePaths.some((path) => path.startsWith('\0'))
+        ? rawFilePaths
+        : rawFilePaths.map((path) => toSessionFileDisplayPath(path, mounts)),
+    [mounts, rawFilePaths]
+  );
+  const fileDiffs = useMemo(
+    () =>
+      rawFileDiffs?.some((diff) => diff.filePath.startsWith('\0'))
+        ? rawFileDiffs.map((diff) => ({
+            ...diff,
+            filePath: toSessionFileDisplayPath(diff.filePath, mounts),
+          }))
+        : rawFileDiffs,
+    [mounts, rawFileDiffs]
+  );
+  const focusFilePath =
+    rawFocusFilePath?.startsWith('\0') === true
+      ? toSessionFileDisplayPath(rawFocusFilePath, mounts)
+      : rawFocusFilePath;
   const diffCommentAnalyticsBase = useMemo(
     () => ({ workspaceId: currentWorkspaceId ?? null, sessionId, mode }),
     [currentWorkspaceId, mode, sessionId]
@@ -755,17 +783,16 @@ function SessionConversationDiffPanelImpl({
     []
   );
 
-  const setScrollAreaRoot = useCallback(
-    (node: HTMLDivElement | null) => {
+  const setScrollAreaViewport = useCallback(
+    (viewport: HTMLDivElement | null) => {
       baseViewportScrollCleanupRef.current?.();
       baseViewportScrollCleanupRef.current = null;
       if (mode !== 'base') return;
-      if (!node) {
+      if (!viewport) {
         scrollContainerRef.current = null;
         viewportRef.current = null;
         return;
       }
-      const viewport = node.querySelector('[data-radix-scroll-area-viewport]');
       scrollContainerRef.current = viewport instanceof HTMLDivElement ? viewport : null;
       viewportRef.current = scrollContainerRef.current;
       if (viewport instanceof HTMLDivElement) {
@@ -1048,9 +1075,9 @@ function SessionConversationDiffPanelImpl({
           {baseHeader}
           <div {...stylex.props(styles.baseScrollFrame)}>
             <ScrollArea
-              ref={setScrollAreaRoot}
+              viewportRef={setScrollAreaViewport}
               className={stylex.props(styles.baseScrollArea).className}
-              type="auto"
+              visibility="always"
             >
               <div {...stylex.props(styles.baseScrollContent)}>{panelContent}</div>
             </ScrollArea>

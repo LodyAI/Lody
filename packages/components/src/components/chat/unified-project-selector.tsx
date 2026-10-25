@@ -2,6 +2,7 @@ import { useDeferredValue, useMemo, useState, type ReactNode } from 'react';
 import type { LocalProjectId, MachineId } from '@lody/shared';
 import {
   ArrowUpRight,
+  Folders,
   ChevronDown,
   CircleSlash2,
   FolderOpen,
@@ -266,7 +267,21 @@ export interface LocalProjectSelection {
 export type UnifiedProjectSelection =
   | { kind: 'none' }
   | ({ kind: 'local' } & LocalProjectSelection)
-  | { kind: 'github'; repoFullName: string };
+  | { kind: 'github'; repoFullName: string }
+  | { kind: 'group'; projectId: string };
+
+/** A Project group offered beside single projects. */
+export type UnifiedProjectGroupOption = {
+  projectId: string;
+  name: string;
+  /** Number of repositories, shown as the option's description. */
+  memberCount: number;
+  lastUsedAt?: number;
+  /** Why this group cannot start a conversation on the selected machine. */
+  disabledReason?: string;
+  /** What the selected machine lacks, e.g. "2 cloned on start". */
+  availability?: string;
+};
 
 type UnifiedProjectOption = {
   value: string;
@@ -276,6 +291,7 @@ type UnifiedProjectOption = {
   selection: Exclude<UnifiedProjectSelection, { kind: 'none' }>;
   lastUsedAt?: number;
   sharing?: SessionSharingState;
+  disabledReason?: string;
 };
 
 export const UNIFIED_PROJECT_OPTION_RENDER_LIMIT = 20;
@@ -434,6 +450,8 @@ export interface UnifiedProjectSelectorViewProps extends Omit<
   'selectedMachineId' | 'latestMessageAtByLocalProject' | 'projectSharing'
 > {
   localProjects: ReadonlyArray<UnifiedLocalProjectOption>;
+  /** Project groups; omitted by surfaces that cannot start multi-repository work. */
+  projectGroups?: ReadonlyArray<UnifiedProjectGroupOption>;
   onShareLocalProjectWithTeam?: (selection: LocalProjectSelection) => Promise<void>;
   getShareErrorMessage?: (error: unknown, fallback: string) => string;
   /**
@@ -542,6 +560,8 @@ function getSelectionValue(selection: UnifiedProjectSelection): string | null {
       return `local:${selection.machineId}:${selection.localProjectId}`;
     case 'github':
       return `github:${selection.repoFullName}`;
+    case 'group':
+      return `group:${selection.projectId}`;
     case 'none':
       return null;
   }
@@ -593,6 +613,7 @@ export function UnifiedProjectSelectorView({
   value,
   onChange,
   localProjects,
+  projectGroups,
   repositories,
   className,
   latestMessageAtByRepo,
@@ -615,6 +636,26 @@ export function UnifiedProjectSelectorView({
 
   const options = useMemo<UnifiedProjectOption[]>(() => {
     const combined: UnifiedProjectOption[] = [];
+    for (const group of projectGroups ?? []) {
+      combined.push({
+        value: `group:${group.projectId}`,
+        label: group.name,
+        description:
+          group.disabledReason ??
+          [
+            t('chat.projectPicker.groupMembers', '{{count}} repositories', {
+              count: group.memberCount,
+            }),
+            group.availability,
+          ]
+            .filter(Boolean)
+            .join(' · '),
+        icon: <Folders className="h-4 w-4 shrink-0 opacity-70" />,
+        selection: { kind: 'group', projectId: group.projectId },
+        lastUsedAt: group.lastUsedAt,
+        disabledReason: group.disabledReason,
+      });
+    }
     for (const project of localProjects) {
       combined.push({
         value: `local:${project.machineId}:${project.localProjectId}`,
@@ -641,7 +682,7 @@ export function UnifiedProjectSelectorView({
       });
     }
     return combined.sort(compareUnifiedProjectOptions);
-  }, [latestMessageAtByRepo, localProjects, repositories]);
+  }, [latestMessageAtByRepo, localProjects, projectGroups, repositories, t]);
 
   const selectedValue = getSelectionValue(value);
   const selectedOption = useMemo(
@@ -658,6 +699,8 @@ export function UnifiedProjectSelectorView({
     selectedOption?.icon ??
     (value.kind === 'github' ? (
       <GitHubOwnerAvatarIcon repoFullName={value.repoFullName} />
+    ) : value.kind === 'group' ? (
+      <Folders className="h-4 w-4 opacity-70" />
     ) : (
       <FolderOpen {...stylex.props(styles.folderGlyph)} />
     ));
@@ -667,7 +710,9 @@ export function UnifiedProjectSelectorView({
       ? value.repoFullName
       : value.kind === 'local'
         ? value.localProjectId
-        : placeholder);
+        : value.kind === 'group'
+          ? t('chat.projectPicker.removedGroup', 'Removed project group')
+          : placeholder);
   const selectedSharing =
     selectedOption?.selection.kind === 'local' ? selectedOption.sharing : undefined;
   const selectedPrivateSharing = shouldShowPrivateSharingStatus(selectedSharing)
@@ -827,7 +872,9 @@ export function UnifiedProjectSelectorView({
                   const localPath =
                     option.selection.kind === 'local' ? option.description : undefined;
                   const inlineDescription =
-                    option.selection.kind === 'github' ? option.description : undefined;
+                    option.selection.kind === 'github' || option.selection.kind === 'group'
+                      ? option.description
+                      : undefined;
                   const labelNode = (
                     <span
                       {...stylex.props(
@@ -842,6 +889,7 @@ export function UnifiedProjectSelectorView({
                     <Menu.RadioItem
                       key={option.value}
                       value={option.value}
+                      disabled={option.disabledReason !== undefined}
                       indicator="check"
                       indicatorSide="end"
                       className={cn(

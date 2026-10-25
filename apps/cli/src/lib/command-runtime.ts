@@ -1,4 +1,5 @@
 import { closeLoginShellApplicationLegacy } from '@/agent/login-shell-env';
+import { SYNC_CONFIRMATION_TIMEOUT_MS } from '@/lib/loro/timeout-utils';
 import {
   createServerTimeFetcher,
   getLoroStreamsShardUrls,
@@ -324,7 +325,7 @@ export function createCommandSessionHistoryFactory(
         return response;
       },
       write: async (operation, payload) => {
-        if (!(await manager.waitUntilMetaSynced()))
+        if (!(await manager.waitUntilMetaSynced({ timeoutMs: SYNC_CONFIRMATION_TIMEOUT_MS })))
           throw new Error('Session metadata has not reached its history owner');
         const response = await withRpc(target, (client) =>
           client.requestSessionHistoryWrite({
@@ -422,7 +423,10 @@ export async function ensureWorkspaceMetaSynced(
   manager: Pick<LoroDocumentManager, 'waitUntilMetaSynced'>,
   reason: string
 ): Promise<void> {
-  const synced = await manager.waitUntilMetaSynced({ reason });
+  const synced = await manager.waitUntilMetaSynced({
+    reason,
+    timeoutMs: SYNC_CONFIRMATION_TIMEOUT_MS,
+  });
   if (!synced) {
     throw new Error(
       `Workspace metadata changes were not confirmed by Loro Streams (${reason}). Retry the command after checking network connectivity.`

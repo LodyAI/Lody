@@ -1,3 +1,11 @@
+import { useReferralPolicyRefresh } from '@/hooks/use-referral-policy-refresh';
+import {
+  clearReferral,
+  readReferral,
+  attachStoredReferral,
+  REFERRAL_ERROR_KEYS,
+} from '@/lib/referral-attribution';
+import { ConvexError } from 'convex/values';
 import { createFileRoute, Navigate, useNavigate } from '@tanstack/react-router';
 import { useState, useEffect, useRef } from 'react';
 import { useCloudAction, usePlatform, usePlatformSession } from '@lody/platform/react';
@@ -16,7 +24,7 @@ import {
   type PendingE2eeWorkspace,
 } from '@/lib/e2ee-workspace-storage';
 import { cloudOperations } from '@/lib/cloud-api-operations';
-import { useCloudQuery } from '@lody/platform/react';
+import { useCloudMutation, useCloudQuery } from '@lody/platform/react';
 import { useTranslation } from 'react-i18next';
 import { usePostHog } from '@posthog/react';
 import { CreateWorkspacePage } from '@/components/pages/create-workspace-page';
@@ -154,6 +162,7 @@ function CreateWorkspaceAuthed({
     cloudOperations.billing.getWorkspaceCreationAvailability
   );
   const newWorkspacePricing = useCloudQuery(cloudOperations.billing.getMyNewWorkspacePricing, {});
+  const [referralCode, setReferralCode] = useState(() => readReferral());
   const createPaidWorkspaceCheckout = useCloudAction(
     cloudOperations.billing.createPaidWorkspaceCheckout
   );
@@ -215,6 +224,15 @@ function CreateWorkspaceAuthed({
 
   const hasExistingWorkspaces = Boolean(organizations && organizations.length > 0);
   const paidRequired = creationAvailability?.canCreateFree === false;
+  const dismissLead = useCloudMutation(cloudOperations.referrals.dismissLead);
+  const attachLead = useCloudMutation(cloudOperations.referrals.attachLead);
+  // Preview account leads from other devices even without a browser referral code.
+  const [policyRefreshKey, refreshPolicy] = useState(0);
+  const referralOffer = useCloudQuery(
+    cloudOperations.referrals.getCheckoutOffer,
+    paidRequired ? { policyRefreshKey, ...(referralCode ? { code: referralCode } : {}) } : 'skip'
+  );
+  useReferralPolicyRefresh(referralOffer?.policy?.nextChangeAt, refreshPolicy);
   // Mirrors the early-return below: the form is only really shown when creating
   // is allowed for an existing-workspace user, or the user has none.
   const willRenderCreateForm =
@@ -428,12 +446,14 @@ function CreateWorkspaceAuthed({
         return;
       }
       if (paidRequired) {
+        await attachStoredReferral(attachLead);
         const isDesktop = isElectronRenderer();
         const billingUrl = `${window.location.origin}/${workspaceSlug}/settings/billing`;
         const result = await createPaidWorkspaceCheckout({
           name: workspaceName.trim(),
           slug: workspaceSlug,
           interval: billingInterval,
+          ...(referralCode && referralOffer?.sendCode ? { referralCode } : {}),
           ...(isDesktop
             ? { returnTarget: 'desktop' as const }
             : { successUrl: billingUrl, cancelUrl: billingUrl }),
@@ -511,9 +531,15 @@ function CreateWorkspaceAuthed({
           // Storage stays authoritative; the next page load reads it again.
         }
       }
+      const code =
+        err instanceof ConvexError && err.data && typeof err.data === 'object'
+          ? (err.data as { code?: unknown }).code
+          : undefined;
       setError(
         !useEncryption
-          ? t('organization.createFailed')
+          ? typeof code === 'string' && code in REFERRAL_ERROR_KEYS
+            ? t(REFERRAL_ERROR_KEYS[code])
+            : t('organization.createFailed')
           : isE2eeCreationNotEnabled(err)
             ? t('e2ee.create.notEnabled')
             : removed
@@ -600,6 +626,19 @@ function CreateWorkspaceAuthed({
       }
       billingInterval={billingInterval}
       pricing={newWorkspacePricing}
+      referralOffer={
+        referralOffer?.discount
+          ? {
+              policy: referralOffer.policy,
+              onRemove: () => {
+                clearReferral();
+                // Also decline the link remembered on the account.
+                void dismissLead({}).catch(() => {});
+                setReferralCode(undefined);
+              },
+            }
+          : null
+      }
       slugChecking={slugChecking}
       slugAvailable={slugAvailable}
       slugErrorType={currentPending ? null : slugErrorType}

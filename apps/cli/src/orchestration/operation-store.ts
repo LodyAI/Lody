@@ -422,6 +422,14 @@ export class LodyOperationStore {
             claimedItemIndexes: [],
           };
         this.assertOperationIdNotRetired(input.requesterSessionId, input.operationId);
+        const duplicate = this.findActiveDuplicateCreate(
+          input.requesterSessionId,
+          input.kind,
+          fingerprint,
+          input.requesterUserId,
+          frozenConfig.sourceTurnId
+        );
+        if (duplicate) return { created: false, operation: duplicate, claimedItemIndexes: [] };
         const inserted = this.db
           .prepare(
             `INSERT OR IGNORE INTO operations (
@@ -530,11 +538,17 @@ export class LodyOperationStore {
     sourceTurnId?: string
   ): StoredLodyOperation | undefined {
     const existing = this.getStored(requesterSessionId, operationId);
+    const fingerprint = fingerprintLodyCommand(kind, canonicalizeLodyCommand(canonicalCommand));
     if (!existing) {
       this.assertOperationIdNotRetired(requesterSessionId, operationId);
-      return undefined;
+      return this.findActiveDuplicateCreate(
+        requesterSessionId,
+        kind,
+        fingerprint,
+        requesterUserId,
+        sourceTurnId
+      );
     }
-    const fingerprint = fingerprintLodyCommand(kind, canonicalizeLodyCommand(canonicalCommand));
     return this.assertMatching(existing, kind, fingerprint, requesterUserId, sourceTurnId);
   }
 
@@ -897,6 +911,35 @@ export class LodyOperationStore {
       .prepare('SELECT * FROM operations WHERE requester_session_id = ? AND operation_id = ?')
       .get(requesterSessionId, operationId);
     return row === undefined ? undefined : this.decodeOperation(row);
+  }
+
+  /**
+   * An Agent that loses a slow create response, for example to a client tool
+   * timeout, tends to retry under a fresh operationId while the first create
+   * is still running. An identical single create from the same source Turn
+   * that is still active is that retry, so it adopts the accepted Operation
+   * instead of creating a second Session. Finished Operations never match:
+   * creating the same work again after a result or failure stays possible.
+   */
+  private findActiveDuplicateCreate(
+    requesterSessionId: SessionId,
+    kind: LodyOperationKind,
+    fingerprint: string,
+    requesterUserId: string,
+    sourceTurnId: string | undefined
+  ): StoredLodyOperation | undefined {
+    if (kind !== 'session_create' || !sourceTurnId) return undefined;
+    const rows = this.db
+      .prepare(
+        `SELECT * FROM operations
+         WHERE requester_session_id = ? AND kind = ? AND fingerprint = ?
+           AND requester_user_id = ? AND state = 'active'
+         ORDER BY created_at ASC, operation_id ASC`
+      )
+      .all(requesterSessionId, kind, fingerprint, requesterUserId);
+    return rows
+      .map((row) => this.decodeOperation(row))
+      .find((operation) => operation.frozenContinuationConfig.sourceTurnId === sourceTurnId);
   }
 
   private assertOperationIdNotRetired(requesterSessionId: SessionId, operationId: string): void {

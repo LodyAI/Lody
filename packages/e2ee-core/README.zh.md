@@ -139,3 +139,6 @@ pnpm --filter @lody/e2ee-core check:docs  # 公开导出、命名空间与 servi
 测试使用固定的合成向量、真实 SQLite、真实 Ed25519/HPKE 和子进程；`test/generate-*.py` 用于（可选地）重新生成向量。
 
 [非门禁基准测试](bench/README.md)输出带环境信息的 JSON。
+
+Streams 适配器与 Lab 使用当前 workspace catalog 版本。Node 宿主可共用
+[node-custody](docs/surface.zh.md) 保管实现，并分别提供经过核对的系统包装器。

@@ -13,6 +13,11 @@ import type { OperationInboxLegacy } from '../inbox/legacy';
 import type { LodyOperationCoordinatorOptions } from '../operation-coordinator';
 import type { LodyOperationStore } from '../operation-store';
 
+// Reconcile passes walk active Operations serially, so this wait delays every
+// other Operation on the machine. A timeout is only uncertainty: the item arms
+// its own backoff retry and the abandoned sync keeps running underneath.
+const TARGET_CATCH_UP_TIMEOUT_MS = 8_000;
+
 /** Named upstream adapter: Session/history/materialization are not yet native dependencies. */
 export const coordinatorSessionsLayer = (
   options: LodyOperationCoordinatorOptions,
@@ -96,7 +101,10 @@ export const coordinatorSessionsLayer = (
       io(() =>
         options.confirmTargetReadable
           ? options.confirmTargetReadable(getSessionRoomId(id), reason)
-          : options.workspaceDocument.syncRemoteDocOrThrow(getSessionRoomId(id), { reason })
+          : options.workspaceDocument.syncRemoteDocOrThrow(getSessionRoomId(id), {
+              reason,
+              timeoutMs: TARGET_CATCH_UP_TIMEOUT_MS,
+            })
       ),
     materialize: (operation, item, index) =>
       io(() => {

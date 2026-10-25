@@ -101,6 +101,7 @@ function historyFixture(commitment = 6) {
     checkpoint,
     startIndex: 0,
     recordsHex: [bytesToHex(genesis)],
+    position: 'p1:workspace-1:1:offset:0',
     nextCursor: 'next',
   };
   const secondPage: E2eeWorkspaceHistoryPage = {

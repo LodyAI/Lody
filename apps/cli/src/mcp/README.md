@@ -59,6 +59,10 @@ See the [decision and verification](../../../../.agents/notes/implemented/bug-fi
   target for daemon replay, and `session_create({ operationId, resume: true })` recovers it without
   the prompt. Completion is delivered automatically — no public wait tool — and legacy `wait=true`
   is a temporary adapter new callers must not use.
+- Single create can outlast a client's tool timeout, and Agents then tend to retry under a fresh
+  id. While the original is active, an identical create from the same source Turn adopts it and
+  returns its snapshot with a `notice` instead of creating a second Session
+  ([note](../../../../.agents/notes/implemented/bug-fix/2026-10-21-mcp-create-fresh-id-retry.md)).
 
 ## Machine catalog retry guidance
 

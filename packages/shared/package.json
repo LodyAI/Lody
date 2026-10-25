@@ -8,6 +8,7 @@
     "./src/visual-annotation-inspector-global.ts"
   ],
   "exports": {
+    "./workspace-streams-content": "./src/workspace-streams-content.ts",
     "./notifications": {
       "types": "./src/notifications/index.ts",
       "import": "./src/notifications/index.ts"
@@ -103,6 +104,10 @@
     "./image-file-types": {
       "types": "./src/image-file-types.ts",
       "import": "./src/image-file-types.ts"
+    },
+    "./file-preview": {
+      "types": "./src/file-preview.ts",
+      "import": "./src/file-preview.ts"
     },
     "./local-file-preview": {
       "types": "./src/local-file-preview.ts",

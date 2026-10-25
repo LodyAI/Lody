@@ -6,14 +6,16 @@ import {
   resolvePlanExitMarkdown,
 } from '../src/components/ai-gui/plan-surface';
 
-const toolCall = (overrides: Record<string, unknown>): MessageContent =>
+type ToolCallMessage = Extract<MessageContent, { type: 'tool_call' }>;
+
+const toolCall = (overrides: Partial<ToolCallMessage>): ToolCallMessage =>
   ({
     type: 'tool_call',
     toolCallId: 't',
     kind: 'switch_mode',
     status: 'completed',
     ...overrides,
-  }) as MessageContent;
+  }) as ToolCallMessage;
 
 const request = (overrides: Record<string, unknown> = {}) => ({
   requestId: 'r',
@@ -43,16 +45,47 @@ describe('resolvePlanExitMarkdown', () => {
     );
   });
 
-  it('prefers the rendered content block over rawInput when an agent sends both', () => {
-    expect(
-      resolvePlanExitMarkdown(
-        toolCall({
-          content: [{ type: 'content', content: { type: 'text', text: 'shown' } }],
-          rawInput: { plan: 'raw' },
-        })
-      )
-    ).toBe('shown');
-  });
+  it.each([
+    { status: 'failed' as const, result: "The user doesn't want to proceed with this tool use." },
+    { status: 'completed' as const, result: 'User has approved your plan.' },
+  ])(
+    'keeps the submitted plan after a $status result replaces card content',
+    ({ status, result }) => {
+      const markdown = '# Plan\n1. Keep the tests.\n2. Update the parser.';
+      const pending = toolCall({
+        status: 'pending',
+        rawInput: { plan: markdown },
+        content: [{ type: 'content', content: { type: 'text', text: markdown } }],
+      });
+      expect(resolvePlanExitMarkdown(pending)).toBe(markdown);
+
+      // ACP replaces content but retains rawInput when the result omits it.
+      const settled = toolCall({
+        ...pending,
+        status,
+        content: [{ type: 'content', content: { type: 'text', text: result } }],
+        rawOutput: result,
+      });
+      expect(resolvePlanExitMarkdown(settled)).toBe(markdown);
+      // A hydrated historical card has no component-local copy of the plan.
+      expect(resolvePlanExitMarkdown(JSON.parse(JSON.stringify(settled)))).toBe(markdown);
+      expect(resolvePlanExitMarkdown({ ...settled, content: [] })).toBe(markdown);
+    }
+  );
+
+  it.each([undefined, null, '', '   ', 42, { nested: true }])(
+    'falls back to card content when rawInput.plan is %j',
+    (plan) => {
+      expect(
+        resolvePlanExitMarkdown(
+          toolCall({
+            rawInput: { plan },
+            content: [{ type: 'content', content: { type: 'text', text: '  # Content plan  ' } }],
+          })
+        )
+      ).toBe('# Content plan');
+    }
+  );
 
   it("takes only the first block, so Kimi's action summary stays out of the plan", () => {
     // Kimi builds `[plan, "Requesting approval to <action>"]`; joining pasted

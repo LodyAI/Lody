@@ -63,6 +63,30 @@ describe('Session operation target ownership', () => {
     }
   );
 
+  it('archive-tree follows opened Sessions and Tabs downward only', async () => {
+    const tree = mixedTree();
+    const repo = snapshot(Object.values(tree));
+    expect(
+      (await readSessionOperationTargets(repo, tree.root.id, 'archive-tree')).map(
+        (target) => target.id
+      )
+    ).toEqual([
+      tree.root.id,
+      tree.tab.id,
+      tree.opened.id,
+      tree.fromTab.id,
+      tree.openedTab.id,
+      tree.furtherOpened.id,
+      tree.fromTabChild.id,
+    ]);
+    // Unlike collaboration, a selected opened Session never pulls in its opener.
+    expect(await readSessionOperationTargets(repo, tree.opened.id, 'archive-tree')).toEqual([
+      tree.opened,
+      tree.openedTab,
+      tree.furtherOpened,
+    ]);
+  });
+
   it('retains explicit collaboration stop scope through opened Sessions and Tabs', async () => {
     const tree = mixedTree();
     const targets = await readSessionOperationTargets(

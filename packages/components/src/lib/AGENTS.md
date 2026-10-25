@@ -84,12 +84,11 @@ Background: [components](../../../../.agents/docs/components-package.md),
 
 ## File identity, caching, and errors
 
-- `session-file-open-target.ts` alone owns path normalization. Canonical workspace-relative
-  paths (tree, quick open, mobile browser, LSP) travel verbatim. Only Markdown hrefs
-  are URL-decoded and stripped of `:<line>` / `#L<line>` suffixes, absolute host
-  roots; same-machine Electron preserves other worktree paths instead of stripping
-  `.../worktrees/<uuid>/` prefixes. Display shortening never rewrites click targets.
-  Line anchors travel as fields, not inside paths.
+- `session-file-open-target.ts` owns normalization: canonical paths travel verbatim;
+  Markdown hrefs decode URL/line suffixes and host roots; local Electron preserves
+  other worktrees. Relative links negotiate `markdownFileLinks` candidates; multiple
+  matches require a choice, unsupported daemons open as before. Pin the selected
+  canonical path; no short-link cache. Anchors remain fields.
 - Cache resolved opens under BOTH `response.path` (the save identity) and the requested
   path (viewer/change-check identity). After save, refresh EVERY `cacheKeys` alias.
   Preview reads are case-tolerant; `save-text` writes are case-exact.

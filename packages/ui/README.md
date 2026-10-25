@@ -860,6 +860,38 @@ the range that clamps itself, the shell an input builds out of its own `render`,
 and the two Base UI gaps they close are recorded in the
 [UI number and password fields note](../../.agents/notes/implemented/feature/2026-09-20-ui-number-password-fields.md).
 
+## Scroll area
+
+`ScrollArea` uses Base UI for native wheel/touch scrolling, thumb dragging,
+overflow measurement and cleanup. Its transparent track and rounded thumb use
+the neutral gray ramp, shared by Menu, Select, Textarea, Table and Drawer native
+scroll regions. The component's tokens own width, inset and interaction colors.
+
+```tsx
+import { ScrollArea } from '@lody/ui/scroll-area';
+
+<ScrollArea className={panelHeight} viewportRef={scrollViewportRef}>
+  {content}
+</ScrollArea>
+<ScrollArea axis="horizontal" compact visibility="scroll">
+  {tabs}
+</ScrollArea>
+```
+
+`axis` is `vertical` (default), `horizontal` or `both`. `visibility` is `hover`
+(default), `scroll` or `always`; bars still require overflow. `compact` provides
+a narrow track for tab strips. The viewport ref remains the real native scroll
+element for virtualization, keyboard handling and scroll restoration. Root and
+viewport classes/styles carry caller layout, not thumb appearance.
+`scrollbarClassName` carries layout or interaction constraints on both tracks,
+such as hiding them during a parent frame's animation; track appearance stays token-owned.
+
+`nativeScrollbar` is a StyleX style for existing scroll owners, including native
+text controls and the popup lists that own keyboard selection. Product-wide CSS
+may use the variables supplied by `scrollbarNativeTheme` from
+`@lody/ui/scroll-area/scroll-area.tokens.stylex`; apply it with
+`scrollbarPaletteTheme` on the palette scope. `ThemeRoot` includes both.
+
 Open the gallery with `pnpm storybook` and pick _Design System / UI Gallery_.
 It renders each sample once per palette and reads its values back off the
 rendered nodes, so a token that changes shows its new value there without the

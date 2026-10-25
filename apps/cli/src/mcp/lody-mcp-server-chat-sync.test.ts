@@ -11,7 +11,7 @@ import {
   type LodyOperationItemResult,
   type SessionId,
 } from '@lody/shared';
-import type { LodyOperationStore } from '@/orchestration/operation-store';
+import { LodyOperationStoreError, type LodyOperationStore } from '@/orchestration/operation-store';
 import type { SessionToolHandlers } from './session-tool-router';
 
 const mocks = vi.hoisted(() => ({
@@ -647,6 +647,34 @@ describe('turn-scoped reverse chat rejection', () => {
         .notificationOriginTurnIds
     ).toEqual(['late-input']);
     expect(delivered).toHaveLength(1);
+  });
+
+  it('reports a materialized create as accepted when its durable mark hits a busy store', async () => {
+    setInput('create-input');
+    mocks.validateSessionCreateOptions.mockResolvedValue({ mcpServerIds: [] });
+    const created: string[] = [];
+    mocks.createSessionResult.mockImplementation(
+      async (_auth, _workspace, _manager, _prompt, options) => {
+        created.push(options.sessionId);
+        return { sessionId: options.sessionId, userTurnId: options.userTurnId };
+      }
+    );
+    mocks.markItemInputDurable.mockImplementation(() => {
+      throw new LodyOperationStoreError('STORE_BUSY', 'busy', true);
+    });
+    const args = { operationId: 'busy-mark-create', prompt: 'Review the change' };
+
+    const result = await startSessionCreateOperation(args);
+
+    expect(result).toMatchObject({
+      id: 'busy-mark-create',
+      state: 'active',
+      items: [{ status: 'active', inputDurable: false, target: { sessionId: created[0] } }],
+    });
+    // The level-checked Coordinator, not the caller, finishes the durable mark.
+    expect(store.get(requesterSession.id as SessionId, args.operationId).state).toBe('active');
+    await startSessionCreateOperation({ ...args, operationId: 'busy-mark-create-fresh-id' });
+    expect(created).toHaveLength(1);
   });
 
   it('does not fall back to earlier history when the exact active input is unavailable', async () => {

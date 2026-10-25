@@ -40,7 +40,7 @@
   "author": "Leon Zhao",
   "license": "Apache-2.0",
   "engines": {
-    "node": ">=22.14.0 <23 || >=23.6.0"
+    "node": ">=22.23.4 <23 || >=24.22.1 <25 || >=26.12.1 <27"
   },
   "devDependencies": {
     "@agentclientprotocol/sdk": "catalog:",
@@ -50,6 +50,7 @@
     "@effect/vitest": "catalog:",
     "@lody/cli-supervisor": "workspace:*",
     "@lody/cloud-api": "workspace:*",
+    "@lody/e2ee-core": "workspace:*",
     "@lody/code-review-helper": "workspace:*",
     "@lody/loro-streams-rpc": "workspace:*",
     "@lody/platform": "workspace:*",
@@ -129,11 +130,11 @@
   ],
   "dependencies": {
     "@effect/platform-node-shared": "catalog:",
-    "@loro-dev/roost-node": "0.2.0",
+    "@loro-dev/roost-node": "0.3.0",
     "@lydell/node-pty": "1.2.0-beta.14",
     "@napi-rs/keyring": "2.1.0",
     "better-sqlite3": "catalog:",
-    "loro-crdt": "1.16.3",
+    "loro-crdt": "1.17.0",
     "tinypool": "^1.0.0",
     "typescript": "^5.9.3"
   }

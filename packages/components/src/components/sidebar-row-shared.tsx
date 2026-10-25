@@ -62,11 +62,26 @@ import { themeDuration, themeEasing, themeRadius, themeSpace } from '../style/th
 const sendSpin = stylex.keyframes({ to: { transform: 'rotate(360deg)' } });
 
 const rowParts = stylex.create({
+  hoverAction: {
+    display: 'inline-flex',
+    width: themeSpace[5],
+    height: themeSpace[5],
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: themeRadius.sm,
+    color: { default: 'hsl(var(--muted-foreground) / 0.7)', ':hover': themeColors.foreground },
+    backgroundColor: { default: null, ':hover': 'hsl(var(--muted) / 0.3)' },
+    transitionProperty: 'opacity,background-color,color',
+    transitionDuration: themeDuration[100],
+    transitionTimingFunction: themeEasing['in-out'],
+    opacity: 0,
+    pointerEvents: 'none',
+  },
+  hoverActionFocus: { boxShadow: { default: null, ':focus-visible': 'none' } },
   verdictSuccess: { color: themeColors.statusSuccess },
   verdictFailure: { color: themeColors.destructive },
   verdictWarning: { color: themeColors.statusWarning },
   primary: { color: themeColors.primary },
-  compactPrTone: { color: themeColors.sidebarForegroundMuted },
   smallPr: { height: themeSpace[3], width: themeSpace[3] },
   fullPr: { height: themeSpace[3.5], width: themeSpace[3.5] },
   mergedPr: { translate: '1px' },
@@ -596,8 +611,6 @@ export function SidebarSessionTitleText({
  */
 /** A filter, not opacity: the mark keeps its full lightness, only its hue is muted. */
 const SIDEBAR_PR_ICON_COMPACT_CLASS = 'saturate-[0.55]';
-/** Sidebar PR marks read as one quiet glyph; only the CI verdict keeps a hue. */
-const SIDEBAR_PR_ICON_COMPACT_TONE_CLASS = clsx(stylex.props(rowParts.compactPrTone).className);
 
 export function SessionPrIcon({
   prStatus,
@@ -640,7 +653,7 @@ export function SessionPrIcon({
       <MaskedPrCiIcon
         BaseIcon={BaseIcon}
         VerdictIcon={VerdictIcon}
-        baseToneClassName={compact ? SIDEBAR_PR_ICON_COMPACT_TONE_CLASS : meta.iconColorClassName}
+        baseToneClassName={meta.iconColorClassName}
         verdict={verdict}
         className={cn(
           compact && SIDEBAR_PR_ICON_COMPACT_CLASS,
@@ -656,7 +669,7 @@ export function SessionPrIcon({
       className={cn(
         stylex.props(compact ? rowParts.smallPr : rowParts.fullPr, rowParts.shrink).className,
         compact && SIDEBAR_PR_ICON_COMPACT_CLASS,
-        compact ? SIDEBAR_PR_ICON_COMPACT_TONE_CLASS : meta.iconColorClassName,
+        meta.iconColorClassName,
         className
       )}
       strokeWidth={2.25}
@@ -794,6 +807,24 @@ export function SessionRowOpenedByMenuItems({
  * containment. The rule lives in `tailwind/index.css` (`sidebar-row-list`).
  */
 export const SIDEBAR_ROW_LIST_CLASS = `${stylex.props(rowParts.rowList).className} sidebar-row-list`;
+
+/**
+ * A project-like row's hover controls (⋯, new chat, drag handle): hidden until
+ * the row is hovered or its menu is open. Shared by local projects and
+ * Project groups so the two rows behave alike.
+ */
+export const SIDEBAR_HOVER_ACTION_CLASS = cn(
+  stylex.props(rowParts.hoverAction, rowParts.hoverActionFocus).className,
+  'group-hover:opacity-100 group-hover:pointer-events-auto',
+  'group-data-[menu-open]:opacity-100 group-data-[menu-open]:pointer-events-auto'
+);
+
+/**
+ * The trigger itself stays pressed-looking while its menu is open, not just the
+ * row around it. Only the ⋯ opens a menu — the compose button beside it does not.
+ */
+export const SIDEBAR_MENU_TRIGGER_OPEN_CLASS =
+  'group-data-[menu-open]:bg-muted/30 group-data-[menu-open]:text-foreground';
 
 /**
  * Marks one flat-list row with opened-by tree depth. `gutter={false}` leaves

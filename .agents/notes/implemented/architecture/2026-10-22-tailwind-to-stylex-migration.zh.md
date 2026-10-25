@@ -319,7 +319,7 @@ Storybook 10.6 的严格初始化包装与共享异步 chunk，在真实 WASM �
 单个 Story 的探针通过不足以证明全量构建正确。Storybook 现使用原生 ESM/TLA 并保留模块
 边界；截图前已通过多个真实入口验证完整构建。桌面生产配置保留自己的目标和 WASM 合同。
 
-组件测试在 `NODE_OPTIONS=--no-experimental-webstorage NODE_ENV=test` 下全部通过：
+合入前的组件测试在 `NODE_OPTIONS=--no-experimental-webstorage NODE_ENV=test` 下全部通过：
 598 个文件、5,917 项测试。Node 26 的原生 Storage 会干扰 jsdom 的 Storage fixture；
 初轮十个失败在该运行环境下消失，无须修改产品行为。utility 类名断言改为可观察行为与
 SVG 结构验证，另删除一个只检查类名的浅测试。组件类型检查、带类型的 lint、桌面
@@ -327,12 +327,26 @@ SVG 结构验证，另删除一个只检查类名的浅测试。组件类型检�
 零错误、17,396 项 warning，公开边界、i18n 及格式检查通过。仓库原有 lint/文档
 warning 仍按 warning 报告。
 
-整理 Draft PR 时运行了根 `pnpm check`：类型检查、typed lint、Effect lint 与根脚本
-测试已完成，随后 CLI 四个文件中的 16 项测试失败而停止（4,444 项通过）。失败涉及
-合成仓库缺少 Git 签名密钥、Git 身份断言与 Role 历史消息的提示词预期。这些 CLI 文件
-未被本次迁移修改，但尚未通过干净基线重跑确认其原有状态；聚合命令后续阶段未完成。
-根 `pnpm format` 通过且未产生额外改动。已验证快照起于 `3cbd87970`；准备草稿时
-当前 `main` 已前进 177 个提交，仍须同步并重新执行集成及视觉验收。
+与 `main` 的 `cebc2e6171` 合并解决了 17 个文件冲突，保留上游多仓库项目组、排序、
+启动能力限制、PR 状态颜色、队列触控对齐、终端几何与新 diff renderer 接口。
+主分支删除的 Radix 滚动适配层保持删除；fixture 和原生滚动检查改用 Base UI 的
+axis/visibility API，不恢复已删除的 thumb 外观覆盖或 viewport-as-child 接口。
+
+合入后 614 个组件测试文件、6,083 项测试全部通过。根类型检查、typed lint、Effect lint
+及根脚本测试完成。根 `pnpm check` 随后在 CLI 测试处停止：SQLite runtime 套件因
+本机 Node 26.11.1 低于上游新要求的补丁版本而无法载入，另有一项 Git 身份测试失败。
+CLI 共 330 个文件、4,631 项测试通过，两个文件失败、一项测试失败；聚合命令后续阶段
+未完成。合成 fixture 提交仅通过命令环境关闭签名，未修改 Git 配置。根格式检查、
+公开边界及 i18n 检查通过。这些结果不代表支持的 Node runtime 或 Electron 集成验收。
+
+合入后的不可变 Storybook 构建完成 240 张真实浏览器截图：160 个组件状态、48 个页面
+状态及 32 个滚轮/拖拽/键盘状态，另有真实生产组件的 Landing 按钮 5px/92px 几何探针。
+这些是合入后的 smoke 证据，不代表与整个主分支像素等价。早期迁移报告仍对应其原有
+不可变源码版本；20 帧、115 个阈值差异像素继续保留为未闭合问题。
+Landing 面板与标签的重叠也出现在隔离构建、产品代码未修改的当前 main 中：320 个
+节点几何一致，截图有 323 个原始差异像素、各通道最大差异 2，阈值差异为零。
+手机 Command 对话框左侧裁切与合入前截图字节一致。两项仍列为可见限制，不用补丁
+掩盖，也不据此扩大验收结论。`main-merge-acceptance.html` 内嵌合入截图与对照证据。
 
 ## 后续工作
 
@@ -343,9 +357,11 @@ warning 仍按 warning 报告。
 
 此前九文件续迁使 components 用量从 2,377 处降至 2,100 处，审计下界为 3,093 处，
 component 扫描另列 605 个未解析表达式。后续七文件再将 components 从 2,100 处降至 1,907 处。
-共享适配层批次再将 `src/ui` 从 992 处降至 742 处。Emoji Picker / Drawer 批次将 `src/ui` 进一步降至 626 处。Diff Viewer 批次进一步将 `src/ui` 降至 518 处。当前审计下界为
-透明度续迁后为 2,421 处：components 1,902、`src/ui` 518、routes 1，共 188 个仍含 utility 的文件。
+共享适配层批次再将 `src/ui` 从 992 处降至 742 处。Emoji Picker / Drawer 批次将 `src/ui` 进一步降至 626 处。Diff Viewer 批次进一步将 `src/ui` 降至 518 处。合入前透明度续迁后的审计下界
+为 2,421 处：components 1,902、`src/ui` 518、routes 1，共 188 个仍含 utility 的文件。
 扫描器另列 690 个未解析表达式：components 600 个、`src/ui` 90 个。
+合入上游新增代码后，当前扫描为 2,572 处（components 2,054、`src/ui` 517、routes 1），
+共 188 个文件；另有 692 个未解析表达式（components 611、`src/ui` 81）。
 这些数值是下界，不是全项目完成百分比。
 
 未使用的 `src/ui/sidebar.tsx` 保留 324 处，`src/ui/index.ts` 没有重导出它；

@@ -45,7 +45,6 @@ const transitionColors = stylex.create({
 export const queueRowStyles = stylex.create({
   row: {
     position: 'relative',
-    alignItems: 'flex-start',
     gap: themeSpace[2],
     paddingInline: themeSpace[2],
     paddingBlock: themeSpace[1.5],

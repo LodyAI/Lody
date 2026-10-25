@@ -1,3 +1,4 @@
+import { MessageChannel } from 'node:worker_threads';
 import { execFile } from 'node:child_process';
 import { chmod, mkdir, mkdtemp, readFile, rm, unlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -128,6 +129,46 @@ async function withPlainWorkspace<T>(fn: (workspaceRoot: string) => Promise<T>):
 }
 
 describe('fileIndexScanWorker', () => {
+  it('uses each project group member Git ignore rules and prefixes independent changes', async () => {
+    await withPlainWorkspace(async (workspaceRoot) => {
+      for (const name of ['web', 'api']) {
+        const root = path.join(workspaceRoot, name);
+        await mkdir(root);
+        await git(root, ['init', '-b', 'main']);
+        await git(root, ['config', 'user.name', 'Test']);
+        await git(root, ['config', 'user.email', 'test@example.com']);
+        await writeFile(path.join(root, '.gitignore'), 'generated.txt\n');
+        await writeFile(path.join(root, 'shared.txt'), 'old\n');
+        await git(root, ['add', '.']);
+        await git(root, ['commit', '-m', 'base']);
+        await writeFile(path.join(root, 'shared.txt'), 'old\nnew\n');
+        await writeFile(path.join(root, 'generated.txt'), 'ignored');
+      }
+      const result = await fileIndexScanWorker({
+        kind: 'full-state',
+        workspaceRoot,
+        projectMembers: [
+          { path: 'web', base: 'main' },
+          { path: 'api', base: 'main' },
+        ],
+        maxRawTextBytes: 1024 * 1024,
+        entryBudget: 1000,
+      });
+      expect(result.status).toBe('ok');
+      if (result.kind !== 'full-state' || result.status !== 'ok')
+        throw new Error('Missing group state');
+      expect(result.allChanges).toMatchObject({
+        'web/shared.txt': { diff: [1, 0] },
+        'api/shared.txt': { diff: [1, 0] },
+      });
+      expect(result.fileTreeEntries.map(([file]) => file)).toContain('web/shared.txt');
+      expect(result.fileTreeEntries.map(([file]) => file)).toContain('api/shared.txt');
+      expect(result.fileTreeEntries.map(([file]) => file)).not.toContain('web/generated.txt');
+      expect(result.fileTreeEntries.map(([file]) => file)).not.toContain('api/generated.txt');
+      expect(result.allChangesSource).toBe('git');
+    });
+  });
+
   it('rebuilds against the tracking base for a qualified local owner ref', async () => {
     await withGitWorkspace(async (workspaceRoot) => {
       await git(workspaceRoot, ['checkout', '-b', 'feature']);
@@ -256,6 +297,42 @@ describe('fileIndexScanWorker', () => {
       );
     });
   });
+
+  it.runIf(process.platform !== 'win32')(
+    'cancels the worker cooperatively and reaps its Git child before returning',
+    async () => {
+      await withPlainWorkspace(async (workspaceRoot) => {
+        await withFailingFakeGit(async (fakeGitDir) => {
+          let ready: () => void = () => {};
+          const started = new Promise<void>((resolve) => {
+            ready = resolve;
+          });
+          gitCommandFailures.onCachedListingRejected = ready;
+          const { port1, port2 } = new MessageChannel();
+          const scan = fileIndexScanWorker({
+            directoryAbsolutePath: workspaceRoot,
+            directoryWorkspacePath: '',
+            maxRawTextBytes: 1024,
+            entryBudget: 1000,
+            recursive: true,
+            cancellationPort: port2,
+          });
+          const cancelled = expect(scan).rejects.toThrow();
+          await started;
+          const pid = Number(await readFile(path.join(fakeGitDir, 'deleted.pid'), 'utf8'));
+          expect(isProcessPresent(pid)).toBe(true);
+          port1.postMessage('abort');
+          try {
+            await cancelled;
+            expect(isProcessPresent(pid)).toBe(false);
+          } finally {
+            port1.close();
+            port2.close();
+          }
+        });
+      });
+    }
+  );
 
   it.runIf(process.platform !== 'win32')(
     'joins the sibling Git listing before falling back when one listing fails',

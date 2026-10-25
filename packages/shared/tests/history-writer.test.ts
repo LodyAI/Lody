@@ -145,7 +145,7 @@ describe('single history writer', () => {
     }
   );
 
-  it('drops child tool images while retaining read results, diffs and sparse updates', () => {
+  it('drops child tool images while retaining other-kind content and sparse updates', () => {
     const doc = new Loro();
     const writer = open(doc).historyWriter;
     writer.append({ ...entry('first'), role: 'assistant', items: [] });
@@ -211,8 +211,8 @@ describe('single history writer', () => {
       update: {
         sessionUpdate: 'tool_call',
         toolCallId: 'child-tool',
-        title: 'Child read',
-        kind: 'read',
+        title: 'Child tool',
+        kind: 'other',
         content: [
           ...retained.map((block) =>
             block.type === 'content' && block.content.type === 'resource'
@@ -239,7 +239,7 @@ describe('single history writer', () => {
       { type: 'subagent_task' }
     >;
     expect(task.run?.items).toMatchObject([
-      { toolCallId: 'child-tool', kind: 'read', status: 'completed', content: retained },
+      { toolCallId: 'child-tool', kind: 'other', status: 'completed', content: retained },
     ]);
     expect(JSON.stringify(doc.toJSON())).not.toContain('DROP_CHILD');
     expect(task.run?.items[0]).not.toHaveProperty('rawInput');
@@ -288,20 +288,14 @@ describe('single history writer', () => {
     expect(imageReads).toMatchObject([
       {
         toolCallId: 'child-image-read',
-        content: [
-          {
-            type: 'content',
-            content: {
-              type: 'text',
-              text: JSON.stringify([{ type: 'text', text: 'Readable note' }]),
-            },
-          },
-        ],
       },
       { toolCallId: 'child-image-only' },
     ]);
     const imageOnly = imageReads?.[1] as Extract<MessageContent, { type: 'tool_call' }>;
     expect(imageOnly.content ?? []).toEqual([]);
+    expect(
+      (imageReads?.[0] as Extract<MessageContent, { type: 'tool_call' }> | undefined)?.content ?? []
+    ).toEqual([]);
     expect(JSON.stringify(doc.toJSON())).not.toContain('DROP_CHILD');
     const plan = 'Useful approval plan. '.repeat(6000);
     emit({
@@ -321,10 +315,161 @@ describe('single history writer', () => {
     >;
     expect(planned.run?.items.at(-1)).toMatchObject({
       rawInput: { plan },
-      rawOutput: { summary: 'Readable JSON. '.repeat(6000) },
     });
+    expect(planned.run?.items.at(-1)).not.toHaveProperty('rawOutput');
     expect(JSON.stringify(doc.toJSON())).not.toContain('DROP_CHILD_PLAN_INPUT');
   });
+
+  it.each(['read', 'edit', 'execute', 'switch_mode'] as const)(
+    'persists root and child %s tools through the same projection and sparse merge',
+    (kind) => {
+      const doc = new Loro();
+      const writer = open(doc).historyWriter;
+      writer.append({ ...entry('first'), role: 'assistant', items: [] });
+      writer.updateEntry(
+        'first',
+        (turn) =>
+          applyNotificationOnHistory(
+            [turn],
+            [
+              parseSessionNotification({
+                sessionId: 'root',
+                update: {
+                  sessionUpdate: 'subagent_event',
+                  event: {
+                    version: 1,
+                    sessionId: 'root',
+                    runId: 'run',
+                    type: 'snapshot',
+                    snapshot: {
+                      state: 'running',
+                      support: {
+                        stream: ['tool'],
+                        progress: false,
+                        cancel: false,
+                        outputRead: 'none',
+                      },
+                    },
+                  },
+                },
+              }),
+            ],
+            undefined,
+            { targetAssistantEntryId: 'first' }
+          )[0]!
+      );
+      const emit = (update: Record<string, unknown>) => {
+        writer.updateEntry(
+          'first',
+          (turn) =>
+            applyNotificationOnHistory(
+              [turn],
+              [
+                parseSessionNotification({ sessionId: 'root', update }),
+                parseSessionNotification({
+                  sessionId: 'root',
+                  update: {
+                    sessionUpdate: 'subagent_event',
+                    event: { version: 1, type: 'output', sessionId: 'root', runId: 'run', update },
+                  },
+                }),
+              ],
+              undefined,
+              { targetAssistantEntryId: 'first' }
+            )[0]!
+        );
+        const items = writer.read('first')!.items;
+        const root = items.find((item) => item.type === 'tool_call');
+        const task = items.find((item) => item.type === 'subagent_task') as Extract<
+          MessageContent,
+          { type: 'subagent_task' }
+        >;
+        expect(task.run?.items).toEqual([root]);
+        return root as Extract<MessageContent, { type: 'tool_call' }>;
+      };
+      const body = 'DROP_FILE_BODY'.repeat(10000);
+      const output = '终端 output '.repeat(1000);
+      const first = emit({
+        sessionUpdate: 'tool_call',
+        toolCallId: 'tool',
+        kind,
+        title: 'Useful title',
+        status: 'in_progress',
+        content:
+          kind === 'execute'
+            ? [{ type: 'content', content: { type: 'text', text: output } }]
+            : kind === 'switch_mode'
+              ? []
+              : [
+                  { type: 'diff', path: '/synthetic.txt', oldText: body, newText: body },
+                  { type: 'content', content: { type: 'text', text: body } },
+                ],
+        rawInput:
+          kind === 'switch_mode'
+            ? { plan: '# Useful plan', unused: body }
+            : kind === 'execute'
+              ? { command: 'echo hello', unused: body }
+              : { unused: body },
+        rawOutput: kind === 'read' || kind === 'edit' ? body : { aggregated_output: output },
+        _meta: { unused: body },
+      });
+      expect(JSON.stringify(doc.toJSON())).not.toContain('DROP_FILE_BODY');
+      if (kind === 'read' || kind === 'edit') {
+        expect(first.locations).toEqual([{ path: '/synthetic.txt' }]);
+        expect(first.content ?? []).toEqual([]);
+      }
+      if (kind === 'execute') {
+        const outputBlock = first.content?.find((block) => block.type === 'terminal_output');
+        expect(outputBlock?.type === 'terminal_output' && outputBlock.truncated).toBe(true);
+      }
+      if (kind === 'switch_mode') expect(first.rawInput).toEqual({ plan: '# Useful plan' });
+      if (kind === 'read' || kind === 'edit') {
+        for (const rawOutput of [{ body }, [{ type: 'text', text: body }]]) {
+          emit({
+            sessionUpdate: 'tool_call_update',
+            toolCallId: 'tool',
+            rawOutput,
+            content: [{ type: 'diff', path: '/synthetic.txt', oldText: body, newText: body }],
+          });
+          expect(JSON.stringify(doc.toJSON())).not.toContain('DROP_FILE_BODY');
+        }
+      }
+      const completed = emit({
+        sessionUpdate: 'tool_call_update',
+        toolCallId: 'tool',
+        status: 'completed',
+      });
+      expect(completed.title).toBe('Useful title');
+      expect(completed.content ?? []).toEqual(first.content ?? []);
+      const replayed = emit({
+        sessionUpdate: 'tool_call_update',
+        toolCallId: 'tool',
+        status: 'pending',
+      });
+      expect(replayed.status).toBe('completed');
+      const duplicate = emit({
+        sessionUpdate: 'tool_call',
+        toolCallId: 'tool',
+        title: 'Useful title',
+        status: 'pending',
+      });
+      expect(duplicate.content ?? []).toEqual(first.content ?? []);
+      expect(duplicate.locations).toEqual(first.locations);
+      const replaced = emit({
+        sessionUpdate: 'tool_call_update',
+        toolCallId: 'tool',
+        locations: [],
+        content: [],
+      });
+      expect(replaced.locations).toEqual([]);
+      expect(replaced.content?.filter((block) => block.type !== 'terminal_command') ?? []).toEqual(
+        []
+      );
+      const restored = new Loro();
+      restored.import(doc.export({ mode: 'snapshot' }));
+      expect(open(restored).historyWriter.read('first')).toEqual(writer.read('first'));
+    }
+  );
 
   it('freezes the same default emoji displayed by the Role catalog', () => {
     const role = snapshotAgentRole({ id: 'reviewer' as never, revision: 1, name: 'Reviewer' });
@@ -450,7 +595,7 @@ describe('single history writer', () => {
       {
         type: 'tool_call',
         nativeTurnId: 'turn-b',
-        content: [{ type: 'content', content: { type: 'text', text: 'file contents' } }],
+        content: [{ type: 'terminal_output', output: 'file contents' }],
       },
     ]);
     expect(task.run?.items.at(-1)).not.toHaveProperty('_meta.lody.subagentRaw');

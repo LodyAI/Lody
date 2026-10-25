@@ -177,7 +177,7 @@ export function CloudPlatformProvider({ children }: { children: ReactNode }) {
     const native = electron ? getIpcServices()?.e2ee : undefined;
     return createCloudE2eeWorkspaces({
       session: () => sessionStore.get(),
-      ...(native ? { prepareCreation: (request) => native.prepareCreation(request) } : {}),
+      ...(native ? { prepareCreation: (request) => native.prepareCreation(request), runtime: { recordCreated: (request) => native.recordCreated(request), open: (workspaceId, observed) => native.open(workspaceId, observed), close: (workspaceId) => native.close(workspaceId), status: (workspaceId) => native.status(workspaceId), ingestLedgerRecords: (workspaceId, page) => native.ingestLedgerRecords(workspaceId, page), ledgerView: (workspaceId) => native.ledgerView(workspaceId) } } : {}),
       remote: {
         create: (request) => cloudClient.action(cloudOperations.e2eeWorkspaces.create, request),
         describe: (request) => cloudClient.query(cloudOperations.e2eeWorkspaces.describe, request),

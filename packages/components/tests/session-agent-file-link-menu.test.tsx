@@ -22,8 +22,15 @@ const probePathLaunchers = vi.fn(async (payload: { launchers: Array<{ launcherId
   availableIds: payload.launchers.map((launcher) => launcher.launcherId),
 }));
 vi.mock('../src/lib/electron-ipc-client', () => ({
+  onIpcEvent: () => () => {},
   getIpcServices: () => ({
-    app: { revealLocalPath, openLocalPath, launchLocalPath, probePathLaunchers },
+    app: {
+      revealLocalPath,
+      openLocalPath,
+      launchLocalPath,
+      probePathLaunchers,
+      getFullscreen: async () => false,
+    },
   }),
 }));
 
@@ -33,6 +40,12 @@ vi.mock('../src/lib/clipboard', () => ({
 }));
 vi.mock('@/lib/toast', () => ({
   toast: { error: vi.fn(), success: vi.fn() },
+}));
+
+const requestFilePreview = vi.fn();
+vi.mock('../src/atoms/runtime', async (importOriginal) => ({
+  ...(await importOriginal<object>()),
+  activeWorkspaceRuntimeAtom: atom(() => ({ requestFilePreview })),
 }));
 
 import type { SessionMeta } from '@lody/shared';
@@ -71,6 +84,7 @@ describe('SessionAgentFileLinkMenuProvider', () => {
     launchLocalPath.mockClear();
     probePathLaunchers.mockClear();
     writeTextToClipboard.mockClear();
+    requestFilePreview.mockReset();
     (window as { __LODY_ELECTRON__?: boolean }).__LODY_ELECTRON__ = true;
     (window as { __LODY_PLATFORM__?: { os: string } }).__LODY_PLATFORM__ = { os: 'darwin' };
     container = document.createElement('div');
@@ -169,8 +183,70 @@ describe('SessionAgentFileLinkMenuProvider', () => {
     });
 
     expect(writeTextToClipboard).toHaveBeenLastCalledWith('/tmp/build/Lody.zip');
+    expect(requestFilePreview).not.toHaveBeenCalled();
     expect(openLocalPath).not.toHaveBeenCalled();
     expect(revealLocalPath).not.toHaveBeenCalled();
     expect(launchLocalPath).not.toHaveBeenCalled();
+  });
+
+  it('acts on the worktree file the user picks for an ambiguous relative link', async () => {
+    const candidate = (worktree: string) => ({
+      path: `${worktree}/src/a.ts`,
+      absolutePath: `/repo/${worktree}/src/a.ts`,
+      worktreeRoot: `/repo/${worktree}`,
+      branch: `refs/heads/${worktree}`,
+      head: '0123456789abcdef',
+      mtimeMs: 0,
+    });
+    requestFilePreview.mockResolvedValue({
+      status: 'resolved-link',
+      v: 3,
+      candidates: [candidate('wt-a'), candidate('wt-b')],
+    });
+    await act(async () => {
+      root?.render(
+        createElement(
+          Provider,
+          null,
+          createElement(
+            'section',
+            { 'data-testid': 'side-session' },
+            createElement(
+              SessionAgentFileLinkMenuProvider,
+              { session: SIDE_SESSION },
+              createElement(MarkdownRenderer, { text: '[a.ts](src/a.ts)' })
+            )
+          )
+        )
+      );
+      await Promise.resolve();
+    });
+    const region = container?.querySelector<HTMLElement>('[data-testid="side-session"]');
+    if (!region) throw new Error('Session region did not render');
+
+    const copyPath = (await openContextMenu(region)).querySelector<HTMLElement>(
+      '[role="menuitem"]'
+    );
+    if (!copyPath) throw new Error('Copy Path action did not render');
+    await act(async () => {
+      copyPath.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+      await Promise.resolve();
+    });
+    expect(requestFilePreview).toHaveBeenCalledWith(
+      SIDE_SESSION.machineId,
+      expect.objectContaining({ path: 'src/a.ts', resolveMarkdownLink: true }),
+      expect.anything()
+    );
+    expect(writeTextToClipboard).not.toHaveBeenCalled();
+
+    const choices = [...document.querySelectorAll('button')].filter(
+      (button) => button.textContent === 'Open this file'
+    );
+    expect(choices).toHaveLength(2);
+    await act(async () => {
+      choices[1]!.click();
+      await Promise.resolve();
+    });
+    expect(writeTextToClipboard).toHaveBeenLastCalledWith('/repo/wt-b/src/a.ts');
   });
 });

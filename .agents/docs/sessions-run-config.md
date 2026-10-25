@@ -54,12 +54,6 @@ this page is the full text of the rules summarised there.
   Submenus do not center against the whole parent
   popup or clamp to its bottom. Intent:
   [run-config submenu placement](../../specs/composer-run-config-submenu-placement.md).
-  Builtin DeepSeek Harness sessions using a non-Pro model show the same linked
-  delegation-cost warning here and in `MobileRunConfigSheet`: until upstream DSH
-  fixes child-route inheritance, a delegated child may use the session's
-  creation-time DeepSeek-V4-Pro seed rather than the parent's visible model.
-  Keep the warning tied to that agent/model combination and its upstream
-  discussion rather than turning it into a global banner.
   Agent/Model/Reasoning option selection closes the dropdown and must not return
   keyboard focus to its trigger; Plan/Fast toggle rows intentionally stay open.
   Once the model list reaches `OPTION_SEARCH_MIN_OPTIONS`

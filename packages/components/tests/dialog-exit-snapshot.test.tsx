@@ -2,7 +2,7 @@
 
 import { act, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { useDialogExitSnapshot } from '../src/hooks/use-dialog-exit-snapshot';
 import { Dialog } from '../src/ui/dialog';
@@ -17,6 +17,7 @@ import { Dialog } from '../src/ui/dialog';
  * so the test supplies one whose `finished` it resolves itself.
  */
 function holdExitAnimation(): { finish: () => void; restore: () => void } {
+  vi.stubGlobal('BASE_UI_ANIMATIONS_DISABLED', false);
   let finish = () => {};
   const finished = new Promise<void>((resolve) => {
     finish = resolve;
@@ -74,6 +75,7 @@ describe('useDialogExitSnapshot', () => {
     host?.remove();
     root = null;
     host = null;
+    vi.unstubAllGlobals();
   });
 
   it('keeps the closing panel drawn with its body until the exit finishes', async () => {

@@ -626,6 +626,7 @@ Agent config 命令对应 Web 端的[代理配置](/zh/docs/quickstart)。
 | `lody agent-config list`                 | 列出 workspace 中的 agent config           | `lody agent-config list --help`                 |
 | `lody agent-config show`                 | 查看单个 agent config                      | `lody agent-config show --help`                 |
 | `lody agent-config create`               | 创建新的 agent config                      | `lody agent-config create --help`               |
+| `lody agent-config import-magpie` | 导入本机 Magpie Provider | `lody agent-config import-magpie --help` |
 | `lody agent-config update`               | 更新已有 agent config                      | `lody agent-config update --help`               |
 | `lody agent-config delete`               | 删除 agent config                          | `lody agent-config delete --help`               |
 | `lody agent-config refresh-capabilities` | 刷新支持的 modes、models 与 config options | `lody agent-config refresh-capabilities --help` |
@@ -675,6 +676,16 @@ lody agent-config create \
 ```bash
 lody agent-config create --help
 ```
+
+### agent-config import-magpie
+
+在服务器本机导入 Magpie Provider，支持全部导入或指定 Agent：
+
+```bash
+lody agent-config import-magpie --workspace my-team --json
+```
+
+准备步骤、参数和结果说明见[接入 Magpie](/zh/docs/magpie)。
 
 ### agent-config update
 

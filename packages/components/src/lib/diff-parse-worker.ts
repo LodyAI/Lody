@@ -2,7 +2,6 @@ import type { FileDiffMetadata, SupportedLanguages } from '@pierre/diffs';
 import type { DiffTextChunkSide, DiffTextChunkSource } from './diff-text-chunk-source';
 import DiffParseWorker from './diff-parse.worker?worker';
 import { logDiffPerf, logDiffPerfDurationLazy, getDiffPerfNow } from './diff-perf';
-import { stripParsedFileDiffFullText } from './code-collab-diff-metadata-bounds';
 import { createWebWorkerRequestClient } from './web-worker-request-client';
 
 const DEFAULT_DIFF_PARSE_WORKER_TIMEOUT_MS = 8_000;
@@ -154,7 +153,7 @@ const workerClient = createWebWorkerRequestClient<DiffParseWorkerResponse>({
     if ('result' in message) {
       client.finish(message.id, {
         type: 'success',
-        result: stripParsedFileDiffFullText(message.result),
+        result: message.result,
         workerDurationMs: message.durationMs,
       } satisfies DiffParseWorkerOutcome);
       return;

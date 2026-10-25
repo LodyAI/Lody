@@ -26,7 +26,7 @@ const meta = {
 export default meta;
 type Story = StoryObj<typeof meta>;
 
-/** A full week: code shipped with its activity wall, merged PRs, streak, the agents and the repository. */
+/** A full week: code shipped with its activity wall, merged PRs, the agents and the repository. */
 export const Busy: Story = {};
 
 /** Two sessions: the comparison is omitted and the repository share is of very few sessions. */

@@ -127,7 +127,6 @@ export function useSessionDoc(
       notification: undefined,
       preview: undefined,
       externalHistoryCursor: undefined,
-      roostHistoryCursor: undefined,
       acpRuntimeConfig: undefined,
     }),
     [sessionId]

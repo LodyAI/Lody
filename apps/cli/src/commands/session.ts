@@ -1036,7 +1036,7 @@ async function checkSessionTurnQuotaAndReadHistory(args: {
 export async function runSessionOperationWithSyncedMetadata(
   manager: LoroDocumentManager,
   sessionId: SessionId,
-  operation: SessionOperation
+  operation: Extract<SessionOperation, 'archive' | 'restore' | 'delete'>
 ): Promise<SessionId[]> {
   const reason = `session.${operation}:${sessionId}`;
   await syncWorkspaceMetaForRead(manager, `${reason}:prewrite`);
@@ -2641,7 +2641,14 @@ export async function confirmDispatchSyncedBestEffort(args: {
       );
       return;
     }
-    await ensureWorkspaceMetaSynced(args.manager, `${args.reason}:meta`);
+    // Best effort, on the synchronous tail of create: keep the short default
+    // wait instead of the failing confirmation budget.
+    if (!(await args.manager.waitUntilMetaSynced({ reason: `${args.reason}:meta` }))) {
+      logger.warn(
+        `Session dispatch not yet confirmed by Loro Streams (${args.reason}:meta); ` +
+          `the durable dispatch pointer will converge on reconnect.`
+      );
+    }
   } catch (error) {
     logger.warn(
       `Session dispatch confirmation did not complete (${args.reason}); ` +

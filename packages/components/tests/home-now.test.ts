@@ -13,6 +13,7 @@ import {
   HOME_NOW_LISTS,
   HOME_NOW_ROW_BUDGET,
   HOME_NOW_ROW_CAP,
+  HOME_NOW_TALLEST_COLUMN,
   allocateHomeNowRows,
   homeNowBlockHeight,
   layoutHomeNow,
@@ -186,23 +187,59 @@ describe("spending the board's height", () => {
           }
   });
 
-  it('keeps the two columns level instead of pairing a long list with a short one', () => {
-    // Needs you (9 tall with its "Show all") on the left; usage (4) then running (7) on the right;
-    // the short lists then go to whichever side is lower. The left ends two rows short (13 of
-    // 15), so just finished shows two more of its own rows rather than leaving a band.
+  it('keeps every list in its own place, the columns level', () => {
+    // Needs you and just finished on the left, the usage, running and worth continuing on the
+    // right. The left ends two rows short (13 of 15), so just finished shows two more of its own
+    // rows rather than leaving a band.
     expect(shape(layoutHomeNow(totals(30, 10, 8, 6), true))).toEqual([
       ['attention:6', 'finished:3'],
       ['usage', 'running:4', 'next:1'],
     ]);
+    // A list with nothing keeps its place as its title.
     expect(shape(layoutHomeNow(totals(1, 1, 0, 0), true))).toEqual([
-      ['attention:1', 'running:1'],
-      ['usage'],
+      ['attention:1', 'finished:0'],
+      ['usage', 'running:1', 'next:0'],
     ]);
   });
 
-  it('lets a lone list take the whole board, and two lists share it', () => {
-    expect(shape(layoutHomeNow(totals(0, 0, 0, 12), false))).toEqual([['next:3']]);
-    expect(shape(layoutHomeNow(totals(20, 0, 0, 1), false))).toEqual([['attention:6'], ['next:1']]);
+  it('never moves a list to another column, whatever the others hold', () => {
+    const sizes = [0, 1, 3, 9, 40];
+    const columnOf = (layout: ReturnType<typeof layoutHomeNow>) =>
+      Object.fromEntries(
+        layout.columns.flatMap((column, index) =>
+          column.flatMap((block) => (block.kind === 'list' ? [[block.key, index]] : []))
+        )
+      );
+    for (const hasUsage of [false, true])
+      for (const a of sizes)
+        for (const r of sizes)
+          for (const f of sizes)
+            for (const n of sizes) {
+              const layout = layoutHomeNow(totals(a, r, f, n), hasUsage);
+              // Nothing at all happening is the one case with no lists at all: the board
+              // says so in a single card instead.
+              if (a + r + f + n === 0) {
+                expect(columnOf(layout)).toEqual({});
+                continue;
+              }
+              expect(columnOf(layout)).toEqual({ attention: 0, finished: 0, running: 1, next: 1 });
+            }
+  });
+
+  it('keeps the tallest column any lists can make for the board', () => {
+    expect(HOME_NOW_TALLEST_COLUMN).toBe(17);
+    for (const hasUsage of [false, true])
+      for (const a of [0, 1, 6, 40])
+        for (const r of [0, 1, 4, 40])
+          for (const f of [0, 1, 3, 40])
+            for (const n of [0, 1, 3, 40])
+              for (const column of layoutHomeNow(totals(a, r, f, n), hasUsage).columns) {
+                const height = column.reduce(
+                  (sum, block) => sum + homeNowBlockHeight(block, totals(a, r, f, n)),
+                  0
+                );
+                expect(height).toBeLessThanOrEqual(HOME_NOW_TALLEST_COLUMN);
+              }
   });
 
   it('gives way to a short window, lower lists first, and says when one row each is too tall', () => {
@@ -213,7 +250,7 @@ describe("spending the board's height", () => {
       ['attention:5', 'finished:1'],
       ['usage', 'running:1', 'next:1'],
     ]);
-    // One row each is twelve tall too; eleven has no room for it.
+    // One row each, with its "Show all", is twelve tall at the right; eleven has no room for it.
     expect(layoutHomeNow(totals(30, 10, 8, 6), true, 11).fits).toBe(false);
     expect(layoutHomeNow(totals(30, 10, 8, 6), true).fits).toBe(true);
   });
@@ -230,7 +267,7 @@ describe("spending the board's height", () => {
               const blocks = layout.columns.flat();
               for (const key of HOME_NOW_LISTS) {
                 const block = blocks.find((item) => item.kind === 'list' && item.key === key);
-                expect(block != null).toBe(given[key] > 0);
+                expect(block?.kind === 'list' && block.shown > 0).toBe(given[key] > 0);
                 if (block?.kind === 'list') expect(block.shown).toBeLessThanOrEqual(given[key]);
               }
               if (!layout.fits) continue;
@@ -244,7 +281,8 @@ describe("spending the board's height", () => {
             }
   });
 
-  it('is one calm tile when nothing is going on', () => {
+  it('says so in one card when nothing is going on', () => {
+    // Every list empty: one statement stays beside the usage instead of four empty list tiles.
     expect(shape(layoutHomeNow(totals(0, 0, 0, 0), true))).toEqual([['quiet'], ['usage']]);
     expect(shape(layoutHomeNow(totals(0, 0, 0, 0), false))).toEqual([['quiet']]);
   });

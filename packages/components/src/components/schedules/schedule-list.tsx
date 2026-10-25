@@ -807,7 +807,9 @@ export function ScheduleListView({
   const isElectronFullscreen = useElectronFullscreen();
   const windowDrag = useWindowDragRegionClass();
   const windowsCaptionPadClass = useWindowsCaptionPadClass();
-  const macTrafficLightRowPadClass = useMacTrafficLightRowPadClass();
+  const macTrafficLightRowPadClass = useMacTrafficLightRowPadClass({
+    insideWorkspaceFrame: true,
+  });
   const windowsCaptionRowPadClass = useWindowsCaptionRowPadClass();
   const hasMacOSTitlebarInset =
     !isNativeAppShell() && isMacOSElectronRenderer() && !isElectronFullscreen;

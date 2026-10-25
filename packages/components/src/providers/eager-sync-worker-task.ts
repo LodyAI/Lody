@@ -1,3 +1,4 @@
+import { requirePlaintextWorkspaceStreamsContent } from '@lody/shared/workspace-streams-content';
 import { LoroDoc, VersionVector } from 'loro-crdt';
 import { base64ToBytes } from '@lody/shared/local-loro-data-plane';
 import {
@@ -19,6 +20,7 @@ export async function runEagerSyncWorkerTask(
     now?: () => number;
   }
 ) {
+  requirePlaintextWorkspaceStreamsContent(request.content);
   const cached = await (deps.readSnapshot ?? readEagerSyncSnapshot)(request.scope, request.roomId);
   if (cached?.plane === request.transport.plane && cached.lastMessageAt >= request.lastMessageAt) {
     return 'synced' as const;

@@ -10,7 +10,7 @@ import {
   streamsRoomBinding,
   type StreamsRoomBinding,
 } from './streams-room-binding';
-import { readTimeoutEnv, withTimeout } from './timeout-utils';
+import { readTimeoutEnv, SYNC_CONFIRMATION_TIMEOUT_MS, withTimeout } from './timeout-utils';
 
 type MachineFlockSyncState = {
   machineId: MachineId;
@@ -177,7 +177,8 @@ export class MachineFlockSyncCoordinator {
 
     const syncVersion = state.dirtyVersion;
     const timeoutMs =
-      options.timeoutMs ?? readTimeoutEnv('LODY_LORO_SYNC_MACHINE_FLOCK_TIMEOUT_MS', 8_000);
+      options.timeoutMs ??
+      readTimeoutEnv('LODY_LORO_SYNC_MACHINE_FLOCK_TIMEOUT_MS', SYNC_CONFIRMATION_TIMEOUT_MS);
     const timeoutMessage = `Timeout waiting for machine Flock doc sync (doc=${state.docId})`;
 
     try {

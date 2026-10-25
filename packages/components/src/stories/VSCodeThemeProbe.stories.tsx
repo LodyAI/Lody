@@ -1,3 +1,4 @@
+import { canUseWASM } from '@pierre/diffs';
 import type { Meta, StoryObj } from '@storybook/react';
 import { MarkdownRenderer } from '@/components/ai-gui/markdown-renderer';
 import { TerminalComponent } from '@/components/ai-gui/terminal-component';
@@ -59,7 +60,7 @@ const newDiffText = [
   '};',
 ].join('\n');
 
-const fileViewerFile: FileProps<undefined>['file'] = {
+const fileViewerFile: FileProps<undefined, undefined>['file'] = {
   name: 'theme-probe.ts',
   lang: 'ts' as never,
   contents: [
@@ -155,7 +156,8 @@ function VSCodeThemeProbe() {
             </div>
             <FileViewer
               file={fileViewerFile}
-              options={{ disableFileHeader: true, theme: activeDiffThemeName }}
+              options={{ disableFileHeader: true, preferredHighlighter: canUseWASM() ? 'highlights' : 'shiki-js',
+                theme: activeDiffThemeName }}
             />
           </section>
 

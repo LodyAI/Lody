@@ -652,6 +652,7 @@ describe('command runtime helpers', () => {
     ).rejects.toThrow('Workspace metadata changes were not confirmed by Loro Streams');
     expect(manager.waitUntilMetaSynced).toHaveBeenCalledWith({
       reason: 'session.archive:session-1',
+      timeoutMs: 30_000,
     });
   });
 

@@ -41,6 +41,16 @@ async function finishTransition(page: Page) {
   });
 }
 
+/** The switching pictures drift outside their snapshot box; the box must not shear an edge. */
+async function expectBoardDriftUnclipped(page: Page, time: number) {
+  const overflow = await page.evaluate((sampleTime) => {
+    for (const animation of document.getAnimations()) animation.currentTime = sampleTime;
+    return getComputedStyle(document.documentElement, '::view-transition-group(home-board)')
+      .overflow;
+  }, time);
+  expect(overflow).toBe('visible');
+}
+
 /** Check rendered ink, since DOM visibility alone cannot detect a snapshot hiding text. */
 async function expectReadableLabels(page: Page, time: number) {
   const boxes = await page.evaluate((sampleTime) => {
@@ -95,17 +105,18 @@ async function expectReadableLabels(page: Page, time: number) {
 }
 
 for (const width of [1180, 720]) {
-  test(`keeps labels readable and moves the switch with the stage at ${width}px`, async ({
-    page,
-  }) => {
+  test(`keeps labels readable and the switch in place at ${width}px`, async ({ page }) => {
     await openLanding(page, width);
     for (const board of ['week', 'now']) {
       const label = page.locator(`[data-segment=${board}] > [style*="home-${board}-label"]`);
       const before = await label.boundingBox();
       await switchTo(page, `[data-segment=${board}]`);
+      // Switching boards never moves the switch: the board's slot keeps one height, and both
+      // segments keep their summaries, so the next press lands where this one did.
       const after = await label.boundingBox();
-      expect(Math.abs(after!.y - before!.y)).toBeGreaterThan(5);
-      // At the start of the transition the label still occupies its old stage position.
+      expect(Math.abs(after!.y - before!.y)).toBeLessThan(1);
+      expect(Math.abs(after!.x - before!.x)).toBeLessThan(1);
+      // At the start of the transition the label occupies the same place.
       const startY = await page.evaluate((targetBoard) => {
         const style = getComputedStyle(
           document.documentElement,
@@ -114,7 +125,10 @@ for (const width of [1180, 720]) {
         return new DOMMatrix(style.transform).f;
       }, board);
       expect(startY).toBeCloseTo(before!.y, 0);
-      for (const time of [0, 80, 160, 239]) await expectReadableLabels(page, time);
+      for (const time of [0, 80, 160, 239]) {
+        await expectReadableLabels(page, time);
+        await expectBoardDriftUnclipped(page, time);
+      }
       await finishTransition(page);
       await expect(page.getByTestId(board === 'now' ? 'home-now' : 'home-week')).toBeVisible();
     }
