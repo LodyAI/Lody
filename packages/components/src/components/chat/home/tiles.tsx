@@ -398,6 +398,7 @@ function UsageSourcePicker({
             <Menu.RadioItem
               key={candidate.id}
               value={candidate.id}
+              closeOnClick
               icon={agentIcon ? agentIcon(candidate) : undefined}
               indicator="check"
               indicatorSide="end"

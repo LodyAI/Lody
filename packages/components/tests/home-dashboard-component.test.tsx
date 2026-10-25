@@ -480,6 +480,28 @@ describe('HomeDashboard', () => {
       expect(trigger.textContent).toBe('Claude');
       expect(trigger.getAttribute('aria-haspopup')).toBe('menu');
     });
+
+    it.each([CODEX, CLAUDE])('closes the usage picker after choosing $name', async (candidate) => {
+      const selected: string[] = [];
+      render({
+        usage: usage(),
+        usageSources: [CODEX, CLAUDE],
+        usageSourceId: CODEX.id,
+        onUsageSourceChange: (id) => selected.push(id),
+      });
+      const trigger = byTestId('home-week-usage-source')!;
+      await act(async () => trigger.click());
+      expect(trigger.getAttribute('aria-expanded')).toBe('true');
+      const option = Array.from(
+        document.querySelectorAll<HTMLElement>('[role="menuitemradio"]')
+      ).find((item) => item.textContent === candidate.name)!;
+      expect(option).toBeDefined();
+
+      await act(async () => option.click());
+
+      expect(trigger.getAttribute('aria-expanded')).toBe('false');
+      expect(selected).toEqual(candidate.id === CODEX.id ? [] : [candidate.id]);
+    });
   });
 
   describe('the line', () => {

@@ -45,6 +45,10 @@ records the failure and browser verification.
 [`home/week-bento.tsx`](home/week-bento.tsx) keeps each agent's icon beside its name and
 session share, above its own meter, rather than collecting icons in the tile header.
 
+The plan-usage Provider picker in [`home/tiles.tsx`](home/tiles.tsx) closes when a
+Provider is selected, including the current selection. Its radio items explicitly
+set `closeOnClick`; Base UI otherwise keeps radio menus open.
+
 The stage also tells its group how tall it is: [`landing-stage.ts`](landing-stage.ts) provides
 the stage and group elements, and `useLandingRoom` turns them into the height the dashboard may
 take (the stage less the rest of the group, independent of the dashboard's own height). The
