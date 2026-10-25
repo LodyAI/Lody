@@ -106,6 +106,50 @@ describe('SessionProjectMembersChip', () => {
     expect(document.querySelector('[role="listitem"]')).toBeNull();
   });
 
+  it.each(['additional', 'link'] as const)(
+    'shows the absolute directory for %s access with a fallback when unavailable',
+    async (access) => {
+      container = document.createElement('div');
+      document.body.appendChild(container);
+      root = createRoot(container);
+      const localRow = {
+        id: 'docs' as ProjectMemberId,
+        path: 'docs',
+        kind: 'local' as const,
+        isSubmodule: false,
+        depth: 0,
+        access,
+      };
+      const render = (localRootPath?: string) => (
+        <SessionProjectMembersChip
+          groupName="Shop"
+          rows={[{ ...localRow, localRootPath }]}
+          onSelectMember={() => undefined}
+          onOpenPullRequest={() => undefined}
+          defaultOpen
+        />
+      );
+      const path = '/srv/projects/a long directory/documentation';
+      await act(async () => {
+        root!.render(render(path));
+      });
+      const item = document.querySelector('[role="listitem"]')!;
+      expect(item.textContent).toContain(path);
+      expect(item.textContent).not.toContain('Original directory');
+      expect(item.querySelector('[title]')?.getAttribute('title')).toBe(
+        `${path} · Original directory · not isolated`
+      );
+      expect(item.querySelector('button')?.getAttribute('aria-label')).toContain(path);
+      await act(async () => {
+        root!.render(render());
+      });
+      expect(document.querySelector('[role="listitem"]')?.textContent).toContain(
+        'Original directory · not isolated'
+      );
+      expect(document.querySelector('[role="listitem"]')?.textContent).not.toContain(path);
+    }
+  );
+
   it('opening a row’s pull request also selects that repository', async () => {
     const onSelectMember = vi.fn();
     const onOpenPullRequest = vi.fn();

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { ProjectMemberId, SessionMeta } from '@lody/shared';
+import type { LocalProjectId, MachineId, ProjectMemberId, SessionMeta } from '@lody/shared';
 import {
   buildSessionProjectMemberRows,
   resolveSessionProjectMemberRow,
@@ -111,24 +111,51 @@ describe('buildSessionProjectMemberRows', () => {
     expect(buildSessionProjectMemberRows({ pullRequests: [] })).toEqual([]);
   });
 
-  it('carries how each member reached the agent', () => {
-    const rows = buildSessionProjectMemberRows({
-      projectRun: {
-        ...projectRun,
-        members: {
+  it.each(['additional', 'link'] as const)(
+    'resolves the registered directory for %s access',
+    (access) => {
+      const meta = {
+        projectRun: {
+          ...projectRun,
+          members: {
+            docs: {
+              o: 0,
+              access,
+              src: { kind: 'local', machineId: 'm1', localProjectId: 'docs' },
+              placement: { kind: 'root', dir: 'docs' },
+              path: 'docs',
+              base: 'HEAD',
+            },
+          },
+        } as unknown as NonNullable<SessionMeta['projectRun']>,
+        pullRequests: [],
+      };
+      const context = {
+        machineId: 'm1' as MachineId,
+        localProjects: {
           docs: {
-            o: 0,
-            access: 'additional',
-            src: { kind: 'local', machineId: 'm1', localProjectId: 'docs' },
-            placement: { kind: 'root', dir: 'docs' },
-            path: 'docs',
-            base: 'HEAD',
+            id: 'docs' as LocalProjectId,
+            name: 'Docs',
+            rootPath: '/srv/projects/documentation',
+            createdAtMs: 1,
           },
         },
-      } as unknown as NonNullable<SessionMeta['projectRun']>,
-      pullRequests: [],
-    });
-    expect(rows[0]).toMatchObject({ path: 'docs', access: 'additional' });
-    expect(rows[0]!.pr).toBeUndefined();
-  });
+      };
+      const rows = buildSessionProjectMemberRows(meta, context);
+      expect(rows[0]).toMatchObject({
+        path: 'docs',
+        access,
+        localRootPath: '/srv/projects/documentation',
+      });
+      expect(buildSessionProjectMemberRows(meta)[0]?.localRootPath).toBeUndefined();
+      expect(
+        buildSessionProjectMemberRows(meta, { ...context, machineId: 'other' as MachineId })[0]
+          ?.localRootPath
+      ).toBeUndefined();
+      expect(
+        buildSessionProjectMemberRows(meta, { ...context, localProjects: {} })[0]?.localRootPath
+      ).toBeUndefined();
+      expect(rows[0]!.pr).toBeUndefined();
+    }
+  );
 });

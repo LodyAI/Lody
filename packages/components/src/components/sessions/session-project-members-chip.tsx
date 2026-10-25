@@ -195,9 +195,9 @@ export function SessionProjectMembersChip({
                 onSelect={
                   onSelectMember
                     ? () => {
-                      onSelectMember(row.id);
-                      close();
-                    }
+                        onSelectMember(row.id);
+                        close();
+                      }
                     : undefined
                 }
                 onOpenPullRequest={onOpenPullRequest}
@@ -228,11 +228,15 @@ function MemberRow({
   const ciTone = row.pr?.ciState ? CI_ICON_TONE[row.pr.ciState] : undefined;
   const ciLabel = getCiLabel(t, row.pr?.ciState);
   const identity = row.repoFullName ?? row.path;
-  const location = inPlace
+  const inPlaceHint = inPlace
     ? t('sessions.projectMembers.inPlace', 'Original directory · not isolated')
-    : (row.branch ?? '');
+    : undefined;
+  const location = inPlace ? (row.localRootPath ?? inPlaceHint) : (row.branch ?? '');
+  const locationTitle = [location, inPlace && row.localRootPath ? inPlaceHint : null]
+    .filter(Boolean)
+    .join(' · ');
   const showPath = Boolean(row.repoFullName && row.repoFullName !== row.path);
-  const label = [identity, row.path, location].filter(Boolean).join(' · ');
+  const label = [identity, row.path, locationTitle].filter(Boolean).join(' · ');
   const content = (
     <>
       <span {...stylex.props(styles.identity, selected && styles.identitySelected)}>
@@ -252,7 +256,7 @@ function MemberRow({
           </>
         ) : null}
         {location ? (
-          <span {...stylex.props(styles.branch)} title={location}>
+          <span {...stylex.props(styles.branch)} title={locationTitle}>
             {location}
           </span>
         ) : null}

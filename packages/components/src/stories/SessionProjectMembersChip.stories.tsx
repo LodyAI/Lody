@@ -41,6 +41,7 @@ const rows: SessionProjectMemberRow[] = [
     isSubmodule: false,
     depth: 0,
     access: 'additional',
+    localRootPath: '/Users/example/Projects/shop/documentation',
   },
 ];
 

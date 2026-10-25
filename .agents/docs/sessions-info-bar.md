@@ -226,7 +226,10 @@ Repositories chip through the bar's `projectMembers` slot. Like Relations it is 
 plain cluster action, never staged. Its popover lists every frozen Member in
 placement order (each root followed by its submodules, siblings in snapshot
 order), indented by depth, with the repository identity, directory, branch or
-in-place label, and current PR when one exists. A repository without a PR
+registered absolute directory for an in-place local Member, and current PR when one exists.
+The directory comes from the matching machine/project catalog; absent metadata keeps
+the in-place label. The full path and non-isolation notice remain in its hover title
+and accessible selection label. A repository without a PR
 leaves the slot empty, and unpublished work gets no separate dot. CI is the PR
 glyph's tone (green passing, red failing, amber running) while its shape keeps
 the PR status. Clicking a row selects that repository and closes the panel.

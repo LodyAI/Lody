@@ -54,6 +54,11 @@ desktop app.
   carries every Member and its current PR/CI, so a second list would duplicate
   the source and split the selection between two surfaces.
 
+- In-place local rows now show the registered absolute directory from the matching
+  machine/project catalog. The full path and non-isolation notice remain in the
+  hover title and accessible label; missing catalog data retains the original label.
+  This display-only projection does not persist host paths into the frozen snapshot.
+
 ## Evidence
 
 - `packages/components/tests/session-project-members.test.ts` covers nested
@@ -70,7 +75,12 @@ desktop app.
 
 ## Verification and limits
 
-Typecheck and the tests above pass. The panel has not been driven against a real
+Typecheck and the tests above pass. The absolute-directory update passes the two
+member suites (10 tests) and the components typecheck; targeted lint has no errors.
+Its real Storybook component was rendered and visually inspected using headless
+Playwright; the in-place row displays the complete synthetic absolute path.
+The documentation check reports 31 missing links into other uninitialized ACP
+submodules in this checkout. The panel has not been driven against a real
 multi-repository daemon: submodule depth beyond the synthetic fixture, live CI
 and merge behavior on a non-default Member, and mobile popover sizing remain
 unverified end to end.

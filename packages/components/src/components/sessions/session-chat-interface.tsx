@@ -2795,8 +2795,12 @@ export const SessionChatInterface = memo(
     const projectMemberOwnerSession = workspaceSession ?? session;
     const sessionProjectRun = projectMemberOwnerSession.projectRun;
     const projectMemberRows = useMemo(
-      () => buildSessionProjectMemberRows(projectMemberOwnerSession),
-      [projectMemberOwnerSession]
+      () =>
+        buildSessionProjectMemberRows(projectMemberOwnerSession, {
+          machineId: session.machineId,
+          localProjects: sessionMachineLocalProjects,
+        }),
+      [projectMemberOwnerSession, session.machineId, sessionMachineLocalProjects]
     );
     const selectedProjectMemberId = useAtomValue(
       sessionProjectMemberSelectionAtomFamily(projectMemberOwnerSession.id)

@@ -8,6 +8,9 @@ import {
   type SessionMeta,
   type SessionProjectMember,
   type SessionPullRequestCiState,
+  type MachineId,
+  type LocalProjectId,
+  type LocalProjectMeta,
 } from '@lody/shared';
 
 /** One repository of a multi-repository conversation, as the Info Bar lists it. */
@@ -15,6 +18,8 @@ export type SessionProjectMemberRow = {
   id: ProjectMemberId;
   /** Path under the conversation's main directory, e.g. `api/proto`. */
   path: string;
+  /** Registered absolute directory on the owning machine, for in-place members. */
+  localRootPath?: string;
   kind: 'github' | 'local';
   isSubmodule: boolean;
   /** Nesting depth in the placement forest; roots are 0. */
@@ -50,7 +55,11 @@ function getSessionProjectMemberRepository(member: SessionProjectMember): string
  */
 export function buildSessionProjectMemberRows(
   meta: Pick<SessionMeta, 'projectRun' | 'pullRequests' | 'pullRequestState'> &
-    SessionPullRequestLifecycleFields
+    SessionPullRequestLifecycleFields,
+  localContext?: {
+    machineId: MachineId;
+    localProjects: Readonly<Record<LocalProjectId, LocalProjectMeta>>;
+  }
 ): SessionProjectMemberRow[] {
   const run = meta.projectRun;
   if (!run) return [];
@@ -84,9 +93,16 @@ export function buildSessionProjectMemberRows(
     const repoFullName = getSessionProjectMemberRepository(member);
     const pr = repoFullName ? currentByRepo.get(repoFullName.toLowerCase()) : undefined;
     const ciState = pr ? meta.pullRequestState?.[pr.url]?.s : undefined;
+    const localRootPath =
+      (member.access === 'additional' || member.access === 'link') &&
+      member.src.kind === 'local' &&
+      member.src.machineId === localContext?.machineId
+        ? localContext.localProjects[member.src.localProjectId]?.rootPath
+        : undefined;
     rows.push({
       id: memberId,
       path: member.path,
+      ...(localRootPath ? { localRootPath } : {}),
       kind: member.src.kind,
       isSubmodule: member.placement.kind === 'submodule',
       depth,
