@@ -436,8 +436,8 @@ describe('SessionTabBar rapid-close tab widths', () => {
           itemIds,
           activeItemId: standInActiveItemId(),
           gap: 6,
-          paddingLeft: 8,
-          paddingRight: 8,
+          paddingLeft: 3,
+          paddingRight: 3,
           activeMinWidth: 180,
         });
         const width = layout.items.find((item) => item.id === id)?.width ?? 0;
