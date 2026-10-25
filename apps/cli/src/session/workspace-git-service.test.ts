@@ -1,3 +1,7 @@
+import { Effect } from 'effect';
+import { NodeFileSystem } from '@effect/platform-node-shared';
+import { WorktreeGit, WorktreeGitCommandFailed } from './worktree/git-execution';
+import { probeLocalProjectMember } from './worktree/project-member-probe';
 import {
   reconcileProjectMemberLink,
   removeProjectMemberLinks,
@@ -995,6 +999,47 @@ describe('WorkspaceGitService', () => {
 });
 
 describe('non-Git member access', () => {
+  it.each([
+    [128, 'fatal: not a git repository (or any of the parent directories): .git', true],
+    [
+      128,
+      'fatal: not a git repository (or any parent up to mount point /)\nStopping at filesystem boundary (GIT_DISCOVERY_ACROSS_FILESYSTEM not set).',
+      true,
+    ],
+    [1, 'fatal: not a git repository (or any parent up to mount point /)', false],
+    [128, 'fatal: not a git repository: /broken/.git', false],
+    [128, 'fatal: failed to stat /private: Permission denied', false],
+  ] as const)('classifies discovery exit %s: %s', async (code, stderr, nonGit) => {
+    const root = await mkdtemp(join(tmpdir(), 'member-discovery-'));
+    const failure = new WorktreeGitCommandFailed({
+      args: ['rev-parse', '--show-toplevel'],
+      cwd: root,
+      code,
+      signal: null,
+      stdout: '',
+      stderr,
+      message: stderr,
+    });
+    try {
+      const result = Effect.runPromise(
+        probeLocalProjectMember(root).pipe(
+          Effect.provideService(
+            WorktreeGit,
+            WorktreeGit.of({
+              run: () => Effect.fail(failure),
+              probeCredentials: () => Effect.die('Unexpected credential probe'),
+            })
+          ),
+          Effect.provide(NodeFileSystem.layer)
+        )
+      );
+      if (nonGit) await expect(result).resolves.toEqual({ isGit: false, submodules: [] });
+      else await expect(result).rejects.toBe(failure);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it('rebuilds a replaced link from registration, rejects escapes and preserves target on cleanup', async () => {
     const base = await mkdtemp(join(tmpdir(), 'project-roots-'));
     try {

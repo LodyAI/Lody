@@ -28,7 +28,8 @@ export const probeLocalProjectMember = Effect.fn('probeLocalProjectMember')(func
     .pipe(
       Effect.catchTag('WorktreeGitCommandFailed', (error) =>
         error.code === 128 &&
-        error.stderr.includes('not a git repository (or any of the parent directories)')
+        (error.stderr.includes('not a git repository (or any of the parent directories)') ||
+          error.stderr.includes('not a git repository (or any parent up to mount point '))
           ? Effect.succeed(null)
           : Effect.fail(error)
       )
