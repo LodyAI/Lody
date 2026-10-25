@@ -78,122 +78,136 @@ export async function fetchAcpCapabilities(
     waitForTerminalExit: async () => ({ exitCode: null, signal: null }),
     killTerminal: async () => {},
   };
-  const isolatedWorkdir = options.codexProfile
-    ? await mkdtemp(path.join(os.tmpdir(), 'lody-codex-verify-'))
-    : undefined;
-  const workdir = isolatedWorkdir ?? process.cwd();
-  const { agentProcess, client, acpSessionId, sessionResponse, capabilitySourceVersion } =
-    await startLocalAcpAgent({
-      codexProfile: options.codexProfile,
-      cliType,
-      agentType,
-      customAcp,
-      runtimeOverrides,
-      agentConfigId: options.agentConfigId,
-      magpieGatewayUrl: options.magpieGatewayUrl,
-      workdir,
-      env: probeEnv,
-      onManagedRuntimeProgress: options.onManagedRuntimeProgress,
-      signal: options.signal,
-      logger,
-      terminalManager: noopTerminalManager,
-      terminalEnabled: false,
-      onUpdateMessage: () => {},
-      onRequestPermission: async () => ({ outcome: { outcome: 'cancelled' } }),
-    }).catch(async (error: unknown) => {
-      if (isolatedWorkdir) await rm(isolatedWorkdir, { recursive: true, force: true });
-      throw error;
-    });
-
+  // Providers may create workspace-local files during session/new. Never use
+  // the daemon's inherited cwd (which can be /) or a user's project for probes.
+  const workdir = await mkdtemp(path.join(os.tmpdir(), 'lody-acp-capabilities-'));
   try {
-    if (options.verifyCodexCredential && options.codexProfile?.profile.profile.mode === 'api-key') {
-      const key = options.codexProfile.candidateKey;
-      if (!key) throw new Error('Codex credential verification requires a candidate key');
-      const broker = await startCodexCredentialBroker({
-        baseUrl: options.codexProfile.profile.profile.baseUrl,
-        apiKey: key,
+    options.signal?.throwIfAborted();
+    const { agentProcess, client, acpSessionId, sessionResponse, capabilitySourceVersion } =
+      await startLocalAcpAgent({
+        codexProfile: options.codexProfile,
+        cliType,
+        agentType,
+        customAcp,
+        runtimeOverrides,
+        agentConfigId: options.agentConfigId,
+        magpieGatewayUrl: options.magpieGatewayUrl,
+        workdir,
+        env: probeEnv,
+        onManagedRuntimeProgress: options.onManagedRuntimeProgress,
         signal: options.signal,
+        logger,
+        terminalManager: noopTerminalManager,
+        terminalEnabled: false,
+        onUpdateMessage: () => {},
+        onRequestPermission: async () => ({ outcome: { outcome: 'cancelled' } }),
       });
-      try {
-        const models = normalizeAcpSessionCapabilities(sessionResponse, {
-          agent: { cliType, agentType },
-        }).models;
-        const model = models[0]?.modelId.replace(/\[[^\]]+\]$/, '');
-        if (!model) throw new Error('Codex endpoint did not advertise a model');
-        const response = await fetch(`${broker.baseUrl}/responses`, {
-          method: 'POST',
-          headers: {
-            authorization: `Bearer ${broker.capability}`,
-            'content-type': 'application/json',
-          },
-          body: JSON.stringify({
-            model,
-            input: 'Reply with OK only.',
-            max_output_tokens: 16,
-            tools: [],
-            store: false,
-          }),
-          redirect: 'error',
+
+    try {
+      if (
+        options.verifyCodexCredential &&
+        options.codexProfile?.profile.profile.mode === 'api-key'
+      ) {
+        const key = options.codexProfile.candidateKey;
+        if (!key) throw new Error('Codex credential verification requires a candidate key');
+        const broker = await startCodexCredentialBroker({
+          baseUrl: options.codexProfile.profile.profile.baseUrl,
+          apiKey: key,
           signal: options.signal,
         });
-        if (!response.ok) {
-          await response.body?.cancel();
-          throw new Error('Codex endpoint could not verify this API Key');
-        }
-        const reader = response.body?.getReader();
-        let text = '';
-        const decoder = new TextDecoder();
-        if (reader) {
-          try {
-            for (;;) {
-              const part = await reader.read();
-              if (part.done) break;
-              text += decoder.decode(part.value, { stream: true });
-              if (text.length > 65_536) throw new Error('Codex verification response is too large');
-            }
-          } finally {
-            await reader.cancel();
-          }
-        }
-        let value: unknown;
         try {
-          value = JSON.parse(text);
-        } catch {
-          throw new Error('Codex endpoint did not return a Responses result');
+          const models = normalizeAcpSessionCapabilities(sessionResponse, {
+            agent: { cliType, agentType },
+          }).models;
+          const model = models[0]?.modelId.replace(/\[[^\]]+\]$/, '');
+          if (!model) throw new Error('Codex endpoint did not advertise a model');
+          const response = await fetch(`${broker.baseUrl}/responses`, {
+            method: 'POST',
+            headers: {
+              authorization: `Bearer ${broker.capability}`,
+              'content-type': 'application/json',
+            },
+            body: JSON.stringify({
+              model,
+              input: 'Reply with OK only.',
+              max_output_tokens: 16,
+              tools: [],
+              store: false,
+            }),
+            redirect: 'error',
+            signal: options.signal,
+          });
+          if (!response.ok) {
+            await response.body?.cancel();
+            throw new Error('Codex endpoint could not verify this API Key');
+          }
+          const reader = response.body?.getReader();
+          let text = '';
+          const decoder = new TextDecoder();
+          if (reader) {
+            try {
+              for (;;) {
+                const part = await reader.read();
+                if (part.done) break;
+                text += decoder.decode(part.value, { stream: true });
+                if (text.length > 65_536)
+                  throw new Error('Codex verification response is too large');
+              }
+            } finally {
+              await reader.cancel();
+            }
+          }
+          let value: unknown;
+          try {
+            value = JSON.parse(text);
+          } catch {
+            throw new Error('Codex endpoint did not return a Responses result');
+          }
+          if (
+            !value ||
+            typeof value !== 'object' ||
+            !('object' in value) ||
+            value.object !== 'response' ||
+            !('output' in value) ||
+            !Array.isArray(value.output)
+          ) {
+            throw new Error('Codex endpoint did not return a Responses result');
+          }
+        } finally {
+          await broker.close();
         }
-        if (
-          !value ||
-          typeof value !== 'object' ||
-          !('object' in value) ||
-          value.object !== 'response' ||
-          !('output' in value) ||
-          !Array.isArray(value.output)
-        ) {
-          throw new Error('Codex endpoint did not return a Responses result');
-        }
-      } finally {
-        await broker.close();
+      }
+      return {
+        ...normalizeAcpSessionCapabilities(sessionResponse, {
+          sessionFork: client.supportsSessionFork?.() === true,
+          sessionTitle: client.supportsSessionTitleGeneration(),
+          rateLimits: client.getRateLimitsCapability(),
+          acknowledgedSteer: client.supportsAcknowledgedSteer(),
+          goalActions: client.getGoalCapability()?.actions.slice(),
+          agent: { cliType, agentType },
+        }),
+        capabilitySourceVersion,
+      };
+    } finally {
+      await shutdownLocalAcpAgent({
+        agentProcess,
+        client,
+        acpSessionId,
+        logger,
+        sessionLabel: `acp-capabilities:${cliType}/${agentType}`,
+      });
+    }
+  } finally {
+    try {
+      await rm(workdir, { recursive: true, force: true });
+    } catch {
+      // Workspace cleanup must not replace a startup/auth error or discard
+      // discovered capabilities. A later probe always allocates a fresh path.
+      try {
+        logger.warn('[acp-capabilities] Failed to remove temporary probe workspace');
+      } catch {
+        // A failing diagnostic sink must not change the probe result either.
       }
     }
-    return {
-      ...normalizeAcpSessionCapabilities(sessionResponse, {
-        sessionFork: client.supportsSessionFork?.() === true,
-        sessionTitle: client.supportsSessionTitleGeneration(),
-        rateLimits: client.getRateLimitsCapability(),
-        acknowledgedSteer: client.supportsAcknowledgedSteer(),
-        goalActions: client.getGoalCapability()?.actions.slice(),
-        agent: { cliType, agentType },
-      }),
-      capabilitySourceVersion,
-    };
-  } finally {
-    await shutdownLocalAcpAgent({
-      agentProcess,
-      client,
-      acpSessionId,
-      logger,
-      sessionLabel: `acp-capabilities:${cliType}/${agentType}`,
-    });
-    if (isolatedWorkdir) await rm(isolatedWorkdir, { recursive: true, force: true });
   }
 }

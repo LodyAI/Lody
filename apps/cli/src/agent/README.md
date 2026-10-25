@@ -54,8 +54,12 @@ context/message-flow.md "Upstream".
 - `acp-binary-manager.ts` — registry binary-distribution agents (tar/zip install).
 - `npx-cache.ts` — npx cache isolation plus poisoning detection/purge for resilient
   registry launches.
-- `acp-capabilities.ts` / `acp-startup-monitor.ts` / `acp-analytics.ts` — capability cache,
-  startup health, analytics.
+- `acp-capabilities.ts` / `acp-startup-monitor.ts` / `acp-analytics.ts` — capability probing,
+  startup health, analytics. Each capability probe owns a unique writable temporary
+  workspace for process startup and `session/new`, independent of the daemon cwd.
+  Cleanup follows agent shutdown, including failed/cancelled probes; removal errors
+  are diagnostic and do not replace probe results. Provider homes and real-session
+  project directories remain unchanged. [Decision and cleanup limits](../../../../.agents/notes/implemented/bug-fix/2026-10-25-acp-probe-workdir.md).
 - `login-shell-env.ts` — explicit Legacy cache over the shared native
   LoginShellEnvironment probe; the three-second pending wait is distinct from
   retained failure. [Decision](../../../../.agents/notes/implemented/architecture/2026-10-10-effect-login-shell-probe.md).
