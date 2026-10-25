@@ -33,7 +33,6 @@ import {
   resolveSessionHistoryBackendKind,
   type LocalProjectId,
   type LocalProjectMeta,
-  type LocalProjectWorktreeCleanupPreflightResult,
   type MachineId,
   type PrStatus,
   type SessionId,
@@ -141,7 +140,6 @@ import {
 import { SidebarFilterPopover } from '@/components/sidebar-filter-popover';
 import { Dialog } from '@/ui/dialog';
 import { Button } from '@lody/ui/button';
-import { Checkbox } from '@lody/ui/checkbox';
 import { ContextMenu } from '@lody/ui/context-menu';
 import { Tooltip } from '@lody/ui/tooltip';
 import { FocusScope, useListKeyboardNavigation } from '@/ui/focus-scope';
@@ -292,14 +290,9 @@ export type LocalProjectRemovalState = 'removing' | 'waiting_for_device';
 export type RemoveLocalProjectDialogProps = {
   open: boolean;
   target: PendingLocalProjectRemoval | null;
-  isRemote: boolean;
-  machineName?: string | null;
-  deviceOnline: boolean;
-  canCleanupWorktrees: boolean;
   isRemoving: boolean;
   onOpenChange: (open: boolean) => void;
-  onPreflightCleanup: () => Promise<LocalProjectWorktreeCleanupPreflightResult>;
-  onConfirm: (options: { cleanupWorktrees: boolean }) => void;
+  onConfirm: () => void;
 };
 
 type PendingSessionShare = {
@@ -315,199 +308,28 @@ const EMPTY_SESSION_SHARING_BY_ID: ReadonlyMap<string, SessionSharingState> = ne
 export function RemoveLocalProjectDialog({
   open,
   target,
-  isRemote,
-  machineName,
-  deviceOnline,
-  canCleanupWorktrees,
   isRemoving,
   onOpenChange,
-  onPreflightCleanup,
   onConfirm,
 }: RemoveLocalProjectDialogProps) {
   const { t } = useTranslation();
-  const [cleanupWorktrees, setCleanupWorktrees] = useState(false);
-  const [preflight, setPreflight] = useState(
-    null as LocalProjectWorktreeCleanupPreflightResult | null
-  );
-  const [preflightError, setPreflightError] = useState(null as string | null);
-  const [isPreflighting, setIsPreflighting] = useState(false);
-  const preflightGeneration = useRef(0);
-
-  useEffect(() => {
-    preflightGeneration.current += 1;
-    setCleanupWorktrees(false);
-    setPreflight(null);
-    setPreflightError(null);
-    setIsPreflighting(false);
-  }, [open, target?.localProjectId]);
-
-  const setCleanup = useCallback(
-    async (checked: boolean) => {
-      const generation = ++preflightGeneration.current;
-      setCleanupWorktrees(checked);
-      setPreflight(null);
-      setPreflightError(null);
-      if (!checked) return;
-      setIsPreflighting(true);
-      try {
-        const result = await onPreflightCleanup();
-        if (preflightGeneration.current === generation) setPreflight(result);
-      } catch (error) {
-        if (preflightGeneration.current === generation) {
-          setPreflightError(error instanceof Error ? error.message : String(error));
-        }
-      } finally {
-        if (preflightGeneration.current === generation) setIsPreflighting(false);
-      }
-    },
-    [onPreflightCleanup]
-  );
-
-  const cleanupBlocked = cleanupWorktrees && (isPreflighting || !preflight);
-  const device =
-    machineName?.trim() ||
-    t('sidebar.localProjects.remove.remoteFallbackDevice', 'the other device');
-
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
-      <Dialog.Content className="sm:max-w-lg">
+      <Dialog.Content>
         <Dialog.Header>
           <Dialog.Title>
-            {t('sidebar.localProjects.remove.title', 'Remove “{{name}}” from Lody?', {
-              name: target?.name ?? '',
-            })}
+            {t('sidebar.localProjects.remove.entryTitle', { name: target?.name ?? '' })}
           </Dialog.Title>
           <Dialog.Description>
-            {isRemote
-              ? t('sidebar.localProjects.remove.remoteDescription', { device })
-              : t(
-                  'sidebar.localProjects.remove.description',
-                  'This removes the project from Lody.'
-                )}
-            {isRemote && !deviceOnline ? ` ${t('sidebar.localProjects.remove.offline')}` : null}
+            {t('sidebar.localProjects.remove.entryDescription')}
           </Dialog.Description>
         </Dialog.Header>
-
-        <div className={cn(SIDEBAR_ROW_TEXT_CLASS, 'space-y-4 text-muted-foreground')}>
-          <div className="space-y-1">
-            <p className="text-foreground/85">
-              {target && target.conversationCount > 0
-                ? t('sidebar.localProjects.remove.archiveDescription', {
-                    count: target.conversationCount,
-                  })
-                : t(
-                    'sidebar.localProjects.remove.archiveDescriptionEmpty',
-                    'Any conversations in this project will move to Archive.'
-                  )}
-            </p>
-            {target && target.runningSessionCount > 0 ? (
-              <p>
-                {t('sidebar.localProjects.remove.runningSessionsSummary', {
-                  count: target.runningSessionCount,
-                })}
-              </p>
-            ) : null}
-          </div>
-
-          <div className="rounded-lg bg-muted/60 px-3.5 py-3">
-            <p className="font-medium text-foreground/90">
-              {t(
-                'sidebar.localProjects.remove.originalDirectorySafe',
-                'Lody never deletes the original project folder or its files.'
-              )}
-            </p>
-            <p className={cn(SIDEBAR_HELPER_TEXT_CLASS, 'mt-1 break-all font-mono')}>
-              {(target?.pathLabel ?? target?.name) || ''}
-            </p>
-          </div>
-
-          <div className="rounded-lg border border-border/70 px-3.5 py-3">
-            <label className="flex items-start gap-3">
-              <Checkbox
-                className="mt-0.5"
-                checked={cleanupWorktrees}
-                disabled={!canCleanupWorktrees || isRemoving}
-                onCheckedChange={(checked) => void setCleanup(checked)}
-              />
-              <span>
-                <span className="block font-medium text-foreground">
-                  {t(
-                    'sidebar.localProjects.remove.cleanupWorktrees',
-                    'Also delete session worktrees created by Lody'
-                  )}
-                </span>
-                <span className={cn(SIDEBAR_HELPER_TEXT_CLASS, 'mt-1 block')}>
-                  {canCleanupWorktrees
-                    ? t(
-                        'sidebar.localProjects.remove.cleanupWorktreesHelper',
-                        'Only clean worktrees are deleted. Worktrees with changes stay on disk.'
-                      )
-                    : t(
-                        'sidebar.localProjects.remove.cleanupUnavailable',
-                        'Connect the device to inspect worktrees. You can still remove the project.'
-                      )}
-                </span>
-              </span>
-            </label>
-
-            {cleanupWorktrees ? (
-              <div className={cn(SIDEBAR_HELPER_TEXT_CLASS, 'mt-3 border-t pt-3')}>
-                {isPreflighting ? (
-                  <p className="flex items-center gap-2">
-                    <Spinner className="h-3.5 w-3.5" />
-                    {t(
-                      'sidebar.localProjects.remove.checkingWorktrees',
-                      'Checking each worktree for changes…'
-                    )}
-                  </p>
-                ) : preflightError ? (
-                  <p className="text-destructive">{preflightError}</p>
-                ) : preflight ? (
-                  <div className="space-y-2">
-                    <p>
-                      {t('sidebar.localProjects.remove.cleanWorktreesSummary', {
-                        count: preflight.clean.length,
-                      })}
-                    </p>
-                    {preflight.dirty.length > 0 ? (
-                      <div className="rounded-md bg-amber-500/10 p-2.5 text-amber-800 dark:text-amber-300">
-                        <p className="font-medium">
-                          {t('sidebar.localProjects.remove.dirtyWorktreesSummary', {
-                            count: preflight.dirty.length,
-                          })}
-                        </p>
-                        <p className="mt-1 break-words">
-                          {preflight.dirty.map((item) => item.title).join(', ')}
-                        </p>
-                      </div>
-                    ) : null}
-                    {preflight.failed.length > 0 ? (
-                      <p className="text-muted-foreground">
-                        {t('sidebar.localProjects.remove.inspectFailedSummary', {
-                          count: preflight.failed.length,
-                        })}
-                      </p>
-                    ) : null}
-                  </div>
-                ) : null}
-              </div>
-            ) : null}
-          </div>
-        </div>
-
         <Dialog.Footer>
-          <Button variant="secondary" onClick={() => onOpenChange(false)} disabled={isRemoving}>
-            {t('common.cancel', 'Cancel')}
+          <Button variant="secondary" disabled={isRemoving} onClick={() => onOpenChange(false)}>
+            {t('common.cancel')}
           </Button>
-          <Button
-            variant="destructive"
-            disabled={isRemoving || cleanupBlocked}
-            onClick={() => onConfirm({ cleanupWorktrees })}
-          >
-            {isRemoving ? <Spinner className="h-4 w-4" /> : null}
-            {isRemoving
-              ? t('common.processing', 'Processing...')
-              : t('sidebar.localProjects.remove.confirm', 'Remove project')}
+          <Button disabled={isRemoving} onClick={onConfirm}>
+            {t('sidebar.localProjects.remove.entryConfirm')}
           </Button>
         </Dialog.Footer>
       </Dialog.Content>
@@ -2000,8 +1822,7 @@ export function LoroAppSidebar({
   const sessionSidebarCodeChangesOnly = useAtomValue(sessionSidebarCodeChangesOnlyAtom);
   const { archiveSession, markSessionUnread, setSessionPinned, updateSessionTitle } =
     useSessionActions();
-  const { removeLocalProject, preflightLocalProjectRemoval, getRemoveLocalProjectImpact } =
-    useRemoveLocalProject();
+  const { removeLocalProject, getRemoveLocalProjectImpact } = useRemoveLocalProject();
   const presenceStates = useAtomValue(lodyPresenceStatesAtom);
   const presenceNowMs = useAtomValue(lodyPresenceNowMsAtom);
 
@@ -2385,54 +2206,48 @@ export function LoroAppSidebar({
     }
   }, [handleNavigateToProject, runtime, t]);
 
-  const handleConfirmRemoveLocalProject = useCallback(
-    async (options: { cleanupWorktrees: boolean }) => {
-      const pending = pendingLocalProjectRemoval;
-      if (!pending || isRemovingLocalProject) return;
+  const handleConfirmRemoveLocalProject = useCallback(async () => {
+    const pending = pendingLocalProjectRemoval;
+    if (!pending || isRemovingLocalProject) return;
 
-      setIsRemovingLocalProject(true);
-      try {
-        const removed = await removeLocalProject(
-          {
-            machineId: pending.machineId,
-            localProjectId: pending.localProjectId,
-            projectName: pending.name,
-            originalRootPath: pending.originalRootPath ?? undefined,
-          },
-          options
-        );
-        if (!removed) return;
+    setIsRemovingLocalProject(true);
+    try {
+      const removed = await removeLocalProject({
+        machineId: pending.machineId,
+        localProjectId: pending.localProjectId,
+        projectName: pending.name,
+        originalRootPath: pending.originalRootPath ?? undefined,
+      });
+      if (!removed) return;
 
-        setLocalProjectCollapseState((prev) => {
-          const key = `${pending.machineId}:${pending.localProjectId}`;
-          const { [key]: _, ...rest } = prev;
-          return rest;
+      setLocalProjectCollapseState((prev) => {
+        const key = `${pending.machineId}:${pending.localProjectId}`;
+        const { [key]: _, ...rest } = prev;
+        return rest;
+      });
+
+      if (
+        selectedLocalProjectKey === `${pending.machineId}:${pending.localProjectId}` &&
+        workspaceSlug
+      ) {
+        void router.navigate({
+          to: '/$workspaceName/chat',
+          params: { workspaceName: workspaceSlug },
         });
-
-        if (
-          selectedLocalProjectKey === `${pending.machineId}:${pending.localProjectId}` &&
-          workspaceSlug
-        ) {
-          void router.navigate({
-            to: '/$workspaceName/chat',
-            params: { workspaceName: workspaceSlug },
-          });
-        }
-        setPendingLocalProjectRemoval(null);
-      } finally {
-        setIsRemovingLocalProject(false);
       }
-    },
-    [
-      isRemovingLocalProject,
-      pendingLocalProjectRemoval,
-      removeLocalProject,
-      router,
-      selectedLocalProjectKey,
-      setLocalProjectCollapseState,
-      workspaceSlug,
-    ]
-  );
+      setPendingLocalProjectRemoval(null);
+    } finally {
+      setIsRemovingLocalProject(false);
+    }
+  }, [
+    isRemovingLocalProject,
+    pendingLocalProjectRemoval,
+    removeLocalProject,
+    router,
+    selectedLocalProjectKey,
+    setLocalProjectCollapseState,
+    workspaceSlug,
+  ]);
 
   // Sub-session times roll up into the parent — opening or messaging in a child
   // tab keeps the parent fresh in the sidebar order.
@@ -4099,41 +3914,12 @@ export function LoroAppSidebar({
       <RemoveLocalProjectDialog
         open={pendingLocalProjectRemoval != null}
         target={pendingLocalProjectRemoval}
-        isRemote={
-          pendingLocalProjectRemoval != null &&
-          (!localMachineId || pendingLocalProjectRemoval.machineId !== localMachineId)
-        }
-        machineName={
-          pendingLocalProjectRemoval
-            ? machineMetaMap.get(pendingLocalProjectRemoval.machineId)?.name
-            : null
-        }
-        deviceOnline={
-          pendingLocalProjectRemoval != null &&
-          onlineMachineIds.has(pendingLocalProjectRemoval.machineId)
-        }
-        canCleanupWorktrees={
-          pendingLocalProjectRemoval != null &&
-          onlineMachineIds.has(pendingLocalProjectRemoval.machineId) &&
-          machineSupportsLocalProjectRemovalProtocol(
-            machineMetaMap.get(pendingLocalProjectRemoval.machineId)
-          )
-        }
         isRemoving={isRemovingLocalProject}
         onOpenChange={(open) => {
           if (!open && !isRemovingLocalProject) setPendingLocalProjectRemoval(null);
         }}
-        onPreflightCleanup={() => {
-          if (!pendingLocalProjectRemoval) {
-            return Promise.reject(new Error('No project selected.'));
-          }
-          return preflightLocalProjectRemoval({
-            machineId: pendingLocalProjectRemoval.machineId,
-            localProjectId: pendingLocalProjectRemoval.localProjectId,
-          });
-        }}
-        onConfirm={(options) => {
-          void handleConfirmRemoveLocalProject(options);
+        onConfirm={() => {
+          void handleConfirmRemoveLocalProject();
         }}
       />
     </FocusScope>

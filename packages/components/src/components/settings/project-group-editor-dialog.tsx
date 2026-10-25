@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useAtomValue } from 'jotai';
 import { useTranslation } from 'react-i18next';
 import {
@@ -22,6 +22,7 @@ import {
 } from '@/hooks/use-project-submodule-detection';
 import { useWorkspaceProjectActions } from '@/hooks/use-workspace-projects';
 import {
+  addProjectGroupDirectory,
   applyDetectedProjectSubmodules,
   buildProjectGroupFormValue,
   buildWorkspaceProjectFromForm,
@@ -33,6 +34,12 @@ import {
   type ProjectGroupMemberDraft,
 } from '@/lib/project-group-form';
 import { Dialog } from '@/ui/dialog';
+import { prepareLocalProject, registerProjectGroupDirectories } from '@/lib/local-project-import';
+import {
+  AddLocalProjectDialog,
+  type RemoteDirectoryOps,
+} from '../local-projects/add-local-project-dialog';
+import { useAddLocalProjectController } from '../local-projects/add-local-project-dialog-container';
 import { ProjectGroupForm, type ProjectGroupMemberStatus } from './project-group-form';
 import { useProjectMemberSourceNames } from './project-group-source-picker';
 import { useSettingsPane } from './settings-page-header';
@@ -88,12 +95,35 @@ export function ProjectGroupEditorDialog({
   const { shown: editor, onOpenChangeComplete } = useDialogExitSnapshot(openEditor);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string>();
+  const [selectingFolder, setSelectingFolderState] = useState(false);
+  const folderSelection = useRef(false);
+  const folderSelectionGeneration = useRef(0);
+  const setSelectingFolder = (open: boolean) => {
+    folderSelection.current = open;
+    folderSelectionGeneration.current += 1;
+    setSelectingFolderState(open);
+  };
+  const saving = useRef(false);
+  const editorOpen = openEditor !== null;
+  useEffect(() => {
+    if (!editorOpen) {
+      folderSelection.current = false;
+      folderSelectionGeneration.current += 1;
+      setSelectingFolderState(false);
+    }
+    return () => {
+      folderSelection.current = false;
+    };
+  }, [editorOpen]);
+  const editorRef = useRef(openEditor);
+  editorRef.current = openEditor;
 
   const readOnly = editor?.mode === 'edit' && editor.readOnly;
   const value = editor?.value ?? EMPTY_PROJECT_GROUP_FORM_VALUE;
 
   const labelOf = useCallback(
     (member: ProjectGroupMemberDraft) =>
+      member.directory?.name ??
       byKey.get(getProjectMemberSourceKey(member.source))?.label ??
       (member.source.kind === 'github'
         ? member.source.repoFullName
@@ -104,8 +134,10 @@ export function ProjectGroupEditorDialog({
   const { machineName, machinesOf } = useProjectMemberSourceNames(options, currentMachineId);
   const detailOf = useCallback(
     (member: ProjectGroupMemberDraft) => {
+      if (member.directory) return member.directory.rootPath;
       const option = byKey.get(getProjectMemberSourceKey(member.source));
-      if (member.source.kind === 'local') return machineName(member.source.machineId);
+      if (member.source.kind === 'local')
+        return option?.copies[0]?.rootPath ?? machineName(member.source.machineId);
       // A repository Member runs wherever there is a copy; a plain GitHub
       // Member is always cloned, so its copies are beside the point.
       return member.source.preferLocal ? machinesOf(option ?? { copies: [] }) : option?.description;
@@ -122,6 +154,58 @@ export function ProjectGroupEditorDialog({
     return remotes;
   }, [options]);
   const runtime = useAtomValue(activeWorkspaceRuntimeAtom);
+  const selectProject = useCallback<RemoteDirectoryOps['addProject']>(
+    async (machineId, args) => {
+      if (!runtime || !editorRef.current)
+        return { ok: false, message: t('settings.projectGroups.errors.invalid') };
+      const selectionGeneration = folderSelectionGeneration.current;
+      const selectingEditor = editorRef.current;
+      const id =
+        selectingEditor.mode === 'add' ? selectingEditor.projectId : selectingEditor.project.id;
+      try {
+        const prepared = await prepareLocalProject({
+          runtime,
+          machineId,
+          rootPath: args.rootPath,
+          inspect: true,
+          timeoutMessage: t('localProjects.add.timeout'),
+        });
+        if (!prepared.inspection) throw new Error(t('settings.projectGroups.folderUpdateRequired'));
+        const latest = editorRef.current;
+        if (
+          selectionGeneration !== folderSelectionGeneration.current ||
+          !folderSelection.current ||
+          !latest ||
+          (latest.mode === 'add' ? latest.projectId : latest.project.id) !== id
+        ) {
+          return { ok: false, message: t('settings.projectGroups.errors.invalid') };
+        }
+        const next = addProjectGroupDirectory(latest.value, {
+          ...prepared,
+          machineId,
+          inspection: prepared.inspection,
+        });
+        const checked = validateProjectGroupForm(next);
+        if (
+          [...checked.memberErrors.values()].some((errors) => errors.includes('machine_mismatch'))
+        ) {
+          throw new Error(t('settings.projectGroups.memberErrors.machine_mismatch'));
+        }
+        onChange({ ...latest, value: next });
+        return { ok: true, value: { ...prepared, status: 'added' } };
+      } catch (cause) {
+        return { ok: false, message: cause instanceof Error ? cause.message : String(cause) };
+      }
+    },
+    [onChange, runtime, t]
+  );
+  const folderController = useAddLocalProjectController(undefined, undefined, selectProject);
+  const folderMachines = folderController.machines.filter(
+    (machine) =>
+      machine.id === currentMachineId &&
+      machine.canAddProjects &&
+      machine.supportsProjectFolderSelection
+  );
   const onlineMachineIds = useAtomValue(onlineMachineIdsAtom);
   // A repository Member's submodules are read from a copy on an online
   // machine when there is one, this machine first.
@@ -130,6 +214,15 @@ export function ProjectGroupEditorDialog({
       source: Extract<ProjectMemberSource, { kind: 'github' }>
     ): Extract<ProjectMemberSource, { kind: 'local' }> | undefined => {
       if (!source.preferLocal) return undefined;
+      const directory = value.members.find(
+        (member) => getProjectMemberSourceKey(member.source) === getProjectMemberSourceKey(source)
+      )?.directory;
+      if (directory)
+        return {
+          kind: 'local',
+          machineId: directory.machineId,
+          localProjectId: directory.localProjectId,
+        };
       const copies = byKey.get(getProjectMemberSourceKey(source))?.copies ?? [];
       const copy =
         copies.find((candidate) => candidate.machineId === currentMachineId && candidate.online) ??
@@ -142,7 +235,7 @@ export function ProjectGroupEditorDialog({
           }
         : undefined;
     },
-    [byKey, currentMachineId]
+    [byKey, currentMachineId, value.members]
   );
   // A local member's `.gitmodules` lives on its machine. An offline machine is
   // not asked at all (and nothing is reported), rather than failing a probe.
@@ -151,6 +244,12 @@ export function ProjectGroupEditorDialog({
     if (!runtime || !currentUserId) return undefined;
     return async (source) => {
       if (source.kind !== 'local') return undefined;
+      const directory = value.members.find(
+        (member) =>
+          member.directory?.machineId === source.machineId &&
+          member.directory.localProjectId === source.localProjectId
+      )?.directory;
+      if (directory) return directory.inspection;
       if (!onlineMachineIds.has(source.machineId)) return null;
       const result = await runtime.requestProjectProbeLocalMember(
         source.machineId,
@@ -169,7 +268,7 @@ export function ProjectGroupEditorDialog({
         })),
       };
     };
-  }, [currentUserId, onlineMachineIds, probeLocalOverride, runtime]);
+  }, [currentUserId, onlineMachineIds, probeLocalOverride, runtime, value.members]);
 
   const detection = useProjectSubmoduleDetection(value.members, {
     enabled: openEditor !== null && !readOnly,
@@ -228,12 +327,15 @@ export function ProjectGroupEditorDialog({
   );
 
   const close = () => {
+    if (submitting) return;
+    setSelectingFolder(false);
     setError(undefined);
     onClose();
   };
 
   const save = async () => {
-    if (!editor || readOnly || !validation.valid || !currentUserId) return;
+    if (!editor || readOnly || saving.current || !validation.valid || !currentUserId || !runtime)
+      return;
     const project = buildWorkspaceProjectFromForm(editor.value, {
       id: editor.mode === 'add' ? editor.projectId : editor.project.id,
       existing: editor.mode === 'edit' ? editor.project : undefined,
@@ -244,71 +346,98 @@ export function ProjectGroupEditorDialog({
       setError(t('settings.projectGroups.errors.invalid'));
       return;
     }
+    saving.current = true;
     setSubmitting(true);
     setError(undefined);
     try {
+      await registerProjectGroupDirectories({
+        runtime,
+        members: editor.value.members,
+        timeoutMessage: t('localProjects.add.timeout'),
+        changedMessage: t('settings.projectGroups.folderChanged'),
+      });
       // Durable locally is done; the upload is not something to wait on.
       await upsert(project);
       onSaved?.(project, { created: editor.mode === 'add' });
-      close();
+      setSelectingFolder(false);
+      onClose();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
     } finally {
+      saving.current = false;
       setSubmitting(false);
     }
   };
 
   return (
-    <Dialog.Root
-      open={openEditor !== null}
-      onOpenChange={(open) => {
-        if (!open) close();
-      }}
-      onOpenChangeComplete={onOpenChangeComplete}
-    >
-      <Dialog.Content
-        width={SETTINGS_EDITOR_DIALOG_WIDTH}
-        centerOn={settingsPane}
-        className={SETTINGS_EDITOR_DIALOG_LAYOUT}
-        style={{ height: 'min(680px, 88dvh)' }}
+    <>
+      <Dialog.Root
+        open={openEditor !== null}
+        onOpenChange={(open) => {
+          if (!open) close();
+        }}
+        onOpenChangeComplete={onOpenChangeComplete}
       >
-        <Dialog.Header>
-          <Dialog.Title>
-            {editor?.mode === 'edit'
-              ? readOnly
-                ? editor.project.name
-                : t('settings.projectGroups.editTitle')
-              : t('settings.projectGroups.addTitle')}
-          </Dialog.Title>
-          <Dialog.Description>
-            {readOnly
-              ? t('settings.projectGroups.readOnlyDescription')
-              : t('settings.projectGroups.dialogDescription')}
-          </Dialog.Description>
-        </Dialog.Header>
-        {editor ? (
-          <ProjectGroupForm
-            value={value}
-            onChange={(next) => {
-              // A panel fading out is not edited: a change there would reopen it.
-              if (openEditor) onChange({ ...openEditor, value: next });
-            }}
-            sources={options}
-            labelOf={labelOf}
-            detailOf={detailOf}
-            statusOf={statusOf}
-            isNonGit={(memberId) => detection.nonGit.has(memberId)}
-            currentMachineId={currentMachineId}
-            validation={validation}
-            readOnly={readOnly}
-            submitting={submitting}
-            error={error}
-            isEditing={editor.mode === 'edit'}
-            onSubmit={() => void save()}
-            onCancel={close}
-          />
-        ) : null}
-      </Dialog.Content>
-    </Dialog.Root>
+        <Dialog.Content
+          width={SETTINGS_EDITOR_DIALOG_WIDTH}
+          centerOn={settingsPane}
+          className={SETTINGS_EDITOR_DIALOG_LAYOUT}
+          style={{ height: 'min(680px, 88dvh)' }}
+        >
+          <Dialog.Header>
+            <Dialog.Title>
+              {editor?.mode === 'edit'
+                ? readOnly
+                  ? editor.project.name
+                  : t('settings.projectGroups.editTitle')
+                : t('settings.projectGroups.addTitle')}
+            </Dialog.Title>
+            <Dialog.Description>
+              {readOnly
+                ? t('settings.projectGroups.readOnlyDescription')
+                : t('settings.projectGroups.dialogDescription')}
+            </Dialog.Description>
+          </Dialog.Header>
+          {editor ? (
+            <ProjectGroupForm
+              value={value}
+              onChange={(next) => {
+                // A panel fading out is not edited: a change there would reopen it.
+                if (openEditor) onChange({ ...openEditor, value: next });
+              }}
+              sources={options}
+              labelOf={labelOf}
+              detailOf={detailOf}
+              statusOf={statusOf}
+              isNonGit={(memberId) =>
+                value.members.find((member) => member.id === memberId)?.directory?.inspection
+                  .isGit === false || detection.nonGit.has(memberId)
+              }
+              currentMachineId={currentMachineId}
+              validation={validation}
+              readOnly={readOnly}
+              submitting={submitting}
+              error={error}
+              isEditing={editor.mode === 'edit'}
+              onSelectFolders={() => setSelectingFolder(true)}
+              selectFoldersDisabled={
+                folderMachines.length === 0 || !folderMachines.some((machine) => machine.online)
+              }
+              onSubmit={() => void save()}
+              onCancel={close}
+            />
+          ) : null}
+        </Dialog.Content>
+      </Dialog.Root>
+      <AddLocalProjectDialog
+        selectionOnly
+        open={selectingFolder && openEditor !== null}
+        onOpenChange={setSelectingFolder}
+        machines={folderMachines}
+        initialMachineId={currentMachineId}
+        ops={folderController.ops}
+        onAdded={() => undefined}
+      />
+    </>
   );
 }

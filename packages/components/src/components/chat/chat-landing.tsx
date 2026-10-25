@@ -1097,8 +1097,8 @@ function WorkspaceChatLanding({
   // ── Project group availability on the selected machine ──
   // Which machines hold a copy of each repository, as their daemons publish it.
   const projectRepositoryCopies = useMemo(
-    () => buildProjectRepositoryCopyIndex(visibleLocalProjectMap.values()),
-    [visibleLocalProjectMap]
+    () => buildProjectRepositoryCopyIndex(visibleLocalProjects.registeredProjects.values()),
+    [visibleLocalProjects.registeredProjects]
   );
   // Without GitHub integration (local-only) a repository Member the machine
   // has no copy of cannot be cloned. A conversation always gets the whole

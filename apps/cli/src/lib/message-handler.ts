@@ -9723,6 +9723,13 @@ export class MessageHandler {
             name: existingProject?.name ?? preparedProject.name,
             rootPath: existingProject?.rootPath ?? preparedProject.rootPath,
             alreadyRegistered: existingProject !== null,
+            ...(request.inspect
+              ? {
+                  inspection: await worktreeGitLegacy.probeLocalProjectMember(
+                    preparedProject.rootPath
+                  ),
+                }
+              : {}),
           },
         };
       }
@@ -9795,7 +9802,12 @@ export class MessageHandler {
         lastOpenedAtMs: nowMs,
       },
       nowMs,
-      { sync: this.workspaceDocument, reason: 'local-project-add', refreshGitHubRemote: true }
+      {
+        sync: this.workspaceDocument,
+        reason: 'local-project-add',
+        refreshGitHubRemote: true,
+        standaloneVisible: true,
+      }
     );
   }
 

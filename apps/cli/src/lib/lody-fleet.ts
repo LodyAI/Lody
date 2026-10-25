@@ -1,3 +1,4 @@
+import { worktreeGitLegacy } from '@/session/worktree/git-execution-legacy';
 import type {
   LocalE2eePairingRequest,
   LocalE2eePrepareResponse,
@@ -1659,7 +1660,12 @@ export class LodyFleet {
         lastOpenedAtMs: nowMs,
       },
       nowMs,
-      { sync: runtime.lody.documentManager, reason: 'local-project-add', refreshGitHubRemote: true }
+      {
+        sync: runtime.lody.documentManager,
+        reason: 'local-project-add',
+        refreshGitHubRemote: true,
+        standaloneVisible: true,
+      }
     );
   }
 
@@ -1946,6 +1952,13 @@ export class LodyFleet {
             name: existingProject?.name ?? preparedProject.name,
             rootPath: existingProject?.rootPath ?? preparedProject.rootPath,
             alreadyRegistered: existingProject !== null,
+            ...(message.inspect
+              ? {
+                  inspection: await worktreeGitLegacy.probeLocalProjectMember(
+                    preparedProject.rootPath
+                  ),
+                }
+              : {}),
           },
         };
       }

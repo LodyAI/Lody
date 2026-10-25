@@ -115,7 +115,12 @@ export async function upsertMachineLocalProject(
   machineId: MachineId,
   project: LocalProjectMeta,
   nowMs = getServerNow(),
-  options: { sync?: MachineFlockSyncScheduler; reason?: string; refreshGitHubRemote?: boolean } = {}
+  options: {
+    sync?: MachineFlockSyncScheduler;
+    reason?: string;
+    refreshGitHubRemote?: boolean;
+    standaloneVisible?: boolean;
+  } = {}
 ): Promise<void> {
   const handle = await repo.openFlockDoc(getMachineFlockDocId(workspaceId, machineId));
   const rootPath = canonicalLocalProjectRootPath(project.rootPath);
@@ -130,6 +135,8 @@ export async function upsertMachineLocalProject(
   const canonicalProject = {
     ...project,
     rootPath,
+    standaloneVisible:
+      options.standaloneVisible ?? current?.standaloneVisible ?? project.standaloneVisible,
     githubRepoFullName:
       observed !== undefined
         ? (observed ?? undefined)

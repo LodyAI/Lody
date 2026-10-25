@@ -238,29 +238,8 @@ function DesktopConfirmation() {
           conversationCount: 12,
           runningSessionCount: 2,
         }}
-        isRemote
-        machineName="MacBook Pro"
-        deviceOnline
-        canCleanupWorktrees
         isRemoving={false}
         onOpenChange={setOpen}
-        onPreflightCleanup={async () => ({
-          clean: [
-            {
-              sessionId: 'session-clean' as SessionId,
-              title: '完善移除项目的 UX',
-              path: '/tmp/session-clean',
-            },
-          ],
-          dirty: [
-            {
-              sessionId: 'session-dirty' as SessionId,
-              title: '清理本地 worktree',
-              path: '/tmp/session-dirty',
-            },
-          ],
-          failed: [],
-        })}
         onConfirm={() => {}}
       />
     </div>
@@ -320,29 +299,6 @@ function MobileConfirmation() {
         open={open}
         onOpenChange={setOpen}
         projectName={project.name}
-        pathLabel={project.rootPath}
-        deviceName="MacBook Pro"
-        deviceOnline
-        conversationCount={12}
-        runningSessionCount={2}
-        canCleanupWorktrees
-        onPreflightCleanup={async () => ({
-          clean: [
-            {
-              sessionId: 'session-clean' as SessionId,
-              title: '完善移除项目的 UX',
-              path: '/tmp/session-clean',
-            },
-          ],
-          dirty: [
-            {
-              sessionId: 'session-dirty' as SessionId,
-              title: '清理本地 worktree',
-              path: '/tmp/session-dirty',
-            },
-          ],
-          failed: [],
-        })}
         onConfirm={async () => true}
       />
     </div>

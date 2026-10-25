@@ -1,6 +1,8 @@
 import {
   deduplicateProjectMembers,
   type MachineId,
+  type LocalProjectId,
+  type ProjectLocalMemberProbe,
   isSafeProjectPath,
   normalizeWorkspaceProject,
   resolveProjectMemberPaths,
@@ -26,6 +28,13 @@ import {
  */
 
 export type ProjectGroupMemberDraft = {
+  directory?: {
+    machineId: MachineId;
+    localProjectId: LocalProjectId;
+    name: string;
+    rootPath: string;
+    inspection: ProjectLocalMemberProbe;
+  };
   id: ProjectMemberId;
   source: ProjectMemberSource;
   placement: ProjectMemberPlacement;
@@ -141,6 +150,35 @@ export function addProjectGroupMember(
     placementOrigin: 'default',
   };
   return { ...value, members: [...value.members, member] };
+}
+
+/** Attach a prepared folder to the draft only; paths never enter Project sources. */
+export function addProjectGroupDirectory(
+  value: ProjectGroupFormValue,
+  directory: NonNullable<ProjectGroupMemberDraft['directory']>
+): ProjectGroupFormValue {
+  const source: ProjectMemberSource = directory.inspection.repoFullName
+    ? { kind: 'github', repoFullName: directory.inspection.repoFullName, preferLocal: true }
+    : { kind: 'local', machineId: directory.machineId, localProjectId: directory.localProjectId };
+  const next = addProjectGroupMember(value, source, directory.name);
+  if (next === value) {
+    const existing = value.members.find(
+      (member) => getProjectMemberSourceKey(member.source) === getProjectMemberSourceKey(source)
+    );
+    if (!existing || existing.directory) return value;
+    return {
+      ...value,
+      members: value.members.map((member) =>
+        member === existing ? { ...member, directory } : member
+      ),
+    };
+  }
+  return {
+    ...next,
+    members: next.members.map((member, index) =>
+      index === next.members.length - 1 ? { ...member, directory } : member
+    ),
+  };
 }
 
 /**

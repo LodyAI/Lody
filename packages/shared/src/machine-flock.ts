@@ -1569,6 +1569,9 @@ const normalizeLocalProjectMeta = (value: unknown): LocalProjectMeta | undefined
   if (!isMissing(value.history)) {
     project.history = value.history as LocalProjectMeta['history'];
   }
+  if (typeof value.standaloneVisible === 'boolean') {
+    project.standaloneVisible = value.standaloneVisible;
+  }
   // A malformed remote is dropped rather than rejecting the project.
   if (
     typeof value.githubRepoFullName === 'string' &&

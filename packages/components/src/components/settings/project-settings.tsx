@@ -39,7 +39,6 @@ import {
   type LocalProjectHistoryProviderKey,
   type LocalProjectHistorySyncSummary,
   type LocalProjectMeta,
-  machineSupportsLocalProjectRemovalProtocol,
   type MachineId,
   type WorktreeCleanupScriptConfig,
   type WorktreeSetupScriptConfig,
@@ -64,7 +63,6 @@ import {
   useRemoveLocalProject,
 } from '@/hooks/use-remove-local-project';
 import { localMachineIdAtom } from '@/atoms/local-probe';
-import { getMachineMetaMapAtom } from '@/atoms/machines';
 import {
   RemoveLocalProjectDialog,
   type LocalProjectRemovalState,
@@ -1050,14 +1048,11 @@ export function ProjectSettingsComponent({
     openSettings('github');
   }, [openSettings, workspaceSlug]);
 
-  const localMachineId = useAtomValue(localMachineIdAtom);
-  const machineMetaMap = useAtomValue(getMachineMetaMapAtom);
   const onlineMachineIds = useOnlineMachineIds();
   const visibleMachineIds = useMemo(() => sections.map((section) => section.machineId), [sections]);
   const pendingRemovals = usePendingLocalProjectRemovals(visibleMachineIds);
   useLocalProjectRemovalResultNotifications(visibleMachineIds);
-  const { removeLocalProject, preflightLocalProjectRemoval, getRemoveLocalProjectImpact } =
-    useRemoveLocalProject();
+  const { removeLocalProject, getRemoveLocalProjectImpact } = useRemoveLocalProject();
   const [pendingRemoval, setPendingRemoval] = useState<PendingLocalProjectRemoval | null>(null);
   const [isRemovingLocalProject, setIsRemovingLocalProject] = useState(false);
 
@@ -1095,27 +1090,21 @@ export function ProjectSettingsComponent({
     [getRemoveLocalProjectImpact]
   );
 
-  const handleConfirmRemoveLocalProject = useCallback(
-    async (options: { cleanupWorktrees: boolean }) => {
-      if (!pendingRemoval) return;
-      setIsRemovingLocalProject(true);
-      try {
-        const removed = await removeLocalProject(
-          {
-            machineId: pendingRemoval.machineId,
-            localProjectId: pendingRemoval.localProjectId,
-            projectName: pendingRemoval.name,
-            originalRootPath: pendingRemoval.originalRootPath ?? undefined,
-          },
-          options
-        );
-        if (removed) setPendingRemoval(null);
-      } finally {
-        setIsRemovingLocalProject(false);
-      }
-    },
-    [pendingRemoval, removeLocalProject]
-  );
+  const handleConfirmRemoveLocalProject = useCallback(async () => {
+    if (!pendingRemoval) return;
+    setIsRemovingLocalProject(true);
+    try {
+      const removed = await removeLocalProject({
+        machineId: pendingRemoval.machineId,
+        localProjectId: pendingRemoval.localProjectId,
+        projectName: pendingRemoval.name,
+        originalRootPath: pendingRemoval.originalRootPath ?? undefined,
+      });
+      if (removed) setPendingRemoval(null);
+    } finally {
+      setIsRemovingLocalProject(false);
+    }
+  }, [pendingRemoval, removeLocalProject]);
 
   return (
     <>
@@ -1158,31 +1147,12 @@ export function ProjectSettingsComponent({
       <RemoveLocalProjectDialog
         open={pendingRemoval != null}
         target={pendingRemoval}
-        isRemote={
-          pendingRemoval != null && (!localMachineId || pendingRemoval.machineId !== localMachineId)
-        }
-        machineName={pendingRemoval ? machineMetaMap.get(pendingRemoval.machineId)?.name : null}
-        deviceOnline={pendingRemoval != null && onlineMachineIds.has(pendingRemoval.machineId)}
-        canCleanupWorktrees={
-          pendingRemoval != null &&
-          onlineMachineIds.has(pendingRemoval.machineId) &&
-          machineSupportsLocalProjectRemovalProtocol(machineMetaMap.get(pendingRemoval.machineId))
-        }
         isRemoving={isRemovingLocalProject}
         onOpenChange={(open) => {
           if (!open && !isRemovingLocalProject) setPendingRemoval(null);
         }}
-        onPreflightCleanup={() => {
-          if (!pendingRemoval) {
-            return Promise.reject(new Error('No project selected.'));
-          }
-          return preflightLocalProjectRemoval({
-            machineId: pendingRemoval.machineId,
-            localProjectId: pendingRemoval.localProjectId,
-          });
-        }}
-        onConfirm={(options) => {
-          void handleConfirmRemoveLocalProject(options);
+        onConfirm={() => {
+          void handleConfirmRemoveLocalProject();
         }}
       />
     </>

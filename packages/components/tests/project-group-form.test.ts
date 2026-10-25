@@ -8,6 +8,7 @@ import type {
 } from '@lody/shared';
 import {
   addProjectGroupMember,
+  addProjectGroupDirectory,
   applySourceSelection,
   applyDetectedProjectSubmodules,
   buildProjectGroupFormValue,
@@ -289,5 +290,63 @@ describe('project group form', () => {
       upgradeProjectGroupRepositoryMembers(next, (source) => remotes[source.localProjectId])
     ).toBe(next);
     expect(upgradeProjectGroupRepositoryMembers(value, () => undefined)).toBe(value);
+  });
+});
+
+describe('direct folder drafts', () => {
+  const directory = {
+    machineId: 'machine-1' as MachineId,
+    localProjectId: 'folder-1' as LocalProjectId,
+    name: 'api',
+    rootPath: '/workspace/api',
+    inspection: { isGit: true, repoFullName: 'acme/api', submodules: [] },
+  };
+  it('deduplicates folders and repository entries without persisting machine paths', () => {
+    const first = addProjectGroupDirectory(
+      { name: 'Product', instructions: '', members: [] },
+      directory
+    );
+    expect(first.members[0]?.source).toEqual({
+      kind: 'github',
+      repoFullName: 'acme/api',
+      preferLocal: true,
+    });
+    expect(addProjectGroupDirectory(first, directory)).toBe(first);
+    const project = buildWorkspaceProjectFromForm(first, {
+      id: '73a09c4f-b99f-4a37-8fd7-c647c4c9971a' as ProjectId,
+      ownerUserId: 'user-1',
+      now: 1,
+    });
+    expect(project?.members).toHaveLength(1);
+    expect(project?.members[0]).not.toHaveProperty('directory');
+    expect(JSON.stringify(project)).not.toContain('/workspace/api');
+  });
+  it('attaches a selected local copy to a repository already in the draft', () => {
+    const value = addProjectGroupMember(
+      EMPTY_PROJECT_GROUP_FORM_VALUE,
+      { kind: 'github', repoFullName: 'acme/api', preferLocal: true },
+      'api'
+    );
+    const next = addProjectGroupDirectory(value, directory);
+    expect(next.members).toHaveLength(1);
+    expect(next.members[0]?.directory).toEqual(directory);
+  });
+  it('keeps ordinary folders machine-bound and rejects mixing machines', () => {
+    const localDirectory = { ...directory, inspection: { isGit: false, submodules: [] } };
+    const first = addProjectGroupDirectory(
+      { name: 'Folders', instructions: '', members: [] },
+      localDirectory
+    );
+    expect(first.members[0]?.source).toEqual({
+      kind: 'local',
+      machineId: directory.machineId,
+      localProjectId: directory.localProjectId,
+    });
+    const next = addProjectGroupDirectory(first, {
+      ...localDirectory,
+      machineId: 'machine-2' as MachineId,
+    });
+    expect(validateProjectGroupForm(next).valid).toBe(false);
+    expect(validateProjectGroupForm(first).valid).toBe(true);
   });
 });

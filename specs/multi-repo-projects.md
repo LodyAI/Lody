@@ -54,7 +54,53 @@ looks only at that branch.
   saves a new Project and leaves the original and its conversations as they are.
   On a phone the same action is the first row of a project's settings tab, and
   mobile Settings › Projects offers creating one. The editor's
-  picker adds repositories and folders already known to the workspace.
+  picker supports direct local-folder selection as well as repositories and folders
+  already known to the workspace.
+
+## Direct folder selection and standalone visibility
+
+A user can create a Project by selecting local folders without first adding each
+one as a standalone project. “Select local folders” is the primary local entry;
+adding existing projects or repositories remains available. Show the selected
+paths and whether members modify originals or use Git isolation before saving.
+
+**Separate registration from display.** A directory registration records a
+machine-local identity and path; a Project references it. Standalone visibility
+controls whether that directory also appears as its own entry in the sidebar,
+Settings › Projects and standalone project selection. It is not a second project
+copy or an access-control boundary. Members remain visible inside their Project.
+Existing standalone entries remain visible; adding them as members never hides
+them. Absolute paths remain in the machine directory catalog.
+
+**Save and reuse.** Selection is a draft: cancelling before save creates no
+registrations. Saving validates the folders, reuses existing registrations and
+registers missing ones without standalone visibility. Within the same workspace
+and machine, the same canonical directory has one registration, regardless of
+its display name. Different clones or machines have separate registrations;
+repository-member deduplication still follows the rules above. A partial save
+failure is reported and can be retried using registrations already created; it
+must not publish an incomplete Project or delete shared registrations.
+
+**Adding the same folder later.** Explicitly adding a registered folder as a
+standalone project enables its standalone visibility and reuses its identity.
+If already visible, locate that entry. For example, adding `backend` through a
+multi-folder Project and later adding it alone yields one registration with two
+entry points. Neither action moves or merges conversations or changes membership.
+
+**Removal.** Removing a standalone entry turns off its standalone visibility;
+removing a member changes that Project's definition; deleting a Project removes
+that definition. These actions never delete source directories or invalidate
+registrations needed by other Projects or existing conversation snapshots. Adding
+a standalone entry again restores the same identity. Automatic cleanup of unused
+registrations is outside this change.
+
+**Preserve execution semantics.** Direct selection does not introduce exact-copy
+binding: known GitHub-backed folders still become portable repository members;
+other members retain the existing machine constraint. Explain this distinction
+in the editor. Ordinary folders modify originals without worktree isolation;
+selecting a repository subdirectory does not promise independent Git isolation.
+No new CLI/MCP interface, automatic directory relocation, or permission model is
+included. Legacy registrations default to standalone-visible for compatibility.
 
 ## Flat layout
 
@@ -306,6 +352,12 @@ Every root gets the same file capabilities in Lody as the main directory:
   host path. Survey: [proposal note](../.agents/notes/proposed/architecture/2026-10-16-multi-repo-projects.md#path-dependency-survey-preparing-for-local-directories).
 
 ## Evidence
+
+Direct folder selection and standalone visibility are implemented in this change.
+Registration reuse is in
+[local-project-import](../packages/components/src/lib/local-project-import.ts);
+[research and trade-offs](../.agents/notes/implemented/architecture/2026-10-26-project-direct-folder-selection.md)
+record the behavior, validation and remaining limits. The broader Spec remains a draft.
 
 These describe the current code, not an implementation of this Spec:
 

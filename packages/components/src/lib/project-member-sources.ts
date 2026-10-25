@@ -13,6 +13,7 @@ export type ProjectMemberLocalCopy = {
   machineName: string;
   localProjectId: LocalProjectId;
   online: boolean;
+  rootPath?: string;
 };
 
 /**
@@ -46,7 +47,7 @@ export type ProjectMemberLocalProjectInput = {
   project: Pick<
     LocalProjectMeta,
     'id' | 'name' | 'githubRepoFullName' | 'createdAtMs' | 'lastOpenedAtMs'
-  >;
+  > & { rootPath?: string };
 };
 
 /**
@@ -144,6 +145,7 @@ function toCopy(entry: ProjectMemberLocalProjectInput): ProjectMemberLocalCopy {
     machineName: entry.machineName,
     localProjectId: entry.project.id,
     online: entry.online,
+    rootPath: entry.project.rootPath,
   };
 }
 

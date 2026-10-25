@@ -1,3 +1,7 @@
+import {
+  AddLocalProjectDialog,
+  type RemoteDirectoryOps,
+} from '@/components/local-projects/add-local-project-dialog';
 import { useMemo, useState } from 'react';
 import type { Meta, StoryObj } from '@storybook/react';
 import type { LocalProjectId, MachineId, ProjectMemberId } from '@lody/shared';
@@ -11,6 +15,7 @@ import {
   type ProjectMemberSourceOption,
 } from '@/lib/project-member-sources';
 import {
+  addProjectGroupDirectory,
   EMPTY_PROJECT_GROUP_FORM_VALUE,
   getProjectMemberSourceKey,
   validateProjectGroupForm,
@@ -253,3 +258,85 @@ export const Picker: Story = {
     canvasElement.querySelector<HTMLButtonElement>('button[aria-haspopup]')?.click();
   },
 };
+
+/** Real creation controls with synthetic filesystem responses; no host folders are touched. */
+function DirectFolderCreationPreview() {
+  const [value, setValue] = useState<ProjectGroupFormValue>({
+    name: 'Product workspace',
+    instructions: '',
+    members: [],
+  });
+  const [open, setOpen] = useState(false);
+  const home = '/Users/demo/Projects';
+  const folders = ['backend', 'frontend', 'design-notes'];
+  const ops: RemoteDirectoryOps = {
+    listRoots: async () => ({
+      ok: true,
+      value: { platform: 'darwin', pathSeparator: '/', homeDir: home },
+    }),
+    browseDir: async (_machineId, { absolutePath = home }) => ({
+      ok: true,
+      value: {
+        path: absolutePath,
+        parentPath: absolutePath === home ? null : home,
+        truncated: false,
+        entries:
+          absolutePath === home
+            ? folders.map((name) => ({
+                name,
+                absolutePath: `${home}/${name}`,
+                isSymlink: false,
+                hidden: false,
+                hints: { git: name !== 'design-notes' },
+              }))
+            : [],
+      },
+    }),
+    createDirectory: async () => ({ ok: false, message: 'Not available in this preview' }),
+    addProject: async (machineId, { rootPath }) => {
+      const name = rootPath.split('/').pop()!;
+      const directory = {
+        machineId,
+        name,
+        rootPath,
+        localProjectId: `local-${name}` as LocalProjectId,
+        inspection: { isGit: name !== 'design-notes', submodules: [] },
+      };
+      setValue((previous) => addProjectGroupDirectory(previous, directory));
+      return { ok: true, value: { ...directory, status: 'added' } };
+    },
+  };
+  return (
+    <>
+      <ProjectGroupForm
+        value={value}
+        onChange={setValue}
+        sources={[]}
+        currentMachineId={here}
+        labelOf={(entry) => entry.directory?.name ?? 'Folder'}
+        detailOf={(entry) => entry.directory?.rootPath}
+        statusOf={() => undefined}
+        isNonGit={(id) =>
+          value.members.find((entry) => entry.id === id)?.directory?.inspection.isGit === false
+        }
+        validation={validateProjectGroupForm(value)}
+        onSelectFolders={() => setOpen(true)}
+        onSubmit={() => undefined}
+        onCancel={() => setValue({ ...value, members: [] })}
+      />
+      <AddLocalProjectDialog
+        selectionOnly
+        open={open}
+        onOpenChange={setOpen}
+        initialMachineId={here}
+        machines={[
+          { id: here, name: 'This Mac', online: true, canAddProjects: true, ownerName: 'Demo' },
+        ]}
+        ops={ops}
+        onAdded={() => undefined}
+      />
+    </>
+  );
+}
+
+export const DirectFolderCreation: Story = { render: () => <DirectFolderCreationPreview /> };

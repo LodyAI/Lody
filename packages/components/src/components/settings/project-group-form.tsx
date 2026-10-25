@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next';
 import {
   AlertTriangle,
   Folder,
+  FolderPlus,
   FolderGit2,
   GitBranch,
   Github,
@@ -58,9 +59,8 @@ const styles = stylex.create({
   },
   memberDetail: {
     minWidth: 0,
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap',
+    whiteSpace: 'normal',
+    overflowWrap: 'anywhere',
     fontSize: text.footnoteSize,
     color: colors.secondaryLabel,
   },
@@ -90,7 +90,7 @@ const styles = stylex.create({
   },
   stateWarning: { color: colors.warning },
   stateError: { color: colors.destructive },
-  addRow: { minWidth: 0 },
+  addRow: { minWidth: 0, display: 'flex', gap: space[2], flexWrap: 'wrap', alignItems: 'center' },
   errors: { margin: 0, paddingInlineStart: space[4], listStyleType: 'disc' },
 });
 
@@ -118,6 +118,8 @@ export type ProjectGroupFormProps = {
   submitting?: boolean;
   error?: string;
   isEditing?: boolean;
+  onSelectFolders?: () => void;
+  selectFoldersDisabled?: boolean;
   onSubmit: () => void;
   onCancel: () => void;
 };
@@ -167,6 +169,8 @@ export function ProjectGroupForm({
   detailOf,
   statusOf,
   isNonGit = () => false,
+  onSelectFolders,
+  selectFoldersDisabled,
   validation,
   currentMachineId = null,
   readOnly = false,
@@ -188,7 +192,7 @@ export function ProjectGroupForm({
     t(`settings.projectGroups.memberErrors.${code}`);
 
   return (
-    <form {...stylex.props(catalog.editorForm)} onSubmit={submit}>
+    <form {...stylex.props(catalog.editorForm)} onSubmit={submit} inert={submitting || undefined}>
       <div {...withClassName(stylex.props(catalog.editorBody), 'scrollbar-pro')}>
         <div {...stylex.props(catalog.stack)}>
           <Input
@@ -205,12 +209,33 @@ export function ProjectGroupForm({
 
         <Section
           title={t('settings.projectGroups.form.members')}
-          hint={t('settings.projectGroups.form.membersHint')}
+          hint={
+            onSelectFolders
+              ? t('settings.projectGroups.folderSemantics')
+              : t('settings.projectGroups.form.membersHint')
+          }
         >
           {/* The picker sits above the members, so ticking a project grows the
               list below it and never moves the control being used. */}
           {readOnly ? null : (
             <div {...stylex.props(styles.addRow)}>
+              {onSelectFolders ? (
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="small"
+                  disabled={submitting || selectFoldersDisabled}
+                  title={
+                    selectFoldersDisabled
+                      ? t('settings.projectGroups.folderUpdateRequired')
+                      : undefined
+                  }
+                  onClick={onSelectFolders}
+                >
+                  <FolderPlus size={14} />
+                  {t('settings.projectGroups.selectFolders')}
+                </Button>
+              ) : null}
               <ProjectGroupSourcePicker
                 value={value}
                 onChange={onChange}
@@ -373,7 +398,7 @@ function MemberRow({
       )}
       <span {...stylex.props(styles.memberBody)}>
         <span {...stylex.props(styles.memberName)}>{label}</span>
-        <span {...stylex.props(styles.memberDetail)}>
+        <span {...stylex.props(styles.memberDetail)} title={detail}>
           {placement.kind === 'submodule' ? (
             <>
               {t('settings.projectGroups.form.submoduleOf', { parent: parentLabel ?? '' })}

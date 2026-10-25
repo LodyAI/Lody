@@ -10,7 +10,6 @@ import { currentWorkspaceIdAtom } from '@/atoms';
 import { getMachineMetaMapAtom } from '@/atoms/machines';
 import { useLocalProjectsAdmin } from '@/hooks/use-local-projects-admin';
 import { useRemoveLocalProject } from '@/hooks/use-remove-local-project';
-import { useOnlineMachineIds } from '@/hooks/use-machine-online-status';
 import { getLocalProjectVisibilityKey } from '@/lib/visible-local-project-index';
 import type { ProjectSkillsSource } from '@/hooks/use-project-skills';
 import {
@@ -62,7 +61,6 @@ export function MobileLocalProjectSettings({
   const { t } = useTranslation();
   const workspaceId = useAtomValue(currentWorkspaceIdAtom);
   const machineMeta = useAtomValue(getMachineMetaMapAtom).get(machineId as MachineId);
-  const onlineMachineIds = useOnlineMachineIds();
   // Team sharing is cloud-only; the whole sharing section hides on the local
   // (open-source) platform.
   const teamSharingAvailable = useAppCapability('teamSharing');
@@ -77,8 +75,7 @@ export function MobileLocalProjectSettings({
     onWorktreeSetupChange,
     onWorktreeCleanupChange,
   } = useLocalProjectsAdmin();
-  const { removeLocalProject, preflightLocalProjectRemoval, getRemoveLocalProjectImpact } =
-    useRemoveLocalProject();
+  const { removeLocalProject } = useRemoveLocalProject();
   const [removeSheetOpen, setRemoveSheetOpen] = useState(false);
 
   const projectKey = getLocalProjectVisibilityKey(machineId, projectId);
@@ -98,16 +95,6 @@ export function MobileLocalProjectSettings({
   /* Worktree setup + cleanup live behind a single drill-in row that opens
      this sheet, so the Settings tab's first level stays a short list. */
   const [worktreeSheetOpen, setWorktreeSheetOpen] = useState(false);
-  const removeImpact = useMemo(
-    () =>
-      row
-        ? getRemoveLocalProjectImpact({
-            machineId: row.machineId,
-            localProjectId: row.project.id,
-          })
-        : { conversationCount: 0, runningSessionCount: 0 },
-    [getRemoveLocalProjectImpact, row]
-  );
 
   if (isLoading && !row) {
     return (
@@ -241,31 +228,13 @@ export function MobileLocalProjectSettings({
         open={removeSheetOpen}
         onOpenChange={setRemoveSheetOpen}
         projectName={row.project.name}
-        pathLabel={projectPath}
-        deviceName={row.machineName}
-        deviceOnline={onlineMachineIds.has(row.machineId)}
-        conversationCount={removeImpact.conversationCount}
-        runningSessionCount={removeImpact.runningSessionCount}
-        canCleanupWorktrees={
-          onlineMachineIds.has(row.machineId) &&
-          machineSupportsLocalProjectRemovalProtocol(machineMeta)
-        }
-        onPreflightCleanup={() =>
-          preflightLocalProjectRemoval({
+        onConfirm={async () => {
+          const removed = await removeLocalProject({
             machineId: row.machineId,
             localProjectId: row.project.id,
-          })
-        }
-        onConfirm={async (options) => {
-          const removed = await removeLocalProject(
-            {
-              machineId: row.machineId,
-              localProjectId: row.project.id,
-              projectName: row.project.name,
-              originalRootPath: projectPath ?? undefined,
-            },
-            options
-          );
+            projectName: row.project.name,
+            originalRootPath: projectPath ?? undefined,
+          });
           if (removed) onRemoved?.();
           return removed;
         }}

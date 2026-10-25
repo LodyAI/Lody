@@ -34,8 +34,8 @@ rolls back — is in the root [AGENTS.md](../../../../../AGENTS.md).
   a nested project window (header, page tabs) — never inline the editor beside the list.
   Mobile keeps the previous stacked list. Local-project deletion reuses
   `useRemoveLocalProject` / `RemoveLocalProjectDialog` (nested overlay like MCP);
-  do not add a second confirm. Pending removal stays listed until the owning
-  machine finishes. Do not RPC-probe worktree/skills on offline remotes, and
+  Follow the parent removal contract; do not add a second confirm.
+  Do not RPC-probe worktree/skills on offline remotes, and
   never surface `machine_rpc_unavailable` as an editor error. The GitHub source
   row must paint from `lody:githubReposCache` on first frame; do not wait on
   `listWorkspaceReposWithStatus` to decide whether GitHub exists.

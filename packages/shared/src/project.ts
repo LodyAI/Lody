@@ -144,10 +144,13 @@ export type LocalProjectMeta = {
   lastOpenedAtMs?: number;
   history?: LocalProjectHistoryCatalogs;
   /**
-   * `owner/repo` of the folder's GitHub remote, observed and written only by
-   * the owning daemon. Absent for folders without one and from older daemons.
+   * `owner/repo` of the folder's GitHub remote, observed by the owning daemon.
+   * The renderer may persist its validated prepare-add inspection on registration.
+   * Absent for folders without one and from older daemons.
    */
   githubRepoFullName?: string;
+  /** Missing on legacy rows means visible. Does not control access or registration. */
+  standaloneVisible?: boolean;
 };
 
 const DEFAULT_BASE_BRANCH = 'main';

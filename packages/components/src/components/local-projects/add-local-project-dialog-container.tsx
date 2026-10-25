@@ -99,7 +99,8 @@ export function useAddLocalProjectMachines(): {
  */
 export function useAddLocalProjectController(
   onProjectAdded?: AddLocalProjectDialogProps['onAdded'],
-  onProjectLocated?: (info: { machineId: MachineId; localProjectId: LocalProjectId }) => void
+  onProjectLocated?: (info: { machineId: MachineId; localProjectId: LocalProjectId }) => void,
+  selectProject?: RemoteDirectoryOps['addProject']
 ) {
   const { t } = useTranslation();
   const runtime = useAtomValue(activeWorkspaceRuntimeAtom);
@@ -151,26 +152,28 @@ export function useAddLocalProjectController(
           timeoutMessage
         );
       },
-      addProject: async (machineId, args) => {
-        if (!runtime) {
-          return { ok: false, errorCode: 'timeout', message: timeoutMessage };
-        }
-        try {
-          return {
-            ok: true,
-            value: await prepareAndWriteLocalProject({
-              runtime,
-              machineId,
-              rootPath: args.rootPath,
-              timeoutMessage,
-            }),
-          };
-        } catch (error) {
-          return { ok: false, message: error instanceof Error ? error.message : String(error) };
-        }
-      },
+      addProject:
+        selectProject ??
+        (async (machineId, args) => {
+          if (!runtime) {
+            return { ok: false, errorCode: 'timeout', message: timeoutMessage };
+          }
+          try {
+            return {
+              ok: true,
+              value: await prepareAndWriteLocalProject({
+                runtime,
+                machineId,
+                rootPath: args.rootPath,
+                timeoutMessage,
+              }),
+            };
+          } catch (error) {
+            return { ok: false, message: error instanceof Error ? error.message : String(error) };
+          }
+        }),
     };
-  }, [runtime, t]);
+  }, [runtime, t, selectProject]);
 
   const onAdded = useCallback<AddLocalProjectDialogProps['onAdded']>(
     (info) => {
