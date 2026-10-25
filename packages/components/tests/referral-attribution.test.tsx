@@ -1,12 +1,17 @@
 // @vitest-environment jsdom
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { CloudApi, PlatformProvider } from '@lody/platform';
 import { PlatformContext } from '@lody/platform/react';
 import { TEST_CLOUD_PLATFORM } from './test-platform';
 import { ReferralLeadAttacher } from '../src/components/referral-lead-attacher';
-import { captureReferral, readReferral } from '../src/lib/referral-attribution';
+import {
+  captureReferral,
+  readReferral,
+  readReferralHint,
+  attachStoredReferral,
+} from '../src/lib/referral-attribution';
 function storage() {
   const map = new Map<string, string>();
   return {
@@ -20,13 +25,15 @@ function storage() {
   };
 }
 describe('referral attribution through login', () => {
-  it('keeps the first valid click through a login redirect and expires after 30 days', () => {
+  it('replaces the referral on each valid click and expires 30 days after the latest click', () => {
     const s = storage();
     captureReferral('?ref=' + 'a'.repeat(32), s, 1000);
     captureReferral('?ref=' + 'b'.repeat(32), s, 2000);
     captureReferral('?redirect=%2Fworkspace', s, 3000);
-    expect(readReferral(s, 4000)).toBe('a'.repeat(32));
-    expect(readReferral(s, 1000 + 30 * 86400000)).toBeUndefined();
+    expect(readReferral(s, 4000)).toBe('b'.repeat(32));
+    expect(readReferralHint(s, 4000)).toEqual({ code: 'b'.repeat(32), clickedAt: 2000 });
+    expect(readReferral(s, 1000 + 30 * 86400000)).toBe('b'.repeat(32));
+    expect(readReferral(s, 2000 + 30 * 86400000)).toBeUndefined();
     captureReferral('?ref=' + 'b'.repeat(32), s, 1000 + 30 * 86400000);
     expect(readReferral(s, 1001 + 30 * 86400000)).toBe('b'.repeat(32));
   });
@@ -84,6 +91,8 @@ describe('referral attachment to the authenticated account', () => {
   const leads = new Map<string, string>();
 
   beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(10000);
     localStorage.clear();
     leads.clear();
     activeUser = null;
@@ -112,6 +121,7 @@ describe('referral attachment to the authenticated account', () => {
     await act(async () => root.unmount());
     container.remove();
     localStorage.clear();
+    vi.useRealTimers();
   });
 
   async function signIn(userId: string | null) {
@@ -146,6 +156,51 @@ describe('referral attachment to the authenticated account', () => {
       ['first', code],
       ['second', code],
     ]);
+  });
+
+  it('attaches a newer link while mounted and waits for it before checkout', async () => {
+    await signIn('newcomer');
+    vi.setSystemTime(11000);
+    await act(async () => captureReferral(`?ref=${'b'.repeat(32)}`));
+    expect(leads.get('newcomer')).toBe('b'.repeat(32));
+    const ready = Promise.withResolvers<void>();
+    let selected: string | undefined;
+    let checkoutStarted = false;
+    const checkout = attachStoredReferral(async (hint) => {
+      expect(hint).toEqual({ code: 'b'.repeat(32), clickedAt: 11000 });
+      await ready.promise;
+      selected = hint.code;
+    }).then(() => {
+      checkoutStarted = true;
+    });
+    expect(checkoutStarted).toBe(false);
+    ready.resolve();
+    await checkout;
+    expect(checkoutStarted).toBe(true);
+    expect(selected).toBe('b'.repeat(32));
+  });
+
+  it('observes another tab and renews the same link only on a new click', async () => {
+    const accountLeads = new Map<string, { code: string; clickedAt?: number }>();
+    platform.cloudApi!.useMutation = (() => async (hint: { code: string; clickedAt?: number }) => {
+      if (!activeUser) throw new Error('Unauthenticated attachment');
+      accountLeads.set(activeUser, hint);
+      return { status: 'attached' as const };
+    }) as CloudApi['useMutation'];
+    await signIn('newcomer');
+    await act(async () => {
+      window.dispatchEvent(new Event('focus'));
+    });
+    expect(accountLeads.get('newcomer')).toEqual({ code, clickedAt: 10000 });
+    vi.setSystemTime(12000);
+    localStorage.setItem(
+      'lody:referral',
+      JSON.stringify({ code, expiresAt: 12000 + 30 * 86400000 })
+    );
+    await act(async () => {
+      window.dispatchEvent(new StorageEvent('storage', { key: 'lody:referral' }));
+    });
+    expect(accountLeads.get('newcomer')).toEqual({ code, clickedAt: 12000 });
   });
 
   it.each(['invalid', 'self', 'failed'] as const)(

@@ -76,6 +76,7 @@ import {
 } from './sidebar-updated-session-list';
 import { SidebarFilterPopover, type SidebarFilterLabels } from './sidebar-filter-popover';
 import { WorkspaceAvatar } from './workspace-avatar';
+import { AuthRecoveryEntrySlot } from './auth-recovery-entry';
 import type { SidebarOrganizeMode } from '@/atoms/sidebar-state';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { useStableNow } from '@/hooks/use-stable-now';
@@ -308,8 +309,41 @@ export interface LoroSidebarProps {
  */
 const COLLAPSE_DRAG_THRESHOLD = 160;
 
+const resizeStyles = stylex.create({
+  handle: {
+    position: 'absolute',
+    right: '-3.5px',
+    top: radius.large,
+    bottom: `calc(${space[8]} + ${space[2]})`,
+    zIndex: 20,
+    width: '7px',
+    cursor: 'col-resize',
+    touchAction: 'none',
+    color: colors.label,
+    '--sidebar-resize-opacity': {
+      default: 0,
+      ':hover': 0.42,
+    },
+  },
+  dragging: {
+    '--sidebar-resize-opacity': 0.56,
+  },
+  feedback: {
+    position: 'absolute',
+    insetBlock: 0,
+    left: '50%',
+    width: '1px',
+    transform: 'translateX(-50%)',
+    borderRadius: radius.full,
+    backgroundImage: 'linear-gradient(to bottom, transparent, currentColor, transparent)',
+    pointerEvents: 'none',
+    opacity: 'var(--sidebar-resize-opacity)',
+  },
+});
+
 const footerStyles = stylex.create({
   desktop: { columnGap: space[1] },
+  workspace: { display: 'flex', minWidth: 0, flex: 1, alignItems: 'center' },
   actions: {
     display: 'flex',
     alignItems: 'center',
@@ -1320,29 +1354,18 @@ export const LoroSidebar = memo(function LoroSidebar({
           : { width: sidebarWidth, minWidth: resolvedMinWidth, maxWidth: resolvedMaxWidth }
       }
     >
-      {!isMobile &&
-        !overlay && (
-          // VSCode-style sash: a 12px pointer hit area straddling the border
-          // (6px inside + 6px outside, so hovering ON or just past the edge
-          // still triggers); the visible affordance is a thin 2px line covering
-          // the border itself. Slight hover delay so it doesn't flash when the
-          // cursor merely passes over the edge.
-          <div
-            className={cn(
-              'absolute -right-1.5 top-0 z-20 h-full w-3 cursor-col-resize bg-transparent',
-              // 2px line covers the panel's `border-r` for the full height.
-              'after:absolute after:right-[5px] after:top-0 after:bottom-0 after:w-[2px]',
-              'after:bg-transparent after:transition-colors after:duration-150',
-              isResizing
-                ? 'after:bg-sidebar-ring/70'
-                : 'hover:after:bg-sidebar-ring/50 hover:after:delay-150'
-            )}
-            onPointerDown={handleResizeStart}
-            onPointerMove={handleResizeMove}
-            onPointerUp={handleResizeEnd}
-            onPointerCancel={handleResizeEnd}
-          />
-        )}
+      {!isMobile && !overlay && (
+        <div
+          data-sidebar-resize-handle
+          {...stylex.props(resizeStyles.handle, isResizing && resizeStyles.dragging)}
+          onPointerDown={handleResizeStart}
+          onPointerMove={handleResizeMove}
+          onPointerUp={handleResizeEnd}
+          onPointerCancel={handleResizeEnd}
+        >
+          <div aria-hidden="true" {...stylex.props(resizeStyles.feedback)} />
+        </div>
+      )}
 
       <div className="relative flex h-full flex-col overflow-hidden">
         <div
@@ -1355,7 +1378,10 @@ export const LoroSidebar = memo(function LoroSidebar({
           )}
         >
           {isMobile ? (
-            renderWorkspaceControl('bottom')
+            <div {...stylex.props(footerStyles.workspace)}>
+              {renderWorkspaceControl('bottom')}
+              <AuthRecoveryEntrySlot />
+            </div>
           ) : isElectron ? (
             <span className="min-w-0 flex-1" />
           ) : (
@@ -1657,7 +1683,12 @@ export const LoroSidebar = memo(function LoroSidebar({
           )}
           data-sidebar-footer
         >
-          {!isMobile ? renderWorkspaceControl('top') : null}
+          {!isMobile ? (
+            <div {...stylex.props(footerStyles.workspace)}>
+              {renderWorkspaceControl('top')}
+              <AuthRecoveryEntrySlot />
+            </div>
+          ) : null}
           <div {...stylex.props(footerStyles.actions)}>
             <Menu.Root>
               <Menu.Trigger

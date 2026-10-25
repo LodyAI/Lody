@@ -17,7 +17,7 @@ import { fileLockLayer } from '../src/utils/file-lock';
 import { LodyOperationStore } from '../src/orchestration/operation-store';
 import { createSessionBackend } from '../src/session/session-backend';
 import { findNextDispatchableUserTurn } from '../src/session/session-dispatch-logic';
-import { createLoroSessionData } from '@lody/shared/session-data';
+import { createLoroSessionData, createRoostDirectoryRow } from '@lody/shared/session-data';
 import {
   buildMissingEmail,
   getSessionCancelRequestMarker,
@@ -1944,7 +1944,7 @@ describe('SessionDispatchWatcher', () => {
     await vi.waitFor(() => {
       expect(startSession).toHaveBeenCalledTimes(1);
     });
-    expect(sessionDoc.peekReadyMessageQueue).toHaveBeenCalledTimes(1);
+    expect(queue).toHaveLength(0);
     expect(history[0]).toEqual(
       expect.objectContaining({
         id: 'queued-mq-1',
@@ -2227,6 +2227,7 @@ describe('SessionDispatchWatcher', () => {
       withHistoryPort({
         peekReadyMessageQueue,
         updateHistory,
+        getHistory: () => [existingTurn],
         removeMessageQueueItem: vi.fn(async () => {}),
       }),
       {
@@ -2242,7 +2243,6 @@ describe('SessionDispatchWatcher', () => {
     );
 
     expect(promoted).toBeNull();
-    expect(peekReadyMessageQueue).toHaveBeenCalledTimes(1);
     expect(updateHistory).not.toHaveBeenCalled();
     const remainingQueue = [await peekReadyMessageQueue()];
     const failingMeta: SessionMeta = {
@@ -2827,20 +2827,23 @@ describe('SessionDispatchWatcher', () => {
           }),
         },
         getMetaState: vi.fn(async () => meta),
-        getHistory: vi.fn(() => {
-          historyReads += 1;
-          events.push(`history-read:${historyReads}`);
-          if (historyReads === 2) {
-            // A commit that lands while the follow-up check is already reading
-            // history is a genuinely new trigger: it must queue one more check,
-            // and a timer armed before that check must fire before it reads.
-            mirrorListener?.();
-            setTimeout(() => {
-              events.push('timer-2');
-            }, 0);
-          }
-          return history;
-        }),
+        getHistory: () => history,
+        sessionData: {
+          history: {
+            readDirectory: (from: number, to: number) => {
+              historyReads += 1;
+              events.push(`history-read:${historyReads}`);
+              if (historyReads === 2) {
+                // A new trigger during one snapshot still owns a later check.
+                mirrorListener?.();
+                setTimeout(() => events.push('timer-2'), 0);
+              }
+              return history
+                .slice(from, to)
+                .map((entry, index) => createRoostDirectoryRow(from + index, entry));
+            },
+          },
+        },
         setStatus: vi.fn(async () => {}),
         updateHistory: vi.fn(async () => {}),
       });

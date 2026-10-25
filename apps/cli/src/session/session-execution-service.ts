@@ -1,7 +1,11 @@
+import { resolveProjectFileRoots } from './worktree/project-member-access';
 import { type AcpLauncher, resolveAcpLauncher } from '@/agent/acp-analytics';
 import type { LodyRateLimitsCapability } from 'acp-extension-core';
 import { queryLocalAcpRateLimits, AcpQuotaCleanupError } from '@/agent/acp-runner';
-import type { MachineProviderRateLimitsRefreshResponse } from '@lody/shared';
+import {
+  isSubscriptionQuotaEligible,
+  type MachineProviderRateLimitsRefreshResponse,
+} from '@lody/shared';
 import { ProviderQuotaRefreshCache } from './provider-quota-refresh-cache';
 import type { TurnOutcome, TurnOutcomeFact, TurnResultAudience } from '@lody/shared/notifications';
 import {
@@ -1063,13 +1067,7 @@ export class SessionExecutionService {
       this.deps.machineId
     );
     if (!config) return response;
-    if (
-      config.cliType === 'builtin' &&
-      (config.brandId ||
-        Object.keys(config.env ?? {}).length ||
-        config.codexAuth?.mode === 'api-key')
-    )
-      return response;
+    if (!isSubscriptionQuotaEligible(config)) return response;
     const capability = await this.deps.workspaceDocument.getAcpCapabilities(
       this.deps.machineId,
       configId
@@ -5395,7 +5393,8 @@ export class SessionExecutionService {
     if (!userTurnId) {
       return false;
     }
-    const history = await this.getSessionHistory(sessionDoc);
+    const backend = await this.getSessionBackend(sessionDoc, sessionDoc.sessionId);
+    const history = await backend.readDispatchHistory([userTurnId]);
     return history.some(
       (entry) => entry.id === userTurnId && entry.role === 'user' && entry.status === 'canceled'
     );
@@ -5758,6 +5757,7 @@ export class SessionExecutionService {
       // part of the workspace state being resumed.
       const restoreBranch = project?.branch?.trim() || undefined;
       const restoreConfig: SessionConfig = {
+        projectRun: meta?.projectRun,
         sessionId,
         agentConfigId: meta?.agentConfigId,
         codexAuth: storedLaunchConfig.config?.codexAuth,
@@ -6638,6 +6638,7 @@ export class SessionExecutionService {
       githubRepo: githubRepoFullName,
       branch,
       project,
+      projectRun: existingMeta?.projectRun ?? message.projectRun,
       worktreeSetup: message.worktreeSetup,
       worktreeCleanup: message.worktreeCleanup,
       fromFeedbackPostId,
@@ -6663,6 +6664,7 @@ export class SessionExecutionService {
       githubRepo: githubRepoFullName,
       branch,
       project,
+      projectRun: existingMeta?.projectRun ?? message.projectRun,
       worktreeSetup: message.worktreeSetup,
       worktreeCleanup: message.worktreeCleanup,
       workdir,
@@ -6675,6 +6677,19 @@ export class SessionExecutionService {
     // latency-critical create path performs one doc-meta upsert instead of five
     // sequential ones.
     const dispatchStartPatch: Partial<SessionMeta> = {};
+    if (!existingMeta?.projectRun && message.projectRun) {
+      // The creation snapshot cannot claim daemon-observed branches or status.
+      const initialRun = structuredClone(message.projectRun);
+      for (const member of Object.values(initialRun.members)) {
+        delete member.branch;
+        delete member.repoFullName;
+        delete member.dirty;
+        delete member.unpushed;
+        delete member.diff;
+      }
+      sessionConfig.projectRun = initialRun;
+      dispatchStartPatch.projectRun = initialRun;
+    }
     if (project) {
       dispatchStartPatch.project = project;
     }
@@ -6841,6 +6856,18 @@ export class SessionExecutionService {
                 );
               }
             }
+            const projectRun =
+              !hasPriorAcpSession && !message.parentSessionId
+                ? (await sessionDoc.getMetaState())?.projectRun
+                : undefined;
+            const projectFileRoots = projectRun
+              ? await resolveProjectFileRoots(
+                  session.getWorkdir(),
+                  projectRun,
+                  self.deps.machineId,
+                  (id) => self.deps.sessionManager.resolveLocalProjectRootPath(id)
+                )
+              : undefined;
             const sessionInputBlocks = resolveSessionExecutionInputBlocks({
               ...agentConfig,
               prompt: buildPrompt(
@@ -6848,7 +6875,11 @@ export class SessionExecutionService {
                 project,
                 agentConfig.issuePRMentions,
                 fromFeedbackPostId,
-                { branchToRename }
+                {
+                  branchToRename,
+                  projectRun,
+                  projectFileRoots,
+                }
               ),
             });
             return traceAsync(
@@ -7131,7 +7162,10 @@ export class SessionExecutionService {
   private async pendingInboxInputIds(sessionId: SessionId): Promise<string[]> {
     const doc = await this.deps.workspaceDocument.getOrCreateSessionDoc(sessionId);
     const backend = await createSessionBackend(doc);
-    const [history, queued] = await Promise.all([backend.readHistory(), backend.getMessageQueue()]);
+    const [history, queued] = await Promise.all([
+      backend.readDispatchHistory([]),
+      backend.getMessageQueue(),
+    ]);
     return [
       ...history
         .filter(

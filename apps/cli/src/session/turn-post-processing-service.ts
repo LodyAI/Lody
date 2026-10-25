@@ -1,5 +1,10 @@
+import { resolveSessionPullRequests } from '@lody/shared';
+import path from 'node:path';
+import { realpath } from 'node:fs/promises';
+import { WorkspaceGitService } from './workspace-git-service';
 import {
   getSessionRoomId,
+  resolveSessionFilePath,
   resolveBaseBranchPreference,
   resolveProjectGitHubRepo,
   type ProjectRef,
@@ -37,7 +42,6 @@ type SessionPullRequestMeta = NonNullable<SessionMeta['pullRequests']>[number];
 
 type WorkspaceSessionContext = {
   ownerSessionId: SessionId;
-  ownerDoc: SessionDocument;
   ownerMeta: SessionMeta | undefined;
   /** The active session's own meta, already read to find the owner. */
   activeMeta: SessionMeta | undefined;
@@ -52,11 +56,11 @@ export class TurnPostProcessingService {
     ownerMeta: SessionMeta | undefined,
     activeMeta: SessionMeta | undefined
   ): readonly SessionPullRequestMeta[] {
-    const ownerPullRequests = ownerMeta?.pullRequests ?? [];
+    const ownerPullRequests = resolveSessionPullRequests(ownerMeta);
     if (ownerPullRequests.length > 0) {
       return ownerPullRequests;
     }
-    return activeMeta?.pullRequests ?? [];
+    return resolveSessionPullRequests(activeMeta);
   }
 
   private async resolveWorkspaceSessionContext(
@@ -68,7 +72,6 @@ export class TurnPostProcessingService {
     if (ownerSessionId === activeSessionId) {
       return {
         ownerSessionId,
-        ownerDoc: activeDoc,
         ownerMeta: activeMeta,
         activeMeta,
         ownerRoomId: getSessionRoomId(ownerSessionId),
@@ -80,7 +83,6 @@ export class TurnPostProcessingService {
     const ownerMeta = await ownerDoc.getMetaState();
     return {
       ownerSessionId,
-      ownerDoc,
       ownerMeta,
       activeMeta,
       ownerRoomId: getSessionRoomId(ownerSessionId),
@@ -102,6 +104,10 @@ export class TurnPostProcessingService {
     try {
       const sessionDoc = await this.deps.workspaceDocument.getOrCreateSessionDoc(sessionId);
       const workspace = await this.resolveWorkspaceSessionContext(sessionId, sessionDoc);
+      if (workspace.ownerMeta?.projectRun) {
+        await new WorkspaceGitService(this.deps).syncSession(sessionId, session);
+        return;
+      }
       // Gate here rather than at the cancellation callers: they reach this from
       // several sites that carry no `ProjectRef`, and a second copy of the rule
       // is how those routes drift apart. A child Tab's own meta may omit
@@ -159,6 +165,42 @@ export class TurnPostProcessingService {
       skipHistoryFileDiff?: boolean;
     }
   ): Promise<SessionHistoryInput['fileDiff']> {
+    const ownerDoc = await this.deps.workspaceDocument.getOrCreateSessionDoc(sessionId);
+    const ownerContext = await this.resolveWorkspaceSessionContext(sessionId, ownerDoc);
+    if (ownerContext.ownerMeta?.projectRun) {
+      await new WorkspaceGitService(this.deps).syncSession(sessionId, session);
+      const fileDiff: NonNullable<SessionHistoryInput['fileDiff']> = [];
+      const root = await realpath(session.getWorkdir());
+      for (const member of Object.values(ownerContext.ownerMeta.projectRun.members)) {
+        const cwd = await realpath(path.join(root, member.path)).catch(() => null);
+        if (
+          !cwd ||
+          resolveSessionFilePath([{ id: 'main', absolutePath: root }], cwd)?.relativePath !==
+            member.path
+        )
+          continue;
+        const stats = await getGitDiffStats((args) => session.exec('git', args, cwd, false), {
+          preferredBaseBranch: member.base,
+          countWorkingTreeFileLines: (file) => countWorkingTreeTextFileLines(cwd, file),
+        }).catch(() => null);
+        if (stats)
+          fileDiff.push(
+            ...stats.commitFileDiff.map((file) => ({
+              ...file,
+              filePath: `${member.path}/${file.filePath}`,
+            }))
+          );
+      }
+      if (options.skipHistoryFileDiff !== true) {
+        const backend = await createSessionBackend(ownerDoc, await ownerDoc.getMetaState());
+        await backend.applyHistoryAction({
+          kind: 'assistant-file-diff',
+          change: { kind: 'set', value: fileDiff },
+          turnId: options.turnId,
+        });
+      }
+      return fileDiff;
+    }
     const workdir = session.getWorkdir();
     const runGit: GitRunner = (args) => session.exec('git', args, workdir, false);
 
@@ -276,16 +318,8 @@ export class TurnPostProcessingService {
       return detected;
     }
 
-    try {
-      await workspace.ownerDoc.addPullRequest({
-        url: detected.prUrl,
-        status: detected.status,
-      });
-    } catch (error) {
-      this.deps.logger.debug(
-        `[${sessionId}] Failed to write PR to local doc: ${formatErrorMessage(error)}`
-      );
-    }
+    // The reconciler is the only association-list publisher. Turn completion
+    // may establish hosted linkage, but must not race its fresh-meta writeback.
     return detected;
   }
 }

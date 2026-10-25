@@ -17,6 +17,8 @@ do not acquire a dependency on hosted billing.
 
 The annual threshold UI described below was superseded on 2026-10-18 by [uniform referral credit](2026-10-18-uniform-referral-credit.md).
 
+Attribution selection was partially superseded on 2026-10-24 by [last-click attribution](2026-10-24-referral-last-touch.md). The first-touch rule below records the earlier decision.
+
 ## Decision and responsibilities
 
 `packages/cloud-api` defines the overview, ledger and link contracts. Operations use

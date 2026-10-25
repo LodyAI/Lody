@@ -174,3 +174,10 @@ creation and discovery, keep their existing best-effort report semantics. Route 
 application-level sync unavailability, not a fabricated Repo conflict.
 The [decision note](../notes/implemented/bug-fix/2026-10-10-machine-flock-cache-insufficient.md)
 records the fallback and regression coverage.
+
+PR association membership/order has one publisher: the reconciler. Turn completion
+may detect a PR and establish hosted linkage but does not write its own array.
+Lifecycle records are independent per URL/source; shared resolution applies GitHub
+revision ordering to UI, MCP, notifications and polling targets. The legacy array
+status is a compatibility projection. See the
+[observation contract](../../specs/local-github-pr-observation.md).

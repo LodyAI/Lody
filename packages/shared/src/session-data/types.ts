@@ -3,6 +3,7 @@ import type { MessageContent } from '../ai';
 import type { HistoryAction } from './history-actions';
 import type { SessionGoalMessage } from '../goal';
 import type { PermissionOutcome, SessionHistoryChanges } from '../message';
+import type { SessionHistoryChange } from '../schema';
 import type { SessionId } from '../ids';
 import type { HistoryImportInput } from './history-import';
 import type { SessionSnapshotService } from './snapshot';
@@ -196,6 +197,13 @@ export interface SessionHistoryReader {
     to: number
   ): readonly SessionDirectoryRow[] | Promise<readonly SessionDirectoryRow[]>;
   getCheckpoint?(): Promise<string>;
+  /** Native publication and its scoped checkpoint, read as one observation. */
+  getPublication?(): Promise<{
+    readonly checkpoint: string;
+    readonly historyRevision: number;
+    readonly historyCount: number;
+    readonly historyChange: SessionHistoryChange | null;
+  }>;
   readChanges?(
     checkpoint: string,
     options?: { readonly withPatches?: true }

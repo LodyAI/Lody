@@ -143,6 +143,11 @@ export type LocalProjectMeta = {
   createdAtMs: number;
   lastOpenedAtMs?: number;
   history?: LocalProjectHistoryCatalogs;
+  /**
+   * `owner/repo` of the folder's GitHub remote, observed and written only by
+   * the owning daemon. Absent for folders without one and from older daemons.
+   */
+  githubRepoFullName?: string;
 };
 
 const DEFAULT_BASE_BRANCH = 'main';

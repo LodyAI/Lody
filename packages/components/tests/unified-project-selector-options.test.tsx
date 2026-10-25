@@ -231,4 +231,55 @@ describe('UnifiedProjectSelectorView options', () => {
     expect(projectItems.at(-1)?.textContent).toContain('loro-dev/new-repository');
     expect(projectItems.some((item) => item.textContent?.startsWith('Project 20'))).toBe(false);
   });
+
+  it('offers project groups, selects one, and keeps a group it cannot run disabled', async () => {
+    const onChange = vi.fn();
+    await act(async () => {
+      root.render(
+        <Tooltip.Provider>
+          <UnifiedProjectSelectorView
+            value={{ kind: 'none' }}
+            onChange={onChange}
+            localProjects={[]}
+            projectGroups={[
+              { projectId: 'shop', name: 'Shop', memberCount: 3, lastUsedAt: 100 },
+              {
+                projectId: 'split',
+                name: 'Split',
+                memberCount: 2,
+                lastUsedAt: 50,
+                disabledReason: 'Its local repositories are on different machines',
+              },
+            ]}
+            onAddLocalProject={vi.fn()}
+            onConnectGitRepo={vi.fn()}
+          />
+        </Tooltip.Provider>
+      );
+    });
+
+    const trigger = container.querySelector<HTMLButtonElement>('button');
+    await act(async () => {
+      trigger?.dispatchEvent(
+        new TestPointerEvent('mousedown', { bubbles: true, button: 0, pointerType: 'mouse' })
+      );
+      await new Promise((resolve) => setTimeout(resolve, 40));
+    });
+
+    const groupItems = Array.from(
+      document.querySelectorAll<HTMLElement>('[role="menuitemradio"]')
+    ).filter((item) => /Shop|Split/.test(item.textContent ?? ''));
+    // This suite's `t` returns the fallback without interpolating.
+    expect(groupItems.map((item) => item.textContent)).toEqual([
+      'Shop{{count}} repositories',
+      'SplitIts local repositories are on different machines',
+    ]);
+    expect(groupItems[1]?.getAttribute('aria-disabled')).toBe('true');
+
+    await act(async () => {
+      groupItems[0]?.click();
+      await Promise.resolve();
+    });
+    expect(onChange).toHaveBeenCalledWith({ kind: 'group', projectId: 'shop' });
+  });
 });

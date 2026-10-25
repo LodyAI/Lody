@@ -36,14 +36,8 @@ import type { AcpSessionSelectOption } from '@/components/shared/acp-session-sel
 import type { AgentSelection } from '@/components/shared/agent-selector';
 import { composerSurface as surface } from '@/components/shared/composer-surface';
 import { MenuOptionSearchList } from '@/components/shared/menu-option-search-list';
-import {
-  DEEPSEEK_DELEGATION_DISCUSSION_URL,
-  DeepSeekDelegationWarningContent,
-  shouldShowDeepSeekDelegationWarning,
-} from '@/components/shared/deepseek-delegation-warning';
 import { orderAcpConfigOptionSelectors } from '@/lib/acp-selector-order';
 import { shouldOfferOptionSearch } from '@/lib/fuzzy-option-filter';
-import { openExternalUrl } from '@/lib/native-browser';
 import { permissionModeControlLabel, resolvePermissionModeFace } from '@/lib/permission-mode-face';
 import {
   doesAgentRolePinPermissionMode,
@@ -121,16 +115,6 @@ const styles = stylex.create({
     width: '20px',
     height: '20px',
     color: colors.tertiaryLabel,
-  },
-  /** A note in a menu: it wraps, so it is not a row's one line. */
-  note: {
-    display: 'flex',
-    alignItems: 'flex-start',
-    gap: space[2],
-    maxWidth: '18rem',
-    paddingBlock: space[1.5],
-    whiteSpace: 'normal',
-    fontWeight: 400,
   },
 });
 
@@ -500,11 +484,6 @@ export function DesktopRunConfigMenu({
         : null;
   const modelLabel =
     modelPickerOptions.find((opt) => opt.value === modelValue)?.label ?? modelValue;
-  const showDeepSeekDelegationWarning = shouldShowDeepSeekDelegationWarning({
-    cliType: selectedAgentConfig?.cliType ?? fallbackAgent?.cliType,
-    agentType: selectedAgentConfig?.agentType ?? fallbackAgent?.agentType,
-    modelId: modelValue,
-  });
   const handleModelSelect = (value: string) => {
     if (modelOptions.length > 0) {
       onModelChange?.(value);
@@ -912,26 +891,6 @@ export function DesktopRunConfigMenu({
                 </div>
               </Menu.Content>
             </Menu.Submenu>
-          ) : null}
-
-          {showDeepSeekDelegationWarning ? (
-            <Menu.Item
-              render={
-                <a
-                  href={DEEPSEEK_DELEGATION_DISCUSSION_URL}
-                  target="_blank"
-                  rel="noreferrer"
-                  onClick={(event) => {
-                    event.preventDefault();
-                    void openExternalUrl(DEEPSEEK_DELEGATION_DISCUSSION_URL);
-                  }}
-                >
-                  <span {...stylex.props(styles.note)}>
-                    <DeepSeekDelegationWarningContent />
-                  </span>
-                </a>
-              }
-            />
           ) : null}
 
           {interactionSelector ? (

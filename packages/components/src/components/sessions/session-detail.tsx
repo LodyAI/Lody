@@ -56,7 +56,6 @@ import {
   type LocalProjectHistoryProvider,
   type LocalProjectId,
   type LocalProjectMeta,
-  type PrStatus,
   type ProjectRef,
   type SessionId,
   type SessionMeta,
@@ -141,6 +140,7 @@ import {
   sessionMetaCacheSettledAtomFamily,
 } from '@/atoms/doc-meta';
 import { sessionLiveStatusAtomFamily } from '@/atoms/presence';
+import { sessionProjectMemberSelectionAtomFamily } from '@/atoms/session-project-member-selection';
 import { SessionTabBar, type ViewerTabItem } from './session-tab-bar';
 import {
   getSideChatLauncherState,
@@ -246,6 +246,10 @@ import {
   getPullRequestRepoFullName,
   getSessionGitHubState,
 } from '@/lib/session-github-state';
+import {
+  buildSessionProjectMemberRows,
+  resolveSessionProjectMemberRow,
+} from '@/lib/session-project-members';
 import {
   resolveMachineDotlodyPath,
   resolveSessionWorkspacePath,
@@ -2095,14 +2099,33 @@ const SessionDetail = ({
     return 'idle';
   }, [activeSession, activeSessionLiveStatus]);
   useTabStatus(tabStatus);
+  // The Repositories panel in the conversation selects a Member; the PR tab,
+  // URL target and header must describe that same repository.
+  const projectMemberOwnerSession = workspaceOwnerSession ?? activeTabSession;
+  const selectedProjectMemberId = useAtomValue(
+    sessionProjectMemberSelectionAtomFamily(projectMemberOwnerSession?.id ?? ('' as SessionId))
+  );
+  const activeProjectRepository = useMemo<string | null | undefined>(() => {
+    if (!projectMemberOwnerSession?.projectRun) return undefined;
+    const rows = buildSessionProjectMemberRows(projectMemberOwnerSession);
+    const legacyRepoFullName =
+      resolveProjectGitHubRepo(projectMemberOwnerSession.project) ??
+      projectMemberOwnerSession.repoFullName;
+    const selected = resolveSessionProjectMemberRow(
+      rows,
+      selectedProjectMemberId,
+      legacyRepoFullName
+    );
+    return selected?.repoFullName ?? null;
+  }, [projectMemberOwnerSession, selectedProjectMemberId]);
   const {
     sourceSessionId: prSessionId,
     latestPr,
     repoFullName,
     canShowGitHubActions,
   } = useMemo(
-    () => getSessionGitHubState(activeTabSession, workspaceOwnerSession),
-    [activeTabSession, workspaceOwnerSession]
+    () => getSessionGitHubState(activeTabSession, workspaceOwnerSession, activeProjectRepository),
+    [activeProjectRepository, activeTabSession, workspaceOwnerSession]
   );
   const latestPrNumber = getPullRequestNumber(latestPr);
   const latestPrRepoFullName = getPullRequestRepoFullName(latestPr) ?? repoFullName;
@@ -3900,44 +3923,6 @@ const SessionDetail = ({
   const handleClosePrTab = useCallback(() => {
     replaceSessionUrlPr(undefined);
   }, [replaceSessionUrlPr]);
-
-  // When the PR tab resolves live GitHub details, push the canonical status
-  // back into the owner session's persisted PR meta so the sidebar + session
-  // header badges (which read that persisted value, not live details) reflect
-  // reality — most visibly `draft`, which the webhook/CLI may not have
-  // propagated yet. Best-effort and idempotent: only writes on a real change.
-  // Durable session meta writes must go through the writer seam so Electron
-  // local-first mode keeps the CLI as the sole author.
-  const reconcilePersistedPrStatus = useCallback(
-    (status: PrStatus) => {
-      const ownerSession = workspaceOwnerSession;
-      const prNumber = latestPrNumber;
-      if (!runtime || !ownerSession || prNumber == null) return;
-      const list = ownerSession.pullRequests ?? [];
-      if (
-        !list.some(
-          (pr) =>
-            (getPullRequestNumber(pr) === prNumber || pr.url === latestPr?.url) &&
-            pr.status !== status
-        )
-      )
-        return;
-      const next = list.map((pr) =>
-        getPullRequestNumber(pr) === prNumber || pr.url === latestPr?.url
-          ? { url: pr.url, status }
-          : pr
-      );
-      void runtime.writer
-        .upsertDocMeta(getSessionRoomId(ownerSession.id), {
-          pullRequests: next,
-        } satisfies Partial<SessionMeta>)
-        .catch((error: unknown) => {
-          // Best-effort: the PR tab badge still shows live truth regardless.
-          console.error('Failed to reconcile persisted PR status', error);
-        });
-    },
-    [latestPr?.url, latestPrNumber, runtime, workspaceOwnerSession]
-  );
 
   const handleOpenBrowser = useCallback(
     (tabSessionId?: SessionId, navigateCandidate = false) => {
@@ -6732,7 +6717,6 @@ const SessionDetail = ({
                   repoFullName={latestPrRepoFullName}
                   prNumber={latestPrNumber}
                   headCommitSha={getSessionPullRequestLegacyFields(latestPr).headCommitSha}
-                  onResolvedPrStatus={reconcilePersistedPrStatus}
                   className={stylex.props(detailStyles.rootFill).className}
                   leadingSlot={
                     <Button
@@ -6923,7 +6907,6 @@ const SessionDetail = ({
         repoFullName={latestPrRepoFullName}
         prNumber={latestPrNumber}
         headCommitSha={getSessionPullRequestLegacyFields(latestPr).headCommitSha}
-        onResolvedPrStatus={reconcilePersistedPrStatus}
         className={stylex.props(detailStyles.background).className}
         // The side panel stays mounted while collapsed, so GitHub polling has
         // to be paused explicitly — same signal SessionBrowserPanel takes.

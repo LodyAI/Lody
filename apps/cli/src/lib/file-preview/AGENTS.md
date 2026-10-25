@@ -34,7 +34,7 @@ save path's text reads.
 - `file-preview-service.ts` never throws for a domain failure: every rejection is a
   typed `status: 'error'` response.
 - Shared `node/file-preview-path-policy.ts` is the security boundary. Remote `file/preview`
-  requests may read only the session workspace root, `os.tmpdir()`,
+  requests may read only the registered session file roots, `os.tmpdir()`,
   `<LodyDataDir>/chats`, and `LODY_FILE_PREVIEW_EXTRA_ROOTS`. The separate
   legacy local-only `file/resolve-local` IPC method is the desktop user's explicit
   same-machine capability and resolves any regular file for Electron; it returns
@@ -93,7 +93,7 @@ save path's text reads.
   capability — do not add one here.** Remote preview serves only the allowlisted
   temp/scratch roots, while Electron's same-machine local preview can inspect
   arbitrary paths. `code-collab/save-text` refuses everything outside the session
-  workspace (lexical check plus `assertRealPathInsideWorkspace` on the
+  roots (lexical check plus `assertRealPathInsideWorkspace` on the
   symlink-resolved path) and cannot create files at all. The client counterpart: an
   `external: true` result must be marked readonly regardless of the file index, or
   the editor offers a Save the machine is guaranteed to reject and the user loses

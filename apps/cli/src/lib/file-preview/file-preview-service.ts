@@ -17,6 +17,7 @@ import {
   type FilePreviewV3Response,
   type FilePreviewV3TextFormat,
   type SessionId,
+  type SessionFileRoot,
 } from '@lody/shared';
 import { formatErrorMessage } from '@/utils/format-error';
 import {
@@ -34,11 +35,15 @@ const gzipAsync = promisify(gzip);
  * resolver so `MessageHandler` can hand over the one it already owns — preview
  * needs the root and the ownership check, and nothing else from Code Collab.
  */
-export type FilePreviewWorkspaceResolver = (sessionId: SessionId) => Promise<
+export type FilePreviewWorkspaceResolver = (
+  sessionId: SessionId,
+  rootId?: string
+) => Promise<
   | {
       readonly ok: true;
       readonly ownerSessionId: SessionId;
       readonly workspaceRoot: string;
+      readonly fileRoots?: readonly SessionFileRoot[];
     }
   | {
       readonly ok: false;
@@ -54,9 +59,15 @@ export type FilePreviewWorkspaceResolver = (sessionId: SessionId) => Promise<
 
 /** Local ownership is required even when the session's workspace is unavailable. */
 export type FilePreviewLocalWorkspaceResolver = (
-  sessionId: SessionId
+  sessionId: SessionId,
+  rootId?: string
 ) => Promise<
-  | { readonly ok: true; readonly ownerSessionId: SessionId; readonly workspaceRoot: string | null }
+  | {
+      readonly ok: true;
+      readonly ownerSessionId: SessionId;
+      readonly workspaceRoot: string | null;
+      readonly fileRoots?: readonly SessionFileRoot[];
+    }
   | Extract<Awaited<ReturnType<FilePreviewWorkspaceResolver>>, { ok: false }>
 >;
 
@@ -89,7 +100,11 @@ export class FilePreviewService {
 
   private resolvePath(
     request: FilePreviewV3Request,
-    workspace: { readonly ownerSessionId: SessionId; readonly workspaceRoot: string | null },
+    workspace: {
+      readonly ownerSessionId: SessionId;
+      readonly workspaceRoot: string | null;
+      readonly fileRoots?: readonly SessionFileRoot[];
+    },
     local: boolean
   ) {
     const failures: FilePreviewIoFailure[] = [];
@@ -97,6 +112,7 @@ export class FilePreviewService {
       workspaceRoot: workspace.workspaceRoot,
       requestedPath: request.path,
       extraRoots: this.deps.extraRoots,
+      sessionRoots: workspace.fileRoots,
       options: {
         ...this.deps.pathPolicy,
         allowArbitraryPaths: local,
@@ -130,7 +146,10 @@ export class FilePreviewService {
     request: FilePreviewV3Request,
     expectedOwnerSessionId?: string
   ): Promise<LocalFileResolution | import('@lody/shared').FilePreviewV3Error> {
-    const workspace = await this.deps.resolveLocalWorkspace(request.sessionId as SessionId);
+    const workspace = await this.deps.resolveLocalWorkspace(
+      request.sessionId as SessionId,
+      request.rootId
+    );
     if (!workspace.ok) {
       this.deps.onDiagnostic?.({
         stage: 'resolve-workspace',
@@ -175,7 +194,10 @@ export class FilePreviewService {
 
   async previewFile(request: FilePreviewV3Request): Promise<FilePreviewV3Response> {
     const limits = this.limits;
-    const workspace = await this.deps.resolveWorkspace(request.sessionId as SessionId);
+    const workspace = await this.deps.resolveWorkspace(
+      request.sessionId as SessionId,
+      request.rootId
+    );
     if (!workspace.ok) {
       this.deps.onDiagnostic?.({
         stage: 'resolve-workspace',

@@ -187,8 +187,7 @@ are recorded in the
 
 The [conversation drop overlay](shared/conversation-drop-overlay.tsx) paints a
 non-interactive mask over the active drop zone; the parent owns hit testing and
-drag state. The [DeepSeek delegation warning](shared/deepseek-delegation-warning.tsx)
-supplies the same linked warning contents to desktop and mobile run configuration.
+drag state.
 The [MCP transport icon](shared/mcp-transport.tsx) supplies the transport glyph to
 settings controls. Their visual rules are component-local StyleX, with the
 overlay's light/dark alpha tied to the app's explicit theme. See the

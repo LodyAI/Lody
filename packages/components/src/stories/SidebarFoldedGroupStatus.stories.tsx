@@ -121,6 +121,15 @@ const REPO_SESSIONS: SessionListRow[] = [
   row('gh-copy', 'Polish settings copy', 'LodyAI/Lody', { hasUnreadMessages: true }),
 ];
 
+// A multi-repository project's conversations, listed under the project rather
+// than the repository of its first member.
+const GROUP_SESSIONS: SessionListRow[] = [
+  {
+    ...row('group-export', 'Export report across web and api', 'acme/web', { isWorking: true }),
+    projectGroup: { id: 'shop', name: 'Shop' },
+  },
+];
+
 const CHAT_SESSIONS: SessionListRow[] = [
   row('chat-plan', 'Plan the Q4 roadmap', null, { hasUnreadMessages: true }),
   row('chat-idea', 'Naming ideas', null, {}),
@@ -140,6 +149,9 @@ function FoldedGroupsSidebar({ folded, heading }: { folded: boolean; heading?: s
     { repoFullName: 'LodyAI/Lody', collapsed: folded },
   ]);
   const [chatsCollapsed, setChatsCollapsed] = useState(folded);
+  const [groupsFolded, setGroupsFolded] = useState<Record<string, boolean>>({
+    'projectGroup:shop': folded,
+  });
   const store = useMemo(() => createStore(), []);
   const emptyChildren = useMemo(() => new Map<string, SessionMeta[]>(), []);
 
@@ -186,6 +198,7 @@ function FoldedGroupsSidebar({ folded, heading }: { folded: boolean; heading?: s
                   toggleLabel="Toggle"
                   onNavigateProject={() => undefined}
                   onNewChatInProject={() => undefined}
+                  onEditProject={() => undefined}
                   onNavigateSession={() => undefined}
                   onArchive={() => undefined}
                   collapsedOpenedBySessionIds={{}}
@@ -198,6 +211,26 @@ function FoldedGroupsSidebar({ folded, heading }: { folded: boolean; heading?: s
                 />
               ))}
             </div>
+            {/* A project holding a folder of this machine sits with its folders. */}
+            <SessionList
+              sessions={GROUP_SESSIONS}
+              repos={[]}
+              projectGroups={[
+                {
+                  projectId: 'shop',
+                  name: 'Shop',
+                  collapsed: groupsFolded['projectGroup:shop'] ?? false,
+                },
+                { projectId: 'docs', name: 'Docs site', collapsed: false },
+              ]}
+              onToggleProjectGroupCollapsed={(key) =>
+                setGroupsFolded((prev) => ({ ...prev, [key]: !prev[key] }))
+              }
+              onNewInProjectGroup={() => undefined}
+              onOpenProjectGroupSettings={() => undefined}
+              onArchiveProjectGroupChats={() => undefined}
+              onMoveProjectGroup={() => undefined}
+            />
           </div>
 
           <div className={teammateCollapsed ? 'mb-1' : 'mb-3'}>
@@ -220,6 +253,8 @@ function FoldedGroupsSidebar({ folded, heading }: { folded: boolean; heading?: s
             <SessionList
               sessions={REPO_SESSIONS}
               repos={repos}
+              onEditRepoProject={() => undefined}
+              onArchiveRepoChats={() => undefined}
               onToggleRepoCollapsed={(repoFullName) =>
                 setRepos((prev) =>
                   prev.map((repo) =>

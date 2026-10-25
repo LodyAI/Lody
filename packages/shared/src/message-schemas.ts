@@ -1,3 +1,4 @@
+import { SessionProjectRunSchema } from './workspace-project';
 import { AgentRoleProposalMetaSchema } from './agent-role-proposal';
 import { isMagpieGatewayUrl } from './magpie-import';
 import { MemoryBindingSchema } from './memory-provider';
@@ -584,6 +585,7 @@ export const SessionCreateRequestSchema = z
     machineId: MachineIdSchema,
     workspaceId: WorkspaceIdSchema,
     project: ProjectRefSchema.optional(),
+    projectRun: SessionProjectRunSchema.optional(),
     meta: SessionStartMetaSchema.optional(),
     acpSessionConfig: ACPSessionConfigSchema,
     worktreeSetup: WorktreeSetupScriptConfigSchema.optional(),

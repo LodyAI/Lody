@@ -18,6 +18,7 @@ export type WorktreeObservationError = GitError | FileLockError;
 export interface WorktreeObservationSource {
   readonly repoId: RepoId;
   readonly worktreesDir: string;
+  readonly worktreeSubdirectory?: string;
   readonly localShared: boolean;
 }
 const safeSessionId = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/;
@@ -99,7 +100,7 @@ export const WorktreeObservationsLive = Layer.effect(
         filesystem.realPath(source.worktreesDir),
         source.worktreesDir
       );
-      return path.join(root, sessionId);
+      return path.join(root, sessionId, source.worktreeSubdirectory ?? '');
     });
     const currentBranchAt = (cwd: string): Effect.Effect<string | null, GitError> =>
       recoverExit(

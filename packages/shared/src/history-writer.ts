@@ -1,3 +1,4 @@
+import { inheritHistoryStreamText } from './history-stream-text';
 import { historyValuesEqual } from './history-values-equal';
 export { historyValuesEqual } from './history-values-equal';
 import { Immer } from 'immer';
@@ -163,7 +164,9 @@ function preserveUnknown(
 const cleanNew = (schema: z.ZodType, input: unknown, old?: unknown): unknown => {
   const parsed = parseHistoryWrite(schema, input);
   // There is no stored extension to merge for a newly authored value.
-  return old === undefined ? parsed : preserveUnknown(schema, old, input, parsed);
+  const result = old === undefined ? parsed : preserveUnknown(schema, old, input, parsed);
+  inheritHistoryStreamText(input, result);
+  return result;
 };
 
 // One independently editable group, derived from the message definition rather

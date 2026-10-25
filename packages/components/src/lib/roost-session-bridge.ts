@@ -45,7 +45,7 @@ import {
 } from './roost-history-cache';
 import type { ConversationSessionDataFactory } from './conversation-view/create-conversation-session';
 import type { SessionSnapshotService } from '@lody/shared/session-data';
-import { SessionHistoryChangeSchema, SessionHistoryChangesSchema } from '@lody/shared';
+import { SessionHistoryChangesSchema } from '@lody/shared';
 
 type HistoryReadResponse = Extract<
   LocalSessionControlResponse,
@@ -238,7 +238,7 @@ const createRoostSessionDataFactoryFromTransport =
     targetMachineId: MachineId,
     options: RoostHistoryObservationOptions = {}
   ): ConversationSessionDataFactory =>
-  ({ sessionId, doc }) => {
+  ({ sessionId }) => {
     const transport = createTransport(sessionId);
     const incrementalEnabled = () =>
       typeof options.incremental === 'function'
@@ -323,8 +323,7 @@ const createRoostSessionDataFactoryFromTransport =
           throw new HistoryRefreshSupersededError();
         }
         if (firstOwnerObservation && !(incrementalEnabled() && hasIncrementalCheckpoint)) {
-          // Cached bootstrap can overlap this reply even if the control doc
-          // already advertised the same revision before this view opened.
+          // Cached bootstrap can overlap this first authoritative reply.
           observedDirectoryEpoch += 1;
           for (const listener of listeners) listener({ kind: 'structure', from: 0, to: count });
         }
@@ -458,39 +457,9 @@ const createRoostSessionDataFactoryFromTransport =
       return reads;
     };
 
-    const readCursor = (): {
-      readonly revision?: number;
-      readonly count?: number;
-      readonly change?: SessionHistoryChange | null;
-    } => {
-      const state = doc.getMap('roostHistoryCursor').toJSON();
-      if (!isRecord(state)) return {};
-      const revision =
-        typeof state.historyRevision === 'number' && Number.isSafeInteger(state.historyRevision)
-          ? state.historyRevision
-          : undefined;
-      const count =
-        typeof state.historyCount === 'number' && Number.isSafeInteger(state.historyCount)
-          ? state.historyCount
-          : undefined;
-      let change: SessionHistoryChange | null | undefined;
-      if (typeof state.historyChangeJson === 'string' && state.historyChangeJson.length > 0) {
-        try {
-          const parsed = SessionHistoryChangeSchema.nullable().safeParse(
-            JSON.parse(state.historyChangeJson)
-          );
-          if (parsed.success) change = parsed.data;
-        } catch {
-          change = undefined;
-        }
-      }
-      return { revision, count, change };
-    };
-
-    const initialCursor = readCursor();
-    let observedHistoryRevision = initialCursor.revision ?? 0;
-    let observedHistoryCount = initialCursor.count;
-    let latestChange = initialCursor.change;
+    let observedHistoryRevision = 0;
+    let observedHistoryCount: number | undefined;
+    let latestChange: SessionHistoryChange | null | undefined;
     let observedDirectoryEpoch = 0;
     let notificationQueue: Promise<void> = Promise.resolve();
     const notifyChanged = (
@@ -527,7 +496,7 @@ const createRoostSessionDataFactoryFromTransport =
         scheduleRefresh();
         if (revision === undefined || change === undefined || hasRevisionGap) {
           if (revision !== undefined) observedHistoryRevision = revision;
-          observedHistoryCount = count ?? readCursor().count ?? observedHistoryCount ?? 0;
+          observedHistoryCount = count ?? observedHistoryCount ?? 0;
           observedDirectoryEpoch += 1;
           for (const listener of listeners) {
             try {
@@ -1016,14 +985,6 @@ const createRoostSessionDataFactoryFromTransport =
       }
     };
 
-    const unsubscribeDoc = doc.subscribe((batch) => {
-      if (batch.events.some((event) => String(event.path[0]) === 'roostHistoryCursor')) {
-        const cursor = readCursor();
-        void notifyChanged(cursor.change, cursor.revision, cursor.count).catch((error) => {
-          console.error('Roost history cursor notification failed', error);
-        });
-      }
-    });
     const unsubscribeWake = options.subscribeWake?.(scheduleRefresh);
 
     const history: SessionHistoryReader = {
@@ -1180,7 +1141,6 @@ const createRoostSessionDataFactoryFromTransport =
       },
       dispose: () => {
         disposed = true;
-        unsubscribeDoc();
         unsubscribeWake?.();
         if (refreshTimer) clearTimeout(refreshTimer);
         bodies.clear();

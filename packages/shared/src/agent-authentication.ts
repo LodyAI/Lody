@@ -21,7 +21,7 @@ import { isAgentBrandId, type AgentBrandId } from './agent-brand';
  * is reported by the agent itself (Codex custom model providers may set
  * `requires_openai_auth = false`), never inferred from environment variables.
  */
-const CLAUDE_ENV_AUTH_KEYS = [
+export const CLAUDE_ENV_AUTH_KEYS = [
   'ANTHROPIC_API_KEY',
   'ANTHROPIC_AUTH_TOKEN',
   'ANTHROPIC_CUSTOM_HEADERS',

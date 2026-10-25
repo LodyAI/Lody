@@ -1,3 +1,6 @@
+import { resolveProjectFileTarget } from '@/session/worktree/project-member-access';
+import { encodeSessionFilePath, decodeSessionFilePath } from '@lody/shared';
+import { resolveSessionFilePath, type SessionProjectRun, type SessionFileRoot } from '@lody/shared';
 import { toShared } from '@/platform/process-options';
 import { createHash, randomUUID } from 'node:crypto';
 import {
@@ -75,6 +78,8 @@ import {
 } from './file-index-scan-pool';
 import {
   computeAllChanges,
+  computeProjectAllChangesSnapshot,
+  resolveProjectGitDirectory,
   resolveAllChangesDiffBase,
   scanGitDirectoryEntries,
 } from './file-index-scan-core';
@@ -100,6 +105,8 @@ type WorkspaceResolution =
       readonly ownerSessionId: SessionId;
       readonly workspaceRoot: string;
       readonly allChangesBaseBranch?: string;
+      readonly projectRun?: SessionProjectRun;
+      readonly fileRoots?: readonly SessionFileRoot[];
     }
   | {
       readonly ok: false;
@@ -113,6 +120,7 @@ type WorkspaceResolution =
     };
 
 export type CodeCollabV2WorkspaceResolveOptions = {
+  readonly rootId?: string;
   readonly access?: 'read' | 'write';
   readonly requestedByUserId?: string;
 };
@@ -200,6 +208,7 @@ type AllChangesComputation = {
   readonly allChanges: CodeCollabV2AllChangesState;
   readonly source: 'git' | 'diff-store';
   readonly gitBase?: string;
+  readonly gitMemberBases?: Readonly<Record<string, string>>;
   readonly diffStoreSnapshots?: ReadonlyMap<string, DiffStoreAllChangesSnapshotPair>;
   readonly diffStoreDeferredPaths?: ReadonlySet<string>;
 };
@@ -210,6 +219,7 @@ type ResolvedPath = {
   readonly workspacePath: string;
   readonly absolutePath: string;
   readonly allChangesBaseBranch?: string;
+  readonly projectRun?: SessionProjectRun;
 };
 
 type OwnerSharedState = {
@@ -284,6 +294,13 @@ const DEFAULT_FILE_INDEX_REPAIR_MAX_DELAY_MS = 30_000;
 const FILE_INDEX_REPAIR_JITTER_FRACTION = 0.2;
 
 export class CodeCollabV2Service {
+  private readonly servicesByRoot = new Map<string, CodeCollabV2Service>();
+  private readonly rootIndexes = new Map<SessionId, Map<string, CodeCollabV2FileIndexState>>();
+  private readonly rootPublishChains = new Map<
+    SessionId,
+    { readonly work: Promise<unknown>; readonly signal?: AbortSignal }
+  >();
+
   private readonly stateByOwnerSessionId = new Map<SessionId, OwnerSharedState>();
   private readonly publishedStateByOwnerSessionId = new Map<SessionId, OwnerPublishedSharedState>();
   private readonly watchByOwnerSessionId = new Map<SessionId, OwnerWorkspaceWatchState>();
@@ -303,11 +320,12 @@ export class CodeCollabV2Service {
   // Per-absolute-path write chains so concurrent saves to the same file stay
   // serialized (read-check-write atomic) even though the Machine RPC request loop
   // now dispatches handlers concurrently. Saves to different paths run in parallel.
-  private readonly writeChainByAbsolutePath = new Map<string, Promise<void>>();
+  private writeChainByAbsolutePath = new Map<string, Promise<void>>();
 
   constructor(
     private readonly deps: {
       readonly resolveWorkspace: CodeCollabV2WorkspaceResolver;
+      readonly rootId?: string;
       /** Positive task budget; defaults to LODY_CODE_COLLAB_TASK_TIMEOUT_MS or 30 seconds. */
       readonly taskTimeoutMs?: number;
       /** Observe branch on activation/explicit refresh without gating file snapshots. */
@@ -336,9 +354,134 @@ export class CodeCollabV2Service {
       };
       readonly allChangesSnapshotCacheMaxRawBytes?: number;
     }
-  ) {}
+  ) {
+    if (!deps.rootId && deps.publishFileIndex) {
+      const publish = deps.publishFileIndex;
+      this.deps = {
+        ...deps,
+        publishFileIndex: (state) => this.publishRootIndex('main', state, publish),
+      };
+    }
+  }
+
+  private publishRootIndex(
+    rootId: string,
+    state: CodeCollabV2FileIndexPublication,
+    publish: CodeCollabV2FileIndexPublisher
+  ) {
+    // Publications for one owner run in order, but one whose deadline aborted it
+    // no longer holds the next: its late result cannot overwrite a newer index.
+    const previous = this.rootPublishChains.get(state.ownerSessionId);
+    const work = (
+      previous ? settledOrAborted(previous.work, previous.signal) : Promise.resolve()
+    ).then(async () => {
+      const roots =
+        this.rootIndexes.get(state.ownerSessionId) ?? new Map<string, CodeCollabV2FileIndexState>();
+      roots.set(rootId, state.fileIndex);
+      this.rootIndexes.set(state.ownerSessionId, roots);
+      const fileIndex: CodeCollabV2FileIndexState = {};
+      for (const [id, entries] of roots)
+        for (const [relativePath, value] of Object.entries(entries))
+          fileIndex[encodeSessionFilePath({ rootId: id, relativePath })] = value;
+      return publish({
+        ...state,
+        fileIndex,
+        allChangesDiffStats: summarizeFileIndexAllChanges(fileIndex),
+      });
+    });
+    const entry = { work, signal: state.signal };
+    this.rootPublishChains.set(state.ownerSessionId, entry);
+    void work
+      .finally(() => {
+        if (this.rootPublishChains.get(state.ownerSessionId) === entry)
+          this.rootPublishChains.delete(state.ownerSessionId);
+      })
+      .catch(() => undefined);
+    return work;
+  }
+
+  private serviceForRoot(rootId: string): CodeCollabV2Service {
+    const existing = this.servicesByRoot.get(rootId);
+    if (existing) return existing;
+    const service = new CodeCollabV2Service({
+      ...this.deps,
+      rootId,
+      observeWorkspaceGit: undefined,
+      resolveWorkspace: (sessionId, options) =>
+        this.deps.resolveWorkspace(sessionId, { ...options, rootId }),
+      publishFileIndex: this.deps.publishFileIndex
+        ? async (state) => {
+            const indexes =
+              this.rootIndexes.get(state.ownerSessionId) ??
+              new Map<string, CodeCollabV2FileIndexState>();
+            indexes.set(rootId, state.fileIndex);
+            this.rootIndexes.set(state.ownerSessionId, indexes);
+            // Publish through the parent's existing owner chain, retaining its main snapshot.
+            return this.deps.publishFileIndex!({
+              ...state,
+              fileIndex: indexes.get('main') ?? {},
+              persistAllChangesDiffStats: false,
+            });
+          }
+        : undefined,
+    });
+    service.writeChainByAbsolutePath = this.writeChainByAbsolutePath;
+    this.servicesByRoot.set(rootId, service);
+    return service;
+  }
+
+  private async refreshOtherRoots(sessionId: SessionId, afterTurn: boolean): Promise<void> {
+    if (this.deps.rootId) return;
+    const workspace = await this.deps.resolveWorkspace(sessionId);
+    if (!workspace.ok) return;
+    const results = await Promise.allSettled(
+      (workspace.fileRoots ?? [])
+        .filter((root) => root.id !== 'main')
+        .map(async (root) => {
+          const service = this.serviceForRoot(root.id);
+          if (afterTurn) await service.refreshSharedStateAfterTurn({ sessionId });
+          else await service.refreshSharedState({ sessionId });
+        })
+    );
+    for (const result of results)
+      if (result.status === 'rejected')
+        this.logger.debug('Project group file root refresh failed', result.reason);
+  }
+
+  private async routeFileRoot(request: {
+    sessionId: string;
+    rootId?: string;
+    path?: string;
+    focusPath?: string;
+  }) {
+    if (this.deps.rootId) return undefined;
+    if (request.rootId && request.rootId !== 'main') {
+      const workspace = await this.deps.resolveWorkspace(request.sessionId as SessionId, {
+        rootId: request.rootId,
+      });
+      if (!workspace.ok) throw new CodeCollabV2ServiceError(workspace.code, workspace.message);
+      if (!workspace.fileRoots?.some((root) => root.id === request.rootId))
+        throw new CodeCollabV2ServiceError('invalid_path', 'Unknown session file root');
+      return { service: this.serviceForRoot(request.rootId), path: request.path };
+    }
+    const requestedPath = request.path ?? request.focusPath;
+    if (!requestedPath) return undefined;
+    const workspace = await this.deps.resolveWorkspace(request.sessionId as SessionId);
+    if (!workspace.ok || !workspace.fileRoots) return undefined;
+    const target = resolveProjectFileTarget(workspace.fileRoots, requestedPath);
+    return target && target.rootId !== 'main'
+      ? { service: this.serviceForRoot(target.rootId), path: target.relativePath || '.' }
+      : undefined;
+  }
+
+  private fileKey(relativePath: string): string {
+    return encodeSessionFilePath({ rootId: this.deps.rootId ?? 'main', relativePath });
+  }
 
   dispose(): void {
+    for (const service of this.servicesByRoot.values()) service.dispose();
+    this.servicesByRoot.clear();
+    this.rootIndexes.clear();
     this.disposed = true;
     for (const ownerSessionId of this.tasksByOwner.keys()) {
       this.cancelSharedStateRefresh(ownerSessionId);
@@ -355,6 +498,9 @@ export class CodeCollabV2Service {
   }
 
   releaseWorkspaceWatchForOwner(ownerSessionId: SessionId): void {
+    for (const service of this.servicesByRoot.values())
+      service.releaseWorkspaceWatchForOwner(ownerSessionId);
+    this.rootIndexes.delete(ownerSessionId);
     this.cancelSharedStateRefresh(ownerSessionId);
     this.releaseWorkspaceWatch(ownerSessionId);
   }
@@ -396,6 +542,13 @@ export class CodeCollabV2Service {
   }
 
   async openText(request: CodeCollabV2OpenTextRequest): Promise<CodeCollabV2OpenTextOk> {
+    const route = await this.routeFileRoot(request);
+    if (route)
+      return route.service.openText({
+        ...request,
+        rootId: undefined,
+        path: route.path ?? request.path,
+      });
     const resolved = await this.resolveRequestPath(request.sessionId as SessionId, request.path);
     void this.ensureWorkspaceWatch(resolved).catch(() => undefined);
     const read = await this.readSupportedTextFile(resolved);
@@ -412,6 +565,9 @@ export class CodeCollabV2Service {
   async getFileIndex(
     request: CodeCollabV2FileIndexRequest
   ): Promise<CodeCollabV2FileIndexSnapshot> {
+    const route = await this.routeFileRoot(request);
+    if (route) return route.service.getFileIndex({ ...request, rootId: undefined });
+    await this.refreshOtherRoots(request.sessionId as SessionId, false);
     const resolved = await this.resolveRequestDirectoryPath(
       request.sessionId as SessionId,
       ROOT_DIRECTORY_REQUEST_PATH
@@ -466,6 +622,13 @@ export class CodeCollabV2Service {
   async refreshText(
     request: CodeCollabV2RefreshTextRequest
   ): Promise<CodeCollabV2RefreshTextResponse> {
+    const route = await this.routeFileRoot(request);
+    if (route)
+      return route.service.refreshText({
+        ...request,
+        rootId: undefined,
+        path: route.path ?? request.path,
+      });
     const resolved = await this.resolveRequestPath(request.sessionId as SessionId, request.path);
     void this.ensureWorkspaceWatch(resolved).catch(() => undefined);
     const read = await this.readSupportedTextFile(resolved);
@@ -488,6 +651,13 @@ export class CodeCollabV2Service {
   }
 
   async saveText(request: CodeCollabV2SaveTextRequest): Promise<CodeCollabV2SaveTextResponse> {
+    const route = await this.routeFileRoot(request);
+    if (route)
+      return route.service.saveText({
+        ...request,
+        rootId: undefined,
+        path: route.path ?? request.path,
+      });
     let resolved: ResolvedPath;
     try {
       resolved = await this.resolveRequestPath(request.sessionId as SessionId, request.path, {
@@ -581,6 +751,13 @@ export class CodeCollabV2Service {
   async initDirectory(
     request: CodeCollabV2InitDirectoryRequest
   ): Promise<CodeCollabV2InitDirectoryOk> {
+    const route = await this.routeFileRoot(request);
+    if (route)
+      return route.service.initDirectory({
+        ...request,
+        rootId: undefined,
+        path: route.path ?? request.path,
+      });
     const resolved = await this.resolveRequestDirectoryPath(
       request.sessionId as SessionId,
       request.path
@@ -614,7 +791,7 @@ export class CodeCollabV2Service {
   }
 
   private observeWorkspaceGit(
-    workspace: Pick<ResolvedPath, 'ownerSessionId' | 'workspaceRoot'>
+    workspace: Pick<ResolvedPath, 'projectRun' | 'ownerSessionId' | 'workspaceRoot'>
   ): void {
     // Observe activation and explicit refresh, not every file watcher event or
     // terminal diff refresh. Execution already owns terminal branch observation.
@@ -636,6 +813,7 @@ export class CodeCollabV2Service {
     request: { readonly sessionId: SessionId },
     options: { readonly forcePublish?: boolean } = {}
   ): Promise<void> {
+    await this.refreshOtherRoots(request.sessionId, false);
     const resolved = await this.runTask(request.sessionId, (signal) =>
       waitForCodeCollabTask(
         this.resolveRequestDirectoryPath(request.sessionId, ROOT_DIRECTORY_REQUEST_PATH),
@@ -654,6 +832,7 @@ export class CodeCollabV2Service {
   }
 
   async refreshSharedStateAfterTurn(request: { readonly sessionId: SessionId }): Promise<void> {
+    await this.refreshOtherRoots(request.sessionId, true);
     const resolved = await this.runTask(request.sessionId, (signal) =>
       waitForCodeCollabTask(
         this.resolveRequestDirectoryPath(request.sessionId, ROOT_DIRECTORY_REQUEST_PATH),
@@ -891,17 +1070,52 @@ export class CodeCollabV2Service {
     }
   }
 
-  async lspDefinition(): Promise<CodeCollabV2LspUnsupported> {
+  async lspDefinition(request?: {
+    sessionId: string;
+    path: string;
+    rootId?: string;
+  }): Promise<CodeCollabV2LspUnsupported> {
+    if (request) {
+      const route = await this.routeFileRoot(request);
+      if (route)
+        return route.service.lspDefinition({
+          ...request,
+          rootId: undefined,
+          path: route.path ?? request.path,
+        });
+      await this.resolveRequestPath(request.sessionId as SessionId, request.path);
+    }
     return { status: 'unsupported', code: 'lsp_not_wired' };
   }
 
-  async lspReferences(): Promise<CodeCollabV2LspUnsupported> {
+  async lspReferences(request?: {
+    sessionId: string;
+    path: string;
+    rootId?: string;
+  }): Promise<CodeCollabV2LspUnsupported> {
+    if (request) {
+      const route = await this.routeFileRoot(request);
+      if (route)
+        return route.service.lspReferences({
+          ...request,
+          rootId: undefined,
+          path: route.path ?? request.path,
+        });
+      await this.resolveRequestPath(request.sessionId as SessionId, request.path);
+    }
     return { status: 'unsupported', code: 'lsp_not_wired' };
   }
 
   async openCurrentDiff(
     request: CodeCollabV2OpenCurrentDiffRequest
   ): Promise<CodeCollabV2OpenCurrentDiffResponse> {
+    const route = await this.routeFileRoot(request);
+    if (route)
+      return route.service.openCurrentDiff({
+        ...request,
+        rootId: undefined,
+        path: route.path ?? request.path,
+      });
     const resolved = await this.resolveRequestPath(request.sessionId as SessionId, request.path);
     void this.ensureWorkspaceWatch(resolved).catch(() => undefined);
     const scope = request.scope ?? 'branch';
@@ -916,7 +1130,7 @@ export class CodeCollabV2Service {
           message: head.message,
         };
       }
-      oldSnapshot = await this.resolveCurrentDiffBaseSnapshot(resolved, head.head, {
+      oldSnapshot = await this.resolveCurrentDiffBaseSnapshot(resolved, head.head, undefined, {
         allowDiffStoreFallback: false,
       });
     } else {
@@ -976,6 +1190,8 @@ export class CodeCollabV2Service {
   async openAllChangesDiff(
     request: CodeCollabV2OpenAllChangesDiffRequest
   ): Promise<CodeCollabV2OpenAllChangesDiffResponse> {
+    const route = await this.routeFileRoot(request);
+    if (route) return route.service.openAllChangesDiff({ ...request, rootId: undefined });
     const root = await this.resolveRequestDirectoryPath(
       request.sessionId as SessionId,
       ROOT_DIRECTORY_REQUEST_PATH
@@ -993,7 +1209,14 @@ export class CodeCollabV2Service {
     }
 
     const limits = this.deps.allChangesDiffLimits ?? CODE_COLLAB_V2_ALL_CHANGES_DIFF_LIMITS;
-    const { allChanges, source, gitBase, diffStoreSnapshots, diffStoreDeferredPaths } =
+    const {
+      allChanges,
+      source,
+      gitBase,
+      gitMemberBases,
+      diffStoreSnapshots,
+      diffStoreDeferredPaths,
+    } =
       uncommittedHead !== undefined
         ? {
             allChanges: await computeAllChanges(root.workspaceRoot, {
@@ -1001,6 +1224,7 @@ export class CodeCollabV2Service {
             }),
             source: 'git' as const,
             gitBase: uncommittedHead,
+            gitMemberBases: undefined,
             diffStoreSnapshots: undefined,
             diffStoreDeferredPaths: undefined,
           }
@@ -1033,6 +1257,7 @@ export class CodeCollabV2Service {
       const stats = allChangesValueStats(allChanges[workspacePath]);
       const fileResolved: ResolvedPath = {
         ownerSessionId: root.ownerSessionId,
+        projectRun: root.projectRun,
         workspaceRoot: root.workspaceRoot,
         workspacePath,
         absolutePath: path.resolve(root.workspaceRoot, workspacePath),
@@ -1053,7 +1278,7 @@ export class CodeCollabV2Service {
             { status: 'ready', snapshot: cachedSnapshots.newSnapshot },
           ] as const)
         : await Promise.all([
-            this.resolveCurrentDiffBaseSnapshot(fileResolved, base, {
+            this.resolveCurrentDiffBaseSnapshot(fileResolved, base, gitMemberBases, {
               allowDiffStoreFallback: scope !== 'uncommitted',
             }),
             readCurrentDiffSnapshot(fileResolved, maxRawTextBytes),
@@ -1114,12 +1339,19 @@ export class CodeCollabV2Service {
   async openTurnDiff(
     request: CodeCollabV2OpenTurnDiffRequest
   ): Promise<CodeCollabV2OpenTurnDiffResponse> {
+    const route = await this.routeFileRoot(request);
+    if (route)
+      return route.service.openTurnDiff({
+        ...request,
+        rootId: undefined,
+        path: route.path ?? request.path,
+      });
     const resolved = await this.resolveRequestPath(request.sessionId as SessionId, request.path);
     const maxRawTextBytes = this.deps.maxRawTextBytes ?? CODE_COLLAB_V2_TEXT_LIMITS.maxRawTextBytes;
     const turnSnapshot = await this.deps.diffStore?.getTurnDiffSnapshot({
       ownerSessionId: resolved.ownerSessionId,
       turnId: request.turnId,
-      path: resolved.workspacePath,
+      path: this.fileKey(resolved.workspacePath),
       maxRawBytes: Math.min(Number.MAX_SAFE_INTEGER, maxRawTextBytes * 2),
     });
     if (!turnSnapshot || turnSnapshot.status !== 'ready') {
@@ -1203,14 +1435,14 @@ export class CodeCollabV2Service {
     const absolutePath =
       (await resolveExistingPathWithoutConflicts(workspaceRoot, workspacePath, requestedPath)) ??
       requestedAbsolutePath;
-    const relative = path.relative(workspaceRoot, absolutePath);
-    if (isPathOutsideRoot(relative)) {
+    if (!resolveSessionFilePath([{ id: 'main', absolutePath: workspaceRoot }], absolutePath)) {
       throw new CodeCollabV2ServiceError('invalid_path', 'Path escapes workspace root.', {
         path: requestedPath,
       });
     }
     return {
       ownerSessionId: resolvedWorkspace.ownerSessionId,
+      projectRun: resolvedWorkspace.projectRun,
       workspaceRoot,
       workspacePath,
       absolutePath,
@@ -1470,7 +1702,10 @@ export class CodeCollabV2Service {
   }
 
   private async computeAndPublishFullSharedStateInWorker(
-    resolved: Pick<ResolvedPath, 'allChangesBaseBranch' | 'ownerSessionId' | 'workspaceRoot'>,
+    resolved: Pick<
+      ResolvedPath,
+      'projectRun' | 'allChangesBaseBranch' | 'ownerSessionId' | 'workspaceRoot'
+    >,
     state: OwnerSharedState,
     fileTreeIndex: FileTreePathIndex,
     options: SharedStatePublishOptions = {}
@@ -1478,6 +1713,11 @@ export class CodeCollabV2Service {
     const startedAtMs = Date.now();
     const baseInput = {
       kind: 'full-state',
+      projectMembers: resolved.projectRun
+        ? Object.values(resolved.projectRun.members).filter(
+            (candidate) => candidate.access !== 'additional' && candidate.access !== 'link'
+          )
+        : undefined,
       workspaceRoot: resolved.workspaceRoot,
       maxRawTextBytes: this.deps.maxRawTextBytes ?? CODE_COLLAB_V2_TEXT_LIMITS.maxRawTextBytes,
       entryBudget: this.deps.maxFileTreeEntries ?? DEFAULT_FILE_TREE_SCAN_ENTRY_BUDGET,
@@ -1552,13 +1792,36 @@ export class CodeCollabV2Service {
       directoryWorkspacePath: resolved.workspacePath,
       maxRawTextBytes: this.deps.maxRawTextBytes ?? CODE_COLLAB_V2_TEXT_LIMITS.maxRawTextBytes,
       entryBudget: this.deps.maxFileTreeEntries ?? DEFAULT_FILE_TREE_SCAN_ENTRY_BUDGET,
-      recursive: options.recursive === true,
+      recursive: options.recursive === true && !(resolved.projectRun && !resolved.workspacePath),
       signal: options.signal,
     };
     const entries =
       (await scanDirectoryEntriesInWorker(scanInput, options.signal)) ??
       (await scanDirectoryEntries(scanInput));
     options.signal?.throwIfAborted();
+    if (resolved.projectRun && options.recursive) {
+      for (const member of Object.values(resolved.projectRun.members).filter(
+        (candidate) => candidate.access !== 'additional' && candidate.access !== 'link'
+      )) {
+        if (resolved.workspacePath && !member.path.startsWith(`${resolved.workspacePath}/`))
+          continue;
+        const memberInput = {
+          ...scanInput,
+          directoryAbsolutePath: await resolveProjectGitDirectory(
+            resolved.workspaceRoot,
+            member.path
+          ),
+          directoryWorkspacePath: member.path,
+          entryBudget: Math.max(0, scanInput.entryBudget - entries.size),
+          recursive: true,
+        };
+        const memberEntries =
+          (await scanDirectoryEntriesInWorker(memberInput, options.signal)) ??
+          (await scanDirectoryEntries(memberInput));
+        options.signal?.throwIfAborted();
+        for (const entry of memberEntries) entries.set(...entry);
+      }
+    }
     if (options.replaceFileTree === true) {
       replaceFileTreeEntries(state.fileTree, entries, options.fileTreeIndex);
       return entries.size;
@@ -1585,7 +1848,10 @@ export class CodeCollabV2Service {
   }
 
   private async computeAllChangesAndPublish(
-    resolved: Pick<ResolvedPath, 'allChangesBaseBranch' | 'ownerSessionId' | 'workspaceRoot'>,
+    resolved: Pick<
+      ResolvedPath,
+      'projectRun' | 'allChangesBaseBranch' | 'ownerSessionId' | 'workspaceRoot'
+    >,
     state: OwnerSharedState,
     options: SharedStatePublishOptions & { readonly fileTreeIndex?: FileTreePathIndex } = {}
   ): Promise<void> {
@@ -1606,7 +1872,10 @@ export class CodeCollabV2Service {
   }
 
   private async computeAllChangesForResolvedWorkspaceWithSource(
-    resolved: Pick<ResolvedPath, 'allChangesBaseBranch' | 'ownerSessionId' | 'workspaceRoot'>,
+    resolved: Pick<
+      ResolvedPath,
+      'projectRun' | 'allChangesBaseBranch' | 'ownerSessionId' | 'workspaceRoot'
+    >,
     options: {
       readonly signal?: AbortSignal;
       readonly includeDiffStoreSnapshots?: boolean;
@@ -1615,6 +1884,16 @@ export class CodeCollabV2Service {
       readonly diffStoreSnapshotPerFileMaxRawBytes?: number;
     } = {}
   ): Promise<AllChangesComputation> {
+    if (resolved.projectRun)
+      return {
+        ...(await computeProjectAllChangesSnapshot(
+          resolved.workspaceRoot,
+          Object.values(resolved.projectRun.members).filter(
+            (candidate) => candidate.access !== 'additional' && candidate.access !== 'link'
+          )
+        )),
+        source: 'git',
+      };
     if (await isInsideGitWorktree(resolved.workspaceRoot, options.signal)) {
       const gitBase =
         (await resolveAllChangesDiffBase(
@@ -1637,7 +1916,7 @@ export class CodeCollabV2Service {
   }
 
   private async ensureAllChangesFileTreeEntries(
-    resolved: Pick<ResolvedPath, 'workspaceRoot'>,
+    resolved: Pick<ResolvedPath, 'projectRun' | 'workspaceRoot'>,
     state: OwnerSharedState,
     fileTreeIndex?: FileTreePathIndex,
     signal?: AbortSignal
@@ -1675,7 +1954,7 @@ export class CodeCollabV2Service {
   }
 
   private async computeAllChangesFromDiffStore(
-    resolved: Pick<ResolvedPath, 'ownerSessionId' | 'workspaceRoot'>,
+    resolved: Pick<ResolvedPath, 'projectRun' | 'ownerSessionId' | 'workspaceRoot'>,
     options: {
       readonly signal?: AbortSignal;
       readonly includeDiffStoreSnapshots?: boolean;
@@ -1710,17 +1989,20 @@ export class CodeCollabV2Service {
       )
     );
     let cachedSnapshotRawBytes = 0;
-    const changedPaths = await waitForCodeCollabTask(
-      store.listChangedPaths({
-        ownerSessionId: resolved.ownerSessionId,
-      }),
-      options.signal
-    );
+    const changedPaths = (
+      await waitForCodeCollabTask(
+        store.listChangedPaths({ ownerSessionId: resolved.ownerSessionId }),
+        options.signal
+      )
+    ).flatMap((key) => {
+      const parsed = decodeSessionFilePath(key);
+      return parsed?.rootId === (this.deps.rootId ?? 'main') ? [parsed.relativePath] : [];
+    });
     const processPath = async (workspacePath: string): Promise<void> => {
       options.signal?.throwIfAborted();
       const oldSnapshot = await store.getEarliestOldSnapshot({
         ownerSessionId: resolved.ownerSessionId,
-        path: workspacePath,
+        path: this.fileKey(workspacePath),
         maxRawBytes: snapshotReadMaxRawBytes,
       });
       options.signal?.throwIfAborted();
@@ -1787,7 +2069,7 @@ export class CodeCollabV2Service {
   }
 
   private async ensureWorkspaceWatch(
-    resolved: Pick<ResolvedPath, 'ownerSessionId' | 'workspaceRoot'>
+    resolved: Pick<ResolvedPath, 'projectRun' | 'ownerSessionId' | 'workspaceRoot'>
   ): Promise<void> {
     if (!this.deps.publishFileIndex || !this.deps.workspaceWatchCoordinator) {
       return;
@@ -1811,7 +2093,9 @@ export class CodeCollabV2Service {
     this.armWorkspaceWatchIdleTimer(state);
     const subscription = await this.deps.workspaceWatchCoordinator.subscribe({
       workspaceId: this.deps.workspaceId ?? 'code-collab',
-      ownerSessionId: resolved.ownerSessionId,
+      ownerSessionId: this.deps.rootId
+        ? `${resolved.ownerSessionId}:root:${this.deps.rootId}`
+        : resolved.ownerSessionId,
       workspaceRoot,
       onDirty: () => this.scheduleWatchedWorkspaceRefresh(resolved.ownerSessionId),
     });
@@ -1948,11 +2232,38 @@ export class CodeCollabV2Service {
   private async resolveCurrentDiffBaseSnapshot(
     resolved: ResolvedPath,
     pinnedGitBase?: string,
+    pinnedMemberBases?: Readonly<Record<string, string>>,
     options: { readonly allowDiffStoreFallback?: boolean } = {}
   ): Promise<
     | { readonly status: 'ready'; readonly snapshot: InternalDiffSnapshot }
     | { readonly status: 'unavailable' }
   > {
+    if (resolved.projectRun) {
+      const entries = Object.entries(resolved.projectRun.members);
+      const memberFile = resolveSessionFilePath(
+        entries.map(([id, member]) => ({
+          id,
+          absolutePath: path.join(resolved.workspaceRoot, member.path),
+        })),
+        resolved.absolutePath
+      );
+      const member =
+        memberFile &&
+        resolved.projectRun.members[memberFile.rootId as keyof typeof resolved.projectRun.members];
+      if (memberFile && member) {
+        const cwd = await resolveProjectGitDirectory(resolved.workspaceRoot, member.path);
+        const base =
+          pinnedMemberBases?.[member.path] ??
+          (await resolveAllChangesDiffBase(cwd, member.base)) ??
+          'HEAD';
+        return readGitBaseDiffSnapshot(
+          cwd,
+          base,
+          memberFile.relativePath,
+          this.deps.maxRawTextBytes ?? CODE_COLLAB_V2_TEXT_LIMITS.maxRawTextBytes
+        );
+      }
+    }
     if (await isInsideGitWorktree(resolved.workspaceRoot)) {
       const base =
         pinnedGitBase ??
@@ -1976,7 +2287,7 @@ export class CodeCollabV2Service {
     }
     const storeSnapshot = await this.deps.diffStore?.getEarliestOldSnapshot({
       ownerSessionId: resolved.ownerSessionId,
-      path: resolved.workspacePath,
+      path: this.fileKey(resolved.workspacePath),
       maxRawBytes: maxRawTextBytes,
     });
     if (!storeSnapshot || storeSnapshot.status === 'unavailable') {
@@ -2394,21 +2705,16 @@ function resolveWorkspaceRelativeRequestPath(workspaceRoot: string, input: strin
     return input;
   }
 
-  const relative = path.relative(workspaceRoot, path.resolve(input));
-  if (isPathOutsideRoot(relative)) {
+  const parsed = resolveSessionFilePath(
+    [{ id: 'main', absolutePath: workspaceRoot }],
+    path.resolve(input)
+  );
+  if (!parsed) {
     throw new CodeCollabV2ServiceError('invalid_path', 'Path escapes workspace root.', {
       path: input,
     });
   }
-  return relative.split(path.sep).join('/');
-}
-
-function isPathOutsideRoot(relativePath: string): boolean {
-  return (
-    relativePath === '..' ||
-    relativePath.startsWith(`..${path.sep}`) ||
-    path.isAbsolute(relativePath)
-  );
+  return parsed.relativePath;
 }
 
 async function stableReadFile(resolved: ResolvedPath, maxBytes: number): Promise<StableRead> {
@@ -2465,7 +2771,7 @@ async function stableReadFile(resolved: ResolvedPath, maxBytes: number): Promise
 }
 
 async function readCurrentDiffSnapshot(
-  resolved: Pick<ResolvedPath, 'absolutePath' | 'workspacePath' | 'workspaceRoot'>,
+  resolved: Pick<ResolvedPath, 'projectRun' | 'absolutePath' | 'workspacePath' | 'workspaceRoot'>,
   maxBytes: number
 ): Promise<
   | { readonly status: 'ready'; readonly snapshot: InternalDiffSnapshot }
@@ -2519,8 +2825,7 @@ async function assertRealPathInsideWorkspace(resolved: ResolvedPath): Promise<vo
   ]).catch((error: unknown) => {
     throw mapNodeReadError(error, resolved.workspacePath);
   });
-  const relative = path.relative(rootRealpath, fileRealpath);
-  if (isPathOutsideRoot(relative)) {
+  if (!resolveSessionFilePath([{ id: 'main', absolutePath: rootRealpath }], fileRealpath)) {
     throw new CodeCollabV2ServiceError('invalid_path', 'Resolved path escapes workspace root.', {
       path: resolved.workspacePath,
     });
@@ -3235,4 +3540,19 @@ async function runGitBuffer(
   } catch {
     return { ok: false };
   }
+}
+
+function settledOrAborted(work: Promise<unknown>, signal: AbortSignal | undefined): Promise<void> {
+  const settled = work.then(
+    () => undefined,
+    () => undefined
+  );
+  if (!signal) return settled;
+  if (signal.aborted) return Promise.resolve();
+  return Promise.race([
+    settled,
+    new Promise<void>((resolve) =>
+      signal.addEventListener('abort', () => resolve(), { once: true })
+    ),
+  ]);
 }

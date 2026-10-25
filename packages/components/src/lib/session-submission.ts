@@ -82,6 +82,11 @@ function buildSessionCreateResult(
   if (payload.project) {
     sessionMeta.project = payload.project;
   }
+  // The creation snapshot of a multi-repository Session. After this write the
+  // owning daemon is its only writer.
+  if (payload.projectRun) {
+    sessionMeta.projectRun = payload.projectRun;
+  }
   if (
     payload.isWorktree === true ||
     payload.project?.kind === 'github' ||

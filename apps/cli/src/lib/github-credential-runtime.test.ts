@@ -3,7 +3,13 @@ import { describe, expect, it } from 'vitest';
 import { githubCredentialRuntime } from './github-credential-runtime';
 
 function harness(
-  options: { personal?: string; app?: string; owner?: boolean; offline?: boolean } = {}
+  options: {
+    nativeRepositories?: string[];
+    personal?: string;
+    app?: string;
+    owner?: boolean;
+    offline?: boolean;
+  } = {}
 ) {
   const events: string[] = [];
   const logs: string[] = [];
@@ -11,7 +17,11 @@ function harness(
     githubCredentialRuntime +
       '\n({ readCredentialPolicy, selectGitHubCredential, githubCredentials, readCredentialContext })',
     {
-      getContext: () => ({ contextToken: 'fixture', allowLocalAuth: options.owner ?? true }),
+      getContext: () => ({
+        contextToken: 'fixture',
+        allowLocalAuth: options.owner ?? true,
+        nativeRepositories: options.nativeRepositories,
+      }),
       requestBroker: async (_endpoint: string, body: { source: 'personal' | 'app' }) => {
         events.push(body.source);
         if (options.offline)
@@ -34,6 +44,31 @@ function harness(
 }
 
 describe('ordered GitHub credentials', () => {
+  it('uses only native credentials for a resolved-local member in a mixed runtime', async () => {
+    const h = harness({ personal: 'personal', app: 'app', nativeRepositories: ['org/local'] });
+    const local = await h.context.selectGitHubCredential(
+      'ORG/LOCAL',
+      h.context.readCredentialPolicy(),
+      h.local,
+      true
+    );
+    const managed = await h.context.selectGitHubCredential(
+      'org/managed',
+      h.context.readCredentialPolicy(),
+      h.local,
+      true
+    );
+    expect(local).toEqual({ token: 'machine', source: 'local' });
+    expect(managed).toEqual({ token: 'personal', source: 'personal' });
+    await expect(
+      h.context.selectGitHubCredential(
+        'org/local',
+        h.context.readCredentialPolicy(),
+        async () => null,
+        true
+      )
+    ).rejects.toMatchObject({ code: 'credentials_exhausted' });
+  });
   it('selects personal first without a policy request or a permission API', async () => {
     const h = harness({ personal: 'personal' });
     const selected = await h.context.selectGitHubCredential(

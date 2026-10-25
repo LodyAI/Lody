@@ -303,6 +303,23 @@ describe('machine Flock helpers', () => {
     });
   });
 
+  it('keeps a well-formed GitHub remote on a local project and drops a malformed one', () => {
+    const flock = new FakeMachineFlock();
+    const value = (id: string, githubRepoFullName: unknown) => ({
+      id,
+      name: id,
+      rootPath: `/Users/developer/Code/${id}`,
+      createdAtMs: 1,
+      githubRepoFullName,
+    });
+    flock.set(machineFlockKeys.localProject('a' as LocalProjectId), value('a', 'acme/api'));
+    flock.set(machineFlockKeys.localProject('b' as LocalProjectId), value('b', '/Users/x/api'));
+    const projects = getMachineFlockLocalProjects(readMachineFlockRowsFromFlock(flock));
+    expect(projects['a' as LocalProjectId]?.githubRepoFullName).toBe('acme/api');
+    expect(projects['b' as LocalProjectId]).toBeDefined();
+    expect(projects['b' as LocalProjectId]?.githubRepoFullName).toBeUndefined();
+  });
+
   it('extracts pending local project delete commands', () => {
     const localProjectId = 'project-delete' as LocalProjectId;
     const row = {

@@ -145,6 +145,36 @@ composition does not enable cloud queries; local project listing remains availab
 Catalog `--offline` skips catalog synchronization but still verifies authorization;
 GitHub repository listing requires connectivity.
 
+## Import Magpie providers on a server
+
+Run on the machine hosting both Lody and Magpie, with Lody signed in and its daemon
+running. This uses the existing workspace command runtime, not the OSS local-only
+composition. Explicit command execution authorizes the import; no desktop is needed.
+
+```sh
+lody agent-config import-magpie --workspace team --json
+lody agent-config import-magpie --workspace team --targets pi,codex --gateway http://127.0.0.1:3425 --json
+lody agent-config import-magpie --workspace team --link 'lody://provider/import?v=1&data=…' --json
+```
+
+Without `--targets`, import all seven (`claude,codex,pi,dsh,kimi,grok,bub`), or all
+those offered by `--link`. A target subset cannot expand a link's offered targets.
+`--gateway` and `--link` are mutually exclusive. The gateway must be a literal
+loopback HTTP origin; upstream credentials stay in Magpie. The command always
+uses the invoking machine, ignoring `LODY_MACHINE_ID`; there is no remote-machine
+flag. The daemon must advertise `magpieImport` and `providerSetup`, plus `builtinPi`
+when Pi is selected. Unsupported selections fail before any writes.
+
+Existing providers are preserved. Repeated imports reuse providers or pending setup
+IDs for the same gateway/runtime, and requeue failed setups with their existing
+configuration. Managed runtimes and Bub enter the normal daemon setup queue;
+DSH is saved directly. Bub still needs a user-installed `bub acp` and ACP plugin.
+JSON lists each target, `agentConfigId`, and status (`existing`, `created`, or a
+setup status). `queued` is not ready: follow progress in Providers. `synced: false`
+means saved locally but publication is unconfirmed; rerun after connectivity recovers.
+Import does not verify upstream inference. Startup generates native configuration
+from the gateway's live catalog as described in the [Magpie contract](../../specs/magpie-provider-import.md).
+
 ## Agent configuration output
 
 `agent-config show [id] [--json]` returns sorted `envKeys`, not environment values.

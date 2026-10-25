@@ -41,9 +41,9 @@ export type HistoryLiveSync = 'live' | 'syncing' | 'offline';
 export type HistoryLiveWindow = { sync: HistoryLiveSync; since: number | null };
 
 /**
- * Both history backends deliver live changes through the session room (Loro
- * directly; Roost through its `roostHistoryCursor`), so its sync state says
- * whether an absence of updates means anything.
+ * The session room supplies the control-plane connection window. Roost history
+ * arrives through owner checkpoint observation; room sync alone does not certify
+ * that history is current.
  */
 export const resolveHistoryLiveSync = (
   syncState: RoomSyncState,

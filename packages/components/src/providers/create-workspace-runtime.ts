@@ -1895,6 +1895,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     requestSessionPreviewStatus,
     requestIosSimulatorControl,
     requestLocalProjectGitState,
+    requestProjectProbeLocalMember,
     requestLocalProjectControl,
     requestMachineBugReport,
     requestLocalMcpTools,
@@ -3832,8 +3833,11 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     subscribeSyncState: (listener) => presenceTransport.subscribeSyncState(listener),
     needsReconnect: () => presenceTransport.needsReconnect(),
   });
+  // UI liveness reads the display state: a clean SSE recycle briefly reports
+  // 'reconnecting' while the retained snapshot still speaks for every machine.
+  // The room registry above keeps the raw state so recovery is never delayed.
   const unsubscribePresenceSyncState = deps.onPresenceSyncStateChange
-    ? presenceTransport.subscribeSyncState(deps.onPresenceSyncStateChange)
+    ? presenceTransport.subscribeDisplaySyncState(deps.onPresenceSyncStateChange)
     : null;
   const machineMonitorSyncRoomId = `machine-monitor:${workspaceId}`;
   const untrackMachineMonitorSync = roomSyncRegistry.track({
@@ -4212,9 +4216,10 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     // A persisted Loro history is enough to read a legacy session offline. An
     // empty provisional control doc is not evidence that its backend is Loro.
     const legacyHistory = doc.getByPath('history');
-    const hasRoostCursor = doc.getByPath('roostHistoryCursor/cursor') !== undefined;
+    // A removed experimental marker can veto legacy fallback, never publish history.
+    const hasRetiredRoostMarker = doc.getByPath('roostHistoryCursor/cursor') !== undefined;
     const hasLegacyHistory =
-      legacyHistory instanceof LoroList && legacyHistory.length > 0 && !hasRoostCursor;
+      legacyHistory instanceof LoroList && legacyHistory.length > 0 && !hasRetiredRoostMarker;
     return new Promise((resolve, reject) => {
       let meta: { historyBackend?: SessionHistoryBackendKind; machineId?: MachineId } = {};
       let exists = false;
@@ -4267,7 +4272,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
             })
           );
         if (readyBindings.has(binding)) {
-          if (exists && meta.machineId && !hasRoostCursor) finish();
+          if (exists && meta.machineId && !hasRetiredRoostMarker) finish();
           // Restoration is a completed barrier, not a polling loop. Missing
           // identity is woken by metadata/route events; a known Roost cursor
           // cannot turn into a legacy identity merely because Meta is late.
@@ -5572,6 +5577,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     requestSessionPreviewStatus,
     requestIosSimulatorControl,
     requestLocalProjectGitState,
+    requestProjectProbeLocalMember,
     requestLocalProjectControl,
     requestMachineBugReport,
     requestLocalMcpTools,

@@ -1,3 +1,4 @@
+import { resolveSessionPullRequests } from '@lody/shared';
 import { turnNotificationAudience } from '@/lib/notifications/turn-notification-audience';
 import { registerAgentRoleTools } from './agent-role-tools';
 import { proposeAgentRole } from '@/lib/agent-role-proposal';
@@ -1699,7 +1700,7 @@ const sessionSummaryForMcp = (
     : {}),
   ...(session.parentSessionId ? { parentSessionId: session.parentSessionId } : {}),
   executionContext: summarizeProjectRefForMcp(session.project),
-  pullRequests: (session.pullRequests ?? [])
+  pullRequests: resolveSessionPullRequests(session)
     .map(normalizeSessionPullRequestMeta)
     .filter((item): item is NonNullable<typeof item> => item !== null)
     .slice(0, 10)
@@ -1804,7 +1805,7 @@ const matchesSessionListFilters = (
   }
   const prFilter = input.pullRequest;
   if (prFilter) {
-    const prs = (session.pullRequests ?? [])
+    const prs = resolveSessionPullRequests(session)
       .map(normalizeSessionPullRequestMeta)
       .filter((item): item is NonNullable<typeof item> => item !== null);
     if (prFilter.exists === false) return prs.length === 0;

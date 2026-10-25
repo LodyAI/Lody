@@ -51,6 +51,28 @@ never invent a PR or erase a previously successful observation. Login and access
 changes take effect at a subsequent eligible polling attempt, respecting cooldowns
 and exhaustion. GitHub observation remains independent of this hosted linkage budget.
 
+## Association and lifecycle ownership
+
+The owning machine reconciler alone maintains associated PR membership and order.
+Hosted association establishes webhook linkage; it MUST NOT replace the session's
+association list. Renderers MUST NOT persist lists captured during detail reads.
+
+Lifecycle observations are independent per canonical repository-qualified PR URL
+and source. Machine reads and hosted webhooks MUST preserve each other's records.
+Readers resolve the greatest GitHub update revision, falling back to the legacy
+association status when no observation exists. For equal revisions, a machine
+live read wins a webhook tie; ambiguous webhook-only ties converge deterministically.
+GitHub's second-resolution timestamp cannot establish ordering within that second.
+Later provider revisions supersede either source, including reopening a closed PR.
+Receipt time MUST NOT make an older provider revision authoritative.
+
+An observation MUST NOT create an association or revive a deleted session.
+Unassociated observations remain invisible. Retention is bounded to source registers
+per observed PR for the session's lifetime, not a growing event history.
+Machine-offline hosted observations continue to update new clients' summaries.
+Old clients read the compatibility array and may wait for the machine to refresh it;
+all active clients must upgrade to remove legacy renderer list writers.
+
 The desktop reads the same metadata for local and hosted projects. Without hosted
 GitHub integration, PR links open GitHub in the browser; detailed checks, review
 and mutation APIs are not enabled by local summary access. In hosted PR views, an unconfirmed association must not block reading a public

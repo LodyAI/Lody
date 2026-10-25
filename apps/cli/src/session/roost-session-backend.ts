@@ -29,6 +29,13 @@ import {
 } from '@lody/shared/session-data';
 import type { SessionDocument } from '@/lib/loro/doc';
 import type { SessionAgentWrites } from '@/lib/loro/session-agent-writes';
+import {
+  readDispatchHistory,
+  readDispatchSelection,
+  type SessionDispatchEntry,
+  type SessionDispatchSelection,
+  type SessionDispatchSelector,
+} from './session-dispatch-history';
 import type {
   QueuePromotionInput,
   QueuePromotionResult,
@@ -47,6 +54,13 @@ export type RoostSessionBackendServices = {
   readonly sessionData: RoostSessionData;
   readonly agentWrites: SessionAgentWrites;
   readonly setPlan: (entries: readonly SessionPlanEntry[]) => Promise<void>;
+  readonly readDispatchHistory?: (
+    includeTurnIds: readonly string[]
+  ) => Promise<SessionDispatchEntry[]>;
+  readonly readDispatchSelection?: (
+    includeTurnIds: readonly string[],
+    select: SessionDispatchSelector
+  ) => Promise<SessionDispatchSelection>;
   readonly initialize?: (options: { readonly skipAutoRead: boolean }) => Promise<void>;
   readonly flushLocalWrites?: () => Promise<void>;
   /**
@@ -129,6 +143,23 @@ export class RoostSessionBackend implements SessionBackend {
       ...entry,
       inputConfig: normalizeSessionTurnInputConfig(entry.inputConfig),
     })) as SessionHistoryInput[];
+  }
+
+  readDispatchHistory(includeTurnIds: readonly string[]): Promise<SessionDispatchEntry[]> {
+    return (
+      this.services.readDispatchHistory?.(includeTurnIds) ??
+      readDispatchHistory(this.history, includeTurnIds)
+    );
+  }
+
+  readDispatchSelection(
+    includeTurnIds: readonly string[],
+    select: SessionDispatchSelector
+  ): Promise<SessionDispatchSelection> {
+    return (
+      this.services.readDispatchSelection?.(includeTurnIds, select) ??
+      readDispatchSelection(this.history, includeTurnIds, select)
+    );
   }
 
   async captureForkSnapshot(): Promise<SessionBackendForkSnapshot> {

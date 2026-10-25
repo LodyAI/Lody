@@ -66,8 +66,11 @@ export class AgentRolePage {
     await editor
       .getByLabel(/^(Default instruction|默认指令)$/u)
       .fill(this.fixture.initialInstruction);
-    await editor.getByLabel(/^(Machine|机器)$/u).click();
-    await this.page.getByRole('option').first().click();
+    const machineTab = editor.getByRole('tablist', { name: /^(Machine|机器)$/u }).getByRole('tab');
+    // The isolated desktop has one local machine, presented as a configuration tab.
+    await expect(machineTab).toHaveCount(1);
+    await machineTab.click();
+    await expect(machineTab).toHaveAttribute('aria-selected', 'true');
     await editor.getByLabel(/^(Agent config|Agent 配置)$/u).click();
     await this.page.getByRole('option', { name: this.fixture.agentName, exact: true }).click();
     await editor.getByRole('button', { name: /^(Create role|创建角色)$/u }).click();

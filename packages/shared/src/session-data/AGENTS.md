@@ -87,7 +87,8 @@
   Receipt projections target its exact turn and batch, preserve user text/config and do not
   rewrite unchanged status. Full result bodies remain in the scoped orchestration repository.
 
-- Roost incremental reads bind a complete logical change interval to one owner checkpoint.
+- Native owns Roost history publication; control documents never publish its revisions.
+  Roost incremental reads bind a complete logical change interval to one owner checkpoint.
   Missing or foreign checkpoint evidence requires explicit reset, never trusting the last hint.
   Persist repaired bodies, membership and checkpoint atomically; the cache grants no write receipt.
   Reset replaces the latest window atomically; invalidated older pages load on demand,

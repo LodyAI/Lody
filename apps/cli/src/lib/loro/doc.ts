@@ -1,4 +1,5 @@
 import type { CliE2eeWorkspaceLegacy } from '../e2ee/workspace-legacy';
+import { projectRunMetaPatch } from '@/session/project-run-state';
 import type { LodyRateLimitsCapability } from 'acp-extension-core';
 import { terminalNotificationSchema, type TerminalNotification } from '@lody/shared/notifications';
 import { createSessionAgentWrites, type SessionAgentWrites } from './session-agent-writes';
@@ -41,15 +42,12 @@ import {
   SessionStatus,
   SessionContextWindowUsage,
   type ProjectRef,
-  SessionPullRequestMeta,
   SessionPlanEntry,
   type SessionExternalHistoryCursorDocState,
-  type SessionRoostHistoryCursorDocState,
   ACP_CAPABILITY_CACHE_VERSION,
   MessageQueueItem,
   SessionTitleSource,
   getAcpCapabilityCacheKey,
-  normalizeSessionPullRequestMeta,
   getServerNow,
   shouldRenewAcpCapabilityFetchTime,
   isLoroRepoDocDeleted,
@@ -2287,15 +2285,6 @@ export class SessionDocument implements LoroDocument<Omit<SessionDocMeta, 'histo
     return this.mirror.subscribe(listener);
   }
 
-  subscribeRoostHistoryCursor(listener: () => void): () => void {
-    if (!this.handle) throw new Error('SessionDocument not initialized');
-    return this.handle.doc.subscribe((batch) => {
-      if (batch.events.some((event) => String(event.path[0]) === 'roostHistoryCursor')) {
-        listener();
-      }
-    });
-  }
-
   async init(options: { skipAutoRead?: boolean; historyBackend?: SessionHistoryBackendKind } = {}) {
     this.destroyed = false;
     try {
@@ -2593,7 +2582,6 @@ export class SessionDocument implements LoroDocument<Omit<SessionDocMeta, 'histo
       notification: state.notification,
       preview: state.preview as SessionDocMeta['preview'],
       externalHistoryCursor: state.externalHistoryCursor as SessionDocMeta['externalHistoryCursor'],
-      roostHistoryCursor: state.roostHistoryCursor as SessionDocMeta['roostHistoryCursor'],
       acpRuntimeConfig: state.acpRuntimeConfig as SessionDocMeta['acpRuntimeConfig'],
     };
   }
@@ -2972,6 +2960,14 @@ export class SessionDocument implements LoroDocument<Omit<SessionDocMeta, 'histo
     await this.repo.upsertDocMeta(this.roomId, { project });
   }
 
+  /** Caller must hold the conversation's WorkspaceGitService mutation queue. */
+  async setProjectRun(run: NonNullable<SessionMeta['projectRun']>) {
+    if (!this.mirror) throw new Error('SessionDocument not initialized');
+    const current = await this.repo.getDocMeta(this.roomId);
+    if (isLoroRepoDocDeleted(current)) return;
+    await this.repo.upsertDocMeta(this.roomId, projectRunMetaPatch(run));
+  }
+
   async setBranchName(branchName: string) {
     if (!this.mirror) {
       throw new Error('SessionDocument not initialized');
@@ -3211,18 +3207,6 @@ export class SessionDocument implements LoroDocument<Omit<SessionDocMeta, 'histo
     }));
   }
 
-  async getRoostHistoryCursor(): Promise<SessionRoostHistoryCursorDocState | undefined> {
-    if (!this.mirror) return undefined;
-    return this.mirror.getState().roostHistoryCursor as
-      | SessionRoostHistoryCursorDocState
-      | undefined;
-  }
-
-  async setRoostHistoryCursor(cursor: SessionRoostHistoryCursorDocState): Promise<void> {
-    if (!this.mirror) throw new Error('Mirror not initialized');
-    this.mirror.setState((prev) => ({ ...prev, roostHistoryCursor: cursor }));
-  }
-
   /**
    * Get the plan from the latest assistant entry in history.
    * Plan is now stored per-turn on each history entry, not at the root level.
@@ -3234,24 +3218,6 @@ export class SessionDocument implements LoroDocument<Omit<SessionDocMeta, 'histo
       return [];
     }
     return (entry.plan ?? []) as SessionPlanEntry[];
-  }
-
-  async addPullRequest(prMeta: SessionPullRequestMeta): Promise<void> {
-    const summary = normalizeSessionPullRequestMeta(prMeta);
-    if (!summary) return;
-    const current = await this.repo.getDocMeta(this.roomId);
-    if (isLoroRepoDocDeleted(current)) return;
-    const existingMeta = current?.meta as SessionMeta | undefined;
-    const existing = (existingMeta?.pullRequests ?? []).flatMap((item) => {
-      const parsed = normalizeSessionPullRequestMeta(item);
-      return parsed ? [parsed] : [];
-    });
-    const filtered = existing.filter((item) => item.url !== summary.url);
-    const updated = [...filtered, summary];
-
-    await this.repo.upsertDocMeta(this.roomId, {
-      pullRequests: updated,
-    });
   }
 
   /**

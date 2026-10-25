@@ -69,7 +69,7 @@ changes dependencies, native boundaries, consumers or ownership.
   artifact and versioned ACP contract. Shared ACP extension contracts belong in the
   public `LodyAI/acp-extension-core` submodule, consumed through the root workspace;
   never duplicate them locally.
-- Magpie: require local desktop confirmation, fixed loopback mappings and public token.
+- Magpie: desktop confirmation or explicit local CLI import; loopback mappings and public token.
   Keep gateway metadata outside env and catalogs under Lody data, never user profiles.
   [Contract](specs/magpie-provider-import.md).
 - Pi provider migration requires owner confirmation and the target's `builtinPi`

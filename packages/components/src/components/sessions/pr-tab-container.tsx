@@ -1,14 +1,13 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useAtomValue } from 'jotai';
 import { usePostHog } from '@posthog/react';
 import { toast } from '@/lib/toast';
 import { useTranslation } from 'react-i18next';
-import type { GitHubMergeMethod, PrStatus } from '@lody/shared';
+import type { GitHubMergeMethod } from '@lody/shared';
 
 import { currentWorkspaceIdAtom } from '@/atoms';
-import { derivePrStatusFromDetails } from '@/lib/github-pr-details-state';
 import { getDurationSinceMs, getPerformanceNowMs } from '@/lib/posthog-analytics';
 import {
   isGitHubOperationTokenConnectionLostError,
@@ -42,13 +41,6 @@ export interface PrTabContainerProps {
   visible?: boolean;
   /** Session this PR tab belongs to, for analytics breakdown (spec §8d). */
   sessionId?: string | null;
-  /**
-   * Fired when the live PR details resolve to a coarse {@link PrStatus},
-   * letting the owner reconcile the persisted session PR status (which drives
-   * the sidebar + session-header badges) against GitHub's live truth — most
-   * visibly `draft`, which the webhook/CLI may not have propagated yet.
-   */
-  onResolvedPrStatus?: (status: PrStatus) => void;
 }
 
 function resolveGitHubAppInstallUrl(): string {
@@ -71,7 +63,6 @@ export function PrTabContainer({
   className,
   sessionId,
   visible = true,
-  onResolvedPrStatus,
 }: PrTabContainerProps) {
   const { t } = useTranslation();
   const postHog = usePostHog();
@@ -144,15 +135,6 @@ export function PrTabContainer({
   // webhook/CLI own; until those propagate (notably `draft`), this is the only
   // surface that knows the real state. Fire once per resolved status so the
   // owner's write doesn't loop.
-  const lastResolvedStatusRef = useRef<string | null>(null);
-  useEffect(() => {
-    if (!pullRequest || !onResolvedPrStatus) return;
-    const status = derivePrStatusFromDetails(pullRequest);
-    const key = `${pullRequest.number}:${status}`;
-    if (lastResolvedStatusRef.current === key) return;
-    lastResolvedStatusRef.current = key;
-    onResolvedPrStatus(status);
-  }, [onResolvedPrStatus, pullRequest]);
 
   const handleSelectMergeMethod = useCallback((method: GitHubMergeMethod) => {
     setPreferredPrMergeMethod(method);

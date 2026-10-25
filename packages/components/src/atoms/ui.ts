@@ -36,10 +36,11 @@ export const toggleMobileDrawerAtom = atom(null, (get, set) => {
  * than resurrect a stale context from a previous visit.
  */
 export type MobileWorkspaceBaseContext = {
-  context?: 'local' | 'github' | 'chat';
+  context?: 'local' | 'github' | 'chat' | 'group';
   machine?: string;
   project?: string;
   repo?: string;
+  group?: string;
 };
 
 export const mobileWorkspaceBaseContextAtom = atom<MobileWorkspaceBaseContext>({});

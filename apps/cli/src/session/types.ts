@@ -38,6 +38,7 @@ export interface SessionConfig {
   runtimeOverrides?: BuiltinRuntimeOverrides;
   magpieGatewayUrl?: string;
   project?: ProjectRef;
+  projectRun?: import('@lody/shared').SessionProjectRun;
   // undefined means create a new session
   sessionId?: SessionId;
   // promptBuildConfig: PromptBuildConfig;

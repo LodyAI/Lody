@@ -1277,3 +1277,50 @@ describe('getChatLandingSelectionSyncDecision', () => {
     ).toBe('skip');
   });
 });
+
+describe('project group selection URL', () => {
+  it('names the group and keeps legacy keys unchanged', () => {
+    expect(
+      getChatLandingSelectionSearch({
+        contextType: 'group',
+        machineId: null,
+        localProjectId: null,
+        repoFullName: null,
+        projectGroupId: 'shop',
+      })
+    ).toEqual({ context: 'group', group: 'shop' });
+    expect(
+      getChatLandingSelectionSearch({
+        contextType: 'group',
+        machineId: null,
+        localProjectId: null,
+        repoFullName: null,
+        projectGroupId: null,
+      })
+    ).toEqual({});
+    expect(
+      buildChatLandingPreSelectionKey({
+        context: 'github',
+        machine: undefined,
+        project: undefined,
+        repo: 'acme/web',
+      })
+    ).toBe('github|undefined|undefined|acme/web');
+    expect(
+      buildChatLandingPreSelectionKey({
+        context: 'group',
+        machine: undefined,
+        project: undefined,
+        repo: undefined,
+        group: 'shop',
+      })
+    ).toBe('group|undefined|undefined|undefined|shop');
+    expect(parseChatLandingSearch({ context: 'group', group: 'shop' })).toEqual({
+      context: 'group',
+      machine: undefined,
+      project: undefined,
+      repo: undefined,
+      group: 'shop',
+    });
+  });
+});

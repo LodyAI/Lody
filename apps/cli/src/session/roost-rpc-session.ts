@@ -1,5 +1,5 @@
 import {
-  SessionHistoryChangeSchema,
+  SessionHistoryChangesSchema,
   type SessionHistoryReadQuery,
   type SessionHistoryReadResponse,
   type SessionHistoryWriteOperation,
@@ -32,6 +32,7 @@ export function createRoostRpcSessionServices(
 ): RoostSessionBackendServices {
   const listeners = new Set<Parameters<SessionHistoryReader['observe']>[0]>();
   const readResponse = async (query: SessionHistoryReadQuery) => {
+    if (disposed) throw new Error('Owner history reader is disposed');
     const response = await rpc.read(query);
     if (!response.success || response.sessionId !== doc.sessionId || response.result === undefined)
       throw new Error(response.error ?? 'Owner history read failed');
@@ -75,6 +76,7 @@ export function createRoostRpcSessionServices(
     operation: SessionHistoryWriteOperation,
     payload: Record<string, unknown>
   ): Promise<T> => {
+    if (disposed) throw new Error('Owner history reader is disposed');
     const response = await rpc.write(operation, payload);
     if (
       !response.success ||
@@ -90,30 +92,51 @@ export function createRoostRpcSessionServices(
     notify(change);
     return response.result as T;
   };
-  const unsubscribe = doc.subscribeRoostHistoryCursor(() => {
-    // The authoritative read obtains its own revision; a hint cannot overwrite it.
-    void doc
-      .getRoostHistoryCursor()
-      .then(async (cursor) => {
-        let parsed;
-        try {
-          parsed = cursor?.historyChangeJson
-            ? SessionHistoryChangeSchema.nullable().safeParse(JSON.parse(cursor.historyChangeJson))
-            : undefined;
-        } catch {
-          /* A stale hint falls back to the authoritative count. */
-        }
-        const change = parsed?.success ? parsed.data : undefined;
-        notify(
-          change ?? {
-            kind: 'structure',
-            from: 0,
-            to: cursor?.historyCount ?? (await read<number>({ kind: 'count' })),
-          }
-        );
+  let disposed = false;
+  let checkpoint: string | undefined;
+  let watchRevision = -1;
+  let watching = false;
+  let retry: ReturnType<typeof setTimeout> | undefined;
+  const observeHead = (response: SessionHistoryReadResponse, next: string) => {
+    if ((response.historyRevision ?? -1) < watchRevision) return;
+    watchRevision = response.historyRevision ?? watchRevision;
+    checkpoint = next;
+  };
+  const startWatch = () => {
+    if (disposed || !listeners.size || watching || retry || !checkpoint) return;
+    watching = true;
+    const from = checkpoint;
+    let delay = 0;
+    void (async () => {
+      const response = await readResponse({
+        kind: 'watchChanges',
+        checkpoint: from,
+        waitMs: 15_000,
+      });
+      if (disposed || !listeners.size) return;
+      const change = SessionHistoryChangesSchema.parse(response.result);
+      observeHead(response, change.checkpoint);
+      if (change.state === 'reset') {
+        notify({ kind: 'structure', from: 0, to: response.historyCount ?? 0 });
+      } else {
+        if (change.from !== undefined)
+          notify({ kind: 'structure', from: change.from, to: response.historyCount ?? 0 });
+        if (change.ids.length) notify({ kind: 'changed', ids: change.ids });
+      }
+    })()
+      .catch((error) => {
+        delay = 250;
+        if (!disposed && listeners.size) console.error('Owner history observation failed', error);
       })
-      .catch((error) => console.error('Owner history cursor refresh failed', error));
-  });
+      .finally(() => {
+        watching = false;
+        if (!disposed && listeners.size)
+          retry = setTimeout(() => {
+            retry = undefined;
+            startWatch();
+          }, delay);
+      });
+  };
   const history: SessionHistoryReader = {
     count: () => read<number>({ kind: 'count' }),
     readAt: (position) => read<SessionTurnRead>({ kind: 'readAt', position }),
@@ -126,12 +149,26 @@ export function createRoostRpcSessionServices(
     readTurnOutput: (userTurnId) => read({ kind: 'readTurnOutput', userTurnId }),
     observe(listener) {
       listeners.add(listener);
-      const initialPage = read<SessionHistoryDirectoryPage>({ kind: 'readLatestPage', limit: 40 });
+      const initialPage = readResponse({
+        kind: 'readLatestPage',
+        limit: 40,
+        withCheckpoint: true,
+      }).then((response) => {
+        const page = response.result as SessionHistoryDirectoryPage;
+        if (!page.checkpoint) throw new Error('Owner history checkpoint is unavailable');
+        observeHead(response, page.checkpoint);
+        startWatch();
+        return page;
+      });
       return {
         initial: initialPage.then((page) => page.rows),
         initialPage,
         unsubscribe: () => {
           listeners.delete(listener);
+          if (!listeners.size && retry) {
+            clearTimeout(retry);
+            retry = undefined;
+          }
         },
       };
     },
@@ -174,7 +211,8 @@ export function createRoostRpcSessionServices(
     },
     setPlan: unsupported,
     dispose: () => {
-      unsubscribe();
+      disposed = true;
+      if (retry) clearTimeout(retry);
       listeners.clear();
     },
   };

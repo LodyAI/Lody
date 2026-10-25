@@ -1,4 +1,8 @@
-import type { MemoryProviderRequest, MemoryProviderResponse } from '@lody/shared';
+import type {
+  MemoryProviderRequest,
+  MemoryProviderResponse,
+  ProjectProbeLocalMemberResult,
+} from '@lody/shared';
 import type { PendingSessionSends } from '../lib/session-pending-sends';
 import type { SessionSendResources } from '@/lib/session-send-resources';
 import type { LocalFilePreviewResource } from '@lody/shared/local-file-preview';
@@ -520,6 +524,13 @@ export type WorkspaceRuntime = {
     requestedByUserId: string,
     options?: { timeoutMs?: number }
   ) => Promise<LocalProjectGitStateRpcResponse | null>;
+  /** Read-only `.gitmodules` probe of one local project, for the Project group editor. */
+  requestProjectProbeLocalMember: (
+    machineId: MachineId,
+    localProjectId: LocalProjectId,
+    requestedByUserId: string,
+    options?: { timeoutMs?: number }
+  ) => Promise<ProjectProbeLocalMemberResult | null>;
   requestLocalProjectControl: (
     request: LocalProjectControlRequest,
     options?: { timeoutMs?: number }

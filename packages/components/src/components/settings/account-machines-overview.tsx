@@ -117,6 +117,9 @@ export function AccountMachinesOverview() {
 
 const styles = stylex.create({
   note: { display: 'flex', alignItems: 'center', justifyContent: 'center', gap: space[2] },
+  // Narrow rows stack their controls at the left edge, under the native back-swipe strip.
+  // Keep the whole Manage target at the trailing edge without changing the gesture zone.
+  manageAction: { display: 'flex', marginInlineStart: 'auto' },
   /** A glyph inside a box that sizes it — an icon Button's. */
   glyph: { width: '100%', height: '100%' },
 });
@@ -183,18 +186,20 @@ export function AccountMachinesOverviewView({
                 .filter(Boolean)
                 .join(' · ')}
             >
-              <Button
-                type="button"
-                variant="secondary"
-                size="small"
-                onClick={() => onManageMachine(item.id)}
-                aria-label={t('settings.account.machines.manageMachine', {
-                  name: item.name,
-                  defaultValue: 'Manage {{name}}',
-                })}
-              >
-                {t('settings.account.machines.manage', 'Manage')}
-              </Button>
+              <div {...stylex.props(styles.manageAction)}>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="small"
+                  onClick={() => onManageMachine(item.id)}
+                  aria-label={t('settings.account.machines.manageMachine', {
+                    name: item.name,
+                    defaultValue: 'Manage {{name}}',
+                  })}
+                >
+                  {t('settings.account.machines.manage', 'Manage')}
+                </Button>
+              </div>
             </CompactRow>
           ))
         )}

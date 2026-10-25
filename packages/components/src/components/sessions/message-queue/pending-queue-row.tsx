@@ -85,7 +85,7 @@ export function PendingQueueRow({
   return (
     <div
       className={cn(
-        'relative items-start gap-2 px-2 py-1.5',
+        'relative gap-2 px-2 py-1.5',
         stylex.props(queueSurface.row).className,
         divided && 'border-t border-border/30'
       )}

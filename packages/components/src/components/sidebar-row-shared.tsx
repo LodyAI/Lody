@@ -367,8 +367,6 @@ export function SidebarSessionTitleText({
  */
 /** A filter, not opacity: the mark keeps its full lightness, only its hue is muted. */
 const SIDEBAR_PR_ICON_COMPACT_CLASS = 'saturate-[0.55]';
-/** Sidebar PR marks read as one quiet glyph; only the CI verdict keeps a hue. */
-const SIDEBAR_PR_ICON_COMPACT_TONE_CLASS = 'text-sidebar-foreground-muted';
 
 export function SessionPrIcon({
   prStatus,
@@ -411,7 +409,7 @@ export function SessionPrIcon({
       <MaskedPrCiIcon
         BaseIcon={BaseIcon}
         VerdictIcon={VerdictIcon}
-        baseToneClassName={compact ? SIDEBAR_PR_ICON_COMPACT_TONE_CLASS : meta.iconColorClassName}
+        baseToneClassName={meta.iconColorClassName}
         verdict={verdict}
         className={cn(
           compact && SIDEBAR_PR_ICON_COMPACT_CLASS,
@@ -427,7 +425,7 @@ export function SessionPrIcon({
       className={cn(
         compact ? ['h-3 w-3', SIDEBAR_PR_ICON_COMPACT_CLASS] : 'h-3.5 w-3.5',
         'shrink-0',
-        compact ? SIDEBAR_PR_ICON_COMPACT_TONE_CLASS : meta.iconColorClassName,
+        meta.iconColorClassName,
         className
       )}
       strokeWidth={2.25}
@@ -562,6 +560,27 @@ export function SessionRowOpenedByMenuItems({
  * containment. The rule lives in `tailwind/index.css` (`sidebar-row-list`).
  */
 export const SIDEBAR_ROW_LIST_CLASS = 'flex flex-col gap-px sidebar-row-list';
+
+/**
+ * A project-like row's hover controls (⋯, new chat, drag handle): hidden until
+ * the row is hovered or its menu is open. Shared by local projects and
+ * Project groups so the two rows behave alike.
+ */
+export const SIDEBAR_HOVER_ACTION_CLASS = cn(
+  'inline-flex h-5 w-5 items-center justify-center rounded-sm',
+  'text-muted-foreground/70 transition-[opacity,background-color,color] duration-100',
+  'opacity-0 pointer-events-none',
+  'group-hover:opacity-100 group-hover:pointer-events-auto',
+  'group-data-[menu-open]:opacity-100 group-data-[menu-open]:pointer-events-auto',
+  'hover:text-foreground hover:bg-muted/30 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring/60'
+);
+
+/**
+ * The trigger itself stays pressed-looking while its menu is open, not just the
+ * row around it. Only the ⋯ opens a menu — the compose button beside it does not.
+ */
+export const SIDEBAR_MENU_TRIGGER_OPEN_CLASS =
+  'group-data-[menu-open]:bg-muted/30 group-data-[menu-open]:text-foreground';
 
 /**
  * Marks one flat-list row with opened-by tree depth. `gutter={false}` leaves

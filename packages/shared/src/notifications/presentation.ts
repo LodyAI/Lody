@@ -1,3 +1,4 @@
+import { resolveSessionPullRequests } from '../session-pull-requests';
 import { z } from 'zod';
 import { getSessionPullRequestLegacyFields, type SessionMeta } from '../schema';
 import { parseGitHubPrNumber } from '../github-url';
@@ -72,7 +73,7 @@ export function notificationProjectName(
 function notificationPullRequestNumber(
   meta: Pick<SessionMeta, 'pullRequests'>
 ): number | undefined {
-  const prs = meta.pullRequests ?? [];
+  const prs = resolveSessionPullRequests(meta);
   const active = prs.filter((pr) => pr.status === 'open' || pr.status === 'draft');
   let latest: (typeof prs)[number] | undefined;
   for (const pr of active.length ? active : prs) {

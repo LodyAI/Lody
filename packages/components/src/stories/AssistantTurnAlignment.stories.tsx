@@ -9,7 +9,7 @@
  */
 import type { Meta, StoryObj } from '@storybook/react';
 import { Provider, createStore, useAtomValue } from 'jotai';
-import { expect, waitFor } from 'storybook/test';
+import { expect, userEvent, waitFor } from 'storybook/test';
 import { useState, type ReactNode } from 'react';
 import {
   getSessionRoomId,
@@ -1502,8 +1502,42 @@ const dshItems: ChatStreamItem[] = [
   { type: 'message', sessionId, message: dshMessage, turnIndex: 0 },
 ];
 
-/** DSH prose stays visible after completion; command details start closed. */
+/** Completed DSH work folds together; expanded prose retains answer typography. */
 export const DeepSeekIndependentProse: Story = {
+  play: async ({ canvasElement }) => {
+    const workedButton = () =>
+      canvasElement.querySelector<HTMLButtonElement>('button[aria-expanded]')!;
+    await waitFor(async () => {
+      await expect(workedButton()).not.toBeNull();
+      await expect(canvasElement.textContent).toContain('检查完成。');
+      await expect(canvasElement.textContent).not.toContain('先检查输入边界，再执行测试。');
+      await expect(canvasElement.textContent).not.toContain('测试已经返回，继续核对结果。');
+    });
+    await userEvent.click(workedButton());
+    await waitFor(async () => {
+      const paragraphs = Array.from(canvasElement.querySelectorAll('p'));
+      const thought = paragraphs.find(
+        (node) => node.textContent === '先检查输入边界，再执行测试。'
+      );
+      const answer = paragraphs.find((node) => node.textContent === '检查完成。');
+      await expect(thought).toBeDefined();
+      await expect(answer).toBeDefined();
+      const thoughtStyle = getComputedStyle(thought!);
+      const answerStyle = getComputedStyle(answer!);
+      for (const property of ['font-family', 'font-size', 'font-weight', 'line-height', 'color']) {
+        await expect(thoughtStyle.getPropertyValue(property)).toBe(
+          answerStyle.getPropertyValue(property)
+        );
+      }
+      await expect(canvasElement.textContent).not.toContain('Synthetic command output');
+      await expect(canvasElement.textContent).toContain('测试已经返回，继续核对结果。');
+    });
+    await userEvent.click(workedButton());
+    await waitFor(async () => {
+      await expect(canvasElement.textContent).not.toContain('先检查输入边界，再执行测试。');
+      await expect(canvasElement.textContent).toContain('检查完成。');
+    });
+  },
   args: { sessionId, items: dshItems, renderMessageRow },
   render: () => (
     <Provider store={dshStore}>

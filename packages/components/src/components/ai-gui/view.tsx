@@ -1422,9 +1422,6 @@ export const buildChatVirtualRows = ({
         }
       }
       const shouldUseWorkedGroup =
-        // DSH keeps prose and tool summaries in chronological order after completion;
-        // each thought/tool group owns its disclosure instead of an outer work fold.
-        !showThoughts &&
         isTurnFinished &&
         (segment.workBlockKeys.size > 0 || segmentSubagentTasks.length > 0) &&
         hasVisibleFinalContent;
@@ -2867,9 +2864,7 @@ const SystemMessageRowView = ({
     return <CreatedSessionList cards={creationCards} onNavigateSession={onNavigateSession} />;
   }
   const systemItems = message.items.flatMap((item, itemIndex) =>
-    shouldRenderSystemRowItem(item) && hasVisibleOperationContent(item)
-      ? [{ item, itemIndex }]
-      : []
+    shouldRenderSystemRowItem(item) && hasVisibleOperationContent(item) ? [{ item, itemIndex }] : []
   );
 
   if (systemItems.length === 0) {
@@ -3024,8 +3019,7 @@ const OperationCompletionView = ({
   );
   // The status card carries only what the cards cannot: a whole-Operation
   // failure or cancellation, or targetless problems.
-  const showStatusCard =
-    failedCompletion || cancelledCompletion || untargetedProblems.length > 0;
+  const showStatusCard = failedCompletion || cancelledCompletion || untargetedProblems.length > 0;
 
   return (
     <div className="flex flex-col gap-2" data-operation-completion={completion.operationKind}>
@@ -5238,7 +5232,9 @@ const AssistantThoughtVirtualRow = memo(function AssistantThoughtVirtualRow({
   fontSize: ConversationFontSize;
 }) {
   const { t } = useTranslation();
-  /* The thought is prose on the rail, with no glyph: it is the agent's own
+  /* Only builtin DSH exposes these thought rows. Reuse answer typography,
+     preserving thought search identity and the separate disclosure label.
+     The thought is prose on the rail, with no glyph: it is the agent's own
      words, and an icon beside every paragraph of it read as a list of
      objects. The group header already says "Thought". */
   return (
@@ -5248,11 +5244,9 @@ const AssistantThoughtVirtualRow = memo(function AssistantThoughtVirtualRow({
           ? t('sessions.toolActivity.thinking', 'Thinking…')
           : t('sessions.toolActivity.thought', 'Thought')}
       </span>
-      <MarkdownRenderer
+      <MarkdownBlock
         text={text}
         size={fontSize}
-        compact
-        className={ACTIVITY_STEP_BODY_CLASS}
         isStreaming={isStreaming}
         searchBlockId={getThoughtSearchBlockId(messageId, itemIndex)}
       />

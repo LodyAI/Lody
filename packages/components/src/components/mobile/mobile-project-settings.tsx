@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { ChevronRight, Folder, FolderOpen, FolderPlus, Github } from 'lucide-react';
+import { ChevronRight, Folder, FolderOpen, FolderPlus, Folders, Github } from 'lucide-react';
 import { Spinner } from '@lody/ui/spinner';
 import type { MachineId } from '@lody/shared';
 import { Switch } from '@lody/ui/switch';
@@ -12,6 +12,7 @@ import { AgentIcon } from '@/components/icons/agent-icon';
 import {
   getHistoryProviderLabel,
   ProjectHistoryImportPanel,
+  type MultiRepoProjectRow,
   type ProjectRowProps,
   type ProjectSettingsRow,
   type ProjectSettingsViewProps,
@@ -58,6 +59,9 @@ export function MobileProjectSettings({
   onAddLocalProject,
   initialMachineId,
   initialProjectKey,
+  multiRepoProjects = [],
+  onCreateMultiRepoProject,
+  onOpenMultiRepoProject,
 }: ProjectSettingsViewProps) {
   const { t } = useTranslation();
   const onlineMachineIds = useOnlineMachineIds();
@@ -106,6 +110,40 @@ export function MobileProjectSettings({
         })),
     ];
   const useMachineHeadings = machineGroups.length > 1;
+  const groupMachineIds = new Set(machineGroups.map((group) => group.machineId));
+  const boundTo = (machineId: MachineId) =>
+    multiRepoProjects.filter((project) => project.boundMachineId === machineId);
+  // Projects that run anywhere, or whose machine this page does not list.
+  const anyMachineProjects = initialMachineId
+    ? []
+    : multiRepoProjects.filter(
+        (project) => !project.boundMachineId || !groupMachineIds.has(project.boundMachineId)
+      );
+  const multiRepoRow = (project: MultiRepoProjectRow, hasDivider: boolean) => (
+    <MobileSettingsRow
+      key={`multi:${project.id}`}
+      hasDivider={hasDivider}
+      label={
+        <span className="flex min-w-0 items-center gap-3">
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
+            <Folders className="h-[1.05rem] w-[1.05rem]" />
+          </span>
+          <span className="min-w-0">
+            <span className="block truncate text-[0.95rem] font-medium leading-tight text-foreground">
+              {project.name}
+            </span>
+            <span className="mt-0.5 block truncate text-[0.78rem] leading-tight text-muted-foreground">
+              {t('workspace.projects.repositoryCount', '{{count}} repositories or folders', {
+                count: project.memberCount,
+              })}
+            </span>
+          </span>
+        </span>
+      }
+      onClick={onOpenMultiRepoProject ? () => onOpenMultiRepoProject(project.id) : undefined}
+      trailing={<ChevronRight className="h-4 w-4" />}
+    />
+  );
   const fallbackTitle = t('workspace.projects.title', 'Projects');
   const addFolderLabel = t('workspace.projects.addFolder', 'Add folder');
 
@@ -186,8 +224,31 @@ export function MobileProjectSettings({
               trailing={<ChevronRight className="h-4 w-4" />}
             />
           ) : null}
+          {boundTo(group.machineId).map((project) => multiRepoRow(project, true))}
         </MobileSettingsSection>
       ))}
+      {anyMachineProjects.length > 0 || (onCreateMultiRepoProject && !initialMachineId) ? (
+        <MobileSettingsSection title={t('workspace.projects.anyMachineTitle', 'Any machine')}>
+          {anyMachineProjects.map((project, index) => multiRepoRow(project, index > 0))}
+          {onCreateMultiRepoProject ? (
+            <MobileSettingsRow
+              hasDivider={anyMachineProjects.length > 0}
+              label={
+                <span className="flex min-w-0 items-center gap-3">
+                  <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
+                    <Folders className="h-[1.05rem] w-[1.05rem]" />
+                  </span>
+                  <span className="truncate text-[0.95rem] font-medium leading-tight text-foreground">
+                    {t('workspace.projects.createMultiRepo', 'Several repositories or folders')}
+                  </span>
+                </span>
+              }
+              onClick={() => onCreateMultiRepoProject()}
+              trailing={<ChevronRight className="h-4 w-4" />}
+            />
+          ) : null}
+        </MobileSettingsSection>
+      ) : null}
       {visibleGithubSections.map((section) => (
         <MobileSettingsSection key={section.owner} title={`GitHub · ${section.owner}`}>
           {section.rows.map((row, rowIndex) => (

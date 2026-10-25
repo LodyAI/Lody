@@ -71,6 +71,14 @@ unmounted queries stop retries, and session/query identity fences callbacks and 
 Public queries, mutations/actions and local-only clients keep their existing behavior.
 See the [decision](../../../../.agents/notes/implemented/bug-fix/2026-10-10-cloud-query-server-recovery.md).
 
+Authentication recovery status is presented separately from query retries:
+`AuthenticatedConvexProvider` owns its budget and actions; `AuthRecoveryEntryProvider`
+places a nonmodal icon beside the existing sidebar workspace control through
+`AuthRecoveryEntrySlot`. No status row is added; composer and footer geometry stay
+unchanged. Details open on request and leave drafts and page focus intact. See the
+[UI decision](../../../../.agents/notes/implemented/feature/2026-10-25-nonblocking-auth-recovery.md)
+for placement and verification limits.
+
 ## Session lifecycle
 
 `use-session-actions.ts` reads archive, restore, and archived-root deletion targets

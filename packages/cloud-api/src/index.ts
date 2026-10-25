@@ -556,7 +556,10 @@ export type CloudApi = {
       ReferralCheckoutOffer
     >;
     /** Remember the referral link the signed-in person followed, across devices. */
-    attachLead: Mutation<{ code: string }, { status: 'attached' | 'kept' | 'self' | 'invalid' }>;
+    attachLead: Mutation<
+      { code: string; clickedAt?: number },
+      { status: 'attached' | 'kept' | 'self' | 'invalid' }
+    >;
     /** The person declined the referral discount. */
     dismissLead: Mutation<Record<string, never>, null>;
   };

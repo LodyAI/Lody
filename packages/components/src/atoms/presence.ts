@@ -14,7 +14,12 @@ export const lodyPresenceStatesAtom = atom<LodyPresenceStateMap>({});
 export const lodyPresenceNowMsAtom = atom(getServerNow());
 
 /**
- * Health of the workspace presence transport (the ephemeral Streams room).
+ * Display health of the workspace presence transport (the ephemeral Streams
+ * room). This is the raw transport state except that a brief in-place reconnect
+ * keeps the last synced state: the retained snapshot still describes every
+ * machine, and clearing the pill for the reconnect would read as a status
+ * change. Raw health (for recovery) lives in the runtime's room-sync registry.
+ *
  * Machine online/offline is only trustworthy while this is 'synced'; any other
  * state means we cannot distinguish "machine offline" from "we are not
  * receiving presence".

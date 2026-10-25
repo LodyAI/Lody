@@ -130,6 +130,7 @@ type WorkspaceRuntimeState = {
   unsubscribeTerminalCleanup: () => void;
   prPollerWorkspace: PrPollerWorkspaceHandle | null;
   schedules: ScheduleWorkspaceHandle;
+  localProjectReconciliation?: { stop: AbortController; done: Promise<void> };
   cleanupOwner?: ReturnType<typeof workspaceCleanupOwnerLegacy>;
   cleanupReceipt?: Promise<void>;
   cleanupFailure?: unknown;
@@ -909,17 +910,6 @@ export class LodyFleet {
 
         await lody.start();
 
-        await reconcileMachineLocalProjectRootPaths(
-          lody.documentManager.repo,
-          workspace.id as WorkspaceId,
-          this.machineId,
-          lody.documentManager
-        ).catch((error: unknown) => {
-          workspaceLogger.warn(
-            `Failed to reconcile local project paths: ${formatErrorMessage(error)}`
-          );
-        });
-
         if (!this.desiredWorkspaces.has(workspace.id) || this.stopped) {
           await lody.cleanup();
           return;
@@ -970,13 +960,14 @@ export class LodyFleet {
               hasSessionWork: (sessionId) => startedLody.hasAutomationSessionWork(sessionId),
             });
         stopSchedules = schedules.dispose;
-        this.runtimes.set(workspace.id, {
+        const runtime: WorkspaceRuntimeState = {
           workspace,
           lody: startedLody,
           unsubscribeTerminalCleanup,
           prPollerWorkspace,
           schedules,
-        });
+        };
+        this.runtimes.set(workspace.id, runtime);
         if (prPollerWorkspace) this.prStatusPoller.registerWorkspace(prPollerWorkspace);
         void this.remoteBridge?.attachRuntimeIfAllowed(workspace.id);
         this.logger.debug(`[fleet] Connected workspace: ${workspaceLabel} (${workspace.id})`);
@@ -987,6 +978,19 @@ export class LodyFleet {
         );
         this.runtimeStateReporter.clearIssue(`workspace_start_failed:${workspace.id}`);
         this.refreshRuntimeState();
+        // Observation is not a prerequisite for pollers, schedules or runtime readiness.
+        // Keep its lifetime with this runtime so shutdown never closes its document mid-write.
+        const stop = new AbortController();
+        const done = reconcileMachineLocalProjectRootPaths(
+          startedLody.documentManager.repo,
+          workspace.id as WorkspaceId,
+          this.machineId,
+          startedLody.documentManager,
+          stop.signal
+        ).catch((error: unknown) => {
+          workspaceLogger.warn(`Failed to reconcile local projects: ${formatErrorMessage(error)}`);
+        });
+        runtime.localProjectReconciliation = { stop, done };
       } catch (error) {
         if (lody) {
           const retained = lody;
@@ -1086,6 +1090,10 @@ export class LodyFleet {
     if (state.cleanupReceipt && !recover) return state.cleanupReceipt;
     this.cleanupOwners.set(state.workspace.id, state);
     state.cleanupOwner ??= workspaceCleanupOwnerLegacy([
+      async () => {
+        state.localProjectReconciliation?.stop.abort();
+        await state.localProjectReconciliation?.done;
+      },
       () => state.schedules.dispose(),
       async () => {
         await state.lody.cleanup();
@@ -1651,7 +1659,7 @@ export class LodyFleet {
         lastOpenedAtMs: nowMs,
       },
       nowMs,
-      { sync: runtime.lody.documentManager, reason: 'local-project-add' }
+      { sync: runtime.lody.documentManager, reason: 'local-project-add', refreshGitHubRemote: true }
     );
   }
 

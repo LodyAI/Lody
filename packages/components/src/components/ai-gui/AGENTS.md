@@ -50,8 +50,8 @@ Ownership: [README.md](README.md).
   steps. Execute calls are not cards. Disclosure labels lead, chevrons trail
   (desktop: hover-only, body type, no fill). Only builtin DSH shows thoughts:
   separate groups default thoughts open and tools closed; explicit toggles win.
-  DSH skips outer finished-work folding to preserve prose order and visibility.
-  Other providers hide thoughts. Footers show config, not author identity.
+  DSH prose uses answer typography and shared work folding. Other providers
+  hide thoughts. Footers show config, not author identity.
 - An expanded tool step is ONE `ToolDetailSheet` (`tool-call-detail.tsx`): composer
   fill + card shadow, no header restating the row, sections in content order. Only
   the command is highlighted, via the Shiki worker; output stays ANSI text. Drop

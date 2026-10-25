@@ -1,4 +1,5 @@
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { reconcileProjectMemberLink } from '@/session/worktree/project-member-access';
+import { mkdtemp, readFile, rm, writeFile, mkdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -107,6 +108,42 @@ describe('AgentClient session startup', () => {
       await rm(workdir, { recursive: true, force: true });
     }
   });
+
+  it.each([true, false])(
+    'negotiates directory access before starting the Provider (additional=%s)',
+    async (supported) => {
+      const base = await mkdtemp(join(tmpdir(), 'acp-extra-roots-'));
+      const main = join(base, 'main');
+      const docs = join(base, 'docs');
+      await mkdir(main);
+      await mkdir(docs);
+      connectionMocks.initialize.mockResolvedValue({
+        agentCapabilities: { sessionCapabilities: supported ? { additionalDirectories: {} } : {} },
+      });
+      connectionMocks.newSession.mockImplementation(async (request) => {
+        const directory = request.additionalDirectories?.[0] ?? join(request.cwd, 'docs');
+        await writeFile(join(directory, 'provider.txt'), 'updated');
+        return { sessionId: 'provider-session' };
+      });
+      const client = new AgentClient({
+        logger: createLogger(),
+        sessionId: 'extra-roots' as SessionId,
+        terminalManager: {} as never,
+        onUpdateMessage: vi.fn(),
+        onRequestPermission: vi.fn(),
+        resolveAdditionalDirectories: async (capability) => {
+          await reconcileProjectMemberLink(main, 'docs', docs, capability);
+          return capability ? [docs] : [];
+        },
+      });
+      try {
+        await client.startSession({} as never, main);
+        expect(await readFile(join(docs, 'provider.txt'), 'utf8')).toBe('updated');
+      } finally {
+        await rm(base, { recursive: true, force: true });
+      }
+    }
+  );
 
   it.each(['new', 'load', 'resume', 'fork'] as const)(
     'carries negotiated local project identity on %s while preserving the claimed worktree',

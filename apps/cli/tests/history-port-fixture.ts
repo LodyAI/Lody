@@ -1,5 +1,8 @@
 import { selectTurnOutput } from '../../../packages/shared/src/session-data/read';
-import { pickDirectoryScalars } from '../../../packages/shared/src/session-data/directory';
+import {
+  pickDirectoryScalars,
+  pickDirectoryInputConfig,
+} from '../../../packages/shared/src/session-data/directory';
 import { createHistoryWriter } from '@lody/shared';
 import type { LoroDoc } from 'loro-crdt';
 import { applyHistoryAction } from '../../../packages/shared/src/session-data/history-actions';
@@ -60,7 +63,7 @@ export function withHistoryPort<T extends object>(
       },
       count: () => read().length,
       readTurn: (id: string) => {
-        const turn = read().find((t) => t.id === id);
+        const turn = [...read()].reverse().find((t) => t.id === id);
         return turn ? { state: 'ready', turn } : { state: 'missing' };
       },
       readDirectory: (from: number, to: number) =>
@@ -70,7 +73,8 @@ export function withHistoryPort<T extends object>(
             position: from + i,
             turnId: t.id,
             state: 'ready',
-            scalars: { ...t, items: undefined },
+            scalars: pickDirectoryScalars(t),
+            inputConfig: pickDirectoryInputConfig(t.inputConfig),
           })),
       observe: () => ({ initial: Promise.resolve([]), unsubscribe: () => {} }),
       ...storage.sessionData?.history,

@@ -75,12 +75,12 @@ Replacement contract: [shared rules](../../../shared/AGENTS.md#session-history).
 - Repo storage, LoroDoc cursors and eager-sync high-water state share a per-renderer
   cache namespace. Independently persisted replicas must not share checkpoints.
   Meta/Flock cursors stay repo-owned; delete Meta progress via `repo.getReplicaCheckpointStore`.
-- E2EE must open locally before background sync; keep native-only keys, dedicated
-  bucket, Loro history and waiting-key leases, without plaintext side channels.
+- Open E2EE locally before background sync. Keep native-only keys, a dedicated
+  bucket, Loro history, waiting-key leases; no plaintext bypass.
   Epoch/rotation changes stop sends and retain edits with a key-update notice;
   M3 owns resumption. Reject missing protection/plaintext rooms. Forward rejected
-  tokens for exact cache eviction. Read [M2 boundaries](../../../../.agents/notes/proposed/architecture/2026-10-22-e2ee-m2-product-integration.md)
-  and the [transport contract](../../../../specs/workspace-streams-content.md) before changes.
+  tokens for exact eviction. See [M2 boundaries](../../../../.agents/notes/proposed/architecture/2026-10-22-e2ee-m2-product-integration.md)
+  and [transport contract](../../../../specs/workspace-streams-content.md).
 - Select transport per room, never merge. Use `getReadinessTransportForRoom`;
   hooks without the router use `src/lib/room-readiness.ts`. Keep rules aligned.
 - The local renderer identity comes atomically from the Electron local-platform snapshot
@@ -102,7 +102,7 @@ Replacement contract: [shared rules](../../../shared/AGENTS.md#session-history).
   unknown ownership remains pending.
 - Presence is merged by origin. For an origin represented by the local plane, the local
   snapshot is authoritative, including absence; do not resurrect cleared presence from a
-  lagging replica.
+  lagging replica. UI reads the transport's display sync state; raw state drives recovery.
 - Doc-metadata bootstrap and the live repo watch overlap by design: merge per field with
   live winning (`mergeBootstrapMetaCache`), never letting the snapshot undo an archive
   already applied live.

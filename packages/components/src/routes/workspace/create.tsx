@@ -1,5 +1,10 @@
 import { useReferralPolicyRefresh } from '@/hooks/use-referral-policy-refresh';
-import { clearReferral, readReferral, REFERRAL_ERROR_KEYS } from '@/lib/referral-attribution';
+import {
+  clearReferral,
+  readReferral,
+  attachStoredReferral,
+  REFERRAL_ERROR_KEYS,
+} from '@/lib/referral-attribution';
 import { ConvexError } from 'convex/values';
 import { createFileRoute, Navigate, useNavigate } from '@tanstack/react-router';
 import { useState, useEffect, useRef } from 'react';
@@ -220,6 +225,7 @@ function CreateWorkspaceAuthed({
   const hasExistingWorkspaces = Boolean(organizations && organizations.length > 0);
   const paidRequired = creationAvailability?.canCreateFree === false;
   const dismissLead = useCloudMutation(cloudOperations.referrals.dismissLead);
+  const attachLead = useCloudMutation(cloudOperations.referrals.attachLead);
   // Preview account leads from other devices even without a browser referral code.
   const [policyRefreshKey, refreshPolicy] = useState(0);
   const referralOffer = useCloudQuery(
@@ -440,6 +446,7 @@ function CreateWorkspaceAuthed({
         return;
       }
       if (paidRequired) {
+        await attachStoredReferral(attachLead);
         const isDesktop = isElectronRenderer();
         const billingUrl = `${window.location.origin}/${workspaceSlug}/settings/billing`;
         const result = await createPaidWorkspaceCheckout({

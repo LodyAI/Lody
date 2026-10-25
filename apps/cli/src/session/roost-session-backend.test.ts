@@ -179,6 +179,80 @@ describe('RoostSessionBackend', () => {
 });
 
 describe('Roost owner RPC reader', () => {
+  it('observes Native owner checkpoints without control updates and leaves writes available while waiting', async () => {
+    vi.useFakeTimers();
+    const doc = { sessionId: 'native-observed-session' } as SessionDocument;
+    const waiting = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<SessionHistoryReadResponse>();
+    const changes: unknown[] = [];
+    let writeCompleted = false;
+    const services = createRoostRpcSessionServices(doc, {
+      read: async (query) => {
+        if (query.kind === 'watchChanges') {
+          waiting.resolve();
+          return release.promise;
+        }
+        return {
+          type: 'session/history-read_response',
+          sessionId: doc.sessionId,
+          success: true,
+          historyRevision: 1,
+          historyCount: 0,
+          result: {
+            checkpoint: 'native-scope:1',
+            startPosition: 0,
+            totalCount: 0,
+            rows: [],
+            hasMoreOlder: false,
+            cursor: null,
+          },
+        };
+      },
+      write: async (operation) => {
+        writeCompleted = true;
+        return {
+          type: 'session/history-write_response',
+          sessionId: doc.sessionId,
+          operation,
+          success: true,
+          historyRevision: 2,
+          historyCount: 1,
+          historyChange: { kind: 'structure', from: 0, to: 1 },
+        };
+      },
+    });
+    const observation = services.sessionData.history.observe((change) => changes.push(change));
+    try {
+      await observation.initial;
+      await waiting.promise;
+      await services.sessionData.commands.appendTurn(entry as never);
+      expect(writeCompleted).toBe(true);
+      const notified = Promise.withResolvers<void>();
+      const second = services.sessionData.history.observe((change) => {
+        if (change.kind === 'changed') notified.resolve();
+      });
+      await second.initial;
+      release.resolve({
+        type: 'session/history-read_response',
+        sessionId: doc.sessionId,
+        success: true,
+        historyRevision: 3,
+        historyCount: 1,
+        result: { state: 'ready', checkpoint: 'native-scope:3', ids: ['owner-turn'] },
+      });
+      await notified.promise;
+      expect(changes).toContainEqual({ kind: 'changed', ids: ['owner-turn'] });
+      second.unsubscribe();
+      observation.unsubscribe();
+      await services.dispose?.();
+      await vi.runOnlyPendingTimersAsync();
+    } finally {
+      observation.unsubscribe();
+      await services.dispose?.();
+      vi.useRealTimers();
+    }
+  });
+
   it('clips open-ended directory reads and batches within the negotiated RPC limit', async () => {
     const doc = {
       sessionId: 'remote-session',

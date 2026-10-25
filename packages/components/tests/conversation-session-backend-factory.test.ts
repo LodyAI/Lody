@@ -679,7 +679,7 @@ describe('createConversationSession backend seam', () => {
   );
 
   it.each([false, true])(
-    'keeps initial history coherent while control advances: incremental=%s',
+    'keeps the committed initial snapshot coherent while an unrelated control value changes: incremental=%s',
     async (incremental) => {
       vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
       vi.stubGlobal('indexedDB', new IDBFactory());
@@ -731,7 +731,7 @@ describe('createConversationSession backend seam', () => {
       });
       void observation.initial.catch(() => {});
       try {
-        const expected = turn(incremental ? 5 : 7);
+        const expected = turn(5);
         const page = await observation.initialPage;
         expect(page?.rows).toEqual([createRoostDirectoryRow(0, expected)]);
         if (incremental) expect(page?.checkpoint).toBe('checkpoint-5');
@@ -841,16 +841,8 @@ it.each([
       1
     );
     const doc = new LoroDoc();
-    const cursor = doc.getMap('roostHistoryCursor');
-    const publish = (revision: number) => {
-      cursor.set('historyRevision', revision);
-      cursor.set('historyCount', entries.length);
-      cursor.set(
-        'historyChangeJson',
-        JSON.stringify({ kind: 'changed', ids: [entries.at(-1)!.id] })
-      );
-      doc.commit();
-    };
+    let wake = () => {};
+    const publish = (_revision: number) => wake();
     publish(1);
     let revision = 1;
     const reads: { kind: string; rows: number }[] = [];
@@ -861,6 +853,12 @@ it.each([
     const unexpectedPageRead = Promise.withResolvers<void>();
     const factory = createLocalRoostSessionDataFactory({
       incremental: true,
+      subscribeWake: (listener) => {
+        wake = listener;
+        return () => {
+          wake = () => {};
+        };
+      },
       workspaceId,
       machineId,
       sendControl: async (request) => {
@@ -1219,6 +1217,7 @@ it.each([1, 2, 3])(
     }));
     const data = createLocalRoostSessionDataFactory({
       incremental: true,
+      subscribeWake: h.subscribeWake,
       workspaceId: h.workspaceId,
       machineId: h.machineId,
       sendControl: async (request) => {
@@ -1466,7 +1465,7 @@ it.each(['valid', 'wrong-base', 'invalid-path', 'failed-repair'] as const)(
   }
 );
 
-it('advances coherent streaming replies even while newer control revisions keep arriving', async () => {
+it('advances coherent streaming replies even while newer owner wakes keep arriving', async () => {
   Object.assign(globalThis, { indexedDB: new IDBFactory(), IDBKeyRange });
   const sessionId = 'synthetic-continuous-stream' as SessionId;
   const workspaceId = 'synthetic-workspace' as WorkspaceId;
@@ -1514,7 +1513,14 @@ it('advances coherent streaming replies even while newer control revisions keep 
   }) as typeof setTimeout);
   const clearTimer = vi.spyOn(globalThis, 'clearTimeout').mockImplementation(() => {});
   const completions = new Map<number, () => void>();
+  let wake = () => {};
   const data = createLocalRoostSessionDataFactory({
+    subscribeWake: (listener) => {
+      wake = listener;
+      return () => {
+        wake = () => {};
+      };
+    },
     incremental: true,
     workspaceId,
     machineId,
@@ -1526,11 +1532,7 @@ it('advances coherent streaming replies even while newer control revisions keep 
       expect(request.query.includeBodiesFrom).toBe(0);
       expect(request.query).not.toHaveProperty('withPatches');
       revision += 2;
-      const cursor = doc.getMap('roostHistoryCursor');
-      cursor.set('historyRevision', revision);
-      cursor.set('historyCount', 1);
-      cursor.set('historyChangeJson', JSON.stringify({ kind: 'changed', ids: [entry.id] }));
-      doc.commit();
+      wake();
       return {
         ok: true,
         responses: [
@@ -1572,7 +1574,7 @@ it('advances coherent streaming replies even while newer control revisions keep 
         revision: expected,
         checkpoint: `checkpoint-${expected}`,
       });
-      expect(doc.getMap('roostHistoryCursor').get('historyRevision')).toBe(expected + 2);
+      expect(revision).toBe(expected + 2);
       expect(await data.history.readTurn(entry.id)).toMatchObject({
         state: 'ready',
         turn: { items: [{ type: 'text', text: `chunk-${expected}` }] },
@@ -1724,7 +1726,7 @@ it('adopts late owner capabilities and watches a quiet control document from the
       turn: { items: [{ type: 'text', text: 'after missed owner changes' }] },
     });
     expect(await cache.getHead()).toMatchObject({ revision: 3, checkpoint: 'checkpoint-3' });
-    expect(doc.toJSON().roostHistoryCursor).toEqual({});
+    expect(doc.toJSON().roostHistoryCursor).toBeUndefined();
   } finally {
     observation.unsubscribe();
     data.dispose?.();
@@ -1840,6 +1842,7 @@ it('uses complete bodies to repair an unbound window, then resumes patches from 
     incremental: true,
     patches: true,
     watch: true,
+    subscribeWake: h.subscribeWake,
     workspaceId: h.workspaceId,
     machineId: h.machineId,
     sendControl: async (request) => {
@@ -1904,76 +1907,79 @@ it('uses complete bodies to repair an unbound window, then resumes patches from 
   }
 });
 
-it('isolates persisted legacy heads and concurrent old-page writes from patch-capable caches', async () => {
-  Object.assign(globalThis, { indexedDB: new IDBFactory(), IDBKeyRange });
-  const scope = 'synthetic-old-tab';
-  const legacy = await new Promise<IDBDatabase>((resolve, reject) => {
-    const request = indexedDB.open('lody:roost-history-v1', 1);
-    request.onupgradeneeded = () => {
-      request.result.createObjectStore('heads');
-      const rows = request.result.createObjectStore('rows', {
-        keyPath: ['scope', 'slot', 'position'],
-      });
-      rows.createIndex('turn', ['scope', 'slot', 'turnId'], { unique: true });
-    };
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error);
-  });
-  const initial: SessionHistoryInput = {
-    id: 'tail',
-    role: 'assistant',
-    timestamp: 'synthetic',
-    items: [{ type: 'text', text: 'base' }],
-  };
-  const advanced: SessionHistoryInput = { ...initial, items: [{ type: 'text', text: 'baseA' }] };
-  const legacyWrite = (turn: SessionHistoryInput) =>
-    new Promise<void>((resolve, reject) => {
-      const tx = legacy.transaction(['heads', 'rows'], 'readwrite');
-      tx.oncomplete = () => resolve();
-      tx.onabort = () => reject(tx.error);
-      tx.objectStore('heads').put(
-        { revision: 2, count: 1, start: 0, slot: 0, checkpoint: 'checkpoint-1' },
-        [scope, 'head']
-      );
-      tx.objectStore('rows').put({
-        scope,
-        slot: 0,
-        position: 0,
-        turnId: turn.id,
-        turn,
-        row: createRoostDirectoryRow(0, turn as never),
-      });
+it.each(['v1', 'v2'])(
+  'isolates persisted %s heads and concurrent old-page writes from Native publication caches',
+  async (version) => {
+    Object.assign(globalThis, { indexedDB: new IDBFactory(), IDBKeyRange });
+    const scope = 'synthetic-old-tab';
+    const legacy = await new Promise<IDBDatabase>((resolve, reject) => {
+      const request = indexedDB.open(`lody:roost-history-${version}`, 1);
+      request.onupgradeneeded = () => {
+        request.result.createObjectStore('heads');
+        const rows = request.result.createObjectStore('rows', {
+          keyPath: ['scope', 'slot', 'position'],
+        });
+        rows.createIndex('turn', ['scope', 'slot', 'turnId'], { unique: true });
+      };
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
     });
-  const cache = createRoostHistoryCache(scope);
-  try {
-    await legacyWrite(advanced);
-    expect(await cache.getHead()).toBeUndefined();
-    await cache.acceptPage(
-      {
-        checkpoint: 'checkpoint-1',
-        startPosition: 0,
-        totalCount: 1,
-        rows: [createRoostDirectoryRow(0, initial as never)],
-        hasMoreOlder: false,
-        cursor: null,
-      },
-      [initial],
-      1
-    );
-    const prior = (await cache.getHead())!;
-    await legacyWrite({ ...initial, items: [{ type: 'text', text: 'baseAA' }] });
-    expect(
-      await cache.applyChanges(prior, 2, 1, 'checkpoint-2', undefined, [
-        { position: 0, turn: advanced },
-      ])
-    ).toBe(true);
-    expect((await cache.readRows(0, 1))?.[0]?.turn).toEqual(advanced);
-    expect(await cache.getHead()).toMatchObject({ revision: 2, checkpoint: 'checkpoint-2' });
-  } finally {
-    cache.dispose();
-    legacy.close();
+    const initial: SessionHistoryInput = {
+      id: 'tail',
+      role: 'assistant',
+      timestamp: 'synthetic',
+      items: [{ type: 'text', text: 'base' }],
+    };
+    const advanced: SessionHistoryInput = { ...initial, items: [{ type: 'text', text: 'baseA' }] };
+    const legacyWrite = (turn: SessionHistoryInput) =>
+      new Promise<void>((resolve, reject) => {
+        const tx = legacy.transaction(['heads', 'rows'], 'readwrite');
+        tx.oncomplete = () => resolve();
+        tx.onabort = () => reject(tx.error);
+        tx.objectStore('heads').put(
+          { revision: 2, count: 1, start: 0, slot: 0, checkpoint: 'checkpoint-1' },
+          [scope, 'head']
+        );
+        tx.objectStore('rows').put({
+          scope,
+          slot: 0,
+          position: 0,
+          turnId: turn.id,
+          turn,
+          row: createRoostDirectoryRow(0, turn as never),
+        });
+      });
+    const cache = createRoostHistoryCache(scope);
+    try {
+      await legacyWrite(advanced);
+      expect(await cache.getHead()).toBeUndefined();
+      await cache.acceptPage(
+        {
+          checkpoint: 'checkpoint-1',
+          startPosition: 0,
+          totalCount: 1,
+          rows: [createRoostDirectoryRow(0, initial as never)],
+          hasMoreOlder: false,
+          cursor: null,
+        },
+        [initial],
+        1
+      );
+      const prior = (await cache.getHead())!;
+      await legacyWrite({ ...initial, items: [{ type: 'text', text: 'baseAA' }] });
+      expect(
+        await cache.applyChanges(prior, 2, 1, 'checkpoint-2', undefined, [
+          { position: 0, turn: advanced },
+        ])
+      ).toBe(true);
+      expect((await cache.readRows(0, 1))?.[0]?.turn).toEqual(advanced);
+      expect(await cache.getHead()).toMatchObject({ revision: 2, checkpoint: 'checkpoint-2' });
+    } finally {
+      cache.dispose();
+      legacy.close();
+    }
   }
-});
+);
 
 it('rolls back incomplete cache repairs and removes a truncated suffix with its checkpoint', async () => {
   Object.assign(globalThis, { indexedDB: new IDBFactory(), IDBKeyRange });
@@ -2087,14 +2093,16 @@ async function cachedRecoveryFixture(name: string, count: number, first = 0) {
     1
   );
   const doc = new LoroDoc();
-  const publish = (revision: number, ids = [entries.at(-1)!.id]) => {
-    const cursor = doc.getMap('roostHistoryCursor');
-    cursor.set('historyRevision', revision);
-    cursor.set('historyCount', count);
-    cursor.set('historyChangeJson', JSON.stringify({ kind: 'changed', ids }));
-    doc.commit();
+  const wakes = new Set<() => void>();
+  const publish = (_revision: number, _ids?: string[]) => {
+    for (const wake of wakes) wake();
   };
-  publish(1);
+  const subscribeWake = (wake: () => void) => {
+    wakes.add(wake);
+    return () => {
+      wakes.delete(wake);
+    };
+  };
   const reply = (revision: number, result: unknown, pageTurns?: SessionHistoryInput[]) => ({
     ok: true as const,
     responses: [
@@ -2109,7 +2117,7 @@ async function cachedRecoveryFixture(name: string, count: number, first = 0) {
       },
     ],
   });
-  return { sessionId, workspaceId, machineId, entries, cache, doc, publish, reply };
+  return { sessionId, workspaceId, machineId, entries, cache, doc, publish, subscribeWake, reply };
 }
 
 it('keeps a local idle watch healthy through the desktop deadline and immediately receives the next reply', async () => {
@@ -2122,6 +2130,7 @@ it('keeps a local idle watch healthy through the desktop deadline and immediatel
   const data = createLocalRoostSessionDataFactory({
     incremental: true,
     watch: true,
+    subscribeWake: h.subscribeWake,
     workspaceId: h.workspaceId,
     machineId: h.machineId,
     sendControl: (request) => {
@@ -2209,6 +2218,7 @@ it('commits a bounded reset while the owner keeps writing, then catches up incre
   const data = createLocalRoostSessionDataFactory({
     incremental: true,
     patches: true,
+    subscribeWake: h.subscribeWake,
     workspaceId: h.workspaceId,
     machineId: h.machineId,
     sendControl: async (request) => {
@@ -2343,6 +2353,7 @@ it('notifies the actual view for a committed non-inline interval even when a new
     });
   const data = createLocalRoostSessionDataFactory({
     incremental: true,
+    subscribeWake: h.subscribeWake,
     workspaceId: h.workspaceId,
     machineId: h.machineId,
     sendControl: async (request) => {

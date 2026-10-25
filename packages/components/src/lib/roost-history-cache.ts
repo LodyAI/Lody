@@ -3,9 +3,9 @@ import type { SessionDirectoryRow, SessionHistoryDirectoryPage } from '@lody/sha
 import { createRoostDirectoryRow, type SessionEntry } from '@lody/shared/session-data';
 
 /** A durable, read-only projection of owner-accepted history; never an outbox. */
-// Older tabs can retain a checkpoint while replacing its bodies. Keep their
-// writes (and already persisted mismatched heads) out of the patch baseline.
-export const ROOST_HISTORY_CACHE_DB = 'lody:roost-history-v2';
+// A Native publication revision has a different authority from a retired Loro
+// cursor. Old tabs/rows must never overwrite or outrank its scoped checkpoint.
+export const ROOST_HISTORY_CACHE_DB = 'lody:roost-history-v3';
 const HEADS = 'heads';
 const ROWS = 'rows';
 

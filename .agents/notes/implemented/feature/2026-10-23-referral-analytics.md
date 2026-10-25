@@ -14,6 +14,8 @@ existing PostHog client. Platform telemetry gates every call; no referral URL or
 Browser events measure interactions, while hosted services remain authoritative for attribution,
 payments and credit accounting. Delivery is best-effort and does not establish financial truth.
 
+Attribution selection was partially superseded on 2026-10-24 by [last-click attribution](2026-10-24-referral-last-touch.md). The first-touch rule below records the earlier decision.
+
 ## Decision
 
 The existing `referral-attribution.ts` hint remains first-touch, valid for 30 days. A new

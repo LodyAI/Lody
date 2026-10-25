@@ -1,7 +1,14 @@
 import { z } from 'zod';
-import { decodeJson } from '@loro-dev/roost';
-import { toApplicationJson } from '@loro-dev/roost/lody-history';
-import { roostContentPatches } from './roost-content-patches';
+import {
+  roostContentPatches,
+  stageRoostContent,
+  contentPathKey,
+  type TextAppendHints,
+  type TextAppend,
+} from './roost-content-patches';
+import type { ContentOp } from '@loro-dev/roost-node';
+import { applicationJsonText } from '@loro-dev/roost/lody-history';
+import type { AgentHistoryMutationPath } from '@lody/shared';
 
 const index = z.number().int().min(0).max(Number.MAX_SAFE_INTEGER);
 const path = z.array(
@@ -33,12 +40,8 @@ const deltaSchema = z
     ),
   })
   .strict();
-type StatePath = z.infer<typeof path>;
 const object = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === 'object' && !Array.isArray(value);
-const json = (text: string): unknown =>
-  toApplicationJson(decodeJson(new TextEncoder().encode(text)));
-
 /** The immutable primary is the baseline, so unchanged body bytes never enter state. */
 export function createRoostMessageState(primary: unknown, primaryTurnId: string, next: unknown) {
   const patches = roostContentPatches(primary, next).map((op) => ({
@@ -56,6 +59,203 @@ export function createRoostMessageState(primary: unknown, primaryTurnId: string,
   });
 }
 
+/** Extend a compact state without rebuilding its immutable primary. Append
+ * composition is restricted to the last related operation; other edits replace
+ * only the authored top-level fields' baseline-relative deltas. */
+export function planRoostMessageState(
+  primary: unknown,
+  primaryTurnId: string,
+  previous: unknown,
+  before: unknown,
+  next: unknown,
+  appends?: TextAppendHints,
+  changes?: readonly AgentHistoryMutationPath[]
+): { content: ReturnType<typeof createRoostMessageState>; appends?: TextAppendHints } {
+  const old = deltaSchema.safeParse(previous);
+  if (!old.success || old.data.primaryTurnId !== primaryTurnId)
+    return { content: createRoostMessageState(primary, primaryTurnId, next) };
+  const edits = roostContentPatches(before, next, appends, changes);
+  const patches = old.data.patches.slice();
+  const hints = new Map<string, TextAppend>();
+  let composed = true;
+  for (const edit of edits) {
+    if (edit.kind !== 'appendText') {
+      composed = false;
+      break;
+    }
+    const target = edit.path
+      .slice(1)
+      .map((part) => ('key' in part ? part : { index: Number(part.index) }));
+    const related = (a: typeof target, b: typeof target) => {
+      const n = Math.min(a.length, b.length);
+      return a.slice(0, n).every((part, i) => JSON.stringify(part) === JSON.stringify(b[i]));
+    };
+    let found = -1;
+    for (let i = patches.length - 1; i >= 0; i--) {
+      const patch = patches[i];
+      if (patch && related(patch.path, target)) {
+        found = i;
+        break;
+      }
+    }
+    const prior = patches[found];
+    if (prior) {
+      if (prior.kind !== 'appendText' || JSON.stringify(prior.path) !== JSON.stringify(target)) {
+        composed = false;
+        break;
+      }
+      const value = prior.text + edit.text;
+      patches[found] = { ...prior, text: value };
+      hints.set(
+        contentPathKey([
+          { key: 'content' },
+          { key: 'patches' },
+          { index: BigInt(found) },
+          { key: 'text' },
+        ]),
+        { previous: prior.text, value, text: edit.text }
+      );
+    } else patches.push({ kind: 'appendText', path: target, text: edit.text });
+  }
+  if (composed) return { content: { ...old.data, patches }, appends: hints };
+  if (
+    changes?.length &&
+    changes.every((change) => change.path.length && typeof change.path[0] === 'string') &&
+    old.data.patches.every((op) => op.path[0] && 'key' in op.path[0])
+  ) {
+    const fields = new Set(changes.map((change) => change.path[0]));
+    const fresh = roostContentPatches(primary, next, undefined, changes).map((op) => ({
+      ...op,
+      path: op.path.slice(1).map((part) => ('key' in part ? part : { index: Number(part.index) })),
+      ...('index' in op ? { index: Number(op.index), delete: Number(op.delete) } : {}),
+    }));
+    return {
+      content: deltaSchema.parse({
+        ...old.data,
+        patches: [
+          ...old.data.patches.filter((op) => {
+            const first = op.path[0];
+            return !first || !('key' in first) || !fields.has(first.key);
+          }),
+          ...fresh,
+        ],
+      }),
+    };
+  }
+  return { content: createRoostMessageState(primary, primaryTurnId, next) };
+}
+
+/** Preserve one unchanged large patch node while changing its array position.
+ * The final patch order stays exact; this schedules storage edits, not semantic
+ * state operations. Ordinary appends retain the existing diff and hints. */
+export function roostMessageStatePatches(
+  previous: unknown,
+  next: unknown,
+  appends?: TextAppendHints
+): ContentOp[] {
+  const baseline = roostContentPatches(previous, next, appends);
+  const inPatches = (op: ContentOp) =>
+    op.path[1] && 'key' in op.path[1] && op.path[1].key === 'patches';
+  const hasLargePayload = (op: ContentOp) => {
+    // A genuine append already transmits only new bytes. Do not parse or
+    // inspect the full state to optimize that unchanged hot path.
+    if (op.kind === 'appendText') return false;
+    const payload =
+      'contentJson' in op
+        ? op.contentJson
+        : 'valuesJson' in op
+          ? op.valuesJson
+          : 'text' in op
+            ? op.text
+            : '';
+    return payload.length >= 1024;
+  };
+  if (
+    baseline.some((op) => op.path.length < 2) ||
+    !baseline.some((op) => inPatches(op) && hasLargePayload(op)) ||
+    !object(previous) ||
+    !object(next) ||
+    !Array.isArray(previous.patches) ||
+    !Array.isArray(next.patches) ||
+    previous.patches.length > 128 ||
+    next.patches.length > 128
+  )
+    return baseline;
+  const old = deltaSchema.safeParse(previous);
+  const updated = deltaSchema.safeParse(next);
+  if (!old.success || !updated.success || old.data.primaryTurnId !== updated.data.primaryTurnId)
+    return baseline;
+
+  type StatePatch = z.infer<typeof deltaSchema>['patches'][number];
+  const positions = (patches: readonly StatePatch[]) => {
+    const result = new Map<string, number | null>();
+    patches.forEach((patch, position) => {
+      if (patch.kind !== 'appendText') return;
+      const identity = JSON.stringify(patch.path);
+      result.set(identity, result.has(identity) ? null : position);
+    });
+    return result;
+  };
+  const before = positions(old.data.patches);
+  const after = positions(updated.data.patches);
+  const anchors: { oldPosition: number; newPosition: number; bytes: number }[] = [];
+  for (const [identity, oldPosition] of before) {
+    const newPosition = after.get(identity);
+    if (oldPosition == null || newPosition == null || oldPosition === newPosition) continue;
+    const oldPatch = old.data.patches[oldPosition];
+    const newPatch = updated.data.patches[newPosition];
+    if (
+      oldPatch?.kind !== 'appendText' ||
+      newPatch?.kind !== 'appendText' ||
+      oldPatch.text !== newPatch.text ||
+      oldPatch.text.length < 1024
+    )
+      continue;
+    const bytes = Buffer.byteLength(oldPatch.text);
+    if (bytes >= 4096) anchors.push({ oldPosition, newPosition, bytes });
+  }
+  if (!anchors.length) return baseline;
+
+  // Optional planning only: no writes or authoritative validation happen here.
+  // Any unsupported local representation keeps the original diff/error boundary.
+  try {
+    const size = (ops: readonly ContentOp[]) => Buffer.byteLength(applicationJsonText(ops));
+    const originalBytes = size(baseline);
+    let best = baseline;
+    let bestBytes = originalBytes;
+    const arrayPath: ContentOp['path'] = [{ key: 'content' }, { key: 'patches' }];
+    for (const anchor of anchors.sort((a, b) => b.bytes - a.bytes).slice(0, 4)) {
+      const candidate = baseline.filter((op) => !inPatches(op));
+      const splice = (at: number, remove: number, values: readonly StatePatch[]) => {
+        if (!remove && !values.length) return;
+        candidate.push({
+          kind: 'spliceArray',
+          path: arrayPath,
+          index: BigInt(at),
+          delete: BigInt(remove),
+          valuesJson: applicationJsonText(values),
+        });
+      };
+      // Leave the old anchor as the sole array element, then restore the exact
+      // next suffix/prefix around it. Its text never enters an inserted value.
+      splice(anchor.oldPosition + 1, old.data.patches.length - anchor.oldPosition - 1, []);
+      splice(0, anchor.oldPosition, []);
+      splice(1, 0, updated.data.patches.slice(anchor.newPosition + 1));
+      splice(0, 0, updated.data.patches.slice(0, anchor.newPosition));
+      const bytes = size(candidate);
+      if (bytes + 1024 >= bestBytes || bytes * 2 > originalBytes) continue;
+      const staged = stageRoostContent(previous, candidate);
+      if (staged === undefined || applicationJsonText(staged) !== applicationJsonText(next))
+        continue;
+      best = candidate;
+      bestBytes = bytes;
+    }
+    return best;
+  } catch {
+    return baseline;
+  }
+}
+
 /** Reconstruct application content without changing the signed primary. */
 export function projectRoostMessageState(
   primary: unknown,
@@ -66,76 +266,18 @@ export function projectRoostMessageState(
   if (object(stored) && typeof stored.id === 'string') return structuredClone(stored);
   const delta = deltaSchema.parse(stored);
   if (delta.primaryTurnId !== primaryTurnId) throw new Error('Roost state primary mismatch');
-  let result: unknown = structuredClone(primary);
-  const member = (parent: unknown, part: StatePath[number], existing: boolean): string | number => {
-    if ('index' in part) {
-      if (!Array.isArray(parent) || part.index >= parent.length)
-        throw new Error('Roost state array path is invalid');
-      return part.index;
-    }
-    if (!object(parent) || (existing && !Object.hasOwn(parent, part.key)))
-      throw new Error('Roost state object path is invalid');
-    return part.key;
-  };
-  const read = (parts: StatePath): unknown => {
-    let value = result;
-    for (const part of parts) {
-      const key = member(value, part, true);
-      value = Reflect.get(value as object, key);
-    }
-    return value;
-  };
-  const write = (parts: StatePath, value: unknown, remove = false) => {
-    const last = parts.at(-1);
-    if (!last) {
-      if (remove) throw new Error('Roost state cannot remove its root');
-      result = value;
-      return;
-    }
-    const parent = read(parts.slice(0, -1));
-    const key = member(parent, last, remove);
-    if (remove) {
-      if (Array.isArray(parent)) throw new Error('Roost state cannot remove an array index');
-      Reflect.deleteProperty(parent as object, key);
-    } else
-      Object.defineProperty(parent, key, {
-        value,
-        enumerable: true,
-        writable: true,
-        configurable: true,
-      });
-  };
-  for (const op of delta.patches) {
-    if (op.kind === 'set') write(op.path, json(op.contentJson));
-    else if (op.kind === 'remove') write(op.path, undefined, true);
-    else {
-      const value = read(op.path);
-      if (op.kind === 'spliceArray') {
-        const values = json(op.valuesJson);
-        if (
-          !Array.isArray(value) ||
-          !Array.isArray(values) ||
-          op.index > value.length ||
-          op.delete > value.length - op.index
-        )
-          throw new Error('Roost state array splice is invalid');
-        write(op.path, value.slice(0, op.index).concat(values, value.slice(op.index + op.delete)));
-      } else {
-        if (typeof value !== 'string') throw new Error('Roost state text path is invalid');
-        if (op.kind === 'appendText') write(op.path, value + op.text);
-        else {
-          const scalars = Array.from(value);
-          if (op.index > scalars.length || op.delete > scalars.length - op.index)
-            throw new Error('Roost state text splice is invalid');
-          write(
-            op.path,
-            scalars.slice(0, op.index).join('') +
-              op.text +
-              scalars.slice(op.index + op.delete).join('')
-          );
-        }
-      }
-    }
-  }
+  const ops: ContentOp[] = delta.patches.map(
+    (op) =>
+      ({
+        ...op,
+        path: [
+          { key: 'content' },
+          ...op.path.map((part) => ('key' in part ? part : { index: BigInt(part.index) })),
+        ],
+        ...('index' in op ? { index: BigInt(op.index), delete: BigInt(op.delete) } : {}),
+      }) as ContentOp
+  );
+  const result = stageRoostContent(primary, ops);
+  if (result === undefined) throw new Error('Roost state content operation is invalid');
   return result;
 }

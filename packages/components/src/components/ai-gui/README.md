@@ -4,10 +4,13 @@ Conversation rendering for a Session: the message stream, assistant turn folding
 the outline rail, and the markdown/terminal/file content surfaces.
 
 Builtin DeepSeek Harness separates thought disclosures from tool groups. Thoughts
-start open, tools closed, and explicit toggles remain respected. DSH skips the outer
-finished-work fold so intermediate prose stays visible in order after completion;
-duration moves to the existing footer. Both layout and virtual-row caches include
-provider visibility. Other providers retain their grouping and filtering. This is
+start open, tools closed, and explicit toggles remain respected. DSH thought prose
+uses the same Markdown typography and reading color as ordinary answers; tool
+labels and details retain their compact process styling. While streaming,
+intermediate prose stays visible in order. Once a final answer is complete, the shared finished-work disclosure collapses earlier prose and tools;
+expanding it restores their order and independent disclosure states. Interrupted
+turns without an answer remain visible. Duration follows the shared header/footer
+policy. Both layout and virtual-row caches include provider visibility. Other providers retain their grouping and filtering. This is
 presentation only: stored thought/text types and provider delivery remain unchanged.
 
 Binding rules live in [AGENTS.md](AGENTS.md); this file is the directory index and
@@ -365,10 +368,7 @@ owns native range retention, history leases, and incomplete-copy protection.
 `view.tsx` supplies stable row identities, `keepMounted`, folding snapshots, and
 follow suppression; `markdown-renderer.tsx` holds selected prose presentation.
 Session data and action controls continue updating. This is independent of
-`message-selection.tsx`, which selects messages for image sharing, and of
-`selection-quote.tsx`, which captures the same kind of range as a text snapshot
-and stages it into the composer draft; that capture is sticky on purpose, so a
-quote outlives the native range the moment a press on our own controls clears it.
+`message-selection.tsx`, which selects messages for image sharing.
 
 The [decision note](../../../../../.agents/notes/implemented/bug-fix/2026-09-20-conversation-text-selection.md)
 records lifecycle, alternatives, and platform verification limits.

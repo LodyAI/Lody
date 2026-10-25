@@ -36,7 +36,9 @@ async function switchTo(page: Page, selector: string) {
 
 async function finishTransition(page: Page) {
   await page.evaluate(async () => {
-    for (const animation of document.getAnimations()) animation.finish();
+    for (const animation of document.getAnimations()) {
+      if (animation.effect?.getTiming().iterations !== Infinity) animation.finish();
+    }
     await window.homeTransition.finished;
   });
 }

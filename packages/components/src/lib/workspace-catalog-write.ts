@@ -7,9 +7,11 @@ import {
   type AgentRole,
   type AgentRoleId,
   type McpServerId,
+  type ProjectId,
   type ProjectRef,
   type WorkspaceId,
   type WorkspaceMcpServerMeta,
+  type WorkspaceProject,
 } from '@lody/shared';
 import type { WorkspaceRuntime } from '@/atoms/runtime';
 
@@ -100,6 +102,16 @@ export const deleteWorkspaceAgentRole = (
   id: AgentRoleId
 ): Promise<void> => deleteRow(deps, workspaceFlockKeys.agentRole(id));
 
+/** Write a Project group — created or edited. Each content change bumps `revision`. */
+export const writeWorkspaceProject = (
+  deps: WorkspaceCatalogWriteDeps,
+  project: WorkspaceProject
+): Promise<void> => putRow(deps, workspaceFlockKeys.project(project.id), project);
+
+export const deleteWorkspaceProject = (
+  deps: WorkspaceCatalogWriteDeps,
+  id: ProjectId
+): Promise<void> => deleteRow(deps, workspaceFlockKeys.project(id));
 /**
  * Who may manage a project's defaults, resolved from live state by the caller
  * at the moment of the write — never from whether a switch was enabled.

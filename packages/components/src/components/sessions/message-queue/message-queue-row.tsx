@@ -93,7 +93,7 @@ export function MessageQueueRow(props: MessageQueueRowProps) {
       ref={sortable.setNodeRef}
       style={style}
       className={cn(
-        'group/row relative items-start gap-2 px-2 py-1.5',
+        'group/row relative gap-2 px-2 py-1.5',
         stylex.props(queueSurface.row).className,
         // Dividers go between rows only. (`divide-y` on the list also lined the
         // last row, because dnd-kit appends hidden nodes after it, and that
