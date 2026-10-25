@@ -89,6 +89,10 @@ describe('SessionProjectMembersChip', () => {
     expect(items[0]!.textContent).toContain('lody/export');
     expect(items[1]!.textContent).toContain('acme/proto');
     expect(items[1]!.textContent).toContain('api/proto');
+    // A repository without a PR keeps the slot empty instead of saying "No PR".
+    expect(items[0]!.textContent).not.toContain('No PR');
+    // Unpublished work is not a separate dot either.
+    expect(document.querySelector('[role="img"]')).toBeNull();
 
     const protoButton = Array.from(document.querySelectorAll<HTMLButtonElement>('button')).find(
       (button) => button.getAttribute('aria-label')?.startsWith('acme/proto')

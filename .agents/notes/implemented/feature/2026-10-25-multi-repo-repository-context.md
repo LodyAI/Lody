@@ -38,6 +38,9 @@ desktop app.
 - CI is the PR glyph's tone, not a second dot: the glyph shape keeps the PR
   status (open / draft / merged / closed), while green / red / amber reads the
   CI verdict. Unreported CI leaves the PR-status color.
+- Rows omit both the unpublished-work dot and the "No PR" label, keeping the
+  right edge quiet. The underlying dirty/unpushed values still gate the Info
+  Bar's conversation-scoped actions.
 - A Member used in place (`additional` / `link`) keeps the folder glyph and
   clears GitHub identity rather than pretending its mount path is a copyable
   host path.

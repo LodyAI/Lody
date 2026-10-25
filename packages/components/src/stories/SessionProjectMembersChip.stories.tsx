@@ -14,7 +14,7 @@ const rows: SessionProjectMemberRow[] = [
     hasChildren: false,
     repoFullName: 'acme/web',
     branch: 'lody/export-report',
-    dirty: true,
+    dirty: false,
     unpushed: false,
     pr: { url: 'https://github.com/acme/web/pull/412', number: 412, status: 'open', ciState: 'f' },
   },
@@ -42,7 +42,7 @@ const rows: SessionProjectMemberRow[] = [
     repoFullName: 'acme/proto',
     branch: 'lody/export-report-proto',
     dirty: false,
-    unpushed: true,
+    unpushed: false,
   },
   {
     id: 'docs' as ProjectMemberId,
@@ -52,7 +52,7 @@ const rows: SessionProjectMemberRow[] = [
     depth: 0,
     hasChildren: false,
     access: 'additional',
-    dirty: true,
+    dirty: false,
     unpushed: false,
   },
 ];
@@ -86,10 +86,10 @@ const meta = {
 export default meta;
 type Story = StoryObj<typeof meta>;
 
-/** Every state at once: dirty, unpushed, failing and passing CI, no PR yet. */
+/** Failing and passing CI, an in-place folder, and a repository without a PR. */
 export const Mixed: Story = {};
 
-/** Nothing pushed yet: every row says No PR, the summary counts zero. */
+/** Nothing pushed yet: rows without a PR stay quiet, the summary counts zero. */
 export const BeforeAnyPr: Story = {
   args: { rows: rows.map(({ pr: _pr, ...row }) => row) },
 };

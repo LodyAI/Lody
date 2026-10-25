@@ -226,10 +226,10 @@ Repositories chip through the bar's `projectMembers` slot. Like Relations it is 
 plain cluster action, never staged. Its popover lists every frozen Member in
 placement order (each root followed by its submodules, siblings in snapshot
 order), indented by depth, with the repository identity, directory, branch or
-in-place label, unpublished-work mark, and current PR. CI is the PR glyph's
-tone (green passing, red failing, amber running) while its shape keeps the PR
-status; there is no separate CI dot. Clicking a row selects that repository and
-closes the panel.
+in-place label, and current PR when one exists. A repository without a PR
+leaves the slot empty, and unpublished work gets no separate dot. CI is the PR
+glyph's tone (green passing, red failing, amber running) while its shape keeps
+the PR status. Clicking a row selects that repository and closes the panel.
 
 Selection is view state in `atoms/session-project-member-selection.ts`, keyed by
 the workspace-owner Session so a child tab and its root agree. The context stage,

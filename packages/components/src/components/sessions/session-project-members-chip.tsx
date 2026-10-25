@@ -2,7 +2,6 @@ import * as stylex from '@stylexjs/stylex';
 import { Folders, Folder, GitBranch, Github } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import type { ProjectMemberId, SessionPullRequestCiState } from '@lody/shared';
-import { Tooltip } from '@lody/ui/tooltip';
 import { colors } from '@lody/ui/tokens/colors.stylex';
 import { space, text } from '@lody/ui/tokens/scales.stylex';
 import type { SessionProjectMemberRow } from '@/lib/session-project-members';
@@ -86,13 +85,6 @@ const styles = stylex.create({
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap',
   },
-  state: {
-    width: '8px',
-    height: '8px',
-    flexShrink: 0,
-    borderRadius: '50%',
-    backgroundColor: colors.warning,
-  },
   prSlot: {
     display: 'inline-flex',
     alignItems: 'center',
@@ -115,7 +107,6 @@ const styles = stylex.create({
     ':hover': { textDecoration: 'underline' },
   },
   prIcon: { width: '12px', height: '12px', flexShrink: 0 },
-  noPr: { color: colors.tertiaryLabel },
   hint: {
     padding: `${space[1.5]} ${space[2]}`,
     borderTop: `1px solid ${colors.separator}`,
@@ -158,10 +149,10 @@ function getCiLabel(
  * The repositories of a multi-repository conversation, one click away.
  *
  * A plain cluster action like Related sessions: it never takes the stage.
- * Each row says where the repository sits, its branch, whether it holds work
- * that is not on the remote yet, and its current PR. Rows are indented by
- * placement depth; selecting one makes the context stage describe that
- * repository (its branch, path, diff and PR) instead of the first Member.
+ * Each row says where the repository sits, its branch, and its current PR
+ * (when there is one). Rows are indented by placement depth; selecting one
+ * makes the context stage describe that repository (its branch, path, diff
+ * and PR) instead of the first Member.
  */
 export function SessionProjectMembersChip({
   groupName,
@@ -247,11 +238,6 @@ function MemberRow({
   const { t } = useTranslation();
   const Glyph = row.isSubmodule ? GitBranch : row.kind === 'github' ? Github : Folder;
   const inPlace = row.access === 'additional' || row.access === 'link';
-  const pending = row.dirty
-    ? t('sessions.projectMembers.dirty', 'Uncommitted changes')
-    : row.unpushed
-      ? t('sessions.projectMembers.unpushed', 'Commits not pushed yet')
-      : null;
   const statusMeta = row.pr ? PR_STATUS_META[row.pr.status] : null;
   const ciTone = row.pr?.ciState ? CI_ICON_TONE[row.pr.ciState] : undefined;
   const ciLabel = getCiLabel(t, row.pr?.ciState);
@@ -260,7 +246,7 @@ function MemberRow({
     ? t('sessions.projectMembers.inPlace', 'Original directory · not isolated')
     : (row.branch ?? '');
   const showPath = Boolean(row.repoFullName && row.repoFullName !== row.path);
-  const label = [identity, row.path, location, pending].filter(Boolean).join(' · ');
+  const label = [identity, row.path, location].filter(Boolean).join(' · ');
   const content = (
     <>
       <span {...stylex.props(styles.identity, selected && styles.identitySelected)}>
@@ -309,16 +295,6 @@ function MemberRow({
       ) : (
         <span {...stylex.props(styles.select, styles.selectStatic)}>{content}</span>
       )}
-      {pending ? (
-        <Tooltip.Root>
-          <Tooltip.Trigger
-            render={<span role="img" aria-label={pending} {...stylex.props(styles.state)} />}
-          />
-          <Tooltip.Content side="top">{pending}</Tooltip.Content>
-        </Tooltip.Root>
-      ) : (
-        <span aria-hidden="true" />
-      )}
       <span {...stylex.props(styles.prSlot)}>
         {row.pr && statusMeta ? (
           <button
@@ -343,13 +319,7 @@ function MemberRow({
             />
             <span>#{row.pr.number}</span>
           </button>
-        ) : (
-          // A directory used in place never has one; saying "No PR" would
-          // suggest it could.
-          <span {...stylex.props(styles.noPr)}>
-            {inPlace ? '' : t('sessions.projectMembers.noPr', 'No PR')}
-          </span>
-        )}
+        ) : null}
       </span>
     </div>
   );

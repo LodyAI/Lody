@@ -32,6 +32,8 @@ Member 投影，且没有 GitHub remote 的本地目录不会借用其他 Member
 - CI 用 PR 图标的颜色表达，不再加第二个圆点：图标形状保留 PR 状态
   （open / draft / merged / closed），绿 / 红 / 黄分别表示 CI 通过 / 失败 /
   进行中。没有 CI 数据时保持 PR 状态色。
+- 行内不再显示未提交/未推送的圆点，也不再显示“无 PR”文字，右侧保持安静。
+  底层的 dirty/unpushed 仍用于 Info Bar 的整个对话级操作。
 - 原地使用的 Member（`additional` / `link`）保留文件夹图标并清空 GitHub 身份，
   不把挂载路径伪装成可复制的宿主机路径。
 - 否决方案：另做“全部 PR”视图。仓库面板已经列出每个 Member 及其当前 PR/CI，
