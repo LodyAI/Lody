@@ -7,7 +7,7 @@ import * as stylex from '@stylexjs/stylex';
 import { Badge } from '@lody/ui/badge';
 import { Spinner } from '@lody/ui/spinner';
 import { colors } from '@lody/ui/tokens/colors.stylex';
-import { corner, radius, space } from '@lody/ui/tokens/scales.stylex';
+import { corner, radius, space, text } from '@lody/ui/tokens/scales.stylex';
 import { usePostHog } from '@posthog/react';
 import { useAtomValue, useSetAtom } from 'jotai';
 import isEmail from 'validator/lib/isEmail';
@@ -2142,6 +2142,8 @@ const styles = stylex.create({
   methodLabel: {
     flexGrow: 1,
     minWidth: 0,
+    // Ellipsis clips vertically too; the button's 1em line box cuts off descenders.
+    lineHeight: text.subheadlineLeading,
     overflow: 'hidden',
     textOverflow: 'ellipsis',
     textAlign: 'start',
