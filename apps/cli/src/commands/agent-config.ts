@@ -1,10 +1,19 @@
 import { Command } from 'commander';
+import { createHash } from 'node:crypto';
+import { fileLocksLegacy } from '@/utils/file-lock';
+import {
+  assertMagpieImportMachine,
+  importMagpieProviders,
+  resolveMagpieImport,
+} from './magpie-import';
 import { discoveryListCommand, discoveryGetCommand } from './discovery';
 import { promises as fs } from 'node:fs';
 import { v4 as uuidV4 } from 'uuid';
 import { z } from 'zod';
 import {
   MachineAcpCapabilitiesRefreshResponseSchema,
+  getMachineFlockDocId,
+  getServerNow,
   isMachineDocRoomId,
   negotiatedAcpCapabilitiesRefreshForce,
   type AgentConfigCliType,
@@ -808,6 +817,98 @@ const agentConfigDeleteCommand = new Command('delete')
     });
   });
 
+const agentConfigImportMagpieCommand = new Command('import-magpie')
+  .description('Import Magpie providers on this machine without a desktop confirmation dialog')
+  .option('--workspace <selector>', 'Target workspace id, slug, or name')
+  .option('--gateway <url>', 'Local Magpie origin (default: http://127.0.0.1:3425)')
+  .option('--link <url>', 'Import a Magpie lody://provider/import link instead of a gateway')
+  .option(
+    '--targets <types>',
+    'Comma-separated claude,codex,pi,dsh,kimi,grok,bub (default: all offered)'
+  )
+  .option('--json', 'Print JSON output')
+  .option('--debug', 'Enable debug output')
+  .action(
+    async (
+      options: CommonCommandOptions & { gateway?: string; link?: string; targets?: string }
+    ) => {
+      await runOneShotCommand('agent-config', options, async () => {
+        const request = resolveMagpieImport(options);
+        const auth = getAuthContextOrThrow('agent-config');
+        const workspace = await resolveWorkspaceOrThrow(auth, options.workspace);
+        const workspaceId = workspace.id as WorkspaceId;
+        // Serialize this machine's CLI imports before opening their workspace replica.
+        const lock = `magpie-import-${createHash('sha256')
+          .update(JSON.stringify([workspaceId, auth.machineId]))
+          .digest('hex')}`;
+        await fileLocksLegacy.withLock(lock, async () => {
+          await withWorkspaceManager(auth, workspace, 'agent-config', async (manager) => {
+            const machine = (await listMachineMetasForWorkspace(manager)).find(
+              (m) => m.id === auth.machineId
+            );
+            if (!machine)
+              throw new Error(
+                'Current machine is not registered in this workspace. Run lody start first.'
+              );
+            assertMagpieImportMachine(machine, request);
+            const online = await manager.getOnlineMachineIds();
+            if (online && !online.has(machine.id))
+              throw new Error('Current machine is offline. Run lody start first.');
+            if (
+              !(await manager.syncMachineFlockDoc(machine.id, { reason: 'magpie-import:prewrite' }))
+            )
+              throw new Error(
+                'Cannot synchronize existing providers; no changes were written. Retry after checking connectivity.'
+              );
+            const handle = await manager.repo.openFlockDoc(
+              getMachineFlockDocId(workspaceId, machine.id)
+            );
+            const existing = await listMergedAgentConfigs(manager.repo, workspaceId, [machine.id]);
+            const providers = importMagpieProviders({
+              flock: handle.flock,
+              machine,
+              request,
+              existing,
+              newId: () => uuidV4() as AgentConfigId,
+              now: getServerNow(),
+            });
+            await manager.repo.flush();
+            manager.markMachineFlockDocDirty(machine.id, { reason: 'magpie-import' });
+            const priorSynced = await manager.syncMachineFlockDoc(machine.id, {
+              reason: 'magpie-import:publish',
+            });
+            // The first waiter may have joined a sync started before our flush.
+            const synced =
+              priorSynced &&
+              (await manager.syncMachineFlockDoc(machine.id, {
+                reason: 'magpie-import:confirm',
+              }));
+            if (options.json)
+              printJson({
+                ok: true,
+                workspaceId,
+                machineId: machine.id,
+                gatewayUrl: request.gatewayUrl,
+                providers,
+                synced,
+              });
+            else {
+              for (const provider of providers)
+                console.log(`${provider.target}: ${provider.status} (${provider.agentConfigId})`);
+              console.log(
+                'Configuration saved. Queued providers are prepared by the daemon; this does not verify model inference.'
+              );
+              if (!synced)
+                console.warn(
+                  'Saved locally, but workspace sync is unconfirmed. Retry this command to publish without duplicating providers.'
+                );
+            }
+          });
+        });
+      });
+    }
+  );
+
 export const agentConfigCommand = new Command('agent-config')
   .description('Manage agent configs')
   .addCommand(agentConfigListCommand)
@@ -815,5 +916,6 @@ export const agentConfigCommand = new Command('agent-config')
   .addCommand(agentConfigShowCommand)
   .addCommand(agentConfigRefreshCapabilitiesCommand)
   .addCommand(agentConfigCreateCommand)
+  .addCommand(agentConfigImportMagpieCommand)
   .addCommand(agentConfigUpdateCommand)
   .addCommand(agentConfigDeleteCommand);
