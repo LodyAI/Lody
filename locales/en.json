@@ -5458,6 +5458,7 @@
   "settings.projectGroups.memberErrors.machine_mismatch": "it is on a different machine from the project's other local folders",
   "settings.projectGroups.form.nonGitDetail": "{{detail}} · Not a Git repository, edited in place",
   "sessions.projectMembers.inPlace": "Original directory · not isolated",
+  "sessions.projectMembers.selectHint": "Select a repository to show its branch and pull request below.",
   "settings.projectGroups.picker.thisMachine": "This machine",
   "settings.projectGroups.picker.filter": "Show",
   "settings.projectGroups.picker.all": "All",

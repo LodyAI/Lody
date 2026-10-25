@@ -97,16 +97,29 @@ export const resolveWorkspaceOwnerSession = (
   workspaceSession?: SessionMeta | null
 ): SessionMeta | null => workspaceSession ?? session ?? null;
 
+/**
+ * The GitHub context of a conversation.
+ *
+ * `activeRepository` lets a multi-repository conversation describe the
+ * repository the user selected instead of the legacy first-Member projection:
+ * pass a repository name to describe it, `null` to describe a Member with no
+ * GitHub remote (no PR or GitHub action), and omit it for the legacy default.
+ */
 export const getSessionGitHubState = (
   session: SessionMeta | null | undefined,
-  workspaceSession?: SessionMeta | null
+  workspaceSession?: SessionMeta | null,
+  activeRepository?: string | null
 ): SessionGitHubState => {
   const sourceSession = resolveWorkspaceOwnerSession(session, workspaceSession);
-  const repoFullName =
+  const legacyRepoFullName =
     (resolveProjectGitHubRepo(sourceSession?.project) ?? sourceSession?.repoFullName)?.trim() ?? '';
+  const repoFullName =
+    activeRepository === undefined ? legacyRepoFullName : (activeRepository?.trim() ?? '');
   const latestPr =
-    sourceSession?.projectRun && repoFullName
-      ? getLatestPullRequestForRepository(sourceSession, repoFullName)
+    sourceSession?.projectRun || activeRepository !== undefined
+      ? repoFullName
+        ? getLatestPullRequestForRepository(sourceSession, repoFullName)
+        : null
       : getLatestPullRequest(sourceSession);
   const latestPrState = latestPr?.url
     ? (sourceSession?.pullRequestState?.[latestPr.url] ?? null)

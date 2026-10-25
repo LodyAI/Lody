@@ -1,7 +1,7 @@
 import * as stylex from '@stylexjs/stylex';
 import { Folders, Folder, GitBranch, Github } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import type { SessionPullRequestCiState } from '@lody/shared';
+import type { ProjectMemberId, SessionPullRequestCiState } from '@lody/shared';
 import { Tooltip } from '@lody/ui/tooltip';
 import { colors } from '@lody/ui/tokens/colors.stylex';
 import { space, text } from '@lody/ui/tokens/scales.stylex';
@@ -20,29 +20,68 @@ const styles = stylex.create({
   },
   title: { fontSize: text.footnoteSize, color: colors.label, fontWeight: 500 },
   subtitle: { fontSize: text.footnoteSize, color: colors.secondaryLabel },
-  list: { maxHeight: 320, overflowY: 'auto', padding: space[1], minWidth: 340 },
-  // Every row is one line: path, branch, then fixed slots for state and PR,
-  // so a repository changing state never changes the row's height or shape.
+  list: { maxHeight: 360, overflowY: 'auto', padding: space[1], minWidth: 340 },
+  // Two lines per repository: its GitHub identity (or local directory) and,
+  // underneath, where it sits plus its branch. Submodules are indented by their
+  // placement depth, so the panel shows the same forest the conversation has.
   row: {
-    display: 'grid',
-    gridTemplateColumns: '14px minmax(0, max-content) minmax(0, 1fr) 14px 64px',
+    display: 'flex',
     alignItems: 'center',
-    columnGap: space[2],
-    height: '28px',
-    paddingInline: space[1.5],
+    gap: space[2],
+    minHeight: '40px',
+    paddingBlock: space[1],
+    paddingInlineEnd: space[1.5],
     borderRadius: '6px',
+    backgroundColor: 'transparent',
     fontSize: text.footnoteSize,
+    ':hover': { backgroundColor: colors.hoverFill },
   },
-  glyph: { width: '14px', height: '14px', color: colors.tertiaryLabel },
-  path: {
+  rowSelected: { backgroundColor: colors.selectedFill },
+  glyph: { width: '14px', height: '14px', flexShrink: 0, color: colors.tertiaryLabel },
+  select: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'stretch',
+    gap: '1px',
+    flex: 1,
+    minWidth: 0,
+    borderWidth: 0,
+    padding: 0,
+    backgroundColor: 'transparent',
+    color: 'inherit',
+    font: 'inherit',
+    textAlign: 'left',
+    cursor: 'pointer',
+  },
+  selectStatic: { cursor: 'default' },
+  identity: {
     color: colors.label,
     fontFamily: 'var(--font-mono, ui-monospace, monospace)',
     overflow: 'hidden',
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap',
   },
-  branch: {
+  identitySelected: { fontWeight: 500 },
+  meta: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: space[1],
+    minWidth: 0,
     color: colors.secondaryLabel,
+    fontSize: text.captionSize,
+    lineHeight: text.captionLeading,
+  },
+  metaPath: {
+    minWidth: 0,
+    maxWidth: '60%',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontFamily: 'var(--font-mono, ui-monospace, monospace)',
+  },
+  metaDot: { flexShrink: 0, color: colors.tertiaryLabel },
+  branch: {
+    minWidth: 0,
     overflow: 'hidden',
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap',
@@ -50,9 +89,16 @@ const styles = stylex.create({
   state: {
     width: '8px',
     height: '8px',
-    marginInline: 'auto',
+    flexShrink: 0,
     borderRadius: '50%',
     backgroundColor: colors.warning,
+  },
+  prSlot: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    minWidth: '64px',
+    flexShrink: 0,
   },
   pr: {
     display: 'inline-flex',
@@ -69,11 +115,18 @@ const styles = stylex.create({
     ':hover': { textDecoration: 'underline' },
   },
   prIcon: { width: '12px', height: '12px', flexShrink: 0 },
-  noPr: { justifySelf: 'end', color: colors.tertiaryLabel },
+  noPr: { color: colors.tertiaryLabel },
   ci: { width: '6px', height: '6px', borderRadius: '50%', flexShrink: 0 },
   ciSuccess: { backgroundColor: colors.success },
   ciFailure: { backgroundColor: colors.destructive },
   ciPending: { backgroundColor: colors.tertiaryLabel },
+  hint: {
+    padding: `${space[1.5]} ${space[2]}`,
+    borderTop: `1px solid ${colors.separator}`,
+    color: colors.secondaryLabel,
+    fontSize: text.captionSize,
+    lineHeight: text.captionLeading,
+  },
 });
 
 const CI_STYLE: Partial<Record<SessionPullRequestCiState, keyof typeof styles>> = {
@@ -86,19 +139,26 @@ const CI_STYLE: Partial<Record<SessionPullRequestCiState, keyof typeof styles>> 
 /**
  * The repositories of a multi-repository conversation, one click away.
  *
- * A plain cluster action like Related sessions: it never takes the stage, and
- * the context stage keeps describing the first repository for its actions.
+ * A plain cluster action like Related sessions: it never takes the stage.
  * Each row says where the repository sits, its branch, whether it holds work
- * that is not on the remote yet, and its current PR.
+ * that is not on the remote yet, and its current PR. Rows are indented by
+ * placement depth; selecting one makes the context stage describe that
+ * repository (its branch, path, diff and PR) instead of the first Member.
  */
 export function SessionProjectMembersChip({
   groupName,
   rows,
+  selectedMemberId,
+  onSelectMember,
   onOpenPullRequest,
   defaultOpen,
 }: {
   groupName: string;
   rows: readonly SessionProjectMemberRow[];
+  /** The repository the context stage is describing. */
+  selectedMemberId?: ProjectMemberId | null;
+  /** Select a repository and close the panel; omitted means read-only. */
+  onSelectMember?: (memberId: ProjectMemberId) => void;
   onOpenPullRequest: (url: string) => void;
   /** Storybook/testing aid. */
   defaultOpen?: boolean;
@@ -112,7 +172,7 @@ export function SessionProjectMembersChip({
       label={label}
       value={String(rows.length)}
       defaultOpen={defaultOpen}
-      content={
+      content={(close) => (
         <div>
           <div {...stylex.props(styles.header)}>
             <span {...stylex.props(styles.title)}>{groupName}</span>
@@ -125,20 +185,45 @@ export function SessionProjectMembersChip({
           </div>
           <div {...stylex.props(styles.list)} role="list">
             {rows.map((row) => (
-              <MemberRow key={row.id} row={row} onOpenPullRequest={onOpenPullRequest} />
+              <MemberRow
+                key={row.id}
+                row={row}
+                selected={row.id === selectedMemberId}
+                onSelect={
+                  onSelectMember
+                    ? () => {
+                        onSelectMember(row.id);
+                        close();
+                      }
+                    : undefined
+                }
+                onOpenPullRequest={onOpenPullRequest}
+              />
             ))}
           </div>
+          {onSelectMember ? (
+            <div {...stylex.props(styles.hint)}>
+              {t(
+                'sessions.projectMembers.selectHint',
+                'Select a repository to show its branch and pull request below.'
+              )}
+            </div>
+          ) : null}
         </div>
-      }
+      )}
     />
   );
 }
 
 function MemberRow({
   row,
+  selected,
+  onSelect,
   onOpenPullRequest,
 }: {
   row: SessionProjectMemberRow;
+  selected: boolean;
+  onSelect?: () => void;
   onOpenPullRequest: (url: string) => void;
 }) {
   const { t } = useTranslation();
@@ -151,20 +236,59 @@ function MemberRow({
       : null;
   const statusMeta = row.pr ? PR_STATUS_META[row.pr.status] : null;
   const ciStyle = row.pr?.ciState ? CI_STYLE[row.pr.ciState] : undefined;
-  return (
-    <div role="listitem" {...stylex.props(styles.row)}>
-      <Glyph aria-hidden="true" {...stylex.props(styles.glyph)} />
-      <span {...stylex.props(styles.path)} title={row.repoFullName ?? row.path}>
-        {row.path}
+  const identity = row.repoFullName ?? row.path;
+  const location = inPlace
+    ? t('sessions.projectMembers.inPlace', 'Original directory · not isolated')
+    : (row.branch ?? '');
+  const showPath = Boolean(row.repoFullName && row.repoFullName !== row.path);
+  const label = [identity, row.path, location, pending].filter(Boolean).join(' · ');
+  const content = (
+    <>
+      <span {...stylex.props(styles.identity, selected && styles.identitySelected)}>
+        {identity}
       </span>
-      {inPlace ? (
-        <span {...stylex.props(styles.branch)}>
-          {t('sessions.projectMembers.inPlace', 'Original directory · not isolated')}
-        </span>
+      <span {...stylex.props(styles.meta)}>
+        {showPath ? (
+          <>
+            <span {...stylex.props(styles.metaPath)} title={row.path}>
+              {row.path}
+            </span>
+            {location ? (
+              <span aria-hidden="true" {...stylex.props(styles.metaDot)}>
+                ·
+              </span>
+            ) : null}
+          </>
+        ) : null}
+        {location ? (
+          <span {...stylex.props(styles.branch)} title={location}>
+            {location}
+          </span>
+        ) : null}
+      </span>
+    </>
+  );
+  return (
+    <div
+      role="listitem"
+      {...stylex.props(styles.row, selected && styles.rowSelected)}
+      // Depth is data, not a design token: four roots and a few nested
+      // submodules must each get their own indent without a fixed ladder.
+      style={{ paddingInlineStart: 4 + row.depth * 14 }}
+    >
+      <Glyph aria-hidden="true" {...stylex.props(styles.glyph)} />
+      {onSelect ? (
+        <button
+          type="button"
+          aria-label={label}
+          aria-current={selected ? 'true' : undefined}
+          onClick={onSelect}
+          {...stylex.props(styles.select)}
+        >
+          {content}
+        </button>
       ) : (
-        <span {...stylex.props(styles.branch)} title={row.branch}>
-          {row.branch ?? ''}
-        </span>
+        <span {...stylex.props(styles.select, styles.selectStatic)}>{content}</span>
       )}
       {pending ? (
         <Tooltip.Root>
@@ -176,31 +300,38 @@ function MemberRow({
       ) : (
         <span aria-hidden="true" />
       )}
-      {row.pr && statusMeta ? (
-        <button
-          type="button"
-          {...stylex.props(styles.pr)}
-          aria-label={t('sessions.projectMembers.openPr', 'Open pull request #{{number}}', {
-            number: row.pr.number,
-          })}
-          onClick={() => onOpenPullRequest(row.pr!.url)}
-        >
-          <statusMeta.icon
-            aria-hidden="true"
-            className={cn(stylex.props(styles.prIcon).className, statusMeta.iconColorClassName)}
-          />
-          <span>#{row.pr.number}</span>
-          {ciStyle ? (
-            <span aria-hidden="true" {...stylex.props(styles.ci, styles[ciStyle])} />
-          ) : null}
-        </button>
-      ) : (
-        // A directory used in place never has one; saying "No PR" would
-        // suggest it could.
-        <span {...stylex.props(styles.noPr)}>
-          {inPlace ? '' : t('sessions.projectMembers.noPr', 'No PR')}
-        </span>
-      )}
+      <span {...stylex.props(styles.prSlot)}>
+        {row.pr && statusMeta ? (
+          <button
+            type="button"
+            {...stylex.props(styles.pr)}
+            aria-label={t('sessions.projectMembers.openPr', 'Open pull request #{{number}}', {
+              number: row.pr.number,
+            })}
+            onClick={() => {
+              // Opening a PR from the panel also makes its repository the one
+              // the stage and PR tab describe.
+              onSelect?.();
+              onOpenPullRequest(row.pr!.url);
+            }}
+          >
+            <statusMeta.icon
+              aria-hidden="true"
+              className={cn(stylex.props(styles.prIcon).className, statusMeta.iconColorClassName)}
+            />
+            <span>#{row.pr.number}</span>
+            {ciStyle ? (
+              <span aria-hidden="true" {...stylex.props(styles.ci, styles[ciStyle])} />
+            ) : null}
+          </button>
+        ) : (
+          // A directory used in place never has one; saying "No PR" would
+          // suggest it could.
+          <span {...stylex.props(styles.noPr)}>
+            {inPlace ? '' : t('sessions.projectMembers.noPr', 'No PR')}
+          </span>
+        )}
+      </span>
     </div>
   );
 }

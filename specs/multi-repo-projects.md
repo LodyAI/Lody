@@ -198,8 +198,13 @@ read-only mode.
 - `pullRequests` still stores every PR by URL. "Current PR" changes from "the
   last item of the whole array" to "the last item per repository", so a
   conversation can have several current PRs at once, at most one per repository.
-- The Info Bar lists PRs and CI by repository. Create PR opens one PR for each
-  Member that has changes, and links the PRs to each other in their bodies.
+- The Info Bar's Repositories panel lists every Member, nested by placement, with
+  its branch and current PR/CI. Selecting a Member makes the context stage and PR
+  tab describe that Member's repository, branch, diff and PR; without a
+  selection, the first Member's projection remains the default. A Member with no
+  GitHub remote shows no repository or PR rather than another Member's.
+  Create PR opens one PR for each Member that has changes, and links the PRs to
+  each other in their bodies.
 - PR auto-archive fires only after all current PRs reach an enabled terminal
   state, not when one of them does.
 - Compatibility: `project`, `branchName` and `repoFullName` stay as a projection of

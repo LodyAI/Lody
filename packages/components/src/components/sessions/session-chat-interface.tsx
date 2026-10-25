@@ -230,6 +230,7 @@ import { Tooltip } from '@lody/ui/tooltip';
 import { useSessionDoc } from '@/hooks/use-session-doc';
 import { useSessionPendingConfig } from '@/hooks/use-session-pending-config';
 import { getSessionRunConfigDraftTargetKey } from '@/atoms/session-run-config-drafts';
+import { sessionProjectMemberSelectionAtomFamily } from '@/atoms/session-project-member-selection';
 import { useSessionActions } from '@/hooks/use-session-actions';
 import { useWorkspaceMembers, type WorkspaceMember } from '@/hooks/use-workspace-members';
 import { UserAvatar } from '@/components/user-avatar';
@@ -240,11 +241,15 @@ import { SessionInfoBar } from './session-info-bar';
 import { SessionPreviewPreload } from './session-preview-preload';
 import { CurrentSessionRelationsChip, useHasSessionRelations } from './session-relations-chip';
 import { SessionProjectMembersChip } from './session-project-members-chip';
-import { buildSessionProjectMemberRows } from '@/lib/session-project-members';
+import {
+  buildSessionProjectMemberRows,
+  resolveSessionProjectMemberRow,
+} from '@/lib/session-project-members';
 import {
   mapGitHubCheckRunToPrCiRun,
   type ContextChipAction,
   type PrCiRun,
+  type WorkspaceLocationKind,
 } from './session-info-chips';
 import {
   resolveSessionInfoBarGitHubActionIds,
@@ -2784,6 +2789,49 @@ export const SessionChatInterface = memo(
       return formatSessionDate(session.createdAt, localeObj) || session.id;
     }, [session, localeObj]);
 
+    // A Project group freezes its Member forest on the workspace-owner
+    // Session; a child tab reads the same snapshot. The selection is keyed by
+    // that owner so the tab and its root describe the same repository.
+    const projectMemberOwnerSession = workspaceSession ?? session;
+    const sessionProjectRun = projectMemberOwnerSession.projectRun;
+    const projectMemberRows = useMemo(
+      () =>
+        buildSessionProjectMemberRows({
+          projectRun: sessionProjectRun,
+          pullRequests: projectMemberOwnerSession.pullRequests,
+          pullRequestState: projectMemberOwnerSession.pullRequestState,
+        }),
+      [
+        projectMemberOwnerSession.pullRequestState,
+        projectMemberOwnerSession.pullRequests,
+        sessionProjectRun,
+      ]
+    );
+    const selectedProjectMemberId = useAtomValue(
+      sessionProjectMemberSelectionAtomFamily(projectMemberOwnerSession.id)
+    );
+    const setSelectedProjectMemberId = useSetAtom(
+      sessionProjectMemberSelectionAtomFamily(projectMemberOwnerSession.id)
+    );
+    const legacyRepoFullName =
+      resolveProjectGitHubRepo(projectMemberOwnerSession.project) ??
+      projectMemberOwnerSession.repoFullName;
+    const selectedProjectMemberRow = useMemo(
+      () =>
+        resolveSessionProjectMemberRow(
+          projectMemberRows,
+          selectedProjectMemberId,
+          legacyRepoFullName
+        ),
+      [legacyRepoFullName, projectMemberRows, selectedProjectMemberId]
+    );
+    // `undefined` keeps the single-repository projection; `null` says the
+    // selected Member has no GitHub remote, so it must not borrow the first
+    // Member's PR. An explicit repository describes that Member.
+    const activeProjectRepository = sessionProjectRun
+      ? (selectedProjectMemberRow?.repoFullName ?? null)
+      : undefined;
+
     const {
       sourceSessionId: prSessionId,
       repoFullName,
@@ -2795,8 +2843,8 @@ export const SessionChatInterface = memo(
       workspaceUnpushed,
       hasChanges,
     } = useMemo(
-      () => getSessionGitHubState(session, workspaceSession),
-      [session, workspaceSession]
+      () => getSessionGitHubState(session, workspaceSession, activeProjectRepository),
+      [activeProjectRepository, session, workspaceSession]
     );
     const hasHostedGitHub = usePlatformCapability('githubIntegration');
     const latestPrNumber = getPullRequestNumber(latestPr);
@@ -5442,18 +5490,6 @@ export const SessionChatInterface = memo(
       t,
     ]);
     const hasSessionRelations = useHasSessionRelations(session.id);
-    const sessionProjectRun = session.projectRun;
-    const sessionPullRequests = session.pullRequests;
-    const sessionPullRequestState = session.pullRequestState;
-    const projectMemberRows = useMemo(
-      () =>
-        buildSessionProjectMemberRows({
-          projectRun: sessionProjectRun,
-          pullRequests: sessionPullRequests,
-          pullRequestState: sessionPullRequestState,
-        }),
-      [sessionProjectRun, sessionPullRequests, sessionPullRequestState]
-    );
     const openedByConversationStart = useMemo(() => {
       const openedBy = openedByRelations?.openedBy;
       if (!openedBy) return undefined;
@@ -5475,6 +5511,69 @@ export const SessionChatInterface = memo(
       );
     }, [openedByRelations, t]);
 
+    // A Project group's GitHub actions stay conversation-scoped (Create PR
+    // publishes every changed Member), so their availability is the union of
+    // the Members, not whichever repository the stage currently describes.
+    const selectedMemberInPlace =
+      selectedProjectMemberRow?.access === 'additional' ||
+      selectedProjectMemberRow?.access === 'link';
+    const contextWorkspaceDirty = sessionProjectRun
+      ? workspaceDirty || projectMemberRows.some((row) => row.dirty)
+      : workspaceDirty;
+    const contextWorkspaceUnpushed = sessionProjectRun
+      ? workspaceUnpushed || projectMemberRows.some((row) => row.unpushed)
+      : workspaceUnpushed;
+    const contextHasChanges =
+      hasChanges ||
+      (sessionProjectRun
+        ? projectMemberRows.some(
+            (row) => row.dirty || (row.diff ? row.diff.add + row.diff.del > 0 : false)
+          )
+        : false);
+    const infoBarProjectName = sessionProjectRun
+      ? (selectedProjectMemberRow?.repoFullName ?? selectedProjectMemberRow?.path ?? null)
+      : repoFullName || resolvedLocalProjectMeta?.name || null;
+    const infoBarBranch = sessionProjectRun
+      ? (selectedProjectMemberRow?.branch ?? null)
+      : session.branchName?.trim() || null;
+    const infoBarWorkspaceLocation = useMemo<{
+      kind: WorkspaceLocationKind;
+      path?: string | null;
+    } | null>(() => {
+      if (sessionProjectRun && selectedProjectMemberRow) {
+        const base = sessionWorkspacePath?.replace(/[\\/]+$/, '');
+        return {
+          kind: selectedMemberInPlace
+            ? 'folder'
+            : selectedProjectMemberRow.repoFullName
+              ? 'github-worktree'
+              : 'worktree',
+          // A Member used in place lives outside the conversation's main
+          // directory; the snapshot does not carry its host path, so do not
+          // pretend the mount path is copyable.
+          path: selectedMemberInPlace || !base ? null : `${base}/${selectedProjectMemberRow.path}`,
+        };
+      }
+      if (session.isWorktree) {
+        return {
+          kind: repoFullName ? 'github-worktree' : 'worktree',
+          path: sessionWorkspacePath,
+        };
+      }
+      return resolvedLocalProjectMeta ? { kind: 'folder', path: sessionWorkspacePath } : null;
+    }, [
+      repoFullName,
+      resolvedLocalProjectMeta,
+      selectedMemberInPlace,
+      selectedProjectMemberRow,
+      session.isWorktree,
+      sessionProjectRun,
+      sessionWorkspacePath,
+    ]);
+    const infoBarDiffStat = sessionProjectRun
+      ? (selectedProjectMemberRow?.diff ?? null)
+      : changesDiffStat;
+
     const infoBarContextActions = useMemo<ContextChipAction[]>(() => {
       // The CI pill renders from live check runs, so the action gating must
       // honor them too: whenever the pill shows "CI failed", the Fix CI Errors
@@ -5485,9 +5584,9 @@ export const SessionChatInterface = memo(
         canShowGitHubActions,
         canMutatePr: hasHostedGitHub,
         hasExistingPr,
-        workspaceDirty,
-        workspaceUnpushed,
-        hasChanges,
+        workspaceDirty: contextWorkspaceDirty,
+        workspaceUnpushed: contextWorkspaceUnpushed,
+        hasChanges: contextHasChanges,
         isAgentBusy,
         prCiState: liveCiFailed ? 'f' : latestPrState?.s,
         prMergeState: latestPrState?.m,
@@ -5582,9 +5681,9 @@ export const SessionChatInterface = memo(
       isActivePrMerging,
       sessionDocReady,
       t,
-      workspaceDirty,
-      workspaceUnpushed,
-      hasChanges,
+      contextWorkspaceDirty,
+      contextWorkspaceUnpushed,
+      contextHasChanges,
     ]);
 
     // Bridge the "Resolve conflicts" action to the PR tab (a separate subtree).
@@ -7025,20 +7124,9 @@ export const SessionChatInterface = memo(
                       prCiRuns={infoBarPrCiRuns}
                       onOpenPrCiRun={handleOpenPrCiRun}
                       prCiState={latestPrState?.s}
-                      projectName={repoFullName || resolvedLocalProjectMeta?.name || null}
-                      branch={isMobile ? null : session.branchName?.trim() || null}
-                      workspaceLocation={
-                        session.isWorktree
-                          ? {
-                              // GitHub sessions are always worktrees, so surface the
-                              // GitHub identity rather than the redundant worktree mark.
-                              kind: repoFullName ? 'github-worktree' : 'worktree',
-                              path: sessionWorkspacePath,
-                            }
-                          : resolvedLocalProjectMeta
-                            ? { kind: 'folder', path: sessionWorkspacePath }
-                            : null
-                      }
+                      projectName={infoBarProjectName}
+                      branch={isMobile ? null : infoBarBranch}
+                      workspaceLocation={infoBarWorkspaceLocation}
                       pr={canShowGitHubActions ? effectiveLatestPr : null}
                       onOpenPr={prLinkHandler}
                       contextActions={infoBarContextActions}
@@ -7050,6 +7138,8 @@ export const SessionChatInterface = memo(
                           <SessionProjectMembersChip
                             groupName={sessionProjectRun.name}
                             rows={projectMemberRows}
+                            selectedMemberId={selectedProjectMemberRow?.id}
+                            onSelectMember={setSelectedProjectMemberId}
                             onOpenPullRequest={(url) => {
                               void openExternalUrl(url);
                             }}
@@ -7082,7 +7172,7 @@ export const SessionChatInterface = memo(
                             }
                           : undefined
                       }
-                      diffStat={changesDiffStat}
+                      diffStat={infoBarDiffStat}
                       // Desktop only: mobile already shows catch-up in its header.
                       syncStatus={
                         isMobile

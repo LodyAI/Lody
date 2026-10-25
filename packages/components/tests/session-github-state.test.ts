@@ -184,4 +184,41 @@ describe('multi-repository sessions', () => {
     });
     expect(getSessionGitHubState(session).latestPr).toBeNull();
   });
+
+  it("describes the selected member's repository and PR", () => {
+    const session = createSession({
+      project: { kind: 'github', repoFullName: 'acme/api', branch: 'main' },
+      repoFullName: 'acme/api',
+      projectRun: run,
+      pullRequests: [
+        { url: 'https://github.com/acme/api/pull/7', status: 'open' },
+        { url: 'https://github.com/acme/web/pull/9', status: 'draft' },
+      ],
+      pullRequestState: { 'https://github.com/acme/web/pull/9': { s: 'f', t: 1 } },
+    });
+
+    const state = getSessionGitHubState(session, undefined, 'acme/web');
+
+    expect(state.repoFullName).toBe('acme/web');
+    expect(state.latestPr?.url).toBe('https://github.com/acme/web/pull/9');
+    expect(state.latestPrState?.s).toBe('f');
+    expect(state.canShowGitHubActions).toBe(true);
+    expect(state.hasExistingPr).toBe(true);
+  });
+
+  it('does not borrow another member’s PR for a member with no GitHub remote', () => {
+    const session = createSession({
+      project: { kind: 'github', repoFullName: 'acme/api', branch: 'main' },
+      repoFullName: 'acme/api',
+      projectRun: run,
+      pullRequests: [{ url: 'https://github.com/acme/api/pull/7', status: 'open' }],
+    });
+
+    const state = getSessionGitHubState(session, undefined, null);
+
+    expect(state.repoFullName).toBe('');
+    expect(state.latestPr).toBeNull();
+    expect(state.canShowGitHubActions).toBe(false);
+    expect(state.hasExistingPr).toBe(false);
+  });
 });

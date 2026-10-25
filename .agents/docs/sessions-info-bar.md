@@ -219,6 +219,25 @@ machines act after metadata sync; this is not an instantaneous cross-machine sto
 The scope follows creation/containment edges, not every unrelated session that
 has exchanged a message. See the [decision](../notes/implemented/feature/2026-10-11-stop-conversation-tree.md).
 
+## Repositories panel and the active repository
+
+`session-project-members-chip.tsx` renders a multi-repository conversation's
+Repositories chip through the bar's `projectMembers` slot. Like Relations it is a
+plain cluster action, never staged. Its popover lists every frozen Member in
+placement order (each root followed by its submodules, siblings in snapshot
+order), indented by depth, with the repository identity, directory, branch or
+in-place label, unpublished-work mark, and current PR/CI. Clicking a row selects
+that repository and closes the panel.
+
+Selection is view state in `atoms/session-project-member-selection.ts`, keyed by
+the workspace-owner Session so a child tab and its root agree. The context stage,
+the PR tab, live PR details/actions, and the diff stat describe the selected
+Member. With no selection the legacy first-Member projection is used, preserving
+existing conversations. A Member with no GitHub remote explicitly clears the
+repository/PR/actions instead of borrowing another Member's PR. Create PR and
+Commit & Push remain conversation-scoped because their prompt publishes every
+changed Member.
+
 ## Type
 
 The bar is chrome, one tier below the conversation. `info-bar-type.ts` exports the

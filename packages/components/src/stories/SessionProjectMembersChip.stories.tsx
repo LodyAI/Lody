@@ -10,6 +10,8 @@ const rows: SessionProjectMemberRow[] = [
     path: 'web',
     kind: 'local',
     isSubmodule: false,
+    depth: 0,
+    hasChildren: false,
     repoFullName: 'acme/web',
     branch: 'lody/export-report',
     dirty: true,
@@ -21,6 +23,8 @@ const rows: SessionProjectMemberRow[] = [
     path: 'api',
     kind: 'github',
     isSubmodule: false,
+    depth: 0,
+    hasChildren: true,
     repoFullName: 'acme/api',
     branch: 'lody/export-report',
     dirty: false,
@@ -32,6 +36,9 @@ const rows: SessionProjectMemberRow[] = [
     path: 'api/proto',
     kind: 'github',
     isSubmodule: true,
+    parentId: 'api' as ProjectMemberId,
+    depth: 1,
+    hasChildren: false,
     repoFullName: 'acme/proto',
     branch: 'lody/export-report-proto',
     dirty: false,
@@ -42,6 +49,8 @@ const rows: SessionProjectMemberRow[] = [
     path: 'docs',
     kind: 'local',
     isSubmodule: false,
+    depth: 0,
+    hasChildren: false,
     access: 'additional',
     dirty: true,
     unpushed: false,
@@ -51,7 +60,13 @@ const rows: SessionProjectMemberRow[] = [
 const meta = {
   title: 'Sessions/SessionProjectMembersChip',
   component: SessionProjectMembersChip,
-  args: { groupName: 'Shop', rows, onOpenPullRequest: () => undefined, defaultOpen: true },
+  args: {
+    groupName: 'Shop',
+    rows,
+    onSelectMember: () => undefined,
+    onOpenPullRequest: () => undefined,
+    defaultOpen: true,
+  },
   // The popover takes the width of the info bar it opens from, so the story
   // renders the real bar rather than the chip alone.
   render: (args) => (
@@ -77,4 +92,9 @@ export const Mixed: Story = {};
 /** Nothing pushed yet: every row says No PR, the summary counts zero. */
 export const BeforeAnyPr: Story = {
   args: { rows: rows.map(({ pr: _pr, ...row }) => row) },
+};
+
+/** The selected repository is the one the context stage describes. */
+export const Selected: Story = {
+  args: { selectedMemberId: 'web' as ProjectMemberId },
 };

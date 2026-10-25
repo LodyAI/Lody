@@ -151,7 +151,10 @@ Daemon 在执行机器上为每个 Git Member 创建一个 worktree 和新分支
   `(仓库, 该 Member 的分支)` 为键。
 - `pullRequests` 仍按 URL 存储全部 PR。“当前 PR”的含义从“整个数组的最后一项”
   改为“每个仓库的最后一项”，因此一个对话可以同时有多个当前 PR，每个仓库至多一个。
-- Info Bar 按仓库列出 PR 和 CI。Create PR 为每个有改动的 Member 各创建一个 PR，
+- Info Bar 的仓库面板列出全部 Member，并按放置层级缩进，显示各自的分支与当前
+  PR/CI。选中某个 Member 后，context stage 与 PR 标签页描述该 Member 的仓库、分支、
+  diff 与 PR；未选择时仍默认使用第一个 Member 的投影。没有 GitHub remote 的 Member
+  不会借用其他 Member 的仓库或 PR。Create PR 为每个有改动的 Member 各创建一个 PR，
   各 PR 正文互相链接。
 - 只有当前 PR 全部进入已启用的终态时，才触发 PR 自动归档；其中一个进入终态不算。
 - 兼容性：`project`、`branchName`、`repoFullName` 保留为第一个 Member 的投影，供旧

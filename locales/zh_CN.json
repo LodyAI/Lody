@@ -5458,6 +5458,7 @@
   "settings.projectGroups.memberErrors.machine_mismatch": "它和项目里其他本地文件夹不在同一台机器上",
   "settings.projectGroups.form.nonGitDetail": "{{detail}} · 非 Git 目录，直接修改原目录",
   "sessions.projectMembers.inPlace": "原目录 · 不隔离",
+  "sessions.projectMembers.selectHint": "选择仓库，在下方查看它的分支与 PR。",
   "settings.projectGroups.picker.thisMachine": "本机",
   "settings.projectGroups.picker.filter": "显示",
   "settings.projectGroups.picker.all": "全部",

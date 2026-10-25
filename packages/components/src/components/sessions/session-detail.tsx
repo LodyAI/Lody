@@ -140,6 +140,7 @@ import {
   sessionMetaCacheSettledAtomFamily,
 } from '@/atoms/doc-meta';
 import { sessionLiveStatusAtomFamily } from '@/atoms/presence';
+import { sessionProjectMemberSelectionAtomFamily } from '@/atoms/session-project-member-selection';
 import { SessionTabBar, type ViewerTabItem } from './session-tab-bar';
 import {
   getSideChatLauncherState,
@@ -245,6 +246,10 @@ import {
   getPullRequestRepoFullName,
   getSessionGitHubState,
 } from '@/lib/session-github-state';
+import {
+  buildSessionProjectMemberRows,
+  resolveSessionProjectMemberRow,
+} from '@/lib/session-project-members';
 import {
   resolveMachineDotlodyPath,
   resolveSessionWorkspacePath,
@@ -2092,14 +2097,37 @@ const SessionDetail = ({
     return 'idle';
   }, [activeSession, activeSessionLiveStatus]);
   useTabStatus(tabStatus);
+  // The Repositories panel in the conversation selects a Member; the PR tab,
+  // URL target and header must describe that same repository.
+  const projectMemberOwnerSession = workspaceOwnerSession ?? activeTabSession;
+  const selectedProjectMemberId = useAtomValue(
+    sessionProjectMemberSelectionAtomFamily(projectMemberOwnerSession?.id ?? ('' as SessionId))
+  );
+  const activeProjectRepository = useMemo<string | null | undefined>(() => {
+    if (!projectMemberOwnerSession?.projectRun) return undefined;
+    const rows = buildSessionProjectMemberRows({
+      projectRun: projectMemberOwnerSession.projectRun,
+      pullRequests: projectMemberOwnerSession.pullRequests,
+      pullRequestState: projectMemberOwnerSession.pullRequestState,
+    });
+    const legacyRepoFullName =
+      resolveProjectGitHubRepo(projectMemberOwnerSession.project) ??
+      projectMemberOwnerSession.repoFullName;
+    const selected = resolveSessionProjectMemberRow(
+      rows,
+      selectedProjectMemberId,
+      legacyRepoFullName
+    );
+    return selected?.repoFullName ?? null;
+  }, [projectMemberOwnerSession, selectedProjectMemberId]);
   const {
     sourceSessionId: prSessionId,
     latestPr,
     repoFullName,
     canShowGitHubActions,
   } = useMemo(
-    () => getSessionGitHubState(activeTabSession, workspaceOwnerSession),
-    [activeTabSession, workspaceOwnerSession]
+    () => getSessionGitHubState(activeTabSession, workspaceOwnerSession, activeProjectRepository),
+    [activeProjectRepository, activeTabSession, workspaceOwnerSession]
   );
   const latestPrNumber = getPullRequestNumber(latestPr);
   const latestPrRepoFullName = getPullRequestRepoFullName(latestPr) ?? repoFullName;
@@ -4047,7 +4075,12 @@ const SessionDetail = ({
           ...(options.endLine === undefined ? {} : { endLine: options.endLine }),
         });
         let openingPath = target.filePath;
-        if (target.resolveMarkdownLink && runtime && activeSessionMachineId && activeBrowserSession) {
+        if (
+          target.resolveMarkdownLink &&
+          runtime &&
+          activeSessionMachineId &&
+          activeBrowserSession
+        ) {
           const link = await runtime.requestFilePreview(
             activeSessionMachineId,
             {
