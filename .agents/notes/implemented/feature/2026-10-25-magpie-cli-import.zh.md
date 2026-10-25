@@ -2,6 +2,7 @@
 
 Status: implemented
 Translation: current
+PR: [#1866](https://github.com/LodyAI/Lody/pull/1866)
 
 [English](2026-10-25-magpie-cli-import.md)
 
