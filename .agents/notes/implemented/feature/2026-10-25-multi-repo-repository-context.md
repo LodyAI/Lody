@@ -22,9 +22,9 @@ desktop app.
 ## Decision
 
 - `buildSessionProjectMemberRows` emits rows in pre-order: roots in snapshot
-  order, each followed by its submodules, with `depth`, `parentId` and
-  `hasChildren`. The panel indents by depth instead of inventing a second tree
-  model; the frozen snapshot remains the source of truth.
+  order, each followed by its submodules, with only the rendered fields and a
+  `depth`. The panel indents by depth instead of inventing a second tree model;
+  the frozen snapshot remains the source of truth.
 - `sessionProjectMemberSelectionAtomFamily` holds the selected Member id, keyed
   by the workspace-owner Session so a child tab and its root describe the same
   repository. It is not persisted, like the Info Bar's staged item.
@@ -35,6 +35,12 @@ desktop app.
 - The PR tab, `useGitHubPrDetails`, Fix CI Errors, Resolve Conflicts, Ready for
   review and Merge follow the selected PR. Create PR and Commit & Push stay
   conversation-scoped because their prompt publishes every changed Member.
+- Action gating reads the session-level `workspaceDirty` / `workspaceUnpushed`
+  that `projectRunMetaPatch` already aggregates across every Member, so rows no
+  longer carry dirty/unpushed. The committed-diff fallback moved into
+  `getSessionGitHubState`: `diffStats` is written only when every Member reports
+  a diff, and a non-Git Member never does. The ablation kept that branch,
+  removed the two duplicate ORs, and covered the mixed-group case.
 - CI is the PR glyph's tone, not a second dot: the glyph shape keeps the PR
   status (open / draft / merged / closed), while green / red / amber reads the
   CI verdict. Unreported CI leaves the PR-status color.

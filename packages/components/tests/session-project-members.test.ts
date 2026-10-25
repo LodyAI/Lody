@@ -17,7 +17,6 @@ const projectRun = {
       path: 'api/proto',
       base: 'gitlink',
       branch: 'lody/export-proto',
-      unpushed: true,
     },
     web: {
       o: 0,
@@ -26,7 +25,6 @@ const projectRun = {
       path: 'web',
       base: 'HEAD',
       branch: 'lody/export',
-      dirty: true,
       repoFullName: 'acme/web',
     },
     api: {
@@ -54,11 +52,10 @@ describe('buildSessionProjectMemberRows', () => {
     expect(rows[0]).toMatchObject({
       kind: 'local',
       repoFullName: 'acme/web',
-      dirty: true,
       pr: { number: 4, status: 'open', ciState: 'f' },
     });
     expect(rows[1]!.pr).toBeUndefined();
-    expect(rows[2]).toMatchObject({ isSubmodule: true, unpushed: true, pr: { number: 5 } });
+    expect(rows[2]).toMatchObject({ isSubmodule: true, pr: { number: 5 } });
   });
 
   it('nests submodules under their parent when the snapshot lists the child first', () => {
@@ -94,8 +91,6 @@ describe('buildSessionProjectMemberRows', () => {
 
     expect(rows.map((row) => row.path)).toEqual(['api', 'api/proto', 'web']);
     expect(rows.map((row) => row.depth)).toEqual([0, 1, 0]);
-    expect(rows.map((row) => row.parentId)).toEqual([undefined, 'api', undefined]);
-    expect(rows.map((row) => row.hasChildren)).toEqual([true, false, false]);
   });
 
   it('resolves the explicit selection, then the legacy repository, then the first row', () => {

@@ -5512,26 +5512,14 @@ export const SessionChatInterface = memo(
     }, [openedByRelations, t]);
 
     // A Project group's GitHub actions stay conversation-scoped (Create PR
-    // publishes every changed Member), so their availability is the union of
-    // the Members, not whichever repository the stage currently describes.
+    // publishes every changed Member). `getSessionGitHubState` already reads
+    // the workspace-owner fields that `projectRunMetaPatch` aggregates across
+    // every Member, including its committed-diff fallback for mixed groups.
     const selectedMemberInPlace =
       selectedProjectMemberRow?.access === 'additional' ||
       selectedProjectMemberRow?.access === 'link';
-    const contextWorkspaceDirty = sessionProjectRun
-      ? workspaceDirty || projectMemberRows.some((row) => row.dirty)
-      : workspaceDirty;
-    const contextWorkspaceUnpushed = sessionProjectRun
-      ? workspaceUnpushed || projectMemberRows.some((row) => row.unpushed)
-      : workspaceUnpushed;
-    const contextHasChanges =
-      hasChanges ||
-      (sessionProjectRun
-        ? projectMemberRows.some(
-            (row) => row.dirty || (row.diff ? row.diff.add + row.diff.del > 0 : false)
-          )
-        : false);
     const infoBarProjectName = sessionProjectRun
-      ? (selectedProjectMemberRow?.repoFullName ?? selectedProjectMemberRow?.path ?? null)
+      ? repoFullName || selectedProjectMemberRow?.path || null
       : repoFullName || resolvedLocalProjectMeta?.name || null;
     const infoBarBranch = sessionProjectRun
       ? (selectedProjectMemberRow?.branch ?? null)
@@ -5543,11 +5531,7 @@ export const SessionChatInterface = memo(
       if (sessionProjectRun && selectedProjectMemberRow) {
         const base = sessionWorkspacePath?.replace(/[\\/]+$/, '');
         return {
-          kind: selectedMemberInPlace
-            ? 'folder'
-            : selectedProjectMemberRow.repoFullName
-              ? 'github-worktree'
-              : 'worktree',
+          kind: selectedMemberInPlace ? 'folder' : repoFullName ? 'github-worktree' : 'worktree',
           // A Member used in place lives outside the conversation's main
           // directory; the snapshot does not carry its host path, so do not
           // pretend the mount path is copyable.
@@ -5584,9 +5568,9 @@ export const SessionChatInterface = memo(
         canShowGitHubActions,
         canMutatePr: hasHostedGitHub,
         hasExistingPr,
-        workspaceDirty: contextWorkspaceDirty,
-        workspaceUnpushed: contextWorkspaceUnpushed,
-        hasChanges: contextHasChanges,
+        workspaceDirty,
+        workspaceUnpushed,
+        hasChanges,
         isAgentBusy,
         prCiState: liveCiFailed ? 'f' : latestPrState?.s,
         prMergeState: latestPrState?.m,
@@ -5681,9 +5665,9 @@ export const SessionChatInterface = memo(
       isActivePrMerging,
       sessionDocReady,
       t,
-      contextWorkspaceDirty,
-      contextWorkspaceUnpushed,
-      contextHasChanges,
+      workspaceDirty,
+      workspaceUnpushed,
+      hasChanges,
     ]);
 
     // Bridge the "Resolve conflicts" action to the PR tab (a separate subtree).

@@ -18,8 +18,8 @@ Member 投影，且没有 GitHub remote 的本地目录不会借用其他 Member
 ## 决定
 
 - `buildSessionProjectMemberRows` 按先序输出：根 Member 按快照顺序排列，每个根
-  后面紧跟它的子模块，并带上 `depth`、`parentId`、`hasChildren`。面板只按深度
-  缩进，不引入第二套树模型；冻结快照仍是唯一事实来源。
+  后面紧跟它的子模块，只保留实际渲染的字段和 `depth`。面板只按深度缩进，
+  不引入第二套树模型；冻结快照仍是唯一事实来源。
 - `sessionProjectMemberSelectionAtomFamily` 保存选中的 Member id，以 workspace
   所有者 Session 为键，因此子标签页和根对话描述同一个仓库。它和 Info Bar 的
   staged item 一样不持久化。
@@ -29,6 +29,11 @@ Member 投影，且没有 GitHub remote 的本地目录不会借用其他 Member
 - PR 标签页、`useGitHubPrDetails`、Fix CI Errors、Resolve Conflicts、Ready for
   review 和 Merge 都跟随选中的 PR。Create PR 和 Commit & Push 仍以整个对话为
   范围，因为它们发送的 prompt 会发布所有有改动的 Member。
+- 操作门控复用 `projectRunMetaPatch` 汇总后的 session 级 `workspaceDirty` /
+  `workspaceUnpushed`，行模型不再重复保存 dirty/unpushed。已提交 diff 的回退
+  移入 `getSessionGitHubState`：只有所有 Member 都报告 diff 时才会写
+  `diffStats`，而非 Git Member 永远没有 diff。消融实验保留这一支，删掉另外
+  两处重复 OR，并补上混合项目组的测试。
 - CI 用 PR 图标的颜色表达，不再加第二个圆点：图标形状保留 PR 状态
   （open / draft / merged / closed），绿 / 红 / 黄分别表示 CI 通过 / 失败 /
   进行中。没有 CI 数据时保持 PR 状态色。

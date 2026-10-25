@@ -85,19 +85,13 @@ const styles = stylex.create({
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap',
   },
-  prSlot: {
-    display: 'inline-flex',
-    alignItems: 'center',
-    justifyContent: 'flex-end',
-    minWidth: '64px',
-    flexShrink: 0,
-  },
   pr: {
     display: 'inline-flex',
     alignItems: 'center',
     justifyContent: 'flex-end',
     gap: '3px',
     minWidth: 0,
+    flexShrink: 0,
     borderWidth: 0,
     padding: 0,
     backgroundColor: 'transparent',
@@ -295,32 +289,30 @@ function MemberRow({
       ) : (
         <span {...stylex.props(styles.select, styles.selectStatic)}>{content}</span>
       )}
-      <span {...stylex.props(styles.prSlot)}>
-        {row.pr && statusMeta ? (
-          <button
-            type="button"
-            {...stylex.props(styles.pr)}
-            aria-label={`${t('sessions.projectMembers.openPr', 'Open pull request #{{number}}', {
-              number: row.pr.number,
-            })}${ciLabel ? ` · ${ciLabel}` : ''}`}
-            onClick={() => {
-              // Opening a PR from the panel also makes its repository the one
-              // the stage and PR tab describe.
-              onSelect?.();
-              onOpenPullRequest(row.pr!.url);
-            }}
-          >
-            <statusMeta.icon
-              aria-hidden="true"
-              className={cn(
-                stylex.props(styles.prIcon).className,
-                ciTone ?? statusMeta.iconColorClassName
-              )}
-            />
-            <span>#{row.pr.number}</span>
-          </button>
-        ) : null}
-      </span>
+      {row.pr && statusMeta ? (
+        <button
+          type="button"
+          {...stylex.props(styles.pr)}
+          aria-label={`${t('sessions.projectMembers.openPr', 'Open pull request #{{number}}', {
+            number: row.pr.number,
+          })}${ciLabel ? ` · ${ciLabel}` : ''}`}
+          onClick={() => {
+            // Opening a PR from the panel also makes its repository the one
+            // the stage and PR tab describe.
+            onSelect?.();
+            onOpenPullRequest(row.pr!.url);
+          }}
+        >
+          <statusMeta.icon
+            aria-hidden="true"
+            className={cn(
+              stylex.props(styles.prIcon).className,
+              ciTone ?? statusMeta.iconColorClassName
+            )}
+          />
+          <span>#{row.pr.number}</span>
+        </button>
+      ) : null}
     </div>
   );
 }

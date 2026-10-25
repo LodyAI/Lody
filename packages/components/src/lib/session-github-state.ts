@@ -129,6 +129,14 @@ export const getSessionGitHubState = (
   const workspaceUnpushed = sourceSession?.workspaceUnpushed ?? false;
   const allChange = sourceSession?.diffStats?.allChange;
   const hasCommittedDiff = allChange ? allChange.add + allChange.del > 0 : false;
+  // `diffStats` is published only when every Member reports a diff, and a
+  // non-Git Member never does. Fall back to the Member rows so committed work
+  // still enables Create PR in a mixed Project group.
+  const memberHasCommittedDiff = sourceSession?.projectRun
+    ? Object.values(sourceSession.projectRun.members).some(
+        (member) => member.diff && member.diff.add + member.diff.del > 0
+      )
+    : false;
 
   return {
     sourceSessionId: sourceSession?.id,
@@ -139,6 +147,6 @@ export const getSessionGitHubState = (
     hasExistingPr: !!repoFullName && !!latestPr,
     workspaceDirty,
     workspaceUnpushed,
-    hasChanges: workspaceDirty || hasCommittedDiff,
+    hasChanges: workspaceDirty || hasCommittedDiff || memberHasCommittedDiff,
   };
 };

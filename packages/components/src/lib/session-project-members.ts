@@ -15,12 +15,8 @@ export type SessionProjectMemberRow = {
   path: string;
   kind: 'github' | 'local';
   isSubmodule: boolean;
-  /** Parent Member of a submodule; absent for a root Member. */
-  parentId?: ProjectMemberId;
   /** Nesting depth in the placement forest; roots are 0. */
   depth: number;
-  /** Whether another Member sits below this one in the placement forest. */
-  hasChildren: boolean;
   /**
    * How the member reached the agent. `additional` and `link` are local
    * directories used in place: no branch, no backup, no PR.
@@ -29,8 +25,6 @@ export type SessionProjectMemberRow = {
   /** GitHub repository, when known; local members learn it from their remote. */
   repoFullName?: string;
   branch?: string;
-  dirty: boolean;
-  unpushed: boolean;
   /** Observed line changes for this Member, when the daemon has them. */
   diff?: { add: number; del: number };
   pr?: { url: string; number: number; status: PrStatus; ciState?: SessionPullRequestCiState };
@@ -41,9 +35,7 @@ export type SessionProjectMemberRow = {
  * frozen source; a local member's comes from the remote its machine observed,
  * which the daemon publishes beside the other runtime fields.
  */
-export function getSessionProjectMemberRepository(
-  member: SessionProjectMember
-): string | undefined {
+function getSessionProjectMemberRepository(member: SessionProjectMember): string | undefined {
   return member.src.kind === 'github' ? member.src.repoFullName : member.repoFullName;
 }
 
@@ -89,24 +81,19 @@ export function buildSessionProjectMemberRows(
     const repoFullName = getSessionProjectMemberRepository(member);
     const pr = repoFullName ? currentByRepo.get(repoFullName.toLowerCase()) : undefined;
     const ciState = pr ? meta.pullRequestState?.[pr.url]?.s : undefined;
-    const childEntries = children.get(memberId) ?? [];
     rows.push({
       id: memberId,
       path: member.path,
       kind: member.src.kind,
       isSubmodule: member.placement.kind === 'submodule',
-      ...(member.placement.kind === 'submodule' ? { parentId: member.placement.parent } : {}),
       depth,
-      hasChildren: childEntries.length > 0,
       ...(member.access ? { access: member.access } : {}),
       ...(repoFullName ? { repoFullName } : {}),
       ...(member.branch ? { branch: member.branch } : {}),
-      dirty: member.dirty === true,
-      unpushed: member.unpushed === true,
       ...(member.diff ? { diff: member.diff } : {}),
       ...(pr ? { pr: { ...pr, ...(ciState ? { ciState } : {}) } } : {}),
     });
-    for (const child of childEntries) visit(child, depth + 1);
+    for (const child of children.get(memberId) ?? []) visit(child, depth + 1);
   };
 
   // A malformed snapshot is rejected when it is written, but tolerate a parent

@@ -221,4 +221,34 @@ describe('multi-repository sessions', () => {
     expect(state.canShowGitHubActions).toBe(false);
     expect(state.hasExistingPr).toBe(false);
   });
+
+  it('finds committed changes in member rows when a mixed group has no diffStats', () => {
+    const mixedRun = {
+      ...run,
+      members: {
+        api: { ...run.members.api, diff: { add: 4, del: 1 } },
+        docs: {
+          o: 1,
+          access: 'additional',
+          src: { kind: 'local', machineId: 'm1', localProjectId: 'docs' },
+          placement: { kind: 'root', dir: 'docs' },
+          path: 'docs',
+          base: 'HEAD',
+        },
+      },
+    } as unknown as NonNullable<SessionMeta['projectRun']>;
+    const session = createSession({
+      project: { kind: 'github', repoFullName: 'acme/api', branch: 'main' },
+      repoFullName: 'acme/api',
+      projectRun: mixedRun,
+      pullRequests: [],
+    });
+
+    const state = getSessionGitHubState(session);
+
+    // A non-Git Member has no diff, so the daemon cannot publish diffStats;
+    // the per-Member fallback still has to enable Create PR after a commit.
+    expect(state.workspaceDirty).toBe(false);
+    expect(state.hasChanges).toBe(true);
+  });
 });

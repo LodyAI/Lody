@@ -11,11 +11,8 @@ const rows: SessionProjectMemberRow[] = [
     kind: 'local',
     isSubmodule: false,
     depth: 0,
-    hasChildren: false,
     repoFullName: 'acme/web',
     branch: 'lody/export-report',
-    dirty: false,
-    unpushed: false,
     pr: { url: 'https://github.com/acme/web/pull/412', number: 412, status: 'open', ciState: 'f' },
   },
   {
@@ -24,11 +21,8 @@ const rows: SessionProjectMemberRow[] = [
     kind: 'github',
     isSubmodule: false,
     depth: 0,
-    hasChildren: true,
     repoFullName: 'acme/api',
     branch: 'lody/export-report',
-    dirty: false,
-    unpushed: false,
     pr: { url: 'https://github.com/acme/api/pull/88', number: 88, status: 'draft', ciState: 's' },
   },
   {
@@ -36,13 +30,9 @@ const rows: SessionProjectMemberRow[] = [
     path: 'api/proto',
     kind: 'github',
     isSubmodule: true,
-    parentId: 'api' as ProjectMemberId,
     depth: 1,
-    hasChildren: false,
     repoFullName: 'acme/proto',
     branch: 'lody/export-report-proto',
-    dirty: false,
-    unpushed: false,
   },
   {
     id: 'docs' as ProjectMemberId,
@@ -50,10 +40,7 @@ const rows: SessionProjectMemberRow[] = [
     kind: 'local',
     isSubmodule: false,
     depth: 0,
-    hasChildren: false,
     access: 'additional',
-    dirty: false,
-    unpushed: false,
   },
 ];
 
