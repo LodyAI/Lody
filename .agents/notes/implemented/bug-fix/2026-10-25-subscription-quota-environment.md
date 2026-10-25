@@ -2,6 +2,7 @@
 
 Status: implemented
 Translation: current
+PR: [#1867](https://github.com/LodyAI/Lody/pull/1867)
 
 [中文](2026-10-25-subscription-quota-environment.zh.md)
 
