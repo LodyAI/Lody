@@ -500,7 +500,7 @@ describe('HomeDashboard', () => {
       await act(async () => option.click());
 
       expect(trigger.getAttribute('aria-expanded')).toBe('false');
-      expect(selected).toEqual(candidate.id === CODEX.id ? [] : [candidate.id]);
+      expect(selected).toEqual([candidate.id]);
     });
   });
 

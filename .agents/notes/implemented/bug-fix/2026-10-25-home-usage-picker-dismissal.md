@@ -20,14 +20,16 @@ the shared menu primitive's defaults.
 [`UsageSourcePicker`](../../../../packages/components/src/components/chat/home/tiles.tsx)
 uses `Menu.RadioGroup` for selection and `Menu.RadioItem` for each Provider.
 The [Base UI contract](https://base-ui.com/react/components/menu#radio-item)
-defaults `closeOnClick` to `false`. Closing only in `onValueChange` would miss
-activation of the current value, so dismissal belongs on each item.
+defaults `closeOnClick` to `false`. Each item owns dismissal through this prop,
+without adding controlled menu state or coupling closing to the selection callback.
 This supplements the [home dashboard decision](../feature/2026-10-16-home-week-tiles.md).
 
 ## Verification and limits
 
 The existing [dashboard component suite](../../../../packages/components/tests/home-dashboard-component.test.tsx)
 now opens the real menu and checks that both an unchanged selection and a changed
-selection close it, while only a changed selection reports a new Provider id.
+selection close it and report the activated Provider id. Base UI also invokes
+the selection callback when activating the current value; the initial assertion
+that this activation emitted nothing was incorrect, as demonstrated by CI.
 The targeted dashboard and week suites could not start because the available
 dependency tree lacks `@stylexjs/unplugin`. Browser behavior remains unverified.
