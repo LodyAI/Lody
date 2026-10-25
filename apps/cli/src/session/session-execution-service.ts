@@ -2,7 +2,10 @@ import { resolveProjectFileRoots } from './worktree/project-member-access';
 import { type AcpLauncher, resolveAcpLauncher } from '@/agent/acp-analytics';
 import type { LodyRateLimitsCapability } from 'acp-extension-core';
 import { queryLocalAcpRateLimits, AcpQuotaCleanupError } from '@/agent/acp-runner';
-import type { MachineProviderRateLimitsRefreshResponse } from '@lody/shared';
+import {
+  isSubscriptionQuotaEligible,
+  type MachineProviderRateLimitsRefreshResponse,
+} from '@lody/shared';
 import { ProviderQuotaRefreshCache } from './provider-quota-refresh-cache';
 import type { TurnOutcome, TurnOutcomeFact, TurnResultAudience } from '@lody/shared/notifications';
 import {
@@ -1064,13 +1067,7 @@ export class SessionExecutionService {
       this.deps.machineId
     );
     if (!config) return response;
-    if (
-      config.cliType === 'builtin' &&
-      (config.brandId ||
-        Object.keys(config.env ?? {}).length ||
-        config.codexAuth?.mode === 'api-key')
-    )
-      return response;
+    if (!isSubscriptionQuotaEligible(config)) return response;
     const capability = await this.deps.workspaceDocument.getAcpCapabilities(
       this.deps.machineId,
       configId

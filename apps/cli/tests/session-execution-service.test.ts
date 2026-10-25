@@ -12450,11 +12450,12 @@ describe('Provider quota refresh', () => {
     ],
   };
 
-  function quotaHarness(query = true) {
+  function quotaHarness(query = true, overrides: Partial<AgentConfigMeta> = {}) {
     let config: AgentConfigMeta | null = createLaunchConfig({
       cliType: 'custom',
       agentType: 'example',
       env: {},
+      ...overrides,
     });
     const rows = new Map<string, unknown>();
     const deps = createBaseDeps({});
@@ -12475,6 +12476,9 @@ describe('Provider quota refresh', () => {
       rows,
       remove: () => {
         config = null;
+      },
+      change: () => {
+        if (config) config = { ...config, env: { OP_TOKEN: 'changed' } };
       },
     };
   }
@@ -12502,7 +12506,59 @@ describe('Provider quota refresh', () => {
     }
   });
 
-  it.each(['empty', 'failure', 'push', 'deleted', 'unsupported'] as const)(
+  it.each([
+    ['codex', 'OPENAI_API_KEY'],
+    ['claude', 'ANTHROPIC_BASE_URL'],
+    ['grok', 'XAI_API_KEY'],
+  ])(
+    'refreshes %s with tool env but preserves cached quota for account overrides',
+    async (agentType, accountKey) => {
+      const read = vi
+        .spyOn(quotaRunner, 'queryLocalAcpRateLimits')
+        .mockImplementation(async (options) => {
+          expect(options.agentConfigId).toBe(capabilityConfigId);
+          expect(options.env?.OP_TOKEN).toBe('synthetic');
+          return snapshot;
+        });
+      const status = vi
+        .spyOn(SessionExecutionService.prototype, 'getMachineAcpBinaryStatus')
+        .mockResolvedValue({
+          type: 'machine/acp-binary-status_response',
+          machineId: 'machine-1',
+          agentType,
+          success: true,
+          status: 'installed',
+        });
+      try {
+        const allowed = quotaHarness(true, {
+          cliType: 'builtin',
+          agentType,
+          env: { OP_TOKEN: 'synthetic' },
+        });
+        expect((await allowed.service.refreshProviderRateLimits(capabilityConfigId)).success).toBe(
+          true
+        );
+        const key = `${capabilityConfigId}/example`;
+        expect(allowed.rows.get(key)).toEqual(snapshot.rateLimits[0]);
+
+        const blocked = quotaHarness(true, {
+          cliType: 'builtin',
+          agentType,
+          env: { OP_TOKEN: 'synthetic', [accountKey]: 'synthetic' },
+        });
+        blocked.rows.set(key, 'previous');
+        expect((await blocked.service.refreshProviderRateLimits(capabilityConfigId)).success).toBe(
+          false
+        );
+        expect(blocked.rows.get(key)).toBe('previous');
+      } finally {
+        read.mockRestore();
+        status.mockRestore();
+      }
+    }
+  );
+
+  it.each(['empty', 'failure', 'push', 'deleted', 'changed', 'unsupported'] as const)(
     'preserves old quota on %s',
     async (mode) => {
       const pending = createDeferred<typeof snapshot>();
@@ -12522,6 +12578,7 @@ describe('Provider quota refresh', () => {
           harness.rows.set(key, 'newer-push');
         }
         if (mode === 'deleted') harness.remove();
+        if (mode === 'changed') harness.change();
         if (mode === 'failure') pending.reject(new Error('provider unavailable'));
         else pending.resolve(mode === 'empty' ? { rateLimits: [] } : snapshot);
         expect((await request).success).toBe(false);

@@ -361,3 +361,11 @@ the native LoginShellCache runtime and waits for its producer at daemon/command 
 [Ownership decision](../../../../.agents/notes/implemented/architecture/2026-10-10-effect-login-shell-probe.md).
 
 Provider quota refresh uses `queryLocalAcpRateLimits`: initialize a separately owned ACP process, verify Core `rateLimits.query`, query without a session, and await process-tree cleanup. The session execution service owns Provider coalescing and guarded Flock publication. See the [quota refresh decision](../../../../.agents/notes/implemented/architecture/2026-10-13-provider-quota-refresh.md).
+
+Account eligibility for both renderer display and daemon refresh lives in
+[`subscription-quota.ts`](../../../../packages/shared/src/subscription-quota.ts).
+Codex, Claude and Grok allow ordinary tool environment variables; account/config
+overrides, API-key profiles, explicit brands and Magpie routes remain excluded.
+Other builtin env policies and custom adapter capability semantics are unchanged.
+Keep provider-specific key rules in that module, not in individual UI consumers.
+See the [policy and source evidence](../../../../.agents/notes/implemented/bug-fix/2026-10-25-subscription-quota-environment.md).

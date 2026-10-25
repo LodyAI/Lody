@@ -44,6 +44,7 @@ export * from './bug-report';
 export * from './billing';
 export * from './agent-brand';
 export * from './agent-authentication';
+export * from './subscription-quota';
 export * from './acp-authentication-limits';
 export * from './schema';
 export * from './schedule-types';
