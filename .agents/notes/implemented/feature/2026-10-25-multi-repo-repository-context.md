@@ -35,6 +35,9 @@ desktop app.
 - The PR tab, `useGitHubPrDetails`, Fix CI Errors, Resolve Conflicts, Ready for
   review and Merge follow the selected PR. Create PR and Commit & Push stay
   conversation-scoped because their prompt publishes every changed Member.
+- CI is the PR glyph's tone, not a second dot: the glyph shape keeps the PR
+  status (open / draft / merged / closed), while green / red / amber reads the
+  CI verdict. Unreported CI leaves the PR-status color.
 - A Member used in place (`additional` / `link`) keeps the folder glyph and
   clears GitHub identity rather than pretending its mount path is a copyable
   host path.
@@ -47,8 +50,9 @@ desktop app.
 - `packages/components/tests/session-project-members.test.ts` covers nested
   ordering, depth/parent fields, and the selection/legacy fallback.
 - `packages/components/tests/session-project-members-chip.test.tsx` covers
-  indentation, labels, selection, panel dismissal, and PR buttons selecting
-  their repository before opening.
+  indentation, labels, selection, panel dismissal, CI tinting the PR glyph
+  without a separate dot, and PR buttons selecting their repository before
+  opening.
 - `packages/components/tests/session-github-state.test.ts` covers selecting a
   Member's PR and explicitly clearing the repository for a Member without a
   remote.

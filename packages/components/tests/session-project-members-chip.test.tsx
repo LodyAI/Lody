@@ -37,6 +37,7 @@ const rows = [
       url: 'https://github.com/acme/proto/pull/5',
       number: 5,
       status: 'open' as const,
+      ciState: 'f' as const,
     },
   },
 ];
@@ -128,9 +129,13 @@ describe('SessionProjectMembersChip', () => {
     });
 
     const prButton = Array.from(document.querySelectorAll<HTMLButtonElement>('button')).find(
-      (button) => button.getAttribute('aria-label') === 'Open pull request #5'
+      (button) => button.getAttribute('aria-label')?.startsWith('Open pull request #5')
     );
     expect(prButton).toBeDefined();
+    expect(prButton!.getAttribute('aria-label')).toBe('Open pull request #5 · CI failed');
+    // CI tints the PR glyph; there is no separate status dot beside it.
+    expect(prButton!.querySelector('svg')?.getAttribute('class')).toContain('text-destructive');
+    expect(prButton!.querySelectorAll('span[aria-hidden="true"]').length).toBe(0);
     await act(async () => {
       prButton!.click();
     });

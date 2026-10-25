@@ -116,10 +116,6 @@ const styles = stylex.create({
   },
   prIcon: { width: '12px', height: '12px', flexShrink: 0 },
   noPr: { color: colors.tertiaryLabel },
-  ci: { width: '6px', height: '6px', borderRadius: '50%', flexShrink: 0 },
-  ciSuccess: { backgroundColor: colors.success },
-  ciFailure: { backgroundColor: colors.destructive },
-  ciPending: { backgroundColor: colors.tertiaryLabel },
   hint: {
     padding: `${space[1.5]} ${space[2]}`,
     borderTop: `1px solid ${colors.separator}`,
@@ -129,12 +125,34 @@ const styles = stylex.create({
   },
 });
 
-const CI_STYLE: Partial<Record<SessionPullRequestCiState, keyof typeof styles>> = {
-  s: 'ciSuccess',
-  f: 'ciFailure',
-  e: 'ciFailure',
-  p: 'ciPending',
+/**
+ * CI rides on the PR glyph, whose SHAPE already carries the PR status. This
+ * keeps the row to one status mark instead of stacking a second colored dot
+ * beside the number. Unreported CI leaves the glyph in its PR-status color.
+ */
+const CI_ICON_TONE: Partial<Record<SessionPullRequestCiState, string>> = {
+  s: 'text-status-success',
+  f: 'text-destructive',
+  e: 'text-destructive',
+  p: 'text-status-warning',
 };
+
+function getCiLabel(
+  t: ReturnType<typeof useTranslation>['t'],
+  ciState: SessionPullRequestCiState | undefined
+): string | null {
+  switch (ciState) {
+    case 's':
+      return t('sessions.prCi.passing', 'CI passed');
+    case 'p':
+      return t('sessions.prCi.running', 'CI running');
+    case 'f':
+    case 'e':
+      return t('sessions.prCi.failing', 'CI failed');
+    default:
+      return null;
+  }
+}
 
 /**
  * The repositories of a multi-repository conversation, one click away.
@@ -235,7 +253,8 @@ function MemberRow({
       ? t('sessions.projectMembers.unpushed', 'Commits not pushed yet')
       : null;
   const statusMeta = row.pr ? PR_STATUS_META[row.pr.status] : null;
-  const ciStyle = row.pr?.ciState ? CI_STYLE[row.pr.ciState] : undefined;
+  const ciTone = row.pr?.ciState ? CI_ICON_TONE[row.pr.ciState] : undefined;
+  const ciLabel = getCiLabel(t, row.pr?.ciState);
   const identity = row.repoFullName ?? row.path;
   const location = inPlace
     ? t('sessions.projectMembers.inPlace', 'Original directory · not isolated')
@@ -305,9 +324,9 @@ function MemberRow({
           <button
             type="button"
             {...stylex.props(styles.pr)}
-            aria-label={t('sessions.projectMembers.openPr', 'Open pull request #{{number}}', {
+            aria-label={`${t('sessions.projectMembers.openPr', 'Open pull request #{{number}}', {
               number: row.pr.number,
-            })}
+            })}${ciLabel ? ` · ${ciLabel}` : ''}`}
             onClick={() => {
               // Opening a PR from the panel also makes its repository the one
               // the stage and PR tab describe.
@@ -317,12 +336,12 @@ function MemberRow({
           >
             <statusMeta.icon
               aria-hidden="true"
-              className={cn(stylex.props(styles.prIcon).className, statusMeta.iconColorClassName)}
+              className={cn(
+                stylex.props(styles.prIcon).className,
+                ciTone ?? statusMeta.iconColorClassName
+              )}
             />
             <span>#{row.pr.number}</span>
-            {ciStyle ? (
-              <span aria-hidden="true" {...stylex.props(styles.ci, styles[ciStyle])} />
-            ) : null}
           </button>
         ) : (
           // A directory used in place never has one; saying "No PR" would

@@ -29,6 +29,9 @@ Member 投影，且没有 GitHub remote 的本地目录不会借用其他 Member
 - PR 标签页、`useGitHubPrDetails`、Fix CI Errors、Resolve Conflicts、Ready for
   review 和 Merge 都跟随选中的 PR。Create PR 和 Commit & Push 仍以整个对话为
   范围，因为它们发送的 prompt 会发布所有有改动的 Member。
+- CI 用 PR 图标的颜色表达，不再加第二个圆点：图标形状保留 PR 状态
+  （open / draft / merged / closed），绿 / 红 / 黄分别表示 CI 通过 / 失败 /
+  进行中。没有 CI 数据时保持 PR 状态色。
 - 原地使用的 Member（`additional` / `link`）保留文件夹图标并清空 GitHub 身份，
   不把挂载路径伪装成可复制的宿主机路径。
 - 否决方案：另做“全部 PR”视图。仓库面板已经列出每个 Member 及其当前 PR/CI，
@@ -39,7 +42,8 @@ Member 投影，且没有 GitHub remote 的本地目录不会借用其他 Member
 - `packages/components/tests/session-project-members.test.ts` 覆盖嵌套顺序、
   深度/父级字段和“选择 → 旧投影”回退。
 - `packages/components/tests/session-project-members-chip.test.tsx` 覆盖缩进、
-  标签、选择、关闭面板，以及点击 PR 时先选中所属仓库再打开。
+  标签、选择、关闭面板、CI 用 PR 图标着色且没有独立圆点，以及点击 PR 时先
+  选中所属仓库再打开。
 - `packages/components/tests/session-github-state.test.ts` 覆盖选择某个 Member
   的 PR，以及为无 remote 的 Member 显式清空仓库。
 - `SessionProjectMembersChip.stories.tsx` 在真实 Info Bar 上渲染嵌套列表和选中态。
