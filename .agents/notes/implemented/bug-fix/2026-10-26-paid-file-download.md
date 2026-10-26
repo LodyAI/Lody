@@ -39,6 +39,12 @@ remain concurrent, and native sharing retains its serialization.
 
 ## Verification and limits
 
+The multi-megabyte reconstruction assertion uses `Buffer.equals` to compare every
+byte and the length without a JavaScript deep walk of millions of indexed
+properties. The previous `toEqual` assertion exceeded the CLI test timeout in
+[PR #1914](https://github.com/LodyAI/Lody/pull/1914); the fixture size and timeout
+remain unchanged.
+
 Behavioral tests cover 100 MiB admission and one-byte-over rejection, original
 binary reconstruction, unpaid/unavailable billing, changes between ranges,
 symlink escapes, owner-envelope rejection, capability negotiation, cancellation,

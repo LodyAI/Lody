@@ -687,7 +687,8 @@ describe('paid file downloads', () => {
       revision = result.revision;
       chunks.push(Buffer.from(result.data, 'base64'));
     }
-    expect(Buffer.concat(chunks)).toEqual(bytes);
+    // Compare bytes natively rather than deep-walking millions of indexed properties.
+    expect(Buffer.concat(chunks).equals(bytes)).toBe(true);
   });
 
   it('accepts exactly 100 MiB and refuses one byte more', async () => {
