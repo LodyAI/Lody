@@ -2,6 +2,7 @@
 
 Status: proposed
 Translation: current
+PR: https://github.com/LodyAI/Lody/pull/1917
 
 [中文](2026-10-26-acp-terminal-exit-drain.zh.md)
 
