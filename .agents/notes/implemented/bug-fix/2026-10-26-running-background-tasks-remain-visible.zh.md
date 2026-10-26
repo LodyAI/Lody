@@ -2,6 +2,7 @@
 
 Status: implemented
 Translation: current
+PR: [#1912](https://github.com/LodyAI/Lody/pull/1912)
 
 [English](2026-10-26-running-background-tasks-remain-visible.md)
 
@@ -22,4 +23,3 @@ Translation: current
 ## 权衡与限制
 
 当同一行含有运行中和终态任务时，现有面板会在所有任务结束前将整组显示在回答下方；它不会把一个消息级面板拆成多个独立行。所有任务进入终态后，该组恢复现有的工作详情展开行为。本改动不影响 provider 任务合并或历史重载语义。
-

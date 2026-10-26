@@ -2,6 +2,7 @@
 
 Status: implemented
 Translation: current
+PR: [#1912](https://github.com/LodyAI/Lody/pull/1912)
 
 [中文](2026-10-26-running-background-tasks-remain-visible.zh.md)
 
@@ -22,4 +23,3 @@ At baseline `91fa467a`, the added virtual-row acceptance failed because the runn
 ## Trade-offs and limits
 
 When a row contains both running and terminal tasks, the existing panel renders the entire group below the answer until every task settles; it does not split one message-scoped panel into separate rows. Once all tasks are terminal, the group follows existing worked-detail expansion behavior. The change does not alter provider task merging or reload semantics.
-
