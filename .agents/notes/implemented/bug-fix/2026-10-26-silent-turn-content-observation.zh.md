@@ -3,6 +3,7 @@
 Status: implemented
 Translation: current
 Issue: [#436](https://github.com/LodyAI/Lody/issues/436)
+PR: [#1913](https://github.com/LodyAI/Lody/pull/1913)
 
 [English](2026-10-26-silent-turn-content-observation.md)
 
