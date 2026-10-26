@@ -1,6 +1,5 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useAtomValue } from 'jotai';
-import { usePlatform } from '@lody/platform/react';
 import {
   getEffectiveDefaultMcpIds,
   getProjectMcpKey,
@@ -10,6 +9,10 @@ import {
 } from '@lody/shared';
 import type { AttachmentAddMenuMcp } from '@/components/chat/attachment-add-menu';
 import { activeWorkspaceRuntimeAtom } from '@/atoms/runtime';
+import {
+  acquireWorkspaceCatalog,
+  type WorkspaceCatalogSnapshot,
+} from '@/lib/workspace-catalog-room';
 import { useWorkspaceCatalog } from './use-workspace-catalog';
 
 export type SessionMcpSelection = {
@@ -24,8 +27,8 @@ export type SessionMcpSelection = {
    * would silently author a turn with no MCP servers.
    */
   ready: boolean;
-  /** The defaults this selection depends on could not be read at all. */
-  defaultsFailed: boolean;
+  /** Capture the send selection, waiting at most two seconds for defaults. */
+  resolveForSend: () => Promise<McpServerId[]>;
 };
 
 /** The project a NEW conversation is created in; its defaults preselect servers. */
@@ -63,8 +66,7 @@ export function useSessionMcpSelection(
 ): SessionMcpSelection {
   const { existingSession, disabled, scopeKey, defaultsTarget } = options;
   const runtime = useAtomValue(activeWorkspaceRuntimeAtom);
-  const { sync } = usePlatform();
-  const { servers, synced, loaded, failed, projectMcpDefaults } = useWorkspaceCatalog();
+  const { servers, synced, loaded, projectMcpDefaults } = useWorkspaceCatalog();
   const projectKey = existingSession
     ? undefined
     : getProjectMcpKey(defaultsTarget?.project, defaultsTarget?.machineId);
@@ -98,12 +100,46 @@ export function useSessionMcpSelection(
 
   const dependsOnDefaults =
     !existingSession && scopedOverride === undefined && persistedIds === undefined;
-  // A locally loaded cloud document can still lack remote project preferences,
-  // even when it already contains servers. Local-only composition has no cloud
-  // authority to wait for and keeps using its durable local snapshot. E2EE
-  // also accepts locally loaded defaults so offline drafts remain sendable.
-  const ready =
-    !dependsOnDefaults || (runtime != null && loaded && (sync.mode === 'local' || runtime.contentMode === 'e2ee' || synced));
+  // Use the latest locally available snapshot. The shared room applies remote
+  // updates in the background; opening a composer never requires fresh catch-up.
+  const ready = !dependsOnDefaults || (runtime != null && loaded);
+  const pendingSends = useRef(new Set<() => void>());
+  useEffect(() => {
+    const pending = pendingSends.current;
+    return () => {
+      for (const cancel of pending) cancel();
+    };
+  }, [runtime, scope]);
+
+  const resolveForSend = async (): Promise<McpServerId[]> => {
+    if (ready) return [...selectedIds];
+    if (!runtime) throw new Error('MCP defaults unavailable');
+    // Borrow the already-opening room. The deadline releases only this waiter;
+    // background synchronization and other catalog consumers retain their owner.
+    return new Promise((resolve, reject) => {
+      function check(snapshot: WorkspaceCatalogSnapshot) {
+        if (snapshot.loaded) {
+          finish(
+            getEffectiveDefaultMcpIds(
+              snapshot.servers,
+              projectKey ? snapshot.projectMcpDefaults[projectKey] : undefined
+            )
+          );
+        } else if (snapshot.failed) finish();
+      }
+      const lease = acquireWorkspaceCatalog(runtime, check);
+      const timer = setTimeout(() => finish(), 2_000);
+      function finish(ids?: McpServerId[]) {
+        clearTimeout(timer);
+        lease.release();
+        pendingSends.current.delete(finish);
+        if (ids) resolve(ids);
+        else reject(new Error('MCP defaults unavailable'));
+      }
+      pendingSends.current.add(finish);
+      check(lease.snapshot);
+    });
+  };
 
   // Stable per scope so menu props built from this selection do not churn every render.
   const setSelectedIds = useCallback(
@@ -133,6 +169,6 @@ export function useSessionMcpSelection(
     setSelectedIds,
     menu,
     ready,
-    defaultsFailed: dependsOnDefaults && failed,
+    resolveForSend,
   };
 }

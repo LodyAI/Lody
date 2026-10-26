@@ -196,8 +196,6 @@ export interface ChatLandingSubmitDisabledArgs {
   isRuntimeInitializing: boolean;
   isLoadingLocalGitState: boolean;
   hasLocalGitStateError: boolean;
-  /** The MCP selection still waits on project defaults that have not been read. */
-  mcpDefaultsPending?: boolean;
 }
 
 export type ChatLandingComposerStatus<TMessage = unknown> = {
@@ -557,15 +555,8 @@ export function getChatLandingSubmitDisabled({
   isRuntimeInitializing,
   isLoadingLocalGitState,
   hasLocalGitStateError,
-  mcpDefaultsPending = false,
 }: ChatLandingSubmitDisabledArgs): boolean {
-  if (
-    submitting ||
-    hasBlockingImages ||
-    hasBlockingFiles ||
-    !hasSendableContent ||
-    mcpDefaultsPending
-  ) {
+  if (submitting || hasBlockingImages || hasBlockingFiles || !hasSendableContent) {
     return true;
   }
 

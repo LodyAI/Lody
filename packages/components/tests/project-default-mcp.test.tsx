@@ -200,7 +200,7 @@ describe('composer MCP selection', () => {
   });
 
   it.each(['cloud', 'dual'] as const)(
-    'waits for %s catch-up even with a partial local catalog',
+    'uses the local %s snapshot and applies background updates without waiting for catch-up',
     async (syncMode) => {
       const workspace = createWorkspace('workspace-1', []);
       store.set(runtimeAtom, workspace.runtime);
@@ -210,21 +210,43 @@ describe('composer MCP selection', () => {
       });
       workspace.open();
       await settle();
-      expect(view.current()).toMatchObject({ ready: false, selectedIds: [] });
-      // Catalog entries may arrive before the project row; nonempty is not ready.
+      expect(view.current()).toMatchObject({ ready: true, selectedIds: [] });
+      // Background events update subsequent sends; no remote barrier is required.
       act(() => {
         for (const [key, value] of catalogRows()) workspace.put(key, value);
       });
       await settle();
-      expect(view.current()).toMatchObject({ ready: false, selectedIds: ['db', 'files'] });
+      expect(view.current()).toMatchObject({ ready: true, selectedIds: ['db', 'files'] });
       act(() =>
         workspace.put(workspaceFlockKeys.projectMcpDefault(keyOf(projectA)), { ids: ['search'] })
       );
-      workspace.sync();
       await settle();
       expect(view.current()).toMatchObject({ ready: true, selectedIds: ['search'] });
+      expect(await view.current().resolveForSend()).toEqual(['search']);
     }
   );
+
+  it('captures cached project defaults offline and receives later edits for the next send', async () => {
+    const workspace = createWorkspace('workspace-1', [
+      ...catalogRows(),
+      [workspaceFlockKeys.projectMcpDefault(keyOf(projectA)), { ids: ['search'] }],
+    ]);
+    store.set(runtimeAtom, workspace.runtime);
+    const view = renderSelection({
+      syncMode: 'cloud',
+      defaultsTarget: { project: projectA, machineId: 'machine-1' },
+    });
+    workspace.open();
+    await settle();
+    const sent = await view.current().resolveForSend();
+    expect(sent).toEqual(['search']);
+    act(() =>
+      workspace.put(workspaceFlockKeys.projectMcpDefault(keyOf(projectA)), { ids: ['files'] })
+    );
+    await settle();
+    expect(await view.current().resolveForSend()).toEqual(['files']);
+    expect(sent).toEqual(['search']);
+  });
 
   it('accepts a confirmed empty cloud catalog and does not gate explicit selections', async () => {
     const workspace = createWorkspace('workspace-1', []);
@@ -237,10 +259,104 @@ describe('composer MCP selection', () => {
     view.render({ syncMode: 'cloud', persistedIds: [] });
     expect(view.current()).toMatchObject({ ready: true, selectedIds: [] });
     view.render({ syncMode: 'cloud' });
-    expect(view.current().ready).toBe(false);
+    expect(view.current().ready).toBe(true);
     workspace.sync();
     await settle();
     expect(view.current()).toMatchObject({ ready: true, selectedIds: [] });
+  });
+
+  it('resolves a pending send with the confirmed project defaults', async () => {
+    const workspace = createWorkspace('workspace-1', catalogRows());
+    store.set(runtimeAtom, workspace.runtime);
+    const view = renderSelection({
+      syncMode: 'cloud',
+      defaultsTarget: { project: projectA, machineId: 'machine-1' },
+    });
+    const sending = view.current().resolveForSend();
+    act(() =>
+      workspace.put(workspaceFlockKeys.projectMcpDefault(keyOf(projectA)), { ids: ['search'] })
+    );
+    workspace.open();
+    await settle();
+    expect(await sending).toEqual(['search']);
+  });
+
+  it('bounds a local-read wait and allows a later send after the document opens', async () => {
+    vi.useFakeTimers();
+    try {
+      const workspace = createWorkspace('workspace-1', catalogRows());
+      store.set(runtimeAtom, workspace.runtime);
+      const view = renderSelection({ syncMode: 'cloud' });
+      let outcome: unknown;
+      void view
+        .current()
+        .resolveForSend()
+        .then(
+          (ids) => {
+            outcome = ids;
+          },
+          (failure: unknown) => {
+            outcome = failure;
+          }
+        );
+      await vi.advanceTimersByTimeAsync(2_000);
+      expect(outcome).toBeInstanceOf(Error);
+      // Timeout must not declare an unread document ready or cancel its load.
+      expect(view.current().ready).toBe(false);
+      workspace.open();
+      await settle();
+      expect(await view.current().resolveForSend()).toEqual(['db', 'files']);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it.each(['project', 'workspace', 'unmount'] as const)(
+    'cancels pending sends immediately on %s changes',
+    async (change) => {
+      vi.useFakeTimers();
+      try {
+        const workspace = createWorkspace('workspace-1', catalogRows());
+        store.set(runtimeAtom, workspace.runtime);
+        const view = renderSelection({
+          defaultsTarget: { project: projectA, machineId: 'machine-1' },
+        });
+        let outcome: unknown;
+        void view
+          .current()
+          .resolveForSend()
+          .then(
+            (ids) => {
+              outcome = ids;
+            },
+            (failure: unknown) => {
+              outcome = failure;
+            }
+          );
+        if (change === 'project') {
+          view.render({ defaultsTarget: { project: projectB, machineId: 'machine-1' } });
+        } else if (change === 'workspace') {
+          act(() => store.set(runtimeAtom, createWorkspace('workspace-2', []).runtime));
+        } else {
+          act(() => root.render(null));
+        }
+        await settle();
+        // No clock advance: cancellation must not be mistaken for deadline expiry.
+        expect(outcome).toBeInstanceOf(Error);
+        workspace.open();
+        await settle();
+        expect(outcome).toBeInstanceOf(Error);
+      } finally {
+        vi.useRealTimers();
+      }
+    }
+  );
+
+  it('sends an explicit empty selection without waiting for the catalog', async () => {
+    const workspace = createWorkspace('workspace-1', []);
+    store.set(runtimeAtom, workspace.runtime);
+    const view = renderSelection({ syncMode: 'cloud', persistedIds: [] });
+    expect(await view.current().resolveForSend()).toEqual([]);
   });
 
   it('reports unreadable defaults as a failure, never as an empty selection', async () => {
@@ -248,9 +364,15 @@ describe('composer MCP selection', () => {
     store.set(runtimeAtom, workspace.runtime);
     const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
     const view = renderSelection({ defaultsTarget: { project: projectA, machineId: 'machine-1' } });
+    const outcome = view
+      .current()
+      .resolveForSend()
+      .catch((failure: unknown) => failure);
     workspace.fail(new Error('storage unavailable'));
     await settle();
-    expect(view.current()).toMatchObject({ ready: false, defaultsFailed: true });
+    expect(view.current()).toMatchObject({ ready: false });
+    expect(await outcome).toBeInstanceOf(Error);
+    await expect(view.current().resolveForSend()).rejects.toThrow('MCP defaults unavailable');
     error.mockRestore();
   });
 
@@ -500,16 +622,19 @@ describe('project Default MCP tab', () => {
   });
 });
 
-it('uses loaded encrypted defaults offline while ordinary cloud composers still await remote catch-up', async () => {
+it('uses loaded defaults offline in both encrypted and plaintext workspaces', async () => {
   const workspace = createWorkspace('workspace-offline', catalogRows());
-  Object.assign(workspace.runtime, {contentMode:'e2ee', accountId:'offline-owner'});
+  Object.assign(workspace.runtime, { contentMode: 'e2ee', accountId: 'offline-owner' });
   store.set(runtimeAtom, workspace.runtime);
-  const view = renderSelection({syncMode:'cloud', defaultsTarget:{project:projectA,machineId:'machine-1'}});
+  const view = renderSelection({
+    syncMode: 'cloud',
+    defaultsTarget: { project: projectA, machineId: 'machine-1' },
+  });
   expect(view.current().ready).toBe(false);
   workspace.open();
   await settle();
-  expect(view.current()).toMatchObject({ready:true,selectedIds:['db','files']});
-  Object.assign(workspace.runtime, {contentMode:'plaintext'});
-  view.render({syncMode:'cloud', defaultsTarget:{project:projectA,machineId:'machine-1'}});
-  expect(view.current().ready).toBe(false);
+  expect(view.current()).toMatchObject({ ready: true, selectedIds: ['db', 'files'] });
+  Object.assign(workspace.runtime, { contentMode: 'plaintext' });
+  view.render({ syncMode: 'cloud', defaultsTarget: { project: projectA, machineId: 'machine-1' } });
+  expect(view.current().ready).toBe(true);
 });

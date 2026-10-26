@@ -73,7 +73,12 @@ while the rest steps back (`home/focus-motion.ts`). [Why](../../../../../.agents
 - **MCP as a second menu level.** The workspace MCP catalog is multi-select and
   unbounded, so it cannot sit in the footer selector row. Desktop has hover and
   opens a submenu; touch does not, so mobile pushes the panel onto the same
-  surface with a back row.
+  surface with a back row. Landing loads the local catalog while composing and receives remote updates
+  in the background; send captures local ids without waiting for remote catch-up.
+  Only an unfinished local read waits, for at most two seconds. It shows no MCP-loading copy
+  and does not disable Send just because defaults are pending. Failure keeps the
+  draft and reports the ordinary send error; it never substitutes empty ids.
+  [Decision](../../../../../.agents/notes/implemented/bug-fix/2026-10-26-mcp-send-wait.md).
 - **The 20-row picker cap.** The complete option set is unbounded; the cap keeps
   the menu mountable while search still ranks over everything. The project
   picker uses `DropdownMenuSearchInput` for mount-owned autofocus and to route

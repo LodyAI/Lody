@@ -3078,20 +3078,6 @@ function WorkspaceChatLanding({
       setComposerError(t('chat.validation.missingAgent'));
       return;
     }
-    // The selection still comes from defaults that were never read; sending now
-    // would create the conversation with no MCP servers instead of its defaults.
-    if (!mcpSelection.ready) {
-      captureSessionInputBlocked('mcp_defaults_not_ready');
-      setComposerError(
-        mcpSelection.defaultsFailed
-          ? t(
-              'chat.validation.mcpDefaultsFailed',
-              'Default MCP servers couldn’t be read, so this conversation can’t be created yet.'
-            )
-          : t('chat.validation.mcpDefaultsLoading', 'Loading this project’s default MCP servers…')
-      );
-      return;
-    }
     const scopedMachineId =
       contextType === 'local'
         ? selectedMachineId && isSelectedMachineValid
@@ -3239,6 +3225,15 @@ function WorkspaceChatLanding({
         repoFullNameForMentions = selectedRepo;
       }
 
+      let mcpServerIds: typeof mcpSelection.selectedIds;
+      try {
+        mcpServerIds = await mcpSelection.resolveForSend();
+      } catch (error) {
+        captureSessionInputBlocked('mcp_defaults_not_ready');
+        console.error('Failed to resolve MCP selection before send', error);
+        toast.error(t('chat.failed'));
+        return;
+      }
       const draftTitle = deriveDraftSessionTitle(promptText);
       /* Agent config prompt, then the Role's instruction, then the task — the
          Role speaks for how this agent is being used, so it sits between the
@@ -3261,7 +3256,7 @@ function WorkspaceChatLanding({
         modelId: modelOptions.length > 0 ? (selectedModelId ?? undefined) : undefined,
         configOptionValues: dispatchConfigOptionValues,
         issuePRMentions,
-        mcpServerIds: mcpSelection.selectedIds,
+        mcpServerIds,
         agentRoleId: activeAgentRole?.id ?? null,
         agentRoleRevision: activeAgentRole?.revision,
         memory: activeAgentRole?.runConfig.memory,
@@ -4540,7 +4535,6 @@ function WorkspaceChatLanding({
       isRuntimeInitializing: runtimeInitializing,
       isLoadingLocalGitState: loadingLocalGitState,
       hasLocalGitStateError: Boolean(localGitStateError),
-      mcpDefaultsPending: !mcpSelection.ready && !mcpSelection.defaultsFailed,
     });
   const selectedMachineHasVisibleLocalProject = useMemo(
     () =>

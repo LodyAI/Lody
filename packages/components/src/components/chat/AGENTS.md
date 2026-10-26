@@ -107,9 +107,9 @@ project.sharedWithTeam`. The selected Private segment opens `ProjectShareDialog`
 - Mobile composer pickers rely on `MobileInlinePicker` plus
   `MobileInlinePickerRowSlot` so dropdown panels project to a full-row slot,
   never resizing a narrow footer chip.
-- Keep raw local Git, Machine RPC, and Streams failures out of landing status copy;
-  retain them for submit blocking, telemetry, logging, and scoped retry. Status copy
-  is for actionable validation and selected-machine project guidance.
+- Hide raw Git/RPC/Streams errors in landing status. MCP uses local defaults without
+  remote catch-up; local reads get two seconds. Failure keeps the draft, never
+  substitutes empty ids. See [README](README.md).
 - Chat Landing must not initiate ACP capability probes: startup refresh lives in
   the workspace runtime and explicit probes in settings/onboarding. Do not render
   their spinner, download progress, or ready state in the landing composer.
