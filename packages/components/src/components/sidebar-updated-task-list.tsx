@@ -32,10 +32,7 @@ import {
   themeRadius,
   themeSpace,
 } from '../style/theme-scale.stylex';
-/**
- * The parts of the Updated list that were Tailwind. The rows' own box, ink and
- * fills come from `sidebarSurface`; these are the pieces around it.
- */
+/** The legacy flat Updated list's own layout and ink. */
 const updatedStyles = stylex.create({
   /** A list's own column. */
   listStack: { display: 'flex', flexDirection: 'column' },
@@ -117,6 +114,134 @@ const updatedStyles = stylex.create({
     backgroundColor: themeColors.sidebarHover,
     color: themeColors.sidebarHoverForeground,
   },
+  bucket: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 'calc(var(--spacing) * 0.5)',
+  },
+  expandedBucket: {
+    marginBottom: {
+      default: 'calc(var(--spacing) * 4)',
+      ':last-child': 'calc(var(--spacing) * 0)',
+    },
+  },
+  collapsedBucket: {
+    marginBottom: {
+      default: 'calc(var(--spacing) * 1)',
+      ':last-child': 'calc(var(--spacing) * 0)',
+    },
+  },
+  showMore: {
+    display: 'flex',
+    userSelect: 'none',
+    alignItems: 'center',
+    gap: 'calc(var(--spacing) * 2)',
+    borderRadius: 'var(--radius-md)',
+    paddingInline: 'calc(var(--spacing) * 2)',
+    paddingBlock: 'calc(var(--spacing) * 2)',
+    textAlign: 'left',
+    fontSize: 'var(--text-xs)',
+    lineHeight: 'var(--tw-leading, var(--text-xs--line-height))',
+    color: {
+      default: 'color-mix(in oklab, hsl(var(--sidebar-foreground-muted) / 1) 80%, transparent)',
+      '@media (hover: hover)': { ':hover': 'hsl(var(--sidebar-hover-foreground) / 1)' },
+    },
+    backgroundColor: {
+      default: null,
+      '@media (hover: hover)': { ':hover': 'hsl(var(--sidebar-hover) / 1)' },
+    },
+    transitionProperty:
+      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke, --tw-gradient-from, --tw-gradient-via, --tw-gradient-to',
+    transitionTimingFunction: 'var(--tw-ease, var(--default-transition-timing-function))',
+    transitionDuration: 'var(--tw-duration, var(--default-transition-duration))',
+  },
+  renameInput: {
+    minWidth: 0,
+    width: '100%',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    backgroundColor: 'transparent',
+    outlineStyle: { default: 'none', '@media (forced-colors: active)': 'solid' },
+    outlineWidth: { default: null, '@media (forced-colors: active)': '2px' },
+    outlineColor: { default: null, '@media (forced-colors: active)': 'transparent' },
+    outlineOffset: { default: null, '@media (forced-colors: active)': '2px' },
+    borderWidth: '1px',
+    borderStyle: 'var(--tw-border-style)',
+    borderColor: 'color-mix(in oklab, hsl(var(--sidebar-ring) / 1) 40%, transparent)',
+    borderRadius: 'var(--radius-sm)',
+    paddingInline: 'calc(var(--spacing) * 1)',
+    marginInline: 'calc(var(--spacing) * -1)',
+    fontSize: 'var(--text-sm)',
+    lineHeight: 'var(--tw-leading, var(--text-sm--line-height))',
+    fontWeight: 'var(--font-weight-normal)',
+  },
+  title: {
+    minWidth: 0,
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: '0%',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontWeight: 'var(--font-weight-normal)',
+    color: 'hsl(var(--sidebar-row-foreground) / 1)',
+  },
+  selectedTitle: { color: 'hsl(var(--sidebar-selection-foreground) / 1)' },
+  row: {
+    position: 'relative',
+    display: 'flex',
+    width: '100%',
+    alignItems: 'center',
+    borderRadius: 'var(--radius-md)',
+    paddingInline: 'calc(var(--spacing) * 2)',
+    paddingBlock: 'calc(var(--spacing) * 1)',
+    textAlign: 'left',
+    borderWidth: '1px',
+    borderStyle: 'var(--tw-border-style)',
+    borderColor: 'transparent',
+    backgroundColor: 'transparent',
+  },
+  rowHover: {
+    backgroundColor: {
+      default: 'transparent',
+      '@media (hover: hover)': { ':hover': 'hsl(var(--sidebar-hover) / 1)' },
+    },
+    color: {
+      default: null,
+      '@media (hover: hover)': { ':hover': 'hsl(var(--sidebar-hover-foreground) / 1)' },
+    },
+  },
+  rowSelected: {
+    backgroundColor: 'hsl(var(--sidebar-selection) / 1)',
+    color: 'hsl(var(--sidebar-selection-foreground) / 1)',
+  },
+  pointer: { cursor: 'pointer' },
+  defaultCursor: { cursor: 'default' },
+  titleBox: {
+    minWidth: 0,
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: '0%',
+    display: 'flex',
+    alignItems: 'center',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontSize: 'var(--text-sm)',
+    lineHeight: 'var(--tw-leading, var(--text-sm--line-height))',
+  },
+  editingAnchorTitle: { position: 'relative', zIndex: 20 },
+  restingMetrics: {
+    display: 'flex',
+    userSelect: 'none',
+    alignItems: 'center',
+    gap: 'calc(var(--spacing) * 1.5)',
+    fontSize: '11px',
+    fontVariantNumeric: 'tabular-nums',
+    color: 'color-mix(in oklab, hsl(var(--sidebar-foreground-muted) / 1) 80%, transparent)',
+  },
+  anchorMetrics: { zIndex: 20 },
 });
 import { formatCompactRelativeTime } from '@/lib/format-relative-time';
 import { Tooltip } from '@lody/ui/tooltip';
@@ -514,8 +639,11 @@ export const SidebarUpdatedTaskList = memo(function SidebarUpdatedTaskList({
             <div
               key={bucket.key}
               className={cn(
-                'group flex flex-col gap-0.5',
-                collapsed ? 'mb-1 last:mb-0' : 'mb-4 last:mb-0'
+                'group',
+                stylex.props(
+                  updatedStyles.bucket,
+                  collapsed ? updatedStyles.collapsedBucket : updatedStyles.expandedBucket
+                ).className
               )}
             >
               {/* Same shared section header as Workspace mode, so section labels
@@ -562,11 +690,7 @@ export const SidebarUpdatedTaskList = memo(function SidebarUpdatedTaskList({
                     <button
                       type="button"
                       data-sidebar-updated-show-more={bucket.key}
-                      className={cn(
-                        'flex select-none items-center gap-2 rounded-md px-2 py-2 text-left text-xs text-sidebar-foreground-muted/80',
-                        'transition-colors',
-                        'hover:bg-sidebar-hover hover:text-sidebar-hover-foreground'
-                      )}
+                      {...stylex.props(updatedStyles.showMore)}
                       aria-label={toggleFullListLabel}
                       onClick={() => onToggleFullBucket?.(bucket.key)}
                     >
@@ -749,20 +873,13 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
       onPointerDown={(e) => e.stopPropagation()}
       onBlur={() => onCommitRename(item.id, item.title)}
       onFocus={(e) => e.currentTarget.select()}
-      className={cn(
-        'min-w-0 w-full truncate bg-transparent outline-hidden',
-        'border border-sidebar-ring/40 rounded-sm px-1 -mx-1',
-        'text-sm font-normal'
-      )}
+      {...stylex.props(updatedStyles.renameInput)}
     />
   ) : (
     <SidebarSessionTitleText
       sessionId={item.id}
       selected={showSelectedState}
-      className={cn(
-        'min-w-0 flex-1 truncate font-normal',
-        showSelectedState ? 'text-sidebar-selection-foreground' : 'text-sidebar-row-foreground'
-      )}
+      {...stylex.props(updatedStyles.title, showSelectedState && updatedStyles.selectedTitle)}
     >
       {item.title}
     </SidebarSessionTitleText>
@@ -785,20 +902,22 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
         // only. The bucket wrapper above also uses an (unnamed) `group` for its
         // header chevron — without naming, hovering any row would match the bucket's
         // group-hover and reveal every row's archive button at once.
-        'group/row relative flex w-full items-center rounded-md px-2 py-1 text-left',
-        'border border-transparent bg-transparent',
+        'group/row',
+        stylex.props(
+          updatedStyles.row,
+          !showSelectedState && onSelect && !isMobile && updatedStyles.rowHover,
+          showSelectedState && updatedStyles.rowSelected,
+          onSelect ? updatedStyles.pointer : updatedStyles.defaultCursor
+        ).className,
         !showSelectedState &&
           onSelect &&
           !isMobile &&
-          'hover:bg-sidebar-hover hover:text-sidebar-hover-foreground data-[menu-open]:bg-sidebar-hover data-[menu-open]:text-sidebar-hover-foreground',
-        showSelectedState &&
-          'bg-sidebar-selection text-sidebar-selection-foreground hover:bg-sidebar-selection',
+          'data-[menu-open]:bg-sidebar-hover data-[menu-open]:text-sidebar-hover-foreground',
         // Keyboard-only focus ring — see TaskList: plain :focus-within also
         // matches after mouse clicks via the overlay <a> and left a permanent
         // inset ring on the selected row.
         useAnchor &&
-          'has-[a:focus-visible]:outline-hidden has-[a:focus-visible]:ring-1 has-[a:focus-visible]:ring-inset has-[a:focus-visible]:ring-sidebar-ring/40',
-        onSelect ? 'cursor-pointer' : 'cursor-default'
+          'has-[a:focus-visible]:outline-hidden has-[a:focus-visible]:ring-1 has-[a:focus-visible]:ring-inset has-[a:focus-visible]:ring-sidebar-ring/40'
       )}
       onClick={
         useAnchor
@@ -841,9 +960,9 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
           <Pin aria-hidden="true" {...stylex.props(updatedStyles.pin)} />
         ) : null}
         <div
-          className={cn(
-            'min-w-0 flex-1 flex items-center truncate text-sm',
-            useAnchor && isEditing && 'relative z-20'
+          {...stylex.props(
+            updatedStyles.titleBox,
+            useAnchor && isEditing && updatedStyles.editingAnchorTitle
           )}
           // Double-click to rename is scoped to the title only, so double-clicking
           // elsewhere on the row (e.g. the two-step Archive confirm button) cannot
@@ -867,9 +986,9 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
           restIcon={
             showPr || showMergeablePill || isMobile || item.sharing?.visibility === 'private' ? (
               <span
-                className={cn(
-                  'flex select-none items-center gap-1.5 text-[11px] tabular-nums text-sidebar-foreground-muted/80',
-                  useAnchor && 'z-20'
+                {...stylex.props(
+                  updatedStyles.restingMetrics,
+                  useAnchor && updatedStyles.anchorMetrics
                 )}
               >
                 {isMobile ? <span>{relativeTime}</span> : null}

@@ -112,6 +112,8 @@ document why they were unsuitable for a pair.
 | `schedule-style-targets.json` | Wide schedule rows, child-width precedence, issue tooltips, caller overrides and 639/640px boundaries. |
 | `bub-style-targets.json` | Install guide copy success/failure, long translation, code overflow and keyboard/pointer states. |
 | `info-chip-style-targets.json` | Production action/cluster/stage chips, context actions, CI portals and 419/420/421px container boundaries. |
+| `legacy-task-targets.json` | Actual legacy TaskList rows, caller/root/subtree variable overrides, loading/empty/overflow and desktop pointer states. |
+| `legacy-updated-task-targets.json` | Actual legacy flat Updated list, status/anchor rows, rename, archive, show all/less and scoped variables. |
 | `sidebar-targets.json`                                          | Sidebar layouts, row parts, loading/empty/overflow and archive/menu states; narrow widths use a desktop UA.         |
 | `sidebar-mobile-targets.json`                                   | iPhone/Android descriptors, known-logo readiness and real touch menu/archive actions in both themes.                |
 | `sidebar-updated-interaction-targets.json`                      | Show all/less, selection, collapse/expand and focus/hover on the production Updated list.                           |
@@ -131,6 +133,17 @@ chip runner adds `--scope-only true` for its separate local-variable matrix. The
 install-guide fixture intercepts its existing browser clipboard and external-open
 boundaries; it never runs the displayed command or opens the live guide. Scope
 probes verify selector matching, not theme-provider persistence or native OS UI.
+
+`legacy-task-native.mjs` and `legacy-updated-task-native.mjs` take the same phase
+and immutable URL arguments. TaskList writes `proof.json`: matching primary
+computed observations plus separately named gesture screenshots. Updated writes
+`manifest.json` with native screenshots, trusted events and callback assertions.
+Do not count computed-only observations as additional screenshot pairs. Preserve
+complete nested fields when comparing; native report adapters assign stable
+node-index paths and retain original PNG hashes. Actual touch covers swipe/archive
+and the 767/768px boundary; forced colors and drag/cancel/reorder are separate
+states. Original nested-button Enter and touch-without-hover restrictions remain
+explicit; an unsupported interaction is not a passing screenshot state.
 
 `chat-search-ready-targets.json` explicitly enters the search query and waits for
 the filtered result. Storybook play completion can precede a successful input

@@ -514,6 +514,44 @@ in local artifacts. Existing mobile long-link clipping and extreme 240px row
 crowding remain byte-exact baseline limitations. These controls do not establish
 native OS IME, WebKit or every theme outside the recorded matrix.
 
+### Legacy sidebar lists
+
+The legacy `TaskList` and `SidebarUpdatedTaskList` now have actual rendering
+fixtures despite having no active product value consumers. Their remaining
+utilities fall from 87 to 15 and 95 to 23 respectively. Local styles preserve
+element-local variable evaluation, caller precedence, group hooks, drag inline
+transforms, DOM, handlers and public APIs. Retained rules cover ancestor state,
+anchor focus, shared fade/reveal and primitive composition. Two task swipe-action
+color strings remain inside an unresolved expression, outside the counted 15.
+
+`legacy-acceptance.html` contains 490 real pairs: 362 primary and 128 native
+screenshots, with 99,960 matched nodes. Another 104 TaskList observations compare
+28,288 nodes without being counted again as screenshots. All recorded fields
+match, including recursive native CSS, focus, input, pseudo-elements, trusted
+events and callback assertions. All 128 native PNG pairs are byte-exact.
+Of the full matrix, 487 PNG pairs are byte-exact; three retain 29 raw pixels,
+including three threshold pixels, maximum channel delta 10. These formal
+exceptions remain **unresolved**: two pixels at a root-variable rename input's
+bottom edge and one in the unchanged shared CI check SVG. Narrow row corners
+account for the other below-threshold difference. Location is not a proven
+rendering cause.
+
+Alternating unchanged-source controls share complete PNGs for all three states:
+final source reproduces the narrow-row and CI-icon Before PNGs; original source
+reproduces the root-variable After PNG. Twenty TaskList control screenshots and
+144 Updated support screenshots retain the full sequences. They do not reproduce
+every formal variant or close the exceptions. The report embeds nine original
+Before/After/control PNGs and keeps both current and historical differences open.
+
+Coverage includes real touch at 390/767/768px, drag/cancel/reorder, rename,
+archive, forced colors, root/subtree variables and caller overrides. Rejected
+mixed-device hover and nested-button Enter captures remain: the original row
+keyboard handler intercepts nested Enter, and touch devices cannot activate
+desktop hover-only controls. Accepted primary captures use valid desktop
+pointer paths; native runs cover actual touch. Early browser cleanup hangs are
+retained separately; both final sources use the same headless Chromium runner
+and exit cleanly. These are harness corrections, not product behavior changes.
+
 ### Build and test findings
 
 Storybook 10.6's strict execution wrappers and shared async chunks introduced
@@ -619,16 +657,19 @@ Following the later upstream integration, the scan reports 2,501
 (components 2,009, `src/ui` 487, routes 5) across 185 files, with 692 unresolved
 expressions (611 components, 81 `src/ui`). The property/guide/chip batch leaves
 2,428 occurrences (components 1,936, `src/ui` 487, routes 5) across 184 files;
-the 692 unresolved expressions are unchanged. These are lower bounds, not a
-project completion percentage.
+the 692 unresolved expressions are unchanged. The legacy-list batch leaves
+2,284 occurrences (components 1,792, `src/ui` 487, routes 5) across 184 files,
+with the same 692 unresolved expressions. These are lower bounds, not a project
+completion percentage.
 
 The unconsumed `src/ui/sidebar.tsx` retains 324 occurrences and is not re-exported
 by `src/ui/index.ts`; direct public wildcard imports remain possible.
-The unconsumed `src/components/task-list.tsx` retains 87 occurrences,
-`src/components/sidebar-updated-task-list.tsx` retains 95 and the unused
+The unconsumed `src/components/task-list.tsx` retains 15 occurrences,
+`src/components/sidebar-updated-task-list.tsx` retains 23; both now have real
+rendering and native-input fixtures. The unused
 `PropertyRowWide` export now has actual rendering fixtures and retains only its
 two arbitrary-child selectors. Establish actual consumers and rendering fixtures
-before migrating the other unconsumed surfaces. The original phone terminal error span has zero width and invisible inline
+before migrating other unconsumed surfaces. The original phone terminal error span has zero width and invisible inline
 feedback, while desktop/tablet/short-view feedback remains visible; the original
 240px schedule fixture with an extreme label and nonshrinking Button overlaps.
 Both limitations are preserved and documented, rather than redesigned during a

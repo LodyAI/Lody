@@ -86,8 +86,8 @@ const taskStyles = stylex.create({
   groupToggle: {
     position: 'relative',
     display: 'flex',
-    height: themeSpace[5],
-    width: themeSpace[5],
+    height: 'calc(var(--spacing) * 5)',
+    width: 'calc(var(--spacing) * 5)',
     flexShrink: 0,
     alignItems: 'center',
     justifyContent: 'center',
@@ -207,13 +207,81 @@ const taskStyles = stylex.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  smallGlyph: { width: themeSpace[3.5], height: themeSpace[3.5] },
-  archiveIcon: { width: themeSpace[4], height: themeSpace[4] },
+  smallGlyph: { width: 'calc(var(--spacing) * 3.5)', height: 'calc(var(--spacing) * 3.5)' },
+  archiveIcon: { width: 'calc(var(--spacing) * 4)', height: 'calc(var(--spacing) * 4)' },
   archiveAction: {
     backgroundColor: themeColors.sidebarHover,
     color: themeColors.sidebarHoverForeground,
   },
   listStack: { display: 'flex', flexDirection: 'column' },
+  // These declarations read the app variables at the row, including scoped overrides.
+  time: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    gap: 'calc(var(--spacing) * 1)',
+  },
+  timeText: { userSelect: 'none', fontVariantNumeric: 'tabular-nums' },
+  flexOne: { flex: '1' },
+  noShrink: { flexShrink: 0 },
+  taskRows: { display: 'flex', flexDirection: 'column', gap: '1px' },
+  pointer: { cursor: 'pointer' },
+  defaultCursor: { cursor: 'default' },
+  activeGroupBorder: {
+    borderColor: 'color-mix(in oklab, hsl(var(--sidebar-ring) / 1) 30%, transparent)',
+  },
+  repoHeaderWeight: { fontWeight: 'var(--font-weight-medium)' },
+  rowBox: { position: 'relative', width: '100%', textAlign: 'left' },
+  pinGlyph: {
+    width: 'calc(var(--spacing) * 3)',
+    height: 'calc(var(--spacing) * 3)',
+    flexShrink: 0,
+    color: 'color-mix(in oklab, hsl(var(--sidebar-foreground-muted) / 1) 80%, transparent)',
+  },
+  restIcons: { display: 'flex', alignItems: 'center', gap: 'calc(var(--spacing) * 1.5)' },
+  raisedRest: { zIndex: 20 },
+  chatTime: {
+    fontSize: 'var(--text-xs)',
+    lineHeight: 'var(--tw-leading, var(--text-xs--line-height))',
+    color: 'hsl(var(--muted-foreground) / 1)',
+  },
+  timeInk: { color: 'hsl(var(--muted-foreground) / 1)' },
+  repoRest: {
+    userSelect: 'none',
+    fontSize: '11px',
+    fontVariantNumeric: 'tabular-nums',
+    color: 'color-mix(in oklab, hsl(var(--sidebar-foreground-muted) / 1) 80%, transparent)',
+  },
+  repoWidth: { width: '100%' },
+  repoDragging: { opacity: 0.6 },
+  emptyHeader: {
+    display: 'flex',
+    height: 'calc(var(--spacing) * 7)',
+    flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+  },
+  renameInput: {
+    minWidth: 0,
+    width: '100%',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    backgroundColor: 'transparent',
+    borderWidth: '1px',
+    borderStyle: 'solid',
+    borderColor: 'color-mix(in oklab, hsl(var(--sidebar-ring) / 1) 40%, transparent)',
+    borderRadius: 'var(--radius-sm)',
+    paddingInline: 'calc(var(--spacing) * 1)',
+    marginInline: 'calc(var(--spacing) * -1)',
+    fontSize: 'var(--text-sm)',
+    lineHeight: 'var(--tw-leading, var(--text-sm--line-height))',
+    outlineStyle: { default: 'none', '@media (forced-colors: active)': 'solid' },
+    outlineWidth: { default: null, '@media (forced-colors: active)': '2px' },
+    outlineColor: { default: null, '@media (forced-colors: active)': 'transparent' },
+    outlineOffset: { default: null, '@media (forced-colors: active)': '2px' },
+  },
+
   /** A list's header row: the action sits at the list's end. */
   listHeader: {
     display: 'flex',
@@ -570,8 +638,8 @@ function reconcileShowFullListByGroups(
 // elsewhere in LocalProjectSessionItem, where it's a meaningful distinction.
 function TaskRowTime({ relativeTime, className }: { relativeTime: string; className?: string }) {
   return (
-    <span className={cn('inline-flex items-center justify-end gap-1', className)}>
-      <span className="select-none tabular-nums">{relativeTime}</span>
+    <span className={clsx(stylex.props(taskStyles.time).className, className)}>
+      <span {...stylex.props(taskStyles.timeText)}>{relativeTime}</span>
     </span>
   );
 }
@@ -730,7 +798,7 @@ const TaskGroupSection = memo(function TaskGroupSection({
   const isRepoHeader = group.kind === 'repo';
   const headerBaseColorClass = isRepoHeader ? undefined : SIDEBAR_GROUP_LABEL_COLOR_CLASS;
   const headerTypographyClass = isRepoHeader
-    ? cn(SIDEBAR_ROW_TEXT_CLASS, 'font-medium')
+    ? clsx(SIDEBAR_ROW_TEXT_CLASS, stylex.props(taskStyles.repoHeaderWeight).className)
     : SIDEBAR_GROUP_LABEL_CLASS;
   const headerToggleHoverClass = isRepoHeader ? undefined : 'hover:text-sidebar-foreground';
 
@@ -750,7 +818,13 @@ const TaskGroupSection = memo(function TaskGroupSection({
           data-scope-item="row"
           data-sidebar-group-key={group.key}
           className={clsx(
-            stylex.props(taskStyles.groupHeader).className,
+            stylex.props(
+              taskStyles.groupHeader,
+              showActiveGroupState && taskStyles.activeGroupBorder,
+              showActiveGroupState || canNavigate || canToggle
+                ? taskStyles.pointer
+                : taskStyles.defaultCursor
+            ).className,
             headerTypographyClass,
             stylex.props(
               sidebarSurface.row,
@@ -759,12 +833,12 @@ const TaskGroupSection = memo(function TaskGroupSection({
                 : canNavigate && !isMobile && isRepoHeader && sidebarSurface.hover
             ).className,
             showActiveGroupState
-              ? 'cursor-pointer border-sidebar-ring/30'
+              ? undefined
               : canNavigate
-                ? cn('cursor-pointer', headerBaseColorClass)
+                ? headerBaseColorClass
                 : canToggle
-                  ? cn('cursor-pointer', headerBaseColorClass, !isMobile && headerToggleHoverClass)
-                  : cn('cursor-default', headerBaseColorClass)
+                  ? cn(headerBaseColorClass, !isMobile && headerToggleHoverClass)
+                  : headerBaseColorClass
           )}
           onClick={canNavigate ? handleNavigate : handleToggleGroup}
           onKeyDown={
@@ -788,7 +862,7 @@ const TaskGroupSection = memo(function TaskGroupSection({
           {showGroupHeaderIcon ? (
             <button
               type="button"
-              className="relative flex h-5 w-5 shrink-0 items-center justify-center"
+              {...stylex.props(taskStyles.groupToggle)}
               onClick={
                 canToggle
                   ? (e) => {
@@ -846,7 +920,7 @@ const TaskGroupSection = memo(function TaskGroupSection({
               aria-hidden="true"
             />
           ) : null}
-          <span className="flex-1" aria-hidden="true" />
+          <span {...stylex.props(taskStyles.flexOne)} aria-hidden="true" />
         </div>
 
         {resolvedTrailingContent}
@@ -861,15 +935,15 @@ const TaskGroupSection = memo(function TaskGroupSection({
             aria-label="New task"
             onClick={() => onNew?.(group.repoFullName ?? undefined)}
           >
-            <Plus className="h-3.5 w-3.5" />
+            <Plus {...stylex.props(taskStyles.smallGlyph)} />
           </button>
         )}
 
-        {headerAction ? <div className="shrink-0">{headerAction}</div> : null}
+        {headerAction ? <div {...stylex.props(taskStyles.noShrink)}>{headerAction}</div> : null}
       </div>
 
       {!group.collapsed && (
-        <div className="flex flex-col gap-px">
+        <div {...stylex.props(taskStyles.taskRows)}>
           {visibleTasks.length > 0 &&
             visibleTasks.map((task) => {
               const isSelected = task.taskId === selectedTaskId;
@@ -946,12 +1020,7 @@ const TaskGroupSection = memo(function TaskGroupSection({
                     onPointerDown={(e) => e.stopPropagation()}
                     onBlur={() => commitRename(task.taskId, task.title)}
                     onFocus={(e) => e.currentTarget.select()}
-                    className={cn(
-                      'min-w-0 w-full truncate bg-transparent outline-hidden',
-                      'border border-sidebar-ring/40 rounded-sm px-1 -mx-1',
-                      'text-sm',
-                      extraClassName
-                    )}
+                    className={clsx(stylex.props(taskStyles.renameInput).className, extraClassName)}
                   />
                 ) : (
                   <SidebarSessionTitleText
@@ -1002,7 +1071,8 @@ const TaskGroupSection = memo(function TaskGroupSection({
                   data-scope-item="row"
                   data-sidebar-session-id={task.taskId}
                   className={cn(
-                    'group relative w-full text-left',
+                    'group',
+                    stylex.props(taskStyles.rowBox).className,
                     // Both chat and repo rows are a single line now; the repo row's
                     // low-signal metadata (time / repo / branch / PR) moves to the
                     // desktop hover info card so both organize modes read equally compact.
@@ -1020,8 +1090,8 @@ const TaskGroupSection = memo(function TaskGroupSection({
                     // as a misplaced border.
                     useAnchor &&
                       'has-[a:focus-visible]:outline-hidden has-[a:focus-visible]:ring-1 has-[a:focus-visible]:ring-inset has-[a:focus-visible]:ring-sidebar-ring/40',
-                    !isSelectable && 'cursor-default',
-                    isSelectable && 'cursor-pointer'
+                    stylex.props(isSelectable ? taskStyles.pointer : taskStyles.defaultCursor)
+                      .className
                   )}
                   onClick={
                     useAnchor
@@ -1078,10 +1148,7 @@ const TaskGroupSection = memo(function TaskGroupSection({
                       }}
                     >
                       {task.isPinned ? (
-                        <Pin
-                          aria-hidden="true"
-                          className="h-3 w-3 shrink-0 text-sidebar-foreground-muted/80"
-                        />
+                        <Pin aria-hidden="true" {...stylex.props(taskStyles.pinGlyph)} />
                       ) : null}
                       {renderTitle()}
                     </div>
@@ -1093,10 +1160,15 @@ const TaskGroupSection = memo(function TaskGroupSection({
                       hasUnreadMessages={task.hasUnreadMessages}
                       restIcon={
                         isChatTask ? (
-                          <span className={cn('flex items-center gap-1.5', useAnchor && 'z-20')}>
+                          <span
+                            {...stylex.props(
+                              taskStyles.restIcons,
+                              useAnchor && taskStyles.raisedRest
+                            )}
+                          >
                             <TaskRowTime
                               relativeTime={relativeTime}
-                              className="text-xs text-muted-foreground"
+                              className={stylex.props(taskStyles.chatTime).className}
                             />
                             {task.sharing ? <SessionSharingIndicator state={task.sharing} /> : null}
                           </span>
@@ -1105,15 +1177,16 @@ const TaskGroupSection = memo(function TaskGroupSection({
                           isMobile ||
                           task.sharing?.visibility === 'private' ? (
                           <span
-                            className={cn(
-                              'flex select-none items-center gap-1.5 text-[11px] tabular-nums text-sidebar-foreground-muted/80',
-                              useAnchor && 'z-20'
+                            {...stylex.props(
+                              taskStyles.restIcons,
+                              taskStyles.repoRest,
+                              useAnchor && taskStyles.raisedRest
                             )}
                           >
                             {isMobile ? (
                               <TaskRowTime
                                 relativeTime={relativeTime}
-                                className="text-muted-foreground"
+                                className={stylex.props(taskStyles.timeInk).className}
                               />
                             ) : null}
                             {showMergeablePill ? <SessionMergeablePill /> : null}
@@ -1311,7 +1384,7 @@ const TaskGroupSection = memo(function TaskGroupSection({
                       key: 'archive',
                       label: archiveActionLabel,
                       ariaLabel: archiveTooltipLabel,
-                      icon: <Archive className="h-4 w-4" />,
+                      icon: <Archive {...stylex.props(taskStyles.archiveIcon)} />,
                       hideLabel: group.kind === 'chat',
                       className: 'bg-sidebar-hover text-sidebar-hover-foreground',
                       onClick: () => onArchiveTask?.(task.taskId),
@@ -1387,7 +1460,7 @@ function SortableRepoGroupSection({
       {...attributes}
       {...listeners}
     >
-      <GripVertical className="h-3.5 w-3.5" />
+      <GripVertical {...stylex.props(taskStyles.smallGlyph)} />
     </button>
   ) : null;
   const trailingContent = dragHandle;
@@ -1396,7 +1469,7 @@ function SortableRepoGroupSection({
     <div
       ref={setNodeRef}
       style={style}
-      className={cn('w-full', isDragging && 'opacity-60')}
+      {...stylex.props(taskStyles.repoWidth, isDragging && taskStyles.repoDragging)}
       data-repo-full-name={group.repoFullName}
     >
       <TaskGroupSection
@@ -1538,7 +1611,7 @@ export const TaskList = memo(function TaskList({
   if (!groups.length) {
     // Keep the header action reachable even when every group filtered out.
     if (headerAction) {
-      return <div className="flex h-7 shrink-0 items-center justify-end">{headerAction}</div>;
+      return <div {...stylex.props(taskStyles.emptyHeader)}>{headerAction}</div>;
     }
     return null;
   }
