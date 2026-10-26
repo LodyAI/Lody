@@ -59,11 +59,20 @@ late decoding after settings unmount cannot publish. Unsupported remote URLs and
 malformed persisted values normalize safely. No assets or code were copied from
 Zeron and no additional dependency was introduced.
 
+Light and dark modes now own separate images and adjustments. Both the editor
+and landing page select by the app's resolved theme, including system changes and
+theme previews. Users switch the existing theme selector to edit the other mode;
+the section description identifies the active mode. Legacy single-wallpaper
+preferences seed both modes without writing on read; the next edit stores the pair.
+Async uploads retain their starting mode, and reset/removal only affect that mode.
+The existing appearance suite covers migration, independent edits, theme switching
+and restoration after remount.
+
 ## Verification
 
 Behavioral coverage extends the existing appearance suite for restoration,
 adjustments, reset/removal, storage failure, invalid image selection and cross-window
-updates. The appearance and landing submission suites pass all 15 tests. A Chromium
+updates. The appearance and landing submission suites pass all 16 tests. A Chromium
 harness rendering the real `WebChatLandingScreen` also verifies a transparent
 composer dock with wallpaper, continued typing, a short viewport, and restoration
 of the opaque dock after removing the image. Its composer child is a synthetic

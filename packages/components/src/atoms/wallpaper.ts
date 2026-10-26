@@ -4,6 +4,7 @@ import {
   readWallpaper,
   WALLPAPER_STORAGE_KEY,
   type WallpaperSettings,
+  type WallpaperMode,
 } from '@/lib/wallpaper';
 
 const state = atom(readWallpaper());
@@ -23,8 +24,9 @@ state.onMount = (set) => {
 
 export const wallpaperAtom = atom(
   (get) => get(state),
-  (get, set, patch: Partial<WallpaperSettings>) => {
-    const next = normalizeWallpaper({ ...get(state), ...patch });
+  (get, set, { mode, patch }: { mode: WallpaperMode; patch: Partial<WallpaperSettings> }) => {
+    const current = get(state);
+    const next = { ...current, [mode]: normalizeWallpaper({ ...current[mode], ...patch }) };
     // Persist first: quota/permission errors leave both the old image and UI intact.
     localStorage.setItem(WALLPAPER_STORAGE_KEY, JSON.stringify(next));
     set(state, next);

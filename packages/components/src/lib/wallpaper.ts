@@ -37,11 +37,25 @@ export function normalizeWallpaper(value: unknown): WallpaperSettings {
   };
 }
 
-export function readWallpaper(): WallpaperSettings {
+export type WallpaperMode = 'light' | 'dark';
+export type WallpaperPreferences = Record<WallpaperMode, WallpaperSettings>;
+
+export function normalizeWallpaperPreferences(value: unknown): WallpaperPreferences {
+  if (value && typeof value === 'object' && ('light' in value || 'dark' in value)) {
+    const input = value as Partial<WallpaperPreferences>;
+    return { light: normalizeWallpaper(input.light), dark: normalizeWallpaper(input.dark) };
+  }
+  // Existing single-image preferences seed both modes until edited independently.
+  return { light: normalizeWallpaper(value), dark: normalizeWallpaper(value) };
+}
+
+export function readWallpaper(): WallpaperPreferences {
   try {
-    return normalizeWallpaper(JSON.parse(localStorage.getItem(WALLPAPER_STORAGE_KEY) ?? 'null'));
+    return normalizeWallpaperPreferences(
+      JSON.parse(localStorage.getItem(WALLPAPER_STORAGE_KEY) ?? 'null')
+    );
   } catch {
-    return DEFAULT_WALLPAPER;
+    return normalizeWallpaperPreferences(null);
   }
 }
 

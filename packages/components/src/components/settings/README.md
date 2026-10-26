@@ -33,7 +33,12 @@ from top to bottom. Existing composer/card materials and shadows stay theme-owne
 
 `lib/wallpaper.ts` decodes PNG/JPEG/WebP files up to 20 MB, scales their longest
 edge to at most 1920px and encodes a bounded WebP copy. `atoms/wallpaper.ts`
-persists it with the adjustments under `lody-appearance-wallpaper`, updates other
+persists separate light/dark images and adjustments under `lody-appearance-wallpaper`, updates other
 windows through storage events, and keeps the previous selection if saving fails.
+The editor and landing page use the resolved app theme, including system changes
+and previews. Switch the theme above the editor to configure the other mode.
+Legacy single-wallpaper values seed both modes; the first edit persists the pair.
+An upload targets the mode in which it started, even if the theme changes during decoding.
+Reset and Remove affect only that mode.
 No source path, remote image URL or workspace document is involved. This preference
 survives cache clearing. Mobile and existing conversations retain their backgrounds.

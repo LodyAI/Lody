@@ -1,5 +1,6 @@
 import { useMemo, useState, type ReactNode, type Ref } from 'react';
 import { useAtomValue } from 'jotai';
+import { useResolvedTheme } from '@/theme-provider';
 import { wallpaperAtom } from '@/atoms/wallpaper';
 import { WallpaperBackdrop } from '../wallpaper-backdrop';
 import * as stylex from '@stylexjs/stylex';
@@ -89,7 +90,8 @@ export function WebChatLandingScreen({
   dropKind = 'session-mention',
   dropHandlers,
 }: WebChatLandingScreenProps) {
-  const wallpaper = useAtomValue(wallpaperAtom);
+  const mode = useResolvedTheme();
+  const wallpaper = useAtomValue(wallpaperAtom)[mode];
   const isElectron = isElectronRenderer();
   const isElectronFullscreen = useElectronFullscreen();
   // The stage and its group, for what in the group fits itself to the window (`landing-stage.ts`).

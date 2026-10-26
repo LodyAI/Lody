@@ -5530,6 +5530,8 @@
   "storageGuard.quit": "退出 Lody",
   "settings.wallpaper.title": "壁纸",
   "settings.wallpaper.description": "为新对话首页添加向下渐隐的背景。",
+  "settings.wallpaper.lightDescription": "正在配置浅色模式的壁纸。切换上方主题可配置深色模式。",
+  "settings.wallpaper.darkDescription": "正在配置深色模式的壁纸。切换上方主题可配置浅色模式。",
   "settings.wallpaper.image": "背景图片",
   "settings.wallpaper.localHint": "仅保存在本机。支持 PNG、JPEG 或 WebP，最大 20 MB。",
   "settings.wallpaper.choose": "选择图片",

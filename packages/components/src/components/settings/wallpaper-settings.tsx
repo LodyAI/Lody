@@ -5,6 +5,7 @@ import * as stylex from '@stylexjs/stylex';
 import { Button } from '@lody/ui/button';
 import { colors, shadow } from '@lody/ui/tokens/colors.stylex';
 import { radius, space, text } from '@lody/ui/tokens/scales.stylex';
+import { useResolvedTheme } from '@/theme-provider';
 import { wallpaperAtom } from '@/atoms/wallpaper';
 import {
   DEFAULT_WALLPAPER,
@@ -62,7 +63,9 @@ const styles = stylex.create({
 
 export function WallpaperSettings() {
   const { t } = useTranslation();
-  const [settings, setSettings] = useAtom(wallpaperAtom);
+  const mode = useResolvedTheme();
+  const [preferences, setSettings] = useAtom(wallpaperAtom);
+  const settings = preferences[mode];
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(false);
   const input = useRef<HTMLInputElement>(null);
@@ -76,7 +79,7 @@ export function WallpaperSettings() {
 
   function update(patch: Partial<Settings>) {
     try {
-      setSettings(patch);
+      setSettings({ mode, patch });
       setError(false);
     } catch {
       setError(true);
@@ -100,7 +103,11 @@ export function WallpaperSettings() {
   return (
     <CompactSection
       title={t('settings.wallpaper.title')}
-      description={t('settings.wallpaper.description')}
+      description={t(
+        mode === 'dark'
+          ? 'settings.wallpaper.darkDescription'
+          : 'settings.wallpaper.lightDescription'
+      )}
     >
       <CompactRow label={t('settings.wallpaper.image')} helper={t('settings.wallpaper.localHint')}>
         <div {...stylex.props(styles.actions)}>

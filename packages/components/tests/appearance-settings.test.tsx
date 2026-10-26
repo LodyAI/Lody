@@ -20,6 +20,12 @@ import { Dialog } from '../src/ui/dialog';
   globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
 ).IS_REACT_ACT_ENVIRONMENT = true;
 
+const wallpaperTheme = vi.hoisted(() => ({ mode: 'light' as 'light' | 'dark' }));
+vi.mock('../src/theme-provider', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../src/theme-provider')>()),
+  useResolvedTheme: () => wallpaperTheme.mode,
+}));
+
 const originalScrollIntoView = Element.prototype.scrollIntoView;
 
 class TestPointerEvent extends MouseEvent {
@@ -117,6 +123,7 @@ describe('AppearanceSettingsView', () => {
 
   beforeEach(async () => {
     await initI18n('en');
+    wallpaperTheme.mode = 'light';
     vi.stubGlobal(
       'ResizeObserver',
       class ResizeObserver {
@@ -167,19 +174,68 @@ describe('AppearanceSettingsView', () => {
     const transparency = container!.querySelector<HTMLInputElement>('[aria-label="Transparency"]')!;
     expect(transparency.value).toBe('30');
     await act(async () => setInputValue(transparency, '65'));
-    expect(store.get(wallpaperAtom).opacity).toBe(35);
-    expect(JSON.parse(localStorage.getItem(WALLPAPER_STORAGE_KEY)!)).toMatchObject({
+    expect(store.get(wallpaperAtom).light.opacity).toBe(35);
+    expect(JSON.parse(localStorage.getItem(WALLPAPER_STORAGE_KEY)!).light).toMatchObject({
       image,
       opacity: 35,
     });
     const button = (label: string) =>
       Array.from(container!.querySelectorAll('button')).find((node) => node.textContent === label)!;
     await act(async () => button('Reset adjustments').click());
-    expect(store.get(wallpaperAtom)).toEqual({ ...DEFAULT_WALLPAPER, image });
+    expect(store.get(wallpaperAtom).light).toEqual({ ...DEFAULT_WALLPAPER, image });
     await act(async () => button('Remove').click());
     expect(container?.querySelector('[data-wallpaper-backdrop]')).toBeNull();
-    expect(JSON.parse(localStorage.getItem(WALLPAPER_STORAGE_KEY)!).image).toBeNull();
+    expect(JSON.parse(localStorage.getItem(WALLPAPER_STORAGE_KEY)!).light.image).toBeNull();
     expect(transparency.disabled).toBe(true);
+  });
+
+  it('keeps mode-specific images and adjustments independent across theme switches and reloads', async () => {
+    const light = { ...DEFAULT_WALLPAPER, image: 'data:image/png;base64,bGlnaHQ=' };
+    const dark = { ...DEFAULT_WALLPAPER, image: 'data:image/png;base64,ZGFyaw==', blur: 12 };
+    localStorage.setItem(WALLPAPER_STORAGE_KEY, JSON.stringify(light));
+    let store = createStore();
+    const render = () =>
+      root?.render(
+        <Provider store={store}>
+          <WallpaperSettings />
+        </Provider>
+      );
+    await act(async () => render());
+    expect(store.get(wallpaperAtom)).toEqual({ light, dark: light });
+    await act(async () => {
+      store.set(wallpaperAtom, { mode: 'dark', patch: dark });
+      wallpaperTheme.mode = 'dark';
+      render();
+    });
+    expect(container?.textContent).toContain('Editing the dark-mode wallpaper');
+    expect(container!.querySelector<HTMLInputElement>('[aria-label="Blur"]')!.value).toBe('12');
+    expect(
+      container!.querySelector('[data-wallpaper-backdrop] > div')?.getAttribute('style')
+    ).toContain(dark.image);
+    await act(async () =>
+      setInputValue(container!.querySelector('[aria-label="Transparency"]')!, '80')
+    );
+    expect(store.get(wallpaperAtom).dark.opacity).toBe(20);
+    expect(store.get(wallpaperAtom).light).toEqual(light);
+    await act(async () => root?.render(null));
+    store = createStore();
+    await act(async () => render());
+    expect(store.get(wallpaperAtom).dark).toEqual({ ...dark, opacity: 20 });
+    await act(async () =>
+      Array.from(container!.querySelectorAll('button'))
+        .find((b) => b.textContent === 'Remove')!
+        .click()
+    );
+    expect(store.get(wallpaperAtom).dark.image).toBeNull();
+    await act(async () => {
+      wallpaperTheme.mode = 'light';
+      render();
+    });
+    expect(container?.textContent).toContain('Editing the light-mode wallpaper');
+    expect(
+      container!.querySelector('[data-wallpaper-backdrop] > div')?.getAttribute('style')
+    ).toContain(light.image);
+    expect(store.get(wallpaperAtom).light).toEqual(light);
   });
 
   it('keeps the active wallpaper and reports failed persistence', async () => {
@@ -198,7 +254,7 @@ describe('AppearanceSettingsView', () => {
     });
     const transparency = container!.querySelector<HTMLInputElement>('[aria-label="Transparency"]')!;
     await act(async () => setInputValue(transparency, '80'));
-    expect(store.get(wallpaperAtom)).toEqual(saved);
+    expect(store.get(wallpaperAtom).light).toEqual(saved);
     expect(JSON.parse(localStorage.getItem(WALLPAPER_STORAGE_KEY)!)).toEqual(saved);
     expect(container!.querySelector('[role="alert"]')?.textContent).toContain('Could not save');
   });
@@ -219,7 +275,7 @@ describe('AppearanceSettingsView', () => {
       value: [new File(['<svg/>'], 'test.svg', { type: 'image/svg+xml' })],
     });
     await act(async () => input.dispatchEvent(new Event('change', { bubbles: true })));
-    expect(store.get(wallpaperAtom)).toEqual(saved);
+    expect(store.get(wallpaperAtom).light).toEqual(saved);
     expect(container!.querySelector('[role="alert"]')).not.toBeNull();
     expect(container!.querySelector('[data-wallpaper-backdrop]')).not.toBeNull();
   });
@@ -234,7 +290,7 @@ describe('AppearanceSettingsView', () => {
         </Provider>
       )
     );
-    expect(store.get(wallpaperAtom)).toEqual(DEFAULT_WALLPAPER);
+    expect(store.get(wallpaperAtom).light).toEqual(DEFAULT_WALLPAPER);
     await act(async () => {
       localStorage.setItem(
         WALLPAPER_STORAGE_KEY,
@@ -249,7 +305,7 @@ describe('AppearanceSettingsView', () => {
         new StorageEvent('storage', { key: WALLPAPER_STORAGE_KEY, storageArea: localStorage })
       );
     });
-    expect(store.get(wallpaperAtom)).toEqual({
+    expect(store.get(wallpaperAtom).light).toEqual({
       image: null,
       opacity: 0,
       blur: 24,

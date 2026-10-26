@@ -5536,6 +5536,8 @@
   "storageGuard.quit": "Quit Lody",
   "settings.wallpaper.title": "Wallpaper",
   "settings.wallpaper.description": "A fading backdrop for the new conversation page.",
+  "settings.wallpaper.lightDescription": "Editing the light-mode wallpaper. Switch the theme above to configure dark mode.",
+  "settings.wallpaper.darkDescription": "Editing the dark-mode wallpaper. Switch the theme above to configure light mode.",
   "settings.wallpaper.image": "Background image",
   "settings.wallpaper.localHint": "Stored only on this device. PNG, JPEG or WebP, up to 20 MB.",
   "settings.wallpaper.choose": "Choose image",
