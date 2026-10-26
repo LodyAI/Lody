@@ -19,8 +19,10 @@ task id 与 ACP session 作用域不变。事件继续走现有的按投递顺�
 
 ## 验证
 
-回归测试将合成的 `local_bash` 启动事件和缺少类型的完成事件转换后送入历史写入器，并在迟到进度重放后检查重建任务仍保留 Bash actor、完成状态和摘要。转换器测试检查显示回退标题仍存在、Claude 缺少 actor 元数据时会省略该字段、显式报告的 task 类型仍会保留，且 Kimi actor 回退保持不变。
+拥有该行为边界的测试依次转换 `task_started(task_type=local_bash)`、缺少类型的完成 `task_notification` 和迟到的无类型 `task_progress`，通过历史写入器应用事件，再确认重建结果只有一个 task id，且保留 Bash actor、完成状态和摘要。在独立 clone 的源码提交 `779edf736b072965dcfb92618352e050a02620b5` 中，临时恢复 Claude 缺失类型时写入元数据回退的行为后，此用例失败：期望 `actor: local_bash`，实际得到 `actor: Claude task`（1 项失败，26 项跳过）。恢复已提交转换器后，同样的 owning suites 通过：`history.test.ts` 与 `claude-task-lifecycle.test.ts` 共 33 项通过。两套测试也验证了显式 task 类型更新和 Kimi 回退不变。本次跟进未新增回归测试。
 
-本地无法运行测试：该 nested checkout 没有 `node_modules`，且找不到 `vitest`。仓库检查和完整格式化也因缺少工作区工具而停止；变更文件通过使用 `pnpm dlx` 调用锁定版本 Oxfmt 的检查。恢复 Kimi 回退配置后，PR 远端 CLI 套件通过（333 个测试文件通过，1 个跳过），远端 Static checks 也通过。第一次远端运行在移除共享回退时因既有 Kimi actor 回退断言失败；保留按 provider 配置的元数据回退后消除了该回归。当前 Node 为 26.11.1，低于声明的 26.12.1 最低版本，机器上也没有其他满足要求的版本。由于缺少相同依赖，本地桌面构建在启动前停止，因此未能产生真实 UI 前后截图。`pnpm run docs check` 报告了指向缺失 ACP 子模块的既存损坏链接和缺失翻译；没有报告这次新增的双语 note。这里如实记录这些限制，不将它们视为验收通过。
+Storybook 使用合成会话历史投影渲染现有 `SubagentTaskPanel`，输入序列与上面相同。真实面板基线显示 `Claude task` 且没有 Command 区；修复后显示 `Bash` 和关联的合成命令。截图均标注源码 SHA 和输入：[基线面板](https://github.com/user-attachments/assets/b5b3dd76-9619-4ee2-bb6e-5db0993ec563)、[基线详情](https://github.com/user-attachments/assets/333e5b35-53aa-4f54-8604-dd882494a8a7)、[修复后面板](https://github.com/user-attachments/assets/c0e930ff-179a-4c66-9e84-dc138ae1c001)、[修复后详情](https://github.com/user-attachments/assets/a72f27f5-95c6-4ce8-8f30-3ded400e95bb)。临时 story 和回退修改仅在 `/tmp/lody-1809-verify`，未进入 PR。
+
+验证在 Node 26.12.1 和独立 clone 的 frozen root install 下进行。该环境中的 `pnpm format` 通过。完整 `pnpm check` 在 `prepare:acp-adapters` 停止，因为锁定的 Claude ACP 子模块没有安装 package-local TypeScript 依赖；root workspace 将该子模块作为独立依赖排除。变更行为由本地通过的 owning suites 和最新远端 CLI、Static checks 覆盖：[CLI job](https://github.com/LodyAI/Lody/actions/runs/40297222519/job/121486103742)、[Static job](https://github.com/LodyAI/Lody/actions/runs/40297222519/job/121486103559)。同一 PR HEAD 的远端桌面 smoke、浏览器测试、其余测试分片和贡献策略检查也均通过。`pnpm run docs check` 仍报告缺失 ACP 子模块链接和未翻译文档等既有问题，没有报告这两份更新的 note。
 
 PR：https://github.com/LodyAI/Lody/pull/1906

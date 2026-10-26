@@ -19,19 +19,31 @@ The task id and ACP session scope are unchanged. Events continue through the exi
 
 ## Validation
 
-The regression test converts a synthetic `local_bash` start and untyped completion, applies both through the history writer, and checks the reconstructed task retains the Bash actor, completed status and summary after a late progress replay. Converter tests check that the display fallback remains while absent Claude actor metadata is omitted, explicit task types are retained, and Kimi's fallback actor remains.
+The owning behavior test converts `task_started(task_type=local_bash)`, an untyped
+completed `task_notification`, and a late untyped `task_progress`, applies them through
+the history writer, then checks the reconstructed task keeps one task id, the Bash actor,
+completed status, and summary. In the independent clone at source commit
+`779edf736b072965dcfb92618352e050a02620b5`, temporarily restoring Claude's missing-type
+metadata fallback made that test fail: expected `actor: local_bash`, received
+`actor: Claude task` (1 failed, 26 skipped). Restoring the committed converter made the
+same owning suites pass: `33 passed` across `history.test.ts` and
+`claude-task-lifecycle.test.ts`. Those suites also verify explicit task type updates and
+the unchanged Kimi fallback. No regression test was added for this follow-up.
 
-The test could not run locally because this nested checkout has no `node_modules` and
-`vitest` is unavailable. The repository check and full formatter also stop on missing
-workspace tools; the changed files pass the pinned Oxfmt check through `pnpm dlx`.
-The PR's remote CLI suite passed after the Kimi fallback was restored (`333` CLI test
-files passed, one skipped), and remote Static checks passed. The first remote run failed
-the existing Kimi fallback assertion when the shared fallback was removed; keeping a
-provider-specific metadata fallback fixed that regression.
-The checkout has Node 26.11.1, below the declared 26.12.1 floor, and no other installed
-version meets the floor. The local desktop build stops before launch for the same missing
-dependencies, so no actual UI before/after capture was produced. `pnpm run docs check`
-reports existing broken links to absent ACP submodules and missing translations; neither
-new note is reported. These limits are recorded rather than treated as passing acceptance.
+Storybook rendered the existing `SubagentTaskPanel` with a synthetic session-history
+projection for the same event sequence. The real panel shows `Claude task` and no
+Command section in the baseline; the fixed panel shows `Bash` and the linked synthetic
+command. The screenshots identify the source SHA and input: [baseline panel](https://github.com/user-attachments/assets/b5b3dd76-9619-4ee2-bb6e-5db0993ec563), [baseline detail](https://github.com/user-attachments/assets/333e5b35-53aa-4f54-8604-dd882494a8a7), [fixed panel](https://github.com/user-attachments/assets/c0e930ff-179a-4c66-9e84-dc138ae1c001), and [fixed detail](https://github.com/user-attachments/assets/a72f27f5-95c6-4ce8-8f30-3ded400e95bb). The temporary story and fallback edit were confined to `/tmp/lody-1809-verify` and are not part of the PR.
+
+Validation used Node 26.12.1 and a frozen root install in that independent clone. `pnpm
+format` passed there. Full `pnpm check` stops in `prepare:acp-adapters` because the locked
+Claude ACP submodule does not have its package-local TypeScript dependency installed;
+the root workspace excludes that submodule's isolated dependencies. The changed behavior
+is covered by the green local owning suites and the latest remote CLI and Static checks:
+[CLI job](https://github.com/LodyAI/Lody/actions/runs/40297222519/job/121486103742),
+[Static job](https://github.com/LodyAI/Lody/actions/runs/40297222519/job/121486103559).
+The remote desktop smoke, browser tests, remaining test shards, and contribution checks
+also passed on the same PR head. `pnpm run docs check` reports existing broken links to
+absent ACP submodules and untranslated notes; the changed notes are not among them.
 
 PR: https://github.com/LodyAI/Lody/pull/1906
