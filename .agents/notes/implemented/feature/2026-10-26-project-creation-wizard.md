@@ -43,6 +43,11 @@ picker to offer creation beside Settings and the sidebar menu.
   wizard remembers the folder tick, so either tab can be unticked independently;
   unticking GitHub returns the member to the local copy. GitHub-only scope also turns
   copy-preferring members into plain clones.
+- The GitHub tab lists only repositories the workspace's GitHub integration lists
+  (`ProjectMemberSourceOption.onGithub`). A repository known only from a local
+  folder's remote is offered as that folder; ticking it as a clone would need
+  access the workspace does not have. A member already cloned from one keeps its
+  row so it can be unticked.
 - Lists show every row; search filters but nothing is held back for it. A records
   card clips its rows, so list cards opt out of flex shrinking; otherwise the
   GitHub-only list shrank to the dialog and could not scroll.

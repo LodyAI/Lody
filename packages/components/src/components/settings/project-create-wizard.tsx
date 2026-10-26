@@ -779,7 +779,14 @@ function SourcesStep({
   // Every GitHub repository, including those with a copy here: choosing one
   // there as well is allowed, and only noted.
   const repositoryRows: PickRow[] = sources
-    .filter((option) => option.kind === 'repository')
+    // Only what GitHub integration can clone, plus a member already cloned
+    // from one it no longer lists, so it can still be unticked.
+    .filter(
+      (option) =>
+        option.kind === 'repository' &&
+        (option.onGithub === true ||
+          (members.has(option.key) && usageOf(members.get(option.key)!) === 'worktree'))
+    )
     .map((option) => {
       const member = members.get(option.key);
       const both = alsoFolder.has(option.key);

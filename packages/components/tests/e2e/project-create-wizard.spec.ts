@@ -40,6 +40,11 @@ test('a repository may be ticked as a folder and on GitHub, with a notice only',
   await page.getByRole('tab', { name: /GitHub repositories/ }).click();
   // The whole list is shown, including repositories with a copy here.
   await expect(page.getByRole('checkbox', { name: 'acme/service-24', exact: true })).toBeVisible();
+  // A remote GitHub integration cannot reach is only offered as the folder.
+  await expect(page.getByRole('checkbox', { name: 'private/tool', exact: true })).toHaveCount(0);
+  await page.getByRole('tab', { name: /Folders on/ }).click();
+  await expect(page.getByRole('checkbox', { name: 'tool', exact: true })).toBeVisible();
+  await page.getByRole('tab', { name: /GitHub repositories/ }).click();
   const web = page.getByRole('checkbox', { name: 'acme/web', exact: true });
   await expect(web).not.toBeChecked();
   await web.click();

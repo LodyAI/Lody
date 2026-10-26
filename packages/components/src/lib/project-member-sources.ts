@@ -31,6 +31,12 @@ export type ProjectMemberSourceOption = {
   label: string;
   /** The GitHub description of a repository, when known. */
   description?: string;
+  /**
+   * Repository rows: the workspace's GitHub integration can reach it. A
+   * repository known only from a folder's remote cannot be cloned for a
+   * conversation, so it is offered only as that folder.
+   */
+  onGithub?: boolean;
   /** Repository rows: every machine holding a copy. Directory rows: its one machine. */
   copies: readonly ProjectMemberLocalCopy[];
   /**
@@ -67,7 +73,12 @@ export function buildProjectMemberSourceOptions(input: {
 }): ProjectMemberSourceOption[] {
   const repositories = new Map<
     string,
-    { label: string; description?: string; copies: ProjectMemberLocalProjectInput[] }
+    {
+      label: string;
+      description?: string;
+      copies: ProjectMemberLocalProjectInput[];
+      onGithub?: boolean;
+    }
   >();
   const directories: ProjectMemberSourceOption[] = [];
   for (const entry of input.localProjects) {
@@ -100,11 +111,13 @@ export function buildProjectMemberSourceOptions(input: {
     if (row) {
       row.label = repo.fullName;
       row.description = repo.description ?? undefined;
+      row.onGithub = true;
     } else {
       repositories.set(key, {
         label: repo.fullName,
         description: repo.description ?? undefined,
         copies: [],
+        onGithub: true,
       });
     }
   }
@@ -123,6 +136,7 @@ export function buildProjectMemberSourceOptions(input: {
       source,
       label: row.label,
       ...(row.description ? { description: row.description } : {}),
+      ...(row.onGithub ? { onGithub: true } : {}),
       copies: ordered.map(toCopy),
       localKeys: row.copies.map((copy) =>
         getProjectMemberSourceKey({

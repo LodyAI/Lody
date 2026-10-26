@@ -44,6 +44,18 @@ const byKey = new Map(options.map((option) => [option.key, option]));
 const keys = (items: readonly ProjectMemberSourceOption[]) => items.map((option) => option.key);
 
 describe('project member sources', () => {
+  it('marks only repositories the GitHub integration lists as reachable on GitHub', () => {
+    const sources = buildProjectMemberSourceOptions({
+      localProjects: [local(here, 'web', 'acme/web'), local(here, 'tool', 'private/tool')],
+      githubRepositories: [{ fullName: 'acme/web' }],
+    });
+    const of = (key: string) => sources.find((option) => option.key === key);
+    expect(of('github:acme/web')?.onGithub).toBe(true);
+    // Known only from a folder's remote: offered as that folder, never as a clone.
+    expect(of('github:private/tool')).toMatchObject({ kind: 'repository' });
+    expect(of('github:private/tool')?.onGithub).toBeUndefined();
+  });
+
   it('merges every copy of a repository into one row, in the order the daemon picks', () => {
     expect(keys(options)).toEqual([
       'github:acme/web',

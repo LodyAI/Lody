@@ -55,6 +55,8 @@ const sources = buildProjectMemberSourceOptions({
     local(here, 'api', '/Users/demo/code/api', 'acme/api'),
     local(here, 'notes', '/Users/demo/Documents/notes'),
     local(here, 'design', '/Users/demo/Documents/design-system'),
+    // Its remote is outside the workspace's GitHub integration.
+    local(here, 'tool', '/Users/demo/code/tool', 'private/tool'),
     local(studio, 'web', '/Users/wibus/web', 'acme/web'),
     local(studio, 'ios', '/Users/wibus/ios'),
     local(mini, 'api', '/Users/lampese/api', 'acme/api'),
