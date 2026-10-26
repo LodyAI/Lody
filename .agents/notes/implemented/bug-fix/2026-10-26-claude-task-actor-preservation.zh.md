@@ -23,4 +23,4 @@ task id 与 ACP session 作用域不变。事件继续走现有的按投递顺�
 
 本地无法运行测试：该 nested checkout 没有 `node_modules`，且找不到 `vitest`。仓库检查和完整格式化也因缺少工作区工具而停止；变更文件通过使用 `pnpm dlx` 调用锁定版本 Oxfmt 的检查。当前 Node 为 26.11.1，低于声明的 26.12.1 最低版本，机器上也没有其他满足要求的版本。由于缺少相同依赖，本地桌面构建在启动前停止，因此未能产生真实 UI 前后截图。`pnpm run docs check` 报告了指向缺失 ACP 子模块的既存损坏链接和缺失翻译；没有报告这次新增的双语 note。这里如实记录这些限制，不将它们视为验收通过。
 
-PR：待创建
+PR：https://github.com/LodyAI/Lody/pull/1906

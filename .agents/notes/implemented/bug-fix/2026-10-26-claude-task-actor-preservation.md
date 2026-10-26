@@ -30,4 +30,4 @@ dependencies, so no actual UI before/after capture was produced. `pnpm run docs 
 reports existing broken links to absent ACP submodules and missing translations; neither
 new note is reported. These limits are recorded rather than treated as passing acceptance.
 
-PR: pending
+PR: https://github.com/LodyAI/Lody/pull/1906
