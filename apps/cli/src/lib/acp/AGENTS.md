@@ -67,6 +67,12 @@ goes silently empty (unit tests fabricate history and will not catch it).
 The former `_meta.claudeCode.toolName` carrier is read only by the centralized
 one-release compatibility path; new provider output must use the Core contract.
 
+Replay safety and content settlement use independent observations. Stamp content
+at enqueue against the target epoch and retain it through flush; late/suppressed
+events cannot mark another turn. Metadata, usage, checklists and lifecycle status
+do not establish a reply. Unknown state refuses replay and lets settlement fail
+open. Content cases and provider differences: [decision](../../../../../.agents/notes/implemented/bug-fix/2026-10-26-silent-turn-content-observation.md).
+
 ## Flush, evidence, and shutdown
 
 Permission requests must drain earlier buffered/in-flight ACP updates before

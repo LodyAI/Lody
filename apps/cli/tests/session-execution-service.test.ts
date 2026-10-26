@@ -2576,7 +2576,8 @@ describe('SessionExecutionService', () => {
     inputAuthor?: SessionHistoryInput['author'];
     earlierInputAuthor?: SessionHistoryInput['author'];
     attempts?: number;
-    hasPromptOutputForTurn: boolean;
+    hasPromptEventsForTurn: boolean;
+    content?: boolean | 'unobservable';
     dispatchSource?: 'rpc' | 'crdt' | 'queue' | 'goal';
     promptFailure?: unknown;
     notificationAudience?: TurnResultAudience;
@@ -2684,8 +2685,12 @@ describe('SessionExecutionService', () => {
           });
         }),
       },
-      observePromptOutputForTurn: vi.fn(() => options.hasPromptOutputForTurn),
-      hasPromptOutputForTurn: vi.fn(() => options.hasPromptOutputForTurn),
+      observePromptContentForTurn: vi.fn(() =>
+        options.content === 'unobservable'
+          ? undefined
+          : (options.content ?? options.hasPromptEventsForTurn)
+      ),
+      hasPromptEventsForTurn: vi.fn(() => options.hasPromptEventsForTurn),
     });
 
     const service = new SessionExecutionService(deps);
@@ -2734,7 +2739,7 @@ describe('SessionExecutionService', () => {
     async ({ output, outcome }) => {
       const { notificationFacts, getHistory } = await runSilentPromptTurn({
         sessionId: 'notification-source',
-        hasPromptOutputForTurn: output,
+        hasPromptEventsForTurn: output,
       });
       expect(notificationFacts).toEqual([
         {
@@ -2759,7 +2764,7 @@ describe('SessionExecutionService', () => {
     } as const;
     const { notificationFacts } = await runSilentPromptTurn({
       sessionId: 'notification-child',
-      hasPromptOutputForTurn: true,
+      hasPromptEventsForTurn: true,
       notificationAudience: audience,
     });
     expect(notificationFacts).toEqual([
@@ -2778,7 +2783,7 @@ describe('SessionExecutionService', () => {
   it('publishes provider failure separately from successful completion', async () => {
     const { notificationFacts, getHistory } = await runSilentPromptTurn({
       sessionId: 'notification-failure',
-      hasPromptOutputForTurn: true,
+      hasPromptEventsForTurn: true,
       promptFailure: new Error('synthetic provider failure'),
     });
     expect(notificationFacts).toEqual([
@@ -2798,7 +2803,7 @@ describe('SessionExecutionService', () => {
   it('retains disconnected execution as unknown instead of claiming success', async () => {
     const { notificationFacts } = await runSilentPromptTurn({
       sessionId: 'notification-disconnected',
-      hasPromptOutputForTurn: true,
+      hasPromptEventsForTurn: true,
       promptFailure: new Error('Connection is disposed'),
     });
     expect(notificationFacts.map((fact) => fact.outcome)).toEqual([
@@ -2810,7 +2815,7 @@ describe('SessionExecutionService', () => {
     const attempts: TurnOutcomeFact[] = [];
     const { notificationFacts, getHistory, agentClient } = await runSilentPromptTurn({
       sessionId: 'notification-store-failure',
-      hasPromptOutputForTurn: true,
+      hasPromptEventsForTurn: true,
       onTurnOutcome: async (fact) => {
         attempts.push(fact);
         throw new Error('synthetic notification failure');
@@ -2826,7 +2831,7 @@ describe('SessionExecutionService', () => {
     const { deps, sessionDoc, notificationFacts, upsertDocMeta, agentClient, getHistory } =
       await runSilentPromptTurn({
         sessionId: 'session-silent-turn',
-        hasPromptOutputForTurn: false,
+        hasPromptEventsForTurn: false,
       });
 
     expect(agentClient.prompt).toHaveBeenCalled();
@@ -2852,7 +2857,7 @@ describe('SessionExecutionService', () => {
   it('publishes a single successful output fact', async () => {
     const { deps, getHistory, notificationFacts } = await runSilentPromptTurn({
       sessionId: 'session-output-turn',
-      hasPromptOutputForTurn: true,
+      hasPromptEventsForTurn: true,
     });
 
     expect(deps.recordChatFailure).not.toHaveBeenCalled();
@@ -2860,6 +2865,29 @@ describe('SessionExecutionService', () => {
     expect(notificationFacts).toHaveLength(1);
     expect(notificationFacts[0]?.outcome).toEqual({ kind: 'succeeded' });
   });
+
+  it.each([
+    {
+      content: false as const,
+      status: 'failed',
+      outcome: { kind: 'failed', code: 'no_agent_output' },
+    },
+    { content: 'unobservable' as const, status: 'handled', outcome: { kind: 'succeeded' } },
+  ])(
+    'settles content independently of replay evidence ($content)',
+    async ({ content, status, outcome }) => {
+      const result = await runSilentPromptTurn({
+        sessionId: 'independent-observations',
+        hasPromptEventsForTurn: true,
+        content,
+      });
+      expect(result.getHistory()[0]?.status).toBe(status);
+      expect(result.notificationFacts.map((fact) => fact.outcome)).toEqual([outcome]);
+      expect(
+        result.service.getExecutionSnapshot('independent-observations' as SessionId).hasActiveTurn
+      ).toBe(false);
+    }
+  );
 
   it.each(['agent', 'human'] as const)(
     'uses the exact %s-authored input for completion notifications',
@@ -2874,7 +2902,7 @@ describe('SessionExecutionService', () => {
       const { deps, notificationFacts, getHistory, getStatus, finalizationOwners } =
         await runSilentPromptTurn({
           sessionId: `session-notify-${kind}`,
-          hasPromptOutputForTurn: true,
+          hasPromptEventsForTurn: true,
           notificationAudience:
             kind === 'agent'
               ? { kind: 'agent', sessionId: 'sender-session' as SessionId, turnId: 'sender-turn' }
@@ -3373,9 +3401,9 @@ describe('SessionExecutionService', () => {
     expect(events.filter((event) => event === 'phase:finalizing')).toEqual(['phase:finalizing']);
   });
 
-  it.each([undefined] as const)(
-    'preserves the completion submission policy after a transport failure for %s dispatch',
-    async (dispatchSource) => {
+  it.each([true, false] as const)(
+    'retries a disconnected turn only with an observable empty event stream (observable=%s)',
+    async (observable) => {
       const sessionId = 'session-stale-acp' as SessionId;
       const acpSessionId = 'acp-stale' as ACPSessionId;
       const restoredAcpSessionId = 'acp-restored' as ACPSessionId;
@@ -3442,7 +3470,7 @@ describe('SessionExecutionService', () => {
           history = updater(history);
         }),
       });
-      const deps = createBaseDeps({});
+      const deps = createBaseDeps({ hasPromptEventsForTurn: observable ? () => false : undefined });
       const sessionManager = deps.sessionManager as unknown as {
         getSession: ReturnType<typeof vi.fn>;
         terminateSession: ReturnType<typeof vi.fn>;
@@ -3456,25 +3484,24 @@ describe('SessionExecutionService', () => {
       workspaceDocument.getOrCreateSessionDoc.mockResolvedValue(sessionDoc);
 
       const service = new SessionExecutionService(deps);
-      await service.continueSession(
-        {
-          type: 'session/chat',
-          sessionId,
-          machineId: 'machine-1',
-          workspaceId: 'workspace-1' as WorkspaceId,
-          project: undefined,
-          acpSessionConfig: { prompt: 'hi', cliType: 'builtin', agentType: 'codex' },
-          userTurnId: 'turn-user-1',
-          userId: 'user-1',
-          userName: 'User',
-          userEmail: 'user@example.com',
-        },
-        dispatchSource ? { dispatchSource } : undefined
-      );
+      await service.continueSession({
+        type: 'session/chat',
+        sessionId,
+        machineId: 'machine-1',
+        workspaceId: 'workspace-1' as WorkspaceId,
+        project: undefined,
+        acpSessionConfig: { prompt: 'hi', cliType: 'builtin', agentType: 'codex' },
+        userTurnId: 'turn-user-1',
+        userId: 'user-1',
+        userName: 'User',
+        userEmail: 'user@example.com',
+      });
 
       expect(service.getExecutionSnapshot(sessionId).hasActiveTurn).toBe(false);
-      expect(submittedSessions).toEqual([acpSessionId, restoredAcpSessionId]);
-      expect(history[0]?.status).toBe('handled');
+      expect(submittedSessions).toEqual(
+        observable ? [acpSessionId, restoredAcpSessionId] : [acpSessionId]
+      );
+      expect(history[0]?.status).toBe(observable ? 'handled' : 'failed');
     }
   );
 

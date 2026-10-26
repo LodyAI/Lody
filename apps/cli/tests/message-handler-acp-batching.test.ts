@@ -14,6 +14,7 @@ import type {
 } from '@lody/shared';
 
 import type { SessionUsageUpdate } from 'acp-extension-core';
+import type { TurnOutcomeFact } from '@lody/shared/notifications';
 import { MessageHandler } from '../src/lib/message-handler';
 import { SessionDocument } from '../src/lib/loro/doc';
 import type { LoroDocumentManager } from '../src/lib/loro/doc';
@@ -173,6 +174,9 @@ const createRecoveryHarness = async (
     resume?: boolean;
     promptError?: Error;
     priorOutput?: string;
+    updates?: AcpSessionNotification['update'][];
+    completeNormally?: boolean;
+    flushBeforeReturn?: boolean;
     retryError?: Error;
     cleanup?: () => Promise<void>;
   } = {}
@@ -235,6 +239,7 @@ const createRecoveryHarness = async (
   };
   host.machineFlockCommandWatcher.stop();
   const service = host.executionService;
+  const outcomes: TurnOutcomeFact[] = [];
   const deps = (service as unknown as { deps: SessionExecutionServiceDeps }).deps;
   Object.assign(deps, {
     syncSessionBranchName: async () => null,
@@ -251,6 +256,9 @@ const createRecoveryHarness = async (
     }),
   });
   Object.assign(deps.turnFinalization, {
+    onTurnOutcome: async (fact: TurnOutcomeFact) => {
+      outcomes.push(fact);
+    },
     flushSessionUsage: async () => {},
     persistCodeCollabTurnDiffs: async () => false,
     updateSessionDiffStats: async () => [],
@@ -295,6 +303,10 @@ const createRecoveryHarness = async (
       prompt: async () => {
         submissions.push(replacement ? 'replacement' : 'old');
         if (!replacement) {
+          for (const update of options.updates ?? [])
+            manager.emit('onACPUpdateMessage', sessionId, { sessionId, update });
+          if (options.flushBeforeReturn) await host.flushACPUpdatesNow(sessionId);
+          if (options.completeNormally) return { stopReason: 'end_turn' };
           if (options.priorOutput)
             manager.emit('onACPUpdateMessage', sessionId, {
               sessionId,
@@ -363,6 +375,7 @@ const createRecoveryHarness = async (
     finishRetry,
     cleanupStarted,
     submissions,
+    outcomes,
     emitText,
     close: async () => {
       await host.sessionActivePresence.close();
@@ -372,6 +385,316 @@ const createRecoveryHarness = async (
 };
 
 describe('MessageHandler ACP batching', () => {
+  it.each([false, true])(
+    'silent-turn acceptance: metadata-only completion fails (flushed=%s)',
+    async (flushBeforeReturn) => {
+      const h = await createRecoveryHarness({
+        completeNormally: true,
+        flushBeforeReturn,
+        updates: [
+          { sessionUpdate: 'current_mode_update', currentModeId: 'auto' },
+          { sessionUpdate: 'config_option_update', configOptions: [] },
+          { sessionUpdate: 'available_commands_update', availableCommands: [] },
+        ],
+      });
+      try {
+        await h.service.continueSession(h.message);
+        const history = await h.doc.sessionData.history.readAll();
+        expect(history.find((entry) => entry.id === h.message.userTurnId)?.status).toBe('failed');
+        expect(history.flatMap(readItems)).toContainEqual(
+          expect.objectContaining({
+            type: 'system_notice',
+            name: 'chat_failed',
+            meta: expect.objectContaining({ reason: 'agent_no_output' }),
+          })
+        );
+        expect(h.submissions).toEqual(['old']);
+        expect(h.outcomes.map((fact) => fact.outcome)).toEqual([
+          { kind: 'failed', code: 'no_agent_output' },
+        ]);
+        expect(h.service.getExecutionSnapshot(h.sessionId).hasActiveTurn).toBe(false);
+        expect(h.host.sessionActivePresence.has(h.sessionId)).toBe(false);
+        expect(h.host.store.get(h.sessionId).acpUpdateBuffer).toEqual([]);
+      } finally {
+        await h.close();
+      }
+    }
+  );
+
+  it.each<{ name: string; updates: AcpSessionNotification['update'][]; visible: boolean }>([
+    { name: 'no events', updates: [], visible: false },
+    {
+      name: 'empty text',
+      updates: [{ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: '' } }],
+      visible: false,
+    },
+    {
+      name: 'whitespace thought',
+      updates: [{ sessionUpdate: 'agent_thought_chunk', content: { type: 'text', text: ' \n' } }],
+      visible: false,
+    },
+    {
+      name: 'usage',
+      updates: [{ sessionUpdate: 'usage_update', used: 10, size: 100 }],
+      visible: false,
+    },
+    {
+      name: 'title',
+      updates: [{ sessionUpdate: 'session_info_update', title: 'Synthetic title' }],
+      visible: false,
+    },
+    {
+      name: 'user echo',
+      updates: [{ sessionUpdate: 'user_message_chunk', content: { type: 'text', text: 'echo' } }],
+      visible: false,
+    },
+    {
+      name: 'checklist',
+      updates: [
+        {
+          sessionUpdate: 'plan',
+          entries: [{ content: 'Investigate', priority: 'medium', status: 'in_progress' }],
+        },
+      ],
+      visible: false,
+    },
+    {
+      name: 'ACP 1.3 checklist',
+      updates: [
+        { sessionUpdate: 'plan_update', plan: { type: 'items', planId: 'plan', entries: [] } },
+      ],
+      visible: false,
+    },
+    {
+      name: 'file plan',
+      updates: [
+        {
+          sessionUpdate: 'plan_update',
+          plan: { type: 'file', planId: 'plan', path: '/tmp/synthetic-plan.md' },
+        },
+      ],
+      visible: false,
+    },
+    {
+      name: 'removed plan',
+      updates: [{ sessionUpdate: 'plan_removed', planId: 'plan' }],
+      visible: false,
+    },
+    {
+      name: 'empty markdown plan',
+      updates: [
+        { sessionUpdate: 'plan_update', plan: { type: 'markdown', planId: 'plan', content: '' } },
+      ],
+      visible: false,
+    },
+    {
+      name: 'answer',
+      updates: [
+        {
+          sessionUpdate: 'agent_message_chunk',
+          content: { type: 'text', text: 'Synthetic answer' },
+        },
+      ],
+      visible: true,
+    },
+    {
+      name: 'thought',
+      updates: [
+        {
+          sessionUpdate: 'agent_thought_chunk',
+          content: { type: 'text', text: 'Synthetic reasoning' },
+        },
+      ],
+      visible: true,
+    },
+    {
+      name: 'markdown proposal',
+      updates: [
+        {
+          sessionUpdate: 'plan_update',
+          plan: { type: 'markdown', planId: 'plan', content: 'A readable proposal' },
+        },
+      ],
+      visible: true,
+    },
+    {
+      name: 'tool only',
+      updates: [
+        {
+          sessionUpdate: 'tool_call',
+          toolCallId: 'tool',
+          title: 'Synthetic tool',
+          status: 'completed',
+        },
+      ],
+      visible: true,
+    },
+    {
+      name: 'sparse failed tool',
+      updates: [{ sessionUpdate: 'tool_call_update', toolCallId: 'tool', status: 'failed' }],
+      visible: true,
+    },
+  ])('silent-turn content contract: $name', async ({ updates, visible }) => {
+    const h = await createRecoveryHarness({ completeNormally: true, updates });
+    try {
+      await h.service.continueSession(h.message);
+      const history = await h.doc.sessionData.history.readAll();
+      expect(history.find((entry) => entry.id === h.message.userTurnId)?.status).toBe(
+        visible ? 'handled' : 'failed'
+      );
+      expect(history.find((entry) => entry.id === h.turnId)?.finished).toBe(true);
+      expect(h.outcomes.map((fact) => fact.outcome)).toEqual([
+        visible ? { kind: 'succeeded' } : { kind: 'failed', code: 'no_agent_output' },
+      ]);
+      expect(h.submissions).toEqual(['old']);
+      expect(h.service.getExecutionSnapshot(h.sessionId).hasActiveTurn).toBe(false);
+      expect(h.host.sessionActivePresence.has(h.sessionId)).toBe(false);
+    } finally {
+      await h.close();
+    }
+  });
+
+  it.each<AcpSessionNotification['update']>([
+    { sessionUpdate: 'current_mode_update', currentModeId: 'auto' },
+    { sessionUpdate: 'plan', entries: [] },
+    { sessionUpdate: 'tool_call_update', toolCallId: 'tool', status: 'completed' },
+  ])('never replays a disconnected prompt after $sessionUpdate', async (update) => {
+    const h = await createRecoveryHarness({ updates: [update] });
+    h.finishRetry.resolve();
+    try {
+      await h.service.continueSession(h.message);
+      expect(h.submissions).toEqual(['old']);
+      expect(h.outcomes.map((fact) => fact.outcome)).toEqual([
+        { kind: 'unknown', code: 'agent_disconnected' },
+      ]);
+      expect(h.service.getExecutionSnapshot(h.sessionId).hasActiveTurn).toBe(false);
+      expect(h.host.sessionActivePresence.has(h.sessionId)).toBe(false);
+    } finally {
+      await h.close();
+    }
+  });
+
+  it.each(['snapshot', 'progress', 'text', 'rich', 'tool'] as const)(
+    'subagent content observation distinguishes $0 from lifecycle status',
+    async (kind) => {
+      const sessionId = 'stale-recovery';
+      const snapshot: AcpSessionNotification['update'] = {
+        sessionUpdate: 'subagent_event',
+        event: {
+          version: 1,
+          sessionId,
+          runId: 'child',
+          type: 'snapshot',
+          snapshot: {
+            state: 'running',
+            support: {
+              stream: ['text', 'tool'],
+              progress: true,
+              outputRead: 'live_tail',
+              cancel: true,
+            },
+          },
+        },
+      };
+      const updates: AcpSessionNotification['update'][] = [snapshot];
+      if (kind === 'progress')
+        updates.push({
+          sessionUpdate: 'subagent_event',
+          event: {
+            version: 1,
+            sessionId,
+            runId: 'child',
+            type: 'progress',
+            progress: { totalTokens: 12 },
+          },
+        });
+      if (kind === 'text' || kind === 'rich' || kind === 'tool')
+        updates.push({
+          sessionUpdate: 'subagent_event',
+          event: {
+            version: 1,
+            sessionId,
+            runId: 'child',
+            type: 'output',
+            update:
+              kind === 'tool'
+                ? {
+                    sessionUpdate: 'tool_call_update',
+                    toolCallId: 'child-tool',
+                    status: 'completed',
+                  }
+                : {
+                    sessionUpdate: 'agent_message_chunk',
+                    content:
+                      kind === 'text'
+                        ? { type: 'text', text: 'Child answer' }
+                        : { type: 'image', data: 'aGVsbG8=', mimeType: 'image/png' },
+                  },
+          },
+        });
+      const h = await createRecoveryHarness({ updates, completeNormally: true });
+      try {
+        await h.service.continueSession(h.message);
+        const visible = kind === 'text' || kind === 'tool';
+        expect(h.outcomes.map((fact) => fact.outcome)).toEqual([
+          visible ? { kind: 'succeeded' } : { kind: 'failed', code: 'no_agent_output' },
+        ]);
+        const items = (await h.doc.sessionData.history.readAll()).flatMap(readItems);
+        expect(items).toContainEqual(
+          expect.objectContaining({ type: 'subagent_task', taskId: 'child' })
+        );
+      } finally {
+        await h.close();
+      }
+    }
+  );
+
+  it('keeps content through flush and isolates next-turn, late and suppressed events', async () => {
+    const sessionId = 'observations' as SessionId;
+    const { repo, handler } = await createHandlerHarness([sessionId]);
+    const host = handler as unknown as {
+      store: SessionTransientStore;
+      enqueueACPUpdate(id: SessionId, update: AcpSessionNotification): void;
+      flushACPUpdatesNow(id: SessionId): Promise<void>;
+      hasPromptEventsForTurn(id: SessionId, turnId: string): boolean;
+    };
+    const enqueue = (text: string) =>
+      host.enqueueACPUpdate(sessionId, {
+        sessionId,
+        update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text } },
+      });
+    try {
+      expect(handler.observePromptContentForTurn(sessionId, 'first')).toBeUndefined();
+      expect(host.hasPromptEventsForTurn(sessionId, 'first')).toBe(true);
+      host.store.beginTurn(sessionId, { turnId: 'first' });
+      expect(handler.observePromptContentForTurn(sessionId, 'first')).toBe(false);
+      expect(host.hasPromptEventsForTurn(sessionId, 'first')).toBe(false);
+      enqueue('first answer');
+      expect(handler.observePromptContentForTurn(sessionId, 'first')).toBe(true);
+      await host.flushACPUpdatesNow(sessionId);
+      expect(handler.observePromptContentForTurn(sessionId, 'first')).toBe(true);
+      host.store.markPromptReturned(sessionId, 'first');
+      const target = host.store.getCurrentACPUpdateTarget(sessionId);
+      if (!target) throw new Error('Missing synthetic target');
+      host.store.rememberFinalizedTurnForLateACPUpdates(sessionId, target);
+      host.store.clearTurnState(sessionId);
+      host.store.beginTurn(sessionId, { turnId: 'second', ownsACPUpdates: false });
+      enqueue('late first answer');
+      await host.flushACPUpdatesNow(sessionId);
+      expect(handler.observePromptContentForTurn(sessionId, 'first')).toBeUndefined();
+      expect(handler.observePromptContentForTurn(sessionId, 'second')).toBe(false);
+      host.store.activateTurnACPUpdateTarget(sessionId, 'second');
+      host.store.beginAcpReplaySuppression(sessionId);
+      enqueue('native replay');
+      host.store.endAcpReplaySuppression(sessionId);
+      expect(handler.observePromptContentForTurn(sessionId, 'second')).toBe(false);
+      host.store.clearTurnState(sessionId);
+      expect(handler.observePromptContentForTurn(sessionId, 'second')).toBeUndefined();
+    } finally {
+      await destroyRepoOnRealTimers(repo);
+    }
+  });
+
   it('isolates a malformed tool notification and continues flushing valid output', async () => {
     const sessionId = 'poison-session' as SessionId;
     const { repo, docs, handler } = await createHandlerHarness([sessionId]);

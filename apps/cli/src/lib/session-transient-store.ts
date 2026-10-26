@@ -86,6 +86,7 @@ export type TurnPhase =
       assistantEntryId: string;
       turnEpoch: number;
       ownsACPUpdates: boolean;
+      hasVisibleOutput: boolean;
       userTurnId?: string;
     }
   | {
@@ -94,6 +95,7 @@ export type TurnPhase =
       assistantEntryId: string;
       turnEpoch: number;
       ownsACPUpdates: boolean;
+      hasVisibleOutput: boolean;
       userTurnId?: string;
     };
 
@@ -241,6 +243,7 @@ export class SessionTransientStore {
       assistantEntryId: args.assistantEntryId ?? args.turnId,
       turnEpoch,
       ownsACPUpdates,
+      hasVisibleOutput: false,
       ...(args.userTurnId ? { userTurnId: args.userTurnId } : {}),
     };
     if (ownsACPUpdates) {

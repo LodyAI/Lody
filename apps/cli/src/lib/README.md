@@ -117,7 +117,9 @@ subdirectory; this file is the navigation index. Cross-module explanations live 
   ([decision](../../../../.agents/notes/implemented/bug-fix/2026-10-18-gc-respects-native-agent-work.md)). Per-OS
   measurement rationale:
   [`.agents/docs/cli-lib-memory-pressure.md`](../../../../.agents/docs/cli-lib-memory-pressure.md).
-- `session-transient-store.ts` — buffered ACP updates and their turn ownership.
+- `session-transient-store.ts` — buffered ACP updates and their turn ownership;
+  each active turn retains content observation through flush, independently of
+  the any-event replay guard. Classification: [ACP rules](acp/AGENTS.md).
 - `session-activity-status.ts`, `session-live-status.ts` — derived busy/idle state.
 
 ## Projects and providers

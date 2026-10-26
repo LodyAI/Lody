@@ -2942,9 +2942,9 @@ export class MessageHandler {
         this.clearConversationTurnIfMatches(sessionId, turnId),
       getActiveTurnId: (sessionId) => this.store.getActiveTurnId(sessionId),
       clearActiveTurnId: (sessionId, turnId) => this.clearActiveTurnIdIfMatches(sessionId, turnId),
-      hasPromptOutputForTurn: (sessionId, turnId) => this.hasPromptOutputForTurn(sessionId, turnId),
-      observePromptOutputForTurn: (sessionId, turnId) =>
-        this.observePromptOutputForTurn(sessionId, turnId),
+      hasPromptEventsForTurn: (sessionId, turnId) => this.hasPromptEventsForTurn(sessionId, turnId),
+      observePromptContentForTurn: (sessionId, turnId) =>
+        this.observePromptContentForTurn(sessionId, turnId),
       buildAcpPromptBlocks: async (args) => await this.buildAcpPromptBlocks(args),
       applyAcpModeAndModel: async (session, acpConfig, context) =>
         await this.applyAcpModeAndModel(
@@ -4540,7 +4540,15 @@ export class MessageHandler {
         }
       );
     }
-    this.store.get(sessionId).acpUpdateBuffer.push({
+    const state = this.store.get(sessionId);
+    if (
+      state.turn.phase !== 'idle' &&
+      state.turn.turnEpoch === target.turnEpoch &&
+      this.isVisibleACPUpdate(update.update)
+    ) {
+      state.turn.hasVisibleOutput = true;
+    }
+    state.acpUpdateBuffer.push({
       operationId: uuidV4(),
       notification: update,
       target,
@@ -10358,9 +10366,9 @@ export class MessageHandler {
    * update means the adapter may have acted on the user prompt, so execution
    * recovery must stop and surface the failure instead of retrying.
    */
-  private hasPromptOutputForTurn(sessionId: SessionId, turnId: string): boolean {
-    if (!this.store.has(sessionId)) {
-      return false;
+  private hasPromptEventsForTurn(sessionId: SessionId, turnId: string): boolean {
+    if (!this.store.has(sessionId) || this.store.getTurnId(sessionId) !== turnId) {
+      return true;
     }
     const state = this.store.get(sessionId);
     const hasBufferedOutput = state.acpUpdateBuffer.some((item) => item.target.turnId === turnId);
@@ -10369,18 +10377,37 @@ export class MessageHandler {
     return hasBufferedOutput || hasFlushedOutput;
   }
 
-  /**
-   * Same observation as `hasPromptOutputForTurn`, but it distinguishes "this turn
-   * emitted nothing" from "we cannot tell". The two callers need opposite
-   * conservative answers on a missing session: prompt replay must refuse to
-   * retry, while the no-output guard must not accuse a turn it could not observe.
-   * `undefined` means unobservable — the transient state is gone.
-   */
-  observePromptOutputForTurn(sessionId: SessionId, turnId: string): boolean | undefined {
-    if (!this.store.has(sessionId)) {
-      return undefined;
+  /** Content observation survives flush and is unknown outside its owning turn. */
+  observePromptContentForTurn(sessionId: SessionId, turnId: string): boolean | undefined {
+    if (!this.store.has(sessionId)) return undefined;
+    const { turn } = this.store.get(sessionId);
+    return turn.phase !== 'idle' && turn.turnId === turnId ? turn.hasVisibleOutput : undefined;
+  }
+
+  private isVisibleACPUpdate(update: AcpSessionNotification['update']): boolean {
+    switch (update.sessionUpdate) {
+      case 'agent_message_chunk':
+        // Non-text assistant content is materialized as attachments by the flush pipeline.
+        return update.content.type !== 'text' || update.content.text.trim().length > 0;
+      case 'agent_thought_chunk':
+        return update.content.type === 'text' && update.content.text.trim().length > 0;
+      case 'tool_call':
+      case 'tool_call_update':
+        // Sparse updates also materialize tool rows, including tool-only turns.
+        return update.toolCallId.length > 0;
+      case 'plan_update':
+        // A proposed markdown answer differs from the checklist/status plan channel.
+        return update.plan.type === 'markdown' && update.plan.content.trim().length > 0;
+      case 'subagent_event':
+        if (update.event.type !== 'output') return false;
+        const child = update.event.update;
+        // Child rich chunks only mark outputIncomplete in the shared reducer.
+        if (child.sessionUpdate === 'agent_message_chunk' && child.content.type !== 'text')
+          return false;
+        return this.isVisibleACPUpdate(child);
+      default:
+        return false;
     }
-    return this.hasPromptOutputForTurn(sessionId, turnId);
   }
 
   /**
