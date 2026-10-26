@@ -560,19 +560,14 @@ export const makeLoroStreamsTokenProvider = Effect.fnUntraced(function* (
           return yield* Effect.die(
             new LoroStreamsTokenShutdownFailed({ cause: releaseFailure, owner: provider })
           );
-        let operation: Fiber.Fiber<string, TokenFailure> | undefined;
-        operation = yield* Effect.forkIn(
-          readToken(context).pipe(
-            Effect.interruptible,
-            Effect.ensuring(
-              Effect.sync(() => {
-                if (operation) operations.delete(operation);
-              })
-            )
-          ),
+        const operation = yield* Effect.forkIn(
+          readToken(context).pipe(Effect.interruptible),
           producerScope
         );
         operations.add(operation);
+        // A reader cancelled before its first instruction never enters ensuring.
+        // The completion observer also runs when the fiber has already ended.
+        operation.addObserver(() => operations.delete(operation));
         return yield* restore(
           Fiber.join(operation).pipe(Effect.timeout(options.requestTimeoutMs ?? 30_000))
         ).pipe(Effect.ensuring(joinOperation(operation)));

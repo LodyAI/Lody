@@ -1,3 +1,4 @@
+import { publishTurnCompletionLegacy } from './turn-completion-legacy';
 import { resolveProjectFileRoots } from './worktree/project-member-access';
 import { type AcpLauncher, resolveAcpLauncher } from '@/agent/acp-analytics';
 import type { LodyRateLimitsCapability } from 'acp-extension-core';
@@ -858,6 +859,12 @@ type TurnAnalyticsState = {
 };
 
 export class SessionExecutionService {
+  private readonly completionPublicationAbort = new AbortController();
+
+  stopCompletionPublication(): void {
+    this.completionPublicationAbort.abort();
+  }
+
   private readonly ownedWork = new Set<Promise<unknown>>();
   async drainInboxExecutions(): Promise<void> {
     // Completed executions can enqueue delivery while the first snapshot drains.
@@ -3720,10 +3727,18 @@ export class SessionExecutionService {
   ): Promise<void> {
     const acpError = error ? parseACPError(error) : null;
     const providerDisconnected = error ? isAgentDisconnectedError(error) : false;
-    await this.deps.turnFinalization.finalizeACPState(
-      sessionId,
-      this.currentTurnBySession.get(sessionId)
-    );
+    try {
+      await this.deps.turnFinalization.finalizeACPState(
+        sessionId,
+        this.currentTurnBySession.get(sessionId)
+      );
+    } catch (finalizationError) {
+      // The normal path fails on unfinished history. Error settlement must still
+      // run independent status, failure attention and release bookkeeping.
+      this.deps.logger.warn(
+        `[${sessionId}] Failed to finalize error history: ${formatErrorMessage(finalizationError)}`
+      );
+    }
     await this.persistCodeCollabTurnDiffsAfterACPFinalization(
       sessionId,
       this.currentTurnBySession.get(sessionId)
@@ -4052,33 +4067,11 @@ export class SessionExecutionService {
     }
 
     this.refreshCodeCollabSharedStateAfterTurn(sessionId);
-    await this.runTurnFinalizationStage(
-      sessionId,
-      turnId,
-      'sessionDoc.waitUntilSynced',
-      async () => {
-        await sessionDoc.waitUntilSynced();
-      }
-    );
     await this.runTurnFinalizationStage(sessionId, turnId, 'captureTurnCompleted', async () => {
       await this.captureTurnCompleted(sessionId, sessionDoc, turnId);
     });
     this.deps.logger.info(`Session chat completed: ${sessionId}`);
 
-    try {
-      await this.runTurnFinalizationStage(
-        sessionId,
-        turnId,
-        'sessionDoc.setLastMessageAt',
-        async () => {
-          await sessionDoc.setLastMessageAt();
-        }
-      );
-    } catch (error) {
-      this.deps.logger.debug(
-        `[${sessionId}] Failed to persist session lastMessageAt: ${formatErrorMessage(error)}`
-      );
-    }
     this.deps.touchSession(sessionId);
   }
 
@@ -4917,6 +4910,7 @@ export class SessionExecutionService {
     } finally {
       // Freeze the outcome before waking a successor; delivery owns no prompt slot.
       const fact = this.resolveTurnOutcomeFact(runtime, !!inboxInput);
+      const completedAt = getServerNow();
       try {
         if (inboxInput && !runtime.releaseFailure) {
           this.releaseTurnRuntime(sessionId, runtime.turnId);
@@ -4924,11 +4918,28 @@ export class SessionExecutionService {
           this.onInboxReleased?.(sessionId);
         }
       } finally {
-        if (fact) {
-          const delivery = this.publishTurnOutcomeFact(fact);
-          this.ownedWork.add(delivery);
-          void delivery.finally(() => this.ownedWork.delete(delivery));
-        }
+        const notify = async () => {
+          if (fact) await this.publishTurnOutcomeFact(fact);
+        };
+        // Failure attention is independent of successful delivery. Never delay it on sync.
+        const completion = runtime.finalizeCompleted && !runtime.releaseFailure;
+        const delivery = completion
+          ? publishTurnCompletionLegacy({
+              signal: this.completionPublicationAbort.signal,
+              completedAt,
+              sessionDoc,
+              workspaceDocument: this.deps.workspaceDocument,
+              notify: fact?.outcome.kind === 'succeeded' ? notify : async () => {},
+            }).catch((error: unknown) => {
+              this.deps.logger.warn(
+                `[${sessionId}] Turn completion publication incomplete (turnId=${runtime.turnId}): ${formatErrorMessage(error)}`
+              );
+            })
+          : Promise.resolve();
+        const attention = fact?.outcome.kind !== 'succeeded' ? notify() : Promise.resolve();
+        const owned = Promise.allSettled([delivery, attention]);
+        this.ownedWork.add(owned);
+        void owned.then(() => this.ownedWork.delete(owned));
       }
     }
   }

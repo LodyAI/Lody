@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
-import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto'
-import { mkdtemp, readdir, rm } from 'node:fs/promises'
+import { createCipheriv, createDecipheriv, randomBytes, createHash } from 'node:crypto'
+import { mkdtemp, readdir, readFile, rm, unlink } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
@@ -82,7 +82,7 @@ void test('creation retains real native device keys and epoch0 before returning 
   const first = await prepare(directory)
   assert.deepEqual(
     Object.keys(first).sort(),
-    [...Object.keys(intent), 'genesisRecordHex', 'genesisHashHex'].sort()
+    [...Object.keys(intent), 'genesisRecordHex', 'genesisHashHex', 'deviceCredentialHash'].sort()
   )
   const bytes = Buffer.from(first.genesisRecordHex, 'hex')
   const genesis = Result.getOrThrow(Bytes.genesisHash(Buffer.from(first.genesisHashHex, 'hex')))
@@ -373,4 +373,65 @@ void test('hard process exit releases creation ownership and preserves incomplet
     else assert.equal(reopened.failure.code, 'incomplete-local')
     assert.deepEqual(stored(directory), before)
   }
+})
+
+void test('device credentials reopen exactly, stay encrypted, and missing originals never regenerate', async (t) => {
+  const directory = await fixture(t)
+  const prepared = await prepare(directory)
+  const genesis = Result.getOrThrow(Bytes.genesisHash(Buffer.from(prepared.genesisHashHex, 'hex')))
+  const credential = await execute(
+    Effect.gen(function* () {
+      const { custody, bootstrap } = yield* openOwner(directory)
+      yield* bootstrap.recordCreated({
+        workspaceId: 'credential-workspace',
+        genesisHash: prepared.genesisHashHex,
+        requestId: intent.requestId
+      })
+      const device = yield* custody.openDevice(genesis)
+      const value = yield* bootstrap.deviceCredential('credential-workspace')
+      assert.deepEqual(yield* custody.prepareDeviceCredential(genesis, device.publicKey), {
+        credential: value,
+        credentialHash: prepared.deviceCredentialHash
+      })
+      return value
+    })
+  )
+  assert.equal(
+    createHash('sha256').update(Buffer.from(credential, 'hex')).digest('hex'),
+    prepared.deviceCredentialHash
+  )
+  assert.equal(
+    await execute(
+      Effect.gen(function* () {
+        const { bootstrap } = yield* openOwner(directory)
+        return yield* bootstrap.deviceCredential('credential-workspace')
+      })
+    ),
+    credential
+  )
+  for (const name of await readdir(join(directory, 'custody'))) {
+    const bytes = await readFile(join(directory, 'custody', name))
+    assert.equal(bytes.includes(Buffer.from(credential, 'hex')), false)
+    assert.equal(bytes.includes(Buffer.from(credential)), false)
+  }
+  await unlink(join(directory, 'custody', `device-credential-${prepared.genesisHashHex}.sealed`))
+  await assert.rejects(() =>
+    execute(
+      Effect.gen(function* () {
+        const { bootstrap } = yield* openOwner(directory)
+        return yield* bootstrap.deviceCredential('credential-workspace')
+      })
+    )
+  )
+  await assert.rejects(() => prepare(directory))
+})
+
+void test('pre-credential developer creations require recreation instead of generating a credential', async (t) => {
+  const directory = await fixture(t)
+  const prepared = await prepare(directory)
+  const db = new DatabaseSync(join(directory, 'creations.sqlite'))
+  db.prepare('DELETE FROM creation_credentials').run()
+  db.close()
+  await assert.rejects(() => prepare(directory))
+  assert.equal(Buffer.from(stored(directory).record).toString('hex'), prepared.genesisRecordHex)
 })

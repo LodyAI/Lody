@@ -1,3 +1,4 @@
+import { workspaceSupports } from '@lody/shared/workspace-streams-content';
 import { encodeSessionFilePath, resolveSessionPullRequests } from '@lody/shared';
 import type { SessionFileRoot } from '@lody/shared';
 import { resolveProjectFileRoots } from '@/session/worktree/project-member-access';
@@ -593,6 +594,7 @@ function formatLiveActivityUpdatedAt(value: number, nowMs: number): string {
 }
 
 export interface MessageHandlerConfig {
+  encryptedWorkspace?: boolean;
   token: string;
   workspaceId: WorkspaceId;
   workspaceSlug?: string;
@@ -2888,6 +2890,12 @@ export class MessageHandler {
       },
     });
     this.filePreviewService = new FilePreviewService({
+      canDownloadLargeFiles: async () => {
+        const entitlement = await this.cloudPort.billing?.getWorkspaceEntitlement(this.workspaceId);
+        return Boolean(
+          entitlement && !entitlement.checkoutPending && entitlement.effectivePlanTier !== 'free'
+        );
+      },
       onDiagnostic: (event) => this.logger.debug(`[file-preview] ${JSON.stringify(event)}`),
       resolveLocalWorkspace: this.resolveLocalFilePreviewWorkspace,
       resolveWorkspace: async (sessionId, rootId) => {
@@ -2974,8 +2982,15 @@ export class MessageHandler {
         flushSessionUsage: async (sessionId) => await this.flushSessionUsage(sessionId),
         updateSessionDiffStats: async (sessionId, session, options) =>
           await this.turnPostProcessingService.updateSessionDiffStats(sessionId, session, options),
-        refreshCodeCollabSharedState: async (sessionId) =>
-          await this.codeCollabV2Service.refreshSharedStateAfterTurn({ sessionId }),
+        refreshCodeCollabSharedState: async (sessionId) => {
+          if (
+            workspaceSupports(
+              { mode: config.encryptedWorkspace ? 'protected' : 'plaintext' },
+              'code-collab-index'
+            )
+          )
+            await this.codeCollabV2Service.refreshSharedStateAfterTurn({ sessionId });
+        },
         detectAndAssociatePR: async (ctx) =>
           await this.turnPostProcessingService.detectAndAssociatePR(ctx),
         syncWorkspaceGitState: async (sessionId, session) =>
@@ -3170,7 +3185,7 @@ export class MessageHandler {
         }
       },
     });
-    const streamsTokens = this.cloudPort.streamsTokens;
+    const streamsTokens = config.encryptedWorkspace ? null : this.cloudPort.streamsTokens;
     if (streamsTokens) {
       const cliHttpFetch = getCliHttpFetch({ logger: this.logger });
       const rpcConnectTimeoutMs = readTimeoutEnv('LODY_LORO_RPC_CONNECT_TIMEOUT_MS', 30_000);
@@ -3425,6 +3440,8 @@ export class MessageHandler {
           await this.writeSessionHistoryForRpc(sessionId, operation, payload),
         resolveCodeCollabOwnerSessionId: this.resolveCodeCollabV2OwnerSessionId,
         previewFile: async (request) => await this.filePreviewService.previewFile(request),
+        downloadFileChunk: async (request) =>
+          await this.filePreviewService.downloadFileChunk(request),
         openCodeCollabText: async (request) => await this.codeCollabV2Service.openText(request),
         refreshCodeCollabText: async (request) =>
           await this.codeCollabV2Service.refreshText(request),
@@ -5196,8 +5213,7 @@ export class MessageHandler {
       return;
     }
     const state = this.store.get(sessionId);
-    if (state.turn.phase !== 'idle') {
-      state.pendingUnread = true;
+    if (state.turn.phase !== 'idle' || this.hasSessionActivePresence(sessionId)) {
       return;
     }
     try {
@@ -5702,16 +5718,12 @@ export class MessageHandler {
     const currentTarget = this.store.getCurrentACPUpdateTarget(sessionId);
     const finalizedTarget = !turnId || currentTarget?.turnId === turnId ? currentTarget : undefined;
     const permissionWaitMs = state.permissionWaitMs || undefined;
+    let historyFinalized = false;
     try {
       await this.flushSessionContextWindowUsage(sessionId);
       await this.flushACPUpdatesNow(sessionId);
       await this.flushThreadGoalHistoryPersists(sessionId);
       await this.flushCodexGeneratedImageUploads(sessionId);
-      if (state.pendingUnread) {
-        state.pendingUnread = false;
-        const sessionDoc = await this.workspaceDocument.getOrCreateSessionDoc(sessionId);
-        await sessionDoc.setLastMessageAt();
-      }
 
       // Mark the owning assistant entry as finished and record timing.
       const sessionDoc = await this.workspaceDocument.getOrCreateSessionDoc(sessionId);
@@ -5722,12 +5734,15 @@ export class MessageHandler {
         endedAt,
         permissionWaitMs,
       });
+      historyFinalized = true;
       if (finalizedTarget) {
         await this.flushTurnTokenUsage(sessionId, finalizedTarget.assistantEntryId);
       }
-      await sessionDoc.waitUntilSynced();
     } catch (error) {
       this.logger.error(`[${sessionId}] Failed to flush ACP updates during finalization:`, error);
+      // Live execution must not publish a successful completion after failed history writes.
+      // No-turn teardown remains best effort and still drains independent sessions.
+      if (turnId && !historyFinalized) throw error;
     } finally {
       if (finalizedTarget) {
         this.store.rememberFinalizedTurnForLateACPUpdates(sessionId, finalizedTarget);
@@ -10133,6 +10148,7 @@ export class MessageHandler {
    * Flush pending ACP updates and tear down session resources.
    */
   async cleanup(): Promise<void> {
+    this.executionService.stopCompletionPublication();
     const inboxShutdown = this.operationCoordinator.recoverStop();
     void inboxShutdown.catch((cause) =>
       this.logger.error('Inbox shutdown retains resources', cause)
@@ -10342,10 +10358,8 @@ export class MessageHandler {
     void this.sessionDispatchWatcher.enqueueSessionCheck(sessionId);
   }
 
-  // ============================================================================
-  // GC-related public methods
-  // ============================================================================
-
+  // =====================================================================  // GC-related public methods
+  // =====================================================================
   /**
    * Check if a session has pending ACP updates that haven't been flushed yet.
    */

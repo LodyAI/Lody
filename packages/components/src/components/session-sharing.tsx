@@ -1,3 +1,4 @@
+import { useWorkspaceFeature } from '@/hooks/use-workspace-feature';
 import { useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import {
   Archive,
@@ -503,6 +504,7 @@ export function SessionAccessControl({
   exportActions?: SessionAccessAction[];
   className?: string;
 }) {
+  const sharingAllowed = useWorkspaceFeature('sharing');
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const [view, setView] = useState<AccessView>('home');
@@ -511,6 +513,7 @@ export function SessionAccessControl({
   // A publication is under way: the panel stays open until it finishes.
   const [busy, setBusy] = useState(false);
 
+  if (!sharingAllowed) return null;
   const isPrivate = shouldShowPrivateSharingStatus(state);
   if (!isPrivate && !publicShare) {
     return null;

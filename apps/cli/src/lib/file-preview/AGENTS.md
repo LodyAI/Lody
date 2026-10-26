@@ -20,6 +20,13 @@ save path's text reads.
 
 ## Invariants
 
+- `file/download-chunk` is a separate `fileDownload` v1 capability. Preserve
+  owner-envelope authorization, remote path containment, positive paid-workspace
+  entitlement on every request, the 100 MiB ceiling and 512 KiB response chunks.
+  Billing failures do not grant this larger transfer. Pin file identity/metadata
+  across ranges; reject mutation instead of returning a mixed file. No watchers,
+  history writes, preview-budget increases or plaintext cloud fallback.
+
 - `markdownFileLinks` resolution returns identities only and every realpath-distinct
   match; never pick one or widen authorization. Canonical previews never discover.
 

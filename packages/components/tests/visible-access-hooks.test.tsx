@@ -9,6 +9,12 @@ import {
   getMachineRoomId,
   getServerNow,
   getSessionRoomId,
+  AGENT_ROLE_VERSION,
+  type AgentConfigId,
+  type AgentRole,
+  type AgentRoleId,
+  type LocalProjectId,
+  type MachineLegacyMetaFields,
   type LodyPresenceInstanceId,
   type MachineId,
   type MachineMeta,
@@ -34,6 +40,8 @@ const machineFlockMocks = vi.hoisted(() => {
   };
 });
 const sharedMachineProjectIndexProbeRender = vi.fn();
+const catalogMocks = vi.hoisted(() => ({ roles: [] as unknown[], synced: false }));
+vi.mock('../src/hooks/use-workspace-catalog', () => ({ useWorkspaceCatalog: () => catalogMocks }));
 
 vi.mock('../src/hooks/use-authenticated-convex', () => ({
   useAuthenticatedConvex: () => ({ isAuthenticated: true, isLoading: false }),
@@ -48,6 +56,8 @@ vi.mock('@/hooks/use-machine-flock-rows', () => machineFlockMocks);
 vi.mock('../src/hooks/use-machine-flock-rows', () => machineFlockMocks);
 
 import { userAtom } from '../src/atoms';
+import { runtimeAtom, type WorkspaceRuntime } from '../src/atoms/runtime';
+import { useWorkspaceAgentRoles } from '../src/hooks/use-workspace-agent-roles';
 import { machineMetaCacheAtom, sessionMetaCacheAtom } from '../src/atoms/doc-meta';
 import { lodyPresenceStatesAtom, setLodyPresenceNowMsAtom } from '../src/atoms/presence';
 import { currentWorkspaceIdAtom } from '../src/atoms/workspace-context';
@@ -185,6 +195,36 @@ function RouteScopedVisibilityProbe({
   return null;
 }
 
+function OfflineVisibilityProbe({
+  onSnapshot,
+}: {
+  onSnapshot: (value: {
+    machines: string[];
+    projects: string[];
+    sessions: string[];
+    archived: string[];
+    roles: string[];
+    isLoading: boolean;
+  }) => void;
+}) {
+  const machines = useVisibleMachineMetas({ includeMachineFlock: false });
+  const projects = useVisibleLocalProjects({ includeMachineFlock: false });
+  const sessions = useVisibleSessionMetas();
+  const archived = useVisibleArchivedSessionMetas();
+  const { roles } = useWorkspaceAgentRoles();
+  useEffect(() => {
+    onSnapshot({
+      machines: [...machines.machines.keys()],
+      projects: [...projects.projects.keys()],
+      sessions: sessions.sessions.map((session) => session.id),
+      archived: archived.archivedSessions.map((session) => session.id),
+      roles: roles.map((role) => role.id),
+      isLoading: machines.isLoading || projects.isLoading || sessions.isLoading,
+    });
+  }, [machines, projects, sessions, archived, roles, onSnapshot]);
+  return null;
+}
+
 function createCachedSession(userId: string): SessionMeta {
   return {
     id: 'cached-session' as SessionId,
@@ -259,6 +299,8 @@ describe('visible access hooks', () => {
     sessionSnapshot = undefined;
     queryMocks.machineRows = undefined;
     queryMocks.localProjectRows = [];
+    catalogMocks.roles = [];
+    catalogMocks.synced = false;
     queryMocks.useQuery.mockReset();
     queryMocks.useQuery.mockImplementation((query) => {
       const queryName = getFunctionName(query as Parameters<typeof getFunctionName>[0]);
@@ -539,4 +581,121 @@ describe('visible access hooks', () => {
 
     expectSessionSnapshot(['cached-session'], 'resolved', true);
   });
+
+  for (const scenario of [
+    {
+      name: 'retains E2EE owner data after the renderer auth snapshot has expired',
+      mode: 'e2ee',
+      userId: null,
+      runtimeWorkspace: 'offline-workspace',
+      visible: true,
+    },
+    {
+      name: 'keeps ordinary workspace filtering unchanged without a renderer user',
+      mode: 'plaintext',
+      userId: null,
+      runtimeWorkspace: 'offline-workspace',
+      visible: false,
+    },
+    {
+      name: 'preserves ordinary owner visibility with a current renderer user',
+      mode: 'plaintext',
+      userId: 'viewer-user',
+      runtimeWorkspace: 'offline-workspace',
+      visible: true,
+    },
+    {
+      name: 'fails closed when the logged-in user differs from the E2EE owner',
+      mode: 'e2ee',
+      userId: 'different-user',
+      runtimeWorkspace: 'offline-workspace',
+      visible: false,
+    },
+    {
+      name: 'does not borrow the identity of another workspace runtime',
+      mode: 'e2ee',
+      userId: null,
+      runtimeWorkspace: 'other-workspace',
+      visible: false,
+    },
+  ] as const) {
+    it(scenario.name, async () => {
+      queryMocks.machineRows = undefined;
+      queryMocks.localProjectRows = undefined;
+      store.set(
+        userAtom,
+        scenario.userId ? { id: scenario.userId, name: 'Other', email: 'other@example.test' } : null
+      );
+      store.set(runtimeAtom, {
+        workspaceId: scenario.runtimeWorkspace as WorkspaceId,
+        workspaceSlug: 'offline',
+        contentMode: scenario.mode,
+        accountId: 'viewer-user',
+      } as WorkspaceRuntime);
+      const machineId = 'shared-machine' as MachineId;
+      const projectId = 'offline-project' as LocalProjectId;
+      const machine: MachineMeta & MachineLegacyMetaFields = {
+        id: machineId,
+        name: 'Cached owner machine',
+        ownerUserId: 'viewer-user',
+        cliVersion: '0.1.0',
+        os: 'linux',
+        sessions: [],
+        localProjects: {
+          [projectId]: {
+            id: projectId,
+            name: 'Cached project',
+            rootPath: '/synthetic/project',
+            createdAtMs: 1,
+          },
+        },
+      };
+      store.set(machineMetaCacheAtom, { [getMachineRoomId(machineId)]: machine });
+      const session = {
+        ...createCachedSession('viewer-user'),
+        project: { kind: 'local' as const, localProjectId: projectId },
+      };
+      const archived = { ...session, id: 'archived-offline' as SessionId, isArchived: true };
+      store.set(sessionMetaCacheAtom, {
+        [getSessionRoomId(session.id)]: session,
+        [getSessionRoomId(archived.id)]: archived,
+      });
+      const privateRole: AgentRole = {
+        v: AGENT_ROLE_VERSION,
+        id: 'offline-role' as AgentRoleId,
+        name: 'Cached private role',
+        ownerUserId: 'viewer-user',
+        visibility: 'private',
+        machineId,
+        agentConfigId: 'offline-config' as AgentConfigId,
+        runConfig: {},
+        revision: 1,
+        createdAt: 1,
+        updatedAt: 1,
+      };
+      catalogMocks.roles = [
+        privateRole,
+        { ...privateRole, id: 'other-private-role' as AgentRoleId, ownerUserId: 'teammate' },
+      ];
+      let snapshot:
+        | Parameters<Parameters<typeof OfflineVisibilityProbe>[0]['onSnapshot']>[0]
+        | undefined;
+      await mount(
+        'offline-workspace',
+        createElement(OfflineVisibilityProbe, {
+          onSnapshot: (value) => {
+            snapshot = value;
+          },
+        })
+      );
+      expect(snapshot).toEqual({
+        machines: scenario.visible ? [machineId] : [],
+        projects: scenario.visible ? [`${machineId}:${projectId}`] : [],
+        sessions: scenario.visible ? [session.id] : [],
+        archived: scenario.visible ? [archived.id] : [],
+        roles: scenario.visible ? [privateRole.id] : [],
+        isLoading: true,
+      });
+    });
+  }
 });

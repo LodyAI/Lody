@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { getSessionRoomId, type MachineId, type SessionId, type WorkspaceId } from '@lody/shared';
+import { createLoroStreamsTokenProviderLegacy, getSessionRoomId, type MachineId, type SessionId, type WorkspaceId } from '@lody/shared';
 import type { LoroRepo, TransportAdapter, TransportSubscription } from 'loro-repo';
 
 const mocks = vi.hoisted(() => {
@@ -2420,11 +2420,24 @@ describe('createWorkspaceRuntime meta recovery lifecycle', () => {
 
     await runtime.dispose();
   });
-it('refuses a protected new-session stream before any stream creation', async () => {
-  const runtime = await createWorkspaceRuntime({ content: { mode: 'protected', namespace: 'synthetic-genesis', resolve: () => { throw new Error('no content provider in M1'); }, snapshotUpload: { canUpload: () => false } }, workspaceSlug: 'workspace', workspaceId: 'workspace-1' as WorkspaceId, apiBaseUrl: 'https://api.example.test' });
+it('opens protected local content without a token and refuses unencrypted side channels', async () => {
+  const provider = () => createLoroStreamsTokenProviderLegacy({ endpoint: 'https://encrypted.example.test/token', workspaceId: 'workspace-1', authToken: () => 'synthetic' });
+  const content = { mode: 'protected' as const, namespace: 'synthetic-genesis', resolve: () => { throw new Error('unused until protected transport attaches'); }, snapshotUpload: { canUpload: () => false } };
+  const runtime = await createWorkspaceRuntime({ content, e2ee: { bucketId: () => 'synthetic-encrypted-content', createTokenProvider: provider }, workspaceSlug: 'workspace', workspaceId: 'workspace-1' as WorkspaceId, apiBaseUrl: 'https://api.example.test', syncMode: 'dual' });
   try {
-    await expect(runtime.ensureDocStream('encrypted-session')).rejects.toThrow('Encrypted workspace does not support this operation');
+    expect(runtime.contentMode).toBe('e2ee');
+    await expect(runtime.ensureDocStream('encrypted-session')).resolves.toBeUndefined();
+    await expect(runtime.requestFilePreview('machine-1' as MachineId, {} as never)).resolves.toMatchObject({status:'error',message:'e2ee_rpc_unavailable'});
+    await expect(runtime.acquireScheduleStore('schedule-1')).rejects.toThrow('e2ee_feature_unavailable');
     expect(cloudAttachCalls()).toEqual([]);
+    expect(mocks.authInvocations).toEqual([]);
+    mocks.joinMetaRoom.mockResolvedValueOnce(createMetaSub(Promise.resolve()));
+    await runtime.setAuthToken('synthetic');
+    const adapter = mocks.streamsTransportConstructors.mock.calls.at(-1)?.[0] as { bucketId: string; payloadProtection: unknown };
+    expect(adapter.bucketId).toBe('synthetic-encrypted-content');
+    expect(adapter.payloadProtection).toBeDefined();
+    expect(mocks.presenceStart.mock.calls).toEqual([]);
+    expect(mocks.machineRpcConstructors.mock.calls).toEqual([]);
   } finally { await runtime.dispose(); }
 });
 

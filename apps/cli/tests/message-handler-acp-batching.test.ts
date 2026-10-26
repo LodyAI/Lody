@@ -108,6 +108,7 @@ const createHandlerHarness = async (
   }
 
   const workspaceDocument = {
+    getRemoteStreamsGeneration: () => undefined,
     isTransportConnected: vi.fn(() => true),
     markMachineFlockDocDirty: vi.fn(),
     registerMachine: vi.fn(),
@@ -365,7 +366,9 @@ const createRecoveryHarness = async (
     submissions,
     emitText,
     close: async () => {
+      service.stopCompletionPublication();
       await host.sessionActivePresence.close();
+      await service.drainInboxExecutions();
       await destroyRepoOnRealTimers(repo);
     },
   };
@@ -1373,7 +1376,7 @@ describe('MessageHandler ACP batching', () => {
     }
   });
 
-  it('keeps unread state and coalesces plans when a plan write is retried', async () => {
+  it('defers unread publication and coalesces plans when a plan write is retried', async () => {
     vi.useRealTimers();
     const sessionId = 's-1' as SessionId;
     const { repo, docs, handler } = await createHandlerHarness([sessionId]);
@@ -1396,7 +1399,6 @@ describe('MessageHandler ACP batching', () => {
         beginConversationTurn(sessionId: SessionId): string;
         enqueueACPUpdate(sessionId: SessionId, update: AcpSessionNotification): void;
         flushACPUpdatesNow(sessionId: SessionId): Promise<void>;
-        store: { get(sessionId: SessionId): { pendingUnread: boolean } };
       };
       host.beginConversationTurn(sessionId);
       host.enqueueACPUpdate(sessionId, {
@@ -1431,7 +1433,7 @@ describe('MessageHandler ACP batching', () => {
       expect(readItems((await doc.sessionData.history.readAll())[0])).toEqual([
         { type: 'text', text: 'before' },
       ]);
-      expect(host.store.get(sessionId).pendingUnread).toBe(true);
+      expect((await doc.getMetaState())?.lastMessageAt).toBeUndefined();
     } finally {
       await destroyRepoOnRealTimers(repo);
     }

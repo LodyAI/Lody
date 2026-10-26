@@ -117,7 +117,7 @@ const styles = stylex.create({
     borderWidth: '1px',
     borderStyle: 'solid',
     borderColor: 'transparent',
-    borderRadius: 'var(--radius-md)',
+    borderRadius: radius.medium,
     paddingInline: space[3],
     fontSize: '0.9em',
     cursor: 'default',
@@ -1043,10 +1043,11 @@ export const SessionTabBar = memo(function SessionTabBar({
         aria-label={t('sessions.tabs.label', 'Session tabs')}
         // max-h-full keeps the strip inside a padded h-11 bar (macOS row pad).
         className={stylex.props(styles.adaptiveStrip).className}
-        // A little more than the 6px tab gap, so the first tab reads as part of
-        // the strip rather than attached to the sidebar edge.
-        paddingLeft={8}
-        paddingRight={8}
+        // The first tab sits in the workspace card's 14px corner: its 3px left inset
+        // matches the ~3.5px top inset of a 32px tab centred in the 38px row, and
+        // its 10px radius is concentric with the card (14 - 3.5).
+        paddingLeft={3}
+        paddingRight={3}
       >
         {showParentTab && (
           <AdaptiveTabStripItem itemId={parentSession.id}>

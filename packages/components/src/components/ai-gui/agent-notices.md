@@ -63,12 +63,12 @@ success only after the write succeeds, and show a failure toast otherwise.
 The report starts with `Error details:`: the space prevents clipboard consumers
 from interpreting the entire report as an `error:` URL and percent-encoding it.
 
-At phone widths, when copy is the only trailing control, the button rides the
+When copy is the only trailing control, the compact button rides the
 header row's trailing edge and the detail takes its own full-width line beneath
 it, so copying costs no separate control row. When a capacity retry action is
 present the header is already occupied, so copy keeps its footer row rather than
-squeezing the title between two controls. Above the mobile breakpoint the footer
-keeps that row in both cases.
+squeezing the title between two controls. This layout applies at every viewport
+width. Long unbroken paths wrap within the detail instead of overflowing the card.
 
 ## Capacity retry
 

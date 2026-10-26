@@ -1,6 +1,7 @@
 import fs from 'fs/promises';
 import os from 'os';
 import path from 'path';
+import { z } from 'zod';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Effect, ManagedRuntime } from 'effect';
 import { fileLockLayer, type FileLocks } from '@/utils/file-lock';
@@ -9,8 +10,27 @@ let runtime: ManagedRuntime.ManagedRuntime<FileLocks, never>;
 const runCatalog = <A, E>(effect: Effect.Effect<A, E, FileLocks>) => runtime.runPromise(effect);
 import {
   localCatalogWorkspaceToWorkspaceListItem,
+  CatalogCorruptError,
+  CatalogPermissionError,
   makeLocalWorkspaceCatalog,
 } from './local-workspace-catalog';
+
+const legacyCatalogSchema = z.object({
+  version: z.literal(1),
+  identity: z.object({ userId: z.string() }),
+  machine: z.object({ machineId: z.string() }),
+  workspaces: z.array(
+    z.object({
+      workspaceId: z.string(),
+      name: z.string(),
+      slug: z.string().nullable(),
+      role: z.string(),
+      state: z.enum(['active', 'remote_missing']),
+      cachedAt: z.number(),
+    })
+  ),
+  sessions: z.array(z.unknown()),
+});
 
 let tempDir: string | undefined;
 
@@ -93,6 +113,51 @@ describe('LocalWorkspaceCatalog', () => {
     ]);
   });
 
+  it('retains encrypted workspace evidence across restart without changing ordinary entries', async () => {
+    const normal = { id: 'ordinary', name: 'Ordinary', slug: null, role: 'owner' };
+    const encrypted = {
+      id: 'encrypted',
+      name: 'Encrypted',
+      slug: null,
+      role: 'owner',
+      contentMode: 'e2ee',
+      genesisHash: 'ab'.repeat(32),
+    };
+    await runCatalog(
+      makeCatalog().cacheRemoteWorkspaces({
+        identity: { userId: 'user-1' },
+        machine: { machineId: 'machine-1', machineName: 'host' },
+        workspaces: [normal, encrypted],
+      })
+    );
+    const reopened = await runCatalog(makeCatalog().listActiveWorkspaces());
+    expect(reopened.map(localCatalogWorkspaceToWorkspaceListItem)).toEqual([normal, encrypted]);
+
+    // The released v1 reader strips unknown row fields. Exercise that same
+    // parsing behavior against the saved file rather than inspecting source.
+    if (!tempDir) throw new Error('tempDir not initialized');
+    const catalogPath = path.join(tempDir, 'workspace-catalog.json');
+    const legacy = legacyCatalogSchema.parse(JSON.parse(await fs.readFile(catalogPath, 'utf8')));
+    expect(legacy.workspaces.map((workspace) => workspace.workspaceId)).toEqual(['ordinary']);
+    // An old daemon may rewrite its own catalog; it cannot erase E2EE discovery.
+    await fs.writeFile(catalogPath, JSON.stringify(legacy));
+    expect(
+      (await runCatalog(makeCatalog().listActiveWorkspaces())).map(
+        localCatalogWorkspaceToWorkspaceListItem
+      )
+    ).toEqual([normal, encrypted]);
+    // A different login cannot adopt the preserved sidecar's encrypted rows.
+    await fs.writeFile(
+      catalogPath,
+      JSON.stringify({ ...legacy, identity: { userId: 'other-account' } })
+    );
+    expect(
+      (await runCatalog(makeCatalog().listActiveWorkspaces())).map(
+        localCatalogWorkspaceToWorkspaceListItem
+      )
+    ).toEqual([normal]);
+  });
+
   it('records workspace access snapshots and preserves them across remote refreshes', async () => {
     const catalog = makeCatalog();
     await runCatalog(
@@ -147,6 +212,233 @@ describe('LocalWorkspaceCatalog', () => {
         ownerUserId: 'user-1',
       },
     });
+  });
+
+  it.each(['corrupt', 'EACCES'])(
+    'preserves an unreadable %s encrypted index while ordinary offline rows remain writable',
+    async (condition) => {
+      if (!tempDir) throw new Error('tempDir not initialized');
+      const filePath = path.join(tempDir, 'workspace-catalog.json');
+      const sidecarPath = `${filePath}.e2ee`;
+      const workspaces = [
+        { id: 'ordinary', name: 'Ordinary', slug: null, role: 'owner' },
+        {
+          id: 'encrypted',
+          name: 'Encrypted',
+          slug: null,
+          role: 'owner',
+          contentMode: 'e2ee',
+          genesisHash: 'ab'.repeat(32),
+        },
+      ];
+      const input = {
+        identity: { userId: 'user-1' },
+        machine: { machineId: 'machine-1' },
+        workspaces,
+      };
+      await runCatalog(makeCatalog().cacheRemoteWorkspaces(input));
+      const healthy = await fs.readFile(sidecarPath, 'utf8');
+      const readFile = fs.readFile;
+      const originalFailure = Object.assign(
+        new Error('synthetic encrypted index permission failure'),
+        { code: 'EACCES' }
+      );
+      let restore = () => {};
+      if (condition === 'corrupt') await fs.writeFile(sidecarPath, '{damaged encrypted index');
+      else {
+        const spy = vi
+          .spyOn(fs, 'readFile')
+          .mockImplementation((...args) =>
+            args[0] === sidecarPath ? Promise.reject(originalFailure) : readFile(...args)
+          );
+        restore = () => spy.mockRestore();
+      }
+      const originalBytes = await readFile(sidecarPath, 'utf8');
+      try {
+        const catalog = makeCatalog();
+        const snapshot = await runCatalog(catalog.read());
+        expect(snapshot.workspaces.map((workspace) => workspace.workspaceId)).toEqual(['ordinary']);
+        expect(snapshot.encryptedCatalogError).toBeInstanceOf(
+          condition === 'corrupt' ? CatalogCorruptError : CatalogPermissionError
+        );
+        if (condition === 'EACCES')
+          expect(snapshot.encryptedCatalogError?.cause).toBe(originalFailure);
+        await runCatalog(
+          catalog.recordWorkspaceAccessSnapshot({
+            workspaceId: 'ordinary',
+            accessSnapshot: { ownerUserId: 'user-1', verifiedAt: '2026-10-24T00:00:00Z' },
+          })
+        );
+        expect((await runCatalog(catalog.read())).workspaces[0]?.accessSnapshot?.ownerUserId).toBe(
+          'user-1'
+        );
+        const degraded = await runCatalog(catalog.cacheRemoteWorkspaces(input));
+        expect(degraded?.encryptedCatalogError).toBeInstanceOf(
+          condition === 'corrupt' ? CatalogCorruptError : CatalogPermissionError
+        );
+        expect(await readFile(sidecarPath, 'utf8')).toBe(originalBytes);
+      } finally {
+        restore();
+      }
+      await fs.writeFile(sidecarPath, healthy);
+      const unconfirmed = await runCatalog(makeCatalog().read());
+      expect(unconfirmed.encryptedCatalogUnavailable).toBe(true);
+      expect(unconfirmed.workspaces.map((workspace) => workspace.workspaceId)).toEqual([
+        'ordinary',
+      ]);
+      await expect(runCatalog(makeCatalog().cacheRemoteWorkspaces(input))).resolves.toBeUndefined();
+      const repaired = await runCatalog(makeCatalog().read());
+      expect(repaired.encryptedCatalogUnavailable).toBeUndefined();
+      expect(repaired.encryptedCatalogError).toBeUndefined();
+      expect(repaired.workspaces.map((workspace) => workspace.workspaceId)).toEqual([
+        'ordinary',
+        'encrypted',
+      ]);
+    }
+  );
+
+  it('does not rewrite the encrypted sidecar for an ordinary mutation', async () => {
+    if (!tempDir) throw new Error('tempDir not initialized');
+    const sidecarPath = path.join(tempDir, 'workspace-catalog.json.e2ee');
+    const catalog = makeCatalog();
+    await runCatalog(
+      catalog.cacheRemoteWorkspaces({
+        identity: { userId: 'user-1' },
+        machine: { machineId: 'machine-1' },
+        workspaces: [
+          { id: 'ordinary', name: 'Ordinary', slug: null, role: 'owner' },
+          {
+            id: 'encrypted',
+            name: 'Encrypted',
+            slug: null,
+            role: 'owner',
+            contentMode: 'e2ee',
+            genesisHash: 'ab'.repeat(32),
+          },
+        ],
+      })
+    );
+    const original = await fs.readFile(sidecarPath, 'utf8');
+    const writeFile = fs.writeFile;
+    const writeFailure = Object.assign(new Error('synthetic encrypted index write failure'), {
+      code: 'EACCES',
+    });
+    const spy = vi
+      .spyOn(fs, 'writeFile')
+      .mockImplementation((...args) =>
+        String(args[0]).startsWith(`${sidecarPath}.`)
+          ? Promise.reject(writeFailure)
+          : writeFile(...args)
+      );
+    try {
+      await runCatalog(
+        catalog.upsertSession({
+          sessionId: 'ordinary-session',
+          workspaceId: 'ordinary',
+          authorUserId: 'user-1',
+          origin: 'offline',
+        })
+      );
+      expect(
+        (await runCatalog(makeCatalog().read())).sessions.map((session) => session.sessionId)
+      ).toEqual(['ordinary-session']);
+      expect(await fs.readFile(sidecarPath, 'utf8')).toBe(original);
+      const receipt = await runCatalog(
+        catalog.cacheRemoteWorkspaces({
+          identity: { userId: 'user-1' },
+          machine: { machineId: 'machine-1' },
+          workspaces: [{ id: 'ordinary', name: 'Still usable', slug: null, role: 'owner' }],
+        })
+      );
+      expect(receipt?.encryptedCatalogError.cause).toBe(writeFailure);
+      expect(await fs.readFile(sidecarPath, 'utf8')).toBe(original);
+      // A released CLI parses non-strict v1 and rewrites only known fields.
+      // The independent fence must survive this actual parse/serialize cycle.
+      const ordinaryPath = path.join(tempDir, 'workspace-catalog.json');
+      const legacy = legacyCatalogSchema.parse(JSON.parse(await fs.readFile(ordinaryPath, 'utf8')));
+      await fs.writeFile(ordinaryPath, JSON.stringify(legacy));
+      const markerPath = `${ordinaryPath}.e2ee-invalid`;
+      expect(JSON.parse(await fs.readFile(markerPath, 'utf8')).identity.userId).toBe('user-1');
+      // The old encrypted row is physically retained but cannot reappear as
+      // active on a new offline read after its revocation failed to cache.
+      const reopened = await runCatalog(makeCatalog().read());
+      expect(reopened.encryptedCatalogUnavailable).toBe(true);
+      expect(reopened.workspaces.map((workspace) => workspace.workspaceId)).toEqual(['ordinary']);
+      expect(reopened.workspaces[0]?.name).toBe('Still usable');
+    } finally {
+      spy.mockRestore();
+    }
+    await expect(
+      runCatalog(
+        makeCatalog().cacheRemoteWorkspaces({
+          identity: { userId: 'user-1' },
+          machine: { machineId: 'machine-1' },
+          workspaces: [{ id: 'ordinary', name: 'Still usable', slug: null, role: 'owner' }],
+        })
+      )
+    ).resolves.toBeUndefined();
+    expect((await runCatalog(makeCatalog().read())).encryptedCatalogUnavailable).toBeUndefined();
+    await expect(
+      fs.stat(`${path.join(tempDir, 'workspace-catalog.json')}.e2ee-invalid`)
+    ).rejects.toHaveProperty('code', 'ENOENT');
+  });
+
+  it('retains the invalid marker cleanup owner without losing successfully published cache results', async () => {
+    if (!tempDir) throw new Error('tempDir not initialized');
+    const filePath = path.join(tempDir, 'workspace-catalog.json');
+    const markerPath = `${filePath}.e2ee-invalid`;
+    const input = {
+      identity: { userId: 'user-1' },
+      machine: { machineId: 'machine-1' },
+      workspaces: [
+        { id: 'ordinary', name: 'Ordinary', slug: null, role: 'owner' },
+        {
+          id: 'encrypted',
+          name: 'Encrypted',
+          slug: null,
+          role: 'owner',
+          contentMode: 'e2ee',
+          genesisHash: 'ab'.repeat(32),
+        },
+      ],
+    };
+    const catalog = makeCatalog();
+    await runCatalog(catalog.cacheRemoteWorkspaces(input));
+    const unlink = fs.unlink;
+    const originalError = Object.assign(new Error('synthetic invalid marker EBUSY'), {
+      code: 'EBUSY',
+    });
+    const spy = vi
+      .spyOn(fs, 'unlink')
+      .mockImplementation((file) =>
+        file === markerPath ? Promise.reject(originalError) : unlink(file)
+      );
+    const updated = {
+      ...input,
+      workspaces: input.workspaces.map((workspace) => ({
+        ...workspace,
+        name: `${workspace.name} updated`,
+      })),
+    };
+    try {
+      const receipt = await runCatalog(catalog.cacheRemoteWorkspaces(updated));
+      expect(receipt?.encryptedCatalogError.cause).toBe(originalError);
+      expect(JSON.parse(await fs.readFile(filePath, 'utf8')).workspaces[0].name).toBe(
+        'Ordinary updated'
+      );
+      expect(JSON.parse(await fs.readFile(`${filePath}.e2ee`, 'utf8')).workspaces[0].name).toBe(
+        'Encrypted updated'
+      );
+      expect((await runCatalog(makeCatalog().read())).encryptedCatalogUnavailable).toBe(true);
+      expect(JSON.parse(await fs.readFile(markerPath, 'utf8')).machine.machineId).toBe('machine-1');
+    } finally {
+      spy.mockRestore();
+    }
+    await expect(runCatalog(makeCatalog().cacheRemoteWorkspaces(updated))).resolves.toBeUndefined();
+    expect(
+      (await runCatalog(makeCatalog().listActiveWorkspaces())).map((workspace) => workspace.name)
+    ).toEqual(['Ordinary updated', 'Encrypted updated']);
+    await expect(fs.stat(markerPath)).rejects.toHaveProperty('code', 'ENOENT');
   });
 
   it('clears a cached allow when recordWorkspaceAccessSnapshot is called with null', async () => {

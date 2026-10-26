@@ -152,6 +152,7 @@ import { parseEnvAssignments } from './agent-config';
 import { formatErrorMessage } from '@/utils/format-error';
 import {
   SessionTurnWaitError,
+  sessionHistoryActivityAt,
   type SessionTurnOutputEvent,
   type StructuredSessionOutputMode,
   waitForTurnCompletion,
@@ -4229,7 +4230,7 @@ async function buildSessionShowResult(
     workspace,
     session,
     historyCount: directory.length,
-    latestHistoryAt: directory[directory.length - 1]?.scalars?.timestamp,
+    latestHistoryAt: sessionHistoryActivityAt(directory[directory.length - 1]?.scalars),
     messageQueueCount: queue.length,
   };
 }

@@ -109,3 +109,5 @@ and file responsibilities: [../README.md](../README.md).
   workspace metadata is complete. Contract: specs/session-worktree-lifecycle.md.
 
 - Project roots use registrations. Repair links; archive unlinks without following targets.
+  Submodule init uses actual gitlinks; backup requires its own checkout. Only complete,
+  standalone, non-shallow repositories may lend objects.

@@ -39,7 +39,7 @@
 | 分组 | 导出 |
 | --- | --- |
 | 字节与编码 | `Bytes`, `encodeCbor`, `decodeCbor`, `CborValue`, `ValidationError`, `ValidationErrorCode`, `ContentError` |
-| 签名 | `verifySignature`, `verifyContentSignature`, `signVerified`, `nativeDeviceSigner`, `DeviceSigner`, `ed25519WasmActive` |
+| 签名 | `deviceCredentialBindingBytes`, `signDeviceCredentialBinding`, `verifyDeviceCredentialBinding`, `DeviceCredentialBinding`, `verifySignature`, `verifyContentSignature`, `signVerified`, `nativeDeviceSigner`, `DeviceSigner`, `ed25519WasmActive` |
 | 内容格式 | `encodeDocumentContext`, `encodeContentContext`, `encodeContentHeader`, `contentKeyInfo`, `contentHkdfSalt`, `contentAad`, `contentSigningBytes`, `inspectContentFrame`, `DocumentScope`, `ContentScope`, `ContentPurpose`, `ContentHeader`, `ContentMetadata` |
 | 文档 | `sealDocument`, `openDocument`, `authenticateDocument`, `admitDocument`, `deriveDocumentKey`, `scopedDocumentKey`, `importDocumentKey`, `exportDocumentKey`, `disposeDocumentKey`, `DocumentKey` |
 | 内容加密 | `deriveContentKey`, `disposeContentKey`, `sealContentAead`, `openContentAead`, `ContentKey`, `SealedContentAead` |
@@ -95,3 +95,5 @@
 
 仅 Node 可用，由显式 Scope 持有。宿主负责核对 KEK 包装器的实际保护能力；
 文件保护只能创建机器身份，个人身份必须使用系统安全存储。
+
+`NodeE2eeCustody.prepareDeviceCredential(genesis, signingPublicKey)` 一次性持久保存独立的 32 字节设备访问凭证，返回小写 hex 凭证及原字节的 SHA-256。`NodeE2eeCustody.deviceCredential` 只重开已有原件，缺失或损坏时不重新生成。凭证用独立用途域、genesis 与设备公钥绑定后由现有 KEK 保护，不改变设备文件和 epoch 密钥格式。它只用于服务端访问，不是内容密钥。

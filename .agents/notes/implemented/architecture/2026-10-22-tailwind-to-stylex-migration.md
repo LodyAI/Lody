@@ -519,6 +519,19 @@ phone Command dialog's clipped left edge is byte-identical to the pre-merge
 build. Both remain visible limits, not silent layout patches or new acceptance
 claims. `main-merge-acceptance.html` embeds the integration captures and controls.
 
+The subsequent integration of `a3de5d611` preserves upstream notice-copy layout
+and E2EE scoped instructions, with no changes to the six leaf implementations.
+A fresh Storybook 10.6.2 build and 434 integration captures have equal recorded
+styles/geometry and zero threshold pixels (421 byte-identical). This separate
+matrix does not replace the earlier native differences. The current component
+run passes 617 files / 6,124 tests; one Electron-auth recovery suite cannot load
+because the newly required Electron 44.9.3 binary is unavailable locally.
+Installer fetches fail, and GitHub release download reports “release not found”.
+The application builds, but this runtime smoke is blocked; the earlier real
+Electron runs retain their original runtime/version scope. Root checking stops
+with the same unsupported-Node SQLite suite and Git identity assertion (332 CLI
+files / 4,697 tests pass). The integration proof is `leaf-main-integration-review.json`.
+
 ## Remaining work
 
 Compiler-backed [usage inventory](../../../../packages/components/scripts/tailwind-usage.mjs)
@@ -536,8 +549,9 @@ lower bound is 2,421 occurrences after the alpha follow-up: components 1,902, `s
 across 188 affected files. The scanner separately
 reports 690 unresolved expressions: 600 in components and 90 in `src/ui`.
 After integrating upstream additions, the scan reported 2,572 occurrences across
-188 files. The status/project-entry/rename batch leaves 2,497 occurrences
-(components 2,009, `src/ui` 487, routes 1) across 184 files, with 692 unresolved
+188 files. The status/project-entry/rename batch left 2,497 occurrences across 184 files.
+Following the later upstream integration, the current scan reports 2,501
+(components 2,009, `src/ui` 487, routes 5) across 185 files, with 692 unresolved
 expressions (611 components, 81 `src/ui`). These are lower bounds, not a project
 completion percentage.
 

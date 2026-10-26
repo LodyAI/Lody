@@ -4,6 +4,7 @@ import { app } from 'electron'
 import { Effect, Exit, Scope, Semaphore } from 'effect'
 import { makeElectronE2eeCustody } from '../e2ee-custody-electron'
 import { makeDesktopE2eeBootstrap } from './e2ee-bootstrap.mjs'
+import type { E2eeCloudClient } from './e2ee-cloud-client.mjs'
 import type { makeDesktopE2eeRuntimeHost } from './e2ee-runtime.mjs'
 import { getIpcServiceDeps } from '../ipc/ipc-service-deps'
 
@@ -15,11 +16,32 @@ type Account = {
   scope: Scope.Closeable
   bootstrap: Effect.Success<ReturnType<typeof makeDesktopE2eeBootstrap>>
   host: Effect.Success<ReturnType<typeof makeDesktopE2eeRuntimeHost>>
+  cloud?: E2eeCloudClient
   closeFailed?: boolean
   readers: Map<string, Map<number, number>>
 }
 let current: Account | undefined
 let quitting = false
+let observingIdentity = false
+function observeIdentity() {
+  if (observingIdentity) return
+  const auth = getIpcServiceDeps().authService
+  if (typeof auth.subscribeCachedSessionIdentity !== 'function') return
+  observingIdentity = true
+  auth.subscribeCachedSessionIdentity(() => {
+    const owner = current
+    if (!owner || auth.getCachedSessionIdentity().userId === owner.accountId) return
+    // The synchronous identity check fences new calls immediately. Resource
+    // release queues behind admitted native work, without awaiting auth I/O.
+    void Effect.runPromise(
+      Effect.uninterruptible(
+        serial.withPermit(Effect.suspend(() => (current === owner ? closeCurrent : Effect.void)))
+      )
+    ).catch(() => {
+      console.warn('[E2EE] Account cleanup pending', { code: 'e2ee_cleanup_failed' })
+    })
+  })
+}
 const closeCurrent = Effect.gen(function* () {
   if (!current) return undefined
   const owner = current
@@ -39,6 +61,7 @@ const closeCurrent = Effect.gen(function* () {
 export function withDesktopE2eeAccount<A>(
   work: (owner: Account) => Effect.Effect<A, unknown>
 ): Promise<A> {
+  observeIdentity()
   return Effect.runPromise(
     Effect.uninterruptible(
       serial.withPermit(
@@ -103,22 +126,7 @@ export function withDesktopE2eeAccount<A>(
       )
     )
   ).catch((error: unknown) => {
-    const code = error && typeof error === 'object' && 'code' in error ? error.code : undefined
-    const allowed = new Set([
-      'account_unavailable',
-      'custody_unavailable',
-      'missing-binding',
-      'conflict',
-      'local-evidence-conflict',
-      'closed',
-      'corrupt',
-      'invalid-input',
-      'storage',
-      'invalid-ledger'
-    ])
-    throw new Error(
-      typeof code === 'string' && allowed.has(code) ? `e2ee_${code}` : 'e2ee_host_operation_failed'
-    )
+    throw publicE2eeFailure(error)
   })
 }
 
@@ -152,25 +160,99 @@ export function closeDesktopE2eeAccount(options?: {
 
 /** A destroyed renderer cannot retain a workspace or submit further requests. */
 export function releaseDesktopE2eeReader(senderId: number): void {
+  const detach = serial.withPermit(
+    Effect.gen(function* () {
+      const cleanup: Effect.Effect<void, unknown>[] = []
+      if (!current) return cleanup
+      for (const [workspaceId, readers] of current.readers) {
+        readers.delete(senderId)
+        if (readers.size === 0) {
+          cleanup.push(yield* current.host.beginCloseWorkspace(workspaceId))
+          current.readers.delete(workspaceId)
+        }
+      }
+      return cleanup
+    })
+  )
   void Effect.runPromise(
     Effect.uninterruptible(
-      serial.withPermit(
-        Effect.gen(function* () {
-          if (!current) return
-          for (const [workspaceId, readers] of current.readers) {
-            readers.delete(senderId)
-            if (readers.size === 0) {
-              yield* current.host.closeWorkspace(workspaceId)
-              current.readers.delete(workspaceId)
-            }
-          }
-        })
+      Effect.flatMap(detach, (cleanup) =>
+        Effect.forEach(cleanup, (work) => Effect.exit(work), { concurrency: 'unbounded' }).pipe(
+          Effect.tap((results) =>
+            Effect.sync(() => {
+              if (results.some(Exit.isFailure))
+                console.warn('[E2EE] Reader cleanup pending', { code: 'e2ee_cleanup_failed' })
+            })
+          )
+        )
       )
     )
-  ).catch(() => undefined)
+  ).catch(() => {
+    console.warn('[E2EE] Reader cleanup pending', { code: 'e2ee_cleanup_failed' })
+  })
 }
 
 /** The quit barrier can leave the application open; failed owners stay fenced. */
 export function resumeDesktopE2eeAccount(): void {
   quitting = false
+}
+
+/** Acquire the narrow account client locally, then release the native lock
+ * before auth refresh, HTTP or mailbox work starts. Logout owns its Scope. */
+export async function desktopE2eeCloudClient(): Promise<{
+  accountId: string
+  client: E2eeCloudClient
+}> {
+  return withDesktopE2eeAccount((owner) =>
+    Effect.gen(function* () {
+      if (!owner.cloud) {
+        const { makeE2eeCloudClient } = yield* Effect.promise(
+          () => import('./e2ee-cloud-client.mjs')
+        )
+        owner.cloud = yield* makeE2eeCloudClient({
+          platformKind: 'cloud',
+          deploymentUrl: import.meta.env.VITE_CONVEX_DEPLOY_URL ?? '',
+          convexToken: () => getIpcServiceDeps().authService.convexToken()
+        }).pipe(Scope.provide(owner.scope))
+      }
+      return { accountId: owner.accountId, client: owner.cloud }
+    })
+  )
+}
+
+function publicE2eeFailure(error: unknown): Error {
+  const code = error && typeof error === 'object' && 'code' in error ? error.code : undefined
+  const allowed = new Set([
+    'account_unavailable',
+    'custody_unavailable',
+    'missing-binding',
+    'conflict',
+    'local-evidence-conflict',
+    'closed',
+    'corrupt',
+    'invalid-input',
+    'storage',
+    'invalid-ledger'
+  ])
+  return new Error(
+    typeof code === 'string' && allowed.has(code) ? `e2ee_${code}` : 'e2ee_host_operation_failed'
+  )
+}
+
+/** The workspace host owns native admission/drain. Execute a captured operation
+ * outside the account lock, retaining the originating account fence. */
+export async function runDesktopE2eeOperation<A>(
+  accountId: string,
+  work: Effect.Effect<A, unknown>
+): Promise<A> {
+  const assertAccount = () => {
+    if (getIpcServiceDeps().authService.getCachedSessionIdentity().userId !== accountId)
+      throw new Error('e2ee_account_mismatch')
+  }
+  assertAccount()
+  const result = await Effect.runPromise(work).catch((error) => {
+    throw publicE2eeFailure(error)
+  })
+  assertAccount()
+  return result
 }

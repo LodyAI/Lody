@@ -12,6 +12,10 @@ import {
   type ProcessHandleLegacy,
   type TerminationPolicy
 } from '@lody/shared/node/process'
+import type {
+  LocalE2eePrepareRequest,
+  LocalE2eeActivateRequest
+} from '@lody/shared/e2ee-local-pairing'
 import { isLocalSessionControlRequest } from '@lody/shared/node/local-session-control'
 import { isLocalProjectControlRequest } from '@lody/shared/node/local-project-control'
 import {
@@ -803,6 +807,44 @@ export class CliService {
       }
       return fallbackMachineId
     }
+  }
+
+  async prepareLocalE2eeDevice(message: LocalE2eePrepareRequest) {
+    if (!this.cliAutoStartEnabled) throw new Error('e2ee_local_agent_disabled')
+    return Effect.runPromise(
+      this.localControlClient
+        .e2eePrepare(message, { timeoutMs: 30_000 })
+        .pipe(
+          Effect.mapError(
+            (error) =>
+              new Error(
+                error._tag === 'IpcTimeoutError'
+                  ? 'e2ee_local_agent_pending'
+                  : 'e2ee_local_agent_unavailable',
+                { cause: error }
+              )
+          )
+        )
+    )
+  }
+
+  async activateLocalE2eeDevice(message: LocalE2eeActivateRequest) {
+    if (!this.cliAutoStartEnabled) throw new Error('e2ee_local_agent_disabled')
+    return Effect.runPromise(
+      this.localControlClient
+        .e2eeActivate(message, { timeoutMs: 30_000 })
+        .pipe(
+          Effect.mapError(
+            (error) =>
+              new Error(
+                error._tag === 'IpcTimeoutError'
+                  ? 'e2ee_local_agent_pending'
+                  : 'e2ee_local_agent_unavailable',
+                { cause: error }
+              )
+          )
+        )
+    )
   }
 
   async sendLocalSessionControl(

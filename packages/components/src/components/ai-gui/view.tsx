@@ -4140,27 +4140,16 @@ const DashedNoticeRule = () => (
 );
 
 const noticeStyles = stylex.create({
-  /**
-   * One wrapping row for the whole banner. Above the mobile breakpoint the
-   * detail and footer keep their own rows; at phone widths the copy-only case
-   * swaps those two orders so the footer rides the header's trailing edge
-   * instead of spending a row. When a capacity retry action is present the
-   * header is already occupied, so the footer keeps its row to avoid squeezing
-   * the title between two controls.
-   */
+  // Copy shares the title row unless retry already occupies its trailing edge.
   row: {
     display: 'flex',
     flexWrap: 'wrap',
     alignItems: 'center',
     columnGap: space[2],
     rowGap: space[1.5],
-    paddingInline: space[2],
-    paddingTop: space[1.5],
-    paddingBottom: space[1.5],
-  },
-  /** A footer button's own bottom padding replaces the plain band's. */
-  rowWithFooter: {
-    paddingBottom: space[2],
+    paddingInline: space[3],
+    paddingTop: space[2],
+    paddingBottom: space[3],
   },
   label: {
     flexGrow: 1,
@@ -4179,13 +4168,13 @@ const noticeStyles = stylex.create({
   },
   /** Applied only when copy is the sole trailing control. */
   detailAfterFooter: {
-    '@media (max-width: 767px)': { order: 5 },
+    order: 5,
   },
   detailText: {
     display: 'block',
     minWidth: 0,
     whiteSpace: 'pre-wrap',
-    overflowWrap: 'break-word',
+    overflowWrap: 'anywhere',
     fontSize: textScale.footnoteSize,
     lineHeight: textScale.bodyLeading,
     color: 'hsl(var(--muted-foreground))',
@@ -4197,7 +4186,9 @@ const noticeStyles = stylex.create({
   },
   /** Applied only when copy is the sole trailing control. */
   footerInHeader: {
-    '@media (max-width: 767px)': { order: 4, width: 'auto' },
+    order: 4,
+    width: 'auto',
+    maxWidth: '100%',
   },
 });
 
@@ -4274,11 +4265,7 @@ const AgentNoticeBanner = ({
       style={{ boxShadow: `0 0 0 0.5px ${ringColor}`, background: fillColor }}
       {...stylex.props(viewStyles.noticeFrame)}
     >
-      {/* Header, detail, and footer share one wrapping row. On phones without a
-          retry action the footer keeps the header's trailing edge and the detail
-          drops to its own full-width line, so copy no longer spends a separate
-          row; wider viewports keep detail and footer on their own rows below. */}
-      <div {...stylex.props(noticeStyles.row, footer ? noticeStyles.rowWithFooter : undefined)}>
+      <div {...stylex.props(noticeStyles.row)}>
         <Icon
           {...withClassName(stylex.props(viewStyles.iconSm, accentStyle), accentClass)}
           aria-hidden="true"
@@ -4648,7 +4635,7 @@ const ChatFailedNoticeView = ({
       })}
       action={retryAction}
       footer={
-        <Button variant="ghost" size="medium" onClick={() => void handleCopyError()}>
+        <Button variant="ghost" size="small" onClick={() => void handleCopyError()}>
           <Copy size={14} aria-hidden="true" />
           {t('sessions.systemNotices.chatFailed.copyError', 'Copy error')}
         </Button>

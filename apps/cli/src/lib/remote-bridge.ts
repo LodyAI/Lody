@@ -1,7 +1,10 @@
 import { fileLocksLegacy } from '@/utils/file-lock';
 import type { MachineId } from '@lody/shared';
 import type { Logger } from '@/utils/logger';
-import type { LocalWorkspaceCatalogService } from '@/lib/local-workspace-catalog';
+import type {
+  LocalWorkspaceCatalogError,
+  LocalWorkspaceCatalogService,
+} from '@/lib/local-workspace-catalog';
 import { formatErrorMessage } from '@/utils/format-error';
 
 export type RemoteBridgeWorkspace = {
@@ -9,6 +12,8 @@ export type RemoteBridgeWorkspace = {
   name: string;
   slug: string | null;
   role: string;
+  contentMode?: string;
+  genesisHash?: string;
 };
 
 export type RemoteBridgeRuntime = {
@@ -20,6 +25,7 @@ export type RemoteBridgeRuntime = {
 export type RemoteBridgeReconcileResult = {
   allowedWorkspaceIds: Set<string>;
   revokedRunningWorkspaceIds: Set<string>;
+  encryptedCatalogError?: LocalWorkspaceCatalogError;
 };
 
 const ATTACH_RETRY_INITIAL_DELAY_MS = 5_000;
@@ -45,7 +51,7 @@ export class RemoteBridge {
     workspaces: RemoteBridgeWorkspace[];
     runningWorkspaceIds: Iterable<string>;
   }): Promise<RemoteBridgeReconcileResult> {
-    await fileLocksLegacy.runPromise(
+    const cached = await fileLocksLegacy.runPromise(
       this.args.catalog.cacheRemoteWorkspaces({
         identity: { userId: this.args.userId },
         machine: {
@@ -76,7 +82,13 @@ export class RemoteBridge {
       }
     }
 
-    return { allowedWorkspaceIds, revokedRunningWorkspaceIds };
+    return {
+      allowedWorkspaceIds,
+      revokedRunningWorkspaceIds,
+      ...(cached?.encryptedCatalogError
+        ? { encryptedCatalogError: cached.encryptedCatalogError }
+        : {}),
+    };
   }
 
   async attachAllowedRuntimes(workspaceIds: Iterable<string>): Promise<void> {

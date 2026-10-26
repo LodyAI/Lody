@@ -373,6 +373,15 @@ Landing 面板与标签的重叠也出现在隔离构建、产品代码未修改
 手机 Command 对话框左侧裁切与合入前截图字节一致。两项仍列为可见限制，不用补丁
 掩盖，也不据此扩大验收结论。`main-merge-acceptance.html` 内嵌合入截图与对照证据。
 
+随后合入 `a3de5d611`，保留上游通知复制布局及 E2EE 分域规则，六个叶组件实现未变。
+Storybook 10.6.2 新构建与 434 组集成截图的记录样式/几何相等、阈值差异为零，421 组
+字节一致；独立矩阵不替代之前原生差异。当前组件测试 617 个文件、6,124 项通过；
+一个 Electron auth recovery 套件因本地缺少新要求的 Electron 44.9.3 二进制而无法载入。
+安装器 fetch 失败，GitHub release 下载返回“release not found”。应用构建通过，但该
+版本实际运行 smoke 受阻；早期真实 Electron 运行仍仅对应其原有版本。根检查仍在
+Node 不支持的 SQLite 套件及 Git 身份断言处停止，CLI 332 个文件、4,697 项通过。
+集成证据记录在 `leaf-main-integration-review.json`。
+
 ## 后续工作
 
 基于编译器的[用量统计](../../../../packages/components/scripts/tailwind-usage.mjs)
@@ -385,9 +394,9 @@ component 扫描另列 605 个未解析表达式。后续七文件再将 compone
 共享适配层批次再将 `src/ui` 从 992 处降至 742 处。Emoji Picker / Drawer 批次将 `src/ui` 进一步降至 626 处。Diff Viewer 批次进一步将 `src/ui` 降至 518 处。合入前透明度续迁后的审计下界
 为 2,421 处：components 1,902、`src/ui` 518、routes 1，共 188 个仍含 utility 的文件。
 扫描器另列 690 个未解析表达式：components 600 个、`src/ui` 90 个。
-合入上游新增代码后为 2,572 处、188 个文件；本批状态/项目入口/重命名续迁后为 2,497 处
-（components 2,009、`src/ui` 487、routes 1），共 184 个文件；另有 692 个未解析表达式
-（components 611、`src/ui` 81）。
+合入上游新增代码后为 2,572 处、188 个文件；本批状态/项目入口/重命名续迁后为 2,497 处、184 个文件。
+后续再合入上游后，当前扫描为 2,501 处（components 2,009、`src/ui` 487、routes 5），
+共 185 个文件；另有 692 个未解析表达式（components 611、`src/ui` 81）。
 这些数值是下界，不是全项目完成百分比。
 
 未使用的 `src/ui/sidebar.tsx` 保留 324 处，`src/ui/index.ts` 没有重导出它；

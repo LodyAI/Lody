@@ -18,9 +18,8 @@ Parent/child scopes apply. `CLAUDE.md` symlinks here; edit `AGENTS.md` only.
   (zero under reduced motion); hidden eager-sync/keyboard-nav pauses. Compact/settings
   remounts restore scroll. Compact nav is modal: inert content, restore focus,
   nested Escape first. [Spec](../../../../specs/desktop-windows.md).
-- All lists and keyboard navigation use `lib/session-opened-by-tree.ts`:
-  `session-list.tsx`, local-project sections, Updated/Pinned in
-  `sidebar-updated-session-list.tsx`, and `sidebar-navigation-model.ts`.
+- All lists use `lib/session-opened-by-tree.ts`; `sidebar-navigation-model.ts`
+  owns matching keyboard navigation.
 - Keep `openedBySessionId` (precise opener) distinct from `openedByRowSessionId`
   (row). `buildSidebarOpenerRowResolver` in `sessions/session-list-rows.ts` walks
   `parentSessionId` to root using `allActiveSessions`, never visible rows.
@@ -106,3 +105,5 @@ Parent/child scopes apply. `CLAUDE.md` symlinks here; edit `AGENTS.md` only.
   state that the original project directory is never deleted; list dirty
   worktrees and keep them by default. Completed cleanup is not pending removal:
   acknowledge it visibly even when worktrees were kept or failed.
+
+E2EE/terminals: read [rules](e2ee/AGENTS.md).

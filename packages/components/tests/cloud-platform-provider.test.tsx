@@ -12,7 +12,7 @@ import type {
   E2eeWorkspaceRuntime,
   PlatformE2eeWorkspaces,
 } from '@lody/platform';
-import { usePlatform } from '@lody/platform/react';
+import { usePlatform, usePlatformSession } from '@lody/platform/react';
 
 const fixture = vi.hoisted(() => ({
   session: {} as Record<string, unknown>,
@@ -42,6 +42,8 @@ const fixture = vi.hoisted(() => ({
 }));
 
 vi.mock('jotai', () => ({ useAtomValue: () => false }));
+vi.mock('@/atoms', () => ({ userAtom: 'user' }));
+vi.mock('@/atoms/runtime', () => ({ activeWorkspaceRuntimeAtom: 'runtime' }));
 vi.mock('@/atoms/local-probe', () => ({ localAgentEnabledAtom: 'local-agent' }));
 vi.mock('@/lib/electron', () => ({ isElectronRenderer: () => fixture.electron }));
 vi.mock('@/lib/electron-ipc-client', () => ({ getIpcServices: () => fixture.native }));
@@ -62,6 +64,8 @@ vi.mock('@/lib/cloud-http-port', () => ({ installCloudHttpPort: () => () => {} }
 
 import { CloudPlatformProvider } from '@/providers/cloud-platform-provider';
 import { createCloudE2eeWorkspaces } from '@/providers/cloud-e2ee-workspaces';
+import { useE2eeAccountId } from '@/lib/e2ee-account';
+import { readAuthBootstrapSnapshot, writeStoredAuthToken } from '@/lib/auth-bootstrap';
 
 /** What better-auth hands back on a refetch: equal data in new objects. */
 function refetch(workspaceName: string) {
@@ -109,6 +113,76 @@ describe('CloudPlatformProvider', () => {
   afterEach(() => {
     act(() => root.unmount());
     container.remove();
+    localStorage.clear();
+  });
+
+  it('keeps ordinary access unauthenticated while E2EE opens with an expired snapshot and retained bearer after network retries fail', async () => {
+    fixture.electron = true;
+    refetch('Encrypted');
+    writeStoredAuthToken('synthetic-retained-bearer');
+    localStorage.setItem(
+      'lody:auth-bootstrap',
+      JSON.stringify({
+        user: { id: 'user-a', name: 'A', email: 'a@example.com', image: null },
+        updatedAt: Date.now() - 8 * 24 * 60 * 60 * 1000,
+      })
+    );
+    expect(readAuthBootstrapSnapshot()).toBeNull();
+    // Actual useStableSession terminal output after retryable failures exhaust:
+    // the old bootstrap is gone, but this is not a confirmed session rejection.
+    fixture.session = {
+      data: undefined,
+      isPending: false,
+      isRetrying: false,
+      isOptimistic: false,
+      error: new Error('synthetic network unavailable'),
+      confirmedUnauthenticated: false,
+    };
+    const acceptedBearers: string[] = [];
+    const unused = async (): Promise<never> => {
+      throw new Error('unexpected native operation');
+    };
+    fixture.native = {
+      e2ee: {
+        account: async (options) => {
+          if (options?.token !== 'synthetic-retained-bearer') return null;
+          acceptedBearers.push(options.token);
+          return { userId: 'user-a', source: 'offline' };
+        },
+        prepareCreation: unused,
+        recordCreated: unused,
+        open: unused,
+        close: async () => {},
+        status: unused,
+        ledgerView: unused,
+        ingestLedgerRecords: unused,
+      },
+    };
+    function LocalAccount() {
+      const accountId = useE2eeAccountId();
+      const session = usePlatformSession();
+      const ordinaryAccount = useE2eeAccountId(false);
+      return createElement('output', null, `${session.status}:${accountId}:${ordinaryAccount}`);
+    }
+    await act(async () => {
+      root.render(createElement(CloudPlatformProvider, null, createElement(LocalAccount)));
+    });
+    expect(container.textContent).toBe('unauthenticated:user-a:null');
+    expect(acceptedBearers.length).toBeGreaterThan(0);
+
+    // A real rejection immediately retires the E2EE identity too. The retained
+    // bearer here deliberately remains, so it cannot disguise confirmed logout.
+    fixture.session = {
+      ...fixture.session,
+      error: Object.assign(new Error('synthetic session rejected'), { status: 401 }),
+      confirmedUnauthenticated: true,
+    };
+    const beforeLogout = acceptedBearers.length;
+    await act(async () => {
+      root.render(createElement(CloudPlatformProvider, null, createElement(LocalAccount)));
+    });
+    expect(container.textContent).toBe('unauthenticated:null:null');
+    expect(acceptedBearers.length).toBe(beforeLogout);
   });
 
   it('keeps one platform object across a session refetch and calls the latest actions', async () => {
@@ -176,12 +250,22 @@ describe('CloudPlatformProvider', () => {
     };
     fixture.electron = true;
     const bindings: Array<{ workspaceId: string; genesisHash: string; requestId?: string }> = [];
-    const unused = async (): Promise<never> => { throw new Error('unused runtime method'); };
-    fixture.native = { e2ee: {
-      prepareCreation: async () => ({ ...prepared }),
-      recordCreated: async binding => { bindings.push({ ...binding }); },
-      open: unused, close: async () => {}, status: unused, ledgerView: unused, ingestLedgerRecords: unused,
-    } };
+    const unused = async (): Promise<never> => {
+      throw new Error('unused runtime method');
+    };
+    fixture.native = {
+      e2ee: {
+        prepareCreation: async () => ({ ...prepared }),
+        recordCreated: async (binding) => {
+          bindings.push({ ...binding });
+        },
+        open: unused,
+        close: async () => {},
+        status: unused,
+        ledgerView: unused,
+        ingestLedgerRecords: unused,
+      },
+    };
     fixture.cloudClient.query = async (reference, args) => {
       expect(getFunctionName(reference)).toBe('e2eeWorkspaces:describe');
       expect(args).toEqual({ workspaceId: receipt.workspaceId });
@@ -203,7 +287,13 @@ describe('CloudPlatformProvider', () => {
     const port = seen.at(-1)!.e2eeWorkspaces!;
     await expect(port.prepareCreation!(prepared)).resolves.toEqual(prepared);
     await expect(port.create(createRequest)).resolves.toEqual(receipt);
-    expect(bindings).toEqual([{ workspaceId: receipt.workspaceId, genesisHash: prepared.genesisHashHex, requestId: prepared.requestId }]);
+    expect(bindings).toEqual([
+      {
+        workspaceId: receipt.workspaceId,
+        genesisHash: prepared.genesisHashHex,
+        requestId: prepared.requestId,
+      },
+    ]);
     await expect(port.describe({ workspaceId: receipt.workspaceId })).resolves.toEqual(receipt);
     await expect(port.history(historyRequest)).resolves.toEqual(historyPage);
 

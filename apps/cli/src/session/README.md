@@ -226,9 +226,20 @@ that signal before the next mutation, so an old turn whose first configuration c
 late cannot overwrite the configuration of the turn that started after Stop.
 
 Completion notifications use the exact completed invocation's input author, including
-steer handoffs. An Agent-authored input suppresses the user-facing completion notice;
-an earlier Agent input does not suppress a later human turn. Finalization, Operation
-results and Inbox scheduling still run. Cancellation is rechecked after the author read.
+steer handoffs. Agent input suppresses notices but not unread publication. Execution
+finishes history, releases presence and settles Inbox ownership before handing a
+frozen activity time to `turn-completion.ts`. Its Effect program persists the actual
+history backend and confirms remote history/control sync when attached, retrying
+only confirmation within 30 seconds. Local-only completion needs no remote receipt.
+Unconfirmed success is withheld and logged; failures still notify independently.
+The host drain owns publication through `publishTurnCompletionLegacy`; shutdown
+cancels confirmation before draining begun writes. Notification sends remain one-shot,
+with no outbox or reconnect replay. A receipt is not proof of client rendering.
+
+`session show` summarizes a finished assistant entry using `endedAt`, falling back
+to creation `timestamp` for active/legacy entries. Stored timestamps and ordering
+are unchanged. Activity metadata advances monotonically even when an older
+completion confirms after a newer turn; parent activity uses the same write queue.
 
 ### Why resume reopens the assistant entry
 
@@ -859,5 +870,13 @@ selected submodules wait for their parent, and siblings sharing parent Git confi
 are serialized. Branch receipts publish serially, and failures drain started work
 before releasing the Project owner. Selected members initialize non-recursively
 with their own credentials; remaining submodules initialize afterward with four Git
-fetch jobs per command. Local selected copies lend objects via `--reference` and
-`--dissociate`, so source GC cannot invalidate a checkout. Setup retains the prior serial traversal order, including parents before children.
+fetch jobs per command. Complete standalone local copies lend objects via `--reference`
+and `--dissociate`, so source GC cannot invalidate a checkout. Partial clones, shallow
+copies and linked worktrees use ordinary cloning instead; preparation never hydrates
+the source. Remaining submodule initialization follows gitlinks in the current index,
+ignoring residual `.gitmodules` entries. Archive skips unmaterialized empty selected
+submodules and verifies that populated members are independent checkouts before backup;
+unknown local content is retained. Setup retains the prior serial traversal order,
+including parents before children.
+The [submodule preparation decision](../../../../.agents/notes/implemented/bug-fix/2026-10-26-project-submodule-preparation.md)
+records the source-layout and incomplete-startup recovery boundaries.

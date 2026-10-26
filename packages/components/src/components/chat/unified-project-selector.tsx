@@ -867,14 +867,12 @@ export function UnifiedProjectSelectorView({
                 }}
               >
                 {filteredOptions.map((option) => {
-                  // Local projects show only the name; the path lives in a hover
-                  // tooltip. GitHub repos keep their inline description line.
+                  // Local and GitHub projects show only the name; local paths
+                  // live in a hover tooltip. Groups keep their member summary.
                   const localPath =
                     option.selection.kind === 'local' ? option.description : undefined;
                   const inlineDescription =
-                    option.selection.kind === 'github' || option.selection.kind === 'group'
-                      ? option.description
-                      : undefined;
+                    option.selection.kind === 'group' ? option.description : undefined;
                   const labelNode = (
                     <span
                       {...stylex.props(
