@@ -12,6 +12,7 @@
   "e2ee.pair.claim": "检查批准结果并领取密钥",
   "e2ee.pair.waiting": "等待批准或密钥送达。请保持批准设备在线，然后再次检查。",
   "e2ee.pair.published": "已批准。另一台桌面现在可以检查邀请并领取密钥。",
+  "e2ee.pair.retrySubmission": "重试已保存的申请",
   "e2ee.pair.retryPublication": "已批准；重试投递邀请",
   "e2ee.pair.cancelled": "申请已在提交前取消，此申请没有接纳新设备。",
   "e2ee.pair.ready": "此桌面已加入并持有当前密钥。",

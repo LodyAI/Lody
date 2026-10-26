@@ -42,6 +42,19 @@ export default meta;
 type Story = StoryObj<typeof meta>;
 export const ExistingDesktop: Story = {};
 export const JoiningDesktop: Story = { args: { canApprove: false } };
+export const SavedJoiningRequest: Story = {
+  args: {
+    canApprove: false,
+    runtime: {
+      ...meta.args.runtime,
+      pendingPersonalJoin: async () => ({
+        pairingSessionId: offer.pairingSessionId,
+        signingPublicKey: '55'.repeat(32),
+        offer,
+      }),
+    },
+  },
+};
 export const Confirm: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);

@@ -37,6 +37,10 @@ sequenceDiagram
 
 ## Storage, lifecycle and recovery
 
+After a failed begin, the recipient can discover the saved session, including a pin whose request preparation has not finished, and explicitly retry only that original offer. The approving desktop can cancel a pending offer through the existing relay reservation fence. Both sides reconcile an explicit terminal cancelled/conflict response before archival; a generic conflict error, timeout or admitting state never retires an original. Confirmed cancellation remains successful if local archival fails: journals retain the original and the host retains the diagnostic, and the next claim, preparation or offer query can retry the affected cleanup. Reopening the window discovers the same local intent.
+
+Storage failures retain their original native cause in one main-only diagnostic slot before public error conversion. Raw causes are never attached to IPC errors or generic telemetry.
+
 The account bootstrap journal retains public requests/invitations and protected identity/credential bindings. Runtime creation data now selects a local genesis origin or a qualified invitation; it does not manufacture an epoch-zero key for a joining device. Snapshot-origin cache rebuilding starts from the saved invitation and genuine suffix; conflicting independent evidence remains blocking. Key distribution and HTTP stay outside account custody locks. Workspace operations hold their existing owner/reader fences; logout and close keep native settlement ownership.
 
 Current keys come through KeyMailbox and old keys through InstalledEpochHistory. Historical keys are never fetched from staging. The invitation wire wrapper is bounded JSON encoded as UTF-8 hex with canonical base64 snapshot bytes; it does not change core snapshot/signature formats. The cloud limit is 6 MiB ASCII hex; chunk rows stay below document limits, and erase drains bounded chunk batches before retiring identities.

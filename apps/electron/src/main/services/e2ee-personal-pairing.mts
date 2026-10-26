@@ -1,3 +1,4 @@
+import { rememberDesktopE2eeFailure } from './e2ee-diagnostics.mjs'
 import { createHash, randomBytes, randomUUID } from 'node:crypto'
 import type { DatabaseSync } from 'node:sqlite'
 import { Effect, Result } from 'effect'
@@ -61,7 +62,10 @@ const fail = (code: string): Error & { code: string } =>
 function sql<A>(work: () => A): Effect.Effect<A, unknown> {
   return Effect.try({
     try: work,
-    catch: (error) => (error instanceof Error && 'code' in error ? error : fail('storage'))
+    catch: (error) => {
+      rememberDesktopE2eeFailure('personal-pairing-sql', error)
+      return error instanceof Error && 'code' in error ? error : fail('storage')
+    }
   })
 }
 function decodeRequest(value: string): PersonalPairingRequest {
@@ -150,6 +154,12 @@ interface PersonalJoinOrigin {
   invitationHex: string
 }
 interface PersonalJoins {
+  pending(
+    workspaceId: string
+  ): Effect.Effect<
+    { offer: PersonalPairingOffer; pairingSessionId: string; signingPublicKey?: string } | null,
+    unknown
+  >
   prepare(offer: PersonalPairingOffer): Effect.Effect<PersonalJoinPrepared, unknown>
   retire(workspaceId: string, pairingSessionId: string): Effect.Effect<void, unknown>
   accept(workspaceId: string, invitationHex: string): Effect.Effect<void, unknown>
@@ -358,6 +368,28 @@ export function makeDesktopPersonalJoins(input: {
     }
   })
   return {
+    pending: (workspaceId: string) =>
+      sql(() => {
+        const row = rowFor(workspaceId)
+        if (!row || row.invitation_hex) return null
+        const offer = PersonalPairingOfferSchema.parse(JSON.parse(row.pin))
+        if (offer.workspaceId !== workspaceId) throw fail('corrupt')
+        const request = row.request_hex ? decodeRequest(row.request_hex) : undefined
+        if (
+          request &&
+          Object.keys(offer).some(
+            (key) =>
+              offer[key as keyof PersonalPairingOffer] !==
+              request[key as keyof PersonalPairingOffer]
+          )
+        )
+          throw fail('corrupt')
+        return {
+          offer,
+          pairingSessionId: offer.pairingSessionId,
+          ...(request ? { signingPublicKey: request.signingPublicKey } : {})
+        }
+      }),
     prepare,
     retire: (workspaceId: string, pairingSessionId: string) =>
       sql(() => {
@@ -693,7 +725,8 @@ export function makeDesktopPersonalPairing(input: {
       const view = yield* input.current()
       yield* sql(() => {
         const row = rowFor(pairingSessionId)
-        if (!row || row.invitation_hex) throw fail('conflict')
+        if (!row) return
+        if (row.invitation_hex) throw fail('conflict')
         if (row.retired) return
         const state = disposition(row, view)
         if (state !== 'unsigned' && state !== 'lost') throw fail('conflict')
@@ -704,7 +737,8 @@ export function makeDesktopPersonalPairing(input: {
       const view = yield* input.current()
       yield* sql(() => {
         const row = rowFor(pairingSessionId)
-        if (!row || row.invitation_hex) throw fail('conflict')
+        if (!row) return
+        if (row.invitation_hex) throw fail('conflict')
         if (row.retired) return
         if (disposition(row, view) === 'committed') throw fail('conflict')
         // The service terminal-cancel contract fences every later reservation of

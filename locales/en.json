@@ -12,6 +12,7 @@
   "e2ee.pair.claim": "Check approval and get key",
   "e2ee.pair.waiting": "Waiting for approval or key delivery. Keep the approving desktop online and check again.",
   "e2ee.pair.published": "Approved. The other desktop can now check for its invitation and key.",
+  "e2ee.pair.retrySubmission": "Retry saved request",
   "e2ee.pair.retryPublication": "Approved; retry invitation delivery",
   "e2ee.pair.cancelled": "Request cancelled before submission. No device was admitted by this request.",
   "e2ee.pair.ready": "This desktop has joined and has the current key.",

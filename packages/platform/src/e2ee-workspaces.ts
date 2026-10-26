@@ -83,6 +83,12 @@ export interface E2eeWorkspaceRuntime {
   preparePersonalJoin?(
     offer: E2eePersonalPairingOffer
   ): Promise<{ pairingSessionId: string; signingPublicKey: string; status: string }>;
+  /** Query only the host's retained local request; never creates a session. */
+  pendingPersonalJoin?(workspaceId: string): Promise<{
+    pairingSessionId: string;
+    signingPublicKey?: string;
+    offer: E2eePersonalPairingOffer;
+  } | null>;
   inspectPersonalJoin?(
     workspaceId: string,
     pairingSessionId: string

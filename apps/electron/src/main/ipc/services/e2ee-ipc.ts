@@ -55,13 +55,139 @@ export class E2eeIpc extends IpcService {
       ? { userId: identity.userId, source: identity.source }
       : null
   }
+  /** Terminal remote state is the cleanup authority, not a generic request error.
+   * Each original remains in its journal until its own archival succeeds. */
+  private async settlePersonalJoin(
+    accountId: string,
+    workspaceId: string,
+    pairingSessionId: string,
+    status: 'cancelled' | 'conflict'
+  ) {
+    const errors: unknown[] = []
+    const attempt = async (work: Parameters<typeof withDesktopE2eeAccount>[0]) => {
+      try {
+        await withDesktopE2eeAccount(work)
+      } catch (error) {
+        errors.push(error)
+      }
+    }
+    await attempt((owner) =>
+      owner.accountId === accountId
+        ? owner.bootstrap.retirePersonalJoin(workspaceId, pairingSessionId)
+        : Effect.fail(new Error('e2ee_account_mismatch'))
+    )
+    await attempt((owner) => {
+      if (owner.accountId !== accountId) return Effect.fail(new Error('e2ee_account_mismatch'))
+      if (!owner.readers.has(workspaceId)) return Effect.void
+      return status === 'cancelled'
+        ? owner.host.cancelPersonalPairing(workspaceId, pairingSessionId)
+        : owner.host.retirePersonalPairing(workspaceId, pairingSessionId)
+    })
+    if (errors.length) this.pairingFailure = new AggregateError(errors, 'e2ee_join_cleanup_pending')
+    return errors.length > 0
+  }
   @IpcMethod()
   async personalPairingOffer(workspaceId: string) {
     const id = sender()
+    const saved = await withDesktopE2eeAccount((owner) =>
+      Effect.gen(function* () {
+        if (!owner.readers.get(workspaceId)?.has(id))
+          return yield* Effect.fail(new Error('e2ee_not_open'))
+        return {
+          accountId: owner.accountId,
+          offer: yield* owner.host.personalPairingOffer(workspaceId)
+        }
+      })
+    )
+    const cloud = await desktopE2eeCloudClient().catch((error) => {
+      this.pairingFailure = error
+      return null
+    })
+    if (cloud && cloud.accountId !== saved.accountId) throw new Error('e2ee_account_mismatch')
+    let result
+    try {
+      if (cloud)
+        result = await Effect.runPromise(
+          cloud.client.joinStatus({ workspaceId, pairingSessionId: saved.offer.pairingSessionId })
+        )
+    } catch (error) {
+      // New offers need not have reached the relay. Unavailability never retires
+      // the original or prevents its transfer; it is not admission authority.
+      this.pairingFailure = error
+    }
+    if (result) {
+      if (
+        result.accountId !== saved.accountId ||
+        result.workspaceId !== workspaceId ||
+        result.pairingSessionId !== saved.offer.pairingSessionId ||
+        result.genesisHash !== saved.offer.genesisHash
+      )
+        throw new Error('e2ee_conflict')
+      if (result.status === 'cancelled' || result.status === 'conflict') {
+        if (result.status === 'conflict') {
+          try {
+            await this.refresh(workspaceId)
+          } catch (error) {
+            this.pairingFailure = error
+          }
+        }
+        await this.settlePersonalJoin(
+          saved.accountId,
+          workspaceId,
+          result.pairingSessionId,
+          result.status
+        )
+      }
+    }
     return withDesktopE2eeAccount((owner) =>
-      owner.readers.get(workspaceId)?.has(id)
+      owner.accountId === saved.accountId && owner.readers.get(workspaceId)?.has(id)
         ? owner.host.personalPairingOffer(workspaceId)
-        : Effect.fail(new Error('e2ee_not_open'))
+        : Effect.fail(new Error('e2ee_account_mismatch'))
+    )
+  }
+  @IpcMethod()
+  async pendingPersonalJoin(workspaceId: string) {
+    sender()
+    return withDesktopE2eeAccount((owner) => owner.bootstrap.pendingPersonalJoin(workspaceId))
+  }
+  private async reconcilePendingPersonalJoin(workspaceId: string) {
+    const saved = await withDesktopE2eeAccount((owner) =>
+      Effect.map(owner.bootstrap.pendingPersonalJoin(workspaceId), (pending) => ({
+        accountId: owner.accountId,
+        pending
+      }))
+    )
+    if (!saved.pending) return null
+    const cloud = await desktopE2eeCloudClient()
+    if (cloud.accountId !== saved.accountId) throw new Error('e2ee_account_mismatch')
+    let result
+    try {
+      result = await Effect.runPromise(
+        cloud.client.joinStatus({ workspaceId, pairingSessionId: saved.pending.pairingSessionId })
+      )
+    } catch (error) {
+      this.pairingFailure = error
+    }
+    if (result) {
+      if (
+        result.accountId !== saved.accountId ||
+        result.workspaceId !== workspaceId ||
+        result.pairingSessionId !== saved.pending.pairingSessionId ||
+        result.genesisHash !== saved.pending.offer.genesisHash
+      )
+        throw new Error('e2ee_conflict')
+      if (result.status === 'cancelled' || result.status === 'conflict')
+        await this.settlePersonalJoin(
+          saved.accountId,
+          workspaceId,
+          result.pairingSessionId,
+          result.status
+        )
+    }
+    return withDesktopE2eeAccount((owner) =>
+      owner.accountId === saved.accountId
+        ? owner.bootstrap.pendingPersonalJoin(workspaceId)
+        : Effect.fail(new Error('e2ee_account_mismatch'))
     )
   }
   @IpcMethod()
@@ -70,6 +196,7 @@ export class E2eeIpc extends IpcService {
     const parsed = PersonalPairingOfferSchema.safeParse(input)
     if (!parsed.success) throw new Error('e2ee_invalid-input')
     const offer = parsed.data
+    await this.reconcilePendingPersonalJoin(offer.workspaceId)
     const prepared = await withDesktopE2eeAccount((owner) =>
       Effect.map(owner.bootstrap.preparePersonalJoin(offer), (request) => ({
         accountId: owner.accountId,
@@ -232,15 +359,7 @@ export class E2eeIpc extends IpcService {
     )
       throw new Error('e2ee_conflict')
     if (result.status === 'cancelled' || result.status === 'conflict') {
-      try {
-        await withDesktopE2eeAccount((owner) =>
-          owner.accountId === cloud.accountId
-            ? owner.bootstrap.retirePersonalJoin(workspaceId, pairingSessionId)
-            : Effect.fail(new Error('e2ee_account_mismatch'))
-        )
-      } catch (error) {
-        this.pairingFailure = error
-      }
+      await this.settlePersonalJoin(cloud.accountId, workspaceId, pairingSessionId, result.status)
       return { ready: false, status: result.status }
     }
     if (!result.invitationHex) return { ready: false, status: result.status }
@@ -274,18 +393,14 @@ export class E2eeIpc extends IpcService {
     const result = await Effect.runPromise(
       cloud.client.joinCancel({ workspaceId, pairingSessionId })
     )
-    try {
-      await withDesktopE2eeAccount((owner) =>
-        owner.accountId === cloud.accountId
-          ? owner.bootstrap.retirePersonalJoin(workspaceId, pairingSessionId)
-          : Effect.fail(new Error('e2ee_account_mismatch'))
-      )
-    } catch (error) {
-      this.pairingFailure = error
-    }
-    // Remote cancellation is already confirmed; local archival cleanup cannot
-    // turn it into a failed business result. Retry can finish the same cleanup.
-    return result
+    const cleanupPending = await this.settlePersonalJoin(
+      cloud.accountId,
+      workspaceId,
+      pairingSessionId,
+      'cancelled'
+    )
+    // A confirmed cancellation remains successful even if archival needs retry.
+    return { ...result, cleanupPending }
   }
   @IpcMethod()
   async refresh(workspaceId: string) {

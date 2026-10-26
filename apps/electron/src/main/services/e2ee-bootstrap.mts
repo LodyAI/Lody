@@ -1,3 +1,4 @@
+import { rememberDesktopE2eeFailure } from './e2ee-diagnostics.mjs'
 import { createHash, randomBytes } from 'node:crypto'
 import { makeDesktopPersonalJoins, type PersonalPairingOffer } from './e2ee-personal-pairing.mjs'
 import { constants } from 'node:fs'
@@ -60,13 +61,19 @@ const hex = (bytes: Uint8Array) => Buffer.from(bytes).toString('hex')
 function sql<A>(work: () => A) {
   return Effect.try({
     try: work,
-    catch: (cause) => (cause instanceof DesktopE2eeBootstrapError ? cause : fail('storage'))
+    catch: (cause) => {
+      rememberDesktopE2eeFailure('bootstrap-storage', cause)
+      return cause instanceof DesktopE2eeBootstrapError ? cause : fail('storage')
+    }
   })
 }
 function io<A>(work: () => Promise<A>) {
   return Effect.tryPromise({
     try: work,
-    catch: (cause) => (cause instanceof DesktopE2eeBootstrapError ? cause : fail('storage'))
+    catch: (cause) => {
+      rememberDesktopE2eeFailure('bootstrap-storage', cause)
+      return cause instanceof DesktopE2eeBootstrapError ? cause : fail('storage')
+    }
   })
 }
 
@@ -498,6 +505,7 @@ export const makeDesktopE2eeBootstrap = Effect.fn('DesktopE2eeBootstrap.open')(f
       })
     )
   return Object.freeze({
+    pendingPersonalJoin: (workspaceId: string) => withLock(joins.pending(workspaceId)),
     retirePersonalJoin: (workspaceId: string, pairingSessionId: string) =>
       withLock(joins.retire(workspaceId, pairingSessionId)),
     preparePersonalJoin: (offer: PersonalPairingOffer) => withLock(joins.prepare(offer)),

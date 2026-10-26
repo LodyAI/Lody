@@ -1,3 +1,4 @@
+import { rememberDesktopE2eeFailure } from './e2ee-diagnostics.mjs'
 import { randomUUID } from 'node:crypto'
 import { makeDesktopPersonalPairing } from './e2ee-personal-pairing.mjs'
 import { makeDesktopLocalPairing } from './e2ee-local-pairing.mjs'
@@ -77,7 +78,10 @@ const unhex = (value: string) => {
 function sql<A>(work: () => A) {
   return Effect.try({
     try: work,
-    catch: (error) => (error instanceof DesktopE2eeRuntimeError ? error : fail('storage'))
+    catch: (error) => {
+      rememberDesktopE2eeFailure('runtime-sql', error)
+      return error instanceof DesktopE2eeRuntimeError ? error : fail('storage')
+    }
   })
 }
 const boundary = <A, E, R>(work: Effect.Effect<A, E, R>) =>

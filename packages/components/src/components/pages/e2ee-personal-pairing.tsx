@@ -20,6 +20,7 @@ type Runtime = Pick<
   E2eeWorkspaceRuntime,
   | 'personalPairingOffer'
   | 'preparePersonalJoin'
+  | 'pendingPersonalJoin'
   | 'inspectPersonalJoin'
   | 'approvePersonalJoin'
   | 'claimPersonalJoin'
@@ -29,7 +30,18 @@ type Preview = Awaited<ReturnType<NonNullable<Runtime['inspectPersonalJoin']>>>;
 
 /** Host-verified evidence is displayed before a separate approval click. An
  * invitation is imported only after the person transfers the existing host's pin. */
-export function E2eePersonalPairing({
+export function E2eePersonalPairing(props: {
+  workspaceId: string;
+  runtime: Runtime;
+  canApprove: boolean;
+  onJoined: () => void;
+}) {
+  // A workspace owns its pending originals and async UI results. Never carry
+  // the previous workspace's session into a route switch.
+  return <PersonalPairingSession key={props.workspaceId} {...props} />;
+}
+
+function PersonalPairingSession({
   workspaceId,
   runtime,
   canApprove,
@@ -45,7 +57,8 @@ export function E2eePersonalPairing({
   const [input, setInput] = useState('');
   const [joining, setJoining] = useState<{
     pairingSessionId: string;
-    signingPublicKey: string;
+    signingPublicKey?: string;
+    offer: E2eePersonalPairingOffer;
   } | null>(null);
   const [preview, setPreview] = useState<Preview | null>(null);
   const [phase, setPhase] = useState<
@@ -61,20 +74,46 @@ export function E2eePersonalPairing({
   >('idle');
   const live = useRef(true);
   const busy = useRef(false);
+  const currentRuntime = useRef(runtime);
+  currentRuntime.current = runtime;
+  const isLive = () => live.current && currentRuntime.current === runtime;
+  const [recovering, setRecovering] = useState(Boolean(runtime.pendingPersonalJoin));
   useEffect(() => {
     live.current = true;
     return () => {
       live.current = false;
     };
   }, []);
+  useEffect(() => {
+    let cancelled = false;
+    setRecovering(Boolean(runtime.pendingPersonalJoin));
+    if (runtime.pendingPersonalJoin) {
+      void runtime.pendingPersonalJoin(workspaceId).then(
+        (pending) => {
+          if (cancelled) return;
+          setJoining(pending);
+          if (pending) setPhase('waiting');
+          setRecovering(false);
+        },
+        () => {
+          if (cancelled) return;
+          setPhase('error');
+          setRecovering(false);
+        }
+      );
+    }
+    return () => {
+      cancelled = true;
+    };
+  }, [runtime, workspaceId]);
   const work = async (operation: () => Promise<void>) => {
-    if (busy.current) return;
+    if (busy.current || recovering) return;
     busy.current = true;
     setPhase('busy');
     try {
       await operation();
     } catch {
-      if (live.current) setPhase('error');
+      if (isLive()) setPhase('error');
     } finally {
       busy.current = false;
     }
@@ -91,23 +130,36 @@ export function E2eePersonalPairing({
   const createOffer = () =>
     work(async () => {
       const value = await runtime.personalPairingOffer!(workspaceId);
-      if (live.current) {
+      if (isLive()) {
         setOffer(value);
         setPhase('idle');
       }
     });
-  const prepare = () =>
+  const prepare = (retainedOffer?: E2eePersonalPairingOffer) =>
     work(async () => {
-      const value: E2eePersonalPairingOffer = JSON.parse(input);
+      const value: E2eePersonalPairingOffer = retainedOffer ?? JSON.parse(input);
       if (value.workspaceId !== workspaceId) throw new Error('wrong_workspace');
-      const result = await runtime.preparePersonalJoin!(value);
-      if (live.current) {
+      let result;
+      try {
+        result = await runtime.preparePersonalJoin!(value);
+      } catch (error) {
+        // begin may fail after the host saved its immutable request. Recover
+        // the actual session so cancellation/reconciliation remains reachable.
+        try {
+          const pending = await runtime.pendingPersonalJoin?.(workspaceId);
+          if (isLive() && pending) setJoining(pending);
+        } catch {
+          // Keep the original prepare failure; another normal query can retry.
+        }
+        throw error;
+      }
+      if (isLive()) {
         if (result.status === 'cancelled' || result.status === 'conflict') {
           setJoining(null);
           setInput('');
           setPhase(result.status === 'cancelled' ? 'cancelled' : 'conflict');
         } else {
-          setJoining(result);
+          setJoining({ ...result, offer: value });
           setPhase('waiting');
         }
       }
@@ -116,13 +168,13 @@ export function E2eePersonalPairing({
     work(async () => {
       try {
         const result = await runtime.inspectPersonalJoin!(workspaceId, offer!.pairingSessionId);
-        if (live.current) {
+        if (isLive()) {
           setPreview(result);
           setPhase('idle');
         }
       } catch (error) {
         if (error instanceof Error && /e2ee_join_(cancelled|conflict)/.test(error.message)) {
-          if (live.current) {
+          if (isLive()) {
             setOffer(null);
             setPreview(null);
             setPhase(error.message.includes('cancelled') ? 'cancelled' : 'conflict');
@@ -133,12 +185,12 @@ export function E2eePersonalPairing({
   const approve = () =>
     work(async () => {
       const result = await runtime.approvePersonalJoin!(workspaceId, preview!.pairingSessionId);
-      if (live.current) setPhase(result.invitationPublished ? 'published' : 'retryPublication');
+      if (isLive()) setPhase(result.invitationPublished ? 'published' : 'retryPublication');
     });
   const claim = () =>
     work(async () => {
       const result = await runtime.claimPersonalJoin!(workspaceId, joining!.pairingSessionId);
-      if (live.current) {
+      if (isLive()) {
         if (result.status === 'cancelled' || result.status === 'conflict') {
           setJoining(null);
           setInput('');
@@ -149,12 +201,14 @@ export function E2eePersonalPairing({
         if (result.ready) onJoined();
       }
     });
-  const cancel = () =>
+  const cancel = (pairingSessionId: string) =>
     work(async () => {
-      await runtime.cancelPersonalJoin!(workspaceId, joining!.pairingSessionId);
-      if (live.current) {
+      await runtime.cancelPersonalJoin!(workspaceId, pairingSessionId);
+      if (isLive()) {
         setPhase('cancelled');
         setJoining(null);
+        setOffer(null);
+        setPreview(null);
         setInput('');
       }
     });
@@ -168,7 +222,7 @@ export function E2eePersonalPairing({
         {canApprove && !offer && (
           <Button
             variant="secondary"
-            disabled={phase === 'busy'}
+            disabled={phase === 'busy' || recovering}
             onClick={() => void createOffer()}
           >
             {t('e2ee.pair.create')}
@@ -182,8 +236,19 @@ export function E2eePersonalPairing({
             <LedgerQrCode payload={JSON.stringify(offer)} size={200} label={t('e2ee.pair.code')} />
           </div>
           <Textarea aria-label={t('e2ee.pair.code')} value={JSON.stringify(offer)} readOnly />
-          <Button variant="secondary" disabled={phase === 'busy'} onClick={() => void inspect()}>
+          <Button
+            variant="secondary"
+            disabled={phase === 'busy' || recovering}
+            onClick={() => void inspect()}
+          >
             {t('e2ee.pair.inspect')}
+          </Button>
+          <Button
+            variant="ghost"
+            disabled={phase === 'busy' || recovering || phase === 'published'}
+            onClick={() => void cancel(offer.pairingSessionId)}
+          >
+            {t('common.cancel')}
           </Button>
         </>
       )}
@@ -197,7 +262,7 @@ export function E2eePersonalPairing({
           />
           <Button
             variant="secondary"
-            disabled={!input || phase === 'busy'}
+            disabled={!input || phase === 'busy' || recovering}
             onClick={() => void prepare()}
           >
             {t('e2ee.pair.trust')}
@@ -218,7 +283,9 @@ export function E2eePersonalPairing({
       )}
       {joining && (
         <>
-          <p {...stylex.props(styles.code)}>{joining.signingPublicKey}</p>
+          {joining.signingPublicKey && (
+            <p {...stylex.props(styles.code)}>{joining.signingPublicKey}</p>
+          )}
           <div {...stylex.props(styles.actions)}>
             <Button
               disabled={phase === 'busy' || phase === 'cancelled'}
@@ -227,9 +294,16 @@ export function E2eePersonalPairing({
               {t('e2ee.pair.claim')}
             </Button>
             <Button
+              variant="secondary"
+              disabled={phase === 'busy' || phase === 'ready'}
+              onClick={() => void prepare(joining.offer)}
+            >
+              {t('e2ee.pair.retrySubmission')}
+            </Button>
+            <Button
               variant="ghost"
               disabled={phase === 'busy' || phase === 'cancelled' || phase === 'ready'}
-              onClick={() => void cancel()}
+              onClick={() => void cancel(joining.pairingSessionId)}
             >
               {t('common.cancel')}
             </Button>

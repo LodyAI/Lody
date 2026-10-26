@@ -188,6 +188,7 @@ export function CloudPlatformProvider({ children }: { children: ReactNode }) {
             runtime: {
               personalPairingOffer: (workspaceId) => native.personalPairingOffer(workspaceId),
               preparePersonalJoin: (offer) => native.preparePersonalJoin(offer),
+              pendingPersonalJoin: (workspaceId) => native.pendingPersonalJoin(workspaceId),
               inspectPersonalJoin: (workspaceId, pairingSessionId) =>
                 native.inspectPersonalJoin(workspaceId, pairingSessionId),
               approvePersonalJoin: (workspaceId, pairingSessionId) =>

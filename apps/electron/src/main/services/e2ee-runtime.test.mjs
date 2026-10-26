@@ -1484,3 +1484,84 @@ void test('terminal cancellation can archive a signed pre-reservation intent, wh
     })
   )
 })
+
+for (const recovery of ['retry', 'cancel-and-renew']) {
+  void test(`a pending personal pin remains discoverable before request persistence and ${recovery} reuses original custody after reopen`, async (t) => {
+    const directory = await fixture(t)
+    const secondDirectory = join(directory, 'second')
+    let offer, originalKey, originalCredential
+    await execute(
+      Effect.gen(function* () {
+        const first = yield* ownerWithHost(directory)
+        yield* bind(first)
+        yield* first.host.open(workspaceId)
+        offer = yield* first.host.personalPairingOffer(workspaceId)
+        const second = yield* ownerWithHost(secondDirectory)
+        assert.equal(yield* second.bootstrap.pendingPersonalJoin(workspaceId), null)
+        const db = new DatabaseSync(join(secondDirectory, 'creations.sqlite'))
+        try {
+          db.exec(
+            "CREATE TRIGGER synthetic_request_full BEFORE UPDATE OF request_hex ON personal_joins BEGIN SELECT RAISE(ABORT, 'synthetic request persistence failure'); END"
+          )
+        } finally {
+          db.close()
+        }
+        const failed = yield* Effect.result(second.bootstrap.preparePersonalJoin(offer))
+        assert.ok(Result.isFailure(failed))
+        const pending = yield* second.bootstrap.pendingPersonalJoin(workspaceId)
+        assert.deepEqual(pending, { offer, pairingSessionId: offer.pairingSessionId })
+        const genesis = Result.getOrThrow(Bytes.genesisHash(Buffer.from(offer.genesisHash, 'hex')))
+        const device = yield* second.custody.openDevice(genesis)
+        originalKey = hex(device.publicKey.toBytes())
+        originalCredential = yield* second.custody.deviceCredential(genesis, device.publicKey)
+        // Querying the pin cannot manufacture request evidence or change native keys.
+        assert.deepEqual(yield* second.bootstrap.pendingPersonalJoin(workspaceId), pending)
+        const unchanged = yield* second.custody.openDevice(genesis)
+        assert.equal(hex(unchanged.publicKey.toBytes()), originalKey)
+        assert.equal(
+          yield* second.custody.deviceCredential(genesis, unchanged.publicKey),
+          originalCredential
+        )
+      })
+    )
+    await execute(
+      Effect.gen(function* () {
+        const second = yield* ownerWithHost(secondDirectory)
+        assert.deepEqual(yield* second.bootstrap.pendingPersonalJoin(workspaceId), {
+          offer,
+          pairingSessionId: offer.pairingSessionId
+        })
+        const db = new DatabaseSync(join(secondDirectory, 'creations.sqlite'))
+        try {
+          db.exec('DROP TRIGGER synthetic_request_full')
+        } finally {
+          db.close()
+        }
+        let targetOffer = offer
+        if (recovery === 'cancel-and-renew') {
+          // These local retirement calls follow authoritative terminal cancellation;
+          // the IPC/relay suite separately tests that admission arbitration boundary.
+          const first = yield* ownerWithHost(directory)
+          yield* first.host.open(workspaceId)
+          yield* first.host.cancelPersonalPairing(workspaceId, offer.pairingSessionId)
+          yield* second.bootstrap.retirePersonalJoin(workspaceId, offer.pairingSessionId)
+          targetOffer = yield* first.host.personalPairingOffer(workspaceId)
+          assert.notEqual(targetOffer.pairingSessionId, offer.pairingSessionId)
+        }
+        const renewed = yield* second.bootstrap.preparePersonalJoin(targetOffer)
+        assert.equal(renewed.signingPublicKey, originalKey)
+        const genesis = Result.getOrThrow(Bytes.genesisHash(Buffer.from(offer.genesisHash, 'hex')))
+        const device = yield* second.custody.openDevice(genesis)
+        assert.equal(
+          yield* second.custody.deviceCredential(genesis, device.publicKey),
+          originalCredential
+        )
+        assert.deepEqual(yield* second.bootstrap.pendingPersonalJoin(workspaceId), {
+          offer: targetOffer,
+          pairingSessionId: targetOffer.pairingSessionId,
+          signingPublicKey: originalKey
+        })
+      })
+    )
+  })
+}

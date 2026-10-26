@@ -1,13 +1,21 @@
 import assert from 'node:assert/strict'
 import { EventEmitter } from 'node:events'
-import { readFile } from 'node:fs/promises'
+import { readFile, mkdtemp, rm } from 'node:fs/promises'
+import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { DatabaseSync } from 'node:sqlite'
 import { createRequire } from 'node:module'
 import { runInNewContext } from 'node:vm'
 import test from 'node:test'
 import ts from 'typescript'
-import { Effect, Scope } from 'effect'
+import { Effect, Scope, Exit } from 'effect'
+import { makeDesktopE2eeCustody } from '../e2ee-custody.mts'
+import { makeDesktopE2eeBootstrap } from './e2ee-bootstrap.mts'
+import { makeDesktopE2eeRuntimeHost } from './e2ee-runtime.mts'
 import { makeOfflineAuthIdentityCache } from '../auth-storage.ts'
 import { PersonalPairingOfferSchema } from './e2ee-personal-pairing.mts'
+import { desktopE2eeFailure } from './e2ee-diagnostics.mts'
 const require = createRequire(import.meta.url)
 async function load(relative, dependencies, console = globalThis.console) {
   const source = await readFile(new URL(relative, import.meta.url), 'utf8')
@@ -373,7 +381,6 @@ void test('only unavailable custody exposes the availability fallback code', asy
     unavailable.api.withDesktopE2eeAccount(() => Effect.void),
     /e2ee_custody_unavailable/
   )
-  const { makeDesktopE2eeCustody } = await import('../e2ee-custody.mts')
   const basicText = await account({
     custody: () =>
       makeDesktopE2eeCustody({
@@ -613,7 +620,7 @@ void test('personal join cancellation preserves remote success when local retire
   const result = await ipc.cancelPersonalJoin('workspace', '44'.repeat(16))
   assert.equal(result.status, 'cancelled')
   assert.equal(retired, false)
-  assert.equal(ipc.pairingFailure, diagnostic)
+  assert.equal(ipc.pairingFailure.errors[0], diagnostic)
   localFailure = false
   assert.equal((await ipc.cancelPersonalJoin('workspace', '44'.repeat(16))).status, 'cancelled')
   assert.equal(retired, true)
@@ -656,4 +663,328 @@ void test('cancelled personal approval uses terminal cancellation rather than re
   const ipc = new E2eeIpc()
   await assert.rejects(ipc.inspectPersonalJoin('workspace', '44'.repeat(16)), /e2ee_join_cancelled/)
   assert.equal(cancelled, true)
+})
+
+// The relay below models immutable begin bytes and cancel/reservation arbitration;
+// native journals, crypto, host approval and the invoked IPC methods remain real.
+async function personalJoinFixture(t) {
+  const directory = await mkdtemp(join(tmpdir(), 'lody-join-ipc-'))
+  const owners = new Set()
+  t.after(async () => {
+    for (const owner of owners) await owner.close()
+    await rm(directory, { recursive: true, force: true })
+  })
+  const accountId = 'synthetic-personal-account'
+  const workspaceId = 'synthetic-personal-workspace'
+  const wrapping = Buffer.alloc(32, 93)
+  const safeStorage = {
+    isEncryptionAvailable: () => true,
+    isAsyncEncryptionAvailable: async () => true,
+    getSelectedStorageBackend: () => 'gnome_libsecret',
+    encryptStringAsync: async (value) => {
+      const nonce = randomBytes(12)
+      const cipher = createCipheriv('aes-256-gcm', wrapping, nonce)
+      return Buffer.concat([nonce, cipher.update(value), cipher.final(), cipher.getAuthTag()])
+    },
+    decryptStringAsync: async (value) => {
+      const decipher = createDecipheriv('aes-256-gcm', wrapping, value.subarray(0, 12))
+      decipher.setAuthTag(value.subarray(-16))
+      return {
+        result: Buffer.concat([
+          decipher.update(value.subarray(12, -16)),
+          decipher.final()
+        ]).toString(),
+        shouldReEncrypt: false
+      }
+    }
+  }
+  let lockDepth = 0
+  const rows = new Map()
+  const relay = { statusFailure: null, loseCancelReceipt: false }
+  const remote = (work) =>
+    Effect.try({
+      try: () => {
+        assert.equal(lockDepth, 0, 'cloud work cannot run under account custody lock')
+        return work()
+      },
+      catch: (error) => error
+    })
+  const getRow = ({ pairingSessionId }) => {
+    const row = rows.get(pairingSessionId)
+    if (!row) throw new Error('e2ee_not_found')
+    return row
+  }
+  const client = {
+    joinBegin: (request) =>
+      remote(() => {
+        const existing = rows.get(request.pairingSessionId)
+        if (existing) {
+          for (const field of [
+            'workspaceId',
+            'genesisHash',
+            'requestHex',
+            'signingPublicKey',
+            'credentialHash'
+          ])
+            if (existing[field] !== request[field]) throw new Error('e2ee_conflict')
+          return { ...existing }
+        }
+        const value = { ...request, accountId, status: 'pending' }
+        rows.set(request.pairingSessionId, value)
+        return { ...value }
+      }),
+    joinReadRequest: (request) => remote(() => ({ ...getRow(request) })),
+    joinStatus: (request) =>
+      remote(() => {
+        if (relay.statusFailure) throw relay.statusFailure
+        return { ...getRow(request) }
+      }),
+    joinClaim: (request) => remote(() => ({ ...getRow(request) })),
+    joinCancel: (request) =>
+      remote(() => {
+        const row = getRow(request)
+        if (row.status === 'admitting' || row.status === 'published')
+          throw new Error('e2ee_admission_reserved')
+        row.status = 'cancelled'
+        if (relay.loseCancelReceipt) {
+          relay.loseCancelReceipt = false
+          throw new Error('synthetic lost cancel receipt')
+        }
+        return { status: 'cancelled' }
+      })
+  }
+  const open = async (name) => {
+    const path = join(directory, name)
+    const scope = await Effect.runPromise(Scope.make())
+    const material = await Effect.runPromise(
+      Effect.gen(function* () {
+        const custody = yield* makeDesktopE2eeCustody({
+          directory: join(path, 'custody'),
+          platform: 'linux',
+          safeStorage
+        })
+        const bootstrap = yield* makeDesktopE2eeBootstrap({ directory: path, accountId, custody })
+        const host = yield* makeDesktopE2eeRuntimeHost({ directory: path, custody, bootstrap })
+        return { custody, bootstrap, host }
+      }).pipe(Effect.provideService(Scope.Scope, scope))
+    )
+    const sender = Object.assign(new EventEmitter(), { id: 23 })
+    const owner = { ...material, accountId, readers: new Map() }
+    const { E2eeIpc } = await load('../ipc/services/e2ee-ipc.ts', {
+      'electron-ipc-decorator': {
+        IpcService: class {},
+        IpcMethod: () => (_t, _n, descriptor) => descriptor,
+        getIpcContext: () => ({ event: { sender } })
+      },
+      '../../platform': { isLocalPlatform: () => false },
+      '../../services/e2ee-bootstrap.mjs': {},
+      '../ipc-service-deps': { getIpcServiceDeps: () => ({}) },
+      '../assert-sender': { assertProductWindowSender: () => {} },
+      '../../services/e2ee-account-runtime': {
+        withDesktopE2eeAccount: async (work) => {
+          lockDepth++
+          try {
+            return await Effect.runPromise(work(owner))
+          } finally {
+            lockDepth--
+          }
+        },
+        desktopE2eeCloudClient: async () => ({ accountId, client })
+      }
+    })
+    let closed = false
+    const value = {
+      ...owner,
+      path,
+      ipc: new E2eeIpc(),
+      close: async () => {
+        if (closed) return
+        closed = true
+        await Effect.runPromise(Scope.close(scope, Exit.void))
+      },
+      attach: async (id = workspaceId) => {
+        await Effect.runPromise(owner.host.open(id))
+        owner.readers.set(id, new Set([sender.id]))
+      },
+      create: async (id = workspaceId) => {
+        const prepared = await Effect.runPromise(
+          owner.bootstrap.prepareCreation({
+            accountId,
+            requestId: `synthetic-request-${id}`,
+            name: 'Synthetic encrypted workspace',
+            slug: id
+          })
+        )
+        await Effect.runPromise(
+          owner.bootstrap.recordCreated({
+            workspaceId: id,
+            genesisHash: prepared.genesisHashHex,
+            requestId: `synthetic-request-${id}`
+          })
+        )
+        await value.attach(id)
+      }
+    }
+    owners.add(value)
+    return value
+  }
+  const db = (owner, name, work) => {
+    const connection = new DatabaseSync(join(owner.path, name))
+    try {
+      return work(connection)
+    } finally {
+      connection.close()
+    }
+  }
+  return { open, rows, relay, db, workspaceId }
+}
+
+void test('personal IPC recovers a competing recipient after cancellation with lost receipt and process reopen, preserving custody and pins', async (t) => {
+  const f = await personalJoinFixture(t)
+  let first = await f.open('first')
+  await first.create()
+  const second = await f.open('second')
+  let third = await f.open('third')
+  const offer = await first.ipc.personalPairingOffer(f.workspaceId)
+  await second.ipc.preparePersonalJoin(offer)
+  const preview = await first.ipc.inspectPersonalJoin(f.workspaceId, offer.pairingSessionId)
+  await assert.rejects(third.ipc.preparePersonalJoin(offer), /e2ee_conflict/)
+  const pending = await third.ipc.pendingPersonalJoin(f.workspaceId)
+  assert.notEqual(pending.signingPublicKey, preview.signingPublicKey)
+  const original = await Effect.runPromise(third.bootstrap.preparePersonalJoin(offer))
+  await third.close()
+  third = await f.open('third')
+  assert.deepEqual(await third.ipc.pendingPersonalJoin(f.workspaceId), pending)
+
+  // Generic transport conflicts and a reserved admission never authorize local retirement.
+  f.relay.statusFailure = new Error('synthetic generic conflict')
+  await assert.rejects(
+    third.ipc.preparePersonalJoin({ ...offer, pairingSessionId: '81'.repeat(16) }),
+    /e2ee_conflict/
+  )
+  assert.deepEqual(await third.ipc.pendingPersonalJoin(f.workspaceId), pending)
+  f.relay.statusFailure = null
+  f.rows.get(offer.pairingSessionId).status = 'admitting'
+  await assert.rejects(
+    first.ipc.cancelPersonalJoin(f.workspaceId, offer.pairingSessionId),
+    /e2ee_admission_reserved/
+  )
+  await assert.rejects(
+    third.ipc.preparePersonalJoin({ ...offer, pairingSessionId: '82'.repeat(16) }),
+    /e2ee_conflict/
+  )
+  assert.deepEqual(await third.ipc.pendingPersonalJoin(f.workspaceId), pending)
+  assert.equal(
+    f.rows.get(offer.pairingSessionId).requestHex,
+    (await Effect.runPromise(second.bootstrap.preparePersonalJoin(offer))).requestHex
+  )
+
+  // A neighboring workspace remains usable while this recipient is unresolved.
+  await first.create('synthetic-unrelated-workspace')
+  const independent = await first.ipc.personalPairingOffer('synthetic-unrelated-workspace')
+  assert.equal((await third.ipc.preparePersonalJoin(independent)).status, 'pending')
+  assert.deepEqual(await third.ipc.pendingPersonalJoin(f.workspaceId), pending)
+
+  f.rows.get(offer.pairingSessionId).status = 'pending'
+  f.relay.loseCancelReceipt = true
+  await assert.rejects(
+    first.ipc.cancelPersonalJoin(f.workspaceId, offer.pairingSessionId),
+    /lost cancel receipt/
+  )
+  await first.close()
+  first = await f.open('first')
+  await first.attach()
+  const next = await first.ipc.personalPairingOffer(f.workspaceId)
+  assert.notEqual(next.pairingSessionId, offer.pairingSessionId)
+  const terminal = await third.ipc.claimPersonalJoin(f.workspaceId, offer.pairingSessionId)
+  assert.equal(terminal.ready, false)
+  assert.equal(terminal.status, 'cancelled')
+  assert.equal(await third.ipc.pendingPersonalJoin(f.workspaceId), null)
+  const renewed = await third.ipc.preparePersonalJoin(next)
+  const renewedOriginal = await Effect.runPromise(third.bootstrap.preparePersonalJoin(next))
+  assert.equal(renewed.signingPublicKey, original.signingPublicKey)
+  assert.equal(renewedOriginal.credentialHash, original.credentialHash)
+  f.db(third, 'creations.sqlite', (db) => {
+    const archived = db
+      .prepare('SELECT pin,request_hex FROM retired_personal_joins WHERE workspace_id=?')
+      .get(f.workspaceId)
+    assert.equal(archived.request_hex, original.requestHex)
+    assert.deepEqual(JSON.parse(archived.pin), offer)
+  })
+  await assert.rejects(
+    third.ipc.preparePersonalJoin({ ...next, endorser: pending.signingPublicKey }),
+    /e2ee_conflict/
+  )
+})
+
+void test('confirmed cancellation survives real SQLite archival failure and the next normal offer/prepare completes retained cleanup', async (t) => {
+  const f = await personalJoinFixture(t)
+  const first = await f.open('first')
+  await first.create()
+  const second = await f.open('second')
+  const third = await f.open('third')
+  const offer = await first.ipc.personalPairingOffer(f.workspaceId)
+  await second.ipc.preparePersonalJoin(offer)
+  await first.ipc.inspectPersonalJoin(f.workspaceId, offer.pairingSessionId)
+  await assert.rejects(third.ipc.preparePersonalJoin(offer), /e2ee_conflict/)
+  const original = await Effect.runPromise(third.bootstrap.preparePersonalJoin(offer))
+  f.db(first, join('workspaces', f.workspaceId, 'history.sqlite'), (db) =>
+    db.exec(
+      "CREATE TRIGGER synthetic_archive_block BEFORE UPDATE OF retired ON personal_pairing BEGIN SELECT RAISE(ABORT, 'synthetic approver archival failure'); END"
+    )
+  )
+  f.db(third, 'creations.sqlite', (db) =>
+    db.exec(
+      "CREATE TRIGGER synthetic_archive_block BEFORE DELETE ON personal_joins BEGIN SELECT RAISE(ABORT, 'synthetic recipient archival failure'); END"
+    )
+  )
+  const cancelled = await first.ipc.cancelPersonalJoin(f.workspaceId, offer.pairingSessionId)
+  assert.equal(cancelled.status, 'cancelled')
+  assert.equal(cancelled.cleanupPending, true)
+  assert.equal(first.ipc.pairingFailure.errors.length, 1)
+  assert.match(String(desktopE2eeFailure().cause), /synthetic approver archival failure/)
+  assert.equal(desktopE2eeFailure().cause.code, 'ERR_SQLITE_ERROR')
+  assert.ok(!JSON.stringify(cancelled).includes('synthetic approver archival failure'))
+  assert.ok(
+    !JSON.stringify(first.ipc.pairingFailure).includes('synthetic approver archival failure')
+  )
+  const claimed = await third.ipc.claimPersonalJoin(f.workspaceId, offer.pairingSessionId)
+  assert.equal(claimed.status, 'cancelled')
+  assert.ok(await third.ipc.pendingPersonalJoin(f.workspaceId))
+  assert.equal(third.ipc.pairingFailure.errors.length, 1)
+  assert.match(String(desktopE2eeFailure().cause), /synthetic recipient archival failure/)
+  assert.equal(desktopE2eeFailure().cause.code, 'ERR_SQLITE_ERROR')
+  assert.ok(!JSON.stringify(claimed).includes('synthetic recipient archival failure'))
+  // Repeated confirmed results do not delete the original when persistence is blocked.
+  assert.equal(
+    (await first.ipc.cancelPersonalJoin(f.workspaceId, offer.pairingSessionId)).status,
+    'cancelled'
+  )
+  f.db(third, 'creations.sqlite', (db) =>
+    assert.equal(
+      db.prepare('SELECT request_hex FROM personal_joins WHERE workspace_id=?').get(f.workspaceId)
+        .request_hex,
+      original.requestHex
+    )
+  )
+  f.db(first, join('workspaces', f.workspaceId, 'history.sqlite'), (db) =>
+    db.exec('DROP TRIGGER synthetic_archive_block')
+  )
+  f.db(third, 'creations.sqlite', (db) => db.exec('DROP TRIGGER synthetic_archive_block'))
+  const next = await first.ipc.personalPairingOffer(f.workspaceId)
+  assert.notEqual(next.pairingSessionId, offer.pairingSessionId)
+  const renewed = await third.ipc.preparePersonalJoin(next)
+  assert.equal(renewed.signingPublicKey, original.signingPublicKey)
+  assert.equal(
+    (await Effect.runPromise(third.bootstrap.preparePersonalJoin(next))).credentialHash,
+    original.credentialHash
+  )
+  f.db(third, 'creations.sqlite', (db) =>
+    assert.equal(
+      db
+        .prepare('SELECT request_hex FROM retired_personal_joins WHERE workspace_id=?')
+        .get(f.workspaceId).request_hex,
+      original.requestHex
+    )
+  )
 })

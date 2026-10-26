@@ -37,6 +37,10 @@ sequenceDiagram
 
 ## 保存、生命周期与恢复
 
+提交 begin 失败后，接收端仍可查询已保存会话（包括尚未完成请求生成的 pin），并明确重试原 offer。审批端可经既有取消／预约 fence 取消待处理 offer。双方只在服务端明确 cancelled/conflict 后归档；普通 conflict 错误、超时或 admitting 不会退休原件。取消已确认但本地归档失败时，取消仍成功，journal 保留原件、宿主保留诊断；下一次领取、准备或 offer 查询可重试该清理。窗口重开会发现同一本地意图。
+
+存储错误在公开错误转换前，将原始原因保留于单个 main 私有诊断槽；原始原因不附到 IPC Error，也不进入通用遥测。
+
 账号 bootstrap 日志保存公开请求/邀请及受保护身份和凭证绑定。运行时选择本机创建 genesis 或合格邀请起点，不为加入设备伪造 epoch 0 密钥。快照起点的缓存重建使用保存的邀请与真实后缀；独立证据冲突仍阻断。HTTP 和密钥分发不在账号锁内等待；工作区继续保留所有者和 reader 检查，登出及关闭等待原生工作真正结束。
 
 当前钥走 KeyMailbox，旧钥走 InstalledEpochHistory，历史钥不走 staging。邀请外层是有界 JSON 的 UTF-8 hex，snapshot 用规范 base64，不改变 core 快照/签名格式。云端最多 6 MiB ASCII hex；分块低于单文档上限，删除先按有界批次清理分块，再退休身份。
