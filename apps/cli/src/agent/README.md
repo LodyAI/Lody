@@ -32,7 +32,8 @@ context/message-flow.md "Upstream".
   Claude single-question forms retain their request-message prompt.
 - `claude-task-lifecycle.ts` — converts Claude task lifecycle events into ACP task
   updates. Rendered titles may use a fallback; persisted actor metadata is omitted when
-  the provider reports no actor, so later events preserve an earlier identity.
+  Claude reports no actor, so later events preserve an earlier identity. Providers that
+  rely on an unknown-actor label can configure a separate metadata fallback.
 - `acp-runner.ts` — process spawn/restart around the client. Spawn + initialize +
   `newSession`/`loadSession` share `acp-session-start-gate.ts`.
 - `acp-session-start-gate.ts` — process-wide start semaphore used by

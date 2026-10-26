@@ -88,6 +88,7 @@ export type ClaudeTaskLifecycleConversionResult =
 
 export type TaskLifecycleConversionOptions = {
   defaultActor: string;
+  taskMetaFallbackActor?: string;
 };
 
 export const convertTaskLifecycleNotification = (
@@ -148,6 +149,7 @@ const buildTaskLifecycleAcpNotification = (
     summary,
     usage,
     lastToolName,
+    taskMetaFallbackActor: options.taskMetaFallbackActor,
   });
 
   const updateBase = {
@@ -299,6 +301,7 @@ const buildTaskMeta = (args: {
   summary: string | undefined;
   usage: ReturnType<typeof sanitizeUsage>;
   lastToolName: string | undefined;
+  taskMetaFallbackActor: string | undefined;
 }): LodyTaskMeta => {
   const { message } = args;
   const meta: Record<string, unknown> = {
@@ -313,7 +316,8 @@ const buildTaskMeta = (args: {
   const actor = sanitizeText(
     message.subagent_type ??
       (message.subtype === 'task_started' ? message.workflow_name : undefined) ??
-      message.task_type,
+      message.task_type ??
+      args.taskMetaFallbackActor,
     MAX_META_TEXT_LENGTH
   );
   setIfDefined(meta, 'actor', actor);

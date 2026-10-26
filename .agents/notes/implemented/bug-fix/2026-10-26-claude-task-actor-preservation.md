@@ -13,13 +13,13 @@ Claude terminal task events can omit their type after a start event identified a
 
 `convertClaudeTaskLifecycleNotification` creates an ACP task update from each Claude lifecycle event. History materializes `_meta.lody.task` and merges updates by `taskId`, with later defined fields winning. The task panel recognizes Bash through `actor === 'local_bash'` or `taskType === 'local_bash'`; the fallback actor therefore hides the linked command as well as changing the label.
 
-The fix omits only an absent actor from task metadata. The title still uses the established localized display fallback, and explicit `subagent_type`, start-event `workflow_name`, or `task_type` values still populate actor metadata. Adding a separate task-type field would require changing the shared schema, parsing and UI consumers without improving this case: omission already represents “no new identity” in the existing merge contract.
+The fix separates the rendered title fallback from an optional task-metadata fallback. Claude omits the latter, so an untyped event leaves the actor undefined and the existing merge preserves prior identity. Explicit `subagent_type`, start-event `workflow_name`, or `task_type` values still populate actor metadata. The shared converter also serves Kimi, whose established `Kimi task` actor fallback is retained through the explicit option; the Kimi test failed when that fallback was removed globally. Adding a separate task-type field would require changing the shared schema, parsing and UI consumers without improving this case.
 
 The task id and ACP session scope are unchanged. Events continue through the existing delivery-order history merge. Terminal status monotonicity remains owned by `mergeSubagentTaskPayload`; this change only makes absent actor metadata preserve the earlier value during normal and reconstructed history.
 
 ## Validation
 
-The regression test converts a synthetic `local_bash` start and untyped completion, applies both through the history writer, and checks the reconstructed task retains the Bash actor, completed status and summary. Converter tests check that the display fallback remains while absent actor metadata is omitted, and that an explicitly reported task type is retained.
+The regression test converts a synthetic `local_bash` start and untyped completion, applies both through the history writer, and checks the reconstructed task retains the Bash actor, completed status and summary after a late progress replay. Converter tests check that the display fallback remains while absent Claude actor metadata is omitted, explicit task types are retained, and Kimi's fallback actor remains.
 
 The test could not run locally because this nested checkout has no `node_modules` and
 `vitest` is unavailable. The repository check and full formatter also stop on missing
