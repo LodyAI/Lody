@@ -46,7 +46,11 @@ looks only at that branch.
 - **Where it appears.** A Project with a machine-bound Member is listed under that
   machine, with the machine's folders. A Project without one runs anywhere and is
   listed with the GitHub repositories. This applies to the sidebar and to
-  Settings › Projects.
+  Settings › Projects. In the sidebar each follows its neighbours: under a machine
+  it stays listed like a folder; beside the repositories it is listed while it has
+  conversations, like a repository, so archiving them all hides it and restoring
+  one brings it back. Its menu offers "Remove project" to its creator, as a folder's
+  does.
 - **Creating and editing.** Settings › Projects offers "Several repositories or
   folders" beside adding a folder or a GitHub repository. A project row's context
   menu offers "Edit project…": on a multi-repository Project it edits it; on a

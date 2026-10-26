@@ -214,7 +214,12 @@ describe('project placement in the sidebar', () => {
     const placed = placeProjectGroups({
       projects: [project, portable, offList],
       states: [state(project.id), state(portable.id), state(offList.id)],
-      sessions: [row('a', project.id), row('b', portable.id), row('c', 'deleted')],
+      sessions: [
+        row('a', project.id),
+        row('b', portable.id),
+        row('c', 'deleted'),
+        row('d', offList.id),
+      ],
       listedMachineIds: new Set([m1]),
     });
     expect(placed.byMachine.get(m1)).toEqual({
@@ -225,7 +230,7 @@ describe('project placement in the sidebar', () => {
     // conversations have no machine either.
     expect(placed.anywhere).toEqual({
       states: [state(portable.id), state(offList.id)],
-      sessions: [row('b', portable.id), row('c', 'deleted')],
+      sessions: [row('b', portable.id), row('c', 'deleted'), row('d', offList.id)],
     });
   });
 });

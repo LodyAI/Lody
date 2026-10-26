@@ -9,7 +9,8 @@ export type ProjectGroupBucket<State, Row> = { states: State[]; sessions: Row[] 
  * sits under that machine with its folders, when the sidebar lists that
  * machine. Every other project runs wherever a copy is, so it sits with the
  * GitHub repositories, as do the conversations of a deleted project, which
- * no longer name a machine.
+ * no longer name a machine. There it is listed only while it has
+ * conversations, like a repository.
  */
 export function placeProjectGroups<
   State extends { projectId: string },
@@ -44,5 +45,10 @@ export function placeProjectGroups<
   };
   for (const state of input.states) bucketOf(state.projectId).states.push(state);
   for (const session of input.sessions) bucketOf(session.projectGroup?.id).sessions.push(session);
+  // Beside the GitHub repositories a project is listed while it has
+  // conversations, as a repository is: archiving them all hides it and
+  // restoring one brings it back. Under a machine it stays, as its folders do.
+  const active = new Set(anywhere.sessions.map((session) => session.projectGroup?.id));
+  anywhere.states = anywhere.states.filter((state) => active.has(state.projectId));
   return { byMachine, anywhere };
 }

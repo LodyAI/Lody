@@ -127,7 +127,7 @@ import { pickLocalizedReleaseNotes, readUpdateBannerState } from '@/lib/electron
 import { useElectronUpdaterState } from '@/hooks/use-electron-updater-state';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { useOpenSettings } from '@/hooks/use-open-settings';
-import { useWorkspaceProjects } from '@/hooks/use-workspace-projects';
+import { canManageWorkspaceProject, useWorkspaceProjects } from '@/hooks/use-workspace-projects';
 import { useOrganization } from '@/hooks/useOrganization';
 import { useVisibleSessionMetas } from '@/hooks/use-visible-session-metas';
 import { useReportVisibleSessionsForEagerSync } from '@/hooks/use-report-visible-sessions-for-eager-sync';
@@ -2768,7 +2768,9 @@ export function LoroAppSidebar({
   const [projectGroupOrder, setProjectGroupOrder] = useAtom(projectGroupOrderAtom);
   const projectGroupStates = useMemo<SessionListProjectGroupState[]>(() => {
     const rank = new Map(projectGroupOrder.map((id, index) => [id, index]));
-    return workspaceProjects
+    const collapsedOf = (projectId: string) =>
+      repoCollapseState[getProjectGroupSessionGroupKey(projectId)] ?? false;
+    const defined = workspaceProjects
       .map((project, index) => ({ project, index }))
       .sort(
         (left, right) =>
@@ -2778,9 +2780,27 @@ export function LoroAppSidebar({
       .map(({ project }) => ({
         projectId: project.id,
         name: project.name,
-        collapsed: repoCollapseState[getProjectGroupSessionGroupKey(project.id)] ?? false,
+        collapsed: collapsedOf(project.id),
+        canDelete: canManageWorkspaceProject(project, userId),
       }));
-  }, [projectGroupOrder, repoCollapseState, workspaceProjects]);
+    // A deleted project's conversations keep its name; it folds like any group.
+    const definedIds = new Set<string>(workspaceProjects.map((project) => project.id));
+    const removed = new Map<string, SessionListProjectGroupState>();
+    for (const session of projectGroupSessions) {
+      const group = session.projectGroup;
+      if (!group || definedIds.has(group.id) || removed.has(group.id)) continue;
+      removed.set(group.id, {
+        projectId: group.id,
+        name: group.name,
+        collapsed: collapsedOf(group.id),
+        removed: true,
+      });
+    }
+    return [
+      ...defined,
+      ...[...removed.values()].sort((left, right) => left.name.localeCompare(right.name)),
+    ];
+  }, [projectGroupOrder, projectGroupSessions, repoCollapseState, userId, workspaceProjects]);
   const projectGroupPlacement = useMemo(
     () =>
       placeProjectGroups({
@@ -2808,6 +2828,10 @@ export function LoroAppSidebar({
   );
   const handleOpenProjectGroupSettings = useCallback(
     (projectId: string) => requestProjectEditor({ kind: 'edit', projectId }),
+    [requestProjectEditor]
+  );
+  const handleDeleteProjectGroup = useCallback(
+    (projectId: string) => requestProjectEditor({ kind: 'delete', projectId }),
     [requestProjectEditor]
   );
   const handleEditLocalProject = useCallback(
@@ -2856,6 +2880,7 @@ export function LoroAppSidebar({
         onToggleProjectGroupCollapsed={handleToggleProjectGroupCollapsed}
         onNewInProjectGroup={handleNewInProjectGroup}
         onOpenProjectGroupSettings={handleOpenProjectGroupSettings}
+        onDeleteProjectGroup={handleDeleteProjectGroup}
         onArchiveProjectGroupChats={handleArchiveProjectChats}
         onMoveProjectGroup={isMobile ? undefined : handleMoveProjectGroup}
         onOpenPullRequest={handleOpenTaskPullRequest}
@@ -3448,6 +3473,7 @@ export function LoroAppSidebar({
       onToggleProjectGroupCollapsed: handleToggleProjectGroupCollapsed,
       onNewInProjectGroup: handleNewInProjectGroup,
       onOpenProjectGroupSettings: handleOpenProjectGroupSettings,
+      onDeleteProjectGroup: handleDeleteProjectGroup,
       onArchiveProjectGroupChats: handleArchiveProjectChats,
       onMoveProjectGroup: isMobile ? undefined : handleMoveProjectGroup,
       onEditRepoProject: handleEditRepoProject,
@@ -3489,6 +3515,7 @@ export function LoroAppSidebar({
       handleMoveProjectGroup,
       handleNewInProjectGroup,
       handleOpenProjectGroupSettings,
+      handleDeleteProjectGroup,
       handleToggleProjectGroupCollapsed,
       isMobile,
       projectGroupPlacement,
