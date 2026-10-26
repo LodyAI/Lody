@@ -5527,5 +5527,21 @@
   "storageGuard.stillLow": "空间仍然不足：当前可用 {{free}}，至少需要 {{needed}}。",
   "storageGuard.relaunch": "重新检查并重启",
   "storageGuard.checking": "正在检查…",
-  "storageGuard.quit": "退出 Lody"
+  "storageGuard.quit": "退出 Lody",
+  "settings.wallpaper.title": "壁纸",
+  "settings.wallpaper.description": "为新对话首页添加向下渐隐的背景。",
+  "settings.wallpaper.image": "背景图片",
+  "settings.wallpaper.localHint": "仅保存在本机。支持 PNG、JPEG 或 WebP，最大 20 MB。",
+  "settings.wallpaper.choose": "选择图片",
+  "settings.wallpaper.loading": "正在处理图片…",
+  "settings.wallpaper.remove": "移除",
+  "settings.wallpaper.preview": "壁纸预览",
+  "settings.wallpaper.greeting": "今天想创造些什么？",
+  "settings.wallpaper.prompt": "开始一段对话…",
+  "settings.wallpaper.opacity": "透明度",
+  "settings.wallpaper.blur": "模糊",
+  "settings.wallpaper.shade": "暗角",
+  "settings.wallpaper.adjustments": "图片调整",
+  "settings.wallpaper.reset": "重置调整",
+  "settings.wallpaper.error": "无法保存壁纸。请选择较小的 PNG、JPEG 或 WebP 图片，并检查本地存储空间。"
 }

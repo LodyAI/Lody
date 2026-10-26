@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useAtom } from 'jotai';
 import { usePostHog } from '@posthog/react';
@@ -38,10 +38,12 @@ import { settingContainerClass } from '.';
 import { CompactRow, CompactSection } from './compact-layout';
 import { buildConversationFontSizeChoices } from './conversation-font-size-options';
 import { PreviewSelect, type PreviewSelectOption } from './preview-select';
+import { WallpaperSettings } from './wallpaper-settings';
 
 export type SystemFontLoadState = 'idle' | 'loading' | 'loaded' | 'error';
 
 export interface AppearanceSettingsViewProps {
+  wallpaperSettings?: ReactNode;
   theme: Theme;
   onThemePreview: (value: Theme) => void;
   onThemeCommit: (value: Theme) => void;
@@ -221,6 +223,7 @@ function SystemFontCombobox({
 }
 
 export function AppearanceSettingsView({
+  wallpaperSettings,
   theme,
   onThemePreview,
   onThemeCommit,
@@ -343,6 +346,7 @@ export function AppearanceSettingsView({
         </CompactRow>
       </CompactSection>
 
+      {wallpaperSettings}
       <CompactSection title={t('settings.appearance.sections.text', 'Text')}>
         {isElectron ? (
           <CompactRow
@@ -566,6 +570,7 @@ function DesktopAppearanceSettings() {
 
   return (
     <AppearanceSettingsView
+      wallpaperSettings={<WallpaperSettings />}
       theme={theme}
       onThemePreview={handleThemePreview}
       onThemeCommit={handleThemeCommit}

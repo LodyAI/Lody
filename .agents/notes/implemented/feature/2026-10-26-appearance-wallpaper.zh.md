@@ -1,0 +1,36 @@
+# 新对话首页的本地壁纸
+
+Status: implemented
+Translation: current
+
+[English](2026-10-26-appearance-wallpaper.md)
+
+## 摘要
+
+Lody 的外观设置此前不支持自定义背景图片。桌面新对话首页现在支持本地壁纸、透明度、模糊、暗角和设置内实时预览，采用参考 Zeron 的向下渐隐效果。改变仅作用于装饰背景，文字、输入框层次阴影和已有对话背景继续使用主题材质。图片仅保存在本机；本次不实现系统桌面毛玻璃、壁纸轮换或 Zeron 的图片特效。
+
+## 参考与决策
+
+研究的 Zeron 提交为 `325384d8b1200630410580f179a7e7910c7ccb31`：
+
+- [图片遮罩](https://github.com/zeronsh/zeron/blob/325384d8b1200630410580f179a7e7910c7ccb31/crates/ui/src/new_thread_background_mask.rs) 使用 cover 填充、贯穿全高的底部渐隐、输入框周围 8px 留白、限制在 120–280px 的羽化，以及不透明度 0.5 的补充显露层。
+- [主题材质](https://github.com/zeronsh/zeron/blob/325384d8b1200630410580f179a7e7910c7ccb31/crates/ui/src/theme.rs) 区分系统窗口玻璃和应用内磨砂。macOS/Windows 窗口玻璃基础覆盖率为 0.80，Linux 保持不透明；对比度检查可以提高覆盖率。浅色浮层磨砂覆盖率为 0.45。选中项使用内描边，避免半透明标签背后的外阴影成为黑色底板。
+- [外观生命周期](https://github.com/zeronsh/zeron/blob/325384d8b1200630410580f179a7e7910c7ccb31/crates/ui/src/appearance.rs) 将原生窗口背景应用与主题调色板分别处理。
+
+Lody 借鉴图片和渐隐的分层方式，不引入 GPUI 的原生材质实现或源代码。Lody 输入框固定在底部，因此使用 CSS 透明度渐隐代替 Zeron 按输入框位置计算的挖空。保留 Lody 现有卡片阴影；暗角是图片调整，不替代层次阴影。默认透明度 45%、无模糊、暗角 20%；选择图片前不开启。
+
+## 职责与取舍
+
+```text
+外观设置 → 解码 / 缩放 → 本地偏好 atom → localStorage
+                              ↓
+                     共用 WallpaperBackdrop
+                       ↙             ↘
+                    实时预览       新对话首页
+```
+
+[设置 README](../../../../packages/components/src/components/settings/README.md#wallpaper) 维护实现细节。限制体积的编码图片让这项偏好独立于工作区存储、上传和 Electron IPC，代价是最长边 1920px、编码长度最多 140 万字符，以及同步的本地偏好写入。解码或保存失败时保留旧图片；设置卸载后未完成的解码不能再发布结果。远程 URL 和损坏的持久化数据会安全归一化。没有复制 Zeron 的素材或代码，也没有引入新依赖。
+
+## 验证
+
+在现有外观测试套件中补充恢复、调整、重置与移除、保存失败、非法图片选择和跨窗口更新的行为覆盖。外观套件的 14 项测试全部通过。独立 Chromium 验证页面使用真实组件检查了 PNG 上传及 WebP 编码、预览、滑块保存、刷新恢复、重置与移除、中文文案，并目视检查浅色和深色效果。四个新增模块通过独立 TypeScript 检查；范围内的 Oxfmt/Oxlint、国际化和 diff 检查通过。复用依赖的环境中，完整包类型检查仍受缺少 Electron 依赖和其他现有类型错误阻塞。`docs check` 报告指向未初始化 ACP 子模块的现有链接，本次修改文档没有错误。完整 Storybook 的首次依赖打包未及时完成，因此浏览器验证改用包含真实壁纸组件的独立页面。提交前已完成 `pnpm format`。根目录 `pnpm check` 因当前检出目录未安装 `fumadocs-mdx`，在站点文档的 pretypecheck 步骤停止。未完成完整桌面构建或全仓库测试。

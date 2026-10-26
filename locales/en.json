@@ -5533,5 +5533,21 @@
   "storageGuard.stillLow": "Still not enough space: {{free}} free, at least {{needed}} needed.",
   "storageGuard.relaunch": "Check again and restart",
   "storageGuard.checking": "Checking…",
-  "storageGuard.quit": "Quit Lody"
+  "storageGuard.quit": "Quit Lody",
+  "settings.wallpaper.title": "Wallpaper",
+  "settings.wallpaper.description": "A fading backdrop for the new conversation page.",
+  "settings.wallpaper.image": "Background image",
+  "settings.wallpaper.localHint": "Stored only on this device. PNG, JPEG or WebP, up to 20 MB.",
+  "settings.wallpaper.choose": "Choose image",
+  "settings.wallpaper.loading": "Preparing image…",
+  "settings.wallpaper.remove": "Remove",
+  "settings.wallpaper.preview": "Wallpaper preview",
+  "settings.wallpaper.greeting": "What would you like to build?",
+  "settings.wallpaper.prompt": "Start a conversation…",
+  "settings.wallpaper.opacity": "Transparency",
+  "settings.wallpaper.blur": "Blur",
+  "settings.wallpaper.shade": "Vignette",
+  "settings.wallpaper.adjustments": "Image adjustments",
+  "settings.wallpaper.reset": "Reset adjustments",
+  "settings.wallpaper.error": "Could not save this wallpaper. Choose a smaller PNG, JPEG or WebP image, and check available local storage."
 }

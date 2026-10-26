@@ -11,6 +11,9 @@ import type { AppIconBridge } from '../src/components/mobile/mobile-app-icon-set
 import { AppearanceSettingsView } from '../src/components/settings/appearance-setting';
 import type { Theme } from '../src/theme-provider';
 import { initI18n } from '../src/i18n';
+import { WallpaperSettings } from '../src/components/settings/wallpaper-settings';
+import { wallpaperAtom } from '../src/atoms/wallpaper';
+import { DEFAULT_WALLPAPER, WALLPAPER_STORAGE_KEY } from '../src/lib/wallpaper';
 import { Dialog } from '../src/ui/dialog';
 
 (
@@ -137,11 +140,122 @@ describe('AppearanceSettingsView', () => {
       await act(async () => root?.unmount());
     }
     container?.remove();
+    localStorage.removeItem(WALLPAPER_STORAGE_KEY);
+    vi.restoreAllMocks();
     delete window.__LODY_APP_ICON__;
     vi.unstubAllGlobals();
     Element.prototype.scrollIntoView = originalScrollIntoView;
     root = undefined;
     container = undefined;
+  });
+
+  it('restores wallpaper, adjusts it, resets effects and removes the saved image', async () => {
+    const image = 'data:image/png;base64,iVBORw0KGgo=';
+    localStorage.setItem(
+      WALLPAPER_STORAGE_KEY,
+      JSON.stringify({ image, opacity: 70, blur: 8, shade: 30 })
+    );
+    const store = createStore();
+    await act(async () =>
+      root?.render(
+        <Provider store={store}>
+          <WallpaperSettings />
+        </Provider>
+      )
+    );
+    expect(container?.querySelector('[data-wallpaper-backdrop]')).not.toBeNull();
+    const transparency = container!.querySelector<HTMLInputElement>('[aria-label="Transparency"]')!;
+    expect(transparency.value).toBe('30');
+    await act(async () => setInputValue(transparency, '65'));
+    expect(store.get(wallpaperAtom).opacity).toBe(35);
+    expect(JSON.parse(localStorage.getItem(WALLPAPER_STORAGE_KEY)!)).toMatchObject({
+      image,
+      opacity: 35,
+    });
+    const button = (label: string) =>
+      Array.from(container!.querySelectorAll('button')).find((node) => node.textContent === label)!;
+    await act(async () => button('Reset adjustments').click());
+    expect(store.get(wallpaperAtom)).toEqual({ ...DEFAULT_WALLPAPER, image });
+    await act(async () => button('Remove').click());
+    expect(container?.querySelector('[data-wallpaper-backdrop]')).toBeNull();
+    expect(JSON.parse(localStorage.getItem(WALLPAPER_STORAGE_KEY)!).image).toBeNull();
+    expect(transparency.disabled).toBe(true);
+  });
+
+  it('keeps the active wallpaper and reports failed persistence', async () => {
+    const saved = { ...DEFAULT_WALLPAPER, image: 'data:image/png;base64,aGVsbG8=' };
+    localStorage.setItem(WALLPAPER_STORAGE_KEY, JSON.stringify(saved));
+    const store = createStore();
+    await act(async () =>
+      root?.render(
+        <Provider store={store}>
+          <WallpaperSettings />
+        </Provider>
+      )
+    );
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+      throw new DOMException('Full', 'QuotaExceededError');
+    });
+    const transparency = container!.querySelector<HTMLInputElement>('[aria-label="Transparency"]')!;
+    await act(async () => setInputValue(transparency, '80'));
+    expect(store.get(wallpaperAtom)).toEqual(saved);
+    expect(JSON.parse(localStorage.getItem(WALLPAPER_STORAGE_KEY)!)).toEqual(saved);
+    expect(container!.querySelector('[role="alert"]')?.textContent).toContain('Could not save');
+  });
+
+  it('rejects unsupported images without discarding the current wallpaper', async () => {
+    const saved = { ...DEFAULT_WALLPAPER, image: 'data:image/png;base64,aGVsbG8=' };
+    localStorage.setItem(WALLPAPER_STORAGE_KEY, JSON.stringify(saved));
+    const store = createStore();
+    await act(async () =>
+      root?.render(
+        <Provider store={store}>
+          <WallpaperSettings />
+        </Provider>
+      )
+    );
+    const input = container!.querySelector<HTMLInputElement>('input[type="file"]')!;
+    Object.defineProperty(input, 'files', {
+      value: [new File(['<svg/>'], 'test.svg', { type: 'image/svg+xml' })],
+    });
+    await act(async () => input.dispatchEvent(new Event('change', { bubbles: true })));
+    expect(store.get(wallpaperAtom)).toEqual(saved);
+    expect(container!.querySelector('[role="alert"]')).not.toBeNull();
+    expect(container!.querySelector('[data-wallpaper-backdrop]')).not.toBeNull();
+  });
+
+  it('normalizes corrupt preferences and updates from another window without fetching URLs', async () => {
+    localStorage.setItem(WALLPAPER_STORAGE_KEY, '{broken');
+    const store = createStore();
+    await act(async () =>
+      root?.render(
+        <Provider store={store}>
+          <WallpaperSettings />
+        </Provider>
+      )
+    );
+    expect(store.get(wallpaperAtom)).toEqual(DEFAULT_WALLPAPER);
+    await act(async () => {
+      localStorage.setItem(
+        WALLPAPER_STORAGE_KEY,
+        JSON.stringify({
+          image: 'https://example.com/image.png',
+          opacity: -1,
+          blur: 100,
+          shade: 'bad',
+        })
+      );
+      window.dispatchEvent(
+        new StorageEvent('storage', { key: WALLPAPER_STORAGE_KEY, storageArea: localStorage })
+      );
+    });
+    expect(store.get(wallpaperAtom)).toEqual({
+      image: null,
+      opacity: 0,
+      blur: 24,
+      shade: DEFAULT_WALLPAPER.shade,
+    });
+    expect(container!.querySelector('[data-wallpaper-backdrop]')).toBeNull();
   });
 
   it('lets the user pick System in the theme selector', async () => {

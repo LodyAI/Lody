@@ -1,4 +1,7 @@
 import { useMemo, useState, type ReactNode, type Ref } from 'react';
+import { useAtomValue } from 'jotai';
+import { wallpaperAtom } from '@/atoms/wallpaper';
+import { WallpaperBackdrop } from '../wallpaper-backdrop';
 import * as stylex from '@stylexjs/stylex';
 import { colors } from '@lody/ui/tokens/colors.stylex';
 import { space } from '@lody/ui/tokens/scales.stylex';
@@ -86,6 +89,7 @@ export function WebChatLandingScreen({
   dropKind = 'session-mention',
   dropHandlers,
 }: WebChatLandingScreenProps) {
+  const wallpaper = useAtomValue(wallpaperAtom);
   const isElectron = isElectronRenderer();
   const isElectronFullscreen = useElectronFullscreen();
   // The stage and its group, for what in the group fits itself to the window (`landing-stage.ts`).
@@ -106,6 +110,7 @@ export function WebChatLandingScreen({
       )}
       {...dropHandlers}
     >
+      <WallpaperBackdrop settings={wallpaper} />
       <WindowDragStrip />
       <ConversationDropOverlay active={dropActive} kind={dropKind} />
       {leftSidebarExpandSlot != null ? (

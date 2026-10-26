@@ -107,3 +107,12 @@ while the rest steps back (`home/focus-motion.ts`). [Why](../../../../../.agents
 Chat Landing no longer emits the legacy onboarding project-source, project-selection,
 or agent-selection events. Onboarding owns its route-scoped flow, step and operation
 telemetry; see [event semantics](../../../../../specs/onboarding-analytics.md).
+
+## New-conversation wallpaper
+
+`web-chat-landing-screen.tsx` places the optional `WallpaperBackdrop` behind its
+existing focus scope and composer. The decoration cannot receive pointer events;
+its transparency, blur and vignette never filter text or controls. The full-height
+alpha fade reaches zero at the bottom, preserving the docked composer's existing
+surface. Selection and local persistence belong to
+[Appearance settings](../settings/README.md#wallpaper).

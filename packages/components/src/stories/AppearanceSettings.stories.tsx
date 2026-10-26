@@ -6,6 +6,7 @@ import {
   type AppearanceSettingsViewProps,
 } from '@/components/settings/appearance-setting';
 import { Dialog } from '@/ui/dialog';
+import { WallpaperSettings } from '@/components/settings/wallpaper-settings';
 
 const systemFontFamilies = [
   'Fira Code',
@@ -30,6 +31,7 @@ function ControlledAppearanceSettings({ isElectron }: { isElectron: boolean }) {
   return (
     <div className="mx-auto max-w-4xl p-6">
       <AppearanceSettingsView
+        wallpaperSettings={<WallpaperSettings />}
         theme={theme}
         onThemePreview={setTheme}
         onThemeCommit={setTheme}
