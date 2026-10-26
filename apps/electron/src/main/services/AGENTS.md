@@ -111,9 +111,11 @@ and raw causes in main, outside IPC logging and telemetry. `e2ee-diagnostics.mts
 over a lost acknowledgement; auxiliary failures never undo verified admission.
 
 Explicit consent follows locally verified, durably fixed pairing evidence.
-Retries use the same session, record and requestId. Archive settled/cancelled
-sessions without replacing keys, credentials or independent pins; failed begin stays discoverable; only terminal state permits archival; unknown signed
-admissions stay retained. Personal snapshot origins verify pinned endorsement and
+Retries retain session/record/requestId and keys, credentials and pins. Failed begin
+stays discoverable. Archive only terminal or foreign immutable recipient attempts;
+same-request admitting/unknown stays fenced. Cleanup preserves installed origins,
+other sessions and both primary/cleanup causes; see the linked join note.
+Personal snapshot origins verify pinned endorsement and
 self admission before any binding/pin/cursor; old epoch keys use mailbox plus the
 verified history chain, never staging. Ledger record positions may be sparse.
 Machine approval still discloses file protection; socket timeout means pending,

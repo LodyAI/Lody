@@ -154,10 +154,14 @@ interface PersonalJoinOrigin {
   invitationHex: string
 }
 interface PersonalJoins {
-  pending(
-    workspaceId: string
-  ): Effect.Effect<
-    { offer: PersonalPairingOffer; pairingSessionId: string; signingPublicKey?: string } | null,
+  pending(workspaceId: string): Effect.Effect<
+    {
+      offer: PersonalPairingOffer
+      pairingSessionId: string
+      signingPublicKey?: string
+      credentialHash?: string
+      requestHex?: string
+    } | null,
     unknown
   >
   prepare(offer: PersonalPairingOffer): Effect.Effect<PersonalJoinPrepared, unknown>
@@ -387,7 +391,13 @@ export function makeDesktopPersonalJoins(input: {
         return {
           offer,
           pairingSessionId: offer.pairingSessionId,
-          ...(request ? { signingPublicKey: request.signingPublicKey } : {})
+          ...(request
+            ? {
+                signingPublicKey: request.signingPublicKey,
+                credentialHash: request.credentialHash,
+                requestHex: row.request_hex!
+              }
+            : {})
         }
       }),
     prepare,

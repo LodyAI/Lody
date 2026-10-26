@@ -1559,7 +1559,9 @@ for (const recovery of ['retry', 'cancel-and-renew']) {
         assert.deepEqual(yield* second.bootstrap.pendingPersonalJoin(workspaceId), {
           offer: targetOffer,
           pairingSessionId: targetOffer.pairingSessionId,
-          signingPublicKey: originalKey
+          signingPublicKey: originalKey,
+          credentialHash: renewed.credentialHash,
+          requestHex: renewed.requestHex
         })
       })
     )

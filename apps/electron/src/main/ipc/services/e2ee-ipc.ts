@@ -15,7 +15,7 @@ import {
 import { assertProductWindowSender } from '../assert-sender'
 import { getIpcServiceDeps } from '../ipc-service-deps'
 import { PersonalPairingOfferSchema } from '../../services/e2ee-personal-pairing.mjs'
-import type { E2eePersonalPairingOffer } from '@lody/cloud-api'
+import type { E2eeJoinSession, E2eePersonalPairingOffer } from '@lody/cloud-api'
 
 const observedSenders = new WeakSet<Electron.WebContents>()
 function pairingSession(value: string) {
@@ -61,7 +61,8 @@ export class E2eeIpc extends IpcService {
     accountId: string,
     workspaceId: string,
     pairingSessionId: string,
-    status: 'cancelled' | 'conflict'
+    status: 'cancelled' | 'conflict',
+    options?: { primary?: unknown; recipientOnly?: boolean }
   ) {
     const errors: unknown[] = []
     const attempt = async (work: Parameters<typeof withDesktopE2eeAccount>[0]) => {
@@ -72,19 +73,51 @@ export class E2eeIpc extends IpcService {
       }
     }
     await attempt((owner) =>
-      owner.accountId === accountId
-        ? owner.bootstrap.retirePersonalJoin(workspaceId, pairingSessionId)
-        : Effect.fail(new Error('e2ee_account_mismatch'))
+      Effect.gen(function* () {
+        if (owner.accountId !== accountId)
+          return yield* Effect.fail(new Error('e2ee_account_mismatch'))
+        const pending = yield* owner.bootstrap.pendingPersonalJoin(workspaceId)
+        // A snapshot-origin approver retains its own accepted join. Cancelling
+        // somebody else's session cannot retire that origin or a newer request.
+        if (pending?.pairingSessionId === pairingSessionId)
+          yield* owner.bootstrap.retirePersonalJoin(workspaceId, pairingSessionId)
+        return undefined
+      })
     )
-    await attempt((owner) => {
-      if (owner.accountId !== accountId) return Effect.fail(new Error('e2ee_account_mismatch'))
-      if (!owner.readers.has(workspaceId)) return Effect.void
-      return status === 'cancelled'
-        ? owner.host.cancelPersonalPairing(workspaceId, pairingSessionId)
-        : owner.host.retirePersonalPairing(workspaceId, pairingSessionId)
-    })
-    if (errors.length) this.pairingFailure = new AggregateError(errors, 'e2ee_join_cleanup_pending')
+    if (!options?.recipientOnly)
+      await attempt((owner) => {
+        if (owner.accountId !== accountId) return Effect.fail(new Error('e2ee_account_mismatch'))
+        if (!owner.readers.has(workspaceId)) return Effect.void
+        return status === 'cancelled'
+          ? owner.host.cancelPersonalPairing(workspaceId, pairingSessionId)
+          : owner.host.retirePersonalPairing(workspaceId, pairingSessionId)
+      })
+    if (errors.length)
+      this.pairingFailure = new AggregateError(
+        [...(options?.primary === undefined ? [] : [options.primary]), ...errors],
+        'e2ee_join_cleanup_pending'
+      )
     return errors.length > 0
+  }
+  /** A relay slot is immutable. Different complete material cannot admit this
+   * host's saved request; archive only that local attempt, retaining all originals. */
+  private async foreignPersonalJoin(accountId: string, result: E2eeJoinSession) {
+    return withDesktopE2eeAccount((owner) =>
+      Effect.gen(function* () {
+        if (owner.accountId !== accountId)
+          return yield* Effect.fail(new Error('e2ee_account_mismatch'))
+        const pending = yield* owner.bootstrap.pendingPersonalJoin(result.workspaceId)
+        if (!pending || pending.pairingSessionId !== result.pairingSessionId) return false
+        if (pending.offer.genesisHash !== result.genesisHash)
+          return yield* Effect.fail(new Error('e2ee_conflict'))
+        if (!pending.requestHex) return false
+        return (
+          pending.signingPublicKey !== result.signingPublicKey ||
+          pending.credentialHash !== result.credentialHash ||
+          pending.requestHex !== result.requestHex
+        )
+      })
+    )
   }
   @IpcMethod()
   async personalPairingOffer(workspaceId: string) {
@@ -124,18 +157,21 @@ export class E2eeIpc extends IpcService {
       )
         throw new Error('e2ee_conflict')
       if (result.status === 'cancelled' || result.status === 'conflict') {
+        let primary: unknown
         if (result.status === 'conflict') {
           try {
             await this.refresh(workspaceId)
           } catch (error) {
             this.pairingFailure = error
+            primary = error
           }
         }
         await this.settlePersonalJoin(
           saved.accountId,
           workspaceId,
           result.pairingSessionId,
-          result.status
+          result.status,
+          { primary }
         )
       }
     }
@@ -176,7 +212,15 @@ export class E2eeIpc extends IpcService {
         result.genesisHash !== saved.pending.offer.genesisHash
       )
         throw new Error('e2ee_conflict')
-      if (result.status === 'cancelled' || result.status === 'conflict')
+      if (await this.foreignPersonalJoin(saved.accountId, result))
+        await this.settlePersonalJoin(
+          saved.accountId,
+          workspaceId,
+          result.pairingSessionId,
+          'conflict',
+          { recipientOnly: true }
+        )
+      else if (result.status === 'cancelled' || result.status === 'conflict')
         await this.settlePersonalJoin(
           saved.accountId,
           workspaceId,
@@ -210,7 +254,12 @@ export class E2eeIpc extends IpcService {
     )
     if (
       result.requestHex !== prepared.request.requestHex ||
-      result.accountId !== prepared.accountId
+      result.accountId !== prepared.accountId ||
+      result.workspaceId !== offer.workspaceId ||
+      result.genesisHash !== offer.genesisHash ||
+      result.pairingSessionId !== offer.pairingSessionId ||
+      result.signingPublicKey !== prepared.request.signingPublicKey ||
+      result.credentialHash !== prepared.request.credentialHash
     )
       throw new Error('e2ee_conflict')
     if (result.status === 'cancelled' || result.status === 'conflict') {
@@ -361,6 +410,12 @@ export class E2eeIpc extends IpcService {
     if (result.status === 'cancelled' || result.status === 'conflict') {
       await this.settlePersonalJoin(cloud.accountId, workspaceId, pairingSessionId, result.status)
       return { ready: false, status: result.status }
+    }
+    if (await this.foreignPersonalJoin(cloud.accountId, result)) {
+      await this.settlePersonalJoin(cloud.accountId, workspaceId, pairingSessionId, 'conflict', {
+        recipientOnly: true
+      })
+      return { ready: false, status: 'conflict' }
     }
     if (!result.invitationHex) return { ready: false, status: result.status }
     await withDesktopE2eeAccount((owner) =>

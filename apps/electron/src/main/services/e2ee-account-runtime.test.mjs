@@ -9,7 +9,14 @@ import { createRequire } from 'node:module'
 import { runInNewContext } from 'node:vm'
 import test from 'node:test'
 import ts from 'typescript'
-import { Effect, Scope, Exit } from 'effect'
+import { Effect, Scope, Exit, Result } from 'effect'
+import {
+  Bytes,
+  hashRecordBytes,
+  verifyLedger,
+  prepareLedgerCommand,
+  signLedgerRecord
+} from '@lody/e2ee-core/protocol'
 import { makeDesktopE2eeCustody } from '../e2ee-custody.mts'
 import { makeDesktopE2eeBootstrap } from './e2ee-bootstrap.mts'
 import { makeDesktopE2eeRuntimeHost } from './e2ee-runtime.mts'
@@ -575,6 +582,7 @@ void test('personal join cancellation preserves remote success when local retire
     accountId: 'account',
     readers: new Map(),
     bootstrap: {
+      pendingPersonalJoin: () => Effect.succeed({ pairingSessionId: '44'.repeat(16) }),
       retirePersonalJoin: () =>
         Effect.suspend(() =>
           localFailure
@@ -823,6 +831,17 @@ async function personalJoinFixture(t) {
           })
         )
         await value.attach(id)
+        await Effect.runPromise(
+          owner.host.ingestLedgerRecords(id, {
+            workspaceId: id,
+            genesisHash: prepared.genesisHashHex,
+            checkpoint: { length: 1, headHash: prepared.genesisHashHex },
+            startIndex: 0,
+            recordsHex: [prepared.genesisRecordHex],
+            position: `p1:${id}:1:source-1:0`,
+            nextCursor: null
+          })
+        )
       }
     }
     owners.add(value)
@@ -836,7 +855,41 @@ async function personalJoinFixture(t) {
       connection.close()
     }
   }
-  return { open, rows, relay, db, workspaceId }
+  const append = async (owner, genesisHash, recordHex) => {
+    const status = await Effect.runPromise(owner.host.status(workspaceId))
+    await Effect.runPromise(
+      owner.host.ingestLedgerRecords(workspaceId, {
+        workspaceId,
+        genesisHash,
+        checkpoint: {
+          length: status.length + 1,
+          headHash: Buffer.from(hashRecordBytes(Buffer.from(recordHex, 'hex')).toBytes()).toString(
+            'hex'
+          )
+        },
+        startIndex: status.length,
+        recordsHex: [recordHex],
+        position: `p1:${workspaceId}:${status.length + 1}:source-${status.length + 1}:0`,
+        nextCursor: null
+      })
+    )
+  }
+  const admit = async (owner, recipient, offer) => {
+    const request = await Effect.runPromise(recipient.bootstrap.preparePersonalJoin(offer))
+    await Effect.runPromise(owner.host.previewPersonalAdmission(workspaceId, request.requestHex))
+    const admission = await Effect.runPromise(
+      owner.host.preparePersonalAdmission(workspaceId, request.requestHex)
+    )
+    await append(owner, offer.genesisHash, admission.recordHex)
+    const invitation = await Effect.runPromise(
+      owner.host.personalInvitation(workspaceId, offer.pairingSessionId)
+    )
+    const row = rows.get(offer.pairingSessionId)
+    row.status = 'published'
+    row.invitationHex = invitation.invitationHex
+    return invitation
+  }
+  return { open, rows, relay, db, workspaceId, append, admit }
 }
 
 void test('personal IPC recovers a competing recipient after cancellation with lost receipt and process reopen, preserving custody and pins', async (t) => {
@@ -870,7 +923,7 @@ void test('personal IPC recovers a competing recipient after cancellation with l
     /e2ee_admission_reserved/
   )
   await assert.rejects(
-    third.ipc.preparePersonalJoin({ ...offer, pairingSessionId: '82'.repeat(16) }),
+    second.ipc.preparePersonalJoin({ ...offer, pairingSessionId: '82'.repeat(16) }),
     /e2ee_conflict/
   )
   assert.deepEqual(await third.ipc.pendingPersonalJoin(f.workspaceId), pending)
@@ -986,5 +1039,167 @@ void test('confirmed cancellation survives real SQLite archival failure and the 
         .get(f.workspaceId).request_hex,
       original.requestHex
     )
+  )
+})
+
+void test('an immutable published session for another recipient retires only the local losing request and preserves its identity on the next offer', async (t) => {
+  for (const path of ['claim', 'prepare']) {
+    const f = await personalJoinFixture(t)
+    const first = await f.open('first')
+    await first.create()
+    const second = await f.open('second')
+    let third = await f.open('third')
+    const offer = await first.ipc.personalPairingOffer(f.workspaceId)
+    await second.ipc.preparePersonalJoin(offer)
+    await assert.rejects(third.ipc.preparePersonalJoin(offer), /e2ee_conflict/)
+    const original = await Effect.runPromise(third.bootstrap.preparePersonalJoin(offer))
+    await f.admit(first, second, offer)
+    await third.close()
+    third = await f.open('third')
+    const next = await first.ipc.personalPairingOffer(f.workspaceId)
+    assert.notEqual(next.pairingSessionId, offer.pairingSessionId)
+    if (path === 'claim') {
+      const claimed = await third.ipc.claimPersonalJoin(f.workspaceId, offer.pairingSessionId)
+      assert.equal(claimed.ready, false)
+      assert.equal(claimed.status, 'conflict')
+      assert.equal(await third.ipc.pendingPersonalJoin(f.workspaceId), null)
+    }
+    const result = await third.ipc.preparePersonalJoin(next)
+    const renewed = await Effect.runPromise(third.bootstrap.preparePersonalJoin(next))
+    assert.equal(result.signingPublicKey, original.signingPublicKey)
+    assert.equal(renewed.credentialHash, original.credentialHash)
+    assert.equal(f.rows.get(offer.pairingSessionId).status, 'published')
+    f.db(third, 'creations.sqlite', (db) => {
+      const archived = db
+        .prepare('SELECT request_hex FROM retired_personal_joins WHERE workspace_id=?')
+        .get(f.workspaceId)
+      assert.equal(archived.request_hex, original.requestHex)
+    })
+  }
+})
+
+void test('a proven lost approval renews its offer and the same recipient can cancel the released old session before retrying', async (t) => {
+  const f = await personalJoinFixture(t)
+  const first = await f.open('first')
+  await first.create()
+  const second = await f.open('second')
+  const third = await f.open('third')
+  const offer = await first.ipc.personalPairingOffer(f.workspaceId)
+  await second.ipc.preparePersonalJoin(offer)
+  const original = await Effect.runPromise(second.bootstrap.preparePersonalJoin(offer))
+  await first.ipc.inspectPersonalJoin(f.workspaceId, offer.pairingSessionId)
+  const losing = await Effect.runPromise(
+    first.host.preparePersonalAdmission(f.workspaceId, original.requestHex)
+  )
+  f.rows.get(offer.pairingSessionId).status = 'admitting'
+  await assert.rejects(
+    second.ipc.preparePersonalJoin({ ...offer, pairingSessionId: '89'.repeat(16) }),
+    /e2ee_conflict/
+  )
+  const competing = await Effect.runPromise(third.bootstrap.preparePersonalJoin(offer))
+  const material = JSON.parse(Buffer.from(competing.requestHex, 'hex').toString())
+  const ledger = await Effect.runPromise(first.host.ledgerView(f.workspaceId))
+  const records = ledger.recordsHex.map((value) => Buffer.from(value, 'hex'))
+  const genesis = Result.getOrThrow(Bytes.genesisHash(Buffer.from(offer.genesisHash, 'hex')))
+  const view = Result.getOrThrow(
+    verifyLedger({
+      anchor: genesis,
+      records,
+      checkpoint: { head: hashRecordBytes(records.at(-1)), length: records.length }
+    })
+  )
+  const signer = await Effect.runPromise(first.custody.openDevice(genesis))
+  const winner = await Effect.runPromise(
+    signLedgerRecord(
+      Result.getOrThrow(
+        prepareLedgerCommand(view, signer.publicKey, {
+          _tag: 'AdmitDevice',
+          kind: 'personal',
+          signingPublicKey: Result.getOrThrow(
+            Bytes.signingPublicKey(Buffer.from(material.signingPublicKey, 'hex'))
+          ),
+          encryptionPublicKey: Result.getOrThrow(
+            Bytes.encryptionPublicKey(Buffer.from(material.encryptionPublicKey, 'hex'))
+          ),
+          possessionSignature: Result.getOrThrow(
+            Bytes.signature(Buffer.from(material.possessionSignature, 'hex'))
+          )
+        })
+      ),
+      signer
+    )
+  )
+  assert.notEqual(Buffer.from(winner).toString('hex'), losing.recordHex)
+  await f.append(first, offer.genesisHash, Buffer.from(winner).toString('hex'))
+  const next = await first.ipc.personalPairingOffer(f.workspaceId)
+  assert.notEqual(next.pairingSessionId, offer.pairingSessionId)
+  // The backend's verified losing-writer settlement releases the reservation;
+  // the real handler regression is owned by the backend test suite.
+  f.rows.get(offer.pairingSessionId).status = 'pending'
+  await second.ipc.cancelPersonalJoin(f.workspaceId, offer.pairingSessionId)
+  await second.ipc.preparePersonalJoin(next)
+  const renewed = await Effect.runPromise(second.bootstrap.preparePersonalJoin(next))
+  assert.equal(renewed.signingPublicKey, original.signingPublicKey)
+  assert.equal(renewed.credentialHash, original.credentialHash)
+})
+
+void test('a snapshot-joined approver cancels another recipient without retiring its own origin and retains genuine cleanup causes', async (t) => {
+  const f = await personalJoinFixture(t)
+  const first = await f.open('first')
+  await first.create()
+  const second = await f.open('second')
+  const third = await f.open('third')
+  const offer = await first.ipc.personalPairingOffer(f.workspaceId)
+  await second.ipc.preparePersonalJoin(offer)
+  const invitation = await f.admit(first, second, offer)
+  await Effect.runPromise(
+    second.bootstrap.acceptPersonalJoin(f.workspaceId, invitation.invitationHex)
+  )
+  await second.attach()
+  const preservedOrigin = JSON.stringify(
+    await Effect.runPromise(second.bootstrap.creationFor(f.workspaceId))
+  )
+  const own = await second.ipc.personalPairingOffer(f.workspaceId)
+  await third.ipc.preparePersonalJoin(own)
+  const primary = new Error('synthetic primary refresh unavailable')
+  second.ipc.pairingFailure = primary
+  const cancelled = await second.ipc.cancelPersonalJoin(f.workspaceId, own.pairingSessionId)
+  assert.equal(cancelled.cleanupPending, false)
+  assert.equal(second.ipc.pairingFailure, primary)
+  assert.equal(
+    JSON.stringify(await Effect.runPromise(second.bootstrap.creationFor(f.workspaceId))),
+    preservedOrigin
+  )
+  const another = await second.ipc.personalPairingOffer(f.workspaceId)
+  f.rows.set(another.pairingSessionId, {
+    ...f.rows.get(own.pairingSessionId),
+    pairingSessionId: another.pairingSessionId,
+    status: 'conflict'
+  })
+  second.ipc.refresh = async () => {
+    throw primary
+  }
+  f.db(second, join('workspaces', f.workspaceId, 'history.sqlite'), (db) =>
+    db.exec(
+      "CREATE TRIGGER refuse_actual_cleanup BEFORE UPDATE OF retired ON personal_pairing BEGIN SELECT RAISE(ABORT,'synthetic cleanup unavailable'); END"
+    )
+  )
+  await second.ipc.personalPairingOffer(f.workspaceId)
+  assert.equal(second.ipc.pairingFailure.errors[0], primary)
+  assert.equal(second.ipc.pairingFailure.errors.length, 2)
+  f.db(second, join('workspaces', f.workspaceId, 'history.sqlite'), (db) => {
+    assert.equal(
+      db
+        .prepare('SELECT retired FROM personal_pairing WHERE session=?')
+        .get(another.pairingSessionId).retired,
+      0
+    )
+    db.exec('DROP TRIGGER refuse_actual_cleanup')
+  })
+  const recovered = await second.ipc.personalPairingOffer(f.workspaceId)
+  assert.notEqual(recovered.pairingSessionId, another.pairingSessionId)
+  assert.equal(
+    JSON.stringify(await Effect.runPromise(second.bootstrap.creationFor(f.workspaceId))),
+    preservedOrigin
   )
 })
