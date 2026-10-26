@@ -781,6 +781,56 @@ describe('session create prevalidation failures', () => {
     },
   ];
 
+  it('preserves omitted, empty, and explicit MCP selections through batch creation', async () => {
+    let acceptedInput:
+      | {
+          items: LodyOperationItemResult[];
+          frozenContinuationConfig: { targetDispatchConfigs: unknown[] };
+          canonicalCommand: { items: Record<string, unknown>[] };
+        }
+      | undefined;
+    mocks.accept.mockImplementation((input: unknown) => {
+      acceptedInput = input as NonNullable<typeof acceptedInput>;
+      return { operation: { ...acceptedInput, state: 'active' }, claimedItemIndexes: [0, 1, 2] };
+    });
+    mocks.snapshot.mockImplementation((operation: unknown) => operation);
+    mocks.validateSessionCreateOptions.mockImplementation(
+      ({ dispatchConfig }: { dispatchConfig: unknown }) => dispatchConfig
+    );
+    const createdConfigs: unknown[] = [];
+    mocks.createSessionResult.mockImplementation(
+      async (_auth, _workspace, _manager, _prompt, options, dispatchConfig) => {
+        createdConfigs.push(dispatchConfig);
+        return { sessionId: options.sessionId, userTurnId: options.userTurnId };
+      }
+    );
+
+    await startSessionCreateManyOperation({
+      operationId: 'mcp-selection-batch',
+      items: [
+        { prompt: 'use target defaults' },
+        { prompt: 'select none', mcpServerIds: [] },
+        { prompt: 'select servers', mcpServerIds: ['server-a', 'server-b'] },
+      ],
+    });
+
+    expect(acceptedInput?.canonicalCommand.items.map((item) => item.mcpServerIds)).toEqual([
+      undefined,
+      [],
+      ['server-a', 'server-b'],
+    ]);
+    const selection = (config: unknown) =>
+      config && typeof config === 'object' && 'mcpServerIds' in config
+        ? config.mcpServerIds
+        : undefined;
+    expect(acceptedInput?.frozenContinuationConfig.targetDispatchConfigs.map(selection)).toEqual([
+      undefined,
+      [],
+      ['server-a', 'server-b'],
+    ]);
+    expect(createdConfigs.map(selection)).toEqual([undefined, [], ['server-a', 'server-b']]);
+  });
+
   it.each([
     { field: 'builtinDefaultModeId', value: 'agent-auto-review' },
     { field: 'inheritedBuiltinDefaultModeId', value: 'agent-auto-review' },

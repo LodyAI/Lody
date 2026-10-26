@@ -3262,6 +3262,7 @@ const startSessionCreateManyOperation = async (
         const single = {
           operationId: args.operationId,
           prompt: item.prompt,
+          ...(item.mcpServerIds !== undefined ? { mcpServerIds: item.mcpServerIds } : {}),
           ...(item.agentRoleId ? { agentRoleId: item.agentRoleId } : {}),
           ...(item.agentRoleMachineId ? { agentRoleMachineId: item.agentRoleMachineId } : {}),
           ...(item.machineId ? { machineId: item.machineId } : {}),
