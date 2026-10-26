@@ -286,7 +286,9 @@ states, and the "no output" status).
 ruled rows. A row's first line is the task and its time; a running task adds a
 second line with its latest step, taken from the last `run.items` entry, then
 `run.progress`, then the legacy `summary`/`lastToolName`, so older tasks keep
-working. A row opens the panel's ONE dialog by task id (not a snapshot), so a
+working. While any task is pending or running, the finished turn keeps this
+panel after its answer; once every task is terminal, the panel returns to the
+folded work details. A row opens the panel's ONE dialog by task id (not a snapshot), so a
 streaming run keeps updating inside it and the view follows the end only while
 the reader is there. `subagent-run-history.tsx` groups `run.items` with the conversation's
 `buildAssistantTurnRenderBlocks`; `view.tsx` supplies the same activity headers,
