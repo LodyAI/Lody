@@ -2890,6 +2890,12 @@ export class MessageHandler {
       },
     });
     this.filePreviewService = new FilePreviewService({
+      canDownloadLargeFiles: async () => {
+        const entitlement = await this.cloudPort.billing?.getWorkspaceEntitlement(this.workspaceId);
+        return Boolean(
+          entitlement && !entitlement.checkoutPending && entitlement.effectivePlanTier !== 'free'
+        );
+      },
       onDiagnostic: (event) => this.logger.debug(`[file-preview] ${JSON.stringify(event)}`),
       resolveLocalWorkspace: this.resolveLocalFilePreviewWorkspace,
       resolveWorkspace: async (sessionId, rootId) => {
@@ -3434,6 +3440,8 @@ export class MessageHandler {
           await this.writeSessionHistoryForRpc(sessionId, operation, payload),
         resolveCodeCollabOwnerSessionId: this.resolveCodeCollabV2OwnerSessionId,
         previewFile: async (request) => await this.filePreviewService.previewFile(request),
+        downloadFileChunk: async (request) =>
+          await this.filePreviewService.downloadFileChunk(request),
         openCodeCollabText: async (request) => await this.codeCollabV2Service.openText(request),
         refreshCodeCollabText: async (request) =>
           await this.codeCollabV2Service.refreshText(request),
