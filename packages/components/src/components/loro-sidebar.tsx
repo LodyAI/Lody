@@ -102,6 +102,19 @@ import {
  * and fills come from `sidebarSurface`; these are the pieces around it.
  */
 const shellStyles = stylex.create({
+  headerTooltipRow: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 'calc(var(--spacing) * 1.5)',
+  },
+  switcherAvatar: { fontSize: '9px' },
+  switcherMenuAvatar: { fontSize: '10px' },
+  switcherMenu: { width: 'calc(var(--spacing) * 64)' },
+  switcherMenuHeading: { fontWeight: 'var(--font-weight-medium)' },
+  switcherMenuChoice: {
+    paddingInlineStart: 'calc(var(--spacing) * 2)',
+  },
+
   relative: { position: 'relative' },
   navLabel: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
   flexFill: { minWidth: 0, flex: '1 1 0%' },
@@ -1107,7 +1120,7 @@ function SidebarHeaderIconButton({
   return (
     <Tooltip.Root>
       <Tooltip.Trigger render={button} />
-      <Tooltip.Content side="bottom" className="flex items-center gap-1.5">
+      <Tooltip.Content side="bottom" {...stylex.props(shellStyles.headerTooltipRow)}>
         <span>{label}</span>
         {shortcut ? <Kbd>{shortcut}</Kbd> : null}
       </Tooltip.Content>
@@ -1521,7 +1534,7 @@ export const LoroSidebar = memo(function LoroSidebar({
             name: workspaceName,
             logo: workspaces.find((ws) => ws.id === currentWorkspaceId)?.logo,
           }}
-          className="h-4 w-4 text-[9px]"
+          className={clsx(stylex.props(shellStyles.switcherAvatar).className, 'h-4 w-4')}
         />
       </span>
       <span {...stylex.props(shellStyles.identityRow)}>
@@ -1597,7 +1610,7 @@ export const LoroSidebar = memo(function LoroSidebar({
             }
           />
         </div>
-        <Menu.Content align="start" side={menuSide} className="w-64">
+        <Menu.Content align="start" side={menuSide} {...stylex.props(shellStyles.switcherMenu)}>
           <Menu.GroupLabel
             className={clsx(
               SIDEBAR_HELPER_TEXT_CLASS,
@@ -1610,7 +1623,12 @@ export const LoroSidebar = memo(function LoroSidebar({
 
           {workspaces.length > 0 ? (
             <>
-              <Menu.GroupLabel className={clsx(SIDEBAR_HELPER_TEXT_CLASS, 'font-medium')}>
+              <Menu.GroupLabel
+                className={clsx(
+                  SIDEBAR_HELPER_TEXT_CLASS,
+                  stylex.props(shellStyles.switcherMenuHeading).className
+                )}
+              >
                 {mergedLabels.switchWorkspace}
               </Menu.GroupLabel>
               <Menu.RadioGroup
@@ -1657,10 +1675,16 @@ export const LoroSidebar = memo(function LoroSidebar({
                         icon={
                           <WorkspaceAvatar
                             workspace={{ name: ws.name, logo: ws.logo }}
-                            className="h-5 w-5 text-[10px]"
+                            className={clsx(
+                              stylex.props(shellStyles.switcherMenuAvatar).className,
+                              'h-5 w-5'
+                            )}
                           />
                         }
-                        className="gap-1.5 ps-2"
+                        className={clsx(
+                          stylex.props(shellStyles.switcherMenuChoice).className,
+                          'gap-1.5'
+                        )}
                         onClickCapture={(event) => {
                           if (!workspaceSlug || !isNewWindowClick(event)) return;
                           if (openDesktopWindow(undefined, workspaceSlug, 'modifier_click')) {

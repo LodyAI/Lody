@@ -309,6 +309,20 @@ const markdownStyles = stylex.create({
     transitionTimingFunction: themeEasing['in-out'],
   },
   sessionChipInteractive: { cursor: 'pointer' },
+  githubReference: {
+    marginInline: '0.1em',
+    display: 'inline-flex',
+    maxWidth: '100%',
+    alignItems: 'baseline',
+    borderRadius: 'var(--radius-md)',
+    paddingInline: '0.4em',
+    verticalAlign: 'baseline',
+    fontSize: '1em',
+    transitionProperty:
+      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke, --tw-gradient-from, --tw-gradient-via, --tw-gradient-to',
+    transitionDuration: 'var(--tw-duration, var(--default-transition-duration))',
+    transitionTimingFunction: 'var(--tw-ease, var(--default-transition-timing-function))',
+  },
   /** The file link inside prose: a button that reads as the link it stands for. */
   agentFileLink: {
     margin: 0,
@@ -1204,7 +1218,9 @@ const AgentFileLink = ({
           if (item.kind === 'submenu') {
             return (
               <ContextMenu.Submenu key={item.id}>
-                <ContextMenu.SubmenuTrigger icon={<ItemIcon {...stylex.props(markdownStyles.menuGlyph)} />}>
+                <ContextMenu.SubmenuTrigger
+                  icon={<ItemIcon {...stylex.props(markdownStyles.menuGlyph)} />}
+                >
                   {item.label}
                 </ContextMenu.SubmenuTrigger>
                 <ContextMenu.SubmenuContent className="min-w-[190px]">
@@ -1472,7 +1488,8 @@ const createMarkdownComponents = ({
           {...rest}
           className={cn(
             rest.className,
-            'markdown-reference-chip mx-[0.1em] inline-flex max-w-full items-baseline rounded-md px-[0.4em] align-baseline text-[1em] leading-[1.55] transition-colors'
+            'markdown-reference-chip leading-[1.55]',
+            stylex.props(markdownStyles.githubReference).className
           )}
         >
           <GitHubReferenceChip reference={githubReference} />
@@ -1503,11 +1520,7 @@ function ConversationMarkdownImage(props: MarkdownImageProps) {
       typeof props.src === 'string' &&
       /^data:image\/(?:png|jpeg|gif|webp);base64,[A-Za-z0-9+/=\s]+$/.test(props.src);
     return inline ? (
-      <img
-        src={props.src}
-        alt={props.alt ?? ''}
-        {...stylex.props(markdownStyles.image)}
-      />
+      <img src={props.src} alt={props.alt ?? ''} {...stylex.props(markdownStyles.image)} />
     ) : (
       <span
         role="img"
@@ -1557,11 +1570,7 @@ function SizedMarkdownImage(props: MarkdownImageProps) {
   );
   if (outcome === 'failed') {
     return (
-      <span
-        role="img"
-        aria-label={alt || 'Image'}
-        {...stylex.props(markdownStyles.imageFallback)}
-      >
+      <span role="img" aria-label={alt || 'Image'} {...stylex.props(markdownStyles.imageFallback)}>
         {alt || 'Image'}
       </span>
     );

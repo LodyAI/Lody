@@ -127,6 +127,9 @@ It applies the same predicate after view changes on both immutable builds.
 | `mobile-project-settings-targets.json` | Production project settings with multiple machines, long labels, local editors, loading and read-only states. |
 | `mobile-account-settings-targets.json` | Production account/workspace settings, editable names, deferred token/invitation actions and scoped variables. |
 | `mobile-workspace-sheets-targets.json` | Actual create/delete drawers, validation, pending deletion, long translations and 320/390/768px layouts. |
+| `file-image-targets.json` | Actual fitted raster/SVG previews, null-source cases, constrained hosts, modal focus and close. |
+| `markdown-links-targets.json` | Actual prose/table file links, GitHub references, clipboard outcomes, caller overrides and read-only safety. |
+| `workspace-shell-targets.json` | Actual sidebar empty states, menus, tooltips, keyboard focus, resize and root/subtree variables. |
 | `sidebar-targets.json`                                          | Sidebar layouts, row parts, loading/empty/overflow and archive/menu states; narrow widths use a desktop UA.         |
 | `sidebar-mobile-targets.json`                                   | iPhone/Android descriptors, known-logo readiness and real touch menu/archive actions in both themes.                |
 | `sidebar-updated-interaction-targets.json`                      | Show all/less, selection, collapse/expand and focus/hover on the production Updated list.                           |
@@ -191,6 +194,20 @@ The compiler-backed [inventory](../../scripts/tailwind-usage.mjs) also inspects
 first argument contains StyleX props and is not a utility expression. Recount
 both sources with the same scanner version; older snapshots missed this helper
 and cannot establish the current batch's removal count.
+
+`file-image-native.mjs`, `markdown-links-native.mjs` and
+`workspace-shell-native.mjs` use the same phase/immutable-URL arguments.
+Image observations digest loaded image bytes while keeping random blob URL
+identities in separate source metadata. Its final native gesture witnesses use
+normal motion; reduced-motion primary coverage does not establish reduced-motion
+pinch behavior. PhotoView has JavaScript throttling and geometry rebasing beyond
+CSS animation completion. Preserve incomplete full runs when adapting common
+entries, and label later individual-state witnesses as supplemental. Never let a
+zero-failure subset manifest erase the original failure or missing sequence.
+Markdown clipboard deadlines use the controlled clock and actual deferred
+clipboard boundary. Sidebar pointer/keyboard and separate trusted-touch probes
+are distinct input coverage. Supplemental theme/caller probes and computed-only
+custom-property observations keep separate counts and original provenance.
 
 `chat-search-ready-targets.json` explicitly enters the search query and waits for
 the filtered result. Storybook play completion can precede a successful input

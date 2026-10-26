@@ -1,0 +1,132 @@
+{
+  "viewports": [
+    {
+      "name": "desktop",
+      "width": 1280,
+      "height": 900
+    },
+    {
+      "name": "phone",
+      "width": 390,
+      "height": 844
+    },
+    {
+      "name": "narrow",
+      "width": 320,
+      "height": 720
+    }
+  ],
+  "themes": ["light", "dark"],
+  "reducedMotion": "reduce",
+  "locale": "en",
+  "ids": [
+    "sessions-ownedfileimagemigration--raster-bytes",
+    "sessions-ownedfileimagemigration--svg-text",
+    "sessions-ownedfileimagemigration--url-image",
+    "sessions-ownedfileimagemigration--constrained",
+    "sessions-ownedfileimagemigration--no-source",
+    "sessions-ownedfileimagemigration--not-image"
+  ],
+  "ready": {
+    "sessions-ownedfileimagemigration--raster-bytes": [
+      {
+        "action": "visible",
+        "selector": "[data-file-image-fixture-result]"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const image=document.querySelector(\"[data-file-image-host] img\");return image?.complete && image.naturalWidth>0;}"
+      }
+    ],
+    "sessions-ownedfileimagemigration--svg-text": [
+      {
+        "action": "visible",
+        "selector": "[data-file-image-fixture-result]"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const image=document.querySelector(\"[data-file-image-host] img\");return image?.complete && image.naturalWidth>0;}"
+      }
+    ],
+    "sessions-ownedfileimagemigration--url-image": [
+      {
+        "action": "visible",
+        "selector": "[data-file-image-fixture-result]"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const image=document.querySelector(\"[data-file-image-host] img\");return image?.complete && image.naturalWidth>0;}"
+      }
+    ],
+    "sessions-ownedfileimagemigration--constrained": [
+      {
+        "action": "visible",
+        "selector": "[data-file-image-fixture-result]"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const image=document.querySelector(\"[data-file-image-host] img\");return image?.complete && image.naturalWidth>0;}"
+      }
+    ],
+    "sessions-ownedfileimagemigration--no-source": [
+      {
+        "action": "visible",
+        "selector": "[data-file-image-fixture-result]"
+      }
+    ],
+    "sessions-ownedfileimagemigration--not-image": [
+      {
+        "action": "visible",
+        "selector": "[data-file-image-fixture-result]"
+      }
+    ]
+  },
+  "states": {
+    "sessions-ownedfileimagemigration--svg-text": [
+      {
+        "name": "keyboard-focus",
+        "steps": [
+          {
+            "action": "focus",
+            "selector": "[data-file-image-host] button"
+          }
+        ]
+      },
+      {
+        "name": "keyboard-open",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "[data-file-image-host] button",
+            "key": "Enter"
+          },
+          {
+            "action": "visible",
+            "role": "dialog",
+            "name": "Image preview"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const image=document.querySelector(\"img.lody-photo-slider-image\");return image?.complete && image.naturalWidth===1200;}"
+          }
+        ]
+      },
+      {
+        "name": "closed",
+        "steps": [
+          {
+            "action": "press",
+            "role": "dialog",
+            "name": "Image preview",
+            "key": "Escape"
+          },
+          {
+            "action": "hidden",
+            "role": "dialog",
+            "name": "Image preview"
+          }
+        ]
+      }
+    ]
+  }
+}

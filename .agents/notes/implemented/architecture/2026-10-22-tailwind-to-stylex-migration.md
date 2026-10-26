@@ -623,6 +623,50 @@ tests pass all 618 files / 6,137 tests; actual Electron build and four after-onl
 smoke screenshots pass. Root check still fails the existing Git-identity test;
 types, typed lint, Effect lint, scripts and independent boundaries pass.
 
+### Image preview, Markdown references and sidebar compatibility
+
+The next three files remove 33 confirmed utilities: image preview 16→0,
+Markdown renderer 27→18 and sidebar 37→29. Image DOM, object-URL lifetime,
+callbacks and shared viewer stay intact. Markdown keeps its 15 table variants:
+an actual public descendant selector changes winners when these move layers.
+It also retains `leading-[1.55]`, whose `--tw-leading` writer composes with
+caller text-size/leading utilities. Local reference radius and both transition
+variable fallback branches have explicit browser probes; the unresolved base
+class string remains outside the file's static count.
+
+Real sidebar captures reject an initial StyleX candidate: primitive avatars
+replace 16/20/25px dimensions with 24px, gaps become 8px instead of 6/7.5px and
+Help minimum width becomes 200px instead of 160px. The rejected primary/native/
+touch captures retain 203,530 / 63,888 / 10,471 threshold pixels. Restore nine
+exact compatibility utilities and delete the failed StyleX declarations instead
+of increasing specificity. All three final components are recaptured on one
+corrected immutable build. Six computed-only sidebar observations retain six
+private non-inherited `--tw-font-weight` writers disappearing; current source
+and compiled CSS have no reader, and rendered weight/leading remain equal.
+
+`leaves2-acceptance.html` has 348 distinct observed pairs: 206 primary, 125
+common native and 17 supplemental witnesses. The common formal coverage is 331;
+three image gesture witnesses, ten Markdown variable/caller probes and four
+actual sidebar taps are separate. Recorded rendering fields match across 35,772
+paired nodes. Of these PNGs, 343 are byte-exact; five retain 7,550 raw pixels,
+including 5,631 above the unchanged threshold in two frames. These remain OPEN.
+Markdown's 114 pairs are byte-exact. Sidebar's four raw variants retain one
+threshold pixel; unchanged-source controls reproduce three whole-image variants
+without proving the trigger or closing the formal differences.
+
+Image native acceptance is explicitly incomplete: full Before has 44 entries;
+full After has 41 plus one failed dark pinch. A bounded final-source replay
+supplies three distinct valid states, while the original-source replay also
+fails. This does not turn the full run into a success. Reduced-motion and
+controlled-clock gesture attempts remain unresolved; final gesture witnesses
+use normal motion, with reduced-motion primary coverage separate. The desktop
+zoom pair retains 7,505 raw / 5,630 threshold pixels despite matching recorded
+CSS/geometry/media bytes; screenshot-time JavaScript rebasing remains a hypothesis.
+Original failures, motion modes and source/harness provenance remain inspectable.
+Forty-four additional caret-policy diagnostic PNGs from the preceding workspace
+build show small same-source edge changes, including repeated hide-policy shots;
+they neither explain the earlier large variants nor close any historical pair.
+
 ### Build and test findings
 
 Storybook 10.6's strict execution wrappers and shared async chunks introduced
@@ -773,7 +817,11 @@ inside a helper as migration. On the same method, the baseline is 2,208 and the
 current lower bound is 2,140 occurrences (components 1,648, `src/ui` 487, routes 5)
 across 187 files, plus 765 unresolved expressions. Newly visible historical
 helper usages explain the higher corrected baseline; these are lower bounds,
-not a project completion percentage.
+not a project completion percentage. The image/Markdown/sidebar continuation
+then removes 33 on that same scanner, leaving 2,107 occurrences (components
+1,615, `src/ui` 487, routes 5) across 186 files and 765 unresolved expressions.
+WebWorkspaceLayout remains deferred until its actual sidebar/runtime/router
+graph has a bounded production-component fixture.
 
 The unconsumed `src/ui/sidebar.tsx` retains 324 occurrences and is not re-exported
 by `src/ui/index.ts`; direct public wildcard imports remain possible.
