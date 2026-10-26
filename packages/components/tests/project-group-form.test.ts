@@ -371,6 +371,8 @@ describe('direct folder drafts', () => {
     // GitHub-only drops a picked folder even when its remote made it portable.
     const githubOnly = retainProjectGroupScope(value, { kind: 'github' }, labelOf);
     expect(githubOnly.members.map(labelOf)).toEqual(['acme/web']);
+    // GitHub only clones for each conversation rather than using a machine's copy.
+    expect(githubOnly.members[0]?.source).toEqual({ kind: 'github', repoFullName: 'acme/web' });
     expect(validateProjectGroupForm({ ...githubOnly, name: 'Web' }).valid).toBe(true);
   });
   it('names a new project after its first member unless a name was typed', () => {

@@ -58,8 +58,10 @@ looks only at that branch.
   so folders and repositories are never mixed before the user has chosen where the
   project runs: first whether it includes local folders or only GitHub repositories;
   for local folders, which machine; then the folders on that machine (including
-  direct selection) beside a separate tab of GitHub repositories, or for GitHub only,
-  the repositories; finally the name, the selected Members and the instructions.
+  direct selection) beside a separate tab listing every GitHub repository, or for
+  GitHub only, the repositories; finally the name, the selected Members and the
+  instructions. A repository ticked both as a folder and on GitHub is noted, not
+  blocked; the Project keeps one Member that uses the folder.
   Changing an earlier answer drops Members the new answer cannot hold. Editing an
   existing Project keeps the single editor, whose picker supports direct
   local-folder selection as well as repositories and folders already known to the

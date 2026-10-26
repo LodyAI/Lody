@@ -5568,7 +5568,7 @@
   "settings.projectGroups.wizard.sources.foldersTab": "Folders on {{machine}}",
   "settings.projectGroups.wizard.sources.githubTab": "GitHub repositories",
   "settings.projectGroups.wizard.sources.foldersNote": "Folders with a GitHub remote use a worktree of your copy. Other folders are edited in place.",
-  "settings.projectGroups.wizard.sources.githubNote": "Repositories without a copy on this machine. They are cloned when a conversation starts.",
+  "settings.projectGroups.wizard.sources.githubNote": "Repositories ticked here are cloned for each conversation. One that is also ticked as a folder uses that folder instead.",
   "settings.projectGroups.wizard.sources.noFolders": "No folders on {{machine}} yet. Add one from Settings › Projects.",
   "settings.projectGroups.wizard.sources.noFoldersBrowse": "No folders on {{machine}} yet. Use Browse… to pick one.",
   "settings.projectGroups.wizard.sources.noRepositories": "No GitHub repositories are connected yet.",
@@ -5585,5 +5585,8 @@
   "settings.projectGroups.wizard.details.runsOn": "Conversations in this project run on {{machine}}.",
   "settings.projectGroups.wizard.details.runsAnywhere": "Conversations in this project can run on any machine.",
   "settings.projectGroups.wizard.details.instructions": "Instructions for the agent (optional)",
-  "chat.projectPicker.createProject": "Create project"
+  "chat.projectPicker.createProject": "Create project",
+  "settings.projectGroups.wizard.sources.bothSelected": "{{names}} is selected both as a folder and as a GitHub repository. The project keeps one copy and uses the folder on {{machine}}.",
+  "settings.projectGroups.wizard.sources.bothSelected_one": "{{names}} is selected both as a folder and as a GitHub repository. The project keeps one copy and uses the folder on {{machine}}.",
+  "settings.projectGroups.wizard.sources.bothSelected_other": "{{names}} are selected both as folders and as GitHub repositories. The project keeps one copy of each and uses the folders on {{machine}}."
 }

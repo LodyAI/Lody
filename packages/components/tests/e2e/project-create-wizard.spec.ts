@@ -26,11 +26,39 @@ test('a local project is built one question at a time and keeps only its machine
   await next.click();
 
   await expect(page.getByRole('textbox', { name: 'Project name' })).toHaveValue('proto');
+  // Next leads to the last step; it never submits on the click that advanced.
+  await expect(page.getByText('Project created')).toHaveCount(0);
   await expect(page.getByText('Edited in place')).toBeVisible();
   await expect(
     page.getByText('Conversations in this project run on wibusdeMacBook-Air-M2.local.')
   ).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Create', exact: true })).toBeEnabled();
+  await page.getByRole('button', { name: 'Create', exact: true }).click();
+  await expect(page.getByText('Project created')).toBeVisible();
+});
+
+test('a repository may be ticked as a folder and on GitHub, with a notice only', async ({
+  page,
+}) => {
+  await story(page, 'local-sources');
+  await page.getByRole('tab', { name: /GitHub repositories/ }).click();
+  // The whole list is shown, including repositories with a copy here.
+  await expect(page.getByRole('checkbox', { name: 'acme/service-24', exact: true })).toBeVisible();
+  const web = page.getByRole('checkbox', { name: 'acme/web', exact: true });
+  await expect(web).not.toBeChecked();
+  await web.click();
+  await expect(page.getByText(/acme\/web is selected both as a folder/)).toBeVisible();
+  await expect(page.getByText('4 selected')).toBeVisible();
+  const next = page.getByRole('button', { name: 'Next', exact: true });
+  await expect(next).toBeEnabled();
+
+  // Unticking the folder keeps the repository, now cloned per conversation.
+  await page.getByRole('tab', { name: /Folders on/ }).click();
+  await page.getByRole('checkbox', { name: 'web', exact: true }).click();
+  await expect(page.getByText(/selected both as a folder/)).toHaveCount(0);
+  await expect(page.getByText('4 selected')).toBeVisible();
+  await next.click();
+  await expect(page.getByRole('button', { name: 'Remove acme/web' })).toBeVisible();
+  await expect(page.getByText('Cloned per conversation')).toHaveCount(2);
 });
 
 test('a GitHub-only project drops local folders and runs anywhere', async ({ page }) => {

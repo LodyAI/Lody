@@ -28,9 +28,18 @@ picker to offer creation beside Settings and the sidebar menu.
   a scope cannot hold: folders on another machine, and for GitHub only every folder,
   including a picked folder whose remote made it portable (its registration would
   otherwise be written for a project that runs anywhere).
-- With a machine chosen, a repository it holds a copy of is listed only among that
-  machine's folders, so no row appears in both tabs. Repository members keep the
-  existing `preferLocal` semantics.
+- With a machine chosen, its copies of GitHub repositories appear among its
+  folders (`preferLocal`), and the GitHub tab lists every repository, ticked as a
+  plain clone. Ticking one repository in both tabs is allowed and only noted: the
+  project keeps one member, using the folder. The wizard remembers the second tick,
+  so either tab can be unticked independently. GitHub-only scope also turns
+  copy-preferring members into plain clones.
+- Lists show every row; search filters but nothing is held back for it.
+- The answers are raised cards that press in, and progress is an ink fill in a
+  recessed well, following the `@lody/ui` materials rather than flat outlines.
+- "Next" and "Create" are separate keyed elements. Sharing one slot let React reuse
+  the button, which became `type="submit"` during the click that advanced, so the
+  browser submitted the form and created the project without its last step.
 - A seeded request (sidebar "create from this project") starts at the member step
   with the scope inferred from the seed.
 - The review step names the run location and how each member is used: edited in
@@ -46,6 +55,8 @@ sufficient). Direct browsing remains limited to the current machine, as before.
 `tests/project-group-form.test.ts` covers scope retention and name suggestion.
 `tests/e2e/project-create-wizard.spec.ts` drives the real component in Storybook:
 choosing a machine, mixing tabs, changing machine (dropping its folder), switching
-to GitHub only, and removing a member on review. Screenshots came from the same
+to GitHub only, removing a member on review, ticking one repository in both tabs,
+and that advancing to the last step does not create the project (this assertion
+fails when the buttons are not keyed). Screenshots came from the same
 stories with synthetic data; no end-to-end session was started from a created
 Project, and the full `pnpm check` was not run.

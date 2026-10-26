@@ -240,7 +240,42 @@ export function retainProjectGroupScope(
   for (const member of value.members) {
     if (outside(member)) result = removeProjectGroupMember(result, member.id, labelOf);
   }
-  return result;
+  if (scope.kind !== 'github') return result;
+  // GitHub only means a clone per conversation, never a machine's copy.
+  const members = result.members.map((member) =>
+    member.source.kind === 'github' && member.source.preferLocal
+      ? { ...member, source: withoutLocalCopy(member.source) }
+      : member
+  );
+  return members.some((member, index) => member !== result.members[index])
+    ? { ...result, members }
+    : result;
+}
+
+/** The same repository, cloned for each conversation instead of using a machine's copy. */
+export function withoutLocalCopy(
+  source: Extract<ProjectMemberSource, { kind: 'github' }>
+): Extract<ProjectMemberSource, { kind: 'github' }> {
+  const { preferLocal: _preferLocal, ...rest } = source;
+  return rest;
+}
+
+/** Replace one member's source, keeping its id and placement; a picked folder can be dropped. */
+export function setProjectGroupMemberSource(
+  value: ProjectGroupFormValue,
+  memberId: ProjectMemberId,
+  source: ProjectMemberSource,
+  options: { dropDirectory?: boolean } = {}
+): ProjectGroupFormValue {
+  return {
+    ...value,
+    members: value.members.map((member) => {
+      if (member.id !== memberId) return member;
+      if (!options.dropDirectory) return { ...member, source };
+      const { directory: _directory, ...rest } = member;
+      return { ...rest, source };
+    }),
+  };
 }
 
 /** A name for a new project from its first member, unless one was typed. */

@@ -12,14 +12,16 @@ import {
   Search,
   X,
 } from 'lucide-react';
-import type { MachineId } from '@lody/shared';
+import type { MachineId, ProjectMemberSource } from '@lody/shared';
 import {
   addProjectGroupMember,
   getProjectGroupLocalMachineId,
   getProjectMemberSourceKey,
   removeProjectGroupMember,
   retainProjectGroupScope,
+  setProjectGroupMemberSource,
   suggestProjectGroupName,
+  withoutLocalCopy,
   type ProjectGroupFormValidation,
   type ProjectGroupFormValue,
   type ProjectGroupMemberDraft,
@@ -36,14 +38,11 @@ import { Input } from '@lody/ui/input';
 import { Spinner } from '@lody/ui/spinner';
 import { Tabs } from '@lody/ui/tabs';
 import { Textarea } from '@lody/ui/textarea';
-import { colors } from '@lody/ui/tokens/colors.stylex';
-import { corner, duration, radius, space, text } from '@lody/ui/tokens/scales.stylex';
+import { colors, shadow, sheen } from '@lody/ui/tokens/colors.stylex';
+import { corner, duration, ease, radius, space, text } from '@lody/ui/tokens/scales.stylex';
 import { settingsRecordsCard } from './compact-layout';
 import { FormMessage, Section } from './form-primitives';
 import { settingsCatalog as catalog, settingsSurface as surface } from './surface';
-
-/** A long GitHub list is searched, not scrolled: past this, rows wait for a query. */
-const MAX_LISTED_REPOSITORIES = 60;
 
 export type ProjectCreateWizardStep = 'kind' | 'machine' | 'sources' | 'details';
 
@@ -71,17 +70,38 @@ export type ProjectCreateWizardProps = {
 };
 
 const styles = stylex.create({
-  progress: { display: 'flex', gap: space[1], paddingTop: space[2] },
-  progressStep: {
+  // Progress is a value, so it sits in the recessed well every value holder
+  // takes, filled with ink the way a checked box is.
+  progressRow: { display: 'flex', alignItems: 'center', gap: space[3], paddingTop: space[3] },
+  progressTrack: {
     flexGrow: 1,
-    height: '3px',
+    height: '6px',
+    overflow: 'hidden',
     borderRadius: radius.full,
-    backgroundColor: colors.separator,
-    transitionProperty: 'background-color',
-    transitionDuration: duration.regular,
+    backgroundColor: colors.wellBackground,
+    boxShadow: shadow.inset,
   },
-  progressStepDone: { backgroundColor: colors.accent },
+  progressFill: (fraction: number) => ({ width: `${fraction * 100}%` }),
+  progressInk: {
+    height: '100%',
+    borderRadius: radius.full,
+    backgroundColor: colors.accent,
+    backgroundImage: sheen.ink,
+    boxShadow: shadow.inkEdge,
+    transitionProperty: 'width',
+    transitionDuration: duration.regular,
+    transitionTimingFunction: ease.standard,
+  },
+  progressText: {
+    flexShrink: 0,
+    fontSize: text.footnoteSize,
+    color: colors.secondaryLabel,
+    fontVariantNumeric: 'tabular-nums',
+  },
   choices: { display: 'flex', flexDirection: 'column', gap: space[2] },
+  stack: { display: 'flex', flexDirection: 'column', gap: space[2] },
+  // An answer is a raised card that goes down when pressed, the way a
+  // secondary button does: lit from above, a contact shadow, no outline.
   choice: {
     display: 'flex',
     alignItems: 'center',
@@ -90,39 +110,50 @@ const styles = stylex.create({
     margin: 0,
     paddingBlock: space[3],
     paddingInline: space[3],
-    borderWidth: '1px',
-    borderStyle: 'solid',
-    borderColor: colors.separator,
+    borderWidth: 0,
+    borderStyle: 'none',
     borderRadius: radius.large,
     cornerShape: corner.shape,
-    backgroundColor: { default: 'transparent', ':hover': colors.hoverFill },
+    backgroundColor: {
+      default: colors.raisedBackground,
+      ':hover': `color-mix(in oklab, ${colors.raisedBackground}, ${colors.label} 3%)`,
+    },
+    backgroundImage: { default: sheen.raised, ':active': 'none' },
+    boxShadow: {
+      default: shadow.raised,
+      ':focus-visible': `0 0 0 2px ${colors.accent}, ${shadow.raised}`,
+      ':active': shadow.inset,
+    },
+    transform: { default: null, ':active': 'translateY(1px)' },
     color: colors.label,
     fontFamily: 'inherit',
     textAlign: 'start',
     cursor: { default: 'pointer', ':disabled': 'default' },
     opacity: { default: 1, ':disabled': 0.5 },
     outlineStyle: 'none',
-    boxShadow: {
-      default: null,
-      ':focus-visible': `0 0 0 2px ${colors.accent}`,
-    },
-    transitionProperty: 'background-color',
+    transitionProperty: 'background-color, box-shadow, transform',
     transitionDuration: duration.fast,
+    transitionTimingFunction: ease.standard,
   },
   choiceSelected: {
-    borderColor: colors.accent,
-    backgroundColor: `color-mix(in oklab, transparent, ${colors.accent} 6%)`,
+    boxShadow: {
+      default: `0 0 0 1.5px ${colors.accent}, ${shadow.raised}`,
+      ':active': shadow.inset,
+    },
   },
+  // The glyph stands on its own small raised tile, a step off the card.
   choiceIcon: {
     display: 'flex',
     flexShrink: 0,
     alignItems: 'center',
     justifyContent: 'center',
-    width: '36px',
-    height: '36px',
+    width: '38px',
+    height: '38px',
     borderRadius: radius.medium,
     cornerShape: corner.shape,
-    backgroundColor: `color-mix(in oklab, transparent, ${colors.label} 6%)`,
+    backgroundColor: colors.background,
+    backgroundImage: sheen.raised,
+    boxShadow: shadow.raised,
     color: colors.secondaryLabel,
   },
   choiceBody: { display: 'flex', flexDirection: 'column', flexGrow: 1, gap: '3px', minWidth: 0 },
@@ -178,19 +209,7 @@ const styles = stylex.create({
     color: colors.secondaryLabel,
   },
   note: { margin: 0, fontSize: text.footnoteSize, lineHeight: 1.45, color: colors.secondaryLabel },
-  where: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: space[2],
-    paddingBlock: space[2],
-    paddingInline: space[3],
-    borderRadius: radius.medium,
-    cornerShape: corner.shape,
-    backgroundColor: `color-mix(in oklab, transparent, ${colors.label} 4%)`,
-    fontSize: text.footnoteSize,
-    lineHeight: 1.45,
-    color: colors.secondaryLabel,
-  },
+  where: { display: 'flex', alignItems: 'center', gap: space[2] },
   footerCount: {
     alignSelf: 'center',
     marginInlineEnd: 'auto',
@@ -224,6 +243,17 @@ function initialStepOf(value: ProjectGroupFormValue): {
   };
 }
 
+const sourceKey = getProjectMemberSourceKey;
+const keyOf = (member: ProjectGroupMemberDraft) => sourceKey(member.source);
+
+/** How a member is used, said on review: in place, a machine's copy, or a fresh clone. */
+const usageOf = (member: ProjectGroupMemberDraft) =>
+  member.source.kind === 'local'
+    ? 'inPlace'
+    : member.directory || member.source.preferLocal
+      ? 'localCopy'
+      : 'worktree';
+
 /**
  * Creating a project, one question at a time: what it holds (folders on a
  * machine, or GitHub only), which machine, which folders and repositories,
@@ -255,19 +285,25 @@ export function ProjectCreateWizard({
     const initial = initialStepOf(value);
     return initialStep ? { ...initial, step: initialStep } : initial;
   });
+  // Repositories ticked in both tabs: one member, using the local copy. The
+  // second tick is remembered so either tab can be unticked on its own.
+  const [alsoGithub, setAlsoGithub] = useState<ReadonlySet<string>>(() => new Set());
   const go = (next: ProjectCreateWizardStep, nextScope: ProjectGroupScope | null = scope) =>
     setState({ step: next, scope: nextScope });
 
   const machineId = scope?.kind === 'machine' ? scope.machineId : null;
   const machine = machines.find((candidate) => candidate.id === machineId);
-  const machineLabel = (id: MachineId, name?: string) =>
-    id === currentMachineId
-      ? t('settings.projectGroups.picker.thisMachine')
-      : (name ?? machines.find((candidate) => candidate.id === id)?.name ?? id);
+  const machineLabel = (id: MachineId | null) =>
+    !id
+      ? ''
+      : id === currentMachineId
+        ? t('settings.projectGroups.picker.thisMachine')
+        : (machines.find((candidate) => candidate.id === id)?.name ?? id);
 
   const chooseScope = (next: ProjectGroupScope) => {
     const retained = retainProjectGroupScope(value, next, labelOf);
     if (retained !== value) onChange(retained);
+    setAlsoGithub(new Set());
     go('sources', next);
   };
 
@@ -282,10 +318,29 @@ export function ProjectCreateWizard({
     else if (step === 'details') go('sources');
   };
   const next = () => {
-    const named = suggestProjectGroupName(value, labelOf);
-    if (named !== value.name) onChange({ ...value, name: named });
+    let draft = scope ? retainProjectGroupScope(value, scope, labelOf) : value;
+    const named = suggestProjectGroupName(draft, labelOf);
+    if (named !== draft.name) draft = { ...draft, name: named };
+    if (draft !== value) onChange(draft);
     go('details');
   };
+
+  const doubled = value.members.filter(
+    (member) =>
+      alsoGithub.has(keyOf(member)) &&
+      member.source.kind === 'github' &&
+      usageOf(member) === 'localCopy'
+  );
+  const doubleNotice =
+    doubled.length > 0 ? (
+      <FormMessage tone="warning">
+        {t('settings.projectGroups.wizard.sources.bothSelected', {
+          names: doubled.map(labelOf).join('、'),
+          machine: machineLabel(machineId),
+          count: doubled.length,
+        })}
+      </FormMessage>
+    ) : null;
 
   const heading = {
     kind: t('settings.projectGroups.wizard.kind.title'),
@@ -302,7 +357,7 @@ export function ProjectCreateWizard({
     sources:
       scope?.kind === 'machine'
         ? t('settings.projectGroups.wizard.sources.localDescription', {
-            machine: machineLabel(scope.machineId, machine?.name),
+            machine: machineLabel(scope.machineId),
           })
         : t('settings.projectGroups.wizard.sources.githubDescription'),
     details: t('settings.projectGroups.wizard.details.description'),
@@ -318,23 +373,31 @@ export function ProjectCreateWizard({
       <Dialog.Header>
         <Dialog.Title>{heading}</Dialog.Title>
         <Dialog.Description>{description}</Dialog.Description>
-        <div
-          {...stylex.props(styles.progress)}
-          role="progressbar"
-          aria-label={t('settings.projectGroups.wizard.progress', {
-            step: stepIndex + 1,
-            count: steps.length,
-          })}
-          aria-valuemin={1}
-          aria-valuemax={steps.length}
-          aria-valuenow={stepIndex + 1}
-        >
-          {steps.map((candidate, index) => (
-            <span
-              key={candidate}
-              {...stylex.props(styles.progressStep, index <= stepIndex && styles.progressStepDone)}
+        <div {...stylex.props(styles.progressRow)}>
+          <div
+            {...stylex.props(styles.progressTrack)}
+            role="progressbar"
+            aria-label={t('settings.projectGroups.wizard.progress', {
+              step: stepIndex + 1,
+              count: steps.length,
+            })}
+            aria-valuemin={1}
+            aria-valuemax={steps.length}
+            aria-valuenow={stepIndex + 1}
+          >
+            <div
+              {...stylex.props(
+                styles.progressInk,
+                styles.progressFill((stepIndex + 1) / steps.length)
+              )}
             />
-          ))}
+          </div>
+          <span {...stylex.props(styles.progressText)} aria-hidden="true">
+            {t('settings.projectGroups.wizard.progress', {
+              step: stepIndex + 1,
+              count: steps.length,
+            })}
+          </span>
         </div>
       </Dialog.Header>
 
@@ -360,8 +423,11 @@ export function ProjectCreateWizard({
             onChange={onChange}
             sources={sources}
             scope={scope}
-            machineLabel={machineLabel(machineId ?? ('' as MachineId), machine?.name)}
+            alsoGithub={alsoGithub}
+            onAlsoGithubChange={setAlsoGithub}
+            machineLabel={machineLabel(machineId)}
             labelOf={labelOf}
+            notice={doubleNotice}
             canBrowse={machineId ? canBrowseFolders(machineId) : false}
             onBrowse={machineId && onBrowseFolders ? () => onBrowseFolders(machineId) : undefined}
           />
@@ -369,11 +435,17 @@ export function ProjectCreateWizard({
           <DetailsStep
             value={value}
             onChange={onChange}
-            scope={scope}
-            machineLabel={machineId ? machineLabel(machineId, machine?.name) : ''}
+            onRemoved={(key) => {
+              if (!alsoGithub.has(key)) return;
+              const remaining = new Set(alsoGithub);
+              remaining.delete(key);
+              setAlsoGithub(remaining);
+            }}
+            machineLabel={machine ? machineLabel(machine.id) : machineLabel(machineId)}
             labelOf={labelOf}
             detailOf={detailOf}
             validation={validation}
+            notice={doubleNotice}
           />
         ) : null}
         {error ? <FormMessage tone="error">{error}</FormMessage> : null}
@@ -385,22 +457,32 @@ export function ProjectCreateWizard({
             {t('settings.projectGroups.wizard.selectedCount', { count: value.members.length })}
           </span>
         ) : null}
+        {/* Keys keep each button its own element. A reused one turns from
+            "Next" into the submit button inside the click that advanced, and
+            the browser then submits the form: the project would be created
+            without its last step. */}
         {step === 'kind' ? (
-          <Button type="button" variant="secondary" disabled={submitting} onClick={onCancel}>
+          <Button
+            key="cancel"
+            type="button"
+            variant="secondary"
+            disabled={submitting}
+            onClick={onCancel}
+          >
             {t('common.cancel')}
           </Button>
         ) : (
-          <Button type="button" variant="secondary" disabled={submitting} onClick={back}>
+          <Button key="back" type="button" variant="secondary" disabled={submitting} onClick={back}>
             <ArrowLeft size={14} aria-hidden="true" />
             {t('settings.projectGroups.wizard.back')}
           </Button>
         )}
         {step === 'sources' ? (
-          <Button type="button" disabled={value.members.length === 0} onClick={next}>
+          <Button key="next" type="button" disabled={value.members.length === 0} onClick={next}>
             {t('settings.projectGroups.wizard.next')}
           </Button>
         ) : step === 'details' ? (
-          <Button type="submit" disabled={submitting || !validation.valid}>
+          <Button key="create" type="submit" disabled={submitting || !validation.valid}>
             {submitting ? <Spinner size="small" aria-hidden="true" /> : null}
             {t('settings.projectGroups.form.create')}
           </Button>
@@ -554,8 +636,11 @@ function SourcesStep({
   onChange,
   sources,
   scope,
+  alsoGithub,
+  onAlsoGithubChange,
   machineLabel,
   labelOf,
+  notice,
   canBrowse,
   onBrowse,
 }: {
@@ -563,8 +648,11 @@ function SourcesStep({
   onChange: (value: ProjectGroupFormValue) => void;
   sources: readonly ProjectMemberSourceOption[];
   scope: ProjectGroupScope;
+  alsoGithub: ReadonlySet<string>;
+  onAlsoGithubChange: (next: ReadonlySet<string>) => void;
   machineLabel: string;
   labelOf: (member: ProjectGroupMemberDraft) => string;
+  notice: ReactNode;
   canBrowse: boolean;
   onBrowse?: () => void;
 }) {
@@ -574,27 +662,27 @@ function SourcesStep({
   );
   const [query, setQuery] = useState('');
 
-  const selectedKeys = new Set(
-    value.members.map((member) => getProjectMemberSourceKey(member.source))
-  );
-  const toggleOption = (option: ProjectMemberSourceOption) => () => {
-    const member = value.members.find(
-      (candidate) => getProjectMemberSourceKey(candidate.source) === option.key
-    );
-    onChange(
-      member
-        ? removeProjectGroupMember(value, member.id, labelOf)
-        : addProjectGroupMember(value, option.source, option.label)
-    );
+  const members = new Map(value.members.map((member) => [keyOf(member), member]));
+  const withKey = (key: string, add: boolean) => {
+    const next = new Set(alsoGithub);
+    if (add) next.add(key);
+    else next.delete(key);
+    onAlsoGithubChange(next);
   };
+  const plain = (repoFullName: string): ProjectMemberSource => ({ kind: 'github', repoFullName });
 
+  // Folders on the chosen machine, including its copies of GitHub repositories.
   const folderRows: PickRow[] = [];
+  const folderKeys = new Set<string>();
   if (scope.kind === 'machine') {
-    const listed = new Set<string>();
     for (const option of sources) {
       const copy = option.copies.find((candidate) => candidate.machineId === scope.machineId);
       if (!copy) continue;
-      listed.add(option.key);
+      folderKeys.add(option.key);
+      const member = members.get(option.key);
+      // A repository ticked only in the GitHub tab is a clone, not this folder.
+      const selected =
+        member !== undefined && (member.source.kind === 'local' || usageOf(member) === 'localCopy');
       folderRows.push({
         key: option.key,
         label:
@@ -606,39 +694,83 @@ function SourcesStep({
             ? [option.label, copy.rootPath].filter(Boolean).join(' · ')
             : copy.rootPath,
         icon: option.kind === 'repository' ? 'repository' : 'folder',
-        selected: selectedKeys.has(option.key),
-        toggle: toggleOption(option),
+        selected,
+        toggle: () => {
+          if (selected && member) {
+            if (alsoGithub.has(option.key) && member.source.kind === 'github') {
+              onChange(
+                setProjectGroupMemberSource(value, member.id, withoutLocalCopy(member.source), {
+                  dropDirectory: true,
+                })
+              );
+              withKey(option.key, false);
+            } else onChange(removeProjectGroupMember(value, member.id, labelOf));
+          } else if (member) {
+            // Already ticked as a GitHub repository: it now uses this copy.
+            onChange(setProjectGroupMemberSource(value, member.id, option.source));
+            withKey(option.key, true);
+          } else onChange(addProjectGroupMember(value, option.source, option.label));
+        },
       });
     }
     // A folder picked from the browser is not a listed project yet; it is
     // shown, ticked, until saving registers it.
     for (const member of value.members) {
-      const key = getProjectMemberSourceKey(member.source);
-      if (!member.directory || member.directory.machineId !== scope.machineId || listed.has(key))
+      const key = keyOf(member);
+      if (
+        !member.directory ||
+        member.directory.machineId !== scope.machineId ||
+        folderKeys.has(key)
+      )
         continue;
+      folderKeys.add(key);
       folderRows.unshift({
         key,
         label: labelOf(member),
         detail: member.directory.rootPath,
         icon: member.source.kind === 'github' ? 'repository' : 'folder',
         selected: true,
-        toggle: () => onChange(removeProjectGroupMember(value, member.id, labelOf)),
+        toggle: () => {
+          if (alsoGithub.has(key) && member.source.kind === 'github') {
+            onChange(
+              setProjectGroupMemberSource(value, member.id, withoutLocalCopy(member.source), {
+                dropDirectory: true,
+              })
+            );
+            withKey(key, false);
+          } else onChange(removeProjectGroupMember(value, member.id, labelOf));
+        },
       });
     }
   }
-  // With a machine chosen, a repository it holds a copy of is one of its
-  // folders; the GitHub tab lists the rest, so nothing is listed twice.
-  const folderKeys = new Set(folderRows.map((row) => row.key));
+
+  // Every GitHub repository, including those with a copy here: choosing one
+  // there as well is allowed, and only noted.
   const repositoryRows: PickRow[] = sources
-    .filter((option) => option.kind === 'repository' && !folderKeys.has(option.key))
-    .map((option) => ({
-      key: option.key,
-      label: option.label,
-      detail: option.description,
-      icon: 'github' as const,
-      selected: selectedKeys.has(option.key),
-      toggle: toggleOption(option),
-    }));
+    .filter((option) => option.kind === 'repository')
+    .map((option) => {
+      const member = members.get(option.key);
+      const asFolder =
+        member !== undefined && folderKeys.has(option.key) && usageOf(member) === 'localCopy';
+      const selected =
+        member !== undefined &&
+        member.source.kind === 'github' &&
+        (!asFolder || alsoGithub.has(option.key));
+      return {
+        key: option.key,
+        label: option.label,
+        detail: option.description,
+        icon: 'github' as const,
+        selected,
+        toggle: () => {
+          if (selected && member) {
+            if (asFolder) withKey(option.key, false);
+            else onChange(removeProjectGroupMember(value, member.id, labelOf));
+          } else if (member && asFolder) withKey(option.key, true);
+          else onChange(addProjectGroupMember(value, plain(option.label), option.label));
+        },
+      };
+    });
 
   const needle = query.trim().toLowerCase();
   const matches = (row: PickRow) =>
@@ -646,13 +778,7 @@ function SourcesStep({
     row.label.toLowerCase().includes(needle) ||
     (row.detail?.toLowerCase().includes(needle) ?? false);
   const shownFolders = folderRows.filter(matches);
-  const matchingRepositories = repositoryRows.filter(matches);
-  // Selected repositories always stay in view; the rest are capped.
-  const shownRepositories = [
-    ...matchingRepositories.filter((row) => row.selected),
-    ...matchingRepositories.filter((row) => !row.selected),
-  ].slice(0, Math.max(MAX_LISTED_REPOSITORIES, selectedKeys.size));
-  const hiddenRepositories = matchingRepositories.length - shownRepositories.length;
+  const shownRepositories = repositoryRows.filter(matches);
 
   const search = (
     <div {...stylex.props(styles.toolbar)}>
@@ -684,34 +810,15 @@ function SourcesStep({
     </div>
   );
 
-  const folderList = (
+  const repositoryList = (
     <PickList
-      rows={shownFolders}
+      rows={shownRepositories}
       empty={
         needle
           ? t('settings.projectGroups.form.noSources')
-          : canBrowse
-            ? t('settings.projectGroups.wizard.sources.noFoldersBrowse', { machine: machineLabel })
-            : t('settings.projectGroups.wizard.sources.noFolders', { machine: machineLabel })
+          : t('settings.projectGroups.wizard.sources.noRepositories')
       }
     />
-  );
-  const repositoryList = (
-    <>
-      <PickList
-        rows={shownRepositories}
-        empty={
-          needle
-            ? t('settings.projectGroups.form.noSources')
-            : t('settings.projectGroups.wizard.sources.noRepositories')
-        }
-      />
-      {hiddenRepositories > 0 ? (
-        <p {...stylex.props(styles.note)}>
-          {t('settings.projectGroups.picker.hiddenRepositories', { count: hiddenRepositories })}
-        </p>
-      ) : null}
-    </>
   );
 
   if (scope.kind === 'github') {
@@ -723,7 +830,7 @@ function SourcesStep({
     );
   }
   const folderSelected = folderRows.filter((row) => row.selected).length;
-  const githubSelected = value.members.length - folderSelected;
+  const githubSelected = repositoryRows.filter((row) => row.selected).length;
   return (
     <Tabs.Root value={tab} onValueChange={(next) => setTab(next as 'folders' | 'github')}>
       <Tabs.List size="small" stretch>
@@ -737,16 +844,28 @@ function SourcesStep({
         </Tabs.Tab>
       </Tabs.List>
       {search}
+      {notice}
       <Tabs.Panel value="folders">
-        <div {...stylex.props(styles.choices)}>
-          {folderList}
+        <div {...stylex.props(styles.stack)}>
+          <PickList
+            rows={shownFolders}
+            empty={
+              needle
+                ? t('settings.projectGroups.form.noSources')
+                : canBrowse
+                  ? t('settings.projectGroups.wizard.sources.noFoldersBrowse', {
+                      machine: machineLabel,
+                    })
+                  : t('settings.projectGroups.wizard.sources.noFolders', { machine: machineLabel })
+            }
+          />
           <p {...stylex.props(styles.note)}>
             {t('settings.projectGroups.wizard.sources.foldersNote')}
           </p>
         </div>
       </Tabs.Panel>
       <Tabs.Panel value="github">
-        <div {...stylex.props(styles.choices)}>
+        <div {...stylex.props(styles.stack)}>
           {repositoryList}
           <p {...stylex.props(styles.note)}>
             {t('settings.projectGroups.wizard.sources.githubNote')}
@@ -795,22 +914,26 @@ function PickList({ rows, empty }: { rows: readonly PickRow[]; empty: string }) 
 function DetailsStep({
   value,
   onChange,
-  scope,
+  onRemoved,
   machineLabel,
   labelOf,
   detailOf,
   validation,
+  notice,
 }: {
   value: ProjectGroupFormValue;
   onChange: (value: ProjectGroupFormValue) => void;
-  scope: ProjectGroupScope | null;
+  onRemoved: (key: string) => void;
   machineLabel: string;
   labelOf: (member: ProjectGroupMemberDraft) => string;
   detailOf: (member: ProjectGroupMemberDraft) => string | undefined;
   validation: ProjectGroupFormValidation;
+  notice: ReactNode;
 }) {
   const { t } = useTranslation();
-  const bound = getProjectGroupLocalMachineId(value) !== null;
+  const bound =
+    getProjectGroupLocalMachineId(value) !== null ||
+    value.members.some((member) => usageOf(member) === 'localCopy');
   const errorText = (code: ProjectGroupMemberError) =>
     t(`settings.projectGroups.memberErrors.${code}`);
   return (
@@ -833,6 +956,7 @@ function DetailsStep({
         <div {...stylex.props(settingsRecordsCard)}>
           {value.members.map((member, index) => {
             const code = validation.memberErrors.get(member.id);
+            const usage = usageOf(member);
             return (
               <div
                 key={member.id}
@@ -845,11 +969,7 @@ function DetailsStep({
               >
                 <RowIcon
                   icon={
-                    member.source.kind === 'local'
-                      ? 'folder'
-                      : member.source.preferLocal && scope?.kind === 'machine'
-                        ? 'repository'
-                        : 'github'
+                    usage === 'inPlace' ? 'folder' : usage === 'localCopy' ? 'repository' : 'github'
                   }
                 />
                 <span {...stylex.props(styles.rowBody)}>
@@ -859,11 +979,7 @@ function DetailsStep({
                   </span>
                 </span>
                 <Badge tone={code ? 'danger' : 'neutral'}>
-                  {member.source.kind === 'local'
-                    ? t('settings.projectGroups.wizard.details.inPlace')
-                    : member.directory || (member.source.preferLocal && scope?.kind === 'machine')
-                      ? t('settings.projectGroups.wizard.details.localCopy')
-                      : t('settings.projectGroups.wizard.details.worktree')}
+                  {t(`settings.projectGroups.wizard.details.${usage}`)}
                 </Badge>
                 <Button
                   type="button"
@@ -873,26 +989,30 @@ function DetailsStep({
                   aria-label={t('settings.projectGroups.wizard.details.remove', {
                     name: labelOf(member),
                   })}
-                  onClick={() => onChange(removeProjectGroupMember(value, member.id, labelOf))}
+                  onClick={() => {
+                    onChange(removeProjectGroupMember(value, member.id, labelOf));
+                    onRemoved(keyOf(member));
+                  }}
                 >
                   <X {...stylex.props(catalog.icon)} />
                 </Button>
               </div>
             );
           })}
+          <div {...stylex.props(surface.line, surface.lineRuled, surface.cardNote, styles.where)}>
+            {bound ? (
+              <Laptop size={14} aria-hidden="true" />
+            ) : (
+              <Github size={14} aria-hidden="true" />
+            )}
+            <span>
+              {bound
+                ? t('settings.projectGroups.wizard.details.runsOn', { machine: machineLabel })
+                : t('settings.projectGroups.wizard.details.runsAnywhere')}
+            </span>
+          </div>
         </div>
-        <div {...stylex.props(styles.where)}>
-          {bound ? (
-            <Laptop size={14} aria-hidden="true" />
-          ) : (
-            <Github size={14} aria-hidden="true" />
-          )}
-          <span>
-            {bound
-              ? t('settings.projectGroups.wizard.details.runsOn', { machine: machineLabel })
-              : t('settings.projectGroups.wizard.details.runsAnywhere')}
-          </span>
-        </div>
+        {notice}
         {validation.memberErrors.size > 0 ? (
           <FormMessage tone="error">
             <ul {...stylex.props(styles.errors)}>

@@ -66,6 +66,8 @@ const sources = buildProjectMemberSourceOptions({
     { fullName: 'acme/docs', description: 'Public documentation site' },
     { fullName: 'acme/infra', description: 'Terraform and deployment' },
     { fullName: 'acme/mobile', description: 'React Native app' },
+    // Enough to show that the whole list is listed, not a searchable excerpt.
+    ...Array.from({ length: 24 }, (_, index) => ({ fullName: `acme/service-${index + 1}` })),
   ],
 });
 const byKey = new Map(sources.map((option) => [option.key, option]));
@@ -124,27 +126,35 @@ function WizardInDialog({
   initialStep?: ProjectCreateWizardStep;
 }) {
   const [value, setValue] = useState(initial);
+  const [created, setCreated] = useState(false);
   const validation = useMemo(() => validateProjectGroupForm(value), [value]);
   return (
-    <Dialog.Root open modal={false}>
-      <Dialog.Content width={SETTINGS_EDITOR_DIALOG_WIDTH} style={{ height: 'min(680px, 88dvh)' }}>
-        <ProjectCreateWizard
-          value={value}
-          onChange={setValue}
-          sources={sources}
-          machines={machines}
-          currentMachineId={here}
-          labelOf={labelOf}
-          detailOf={detailOf}
-          validation={validation}
-          canBrowseFolders={(machineId) => machineId === here}
-          onBrowseFolders={() => undefined}
-          initialStep={initialStep}
-          onSubmit={() => undefined}
-          onCancel={() => setValue(EMPTY_PROJECT_GROUP_FORM_VALUE)}
-        />
-      </Dialog.Content>
-    </Dialog.Root>
+    <>
+      {/* The product saves here; the story records that it was asked to. */}
+      {created ? <p role="status">Project created</p> : null}
+      <Dialog.Root open modal={false}>
+        <Dialog.Content
+          width={SETTINGS_EDITOR_DIALOG_WIDTH}
+          style={{ height: 'min(680px, 88dvh)' }}
+        >
+          <ProjectCreateWizard
+            value={value}
+            onChange={setValue}
+            sources={sources}
+            machines={machines}
+            currentMachineId={here}
+            labelOf={labelOf}
+            detailOf={detailOf}
+            validation={validation}
+            canBrowseFolders={(machineId) => machineId === here}
+            onBrowseFolders={() => undefined}
+            initialStep={initialStep}
+            onSubmit={() => setCreated(true)}
+            onCancel={() => setValue(EMPTY_PROJECT_GROUP_FORM_VALUE)}
+          />
+        </Dialog.Content>
+      </Dialog.Root>
+    </>
   );
 }
 
