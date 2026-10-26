@@ -3,6 +3,7 @@ import type {
   E2eeWorkspaceCreateResult,
   E2eeWorkspaceHistoryPage,
   E2eeWorkspaceHistoryRequest,
+  E2eePersonalPairingOffer,
   WorkspaceAdmissionDescriptor,
 } from '@lody/cloud-api';
 
@@ -73,9 +74,37 @@ export interface E2eeRuntimeLedgerView {
   readonly status: E2eeRuntimeStatus;
   readonly stateHex: string;
   readonly recordsHex: readonly string[];
+  /** Absolute ledger positions; a snapshot-origin host need not hold the prefix. */
+  readonly recordPositions?: readonly number[];
 }
 /** Desktop-only purpose-limited IPC; opening an existing workspace never creates an identity. */
 export interface E2eeWorkspaceRuntime {
+  personalPairingOffer?(workspaceId: string): Promise<E2eePersonalPairingOffer>;
+  preparePersonalJoin?(
+    offer: E2eePersonalPairingOffer
+  ): Promise<{ pairingSessionId: string; signingPublicKey: string; status: string }>;
+  inspectPersonalJoin?(
+    workspaceId: string,
+    pairingSessionId: string
+  ): Promise<{
+    pairingSessionId: string;
+    signingPublicKey: string;
+    encryptionPublicKey: string;
+    credentialHash: string;
+    protection: 'os-keystore';
+  }>;
+  approvePersonalJoin?(
+    workspaceId: string,
+    pairingSessionId: string
+  ): Promise<{ admitted: true; invitationPublished: boolean }>;
+  claimPersonalJoin?(
+    workspaceId: string,
+    pairingSessionId: string
+  ): Promise<{ ready: boolean; status: string }>;
+  cancelPersonalJoin?(
+    workspaceId: string,
+    pairingSessionId: string
+  ): Promise<{ status: 'cancelled' }>;
   /** Local identity only; never authorizes a cloud request. */
   account(options?: {
     token?: string;

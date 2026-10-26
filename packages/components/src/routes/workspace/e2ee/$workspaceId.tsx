@@ -7,6 +7,8 @@ import type { WorkspaceModeDescriptor } from '@lody/cloud-api';
 import { setWorkspaceContextAtom } from '@/atoms';
 import { useE2eeAccountId } from '@/lib/e2ee-account';
 import { E2eeWorkspaceControlPage } from '@/components/pages/e2ee-workspace-control-page';
+import { E2eePersonalPairing } from '@/components/pages/e2ee-personal-pairing';
+import { E2eeLedgerAudit } from '@/components/pages/e2ee-ledger-audit';
 import {
   appendLedgerHistory,
   hostLedgerHistory,
@@ -322,7 +324,25 @@ function WorkspaceControlRoute() {
         onBack={() => {
           void navigate({ to: '/workspace/create', search: { allowExisting: true } });
         }}
-      />
+      >
+        {port?.runtime && accountId && (
+          <E2eePersonalPairing
+            key={identity}
+            workspaceId={workspaceId}
+            runtime={port.runtime}
+            canApprove={Boolean(current?.history?.locallyPinned)}
+            onJoined={refresh}
+          />
+        )}
+        {port && current?.history?.locallyPinned && (
+          <E2eeLedgerAudit
+            key={identity + ':audit'}
+            workspaceId={workspaceId}
+            history={current.history}
+            read={port.history}
+          />
+        )}
+      </E2eeWorkspaceControlPage>
     </>
   );
 }

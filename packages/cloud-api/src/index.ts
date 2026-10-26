@@ -6,6 +6,8 @@ import type {
   E2eeAppendRecordRequest,
   E2eeAppendRecordReply,
 } from './e2ee-device';
+import type { E2eeJoinRequests, E2eeJoinReplies } from './e2ee-join';
+export type * from './e2ee-join';
 export type * from './e2ee-device';
 import type { NotificationPresentation } from '@lody/shared/notifications';
 import type { TerminalOutcome } from '@lody/shared/notifications';
@@ -393,6 +395,14 @@ type SeatInvitePreview =
 export type CloudApi = {
   /** Optional developer-only E2EE control plane; does not authorize content access. */
   e2eeContent: { contentStreamsToken: Action<E2eeContentTokenRequest, E2eeContentToken> };
+  e2eeJoinMailbox: {
+    begin: Mutation<E2eeJoinRequests['begin'], E2eeJoinReplies['begin']>;
+    status: Query<E2eeJoinRequests['status'], E2eeJoinReplies['status']>;
+    readRequest: Query<E2eeJoinRequests['readRequest'], E2eeJoinReplies['readRequest']>;
+    cancel: Mutation<E2eeJoinRequests['cancel'], E2eeJoinReplies['cancel']>;
+    publish: Mutation<E2eeJoinRequests['publish'], E2eeJoinReplies['publish']>;
+    claim: Query<E2eeJoinRequests['claim'], E2eeJoinReplies['claim']>;
+  };
   e2eeMailbox: {
     put: Mutation<E2eeMailboxRequests['put'], E2eeMailboxReplies['put']>;
     read: Query<E2eeMailboxRequests['read'], E2eeMailboxReplies['read']>;

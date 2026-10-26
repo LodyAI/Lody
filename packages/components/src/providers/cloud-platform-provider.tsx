@@ -186,6 +186,16 @@ export function CloudPlatformProvider({ children }: { children: ReactNode }) {
         ? {
             prepareCreation: (request) => native.prepareCreation(request),
             runtime: {
+              personalPairingOffer: (workspaceId) => native.personalPairingOffer(workspaceId),
+              preparePersonalJoin: (offer) => native.preparePersonalJoin(offer),
+              inspectPersonalJoin: (workspaceId, pairingSessionId) =>
+                native.inspectPersonalJoin(workspaceId, pairingSessionId),
+              approvePersonalJoin: (workspaceId, pairingSessionId) =>
+                native.approvePersonalJoin(workspaceId, pairingSessionId),
+              claimPersonalJoin: (workspaceId, pairingSessionId) =>
+                native.claimPersonalJoin(workspaceId, pairingSessionId),
+              cancelPersonalJoin: (workspaceId, pairingSessionId) =>
+                native.cancelPersonalJoin(workspaceId, pairingSessionId),
               prepareLocalAgent: (workspaceId) => native.prepareLocalAgent(workspaceId),
               admitLocalAgent: (workspaceId, pairingSessionId) =>
                 native.admitLocalAgent(workspaceId, pairingSessionId),

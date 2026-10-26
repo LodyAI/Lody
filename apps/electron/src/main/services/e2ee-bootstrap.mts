@@ -1,4 +1,5 @@
 import { createHash, randomBytes } from 'node:crypto'
+import { makeDesktopPersonalJoins, type PersonalPairingOffer } from './e2ee-personal-pairing.mjs'
 import { constants } from 'node:fs'
 import { lstat, mkdir, open } from 'node:fs/promises'
 import { isAbsolute, join } from 'node:path'
@@ -212,6 +213,8 @@ export const makeDesktopE2eeBootstrap = Effect.fn('DesktopE2eeBootstrap.open')(f
         throw fail('corrupt')
     })
   )
+
+  const joins = yield* withLock(sql(() => makeDesktopPersonalJoins({ db, custody })))
 
   const load = (requestId: string) => {
     const value = db
@@ -469,28 +472,37 @@ export const makeDesktopE2eeBootstrap = Effect.fn('DesktopE2eeBootstrap.open')(f
     )
   const creationFor = (workspaceId: string) =>
     withLock(
-      sql(() => {
-        if (!/^[A-Za-z0-9_-]{1,128}$/.test(workspaceId)) throw fail('invalid-input')
-        const bound = db
-          .prepare('SELECT genesis,request_id FROM workspace_bindings WHERE workspace_id=?')
-          .get(workspaceId)
-        if (!bound) throw fail('missing-binding')
-        const row = load(String(bound.request_id))
-        if (
-          !row?.ready ||
-          !row.record ||
-          !row.epoch_blob ||
-          hex(hashRecordBytes(row.record).toBytes()) !== bound.genesis
-        )
-          throw fail('corrupt')
-        return {
-          genesisHash: String(bound.genesis),
-          record: new Uint8Array(row.record),
-          epochBlob: new Uint8Array(row.epoch_blob)
-        }
+      Effect.gen(function* () {
+        const creation = yield* sql(() => {
+          if (!/^[A-Za-z0-9_-]{1,128}$/.test(workspaceId)) throw fail('invalid-input')
+          const bound = db
+            .prepare('SELECT genesis,request_id FROM workspace_bindings WHERE workspace_id=?')
+            .get(workspaceId)
+          if (!bound) return null
+          const row = load(String(bound.request_id))
+          if (
+            !row?.ready ||
+            !row.record ||
+            !row.epoch_blob ||
+            hex(hashRecordBytes(row.record).toBytes()) !== bound.genesis
+          )
+            throw fail('corrupt')
+          return {
+            genesisHash: String(bound.genesis),
+            record: new Uint8Array(row.record),
+            epochBlob: new Uint8Array(row.epoch_blob),
+            invitation: undefined
+          }
+        })
+        return creation ?? (yield* joins.origin(workspaceId))
       })
     )
   return Object.freeze({
+    retirePersonalJoin: (workspaceId: string, pairingSessionId: string) =>
+      withLock(joins.retire(workspaceId, pairingSessionId)),
+    preparePersonalJoin: (offer: PersonalPairingOffer) => withLock(joins.prepare(offer)),
+    acceptPersonalJoin: (workspaceId: string, invitationHex: string) =>
+      withLock(joins.accept(workspaceId, invitationHex)),
     prepareCreation: (input: DesktopE2eeCreationIntent) => withLock(prepare(input)),
     recordCreated,
     creationFor,

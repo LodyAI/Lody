@@ -5,7 +5,7 @@ import { Avatar } from '@lody/ui/avatar';
 import { Button } from '@lody/ui/button';
 import { colors, shadow } from '@lody/ui/tokens/colors.stylex';
 import { radius, space, text as type } from '@lody/ui/tokens/scales.stylex';
-import { useMemo, useState } from 'react';
+import { useMemo, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ChevronLeft, CircleHelp, RefreshCw } from 'lucide-react';
 import type { TFunction } from 'i18next';
@@ -430,6 +430,8 @@ export interface E2eeWorkspaceControlPageProps {
   onLoadMore: () => void;
   onRefresh: () => void;
   onBack: () => void;
+  /** Optional host-backed developer controls; no cryptographic work in this surface. */
+  children?: ReactNode;
 }
 
 /** Standalone control surface: it never mounts a workspace document or execution runtime. */
@@ -516,6 +518,7 @@ export function E2eeWorkspaceControlPage(props: E2eeWorkspaceControlPageProps) {
           </p>
         )}
         {history && <LedgerVerificationCard history={history} />}
+        {props.children}
         {history && overview && <MembersSection overview={overview} names={names} />}
         {history && overview && (
           <section aria-label={t('e2ee.control.history')} {...stylex.props(styles.section)}>

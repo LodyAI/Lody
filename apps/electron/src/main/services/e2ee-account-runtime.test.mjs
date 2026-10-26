@@ -7,6 +7,7 @@ import test from 'node:test'
 import ts from 'typescript'
 import { Effect, Scope } from 'effect'
 import { makeOfflineAuthIdentityCache } from '../auth-storage.ts'
+import { PersonalPairingOfferSchema } from './e2ee-personal-pairing.mts'
 const require = createRequire(import.meta.url)
 async function load(relative, dependencies, console = globalThis.console) {
   const source = await readFile(new URL(relative, import.meta.url), 'utf8')
@@ -25,7 +26,12 @@ async function load(relative, dependencies, console = globalThis.console) {
       setTimeout,
       clearTimeout,
       console,
-      require: (id) => (Object.hasOwn(dependencies, id) ? dependencies[id] : require(id))
+      require: (id) =>
+        Object.hasOwn(dependencies, id)
+          ? dependencies[id]
+          : id === '../../services/e2ee-personal-pairing.mjs'
+            ? { PersonalPairingOfferSchema }
+            : require(id)
     }
   )
   return exports
@@ -550,4 +556,104 @@ void test('confirmed identity changes release old custody without waiting for an
     'replacement-account'
   )
   await api.closeDesktopE2eeAccount()
+})
+
+void test('personal join cancellation preserves remote success when local retirement fails and retries without a network lock', async () => {
+  const sender = Object.assign(new EventEmitter(), { id: 18 })
+  let localFailure = true,
+    retired = false,
+    lockDepth = 0
+  const diagnostic = new Error('synthetic private storage failure')
+  const owner = {
+    accountId: 'account',
+    readers: new Map(),
+    bootstrap: {
+      retirePersonalJoin: () =>
+        Effect.suspend(() =>
+          localFailure
+            ? Effect.fail(diagnostic)
+            : Effect.sync(() => {
+                retired = true
+              })
+        )
+    }
+  }
+  const { E2eeIpc } = await load('../ipc/services/e2ee-ipc.ts', {
+    'electron-ipc-decorator': {
+      IpcService: class {},
+      IpcMethod: () => (_t, _n, descriptor) => descriptor,
+      getIpcContext: () => ({ event: { sender } })
+    },
+    '../../platform': { isLocalPlatform: () => false },
+    '../../services/e2ee-bootstrap.mjs': {},
+    '../ipc-service-deps': { getIpcServiceDeps: () => ({}) },
+    '../assert-sender': { assertProductWindowSender: () => {} },
+    '../../services/e2ee-account-runtime': {
+      withDesktopE2eeAccount: async (work) => {
+        lockDepth++
+        try {
+          return await Effect.runPromise(work(owner))
+        } finally {
+          lockDepth--
+        }
+      },
+      desktopE2eeCloudClient: async () => ({
+        accountId: 'account',
+        client: {
+          joinCancel: () =>
+            Effect.sync(() => {
+              assert.equal(lockDepth, 0)
+              return { status: 'cancelled' }
+            })
+        }
+      })
+    }
+  })
+  const ipc = new E2eeIpc()
+  const result = await ipc.cancelPersonalJoin('workspace', '44'.repeat(16))
+  assert.equal(result.status, 'cancelled')
+  assert.equal(retired, false)
+  assert.equal(ipc.pairingFailure, diagnostic)
+  localFailure = false
+  assert.equal((await ipc.cancelPersonalJoin('workspace', '44'.repeat(16))).status, 'cancelled')
+  assert.equal(retired, true)
+})
+
+void test('cancelled personal approval uses terminal cancellation rather than retiring an uncertain signed record', async () => {
+  const sender = Object.assign(new EventEmitter(), { id: 19 })
+  let cancelled = false
+  const owner = {
+    accountId: 'account',
+    readers: new Map([['workspace', new Set([sender.id])]]),
+    bootstrap: { deviceCredential: () => Effect.succeed('synthetic-credential') },
+    host: {
+      cancelPersonalPairing: () =>
+        Effect.sync(() => {
+          cancelled = true
+        }),
+      retirePersonalPairing: () =>
+        Effect.die(new Error('uncertain record must not use generic retirement'))
+    }
+  }
+  const { E2eeIpc } = await load('../ipc/services/e2ee-ipc.ts', {
+    'electron-ipc-decorator': {
+      IpcService: class {},
+      IpcMethod: () => (_t, _n, descriptor) => descriptor,
+      getIpcContext: () => ({ event: { sender } })
+    },
+    '../../platform': { isLocalPlatform: () => false },
+    '../../services/e2ee-bootstrap.mjs': {},
+    '../ipc-service-deps': { getIpcServiceDeps: () => ({}) },
+    '../assert-sender': { assertProductWindowSender: () => {} },
+    '../../services/e2ee-account-runtime': {
+      withDesktopE2eeAccount: (work) => Effect.runPromise(work(owner)),
+      desktopE2eeCloudClient: async () => ({
+        accountId: 'account',
+        client: { joinReadRequest: () => Effect.succeed({ status: 'cancelled' }) }
+      })
+    }
+  })
+  const ipc = new E2eeIpc()
+  await assert.rejects(ipc.inspectPersonalJoin('workspace', '44'.repeat(16)), /e2ee_join_cancelled/)
+  assert.equal(cancelled, true)
 })

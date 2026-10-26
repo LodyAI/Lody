@@ -4,6 +4,7 @@ import type {
   E2eeAppendRecordRequest,
   E2eeContentTokenRequest,
   E2eeDeviceAccess,
+  E2eeJoinRequests,
   E2eeWorkspaceHistoryRequest
 } from '@lody/cloud-api'
 import { BackendError, KeyMailbox } from '@lody/e2ee-core/services'
@@ -53,6 +54,16 @@ const historyPage = z.object({
   nextCursor: z.string().min(1).nullable()
 })
 const appended = z.object({ status: z.enum(['committed', 'conflict']), recordHash: hash })
+const joinSession = z.object({
+  workspaceId: z.string().min(1),
+  accountId: z.string().min(1),
+  pairingSessionId: z.string().regex(/^[0-9a-f]{32}$/),
+  genesisHash: hash,
+  signingPublicKey: hash,
+  credentialHash: hash,
+  requestHex: bytesHex(8192),
+  status: z.enum(['pending', 'cancelled', 'admitting', 'admitted', 'conflict', 'published'])
+})
 const hex = (bytes: Uint8Array) => Buffer.from(bytes).toString('hex')
 const raw = (value: string) => new Uint8Array(Buffer.from(value, 'hex'))
 const unavailable = () => new BackendError({ service: 'E2eeCloud', reason: 'unavailable' })
@@ -207,6 +218,45 @@ export const makeE2eeCloudClient = Effect.fnUntraced(function* (input: {
   return Object.freeze({
     close,
     mailbox,
+    joinBegin: (requestInput: E2eeJoinRequests['begin']) => {
+      const original = { ...requestInput }
+      return request((client) => client.mutation(api.e2eeJoinMailbox.begin, original), joinSession)
+    },
+    joinStatus: (requestInput: E2eeJoinRequests['status']) => {
+      const original = { ...requestInput }
+      return request((client) => client.query(api.e2eeJoinMailbox.status, original), joinSession)
+    },
+    joinReadRequest: (requestInput: E2eeJoinRequests['readRequest']) => {
+      const original = { ...requestInput }
+      return request(
+        (client) => client.query(api.e2eeJoinMailbox.readRequest, original),
+        joinSession
+      )
+    },
+    joinCancel: (requestInput: E2eeJoinRequests['cancel']) => {
+      const original = { ...requestInput }
+      return request(
+        (client) => client.mutation(api.e2eeJoinMailbox.cancel, original),
+        z.object({ status: z.literal('cancelled') })
+      )
+    },
+    joinPublish: (requestInput: E2eeJoinRequests['publish']) => {
+      const original = { ...requestInput }
+      return request(
+        (client) => client.mutation(api.e2eeJoinMailbox.publish, original),
+        z.object({ status: z.literal('published') })
+      )
+    },
+    joinClaim: (requestInput: E2eeJoinRequests['claim']) => {
+      const original = { ...requestInput }
+      return request(
+        (client) => client.query(api.e2eeJoinMailbox.claim, original),
+        joinSession.extend({
+          publisher: hash.nullable(),
+          invitationHex: bytesHex(3 * 1024 * 1024).nullable()
+        })
+      )
+    },
     appendRecord: (requestInput: E2eeAppendRecordRequest) => {
       const original = { ...requestInput }
       return request((client) => client.action(api.e2eeWorkspaces.appendRecord, original), appended)
