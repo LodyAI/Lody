@@ -23,8 +23,8 @@ export type SessionMcpSelection = {
   menu: AttachmentAddMenuMcp | undefined;
   /**
    * Whether `selectedIds` can be sent. False only while a new conversation's
-   * selection still comes from defaults that have not been read: sending then
-   * would silently author a turn with no MCP servers.
+   * selection still comes from a local catalog that has not been read: sending
+   * then would silently author a turn with no MCP servers.
    */
   ready: boolean;
   /** Capture the send selection, waiting at most two seconds for defaults. */

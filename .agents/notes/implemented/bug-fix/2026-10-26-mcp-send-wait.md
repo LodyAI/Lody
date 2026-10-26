@@ -18,7 +18,10 @@ send error; no unconfirmed empty selection is accepted.
 
 ## Decision and ownership
 
-This supersedes the composer remote-catch-up gate in the [original policy](../architecture/2026-10-09-project-default-mcp.md).
+This extends the [local-snapshot policy](2026-10-26-mcp-defaults-send-gate.md)
+already merged in #1920 with a bounded local-read waiter and quieter landing UI.
+It preserves that policy's independent cold-start coverage for plaintext and E2EE;
+the two-second deadline never waits for remote catch-up.
 The requested policy is optimistic local selection, not a remote freshness barrier. The mounted catalog hook already
 starts loading while the user composes. Ready or explicit ids are captured immediately;
 a pending send borrows the existing shared catalog room and captures defaults from its
@@ -43,7 +46,7 @@ React catalog consumer change; it does not migrate the existing shared room to E
 
 The owning project-default suite exercises delayed local reads, cached defaults and background updates, deadline/retry,
 project-change cancellation and explicit empty selection through the real shared room.
-The selection, catalog-room and landing-derived suites passed 106 tests; component
+The merged selection, catalog-room and landing-derived suites passed 107 tests; component
 type-checking and scoped lint passed; `pnpm format` passed. Full `pnpm check`
 stops at CLI type-checking because this checkout lacks the Claude/Codex/Grok/Devin
 ACP submodules and Claude SDK manifests. Documentation checking retains 31

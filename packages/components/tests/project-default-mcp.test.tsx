@@ -208,6 +208,7 @@ describe('composer MCP selection', () => {
         syncMode,
         defaultsTarget: { project: projectA, machineId: 'machine-1' },
       });
+      expect(view.current().ready).toBe(false);
       workspace.open();
       await settle();
       expect(view.current()).toMatchObject({ ready: true, selectedIds: [] });
@@ -217,6 +218,7 @@ describe('composer MCP selection', () => {
       });
       await settle();
       expect(view.current()).toMatchObject({ ready: true, selectedIds: ['db', 'files'] });
+      // A project row arriving with catch-up updates the unsent selection.
       act(() =>
         workspace.put(workspaceFlockKeys.projectMcpDefault(keyOf(projectA)), { ids: ['search'] })
       );
@@ -248,7 +250,7 @@ describe('composer MCP selection', () => {
     expect(sent).toEqual(['search']);
   });
 
-  it('accepts a confirmed empty cloud catalog and does not gate explicit selections', async () => {
+  it('accepts an empty cloud catalog and does not gate explicit selections', async () => {
     const workspace = createWorkspace('workspace-1', []);
     store.set(runtimeAtom, workspace.runtime);
     const view = renderSelection({ syncMode: 'cloud' });
@@ -259,7 +261,7 @@ describe('composer MCP selection', () => {
     view.render({ syncMode: 'cloud', persistedIds: [] });
     expect(view.current()).toMatchObject({ ready: true, selectedIds: [] });
     view.render({ syncMode: 'cloud' });
-    expect(view.current().ready).toBe(true);
+    expect(view.current()).toMatchObject({ ready: true, selectedIds: [] });
     workspace.sync();
     await settle();
     expect(view.current()).toMatchObject({ ready: true, selectedIds: [] });
@@ -622,19 +624,19 @@ describe('project Default MCP tab', () => {
   });
 });
 
-it('uses loaded defaults offline in both encrypted and plaintext workspaces', async () => {
-  const workspace = createWorkspace('workspace-offline', catalogRows());
-  Object.assign(workspace.runtime, { contentMode: 'e2ee', accountId: 'offline-owner' });
-  store.set(runtimeAtom, workspace.runtime);
-  const view = renderSelection({
-    syncMode: 'cloud',
-    defaultsTarget: { project: projectA, machineId: 'machine-1' },
-  });
-  expect(view.current().ready).toBe(false);
-  workspace.open();
-  await settle();
-  expect(view.current()).toMatchObject({ ready: true, selectedIds: ['db', 'files'] });
-  Object.assign(workspace.runtime, { contentMode: 'plaintext' });
-  view.render({ syncMode: 'cloud', defaultsTarget: { project: projectA, machineId: 'machine-1' } });
-  expect(view.current().ready).toBe(true);
-});
+it.each(['e2ee', 'plaintext'] as const)(
+  'uses loaded %s cloud defaults while the remote room stays unsynced',
+  async (contentMode) => {
+    const workspace = createWorkspace('workspace-offline', catalogRows());
+    Object.assign(workspace.runtime, { contentMode, accountId: 'offline-owner' });
+    store.set(runtimeAtom, workspace.runtime);
+    const view = renderSelection({
+      syncMode: 'cloud',
+      defaultsTarget: { project: projectA, machineId: 'machine-1' },
+    });
+    expect(view.current().ready).toBe(false);
+    workspace.open();
+    await settle();
+    expect(view.current()).toMatchObject({ ready: true, selectedIds: ['db', 'files'] });
+  }
+);
