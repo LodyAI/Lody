@@ -206,6 +206,48 @@ export async function registerProjectGroupDirectories(args: {
   }
 }
 
+/** A folder picked for a project: a draft until save, or already registered. */
+export type PickedProjectGroupFolder =
+  | {
+      kind: 'draft';
+      directory: NonNullable<ProjectGroupMemberDraft['directory']>;
+      result: AddLocalProjectResult;
+    }
+  | { kind: 'registered'; localProjectId: LocalProjectId; result: AddLocalProjectResult };
+
+/**
+ * Takes a folder picked for a project. A daemon that can inspect a folder
+ * without registering it leaves it a draft until the project is saved. An
+ * older daemon cannot, so the folder is registered now, hidden from standalone
+ * lists as a save would; its GitHub remote arrives when the daemon publishes it.
+ */
+export async function pickProjectGroupFolder(args: {
+  runtime: LocalProjectImportRuntime;
+  machineId: MachineId;
+  rootPath: string;
+  canInspect: boolean;
+  timeoutMessage: string;
+  updateRequiredMessage: string;
+}): Promise<PickedProjectGroupFolder> {
+  if (!args.canInspect) {
+    const result = await prepareAndWriteLocalProject({
+      runtime: args.runtime,
+      machineId: args.machineId,
+      rootPath: args.rootPath,
+      standaloneVisible: false,
+      timeoutMessage: args.timeoutMessage,
+    });
+    return { kind: 'registered', localProjectId: result.localProjectId, result };
+  }
+  const prepared = await prepareLocalProject({ ...args, inspect: true });
+  if (!prepared.inspection) throw new Error(args.updateRequiredMessage);
+  return {
+    kind: 'draft',
+    directory: { ...prepared, machineId: args.machineId, inspection: prepared.inspection },
+    result: { ...prepared, status: 'added' },
+  };
+}
+
 /**
  * The Electron main process owns the native folder picker, but the renderer
  * owns the import mutation. Keep the picker IPC selection-only, then reuse the

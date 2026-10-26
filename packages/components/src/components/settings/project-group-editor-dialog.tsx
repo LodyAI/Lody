@@ -23,6 +23,7 @@ import {
 import { useWorkspaceProjectActions } from '@/hooks/use-workspace-projects';
 import {
   addProjectGroupDirectory,
+  addProjectGroupMember,
   applyDetectedProjectSubmodules,
   buildProjectGroupFormValue,
   buildWorkspaceProjectFromForm,
@@ -34,7 +35,10 @@ import {
   type ProjectGroupMemberDraft,
 } from '@/lib/project-group-form';
 import { Dialog } from '@/ui/dialog';
-import { prepareLocalProject, registerProjectGroupDirectories } from '@/lib/local-project-import';
+import {
+  pickProjectGroupFolder,
+  registerProjectGroupDirectories,
+} from '@/lib/local-project-import';
 import {
   AddLocalProjectDialog,
   type RemoteDirectoryOps,
@@ -155,6 +159,9 @@ export function ProjectGroupEditorDialog({
     return remotes;
   }, [options]);
   const runtime = useAtomValue(activeWorkspaceRuntimeAtom);
+  // Machines whose daemon can inspect a folder without registering it; set
+  // below once the machine list is known.
+  const inspectableMachines = useRef<ReadonlySet<MachineId>>(new Set());
   const selectProject = useCallback<RemoteDirectoryOps['addProject']>(
     async (machineId, args) => {
       if (!runtime || !editorRef.current)
@@ -163,29 +170,17 @@ export function ProjectGroupEditorDialog({
       const selectingEditor = editorRef.current;
       const id =
         selectingEditor.mode === 'add' ? selectingEditor.projectId : selectingEditor.project.id;
-      try {
-        const prepared = await prepareLocalProject({
-          runtime,
-          machineId,
-          rootPath: args.rootPath,
-          inspect: true,
-          timeoutMessage: t('localProjects.add.timeout'),
-        });
-        if (!prepared.inspection) throw new Error(t('settings.projectGroups.folderUpdateRequired'));
+      // A late answer for a dismissed browser or another project is dropped.
+      const current = () => {
         const latest = editorRef.current;
-        if (
-          selectionGeneration !== folderSelectionGeneration.current ||
-          !folderSelection.current ||
-          !latest ||
-          (latest.mode === 'add' ? latest.projectId : latest.project.id) !== id
-        ) {
-          return { ok: false, message: t('settings.projectGroups.errors.invalid') };
-        }
-        const next = addProjectGroupDirectory(latest.value, {
-          ...prepared,
-          machineId,
-          inspection: prepared.inspection,
-        });
+        return selectionGeneration === folderSelectionGeneration.current &&
+          folderSelection.current &&
+          latest &&
+          (latest.mode === 'add' ? latest.projectId : latest.project.id) === id
+          ? latest
+          : null;
+      };
+      const commit = (latest: ProjectGroupEditorState, next: ProjectGroupFormValue) => {
         const checked = validateProjectGroupForm(next);
         if (
           [...checked.memberErrors.values()].some((errors) => errors.includes('machine_mismatch'))
@@ -193,7 +188,29 @@ export function ProjectGroupEditorDialog({
           throw new Error(t('settings.projectGroups.memberErrors.machine_mismatch'));
         }
         onChange({ ...latest, value: next });
-        return { ok: true, value: { ...prepared, status: 'added' } };
+      };
+      try {
+        const picked = await pickProjectGroupFolder({
+          runtime,
+          machineId,
+          rootPath: args.rootPath,
+          canInspect: inspectableMachines.current.has(machineId),
+          timeoutMessage: t('localProjects.add.timeout'),
+          updateRequiredMessage: t('settings.projectGroups.folderUpdateRequired'),
+        });
+        const latest = current();
+        if (!latest) return { ok: false, message: t('settings.projectGroups.errors.invalid') };
+        commit(
+          latest,
+          picked.kind === 'draft'
+            ? addProjectGroupDirectory(latest.value, picked.directory)
+            : addProjectGroupMember(
+                latest.value,
+                { kind: 'local', machineId, localProjectId: picked.localProjectId },
+                picked.result.name
+              )
+        );
+        return { ok: true, value: picked.result };
       } catch (cause) {
         return { ok: false, message: cause instanceof Error ? cause.message : String(cause) };
       }
@@ -201,10 +218,12 @@ export function ProjectGroupEditorDialog({
     [onChange, runtime, t]
   );
   const folderController = useAddLocalProjectController(undefined, undefined, selectProject);
-  // Any machine the user owns can be browsed over RPC, as Add folder does; it
-  // needs the daemon's read-only folder inspection.
-  const folderMachines = folderController.machines.filter(
-    (machine) => machine.canAddProjects && machine.supportsProjectFolderSelection
+  // Any machine the user owns can be browsed over RPC, as Add folder does.
+  const folderMachines = folderController.machines.filter((machine) => machine.canAddProjects);
+  inspectableMachines.current = new Set(
+    folderMachines
+      .filter((machine) => machine.supportsProjectFolderSelection)
+      .map((machine) => machine.id)
   );
   // The browser opens on the machine the wizard chose, and only that one, so a
   // picked folder cannot bind the project to a different machine.

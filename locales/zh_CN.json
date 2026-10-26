@@ -5553,7 +5553,7 @@
   "settings.projectGroups.wizard.sources.githubDescription": "勾选项目需要的所有仓库。每个对话都会拿到每个仓库的独立副本。",
   "settings.projectGroups.wizard.sources.search": "搜索",
   "settings.projectGroups.wizard.sources.browse": "浏览…",
-  "settings.projectGroups.wizard.sources.browseUnavailable": "只能在你添加的机器上浏览文件夹，且这台机器需要在线、Lody 版本较新。",
+  "settings.projectGroups.wizard.sources.browseUnavailable": "只能在你添加的、在线的机器上浏览文件夹。",
   "settings.projectGroups.wizard.sources.foldersTab": "{{machine}}上的文件夹",
   "settings.projectGroups.wizard.sources.githubTab": "GitHub 仓库",
   "settings.projectGroups.wizard.sources.foldersNote": "带 GitHub 远端的文件夹会基于你的副本创建工作区；其他文件夹直接修改原目录。",

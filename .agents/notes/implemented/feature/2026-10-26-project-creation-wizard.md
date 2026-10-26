@@ -73,7 +73,13 @@ Direct browsing now works on any online machine the user owns whose Lody support
 this machine, but preparation, registration and the directory browser already go
 through machine RPC by id, as Add folder does for remote machines. The browser opens
 on the machine chosen in the wizard and offers only that machine, so a picked folder
-cannot bind the project elsewhere. This supersedes the current-machine limit in the
+cannot bind the project elsewhere. A daemon without `projectFolderSelection` (an
+already released one) cannot inspect a folder without registering it, so for those
+machines `pickProjectGroupFolder` registers the picked folder at once, hidden from
+standalone lists as a save would, and adds it as that machine's folder; its GitHub
+remote turns it into a repository member once the daemon publishes it. Cancelling
+then leaves a hidden registration, which saves already tolerate. Newer daemons keep
+the draft-until-save behavior. This supersedes the current-machine limit in the
 [direct folder selection note](../architecture/2026-10-26-project-direct-folder-selection.md).
 
 ## Validation and limits

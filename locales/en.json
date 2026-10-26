@@ -5561,7 +5561,7 @@
   "settings.projectGroups.wizard.sources.githubDescription": "Tick every repository this project needs. Each conversation gets its own copy of each one.",
   "settings.projectGroups.wizard.sources.search": "Search",
   "settings.projectGroups.wizard.sources.browse": "Browse…",
-  "settings.projectGroups.wizard.sources.browseUnavailable": "Folders can be browsed on a machine you added while it is online and its Lody is up to date.",
+  "settings.projectGroups.wizard.sources.browseUnavailable": "Folders can be browsed on a machine you added while it is online.",
   "settings.projectGroups.wizard.sources.foldersTab": "Folders on {{machine}}",
   "settings.projectGroups.wizard.sources.githubTab": "GitHub repositories",
   "settings.projectGroups.wizard.sources.foldersNote": "Folders with a GitHub remote use a worktree of your copy. Other folders are edited in place.",

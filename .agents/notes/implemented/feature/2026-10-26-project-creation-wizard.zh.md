@@ -52,7 +52,11 @@ Translation: current
 直接浏览现在支持用户拥有的、在线且 Lody 支持 `projectFolderSelection` 的任意机器，不再只限
 当前机器：之前的记录把它限制在本机，但准备、注册和目录浏览本来就按机器 id 走机器 RPC，
 和「添加文件夹」浏览远端机器相同。浏览器打开向导所选的机器，且只提供这一台，所以选中的
-文件夹不会把项目绑定到其他机器。这取代了[直接选择目录记录](../architecture/2026-10-26-project-direct-folder-selection.zh.md)中的本机限制。
+文件夹不会把项目绑定到其他机器。不支持 `projectFolderSelection` 的守护进程（已发布版本）
+无法在不注册的情况下检查文件夹，因此对这些机器，`pickProjectGroupFolder` 会立即注册所选
+文件夹，并像保存时一样在独立列表中隐藏，再作为该机器的文件夹加入；守护进程发布 GitHub
+远端后，它会变为仓库成员。此时取消会留下一个隐藏的注册，保存流程本来就容忍这种情况。
+新版守护进程仍保持保存前只是草稿的行为。这取代了[直接选择目录记录](../architecture/2026-10-26-project-direct-folder-selection.zh.md)中的本机限制。
 
 ## 验证与限制
 

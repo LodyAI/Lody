@@ -12,6 +12,7 @@ import {
   type WorkspaceId,
 } from '@lody/shared';
 import {
+  pickProjectGroupFolder,
   prepareLocalProject,
   registerProjectGroupDirectories,
   prepareAndWriteLocalProject,
@@ -242,5 +243,28 @@ describe('local project registration and standalone display', () => {
     });
     expect(result).toMatchObject({ status: 'added', machineId, localProjectId: 'project-1' });
     expect(runtime.read()?.standaloneVisible).not.toBe(false);
+  });
+  it('keeps a picked folder a draft on a daemon that can inspect it', async () => {
+    const runtime = runtimeWithResponse();
+    const picked = await pickProjectGroupFolder({
+      ...args,
+      runtime,
+      canInspect: true,
+      updateRequiredMessage: 'Update Lody',
+    });
+    expect(picked.kind).toBe('draft');
+    expect(runtime.rows.size).toBe(0);
+  });
+  it('registers a picked folder hidden on an older daemon that cannot inspect it', async () => {
+    // An older daemon answers prepare-add without an inspection.
+    const runtime = runtimeWithResponse();
+    const picked = await pickProjectGroupFolder({
+      ...args,
+      runtime,
+      canInspect: false,
+      updateRequiredMessage: 'Update Lody',
+    });
+    expect(picked).toMatchObject({ kind: 'registered', localProjectId: 'project-1' });
+    expect(runtime.read()).toMatchObject({ id: 'project-1', standaloneVisible: false });
   });
 });
