@@ -69,6 +69,19 @@ human-only stop barrier. Results arriving while paused stay held. Native Effect
 workflow/scoped platform boundaries are retained; a larger Session/ACP migration
 is unrelated and deferred.
 
+## Correction: admission waits for the startup probe
+
+A later incident showed a false manual-recovery diagnosis. A host rebooted during
+a turn; the restarted daemon redispatched the interrupted user turn 15 ms into
+startup. Admission read `blocked=1` before the startup probe had read the process
+table, so it showed the quit-and-`recover-inbox` instructions. Seconds later, the
+same probe proved the old roots gone and cleared the block. Bridge admission now
+awaits that one-shot probe before reading block state. The interrupted input then
+ends as an ordinary rejected input without replay, and fresh input proceeds. A
+failed probe still leaves the block for the existing paths. Admission adds one
+local process-table read to the first post-start dispatch only. A synthetic test
+holds the probe and checks both cases before it resolves.
+
 ## Verification and limits
 
 Synthetic SQLite, process-probe, Host-lease, command and durable-history tests are

@@ -532,6 +532,19 @@ Electron runs retain their original runtime/version scope. Root checking stops
 with the same unsupported-Node SQLite suite and Git identity assertion (332 CLI
 files / 4,697 tests pass). The integration proof is `leaf-main-integration-review.json`.
 
+A final sync through `40e108f1a` keeps the upstream reset-time absolute/relative
+toggle alongside the popover's migrated styles. The incoming toggle and its
+styles remain structurally identical to main; both owning suites pass 21 tests.
+The six leaf implementations remain unchanged. This integration does not broaden
+the frozen leaf report's source/runtime scope. The final root aggregate records
+331 CLI files / 4,697 tests passed, the same SQLite/Git failures, and an additional
+file-index worker timeout; the worker's owning suite passes all seven tests in a
+separate rerun. The aggregate remains failed. A separate post-merge browser smoke covers 48
+frames across three actual popover stories, desktop/phone, light/dark, open and
+absolute/relative toggle states. All interaction and date-bound checks pass;
+`usage-toggle-postmerge-final/report.html` embeds the actual screenshots. This
+smoke has no pre-merge pixel baseline and does not establish visual equivalence.
+
 ## Remaining work
 
 Compiler-backed [usage inventory](../../../../packages/components/scripts/tailwind-usage.mjs)

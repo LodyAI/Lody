@@ -382,6 +382,15 @@ Storybook 10.6.2 新构建与 434 组集成截图的记录样式/几何相等、
 Node 不支持的 SQLite 套件及 Git 身份断言处停止，CLI 332 个文件、4,697 项通过。
 集成证据记录在 `leaf-main-integration-review.json`。
 
+最后同步至 `40e108f1a`，保留上游绝对/相对重置时间切换和弹窗既有 StyleX 样式。
+新增切换实现及其样式与 main 结构一致，两个所属套件 21 项测试通过；六个叶组件未变。
+此次集成不扩大已冻结 leaf 报告的源码/运行时范围。最终 root 聚合运行记录 CLI
+331 个文件、4,697 项通过；除相同 SQLite/Git 失败外，文件索引 worker 另有一项超时，
+该所属套件单独重跑七项全部通过。聚合检查仍为失败。另以三个真实用量弹窗 Story
+完成桌面/手机、明暗主题、打开及绝对/相对切换共 48 帧浏览器冒烟，交互和日期边界
+检查全部通过；`usage-toggle-postmerge-final/report.html` 内嵌真实截图。该冒烟没有
+合并前像素基线，不构成视觉等价结论。
+
 ## 后续工作
 
 基于编译器的[用量统计](../../../../packages/components/scripts/tailwind-usage.mjs)
