@@ -1890,6 +1890,11 @@ export class SessionDispatchWatcher {
     if (updatedAt <= (meta.messageQueueCheckedAt ?? 0)) {
       return;
     }
+    // A row that could not be promoted yet keeps the signal open, so the session
+    // stays watched and a later change retries it instead of stranding it.
+    if ((await sessionDoc.getMessageQueue()).length > 0) {
+      return;
+    }
     await this.deps.workspaceDocument.repo.upsertDocMeta(sessionDoc.roomId, {
       messageQueueCheckedAt: updatedAt,
     } satisfies Partial<SessionMeta>);
@@ -3133,6 +3138,15 @@ export class SessionDispatchWatcher {
         this.consumeStashedRpcTurn(meta.id, turn.id);
         return { turn, history };
       }
+      if (!isActive()) {
+        return { turn: null, history };
+      }
+      // Nothing in history runs next, so an unfinished assistant turn whose input
+      // already settled has no execution left. Close it so clients stop treating
+      // the session as busy; the queue below then runs as after any turn.
+      await this.deps.executionService.closeDeadAssistantTurn?.(meta.id, {
+        requireSettledUserTurn: true,
+      });
       if (!isActive()) {
         return { turn: null, history };
       }

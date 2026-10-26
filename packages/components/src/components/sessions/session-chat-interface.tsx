@@ -4165,8 +4165,6 @@ export const SessionChatInterface = memo(
       peekStore: peekSessionStore,
     });
     const canStopAgent = canStopAgentEnabled({
-      isContextCompacting,
-      isSessionActive,
       activeAssistantTurnId: activeAssistantTurnId ?? null,
       isGoalActive,
       canPauseGoal,

@@ -252,6 +252,26 @@ renderer folds the still-streaming turn into a `Worked for …` summary and shar
 assistant entry" logic (`@lody/shared` `schema.ts` terminal predicate) treats it as done.
 Renderer side: [packages/components/src/components/ai-gui/AGENTS.md](../../../../packages/components/src/components/ai-gui/AGENTS.md).
 
+### Dead turns
+
+Whether the last assistant entry is finished is what clients use to choose Stop and
+queue-versus-send, so an entry that no execution will ever finish keeps a session busy
+forever. Only the owning daemon executes a session; with no live runtime there
+(`SessionExecutionService.closeDeadAssistantTurn` checks the active, current and runtime
+turn under the rewrite lease), the entry is dead:
+
+- Stop on that turn closes it: it cancels a still-unsettled user input, then force-finishes
+  the entry. Stop still does not run the queue.
+- A dispatch check with nothing to run from history closes it before queue promotion, but
+  only once its user input is `handled`/`failed`/`canceled`; a `processing` input still owes
+  its crash-recovery run on the same entry.
+- The queue signal (`messageQueueCheckedAt`) is acknowledged only when the local queue is
+  empty, so a row that could not be promoted keeps the session watched.
+
+Observed cause: a restart's recovery dispatch was rejected by Inbox admission before its
+prompt, failing the user input while the entry stayed open. See the
+[decision](../../../../.agents/notes/implemented/bug-fix/2026-10-26-dead-turns-and-orphaned-queue.md).
+
 ### Why a resolved prompt is not proof of success
 
 Nothing reads `PromptResponse.stopReason`, and an adapter may swallow an upstream failure and
