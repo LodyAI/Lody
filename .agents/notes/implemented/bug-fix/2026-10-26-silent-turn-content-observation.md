@@ -10,91 +10,107 @@ PR: [#1913](https://github.com/LodyAI/Lody/pull/1913)
 ## Abstract
 
 Session metadata could make an empty Agent turn successful because settlement and
-prompt replay shared the same any-update observation. MessageHandler now stamps
-content on the existing turn owner at enqueue, preserving it through flush while
-keeping every event conservative for replay. Empty or metadata-only completion
-records `agent_no_output`, advances the delivered input's pointer and publishes a
-failed outcome. The fixture covers the real local execution/history boundary;
-live providers and the packaged desktop remain unverified.
+prompt replay shared one any-update observation. Each existing turn epoch now
+retains independent event and content facts, including image generation's separate
+callback path. ACP content is observed at enqueue; generated images count after a
+matched nonempty history write, and settlement first joins the existing upload
+owner. Silent completion fails visibly without replay, while image-only completion
+can succeed. Synthetic tests cover local execution and storage; live providers and
+the packaged desktop remain unverified.
 
 ## Decision and provider contracts
 
 The issue's [reference branch comment](https://github.com/LodyAI/Lody/issues/436#issuecomment-5935995345)
 identifies the two observations but also counts checklist plans and subagent
-lifecycle events as content. This implementation follows the consuming contracts:
+lifecycle events as content. The implementation follows the consuming contracts:
 
 | Received update | Content settlement |
 | --- | --- |
 | Nonblank assistant text or thought | Content; thoughts remain expandable history items. |
-| Root assistant image/audio/resource/link | Content; MessageHandler materializes attachments before history persistence. Non-text thoughts have no corresponding history item. |
-| Tool call or sparse tool update with an ID | Content; the reducer materializes a tool row even without final prose. A failed tool is observable tool activity. |
+| Root assistant image/audio/resource/link | Content; MessageHandler materializes attachments. Non-text thoughts have no corresponding history item. |
+| Image-generation callbacks | Begin/status/failure establish event evidence. Only a matched nonempty `image_group` write establishes content; upload failure or refused attachment does not. |
+| Ordinary tool call or sparse tool update with an ID | Content; the reducer materializes a tool row even without final prose. A failed tool is observable tool activity. |
 | `plan` / `plan_update(items)` | Checklist/status only, including nonempty checklists. |
-| `plan_update(markdown)` | Content when nonblank: a readable proposed-plan history item. File plans, removal and empty markdown do not establish content. |
+| `plan_update(markdown)` | Content when nonblank: a readable proposed-plan item. File plans, removal and empty markdown do not establish content. |
 | Subagent event | Snapshot/progress is lifecycle status. Child text/thought/tool output counts; child rich output currently only marks the run incomplete. |
 | Config, mode, commands, title, usage, user echo | No Agent content. |
 
-This is a protocol-content observation, not proof of successful downstream storage
-or completed tool effects. Existing flush failures retain their own error/retry owner.
-The locked Claude adapter streams thought tags in ordinary text and emits checklist
-plans. Codex's `CodexPlanStream` and Grok's `plan-review.js` can emit markdown
-proposals or fall back to ordinary text. Core normalizes child output separately
-from lifecycle snapshots; Kimi's documented support is main-agent task snapshots
-and final-tail output, not live child deltas. No provider-name exception is needed.
-See [the shared reducer](../../../../packages/shared/src/acp/history-apply.ts),
+ACP enqueue observation is not proof of downstream storage or completed tool
+effects; flush failures retain their existing error/retry owner. Image generation
+has a different boundary: AgentClient suppresses its raw tool notifications before
+`onUpdateMessage`, then invokes `onImageGenerationBegin/End`. Independent review of
+`fa1e38ec4` demonstrated a persisted image-only reply still becoming failed despite
+376 green tests. Counting only the enqueue path was insufficient for both content
+and replay protection. The owning suite now drives the real AgentClient router,
+MessageHandler upload pipeline and SessionDocument history instead of simulating
+that bypass as an ordinary ACP chunk.
+
+Claude streams thought tags in ordinary text and emits checklist plans. Codex's
+`CodexPlanStream` and Grok's `plan-review.js` can emit markdown proposals or ordinary
+text. Core normalizes child output separately from lifecycle snapshots; Kimi's
+recorded support includes main-agent task snapshots and final-tail output, not live
+child deltas. Classification needs no new provider-name exception. See the
+[shared reducer](../../../../packages/shared/src/acp/history-apply.ts),
 [attachment materialization](../../../../apps/cli/src/lib/acp-agent-attachments.ts)
 and [provider evidence](../../proposed/architecture/2026-09-26-subagent-events.md).
 
 ## Ownership and containment
 
-The trigger is normal prompt resolution with no content. `TurnPhase.hasVisibleOutput`
-belongs to that exact epoch, starts false and disappears with the turn; enqueue
-checks the stamped target epoch before setting it. This avoids a second registry,
-retention policy or flush-time scan. Native replay suppression runs first. Late
-output for a finalized turn cannot make a newly admitted turn successful.
+`TurnPhase.hasPromptEvents` and `hasVisibleOutput` belong to one epoch, start false
+and disappear with it. The shared private recorder checks epoch and replay
+suppression before updating either fact. Buffered/flushed events and image
+lifecycle callbacks therefore prevent replay without becoming equivalent to content.
+Missing state or an absent observer refuses stale replay; missing/mismatched
+content observation remains unknown and settlement fails open.
 
-`hasPromptEventsForTurn` retains buffered/flushed evidence of any ACP update;
-missing state or an absent observer refuses stale replay. Content observation
-returns unknown for a missing/mismatched owner and settlement fails open. A known
-silent turn finalizes normally, records a visible failure, and advances only the
-already-delivered input's terminal pointer. It never retries a successfully
-resolved prompt. Ordinary disconnected turns retain one retry only before any
-event; Inbox keeps its no-replay fence.
+The existing image callId map now holds the begin-time target and epoch instead of
+only a turn ID. Both inline and saved-path uploads carry that target into the
+existing append helper. A successful matched image write records content for that
+epoch; a reused assistant ID cannot authorize an older generation to write into
+its successor. Late completion can still write its original, distinct assistant
+entry, without marking the current turn. No new map, timer or resource owner is
+introduced.
 
-Cancellation, raw-request drain, instance retirement, presence release and flush
-recovery stay with their existing owners. A content failure adds no wait, resource
-or teardown fence. The [retirement decision](2026-10-17-stale-acp-recovery-turn-ownership.md)
-continues to govern replacement and failed release. The Effect 4.0.2 feature/fix
-assessment keeps this synchronous observation ordinary: migrating MessageHandler
-would pull unfinished Session/history dependencies into the issue. No native
-boundary, dependency, consumer or unit-ledger fact changes.
+After prompt return, content observation joins `flushCodexGeneratedImageUploads`
+before reading, while the turn still owns its state. This is the same drain already
+used by finalization, moved ahead of the verdict rather than a second recovery
+mechanism. Both execution paths await it through their existing Effect Promise
+boundary. Stop interrupts the waiter; finalization still retains the upload owner
+until it drains, then releases execution and presence. Failed/refused uploads
+retain the existing caught-error behavior and add no success fact. Events arriving
+after all current uploads drain keep their captured target but do not retroactively
+change an already-settled outcome.
+
+A known silent turn finalizes, records `agent_no_output`, and advances only its
+already-delivered input's terminal pointer. A normally resolved prompt never
+replays. Disconnected ordinary turns retain one retry only before any owned event;
+Inbox keeps its no-replay fence. Instance retirement and failed release continue to
+follow the [retirement decision](2026-10-17-stale-acp-recovery-turn-ownership.md).
+The Effect 4.0.2 assessment keeps synchronous facts ordinary and reuses the native
+execution entry; migrating the unfinished image/Session/history orchestration
+would expand this issue. No native boundary or unit-ledger fact changes.
 
 ## Verification and simplification
 
-The owning ACP batching and execution suites use synthetic provider/Git inputs,
-real Session/SessionManager/MessageHandler, offline SessionDocument, native presence
-and explicit completion signals. They inspect terminal history, failure notices,
-outcome facts, submitted inputs and released ownership. Cases include metadata
-before/after flush, no events, empty and visible content, tool-only/failing tools,
-plan variants, child content/status, next-turn isolation, replay suppression,
-unobservable state and existing Stop/retirement/retry failure paths.
+All 454 cases pass in four owning suites covering ACP batching, execution, image
+upload and AgentClient routing using synthetic provider/upload/Git inputs, real local history and native
+presence. Explicit gates cover upload tails, failure/refusal, begin-only and failed
+status, Stop during the upload, late end callbacks and delayed writes across
+different IDs or the same ID with a new epoch. Assertions inspect history, terminal
+outcomes, submitted inputs and retained/released ownership. The independent
+reviewer's original image-only fixture also passes.
 
-The original any-update observer makes the metadata-only acceptance tests fail
-with `handled` instead of `failed`. The same two suites pass all 376 cases after
-restoration. Temporary simplifications produce these behavioral failures:
+The PR preserves actual baseline/fixed terminal captures and raw commands. Critical
+image designs are temporarily removed against the same four suites: successful
+image-write marking, upload drain before observation, captured epoch, lifecycle
+replay marking, matched-write guard, begin-time target retention and preserving an
+unowned image entry. The removals produced 2, 1, 2, 1, 1, 5 and 1 failed cases
+respectively; all withdrawals are restored before submission. No source-string or mock-count assertion substitutes for these results.
+The obsolete buffered/flushed replay inference was removed in favor of the one
+epoch-owned event fact. No speculative Service, Layer or parallel recovery remains.
 
-| Removed design | Failed cases |
-| --- | --- |
-| Separate content observation; reuse any-event verdict | 16: metadata/empty/checklist/lifecycle become success. |
-| Turn latch; inspect only the pending buffer | 3: flushed content disappears, including successful stale recovery. |
-| Target epoch check | 1: old-turn output contaminates the new turn. |
-| Conservative unknown-state replay policy | 2: missing observation permits replay. |
-| Child rich-content exclusion | 1: an incomplete marker becomes successful output. |
-
-All temporary withdrawals were restored. The design adds one turn-local boolean
-and one private classifier; no exported helper, Service, Layer, map, timer or new
-recovery path is retained. `pnpm format`, CLI typechecking, `check:quick` (including
-Effect/public boundaries) and `docs check` pass with Node 26.12.1. Root `pnpm check`
-reaches CLI tests (4,685 passing) but fails the unchanged Git-identity relative-global
-fixture, which also fails alone with this machine's owner identity. This is not a
-full-repository green result. Captured acceptance and raw ablation evidence belong
-to the draft PR; no live user transcript is a fixture.
+Node 26.12.1 is used without changing the floor or dependency versions. Root
+`pnpm check` passes typechecking/lint/Effect lint, then reports 4,697 CLI tests passed
+and one unchanged Git-identity relative-global fixture failed on this machine
+(4 skipped). This is not full-repository green. Scoped checks and latest CI results
+are reported in the draft PR; no live user transcript is a fixture.

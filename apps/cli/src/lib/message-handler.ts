@@ -638,7 +638,7 @@ type ConversationTurnGateContext = {
 };
 
 type SessionImageUploadAttachTarget =
-  | { kind: 'active_turn'; turnId: string }
+  | { kind: 'active_turn'; turnId: string; turnEpoch?: number }
   | { kind: 'new_entry' }
   | { kind: 'unavailable'; statusType: string };
 type SessionImageUploadOptions = {
@@ -1190,9 +1190,12 @@ export class MessageHandler {
   }
 
   private handleImageGenerationBegin(sessionId: SessionId, event: ImageGenerationBeginEvent): void {
-    const turnId = this.store.getTurnId(sessionId) ?? null;
+    const currentTarget = this.store.getCurrentACPUpdateTarget(sessionId);
+    const target = currentTarget?.source === 'active_turn' ? currentTarget : null;
+    const turnId = target?.turnId;
     const state = this.store.get(sessionId);
-    state.imageGenerationTurnIds.set(event.callId, turnId);
+    state.imageGenerationTurnTargets.set(event.callId, target);
+    this.recordTurnEvent(sessionId, target?.turnEpoch);
     state.imageGenerationActiveCallIds.add(event.callId);
     this.syncImageGenerationActivityPresence(sessionId);
     this.logger.debug(
@@ -1247,14 +1250,20 @@ export class MessageHandler {
       return;
     }
 
-    const cachedTurnId = state.imageGenerationTurnIds.get(event.callId);
-    const capturedTurnId =
-      cachedTurnId !== undefined ? cachedTurnId : (this.store.getTurnId(sessionId) ?? null);
+    const cachedTarget = state.imageGenerationTurnTargets.get(event.callId);
+    const currentTarget = this.store.getCurrentACPUpdateTarget(sessionId);
+    const target =
+      cachedTarget !== undefined
+        ? cachedTarget
+        : currentTarget?.source === 'active_turn'
+          ? currentTarget
+          : null;
+    this.recordTurnEvent(sessionId, target?.turnEpoch);
 
     const savedPath = this.resolveCodexGeneratedImagePath(sessionId, event.savedPath);
     if (!savedPath && !event.image) {
       if (isTerminal) {
-        state.imageGenerationTurnIds.delete(event.callId);
+        state.imageGenerationTurnTargets.delete(event.callId);
       }
       this.logger.debug(
         `[${sessionId}] Codex image generation has neither a usable savedPath nor inline image data (callId=${event.callId} status=${event.status} terminal=${isTerminal})`
@@ -1262,9 +1271,9 @@ export class MessageHandler {
       return;
     }
 
-    const attachTarget = capturedTurnId
-      ? ({ kind: 'active_turn', turnId: capturedTurnId } satisfies SessionImageUploadAttachTarget)
-      : undefined;
+    const attachTarget: SessionImageUploadAttachTarget = target
+      ? { kind: 'active_turn', turnId: target.turnId, turnEpoch: target.turnEpoch }
+      : { kind: 'new_entry' };
 
     const callId = event.callId;
     const uploadPromise = (async () => {
@@ -1300,14 +1309,14 @@ export class MessageHandler {
     })()
       .then(() => {
         state.imageGenerationUploadedCallIds.add(callId);
-        state.imageGenerationTurnIds.delete(callId);
+        state.imageGenerationTurnTargets.delete(callId);
       })
       .catch((error) => {
         this.logger.debug(
           `[${sessionId}] Failed to upload Codex generated image (callId=${callId} path=${savedPath ?? 'none'}): ${formatErrorMessage(error)}`
         );
         if (isTerminal) {
-          state.imageGenerationTurnIds.delete(callId);
+          state.imageGenerationTurnTargets.delete(callId);
         }
       })
       .finally(() => {
@@ -1371,6 +1380,7 @@ export class MessageHandler {
       const appended = await this.appendAssistantImageGroupToActiveTurn({
         sessionDoc,
         turnId: initialTarget.turnId,
+        turnEpoch: initialTarget.turnEpoch,
         content,
       });
       if (appended) {
@@ -1705,7 +1715,21 @@ export class MessageHandler {
     sessionDoc: SessionDocument;
     turnId: string;
     content: SessionImageGroupContent;
+    turnEpoch?: number;
   }): Promise<boolean> {
+    const sessionId = args.sessionDoc.sessionId;
+    const turn = this.store.has(sessionId) ? this.store.get(sessionId).turn : undefined;
+    const turnEpoch =
+      args.turnEpoch ??
+      (turn?.phase !== 'idle' && turn?.turnId === args.turnId ? turn.turnEpoch : undefined);
+    // A reused assistant id does not authorize an older image generation to write into it.
+    if (
+      args.turnEpoch !== undefined &&
+      turn?.phase !== 'idle' &&
+      turn?.turnId === args.turnId &&
+      turn.turnEpoch !== args.turnEpoch
+    )
+      return false;
     let appended = false;
     const backend = await this.getSessionBackend(args.sessionDoc);
     await backend
@@ -1718,6 +1742,8 @@ export class MessageHandler {
       .then((result) => {
         appended = result.matched ?? false;
       });
+    if (appended && args.content.images.length > 0)
+      this.recordTurnEvent(sessionId, turnEpoch, true);
     return appended;
   }
 
@@ -1787,7 +1813,12 @@ export class MessageHandler {
   ): Promise<SessionImageUploadAttachTarget> {
     const turnId = this.store.getTurnId(sessionId);
     if (turnId) {
-      return { kind: 'active_turn', turnId };
+      const turn = this.store.get(sessionId).turn;
+      return {
+        kind: 'active_turn',
+        turnId,
+        ...(turn.phase !== 'idle' ? { turnEpoch: turn.turnEpoch } : {}),
+      };
     }
 
     const statusType = (await sessionDoc.getMetaState())?.status?.type;
@@ -4541,13 +4572,7 @@ export class MessageHandler {
       );
     }
     const state = this.store.get(sessionId);
-    if (
-      state.turn.phase !== 'idle' &&
-      state.turn.turnEpoch === target.turnEpoch &&
-      this.isVisibleACPUpdate(update.update)
-    ) {
-      state.turn.hasVisibleOutput = true;
-    }
+    this.recordTurnEvent(sessionId, target.turnEpoch, this.isVisibleACPUpdate(update.update));
     state.acpUpdateBuffer.push({
       operationId: uuidV4(),
       notification: update,
@@ -7696,6 +7721,7 @@ export class MessageHandler {
       const appended = await this.appendAssistantImageGroupToActiveTurn({
         sessionDoc,
         turnId: initialAttachTarget.turnId,
+        turnEpoch: initialAttachTarget.turnEpoch,
         content,
       });
 
@@ -10362,26 +10388,48 @@ export class MessageHandler {
   }
 
   /**
-   * Conservative guard for prompt replay: any buffered or already-flushed ACP
-   * update means the adapter may have acted on the user prompt, so execution
+   * Conservative guard for prompt replay: any owned ACP or image lifecycle
+   * event means the adapter may have acted on the user prompt, so execution
    * recovery must stop and surface the failure instead of retrying.
    */
   private hasPromptEventsForTurn(sessionId: SessionId, turnId: string): boolean {
     if (!this.store.has(sessionId) || this.store.getTurnId(sessionId) !== turnId) {
       return true;
     }
-    const state = this.store.get(sessionId);
-    const hasBufferedOutput = state.acpUpdateBuffer.some((item) => item.target.turnId === turnId);
-    const hasFlushedOutput =
-      state.acpFlushCountInTurn > 0 && this.store.getTurnId(sessionId) === turnId;
-    return hasBufferedOutput || hasFlushedOutput;
+    const { turn } = this.store.get(sessionId);
+    return turn.phase !== 'idle' && turn.hasPromptEvents;
   }
 
-  /** Content observation survives flush and is unknown outside its owning turn. */
-  observePromptContentForTurn(sessionId: SessionId, turnId: string): boolean | undefined {
+  private recordTurnEvent(
+    sessionId: SessionId,
+    turnEpoch: number | undefined,
+    visible = false
+  ): void {
+    if (!this.store.has(sessionId)) return;
+    const state = this.store.get(sessionId);
+    if (
+      state.suppressAcpReplayUntilTurnStart ||
+      state.turn.phase === 'idle' ||
+      state.turn.turnEpoch !== turnEpoch
+    )
+      return;
+    state.turn.hasPromptEvents = true;
+    state.turn.hasVisibleOutput ||= visible;
+  }
+
+  /** Drain the existing image owner before observing content, while this epoch still owns the turn. */
+  async observePromptContentForTurn(
+    sessionId: SessionId,
+    turnId: string
+  ): Promise<boolean | undefined> {
     if (!this.store.has(sessionId)) return undefined;
-    const { turn } = this.store.get(sessionId);
-    return turn.phase !== 'idle' && turn.turnId === turnId ? turn.hasVisibleOutput : undefined;
+    const state = this.store.get(sessionId);
+    const turn = state.turn;
+    if (turn.phase === 'idle' || turn.turnId !== turnId) return undefined;
+    await this.flushCodexGeneratedImageUploads(sessionId);
+    return state.turn.phase !== 'idle' && state.turn.turnEpoch === turn.turnEpoch
+      ? state.turn.hasVisibleOutput
+      : undefined;
   }
 
   private isVisibleACPUpdate(update: AcpSessionNotification['update']): boolean {

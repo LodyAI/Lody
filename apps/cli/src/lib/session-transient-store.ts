@@ -87,6 +87,7 @@ export type TurnPhase =
       turnEpoch: number;
       ownsACPUpdates: boolean;
       hasVisibleOutput: boolean;
+      hasPromptEvents: boolean;
       userTurnId?: string;
     }
   | {
@@ -96,6 +97,7 @@ export type TurnPhase =
       turnEpoch: number;
       ownsACPUpdates: boolean;
       hasVisibleOutput: boolean;
+      hasPromptEvents: boolean;
       userTurnId?: string;
     };
 
@@ -139,7 +141,7 @@ export interface SessionState {
   // ── Codex image generation uploads ──────────────────────────────────────
   // Session-scoped on purpose: image_generation_end may arrive after prompt return,
   // and clearing this with turn state would detach the generated image from its turn.
-  imageGenerationTurnIds: Map<string, string | null>;
+  imageGenerationTurnTargets: Map<string, AssistantTurnACPUpdateTarget | null>;
   // callId -> in-flight upload promise. Doubles as the dedupe set (callId presence
   // means an upload is in flight) and the drainable set (values() for flush).
   imageGenerationUploads: Map<string, Promise<void>>;
@@ -180,7 +182,7 @@ function createSessionState(): SessionState {
     pendingUsageHandlers: new Set(),
     pendingHistoryNoticeHandlers: new Set(),
     historyNoticePersistChain: Promise.resolve(),
-    imageGenerationTurnIds: new Map(),
+    imageGenerationTurnTargets: new Map(),
     imageGenerationUploads: new Map(),
     imageGenerationUploadedCallIds: new Set(),
     imageGenerationActiveCallIds: new Set(),
@@ -244,6 +246,7 @@ export class SessionTransientStore {
       turnEpoch,
       ownsACPUpdates,
       hasVisibleOutput: false,
+      hasPromptEvents: false,
       ...(args.userTurnId ? { userTurnId: args.userTurnId } : {}),
     };
     if (ownsACPUpdates) {

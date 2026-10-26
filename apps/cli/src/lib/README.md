@@ -118,8 +118,8 @@ subdirectory; this file is the navigation index. Cross-module explanations live 
   measurement rationale:
   [`.agents/docs/cli-lib-memory-pressure.md`](../../../../.agents/docs/cli-lib-memory-pressure.md).
 - `session-transient-store.ts` — buffered ACP updates and their turn ownership;
-  each active turn retains content observation through flush, independently of
-  the any-event replay guard. Classification: [ACP rules](acp/AGENTS.md).
+  each active epoch retains independent event/content facts through flush. The
+  image owner drains before content is read and records successful history writes. Classification: [ACP rules](acp/AGENTS.md).
 - `session-activity-status.ts`, `session-live-status.ts` — derived busy/idle state.
 
 ## Projects and providers

@@ -22,7 +22,7 @@ import { SessionManager } from '../src/session/session-manager';
 import { Session } from '../src/session/session';
 import { createNoopSessionSandbox } from '../src/session/session-sandbox';
 import type { SessionConfig } from '../src/session/types';
-import type { AgentClient } from '../src/agent/agent-client';
+import { AgentClient } from '../src/agent/agent-client';
 import type {
   SessionExecutionService,
   SessionExecutionServiceDeps,
@@ -177,6 +177,7 @@ const createRecoveryHarness = async (
     updates?: AcpSessionNotification['update'][];
     completeNormally?: boolean;
     flushBeforeReturn?: boolean;
+    onPrompt?: () => Promise<void>;
     retryError?: Error;
     cleanup?: () => Promise<void>;
   } = {}
@@ -306,6 +307,7 @@ const createRecoveryHarness = async (
           for (const update of options.updates ?? [])
             manager.emit('onACPUpdateMessage', sessionId, { sessionId, update });
           if (options.flushBeforeReturn) await host.flushACPUpdatesNow(sessionId);
+          await options.onPrompt?.();
           if (options.completeNormally) return { stopReason: 'end_turn' };
           if (options.priorOutput)
             manager.emit('onACPUpdateMessage', sessionId, {
@@ -384,7 +386,377 @@ const createRecoveryHarness = async (
   };
 };
 
+const syntheticGeneratedImage = {
+  imageId: 'generated-image',
+  mimeType: 'image/png',
+  fileName: 'result.png',
+  sizeBytes: 68,
+  width: 1,
+  height: 1,
+  downloadUrl: 'https://uploads.example.test/generated-image',
+};
+const syntheticImageGroup = {
+  type: 'image_group' as const,
+  images: [
+    {
+      imageId: 'generated-image',
+      mimeType: 'image/png',
+      fileName: 'result.png',
+      sizeBytes: 68,
+      width: 1,
+      height: 1,
+    },
+  ],
+};
+
+// Exercise AgentClient's raw-tool suppression and the manager's real image callbacks.
+const createImageClient = (h: Awaited<ReturnType<typeof createRecoveryHarness>>) => {
+  const client = new AgentClient({
+    sessionId: h.sessionId,
+    logger: createSilentLogger(),
+    terminalManager: {} as never,
+    agentConfig: { cliType: 'builtin', agentType: 'codex' },
+    onUpdateMessage: (update) => {
+      h.manager.emit('onACPUpdateMessage', h.sessionId, update);
+    },
+    onImageGenerationBegin: (event) => {
+      h.manager.emit('onImageGenerationBegin', h.sessionId, event);
+    },
+    onImageGenerationEnd: (event) => {
+      h.manager.emit('onImageGenerationEnd', h.sessionId, event);
+    },
+  });
+  (client as unknown as { acpSessionId: ACPSessionId }).acpSessionId = 'acp-old' as ACPSessionId;
+  return {
+    begin: () =>
+      client.sessionUpdate({
+        sessionId: 'acp-old',
+        update: {
+          sessionUpdate: 'tool_call',
+          toolCallId: 'image-call',
+          title: 'Image generation',
+          status: 'in_progress',
+          _meta: { lody: { toolName: 'ImageGeneration' } },
+        },
+      }),
+    end: (status: 'completed' | 'failed' = 'completed') =>
+      client.sessionUpdate({
+        sessionId: 'acp-old',
+        update: {
+          sessionUpdate: 'tool_call_update',
+          toolCallId: 'image-call',
+          status,
+          ...(status === 'completed'
+            ? {
+                content: [
+                  {
+                    type: 'content',
+                    content: {
+                      type: 'image',
+                      mimeType: 'image/png',
+                      data: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=',
+                    },
+                  },
+                ],
+              }
+            : {}),
+        },
+      }),
+  };
+};
+
 describe('MessageHandler ACP batching', () => {
+  it('image-only acceptance: persisted image content succeeds without ACP reply chunks', async () => {
+    const h = await createRecoveryHarness({
+      completeNormally: true,
+      updates: [{ sessionUpdate: 'config_option_update', configOptions: [] }],
+      onPrompt: async () => {
+        const imageHost = h.handler as unknown as {
+          appendAssistantImageGroupToActiveTurn(args: {
+            sessionDoc: SessionDocument;
+            turnId: string;
+            content: typeof syntheticImageGroup;
+          }): Promise<boolean>;
+        };
+        expect(
+          await imageHost.appendAssistantImageGroupToActiveTurn({
+            sessionDoc: h.doc,
+            turnId: h.turnId,
+            content: syntheticImageGroup,
+          })
+        ).toBe(true);
+      },
+    });
+    try {
+      await h.service.continueSession(h.message);
+      const history = await h.doc.sessionData.history.readAll();
+      expect(readItems(history.find((entry) => entry.id === h.turnId))).toEqual([
+        syntheticImageGroup,
+      ]);
+      expect(history.find((entry) => entry.id === h.message.userTurnId)?.status).toBe('handled');
+      expect(h.outcomes.map((fact) => fact.outcome)).toEqual([{ kind: 'succeeded' }]);
+    } finally {
+      await h.close();
+    }
+  });
+
+  it.each(['success', 'upload-failed', 'write-refused', 'failed-status', 'begin-only'] as const)(
+    'image lifecycle acceptance: $0 settles from persisted output after the upload tail',
+    async (kind) => {
+      const uploadStarted = Promise.withResolvers<void>();
+      const allowUpload = Promise.withResolvers<void>();
+      const observationStarted = Promise.withResolvers<void>();
+      const h = await createRecoveryHarness({
+        completeNormally: true,
+        onPrompt: async () => {
+          const images = createImageClient(h);
+          await images.begin();
+          if (kind !== 'begin-only')
+            await images.end(kind === 'failed-status' ? 'failed' : 'completed');
+        },
+      });
+      const imageHost = h.handler as unknown as {
+        uploadSessionImageFile: () => Promise<typeof syntheticGeneratedImage>;
+      };
+      vi.spyOn(imageHost, 'uploadSessionImageFile').mockImplementation(async () => {
+        uploadStarted.resolve();
+        await allowUpload.promise;
+        if (kind === 'upload-failed') throw new Error('Synthetic upload refused');
+        if (kind === 'write-refused')
+          await h.doc.sessionData.commands.applyHistoryAction({
+            kind: 'remove-turn',
+            turnId: h.turnId,
+          });
+        return syntheticGeneratedImage;
+      });
+      const observe = h.handler.observePromptContentForTurn.bind(h.handler);
+      vi.spyOn(h.handler, 'observePromptContentForTurn').mockImplementation((...args) => {
+        observationStarted.resolve();
+        return observe(...args);
+      });
+      const running = h.service.continueSession(h.message);
+      try {
+        await Promise.race([
+          observationStarted.promise,
+          running.then(() => {
+            throw new Error('Turn ended before content observation');
+          }),
+        ]);
+        if (kind !== 'begin-only' && kind !== 'failed-status') {
+          await uploadStarted.promise;
+          expect(h.outcomes).toEqual([]);
+          expect(h.service.getExecutionSnapshot(h.sessionId).hasActiveTurn).toBe(true);
+          expect(h.host.sessionActivePresence.has(h.sessionId)).toBe(true);
+        }
+        allowUpload.resolve();
+        await running;
+        const success = kind === 'success';
+        const history = await h.doc.sessionData.history.readAll();
+        expect(readItems(history.find((entry) => entry.id === h.turnId))).toEqual(
+          success ? [syntheticImageGroup] : []
+        );
+        expect(history.find((entry) => entry.id === h.message.userTurnId)?.status).toBe(
+          success ? 'handled' : 'failed'
+        );
+        expect(h.outcomes.map((fact) => fact.outcome)).toEqual([
+          success ? { kind: 'succeeded' } : { kind: 'failed', code: 'no_agent_output' },
+        ]);
+        expect(h.submissions).toEqual(['old']);
+        expect(h.host.store.get(h.sessionId).imageGenerationUploads.size).toBe(0);
+        expect(h.service.getExecutionSnapshot(h.sessionId).hasActiveTurn).toBe(false);
+        expect(h.host.sessionActivePresence.has(h.sessionId)).toBe(false);
+      } finally {
+        allowUpload.resolve();
+        await running;
+        await h.close();
+      }
+    }
+  );
+
+  it.each([
+    { sameId: false, endAfterSwitch: false },
+    { sameId: true, endAfterSwitch: false },
+    { sameId: false, endAfterSwitch: true },
+    { sameId: true, endAfterSwitch: true },
+  ])(
+    'image epoch acceptance: late output cannot mark a successor (sameId=$sameId, endAfterSwitch=$endAfterSwitch)',
+    async ({ sameId, endAfterSwitch }) => {
+      const h = await createRecoveryHarness();
+      const uploadStarted = Promise.withResolvers<void>();
+      const allowUpload = Promise.withResolvers<void>();
+      const imageHost = h.handler as unknown as {
+        uploadSessionImageFile: () => Promise<typeof syntheticGeneratedImage>;
+        flushCodexGeneratedImageUploads(id: SessionId): Promise<void>;
+        hasPromptEventsForTurn(id: SessionId, turnId: string): boolean;
+      };
+      vi.spyOn(imageHost, 'uploadSessionImageFile').mockImplementation(async () => {
+        uploadStarted.resolve();
+        await allowUpload.promise;
+        return syntheticGeneratedImage;
+      });
+      const nextId = sameId ? h.turnId : 'assistant:next';
+      try {
+        h.host.store.beginTurn(h.sessionId, { turnId: h.turnId });
+        await h.doc.sessionData.commands.applyHistoryAction({
+          kind: 'upsert-turn',
+          turn: {
+            id: h.turnId,
+            timestamp: '2026-10-26T00:00:00.000Z',
+            role: 'assistant',
+            items: [],
+            finished: false,
+          } as SessionHistoryInput,
+        });
+        const images = createImageClient(h);
+        await images.begin();
+        if (!endAfterSwitch) {
+          await images.end();
+          await uploadStarted.promise;
+        }
+        h.host.store.clearTurnState(h.sessionId);
+        h.host.store.beginTurn(h.sessionId, { turnId: nextId });
+        if (!sameId)
+          await h.doc.sessionData.commands.applyHistoryAction({
+            kind: 'upsert-turn',
+            turn: {
+              id: nextId,
+              timestamp: '2026-10-26T00:00:00.000Z',
+              role: 'assistant',
+              items: [],
+              finished: false,
+            } as SessionHistoryInput,
+          });
+        if (endAfterSwitch) {
+          await images.end();
+          await uploadStarted.promise;
+        }
+        allowUpload.resolve();
+        await imageHost.flushCodexGeneratedImageUploads(h.sessionId);
+        expect(await h.handler.observePromptContentForTurn(h.sessionId, nextId)).toBe(false);
+        expect(imageHost.hasPromptEventsForTurn(h.sessionId, nextId)).toBe(false);
+        const history = await h.doc.sessionData.history.readAll();
+        expect(readItems(history.find((entry) => entry.id === nextId))).toEqual([]);
+        if (!sameId)
+          expect(readItems(history.find((entry) => entry.id === h.turnId))).toEqual([
+            syntheticImageGroup,
+          ]);
+        expect(h.host.store.get(h.sessionId).imageGenerationUploads.size).toBe(0);
+      } finally {
+        allowUpload.resolve();
+        await imageHost.flushCodexGeneratedImageUploads(h.sessionId);
+        await h.close();
+      }
+    }
+  );
+
+  it('image epoch acceptance: generation begun without an active owner stays outside the next turn', async () => {
+    const h = await createRecoveryHarness();
+    const imageHost = h.handler as unknown as {
+      uploadSessionImageFile: () => Promise<typeof syntheticGeneratedImage>;
+      flushCodexGeneratedImageUploads(id: SessionId): Promise<void>;
+    };
+    vi.spyOn(imageHost, 'uploadSessionImageFile').mockResolvedValue(syntheticGeneratedImage);
+    try {
+      h.host.store.beginTurn(h.sessionId, { turnId: 'old-turn' });
+      const old = h.host.store.getCurrentACPUpdateTarget(h.sessionId);
+      if (!old) throw new Error('Missing synthetic target');
+      h.host.store.rememberFinalizedTurnForLateACPUpdates(h.sessionId, old);
+      h.host.store.clearTurnState(h.sessionId);
+      const images = createImageClient(h);
+      await images.begin();
+      h.host.store.beginTurn(h.sessionId, { turnId: 'next-turn' });
+      await images.end();
+      await imageHost.flushCodexGeneratedImageUploads(h.sessionId);
+      const history = await h.doc.sessionData.history.readAll();
+      const imageEntry = history.find((entry) =>
+        readItems(entry).some((item) => item.type === 'image_group')
+      );
+      expect(imageEntry?.id).toMatch(/^assistant-image-/);
+      expect(readItems(imageEntry)).toEqual([syntheticImageGroup]);
+      expect(await h.handler.observePromptContentForTurn(h.sessionId, 'next-turn')).toBe(false);
+    } finally {
+      await imageHost.flushCodexGeneratedImageUploads(h.sessionId);
+      await h.close();
+    }
+  });
+
+  it('image cancellation acceptance: Stop retains ownership until the upload drains', async () => {
+    const uploadStarted = Promise.withResolvers<void>();
+    const allowUpload = Promise.withResolvers<void>();
+    const observationStarted = Promise.withResolvers<void>();
+    const h = await createRecoveryHarness({
+      completeNormally: true,
+      onPrompt: async () => {
+        const images = createImageClient(h);
+        await images.begin();
+        await images.end();
+      },
+    });
+    const imageHost = h.handler as unknown as {
+      uploadSessionImageFile: () => Promise<typeof syntheticGeneratedImage>;
+    };
+    vi.spyOn(imageHost, 'uploadSessionImageFile').mockImplementation(async () => {
+      uploadStarted.resolve();
+      await allowUpload.promise;
+      return syntheticGeneratedImage;
+    });
+    const observe = h.handler.observePromptContentForTurn.bind(h.handler);
+    vi.spyOn(h.handler, 'observePromptContentForTurn').mockImplementation((...args) => {
+      observationStarted.resolve();
+      return observe(...args);
+    });
+    const running = h.service.continueSession(h.message);
+    try {
+      await observationStarted.promise;
+      await uploadStarted.promise;
+      await h.service.cancelSession({
+        type: 'session/cancel',
+        sessionId: h.sessionId,
+        turnId: h.turnId,
+        machineId: 'm-1',
+        workspaceId: 'ws-1' as WorkspaceId,
+      });
+      expect(h.service.getExecutionSnapshot(h.sessionId).hasActiveTurn).toBe(true);
+      expect(h.host.sessionActivePresence.has(h.sessionId)).toBe(true);
+      expect(h.outcomes).toEqual([]);
+      allowUpload.resolve();
+      await running;
+      expect(
+        (await h.doc.sessionData.history.readAll()).find(
+          (entry) => entry.id === h.message.userTurnId
+        )?.status
+      ).toBe('canceled');
+      expect(h.outcomes.map((fact) => fact.outcome.kind)).toEqual(['cancelled']);
+      expect(h.host.store.get(h.sessionId).imageGenerationUploads.size).toBe(0);
+      expect(h.service.getExecutionSnapshot(h.sessionId).hasActiveTurn).toBe(false);
+      expect(h.host.sessionActivePresence.has(h.sessionId)).toBe(false);
+    } finally {
+      allowUpload.resolve();
+      await running;
+      await h.close();
+    }
+  });
+
+  it('image lifecycle events prevent stale prompt replay even when no image is produced', async () => {
+    const h = await createRecoveryHarness({
+      onPrompt: async () => {
+        const images = createImageClient(h);
+        await images.begin();
+        await images.end('failed');
+      },
+    });
+    h.finishRetry.resolve();
+    try {
+      await h.service.continueSession(h.message);
+      expect(h.submissions).toEqual(['old']);
+      expect(h.outcomes.map((fact) => fact.outcome)).toEqual([
+        { kind: 'unknown', code: 'agent_disconnected' },
+      ]);
+    } finally {
+      await h.close();
+    }
+  });
+
   it.each([false, true])(
     'silent-turn acceptance: metadata-only completion fails (flushed=%s)',
     async (flushBeforeReturn) => {
@@ -664,15 +1036,15 @@ describe('MessageHandler ACP batching', () => {
         update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text } },
       });
     try {
-      expect(handler.observePromptContentForTurn(sessionId, 'first')).toBeUndefined();
+      expect(await handler.observePromptContentForTurn(sessionId, 'first')).toBeUndefined();
       expect(host.hasPromptEventsForTurn(sessionId, 'first')).toBe(true);
       host.store.beginTurn(sessionId, { turnId: 'first' });
-      expect(handler.observePromptContentForTurn(sessionId, 'first')).toBe(false);
+      expect(await handler.observePromptContentForTurn(sessionId, 'first')).toBe(false);
       expect(host.hasPromptEventsForTurn(sessionId, 'first')).toBe(false);
       enqueue('first answer');
-      expect(handler.observePromptContentForTurn(sessionId, 'first')).toBe(true);
+      expect(await handler.observePromptContentForTurn(sessionId, 'first')).toBe(true);
       await host.flushACPUpdatesNow(sessionId);
-      expect(handler.observePromptContentForTurn(sessionId, 'first')).toBe(true);
+      expect(await handler.observePromptContentForTurn(sessionId, 'first')).toBe(true);
       host.store.markPromptReturned(sessionId, 'first');
       const target = host.store.getCurrentACPUpdateTarget(sessionId);
       if (!target) throw new Error('Missing synthetic target');
@@ -681,15 +1053,15 @@ describe('MessageHandler ACP batching', () => {
       host.store.beginTurn(sessionId, { turnId: 'second', ownsACPUpdates: false });
       enqueue('late first answer');
       await host.flushACPUpdatesNow(sessionId);
-      expect(handler.observePromptContentForTurn(sessionId, 'first')).toBeUndefined();
-      expect(handler.observePromptContentForTurn(sessionId, 'second')).toBe(false);
+      expect(await handler.observePromptContentForTurn(sessionId, 'first')).toBeUndefined();
+      expect(await handler.observePromptContentForTurn(sessionId, 'second')).toBe(false);
       host.store.activateTurnACPUpdateTarget(sessionId, 'second');
       host.store.beginAcpReplaySuppression(sessionId);
       enqueue('native replay');
       host.store.endAcpReplaySuppression(sessionId);
-      expect(handler.observePromptContentForTurn(sessionId, 'second')).toBe(false);
+      expect(await handler.observePromptContentForTurn(sessionId, 'second')).toBe(false);
       host.store.clearTurnState(sessionId);
-      expect(handler.observePromptContentForTurn(sessionId, 'second')).toBeUndefined();
+      expect(await handler.observePromptContentForTurn(sessionId, 'second')).toBeUndefined();
     } finally {
       await destroyRepoOnRealTimers(repo);
     }

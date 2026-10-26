@@ -246,7 +246,8 @@ Renderer side: [packages/components/src/components/ai-gui/AGENTS.md](../../../..
 Nothing reads `PromptResponse.stopReason`, and an adapter may swallow an upstream failure and
 resolve normally — observed: an over-context request answered with HTTP 400, kept only in the
 agent's own session file — so `handleTurnError` never sees it. The no-output guard is the
-backstop. It reads the current turn's content observation before finalization:
+backstop. It awaits the existing image upload owner before reading the current
+turn's content observation, while that epoch still owns finalization:
 metadata and checklist/status updates cannot make a silent turn successful.
 Any ACP event still prevents replay. Unobservable state refuses replay and lets
 content settlement fail open; the [ACP contract](../lib/acp/AGENTS.md) owns the

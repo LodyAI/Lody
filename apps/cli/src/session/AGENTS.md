@@ -62,8 +62,8 @@
 - Stale ACP: retry once before any event; retire, retain cleanup, keep the turn. Never retry submitted
   Inbox inputs (human-plus-batch too).
 - Agent-input turns skip completion notices only. Use the completed invocation's exact input.
-- No content: `recordSilentTurnFailure`, not `setDispatchHandled`. Read
-  `turnProducedVisibleOutput` before `finalizeTurn` clears it; finalize, advance pointers, fail open.
+- No content: `recordSilentTurnFailure`, not `setDispatchHandled`. Await
+  `turnProducedVisibleOutput` before `finalizeTurn`; finalize, advance pointers, fail open.
 - Diff content comes only from the CLI-local ACP evidence store; GitHub `diffStats` use PR compare
   semantics; `session-diff-stats-target.ts` skips, never overwrites, a good total.
 
