@@ -1589,7 +1589,7 @@ const SessionDetail = ({
     return resolveActiveSessionTabId(
       activeTabSessionId,
       sessionId,
-      visibleChildSessions.map((session) => session.id)
+      visibleChildSessions.map((childSession) => childSession.id)
     );
   }, [activeTabSessionId, sessionId, visibleChildSessions]);
   const childSessionToMount =
