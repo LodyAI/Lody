@@ -5,6 +5,8 @@ Translation: current
 
 [中文](2026-10-26-mcp-send-wait.zh.md)
 
+PR: [#1922](https://github.com/LodyAI/Lody/pull/1922)
+
 ## Abstract
 
 New-chat Send was disabled until project MCP defaults became ready, and a direct

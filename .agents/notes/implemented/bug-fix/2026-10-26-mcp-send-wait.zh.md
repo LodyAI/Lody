@@ -5,6 +5,8 @@ Translation: current
 
 [English](2026-10-26-mcp-send-wait.md)
 
+PR: [#1922](https://github.com/LodyAI/Lody/pull/1922)
+
 ## 摘要
 
 此前新对话发送按钮一直等待项目 MCP 默认配置就绪，直接提交还会显示加载文案；
