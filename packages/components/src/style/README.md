@@ -86,7 +86,8 @@ Where an alpha has a semantic home in the theme, use that token instead:
 | Tailwind                        | StyleX                                                                |
 | ------------------------------- | --------------------------------------------------------------------- |
 | `p-2` / `gap-4` / `mt-1.5`      | `themeSpace[2]` / `themeSpace[4]` / `themeSpace[1.5]`                 |
-| `rounded-lg` / `rounded-full`   | `borderRadius: themeRadius.lg` / `themeRadius.full`                   |
+| `rounded-lg`                    | `borderRadius: themeRadius.lg`                                        |
+| `rounded-full`                  | `borderRadius: 'calc(infinity * 1px)'`                                |
 | `text-sm`                       | `fontSize: themeFontSize.sm` **and** `lineHeight: themeLineHeight.sm` |
 | `font-semibold`                 | `fontWeight: themeFontWeight.semibold`                                |
 | `duration-200` / `ease-pro`     | `themeDuration[200]` / `themeEasing.pro`                              |
@@ -95,6 +96,10 @@ Where an alpha has a semantic home in the theme, use that token instead:
 
 `text-*` sets a size **and** a line height in Tailwind v4. A surface that keeps
 only the size re-wraps its copy; keep the pair.
+
+These mappings require the [compiled variable contract](MIGRATION.md#preserve-the-computed-contract).
+Some radius and weight tokens retain literal legacy defaults; they cannot
+replace a runtime variable merely because the default screenshot matches.
 
 Spacing reads `--spacing`, the theme's one spacing unit, so a migrated surface
 and a Tailwind one stay coupled. Type sizes stay on Tailwind's rem scale: the

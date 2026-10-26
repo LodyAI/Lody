@@ -43,6 +43,44 @@ owns the cascade, focus/ring, typography, CSS-hook and verification contracts.
 
 ## Continued batches and corrections
 
+The status/project-entry/rename continuation removes 75 more compiler-confirmed
+utilities across six components: WorkingGrid 8→0, WorkingGridCollapse 13→0,
+WorkingStatusMark 4→0, Spinner 7→2, MobileProjectEditSection 30→0 and
+RenameSessionDialog 29→14. Spinner retains the animation hook and SVG size marker
+that remaining ancestor selectors consume; rename retains primitive layout,
+typography and Textarea overrides. Public props, DOM structure, inline styles,
+measurement, animations and input/save handling remain unchanged. Project entry
+keeps runtime radius, weight and line-height variables, including nondefault
+palette/scale browser controls, rather than substituting equal-default literals.
+
+This batch's 434 primary pairs have equal recorded styles/geometry and zero
+threshold pixels; 425 PNGs are byte-identical. Nine project keyboard frames retain
+small raw pixel differences. Native project input has 48 byte-identical pairs;
+rename has 44 native and eight pointer-retry pairs with zero threshold pixels,
+42 and seven respectively byte-identical. Rename shadow variants reproduce on
+unchanged sources. Status animation capture remains incomplete as acceptance:
+107/120 pairs are byte-identical, while 13 formal frames retain 9,518 threshold
+pixels despite equal computed geometry, styles and animation observations.
+Seventy-eight alternating-source control screenshots reproduce a shared complete
+PNG for every changed state, but some formal variants remain unreproduced. These
+13 frames are not accepted as antialiasing or hidden by a wider threshold; they
+remain separate from the earlier 20-frame/115-pixel limit. The self-contained
+`leaf-acceptance.html` includes actual before/after images, controls and precise
+limits. Synthetic composition events establish the DOM IME guard, not native OS
+IME behavior; device descriptors establish Chromium touch emulation only.
+
+The actual OSS desktop is built and run on both sides with its real main,
+preload, IPC, bundled CLI and isolated local chat. The smoke harness waits for
+the TourStill camera and foreground ancestor geometry before capturing, since
+Playwright's animation switch cannot settle the JavaScript spring. Three final
+application states have zero threshold pixels; Explore retains 16,155 formal
+threshold pixels. Two independent launches of the same final build show different
+stable foreground PNGs, and the second launch plus three repeated screenshots
+reproduces the entire before PNG. Forty-one foreground elements have equal
+computed styles and text geometry after excluding a nonvisual elapsed-time
+variable. This demonstrates run-to-run raster variation without identifying its
+compositor trigger; the formal differing pair remains in the report.
+
 The Emoji Picker / Drawer continuation moves another 116 compiler-confirmed
 utilities: Emoji Picker 87→3 and Drawer 67→35. Emoji active theme fills and the
 primitive Spinner size remain compatible utilities. Drawer direction variants,
@@ -497,8 +535,9 @@ components from 2,100 to 1,907. The shared-adapter batch reduces `src/ui` from
 lower bound is 2,421 occurrences after the alpha follow-up: components 1,902, `src/ui` 518 and routes 1,
 across 188 affected files. The scanner separately
 reports 690 unresolved expressions: 600 in components and 90 in `src/ui`.
-After integrating upstream additions, the current scan reports 2,572 occurrences
-(components 2,054, `src/ui` 517, routes 1) across 188 files, with 692 unresolved
+After integrating upstream additions, the scan reported 2,572 occurrences across
+188 files. The status/project-entry/rename batch leaves 2,497 occurrences
+(components 2,009, `src/ui` 487, routes 1) across 184 files, with 692 unresolved
 expressions (611 components, 81 `src/ui`). These are lower bounds, not a project
 completion percentage.
 

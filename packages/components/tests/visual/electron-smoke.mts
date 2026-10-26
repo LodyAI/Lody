@@ -18,7 +18,9 @@ const harness = new ElectronHarness({
   stableId: 'STYLE-MIGRATION-ELECTRON-SMOKE',
 });
 const result: Record<string, unknown> = {
-  scope: 'After-only real OSS Electron smoke; no pre-migration application baseline',
+  scope:
+    process.env.LODY_STYLE_MIGRATION_PHASE ??
+    'After-only real OSS Electron smoke; no pre-migration application baseline',
   command:
     'pnpm --dir e2e exec tsx --tsconfig ../apps/cli/tsconfig.json ../packages/components/tests/visual/electron-smoke.mts',
   startedAt: new Date().toISOString(),
@@ -42,12 +44,59 @@ try {
   result.bootstrap = await onboarding.waitForLocalBootstrap();
   const screenshot = async (name: string) => {
     await page.evaluate(() => document.fonts.ready);
+    const readiness = await page.evaluate(async () => {
+      // TourStill's spring writes transforms from requestAnimationFrame; the
+      // screenshot animation switch only settles browser-owned animations.
+      let previous = '';
+      let stableFrames = 0;
+      for (let frame = 0; frame < 240; frame++) {
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+        const anchor = document.querySelector<HTMLElement>('[data-tour-anchor="window"]');
+        const nodes: HTMLElement[] = [];
+        const foreground = [...document.querySelectorAll<HTMLElement>('h1, h2, button')].filter(
+          (node) => {
+            const rect = node.getBoundingClientRect();
+            return (
+              rect.width > 0 && rect.height > 0 && !node.closest('[data-tour-anchor="window"]')
+            );
+          }
+        );
+        for (const target of [anchor, ...foreground])
+          for (let node = target, depth = 0; node && depth < 4; node = node.parentElement, depth++)
+            if (!nodes.includes(node)) nodes.push(node);
+        const pose = nodes.map((node) => {
+          const rect = node.getBoundingClientRect();
+          const computed = getComputedStyle(node);
+          return {
+            rect: [rect.x, rect.y, rect.width, rect.height],
+            transform: computed.transform,
+            opacity: computed.opacity,
+            font: computed.font,
+            filter: computed.filter,
+          };
+        });
+        const running = document
+          .getAnimations()
+          .some(
+            (animation) =>
+              animation.effect?.getTiming().iterations !== Infinity &&
+              animation.playState === 'running'
+          );
+        const current = JSON.stringify(pose);
+        stableFrames = !running && current === previous ? stableFrames + 1 : 0;
+        previous = current;
+        if (stableFrames >= 12) return { frames: frame + 1, tourPose: pose };
+      }
+      throw new Error('The real onboarding camera or finite animation did not settle');
+    });
     await page.screenshot({
       path: join(scenarioDir, name),
       fullPage: true,
       animations: 'disabled',
       caret: 'hide',
     });
+    const captureReadiness = (result.captureReadiness ??= {}) as Record<string, unknown>;
+    captureReadiness[name] = readiness;
     (result.screenshots as string[]).push(name);
   };
 

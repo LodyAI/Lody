@@ -8,6 +8,7 @@ import {
 } from 'react';
 
 import { cn } from '@/lib/utils';
+import * as stylex from '@stylexjs/stylex';
 import { useResolvedTheme } from '@/theme-provider';
 
 import {
@@ -21,6 +22,12 @@ import {
 } from './working-grid-sea';
 
 export type { WorkingGridDirection } from './working-grid-sea';
+
+const styles = stylex.create({
+  root: { position: 'relative', display: 'inline-block', flexShrink: 0 },
+  tile: { position: 'absolute', display: 'block' },
+  face: { display: 'block', width: '100%', height: '100%', backgroundColor: 'currentColor' },
+});
 
 /** Where a tile scales from, or `none` to keep every tile full size. */
 export type WorkingGridScale = 'center' | 'bottom' | 'none';
@@ -401,7 +408,7 @@ export function WorkingGrid({
       ref={rootRef}
       data-working-grid=""
       aria-hidden="true"
-      className={cn('relative inline-block shrink-0', className)}
+      className={cn(stylex.props(styles.root).className, className)}
       // Tiles animate opacity between 1 and their trough; the mark's own opacity
       // sets the ceiling, so the brightest tile reaches maxOpacity.
       style={{ width: size, height: size, opacity: maxOpacity, ...style }}
@@ -414,7 +421,7 @@ export function WorkingGrid({
             data-working-grid-tile=""
             data-row={row}
             data-col={col}
-            className="absolute block"
+            className={stylex.props(styles.tile).className}
             style={{
               left: col * pitch + inset,
               top: row * pitch + insetTop,
@@ -424,7 +431,7 @@ export function WorkingGrid({
             }}
           >
             <span
-              className="block size-full bg-current"
+              className={stylex.props(styles.face).className}
               style={{ ...shape, transformOrigin: origin }}
             />
           </span>

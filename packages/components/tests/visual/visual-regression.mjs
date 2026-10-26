@@ -843,7 +843,7 @@ function renderReport({
     <ul>${list(acceptance.scope)}</ul>${coverage ? `<table><thead><tr><th>Component</th><th>Utilities before</th><th>Utilities after</th><th>Remaining compatibility</th></tr></thead><tbody>${coverage}</tbody></table>` : ''}<h3>Validation</h3><ul>${list(acceptance.checks)}</ul>
     <h3>Known limits and next batches</h3><ul>${list(acceptance.limits)}</ul>
     ${evidencePairs ? `<h3>${escapeHtml(acceptance.evidenceTitle ?? 'Additional browser evidence')}</h3><p>${escapeHtml(acceptance.evidenceDescription ?? 'Supplemental screenshots are separate from the quantified component comparisons below.')}</p>${evidencePairs}` : ''}
-    ${(acceptance.evidence ?? []).length ? '<h3>Real Electron application smoke test — after only</h3><p>These application screenshots are separate from the paired component comparisons below.</p><div class="shots">' + acceptance.evidence.map((item) => `<figure><figcaption>${escapeHtml(item.label)}</figcaption><img src="${item.dataUrl}" alt="${escapeHtml(item.label)}" loading="lazy"></figure>`).join('') + '</div>' : ''}
+    ${(acceptance.evidence ?? []).length ? `<h3>${escapeHtml(acceptance.evidenceHeading ?? 'Real Electron application smoke test — after only')}</h3><p>${escapeHtml(acceptance.evidenceDescriptionSingle ?? 'These application screenshots are separate from the paired component comparisons below.')}</p><div class="shots">` + acceptance.evidence.map((item) => `<figure><figcaption>${escapeHtml(item.label)}</figcaption><img src="${item.dataUrl}" alt="${escapeHtml(item.label)}" loading="lazy"></figure>`).join('') + '</div>' : ''}
     </section>`;
   const failureRows = [
     ['Before', beforeFailures],
@@ -858,7 +858,9 @@ function renderReport({
     .join('');
   const groupSections = [...groups.entries()]
     .map(([title, groupResults]) => {
-      const changedCount = groupResults.filter((result) => result.status === 'changed').length;
+      const changedCount = groupResults.filter(
+        (result) => result.status !== 'identical' || !result.pngIdentical
+      ).length;
       const rows = groupResults
         .map((result) => {
           const entry = result.entry;
@@ -914,7 +916,7 @@ function renderReport({
               }</div>`
             : '';
           return `
-            <section class="frame ${result.status} ${result.diff?.ratio === 0 ? 'pixel-same' : ''}">
+            <section class="frame ${result.status} ${!result.pngIdentical ? 'raw-png-difference' : ''} ${result.diff?.ratio === 0 ? 'pixel-same' : ''}">
               ${head}
               <div class="shots">
                 <figure><figcaption>Before — ${escapeHtml(beforePhase)}</figcaption><img src="${result.beforeUrl}" alt="before" loading="lazy" /></figure>
@@ -988,10 +990,13 @@ function renderReport({
   <h1>Tailwind → StyleX — visual acceptance</h1>
   <p>Paired frames were rendered in Chromium from this repository's production-component stories. The “Difference” image marks above-threshold pixels in magenta over a faded copy of the after frame; raw property changes retain geometry and computed-style differences. Click any screenshot to inspect its original size.</p>
 </header>
+${acceptance.verdict ? `<section class="frame" data-acceptance-verdict style="margin:16px 32px;border:2px solid #a75a00;background:#fff6e5"><h2>Partial visual acceptance — unresolved evidence remains</h2><p>${escapeHtml(acceptance.verdict)}</p></section>` : ''}
+<p style="margin:16px 32px" data-summary-scope>Primary comparison metrics only. Supplemental native, controls and application evidence have separate outcomes below.</p>
 <div class="summary">
   <div><strong>${counts.total}</strong>frames compared</div>
   <div><strong>${counts.identical}</strong>pixel threshold + raw styles match</div>
-  <div><strong>${counts.changed}</strong>raw pixel/computed-style differences</div>
+  <div><strong>${counts.changed}</strong>threshold-pixel/computed-style differences</div>
+  <div><strong>${counts.total - counts.pngIdentical}</strong>PNG files differ (including below threshold)</div>
   <div><strong>${counts.missing}</strong>missing comparison frames</div>
   <div><strong>${beforeFailures.length + afterFailures.length}</strong>capture failures (never passed)</div>
   <div><strong>${counts.pngIdentical}</strong>PNG files byte-identical</div>
@@ -1035,7 +1040,7 @@ function filter() {
   for (const group of document.querySelectorAll('details.group')) {
     let visible = false;
     for (const frame of group.querySelectorAll('.frame')) {
-      frame.hidden = (changed.checked && frame.classList.contains('identical')) || !frame.textContent.toLowerCase().includes(query);
+      frame.hidden = (changed.checked && frame.classList.contains('identical') && !frame.classList.contains('raw-png-difference')) || !frame.textContent.toLowerCase().includes(query);
       visible ||= !frame.hidden;
     }
     group.hidden = !visible;

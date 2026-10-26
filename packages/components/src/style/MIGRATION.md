@@ -104,6 +104,15 @@ stack; replacing it with `var(--font-sans)` selects the app's Inter stack and
 changes comment layout. Keep the original family until a separate typography
 change is intended and accepted.
 
+Preserve runtime variables as well as their default values. The project editor's
+`rounded-xl`, `font-medium` and `leading-tight` read `--radius-xl`,
+`--font-weight-medium` and `--leading-tight`; some shared scale tokens contain
+literal defaults instead. Keep the exact variable expression locally when that
+token does not preserve the compiler contract, and verify nondefault variable
+values in the browser. Do not change a shared token for one component without
+checking its other consumers. `rounded-full` compiles to `calc(infinity * 1px)`;
+a fixed `9999px` token can differ for a public component with unbounded sizes.
+
 Type and spacing stay on their original rem scale. Moving them to `em` or
 `--ui-font-size` changes interface font-size behavior. Preserve existing `em`
 styles where the component already follows the interface size.

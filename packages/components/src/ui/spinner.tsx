@@ -2,6 +2,12 @@ import { Loader2, type LucideIcon } from 'lucide-react';
 import type { ComponentPropsWithoutRef } from 'react';
 
 import { cn } from '@/lib/utils';
+import * as stylex from '@stylexjs/stylex';
+
+const styles = stylex.create({
+  root: { display: 'inline-flex', flexShrink: 0, alignItems: 'center', justifyContent: 'center' },
+  spinning: { willChange: 'transform' },
+});
 
 export type SpinnerProps = Omit<ComponentPropsWithoutRef<'span'>, 'children'> & {
   /** Glyph to rotate. Defaults to Lucide's `Loader2` arc. */
@@ -51,8 +57,8 @@ export function Spinner({
   return (
     <span
       className={cn(
-        'inline-flex shrink-0 items-center justify-center',
-        spinning && 'animate-spin will-change-transform',
+        stylex.props(styles.root, spinning && styles.spinning).className,
+        spinning && 'animate-spin',
         className
       )}
       {...props}

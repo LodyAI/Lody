@@ -35,6 +35,31 @@ Portal 离开 `@lody/ui` 调色板子树后使用不同颜色。任意透明度�
 
 ## 续迁批次与修正
 
+状态标记、项目入口与重命名续迁在六个组件中再减少 75 处编译器确认的 utility：
+WorkingGrid 8→0、WorkingGridCollapse 13→0、WorkingStatusMark 4→0、Spinner 7→2、
+MobileProjectEditSection 30→0、RenameSessionDialog 29→14。Spinner 保留动画 hook 和
+祖先选择器使用的 SVG 尺寸标记；重命名保留 primitive 布局、字体及 Textarea 覆盖。
+公开属性、DOM 结构、内联样式、测量、动画及输入/保存处理均保持不变。项目入口保留
+运行时圆角、字重、行高变量，通过非默认调色板/比例浏览器对照，不用默认值相同的
+常量替代变量合同。
+
+本批 434 组主对照记录的样式与几何一致，阈值差异为零，其中 425 组 PNG 字节一致；
+九个项目键盘状态仍有少量原始像素差异。项目原生输入 48 组字节一致；重命名 44 组
+原生、八组指针重试均无阈值差异，分别 42、七组字节一致，阴影变体可在未改变源码上
+复现。状态动画仍未完成视觉验收：120 组中 107 组字节一致，13 个正式帧保留 9,518 个
+阈值像素，计算几何、样式及动画观测却一致。78 张交替版本对照在每个差异状态均复现
+跨版本相同的完整 PNG，但部分正式变体尚未复现。这 13 帧不归为抗锯齿、不扩大阈值，
+也不与早期 20 帧/115 像素限制混算。自包含 `leaf-acceptance.html` 汇集真实前后截图、
+控制实验及准确限制。合成 composition 事件仅验证 DOM IME guard，不代表原生 OS IME；
+设备描述符仅代表 Chromium 触屏仿真。
+
+前后均实际构建并运行 OSS 桌面，覆盖真实 main、preload、IPC、内置 CLI 和隔离的本地
+聊天。验收工具在拍照前等待 TourStill 相机及前景祖先几何稳定，因为截图动画开关无法
+终止 JavaScript 弹簧。最终三个应用状态无阈值差异，Explore 正式对照仍有 16,155 个
+阈值像素。同一最终构建的两次独立启动出现不同的稳定前景 PNG，第二次及三张重复图
+完整复现迁移前整张 PNG。41 个前景节点排除非视觉耗时变量后，计算样式及文字几何
+相等。这证明运行间栅格变化，但没有确定合成触发；报告仍保留正式差异图。
+
 Emoji Picker / Drawer 续迁再移除 116 处编译器确认的 utility：Emoji Picker
 87→3，Drawer 67→35。Emoji 的选中主题底色和 Spinner 控件尺寸保留兼容类；
 Drawer 方向变体、头部断点和动画 hook 保留 utilities 层优先级，避免原先无效的
@@ -360,8 +385,9 @@ component 扫描另列 605 个未解析表达式。后续七文件再将 compone
 共享适配层批次再将 `src/ui` 从 992 处降至 742 处。Emoji Picker / Drawer 批次将 `src/ui` 进一步降至 626 处。Diff Viewer 批次进一步将 `src/ui` 降至 518 处。合入前透明度续迁后的审计下界
 为 2,421 处：components 1,902、`src/ui` 518、routes 1，共 188 个仍含 utility 的文件。
 扫描器另列 690 个未解析表达式：components 600 个、`src/ui` 90 个。
-合入上游新增代码后，当前扫描为 2,572 处（components 2,054、`src/ui` 517、routes 1），
-共 188 个文件；另有 692 个未解析表达式（components 611、`src/ui` 81）。
+合入上游新增代码后为 2,572 处、188 个文件；本批状态/项目入口/重命名续迁后为 2,497 处
+（components 2,009、`src/ui` 487、routes 1），共 184 个文件；另有 692 个未解析表达式
+（components 611、`src/ui` 81）。
 这些数值是下界，不是全项目完成百分比。
 
 未使用的 `src/ui/sidebar.tsx` 保留 324 处，`src/ui/index.ts` 没有重导出它；

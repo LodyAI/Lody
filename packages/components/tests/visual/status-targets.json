@@ -1,0 +1,60 @@
+{
+  "viewports": [
+    { "name": "desktop", "width": 1280, "height": 900 },
+    { "name": "phone", "width": 390, "height": 844 }
+  ],
+  "themes": ["light", "dark"],
+  "ids": [
+    "ui-statusmigration--grids",
+    "ui-statusmigration--caller-overrides",
+    "ui-statusmigration--collapse",
+    "ui-statusmigration--states",
+    "ui-statusmigration--transition",
+    "ui-statusmigration--spinners",
+    "ui-statusmigration--spinner-state"
+  ],
+  "ready": {
+    "ui-statusmigration--collapse": [{ "action": "visible", "text": "Completed 2" }]
+  },
+  "states": {
+    "ui-statusmigration--transition": [
+      {
+        "name": "unread",
+        "steps": [
+          { "action": "click", "role": "button", "name": "Finish unread" },
+          { "action": "visible", "text": "Unread" }
+        ]
+      },
+      {
+        "name": "idle",
+        "steps": [
+          { "action": "click", "role": "button", "name": "Clear status" },
+          { "action": "visible", "text": "Idle" }
+        ]
+      },
+      {
+        "name": "working-again",
+        "steps": [
+          { "action": "click", "role": "button", "name": "Start working" },
+          { "action": "visible", "text": "Working" }
+        ]
+      }
+    ],
+    "ui-statusmigration--spinner-state": [
+      {
+        "name": "spinning",
+        "steps": [
+          { "action": "click", "role": "button", "name": "Toggle spinner" },
+          { "action": "visible", "text": "Spinning" }
+        ]
+      },
+      {
+        "name": "resting-again",
+        "steps": [
+          { "action": "click", "role": "button", "name": "Toggle spinner" },
+          { "action": "visible", "text": "Resting" }
+        ]
+      }
+    ]
+  }
+}

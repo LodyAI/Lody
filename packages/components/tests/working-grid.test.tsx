@@ -231,7 +231,9 @@ describe('WorkingGrid', () => {
 
     // Per tile: the main wave on the outer box, a smaller ripple on the face.
     const main = recorded.filter((a) => a.target.hasAttribute('data-working-grid-tile'));
-    const ripple = recorded.filter((a) => a.target.classList.contains('bg-current'));
+    const ripple = recorded.filter((a) =>
+      a.target.parentElement?.hasAttribute('data-working-grid-tile')
+    );
     expect(main).toHaveLength(9);
     expect(ripple).toHaveLength(9);
     // Each wave has one shape and period everywhere; only the phase differs, so
@@ -368,7 +370,9 @@ describe('WorkingGrid', () => {
       // outer layer only swells, so a whole mark never empties at once.
       const outers = recorded.filter((a) => a.target.hasAttribute('data-working-grid-tile'));
       for (const outer of outers) expect(outer.keyframes.every((f) => scaleOf(f) > 0)).toBe(true);
-      const layer = recorded.find((a) => a.target.classList.contains('bg-current'))!;
+      const layer = recorded.find((a) =>
+        a.target.parentElement?.hasAttribute('data-working-grid-tile')
+      )!;
       const frames = layer.keyframes;
       let empty = 0;
       for (let k = 1; k < frames.length; k += 1) {

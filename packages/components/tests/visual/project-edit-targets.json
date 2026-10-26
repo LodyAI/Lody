@@ -1,0 +1,294 @@
+{
+  "viewports": [
+    {
+      "name": "desktop",
+      "width": 1280,
+      "height": 900
+    },
+    {
+      "name": "compact-phone",
+      "width": 320,
+      "height": 720
+    },
+    {
+      "name": "phone",
+      "width": 390,
+      "height": 844
+    },
+    {
+      "name": "below-sm",
+      "width": 639,
+      "height": 900
+    },
+    {
+      "name": "at-sm",
+      "width": 640,
+      "height": 900
+    },
+    {
+      "name": "iphone",
+      "width": 390,
+      "height": 844,
+      "device": "iPhone 13"
+    }
+  ],
+  "themes": ["light", "dark"],
+  "ids": [
+    "mobile-mobileprojecteditmigration--local",
+    "mobile-mobileprojecteditmigration--git-hub",
+    "mobile-mobileprojecteditmigration--long-translation"
+  ],
+  "ready": {
+    "mobile-mobileprojecteditmigration--local": [
+      {
+        "action": "visible",
+        "selector": "[data-project-edit-section] button"
+      },
+      {
+        "action": "visible",
+        "selector": "[data-editor-request-kind=\"none\"]"
+      }
+    ],
+    "mobile-mobileprojecteditmigration--git-hub": [
+      {
+        "action": "visible",
+        "selector": "[data-project-edit-section] button"
+      },
+      {
+        "action": "visible",
+        "selector": "[data-editor-request-kind=\"none\"]"
+      }
+    ],
+    "mobile-mobileprojecteditmigration--long-translation": [
+      {
+        "action": "visible",
+        "selector": "[data-project-edit-section] button"
+      },
+      {
+        "action": "visible",
+        "selector": "[data-editor-request-kind=\"none\"]"
+      }
+    ]
+  },
+  "states": {
+    "mobile-mobileprojecteditmigration--local": [
+      {
+        "name": "hover",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "[data-project-edit-section] button"
+          }
+        ]
+      },
+      {
+        "name": "keyboard-focus",
+        "steps": [
+          {
+            "action": "movePointer",
+            "x": -10,
+            "y": -10
+          },
+          {
+            "action": "focus",
+            "role": "button",
+            "name": "Reset request"
+          },
+          {
+            "action": "press",
+            "role": "button",
+            "name": "Reset request",
+            "key": "Shift+Tab"
+          }
+        ]
+      },
+      {
+        "name": "keyboard-open",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "[data-project-edit-section] button",
+            "key": "Enter"
+          },
+          {
+            "action": "visible",
+            "selector": "[data-editor-request-kind=\"create\"]"
+          }
+        ]
+      },
+      {
+        "name": "reset",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Reset request"
+          },
+          {
+            "action": "visible",
+            "selector": "[data-editor-request-kind=\"none\"]"
+          }
+        ]
+      },
+      {
+        "name": "pointer-open",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[data-project-edit-section] button"
+          },
+          {
+            "action": "visible",
+            "selector": "[data-editor-request-kind=\"create\"]"
+          }
+        ]
+      }
+    ],
+    "mobile-mobileprojecteditmigration--git-hub": [
+      {
+        "name": "hover",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "[data-project-edit-section] button"
+          }
+        ]
+      },
+      {
+        "name": "keyboard-focus",
+        "steps": [
+          {
+            "action": "movePointer",
+            "x": -10,
+            "y": -10
+          },
+          {
+            "action": "focus",
+            "role": "button",
+            "name": "Reset request"
+          },
+          {
+            "action": "press",
+            "role": "button",
+            "name": "Reset request",
+            "key": "Shift+Tab"
+          }
+        ]
+      },
+      {
+        "name": "keyboard-open",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "[data-project-edit-section] button",
+            "key": "Enter"
+          },
+          {
+            "action": "visible",
+            "selector": "[data-editor-request-kind=\"create\"]"
+          }
+        ]
+      },
+      {
+        "name": "reset",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Reset request"
+          },
+          {
+            "action": "visible",
+            "selector": "[data-editor-request-kind=\"none\"]"
+          }
+        ]
+      },
+      {
+        "name": "pointer-open",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[data-project-edit-section] button"
+          },
+          {
+            "action": "visible",
+            "selector": "[data-editor-request-kind=\"create\"]"
+          }
+        ]
+      }
+    ],
+    "mobile-mobileprojecteditmigration--long-translation": [
+      {
+        "name": "hover",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "[data-project-edit-section] button"
+          }
+        ]
+      },
+      {
+        "name": "keyboard-focus",
+        "steps": [
+          {
+            "action": "movePointer",
+            "x": -10,
+            "y": -10
+          },
+          {
+            "action": "focus",
+            "role": "button",
+            "name": "Reset request"
+          },
+          {
+            "action": "press",
+            "role": "button",
+            "name": "Reset request",
+            "key": "Shift+Tab"
+          }
+        ]
+      },
+      {
+        "name": "keyboard-open",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "[data-project-edit-section] button",
+            "key": "Enter"
+          },
+          {
+            "action": "visible",
+            "selector": "[data-editor-request-kind=\"create\"]"
+          }
+        ]
+      },
+      {
+        "name": "reset",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Reset request"
+          },
+          {
+            "action": "visible",
+            "selector": "[data-editor-request-kind=\"none\"]"
+          }
+        ]
+      },
+      {
+        "name": "pointer-open",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[data-project-edit-section] button"
+          },
+          {
+            "action": "visible",
+            "selector": "[data-editor-request-kind=\"create\"]"
+          }
+        ]
+      }
+    ]
+  }
+}

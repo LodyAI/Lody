@@ -106,6 +106,9 @@ document why they were unsuitable for a pair.
 | `session-leaf-targets.json`                                     | Usage variants, relation trees/confirmation and the delayed notification prompt.                                    |
 | `usage-portal-targets.json`                                     | Actually opened usage portals across seven variants.                                                                |
 | `regression-targets.json`                                       | Additional information-bar and onboarding checks; historical missing baselines remain explicit.                     |
+| `status-targets.json`                                           | Working grids, unread/collapse states and spinner callers in both themes, including reduced motion.                 |
+| `project-edit-targets.json`                                     | Actual project-editor entry, translations, truncation, keyboard/pointer activation and responsive boundaries.       |
+| `rename-targets.json`                                           | Actual rename dialog, title wrapping, disabled/pending save, failure/retry, focus and 639/640/641px boundaries.     |
 | `sidebar-targets.json`                                          | Sidebar layouts, row parts, loading/empty/overflow and archive/menu states; narrow widths use a desktop UA.         |
 | `sidebar-mobile-targets.json`                                   | iPhone/Android descriptors, known-logo readiness and real touch menu/archive actions in both themes.                |
 | `sidebar-updated-interaction-targets.json`                      | Show all/less, selection, collapse/expand and focus/hover on the production Updated list.                           |
@@ -193,6 +196,9 @@ source path. Require rendered shadow-DOM lines before accepting a diff body;
 an unregistered zero-height custom element only verifies its surrounding chrome.
 
 The `states` object maps a story ID to ordered state names and observable steps.
+When another surface such as an error toast also uses `role="dialog"`, locate
+the intended dialog by its accessible name. Portal-only fixtures still require
+visible actual content even when their unpainted story root is allowed blank.
 Steps use roles, text or owned selectors and can click, tap, hover, focus, fill, press,
 move the pointer, or assert visible/hidden/enabled/disabled state. States execute
 in sequence after a fresh story load. Move the pointer away before a keyboard

@@ -1,9 +1,20 @@
 import { useEffect, useState } from 'react';
 
 import { cn } from '@/lib/utils';
+import * as stylex from '@stylexjs/stylex';
+import { themeSpace } from '../style/theme-scale.stylex';
 
 import { WorkingGrid } from './working-grid';
 import { WorkingGridCollapse } from './working-grid-collapse';
+
+const styles = stylex.create({
+  unread: {
+    height: themeSpace[2],
+    width: themeSpace[2],
+    borderRadius: 'calc(infinity * 1px)',
+    backgroundColor: 'currentColor',
+  },
+});
 
 export type WorkingStatusMarkProps = {
   /** The session's agent is running. */
@@ -54,7 +65,7 @@ export function WorkingStatusMark({ working, unread, className }: WorkingStatusM
     return (
       <span
         data-session-unread-dot=""
-        className={cn('h-2 w-2 rounded-full bg-current', className)}
+        className={cn(stylex.props(styles.unread).className, className)}
       />
     );
   }
