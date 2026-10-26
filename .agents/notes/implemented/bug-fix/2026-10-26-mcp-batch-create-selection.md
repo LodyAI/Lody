@@ -46,3 +46,8 @@ the test pass. No temporary change is part of the final diff.
 The test ran with Node 26.12.1 by reusing dependencies already installed in a
 separate worktree; the required Node version was fetched into npm's isolated
 cache. The PR's full check status records any remaining environment limits.
+
+## Review
+
+[Draft PR #1907](https://github.com/LodyAI/Lody/pull/1907) includes the red and
+green terminal captures and the focused regression evidence.
