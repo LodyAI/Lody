@@ -394,9 +394,12 @@ export function ProjectGroupEditorDialog({
           className={SETTINGS_EDITOR_DIALOG_LAYOUT}
           style={{ height: 'min(680px, 88dvh)' }}
         >
-          {editor?.mode === 'add' ? (
+          {/* Creating and editing walk the same questions; only someone who
+              may not change the project sees it read-only in the form. */}
+          {editor && !readOnly ? (
             <ProjectCreateWizard
-              key={editor.projectId}
+              key={editor.mode === 'add' ? editor.projectId : editor.project.id}
+              mode={editor.mode === 'add' ? 'create' : 'edit'}
               value={value}
               onChange={(next) => {
                 if (openEditor) onChange({ ...openEditor, value: next });
@@ -417,46 +420,33 @@ export function ProjectGroupEditorDialog({
               onCancel={close}
             />
           ) : null}
-          {editor?.mode === 'edit' ? (
-            <Dialog.Header>
-              <Dialog.Title>
-                {readOnly ? editor.project.name : t('settings.projectGroups.editTitle')}
-              </Dialog.Title>
-              <Dialog.Description>
-                {readOnly
-                  ? t('settings.projectGroups.readOnlyDescription')
-                  : t('settings.projectGroups.dialogDescription')}
-              </Dialog.Description>
-            </Dialog.Header>
-          ) : null}
-          {editor?.mode === 'edit' ? (
-            <ProjectGroupForm
-              value={value}
-              onChange={(next) => {
-                // A panel fading out is not edited: a change there would reopen it.
-                if (openEditor) onChange({ ...openEditor, value: next });
-              }}
-              sources={options}
-              labelOf={labelOf}
-              detailOf={detailOf}
-              statusOf={statusOf}
-              isNonGit={(memberId) =>
-                value.members.find((member) => member.id === memberId)?.directory?.inspection
-                  .isGit === false || detection.nonGit.has(memberId)
-              }
-              currentMachineId={currentMachineId}
-              validation={validation}
-              readOnly={readOnly}
-              submitting={submitting}
-              error={error}
-              isEditing
-              onSelectFolders={() => setSelectingFolder(true)}
-              selectFoldersDisabled={
-                folderMachines.length === 0 || !folderMachines.some((machine) => machine.online)
-              }
-              onSubmit={() => void save()}
-              onCancel={close}
-            />
+          {editor?.mode === 'edit' && readOnly ? (
+            <>
+              <Dialog.Header>
+                <Dialog.Title>{editor.project.name}</Dialog.Title>
+                <Dialog.Description>
+                  {t('settings.projectGroups.readOnlyDescription')}
+                </Dialog.Description>
+              </Dialog.Header>
+              <ProjectGroupForm
+                value={value}
+                onChange={() => undefined}
+                sources={options}
+                labelOf={labelOf}
+                detailOf={detailOf}
+                statusOf={statusOf}
+                isNonGit={(memberId) =>
+                  value.members.find((member) => member.id === memberId)?.directory?.inspection
+                    .isGit === false || detection.nonGit.has(memberId)
+                }
+                currentMachineId={currentMachineId}
+                validation={validation}
+                readOnly
+                isEditing
+                onSubmit={() => undefined}
+                onCancel={close}
+              />
+            </>
           ) : null}
         </Dialog.Content>
       </Dialog.Root>

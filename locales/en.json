@@ -5431,8 +5431,6 @@
   "e2ee.verify.versionShort": "Version {{version}}",
   "settings.projectGroups.removeTitle": "Delete project?",
   "settings.projectGroups.confirmRemove": "“{{name}}” will be deleted. Existing conversations keep their repositories and branches; the folders and repositories themselves are untouched.",
-  "settings.projectGroups.editTitle": "Edit project",
-  "settings.projectGroups.dialogDescription": "A project can hold several repositories or folders. A conversation gets them all in one directory and tracks each repository's PR.",
   "settings.projectGroups.readOnlyDescription": "Only the person who created this project can change it.",
   "settings.projectGroups.form.name": "Project name",
   "settings.projectGroups.form.members": "Folders and repositories",
@@ -5578,15 +5576,11 @@
   "settings.projectGroups.wizard.details.members": "Includes {{count}} items",
   "settings.projectGroups.wizard.details.members_one": "Includes {{count}} item",
   "settings.projectGroups.wizard.details.members_other": "Includes {{count}} items",
-  "settings.projectGroups.wizard.details.inPlace": "Edited in place",
-  "settings.projectGroups.wizard.details.localCopy": "Local copy",
-  "settings.projectGroups.wizard.details.worktree": "Cloned per conversation",
   "settings.projectGroups.wizard.details.remove": "Remove {{name}}",
-  "settings.projectGroups.wizard.details.runsOn": "Conversations in this project run on {{machine}}.",
-  "settings.projectGroups.wizard.details.runsAnywhere": "Conversations in this project can run on any machine.",
   "settings.projectGroups.wizard.details.instructions": "Instructions for the agent (optional)",
   "chat.projectPicker.createProject": "Create project",
   "settings.projectGroups.wizard.sources.bothSelected": "{{names}} is selected both as a folder and as a GitHub repository. The project keeps one copy and uses the folder on {{machine}}.",
   "settings.projectGroups.wizard.sources.bothSelected_one": "{{names}} is selected both as a folder and as a GitHub repository. The project keeps one copy and uses the folder on {{machine}}.",
-  "settings.projectGroups.wizard.sources.bothSelected_other": "{{names}} are selected both as folders and as GitHub repositories. The project keeps one copy of each and uses the folders on {{machine}}."
+  "settings.projectGroups.wizard.sources.bothSelected_other": "{{names}} are selected both as folders and as GitHub repositories. The project keeps one copy of each and uses the folders on {{machine}}.",
+  "settings.projectGroups.wizard.previous": "Previously selected"
 }

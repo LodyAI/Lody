@@ -65,6 +65,8 @@ export type ProjectCreateWizardProps = {
   error?: string;
   /** Stories start part-way through; the product starts from the draft. */
   initialStep?: ProjectCreateWizardStep;
+  /** Editing marks the project's current answers and saves rather than creates. */
+  mode?: 'create' | 'edit';
   onSubmit: () => void;
   onCancel: () => void;
 };
@@ -209,7 +211,6 @@ const styles = stylex.create({
     color: colors.secondaryLabel,
   },
   note: { margin: 0, fontSize: text.footnoteSize, lineHeight: 1.45, color: colors.secondaryLabel },
-  where: { display: 'flex', alignItems: 'center', gap: space[2] },
   footerCount: {
     alignSelf: 'center',
     marginInlineEnd: 'auto',
@@ -225,29 +226,42 @@ type PickRow = {
   label: string;
   detail?: string;
   icon: 'folder' | 'repository' | 'github';
+  /** Part of the project before this edit. */
+  previous?: boolean;
   selected: boolean;
   toggle: () => void;
 };
 
-function initialStepOf(value: ProjectGroupFormValue): {
-  step: ProjectCreateWizardStep;
-  scope: ProjectGroupScope | null;
-} {
-  if (value.members.length === 0) return { step: 'kind', scope: null };
+/**
+ * The scope a draft already implies. A folder decides it; a repository that
+ * uses a local copy names the machine holding one, this machine first. A
+ * draft of plain clones runs anywhere.
+ */
+function scopeOf(
+  value: ProjectGroupFormValue,
+  sources: readonly ProjectMemberSourceOption[],
+  currentMachineId: MachineId | null
+): ProjectGroupScope | null {
+  if (value.members.length === 0) return null;
   const machineId =
     getProjectGroupLocalMachineId(value) ??
     value.members.find((member) => member.directory)?.directory?.machineId;
-  return {
-    step: 'sources',
-    scope: machineId ? { kind: 'machine', machineId } : { kind: 'github' },
-  };
+  if (machineId) return { kind: 'machine', machineId };
+  const copyKeys = new Set(
+    value.members.filter((member) => usageOf(member) === 'localCopy').map(keyOf)
+  );
+  const copies = sources.filter((option) => copyKeys.has(option.key)).flatMap((o) => o.copies);
+  const copy = copies.find((candidate) => candidate.machineId === currentMachineId) ?? copies[0];
+  return copy ? { kind: 'machine', machineId: copy.machineId } : { kind: 'github' };
 }
 
 const sourceKey = getProjectMemberSourceKey;
 const keyOf = (member: ProjectGroupMemberDraft) => sourceKey(member.source);
 
-/** How a member is used, said on review: in place, a machine's copy, or a fresh clone. */
-const usageOf = (member: ProjectGroupMemberDraft) =>
+type MemberUsage = 'inPlace' | 'localCopy' | 'worktree';
+
+/** How a member is used: in place, a machine's copy, or a fresh clone. */
+const usageOf = (member: ProjectGroupMemberDraft): MemberUsage =>
   member.source.kind === 'local'
     ? 'inPlace'
     : member.directory || member.source.preferLocal
@@ -277,13 +291,28 @@ export function ProjectCreateWizard({
   submitting = false,
   error,
   initialStep,
+  mode = 'create',
   onSubmit,
   onCancel,
 }: ProjectCreateWizardProps) {
   const { t } = useTranslation();
+  // A new draft that already has members (a seed) opens on them; an edit walks
+  // the questions again from the start, its earlier answers marked.
+  const [previous] = useState(() =>
+    mode === 'edit'
+      ? {
+          scope: scopeOf(value, sources, currentMachineId),
+          usage: new Map<string, MemberUsage>(
+            value.members.map((member) => [keyOf(member), usageOf(member)])
+          ),
+        }
+      : null
+  );
   const [{ step, scope }, setState] = useState(() => {
-    const initial = initialStepOf(value);
-    return initialStep ? { ...initial, step: initialStep } : initial;
+    const initialScope = scopeOf(value, sources, currentMachineId);
+    const defaultStep: ProjectCreateWizardStep =
+      mode === 'create' && initialScope ? 'sources' : 'kind';
+    return { step: initialStep ?? defaultStep, scope: initialScope };
   });
   // Repositories ticked in both tabs: one member, using the local copy. The
   // second tick is remembered so either tab can be unticked on its own.
@@ -292,7 +321,6 @@ export function ProjectCreateWizard({
     setState({ step: next, scope: nextScope });
 
   const machineId = scope?.kind === 'machine' ? scope.machineId : null;
-  const machine = machines.find((candidate) => candidate.id === machineId);
   const machineLabel = (id: MachineId | null) =>
     !id
       ? ''
@@ -405,6 +433,7 @@ export function ProjectCreateWizard({
         {step === 'kind' ? (
           <KindStep
             scope={scope}
+            previous={previous?.scope?.kind ?? null}
             hasMachines={machines.length > 0}
             onLocal={() => go('machine', scope?.kind === 'machine' ? scope : null)}
             onGithub={() => chooseScope({ kind: 'github' })}
@@ -414,6 +443,7 @@ export function ProjectCreateWizard({
             machines={machines}
             sources={sources}
             selected={machineId}
+            previous={previous?.scope?.kind === 'machine' ? previous.scope.machineId : null}
             currentMachineId={currentMachineId}
             onChoose={(id) => chooseScope({ kind: 'machine', machineId: id })}
           />
@@ -425,6 +455,7 @@ export function ProjectCreateWizard({
             scope={scope}
             alsoGithub={alsoGithub}
             onAlsoGithubChange={setAlsoGithub}
+            previousUsage={previous?.usage}
             machineLabel={machineLabel(machineId)}
             labelOf={labelOf}
             notice={doubleNotice}
@@ -441,7 +472,6 @@ export function ProjectCreateWizard({
               remaining.delete(key);
               setAlsoGithub(remaining);
             }}
-            machineLabel={machine ? machineLabel(machine.id) : machineLabel(machineId)}
             labelOf={labelOf}
             detailOf={detailOf}
             validation={validation}
@@ -484,7 +514,7 @@ export function ProjectCreateWizard({
         ) : step === 'details' ? (
           <Button key="create" type="submit" disabled={submitting || !validation.valid}>
             {submitting ? <Spinner size="small" aria-hidden="true" /> : null}
-            {t('settings.projectGroups.form.create')}
+            {mode === 'edit' ? t('common.save') : t('settings.projectGroups.form.create')}
           </Button>
         ) : null}
       </Dialog.Footer>
@@ -532,11 +562,13 @@ function Choice({
 
 function KindStep({
   scope,
+  previous,
   hasMachines,
   onLocal,
   onGithub,
 }: {
   scope: ProjectGroupScope | null;
+  previous: ProjectGroupScope['kind'] | null;
   hasMachines: boolean;
   onLocal: () => void;
   onGithub: () => void;
@@ -547,6 +579,7 @@ function KindStep({
       <Choice
         icon={<Laptop size={18} aria-hidden="true" />}
         title={t('settings.projectGroups.wizard.kind.local')}
+        badge={previous === 'machine' ? <PreviousBadge /> : null}
         selected={scope?.kind === 'machine'}
         disabled={!hasMachines}
         onClick={onLocal}
@@ -558,6 +591,7 @@ function KindStep({
       <Choice
         icon={<Github size={18} aria-hidden="true" />}
         title={t('settings.projectGroups.wizard.kind.github')}
+        badge={previous === 'github' ? <PreviousBadge /> : null}
         selected={scope?.kind === 'github'}
         onClick={onGithub}
       >
@@ -571,12 +605,14 @@ function MachineStep({
   machines,
   sources,
   selected,
+  previous,
   currentMachineId,
   onChoose,
 }: {
   machines: readonly ProjectCreateWizardMachine[];
   sources: readonly ProjectMemberSourceOption[];
   selected: MachineId | null;
+  previous: MachineId | null;
   currentMachineId: MachineId | null;
   onChoose: (machineId: MachineId) => void;
 }) {
@@ -605,9 +641,12 @@ function MachineStep({
           icon={<Laptop size={18} aria-hidden="true" />}
           title={machine.name}
           badge={
-            machine.id === currentMachineId ? (
-              <Badge>{t('settings.projectGroups.picker.thisMachine')}</Badge>
-            ) : null
+            <>
+              {machine.id === currentMachineId ? (
+                <Badge>{t('settings.projectGroups.picker.thisMachine')}</Badge>
+              ) : null}
+              {machine.id === previous ? <PreviousBadge /> : null}
+            </>
           }
           selected={selected === machine.id}
           onClick={() => onChoose(machine.id)}
@@ -638,6 +677,7 @@ function SourcesStep({
   scope,
   alsoGithub,
   onAlsoGithubChange,
+  previousUsage,
   machineLabel,
   labelOf,
   notice,
@@ -650,6 +690,8 @@ function SourcesStep({
   scope: ProjectGroupScope;
   alsoGithub: ReadonlySet<string>;
   onAlsoGithubChange: (next: ReadonlySet<string>) => void;
+  /** An edited project's members as saved, keyed by source: how each was used. */
+  previousUsage?: ReadonlyMap<string, MemberUsage>;
   machineLabel: string;
   labelOf: (member: ProjectGroupMemberDraft) => string;
   notice: ReactNode;
@@ -694,6 +736,7 @@ function SourcesStep({
             ? [option.label, copy.rootPath].filter(Boolean).join(' · ')
             : copy.rootPath,
         icon: option.kind === 'repository' ? 'repository' : 'folder',
+        previous: (previousUsage?.get(option.key) ?? 'worktree') !== 'worktree',
         selected,
         toggle: () => {
           if (selected && member) {
@@ -761,6 +804,9 @@ function SourcesStep({
         label: option.label,
         detail: option.description,
         icon: 'github' as const,
+        previous:
+          previousUsage?.has(option.key) === true &&
+          (previousUsage.get(option.key) === 'worktree' || !folderKeys.has(option.key)),
         selected,
         toggle: () => {
           if (selected && member) {
@@ -876,6 +922,12 @@ function SourcesStep({
   );
 }
 
+/** Marks an answer the project had before this edit. */
+function PreviousBadge() {
+  const { t } = useTranslation();
+  return <Badge>{t('settings.projectGroups.wizard.previous')}</Badge>;
+}
+
 function RowIcon({ icon }: { icon: PickRow['icon'] }) {
   const Icon = icon === 'folder' ? Folder : icon === 'repository' ? FolderGit2 : Github;
   return <Icon aria-hidden="true" {...stylex.props(catalog.icon)} />;
@@ -905,6 +957,7 @@ function PickList({ rows, empty }: { rows: readonly PickRow[]; empty: string }) 
               </span>
             ) : null}
           </span>
+          {row.previous ? <PreviousBadge /> : null}
         </label>
       ))}
     </div>
@@ -915,7 +968,6 @@ function DetailsStep({
   value,
   onChange,
   onRemoved,
-  machineLabel,
   labelOf,
   detailOf,
   validation,
@@ -924,16 +976,12 @@ function DetailsStep({
   value: ProjectGroupFormValue;
   onChange: (value: ProjectGroupFormValue) => void;
   onRemoved: (key: string) => void;
-  machineLabel: string;
   labelOf: (member: ProjectGroupMemberDraft) => string;
   detailOf: (member: ProjectGroupMemberDraft) => string | undefined;
   validation: ProjectGroupFormValidation;
   notice: ReactNode;
 }) {
   const { t } = useTranslation();
-  const bound =
-    getProjectGroupLocalMachineId(value) !== null ||
-    value.members.some((member) => usageOf(member) === 'localCopy');
   const errorText = (code: ProjectGroupMemberError) =>
     t(`settings.projectGroups.memberErrors.${code}`);
   return (
@@ -978,9 +1026,6 @@ function DetailsStep({
                     {code ? errorText(code) : (detailOf(member) ?? '')}
                   </span>
                 </span>
-                <Badge tone={code ? 'danger' : 'neutral'}>
-                  {t(`settings.projectGroups.wizard.details.${usage}`)}
-                </Badge>
                 <Button
                   type="button"
                   variant="ghost"
@@ -999,18 +1044,6 @@ function DetailsStep({
               </div>
             );
           })}
-          <div {...stylex.props(surface.line, surface.lineRuled, surface.cardNote, styles.where)}>
-            {bound ? (
-              <Laptop size={14} aria-hidden="true" />
-            ) : (
-              <Github size={14} aria-hidden="true" />
-            )}
-            <span>
-              {bound
-                ? t('settings.projectGroups.wizard.details.runsOn', { machine: machineLabel })
-                : t('settings.projectGroups.wizard.details.runsAnywhere')}
-            </span>
-          </div>
         </div>
         {notice}
         {validation.memberErrors.size > 0 ? (

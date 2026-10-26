@@ -62,10 +62,9 @@ looks only at that branch.
   GitHub only, the repositories; finally the name, the selected Members and the
   instructions. A repository ticked both as a folder and on GitHub is noted, not
   blocked; the Project keeps one Member that uses the folder.
-  Changing an earlier answer drops Members the new answer cannot hold. Editing an
-  existing Project keeps the single editor, whose picker supports direct
-  local-folder selection as well as repositories and folders already known to the
-  workspace.
+  Changing an earlier answer drops Members the new answer cannot hold. Editing a
+  Project walks the same questions, marking its current answers and Members as
+  previously selected; someone who may not change it sees it read-only.
 
 ## Direct folder selection and standalone visibility
 

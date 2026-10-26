@@ -3767,6 +3767,7 @@ function WorkspaceChatLanding({
             projectId: project.id,
             name: project.name,
             memberCount: project.members.length,
+            lastUsedAt: mobileSheetRecency.byGroup.get(project.id),
             ...(missing > 0 && canCloneProjectRepositories
               ? {
                   availability: t('chat.projectGroup.missingClone', '{{count}} cloned on start', {
@@ -3790,7 +3791,14 @@ function WorkspaceChatLanding({
           },
         ];
       }),
-    [canCloneProjectRepositories, projectRepositoryCopies, selectedMachineId, t, workspaceProjects]
+    [
+      canCloneProjectRepositories,
+      mobileSheetRecency.byGroup,
+      projectRepositoryCopies,
+      selectedMachineId,
+      t,
+      workspaceProjects,
+    ]
   );
   const desktopAgentMachineIds = useMemo(
     () => (scopedMachineId ? [scopedMachineId] : []),

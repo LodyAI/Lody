@@ -121,9 +121,11 @@ const picked = addProjectGroupDirectory(localDraft, {
 function WizardInDialog({
   value: initial,
   initialStep,
+  mode,
 }: {
   value: ProjectGroupFormValue;
   initialStep?: ProjectCreateWizardStep;
+  mode?: 'create' | 'edit';
 }) {
   const [value, setValue] = useState(initial);
   const [created, setCreated] = useState(false);
@@ -131,7 +133,7 @@ function WizardInDialog({
   return (
     <>
       {/* The product saves here; the story records that it was asked to. */}
-      {created ? <p role="status">Project created</p> : null}
+      {created ? <p role="status">Submitted</p> : null}
       <Dialog.Root open modal={false}>
         <Dialog.Content
           width={SETTINGS_EDITOR_DIALOG_WIDTH}
@@ -149,6 +151,7 @@ function WizardInDialog({
             canBrowseFolders={(machineId) => machineId === here}
             onBrowseFolders={() => undefined}
             initialStep={initialStep}
+            mode={mode}
             onSubmit={() => setCreated(true)}
             onCancel={() => setValue(EMPTY_PROJECT_GROUP_FORM_VALUE)}
           />
@@ -184,4 +187,9 @@ export const LocalDetails: Story = {
 
 export const GithubDetails: Story = {
   args: { value: { ...githubDraft, name: 'Shop' }, initialStep: 'details' },
+};
+
+/** Editing walks the same questions; the project's current answers are marked. */
+export const EditProject: Story = {
+  args: { value: { ...localDraft, name: 'Shop' }, mode: 'edit' },
 };

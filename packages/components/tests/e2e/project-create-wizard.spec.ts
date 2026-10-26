@@ -27,13 +27,10 @@ test('a local project is built one question at a time and keeps only its machine
 
   await expect(page.getByRole('textbox', { name: 'Project name' })).toHaveValue('proto');
   // Next leads to the last step; it never submits on the click that advanced.
-  await expect(page.getByText('Project created')).toHaveCount(0);
-  await expect(page.getByText('Edited in place')).toBeVisible();
-  await expect(
-    page.getByText('Conversations in this project run on wibusdeMacBook-Air-M2.local.')
-  ).toBeVisible();
+  await expect(page.getByText('Submitted')).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Remove ios' })).toBeVisible();
   await page.getByRole('button', { name: 'Create', exact: true }).click();
-  await expect(page.getByText('Project created')).toBeVisible();
+  await expect(page.getByText('Submitted')).toBeVisible();
 });
 
 test('a repository may be ticked as a folder and on GitHub, with a notice only', async ({
@@ -58,10 +55,9 @@ test('a repository may be ticked as a folder and on GitHub, with a notice only',
   await expect(page.getByText('4 selected')).toBeVisible();
   await next.click();
   await expect(page.getByRole('button', { name: 'Remove acme/web' })).toBeVisible();
-  await expect(page.getByText('Cloned per conversation')).toHaveCount(2);
 });
 
-test('a GitHub-only project drops local folders and runs anywhere', async ({ page }) => {
+test('a GitHub-only project drops local folders', async ({ page }) => {
   await story(page, 'local-sources');
   await expect(page.getByText('4 selected')).toBeVisible();
   await page.getByRole('button', { name: 'Back', exact: true }).click();
@@ -71,9 +67,32 @@ test('a GitHub-only project drops local folders and runs anywhere', async ({ pag
   await expect(page.getByText('2 selected')).toBeVisible();
   await expect(page.getByRole('tab')).toHaveCount(0);
   await page.getByRole('button', { name: 'Next', exact: true }).click();
-  await expect(
-    page.getByText('Conversations in this project can run on any machine.')
-  ).toBeVisible();
   await page.getByRole('button', { name: 'Remove acme/web' }).click();
   await expect(page.getByText('Includes 1 item')).toBeVisible();
+});
+
+test('editing walks the same questions with the current answers marked', async ({ page }) => {
+  await story(page, 'edit-project');
+  const previous = 'Previously selected';
+  await expect(
+    page.getByRole('button', { name: /Includes local folders/ }).getByText(previous)
+  ).toBeVisible();
+  await expect(
+    page.getByRole('button', { name: /GitHub repositories only/ }).getByText(previous)
+  ).toHaveCount(0);
+  await page.getByRole('button', { name: /Includes local folders/ }).click();
+  await page.getByRole('button', { name: /zhaoliangdeMacBook-Pro\.local/ }).click();
+
+  const notes = page.locator('label', { has: page.getByRole('checkbox', { name: 'notes' }) });
+  await expect(notes.getByText(previous)).toBeVisible();
+  await expect(page.getByRole('checkbox', { name: 'notes', exact: true })).toBeChecked();
+  await page.getByRole('tab', { name: /GitHub repositories/ }).click();
+  const proto = page.locator('label', { has: page.getByRole('checkbox', { name: 'acme/proto' }) });
+  await expect(proto.getByText(previous)).toBeVisible();
+
+  await page.getByRole('button', { name: 'Next', exact: true }).click();
+  await expect(page.getByRole('textbox', { name: 'Project name' })).toHaveValue('Shop');
+  await expect(page.getByText('Submitted')).toHaveCount(0);
+  await page.getByRole('button', { name: 'Save', exact: true }).click();
+  await expect(page.getByText('Submitted')).toBeVisible();
 });

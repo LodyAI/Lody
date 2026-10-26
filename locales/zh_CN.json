@@ -5431,8 +5431,6 @@
   "e2ee.verify.versionShort": "版本 {{version}}",
   "settings.projectGroups.removeTitle": "删除项目？",
   "settings.projectGroups.confirmRemove": "将删除项目「{{name}}」。已有对话保留各自的仓库和分支，原来的文件夹和仓库不受影响。",
-  "settings.projectGroups.editTitle": "编辑项目",
-  "settings.projectGroups.dialogDescription": "一个项目可以包含多个仓库或文件夹，对话在同一个目录下拿到它们，并跟踪每个仓库的 PR。",
   "settings.projectGroups.readOnlyDescription": "只有创建者可以修改这个项目。",
   "settings.projectGroups.form.name": "项目名称",
   "settings.projectGroups.form.members": "文件夹与仓库",
@@ -5569,14 +5567,10 @@
   "settings.projectGroups.wizard.details.namePlaceholder": "例如：Shop",
   "settings.projectGroups.wizard.details.members": "包含 {{count}} 项",
   "settings.projectGroups.wizard.details.members_other": "包含 {{count}} 项",
-  "settings.projectGroups.wizard.details.inPlace": "直接修改原目录",
-  "settings.projectGroups.wizard.details.localCopy": "使用本地副本",
-  "settings.projectGroups.wizard.details.worktree": "每个对话独立克隆",
   "settings.projectGroups.wizard.details.remove": "移除 {{name}}",
-  "settings.projectGroups.wizard.details.runsOn": "这个项目的对话在{{machine}}上运行。",
-  "settings.projectGroups.wizard.details.runsAnywhere": "这个项目的对话可以在任意机器上运行。",
   "settings.projectGroups.wizard.details.instructions": "给 Agent 的说明（可选）",
   "chat.projectPicker.createProject": "创建项目",
   "settings.projectGroups.wizard.sources.bothSelected": "{{names}} 同时选中了本地文件夹和 GitHub 仓库。项目只保留一份，使用{{machine}}上的文件夹。",
-  "settings.projectGroups.wizard.sources.bothSelected_other": "{{names}} 同时选中了本地文件夹和 GitHub 仓库。项目只保留一份，使用{{machine}}上的文件夹。"
+  "settings.projectGroups.wizard.sources.bothSelected_other": "{{names}} 同时选中了本地文件夹和 GitHub 仓库。项目只保留一份，使用{{machine}}上的文件夹。",
+  "settings.projectGroups.wizard.previous": "上次选择"
 }

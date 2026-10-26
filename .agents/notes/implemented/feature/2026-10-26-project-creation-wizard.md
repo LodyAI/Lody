@@ -13,8 +13,9 @@ could not tell how the two kinds combine or where conversations would run. Creat
 is now a short sequence of single questions: local folders or GitHub only, then the
 machine, then the members, then the name and instructions. The run location is
 decided before any member is chosen, and changing it drops what no longer fits.
-Editing an existing Project keeps the previous editor; the composer's project
-picker gained a "Create project" entry.
+Editing walks the same questions with the project's current answers marked
+"Previously selected"; the composer's project picker gained a "Create project"
+entry and now ranks projects with several members by recent use.
 
 ## Decision
 
@@ -22,8 +23,15 @@ The user asked for a redesign of creation, not of editing, and for the composer
 picker to offer creation beside Settings and the sidebar menu.
 
 - `ProjectCreateWizard` is presentational. `ProjectGroupEditorDialog` still owns
-  detection, direct folder preparation and saving, and renders the wizard only in
-  `add` mode, so save, registration and submodule behavior are unchanged.
+  detection, direct folder preparation and saving, and renders the wizard for
+  creating and for editing by the owner, so save, registration and automatic
+  submodule detection are unchanged. Someone who may not change a project still
+  sees it read-only in `ProjectGroupForm`.
+- Editing starts at the first question. The scope a saved project implies (a
+  folder's machine, or the machine holding a used copy, this machine first) is
+  preselected, and every earlier answer and member carries a "Previously selected"
+  badge. The review step lists members and their paths only; usage labels and the
+  run-location line were removed as noise.
 - Scope is wizard state, not stored data. `retainProjectGroupScope` removes members
   a scope cannot hold: folders on another machine, and for GitHub only every folder,
   including a picked folder whose remote made it portable (its registration would
@@ -42,11 +50,16 @@ picker to offer creation beside Settings and the sidebar menu.
   browser submitted the form and created the project without its last step.
 - A seeded request (sidebar "create from this project") starts at the member step
   with the scope inferred from the seed.
+- The composer picker sorts by the newest conversation, but conversations started
+  from a multi-member project (`projectRun.id`) were never counted, so such projects
+  always sank below every used one. Landing recency now indexes them by id.
 - The review step names the run location and how each member is used: edited in
   place, a local copy, or cloned per conversation.
 
-Considered and not taken: replacing the editor for edits too (submodule placement
-and directory naming need the full form) and adding a second machine-selection
+Trade-off: the wizard has no controls for directory names or manual submodule
+placement. Saved placements are kept and detection still nests new members; the
+"cannot read submodules" hint, which pointed at those manual controls, no longer
+appears for owners. Considered and not taken: adding a second machine-selection
 protocol (the existing visible-machine list and `projectFolderSelection` gate are
 sufficient). Direct browsing remains limited to the current machine, as before.
 
@@ -56,7 +69,8 @@ sufficient). Direct browsing remains limited to the current machine, as before.
 `tests/e2e/project-create-wizard.spec.ts` drives the real component in Storybook:
 choosing a machine, mixing tabs, changing machine (dropping its folder), switching
 to GitHub only, removing a member on review, ticking one repository in both tabs,
-and that advancing to the last step does not create the project (this assertion
-fails when the buttons are not keyed). Screenshots came from the same
+that advancing to the last step does not create the project (this assertion fails
+when the buttons are not keyed), and editing with marked answers.
+`tests/chat-landing-derived.test.ts` covers recency by project id. Screenshots came from the same
 stories with synthetic data; no end-to-end session was started from a created
 Project, and the full `pnpm check` was not run.
