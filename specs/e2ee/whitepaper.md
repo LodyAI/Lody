@@ -188,6 +188,13 @@ Execution requests include starting an Agent turn, saving a remote file and term
 
 Org execution permissions obey the same worst-case 15-minute revocation bound. Caches cannot outlive the original freshness proof, and forwarding, receipt, or restart does not start a new timer. Known revocation invalidates them immediately; failure to refresh by expiry blocks new execution. This bound depends on the server honestly supplying current control state: a local timer cannot prevent a malicious server from continually concealing revocation. Cancelling an already started command is a separate process; revocation does not automatically undo its effects.
 
+The [M5 realtime review draft](../e2ee-foundations.md#realtime-rpc-and-presence-m5-review-draft)
+details shared encrypted frames, target-machine signer binding, progress/results,
+freshness acquisition and durable deduplication. Its proposed encoding, limits,
+machine-binding proof and clock policy are not approved by this whitepaper.
+Unavailable iroh must leave encrypted Streams RPC usable; neither transport may
+bypass authorization or re-sign/re-encrypt the original request on retry.
+
 ## 8. Security Properties and Trade-offs
 
 Normal first join verifies a signed snapshot and subsequent increments. The requirement to verify signatures and replay permissions for 10,000 raw records from zero within 100ms is therefore withdrawn, along with mandatory SIMD/Wasm/multithreading optimization for that target. Withdrawal is not a passing measurement. Full audits remain available and still verify every signature. The entry point is implemented with stage-level tests in the independent package, not acceptance of product integration or production services.
