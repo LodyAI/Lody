@@ -299,6 +299,10 @@ requested options fail to the existing prompt-derived fallback. The bundled adap
 has no automatic generator, so neither the main nor title session starts an extra
 naming turn. Main conversation settings and Provider authentication are preserved.
 
+Other isolated title sessions retain the Provider's current model unless a title model
+was explicitly saved. Catalog order does not define a model preference; inferred safe
+mode and reasoning options remain independent of the model choice.
+
 Title output accepts normal assistant text with an absent message phase, as Codex
 providers do not all emit that optional field. Explicit `commentary` is excluded;
 when a final-answer stream exists, it takes precedence over unphased text. Both

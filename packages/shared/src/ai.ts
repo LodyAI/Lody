@@ -1260,8 +1260,8 @@ const selectByLowestRank = (
  * Computes runtime title-generation configOptionValues from current ACP capabilities.
  *
  * Builtin Codex defaults to Luna, low reasoning, and full access. Other providers
- * choose the least-privileged mode, last listed model, and smallest reasoning effort
- * from their current configOptions when the user has not configured title generation.
+ * retain their current model; only explicitly configured title models are applied.
+ * Safe mode and reasoning defaults are inferred from advertised capabilities.
  */
 export function computeTitleGenerationDefaults(
   cliType: AgentConfigCliType,
@@ -1277,10 +1277,7 @@ export function computeTitleGenerationDefaults(
       continue;
     }
 
-    if (opt.category === 'model') {
-      const lastOption = opt.options.length > 0 ? opt.options[opt.options.length - 1] : undefined;
-      defaults[opt.id] = lastOption?.value ?? opt.currentValue;
-    } else if (opt.category === 'mode') {
+    if (opt.category === 'mode') {
       defaults[opt.id] =
         selectByLowestRank(opt.options, leastPermissionModeRank) ?? opt.currentValue;
     } else if (opt.id === 'reasoning_effort' || opt.category === 'thought_level') {
