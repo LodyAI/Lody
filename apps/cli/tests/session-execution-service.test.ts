@@ -9120,6 +9120,93 @@ describe('SessionExecutionService', () => {
     });
   });
 
+  describe('dead assistant turns', () => {
+    const setup = (userStatus: 'processing' | 'failed') => {
+      const upsertDocMeta = vi.fn(async (_room: string, _patch: Record<string, unknown>) => {});
+      const history: Array<Record<string, unknown>> = [
+        { id: 'user-dead', role: 'user', status: userStatus, items: [], timestamp: 't0' },
+        {
+          id: 'assistant:user-dead',
+          role: 'assistant',
+          userTurnId: 'user-dead',
+          items: [{ type: 'text', text: 'partial answer' }],
+          timestamp: 't1',
+        },
+      ];
+      const sessionDoc = withHistoryPort({
+        getHistory: vi.fn(() => history),
+        setStatus: vi.fn(async () => {}),
+        updateHistory: vi.fn(async (update: (value: typeof history) => typeof history) => {
+          update(history);
+        }),
+      });
+      const deps = createBaseDeps({
+        sessionManager: {
+          getSession: vi.fn(() => null),
+          getPendingSession: vi.fn(() => null),
+        } as unknown as SessionManager,
+        getActiveTurnId: vi.fn(() => undefined),
+        workspaceDocument: {
+          repo: {
+            upsertDocMeta,
+            getDocMeta: vi.fn(async () => ({
+              meta: { latestUserMsgId: 'user-dead', processingUserMsgId: 'user-dead' },
+            })),
+          },
+          getOrCreateSessionDoc: vi.fn(async () => sessionDoc),
+          updateAcpCapabilities: vi.fn(async () => {}),
+        } as unknown as LoroDocumentManager,
+      });
+      return { service: new SessionExecutionService(deps), history, upsertDocMeta, sessionDoc };
+    };
+
+    it('Stop closes an ordinary turn whose agent process is gone', async () => {
+      const { service, history, upsertDocMeta, sessionDoc } = setup('processing');
+
+      const result = await service.cancelSession({
+        type: 'session/cancel',
+        sessionId: 'session-dead' as SessionId,
+        machineId: 'machine-1',
+        workspaceId: 'workspace-1' as WorkspaceId,
+        turnId: 'assistant:user-dead',
+      });
+
+      expect(result).toEqual({ success: true });
+      expect(history[1]).toMatchObject({ finished: true, endedAt: expect.any(Number) });
+      expect(history[0]).toMatchObject({ status: 'canceled' });
+      expect(upsertDocMeta).toHaveBeenCalledWith('session-session-dead', {
+        lastHandledUserMsgId: 'user-dead',
+        processingUserMsgId: undefined,
+      });
+      expect(sessionDoc.setStatus).toHaveBeenCalledWith(SessionStatusFactory.idle());
+      expect(upsertDocMeta).toHaveBeenCalledWith('session-session-dead', {
+        lastCanceledTurn: undefined,
+      });
+    });
+
+    it('closes automatically only after the user input settled', async () => {
+      const owed = setup('processing');
+      // A processing input still owes its crash-recovery run on this entry.
+      await expect(
+        owed.service.closeDeadAssistantTurn('session-dead' as SessionId, {
+          requireSettledUserTurn: true,
+        })
+      ).resolves.toBe(false);
+      expect(owed.history[1]?.finished).toBeUndefined();
+
+      const failed = setup('failed');
+      await expect(
+        failed.service.closeDeadAssistantTurn('session-dead' as SessionId, {
+          requireSettledUserTurn: true,
+        })
+      ).resolves.toBe(true);
+      expect(failed.history[1]).toMatchObject({ finished: true });
+      // The settled outcome is kept, not rewritten as a cancellation.
+      expect(failed.history[0]).toMatchObject({ status: 'failed' });
+      expect(failed.upsertDocMeta).not.toHaveBeenCalled();
+    });
+  });
+
   it('keeps a newer queued turn pending when cancelling the currently running turn', async () => {
     const upsertDocMeta = vi.fn(async () => {});
     const sessionDoc = withHistoryPort({
@@ -11325,11 +11412,30 @@ describe('Operation Inbox execution boundary', () => {
       };
       expect(f.store.inbox.accept(old)).toBe(true);
       expect(f.store.inbox.begin(old, 'assistant:human-input')).toBe(true);
+      // The crashed run left its assistant entry open.
+      await f.doc.sessionData.commands.applyHistoryAction({
+        kind: 'upsert-turn',
+        turn: {
+          id: 'assistant:human-input',
+          role: 'assistant',
+          userTurnId: 'human-input',
+          timestamp: '2026-10-12T00:00:01Z',
+          items: [{ type: 'text', text: 'partial answer' }],
+          fileDiff: [],
+        },
+      });
       // Restart observation blocks the owner without manufacturing a release receipt.
       f.store.inbox.activate('workspace-1', 'owner');
       await expect(f.service.continueSession(f.message)).rejects.toBeInstanceOf(
         InboxExecutionBlocked
       );
+      // The rejected run settles its input, so nothing owns the leftover entry any more.
+      const backend = await createSessionBackend(f.doc);
+      expect((await backend.readTurn('human-input')).turn).toMatchObject({ status: 'failed' });
+      expect((await backend.readTurn('assistant:human-input')).turn).toMatchObject({
+        finished: true,
+        endedAt: expect.any(Number),
+      });
       expect(f.store.inbox.blockedExecutions('workspace-1', f.message.sessionId)).toMatchObject([
         { executionId: 'assistant:human-input' },
       ]);

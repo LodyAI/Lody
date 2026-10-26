@@ -28,7 +28,7 @@ const styles = stylex.create({
   },
   /** The compact control paints its own tinted well behind both halves. */
   rootCompact: {
-    height: themeSpace[6],
+    height: themeSpace[5],
     backgroundColor: 'hsl(var(--status-success) / 0.08)',
   },
   compactMain: {

@@ -297,10 +297,17 @@ function hasResponseError(response: unknown): boolean {
 // surfacing ElectronAuthQueryTimeoutError to every consumer.
 const AUTH_SESSION_NETWORK_TIMEOUT_MS = 5_000
 
-async function withSessionNetworkTimeout<T>(promise: Promise<T>): Promise<T> {
+// The timeout bounds the caller's wait, not the request: a slow first request
+// (e.g. proxy resolution at startup) may still succeed, and `onLateResult`
+// receives that answer so it is not discarded.
+async function withSessionNetworkTimeout<T>(
+  promise: Promise<T>,
+  onLateResult?: (result: T) => void
+): Promise<T> {
   let timeoutId: ReturnType<typeof setTimeout> | null = null
   const timeoutPromise = new Promise<never>((_resolve, reject) => {
     timeoutId = setTimeout(() => {
+      if (onLateResult) promise.then(onLateResult, () => {})
       reject(
         new Error(`getSession network call timed out after ${AUTH_SESSION_NETWORK_TIMEOUT_MS}ms`)
       )
@@ -625,7 +632,18 @@ export class AuthService {
       // while getSession() stayed green. Mirror getSession()'s validate-and-fallback
       // here: resolve the session for this bearer and trust only the token it
       // actually yields, so both entry points agree on the same session.
-      const verified = await this.getSession(options)
+      let verified: unknown
+      try {
+        verified = await this.getSession(options)
+      } catch (error) {
+        // A transport failure is no verdict on either credential. Hand the
+        // request the durable cookie (else this bearer) for the server to
+        // authenticate, instead of failing it or waiting on a second hung check.
+        console.warn('[Auth] Session verification unavailable; using stored credential', error)
+        return (
+          readSessionTokenFromCookieHeader(getElectronAuthCookieHeader()) ?? explicitBearerToken
+        )
+      }
       const verifiedToken = readSessionTokenFromResponse(verified)
       if (verifiedToken) {
         return verifiedToken
@@ -687,14 +705,49 @@ export class AuthService {
     return null
   }
 
+  // Commits a session the server resolved. `sessionToken` is attached to the
+  // response when it lacks one; `confirmedToken` is the credential proven live.
+  private commitResolvedSession(
+    response: unknown,
+    sessionToken: string | null,
+    confirmedToken: string | null
+  ): unknown {
+    const resolved = withSessionTokenInResponse(response, sessionToken)
+    if (!confirmedToken) this.clearOfflineIdentity()
+    this.rememberSessionToken(confirmedToken)
+    this.lastResolvedSessionResponse = resolved
+    this.retainOfflineIdentity(confirmedToken, readSessionFromResponse(resolved).userId)
+    this.notifyCachedSessionIdentity()
+    return resolved
+  }
+
+  // A session answer that arrived after its caller timed out still seeds the
+  // offline fallback, so the caller's retry is served instead of timing out
+  // again. It never replaces a newer answer or crosses an auth generation.
+  private commitLateSession(generation: number, response: unknown, token: string | null): void {
+    if (
+      generation !== this.authGeneration ||
+      this.lastResolvedSessionResponse !== null ||
+      !hasResolvedSession(response) ||
+      !token
+    ) {
+      return
+    }
+    this.commitResolvedSession(response, token, readSessionTokenFromResponse(response) ?? token)
+  }
+
   async getSession(options?: unknown) {
     const generation = this.authGeneration
     const parsedOptions = parseSessionQueryOptions(options)
+    const onLateResult = (late: unknown) => {
+      const cookie = readSessionTokenFromCookieHeader(getElectronAuthCookieHeader())
+      this.commitLateSession(generation, late, readBearerTokenFromInput(options) ?? cookie)
+    }
     let response: unknown
     try {
       response = parsedOptions
-        ? await withSessionNetworkTimeout(authClient.getSession(parsedOptions))
-        : await withSessionNetworkTimeout(authClient.getSession())
+        ? await withSessionNetworkTimeout(authClient.getSession(parsedOptions), onLateResult)
+        : await withSessionNetworkTimeout(authClient.getSession(), onLateResult)
     } catch (error) {
       // Transport-level failure (offline, hung network, DNS): serve the last
       // resolved session instead of surfacing a timeout to every consumer.
@@ -712,22 +765,18 @@ export class AuthService {
     if (hasResolvedSession(response)) {
       // Remember whatever token resolved this session (response > cookie >
       // the bearer the caller supplied) so CLI bootstrap can reuse it.
-      const resolved = withSessionTokenInResponse(
-        response,
+      const sessionToken =
         !existingAuthorization || existingAuthorization === `Bearer ${cookieToken}`
           ? cookieToken
           : null
-      )
-      if (generation === this.authGeneration) {
-        const confirmedToken =
-          readSessionTokenFromResponse(response) ?? readBearerTokenFromInput(options) ?? cookieToken
-        if (!confirmedToken) this.clearOfflineIdentity()
-        this.rememberSessionToken(confirmedToken)
-        this.lastResolvedSessionResponse = resolved
-        this.retainOfflineIdentity(confirmedToken, readSessionFromResponse(resolved).userId)
-        this.notifyCachedSessionIdentity()
+      if (generation !== this.authGeneration) {
+        return withSessionTokenInResponse(response, sessionToken)
       }
-      return resolved
+      return this.commitResolvedSession(
+        response,
+        sessionToken,
+        readSessionTokenFromResponse(response) ?? readBearerTokenFromInput(options) ?? cookieToken
+      )
     }
 
     if (!cookieToken || existingAuthorization === `Bearer ${cookieToken}`) {
@@ -747,17 +796,14 @@ export class AuthService {
               Authorization: `Bearer ${cookieToken}`
             }
           }
-        })
+        }),
+        (late) => this.commitLateSession(generation, late, cookieToken)
       )
       if (hasResolvedSession(fallbackResponse)) {
-        const resolved = withSessionTokenInResponse(fallbackResponse, cookieToken)
-        if (generation === this.authGeneration) {
-          this.rememberSessionToken(cookieToken)
-          this.lastResolvedSessionResponse = resolved
-          this.retainOfflineIdentity(cookieToken, readSessionFromResponse(resolved).userId)
-          this.notifyCachedSessionIdentity()
+        if (generation !== this.authGeneration) {
+          return withSessionTokenInResponse(fallbackResponse, cookieToken)
         }
-        return resolved
+        return this.commitResolvedSession(fallbackResponse, cookieToken, cookieToken)
       }
       // The supplied bearer may be stale while the durable cookie is still
       // valid. A failed cookie check must retain its own result: returning the
