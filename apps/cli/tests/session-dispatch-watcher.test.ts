@@ -23,6 +23,7 @@ import {
   getSessionCancelRequestMarker,
   getPendingUserTurnActivationId,
   hasPendingUserTurnActivation,
+  type MachineId,
   type MessageContent,
   type MessageQueueItem,
   type SessionHistoryInput,
@@ -715,6 +716,170 @@ describe('SessionDispatchWatcher', () => {
       { dispatchSource: 'rpc' }
     );
     watcher.stop();
+  });
+
+  /**
+   * A session whose metadata record syncs to this machine in stages: the RPC
+   * turn is offered first, then `setRecord` publishes each stage and fires the
+   * metadata watch. History never carries the turn, so only the stash can
+   * dispatch it.
+   */
+  const createStagedMetaFixture = (sessionId: SessionId) => {
+    type MetaRecord = { meta: Partial<SessionMeta>; deleted?: boolean };
+    let metaRecord: MetaRecord | undefined;
+    let metadataWatchCallback: ((event: { kind: string; docId: string }) => void) | undefined;
+    const startSession = vi.fn(async () => {});
+    const getDocMeta = vi.fn(async () => metaRecord);
+    const sessionDoc = withHistoryPort({
+      mirror: { subscribe: vi.fn(() => vi.fn()) },
+      getMetaState: vi.fn(async () => (metaRecord?.deleted ? undefined : metaRecord?.meta)),
+      getHistory: vi.fn(() => []),
+      updateHistory: vi.fn(async () => {}),
+      setStatus: vi.fn(async () => {}),
+      waitForRemoteSync: vi.fn(async () => {}),
+    });
+    const workspaceDocument = {
+      repo: {
+        getMeta: () => ({ scan: vi.fn(async () => []) }),
+        getDocMeta,
+        upsertDocMeta: vi.fn(async () => {}),
+        watch: vi.fn((callback: (event: { kind: string; docId: string }) => void) => {
+          metadataWatchCallback = callback;
+          return { unsubscribe: vi.fn() };
+        }),
+      },
+      getOrCreateSessionDoc: vi.fn(async () => withSessionData(sessionDoc)),
+      onMetaRoomSynced: vi.fn(() => vi.fn()),
+    } as unknown as LoroDocumentManager;
+    const watcher = createWatcher({
+      logger: createSilentLogger(),
+      machineId: 'machine-1' as MachineId,
+      workspaceId: 'workspace-1' as WorkspaceId,
+      workspaceDocument,
+      executionService: {
+        getExecutionSnapshot: vi.fn(() => ({
+          hasActiveTurn: false,
+          hasBlockingPendingCreate: false,
+          hasReusableSession: false,
+        })),
+        continueSession: vi.fn(async () => {}),
+        startSession,
+        cancelSession: vi.fn(async () => ({ success: true })),
+      } as unknown as SessionExecutionService,
+      canUseMachine: createAllowMachineAccess(),
+    });
+    const ownMeta = {
+      id: sessionId,
+      machineId: 'machine-1' as MachineId,
+      userId: 'user-1',
+      createdAt: new Date().toISOString(),
+      cliType: 'builtin',
+      agentType: 'codex',
+      status: { type: 'idle' as const },
+    } satisfies SessionMeta;
+    /** Publish a metadata stage and wait until the watcher's reconcile has read it. */
+    const setRecord = async (record: MetaRecord | undefined) => {
+      metaRecord = record;
+      const readsBefore = getDocMeta.mock.calls.length;
+      metadataWatchCallback?.({ kind: 'doc-metadata', docId: `session-${sessionId}` });
+      await vi.waitFor(
+        () => {
+          expect(getDocMeta.mock.calls.length).toBeGreaterThan(readsBefore);
+        },
+        { timeout: 3_000 }
+      );
+      await flushMicrotasks(16);
+    };
+    return { watcher, startSession, setRecord, ownMeta };
+  };
+
+  it.each([
+    ['an empty meta record', (): Partial<SessionMeta> => ({})],
+    ['a meta record without machineId', (sessionId: SessionId) => ({ id: sessionId })],
+  ])(
+    'keeps a stashed RPC turn while the session meta is %s and dispatches it once ownership lands',
+    async (_label, partialMeta) => {
+      const sessionId = 'session-rpc-partial-meta' as SessionId;
+      const userTurnId = 'rpc-turn-partial-meta';
+      const { watcher, startSession, setRecord, ownMeta } = createStagedMetaFixture(sessionId);
+      await watcher.start();
+      try {
+        await expect(
+          watcher.offerRpcTurn({
+            sessionId,
+            userTurnId,
+            userId: 'user-1',
+            timestamp: new Date().toISOString(),
+            inputConfig: { prompt: 'first message of a new session' },
+          })
+        ).resolves.toBe('accepted');
+
+        // The doc's existence key syncs before the rest of its meta: a record
+        // without machineId is still "unknown", so the stash must survive it.
+        await setRecord({ meta: partialMeta(sessionId) });
+        expect(watcher.hasPendingDispatch(sessionId)).toBe(true);
+        expect(startSession).not.toHaveBeenCalled();
+
+        // Ownership and the activation pointer land; history never carries the
+        // turn, so it can only start from the kept stash.
+        await setRecord({ meta: { ...ownMeta, latestUserMsgId: userTurnId } });
+        await vi.waitFor(
+          () => {
+            expect(startSession).toHaveBeenCalledTimes(1);
+          },
+          { timeout: 3_000 }
+        );
+        expect(startSession).toHaveBeenCalledWith(
+          expect.objectContaining({
+            type: 'session/create',
+            sessionId,
+            userTurnId,
+            acpSessionConfig: expect.objectContaining({
+              prompt: 'first message of a new session',
+            }),
+          }),
+          { dispatchSource: 'rpc' }
+        );
+      } finally {
+        watcher.stop();
+      }
+    }
+  );
+
+  it.each([
+    [
+      "another machine's session",
+      (meta: SessionMeta) => ({ meta: { ...meta, machineId: 'machine-2' as MachineId } }),
+    ],
+    ['an archived session', (meta: SessionMeta) => ({ meta: { ...meta, isArchived: true } })],
+    ['a deleted doc', (meta: SessionMeta) => ({ meta, deleted: true })],
+  ])('drops a stashed RPC turn once the metadata says %s', async (_label, verdict) => {
+    const sessionId = 'session-rpc-definitive-verdict' as SessionId;
+    const { watcher, startSession, setRecord, ownMeta } = createStagedMetaFixture(sessionId);
+    await watcher.start();
+    try {
+      await expect(
+        watcher.offerRpcTurn({
+          sessionId,
+          userTurnId: 'rpc-turn-not-ours',
+          userId: 'user-1',
+          timestamp: new Date().toISOString(),
+          inputConfig: { prompt: 'never runs here' },
+        })
+      ).resolves.toBe('accepted');
+      expect(watcher.hasPendingDispatch(sessionId)).toBe(true);
+
+      await setRecord(verdict(ownMeta));
+      await vi.waitFor(
+        () => {
+          expect(watcher.hasPendingDispatch(sessionId)).toBe(false);
+        },
+        { timeout: 3_000 }
+      );
+      expect(startSession).not.toHaveBeenCalled();
+    } finally {
+      watcher.stop();
+    }
   });
 
   it('preempts an in-flight Doc Room join when an RPC turn arrives', async () => {
