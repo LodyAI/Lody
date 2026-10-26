@@ -1,6 +1,6 @@
 import { removeProjectMemberLinks } from './project-member-access';
 import path from 'node:path';
-import { realpath, rmdir, rm } from 'node:fs/promises';
+import { mkdir, readdir, realpath, rmdir, rm } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import {
   getSessionRoomId,
@@ -21,6 +21,7 @@ import {
 } from './project-worktrees';
 import { getWorktreeManager } from './worktree-manager';
 import { worktreeGitLegacy } from './git-execution-legacy';
+import { isAllocatedSessionBranchName } from './branch-name-allocation';
 
 /** All backups finish before deinit/removal. Any unresolved member keeps the group. */
 export async function archiveProjectGroup(
@@ -80,23 +81,97 @@ export async function archiveProjectGroup(
         ];
       })
     );
+    const unmaterializedSubmodules = new Set<string>();
     // Resolve and check every existing path before invoking hooks or backing up.
     for (const [id, member] of entries) {
       const memberPath = path.join(root, member.path);
       if (!existsSync(memberPath)) {
-        if (!member.branch) throw new Error('Missing project group member has no saved branch');
-        await managers.get(id)!.verifyProjectBranch(member.branch);
+        if (member.branch) await managers.get(id)!.verifyProjectBranch(member.branch);
+        else if (member.placement.kind !== 'submodule')
+          throw new Error('Missing project group member has no saved branch');
+        if (member.placement.kind === 'submodule') unmaterializedSubmodules.add(id);
         continue;
       }
+      const actualPath = await realpath(memberPath);
       if (
-        resolveSessionFilePath([{ id: 'main', absolutePath: root }], await realpath(memberPath))
-          ?.relativePath !== member.path
+        resolveSessionFilePath([{ id: 'main', absolutePath: root }], actualPath)?.relativePath !==
+        member.path
       )
         throw new Error('Project group member escaped its directory');
+      if (member.placement.kind !== 'submodule') continue;
+      if (!existsSync(path.join(memberPath, '.git'))) {
+        // Git creates empty gitlink directories before it initializes their checkout.
+        // Running Git inside one would discover the parent repository instead.
+        if ((await readdir(memberPath)).length)
+          throw new Error(
+            'Project group submodule has no independent Git checkout; preserving the project group'
+          );
+        if (member.branch) await managers.get(id)!.verifyProjectBranch(member.branch);
+        unmaterializedSubmodules.add(id);
+        continue;
+      }
+      const checkoutRoot = await worktreeGitLegacy.run({
+        cwd: memberPath,
+        args: ['rev-parse', '--show-toplevel'],
+      });
+      if ((await realpath(checkoutRoot)) !== actualPath)
+        throw new Error(
+          'Project group submodule has no independent Git checkout; preserving the project group'
+        );
+      // A clone can leave .git behind before checkout or branch allocation finishes.
+      // Preserve that state rather than invoking hooks or backing up another branch.
+      await worktreeGitLegacy.run({
+        cwd: memberPath,
+        args: ['rev-parse', '--verify', 'HEAD^{commit}'],
+      });
+      const branch = await worktreeGitLegacy.run({
+        cwd: memberPath,
+        args: ['symbolic-ref', '--quiet', '--short', 'HEAD'],
+      });
+      if (!member.branch && !isAllocatedSessionBranchName(branch, options.sessionId))
+        throw new Error('Project group submodule has no task branch; preserving the project group');
     }
-    for (const [, member] of entries) {
+    const emptySubmoduleDirectories = new Set<string>();
+    for (const [id, member] of entries) {
+      if (member.placement.kind !== 'submodule' || !unmaterializedSubmodules.has(id)) continue;
       const memberPath = path.join(root, member.path);
-      if (!existsSync(memberPath)) continue;
+      if (unmaterializedSubmodules.has(member.placement.parent)) continue;
+      const parent = run.members[member.placement.parent]!;
+      const parentPath = path.join(root, parent.path);
+      if (!existsSync(parentPath)) continue;
+      const indexed = await worktreeGitLegacy.run({
+        cwd: parentPath,
+        args: ['--literal-pathspecs', 'ls-files', '--stage', '-z', '--', member.placement.path],
+      });
+      const rows = indexed.split('\0');
+      if (
+        rows.length !== 2 ||
+        rows[1] !== '' ||
+        /^160000 [a-f0-9]{40,64} 0\t([\s\S]+)$/.exec(rows[0] ?? '')?.[1] !== member.placement.path
+      )
+        throw new Error(
+          'Missing project group submodule has no indexed gitlink; preserving the project group'
+        );
+      if (existsSync(memberPath)) continue;
+      let ancestor = memberPath;
+      while (!existsSync(ancestor)) {
+        emptySubmoduleDirectories.add(ancestor);
+        ancestor = path.dirname(ancestor);
+      }
+      if ((await realpath(ancestor)) !== ancestor)
+        throw new Error('Project group member escaped its directory');
+    }
+    // Keep Git's untouched gitlink directories present: parent `add -A` would
+    // otherwise turn an unfinished checkout into a committed submodule deletion.
+    // Create only after every member/index/path check passes, without overwriting
+    // a path that appeared since those checks.
+    for (const directory of [...emptySubmoduleDirectories].sort(
+      (a, b) => a.split(path.sep).length - b.split(path.sep).length
+    ))
+      await mkdir(directory);
+    for (const [id, member] of entries) {
+      const memberPath = path.join(root, member.path);
+      if (unmaterializedSubmodules.has(id) || !existsSync(memberPath)) continue;
       try {
         const projected = projectRunMetaPatch({
           ...run,
@@ -140,7 +215,7 @@ export async function archiveProjectGroup(
     }
     for (const [id, member] of entries) {
       const memberPath = path.join(root, member.path);
-      if (!existsSync(memberPath)) continue;
+      if (unmaterializedSubmodules.has(id) || !existsSync(memberPath)) continue;
       const manager = managers.get(id)!;
       if (member.placement.kind === 'submodule')
         member.branch = await manager.backupProjectSubmodule(memberPath, options.sessionId);

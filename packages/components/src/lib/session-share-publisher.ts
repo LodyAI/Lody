@@ -1,3 +1,4 @@
+import { workspaceSupports } from '@lody/shared/workspace-streams-content';
 import i18next from 'i18next';
 import {
   getSessionFileDownloadApiPath,
@@ -25,6 +26,7 @@ export async function captureSessionShare(options: {
   previousSourceIds?: readonly { sourceId: string; conversationId: string }[];
   signal: AbortSignal;
 }) {
+  if (!workspaceSupports({ mode: options.runtime.contentMode === 'e2ee' ? 'protected' : 'plaintext' }, 'sharing')) throw new Error('e2ee_sharing_unavailable');
   const stores: Array<{ store: SessionDocStore; releaseSync: () => void }> = [];
   try {
     const orderedStores = await mapShareConcurrent(

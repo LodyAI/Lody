@@ -119,6 +119,8 @@ type LspRequest = {
 
 export type WorkspaceMachineRpcFacadeDeps = {
   getSessionToken?: () => string | null;
+  /** Same-computer control only; never enables network RPC or a local file API. */
+  isLocalControlMachine?: (machineId: MachineId) => boolean;
   workspaceId: WorkspaceId;
   targetRouter: Pick<WorkspaceTargetRouter, 'getPlaneForMachine' | 'resolvePlaneForMachine'>;
   getMachineProtocolCapabilities: (
@@ -631,7 +633,8 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
         })
       )
         throw new Error('This machine does not support individual subagent cancellation.');
-      if (await canUseLocalMachineRpc(machineId)) {
+      const requiredLocalControl = deps.isLocalControlMachine?.(machineId) === true;
+      if (requiredLocalControl || await canUseLocalMachineRpc(machineId)) {
         const response = await getLocalMachineRpcSender()?.({
           machineId,
           workspaceId,
@@ -653,7 +656,7 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
           };
         }
         if (response?.ok) return response.result as SessionCancelResponse;
-        if (options?.subagentTaskId) throw new Error('Local machine RPC is unavailable.');
+        if (requiredLocalControl || options?.subagentTaskId) throw new Error('Local machine RPC is unavailable.');
       }
       return await (
         await getMachineRpcClient(machineId)

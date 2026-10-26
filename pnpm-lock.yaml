@@ -563,6 +563,9 @@ importers:
       '@electron-toolkit/utils':
         specifier: ^4.0.0
         version: 4.0.0(electron@44.7.0)
+      '@lody/cloud-api':
+        specifier: workspace:*
+        version: link:../../packages/cloud-api
       '@lody/cli-supervisor':
         specifier: workspace:*
         version: link:../../packages/cli-supervisor

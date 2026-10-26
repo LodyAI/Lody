@@ -14,6 +14,7 @@ import { archiveProjectGroup } from './worktree/project-worktree-archive';
 import { existsSync } from 'node:fs';
 import {
   materializeProjectGroup,
+  projectGroupDirectory,
   resolveProjectGroupRepositories,
   ProjectRepositoryNotOnMachineError,
 } from './worktree/project-worktrees';
@@ -30,6 +31,7 @@ import {
 } from 'node:fs/promises';
 import { devNull, tmpdir } from 'node:os';
 import { join, resolve as resolvePath } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ProjectRef, SessionId, SessionMeta, SessionProjectRun } from '@lody/shared';
@@ -112,6 +114,79 @@ async function withRepo(
     await run(cwd, git);
   } finally {
     await rm(cwd, { recursive: true, force: true });
+  }
+}
+
+async function withLocalSubmoduleGroup(
+  selected: boolean,
+  runTest: (context: {
+    directory: string;
+    web: string;
+    api: string;
+    roots: { api: string };
+    run: SessionProjectRun;
+    options: Parameters<typeof materializeProjectGroup>[0];
+    meta: ReturnType<typeof fixture>['meta'];
+    git: (cwd: string, args: string[]) => Promise<string>;
+  }) => Promise<void>
+) {
+  const directory = await realpath(await mkdtemp(join(tmpdir(), 'lody-submodule-group-')));
+  const web = join(directory, 'web');
+  const api = join(directory, 'api');
+  const git = async (cwd: string, args: string[]) => (await exec('git', args, { cwd })).stdout;
+  vi.stubEnv('GIT_ALLOW_PROTOCOL', 'file');
+  vi.stubEnv('GIT_AUTHOR_NAME', 'Test');
+  vi.stubEnv('GIT_AUTHOR_EMAIL', 'test@example.com');
+  vi.stubEnv('GIT_COMMITTER_NAME', 'Test');
+  vi.stubEnv('GIT_COMMITTER_EMAIL', 'test@example.com');
+  vi.stubEnv('LODY_DATA_DIR', join(directory, 'data'));
+  try {
+    for (const repository of [web, api]) {
+      await mkdir(repository);
+      await git(repository, ['init', '-b', 'main']);
+      await writeFile(join(repository, 'readme'), 'original');
+      await git(repository, ['add', '.']);
+      await git(repository, ['commit', '-m', 'base']);
+    }
+    const moduleUrl = 'https://github.com/example/api.git';
+    await git(web, ['submodule', 'add', pathToFileURL(api).href, 'deps/api']);
+    await git(web, ['config', '-f', '.gitmodules', 'submodule.deps/api.url', moduleUrl]);
+    await git(web, ['commit', '-am', 'submodule']);
+    await git(api, ['remote', 'add', 'origin', 'git@github.com:example/api.git']);
+    vi.stubEnv('GIT_CONFIG_COUNT', '1');
+    vi.stubEnv('GIT_CONFIG_KEY_0', `url.${pathToFileURL(api).href}.insteadOf`);
+    vi.stubEnv('GIT_CONFIG_VALUE_0', moduleUrl);
+    const { meta, workspaceDocument } = fixture();
+    const run = projectRun();
+    for (const [id, member] of Object.entries(run.members)) {
+      member.src = {
+        kind: 'local',
+        machineId: 'machine' as never,
+        localProjectId: id as never,
+      };
+      member.base = 'HEAD';
+    }
+    const apiId = Object.keys(run.members)[1]!;
+    if (selected) {
+      const member = run.members[apiId as keyof typeof run.members]!;
+      member.placement = { kind: 'submodule', parent: 'web' as never, path: 'deps/api' };
+      member.path = 'web/deps/api';
+      member.base = 'gitlink';
+    }
+    meta.set(owner, { projectRun: run, machineId: 'machine' as never });
+    const roots = { api };
+    const options = {
+      sessionId: owner,
+      machineId: 'machine',
+      workspaceDocument,
+      logger: { debug() {}, info() {}, warn() {}, trace() {} } as unknown as Logger,
+      resolveLocalRoot: async (id: string) => (id === 'web' ? web : roots.api),
+      brokerAuth: async () => undefined,
+      setup: async () => {},
+    };
+    await runTest({ directory, web, api, roots, run, options, meta, git });
+  } finally {
+    await rm(directory, { recursive: true, force: true });
   }
 }
 
@@ -584,6 +659,332 @@ describe('WorkspaceGitService', () => {
             await rm(data, { recursive: true, force: true });
           }
         });
+      });
+    },
+    180_000
+  );
+
+  it('materializes a local partial-clone member without borrowing or hydrating its missing objects', async () => {
+    await withLocalSubmoduleGroup(true, async ({ directory, web, api, roots, options, git }) => {
+      let seed = 33;
+      const random = () => {
+        seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+        return seed;
+      };
+      const text = () =>
+        Array.from({ length: 100 }, () => 'abcdefghijklmnopqrstuvwxyz '[random() % 27]).join('');
+      const lines = Array.from({ length: 1200 }, () => `${text()}\n`);
+      const addRevision = async (version: number) => {
+        for (let change = 0; change < 30; change++)
+          lines[random() % lines.length] = `${version} ${text()}\n`;
+        // Shrinking blobs produce deltas against older promised blobs when the
+        // remote advances beyond the partial clone's known commits.
+        await writeFile(join(api, 'file'), lines.join('').slice(0, 120000 - version * 100));
+        await git(api, ['add', 'file']);
+        await git(api, ['commit', '-m', `revision ${version}`]);
+      };
+      for (let version = 0; version < 12; version++) await addRevision(version);
+      await git(api, ['gc', '--aggressive', '--prune=now']);
+      await git(api, ['config', 'uploadpack.allowFilter', 'true']);
+      await git(api, ['config', 'uploadpack.allowAnySHA1InWant', 'true']);
+      const partial = join(directory, 'partial');
+      await git(directory, [
+        'clone',
+        '--filter=blob:none',
+        '--no-checkout',
+        pathToFileURL(api).href,
+        partial,
+      ]);
+      await git(partial, ['remote', 'set-url', 'origin', 'git@github.com:example/api.git']);
+      roots.api = partial;
+      const missingObjects = async () =>
+        (await git(partial, ['rev-list', '--objects', '--all', '--missing=print']))
+          .split('\n')
+          .filter((line) => line.startsWith('?'))
+          .sort();
+      const before = await missingObjects();
+      expect(before.length).toBeGreaterThan(0);
+      expect((await git(partial, ['config', '--get', 'remote.origin.promisor'])).trim()).toBe(
+        'true'
+      );
+      expect(
+        (await git(partial, ['config', '--get', 'remote.origin.partialclonefilter'])).trim()
+      ).toBe('blob:none');
+      await git(partial, ['fsck', '--connectivity-only']);
+      for (let version = 12; version < 16; version++) await addRevision(version);
+      await git(api, ['gc', '--aggressive', '--prune=now']);
+      const nested = join(web, 'deps/api');
+      await git(nested, ['fetch']);
+      await git(nested, ['checkout', (await git(api, ['rev-parse', 'HEAD'])).trim()]);
+      await git(web, ['commit', '-am', 'advance gitlink']);
+
+      const prepared = await materializeProjectGroup(options);
+      const checkout = join(prepared.workdir, 'web/deps/api');
+      expect(await readFile(join(checkout, 'file'), 'utf8')).toBe(
+        await readFile(join(api, 'file'), 'utf8')
+      );
+      expect((await git(checkout, ['rev-parse', 'HEAD'])).trim()).toBe(
+        (await git(api, ['rev-parse', 'HEAD'])).trim()
+      );
+      await git(checkout, ['fsck', '--full']);
+      expect(await missingObjects()).toEqual(before);
+    });
+  }, 180_000);
+
+  it('ignores stale unselected submodule paths while initializing real gitlinks', async () => {
+    await withLocalSubmoduleGroup(false, async ({ web, options, git }) => {
+      await git(web, ['config', '-f', '.gitmodules', 'submodule.stale.path', 'deps/stale']);
+      await git(web, [
+        'config',
+        '-f',
+        '.gitmodules',
+        'submodule.stale.url',
+        'file:///nonexistent-stale-submodule',
+      ]);
+      await git(web, ['commit', '-am', 'stale submodule metadata']);
+
+      const prepared = await materializeProjectGroup(options);
+      expect(await readFile(join(prepared.workdir, 'web/deps/api/readme'), 'utf8')).toBe(
+        'original'
+      );
+      expect(existsSync(join(prepared.workdir, 'web/deps/api/.git'))).toBe(true);
+      expect(existsSync(join(prepared.workdir, 'web/deps/stale'))).toBe(false);
+    });
+  }, 180_000);
+
+  it.each(['linked-worktree', 'shallow'])(
+    'materializes a local member backed by a %s without using it as an object reference',
+    async (layout) => {
+      await withLocalSubmoduleGroup(true, async ({ directory, api, roots, options, git }) => {
+        const reference = join(directory, 'reference');
+        if (layout === 'linked-worktree')
+          await git(api, ['worktree', 'add', '-b', 'local-copy', reference]);
+        else {
+          await git(directory, ['clone', '--depth', '1', pathToFileURL(api).href, reference]);
+          await git(reference, ['remote', 'set-url', 'origin', 'git@github.com:example/api.git']);
+        }
+        roots.api = reference;
+        const sourceHead = (await git(reference, ['rev-parse', 'HEAD'])).trim();
+
+        const prepared = await materializeProjectGroup(options);
+
+        expect(await readFile(join(prepared.workdir, 'web/deps/api/readme'), 'utf8')).toBe(
+          'original'
+        );
+        expect((await git(reference, ['rev-parse', 'HEAD'])).trim()).toBe(sourceHead);
+        expect((await git(reference, ['rev-parse', '--is-shallow-repository'])).trim()).toBe(
+          layout === 'shallow' ? 'true' : 'false'
+        );
+      });
+    },
+    180_000
+  );
+
+  it.each(['empty', 'missing'])(
+    'archives a failed submodule clone with a %s member directory and preserves completed work',
+    async (state) => {
+      await withLocalSubmoduleGroup(
+        true,
+        async ({ directory, web, api, run, options, meta, git }) => {
+          vi.stubEnv(
+            'GIT_CONFIG_KEY_0',
+            `url.${pathToFileURL(join(directory, 'unavailable')).href}.insteadOf`
+          );
+          await expect(materializeProjectGroup(options)).rejects.toThrow(/clone|repository/i);
+          const root = join(projectGroupDirectory(run), 'worktrees', owner);
+          const parent = join(root, 'web');
+          const member = join(parent, 'deps/api');
+          await rm(member, { recursive: true, force: true });
+          if (state === 'empty') await mkdir(member, { recursive: true });
+          await writeFile(join(parent, 'saved.txt'), 'completed before archive');
+          const sourceHead = (await git(web, ['rev-parse', 'HEAD'])).trim();
+          const childBranches = await git(api, [
+            'for-each-ref',
+            '--format=%(refname) %(objectname)',
+            'refs/heads/',
+          ]);
+          meta.set(owner, { ...meta.get(owner), isArchived: true });
+
+          await archiveProjectGroup({ ...options, worktreePath: root, cleanup: async () => {} });
+
+          expect(existsSync(root)).toBe(false);
+          const saved = Object.values(meta.get(owner)!.projectRun!.members)[0]!.branch;
+          if (!saved) throw new Error('Archived parent branch was not recorded');
+          expect((await git(web, ['show', `${saved}:saved.txt`])).trim()).toBe(
+            'completed before archive'
+          );
+          expect((await git(web, ['rev-parse', 'HEAD'])).trim()).toBe(sourceHead);
+          expect(await readFile(join(web, 'readme'), 'utf8')).toBe('original');
+          expect(existsSync(join(web, 'saved.txt'))).toBe(false);
+          expect(
+            await git(api, ['for-each-ref', '--format=%(refname) %(objectname)', 'refs/heads/'])
+          ).toBe(childBranches);
+          expect(await git(web, ['ls-tree', saved, '--', 'deps/api'])).toMatch(/^160000 commit /);
+          vi.stubEnv('GIT_CONFIG_KEY_0', `url.${pathToFileURL(api).href}.insteadOf`);
+          meta.set(owner, { ...meta.get(owner), isArchived: false });
+          const restored = await materializeProjectGroup(options);
+          expect(await readFile(join(restored.workdir, 'web/saved.txt'), 'utf8')).toBe(
+            'completed before archive'
+          );
+          expect(await readFile(join(restored.workdir, 'web/deps/api/readme'), 'utf8')).toBe(
+            'original'
+          );
+          expect(existsSync(join(restored.workdir, 'web/deps/api/.git'))).toBe(true);
+        }
+      );
+    },
+    180_000
+  );
+
+  it('preserves an unknown nonempty submodule directory without backing up its parent as the child', async () => {
+    await withLocalSubmoduleGroup(true, async ({ directory, api, run, options, meta, git }) => {
+      vi.stubEnv(
+        'GIT_CONFIG_KEY_0',
+        `url.${pathToFileURL(join(directory, 'unavailable')).href}.insteadOf`
+      );
+      await expect(materializeProjectGroup(options)).rejects.toThrow(/clone|repository/i);
+      const root = join(projectGroupDirectory(run), 'worktrees', owner);
+      const parent = join(root, 'web');
+      const member = join(parent, 'deps/api');
+      await mkdir(member, { recursive: true });
+      await writeFile(join(member, 'keep.txt'), 'unknown local content');
+      const parentHead = (await git(parent, ['rev-parse', 'HEAD'])).trim();
+      const childBranches = await git(api, [
+        'for-each-ref',
+        '--format=%(refname) %(objectname)',
+        'refs/heads/',
+      ]);
+      meta.set(owner, { ...meta.get(owner), isArchived: true });
+
+      await expect(
+        archiveProjectGroup({ ...options, worktreePath: root, cleanup: async () => {} })
+      ).rejects.toThrow(/no independent Git checkout/);
+
+      expect(await readFile(join(member, 'keep.txt'), 'utf8')).toBe('unknown local content');
+      expect((await git(parent, ['rev-parse', 'HEAD'])).trim()).toBe(parentHead);
+      expect(
+        await git(api, ['for-each-ref', '--format=%(refname) %(objectname)', 'refs/heads/'])
+      ).toBe(childBranches);
+    });
+  }, 180_000);
+
+  it('keeps the project when a missing submodule has an unrestorable saved branch', async () => {
+    await withLocalSubmoduleGroup(true, async ({ directory, run, options, meta }) => {
+      vi.stubEnv(
+        'GIT_CONFIG_KEY_0',
+        `url.${pathToFileURL(join(directory, 'unavailable')).href}.insteadOf`
+      );
+      await expect(materializeProjectGroup(options)).rejects.toThrow(/clone|repository/i);
+      const root = join(projectGroupDirectory(run), 'worktrees', owner);
+      const member = join(root, 'web/deps/api');
+      await rm(member, { recursive: true, force: true });
+      const savedRun = meta.get(owner)!.projectRun!;
+      Object.values(savedRun.members)[1]!.branch = 'local/missing-backup';
+      meta.set(owner, { ...meta.get(owner), projectRun: savedRun, isArchived: true });
+      await writeFile(join(root, 'web/keep.txt'), 'unbacked parent work');
+
+      await expect(
+        archiveProjectGroup({ ...options, worktreePath: root, cleanup: async () => {} })
+      ).rejects.toThrow();
+
+      expect(await readFile(join(root, 'web/keep.txt'), 'utf8')).toBe('unbacked parent work');
+      expect(existsSync(root)).toBe(true);
+      expect(existsSync(member)).toBe(false);
+    });
+  }, 180_000);
+
+  it.each(['empty', 'missing'])(
+    'preserves an explicit staged gitlink deletion when a submodule directory is %s',
+    async (state) => {
+      await withLocalSubmoduleGroup(true, async ({ directory, run, options, meta, git }) => {
+        vi.stubEnv(
+          'GIT_CONFIG_KEY_0',
+          `url.${pathToFileURL(join(directory, 'unavailable')).href}.insteadOf`
+        );
+        await expect(materializeProjectGroup(options)).rejects.toThrow(/clone|repository/i);
+        const root = join(projectGroupDirectory(run), 'worktrees', owner);
+        const parent = join(root, 'web');
+        await rm(join(parent, 'deps/api'), { recursive: true, force: true });
+        if (state === 'empty') await mkdir(join(parent, 'deps/api'), { recursive: true });
+        await git(parent, ['rm', '--cached', 'deps/api']);
+        const staged = await git(parent, ['diff', '--cached', '--raw']);
+        const parentHead = (await git(parent, ['rev-parse', 'HEAD'])).trim();
+        meta.set(owner, { ...meta.get(owner), isArchived: true });
+
+        await expect(
+          archiveProjectGroup({ ...options, worktreePath: root, cleanup: async () => {} })
+        ).rejects.toThrow();
+
+        expect(await git(parent, ['diff', '--cached', '--raw'])).toBe(staged);
+        expect(await git(parent, ['ls-files', '--stage', '--', 'deps/api'])).toBe('');
+        expect((await git(parent, ['rev-parse', 'HEAD'])).trim()).toBe(parentHead);
+        expect(existsSync(root)).toBe(true);
+      });
+    },
+    180_000
+  );
+
+  it('rejects a missing submodule below an escaping symlink without creating an external directory', async () => {
+    await withLocalSubmoduleGroup(true, async ({ directory, run, options, meta, git }) => {
+      vi.stubEnv(
+        'GIT_CONFIG_KEY_0',
+        `url.${pathToFileURL(join(directory, 'unavailable')).href}.insteadOf`
+      );
+      await expect(materializeProjectGroup(options)).rejects.toThrow(/clone|repository/i);
+      const root = join(projectGroupDirectory(run), 'worktrees', owner);
+      const parent = join(root, 'web');
+      const outside = join(directory, 'outside');
+      await mkdir(outside);
+      await writeFile(join(outside, 'keep.txt'), 'external content');
+      await rm(join(parent, 'deps'), { recursive: true, force: true });
+      await symlink(outside, join(parent, 'deps'), 'dir');
+      const parentHead = (await git(parent, ['rev-parse', 'HEAD'])).trim();
+      meta.set(owner, { ...meta.get(owner), isArchived: true });
+
+      await expect(
+        archiveProjectGroup({ ...options, worktreePath: root, cleanup: async () => {} })
+      ).rejects.toThrow();
+
+      expect(existsSync(join(outside, 'api'))).toBe(false);
+      expect(await readFile(join(outside, 'keep.txt'), 'utf8')).toBe('external content');
+      expect((await git(parent, ['rev-parse', 'HEAD'])).trim()).toBe(parentHead);
+      expect(existsSync(root)).toBe(true);
+    });
+  }, 180_000);
+
+  it.each(['main', 'detached'])(
+    'preserves an independent submodule checkout on %s when no task branch was recorded',
+    async (checkoutState) => {
+      await withLocalSubmoduleGroup(true, async ({ directory, api, run, options, meta, git }) => {
+        vi.stubEnv(
+          'GIT_CONFIG_KEY_0',
+          `url.${pathToFileURL(join(directory, 'unavailable')).href}.insteadOf`
+        );
+        await expect(materializeProjectGroup(options)).rejects.toThrow(/clone|repository/i);
+        const root = join(projectGroupDirectory(run), 'worktrees', owner);
+        const parent = join(root, 'web');
+        const member = join(parent, 'deps/api');
+        await rm(member, { recursive: true, force: true });
+        await git(parent, ['clone', pathToFileURL(api).href, member]);
+        if (checkoutState === 'detached') await git(member, ['checkout', '--detach']);
+        await writeFile(join(member, 'keep.txt'), 'unclaimed checkout work');
+        const parentHead = (await git(parent, ['rev-parse', 'HEAD'])).trim();
+        const childBranches = await git(api, [
+          'for-each-ref',
+          '--format=%(refname) %(objectname)',
+          'refs/heads/',
+        ]);
+        meta.set(owner, { ...meta.get(owner), isArchived: true });
+
+        await expect(
+          archiveProjectGroup({ ...options, worktreePath: root, cleanup: async () => {} })
+        ).rejects.toThrow();
+
+        expect(await readFile(join(member, 'keep.txt'), 'utf8')).toBe('unclaimed checkout work');
+        expect((await git(parent, ['rev-parse', 'HEAD'])).trim()).toBe(parentHead);
+        expect(
+          await git(api, ['for-each-ref', '--format=%(refname) %(objectname)', 'refs/heads/'])
+        ).toBe(childBranches);
       });
     },
     180_000

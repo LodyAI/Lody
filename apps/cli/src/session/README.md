@@ -864,5 +864,13 @@ selected submodules wait for their parent, and siblings sharing parent Git confi
 are serialized. Branch receipts publish serially, and failures drain started work
 before releasing the Project owner. Selected members initialize non-recursively
 with their own credentials; remaining submodules initialize afterward with four Git
-fetch jobs per command. Local selected copies lend objects via `--reference` and
-`--dissociate`, so source GC cannot invalidate a checkout. Setup retains the prior serial traversal order, including parents before children.
+fetch jobs per command. Complete standalone local copies lend objects via `--reference`
+and `--dissociate`, so source GC cannot invalidate a checkout. Partial clones, shallow
+copies and linked worktrees use ordinary cloning instead; preparation never hydrates
+the source. Remaining submodule initialization follows gitlinks in the current index,
+ignoring residual `.gitmodules` entries. Archive skips unmaterialized empty selected
+submodules and verifies that populated members are independent checkouts before backup;
+unknown local content is retained. Setup retains the prior serial traversal order,
+including parents before children.
+The [submodule preparation decision](../../../../.agents/notes/implemented/bug-fix/2026-10-26-project-submodule-preparation.md)
+records the source-layout and incomplete-startup recovery boundaries.

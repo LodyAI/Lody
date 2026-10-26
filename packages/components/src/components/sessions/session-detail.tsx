@@ -1,3 +1,4 @@
+import { useWorkspaceFeature } from '@/hooks/use-workspace-feature';
 import { FileLinkCandidateDialog } from './file-link-candidate-dialog';
 import {
   useArchiveConfirmationRequest,
@@ -1192,6 +1193,8 @@ const SessionDetail = ({
   const clearPendingSessionLink = useSetAtom(pendingSessionLinkAtom);
   const isLeftSidebarHidden = !useAtomValue(navigationSidebarVisibleAtom);
   const showNavigationSidebar = useSetAtom(showNavigationSidebarAtom);
+  const exportAllowed = useWorkspaceFeature('export');
+  const previewAllowed = useWorkspaceFeature('remote-preview');
   const runtime = useAtomValue(activeWorkspaceRuntimeAtom);
   const runtimeInitializing = useAtomValue(runtimeInitializingAtom);
   const localMachineId = useAtomValue(localMachineIdAtom);
@@ -2587,7 +2590,8 @@ const SessionDetail = ({
 
   const handleSendDraft = useCallback(
     async (payload: DraftSessionSendPayload): Promise<boolean> => {
-      if (!activeSession || !user) {
+      const draftUserId = user?.id ?? (runtime?.contentMode === 'e2ee' ? runtime.accountId : null);
+      if (!activeSession || !draftUserId) {
         toast.error(t('sessions.sendError'));
         return false;
       }
@@ -2627,7 +2631,7 @@ const SessionDetail = ({
         const draftTitle = getDraftTabLabel({ prompt }, '').trim();
         const pendingHistoryEntry = buildDraftUserHistoryEntry(
           {
-            userId: user.id,
+            userId: draftUserId,
             inputBlocks: payload.inputBlocks,
             timestamp: new Date().toISOString(),
             inputConfig: payload.inputConfig,
@@ -2652,7 +2656,7 @@ const SessionDetail = ({
           {
             sessionId: childSessionId,
             machineId: activeSession.machineId,
-            userId: user.id,
+            userId: draftUserId,
             cliType: payload.cliType,
             agentType: payload.agentType,
             agentConfigId: payload.agentConfigId,
@@ -2818,6 +2822,8 @@ const SessionDetail = ({
       }
     },
     [
+      runtime?.accountId,
+      runtime?.contentMode,
       activeSession,
       captureSessionDetailEvent,
       hidesBillingUi,
@@ -3247,6 +3253,7 @@ const SessionDetail = ({
   }, [activeSession, machineDotlodyPath, resolvedLocalProjectMeta?.rootPath, sessionMachine]);
 
   const handleCopyConversationHistory = useCallback(() => {
+    if (runtime?.contentMode === 'e2ee') throw new Error('e2ee_export_unavailable');
     if (activeDraftTab) {
       return;
     }
@@ -3265,9 +3272,10 @@ const SessionDetail = ({
       return;
     }
     void activeChatRef.copyConversationHistory();
-  }, [activeDraftTab, activeTabSessionId, captureSessionDetailEvent, t]);
+  }, [runtime?.contentMode, activeDraftTab, activeTabSessionId, captureSessionDetailEvent, t]);
 
   const handleShareAsImage = useCallback(async () => {
+    if (runtime?.contentMode === 'e2ee') throw new Error('e2ee_export_unavailable');
     if (activeDraftTab) {
       return;
     }
@@ -3293,7 +3301,7 @@ const SessionDetail = ({
         agentName: shareData.agentName,
       });
     });
-  }, [activeDraftTab, activeTabSession, activeTabSessionId, t]);
+  }, [runtime?.contentMode, activeDraftTab, activeTabSession, activeTabSessionId, t]);
 
   // The share is finished, so the whole flow ends: the preview closes and the
   // chat drops the selection behind it. Resolve the surface by the session the
@@ -3918,6 +3926,7 @@ const SessionDetail = ({
 
   const handleOpenBrowser = useCallback(
     (tabSessionId?: SessionId, navigateCandidate = false) => {
+      if (runtime?.contentMode === 'e2ee') throw new Error('e2ee_preview_unavailable');
       const browserSessionId = tabSessionId ?? activeBrowserSession?.id;
       if (tabSessionId) {
         navigateToSessionTab(tabSessionId, { push: true });
@@ -3940,6 +3949,7 @@ const SessionDetail = ({
       });
     },
     [
+      runtime?.contentMode,
       activeBrowserSession?.id,
       activeTabSessionId,
       activateSidebarTab,
@@ -4753,6 +4763,9 @@ const SessionDetail = ({
     }
     return viewerTabs.find((tab) => tab.id === effectiveActiveViewerTabId) ?? null;
   }, [effectiveActiveViewerTabId, viewerTabs]);
+  // Mobile diff viewers replace the conversation; file drawers do not.
+  const hasActiveViewerTab =
+    effectiveActiveViewerTabId !== null && (!isMobile || activeViewerTab?.type !== 'file');
   const activeViewerTabSaveState = effectiveActiveViewerTabId
     ? viewerTabSaveStates[effectiveActiveViewerTabId]
     : undefined;
@@ -4809,16 +4822,20 @@ const SessionDetail = ({
     });
   }, [activeTabSessionId, isMobile]);
 
+  // Drafts and pending children can resolve to the parent for display only.
+  const canRenameCurrentSession =
+    activeTabSession?.id === activeTabSessionId &&
+    !activeTabSession.isArchived &&
+    (!isMobile || !hasActiveViewerTab);
   const handleRenameCurrentSession = useCallback(() => {
-    const targetSession = activeDraftTab ? null : activeTabSession;
-    if (!targetSession || targetSession.isArchived) {
+    if (!canRenameCurrentSession) {
       return;
     }
     setRenameDialogTarget({
-      sessionId: targetSession.id,
-      initialTitle: targetSession.title ?? '',
+      sessionId: activeTabSession.id,
+      initialTitle: activeTabSession.title ?? '',
     });
-  }, [activeDraftTab, activeTabSession]);
+  }, [canRenameCurrentSession, activeTabSession]);
 
   const handleToggleCurrentSessionPinned = useCallback(() => {
     const targetSession = activeDraftTab ? null : activeTabSession;
@@ -4994,12 +5011,7 @@ const SessionDetail = ({
     title: t('commands.session.renameCurrent', 'Rename Current Chat'),
     category: 'Session',
     keybindings: getCommandKeybindings('session.renameCurrent'),
-    /* Same pending-child rule as toggleCurrentPinned above. */
-    when: () =>
-      Boolean(activeTabSession) &&
-      !activeDraftTab &&
-      !activeTabIsPendingChild &&
-      activeTabSession?.isArchived !== true,
+    when: () => canRenameCurrentSession,
     run: handleRenameCurrentSession,
   });
 
@@ -5362,10 +5374,6 @@ const SessionDetail = ({
     sidePanelTabs,
   ]);
 
-  // Mobile diff viewers still replace the conversation surface. File viewers
-  // open in their own drawer and therefore never hide the conversation.
-  const hasActiveViewerTab =
-    effectiveActiveViewerTabId !== null && (!isMobile || activeViewerTab?.type !== 'file');
   const mobileSkipTargetId = getSessionDetailSkipTargetId(hasActiveViewerTab);
 
   /* ── Mobile tab-switcher sheet (replaces the mobile SessionTabBar) ──
@@ -5681,8 +5689,8 @@ const SessionDetail = ({
         onRestoreSession: handleRestoreCurrentSession,
         onDeleteSession: handleRequestDeleteCurrentSession,
         onOpenSearch: handleOpenSearch,
-        onCopyConversationHistory: handleCopyConversationHistory,
-        onRequestRename: !activeDraftTab ? handleRenameCurrentSession : undefined,
+        onCopyConversationHistory: exportAllowed ? handleCopyConversationHistory : undefined,
+        onRequestRename: canRenameCurrentSession ? handleRenameCurrentSession : undefined,
         onForkSession:
           !activeDraftTab && activeTabSession && canForkSession(activeTabSession)
             ? handleForkCurrentSession
@@ -5702,14 +5710,15 @@ const SessionDetail = ({
         onShareWithTeam: showSessionSharing
           ? () => handleRequestShareSession(activeSession)
           : undefined,
-        onShareAsImage: activeDraftTab
-          ? undefined
-          : () => {
-              void handleShareAsImage().catch((error: unknown) => {
-                console.error('Failed to load conversation for image sharing', error);
-                toast.error(t('sessions.shareImage.empty', 'No conversation to share'));
-              });
-            },
+        onShareAsImage:
+          activeDraftTab || !exportAllowed
+            ? undefined
+            : () => {
+                void handleShareAsImage().catch((error: unknown) => {
+                  console.error('Failed to load conversation for image sharing', error);
+                  toast.error(t('sessions.shareImage.empty', 'No conversation to share'));
+                });
+              },
       },
     };
   }, [
@@ -5720,8 +5729,10 @@ const SessionDetail = ({
     handleRestoreCurrentSession,
     handleRequestDeleteCurrentSession,
     handleOpenSearch,
+    exportAllowed,
     handleCopyConversationHistory,
     activeDraftTab,
+    canRenameCurrentSession,
     handleRenameCurrentSession,
     activeTabSession,
     canForkSession,
@@ -6159,16 +6170,14 @@ const SessionDetail = ({
           }
         }
       }
-      mobileMenuActions.push({
-        id: 'rename',
-        icon: <Pencil {...stylex.props(detailStyles.icon14)} />,
-        label: t('sidebar.renameChat.title', 'Rename Chat'),
-        onClick: () =>
-          setRenameDialogTarget({
-            sessionId: activeSession.id,
-            initialTitle: activeSession.title ?? '',
-          }),
-      });
+      if (canRenameCurrentSession) {
+        mobileMenuActions.push({
+          id: 'rename',
+          icon: <Pencil {...stylex.props(detailStyles.icon14)} />,
+          label: t('sidebar.renameChat.title', 'Rename Chat'),
+          onClick: handleRenameCurrentSession,
+        });
+      }
     }
     mobileMenuActions.push(
       {
@@ -6202,7 +6211,7 @@ const SessionDetail = ({
     // Share-as-image arms message selection inside the chat surface, so it is
     // only offered while that surface is the one on screen: a draft has no
     // conversation and a viewer tab covers the rows being picked.
-    if (!activeDraftTab && !hasActiveViewerTab) {
+    if (exportAllowed && !activeDraftTab && !hasActiveViewerTab) {
       mobileMenuActions.push({
         id: 'share-image',
         icon: <Image {...stylex.props(detailStyles.icon14)} />,
@@ -6350,7 +6359,13 @@ const SessionDetail = ({
           open={mobileMenuSheetOpen}
           onOpenChange={setMobileMenuSheetOpen}
           infoRows={mobileMenuInfoRows}
-          actions={mobileMenuActions}
+          actions={
+            exportAllowed
+              ? mobileMenuActions
+              : mobileMenuActions.filter(
+                  (action) => action.id !== 'copy-md' && action.id !== 'share-image'
+                )
+          }
           owner={
             isMultiMemberWorkspace && !activeSession.isArchived
               ? {
@@ -6416,7 +6431,9 @@ const SessionDetail = ({
                   onOpenPrTab={handleOpenPrTab}
                   onOpenAllChanges={handleOpenAllChanges}
                   onOpenIosSimulator={() => handleOpenIosSimulatorForSession(tabSession.id)}
-                  onOpenBrowser={() => handleOpenBrowser(tabSession.id, true)}
+                  onOpenBrowser={
+                    previewAllowed ? () => handleOpenBrowser(tabSession.id, true) : undefined
+                  }
                   onOpenExistingBrowser={() => handleOpenBrowser(tabSession.id, false)}
                   changesDiffStat={changesDiffStat}
                   onForkLastAssistant={
@@ -6729,7 +6746,7 @@ const SessionDetail = ({
         <Drawer
           direction="right"
           repositionInputs={isNativeAppShell()}
-          open={Boolean(urlBrowser && activeBrowserSession)}
+          open={Boolean(previewAllowed && urlBrowser && activeBrowserSession)}
           onOpenChange={(open) => {
             if (!open) handleCloseBrowserTab();
           }}
@@ -6908,7 +6925,7 @@ const SessionDetail = ({
   // switching behaves like a browser rather than rebuilding the page.
   const sidebarContent = (
     <div {...stylex.props(detailStyles.sidebarContentRoot)}>
-      {activeBrowserSession && openedSidebarTabs.includes('browser') ? (
+      {previewAllowed && activeBrowserSession && openedSidebarTabs.includes('browser') ? (
         <div
           className={
             stylex.props(
@@ -7058,7 +7075,7 @@ const SessionDetail = ({
       onFilePathClick: handleOpenFile,
       onOpenHtmlFile: handleOpenHtmlFile,
       onOpenIosSimulator: () => handleOpenIosSimulatorForSession(chatSession.id),
-      onOpenBrowser: () => handleOpenBrowser(chatSession.id, true),
+      onOpenBrowser: previewAllowed ? () => handleOpenBrowser(chatSession.id, true) : undefined,
       onOpenExistingBrowser: () => handleOpenBrowser(chatSession.id, false),
       onNavigateToComment: handleNavigateToComment,
       onCommentReferencesChange: getCommentReferencesChangeHandler(chatSession.id),
@@ -7121,7 +7138,9 @@ const SessionDetail = ({
                 messageFileDiffEntriesByTurn={
                   tabSession.id === activeSessionTabId ? messageFileDiffEntriesByTurn : undefined
                 }
-                onOpenBrowser={() => handleOpenBrowser(tabSession.id, true)}
+                onOpenBrowser={
+                  previewAllowed ? () => handleOpenBrowser(tabSession.id, true) : undefined
+                }
                 changesDiffStat={changesDiffStat}
                 onForkLastAssistant={
                   canForkSession(tabSession)

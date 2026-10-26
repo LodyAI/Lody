@@ -14,6 +14,7 @@ const fixture = vi.hoisted(() => ({
   port: undefined as PlatformE2eeWorkspaces | undefined,
   session: { status: 'authenticated', user: { id: 'account', name: 'A', email: 'a@example.test' } },
   clear: () => {},
+  cachedUser: null as { id: string } | null,
 }));
 vi.mock('@tanstack/react-router', () => ({
   createFileRoute: () => (options: unknown) => ({
@@ -26,14 +27,34 @@ vi.mock('@lody/platform/react', () => ({
   usePlatform: () => ({ e2eeWorkspaces: fixture.port }),
   usePlatformSession: () => fixture.session,
 }));
-vi.mock('jotai', () => ({ useSetAtom: () => fixture.clear }));
-vi.mock('@/atoms', () => ({ setWorkspaceContextAtom: 'workspace' }));
+vi.mock('jotai', () => ({
+  useSetAtom: () => fixture.clear,
+  useAtomValue: () => fixture.cachedUser,
+}));
+vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (key: string) => key }) }));
+vi.mock('@/atoms', () => ({ setWorkspaceContextAtom: 'workspace', userAtom: 'user' }));
+vi.mock('@/atoms/runtime', () => ({ activeWorkspaceRuntimeAtom: 'runtime' }));
 vi.mock('@/components/pages/e2ee-workspace-control-page', () => ({
-  E2eeWorkspaceControlPage: ({ history, failure }: { history: { view: { length: number }; upgradeRequiredAt?: number } | null; failure?: unknown }) =>
-    createElement('p', null, failure ? 'failed' : history?.upgradeRequiredAt !== undefined ? 'upgrade' : history?.view.length ?? 'loading'),
+  E2eeWorkspaceControlPage: ({
+    history,
+    failure,
+  }: {
+    history: { view: { length: number }; upgradeRequiredAt?: number } | null;
+    failure?: unknown;
+  }) =>
+    createElement(
+      'p',
+      null,
+      failure
+        ? 'failed'
+        : history?.upgradeRequiredAt !== undefined
+          ? 'upgrade'
+          : (history?.view.length ?? 'loading')
+    ),
 }));
 import { saveE2eeGenesisPin } from '../src/lib/e2ee-workspace-storage';
 import { Route } from '../src/routes/workspace/e2ee/$workspaceId';
+import { useE2eeAccountId } from '../src/lib/e2ee-account';
 (
   globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
 ).IS_REACT_ACT_ENVIRONMENT = true;
@@ -79,6 +100,8 @@ let container: HTMLDivElement;
 let root: ReturnType<typeof createRoot>;
 beforeEach(() => {
   localStorage.clear();
+  fixture.session.status = 'authenticated';
+  fixture.cachedUser = null;
   container = document.createElement('div');
   document.body.append(container);
   root = createRoot(container);
@@ -156,28 +179,61 @@ for (const upgrade of [false, true]) {
     const publishedPhases: number[] = [];
     const pagesRead: (string | undefined)[] = [];
     fixture.port = {
-      create: async () => { throw new Error('unused'); },
-      describe: async () => ({ workspaceId, contentMode: 'e2ee', contentModeVersion: 1, genesisHash, cryptoOrgId: genesisHash, activation: 'control-only' }),
+      create: async () => {
+        throw new Error('unused');
+      },
+      describe: async () => ({
+        workspaceId,
+        contentMode: 'e2ee',
+        contentModeVersion: 1,
+        genesisHash,
+        cryptoOrgId: genesisHash,
+        activation: 'control-only',
+      }),
       history: async (request) => {
         pagesRead.push(request.cursor);
         if (request.cursor === 'page-2') await continueSync.promise;
-        return { workspaceId, genesisHash, checkpoint: { headHash: genesisHash, length: 1 }, startIndex: 1, recordsHex: [], position: local.status.position!, nextCursor: request.cursor === 'page-3' ? null : request.cursor === 'page-2' ? 'page-3' : 'page-2' };
+        return {
+          workspaceId,
+          genesisHash,
+          checkpoint: { headHash: genesisHash, length: 1 },
+          startIndex: 1,
+          recordsHex: [],
+          position: local.status.position!,
+          nextCursor:
+            request.cursor === 'page-3' ? null : request.cursor === 'page-2' ? 'page-3' : 'page-2',
+        };
       },
       runtime: {
-        recordCreated: async () => {}, open: async () => local.status, close: async () => {}, status: async () => local.status,
-        ingestLedgerRecords: async () => { phase++; return { ...local.status, ...(upgrade && phase === 2 ? { upgradeRequiredAt: 1 } : {}) }; },
+        recordCreated: async () => {},
+        open: async () => local.status,
+        close: async () => {},
+        status: async () => local.status,
+        ingestLedgerRecords: async () => {
+          phase++;
+          return { ...local.status, ...(upgrade && phase === 2 ? { upgradeRequiredAt: 1 } : {}) };
+        },
         ledgerView: async () => {
-          if (phase === 1 || (!upgrade && phase === 2)) throw new Error('incomplete view must not cross IPC');
+          if (phase === 1 || (!upgrade && phase === 2))
+            throw new Error('incomplete view must not cross IPC');
           publishedPhases.push(phase);
-          return { ...local, status: { ...local.status, ...(upgrade && phase === 2 ? { upgradeRequiredAt: 1 } : {}) } };
-        }
-      }
+          return {
+            ...local,
+            status: {
+              ...local.status,
+              ...(upgrade && phase === 2 ? { upgradeRequiredAt: 1 } : {}),
+            },
+          };
+        },
+      },
     };
     const Component = Route.options.component as () => ReturnType<typeof createElement>;
     await act(async () => root.render(createElement(Component)));
     expect(container.textContent).toBe('1');
     expect(pagesRead).toEqual([undefined, 'page-2']);
-    await act(async () => { continueSync.resolve(); });
+    await act(async () => {
+      continueSync.resolve();
+    });
     expect(container.textContent).toBe(upgrade ? 'upgrade' : '1');
     expect(publishedPhases).toEqual(upgrade ? [0, 2] : [0, 3]);
     expect(pagesRead).toEqual(upgrade ? [undefined, 'page-2'] : [undefined, 'page-2', 'page-3']);
@@ -195,28 +251,157 @@ it.each([
   ['local-evidence-conflict', true, 'open', false],
   ['conflict', true, 'recordCreated', false],
   ['corrupt', true, 'open', false],
-] as const)('keeps read-only verification for %s (pin=%s, at=%s, mismatched pin=%s)', async (code, pinned, at, mismatch) => {
-  if (pinned) saveE2eeGenesisPin(localStorage, 'account', workspaceId, mismatch ? 'a'.repeat(64) : genesisHash);
-  const fetched: string[] = [];
+] as const)(
+  'keeps read-only verification for %s (pin=%s, at=%s, mismatched pin=%s)',
+  async (code, pinned, at, mismatch) => {
+    if (pinned)
+      saveE2eeGenesisPin(
+        localStorage,
+        'account',
+        workspaceId,
+        mismatch ? 'a'.repeat(64) : genesisHash
+      );
+    const fetched: string[] = [];
+    fixture.port = {
+      create: async () => {
+        throw new Error('unused');
+      },
+      describe: async () => {
+        fetched.push('describe');
+        return {
+          workspaceId,
+          contentMode: 'e2ee',
+          contentModeVersion: 1,
+          genesisHash,
+          cryptoOrgId: genesisHash,
+          activation: 'control-only',
+        };
+      },
+      history: async () => ({
+        workspaceId,
+        genesisHash,
+        checkpoint: { headHash: genesisHash, length: 1 },
+        startIndex: 0,
+        recordsHex: [raw],
+        position: local.status.position!,
+        nextCursor: null,
+      }),
+      runtime: {
+        recordCreated: async () => {
+          if (at === 'recordCreated') throw new Error(`e2ee_${code}`);
+        },
+        open: async () => {
+          throw new Error(`Error invoking remote method 'e2ee:open': Error: e2ee_${code}`);
+        },
+        close: async () => {},
+        status: async () => local.status,
+        ledgerView: async () => {
+          throw new Error('native view must not be used');
+        },
+        ingestLedgerRecords: async () => {
+          throw new Error('native ingestion must not be used');
+        },
+      },
+    };
+    const Component = Route.options.component as () => ReturnType<typeof createElement>;
+    await act(async () => root.render(createElement(Component)));
+    const availability = [
+      'custody_unavailable',
+      'account_unavailable',
+      'missing-binding',
+      'closed',
+    ].includes(code);
+    expect(container.textContent).toBe(availability && !mismatch ? '1' : 'failed');
+    expect(fetched).toEqual(availability ? ['describe'] : []);
+  }
+);
+
+it('opens the local ledger with an expired renderer snapshot and offline main identity, then reconnects', async () => {
+  fixture.session.status = 'loading';
+  localStorage.setItem('lody_auth_token', 'synthetic-offline-bearer');
+  localStorage.setItem(
+    'lody:auth-bootstrap',
+    JSON.stringify({
+      user: { id: 'account', name: 'A', email: 'a@example.test' },
+      updatedAt: Date.now() - 8 * 24 * 60 * 60 * 1000,
+    })
+  );
+  let online = false;
+  let matchedBearer = false;
   fixture.port = {
-    create: async () => { throw new Error('unused'); },
-    describe: async () => {
-      fetched.push('describe');
-      return { workspaceId, contentMode: 'e2ee', contentModeVersion: 1, genesisHash, cryptoOrgId: genesisHash, activation: 'control-only' };
+    create: async () => {
+      throw new Error('unused');
     },
-    history: async () => ({ workspaceId, genesisHash, checkpoint: { headHash: genesisHash, length: 1 }, startIndex: 0, recordsHex: [raw], position: local.status.position!, nextCursor: null }),
+    describe: async () => {
+      if (!online) throw new TypeError('Failed to fetch');
+      return {
+        workspaceId,
+        contentMode: 'e2ee',
+        contentModeVersion: 1,
+        genesisHash,
+        cryptoOrgId: genesisHash,
+        activation: 'control-only',
+      };
+    },
+    history: async () => ({
+      workspaceId,
+      genesisHash,
+      checkpoint: { headHash: genesisHash, length: 1 },
+      startIndex: 1,
+      recordsHex: [],
+      position: local.status.position!,
+      nextCursor: null,
+    }),
     runtime: {
-      recordCreated: async () => { if (at === 'recordCreated') throw new Error(`e2ee_${code}`); },
-      open: async () => { throw new Error(`Error invoking remote method 'e2ee:open': Error: e2ee_${code}`); },
+      account: async (input) => {
+        matchedBearer = input?.token === 'synthetic-offline-bearer';
+        return matchedBearer ? { userId: 'account', source: 'offline' } : null;
+      },
+      recordCreated: async () => {},
+      open: async () => local.status,
       close: async () => {},
       status: async () => local.status,
-      ledgerView: async () => { throw new Error('native view must not be used'); },
-      ingestLedgerRecords: async () => { throw new Error('native ingestion must not be used'); },
+      ingestLedgerRecords: async () => local.status,
+      ledgerView: async () => local,
     },
   };
   const Component = Route.options.component as () => ReturnType<typeof createElement>;
   await act(async () => root.render(createElement(Component)));
-  const availability = ['custody_unavailable', 'account_unavailable', 'missing-binding', 'closed'].includes(code);
-  expect(container.textContent).toBe(availability && !mismatch ? '1' : 'failed');
-  expect(fetched).toEqual(availability ? ['describe'] : []);
+  expect(matchedBearer).toBe(true);
+  expect(container.textContent).toBe('sessions.offline1');
+  online = true;
+  await act(async () => window.dispatchEvent(new Event('online')));
+  expect(container.textContent).toBe('1');
+});
+
+it('keeps E2EE identity IPC dormant for an ordinary workspace even while auth is loading', async () => {
+  fixture.session.status = 'loading';
+  fixture.port = {
+    create: async () => {
+      throw new Error('unused');
+    },
+    describe: async () => {
+      throw new Error('unused');
+    },
+    history: async () => {
+      throw new Error('unused');
+    },
+    runtime: {
+      account: () => {
+        throw new Error('ordinary workspace must not call E2EE account IPC');
+      },
+      recordCreated: async () => {},
+      open: async () => local.status,
+      close: async () => {},
+      status: async () => local.status,
+      ingestLedgerRecords: async () => local.status,
+      ledgerView: async () => local,
+    },
+  };
+  function OrdinaryWorkspace() {
+    const id = useE2eeAccountId(false);
+    return createElement('p', null, id ?? 'ordinary');
+  }
+  await act(async () => root.render(createElement(OrdinaryWorkspace)));
+  expect(container.textContent).toBe('ordinary');
 });

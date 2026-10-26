@@ -92,7 +92,10 @@ export function CloudPlatformProvider({ children }: { children: ReactNode }) {
     }
     const user = session.data?.user;
     if (!user) {
-      sessionStore.set({ status: 'unauthenticated' });
+      sessionStore.set({
+        status: 'unauthenticated',
+        ...(session.error && !session.confirmedUnauthenticated ? { uncertain: true as const } : {}),
+      });
       return;
     }
     sessionStore.set({
@@ -106,6 +109,8 @@ export function CloudPlatformProvider({ children }: { children: ReactNode }) {
     });
   }, [
     session.data?.user,
+    session.error,
+    session.confirmedUnauthenticated,
     session.isOptimistic,
     session.isPending,
     session.isRetrying,
@@ -177,7 +182,29 @@ export function CloudPlatformProvider({ children }: { children: ReactNode }) {
     const native = electron ? getIpcServices()?.e2ee : undefined;
     return createCloudE2eeWorkspaces({
       session: () => sessionStore.get(),
-      ...(native ? { prepareCreation: (request) => native.prepareCreation(request), runtime: { recordCreated: (request) => native.recordCreated(request), open: (workspaceId, observed) => native.open(workspaceId, observed), close: (workspaceId) => native.close(workspaceId), status: (workspaceId) => native.status(workspaceId), ingestLedgerRecords: (workspaceId, page) => native.ingestLedgerRecords(workspaceId, page), ledgerView: (workspaceId) => native.ledgerView(workspaceId) } } : {}),
+      ...(native
+        ? {
+            prepareCreation: (request) => native.prepareCreation(request),
+            runtime: {
+              prepareLocalAgent: (workspaceId) => native.prepareLocalAgent(workspaceId),
+              admitLocalAgent: (workspaceId, pairingSessionId) =>
+                native.admitLocalAgent(workspaceId, pairingSessionId),
+              refresh: (workspaceId) => native.refresh(workspaceId),
+              contentStreamsToken: (workspaceId, rejectedToken) =>
+                native.contentStreamsToken(workspaceId, rejectedToken),
+              seal: (workspaceId, input) => native.seal(workspaceId, input),
+              openContent: (workspaceId, input) => native.openContent(workspaceId, input),
+              account: (options) => native.account(options),
+              recordCreated: (request) => native.recordCreated(request),
+              open: (workspaceId, observed) => native.open(workspaceId, observed),
+              close: (workspaceId) => native.close(workspaceId),
+              status: (workspaceId) => native.status(workspaceId),
+              ingestLedgerRecords: (workspaceId, page) =>
+                native.ingestLedgerRecords(workspaceId, page),
+              ledgerView: (workspaceId) => native.ledgerView(workspaceId),
+            },
+          }
+        : {}),
       remote: {
         create: (request) => cloudClient.action(cloudOperations.e2eeWorkspaces.create, request),
         describe: (request) => cloudClient.query(cloudOperations.e2eeWorkspaces.describe, request),

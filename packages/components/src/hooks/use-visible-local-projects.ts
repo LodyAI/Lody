@@ -1,8 +1,7 @@
 import { useMemo } from 'react';
-import { useAtomValue } from 'jotai';
 import { cloudOperations } from '@/lib/cloud-api-operations';
 import type { WorkspaceId } from '@lody/shared';
-import { userAtom } from '@/atoms';
+import { useWorkspaceLocalAccountId } from '@/lib/e2ee-account';
 import {
   canRunAuthedWorkspaceQuery,
   isAuthedWorkspaceQueryLoading,
@@ -51,7 +50,7 @@ export function useVisibleLocalProjectsFromMachineIndex(
   const { workspaceId, enabled } = useResolvedWorkspaceScope(options);
   const { isAuthenticated, isLoading: isConvexAuthLoading } = useAuthenticatedConvex();
   const canQuery = enabled && canRunAuthedWorkspaceQuery(workspaceId, isAuthenticated);
-  const currentUserId = useAtomValue(userAtom)?.id ?? null;
+  const currentUserId = useWorkspaceLocalAccountId();
   const {
     machines: visibleMachines,
     accessByMachineId,

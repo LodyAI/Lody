@@ -30,6 +30,8 @@ export type E2eeWorkspaceCreateRequest = {
   requestId: string;
   /** Canonical signed CBOR genesis, lowercase hexadecimal. Never secret key material. */
   genesisRecordHex: string;
+  /** SHA-256 of the 32 raw credential bytes. */
+  deviceCredentialHash: string;
   developerMode: true;
 };
 
@@ -43,6 +45,9 @@ export type E2eeLedgerCheckpoint = { headHash: string; length: number };
 
 export type E2eeWorkspaceHistoryRequest = {
   workspaceId: string;
+  /** CLI identity supplements account authentication, never ledger authority. */
+  cliToken?: string;
+  credential?: string;
   /** Opaque nextCursor from the previous page; omit on the first page. */
   cursor?: string;
   /** Endpoint-independent position from an earlier response; mutually exclusive with cursor. */

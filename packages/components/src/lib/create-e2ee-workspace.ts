@@ -55,6 +55,7 @@ export async function createPreparedE2eeWorkspace(
       slug: pending.slug,
       requestId: pending.requestId,
       genesisRecordHex: prepared.genesisRecordHex,
+      deviceCredentialHash: prepared.deviceCredentialHash,
       developerMode: true,
     });
   } catch (error) {

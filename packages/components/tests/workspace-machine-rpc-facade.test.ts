@@ -766,6 +766,27 @@ describe('createWorkspaceMachineRpcFacade', () => {
     expect(getMachineRpcClient).not.toHaveBeenCalled();
   });
 
+  it('uses only the explicit same-machine cancel bridge in a protected cloud-only topology', async () => {
+    let bridgeAvailable = true;
+    let delivered: unknown;
+    const invoke = async (_channel: string, request: unknown) => {
+      delivered = request;
+      return bridgeAvailable ? {ok:true,result:{type:'session/cancel_response',sessionId,success:true}} : undefined;
+    };
+    vi.stubGlobal('window',{__LODY_ELECTRON__:true,ipc:{invoke}});
+    let networkUsed = false;
+    const facade = createWorkspaceMachineRpcFacade({
+      workspaceId, getMachineProtocolCapabilities:async()=>CURRENT_MACHINE_PROTOCOL_CAPABILITIES,
+      targetRouter:{getPlaneForMachine:()=> 'cloud',resolvePlaneForMachine:async()=> 'cloud'},
+      isLocalControlMachine: machine => machine === localMachineId,
+      getMachineRpcClient:async()=>{networkUsed=true;throw new Error('cloud RPC unavailable');},
+    });
+    expect(await facade.requestSessionCancel(localMachineId,sessionId,'turn-1')).toMatchObject({success:true});
+    expect(delivered).toMatchObject({workspaceId,machineId:localMachineId,method:'session/cancel'});
+    bridgeAvailable=false;
+    expect(await facade.requestSessionCancel(localMachineId,sessionId,'turn-1')).toMatchObject({success:false,error:'Local machine RPC is unavailable.'});
+    expect(networkUsed).toBe(false);
+  });
   it('uses the cloud Machine RPC client for a remote machine', async () => {
     const invoke = vi.fn();
     vi.stubGlobal('window', {

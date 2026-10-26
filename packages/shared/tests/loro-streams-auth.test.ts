@@ -117,6 +117,8 @@ describe('loro streams auth helpers', () => {
     await expect(provider.getToken()).resolves.toBe('jwt-1');
 
     expect(provider.getGatewayBaseUrl()).toBe('https://streams-api.example.com');
+    // A synchronous cached read must retire its credential reader before close.
+    await provider.close();
   });
 
   it('keeps auth plus diagnostic failure through the Legacy protocol callback', async () => {
@@ -1154,6 +1156,24 @@ function retainedRawOwners(cause: Cause.Cause<unknown>): Array<LoroStreamsTokenR
 }
 
 describe('native shared Streams token ownership', () => {
+  it('retires a reader cancelled before it starts when a native provider closes', async () => {
+    const scope = Effect.runSync(Scope.make());
+    const provider = await Effect.runPromise(
+      nativeProvider(makeLoroStreamsTokenWebPorts({
+        credential: Effect.succeed('synthetic-credential'),
+        fetchImpl: async () => Response.json({ token: 'native-cached', expiresIn: 900 }),
+      })).pipe(Effect.provideService(Scope.Scope, scope))
+    );
+    const legacy = createLoroStreamsTokenProviderLegacy({ provider, executor: Effect });
+    expect(await legacy.getToken()).toBe('native-cached');
+    expect(await legacy.getToken()).toBe('native-cached');
+    const pending = legacy.getToken().then(() => 'settled', () => 'cancelled');
+    await legacy.close();
+    await pending;
+    expect((await Effect.runPromise(provider.health)).activeReads).toBe(0);
+    await Effect.runPromise(Scope.close(scope, Exit.void));
+  });
+
   effectIt.effect(
     'borrowed Legacy auth shares the native producer and leaves its application executor alive',
     () =>

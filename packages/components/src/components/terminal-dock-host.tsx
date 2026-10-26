@@ -3,15 +3,27 @@ import { useAtomValue } from 'jotai';
 import { useParams } from '@tanstack/react-router';
 import { useMemo } from 'react';
 import { localMachineIdAtom } from '@/atoms/local-probe';
+import { activeWorkspaceRuntimeAtom } from '@/atoms/runtime';
 import { sessionMetaAtomFamily } from '@/atoms/doc-meta';
 import { sessionLiveStatusAtomFamily } from '@/atoms/presence';
 import { useElectronCliDaemon } from '@/hooks/use-electron-cli-daemon';
 import { TerminalDock } from './terminal/terminal-dock';
 import { createElectronTerminalChannel } from './terminal/electron-terminal-channel';
 
-// The terminal can only attach once the daemon is actually up (running/degraded).
-function canUseTerminalCliPhase(phase: ElectronCliState['phase']): boolean {
-  return phase === 'running' || phase === 'degraded';
+function canUseTerminalCliState(state: ElectronCliState | null, workspaceId?: string): boolean {
+  if (!state) return false;
+  if (state.phase === 'running' || state.phase === 'degraded') return true;
+  // Fleet connectivity also includes unrelated workspace retries. A ready local
+  // runtime can serve terminals while that aggregate status is reconnecting.
+  const runtime = state.runtime;
+  return (
+    state.phase === 'reconnecting' &&
+    state.desiredState === 'running' &&
+    state.localAgentEnabled &&
+    runtime?.startupStage === 'ready' &&
+    (runtime.phase === 'running' || runtime.phase === 'degraded') &&
+    runtime.connectedWorkspaces?.some((workspace) => workspace.id === workspaceId) === true
+  );
 }
 
 /**
@@ -25,6 +37,7 @@ export function TerminalDockHost() {
   const params = useParams({ strict: false });
   const isElectron = typeof window !== 'undefined' && window.__LODY_ELECTRON__ === true;
   const localMachineId = useAtomValue(localMachineIdAtom);
+  const runtime = useAtomValue(activeWorkspaceRuntimeAtom);
   const routeSessionId =
     typeof params.sessionId === 'string' && params.sessionId.trim()
       ? (params.sessionId as SessionId)
@@ -34,7 +47,7 @@ export function TerminalDockHost() {
   const routeSessionLiveStatus = useAtomValue(
     sessionLiveStatusAtomFamily((routeSessionId ?? '__no_session__') as SessionId)
   );
-  const { phase: cliPhase } = useElectronCliDaemon();
+  const { state: cliState } = useElectronCliDaemon();
 
   const terminalChannel = useMemo(
     () => (isElectron ? createElectronTerminalChannel() : null),
@@ -47,7 +60,9 @@ export function TerminalDockHost() {
   const isRouteSessionReadyForTerminal =
     Boolean(routeSession?.acpSessionId) || routeSessionLiveStatus != null;
   const canCreateTerminal =
-    isRouteSessionLocal && canUseTerminalCliPhase(cliPhase) && isRouteSessionReadyForTerminal;
+    isRouteSessionLocal &&
+    canUseTerminalCliState(cliState, runtime?.workspaceId) &&
+    isRouteSessionReadyForTerminal;
   const terminalSessionId =
     terminalChannel && isRouteSessionLocal && routeSessionId ? routeSessionId : undefined;
 

@@ -1,3 +1,4 @@
+import { workspaceSupports } from '@lody/shared/workspace-streams-content';
 import { encodeSessionFilePath, resolveSessionPullRequests } from '@lody/shared';
 import type { SessionFileRoot } from '@lody/shared';
 import { resolveProjectFileRoots } from '@/session/worktree/project-member-access';
@@ -593,6 +594,7 @@ function formatLiveActivityUpdatedAt(value: number, nowMs: number): string {
 }
 
 export interface MessageHandlerConfig {
+  encryptedWorkspace?: boolean;
   token: string;
   workspaceId: WorkspaceId;
   workspaceSlug?: string;
@@ -3005,8 +3007,15 @@ export class MessageHandler {
         flushSessionUsage: async (sessionId) => await this.flushSessionUsage(sessionId),
         updateSessionDiffStats: async (sessionId, session, options) =>
           await this.turnPostProcessingService.updateSessionDiffStats(sessionId, session, options),
-        refreshCodeCollabSharedState: async (sessionId) =>
-          await this.codeCollabV2Service.refreshSharedStateAfterTurn({ sessionId }),
+        refreshCodeCollabSharedState: async (sessionId) => {
+          if (
+            workspaceSupports(
+              { mode: config.encryptedWorkspace ? 'protected' : 'plaintext' },
+              'code-collab-index'
+            )
+          )
+            await this.codeCollabV2Service.refreshSharedStateAfterTurn({ sessionId });
+        },
         detectAndAssociatePR: async (ctx) =>
           await this.turnPostProcessingService.detectAndAssociatePR(ctx),
         syncWorkspaceGitState: async (sessionId, session) =>
@@ -3201,7 +3210,7 @@ export class MessageHandler {
         }
       },
     });
-    const streamsTokens = this.cloudPort.streamsTokens;
+    const streamsTokens = config.encryptedWorkspace ? null : this.cloudPort.streamsTokens;
     if (streamsTokens) {
       const cliHttpFetch = getCliHttpFetch({ logger: this.logger });
       const rpcConnectTimeoutMs = readTimeoutEnv('LODY_LORO_RPC_CONNECT_TIMEOUT_MS', 30_000);
@@ -10376,10 +10385,8 @@ export class MessageHandler {
     void this.sessionDispatchWatcher.enqueueSessionCheck(sessionId);
   }
 
-  // ============================================================================
-  // GC-related public methods
-  // ============================================================================
-
+  // =====================================================================  // GC-related public methods
+  // =====================================================================
   /**
    * Check if a session has pending ACP updates that haven't been flushed yet.
    */

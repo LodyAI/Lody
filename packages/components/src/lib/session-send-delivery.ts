@@ -41,7 +41,7 @@ export type SessionSendRuntime = Pick<
   WorkspaceRuntime,
   'repo' | 'writer' | 'sendResources' | 'requestSessionDispatchTurn' | 'requestSessionSteer'
 > &
-  Partial<Pick<WorkspaceRuntime, 'isMachineRpcUnreachable'>>;
+  Partial<Pick<WorkspaceRuntime, 'isMachineRpcUnreachable' | 'contentMode'>>;
 
 /** Trusted human-send provenance, committed before history or queue activation. */
 export async function persistHumanInputReceipt(
@@ -187,7 +187,7 @@ export async function dispatchUserTurn(
     });
   const machineId = options?.machineId ?? (await readMachineId(runtime, sessionId));
   let rpc: Promise<boolean> = Promise.resolve(false);
-  if (machineId && inputConfig && userId && timestamp) {
+  if (runtime.contentMode !== 'e2ee' && machineId && inputConfig && userId && timestamp) {
     const rpcArgs = { sessionId, userTurnId, userId, timestamp, inputConfig };
     // Attachments ride as references, so payloads are normally small; skip the
     // fast path for pathological sizes rather than risk an oversized append.

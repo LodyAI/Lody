@@ -1,4 +1,4 @@
-import { randomBytes } from 'node:crypto'
+import { createHash, randomBytes } from 'node:crypto'
 import { constants } from 'node:fs'
 import { lstat, mkdir, open } from 'node:fs/promises'
 import { isAbsolute, join } from 'node:path'
@@ -37,6 +37,7 @@ export interface DesktopE2eeCreationIntent {
 export interface PreparedDesktopE2eeCreation extends DesktopE2eeCreationIntent {
   readonly genesisRecordHex: string
   readonly genesisHashHex: string
+  readonly deviceCredentialHash: string
 }
 
 export class DesktopE2eeBootstrapError extends Data.TaggedError('DesktopE2eeBootstrapError')<{
@@ -49,6 +50,7 @@ export class DesktopE2eeBootstrapError extends Data.TaggedError('DesktopE2eeBoot
     | 'storage'
     | 'closed'
     | 'missing-binding'
+    | 'credential-required'
 }> {}
 
 const fail = (code: DesktopE2eeBootstrapError['code']) => new DesktopE2eeBootstrapError({ code })
@@ -201,7 +203,7 @@ export const makeDesktopE2eeBootstrap = Effect.fn('DesktopE2eeBootstrap.open')(f
         }
       } else if (version !== 1 || id !== applicationId) throw fail('corrupt')
       db.exec(
-        'CREATE TABLE IF NOT EXISTS workspace_bindings(workspace_id TEXT PRIMARY KEY, genesis TEXT UNIQUE NOT NULL, request_id TEXT NOT NULL)'
+        'CREATE TABLE IF NOT EXISTS workspace_bindings(workspace_id TEXT PRIMARY KEY, genesis TEXT UNIQUE NOT NULL, request_id TEXT NOT NULL); CREATE TABLE IF NOT EXISTS creation_credentials(request_id TEXT PRIMARY KEY, credential_hash TEXT)'
       )
       if (
         db.prepare('SELECT account_id FROM metadata').all().length !== 1 ||
@@ -229,6 +231,34 @@ export const makeDesktopE2eeBootstrap = Effect.fn('DesktopE2eeBootstrap.open')(f
       throw fail('corrupt')
     return value as CreationRow
   }
+
+  const credentialForCreation = Effect.fnUntraced(function* (
+    requestId: string,
+    genesis: Bytes.GenesisHash,
+    device: DesktopE2eeDevice
+  ) {
+    const state = yield* sql(() =>
+      db
+        .prepare('SELECT credential_hash FROM creation_credentials WHERE request_id=?')
+        .get(requestId)
+    )
+    if (!state) return yield* fail('credential-required')
+    const credential =
+      state.credential_hash === null
+        ? (yield* custody.prepareDeviceCredential(genesis, device.publicKey)).credential
+        : yield* custody.deviceCredential(genesis, device.publicKey)
+    const hash = createHash('sha256').update(Buffer.from(credential, 'hex')).digest('hex')
+    if (state.credential_hash !== null && state.credential_hash !== hash)
+      return yield* fail('corrupt')
+    yield* sql(() =>
+      db
+        .prepare(
+          'UPDATE creation_credentials SET credential_hash=? WHERE request_id=? AND credential_hash IS NULL'
+        )
+        .run(hash, requestId)
+    )
+    return hash
+  })
 
   const retained = Effect.fn('DesktopE2eeBootstrap.verifyRetained')(function* (
     requestId: string,
@@ -318,13 +348,33 @@ export const makeDesktopE2eeBootstrap = Effect.fn('DesktopE2eeBootstrap.open')(f
     if (row && (row.name !== intent.name || row.slug !== intent.slug))
       return yield* fail('conflict')
     if (!row) {
-      yield* sql(() =>
-        db
-          .prepare('INSERT INTO creations(request_id,name,slug) VALUES(?,?,?)')
-          .run(intent.requestId, intent.name, intent.slug)
-      )
+      yield* sql(() => {
+        db.exec('BEGIN IMMEDIATE')
+        try {
+          db.prepare('INSERT INTO creations(request_id,name,slug) VALUES(?,?,?)').run(
+            intent.requestId,
+            intent.name,
+            intent.slug
+          )
+          db.prepare(
+            'INSERT INTO creation_credentials(request_id,credential_hash) VALUES(?,NULL)'
+          ).run(intent.requestId)
+          db.exec('COMMIT')
+        } catch (cause) {
+          db.exec('ROLLBACK')
+          throw cause
+        }
+      })
       row = yield* sql(() => load(intent.requestId))
     }
+    if (
+      !(yield* sql(() =>
+        db
+          .prepare('SELECT request_id FROM creation_credentials WHERE request_id=?')
+          .get(intent.requestId)
+      ))
+    )
+      return yield* fail('credential-required')
     let record = row!.record
     if (!record) {
       yield* Effect.acquireUseRelease(
@@ -359,9 +409,10 @@ export const makeDesktopE2eeBootstrap = Effect.fn('DesktopE2eeBootstrap.open')(f
     if (parsed.body.type !== 'genesis') return yield* fail('corrupt')
     const genesis = yield* Effect.fromResult(Bytes.genesisHash(hashRecordBytes(original).toBytes()))
     // Always reopen native private handles and the actual installed key, even for ready retries.
-    yield* Effect.gen(function* () {
+    const deviceCredentialHash = yield* Effect.gen(function* () {
       const device = yield* custody.openDevice(genesis)
       yield* retained(intent.requestId, original, device)
+      return yield* credentialForCreation(intent.requestId, genesis, device)
     }).pipe(Effect.mapError(() => fail(row!.ready === 1 ? 'corrupt' : 'incomplete-local')))
     yield* sql(() => {
       db.prepare('UPDATE creations SET ready=1 WHERE request_id=?').run(intent.requestId)
@@ -372,7 +423,8 @@ export const makeDesktopE2eeBootstrap = Effect.fn('DesktopE2eeBootstrap.open')(f
     return Object.freeze({
       ...intent,
       genesisRecordHex: hex(original),
-      genesisHashHex: hex(genesis.toBytes())
+      genesisHashHex: hex(genesis.toBytes()),
+      deviceCredentialHash
     })
   })
   const recordCreated = (input: { workspaceId: string; genesisHash: string; requestId?: string }) =>
@@ -441,6 +493,15 @@ export const makeDesktopE2eeBootstrap = Effect.fn('DesktopE2eeBootstrap.open')(f
   return Object.freeze({
     prepareCreation: (input: DesktopE2eeCreationIntent) => withLock(prepare(input)),
     recordCreated,
-    creationFor
+    creationFor,
+    deviceCredential: (workspaceId: string) =>
+      Effect.gen(function* () {
+        const creation = yield* creationFor(workspaceId)
+        const genesis = yield* Effect.fromResult(
+          Bytes.genesisHash(Buffer.from(creation.genesisHash, 'hex'))
+        )
+        const device = yield* custody.openDevice(genesis)
+        return yield* custody.deviceCredential(genesis, device.publicKey)
+      })
   })
 })

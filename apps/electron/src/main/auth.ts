@@ -9,7 +9,8 @@ import { join, resolve } from 'node:path'
 import {
   backupAuthStorageFile,
   createRecoveringAuthStorage,
-  openAuthStorageBackend
+  openAuthStorageBackend,
+  makeOfflineAuthIdentityCache
 } from './auth-storage'
 import { isLocalPlatform, desktopInstallationProfile } from './platform'
 import { createDesktopAuthFetch } from './auth-fetch'
@@ -141,6 +142,12 @@ if (opened.error) {
   )
 }
 const confStore = opened.store
+
+export const offlineAuthIdentity = makeOfflineAuthIdentityCache({
+  get: (key) => confStore.get(key, null),
+  set: (key, value) => confStore.set(key, value),
+  delete: (key) => confStore.delete(key)
+})
 
 const authStorage = createRecoveringAuthStorage(
   {

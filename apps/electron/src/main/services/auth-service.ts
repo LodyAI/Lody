@@ -1,5 +1,5 @@
 import { app, safeStorage, shell } from 'electron'
-import { authClient } from '../auth'
+import { authClient, offlineAuthIdentity } from '../auth'
 import { captureElectronMainException } from '../posthog-error-reporting'
 import { DesktopLogin, DesktopLoginFailure } from './desktop-login'
 import { isLocalPlatform, desktopInstallationProfile } from '../platform'
@@ -448,6 +448,8 @@ export class AuthService {
           this.authGeneration += 1
           this.rememberSessionToken(session.session.token)
           this.lastResolvedSessionResponse = session
+          this.retainOfflineIdentity(session.session.token, session.user.id)
+          this.notifyCachedSessionIdentity()
           return session
         }),
       publish: onLoginState,
@@ -490,12 +492,72 @@ export class AuthService {
   // unauthenticated responses clear it; transport failures never sign the user
   // out by themselves.
   private lastResolvedSessionResponse: unknown = null
+  private identityListeners = new Set<() => void>()
 
-  /** Main-process identity only; never starts an authentication request. */
-  getCachedSessionIdentity(): { userId: string | null; generation: number } {
-    return {
-      userId: readSessionFromResponse(this.lastResolvedSessionResponse).userId,
-      generation: this.authGeneration
+  subscribeCachedSessionIdentity(listener: () => void): () => void {
+    this.identityListeners.add(listener)
+    return () => {
+      this.identityListeners.delete(listener)
+    }
+  }
+
+  private notifyCachedSessionIdentity(): void {
+    for (const listener of this.identityListeners) {
+      try {
+        listener()
+      } catch {
+        console.warn('[Auth] e2ee_identity_observer_failed')
+      }
+    }
+  }
+
+  /** Local E2EE identity only; never starts an authentication request. */
+  getCachedSessionIdentity(options?: unknown): {
+    userId: string | null
+    generation: number
+    source: 'network' | 'offline' | null
+  } {
+    const resolved = readSessionFromResponse(this.lastResolvedSessionResponse).userId
+    if (resolved) return { userId: resolved, generation: this.authGeneration, source: 'network' }
+    const supplied = readBearerTokenFromInput(options)
+    // An explicit renderer bearer must itself match. A different bearer cannot
+    // borrow a cookie's offline identity or choose another account's directory.
+    try {
+      let cookie: string | null = null
+      if (!supplied) {
+        try {
+          cookie = readSessionTokenFromCookieHeader(getElectronAuthCookieHeader())
+        } catch {
+          console.warn('[Auth] e2ee_identity_cookie_unavailable')
+        }
+      }
+      const userId = supplied
+        ? offlineAuthIdentity.read(supplied)
+        : (offlineAuthIdentity.read(cookie) ?? offlineAuthIdentity.read(this.lastKnownSessionToken))
+      if (userId && supplied) this.rememberSessionToken(supplied)
+      return { userId, generation: this.authGeneration, source: userId ? 'offline' : null }
+    } catch {
+      console.warn('[Auth] e2ee_offline_identity_read_failed')
+      return { userId: null, generation: this.authGeneration, source: null }
+    }
+  }
+
+  private retainOfflineIdentity(token: string | null, userId: string | null): void {
+    if (!token || !userId) return
+    try {
+      offlineAuthIdentity.remember(token, userId)
+    } catch {
+      // Saving an optional local identity cannot undo a successful cloud login.
+      console.warn('[Auth] e2ee_offline_identity_write_failed')
+    }
+  }
+
+  private clearOfflineIdentity(): void {
+    this.lastKnownSessionToken = null
+    try {
+      offlineAuthIdentity.clear()
+    } catch {
+      console.warn('[Auth] e2ee_offline_identity_clear_failed')
     }
   }
 
@@ -541,6 +603,8 @@ export class AuthService {
   async signOut(): Promise<void> {
     this.authGeneration += 1
     this.lastResolvedSessionResponse = null
+    this.clearOfflineIdentity()
+    this.notifyCachedSessionIdentity()
     this.login.cancel()
     await this.enqueueAuthOperation(async () => {
       try {
@@ -655,10 +719,13 @@ export class AuthService {
           : null
       )
       if (generation === this.authGeneration) {
-        this.rememberSessionToken(
-          readSessionTokenFromResponse(response) ?? cookieToken ?? readBearerTokenFromInput(options)
-        )
+        const confirmedToken =
+          readSessionTokenFromResponse(response) ?? readBearerTokenFromInput(options) ?? cookieToken
+        if (!confirmedToken) this.clearOfflineIdentity()
+        this.rememberSessionToken(confirmedToken)
         this.lastResolvedSessionResponse = resolved
+        this.retainOfflineIdentity(confirmedToken, readSessionFromResponse(resolved).userId)
+        this.notifyCachedSessionIdentity()
       }
       return resolved
     }
@@ -666,6 +733,8 @@ export class AuthService {
     if (!cookieToken || existingAuthorization === `Bearer ${cookieToken}`) {
       if (generation === this.authGeneration && isDefinitiveUnauthenticatedResponse(response)) {
         this.lastResolvedSessionResponse = null
+        this.clearOfflineIdentity()
+        this.notifyCachedSessionIdentity()
       }
       return response
     }
@@ -685,6 +754,8 @@ export class AuthService {
         if (generation === this.authGeneration) {
           this.rememberSessionToken(cookieToken)
           this.lastResolvedSessionResponse = resolved
+          this.retainOfflineIdentity(cookieToken, readSessionFromResponse(resolved).userId)
+          this.notifyCachedSessionIdentity()
         }
         return resolved
       }
@@ -701,6 +772,8 @@ export class AuthService {
         isDefinitiveUnauthenticatedResponse(unresolvedResponse)
       ) {
         this.lastResolvedSessionResponse = null
+        this.clearOfflineIdentity()
+        this.notifyCachedSessionIdentity()
       }
       return unresolvedResponse
     } catch (error) {
