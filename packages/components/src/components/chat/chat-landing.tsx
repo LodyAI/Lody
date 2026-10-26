@@ -96,6 +96,7 @@ import {
   workspaceReposCacheAtomFamily,
 } from '@/atoms';
 import { docMetaCacheReadyAtom, sessionMetaCountAtom } from '@/atoms/doc-meta';
+import { projectEditorRequestAtom } from '@/atoms/project-editor';
 import {
   localAgentEnabledAtom,
   localProbeAttemptedAtom,
@@ -2990,6 +2991,12 @@ function WorkspaceChatLanding({
     openAddProjectDialog();
   }, [openAddProjectDialog]);
 
+  const requestProjectEditor = useSetAtom(projectEditorRequestAtom);
+  const handleCreateProject = useCallback(
+    () => requestProjectEditor({ kind: 'create' }),
+    [requestProjectEditor]
+  );
+
   const handleLocalProjectAdded = useCallback(
     (info: { machineId: MachineId; localProjectId: LocalProjectId }) => {
       handleSelectedLocalProjectChange({
@@ -4049,6 +4056,7 @@ function WorkspaceChatLanding({
           latestMessageAtByRepo={mobileSheetRecency.byRepo}
           onConnectGitRepo={handleConnectGitRepo}
           onAddLocalProject={handleAddLocalProject}
+          onCreateProject={handleCreateProject}
           onShareLocalProjectWithTeam={
             showProjectSharing ? handleShareLocalProjectWithTeam : undefined
           }

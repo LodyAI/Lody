@@ -212,6 +212,49 @@ export function removeProjectGroupMember(
 }
 
 /**
+ * Where a new project's conversations run, chosen before any member: on one
+ * machine, which may then contribute its folders, or anywhere, which admits
+ * only GitHub repositories.
+ */
+export type ProjectGroupScope = { kind: 'machine'; machineId: MachineId } | { kind: 'github' };
+
+/**
+ * Drops the members a scope cannot hold: folders bound to another machine, and
+ * for a GitHub-only project every folder, including a picked folder that only
+ * a GitHub remote made portable. Repository members stay. Returns the same
+ * value when nothing goes.
+ */
+export function retainProjectGroupScope(
+  value: ProjectGroupFormValue,
+  scope: ProjectGroupScope,
+  labelOf: (member: ProjectGroupMemberDraft) => string
+): ProjectGroupFormValue {
+  const outside = (member: ProjectGroupMemberDraft) => {
+    const machineId =
+      member.directory?.machineId ??
+      (member.source.kind === 'local' ? member.source.machineId : undefined);
+    if (machineId === undefined) return false;
+    return scope.kind === 'github' || machineId !== scope.machineId;
+  };
+  let result = value;
+  for (const member of value.members) {
+    if (outside(member)) result = removeProjectGroupMember(result, member.id, labelOf);
+  }
+  return result;
+}
+
+/** A name for a new project from its first member, unless one was typed. */
+export function suggestProjectGroupName(
+  value: ProjectGroupFormValue,
+  labelOf: (member: ProjectGroupMemberDraft) => string
+): string {
+  if (value.name.trim()) return value.name;
+  const first = value.members[0];
+  if (!first) return value.name;
+  return labelOf(first).split('/').filter(Boolean).pop() ?? value.name;
+}
+
+/**
  * Apply a multi-select change: sources newly ticked are added, sources
  * unticked are removed (their submodules become top-level). Members whose
  * project is no longer listed are not in the picker, so they are untouched.

@@ -53,9 +53,17 @@ looks only at that branch.
   single folder or GitHub repository it opens the same editor seeded with it, which
   saves a new Project and leaves the original and its conversations as they are.
   On a phone the same action is the first row of a project's settings tab, and
-  mobile Settings › Projects offers creating one. The editor's
-  picker supports direct local-folder selection as well as repositories and folders
-  already known to the workspace.
+  mobile Settings › Projects offers creating one. The composer's project picker
+  also offers "Create project". Creation is a guided sequence of single questions,
+  so folders and repositories are never mixed before the user has chosen where the
+  project runs: first whether it includes local folders or only GitHub repositories;
+  for local folders, which machine; then the folders on that machine (including
+  direct selection) beside a separate tab of GitHub repositories, or for GitHub only,
+  the repositories; finally the name, the selected Members and the instructions.
+  Changing an earlier answer drops Members the new answer cannot hold. Editing an
+  existing Project keeps the single editor, whose picker supports direct
+  local-folder selection as well as repositories and folders already known to the
+  workspace.
 
 ## Direct folder selection and standalone visibility
 

@@ -40,6 +40,7 @@ import {
   type RemoteDirectoryOps,
 } from '../local-projects/add-local-project-dialog';
 import { useAddLocalProjectController } from '../local-projects/add-local-project-dialog-container';
+import { ProjectCreateWizard } from './project-create-wizard';
 import { ProjectGroupForm, type ProjectGroupMemberStatus } from './project-group-form';
 import { useProjectMemberSourceNames } from './project-group-source-picker';
 import { useSettingsPane } from './settings-page-header';
@@ -205,6 +206,15 @@ export function ProjectGroupEditorDialog({
       machine.id === currentMachineId &&
       machine.canAddProjects &&
       machine.supportsProjectFolderSelection
+  );
+  const wizardMachines = useMemo(
+    () =>
+      folderController.machines.map((machine) => ({
+        id: machine.id,
+        name: machine.name,
+        online: machine.online,
+      })),
+    [folderController.machines]
   );
   const onlineMachineIds = useAtomValue(onlineMachineIdsAtom);
   // A repository Member's submodules are read from a copy on an online
@@ -384,21 +394,42 @@ export function ProjectGroupEditorDialog({
           className={SETTINGS_EDITOR_DIALOG_LAYOUT}
           style={{ height: 'min(680px, 88dvh)' }}
         >
-          <Dialog.Header>
-            <Dialog.Title>
-              {editor?.mode === 'edit'
-                ? readOnly
-                  ? editor.project.name
-                  : t('settings.projectGroups.editTitle')
-                : t('settings.projectGroups.addTitle')}
-            </Dialog.Title>
-            <Dialog.Description>
-              {readOnly
-                ? t('settings.projectGroups.readOnlyDescription')
-                : t('settings.projectGroups.dialogDescription')}
-            </Dialog.Description>
-          </Dialog.Header>
-          {editor ? (
+          {editor?.mode === 'add' ? (
+            <ProjectCreateWizard
+              key={editor.projectId}
+              value={value}
+              onChange={(next) => {
+                if (openEditor) onChange({ ...openEditor, value: next });
+              }}
+              sources={options}
+              machines={wizardMachines}
+              currentMachineId={currentMachineId}
+              labelOf={labelOf}
+              detailOf={detailOf}
+              validation={validation}
+              canBrowseFolders={(machineId) =>
+                folderMachines.some((machine) => machine.id === machineId && machine.online)
+              }
+              onBrowseFolders={() => setSelectingFolder(true)}
+              submitting={submitting}
+              error={error}
+              onSubmit={() => void save()}
+              onCancel={close}
+            />
+          ) : null}
+          {editor?.mode === 'edit' ? (
+            <Dialog.Header>
+              <Dialog.Title>
+                {readOnly ? editor.project.name : t('settings.projectGroups.editTitle')}
+              </Dialog.Title>
+              <Dialog.Description>
+                {readOnly
+                  ? t('settings.projectGroups.readOnlyDescription')
+                  : t('settings.projectGroups.dialogDescription')}
+              </Dialog.Description>
+            </Dialog.Header>
+          ) : null}
+          {editor?.mode === 'edit' ? (
             <ProjectGroupForm
               value={value}
               onChange={(next) => {
@@ -418,7 +449,7 @@ export function ProjectGroupEditorDialog({
               readOnly={readOnly}
               submitting={submitting}
               error={error}
-              isEditing={editor.mode === 'edit'}
+              isEditing
               onSelectFolders={() => setSelectingFolder(true)}
               selectFoldersDisabled={
                 folderMachines.length === 0 || !folderMachines.some((machine) => machine.online)

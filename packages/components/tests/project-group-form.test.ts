@@ -16,6 +16,8 @@ import {
   collectProjectSubmoduleDescendants,
   EMPTY_PROJECT_GROUP_FORM_VALUE,
   removeProjectGroupMember,
+  retainProjectGroupScope,
+  suggestProjectGroupName,
   suggestProjectMemberDir,
   updateProjectGroupMemberPlacement,
   upgradeProjectGroupRepositoryMembers,
@@ -348,5 +350,33 @@ describe('direct folder drafts', () => {
     });
     expect(validateProjectGroupForm(next).valid).toBe(false);
     expect(validateProjectGroupForm(first).valid).toBe(true);
+  });
+  it('keeps only what the chosen scope can hold when the wizard answer changes', () => {
+    const createId = ids();
+    let value = addProjectGroupMember(
+      EMPTY_PROJECT_GROUP_FORM_VALUE,
+      { kind: 'github', repoFullName: 'acme/web', preferLocal: true },
+      'acme/web',
+      createId
+    );
+    value = addProjectGroupMember(value, local('notes'), 'notes', createId);
+    value = addProjectGroupDirectory(value, directory);
+    const machine1 = { kind: 'machine', machineId: 'machine-1' as MachineId } as const;
+    expect(retainProjectGroupScope(value, machine1, labelOf)).toBe(value);
+
+    const machine2 = { kind: 'machine', machineId: 'machine-2' as MachineId } as const;
+    expect(retainProjectGroupScope(value, machine2, labelOf).members.map(labelOf)).toEqual([
+      'acme/web',
+    ]);
+    // GitHub-only drops a picked folder even when its remote made it portable.
+    const githubOnly = retainProjectGroupScope(value, { kind: 'github' }, labelOf);
+    expect(githubOnly.members.map(labelOf)).toEqual(['acme/web']);
+    expect(validateProjectGroupForm({ ...githubOnly, name: 'Web' }).valid).toBe(true);
+  });
+  it('names a new project after its first member unless a name was typed', () => {
+    const value = addProjectGroupMember(EMPTY_PROJECT_GROUP_FORM_VALUE, github('acme/web'), 'web');
+    expect(suggestProjectGroupName(value, labelOf)).toBe('web');
+    expect(suggestProjectGroupName({ ...value, name: 'Shop' }, labelOf)).toBe('Shop');
+    expect(suggestProjectGroupName(EMPTY_PROJECT_GROUP_FORM_VALUE, labelOf)).toBe('');
   });
 });
