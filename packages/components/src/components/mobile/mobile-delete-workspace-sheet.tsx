@@ -51,10 +51,7 @@ const styles = stylex.create({
     paddingInline: themeSpace[4],
     paddingBottom: themeSpace[2],
   },
-  /**
-   * The billing warning. Its amber is a hard-coded colour, so its dark
-   * twin stays a Tailwind class on this element.
-   */
+  /** The billing warning follows the app's explicit theme scopes. */
   warning: {
     marginBottom: themeSpace[2],
     paddingInline: themeSpace[3],
@@ -68,7 +65,11 @@ const styles = stylex.create({
     fontSize: '0.72rem',
     fontWeight: themeFontWeight.medium,
     lineHeight: 1.625,
-    color: 'oklch(27.9% 0.077 45.635)',
+    color: {
+      default: 'oklch(27.9% 0.077 45.635)',
+      ':where(.dark, .dark *, .dark-scope, .dark-scope *):not(:where(.light-scope, .light-scope *))':
+        'var(--color-amber-100)',
+    },
   },
   /** The type-to-confirm card. */
   confirmCard: {
@@ -79,6 +80,11 @@ const styles = stylex.create({
     borderColor: 'hsl(var(--destructive) / 0.3)',
     backgroundColor: 'hsl(var(--destructive) / 0.04)',
     boxShadow: '0 0 0 3px hsl(var(--destructive) / 0.04)',
+  },
+  confirmationInput: { marginTop: 'calc(var(--spacing) * 2)' },
+  action: { flexGrow: 1, flexShrink: 1, flexBasis: '0%' },
+  busyMark: {
+    marginRight: 'calc(var(--spacing) * 1.5)',
   },
 });
 
@@ -187,11 +193,7 @@ export function MobileDeleteWorkspaceSheet({
           </DrawerDescription>
 
           <div {...stylex.props(styles.body)}>
-            {warningText ? (
-              <p {...withClassName(stylex.props(styles.warning), 'dark:text-amber-100')}>
-                {warningText}
-              </p>
-            ) : null}
+            {warningText ? <p {...stylex.props(styles.warning)}>{warningText}</p> : null}
             <div {...stylex.props(styles.confirmCard)}>
               <UiField.Label
                 htmlFor="mobile-delete-workspace-confirm"
@@ -215,7 +217,7 @@ export function MobileDeleteWorkspaceSheet({
                 autoCorrect="off"
                 spellCheck={false}
                 enterKeyHint="done"
-                className="mt-2"
+                {...stylex.props(styles.confirmationInput)}
                 onKeyDown={(event) => {
                   if (event.key === 'Enter' && canDelete) {
                     event.preventDefault();
@@ -230,7 +232,7 @@ export function MobileDeleteWorkspaceSheet({
             <Button
               type="button"
               variant="secondary"
-              className="flex-1"
+              {...stylex.props(styles.action)}
               onClick={() => onOpenChange(false)}
               disabled={isDeleting}
             >
@@ -239,13 +241,13 @@ export function MobileDeleteWorkspaceSheet({
             <Button
               type="button"
               variant="destructive"
-              className="flex-1"
+              {...stylex.props(styles.action)}
               onClick={() => void handleDelete()}
               disabled={!canDelete}
             >
               {isDeleting ? (
                 <>
-                  <Spinner className="mr-1.5 h-3.5 w-3.5" />
+                  <Spinner {...withClassName(stylex.props(styles.busyMark), 'h-3.5 w-3.5')} />
                   {t('common.processing', 'Processing...')}
                 </>
               ) : (

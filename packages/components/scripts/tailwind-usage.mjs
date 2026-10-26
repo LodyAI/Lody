@@ -3,7 +3,7 @@
  *
  * node scripts/tailwind-usage.mjs [--files | --json] [--root <file-or-directory>]
  *
- * Reads JSX class attributes, cn/clsx/cva/twMerge calls, local class constants,
+ * Reads JSX class attributes, cn/clsx/cva/twMerge/withClassName calls, local class constants,
  * and complete static template tokens. Each source token is counted once, even
  * if a constant has several consumers. Runtime values remain unresolved. CSS
  * hooks and group/peer markers emit no utilities and are excluded. Counts measure
@@ -51,7 +51,7 @@ async function walk(file) {
   return children.flat().sort();
 }
 
-const classHelpers = new Set(['cn', 'clsx', 'cva', 'twMerge']);
+const classHelpers = new Set(['cn', 'clsx', 'cva', 'twMerge', 'withClassName']);
 const className = (name) =>
   /class(?:es|names?)?$/i.test(name) || /CLASS(?:_NAME)?(?:_[A-Z0-9]+)*$/.test(name);
 
@@ -141,7 +141,9 @@ function inspect(file, source) {
       }
     } else if (ts.isCallExpression(node)) {
       const helper = node.expression.getText(ast);
-      if (classHelpers.has(helper)) {
+      if (helper === 'withClassName') {
+        collect(node.arguments[1]);
+      } else if (classHelpers.has(helper)) {
         node.arguments.forEach((argument) => collect(argument, helper !== 'cva'));
       } else if (!helper.startsWith('stylex.')) unknown(node, 'Runtime helper output.');
     } else if (

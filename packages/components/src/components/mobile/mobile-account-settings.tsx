@@ -46,6 +46,9 @@ import {
 const MONO = 'var(--font-mono, ui-monospace, monospace)';
 
 const styles = stylex.create({
+  pendingNameInk: { color: 'hsl(var(--muted-foreground) / 1)' },
+  pendingActionSpacing: { marginRight: 'calc(var(--spacing) * 1.5)' },
+  pendingAccountDeletionSpacing: { marginRight: 'calc(var(--spacing) * 2)' },
   /** The account's address, in the section's header. */
   email: {
     maxWidth: '55vw',
@@ -609,7 +612,11 @@ export function MobileAccountSettings({
                     {userNameBaseline || t('settings.profile.nameEmpty')}
                   </span>
                   {isSavingUserName ? (
-                    <Spinner className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                    <Spinner
+                      className={
+                        withClassName(stylex.props(styles.pendingNameInk), 'h-3.5 w-3.5').className
+                      }
+                    />
                   ) : (
                     <Pencil {...stylex.props(styles.namePencil)} />
                   )}
@@ -711,7 +718,11 @@ export function MobileAccountSettings({
                 >
                   <span {...stylex.props(styles.nameValue)}>{workspaceNameBaseline}</span>
                   {isRenamingOrganization ? (
-                    <Spinner className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                    <Spinner
+                      className={
+                        withClassName(stylex.props(styles.pendingNameInk), 'h-3.5 w-3.5').className
+                      }
+                    />
                   ) : (
                     <Pencil {...stylex.props(styles.namePencil)} />
                   )}
@@ -759,7 +770,7 @@ export function MobileAccountSettings({
                 key={member.id}
                 {...stylex.props(styles.listRow, index > 0 && styles.listRowDivider)}
               >
-                <UserAvatar user={member.user} size="large" className="shrink-0" />
+                <UserAvatar user={member.user} size="large" />
                 <div {...stylex.props(styles.listBody)}>
                   <p {...stylex.props(styles.listName)}>
                     {member.user?.name || '—'}
@@ -983,7 +994,12 @@ export function MobileAccountSettings({
                       disabled={revokingCliApiKeyId === apiKey.id}
                     >
                       {revokingCliApiKeyId === apiKey.id ? (
-                        <Spinner className="mr-1.5 h-3.5 w-3.5" />
+                        <Spinner
+                          className={
+                            withClassName(stylex.props(styles.pendingActionSpacing), 'h-3.5 w-3.5')
+                              .className
+                          }
+                        />
                       ) : (
                         <Trash2 {...stylex.props(styles.buttonIcon)} />
                       )}
@@ -1129,7 +1145,14 @@ export function MobileAccountSettings({
                   }}
                   disabled={isCreatingCliApiKey || !onGenerateCliApiKey}
                 >
-                  {isCreatingCliApiKey && <Spinner className="mr-1.5 h-3.5 w-3.5" />}
+                  {isCreatingCliApiKey && (
+                    <Spinner
+                      className={
+                        withClassName(stylex.props(styles.pendingActionSpacing), 'h-3.5 w-3.5')
+                          .className
+                      }
+                    />
+                  )}
                   {t('settings.account.cliAuth.createConfirmButton')}
                 </Button>
               )}
@@ -1374,7 +1397,12 @@ export function MobileAccountSettings({
             >
               {isDeletingAccount ? (
                 <>
-                  <Spinner className="mr-2 h-4 w-4" />
+                  <Spinner
+                    className={
+                      withClassName(stylex.props(styles.pendingAccountDeletionSpacing), 'h-4 w-4')
+                        .className
+                    }
+                  />
                   {t('common.processing')}
                 </>
               ) : (

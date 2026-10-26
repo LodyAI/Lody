@@ -1,0 +1,549 @@
+{
+  "viewports": [
+    {
+      "name": "desktop",
+      "width": 1280,
+      "height": 1000
+    },
+    {
+      "name": "phone",
+      "width": 390,
+      "height": 1000
+    }
+  ],
+  "themes": ["light", "dark"],
+  "reducedMotion": "reduce",
+  "locale": "en",
+  "ids": [
+    "mobile-ownedmobileaccountsettingsmigration--account",
+    "mobile-ownedmobileaccountsettingsmigration--account-subtree-variables",
+    "mobile-ownedmobileaccountsettingsmigration--account-root-variables",
+    "mobile-ownedmobileaccountsettingsmigration--loading-keys",
+    "mobile-ownedmobileaccountsettingsmigration--workspace",
+    "mobile-ownedmobileaccountsettingsmigration--workspace-subtree-variables",
+    "mobile-ownedmobileaccountsettingsmigration--workspace-member"
+  ],
+  "ready": {
+    "mobile-ownedmobileaccountsettingsmigration--account": [
+      {
+        "action": "visible",
+        "selector": "[data-mobile-account-fixture]"
+      },
+      {
+        "action": "visible",
+        "selector": "[data-mobile-account-result]"
+      }
+    ],
+    "mobile-ownedmobileaccountsettingsmigration--account-subtree-variables": [
+      {
+        "action": "visible",
+        "selector": "[data-mobile-account-fixture]"
+      },
+      {
+        "action": "visible",
+        "selector": "[data-mobile-account-result]"
+      }
+    ],
+    "mobile-ownedmobileaccountsettingsmigration--account-root-variables": [
+      {
+        "action": "visible",
+        "selector": "[data-mobile-account-fixture]"
+      },
+      {
+        "action": "visible",
+        "selector": "[data-mobile-account-result]"
+      }
+    ],
+    "mobile-ownedmobileaccountsettingsmigration--loading-keys": [
+      {
+        "action": "visible",
+        "selector": "[data-mobile-account-fixture]"
+      },
+      {
+        "action": "visible",
+        "selector": "[data-mobile-account-result]"
+      }
+    ],
+    "mobile-ownedmobileaccountsettingsmigration--workspace": [
+      {
+        "action": "visible",
+        "selector": "[data-mobile-account-fixture]"
+      },
+      {
+        "action": "visible",
+        "selector": "[data-mobile-account-result]"
+      }
+    ],
+    "mobile-ownedmobileaccountsettingsmigration--workspace-subtree-variables": [
+      {
+        "action": "visible",
+        "selector": "[data-mobile-account-fixture]"
+      },
+      {
+        "action": "visible",
+        "selector": "[data-mobile-account-result]"
+      }
+    ],
+    "mobile-ownedmobileaccountsettingsmigration--workspace-member": [
+      {
+        "action": "visible",
+        "selector": "[data-mobile-account-fixture]"
+      },
+      {
+        "action": "visible",
+        "selector": "[data-mobile-account-result]"
+      }
+    ]
+  },
+  "states": {
+    "mobile-ownedmobileaccountsettingsmigration--account": [
+      {
+        "name": "name-edit",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Edit name",
+            "exact": true
+          },
+          {
+            "action": "fill",
+            "selector": "#profile-name-mobile",
+            "value": "Renamed synthetic account 中文"
+          }
+        ]
+      },
+      {
+        "name": "name-saving",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "#profile-name-mobile",
+            "key": "Enter"
+          },
+          {
+            "action": "visible",
+            "selector": "[data-mobile-account-pending^=\"Account name\"]"
+          },
+          {
+            "action": "disabled",
+            "role": "button",
+            "name": "Edit name"
+          }
+        ]
+      },
+      {
+        "name": "name-completed",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[data-complete-operation]"
+          },
+          {
+            "action": "visible",
+            "selector": "[data-mobile-account-result]:text-is(\"Completed Account name Renamed synthetic account 中文\")"
+          }
+        ]
+      },
+      {
+        "name": "key-dialog",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Create token",
+            "exact": true
+          },
+          {
+            "action": "visible",
+            "selector": "[role=\"dialog\"]"
+          },
+          {
+            "action": "fill",
+            "selector": "#cli-api-key-note",
+            "value": "Synthetic long token note 中文边界"
+          }
+        ]
+      },
+      {
+        "name": "key-pending",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[role=\"dialog\"] button:text-is(\"Create token\")"
+          },
+          {
+            "action": "visible",
+            "selector": "[data-mobile-account-pending^=\"Create key\"]"
+          },
+          {
+            "action": "disabled",
+            "selector": "[role=\"dialog\"] button:text-is(\"Create token\")"
+          }
+        ]
+      }
+    ],
+    "mobile-ownedmobileaccountsettingsmigration--account-subtree-variables": [
+      {
+        "name": "name-edit",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Edit name",
+            "exact": true
+          },
+          {
+            "action": "fill",
+            "selector": "#profile-name-mobile",
+            "value": "Renamed synthetic account 中文"
+          }
+        ]
+      },
+      {
+        "name": "name-saving",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "#profile-name-mobile",
+            "key": "Enter"
+          },
+          {
+            "action": "visible",
+            "selector": "[data-mobile-account-pending^=\"Account name\"]"
+          },
+          {
+            "action": "disabled",
+            "role": "button",
+            "name": "Edit name"
+          }
+        ]
+      },
+      {
+        "name": "name-completed",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[data-complete-operation]"
+          },
+          {
+            "action": "visible",
+            "selector": "[data-mobile-account-result]:text-is(\"Completed Account name Renamed synthetic account 中文\")"
+          }
+        ]
+      },
+      {
+        "name": "key-dialog",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Create token",
+            "exact": true
+          },
+          {
+            "action": "visible",
+            "selector": "[role=\"dialog\"]"
+          },
+          {
+            "action": "fill",
+            "selector": "#cli-api-key-note",
+            "value": "Synthetic long token note 中文边界"
+          }
+        ]
+      },
+      {
+        "name": "key-pending",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[role=\"dialog\"] button:text-is(\"Create token\")"
+          },
+          {
+            "action": "visible",
+            "selector": "[data-mobile-account-pending^=\"Create key\"]"
+          },
+          {
+            "action": "disabled",
+            "selector": "[role=\"dialog\"] button:text-is(\"Create token\")"
+          }
+        ]
+      }
+    ],
+    "mobile-ownedmobileaccountsettingsmigration--account-root-variables": [
+      {
+        "name": "name-edit",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Edit name",
+            "exact": true
+          },
+          {
+            "action": "fill",
+            "selector": "#profile-name-mobile",
+            "value": "Renamed synthetic account 中文"
+          }
+        ]
+      },
+      {
+        "name": "name-saving",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "#profile-name-mobile",
+            "key": "Enter"
+          },
+          {
+            "action": "visible",
+            "selector": "[data-mobile-account-pending^=\"Account name\"]"
+          },
+          {
+            "action": "disabled",
+            "role": "button",
+            "name": "Edit name"
+          }
+        ]
+      },
+      {
+        "name": "name-completed",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[data-complete-operation]"
+          },
+          {
+            "action": "visible",
+            "selector": "[data-mobile-account-result]:text-is(\"Completed Account name Renamed synthetic account 中文\")"
+          }
+        ]
+      },
+      {
+        "name": "key-dialog",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Create token",
+            "exact": true
+          },
+          {
+            "action": "visible",
+            "selector": "[role=\"dialog\"]"
+          },
+          {
+            "action": "fill",
+            "selector": "#cli-api-key-note",
+            "value": "Synthetic long token note 中文边界"
+          }
+        ]
+      },
+      {
+        "name": "key-pending",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[role=\"dialog\"] button:text-is(\"Create token\")"
+          },
+          {
+            "action": "visible",
+            "selector": "[data-mobile-account-pending^=\"Create key\"]"
+          },
+          {
+            "action": "disabled",
+            "selector": "[role=\"dialog\"] button:text-is(\"Create token\")"
+          }
+        ]
+      }
+    ],
+    "mobile-ownedmobileaccountsettingsmigration--workspace": [
+      {
+        "name": "name-edit",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Rename workspace",
+            "exact": true
+          },
+          {
+            "action": "fill",
+            "selector": "#workspace-name-mobile",
+            "value": "Renamed synthetic workspace 中文"
+          }
+        ]
+      },
+      {
+        "name": "name-saving",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "#workspace-name-mobile",
+            "key": "Enter"
+          },
+          {
+            "action": "visible",
+            "selector": "[data-mobile-account-pending^=\"Workspace name\"]"
+          },
+          {
+            "action": "disabled",
+            "role": "button",
+            "name": "Rename workspace"
+          }
+        ]
+      },
+      {
+        "name": "name-completed",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[data-complete-operation]"
+          },
+          {
+            "action": "visible",
+            "selector": "[data-mobile-account-result]:text-is(\"Completed Workspace name Renamed synthetic workspace 中文\")"
+          }
+        ]
+      },
+      {
+        "name": "role-menu",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Member",
+            "exact": true
+          },
+          {
+            "action": "visible",
+            "selector": "[role=\"menu\"]"
+          }
+        ]
+      },
+      {
+        "name": "invitation-cancel-pending",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "[role=\"menu\"]",
+            "key": "Escape"
+          },
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Cancel",
+            "exact": true
+          },
+          {
+            "action": "visible",
+            "selector": "[data-mobile-account-pending^=\"Cancel invitation\"]"
+          }
+        ]
+      }
+    ],
+    "mobile-ownedmobileaccountsettingsmigration--workspace-subtree-variables": [
+      {
+        "name": "name-edit",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Rename workspace",
+            "exact": true
+          },
+          {
+            "action": "fill",
+            "selector": "#workspace-name-mobile",
+            "value": "Renamed synthetic workspace 中文"
+          }
+        ]
+      },
+      {
+        "name": "name-saving",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "#workspace-name-mobile",
+            "key": "Enter"
+          },
+          {
+            "action": "visible",
+            "selector": "[data-mobile-account-pending^=\"Workspace name\"]"
+          },
+          {
+            "action": "disabled",
+            "role": "button",
+            "name": "Rename workspace"
+          }
+        ]
+      },
+      {
+        "name": "name-completed",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[data-complete-operation]"
+          },
+          {
+            "action": "visible",
+            "selector": "[data-mobile-account-result]:text-is(\"Completed Workspace name Renamed synthetic workspace 中文\")"
+          }
+        ]
+      },
+      {
+        "name": "role-menu",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Member",
+            "exact": true
+          },
+          {
+            "action": "visible",
+            "selector": "[role=\"menu\"]"
+          }
+        ]
+      },
+      {
+        "name": "invitation-cancel-pending",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "[role=\"menu\"]",
+            "key": "Escape"
+          },
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Cancel",
+            "exact": true
+          },
+          {
+            "action": "visible",
+            "selector": "[data-mobile-account-pending^=\"Cancel invitation\"]"
+          }
+        ]
+      }
+    ],
+    "mobile-ownedmobileaccountsettingsmigration--workspace-member": [
+      {
+        "name": "leave-dialog",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Leave Workspace",
+            "exact": true
+          },
+          {
+            "action": "visible",
+            "selector": "[role=\"alertdialog\"]"
+          }
+        ]
+      }
+    ]
+  },
+  "metricsDescription": "Real MobileAccountSettings account/workspace surfaces, exact pending callback signals, root/subtree variables and primitive compatibility; native runner adds resolved/rejected operations, dialogs and an explicitly emulated iOS branch."
+}

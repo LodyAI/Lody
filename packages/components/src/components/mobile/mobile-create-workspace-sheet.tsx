@@ -77,6 +77,8 @@ const styles = stylex.create({
   slugHintError: { color: themeColors.destructive },
   slugHintChecking: { color: themeColors.mutedForeground },
   slugHintAvailable: { color: themeColors.primary },
+  slugBorderError: { borderColor: 'hsl(var(--destructive) / 1)' },
+  action: { flexGrow: 1, flexShrink: 1, flexBasis: '0%' },
 });
 
 /**
@@ -255,7 +257,7 @@ export function MobileCreateWorkspaceSheet({
                     onChange={(event) => setSlug(event.target.value)}
                     placeholder={t('organization.workspaceSlugPlaceholder', 'my-workspace')}
                     disabled={creating}
-                    className={showError ? 'border-destructive' : ''}
+                    {...stylex.props(showError && styles.slugBorderError)}
                     autoCapitalize="none"
                     autoCorrect="off"
                     spellCheck={false}
@@ -289,7 +291,7 @@ export function MobileCreateWorkspaceSheet({
             <Button
               type="button"
               variant={creationBlocked ? 'primary' : 'secondary'}
-              className="flex-1"
+              {...stylex.props(styles.action)}
               onClick={() => handleClose(false)}
               disabled={creating}
             >
@@ -298,7 +300,7 @@ export function MobileCreateWorkspaceSheet({
             {creationAvailable ? (
               <Button
                 type="button"
-                className="flex-1"
+                {...stylex.props(styles.action)}
                 onClick={() => void handleSubmit()}
                 disabled={!canSubmit}
               >

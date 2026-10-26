@@ -124,6 +124,9 @@ It applies the same predicate after view changes on both immutable builds.
 | `owned-session-list-targets.json` | Active SessionList project groups, selection, caller/root/subtree overrides, menus, folding and empty/loading states. |
 | `owned-updated-session-targets.json` | Active Updated list trees, precise openers, project groups, caller overrides, read-only/overflow and archive/rename states. |
 | `owned-login-targets.json` | Login providers, email/handoff pending states, scoped spacing and actual 860/861px layout boundary. |
+| `mobile-project-settings-targets.json` | Production project settings with multiple machines, long labels, local editors, loading and read-only states. |
+| `mobile-account-settings-targets.json` | Production account/workspace settings, editable names, deferred token/invitation actions and scoped variables. |
+| `mobile-workspace-sheets-targets.json` | Actual create/delete drawers, validation, pending deletion, long translations and 320/390/768px layouts. |
 | `sidebar-targets.json`                                          | Sidebar layouts, row parts, loading/empty/overflow and archive/menu states; narrow widths use a desktop UA.         |
 | `sidebar-mobile-targets.json`                                   | iPhone/Android descriptors, known-logo readiness and real touch menu/archive actions in both themes.                |
 | `sidebar-updated-interaction-targets.json`                      | Show all/less, selection, collapse/expand and focus/hover on the production Updated list.                           |
@@ -170,6 +173,24 @@ captures inspect provider SVG sizing, pending spinner spacing and synthetic auth
 intents without completing a sign-in. Retain initial mismatched interaction or
 transition captures when improving readiness; compare both sources again with
 the same final runner and keep raw pixel and diagnostic differences explicit.
+
+`mobile-project-settings-native.mjs`, `mobile-account-settings-native.mjs` and
+`mobile-workspace-sheets-native.mjs` use the same phase/immutable-URL arguments.
+They record trusted pointer/touch/keyboard events, callback results, focus, exact
+geometry and nested computed styles. Project touch-held states record the original
+Chromium behavior without claiming `:active` when that pseudo-class is absent.
+Account iOS-branch emulation and sheet keyboard-inset CSS probes do not establish
+native WebKit or an OS keyboard. The local build rejects cloud workspace creation;
+the create runner verifies that rejection and never substitutes a successful
+cloud mutation. Delete uses a deferred synthetic callback and verifies its actual
+completion/close/reset behavior. Keep failed fixture/locator calibrations, raw
+pixel differences and unchanged-source control runs separate from formal pairs.
+
+The compiler-backed [inventory](../../scripts/tailwind-usage.mjs) also inspects
+`withClassName`'s second argument, including calls spread onto a component. Its
+first argument contains StyleX props and is not a utility expression. Recount
+both sources with the same scanner version; older snapshots missed this helper
+and cannot establish the current batch's removal count.
 
 `chat-search-ready-targets.json` explicitly enters the search query and waits for
 the filtered result. Storybook play completion can precede a successful input

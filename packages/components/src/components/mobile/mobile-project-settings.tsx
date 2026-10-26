@@ -36,6 +36,49 @@ const TRANSITION_COLORS = {
 } as const;
 
 const styles = stylex.create({
+  multiRepoIdentity: {
+    display: 'flex',
+    minWidth: 'calc(var(--spacing) * 0)',
+    alignItems: 'center',
+    gap: 'calc(var(--spacing) * 3)',
+  },
+  multiRepoTile: {
+    display: 'flex',
+    width: 'calc(var(--spacing) * 9)',
+    height: 'calc(var(--spacing) * 9)',
+    flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 'var(--radius-xl)',
+    backgroundColor: 'color-mix(in oklab, hsl(var(--primary)) 10%, transparent)',
+    color: 'hsl(var(--primary))',
+  },
+  multiRepoGlyph: { width: '1.05rem', height: '1.05rem' },
+  multiRepoText: { minWidth: 'calc(var(--spacing) * 0)' },
+  multiRepoLabel: {
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontSize: '0.95rem',
+    fontWeight: 'var(--font-weight-medium)',
+    lineHeight: 'var(--leading-tight)',
+    color: 'hsl(var(--foreground) / 1)',
+  },
+  multiRepoLabelBlock: { display: 'block' },
+  multiRepoCount: {
+    display: 'block',
+    marginTop: 'calc(var(--spacing) * 0.5)',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontSize: '0.78rem',
+    lineHeight: 'var(--leading-tight)',
+    color: 'hsl(var(--muted-foreground) / 1)',
+  },
+  multiRepoChevron: {
+    width: 'calc(var(--spacing) * 4)',
+    height: 'calc(var(--spacing) * 4)',
+  },
   /** The machine's name, with its online mark in front. */
   machineHeading: {
     display: 'inline-flex',
@@ -348,15 +391,15 @@ export function MobileProjectSettings({
       key={`multi:${project.id}`}
       hasDivider={hasDivider}
       label={
-        <span className="flex min-w-0 items-center gap-3">
-          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
-            <Folders className="h-[1.05rem] w-[1.05rem]" />
+        <span {...stylex.props(styles.multiRepoIdentity)}>
+          <span {...stylex.props(styles.multiRepoTile)}>
+            <Folders {...stylex.props(styles.multiRepoGlyph)} />
           </span>
-          <span className="min-w-0">
-            <span className="block truncate text-[0.95rem] font-medium leading-tight text-foreground">
+          <span {...stylex.props(styles.multiRepoText)}>
+            <span {...stylex.props(styles.multiRepoLabel, styles.multiRepoLabelBlock)}>
               {project.name}
             </span>
-            <span className="mt-0.5 block truncate text-[0.78rem] leading-tight text-muted-foreground">
+            <span {...stylex.props(styles.multiRepoCount)}>
               {t('workspace.projects.repositoryCount', '{{count}} repositories or folders', {
                 count: project.memberCount,
               })}
@@ -365,7 +408,7 @@ export function MobileProjectSettings({
         </span>
       }
       onClick={onOpenMultiRepoProject ? () => onOpenMultiRepoProject(project.id) : undefined}
-      trailing={<ChevronRight className="h-4 w-4" />}
+      trailing={<ChevronRight {...stylex.props(styles.multiRepoChevron)} />}
     />
   );
   const fallbackTitle = t('workspace.projects.title', 'Projects');
@@ -464,17 +507,17 @@ export function MobileProjectSettings({
             <MobileSettingsRow
               hasDivider={anyMachineProjects.length > 0}
               label={
-                <span className="flex min-w-0 items-center gap-3">
-                  <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
-                    <Folders className="h-[1.05rem] w-[1.05rem]" />
+                <span {...stylex.props(styles.multiRepoIdentity)}>
+                  <span {...stylex.props(styles.multiRepoTile)}>
+                    <Folders {...stylex.props(styles.multiRepoGlyph)} />
                   </span>
-                  <span className="truncate text-[0.95rem] font-medium leading-tight text-foreground">
+                  <span {...stylex.props(styles.multiRepoLabel)}>
                     {t('workspace.projects.createMultiRepo', 'Several repositories or folders')}
                   </span>
                 </span>
               }
               onClick={() => onCreateMultiRepoProject()}
-              trailing={<ChevronRight className="h-4 w-4" />}
+              trailing={<ChevronRight {...stylex.props(styles.multiRepoChevron)} />}
             />
           ) : null}
         </MobileSettingsSection>

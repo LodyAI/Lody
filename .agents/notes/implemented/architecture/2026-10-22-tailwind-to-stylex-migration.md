@@ -591,6 +591,38 @@ login pixels, and Updated's initial 100,729 raw / 91,090 threshold pixels remain
 separate evidence with the old hover-card variants, failed closure candidates
 and unchanged-source controls. Historical exceptions stay open.
 
+### Mobile settings and workspace sheets
+
+The next four-file batch removes 68 actual compiler-confirmed utilities:
+project settings 57→5, account settings 76→68, create workspace 15→12 and delete
+workspace 17→12. New styles preserve element-local spacing, ink, radius, weight,
+the compiler's exact `color-mix`, and its complete dark/light-scope predicate.
+Redundant primitive shrink classes are removed only where the primitive owns the
+same value. Control sizing, Drawer overrides, field typography and pending
+margins inside automatically closing confirmation actions remain explicit.
+DOM, hooks, events, inline styles and public APIs are unchanged.
+
+`mobile-acceptance.html` has 716 paired browser screenshots: 418 primary,
+290 native and eight supplemental runtime theme-scope probes. Recorded rendering
+fields match across 62,030 paired nodes; one Account `alertDialogOpen` diagnostic
+was sampled before settling and differs despite equal settled DOM. Only 670
+PNGs are byte-exact: 46 pairs retain 16,827 raw pixels, including 7,818 above the
+unchanged threshold. These remain **OPEN**. Bounded unchanged-source controls
+reproduce some complete formal variants, but do not explain every variant or
+prove the raster trigger. The largest differences lie on the unchanged workspace
+name Input's inset-shadow edge after blur; no compensating CSS is added.
+
+Original failed locator/translation/pending-fixture captures remain separate from
+accepted phases. Project fixtures retain their original immutable build; revised
+Account/Workspace fixtures get a second original-source build. Both use the same
+four original production files. Real touch contact is verified without inventing
+a missing Chromium `:active` state. Local creation rejection, automatic deletion
+closure and existing 320px long-title/close-button overlap remain visible limits.
+Native iOS-branch and keyboard-inset probes are emulations. Current component
+tests pass all 618 files / 6,137 tests; actual Electron build and four after-only
+smoke screenshots pass. Root check still fails the existing Git-identity test;
+types, typed lint, Effect lint, scripts and independent boundaries pass.
+
 ### Build and test findings
 
 Storybook 10.6's strict execution wrappers and shared async chunks introduced
@@ -729,8 +761,19 @@ the 692 unresolved expressions are unchanged. The legacy-list batch leaves
 2,284 occurrences (components 1,792, `src/ui` 487, routes 5) across 184 files,
 with the same 692 unresolved expressions. The active-list/login batch leaves
 2,174 occurrences (components 1,682, `src/ui` 487, routes 5) across the same
-184 files and 692 unresolved expressions. These are lower bounds, not a project
-completion percentage.
+184 files and 692 unresolved expressions. Those snapshots predate recognition of
+`withClassName`'s class argument.
+
+The corrected scanner reads that helper's second argument while excluding its
+StyleX props argument, validates candidates with the same locked compiler, and
+retains unresolved dynamic arguments. A real compiler probe checks deduplication,
+invalid tokens and dynamic values. Rescanning the four original files and final
+files yields 165→97, removing 68; it does not count moving retained size classes
+inside a helper as migration. On the same method, the baseline is 2,208 and the
+current lower bound is 2,140 occurrences (components 1,648, `src/ui` 487, routes 5)
+across 187 files, plus 765 unresolved expressions. Newly visible historical
+helper usages explain the higher corrected baseline; these are lower bounds,
+not a project completion percentage.
 
 The unconsumed `src/ui/sidebar.tsx` retains 324 occurrences and is not re-exported
 by `src/ui/index.ts`; direct public wildcard imports remain possible.
