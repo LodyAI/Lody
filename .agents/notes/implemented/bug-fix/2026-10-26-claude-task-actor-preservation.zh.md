@@ -1,4 +1,4 @@
-# 保留 Claude 任务的 actor 类型
+# 保留 builtin Claude Bash 任务身份
 
 Status: implemented
 Translation: current
@@ -7,22 +7,35 @@ Translation: current
 
 ## 摘要
 
-Claude 任务终态事件可能在启动事件已识别 Bash 任务后省略类型。若把显示用的 `Claude task` 回退值写入 actor 元数据，后续历史合并就会用它替换 `local_bash`，导致完成后的行丢失 Bash 标签和关联命令。修复保留标题中的显示回退值，但在 provider 未提供身份时省略 actor 元数据。显式 subagent、workflow 和 task 类型仍会记录；后续事件省略身份时，现有 task-id 合并会保留较早的身份。
+builtin Claude 任务生命周期事件通过标准 ACP `session/update` 发送。终态事件缺少类型时，显示标题仍可使用回退值，但不能用它覆盖共享历史中此前报告的 `local_bash` actor。adapter 现在只省略缺失的 actor 字段，任务身份、合并行为和标题显示仍由现有模块负责。真实 adapter 到历史写入的测试和任务面板都确认完成后的任务仍显示为 Bash，并保留关联命令。
 
-## 证据与决策
+## 责任归属与决策
 
-`convertClaudeTaskLifecycleNotification` 从每条 Claude 生命周期事件构造 ACP task 更新。历史层将 `_meta.lody.task` 物化为任务项，并按 `taskId` 合并，后续已定义字段优先。任务面板通过 `actor === 'local_bash'` 或 `taskType === 'local_bash'` 识别 Bash；因此回退 actor 会同时隐藏关联命令并改变标签。
+`packages/acp-extension-claude/src/acp-agent.ts` 中的 `createClaudeTaskLifecycleUpdate` 负责生成生命周期通知。未协商 async-task 事件的后台任务会进入 `emitTaskLifecycle`，再由 `sendUpdate` 发送标准 ACP 更新。`AgentClient.sessionUpdate` 将这些更新转交 CLI 历史；旧版 `_claude/taskLifecycle` handler 是另一条兼容输入路径，不会接收当前 builtin producer 的标准消息。
 
-修复将标题显示回退值与可选的任务元数据回退值分开。Claude 不设置后者，因此缺少类型的事件会让 actor 保持未定义，并由现有合并逻辑保留早先身份。显式 `subagent_type`、启动事件中的 `workflow_name` 或 `task_type` 仍会写入 actor 元数据。共享转换器也服务于 Kimi；通过显式选项保留其既有的 `Kimi task` actor 回退值。全局删除该回退时 Kimi 测试失败，证实该显示契约仍然有效。增加单独的 task-type 字段则要修改 shared schema、解析和 UI 消费者，却不能改善这个场景。
+仅当 `subagent_type`、`workflow_name` 或 `task_type` 提供身份时，adapter 才写入 `_meta.lody.task.actor`。ACP tool-call 标题仍回退为 `Claude task`。因此共享历史按 task id 合并完成与迟到进度字段时，会保留更早的 `local_bash` actor 和 `toolUseId`；无需新增 task-type schema 或历史分支。
 
-task id 与 ACP session 作用域不变。事件继续走现有的按投递顺序历史合并。终态状态单调性仍由 `mergeSubagentTaskPayload` 负责；本修复只让缺失的 actor 元数据在实时和重建历史合并中保留早先的值。
+CLI 仍接收较旧 adapter 发出的 `_claude/taskLifecycle`，因此 converter 作为旧兼容路径保留并继续测试。共享 converter 的 `taskMetaFallbackActor` 可选项也继续保留：Kimi 测试验证既有 `Kimi task` 回退，显式事件类型仍会更新 actor。
 
-## 验证
+## 验证与消融
 
-拥有该行为边界的测试依次转换 `task_started(task_type=local_bash)`、缺少类型的完成 `task_notification` 和迟到的无类型 `task_progress`，通过历史写入器应用事件，再确认重建结果只有一个 task id，且保留 Bash actor、完成状态和摘要。在独立 clone 的源码提交 `779edf736b072965dcfb92618352e050a02620b5` 中，临时恢复 Claude 缺失类型时写入元数据回退的行为后，此用例失败：期望 `actor: local_bash`，实际得到 `actor: Claude task`（1 项失败，26 项跳过）。恢复已提交转换器后，同样的 owning suites 通过：`history.test.ts` 与 `claude-task-lifecycle.test.ts` 共 33 项通过。两套测试也验证了显式 task 类型更新和 Kimi 回退不变。本次跟进未新增回归测试。
+CLI 历史测试现在会实例化真实 `ClaudeAcpAgent`，依次送入确定性的 Bash tool call、`task_started(local_bash)`、无类型完成事件和迟到进度，经由实际 `sessionUpdate` 回调进入历史处理，再把相同通知重放到新的历史文档。测试检查最终 actor、task id、关联 tool use、命令、状态和摘要。adapter owning suite 覆盖发出的标准 payload、标题回退和显式 workflow 类型。
 
-Storybook 使用合成会话历史投影渲染现有 `SubagentTaskPanel`，输入序列与上面相同。真实面板基线显示 `Claude task` 且没有 Command 区；修复后显示 `Bash` 和关联的合成命令。截图均标注源码 SHA 和输入：[基线面板](https://github.com/user-attachments/assets/b5b3dd76-9619-4ee2-bb6e-5db0993ec563)、[基线详情](https://github.com/user-attachments/assets/333e5b35-53aa-4f54-8604-dd882494a8a7)、[修复后面板](https://github.com/user-attachments/assets/c0e930ff-179a-4c66-9e84-dc138ae1c001)、[修复后详情](https://github.com/user-attachments/assets/a72f27f5-95c6-4ce8-8f30-3ded400e95bb)。临时 story 和回退修改仅在 `/tmp/lody-1809-verify`，未进入 PR。
+- **红灯：** adapter 源码为 `269960a27ef6679813c569cc0c73bf501114a23a` 时，用例在真实完成 payload 处失败：期望不含 `actor`，实际得到 `Claude task`（1 失败、26 跳过；退出码 1）。
+- **绿灯：** adapter 源码为 `cad4342265634ba3dcdc9f37e587a096596eaa67` 时，同一命令通过（1 通过、26 跳过；退出码 0）。`history.test.ts` 和 `claude-task-lifecycle.test.ts` 共 33 项通过，覆盖显式类型和 Kimi 兼容行为。
+- `npm run check`、`npm run build` 和 adapter 的 `src/tests/acp-agent.test.ts` 套件通过（604 通过、10 跳过）。
+- 使用 Node 26.12.1 的独立 clone 中，`pnpm format` 通过。完整 `pnpm check` 完成 typecheck、lint 和 effect lint 后，在 `test:ci` 报告 4,657 通过、4 跳过、1 失败。失败用例是 `src/session/git-identity.test.ts`：显式相对 Git 配置测试读到了主机身份 `wibus-wee`，而非测试身份 `Requester`。单独运行该用例可复现本机 Git 环境问题，与本修复无关。
 
-验证在 Node 26.12.1 和独立 clone 的 frozen root install 下进行。该环境中的 `pnpm format` 通过。完整 `pnpm check` 在 `prepare:acp-adapters` 停止，因为锁定的 Claude ACP 子模块没有安装 package-local TypeScript 依赖；root workspace 将该子模块作为独立依赖排除。变更行为由本地通过的 owning suites 和最新远端 CLI、Static checks 覆盖：[CLI job](https://github.com/LodyAI/Lody/actions/runs/40297222519/job/121486103742)、[Static job](https://github.com/LodyAI/Lody/actions/runs/40297222519/job/121486103559)。同一 PR HEAD 的远端桌面 smoke、浏览器测试、其余测试分片和贡献策略检查也均通过。`pnpm run docs check` 仍报告缺失 ACP 子模块链接和未翻译文档等既有问题，没有报告这两份更新的 note。
+去掉条件式 actor 省略会重现上面的红灯。将标题显示回退值留在 `title` 中可保留现有 ACP 表现；保留 Kimi 选项则满足 Kimi 兼容断言。没有新增抽象或状态。
+
+## 可视化证据
+
+baseline 和 fixed adapter 实际运行产生的历史记录被直接送入生产 `SubagentTaskPanel` 和详情对话框。两个 Story 都显示源码 SHA 和相同的确定性输入序列。基线显示 `Claude task` 且没有 Command 区；修复后显示 `Bash` 以及关联的 `printf synthetic-background-output` 命令。
+
+| 基线（`269960a`） | 修复后（`cad4342`） |
+| --- | --- |
+| [面板](https://github.com/user-attachments/assets/6c073031-f649-4090-9fb5-1aae6147a34a) · [详情](https://github.com/user-attachments/assets/c9f0120e-811c-43d6-9cef-0aee89a6d4d6) | [面板](https://github.com/user-attachments/assets/40e8917a-b32b-436f-8e04-844b1471d594) · [详情](https://github.com/user-attachments/assets/a865040e-b419-425b-a70f-a58b12b113e5) |
+
+adapter commit 已推送至 `LodyAI/acp-extension-claude` 的 `fix/omit-missing-task-actor` 分支；本 PR 通过 submodule gitlink 固定该 commit。本 issue 仍只有原 PR #1906，且保持 draft。
 
 PR：https://github.com/LodyAI/Lody/pull/1906
