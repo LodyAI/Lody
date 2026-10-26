@@ -1,5 +1,6 @@
 import { withHistoryPort } from '../../../tests/history-port-fixture';
 import { describe, expect, it, vi } from 'vitest';
+import { randomUUID } from 'node:crypto';
 import {
   parseSessionNotification,
   type MessageContent,
@@ -9,13 +10,20 @@ import {
 import type { ApplyAgentBatchInput } from '../loro/session-agent-writes';
 import type { SessionDocument } from '@/lib/loro/doc';
 import type { Logger } from '@/utils/logger';
-import { convertClaudeTaskLifecycleNotification } from '../../agent/claude-task-lifecycle';
 import { applyMessageContentsBatch, applyNotificationOnHistory } from './history-apply';
 import {
   clearThreadGoalFromHistory,
   handleACPUpdateMessage,
   upsertThreadGoalInHistory,
 } from './history';
+import { ClaudeAcpAgent } from '../../../../../packages/acp-extension-claude/src/acp-agent.js';
+import {
+  mockSessionState,
+  successfulResultMessage,
+  userEcho,
+  wrapQuery,
+} from '../../../../../packages/acp-extension-claude/src/tests/session-doubles.js';
+import { Pushable } from '../../../../../packages/acp-extension-claude/src/utils.js';
 
 const sid = (id: string) => id as SessionId;
 
@@ -597,39 +605,120 @@ describe('handleACPUpdateMessage', () => {
     });
   });
 
-  it('keeps a Bash actor through an untyped terminal event and history reconstruction', async () => {
+  it('keeps the builtin Claude Bash actor through untyped completion, late progress, and history replay', async () => {
     const { doc, readHistory } = createDoc();
-    const getCurrentSessionTurnId = vi.fn(() => 'turn-1');
-    const convert = (message: Record<string, unknown>) => {
-      const result = convertClaudeTaskLifecycleNotification({
-        sessionId: 'acp-session',
-        message: { type: 'system', task_id: 'bash-task-1', ...message },
+    const updates: Parameters<typeof parseSessionNotification>[0][] = [];
+    const applyTo = (target: SessionDocument) => async (notification: (typeof updates)[number]) => {
+      await handleACPUpdateMessage(target, parseSessionNotification(notification), {
+        getCurrentSessionTurnId: () => 'turn-1',
       });
-      expect(result.ok).toBe(true);
-      if (!result.ok) throw new Error(result.reason);
-      return result.notification;
     };
-
-    await handleACPUpdateMessage(
-      doc,
-      [
-        convert({
-          subtype: 'task_started',
-          task_type: 'local_bash',
-          description: 'Run the synthetic background command',
-        }),
-        convert({
-          subtype: 'task_notification',
-          status: 'completed',
-          summary: 'Synthetic command completed',
-        }),
-        convert({
-          subtype: 'task_progress',
-          description: 'Late progress replay',
-        }),
-      ],
-      { getCurrentSessionTurnId }
+    const agent = new ClaudeAcpAgent(
+      {
+        sessionUpdate: async (notification) => {
+          updates.push(notification);
+          await applyTo(doc)(notification);
+        },
+      } as never,
+      { log: () => {}, error: () => {} }
     );
+    const input = new Pushable<any>();
+    async function* messages() {
+      const iter = input[Symbol.asyncIterator]();
+      const { value, done } = await iter.next();
+      if (!done && value) yield userEcho(value);
+      yield {
+        type: 'assistant',
+        uuid: randomUUID(),
+        session_id: 'test-session',
+        parent_tool_use_id: null,
+        message: {
+          id: 'message-bash',
+          model: 'claude-sonnet-4-5',
+          role: 'assistant',
+          type: 'message',
+          stop_reason: 'tool_use',
+          content: [
+            {
+              type: 'tool_use',
+              id: 'bash-tool-1',
+              name: 'Bash',
+              input: { command: 'printf synthetic-background-output' },
+            },
+          ],
+          usage: { input_tokens: 0, output_tokens: 0 },
+        },
+      };
+      yield {
+        type: 'system',
+        subtype: 'task_started',
+        task_id: 'bash-task-1',
+        tool_use_id: 'bash-tool-1',
+        task_type: 'local_bash',
+        description: 'Run the synthetic background command',
+        session_id: 'test-session',
+      };
+      yield {
+        type: 'system',
+        subtype: 'task_notification',
+        task_id: 'bash-task-1',
+        status: 'completed',
+        summary: 'Synthetic command completed',
+        session_id: 'test-session',
+      };
+      yield {
+        type: 'system',
+        subtype: 'task_progress',
+        task_id: 'bash-task-1',
+        session_id: 'test-session',
+      };
+      yield {
+        type: 'user',
+        uuid: randomUUID(),
+        session_id: 'test-session',
+        parent_tool_use_id: null,
+        message: {
+          role: 'user',
+          content: [
+            {
+              type: 'tool_result',
+              tool_use_id: 'bash-tool-1',
+              content: 'synthetic-background-output',
+              is_error: false,
+            },
+          ],
+        },
+      };
+      yield successfulResultMessage({ session_id: 'test-session' });
+      yield { type: 'system', subtype: 'session_state_changed', state: 'idle' };
+    }
+    agent.sessions['test-session'] = mockSessionState(
+      { query: wrapQuery(messages()), input },
+      agent,
+      'test-session'
+    );
+
+    await agent.prompt({
+      sessionId: 'test-session',
+      prompt: [{ type: 'text', text: 'run the synthetic background task' }],
+    });
+
+    const taskUpdates = updates.filter(
+      (notification) => notification.update._meta?.lody?.task?.taskId === 'bash-task-1'
+    );
+    expect(taskUpdates.map((notification) => notification.update.sessionUpdate)).toEqual([
+      'tool_call',
+      'tool_call_update',
+      'tool_call_update',
+    ]);
+    expect(taskUpdates[0]?.update._meta?.lody?.task).toMatchObject({ actor: 'local_bash' });
+    expect(taskUpdates[1]?.update).toMatchObject({ title: 'Claude task' });
+    expect(taskUpdates[1]?.update._meta?.lody?.task).not.toHaveProperty('actor');
+    expect(taskUpdates[2]?.update._meta?.lody?.task).not.toHaveProperty('actor');
+
+    const replayed = createDoc();
+    const replay = applyTo(replayed.doc);
+    for (const notification of updates) await replay(notification);
 
     const items = readHistory()[0]?.items as MessageContent[] | undefined;
     const task = items?.find(
@@ -639,10 +728,29 @@ describe('handleACPUpdateMessage', () => {
     expect(task).toMatchObject({
       taskId: 'bash-task-1',
       actor: 'local_bash',
+      toolUseId: 'bash-tool-1',
       status: 'completed',
       summary: 'Synthetic command completed',
     });
+    const bashTool = items?.find((item) => item.type === 'tool_call');
+    expect(bashTool).toMatchObject({ toolCallId: 'bash-tool-1' });
+    expect(bashTool?.content).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: 'terminal_command',
+          command: 'printf synthetic-background-output',
+        }),
+      ])
+    );
     expect(items?.filter((item) => item.type === 'subagent_task')).toHaveLength(1);
+    const replayedItems = replayed.readHistory()[0]?.items as MessageContent[] | undefined;
+    expect(replayedItems?.find((item) => item.type === 'subagent_task')).toMatchObject({
+      taskId: 'bash-task-1',
+      actor: 'local_bash',
+      toolUseId: 'bash-tool-1',
+      status: 'completed',
+      summary: 'Synthetic command completed',
+    });
   });
 
   it('creates the explicit target assistant entry instead of appending to another open entry', async () => {
