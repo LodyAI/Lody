@@ -10,6 +10,7 @@ import { pendingSessionLinkAtom } from '@/lib/session-deep-link';
 import { windowPreparationAtom } from '@/lib/window-preparation';
 import { useEmptySessionDraft } from '@/hooks/use-empty-session-draft';
 import { sessionHasUnreadMessages } from '@/lib/session-read-receipt';
+import { resolveActiveSessionTabId } from '@/lib/session-tab-action-target';
 import {
   Archive,
   ArchiveRestore,
@@ -1585,8 +1586,11 @@ const SessionDetail = ({
   // tick; the delayed flag keeps that from flashing a spinner.
   const showPendingChildTabState = useDelayedFlag(activeTabIsPendingChild, 300);
   const activeSessionTabId = useMemo<SessionId | null>(() => {
-    if (activeTabSessionId === sessionId) return sessionId;
-    return visibleChildSessions.find((s) => s.id === activeTabSessionId)?.id ?? null;
+    return resolveActiveSessionTabId(
+      activeTabSessionId,
+      sessionId,
+      visibleChildSessions.map((session) => session.id)
+    );
   }, [activeTabSessionId, sessionId, visibleChildSessions]);
   const childSessionToMount =
     activeSessionTabId !== sessionId &&
@@ -6694,7 +6698,7 @@ const SessionDetail = ({
               {latestPr && repoFullName && urlPrNumber === latestPrNumber && latestPrNumber && (
                 <PrTabContainer
                   sessionId={prSessionId}
-                  actionSessionId={activeTabSession?.id ?? null}
+                  actionSessionId={activeSessionTabId}
                   repoFullName={latestPrRepoFullName}
                   prNumber={latestPrNumber}
                   headCommitSha={getSessionPullRequestLegacyFields(latestPr).headCommitSha}
@@ -6885,7 +6889,7 @@ const SessionDetail = ({
     ) : activeSidebarTab === 'pr' && latestPr && repoFullName && latestPrNumber ? (
       <PrTabContainer
         sessionId={prSessionId}
-        actionSessionId={activeTabSession?.id ?? null}
+        actionSessionId={activeSessionTabId}
         repoFullName={latestPrRepoFullName}
         prNumber={latestPrNumber}
         headCommitSha={getSessionPullRequestLegacyFields(latestPr).headCommitSha}

@@ -8,26 +8,32 @@ Pull request: https://github.com/LodyAI/Lody/pull/1908
 
 ## Abstract
 
-The PR view used the workspace-owner session ID both to load PR data and to find the live conflict-resolution action. For a child conversation, that sent the prompt to the root conversation. `PrTabContainer` now receives a separate action target from the selected conversation while retaining the owner ID for GitHub queries and analytics. A missing target disables the action. The component suite passes for root, child, and absent targets, and ablation reproduces the child and missing-target failures. A full session UI capture remains unavailable because the required ACP extension submodules are absent from this checkout.
+The PR view used the workspace-owner session ID both to load PR data and to find the live conflict-resolution action. For a child conversation, that sent the prompt to the root conversation. `PrTabContainer` now receives a separate action target from the resolved selection while retaining the owner ID for GitHub queries and analytics. Tests cover root, resolved child, pending child, draft, and empty selections; ablation makes the three missing-target cases offer the root action. Browser captures show the baseline misroute and the fixed child and no-target outcomes in a synthetic session fixture using the production tab bar, conversation stream, and PR conflict view.
 
 ## Decision
 
 In `SessionDetail`, preserve `prSessionId` as the PR data owner and pass
-`activeTabSession?.id ?? null` separately as `actionSessionId` to both PR-view
-surfaces. `PrTabContainer` reads the conflict action only from that target.
-This keeps GitHub query ownership stable and makes a missing execution target
-fail closed instead of falling back to the root.
+`activeSessionTabId` separately as `actionSessionId` to both PR-view surfaces.
+This is the existing resolved selection used by the common desktop/mobile
+session shell: it retains the root ID and a visible child ID, while returning
+`null` for an unresolved child, draft, or empty tab. Do not use
+`activeTabSession?.id`; its display fallback intentionally returns the root
+metadata when a child is unresolved. `PrTabContainer` reads the conflict action
+only from the execution target, so missing selection remains unavailable.
 
 ## Evidence and limits
 
 The existing `session-chat-interface.tsx` publishes the action under its own
 `session.id`, while `getSessionGitHubState` resolves `sourceSessionId` to the
 workspace owner. Those are different identities for a child tab. The existing
-`pr-tab-container.test.tsx` now asserts the selected target and retained query
-owner through the rendered conflict action. With preinstalled dependencies from
-the identical lockfile, that suite passed all 7 tests. Temporarily restoring the
-owner-keyed action lookup made the child-target and missing-target tests fail,
-while the root-target case remained green. A full UI screenshot was unavailable:
-the Storybook preview cannot resolve the absent ACP extension submodules, and the
-conflict-resolution target itself appears only when the prompt is appended in a
-conversation, which the PR-only story does not render.
+`pr-tab-container.test.tsx` now drives the same active-tab resolver used by
+`SessionDetail` into the rendered conflict action and checks the prompt
+destination. It covers root, resolved child (while PR queries retain the root
+owner), pending child, draft, and empty tabs. With Node 26.12.1 and the identical
+lockfile dependency tree, all 9 tests pass. Ablating the resolver's no-target
+result to fall back to root makes all three pending/draft/empty cases offer the
+root action (3 failures, 6 passed). Browser acceptance used a synthetic session
+fixture with the production `SessionTabBar`, conversation page/stream, and PR
+conflict view: baseline pending-child dispatch landed in root; fixed child
+dispatch landed in child, and fixed pending/draft states showed no resolve
+action or root prompt. Screenshots are attached to PR #1908.

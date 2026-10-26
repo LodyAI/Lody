@@ -82,6 +82,7 @@ vi.mock('@/hooks/use-github-pr-diff', () => ({
 import { currentWorkspaceIdAtom } from '../src/atoms/workspace-context';
 import { PrTabContainer } from '../src/components/sessions/pr-tab-container';
 import { resolveConflictsActionAtomFamily } from '../src/components/sessions/session-pr-agent-action';
+import { resolveActiveSessionTabId } from '../src/lib/session-tab-action-target';
 
 (
   globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
@@ -300,7 +301,7 @@ describe('PrTabContainer ready-for-review auth recovery', () => {
             repoFullName="loro-dev/lody"
             prNumber={42}
             sessionId="root-session"
-            actionSessionId="child-session"
+            actionSessionId={resolveActiveSessionTabId('child-session', 'root-session', ['child-session'])}
           />
         </Provider>
       );
@@ -326,7 +327,7 @@ describe('PrTabContainer ready-for-review auth recovery', () => {
             repoFullName="loro-dev/lody"
             prNumber={42}
             sessionId="root-session"
-            actionSessionId="root-session"
+            actionSessionId={resolveActiveSessionTabId('root-session', 'root-session', ['child-session'])}
           />
         </Provider>
       );
@@ -336,7 +337,11 @@ describe('PrTabContainer ready-for-review auth recovery', () => {
     expect(store.get(dispatchedSessionAtom)).toBe('root-session');
   });
 
-  it('does not expose a root action when there is no execution target', async () => {
+  it.each([
+    ['pending child', 'url-child'],
+    ['draft', 'draft:local-id'],
+    ['empty', 'empty'],
+  ])('does not expose or dispatch the root action for a %s tab', async (_label, tabId) => {
     store.set(resolveConflictsActionAtomFamily('root-session'), {
       available: true,
       pending: false,
@@ -351,7 +356,7 @@ describe('PrTabContainer ready-for-review auth recovery', () => {
             repoFullName="loro-dev/lody"
             prNumber={42}
             sessionId="root-session"
-            actionSessionId={null}
+            actionSessionId={resolveActiveSessionTabId(tabId, 'root-session', [])}
           />
         </Provider>
       );
