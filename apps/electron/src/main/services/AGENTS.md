@@ -112,7 +112,7 @@ over a lost acknowledgement; auxiliary failures never undo verified admission.
 
 Explicit consent follows locally verified, durably fixed pairing evidence.
 Retries retain session/record/requestId and keys, credentials and pins. Failed begin
-stays discoverable. Archive only terminal or foreign immutable recipient attempts;
+stays discoverable. Archive terminal or foreign immutable recipient attempts (pin-only + relay request is foreign);
 same-request admitting/unknown stays fenced. Cleanup preserves installed origins,
 other sessions and both primary/cleanup causes; see the linked join note.
 Personal snapshot origins verify pinned endorsement and

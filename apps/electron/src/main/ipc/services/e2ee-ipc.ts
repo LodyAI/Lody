@@ -110,7 +110,9 @@ export class E2eeIpc extends IpcService {
         if (!pending || pending.pairingSessionId !== result.pairingSessionId) return false
         if (pending.offer.genesisHash !== result.genesisHash)
           return yield* Effect.fail(new Error('e2ee_conflict'))
-        if (!pending.requestHex) return false
+        // This host persists its request before joinBegin can publish it. A
+        // complete relay request cannot be ours while only our pin is saved.
+        if (!pending.requestHex) return true
         return (
           pending.signingPublicKey !== result.signingPublicKey ||
           pending.credentialHash !== result.credentialHash ||

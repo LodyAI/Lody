@@ -1078,6 +1078,80 @@ void test('an immutable published session for another recipient retires only the
   }
 })
 
+void test('a pin-only recipient reconciles a foreign published request and accepts one new offer with the same custody', async (t) => {
+  const f = await personalJoinFixture(t)
+  const first = await f.open('first')
+  await first.create()
+  const second = await f.open('second')
+  let third = await f.open('third')
+  const offer = await first.ipc.personalPairingOffer(f.workspaceId)
+  await second.ipc.preparePersonalJoin(offer)
+  f.db(third, 'creations.sqlite', (db) =>
+    db.exec(
+      "CREATE TRIGGER synthetic_request_block BEFORE UPDATE OF request_hex ON personal_joins BEGIN SELECT RAISE(ABORT, 'synthetic request save failure'); END"
+    )
+  )
+  await assert.rejects(third.ipc.preparePersonalJoin(offer), /synthetic request save failure/)
+  const pending = await third.ipc.pendingPersonalJoin(f.workspaceId)
+  assert.deepEqual(pending.offer, offer)
+  assert.equal(pending.requestHex, undefined)
+  const genesis = Result.getOrThrow(Bytes.genesisHash(Buffer.from(offer.genesisHash, 'hex')))
+  const device = await Effect.runPromise(third.custody.openDevice(genesis))
+  const publicKey = Buffer.from(device.publicKey.toBytes()).toString('hex')
+  const credential = await Effect.runPromise(
+    third.custody.deviceCredential(genesis, device.publicKey)
+  )
+  f.db(third, 'creations.sqlite', (db) => db.exec('DROP TRIGGER synthetic_request_block'))
+  await f.admit(first, second, offer)
+  await third.close()
+  third = await f.open('third')
+  assert.deepEqual(await third.ipc.pendingPersonalJoin(f.workspaceId), pending)
+  const next = await first.ipc.personalPairingOffer(f.workspaceId)
+  assert.notEqual(next.pairingSessionId, offer.pairingSessionId)
+  const result = await third.ipc.preparePersonalJoin(next)
+  assert.equal(result.status, 'pending')
+  assert.equal(result.signingPublicKey, publicKey)
+  const reopened = await Effect.runPromise(third.custody.openDevice(genesis))
+  assert.equal(
+    await Effect.runPromise(third.custody.deviceCredential(genesis, reopened.publicKey)),
+    credential
+  )
+  assert.equal(f.rows.get(offer.pairingSessionId).status, 'published')
+  f.db(third, 'creations.sqlite', (db) => {
+    const archived = db
+      .prepare('SELECT pin,request_hex FROM retired_personal_joins WHERE workspace_id=?')
+      .get(f.workspaceId)
+    assert.deepEqual(JSON.parse(archived.pin), offer)
+    assert.equal(archived.request_hex, null)
+  })
+})
+
+void test('a pin-only recipient without a relay session retains its pin and can retry the same offer', async (t) => {
+  const f = await personalJoinFixture(t)
+  const first = await f.open('first')
+  await first.create()
+  const recipient = await f.open('recipient')
+  const offer = await first.ipc.personalPairingOffer(f.workspaceId)
+  f.db(recipient, 'creations.sqlite', (db) =>
+    db.exec(
+      "CREATE TRIGGER synthetic_request_block BEFORE UPDATE OF request_hex ON personal_joins BEGIN SELECT RAISE(ABORT, 'synthetic request save failure'); END"
+    )
+  )
+  await assert.rejects(recipient.ipc.preparePersonalJoin(offer), /synthetic request save failure/)
+  const pending = await recipient.ipc.pendingPersonalJoin(f.workspaceId)
+  assert.equal(pending.requestHex, undefined)
+  f.db(recipient, 'creations.sqlite', (db) => db.exec('DROP TRIGGER synthetic_request_block'))
+  await assert.rejects(
+    recipient.ipc.preparePersonalJoin({ ...offer, pairingSessionId: '84'.repeat(16) }),
+    /e2ee_conflict/
+  )
+  assert.deepEqual(await recipient.ipc.pendingPersonalJoin(f.workspaceId), pending)
+  assert.equal((await recipient.ipc.preparePersonalJoin(offer)).status, 'pending')
+  f.db(recipient, 'creations.sqlite', (db) =>
+    assert.equal(db.prepare('SELECT COUNT(*) AS count FROM retired_personal_joins').get().count, 0)
+  )
+})
+
 void test('a proven lost approval renews its offer and the same recipient can cancel the released old session before retrying', async (t) => {
   const f = await personalJoinFixture(t)
   const first = await f.open('first')
