@@ -1493,10 +1493,20 @@ export class WorktreeManager {
           return '';
         throw error;
       });
+      if (!entries) return;
+      // Submodule update follows the index, not residual entries in .gitmodules.
+      const index = await this.runGit(['ls-files', '--stage', '-z'], workdir);
+      const gitlinks = new Set(
+        index.split('\0').flatMap((entry) => {
+          const match = /^160000 [0-9a-f]{40,64} 0\t([\s\S]+)$/.exec(entry);
+          return match ? [match[1]] : [];
+        })
+      );
       const missing: string[] = [];
       for (const entry of entries.split('\0').filter(Boolean)) {
         const memberPath = entry.slice(entry.indexOf('\n') + 1);
         if (!isSafeProjectPath(memberPath)) throw new Error('Invalid project group submodule path');
+        if (!gitlinks.has(memberPath)) continue;
         const directory = path.join(workdir, memberPath);
         if (
           fs.existsSync(directory) &&
