@@ -1834,6 +1834,65 @@ describe('SessionDispatchWatcher', () => {
     h.watcher.stop();
   });
 
+  it('keeps the queue signal open while a queued row could not be promoted', async () => {
+    const id = 'queue-held' as SessionId;
+    let meta = {
+      id,
+      machineId: 'machine-1',
+      userId: 'user-1',
+      createdAt: '2026-10-26T00:00:00.000Z',
+      cliType: 'builtin',
+      agentType: 'codex',
+      status: { type: 'idle' },
+      messageQueueUpdatedAt: 5,
+      messageQueueCheckedAt: 1,
+    } as SessionMeta;
+    const repo = {
+      getDocMeta: async () => ({ meta }),
+      upsertDocMeta: async (_room: string, patch: Partial<SessionMeta>) => {
+        meta = { ...meta, ...patch };
+      },
+    };
+    const doc = new SessionDocument(repo as never, id, async () => {}, createSilentLogger());
+    doc.roomId = `session-${id}`;
+    composeTestSessionDoc(doc, { history: [] });
+    await doc.pushMessageQueue(createQueueItem('held'));
+    // Another session rewrite holds the lease during the first check.
+    let leaseFree = false;
+    const startSession = vi.fn(async () => {});
+    const watcher = createWatcher({
+      logger: createSilentLogger(),
+      machineId: 'machine-1',
+      workspaceId: 'workspace-1' as WorkspaceId,
+      workspaceDocument: { repo, getOrCreateSessionDoc: async () => doc } as never,
+      executionService: {
+        getExecutionSnapshot: () => ({
+          hasActiveTurn: false,
+          hasBlockingPendingCreate: false,
+          hasReusableSession: false,
+        }),
+        tryAcquireSessionRewriteConflictLease: () => (leaseFree ? () => {} : null),
+        startSession,
+        continueSession: vi.fn(async () => {}),
+      } as unknown as SessionExecutionService,
+      canUseMachine: createAllowMachineAccess(),
+    });
+    try {
+      await runMaybeHandleSession(watcher, id);
+      expect(await doc.getMessageQueue()).toHaveLength(1);
+      expect(meta.messageQueueCheckedAt).toBe(1);
+
+      leaseFree = true;
+      await runMaybeHandleSession(watcher, id);
+      expect(await doc.getMessageQueue()).toHaveLength(0);
+      expect(startSession).toHaveBeenCalledWith(expect.objectContaining({ userTurnId: 'held' }), {
+        dispatchSource: 'queue',
+      });
+    } finally {
+      doc.mirror.dispose();
+    }
+  });
+
   it('hydrates queued mq items into pending turns before dispatching', async () => {
     const continueSession = vi.fn(async () => {});
     const startSession = vi.fn(async () => {});
@@ -2442,7 +2501,7 @@ describe('SessionDispatchWatcher', () => {
     const privateWatcher = watcher as unknown as {
       sessionNeedsActiveWatch: (meta: SessionMeta) => boolean;
       markMessageQueueSignalChecked: (
-        sessionDoc: { roomId: string },
+        sessionDoc: { roomId: string; getMessageQueue: () => Promise<MessageQueueItem[]> },
         meta: SessionMeta
       ) => Promise<void>;
     };
@@ -2461,7 +2520,10 @@ describe('SessionDispatchWatcher', () => {
 
     expect(privateWatcher.sessionNeedsActiveWatch(meta)).toBe(true);
 
-    await privateWatcher.markMessageQueueSignalChecked({ roomId }, meta);
+    await privateWatcher.markMessageQueueSignalChecked(
+      { roomId, getMessageQueue: async () => [] },
+      meta
+    );
 
     expect(upsertDocMeta).toHaveBeenCalledWith(roomId, {
       messageQueueCheckedAt: 20,

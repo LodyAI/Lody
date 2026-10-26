@@ -635,6 +635,23 @@ assertion (332 CLI files / 4,698 tests pass). The current Electron application
 build passes; its actual smoke attempt fails before launch because
 `electron@44.9.3/path.txt` is missing. This adds no new Electron runtime acceptance.
 
+The legacy-list continuation also passes all 618 component files / 6,136 tests
+before main integration. Syncing through `ff17c0e68` resolves the sole new
+`pr-merge-button.tsx` conflict by keeping StyleX and adopting upstream's compact
+height of 20px (`themeSpace[5]`). Upstream queue/auth behavior is preserved. The
+two legacy implementations remain byte-identical to their accepted source
+snapshots. The integrated component suite passes 618 files / 6,137 tests; root
+types, typed lint, Effect lint and scripts complete, while the same Node/Git
+failures leave the aggregate failed (332 CLI files / 4,701 tests pass).
+Independent post-merge browser matrices retain their own source scope and do
+not replace the formal 490-pair exceptions. The integrated 362-pair primary
+matrix has equal full recorded fields across 69,752 nodes; 359 PNGs are byte-exact,
+while three pairs retain 27 raw pixels / two threshold pixels, maximum channel
+delta six. These exceptions also remain open. A separate 16-frame real browser
+smoke verifies the intentional 20px merge/diff height, method menu, squash
+selection and Escape at 390/1280px in both themes. The integrated Electron app
+build passes; missing Electron binaries still block actual runtime validation.
+
 ## Remaining work
 
 Compiler-backed [usage inventory](../../../../packages/components/scripts/tailwind-usage.mjs)
