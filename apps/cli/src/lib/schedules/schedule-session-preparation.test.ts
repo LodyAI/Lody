@@ -158,7 +158,7 @@ describe('Schedule ACP values reach ordinary Session preparation', () => {
     cliType: 'custom',
     agentType: 'acp',
     modes: [],
-    models: [],
+    models: [{ modelId: 'opus', name: 'Opus' }],
     fetchedAt: 0,
     configOptions: [
       { id: 'plan_mode', name: 'Plan', type: 'boolean', currentValue: false, options: [] },
@@ -184,10 +184,14 @@ describe('Schedule ACP values reach ordinary Session preparation', () => {
       }),
     },
   } as unknown as LoroDocumentManager;
-  const prepareOptions = async (planMode: string | boolean) => {
+  const prepareOptions = async (
+    planMode: string | boolean,
+    fastValues: Record<string, string | boolean> = {}
+  ) => {
     const stored = ScheduleAgentSchema.parse({
       agentConfigId: 'agent',
-      configOptionValues: { plan_mode: planMode, select_flag: 'false' },
+      modelId: Object.keys(fastValues).length > 0 ? 'opus' : undefined,
+      configOptionValues: { plan_mode: planMode, select_flag: 'false', ...fastValues },
     });
     const agent = await resolveScheduleAgentRunConfig(
       localManager,
@@ -225,5 +229,18 @@ describe('Schedule ACP values reach ordinary Session preparation', () => {
   );
   it('leaves malformed legacy booleans for the ordinary validator to reject', async () => {
     await expect(prepareOptions('off')).rejects.toThrow('expects a boolean');
+  });
+  it.each([
+    { fast: 'false', 'fast-mode': 'true', expected: { fast: false, 'fast-mode': true } },
+    { fast: 'true', 'fast-mode': 'false', expected: { fast: true, 'fast-mode': false } },
+  ])('prepares legacy Fast values when the probe omits both Fast controls', async (values) => {
+    const { expected, ...fastValues } = values;
+    const prepared = await prepareOptions(false, fastValues);
+
+    expect(prepared.userTurn.inputConfig?.configOptionValues).toEqual({
+      plan_mode: false,
+      select_flag: 'false',
+      ...expected,
+    });
   });
 });

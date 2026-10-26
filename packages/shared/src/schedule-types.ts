@@ -5,6 +5,7 @@ import { AcpConfigOptionValueSchema, ProjectRefSchema } from './message-schemas'
 import type { ProjectRef } from './project';
 import { classifyPermissionModeFace, type AcpConfigOptionSummary } from './ai';
 import { isSensitiveAcpConfigOptionId } from './acp-config-option-sensitivity';
+import { isAcpFastModeConfigId } from './acp-run-config';
 
 export const SCHEDULE_PROMPT_MAX_BYTES = 32 * 1024;
 export { SCHEDULES_PROTOCOL_VERSION as SCHEDULE_PROTOCOL_VERSION } from './machine-protocol-capabilities';
@@ -92,8 +93,9 @@ export const ScheduleAgentSchema = z
   .strict();
 
 /**
- * Older Schedule writers stringified ACP booleans. Interpret only exact boolean
- * literals for options the target declares boolean; select strings stay strings.
+ * Older Schedule writers stringified ACP booleans. Interpret exact boolean
+ * literals for declared booleans and for absent semantic Fast ids; explicit
+ * selects and all other strings retain their type.
  * This is an execution/display projection, never a persisted-definition migration:
  * the Registry fingerprint and frozen run definition must remain unchanged.
  */
@@ -102,16 +104,19 @@ export function normalizeLegacyScheduleAgent(
   options: readonly Pick<AcpConfigOptionSummary, 'id' | 'type'>[] = []
 ): z.infer<typeof ScheduleAgentSchema> {
   if (!agent.configOptionValues) return agent;
-  const booleans = new Set(
-    options.filter((option) => option.type === 'boolean').map((option) => option.id)
-  );
+  const optionsById = new Map(options.map((option) => [option.id, option]));
   return {
     ...agent,
     configOptionValues: Object.fromEntries(
-      Object.entries(agent.configOptionValues).map(([id, value]) => [
-        id,
-        booleans.has(id) && (value === 'true' || value === 'false') ? value === 'true' : value,
-      ])
+      Object.entries(agent.configOptionValues).map(([id, value]) => {
+        const option = optionsById.get(id);
+        const isBoolean =
+          option?.type === 'boolean' || (option === undefined && isAcpFastModeConfigId(id));
+        return [
+          id,
+          isBoolean && (value === 'true' || value === 'false') ? value === 'true' : value,
+        ];
+      })
     ),
   };
 }
