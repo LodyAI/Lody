@@ -73,8 +73,8 @@
   removed-history revival, uncertain steer replay/retry or log/receipt pruning. Atomic edits/digests/metadata;
   agent v2/renderer v3. SDK owns input/permission/branch; local causes+RPC stage/code/ID.
   Native proofs gate path reuse/goal read elision; head/watch replaces Loro cursor.
-- `Session.createAgent` gates each ACP spawn; failures reject JSON-RPC. Terminals use protocol argv (`sh -c` for unsplit commands only). Managed Codex reused-refresh startup
-  retries once after process cleanup, delay, and live Provider recheck; other auth errors do not.
+- `Session.createAgent` gates ACP spawn; failures reject JSON-RPC. Terminals: argv (shell for
+  unsplit lines only), direct exit and bounded drain. Managed Codex reused-refresh retries once after process cleanup, delay and live Provider recheck; other auth errors do not.
 - Child tabs reuse parent workspace. No per-session paths in `MachineMeta`:
   machines publish `['dotlodyPath']`; frontends derive them.
 - `sandbox.spawn` returning OUTPUT requires `captureOutput: true` and a 4 MiB buffer cap;
