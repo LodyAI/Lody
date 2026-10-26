@@ -3,6 +3,8 @@
 Status: implemented
 Translation: current
 
+PR: [#1903](https://github.com/LodyAI/Lody/pull/1903)
+
 [English](2026-10-26-mobile-rename-target.md) | 中文
 
 ## 摘要
