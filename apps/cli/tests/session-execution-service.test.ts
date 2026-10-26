@@ -11412,11 +11412,30 @@ describe('Operation Inbox execution boundary', () => {
       };
       expect(f.store.inbox.accept(old)).toBe(true);
       expect(f.store.inbox.begin(old, 'assistant:human-input')).toBe(true);
+      // The crashed run left its assistant entry open.
+      await f.doc.sessionData.commands.applyHistoryAction({
+        kind: 'upsert-turn',
+        turn: {
+          id: 'assistant:human-input',
+          role: 'assistant',
+          userTurnId: 'human-input',
+          timestamp: '2026-10-12T00:00:01Z',
+          items: [{ type: 'text', text: 'partial answer' }],
+          fileDiff: [],
+        },
+      });
       // Restart observation blocks the owner without manufacturing a release receipt.
       f.store.inbox.activate('workspace-1', 'owner');
       await expect(f.service.continueSession(f.message)).rejects.toBeInstanceOf(
         InboxExecutionBlocked
       );
+      // The rejected run settles its input, so nothing owns the leftover entry any more.
+      const backend = await createSessionBackend(f.doc);
+      expect((await backend.readTurn('human-input')).turn).toMatchObject({ status: 'failed' });
+      expect((await backend.readTurn('assistant:human-input')).turn).toMatchObject({
+        finished: true,
+        endedAt: expect.any(Number),
+      });
       expect(f.store.inbox.blockedExecutions('workspace-1', f.message.sessionId)).toMatchObject([
         { executionId: 'assistant:human-input' },
       ]);

@@ -21,13 +21,9 @@ export type CanStopAgentOptions = {
 };
 
 /**
- * Whether the session Stop control should be exposed: exactly while the last
- * assistant turn is unfinished, or a goal can be paused.
- *
- * Live activity is not consulted. A turn whose agent process is gone (crash,
- * restart) is still unfinished, and Stop is how the user ends it: the daemon
- * closes a turn that no execution owns. A finished turn has nothing to stop,
- * even while a stale compaction marker remains in history.
+ * Stop is exposed exactly while the last assistant turn is unfinished (or a goal
+ * can be paused), never from live activity: a turn whose agent died stays
+ * stoppable, and the daemon closes it.
  */
 export const canStopAgentEnabled = ({
   activeAssistantTurnId,

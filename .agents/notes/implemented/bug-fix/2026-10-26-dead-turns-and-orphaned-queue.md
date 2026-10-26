@@ -13,8 +13,8 @@ After a machine restart, a session could stay "busy" forever: its last assistant
 never finished, so the composer queued every message, Stop was hidden, and the daemon, seeing
 no pending work, never ran the queue. The fix makes one fact decide the user-visible state —
 whether the last assistant turn is finished — and makes the owning daemon responsible for
-finishing turns that no execution owns: Stop closes such a turn, and a dispatch check closes it
-once its user input has settled. The daemon also stops acknowledging the queue signal while
+finishing turns that no execution owns: Stop closes such a turn, and a dispatch that settles its
+input before the prompt closes the entry a crashed run left open. The daemon also stops acknowledging the queue signal while
 rows remain. Sessions already stuck before this change still need one trigger (Stop or a queue
 edit), because idle sessions are not opened at startup.
 
@@ -45,9 +45,10 @@ pointers were consulted as well, and they disagreed:
   - Stop on that turn closes it unconditionally: an unsettled user input becomes `canceled`
     (and its own dispatch pointers are retired) before the entry is force-finished, in the same
     order as an ordinary Stop. Stop still does not run the queue.
-  - A dispatch check with nothing to run from history closes it before queue promotion, but
-    only when the user input is `handled`, `failed` or `canceled`. A `processing` input still
-    owes its crash-recovery run, which reopens the same entry.
+  - The pre-prompt exits that settle the input without running it (Inbox blocked, input
+    already ended) close that turn's entry at the failure point. Only a settled input
+    (`handled`, `failed`, `canceled`) qualifies; a `processing` input still owes its
+    crash-recovery run, which reopens the same entry.
 - **Queue signal.** `markMessageQueueSignalChecked` acknowledges only an empty local queue, so a
   row that could not be promoted keeps the session watched and later changes retry it.
 
@@ -59,6 +60,10 @@ pointers were consulted as well, and they disagreed:
   presence is absent but the turn is unfinished would hide the only exit again.
 - **Close any ownerless unfinished turn automatically.** Rejected for `processing` inputs, which
   crash recovery must still run on the same entry.
+- **Sweep for dead turns in every dispatch check.** Rejected: it reads history and takes the
+  rewrite lease on each idle trigger, which the per-trigger scan rule forbids and which can make a
+  concurrent queue promotion fail its lease. Closing at the failure point covers the observed
+  cause; Stop covers everything else.
 
 ## Related, not implemented
 
@@ -71,12 +76,14 @@ read by the composer, MCP status and dispatch — was discussed and is not decid
 ## Verification and limits
 
 - Execution-service tests: Stop closes an ordinary ownerless turn (input `canceled`, entry
-  finished, pointers retired, status idle, Stop marker cleared); automatic closing skips a
-  `processing` input and closes a `failed` one without rewriting it. The existing compaction
-  Stop test still passes.
+  finished, pointers retired, status idle, Stop marker cleared); the settled-only mode skips a
+  `processing` input and closes a `failed` one without rewriting it. The existing restart test
+  now also starts with an open entry: after the Inbox rejection the input is `failed` and the
+  entry finished. The existing compaction Stop test still passes.
 - Watcher test over a real `SessionDocument`: a queued row blocked by a held lease keeps
   `messageQueueCheckedAt` unchanged and is promoted and dispatched on the next check.
-- Removing the queue-length guard or the settled-input guard makes the corresponding test fail.
+- Removing the queue-length guard, the settled-input guard or the failure-point close makes the
+  corresponding test fail.
 - Not verified live: no desktop, web or daemon restart was exercised. The Stop button change
   reaches users only with a renderer release.
 - Already-stuck sessions are not repaired automatically: with the new daemon, Stop closes a dead

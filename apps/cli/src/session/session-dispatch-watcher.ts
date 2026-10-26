@@ -3141,15 +3141,6 @@ export class SessionDispatchWatcher {
       if (!isActive()) {
         return { turn: null, history };
       }
-      // Nothing in history runs next, so an unfinished assistant turn whose input
-      // already settled has no execution left. Close it so clients stop treating
-      // the session as busy; the queue below then runs as after any turn.
-      await this.deps.executionService.closeDeadAssistantTurn?.(meta.id, {
-        requireSettledUserTurn: true,
-      });
-      if (!isActive()) {
-        return { turn: null, history };
-      }
       const promoted = await this.promoteNextQueuedMessage(sessionDoc, meta, history);
       if (!isActive()) {
         return { turn: null, history };

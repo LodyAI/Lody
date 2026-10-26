@@ -262,9 +262,10 @@ turn under the rewrite lease), the entry is dead:
 
 - Stop on that turn closes it: it cancels a still-unsettled user input, then force-finishes
   the entry. Stop still does not run the queue.
-- A dispatch check with nothing to run from history closes it before queue promotion, but
-  only once its user input is `handled`/`failed`/`canceled`; a `processing` input still owes
-  its crash-recovery run on the same entry.
+- A dispatch that settles its input before the prompt (Inbox blocked, input already ended)
+  closes the entry a crashed run left open, at that failure point. A `processing` input is
+  never closed this way: it still owes its crash-recovery run on the same entry. Dispatch
+  checks do not sweep for dead turns; that would read history on every trigger.
 - The queue signal (`messageQueueCheckedAt`) is acknowledged only when the local queue is
   empty, so a row that could not be promoted keeps the session watched.
 

@@ -168,6 +168,8 @@ import {
 import type { MachineAccessVerification } from './session-access-retry';
 import { createSessionBackend, getSteerOperationId, type SessionBackend } from './session-backend';
 import {
+  findLastHistoryEntry,
+  isActivationAwaitingHistory,
   resolveDispatchAcpSessionId,
   resolveResumableAcpSessionId,
 } from './session-dispatch-logic';
@@ -4207,6 +4209,15 @@ export class SessionExecutionService {
         }
       }
     } catch (cause) {
+      // Both pre-prompt exits below settle the user input without running it,
+      // so the entry a crashed run left open has no owner: close it with them.
+      const closeLeftoverEntry = () =>
+        this.closeDeadAssistantTurn(sessionId, { turnId, requireSettledUserTurn: true }).catch(
+          (closeCause: unknown) =>
+            this.deps.logger.warn(
+              `[${sessionId}] Failed to close leftover turn ${turnId}: ${formatErrorMessage(closeCause)}`
+            )
+        );
       try {
         // A rejected begin acquired nothing. Its deterministic ID can match an
         // older blocked execution, which only the recovery owner may release.
@@ -4242,6 +4253,7 @@ export class SessionExecutionService {
         // unrelated queued input is also untouched.
         if (inboxInput)
           await inbox!.abandonInput(this.deps.workspaceId, sessionId, inboxInput.inputId, true);
+        await closeLeftoverEntry();
         span.end({ outcome: 'inbox-blocked' });
         throw cause;
       }
@@ -4260,6 +4272,7 @@ export class SessionExecutionService {
               `[${sessionId}] Failed to retire ended Inbox input ${userTurnId}: ${formatErrorMessage(retireCause)}`
             )
         );
+        await closeLeftoverEntry();
         span.end({ outcome: 'inbox-input-ended' });
         return 'inbox-input-ended';
       }
@@ -7201,55 +7214,42 @@ export class SessionExecutionService {
   }
 
   /**
-   * Ends the session's last assistant turn when no execution on this daemon owns it.
-   *
-   * Only this daemon executes the session, so an unfinished entry without a live
-   * runtime here is dead: a crash, a restart or a failure before the prompt left
-   * it open, and it would otherwise keep the session busy forever. With
-   * `requireSettledUserTurn`, only a turn whose user input already has a terminal
-   * status is closed; a `processing` input still owes its crash-recovery run,
-   * which reopens the same entry. Returns whether a turn was closed.
+   * Ends the last assistant turn when no execution on this daemon owns it, so it
+   * cannot keep the session busy. With `requireSettledUserTurn`, a `processing`
+   * input is left alone: it still owes its crash-recovery run on the same entry.
    */
   async closeDeadAssistantTurn(
     sessionId: SessionId,
     options: { turnId?: string; requireSettledUserTurn: boolean }
   ): Promise<boolean> {
-    // The lease excludes turn starts and other rewrites while history is read
-    // and written; the live check repeats after the awaited read.
+    if (this.liveTurnId(sessionId) != null) return false;
+    // The lease excludes turn starts; ownership is rechecked after the read.
     const releaseConflict = this.tryAcquireSessionRewriteConflictLease(sessionId);
     if (!releaseConflict) return false;
     try {
-      if (this.liveTurnId(sessionId) != null) return false;
       const sessionDoc = await this.deps.workspaceDocument.getOrCreateSessionDoc(sessionId);
-      const backend = await createSessionBackend(sessionDoc, await sessionDoc.getMetaState());
-      // The last assistant turn and its user input sit at the tail of history.
+      const backend = await createSessionBackend(sessionDoc);
       const count = await backend.readHistoryCount();
       const rows = (
         await backend.readHistoryDirectory(Math.max(0, count - DEAD_TURN_SCAN_ROWS), count)
       ).flatMap((row) => (row.scalars ? [row.scalars] : []));
       const turnId = resolveActiveAssistantTurnId(rows);
-      if (turnId === undefined || (options.turnId !== undefined && options.turnId !== turnId)) {
+      if (
+        turnId === undefined ||
+        (options.turnId !== undefined && options.turnId !== turnId) ||
+        this.liveTurnId(sessionId) != null
+      ) {
         return false;
       }
-      if (this.liveTurnId(sessionId) != null) return false;
-      const lastRow = (role: 'user' | 'assistant', id: string) => {
-        for (let index = rows.length - 1; index >= 0; index -= 1) {
-          if (rows[index]?.role === role && rows[index]?.id === id) return rows[index];
-        }
-        return undefined;
-      };
-      const userTurnId = lastRow('assistant', turnId)?.userTurnId;
-      const userStatus = userTurnId ? lastRow('user', userTurnId)?.status : undefined;
+      const userTurnId = findLastHistoryEntry(rows, turnId)?.userTurnId;
       const userSettled =
-        userStatus === 'handled' || userStatus === 'failed' || userStatus === 'canceled';
+        userTurnId !== undefined && !isActivationAwaitingHistory(rows, userTurnId);
       if (options.requireSettledUserTurn && !userSettled) return false;
 
-      this.deps.logger.debug(
-        `[${sessionId}] Closing assistant turn ${turnId}: no live runtime owns it`
-      );
+      this.deps.logger.debug(`[${sessionId}] Closing assistant turn ${turnId}: no runtime owns it`);
       this.deps.clearSessionActivePresence(sessionId);
-      // Settle the user input before the assistant entry turns terminal, in the
-      // same order as an ordinary Stop (see finalizeCancelledTurnEffect).
+      // Settle the input before the entry turns terminal, as an ordinary Stop does.
+      // Pointers move only when they still name this input, never a newer one.
       if (userTurnId && !userSettled) {
         await this.setTerminalUserTurnStatus(sessionId, sessionDoc, userTurnId, 'canceled');
         const meta = await this.getSessionMeta(sessionId);
@@ -7337,17 +7337,13 @@ export class SessionExecutionService {
       }
       // Stop always ends the turn the user sees: with no execution here, the
       // unfinished entry is closed instead of ignored.
-      if (
-        currentTurnId == null &&
-        (await this.closeDeadAssistantTurn(sessionId, { turnId, requireSettledUserTurn: false }))
-      ) {
-        await this.clearCancelRequest(sessionId);
-        this.clearTurnCancellation(sessionId, turnId);
-        return { success: true };
+      if (await this.closeDeadAssistantTurn(sessionId, { turnId, requireSettledUserTurn: false })) {
+        this.refreshCodeCollabSharedStateAfterTurn(sessionId);
+      } else {
+        this.deps.logger.debug(
+          `[${sessionId}] Ignoring stop request for stale turn ${turnId} (current=${currentTurnId ?? 'none'})`
+        );
       }
-      this.deps.logger.debug(
-        `[${sessionId}] Ignoring stop request for stale turn ${turnId} (current=${currentTurnId ?? 'none'})`
-      );
       await this.clearCancelRequest(sessionId);
       this.clearTurnCancellation(sessionId, turnId);
       return { success: true };
