@@ -3,7 +3,7 @@
 Status: implemented
 Translation: current
 
-PR: pending
+PR: https://github.com/LodyAI/Lody/pull/1911
 
 [English](2026-10-26-schedule-fast-compatibility.md)
 
@@ -21,6 +21,6 @@ Schedule v2 保留 ACP 字符串和布尔值。原有投影只会转换缓存探
 
 Issue #1732 的合成场景以 `opus` 为目标模型，探测结果不含 Fast，保存值为 `fast: "false"`。修复前，生产 `prepareSessionInput` 回归测试因 `Config option "fast" expects a boolean or on/off value.` 失败；修复后通过。覆盖还检查两个 Fast 别名及 true/false、ID 为 `fast` 的显式 select、无关 select 字符串，以及原有的指纹不变行为。
 
-附在 [Issue #1732](https://github.com/LodyAI/Lody/issues/1732) 的修复前后终端录屏使用相同合成输入和测试命令，分别对应基线 `91fa467a205c` 与修复提交。Fixture 不会连接 Provider，也不会更改已保存的 Schedule。
+附在 [PR #1911](https://github.com/LodyAI/Lody/pull/1911) 的修复前后终端录屏使用相同合成输入和测试命令，分别对应基线 `91fa467a205c` 与修复提交。Fixture 不会连接 Provider，也不会更改已保存的 Schedule。
 
 将所有精确布尔字符串都转换的简单方案会破坏普通 select 值。要求探测必须声明 boolean 则仍会复现 Issue。最终保留的 ID 特例仅限两个 Fast 语义 ID，且不绕过目标模型验证。

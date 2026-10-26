@@ -3,7 +3,7 @@
 Status: implemented
 Translation: current
 
-PR: pending
+PR: https://github.com/LodyAI/Lody/pull/1911
 
 [中文](2026-10-26-schedule-fast-compatibility.zh.md)
 
@@ -21,6 +21,6 @@ This deliberately does not coerce every value named `"true"` or `"false"`, infer
 
 Issue #1732's synthetic shape has target model `opus`, a probe without Fast, and saved `fast: "false"`. The production `prepareSessionInput` regression failed before the change with `Config option "fast" expects a boolean or on/off value.` and passed after normalization. Coverage also checks both Fast aliases and both boolean values, explicit select on ID `fast`, unrelated select strings, and the existing fingerprint-preservation behavior.
 
-The before/after terminal recordings attached to the draft PR show the same synthetic test command and input against baseline `91fa467a205c` and the fixed commit. These fixtures do not contact a provider or alter a stored Schedule.
+The before/after terminal recordings attached to [PR #1911](https://github.com/LodyAI/Lody/pull/1911) show the same synthetic test command and input against baseline `91fa467a205c` and the fixed commit. These fixtures do not contact a provider or alter a stored Schedule.
 
 The simpler alternative—coercing every exact boolean-looking string—would corrupt ordinary select values. Requiring the probe to declare boolean reproduces the reported failure. The retained ID-specific exception is limited to the two semantic Fast IDs and does not bypass target validation.
