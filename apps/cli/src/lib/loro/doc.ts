@@ -935,6 +935,11 @@ export class LoroDocumentManager {
     this.logger.debug(`[${this.workspaceId}] Unloaded doc ${docId} and invalidated its local room`);
   }
 
+  /** Capture a remote confirmation boundary without treating local-only as disconnected. */
+  getRemoteStreamsGeneration(): number | undefined {
+    return this.remoteStreamsAttached ? this.remoteStreamsGeneration : undefined;
+  }
+
   isTransportConnected(): boolean {
     return this.connectionRecovery.isTransportConnected();
   }
@@ -2047,6 +2052,17 @@ export function subscribeSessionChanges(
 }
 
 export class SessionDocument implements LoroDocument<Omit<SessionDocMeta, 'history'>, SessionMeta> {
+  private static readonly activityWritesByRepo = new WeakMap<LoroRepo, ConcurrentQueue<string>>();
+
+  private get activityWrites(): ConcurrentQueue<string> {
+    let queue = SessionDocument.activityWritesByRepo.get(this.repo);
+    if (!queue) {
+      queue = new ConcurrentQueue<string>(Infinity);
+      SessionDocument.activityWritesByRepo.set(this.repo, queue);
+    }
+    return queue;
+  }
+
   private mirror: SessionControlPlaneMirror | null = null;
   handle: RepoDocHandle | null = null;
   docSub: RepoRoomSubscription | null = null;
@@ -3010,22 +3026,21 @@ export class SessionDocument implements LoroDocument<Omit<SessionDocMeta, 'histo
   }
 
   async setLastMessageAt(timestamp?: number) {
-    if (!this.mirror) {
-      throw new Error('SessionDocument not initialized');
-    }
+    if (!this.mirror) throw new Error('SessionDocument not initialized');
     const next =
       typeof timestamp === 'number' && Number.isFinite(timestamp) ? timestamp : getServerNow();
-    const current = await this.repo.getDocMeta(this.roomId);
-    if (isLoroRepoDocDeleted(current)) return;
-    const currentMeta = current?.meta as SessionMeta | undefined;
-    await this.repo.upsertDocMeta(this.roomId, {
-      lastMessageAt: next,
+    const parentSessionId = await this.activityWrites.enqueue(this.roomId, async () => {
+      const current = await this.repo.getDocMeta(this.roomId);
+      if (isLoroRepoDocDeleted(current)) return undefined;
+      const meta = current?.meta as SessionMeta | undefined;
+      if (typeof meta?.lastMessageAt !== 'number' || meta.lastMessageAt < next) {
+        await this.repo.upsertDocMeta(this.roomId, { lastMessageAt: next });
+      }
+      return meta?.parentSessionId;
     });
-    const parentSessionId = currentMeta?.parentSessionId;
-    if (!parentSessionId || parentSessionId === this.sessionId) {
-      return;
+    if (parentSessionId && parentSessionId !== this.sessionId) {
+      await this.setParentLastMessageAt(parentSessionId, next);
     }
-    await this.setParentLastMessageAt(parentSessionId, next);
   }
 
   /**
@@ -3050,18 +3065,20 @@ export class SessionDocument implements LoroDocument<Omit<SessionDocMeta, 'histo
 
   private async setParentLastMessageAt(parentSessionId: SessionId, timestamp: number) {
     const parentRoomId = getSessionRoomId(parentSessionId);
-    const parent = await this.repo.getDocMeta(parentRoomId);
-    if (isLoroRepoDocDeleted(parent)) return;
-    const parentMeta = parent?.meta as SessionMeta | undefined;
-    const parentLastMessageAt =
-      typeof parentMeta?.lastMessageAt === 'number' && Number.isFinite(parentMeta.lastMessageAt)
-        ? parentMeta.lastMessageAt
-        : null;
-    if (parentLastMessageAt !== null && parentLastMessageAt >= timestamp) {
-      return;
-    }
-    await this.repo.upsertDocMeta(parentRoomId, {
-      lastMessageAt: timestamp,
+    return this.activityWrites.enqueue(parentRoomId, async () => {
+      const parent = await this.repo.getDocMeta(parentRoomId);
+      if (isLoroRepoDocDeleted(parent)) return;
+      const parentMeta = parent?.meta as SessionMeta | undefined;
+      const parentLastMessageAt =
+        typeof parentMeta?.lastMessageAt === 'number' && Number.isFinite(parentMeta.lastMessageAt)
+          ? parentMeta.lastMessageAt
+          : null;
+      if (parentLastMessageAt !== null && parentLastMessageAt >= timestamp) {
+        return;
+      }
+      await this.repo.upsertDocMeta(parentRoomId, {
+        lastMessageAt: timestamp,
+      });
     });
   }
 

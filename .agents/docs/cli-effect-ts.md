@@ -472,6 +472,14 @@ migrated layer. Current facades:
 these and reaches `child_process`, `cross-spawn`, `node-pty`, `process.kill` or
 a child's `kill` directly.
 
+`publishTurnCompletionLegacy` in `session/turn-completion-legacy.ts` is consumed by
+`SessionExecutionService.releaseVisibleTurn`. The native publication policy owns
+confirmation retry/deadline; the existing host drain owns its Promise and shutdown
+signal. History/backend/notification Promise adapters remain unfinished dependencies,
+so this does not complete Turn migration. Delete the facade when these owners and
+the Session caller compose native Effects. See the
+[completion decision](../notes/implemented/bug-fix/2026-10-26-turn-completion-signals.md).
+
 Session credential acquisition also has a temporary `acquireSessionCredentialsLegacy`
 facade (`session/session-credentials.ts`): the Effect broker lease's scope belongs
 to the live Session and closes on failure/termination. This is a bounded resource

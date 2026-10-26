@@ -226,9 +226,20 @@ that signal before the next mutation, so an old turn whose first configuration c
 late cannot overwrite the configuration of the turn that started after Stop.
 
 Completion notifications use the exact completed invocation's input author, including
-steer handoffs. An Agent-authored input suppresses the user-facing completion notice;
-an earlier Agent input does not suppress a later human turn. Finalization, Operation
-results and Inbox scheduling still run. Cancellation is rechecked after the author read.
+steer handoffs. Agent input suppresses notices but not unread publication. Execution
+finishes history, releases presence and settles Inbox ownership before handing a
+frozen activity time to `turn-completion.ts`. Its Effect program persists the actual
+history backend and confirms remote history/control sync when attached, retrying
+only confirmation within 30 seconds. Local-only completion needs no remote receipt.
+Unconfirmed success is withheld and logged; failures still notify independently.
+The host drain owns publication through `publishTurnCompletionLegacy`; shutdown
+cancels confirmation before draining begun writes. Notification sends remain one-shot,
+with no outbox or reconnect replay. A receipt is not proof of client rendering.
+
+`session show` summarizes a finished assistant entry using `endedAt`, falling back
+to creation `timestamp` for active/legacy entries. Stored timestamps and ordering
+are unchanged. Activity metadata advances monotonically even when an older
+completion confirms after a newer turn; parent activity uses the same write queue.
 
 ### Why resume reopens the assistant entry
 

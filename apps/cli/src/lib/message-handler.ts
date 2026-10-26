@@ -5205,8 +5205,7 @@ export class MessageHandler {
       return;
     }
     const state = this.store.get(sessionId);
-    if (state.turn.phase !== 'idle') {
-      state.pendingUnread = true;
+    if (state.turn.phase !== 'idle' || this.hasSessionActivePresence(sessionId)) {
       return;
     }
     try {
@@ -5711,16 +5710,12 @@ export class MessageHandler {
     const currentTarget = this.store.getCurrentACPUpdateTarget(sessionId);
     const finalizedTarget = !turnId || currentTarget?.turnId === turnId ? currentTarget : undefined;
     const permissionWaitMs = state.permissionWaitMs || undefined;
+    let historyFinalized = false;
     try {
       await this.flushSessionContextWindowUsage(sessionId);
       await this.flushACPUpdatesNow(sessionId);
       await this.flushThreadGoalHistoryPersists(sessionId);
       await this.flushCodexGeneratedImageUploads(sessionId);
-      if (state.pendingUnread) {
-        state.pendingUnread = false;
-        const sessionDoc = await this.workspaceDocument.getOrCreateSessionDoc(sessionId);
-        await sessionDoc.setLastMessageAt();
-      }
 
       // Mark the owning assistant entry as finished and record timing.
       const sessionDoc = await this.workspaceDocument.getOrCreateSessionDoc(sessionId);
@@ -5731,12 +5726,15 @@ export class MessageHandler {
         endedAt,
         permissionWaitMs,
       });
+      historyFinalized = true;
       if (finalizedTarget) {
         await this.flushTurnTokenUsage(sessionId, finalizedTarget.assistantEntryId);
       }
-      await sessionDoc.waitUntilSynced();
     } catch (error) {
       this.logger.error(`[${sessionId}] Failed to flush ACP updates during finalization:`, error);
+      // Live execution must not publish a successful completion after failed history writes.
+      // No-turn teardown remains best effort and still drains independent sessions.
+      if (turnId && !historyFinalized) throw error;
     } finally {
       if (finalizedTarget) {
         this.store.rememberFinalizedTurnForLateACPUpdates(sessionId, finalizedTarget);
@@ -10142,6 +10140,7 @@ export class MessageHandler {
    * Flush pending ACP updates and tear down session resources.
    */
   async cleanup(): Promise<void> {
+    this.executionService.stopCompletionPublication();
     const inboxShutdown = this.operationCoordinator.recoverStop();
     void inboxShutdown.catch((cause) =>
       this.logger.error('Inbox shutdown retains resources', cause)
