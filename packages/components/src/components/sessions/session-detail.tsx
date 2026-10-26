@@ -10,7 +10,6 @@ import { pendingSessionLinkAtom } from '@/lib/session-deep-link';
 import { windowPreparationAtom } from '@/lib/window-preparation';
 import { useEmptySessionDraft } from '@/hooks/use-empty-session-draft';
 import { sessionHasUnreadMessages } from '@/lib/session-read-receipt';
-import { resolveActiveSessionTabId } from '@/lib/session-tab-action-target';
 import {
   Archive,
   ArchiveRestore,
@@ -1586,11 +1585,8 @@ const SessionDetail = ({
   // tick; the delayed flag keeps that from flashing a spinner.
   const showPendingChildTabState = useDelayedFlag(activeTabIsPendingChild, 300);
   const activeSessionTabId = useMemo<SessionId | null>(() => {
-    return resolveActiveSessionTabId(
-      activeTabSessionId,
-      sessionId,
-      visibleChildSessions.map((childSession) => childSession.id)
-    );
+    if (activeTabSessionId === sessionId) return sessionId;
+    return visibleChildSessions.find((s) => s.id === activeTabSessionId)?.id ?? null;
   }, [activeTabSessionId, sessionId, visibleChildSessions]);
   const childSessionToMount =
     activeSessionTabId !== sessionId &&

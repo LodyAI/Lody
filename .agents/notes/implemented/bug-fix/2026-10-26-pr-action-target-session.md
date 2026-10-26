@@ -8,7 +8,7 @@ Pull request: https://github.com/LodyAI/Lody/pull/1908
 
 ## Abstract
 
-The PR view used the workspace-owner session ID both to load PR data and to find the live conflict-resolution action. For a child conversation, that sent the prompt to the root conversation. `PrTabContainer` now receives a separate action target from the resolved selection while retaining the owner ID for GitHub queries and analytics. Tests cover root, resolved child, pending child, draft, and empty selections; ablation makes the three missing-target cases offer the root action. Browser captures show the baseline misroute and the fixed child and no-target outcomes in a synthetic session fixture using the production tab bar, conversation stream, and PR conflict view.
+The PR view used the workspace-owner session ID both to load PR data and to find the live conflict-resolution action. For a child conversation, that sent the prompt to the root conversation. `PrTabContainer` now receives the existing resolved selection as a separate action target while retaining the owner ID for GitHub queries and analytics. Container tests verify child, root, and missing targets; the session shell keeps its existing inline selection logic. Earlier browser captures show the corresponding outcomes in a synthetic session fixture using the production tab bar, conversation stream, and PR conflict view.
 
 ## Decision
 
@@ -20,20 +20,25 @@ session shell: it retains the root ID and a visible child ID, while returning
 `activeTabSession?.id`; its display fallback intentionally returns the root
 metadata when a child is unresolved. `PrTabContainer` reads the conflict action
 only from the execution target, so missing selection remains unavailable.
+The selection stays inline in its existing owner; extracting a helper solely
+to feed the container tests adds no product behavior.
 
 ## Evidence and limits
 
 The existing `session-chat-interface.tsx` publishes the action under its own
 `session.id`, while `getSessionGitHubState` resolves `sourceSessionId` to the
-workspace owner. Those are different identities for a child tab. The existing
-`pr-tab-container.test.tsx` now drives the same active-tab resolver used by
-`SessionDetail` into the rendered conflict action and checks the prompt
-destination. It covers root, resolved child (while PR queries retain the root
-owner), pending child, draft, and empty tabs. With Node 26.12.1 and the identical
-lockfile dependency tree, all 9 tests pass. Ablating the resolver's no-target
-result to fall back to root makes all three pending/draft/empty cases offer the
-root action (3 failures, 6 passed). Browser acceptance used a synthetic session
-fixture with the production `SessionTabBar`, conversation page/stream, and PR
-conflict view: baseline pending-child dispatch landed in root; fixed child
-dispatch landed in child, and fixed pending/draft states showed no resolve
-action or root prompt. Screenshots are attached to PR #1908.
+workspace owner. Those are different identities for a child tab.
+`pr-tab-container.test.tsx` renders the real container with explicit child,
+root, or null action targets. It checks the selected dispatch destination,
+root-owned PR queries, and the absence of a root action when no target exists;
+it does not test the session shell's selection derivation. Removing the helper
+leaves all 7 tests passing. Temporarily restoring the owner-based action lookup
+makes the child and null-target tests fail (2 failed, 5 passed).
+
+Local verification used Node 26.12.1 and the existing verification checkout's
+Vitest 3.2.4. Its lockfile matches this branch, but the installed runner differs
+from the declared Vitest 5.0.2, so this is not full locked-dependency validation.
+`pnpm check` stops in unrelated `@lody/e2ee-core` typechecking on missing
+dependencies. Earlier browser acceptance showed child dispatch reaching the
+child and pending/draft selections exposing no root action; its screenshots
+remain attached to PR #1908 because this cleanup preserves product behavior.
