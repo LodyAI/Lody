@@ -156,6 +156,7 @@ const styles = stylex.create({
     transitionTimingFunction: 'var(--ease-out, cubic-bezier(0, 0, 0.2, 1))',
   },
   shellEdgeBackLayer: { zIndex: 40 },
+  shellTransparent: { backgroundColor: 'transparent' },
   footerSelectors: {
     display: 'flex',
     minWidth: 0,
@@ -429,9 +430,15 @@ const createLocalImageId = (): string => {
 
 export function getSessionChatInputAreaShellClassName({
   protectFromEdgeBackZone = false,
-}: { protectFromEdgeBackZone?: boolean } = {}): string {
+  transparentBackground = false,
+}: {
+  protectFromEdgeBackZone?: boolean;
+  /** Landing wallpaper continues behind the dock; conversation history stays covered. */
+  transparentBackground?: boolean;
+} = {}): string {
   const shell = stylex.props(
     styles.shell,
+    transparentBackground && styles.shellTransparent,
     // The native session drawer owns a z-30 transparent left-edge swipe zone.
     // Keep the composer above it so the zone cannot swallow its controls.
     protectFromEdgeBackZone && styles.shellEdgeBackLayer

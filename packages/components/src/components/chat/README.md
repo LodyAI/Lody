@@ -114,5 +114,7 @@ telemetry; see [event semantics](../../../../../specs/onboarding-analytics.md).
 existing focus scope and composer. The decoration cannot receive pointer events;
 its transparency, blur and vignette never filter text or controls. The full-height
 alpha fade reaches zero at the bottom, preserving the docked composer's existing
-surface. Selection and local persistence belong to
+surface. With an image selected, the outer composer dock is transparent so it
+does not cut the remaining fade off at its top edge. The input plate keeps its
+own fill and shadow; ordinary conversation docks remain opaque. Selection and local persistence belong to
 [Appearance settings](../settings/README.md#wallpaper).

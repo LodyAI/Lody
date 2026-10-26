@@ -33,7 +33,11 @@ Inspected Zeron at `325384d8b1200630410580f179a7e7910c7ccb31`:
 Lody adapts the image/fade layering, not GPUI-specific native materials or source
 code. Its composer is docked at the bottom, so a CSS alpha fade replaces Zeron's
 measured composer cutout. Existing Lody card shadows remain intact; vignette is
-an image adjustment, not a replacement for elevation shadows. Defaults are 45%
+an image adjustment, not a replacement for elevation shadows. The outer composer
+dock opts into a transparent background while a wallpaper is selected: its normal
+opaque fill otherwise cuts off the remaining image alpha at a full-width horizontal
+edge. The input plate retains its own fill and shadow, and session docks retain
+their opaque background. Defaults are 45%
 transparency, no blur and 20% vignette. The feature is off until an image is chosen.
 
 ## Ownership and trade-offs
@@ -59,7 +63,11 @@ Zeron and no additional dependency was introduced.
 
 Behavioral coverage extends the existing appearance suite for restoration,
 adjustments, reset/removal, storage failure, invalid image selection and cross-window
-updates. The appearance suite passes all 14 tests. A focused Chromium harness verified real
+updates. The appearance and landing submission suites pass all 15 tests. A Chromium
+harness rendering the real `WebChatLandingScreen` also verifies a transparent
+composer dock with wallpaper, continued typing, a short viewport, and restoration
+of the opaque dock after removing the image. Its composer child is a synthetic
+textarea; the actual dock, background and page layout are production components. A focused Chromium harness verified real
 PNG upload/WebP encoding, preview, slider persistence, reload, reset/removal and
 Chinese copy; light/dark rendering was visually inspected. The four new modules
 pass an isolated TypeScript check; scoped Oxfmt/Oxlint, i18n and diff checks pass.
