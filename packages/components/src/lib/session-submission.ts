@@ -129,14 +129,15 @@ export function createSessionSubmission(ports: SessionSubmissionPorts) {
   } = ports;
 
   const prepareCreate = async (payload: SessionToCreate): Promise<CreateSessionResult> => {
-    const wanted = payload.historyBackend ?? defaultHistoryBackend;
+    const encrypted = runtime?.contentMode === 'e2ee';
+    const wanted = encrypted ? LEGACY_SESSION_HISTORY_BACKEND : payload.historyBackend ?? defaultHistoryBackend;
     const machine =
       wanted === 'roost'
         ? ((await runtime!.repo.getDocMeta(getMachineRoomId(payload.machineId)))?.meta as
             | MachineMeta
             | undefined)
         : undefined;
-    const backend = resolveNewSessionHistoryBackend(machine, {
+    const backend = encrypted ? LEGACY_SESSION_HISTORY_BACKEND : resolveNewSessionHistoryBackend(machine, {
       requested: payload.historyBackend,
       preferred: defaultHistoryBackend,
     });

@@ -499,3 +499,17 @@ describe('project Default MCP tab', () => {
     expect(onManageMcp).toHaveBeenCalledTimes(1);
   });
 });
+
+it('uses loaded encrypted defaults offline while ordinary cloud composers still await remote catch-up', async () => {
+  const workspace = createWorkspace('workspace-offline', catalogRows());
+  Object.assign(workspace.runtime, {contentMode:'e2ee', accountId:'offline-owner'});
+  store.set(runtimeAtom, workspace.runtime);
+  const view = renderSelection({syncMode:'cloud', defaultsTarget:{project:projectA,machineId:'machine-1'}});
+  expect(view.current().ready).toBe(false);
+  workspace.open();
+  await settle();
+  expect(view.current()).toMatchObject({ready:true,selectedIds:['db','files']});
+  Object.assign(workspace.runtime, {contentMode:'plaintext'});
+  view.render({syncMode:'cloud', defaultsTarget:{project:projectA,machineId:'machine-1'}});
+  expect(view.current().ready).toBe(false);
+});

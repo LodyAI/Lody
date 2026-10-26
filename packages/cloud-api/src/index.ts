@@ -1,3 +1,12 @@
+import type {
+  E2eeContentTokenRequest,
+  E2eeContentToken,
+  E2eeMailboxRequests,
+  E2eeMailboxReplies,
+  E2eeAppendRecordRequest,
+  E2eeAppendRecordReply,
+} from './e2ee-device';
+export type * from './e2ee-device';
 import type { NotificationPresentation } from '@lody/shared/notifications';
 import type { TerminalOutcome } from '@lody/shared/notifications';
 import { anyApi, type FunctionReference } from 'convex/server';
@@ -383,7 +392,17 @@ type SeatInvitePreview =
 
 export type CloudApi = {
   /** Optional developer-only E2EE control plane; does not authorize content access. */
+  e2eeContent: { contentStreamsToken: Action<E2eeContentTokenRequest, E2eeContentToken> };
+  e2eeMailbox: {
+    put: Mutation<E2eeMailboxRequests['put'], E2eeMailboxReplies['put']>;
+    read: Query<E2eeMailboxRequests['read'], E2eeMailboxReplies['read']>;
+    fetch: Query<E2eeMailboxRequests['fetch'], E2eeMailboxReplies['fetch']>;
+    status: Query<E2eeMailboxRequests['status'], E2eeMailboxReplies['status']>;
+    report: Mutation<E2eeMailboxRequests['report'], E2eeMailboxReplies['report']>;
+    repair: Mutation<E2eeMailboxRequests['repair'], E2eeMailboxReplies['repair']>;
+  };
   e2eeWorkspaces: {
+    appendRecord: Action<E2eeAppendRecordRequest, E2eeAppendRecordReply>;
     create: Action<E2eeWorkspaceCreateRequest, E2eeWorkspaceCreateResult>;
     describe: Query<{ workspaceId: string }, WorkspaceAdmissionDescriptor>;
     history: Action<E2eeWorkspaceHistoryRequest, E2eeWorkspaceHistoryPage>;
@@ -936,7 +955,7 @@ export type CloudApi = {
   };
   deviceAuth: {
     listMyWorkspacesForCliToken: Query<
-      { token: string },
+      { token: string; includeEncrypted?: boolean },
       | { valid: false; userId: null; workspaces: WorkspaceSummary[] }
       | { valid: true; userId: string; workspaces: WorkspaceSummary[] }
     >;

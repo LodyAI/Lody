@@ -1,3 +1,4 @@
+import { workspaceSupports } from '@lody/shared/workspace-streams-content';
 import { useEffect, useMemo, useState } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
 import {
@@ -28,7 +29,7 @@ export function useScheduleRegistrySync(): void {
       ready: false,
     });
     void (async () => {
-      if (!runtime) return;
+      if (!runtime || !workspaceSupports({ mode: runtime.contentMode === 'e2ee' ? 'protected' : 'plaintext' }, 'schedules')) return;
       const handle = await runtime.repo.openFlockDoc(
         getScheduleRegistryFlockDocId(runtime.workspaceId)
       );

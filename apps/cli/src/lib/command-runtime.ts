@@ -52,6 +52,7 @@ import { findWorkspacesBySelector, formatWorkspaceCandidate } from '@/lib/worksp
 import { listAliveRoomIds } from '@/lib/loro/repo-existence';
 import {
   createCloudBillingPort,
+  createCloudE2eePort,
   createCloudStreamsTokenPort,
   createCloudSessionSharingPort,
 } from '@/lib/cloud-cli-port';
@@ -350,6 +351,12 @@ export async function withWorkspaceManager<T>(
   loggerName: string,
   fn: (manager: LoroDocumentManager) => Promise<T>
 ): Promise<T> {
+  if (
+    workspace.contentMode !== undefined &&
+    workspace.contentMode !== 'plaintext' &&
+    workspace.contentMode !== 'e2ee'
+  )
+    throw new Error('workspace_mode_unsupported');
   const environment = getSessionCommandEnvironment();
   if (environment) {
     if (auth !== environment.auth || workspace.id !== environment.workspace.id)
@@ -388,18 +395,33 @@ export async function withWorkspaceManager<T>(
     },
     async () => {
       let manager: LoroDocumentManager;
+      const e2ee =
+        workspace.contentMode === 'e2ee'
+          ? await (
+              await import('./e2ee/workspace-legacy')
+            ).openCliE2eeWorkspaceLegacy({
+              accountId: commandAuth.userId,
+              workspaceId: workspace.id,
+              genesisHash: workspace.genesisHash ?? '',
+              cloud: createCloudE2eePort({ token: commandAuth.token, authBaseUrl, logger }),
+              onUnavailable: () => logger.debug('e2ee_background_unavailable'),
+            })
+          : undefined;
       manager = await LoroDocumentManager.create(
         workspace.id as WorkspaceId,
         commandAuth.userId,
         logger,
         {
-          attachRemoteOnCreate: true,
-          streamsTokens: createCloudStreamsTokenPort({
-            token: commandAuth.token,
-            authBaseUrl,
-            authSiteUrl,
-            logger,
-          }),
+          attachRemoteOnCreate: !e2ee,
+          encryptedWorkspace: e2ee,
+          streamsTokens:
+            e2ee?.tokens ??
+            createCloudStreamsTokenPort({
+              token: commandAuth.token,
+              authBaseUrl,
+              authSiteUrl,
+              logger,
+            }),
           cloudBilling: createCloudBillingPort({ token: commandAuth.token }),
           sessionHistoryFactory: createCommandSessionHistoryFactory(
             () => manager,
@@ -408,6 +430,11 @@ export async function withWorkspaceManager<T>(
           ),
         }
       );
+      // E2EE local acceptance never waits for a token or network connection.
+      if (e2ee)
+        void manager
+          .attachRemoteStreamsTransport()
+          .catch(() => logger.debug('e2ee_background_unavailable'));
       return manager;
     },
     fn,

@@ -38,6 +38,7 @@ const domain = Buffer.from('lody-e2ee/desktop-custody/v1\0');
 const installedPurpose = Buffer.from('lody-e2ee/local-epoch-key/v1\0');
 const candidatePurpose = Buffer.from('lody-e2ee/local-epoch-candidate/v1\0');
 const devicePurpose = Buffer.from('lody-e2ee/local-device/v1\0');
+const credentialPurpose = Buffer.from('lody-e2ee/local-device-credential/v1\0');
 const equal = (a: Uint8Array, b: Uint8Array) => a.length === b.length && timingSafeEqual(a, b);
 const bytes = (value: Uint8Array, limit: number) => {
   if (!(value instanceof Uint8Array) || value.length < 1 || value.length > limit)
@@ -622,8 +623,57 @@ export const makeNodeE2eeCustody = Effect.fnUntraced(function* (input: {
       throw fail('corrupt');
     return actual;
   }
+  const credentialContext = (genesis: Bytes.GenesisHash, key: Bytes.SigningPublicKey) =>
+    new Uint8Array(Buffer.concat([credentialPurpose, genesis.toBytes(), key.toBytes()]));
+  const credentialPath = (genesis: Bytes.GenesisHash) =>
+    join(directory, `device-credential-${Buffer.from(genesis.toBytes()).toString('hex')}.sealed`);
+  const readCredential = async (genesis: Bytes.GenesisHash, key: Bytes.SigningPublicKey) => {
+    const opened = unseal(await readOwned(credentialPath(genesis), 1024));
+    try {
+      if (!equal(opened.aad, credentialContext(genesis, key)) || opened.body.length !== 32)
+        throw fail('corrupt');
+      return Buffer.from(opened.body).toString('hex');
+    } finally {
+      opened.body.fill(0);
+    }
+  };
   return Object.freeze({
     protection,
+    /** Explicit first preparation only. Publish encrypted original before returning;
+     * exact retries read the winner, never replace a credential or identity. */
+    prepareDeviceCredential: (inputGenesis: Bytes.GenesisHash, key: Bytes.SigningPublicKey) =>
+      native(() =>
+        track(async () => {
+          const genesis = ownGenesis(inputGenesis);
+          try {
+            const credential = await readCredential(genesis, key);
+            return {
+              credential,
+              credentialHash: createHash('sha256')
+                .update(Buffer.from(credential, 'hex'))
+                .digest('hex'),
+            };
+          } catch (cause) {
+            if ((cause as NodeJS.ErrnoException).code !== 'ENOENT') throw cause;
+          }
+          const raw = random(new Uint8Array(32));
+          try {
+            await publish(credentialPath(genesis), seal(raw, credentialContext(genesis, key)));
+          } finally {
+            raw.fill(0);
+          }
+          const credential = await readCredential(genesis, key);
+          return {
+            credential,
+            credentialHash: createHash('sha256')
+              .update(Buffer.from(credential, 'hex'))
+              .digest('hex'),
+          };
+        })
+      ),
+    /** Reopen a previously retained access credential. Missing/corrupt data never regenerates it. */
+    deviceCredential: (inputGenesis: Bytes.GenesisHash, key: Bytes.SigningPublicKey) =>
+      native(() => track(() => readCredential(ownGenesis(inputGenesis), key))),
     installed: protector('installed'),
     candidate: protector('candidate'),
     /** Only local signing is available before binding. No private handles export. */

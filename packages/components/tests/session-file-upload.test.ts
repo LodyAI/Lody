@@ -152,6 +152,7 @@ describe('multipart session file progress', () => {
     );
 
     await uploadSessionFile({
+      content: { mode: 'plaintext' },
       workspaceId: 'workspace-1',
       sessionId: 'session-1',
       token: 'token',
@@ -201,6 +202,7 @@ describe('multipart session file progress', () => {
     );
 
     await uploadSessionFile({
+      content: { mode: 'plaintext' },
       workspaceId: 'workspace-1',
       sessionId: 'session-1',
       token: 'token',
@@ -305,4 +307,9 @@ describe('multipart response and cancellation', () => {
       null,
     ]);
   });
+});
+
+it('refuses protected uploads before constructing any network transfer', async () => {
+  vi.stubGlobal('XMLHttpRequest', class { constructor() { throw new Error('unexpected plaintext transfer'); } });
+  await expect(uploadSessionFile({ content: {mode:'protected'}, workspaceId:'workspace-1',sessionId:'session-1' as never,token:'synthetic',file:new File(['CANARY-synthetic'],'CANARY-name.txt'),sha256:'00'.repeat(32),textPreview:true })).rejects.toThrow('e2ee_attachments_unavailable');
 });

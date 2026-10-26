@@ -251,3 +251,16 @@ rebuild from originals or read a suffix to prove the existing pin; never lower i
 
 `InstalledEpochKeys.check(epoch)` verifies a stored key's current eligibility and
 commitment, disposing its temporary material instead of returning a secret to a status reader.
+
+## Device credential binding
+
+`deviceCredentialBindingBytes`, `signDeviceCredentialBinding` and
+`verifyDeviceCredentialBinding` bind a new device's access-credential hash to an
+approver's active pairing session. The bytes are UTF-8
+`lody-e2ee/device-credential-binding/v1` followed by a zero byte, then the pinned
+genesis (32 bytes), pairing session ID (16), new Ed25519 public key (32), and
+SHA-256 of the raw credential (32). The caller supplies the trusted session and
+genesis; a valid signature neither admits a device nor replaces possession proof.
+Verification uses the existing strict Ed25519 policy. The first creator device
+does not need this proof. `test/foundation.test.ts` retains a fixed signing vector
+and checks substitution of every context field.

@@ -3632,7 +3632,10 @@ export const SessionChatInterface = memo(
         // records where each mention landed so the transcript paints the user's
         // own wording back over it — identical to a fresh send.
         const nextText = submission.text;
-        const requesterUserId = currentUser?.id ?? session.userId;
+        const requesterUserId =
+          (runtime?.contentMode === 'e2ee' ? runtime.accountId : null) ??
+          currentUser?.id ??
+          session.userId;
         if (
           !runtime ||
           !requesterUserId ||
@@ -4386,7 +4389,10 @@ export const SessionChatInterface = memo(
           const turnModelId =
             options?.modelIdOverride !== undefined ? options.modelIdOverride : selectedModelId;
           const turnConfigOptionValues = options?.configOptionValuesOverride ?? configOptionValues;
-          const derivedUserId = currentUser?.id ?? session.userId;
+          const derivedUserId =
+            (runtime?.contentMode === 'e2ee' ? runtime.accountId : null) ??
+            currentUser?.id ??
+            session.userId;
           const prompt = extractPromptPreviewFromInputBlocks(inputBlocks);
           const issuePRMentions = prompt
             ? extractIssuePRMentionsFromText(prompt, knownIssuePrItems, repoFullName)
@@ -4498,6 +4504,8 @@ export const SessionChatInterface = memo(
         }
       },
       [
+        runtime?.accountId,
+        runtime?.contentMode,
         addSessionHistory,
         captureRunConfigForSend,
         captureSessionEvent,
@@ -4545,7 +4553,10 @@ export const SessionChatInterface = memo(
           const turnModelId =
             options?.modelIdOverride !== undefined ? options.modelIdOverride : selectedModelId;
           const turnConfigOptionValues = options?.configOptionValuesOverride ?? configOptionValues;
-          const derivedUserId = currentUser?.id ?? session.userId;
+          const derivedUserId =
+            (runtime?.contentMode === 'e2ee' ? runtime.accountId : null) ??
+            currentUser?.id ??
+            session.userId;
           const prompt = extractPromptPreviewFromInputBlocks(inputBlocks);
           const issuePRMentions = prompt
             ? extractIssuePRMentionsFromText(prompt, knownIssuePrItems, repoFullName)
@@ -4618,6 +4629,8 @@ export const SessionChatInterface = memo(
         }
       },
       [
+        runtime?.accountId,
+        runtime?.contentMode,
         captureRunConfigForSend,
         captureSessionEvent,
         configOptionValues,
@@ -5004,7 +5017,10 @@ export const SessionChatInterface = memo(
 
         try {
           const response = await requestSessionGoal(session.id, command, {
-            userId: currentUser?.id ?? session.userId,
+            userId:
+              (runtime?.contentMode === 'e2ee' ? runtime.accountId : null) ??
+              currentUser?.id ??
+              session.userId,
             machineId: session.machineId,
           });
           if (!response?.accepted) {
@@ -5037,6 +5053,8 @@ export const SessionChatInterface = memo(
         }
       },
       [
+        runtime?.accountId,
+        runtime?.contentMode,
         captureSessionEvent,
         currentUser?.id,
         goalCommands,

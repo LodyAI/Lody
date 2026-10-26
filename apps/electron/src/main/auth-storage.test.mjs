@@ -7,7 +7,8 @@ import Conf from 'conf'
 import {
   backupAuthStorageFile,
   createRecoveringAuthStorage,
-  openAuthStorageBackend
+  openAuthStorageBackend,
+  makeOfflineAuthIdentityCache
 } from './auth-storage.ts'
 
 // Synthetic stand-in for safeStorage: only ciphertext produced under the
@@ -97,4 +98,24 @@ void test('an unparsable auth store is moved aside and reopened empty', async (t
   assert.equal(readFileSync(opened.backupPath, 'utf8'), '{"better-auth": {"cookie": "trunc')
   assert.equal(storage(opened.store).getItem('better-auth.cookie'), null)
   assert.equal(opened.store.size, 0)
+})
+
+void test('offline E2EE identity survives reopening without an expiry and only matches its token', (t) => {
+  const { open, path } = fixture(t)
+  const cache = (store) =>
+    makeOfflineAuthIdentityCache({
+      get: (key) => store.get(key, null),
+      set: (key, value) => store.set(key, value),
+      delete: (key) => store.delete(key)
+    })
+  t.mock.timers.enable({ apis: ['Date'], now: Date.now() })
+  cache(open().store).remember('synthetic-device-session', 'account-one')
+  t.mock.timers.tick(8 * 24 * 60 * 60 * 1000)
+  assert.equal(readFileSync(path, 'utf8').includes('synthetic-device-session'), false)
+  const reopened = cache(open().store)
+  assert.equal(reopened.read('synthetic-device-session'), 'account-one')
+  assert.equal(reopened.read('other-session'), null)
+  assert.equal(reopened.read(null), null)
+  reopened.clear()
+  assert.equal(cache(open().store).read('synthetic-device-session'), null)
 })

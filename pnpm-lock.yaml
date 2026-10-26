@@ -569,6 +569,9 @@ importers:
       '@lody/cli-supervisor':
         specifier: workspace:*
         version: link:../../packages/cli-supervisor
+      '@lody/cloud-api':
+        specifier: workspace:*
+        version: link:../../packages/cloud-api
       '@lody/platform':
         specifier: workspace:*
         version: link:../../packages/platform

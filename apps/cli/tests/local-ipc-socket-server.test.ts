@@ -1,3 +1,4 @@
+import { type LocalE2eePrepareResponse } from '@lody/shared/e2ee-local-pairing';
 import fs from 'node:fs';
 import http from 'node:http';
 import net from 'node:net';
@@ -348,5 +349,74 @@ describe('local IPC socket server', () => {
       status: 413,
       payload: { ok: false, error: 'payload_too_large' },
     });
+  });
+});
+
+describe('local E2EE pairing transport', () => {
+  afterEach(async () => {
+    await stopLocalIpcSocketServers();
+    for (const directory of tempDirs.splice(0))
+      fs.rmSync(directory, { recursive: true, force: true });
+  });
+  it('exchanges public pairing evidence and activation only over the same-user socket', async () => {
+    const paths = makePaths();
+    const config = makeServerConfig(paths);
+    const material: LocalE2eePrepareResponse = {
+      ok: true,
+      type: 'prepare',
+      machineId: 'machine-1',
+      pairingSessionId: '12'.repeat(16),
+      signingPublicKey: '23'.repeat(32),
+      encryptionPublicKey: '34'.repeat(32),
+      possessionSignature: '45'.repeat(64),
+      bindingSignature: '56'.repeat(64),
+      credentialHash: '67'.repeat(32),
+      protection: 'file',
+    };
+    let activated = false;
+    await startLocalIpcSocketServers({
+      ...config,
+      control: {
+        ...config.control,
+        dispatchE2eePairing: async (message) => {
+          if (message.type === 'prepare') return material;
+          activated = true;
+          return { ok: true, type: 'activate' };
+        },
+      },
+    });
+    const client = makeLocalControlClientSocket({ socketPath: paths.controlSocketPath });
+    const request = {
+      type: 'prepare' as const,
+      machineId: 'machine-1',
+      accountId: 'account',
+      workspaceId: 'workspace',
+      genesisHash: '78'.repeat(32),
+      genesisRecordHex: '01',
+      membershipId: '89'.repeat(16),
+      pairingSessionId: material.pairingSessionId,
+    };
+    expect(await Effect.runPromise(client.e2eePrepare(request))).toEqual(material);
+    expect(activated).toBe(false);
+    const {
+      genesisRecordHex: _genesis,
+      membershipId: _member,
+      pairingSessionId: _session,
+      ...activation
+    } = request;
+    expect(
+      await Effect.runPromise(
+        client.e2eeActivate({
+          ...activation,
+          type: 'activate',
+          signingPublicKey: material.signingPublicKey,
+        })
+      )
+    ).toEqual({ ok: true, type: 'activate' });
+    expect(activated).toBe(true);
+    const mismatch = await Effect.runPromise(
+      Effect.result(client.e2eePrepare({ ...request, machineId: 'different-machine' }))
+    );
+    expect(mismatch._tag).toBe('Failure');
   });
 });

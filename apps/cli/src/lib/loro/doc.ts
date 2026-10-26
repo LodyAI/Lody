@@ -1,3 +1,4 @@
+import type { CliE2eeWorkspaceLegacy } from '../e2ee/workspace-legacy';
 import { projectRunMetaPatch } from '@/session/project-run-state';
 import type { LodyRateLimitsCapability } from 'acp-extension-core';
 import { terminalNotificationSchema, type TerminalNotification } from '@lody/shared/notifications';
@@ -342,6 +343,7 @@ export interface LoroDocumentManagerOptions {
   /** LoroDoc Streams cursors for this process; see `DocumentCursorScope`. */
   documentRemoteCursorStore?: RemoteCursorStore | null;
   remoteStreamsAttached?: boolean;
+  encryptedWorkspace?: Pick<CliE2eeWorkspaceLegacy, 'content' | 'bucketId' | 'refresh' | 'close'>;
   streamsTokens?: CloudStreamsTokenPort | null;
   cloudBilling?: CloudBillingPort | null;
   /** One-shot clients route history to the owner; daemons use installed local factories. */
@@ -388,6 +390,10 @@ export class LoroDocumentManager {
   > | null = null;
   private remoteStreamsStatusUnsubscribe: (() => void) | null = null;
   private remoteTransportOpQueue: Promise<unknown> = Promise.resolve();
+  private readonly encryptedWorkspace?: Pick<
+    CliE2eeWorkspaceLegacy,
+    'content' | 'bucketId' | 'refresh' | 'close'
+  >;
   private readonly streamsTokens: CloudStreamsTokenPort | null;
   public readonly cloudBilling: CloudBillingPort | null;
   private readonly sessionHistoryFactory?: SessionBackendFactory;
@@ -395,6 +401,10 @@ export class LoroDocumentManager {
   private catalogSync?: WorkspaceCatalogSyncLegacy;
 
   /** Reader interest belongs to the daemon, never to a discovery request. */
+  isEncryptedWorkspace(): boolean {
+    return this.encryptedWorkspace !== undefined;
+  }
+
   async holdCatalogFlockDoc(flockDocId: string): Promise<void> {
     await this.catalogSync?.hold(flockDocId);
   }
@@ -416,6 +426,10 @@ export class LoroDocumentManager {
        * The default keeps LoroDoc progress in this process's memory.
        */
       documentCursorScope?: DocumentCursorScope;
+      encryptedWorkspace?: Pick<
+        CliE2eeWorkspaceLegacy,
+        'content' | 'bucketId' | 'refresh' | 'close'
+      >;
       streamsTokens?: CloudStreamsTokenPort | null;
       cloudBilling?: CloudBillingPort | null;
       sessionHistoryFactory?: SessionBackendFactory;
@@ -517,6 +531,7 @@ export class LoroDocumentManager {
         ),
         remoteStreamsAttached: false,
         streamsTokens: options.streamsTokens ?? null,
+        encryptedWorkspace: options.encryptedWorkspace,
         cloudBilling: options.cloudBilling ?? null,
         sessionHistoryFactory: options.sessionHistoryFactory,
         ownerHistoryRouter: options.ownerHistoryRouter,
@@ -605,6 +620,7 @@ export class LoroDocumentManager {
     this.documentRemoteCursorStore = options.documentRemoteCursorStore ?? null;
     this.remoteStreamsAttached = options.remoteStreamsAttached ?? false;
     this.streamsTokens = options.streamsTokens ?? null;
+    this.encryptedWorkspace = options.encryptedWorkspace;
     this.cloudBilling = options.cloudBilling ?? null;
     this.sessionHistoryFactory = options.sessionHistoryFactory;
     this.ownerHistoryRouter = options.ownerHistoryRouter;
@@ -656,6 +672,7 @@ export class LoroDocumentManager {
     this.detachMachineFlockMetaRoomSyncedListener = this.connectionRecovery.onStreamsOnline(
       (reason) => {
         this.machineFlockSync.retryDirtyNow(`streams-online:${reason}`);
+        void this.encryptedWorkspace?.refresh();
       }
     );
   }
@@ -706,8 +723,10 @@ export class LoroDocumentManager {
       this.streamsTokens.createTokenProvider({ workspaceId: this.workspaceId })
     );
     this.remoteStreamsTokens = streamsTokens;
+    if (this.encryptedWorkspace) await streamsTokens.legacy.getToken();
     const streamsTransport = await createCliStreamsTransport({
-      content: { mode: 'plaintext' },
+      content: this.encryptedWorkspace?.content ?? { mode: 'plaintext' },
+      bucketId: this.encryptedWorkspace?.bucketId(),
       workspaceId: this.workspaceId,
       tokenProvider: streamsTokens.legacy,
       repo: this.repo,
@@ -745,16 +764,18 @@ export class LoroDocumentManager {
       // The presence runtime already exists (created at repo init and producing
       // presence locally); attaching the cloud Streams sink additionally mirrors
       // it to the cloud presence stream.
-      await this.presenceRuntime.attachStreams({
-        streamsBaseUrl: streamsTransport.gatewayBaseUrl,
-        auth: streamsTokens.native.createAuthCallback(),
-        shardHostSuffix: streamsTransport.tokenProvider.getShardHostSuffix(),
-      });
-      this.machineMonitorRuntime?.attachStreams({
-        streamsBaseUrl: streamsTransport.gatewayBaseUrl,
-        auth: streamsTransport.tokenProvider.createAuthCallback(),
-        shardHostSuffix: streamsTransport.tokenProvider.getShardHostSuffix(),
-      });
+      if (!this.encryptedWorkspace) {
+        await this.presenceRuntime.attachStreams({
+          streamsBaseUrl: streamsTransport.gatewayBaseUrl,
+          auth: streamsTokens.native.createAuthCallback(),
+          shardHostSuffix: streamsTransport.tokenProvider.getShardHostSuffix(),
+        });
+        this.machineMonitorRuntime?.attachStreams({
+          streamsBaseUrl: streamsTransport.gatewayBaseUrl,
+          auth: streamsTransport.tokenProvider.createAuthCallback(),
+          shardHostSuffix: streamsTransport.tokenProvider.getShardHostSuffix(),
+        });
+      }
       this.remoteStreamsAttached = true;
       this.remoteStreamsGeneration += 1;
       this.logger.info(`[${this.workspaceId}] Remote Streams transport attached`);
@@ -1405,6 +1426,8 @@ export class LoroDocumentManager {
     sessionId: SessionId,
     options: { historyBackend?: SessionHistoryBackendKind; skipAutoRead?: boolean } = {}
   ): Promise<SessionDocument> {
+    if (this.encryptedWorkspace && options.historyBackend && options.historyBackend !== 'loro')
+      throw new Error('e2ee_history_backend_unavailable');
     const docId = getSessionRoomId(sessionId);
     // An activated SessionDocument owns the live cloud room from here on. Stop
     // any one-shot renderer reconciliation without unloading the shared doc.
@@ -1445,6 +1468,8 @@ export class LoroDocumentManager {
         (!isLoroRepoDocDeleted(meta)
           ? (meta?.meta as Partial<SessionMeta> | undefined)?.historyBackend
           : undefined);
+      if (this.encryptedWorkspace && historyBackend && historyBackend !== 'loro')
+        throw new Error('e2ee_history_backend_unavailable');
       // Observation commands own an isolated manager and must not arm execution's
       // auto-seen/model-summary writers. This option applies to a new open only;
       // it never changes the policies of an already-owned cached document.
@@ -1497,6 +1522,8 @@ export class LoroDocumentManager {
       const historyBackend = !isLoroRepoDocDeleted(meta)
         ? (meta?.meta as Partial<SessionMeta> | undefined)?.historyBackend
         : undefined;
+      if (this.encryptedWorkspace && historyBackend && historyBackend !== 'loro')
+        throw new Error('e2ee_history_backend_unavailable');
       await sessionDoc.init({
         skipAutoRead: true,
         ...(historyBackend ? { historyBackend } : {}),
@@ -1527,7 +1554,7 @@ export class LoroDocumentManager {
       isArchived: false,
       cliType,
       agentType,
-      historyBackend: NEW_SESSION_HISTORY_BACKEND,
+      historyBackend: this.encryptedWorkspace ? 'loro' : NEW_SESSION_HISTORY_BACKEND,
     };
     const sanitizedTitle = title?.trim();
     if (sanitizedTitle) {
@@ -1905,6 +1932,7 @@ export class LoroDocumentManager {
     this.remoteStreamsStatusUnsubscribe?.();
     this.remoteStreamsStatusUnsubscribe = null;
     await this.destroyRepo({ fast: options.fast });
+    await this.encryptedWorkspace?.close();
     if (presenceCleanupFailure) throw presenceCleanupFailure;
   }
 

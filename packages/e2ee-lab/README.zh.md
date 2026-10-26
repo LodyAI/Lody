@@ -258,3 +258,18 @@ occupied 元组，也不能删除别人的组。
 每个动作执行前记录独立预测，执行后比较真实结果；网络或存储失败不能证明权限拒绝，缺测保持 unavailable。`explore <目录> <目标和actors.json>` 为手动工具，使用 `OPENAI_API_KEY`、`E2EE_LAB_MODEL`，仅发送显式合成目标、角色配置和动作 schema，不进 CI。模型自报期望被丢弃；真实性质违规须经新进程确定性重放才计入发现。测试使用录制回复，不调用模型网络，接口见 [Responses JSON mode](https://developers.openai.com/api/docs/guides/structured-outputs)。
 
 快照准入使用后端 `record-boundary` HTTP 扩展，不再读内部表；SQLite 0.3.0 精确依赖补丁承载相同的上游改动，不称已发布包原本具备此能力。
+
+## 合成出口 canary
+
+在仓库根目录运行 `node packages/e2ee-lab/bin/e2ee-canary.mjs /绝对路径/manifest.json`。
+清单的 `canaries` 包含 `message`、`title`、`fileName`、`mcpEnvironment`、
+`machineConfig` 五个标记（ASCII `CANARY-` 加至少 24 个随机字符）；`sources`
+是 `{kind: "streams" | "http", id, path}` 数组。`path` 是服务端 Streams
+存储字节或捕获的 HTTP 请求体文件的绝对路径；运行中的 SQLite 服务也要纳入 WAL。
+不要扫描客户端缓存：本地明文本来就允许保存。只使用合成数据，总输入上限 256 MiB。
+
+命令检查 UTF-8、hex 和 base64，只报告字段名、来源和偏移，不输出正文。退出码：
+0 无发现；2 明文泄漏或缺少出口观察；64 输入不合法。空观察不会通过。这是有限的
+canary 检查，不能证明压缩、任意编码或未捕获路由的安全性。`test/canary.test.ts`
+使用真实的加密 Loro/Flock 对端和本地 HTTP，扫描请求体及 Riverrun 原始存储，并验证
+主动注入明文会失败。完整产品验收仍须在真实应用操作中捕获全部 Convex、Worker、Streams 请求。

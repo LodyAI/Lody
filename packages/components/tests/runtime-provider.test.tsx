@@ -10,6 +10,7 @@ import {
   type MutableStore,
   type PlatformSessionState,
   type PlatformE2eeWorkspaces,
+  type E2eeWorkspaceRuntime,
   type WorkspacesState,
 } from '@lody/platform';
 
@@ -67,6 +68,8 @@ vi.mock('@/lib/electron', () => ({ isElectronRenderer: () => true }));
 vi.mock('@/lib/native-platform', () => ({ isNativeAppShell: () => false }));
 vi.mock('@/lib/desktop-window', () => ({ isWarmWindow: () => environment.warm }));
 vi.mock('@lody/platform/react', () => ({
+  usePlatformSession: () =>
+    React.useSyncExternalStore(environment.session.subscribe, environment.session.get),
   useCloudQuery: () => undefined,
   usePlatform: () => ({
     identity: { session: environment.session },
@@ -148,6 +151,7 @@ function runtimeFixture() {
 
 describe('RuntimeProvider warm workspace preparation', () => {
   let root: Root;
+  let container: HTMLDivElement;
   let store: ReturnType<typeof createStore>;
   let prepared: ReturnType<typeof runtimeFixture>;
   const render = () =>
@@ -173,7 +177,8 @@ describe('RuntimeProvider warm workspace preparation', () => {
     localStorage.clear();
     environment.workspace = { id: 'local:workspace', slug: 'local' };
     store = createStore();
-    root = createRoot(document.createElement('div'));
+    container = document.createElement('div');
+    root = createRoot(container);
     prepared = runtimeFixture();
     vi.mocked(createWorkspaceRuntime)
       .mockReset()
@@ -227,6 +232,43 @@ describe('RuntimeProvider warm workspace preparation', () => {
       cryptoOrgId: '11'.repeat(32),
       activation: 'control-only',
     }) as const;
+
+  it.each(['success', 'temporary failure'])(
+    'keeps the local replica visible and announces a required key update after background refresh %s',
+    async (outcome) => {
+      ordinaryCloud();
+      listEncrypted();
+      const status = {
+        genesisHash: '11'.repeat(32),
+        epoch: 0,
+        hasCurrentKey: true,
+        rotationRequired: false,
+      };
+      let finishRefresh!: (value: typeof status) => void;
+      let failRefresh!: () => void;
+      environment.e2eeWorkspaces!.describe = async () => encryptedDescriptor('local:workspace');
+      environment.e2eeWorkspaces!.runtime = {
+        open: async () => status,
+        refresh: () =>
+          new Promise((resolve, reject) => {
+            finishRefresh = resolve;
+            failRefresh = () => reject(new Error('temporary network failure'));
+          }),
+        status: async () => ({ ...status, epoch: 1 }),
+        close: async () => {},
+      } as unknown as E2eeWorkspaceRuntime;
+      await render();
+      expect(store.get(runtimeAtom)).toBe(prepared);
+      await act(async () =>
+        outcome === 'success' ? finishRefresh({ ...status, epoch: 1 }) : failRefresh()
+      );
+      expect(container.querySelector('[role="status"]')?.textContent).toBe(
+        'e2ee.content.keyUpdateRequired'
+      );
+      expect(store.get(runtimeAtom)).toBe(prepared);
+      expect(prepared.disposed).toBe(false);
+    }
+  );
 
   it('opens an ordinary workspace before authentication, verifies it in the background and keeps it through auth refresh', async () => {
     ordinaryCloud();
@@ -409,6 +451,7 @@ describe('RuntimeProvider warm workspace preparation', () => {
     async (kind) => {
       ordinaryCloud();
       store.set(userAtom, null as never);
+      environment.session.set({ status: 'loading' });
       if (kind === 'with')
         saveE2eeGenesisPin(localStorage, 'other-account', 'local:workspace', '11'.repeat(32));
       await render();

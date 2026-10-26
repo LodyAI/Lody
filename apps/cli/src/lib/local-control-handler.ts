@@ -1,4 +1,13 @@
 import {
+  LOCAL_E2EE_PAIRING_PATH,
+  LocalE2eePairingRequestSchema,
+  LocalE2eePrepareResponseSchema,
+  LocalE2eeActivateResponseSchema,
+  type LocalE2eePairingRequest,
+  type LocalE2eePrepareResponse,
+  type LocalE2eeActivateResponse,
+} from '@lody/shared/e2ee-local-pairing';
+import {
   LOCAL_SCHEDULE_CONTROL_PATH,
   ScheduleControlRequestSchema,
   type ScheduleControlRequest,
@@ -34,6 +43,9 @@ const PROJECT_CONTROL_TYPES: ReadonlyArray<LocalProjectControlRequestValidated['
   LocalProjectControlRequestSchema.options.map((option) => option.shape.type.value);
 
 export interface LocalSessionControlConfig {
+  dispatchE2eePairing?: (
+    message: LocalE2eePairingRequest
+  ) => Promise<LocalE2eePrepareResponse | LocalE2eeActivateResponse>;
   dispatchSchedule?: (message: ScheduleControlRequest) => Promise<ScheduleControlResponse>;
   machineId: MachineId;
   logger: Logger;
@@ -295,6 +307,35 @@ export class LocalControlHandler {
     requestId: number;
     onSessionResponse?: (response: LocalSessionControlResponse) => void;
   }): Promise<LocalControlHandlerResponse> {
+    if (request.path === LOCAL_E2EE_PAIRING_PATH) {
+      return (async () => {
+        let raw: unknown;
+        try {
+          raw = JSON.parse(request.rawBody);
+        } catch {
+          return handlerResponse(400, { ok: false, error: 'e2ee_invalid_input' });
+        }
+        const parsed = LocalE2eePairingRequestSchema.safeParse(raw);
+        if (!parsed.success)
+          return handlerResponse(400, { ok: false, error: 'e2ee_invalid_input' });
+        if (parsed.data.machineId !== this.config.machineId)
+          return handlerResponse(403, { ok: false, error: 'e2ee_machine_mismatch' });
+        if (!this.config.dispatchE2eePairing)
+          return handlerResponse(501, { ok: false, error: 'e2ee_pairing_unavailable' });
+        try {
+          const response = await this.config.dispatchE2eePairing(parsed.data);
+          const valid =
+            parsed.data.type === 'prepare'
+              ? LocalE2eePrepareResponseSchema.safeParse(response)
+              : LocalE2eeActivateResponseSchema.safeParse(response);
+          if (!valid.success)
+            return handlerResponse(500, { ok: false, error: 'e2ee_invalid_response' });
+          return handlerResponse(200, valid.data);
+        } catch {
+          return handlerResponse(503, { ok: false, error: 'e2ee_pairing_unavailable' });
+        }
+      })();
+    }
     if (request.path === LOCAL_SCHEDULE_CONTROL_PATH) {
       return (async () => {
         let raw: unknown;

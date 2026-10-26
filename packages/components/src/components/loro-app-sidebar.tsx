@@ -39,7 +39,6 @@ import {
   type SessionId,
   type SessionMeta,
   type SessionStatus,
-  type WorkspaceId,
 } from '@lody/shared';
 import { useTranslation } from 'react-i18next';
 import { cloudOperations } from '@/lib/cloud-api-operations';
@@ -202,7 +201,7 @@ import { Spinner } from '@lody/ui/spinner';
 import { toast } from '@/lib/toast';
 import { useOnlineMachineIds } from '@/hooks/use-machine-online-status';
 import { useStableNow } from '@/hooks/use-stable-now';
-import { writePreferredWorkspaceSlug } from '@/lib/workspace';
+import { useSidebarWorkspaceNavigation } from './sidebar-workspaces';
 import {
   SessionOpenedByTreeRow,
   SessionPrIcon,
@@ -1818,6 +1817,21 @@ export function LoroAppSidebar({
 
   const { organizations, activeOrganization, switchOrganization } = useOrganization();
   const runtime = useAtomValue(activeWorkspaceRuntimeAtom);
+  const navigateWorkspace = useCallback(
+    (slug: string) => {
+      void router.navigate({ to: '/$workspaceName/chat', params: { workspaceName: slug } });
+    },
+    [router]
+  );
+  const workspaceNavigation = useSidebarWorkspaceNavigation({
+    encryptedAccountId: runtime?.contentMode === 'e2ee' ? runtime.accountId : null,
+    organizations,
+    switchOrganization,
+    setContext: setWorkspaceContext,
+    navigate: navigateWorkspace,
+    close: closeMobileDrawer,
+  });
+
   const runtimeInitFailure = useAtomValue(workspaceRuntimeInitFailureAtom);
   const docMetaScope = useAtomValue(docMetaCacheScopeAtom);
   const organizationsReady = Array.isArray(organizations);
@@ -3417,7 +3431,7 @@ export function LoroAppSidebar({
     [paidPlanTiers]
   );
   const workspaces = useMemo<LoroSidebarWorkspace[]>(() => {
-    return (organizations ?? [])
+    return workspaceNavigation.workspaces
       .filter((org) => Boolean(org))
       .map((org) => ({
         id: org.id,
@@ -3428,7 +3442,12 @@ export function LoroAppSidebar({
         memberCount:
           org.id === activeOrganization?.id ? (activeOrganization.members?.length ?? null) : null,
       }));
-  }, [activeOrganization, multiWorkspaceAvailable, organizations, planTierByWorkspaceId]);
+  }, [
+    activeOrganization,
+    multiWorkspaceAvailable,
+    workspaceNavigation.workspaces,
+    planTierByWorkspaceId,
+  ]);
 
   const handleHomeClicked = useCallback(() => {
     if (!workspaceSlug) return;
@@ -3529,24 +3548,7 @@ export function LoroAppSidebar({
     );
   }, [t]);
 
-  const handleWorkspaceSelected = useCallback(
-    (nextWorkspaceId: string) => {
-      const target = (organizations ?? []).find((org) => org.id === nextWorkspaceId);
-      const slug = target?.slug;
-      if (!slug) {
-        return;
-      }
-      writePreferredWorkspaceSlug(slug);
-      setWorkspaceContext({
-        slug,
-        workspaceId: target.id as WorkspaceId,
-      });
-      void switchOrganization(target.id);
-      closeMobileDrawer();
-      void router.navigate({ to: '/$workspaceName/chat', params: { workspaceName: slug } });
-    },
-    [closeMobileDrawer, organizations, router, setWorkspaceContext, switchOrganization]
-  );
+  const handleWorkspaceSelected = workspaceNavigation.select;
 
   const labels: Partial<LoroSidebarLabels> = useMemo(() => {
     return {

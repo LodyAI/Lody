@@ -1,3 +1,4 @@
+import { workspaceSupports, type WorkspaceStreamsMode } from '@lody/shared/workspace-streams-content';
 import {
   buildSessionImageApiUrl,
   getSessionImageDownloadApiPath,
@@ -82,6 +83,7 @@ export const buildSessionImageThumbnailUrl = (
 };
 
 type UploadSessionImageArgs = {
+  content: WorkspaceStreamsMode;
   workspaceId: WorkspaceId;
   sessionId: SessionId;
   token: string;
@@ -91,6 +93,7 @@ type UploadSessionImageArgs = {
 };
 
 export const uploadSessionImage = async ({
+  content,
   workspaceId,
   sessionId,
   token,
@@ -98,6 +101,7 @@ export const uploadSessionImage = async ({
   onProgress,
   signal,
 }: UploadSessionImageArgs): Promise<SessionImagePayload> => {
+  if (!workspaceSupports(content, 'attachments')) throw new Error('e2ee_attachments_unavailable');
   const validationError = validateSessionImageFile(file);
   if (validationError) {
     throw new Error(validationError);

@@ -1,3 +1,4 @@
+import { useWorkspaceFeature } from '@/hooks/use-workspace-feature';
 import { useState } from 'react';
 import { ChevronLeft, ChevronRight, Paperclip, Plug, Plus } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
@@ -51,10 +52,12 @@ export function AttachmentAddMenu({
   isMobile,
   isLanding,
   disabled,
-  onAddAttachment,
+  onAddAttachment: requestedAddAttachment,
   attachmentDisabled,
   mcp,
 }: AttachmentAddMenuProps) {
+  const attachmentAllowed = useWorkspaceFeature('attachments');
+  const onAddAttachment = attachmentAllowed ? requestedAddAttachment : undefined;
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   // Mobile's pushed panel. Desktop uses a real submenu and stays on 'root'.

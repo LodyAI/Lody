@@ -186,7 +186,7 @@ export function TerminalDock({
 
   // Publish whether a terminal can be created right now so the header icon can
   // disable itself while the local daemon is still starting (canCreateTerminal
-  // is false until it reaches running/degraded).
+  // is false until this workspace's local runtime and session are ready).
   const setDockCanCreate = useSetAtom(terminalDockCanCreateAtom);
   useEffect(() => {
     setDockCanCreate(canCreateTerminal);

@@ -1,6 +1,10 @@
-import { encodeSessionFilePath } from '@lody/shared';
+import {
+  FILE_DOWNLOAD_MAX_BYTES,
+  FILE_DOWNLOAD_CHUNK_BYTES,
+  encodeSessionFilePath,
+} from '@lody/shared';
 import { createHash } from 'node:crypto';
-import { mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, open, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { gunzipSync } from 'node:zlib';
@@ -56,6 +60,7 @@ function createService(args: {
   readonly workspaceRoot: string;
   readonly extraRoots?: readonly string[];
   readonly limits?: Partial<typeof FILE_PREVIEW_V3_LIMITS>;
+  readonly canDownloadLargeFiles?: () => Promise<boolean>;
 }): FilePreviewService {
   const resolveWorkspace: FilePreviewWorkspaceResolver = async () => ({
     ok: true,
@@ -64,6 +69,7 @@ function createService(args: {
   });
   return new FilePreviewService({
     resolveWorkspace,
+    canDownloadLargeFiles: args.canDownloadLargeFiles,
     resolveLocalWorkspace: resolveWorkspace,
     extraRoots: args.extraRoots ?? [],
     ...(args.limits === undefined ? {} : { limits: args.limits }),
@@ -656,4 +662,116 @@ it('records resolution identity and failures without file contents', async () =>
     ]),
   });
   expect(JSON.stringify(events)).not.toContain('private fixture contents');
+});
+
+describe('paid file downloads', () => {
+  it('reads exact binary ranges without widening preview limits', async () => {
+    const workspaceRoot = await makeDir('download-');
+    const bytes = Buffer.alloc(FILE_PREVIEW_V3_LIMITS.maxBinaryBytes + 1, 0xff);
+    await writeFile(path.join(workspaceRoot, 'asset.bin'), bytes);
+    const service = createService({ workspaceRoot, canDownloadLargeFiles: async () => true });
+    expect(
+      await service.previewFile({ v: 3, sessionId: SESSION_ID, path: 'asset.bin' })
+    ).toMatchObject({ status: 'error', code: 'too_large' });
+    const chunks: Buffer[] = [];
+    let revision: string | undefined;
+    for (let offset = 0; offset < bytes.length; offset += FILE_DOWNLOAD_CHUNK_BYTES) {
+      const result = await service.downloadFileChunk({
+        sessionId: SESSION_ID,
+        path: 'asset.bin',
+        offset,
+        revision,
+      });
+      expect(result.status).toBe('ok');
+      if (result.status !== 'ok') throw new Error(result.code);
+      revision = result.revision;
+      chunks.push(Buffer.from(result.data, 'base64'));
+    }
+    // Compare bytes natively rather than deep-walking millions of indexed properties.
+    expect(Buffer.concat(chunks).equals(bytes)).toBe(true);
+  });
+
+  it('accepts exactly 100 MiB and refuses one byte more', async () => {
+    const workspaceRoot = await makeDir('download-boundary-');
+    const file = await open(path.join(workspaceRoot, 'large.bin'), 'w');
+    const service = createService({ workspaceRoot, canDownloadLargeFiles: async () => true });
+    try {
+      await file.truncate(FILE_DOWNLOAD_MAX_BYTES);
+      const first = await service.downloadFileChunk({
+        sessionId: SESSION_ID,
+        path: 'large.bin',
+        offset: 0,
+      });
+      expect(first).toMatchObject({ status: 'ok', sizeBytes: FILE_DOWNLOAD_MAX_BYTES });
+      if (first.status !== 'ok') throw new Error(first.code);
+      expect(
+        await service.downloadFileChunk({
+          sessionId: SESSION_ID,
+          path: 'large.bin',
+          offset: FILE_DOWNLOAD_MAX_BYTES - FILE_DOWNLOAD_CHUNK_BYTES,
+          revision: first.revision,
+        })
+      ).toMatchObject({ status: 'ok' });
+      await file.truncate(FILE_DOWNLOAD_MAX_BYTES + 1);
+      expect(
+        await service.downloadFileChunk({ sessionId: SESSION_ID, path: 'large.bin', offset: 0 })
+      ).toEqual({ status: 'error', code: 'too_large' });
+    } finally {
+      await file.close();
+    }
+  });
+
+  it('refuses unpaid, unavailable billing and a changed file between chunks', async () => {
+    const workspaceRoot = await makeDir('download-policy-');
+    const filename = path.join(workspaceRoot, 'a.bin');
+    await writeFile(filename, Buffer.alloc(FILE_DOWNLOAD_CHUNK_BYTES + 4));
+    const request = { sessionId: SESSION_ID, path: 'a.bin', offset: 0 };
+    expect(await createService({ workspaceRoot }).downloadFileChunk(request)).toEqual({
+      status: 'error',
+      code: 'paid_plan_required',
+    });
+    expect(
+      await createService({
+        workspaceRoot,
+        canDownloadLargeFiles: async () => false,
+      }).downloadFileChunk(request)
+    ).toEqual({ status: 'error', code: 'paid_plan_required' });
+    expect(
+      await createService({
+        workspaceRoot,
+        canDownloadLargeFiles: async () => {
+          throw new Error('offline');
+        },
+      }).downloadFileChunk(request)
+    ).toEqual({ status: 'error', code: 'transient_io' });
+    const service = createService({ workspaceRoot, canDownloadLargeFiles: async () => true });
+    const first = await service.downloadFileChunk(request);
+    if (first.status !== 'ok') throw new Error(first.code);
+    await writeFile(filename, 'changed');
+    expect(
+      await service.downloadFileChunk({
+        ...request,
+        offset: FILE_DOWNLOAD_CHUNK_BYTES,
+        revision: first.revision,
+      })
+    ).toEqual({ status: 'error', code: 'file_changed' });
+  });
+
+  it('keeps path containment and requires a revision for subsequent ranges', async () => {
+    const workspaceRoot = await makeDir('download-inside-');
+    const outside = await makeDir('download-outside-');
+    await writeFile(path.join(outside, 'secret.bin'), 'secret');
+    await symlink(outside, path.join(workspaceRoot, 'escape'), 'junction');
+    const service = createService({ workspaceRoot, canDownloadLargeFiles: async () => true });
+    expect(
+      await service.downloadFileChunk({
+        sessionId: SESSION_ID,
+        path: 'escape/secret.bin',
+        offset: 0,
+      })
+    ).toEqual({ status: 'error', code: 'path_not_allowed' });
+    expect(
+      await service.downloadFileChunk({ sessionId: SESSION_ID, path: 'a.bin', offset: 1 })
+    ).toEqual({ status: 'error', code: 'invalid_path' });
+  });
 });

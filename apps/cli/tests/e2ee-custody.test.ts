@@ -16,6 +16,7 @@ import { tmpdir } from 'node:os';
 import { DatabaseSync } from 'node:sqlite';
 import { describe, expect, it, vi } from 'vitest';
 import { Bytes } from '@lody/e2ee-core/protocol';
+import { NodeE2eeCustodyError } from '@lody/e2ee-core/adapters/node-custody';
 import { makeCliE2eeCustody, type MachineKeyring } from '../src/lib/e2ee/custody';
 const genesis = Result.getOrThrow(Bytes.genesisHash(new Uint8Array(32).fill(7)));
 
@@ -56,6 +57,47 @@ describe('machine E2EE custody', () => {
         Effect.scoped(Effect.result(makeCliE2eeCustody({ directory, keyring })))
       );
       expect(Result.isFailure(result)).toBe(true);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('finishes ACL initialization for an interrupted empty directory, but never repairs originals', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'machine-acl-interrupted-'));
+    let restricted = false;
+    const directoryAcl = (_directory: string, initialize: boolean) =>
+      Effect.suspend(() => {
+        if (initialize) restricted = true;
+        return restricted
+          ? Effect.void
+          : Effect.fail(new NodeE2eeCustodyError({ code: 'unavailable' }));
+      });
+    const keyring: MachineKeyring = async () => {
+      throw new Error('synthetic unavailable');
+    };
+    try {
+      // The process that made this directory exited before it restricted access.
+      const identity = await Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const custody = yield* makeCliE2eeCustody({ directory, keyring, directoryAcl });
+            return (yield* custody.createDevice(genesis)).publicKey.toBytes();
+          })
+        )
+      );
+      expect(restricted).toBe(true);
+      restricted = false;
+      const originals = new Map(
+        readdirSync(directory).map((name) => [name, readFileSync(join(directory, name))])
+      );
+      const reopened = await Effect.runPromise(
+        Effect.scoped(Effect.result(makeCliE2eeCustody({ directory, keyring, directoryAcl })))
+      );
+      expect(Result.isFailure(reopened)).toBe(true);
+      expect(restricted).toBe(false);
+      expect(identity).toHaveLength(32);
+      for (const [name, original] of originals)
+        expect(readFileSync(join(directory, name))).toEqual(original);
     } finally {
       rmSync(directory, { recursive: true, force: true });
     }
