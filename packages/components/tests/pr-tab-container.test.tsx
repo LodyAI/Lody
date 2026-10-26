@@ -2,7 +2,7 @@
 
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { Provider, createStore, type Store } from 'jotai';
+import { atom, Provider, createStore, type Store } from 'jotai';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { GitHubCheckRunsSummary, GitHubPullRequestDetails, WorkspaceId } from '@lody/shared';
 
@@ -81,6 +81,7 @@ vi.mock('@/hooks/use-github-pr-diff', () => ({
 
 import { currentWorkspaceIdAtom } from '../src/atoms/workspace-context';
 import { PrTabContainer } from '../src/components/sessions/pr-tab-container';
+import { resolveConflictsActionAtomFamily } from '../src/components/sessions/session-pr-agent-action';
 
 (
   globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
@@ -124,6 +125,14 @@ const mergeablePullRequest: GitHubPullRequestDetails = {
   mergeable: true,
   mergeableState: 'clean',
 };
+
+const conflictedPullRequest: GitHubPullRequestDetails = {
+  ...mergeablePullRequest,
+  mergeable: false,
+  mergeableState: 'dirty',
+};
+
+const dispatchedSessionAtom = atom<string | null>(null);
 
 function createAuthError(): Error {
   return new Error('Not authenticated. Please sign in.');
@@ -217,7 +226,7 @@ describe('PrTabContainer ready-for-review auth recovery', () => {
     await act(async () => {
       root?.render(
         <Provider store={store}>
-          <PrTabContainer repoFullName="loro-dev/lody" prNumber={42} />
+          <PrTabContainer repoFullName="loro-dev/lody" prNumber={42} actionSessionId={null} />
         </Provider>
       );
     });
@@ -243,6 +252,16 @@ describe('PrTabContainer ready-for-review auth recovery', () => {
     return button;
   }
 
+  function getResolveConflictsButton(): HTMLButtonElement {
+    const button = Array.from(container?.querySelectorAll<HTMLButtonElement>('button') ?? []).find(
+      (node) => node.textContent?.includes('Resolve conflicts')
+    );
+    if (!button) {
+      throw new Error('Expected resolve-conflicts button');
+    }
+    return button;
+  }
+
   it('shows public PR details without mutation controls or a comment composer', async () => {
     mocks.useGitHubPrDetails.mockReturnValue({
       ...createPrDetailsResult(mergeablePullRequest),
@@ -259,6 +278,91 @@ describe('PrTabContainer ready-for-review auth recovery', () => {
       )
     ).toBe(false);
     expect(container?.querySelector('textarea')).toBeNull();
+  });
+
+  it('dispatches conflict resolution to the selected child while retaining the PR owner for queries', async () => {
+    store.set(resolveConflictsActionAtomFamily('root-session'), {
+      available: true,
+      pending: false,
+      run: () => store.set(dispatchedSessionAtom, 'root-session'),
+    });
+    store.set(resolveConflictsActionAtomFamily('child-session'), {
+      available: true,
+      pending: false,
+      run: () => store.set(dispatchedSessionAtom, 'child-session'),
+    });
+    mocks.useGitHubPrDetails.mockReturnValue(createPrDetailsResult(conflictedPullRequest));
+
+    await act(async () => {
+      root?.render(
+        <Provider store={store}>
+          <PrTabContainer
+            repoFullName="loro-dev/lody"
+            prNumber={42}
+            sessionId="root-session"
+            actionSessionId="child-session"
+          />
+        </Provider>
+      );
+    });
+
+    expect(mocks.useGitHubPrDetails.mock.calls.at(-1)?.[0].sessionId).toBe('root-session');
+    await act(async () => getResolveConflictsButton().click());
+    expect(store.get(dispatchedSessionAtom)).toBe('child-session');
+  });
+
+  it('uses the root session when it is the selected execution target', async () => {
+    store.set(resolveConflictsActionAtomFamily('root-session'), {
+      available: true,
+      pending: false,
+      run: () => store.set(dispatchedSessionAtom, 'root-session'),
+    });
+    mocks.useGitHubPrDetails.mockReturnValue(createPrDetailsResult(conflictedPullRequest));
+
+    await act(async () => {
+      root?.render(
+        <Provider store={store}>
+          <PrTabContainer
+            repoFullName="loro-dev/lody"
+            prNumber={42}
+            sessionId="root-session"
+            actionSessionId="root-session"
+          />
+        </Provider>
+      );
+    });
+
+    await act(async () => getResolveConflictsButton().click());
+    expect(store.get(dispatchedSessionAtom)).toBe('root-session');
+  });
+
+  it('does not expose a root action when there is no execution target', async () => {
+    store.set(resolveConflictsActionAtomFamily('root-session'), {
+      available: true,
+      pending: false,
+      run: () => store.set(dispatchedSessionAtom, 'root-session'),
+    });
+    mocks.useGitHubPrDetails.mockReturnValue(createPrDetailsResult(conflictedPullRequest));
+
+    await act(async () => {
+      root?.render(
+        <Provider store={store}>
+          <PrTabContainer
+            repoFullName="loro-dev/lody"
+            prNumber={42}
+            sessionId="root-session"
+            actionSessionId={null}
+          />
+        </Provider>
+      );
+    });
+
+    expect(
+      Array.from(container?.querySelectorAll('button') ?? []).some((button) =>
+        button.textContent?.includes('Resolve conflicts')
+      )
+    ).toBe(false);
+    expect(store.get(dispatchedSessionAtom)).toBeNull();
   });
 
   it('refreshes once and retries without showing a toast on the first auth failure', async () => {

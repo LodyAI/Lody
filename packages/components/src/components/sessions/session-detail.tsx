@@ -6694,6 +6694,7 @@ const SessionDetail = ({
               {latestPr && repoFullName && urlPrNumber === latestPrNumber && latestPrNumber && (
                 <PrTabContainer
                   sessionId={prSessionId}
+                  actionSessionId={activeTabSession?.id ?? null}
                   repoFullName={latestPrRepoFullName}
                   prNumber={latestPrNumber}
                   headCommitSha={getSessionPullRequestLegacyFields(latestPr).headCommitSha}
@@ -6884,6 +6885,7 @@ const SessionDetail = ({
     ) : activeSidebarTab === 'pr' && latestPr && repoFullName && latestPrNumber ? (
       <PrTabContainer
         sessionId={prSessionId}
+        actionSessionId={activeTabSession?.id ?? null}
         repoFullName={latestPrRepoFullName}
         prNumber={latestPrNumber}
         headCommitSha={getSessionPullRequestLegacyFields(latestPr).headCommitSha}
