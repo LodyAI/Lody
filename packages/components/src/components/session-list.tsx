@@ -134,6 +134,102 @@ export type { PrStatus };
  * fills come from `sidebarSurface`; these are the pieces around it.
  */
 const rowStyles = stylex.create({
+  // Project-group declarations keep element-local app variables, including scoped themes.
+  projectHeader: {
+    position: 'relative',
+    width: '100%',
+    borderRadius: 'var(--radius-md)',
+    paddingInline: 'calc(var(--spacing) * 2)',
+    paddingBlock: 'calc(var(--spacing) * 1)',
+    textAlign: 'left',
+    borderWidth: '1px',
+    borderStyle: 'solid',
+    borderColor: 'transparent',
+    display: 'flex',
+    minWidth: 0,
+    flex: '1',
+    userSelect: 'none',
+    alignItems: 'center',
+    gap: 'calc(var(--spacing) * 2)',
+    fontWeight: 'var(--font-weight-normal)',
+    transitionProperty:
+      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke, --tw-gradient-from, --tw-gradient-via, --tw-gradient-to',
+    transitionDuration: 'var(--tw-duration, var(--default-transition-duration))',
+    transitionTimingFunction: 'var(--tw-ease, var(--default-transition-timing-function))',
+  },
+  projectHeaderPlain: {
+    backgroundColor: 'transparent',
+    color: 'hsl(var(--sidebar-row-foreground) / 1)',
+  },
+  projectHeaderInteractive: {
+    backgroundColor: {
+      default: 'transparent',
+      '@media (hover: hover)': { ':hover': 'hsl(var(--sidebar-hover) / 1)' },
+      ':is([data-menu-open])': 'hsl(var(--sidebar-hover) / 1)',
+    },
+    color: {
+      default: 'hsl(var(--sidebar-row-foreground) / 1)',
+      '@media (hover: hover)': { ':hover': 'hsl(var(--sidebar-hover-foreground) / 1)' },
+      ':is([data-menu-open])': 'hsl(var(--sidebar-hover-foreground) / 1)',
+    },
+  },
+  projectHeaderSelected: {
+    borderColor: 'color-mix(in oklab, hsl(var(--sidebar-ring) / 1) 30%, transparent)',
+    backgroundColor: {
+      default: 'hsl(var(--sidebar-selection) / 1)',
+      '@media (hover: hover)': { ':hover': 'hsl(var(--sidebar-selection) / 1)' },
+    },
+    color: 'hsl(var(--sidebar-selection-foreground) / 1)',
+  },
+  projectToggle: {
+    position: 'relative',
+    marginRight: 'calc(var(--spacing) * -1.5)',
+    display: 'flex',
+    height: 'calc(var(--spacing) * 5)',
+    width: 'calc(var(--spacing) * 5)',
+    flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  projectGlyph: {
+    position: 'absolute',
+    left: 0,
+    top: '50%',
+    height: 'calc(var(--spacing) * 4)',
+    width: 'calc(var(--spacing) * 4)',
+    translate: '0 calc(calc(1 / 2 * 100%) * -1)',
+    color: 'currentcolor',
+    transitionProperty: 'opacity',
+    transitionDuration: '100ms',
+    transitionTimingFunction: 'var(--tw-ease, var(--default-transition-timing-function))',
+  },
+  projectChevron: { transitionProperty: 'opacity,translate,scale,rotate' },
+  projectChevronCollapsed: { rotate: 'calc(90deg * -1)' },
+  projectChevronOpen: { rotate: '0deg' },
+  projectGlyphVisible: { opacity: 1 },
+  projectLabel: {
+    minWidth: 0,
+    flex: '1',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    textAlign: 'left',
+  },
+  projectControls: {
+    display: 'flex',
+    flexShrink: 0,
+    alignItems: 'center',
+    gap: 'calc(var(--spacing) * 0.5)',
+  },
+  projectSmallGlyph: { height: 'calc(var(--spacing) * 3.5)', width: 'calc(var(--spacing) * 3.5)' },
+  projectHeaderWrap: { display: 'flex', alignItems: 'center' },
+  projectHeaderAction: { marginRight: 'calc(var(--spacing) * 2)', flexShrink: 0 },
+  projectDragHandle: { cursor: { default: 'grab', ':active': 'grabbing' }, touchAction: 'none' },
+  projectSortable: {
+    width: '100%',
+    marginBottom: { default: 'calc(var(--spacing) * 0.5)', ':last-child': 0 },
+  },
+  projectDragging: { zIndex: 10, opacity: 0.6 },
   rowBox: { position: 'relative', width: '100%', textAlign: 'left' },
   pointer: { cursor: 'pointer' },
   defaultCursor: { cursor: 'default' },
@@ -1831,17 +1927,17 @@ function ProjectGroupHeaderRow({
       data-scope-item="row"
       data-sidebar-group-key={group.key}
       data-menu-open={menuOpen ? '' : undefined}
-      className={cn(
-        'group relative w-full rounded-md px-2 py-1 text-left',
-        'border border-transparent bg-transparent',
-        !selected &&
-          !isMobile &&
-          'hover:bg-sidebar-hover hover:text-sidebar-hover-foreground data-[menu-open]:bg-sidebar-hover data-[menu-open]:text-sidebar-hover-foreground',
-        selected && 'border-sidebar-ring/30 bg-sidebar-selection hover:bg-sidebar-selection',
-        SIDEBAR_ROW_TEXT_CLASS,
-        'flex min-w-0 flex-1 select-none items-center gap-2 font-normal transition-colors',
-        activate ? 'cursor-pointer' : 'cursor-default',
-        selected ? 'text-sidebar-selection-foreground' : 'text-sidebar-row-foreground'
+      className={clsx(
+        'group',
+        stylex.props(
+          rowStyles.projectHeader,
+          !selected && !isMobile
+            ? rowStyles.projectHeaderInteractive
+            : rowStyles.projectHeaderPlain,
+          selected && rowStyles.projectHeaderSelected,
+          activate ? rowStyles.pointer : rowStyles.defaultCursor
+        ).className,
+        SIDEBAR_ROW_TEXT_CLASS
       )}
       onClick={activate}
       onKeyDown={(event) => {
@@ -1852,7 +1948,7 @@ function ProjectGroupHeaderRow({
     >
       <button
         type="button"
-        className="relative -mr-1.5 flex h-5 w-5 shrink-0 items-center justify-center"
+        {...stylex.props(rowStyles.projectToggle)}
         aria-label={t('common.toggle', 'Toggle')}
         onClick={(event) => {
           event.preventDefault();
@@ -1862,24 +1958,27 @@ function ProjectGroupHeaderRow({
       >
         <Folders
           aria-hidden="true"
-          className={cn(
-            'absolute left-0 top-1/2 h-4 w-4 -translate-y-1/2 text-current transition-opacity duration-100',
-            isMobile ? 'opacity-0' : 'group-hover:opacity-0'
+          className={clsx(
+            stylex.props(rowStyles.projectGlyph, isMobile && rowStyles.hidden).className,
+            !isMobile && 'group-hover:opacity-0'
           )}
         />
         <ChevronDown
           aria-hidden="true"
-          className={cn(
-            'absolute left-0 top-1/2 h-4 w-4 -translate-y-1/2 text-current',
-            'transition-[opacity,translate,scale,rotate] duration-100',
-            isMobile ? 'opacity-100' : 'opacity-0 group-hover:opacity-100',
-            group.collapsed ? '-rotate-90' : 'rotate-0'
+          className={clsx(
+            stylex.props(
+              rowStyles.projectGlyph,
+              rowStyles.projectChevron,
+              isMobile ? rowStyles.projectGlyphVisible : rowStyles.hidden,
+              group.collapsed ? rowStyles.projectChevronCollapsed : rowStyles.projectChevronOpen
+            ).className,
+            !isMobile && 'group-hover:opacity-100'
           )}
         />
       </button>
-      <span className="min-w-0 flex-1 truncate text-left">{group.label}</span>
+      <span {...stylex.props(rowStyles.projectLabel)}>{group.label}</span>
       {showMenu || showNew || dragHandle ? (
-        <div className="flex shrink-0 items-center gap-0.5">
+        <div {...stylex.props(rowStyles.projectControls)}>
           {showMenu ? (
             <button
               type="button"
@@ -1900,7 +1999,7 @@ function ProjectGroupHeaderRow({
                 );
               }}
             >
-              <MoreHorizontal className="h-3.5 w-3.5" />
+              <MoreHorizontal {...stylex.props(rowStyles.projectSmallGlyph)} />
             </button>
           ) : null}
           {showNew ? (
@@ -1914,7 +2013,7 @@ function ProjectGroupHeaderRow({
                 onNew?.();
               }}
             >
-              <SquarePen className="h-3.5 w-3.5" />
+              <SquarePen {...stylex.props(rowStyles.projectSmallGlyph)} />
             </button>
           ) : null}
           {dragHandle}
@@ -1925,7 +2024,7 @@ function ProjectGroupHeaderRow({
   );
 
   return (
-    <div className="group flex items-center">
+    <div className={clsx('group', stylex.props(rowStyles.projectHeaderWrap).className)}>
       {showMenu ? (
         <ContextMenu.Root onOpenChange={setMenuOpen}>
           <ContextMenu.Trigger render={row} />
@@ -1949,7 +2048,9 @@ function ProjectGroupHeaderRow({
       ) : (
         row
       )}
-      {headerAction ? <div className="mr-2 shrink-0">{headerAction}</div> : null}
+      {headerAction ? (
+        <div {...stylex.props(rowStyles.projectHeaderAction)}>{headerAction}</div>
+      ) : null}
     </div>
   );
 }
@@ -2404,7 +2505,10 @@ const SortableProjectGroupSection = memo(function SortableProjectGroupSection({
     <button
       type="button"
       ref={setActivatorNodeRef}
-      className={cn(SIDEBAR_HOVER_ACTION_CLASS, 'cursor-grab touch-none active:cursor-grabbing')}
+      className={clsx(
+        SIDEBAR_HOVER_ACTION_CLASS,
+        stylex.props(rowStyles.projectDragHandle).className
+      )}
       aria-label={t('sidebar.projectGroups.reorder', 'Reorder project group')}
       {...attributes}
       {...listeners}
@@ -2413,7 +2517,7 @@ const SortableProjectGroupSection = memo(function SortableProjectGroupSection({
         event.stopPropagation();
       }}
     >
-      <GripVertical className="h-3.5 w-3.5" />
+      <GripVertical {...stylex.props(rowStyles.projectSmallGlyph)} />
     </button>
   ) : undefined;
 
@@ -2421,7 +2525,7 @@ const SortableProjectGroupSection = memo(function SortableProjectGroupSection({
     <div
       ref={setNodeRef}
       style={{ transform: CSS.Transform.toString(constrainedTransform), transition }}
-      className={cn('w-full', 'mb-0.5 last:mb-0', isDragging && 'z-10 opacity-60')}
+      {...stylex.props(rowStyles.projectSortable, isDragging && rowStyles.projectDragging)}
     >
       <SessionGroupSection {...props} group={group} dragHandle={dragHandle} />
     </div>

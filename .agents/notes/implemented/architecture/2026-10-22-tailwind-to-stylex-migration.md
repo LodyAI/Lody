@@ -552,6 +552,45 @@ pointer paths; native runs cover actual touch. Early browser cleanup hangs are
 retained separately; both final sources use the same headless Chromium runner
 and exit cleanly. These are harness corrections, not product behavior changes.
 
+### Active session lists and login
+
+The active `SessionList`, `SidebarUpdatedSessionList` and `LoginPage` remove
+110 more compiler-confirmed utilities: 97→12, 26→9 and 35→27. Project-group
+headers preserve their exact local variable expressions, transitions and drag
+inline styles. Updated rows qualify StyleX ancestor markers with their owned
+row attribute; caller descendant overrides, precise opener navigation and
+shared control composition remain intact. Login migrates its owned provider
+wrapper and spinner margin while retaining the important descendant SVG rule
+and primitive sizing. Public APIs, structure, handlers and auth behavior stay
+unchanged; independent reviews check these boundaries separately from screenshots.
+
+Real captures also exposed missing acceptance preconditions. A stable login
+snapshot could still show a clipped, unfinished form; its profile now awaits
+the existing stage/panel/expanding-row E2E completion contract. Existing login
+stories share local storage, so their full matrix runs serially to avoid
+cross-story last-used-provider input changes. Native drag requires the actual
+moved pose and pointer hit state. Updated-list rest states require menu and
+hover-card closure and a pointer outside rows. Both immutable sources are
+recaptured after these corrections. Initial differences, unchanged-source
+controls and final captures remain separate evidence; no product CSS patch or
+pixel-threshold change substitutes for those observable states.
+
+`active-acceptance.html` contains 880 final screenshot pairs: 648 primary and
+232 native. Of these, 878 PNGs are byte-exact; two login pairs retain 518 raw
+pixels, zero above the unchanged threshold, maximum channel delta one. Their
+rendering cause remains **unresolved**. Full primary and native rendering fields
+match across 253,476 screenshot-paired nodes. Another 124 SessionList computed
+observations cover 42,624 nodes without adding screenshot pairs. Five native
+SessionList diagnostic differences remain explicit: touch hover membership and
+last pointer coordinates vary while final hit chains, CSS, geometry and PNGs
+match. Updated's final 450 screenshot pairs are byte-exact; its final closed-card
+state includes a real pointer re-entry/leave after menu detachment. This does
+not prove that one Escape always closed the original hover card. Initial
+119,914 raw / 117,675 threshold drag pixels, 59,833 raw / 58,892 threshold clipped
+login pixels, and Updated's initial 100,729 raw / 91,090 threshold pixels remain
+separate evidence with the old hover-card variants, failed closure candidates
+and unchanged-source controls. Historical exceptions stay open.
+
 ### Build and test findings
 
 Storybook 10.6's strict execution wrappers and shared async chunks introduced
@@ -652,6 +691,18 @@ smoke verifies the intentional 20px merge/diff height, method menu, squash
 selection and Escape at 390/1280px in both themes. The integrated Electron app
 build passes; missing Electron binaries still block actual runtime validation.
 
+The active-list/login batch uses the officially downloaded Node 26.12.1 archive,
+verified against its SHA-256 manifest, without changing the machine's global
+runtime. All 618 component files / 6,137 tests pass; root types, typed lint,
+Effect lint and script tests complete. SQLite runtime support now passes. The
+aggregate still fails the existing Git-identity assertion (333 CLI files /
+4,725 tests pass), so it is not a full repository check pass. Internationalization,
+public-boundary and the remaining static boundary checks pass independently.
+The actual final Electron 44.9.3 build and isolated smoke now pass onboarding,
+agent configuration, Explore and local chat, with four real screenshots. This
+is after-only application evidence; it does not resolve historical Explore
+pixel differences or replace paired component acceptance.
+
 ## Remaining work
 
 Compiler-backed [usage inventory](../../../../packages/components/scripts/tailwind-usage.mjs)
@@ -676,7 +727,9 @@ expressions (611 components, 81 `src/ui`). The property/guide/chip batch leaves
 2,428 occurrences (components 1,936, `src/ui` 487, routes 5) across 184 files;
 the 692 unresolved expressions are unchanged. The legacy-list batch leaves
 2,284 occurrences (components 1,792, `src/ui` 487, routes 5) across 184 files,
-with the same 692 unresolved expressions. These are lower bounds, not a project
+with the same 692 unresolved expressions. The active-list/login batch leaves
+2,174 occurrences (components 1,682, `src/ui` 487, routes 5) across the same
+184 files and 692 unresolved expressions. These are lower bounds, not a project
 completion percentage.
 
 The unconsumed `src/ui/sidebar.tsx` retains 324 occurrences and is not re-exported

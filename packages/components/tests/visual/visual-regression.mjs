@@ -282,6 +282,12 @@ async function settleLayout(page) {
 
 async function applySteps(page, steps = []) {
   for (const step of steps) {
+    if (step.action === 'waitForFunction') {
+      if (typeof step.expression !== 'string' || !step.expression.trim())
+        throw new Error('waitForFunction requires a nonempty expression');
+      await page.waitForFunction(step.expression, undefined, { timeout: step.timeout ?? 15_000 });
+      continue;
+    }
     if (step.action === 'movePointer') {
       await page.mouse.move(step.x ?? 0, step.y ?? 0);
       continue;

@@ -432,10 +432,7 @@ function BrowserRedirect({
 function ProviderIcon({ className, children }: { className?: string; children: React.ReactNode }) {
   return (
     <span
-      className={cn(
-        'flex h-[18px] w-[18px] shrink-0 items-center justify-center [&_svg]:size-[18px]!',
-        className
-      )}
+      className={cn(stylex.props(styles.providerIcon).className, '[&_svg]:size-[18px]!', className)}
     >
       {children}
     </span>
@@ -1649,7 +1646,9 @@ export function LoginPage({
           >
             {isEmailSubmitting ? (
               <>
-                <Spinner className="mr-2 h-4 w-4" />
+                <Spinner
+                  className={cn(stylex.props(styles.pendingSpinnerSpacing).className, 'h-4 w-4')}
+                />
                 {submitLabel}
               </>
             ) : (
@@ -1796,7 +1795,9 @@ export function LoginPage({
         >
           {isPreparingElectronHandoff ? (
             <>
-              <Spinner className="mr-2 h-4 w-4" />
+              <Spinner
+                className={cn(stylex.props(styles.pendingSpinnerSpacing).className, 'h-4 w-4')}
+              />
               {t('login.desktopHandoff.preparing', 'Preparing desktop sign-in...')}
             </>
           ) : (
@@ -1999,6 +2000,15 @@ const SAFE_TOP = 'max(12px, env(safe-area-inset-top))';
 const SAFE_BOTTOM = 'max(12px, env(safe-area-inset-bottom))';
 
 const styles = stylex.create({
+  providerIcon: {
+    display: 'flex',
+    height: '18px',
+    width: '18px',
+    flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  pendingSpinnerSpacing: { marginRight: 'calc(var(--spacing) * 2)' },
   // The window holds two things: an inset visual surface and the sign-in
   // column. On a narrow window they stack, the visual on top.
   page: {

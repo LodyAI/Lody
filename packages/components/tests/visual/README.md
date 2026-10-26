@@ -95,6 +95,13 @@ avatar profiles use this to exercise the real offline fallback on both builds;
 they do not substitute images. Keep the original network-dependent captures and
 document why they were unsuitable for a pair.
 
+The `waitForFunction` step takes a nonempty browser `expression` and optional
+`timeout` (default 15 seconds). Use a read-only predicate for an application
+completion signal: a stable clipped form can still be an unfinished login
+transition. The login profile requires the stage and expanding rows to reach
+their visible phase and measured panel heights, using the existing E2E contract.
+It applies the same predicate after view changes on both immutable builds.
+
 ## Target profiles and interaction coverage
 
 | Profile                                                         | Coverage                                                                                                            |
@@ -114,6 +121,9 @@ document why they were unsuitable for a pair.
 | `info-chip-style-targets.json` | Production action/cluster/stage chips, context actions, CI portals and 419/420/421px container boundaries. |
 | `legacy-task-targets.json` | Actual legacy TaskList rows, caller/root/subtree variable overrides, loading/empty/overflow and desktop pointer states. |
 | `legacy-updated-task-targets.json` | Actual legacy flat Updated list, status/anchor rows, rename, archive, show all/less and scoped variables. |
+| `owned-session-list-targets.json` | Active SessionList project groups, selection, caller/root/subtree overrides, menus, folding and empty/loading states. |
+| `owned-updated-session-targets.json` | Active Updated list trees, precise openers, project groups, caller overrides, read-only/overflow and archive/rename states. |
+| `owned-login-targets.json` | Login providers, email/handoff pending states, scoped spacing and actual 860/861px layout boundary. |
 | `sidebar-targets.json`                                          | Sidebar layouts, row parts, loading/empty/overflow and archive/menu states; narrow widths use a desktop UA.         |
 | `sidebar-mobile-targets.json`                                   | iPhone/Android descriptors, known-logo readiness and real touch menu/archive actions in both themes.                |
 | `sidebar-updated-interaction-targets.json`                      | Show all/less, selection, collapse/expand and focus/hover on the production Updated list.                           |
@@ -144,6 +154,22 @@ node-index paths and retain original PNG hashes. Actual touch covers swipe/archi
 and the 767/768px boundary; forced colors and drag/cancel/reorder are separate
 states. Original nested-button Enter and touch-without-hover restrictions remain
 explicit; an unsupported interaction is not a passing screenshot state.
+
+The `owned-session-list-native.mjs`, `owned-updated-session-native.mjs` and
+`owned-login-native.mjs` runners also take `--phase` and `--storybook`.
+Capture `owned-login-targets.json` with `LODY_VISUAL_WORKERS=1`: the existing
+LoginPage stories share a context's last-used-provider storage, so concurrent
+stories can change the hidden panel's input state. Use the same story order on
+both sources.
+SessionList writes `proof.json`; only entries with `shot` are screenshot pairs,
+while matching primary observations supply additional computed fields. Drag
+captures require the intended moved pose, settled geometry/styles and actual
+pointer hit testing. Updated-list captures preserve precise-opener callbacks,
+mention payloads, caller precedence and actual touch archive behavior. Login
+captures inspect provider SVG sizing, pending spinner spacing and synthetic auth
+intents without completing a sign-in. Retain initial mismatched interaction or
+transition captures when improving readiness; compare both sources again with
+the same final runner and keep raw pixel and diagnostic differences explicit.
 
 `chat-search-ready-targets.json` explicitly enters the search query and waits for
 the filtered result. Storybook play completion can precede a successful input

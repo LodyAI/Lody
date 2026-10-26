@@ -704,7 +704,11 @@ function UpdatedItemProjectLine({ item }: { item: SidebarUpdatedItem }) {
   const repoFullName = item.repoFullName ?? (item.kind === 'github' ? label : null);
   const isGithub = item.kind === 'github';
   const mark = item.projectGroup ? (
-    <Folders className="h-3 w-3" strokeWidth={1.75} aria-hidden="true" />
+    <Folders
+      {...stylex.props(updatedStyles.projectGroupGlyph)}
+      strokeWidth={1.75}
+      aria-hidden="true"
+    />
   ) : isGithub ? (
     <UpdatedGitHubOwnerMark repoFullName={repoFullName} />
   ) : item.kind === 'local' ? (
@@ -940,16 +944,16 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
         // Hover marks the row with its fill only; the title keeps its color.
         // Unselected titles sit below the reading column's brightness.
         stylex.props(
+          stylex.defaultMarker(),
           updatedStyles.row,
           onSelect ? updatedStyles.clickable : updatedStyles.staticRow,
           sidebarSurface.row,
           showMetaLine ? sidebarSurface.tall : sidebarSurface.snug,
           showSelectedState
             ? sidebarSurface.selected
-            : onSelect && !isMobile && sidebarSurface.hover
+            : onSelect && !isMobile && sidebarSurface.hover,
+          !showSelectedState && onSelect && !isMobile && rowMenuOpen && updatedStyles.rowMenuOpen
         ).className,
-        // Preserve the menu-open hook until the row shares an owned marker with its menu.
-        !showSelectedState && onSelect && !isMobile && 'data-[menu-open]:bg-sidebar-hover',
         // Keyboard-only focus ring — see SessionList: plain :focus-within also
         // matches after mouse clicks via the overlay <a> and left a permanent
         // inset ring on the selected row.
@@ -999,9 +1003,9 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
             showMenuButton={hasMenuActions}
             menuLabel={contextMenuLabels.moreActions}
             openedByTree={openedByTree}
-            fadeClassName="group-hover/row:opacity-0 group-data-[menu-open]/row:opacity-0"
-            restPointerClassName="group-hover/row:pointer-events-none group-data-[menu-open]/row:pointer-events-none"
-            revealClassName="group-hover/row:opacity-100 group-hover/row:pointer-events-auto group-data-[menu-open]/row:opacity-100 group-data-[menu-open]/row:pointer-events-auto"
+            fadeClassName={stylex.props(updatedStyles.rowFade).className}
+            restPointerClassName={stylex.props(updatedStyles.rowRestPointer).className}
+            revealClassName={stylex.props(updatedStyles.rowReveal).className}
           />
         </div>
         {item.owner ? (
@@ -1056,7 +1060,7 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
             isWaitingPermission={item.isWaitingPermission}
             isWorking={item.isWorking}
             hasUnreadMessages={item.hasUnreadMessages}
-            fadeClassName="group-hover/row:opacity-0 group-data-[menu-open]/row:opacity-0"
+            fadeClassName={stylex.props(updatedStyles.rowFade).className}
             restIcon={
               showPr ||
               showMergeablePill ||
@@ -1089,7 +1093,7 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
                   label={archiveTooltipLabel}
                   confirmLabel={archiveConfirmLabel}
                   onConfirm={() => onArchive?.(item.id)}
-                  revealClassName="group-hover/row:opacity-100 group-hover/row:pointer-events-auto group-data-[menu-open]/row:opacity-100 group-data-[menu-open]/row:pointer-events-auto"
+                  revealClassName={stylex.props(updatedStyles.rowReveal).className}
                 />
               ) : undefined
             }
@@ -1378,6 +1382,10 @@ const updatedStyles = stylex.create({
   },
   ownerIcon: { width: themeSpace[4], height: themeSpace[4], opacity: 0.6 },
   glyph12: { width: themeSpace[3], height: themeSpace[3] },
+  projectGroupGlyph: {
+    width: 'calc(var(--spacing) * 3)',
+    height: 'calc(var(--spacing) * 3)',
+  },
   glyph16: { width: themeSpace[4], height: themeSpace[4] },
   projectLine: { display: 'flex', minWidth: 0, alignItems: 'center', gap: themeSpace[1] },
   projectMark: { display: 'flex', flexShrink: 0, alignItems: 'center', justifyContent: 'center' },
@@ -1401,6 +1409,41 @@ const updatedStyles = stylex.create({
   },
   clickable: { cursor: 'pointer' },
   staticRow: { cursor: 'default' },
+  rowMenuOpen: { backgroundColor: 'hsl(var(--sidebar-hover) / 1)' },
+  rowFade: {
+    opacity: {
+      default: null,
+      '@media (hover: hover)': {
+        [stylex.when.ancestor(':is([data-sidebar-updated-id]):hover')]: 0,
+      },
+      [stylex.when.ancestor(':is([data-sidebar-updated-id][data-menu-open])')]: 0,
+    },
+  },
+  rowRestPointer: {
+    pointerEvents: {
+      default: null,
+      '@media (hover: hover)': {
+        [stylex.when.ancestor(':is([data-sidebar-updated-id]):hover')]: 'none',
+      },
+      [stylex.when.ancestor(':is([data-sidebar-updated-id][data-menu-open])')]: 'none',
+    },
+  },
+  rowReveal: {
+    opacity: {
+      default: null,
+      '@media (hover: hover)': {
+        [stylex.when.ancestor(':is([data-sidebar-updated-id]):hover')]: 1,
+      },
+      [stylex.when.ancestor(':is([data-sidebar-updated-id][data-menu-open])')]: 1,
+    },
+    pointerEvents: {
+      default: null,
+      '@media (hover: hover)': {
+        [stylex.when.ancestor(':is([data-sidebar-updated-id]):hover')]: 'auto',
+      },
+      [stylex.when.ancestor(':is([data-sidebar-updated-id][data-menu-open])')]: 'auto',
+    },
+  },
   anchor: {
     position: 'absolute',
     inset: 0,
