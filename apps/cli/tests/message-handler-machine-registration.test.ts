@@ -214,6 +214,7 @@ describe('MessageHandler machine registration', () => {
       localProjectCreateDirectory: 1,
       localProjectHistoryProvider: 1,
       localFileResources: 1,
+      fileDownload: 1,
       markdownFileLinks: 1,
       providerSetup: 1,
       acpProtocolAuthentication: 2,

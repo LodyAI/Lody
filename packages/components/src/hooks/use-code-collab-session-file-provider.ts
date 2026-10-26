@@ -1,3 +1,4 @@
+import { collectFileDownload } from '@/lib/file-download';
 import { useWorkspaceFeature } from './use-workspace-feature';
 import { useSessionWorkspacePath } from './use-session-workspace-path';
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
@@ -463,6 +464,16 @@ export function useCodeCollabSessionFileProvider(
     };
     return {
       sessionId,
+      downloadFile: (path, signal) =>
+        collectFileDownload(
+          (range) =>
+            runtime.requestFileDownloadChunk(
+              machineId,
+              { sessionId, ...at(path), ...range },
+              ownerSessionId
+            ),
+          signal
+        ),
       previewFile: async (path, knownDigest) =>
         await runtime.requestFilePreview(
           machineId,

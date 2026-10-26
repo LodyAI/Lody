@@ -61,7 +61,7 @@
   `agent_disconnected`, Harness compression mismatch = `acp_session_storage_incompatible`.
 - Stale ACP: retry once before any event; retire, retain cleanup, keep the turn. Never retry submitted
   Inbox inputs (human-plus-batch too).
-- Agent-input turns skip completion notices only. Use the completed invocation's exact input.
+- Completion publication follows [notification ownership](../lib/notifications/AGENTS.md).
 - No content: `recordSilentTurnFailure`, not `setDispatchHandled`. Await
   `turnProducedVisibleOutput` before `finalizeTurn`; finalize, advance pointers, fail open.
 - Diff content comes only from the CLI-local ACP evidence store; GitHub `diffStats` use PR compare

@@ -151,9 +151,6 @@ export interface SessionState {
   // ── Permission timing (per-turn, accumulated) ───────────────────────────
   permissionWaitMs: number;
 
-  // ── Unread tracking ─────────────────────────────────────────────────────
-  pendingUnread: boolean;
-
   // ── Session-scoped (survives turn boundaries) ───────────────────────────
   lastActivityMs: number;
   logger: Logger | null;
@@ -187,7 +184,6 @@ function createSessionState(): SessionState {
     imageGenerationUploadedCallIds: new Set(),
     imageGenerationActiveCallIds: new Set(),
     permissionWaitMs: 0,
-    pendingUnread: false,
     lastActivityMs: Date.now(),
     logger: null,
   };
@@ -404,8 +400,7 @@ export class SessionTransientStore {
       state.contextWindowUsageTimer !== null ||
       state.pendingContextWindowHandlers.size > 0 ||
       state.pendingHistoryNoticeHandlers.size > 0 ||
-      state.imageGenerationUploads.size > 0 ||
-      state.pendingUnread
+      state.imageGenerationUploads.size > 0
     );
   }
 
@@ -453,7 +448,6 @@ export class SessionTransientStore {
     // finalizeACPState()/flushSessionUsage(). Clearing them prematurely would drop writes.
     state.imageGenerationActiveCallIds.clear();
     state.permissionWaitMs = 0;
-    state.pendingUnread = false;
   }
 
   /**

@@ -64,7 +64,8 @@ owner，待其 drain 后释放 execution 与 presence。失败/被拒上传保�
 不登记成功。现有上传全部 drain 后才到达的事件仍使用捕获目标，不追溯修改已结算结果。
 
 已知静默回合 finalize 后记录 `agent_no_output`，仅推进已送达输入的终态指针。正常返回的
-prompt 不重放。普通断线回合仅在没有任何归属事件时允许一次重试；Inbox 保留不重放边界。
+prompt 不重放。普通断线回合仅在没有任何归属事件时允许一次重试；Inbox 保留不重放边界。成功发布仍遵循
+[完成确认 owner](2026-10-26-turn-completion-signals.zh.md)；图片观测不绕过本地持久化或远端历史确认。
 实例退休与释放失败继续遵循[退休决策](2026-10-17-stale-acp-recovery-turn-ownership.md)。
 Effect 4.0.2 评估保留同步事实为普通代码并复用 native 执行入口；迁移尚未完成的图片、
 Session、history 编排会扩大本 issue。不改变 native 边界或 unit ledger 事实。

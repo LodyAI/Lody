@@ -84,7 +84,10 @@ change an already-settled outcome.
 A known silent turn finalizes, records `agent_no_output`, and advances only its
 already-delivered input's terminal pointer. A normally resolved prompt never
 replays. Disconnected ordinary turns retain one retry only before any owned event;
-Inbox keeps its no-replay fence. Instance retirement and failed release continue to
+Inbox keeps its no-replay fence. Successful publication still follows the
+[completion confirmation owner](2026-10-26-turn-completion-signals.md); image
+observation bypasses neither local durability nor remote history confirmation.
+Instance retirement and failed release continue to
 follow the [retirement decision](2026-10-17-stale-acp-recovery-turn-ownership.md).
 The Effect 4.0.2 assessment keeps synchronous facts ordinary and reuses the native
 execution entry; migrating the unfinished image/Session/history orchestration

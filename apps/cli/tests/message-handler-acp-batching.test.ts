@@ -109,6 +109,7 @@ const createHandlerHarness = async (
   }
 
   const workspaceDocument = {
+    getRemoteStreamsGeneration: () => undefined,
     isTransportConnected: vi.fn(() => true),
     markMachineFlockDocDirty: vi.fn(),
     registerMachine: vi.fn(),
@@ -380,7 +381,9 @@ const createRecoveryHarness = async (
     outcomes,
     emitText,
     close: async () => {
+      service.stopCompletionPublication();
       await host.sessionActivePresence.close();
+      await service.drainInboxExecutions();
       await destroyRepoOnRealTimers(repo);
     },
   };
@@ -489,6 +492,7 @@ describe('MessageHandler ACP batching', () => {
     });
     try {
       await h.service.continueSession(h.message);
+      await h.service.drainInboxExecutions();
       const history = await h.doc.sessionData.history.readAll();
       expect(readItems(history.find((entry) => entry.id === h.turnId))).toEqual([
         syntheticImageGroup,
@@ -550,6 +554,7 @@ describe('MessageHandler ACP batching', () => {
         }
         allowUpload.resolve();
         await running;
+        await h.service.drainInboxExecutions();
         const success = kind === 'success';
         const history = await h.doc.sessionData.history.readAll();
         expect(readItems(history.find((entry) => entry.id === h.turnId))).toEqual(
@@ -748,6 +753,7 @@ describe('MessageHandler ACP batching', () => {
     h.finishRetry.resolve();
     try {
       await h.service.continueSession(h.message);
+      await h.service.drainInboxExecutions();
       expect(h.submissions).toEqual(['old']);
       expect(h.outcomes.map((fact) => fact.outcome)).toEqual([
         { kind: 'unknown', code: 'agent_disconnected' },
@@ -771,6 +777,7 @@ describe('MessageHandler ACP batching', () => {
       });
       try {
         await h.service.continueSession(h.message);
+        await h.service.drainInboxExecutions();
         const history = await h.doc.sessionData.history.readAll();
         expect(history.find((entry) => entry.id === h.message.userTurnId)?.status).toBe('failed');
         expect(history.flatMap(readItems)).toContainEqual(
@@ -910,6 +917,7 @@ describe('MessageHandler ACP batching', () => {
     const h = await createRecoveryHarness({ completeNormally: true, updates });
     try {
       await h.service.continueSession(h.message);
+      await h.service.drainInboxExecutions();
       const history = await h.doc.sessionData.history.readAll();
       expect(history.find((entry) => entry.id === h.message.userTurnId)?.status).toBe(
         visible ? 'handled' : 'failed'
@@ -935,6 +943,7 @@ describe('MessageHandler ACP batching', () => {
     h.finishRetry.resolve();
     try {
       await h.service.continueSession(h.message);
+      await h.service.drainInboxExecutions();
       expect(h.submissions).toEqual(['old']);
       expect(h.outcomes.map((fact) => fact.outcome)).toEqual([
         { kind: 'unknown', code: 'agent_disconnected' },
@@ -1007,6 +1016,7 @@ describe('MessageHandler ACP batching', () => {
       const h = await createRecoveryHarness({ updates, completeNormally: true });
       try {
         await h.service.continueSession(h.message);
+        await h.service.drainInboxExecutions();
         const visible = kind === 'text' || kind === 'tool';
         expect(h.outcomes.map((fact) => fact.outcome)).toEqual([
           visible ? { kind: 'succeeded' } : { kind: 'failed', code: 'no_agent_output' },
@@ -1249,6 +1259,7 @@ describe('MessageHandler ACP batching', () => {
     const h = await createRecoveryHarness(options);
     try {
       await h.service.continueSession(h.message);
+      await h.service.drainInboxExecutions();
       expect(h.submissions).toEqual(options.submitted);
       expect(h.service.getExecutionSnapshot(h.sessionId).hasActiveTurn).toBe(false);
       if (options.priorOutput)
@@ -2068,7 +2079,7 @@ describe('MessageHandler ACP batching', () => {
     }
   });
 
-  it('keeps unread state and coalesces plans when a plan write is retried', async () => {
+  it('defers unread publication and coalesces plans when a plan write is retried', async () => {
     vi.useRealTimers();
     const sessionId = 's-1' as SessionId;
     const { repo, docs, handler } = await createHandlerHarness([sessionId]);
@@ -2091,7 +2102,6 @@ describe('MessageHandler ACP batching', () => {
         beginConversationTurn(sessionId: SessionId): string;
         enqueueACPUpdate(sessionId: SessionId, update: AcpSessionNotification): void;
         flushACPUpdatesNow(sessionId: SessionId): Promise<void>;
-        store: { get(sessionId: SessionId): { pendingUnread: boolean } };
       };
       host.beginConversationTurn(sessionId);
       host.enqueueACPUpdate(sessionId, {
@@ -2126,7 +2136,7 @@ describe('MessageHandler ACP batching', () => {
       expect(readItems((await doc.sessionData.history.readAll())[0])).toEqual([
         { type: 'text', text: 'before' },
       ]);
-      expect(host.store.get(sessionId).pendingUnread).toBe(true);
+      expect((await doc.getMetaState())?.lastMessageAt).toBeUndefined();
     } finally {
       await destroyRepoOnRealTimers(repo);
     }
