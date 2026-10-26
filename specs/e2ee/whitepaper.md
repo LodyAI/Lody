@@ -190,9 +190,13 @@ Org execution permissions obey the same worst-case 15-minute revocation bound. C
 
 The [M5 realtime review draft](../e2ee-foundations.md#realtime-rpc-and-presence-m5-review-draft)
 details shared encrypted frames, target-machine signer binding, progress/results,
-freshness acquisition and durable deduplication. Its proposed encoding, limits,
-machine-binding proof and clock policy are not approved by this whitepaper.
-Unavailable iroh must leave encrypted Streams RPC usable; neither transport may
+freshness acquisition and durable deduplication. The selected direction binds
+machineId in signed machine admissions, keeps execution freshness in memory after
+the machine's own authenticated latest-ledger read, and reuses the workspace
+device signing identity for iroh. The complete Spec revision remains draft;
+record encoding, concrete iroh domain-separation audit and product acceptance
+remain separate work. Unavailable iroh must leave encrypted Streams RPC usable;
+neither transport may
 bypass authorization or re-sign/re-encrypt the original request on retry.
 
 ## 8. Security Properties and Trade-offs

@@ -46,12 +46,14 @@ mandatory caller responsibilities; HPKE validity does not establish sender ident
 
 ## Realtime RPC and presence (M5 review draft)
 
-This section proposes the missing realtime contract. **The transport direction
-and safety requirements are decided; the byte layout, limits, machine binding
-and freshness acquisition below still require owner approval.** Implementation
-or passing vectors cannot approve them. Until those decisions are resolved,
-product realtime channels remain closed for encrypted workspaces. Ordinary RPC,
-document content v0, ledger v1 and credential-binding/v1 stay unchanged.
+This section records the selected realtime direction: iroh first, encrypted
+Streams RPC fallback, one shared signed encrypted frame and durable deduplication,
+ledger-bound machine IDs, and execution freshness obtained by the machine itself.
+The owner has selected these behavior boundaries, including the device identity
+used by iroh; **this Spec revision remains draft**. The existing candidate byte
+layout and limits below are unchanged; these choices do not approve a new ledger
+encoding or open product channels. The machine admission format change is separate
+work. Ordinary RPC, document content v0 and credential-binding/v1 stay unchanged.
 
 ### Shared content frame
 
@@ -76,11 +78,11 @@ All timestamps are proposed as nonnegative Unix UTC milliseconds. Expired means
 `now >= expiresAt`; presence requires `issuedAt <= now < expiresAt` and
 `0 < expiresAt - issuedAt <= 60_000`. Local clock uncertainty invalidates reuse.
 
-| Purpose | Proposed plaintext layout | Proposed maximum |
-| --- | --- | --- |
-| 8 request | `version:u8=0, requestId:16, expiresAt:u64, method:text16, params:bytes32` | 1 MiB; method 1..128 printable ASCII bytes |
-| 9 response | `version:u8=0, requestId:16, requestDigest:32, kind:u8, sequence:u32, payload:bytes32` | 1 MiB per frame |
-| 7 presence | `version:u8=0, incarnation:16, sequence:u32, issuedAt:u64, expiresAt:u64, payload:bytes32` | 64 KiB; TTL <= 60 seconds |
+| Purpose    | Proposed plaintext layout                                                                  | Proposed maximum                           |
+| ---------- | ------------------------------------------------------------------------------------------ | ------------------------------------------ |
+| 8 request  | `version:u8=0, requestId:16, expiresAt:u64, method:text16, params:bytes32`                 | 1 MiB; method 1..128 printable ASCII bytes |
+| 9 response | `version:u8=0, requestId:16, requestDigest:32, kind:u8, sequence:u32, payload:bytes32`     | 1 MiB per frame                            |
+| 7 presence | `version:u8=0, incarnation:16, sequence:u32, issuedAt:u64, expiresAt:u64, payload:bytes32` | 64 KiB; TTL <= 60 seconds                  |
 
 `requestId` and presence incarnation are host-generated secure random 16-byte
 values. The request signer is the content header key. Target, genesis, epoch and
@@ -120,26 +122,27 @@ knowing an ID or digest does not grant access. A stored business result can be
 wrapped in a newly authorized response to a separate result-query request;
 this is not re-encryption or re-signing of the original request for retry.
 
-### Machine binding: decision required
+### Machine binding: selected ledger admission
 
-The current ledger identifies machine devices but not product machine IDs.
-Current credential-binding/v1 binds genesis, pairing session, device key and
-credential hash; its signature does not cover machineId. Neither a directory
-entry nor possession of the epoch key fills this gap.
+Machine `AdmitDevice` records bind the exact product machineId and the device
+signing public key together under the approving personal device's ledger
+signature. Obtain `machineId → signing key` from the locally verified ledger,
+never from a directory row, a transport address or possession of an epoch key.
+Keep existing member/account and machine ownership/sharing checks; this binding
+does not grant new execution authority. Credential-binding/v1 remains unchanged
+and is not a machineId proof. The separate machine-binding proof alternative is
+not selected.
 
-Option A derives the realtime target identity from the ledger signing key,
-keeping machineId only as a routing hint; this changes the relationship with
-existing machine selection/sharing. **Recommended option B** adds a separate
-device-signed machine-binding proof, confirmed by the approving personal device,
-covering genesis, exact machineId, machine signing key and pairing session.
-It preserves the existing credential proof and ledger format. Its precise
-signing domain/encoding, acquisition by other members, issuer qualification,
-ownership/sharing verification, pin replacement and revocation still need review.
-It must compose with the verified member/account mapping rather than invent one.
-Until selected and verified, purpose APIs may accept an independently trusted
-expected signer, but product code must not obtain it from unverified metadata.
+Within a workspace, at most one active device may bind a given machineId. A
+replacement key for that machineId must revoke its previous key in the same
+signed ledger record, so a competing admission cannot create two active targets.
+The exact record encoding and its validation/vector changes belong to the
+separate machine admission format work; this draft does not choose their bytes.
+Old development machine records without machineId may continue authorized
+document synchronization, but cannot establish realtime authority. Do not infer
+a missing binding from metadata or migrate/re-sign their historical records.
 
-### Permission freshness and clock: decision required
+### Permission freshness: machine-local authenticated read
 
 A verified ledger proves continuity, not that a remote endpoint just returned
 its latest state. A token, request timestamp, forwarded proof or received frame
@@ -150,23 +153,42 @@ read-only queries use read permissions. Known revocation, epoch change,
 rotationRequired or conflicting local evidence immediately blocks affected sends
 and execution, including both transports and the durable dispatch path.
 
-**Recommended first version:** the execution host starts its own authenticated
-latest-ledger read, captures the local start time before network work, verifies
-through that exact latest boundary, and grants at most the remaining part of
-15 minutes. Cached/forwarded pages do not restart it. A slow read that consumes
-the window grants nothing. The deadline is intersected with the request deadline
-and any applicable upstream credential deadline, reserving clock/stop margin.
-No network is awaited under a global account lock.
+The execution machine starts its own authenticated latest-ledger read, captures
+the local start time before network work, and verifies through that exact latest
+boundary. Its in-memory authorization cache lasts no more than the remaining
+part of 15 minutes from that read's start. Cached/forwarded pages do not restart
+it. A slow read that consumes the window grants nothing. Intersect this deadline
+with the request deadline and any applicable upstream credential deadline,
+reserving clock/stop margin. No network is awaited under a global account lock.
 
-On restart the old execution freshness is invalid, even if its absolute deadline
-was persisted; online revalidation is required before new execution. This is the
-recommended alternative to a persistent trusted clock. A live cache must reject
-clock rollback/uncertain suspend-resume elapsed time and revalidate. The precise
-clock source, stop margin and sleep detection are still to be selected and
-tested per host. Persist the source checkpoint and original window for evidence;
-never mint a new window from those stored values. Offline content and editing
-remain available. Supporting cached execution freshness across restart would
-instead require an approved persistent clock/proof contract; it is not implied.
+Execution freshness is memory-only. Restart discards it and requires an online,
+authenticated latest-ledger revalidation before accepting new remote execution;
+local retained checkpoints and journal timestamps cannot restore that grant.
+A live cache rejects clock rollback or uncertain suspend/resume elapsed time and
+revalidates. Select and test the concrete clock, stop margin and sleep detection
+per host without exceeding the bound. Source checkpoints/original windows may
+remain diagnostic evidence, never a new authorization window. This does not
+change the journal's separately accepted persistent expiry clock-floor behavior.
+Offline document content/editing and already retained results remain available;
+a failed refresh blocks new remote execution when its existing grant expires,
+not unrelated local work. Started-but-uncertain operations are not automatically
+restarted after revalidation.
+
+### Iroh identity and trusted-host boundary
+
+Iroh reuses the workspace device's Ed25519 identity: its EndpointId is the same
+device signing public key. Only the trusted host supplies that device private
+key to iroh; it is never exported to the renderer or exposed by an arbitrary-sign
+IPC. An authenticated iroh peer still passes the shared frame, verified machine
+binding, current member/device permission, freshness and execution-journal gates.
+A transport connection does not grant workspace authority.
+
+Before enabling this reuse, audit the concrete iroh TLS and discovery signing
+paths for domain separation from ledger/content signatures; the selected identity
+is not evidence that this audit has passed. Native SDK, discovery/relay settings
+and platform acceptance remain implementation work. An unavailable or slow iroh
+connection must leave encrypted Streams RPC usable with the same original
+request ID/frame and one machine-side execution claim.
 
 ### Durable identities, result lookup and collection
 

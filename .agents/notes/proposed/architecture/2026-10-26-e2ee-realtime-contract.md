@@ -7,29 +7,48 @@ Translation: current
 
 ## Abstract
 
-Encrypted RPC needs more than encryption: the caller must identify the intended
-machine, and the machine must prevent a retry from starting a second operation.
-The foundations draft now makes the candidate wire profile, response binding,
-freshness acquisition and retained execution evidence reviewable. Existing
-credential pairing does not sign machineId, and a verified ledger pin does not
-prove freshness. Those decisions remain explicit proposals; this change opens
-no product channel and grants no protocol approval.
+Encrypted RPC needs an authenticated target and a persistent boundary that stops
+retries from executing twice. The owner selected signed ledger machineId binding,
+machine-initiated in-memory execution freshness and workspace-device Ed25519
+identity reuse for iroh, with encrypted Streams RPC as fallback. The foundations
+revision records those behavior choices while keeping its existing candidate
+frame encoding and limits unchanged. It remains draft and opens no product
+channel; record-format work, domain-separation audit and platform/runtime
+acceptance are separate gates.
 
-## Decision and alternatives
+## Selected direction and alternatives
 
 Keep the existing content v0 algorithms and purposes 7/8/9, with both transports
 carrying the same original frame. The [owning draft](../../../../specs/e2ee-foundations.md#realtime-rpc-and-presence-m5-review-draft)
-contains the exact proposed encoding and limits rather than duplicating them here.
-Fixed fields around existing method payload bytes avoid making an outer routing
-JSON object authoritative or requiring a second generic RPC method system.
+contains the existing candidate encoding and limits rather than duplicating them
+here. This update changes no candidate realtime-frame fields and prescribes no
+new ledger byte encoding.
 
-The machine identity alternatives are a ledger-key-derived target or a separate
-signed pairing binding. The latter is recommended to retain product machine IDs
-without changing ledger or credential-binding/v1. It still needs issuer,
-distribution, sharing and replacement rules. For freshness, locally initiated
-authenticated latest-ledger reads with restart invalidation avoid trusting sender
-timestamps or inventing a persistent trusted clock. Cross-restart freshness reuse
-would require a separate clock/proof design. Neither recommendation is approval.
+Machine `AdmitDevice` records bind machineId and public key under the approving
+personal device's signature. A locally verified ledger supplies machineId-to-key
+resolution; directory metadata and credential-binding/v1 do not. At most one
+active device may use a machineId within a workspace; replacement revokes the old
+key in the same record. This replaces the earlier recommendation for an independent
+machine-binding proof. The ledger-key-only routing alternative is not selected.
+Encoding and vector updates belong to separate machine admission work. Old
+development machine records without machineId keep authorized document sync but
+cannot authorize realtime; do not migrate or re-sign them.
+
+The execution machine itself authenticates and reads the latest ledger. Its
+15-minute maximum starts before that read, and only the remaining window may be
+cached in memory. Restart requires online revalidation before new remote
+execution, without blocking offline document use or reviving uncertain work.
+Forwarded pages and retained journal timestamps never renew the grant. Concrete
+clock/stop-margin/suspend handling still requires host tests; this is not a change
+to the journal's separately accepted persistent expiry floor.
+
+Iroh uses the workspace device signing public key as EndpointId. The private key
+is supplied only inside the trusted host, with no renderer export or arbitrary
+signing IPC. Before enabling this reuse, audit concrete TLS/discovery signing
+domains against ledger/content domains. SDK, discovery/relay configuration and
+platform acceptance are not selected by the identity decision. A slow/unavailable
+iroh path cannot block encrypted Streams, which retains the same original request
+ID/frame and shared execution journal.
 
 Do not collect execution evidence at request expiry. Initially retain it; a later
 bounded-retention design needs durable retired IDs and uncertainty handling.
@@ -62,9 +81,11 @@ Inspected public main `274d74a724de7bfb42c6ff0685c52c0abce7d487`:
 
 ## Verification boundary
 
-Source audit establishes the gaps above, not a shipped vulnerability in ordinary
-RPC. No native iroh identity, SDK, relay/discovery configuration or platform
-support choice is made. Documentation checks validate metadata and links only.
-Fixed vectors, crash/I/O tests, actual authorized product execution, canary and
-ordinary/encrypted latency comparisons remain separate evidence requirements.
-The Spec stays draft pending explicit owner review of the relevant revision.
+The source audit above is a baseline observation, not a claim that the selected
+ledger extension, freshness gate or iroh composition is implemented, nor a shipped
+vulnerability in ordinary RPC. Documentation checks validate metadata and links
+only. Fixed vectors, crash/I/O tests, actual authorized product execution, canary
+and ordinary/encrypted latency comparisons remain separate evidence requirements.
+The Spec remains draft: selected behavior directions do not approve the complete
+revision, the separate machine record encoding or an unaudited cross-protocol key
+reuse. This documentation PR changes no ordinary workspace path or product gate.
