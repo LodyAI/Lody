@@ -33,8 +33,8 @@ rolls back — is in the root [AGENTS.md](../../../../../AGENTS.md).
   owners) as a `CompactSection` of ruled project rows. Clicking a project opens
   a nested project window (header, page tabs) — never inline the editor beside the list.
   Mobile keeps the previous stacked list. Local-project deletion reuses
-  `useRemoveLocalProject` / `RemoveLocalProjectDialog` (nested overlay like MCP);
-  Follow the parent removal contract; do not add a second confirm.
+  `useRemoveLocalProject` directly, without a confirmation overlay.
+  Follow the parent removal contract.
   Do not RPC-probe worktree/skills on offline remotes, and
   never surface `machine_rpc_unavailable` as an editor error. The GitHub source
   row must paint from `lody:githubReposCache` on first frame; do not wait on

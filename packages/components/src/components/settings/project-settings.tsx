@@ -63,11 +63,7 @@ import {
   useRemoveLocalProject,
 } from '@/hooks/use-remove-local-project';
 import { localMachineIdAtom } from '@/atoms/local-probe';
-import {
-  RemoveLocalProjectDialog,
-  type LocalProjectRemovalState,
-  type PendingLocalProjectRemoval,
-} from '@/components/loro-app-sidebar';
+import { type LocalProjectRemovalState } from '@/components/loro-app-sidebar';
 import { getIpcServices } from '@/lib/electron-ipc-client';
 import { CompactRow, CompactSection, SettingsEmptyList } from './compact-layout';
 import { Button, type ButtonProps } from '@lody/ui/button';
@@ -1052,15 +1048,8 @@ export function ProjectSettingsComponent({
   const visibleMachineIds = useMemo(() => sections.map((section) => section.machineId), [sections]);
   const pendingRemovals = usePendingLocalProjectRemovals(visibleMachineIds);
   useLocalProjectRemovalResultNotifications(visibleMachineIds);
-  const { removeLocalProject, getRemoveLocalProjectImpact } = useRemoveLocalProject();
-  const [pendingRemoval, setPendingRemoval] = useState<PendingLocalProjectRemoval | null>(null);
-  const [isRemovingLocalProject, setIsRemovingLocalProject] = useState(false);
-
-  const canRemoveLocalProject = useCallback((_row: ProjectSettingsRow) => {
-    // This catalog is already owner-scoped. Protocol capability only gates
-    // worktree cleanup inside the existing confirm dialog.
-    return true;
-  }, []);
+  const { removeLocalProject } = useRemoveLocalProject();
+  const canRemoveLocalProject = useCallback((_row: ProjectSettingsRow) => true, []);
 
   const localProjectRemovalStateByKey = useMemo(() => {
     const next = new Map<string, LocalProjectRemovalState>();
@@ -1072,39 +1061,15 @@ export function ProjectSettingsComponent({
 
   const handleRequestRemoveLocalProject = useCallback(
     (row: ProjectSettingsRow) => {
-      const impact = getRemoveLocalProjectImpact({
+      void removeLocalProject({
         machineId: row.machineId,
         localProjectId: row.project.id,
-      });
-      const rootPath = typeof row.project.rootPath === 'string' ? row.project.rootPath : null;
-      setPendingRemoval({
-        machineId: row.machineId,
-        localProjectId: row.project.id,
-        name: row.project.name,
-        pathLabel: rootPath,
-        originalRootPath: rootPath,
-        conversationCount: impact.conversationCount,
-        runningSessionCount: impact.runningSessionCount,
+        projectName: row.project.name,
+        originalRootPath: row.project.rootPath,
       });
     },
-    [getRemoveLocalProjectImpact]
+    [removeLocalProject]
   );
-
-  const handleConfirmRemoveLocalProject = useCallback(async () => {
-    if (!pendingRemoval) return;
-    setIsRemovingLocalProject(true);
-    try {
-      const removed = await removeLocalProject({
-        machineId: pendingRemoval.machineId,
-        localProjectId: pendingRemoval.localProjectId,
-        projectName: pendingRemoval.name,
-        originalRootPath: pendingRemoval.originalRootPath ?? undefined,
-      });
-      if (removed) setPendingRemoval(null);
-    } finally {
-      setIsRemovingLocalProject(false);
-    }
-  }, [pendingRemoval, removeLocalProject]);
 
   return (
     <>
@@ -1143,17 +1108,6 @@ export function ProjectSettingsComponent({
         open={addLocalProjectDialogOpen}
         onOpenChange={setAddLocalProjectDialogOpen}
         initialMachineId={addLocalProjectMachineId}
-      />
-      <RemoveLocalProjectDialog
-        open={pendingRemoval != null}
-        target={pendingRemoval}
-        isRemoving={isRemovingLocalProject}
-        onOpenChange={(open) => {
-          if (!open && !isRemovingLocalProject) setPendingRemoval(null);
-        }}
-        onConfirm={() => {
-          void handleConfirmRemoveLocalProject();
-        }}
       />
     </>
   );

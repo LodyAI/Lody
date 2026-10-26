@@ -20,7 +20,6 @@ import {
 import { MobileAcpHistorySheet } from '@/components/mobile/mobile-acp-history-sheet';
 import { MobileWorktreeConfigSheet } from '@/components/mobile/mobile-worktree-config-sheet';
 import { MobileProjectSkillsRow } from '@/components/mobile/mobile-project-skills-sheet';
-import { MobileRemoveLocalProjectSheet } from '@/components/mobile/mobile-remove-local-project-sheet';
 import { AgentIcon } from '@/components/icons/agent-icon';
 import { getHistoryProviderLabel } from '@/components/settings/project-settings';
 import { useAppCapability } from '@/lib/app-platform';
@@ -76,7 +75,6 @@ export function MobileLocalProjectSettings({
     onWorktreeCleanupChange,
   } = useLocalProjectsAdmin();
   const { removeLocalProject } = useRemoveLocalProject();
-  const [removeSheetOpen, setRemoveSheetOpen] = useState(false);
 
   const projectKey = getLocalProjectVisibilityKey(machineId, projectId);
   const skillsSource: ProjectSkillsSource | null = workspaceId
@@ -216,29 +214,22 @@ export function MobileLocalProjectSettings({
         <MobileSettingsSection>
           <button
             type="button"
-            onClick={() => setRemoveSheetOpen(true)}
+            onClick={() => {
+              void removeLocalProject({
+                machineId: row.machineId,
+                localProjectId: row.project.id,
+                projectName: row.project.name,
+                originalRootPath: projectPath ?? undefined,
+              }).then((removed) => {
+                if (removed) onRemoved?.();
+              });
+            }}
             className="block w-full px-4 py-3 text-center text-[0.95rem] font-medium text-destructive transition-colors active:bg-destructive/10"
           >
             {t('workspace.projects.delete', 'Delete project')}
           </button>
         </MobileSettingsSection>
       ) : null}
-
-      <MobileRemoveLocalProjectSheet
-        open={removeSheetOpen}
-        onOpenChange={setRemoveSheetOpen}
-        projectName={row.project.name}
-        onConfirm={async () => {
-          const removed = await removeLocalProject({
-            machineId: row.machineId,
-            localProjectId: row.project.id,
-            projectName: row.project.name,
-            originalRootPath: projectPath ?? undefined,
-          });
-          if (removed) onRemoved?.();
-          return removed;
-        }}
-      />
 
       <MobileWorktreeConfigSheet
         open={worktreeSheetOpen}

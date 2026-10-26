@@ -324,7 +324,9 @@ portable repository-member semantics.
 Machine-local registrations carry optional `standaloneVisible` (legacy default:
 true). Lists use the standalone projection; member sources, repository-copy
 selection and session access use all accessible registrations. Explicit Add
-promotes the same identity. Removing its standalone entry changes only display,
-with no session archival or directory/worktree cleanup. Legacy removal-command
-results still have their existing notification path. Behavior and scope:
+promotes the same identity. Settings deletion directly submits the existing durable
+command without a confirmation surface. The daemon retains registrations needed by
+Project members or existing group runs and disables standalone display; otherwise
+it runs normal deletion. Dependency checks stay internal. Cleanup-result notifications
+remain available for earlier commands that explicitly requested cleanup. Behavior and scope:
 [Spec](../../specs/multi-repo-projects.md#direct-folder-selection-and-standalone-visibility).

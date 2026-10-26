@@ -87,12 +87,15 @@ If already visible, locate that entry. For example, adding `backend` through a
 multi-folder Project and later adding it alone yields one registration with two
 entry points. Neither action moves or merges conversations or changes membership.
 
-**Removal.** Removing a standalone entry turns off its standalone visibility;
-removing a member changes that Project's definition; deleting a Project removes
-that definition. These actions never delete source directories or invalidate
-registrations needed by other Projects or existing conversation snapshots. Adding
-a standalone entry again restores the same identity. Automatic cleanup of unused
-registrations is outside this change.
+**Deletion.** Use the existing Settings › Projects “Delete project” action, without
+an extra confirmation or a separate “Remove from list” feature. The owning daemon
+checks Project members and existing multi-repository conversation snapshots. If
+referenced, it cancels standalone display while preserving the registration and
+conversations; otherwise it follows the existing local-project deletion flow.
+These dependencies stay internal. No action deletes the original directory.
+Removing a member or deleting a Project changes its definition only; automatic
+cleanup of unused hidden registrations is outside this change. Explicitly adding
+a retained directory restores its existing identity and standalone entry.
 
 **Preserve execution semantics.** Direct selection does not introduce exact-copy
 binding: known GitHub-backed folders still become portable repository members;

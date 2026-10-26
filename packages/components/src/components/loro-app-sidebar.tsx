@@ -138,7 +138,6 @@ import {
   type LoroSidebarWorkspace,
 } from '@/components/loro-sidebar';
 import { SidebarFilterPopover } from '@/components/sidebar-filter-popover';
-import { Dialog } from '@/ui/dialog';
 import { Button } from '@lody/ui/button';
 import { ContextMenu } from '@lody/ui/context-menu';
 import { Tooltip } from '@lody/ui/tooltip';
@@ -271,29 +270,14 @@ export type LoroAppSidebarProps = {
   overlay?: boolean;
 };
 
-export type PendingLocalProjectRemoval = {
+type LocalProjectRemovalRequest = {
   machineId: MachineId;
   localProjectId: LocalProjectId;
   name: string;
-  pathLabel?: string | null;
   originalRootPath?: string | null;
-  conversationCount: number;
-  runningSessionCount: number;
 };
-type LocalProjectRemovalRequest = Omit<
-  PendingLocalProjectRemoval,
-  'conversationCount' | 'runningSessionCount'
->;
 
 export type LocalProjectRemovalState = 'removing' | 'waiting_for_device';
-
-export type RemoveLocalProjectDialogProps = {
-  open: boolean;
-  target: PendingLocalProjectRemoval | null;
-  isRemoving: boolean;
-  onOpenChange: (open: boolean) => void;
-  onConfirm: () => void;
-};
 
 type PendingSessionShare = {
   sessionId: string;
@@ -304,38 +288,6 @@ type PendingSessionShare = {
 const DOCS_LINK_FALLBACK_ORIGIN = 'https://lody.ai';
 const SIDEBAR_RELATIVE_TIME_REFRESH_MS = 30_000;
 const EMPTY_SESSION_SHARING_BY_ID: ReadonlyMap<string, SessionSharingState> = new Map();
-
-export function RemoveLocalProjectDialog({
-  open,
-  target,
-  isRemoving,
-  onOpenChange,
-  onConfirm,
-}: RemoveLocalProjectDialogProps) {
-  const { t } = useTranslation();
-  return (
-    <Dialog.Root open={open} onOpenChange={onOpenChange}>
-      <Dialog.Content>
-        <Dialog.Header>
-          <Dialog.Title>
-            {t('sidebar.localProjects.remove.entryTitle', { name: target?.name ?? '' })}
-          </Dialog.Title>
-          <Dialog.Description>
-            {t('sidebar.localProjects.remove.entryDescription')}
-          </Dialog.Description>
-        </Dialog.Header>
-        <Dialog.Footer>
-          <Button variant="secondary" disabled={isRemoving} onClick={() => onOpenChange(false)}>
-            {t('common.cancel')}
-          </Button>
-          <Button disabled={isRemoving} onClick={onConfirm}>
-            {t('sidebar.localProjects.remove.entryConfirm')}
-          </Button>
-        </Dialog.Footer>
-      </Dialog.Content>
-    </Dialog.Root>
-  );
-}
 
 function getDocsLinkOrigin(): string {
   const configuredSiteUrl = import.meta.env.VITE_SITE_URL?.trim();
@@ -1404,7 +1356,6 @@ export const LocalProjectItem = memo(function LocalProjectItem({
                       machineId,
                       localProjectId: project.id,
                       name: project.name,
-                      pathLabel: formattedPath,
                       originalRootPath: project.rootPath,
                     });
                   }}
@@ -1822,7 +1773,7 @@ export function LoroAppSidebar({
   const sessionSidebarCodeChangesOnly = useAtomValue(sessionSidebarCodeChangesOnlyAtom);
   const { archiveSession, markSessionUnread, setSessionPinned, updateSessionTitle } =
     useSessionActions();
-  const { removeLocalProject, getRemoveLocalProjectImpact } = useRemoveLocalProject();
+  const { removeLocalProject } = useRemoveLocalProject();
   const presenceStates = useAtomValue(lodyPresenceStatesAtom);
   const presenceNowMs = useAtomValue(lodyPresenceNowMsAtom);
 
@@ -1963,9 +1914,6 @@ export function LoroAppSidebar({
     t,
   ]);
 
-  const [pendingLocalProjectRemoval, setPendingLocalProjectRemoval] =
-    useState<PendingLocalProjectRemoval | null>(null);
-  const [isRemovingLocalProject, setIsRemovingLocalProject] = useState(false);
   // Rebuilt on every presence tick; keep the previous map while no status
   // changed, or every sidebar row is rebuilt and re-rendered several times a second.
   const liveSessionStatusesRef = useRef<Map<string, SessionStatus> | null>(null);
@@ -2206,12 +2154,8 @@ export function LoroAppSidebar({
     }
   }, [handleNavigateToProject, runtime, t]);
 
-  const handleConfirmRemoveLocalProject = useCallback(async () => {
-    const pending = pendingLocalProjectRemoval;
-    if (!pending || isRemovingLocalProject) return;
-
-    setIsRemovingLocalProject(true);
-    try {
+  const handleRequestRemoval = useCallback(
+    async (pending: LocalProjectRemovalRequest) => {
       const removed = await removeLocalProject({
         machineId: pending.machineId,
         localProjectId: pending.localProjectId,
@@ -2235,19 +2179,15 @@ export function LoroAppSidebar({
           params: { workspaceName: workspaceSlug },
         });
       }
-      setPendingLocalProjectRemoval(null);
-    } finally {
-      setIsRemovingLocalProject(false);
-    }
-  }, [
-    isRemovingLocalProject,
-    pendingLocalProjectRemoval,
-    removeLocalProject,
-    router,
-    selectedLocalProjectKey,
-    setLocalProjectCollapseState,
-    workspaceSlug,
-  ]);
+    },
+    [
+      removeLocalProject,
+      router,
+      selectedLocalProjectKey,
+      setLocalProjectCollapseState,
+      workspaceSlug,
+    ]
+  );
 
   // Sub-session times roll up into the parent — opening or messaging in a child
   // tab keeps the parent fresh in the sidebar order.
@@ -2349,21 +2289,6 @@ export function LoroAppSidebar({
       });
     },
     [closeMobileDrawer, router, workspaceSlug]
-  );
-
-  const handleRequestRemoval = useCallback(
-    (info: LocalProjectRemovalRequest) => {
-      const impact = getRemoveLocalProjectImpact({
-        machineId: info.machineId,
-        localProjectId: info.localProjectId,
-      });
-      setPendingLocalProjectRemoval({
-        ...info,
-        conversationCount: impact.conversationCount,
-        runningSessionCount: impact.runningSessionCount,
-      });
-    },
-    [getRemoveLocalProjectImpact]
   );
 
   const localProjectSections = useMemo(() => {
@@ -3153,7 +3078,9 @@ export function LoroAppSidebar({
                               resolveOpenerRowId={resolveOpenerRowId}
                               onToggleCollapsed={toggleLocalProjectCollapsed}
                               onToggleFullList={handleToggleLocalProjectFullList}
-                              onRequestRemoval={handleRequestRemoval}
+                              onRequestRemoval={(request) => {
+                                void handleRequestRemoval(request);
+                              }}
                             />
                           );
                         })}
@@ -3910,18 +3837,6 @@ export function LoroAppSidebar({
           onOpenChangelogSite={handleOpenChangelogSite}
         />
       ) : null}
-
-      <RemoveLocalProjectDialog
-        open={pendingLocalProjectRemoval != null}
-        target={pendingLocalProjectRemoval}
-        isRemoving={isRemovingLocalProject}
-        onOpenChange={(open) => {
-          if (!open && !isRemovingLocalProject) setPendingLocalProjectRemoval(null);
-        }}
-        onConfirm={() => {
-          void handleConfirmRemoveLocalProject();
-        }}
-      />
     </FocusScope>
   );
 }

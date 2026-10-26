@@ -10,8 +10,9 @@ Translation: current
 Creating a multi-folder Project no longer requires adding each directory as a
 standalone project first. The editor prepares folders without writes, registers
 or reuses them when saving, and keeps their standalone visibility separate from
-membership. Explicitly adding the same folder enables its existing entry; removing
-that entry preserves directories, memberships and conversations. Registration and
+membership. Explicitly adding the same folder enables its existing entry. The existing
+Delete project action has no confirmation: the daemon retains referenced registrations
+and their conversations, otherwise following normal local-project deletion. Registration and
 Project persistence remain separate writes, so failed saves retain reusable
 registrations rather than rolling back shared state.
 
@@ -39,13 +40,25 @@ not approve unrelated portions of that draft Spec or the earlier
   sharing retain them. Hidden display is not authorization. Local transactional
   updates preserve history and other fields; daemon refreshes preserve current
   display state. Concurrent distributed writes retain existing Flock convergence.
-- Explicit UI/CLI Add promotes the same identity. UI removal hides the standalone
-  entry without archiving sessions or cleaning worktrees. Legacy queued removal
-  commands and their result notifications retain their earlier semantics; no new
-  CLI/MCP removal API or registration garbage collector is introduced.
+- Explicit UI/CLI Add promotes the same identity. Settings and sidebar deletion
+  directly submit the existing durable command, without a confirmation dialog or
+  a separate “Remove from list” feature. The daemon waits for its retained catalog reader baseline
+  and checks local members, preferred local GitHub copies, and existing group-run
+  checkout receipts before archival. Referenced registrations become hidden with
+  sessions untouched; unreferenced registrations follow normal deletion. Original
+  directories are never deleted. No new request opts into worktree cleanup.
+- An unavailable catalog baseline retains the command for retry, with a bounded
+  wait on the existing reader; it never treats failed reads as absence.
+  The existing daemon owns execution and error recovery. No per-project lifecycle
+  owner or migration is introduced. Cross-document writes retain existing sync
+  semantics; this does not introduce distributed transactions.
 - GitHub-backed selections retain portable repository semantics. Ordinary folders
   remain machine-bound and visibly warn that originals are edited in place.
   Existing entries stay visible when reused as members.
+
+The user corrected the initial all-removals-hide interpretation: dependency retention
+is internal, and deleting a project needs no new visibility management or confirmation
+UI. Confirmation components, their stories and their unused impact counters are removed.
 
 Keeping the old picker alone preserved an unnecessary prerequisite. Putting paths
 straight into member definitions would replace machine resolution and portability
@@ -62,6 +75,10 @@ Owning files: `local-project-import.ts`, `project-group-form.ts`,
 GitHub identity so a newly registered copy is immediately eligible for a portable
 Project. The existing Promise entrypoints and native probe facade are reused;
 no lifecycle migration or additional process owner was introduced.
+
+Daemon behavioral coverage additionally verifies referenced registrations and running
+sessions survive deletion, unreadable catalogs preserve data, and unreferenced projects
+still archive sessions and remove registrations.
 
 Behavioral suites cover preparation without writes, promotion/reuse, preserved
 history, malformed rows, path/repository changes, partial-save retry, hidden copy

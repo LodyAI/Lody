@@ -101,9 +101,9 @@ Ancestor/scoped rules apply. `CLAUDE.md` links here; edit `AGENTS.md` only.
 - Local directory registration and standalone display are independent. Missing
   `standaloneVisible` means visible. Standalone lists filter hidden registrations;
   member resolution, repository-copy selection and session access retain them.
-- Removing a standalone entry only hides it; never archive Sessions, delete the
-  registration or clean worktrees from that UI action. Explicit Add restores its
-  visibility and identity. Continue showing results of legacy queued removals.
+- Local-project deletion uses the existing action without confirmation or dependency
+  UI. The daemon retains referenced registrations and sessions; unreferenced ones
+  follow normal deletion. Explicit Add restores standalone display and identity.
 - Direct folder selection is draft-only until save. Gate read-only inspection on
   `projectFolderSelection`; register missing directories before saving the complete
   Project. Retried saves reuse registrations; source paths stay out of definitions.

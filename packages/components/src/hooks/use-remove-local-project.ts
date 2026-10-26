@@ -6,18 +6,19 @@ import {
   getMachineFlockDocId,
   getMachineFlockDeleteLocalProjectEntries,
   getMachineFlockLocalProjects,
-  isActiveSessionStatus,
+  buildMachineDeleteLocalProjectCommand,
+  getServerNow,
   machineFlockKeys,
   type LocalProjectId,
   type LocalProjectMeta,
   type MachineId,
-  type SessionMeta,
 } from '@lody/shared';
-import { activeWorkspaceRuntimeAtom } from '@/atoms';
+import { activeWorkspaceRuntimeAtom, userAtom } from '@/atoms';
 import { getMachineMetaMapAtom } from '@/atoms/machines';
-import { useMachineFlockRowsByMachineIds } from '@/hooks/use-machine-flock-rows';
-import { useVisibleSessionMetas } from '@/hooks/use-visible-session-metas';
-import { setLocalProjectStandaloneVisibility } from '@/lib/local-project-import';
+import {
+  resyncMachineFlockRows,
+  useMachineFlockRowsByMachineIds,
+} from '@/hooks/use-machine-flock-rows';
 import { getLocalProjectVisibilityKey } from '@/lib/visible-local-project-index';
 
 export type RemoveLocalProjectTarget = {
@@ -27,11 +28,6 @@ export type RemoveLocalProjectTarget = {
   originalRootPath?: string;
 };
 
-export type RemoveLocalProjectImpact = {
-  conversationCount: number;
-  runningSessionCount: number;
-};
-
 export type PendingLocalProjectRemoval = {
   key: string;
   machineId: MachineId;
@@ -39,26 +35,6 @@ export type PendingLocalProjectRemoval = {
   project: LocalProjectMeta;
   requestedAt: number;
 };
-
-function isSessionInLocalProject(session: SessionMeta, target: RemoveLocalProjectTarget): boolean {
-  const project = session.project;
-  return (
-    session.machineId === target.machineId &&
-    project?.kind === 'local' &&
-    project.localProjectId === target.localProjectId
-  );
-}
-
-export function getRemoveLocalProjectImpactFromSessions(
-  sessions: readonly SessionMeta[],
-  target: RemoveLocalProjectTarget
-): RemoveLocalProjectImpact {
-  const matching = sessions.filter((session) => isSessionInLocalProject(session, target));
-  return {
-    conversationCount: matching.length,
-    runningSessionCount: matching.filter((session) => isActiveSessionStatus(session.status)).length,
-  };
-}
 
 /**
  * Pending removal commands remain visible as honest UI state while the owning
@@ -97,34 +73,34 @@ export function usePendingLocalProjectRemovals(
   }, [rawMachines, rowsByMachineId]);
 }
 
-/** Remove only the standalone entry; registrations and existing sessions remain usable. */
+/** The owning machine decides whether references require retaining the registration. */
 export function useRemoveLocalProject() {
   const runtime = useAtomValue(activeWorkspaceRuntimeAtom);
-  const { allActiveSessions } = useVisibleSessionMetas();
-  const getRemoveLocalProjectImpact = useCallback(
-    (target: RemoveLocalProjectTarget) =>
-      getRemoveLocalProjectImpactFromSessions(allActiveSessions, target),
-    [allActiveSessions]
-  );
+  const currentUserId = useAtomValue(userAtom)?.id;
   const removeLocalProject = useCallback(
     async (target: RemoveLocalProjectTarget): Promise<boolean> => {
       if (!runtime) return false;
       try {
-        await setLocalProjectStandaloneVisibility({
-          runtime,
-          machineId: target.machineId,
-          localProjectId: target.localProjectId,
-          visible: false,
-        });
+        await runtime.writer.flockRowPut(
+          getMachineFlockDocId(runtime.workspaceId, target.machineId),
+          machineFlockKeys.deleteLocalProjectCommand(target.localProjectId),
+          buildMachineDeleteLocalProjectCommand({
+            requestedAt: getServerNow(),
+            requestedBy: currentUserId,
+            projectName: target.projectName,
+            originalRootPath: target.originalRootPath,
+          })
+        );
+        void resyncMachineFlockRows(runtime, target.machineId).catch(() => undefined);
         return true;
       } catch (error) {
         toast.error(error instanceof Error ? error.message : String(error));
         return false;
       }
     },
-    [runtime]
+    [runtime, currentUserId]
   );
-  return { removeLocalProject, getRemoveLocalProjectImpact };
+  return { removeLocalProject };
 }
 
 const localProjectRemovalResultNotificationsInFlight = new Set<string>();

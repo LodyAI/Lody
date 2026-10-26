@@ -149,7 +149,7 @@ export type LocalProjectMeta = {
    * Absent for folders without one and from older daemons.
    */
   githubRepoFullName?: string;
-  /** Missing on legacy rows means visible. Does not control access or registration. */
+  /** Explicit standalone membership; false for folder-only imports. Legacy rows default true. */
   standaloneVisible?: boolean;
 };
 
