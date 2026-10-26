@@ -17,10 +17,10 @@ Generic providers now omit model values from inferred defaults. The settings dia
 
 The alternative of preserving last-item selection was rejected because ACP option order carries no preference or cost semantics. The change does not alter stored explicit choices or the main conversation's model.
 
-The deterministic shared suite covers catalog order differing from the current model, absent model capability, generic provider behavior, and the builtin Codex exception. The CLI test also covers preserving a current Amp model and applying an explicit legacy model selection. A local baseline run failed four model-default assertions before the implementation change; the final shared suite passes 19 tests. The CLI suite was attempted but could not load because the isolated Claude adapter lacks its nested SDK manifest in this checkout.
+The deterministic shared suite covers catalog order differing from the current model, absent model capability, generic provider behavior, and the builtin Codex exception. The CLI test also covers preserving a current Amp model and applying an explicit legacy model selection. The focused baseline replay fails because the result contains `model: "ultra"`; the same scenario passes after the change, and the full shared suite passes 19 tests. The CLI suite was attempted but could not load because the isolated Claude adapter lacks its nested SDK manifest in this checkout.
 
 ## Verification
 
 - Shared: `vitest run packages/shared/tests/title-generation-defaults.test.ts` — 19 passed.
 - CLI: `vitest run src/agent/title-generator.test.ts` — blocked before test collection by missing `packages/acp-extension-claude/node_modules/@anthropic-ai/claude-agent-sdk/manifest.json`.
-- Pull request: pending.
+- Pull request: [#1909](https://github.com/LodyAI/Lody/pull/1909), draft.

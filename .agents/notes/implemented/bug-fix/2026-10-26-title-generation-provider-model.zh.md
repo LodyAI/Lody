@@ -17,10 +17,10 @@ Translation: current
 
 保留目录最后一项选择的方案被否决，因为 ACP 选项顺序没有表达偏好或费用的语义。此改动不会修改已经保存的显式选择，也不影响主会话模型。
 
-确定性共享套件覆盖目录顺序与当前模型不一致、缺少模型能力、通用 Provider 行为和 builtin Codex 特例。CLI 测试还覆盖保留 Amp 当前模型及应用显式旧式模型选择。实现前的本地基线运行有四个模型默认断言失败；最终共享套件 19 项通过。CLI 套件已尝试运行，但当前 checkout 的隔离 Claude 适配器缺少嵌套 SDK manifest，导致测试收集前无法启动。
+确定性共享套件覆盖目录顺序与当前模型不一致、缺少模型能力、通用 Provider 行为和 builtin Codex 特例。CLI 测试还覆盖保留 Amp 当前模型及应用显式旧式模型选择。聚焦基线回放因结果包含 `model: "ultra"` 而失败；修复后同一场景通过，完整共享套件 19 项通过。CLI 套件已尝试运行，但当前 checkout 的隔离 Claude 适配器缺少嵌套 SDK manifest，导致测试收集前无法启动。
 
 ## 验证
 
 - Shared：`vitest run packages/shared/tests/title-generation-defaults.test.ts` — 19 项通过。
 - CLI：`vitest run src/agent/title-generator.test.ts` — 因缺少 `packages/acp-extension-claude/node_modules/@anthropic-ai/claude-agent-sdk/manifest.json`，未能收集测试。
-- Pull request：待创建。
+- Pull request：[#1909](https://github.com/LodyAI/Lody/pull/1909)，draft。
