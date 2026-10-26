@@ -24,6 +24,10 @@ The regression test converts a synthetic `local_bash` start and untyped completi
 The test could not run locally because this nested checkout has no `node_modules` and
 `vitest` is unavailable. The repository check and full formatter also stop on missing
 workspace tools; the changed files pass the pinned Oxfmt check through `pnpm dlx`.
+The PR's remote CLI suite passed after the Kimi fallback was restored (`333` CLI test
+files passed, one skipped), and remote Static checks passed. The first remote run failed
+the existing Kimi fallback assertion when the shared fallback was removed; keeping a
+provider-specific metadata fallback fixed that regression.
 The checkout has Node 26.11.1, below the declared 26.12.1 floor, and no other installed
 version meets the floor. The local desktop build stops before launch for the same missing
 dependencies, so no actual UI before/after capture was produced. `pnpm run docs check`
