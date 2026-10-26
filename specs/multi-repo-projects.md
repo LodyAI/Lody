@@ -61,7 +61,7 @@ looks only at that branch.
   direct selection) beside a separate tab listing every GitHub repository, or for
   GitHub only, the repositories; finally the name, the selected Members and the
   instructions. A repository ticked both as a folder and on GitHub is noted, not
-  blocked; the Project keeps one Member that uses the folder.
+  blocked; the Project keeps one Member, cloned from GitHub.
   Changing an earlier answer drops Members the new answer cannot hold. Editing a
   Project walks the same questions, marking its current answers and Members as
   previously selected; someone who may not change it sees it read-only.

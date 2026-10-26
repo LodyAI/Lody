@@ -44,6 +44,7 @@ test('a repository may be ticked as a folder and on GitHub, with a notice only',
   await expect(web).not.toBeChecked();
   await web.click();
   await expect(page.getByText(/acme\/web is selected both as a folder/)).toBeVisible();
+  await expect(page.getByText(/uses the GitHub repository/)).toBeVisible();
   await expect(page.getByText('4 selected')).toBeVisible();
   const next = page.getByRole('button', { name: 'Next', exact: true });
   await expect(next).toBeEnabled();
@@ -95,4 +96,18 @@ test('editing walks the same questions with the current answers marked', async (
   await expect(page.getByText('Submitted')).toHaveCount(0);
   await page.getByRole('button', { name: 'Save', exact: true }).click();
   await expect(page.getByText('Submitted')).toBeVisible();
+});
+
+test('a long GitHub-only list scrolls instead of being clipped', async ({ page }) => {
+  await story(page, 'github-sources');
+  const last = page.getByRole('checkbox', { name: 'acme/service-24', exact: true });
+  // The list's card holds every row; only the dialog body scrolls.
+  const clipped = await page
+    .locator('label', { has: last })
+    .locator('..')
+    .evaluate((card) => card.scrollHeight - card.clientHeight);
+  expect(clipped).toBeLessThanOrEqual(1);
+  await last.click();
+  await expect(last).toBeChecked();
+  await expect(page.getByText('3 selected')).toBeVisible();
 });

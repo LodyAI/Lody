@@ -218,6 +218,9 @@ const styles = stylex.create({
     color: colors.secondaryLabel,
   },
   errors: { margin: 0, paddingInlineStart: space[4], listStyleType: 'disc' },
+  // A records card clips its rows (`overflow: hidden`), so in the scrolling
+  // column it would shrink to fit and hide the rest instead of scrolling.
+  fullHeight: { flexShrink: 0 },
 });
 
 /** One row of a picking list: a folder, a local copy of a repository, or a GitHub repository. */
@@ -262,11 +265,7 @@ type MemberUsage = 'inPlace' | 'localCopy' | 'worktree';
 
 /** How a member is used: in place, a machine's copy, or a fresh clone. */
 const usageOf = (member: ProjectGroupMemberDraft): MemberUsage =>
-  member.source.kind === 'local'
-    ? 'inPlace'
-    : member.directory || member.source.preferLocal
-      ? 'localCopy'
-      : 'worktree';
+  member.source.kind === 'local' ? 'inPlace' : member.source.preferLocal ? 'localCopy' : 'worktree';
 
 /**
  * Creating a project, one question at a time: what it holds (folders on a
@@ -314,9 +313,9 @@ export function ProjectCreateWizard({
       mode === 'create' && initialScope ? 'sources' : 'kind';
     return { step: initialStep ?? defaultStep, scope: initialScope };
   });
-  // Repositories ticked in both tabs: one member, using the local copy. The
-  // second tick is remembered so either tab can be unticked on its own.
-  const [alsoGithub, setAlsoGithub] = useState<ReadonlySet<string>>(() => new Set());
+  // Repositories ticked in both tabs: one member, cloned from GitHub. The
+  // folder tick is remembered so either tab can be unticked on its own.
+  const [alsoFolder, setAlsoFolder] = useState<ReadonlySet<string>>(() => new Set());
   const go = (next: ProjectCreateWizardStep, nextScope: ProjectGroupScope | null = scope) =>
     setState({ step: next, scope: nextScope });
 
@@ -331,7 +330,7 @@ export function ProjectCreateWizard({
   const chooseScope = (next: ProjectGroupScope) => {
     const retained = retainProjectGroupScope(value, next, labelOf);
     if (retained !== value) onChange(retained);
-    setAlsoGithub(new Set());
+    setAlsoFolder(new Set());
     go('sources', next);
   };
 
@@ -354,10 +353,7 @@ export function ProjectCreateWizard({
   };
 
   const doubled = value.members.filter(
-    (member) =>
-      alsoGithub.has(keyOf(member)) &&
-      member.source.kind === 'github' &&
-      usageOf(member) === 'localCopy'
+    (member) => alsoFolder.has(keyOf(member)) && usageOf(member) === 'worktree'
   );
   const doubleNotice =
     doubled.length > 0 ? (
@@ -453,8 +449,8 @@ export function ProjectCreateWizard({
             onChange={onChange}
             sources={sources}
             scope={scope}
-            alsoGithub={alsoGithub}
-            onAlsoGithubChange={setAlsoGithub}
+            alsoFolder={alsoFolder}
+            onAlsoFolderChange={setAlsoFolder}
             previousUsage={previous?.usage}
             machineLabel={machineLabel(machineId)}
             labelOf={labelOf}
@@ -467,10 +463,10 @@ export function ProjectCreateWizard({
             value={value}
             onChange={onChange}
             onRemoved={(key) => {
-              if (!alsoGithub.has(key)) return;
-              const remaining = new Set(alsoGithub);
+              if (!alsoFolder.has(key)) return;
+              const remaining = new Set(alsoFolder);
               remaining.delete(key);
-              setAlsoGithub(remaining);
+              setAlsoFolder(remaining);
             }}
             labelOf={labelOf}
             detailOf={detailOf}
@@ -675,8 +671,8 @@ function SourcesStep({
   onChange,
   sources,
   scope,
-  alsoGithub,
-  onAlsoGithubChange,
+  alsoFolder,
+  onAlsoFolderChange,
   previousUsage,
   machineLabel,
   labelOf,
@@ -688,8 +684,8 @@ function SourcesStep({
   onChange: (value: ProjectGroupFormValue) => void;
   sources: readonly ProjectMemberSourceOption[];
   scope: ProjectGroupScope;
-  alsoGithub: ReadonlySet<string>;
-  onAlsoGithubChange: (next: ReadonlySet<string>) => void;
+  alsoFolder: ReadonlySet<string>;
+  onAlsoFolderChange: (next: ReadonlySet<string>) => void;
   /** An edited project's members as saved, keyed by source: how each was used. */
   previousUsage?: ReadonlyMap<string, MemberUsage>;
   machineLabel: string;
@@ -706,10 +702,10 @@ function SourcesStep({
 
   const members = new Map(value.members.map((member) => [keyOf(member), member]));
   const withKey = (key: string, add: boolean) => {
-    const next = new Set(alsoGithub);
+    const next = new Set(alsoFolder);
     if (add) next.add(key);
     else next.delete(key);
-    onAlsoGithubChange(next);
+    onAlsoFolderChange(next);
   };
   const plain = (repoFullName: string): ProjectMemberSource => ({ kind: 'github', repoFullName });
 
@@ -724,7 +720,7 @@ function SourcesStep({
       const member = members.get(option.key);
       // A repository ticked only in the GitHub tab is a clone, not this folder.
       const selected =
-        member !== undefined && (member.source.kind === 'local' || usageOf(member) === 'localCopy');
+        member !== undefined && (usageOf(member) !== 'worktree' || alsoFolder.has(option.key));
       folderRows.push({
         key: option.key,
         label:
@@ -740,17 +736,11 @@ function SourcesStep({
         selected,
         toggle: () => {
           if (selected && member) {
-            if (alsoGithub.has(option.key) && member.source.kind === 'github') {
-              onChange(
-                setProjectGroupMemberSource(value, member.id, withoutLocalCopy(member.source), {
-                  dropDirectory: true,
-                })
-              );
-              withKey(option.key, false);
-            } else onChange(removeProjectGroupMember(value, member.id, labelOf));
+            // Also ticked on GitHub: it stays, as the clone it already is.
+            if (alsoFolder.has(option.key)) withKey(option.key, false);
+            else onChange(removeProjectGroupMember(value, member.id, labelOf));
           } else if (member) {
-            // Already ticked as a GitHub repository: it now uses this copy.
-            onChange(setProjectGroupMemberSource(value, member.id, option.source));
+            // Already ticked as a GitHub repository, which wins: only noted.
             withKey(option.key, true);
           } else onChange(addProjectGroupMember(value, option.source, option.label));
         },
@@ -774,11 +764,10 @@ function SourcesStep({
         icon: member.source.kind === 'github' ? 'repository' : 'folder',
         selected: true,
         toggle: () => {
-          if (alsoGithub.has(key) && member.source.kind === 'github') {
+          if (alsoFolder.has(key)) {
+            // The GitHub tick remains: keep the clone, forget the folder.
             onChange(
-              setProjectGroupMemberSource(value, member.id, withoutLocalCopy(member.source), {
-                dropDirectory: true,
-              })
+              setProjectGroupMemberSource(value, member.id, member.source, { dropDirectory: true })
             );
             withKey(key, false);
           } else onChange(removeProjectGroupMember(value, member.id, labelOf));
@@ -793,12 +782,11 @@ function SourcesStep({
     .filter((option) => option.kind === 'repository')
     .map((option) => {
       const member = members.get(option.key);
-      const asFolder =
-        member !== undefined && folderKeys.has(option.key) && usageOf(member) === 'localCopy';
+      const both = alsoFolder.has(option.key);
       const selected =
         member !== undefined &&
         member.source.kind === 'github' &&
-        (!asFolder || alsoGithub.has(option.key));
+        (usageOf(member) === 'worktree' || !folderKeys.has(option.key));
       return {
         key: option.key,
         label: option.label,
@@ -810,10 +798,24 @@ function SourcesStep({
         selected,
         toggle: () => {
           if (selected && member) {
-            if (asFolder) withKey(option.key, false);
-            else onChange(removeProjectGroupMember(value, member.id, labelOf));
-          } else if (member && asFolder) withKey(option.key, true);
-          else onChange(addProjectGroupMember(value, plain(option.label), option.label));
+            // Still ticked as a folder: it goes back to using the local copy.
+            if (both && member.source.kind === 'github') {
+              onChange(
+                setProjectGroupMemberSource(value, member.id, {
+                  ...member.source,
+                  preferLocal: true,
+                })
+              );
+              withKey(option.key, false);
+            } else onChange(removeProjectGroupMember(value, member.id, labelOf));
+          } else if (member && member.source.kind === 'github') {
+            // Ticked as a folder too: GitHub wins, so it becomes a clone.
+            onChange(
+              setProjectGroupMemberSource(value, member.id, withoutLocalCopy(member.source))
+            );
+            withKey(option.key, true);
+          } else if (!member)
+            onChange(addProjectGroupMember(value, plain(option.label), option.label));
         },
       };
     });
@@ -936,12 +938,12 @@ function RowIcon({ icon }: { icon: PickRow['icon'] }) {
 function PickList({ rows, empty }: { rows: readonly PickRow[]; empty: string }) {
   if (rows.length === 0)
     return (
-      <div {...stylex.props(settingsRecordsCard)}>
+      <div {...stylex.props(settingsRecordsCard, styles.fullHeight)}>
         <div {...stylex.props(styles.empty)}>{empty}</div>
       </div>
     );
   return (
-    <div {...stylex.props(settingsRecordsCard)}>
+    <div {...stylex.props(settingsRecordsCard, styles.fullHeight)}>
       {rows.map((row, index) => (
         <label
           key={row.key}
@@ -1001,7 +1003,7 @@ function DetailsStep({
       <Section
         title={t('settings.projectGroups.wizard.details.members', { count: value.members.length })}
       >
-        <div {...stylex.props(settingsRecordsCard)}>
+        <div {...stylex.props(settingsRecordsCard, styles.fullHeight)}>
           {value.members.map((member, index) => {
             const code = validation.memberErrors.get(member.id);
             const usage = usageOf(member);

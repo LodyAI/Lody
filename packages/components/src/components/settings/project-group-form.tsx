@@ -88,13 +88,14 @@ const styles = stylex.create({
     height: '16px',
     color: colors.tertiaryLabel,
   },
-  stateWarning: { color: colors.warning },
   stateError: { color: colors.destructive },
   addRow: { minWidth: 0, display: 'flex', gap: space[2], flexWrap: 'wrap', alignItems: 'center' },
   errors: { margin: 0, paddingInlineStart: space[4], listStyleType: 'disc' },
 });
 
-export type ProjectGroupMemberStatus = 'pending' | 'unavailable' | undefined;
+// A repository whose submodules could not be read is shown as having none:
+// most repositories have none, so a warning there was noise.
+export type ProjectGroupMemberStatus = 'pending' | undefined;
 
 export type ProjectGroupFormProps = {
   value: ProjectGroupFormValue;
@@ -517,13 +518,6 @@ function MemberState({
     mark = {
       node: <Spinner size="small" aria-hidden="true" />,
       reason: t('settings.projectGroups.detection.pending'),
-    };
-  } else if (status === 'unavailable') {
-    mark = {
-      node: (
-        <AlertTriangle aria-hidden="true" {...stylex.props(catalog.icon, styles.stateWarning)} />
-      ),
-      reason: t('settings.projectGroups.detection.unavailable'),
     };
   } else if (detected) {
     mark = {

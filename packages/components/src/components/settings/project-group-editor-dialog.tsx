@@ -201,12 +201,15 @@ export function ProjectGroupEditorDialog({
     [onChange, runtime, t]
   );
   const folderController = useAddLocalProjectController(undefined, undefined, selectProject);
+  // Any machine the user owns can be browsed over RPC, as Add folder does; it
+  // needs the daemon's read-only folder inspection.
   const folderMachines = folderController.machines.filter(
-    (machine) =>
-      machine.id === currentMachineId &&
-      machine.canAddProjects &&
-      machine.supportsProjectFolderSelection
+    (machine) => machine.canAddProjects && machine.supportsProjectFolderSelection
   );
+  // The browser opens on the machine the wizard chose, and only that one, so a
+  // picked folder cannot bind the project to a different machine.
+  const [browseMachineId, setBrowseMachineId] = useState<MachineId | null>(null);
+  const browseMachines = folderMachines.filter((machine) => machine.id === browseMachineId);
   const wizardMachines = useMemo(
     () =>
       folderController.machines.map((machine) => ({
@@ -328,12 +331,8 @@ export function ProjectGroupEditorDialog({
   );
   const statusOf = useCallback(
     (memberId: ProjectMemberId): ProjectGroupMemberStatus =>
-      detection.pending.has(memberId)
-        ? 'pending'
-        : detection.unavailable.has(memberId)
-          ? 'unavailable'
-          : undefined,
-    [detection.pending, detection.unavailable]
+      detection.pending.has(memberId) ? 'pending' : undefined,
+    [detection.pending]
   );
 
   const close = () => {
@@ -413,7 +412,10 @@ export function ProjectGroupEditorDialog({
               canBrowseFolders={(machineId) =>
                 folderMachines.some((machine) => machine.id === machineId && machine.online)
               }
-              onBrowseFolders={() => setSelectingFolder(true)}
+              onBrowseFolders={(machineId) => {
+                setBrowseMachineId(machineId);
+                setSelectingFolder(true);
+              }}
               submitting={submitting}
               error={error}
               onSubmit={() => void save()}
@@ -454,8 +456,8 @@ export function ProjectGroupEditorDialog({
         selectionOnly
         open={selectingFolder && openEditor !== null}
         onOpenChange={setSelectingFolder}
-        machines={folderMachines}
-        initialMachineId={currentMachineId}
+        machines={browseMachines}
+        initialMachineId={browseMachineId}
         ops={folderController.ops}
         onAdded={() => undefined}
       />

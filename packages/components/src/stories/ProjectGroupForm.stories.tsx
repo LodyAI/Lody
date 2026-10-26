@@ -164,7 +164,7 @@ export const DetectionStates: Story = {
         member('proto', 'github:acme/proto', { kind: 'root', dir: 'proto' }),
       ],
     },
-    statuses: { web: 'unavailable', api: 'pending' },
+    statuses: { api: 'pending' },
   },
 };
 

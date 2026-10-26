@@ -25,7 +25,8 @@ not approve unrelated portions of that draft Spec or the earlier
 [multi-repository proposal](../../proposed/architecture/2026-10-16-multi-repo-projects.md).
 
 - Reuse the directory browser, adding folders one at a time to one draft. The
-  direct entry targets the current owned machine. Existing-source selection stays
+  direct entry targets the current owned machine (since widened to any owned
+  machine by the [creation wizard](../feature/2026-10-26-project-creation-wizard.md)). Existing-source selection stays
   available, including for platforms without a local machine.
 - `projectFolderSelection` v1 gates opt-in `prepare-add` inspection. Ordinary
   requests retain their old response shape. Reuse the daemon's read-only member

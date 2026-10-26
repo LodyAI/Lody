@@ -39,10 +39,15 @@ picker to offer creation beside Settings and the sidebar menu.
 - With a machine chosen, its copies of GitHub repositories appear among its
   folders (`preferLocal`), and the GitHub tab lists every repository, ticked as a
   plain clone. Ticking one repository in both tabs is allowed and only noted: the
-  project keeps one member, using the folder. The wizard remembers the second tick,
-  so either tab can be unticked independently. GitHub-only scope also turns
+  project keeps one member, cloned from GitHub (the user chose GitHub to win). The
+  wizard remembers the folder tick, so either tab can be unticked independently;
+  unticking GitHub returns the member to the local copy. GitHub-only scope also turns
   copy-preferring members into plain clones.
-- Lists show every row; search filters but nothing is held back for it.
+- Lists show every row; search filters but nothing is held back for it. A records
+  card clips its rows, so list cards opt out of flex shrinking; otherwise the
+  GitHub-only list shrank to the dialog and could not scroll.
+- A repository whose submodules cannot be read is no longer flagged: most have
+  none, so the warning was noise.
 - The answers are raised cards that press in, and progress is an ink fill in a
   recessed well, following the `@lody/ui` materials rather than flat outlines.
 - "Next" and "Create" are separate keyed elements. Sharing one slot let React reuse
@@ -61,7 +66,15 @@ placement. Saved placements are kept and detection still nests new members; the
 "cannot read submodules" hint, which pointed at those manual controls, no longer
 appears for owners. Considered and not taken: adding a second machine-selection
 protocol (the existing visible-machine list and `projectFolderSelection` gate are
-sufficient). Direct browsing remains limited to the current machine, as before.
+sufficient).
+
+Direct browsing now works on any online machine the user owns whose Lody supports
+`projectFolderSelection`, not only the current one: the earlier note limited it to
+this machine, but preparation, registration and the directory browser already go
+through machine RPC by id, as Add folder does for remote machines. The browser opens
+on the machine chosen in the wizard and offers only that machine, so a picked folder
+cannot bind the project elsewhere. This supersedes the current-machine limit in the
+[direct folder selection note](../architecture/2026-10-26-project-direct-folder-selection.md).
 
 ## Validation and limits
 

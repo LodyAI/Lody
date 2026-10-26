@@ -13,7 +13,7 @@ Translation: current
 
 用户要求实现[多仓库 Spec](../../../../specs/multi-repo-projects.zh.md#直接选择目录与独立展示)中的直接选择方案。本次完成初始研究中的创建与展示决策，不代表批准该草案的其他部分或之前的[多仓库提案](../../proposed/architecture/2026-10-16-multi-repo-projects.zh.md)。
 
-- 复用目录浏览器，逐个添加文件夹到同一草稿。直接入口指向当前用户拥有的本机；保留已有来源选择，包括没有本机的平台。
+- 复用目录浏览器，逐个添加文件夹到同一草稿。直接入口指向当前用户拥有的本机（后由[创建向导](../feature/2026-10-26-project-creation-wizard.zh.md)放宽到用户拥有的任意机器）；保留已有来源选择，包括没有本机的平台。
 - `projectFolderSelection` v1 能力控制可选的 `prepare-add` 探测。普通请求保持原响应形状。复用 daemon 的只读成员探测获取 Git 身份和子模块，不从父目录推断 Git 能力。
 - 草稿路径与探测结果不写入 Project 定义。保存时重新校验规范化身份、Git 和仓库身份，登记所有所选目录，再写入完整项目。不回滚删除可能已被其他 Project 或会话使用的登记。关闭选择器会使迟到响应失效，保存入口防止重复提交。
 - `LocalProjectMeta.standaloneVisible` 缺省为 true。展示列表过滤 false；可访问的登记、仓库副本查找和会话共享保留它们。隐藏不是权限控制。本地事务保留历史和其他字段，daemon 刷新保留当前展示状态；分布式并发写入沿用现有 Flock 收敛语义。

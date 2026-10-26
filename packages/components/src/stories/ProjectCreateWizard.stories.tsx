@@ -148,7 +148,7 @@ function WizardInDialog({
             labelOf={labelOf}
             detailOf={detailOf}
             validation={validation}
-            canBrowseFolders={(machineId) => machineId === here}
+            canBrowseFolders={(machineId) => machineId !== mini}
             onBrowseFolders={() => undefined}
             initialStep={initialStep}
             mode={mode}
