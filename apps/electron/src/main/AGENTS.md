@@ -12,6 +12,10 @@ cookie, preserve the fallback's error/result. A network failure or 5xx must neve
 be replaced by the earlier 401: shared session verification would interpret two
 such results as confirmed sign-out. Cached identity remains scoped to the auth
 generation and is cleared by explicit sign-out or definitive session rejection.
+The 5-second session timeout bounds the caller, not the request: a late resolved
+answer seeds the cached session only when none exists in the same generation.
+`getSessionToken` treats an unreachable verification as no verdict and uses the
+durable cookie (else the supplied bearer); it never starts a second check.
 For local E2EE directory selection, `auth-storage.ts` also retains a token-hash/user-ID
 binding in the existing auth config, with no time expiry. `getCachedSessionIdentity`
 uses it only when the device cookie or supplied bearer matches; it never grants cloud
