@@ -3,6 +3,8 @@
 Status: implemented
 Translation: current
 
+PR: [#1919](https://github.com/LodyAI/Lody/pull/1919)
+
 [English](2026-10-26-dead-turns-and-orphaned-queue.md)
 
 ## 摘要
