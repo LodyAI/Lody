@@ -9,6 +9,7 @@ import {
 import type { ApplyAgentBatchInput } from '../loro/session-agent-writes';
 import type { SessionDocument } from '@/lib/loro/doc';
 import type { Logger } from '@/utils/logger';
+import { convertClaudeTaskLifecycleNotification } from '../../agent/claude-task-lifecycle';
 import { applyMessageContentsBatch, applyNotificationOnHistory } from './history-apply';
 import {
   clearThreadGoalFromHistory,
@@ -594,6 +595,54 @@ describe('handleACPUpdateMessage', () => {
       subagentType: 'Explore',
       description: 'Find CLI startup',
     });
+  });
+
+  it('keeps a Bash actor through an untyped terminal event and history reconstruction', async () => {
+    const { doc, readHistory } = createDoc();
+    const getCurrentSessionTurnId = vi.fn(() => 'turn-1');
+    const convert = (message: Record<string, unknown>) => {
+      const result = convertClaudeTaskLifecycleNotification({
+        sessionId: 'acp-session',
+        message: { type: 'system', task_id: 'bash-task-1', ...message },
+      });
+      expect(result.ok).toBe(true);
+      if (!result.ok) throw new Error(result.reason);
+      return result.notification;
+    };
+
+    await handleACPUpdateMessage(
+      doc,
+      [
+        convert({
+          subtype: 'task_started',
+          task_type: 'local_bash',
+          description: 'Run the synthetic background command',
+        }),
+        convert({
+          subtype: 'task_notification',
+          status: 'completed',
+          summary: 'Synthetic command completed',
+        }),
+        convert({
+          subtype: 'task_progress',
+          description: 'Late progress replay',
+        }),
+      ],
+      { getCurrentSessionTurnId }
+    );
+
+    const items = readHistory()[0]?.items as MessageContent[] | undefined;
+    const task = items?.find(
+      (item): item is Extract<MessageContent, { type: 'subagent_task' }> =>
+        item.type === 'subagent_task'
+    );
+    expect(task).toMatchObject({
+      taskId: 'bash-task-1',
+      actor: 'local_bash',
+      status: 'completed',
+      summary: 'Synthetic command completed',
+    });
+    expect(items?.filter((item) => item.type === 'subagent_task')).toHaveLength(1);
   });
 
   it('creates the explicit target assistant entry instead of appending to another open entry', async () => {

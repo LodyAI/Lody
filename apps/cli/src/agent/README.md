@@ -30,6 +30,9 @@ context/message-flow.md "Upstream".
   use each property's `description` as the full question and `title` as its short
   header, including single-question forms whose request message is generic. Legacy
   Claude single-question forms retain their request-message prompt.
+- `claude-task-lifecycle.ts` — converts Claude task lifecycle events into ACP task
+  updates. Rendered titles may use a fallback; persisted actor metadata is omitted when
+  the provider reports no actor, so later events preserve an earlier identity.
 - `acp-runner.ts` — process spawn/restart around the client. Spawn + initialize +
   `newSession`/`loadSession` share `acp-session-start-gate.ts`.
 - `acp-session-start-gate.ts` — process-wide start semaphore used by
