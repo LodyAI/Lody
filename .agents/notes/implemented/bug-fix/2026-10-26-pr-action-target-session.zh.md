@@ -1,15 +1,14 @@
----
+# PR 数据归属与动作执行目标分离
+
 Status: implemented
 Translation: current
-Language: zh
-Counterpart: 2026-10-26-pr-action-target-session.md
----
+Pull request: https://github.com/LodyAI/Lody/pull/1908
 
-# PR 数据归属与动作执行目标分离
+[English](2026-10-26-pr-action-target-session.md)
 
 ## 摘要
 
-PR 视图曾将 GitHub workspace owner 的会话 ID 同时用于查询 PR 数据和查找实时冲突修复动作。打开子会话时，这会把提示发给根会话。现在 `PrTabContainer` 单独接收当前选中会话作为动作目标，同时保留 owner ID 用于 GitHub 查询和分析；目标缺失时禁用动作。组件测试覆盖根会话、子会话和无目标三种情况，但当前 checkout 缺少依赖，运行验证仍待完成。
+PR 视图曾将 GitHub workspace owner 的会话 ID 同时用于查询 PR 数据和查找实时冲突修复动作。打开子会话时，这会把提示发给根会话。现在 `PrTabContainer` 单独接收当前选中会话作为动作目标，同时保留 owner ID 用于 GitHub 查询和分析；目标缺失时禁用动作。根会话、子会话和无目标组件测试均通过；消融实验复现了子会话及无目标场景的失败。当前 checkout 缺少 ACP 扩展子模块，因此无法录制完整会话界面。
 
 ## 决策
 

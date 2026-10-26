@@ -1,15 +1,14 @@
----
+# Keep PR data ownership separate from action dispatch
+
 Status: implemented
 Translation: current
-Language: en
-Counterpart: 2026-10-26-pr-action-target-session.zh.md
----
+Pull request: https://github.com/LodyAI/Lody/pull/1908
 
-# Keep PR data ownership separate from action dispatch
+[中文](2026-10-26-pr-action-target-session.zh.md)
 
 ## Abstract
 
-The PR view used the workspace-owner session ID both to load PR data and to find the live conflict-resolution action. For a child conversation, that sent the prompt to the root conversation. `PrTabContainer` now receives a separate action target from the selected conversation while retaining the owner ID for GitHub queries and analytics. A missing target disables the action. The component suite now covers root, child, and absent targets; runtime verification remains pending where dependencies are unavailable.
+The PR view used the workspace-owner session ID both to load PR data and to find the live conflict-resolution action. For a child conversation, that sent the prompt to the root conversation. `PrTabContainer` now receives a separate action target from the selected conversation while retaining the owner ID for GitHub queries and analytics. A missing target disables the action. The component suite passes for root, child, and absent targets, and ablation reproduces the child and missing-target failures. A full session UI capture remains unavailable because the required ACP extension submodules are absent from this checkout.
 
 ## Decision
 
