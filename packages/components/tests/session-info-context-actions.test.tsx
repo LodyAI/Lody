@@ -141,7 +141,6 @@ describe('ContextChip actions', () => {
     expect(createPrButton).toBeInstanceOf(HTMLButtonElement);
     expect(commitButton).toBeUndefined();
     expect(menuButton).toBeInstanceOf(HTMLButtonElement);
-    expect(createPrButton?.className).toContain('text-muted-foreground/80');
     // One flat tinted surface in both themes — the bar keeps controls flat.
     // The tint, the borderless edge and the absence of a focus indicator are
     // the component's own StyleX style now (`styles.actionsShell`,

@@ -991,7 +991,7 @@ function renderReport({
   <p>Paired frames were rendered in Chromium from this repository's production-component stories. The “Difference” image marks above-threshold pixels in magenta over a faded copy of the after frame; raw property changes retain geometry and computed-style differences. Click any screenshot to inspect its original size.</p>
 </header>
 ${acceptance.verdict ? `<section class="frame" data-acceptance-verdict style="margin:16px 32px;border:2px solid #a75a00;background:#fff6e5"><h2>Partial visual acceptance — unresolved evidence remains</h2><p>${escapeHtml(acceptance.verdict)}</p></section>` : ''}
-<p style="margin:16px 32px" data-summary-scope>Primary comparison metrics only. Supplemental native, controls and application evidence have separate outcomes below.</p>
+<p style="margin:16px 32px" data-summary-scope>${escapeHtml(acceptance.metricsDescription ?? 'Primary comparison metrics only. Supplemental native, controls and application evidence have separate outcomes below.')}</p>
 <div class="summary">
   <div><strong>${counts.total}</strong>frames compared</div>
   <div><strong>${counts.identical}</strong>pixel threshold + raw styles match</div>

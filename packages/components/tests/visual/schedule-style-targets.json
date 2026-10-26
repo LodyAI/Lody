@@ -1,0 +1,53 @@
+{
+  "viewports": [
+    { "name": "phone", "width": 390, "height": 844 },
+    { "name": "below-sm", "width": 639, "height": 900 },
+    { "name": "at-sm", "width": 640, "height": 900 },
+    { "name": "desktop", "width": 1280, "height": 900 }
+  ],
+  "themes": ["light", "dark"],
+  "ids": [
+    "schedules-stylemigration--wide-rows-default",
+    "schedules-stylemigration--wide-rows-narrow",
+    "schedules-stylemigration--issues",
+    "schedules-stylemigration--caller-overrides",
+    "schedules-stylemigration--theme-variables"
+  ],
+  "states": {
+    "schedules-stylemigration--issues": [
+      {
+        "name": "single-hover",
+        "steps": [
+          { "action": "hover", "selector": "[data-schedule-style-marker=single] [role=img]" },
+          { "action": "visible", "text": "A machine is required." }
+        ]
+      },
+      {
+        "name": "multiple-focus",
+        "steps": [
+          { "action": "movePointer", "x": 0, "y": 0 },
+          { "action": "focus", "selector": "[data-schedule-style-marker=multiple] [role=img]" },
+          { "action": "visible", "text": "The destination must belong to this workspace." }
+        ]
+      }
+    ],
+    "schedules-stylemigration--caller-overrides": [
+      {
+        "name": "caller-focus",
+        "steps": [
+          { "action": "focus", "selector": "[data-schedule-style-marker=caller] [role=img]" },
+          { "action": "visible", "text": "A machine is required." }
+        ]
+      }
+    ],
+    "schedules-stylemigration--theme-variables": [
+      {
+        "name": "multiple-focus",
+        "steps": [
+          { "action": "focus", "selector": "[data-schedule-style-marker=multiple] [role=img]" },
+          { "action": "visible", "text": "The destination must belong to this workspace." }
+        ]
+      }
+    ]
+  }
+}

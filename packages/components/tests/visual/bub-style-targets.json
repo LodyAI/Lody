@@ -1,0 +1,278 @@
+{
+  "viewports": [
+    {
+      "name": "desktop",
+      "width": 1280,
+      "height": 900
+    },
+    {
+      "name": "phone",
+      "width": 390,
+      "height": 844
+    },
+    {
+      "name": "narrow",
+      "width": 320,
+      "height": 720
+    }
+  ],
+  "themes": ["light", "dark"],
+  "ids": [
+    "settings-bubinstallguidemigration--copy-success",
+    "settings-bubinstallguidemigration--copy-failure",
+    "settings-bubinstallguidemigration--long-translation"
+  ],
+  "ready": {
+    "settings-bubinstallguidemigration--copy-success": [
+      {
+        "action": "visible",
+        "selector": "[data-bub-ports-ready=\"true\"]"
+      }
+    ],
+    "settings-bubinstallguidemigration--copy-failure": [
+      {
+        "action": "visible",
+        "selector": "[data-bub-ports-ready=\"true\"]"
+      }
+    ],
+    "settings-bubinstallguidemigration--long-translation": [
+      {
+        "action": "visible",
+        "selector": "[data-bub-ports-ready=\"true\"]"
+      }
+    ]
+  },
+  "states": {
+    "settings-bubinstallguidemigration--copy-success": [
+      {
+        "name": "copy-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "[data-bub-guide] button[aria-label]"
+          }
+        ]
+      },
+      {
+        "name": "copy-keyboard-focus",
+        "steps": [
+          {
+            "action": "movePointer",
+            "x": -10,
+            "y": -10
+          },
+          {
+            "action": "focus",
+            "selector": "[data-bub-guide] button:not([aria-label])"
+          },
+          {
+            "action": "press",
+            "selector": "[data-bub-guide] button:not([aria-label])",
+            "key": "Shift+Tab"
+          }
+        ]
+      },
+      {
+        "name": "copy-result",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "[data-bub-guide] button[aria-label]",
+            "key": "Enter"
+          },
+          {
+            "action": "visible",
+            "selector": "[data-bub-copy-state=\"success\"]"
+          }
+        ]
+      },
+      {
+        "name": "docs-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "[data-bub-guide] button:not([aria-label])"
+          }
+        ]
+      },
+      {
+        "name": "docs-keyboard-focus",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "[data-bub-guide] button[aria-label]",
+            "key": "Tab"
+          }
+        ]
+      },
+      {
+        "name": "docs-intent",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "[data-bub-guide] button:not([aria-label])",
+            "key": "Enter"
+          },
+          {
+            "action": "visible",
+            "selector": "[data-bub-external=\"requested\"]"
+          }
+        ]
+      }
+    ],
+    "settings-bubinstallguidemigration--copy-failure": [
+      {
+        "name": "copy-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "[data-bub-guide] button[aria-label]"
+          }
+        ]
+      },
+      {
+        "name": "copy-keyboard-focus",
+        "steps": [
+          {
+            "action": "movePointer",
+            "x": -10,
+            "y": -10
+          },
+          {
+            "action": "focus",
+            "selector": "[data-bub-guide] button:not([aria-label])"
+          },
+          {
+            "action": "press",
+            "selector": "[data-bub-guide] button:not([aria-label])",
+            "key": "Shift+Tab"
+          }
+        ]
+      },
+      {
+        "name": "copy-result",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "[data-bub-guide] button[aria-label]",
+            "key": "Enter"
+          },
+          {
+            "action": "visible",
+            "selector": "[data-bub-copy-state=\"fallback-rejected\"]"
+          }
+        ]
+      },
+      {
+        "name": "docs-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "[data-bub-guide] button:not([aria-label])"
+          }
+        ]
+      },
+      {
+        "name": "docs-keyboard-focus",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "[data-bub-guide] button[aria-label]",
+            "key": "Tab"
+          }
+        ]
+      },
+      {
+        "name": "docs-intent",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "[data-bub-guide] button:not([aria-label])",
+            "key": "Enter"
+          },
+          {
+            "action": "visible",
+            "selector": "[data-bub-external=\"requested\"]"
+          }
+        ]
+      }
+    ],
+    "settings-bubinstallguidemigration--long-translation": [
+      {
+        "name": "copy-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "[data-bub-guide] button[aria-label]"
+          }
+        ]
+      },
+      {
+        "name": "copy-keyboard-focus",
+        "steps": [
+          {
+            "action": "movePointer",
+            "x": -10,
+            "y": -10
+          },
+          {
+            "action": "focus",
+            "selector": "[data-bub-guide] button:not([aria-label])"
+          },
+          {
+            "action": "press",
+            "selector": "[data-bub-guide] button:not([aria-label])",
+            "key": "Shift+Tab"
+          }
+        ]
+      },
+      {
+        "name": "copy-result",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "[data-bub-guide] button[aria-label]",
+            "key": "Enter"
+          },
+          {
+            "action": "visible",
+            "selector": "[data-bub-copy-state=\"success\"]"
+          }
+        ]
+      },
+      {
+        "name": "docs-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "[data-bub-guide] button:not([aria-label])"
+          }
+        ]
+      },
+      {
+        "name": "docs-keyboard-focus",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "[data-bub-guide] button[aria-label]",
+            "key": "Tab"
+          }
+        ]
+      },
+      {
+        "name": "docs-intent",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "[data-bub-guide] button:not([aria-label])",
+            "key": "Enter"
+          },
+          {
+            "action": "visible",
+            "selector": "[data-bub-external=\"requested\"]"
+          }
+        ]
+      }
+    ]
+  }
+}

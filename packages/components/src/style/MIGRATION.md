@@ -113,6 +113,15 @@ values in the browser. Do not change a shared token for one component without
 checking its other consumers. `rounded-full` compiles to `calc(infinity * 1px)`;
 a fixed `9999px` token can differ for a public component with unbounded sizes.
 
+A `stylex.defineVars` value that references an app CSS variable resolves that
+reference where the StyleX variable is defined. An inherited alias does not
+re-read a descendant override. For a migrated declaration that previously read
+`--spacing`, a radius or an ink variable on its own element, preserve that local
+expression when the component supports scoped overrides. Compare both root and
+subtree variable changes: a root-only custom-theme test cannot detect this
+difference. Portalled content needs its own scope probe. Keep shared-token
+changes separate until their consumers have equivalent before/after evidence.
+
 Type and spacing stay on their original rem scale. Moving them to `em` or
 `--ui-font-size` changes interface font-size behavior. Preserve existing `em`
 styles where the component already follows the interface size.

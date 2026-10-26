@@ -80,6 +80,25 @@ const styles = stylex.create({
     lineHeight: 'var(--leading-tight)',
     color: themeColors.mutedForeground,
   },
+  wideRow: {
+    display: { default: 'flex', '@media (min-width: 40rem)': 'grid' },
+    minHeight: 'calc(var(--spacing) * 11)',
+    flexDirection: 'column',
+    gap: {
+      default: 'calc(var(--spacing) * 1)',
+      '@media (min-width: 40rem)': 'calc(var(--spacing) * 3)',
+    },
+    paddingBlock: 'calc(var(--spacing) * 1)',
+    paddingLeft: 'calc(var(--spacing) * 3)',
+    paddingRight: 'calc(var(--spacing) * 1)',
+    gridTemplateColumns: {
+      default: null,
+      '@media (min-width: 40rem)': 'minmax(0,auto) minmax(0,1fr)',
+    },
+    alignItems: { default: null, '@media (min-width: 40rem)': 'center' },
+  },
+  wideLabel: { color: 'hsl(var(--muted-foreground) / 1)' },
+  wideControls: { display: 'flex', minWidth: 0, justifyContent: 'flex-end' },
 });
 
 /**
@@ -178,9 +197,16 @@ export function PropertyRowWide({ label, children }: { label: string; children: 
   // `pr-1`, not `pr-3`: the menu trigger's own `px-2` is the other 8px, so its
   // label and chevron end on the same line as every other row.
   return (
-    <div className="flex min-h-11 flex-col gap-1 py-1 pl-3 pr-1 sm:grid sm:grid-cols-[minmax(0,auto)_minmax(0,1fr)] sm:items-center sm:gap-3">
-      <span className="min-w-0 truncate text-[0.9em] text-muted-foreground">{label}</span>
-      <div className="flex min-w-0 justify-end [&>*]:min-w-0 [&>*]:max-w-full">{children}</div>
+    <div {...stylex.props(styles.wideRow)}>
+      <span {...stylex.props(styles.label, styles.wideLabel)}>{label}</span>
+      <div
+        className={cn(
+          stylex.props(styles.wideControls).className,
+          '[&>*]:min-w-0 [&>*]:max-w-full'
+        )}
+      >
+        {children}
+      </div>
     </div>
   );
 }

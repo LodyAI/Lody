@@ -470,6 +470,50 @@ preserve the partially migrated tree. Supplemental original-source fixtures
 were used for stories whose legacy static build could not render; those source
 copies and per-frame capture origins remain in the local evidence.
 
+### Element-local variable scopes
+
+The property-row / installation-guide / information-chip batch moves 73 more
+utility occurrences into local StyleX while preserving the existing DOM, events
+and control APIs. Real fixtures now cover the formerly unconsumed `PropertyRowWide`
+export, including caller child-width conflicts.
+
+| Surface | Utilities before → after | Retained contract |
+| --- | --- | --- |
+| Schedule property rows and field marks | 37 → 10 | Two unknown-child width selectors plus eight existing card/ghost compatibility utilities. |
+| Bub installation guide | 29 → 8 | Button appearance and sizing overrides. |
+| Information chips and CI popovers | 33 → 8 | Primitive maximum width, padding and shadow overrides; width and border color are independently migrated. |
+
+Subtree variable probes exposed a real migration bug: `stylex.defineVars`
+references resolve at their definition scope. An inherited alias had already
+resolved `--spacing`, radius and ink dependencies at the root, whereas the old
+utility read the variable on its element. The schedule mark changed from 24px to
+16px; the installation row changed from 13px radius / 10px spacing to 6px / 8px.
+Root-only variable checks had missed this. Rejected candidates retain 16 schedule
+frames / 711,092 threshold pixels, 16 guide frames / 215,817 pixels, and eight
+chip scope frames with changed computed values. New declarations now preserve
+exact local `var` / `calc` / HSL expressions. Existing declarations and shared
+token definitions stay unchanged; their other scoped consumers remain unaudited.
+This is a dependency-resolution correction, not a layout compensation.
+
+The final `properties-acceptance.html` contains 886 paired real screenshots:
+698 primary states and 188 native input / variable-scope states. All pairs have
+zero threshold pixels and equal recorded styles/geometry; 879 are PNG-byte-exact.
+The seven other pairs retain 12 raw pixels, maximum channel delta 3. Sixteen
+alternating-source controls reproduce every one of the four primary After PNG
+hashes on the unchanged Before source; the exact raster trigger is unproved.
+Full snapshots compare 40,174 paired nodes; 72 additional schedule contracts
+compare another 2,504 nodes, including actual tooltip list margins and focus.
+The report embeds the original, rejected and corrected screenshots and keeps
+historical unresolved evidence prominent.
+
+The guide runner initially sampled its scroll endpoint before changed variables
+and fonts settled. Both immutable sources were recaptured after observable font,
+geometry and right-edge scroll readiness; the final 80 guide native pairs are
+byte-exact. Rejected measurements and interrupted chip-run cleanup evidence stay
+in local artifacts. Existing mobile long-link clipping and extreme 240px row
+crowding remain byte-exact baseline limitations. These controls do not establish
+native OS IME, WebKit or every theme outside the recorded matrix.
+
 ### Build and test findings
 
 Storybook 10.6's strict execution wrappers and shared async chunks introduced
@@ -545,6 +589,14 @@ absolute/relative toggle states. All interaction and date-bound checks pass;
 `usage-toggle-postmerge-final/report.html` embeds the actual screenshots. This
 smoke has no pre-merge pixel baseline and does not establish visual equivalence.
 
+For the five-component batch, all 618 component files / 6,136 tests pass under
+`NODE_OPTIONS=--no-experimental-webstorage NODE_ENV=test`; the seven owning suites
+pass 112 behavior tests. Final root type/lint/Effect/script stages complete, but
+the aggregate still stops on the unsupported Node SQLite guard and Git identity
+assertion (332 CLI files / 4,698 tests pass). The current Electron application
+build passes; its actual smoke attempt fails before launch because
+`electron@44.9.3/path.txt` is missing. This adds no new Electron runtime acceptance.
+
 ## Remaining work
 
 Compiler-backed [usage inventory](../../../../packages/components/scripts/tailwind-usage.mjs)
@@ -563,18 +615,20 @@ across 188 affected files. The scanner separately
 reports 690 unresolved expressions: 600 in components and 90 in `src/ui`.
 After integrating upstream additions, the scan reported 2,572 occurrences across
 188 files. The status/project-entry/rename batch left 2,497 occurrences across 184 files.
-Following the later upstream integration, the current scan reports 2,501
+Following the later upstream integration, the scan reports 2,501
 (components 2,009, `src/ui` 487, routes 5) across 185 files, with 692 unresolved
-expressions (611 components, 81 `src/ui`). These are lower bounds, not a project
-completion percentage.
+expressions (611 components, 81 `src/ui`). The property/guide/chip batch leaves
+2,428 occurrences (components 1,936, `src/ui` 487, routes 5) across 184 files;
+the 692 unresolved expressions are unchanged. These are lower bounds, not a
+project completion percentage.
 
 The unconsumed `src/ui/sidebar.tsx` retains 324 occurrences and is not re-exported
 by `src/ui/index.ts`; direct public wildcard imports remain possible.
 The unconsumed `src/components/task-list.tsx` retains 87 occurrences,
 `src/components/sidebar-updated-task-list.tsx` retains 95 and the unused
-`PropertyRowWide` export in `src/components/schedules/schedule-property-row.tsx`
-retains 20. Establish actual consumers and rendering fixtures before migrating
-them. The original phone terminal error span has zero width and invisible inline
+`PropertyRowWide` export now has actual rendering fixtures and retains only its
+two arbitrary-child selectors. Establish actual consumers and rendering fixtures
+before migrating the other unconsumed surfaces. The original phone terminal error span has zero width and invisible inline
 feedback, while desktop/tablet/short-view feedback remains visible; the original
 240px schedule fixture with an extreme label and nonshrinking Button overlaps.
 Both limitations are preserved and documented, rather than redesigned during a

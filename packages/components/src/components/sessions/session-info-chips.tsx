@@ -61,6 +61,12 @@ import {
 } from '../../style/theme-scale.stylex';
 
 const styles = stylex.create({
+  textMuted: { color: 'hsl(var(--muted-foreground) / 1)' },
+  textWarning: { color: 'hsl(var(--status-warning) / 1)' },
+  ciPopover: {
+    width: 'calc(var(--spacing) * 96)',
+    borderColor: 'color-mix(in oklab, hsl(var(--border) / 1) 60%, transparent)',
+  },
   /* ── Goal popover ─────────────────────────────────────────────────── */
   goalPanel: {
     display: 'flex',
@@ -151,7 +157,11 @@ const styles = stylex.create({
     alignItems: 'center',
     overflow: 'hidden',
     borderRadius: themeRadius.md,
-    backgroundColor: 'hsl(var(--foreground) / 0.05)',
+    backgroundColor: {
+      default: 'hsl(var(--foreground) / 0.05)',
+      ':where(.dark, .dark *, .dark-scope, .dark-scope *):not(:where(.light-scope, .light-scope *))':
+        'color-mix(in oklab, hsl(var(--muted-foreground) / 1) 8%, transparent)',
+    },
   },
   actionButton: {
     display: 'flex',
@@ -162,8 +172,26 @@ const styles = stylex.create({
     paddingInline: themeSpace[1.5],
     paddingBlock: themeSpace[0.5],
     fontWeight: themeFontWeight.medium,
-    color: themeColors.mutedForeground,
-    backgroundColor: { default: 'transparent', ':focus-visible': 'hsl(var(--foreground) / 0.05)' },
+    color: {
+      default: themeColors.mutedForeground,
+      ':where(.dark, .dark *, .dark-scope, .dark-scope *):not(:where(.light-scope, .light-scope *))':
+        'color-mix(in oklab, hsl(var(--muted-foreground) / 1) 80%, transparent)',
+      ':focus-visible': themeColors.foreground,
+      ':focus-visible:where(.dark, .dark *, .dark-scope, .dark-scope *):not(:where(.light-scope, .light-scope *))':
+        'color-mix(in oklab, hsl(var(--muted-foreground) / 1) 80%, transparent)',
+      '@media (hover: hover)': { ':enabled:hover': 'hsl(var(--foreground) / 1)' },
+    },
+    backgroundColor: {
+      default: 'transparent',
+      ':focus-visible': 'hsl(var(--foreground) / 0.05)',
+      ':focus-visible:where(.dark, .dark *, .dark-scope, .dark-scope *):not(:where(.light-scope, .light-scope *))':
+        'color-mix(in oklab, hsl(var(--muted-foreground) / 1) 8%, transparent)',
+      '@media (hover: hover)': {
+        ':enabled:hover': 'color-mix(in oklab, hsl(var(--foreground) / 1) 5%, transparent)',
+        ':enabled:hover:where(.dark, .dark *, .dark-scope, .dark-scope *):not(:where(.light-scope, .light-scope *))':
+          'color-mix(in oklab, hsl(var(--muted-foreground) / 1) 8%, transparent)',
+      },
+    },
     // The old Tailwind `focus:ring-*` (and its `focus-visible:` twin) painted
     // nothing — the app forces Tailwind's own ring transparent — but it still
     // declared a `box-shadow`, and a utility-layer shadow beats the base
@@ -174,7 +202,6 @@ const styles = stylex.create({
       'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke, --tw-gradient-from, --tw-gradient-via, --tw-gradient-to',
     transitionDuration: themeDuration[150],
     transitionTimingFunction: themeEasing['in-out'],
-    ':focus-visible': { color: themeColors.foreground },
     ':disabled': { opacity: 0.5 },
   },
   actionLabel: {
@@ -191,7 +218,17 @@ const styles = stylex.create({
     alignItems: 'center',
     justifyContent: 'center',
     color: 'hsl(var(--muted-foreground) / 0.75)',
-    backgroundColor: { default: 'transparent', ':focus-visible': 'hsl(var(--foreground) / 0.05)' },
+    backgroundColor: {
+      default: 'transparent',
+      ':focus-visible': 'hsl(var(--foreground) / 0.05)',
+      ':focus-visible:where(.dark, .dark *, .dark-scope, .dark-scope *):not(:where(.light-scope, .light-scope *))':
+        'color-mix(in oklab, hsl(var(--muted-foreground) / 1) 8%, transparent)',
+      '@media (hover: hover)': {
+        ':hover': 'hsl(var(--foreground) / 0.05)',
+        ':hover:where(.dark, .dark *, .dark-scope, .dark-scope *):not(:where(.light-scope, .light-scope *))':
+          'color-mix(in oklab, hsl(var(--muted-foreground) / 1) 8%, transparent)',
+      },
+    },
     // Same as the action chip above: the old Tailwind `focus:ring-*` erased
     // the base layer's inset focus ring, so the button showed NO focus
     // indicator. Keep it that way.
@@ -206,11 +243,14 @@ const styles = stylex.create({
       left: 0,
       height: themeSpace[3],
       width: '1px',
-      backgroundColor: 'hsl(var(--foreground) / 0.1)',
+      backgroundColor: {
+        default: 'hsl(var(--foreground) / 0.1)',
+        ':where(.dark, .dark *, .dark-scope, .dark-scope *):not(:where(.light-scope, .light-scope *))':
+          'color-mix(in oklab, hsl(var(--muted-foreground) / 1) 15%, transparent)',
+      },
     },
     '@media (hover: hover)': {
       ':hover': {
-        backgroundColor: 'hsl(var(--foreground) / 0.05)',
         color: themeColors.foreground,
       },
     },
@@ -353,7 +393,12 @@ const styles = stylex.create({
     gap: themeSpace[1.5],
     overflow: 'hidden',
     borderRadius: themeRadius.md,
-    backgroundColor: 'hsl(var(--foreground) / 0.06)',
+    backgroundColor: {
+      default: 'hsl(var(--foreground) / 0.06)',
+      '@media (hover: hover)': {
+        ':enabled:hover': 'color-mix(in oklab, hsl(var(--foreground) / 1) 10%, transparent)',
+      },
+    },
     paddingInline: themeSpace[1.5],
     fontWeight: themeFontWeight.medium,
     fontVariantNumeric: 'tabular-nums',
@@ -481,7 +526,7 @@ export function ScheduleSourceChip({
       <ClusterChip
         icon={Clock}
         label={label}
-        textClassName="text-muted-foreground"
+        textClassName={stylex.props(styles.textMuted).className}
         onPromote={itemMode.onPromote}
       />
     );
@@ -491,7 +536,7 @@ export function ScheduleSourceChip({
     <StageChip
       icon={Clock}
       label={label}
-      textClassName="text-muted-foreground"
+      textClassName={stylex.props(styles.textMuted).className}
       summary={label}
       {...(onOpen ? { detail: { kind: 'action', onAction: onOpen, ariaLabel: label } } : {})}
     />
@@ -505,7 +550,7 @@ export function StatusChip({
   const presentation = useSessionStatusPresentation(state);
   if (!presentation) return null;
   const { Icon, text, warning } = presentation;
-  const textClassName = warning ? 'text-status-warning' : 'text-muted-foreground';
+  const textClassName = stylex.props(warning ? styles.textWarning : styles.textMuted).className;
 
   if (itemMode.mode === 'cluster') {
     return (
@@ -693,7 +738,6 @@ export function GoalChip({
                     onClick={() => onDismiss?.(goal)}
                     aria-label={t('sessions.goal.actions.dismiss', 'Dismiss goal banner')}
                     title={t('sessions.goal.actions.dismiss', 'Dismiss goal banner')}
-                    className="shrink-0"
                   >
                     <X {...stylex.props(styles.dismissGlyph)} aria-hidden="true" />
                   </Button>
@@ -842,27 +886,14 @@ function ContextChipActions({ actions }: { actions: readonly ContextChipAction[]
   }
 
   return (
-    <div
-      {...stylex.props(styles.actionsShell)}
-      className={clsx(
-        stylex.props(styles.actionsShell).className,
-        'dark:bg-muted-foreground/[0.08]'
-      )}
-    >
+    <div {...stylex.props(styles.actionsShell)}>
       <button
         type="button"
         onClick={primaryAction.onClick}
         disabled={primaryAction.disabled}
         title={primaryAction.label}
         {...stylex.props(styles.actionButton)}
-        className={clsx(
-          stylex.props(styles.actionButton).className,
-          INFO_BAR_TEXT_CLASS,
-          // StyleX cannot express `enabled:hover` inside Tailwind's
-          // `@media (hover: hover)` guard, so those two variants stay here.
-          'enabled:hover:bg-foreground/[0.05] enabled:hover:text-foreground',
-          'dark:text-muted-foreground/80 dark:enabled:hover:bg-muted-foreground/[0.08] dark:focus-visible:bg-muted-foreground/[0.08]'
-        )}
+        className={clsx(stylex.props(styles.actionButton).className, INFO_BAR_TEXT_CLASS)}
       >
         <span {...stylex.props(styles.actionLabel)}>{primaryAction.label}</span>
       </button>
@@ -875,10 +906,6 @@ function ContextChipActions({ actions }: { actions: readonly ContextChipAction[]
                 aria-label={t('sessions.moreActions', 'More actions')}
                 title={t('sessions.moreActions', 'More actions')}
                 {...stylex.props(styles.overflowButton)}
-                className={clsx(
-                  stylex.props(styles.overflowButton).className,
-                  'dark:before:bg-muted-foreground/15 dark:hover:bg-muted-foreground/[0.08] dark:focus-visible:bg-muted-foreground/[0.08]'
-                )}
               >
                 <ChevronDown {...stylex.props(styles.overflowGlyph)} aria-hidden="true" />
               </button>
@@ -889,10 +916,6 @@ function ContextChipActions({ actions }: { actions: readonly ContextChipAction[]
               aria-label={t('sessions.moreActions', 'More actions')}
               title={t('sessions.moreActions', 'More actions')}
               {...stylex.props(styles.overflowButton)}
-              className={clsx(
-                stylex.props(styles.overflowButton).className,
-                'dark:before:bg-muted-foreground/15 dark:hover:bg-muted-foreground/[0.08] dark:focus-visible:bg-muted-foreground/[0.08]'
-              )}
             >
               <ChevronDown {...stylex.props(styles.overflowGlyph)} aria-hidden="true" />
             </button>
@@ -1146,13 +1169,7 @@ export function ContextChip({
       aria-label={t('sessions.detailTabs.allChanges', 'All Changes')}
       title={t('sessions.detailTabs.allChanges', 'All Changes')}
       {...stylex.props(styles.diffChip)}
-      className={clsx(
-        stylex.props(styles.diffChip).className,
-        INFO_BAR_TEXT_CLASS,
-        // StyleX cannot express `enabled:hover` inside Tailwind's
-        // `@media (hover: hover)` guard, so that variant stays here.
-        'enabled:hover:bg-foreground/[0.1]'
-      )}
+      className={clsx(stylex.props(styles.diffChip).className, INFO_BAR_TEXT_CLASS)}
     >
       <span {...stylex.props(styles.diffAdded)}>+{diffStat.add}</span>
       <span {...stylex.props(styles.diffRemoved)}>−{diffStat.del}</span>
@@ -1178,7 +1195,7 @@ export function ContextChip({
       // control rides in the `leading` slot instead so both stay reachable.
       iconOverride={pr ? prControl : (locationControl ?? undefined)}
       label={label}
-      textClassName="text-muted-foreground"
+      textClassName={stylex.props(styles.textMuted).className}
       summary={summary}
       leading={
         pr ? (
@@ -1407,7 +1424,10 @@ export function PrCiPill({
         align="start"
         sideOffset={8}
         aria-label={t('sessions.prCi.label', 'CI checks')}
-        className="w-96 max-w-[min(24rem,90vw)] border-border/60 p-0 shadow-xl"
+        className={clsx(
+          stylex.props(styles.ciPopover).className,
+          'max-w-[min(24rem,90vw)] p-0 shadow-xl'
+        )}
       >
         <PrCiPopoverBody runs={runs!} onOpenRun={onOpenRun} />
       </Popover.Content>

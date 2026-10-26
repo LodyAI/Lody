@@ -55,6 +55,14 @@ const styles = stylex.create({
     transitionDuration: themeDuration[150],
     transitionTimingFunction: themeEasing['in-out'],
   },
+  anchoredPopover: {
+    width: 'var(--anchor-width)',
+    borderColor: 'color-mix(in oklab, hsl(var(--border) / 1) 60%, transparent)',
+  },
+  stagePopover: {
+    width: 'calc(var(--spacing) * 96)',
+    borderColor: 'color-mix(in oklab, hsl(var(--border) / 1) 60%, transparent)',
+  },
   chipTextMuted: { color: themeColors.mutedForeground },
   chipTextForeground: { color: themeColors.foreground },
   /** An open popover chip keeps its well filled and says so in brighter ink. */
@@ -228,7 +236,7 @@ export function PopoverActionChip({
           return button?.closest('[data-info-bar-surface]') ?? button;
         }}
         aria-label={label}
-        className="w-[var(--anchor-width)] border-border/60 p-0 shadow-xl"
+        className={clsx(stylex.props(styles.anchoredPopover).className, 'p-0 shadow-xl')}
       >
         {typeof content === 'function' ? content(() => setOpen(false)) : content}
       </Popover.Content>
@@ -382,7 +390,10 @@ export function StageChip({
           align="start"
           sideOffset={8}
           aria-label={detail.ariaLabel}
-          className="w-96 max-w-[min(24rem,90vw)] border-border/60 p-0 shadow-xl"
+          className={clsx(
+            stylex.props(styles.stagePopover).className,
+            'max-w-[min(24rem,90vw)] p-0 shadow-xl'
+          )}
         >
           {detail.content}
         </Popover.Content>

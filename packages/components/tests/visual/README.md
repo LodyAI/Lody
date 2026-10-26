@@ -109,6 +109,9 @@ document why they were unsuitable for a pair.
 | `status-targets.json`                                           | Working grids, unread/collapse states and spinner callers in both themes, including reduced motion.                 |
 | `project-edit-targets.json`                                     | Actual project-editor entry, translations, truncation, keyboard/pointer activation and responsive boundaries.       |
 | `rename-targets.json`                                           | Actual rename dialog, title wrapping, disabled/pending save, failure/retry, focus and 639/640/641px boundaries.     |
+| `schedule-style-targets.json` | Wide schedule rows, child-width precedence, issue tooltips, caller overrides and 639/640px boundaries. |
+| `bub-style-targets.json` | Install guide copy success/failure, long translation, code overflow and keyboard/pointer states. |
+| `info-chip-style-targets.json` | Production action/cluster/stage chips, context actions, CI portals and 419/420/421px container boundaries. |
 | `sidebar-targets.json`                                          | Sidebar layouts, row parts, loading/empty/overflow and archive/menu states; narrow widths use a desktop UA.         |
 | `sidebar-mobile-targets.json`                                   | iPhone/Android descriptors, known-logo readiness and real touch menu/archive actions in both themes.                |
 | `sidebar-updated-interaction-targets.json`                      | Show all/less, selection, collapse/expand and focus/hover on the production Updated list.                           |
@@ -119,6 +122,15 @@ document why they were unsuitable for a pair.
 | `chat-mobile-home-targets.json`                                 | Mobile home headers, workspace logos, onboarding, crowded status and reconnect/offline states.                      |
 | `chat-boundary-targets.json`                                    | 311/312, 639/640 and 671/672px widths for compact composer and disabled-context styling.                            |
 | `chat-context-targets.json`, `chat-mobile-context-targets.json` | Independent corrected context-action/tooltip captures; retain invalid initial selector diagnostics.                 |
+
+`schedule-style-native.mjs`, `bub-style-native.mjs` and `info-chip-style-native.mjs`
+take `--phase <name> --storybook <immutable-url>`. They supplement screenshots
+with computed child/tooltip contracts, exact clipboard and document-link intents,
+and trusted pointer/keyboard states, including local theme-scope selectors. The
+chip runner adds `--scope-only true` for its separate local-variable matrix. The
+install-guide fixture intercepts its existing browser clipboard and external-open
+boundaries; it never runs the displayed command or opens the live guide. Scope
+probes verify selector matching, not theme-provider persistence or native OS UI.
 
 `chat-search-ready-targets.json` explicitly enters the search query and waits for
 the filtered result. Storybook play completion can precede a successful input
@@ -229,6 +241,8 @@ do not describe every frame as coming from one final build.
 
 An optional `--context <json-file>` adds `scope`, `checks` and `limits` string
 arrays and an `evidence` array of `{label,dataUrl}` screenshots to the report.
+`metricsDescription` states which assembled phases the counters include; use it
+when native captures are part of the matrix.
 `coverage` rows contain `{file,before,after,remaining}`. `evidencePairs` contains
 `{label,beforeUrl,afterUrl}` with embedded PNG data URLs; `evidenceTitle` and
 `evidenceDescription` identify the evidence and its limits. Use these for measured

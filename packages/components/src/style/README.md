@@ -101,8 +101,10 @@ These mappings require the [compiled variable contract](MIGRATION.md#preserve-th
 Some radius and weight tokens retain literal legacy defaults; they cannot
 replace a runtime variable merely because the default screenshot matches.
 
-Spacing reads `--spacing`, the theme's one spacing unit, so a migrated surface
-and a Tailwind one stay coupled. Type sizes stay on Tailwind's rem scale: the
+Spacing tokens read `--spacing`, the theme's one spacing unit, at their definition
+scope. Root theme changes keep them coupled to Tailwind; descendant overrides
+need the [local variable contract](MIGRATION.md#preserve-the-computed-contract)
+because an inherited StyleX alias has already resolved its dependencies. Type sizes stay on Tailwind's rem scale: the
 interface-font-size tiers (`--ui-font-size`) resized the body copy only, and a
 migrated surface must not start following them.
 
