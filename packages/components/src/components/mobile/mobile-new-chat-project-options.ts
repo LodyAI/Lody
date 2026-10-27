@@ -1,3 +1,5 @@
+import { compareUnifiedProjectOptions } from '../chat/chat-landing-derived';
+import type { UnifiedProjectSelection } from '../chat/unified-project-selector';
 import type { MachineId } from '@lody/shared';
 import type {
   MobileProjectFolder,
@@ -45,4 +47,48 @@ export function filterMobileProjectOptions({
         (right.lastUsedAt ?? 0) - (left.lastUsedAt ?? 0) || left.name.localeCompare(right.name)
     );
   return { folders: filteredFolders, repositories: filteredRepositories, groups: filteredGroups };
+}
+
+export type MobileProjectOption = {
+  value: string;
+  label: string;
+  description?: string;
+  disabledReason?: string;
+  lastUsedAt?: number;
+  selection: Exclude<UnifiedProjectSelection, { kind: 'none' }>;
+};
+
+/** One recent-first list across all sources, using the desktop tie breakers. */
+export function getMobileProjectOptions(
+  input: Parameters<typeof filterMobileProjectOptions>[0]
+): MobileProjectOption[] {
+  const { folders, repositories, groups } = filterMobileProjectOptions(input);
+  const options: MobileProjectOption[] = [
+    ...groups.map((group) => ({
+      value: `group:${group.projectId}`,
+      label: group.name,
+      description: group.availability,
+      disabledReason: group.disabledReason,
+      lastUsedAt: group.lastUsedAt,
+      selection: { kind: 'group' as const, projectId: group.projectId },
+    })),
+    ...folders.map((folder) => ({
+      value: `local:${folder.machineId}:${folder.localProjectId}`,
+      label: folder.name,
+      description: folder.rootPath,
+      lastUsedAt: folder.lastUsedAt,
+      selection: {
+        kind: 'local' as const,
+        machineId: folder.machineId,
+        localProjectId: folder.localProjectId,
+      },
+    })),
+    ...repositories.map((repo) => ({
+      value: `github:${repo.fullName}`,
+      label: repo.fullName,
+      lastUsedAt: repo.lastUsedAt,
+      selection: { kind: 'github' as const, repoFullName: repo.fullName },
+    })),
+  ];
+  return options.sort(compareUnifiedProjectOptions);
 }

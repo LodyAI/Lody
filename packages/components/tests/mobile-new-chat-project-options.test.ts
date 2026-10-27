@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import type { LocalProjectId, MachineId } from '@lody/shared';
-import { filterMobileProjectOptions } from '@/components/mobile/mobile-new-chat-project-options';
+import {
+  filterMobileProjectOptions,
+  getMobileProjectOptions,
+} from '@/components/mobile/mobile-new-chat-project-options';
 import type {
   MobileProjectFolder,
   MobileProjectGroup,
@@ -110,5 +113,56 @@ describe('filterMobileProjectOptions', () => {
     });
     expect(result.folders).toEqual([]);
     expect(result.repositories).toHaveLength(2);
+  });
+});
+
+describe('getMobileProjectOptions', () => {
+  it('ranks recent usage across sources rather than keeping source groups', () => {
+    const result = getMobileProjectOptions({
+      folders,
+      repositories,
+      groups,
+      machineId: spikes,
+      query: '',
+    });
+    expect(result.map((option) => option.label)).toEqual([
+      'Loro stack',
+      'loro-dev/loro',
+      'lody',
+      'blog',
+      'loro-dev/lody',
+    ]);
+  });
+  it('uses names then stable ids for tied or never-used projects, keeping recent first', () => {
+    const result = getMobileProjectOptions({
+      folders: [
+        { ...folders[0]!, name: 'Alpha', lastUsedAt: undefined },
+        { ...folders[1]!, name: 'Same', lastUsedAt: 10 },
+      ],
+      groups: [{ ...groups[0]!, name: 'Same', lastUsedAt: 10 }],
+      repositories: [{ fullName: 'Zeta', lastUsedAt: 2 }, { fullName: 'Beta' }],
+      machineId: spikes,
+      query: '',
+    });
+    expect(result.map((option) => option.value)).toEqual([
+      'group:group-1',
+      'local:spikes:lody',
+      'github:Zeta',
+      'local:spikes:blog',
+      'github:Beta',
+    ]);
+  });
+  it('scopes folders before ranking and keeps an unavailable recent group visible', () => {
+    const result = getMobileProjectOptions({
+      folders,
+      repositories,
+      groups: [{ ...groups[0]!, lastUsedAt: 20, disabledReason: 'Unavailable' }],
+      machineId: zx,
+      query: '',
+    });
+    expect(result[0]?.disabledReason).toBe('Unavailable');
+    expect(
+      result.filter((option) => option.selection.kind === 'local').map((option) => option.label)
+    ).toEqual(['loro']);
   });
 });

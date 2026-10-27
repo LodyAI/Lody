@@ -1,3 +1,5 @@
+import { getSessionChatInputAreaShellClassName } from '@/components/chat/composer-surface';
+export { getSessionChatInputAreaShellClassName } from '@/components/chat/composer-surface';
 import { ScheduledMessagesSummary } from '../schedules/scheduled-messages-summary';
 import { useScheduledMessage } from '../schedules/use-scheduled-message';
 import { useLatestRef } from '@/hooks/use-latest-ref';
@@ -147,19 +149,6 @@ import type { MachineRateLimits } from '@/lib/session-usage';
 const sessionDraftsCache = new Map<SessionId, string>();
 
 const styles = stylex.create({
-  shell: {
-    position: 'relative',
-    flexShrink: 0,
-    paddingTop: 0,
-    marginBottom: 'var(--native-keyboard-height, 0px)',
-    paddingBottom:
-      'calc(0.5rem + max(0px, env(safe-area-inset-bottom, 0px) - var(--native-keyboard-height, 0px)))',
-    backgroundColor: colors.background,
-    transitionProperty: 'margin-bottom',
-    transitionDuration: '250ms',
-    transitionTimingFunction: 'var(--ease-out, cubic-bezier(0, 0, 0.2, 1))',
-  },
-  shellEdgeBackLayer: { zIndex: 40 },
   footerSelectors: {
     display: 'flex',
     minWidth: 0,
@@ -430,18 +419,6 @@ const createLocalImageId = (): string => {
   }
   return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 };
-
-export function getSessionChatInputAreaShellClassName({
-  protectFromEdgeBackZone = false,
-}: { protectFromEdgeBackZone?: boolean } = {}): string {
-  const shell = stylex.props(
-    styles.shell,
-    // The native session drawer owns a z-30 transparent left-edge swipe zone.
-    // Keep the composer above it so the zone cannot swallow its controls.
-    protectFromEdgeBackZone && styles.shellEdgeBackLayer
-  );
-  return shell.className ?? '';
-}
 
 export interface SessionChatInputAreaProps {
   /** Claims a one-shot navigation focus request; absent for ordinary session visits. */

@@ -37,14 +37,25 @@ directory index. Stories: `src/stories/Mobile*.stories.tsx`.
 
 ## Sheets and session surfaces
 
-- `mobile-new-chat-sheet.tsx` is the full-height new-chat compose sheet: the
-  header holds the unified Chat / project / repository native picker
-  (`mobile-native-select.tsx`), and the resting body is one full-bleed
-  `ChatComposer variant="sheet"` whose footer rail carries run config, machine,
-  branch and worktree. The landing's mobile file input mounts inside that sheet;
-  the no-drag popup container stays within Vaul's interaction boundary.
-- Bottom sheets: `mobile-new-chat-sheet.tsx`,
-  `mobile-workspace-switcher-sheet.tsx`, `mobile-create-workspace-sheet.tsx`,
+- `mobile-new-chat-sheet.tsx` hosts the new-chat page: the session-style
+  composer stays at the bottom, with machine and project in that order above it.
+  Local Git worktree and branch share a row; GitHub exposes its branch. Run
+  configuration opens the same Sheet as an ongoing conversation. The
+  selection group shares the composer column and sits above it. Its page, frosted header,
+  back button and composer column reuse the session equivalents. The page lifts above the
+  native keyboard through the same composer shell (keyboard margin, safe-area inset and
+  transition) used by ongoing sessions. First send retains this page until navigation
+  reaches the session, then waits for its presentation acknowledgement before
+  dismissing new chat. Entrance suppression persists through delayed portal mounts
+  and same-entry URL replacements; later visits and Back retain their animation. The existing
+  project and agent selection handlers retain draft and scope semantics. The
+  project list mixes all sources using the desktop recency/name/id comparator,
+  with a pinned “No project selected” option. Groups and local folders use type icons;
+  GitHub rows and the selected value share the desktop owner avatar, falling back to
+  the GitHub icon while loading or on failure. GitHub rows omit repository descriptions.
+  Search preserves this order.
+  [Decision and evidence](../../../../../.agents/notes/implemented/feature/2026-10-28-mobile-new-chat-page.md).
+- Bottom sheets: `mobile-workspace-switcher-sheet.tsx`, `mobile-create-workspace-sheet.tsx`,
   `mobile-delete-workspace-sheet.tsx`, `mobile-worktree-config-sheet.tsx`,
   `mobile-acp-history-sheet.tsx`, `mobile-project-skills-sheet.tsx` (read-only
   project skills, opened from the Skills row of the local and GitHub project

@@ -61,12 +61,14 @@ import { useCloudMutation, useCloudQuery, usePlatform } from '@lody/platform/rea
 import { usePostHog } from '@posthog/react';
 import {
   ArrowUp,
-  FolderKanban,
-  FolderOpen,
-  Github as GithubIcon,
   ChevronsUpDown,
+  Folders,
+  FolderOpen,
+  CircleSlash2,
+  FolderPlus,
+  ArrowUpRight,
+  GitBranch,
   LockKeyhole,
-  MessageCircle,
   Monitor,
   PanelLeft,
   RefreshCw,
@@ -83,7 +85,6 @@ import {
   WorktreeCheckboxPill,
   type WorkdirMode,
 } from '@/components/shared';
-import { cn } from '@/lib/utils';
 import { getIpcServices, onIpcEvent, sendIpc } from '@/lib/electron-ipc-client';
 import {
   bugReportDialogOpenAtom,
@@ -281,6 +282,7 @@ import type { SessionContextType } from './context-switch';
 import {
   UNIFIED_PROJECT_OPTION_RENDER_LIMIT,
   UnifiedProjectSelectorView,
+  GitHubOwnerAvatarIcon,
   buildUnifiedLocalProjectOptions,
   type LocalProjectSelection,
   type UnifiedProjectGroupOption,
@@ -342,12 +344,16 @@ import {
   type MobileNewChatSheetContentProps,
 } from '@/components/mobile/mobile-new-chat-sheet';
 import { MobileFooterRail } from '@/components/mobile/mobile-footer-rail';
-import { MobileNewChatProjectSheet } from '@/components/mobile/mobile-new-chat-project-sheet';
+import {
+  MobileInlinePicker,
+  MobileInlinePickerCoordinator,
+} from '@/components/mobile/mobile-inline-picker';
+import { getMobileProjectOptions } from '@/components/mobile/mobile-new-chat-project-options';
+import { MobileSessionRunConfig } from '@/components/mobile/mobile-session-run-config';
 import { resolveMobileNewChatTargetLabel } from '@/components/mobile/mobile-new-chat-target';
 import { MobileWorkspaceSwitcherSheet } from '@/components/mobile/mobile-workspace-switcher-sheet';
 import { isListedEncryptedWorkspace } from '@/components/e2ee/encrypted-workspace-mark';
 import { MobileCreateWorkspaceSheet } from '@/components/mobile/mobile-create-workspace-sheet';
-import { MobileSessionRunConfig } from '@/components/mobile/mobile-session-run-config';
 import { ChatComposer } from '@/components/chat/chat-composer';
 import { useSessionMcpSelection } from '@/hooks/use-session-mcp-selection';
 import {
@@ -361,12 +367,8 @@ import {
 } from '@/lib/local-project-rpc-file-provider';
 import { GitHubRepoFileProvider } from '@/lib/github-repo-file-provider';
 import type { FileWorkspaceProvider } from '@/lib/file-workspace-provider';
-import { GitBranch as GitBranchIcon } from 'lucide-react';
 import { AddLocalProjectDialogContainer } from '@/components/local-projects/add-local-project-dialog-container';
-import {
-  MobileNativeSelect,
-  type MobileNativeSelectOption,
-} from '@/components/mobile/mobile-native-select';
+import type { MobileNativeSelectOption } from '@/components/mobile/mobile-native-select';
 import {
   buildChildSessionsByParent,
   buildSidebarOpenerRowResolver,
@@ -424,6 +426,8 @@ import {
 } from './chat-landing-derived';
 
 interface ChatLandingProps {
+  /** Committed mobile session surface; route completion alone is not presentation. */
+  mobilePresentedSessionId?: string;
   workspaceSlug: string;
   preSelectedContext?: 'local' | 'github' | 'chat' | 'group';
   preSelectedMachine?: string;
@@ -598,6 +602,7 @@ export function ChatLanding(props: ChatLandingProps) {
 }
 
 function WorkspaceChatLanding({
+  mobilePresentedSessionId,
   workspaceSlug,
   preSelectedContext: preSelectedContextProp,
   preSelectedMachine,
@@ -1157,11 +1162,15 @@ function WorkspaceChatLanding({
       setAddProjectInitialMachineId(null);
     }
   }, []);
-  /* Mobile-only: controls the bottom-sheet composer launched from the
-     home screen's new-chat chip. The sheet hosts the same composer +
-     selectors as the desktop landing — opening it doesn't navigate,
-     so the home tab list stays visible underneath. */
+  /* The new-chat page sits over the mounted home or project screen. */
   const [mobileNewChatOpen, setMobileNewChatOpen] = useState(false);
+  const [mobileCreatedSessionId, setMobileCreatedSessionId] = useState<string | null>(null);
+  useLayoutEffect(() => {
+    if (mobileCreatedSessionId && mobilePresentedSessionId === mobileCreatedSessionId) {
+      setMobileNewChatOpen(false);
+      setMobileCreatedSessionId(null);
+    }
+  }, [mobileCreatedSessionId, mobilePresentedSessionId]);
 
   /* Mobile-only: controls the bottom-sheet workspace switcher launched
      from the home screen's workspace pill. Replaces the inline dropdown
@@ -3164,12 +3173,9 @@ function WorkspaceChatLanding({
     try {
       setSubmitting(true);
       setComposerStatus(null);
-      // Preserve React draft state until startSession is accepted, but clear the
-      // controlled element immediately so click/Enter feedback cannot wait for
-      // the first local writer await.
-      if (promptTextareaRef.current) {
-        promptTextareaRef.current.value = '';
-      }
+      // Match the session composer's mobile send: dismiss the keyboard once,
+      // while the controlled draft stays available if creation is rejected.
+      if (usesMobileKeyboardAction) promptTextareaRef.current?.blur();
 
       let project: ProjectRef | undefined;
       let repoFullNameForMentions: string | undefined;
@@ -3328,6 +3334,7 @@ function WorkspaceChatLanding({
         pendingHistoryEntry,
         attachments
       );
+      if (mobileNewChatOpen) setMobileCreatedSessionId(sessionId);
       // Admission owns the snapshot now; later preference/navigation failures must not resend it.
       setPrompt('');
       clearPastedTextDrafts();
@@ -3493,13 +3500,8 @@ function WorkspaceChatLanding({
       // be misattributed.
       startFailureReason = 'unknown';
 
-      if (mobileNewChatOpen) {
-        // The mobile base ChatLanding stays mounted beneath the session drawer.
-        // Close the sheet explicitly on successful start so keyboard-submit and
-        // button-submit leave the same clean underlying state.
-        promptTextareaRef.current?.blur();
-        setMobileNewChatOpen(false);
-      }
+      // The mobile host acknowledges its committed session surface before
+      // dismissing the new-chat page; navigation may resolve before portals paint.
       await navigate(
         getSessionCreationNavigation(workspaceSlug, sessionId, usesMobileKeyboardAction)
       );
@@ -4145,18 +4147,7 @@ function WorkspaceChatLanding({
 
   const bottomBarNode = null;
 
-  /* ── Mobile-sheet targets ──
-     Target rows are real HTML selects so touch platforms present their own
-     option picker. The unified project select carries Chat, local projects and
-     GitHub repositories in one control; machine / branch / worktree live in
-     the composer's bottom rail. Layout follows the community contribution in
-     [#491](https://github.com/LodyAI/Lody/pull/491) by @natsustan. */
-
-  /* ── Machine and project target ──
-     Local folders live on machines, so the project sheet owns the machine
-     choice AND one search across local folders + GitHub repos. The header and
-     the footer machine chip both open it; the old native select is gone. */
-  const [mobileProjectPickerOpen, setMobileProjectPickerOpen] = useState(false);
+  /* Mobile target options retain the same machine and project scoping as desktop. */
   const mobileSheetOnlineMachines = useOnlineMachines();
   const mobileProjectSelectedMachineId =
     selectedMachineId && isSelectedMachineValid
@@ -4203,10 +4194,7 @@ function WorkspaceChatLanding({
         localProjectId: entry.project.id,
         name: entry.project.name,
         rootPath: entry.project.rootPath,
-        lastUsedAt:
-          mobileSheetRecency.byProject.get(entry.key) ??
-          entry.project.lastOpenedAtMs ??
-          entry.project.createdAtMs,
+        lastUsedAt: mobileSheetRecency.byProject.get(entry.key) ?? entry.project.lastOpenedAtMs,
       })),
     [mobileSheetRecency.byProject, visibleLocalProjectMap]
   );
@@ -4230,21 +4218,6 @@ function WorkspaceChatLanding({
         lastUsedAt: group.lastUsedAt,
       })),
     [desktopProjectGroupOptions]
-  );
-
-  const mobileSheetMachineNode = (
-    <button
-      type="button"
-      onClick={() => setMobileProjectPickerOpen(true)}
-      aria-label={t('chat.machineSelector.placeholder', 'Machine')}
-      className="flex h-8 w-full min-w-0 items-center gap-1.5 rounded-full px-1.5 text-left text-sm text-foreground/85"
-    >
-      <Monitor className="h-3.5 w-3.5 shrink-0 opacity-70" aria-hidden="true" />
-      <span className="min-w-0 flex-1 truncate">
-        {mobileSheetSelectedMachineLabel ?? t('chat.machineSelector.placeholder', 'Machine')}
-      </span>
-      <ChevronsUpDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
-    </button>
   );
 
   const mobileSheetSelectedProjectName = useMemo(() => {
@@ -4282,54 +4255,11 @@ function WorkspaceChatLanding({
           repoFullName: selectedRepo,
           projectName: mobileSheetSelectedProjectName,
           labels: {
-            chat: String(t('chat.contextSwitch.chat', 'Chat')),
+            noProject: String(t('chat.mobileNewChat.noProject', 'No project selected')),
             project: String(t('chat.validation.missingProject', 'Select a project')),
             repository: String(t('chat.repoPlaceholder', 'Repository')),
           },
         });
-  const mobileSheetProjectNode = (
-    <button
-      type="button"
-      onClick={() => setMobileProjectPickerOpen(true)}
-      aria-label={t('chat.projectPicker.placeholder', 'Select a project')}
-      className={cn(
-        'flex h-11 min-w-0 max-w-full items-center gap-2 rounded-full px-3 text-xl font-semibold',
-        'text-foreground transition-colors hover:bg-muted/60 active:bg-muted'
-      )}
-    >
-      {desktopProjectSelection.kind === 'group' ? (
-        <FolderKanban className="h-4 w-4 shrink-0 opacity-70" aria-hidden="true" />
-      ) : contextType === 'chat' ? (
-        <MessageCircle className="h-4 w-4 shrink-0 opacity-70" aria-hidden="true" />
-      ) : desktopProjectSelection.kind === 'github' ? (
-        <GithubIcon className="h-3.5 w-3.5 shrink-0 opacity-70" aria-hidden="true" />
-      ) : (
-        <FolderOpen className="h-3.5 w-3.5 shrink-0 opacity-70" aria-hidden="true" />
-      )}
-      <span className="truncate">{mobileSheetTargetLabel}</span>
-      <ChevronsUpDown className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
-    </button>
-  );
-
-  const mobileProjectSheetNode = (
-    <MobileNewChatProjectSheet
-      open={mobileProjectPickerOpen}
-      onOpenChange={setMobileProjectPickerOpen}
-      machines={mobileProjectMachines}
-      selectedMachineId={mobileProjectSelectedMachineId}
-      onMachineChange={handleMachineChange}
-      localProjects={mobileProjectFolders}
-      repositories={mobileProjectRepos}
-      groups={mobileProjectGroups}
-      selection={desktopProjectSelection}
-      onSelect={handleDesktopProjectChange}
-      onAddLocalProject={handleAddLocalProject}
-      onConnectGitHub={handleConnectGitRepo}
-      lockedMachineId={activeAgentRole?.machineId ?? null}
-      lockedMachineReason={t('chat.mobileNewChat.roleMachineLocked')}
-    />
-  );
-
   /* ── Branch ── */
   const mobileSheetBranchOptions = useMemo<MobileNativeSelectOption<string>[]>(
     () =>
@@ -4339,49 +4269,6 @@ function WorkspaceChatLanding({
       })),
     [branchOptions]
   );
-  const mobileSheetBranchNode = showBranchSelector ? (
-    <MobileNativeSelect<string>
-      key={branchSelectorKey}
-      value={currentBranch}
-      onChange={(value) => setCurrentBranch(value)}
-      options={mobileSheetBranchOptions}
-      disabled={isBranchDisabled}
-      loading={contextType === 'local' ? loadingLocalGitState || runtimeInitializing : false}
-      loadingText={t('chat.branchLoading', { defaultValue: 'Loading branches...' })}
-      ariaLabel={t('chat.branchPlaceholder', 'Branch')}
-      className="h-8 w-fit max-w-full"
-      triggerContent={
-        <>
-          <GitBranchIcon
-            className="h-3.5 w-3.5 shrink-0 opacity-70"
-            strokeWidth={1.8}
-            aria-hidden="true"
-          />
-          <span className="truncate">
-            {currentBranchLabel ?? t('chat.branchPlaceholder', 'Branch')}
-          </span>
-        </>
-      }
-    />
-  ) : null;
-
-  /* Local files are the implicit default. Only the optional isolation choice
-     needs a visible control, kept inline with the project target row. */
-  const mobileSheetWorkdirModeNode =
-    contextType === 'local' && selectedLocalProject ? (
-      <WorktreeCheckboxPill
-        checked={effectiveWorkdirMode === 'worktree'}
-        onCheckedChange={(checked) => handleWorkdirModeChange(checked ? 'worktree' : 'local')}
-        disabled={!worktreeAvailable}
-        disabledReason={!worktreeAvailable ? worktreeUnavailableReason : undefined}
-        className="h-7 bg-transparent px-1.5 hover:bg-hover/60"
-      />
-    ) : null;
-
-  /* ── Composer footer rail ──
-     One horizontal rail: run config + usage, then machine, worktree and branch.
-     Attachment and send stay outside it, so a long target label can never hide
-     the send action. */
   const mobileSheetFooterSelectorNode = (
     <ErrorBoundary
       name="MobileSheetFooterSelector"
@@ -4390,64 +4277,43 @@ function WorkspaceChatLanding({
       fallback={null}
     >
       <MobileFooterRail>
-        <div
-          className={cn(
-            'flex h-8 max-w-[70vw] min-w-0 shrink-0 items-center overflow-hidden rounded-full',
-            'bg-muted/55 pl-0.5 pr-1 dark:bg-input/80'
-          )}
-        >
-          <div className="min-w-0">
-            <MobileSessionRunConfig
-              agentSelection={selectedAgent}
-              allowedMachineIds={scopedMachineId ? [scopedMachineId] : []}
-              agentLocked={false}
-              onAgentConfigChange={setSelectedAgent}
-              modelOptions={modelOptions}
-              selectedModelId={selectedModelId}
-              onModelChange={setSelectedModelName}
-              modeOptions={modeOptions}
-              selectedModeId={selectedModeId}
-              onModeChange={setSelectedModeId}
-              configOptionSelectors={configOptionSelectors}
-              configOptionValues={configOptionValues}
-              onConfigOptionChange={handleConfigOptionChange}
-              fallbackAgent={{
-                cliType: selectedConfig?.cliType,
-                agentType: selectedConfig?.agentType,
-              }}
-              agentRoles={{
-                items: composerAgentRoleItems,
-                selectedRoleId: activeAgentRole?.id ?? null,
-                onSelect: handleAgentRoleSelect,
-                onCreate: handleAgentRoleCreate,
-              }}
-            />
-          </div>
-          <SessionUsagePopover
-            onRefreshQuota={refreshQuota}
-            rateLimits={selectedRateLimits}
-            agentType={selectedConfig?.agentType ?? ''}
-            agentConfigId={selectedConfig?.id}
-            modelId={selectedModelId}
-            modelLabel={selectedModelLabel}
-            showCodexResetForecast={showCodexResetForecast}
-            showRateLimitWithoutContext
-            className="h-7 shrink-0"
-          />
-        </div>
-        <div className="flex h-8 max-w-[70vw] min-w-0 shrink-0 items-center rounded-full border border-border/60 bg-muted/50 px-2 dark:bg-input/80">
-          {mobileSheetMachineNode}
-        </div>
-        {mobileSheetWorkdirModeNode ? (
-          <div className="flex h-8 shrink-0 items-center rounded-full border border-border/60 bg-muted/50 px-1 dark:bg-input/80">
-            {mobileSheetWorkdirModeNode}
-          </div>
-        ) : null}
-        {mobileSheetBranchNode ? (
-          <div className="flex h-8 max-w-[70vw] min-w-0 shrink-0 items-center rounded-full border border-border/60 bg-muted/50 px-2 dark:bg-input/80">
-            {mobileSheetBranchNode}
-          </div>
-        ) : null}
+        <MobileSessionRunConfig
+          disabled={submitting}
+          agentSelection={selectedAgent}
+          allowedMachineIds={scopedMachineId ? [scopedMachineId] : []}
+          agentLocked={false}
+          onAgentConfigChange={setSelectedAgent}
+          modelOptions={modelOptions}
+          selectedModelId={selectedModelId}
+          onModelChange={setSelectedModelName}
+          modeOptions={modeOptions}
+          selectedModeId={selectedModeId}
+          onModeChange={setSelectedModeId}
+          configOptionSelectors={configOptionSelectors}
+          configOptionValues={configOptionValues}
+          onConfigOptionChange={handleConfigOptionChange}
+          fallbackAgent={{
+            cliType: selectedConfig?.cliType,
+            agentType: selectedConfig?.agentType,
+          }}
+          agentRoles={{
+            items: composerAgentRoleItems,
+            selectedRoleId: activeAgentRole?.id ?? null,
+            onSelect: handleAgentRoleSelect,
+            onCreate: handleAgentRoleCreate,
+          }}
+        />
+        <SessionUsagePopover
+          onRefreshQuota={refreshQuota}
+          rateLimits={selectedRateLimits}
+          agentType={selectedConfig?.agentType ?? ''}
+          agentConfigId={selectedConfig?.id}
+          modelId={selectedModelId}
+          modelLabel={selectedModelLabel}
+          showCodexResetForecast={showCodexResetForecast}
+          showRateLimitWithoutContext
+          className="h-7 shrink-0"
+        />
       </MobileFooterRail>
     </ErrorBoundary>
   );
@@ -6335,19 +6201,188 @@ function WorkspaceChatLanding({
       </>
     ) : null;
 
+  const mobileProjectChoices = getMobileProjectOptions({
+    folders: mobileProjectFolders,
+    repositories: mobileProjectRepos,
+    groups: mobileProjectGroups,
+    machineId: mobileProjectSelectedMachineId,
+    query: '',
+  });
+  const mobileInlineProjects = [
+    {
+      value: 'none',
+      label: t('chat.mobileNewChat.noProject', 'No project selected'),
+      icon: <CircleSlash2 className="size-4" />,
+      selection: { kind: 'none' } as UnifiedProjectSelection,
+    },
+    ...mobileProjectChoices.map((option) => ({
+      ...option,
+      searchText: `${option.label} ${option.description ?? ''}`,
+      disabled: Boolean(option.disabledReason),
+      icon:
+        option.selection.kind === 'group' ? (
+          <Folders className="size-4" />
+        ) : option.selection.kind === 'local' ? (
+          <FolderOpen className="size-4" />
+        ) : (
+          <GitHubOwnerAvatarIcon repoFullName={option.selection.repoFullName} />
+        ),
+    })),
+    {
+      value: '__add_local__',
+      icon: <FolderPlus className="size-4" />,
+      label: t('chat.contextSwitch.addProject', 'Add a folder'),
+      selection: null,
+    },
+    {
+      value: '__connect_github__',
+      icon: <ArrowUpRight className="size-4" />,
+      label: t('repos.connectMore', 'Connect more GitHub projects'),
+      selection: null,
+    },
+  ];
+  const mobileInlineProjectValue =
+    desktopProjectSelection.kind === 'group'
+      ? `group:${desktopProjectSelection.projectId}`
+      : desktopProjectSelection.kind === 'local'
+        ? `local:${desktopProjectSelection.machineId}:${desktopProjectSelection.localProjectId}`
+        : desktopProjectSelection.kind === 'github'
+          ? `github:${desktopProjectSelection.repoFullName}`
+          : 'none';
+  const mobileInlineValue = (icon: ReactNode, value: string) => (
+    <span className="flex min-w-0 w-full items-center gap-2 text-start">
+      <span className="shrink-0 text-muted-foreground">{icon}</span>
+      <span className="min-w-0 flex-1 break-words [overflow-wrap:anywhere] text-sm text-foreground">
+        {value}
+      </span>
+      <ChevronsUpDown className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+    </span>
+  );
+  const mobileInlineTrigger = 'min-h-11 rounded-xl bg-foreground/[0.04] px-3 py-2';
+  const mobileInlinePanel = 'border-border/30 bg-muted/45 shadow-none';
+  const mobileProjectIcon =
+    desktopProjectSelection.kind === 'group' ? (
+      <Folders className="size-4" />
+    ) : desktopProjectSelection.kind === 'local' ? (
+      <FolderOpen className="size-4" />
+    ) : desktopProjectSelection.kind === 'github' ? (
+      <GitHubOwnerAvatarIcon repoFullName={desktopProjectSelection.repoFullName} />
+    ) : (
+      <CircleSlash2 className="size-4" />
+    );
+  const mobileLocalGitProject =
+    contextType === 'local' && !!selectedLocalProject && activeLocalGitState?.git === true;
+  const mobileBranchVisible = mobileLocalGitProject || (contextType === 'github' && !!selectedRepo);
   const mobileNewChatSheetContentProps: MobileNewChatSheetContentProps = {
     labels: {
       title: t('chat.mobileNewChat.title', '新建对话'),
       backAriaLabel: t('common.back', 'Back'),
     },
-    targetNode: mobileSheetProjectNode,
+    targetNode: t('chat.mobileNewChat.title', 'New chat'),
+    coordinator: MobileInlinePickerCoordinator,
+    summary: (
+      <div className="flex flex-col gap-2 py-3">
+        <MobileInlinePicker
+          id="new-machine"
+          value={mobileProjectSelectedMachineId}
+          options={mobileProjectMachines.map((machine) => ({
+            value: machine.id,
+            label: machine.name,
+            disabled: Boolean(machine.disabledReason),
+            description:
+              machine.disabledReason ??
+              (activeAgentRole && machine.id !== mobileProjectSelectedMachineId
+                ? t(
+                    'chat.mobileNewChat.switchClearsRole',
+                    'Changing machine clears the selected Role'
+                  )
+                : undefined),
+          }))}
+          onChange={(id) => {
+            if (id !== mobileProjectSelectedMachineId) {
+              if (activeAgentRole) handleAgentRoleSelect(null);
+              handleMachineChange(id);
+            }
+          }}
+          ariaLabel={t('chat.mobileNewChat.machineLabel', 'Machine')}
+          triggerClassName={mobileInlineTrigger}
+          expansionPanelClassName={mobileInlinePanel}
+          triggerContent={mobileInlineValue(
+            <Monitor className="size-4" />,
+            mobileSheetSelectedMachineLabel ?? t('chat.machineSelector.placeholder', 'Machine')
+          )}
+        />
+        <MobileInlinePicker
+          id="new-project"
+          preserveOptionOrder
+          value={mobileInlineProjectValue}
+          options={mobileInlineProjects}
+          onChange={(value) => {
+            const item = mobileInlineProjects.find((entry) => entry.value === value);
+            if (value === '__add_local__') handleAddLocalProject();
+            else if (value === '__connect_github__') handleConnectGitRepo();
+            else if (item?.selection) handleDesktopProjectChange(item.selection);
+          }}
+          ariaLabel={t('chat.projectPicker.title', 'Project')}
+          searchable
+          searchPlaceholder={t('chat.projectPicker.searchPlaceholder', 'Search projects')}
+          triggerClassName={mobileInlineTrigger}
+          expansionPanelClassName={mobileInlinePanel}
+          triggerContent={mobileInlineValue(mobileProjectIcon, mobileSheetTargetLabel)}
+        />
+        {mobileBranchVisible ? (
+          <div className="flex min-w-0 items-start gap-2 px-1">
+            {mobileLocalGitProject ? (
+              <div className="pt-1">
+                <WorktreeCheckboxPill
+                  checked={effectiveWorkdirMode === 'worktree'}
+                  onCheckedChange={(checked) =>
+                    handleWorkdirModeChange(checked ? 'worktree' : 'local')
+                  }
+                  loading={worktreeLoading}
+                  disabled={!worktreeAvailable || worktreeLoading}
+                  disabledReason={worktreeUnavailableReason}
+                />
+              </div>
+            ) : null}
+            <div className="min-w-0 flex-1">
+              <MobileInlinePicker
+                id="new-branch"
+                value={currentBranch}
+                onChange={setCurrentBranch}
+                options={mobileSheetBranchOptions}
+                disabled={
+                  isBranchDisabled || (mobileLocalGitProject && effectiveWorkdirMode !== 'worktree')
+                }
+                loading={contextType === 'local' && (loadingLocalGitState || runtimeInitializing)}
+                searchable
+                ariaLabel={t('chat.branchPlaceholder', 'Branch')}
+                triggerClassName="h-8 rounded-lg bg-transparent px-2 hover:bg-transparent"
+                expansionPanelClassName={mobileInlinePanel}
+                triggerContent={
+                  <>
+                    <GitBranch className="size-4 shrink-0 text-muted-foreground" />
+                    <span className="min-w-0 truncate">
+                      {(mobileLocalGitProject && effectiveWorkdirMode === 'local'
+                        ? activeLocalGitState?.currentBranch
+                        : currentBranchLabel) ?? t('chat.branchPlaceholder', 'Branch')}
+                    </span>
+                    <ChevronsUpDown className="size-3.5 shrink-0 text-muted-foreground" />
+                  </>
+                }
+              />
+            </div>
+          </div>
+        ) : null}
+      </div>
+    ),
     composer: (
       <ErrorBoundary
         name="MobileNewChatSheetComposer"
         variant="section"
         resetKeys={[workspaceId, workspaceSlug, contextType, mobileNewChatOpen]}
       >
-        <div className="flex h-full min-h-0 flex-col">
+        <div className="flex min-h-0 flex-col">
           <input
             ref={attachmentInputRef}
             type="file"
@@ -6358,8 +6393,9 @@ function WorkspaceChatLanding({
           {composerNoticeNode ? <div className="px-4 pt-2">{composerNoticeNode}</div> : null}
           <ChatComposer
             tone={tone}
-            variant="sheet"
-            className="min-h-0 flex-1"
+            variant="session"
+            autoResize
+            className="min-h-0"
             mentionSource={mentionSource}
             availableCommands={availableCommands}
             skillAgent={skillAgent}
@@ -6374,9 +6410,9 @@ function WorkspaceChatLanding({
             promptPlaceholder={promptPlaceholder}
             compactPlaceholderName={activeAgentRole?.name ?? selectedConfig?.name ?? null}
             promptDisabled={submitting}
-            promptRows={1}
+            promptRows={2}
+            maxRows={11}
             promptEnterKeyHint={promptEnterKeyHint}
-            promptAutoFocus
             focusOnContainerClick
             pastedTextDrafts={submitting ? [] : pastedTextDrafts}
             onPastedTextDraftsChange={submitting ? undefined : setPastedTextDrafts}
@@ -6399,6 +6435,8 @@ function WorkspaceChatLanding({
                 type="button"
                 icon
                 variant="ghost"
+                size="medium"
+                shape="pill"
                 onClick={() => {
                   void handleSubmit();
                 }}
@@ -6406,12 +6444,9 @@ function WorkspaceChatLanding({
                 aria-label={submitDisabled ? t('chat.submitting') : t('chat.send')}
                 /* Match the in-session mobile composer send face: solid
                    foreground disc + ArrowUp (not the old primary-tint chip). */
-                className={cn(
-                  'h-8 w-8 rounded-full shadow-xs transition-all',
-                  'bg-foreground text-background hover:bg-foreground/90 hover:text-background active:translate-y-[1px]'
-                )}
+                className="shadow-xs transition-all bg-foreground text-background hover:bg-foreground/90 hover:text-background active:translate-y-[1px]"
               >
-                {submitting ? <Spinner className="h-5 w-5" /> : <ArrowUp className="h-5 w-5" />}
+                {submitting ? <Spinner size="medium" /> : <ArrowUp className="h-5 w-5" />}
               </Button>
             }
           />
@@ -6425,7 +6460,7 @@ function WorkspaceChatLanding({
       open={mobileNewChatOpen}
       onOpenChange={(open) => {
         setMobileNewChatOpen(open);
-        if (!open) setMobileProjectPickerOpen(false);
+        if (!open) setMobileCreatedSessionId(null);
       }}
       {...mobileNewChatSheetContentProps}
     />
@@ -6435,7 +6470,6 @@ function WorkspaceChatLanding({
     return (
       <>
         {mobileNewChatSheetNode}
-        {mobileProjectSheetNode}
         <MobileProjectScreen
           project={mobileProjectContext}
           conversations={visibleProjectConversations}
@@ -6816,7 +6850,6 @@ function WorkspaceChatLanding({
           </>
         ) : null}
         {mobileNewChatSheetNode}
-        {mobileProjectSheetNode}
         <AddLocalProjectDialogContainer
           open={addProjectOpen}
           onOpenChange={handleAddProjectOpenChange}

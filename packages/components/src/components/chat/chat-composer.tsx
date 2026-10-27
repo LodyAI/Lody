@@ -716,7 +716,7 @@ export function ChatComposer({
   const boxFooterClassName = cn(
     'flex shrink-0 select-none items-center gap-x-1.5',
     isSheet
-      ? 'border-t border-border/60 px-3 pb-[calc(8px+var(--safe-area-bottom,0px))] pt-2'
+      ? 'border-t border-border/60 px-3 pb-[calc(8px+max(0px,var(--safe-area-bottom,0px)-var(--native-keyboard-height,0px)))] pt-2'
       : isLanding
         ? 'pt-2'
         : 'pt-0.5'
@@ -1108,6 +1108,7 @@ export function ChatComposer({
                 <AttachmentAddMenu
                   isMobile={isMobile}
                   isLanding={isLanding}
+                  isSheet={isSheet}
                   disabled={promptDisabled}
                   onAddAttachment={onAttachmentAddClick}
                   attachmentDisabled={attachmentAddDisabled}

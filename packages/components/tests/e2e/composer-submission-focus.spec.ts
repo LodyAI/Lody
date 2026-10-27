@@ -920,3 +920,207 @@ for (const imeSignal of [{ isComposing: true }, { keyCode: 229 }, { which: 229 }
     await expect(input).toHaveValue('保留现有接口，先修改队列编辑。');
   });
 }
+
+test.describe('mobile first-send continuity', () => {
+  for (const scenario of [
+    { theme: 'light', width: 390, height: 844, keyboard: 0 },
+    { theme: 'dark', width: 390, height: 844, keyboard: 0 },
+    { theme: 'dark', width: 320, height: 568, keyboard: 0 },
+    { theme: 'light', width: 430, height: 932, keyboard: 0 },
+    { theme: 'dark', width: 390, height: 844, keyboard: 300 },
+  ]) {
+    test(`${scenario.theme} ${scenario.width}px keyboard ${scenario.keyboard}px replaces in place`, async ({
+      page,
+    }) => {
+      await page.setViewportSize(scenario);
+      await page.goto(
+        `/iframe.html?id=mobile-newchattransition--send-in-place&viewMode=story&globals=theme:${scenario.theme}`
+      );
+      const composer = page.locator('[class~="@container/composer-box"]');
+      const send = page.getByRole('button', { name: 'Send', exact: true });
+      await expect(send).toBeEnabled({ timeout: 15000 });
+      if (scenario.keyboard) {
+        await page.evaluate(
+          (height) =>
+            document.documentElement.style.setProperty('--native-keyboard-height', `${height}px`),
+          scenario.keyboard
+        );
+        await expect
+          .poll(async () => {
+            const box = await composer.boundingBox();
+            return box ? box.y + box.height : 0;
+          })
+          .toBe(scenario.height - scenario.keyboard - 8);
+      }
+      const before = await composer.boundingBox();
+      const model = page.getByRole('button', { name: 'Run configuration', exact: true });
+      const modelLabel = await model.innerText();
+      // Observe real surfaces through routing and 45 frames of the new page.
+      const samples = page.evaluate(
+        () =>
+          new Promise<Array<{ boxes: number[][]; transform: string; animations: number }>>(
+            (resolve) => {
+              const result: Array<{ boxes: number[][]; transform: string; animations: number }> =
+                [];
+              let sentFrames = 0;
+              const sample = () => {
+                const drawer = document.querySelector('[data-vaul-drawer]');
+                result.push({
+                  boxes: Array.from(
+                    document.querySelectorAll('[class~="@container/composer-box"]'),
+                    (element) => {
+                      const box = element.getBoundingClientRect();
+                      return [box.x, box.y, box.width, box.height];
+                    }
+                  ),
+                  transform: drawer ? getComputedStyle(drawer).transform : 'none',
+                  animations: drawer
+                    ? drawer
+                        .getAnimations()
+                        .filter((animation) => animation.playState === 'running').length
+                    : 0,
+                });
+                if (drawer && ++sentFrames >= 45) resolve(result);
+                else requestAnimationFrame(sample);
+              };
+              requestAnimationFrame(sample);
+            }
+          )
+      );
+      await send.click();
+      await expect(page.getByText('请检查移动端发送消息的布局。', { exact: true })).toBeVisible();
+      await expect(composer).toHaveCount(1);
+      expect(await composer.boundingBox()).toEqual(before);
+      expect(await model.innerText()).toBe(modelLabel);
+      await expect(model).toHaveCSS('font-weight', '400');
+      for (const frame of await samples) {
+        expect(frame.boxes).toEqual([[before!.x, before!.y, before!.width, before!.height]]);
+        expect(['none', 'matrix(1, 0, 0, 1, 0, 0)']).toContain(frame.transform);
+        expect(frame.animations).toBe(0);
+      }
+    });
+  }
+});
+
+test('mobile project choices mix sources by recency and render their icons', async ({ page }) => {
+  await page.route('https://avatars.githubusercontent.com/**', (route) => route.abort());
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto(
+    '/iframe.html?id=mobile-mobilenewchatsheet--inline-page-review-story&viewMode=story'
+  );
+  await page.getByRole('button', { name: 'Project', exact: true }).click();
+  const list = page.getByRole('listbox', { name: 'Project', exact: true });
+  await expect(list).toBeVisible();
+  const names = async () =>
+    (await list.getByRole('option').allInnerTexts()).map((text) => text.split('\n')[0]);
+  await expect
+    .poll(names)
+    .toEqual([
+      'No project selected',
+      'blog',
+      'loro-dev/lody',
+      'Loro stack',
+      'lody',
+      'loro-dev/loro',
+      'docs',
+      'loro-dev/lody-web',
+    ]);
+  for (const option of await list.getByRole('option').all())
+    await expect(option.locator('button > span').first().locator('svg')).toHaveCount(1);
+  await expect(list.getByText('High-performance CRDT framework', { exact: true })).toHaveCount(0);
+  await expect(
+    list.getByRole('option').filter({ hasText: 'loro-dev/loro' }).locator('svg.lucide-github')
+  ).toHaveCount(1);
+  await page.getByRole('textbox', { name: 'Search projects', exact: true }).fill('loro');
+  await expect
+    .poll(names)
+    .toEqual(['loro-dev/lody', 'Loro stack', 'loro-dev/loro', 'loro-dev/lody-web']);
+  await page.getByRole('textbox', { name: 'Search projects', exact: true }).fill('');
+  await list.getByRole('button', { name: 'No project selected', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Project', exact: true })).toHaveText(
+    'No project selected'
+  );
+});
+
+test('mobile GitHub projects show owner avatars after loading with a GitHub fallback meanwhile', async ({
+  page,
+}) => {
+  let release!: () => void;
+  const ready = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  await page.route('https://avatars.githubusercontent.com/**', async (route) => {
+    await ready;
+    await route.fulfill({
+      contentType: 'image/svg+xml',
+      headers: { 'Access-Control-Allow-Origin': '*' },
+      body: '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16"><rect width="16" height="16" fill="#318080"/></svg>',
+    });
+  });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto(
+    '/iframe.html?id=mobile-mobilenewchatsheet--inline-page-review-story&viewMode=story'
+  );
+  const project = page.getByRole('button', { name: 'Project', exact: true });
+  await expect(project.locator('svg.lucide-github')).toBeVisible();
+  release();
+  await expect(project.locator('img')).toBeVisible();
+  await expect(project.locator('img')).toHaveCSS('opacity', '1');
+  await expect(project.locator('svg.lucide-github')).toHaveCount(0);
+  await project.click();
+  const repo = page.getByRole('option').filter({ hasText: 'loro-dev/loro' });
+  await expect(repo.locator('img')).toHaveAttribute(
+    'src',
+    /^(blob:|https:\/\/avatars\.githubusercontent\.com\/loro-dev\?size=80)/
+  );
+  await expect(repo.locator('img')).toHaveCSS('opacity', '1');
+  await expect(repo.locator('svg.lucide-github')).toHaveCount(0);
+});
+
+test('mobile send retains its page through delayed presentation and later URL corrections', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto(
+    '/iframe.html?id=mobile-newchattransition--deferred-send-in-place&viewMode=story&globals=theme:dark'
+  );
+  const composer = page.locator('[class~="@container/composer-box"]');
+  await expect(page.getByRole('button', { name: 'Send', exact: true })).toBeEnabled();
+  const before = await composer.boundingBox();
+  await page.getByRole('button', { name: 'Send', exact: true }).click();
+  // Let Vaul's first-frame shortcut expire before the real surface can mount.
+  await page.evaluate(
+    () =>
+      new Promise<void>((resolve) =>
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
+      )
+  );
+  await expect(page.getByRole('button', { name: 'Project', exact: true })).toBeVisible();
+  await expect(page.locator('[data-vaul-drawer]')).toHaveCount(0);
+  expect(await composer.boundingBox()).toEqual(before);
+  await page.evaluate(() => window.dispatchEvent(new Event('storybook:session-ready')));
+  await expect(page.getByText('请检查移动端发送消息的布局。', { exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Project', exact: true })).toHaveCount(0);
+  const drawer = page.locator('[data-vaul-drawer]');
+  await expect(drawer).toHaveCSS('animation-name', 'none');
+  await page.evaluate(
+    () =>
+      new Promise<void>((resolve) =>
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
+      )
+  );
+  await page.evaluate(() => window.dispatchEvent(new Event('storybook:normalize-session-url')));
+  for (let frame = 0; frame < 45; frame++) {
+    const geometry = await drawer.evaluate((element) => ({
+      transform: getComputedStyle(element).transform,
+      animations: element.getAnimations().filter((animation) => animation.playState === 'running')
+        .length,
+    }));
+    expect(['none', 'matrix(1, 0, 0, 1, 0, 0)']).toContain(geometry.transform);
+    expect(geometry.animations).toBe(0);
+    expect(await composer.boundingBox()).toEqual(before);
+    await page.evaluate(
+      () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
+    );
+  }
+});

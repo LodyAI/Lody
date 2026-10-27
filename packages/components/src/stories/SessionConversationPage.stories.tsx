@@ -1,3 +1,4 @@
+import { ForceMobileLayoutProvider } from '@/hooks/use-mobile';
 /**
  * INTEGRATION HARNESS — not production, and NOT a place to change UI appearance.
  *
@@ -91,7 +92,6 @@ import {
 import { SessionChatInputArea } from '@/components/sessions/session-chat-input-area';
 import {
   Archive,
-  ChevronLeft,
   Copy,
   Ellipsis,
   FileText,
@@ -115,7 +115,10 @@ import {
   type MobileSessionMenuAction,
   type MobileSessionMenuInfoRow,
 } from '@/components/mobile/mobile-session-menu-sheet';
-import { GlassIconButton } from '@/components/mobile/glass-icon-button';
+import {
+  GlassIconButton,
+  MobileSessionHeaderBackButton,
+} from '@/components/mobile/glass-icon-button';
 import {
   buildAcpSelectorOptions,
   type AcpConfigOptionValue,
@@ -1634,13 +1637,23 @@ function StoryComposer({
   isAgentBusy,
   onSendMessage,
   initialInputText = 'Tighten the mobile spacing after the permission flow is stable.',
+  modelLabel,
 }: {
   session: SessionMeta;
   isAgentBusy: boolean;
   onSendMessage?: ComponentProps<typeof SessionChatInputArea>['onSendMessage'];
   initialInputText?: string;
+  modelLabel?: string;
 }) {
-  const options = session.agentType === 'deepseek' ? readingSelectorOptions : selectorOptions;
+  const baseOptions = session.agentType === 'deepseek' ? readingSelectorOptions : selectorOptions;
+  const options = modelLabel
+    ? {
+        ...baseOptions,
+        modelOptions: [{ value: modelLabel, label: modelLabel }],
+        modeOptions: [{ value: 'auto', label: 'Auto' }],
+        configOptionSelectors: [],
+      }
+    : baseOptions;
   const [mode, setMode] = useState<string | null>(options.modeOptions[0]?.value ?? null);
   const [model, setModel] = useState<string | null>(options.modelOptions[0]?.value ?? null);
   const [configValues, setConfigValues] = useState<Record<string, AcpConfigOptionValue>>(() =>
@@ -1854,6 +1867,9 @@ export function SessionConversationStoryHarness({
   machineInfo,
   machineOnly = false,
   annotationPreview = false,
+  firstUserMessage,
+  onPresented,
+  composerModelLabel,
 }: {
   state: PageState;
   frame: DeviceFrame;
@@ -1870,10 +1886,16 @@ export function SessionConversationStoryHarness({
   machineInfo?: SessionMachineInfo;
   machineOnly?: boolean;
   annotationPreview?: boolean;
+  firstUserMessage?: string;
+  onPresented?: () => void;
+  composerModelLabel?: string;
   /** Mirrors the Settings > Appearance "Full width" switch. */
   wide?: boolean;
 }) {
   const { t } = useTranslation();
+  useLayoutEffect(() => {
+    onPresented?.();
+  }, [onPresented]);
   const [streamChunkCount, setStreamChunkCount] = useState(0);
   const [readingLiveTimestamp] = useState(() => new Date(getServerNow() - 45_000).toISOString());
   const [readingPanel, setReadingPanel] = useState<ReadingPanelSelection | null>(
@@ -1935,12 +1957,23 @@ export function SessionConversationStoryHarness({
   }, [state]);
   const history = useMemo(
     () =>
-      shareImage
-        ? [...buildShareHistory(), ...sentMessages]
-        : showCollaborators
-          ? collaborativeMessages()
-          : buildHistory(state, streamChunkCount, showCapacityRetry, readingLiveTimestamp),
+      firstUserMessage !== undefined
+        ? [
+            buildMessage({
+              id: 'new-chat-first-turn',
+              role: 'user',
+              userId: STORY_USER_ID,
+              timestamp: '2026-10-28T00:00:00.000Z',
+              items: [{ type: 'text', text: firstUserMessage }],
+            }),
+          ]
+        : shareImage
+          ? [...buildShareHistory(), ...sentMessages]
+          : showCollaborators
+            ? collaborativeMessages()
+            : buildHistory(state, streamChunkCount, showCapacityRetry, readingLiveTimestamp),
     [
+      firstUserMessage,
       shareImage,
       sentMessages,
       showCapacityRetry,
@@ -2190,15 +2223,7 @@ export function SessionConversationStoryHarness({
                           hideMenuButton
                           className="absolute inset-x-0 top-0 z-30 border-b-0 bg-background/55 backdrop-blur-xl"
                           style={{ height: '3rem' }}
-                          leading={
-                            // Mirrors production `MobileSessionHeaderBackButton`.
-                            <GlassIconButton
-                              label={translate('common.back', 'Back')}
-                              onClick={action}
-                            >
-                              <ChevronLeft className="h-5 w-5" />
-                            </GlassIconButton>
-                          }
+                          leading={<MobileSessionHeaderBackButton onBack={action} />}
                           title={mobileTitleNode}
                           actions={mobileHeaderActions}
                         />
@@ -2291,6 +2316,7 @@ export function SessionConversationStoryHarness({
                                 <StoryComposer
                                   session={session}
                                   isAgentBusy={isWorking}
+                                  modelLabel={composerModelLabel}
                                   initialInputText={
                                     shareImage
                                       ? 'Can we compare the profiler results next?'
@@ -2420,7 +2446,7 @@ function makeMobileViewportDecorator(width: number, height?: number): Decorator 
         window.dispatchEvent(new Event('resize'));
       };
     }, []);
-    return <>{children}</>;
+    return <ForceMobileLayoutProvider force>{children}</ForceMobileLayoutProvider>;
   }
   return (Story) => (
     <MobileViewport>
@@ -2446,7 +2472,7 @@ const withDesktopViewport: Decorator = (Story) => {
       clearViewportLock(frame);
       window.dispatchEvent(new Event('resize'));
     }, []);
-    return <>{children}</>;
+    return <ForceMobileLayoutProvider force>{children}</ForceMobileLayoutProvider>;
   }
   return (
     <DesktopViewport>
