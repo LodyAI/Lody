@@ -725,7 +725,7 @@ describe('ledger-bound signed document workflows', () => {
     expect(code(admitStreamsUpdateBatch({ ...options, view: f.view() }))).toBe('unauthorized');
   });
   it.each(['tag7', 'tag8', 'rotation-required'] as const)(
-    'admits original sealed updates and snapshots after %s while retaining the new-seal gate',
+    'admits original sealed updates and snapshots after %s while retaining active writer access',
     async (transition) => {
       const f = ledgerFixture(true);
       f.addPhone();
@@ -1106,7 +1106,18 @@ describe('ledger-bound signed document workflows', () => {
             f.addPhone();
             f.append([5, f.phone.raw]);
             expect(read(admitStreamsSnapshot({ ...input, view: f.view() }))).toEqual(body);
-            yield* binding.seal({ ...updateInput, context, additionalData: aadFor });
+            const pendingSeal = yield* binding.seal({
+              ...updateInput,
+              context,
+              additionalData: aadFor,
+            });
+            expect(
+              yield* binding.open({
+                ...pendingSeal,
+                context,
+                additionalData: aadFor(pendingSeal.header),
+              })
+            ).toEqual(updateInput.plaintext);
             expect(yield* authenticateStreamsSnapshotEffect({ ...input, view: f.view() })).toEqual(
               body
             );
@@ -1198,7 +1209,7 @@ describe('ledger-bound signed document workflows', () => {
       )
     );
   });
-  it('keeps active retained-epoch sends available during manual rotation', async () => {
+  it('keeps active seals available during manual rotation while refusing revoked writers', async () => {
     const f = ledgerFixture(true);
     f.addPhone();
     const nextSecret = new Uint8Array(32).fill(8);
@@ -1215,7 +1226,15 @@ describe('ledger-bound signed document workflows', () => {
           const phone = yield* makeStreamsUpdateBinding({ ...options, signer: f.phone.signer });
           const old = yield* phone.seal(updateInput);
           f.append([5, f.phone.raw]);
-          yield* owner.seal(updateInput);
+          const pending = yield* owner.seal(updateInput);
+          expect(
+            yield* owner.open({
+              ...pending,
+              context: updateContext,
+              additionalData: new Uint8Array([1, 2]),
+            })
+          ).toEqual(updateInput.plaintext);
+          expect(code(yield* Effect.result(phone.seal(updateInput)))).toBe('unauthorized');
           f.publishEpoch(nextSecret);
           yield* owner.seal(updateInput);
           expect(code(yield* Effect.result(phone.seal(updateInput)))).toBe('unauthorized');

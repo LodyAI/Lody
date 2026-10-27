@@ -292,3 +292,35 @@ export const RestoreFailure: Story = {
     await expect(within(banner).getByRole('button', { name: /Copy error|复制错误/ })).toBeVisible();
   },
 };
+
+export const DeepSeekNodeMissing: Story = {
+  args: {
+    sessionId,
+    message: {
+      ...message,
+      items: [
+        {
+          type: 'system_notice',
+          name: 'chat_failed',
+          meta: {
+            reason: 'turn_pre_prompt_failed',
+            message:
+              'Starting the agent failed: [DSH_NODE_NOT_FOUND] DeepSeek Harness requires Node.js, but node was not found on the target machine PATH.',
+          },
+        },
+      ],
+    },
+  },
+  render: renderRow,
+  play: async ({ canvasElement }) => {
+    const banner = within(canvasElement).getByRole('alert');
+    await expect(banner.textContent).toMatch(
+      /needs Node.js on the target machine|需要在目标机器上安装 Node.js/
+    );
+    await expect(banner.textContent).toContain('PATH');
+    await expect(
+      within(banner).getByRole('button', { name: /Download Node.js|下载 Node.js/ })
+    ).toBeVisible();
+    await expect(within(banner).getByRole('button', { name: /Copy error|复制错误/ })).toBeVisible();
+  },
+};
