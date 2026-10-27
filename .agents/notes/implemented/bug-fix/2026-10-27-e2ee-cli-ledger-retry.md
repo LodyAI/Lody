@@ -2,6 +2,7 @@
 
 Status: implemented
 Translation: current
+PR: [#1977](https://github.com/LodyAI/Lody/pull/1977)
 
 [中文](2026-10-27-e2ee-cli-ledger-retry.zh.md)
 

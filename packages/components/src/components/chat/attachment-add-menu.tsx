@@ -1,4 +1,5 @@
-import { useWorkspaceFeature } from '@/hooks/use-workspace-feature';
+import { WorkspaceFeatureReasonText } from '@/components/workspace-feature-notice';
+import { useWorkspaceFeatureReason } from '@/hooks/use-workspace-feature';
 import { useState } from 'react';
 import { Clock, ChevronLeft, ChevronRight, Paperclip, Plug, Plus } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
@@ -55,16 +56,14 @@ export function AttachmentAddMenu({
   isMobile,
   isLanding,
   disabled,
-  onAddAttachment: requestedAddAttachment,
+  onAddAttachment,
   attachmentDisabled,
-  onScheduleSend: requestedScheduleSend,
+  onScheduleSend,
   scheduleDisabledReason,
   mcp,
 }: AttachmentAddMenuProps) {
-  const schedulesAllowed = useWorkspaceFeature('schedules');
-  const onScheduleSend = schedulesAllowed ? requestedScheduleSend : undefined;
-  const attachmentAllowed = useWorkspaceFeature('attachments');
-  const onAddAttachment = attachmentAllowed ? requestedAddAttachment : undefined;
+  const scheduleFeatureReason = useWorkspaceFeatureReason('schedules');
+  const attachmentFeatureReason = useWorkspaceFeatureReason('attachments');
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   // Mobile's pushed panel. Desktop uses a real submenu and stays on 'root'.
@@ -87,7 +86,7 @@ export function AttachmentAddMenu({
       ? t('session.mcp.loadCount', { count: selectedCount })
       : t('session.mcp.loadNone');
 
-  const scheduleDisabled = Boolean(scheduleDisabledReason);
+  const scheduleDisabled = Boolean(scheduleFeatureReason || scheduleDisabledReason);
   const scheduleItem = onScheduleSend ? (
     <Menu.Item
       icon={Clock}
@@ -95,7 +94,11 @@ export function AttachmentAddMenu({
       disabled={scheduleDisabled}
       className={itemClass}
     >
-      {t('scheduledMessage.menu')}
+      {scheduleFeatureReason ? (
+        <WorkspaceFeatureReasonText reason={scheduleFeatureReason} />
+      ) : (
+        t('scheduledMessage.menu')
+      )}
     </Menu.Item>
   ) : null;
 
@@ -104,7 +107,7 @@ export function AttachmentAddMenu({
   // owns the same box; the tooltip then explains the state without making the
   // command clickable.
   const scheduleEntry =
-    scheduleItem && scheduleDisabled ? (
+    scheduleItem && scheduleDisabled && !scheduleFeatureReason ? (
       <Tooltip.Root>
         <Tooltip.Trigger delay={0} render={<div />}>
           {scheduleItem}
@@ -195,11 +198,16 @@ export function AttachmentAddMenu({
             {onAddAttachment ? (
               <Menu.Item
                 onClick={onAddAttachment}
-                disabled={attachmentDisabled}
+                disabled={attachmentDisabled || !!attachmentFeatureReason}
+                title={attachmentFeatureReason}
                 className={itemClass}
                 icon={Paperclip}
               >
-                {triggerLabel}
+                {attachmentFeatureReason ? (
+                  <WorkspaceFeatureReasonText reason={attachmentFeatureReason} />
+                ) : (
+                  triggerLabel
+                )}
               </Menu.Item>
             ) : null}
             {scheduleEntry}
