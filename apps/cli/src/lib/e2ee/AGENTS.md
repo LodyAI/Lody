@@ -67,10 +67,10 @@
 - Only activation/binding/device-original ENOENT means pairing wait. Check the
   original before custody init; stale hints cannot trigger keyring probes. Preserve
   other file errors/Fleet retry; never cache transient storage as missing pairing.
-- Ingest storage failure fences writes until verified refresh. Seal only requests
-  coalesced storage repair and returns; never await refresh inside an SDK save queue.
-  Healthy readers stay attached.
-  Validation/conflict needs explicit normal refresh; seal cannot auto-recover it.
+- Ingest failure fences new seals until verified refresh; keep the last verified view
+  and healthy readers. Retry at most three times per failure episode; explicit refresh
+  restarts that budget. Seal may request retry but never await it in the SDK save queue.
+  Never skip rejected records or reset pins. Close cancels pending retry timers.
 
 ## Local machine pairing
 
