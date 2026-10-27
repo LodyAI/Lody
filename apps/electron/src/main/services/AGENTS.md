@@ -105,16 +105,17 @@ release. Verification/storage failures close only their owner; malformed input
 leaves shared readers available. Preserve originals before feed/pin and compare
 overlapping records. Genuine evidence conflicts never fall back.
 
-Cloud calls use fixed E2EE references and per-request auth/abort/deadlines outside
-custody locks. Preserve original requests across unknown outcomes. Keep SDK logs
-and raw causes in main, outside IPC logging and telemetry. `e2ee-diagnostics.mts` keeps raw storage causes main-only. Verified readback wins
-over a lost acknowledgement; auxiliary failures never undo verified admission.
+Cloud E2EE calls use fixed references and per-request auth/abort/deadlines outside
+custody locks. Pin D03 identity before new signatures; auth generation fences late
+registration. Retain requests on unknown outcomes. Keep raw/SDK diagnostics in
+main, outside IPC/telemetry (`e2ee-diagnostics.mts`). Verified readback wins over
+lost acknowledgements; auxiliary failures never undo verified admission.
 
 Explicit consent follows locally verified, durably fixed pairing evidence.
 Retries retain session/record/requestId and keys, credentials and pins. Failed begin
 stays discoverable. Archive terminal or foreign immutable recipient attempts (pin-only + relay request is foreign);
 same-request admitting/unknown stays fenced. Cleanup preserves installed origins,
-other sessions and both primary/cleanup causes; see the linked join note.
+other sessions and both primary/cleanup causes; see join note.
 Personal snapshot origins verify pinned endorsement and
 self admission before any binding/pin/cursor; old epoch keys use mailbox plus the
 verified history chain, never staging. Ledger record positions may be sparse.

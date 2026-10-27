@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto'
-import { mkdtemp, rm, readFile } from 'node:fs/promises'
+import { mkdtemp, rm, readFile, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
@@ -72,7 +72,7 @@ async function fixture(t) {
   t.after(() => rm(directory, { recursive: true, force: true }))
   return directory
 }
-const openOwner = (directory, override = (custody) => custody) =>
+const openOwner = (directory, override = (custody) => custody, registerIdentity = true) =>
   Effect.gen(function* () {
     const custody = yield* makeDesktopE2eeCustody({
       directory: join(directory, 'custody'),
@@ -84,6 +84,11 @@ const openOwner = (directory, override = (custody) => custody) =>
       accountId: intent.accountId,
       custody: override(custody)
     })
+    if (registerIdentity)
+      yield* bootstrap.recordAccountIdentity({
+        accountId: intent.accountId,
+        cryptoUserId: 'aa'.repeat(32)
+      })
     return { custody, bootstrap }
   })
 
@@ -1567,3 +1572,31 @@ for (const recovery of ['retry', 'cancel-and-renew']) {
     )
   })
 }
+
+void test('D03 unknown identity companion blocks only new signatures; existing workspace and signed originals reopen offline', async (t) => {
+  const directory = await fixture(t)
+  let original
+  await execute(
+    Effect.gen(function* () {
+      const owner = yield* ownerWithHost(directory)
+      original = yield* bind(owner)
+      yield* owner.host.open(workspaceId)
+    })
+  )
+  const protectedBytes = Buffer.from('{"version":99,"opaque":"future account identity"}')
+  await writeFile(join(directory, 'account-identity.json'), protectedBytes)
+  await execute(
+    Effect.gen(function* () {
+      const owner = yield* openOwner(directory, (value) => value, false)
+      const host = yield* makeDesktopE2eeRuntimeHost({ directory, ...owner })
+      assert.equal((yield* host.open(workspaceId)).hasCurrentKey, true)
+      assert.equal(yield* owner.bootstrap.creationNeedsAccountIdentity(intent), false)
+      assert.deepEqual(yield* owner.bootstrap.prepareCreation(intent), original)
+      const next = { ...intent, requestId: 'another-request-01234567' }
+      const rejected = yield* Effect.result(owner.bootstrap.creationNeedsAccountIdentity(next))
+      assert.equal(rejected.failure.code, 'corrupt')
+      assert.equal((yield* host.status(workspaceId)).hasCurrentKey, true)
+    })
+  )
+  assert.deepEqual(await readFile(join(directory, 'account-identity.json')), protectedBytes)
+})

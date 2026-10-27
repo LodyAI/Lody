@@ -382,3 +382,22 @@ void test('personal join keeps exact originals across lost acknowledgements and 
     )
   )
 })
+
+void test('D03 narrow registration accepts no client-selected identity and validates the response', async () => {
+  await Effect.runPromise(
+    Effect.scoped(
+      Effect.gen(function* () {
+        const client = yield* build(async (_url, init) => {
+          const { path, args } = JSON.parse(init.body)
+          assert.equal(path, 'e2eeWorkspaces:accountIdentity')
+          assert.deepEqual(args, [{}])
+          return response({ accountId: 'synthetic-account', cryptoUserId: 'aa'.repeat(32) })
+        })
+        assert.deepEqual(yield* client.accountIdentity(), {
+          accountId: 'synthetic-account',
+          cryptoUserId: 'aa'.repeat(32)
+        })
+      })
+    )
+  )
+})

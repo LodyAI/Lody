@@ -70,7 +70,10 @@ async function account(options = {}) {
       '../e2ee-custody-electron': {
         makeElectronE2eeCustody: options.custody ?? (() => Effect.succeed({}))
       },
-      './e2ee-bootstrap.mjs': { makeDesktopE2eeBootstrap: () => Effect.succeed({}) },
+      './e2ee-bootstrap.mjs': {
+        makeDesktopE2eeBootstrap: options.bootstrap ?? (() => Effect.succeed({}))
+      },
+      './e2ee-cloud-client.mjs': { makeE2eeCloudClient: options.cloud },
       './e2ee-runtime.mjs': { makeDesktopE2eeRuntimeHost: () => Effect.succeed({}) },
       '../ipc/ipc-service-deps': {
         getIpcServiceDeps: () => ({
@@ -772,6 +775,7 @@ async function personalJoinFixture(t) {
           safeStorage
         })
         const bootstrap = yield* makeDesktopE2eeBootstrap({ directory: path, accountId, custody })
+        yield* bootstrap.recordAccountIdentity({ accountId, cryptoUserId: 'aa'.repeat(32) })
         const host = yield* makeDesktopE2eeRuntimeHost({ directory: path, custody, bootstrap })
         return { custody, bootstrap, host }
       }).pipe(Effect.provideService(Scope.Scope, scope))
@@ -1040,6 +1044,84 @@ void test('confirmed cancellation survives real SQLite archival failure and the 
       original.requestHex
     )
   )
+})
+
+for (const change of ['account switch', 'same-account logout/login'])
+  void test(`D03 registration waits outside the account lock and rejects a late response after ${change}`, async () => {
+    const entered = Promise.withResolvers()
+    const response = Promise.withResolvers()
+    let signatures = 0
+    let cached = 0
+    const { api, publishIdentity } = await account({
+      bootstrap: () =>
+        Effect.succeed({
+          creationNeedsAccountIdentity: () => Effect.succeed(true),
+          recordAccountIdentity: () =>
+            Effect.sync(() => {
+              cached++
+            }),
+          prepareCreation: () =>
+            Effect.sync(() => {
+              signatures++
+              return 'signed'
+            })
+        }),
+      cloud: () =>
+        Effect.succeed({
+          accountIdentity: () =>
+            Effect.promise(async () => {
+              entered.resolve()
+              return response.promise
+            })
+        })
+    })
+    const creation = api.prepareDesktopE2eeCreation({
+      accountId: 'account',
+      requestId: 'request-0123456789',
+      name: 'Synthetic',
+      slug: 'synthetic'
+    })
+    await entered.promise
+    assert.equal(
+      await api.withDesktopE2eeAccount((owner) => Effect.succeed(owner.accountId)),
+      'account'
+    )
+    if (change === 'account switch') publishIdentity('other-account')
+    else {
+      publishIdentity(null)
+      publishIdentity('account')
+    }
+    response.resolve({ accountId: 'account', cryptoUserId: 'aa'.repeat(32) })
+    await assert.rejects(creation, /e2ee_/)
+    assert.equal(signatures, 0)
+    assert.equal(cached, 0)
+    assert.equal(
+      await api.withDesktopE2eeAccount((owner) => Effect.succeed(owner.accountId)),
+      change === 'account switch' ? 'other-account' : 'account'
+    )
+    await api.closeDesktopE2eeAccount()
+  })
+
+void test('D03 exact signed retry and registered local identity do not acquire a cloud client', async () => {
+  const original = Object.freeze({ genesisRecordHex: 'synthetic-original' })
+  const { api } = await account({
+    bootstrap: () =>
+      Effect.succeed({
+        creationNeedsAccountIdentity: () => Effect.succeed(false),
+        prepareCreation: () => Effect.succeed(original)
+      }),
+    cloud: () => Effect.die(new Error('unexpected cloud call'))
+  })
+  assert.equal(
+    await api.prepareDesktopE2eeCreation({
+      accountId: 'account',
+      requestId: 'request-0123456789',
+      name: 'Synthetic',
+      slug: 'synthetic'
+    }),
+    original
+  )
+  await api.closeDesktopE2eeAccount()
 })
 
 void test('an immutable published session for another recipient retires only the local losing request and preserves its identity on the next offer', async (t) => {

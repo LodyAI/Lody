@@ -218,6 +218,11 @@ export const makeE2eeCloudClient = Effect.fnUntraced(function* (input: {
   return Object.freeze({
     close,
     mailbox,
+    accountIdentity: () =>
+      request(
+        (client) => client.action(api.e2eeWorkspaces.accountIdentity, {}),
+        z.object({ accountId: z.string().min(1), cryptoUserId: hash })
+      ),
     joinBegin: (requestInput: E2eeJoinRequests['begin']) => {
       const original = { ...requestInput }
       return request((client) => client.mutation(api.e2eeJoinMailbox.begin, original), joinSession)

@@ -416,6 +416,7 @@ export type CloudApi = {
     repair: Mutation<E2eeMailboxRequests['repair'], E2eeMailboxReplies['repair']>;
   };
   e2eeWorkspaces: {
+    accountIdentity: Action<Record<string, never>, { accountId: string; cryptoUserId: string }>;
     appendRecord: Action<E2eeAppendRecordRequest, E2eeAppendRecordReply>;
     create: Action<E2eeWorkspaceCreateRequest, E2eeWorkspaceCreateResult>;
     describe: Query<{ workspaceId: string }, WorkspaceAdmissionDescriptor>;

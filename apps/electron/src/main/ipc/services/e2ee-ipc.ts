@@ -8,6 +8,7 @@ import {
 } from '../../services/e2ee-bootstrap.mjs'
 import {
   releaseDesktopE2eeReader,
+  prepareDesktopE2eeCreation,
   desktopE2eeCloudClient,
   runDesktopE2eeOperation,
   withDesktopE2eeAccount
@@ -673,11 +674,7 @@ export class E2eeIpc extends IpcService {
     sender()
     validateDesktopE2eeCreationIntent(payload)
     const input = { ...payload }
-    return withDesktopE2eeAccount((owner) =>
-      owner.accountId === input.accountId
-        ? owner.bootstrap.prepareCreation(input)
-        : Effect.fail(new Error('e2ee_account_mismatch'))
-    )
+    return prepareDesktopE2eeCreation(input)
   }
   @IpcMethod()
   async recordCreated(input: Parameters<E2eeWorkspaceRuntime['recordCreated']>[0]) {
