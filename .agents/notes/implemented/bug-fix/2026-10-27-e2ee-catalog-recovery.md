@@ -2,6 +2,7 @@
 
 Status: implemented
 Translation: current
+PR: [#1966](https://github.com/LodyAI/Lody/pull/1966)
 
 [中文](2026-10-27-e2ee-catalog-recovery.zh.md)
 
