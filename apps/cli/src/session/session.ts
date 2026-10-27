@@ -737,6 +737,7 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
           onUsageUpdate: callbacks.onUsageUpdate,
           onContextWindowUsageUpdate: callbacks.onContextWindowUsageUpdate,
           onRateLimitUpdate: callbacks.onRateLimitUpdate,
+          onPromptSuggestion: callbacks.onPromptSuggestion,
           onThreadGoalUpdated: callbacks.onThreadGoalUpdated,
           onThreadGoalCleared: callbacks.onThreadGoalCleared,
           onSessionTitleUpdate: callbacks.onSessionTitleUpdate,

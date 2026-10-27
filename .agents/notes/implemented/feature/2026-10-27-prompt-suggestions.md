@@ -3,13 +3,13 @@
 Status: implemented
 Translation: current
 
-PRs: [Core #24](https://github.com/LodyAI/acp-extension-core/pull/24), [Codex #75](https://github.com/LodyAI/acp-extension-codex/pull/75), [Claude #44](https://github.com/LodyAI/acp-extension-claude/pull/44)
+PRs: [Lody #1951](https://github.com/LodyAI/Lody/pull/1951), [Core #24](https://github.com/LodyAI/acp-extension-core/pull/24), [Codex #75](https://github.com/LodyAI/acp-extension-codex/pull/75), [Claude #44](https://github.com/LodyAI/acp-extension-claude/pull/44)
 
 [中文](2026-10-27-prompt-suggestions.zh.md)
 
 ## Abstract
 
-Core now defines a negotiated notification for predictions of the next user prompt, and the Codex and Claude adapters forward their native events. Codex preserves its source turn and success/empty/failure result; Claude preserves suggestion text and message identity without inventing a source turn. The user explicitly accepted stale suggestions and limited this implementation to Core and adapters. Workspace integration is implemented; standalone publication, Lody synchronization and composer UI remain separate work.
+Core now defines a negotiated notification for predictions of the next user prompt, and the Codex and Claude adapters forward their native events. Codex preserves its source turn and success/empty/failure result; Claude preserves suggestion text and message identity without inventing a source turn. The user accepted stale suggestions and subsequently authorized Lody synchronization and composer integration. Lody delivers the latest advisory state through an independent ephemeral channel; desktop Tab and mobile Apply copy it into an editable draft without submitting it. Real-model end-to-end delivery remains unverified.
 
 ## Contract and mapping
 
@@ -36,16 +36,19 @@ Claude negotiation enables SDK `promptSuggestions` unless provider options expli
 
 - The user accepted potentially stale suggestions. `sourceTurnId` stays absent for Claude; no `validForTurnId` or synthetic turn binding is introduced. A message UUID is not a source turn.
 - Notifications are advisory, can follow prompt completion or newer input, and never enter assistant text or automatically become user input. No history/read/retry API or per-turn delivery guarantee is implied. SDK suppression is not a failure.
-- The root pnpm workspace already overrides Core to `workspace:*`; local consumers use this source. Core 0.3.0 is published. Both adapters now pin `acp-extension-core` to `0.3.0`, with npm-generated lockfiles and registry integrity hashes. The root lockfile remains unchanged because its override still resolves Core to the workspace. The integration PR pins the reviewed source commits; package versions, runtime pins and publication remain unchanged.
-- The proposed product direction remains a composer hint accepted by Tab into an editable draft, without auto-submit. Independent ephemeral latest-state synchronization is appropriate; the existing `presence` heartbeat channel must not carry suggestion text. This UI/synchronization direction was not implemented or tested.
+- The root pnpm workspace already overrides Core to `workspace:*`; local consumers use this source. Core 0.3.0 is published. Both adapters now pin `acp-extension-core` to `0.3.0`, with npm-generated lockfiles and registry integrity hashes. The root lockfile remains unchanged because its override still resolves Core to the workspace. All eight submodules are aligned to their fetched upstream main commits, including the Core 0.3.0 release; managed-runtime version pins remain unchanged.
+- Suggestions use a dedicated `prompt-suggestions` ephemeral channel, separate from presence heartbeat and persisted conversation history. The publisher retains up to 256 session entries for 24 hours, with 16,384-character text and bounded identity fields. This is transport retention, not turn freshness.
+- The CLI accepts only negotiated events for its active ACP session, then maps them to the stable Lody session and machine. Local connections receive coalesced latest snapshots through the existing physical writer. Optional cloud bridging uses existing authorization and excludes encrypted workspaces; local-only composition never starts cloud transport.
+- Renderer local and cloud stores stay separate and resolve by target machine; unknown routes return no hint. Hook snapshots guard workspace/runtime/session/machine switches. Typing, clearing and accepting do not consume shared state. Empty or failed results clear the visible hint. See the [composer interaction contract](2026-10-27-prompt-suggestion-composer-ui.md).
+- Existing native transport and writer owners remain authoritative. No broader lifecycle migration was introduced into the Promise-based integration boundary.
 
 ## Verification
 
 Core build/typecheck and all 10 Core tests passed. Adapter tests cover absent/unknown negotiation, successful generation opt-in and explicit opt-out, native text/null/failure preservation, session ownership and native-to-ACP identity, post-prompt delivery, and a rejected late Claude notification while another prompt continues. Codex covers both ACP versions. Final offline suites: Claude 1,172 passed / 11 skipped; Codex 98 passed. Both adapter builds, Codex typecheck, and changed Claude files lint/format checks passed using Node 24.22.1.
 
-Two Claude initialization snapshots were updated only for the new capability. The broader suite exposed nine existing v2 task actor snapshots; `bash-background` reproduces with the unchanged adapter source. Full default adapter test runs were stopped after existing real-runtime cases attempted network access and Codex authentication failed. Real-model generation and suppression remain unverified. PR preparation also attempted root `pnpm check`/`pnpm format` and Claude `npm run check`; missing workspace dependencies and now-unavailable dependency symlinks prevented those reruns. The successful targeted checks above preceded that environment change. Root documentation checks retain existing missing-submodule link failures; no new note-link errors were introduced (40 baseline errors remain).
+Core 0.3.0 was also checked in clean standalone adapter clones using `npm ci`: Codex typecheck, build and 11 targeted tests passed; Claude build, check and 699 targeted tests passed (10 skipped). Real-model generation and suppression remain unverified.
 
-The Core 0.3.0 dependency update was verified in clean standalone clones using `npm ci` against the published package: Codex typecheck (including examples), build and 11 targeted tests passed; Claude build, full `npm run check` and 699 targeted tests passed (10 skipped). Root checks remain blocked by missing workspace dependencies.
+Lody verification after updating submodules: 46 CLI tests, 21 shared boundary tests, and 72 renderer/composer tests passed. The shared full suite previously passed 1,688 tests. Shared, CLI and components typechecks passed. Root formatting and documentation checks passed. Root `pnpm check` is blocked during Devin adapter preparation because that checkout lacks dependencies; this is not a passing full-workspace check. Root lint also encounters missing Node/React/Vite type definitions in other checkout scopes. Storybook browser checks cover desktop Tab, mobile Apply, hiding while typing and restoration after clearing without console errors. These use synthetic component data, not a live model or full application session.
 
 ## Evidence
 

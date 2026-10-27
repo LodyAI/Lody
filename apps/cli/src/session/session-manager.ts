@@ -86,7 +86,7 @@ import {
 } from '@/lib/gh-shim-script';
 import { ensureLodyBashEnvForGhShim, shouldInjectBashEnvForGhShim } from '@/lib/lody-bashenv';
 import { ensureLodyZdotdirForGhShim, shouldInjectZdotdirForGhShim } from '@/lib/lody-zdotdir';
-import type { RateLimit, SessionUsageUpdate } from 'acp-extension-core';
+import type { LodyPromptSuggestion, RateLimit, SessionUsageUpdate } from 'acp-extension-core';
 import { getWorktreeManager } from './worktree/worktree-manager';
 import type {
   GitCredentialBrokerAuth,
@@ -290,6 +290,7 @@ export interface CreateAgentConfig {
   onUsageUpdate: (usage: SessionUsageUpdate, accountingId?: string) => void;
   onContextWindowUsageUpdate: (usage: SessionContextWindowUsage) => void;
   onRateLimitUpdate: (limits: RateLimit) => void;
+  onPromptSuggestion?: (suggestion: LodyPromptSuggestion) => void;
   onThreadGoalUpdated: (goal: Extract<MessageContent, { type: 'goal' }>) => void;
   onThreadGoalCleared: (threadId: string) => void;
   onSessionTitleUpdate: (title: string) => void;
@@ -334,6 +335,7 @@ interface SessionManagerEvents {
     accountingId?: string;
   }) => void;
   onContextWindowUsageUpdate: (sessionId: SessionId, usage: SessionContextWindowUsage) => void;
+  onPromptSuggestion: (sessionId: SessionId, suggestion: LodyPromptSuggestion) => void;
   onRateLimitUpdate: (
     machineId: MachineId,
     agentConfigId: AgentConfigId | undefined,
@@ -743,6 +745,9 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
       },
       onContextWindowUsageUpdate: (usage: SessionContextWindowUsage) => {
         this.emit('onContextWindowUsageUpdate', sessionId, usage);
+      },
+      onPromptSuggestion: (suggestion) => {
+        this.emit('onPromptSuggestion', sessionId, suggestion);
       },
       onRateLimitUpdate: (limits: RateLimit) => {
         if (

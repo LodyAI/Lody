@@ -56,7 +56,7 @@ import type {
 } from '@lody/shared';
 
 import { createStdinWritableStream, createStdoutReadableStream } from '@/utils/stream';
-import type { RateLimit, SessionUsageUpdate } from 'acp-extension-core';
+import type { LodyPromptSuggestion, RateLimit, SessionUsageUpdate } from 'acp-extension-core';
 import {
   appendStderrTail,
   AcpStartupProcessError,
@@ -114,6 +114,7 @@ export type CreateAcpClientOptions = {
   onUsageUpdate?(usage: SessionUsageUpdate): void;
   onContextWindowUsageUpdate?(usage: SessionContextWindowUsage): void;
   onRateLimitUpdate?(limits: RateLimit): void;
+  onPromptSuggestion?(suggestion: LodyPromptSuggestion): void;
   onThreadGoalUpdated?(goal: Extract<MessageContent, { type: 'goal' }>): void;
   onThreadGoalCleared?(threadId: string): void;
   onSessionTitleUpdate?(title: string): void;
@@ -149,6 +150,7 @@ export const createAcpClient = async (options: CreateAcpClientOptions) => {
     onUsageUpdate: options.onUsageUpdate,
     onContextWindowUsageUpdate: options.onContextWindowUsageUpdate,
     onRateLimitUpdate: options.onRateLimitUpdate,
+    onPromptSuggestion: options.onPromptSuggestion,
     onThreadGoalUpdated: options.onThreadGoalUpdated,
     onThreadGoalCleared: options.onThreadGoalCleared,
     onSessionTitleUpdate: options.onSessionTitleUpdate,

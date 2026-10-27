@@ -54,11 +54,7 @@ remains unverified here.
   succeeds. Playwright against the built stories at 900×600 and 420×700 confirmed
   the desktop Tab draft/caret and hidden hint, mobile click-through focus,
   unchanged Tab, Apply-only draft/caret and hidden hint, with no console errors.
-- Typecheck of `@lody/components` reached only dependency-owned errors: the
-  supplied hook refers to the runtime method added by its owning change, and the
-  core submodule lacks an `@agentclientprotocol/sdk` type in this isolated
-  checkout. This commit is intended to cherry-pick after that hook/runtime
-  commit.
+- After integration with the owning hook/runtime, `@lody/components` typecheck passes.
 - No live model was available, so real ACP suggestion generation and a complete
   app visual check remain unverified.
 

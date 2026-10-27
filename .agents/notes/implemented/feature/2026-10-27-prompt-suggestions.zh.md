@@ -3,13 +3,13 @@
 Status: implemented
 Translation: current
 
-PRs: [Core #24](https://github.com/LodyAI/acp-extension-core/pull/24), [Codex #75](https://github.com/LodyAI/acp-extension-codex/pull/75), [Claude #44](https://github.com/LodyAI/acp-extension-claude/pull/44)
+PRs: [Lody #1951](https://github.com/LodyAI/Lody/pull/1951), [Core #24](https://github.com/LodyAI/acp-extension-core/pull/24), [Codex #75](https://github.com/LodyAI/acp-extension-codex/pull/75), [Claude #44](https://github.com/LodyAI/acp-extension-claude/pull/44)
 
 [English](2026-10-27-prompt-suggestions.md)
 
 ## 摘要
 
-Core 新增经过协商的下一条用户提示预测通知，Codex 和 Claude adapter 已转发原生事件。Codex 保留来源 turn 与成功／空结果／失败；Claude 保留建议文本和消息标识，不虚构来源 turn。用户明确接受过期建议，并将本次实现限定为 Core 和 adapter。工作区集成已实现，独立包发布、Lody 同步与 composer UI 留待后续。
+Core 新增经过协商的下一条用户提示预测通知，Codex 和 Claude adapter 已转发原生事件。Codex 保留来源 turn 与成功／空结果／失败；Claude 保留建议文本和消息标识，不虚构来源 turn。用户接受过期建议，随后授权实现 Lody 同步与 composer 集成。Lody 通过独立 ephemeral 通道交付最新参考建议；桌面 Tab 与移动端“应用”将它填入可编辑草稿，不自动发送。真实模型端到端交付仍未验证。
 
 ## 契约与映射
 
@@ -48,10 +48,11 @@ Claude 协商后开启 SDK `promptSuggestions`，但尊重 provider 选项的显
   没有历史／读取／重试 API，也不保证每轮必有事件；SDK 抑制生成不等于失败。
 - 根 pnpm 工作区已有 `acp-extension-core: workspace:*` override，本地消费者使用本次
   源码。Core 0.3.0 已发布，两个 adapter 均精确依赖 `acp-extension-core@0.3.0`，
-  npm 生成的 lockfile 包含对应注册表校验值。根 lockfile 因 workspace 覆盖不变。集成 PR 锁定供审查的源码提交；包版本、运行时版本和发布保持不变。
-- 后续产品方向仍是 composer hint，Tab 接受为可编辑草稿但不自动发送。独立 ephemeral
-  最新状态同步适合此场景；现有 `presence` 心跳通道不能承载建议文本。此次没有实现或
-  验证 UI／同步。
+  npm 生成的 lockfile 包含对应注册表校验值。根 lockfile 因 workspace 覆盖不变。全部 8 个 submodule 对齐拉取时的上游 main，包含 Core 0.3.0 发布提交；托管运行时版本锁定不变。
+- 建议使用独立 `prompt-suggestions` ephemeral 通道，不进入 presence 心跳和持久化历史。发布端最多保留 256 个会话条目、24 小时，文本上限 16,384 字符，身份字段有长度限制。这是传输保留时间，不是 turn 新鲜度规则。
+- CLI 仅接受已协商且属于当前 ACP 会话的通知，再映射到稳定 Lody 会话及机器。现有物理写入器向本地连接合并发送最新快照。可选云桥接沿用既有授权并排除加密工作区；纯本地组合不启动云传输。
+- Renderer 分离本地与云端 store，按目标机器选择来源，未知路由不显示建议。hook 防止 workspace/runtime/session/machine 切换串数据。输入、清空和接受都不消费共享建议；空结果或失败清除可见提示。参见 [composer 交互契约](2026-10-27-prompt-suggestion-composer-ui.zh.md)。
+- 现有原生传输和写入器继续负责生命周期，本次未扩大 Promise 集成边界的迁移范围。
 
 ## 验证
 
@@ -60,10 +61,9 @@ Core build/typecheck 与全部 10 项测试通过。adapter 测试覆盖未协�
 以及旧 Claude 建议发送失败时新 prompt 仍能完成。Codex 覆盖两个 ACP 版本。
 最终离线测试：Claude 1,172 项通过、11 项跳过；Codex 98 项通过。Node 24.22.1 下两个 adapter 构建、Codex typecheck、Claude 修改文件 lint/format 检查通过。
 
-仅因新增能力更新了两处 Claude 初始化快照。较大测试集发现九项已有 v2 task actor
-快照差异，其中 `bash-background` 在未修改 adapter 源码下可复现。默认全量测试触发
-已有真实运行时用例并访问网络、Codex 认证失败后已停止。真实模型生成和抑制行为仍未验证。
-根文档检查仍有原有未展开子模块的断链；新增记录未引入链接错误（仍为基线 40 项）。
+Core 0.3.0 在干净的独立 adapter 克隆中使用 `npm ci` 验证：Codex 类型检查、构建和 11 项定向测试通过；Claude 构建、check 和 699 项定向测试通过（10 项跳过）。真实模型生成和抑制行为仍未验证。
+
+更新 submodule 后，Lody 的 46 项 CLI、21 项共享边界及 72 项 renderer/composer 测试通过。此前共享包全量 1,688 项测试通过。shared、CLI、components 类型检查通过，根格式化和文档检查通过。根 `pnpm check` 在 Devin adapter 准备阶段因该 checkout 缺少依赖阻塞，不能视为全仓检查通过。根 lint 也遇到其他 checkout 范围缺少 Node/React/Vite 类型定义。Storybook 浏览器检查覆盖桌面 Tab、移动端应用、输入隐藏与清空恢复，控制台无错误；数据为合成组件输入，并非真实模型或完整应用会话。
 
 ## 证据
 
@@ -73,7 +73,3 @@ Core build/typecheck 与全部 10 项测试通过。adapter 测试覆盖未协�
 
 使用助手文本会污染历史；强制来源 turn 与 Claude 缺失原生字段冲突；折叠空结果与失败
 会丢失 Codex 语义。用户选择宽松参考性交付，不继续调查 Claude 的跨轮来源关联。
-
-创建 PR 时重新尝试了主仓 `pnpm check`／`pnpm format` 和 Claude `npm run check`；工作区依赖缺失、原有依赖软链接目标已不可用，因此未能重跑。上面的定向验证在环境变化之前通过。
-
-Core 0.3.0 依赖更新在干净的独立克隆中通过 `npm ci` 验证，使用 npm 发布包：Codex 类型检查（含示例）、构建和 11 项定向测试通过；Claude 构建、完整 `npm run check` 和 699 项定向测试通过（10 项跳过）。主仓检查仍受工作区依赖缺失阻塞。

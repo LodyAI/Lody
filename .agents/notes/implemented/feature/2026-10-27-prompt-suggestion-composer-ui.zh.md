@@ -38,9 +38,7 @@ Composer 仍只负责展示：会话级订阅 hook 与工作区传输由本次�
   移动端“应用”状态，静态 Storybook 构建成功。用 Playwright 在 900×600 与 420×700 下验证了
   桌面 Tab 写入草稿／光标位置与提示隐藏、移动端点击穿透聚焦、Tab 不写入、“应用”写入草稿／
   光标位置与提示隐藏，且控制台无错误。
-- `@lody/components` 类型检查只报依赖方错误：提供的 hook 引用了其所属改动新增的 runtime 方法，
-  隔离检出中的 core 子模块缺 `@agentclientprotocol/sdk` 类型。本提交预期在 hook／runtime 提交之后
-  cherry-pick。
+- 合入所属 hook/runtime 后，`@lody/components` 类型检查通过。
 - 没有可用真实模型，因此真实 ACP 建议生成与完整应用视觉检查仍未验证。
 
 ## 证据
