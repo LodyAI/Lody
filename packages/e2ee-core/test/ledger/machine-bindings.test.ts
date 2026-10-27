@@ -214,7 +214,7 @@ describe('signed machine bindings and current-only state', () => {
       ).toBe(true);
   });
 
-  it('restores exact machine bindings in snapshots and retained state, then replaces atomically with a seal barrier', () => {
+  it('restores exact machine bindings, then replaces atomically while preserving write permission and rotation advice', () => {
     const base = initial(),
       machine = ok(encodeMachineId('machine'));
     const admitted = ok(extend(base, record(base, oldMachine, machine)));
@@ -234,8 +234,9 @@ describe('signed machine bindings and current-only state', () => {
         'machine'
       );
       expect(
-        ok(Protocol.contentPermissions(replaced, replacement.signingPublicKey)).maySealNewContent
-      ).toBe(false);
+        ok(Protocol.contentPermissions(replaced, replacement.signingPublicKey)).mayWriteDocument
+      ).toBe(true);
+      expect(replaced.inspectState().epoch.rotationRequired).toBe(true);
       expect(
         ok(Protocol.contentPermissions(replaced, oldMachine.signingPublicKey)).mayWriteDocument
       ).toBe(false);
@@ -436,7 +437,7 @@ describe('machine binding authorization transitions (wire encoding independent)'
     expect(evidence(f.state)).toEqual(before);
   });
 
-  it('atomically replaces only the exact active key, preserves history and requires rotation', () => {
+  it('atomically replaces only the exact active key, preserves history and retains rotation advice', () => {
     const f = fixture();
     ok(f.run(admit(oldMachine, 'machine-1')));
     const original = evidence(f.state),

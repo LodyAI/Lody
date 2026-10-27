@@ -70,11 +70,13 @@ pairing context bound by the separate bindingSignature, never permanent ledger f
 Only one device may currently bind a machineId within one workspace. Replacing it
 requires the existing same-member personal-device authority and revokes the exact
 old key while admitting the new one in the same record. Historical keys stay
-non-reusable; rotationRequired blocks new seals until epoch publication. Snapshot,
-retained and digest version 3 preserve the binding and historical device kind.
+non-reusable; rotationRequired advises administrators to update keys without blocking
+new seals or workspace use. Snapshot, retained and digest version 3 preserve the binding
+and historical device kind.
 Old developer machine records require workspace recreation, without a legacy reader
 or migration. The independent v1 vector is regenerated under this explicit pre-freeze
-approval. This does not approve production activation or implement the PR20 barrier.
+approval. This does not approve production activation. PR20 removes the inherited M2
+rotation-based send guards; this ledger change adds no send guard.
 
 ## Retained verified state (proposed)
 

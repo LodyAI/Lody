@@ -17,4 +17,6 @@ encoding rejects unpaired surrogates and decoding rejects malformed UTF-8. Sessi
 stay only in the separate credential-binding proof. Personal/recovery tag4 and possession
 remain five fields. The current-format decoder rejects old five-field machine records.
 A replacement names the exact current same-member machine with that ID, retains old
-identity evidence and sets rotationRequired; retries keep the signed original unchanged.
+identity evidence and sets rotationRequired as advice to update keys, without blocking
+sends. Retries keep the signed original unchanged. Removing inherited M2 send guards
+belongs to PR20; this admission change adds no send guard.

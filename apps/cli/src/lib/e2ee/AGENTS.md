@@ -44,8 +44,8 @@
   Activation refreshes the verified ledger and mailbox and acknowledges only an
   installed current key; temporary failure leaves the same pairing retryable.
 
-- Pin M2 write epoch; epoch change/rotation-required latches sends off, retaining local
-  state. M3 owns resumption.
+- Pin M2 write epoch. rotationRequired only prompts administrators to update keys; it
+  must not latch sends off or block workspace use. PR20 owns removal of inherited gates.
 - Prepared bindings cannot start content replicas. Activate only the native ledger/key
   receiver: verify current installed key, close temporary owner, THEN write `activation.json`
   before Fleet attaches rooms. The marker grants no authority; match genesis/device.
@@ -72,19 +72,19 @@
 
 ## Local machine pairing
 
-- `pairing-journal.ts` retains immutable frontend/session proofs and admission originals
-  before key receipt. Verify full original history and current same-member personal
-  authority. New sessions need explicit consent; preserve the original signer, keys and
-  credential. Latest-session preflight precedes Fleet ownership changes; late sessions fail.
-- Publish preparation ownership before replacement originals, then publish material and
-  current identity atomically. A same-scope fresh session can take an unpublished
-  creating generation atomically: old creating=-1, new creating=1, no original-byte
-  edits. Account/machine/workspace/genesis/member must match; superseded sessions
-  cannot publish or retake. Reuse custody originals; surviving old credentials
-  forbid device replacement. Ledger-only owners cannot receive keys.
-  Same-identity retries keep healthy owners; only identical intents share a flight.
-  Local cancellation never guesses remote settlement.
-- Trusted OS-user socket only; partial upgrades fail closed. No remote authentication is implied. See the
+- `pairing-journal.ts` retains immutable frontend/session proofs and admissions before key
+  receipt. Verify full history and current same-member personal authority. New sessions
+  need consent; preserve signer/keys/credential. Preflight latest session before Fleet
+  ownership changes; reject late sessions.
+- Publish ownership before replacement originals; publish material/current identity atomically.
+  Same-scope takeover atomically changes old creating=-1/new creating=1, retaining bytes.
+  Match account/machine/workspace/genesis/member; superseded sessions cannot publish/retake.
+  Reuse originals. Unpublished generations with retained credentials cannot replace missing
+  devices; fresh explicit sessions may replace lost published identities with distinct
+  signing-key-scoped credentials. Ledger-only owners cannot receive keys. Same-identity
+  retries keep healthy owners; only identical intents share flights. Cancellation never
+  guesses remote settlement. See [recovery rationale](../../../../../.agents/notes/implemented/bug-fix/2026-10-27-e2ee-local-pairing-recovery.md).
+- OS-user socket only; partial upgrades fail closed. No remote authentication. See the
   [pairing note](../../../../../.agents/notes/proposed/architecture/2026-10-26-e2ee-machine-pairing-journal.md).
 
 ## Catalog and Fleet containment

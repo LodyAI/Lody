@@ -62,5 +62,6 @@ covered records atomically. Verification provenance is never upgraded.
 - Owner-approved pre-freeze machine tag4 binds strict UTF-8 machineId (1..256 bytes,
   no normalization) in both record and possession. No session ID/capability is added.
   Only a same-member personal device can atomically replace its exact active machine;
-  retain old keys/history and require rotation before new seals. Current-only, no legacy
+  retain old keys/history. rotationRequired advises key updates; it must not block sends.
+  Current-only, no legacy
   machine record reader. Snapshot/retained/digest v3 preserve every historical binding.
