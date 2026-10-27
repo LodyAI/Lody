@@ -234,6 +234,15 @@ export const Narrow: Story = {
 };
 export const Empty: Story = { args: { rows: [], runtimes: [] } };
 export const Loading: Story = { args: { ready: false } };
+export const LoadFailed: Story = {
+  args: { rows: [], runtimes: [], error: 'REGISTRY_UNAVAILABLE', onRetry: () => {} },
+};
+export const SyncFailedWithSavedTasks: Story = {
+  args: { error: 'REGISTRY_UNAVAILABLE', onRetry: () => {} },
+};
+export const Retrying: Story = {
+  args: { error: 'REGISTRY_UNAVAILABLE', retrying: true, onRetry: () => {} },
+};
 export const LoadError: Story = { args: { error: 'boom' } };
 export const AllOffline: Story = {
   args: { contextForRow: (item) => ({ ...context(item), presence: 'offline' }) },

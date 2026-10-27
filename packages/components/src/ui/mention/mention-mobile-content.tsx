@@ -87,11 +87,15 @@ const styles = stylex.create({
 export function MentionMobilePanel({
   open,
   anchorRef,
+  placement = 'above-composer',
   children,
 }: {
   open: boolean;
   /** The composer input used to find its frame and search field. */
   anchorRef: React.RefObject<HTMLElement | null>;
+  /** Full-height composers dock the panel at the bottom of the writing area,
+     above the footer, because there is no room above the input. */
+  placement?: 'above-composer' | 'bottom';
   children: React.ReactNode;
 }) {
   /* Keep the portal inside the nearest drawer/dialog interaction and scroll
@@ -124,6 +128,15 @@ export function MentionMobilePanel({
          uses fixed viewport coordinates. */
       const layerRect = layer?.getBoundingClientRect();
       const referenceBottom = layerRect?.bottom ?? window.innerHeight;
+      if (placement === 'bottom') {
+        /* Full-height composer: anchor the panel to the input's BOTTOM (just
+           above the composer footer), not its top. The writing area is still
+           visible above the panel and the footer stays reachable below. */
+        const bottom = Math.max(0, referenceBottom - composerRect.bottom + PANEL_TO_COMPOSER_GAP);
+        const maxHeight = Math.min(PANEL_MAX_HEIGHT * 1.6, Math.max(120, composerRect.height - 16));
+        setMetrics({ bottom, maxHeight });
+        return;
+      }
       const bottom = Math.max(0, referenceBottom - composerRect.top + PANEL_TO_COMPOSER_GAP);
       const maxHeight = Math.min(
         PANEL_MAX_HEIGHT,
@@ -163,7 +176,7 @@ export function MentionMobilePanel({
       cleanupFrameObserver?.();
       cleanupLayerObserver?.();
     };
-  }, [open, anchorRef]);
+  }, [open, anchorRef, placement]);
 
   if (!open || !container) return null;
 

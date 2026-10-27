@@ -164,11 +164,15 @@ export const makeCliE2eeRuntime = Effect.fn('CliE2eeRuntime.open')(function* (op
         .prepare('SELECT position,record,locator FROM records ORDER BY position')
         .all() as unknown as HistoryRow[]
   );
+  // Creation journals the genesis original and the cache row; their absence is local damage.
+  const lastOriginal = originals.at(-1);
+  if (!lastOriginal) return yield* failure('storage');
   const endpoint = {
-    head: hashRecordBytes(originals[originals.length - 1]!.record),
+    head: hashRecordBytes(lastOriginal.record),
     length: originals.length,
   };
-  const cache = yield* sql(() => db.prepare('SELECT name,origin FROM cache WHERE id=1').get()!);
+  const cache = yield* sql(() => db.prepare('SELECT name,origin FROM cache WHERE id=1').get());
+  if (!cache) return yield* failure('storage');
   const journalStore = (name: string) =>
     Layer.effect(
       LedgerFeedStore,
@@ -274,11 +278,11 @@ export const makeCliE2eeRuntime = Effect.fn('CliE2eeRuntime.open')(function* (op
       { kind: 'genesis', record: genesisRecord },
       { length: 1, head: hashRecordBytes(genesisRecord) }
     );
-    if (originals[originals.length - 1]?.locator)
+    if (lastOriginal.locator)
       yield* feed.accept(
         {
           requestOffset: '-1',
-          nextOffset: originals[originals.length - 1]!.locator!,
+          nextOffset: lastOriginal.locator,
           records: originals.map((row) => row.record),
           upToDate: true,
         },
@@ -415,8 +419,9 @@ export const makeCliE2eeRuntime = Effect.fn('CliE2eeRuntime.open')(function* (op
                   db.prepare('SELECT record FROM records WHERE position=?').get(length - 1)
                 )
               : undefined;
-          const head = records.length
-            ? hashRecordBytes(records[records.length - 1]!)
+          const lastRecord = records.at(-1);
+          const head = lastRecord
+            ? hashRecordBytes(lastRecord)
             : previous
               ? hashRecordBytes(previous.record as Uint8Array)
               : state.view.head;
@@ -433,10 +438,14 @@ export const makeCliE2eeRuntime = Effect.fn('CliE2eeRuntime.open')(function* (op
             );
             if (
               existing.length !== overlap ||
-              existing.some(
-                (row, index) =>
-                  !(row.record instanceof Uint8Array) || hex(row.record) !== hex(records[index]!)
-              )
+              existing.some((row, index) => {
+                const incoming = records[index];
+                return (
+                  !(row.record instanceof Uint8Array) ||
+                  incoming === undefined ||
+                  hex(row.record) !== hex(incoming)
+                );
+              })
             )
               return yield* failure('local-evidence-conflict');
           }

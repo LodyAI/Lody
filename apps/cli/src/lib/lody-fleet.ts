@@ -1,3 +1,4 @@
+import { listMergedAgentConfigs } from '@/lib/agent-config-machine-flock';
 import { worktreeGitLegacy } from '@/session/worktree/git-execution-legacy';
 import type {
   LocalE2eePairingRequest,
@@ -10,6 +11,7 @@ import { ensureImplicitLocalWorkspace } from '@/lib/cli-platform';
 import { CliRuntimeStateReporter } from '@/lib/cli-runtime-state';
 import { WorkspaceWatchCoordinator } from '@/lib/code-collab/workspace-watch-coordinator';
 import { listAliveSessionMetas } from '@/lib/command-runtime';
+import type { DaemonWorkspaceAccess } from '@/lib/session-command-environment';
 import {
   startLocalIpcSocketServers,
   stopLocalIpcSocketServers,
@@ -747,6 +749,22 @@ export class LodyFleet {
     this.refreshRuntimeState();
   }
 
+  /**
+   * Synchronous access verdict for one running workspace. The latest remote
+   * snapshot wins as soon as it arrives; before the first one, the cached entry
+   * the runtime was bootstrapped from stands. A subscription error keeps the
+   * last authorized snapshot: only a confirmed revocation or token rejection denies.
+   */
+  readWorkspaceAccess(workspaceId: string): DaemonWorkspaceAccess {
+    if (this.invalidTokenReported) return { status: 'unauthorized' };
+    const remote = this.lastValidWorkspaceListResult;
+    const workspace = remote
+      ? remote.workspaces.find((candidate) => candidate.id === workspaceId)
+      : this.desiredWorkspaces.get(workspaceId);
+    if (workspace) return { status: 'authorized', workspace };
+    return remote ? { status: 'revoked' } : { status: 'unknown' };
+  }
+
   private async applyRemoteWorkspaceList(result: AuthorizedWorkspaceList): Promise<void> {
     const remoteBridge = this.remoteBridge;
     if (!remoteBridge) {
@@ -893,6 +911,7 @@ export class LodyFleet {
           contentMode: workspace.contentMode,
           genesisHash: workspace.genesisHash,
           workspaceSlug: workspace.slug ?? undefined,
+          readWorkspaceAccess: () => this.readWorkspaceAccess(workspace.id),
           token: this.cliToken,
           userId: this.userId,
           machineId: this.machineId,
@@ -1291,6 +1310,34 @@ export class LodyFleet {
     message: LocalSessionControlRequest,
     options: { onResponse?: (response: LocalSessionControlResponse) => void } = {}
   ): Promise<LocalSessionControlResponse[]> {
+    if (message.type === 'machine/dsh-providers') {
+      const providers = new Map<string, { id: string; name: string }>();
+      for (const runtime of this.runtimes.values()) {
+        const configs = await listMergedAgentConfigs(
+          runtime.lody.documentManager.repo,
+          runtime.workspace.id as WorkspaceId,
+          [this.machineId]
+        );
+        for (const config of configs) {
+          if (
+            config.machineId === this.machineId &&
+            config.cliType === 'builtin' &&
+            config.agentType === 'deepseek'
+          ) {
+            providers.set(config.id, { id: config.id, name: config.name });
+          }
+        }
+      }
+      const response = {
+        type: 'machine/dsh-providers_response' as const,
+        providers: [...providers.values()].sort(
+          (a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id)
+        ),
+      };
+      options.onResponse?.(response);
+      return [response];
+    }
+
     // Image and file uploads (from the in-session MCP server) may omit the
     // workspaceId; resolve it by finding the single active runtime that holds
     // the session doc. Both share the same resolution + ambiguity handling.

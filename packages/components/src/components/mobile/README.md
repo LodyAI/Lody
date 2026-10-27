@@ -37,10 +37,12 @@ directory index. Stories: `src/stories/Mobile*.stories.tsx`.
 
 ## Sheets and session surfaces
 
-- `mobile-new-chat-sheet.tsx` provides a no-drag popup container inside its
-  modal, outside its scrolling content. The landing's mobile file input mounts
-  with the composer inside that sheet; the attachment menu stays within Vaul's
-  interaction boundary.
+- `mobile-new-chat-sheet.tsx` is the full-height new-chat compose sheet: the
+  header holds the unified Chat / project / repository native picker
+  (`mobile-native-select.tsx`), and the resting body is one full-bleed
+  `ChatComposer variant="sheet"` whose footer rail carries run config, machine,
+  branch and worktree. The landing's mobile file input mounts inside that sheet;
+  the no-drag popup container stays within Vaul's interaction boundary.
 - Bottom sheets: `mobile-new-chat-sheet.tsx`,
   `mobile-workspace-switcher-sheet.tsx`, `mobile-create-workspace-sheet.tsx`,
   `mobile-delete-workspace-sheet.tsx`, `mobile-worktree-config-sheet.tsx`,
@@ -51,7 +53,7 @@ directory index. Stories: `src/stories/Mobile*.stories.tsx`.
   `if (isMobile)`: `mobile-session-tab-sheet.tsx` (the 💬 `MobileSessionTabButton`
   with its accent unread dot opens the tab switcher — grouped cards, Conversations
   rows reading `[hand|spinner|accent unread dot|empty] title [Main chip]
-  relative-time`, a collapsed `Archived (N)` disclosure whose rows restore and
+relative-time`, a collapsed `Archived (N)` disclosure whose rows restore and
   switch, then a Viewers card of Files/file/diff/PR/browser) and
   `mobile-session-menu-sheet.tsx` (the `…` button: machine/branch info, optional
   Owner row, Find/Fork/Rename/Copy/Archive).
@@ -64,9 +66,15 @@ directory index. Stories: `src/stories/Mobile*.stories.tsx`.
 
 ## Run config and pickers
 
+- `mobile-native-select.tsx` — branded trigger over a real `<select>` for
+  touch-native target lists; used by the new-chat header and footer rail.
+- `mobile-footer-rail.tsx` — horizontal footer scroller with a right-edge fade
+  while more controls remain; used by the new-chat composer.
+- `mobile-new-chat-project-sheet.tsx` — mobile project picker: machine row, one
+  search across local folders and GitHub repos, grouped results, add/connect.
 - `mobile-session-run-config.tsx` (the one shared control),
   `mobile-run-config-button.tsx` (collapsed face: `[agent icon] model · reasoning ·
-  [mode face] · plan/fast`), `mobile-run-config-sheet.tsx`
+[mode face] · plan/fast`), `mobile-run-config-sheet.tsx`
   (Role/Agent/Model/Interaction/Reasoning/Permission/Plan/Fast rows plus
   provider-defined selects, all through coordinated inline pickers),
   `permission-mode-face.tsx` (classified by `@lody/shared`

@@ -14,6 +14,7 @@ import {
   type Role,
 } from './records';
 import { LedgerError } from './errors';
+import { encodeMachineId } from './machine-id';
 import { verifyLedger, requireLedgerContinuation, type LedgerView } from './replay';
 import { prepareLedgerRecord } from './signing';
 const invalid = () => Result.fail(new LedgerError({ code: 'canonical' }));
@@ -57,6 +58,7 @@ export const prepareDeviceAdmission = Effect.fnUntraced(function* (input: {
   readonly membershipId: Bytes.MembershipId;
   readonly encryptionPublicKey: Bytes.EncryptionPublicKey;
   readonly kind: DeviceKind;
+  readonly machineId?: string;
   readonly signer: DeviceSigner;
 }) {
   const genesis = yield* Effect.fromResult(Bytes.genesisHash(input.genesis.toBytes()));
@@ -65,6 +67,7 @@ export const prepareDeviceAdmission = Effect.fnUntraced(function* (input: {
     Bytes.encryptionPublicKey(input.encryptionPublicKey.toBytes())
   );
   const kind = input.kind;
+  const machineId = input.machineId;
   if (kind !== 'personal' && kind !== 'machine' && kind !== 'recovery')
     return yield* new LedgerError({ code: 'canonical' });
   const signer = yield* Effect.fromResult(ownSigner(input.signer));
@@ -75,6 +78,7 @@ export const prepareDeviceAdmission = Effect.fnUntraced(function* (input: {
       signingPublicKey: signer.publicKey,
       encryptionPublicKey,
       kind,
+      machineId,
     })
   );
   const possessionSignature = yield* signVerified(signer, message);
@@ -84,6 +88,7 @@ export const prepareDeviceAdmission = Effect.fnUntraced(function* (input: {
     signingPublicKey: signer.publicKey,
     encryptionPublicKey,
     possessionSignature,
+    ...(kind === 'machine' ? { machineId, replaces: null } : {}),
   });
 });
 /** Existing ordinary intent only. Atomic removal and lifecycle rotation are separate gates. */
@@ -104,6 +109,8 @@ export type LedgerCommand =
       readonly signingPublicKey: Bytes.SigningPublicKey;
       readonly encryptionPublicKey: Bytes.EncryptionPublicKey;
       readonly possessionSignature: Bytes.Signature;
+      readonly machineId?: string;
+      readonly replaces?: Bytes.SigningPublicKey | null;
     }
   | { readonly _tag: 'RevokeDevice'; readonly target: Bytes.SigningPublicKey }
   | { readonly _tag: 'TransferOwner'; readonly successorMembershipId: Bytes.MembershipId };
@@ -133,17 +140,31 @@ function operation(command: LedgerCommand): Result.Result<CborValue, LedgerError
           ])
         : invalid();
     case 'AdmitDevice':
-      return command.kind === 'personal' ||
-        command.kind === 'machine' ||
-        command.kind === 'recovery'
-        ? Result.succeed([
-            4,
-            kindTag(command.kind),
-            command.signingPublicKey.toBytes(),
-            command.encryptionPublicKey.toBytes(),
-            command.possessionSignature.toBytes(),
-          ])
-        : invalid();
+      return Result.gen(function* () {
+        if (
+          command.kind !== 'personal' &&
+          command.kind !== 'machine' &&
+          command.kind !== 'recovery'
+        )
+          return yield* invalid();
+        if (
+          command.kind !== 'machine' &&
+          (command.machineId !== undefined || command.replaces !== undefined)
+        )
+          return yield* invalid();
+        const binding =
+          command.kind === 'machine'
+            ? [yield* encodeMachineId(command.machineId), command.replaces?.toBytes() ?? null]
+            : [];
+        return [
+          4,
+          kindTag(command.kind),
+          command.signingPublicKey.toBytes(),
+          command.encryptionPublicKey.toBytes(),
+          command.possessionSignature.toBytes(),
+          ...binding,
+        ];
+      });
     case 'RevokeDevice':
       return Result.succeed([5, command.target.toBytes()]);
     case 'TransferOwner':

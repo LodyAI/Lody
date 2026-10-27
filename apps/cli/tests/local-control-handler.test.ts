@@ -69,6 +69,56 @@ const createSessionRequest = (): LocalSessionControlRequest => ({
 });
 
 describe('LocalControlHandler', () => {
+  it.each([
+    {
+      machineId: 'machine-1',
+      fail: false,
+      expected: {
+        status: 200,
+        payload: {
+          ok: true,
+          responses: [
+            { type: 'machine/dsh-providers_response', providers: [{ id: 'dsh-1', name: 'DSH' }] },
+          ],
+        },
+      },
+    },
+    {
+      machineId: 'machine-1',
+      fail: true,
+      expected: { status: 500, payload: { ok: false, error: 'catalog unavailable' } },
+    },
+    {
+      machineId: 'other',
+      fail: true,
+      expected: { status: 403, payload: { ok: false, error: 'machine_mismatch' } },
+    },
+  ])(
+    'owns DSH discovery failure at the IPC boundary: $machineId / fail=$fail',
+    async ({ machineId, fail, expected }) => {
+      const handler = new LocalControlHandler({
+        machineId: 'machine-1',
+        logger,
+        dispatchSession: async () => {
+          if (fail) throw new Error('catalog unavailable');
+          return [
+            { type: 'machine/dsh-providers_response', providers: [{ id: 'dsh-1', name: 'DSH' }] },
+          ];
+        },
+        dispatchProject: async () => {
+          throw new Error('unexpected project request');
+        },
+      });
+      expect(
+        await handler.handle({
+          path: LOCAL_SESSION_CONTROL_PATH,
+          rawBody: JSON.stringify({ type: 'machine/dsh-providers', machineId }),
+          requestId: 1,
+        })
+      ).toEqual(expected);
+    }
+  );
+
   it('handles session-control messages without HTTP objects', async () => {
     const dispatchResponse: LocalSessionControlResponse = {
       type: 'session/create_response',

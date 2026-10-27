@@ -158,6 +158,35 @@ describe('LocalWorkspaceCatalog', () => {
     ).toEqual([normal]);
   });
 
+  it('never caches an unsupported content mode, so offline restarts cannot open it as plaintext', async () => {
+    const normal = { id: 'ordinary', name: 'Ordinary', slug: null, role: 'owner' };
+    const encrypted = {
+      id: 'future',
+      name: 'Future',
+      slug: null,
+      role: 'owner',
+      contentMode: 'e2ee',
+      genesisHash: 'ab'.repeat(32),
+    };
+    const identity = { userId: 'user-1' };
+    const machine = { machineId: 'machine-1', machineName: 'host' };
+    await runCatalog(
+      makeCatalog().cacheRemoteWorkspaces({ identity, machine, workspaces: [normal, encrypted] })
+    );
+    // The same workspace later reports a mode this client does not implement.
+    await runCatalog(
+      makeCatalog().cacheRemoteWorkspaces({
+        identity,
+        machine,
+        workspaces: [normal, { ...encrypted, contentMode: 'e2ee-v2' }],
+      })
+    );
+    const reopened = await runCatalog(makeCatalog().listActiveWorkspaces());
+    expect(reopened.map(localCatalogWorkspaceToWorkspaceListItem)).toEqual([normal]);
+    const snapshot = await runCatalog(makeCatalog().read());
+    expect(snapshot.workspaces.map((workspace) => workspace.workspaceId)).toEqual(['ordinary']);
+  });
+
   it('records workspace access snapshots and preserves them across remote refreshes', async () => {
     const catalog = makeCatalog();
     await runCatalog(

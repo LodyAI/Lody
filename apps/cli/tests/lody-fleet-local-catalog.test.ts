@@ -1,5 +1,7 @@
 import { createLocalCloudPort, type CloudPort } from '@lody/platform';
 import {
+  machineFlockKeys,
+  type AgentConfigId,
   type LocalSessionControlRequest,
   type LocalSessionControlResponse,
   type MachineId,
@@ -483,6 +485,73 @@ describe('LodyFleet remote authentication boundary', () => {
         message: 'Remote CLI identity user-2 does not match cached identity user-1.',
       })
     );
+  });
+
+  it('gives daemon commands the bootstrap cache, then the live subscription, as their access verdict', async () => {
+    vi.useFakeTimers();
+    let push: (
+      snapshot: Parameters<Parameters<CloudPort['access']['watchWorkspaceAccess']>[0]>[0]
+    ) => void = () => {};
+    let fail: (error: Error) => void = () => {};
+    const { fleet: harness } = createFleetHarness(
+      createCatalogStub(() =>
+        Effect.succeed(
+          catalogSnapshot({ workspaces: [activeWorkspace('ws-1', 'One', 'one', 'member')] })
+        )
+      ),
+      createTestCloudPort((onValue, onError) => {
+        push = onValue;
+        fail = onError;
+        return () => {};
+      })
+    );
+    const fleet = harness as unknown as typeof harness & {
+      startWorkspaceSubscription: (options: { waitForInitial: boolean }) => Promise<void>;
+      applyRemoteWorkspaceList: () => Promise<void>;
+      readWorkspaceAccess: (workspaceId: string) => unknown;
+    };
+    fleet.applyRemoteWorkspaceList = async () => {};
+    const remote = {
+      id: 'ws-1',
+      name: 'One',
+      slug: 'one',
+      role: 'admin',
+      contentMode: 'e2ee',
+      genesisHash: 'ab'.repeat(32),
+    };
+    try {
+      expect(fleet.readWorkspaceAccess('ws-1')).toEqual({ status: 'unknown' });
+      await fleet.bootstrapFromLocalCatalog();
+      expect(fleet.readWorkspaceAccess('ws-1')).toEqual({
+        status: 'authorized',
+        workspace: { id: 'ws-1', name: 'One', slug: 'one', role: 'member' },
+      });
+      expect(fleet.readWorkspaceAccess('ws-2')).toEqual({ status: 'unknown' });
+
+      await fleet.startWorkspaceSubscription({ waitForInitial: false });
+      push({ status: 'authorized', userId: 'user-1', workspaces: [remote] });
+      expect(fleet.readWorkspaceAccess('ws-1')).toEqual({
+        status: 'authorized',
+        workspace: remote,
+      });
+      // An unreachable control plane is not a revocation.
+      fail(new Error('Synthetic subscription outage'));
+      expect(fleet.readWorkspaceAccess('ws-1')).toEqual({
+        status: 'authorized',
+        workspace: remote,
+      });
+      push({ status: 'authorized', userId: 'user-1', workspaces: [] });
+      expect(fleet.readWorkspaceAccess('ws-1')).toEqual({ status: 'revoked' });
+      push({ status: 'authorized', userId: 'user-1', workspaces: [remote] });
+      expect(fleet.readWorkspaceAccess('ws-1')).toEqual({
+        status: 'authorized',
+        workspace: remote,
+      });
+      push({ status: 'unauthorized', reason: 'CLI token is invalid or expired.' });
+      expect(fleet.readWorkspaceAccess('ws-1')).toEqual({ status: 'unauthorized' });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('reports a rejected backend authorization for an invalid token', async () => {
@@ -1048,4 +1117,77 @@ it('joins background project observation before closing its workspace document',
   await closing;
   expect(steps).toEqual(['schedules', 'document', 'poller']);
   expect(fleet.runtimes.has('observing')).toBe(false);
+});
+
+describe('local DSH Provider discovery', () => {
+  it('returns only local builtin DSH ids/names across workspaces, without credentials', async () => {
+    const { fleet: raw } = createFleetHarness(
+      createCatalogStub(() => Effect.succeed(catalogSnapshot({})))
+    );
+    const fleet = raw as unknown as {
+      runtimes: Map<string, unknown>;
+      dispatchLocalSessionControl: (
+        request: LocalSessionControlRequest
+      ) => Promise<LocalSessionControlResponse[]>;
+    };
+    const configs = [
+      {
+        id: 'local-dsh',
+        name: 'DSH',
+        cliType: 'builtin',
+        agentType: 'deepseek',
+        machineId: 'machine-1',
+        env: { DEEPSEEK_API_KEY: 'synthetic-secret' },
+      },
+      {
+        id: 'remote',
+        name: 'Remote',
+        cliType: 'builtin',
+        agentType: 'deepseek',
+        machineId: 'machine-2',
+        env: {},
+      },
+      {
+        id: 'codex',
+        name: 'Codex',
+        cliType: 'builtin',
+        agentType: 'codex',
+        machineId: 'machine-1',
+        env: {},
+      },
+      {
+        id: 'registry',
+        name: 'Registry',
+        cliType: 'registry',
+        agentType: 'deepseek',
+        machineId: 'machine-1',
+        env: {},
+      },
+    ];
+    const repo = {
+      getMeta: () => ({ scan: async () => [] }),
+      openFlockDoc: async () => ({
+        flock: {
+          scan: () =>
+            configs.map((config) => ({
+              key: machineFlockKeys.agentConfig(config.id as AgentConfigId),
+              value: config,
+            })),
+        },
+      }),
+    };
+    for (const id of ['workspace-1', 'workspace-2'])
+      fleet.runtimes.set(id, { workspace: { id }, lody: { documentManager: { repo } } });
+    expect(
+      await fleet.dispatchLocalSessionControl({
+        type: 'machine/dsh-providers',
+        machineId: 'machine-1' as MachineId,
+      })
+    ).toEqual([
+      {
+        type: 'machine/dsh-providers_response',
+        providers: [{ id: 'local-dsh', name: 'DSH' }],
+      },
+    ]);
+  });
 });

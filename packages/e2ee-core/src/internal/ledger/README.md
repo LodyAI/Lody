@@ -48,7 +48,7 @@ extends exactly like the exported one; the next record must name its head. It
 keeps every device's historical author but reports original epoch publication
 records as unavailable. Never restore another party's bytes;
 that is what endorsed snapshots are for. Retained bytes are current-format only
-(envelope version 2); any other version fails with `unknown-version`, and the
+(envelope version 3); any other version fails with `unknown-version`, and the
 caller rebuilds them by one full replay.
 
 Preserved candidate v1 arrays/domains: genesis, admit Member, set role, admit own
@@ -81,7 +81,8 @@ so it returns the admission-bound user/member identity even after revocation,
 also from an endorsed snapshot or retained state. Unknown/fake views fail.
 `contentPermissions(view, device)` separates current host write admission from
 honest new-content sealing: active non-Guest personal/machine devices may write,
-Recovery never writes, and a pending rotation additionally blocks new seals.
+Recovery never writes. Pending manual rotation is advisory: administrators should
+update keys without blocking active writers or new seals.
 Permission is relative to the caller-selected verified endpoint; freshness and
 scope binding remain caller obligations. Every query requires the module-created
 view, not an inspection object. Snapshot endorsement/import uses the separate entry below; delivery is a key workflow. Product integration remains separate.
@@ -117,9 +118,9 @@ and [source/destination fingerprints](https://github.com/LodyAI/Lody/blob/5f9759
 
 ## Authenticated permission snapshots
 
-The snapshot functions use snapshot body version 2
+The snapshot functions use snapshot body version 3
 (the compact state; any other version is `unknown-version`) and the snapshot/v1,
-head-attest/v1 and snapshot-digest/v2 domains. Caller-pinned
+head-attest/v1 and snapshot-digest/v3 domains. Caller-pinned
 external qualification must include genesis, exact head/count, endorser key,
 membership, Owner/Admin role and personal kind. Missing role facts never default
 from signed self-claims or journal data. These are externally confirmed facts; the

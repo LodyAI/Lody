@@ -625,13 +625,52 @@ export const makeNodeE2eeCustody = Effect.fnUntraced(function* (input: {
   }
   const credentialContext = (genesis: Bytes.GenesisHash, key: Bytes.SigningPublicKey) =>
     new Uint8Array(Buffer.concat([credentialPurpose, genesis.toBytes(), key.toBytes()]));
-  const credentialPath = (genesis: Bytes.GenesisHash) =>
-    join(directory, `device-credential-${Buffer.from(genesis.toBytes()).toString('hex')}.sealed`);
-  const readCredential = async (genesis: Bytes.GenesisHash, key: Bytes.SigningPublicKey) => {
-    const opened = unseal(await readOwned(credentialPath(genesis), 1024));
+  const credentialPath = (genesis: Bytes.GenesisHash, key: Bytes.SigningPublicKey) =>
+    join(
+      directory,
+      `device-credential-${Buffer.from(genesis.toBytes()).toString('hex')}-${Buffer.from(key.toBytes()).toString('hex')}.sealed`
+    );
+  const readCredential = async (
+    genesis: Bytes.GenesisHash,
+    key: Bytes.SigningPublicKey,
+    preparing = false
+  ) => {
+    let blob: Uint8Array;
+    let legacy = false;
     try {
-      if (!equal(opened.aad, credentialContext(genesis, key)) || opened.body.length !== 32)
+      blob = await readOwned(credentialPath(genesis, key), 1024);
+    } catch (cause) {
+      if ((cause as NodeJS.ErrnoException).code !== 'ENOENT') throw cause;
+      legacy = true;
+      try {
+        blob = await readOwned(
+          join(
+            directory,
+            `device-credential-${Buffer.from(genesis.toBytes()).toString('hex')}.sealed`
+          ),
+          1024
+        );
+      } catch (legacyCause) {
+        if (preparing && (legacyCause as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
+        throw legacyCause;
+      }
+    }
+    const opened = unseal(blob);
+    try {
+      const expected = credentialContext(genesis, key);
+      if (opened.body.length !== 32) throw fail('corrupt');
+      if (!equal(opened.aad, expected)) {
+        // The old location is read-only. A genuine other identity's credential
+        // is retained evidence, never the replacement identity's credential.
+        if (
+          legacy &&
+          preparing &&
+          opened.aad.length === expected.length &&
+          equal(opened.aad.subarray(0, -32), expected.subarray(0, -32))
+        )
+          return undefined;
         throw fail('corrupt');
+      }
       return Buffer.from(opened.body).toString('hex');
     } finally {
       opened.body.fill(0);
@@ -645,24 +684,22 @@ export const makeNodeE2eeCustody = Effect.fnUntraced(function* (input: {
       native(() =>
         track(async () => {
           const genesis = ownGenesis(inputGenesis);
-          try {
-            const credential = await readCredential(genesis, key);
+          const retained = await readCredential(genesis, key, true);
+          if (retained !== undefined)
             return {
-              credential,
+              credential: retained,
               credentialHash: createHash('sha256')
-                .update(Buffer.from(credential, 'hex'))
+                .update(Buffer.from(retained, 'hex'))
                 .digest('hex'),
             };
-          } catch (cause) {
-            if ((cause as NodeJS.ErrnoException).code !== 'ENOENT') throw cause;
-          }
           const raw = random(new Uint8Array(32));
           try {
-            await publish(credentialPath(genesis), seal(raw, credentialContext(genesis, key)));
+            await publish(credentialPath(genesis, key), seal(raw, credentialContext(genesis, key)));
           } finally {
             raw.fill(0);
           }
           const credential = await readCredential(genesis, key);
+          if (credential === undefined) throw fail('corrupt');
           return {
             credential,
             credentialHash: createHash('sha256')
@@ -673,7 +710,13 @@ export const makeNodeE2eeCustody = Effect.fnUntraced(function* (input: {
       ),
     /** Reopen a previously retained access credential. Missing/corrupt data never regenerates it. */
     deviceCredential: (inputGenesis: Bytes.GenesisHash, key: Bytes.SigningPublicKey) =>
-      native(() => track(() => readCredential(ownGenesis(inputGenesis), key))),
+      native(() =>
+        track(async () => {
+          const credential = await readCredential(ownGenesis(inputGenesis), key);
+          if (credential === undefined) throw fail('corrupt');
+          return credential;
+        })
+      ),
     installed: protector('installed'),
     candidate: protector('candidate'),
     /** Only local signing is available before binding. No private handles export. */

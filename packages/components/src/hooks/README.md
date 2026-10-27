@@ -279,3 +279,17 @@ redirects, private repositories and failed probes retain the recoverable error.
 Public details do not hydrate or write authenticated caches; review caches and
 in-flight detail reads use a separate public key. Public CI polling runs every
 five minutes without the fast mergeability loop; manual refresh remains available.
+
+## Schedule Registry recovery
+
+`useScheduleRegistrySync` owns one subscription in the workspace shell. Its local
+snapshot stays visible if opening or first sync fails; an empty cold scan is not
+shown as an authoritative empty list until the selected transport first syncs.
+Failures include a stage and sanitized error in the client log. Three automatic
+retries wait 1, 3 and 10 seconds; browser `online` and the list's Retry action can
+also restart acquisition. A remote failure closes only the room: the readable
+local document and its change subscription stay live, including after retries
+are exhausted. Local changes preserve the warning and do not mark a retry active.
+Only successful first sync clears the sync warning. An initial local scan failure
+releases the unusable observer so the next attempt can reopen it. Workspace changes
+or unmount release both subscriptions and retire pending results.

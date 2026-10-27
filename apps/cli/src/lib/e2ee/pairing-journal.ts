@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { constants } from 'node:fs';
-import { open } from 'node:fs/promises';
+import { open, readdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { Data, Effect, Result, type Scope } from 'effect';
@@ -173,6 +173,7 @@ export const openMachinePairingJournal = Effect.fnUntraced(function* (directory:
           Bytes.encryptionPublicKey(raw(material.encryptionPublicKey))
         ),
         kind: 'machine',
+        machineId: expected.machineId,
       })
     );
     if (
@@ -284,21 +285,64 @@ export const openMachinePairingJournal = Effect.fnUntraced(function* (directory:
           missing = true;
         }
       }
-      if (missing) {
-        // A surviving credential belongs to the missing identity. Never generate
-        // a replacement device that cannot reopen that credential's AAD.
-        const credential = yield* Effect.result(
-          io(async () => {
-            const file = await open(
-              join(directory, 'custody', `device-credential-${expected.genesisHash}.sealed`),
-              constants.O_RDONLY | constants.O_NOFOLLOW
-            );
-            await file.close();
-          })
+      let openedCustody: NodeE2eeCustody | undefined;
+      if (missing && original.creating) {
+        const published = yield* sql(() =>
+          db
+            .prepare('SELECT material FROM pairings WHERE material IS NOT NULL')
+            .all()
+            .map((row) => MaterialSchema.parse(JSON.parse(String(row.material))))
         );
-        if (Result.isSuccess(credential)) return yield* failure('conflict');
-        if ((credential.failure.cause as NodeJS.ErrnoException | undefined)?.code !== 'ENOENT')
-          return yield* credential.failure;
+        const names = yield* io(async () => {
+          try {
+            return await readdir(join(directory, 'custody'));
+          } catch (cause) {
+            if ((cause as NodeJS.ErrnoException).code === 'ENOENT') return [];
+            throw cause;
+          }
+        });
+        const scopedName = (key: string) =>
+          `device-credential-${expected.genesisHash}-${key}.sealed`;
+        const publishedNames = new Set(
+          published.map((value) => scopedName(value.signingPublicKey))
+        );
+        // Old published credentials survive deliberate replacement. Only a
+        // credential outside that history belongs to the unfinished generation.
+        if (
+          names.some(
+            (name) =>
+              name.startsWith(`device-credential-${expected.genesisHash}-`) &&
+              name.endsWith('.sealed') &&
+              !publishedNames.has(name)
+          )
+        )
+          return yield* failure('conflict');
+        if (names.includes(`device-credential-${expected.genesisHash}.sealed`)) {
+          // A legacy location has no key in its name. Authenticate it against a
+          // published identity; never guess that an unfinished original is old.
+          openedCustody = yield* acquireCustody;
+          let authenticated = false;
+          for (const prior of published) {
+            // Avoid a keyed original shadowing the legacy file under validation.
+            if (names.includes(scopedName(prior.signingPublicKey))) continue;
+            const credential = yield* Effect.result(
+              openedCustody.deviceCredential(
+                genesis,
+                Result.getOrThrow(Bytes.signingPublicKey(raw(prior.signingPublicKey)))
+              )
+            );
+            if (Result.isFailure(credential)) {
+              if (credential.failure.code !== 'corrupt') return yield* credential.failure;
+            } else if (
+              createHash('sha256').update(raw(credential.success)).digest('hex') ===
+              prior.credentialHash
+            ) {
+              authenticated = true;
+              break;
+            }
+          }
+          if (!authenticated) return yield* failure('conflict');
+        }
       }
       const reopen = Boolean(original.retained && !missing && !original.creating);
       if (!reopen) {
@@ -322,7 +366,7 @@ export const openMachinePairingJournal = Effect.fnUntraced(function* (directory:
             throw failure('corrupt');
         });
       }
-      const custody = yield* acquireCustody;
+      const custody = openedCustody ?? (yield* acquireCustody);
       const device = yield* reopen ? custody.openDevice(genesis) : custody.createDevice(genesis);
       const credential = yield* reopen
         ? custody.deviceCredential(genesis, device.publicKey).pipe(
@@ -349,6 +393,7 @@ export const openMachinePairingJournal = Effect.fnUntraced(function* (directory:
           membershipId: Result.getOrThrow(Bytes.membershipId(raw(expected.membershipId))),
           encryptionPublicKey: device.enc,
           kind: 'machine',
+          machineId: expected.machineId,
           signer: device,
         });
         const binding = yield* signDeviceCredentialBinding({
@@ -461,6 +506,7 @@ export const openMachinePairingJournal = Effect.fnUntraced(function* (directory:
         if (
           !own ||
           own.kind !== 'machine' ||
+          own.machineId !== expected.machineId ||
           hex(own.membershipId.toBytes()) !== expected.membershipId ||
           hex(own.encryptionPublicKey.toBytes()) !== material.encryptionPublicKey ||
           !state.members.has(expected.membershipId)
@@ -481,6 +527,7 @@ export const openMachinePairingJournal = Effect.fnUntraced(function* (directory:
             body.type === 'ordinary' &&
             body.operation.type === 'admitDevice' &&
             body.operation.kind === 'machine' &&
+            body.operation.machineId === expected.machineId &&
             hex(body.operation.signingPublicKey.toBytes()) === material.signingPublicKey &&
             hex(body.operation.encryptionPublicKey.toBytes()) === material.encryptionPublicKey &&
             hex(body.operation.possessionSignature.toBytes()) === material.possessionSignature &&
