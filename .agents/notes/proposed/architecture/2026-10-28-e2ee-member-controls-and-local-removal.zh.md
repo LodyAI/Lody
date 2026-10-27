@@ -2,6 +2,7 @@
 
 Status: proposed
 Translation: current
+PR: [#1982](https://github.com/LodyAI/Lody/pull/1982)
 
 [English](2026-10-28-e2ee-member-controls-and-local-removal.md)
 
