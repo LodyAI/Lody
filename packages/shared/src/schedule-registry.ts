@@ -3,6 +3,7 @@ import { sha256Hex } from './incremental-sha256';
 import {
   ScheduleDefinitionSchema,
   ScheduledMessageSchema,
+  scheduledMessagePrompt,
   ScheduleRegistryRowSchema,
   ScheduleTombstoneSchema,
   scheduleUsesElevatedPermissions,
@@ -58,10 +59,7 @@ export function scheduleDefinitionFingerprint(
     throw new Error('Scheduled message payload is missing');
   if (document.message) {
     ScheduledMessageSchema.parse(document.message);
-    const text = document.message.inputBlocks
-      .filter((block) => block.type === 'text')
-      .map((block) => block.text)
-      .join('\n');
+    const text = scheduledMessagePrompt(document.message);
     if (text !== document.prompt)
       throw new Error('Scheduled message text does not match its payload');
     if (text.trim()) validateSchedulePrompt(text);

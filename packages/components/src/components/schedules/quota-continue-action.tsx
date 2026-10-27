@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { memo, useEffect, useRef, useState } from 'react';
 import { useAtomValue } from 'jotai';
 import { useNavigate } from '@tanstack/react-router';
 import { useTranslation } from 'react-i18next';
@@ -41,7 +41,7 @@ const styles = stylex.create({
 });
 
 /** The quota and tail subscriptions stay outside the composer and conversation tree. */
-export function QuotaContinueAction({
+export const QuotaContinueAction = memo(function QuotaContinueAction({
   session,
   visible,
 }: {
@@ -51,7 +51,7 @@ export function QuotaContinueAction({
   const allowed = useWorkspaceFeature('schedules');
   if (!allowed || session.agentType !== 'claude' || session.isArchived) return null;
   return <QuotaContinueOwner key={session.id} session={session} visible={visible} />;
-}
+});
 
 function QuotaContinueOwner({ session, visible }: { session: SessionMeta; visible: boolean }) {
   const { t } = useTranslation();

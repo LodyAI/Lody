@@ -6,6 +6,7 @@ import {
   getDeviceTimeZone,
   getServerNow,
   machineSupportsScheduledMessagesProtocol,
+  scheduledMessagePrompt,
   type MachineMeta,
   type SessionMeta,
   type SessionInputBlock,
@@ -20,7 +21,12 @@ import { useResolvedWorkspaceScope } from '@/hooks/use-resolved-workspace-scope'
 import { useWorkspaceFeature } from '@/hooks/use-workspace-feature';
 import type { SessionAttachmentDraft } from '@/lib/session-attachment-draft';
 import { toast } from '@/lib/toast';
-import { prepareScheduledMessage, saveScheduledMessage } from './scheduled-message-write';
+import {
+  SCHEDULED_MESSAGE_POLICY,
+  prepareScheduledMessage,
+  saveScheduledMessage,
+  scheduledAttachmentProgress,
+} from './scheduled-message-write';
 
 const PREFIX = 'lody:scheduledMessageDraft:';
 type Draft = { at: string; scheduleId: string; activationId: string; activityId: string };
@@ -201,21 +207,11 @@ export function useScheduledMessage(session: SessionMeta, machine: MachineMeta |
             signal,
             onAttachments: (next) => {
               prepared.current = { key, attachments: next };
-              if (owner.current === owned)
-                setProgress(
-                  next.length
-                    ? Math.round(
-                        next.reduce((sum, item) => sum + (item.progress ?? 0), 0) / next.length
-                      )
-                    : null
-                );
+              if (owner.current === owned) setProgress(scheduledAttachmentProgress(next));
             },
           });
           signal.throwIfAborted();
-          const prompt = message.inputBlocks
-            .filter((block) => block.type === 'text')
-            .map((block) => block.text)
-            .join('\n');
+          const prompt = scheduledMessagePrompt(message);
           await saveScheduledMessage({
             runtime,
             actorId: user.id,
@@ -229,9 +225,7 @@ export function useScheduledMessage(session: SessionMeta, machine: MachineMeta |
               destination: { kind: 'existing_session', sessionId: session.id },
               machineId: session.machineId,
               agent: args.agent,
-              misfirePolicy: { kind: 'run_once' },
-              overlapPolicy: 'queue_one',
-              retryPolicy: { dispatchMaxAttempts: 5, dispatchMaxAgeMs: 86_400_000 },
+              ...SCHEDULED_MESSAGE_POLICY,
             },
           });
         }, owned.controller.signal);

@@ -187,6 +187,14 @@ export const ScheduledMessageSchema = ACPTurnConfigSchema.pick({
   .strict();
 export type ScheduledMessage = z.infer<typeof ScheduledMessageSchema>;
 
+/** The prompt projection of a complete message; writers and readers must agree byte for byte. */
+export function scheduledMessagePrompt(message: Pick<ScheduledMessage, 'inputBlocks'>): string {
+  return message.inputBlocks
+    .filter((block) => block.type === 'text')
+    .map((block) => block.text)
+    .join('\n');
+}
+
 export type ScheduleDocument = {
   definition: ScheduleDefinition;
   prompt: string;
@@ -225,21 +233,6 @@ export const ScheduleRuntimeRowSchema = z.object({
   queueState: z.enum(['due', 'waiting_for_agent', 'retrying', 'blocked']).optional(),
   blockedCode: z.string().max(100).optional(),
   messageState: z.enum(['pending', 'sent', 'cancelled', 'failed']).optional(),
-  lastRun: z
-    .object({
-      state: z.enum([
-        'pending',
-        'claimed',
-        'session_prepared',
-        'retry_wait',
-        'dispatched',
-        'finished',
-        'failed',
-        'skipped',
-      ]),
-      errorCode: z.string().optional(),
-    })
-    .optional(),
   lastDispatch: z
     .object({ scheduledFor: timestamp, dispatchedAt: timestamp, sessionId: z.string() })
     .optional(),

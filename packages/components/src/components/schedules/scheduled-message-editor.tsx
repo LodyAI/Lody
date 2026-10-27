@@ -29,7 +29,11 @@ import { validateSessionFile } from '@/lib/session-file-upload';
 import { validateSessionImageFile } from '@/lib/session-image-upload';
 import type { SessionAttachmentDraft } from '@/lib/session-attachment-draft';
 import { ScheduledMessageTimeFields } from './scheduled-message-time';
-import { prepareScheduledMessage, saveScheduledMessage } from './scheduled-message-write';
+import {
+  prepareScheduledMessage,
+  saveScheduledMessage,
+  scheduledAttachmentProgress,
+} from './scheduled-message-write';
 
 const styles = stylex.create({
   layout: { display: 'flex', flexDirection: 'column', gap: space[4], padding: space[4] },
@@ -112,13 +116,8 @@ export function ScheduledMessageEditor({
     setAttachments((old) => [...old, ...next]);
   };
   const save = async () => {
-    if (
-      disabled ||
-      !runtime ||
-      !user ||
-      !document.message ||
-      document.definition.destination.kind !== 'existing_session'
-    )
+    const target = document.definition.destination;
+    if (disabled || !runtime || !user || !document.message || target.kind !== 'existing_session')
       return;
     setSaving(true);
     setError(undefined);
@@ -133,10 +132,7 @@ export function ScheduledMessageEditor({
               ];
         const message = await prepareScheduledMessage({
           runtime,
-          sessionId:
-            document.definition.destination.kind === 'existing_session'
-              ? (document.definition.destination.sessionId as SessionId)
-              : ('' as SessionId),
+          sessionId: target.sessionId as SessionId,
           machineId: document.definition.machineId as MachineId,
           actorId: user.id,
           inputBlocks,
@@ -147,11 +143,7 @@ export function ScheduledMessageEditor({
           localMachineId,
           onAttachments: (next) => {
             setAttachments(next);
-            setProgress(
-              Math.round(
-                next.reduce((sum, item) => sum + (item.progress ?? 0), 0) / Math.max(next.length, 1)
-              )
-            );
+            setProgress(scheduledAttachmentProgress(next));
           },
         });
         const {

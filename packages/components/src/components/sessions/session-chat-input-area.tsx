@@ -1,6 +1,7 @@
 import { QuotaContinueAction } from '../schedules/quota-continue-action';
 import { ScheduledMessagesSummary } from '../schedules/scheduled-messages-summary';
 import { useScheduledMessage } from '../schedules/use-scheduled-message';
+import { useLatestRef } from '@/hooks/use-latest-ref';
 import { ScheduledMessageTimeDialog } from '../schedules/scheduled-message-time';
 import type { AgentConfigMeta } from '@lody/shared';
 import { canShowSubscriptionRateLimits } from '@/lib/session-usage';
@@ -869,6 +870,8 @@ export const SessionChatInputArea = memo(
     const mentionRangesRef = useRef<MentionRange[]>([]);
     const { machine: quotaMachine } = useResolvedMachineMeta(session.machineId);
     const scheduled = useScheduledMessage(session, quotaMachine);
+    // The hook returns fresh closures each render; keep sendMessage stable while typing.
+    const scheduledSaveRef = useLatestRef(scheduled.save);
     const refreshQuota = useProviderQuotaRefresh(
       session.machineId,
       session.agentConfigId,
@@ -1781,7 +1784,7 @@ export const SessionChatInputArea = memo(
           // config must come from the same current composer state.
           const role = agentRoleTurnSelectionRef.current;
           const accepted = scheduled.at
-            ? await scheduled.save({
+            ? await scheduledSaveRef.current({
                 inputBlocks,
                 attachments,
                 agent: {
@@ -1858,7 +1861,8 @@ export const SessionChatInputArea = memo(
         durableAgentRoleReady,
         mcp,
         mcpSelectionReady,
-        scheduled,
+        scheduled.at,
+        scheduledSaveRef,
         selectedModeId,
         selectedModelId,
         configOptionValues,

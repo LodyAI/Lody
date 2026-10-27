@@ -12,6 +12,22 @@ import type { WorkspaceRuntime } from '@/atoms/runtime';
 import type { SessionAttachmentDraft } from '@/lib/session-attachment-draft';
 import { prepareDraftAttachments } from '@/lib/session-attachment-preparation';
 
+/** One-time message reservations share delivery policy across the composer and quota continue. */
+export const SCHEDULED_MESSAGE_POLICY = {
+  misfirePolicy: { kind: 'run_once' },
+  overlapPolicy: 'queue_one',
+  retryPolicy: { dispatchMaxAttempts: 5, dispatchMaxAgeMs: 86_400_000 },
+} as const satisfies Pick<ScheduleDraft, 'misfirePolicy' | 'overlapPolicy' | 'retryPolicy'>;
+
+/** Mean transfer progress, or null when there is nothing to transfer. */
+export function scheduledAttachmentProgress(attachments: SessionAttachmentDraft[]): number | null {
+  return attachments.length
+    ? Math.round(
+        attachments.reduce((sum, item) => sum + (item.progress ?? 0), 0) / attachments.length
+      )
+    : null;
+}
+
 /** Use the same owned attachment transfers as Send, without publishing a user turn. */
 export async function prepareScheduledMessage(args: {
   runtime: WorkspaceRuntime;

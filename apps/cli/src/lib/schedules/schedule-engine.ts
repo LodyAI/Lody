@@ -340,14 +340,6 @@ export class ScheduleEngine<Prepared> {
         : undefined;
     this.projections.set(row.scheduleId, {
       ...this.projections.get(row.scheduleId),
-      ...(last?.activationId === row.activationId
-        ? {
-            lastRun: {
-              state: last.state,
-              ...(last.errorCode ? { errorCode: last.errorCode } : {}),
-            },
-          }
-        : {}),
       ...(lastDispatch ? { lastDispatch } : {}),
       ...(row.scheduledMessage
         ? {

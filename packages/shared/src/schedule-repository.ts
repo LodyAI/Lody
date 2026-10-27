@@ -17,6 +17,7 @@ import {
   ScheduleDefinitionSchema,
   ScheduleTriggerSchema,
   ScheduledMessageSchema,
+  scheduledMessagePrompt,
   ScheduleTombstoneSchema,
   type ScheduleDefinition,
   type ScheduleDocument,
@@ -85,12 +86,7 @@ export function scheduleDocumentFromMirrorState(
     definition: parsed.data,
     // Complete messages are an atomic payload, not collaboratively appended text.
     // Concurrent creation can concatenate the legacy LoroText projection.
-    prompt: message?.success
-      ? message.data.inputBlocks
-          .filter((block) => block.type === 'text')
-          .map((block) => block.text)
-          .join('\n')
-      : state.prompt,
+    prompt: message?.success ? scheduledMessagePrompt(message.data) : state.prompt,
     ...(message?.success ? { message: message.data } : {}),
     timeline: message?.success
       ? timeline.filter((entry) => {
@@ -280,7 +276,7 @@ export class ScheduleRepository {
     const document = {
       definition,
       prompt,
-      ...(message ? { message: ScheduledMessageSchema.parse(message) } : {}),
+      ...(message ? { message } : {}),
       timeline: [...(previous?.timeline ?? []), activity],
     };
     await this.write(document);

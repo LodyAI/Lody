@@ -1,3 +1,4 @@
+import { memo } from 'react';
 import { space } from '@lody/ui/tokens/scales.stylex';
 import { useAtomValue } from 'jotai';
 import { useNavigate } from '@tanstack/react-router';
@@ -15,7 +16,7 @@ import { formatInstant } from './schedule-format';
 const styles = stylex.create({ row: { paddingBottom: space[2], minWidth: 0 } });
 
 /** A leaf subscription: Registry activity must not rerender the whole conversation. */
-export function ScheduledMessagesSummary({
+export const ScheduledMessagesSummary = memo(function ScheduledMessagesSummary({
   sessionId,
   timeZone,
 }: {
@@ -69,4 +70,4 @@ export function ScheduledMessagesSummary({
       </Button>
     </div>
   );
-}
+});

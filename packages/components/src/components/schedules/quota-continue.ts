@@ -6,6 +6,7 @@ import {
   resolveAgentRateLimitForModel,
   type MachineRateLimits,
 } from '@/lib/session-usage';
+import { SCHEDULED_MESSAGE_POLICY } from './scheduled-message-write';
 
 /** Only provider failures, never user prose or quoted tool output. */
 export function findClaudeSessionLimit(turns: readonly SessionHistory[]) {
@@ -126,8 +127,6 @@ export function quotaContinueDraft(
     machineId: session.machineId,
     destination: { kind: 'existing_session', sessionId: session.id },
     trigger: { kind: 'once', at: new Date(resetMs + 1000).toISOString() },
-    misfirePolicy: { kind: 'run_once' },
-    overlapPolicy: 'queue_one',
-    retryPolicy: { dispatchMaxAttempts: 5, dispatchMaxAgeMs: 86_400_000 },
+    ...SCHEDULED_MESSAGE_POLICY,
   };
 }
