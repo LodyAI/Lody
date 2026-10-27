@@ -28,14 +28,7 @@
     "mobile-alphamobilemigration--tabs-all-states",
     "mobile-alphamobilemigration--tabs-compact",
     "mobile-alphamobilemigration--tabs-empty",
-    "mobile-alphamobilemigration--tabs-read-only",
-    "mobile-alphamobilemigration--removal-default",
-    "mobile-alphamobilemigration--removal-offline",
-    "mobile-alphamobilemigration--removal-empty",
-    "mobile-alphamobilemigration--removal-error",
-    "mobile-alphamobilemigration--removal-pending",
-    "mobile-alphamobilemigration--removal-in-flight",
-    "mobile-alphamobilemigration--removal-long"
+    "mobile-alphamobilemigration--tabs-read-only"
   ],
   "ready": {
     "mobile-alphamobilemigration--tabs-all-states": [
@@ -57,48 +50,6 @@
       }
     ],
     "mobile-alphamobilemigration--tabs-read-only": [
-      {
-        "action": "visible",
-        "selector": "[role=dialog]"
-      }
-    ],
-    "mobile-alphamobilemigration--removal-default": [
-      {
-        "action": "visible",
-        "selector": "[role=dialog]"
-      }
-    ],
-    "mobile-alphamobilemigration--removal-offline": [
-      {
-        "action": "visible",
-        "selector": "[role=dialog]"
-      }
-    ],
-    "mobile-alphamobilemigration--removal-empty": [
-      {
-        "action": "visible",
-        "selector": "[role=dialog]"
-      }
-    ],
-    "mobile-alphamobilemigration--removal-error": [
-      {
-        "action": "visible",
-        "selector": "[role=dialog]"
-      }
-    ],
-    "mobile-alphamobilemigration--removal-pending": [
-      {
-        "action": "visible",
-        "selector": "[role=dialog]"
-      }
-    ],
-    "mobile-alphamobilemigration--removal-in-flight": [
-      {
-        "action": "visible",
-        "selector": "[role=dialog]"
-      }
-    ],
-    "mobile-alphamobilemigration--removal-long": [
       {
         "action": "visible",
         "selector": "[role=dialog]"
@@ -193,92 +144,6 @@
             "action": "hover",
             "selector": "button[aria-current=\"false\"]",
             "index": 0
-          }
-        ]
-      }
-    ],
-    "mobile-alphamobilemigration--removal-default": [
-      {
-        "name": "preflight-results",
-        "steps": [
-          {
-            "action": "click",
-            "selector": "[role=checkbox]"
-          },
-          {
-            "action": "visible",
-            "text": "1 worktree has changes and will stay on disk: Dirty synthetic worktree 中文"
-          }
-        ]
-      }
-    ],
-    "mobile-alphamobilemigration--removal-long": [
-      {
-        "name": "preflight-results",
-        "steps": [
-          {
-            "action": "click",
-            "selector": "[role=checkbox]"
-          },
-          {
-            "action": "visible",
-            "text": "1 worktree has changes and will stay on disk: Dirty synthetic worktree 中文"
-          }
-        ]
-      }
-    ],
-    "mobile-alphamobilemigration--removal-error": [
-      {
-        "name": "preflight-error",
-        "steps": [
-          {
-            "action": "click",
-            "selector": "[role=checkbox]"
-          },
-          {
-            "action": "visible",
-            "text": "Synthetic inspection error"
-          }
-        ]
-      }
-    ],
-    "mobile-alphamobilemigration--removal-pending": [
-      {
-        "name": "preflight-pending",
-        "steps": [
-          {
-            "action": "click",
-            "selector": "[role=checkbox]"
-          },
-          {
-            "action": "visible",
-            "text": "Checking each worktree for changes…"
-          },
-          {
-            "action": "disabled",
-            "role": "button",
-            "name": "Remove project"
-          }
-        ]
-      }
-    ],
-    "mobile-alphamobilemigration--removal-in-flight": [
-      {
-        "name": "removal-pending",
-        "steps": [
-          {
-            "action": "click",
-            "role": "button",
-            "name": "Remove project"
-          },
-          {
-            "action": "visible",
-            "text": "Processing..."
-          },
-          {
-            "action": "disabled",
-            "role": "button",
-            "name": "Cancel"
           }
         ]
       }

@@ -23,6 +23,7 @@ export type ScheduleRun<Prepared = unknown> = {
   agentConfigId: string;
   scheduledFor: number;
   plannedAt: number;
+  dispatchedAt?: number;
   definitionFingerprint: string;
   state: ScheduleRunState;
   manual: boolean;
@@ -34,6 +35,7 @@ export type ScheduleRun<Prepared = unknown> = {
   errorCode?: string;
   definition: ScheduleDefinition;
   prompt: string;
+  message?: ScheduleDocument['message'];
   prepared?: Prepared;
 };
 
@@ -111,6 +113,16 @@ export class ScheduleStore<Prepared = unknown> {
         .all(workspaceId, scheduleId, Math.max(1, Math.min(100, limit))) as { payload: string }[]
     ).map((row) => JSON.parse(row.payload));
   }
+  /** A complete message is consumed once, across edits/activations and restarts. */
+  messageDispatch(workspaceId: string, scheduleId: string): ScheduleRun<Prepared> | undefined {
+    const row = this.db
+      .prepare(
+        "SELECT payload FROM schedule_runs WHERE workspace_id = ? AND schedule_id = ? AND state IN ('dispatched', 'finished') AND json_extract(payload, '$.message') IS NOT NULL ORDER BY planned_at DESC,run_key LIMIT 1"
+      )
+      .get(workspaceId, scheduleId) as { payload: string } | undefined;
+    return row ? (JSON.parse(row.payload) as ScheduleRun<Prepared>) : undefined;
+  }
+
   private put(run: ScheduleRun<Prepared>): void {
     this.db
       .prepare(
@@ -180,6 +192,7 @@ export class ScheduleStore<Prepared = unknown> {
               manual: false,
               definition: d,
               prompt: document.prompt,
+              ...(document.message ? { message: document.message } : {}),
             });
           }
         }
@@ -230,6 +243,7 @@ export class ScheduleStore<Prepared = unknown> {
           manual: true,
           definition: d,
           prompt: document.prompt,
+          ...(document.message ? { message: document.message } : {}),
         };
         this.put(run);
         return run;
@@ -241,7 +255,10 @@ export class ScheduleStore<Prepared = unknown> {
     runKey: string,
     from: readonly ScheduleRunState[],
     patch: Partial<
-      Pick<ScheduleRun<Prepared>, 'state' | 'prepared' | 'attempts' | 'retryAt' | 'errorCode'>
+      Pick<
+        ScheduleRun<Prepared>,
+        'state' | 'prepared' | 'attempts' | 'retryAt' | 'errorCode' | 'dispatchedAt'
+      >
     >
   ): ScheduleRun<Prepared> {
     return this.db

@@ -664,12 +664,19 @@ async function startLocalAcpProtocol<T>(
         capabilitySourceVersion: launch.capabilitySourceVersion,
       };
     } catch (error) {
+      const startupError = startupMonitor.resolveError(error);
       // The process died/failed to spawn before startup completed (the startup
       // monitor surfaces async ENOENT/EACCES/early-exit here). Protocol-level
       // failures are captured inside AgentClient.startSession, so only
       // spawn-level monitor errors are reported here to avoid double-counting.
-      if (error instanceof AcpStartupProcessExitError || error instanceof AcpStartupProcessError) {
-        captureAcpSpawnFailed({ ...spawnAnalyticsProps, reason: classifyCliSpawnReason(error) });
+      if (
+        startupError instanceof AcpStartupProcessExitError ||
+        startupError instanceof AcpStartupProcessError
+      ) {
+        captureAcpSpawnFailed({
+          ...spawnAnalyticsProps,
+          reason: classifyCliSpawnReason(startupError),
+        });
       }
       // Report a survivor, but keep the startup error: it is why the call failed.
       await terminateAcpProcessTree(agentProcess, {
@@ -683,7 +690,7 @@ async function startLocalAcpProtocol<T>(
         );
       });
 
-      throw error;
+      throw startupError;
     } finally {
       options.signal?.removeEventListener('abort', handleSignalAbort);
       startupMonitor.dispose();

@@ -16,6 +16,7 @@ const UNRESERVED_REFUSALS = new Set([
   'e2ee_creation_not_enabled',
   'e2ee_creation_deleted',
   'e2ee_genesis_already_bound',
+  'e2ee_account_identity_conflict',
   'workspace_slug_taken',
 ]);
 

@@ -551,45 +551,55 @@ Node 不支持的 SQLite 套件及 Git 身份断言处停止，CLI 332 个文件
 构建和隔离 smoke 现已完成引导、代理配置、Explore 到本地聊天，并保留四张真实截图。
 这是仅迁移后的应用运行证据，不解决历史 Explore 像素差异，也不替代组件配对验收。
 
-### Onboarding 覆盖层、会话拖拽与表格反馈
+### Onboarding、会话界面与最新 main 协调
 
-三个文件实际移除 23 个工具类：Overlay 13→1、桌面布局 16→9、MarkdownTable 5→1。
-保留覆盖层准确的奶油色、元素局部 slate/spacing 变量、拖动条覆盖、拖拽柄 alpha 表达式
-与变量 fallback。表格保留命名外层 group 选择器，任意匹配祖先仍能显示复制按钮。
-DOM、回调、hooks 与公开 API 不变；独立源码审查未发现 P0/P1。
+归属批次实际移除 23 个工具类：Overlay 13→1、桌面布局 16→9、MarkdownTable 5→1。
+保留准确的奶油色、局部 slate/spacing 变量、拖动条优先级、拖拽柄 alpha/transition
+语义和表格命名外层 group 选择器。DOM、回调、hooks 与公开 API 不变。
+WorkspaceCard 的真实 opaque StyleX 调用方探针证明迁移会改变优先级，因此保留六个；
+Backdrop 因对应公开边界保留四个。搜索 13 个、会话面板 23 个继续保留：公开字符串依赖
+`cn` 在两个参数顺序中解析冲突，以及 ring/shadow 组合。在全部保留的工具类下加无效
+样式不计作迁移。
 
-公开组合边界限制本批范围。WorkspaceCard 的真实 StyleX 调用方探针确认现有六个工具类
-优先于冲突的 opaque 调用方类。Backdrop 因对应公开边界尚未验证，保留四个。
-搜索保留 13 个导出的背景/ring/shadow 工具类，会话面板保留 23 个：`cn` 在两个参数顺序
-中解析冲突工具类，opaque StyleX 导出无法保持这一合同。不能在全部保留的工具类下增加
-无效样式并计作迁移；这些单元须先定义并验证保持当前调用方行为的组合合同。
+同步 `main` 至 `05a60e018`，保留直接删除本地项目、引导创建项目和计划消息队列行为。
+退役上游已删除的确认组件及专用夹具/runner，不为旧截图配置复活旧 UI；历史图片不动。
+非样式源码对照和归属测试确认上游 handlers、公开 props、编辑/IME、菜单及导航决策保留。
 
-`surfaces-acceptance.html` 展示 308 对：132 primary、174 native、两个未改
-WorkspaceCard 调用方 supplemental 控制。302 对 PNG 字节一致；六对保留 60,756 个
-原始差异像素，其中 38,281 个超过既定阈值，均保持 **OPEN**。布局/搜索分别保留四个/
-一个低于阈值的像素，记录字段相同。38,074 个配对节点中，Onboarding 两个 Back 状态
-有 1,512 条不同节点记录／2,275 个 scalar fields：约 0.01px camera transform 传播至
-子节点及 scrollWidth。两个 Skip 状态记录字段一致但图片不同。其余 42 对 Onboarding
-截图字节一致，包含局部变量与真实触屏探针。
+真实变量作用域截图暴露既有迁移错误：继承的 StyleX alias 保持根 ink，组件局部 CSS
+变量却已要求不同颜色。队列和移动设置改用元素局部准确表达式及编译器 alpha mix，不改
+共享 token；修复后的 24/8 对 scope 截图字节一致，紫色/绿色对根蓝色/红色的反例保留。
+同时恢复完整 transition 属性列表和变量 fallback、队列 hover 媒体条件及 Clock3 原有的
+`flex-shrink: 0`。Clock 候选的 108 对 PNG 虽一致，仍有 24 个渲染字段错误，已实际修复。
 
-两次限定的原源／最终源控制另保留 14 张 PNG。两侧 Skip 控制图片彼此相同，但都是
-第三种变体，没有复现任一正式整图。原源控制复现了最终 camera matrix，整图仍不同。
-未改摄像机采用真实 rAF 积分、DOM anchor 回算与小数截位；这些证据不能证明栅格根因。
-保留正式差异，后续应调查确定性的 camera/form readiness 再宣布视觉等价，不改摄像机
-设计，也不加 CSS 补偿。
+最新 main 验收采用 source reference：保持合并图和夹具相同，仅将四个 incoming-main
+文件作为侧栏、移动设置、队列/pending 依赖单元恢复。它不是完整历史 main 构建。
+最初仅三文件的参考构建因 main 队列缺少迁移版 pending 所需导出而失败；保留该失败并
+纳入 main 原始 pending 文件，不造兼容桥。原始参考 6101、修复队列/移动设置 6103、
+修复侧栏 6104 均不可变，源码哈希证明各最终构建中的消费者未变。真实移动夹具使用实际
+hooks/atoms 和合成 command port；侧栏已有 no-op 回调及调度预览 slot 不能证明 daemon
+写入、完整 router 或调度器端到端行为。
 
-布局／表格原始基线使用不可变构建 6089。Onboarding 修正夹具的真实 preview API 和
-选择器后另建原始 Overlay 构建 6091，其中已含另两组候选。最终均采自 6090。
-Overlay 对两种 requested theme 都实际固定浅色，符合路由合同。两侧 native 都完成
-46/46，固定 Date、保留真实 timers/rAF，明确暂停无限 WAAPI 图标。通用完整故事序列
-两侧仍各为 12/32 帧及四个初始透明度 readiness 失败，作为独立失败证据保留，不接受
-空白帧作为成功基线。
+`main2-combined-acceptance.html` 汇集 638 对：234 primary、370 native、34 个调用方/
+变量作用域 supplemental 控制。627 对 PNG 字节一致；11 对保留 60,911 个原始差异
+像素，其中五帧的 38,282 个像素超过既定阈值，保持 **OPEN**。最新 main 子集为 330 对/
+325 字节一致/155 raw/一个阈值像素，共 72,132 节点；另保留 1,104 个侧栏私有 writer
+差异和 72 个 shadow/pending-alpha 字符串差异。实际几何/事件相同；sRGB8bit 探针仅
+支持选定表达式等价，不替换原始字段，也不证明任意浮点/过渡等价。合计覆盖 110,206 节点。
 
-当前组件测试 618 文件／6,137 用例全部通过；最终归属测试、类型、typed lint、格式和
-独立边界通过。根检查仍失败于既有 CLI Git 身份用例。实际 Electron 重建及 onboarding/
-配置/Explore/本地聊天四图 smoke 通过，属于 **after-only**；历史应用差异未关闭。
-自包含报告保留原始 PNG 字节和明确标注的派生差异图，醒目标记部分验收，并保留独立
-完整字段证明。
+较早归属子集保持 308 对/302 字节一致。四个桌面 Onboarding Back/Skip 仍有 camera/
+paint 差异：两帧有 1,512 条不同节点记录／2,275 scalar fields，约 0.01px transform
+传播至子节点；两帧记录字段相同但 PNG 不同。两次限定原源/最终源控制得到匹配的第三种
+Skip 变体和匹配最终 camera matrix 的原源控制，没有复现任一正式整图。摄像机使用真实
+rAF、DOM anchor 回算及小数截位，尚未证明栅格原因。通用完整故事序列两侧仍各为
+12/32 帧及四个初始透明度 readiness 失败；独立 native 46/46 成功不关闭它们。Overlay
+对两种 requested theme 都实际固定浅色，符合路由合同。
+
+报告内嵌原始 PNG 和明确标注的派生差异图。完整合并曾超过 V8 JSON 字符串长度限制；
+派生报告视图逐值保留公开比较器实际读取的全部字段，完整 native 快照及独立全字段证明
+保持不动。失败采集、被拒候选和 Electron after-only 不计正式配对。
+当前组件测试 620 文件／6,207 用例通过；类型、归属测试、格式和独立边界通过。根检查
+仍失败于既有 CLI Git 身份用例（4,868 通过／一个失败）。最新 CLI 与实际 Electron
+已重建，隔离四图 smoke 通过，属于 after-only，历史应用差异未关闭。集成审查未发现 P0/P1。
 
 ## 后续工作
 
@@ -627,6 +637,9 @@ Markdown 基础类，并解析了一个旧表达式：修正后的基线为 2,13
 未解析表达式。Onboarding／布局／表格批次在同一口径下移除 23 处，留下 **2,116 处**
 （components 1,624、`src/ui` 487、routes 5），仍为 186 文件及 764 个未解析表达式。
 与旧快照 2,107 相比的增加来自盘点修正，没有新增 Tailwind 样式；这些数值都不是完成率。
+
+同步 main 后，同口径当前快照为 2,102 处（components 1,610、`src/ui` 487、routes 5），
+186 个文件及 760 个未解析表达式；额外变化包含上游新增和退役 UI，不另计作迁移移除。
 
 WebWorkspaceLayout 仍延期，等待真实 sidebar/runtime/router 组合的
 适度生产组件夹具，避免以替身 UI 声称验收。

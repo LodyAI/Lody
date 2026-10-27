@@ -41,6 +41,8 @@ export interface PrTabContainerProps {
   visible?: boolean;
   /** Session this PR tab belongs to, for analytics breakdown (spec §8d). */
   sessionId?: string | null;
+  /** Open conversation that receives PR-tab agent actions; null disables them. */
+  actionSessionId: string | null;
 }
 
 function resolveGitHubAppInstallUrl(): string {
@@ -62,6 +64,7 @@ export function PrTabContainer({
   leadingSlot,
   className,
   sessionId,
+  actionSessionId,
   visible = true,
 }: PrTabContainerProps) {
   const { t } = useTranslation();
@@ -95,10 +98,12 @@ export function PrTabContainer({
     visible,
   });
   const mergeMethod = usePreferredPrMergeMethod();
-  // The owning session (this PR tab's session) publishes the live resolve-
-  // conflicts action; consuming it here keeps the PR-tab button in lockstep with
-  // the info-bar "Resolve Conflicts" button (same dispatch, shared pending).
-  const resolveConflictsAction = useAtomValue(resolveConflictsActionAtomFamily(sessionId ?? ''));
+  // PR data belongs to sessionId, while this action must target the open
+  // conversation. Keep those identities separate so a child tab never sends
+  // its prompt to the workspace owner's (often root) conversation.
+  const resolveConflictsAction = useAtomValue(
+    resolveConflictsActionAtomFamily(actionSessionId ?? '')
+  );
   const canResolveConflicts = Boolean(
     resolveConflictsAction?.available && !resolveConflictsAction.pending
   );

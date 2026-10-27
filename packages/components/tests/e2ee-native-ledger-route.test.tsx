@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, createElement } from 'react';
+import { act, createElement, Fragment, type ReactNode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { Result } from 'effect';
@@ -14,12 +14,14 @@ const fixture = vi.hoisted(() => ({
   port: undefined as PlatformE2eeWorkspaces | undefined,
   session: { status: 'authenticated', user: { id: 'account', name: 'A', email: 'a@example.test' } },
   clear: () => {},
+  workspaceId: 'workspace-native',
   cachedUser: null as { id: string } | null,
+  showTools: false,
 }));
 vi.mock('@tanstack/react-router', () => ({
   createFileRoute: () => (options: unknown) => ({
     options,
-    useParams: () => ({ workspaceId: 'workspace-native' }),
+    useParams: () => ({ workspaceId: fixture.workspaceId }),
   }),
   useNavigate: () => () => {},
 }));
@@ -38,19 +40,37 @@ vi.mock('@/components/pages/e2ee-workspace-control-page', () => ({
   E2eeWorkspaceControlPage: ({
     history,
     failure,
+    memberProfiles,
+    children,
   }: {
     history: { view: { length: number }; upgradeRequiredAt?: number } | null;
     failure?: unknown;
+    memberProfiles?: ReadonlyMap<string, { name: string }>;
+    children?: ReactNode;
   }) =>
     createElement(
-      'p',
+      Fragment,
       null,
-      failure
-        ? 'failed'
-        : history?.upgradeRequiredAt !== undefined
-          ? 'upgrade'
-          : (history?.view.length ?? 'loading')
+      createElement(
+        'p',
+        null,
+        failure
+          ? 'failed'
+          : history?.upgradeRequiredAt !== undefined
+            ? 'upgrade'
+            : (history?.view.length ?? 'loading'),
+        ...[...(memberProfiles?.values() ?? [])].map((profile) => ` ${profile.name}`)
+      ),
+      children
     ),
+}));
+vi.mock('@/components/pages/e2ee-personal-pairing', () => ({
+  E2eePersonalPairing: ({ workspaceId }: { workspaceId: string }) =>
+    fixture.showTools ? createElement('aside', { 'data-pairing': workspaceId }) : null,
+}));
+vi.mock('@/components/pages/e2ee-ledger-audit', () => ({
+  E2eeLedgerAudit: ({ workspaceId }: { workspaceId: string }) =>
+    fixture.showTools ? createElement('aside', { 'data-audit': workspaceId }) : null,
 }));
 import { saveE2eeGenesisPin } from '../src/lib/e2ee-workspace-storage';
 import { Route } from '../src/routes/workspace/e2ee/$workspaceId';
@@ -101,7 +121,10 @@ let root: ReturnType<typeof createRoot>;
 beforeEach(() => {
   localStorage.clear();
   fixture.session.status = 'authenticated';
+  fixture.session.user.id = 'account';
+  fixture.workspaceId = workspaceId;
   fixture.cachedUser = null;
+  fixture.showTools = false;
   container = document.createElement('div');
   document.body.append(container);
   root = createRoot(container);
@@ -404,4 +427,116 @@ it('keeps E2EE identity IPC dormant for an ordinary workspace even while auth is
   }
   await act(async () => root.render(createElement(OrdinaryWorkspace)));
   expect(container.textContent).toBe('ordinary');
+});
+
+function displayPort(
+  memberProfiles: NonNullable<PlatformE2eeWorkspaces['memberProfiles']>
+): PlatformE2eeWorkspaces {
+  return {
+    create: async () => {
+      throw new Error('unused');
+    },
+    describe: async ({ workspaceId: id }) => ({
+      workspaceId: id,
+      contentMode: 'e2ee',
+      contentModeVersion: 1,
+      genesisHash,
+      cryptoOrgId: genesisHash,
+      activation: 'control-only',
+    }),
+    history: async ({ workspaceId: id }) => ({
+      workspaceId: id,
+      genesisHash,
+      checkpoint: { headHash: genesisHash, length: 1 },
+      startIndex: 0,
+      recordsHex: [raw],
+      position: 'position',
+      nextCursor: null,
+    }),
+    memberProfiles,
+  };
+}
+
+it('shows verified history during a slow or failed directory and recovers labels on refresh', async () => {
+  const pending =
+    Promise.withResolvers<
+      Awaited<ReturnType<NonNullable<PlatformE2eeWorkspaces['memberProfiles']>>>
+    >();
+  let count = 0;
+  fixture.port = displayPort(() =>
+    ++count === 1
+      ? pending.promise
+      : Promise.resolve({
+          workspaceId,
+          profiles: [{ cryptoUserId: '02'.repeat(32), name: 'Recovered label', image: null }],
+        })
+  );
+  const Component = Route.options.component as () => ReturnType<typeof createElement>;
+  await act(async () => root.render(createElement(Component)));
+  expect(container.textContent).toBe('1');
+  await act(async () => pending.reject(new Error('directory unavailable')));
+  expect(container.textContent).toBe('1');
+  await act(async () => window.dispatchEvent(new Event('online')));
+  expect(container.textContent).toBe('1 Recovered label');
+});
+
+it.each(['account', 'workspace'] as const)(
+  'ignores a late display directory after %s changes',
+  async (change) => {
+    const pending =
+      Promise.withResolvers<
+        Awaited<ReturnType<NonNullable<PlatformE2eeWorkspaces['memberProfiles']>>>
+      >();
+    let count = 0;
+    fixture.port = displayPort(async ({ workspaceId: id }) =>
+      ++count === 1
+        ? pending.promise
+        : {
+            workspaceId: id,
+            profiles: [{ cryptoUserId: '02'.repeat(32), name: 'Current label', image: null }],
+          }
+    );
+    const Component = Route.options.component as () => ReturnType<typeof createElement>;
+    await act(async () => root.render(createElement(Component)));
+    if (change === 'account') fixture.session.user.id = 'next-account';
+    else fixture.workspaceId = 'next-workspace';
+    await act(async () => root.render(createElement(Component)));
+    expect(container.textContent).toBe('1 Current label');
+    await act(async () =>
+      pending.resolve({
+        workspaceId,
+        profiles: [{ cryptoUserId: '02'.repeat(32), name: 'Stale label', image: null }],
+      })
+    );
+    expect(container.textContent).toBe('1 Current label');
+  }
+);
+
+it('retains pairing and audit beside verified history when the independent directory fails', async () => {
+  fixture.showTools = true;
+  const pending =
+    Promise.withResolvers<
+      Awaited<ReturnType<NonNullable<PlatformE2eeWorkspaces['memberProfiles']>>>
+    >();
+  saveE2eeGenesisPin(localStorage, 'account', workspaceId, genesisHash);
+  fixture.port = {
+    ...displayPort(() => pending.promise),
+    runtime: {
+      recordCreated: async () => {},
+      open: async () => local.status,
+      close: async () => {},
+      status: async () => local.status,
+      ledgerView: async () => local,
+      ingestLedgerRecords: async () => local.status,
+    },
+  };
+  const Component = Route.options.component as () => ReturnType<typeof createElement>;
+  await act(async () => root.render(createElement(Component)));
+  expect(container.textContent).toBe('1');
+  expect(container.querySelector('[data-pairing]')?.getAttribute('data-pairing')).toBe(workspaceId);
+  expect(container.querySelector('[data-audit]')?.getAttribute('data-audit')).toBe(workspaceId);
+  await act(async () => pending.reject(new Error('synthetic directory outage')));
+  expect(container.textContent).toBe('1');
+  expect(container.querySelector('[data-pairing]')).not.toBeNull();
+  expect(container.querySelector('[data-audit]')).not.toBeNull();
 });

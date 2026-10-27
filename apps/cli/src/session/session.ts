@@ -762,17 +762,21 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
           agent: { cliType: this.config.agentCliType, agentType: this.config.agentType },
         });
       } catch (error) {
+        const startupError = startupMonitor.resolveError(error);
         // The agent process died before startup completed (the startup monitor
         // surfaces async ENOENT/EACCES/early-exit here). Protocol-level failures
         // are captured inside AgentClient.startSession; only spawn-level monitor
         // errors are reported here to avoid double-counting.
         if (
-          error instanceof AcpStartupProcessExitError ||
-          error instanceof AcpStartupProcessError
+          startupError instanceof AcpStartupProcessExitError ||
+          startupError instanceof AcpStartupProcessError
         ) {
-          captureAcpSpawnFailed({ ...spawnAnalyticsProps, reason: classifyCliSpawnReason(error) });
+          captureAcpSpawnFailed({
+            ...spawnAnalyticsProps,
+            reason: classifyCliSpawnReason(startupError),
+          });
         }
-        throw error;
+        throw startupError;
       } finally {
         startupMonitor.dispose();
         externalAbort?.dispose();

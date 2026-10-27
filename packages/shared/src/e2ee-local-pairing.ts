@@ -10,6 +10,7 @@ const common = {
   accountId: identifier,
   workspaceId: identifier,
   genesisHash: hex32,
+  frontendSigningPublicKey: hex32,
 };
 export const LocalE2eePrepareRequestSchema = z
   .object({
@@ -21,7 +22,12 @@ export const LocalE2eePrepareRequestSchema = z
   })
   .strict();
 export const LocalE2eeActivateRequestSchema = z
-  .object({ ...common, type: z.literal('activate'), signingPublicKey: hex32 })
+  .object({
+    ...common,
+    type: z.literal('activate'),
+    pairingSessionId: hex16,
+    signingPublicKey: hex32,
+  })
   .strict();
 export const LocalE2eePairingRequestSchema = z.discriminatedUnion('type', [
   LocalE2eePrepareRequestSchema,
@@ -41,6 +47,20 @@ export const LocalE2eePrepareResponseSchema = z
     protection: z.enum(['os-keystore', 'file']),
   })
   .strict();
+/** Exact same-user receipt: this request's unpublished generation was superseded. */
+export const LocalE2eePrepareSupersededResponseSchema = z
+  .object({
+    ok: z.literal(true),
+    type: z.literal('prepare-superseded'),
+    machineId: identifier,
+    pairingSessionId: hex16,
+  })
+  .strict();
+export const LocalE2eePrepareReplySchema = z.union([
+  LocalE2eePrepareResponseSchema,
+  LocalE2eePrepareSupersededResponseSchema,
+]);
+export type LocalE2eePrepareReply = z.infer<typeof LocalE2eePrepareReplySchema>;
 export const LocalE2eeActivateResponseSchema = z
   .object({ ok: z.literal(true), type: z.literal('activate') })
   .strict();

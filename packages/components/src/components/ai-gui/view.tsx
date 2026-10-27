@@ -188,6 +188,7 @@ import {
   type AssistantTurnRenderBlock,
 } from './assistant-turn-render-blocks';
 import { SubagentTaskPanel, collectSubagentTasks, type SubagentTask } from './subagent-task-panel';
+import { isRunning as isSubagentTaskRunning } from './subagent-task-state';
 import { SubagentRunMessageList } from './subagent-run-history';
 import { styles as subagentHistoryStyles } from './subagent-run-history.stylex';
 import { SessionReadonlyContext } from './session-readonly-context';
@@ -2446,6 +2447,7 @@ export const buildChatVirtualRows = ({
       const [segmentStart, segmentEnd] = segment.blockRange;
       const isLastSegment = segmentIndex === lastSegmentIndex;
       const segmentSubagentTasks = isLastSegment ? subagentTasks : EMPTY_SUBAGENT_TASKS;
+      const hasRunningSubagentTasks = segmentSubagentTasks.some(isSubagentTaskRunning);
 
       let hasVisibleFinalContent = false;
       for (let blockIndex = segmentStart; blockIndex < segmentEnd; blockIndex += 1) {
@@ -2509,7 +2511,7 @@ export const buildChatVirtualRows = ({
             appendBlockRows(workedRows, block, blockIndex, true);
           }
         }
-        if (segmentSubagentTasks.length > 0) {
+        if (segmentSubagentTasks.length > 0 && !hasRunningSubagentTasks) {
           appendSubagentTasksRow(workedRows, true);
         }
       }
@@ -2551,6 +2553,9 @@ export const buildChatVirtualRows = ({
       }
       if (!didInsertWorkedGroup) {
         insertWorkedGroup();
+      }
+      if (hasRunningSubagentTasks) {
+        appendSubagentTasksRow(assistantRows, false);
       }
     }
 

@@ -21,7 +21,9 @@
   requires the initial and current connection sync; a previously resolved
   first-sync promise is insufficient after reconnect. Pure local bypasses only
   this cloud gate, never ownership/config validation.
-- `AgentExecutionSlots` is host-local, per-Agent-config Schedule admission.
+- `AgentExecutionSlots` is host-local, per-Agent-config generic Schedule admission.
+  Complete messages never reserve or restore these slots; only their destination
+  session busy check gates admission. Keep their ledger completion tracking.
   Restore accepted occupancy before evaluating; retain it while Session
   dispatch, queues, Operations or deliveries still have work. Release before
   prehandoff retry.
@@ -41,9 +43,12 @@
   The tool description tells the agent to ask rather than guess when the
   prompt, rule or destination is unclear — that guidance is the product
   behaviour, so keep it in step with what the card can resolve.
-- Schedule v2 preserves ACP string/boolean values. Legacy boolean strings are
-  projected against target capability types at handoff, never migrated in the
-  definition/ledger (their fingerprints authorize execution).
+- Schedule v2 preserves ACP string/boolean values. At handoff, exact legacy
+  boolean literals are projected for declared boolean options and for the
+  semantic Fast IDs `fast`/`fast-mode` only when the probe omits those IDs;
+  an explicit select declaration keeps its string. Definitions and ledger rows
+  are never migrated because their fingerprints authorize execution. See the
+  [Fast compatibility decision](../../../../../.agents/notes/implemented/bug-fix/2026-10-26-schedule-fast-compatibility.md).
 - Schedules use ordinary Session run-config defaults and validation; do not add
   a schedule-specific explicit-permission or capability-cache gate. No credentials
   or provider exception content may enter Registry runtime rows or Schedule logs.
@@ -73,3 +78,14 @@
   Timers and active evaluations must not survive workspace revocation.
 - Deterministic tests use injected clocks, explicit sync barriers and temporary
   SQLite files. Do not add wall-clock sleep or live-provider timing assertions.
+
+- Complete-message reservations require schedules v3 and `messageVersion: 1`.
+  Preserve their payload in the fingerprint and frozen ledger; never dispatch a
+  prompt-only projection. Published reservations retain staged local attachment
+  bytes. Cancellation is acknowledged only after durable dispatch reconciliation;
+  a committed dispatch wins. Busy destination chats defer handoff without interruption.
+- A complete-message Schedule ID is consumed by durable dispatch across all later
+  activations. Consult the persistent ledger before planning/processing another run;
+  derive cross-activation sent state from that ledger, never a cached runtime row.
+  Complete-message prompt reads derive from atomic input blocks, and their activation
+  floor is the once instant so concurrent same-reservation creates share a fingerprint.

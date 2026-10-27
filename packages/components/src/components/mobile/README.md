@@ -46,7 +46,7 @@ directory index. Stories: `src/stories/Mobile*.stories.tsx`.
   `mobile-delete-workspace-sheet.tsx`, `mobile-worktree-config-sheet.tsx`,
   `mobile-acp-history-sheet.tsx`, `mobile-project-skills-sheet.tsx` (read-only
   project skills, opened from the Skills row of the local and GitHub project
-  Settings tab), `mobile-remove-local-project-sheet.tsx`.
+  Settings tab). Local-project deletion submits directly without a confirmation sheet.
 - Session header sheets, wired in `../sessions/session-detail.tsx` under
   `if (isMobile)`: `mobile-session-tab-sheet.tsx` (the 💬 `MobileSessionTabButton`
   with its accent unread dot opens the tab switcher — grouped cards, Conversations

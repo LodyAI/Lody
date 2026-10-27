@@ -556,7 +556,9 @@ toasts.add({ title: 'Sync failed', description: 'No answer.', type: 'danger' });
 `Toast.Provider` renders the viewport itself, so a surface wraps its app once
 rather than keeping a provider, a portal, a viewport and a list in step. The
 viewport takes no pointer, so the page under a toast stays usable; each toast
-takes it back for its own close button.
+takes it back for its own close button. Each toast also excludes its card from
+Electron's native window drag region, so controls remain clickable where the
+portalled card overlaps the titlebar; gaps between cards do not claim that region.
 
 The other half is the wait. A `Progress` is a well-rung track with `accent`
 running in it, because the rules give that colour to live state and name the

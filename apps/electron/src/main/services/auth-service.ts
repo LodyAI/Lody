@@ -491,6 +491,11 @@ export class AuthService {
   private lastKnownSessionToken: string | null = null
   private authOperation: Promise<void> = Promise.resolve()
   private authGeneration = 0
+  // Advances on every committed session answer (resolved or definitively
+  // rejected). A late reply commits only if no answer was committed after its
+  // request started: an empty cache alone cannot tell "never answered" from
+  // "rejected", and a rejection does not change the auth generation.
+  private sessionAnswerRevision = 0
 
   // Offline identity authority (specs/local-first-two-plane.md): the last
   // session response that actually resolved a user this run. Served when the
@@ -713,6 +718,7 @@ export class AuthService {
     confirmedToken: string | null
   ): unknown {
     const resolved = withSessionTokenInResponse(response, sessionToken)
+    this.sessionAnswerRevision += 1
     if (!confirmedToken) this.clearOfflineIdentity()
     this.rememberSessionToken(confirmedToken)
     this.lastResolvedSessionResponse = resolved
@@ -721,12 +727,26 @@ export class AuthService {
     return resolved
   }
 
+  private commitDefinitiveRejection(): void {
+    this.sessionAnswerRevision += 1
+    this.lastResolvedSessionResponse = null
+    this.clearOfflineIdentity()
+    this.notifyCachedSessionIdentity()
+  }
+
   // A session answer that arrived after its caller timed out still seeds the
   // offline fallback, so the caller's retry is served instead of timing out
-  // again. It never replaces a newer answer or crosses an auth generation.
-  private commitLateSession(generation: number, response: unknown, token: string | null): void {
+  // again. It never overrides an answer committed after its request started
+  // (including a definitive rejection) or crosses an auth generation.
+  private commitLateSession(
+    generation: number,
+    answerRevision: number,
+    response: unknown,
+    token: string | null
+  ): void {
     if (
       generation !== this.authGeneration ||
+      answerRevision !== this.sessionAnswerRevision ||
       this.lastResolvedSessionResponse !== null ||
       !hasResolvedSession(response) ||
       !token
@@ -738,10 +758,16 @@ export class AuthService {
 
   async getSession(options?: unknown) {
     const generation = this.authGeneration
+    const answerRevision = this.sessionAnswerRevision
     const parsedOptions = parseSessionQueryOptions(options)
     const onLateResult = (late: unknown) => {
       const cookie = readSessionTokenFromCookieHeader(getElectronAuthCookieHeader())
-      this.commitLateSession(generation, late, readBearerTokenFromInput(options) ?? cookie)
+      this.commitLateSession(
+        generation,
+        answerRevision,
+        late,
+        readBearerTokenFromInput(options) ?? cookie
+      )
     }
     let response: unknown
     try {
@@ -781,13 +807,12 @@ export class AuthService {
 
     if (!cookieToken || existingAuthorization === `Bearer ${cookieToken}`) {
       if (generation === this.authGeneration && isDefinitiveUnauthenticatedResponse(response)) {
-        this.lastResolvedSessionResponse = null
-        this.clearOfflineIdentity()
-        this.notifyCachedSessionIdentity()
+        this.commitDefinitiveRejection()
       }
       return response
     }
 
+    const fallbackAnswerRevision = this.sessionAnswerRevision
     try {
       const fallbackResponse = await withSessionNetworkTimeout(
         authClient.getSession({
@@ -797,7 +822,7 @@ export class AuthService {
             }
           }
         }),
-        (late) => this.commitLateSession(generation, late, cookieToken)
+        (late) => this.commitLateSession(generation, fallbackAnswerRevision, late, cookieToken)
       )
       if (hasResolvedSession(fallbackResponse)) {
         if (generation !== this.authGeneration) {
@@ -817,9 +842,7 @@ export class AuthService {
         generation === this.authGeneration &&
         isDefinitiveUnauthenticatedResponse(unresolvedResponse)
       ) {
-        this.lastResolvedSessionResponse = null
-        this.clearOfflineIdentity()
-        this.notifyCachedSessionIdentity()
+        this.commitDefinitiveRejection()
       }
       return unresolvedResponse
     } catch (error) {

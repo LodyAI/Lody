@@ -36,12 +36,6 @@ export type ProjectSubmoduleDetection = {
   detected: ReadonlyMap<ProjectMemberId, readonly DetectedProjectSubmodule[]>;
   /** The GitHub repository each member was found to be, local members included. */
   repositories: ReadonlyMap<ProjectMemberId, string>;
-  /** Members found to be local directories without Git. */
-  nonGit: ReadonlySet<ProjectMemberId>;
-  /** Members still being read. */
-  pending: ReadonlySet<ProjectMemberId>;
-  /** Members whose repository could not be read; their placement stays manual. */
-  unavailable: ReadonlySet<ProjectMemberId>;
 };
 
 // Per source and base branch, for the life of the page: reopening the editor
@@ -162,24 +156,13 @@ export function useProjectSubmoduleDetection(
   return useMemo(() => {
     const detected = new Map<ProjectMemberId, readonly DetectedProjectSubmodule[]>();
     const repositories = new Map<ProjectMemberId, string>();
-    const nonGit = new Set<ProjectMemberId>();
-    const pending = new Set<ProjectMemberId>();
-    const unavailable = new Set<ProjectMemberId>();
     for (const member of members) {
-      if (!results.has(member.id)) {
-        if (enabled) pending.add(member.id);
-        continue;
-      }
       const value = results.get(member.id);
-      if (value === null) continue;
-      if (value === 'error' || value === undefined) {
-        unavailable.add(member.id);
-        continue;
-      }
+      // Not read yet, not readable, or not to be read: nothing to apply.
+      if (value === null || value === 'error' || value === undefined) continue;
       detected.set(member.id, value.submodules);
-      if (value.isGit === false) nonGit.add(member.id);
       if (value.repoFullName) repositories.set(member.id, value.repoFullName);
     }
-    return { detected, repositories, nonGit, pending, unavailable };
-  }, [enabled, members, results]);
+    return { detected, repositories };
+  }, [members, results]);
 }

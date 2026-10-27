@@ -96,14 +96,14 @@ Parent/child scopes apply. `CLAUDE.md` symlinks here; edit `AGENTS.md` only.
   `useAddLocalProjectMachines` owns the addable set/`canAddProjects`; never
   rederive per surface. Onboarding alone uses the this-machine desktop
   native picker.
-- Keep pending removal and its Sessions visible while its machine is offline or
-  retrying; exclude the project from new-Session selectors. After catalog removal,
-  archived Sessions remain readable/deletable; Restore waits for that same project
-  to be re-added.
-- Optional cleanup targets only Lody-created Session worktrees, defaults off,
-  and appears only after the owning machine preflights every worktree. Always
-  state that the original project directory is never deleted; list dirty
-  worktrees and keep them by default. Completed cleanup is not pending removal:
-  acknowledge it visibly even when worktrees were kept or failed.
+- Local directory registration and standalone display are independent. Missing
+  `standaloneVisible` means visible. Standalone lists filter hidden registrations;
+  member resolution, repository-copy selection and session access retain them.
+- Local-project deletion uses the existing action without confirmation or dependency
+  UI. The daemon retains referenced registrations and sessions; unreferenced ones
+  follow normal deletion. Explicit Add restores standalone display and identity.
+- Direct folder selection is draft-only until save. Gate read-only inspection on
+  `projectFolderSelection`; register missing directories before saving the complete
+  Project. Retried saves reuse registrations; source paths stay out of definitions.
 
 E2EE/terminals: read [rules](e2ee/AGENTS.md).

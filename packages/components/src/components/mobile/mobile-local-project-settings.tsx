@@ -11,7 +11,6 @@ import { currentWorkspaceIdAtom } from '@/atoms';
 import { getMachineMetaMapAtom } from '@/atoms/machines';
 import { useLocalProjectsAdmin } from '@/hooks/use-local-projects-admin';
 import { useRemoveLocalProject } from '@/hooks/use-remove-local-project';
-import { useOnlineMachineIds } from '@/hooks/use-machine-online-status';
 import { getLocalProjectVisibilityKey } from '@/lib/visible-local-project-index';
 import type { ProjectSkillsSource } from '@/hooks/use-project-skills';
 import {
@@ -22,19 +21,24 @@ import {
 import { MobileAcpHistorySheet } from '@/components/mobile/mobile-acp-history-sheet';
 import { MobileWorktreeConfigSheet } from '@/components/mobile/mobile-worktree-config-sheet';
 import { MobileProjectSkillsRow } from '@/components/mobile/mobile-project-skills-sheet';
-import { MobileRemoveLocalProjectSheet } from '@/components/mobile/mobile-remove-local-project-sheet';
 import { AgentIcon } from '@/components/icons/agent-icon';
 import { getHistoryProviderLabel } from '@/components/settings/project-settings';
 import { useAppCapability } from '@/lib/app-platform';
 // The theme tokens are imported by path, not by the `@/` alias: the StyleX
 // compiler links a theme file on its own and does not follow bundler aliases.
-import { themeColors } from '../../style/theme-colors.stylex';
 import { themeFontWeight, themeSpace } from '../../style/theme-scale.stylex';
 import { mobileSurface } from './surface';
 
 const styles = stylex.create({
   /** The share toggle's box: the switch, and its spinner when it works. */
   shareControl: { display: 'flex', alignItems: 'center', gap: themeSpace[2] },
+  identityTileInk: {
+    backgroundColor: 'color-mix(in oklab, hsl(var(--primary)) 10%, transparent)',
+    color: 'hsl(var(--primary))',
+  },
+  chevronInk: {
+    color: 'color-mix(in oklab, hsl(var(--muted-foreground) / 1) 60%, transparent)',
+  },
   /** The row that destroys the project. */
   deleteButton: {
     display: 'block',
@@ -44,12 +48,15 @@ const styles = stylex.create({
     textAlign: 'center',
     fontSize: '0.95rem',
     fontWeight: themeFontWeight.medium,
-    color: themeColors.destructive,
+    color: 'hsl(var(--destructive) / 1)',
     transitionProperty:
-      'color, background-color, border-color, text-decoration-color, fill, stroke',
-    transitionDuration: '150ms',
-    transitionTimingFunction: 'cubic-bezier(0.4, 0, 0.2, 1)',
-    backgroundColor: { default: null, ':active': 'hsl(var(--destructive) / 0.1)' },
+      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke, --tw-gradient-from, --tw-gradient-via, --tw-gradient-to',
+    transitionDuration: 'var(--tw-duration, var(--default-transition-duration))',
+    transitionTimingFunction: 'var(--tw-ease, var(--default-transition-timing-function))',
+    backgroundColor: {
+      default: null,
+      ':active': 'color-mix(in oklab, hsl(var(--destructive) / 1) 10%, transparent)',
+    },
   },
 });
 
@@ -89,7 +96,6 @@ export function MobileLocalProjectSettings({
   const { t } = useTranslation();
   const workspaceId = useAtomValue(currentWorkspaceIdAtom);
   const machineMeta = useAtomValue(getMachineMetaMapAtom).get(machineId as MachineId);
-  const onlineMachineIds = useOnlineMachineIds();
   // Team sharing is cloud-only; the whole sharing section hides on the local
   // (open-source) platform.
   const teamSharingAvailable = useAppCapability('teamSharing');
@@ -104,9 +110,7 @@ export function MobileLocalProjectSettings({
     onWorktreeSetupChange,
     onWorktreeCleanupChange,
   } = useLocalProjectsAdmin();
-  const { removeLocalProject, preflightLocalProjectRemoval, getRemoveLocalProjectImpact } =
-    useRemoveLocalProject();
-  const [removeSheetOpen, setRemoveSheetOpen] = useState(false);
+  const { removeLocalProject } = useRemoveLocalProject();
 
   const projectKey = getLocalProjectVisibilityKey(machineId, projectId);
   const skillsSource: ProjectSkillsSource | null = workspaceId
@@ -125,16 +129,6 @@ export function MobileLocalProjectSettings({
   /* Worktree setup + cleanup live behind a single drill-in row that opens
      this sheet, so the Settings tab's first level stays a short list. */
   const [worktreeSheetOpen, setWorktreeSheetOpen] = useState(false);
-  const removeImpact = useMemo(
-    () =>
-      row
-        ? getRemoveLocalProjectImpact({
-            machineId: row.machineId,
-            localProjectId: row.project.id,
-          })
-        : { conversationCount: 0, runningSessionCount: 0 },
-    [getRemoveLocalProjectImpact, row]
-  );
 
   if (isLoading && !row) {
     return (
@@ -203,7 +197,7 @@ export function MobileLocalProjectSettings({
         <MobileSettingsRow
           label={
             <div {...stylex.props(mobileSurface.identity)}>
-              <div {...stylex.props(mobileSurface.identityTile)}>
+              <div {...stylex.props(mobileSurface.identityTile, styles.identityTileInk)}>
                 <Wrench {...stylex.props(mobileSurface.identityGlyph)} />
               </div>
               <span
@@ -214,7 +208,7 @@ export function MobileLocalProjectSettings({
             </div>
           }
           onClick={() => setWorktreeSheetOpen(true)}
-          trailing={<ChevronRight {...stylex.props(mobileSurface.chevron)} />}
+          trailing={<ChevronRight {...stylex.props(mobileSurface.chevron, styles.chevronInk)} />}
         />
       </MobileSettingsSection>
 
@@ -234,7 +228,7 @@ export function MobileLocalProjectSettings({
                 key={state.providerKey}
                 label={
                   <div {...stylex.props(mobileSurface.identity)}>
-                    <div {...stylex.props(mobileSurface.identityTile)}>
+                    <div {...stylex.props(mobileSurface.identityTile, styles.identityTileInk)}>
                       <AgentIcon
                         cliType={state.provider.cliType}
                         agentType={state.provider.agentType}
@@ -252,7 +246,9 @@ export function MobileLocalProjectSettings({
                   </div>
                 }
                 onClick={() => setSelectedProviderKey(state.providerKey)}
-                trailing={<ChevronRight {...stylex.props(mobileSurface.chevron)} />}
+                trailing={
+                  <ChevronRight {...stylex.props(mobileSurface.chevron, styles.chevronInk)} />
+                }
               />
             ))}
           </MobileSettingsRowGroup>
@@ -263,47 +259,22 @@ export function MobileLocalProjectSettings({
         <MobileSettingsSection>
           <button
             type="button"
-            onClick={() => setRemoveSheetOpen(true)}
+            onClick={() => {
+              void removeLocalProject({
+                machineId: row.machineId,
+                localProjectId: row.project.id,
+                projectName: row.project.name,
+                originalRootPath: projectPath ?? undefined,
+              }).then((removed) => {
+                if (removed) onRemoved?.();
+              });
+            }}
             {...stylex.props(styles.deleteButton)}
           >
             {t('workspace.projects.delete', 'Delete project')}
           </button>
         </MobileSettingsSection>
       ) : null}
-
-      <MobileRemoveLocalProjectSheet
-        open={removeSheetOpen}
-        onOpenChange={setRemoveSheetOpen}
-        projectName={row.project.name}
-        pathLabel={projectPath}
-        deviceName={row.machineName}
-        deviceOnline={onlineMachineIds.has(row.machineId)}
-        conversationCount={removeImpact.conversationCount}
-        runningSessionCount={removeImpact.runningSessionCount}
-        canCleanupWorktrees={
-          onlineMachineIds.has(row.machineId) &&
-          machineSupportsLocalProjectRemovalProtocol(machineMeta)
-        }
-        onPreflightCleanup={() =>
-          preflightLocalProjectRemoval({
-            machineId: row.machineId,
-            localProjectId: row.project.id,
-          })
-        }
-        onConfirm={async (options) => {
-          const removed = await removeLocalProject(
-            {
-              machineId: row.machineId,
-              localProjectId: row.project.id,
-              projectName: row.project.name,
-              originalRootPath: projectPath ?? undefined,
-            },
-            options
-          );
-          if (removed) onRemoved?.();
-          return removed;
-        }}
-      />
 
       <MobileWorktreeConfigSheet
         open={worktreeSheetOpen}

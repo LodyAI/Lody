@@ -1,0 +1,117 @@
+{
+  "viewports": [
+    {
+      "name": "narrow",
+      "width": 320,
+      "height": 720
+    },
+    {
+      "name": "phone",
+      "width": 390,
+      "height": 844
+    },
+    {
+      "name": "tablet",
+      "width": 768,
+      "height": 1024
+    }
+  ],
+  "themes": ["light", "dark"],
+  "reducedMotion": "reduce",
+  "locale": "en",
+  "ids": [
+    "mobile-mainmobilesettingsintegration--direct-delete",
+    "mobile-mainmobilesettingsintegration--rejected-delete",
+    "mobile-mainmobilesettingsintegration--unsupported-protocol",
+    "mobile-mainmobilesettingsintegration--non-owner"
+  ],
+  "ready": {
+    "mobile-mainmobilesettingsintegration--direct-delete": [
+      {
+        "action": "visible",
+        "selector": "[data-main-mobile-settings-result]"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => { const root=document.querySelector('[data-main-mobile-settings]'); const buttons=[...root.querySelectorAll('button')]; return root.dataset.mainMobileSettings==='non-owner' ? !!root.querySelector('p') && buttons.length===0 : buttons.some(b=>b.textContent.includes('Worktree setup')) && buttons.some(b=>b.textContent.includes('Project skills')); }"
+      }
+    ],
+    "mobile-mainmobilesettingsintegration--rejected-delete": [
+      {
+        "action": "visible",
+        "selector": "[data-main-mobile-settings-result]"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => { const root=document.querySelector('[data-main-mobile-settings]'); const buttons=[...root.querySelectorAll('button')]; return root.dataset.mainMobileSettings==='non-owner' ? !!root.querySelector('p') && buttons.length===0 : buttons.some(b=>b.textContent.includes('Worktree setup')) && buttons.some(b=>b.textContent.includes('Project skills')); }"
+      }
+    ],
+    "mobile-mainmobilesettingsintegration--unsupported-protocol": [
+      {
+        "action": "visible",
+        "selector": "[data-main-mobile-settings-result]"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => { const root=document.querySelector('[data-main-mobile-settings]'); const buttons=[...root.querySelectorAll('button')]; return root.dataset.mainMobileSettings==='non-owner' ? !!root.querySelector('p') && buttons.length===0 : buttons.some(b=>b.textContent.includes('Worktree setup')) && buttons.some(b=>b.textContent.includes('Project skills')); }"
+      }
+    ],
+    "mobile-mainmobilesettingsintegration--non-owner": [
+      {
+        "action": "visible",
+        "selector": "[data-main-mobile-settings-result]"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => { const root=document.querySelector('[data-main-mobile-settings]'); const buttons=[...root.querySelectorAll('button')]; return root.dataset.mainMobileSettings==='non-owner' ? !!root.querySelector('p') && buttons.length===0 : buttons.some(b=>b.textContent.includes('Worktree setup')) && buttons.some(b=>b.textContent.includes('Project skills')); }"
+      }
+    ]
+  },
+  "states": {
+    "mobile-mainmobilesettingsintegration--direct-delete": [
+      {
+        "name": "direct-delete-completed",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Delete project"
+          },
+          {
+            "action": "visible",
+            "selector": "[data-main-mobile-settings-result][data-removed=\"true\"]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('[data-main-mobile-settings-result]').textContent.includes('Navigated after admitted deletion') && !document.querySelector('[role=dialog],[role=alertdialog]')"
+          }
+        ]
+      }
+    ],
+    "mobile-mainmobilesettingsintegration--rejected-delete": [
+      {
+        "name": "delete-rejected",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Delete project"
+          },
+          {
+            "action": "visible",
+            "text": "Synthetic local-project command rejected"
+          },
+          {
+            "action": "enabled",
+            "role": "button",
+            "name": "Delete project"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('[data-main-mobile-settings-result]').dataset.removed==='false' && document.querySelector('[data-main-mobile-settings-result]').textContent.includes('Synthetic command rejected') && document.querySelectorAll('[role=alertdialog]').length===0 && [...document.querySelectorAll('[role=dialog]')].every(dialog=>dialog.textContent.trim()==='Synthetic local-project command rejected')"
+          }
+        ]
+      }
+    ]
+  }
+}

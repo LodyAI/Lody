@@ -120,37 +120,6 @@ const contract = (apply) => {
       set(`closed.${i}.elapsedClosed`, b.children[2], 'color', mix('muted-foreground', 70));
       set(`closed.${i}.restoreGlyph`, b.lastElementChild, 'color', mix('muted-foreground', 70));
     }
-  } else {
-    const safe = [...root.querySelectorAll('p')].find(
-      (e) => e.textContent === 'Lody never deletes the original project folder or its files.'
-    );
-    if (!safe) throw new Error('Missing removal safety note');
-    set(
-      'remove.archiveNote',
-      safe.parentElement.previousElementSibling.firstElementChild,
-      'color',
-      mix('foreground', 85)
-    );
-    set('remove.safeNote', safe.parentElement, 'backgroundColor', mix('muted', 60));
-    set('remove.safeNoteLead', safe, 'color', mix('foreground', 90));
-    set(
-      'remove.cleanupOption',
-      root.querySelector('[role=checkbox]').closest('label').parentElement,
-      'borderColor',
-      mix('border', 70)
-    );
-    const dirty = [...root.querySelectorAll('p')].find((e) =>
-      e.textContent.includes('Dirty synthetic worktree')
-    );
-    if (dirty)
-      set(
-        'remove.dirtyAmber',
-        dirty,
-        'color',
-        document.documentElement.classList.contains('dark')
-          ? 'var(--color-amber-300)'
-          : 'var(--color-amber-700)'
-      );
   }
   return rows;
 };
@@ -185,14 +154,7 @@ const layout = () =>
     });
 for (const viewport of profile.viewports.filter((v) => !args.onlyview || v.name === args.onlyview))
   for (const theme of args.probe ? ['light'] : profile.themes)
-    for (const suffix of [
-      'tabs-all-states',
-      'removal-default',
-      'removal-error',
-      'removal-pending',
-      'removal-in-flight',
-      'removal-offline',
-    ].filter((x) => !args.only || x.includes(args.only))) {
+    for (const suffix of ['tabs-all-states'].filter((x) => !args.only || x.includes(args.only))) {
       const context = await browser.newContext({
         ...(viewport.device ? devices[viewport.device] : {}),
         viewport: { width: viewport.width, height: viewport.height },
@@ -359,55 +321,6 @@ for (const viewport of profile.viewports.filter((v) => !args.onlyview || v.name 
           await activate(page.getByRole('button', { name: 'Open session tabs' }));
           await page.locator('[role=dialog]').waitFor();
           await shot('selected-idle-reopened');
-        } else if (['removal-default', 'removal-error', 'removal-pending'].includes(suffix)) {
-          await activate(page.locator('[role=checkbox]'));
-          await page
-            .getByText(
-              suffix === 'removal-default'
-                ? '1 worktree has changes and will stay on disk: Dirty synthetic worktree 中文'
-                : suffix === 'removal-error'
-                  ? 'Synthetic inspection error'
-                  : 'Checking each worktree for changes…',
-              { exact: true }
-            )
-            .waitFor();
-          await page.mouse.move(-10, -10);
-          await shot('cleanup-state');
-          if (suffix === 'removal-default') {
-            await activate(page.getByRole('button', { name: 'Remove project', exact: true }));
-            await page.locator('[role=dialog]').waitFor({ state: 'hidden' });
-            if (
-              (await page.locator('[data-alpha-remove-output]').textContent()) !==
-              'Removal requested: cleanup=true'
-            )
-              throw new Error('Cleanup confirmation missing');
-          }
-          if (
-            suffix === 'removal-error' &&
-            !(await page.getByRole('button', { name: 'Remove project', exact: true }).isDisabled())
-          )
-            throw new Error('Failed preflight permits removal');
-          if (
-            suffix === 'removal-pending' &&
-            !(await page.getByRole('button', { name: 'Remove project', exact: true }).isDisabled())
-          )
-            throw new Error('Pending preflight permits removal');
-        } else if (suffix === 'removal-in-flight') {
-          await activate(page.getByRole('button', { name: 'Remove project', exact: true }));
-          await page.getByText('Processing...', { exact: true }).waitFor();
-          if (!(await page.getByRole('button', { name: 'Cancel', exact: true }).isDisabled()))
-            throw new Error('Removing cancel remains enabled');
-          await shot('removal-pending');
-        } else if (suffix === 'removal-offline') {
-          if (!(await page.locator('[role=checkbox]').isDisabled()))
-            throw new Error('Offline cleanup enabled');
-          await activate(page.getByRole('button', { name: 'Remove project', exact: true }));
-          await page.locator('[role=dialog]').waitFor({ state: 'hidden' });
-          if (
-            (await page.locator('[data-alpha-remove-output]').textContent()) !==
-            'Removal requested: cleanup=false'
-          )
-            throw new Error('Offline removal failed');
         }
       } catch (e) {
         const key = `${id}__${viewport.name}__${theme}__${state}`;
@@ -428,7 +341,7 @@ const metadata = {
   baseUrl: args.storybook,
   restoredOriginalTailwindContract: restored,
   referenceScope:
-    'Ten exact Tailwind-origin mobile alpha declarations, the New Chat hover media condition and dirty amber light/dark; actual current production DOM, not historical UI.',
+    'Exact Tailwind-origin session-tab alpha declarations and the New Chat hover media condition; actual current production DOM, not historical UI.',
   buildFingerprint: hash(iframe + JSON.stringify(index)),
   harnessFingerprint: hash(await readFile(fileURLToPath(import.meta.url))),
   targetsFingerprint: hash(JSON.stringify(profile)),

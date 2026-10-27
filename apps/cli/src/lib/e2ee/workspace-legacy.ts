@@ -2,7 +2,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { constants } from 'node:fs';
 import { link, mkdir, open, readFile, rename, unlink } from 'node:fs/promises';
 import { join } from 'node:path';
-import { Effect, Exit, Scope } from 'effect';
+import { Effect, Exit, Scope, Result } from 'effect';
 import { z } from 'zod';
 import type { PayloadProtectionProvider } from '@loro-dev/streams-crdt';
 import type { CloudE2eePort, CloudStreamsTokenPort } from '@lody/platform';
@@ -16,6 +16,7 @@ import {
 } from '@lody/shared/workspace-streams-content';
 import { makeCliE2eeCustody, type MachineKeyring } from './custody';
 import { makeCliE2eeRuntime } from './runtime';
+import { openMachinePairingJournal, MachinePairingJournalError } from './pairing-journal';
 
 const Binding = z
   .object({
@@ -122,19 +123,14 @@ function mailbox(
 export async function prepareCliE2eeMachineLegacy(
   options: z.input<typeof Binding> & {
     accountId: string;
+    machineId: string;
+    frontendSigningPublicKey: string;
     membershipId: string;
     pairingSessionId: string;
     keyring?: MachineKeyring;
   }
 ) {
-  const {
-    Bytes,
-    hashRecordBytes,
-    prepareDeviceAdmission,
-    signDeviceCredentialBinding,
-    verifyLedgerEffect,
-  } = await import('@lody/e2ee-core/protocol');
-  if (!/^[0-9a-f]{32}$/.test(options.pairingSessionId)) throw new Error('e2ee_invalid_input');
+  const { Bytes, hashRecordBytes, verifyLedgerEffect } = await import('@lody/e2ee-core/protocol');
   const binding = Binding.parse({
     workspaceId: options.workspaceId,
     genesisHash: options.genesisHash,
@@ -142,11 +138,7 @@ export async function prepareCliE2eeMachineLegacy(
   });
   if (hex(hashRecordBytes(bytes(binding.genesisRecordHex)).toBytes()) !== binding.genesisHash)
     throw new Error('e2ee_binding_conflict');
-  const genesis = Effect.runSync(Effect.fromResult(Bytes.genesisHash(bytes(binding.genesisHash))));
-  const membershipId = Effect.runSync(
-    Effect.fromResult(Bytes.membershipId(bytes(options.membershipId)))
-  );
-  // Pin comes from the already authenticated local desktop; the server cannot choose it.
+  const genesis = Result.getOrThrow(Bytes.genesisHash(bytes(binding.genesisHash)));
   await Effect.runPromise(
     verifyLedgerEffect({
       anchor: genesis,
@@ -158,35 +150,34 @@ export async function prepareCliE2eeMachineLegacy(
   return Effect.runPromise(
     Effect.scoped(
       Effect.gen(function* () {
-        const custody = yield* makeCliE2eeCustody({
-          directory: join(directoryFor(options.accountId, options.workspaceId), 'custody'),
+        const directory = directoryFor(options.accountId, options.workspaceId);
+        const journal = yield* openMachinePairingJournal(directory);
+        const custody = makeCliE2eeCustody({
+          directory: join(directory, 'custody'),
           keyring: options.keyring,
         });
-        const device = yield* custody.createDevice(genesis);
-        const credential = yield* custody.prepareDeviceCredential(genesis, device.publicKey);
-        const admission = yield* prepareDeviceAdmission({
-          genesis,
-          membershipId,
-          encryptionPublicKey: device.enc,
-          kind: 'machine',
-          signer: device,
-        });
-        const bindingSignature = yield* signDeviceCredentialBinding({
-          genesis,
-          pairingSessionId: bytes(options.pairingSessionId),
-          signingPublicKey: device.publicKey,
-          credentialHash: bytes(credential.credentialHash),
-          signer: device,
-        });
-        return {
-          pairingSessionId: options.pairingSessionId,
-          bindingSignature: hex(bindingSignature.toBytes()),
-          signingPublicKey: hex(device.publicKey.toBytes()),
-          encryptionPublicKey: hex(device.enc.toBytes()),
-          possessionSignature: hex(admission.possessionSignature.toBytes()),
-          credentialHash: credential.credentialHash,
-          protection: custody.protection,
-        };
+        return yield* journal
+          .prepare(
+            {
+              machineId: options.machineId,
+              accountId: options.accountId,
+              ...binding,
+              membershipId: options.membershipId,
+              pairingSessionId: options.pairingSessionId,
+              frontendSigningPublicKey: options.frontendSigningPublicKey,
+            },
+            custody
+          )
+          .pipe(
+            Effect.catchIf(
+              (error) => error instanceof MachinePairingJournalError && error.code === 'superseded',
+              () =>
+                Effect.succeed({
+                  superseded: true as const,
+                  pairingSessionId: options.pairingSessionId,
+                })
+            )
+          );
       })
     )
   );
@@ -216,16 +207,58 @@ export function openCliE2eeWorkspaceLegacy(options: CliE2eeWorkspaceOptions) {
   return openWorkspace(options, true);
 }
 
-/** A pending pairing may verify its ledger and receive keys, but exposes no content transport. */
+/** A pending pairing verifies ledger bytes only; it cannot receive keys or attach content. */
 export async function openCliE2eePairingRuntimeLegacy(options: CliE2eeWorkspaceOptions) {
   const pending = await openWorkspace(options, false);
   return { status: pending.status, refresh: pending.refresh, close: pending.close };
 }
 
+/** Validate only locally retained pairing intent before a Fleet ownership transition. */
+export async function validateCliE2eePairingIntentLegacy(options: {
+  accountId: string;
+  workspaceId: string;
+  genesisHash: string;
+  machineId: string;
+  pairingSessionId: string;
+  frontendSigningPublicKey: string;
+  signingPublicKey: string;
+}) {
+  await Effect.runPromise(
+    Effect.scoped(
+      Effect.gen(function* () {
+        const journal = yield* openMachinePairingJournal(
+          directoryFor(options.accountId, options.workspaceId)
+        );
+        const retained = yield* journal.retained(options.pairingSessionId);
+        if (
+          retained.expected.accountId !== options.accountId ||
+          retained.expected.machineId !== options.machineId ||
+          retained.expected.workspaceId !== options.workspaceId ||
+          retained.expected.genesisHash !== options.genesisHash ||
+          retained.expected.frontendSigningPublicKey !== options.frontendSigningPublicKey ||
+          retained.material.signingPublicKey !== options.signingPublicKey
+        )
+          return yield* Effect.fail(new Error('e2ee_binding_conflict'));
+        return undefined;
+      })
+    )
+  );
+}
+
 /** Verify actual admission and install the current key before allowing Fleet to attach rooms.
  * The marker is only a startup hint: subsequent authorization still comes from core's verified ledger. */
-export async function activateCliE2eeWorkspaceLegacy(options: CliE2eeWorkspaceOptions) {
-  const pending = await openCliE2eePairingRuntimeLegacy(options);
+export async function activateCliE2eeWorkspaceLegacy(
+  options: CliE2eeWorkspaceOptions & {
+    pairingSessionId: string;
+    frontendSigningPublicKey: string;
+    expectedSigningPublicKey: string;
+  }
+) {
+  const pending = await openWorkspace(options, false, {
+    pairingSessionId: options.pairingSessionId,
+    frontendSigningPublicKey: options.frontendSigningPublicKey,
+    signingPublicKey: options.expectedSigningPublicKey,
+  });
   let marker: z.infer<typeof Activation>;
   try {
     await pending.refresh();
@@ -235,6 +268,7 @@ export async function activateCliE2eeWorkspaceLegacy(options: CliE2eeWorkspaceOp
       options.expectedSigningPublicKey !== status.devicePublicKey
     )
       throw new Error('e2ee_binding_conflict');
+    pending.assertPairingConfirmed();
     if (!status.hasCurrentKey) throw new Error('e2ee_waiting_for_key');
     marker = { genesisHash: options.genesisHash, signingPublicKey: status.devicePublicKey };
   } finally {
@@ -264,7 +298,11 @@ export async function activateCliE2eeWorkspaceLegacy(options: CliE2eeWorkspaceOp
   }
 }
 
-async function openWorkspace(options: CliE2eeWorkspaceOptions, requireActivation: boolean) {
+async function openWorkspace(
+  options: CliE2eeWorkspaceOptions,
+  requireActivation: boolean,
+  pairing?: { pairingSessionId: string; frontendSigningPublicKey: string; signingPublicKey: string }
+) {
   const directory = directoryFor(options.accountId, options.workspaceId);
   let activation: z.infer<typeof Activation> | undefined;
   if (requireActivation) {
@@ -352,6 +390,8 @@ async function openWorkspace(options: CliE2eeWorkspaceOptions, requireActivation
   let latestEpoch = writeEpoch;
   let keyUpdateRequired = initialStatus.rotationRequired;
   let ledgerBlocked = false;
+  let pairingConfirmed = false;
+  let pairingFailure: unknown;
   let retryLedgerOnSeal = false;
   let closed = false;
   let refresh: Promise<void> | undefined;
@@ -416,10 +456,36 @@ async function openWorkspace(options: CliE2eeWorkspaceOptions, requireActivation
     },
   };
   const isClosed = () => closed;
+  const confirmPairing = async (intent: {
+    pairingSessionId: string;
+    frontendSigningPublicKey: string;
+    signingPublicKey: string;
+  }) => {
+    const evidence = await run(opened.runtime.pairingEvidence());
+    await run(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const journal = yield* openMachinePairingJournal(directory);
+          const retained = yield* journal.retained(intent.pairingSessionId);
+          if (
+            retained.expected.accountId !== options.accountId ||
+            retained.expected.workspaceId !== options.workspaceId ||
+            retained.expected.genesisHash !== options.genesisHash ||
+            retained.expected.frontendSigningPublicKey !== intent.frontendSigningPublicKey ||
+            retained.material.signingPublicKey !== intent.signingPublicKey
+          )
+            return yield* Effect.fail(new Error('e2ee_binding_conflict'));
+          yield* journal.confirm(retained.expected, evidence.view, evidence.records);
+          return undefined;
+        })
+      )
+    );
+  };
   const refreshInBackground = () => {
     if (closed) return Promise.resolve();
     pending = true;
     if (refresh) return refresh;
+    if (pairing) pairingConfirmed = false;
     refresh = (async () => {
       while (pending && !isClosed()) {
         pending = false;
@@ -460,10 +526,17 @@ async function openWorkspace(options: CliE2eeWorkspaceOptions, requireActivation
           keyUpdateRequired ||= status.rotationRequired || latestEpoch !== writeEpoch;
           cursor = page.nextCursor ?? undefined;
         } while (cursor && !isClosed());
-        if (!closed) await run(opened.runtime.receiveKeys());
+        if (!closed) {
+          if (pairing) {
+            await confirmPairing(pairing);
+            pairingConfirmed = true;
+          }
+          if (requireActivation || pairing) await run(opened.runtime.receiveKeys());
+        }
       }
     })()
-      .catch(() => {
+      .catch((error: unknown) => {
+        if (pairing) pairingFailure = error;
         try {
           options.onUnavailable();
         } catch {
@@ -478,6 +551,11 @@ async function openWorkspace(options: CliE2eeWorkspaceOptions, requireActivation
   // Startup is one of the three refresh triggers; no network request is awaited by open.
   void refreshInBackground();
   return {
+    assertPairingConfirmed: () => {
+      if (!pairing || !pairingConfirmed)
+        throw new Error('e2ee_pairing_unconfirmed', { cause: pairingFailure });
+    },
+    confirmPairing,
     content,
     tokens,
     bucketId: () => bucket?.(),

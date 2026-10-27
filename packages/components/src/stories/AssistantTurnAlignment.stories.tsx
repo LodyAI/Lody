@@ -179,6 +179,68 @@ export const ConversationRhythm: Story = {
   render: () => <ConversationRhythmScene />,
 };
 
+const backgroundTaskItems: ChatStreamItem[] = [
+  {
+    type: 'message',
+    sessionId,
+    turnIndex: 0,
+    message: {
+      id: 'background-task-user',
+      role: 'user',
+      timestamp: '2026-10-01T08:00:00.000Z',
+      read: true,
+      items: [{ type: 'text', text: 'Run a background build and answer before it finishes.' }],
+    },
+  },
+  {
+    type: 'message',
+    sessionId,
+    turnIndex: 1,
+    message: {
+      id: 'background-task-assistant',
+      role: 'assistant',
+      timestamp: '2026-10-01T08:00:01.000Z',
+      finished: true,
+      read: true,
+      items: [
+        {
+          type: 'tool_call',
+          toolCallId: 'background-build-call',
+          kind: 'execute',
+          title: 'pnpm build',
+          status: 'completed',
+        },
+        { type: 'text', text: 'The answer is ready; the build is still running.' },
+        {
+          type: 'subagent_task',
+          taskId: 'background-build',
+          taskKind: 'background',
+          actor: 'Bash',
+          status: 'in_progress',
+          description: 'pnpm build',
+          isBackgrounded: true,
+        },
+        {
+          type: 'subagent_task',
+          taskId: 'background-check',
+          taskKind: 'background',
+          actor: 'Bash',
+          status: 'completed',
+          description: 'Check generated files',
+          isBackgrounded: true,
+        },
+      ],
+    },
+  },
+];
+
+export const FinishedAnswerWithRunningBackgroundTasks: Story = {
+  ...ConversationRhythm,
+  name: 'Finished answer with a running background task',
+  args: { ...ConversationRhythm.args, items: backgroundTaskItems },
+  render: () => <ConversationRhythmScene items={backgroundTaskItems} />,
+};
+
 /**
  * The same rounds on a phone. Every left edge — prose, the "Ran N commands"
  * label, and the footer's "Worked for …" — sits on one rail; only the newest

@@ -98,12 +98,11 @@ const vectorHistory = (recorded: typeof vectorPage) =>
     genesisHash: vectorGenesis,
     localPin: vectorGenesis,
   });
-// Synthetic display profiles; the vector's memberships are 0a…, 0b… and 0c….
+// Synthetic profiles keyed by the vector's crypto user IDs, never account authority.
 const teamProfiles = {
-  you: { name: 'Alex Chen' },
   memberProfiles: new Map([
-    ['0b'.repeat(16), { name: 'Sam Rivera' }],
-    ['0c'.repeat(16), { name: 'Jordan Lee' }],
+    ['0a'.repeat(32), { name: 'Alex Chen' }],
+    ['03'.repeat(32), { name: 'Jordan Lee' }],
   ]),
 };
 // The first nine records: everything this client can verify.

@@ -20,12 +20,16 @@ export type ChatLandingProjectSession = {
   machineId: string;
   project?: ChatLandingProjectRefLike | null;
   repoFullName?: string | null;
+  /** Set when the session was started from a multi-member project. */
+  projectRun?: { id: string } | null;
   lastMessageAt?: number | null;
 };
 
 export type ChatLandingProjectRecency = {
   byRepo: ReadonlyMap<string, number>;
   byProject: ReadonlyMap<string, number>;
+  /** Multi-member projects by id, so they rank among recently used projects. */
+  byGroup: ReadonlyMap<string, number>;
 };
 
 export type SharingReviewActionTarget = 'machines' | 'projects' | null;
@@ -309,11 +313,13 @@ export function getChatLandingProjectRecency(
 ): ChatLandingProjectRecency {
   const byRepo = new Map<string, number>();
   const byProject = new Map<string, number>();
+  const byGroup = new Map<string, number>();
   for (const session of sessions) {
     recordLatestTimestamp(byRepo, getSessionGitHubRepoFullName(session), session.lastMessageAt);
     recordLatestTimestamp(byProject, getSessionLocalProjectKey(session), session.lastMessageAt);
+    recordLatestTimestamp(byGroup, session.projectRun?.id ?? null, session.lastMessageAt);
   }
-  return { byRepo, byProject };
+  return { byRepo, byProject, byGroup };
 }
 
 export function compareChatLandingRepositoryByRecency(

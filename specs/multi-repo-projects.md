@@ -29,11 +29,13 @@ looks only at that branch.
   identified by `(machineId, localProjectId)`. A repository added once as a local
   folder and once from GitHub, or added from two subdirectories of one monorepo,
   is a single Member.
-- A Member is either a **repository Member** or a **machine-bound Member**. A local
-  folder whose GitHub remote is known joins as a repository Member: it records the
-  repository, not the machine, so the same Project runs on any machine. Only a
-  local repository without a GitHub remote and a non-Git directory are
-  machine-bound. All machine-bound Members of one Project are on one machine, and
+- A Member is either a **repository Member** or a **machine-bound Member**. A
+  repository chosen from GitHub joins as a repository Member: it records the
+  repository, not the machine, so it runs on any machine. A folder chosen on a
+  machine joins as a machine-bound Member, even when its GitHub remote is known
+  (it is still deduplicated and tracked by that repository), so a Project built
+  from one machine's folders runs only there. Projects saved earlier keep any
+  repository Member that uses a local copy until it is edited. All machine-bound Members of one Project are on one machine, and
   that machine is the Project's only execution machine; a Project without
   machine-bound Members can run on any machine.
 - Each flattened Member has a directory name that is unique within the Project. It
@@ -46,15 +48,82 @@ looks only at that branch.
 - **Where it appears.** A Project with a machine-bound Member is listed under that
   machine, with the machine's folders. A Project without one runs anywhere and is
   listed with the GitHub repositories. This applies to the sidebar and to
-  Settings › Projects.
+  Settings › Projects. In the sidebar each follows its neighbours: under a machine
+  it stays listed like a folder; beside the repositories it is listed while it has
+  conversations, like a repository, so archiving them all hides it and restoring
+  one brings it back. Its menu offers "Remove project" to its creator, as a folder's
+  does.
 - **Creating and editing.** Settings › Projects offers "Several repositories or
   folders" beside adding a folder or a GitHub repository. A project row's context
   menu offers "Edit project…": on a multi-repository Project it edits it; on a
   single folder or GitHub repository it opens the same editor seeded with it, which
   saves a new Project and leaves the original and its conversations as they are.
   On a phone the same action is the first row of a project's settings tab, and
-  mobile Settings › Projects offers creating one. The editor's
-  picker adds repositories and folders already known to the workspace.
+  mobile Settings › Projects offers creating one. The composer's project picker
+  also offers "Create project". Creation is a guided sequence of single questions,
+  so folders and repositories are never mixed before the user has chosen where the
+  project runs: first whether it includes local folders or only GitHub repositories;
+  for local folders, which machine; then the folders on that machine (including
+  direct selection) beside a separate tab listing every GitHub repository, or for
+  GitHub only, the repositories; finally the name, the selected Members and the
+  instructions. A repository ticked both as a folder and on GitHub is noted, not
+  blocked; the Project keeps one Member, cloned from GitHub.
+  Changing an earlier answer drops Members the new answer cannot hold. Choosing a
+  single folder or repository creates no Project and asks for no name: the folder
+  is added (or listed again) as an ordinary project, and a GitHub repository is
+  already one. Project names are unique in the workspace, ignoring case and
+  surrounding spaces. Editing a
+  Project walks the same questions, marking its current answers and Members as
+  previously selected; someone who may not change it sees it read-only.
+
+## Direct folder selection and standalone visibility
+
+A user can create a Project by selecting local folders without first adding each
+one as a standalone project. “Select local folders” is the primary local entry;
+adding existing projects or repositories remains available. Show the selected
+paths and whether members modify originals or use Git isolation before saving.
+
+**Separate registration from display.** A directory registration records a
+machine-local identity and path; a Project references it. Standalone visibility
+controls whether that directory also appears as its own entry in the sidebar,
+Settings › Projects and standalone project selection. It is not a second project
+copy or an access-control boundary. Members remain visible inside their Project.
+Existing standalone entries remain visible; adding them as members never hides
+them. Absolute paths remain in the machine directory catalog.
+
+**Save and reuse.** Selection is a draft: cancelling before save creates no
+registrations. Saving validates the folders, reuses existing registrations and
+registers missing ones without standalone visibility. Within the same workspace
+and machine, the same canonical directory has one registration, regardless of
+its display name. Different clones or machines have separate registrations;
+repository-member deduplication still follows the rules above. A partial save
+failure is reported and can be retried using registrations already created; it
+must not publish an incomplete Project or delete shared registrations.
+
+**Adding the same folder later.** Explicitly adding a registered folder as a
+standalone project enables its standalone visibility and reuses its identity.
+If already visible, locate that entry. For example, adding `backend` through a
+multi-folder Project and later adding it alone yields one registration with two
+entry points. Neither action moves or merges conversations or changes membership.
+
+**Deletion.** Use the existing Settings › Projects “Delete project” action, without
+an extra confirmation or a separate “Remove from list” feature. The owning daemon
+checks Project members and existing multi-repository conversation snapshots. If
+referenced, it cancels standalone display while preserving the registration and
+conversations; otherwise it follows the existing local-project deletion flow.
+These dependencies stay internal. No action deletes the original directory.
+Removing a member or deleting a Project changes its definition only; automatic
+cleanup of unused hidden registrations is outside this change. Explicitly adding
+a retained directory restores its existing identity and standalone entry.
+
+**Preserve execution semantics.** Direct selection does not introduce exact-copy
+binding: a chosen folder binds the Project to its machine, including a
+GitHub-backed one (revised 2026-10-27 at the user's request; earlier such folders
+became portable repository members). Explain this distinction
+in the editor. Ordinary folders modify originals without worktree isolation;
+selecting a repository subdirectory does not promise independent Git isolation.
+No new CLI/MCP interface, automatic directory relocation, or permission model is
+included. Legacy registrations default to standalone-visible for compatibility.
 
 ## Flat layout
 
@@ -243,9 +312,9 @@ GC scope extended to `<data>/repos/project-*/worktrees/<session>`.
   to show which machines can run a Project. It names a repository, never a path,
   and only the owning daemon writes it.
 - A Project saved before repository Members existed keeps its local Members as
-  they are. When the editor saves it again, a local Member whose machine publishes
-  a GitHub remote becomes a repository Member, keeping its ID, directory and
-  submodule placement.
+  they are, and editing no longer converts them: a folder stays its machine's.
+  Editing on a machine turns a repository Member that used a local copy there
+  into that machine's folder.
 - Conversation metadata keeps the Member snapshot frozen at creation, including
   the Project name and the main directory name. Deleting or editing a Project does
   not affect existing conversations; after a Project is deleted, its conversations
@@ -306,6 +375,12 @@ Every root gets the same file capabilities in Lody as the main directory:
   host path. Survey: [proposal note](../.agents/notes/proposed/architecture/2026-10-16-multi-repo-projects.md#path-dependency-survey-preparing-for-local-directories).
 
 ## Evidence
+
+Direct folder selection and standalone visibility are implemented in this change.
+Registration reuse is in
+[local-project-import](../packages/components/src/lib/local-project-import.ts);
+[research and trade-offs](../.agents/notes/implemented/architecture/2026-10-26-project-direct-folder-selection.md)
+record the behavior, validation and remaining limits. The broader Spec remains a draft.
 
 These describe the current code, not an implementation of this Spec:
 

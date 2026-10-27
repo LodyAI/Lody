@@ -1,10 +1,10 @@
 import {
   LOCAL_E2EE_PAIRING_PATH,
   LocalE2eePairingRequestSchema,
-  LocalE2eePrepareResponseSchema,
+  LocalE2eePrepareReplySchema,
   LocalE2eeActivateResponseSchema,
   type LocalE2eePairingRequest,
-  type LocalE2eePrepareResponse,
+  type LocalE2eePrepareReply,
   type LocalE2eeActivateResponse,
 } from '@lody/shared/e2ee-local-pairing';
 import {
@@ -45,7 +45,7 @@ const PROJECT_CONTROL_TYPES: ReadonlyArray<LocalProjectControlRequestValidated['
 export interface LocalSessionControlConfig {
   dispatchE2eePairing?: (
     message: LocalE2eePairingRequest
-  ) => Promise<LocalE2eePrepareResponse | LocalE2eeActivateResponse>;
+  ) => Promise<LocalE2eePrepareReply | LocalE2eeActivateResponse>;
   dispatchSchedule?: (message: ScheduleControlRequest) => Promise<ScheduleControlResponse>;
   machineId: MachineId;
   logger: Logger;
@@ -326,7 +326,7 @@ export class LocalControlHandler {
           const response = await this.config.dispatchE2eePairing(parsed.data);
           const valid =
             parsed.data.type === 'prepare'
-              ? LocalE2eePrepareResponseSchema.safeParse(response)
+              ? LocalE2eePrepareReplySchema.safeParse(response)
               : LocalE2eeActivateResponseSchema.safeParse(response);
           if (!valid.success)
             return handlerResponse(500, { ok: false, error: 'e2ee_invalid_response' });

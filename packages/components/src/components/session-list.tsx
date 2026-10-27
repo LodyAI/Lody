@@ -32,6 +32,7 @@ import {
 import { CSS } from '@dnd-kit/utilities';
 import {
   Archive,
+  Trash2,
   ChevronDown,
   GitBranch,
   GitPullRequest,
@@ -620,6 +621,13 @@ export type SessionListProjectGroupState = {
   projectId: string;
   name: string;
   collapsed: boolean;
+  /**
+   * Deleted: listed only for the conversations that still name it, under the
+   * name their snapshot recorded. It still folds like any group.
+   */
+  removed?: boolean;
+  /** The current user may delete it (the creator). */
+  canDelete?: boolean;
 };
 
 export const getProjectGroupSessionGroupKey = (projectId: string): string =>
@@ -661,6 +669,7 @@ export type SessionListProps = {
   onNewInProjectGroup?: (projectId: string) => void;
   /** Opens the group's editor; the group row's ⋯ menu offers it. */
   onOpenProjectGroupSettings?: (projectId: string) => void;
+  onDeleteProjectGroup?: (projectId: string) => void;
   onArchiveProjectGroupChats?: (sessionIds: string[]) => void;
   /** Reorders Project groups; receives every listed group id in its new order. */
   onMoveProjectGroup?: (projectIds: string[]) => void;
@@ -710,6 +719,8 @@ export type SessionRowGroup = {
   projectId?: string;
   /** A deleted Project group still listing its conversations: nothing to edit or start. */
   projectGroupRemoved?: boolean;
+  /** Set for a `projectGroup` the current user may delete. */
+  projectGroupDeletable?: boolean;
   collapsed: boolean;
   sessions: SessionListRow[];
 };
@@ -861,6 +872,8 @@ export function buildGroups(
       kind: 'projectGroup',
       repoFullName: null,
       projectId: group.projectId,
+      ...(group.removed ? { projectGroupRemoved: true } : {}),
+      ...(group.canDelete ? { projectGroupDeletable: true } : {}),
       collapsed: group.collapsed,
       sessions: sortSessionRowsByLatestMessage(sessionsByProjectGroup.get(group.projectId) ?? []),
     });
@@ -1018,6 +1031,7 @@ type SessionGroupSectionProps = {
   onNewInProjectGroup?: (projectId: string) => void;
   /** Opens the group's editor; the group row's ⋯ menu offers it. */
   onOpenProjectGroupSettings?: (projectId: string) => void;
+  onDeleteProjectGroup?: (projectId: string) => void;
   onArchiveProjectGroupChats?: (sessionIds: string[]) => void;
   /** Reorders Project groups; receives every listed group id in its new order. */
   onMoveProjectGroup?: (projectIds: string[]) => void;
@@ -1897,6 +1911,7 @@ function ProjectGroupHeaderRow({
   onNew,
   onOpenSettings,
   onArchiveChats,
+  onDelete,
   headerAction,
 }: {
   group: SessionRowGroup;
@@ -1908,12 +1923,14 @@ function ProjectGroupHeaderRow({
   onNew?: () => void;
   onOpenSettings?: () => void;
   onArchiveChats?: (sessionIds: string[]) => void;
+  onDelete?: () => void;
   headerAction?: ReactNode;
 }) {
   const { t } = useTranslation();
   const [menuOpen, setMenuOpen] = useState(false);
   const sessionIds = useMemo(() => group.sessions.map((row) => row.sessionId), [group.sessions]);
-  const showMenu = !isMobile && (Boolean(onOpenSettings) || Boolean(onArchiveChats));
+  const showMenu =
+    !isMobile && (Boolean(onOpenSettings) || Boolean(onArchiveChats) || Boolean(onDelete));
   const showNew = !isMobile && Boolean(onNew);
   const activate = onNew ?? onToggle;
 
@@ -2043,6 +2060,12 @@ function ProjectGroupHeaderRow({
                 {t('sidebar.localProjects.archiveChats', 'Archive chats')}
               </ContextMenu.Item>
             ) : null}
+            {/* The same action a folder row offers. */}
+            {onDelete ? (
+              <ContextMenu.Item icon={Trash2} onClick={onDelete}>
+                {t('sidebar.localProjects.remove', 'Remove project')}
+              </ContextMenu.Item>
+            ) : null}
           </ContextMenu.Content>
         </ContextMenu.Root>
       ) : (
@@ -2067,6 +2090,7 @@ const SessionGroupSection = memo(function SessionGroupSection({
   onToggleProjectGroupCollapsed,
   onNewInProjectGroup,
   onOpenProjectGroupSettings,
+  onDeleteProjectGroup,
   onArchiveProjectGroupChats,
   onEditRepoProject,
   onArchiveRepoChats,
@@ -2229,6 +2253,11 @@ const SessionGroupSection = memo(function SessionGroupSection({
               : undefined
           }
           onArchiveChats={onArchiveProjectGroupChats}
+          onDelete={
+            group.projectGroupDeletable && group.projectId && onDeleteProjectGroup
+              ? () => onDeleteProjectGroup(group.projectId!)
+              : undefined
+          }
           headerAction={headerAction}
         />
       ) : (
@@ -2616,6 +2645,7 @@ export const SessionList = memo(function SessionList({
   onToggleProjectGroupCollapsed,
   onNewInProjectGroup,
   onOpenProjectGroupSettings,
+  onDeleteProjectGroup,
   onArchiveProjectGroupChats,
   onMoveProjectGroup,
   onEditRepoProject,
@@ -2847,6 +2877,7 @@ export const SessionList = memo(function SessionList({
                   onToggleProjectGroupCollapsed={onToggleProjectGroupCollapsed}
                   onNewInProjectGroup={onNewInProjectGroup}
                   onOpenProjectGroupSettings={onOpenProjectGroupSettings}
+                  onDeleteProjectGroup={onDeleteProjectGroup}
                   onArchiveProjectGroupChats={onArchiveProjectGroupChats}
                   headerAction={groupHeaderAction}
                   selectedSessionId={selectedSessionId}

@@ -35,6 +35,16 @@ other runtimes need their own storage and platform adapters. Backend ports and
 
 ## Entries
 
+The protocol entry includes `sealPresenceContent` / `openPresenceContent`,
+`sealRpcRequestContent` / `openRpcRequestContent` and `sealRpcResponseContent` /
+`openRpcResponseContent`. They compose existing content v0 cryptography for
+purposes 7/8/9 over opaque payload bytes. Callers supply trusted resource scope,
+installed epoch key and expected signer; the helpers own and dispose their derived
+leaf. They do not validate an RPC body, request/result correlation, presence TTL,
+machine binding, ledger permissions or freshness. Keep those gates in the trusted
+host before enabling a channel. Retain the returned original frame for retries;
+running a seal again creates a new encryption. No product transport is enabled.
+
 | Import | Contents | Stability |
 | --- | --- | --- |
 | `@lody/e2ee-core` | workflows (`KeyReceiver`, `EpochPublisher`, …), their errors and results, `E2eeWorkflows` | public |

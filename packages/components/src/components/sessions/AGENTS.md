@@ -94,11 +94,10 @@ Read parent rules and linked context.
 
 ## [Composer info bar](../../../../../.agents/docs/sessions-info-bar.md)
 
-- Keep canonical cluster order and one nonempty stage when items exist. Hide
-  the bar only without items or ambient content. Machine control stays outside
-  staging (desktop name, mobile icon); ownership appears only in its details card.
-- The stage icon is inert, colour is reserved for genuine status, and nothing
-  in the bar pulses.
+- Keep cluster order and one nonempty stage when items exist. Hide only without
+  items or ambient content. Machine (desktop name/mobile icon) stays unstaged;
+  ownership appears only in details. Scheduled drafts use an unstaged icon popover.
+- Stage icons stay inert; reserve colour for genuine status; no pulses.
 - Open preview stays gated on a real reported target; repository actions are
   priority-ordered (dirty ⇒ Commit & Push), collapse into one, never duplicated
   below the reply.

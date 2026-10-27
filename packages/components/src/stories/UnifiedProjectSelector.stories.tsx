@@ -172,6 +172,7 @@ const meta = {
     ],
     onChange: fn(),
     onAddLocalProject: fn(),
+    onCreateProject: fn(),
     onConnectGitRepo: fn(),
     onShareLocalProjectWithTeam: fn(async () => undefined),
     renderLimit: UNIFIED_PROJECT_OPTION_RENDER_LIMIT,

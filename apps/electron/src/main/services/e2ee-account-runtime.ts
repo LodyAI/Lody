@@ -3,7 +3,7 @@ import { join } from 'node:path'
 import { app } from 'electron'
 import { Effect, Exit, Scope, Semaphore } from 'effect'
 import { makeElectronE2eeCustody } from '../e2ee-custody-electron'
-import { makeDesktopE2eeBootstrap } from './e2ee-bootstrap.mjs'
+import { makeDesktopE2eeBootstrap, type DesktopE2eeCreationIntent } from './e2ee-bootstrap.mjs'
 import type { E2eeCloudClient } from './e2ee-cloud-client.mjs'
 import type { makeDesktopE2eeRuntimeHost } from './e2ee-runtime.mjs'
 import { getIpcServiceDeps } from '../ipc/ipc-service-deps'
@@ -218,6 +218,40 @@ export async function desktopE2eeCloudClient(): Promise<{
       return { accountId: owner.accountId, client: owner.cloud }
     })
   )
+}
+
+/** New signatures need the account-global public ID; old originals and existing
+ * workspaces remain local. No network work is admitted under the account lock. */
+export async function prepareDesktopE2eeCreation(input: DesktopE2eeCreationIntent) {
+  const auth = getIpcServiceDeps().authService
+  const identity = auth.getCachedSessionIdentity()
+  const needsIdentity = await withDesktopE2eeAccount((owner) =>
+    owner.accountId === input.accountId
+      ? owner.bootstrap.creationNeedsAccountIdentity(input)
+      : Effect.fail(new Error('e2ee_account_mismatch'))
+  )
+  if (needsIdentity) {
+    const cloud = await desktopE2eeCloudClient()
+    if (cloud.accountId !== input.accountId) throw new Error('e2ee_account_mismatch')
+    const registered = await Effect.runPromise(cloud.client.accountIdentity())
+    await withDesktopE2eeAccount((owner) => {
+      const latest = auth.getCachedSessionIdentity()
+      return owner.accountId === input.accountId &&
+        registered.accountId === input.accountId &&
+        latest.userId === identity.userId &&
+        latest.generation === identity.generation
+        ? owner.bootstrap.recordAccountIdentity(registered)
+        : Effect.fail(new Error('e2ee_account_mismatch'))
+    })
+  }
+  return withDesktopE2eeAccount((owner) => {
+    const latest = auth.getCachedSessionIdentity()
+    return owner.accountId === input.accountId &&
+      latest.userId === identity.userId &&
+      latest.generation === identity.generation
+      ? owner.bootstrap.prepareCreation(input)
+      : Effect.fail(new Error('e2ee_account_mismatch'))
+  })
 }
 
 function publicE2eeFailure(error: unknown): Error {

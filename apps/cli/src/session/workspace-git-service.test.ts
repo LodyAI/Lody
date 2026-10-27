@@ -1488,6 +1488,32 @@ describe('non-Git member access', () => {
       await rm(base, { recursive: true, force: true });
     }
   });
+  it("keeps a sibling tab's member link when a later Provider takes additional directories", async () => {
+    const base = await mkdtemp(join(tmpdir(), 'project-member-link-'));
+    try {
+      const main = join(base, 'main');
+      const docs = join(base, 'docs');
+      const other = join(base, 'other');
+      await mkdir(main);
+      await mkdir(docs);
+      await mkdir(other);
+      await writeFile(join(docs, 'keep.txt'), 'original');
+      // The parent tab's Provider lacks additional directories: it uses the link.
+      expect(await reconcileProjectMemberLink(main, 'docs', docs, false)).toBe(true);
+      // A child tab's Provider takes them; the parent still reads through the link.
+      expect(await reconcileProjectMemberLink(main, 'docs', docs, true)).toBe(true);
+      expect(await readFile(join(main, 'docs', 'keep.txt'), 'utf8')).toBe('original');
+      // A link to somewhere else is still removed, and none is created.
+      await unlink(join(main, 'docs'));
+      await symlink(other, join(main, 'docs'), 'junction');
+      expect(await reconcileProjectMemberLink(main, 'docs', docs, true)).toBe(false);
+      expect(existsSync(join(main, 'docs'))).toBe(false);
+      expect(await reconcileProjectMemberLink(main, 'docs', docs, true)).toBe(false);
+      expect(existsSync(join(main, 'docs'))).toBe(false);
+    } finally {
+      await rm(base, { recursive: true, force: true });
+    }
+  });
   it('probes non-Git directories and rejects missing roots', async () => {
     const root = await mkdtemp(join(tmpdir(), 'non-git-member-'));
     try {

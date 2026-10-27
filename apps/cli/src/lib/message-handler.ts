@@ -1,3 +1,9 @@
+import { isScheduledMessageFile } from './schedules/scheduled-message-files';
+import {
+  getWorkspaceFlockDocId,
+  listWorkspaceProjects,
+  readWorkspaceFlockRowsFromFlock,
+} from '@lody/shared';
 import { workspaceSupports } from '@lody/shared/workspace-streams-content';
 import { encodeSessionFilePath, resolveSessionPullRequests } from '@lody/shared';
 import type { SessionFileRoot } from '@lody/shared';
@@ -231,7 +237,7 @@ import { formatErrorMessage } from '@/utils/format-error';
 import { startTraceSpan, traceAsync } from '@/utils/trace-span';
 import { getCliHttpFetch } from '@/utils/http-transport';
 import { prepareCliStreamsGatewayBaseUrl } from './loro/streams-access';
-import { readTimeoutEnv, withTimeout } from './loro/timeout-utils';
+import { readTimeoutEnv, withTimeout, SYNC_CONFIRMATION_TIMEOUT_MS } from './loro/timeout-utils';
 import {
   copyIntoSessionFileBlobStore,
   getDraftSessionFileBlobMaxAgeMs,
@@ -373,6 +379,7 @@ import {
 import {
   readMachineLocalProjects,
   removeMachineLocalProject,
+  isLocalProjectReferenced,
   resolveWorkspaceLocalProject,
   resolveWorkspaceLocalProjectRootPath,
   resolveWorkspaceLocalProjectRootPathWithRetry,
@@ -640,7 +647,7 @@ type ConversationTurnGateContext = {
 };
 
 type SessionImageUploadAttachTarget =
-  | { kind: 'active_turn'; turnId: string }
+  | { kind: 'active_turn'; turnId: string; turnEpoch?: number }
   | { kind: 'new_entry' }
   | { kind: 'unavailable'; statusType: string };
 type SessionImageUploadOptions = {
@@ -1192,9 +1199,12 @@ export class MessageHandler {
   }
 
   private handleImageGenerationBegin(sessionId: SessionId, event: ImageGenerationBeginEvent): void {
-    const turnId = this.store.getTurnId(sessionId) ?? null;
+    const currentTarget = this.store.getCurrentACPUpdateTarget(sessionId);
+    const target = currentTarget?.source === 'active_turn' ? currentTarget : null;
+    const turnId = target?.turnId;
     const state = this.store.get(sessionId);
-    state.imageGenerationTurnIds.set(event.callId, turnId);
+    state.imageGenerationTurnTargets.set(event.callId, target);
+    this.recordTurnEvent(sessionId, target?.turnEpoch);
     state.imageGenerationActiveCallIds.add(event.callId);
     this.syncImageGenerationActivityPresence(sessionId);
     this.logger.debug(
@@ -1249,14 +1259,20 @@ export class MessageHandler {
       return;
     }
 
-    const cachedTurnId = state.imageGenerationTurnIds.get(event.callId);
-    const capturedTurnId =
-      cachedTurnId !== undefined ? cachedTurnId : (this.store.getTurnId(sessionId) ?? null);
+    const cachedTarget = state.imageGenerationTurnTargets.get(event.callId);
+    const currentTarget = this.store.getCurrentACPUpdateTarget(sessionId);
+    const target =
+      cachedTarget !== undefined
+        ? cachedTarget
+        : currentTarget?.source === 'active_turn'
+          ? currentTarget
+          : null;
+    this.recordTurnEvent(sessionId, target?.turnEpoch);
 
     const savedPath = this.resolveCodexGeneratedImagePath(sessionId, event.savedPath);
     if (!savedPath && !event.image) {
       if (isTerminal) {
-        state.imageGenerationTurnIds.delete(event.callId);
+        state.imageGenerationTurnTargets.delete(event.callId);
       }
       this.logger.debug(
         `[${sessionId}] Codex image generation has neither a usable savedPath nor inline image data (callId=${event.callId} status=${event.status} terminal=${isTerminal})`
@@ -1264,9 +1280,9 @@ export class MessageHandler {
       return;
     }
 
-    const attachTarget = capturedTurnId
-      ? ({ kind: 'active_turn', turnId: capturedTurnId } satisfies SessionImageUploadAttachTarget)
-      : undefined;
+    const attachTarget: SessionImageUploadAttachTarget = target
+      ? { kind: 'active_turn', turnId: target.turnId, turnEpoch: target.turnEpoch }
+      : { kind: 'new_entry' };
 
     const callId = event.callId;
     const uploadPromise = (async () => {
@@ -1302,14 +1318,14 @@ export class MessageHandler {
     })()
       .then(() => {
         state.imageGenerationUploadedCallIds.add(callId);
-        state.imageGenerationTurnIds.delete(callId);
+        state.imageGenerationTurnTargets.delete(callId);
       })
       .catch((error) => {
         this.logger.debug(
           `[${sessionId}] Failed to upload Codex generated image (callId=${callId} path=${savedPath ?? 'none'}): ${formatErrorMessage(error)}`
         );
         if (isTerminal) {
-          state.imageGenerationTurnIds.delete(callId);
+          state.imageGenerationTurnTargets.delete(callId);
         }
       })
       .finally(() => {
@@ -1373,6 +1389,7 @@ export class MessageHandler {
       const appended = await this.appendAssistantImageGroupToActiveTurn({
         sessionDoc,
         turnId: initialTarget.turnId,
+        turnEpoch: initialTarget.turnEpoch,
         content,
       });
       if (appended) {
@@ -1707,7 +1724,21 @@ export class MessageHandler {
     sessionDoc: SessionDocument;
     turnId: string;
     content: SessionImageGroupContent;
+    turnEpoch?: number;
   }): Promise<boolean> {
+    const sessionId = args.sessionDoc.sessionId;
+    const turn = this.store.has(sessionId) ? this.store.get(sessionId).turn : undefined;
+    const turnEpoch =
+      args.turnEpoch ??
+      (turn?.phase !== 'idle' && turn?.turnId === args.turnId ? turn.turnEpoch : undefined);
+    // A reused assistant id does not authorize an older image generation to write into it.
+    if (
+      args.turnEpoch !== undefined &&
+      turn?.phase !== 'idle' &&
+      turn?.turnId === args.turnId &&
+      turn.turnEpoch !== args.turnEpoch
+    )
+      return false;
     let appended = false;
     const backend = await this.getSessionBackend(args.sessionDoc);
     await backend
@@ -1720,6 +1751,8 @@ export class MessageHandler {
       .then((result) => {
         appended = result.matched ?? false;
       });
+    if (appended && args.content.images.length > 0)
+      this.recordTurnEvent(sessionId, turnEpoch, true);
     return appended;
   }
 
@@ -1789,7 +1822,12 @@ export class MessageHandler {
   ): Promise<SessionImageUploadAttachTarget> {
     const turnId = this.store.getTurnId(sessionId);
     if (turnId) {
-      return { kind: 'active_turn', turnId };
+      const turn = this.store.get(sessionId).turn;
+      return {
+        kind: 'active_turn',
+        turnId,
+        ...(turn.phase !== 'idle' ? { turnEpoch: turn.turnEpoch } : {}),
+      };
     }
 
     const statusType = (await sessionDoc.getMetaState())?.status?.type;
@@ -2950,9 +2988,9 @@ export class MessageHandler {
         this.clearConversationTurnIfMatches(sessionId, turnId),
       getActiveTurnId: (sessionId) => this.store.getActiveTurnId(sessionId),
       clearActiveTurnId: (sessionId, turnId) => this.clearActiveTurnIdIfMatches(sessionId, turnId),
-      hasPromptOutputForTurn: (sessionId, turnId) => this.hasPromptOutputForTurn(sessionId, turnId),
-      observePromptOutputForTurn: (sessionId, turnId) =>
-        this.observePromptOutputForTurn(sessionId, turnId),
+      hasPromptEventsForTurn: (sessionId, turnId) => this.hasPromptEventsForTurn(sessionId, turnId),
+      observePromptContentForTurn: (sessionId, turnId) =>
+        this.observePromptContentForTurn(sessionId, turnId),
       buildAcpPromptBlocks: async (args) => await this.buildAcpPromptBlocks(args),
       applyAcpModeAndModel: async (session, acpConfig, context) =>
         await this.applyAcpModeAndModel(
@@ -4446,6 +4484,36 @@ export class MessageHandler {
       return undefined;
     }
 
+    if (existingProject) {
+      const catalogId = getWorkspaceFlockDocId(this.workspaceId);
+      // Borrow the daemon's retained catalog reader, including local-only readiness.
+      // A missing baseline is not an empty list of references.
+      if (
+        !(await this.workspaceDocument.catalogBaselineReady(
+          catalogId,
+          SYNC_CONFIRMATION_TIMEOUT_MS
+        ))
+      ) {
+        throw new Error('Project catalog is not ready');
+      }
+      const catalog = await this.workspaceDocument.repo.openFlockDoc(catalogId);
+      const projects = listWorkspaceProjects(readWorkspaceFlockRowsFromFlock(catalog.flock));
+      const sessions = (await listAliveSessionMetas(this.workspaceDocument)).map(
+        ({ meta }) => meta
+      );
+      if (isLocalProjectReferenced(existingProject, this.machineId, projects, sessions)) {
+        await upsertMachineLocalProject(
+          this.workspaceDocument.repo,
+          this.workspaceId,
+          this.machineId,
+          existingProject,
+          undefined,
+          { sync: this.workspaceDocument, reason: 'local-project-unlink', standaloneVisible: false }
+        );
+        return undefined;
+      }
+    }
+
     await this.archiveLocalProjectSessions(localProjectId);
 
     let cleanupResult: MachineDeleteLocalProjectCommand['cleanupResult'];
@@ -4557,7 +4625,9 @@ export class MessageHandler {
         }
       );
     }
-    this.store.get(sessionId).acpUpdateBuffer.push({
+    const state = this.store.get(sessionId);
+    this.recordTurnEvent(sessionId, target.turnEpoch, this.isVisibleACPUpdate(update.update));
+    state.acpUpdateBuffer.push({
       operationId: uuidV4(),
       notification: update,
       target,
@@ -7703,6 +7773,7 @@ export class MessageHandler {
       const appended = await this.appendAssistantImageGroupToActiveTurn({
         sessionDoc,
         turnId: initialAttachTarget.turnId,
+        turnEpoch: initialAttachTarget.turnEpoch,
         content,
       });
 
@@ -8279,6 +8350,8 @@ export class MessageHandler {
       // so a staged-but-never-sent file cannot hold quota forever.
       const ageMs = await getSessionFileBlobAgeMs(blobArgs);
       if (ageMs !== null && ageMs > getDraftSessionFileBlobMaxAgeMs()) {
+        if (await isScheduledMessageFile({ repo: this.workspaceDocument.repo, ...blobArgs }))
+          return;
         await removeSessionFileBlob(blobArgs);
         this.logger.warn(
           `[${sessionId}] Reclaimed abandoned draft file blob ${fileId} (age ${Math.round(ageMs / 1000)}s)`
@@ -9729,6 +9802,13 @@ export class MessageHandler {
             name: existingProject?.name ?? preparedProject.name,
             rootPath: existingProject?.rootPath ?? preparedProject.rootPath,
             alreadyRegistered: existingProject !== null,
+            ...(request.inspect
+              ? {
+                  inspection: await worktreeGitLegacy.probeLocalProjectMember(
+                    preparedProject.rootPath
+                  ),
+                }
+              : {}),
           },
         };
       }
@@ -9801,7 +9881,12 @@ export class MessageHandler {
         lastOpenedAtMs: nowMs,
       },
       nowMs,
-      { sync: this.workspaceDocument, reason: 'local-project-add', refreshGitHubRemote: true }
+      {
+        sync: this.workspaceDocument,
+        reason: 'local-project-add',
+        refreshGitHubRemote: true,
+        standaloneVisible: true,
+      }
     );
   }
 
@@ -10368,33 +10453,74 @@ export class MessageHandler {
   }
 
   /**
-   * Conservative guard for prompt replay: any buffered or already-flushed ACP
-   * update means the adapter may have acted on the user prompt, so execution
+   * Conservative guard for prompt replay: any owned ACP or image lifecycle
+   * event means the adapter may have acted on the user prompt, so execution
    * recovery must stop and surface the failure instead of retrying.
    */
-  private hasPromptOutputForTurn(sessionId: SessionId, turnId: string): boolean {
-    if (!this.store.has(sessionId)) {
-      return false;
+  private hasPromptEventsForTurn(sessionId: SessionId, turnId: string): boolean {
+    if (!this.store.has(sessionId) || this.store.getTurnId(sessionId) !== turnId) {
+      return true;
     }
-    const state = this.store.get(sessionId);
-    const hasBufferedOutput = state.acpUpdateBuffer.some((item) => item.target.turnId === turnId);
-    const hasFlushedOutput =
-      state.acpFlushCountInTurn > 0 && this.store.getTurnId(sessionId) === turnId;
-    return hasBufferedOutput || hasFlushedOutput;
+    const { turn } = this.store.get(sessionId);
+    return turn.phase !== 'idle' && turn.hasPromptEvents;
   }
 
-  /**
-   * Same observation as `hasPromptOutputForTurn`, but it distinguishes "this turn
-   * emitted nothing" from "we cannot tell". The two callers need opposite
-   * conservative answers on a missing session: prompt replay must refuse to
-   * retry, while the no-output guard must not accuse a turn it could not observe.
-   * `undefined` means unobservable — the transient state is gone.
-   */
-  observePromptOutputForTurn(sessionId: SessionId, turnId: string): boolean | undefined {
-    if (!this.store.has(sessionId)) {
-      return undefined;
+  private recordTurnEvent(
+    sessionId: SessionId,
+    turnEpoch: number | undefined,
+    visible = false
+  ): void {
+    if (!this.store.has(sessionId)) return;
+    const state = this.store.get(sessionId);
+    if (
+      state.suppressAcpReplayUntilTurnStart ||
+      state.turn.phase === 'idle' ||
+      state.turn.turnEpoch !== turnEpoch
+    )
+      return;
+    state.turn.hasPromptEvents = true;
+    state.turn.hasVisibleOutput ||= visible;
+  }
+
+  /** Drain the existing image owner before observing content, while this epoch still owns the turn. */
+  async observePromptContentForTurn(
+    sessionId: SessionId,
+    turnId: string
+  ): Promise<boolean | undefined> {
+    if (!this.store.has(sessionId)) return undefined;
+    const state = this.store.get(sessionId);
+    const turn = state.turn;
+    if (turn.phase === 'idle' || turn.turnId !== turnId) return undefined;
+    await this.flushCodexGeneratedImageUploads(sessionId);
+    return state.turn.phase !== 'idle' && state.turn.turnEpoch === turn.turnEpoch
+      ? state.turn.hasVisibleOutput
+      : undefined;
+  }
+
+  private isVisibleACPUpdate(update: AcpSessionNotification['update']): boolean {
+    switch (update.sessionUpdate) {
+      case 'agent_message_chunk':
+        // Non-text assistant content is materialized as attachments by the flush pipeline.
+        return update.content.type !== 'text' || update.content.text.trim().length > 0;
+      case 'agent_thought_chunk':
+        return update.content.type === 'text' && update.content.text.trim().length > 0;
+      case 'tool_call':
+      case 'tool_call_update':
+        // Sparse updates also materialize tool rows, including tool-only turns.
+        return update.toolCallId.length > 0;
+      case 'plan_update':
+        // A proposed markdown answer differs from the checklist/status plan channel.
+        return update.plan.type === 'markdown' && update.plan.content.trim().length > 0;
+      case 'subagent_event':
+        if (update.event.type !== 'output') return false;
+        const child = update.event.update;
+        // Child rich chunks only mark outputIncomplete in the shared reducer.
+        if (child.sessionUpdate === 'agent_message_chunk' && child.content.type !== 'text')
+          return false;
+        return this.isVisibleACPUpdate(child);
+      default:
+        return false;
     }
-    return this.hasPromptOutputForTurn(sessionId, turnId);
   }
 
   /**

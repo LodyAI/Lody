@@ -779,58 +779,78 @@ agent configuration, Explore and local chat, with four real screenshots. This
 is after-only application evidence; it does not resolve historical Explore
 pixel differences or replace paired component acceptance.
 
-### Onboarding overlay, session resize and table feedback
+### Onboarding, session surfaces and latest-main reconciliation
 
-Three files remove 23 confirmed utilities: Overlay 13→1, desktop layout 16→9,
-and MarkdownTable 5→1. Preserve the overlay's exact cream background, local slate
-and spacing variables, drag-strip override, resize alpha expressions and variable
-fallbacks. The table retains its named outer-group selector: any matching
-ancestor can reveal the copy action. DOM, callbacks, hooks and public APIs remain
-unchanged; independent source review finds no P0/P1.
+The owned batch removes 23 confirmed utilities: Overlay 13→1, desktop layout
+16→9 and MarkdownTable 5→1. Preserve exact cream/slate/spacing values,
+drag-strip precedence, resize alpha/transition semantics and the table's named
+outer-group selector. DOM, callbacks, hooks and public APIs remain unchanged.
+WorkspaceCard retains six utilities because real opaque StyleX callers otherwise
+change winners. Backdrop retains four for its corresponding public boundary.
+Search's 13 and conversation panels' 23 remain: exported class strings depend on
+`cn` resolving conflicts in both argument orders, plus ring/shadow composition.
+Adding styles under all retained utilities is not a migration.
 
-Public composition limits this batch. WorkspaceCard's real StyleX caller probe
-confirms its six existing utilities win over conflicting opaque caller classes.
-Backdrop retains four for the corresponding unverified public caller boundary.
-Search retains 13 exported background/ring/shadow utilities, and conversation
-panels retain 23: `cn` resolves conflicting caller utilities in both argument
-orders, which opaque StyleX exports cannot preserve. Do not count adding styles
-under retained utilities as a migration. Continue those units only after defining
-and verifying a composition contract that preserves current callers.
+Reconcile `main` through `05a60e018`, preserving its direct local-project deletion,
+guided project rules and scheduled-message queue behavior. Retire the deleted
+removal-confirmation components and their dedicated fixtures/runners; never
+revive that UI for an old screenshot profile. Historical images stay unchanged.
+Non-styling source comparison and owning tests preserve the upstream handlers,
+public props, editing/IME semantics, menus and navigation decisions.
 
-`surfaces-acceptance.html` contains 308 observed pairs: 132 primary, 174 native
-and two supplemental unchanged-WorkspaceCard caller controls. Only 302 are
-PNG-byte-exact; six retain 60,756 raw pixels, including 38,281 above the unchanged
-threshold. These remain **OPEN**. Layout/search retain four/one below-threshold
-pixels with equal recorded fields. Across 38,074 paired nodes, the two onboarding
-Back states have 1,512 differing node records / 2,275 scalar fields: a roughly
-0.01px camera transform propagates to descendants and scroll width. The two Skip
-states have equal recorded fields but different images. The other 42 onboarding
-pairs are byte-exact, including local-variable and actual touch probes.
+Real scoped-theme images expose an existing migration bug: inherited StyleX
+aliases keep root ink while the component's CSS variables request different
+colors. Queue and mobile settings now read exact element-local expressions,
+including the compiler's alpha mixes, without changing shared tokens. Their
+24/8 scope pairs are byte-exact after repair; rejected purple/green-versus-root
+blue/red images remain. Restore the complete transition property list and
+variable fallbacks, the queue's hover media condition, and Clock3's original
+`flex-shrink: 0`. The Clock fix removes 24 rendering-field differences even
+though the rejected 108 PNGs had matched.
 
-Two bounded original/final-source controls retain 14 separate PNGs. Their Skip
-images match each other as a third variant; neither reproduces a formal whole
-image. An original-source control reproduces the final camera matrix, without
-matching its PNG. The unchanged camera uses live rAF integration, DOM-anchor
-measurement and rounded output; this evidence does not prove the raster cause.
-Keep the formal differences and investigate deterministic camera/form readiness
-before declaring visual equivalence; no camera redesign or CSS compensation.
+Latest-main acceptance uses a source reference: the integrated graph and identical
+fixtures, with four incoming-main files restored as the sidebar, mobile settings
+and queue/pending dependency units. This is not a whole historical-main build.
+The initial three-file reference cannot build because main's queue lacks the
+migration-only export used by the migrated pending row; preserve that failure
+and include main's original pending row rather than invent a bridge. Original
+reference build 6101, corrected mobile/queue build 6103 and corrected sidebar
+build 6104 remain immutable. Source hashes establish unchanged consumers across
+those final builds. The real mobile fixture uses actual hooks/atoms and synthetic
+command ports; existing sidebar no-op callbacks and scheduler preview slots do
+not establish daemon mutations, a full router or scheduler end-to-end behavior.
 
-Layout/table original captures use immutable build 6089. Onboarding uses a
-separate original-overlay build 6091 after fixing the fixture's actual preview
-API and selectors; that build already contains the other two candidates. Every
-final capture uses 6090. Overlay resolves light for both requested themes, as its
-route requires. Native 46/46 captures succeed on each side with fixed Date, live
-timers/rAF and explicitly paused infinite WAAPI icons. Generic full-story
-captures still produce 12/32 frames plus four initial-opacity readiness failures
-on both sides. They remain separate failed evidence, not accepted blank frames.
+`main2-combined-acceptance.html` combines 638 observed pairs: 234 primary,
+370 native and 34 supplemental caller/theme-scope controls. Only 627 PNGs are
+byte-exact. Eleven pairs retain 60,911 raw pixels, including 38,282 above the
+unchanged threshold in five frames; they remain **OPEN**. The latest-main subset
+is 330 pairs / 325 byte-exact / 155 raw / one threshold pixel across 72,132 nodes.
+It retains 1,104 private sidebar writer differences and 72 shadow/pending-alpha
+string differences. Actual geometry/events match; sRGB8-bit color probes support
+selected expression equivalence without replacing raw fields or proving every
+floating-point transition. The complete combined evidence covers 110,206 nodes.
 
-Current component tests pass all 618 files / 6,137 tests; final owning tests,
-types, typed lint, formatting and independent boundaries pass. Root check still
-fails the existing CLI Git-identity test. Actual Electron rebuild and four
-onboarding/configuration/Explore/local-chat smoke images pass as **after-only**
-evidence; historical application differences remain open. The self-contained
-report preserves original PNG bytes and labelled derived masks, with visible
-partial acceptance and separate full-field proofs.
+The earlier owned subset remains 308 pairs / 302 byte-exact. Four desktop
+onboarding Back/Skip states retain camera/paint differences: two have 1,512
+changed node records / 2,275 scalar fields as a roughly 0.01px transform propagates;
+two have equal recorded fields but different PNGs. Two bounded source controls
+supply a matching third Skip variant and an original-source matching camera
+matrix, without reproducing either formal whole image. The camera uses live rAF,
+DOM-anchor measurement and rounded output; its raster cause remains unproved.
+Both generic full-story runs still produce 12/32 frames plus four initial-opacity
+readiness failures. Independent native 46/46 success does not close them. Overlay
+actually resolves light for both requested themes, as its route requires.
+
+The combined report embeds unchanged original PNGs and labelled derived masks.
+A full assembly exceeded V8's JSON string limit; derived report views retain every
+exact field the public comparator reads, verified against original layouts.
+Complete native snapshots and separate full-field proofs remain intact. Failed
+captures, rejected candidates and after-only Electron images are not formal pairs.
+Current component tests pass 620 files / 6,207 tests; types, owning tests, formatting
+and independent boundaries pass. Root check still fails the existing CLI
+Git-identity test (4,868 pass / one fail). The latest CLI and actual Electron are
+rebuilt and the four-view isolated smoke passes as after-only evidence; historical
+application differences remain open. No P0/P1 is found in the integration review.
 
 ## Remaining work
 
@@ -883,6 +903,11 @@ method, leaving **2,116 occurrences** (components 1,624, `src/ui` 487, routes 5)
 across 186 files and 764 unresolved expressions. The increase from the earlier
 2,107 snapshot is a scanner correction, not added Tailwind styling. Neither count
 is a completion percentage.
+
+After reconciling main, the current same-method snapshot is 2,102 occurrences
+(components 1,610, `src/ui` 487, routes 5) across 186 files with 760 unresolved
+expressions. The additional change includes upstream additions and retired UI;
+it is not another claimed migration removal.
 
 WebWorkspaceLayout remains deferred until its actual sidebar/runtime/router
 graph has a bounded production-component fixture.

@@ -46,9 +46,13 @@ interpreter of that state. Better Auth's web `useSession` exposes the same field
 - **Late replies.** `withSessionNetworkTimeout` bounds how long the caller waits,
   but the request keeps running. A reply that resolves a session after the timeout
   now fills the cached session, as long as the auth generation is unchanged (no
-  sign-out or login since) and no newer answer exists. The renderer's retry is then
-  served from cache instead of timing out again. A late rejection is ignored; the
-  next real check decides.
+  sign-out or login since) and no answer was committed after the request started.
+  A session-answer revision tracks that second condition. An empty cache is not
+  enough to check it, because a definitive rejection empties the cache without
+  changing the auth generation. Without the revision, a stale success could restore
+  an identity the server had just rejected. The renderer's retry is then served
+  from cache instead of timing out again. A late rejection is ignored; the next
+  real check decides.
 - **Token fallback.** `getSessionToken` used to let a verification timeout reject
   `listOrganizations`, `getActiveOrganization` and `convexToken`. A transport
   failure is no verdict on the credential, so it now returns the durable cookie
@@ -60,7 +64,7 @@ interpreter of that state. Better Auth's web `useSession` exposes the same field
 
 `tests/use-stable-session.test.tsx` replays the timed-out first check followed by
 a long in-flight refetch. `tests/electron-auth-session-recovery.test.ts` covers a
-late reply being kept, a late reply after sign-out being discarded, and the cookie
-fallback for tokens. The new tests fail against the previous code. The underlying
+late reply being kept, a late reply being discarded after sign-out or after a
+definitive rejection, and the cookie fallback for tokens. The new tests fail against the previous code. The underlying
 network delay behind a proxy is not addressed, and no real macOS proxy run was
 performed.

@@ -1,0 +1,53 @@
+{
+  "viewports": [
+    {
+      "name": "narrow",
+      "width": 320,
+      "height": 900
+    },
+    {
+      "name": "phone",
+      "width": 390,
+      "height": 900
+    },
+    {
+      "name": "desktop",
+      "width": 1280,
+      "height": 900
+    }
+  ],
+  "themes": ["light", "dark"],
+  "reducedMotion": "reduce",
+  "ids": [
+    "components-lodysidebar--with-projects",
+    "components-sidebar-folded-group-status--folded",
+    "projects-localprojectremovalux--project-removing",
+    "projects-localprojectremovalux--project-waiting-for-device"
+  ],
+  "ready": {
+    "components-lodysidebar--with-projects": [
+      {
+        "action": "visible",
+        "selector": "[data-sidebar-project-key=\"machine-demo:proj-lody\"]"
+      }
+    ],
+    "components-sidebar-folded-group-status--folded": [
+      {
+        "action": "visible",
+        "selector": "[data-folded-groups-sidebar]"
+      }
+    ],
+    "projects-localprojectremovalux--project-removing": [
+      {
+        "action": "visible",
+        "selector": "[data-sidebar-project-key=\"machine-mac-studio:local-project-lody\"]"
+      }
+    ],
+    "projects-localprojectremovalux--project-waiting-for-device": [
+      {
+        "action": "visible",
+        "selector": "[data-sidebar-project-key=\"machine-mac-studio:local-project-lody\"]"
+      }
+    ]
+  }
+}

@@ -9,6 +9,7 @@ export type MachineProtocolCapabilities = Record<string, number>;
 
 export const MACHINE_PROTOCOL_CAPABILITIES = {
   multiRepoProject: 'multiRepoProject',
+  projectFolderSelection: 'projectFolderSelection',
   projectFileRoots: 'projectFileRoots',
   projectRepositoryMembers: 'projectRepositoryMembers',
   operationInbox: 'operationInbox',
@@ -51,6 +52,8 @@ export const MACHINE_PROTOCOL_CAPABILITIES = {
   bugReportClientLog: 'bugReportClientLog',
 } as const;
 
+export const PROJECT_FOLDER_SELECTION_PROTOCOL_VERSION = 1;
+
 export const OPERATION_INBOX_PROTOCOL_VERSION = 2;
 export const MEMORY_PROVIDERS_PROTOCOL_VERSION = 1;
 export const MCP_TOOL_DISCOVERY_PROTOCOL_VERSION = 1;
@@ -63,7 +66,10 @@ export const LOCAL_PROJECT_REMOVAL_PROTOCOL_VERSION = 1;
 export const LOCAL_PROJECT_CREATE_DIRECTORY_PROTOCOL_VERSION = 1;
 export const PROVIDER_SETUP_PROTOCOL_VERSION = 1;
 // v2 preserves ACP string/boolean values and reads legacy stringified booleans.
-export const SCHEDULES_PROTOCOL_VERSION = 2;
+const SCHEDULES_PROMPT_PROTOCOL_VERSION = 2;
+// v3 supports frozen full-message one-time schedules.
+const SCHEDULED_MESSAGES_PROTOCOL_VERSION = 3;
+export const SCHEDULES_PROTOCOL_VERSION = SCHEDULED_MESSAGES_PROTOCOL_VERSION;
 export const PREPARED_SESSION_INPUT_PROTOCOL_VERSION = 1;
 export const SESSION_INPUT_ATTACHMENTS_PROTOCOL_VERSION = 1;
 export const LOCAL_FILE_RESOURCES_PROTOCOL_VERSION = 1;
@@ -156,6 +162,7 @@ export const CURRENT_MACHINE_PROTOCOL_CAPABILITIES: MachineProtocolCapabilities 
   [MACHINE_PROTOCOL_CAPABILITIES.acpAuthenticationInteractions]:
     ACP_AUTHENTICATION_INTERACTIONS_PROTOCOL_VERSION,
   [MACHINE_PROTOCOL_CAPABILITIES.localProjectRemoval]: LOCAL_PROJECT_REMOVAL_PROTOCOL_VERSION,
+  [MACHINE_PROTOCOL_CAPABILITIES.projectFolderSelection]: PROJECT_FOLDER_SELECTION_PROTOCOL_VERSION,
   [MACHINE_PROTOCOL_CAPABILITIES.localProjectCreateDirectory]:
     LOCAL_PROJECT_CREATE_DIRECTORY_PROTOCOL_VERSION,
   [MACHINE_PROTOCOL_CAPABILITIES.providerSetup]: PROVIDER_SETUP_PROTOCOL_VERSION,
@@ -352,10 +359,8 @@ export function machineSupportsPiExtensions(
 export function machineSupportsSchedulesProtocol(
   machine: MachineProtocolCapabilityCarrier | null | undefined
 ): boolean {
-  return machineSupportsProtocolCapability(
-    machine,
-    MACHINE_PROTOCOL_CAPABILITIES.schedules,
-    SCHEDULES_PROTOCOL_VERSION
+  return machineSupportsProtocolCapability(machine, MACHINE_PROTOCOL_CAPABILITIES.schedules,
+    SCHEDULES_PROMPT_PROTOCOL_VERSION
   );
 }
 
@@ -501,5 +506,14 @@ export function machineSupportsSessionHistoryPatches(
       MACHINE_PROTOCOL_CAPABILITIES.sessionHistoryPatches,
       SESSION_HISTORY_PATCHES_PROTOCOL_VERSION
     )
+  );
+}
+
+/** Frozen input blocks must never be downgraded to a plain-text prompt. */
+export function machineSupportsScheduledMessagesProtocol(
+  machine: MachineProtocolCapabilityCarrier | null | undefined
+): boolean {
+  return machineSupportsProtocolCapability(machine, MACHINE_PROTOCOL_CAPABILITIES.schedules,
+    SCHEDULED_MESSAGES_PROTOCOL_VERSION
   );
 }

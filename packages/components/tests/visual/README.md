@@ -39,7 +39,11 @@ node tests/visual/visual-regression.mjs report \
 
 Open `artifacts/visual/acceptance.html`. PNGs are embedded as data URLs, so the
 report remains viewable without the Storybook server or sibling image files.
-The adjacent JSON preserves the raw comparison results. Each frame shows its
+The adjacent JSON preserves the raw comparison results. For very large
+assemblies, derived report manifests may retain only the exact fields read by
+`diffLayout` to avoid duplicate nested styles exceeding V8 JSON limits. Verify
+every copied value and original PNG hash; keep complete native snapshots and
+full-field proofs unchanged and report their additional differences separately. Each frame shows its
 story ID, viewport, theme, state and source phases, so search can locate a
 specific story rather than only its group. Capture failures,
 missing frames and changed computed styles are not silently treated as passes;
@@ -284,8 +288,8 @@ assembling them as ordinary profiles can invent canonical rest frames that the
 runner never intended to capture. Inspect original phase failures and expected
 counts rather than accepting that invented matrix.
 
-The `alpha-{mobile,surface,sidebar}-targets.json` profiles separate an unchanged
-current baseline, exact original CSS-declaration controls and final source.
+The historical `alpha-{mobile,surface,sidebar}-targets.json` profiles separated an
+unchanged baseline, exact original CSS-declaration controls and final source.
 Runtime restored-declaration images are real browser controls, not whole
 historical builds. A later independent source-reference build keeps verified
 color/state/palette repairs while retaining the five utilities being migrated;
@@ -294,6 +298,17 @@ Preserve rejected reference paint results and their provenance when using that
 source reference. The native runners record target uniqueness, computed values,
 media/input state and the exact declarations applied. Mobile captures must await
 finite animation completion and stable geometry, transform, opacity and color.
+Upstream direct folder selection retires the removal-confirmation components and
+their dedicated AlphaSidebar stories/profile/runner and mobile-removal palette
+runner. Current AlphaMobile covers tabs only. Reproduce retired states from their
+recorded source commits; their original report images remain historical evidence.
+The `main-*-integration-*` runners compare the updated live surfaces with an
+explicit source-reference unit on the same integrated graph, not a whole
+historical-main application. Preserve that reference boundary and failed builds.
+`main-mobile-settings-scopes.mjs` and `main-queue-integration-scopes.mjs` keep
+root/subtree ink, hover and focus probes reproducible with the same
+`--phase` / `--storybook` arguments. Preserve real command-port, no-op callback
+and scheduler-preview-slot limits instead of labelling these as daemon tests.
 
 Static Storybook builds explicitly retain `@pierre/diffs`' shipped web-component
 registration module: version 1.0.10's side-effect metadata names an unpublished

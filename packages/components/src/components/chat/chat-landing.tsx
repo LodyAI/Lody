@@ -96,6 +96,7 @@ import {
   workspaceReposCacheAtomFamily,
 } from '@/atoms';
 import { docMetaCacheReadyAtom, sessionMetaCountAtom } from '@/atoms/doc-meta';
+import { projectEditorRequestAtom } from '@/atoms/project-editor';
 import {
   localAgentEnabledAtom,
   localProbeAttemptedAtom,
@@ -1240,8 +1241,8 @@ function WorkspaceChatLanding({
   // ── Project group availability on the selected machine ──
   // Which machines hold a copy of each repository, as their daemons publish it.
   const projectRepositoryCopies = useMemo(
-    () => buildProjectRepositoryCopyIndex(visibleLocalProjectMap.values()),
-    [visibleLocalProjectMap]
+    () => buildProjectRepositoryCopyIndex(visibleLocalProjects.registeredProjects.values()),
+    [visibleLocalProjects.registeredProjects]
   );
   // Without GitHub integration (local-only) a repository Member the machine
   // has no copy of cannot be cloned. A conversation always gets the whole
@@ -3133,6 +3134,12 @@ function WorkspaceChatLanding({
     openAddProjectDialog();
   }, [openAddProjectDialog]);
 
+  const requestProjectEditor = useSetAtom(projectEditorRequestAtom);
+  const handleCreateProject = useCallback(
+    () => requestProjectEditor({ kind: 'create' }),
+    [requestProjectEditor]
+  );
+
   const handleLocalProjectAdded = useCallback(
     (info: { machineId: MachineId; localProjectId: LocalProjectId }) => {
       handleSelectedLocalProjectChange({
@@ -3903,6 +3910,7 @@ function WorkspaceChatLanding({
             projectId: project.id,
             name: project.name,
             memberCount: project.members.length,
+            lastUsedAt: mobileSheetRecency.byGroup.get(project.id),
             ...(missing > 0 && canCloneProjectRepositories
               ? {
                   availability: t('chat.projectGroup.missingClone', '{{count}} cloned on start', {
@@ -3926,7 +3934,14 @@ function WorkspaceChatLanding({
           },
         ];
       }),
-    [canCloneProjectRepositories, projectRepositoryCopies, selectedMachineId, t, workspaceProjects]
+    [
+      canCloneProjectRepositories,
+      mobileSheetRecency.byGroup,
+      projectRepositoryCopies,
+      selectedMachineId,
+      t,
+      workspaceProjects,
+    ]
   );
   const desktopAgentMachineIds = useMemo(
     () => (scopedMachineId ? [scopedMachineId] : []),
@@ -4192,6 +4207,7 @@ function WorkspaceChatLanding({
           latestMessageAtByRepo={mobileSheetRecency.byRepo}
           onConnectGitRepo={handleConnectGitRepo}
           onAddLocalProject={handleAddLocalProject}
+          onCreateProject={handleCreateProject}
           onShareLocalProjectWithTeam={
             showProjectSharing ? handleShareLocalProjectWithTeam : undefined
           }

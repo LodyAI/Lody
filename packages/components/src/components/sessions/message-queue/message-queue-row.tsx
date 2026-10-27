@@ -1,19 +1,30 @@
 import * as stylex from '@stylexjs/stylex';
 import { clsx } from 'clsx';
-import { useCallback, useEffect, useMemo, useRef } from 'react';
+import { useCallback, useEffect, useMemo, useRef, type ReactNode } from 'react';
 import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { Check, GripVertical, Pencil, X, type LucideIcon } from 'lucide-react';
+import {
+  Check,
+  GripVertical,
+  Pencil,
+  X,
+  MoreHorizontal,
+  Trash2,
+  ArrowUpToLine,
+  type LucideIcon,
+} from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import type { MessageQueueItem, SessionId } from '@lody/shared';
 import { normalizeSessionInputBlocks } from '@lody/shared';
+import { Menu } from '@lody/ui/menu';
+import { Button } from '@lody/ui/button';
+import { useIsMobile } from '@/hooks/use-mobile';
 import { Tooltip } from '@lody/ui/tooltip';
 import { isImeComposingKeyboardEvent } from '@/lib/ime';
 import { QueuedImagePreview, type QueuedImageBlock } from './queued-image-preview';
 import { queueSurface } from './surface';
 import { shouldShowQueuedItemSteer } from './queued-message-steer';
 import { getEditableTaskText } from './use-message-queue-editing';
-import { themeColors } from '../../../style/theme-colors.stylex';
 import {
   themeFontSize,
   themeFontWeight,
@@ -25,16 +36,18 @@ import {
 const MAX_INLINE_IMAGES = 3;
 
 /** The queue's own muted ink, at the two steps the rows use. */
-const MUTED_FOREGROUND_60 = 'hsl(var(--muted-foreground) / 0.6)';
-const MUTED_FOREGROUND_70 = 'hsl(var(--muted-foreground) / 0.7)';
+const MUTED_FOREGROUND_60 =
+  'color-mix(in oklab, hsl(var(--muted-foreground) / 1) 60%, transparent)';
+const MUTED_FOREGROUND_70 =
+  'color-mix(in oklab, hsl(var(--muted-foreground) / 1) 70%, transparent)';
 
 /** Tailwind's `transition-colors`, as the property it actually sets. */
 const transitionColors = stylex.create({
   colors: {
     transitionProperty:
-      'color, background-color, border-color, text-decoration-color, fill, stroke',
-    transitionDuration: '150ms',
-    transitionTimingFunction: 'cubic-bezier(0.4, 0, 0.2, 1)',
+      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke, --tw-gradient-from, --tw-gradient-via, --tw-gradient-to',
+    transitionDuration: 'var(--tw-duration, var(--default-transition-duration))',
+    transitionTimingFunction: 'var(--tw-ease, var(--default-transition-timing-function))',
   },
 });
 
@@ -49,13 +62,16 @@ export const queueRowStyles = stylex.create({
     paddingInline: themeSpace[2],
     paddingBlock: themeSpace[1.5],
   },
+  roomyPosition: { position: 'relative' },
   rowDragging: {
     zIndex: 10,
-    backgroundColor: 'hsl(var(--muted) / 0.4)',
+    backgroundColor: 'color-mix(in oklab, hsl(var(--muted) / 1) 40%, transparent)',
     opacity: 0.9,
     boxShadow: themeShadow.sm,
   },
-  rowEditing: { backgroundColor: 'hsl(var(--background) / 0.6)' },
+  rowEditing: {
+    backgroundColor: 'color-mix(in oklab, hsl(var(--background) / 1) 60%, transparent)',
+  },
   /** The index sits on the task text's first line: its box is exactly that
    *  line box (`text-xs leading-snug` = 0.75rem × 1.375). */
   leadingBox: {
@@ -75,7 +91,10 @@ export const queueRowStyles = stylex.create({
   leadingButton: {
     borderRadius: '0.25rem',
     cursor: { default: 'grab', ':active': 'grabbing' },
-    backgroundColor: { default: null, ':hover': themeColors.hover },
+    backgroundColor: {
+      default: null,
+      '@media (hover: hover)': { ':hover': 'hsl(var(--hover) / 1)' },
+    },
     // The old Tailwind `focus-visible:ring-*` painted nothing — the app forces
     // Tailwind's own ring transparent — but it still declared a `box-shadow`,
     // and a utility-layer shadow beats the base layer's inset focus ring. So
@@ -83,7 +102,10 @@ export const queueRowStyles = stylex.create({
     boxShadow: { default: null, ':focus-visible': 'none' },
   },
   leadingButtonInk: {
-    color: { default: MUTED_FOREGROUND_60, ':hover': themeColors.foreground },
+    color: {
+      default: MUTED_FOREGROUND_60,
+      '@media (hover: hover)': { ':hover': 'hsl(var(--foreground) / 1)' },
+    },
   },
   indexGlyph: { display: 'block' },
   gripGlyph: { display: 'none', height: themeSpace[3], width: themeSpace[3] },
@@ -92,11 +114,17 @@ export const queueRowStyles = stylex.create({
     borderRadius: themeRadius.md,
     borderWidth: '1px',
     borderStyle: 'solid',
-    borderColor: { default: 'hsl(var(--border) / 0.6)', ':focus-within': themeColors.ring },
-    backgroundColor: 'hsl(var(--background) / 0.8)',
+    borderColor: {
+      default: 'color-mix(in oklab, hsl(var(--border) / 1) 60%, transparent)',
+      ':focus-within': 'hsl(var(--ring) / 1)',
+    },
+    backgroundColor: 'color-mix(in oklab, hsl(var(--background) / 1) 80%, transparent)',
     // The wrapper is never focused itself — its textarea is — so this ring is
     // a real one, not the focus-scoped ring the app's base layer erases.
-    boxShadow: { default: null, ':focus-within': '0 0 0 2px hsl(var(--ring) / 0.2)' },
+    boxShadow: {
+      default: null,
+      ':focus-within': '0 0 0 2px color-mix(in oklab, hsl(var(--ring) / 1) 20%, transparent)',
+    },
   },
   editorInput: {
     display: 'block',
@@ -108,7 +136,7 @@ export const queueRowStyles = stylex.create({
     paddingTop: themeSpace[1],
     fontSize: themeFontSize.xs,
     lineHeight: '1.375',
-    color: themeColors.foreground,
+    color: 'hsl(var(--foreground) / 1)',
     // The shell owns the focus ring; the base layer's inset shadow would draw
     // another rectangle on the textarea.
     boxShadow: { default: null, ':focus-visible': 'none' },
@@ -157,7 +185,7 @@ export const queueRowStyles = stylex.create({
     overflow: 'hidden',
     fontSize: themeFontSize.xs,
     lineHeight: '1.375',
-    color: 'hsl(var(--foreground) / 0.8)',
+    color: 'color-mix(in oklab, hsl(var(--foreground) / 1) 80%, transparent)',
   },
   rowActions: { display: 'flex', flexShrink: 0, alignItems: 'center' },
   actionButton: {
@@ -176,8 +204,14 @@ export const queueRowStyles = stylex.create({
   actionInk: {
     fontSize: '11px',
     fontWeight: themeFontWeight.medium,
-    backgroundColor: { default: null, ':hover': themeColors.hover },
-    color: { default: themeColors.mutedForeground, ':hover': themeColors.foreground },
+    backgroundColor: {
+      default: null,
+      '@media (hover: hover)': { ':hover': 'hsl(var(--hover) / 1)' },
+    },
+    color: {
+      default: 'hsl(var(--muted-foreground) / 1)',
+      '@media (hover: hover)': { ':hover': 'hsl(var(--foreground) / 1)' },
+    },
   },
   iconButton: {
     display: 'flex',
@@ -192,13 +226,22 @@ export const queueRowStyles = stylex.create({
     boxShadow: { default: null, ':focus-visible': 'none' },
   },
   iconInk: {
-    backgroundColor: { default: null, ':hover': themeColors.hover },
-    color: { default: MUTED_FOREGROUND_60, ':hover': themeColors.foreground },
+    backgroundColor: {
+      default: null,
+      '@media (hover: hover)': { ':hover': 'hsl(var(--hover) / 1)' },
+    },
+    color: {
+      default: MUTED_FOREGROUND_60,
+      '@media (hover: hover)': { ':hover': 'hsl(var(--foreground) / 1)' },
+    },
     pointerEvents: { default: 'auto', ':disabled': 'none' },
     opacity: { default: 1, ':disabled': 0.5 },
   },
   iconInkDestructive: {
-    color: { default: MUTED_FOREGROUND_60, ':hover': themeColors.destructive },
+    color: {
+      default: MUTED_FOREGROUND_60,
+      '@media (hover: hover)': { ':hover': 'hsl(var(--destructive) / 1)' },
+    },
   },
   actionGlyph: { height: themeSpace[3], width: themeSpace[3] },
 });
@@ -220,6 +263,10 @@ export type MessageQueueRowProps = {
   onSaveEdit: (item: MessageQueueItem) => void;
   onRemove: (cid: string) => void | Promise<void>;
   onSteer: (item: MessageQueueItem) => void | Promise<void>;
+  onMoveToTop?: () => void | Promise<void>;
+  footer?: ReactNode;
+  footerPosition?: 'below' | 'start' | 'end' | 'inline';
+  roomy?: boolean | 'airy';
 };
 
 type EditCommitProps = {
@@ -277,7 +324,10 @@ export function MessageQueueRow(props: MessageQueueRowProps) {
 
   const rowProps = stylex.props(
     queueSurface.row,
-    queueRowStyles.row,
+    !props.roomy && queueRowStyles.row,
+    props.roomy && queueRowStyles.roomyPosition,
+    props.roomy && queueSurface.roomyRow,
+    props.roomy === 'airy' && queueSurface.airyRow,
     transitionColors.colors,
     sortable.isDragging && queueRowStyles.rowDragging,
     isEditing && queueRowStyles.rowEditing
@@ -298,8 +348,27 @@ export function MessageQueueRow(props: MessageQueueRowProps) {
         '[&+&]:border-t [&+&]:border-border/30'
       )}
     >
-      <LeadingHandle {...props} sortable={sortable} />
-      <RowBody {...props} imageBlocks={imageBlocks} onCommitEdit={commitEdit} />
+      {props.roomy ? (
+        <span {...stylex.props(queueSurface.leading)}>
+          <LeadingHandle {...props} sortable={sortable} />
+        </span>
+      ) : (
+        <LeadingHandle {...props} sortable={sortable} />
+      )}
+      {props.footerPosition === 'start' && !isEditing ? (
+        <div {...stylex.props(queueSurface.inlineMeta)}>{props.footer}</div>
+      ) : null}
+      {props.footer && (!props.footerPosition || props.footerPosition === 'below') ? (
+        <div className="min-w-0 flex-1">
+          <RowBody {...props} imageBlocks={imageBlocks} onCommitEdit={commitEdit} />
+          {props.footer}
+        </div>
+      ) : (
+        <RowBody {...props} imageBlocks={imageBlocks} onCommitEdit={commitEdit} />
+      )}
+      {props.footerPosition === 'end' && !isEditing ? (
+        <div {...stylex.props(queueSurface.inlineMeta)}>{props.footer}</div>
+      ) : null}
       <RowActions {...props} />
     </div>
   );
@@ -406,7 +475,7 @@ function RowBody(props: MessageQueueRowProps & EditCommitProps) {
     // newline. Esc blurs, which commits too — there is no separate "discard changes"
     // affordance by design.
     return (
-      <div {...stylex.props(queueRowStyles.editorBody)}>
+      <div {...stylex.props(queueRowStyles.editorBody, props.roomy && queueSurface.editor)}>
         <div {...stylex.props(queueRowStyles.editorShell, transitionColors.colors)}>
           <textarea
             // The synced editing flag can arrive before startEdit resolves; attach when enabled.
@@ -477,7 +546,7 @@ function RowBody(props: MessageQueueRowProps & EditCommitProps) {
   }
 
   return (
-    <div {...stylex.props(queueRowStyles.rowBody)}>
+    <div {...stylex.props(queueRowStyles.rowBody, props.roomy && queueSurface.roomyBody)}>
       {inlineImages.length > 0 ? (
         <div {...stylex.props(queueRowStyles.rowImages)}>
           {inlineImages.map((image, i) => (
@@ -494,13 +563,18 @@ function RowBody(props: MessageQueueRowProps & EditCommitProps) {
         </div>
       ) : null}
       <div
-        {...stylex.props(queueSurface.text, queueRowStyles.rowText)}
+        {...stylex.props(
+          queueSurface.text,
+          queueRowStyles.rowText,
+          props.roomy && queueSurface.roomyText
+        )}
         style={{
           display: '-webkit-box',
-          WebkitLineClamp: 2,
+          WebkitLineClamp: props.footerPosition === 'inline' ? 1 : 2,
           WebkitBoxOrient: 'vertical',
         }}
       >
+        {props.footerPosition === 'inline' && props.footer ? <>{props.footer} </> : null}
         {item.task}
       </div>
     </div>
@@ -509,6 +583,7 @@ function RowBody(props: MessageQueueRowProps & EditCommitProps) {
 
 function RowActions(props: MessageQueueRowProps) {
   const { t } = useTranslation();
+  const mobile = useIsMobile();
   const {
     item,
     isFirst,
@@ -526,8 +601,60 @@ function RowActions(props: MessageQueueRowProps) {
     return null;
   }
 
+  if (mobile && props.roomy) {
+    return (
+      <div {...stylex.props(queueSurface.roomyActions)}>
+        <Menu.Root>
+          <Menu.Trigger
+            render={
+              <Button
+                icon
+                variant="ghost"
+                aria-label={t('common.more', 'More')}
+                style={{ width: 44, height: 44 }}
+              >
+                <MoreHorizontal size={18} />
+              </Button>
+            }
+          />
+          <Menu.Content align="end" width="compact">
+            {props.onMoveToTop ? (
+              <Menu.Item
+                icon={ArrowUpToLine}
+                disabled={isFirst}
+                onClick={() => {
+                  void props.onMoveToTop?.();
+                }}
+              >
+                {t('sessions.messageQueue.moveToTop', 'Move to top')}
+              </Menu.Item>
+            ) : null}
+            <Menu.Item icon={Pencil} onClick={() => onStartEdit(item)}>
+              {t('common.edit', 'Edit')}
+            </Menu.Item>
+            <Menu.Item
+              icon={Trash2}
+              tone="destructive"
+              onClick={() => {
+                void onRemove(item.$cid);
+              }}
+            >
+              {t('common.delete', 'Delete')}
+            </Menu.Item>
+          </Menu.Content>
+        </Menu.Root>
+      </div>
+    );
+  }
+
   return (
-    <div {...stylex.props(queueSurface.actions, queueRowStyles.rowActions)}>
+    <div
+      {...stylex.props(
+        queueSurface.actions,
+        queueRowStyles.rowActions,
+        props.roomy && queueSurface.roomyActions
+      )}
+    >
       {shouldShowQueuedItemSteer({ showSteerAction, isFirst, nativeSteerAvailable }) ? (
         <TextAction
           text={t('sessions.messageQueue.guideAction', 'Steer')}
@@ -541,11 +668,13 @@ function RowActions(props: MessageQueueRowProps) {
         />
       ) : null}
       <IconAction
+        roomy={props.roomy}
         icon={Pencil}
         label={t('sessions.messageQueue.editMessage', 'Edit queued message')}
         onClick={() => onStartEdit(item)}
       />
       <IconAction
+        roomy={props.roomy}
         icon={X}
         label={t('sessions.messageQueue.remove', 'Remove from queue')}
         destructive
@@ -585,12 +714,14 @@ export function TextAction({
 
 export function IconAction({
   icon: Icon,
+  roomy,
   label,
   destructive,
   disabled,
   onClick,
 }: {
   icon: LucideIcon;
+  roomy?: boolean | 'airy';
   label: string;
   destructive?: boolean;
   disabled?: boolean;
@@ -608,13 +739,20 @@ export function IconAction({
             {...stylex.props(
               queueSurface.action,
               queueRowStyles.iconButton,
+              roomy && queueSurface.roomyAction,
               transitionColors.colors,
               queueRowStyles.iconInk,
               destructive && queueRowStyles.iconInkDestructive
             )}
             onClick={onClick}
           >
-            <Icon {...stylex.props(queueRowStyles.actionGlyph)} />
+            <Icon
+              {...stylex.props(
+                roomy && (destructive ? queueSurface.removeGlyph : queueSurface.editGlyph)
+              )}
+              size={roomy ? 16 : 12}
+              strokeWidth={1.5}
+            />
           </button>
         }
       />

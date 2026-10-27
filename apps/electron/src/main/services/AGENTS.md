@@ -97,27 +97,27 @@ replacement before release. See the
 
 ## E2EE runtime
 
-For E2EE changes, read [M1 boundaries](../../../../../.agents/notes/implemented/architecture/2026-10-21-e2ee-m1-runtime-boundaries.md)
-and [M2 boundaries](../../../../../.agents/notes/proposed/architecture/2026-10-22-e2ee-m2-product-integration.md).
-Account custody is lazy; native work settles before release. Use cached main-auth
-identity, rechecking identity/generation after native open; never wait for network
-under custody locks. Availability may use pinned renderer reads; evidence conflicts
-never fall back. Persist originals before feed/pin. Verification/storage failure
-closes its owner; malformed input does not close shared readers. Compare overlapping
-verified originals, retain renderer checkpoints on takeover, and wait for missing history.
+Read [M1](../../../../../.agents/notes/implemented/architecture/2026-10-21-e2ee-m1-runtime-boundaries.md),
+[M2](../../../../../.agents/notes/proposed/architecture/2026-10-22-e2ee-m2-product-integration.md),
+[join](../../../../../.agents/notes/proposed/architecture/2026-10-26-e2ee-personal-desktop-join.md)
+and [machine](../../../../../.agents/notes/proposed/architecture/2026-10-26-e2ee-machine-pairing-journal.md).
+Cached identity/generation fence opens and late D03 registration. Pin D03 before
+new signatures. Lazy custody; no network under its locks. Await native work before
+release. Verification/storage errors stay owner-local; malformed input keeps readers.
+Originals precede feed/pin; compare overlaps, keep renderer checkpoints, await history.
+Evidence conflicts never fall back; availability may use pinned renderer reads.
 
-Cloud calls use fixed E2EE references and per-request auth/abort/deadlines;
-disposal blocks late requests. Keep
-network/key distribution outside custody locks. Caller journals retain exact bytes
-for uncertain writes. Wire checks are structural; core owns signatures/authority.
-SDK logs and raw causes cannot cross the adapter/IPC logging boundary.
+Fixed cloud refs; per-request auth/abort/deadlines; disposal fences late calls.
+Keep exact uncertain bytes; raw/SDK causes stay in main, not IPC/telemetry.
+Verified readback beats lost ACKs; cleanup never undoes admission.
+`e2ee_staging_invalid` and `e2ee_staging_corrupt` are terminal.
 
-Pairing journals its main-generated session and exact admission before HTTP.
-Verify machine proofs locally; explicit consent precedes signing. Confirm from
-verified originals, then await CLI current-key installation before content sync.
-Reset only unsigned or verified settled records (exact commit/competing parent);
-keep uncertain bytes. Re-prepare retries; new sessions require consent. Missing
-credentials block preparation/approval; never export them via IPC. A socket deadline
-bounds waiting, not completion: timeout is pending, never rejection or approval.
-Keep original append/confirmation errors in main; verified readback wins over a
-lost ack, and only stable cause-free errors cross renderer IPC.
+Consent needs fixed verified proofs; retry exact session/record/requestId,
+keys/credentials/pins. Missing credentials block approval; never export them.
+Failed begin stays discoverable. Archive terminal/foreign attempts, including
+pin-only+relay request; same-request unknown/admitting stays fenced. Keep installed origins,
+other sessions and primary/cleanup causes. Superseded retirement needs exact
+socket receipt and atomic all-null local match; fresh sessions need consent.
+Snapshots verify pinned endorsement/self-admission before binding/pin/cursor;
+sparse positions are valid. Old keys use mailbox + verified history, never staging.
+Show file protection; socket deadline means pending. Await CLI current-key install.

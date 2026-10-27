@@ -267,8 +267,13 @@ describe('CloudPlatformProvider', () => {
       },
     };
     fixture.cloudClient.query = async (reference, args) => {
-      expect(getFunctionName(reference)).toBe('e2eeWorkspaces:describe');
       expect(args).toEqual({ workspaceId: receipt.workspaceId });
+      if (getFunctionName(reference) === 'e2eeWorkspaces:memberProfiles')
+        return {
+          workspaceId: receipt.workspaceId,
+          profiles: [{ cryptoUserId: '03'.repeat(32), name: 'Teammate', image: null }],
+        };
+      expect(getFunctionName(reference)).toBe('e2eeWorkspaces:describe');
       return receipt;
     };
     fixture.cloudClient.action = async (reference, args) => {
@@ -296,6 +301,10 @@ describe('CloudPlatformProvider', () => {
     ]);
     await expect(port.describe({ workspaceId: receipt.workspaceId })).resolves.toEqual(receipt);
     await expect(port.history(historyRequest)).resolves.toEqual(historyPage);
+    await expect(port.memberProfiles!({ workspaceId: receipt.workspaceId })).resolves.toEqual({
+      workspaceId: receipt.workspaceId,
+      profiles: [{ cryptoUserId: '03'.repeat(32), name: 'Teammate', image: null }],
+    });
 
     fixture.cloudClient.action = async () => {
       throw new Error('history temporarily unavailable');
@@ -498,6 +507,56 @@ describe('cloud E2EE creation ownership', () => {
     await expect(port.create(request)).rejects.toThrow('e2ee_creation_receipt_mismatch');
     await expect(port.history({ workspaceId: 'different' })).rejects.toThrow(
       'e2ee_history_scope_mismatch'
+    );
+  });
+});
+
+describe('cloud E2EE display directory ownership', () => {
+  it('binds replies to the live account and strips fields outside the display contract', async () => {
+    let session: PlatformSessionState = { status: 'authenticated', user: { id: 'account-a' } };
+    const pending = Promise.withResolvers<{
+      workspaceId: string;
+      profiles: {
+        cryptoUserId: string;
+        name: string | null;
+        image: string | null;
+        role?: string;
+      }[];
+    }>();
+    const remote = {
+      create: async () => {
+        throw new Error('unused');
+      },
+      describe: async () => {
+        throw new Error('unused');
+      },
+      history: async () => {
+        throw new Error('unused');
+      },
+      memberProfiles: () => pending.promise,
+    };
+    const port = createCloudE2eeWorkspaces({
+      session: () => session,
+      remote,
+      refreshWorkspaces: async () => {},
+    });
+    const stale = port.memberProfiles!({ workspaceId: 'workspace' });
+    session = { status: 'authenticated', user: { id: 'account-b' } };
+    pending.resolve({
+      workspaceId: 'workspace',
+      profiles: [{ cryptoUserId: '03'.repeat(32), name: 'A', image: null, role: 'owner' }],
+    });
+    await expect(stale).rejects.toThrow('e2ee_account_changed');
+    await expect(port.memberProfiles!({ workspaceId: 'workspace' })).resolves.toEqual({
+      workspaceId: 'workspace',
+      profiles: [{ cryptoUserId: '03'.repeat(32), name: 'A', image: null }],
+    });
+    await expect(port.memberProfiles!({ workspaceId: 'another-workspace' })).rejects.toThrow(
+      'e2ee_profiles_scope_mismatch'
+    );
+    session = { status: 'unauthenticated' };
+    await expect(port.memberProfiles!({ workspaceId: 'workspace' })).rejects.toThrow(
+      'e2ee_account_unavailable'
     );
   });
 });
