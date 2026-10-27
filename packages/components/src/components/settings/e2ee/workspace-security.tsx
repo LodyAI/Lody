@@ -19,6 +19,9 @@ function SecuritySettings({ scope }: { scope: ReturnType<typeof useSecurityState
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : '';
       const known = [
+        'restart-required',
+        'local-history-recovery-required',
+        'trusted-pin-unavailable',
         'rotation_candidate_unavailable',
         'management_conflict',
         'management_unauthorized',

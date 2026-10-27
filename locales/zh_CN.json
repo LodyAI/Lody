@@ -5671,5 +5671,7 @@
   "e2ee.security.candidateUnavailable": "已保存的密钥更新需要恢复。请重试以接收原始密钥；若仍无法恢复，请使用另一台已授权的管理员设备，或重新授权本设备。请勿删除本地数据。",
   "e2ee.security.conflict": "操作期间工作区发生了变化。状态已刷新，请确认后重试。",
   "e2ee.security.operatorRequired": "服务需要维护才能完成此更新。请联系工作区管理员或服务维护者，检查暂存配置或账本投影；保留本地数据，修复后再重试。",
-  "e2ee.security.authorizePersonal": "个人设备授权"
+  "e2ee.security.authorizePersonal": "个人设备授权",
+  "e2ee.security.restartRequired": "请重启 Lody 以完成加密资源释放，再重试密钥更新。请保留本地数据。",
+  "e2ee.security.localRecovery": "本地加密证据需要恢复。请打开“个人设备授权”查看诊断和安全的下一步，必要时联系工作区管理员。请保留本地数据。"
 }

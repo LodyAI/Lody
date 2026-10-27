@@ -177,6 +177,9 @@ describe('encrypted workspace settings', () => {
     ['custody_unavailable', 'identityMissing'],
     ['rotation_candidate_unavailable', 'candidateUnavailable'],
     ['management_operator_required', 'operatorRequired'],
+    ['restart-required', 'restartRequired'],
+    ['local-history-recovery-required', 'localRecovery'],
+    ['trusted-pin-unavailable', 'localRecovery'],
   ])(
     'shows the next step for a native %s receipt without discarding local state',
     async (code, message) => {

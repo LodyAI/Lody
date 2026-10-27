@@ -72,19 +72,24 @@ export function E2eeSecurityPanel({
             <Alert.Root>
               <Alert.Description>
                 {t(
-                  error === 'e2ee_management_operator_required'
-                    ? 'e2ee.security.operatorRequired'
-                    : /e2ee_(?:custody_unavailable|missing-binding|account_unavailable|not_open|account_mismatch)/.test(
-                          error
-                        )
-                      ? 'e2ee.security.identityMissing'
-                      : error === 'e2ee_rotation_candidate_unavailable'
-                        ? 'e2ee.security.candidateUnavailable'
-                        : error === 'e2ee_management_unauthorized'
-                          ? 'e2ee.security.useManager'
-                          : error === 'e2ee_management_conflict'
-                            ? 'e2ee.security.conflict'
-                            : 'e2ee.security.retryHint'
+                  error === 'e2ee_restart-required'
+                    ? 'e2ee.security.restartRequired'
+                    : error === 'e2ee_local-history-recovery-required' ||
+                        error === 'e2ee_trusted-pin-unavailable'
+                      ? 'e2ee.security.localRecovery'
+                      : error === 'e2ee_management_operator_required'
+                        ? 'e2ee.security.operatorRequired'
+                        : /e2ee_(?:custody_unavailable|missing-binding|account_unavailable|not_open|account_mismatch)/.test(
+                              error
+                            )
+                          ? 'e2ee.security.identityMissing'
+                          : error === 'e2ee_rotation_candidate_unavailable'
+                            ? 'e2ee.security.candidateUnavailable'
+                            : error === 'e2ee_management_unauthorized'
+                              ? 'e2ee.security.useManager'
+                              : error === 'e2ee_management_conflict'
+                                ? 'e2ee.security.conflict'
+                                : 'e2ee.security.retryHint'
                 )}
               </Alert.Description>
             </Alert.Root>

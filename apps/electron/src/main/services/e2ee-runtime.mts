@@ -1237,6 +1237,7 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
         ).pipe(
           Effect.mapError((error) => {
             rememberDesktopE2eeFailure('workspace-management', error)
+            if (error instanceof DesktopE2eeRuntimeError) return error
             const cause = (error as { cause?: unknown })?.cause ?? error
             const code = (cause as { code?: string })?.code
             if (

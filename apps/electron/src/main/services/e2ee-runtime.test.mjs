@@ -206,6 +206,12 @@ for (const damage of ['history', 'pin']) {
           failed.failure.code,
           damage === 'history' ? 'local-history-recovery-required' : 'trusted-pin-unavailable'
         )
+        const managementFailure = yield* Effect.result(
+          owner.host.manage(workspaceId, { type: 'rotate' }, () => {
+            throw new Error('unusable host must not access remote ports')
+          })
+        )
+        assert.equal(managementFailure.failure.code, failed.failure.code)
         // The damaged workspace cannot prevent another independent workspace opening.
         const next = yield* owner.bootstrap.prepareCreation({
           ...intent,
@@ -268,6 +274,14 @@ void test('a failed workspace finalizer reports restart, retains its fence and l
     assert.equal(Exit.isFailure(failed), true)
     const blocked = await run(Effect.result(owner.host.open(workspaceId)))
     assert.equal(blocked.failure.code, 'restart-required')
+    const managementFailure = await run(
+      Effect.result(
+        owner.host.manage(workspaceId, { type: 'rotate' }, () => {
+          throw new Error('failed close must not access remote ports')
+        })
+      )
+    )
+    assert.equal(managementFailure.failure.code, 'restart-required')
     assert.equal((await run(owner.host.status('sibling'))).hasCurrentKey, true)
     const retry = await run(Effect.exit(owner.host.closeWorkspace(workspaceId)))
     assert.equal(Exit.isFailure(retry), true)

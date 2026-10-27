@@ -5680,5 +5680,7 @@
   "e2ee.security.candidateUnavailable": "The saved key update needs recovery. Retry to retrieve its original key. If recovery remains unavailable, use another authorized administrator device or reauthorize this device. Do not delete local data.",
   "e2ee.security.conflict": "The workspace changed during this action. Its status has been refreshed. Review it and try again.",
   "e2ee.security.operatorRequired": "The service needs maintenance before this update can finish. Contact the workspace administrator or service operator to check its staging configuration or ledger projection. Keep local data and retry after repair.",
-  "e2ee.security.authorizePersonal": "Personal device authorization"
+  "e2ee.security.authorizePersonal": "Personal device authorization",
+  "e2ee.security.restartRequired": "Restart Lody to finish releasing encrypted resources, then retry the key update. Keep local data.",
+  "e2ee.security.localRecovery": "Local encryption evidence needs recovery. Open Personal device authorization to view diagnostics and safe next steps. Keep local data; contact the workspace administrator if needed."
 }
