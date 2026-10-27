@@ -116,6 +116,35 @@ describe('local encrypted agent approval', () => {
     expect(admitted).toBe(false);
   });
 
+  it.each([
+    ['local-history-recovery-required', 'historyTitle'],
+    ['trusted-pin-unavailable', 'pinTitle'],
+    ['restart-required', 'restartTitle'],
+  ])('maps native %s to its permitted recovery', async (code, title) => {
+    let archived = false;
+    runtime.status = async () => {
+      throw new Error(`Error invoking remote method 'e2ee:status': Error: e2ee_${code}`);
+    };
+    runtime.resetIdentity = async () => {
+      archived = true;
+      return { archive: '/synthetic/archive' };
+    };
+    await render();
+    expect(container.textContent).toContain(`e2ee.identity.${title}`);
+    expect(archived).toBe(false);
+    if (code === 'restart-required') {
+      expect(container.textContent).toContain('e2ee.identity.restartHelp');
+      expect(container.textContent).not.toContain('e2ee.identity.resetWorkspace');
+      expect(container.textContent).not.toContain('e2ee.identity.resetAccount');
+    } else {
+      await click('e2ee.identity.resetWorkspace');
+      expect(archived).toBe(false);
+      await click('e2ee.identity.confirm');
+      expect(archived).toBe(true);
+    }
+    expect(admitted).toBe(false);
+  });
+
   it('permission repair offers retry without an identity reset', async () => {
     runtime.prepareLocalAgent = async () => {
       throw new Error('e2ee_machine_permissions');

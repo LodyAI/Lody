@@ -906,7 +906,9 @@ export class E2eeIpc extends IpcService {
       false
     )
     await Effect.runPromise(cleanup).catch(() => {
-      throw new Error('e2ee_cleanup_failed')
+      throw new Error(
+        'e2ee_restart-required: Restart Lody to finish releasing encrypted resources.'
+      )
     })
   }
   /** Account-bound local identity read; never grants renderer status/content access. */

@@ -117,11 +117,11 @@ void test('failed account cleanup cannot block sign-out or authorize replacement
   assert.equal(signedOut, true)
   assert.equal(warnings.length, 1)
   assert.ok(!JSON.stringify(warnings).includes('synthetic secret cause'))
-  await assert.rejects(api.closeDesktopE2eeAccount(), /e2ee_cleanup_failed/)
+  await assert.rejects(api.closeDesktopE2eeAccount(), /e2ee_restart-required/)
   api.resumeDesktopE2eeAccount()
   await assert.rejects(
     api.withDesktopE2eeAccount(() => Effect.succeed('replacement')),
-    /e2ee_host_operation_failed/
+    /e2ee_restart-required: Restart Lody/
   )
 })
 void test('cancelled quit reopens admission only after actual in-flight work and cleanup settle', async () => {

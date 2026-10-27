@@ -28,10 +28,13 @@ export function E2eeIdentityRecovery({
   // An uncertain response retries the same reset, never archives a newer identity.
   const resetIds = useRef(new Map<string, string>());
   const code =
-    /\be2ee_(?:machine_)?(permissions|custody_unavailable|unavailable|basic-text|identity-lost|corrupt|conflict|missing-binding|rewrap-failed)\b/.exec(
+    /\be2ee_(?:machine_)?(permissions|custody_unavailable|unavailable|basic-text|identity-lost|corrupt|conflict|missing-binding|rewrap-failed|local-history-recovery-required|trusted-pin-unavailable|restart-required)\b/.exec(
       error
     )?.[1] ?? '';
   const permissions = code === 'permissions';
+  const restart = code === 'restart-required';
+  const history = code === 'local-history-recovery-required';
+  const pin = code === 'trusted-pin-unavailable';
   const locked = ['custody_unavailable', 'unavailable', 'basic-text'].includes(code);
   const lost = [
     'identity-lost',
@@ -39,8 +42,10 @@ export function E2eeIdentityRecovery({
     'conflict',
     'missing-binding',
     'rewrap-failed',
+    'local-history-recovery-required',
+    'trusted-pin-unavailable',
   ].includes(code);
-  if (!permissions && !locked && !lost) return null;
+  if (!permissions && !locked && !lost && !restart) return null;
   const reset = machine ? runtime.resetLocalAgent : runtime.resetIdentity;
   const apply = async () => {
     if (!reset || !confirm || busy) return;
@@ -70,20 +75,32 @@ export function E2eeIdentityRecovery({
     <Alert.Root tone="warning">
       <Alert.Title>
         {t(
-          permissions
-            ? 'e2ee.identity.permissionsTitle'
-            : locked
-              ? 'e2ee.identity.lockedTitle'
-              : 'e2ee.identity.lostTitle'
+          restart
+            ? 'e2ee.identity.restartTitle'
+            : history
+              ? 'e2ee.identity.historyTitle'
+              : pin
+                ? 'e2ee.identity.pinTitle'
+                : permissions
+                  ? 'e2ee.identity.permissionsTitle'
+                  : locked
+                    ? 'e2ee.identity.lockedTitle'
+                    : 'e2ee.identity.lostTitle'
         )}
       </Alert.Title>
       <Alert.Description>
         {t(
-          permissions
-            ? 'e2ee.identity.permissionsHelp'
-            : locked
-              ? 'e2ee.identity.lockedHelp'
-              : 'e2ee.identity.lostHelp'
+          restart
+            ? 'e2ee.identity.restartHelp'
+            : history
+              ? 'e2ee.identity.historyHelp'
+              : pin
+                ? 'e2ee.identity.pinHelp'
+                : permissions
+                  ? 'e2ee.identity.permissionsHelp'
+                  : locked
+                    ? 'e2ee.identity.lockedHelp'
+                    : 'e2ee.identity.lostHelp'
         )}
       </Alert.Description>
       {confirm && (
@@ -92,34 +109,36 @@ export function E2eeIdentityRecovery({
         </Alert.Description>
       )}
       {failure && <Alert.Description>{t('e2ee.identity.resetFailed')}</Alert.Description>}
-      <Alert.Actions>
-        {confirm ? (
-          <>
-            <Button disabled={busy} variant="destructive" onClick={() => void apply()}>
-              {t('e2ee.identity.confirm')}
-            </Button>
-            <Button disabled={busy} variant="ghost" onClick={() => setConfirm(null)}>
-              {t('common.cancel')}
-            </Button>
-          </>
-        ) : (
-          <>
-            <Button variant="secondary" onClick={onReset}>
-              {t('common.tryAgain')}
-            </Button>
-            {reset && !permissions && (
-              <Button variant="secondary" onClick={() => setConfirm('workspace')}>
-                {t(machine ? 'e2ee.identity.resetMachine' : 'e2ee.identity.resetWorkspace')}
+      {!restart && (
+        <Alert.Actions>
+          {confirm ? (
+            <>
+              <Button disabled={busy} variant="destructive" onClick={() => void apply()}>
+                {t('e2ee.identity.confirm')}
               </Button>
-            )}
-            {!machine && (locked || lost) && runtime.resetIdentity && (
-              <Button variant="ghost" onClick={() => setConfirm('account')}>
-                {t('e2ee.identity.resetAccount')}
+              <Button disabled={busy} variant="ghost" onClick={() => setConfirm(null)}>
+                {t('common.cancel')}
               </Button>
-            )}
-          </>
-        )}
-      </Alert.Actions>
+            </>
+          ) : (
+            <>
+              <Button variant="secondary" onClick={onReset}>
+                {t('common.tryAgain')}
+              </Button>
+              {reset && !permissions && (
+                <Button variant="secondary" onClick={() => setConfirm('workspace')}>
+                  {t(machine ? 'e2ee.identity.resetMachine' : 'e2ee.identity.resetWorkspace')}
+                </Button>
+              )}
+              {!machine && (locked || lost) && runtime.resetIdentity && (
+                <Button variant="ghost" onClick={() => setConfirm('account')}>
+                  {t('e2ee.identity.resetAccount')}
+                </Button>
+              )}
+            </>
+          )}
+        </Alert.Actions>
+      )}
     </Alert.Root>
   );
 }

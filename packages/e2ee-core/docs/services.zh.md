@@ -119,6 +119,7 @@
 
 - 每个方法是**一个原子步骤**。写入会在同一事务内读回校验，并检查文件仍绑定于本工作区和设备；任何不一致都会回滚，并以 `corrupt` 失败。
 - 错误为 `LocalStoreError`，`reason` 为：`storage`（I/O，重试可能有效）、`corrupt`、`closed`（所属 Scope 已关闭）、`conflict`（前置条件不再成立）、`capacity`（有界存储已满）、`missing`。
+- SQLite 初始化和 pin 读取把确定的文件损坏归为 `corrupt`，busy、locked、权限错误仍为 `storage`；读取失败不得重置 pin。
 - 存储不做任何决定：读出的行由对应流程重新校验，任何已存字节都不授予权限。
 - 日志会保留原始内容和结果，直到应用确认；不会自动删除。
 

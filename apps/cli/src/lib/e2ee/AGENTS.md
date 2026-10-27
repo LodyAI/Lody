@@ -20,6 +20,7 @@
 - Resume first Windows ACL setup only in an empty custody directory; otherwise validate only.
 - `runtime.ts` composes Feed/VerifiedLedger, installed keys and optional receiver.
   Open/status are offline; cloud requests stay in cloud-cli-port.
+  Report damaged history/pins distinctly; never reset trusted pins from remote hints.
 - Journal originals before feed/pin advancement. Rebase after 64 more records, core pin
   first. Retired cache cleanup cannot fail local open.
 - No plaintext RPC, presence, attachments or scheduled automation on encrypted workspaces
@@ -67,10 +68,10 @@
 - Only activation/binding/device-original ENOENT means pairing wait. Check the
   original before custody init; stale hints cannot trigger keyring probes. Preserve
   other file errors/Fleet retry; never cache transient storage as missing pairing.
-- Ingest storage failure fences writes until verified refresh. Seal only requests
-  coalesced storage repair and returns; never await refresh inside an SDK save queue.
-  Healthy readers stay attached.
-  Validation/conflict needs explicit normal refresh; seal cannot auto-recover it.
+- Ingest failure fences new seals until verified refresh; keep the last verified view
+  and healthy readers. Retry at most three times per failure episode; explicit refresh
+  restarts that budget. Seal may request retry but never await it in the SDK save queue.
+  Never skip rejected records or reset pins. Close cancels pending retry timers.
 
 ## Local machine pairing
 
@@ -110,6 +111,5 @@
   for encrypted workspaces
   ([note](../../../../../.agents/notes/implemented/bug-fix/2026-10-27-e2ee-cli-review-fixes.md)).
 
-- Explicit same-user reset drains the workspace, takes its stable sibling identity
-  lease, and archives the entire directory. Require fresh approval and a new KEK;
-  OS/unknown protection cannot reset into file protection.
+- Reset: same-user socket; drain, exclusive sibling lease, archive whole dir;
+  fresh approval/KEK. OS/unknown stays OS.

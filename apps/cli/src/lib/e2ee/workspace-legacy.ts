@@ -493,7 +493,8 @@ async function openWorkspaceOwned(
   let ledgerBlocked = false;
   let pairingConfirmed = false;
   let pairingFailure: unknown;
-  let retryLedgerOnSeal = false;
+  let ledgerRetryAttempts = 0;
+  let ledgerRetryTimer: ReturnType<typeof setTimeout> | undefined;
   let closed = false;
   let refresh: Promise<void> | undefined;
   let pending = false;
@@ -565,7 +566,7 @@ async function openWorkspaceOwned(
           // A seal runs inside the SDK save queue. Request recovery without
           // awaiting it here: the queue must exit before any refresh can finish.
           if (ledgerBlocked) {
-            if (retryLedgerOnSeal) void refreshInBackground();
+            retryLedger();
             throw new Error('e2ee_invalid_ledger');
           }
           return protectedProvider.seal(input);
@@ -622,8 +623,31 @@ async function openWorkspaceOwned(
       )
     );
   };
-  const refreshInBackground = () => {
+  const clearLedgerRetry = () => {
+    if (ledgerRetryTimer !== undefined) clearTimeout(ledgerRetryTimer);
+    ledgerRetryTimer = undefined;
+  };
+  const retryLedger = (): void => {
+    if (closed || !ledgerBlocked || refresh || ledgerRetryAttempts >= 3) return;
+    clearLedgerRetry();
+    ledgerRetryAttempts++;
+    void refreshInBackground(false);
+  };
+  const scheduleLedgerRetry = () => {
+    if (closed || !ledgerBlocked || ledgerRetryTimer !== undefined || ledgerRetryAttempts >= 3)
+      return;
+    ledgerRetryTimer = setTimeout(() => {
+      ledgerRetryTimer = undefined;
+      retryLedger();
+    }, [250, 1_000, 4_000][ledgerRetryAttempts]);
+    ledgerRetryTimer.unref?.();
+  };
+  const refreshInBackground = (resetRetries = true) => {
     if (closed) return Promise.resolve();
+    if (resetRetries) {
+      clearLedgerRetry();
+      ledgerRetryAttempts = 0;
+    }
     pending = true;
     if (refresh) return refresh;
     if (pairing) pairingConfirmed = false;
@@ -645,24 +669,14 @@ async function openWorkspaceOwned(
           });
           if (closed) return;
           checkpoint ??= { ...page.checkpoint };
-          retryLedgerOnSeal = false;
-          status = await run(
-            opened.runtime.ingest(page).pipe(
-              Effect.tapError((error) =>
-                Effect.sync(() => {
-                  ledgerBlocked = true;
-                  retryLedgerOnSeal = 'code' in error && error.code === 'storage';
-                })
-              )
-            )
-          ).catch((error) => {
+          status = await run(opened.runtime.ingest(page)).catch((error) => {
             // Unexpected defects are fenced too, without classifying them as
             // transient storage or weakening the verification boundary.
             ledgerBlocked = true;
             throw error;
           });
           ledgerBlocked = false;
-          retryLedgerOnSeal = false;
+          ledgerRetryAttempts = 0;
           epochTransition.observe(status);
           cursor = page.nextCursor ?? undefined;
         } while (cursor && !isClosed());
@@ -698,10 +712,11 @@ async function openWorkspaceOwned(
       })
       .finally(() => {
         refresh = undefined;
+        scheduleLedgerRetry();
       });
     return refresh;
   };
-  // Startup is one of the three refresh triggers; no network request is awaited by open.
+  // Startup schedules the first refresh; local open never awaits network work.
   void refreshInBackground();
   return {
     assertPairingConfirmed: () => {
@@ -719,9 +734,10 @@ async function openWorkspaceOwned(
             ...status,
             epochPhase: epochTransition.phase(),
           })),
-    refresh: refreshInBackground,
+    refresh: () => refreshInBackground(),
     close: () => {
       closed = true;
+      clearLedgerRetry();
       return (closeReceipt ??= (async () => {
         await epochTransition.close();
         await refresh;

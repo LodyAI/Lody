@@ -61,7 +61,7 @@ export function classifyE2eeControlFailure(error: unknown): E2eeControlFailure {
   if (message.includes('e2ee_genesis_conflict') || message.includes('e2ee_conflict'))
     return { kind: 'identity-conflict', code: 'pin-mismatch' };
   const local =
-    /\be2ee_(permissions|identity-lost|corrupt|missing-binding|rewrap-failed|custody_unavailable|identity-busy)\b/.exec(
+    /\be2ee_(permissions|identity-lost|corrupt|missing-binding|rewrap-failed|custody_unavailable|identity-busy|local-history-recovery-required|trusted-pin-unavailable|restart-required)\b/.exec(
       message
     );
   if (local) return { kind: 'local-identity', code: `e2ee_${local[1]}` };

@@ -31,12 +31,12 @@ preload 桥显式放行两个受限重置方法，main 仍校验可信产品窗�
 
 组合 #1964 时，`readIdentity` 按工作区目录打开，并禁止自动创建。冷读取不授予 reader，保留已有 reader，也不创建默认 control 身份。原生 `e2ee_conflict` 保留 main 的身份冲突分类，不把真正的 pin 冲突当作可修复保管故障。
 
-验证时 [#1978](https://github.com/LodyAI/Lody/pull/1978) 仍是独立 draft，本变更尚未接入其 `local-history-recovery-required`、`trusted-pin-unavailable` 和 `restart-required`。后合入者需把前两者接入显式恢复界面，不能改变 pin 的信任来源；restart-required 仍要求重启，不能据此替换尚未释放的写入者。
+已接入合入的 [#1978](https://github.com/LodyAI/Lody/pull/1978) 错误码：`local-history-recovery-required` 与 `trusted-pin-unavailable` 提供显式归档/重置及正常审批配对，保留界面证据，不自动重建远端历史或学习替代 pin。`restart-required` 显示重启说明，不显示重置控件；原生 finalizer 失败时仍保留写入者排他边界。按工作区的 owner map 保留该边界，同时尝试其他独立清理。
 
 ## 证据与限制
 
 真实文件和 crypto 测试分别破坏凭证、设备、KEK、选择标记和 material 日志。先证明普通配对失败，再证明显式重置保留所有剩余字节，新准备使用独立签名密钥、凭证、KEK 和日志。租约争用时拒绝归档。撤回重置实现后六个恢复用例全部失败。桌面测试用经过认证的合成系统包装加真实 crypto/SQLite，验证创建交接与原字节重试、工作区归档、兄弟工作区可用、重置幂等，以及系统保护不可用时的账号归档。界面测试要求显式确认和新的配对审批，权限修复不提供破坏性捷径。
 
-12 条定向审查回归在撤回修复时失败，修复后通过：8 条显式信号控制的账号/generation 竞态、真实 preload 到 main 的重置、冷工作区身份读取，以及两种原生 SQLite 镜像损坏。preload 链路使用真实保管/SQLite 归档和新配对 session，并验证不可信 sender 与未确认请求被拒。检查覆盖受影响 CLI、Electron、core、shared、platform 与渲染器路径。真实系统钥匙串、Windows ACL、安装包生命周期、实体多设备及远端配对组合、生产部署仍未验证。归档可能包含未发送数据和仍有效的旧加密凭证。本变更不启用 M5 或未实现的明文通道。
+15 条定向审查回归在撤回修复时失败，修复后通过：8 条显式信号控制的账号/generation 竞态、真实 preload 到 main 的重置、冷工作区身份读取，两种原生 SQLite 镜像损坏，以及三个恢复错误码界面用例。preload 链路使用真实保管/SQLite 归档和新配对 session，并验证不可信 sender 与未确认请求被拒。检查覆盖受影响 CLI、Electron、core、shared、platform 与渲染器路径。真实系统钥匙串、Windows ACL、安装包生命周期、实体多设备及远端配对组合、生产部署仍未验证。归档可能包含未发送数据和仍有效的旧加密凭证。本变更不启用 M5 或未实现的明文通道。
 
 组合 #1954 时保留按工作区隔离，同时让桌面桥接完整传递仅刷新账本的 `installKeys: false`。密钥收取保留 staging 与 mailbox 两条适配路径，重置不恢复旧的 epoch 发送阻塞。#1966 独立的认证目录重建与测试临时锁所有权均保留。

@@ -92,6 +92,8 @@ offer explicit reset and fresh approved pairing; account archival is available f
 permanent OS protection loss. Confirmation binds account/auth generation and is rechecked
 after lock admission and native drain. SQLite image corruption keeps its originals
 and exposes this recovery. Cold identity reads open only the workspace directory.
+Local-history and trusted-pin failures offer explicit archival and fresh approval;
+a failed writer close instead requires restarting Lody and exposes no reset control.
 Renderer genesis pins, history checkpoints and mode
 evidence remain. Earlier shared developer custody is not imported; account archival
 preserves it. Archived unsent work is retained without replay and old remote devices

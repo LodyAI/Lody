@@ -1,4 +1,10 @@
 {
+  "e2ee.identity.restartTitle": "请重启 Lody 以释放加密资源",
+  "e2ee.identity.restartHelp": "旧加密运行时尚未确认释放。请退出并重新打开 Lody 后重试。旧写入者的状态未解决前，不能启动替代身份。",
+  "e2ee.identity.historyTitle": "本机加密历史需要恢复",
+  "e2ee.identity.historyHelp": "本机历史已损坏或无法验证。请保留原件，恢复原文件后重试，或显式归档该身份，再由另一台合法设备审批重新配对。已保存的信任证据不变。",
+  "e2ee.identity.pinTitle": "原始可信 pin 无法使用",
+  "e2ee.identity.pinHelp": "无法读取原始可信账本 pin。请恢复原 pin，或显式归档该身份并请求全新配对审批。不能用服务端 head 替代原始可信 pin。",
   "e2ee.identity.permissionsTitle": "本机身份的文件权限需要修复",
   "e2ee.identity.permissionsHelp": "保留原文件。macOS/Linux：将 E2EE 身份目录设为仅所有者可访问（chmod 700），文件设为 chmod 600。Windows：属性 → 安全 → 高级，关闭继承，仅保留当前用户权限。完成后重试。",
   "e2ee.identity.lockedTitle": "解锁本机密钥保管",

@@ -1,4 +1,10 @@
 {
+  "e2ee.identity.restartTitle": "Restart Lody to release encrypted resources",
+  "e2ee.identity.restartHelp": "The old encrypted runtime has not confirmed release. Quit and reopen Lody before retrying. A replacement identity cannot start while the old writer is unresolved.",
+  "e2ee.identity.historyTitle": "Local encrypted history needs recovery",
+  "e2ee.identity.historyHelp": "Local history is damaged or cannot be verified. Keep the originals. Restore the original files and retry, or explicitly archive this identity and pair again with approval from another authorized device. Retained trust evidence remains unchanged.",
+  "e2ee.identity.pinTitle": "The original trusted pin is unavailable",
+  "e2ee.identity.pinHelp": "The original trusted ledger pin cannot be read. Restore the original pin, or explicitly archive this identity and request fresh pairing approval. A server head cannot replace the original trusted pin.",
   "e2ee.identity.permissionsTitle": "Local identity needs a permission repair",
   "e2ee.identity.permissionsHelp": "Keep the original files. On macOS/Linux, set the E2EE identity directory to owner-only access (chmod 700) and its files to chmod 600. On Windows, Properties → Security → Advanced: disable inheritance and allow only your user. Then retry.",
   "e2ee.identity.lockedTitle": "Unlock local key protection",
