@@ -1,6 +1,7 @@
 import { composeEventHandlers, Primitive, useComposedRefs } from '@diceui/shared';
 import type { VirtualElement } from '@floating-ui/react';
 import * as React from 'react';
+import { getPlatform } from '@/lib/commands/platform';
 import { isImeComposingKeyboardEvent } from '@/lib/ime';
 import { cn } from '@/lib/utils';
 import {
@@ -572,30 +573,37 @@ const MentionInput = React.forwardRef<InputElement, MentionInputProps>((props, f
       const cursorPosition = input.selectionStart ?? 0;
       const selectionEnd = input.selectionEnd ?? cursorPosition;
       const hasSelection = cursorPosition !== selectionEnd;
+      const isMacEmacsHorizontal =
+        event.ctrlKey &&
+        !event.metaKey &&
+        !event.altKey &&
+        (event.key === 'b' || event.key === 'f') &&
+        getPlatform() === 'mac';
+      const horizontalDirection =
+        event.key === 'ArrowLeft' || (isMacEmacsHorizontal && event.key === 'b')
+          ? 'left'
+          : event.key === 'ArrowRight' || (isMacEmacsHorizontal && event.key === 'f')
+            ? 'right'
+            : null;
 
-      if (
-        (event.key === 'ArrowLeft' || event.key === 'ArrowRight') &&
-        !hasSelection &&
-        !event.shiftKey
-      ) {
-        const isCtrlOrCmd = event.metaKey || event.ctrlKey;
-        const direction = event.key === 'ArrowLeft' ? 'left' : 'right';
+      if (horizontalDirection && !hasSelection && !event.shiftKey) {
+        const isWordJump = !isMacEmacsHorizontal && (event.metaKey || event.ctrlKey);
 
         const adjacentMention = findAdjacentMentionForHorizontalNavigation({
           mentions: context.mentions,
           value: input.value,
           cursorPosition,
-          direction,
-          isWordJump: isCtrlOrCmd,
+          direction: horizontalDirection,
+          isWordJump,
         });
 
         if (adjacentMention) {
           event.preventDefault();
-          const newPosition = isCtrlOrCmd
-            ? direction === 'left'
+          const newPosition = isWordJump
+            ? horizontalDirection === 'left'
               ? adjacentMention.start
               : adjacentMention.end
-            : direction === 'left'
+            : horizontalDirection === 'left'
               ? cursorPosition > adjacentMention.end
                 ? adjacentMention.end
                 : adjacentMention.start
@@ -607,7 +615,7 @@ const MentionInput = React.forwardRef<InputElement, MentionInputProps>((props, f
           return;
         }
 
-        if (isCtrlOrCmd) {
+        if (event.metaKey || event.ctrlKey) {
           return;
         }
       }

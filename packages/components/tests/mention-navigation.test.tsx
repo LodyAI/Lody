@@ -4,6 +4,7 @@ import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { __resetPlatformCacheForTests } from '../src/lib/commands/platform';
 import {
   Mention,
   MentionContent,
@@ -129,7 +130,14 @@ describe('Mention navigation and insertion', () => {
       ).requestAnimationFrame;
     }
     originalRequestAnimationFrame = undefined;
+    vi.unstubAllGlobals();
+    __resetPlatformCacheForTests();
   });
+
+  function setPlatform(os: 'darwin' | 'linux') {
+    vi.stubGlobal('__LODY_PLATFORM__', { os });
+    __resetPlatformCacheForTests();
+  }
 
   function render(
     items: ItemSpec[],
@@ -276,6 +284,80 @@ describe('Mention navigation and insertion', () => {
 
     expect(event.defaultPrevented).toBe(true);
     expect(latest.inputValue).toBe('@');
+  });
+
+  it.each([
+    { key: 'b', boundary: 'end' },
+    { key: 'f', boundary: 'start' },
+  ])('macOS Ctrl+$key crosses a committed file mention from its $boundary', ({ key, boundary }) => {
+    setPlatform('darwin');
+    const input = render([{ value: 'src/file.ts', insertText: '@src/file.ts', kind: 'file' }], '@');
+    commit('src/file.ts', 0);
+    const mention = latest.mentions[0]!;
+    const start = boundary === 'end' ? mention.end : mention.start;
+
+    act(() => input.setSelectionRange(start, start));
+    const keydown = pressKey(input, key, { ctrlKey: true });
+
+    expect(keydown.defaultPrevented).toBe(true);
+    expect(input.selectionStart).toBe(boundary === 'end' ? mention.start : mention.end);
+    expect(latest.inputValue).toBe('@src/file.ts ');
+  });
+
+  it('macOS Ctrl+B moves over the separating space before crossing a file mention', () => {
+    setPlatform('darwin');
+    const input = render([{ value: 'src/file.ts', insertText: '@src/file.ts', kind: 'file' }], '@');
+    commit('src/file.ts', 0);
+    const mention = latest.mentions[0]!;
+
+    act(() => input.setSelectionRange(mention.end + 1, mention.end + 1));
+    expect(pressKey(input, 'b', { ctrlKey: true }).defaultPrevented).toBe(true);
+    expect(input.selectionStart).toBe(mention.end);
+    expect(pressKey(input, 'b', { ctrlKey: true }).defaultPrevented).toBe(true);
+    expect(input.selectionStart).toBe(mention.start);
+  });
+
+  it('leaves Ctrl+B/F to the browser away from mentions and off macOS', () => {
+    setPlatform('darwin');
+    const input = render([{ value: 'src/file.ts', insertText: '@src/file.ts', kind: 'file' }], '@');
+    commit('src/file.ts', 0);
+    const mention = latest.mentions[0]!;
+
+    act(() => input.setSelectionRange(input.value.length, input.value.length));
+    expect(pressKey(input, 'f', { ctrlKey: true }).defaultPrevented).toBe(false);
+
+    setPlatform('linux');
+    act(() => input.setSelectionRange(mention.end, mention.end));
+    expect(pressKey(input, 'b', { ctrlKey: true }).defaultPrevented).toBe(false);
+  });
+
+  it('leaves macOS Control selection shortcuts to the browser', () => {
+    setPlatform('darwin');
+    const input = render([{ value: 'src/file.ts', insertText: '@src/file.ts', kind: 'file' }], '@');
+    commit('src/file.ts', 0);
+    const mention = latest.mentions[0]!;
+
+    act(() => input.setSelectionRange(mention.start, mention.end));
+    expect(pressKey(input, 'b', { ctrlKey: true }).defaultPrevented).toBe(false);
+
+    act(() => input.setSelectionRange(mention.end, mention.end));
+    expect(pressKey(input, 'b', { ctrlKey: true, shiftKey: true }).defaultPrevented).toBe(false);
+  });
+
+  it.each([
+    { key: 'ArrowLeft', boundary: 'end' },
+    { key: 'ArrowRight', boundary: 'start' },
+  ])('$key crosses a committed file mention instead of snapping back', ({ key, boundary }) => {
+    const input = render([{ value: 'src/file.ts', insertText: '@src/file.ts', kind: 'file' }], '@');
+    commit('src/file.ts', 0);
+    const mention = latest.mentions[0]!;
+    const start = boundary === 'end' ? mention.end : mention.start;
+
+    act(() => input.setSelectionRange(start, start));
+    const keydown = pressKey(input, key);
+
+    expect(keydown.defaultPrevented).toBe(true);
+    expect(input.selectionStart).toBe(boundary === 'end' ? mention.start : mention.end);
   });
 
   it('leaves Backspace alone inside a path drill-down', () => {
