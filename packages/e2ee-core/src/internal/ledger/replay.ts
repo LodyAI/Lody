@@ -350,7 +350,7 @@ export function restoreVerifiedState(input: {
 export interface ContentPermissions {
   /** Host admission: active personal/machine device of a non-Guest member. */
   readonly mayWriteDocument: boolean;
-  /** Honest seal gate additionally waits for any required epoch rotation. */
+  /** Current seal permission; a pending manual rotation is advisory. */
   readonly maySealNewContent: boolean;
 }
 /** Current permissions at this caller-selected verified endpoint, not freshness proof. */
@@ -375,7 +375,7 @@ export function contentPermissions(
     );
     return Object.freeze({
       mayWriteDocument,
-      maySealNewContent: mayWriteDocument && !state.epoch.rotationRequired,
+      maySealNewContent: mayWriteDocument,
     });
   });
 }

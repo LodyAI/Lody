@@ -3,7 +3,7 @@
 Document content (exported through `@lody/e2ee-core/protocol`; the Streams binding through `@lody/e2ee-core/adapters/loro-streams`, host admission through `@lody/e2ee-core/host`) implements the settled Loro/Flock update/snapshot workflow.
 It preserves content v0 wire bytes, purpose domains, scoped document HKDF and
 XChaCha20-Poly1305. The four document purposes share a leaf but have distinct
-signature/AAD contexts. 
+signature/AAD contexts.
 
 `deriveDocumentKey(scope, epochKey)`, `importDocumentKey(scope, bytes)` and
 `exportDocumentKey(key)` are synchronous Result functions. A document leaf is
@@ -24,7 +24,7 @@ lookup. Each view must be genuine full replay or explicitly qualified endorsed
 state, with its provenance preserved. Later lookups must extend the first verified
 prefix; known rollback/forks fail. Sealing binds
 the caller's genesis, resource, purpose and current epoch; active non-Guest
-personal/machine devices may seal only when rotation is not required. It checks
+personal/machine devices may seal while manual rotation is pending. It checks
 before encryption and after asynchronous signing, and always verifies signer
 output with the fixed strict verifier. No injected verifier/authority can accept
 unsigned content. Each run is a new encryption; a transport retry must retain the

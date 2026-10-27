@@ -782,14 +782,15 @@ describe('verified historical facts and current content permissions', () => {
       'unauthorized'
     );
   });
-  it('distinguishes host admission from the honest seal rotation gate', () => {
+  it('keeps active writers available while manual rotation is pending', () => {
     const o = org();
     o.append(owner, o.device(phone, 0));
     o.append(owner, [5, phone.pk]);
     const pending = ok(o.verify());
+    expect(pending.inspectState().epoch.rotationRequired).toBe(true);
     expect(permissions(pending, owner)).toEqual({
       mayWriteDocument: true,
-      maySealNewContent: false,
+      maySealNewContent: true,
     });
     o.append(owner, [7, 1, filled(21), filled(30, 72)]);
     const rotated = ok(
@@ -799,7 +800,7 @@ describe('verified historical facts and current content permissions', () => {
       mayWriteDocument: true,
       maySealNewContent: true,
     });
-    expect(permissions(pending, owner).maySealNewContent).toBe(false);
+    expect(permissions(pending, owner).maySealNewContent).toBe(true);
     expect(permissions(rotated, phone).mayWriteDocument).toBe(false);
   });
   it('uses current role/kind for permission and admission history for attribution', () => {
