@@ -133,7 +133,8 @@ export interface E2eeWorkspaceRuntime {
   refresh(workspaceId: string): Promise<E2eeRuntimeStatus>;
   contentStreamsToken(
     workspaceId: string,
-    rejectedToken?: string
+    rejectedToken?: string,
+    requestSnapshotFor?: string
   ): Promise<import('@lody/cloud-api').E2eeContentToken>;
   seal(
     workspaceId: string,

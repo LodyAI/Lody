@@ -16,9 +16,32 @@ export function createDesktopE2eeContent(input: {
   authToken: () => string | null | undefined;
   rotationRequired?: boolean;
   onKeyUpdateRequired?: () => void;
+  onSnapshotRecoveryChange?: (pending: boolean) => void;
 }) {
   if (!/^[0-9a-f]{64}$/.test(input.genesisHash)) throw new Error('e2ee_invalid_genesis');
   let bucketId: string | null = null;
+  const recovering = new Set<string>();
+  const requested = new Map<string, number>();
+  const recovery = (stream: string, pending: boolean) => {
+    if (pending) recovering.add(stream);
+    else recovering.delete(stream);
+    try {
+      input.onSnapshotRecoveryChange?.(recovering.size > 0);
+    } catch {
+      /* Observational only. */
+    }
+  };
+  const snapshotRecovery = (stream: string, pending: boolean) => {
+    recovery(stream, pending);
+    if (!pending) return;
+    const now = Date.now();
+    if (now - (requested.get(stream) ?? -Infinity) < 30_000) return;
+    requested.set(stream, now);
+    // The existing host action relays fixed hints for read-only devices too.
+    void input.runtime.contentStreamsToken(input.workspaceId, undefined, stream).catch(() => {
+      console.warn('[e2ee] snapshot repair request failed; will retry');
+    });
+  };
   let keyUpdateRequired = input.rotationRequired === true;
   const updateStatus = (status: { epoch: number; rotationRequired: boolean }) => {
     if (keyUpdateRequired || (status.epoch === input.epoch && !status.rotationRequired)) return;
@@ -29,6 +52,12 @@ export function createDesktopE2eeContent(input: {
     mode: 'protected',
     namespace: encryptedWorkspaceNamespace(input.genesisHash),
     snapshotUpload: {
+      // SDK rejection also covers absent/malformed envelopes before provider.open.
+      onSnapshotRecovery: (streamUrl, pending) =>
+        snapshotRecovery(
+          decodeURIComponent(new URL(streamUrl).pathname.split('/').at(-1)!),
+          pending
+        ),
       // SDK schedules only after local writes, suppresses a competing writer,
       // and checks the remote snapshot before exporting a new one.
       canUpload: () => !keyUpdateRequired,

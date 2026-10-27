@@ -91,7 +91,7 @@ export const createLoroSyncErrorTools = (runtime: RepoErrorRuntime) => {
               failure.streamsContext?.source === 'payload_protection' &&
               failure.streamsContext.stage === 'bootstrap' &&
               failure.streamsContext.originalCode === 'gone'
-                ? 'Encrypted snapshot is unavailable or invalid and history was trimmed. Reconnect a device that has the workspace data, let it publish a fresh snapshot, then retry.'
+                ? 'Encrypted snapshot is unavailable or invalid and history was trimmed. Requesting another device to upload a fresh snapshot; sync will retry automatically.'
                 : `Streams ${failure.phase} failed: ${failure.streamsCode ?? failure.code} (${JSON.stringify(failure)})`
             )
             .join('; ')

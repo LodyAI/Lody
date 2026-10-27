@@ -402,10 +402,35 @@ async function openWorkspace(
     string,
     Promise<Effect.Success<ReturnType<typeof opened.runtime.binding>>>
   >();
+  const snapshotRequests = new Map<string, number>();
+  const snapshotFlights = new Set<Promise<unknown>>();
+  const requestSnapshot = (stream: string) => {
+    if (closed) return;
+    const now = Date.now();
+    if (now - (snapshotRequests.get(stream) ?? -Infinity) < 30_000) return;
+    snapshotRequests.set(stream, now);
+    const flight = options.cloud.getContentToken({
+      workspaceId: options.workspaceId,
+      credential: opened.credential,
+      requestSnapshotFor: stream,
+    });
+    snapshotFlights.add(flight);
+    void flight.then(
+      () => snapshotFlights.delete(flight),
+      () => {
+        snapshotFlights.delete(flight);
+        console.warn('[e2ee] snapshot repair request failed; will retry');
+      }
+    );
+  };
   const content: WorkspaceStreamsContent = {
     mode: 'protected',
     namespace: encryptedWorkspaceNamespace(binding.genesisHash),
     snapshotUpload: {
+      onSnapshotRecovery: (streamUrl, needsSnapshot) => {
+        if (needsSnapshot)
+          requestSnapshot(decodeURIComponent(new URL(streamUrl).pathname.split('/').at(-1)!));
+      },
       // SDK schedules only after local writes, suppresses a competing writer,
       // and checks the remote snapshot before exporting a new one.
       canUpload: () => !closed && !ledgerBlocked && !keyUpdateRequired,
@@ -572,6 +597,7 @@ async function openWorkspace(
       closed = true;
       return (closeReceipt ??= (async () => {
         await refresh;
+        await Promise.allSettled([...snapshotFlights]);
         await Effect.runPromise(Scope.close(scope, Exit.void));
       })());
     },

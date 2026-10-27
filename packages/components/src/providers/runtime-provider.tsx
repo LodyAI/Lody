@@ -117,6 +117,7 @@ const resolveRuntimeEagerSyncSurface = (): EagerSyncSurface => {
 export function RuntimeProvider({ children }: { children: ReactNode }) {
   const platform = usePlatform();
   const { t } = useTranslation();
+  const [snapshotRecoveryWorkspace, setSnapshotRecoveryWorkspace] = useState<string | null>(null);
   const [keyUpdateWorkspace, setKeyUpdateWorkspace] = useState<string | null>(null);
   // Use workspaceSlug for runtime initialization (available immediately from URL)
   // Use workspaceId for WebSocket connections (requires server response)
@@ -531,6 +532,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
     }
 
     setKeyUpdateWorkspace(null);
+    setSnapshotRecoveryWorkspace(null);
     let disposed = false;
     // Set when background verification closes a provisionally opened runtime.
     let retired = false;
@@ -722,6 +724,10 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
               epoch: status.epoch,
               rotationRequired: status.rotationRequired,
               onKeyUpdateRequired: () => setKeyUpdateWorkspace(effectiveWorkspaceId),
+              onSnapshotRecoveryChange: (pending) => {
+                if (!disposed && !retired)
+                  setSnapshotRecoveryWorkspace(pending ? effectiveWorkspaceId : null);
+              },
               authToken: () => tokenRef.current,
             });
           }
@@ -933,6 +939,11 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
       {keyUpdateWorkspace === runtime?.workspaceId && (
         <div role="status">{t('e2ee.content.keyUpdateRequired')}</div>
       )}
+      {snapshotRecoveryWorkspace !== null &&
+        (snapshotRecoveryWorkspace === runtime?.workspaceId ||
+          snapshotRecoveryWorkspace === workspaceId) && (
+          <div role="status">{t('e2ee.content.snapshotRecoveryPending')}</div>
+        )}
       {children}
       <SessionPendingSendsHost runtime={runtime} />
     </>

@@ -34,6 +34,7 @@
   "e2ee.localAgent.preparationPending": "本机 Agent 的设置结果尚未确认，请重试查看状态。",
   "e2ee.localAgent.approvedRetry": "你已确认授权，但尚未确认完成。请重试以核对状态。",
   "e2ee.localAgent.retryHelp": "本机 agent 暂时不可用，请重试。",
+  "e2ee.content.snapshotRecoveryPending": "正在请求其他设备重新上传快照，同步将自动重试。",
   "e2ee.content.keyUpdateRequired": "需要更新密钥。你的编辑已保存在这台设备上。",
   "sessions.fileLinks.chooseTitle": "选择文件",
   "sessions.fileLinks.chooseDescription": "此链接在多个工作树中都有匹配文件，请选择要打开的版本。",

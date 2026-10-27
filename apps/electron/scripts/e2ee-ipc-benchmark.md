@@ -100,9 +100,10 @@ Measured on darwin arm64, Electron 44.9.3 / embedded Node 24.22.0:
 Median ratio: **1.4046×**, below the 1.5× goal in this synthetic trial. This is a
 snapshot-plus-suffix comparison, not encrypted full history versus ordinary
 snapshots. An earlier single-write trial with three signature passes measured
-1.5596×. The final snapshot reader verifies the owned frame once before key
-lookup, checks AEAD, and checks current writer permission again against a genuine
-ledger continuation; updates retain their existing path.
+1.5596×. This measurement precedes the owner's historical-signer read rule and
+automatic repair change; it is not a fresh measurement of that revision. The
+current reader verifies the owned frame once before key lookup, checks AEAD and
+genuine ledger continuation; updates retain their existing path.
 
 Matched full-history trials with 2, 20 and 200 revisions did not complete within
 the 90-second harness bound, including after disabling hidden-window throttling.

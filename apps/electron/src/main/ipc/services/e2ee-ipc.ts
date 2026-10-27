@@ -652,7 +652,11 @@ export class E2eeIpc extends IpcService {
     }
   }
   @IpcMethod()
-  async contentStreamsToken(workspaceId: string, rejectedToken?: string) {
+  async contentStreamsToken(
+    workspaceId: string,
+    rejectedToken?: string,
+    requestSnapshotFor?: string
+  ) {
     const id = sender()
     const access = await withDesktopE2eeAccount((owner) =>
       owner.readers.get(workspaceId)?.has(id)
@@ -668,7 +672,8 @@ export class E2eeIpc extends IpcService {
       cloud.client.contentStreamsToken({
         workspaceId,
         credential: access.credential,
-        ...(rejectedToken ? { rejectedToken } : {})
+        ...(rejectedToken ? { rejectedToken } : {}),
+        ...(requestSnapshotFor ? { requestSnapshotFor } : {})
       })
     )
     if (getIpcServiceDeps().authService.getCachedSessionIdentity().userId !== access.accountId)

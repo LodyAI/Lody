@@ -8,12 +8,7 @@ import * as Bytes from '../foundation/bytes';
 import { disposeEpochKey } from '../foundation/epoch-key';
 import { keyId } from '../foundation/identifiers';
 import { ContentError } from '../foundation/errors';
-import {
-  contentPermissions,
-  epochHistoryPacket,
-  requireLedgerContinuation,
-  type LedgerView,
-} from '../ledger';
+import { epochHistoryPacket, requireLedgerContinuation, type LedgerView } from '../ledger';
 import { commitEpochKey } from '../keys/history';
 import type { DeviceSigner } from '../foundation/signing';
 import {
@@ -148,15 +143,6 @@ export function makeStreamsUpdateBinding(input: {
             ? 'flock-snapshot'
             : 'flock-update',
     });
-    const snapshotWriter = (view: LedgerView, frame: Uint8Array) =>
-      Result.gen(function* () {
-        const device = yield* Bytes.signingPublicKey(frame.subarray(7, 39));
-        const permissions = yield* Result.mapError(contentPermissions(view, device), () =>
-          error('unauthorized')
-        );
-        if (!permissions.mayWriteDocument) return yield* Result.fail(error('unauthorized'));
-        return undefined;
-      });
     const withKey = <A, E, R>(
       view: LedgerView,
       number: number,
@@ -244,7 +230,6 @@ export function makeStreamsUpdateBinding(input: {
             const authenticated = yield* Effect.fromResult(
               authenticateDocument(view, scope(metadata.epoch, selected.kind), frame, binding)
             );
-            if (selected.kind === 'snapshot') yield* Effect.fromResult(snapshotWriter(view, frame));
             return yield* withKey(view, metadata.epoch, selected.kind, (key) =>
               Effect.gen(function* () {
                 const opened = yield* Effect.fromResult(
@@ -280,18 +265,17 @@ export function makeStreamsUpdateBinding(input: {
                       )
                         return yield* error('invalid-snapshot-offset');
                       const latest = yield* ledger();
-                      yield* Effect.fromResult(
-                        // ledger() proved that latest extends the authenticated view.
-                        // The owned frame has not changed; only current permission can change.
-                        selected.kind === 'snapshot'
-                          ? snapshotWriter(latest, frame)
-                          : authenticateDocument(
-                              latest,
-                              scope(metadata.epoch, selected.kind),
-                              frame,
-                              binding
-                            )
-                      );
+                      // The owned snapshot frame was authenticated before key lookup.
+                      // Genuine ledger continuation preserves its historical author.
+                      if (selected.kind !== 'snapshot')
+                        yield* Effect.fromResult(
+                          authenticateDocument(
+                            latest,
+                            scope(metadata.epoch, selected.kind),
+                            frame,
+                            binding
+                          )
+                        );
                       return new Uint8Array(plaintext);
                     }),
                   (plaintext) => Effect.sync(() => plaintext.fill(0))
