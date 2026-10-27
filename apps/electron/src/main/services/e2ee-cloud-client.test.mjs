@@ -1,3 +1,4 @@
+import { E2eeMemberRemovedError } from './e2ee-cloud-errors.mts'
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { createPrivateKey, createPublicKey, sign } from 'node:crypto'
@@ -793,3 +794,27 @@ for (const code of ['e2ee_staging_configuration', 'e2ee_projection_corrupt'])
       )
     )
   })
+
+void test('only authenticated whole-member rejection carries the terminal local deletion signal', async () => {
+  for (const code of ['e2ee_member_removed', 'e2ee_device_revoked', 'unauthorized']) {
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const client = yield* build(async () =>
+            Response.json(
+              { status: 'error', errorMessage: 'synthetic-private-cause', errorData: { code } },
+              { status: 560 }
+            )
+          )
+          const result = yield* Effect.result(client.contentStreamsToken(access))
+          assert.equal(result._tag, 'Failure')
+          assert.equal(
+            result.failure instanceof E2eeMemberRemovedError,
+            code === 'e2ee_member_removed'
+          )
+          assert.equal(JSON.stringify(result.failure).includes('synthetic-private-cause'), false)
+        })
+      )
+    )
+  }
+})

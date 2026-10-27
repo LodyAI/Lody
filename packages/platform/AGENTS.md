@@ -41,6 +41,7 @@ telemetry, or managed-runtime downloads, as routed by the root instructions.
 - `./host-keys` is host-only and remains unconnected until the crypto and host
   adapters are reviewed. CLI assembly receives machine identity only; never grant
   it personal management operations. No generic private export or arbitrary signing.
+- Credential-confirmed member removal is the explicit retention exception: match the originating identity, drain only that workspace and erase its local content/keys. Ordinary failures never authorize deletion.
 - Failure, scope close, logout and ordinary cache cleanup must not delete identity
   keys. Preserve uncertain failure reasons and writes. Personal devices never use file protection; machine-only custody may select file protection at first creation under the owner-approved M1 policy, never on reopen.
 - Native fixtures use random UUIDs and isolated test keychains only. Verify exact

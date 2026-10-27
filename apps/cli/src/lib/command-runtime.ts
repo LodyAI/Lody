@@ -471,6 +471,10 @@ export async function withWorkspaceManager<T>(
     },
     async () => {
       let manager: LoroDocumentManager;
+      let resolveRemovalOwner: (value: LoroDocumentManager | null) => void = () => {};
+      const removalOwner = new Promise<LoroDocumentManager | null>((resolve) => {
+        resolveRemovalOwner = resolve;
+      });
       const e2ee =
         workspace.contentMode === 'e2ee'
           ? await (
@@ -481,6 +485,9 @@ export async function withWorkspaceManager<T>(
               genesisHash: workspace.genesisHash ?? '',
               cloud: createCloudE2eePort({ token: commandAuth.token, authBaseUrl, logger }),
               onUnavailable: () => logger.debug('e2ee_background_unavailable'),
+              onRemoved: async () => {
+                await (await removalOwner)?.cleanUp();
+              },
             })
           : undefined;
       manager = await LoroDocumentManager.create(
@@ -506,6 +513,7 @@ export async function withWorkspaceManager<T>(
           ),
         }
       ).catch(async (error: unknown) => {
+        resolveRemovalOwner(null);
         // The manager owns `e2ee.close()` only once created; otherwise close the
         // opened custody/history/refresh owner here, keeping the original error.
         await e2ee?.close().catch((cleanup: unknown) => {
@@ -513,6 +521,7 @@ export async function withWorkspaceManager<T>(
         });
         throw error;
       });
+      resolveRemovalOwner(manager);
       // E2EE local acceptance never waits for a token or network connection.
       if (e2ee)
         void manager

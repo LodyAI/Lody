@@ -32,6 +32,7 @@ import {
   rpcDeliveredTurnsAtom,
 } from '@/atoms/session-dispatch-delivery';
 import { desktopWindowId } from '@/lib/desktop-window';
+import { encryptedLocalNamespace, type E2eeLocalDataIdentity } from '../lib/e2ee-local-data';
 import { navigationSidebarHiddenAtom } from '@/atoms/layout-state';
 import {
   getMachineRoomId,
@@ -202,13 +203,20 @@ export type WorkspaceRuntimeAnalyticsEvent = {
 
 export function resolveWorkspaceRuntimeCacheIdentity(
   workspaceId: WorkspaceId,
-  windowId: string
+  windowId: string,
+  identity?: E2eeLocalDataIdentity
 ): {
   namespace: string;
   repoDbName: string;
   remoteCursorDbName: string;
 } {
-  const namespace = windowId ? `${workspaceId}:${windowId}` : workspaceId;
+  if (identity && identity.workspaceId !== workspaceId)
+    throw new Error('e2ee_local_identity_mismatch');
+  const namespace = identity
+    ? encryptedLocalNamespace({ ...identity, windowId })
+    : windowId
+      ? `${workspaceId}:${windowId}`
+      : workspaceId;
   return {
     namespace,
     repoDbName: `lody-loro-repo-db-${namespace}`,
@@ -223,6 +231,7 @@ export type WorkspaceE2eeTransport = {
 type RuntimeDeps = {
   content: WorkspaceStreamsContent;
   e2ee?: WorkspaceE2eeTransport;
+  e2eeLocalIdentity?: E2eeLocalDataIdentity;
   /** Cancels an initialization retired by the provider before publication. */
   signal?: AbortSignal;
   accountId?: string | null;
@@ -473,7 +482,16 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
   deps.signal?.throwIfAborted();
   const protectedContent = deps.content.mode === 'protected';
   if (protectedContent && !deps.e2ee) throw new Error('e2ee_transport_unavailable');
-  const cacheIdentity = resolveWorkspaceRuntimeCacheIdentity(deps.workspaceId, desktopWindowId());
+  if (
+    protectedContent &&
+    (!deps.e2eeLocalIdentity || deps.e2eeLocalIdentity.accountId !== deps.accountId)
+  )
+    throw new Error('e2ee_local_identity_required');
+  const cacheIdentity = resolveWorkspaceRuntimeCacheIdentity(
+    deps.workspaceId,
+    desktopWindowId(),
+    protectedContent ? deps.e2eeLocalIdentity : undefined
+  );
   const createDeferred = <T>() => {
     let resolve: ((value: T | PromiseLike<T>) => void) | undefined;
     let reject: ((reason?: unknown) => void) | undefined;
@@ -5408,6 +5426,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
       ),
     accountId: deps.accountId ?? `local:${workspaceId}`,
     workspaceId,
+    ...(protectedContent ? { localIdentity: deps.e2eeLocalIdentity } : {}),
     paused: !initialMetaSyncCompleted,
     runtime: {
       repo,

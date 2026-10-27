@@ -17,8 +17,8 @@ Translation: current
 - 加密账号目录只提供导航和展示资料，不决定设备权限。可选目录故障不能卸载健康的普通工作区。返回已确认的普通路由时，即使故障中路由重新挂载，也会清理加密选择；未知加密目标保持拒绝访问。
 - 原生团队运行时与已认证服务分别审查。本 UI PR 独立基于 main，携带可选协议声明以独立构建；旧主进程显示升级提示。原生 PR 合入后 rebase 应删除重叠声明。此分支没有叠入其他 PR。
 - 设置中提供邀请、逐项申请审批、撤销邀请和 Owner 升级成员。待处理链接申请复用 PR20-D 的设置提醒，按已验证管理设备、账号和工作区隔离；队列失败不能隐藏换代提醒。成员移除与换代由另一工作流负责。
-- 角色调整仅调用 #1982 的可选 `setMemberRole(workspaceId, membershipId, role)` 端口，不再保留平行的 `promoteMember` 端口或签名 owner。main 尚无该配套时，升权操作不可用。加入 DTO 统一位于 `cloud-api/src/e2ee-members.ts`，与独立原生配套的声明完全相同。
-- #1979 负责账本 capability 状态及快照、保留状态、摘要 v4。本 UI 不增加账本状态 schema 或快照版本，解码委托 core。共享的 `memberRole` 状态字段合并一份，并保留 #1982 的身份字段和原生配套的 reader 归属字段。此分支已 rebase 到包含该协议的 main `6a53ad05`，没有叠入其分支，也未另升格式版本。
+- 角色调整复用已合入的 #1982 `setMemberRole(workspaceId, membershipId, role)` 和原生管理日志，共享 provider 转发真实 IPC 方法。本 UI 不另声明角色端口或签名 owner，回归等待真实命令的结果再显示升权成功。加入传输 DTO 与 #1985 共用唯一规范模块 `cloud-api/src/e2ee-members.ts`。
+- #1979 负责账本 capability 状态及快照、保留状态、摘要 v4。本 UI 不增加账本状态 schema 或快照版本，解码委托 core。分支合并当前 main，保留 #1982 的账号、genesis、设备本地存储隔离及真实角色和身份字段。加入设备进入现有运行时接纳流程，原生加入和标记清理由 #1985 接通。
 
 ## 证据与限制
 

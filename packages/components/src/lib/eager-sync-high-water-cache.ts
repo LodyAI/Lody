@@ -293,3 +293,30 @@ export async function createEagerSyncHighWaterStore(
     close: () => db.close(),
   };
 }
+
+/** Remove one retired renderer namespace, after its high-water owner closes. */
+export async function removeEagerSyncHighWaterNamespace(cacheNamespace: string): Promise<void> {
+  const factory = getBrowserIndexedDb();
+  if (!factory) return;
+  const db = await openHighWaterDb(factory);
+  try {
+    const tx = db.transaction(EAGER_SYNC_HIGH_WATER_STORE_NAME, 'readwrite');
+    const completed = new Promise<void>((resolve, reject) => {
+      tx.oncomplete = () => resolve();
+      tx.onabort = () => reject(tx.error);
+      tx.onerror = () => {};
+    });
+    const cursor = tx
+      .objectStore(EAGER_SYNC_HIGH_WATER_STORE_NAME)
+      .index(EAGER_SYNC_HIGH_WATER_WORKSPACE_INDEX)
+      .openCursor(IDBKeyRange.only(cacheNamespace));
+    cursor.onsuccess = () => {
+      if (!cursor.result) return;
+      cursor.result.delete();
+      cursor.result.continue();
+    };
+    await completed;
+  } finally {
+    db.close();
+  }
+}

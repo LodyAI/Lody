@@ -70,8 +70,11 @@ export interface E2eeRuntimeStatus {
   readonly rotationRequired: boolean;
   /** Ephemeral main-process reader owner; never persisted or an authorization credential. */
   readonly readerOwner?: string;
-  readonly deviceKind: 'personal' | 'machine' | 'recovery' | null;
+  /** Current self membership, derived only from the host's verified ledger. */
+  readonly signingPublicKey?: string;
+  readonly membershipId?: string | null;
   readonly memberRole?: 'owner' | 'admin' | 'member' | 'guest' | null;
+  readonly deviceKind: 'personal' | 'machine' | 'recovery' | null;
   readonly hasCurrentKey: boolean;
   /** Confirmed retained key usable for sends while current-key reception retries. */
   readonly writeEpoch?: number | null;
@@ -108,6 +111,8 @@ export interface E2eeWorkspaceRuntime {
   managementState?(workspaceId: string): Promise<E2eeManagementState>;
   updateKeys?(workspaceId: string): Promise<void>;
   revokeDevice?(workspaceId: string, signingPublicKey: string): Promise<void>;
+  /** Explicit management intent; the host signs once and retains the exact original. */
+  removeMember?(workspaceId: string, membershipId: string): Promise<void>;
   /** Owner-only Admin promotion/demotion, checked against the latest verified ledger. */
   setMemberRole?(
     workspaceId: string,

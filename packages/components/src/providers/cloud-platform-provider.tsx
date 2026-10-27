@@ -198,6 +198,11 @@ export function CloudPlatformProvider({ children }: { children: ReactNode }) {
                 native.claimPersonalJoin(workspaceId, pairingSessionId),
               cancelPersonalJoin: (workspaceId, pairingSessionId) =>
                 native.cancelPersonalJoin(workspaceId, pairingSessionId),
+              removeMember: (workspaceId, membershipId) =>
+                native.removeMember(workspaceId, membershipId),
+              setMemberRole: (workspaceId, membershipId, role) =>
+                native.setMemberRole(workspaceId, membershipId, role),
+
               beginRemoteMachinePairing: (workspaceId) =>
                 native.beginRemoteMachinePairing(workspaceId),
               inspectRemoteMachinePairing: (workspaceId, pairingSessionId) =>

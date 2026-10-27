@@ -55,6 +55,7 @@ interface LodyOptions {
   ) => Promise<void>;
   onFatalAuthFailure?: (error: Error) => void;
   onStorageWriteFailure?: (error: Error) => void;
+  onEncryptedMemberRemoved?: (owner: Lody) => Promise<void>;
   onProcessLifecycleAction?: (action: MachineProcessLifecycleAction) => void;
   workspaceWatchCoordinator?: WorkspaceWatchCoordinatorApi;
   readWorkspaceAccess?: () => DaemonWorkspaceAccess;
@@ -72,6 +73,8 @@ export class Lody {
   private supportRegistryAgentTypes: string[];
   private cleanedUp = false;
   private encryptedWorkspace?: CliE2eeWorkspaceLegacy;
+  private memberRemoved = false;
+  private startReceipt?: Promise<void>;
   private builtinAgentConfigRetryTimer: ReturnType<typeof setTimeout> | undefined;
   private pendingBuiltinAgentConfigRetryCliTypes = new Set<CliType>();
   private builtinAgentConfigRetryAttempt = 0;
@@ -90,6 +93,10 @@ export class Lody {
       throw new Error('workspace_mode_unsupported');
     const encrypted = options.contentMode === 'e2ee';
     let e2ee: CliE2eeWorkspaceLegacy | undefined;
+    let resolveRemovalOwner: (value: Lody | null) => void = () => {};
+    const removalOwner = new Promise<Lody | null>((resolve) => {
+      resolveRemovalOwner = resolve;
+    });
     if (!workspaceSupports({ mode: encrypted ? 'protected' : 'plaintext' }, 'rpc')) {
       if (!options.genesisHash || !options.cloudPort.e2ee)
         throw new Error('e2ee_workspace_unavailable');
@@ -100,6 +107,15 @@ export class Lody {
         genesisHash: options.genesisHash,
         cloud: options.cloudPort.e2ee,
         onUnavailable: () => options.logger.debug('e2ee_background_unavailable'),
+        onRemoved: async () => {
+          const owner = await removalOwner;
+          if (!owner) return;
+          owner.memberRemoved = true;
+          await owner.startReceipt?.catch(() => undefined);
+          if (options.onEncryptedMemberRemoved) await options.onEncryptedMemberRemoved(owner);
+          else await owner.cleanup();
+          if (!owner.startReceipt) await owner.documentManager.cleanUp();
+        },
       });
       // Unimplemented channels cannot inherit their ordinary plaintext sinks.
       options = {
@@ -157,11 +173,13 @@ export class Lody {
           onStorageWriteFailure: options.onStorageWriteFailure,
         })
     ).catch(async (error) => {
+      resolveRemovalOwner(null);
       await e2ee?.close();
       throw error;
     });
     const lody = new Lody(options, manager);
     lody.encryptedWorkspace = e2ee;
+    resolveRemovalOwner(lody);
     return lody;
   }
 
@@ -218,6 +236,11 @@ export class Lody {
   }
 
   async start(): Promise<void> {
+    if (this.memberRemoved) throw new Error('e2ee_member_removed');
+    return (this.startReceipt = this.startRuntime());
+  }
+
+  private async startRuntime(): Promise<void> {
     // Warm the login-shell env probe (~100-300ms) concurrently with startup so
     // synchronous terminal environment callbacks usually read a populated PATH.
     // ACP startup awaits the same cached probe before spawning. The Legacy cache

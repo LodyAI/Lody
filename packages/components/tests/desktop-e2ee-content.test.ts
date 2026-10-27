@@ -265,3 +265,50 @@ describe('desktop E2EE content epoch safety', () => {
     }
   });
 });
+
+it.each(['token', 'snapshot'] as const)(
+  'native member removal from %s retires content without waiting on the failed request',
+  async (source) => {
+    let retire = () => {};
+    const retired = new Promise<void>((resolve) => {
+      retire = resolve;
+    });
+    const access = createDesktopE2eeContent({
+      workspaceId: 'workspace',
+      genesisHash: '11'.repeat(32),
+      epoch: 0,
+      authToken: () => 'synthetic-login',
+      onMemberRemoved: () => retire(),
+      runtime: {
+        contentStreamsToken: async () => {
+          throw new Error(
+            "Error invoking remote method 'e2ee.contentStreamsToken': Error: e2ee_member_removed"
+          );
+        },
+      } as unknown as E2eeWorkspaceRuntime,
+    });
+    const token = access.e2ee.createTokenProvider(new AbortController().signal);
+    try {
+      if (source === 'token') await expect(token.getToken()).rejects.toThrow();
+      else
+        access.content.snapshotUpload?.onSnapshotRecovery?.(
+          'https://synthetic.invalid/stream/doc',
+          true
+        );
+      await retired;
+      expect(await access.content.snapshotUpload?.canUpload()).toBe(false);
+      const room = access.content.resolve({ kind: 'doc', docId: 'session' });
+      if (room.mode !== 'protected') throw new Error('expected protected room');
+      await expect(
+        room.config.provider.seal({
+          context,
+          plaintext: new Uint8Array([1]),
+          additionalData: (header) => header,
+        })
+      ).rejects.toThrow('e2ee_member_removed');
+    } finally {
+      await token.close();
+      await access.close();
+    }
+  }
+);

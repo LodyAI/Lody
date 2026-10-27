@@ -776,6 +776,34 @@ export const makeNodeE2eeCustody = Effect.fnUntraced(function* (input: {
           return decodeDevice(genesis, kind, await readOwned(pathFor(genesis, kind), 32768));
         })
       ),
+    /** Terminal host-confirmed removal only, after all workspace users drain. Deletes
+     * this exact incarnation; a different retained key is a later identity and is spared.
+     * Missing originals make cleanup retryable, never recreate them. Shared KEK remains. */
+    forgetDevice: (
+      inputGenesis: Bytes.GenesisHash,
+      key: Bytes.SigningPublicKey,
+      kind: 'personal' | 'machine'
+    ) =>
+      native(() =>
+        track(async () => {
+          if (!validKind(kind)) throw fail('invalid-input');
+          const genesis = ownGenesis(inputGenesis);
+          const file = pathFor(genesis, kind);
+          try {
+            const retained = await decodeDevice(genesis, kind, await readOwned(file, 32768));
+            if (!retained.publicKey.equals(key)) return false;
+          } catch (cause) {
+            if ((cause as NodeJS.ErrnoException).code !== 'ENOENT') throw cause;
+          }
+          await unlink(file).catch((cause) => {
+            if (cause.code !== 'ENOENT') throw cause;
+          });
+          await unlink(credentialPath(genesis, key)).catch((cause) => {
+            if (cause.code !== 'ENOENT') throw cause;
+          });
+          return true;
+        })
+      ),
     stop: () =>
       Effect.sync(() => {
         closed = true;

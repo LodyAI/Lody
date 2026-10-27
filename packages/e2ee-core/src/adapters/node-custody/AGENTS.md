@@ -25,3 +25,8 @@ publish separate originals and never reuse another identity's credential.
 Missing KEKs with surviving originals return identity-lost; access/mode failures
 return permissions for explicit repair. Host reset archives a closed identity as a
 whole before opening independent custody; generic custody never replaces originals.
+
+Terminal credential-confirmed member removal may call `forgetDevice` only after
+workspace users drain. Compare the exact retained signing key; a later identity
+is spared. Keep shared KEK and other workspaces. This exception never permits
+ordinary failure/cache cleanup or unknown outcomes to discard originals.
