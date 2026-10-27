@@ -575,7 +575,7 @@ export const makeCliE2eeRuntime = Effect.fn('CliE2eeRuntime.open')(function* (op
                 yield* receiver.fetchAndInstall(cursor, 100).pipe(
                   Effect.catchTag('MailboxInstallError', (error) =>
                     Effect.gen(function* () {
-                      if (repair) {
+                      if (repair && error.cryptographicRejection) {
                         yield* repair.enqueue(
                           `rejected:${error.epoch}:${error.frameDigest}`,
                           error.frameDigest

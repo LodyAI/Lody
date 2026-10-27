@@ -21,7 +21,8 @@ Behavior: [workflows](../../../docs/workflows.md). Ports: [services](../../../do
   commitment checks, including after reopen; a disk phase or old report never
   stands in. Queued reports retry their original bytes without re-signing. Copy
   and validate a whole fetched page before any write; a failed install returns no
-  `next`. `MailboxInstallError` diagnoses the exact frame; it never rejects it.
+  `next`. Skip routing/hint mismatches for this fetch, without saving/rejecting them.
+  `MailboxInstallError` diagnoses the exact frame; it never rejects it.
 - Discovery/repair revisions and mailbox statuses are hints, never authority. Only
   a genuine current ledger ends a task as Obsolete/Revoked. Finite pages let blocked
   work be skipped without starving later tasks; no hidden loop.

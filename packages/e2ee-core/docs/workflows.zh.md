@@ -76,6 +76,7 @@ results() / acknowledge(id)   已结束任务保留到确认为止
 
 - 报告是签名的安装声明，不是托管证明。
 - `fetchAndInstall` 在写入任何内容前复制并校验整页；任一安装失败时不返回 `next`。`MailboxInstallError` 指明失败的帧（发送者、`frameDigest`），由应用决定是否请求修复。
+- 邮箱页中的路由无法解析，或 sender/工作区/epoch/收件人提示与信封原件不一致时，仅跳过本次，不登记任务、不拒绝 digest；正常元数据恢复后仍可重试。同页后续信封继续通过完整验签、权限、HPKE、commitment 检查。`processed` 是扫描行数，不是已安装密钥数量；实际安装失败仍不返回 `next`。
 - 只有真实的账本变化才把任务结束为 `Obsolete` 或 `Revoked`。
 
 ## KeyRepair
@@ -175,3 +176,5 @@ retained 起点包含本调用方导出的完整 v2 状态，以及紧接其后�
 原始凭证的 SHA-256（32）。调用方必须传入可信的会话和 genesis；签名有效不代表设备已入账，
 也不能代替持钥证明。验证沿用严格 Ed25519 规则。创建者的第一台设备不需要这份证明。
 `test/foundation.test.ts` 保存固定签名向量，并检查所有上下文字段被替换时都拒绝。
+
+桌面维护的错误分类、独立分页与终态消费见[收发钥可用性](../../../.agents/notes/implemented/bug-fix/2026-10-27-e2ee-key-maintenance-availability.zh.md)。`MailboxInstallError.cryptographicRejection` 仅标记信封验证阶段确定的拒绝；本地写入、报告签名和未知原生错误不能授权拒绝信封。
