@@ -551,6 +551,46 @@ Node 不支持的 SQLite 套件及 Git 身份断言处停止，CLI 332 个文件
 构建和隔离 smoke 现已完成引导、代理配置、Explore 到本地聊天，并保留四张真实截图。
 这是仅迁移后的应用运行证据，不解决历史 Explore 像素差异，也不替代组件配对验收。
 
+### Onboarding 覆盖层、会话拖拽与表格反馈
+
+三个文件实际移除 23 个工具类：Overlay 13→1、桌面布局 16→9、MarkdownTable 5→1。
+保留覆盖层准确的奶油色、元素局部 slate/spacing 变量、拖动条覆盖、拖拽柄 alpha 表达式
+与变量 fallback。表格保留命名外层 group 选择器，任意匹配祖先仍能显示复制按钮。
+DOM、回调、hooks 与公开 API 不变；独立源码审查未发现 P0/P1。
+
+公开组合边界限制本批范围。WorkspaceCard 的真实 StyleX 调用方探针确认现有六个工具类
+优先于冲突的 opaque 调用方类。Backdrop 因对应公开边界尚未验证，保留四个。
+搜索保留 13 个导出的背景/ring/shadow 工具类，会话面板保留 23 个：`cn` 在两个参数顺序
+中解析冲突工具类，opaque StyleX 导出无法保持这一合同。不能在全部保留的工具类下增加
+无效样式并计作迁移；这些单元须先定义并验证保持当前调用方行为的组合合同。
+
+`surfaces-acceptance.html` 展示 308 对：132 primary、174 native、两个未改
+WorkspaceCard 调用方 supplemental 控制。302 对 PNG 字节一致；六对保留 60,756 个
+原始差异像素，其中 38,281 个超过既定阈值，均保持 **OPEN**。布局/搜索分别保留四个/
+一个低于阈值的像素，记录字段相同。38,074 个配对节点中，Onboarding 两个 Back 状态
+有 1,512 条不同节点记录／2,275 个 scalar fields：约 0.01px camera transform 传播至
+子节点及 scrollWidth。两个 Skip 状态记录字段一致但图片不同。其余 42 对 Onboarding
+截图字节一致，包含局部变量与真实触屏探针。
+
+两次限定的原源／最终源控制另保留 14 张 PNG。两侧 Skip 控制图片彼此相同，但都是
+第三种变体，没有复现任一正式整图。原源控制复现了最终 camera matrix，整图仍不同。
+未改摄像机采用真实 rAF 积分、DOM anchor 回算与小数截位；这些证据不能证明栅格根因。
+保留正式差异，后续应调查确定性的 camera/form readiness 再宣布视觉等价，不改摄像机
+设计，也不加 CSS 补偿。
+
+布局／表格原始基线使用不可变构建 6089。Onboarding 修正夹具的真实 preview API 和
+选择器后另建原始 Overlay 构建 6091，其中已含另两组候选。最终均采自 6090。
+Overlay 对两种 requested theme 都实际固定浅色，符合路由合同。两侧 native 都完成
+46/46，固定 Date、保留真实 timers/rAF，明确暂停无限 WAAPI 图标。通用完整故事序列
+两侧仍各为 12/32 帧及四个初始透明度 readiness 失败，作为独立失败证据保留，不接受
+空白帧作为成功基线。
+
+当前组件测试 618 文件／6,137 用例全部通过；最终归属测试、类型、typed lint、格式和
+独立边界通过。根检查仍失败于既有 CLI Git 身份用例。实际 Electron 重建及 onboarding/
+配置/Explore/本地聊天四图 smoke 通过，属于 **after-only**；历史应用差异未关闭。
+自包含报告保留原始 PNG 字节和明确标注的派生差异图，醒目标记部分验收，并保留独立
+完整字段证明。
+
 ## 后续工作
 
 基于编译器的[用量统计](../../../../packages/components/scripts/tailwind-usage.mjs)
@@ -579,7 +619,16 @@ component 扫描另列 605 个未解析表达式。后续七文件再将 compone
 共 187 个文件，另有 765 个未解析表达式。新识别的历史 helper 用法解释了基线上调；
 这些数值仍是下界，不是全项目完成百分比。图片／Markdown／侧栏批次以同一方法再减少
 33 处，留下 2,107 处（components 1,615、`src/ui` 487、routes 5），186 文件及 765 个
-未解析表达式。WebWorkspaceLayout 仍延期，等待真实 sidebar/runtime/router 组合的
+未解析表达式。
+
+盘点工具现在先合并纯字面量字符串拼接，再交给编译器验证；不会求值动态或数字操作数。
+独立真实编译器探针检查跨操作数 token、源码位置去重及未解析值。这新识别出 32 处既有
+Markdown 基础类，并解析了一个旧表达式：修正后的基线为 2,139 处、186 文件和 764 个
+未解析表达式。Onboarding／布局／表格批次在同一口径下移除 23 处，留下 **2,116 处**
+（components 1,624、`src/ui` 487、routes 5），仍为 186 文件及 764 个未解析表达式。
+与旧快照 2,107 相比的增加来自盘点修正，没有新增 Tailwind 样式；这些数值都不是完成率。
+
+WebWorkspaceLayout 仍延期，等待真实 sidebar/runtime/router 组合的
 适度生产组件夹具，避免以替身 UI 声称验收。
 
 未使用的 `src/ui/sidebar.tsx` 保留 324 处，`src/ui/index.ts` 没有重导出它；

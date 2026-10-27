@@ -193,7 +193,23 @@ The compiler-backed [inventory](../../scripts/tailwind-usage.mjs) also inspects
 `withClassName`'s second argument, including calls spread onto a component. Its
 first argument contains StyleX props and is not a utility expression. Recount
 both sources with the same scanner version; older snapshots missed this helper
-and cannot establish the current batch's removal count.
+and cannot establish the current batch's removal count. Pure literal string
+concatenations are joined before tokenization, including tokens split across
+operands. Mixed runtime or numeric operands remain unresolved; the scanner never
+evaluates expressions. Recount the baseline when this recognition changes.
+
+`session-layout-native.mjs`, `search-table-native.mjs` and
+`onboarding-surface-native.mjs` capture the owned layout, table and onboarding
+fixtures. Keep caller-class precedence, named outer-group hover, resize-handle
+pseudo-elements and clipboard deadlines in the recorded contract. Onboarding
+overlays resolve to light even when the surrounding Storybook preview requests
+dark; record the resolved theme separately. A generic story-sequence capture
+that leaves Motion at its initial opacity is a failed capture, not an acceptable
+blank baseline. Preserve that run alongside independent native-input evidence.
+Its native runner fixes Date while timers and rAF continue, and records explicitly
+paused infinite WAAPI icons per frame. Stable computed fields do not certify the
+custom tour camera's private rest state or screenshot-time raster equivalence;
+retain changed camera coordinates and PNGs in the report.
 
 `file-image-native.mjs`, `markdown-links-native.mjs` and
 `workspace-shell-native.mjs` use the same phase/immutable-URL arguments.

@@ -4,7 +4,8 @@
  * node scripts/tailwind-usage.mjs [--files | --json] [--root <file-or-directory>]
  *
  * Reads JSX class attributes, cn/clsx/cva/twMerge/withClassName calls, local class constants,
- * and complete static template tokens. Each source token is counted once, even
+ * pure literal string concatenations, and complete static template tokens.
+ * Each source token is counted once, even
  * if a constant has several consumers. Runtime values remain unresolved. CSS
  * hooks and group/peer markers emit no utilities and are excluded. Counts measure
  * source usage, not emitted CSS size; JSON lists unresolved expressions.
@@ -62,6 +63,17 @@ function inspect(file, source) {
   const unresolved = new Map();
   const active = new Set();
   const location = (node) => ast.getLineAndCharacterOfPosition(node.getStart(ast)).line + 1;
+  const literalString = (node) => {
+    if (ts.isStringLiteralLike(node)) return node.text;
+    if (ts.isParenthesizedExpression(node) || ts.isAsExpression(node))
+      return literalString(node.expression);
+    if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.PlusToken) {
+      const left = literalString(node.left);
+      const right = literalString(node.right);
+      if (left !== undefined && right !== undefined) return left + right;
+    }
+    return undefined;
+  };
   const visit = (node, callback) => {
     callback(node);
     ts.forEachChild(node, (child) => visit(child, callback));
@@ -116,7 +128,10 @@ function inspect(file, source) {
       collect(node.whenFalse, objectKeys);
     } else if (ts.isBinaryExpression(node)) {
       if (node.operatorToken.kind === ts.SyntaxKind.PlusToken) {
-        unknown(node, 'Concatenated tokens may cross expression boundaries.');
+        const value = literalString(node);
+        if (value === undefined)
+          unknown(node, 'Concatenated tokens may cross expression boundaries.');
+        else tokens(node, value);
       } else if (
         [
           ts.SyntaxKind.AmpersandAmpersandToken,

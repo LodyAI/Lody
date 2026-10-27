@@ -1,0 +1,137 @@
+{
+  "viewports": [
+    {
+      "name": "desktop",
+      "width": 1280,
+      "height": 900
+    },
+    {
+      "name": "narrow",
+      "width": 320,
+      "height": 720
+    },
+    {
+      "name": "iphone",
+      "width": 390,
+      "height": 844,
+      "device": "iPhone 13"
+    }
+  ],
+  "themes": ["light", "dark"],
+  "reducedMotion": "reduce",
+  "locale": "en",
+  "ids": [
+    "components-ownedsearchtablemigration--table",
+    "components-ownedsearchtablemigration--active",
+    "components-ownedsearchtablemigration--inactive",
+    "components-ownedsearchtablemigration--absent",
+    "components-ownedsearchtablemigration--cjk",
+    "components-ownedsearchtablemigration--root-palette",
+    "components-ownedsearchtablemigration--subtree-palette"
+  ],
+  "ready": {
+    "components-ownedsearchtablemigration--table": [
+      {
+        "action": "visible",
+        "selector": "[data-search-table-result]"
+      }
+    ],
+    "components-ownedsearchtablemigration--active": [
+      {
+        "action": "visible",
+        "selector": "[data-search-table-result]"
+      }
+    ],
+    "components-ownedsearchtablemigration--inactive": [
+      {
+        "action": "visible",
+        "selector": "[data-search-table-result]"
+      }
+    ],
+    "components-ownedsearchtablemigration--absent": [
+      {
+        "action": "visible",
+        "selector": "[data-search-table-result]"
+      }
+    ],
+    "components-ownedsearchtablemigration--cjk": [
+      {
+        "action": "visible",
+        "selector": "[data-search-table-result]"
+      }
+    ],
+    "components-ownedsearchtablemigration--root-palette": [
+      {
+        "action": "visible",
+        "selector": "[data-search-table-result]"
+      }
+    ],
+    "components-ownedsearchtablemigration--subtree-palette": [
+      {
+        "action": "visible",
+        "selector": "[data-search-table-result]"
+      }
+    ]
+  },
+  "states": {
+    "components-ownedsearchtablemigration--table": [
+      {
+        "name": "table-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "[data-search-table-long] [data-markdown-table-frame]"
+          }
+        ]
+      },
+      {
+        "name": "copy-keyboard-focus",
+        "steps": [
+          {
+            "action": "movePointer",
+            "x": 2,
+            "y": 2
+          },
+          {
+            "action": "focus",
+            "selector": "[data-search-toggle-open]"
+          },
+          {
+            "action": "press",
+            "selector": "[data-search-toggle-open]",
+            "key": "Tab"
+          }
+        ]
+      }
+    ],
+    "components-ownedsearchtablemigration--active": [
+      {
+        "name": "active-mark-focused",
+        "steps": [
+          {
+            "action": "focus",
+            "selector": "[data-public-active]"
+          }
+        ]
+      },
+      {
+        "name": "caller-mark-focused",
+        "steps": [
+          {
+            "action": "focus",
+            "selector": "[data-public-caller]"
+          }
+        ]
+      },
+      {
+        "name": "container-focused",
+        "steps": [
+          {
+            "action": "focus",
+            "selector": "[data-public-container]"
+          }
+        ]
+      }
+    ]
+  }
+}

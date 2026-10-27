@@ -8,7 +8,12 @@ import { clsx } from 'clsx';
 import * as stylex from '@stylexjs/stylex';
 import { text as textScale } from '@lody/ui/tokens/scales.stylex';
 import { themeColors } from '../../style/theme-colors.stylex';
-import { themeDuration, themeEasing, themeRadius, themeSpace } from '../../style/theme-scale.stylex';
+import {
+  themeDuration,
+  themeEasing,
+  themeRadius,
+  themeSpace,
+} from '../../style/theme-scale.stylex';
 
 const typography = stylex.create({
   table: {
@@ -45,11 +50,13 @@ const typography = stylex.create({
     backgroundColor: 'hsl(var(--background) / 0.9)',
     color: themeColors.mutedForeground,
     backdropFilter: 'blur(8px)',
+    opacity: { default: 0, ':focus-visible': 1, '@media (hover:none)': 1 },
     transitionProperty: 'opacity',
     transitionDuration: themeDuration[150],
     transitionTimingFunction: themeEasing['in-out'],
     '@media (hover: hover)': { ':hover': { color: themeColors.foreground } },
   },
+  copyFeedback: { opacity: 1 },
   glyph: {
     width: themeSpace[3.5],
     height: themeSpace[3.5],
@@ -274,14 +281,9 @@ export function MarkdownTable({ node, children, ...props }: MarkdownTableProps) 
           void handleCopy();
         }}
         className={clsx(
-          // The button shows itself on hover, on focus and on a touch screen:
-          // the group variant has no StyleX equivalent, so it stays Tailwind.
-          'opacity-0',
-          'focus-visible:opacity-100',
+          // Named outer groups can reveal this button without an owned StyleX marker.
           'group-hover/table:opacity-100',
-          '[@media(hover:none)]:opacity-100',
-          copied && 'opacity-100',
-          stylex.props(typography.copyButton).className
+          stylex.props(typography.copyButton, copied && typography.copyFeedback).className
         )}
       >
         {copied ? (

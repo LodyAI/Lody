@@ -1,0 +1,109 @@
+{
+  "viewports": [
+    {
+      "name": "desktop",
+      "width": 1280,
+      "height": 900
+    },
+    {
+      "name": "phone",
+      "width": 390,
+      "height": 844
+    }
+  ],
+  "themes": ["light", "dark"],
+  "reducedMotion": "reduce",
+  "locale": "en",
+  "ids": [
+    "onboarding-ownedonboardingsurfacemigration--overlay-summary",
+    "onboarding-ownedonboardingsurfacemigration--long-overlay-summary",
+    "onboarding-ownedonboardingsurfacemigration--backdrop",
+    "onboarding-ownedonboardingsurfacemigration--caller-backdrop"
+  ],
+  "ready": {
+    "onboarding-ownedonboardingsurfacemigration--overlay-summary": [
+      {
+        "action": "visible",
+        "selector": "[data-onboarding-surface-result]"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => { const result=document.querySelector('[data-onboarding-surface-result]'); const form=document.querySelector('[data-onboarding-form=\"summary\"]'); return result?.dataset.phase==='summary' && result.dataset.resolvedTheme==='light' && form && getComputedStyle(form).opacity==='1' && getComputedStyle(form).transform==='none'; }"
+      }
+    ],
+    "onboarding-ownedonboardingsurfacemigration--long-overlay-summary": [
+      {
+        "action": "visible",
+        "selector": "[data-onboarding-surface-result]"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => { const result=document.querySelector('[data-onboarding-surface-result]'); const form=document.querySelector('[data-onboarding-form=\"summary\"]'); return result?.dataset.phase==='summary' && result.dataset.resolvedTheme==='light' && form && getComputedStyle(form).opacity==='1' && getComputedStyle(form).transform==='none'; }"
+      }
+    ],
+    "onboarding-ownedonboardingsurfacemigration--backdrop": [
+      {
+        "action": "visible",
+        "selector": "[data-onboarding-surface-result]"
+      }
+    ],
+    "onboarding-ownedonboardingsurfacemigration--caller-backdrop": [
+      {
+        "action": "visible",
+        "selector": "[data-onboarding-surface-result]"
+      }
+    ]
+  },
+  "states": {
+    "onboarding-ownedonboardingsurfacemigration--overlay-summary": [
+      {
+        "name": "completion-keyboard-focus",
+        "steps": [
+          {
+            "action": "focus",
+            "selector": "[data-onboarding-form=\"summary\"] button:text-is(\"Enter Lody\")"
+          }
+        ]
+      },
+      {
+        "name": "back-to-providers",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[data-onboarding-form=\"summary\"] button:text-is(\"Back\")"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => { const result=document.querySelector('[data-onboarding-surface-result]'); const form=document.querySelector('[data-onboarding-form=\"providers\"]'); return result?.dataset.phase==='providers' && result.dataset.resolvedTheme==='light' && form && getComputedStyle(form).opacity==='1' && getComputedStyle(form).transform==='none'; }"
+          }
+        ]
+      },
+      {
+        "name": "skip-to-summary",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[data-onboarding-form=\"providers\"] button:text-is(\"Skip for now\")"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => { const result=document.querySelector('[data-onboarding-surface-result]'); const form=document.querySelector('[data-onboarding-form=\"summary\"]'); return result?.dataset.phase==='summary' && result.dataset.resolvedTheme==='light' && form && getComputedStyle(form).opacity==='1' && getComputedStyle(form).transform==='none'; }"
+          }
+        ]
+      },
+      {
+        "name": "completion-requested",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[data-onboarding-form=\"summary\"] button:text-is(\"Enter Lody\")"
+          },
+          {
+            "action": "visible",
+            "selector": "[data-onboarding-surface-result][data-intent=\"Completion requested: summary\"]"
+          }
+        ]
+      }
+    ]
+  }
+}

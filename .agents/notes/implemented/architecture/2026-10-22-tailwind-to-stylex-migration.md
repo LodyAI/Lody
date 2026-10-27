@@ -779,6 +779,59 @@ agent configuration, Explore and local chat, with four real screenshots. This
 is after-only application evidence; it does not resolve historical Explore
 pixel differences or replace paired component acceptance.
 
+### Onboarding overlay, session resize and table feedback
+
+Three files remove 23 confirmed utilities: Overlay 13→1, desktop layout 16→9,
+and MarkdownTable 5→1. Preserve the overlay's exact cream background, local slate
+and spacing variables, drag-strip override, resize alpha expressions and variable
+fallbacks. The table retains its named outer-group selector: any matching
+ancestor can reveal the copy action. DOM, callbacks, hooks and public APIs remain
+unchanged; independent source review finds no P0/P1.
+
+Public composition limits this batch. WorkspaceCard's real StyleX caller probe
+confirms its six existing utilities win over conflicting opaque caller classes.
+Backdrop retains four for the corresponding unverified public caller boundary.
+Search retains 13 exported background/ring/shadow utilities, and conversation
+panels retain 23: `cn` resolves conflicting caller utilities in both argument
+orders, which opaque StyleX exports cannot preserve. Do not count adding styles
+under retained utilities as a migration. Continue those units only after defining
+and verifying a composition contract that preserves current callers.
+
+`surfaces-acceptance.html` contains 308 observed pairs: 132 primary, 174 native
+and two supplemental unchanged-WorkspaceCard caller controls. Only 302 are
+PNG-byte-exact; six retain 60,756 raw pixels, including 38,281 above the unchanged
+threshold. These remain **OPEN**. Layout/search retain four/one below-threshold
+pixels with equal recorded fields. Across 38,074 paired nodes, the two onboarding
+Back states have 1,512 differing node records / 2,275 scalar fields: a roughly
+0.01px camera transform propagates to descendants and scroll width. The two Skip
+states have equal recorded fields but different images. The other 42 onboarding
+pairs are byte-exact, including local-variable and actual touch probes.
+
+Two bounded original/final-source controls retain 14 separate PNGs. Their Skip
+images match each other as a third variant; neither reproduces a formal whole
+image. An original-source control reproduces the final camera matrix, without
+matching its PNG. The unchanged camera uses live rAF integration, DOM-anchor
+measurement and rounded output; this evidence does not prove the raster cause.
+Keep the formal differences and investigate deterministic camera/form readiness
+before declaring visual equivalence; no camera redesign or CSS compensation.
+
+Layout/table original captures use immutable build 6089. Onboarding uses a
+separate original-overlay build 6091 after fixing the fixture's actual preview
+API and selectors; that build already contains the other two candidates. Every
+final capture uses 6090. Overlay resolves light for both requested themes, as its
+route requires. Native 46/46 captures succeed on each side with fixed Date, live
+timers/rAF and explicitly paused infinite WAAPI icons. Generic full-story
+captures still produce 12/32 frames plus four initial-opacity readiness failures
+on both sides. They remain separate failed evidence, not accepted blank frames.
+
+Current component tests pass all 618 files / 6,137 tests; final owning tests,
+types, typed lint, formatting and independent boundaries pass. Root check still
+fails the existing CLI Git-identity test. Actual Electron rebuild and four
+onboarding/configuration/Explore/local-chat smoke images pass as **after-only**
+evidence; historical application differences remain open. The self-contained
+report preserves original PNG bytes and labelled derived masks, with visible
+partial acceptance and separate full-field proofs.
+
 ## Remaining work
 
 Compiler-backed [usage inventory](../../../../packages/components/scripts/tailwind-usage.mjs)
@@ -820,6 +873,17 @@ helper usages explain the higher corrected baseline; these are lower bounds,
 not a project completion percentage. The image/Markdown/sidebar continuation
 then removes 33 on that same scanner, leaving 2,107 occurrences (components
 1,615, `src/ui` 487, routes 5) across 186 files and 765 unresolved expressions.
+Pure literal string concatenations are now joined before compiler validation,
+without evaluating runtime or numeric operands. An independent real-compiler
+probe verifies split token boundaries, source deduplication and unresolved values.
+This recognizes 32 existing Markdown base-class occurrences and resolves one
+previous expression: the corrected baseline is 2,139 across 186 files with 764
+unresolved expressions. The onboarding/layout/table batch removes 23 on this same
+method, leaving **2,116 occurrences** (components 1,624, `src/ui` 487, routes 5)
+across 186 files and 764 unresolved expressions. The increase from the earlier
+2,107 snapshot is a scanner correction, not added Tailwind styling. Neither count
+is a completion percentage.
+
 WebWorkspaceLayout remains deferred until its actual sidebar/runtime/router
 graph has a bounded production-component fixture.
 
