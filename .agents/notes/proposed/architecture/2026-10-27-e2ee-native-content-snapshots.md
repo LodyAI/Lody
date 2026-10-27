@@ -4,6 +4,7 @@ Status: proposed
 Translation: current
 
 - Date: 2026-10-27
+- PR: [#1959](https://github.com/LodyAI/Lody/pull/1959)
 - Chinese: [中文](2026-10-27-e2ee-native-content-snapshots.zh.md)
 
 ## Abstract
