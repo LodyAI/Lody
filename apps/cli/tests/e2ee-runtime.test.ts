@@ -1,3 +1,6 @@
+import { randomUUID } from 'node:crypto';
+import { resetCliE2eeIdentity } from '../src/lib/e2ee/reset-identity';
+import { leaseE2eeIdentity } from '@lody/shared/node/e2ee-identity';
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:crypto';
 import * as fs from 'node:fs/promises';
 import { mkdtemp, rm, readdir, readFile } from 'node:fs/promises';
@@ -1437,6 +1440,154 @@ describe('machine E2EE local runtime', () => {
         db.close();
       }
     } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it.each([
+    'credential-missing',
+    'credential-corrupt',
+    'device-corrupt',
+    'kek-missing',
+    'selector-missing',
+    'journal-conflict',
+  ] as const)(
+    'explicit reset preserves all surviving originals and creates independent keys after %s',
+    async (damage) => {
+      const directory = await mkdtemp(join(tmpdir(), 'cli-e2ee-reset-'));
+      vi.stubEnv('LODY_DATA_DIR', join(directory, 'profile'));
+      try {
+        const fixture = await execute(setup(directory));
+        const accountId = 'reset-account',
+          workspaceId = 'workspace';
+        const root = join(
+          getLodyDataDir(),
+          'e2ee',
+          createHash('sha256').update(accountId).digest('hex'),
+          workspaceId
+        );
+        // Keep OS protection available so lost selectors cannot authorize file fallback.
+        const keyringRows = new Map<string, string>();
+        const keyring = async (account: string) => ({
+          getPassword: async () => keyringRows.get(account),
+          setPassword: async (value: string) => {
+            keyringRows.set(account, value);
+          },
+          deleteCredential: async () => {
+            keyringRows.delete(account);
+          },
+        });
+        const input = {
+          accountId,
+          workspaceId,
+          machineId: 'machine',
+          genesisHash: hex(fixture.genesis.toBytes()),
+          genesisRecordHex: hex(fixture.genesisRecord),
+          membershipId: '0a'.repeat(16),
+          frontendSigningPublicKey: fixture.sender,
+          keyring,
+        };
+        const first = await prepareCliE2eeMachineLegacy({
+          ...input,
+          pairingSessionId: '01'.repeat(16),
+        });
+        if ('superseded' in first) throw new Error('unexpected superseded');
+        const credentialPath = join(
+          root,
+          'custody',
+          `device-credential-${input.genesisHash}-${first.signingPublicKey}.sealed`
+        );
+        if (damage === 'credential-missing') await rm(credentialPath);
+        if (damage === 'credential-corrupt') await fs.writeFile(credentialPath, 'damaged');
+        if (damage === 'device-corrupt')
+          await fs.writeFile(
+            join(root, 'custody', `${input.genesisHash}.machine.device`),
+            'damaged'
+          );
+        if (damage === 'kek-missing') await rm(join(root, 'custody', 'kek.safe-storage'));
+        if (damage === 'selector-missing') await rm(join(root, 'custody', 'protection'));
+        if (damage === 'journal-conflict') {
+          const db = new DatabaseSync(join(root, 'pairings.sqlite'));
+          db.prepare('UPDATE pairings SET material=?').run('{}');
+          db.close();
+        }
+        await expect(
+          prepareCliE2eeMachineLegacy({ ...input, pairingSessionId: '02'.repeat(16) })
+        ).rejects.toThrow();
+        const snapshot = async (path: string): Promise<Record<string, string>> => {
+          const result: Record<string, string> = {};
+          for (const entry of await readdir(path, { withFileTypes: true })) {
+            if (entry.isDirectory())
+              for (const [key, value] of Object.entries(await snapshot(join(path, entry.name))))
+                result[`${entry.name}/${key}`] = value;
+            else result[entry.name] = hex(await readFile(join(path, entry.name)));
+          }
+          return result;
+        };
+        const old = await snapshot(root);
+        const reset = { accountId, workspaceId, resetId: randomUUID(), now: 1700000000000 };
+        const archive = await execute(resetCliE2eeIdentity(reset));
+        if (!archive) throw new Error('expected archive');
+        expect(await snapshot(archive)).toEqual(old);
+        const second = await prepareCliE2eeMachineLegacy({
+          ...input,
+          pairingSessionId: '03'.repeat(16),
+        });
+        if ('superseded' in second) throw new Error('unexpected superseded');
+        expect(second.signingPublicKey).not.toBe(first.signingPublicKey);
+        expect(second.credentialHash).not.toBe(first.credentialHash);
+        expect(await snapshot(archive)).toEqual(old);
+        if (old['custody/kek.safe-storage'])
+          expect(hex(await readFile(join(root, 'custody', 'kek.safe-storage')))).not.toBe(
+            old['custody/kek.safe-storage']
+          );
+        const journal = new DatabaseSync(join(root, 'pairings.sqlite'));
+        expect(journal.prepare('SELECT session FROM pairings').all()).toEqual([
+          { session: '03'.repeat(16) },
+        ]);
+        journal.close();
+        const beforeRetry = await snapshot(root);
+        expect(await execute(resetCliE2eeIdentity(reset))).toBe(archive);
+        expect(await snapshot(root)).toEqual(beforeRetry);
+      } finally {
+        vi.unstubAllEnvs();
+        await rm(directory, { recursive: true, force: true });
+      }
+    }
+  );
+
+  it('refuses archival while another scoped native owner holds the identity lease', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'cli-e2ee-reset-busy-'));
+    vi.stubEnv('LODY_DATA_DIR', directory);
+    try {
+      const root = join(
+        getLodyDataDir(),
+        'e2ee',
+        createHash('sha256').update('account').digest('hex'),
+        'workspace'
+      );
+      await fs.mkdir(root, { recursive: true, mode: 0o700 });
+      await fs.writeFile(join(root, 'evidence'), 'original', { mode: 0o600 });
+      const { Scope, Exit } = await import('effect');
+      const owner = Effect.runSync(Scope.make());
+      try {
+        await Effect.runPromise(leaseE2eeIdentity(root).pipe(Scope.provide(owner)));
+        await expect(
+          execute(
+            resetCliE2eeIdentity({
+              accountId: 'account',
+              workspaceId: 'workspace',
+              resetId: randomUUID(),
+              now: 0,
+            })
+          )
+        ).rejects.toThrow();
+        expect(await readFile(join(root, 'evidence'), 'utf8')).toBe('original');
+      } finally {
+        await Effect.runPromise(Scope.close(owner, Exit.void));
+      }
+    } finally {
+      vi.unstubAllEnvs();
       await rm(directory, { recursive: true, force: true });
     }
   });

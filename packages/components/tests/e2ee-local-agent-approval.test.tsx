@@ -16,7 +16,10 @@ describe('local encrypted agent approval', () => {
   let session: string;
   let hasCredential: boolean;
   let protection: 'file' | 'os-keystore' = 'file';
-  let runtime: Pick<E2eeWorkspaceRuntime, 'prepareLocalAgent' | 'admitLocalAgent' | 'status'>;
+  let runtime: Pick<
+    E2eeWorkspaceRuntime,
+    'prepareLocalAgent' | 'admitLocalAgent' | 'status' | 'resetLocalAgent'
+  >;
   beforeEach(() => {
     Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
     container = document.createElement('div');
@@ -58,6 +61,47 @@ describe('local encrypted agent approval', () => {
     if (!button) throw new Error(`missing button ${label}`);
     await act(async () => button.click());
   };
+  it('offers explicit machine reset after corrupt preparation, then requires new approval', async () => {
+    const prepareOriginal = runtime.prepareLocalAgent;
+    let broken = true;
+    runtime.prepareLocalAgent = async (...args) => {
+      if (broken) throw new Error('e2ee_machine_corrupt');
+      if (!prepareOriginal) throw new Error('missing fixture preparation');
+      return prepareOriginal(...args);
+    };
+    runtime.resetLocalAgent = async (input) => {
+      expect(input.workspaceId).toBe('workspace');
+      expect(input.confirm).toBe(true);
+      expect(input.resetId).toBeTruthy();
+      broken = false;
+      session = 'replacement-session';
+    };
+    await render();
+    await click('e2ee.localAgent.enable');
+    await click('e2ee.identity.resetMachine');
+    expect(broken).toBe(true);
+    await click('e2ee.identity.confirm');
+    expect(broken).toBe(false);
+    expect(admitted).toBe(false);
+    await click('e2ee.localAgent.enable');
+    expect(document.querySelector('[role="alertdialog"]')?.textContent).toContain(
+      'e2ee.localAgent.confirm'
+    );
+    expect(admitted).toBe(false);
+    await click('e2ee.localAgent.allow');
+    expect(admitted).toBe(true);
+  });
+
+  it('permission repair offers retry without an identity reset', async () => {
+    runtime.prepareLocalAgent = async () => {
+      throw new Error('e2ee_machine_permissions');
+    };
+    await render();
+    await click('e2ee.localAgent.enable');
+    expect(container.textContent).toContain('e2ee.identity.permissionsHelp');
+    expect(container.textContent).not.toContain('e2ee.identity.resetMachine');
+  });
+
   it('does nothing on the ordinary workspace path', async () => {
     await render(false);
     expect(container.textContent).toBe('');

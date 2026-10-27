@@ -1,7 +1,8 @@
+import * as identityStorage from '@lody/shared/node/e2ee-identity'
 import assert from 'node:assert/strict'
 import { EventEmitter } from 'node:events'
-import { readFile, mkdtemp, rm } from 'node:fs/promises'
-import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto'
+import { readFile, mkdtemp, rm, readdir, writeFile } from 'node:fs/promises'
+import { createCipheriv, createDecipheriv, randomBytes, randomUUID } from 'node:crypto'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
@@ -66,7 +67,10 @@ async function account(options = {}) {
   const api = await load(
     './e2ee-account-runtime.ts',
     {
-      electron: { app: { getPath: () => '/synthetic-user-data' } },
+      electron: { app: { getPath: () => options.directory ?? '/synthetic-user-data' } },
+      '@lody/shared/node/e2ee-identity': options.identityStorage ?? {
+        leaseE2eeIdentity: () => Effect.void
+      },
       '../e2ee-custody-electron': {
         makeElectronE2eeCustody: options.custody ?? (() => Effect.succeed({}))
       },
@@ -74,7 +78,9 @@ async function account(options = {}) {
         makeDesktopE2eeBootstrap: options.bootstrap ?? (() => Effect.succeed({}))
       },
       './e2ee-cloud-client.mjs': { makeE2eeCloudClient: options.cloud },
-      './e2ee-runtime.mjs': { makeDesktopE2eeRuntimeHost: () => Effect.succeed({}) },
+      './e2ee-runtime.mjs': {
+        makeDesktopE2eeRuntimeHost: options.host ?? (() => Effect.succeed({}))
+      },
       '../ipc/ipc-service-deps': {
         getIpcServiceDeps: () => ({
           authService: auth
@@ -1357,5 +1363,158 @@ void test('a snapshot-joined approver cancels another recipient without retiring
   assert.equal(
     JSON.stringify(await Effect.runPromise(second.bootstrap.creationFor(f.workspaceId))),
     preservedOrigin
+  )
+})
+
+void test('isolated desktop workspace reset archives real custody and journals, retains sibling availability and requires fresh joining', async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), 'desktop-identity-reset-'))
+  let locked = false
+  const wrapping = Buffer.alloc(32, 121)
+  const safeStorage = {
+    isEncryptionAvailable: () => !locked,
+    isAsyncEncryptionAvailable: async () => !locked,
+    getSelectedStorageBackend: () => 'gnome_libsecret',
+    encryptStringAsync: async (value) => {
+      const nonce = randomBytes(12),
+        cipher = createCipheriv('aes-256-gcm', wrapping, nonce)
+      return Buffer.concat([nonce, cipher.update(value), cipher.final(), cipher.getAuthTag()])
+    },
+    decryptStringAsync: async (value) => {
+      const cipher = createDecipheriv('aes-256-gcm', wrapping, value.subarray(0, 12))
+      cipher.setAuthTag(value.subarray(-16))
+      return {
+        result: Buffer.concat([cipher.update(value.subarray(12, -16)), cipher.final()]).toString(),
+        shouldReEncrypt: false
+      }
+    }
+  }
+  const { api } = await account({
+    directory,
+    identityStorage,
+    custody: (path) => makeDesktopE2eeCustody({ directory: path, platform: 'linux', safeStorage }),
+    bootstrap: makeDesktopE2eeBootstrap,
+    host: makeDesktopE2eeRuntimeHost,
+    cloud: () =>
+      Effect.succeed({
+        accountIdentity: () =>
+          Effect.succeed({ accountId: 'account', cryptoUserId: 'aa'.repeat(32) })
+      })
+  })
+  t.after(async () => {
+    await api.closeDesktopE2eeAccount()
+    await rm(directory, { recursive: true, force: true })
+  })
+  const create = async (workspaceId) =>
+    api.withDesktopE2eeAccount(
+      (owner) =>
+        Effect.gen(function* () {
+          yield* owner.bootstrap.recordAccountIdentity({
+            accountId: 'account',
+            cryptoUserId: 'aa'.repeat(32)
+          })
+          const creation = yield* owner.bootstrap.prepareCreation({
+            accountId: 'account',
+            requestId: `creation-${workspaceId}-request`,
+            name: workspaceId,
+            slug: workspaceId
+          })
+          yield* owner.bootstrap.recordCreated({
+            workspaceId,
+            requestId: `creation-${workspaceId}-request`,
+            genesisHash: creation.genesisHashHex
+          })
+          const status = yield* owner.host.open(workspaceId)
+          const local = yield* owner.host.localPairingContext(workspaceId)
+          return {
+            directory: owner.directory,
+            creation,
+            status,
+            signingPublicKey: local.frontendSigningPublicKey
+          }
+        }),
+      workspaceId
+    )
+  const intent = {
+    accountId: 'account',
+    requestId: 'synthetic-creation-request',
+    name: 'Created',
+    slug: 'created'
+  }
+  const staged = await api.prepareDesktopE2eeCreation(intent)
+  await api.recordDesktopE2eeCreated({
+    workspaceId: 'created',
+    genesisHash: staged.genesisHashHex,
+    requestId: intent.requestId
+  })
+  assert.deepEqual(await api.prepareDesktopE2eeCreation(intent), staged)
+  await api.withDesktopE2eeAccount((owner) => owner.host.open('created'), 'created')
+  await api.resetDesktopE2eeIdentity({ workspaceId: 'created', resetId: randomUUID() })
+  await assert.rejects(api.prepareDesktopE2eeCreation(intent), /e2ee_identity-lost/)
+  const first = await create('first'),
+    sibling = await create('sibling')
+  await api.closeDesktopE2eeAccount()
+  const device = join(
+    first.directory,
+    'custody',
+    `${first.creation.genesisHashHex}.personal.device`
+  )
+  await writeFile(device, 'damaged')
+  await assert.rejects(api.withDesktopE2eeAccount((owner) => owner.host.open('first'), 'first'))
+  const healthy = await api.withDesktopE2eeAccount((owner) => owner.host.open('sibling'), 'sibling')
+  assert.equal(healthy.genesisHash, sibling.status.genesisHash)
+  const files = async (root) => {
+    const result = {}
+    for (const entry of await readdir(root, { withFileTypes: true })) {
+      if (entry.isDirectory())
+        for (const [name, bytes] of Object.entries(await files(join(root, entry.name))))
+          result[`${entry.name}/${name}`] = bytes
+      else result[entry.name] = (await readFile(join(root, entry.name))).toString('hex')
+    }
+    return result
+  }
+  const originals = await files(first.directory)
+  const resetId = randomUUID()
+  const result = await api.resetDesktopE2eeIdentity({ workspaceId: 'first', resetId })
+  assert.ok(result.archive)
+  assert.deepEqual(await files(result.archive), originals)
+  assert.equal(
+    (await api.withDesktopE2eeAccount((owner) => owner.host.status('sibling'), 'sibling'))
+      .genesisHash,
+    healthy.genesisHash
+  )
+  await assert.rejects(
+    api.withDesktopE2eeAccount((owner) => owner.host.open('first'), 'first'),
+    /e2ee_missing-binding/
+  )
+  const replacement = await create('first')
+  assert.notEqual(replacement.signingPublicKey, first.signingPublicKey)
+  await api.resetDesktopE2eeIdentity({ workspaceId: 'first', resetId })
+  assert.equal(
+    (await api.withDesktopE2eeAccount((owner) => owner.host.localPairingContext('first'), 'first'))
+      .frontendSigningPublicKey,
+    replacement.signingPublicKey
+  )
+  // A permanently unavailable OS protector never selects file protection. Recovery
+  // can archive without opening custody, and later native availability allows joining.
+  await api.closeDesktopE2eeAccount()
+  locked = true
+  await assert.rejects(
+    api.withDesktopE2eeAccount((owner) => owner.host.open('first'), 'first'),
+    /e2ee_custody_unavailable/
+  )
+  const all = await api.resetDesktopE2eeIdentity({ resetId: randomUUID() })
+  assert.ok(all.archive)
+  await assert.rejects(
+    api.withDesktopE2eeAccount(() => Effect.void, 'first'),
+    /e2ee_custody_unavailable/
+  )
+  locked = false
+  await assert.rejects(
+    api.withDesktopE2eeAccount((owner) => owner.host.open('first'), 'first'),
+    /e2ee_missing-binding/
+  )
+  await assert.rejects(
+    api.withDesktopE2eeAccount((owner) => owner.host.open('sibling'), 'sibling'),
+    /e2ee_missing-binding/
   )
 })

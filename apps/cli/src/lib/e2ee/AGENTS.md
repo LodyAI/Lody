@@ -102,3 +102,7 @@
 - Never cache an unimplemented content mode; `export` refuses and `sync` skips schedules
   for encrypted workspaces
   ([note](../../../../../.agents/notes/implemented/bug-fix/2026-10-27-e2ee-cli-review-fixes.md)).
+
+- Explicit same-user reset drains the workspace, takes its stable sibling identity
+  lease, and archives the entire directory. Require fresh approval and a new KEK;
+  OS/unknown protection cannot reset into file protection.

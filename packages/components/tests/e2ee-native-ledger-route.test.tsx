@@ -53,7 +53,7 @@ vi.mock('@/components/pages/e2ee-workspace-control-page', () => ({
       null,
       createElement(
         'p',
-        null,
+        { 'data-control-state': true },
         failure
           ? 'failed'
           : history?.upgradeRequiredAt !== undefined
@@ -334,7 +334,16 @@ it.each([
       'missing-binding',
       'closed',
     ].includes(code);
-    expect(container.textContent).toBe(availability && !mismatch ? '1' : 'failed');
+    expect(container.querySelector('[data-control-state]')?.textContent).toBe(
+      availability && !mismatch ? '1' : 'failed'
+    );
+    if (
+      !mismatch &&
+      ['custody_unavailable', 'missing-binding', 'corrupt', 'conflict'].includes(code)
+    )
+      expect(container.textContent).toContain(
+        code === 'custody_unavailable' ? 'e2ee.identity.lockedTitle' : 'e2ee.identity.lostTitle'
+      );
     expect(fetched).toEqual(availability ? ['describe'] : []);
   }
 );

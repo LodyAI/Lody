@@ -16,6 +16,7 @@ import {
  *   verified (rollback or fork). Resettable only after support confirms the server.
  * - `local-corrupt`: an unreadable optional cache; deleting it is safe. */
 export type E2eeControlFailureKind =
+  | 'local-identity'
   | 'network'
   | 'auth'
   | 'server'
@@ -54,8 +55,15 @@ function serverCode(error: unknown): string | null {
 /** Classify a control-page failure. Unknown errors are treated as transport failures. */
 export function classifyE2eeControlFailure(error: unknown): E2eeControlFailure {
   const message = error instanceof Error ? error.message : '';
-  if (message.includes('e2ee_local-evidence-conflict')) return { kind: 'progress-conflict', code: 'local-evidence-conflict' };
-  if (message.includes('e2ee_genesis_conflict') || message.includes('e2ee_conflict')) return { kind: 'identity-conflict', code: 'pin-mismatch' };
+  const local =
+    /\be2ee_(permissions|identity-lost|corrupt|conflict|missing-binding|rewrap-failed|custody_unavailable|identity-busy)\b/.exec(
+      message
+    );
+  if (local) return { kind: 'local-identity', code: `e2ee_${local[1]}` };
+  if (message.includes('e2ee_local-evidence-conflict'))
+    return { kind: 'progress-conflict', code: 'local-evidence-conflict' };
+  if (message.includes('e2ee_genesis_conflict'))
+    return { kind: 'identity-conflict', code: 'pin-mismatch' };
   if (error instanceof E2eeHistoryError) {
     if (error.kind === 'local-conflict')
       return {

@@ -69,3 +69,38 @@ export type LocalE2eeActivateRequest = z.infer<typeof LocalE2eeActivateRequestSc
 export type LocalE2eePairingRequest = z.infer<typeof LocalE2eePairingRequestSchema>;
 export type LocalE2eePrepareResponse = z.infer<typeof LocalE2eePrepareResponseSchema>;
 export type LocalE2eeActivateResponse = z.infer<typeof LocalE2eeActivateResponseSchema>;
+
+/** Explicit, same-OS-user recovery. This route grants no ledger authority. */
+export const LOCAL_E2EE_RESET_PATH = '/e2ee/reset-identity';
+export const LocalE2eeResetRequestSchema = z
+  .object({
+    machineId: identifier,
+    accountId: identifier,
+    workspaceId: z.string().regex(/^[A-Za-z0-9_-]{1,128}$/),
+    resetId: z.string().uuid(),
+  })
+  .strict();
+export const LocalE2eeResetResponseSchema = z
+  .object({
+    ok: z.literal(true),
+    resetId: z.string().uuid(),
+    archive: z.string().nullable(),
+  })
+  .strict();
+export type LocalE2eeResetRequest = z.infer<typeof LocalE2eeResetRequestSchema>;
+export type LocalE2eeResetResponse = z.infer<typeof LocalE2eeResetResponseSchema>;
+
+/** Content-free local recovery failures; raw native/SQLite causes never cross IPC. */
+export const LocalE2eeRecoveryFailureSchema = z
+  .object({
+    ok: z.literal(false),
+    error: z.enum([
+      'e2ee_permissions',
+      'e2ee_identity-lost',
+      'e2ee_corrupt',
+      'e2ee_conflict',
+      'e2ee_unavailable',
+      'e2ee_identity-busy',
+    ]),
+  })
+  .strict();

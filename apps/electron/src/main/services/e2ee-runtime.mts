@@ -1016,6 +1016,8 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
             entry.personalPairing.invitation(session)
           )
         ),
+      resetLocalPairing: (workspaceId: string, resetId: string) =>
+        withPairing(workspaceId, (pairing) => pairing.reset(resetId)),
       localPairingContext: (workspaceId: string) =>
         withPairing(workspaceId, (pairing) => pairing.context()),
       retireSupersededLocalPairing: (

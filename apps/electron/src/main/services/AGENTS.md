@@ -99,7 +99,7 @@ Read [M1](../../../../../.agents/notes/implemented/architecture/2026-10-21-e2ee-
 [join](../../../../../.agents/notes/proposed/architecture/2026-10-26-e2ee-personal-desktop-join.md)
 and [machine](../../../../../.agents/notes/proposed/architecture/2026-10-26-e2ee-machine-pairing-journal.md).
 Fence opens/late D03 registration by identity/generation; pin D03 before signing.
-Lazy custody; no network under locks; drain native work before release.
+Workspace-isolated custody; reset drains then archives whole identities (account reset: all). No network under locks; drain native work before release.
 Keep verification/storage errors owner-local; malformed input keeps readers.
 Originals precede feed/pin; compare overlaps, retain checkpoints, await history.
 Conflicts refuse fallback; availability may use pinned renderer reads.
