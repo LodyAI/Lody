@@ -2,10 +2,14 @@ import { describe, expect, it } from 'vitest';
 
 import { resolveMobileNewChatTargetLabel } from '@/components/mobile/mobile-new-chat-target';
 
-const labels = { chat: 'Chat', project: 'Select a project', repository: 'Repository' };
+const labels = {
+  noProject: 'No project selected',
+  project: 'Select a project',
+  repository: 'Repository',
+};
 
 describe('resolveMobileNewChatTargetLabel', () => {
-  it('shows the plain chat label when no project is involved', () => {
+  it('shows the no-project label when no project is involved', () => {
     expect(
       resolveMobileNewChatTargetLabel({
         contextType: 'chat',
@@ -13,7 +17,7 @@ describe('resolveMobileNewChatTargetLabel', () => {
         projectName: 'ignored',
         labels,
       })
-    ).toBe('Chat');
+    ).toBe('No project selected');
   });
 
   it('shows the selected local project name', () => {

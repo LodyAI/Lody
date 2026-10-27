@@ -909,6 +909,8 @@
   "chat.mobileNewChat.projectLabel": "项目",
   "chat.mobileNewChat.repoLabel": "仓库",
   "chat.mobileNewChat.roleMachineLocked": "所选 Role 已固定运行机器",
+  "chat.mobileNewChat.noProject": "未选择项目",
+  "chat.mobileNewChat.switchClearsRole": "切换机器将清除所选 Role",
   "chat.mobileNewChat.title": "新建对话",
   "chat.mobileNewChat.workdirLocalLabel": "本地文件",
   "chat.mobileNewChat.workdirModeLabel": "模式",

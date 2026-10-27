@@ -26,6 +26,7 @@ export interface AttachmentAddMenuProps {
   isMobile: boolean;
   /** Smaller trigger for the landing composer variant. */
   isLanding?: boolean;
+  isSheet?: boolean;
   /** Disables the whole trigger (e.g. the prompt is disabled). */
   disabled?: boolean;
   /** Omit the callback to hide the attachment item entirely. The picker is
@@ -55,6 +56,7 @@ export interface AttachmentAddMenuProps {
 export function AttachmentAddMenu({
   isMobile,
   isLanding,
+  isSheet,
   disabled,
   onAddAttachment,
   attachmentDisabled,
@@ -138,6 +140,7 @@ export function AttachmentAddMenu({
             aria-label={triggerLabel}
             className={cn(
               triggerSize,
+              isSheet && 'rounded-full bg-muted/55 text-foreground/80 dark:bg-input/80',
               // Light-stroke "+" with a circular hover/open fill. `bg-hover` (not
               // `bg-accent`/`bg-muted`) because those equal the background in the
               // dark theme and paint nothing.
@@ -156,6 +159,7 @@ export function AttachmentAddMenu({
           aria-label={triggerLabel}
           className={cn(
             triggerSize,
+            isSheet && 'rounded-full bg-muted/55 text-foreground/80 dark:bg-input/80',
             // Light-stroke "+" with a circular hover/open fill. `bg-hover` (not
             // `bg-accent`/`bg-muted`) because those equal the background in the
             // dark theme and paint nothing.

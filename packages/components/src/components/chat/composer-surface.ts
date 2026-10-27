@@ -1,3 +1,6 @@
+import * as stylex from '@stylexjs/stylex';
+import { colors } from '@lody/ui/tokens/colors.stylex';
+
 /**
  * The composer's box. Exported so surfaces that cannot mount the real
  * `ChatComposer` — the anonymous share reader, which must stay free of mention,
@@ -14,3 +17,28 @@ export const INFO_BAR_ELEVATION_CLASS =
   'shadow-[0_0.5px_1px_1px_rgba(0,0,0,0.04)] dark:shadow-none';
 
 export const COMPOSER_SESSION_SURFACE_CLASS = `@container/composer-box flex flex-col gap-1 rounded-2xl border px-2.5 py-2 transition-colors duration-150 border-foreground/[0.10] bg-[hsl(var(--composer))] ${COMPOSER_ELEVATION_CLASS} dark:border-input-border/70 dark:bg-input/90`;
+
+const styles = stylex.create({
+  shell: {
+    position: 'relative',
+    flexShrink: 0,
+    paddingTop: 0,
+    marginBottom: 'var(--native-keyboard-height, 0px)',
+    paddingBottom:
+      'calc(0.5rem + max(0px, var(--safe-area-bottom, env(safe-area-inset-bottom, 0px)) - var(--native-keyboard-height, 0px)))',
+    backgroundColor: colors.background,
+    transitionProperty: 'margin-bottom, padding-bottom',
+    transitionDuration: '250ms',
+    transitionTimingFunction: 'var(--ease-out, cubic-bezier(0, 0, 0.2, 1))',
+  },
+  shellEdgeBackLayer: { zIndex: 40 },
+});
+
+/** Both new-chat and in-session composers own exactly one keyboard/safe-area inset. */
+export function getSessionChatInputAreaShellClassName({
+  protectFromEdgeBackZone = false,
+}: { protectFromEdgeBackZone?: boolean } = {}): string {
+  return (
+    stylex.props(styles.shell, protectFromEdgeBackZone && styles.shellEdgeBackLayer).className ?? ''
+  );
+}

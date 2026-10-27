@@ -127,3 +127,9 @@ closed unmerged; this version reconciles it with the current workspace code.
   Vaul no-drag behavior are unverified on device. The real run-config sheet was not opened from
   the new sheet in Storybook; the footer pill there is a visual stand-in. On a
   390px phone the rail requires a horizontal scroll to reach branch/worktree.
+
+## Follow-up
+
+The [mobile new-chat page decision](2026-10-28-mobile-new-chat-page.md) supersedes
+the sheet, footer rail and Role-machine locking described here. It records the
+inline project controls and the presentation acknowledgement used by first send.

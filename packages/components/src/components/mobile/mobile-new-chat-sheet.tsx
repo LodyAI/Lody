@@ -1,12 +1,16 @@
-import { Fragment, type ComponentType, type ReactNode } from 'react';
-import { ChevronLeft } from 'lucide-react';
+import { Fragment, useRef, type ComponentType, type ReactNode } from 'react';
 
-import { Drawer, DrawerContent, DrawerDescription, DrawerTitle } from '@/ui/drawer';
-import { useKeyboardAwareSheet } from '@/hooks/use-keyboard-aware-scroll-into-view';
 import { cn } from '@/lib/utils';
+import { getSessionChatInputAreaShellClassName } from '@/components/chat/composer-surface';
+import { BaseHeader } from '@/components/page-headers/base-header';
+import { MobileSessionHeaderBackButton } from '@/components/mobile/glass-icon-button';
+import { SessionConversationPage } from '@/components/sessions/session-conversation-page';
+import { ConversationColumn } from '@/components/shared/conversation-column';
+import { isNativeAppShell } from '@/lib/native-platform';
+import { useKeyboardAwareScrollIntoView } from '@/hooks/use-keyboard-aware-scroll-into-view';
 
 export type MobileNewChatSheetLabels = {
-  /** Sheet title, announced by the sr-only `DrawerTitle`. */
+  /** Accessible page title. */
   title?: string;
   description?: string;
   backAriaLabel?: string;
@@ -19,11 +23,12 @@ export type MobileNewChatSheetProps = {
 
 export type MobileNewChatSheetContentProps = {
   labels?: MobileNewChatSheetLabels;
-  /** Header centre: the unified Chat / project / repository picker. */
+  /** Header content for the new-chat page. */
   targetNode: ReactNode;
-  /** The full-height composer. Its footer carries the run config, machine,
-     branch and worktree controls; the sheet only owns the page. */
+  /** Session-style composer anchored at the bottom. */
   composer: ReactNode;
+  /** In-flow selection controls above the composer. */
+  summary?: ReactNode;
   /** Optional wrapper that scopes a region, kept for hosts that still mount
      inline pickers inside the composer. Defaults to `Fragment`. */
   coordinator?: ComponentType<{ children: ReactNode }>;
@@ -31,44 +36,19 @@ export type MobileNewChatSheetContentProps = {
   scrollAreaClassName?: string;
 };
 
-/**
- * Full-height writing surface for a new conversation.
- *
- * The header holds one native target picker; the body is a single composer
- * whose prompt fills the page and whose footer is a scrolling control rail.
- * Execution settings (machine, branch, worktree) therefore never sit between
- * the user and the place they write.
- *
- * Layout adapted from the community contribution in
- * [#491](https://github.com/LodyAI/Lody/pull/491) by @natsustan.
- */
+/** New-chat page over the still-mounted mobile home or project screen. */
 export function MobileNewChatSheet({
   open,
   onOpenChange,
   ...contentProps
 }: MobileNewChatSheetProps) {
-  const title = contentProps.labels?.title ?? '新建对话';
-  const keyboard = useKeyboardAwareSheet();
-
+  if (!open) return null;
   return (
-    <Drawer open={open} onOpenChange={onOpenChange} repositionInputs={false}>
-      <DrawerContent
-        className={cn(
-          'mobile-new-chat-sheet mt-0! h-[calc(92dvh-var(--native-keyboard-height,0px))]! max-h-[92dvh]! overflow-hidden rounded-t-[2rem]! border-border/60',
-          keyboard.contentClassName
-        )}
-      >
-        <DrawerTitle className="sr-only">{title}</DrawerTitle>
-        <DrawerDescription className="sr-only">
-          {contentProps.labels?.description ?? title}
-        </DrawerDescription>
-        <MobileNewChatSheetContent
-          {...contentProps}
-          onClose={() => onOpenChange(false)}
-          className={cn('min-h-0 flex-1', contentProps.className)}
-        />
-      </DrawerContent>
-    </Drawer>
+    <MobileNewChatSheetContent
+      {...contentProps}
+      onClose={() => onOpenChange(false)}
+      className={cn('fixed inset-0 z-50', contentProps.className)}
+    />
   );
 }
 
@@ -76,43 +56,48 @@ export function MobileNewChatSheetContent({
   labels = {},
   targetNode,
   composer,
+  summary,
   coordinator: Coordinator = Fragment,
   className,
   scrollAreaClassName,
   onClose,
 }: MobileNewChatSheetContentProps & { onClose?: () => void }) {
-  const keyboard = useKeyboardAwareSheet({ chromeHeight: '4rem', bodyPadding: '8px' });
-
+  const scrollRef = useRef<HTMLDivElement>(null);
+  useKeyboardAwareScrollIntoView(scrollRef);
+  const headerInset = isNativeAppShell() ? 'calc(3rem + var(--safe-area-top, 0px))' : '3rem';
   return (
     <div className={cn('flex min-h-0 flex-col bg-background text-foreground', className)}>
       <Coordinator>
-        <header className="relative flex h-16 shrink-0 items-center justify-center px-16">
-          <button
-            type="button"
-            aria-label={labels.backAriaLabel ?? 'Back'}
-            className="absolute left-4 flex h-11 w-11 items-center justify-center rounded-full border border-border/60 bg-background text-foreground transition-colors hover:bg-muted/60"
-            onClick={() => onClose?.()}
-          >
-            <ChevronLeft className="h-6 w-6" aria-hidden="true" />
-          </button>
+        <SessionConversationPage className="min-h-0 flex-1">
+          <BaseHeader
+            truncateTitle={false}
+            hideMenuButton
+            className="absolute inset-x-0 top-0 z-30 border-b-0 bg-background/55 backdrop-blur-xl"
+            style={{ height: headerInset, paddingTop: 'var(--safe-area-top, 0px)' }}
+            leading={
+              <MobileSessionHeaderBackButton
+                label={labels.backAriaLabel}
+                onBack={() => onClose?.()}
+              />
+            }
+            title={targetNode}
+          />
           <div
-            data-vaul-no-drag=""
-            className="flex min-w-0 max-w-full justify-center text-xl font-semibold"
+            ref={scrollRef}
+            className={cn('flex min-h-0 flex-1 flex-col overflow-y-auto', scrollAreaClassName)}
+            style={{ paddingTop: headerInset, scrollPaddingTop: headerInset }}
           >
-            {targetNode}
+            {labels.description ? (
+              <p className="text-xs text-muted-foreground">{labels.description}</p>
+            ) : null}
+            <div className="min-h-6 flex-1" />
+            <ConversationColumn>{summary}</ConversationColumn>
+            <div className="h-6 shrink-0" />
           </div>
-        </header>
-        {labels.description ? (
-          <p className="px-4 text-xs text-muted-foreground">{labels.description}</p>
-        ) : null}
-        <div
-          ref={keyboard.scrollRef}
-          data-vaul-no-drag=""
-          className={cn('flex min-h-0 flex-1 flex-col overflow-y-auto', scrollAreaClassName)}
-          style={keyboard.scrollStyle}
-        >
-          {composer}
-        </div>
+          <div className={getSessionChatInputAreaShellClassName({ protectFromEdgeBackZone: true })}>
+            <ConversationColumn>{composer}</ConversationColumn>
+          </div>
+        </SessionConversationPage>
       </Coordinator>
     </div>
   );
