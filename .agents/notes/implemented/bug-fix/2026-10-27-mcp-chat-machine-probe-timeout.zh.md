@@ -3,6 +3,8 @@
 Status: implemented
 Translation: current
 
+PR: [#1939](https://github.com/LodyAI/Lody/pull/1939)
+
 [English](2026-10-27-mcp-chat-machine-probe-timeout.md)
 
 ## 摘要
