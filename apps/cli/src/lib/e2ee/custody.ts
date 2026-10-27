@@ -296,11 +296,13 @@ export const makeCliE2eeCustody = Effect.fn('CliE2eeCustody.open')(function* (op
     yield* native(() => publish(marker, protection));
   }
   if (protection !== 'file' && protection !== 'os-keystore') return yield* failure('corrupt');
-  // Once a device exists, a lost KEK must preserve the remaining originals.
+  // Device and credential originals both forbid replacing a missing KEK.
   const missingKek = yield* native(
     async () =>
       !(await exists(join(directory, 'kek.safe-storage'))) &&
-      (await readdir(directory)).some((name) => name.endsWith('.device'))
+      (await readdir(directory)).some(
+        (name) => name.endsWith('.device') || name.endsWith('.sealed')
+      )
   );
   if (missingKek) return yield* failure('corrupt');
   let key: Uint8Array | undefined;
