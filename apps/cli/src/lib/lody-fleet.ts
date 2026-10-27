@@ -1311,7 +1311,6 @@ export class LodyFleet {
     options: { onResponse?: (response: LocalSessionControlResponse) => void } = {}
   ): Promise<LocalSessionControlResponse[]> {
     if (message.type === 'machine/dsh-providers') {
-      if (message.machineId !== this.machineId) throw new Error('Local machine mismatch');
       const providers = new Map<string, { id: string; name: string }>();
       for (const runtime of this.runtimes.values()) {
         const configs = await listMergedAgentConfigs(
@@ -1331,7 +1330,6 @@ export class LodyFleet {
       }
       const response = {
         type: 'machine/dsh-providers_response' as const,
-        success: true,
         providers: [...providers.values()].sort(
           (a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id)
         ),

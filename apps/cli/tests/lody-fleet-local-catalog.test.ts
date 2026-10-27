@@ -1186,15 +1186,8 @@ describe('local DSH Provider discovery', () => {
     ).toEqual([
       {
         type: 'machine/dsh-providers_response',
-        success: true,
         providers: [{ id: 'local-dsh', name: 'DSH' }],
       },
     ]);
-    await expect(
-      fleet.dispatchLocalSessionControl({
-        type: 'machine/dsh-providers',
-        machineId: 'machine-2' as MachineId,
-      })
-    ).rejects.toThrow('mismatch');
   });
 });

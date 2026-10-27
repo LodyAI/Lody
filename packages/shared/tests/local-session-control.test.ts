@@ -21,7 +21,6 @@ describe('local session control node validators', () => {
     const request = { type: 'machine/dsh-providers', machineId: 'machine-1' };
     const response = {
       type: 'machine/dsh-providers_response',
-      success: true,
       providers: [{ id: 'provider-1', name: 'DSH' }],
     };
     for (const validate of [isLocalSessionControlRequest, isLocalSessionControlRequestCjs]) {

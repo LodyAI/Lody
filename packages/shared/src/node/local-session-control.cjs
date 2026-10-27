@@ -822,13 +822,11 @@ function isLocalSessionControlResponse(value) {
 
   if (value.type === 'machine/dsh-providers_response') {
     return (
-      typeof value.success === 'boolean' &&
       Array.isArray(value.providers) &&
       value.providers.every(
         (item) =>
           isObjectRecord(item) && typeof item.id === 'string' && typeof item.name === 'string'
-      ) &&
-      isOptionalString(value.error)
+      )
     );
   }
 

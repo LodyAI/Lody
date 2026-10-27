@@ -2346,9 +2346,7 @@ export const LocalSessionControlResponseSchema = z.discriminatedUnion('type', [
   z
     .object({
       type: z.literal('machine/dsh-providers_response'),
-      success: z.boolean(),
       providers: z.array(z.object({ id: z.string().min(1), name: z.string() }).strict()),
-      error: z.string().optional(),
     })
     .strict(),
   SessionCreateAckSchema,

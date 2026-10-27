@@ -295,7 +295,7 @@ async function publishFileAtomically(filePath: string, contents: string): Promis
   }
 }
 
-export const DshProfileManifestSchema = z
+const DshProfileManifestSchema = z
   .object({
     dependencies: z.record(z.string(), z.string()).optional(),
     devDependencies: z.record(z.string(), z.string()).optional(),
@@ -310,12 +310,6 @@ export const DshProfileManifestSchema = z
 
 export function dshProfileLockName(rootDir: string): string {
   return `dsh-profile-${createHash('sha256').update(resolve(rootDir)).digest('hex')}`;
-}
-
-async function readDshProfileManifest(profileDir: string) {
-  return DshProfileManifestSchema.parse(
-    JSON.parse(await readFile(join(profileDir, 'package.json'), 'utf8'))
-  );
 }
 
 export async function resolveDeepSeekHarnessProcessLaunch(options: {
@@ -391,7 +385,9 @@ export async function resolveDeepSeekHarnessProcessLaunch(options: {
       const generated = DshProfileManifestSchema.parse(JSON.parse(profileFiles.packageJson));
       let manifest = generated;
       try {
-        manifest = await readDshProfileManifest(profileDir);
+        manifest = DshProfileManifestSchema.parse(
+          JSON.parse(await readFile(join(profileDir, 'package.json'), 'utf8'))
+        );
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
       }

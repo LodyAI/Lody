@@ -1,6 +1,7 @@
 import { join } from 'node:path';
 import { Effect } from 'effect';
 import { ChildProcess, ChildProcessSpawner } from 'effect/process';
+import { prepareDeepSeekNodeEnvironment } from './deepseek-system-node';
 import { withFileLock } from '@/utils/file-lock';
 import {
   dshProfileLockName,
@@ -15,12 +16,14 @@ export const runDshPlugin = Effect.fnUntraced(function* (
   hostEnv: NodeJS.ProcessEnv = process.env
 ) {
   const rootDir = launch.env.DSH_HOME;
-  const env = {
-    ...hostEnv,
-    ...launch.env,
-    ELECTRON_RUN_AS_NODE: '1',
-    npm_config_cache: join(rootDir, 'npm-cache'),
-  };
+  const env = yield* prepareDeepSeekNodeEnvironment(
+    {
+      ...hostEnv,
+      ...launch.env,
+      npm_config_cache: join(rootDir, 'npm-cache'),
+    },
+    cwd
+  );
   const command = resolveDeepSeekHarnessSpawn({ ...launch, env, workdir: cwd });
   return yield* withFileLock(
     dshProfileLockName(rootDir),
@@ -36,7 +39,7 @@ export const runDshPlugin = Effect.fnUntraced(function* (
           stderr: 'inherit',
         })
       );
-      return Number(yield* child.exitCode);
+      return yield* child.exitCode;
     }).pipe(Effect.scoped),
     { locksDir: join(rootDir, 'lody-locks'), timeout: 300_000 }
   );

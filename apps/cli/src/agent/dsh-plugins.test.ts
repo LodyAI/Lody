@@ -1,6 +1,6 @@
 import { mkdtemp, readFile, realpath, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { Effect } from 'effect';
 import { afterEach, describe, expect, it } from 'vitest';
 import { fileLocksLegacy } from '@/utils/file-lock';
@@ -42,12 +42,17 @@ describe('native DSH plugin execution', () => {
           command: process.execPath,
           args: [
             '-e',
-            `require('node:fs').writeFileSync(process.argv[1], JSON.stringify({home: process.env.DSH_HOME, cwd: process.cwd(), registry: process.env.npm_config_registry})); process.exitCode=7`,
+            `require('node:fs').writeFileSync(process.argv[1], JSON.stringify({home: process.env.DSH_HOME, cwd: process.cwd(), registry: process.env.npm_config_registry, node: process.env.LODY_DSH_NODE_EXECUTABLE, electron: process.env.ELECTRON_RUN_AS_NODE})); process.exitCode=7`,
             output,
           ],
         },
         rootDir,
-        { DSH_HOME: '/wrong', npm_config_registry: 'https://synthetic.invalid' }
+        {
+          PATH: dirname(process.execPath),
+          DSH_HOME: '/wrong',
+          npm_config_registry: 'https://synthetic.invalid',
+          ELECTRON_RUN_AS_NODE: '1',
+        }
       ).pipe(Effect.provide(platformLayer({})))
     );
     expect(code).toBe(7);
@@ -55,6 +60,7 @@ describe('native DSH plugin execution', () => {
       home: rootDir,
       cwd: await realpath(rootDir),
       registry: 'https://synthetic.invalid',
+      node: process.execPath,
     });
   });
   it('cancels the installer tree before making its Provider lock reusable', async () => {
@@ -76,7 +82,20 @@ describe('native DSH plugin execution', () => {
               ...table.api,
               spawn: (command, args, options) => {
                 const child = table.api.spawn(command, args, options);
-                started.resolve(child.pid ?? -1);
+                if (args[0] === '-p') {
+                  queueMicrotask(() => {
+                    table.childOf(child.pid!)!.stdout.write(
+                      JSON.stringify({
+                        execPath: process.execPath,
+                        node: process.versions.node,
+                        napi: process.versions.napi,
+                      })
+                    );
+                    table.exitOnItsOwn(child.pid!);
+                  });
+                } else {
+                  started.resolve(child.pid ?? -1);
+                }
                 return child;
               },
             },

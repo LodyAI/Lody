@@ -56,10 +56,8 @@ async function runPluginCommand(args: string[], configId?: string): Promise<void
       })
     );
     const response = responses.find((item) => item.type === 'machine/dsh-providers_response');
-    if (!response || !response.success)
-      throw new Error(
-        response?.error ?? 'Cannot read local DSH Providers. Update and start the Lody daemon.'
-      );
+    if (!response)
+      throw new Error('Cannot read local DSH Providers. Update and start the Lody daemon.');
     const provider = await selectDshProvider(
       response.providers,
       configId,

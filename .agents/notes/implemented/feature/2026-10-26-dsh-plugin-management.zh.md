@@ -14,8 +14,8 @@ Lody 之前在启动时覆盖 DSH profile 清单，丢失原生 CLI 安装的依
 
 ## 决策与边界
 
-[PR #1932](https://github.com/LodyAI/Lody/pull/1932) 的最终范围以原生 CLI 薄封装
-替代尚未合入的 UI/RPC 实现。用户选择沿用原生包管理行为，不维护另一套 Lody
+[PR #1961](https://github.com/LodyAI/Lody/pull/1961) 的最终范围以原生 CLI 薄封装
+替代 PR #1932 尚未合入的 UI/RPC 实现。用户选择沿用原生包管理行为，不维护另一套 Lody
 插件目录。Skill 不在本次范围内。
 
 - 本机 daemon 只返回当前机器内置 DeepSeek Provider 的 id/name，跨活跃工作区去重。
@@ -49,5 +49,29 @@ Lody 的锁，应在 Lody 停止后执行。
 测试不下载或执行第三方插件。Windows 打包安装及真实 registry/Git 认证不在
 本次验证范围内。
 
-仓库完整检查未全绿：未修改的 `github-git-transport.test.ts` 递归 SSH 子模块测试
-遇到本机 Git shim 的 `context_unreadable`。CLI 与组件类型检查通过。
+更新基线后，CLI 定向五个套件（79 项测试）和共享传输两个套件（65 项）通过。
+完整 `pnpm check` 停在未修改的 Codex adapter 构建：复用的依赖安装缺少 ACP SDK
+的 `unstable` 导出。更早的基线也有递归 SSH 测试遇到本机 Git shim 的
+`context_unreadable`；两次检查均不代表仓库全绿。
+
+## 消融证据
+
+以 `9d9b7a2a7` 为基线，每次只改变一个候选项。测试通过本身不能证明冗余；
+保留的删除同时有职责归属或类型依据。清理已接到远端合并提交 `f7886d0ba`，
+并重新运行定向套件。这套本机 IPC 新响应尚未合入。
+
+| 候选项 | 证据与决策 |
+| --- | --- |
+| 查询内层 `success/error` 字段 | 没有失败响应生产者，目录异常已由 IPC 错误封装承载。删除字段及客户端分支；真实 handler 测试覆盖成功、目录失败和机器不匹配。 |
+| Fleet 重复的请求机器校验 | 唯一生产调用来自已校验的 IPC handler。删除内层校验；临时删除外层权威校验会令新增边界测试失败。仍保留 Provider 行的机器和类型过滤。 |
+| 单次使用的清单读取包装与导出 schema | 内联读取和解析，schema 改为私有；保留依赖及损坏清单测试通过。 |
+| `Number(exitCode)` | Effect 退出码已是带品牌的 number。移除转换；非零退出与取消测试通过。 |
+| Profile 覆盖限制 | 临时删除后命令测试失败，恢复。 |
+| 读取已有 profile | 临时删除导致依赖丢失，并覆盖损坏配置，两项回归测试失败，恢复。 |
+
+文件锁、进程取消、平台启动适配和清单校验全部保留。本次证据不支持删除这些边界。
+
+远端合并移除了旧的 Node executable 环境覆盖，插件入口因此在合并调用者和启动
+环境后复用 `prepareDeepSeekNodeEnvironment`，遵守系统 Node 契约。
+子进程环境回归测试在修复前失败、修复后通过；取消测试仍在探测成功后到达安装
+进程。这项合并兼容修复与冗余删除分别记录。

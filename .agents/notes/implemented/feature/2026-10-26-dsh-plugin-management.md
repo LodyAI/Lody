@@ -16,8 +16,8 @@ and package installation is never exposed through workspace RPC.
 
 ## Decision and boundaries
 
-The final scope of [PR #1932](https://github.com/LodyAI/Lody/pull/1932) replaces its
-unmerged UI/RPC implementation with a thin native CLI wrapper. The user chose native
+The final scope of [PR #1961](https://github.com/LodyAI/Lody/pull/1961) replaces the
+unmerged UI/RPC implementation in PR #1932 with a thin native CLI wrapper. The user chose native
 package-manager behavior over a separate Lody package catalog. Skills are outside scope.
 
 - The local daemon returns only ids/names of builtin DeepSeek Providers on its machine,
@@ -60,6 +60,34 @@ native subprocess cwd/home/environment and exit status, and startup preservation
 No test downloads or executes a third-party plugin. Packaged Windows installation
 and live registry/Git authentication remain outside this verification scope.
 
-Full repository validation is not green: the unchanged recursive SSH submodule
-fixture in `github-git-transport.test.ts` fails with the local Git shim's
-`context_unreadable`; CLI and component type checks pass.
+On the updated base, five targeted CLI suites pass (79 tests) and two shared
+transport suites pass (65 tests). Full `pnpm check` stops in the unchanged Codex
+adapter build because the reused dependency installation lacks the ACP SDK's
+`unstable` exports. The earlier baseline also had a recursive SSH fixture failure
+with the local Git shim's `context_unreadable`; neither run establishes a green
+full-repository check.
+
+## Ablation evidence
+
+Ablations start from `9d9b7a2a7` and change one candidate at a time. Passing tests
+alone do not establish redundancy; each retained deletion also has an ownership
+or type-level justification. The cleanup is replayed on remote merge `f7886d0ba`
+and its focused suites rerun. The new local IPC response is still unmerged.
+
+| Candidate | Evidence and decision |
+| --- | --- |
+| Nested discovery `success/error` fields | No failure producer exists; catalog exceptions already use the IPC error envelope. Remove the fields and client branch; real handler tests preserve success, catalog failure and wrong-machine rejection. |
+| Fleet's repeated request-machine guard | Its sole production caller is the validated IPC handler. Remove the inner guard; deleting the authoritative outer guard makes the new boundary test fail. Provider-row machine/type filtering remains. |
+| Single-use manifest-reader wrapper and exported schema | Inline the read/parse and keep the schema private; preservation and malformed-manifest tests pass. |
+| `Number(exitCode)` | Effect's exit code is a branded number. Remove the conversion; native nonzero exit and cancellation tests pass. |
+| Profile override guard | Temporary deletion fails the command test; restore it. |
+| Reading the existing profile | Temporary deletion loses dependencies and overwrites malformed configuration; both regression tests fail. Restore it. |
+
+File-lock ownership, process cancellation, platform spawn adaptation and manifest
+validation remain intact. No evidence here authorizes removing those boundaries.
+
+The remote merge removes the old Node executable overlay. The plugin entry now
+reuses `prepareDeepSeekNodeEnvironment` after merging caller/launch env, matching
+the system-Node contract. Its child-environment regression fails before the fix
+and passes after it; cancellation still reaches the installer after a successful
+probe. This integration repair is separate from the redundancy deletions.
