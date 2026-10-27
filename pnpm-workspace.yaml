@@ -110,7 +110,7 @@ minimumReleaseAgeExclude:
   # Use the pinned npm release instead of requiring a sibling Roost checkout.
   - '@loro-dev/roost@0.3.0'
   # pnpm 10.20 uses the first rule per package; keep exact Codex versions together.
-  - '@openai/codex@0.154.0 || 0.156.0 || 0.156.0-darwin-arm64 || 0.156.0-darwin-x64 || 0.156.0-linux-arm64 || 0.156.0-linux-x64 || 0.156.0-win32-arm64 || 0.156.0-win32-x64 || 0.159.2 || 0.159.2-darwin-arm64 || 0.159.2-darwin-x64 || 0.159.2-linux-arm64 || 0.159.2-linux-x64 || 0.159.2-win32-arm64 || 0.159.2-win32-x64'
+  - '@openai/codex@0.154.0 || 0.156.0 || 0.156.0-darwin-arm64 || 0.156.0-darwin-x64 || 0.156.0-linux-arm64 || 0.156.0-linux-x64 || 0.156.0-win32-arm64 || 0.156.0-win32-x64 || 0.159.2 || 0.159.2-darwin-arm64 || 0.159.2-darwin-x64 || 0.159.2-linux-arm64 || 0.159.2-linux-x64 || 0.159.2-win32-arm64 || 0.159.2-win32-x64 || 0.164.0 || 0.164.0-darwin-arm64 || 0.164.0-darwin-x64 || 0.164.0-linux-arm64 || 0.164.0-linux-x64 || 0.164.0-win32-arm64 || 0.164.0-win32-x64'
   # Exact transitive dependencies already selected for werift.
   - '@peculiar/asn1-x509@2.10.0'
   - '@peculiar/asn1-x509-attr@2.10.0'
@@ -150,8 +150,9 @@ minimumReleaseAgeExclude:
   - '@rolldown/binding-openharmony-arm64@1.2.11'
   - '@rolldown/binding-win32-arm64-msvc@1.2.11'
   - '@rolldown/binding-win32-x64-msvc@1.2.11'
+  # ACP SDK versions selected by the Claude and Codex submodule source syncs.
+  - '@agentclientprotocol/sdk@1.5.1 || 2.0.2'
   # Exact pins required by the reviewed Claude upstream 0.84.0 source sync.
-  - '@agentclientprotocol/sdk@1.5.1'
   - '@anthropic-ai/claude-agent-sdk@0.3.284'
   - '@anthropic-ai/claude-agent-sdk-darwin-arm64@0.3.284'
   - '@anthropic-ai/claude-agent-sdk-darwin-x64@0.3.284'

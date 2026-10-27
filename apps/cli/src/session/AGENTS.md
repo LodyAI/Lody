@@ -36,7 +36,7 @@
 - Stop data: control doc; meta: pointer. Never scan old docs for work or change active presence
   here (`../lib/loro/session-active-presence.ts`).
 - Bound reconciliation per README (no per-trigger scans/throttles); close
-  [dead turns](README.md#dead-turns); ack queue signals only when empty.
+  [dead turns](README.md#dead-turns); ack empty queues only with causal proof.
 
 ## Turn execution
 
@@ -60,11 +60,11 @@
   `finished`/`endedAt`/`permissionWaitMs` there only; never write `finished=false` from teardown.
 - Keep JSON-RPC/transport matching in `acp-error-classification.ts`: disposed/stale `-32603` =
   `agent_disconnected`, Harness compression mismatch = `acp_session_storage_incompatible`.
-- Stale ACP: retry once before output; retire, retain cleanup, keep the turn. Never retry submitted
+- Stale ACP: retry once before any event; retire, retain cleanup, keep the turn. Never retry submitted
   Inbox inputs (human-plus-batch too).
 - Completion publication follows [notification ownership](../lib/notifications/AGENTS.md).
-- No ACP updates: `recordSilentTurnFailure`, not `setDispatchHandled`. Read
-  `turnProducedVisibleOutput` before `finalizeTurn` clears it; finalize, advance pointers, fail open.
+- No content: `recordSilentTurnFailure`, not `setDispatchHandled`. Await
+  `turnProducedVisibleOutput` before `finalizeTurn`; finalize, advance pointers, fail open.
 - Diff content comes only from the CLI-local ACP evidence store; GitHub `diffStats` use PR compare
   semantics; `session-diff-stats-target.ts` skips, never overwrites, a good total.
 
@@ -80,7 +80,7 @@
   machines publish `['dotlodyPath']`; frontends derive them.
 - `sandbox.spawn` returning OUTPUT requires `captureOutput: true` and a 4 MiB buffer cap;
   ACP stdio does not capture.
-- Session start failures: [rules](README.md#start-failures).
+- Keep startup stderr: [rules](README.md#start-failures).
 - Shutdown: `cleanUp({ keepWorkspaceDocumentOpen: true })`, MessageHandler's final flush,
   then `cleanUp()`; never close the doc first.
 

@@ -250,6 +250,7 @@ async function workspaceHarness(options: {
     }),
   });
   const store = {
+    doc: handle.doc,
     sessionData: conversation.sessionData,
     history: conversation.history,
     getState: () => conversation.mirror.getState(),

@@ -51,6 +51,16 @@ See the [decision and verification](../../../../.agents/notes/implemented/bug-fi
   refused healthy Machines and silently emptied candidate lists during a cold start or reconnect
   backoff. Contract: `specs/loro-ephemeral-presence-channel.md`.
 
+## Session placement guidance
+
+Single and batch create descriptions tell agents to explicitly set
+`useCurrentSessionAsParent=false` for sidebar sub-conversations; batch calls can
+set it in `defaults`. Use `true` only for an explicitly requested Tab within the
+current conversation. This is caller guidance: runtime defaults remain unchanged,
+including same-machine Local Project Role creation choosing a Tab when the field
+and `workContext` are omitted. An independent conversation can use `workContext`
+to select its project. See [session relations](../../../../specs/session-relations.md).
+
 ## Operation acceptance
 
 - MCP session tools use stable machine/session/agent-config ids and strict, narrow input schemas.

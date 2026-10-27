@@ -224,7 +224,7 @@ inside that same ACP process. Creation/restoration retain their cancellation fen
 initialization completes; those fences must not override a later `keep` during configuration.
 Binding a ready session alone does not authorize termination.
 
-An ordinary user turn can retry a stale ACP prompt once before observing output; Inbox
+An ordinary user turn can retry a stale ACP prompt once before observing any ACP event; Inbox
 submissions never retry. Exact-instance retirement detaches lifecycle listeners before
 termination, preserving the assistant entry and output owner through resume. Until retirement
 succeeds, the disconnected-execution release path retains the old Session for cleanup,
@@ -282,8 +282,13 @@ turn under the rewrite lease), the entry is dead:
   closes the entry a crashed run left open, at that failure point. A `processing` input is
   never closed this way: it still owes its crash-recovery run on the same entry. Dispatch
   checks do not sweep for dead turns; that would read history on every trigger.
-- The queue signal (`messageQueueCheckedAt`) is acknowledged only when the local queue is
-  empty, so a row that could not be promoted keeps the session watched.
+- Queue acknowledgement requires an empty local queue **and** observation of the control
+  frontier carried by that exact `messageQueueUpdatedAt` signal. Renderer queue mutations
+  capture `messageQueueUpdateVersion` before releasing their store. Metadata arriving first
+  therefore keeps the session watched until content arrives. Unversioned signals from older
+  renderers remain unacknowledged; their watch is released by a versioned queue update,
+  archive/deletion/reassignment or watcher shutdown. No polling or extra retry owner is added.
+  See the [causal acknowledgement decision](../../../../.agents/notes/implemented/bug-fix/2026-10-27-queue-signal-before-content.md).
 
 Observed cause: a restart's recovery dispatch was rejected by Inbox admission before its
 prompt, failing the user input while the entry stayed open. See the
@@ -294,7 +299,12 @@ prompt, failing the user input while the entry stayed open. See the
 Nothing reads `PromptResponse.stopReason`, and an adapter may swallow an upstream failure and
 resolve normally — observed: an over-context request answered with HTTP 400, kept only in the
 agent's own session file — so `handleTurnError` never sees it. The no-output guard is the
-backstop.
+backstop. It awaits the existing image upload owner before reading the current
+turn's content observation, while that epoch still owns finalization:
+metadata and checklist/status updates cannot make a silent turn successful.
+Any ACP event still prevents replay. Unobservable state refuses replay and lets
+content settlement fail open; the [ACP contract](../lib/acp/AGENTS.md) owns the
+classification.
 
 ### Why output capture is mandatory for result-bearing spawns
 
@@ -401,6 +411,11 @@ is bound. A failure is recorded as `<step> failed: <message>`, using
 `session-start-stage.ts`, so the user sees where start-up stopped. Authentication failures
 keep their own message. The error itself is never wrapped: the restore and create paths
 classify it by identity to choose sign-in, the history-replay fallback or a generic failure.
+During ACP startup, a plain transport-close error retains the monitor's observed
+process failure, or its already buffered stderr when stdout closes before the exit
+event. Typed startup failures bypass generic disconnect classification, so the
+start-step notice carries their diagnostics. Protocol errors and cancellation keep
+their original identity; no extra wait or retry is introduced.
 When a start fails, cleanup terminates the partial Session and releases its credentials.
 Each cleanup failure is logged, and the original error is rethrown. These are rules:
 never wrap the start error, and never let cleanup replace it. Failure text uses
