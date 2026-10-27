@@ -2,6 +2,7 @@
 
 Status: implemented
 Translation: current
+PR: [#1976](https://github.com/LodyAI/Lody/pull/1976)
 
 [中文](2026-10-27-e2ee-key-maintenance-availability.zh.md)
 

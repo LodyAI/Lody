@@ -1,3 +1,5 @@
+import { useWorkspaceFeature } from '@/hooks/use-workspace-feature';
+import { WorkspaceFeatureNotice } from '@/components/workspace-feature-notice';
 import { ScheduledMessageEditor } from './scheduled-message-editor';
 import type { AgentRunRef } from '@/components/shared/agent-run-ref';
 import { AlertDialog } from '@/ui/dialog';
@@ -212,7 +214,7 @@ const styles = stylex.create({
   },
 });
 
-export function SchedulesWorkspace({
+function SupportedSchedulesWorkspace({
   scheduleId,
   insetSafeArea = false,
   hideHeader = false,
@@ -1004,5 +1006,15 @@ function ScheduleHistoryRow({ session: s, onOpen }: { session: SessionMeta; onOp
         })}
       </time>
     </button>
+  );
+}
+
+/** Also guards deep links, before the editor can subscribe or start writes. */
+export function SchedulesWorkspace(props: Parameters<typeof SupportedSchedulesWorkspace>[0]) {
+  const allowed = useWorkspaceFeature('schedules');
+  return allowed ? (
+    <SupportedSchedulesWorkspace {...props} />
+  ) : (
+    <WorkspaceFeatureNotice feature="schedules" />
   );
 }
