@@ -5,7 +5,11 @@ import * as acp from '@agentclientprotocol/sdk';
 import { ndJsonStream, type Stream } from '@agentclientprotocol/sdk';
 import type { SessionInfo } from '@agentclientprotocol/sdk';
 
-import { spawnAcpProcess, terminateAcpProcessTree } from '@/agent/acp-runner';
+import {
+  spawnAcpProcess,
+  prepareAcpProcessEnvironmentLegacy,
+  terminateAcpProcessTree,
+} from '@/agent/acp-runner';
 import { withAcpSessionStartSlot } from '@/agent/acp-session-start-gate';
 import { getLoginShellEnvLegacy } from '@/agent/login-shell-env';
 import {
@@ -133,9 +137,13 @@ async function createHistoryAcpConnection(args: {
   // minimal PATH, so overlay the login-shell env (+ default fallback dirs) before
   // spawning the history-sync agent binary.
   const loginShellEnv = await getLoginShellEnvLegacy();
-  const env = withDefaultAcpPathEntries(
-    mergeLoginShellEnv(launch.env, loginShellEnv),
-    args.provider.agentType
+  const env = await prepareAcpProcessEnvironmentLegacy(
+    launch,
+    withDefaultAcpPathEntries(
+      mergeLoginShellEnv(launch.env, loginShellEnv),
+      args.provider.agentType
+    ),
+    { logger: args.logger }
   );
   return await withAcpSessionStartSlot(
     {
