@@ -344,6 +344,16 @@ describe('Mention navigation and insertion', () => {
     expect(pressKey(input, 'b', { ctrlKey: true, shiftKey: true }).defaultPrevented).toBe(false);
   });
 
+  it.each(['a', 'e', 'p', 'n'])('leaves macOS Control+%s line movement to the browser', (key) => {
+    setPlatform('darwin');
+    const input = render([{ value: 'src/file.ts', insertText: '@src/file.ts', kind: 'file' }], '@');
+    commit('src/file.ts', 0);
+    const mention = latest.mentions[0]!;
+
+    act(() => input.setSelectionRange(mention.end, mention.end));
+    expect(pressKey(input, key, { ctrlKey: true }).defaultPrevented).toBe(false);
+  });
+
   it.each([
     { key: 'ArrowLeft', boundary: 'end' },
     { key: 'ArrowRight', boundary: 'start' },

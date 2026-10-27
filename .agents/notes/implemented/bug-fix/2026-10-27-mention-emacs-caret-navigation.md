@@ -14,6 +14,8 @@ macOS's default Emacs text-navigation keys could leave the caret stuck at a comm
 
 Treat macOS's default Emacs-style Control+B and Control+F text-navigation keys as character-left and character-right movement at a committed mention boundary. Reuse the existing atomic range navigation for Left and Right Arrow. Preserve the browser's default handling away from adjacent mentions and when a selection or Shift modifier is present. Other platforms keep their existing Control-key behavior.
 
+The key mapping is isolated in `getHorizontalCaretMove`. Other default macOS Emacs movement keys have line-based destinations (Control+A/E/P/N), and editing keys change text; this character-boundary fix leaves those commands to the browser rather than treating every Control shortcut as an arrow.
+
 ## Evidence
 
 - The reporter observed Control+B leaving the caret flashing at the end of a file mention and confirmed that plain Left and Right Arrow already work. The symmetric Control+F failure is inferred from the same source path and covered by a component test; it was not separately observed in the desktop app.

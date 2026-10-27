@@ -34,6 +34,34 @@ type VirtualAnchorSnapshot = {
   anchor: VirtualElement;
 };
 
+type HorizontalCaretMove = { direction: 'left' | 'right'; isWordJump: boolean };
+
+const MAC_EMACS_CHARACTER_MOVES: Readonly<Record<string, HorizontalCaretMove['direction']>> = {
+  b: 'left',
+  f: 'right',
+};
+
+function getHorizontalCaretMove(
+  event: React.KeyboardEvent<InputElement>
+): HorizontalCaretMove | null {
+  if (event.shiftKey) return null;
+
+  if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
+    return {
+      direction: event.key === 'ArrowLeft' ? 'left' : 'right',
+      isWordJump: event.metaKey || event.ctrlKey,
+    };
+  }
+
+  // Other macOS Emacs bindings move by line or change text. Only B/F have the
+  // same one-character movement as the arrows at an atomic mention edge.
+  const direction = MAC_EMACS_CHARACTER_MOVES[event.key];
+  if (!direction || !event.ctrlKey || event.metaKey || event.altKey || getPlatform() !== 'mac') {
+    return null;
+  }
+  return { direction, isWordJump: false };
+}
+
 function normalizeTextareaValue(
   value: React.ComponentPropsWithoutRef<typeof Primitive.textarea>['value']
 ): string | undefined {
@@ -573,37 +601,26 @@ const MentionInput = React.forwardRef<InputElement, MentionInputProps>((props, f
       const cursorPosition = input.selectionStart ?? 0;
       const selectionEnd = input.selectionEnd ?? cursorPosition;
       const hasSelection = cursorPosition !== selectionEnd;
-      const isMacEmacsHorizontal =
-        event.ctrlKey &&
-        !event.metaKey &&
-        !event.altKey &&
-        (event.key === 'b' || event.key === 'f') &&
-        getPlatform() === 'mac';
-      const horizontalDirection =
-        event.key === 'ArrowLeft' || (isMacEmacsHorizontal && event.key === 'b')
-          ? 'left'
-          : event.key === 'ArrowRight' || (isMacEmacsHorizontal && event.key === 'f')
-            ? 'right'
-            : null;
+      const horizontalMove = hasSelection ? null : getHorizontalCaretMove(event);
 
-      if (horizontalDirection && !hasSelection && !event.shiftKey) {
-        const isWordJump = !isMacEmacsHorizontal && (event.metaKey || event.ctrlKey);
+      if (horizontalMove) {
+        const { direction, isWordJump } = horizontalMove;
 
         const adjacentMention = findAdjacentMentionForHorizontalNavigation({
           mentions: context.mentions,
           value: input.value,
           cursorPosition,
-          direction: horizontalDirection,
+          direction,
           isWordJump,
         });
 
         if (adjacentMention) {
           event.preventDefault();
           const newPosition = isWordJump
-            ? horizontalDirection === 'left'
+            ? direction === 'left'
               ? adjacentMention.start
               : adjacentMention.end
-            : horizontalDirection === 'left'
+            : direction === 'left'
               ? cursorPosition > adjacentMention.end
                 ? adjacentMention.end
                 : adjacentMention.start
