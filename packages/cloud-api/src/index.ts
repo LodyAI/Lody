@@ -6,6 +6,8 @@ import type {
   E2eeAppendRecordRequest,
   E2eeAppendRecordReply,
 } from './e2ee-device';
+import type { E2eeJoinRequests, E2eeJoinReplies } from './e2ee-join';
+export type * from './e2ee-join';
 export type * from './e2ee-device';
 import type { NotificationPresentation } from '@lody/shared/notifications';
 import type { TerminalOutcome } from '@lody/shared/notifications';
@@ -16,6 +18,8 @@ import type {
   E2eeWorkspaceCreateResult,
   E2eeWorkspaceHistoryRequest,
   E2eeWorkspaceHistoryPage,
+  E2eeWorkspaceMemberProfilesRequest,
+  E2eeWorkspaceMemberProfiles,
 } from './e2ee-workspaces';
 export type {
   WorkspaceAdmissionDescriptor,
@@ -23,6 +27,8 @@ export type {
   E2eeWorkspaceCreateRequest,
   E2eeWorkspaceCreateResult,
   E2eeLedgerCheckpoint,
+  E2eeWorkspaceMemberProfilesRequest,
+  E2eeWorkspaceMemberProfiles,
   E2eeWorkspaceHistoryRequest,
   E2eeWorkspaceHistoryPage,
 } from './e2ee-workspaces';
@@ -393,6 +399,14 @@ type SeatInvitePreview =
 export type CloudApi = {
   /** Optional developer-only E2EE control plane; does not authorize content access. */
   e2eeContent: { contentStreamsToken: Action<E2eeContentTokenRequest, E2eeContentToken> };
+  e2eeJoinMailbox: {
+    begin: Mutation<E2eeJoinRequests['begin'], E2eeJoinReplies['begin']>;
+    status: Query<E2eeJoinRequests['status'], E2eeJoinReplies['status']>;
+    readRequest: Query<E2eeJoinRequests['readRequest'], E2eeJoinReplies['readRequest']>;
+    cancel: Mutation<E2eeJoinRequests['cancel'], E2eeJoinReplies['cancel']>;
+    publish: Mutation<E2eeJoinRequests['publish'], E2eeJoinReplies['publish']>;
+    claim: Query<E2eeJoinRequests['claim'], E2eeJoinReplies['claim']>;
+  };
   e2eeMailbox: {
     put: Mutation<E2eeMailboxRequests['put'], E2eeMailboxReplies['put']>;
     read: Query<E2eeMailboxRequests['read'], E2eeMailboxReplies['read']>;
@@ -405,6 +419,7 @@ export type CloudApi = {
     appendRecord: Action<E2eeAppendRecordRequest, E2eeAppendRecordReply>;
     create: Action<E2eeWorkspaceCreateRequest, E2eeWorkspaceCreateResult>;
     describe: Query<{ workspaceId: string }, WorkspaceAdmissionDescriptor>;
+    memberProfiles: Query<E2eeWorkspaceMemberProfilesRequest, E2eeWorkspaceMemberProfiles>;
     history: Action<E2eeWorkspaceHistoryRequest, E2eeWorkspaceHistoryPage>;
   };
   /** Optional E2EE ciphertext staging. No ordinary/local product constructs it. */

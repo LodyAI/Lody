@@ -31,6 +31,7 @@ export const MACHINE_PROTOCOL_CAPABILITIES = {
   preparedSessionInput: 'preparedSessionInput',
   sessionInputAttachments: 'sessionInputAttachments',
   localFileResources: 'localFileResources',
+  fileDownload: 'fileDownload',
   markdownFileLinks: 'markdownFileLinks',
   acpProtocolAuthentication: 'acpProtocolAuthentication',
   previewControl: 'previewControl',
@@ -167,6 +168,7 @@ export const CURRENT_MACHINE_PROTOCOL_CAPABILITIES: MachineProtocolCapabilities 
   [MACHINE_PROTOCOL_CAPABILITIES.sessionInputAttachments]:
     SESSION_INPUT_ATTACHMENTS_PROTOCOL_VERSION,
   [MACHINE_PROTOCOL_CAPABILITIES.localFileResources]: LOCAL_FILE_RESOURCES_PROTOCOL_VERSION,
+  [MACHINE_PROTOCOL_CAPABILITIES.fileDownload]: 1,
   [MACHINE_PROTOCOL_CAPABILITIES.markdownFileLinks]: 1,
   [MACHINE_PROTOCOL_CAPABILITIES.acpProtocolAuthentication]: ACP_PROTOCOL_AUTHENTICATION_VERSION,
   [MACHINE_PROTOCOL_CAPABILITIES.previewControl]: PREVIEW_CONTROL_PROTOCOL_VERSION,

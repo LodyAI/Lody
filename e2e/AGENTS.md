@@ -16,6 +16,9 @@ also applies.
   random TCP port on POSIX or unique named pipe on Windows must travel together
   to Electron and all CLI descendants. Never kill or attach to a user's
   existing Lody process.
+- Unpackaged smoke sets the existing dev-only plaintext-auth storage flag in
+  that disposable profile to avoid shared macOS Keychain approval dialogs.
+  These runs do not establish native Keychain acceptance or packaged auth behavior.
 - Run scenarios serially until every remaining fixed OS endpoint has an
   explicit shared test binding. Do not raise Cucumber parallelism first.
 - Keep the unpackaged E2E BrowserWindow hidden by default and disable renderer

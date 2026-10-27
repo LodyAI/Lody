@@ -289,7 +289,7 @@ export interface CloudBillingEntitlement {
 }
 
 export interface CloudBillingPort {
-  /** Callers apply cooperative quota policy and MUST fail open on errors. */
+  /** Cooperative quotas fail open on errors; opt-in paid transfers require a positive entitlement. */
   getWorkspaceEntitlement(workspaceId: string): Promise<CloudBillingEntitlement>;
 }
 

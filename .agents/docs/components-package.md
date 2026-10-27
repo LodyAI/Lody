@@ -216,6 +216,13 @@ and wait behind earlier input under the same lease. Unprepared attachments remai
 in the existing memory queue. Cache recovery preserves saved input; full reset
 may delete it. See the [owning decision](../notes/proposed/architecture/2026-10-13-backend-independent-send-acceptance.md).
 
+An unresolved input holds every later input of its conversation, in every window,
+because they share storage and the session lease. The client log records this
+without input content: `session_input.stalled` (input ID, state, failed stage,
+error, count waiting behind it; once per distinct state), `session_input.slow`
+(a lease or owner step still unsettled after 15 s, not interrupted) and
+`session_input.resolved` when an earlier stall is confirmed.
+
 ## File preview versus Code Collab
 
 File routing, cache, and caller contracts live in

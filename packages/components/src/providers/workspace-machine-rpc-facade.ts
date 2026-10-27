@@ -1,3 +1,4 @@
+import { type FileDownloadRequest, type FileDownloadResponse } from '@lody/shared';
 import {
   FilePreviewV3ResponseSchema,
   MAIN_SESSION_FILE_ROOT_ID,
@@ -284,6 +285,31 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
       message: 'The agent machine does not support Markdown link resolution.',
       retryable: false,
     });
+
+  const requestFileDownloadChunk = async (
+    machineId: MachineId,
+    request: FileDownloadRequest,
+    ownerSessionId?: string
+  ): Promise<FileDownloadResponse> => {
+    const capabilities = await deps.getMachineProtocolCapabilities(machineId);
+    if (
+      !machineSupportsProtocolCapability(
+        { protocolCapabilities: capabilities },
+        MACHINE_PROTOCOL_CAPABILITIES.fileDownload
+      )
+    )
+      return { status: 'error', code: 'unsupported_protocol' };
+    // This is a remote-only path. Same-machine file actions retain local IPC.
+    if ((await resolveMachineTargetPlane(machineId)) === 'local')
+      return { status: 'error', code: 'unsupported_protocol' };
+    const client = await getMachineRpcClient(machineId);
+    return (
+      (await client.requestFileDownloadChunk({ ...request, ownerSessionId })) ?? {
+        status: 'error',
+        code: 'transient_io',
+      }
+    );
+  };
 
   const requestFilePreview = async (
     machineId: MachineId,
@@ -634,7 +660,7 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
       )
         throw new Error('This machine does not support individual subagent cancellation.');
       const requiredLocalControl = deps.isLocalControlMachine?.(machineId) === true;
-      if (requiredLocalControl || await canUseLocalMachineRpc(machineId)) {
+      if (requiredLocalControl || (await canUseLocalMachineRpc(machineId))) {
         const response = await getLocalMachineRpcSender()?.({
           machineId,
           workspaceId,
@@ -656,7 +682,8 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
           };
         }
         if (response?.ok) return response.result as SessionCancelResponse;
-        if (requiredLocalControl || options?.subagentTaskId) throw new Error('Local machine RPC is unavailable.');
+        if (requiredLocalControl || options?.subagentTaskId)
+          throw new Error('Local machine RPC is unavailable.');
       }
       return await (
         await getMachineRpcClient(machineId)
@@ -1574,6 +1601,7 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
     requestSessionHistoryRead,
     requestSessionHistoryWrite,
     requestFilePreview,
+    requestFileDownloadChunk,
     requestLocalCodeCollabFileIndex,
     requestCodeCollabOpenText,
     requestCodeCollabRefreshText,

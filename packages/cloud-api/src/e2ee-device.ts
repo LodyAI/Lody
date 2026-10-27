@@ -34,5 +34,7 @@ export type E2eeAppendRecordRequest = {
   requestId: string;
   recordHex: string;
   credentialHash?: string;
+  /** Personal join cancellation fence, consumed with the writer reservation. */
+  pairingSessionId?: string;
 };
 export type E2eeAppendRecordReply = { status: string; recordHash: string };

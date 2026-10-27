@@ -992,6 +992,11 @@ const AgentFileLink = ({
   getContextMenuItems?: (href: string) => readonly MarkdownAgentFileLinkMenuItem[];
 }) => {
   const [didCopy, setDidCopy] = useState(false);
+  useEffect(() => {
+    if (!didCopy) return undefined;
+    const timeout = window.setTimeout(() => setDidCopy(false), 1200);
+    return () => window.clearTimeout(timeout);
+  }, [didCopy]);
   const hasOpenAction = Boolean(onFilePathClick);
   const iconPath = parseMarkdownAgentFileHref(href)?.filePath ?? href;
   const contextMenuItems = getContextMenuItems?.(href) ?? [];
@@ -1006,7 +1011,6 @@ const AgentFileLink = ({
     if (!ok) return;
 
     setDidCopy(true);
-    window.setTimeout(() => setDidCopy(false), 1200);
   }, [fileCard, href, onFilePathClick]);
 
   const link = fileCard ? (

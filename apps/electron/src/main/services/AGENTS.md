@@ -97,27 +97,26 @@ replacement before release. See the
 
 ## E2EE runtime
 
-For E2EE changes, read [M1 boundaries](../../../../../.agents/notes/implemented/architecture/2026-10-21-e2ee-m1-runtime-boundaries.md)
-and [M2 boundaries](../../../../../.agents/notes/proposed/architecture/2026-10-22-e2ee-m2-product-integration.md).
-Account custody is lazy; native work settles before release. Use cached main-auth
-identity, rechecking identity/generation after native open; never wait for network
-under custody locks. Availability may use pinned renderer reads; evidence conflicts
-never fall back. Persist originals before feed/pin. Verification/storage failure
-closes its owner; malformed input does not close shared readers. Compare overlapping
-verified originals, retain renderer checkpoints on takeover, and wait for missing history.
+Read [M1 boundaries](../../../../../.agents/notes/implemented/architecture/2026-10-21-e2ee-m1-runtime-boundaries.md),
+[M2 boundaries](../../../../../.agents/notes/proposed/architecture/2026-10-22-e2ee-m2-product-integration.md),
+and [personal desktop joining](../../../../../.agents/notes/proposed/architecture/2026-10-26-e2ee-personal-desktop-join.md).
+Custody is lazy; account locks never wait for network. Await native work before
+release. Verification/storage failures close only their owner; malformed input
+leaves shared readers available. Preserve originals before feed/pin and compare
+overlapping records. Genuine evidence conflicts never fall back.
 
-Cloud calls use fixed E2EE references and per-request auth/abort/deadlines;
-disposal blocks late requests. Keep
-network/key distribution outside custody locks. Caller journals retain exact bytes
-for uncertain writes. Wire checks are structural; core owns signatures/authority.
-SDK logs and raw causes cannot cross the adapter/IPC logging boundary.
+Cloud calls use fixed E2EE references and per-request auth/abort/deadlines outside
+custody locks. Preserve original requests across unknown outcomes. Keep SDK logs
+and raw causes in main, outside IPC logging and telemetry. `e2ee-diagnostics.mts` keeps raw storage causes main-only. Verified readback wins
+over a lost acknowledgement; auxiliary failures never undo verified admission.
 
-Pairing journals its main-generated session and exact admission before HTTP.
-Verify machine proofs locally; explicit consent precedes signing. Confirm from
-verified originals, then await CLI current-key installation before content sync.
-Reset only unsigned or verified settled records (exact commit/competing parent);
-keep uncertain bytes. Re-prepare retries; new sessions require consent. Missing
-credentials block preparation/approval; never export them via IPC. A socket deadline
-bounds waiting, not completion: timeout is pending, never rejection or approval.
-Keep original append/confirmation errors in main; verified readback wins over a
-lost ack, and only stable cause-free errors cross renderer IPC.
+Explicit consent follows locally verified, durably fixed pairing evidence.
+Retries retain session/record/requestId and keys, credentials and pins. Failed begin
+stays discoverable. Archive terminal or foreign immutable recipient attempts (pin-only + relay request is foreign);
+same-request admitting/unknown stays fenced. Cleanup preserves installed origins,
+other sessions and both primary/cleanup causes; see the linked join note.
+Personal snapshot origins verify pinned endorsement and
+self admission before any binding/pin/cursor; old epoch keys use mailbox plus the
+verified history chain, never staging. Ledger record positions may be sparse.
+Machine approval still discloses file protection; socket timeout means pending,
+not approval. Await CLI current-key installation before content sync.

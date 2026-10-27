@@ -4763,6 +4763,9 @@ const SessionDetail = ({
     }
     return viewerTabs.find((tab) => tab.id === effectiveActiveViewerTabId) ?? null;
   }, [effectiveActiveViewerTabId, viewerTabs]);
+  // Mobile diff viewers replace the conversation; file drawers do not.
+  const hasActiveViewerTab =
+    effectiveActiveViewerTabId !== null && (!isMobile || activeViewerTab?.type !== 'file');
   const activeViewerTabSaveState = effectiveActiveViewerTabId
     ? viewerTabSaveStates[effectiveActiveViewerTabId]
     : undefined;
@@ -4819,16 +4822,20 @@ const SessionDetail = ({
     });
   }, [activeTabSessionId, isMobile]);
 
+  // Drafts and pending children can resolve to the parent for display only.
+  const canRenameCurrentSession =
+    activeTabSession?.id === activeTabSessionId &&
+    !activeTabSession.isArchived &&
+    (!isMobile || !hasActiveViewerTab);
   const handleRenameCurrentSession = useCallback(() => {
-    const targetSession = activeDraftTab ? null : activeTabSession;
-    if (!targetSession || targetSession.isArchived) {
+    if (!canRenameCurrentSession) {
       return;
     }
     setRenameDialogTarget({
-      sessionId: targetSession.id,
-      initialTitle: targetSession.title ?? '',
+      sessionId: activeTabSession.id,
+      initialTitle: activeTabSession.title ?? '',
     });
-  }, [activeDraftTab, activeTabSession]);
+  }, [canRenameCurrentSession, activeTabSession]);
 
   const handleToggleCurrentSessionPinned = useCallback(() => {
     const targetSession = activeDraftTab ? null : activeTabSession;
@@ -5004,12 +5011,7 @@ const SessionDetail = ({
     title: t('commands.session.renameCurrent', 'Rename Current Chat'),
     category: 'Session',
     keybindings: getCommandKeybindings('session.renameCurrent'),
-    /* Same pending-child rule as toggleCurrentPinned above. */
-    when: () =>
-      Boolean(activeTabSession) &&
-      !activeDraftTab &&
-      !activeTabIsPendingChild &&
-      activeTabSession?.isArchived !== true,
+    when: () => canRenameCurrentSession,
     run: handleRenameCurrentSession,
   });
 
@@ -5372,10 +5374,6 @@ const SessionDetail = ({
     sidePanelTabs,
   ]);
 
-  // Mobile diff viewers still replace the conversation surface. File viewers
-  // open in their own drawer and therefore never hide the conversation.
-  const hasActiveViewerTab =
-    effectiveActiveViewerTabId !== null && (!isMobile || activeViewerTab?.type !== 'file');
   const mobileSkipTargetId = getSessionDetailSkipTargetId(hasActiveViewerTab);
 
   /* ── Mobile tab-switcher sheet (replaces the mobile SessionTabBar) ──
@@ -5692,7 +5690,7 @@ const SessionDetail = ({
         onDeleteSession: handleRequestDeleteCurrentSession,
         onOpenSearch: handleOpenSearch,
         onCopyConversationHistory: exportAllowed ? handleCopyConversationHistory : undefined,
-        onRequestRename: !activeDraftTab ? handleRenameCurrentSession : undefined,
+        onRequestRename: canRenameCurrentSession ? handleRenameCurrentSession : undefined,
         onForkSession:
           !activeDraftTab && activeTabSession && canForkSession(activeTabSession)
             ? handleForkCurrentSession
@@ -5734,6 +5732,7 @@ const SessionDetail = ({
     exportAllowed,
     handleCopyConversationHistory,
     activeDraftTab,
+    canRenameCurrentSession,
     handleRenameCurrentSession,
     activeTabSession,
     canForkSession,
@@ -6171,16 +6170,14 @@ const SessionDetail = ({
           }
         }
       }
-      mobileMenuActions.push({
-        id: 'rename',
-        icon: <Pencil {...stylex.props(detailStyles.icon14)} />,
-        label: t('sidebar.renameChat.title', 'Rename Chat'),
-        onClick: () =>
-          setRenameDialogTarget({
-            sessionId: activeSession.id,
-            initialTitle: activeSession.title ?? '',
-          }),
-      });
+      if (canRenameCurrentSession) {
+        mobileMenuActions.push({
+          id: 'rename',
+          icon: <Pencil {...stylex.props(detailStyles.icon14)} />,
+          label: t('sidebar.renameChat.title', 'Rename Chat'),
+          onClick: handleRenameCurrentSession,
+        });
+      }
     }
     mobileMenuActions.push(
       {

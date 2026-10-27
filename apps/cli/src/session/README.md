@@ -226,9 +226,20 @@ that signal before the next mutation, so an old turn whose first configuration c
 late cannot overwrite the configuration of the turn that started after Stop.
 
 Completion notifications use the exact completed invocation's input author, including
-steer handoffs. An Agent-authored input suppresses the user-facing completion notice;
-an earlier Agent input does not suppress a later human turn. Finalization, Operation
-results and Inbox scheduling still run. Cancellation is rechecked after the author read.
+steer handoffs. Agent input suppresses notices but not unread publication. Execution
+finishes history, releases presence and settles Inbox ownership before handing a
+frozen activity time to `turn-completion.ts`. Its Effect program persists the actual
+history backend and confirms remote history/control sync when attached, retrying
+only confirmation within 30 seconds. Local-only completion needs no remote receipt.
+Unconfirmed success is withheld and logged; failures still notify independently.
+The host drain owns publication through `publishTurnCompletionLegacy`; shutdown
+cancels confirmation before draining begun writes. Notification sends remain one-shot,
+with no outbox or reconnect replay. A receipt is not proof of client rendering.
+
+`session show` summarizes a finished assistant entry using `endedAt`, falling back
+to creation `timestamp` for active/legacy entries. Stored timestamps and ordering
+are unchanged. Activity metadata advances monotonically even when an older
+completion confirms after a newer turn; parent activity uses the same write queue.
 
 ### Why resume reopens the assistant entry
 
@@ -240,6 +251,27 @@ machine-death-then-resume turn streams new output into a `finished=true` entry: 
 renderer folds the still-streaming turn into a `Worked for …` summary and shared "active
 assistant entry" logic (`@lody/shared` `schema.ts` terminal predicate) treats it as done.
 Renderer side: [packages/components/src/components/ai-gui/AGENTS.md](../../../../packages/components/src/components/ai-gui/AGENTS.md).
+
+### Dead turns
+
+Whether the last assistant entry is finished is what clients use to choose Stop and
+queue-versus-send, so an entry that no execution will ever finish keeps a session busy
+forever. Only the owning daemon executes a session; with no live runtime there
+(`SessionExecutionService.closeDeadAssistantTurn` checks the active, current and runtime
+turn under the rewrite lease), the entry is dead:
+
+- Stop on that turn closes it: it cancels a still-unsettled user input, then force-finishes
+  the entry. Stop still does not run the queue.
+- A dispatch that settles its input before the prompt (Inbox blocked, input already ended)
+  closes the entry a crashed run left open, at that failure point. A `processing` input is
+  never closed this way: it still owes its crash-recovery run on the same entry. Dispatch
+  checks do not sweep for dead turns; that would read history on every trigger.
+- The queue signal (`messageQueueCheckedAt`) is acknowledged only when the local queue is
+  empty, so a row that could not be promoted keeps the session watched.
+
+Observed cause: a restart's recovery dispatch was rejected by Inbox admission before its
+prompt, failing the user input while the entry stayed open. See the
+[decision](../../../../.agents/notes/implemented/bug-fix/2026-10-26-dead-turns-and-orphaned-queue.md).
 
 ### Why a resolved prompt is not proof of success
 
@@ -859,5 +891,13 @@ selected submodules wait for their parent, and siblings sharing parent Git confi
 are serialized. Branch receipts publish serially, and failures drain started work
 before releasing the Project owner. Selected members initialize non-recursively
 with their own credentials; remaining submodules initialize afterward with four Git
-fetch jobs per command. Local selected copies lend objects via `--reference` and
-`--dissociate`, so source GC cannot invalidate a checkout. Setup retains the prior serial traversal order, including parents before children.
+fetch jobs per command. Complete standalone local copies lend objects via `--reference`
+and `--dissociate`, so source GC cannot invalidate a checkout. Partial clones, shallow
+copies and linked worktrees use ordinary cloning instead; preparation never hydrates
+the source. Remaining submodule initialization follows gitlinks in the current index,
+ignoring residual `.gitmodules` entries. Archive skips unmaterialized empty selected
+submodules and verifies that populated members are independent checkouts before backup;
+unknown local content is retained. Setup retains the prior serial traversal order,
+including parents before children.
+The [submodule preparation decision](../../../../.agents/notes/implemented/bug-fix/2026-10-26-project-submodule-preparation.md)
+records the source-layout and incomplete-startup recovery boundaries.
