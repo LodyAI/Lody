@@ -140,7 +140,7 @@ export const ApprovalQueue: Story = {
           approveMemberJoin: async () => ({ admitted: true, keyPending: true }),
           rejectMemberJoin: async () => ({ state: 'rejected' }),
           revokeMemberInvitation: async () => ({ revoked: true }),
-          promoteMember: async () => ({ promoted: true }),
+          setMemberRole: async () => {},
         }}
       />
     </div>

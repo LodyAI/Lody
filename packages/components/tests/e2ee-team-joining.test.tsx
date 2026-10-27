@@ -284,6 +284,41 @@ describe('encrypted team joining', () => {
     expect(admitted).toBe(true);
     expect(readers).toBe(0);
   });
+  it('uses the shared member-role command and reports success only after it completes', async () => {
+    let role: 'member' | 'admin' = 'member';
+    const accepted = deferred<void>();
+    await render(
+      <E2eeTeamSettings
+        workspaceId="team"
+        canPromote
+        members={[{ membershipId: '55'.repeat(16), role, name: 'Riley' }]}
+        runtime={{
+          createMemberInvitation: async () => offer,
+          memberJoinRequests: async () => empty,
+          approveMemberJoin: async () => ({ admitted: true, keyPending: false }),
+          rejectMemberJoin: async () => ({ state: 'rejected' }),
+          revokeMemberInvitation: async () => ({ revoked: true }),
+          setMemberRole: async (workspaceId, membershipId, nextRole) => {
+            expect([workspaceId, membershipId, nextRole]).toEqual([
+              'team',
+              '55'.repeat(16),
+              'admin',
+            ]);
+            await accepted.promise;
+            role = nextRole;
+          },
+        }}
+      />
+    );
+    await act(async () => button('e2ee.team.promote').click());
+    expect(role).toBe('member');
+    expect(button('e2ee.team.promote').disabled).toBe(true);
+    expect(container.textContent).not.toContain('e2ee.team.promoted');
+    accepted.resolve();
+    await settle();
+    expect(role).toBe('admin');
+    expect(container.textContent).toContain('e2ee.team.promoted');
+  });
   it('preserves independent genesis pins through desktop handoff and rejects a different token', () => {
     const path = resolveDesktopInviteDeepLinkPath(desktopMemberJoinLink(offer));
     expect(path).toBe(memberJoinPath(offer));

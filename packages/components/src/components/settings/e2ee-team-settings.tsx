@@ -19,7 +19,7 @@ type Runtime = Pick<
   | 'approveMemberJoin'
   | 'rejectMemberJoin'
   | 'revokeMemberInvitation'
-  | 'promoteMember'
+  | 'setMemberRole'
 >;
 const styles = stylex.create({
   stack: { display: 'flex', flexDirection: 'column', gap: space[3] },
@@ -248,7 +248,7 @@ function TeamSession({
         ))}
         {data?.hasMore && <p>{t('e2ee.team.moreRequests')}</p>}
         {canPromote &&
-          runtime.promoteMember &&
+          runtime.setMemberRole &&
           members?.some((member) => member.role === 'member') && (
             <div {...stylex.props(styles.stack)}>
               <h3>{t('e2ee.team.admins')}</h3>
@@ -264,14 +264,8 @@ function TeamSession({
                       disabled={busy}
                       onClick={() =>
                         void perform(async () => {
-                          const result = await runtime.promoteMember!(
-                            workspaceId,
-                            member.membershipId
-                          );
-                          if (current())
-                            setMessage(
-                              t(result.promoted ? 'e2ee.team.promoted' : 'e2ee.team.reconciling')
-                            );
+                          await runtime.setMemberRole!(workspaceId, member.membershipId, 'admin');
+                          if (current()) setMessage(t('e2ee.team.promoted'));
                         })
                       }
                     >
