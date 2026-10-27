@@ -5,7 +5,8 @@ import { LODY_SERVER_URL } from '@/utils/const';
 import { SimulatorIceServersSchema } from '@/ios-simulator/webrtc-protocol';
 import { ConvexClient, ConvexHttpClient } from 'convex/browser';
 import { z } from 'zod';
-import { api, type E2eeMailboxReplies } from '@lody/cloud-api';
+import { api } from '@lody/cloud-api';
+import { e2eeHistoryPageSchema, e2eeMailboxReplySchemas } from './cloud-e2ee-replies';
 import { ShareDeliveryEnvelopeSchema } from '@lody/shared/session-share-delivery';
 import {
   buildLoroStreamsTokenEndpoint,
@@ -205,11 +206,13 @@ export function createCloudE2eePort(
       })
     );
   return {
-    getHistory: (input) =>
-      client(AbortSignal.timeout(30_000)).action(api.e2eeWorkspaces.history, {
-        ...input,
-        cliToken: options.token,
-      }),
+    getHistory: async (input) =>
+      e2eeHistoryPageSchema.parse(
+        await client(AbortSignal.timeout(30_000)).action(api.e2eeWorkspaces.history, {
+          ...input,
+          cliToken: options.token,
+        })
+      ),
     getContentToken: (input) => getContentToken(input, AbortSignal.timeout(30_000)),
     mailboxCall: async (method, input) => {
       const connection = client(AbortSignal.timeout(30_000));
@@ -219,7 +222,7 @@ export function createCloudE2eePort(
         epoch: z.number().int().nonnegative(),
         recipient: z.string(),
       });
-      let reply: E2eeMailboxReplies[keyof E2eeMailboxReplies];
+      let reply: unknown;
       switch (method) {
         case 'put':
           reply = await connection.mutation(api.e2eeMailbox.put, {
@@ -270,7 +273,7 @@ export function createCloudE2eePort(
         default:
           throw new Error('e2ee_unknown_method');
       }
-      return reply as E2eeMailboxReplies[typeof method];
+      return e2eeMailboxReplySchemas[method].parse(reply);
     },
     createContentTokenProvider: (input) =>
       Effect.gen(function* () {

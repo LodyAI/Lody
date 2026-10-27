@@ -586,6 +586,9 @@ describe('MessageHandler ACP batching', () => {
   ])(
     'image epoch acceptance: late output cannot mark a successor (sameId=$sameId, endAfterSwitch=$endAfterSwitch)',
     async ({ sameId, endAfterSwitch }) => {
+      // This tests epoch ownership, not time. Persistence may yield through
+      // setTimeout(0); switching clocks at teardown can discard that queued yield.
+      vi.useRealTimers();
       const h = await createRecoveryHarness();
       const uploadStarted = Promise.withResolvers<void>();
       const allowUpload = Promise.withResolvers<void>();

@@ -140,6 +140,10 @@ choice as `--mcp-server-ids '<JSON array>'`. See the
   a child `lody` CLI. Calls keep a ten-minute IPC bound; legacy `wait: true` adds
   its maximum wait. See
   the [decision](../../../../.agents/notes/implemented/architecture/2026-10-16-daemon-hosted-mcp-workspace-commands.md).
+- A cloud daemon command takes its workspace description from the Fleet access
+  verdict (live subscription, else the cached bootstrap entry), not from listing
+  every workspace of the login; only confirmed revocation or token rejection denies.
+  See the [resolution decision](../../../../.agents/notes/implemented/bug-fix/2026-10-27-daemon-command-workspace-access.md).
 
 ## Bounded collaboration
 
@@ -222,7 +226,6 @@ and `promptPrefix`. An update file contains only the changed `name`, `descriptio
 or `promptPrefix`; an empty string clears description/instructions. Neither accepts
 credentials, MCP selections, ownership, visibility, or run configuration. The command
 prints the requestId and pending result; it does not claim the Role was saved.
-
 
 `role.json`:
 
