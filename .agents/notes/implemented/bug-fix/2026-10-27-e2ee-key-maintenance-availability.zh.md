@@ -18,6 +18,8 @@ PR: [#1976](https://github.com/LodyAI/Lody/pull/1976)
 
 仅在信封认证/解开边界设置 `MailboxInstallError.cryptographicRejection`。报告签名、SQLite、权限变化及未知原生错误不能授权拒信封。HPKE 区分 AEAD 认证失败与无法确定的原生初始化/解封装错误。确定的拒绝登记固定 epoch/digest repair，并重取同一页；提示不授予权限。坏页超过轮数需下一次维护事件。无法确定的解封装错误仍重试，即使可能由恶意字节造成；把原生故障视为远端损坏会错误摧毁有效收钥路径。
 
+CLI 发起 digest repair 也必须得到 core 的确定拒绝诊断，暂时性本地安装故障不能拒绝好信封。
+
 桌面观察后确认收钥、repair、发钥的终态结果，释放未消费容量，保留账本行和 outbox 原始密文。`Observed` 仍表示邮箱读回一致，不表示收件人掌握密钥。各队列独立保存位置，前页 pending 不再阻塞有限调用中的后页。
 
 ## 证据与限制

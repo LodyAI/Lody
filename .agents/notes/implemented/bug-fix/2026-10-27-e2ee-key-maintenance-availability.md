@@ -18,6 +18,8 @@ Ledger open still verifies history and independent pins. Unreadable key blobs gi
 
 `MailboxInstallError.cryptographicRejection` is set only at envelope authentication/open boundaries. Report signing, SQLite, authority changes and unknown native failures cannot authorize rejection. HPKE AEAD authentication errors differ from ambiguous native setup/decapsulation errors. Deterministic rejection enqueues the stable epoch/digest repair and re-fetches the same page; hints grant no authority. A hostile page beyond the finite budget needs another maintenance event. Ambiguous decapsulation remains retryable, even if malicious bytes caused it: classifying native failure as remote corruption would destroy a valid delivery path.
 
+The CLI also requires this core diagnosis before requesting digest repair, so a temporary local install failure cannot reject a good envelope.
+
 The desktop observes and acknowledges terminal receive, repair and distribution results. This frees unconsumed capacity, retaining journal rows and exact outbox ciphertext. `Observed` remains mailbox readback, not recipient key possession. Each queue keeps its own cursor; pending early tasks cannot starve later tasks across finite calls.
 
 ## Evidence and limits
