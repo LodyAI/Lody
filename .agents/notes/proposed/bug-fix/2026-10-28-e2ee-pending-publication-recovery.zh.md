@@ -2,6 +2,7 @@
 
 Status: proposed
 Translation: current
+PR: https://github.com/LodyAI/Lody/pull/1987
 
 [English](2026-10-28-e2ee-pending-publication-recovery.md)
 
