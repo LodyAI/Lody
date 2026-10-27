@@ -18,7 +18,7 @@ Translation: current
 - 原生团队运行时与已认证服务分别审查。本 UI PR 独立基于 main，携带可选协议声明以独立构建；旧主进程显示升级提示。原生 PR 合入后 rebase 应删除重叠声明。此分支没有叠入其他 PR。
 - 设置中提供邀请、逐项申请审批、撤销邀请和 Owner 升级成员。待处理链接申请复用 PR20-D 的设置提醒，按已验证管理设备、账号和工作区隔离；队列失败不能隐藏换代提醒。成员移除与换代由另一工作流负责。
 - 角色调整仅调用 #1982 的可选 `setMemberRole(workspaceId, membershipId, role)` 端口，不再保留平行的 `promoteMember` 端口或签名 owner。main 尚无该配套时，升权操作不可用。加入 DTO 统一位于 `cloud-api/src/e2ee-members.ts`，与独立原生配套的声明完全相同。
-- #1979 负责账本 capability 状态及快照、保留状态、摘要 v4。本 UI 不增加账本状态 schema 或快照版本，解码委托 core。共享的 `memberRole` 状态字段合并一份，并保留 #1982 的身份字段和原生配套的 reader 归属字段。协议合入后 rebase，不叠入其分支，也不另升格式版本。
+- #1979 负责账本 capability 状态及快照、保留状态、摘要 v4。本 UI 不增加账本状态 schema 或快照版本，解码委托 core。共享的 `memberRole` 状态字段合并一份，并保留 #1982 的身份字段和原生配套的 reader 归属字段。此分支已 rebase 到包含该协议的 main `6a53ad05`，没有叠入其分支，也未另升格式版本。
 
 ## 证据与限制
 
