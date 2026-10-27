@@ -4,7 +4,7 @@ import { useMemo, useState } from 'react';
 import * as stylex from '@stylexjs/stylex';
 import { useTranslation } from 'react-i18next';
 import { useAtomValue } from 'jotai';
-import { MoreHorizontal, RefreshCw, Trash2 } from 'lucide-react';
+import { Laptop, MoreHorizontal, RefreshCw, Trash2 } from 'lucide-react';
 import { Spinner } from '@lody/ui/spinner';
 import {
   REGISTRY_ACP_AGENTS,
@@ -28,6 +28,9 @@ import { useAcpSelectorOptions } from '@/hooks/use-acp-selector-options';
 import { formatLocalizedRelativeTime } from '@/lib/format-relative-time';
 import { Menu } from '@lody/ui/menu';
 import { ProviderUsageSummary } from './provider-usage-summary';
+import { ProviderQuotaWindows } from './provider-quota-windows';
+import type { AiUsageQuotaRow } from './ai-usage-model';
+import type { AgentsView } from './agents-view-toggle';
 import { canShowCodexResetForecast } from '@/lib/codex-reset-forecast';
 import {
   canShowSubscriptionRateLimits,
@@ -47,6 +50,21 @@ const styles = stylex.create({
     minWidth: 0,
     paddingInlineEnd: space[4],
   },
+  quotaRow: {
+    paddingBlock: space[3],
+    rowGap: space[2],
+    gridTemplateColumns: {
+      default: 'minmax(0, 1fr) auto',
+      [ROOMY]: 'minmax(0, 1.35fr) minmax(0, 2fr) auto',
+    },
+  },
+  quotaUsage: {
+    gridColumn: { default: '1 / -1', [ROOMY]: '2' },
+    gridRow: { default: 2, [ROOMY]: 1 },
+    minWidth: 0,
+    paddingInlineStart: { default: space[4], [ROOMY]: 0 },
+  },
+  quotaMain: { paddingBlock: 0 },
   main: { gridColumn: 1, gridRow: 1, gap: '10px', paddingInline: space[4], paddingBlock: space[2] },
   mainList: {
     gridColumn: 1,
@@ -68,6 +86,7 @@ const styles = stylex.create({
   glyph: { width: '16px', height: '16px' },
   glyphList: { width: '20px', height: '20px' },
   body: { flexGrow: 1, minWidth: 0 },
+  machine: { display: 'flex', alignItems: 'center', gap: space[1] },
   usage: {
     gridColumn: { default: '1 / -1', [ROOMY]: '2' },
     gridRow: { default: 2, [ROOMY]: 1 },
@@ -77,6 +96,7 @@ const styles = stylex.create({
     paddingBottom: { default: space[2], [ROOMY]: 0 },
   },
   usageList: { paddingInlineStart: { default: '60px', [ROOMY]: 0 } },
+  quotaTrailing: { width: { default: 'auto', [ROOMY]: '11em' }, justifyContent: 'flex-end' },
   trailing: {
     gridColumn: { default: 2, [ROOMY]: 3 },
     gridRow: 1,
@@ -107,6 +127,9 @@ export type ProviderRowProps = {
    * for all its providers and the rule between them.
    */
   variant?: 'card' | 'list';
+  view?: AgentsView;
+  quota?: AiUsageQuotaRow;
+  showMachine?: boolean;
   /**
    * How much the provider is used on its machine. A compact row states it on
    * its second line, with the default model, so a short list still says what
@@ -127,6 +150,9 @@ export function ProviderRow({
   onDelete,
   onRefresh,
   variant = 'card',
+  view = 'configuration',
+  quota,
+  showMachine = false,
   usage,
   className,
 }: ProviderRowProps) {
@@ -240,6 +266,7 @@ export function ProviderRow({
   };
 
   const compact = variant === 'card';
+  const quotaView = view === 'quota';
   const hasUsageSummary = rateLimitWindows.length > 0 || showResetForecast;
   const facts = compact
     ? [
@@ -260,11 +287,15 @@ export function ProviderRow({
     : [kind].filter((fact): fact is string => fact != null);
   return (
     <div {...withClassName(stylex.props(styles.root), className)}>
-      <div {...stylex.props(styles.row, surface.pressableLine)}>
+      <div {...stylex.props(styles.row, quotaView && styles.quotaRow, surface.pressableLine)}>
         <button
           type="button"
           onClick={() => onEdit(config)}
-          {...stylex.props(catalog.rowMain, compact ? styles.main : styles.mainList)}
+          {...stylex.props(
+            catalog.rowMain,
+            compact ? styles.main : styles.mainList,
+            quotaView && styles.quotaMain
+          )}
           aria-label={t('agents.editConfig', 'Edit config')}
         >
           <div {...stylex.props(styles.icon, !compact && styles.iconList)}>
@@ -279,7 +310,16 @@ export function ProviderRow({
           <div {...stylex.props(styles.body)}>
             <div {...stylex.props(catalog.titleLine)}>
               <span {...stylex.props(catalog.name)}>{config.name}</span>
+              {quota?.planName != null && quota.planName.length > 0 ? (
+                <span {...stylex.props(catalog.meta)}>{quota.planName}</span>
+              ) : null}
             </div>
+            {showMachine && machine ? (
+              <span {...stylex.props(catalog.meta, styles.machine)}>
+                <Laptop size={12} aria-hidden="true" />
+                {machine.name || machine.id}
+              </span>
+            ) : null}
             {facts.length > 0 ? (
               <span {...stylex.props(catalog.meta)}>
                 <span {...stylex.props(catalog.truncate)}>{facts.join(' · ')}</span>
@@ -287,7 +327,19 @@ export function ProviderRow({
             ) : null}
           </div>
         </button>
-        {hasUsageSummary ? (
+        {quotaView ? (
+          <div {...stylex.props(styles.quotaUsage)}>
+            <ProviderQuotaWindows
+              row={{
+                windows: rateLimitWindows,
+                wallet:
+                  machine?.acpCapabilities?.[config.id]?.rateLimits?.version === 1
+                    ? (quota?.wallet ?? null)
+                    : null,
+              }}
+            />
+          </div>
+        ) : hasUsageSummary ? (
           <div {...stylex.props(styles.usage, !compact && styles.usageList)}>
             <ProviderUsageSummary
               name={config.name}
@@ -296,7 +348,10 @@ export function ProviderRow({
             />
           </div>
         ) : null}
-        <div {...stylex.props(styles.trailing)}>
+        <div {...stylex.props(styles.trailing, quotaView && styles.quotaTrailing)}>
+          {quotaView && showResetForecast ? (
+            <ProviderUsageSummary name={config.name} windows={[]} showResetForecast />
+          ) : null}
           {envCount > 0 && !compact ? (
             <span>{t('settings.agent.provider.envCount', { count: envCount })}</span>
           ) : null}

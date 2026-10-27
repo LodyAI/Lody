@@ -1,0 +1,332 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=1280">
+<title>AI 用量 · 配额</title>
+<link rel="stylesheet" href="./base.css">
+<style>
+  .limit-cards { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .quota-large { display: flex; flex-direction: column; padding: 15px 16px 12px; min-height: 224px; }
+  .quota-large.warn-card { border-color: rgba(245,180,92,.2); }
+  .quota-large.muted-card { opacity: .88; }
+  .quota-large-body { display: flex; align-items: center; gap: 18px; margin-top: 15px; }
+  .ring-block { display: flex; align-items: center; gap: 10px; min-width: 0; }
+  .ring-block .ring { width: 52px; height: 52px; }
+  .ring-label { min-width: 0; }
+  .ring-label b { display: block; font-size: 11px; font-weight: 550; white-space: nowrap; }
+  .ring-label span { display: block; margin-top: 3px; font-size: 10px; color: var(--faint); white-space: nowrap; }
+  .ring-label em { display: block; margin-top: 2px; font-family: var(--mono); font-size: 9.5px; font-style: normal; color: #5f6669; }
+  .wallet-block { flex: 1; min-width: 0; }
+  .wallet-value { font-size: 26px; font-weight: 560; letter-spacing: -.04em; font-variant-numeric: tabular-nums; }
+  .wallet-value span { font-size: 10px; font-weight: 500; letter-spacing: 0; color: var(--faint); margin-left: 5px; }
+  .wallet-meta { display: flex; justify-content: space-between; margin-top: 6px; font-size: 10.5px; color: var(--faint); }
+  .large-foot { display: flex; align-items: center; gap: 6px; margin-top: auto; padding-top: 10px; border-top: 1px solid var(--line); font-family: var(--mono); font-size: 9px; color: #5f6669; }
+  .large-foot .sep { width: 2px; height: 2px; border-radius: 50%; background: #3f4548; }
+  .large-foot button { margin-left: auto; border: 0; background: transparent; color: var(--accent); font-family: var(--mono); font-size: 9px; padding: 0; }
+  .forecast { display: flex; align-items: center; gap: 8px; margin-top: 12px; padding: 8px 9px; border: 1px solid rgba(245,180,92,.17); border-radius: 9px; background: rgba(245,180,92,.05); }
+  .forecast svg { width: 14px; height: 14px; color: var(--accent); flex: none; }
+  .forecast div { min-width: 0; flex: 1; }
+  .forecast b { display: block; font-size: 10.5px; font-weight: 500; color: #e8c49a; }
+  .forecast span { display: block; margin-top: 2px; font-size: 9.5px; color: #8f7c65; }
+  .forecast em { font-family: var(--mono); font-size: 9px; font-style: normal; color: var(--accent); }
+  .unknown-body { display: flex; align-items: center; gap: 18px; margin-top: 20px; }
+  .unknown-ring { width: 52px; height: 52px; border: 1px dashed rgba(255,255,255,.16); border-radius: 50%; display: grid; place-items: center; color: #5f6669; font-family: var(--mono); font-size: 14px; }
+  .unknown-copy { min-width: 0; flex: 1; }
+  .unknown-copy b { display: block; font-size: 11px; font-weight: 550; }
+  .unknown-copy p { margin: 4px 0 0; font-size: 9.5px; line-height: 1.5; color: var(--faint); }
+  .pressure-card { padding: 16px; }
+  .pressure-head { display: flex; align-items: center; gap: 8px; margin: 13px 0 4px; padding-top: 11px; border-top: 1px solid var(--line); font-family: var(--mono); font-size: 8.5px; letter-spacing: .08em; text-transform: uppercase; color: var(--faint); }
+  .pressure-head:first-of-type { margin-top: 6px; border-top: 0; padding-top: 0; }
+  .pressure-row { display: grid; grid-template-columns: 165px minmax(0,1fr) 118px; align-items: center; gap: 13px; padding: 8px 0; border-top: 1px solid rgba(255,255,255,.045); }
+  .pressure-row:first-of-type { border-top: 0; }
+  .pressure-provider { display: flex; align-items: center; gap: 7px; min-width: 0; }
+  .pressure-provider img { width: 13px; height: 13px; }
+  .pressure-provider b { font-size: 10px; font-weight: 500; white-space: nowrap; }
+  .pressure-provider span { font-family: var(--mono); font-size: 8.5px; color: var(--faint); white-space: nowrap; }
+  .pressure-track { position: relative; height: 18px; border-radius: 6px; background: #070809; box-shadow: inset 0 1px 2px rgba(0,0,0,.55); overflow: hidden; }
+  .pressure-track::before { content:""; position:absolute; inset:0; background-image: repeating-linear-gradient(90deg, transparent 0, transparent calc(25% - 1px), rgba(255,255,255,.05) calc(25% - 1px), rgba(255,255,255,.05) 25%); }
+  .pressure-fill { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 6px 0 0 6px; background: linear-gradient(90deg, rgba(178,224,113,.5), rgba(178,224,113,.22)); border-right: 2px solid var(--lime); }
+  .pressure-fill.warn { background: linear-gradient(90deg, rgba(245,180,92,.55), rgba(245,180,92,.24)); border-right-color: var(--accent); }
+  .pressure-fill.bad { background: linear-gradient(90deg, rgba(240,122,106,.55), rgba(240,122,106,.24)); border-right-color: var(--red); }
+  .pressure-fill::after { content: "现在"; position: absolute; right: 5px; top: 50%; transform: translateY(-50%); font-family: var(--mono); font-size: 7.5px; letter-spacing: .05em; color: rgba(9,10,11,.75); }
+  .pressure-meta { text-align: right; font-family: var(--mono); font-size: 10px; color: var(--faint); white-space: nowrap; }
+  .pressure-meta b { display: block; font-size: 10px; font-weight: 500; color: var(--muted); }
+  .pressure-meta span { display: block; margin-top: 2px; font-size: 9.5px; }
+  .table { width: 100%; border-collapse: collapse; margin-top: 8px; }
+  .table th { padding: 0 0 7px; text-align: left; font-family: var(--mono); font-size: 8px; font-weight: 500; letter-spacing: .08em; text-transform: uppercase; color: #5f6669; border-bottom: 1px solid var(--line); }
+  .table td { padding: 9px 0; border-bottom: 1px solid rgba(255,255,255,.045); font-size: 10.5px; color: var(--muted); vertical-align: middle; }
+  .table tr:last-child td { border-bottom: 0; }
+  .table td:first-child { font-family: var(--mono); font-size: 9px; color: var(--faint); width: 52px; }
+  .table td:nth-child(2) { width: 200px; }
+  .table td:nth-child(4) { width: 108px; }
+  .table td:last-child { width: 86px; text-align: right; }
+  .cell-provider { display: flex; align-items: center; gap: 6px; color: var(--text); font-size: 10.5px; }
+  .cell-provider img { width: 12px; height: 12px; }
+  .cell-provider span { color: var(--faint); font-family: var(--mono); font-size: 9.5px; }
+  .cell-session { color: var(--text); font-size: 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 200px; }
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute">
+  <symbol id="i-chev" viewBox="0 0 16 16"><path d="M4 6l4 4 4-4"/></symbol>
+  <symbol id="i-refresh" viewBox="0 0 16 16"><path d="M13.5 8a5.5 5.5 0 1 1-1.61-3.89M13.5 2.5V6h-3.5"/></symbol>
+  <symbol id="i-download" viewBox="0 0 16 16"><path d="M8 2.5v7M5.25 6.75L8 9.5l2.75-2.75M3 12.5h10"/></symbol>
+  <symbol id="i-arrow" viewBox="0 0 16 16"><path d="M3 8h9.5M9 4.5L12.5 8 9 11.5"/></symbol>
+  <symbol id="i-clock" viewBox="0 0 16 16"><circle cx="8" cy="8" r="5.5"/><path d="M8 4.75V8l2.25 1.5"/></symbol>
+  <symbol id="i-laptop" viewBox="0 0 16 16"><rect x="3" y="3.5" width="10" height="7" rx="1.2"/><path d="M1.5 12.5h13"/></symbol>
+  <symbol id="i-spark" viewBox="0 0 16 16"><path d="M8 2l1.1 3.9L13 7l-3.9 1.1L8 12l-1.1-3.9L3 7l3.9-1.1L8 2z"/></symbol>
+  <symbol id="i-filter" viewBox="0 0 16 16"><path d="M2.5 3.5h11l-4.25 5v4l-2.5-1.25v-2.75l-4.25-5z"/></symbol>
+  <symbol id="i-alert" viewBox="0 0 16 16"><path d="M8 2.5l5.5 10h-11L8 2.5zM8 6.25v3.25M8 11.4v.1"/></symbol>
+  <symbol id="i-check" viewBox="0 0 16 16"><path d="M3 8.5l3.25 3L13 4.75"/></symbol>
+  <symbol id="i-shield" viewBox="0 0 16 16"><path d="M8 2l5 2v4.2c0 3-2 5-5 5.8-3-.8-5-2.8-5-5.8V4l5-2z"/></symbol>
+</svg>
+
+<div class="page">
+  <div class="topline">
+    <div class="crumb"><span>设置</span><span class="slash">/</span><b>AI 用量</b><span class="slash">/</span><b>配额</b></div>
+    <div class="top-actions">
+      <div class="sync"><span class="dot" style="width:5px;height:5px"></span>3 台机器在线 · 刚刚同步</div>
+      <button class="btn icon-only ghost" aria-label="刷新"><svg><use href="#i-refresh"/></svg></button>
+      <button class="btn"><svg><use href="#i-download"/></svg>导出</button>
+    </div>
+  </div>
+
+  <div class="page-head">
+    <div>
+      <h1>配额与重置</h1>
+      <div class="page-sub">
+        <span>3 个 Provider</span><span class="sep"></span>
+        <span>4 个窗口</span><span class="sep"></span>
+        <span>1 个未上报</span><span class="sep"></span>
+        <span>只显示 Provider 真正上报的状态</span>
+      </div>
+    </div>
+    <div class="page-actions">
+      <div class="tabs" role="tablist">
+        <div class="tab">概览</div>
+        <div class="tab active">配额</div>
+        <div class="tab">等待队列 <span class="count">3</span></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="toolbar">
+    <div class="filters">
+      <div class="filter"><svg><use href="#i-laptop"/></svg>全部机器<svg><use href="#i-chev"/></svg></div>
+      <div class="filter"><svg><use href="#i-spark"/></svg>全部 Provider<svg><use href="#i-chev"/></svg></div>
+      <div class="filter"><svg><use href="#i-clock"/></svg>按重置时间<svg><use href="#i-chev"/></svg></div>
+    </div>
+    <div class="toolbar-spacer"></div>
+    <span class="mono" style="letter-spacing:.04em;color:#5f6669">窗口值是快照，不是实时流</span>
+    <button class="btn small" style="margin-left:4px"><svg><use href="#i-refresh"/></svg>刷新配额</button>
+  </div>
+
+  <section class="section" style="margin-top:16px">
+    <div class="section-head">
+      <div>
+        <div class="mono">Quota snapshots</div>
+        <h2>账号窗口</h2>
+        <div class="section-sub">每个 Provider 配置 × 账号。百分比是“已用”，与 composer 里的“剩余”互补。</div>
+      </div>
+      <span class="chip">最后同步 2 分钟前</span>
+    </div>
+
+    <div class="limit-cards">
+      <article class="quota-large card">
+        <div class="quota-head">
+          <span class="brand claude"><img src="icons/claude.svg" alt=""></span>
+          <div class="quota-title">
+            <div class="quota-name">Claude Code <span class="plan">Pro</span></div>
+            <div class="quota-sub">Work account · MacBook Pro + Mac mini</div>
+          </div>
+          <span class="chip ok"><span class="dot"></span>正常</span>
+        </div>
+        <div class="quota-large-body">
+          <div class="ring-block">
+            <div class="ring" style="--pct:62"><span>62%</span></div>
+            <div class="ring-label"><b>5 小时</b><span>剩余 62%</span><em>16:42 · 2h 14m</em></div>
+          </div>
+          <div class="ring-block">
+            <div class="ring" style="--pct:44"><span>44%</span></div>
+            <div class="ring-label"><b>7 天</b><span>剩余 44%</span><em>周二 09:00 · 1d 18h</em></div>
+          </div>
+        </div>
+        <div class="large-foot">Core rateLimits v1<span class="sep"></span>2 台机器聚合<button>刷新</button></div>
+      </article>
+
+      <article class="quota-large card warn-card">
+        <div class="quota-head">
+          <span class="brand codex"><img src="icons/codex.svg" alt=""></span>
+          <div class="quota-title">
+            <div class="quota-name">Codex <span class="plan">Plus</span></div>
+            <div class="quota-sub">Personal · MacBook Pro</div>
+          </div>
+          <span class="chip warn"><span class="dot warn"></span>接近上限</span>
+        </div>
+        <div class="quota-large-body">
+          <div class="ring-block">
+            <div class="ring warn" style="--pct:8"><span style="color:var(--accent)">8%</span></div>
+            <div class="ring-label"><b>5 小时</b><span style="color:#d4a46d">剩余 8%</span><em style="color:#a98457">15:06 · 18m</em></div>
+          </div>
+          <div class="ring-block">
+            <div class="ring" style="--pct:71"><span>71%</span></div>
+            <div class="ring-label"><b>7 天</b><span>剩余 71%</span><em>周六 08:00 · 2d 16h</em></div>
+          </div>
+        </div>
+        <div class="forecast">
+          <svg><use href="#i-spark"/></svg>
+          <div><b>第三方重置预测：82%</b><span>预计今晚 22:10 重置 · 不是 Provider 的承诺</span></div>
+          <em>详情</em>
+        </div>
+      </article>
+
+      <article class="quota-large card">
+        <div class="quota-head">
+          <span class="brand deepseek"><img src="icons/deepseek.svg" alt=""></span>
+          <div class="quota-title">
+            <div class="quota-name">DeepSeek <span class="plan">API</span></div>
+            <div class="quota-sub">Personal · Mac Studio</div>
+          </div>
+          <span class="chip ok"><span class="dot"></span>正常</span>
+        </div>
+        <div class="quota-large-body">
+          <div class="wallet-block">
+            <div class="wallet-value">$8.42<span>可用余额</span></div>
+            <div class="meter" style="margin-top:9px"><i style="width:41%"></i></div>
+            <div class="wallet-meta"><span>本月已用 $41.20</span><span>限额 $100</span></div>
+            <div class="wallet-meta" style="margin-top:9px;color:#5f6669"><span>Provider 没有窗口型配额</span><span>不补 0</span></div>
+          </div>
+        </div>
+        <div class="large-foot">来源：wallet<span class="sep"></span>最后同步 5 分钟前<button>刷新</button></div>
+      </article>
+
+      <article class="quota-large card muted-card">
+        <div class="quota-head">
+          <span class="brand kimi"><img src="icons/kimi.svg" alt=""></span>
+          <div class="quota-title">
+            <div class="quota-name">Kimi Code</div>
+            <div class="quota-sub">Personal · Mac mini</div>
+          </div>
+          <span class="chip">未上报</span>
+        </div>
+        <div class="unknown-body">
+          <div class="unknown-ring">?</div>
+          <div class="unknown-copy">
+            <b>Provider 不支持配额查询</b>
+            <p>没有 <code style="font-family:var(--mono);font-size:8.5px;color:#8b9295">rateLimits</code> capability。这里不画 0%，也不把余额伪装成窗口；用量仍然会出现在概览里。</p>
+          </div>
+        </div>
+        <div class="large-foot">仍然可以看用量<button>去概览 <span style="font-family:var(--sans)">→</span></button></div>
+      </article>
+    </div>
+  </section>
+
+  <section class="section">
+    <article class="card pressure-card">
+      <div class="card-head">
+        <div><div class="mono">Window pressure</div><h3 style="margin-top:4px">窗口压力</h3><p>条是“已用”，右端是当前时刻；重置时间按本机时区显示。</p></div>
+        <div class="seg"><button class="active">已用</button><button>剩余</button></div>
+      </div>
+
+      <div class="pressure-head">Claude Code · Work</div>
+      <div class="pressure-row">
+        <div class="pressure-provider"><img src="icons/claude.svg" alt=""><b>5 小时</b><span>62% 剩余</span></div>
+        <div class="pressure-track"><div class="pressure-fill" style="width:38%"></div></div>
+        <div class="pressure-meta"><b>16:42</b><span>2h 14m 后重置</span></div>
+      </div>
+      <div class="pressure-row">
+        <div class="pressure-provider"><img src="icons/claude.svg" alt=""><b>7 天</b><span>44% 剩余</span></div>
+        <div class="pressure-track"><div class="pressure-fill" style="width:56%"></div></div>
+        <div class="pressure-meta"><b>周二 09:00</b><span>1d 18h 后重置</span></div>
+      </div>
+
+      <div class="pressure-head">Codex · Personal</div>
+      <div class="pressure-row">
+        <div class="pressure-provider"><img src="icons/codex.svg" alt=""><b>5 小时</b><span style="color:#c9a06a">8% 剩余</span></div>
+        <div class="pressure-track"><div class="pressure-fill warn" style="width:92%"></div></div>
+        <div class="pressure-meta"><b style="color:var(--accent)">15:06</b><span>18 分钟后重置</span></div>
+      </div>
+      <div class="pressure-row">
+        <div class="pressure-provider"><img src="icons/codex.svg" alt=""><b>7 天</b><span>71% 剩余</span></div>
+        <div class="pressure-track"><div class="pressure-fill" style="width:29%"></div></div>
+        <div class="pressure-meta"><b>周六 08:00</b><span>2d 16h 后重置</span></div>
+      </div>
+
+      <div class="pressure-head">Only wallet, no windows</div>
+      <div class="pressure-row">
+        <div class="pressure-provider"><img src="icons/deepseek.svg" alt=""><b>DeepSeek</b><span>$8.42 余额</span></div>
+        <div class="pressure-track"><div class="pressure-fill" style="width:41%"></div></div>
+        <div class="pressure-meta"><b>无重置</b><span>按钱包扣费</span></div>
+      </div>
+      <div class="pressure-row">
+        <div class="pressure-provider"><img src="icons/kimi.svg" alt=""><b>Kimi Code</b><span>未上报</span></div>
+        <div class="pressure-track" style="border:1px dashed rgba(255,255,255,.1);background:transparent;box-shadow:none"></div>
+        <div class="pressure-meta"><b>—</b><span>没有窗口</span></div>
+      </div>
+    </article>
+  </section>
+
+  <section class="section">
+    <article class="card card-pad">
+      <div class="card-head">
+        <div><div class="mono">Structured failures</div><h3 style="margin-top:4px">最近配额中断</h3><p>只从结构化结果归一化，不解析错误文案；没有可信重置时间的不进队列。</p></div>
+        <button class="btn small ghost">全部<svg><use href="#i-arrow"/></svg></button>
+      </div>
+      <table class="table">
+        <thead><tr><th>时间</th><th>Provider / 模型</th><th>会话</th><th>机器</th><th>结果</th></tr></thead>
+        <tbody>
+          <tr>
+            <td>14:10</td>
+            <td><span class="cell-provider"><img src="icons/claude.svg" alt="">Claude <span>Opus 4.5</span></span></td>
+            <td><div class="cell-session">修复 auth token 刷新</div></td>
+            <td>MacBook Pro</td>
+            <td><span class="chip warn">已排队</span></td>
+          </tr>
+          <tr>
+            <td>13:42</td>
+            <td><span class="cell-provider"><img src="icons/codex.svg" alt="">Codex <span>GPT-5.6</span></span></td>
+            <td><div class="cell-session">重构 usage 聚合缓存</div></td>
+            <td>MacBook Pro</td>
+            <td><span class="chip warn">已排队</span></td>
+          </tr>
+          <tr>
+            <td>13:18</td>
+            <td><span class="cell-provider"><img src="icons/claude.svg" alt="">Claude <span>Sonnet 4.5</span></span></td>
+            <td><div class="cell-session">整理 provider 迁移清单</div></td>
+            <td>Mac mini</td>
+            <td><span class="chip bad">无重置时间</span></td>
+          </tr>
+          <tr>
+            <td>11:08</td>
+            <td><span class="cell-provider"><img src="icons/claude.svg" alt="">Claude <span>Sonnet 4.5</span></span></td>
+            <td><div class="cell-session">生成 v0.9 release notes</div></td>
+            <td>Mac mini</td>
+            <td><span class="chip ok">已手动重试</span></td>
+          </tr>
+          <tr>
+            <td>09:31</td>
+            <td><span class="cell-provider"><img src="icons/deepseek.svg" alt="">DeepSeek <span>V4</span></span></td>
+            <td><div class="cell-session">迁移本地项目索引</div></td>
+            <td>Mac Studio</td>
+            <td><span class="chip bad">余额不足</span></td>
+          </tr>
+          <tr>
+            <td>08:54</td>
+            <td><span class="cell-provider"><img src="icons/codex.svg" alt="">Codex <span>GPT-5.6</span></span></td>
+            <td><div class="cell-session">检查 worktree 清理</div></td>
+            <td>MacBook Pro</td>
+            <td><span class="chip">已取消</span></td>
+          </tr>
+        </tbody>
+      </table>
+    </article>
+  </section>
+
+  <div class="footer">
+    <span>窗口值来自机器 Flock 的 rateLimits 行 · 刷新通过 Provider RPC，离线机器保留上次快照</span>
+    <span><b>配额是账号状态，不是账单</b> · 预测值来自第三方，不保证准确</span>
+  </div>
+</div>
+</body>
+</html>

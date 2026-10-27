@@ -1,0 +1,424 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=1280">
+<title>AI 用量 · 概览</title>
+<link rel="stylesheet" href="./base.css">
+<style>
+  .overview-quota .quota-card { height: 186px; }
+  .breakdown-grid { display: grid; grid-template-columns: 1.18fr 1fr; gap: 12px; }
+  .bottom-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .mini-list { margin-top: 8px; }
+  .mini-row { display: flex; align-items: center; gap: 10px; padding: 9px 0; border-top: 1px solid var(--line); }
+  .mini-row:first-child { border-top: 0; }
+  .mini-icon { display: grid; place-items: center; width: 26px; height: 26px; flex: none; border-radius: 7px; border: 1px solid var(--line); background: rgba(255,255,255,.025); color: var(--faint); }
+  .mini-icon svg { width: 13px; height: 13px; }
+  .mini-main { min-width: 0; flex: 1; }
+  .mini-title { font-size: 11px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .mini-sub { margin-top: 3px; font-size: 10.5px; color: var(--faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .mini-time { flex: none; font-family: var(--mono); font-size: 9.5px; color: #5f6669; }
+  .queue-preview { margin-top: 8px; }
+  .queue-row { display: flex; align-items: center; gap: 10px; padding: 9px 0; border-top: 1px solid var(--line); }
+  .queue-row:first-child { border-top: 0; }
+  .queue-main { min-width: 0; flex: 1; }
+  .queue-title { font-size: 11px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .queue-sub { margin-top: 3px; font-size: 10.5px; color: var(--faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .queue-when { flex: none; font-family: var(--mono); font-size: 9.5px; color: var(--accent); }
+  .queue-when.bad { color: var(--red); }
+  .link-row { display: flex; align-items: center; justify-content: center; gap: 5px; margin-top: 10px; padding-top: 9px; border-top: 1px solid var(--line); font-family: var(--mono); font-size: 9.5px; letter-spacing: .05em; color: var(--accent); }
+  .link-row svg { width: 11px; height: 11px; }
+  .cost-band { margin-top: 12px; padding-top: 11px; border-top: 1px solid var(--line); }
+  .cost-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+  .cost-head span:last-child { font-family: var(--mono); font-size: 9.5px; color: var(--faint); }
+  .cost-bar { display: flex; gap: 2px; height: 5px; margin-top: 9px; overflow: hidden; border-radius: 999px; background: #070809; }
+  .cost-bar i { display: block; height: 100%; }
+  .cost-legend { display: flex; align-items: center; gap: 12px; margin-top: 8px; font-size: 9.5px; color: var(--faint); }
+  .cost-legend span { display: inline-flex; align-items: center; gap: 5px; }
+  .cost-legend i { width: 6px; height: 6px; border-radius: 2px; }
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute">
+  <symbol id="i-chev" viewBox="0 0 16 16"><path d="M4 6l4 4 4-4"/></symbol>
+  <symbol id="i-refresh" viewBox="0 0 16 16"><path d="M13.5 8a5.5 5.5 0 1 1-1.61-3.89M13.5 2.5V6h-3.5"/></symbol>
+  <symbol id="i-download" viewBox="0 0 16 16"><path d="M8 2.5v7M5.25 6.75L8 9.5l2.75-2.75M3 12.5h10"/></symbol>
+  <symbol id="i-arrow" viewBox="0 0 16 16"><path d="M3 8h9.5M9 4.5L12.5 8 9 11.5"/></symbol>
+  <symbol id="i-arrow-up" viewBox="0 0 16 16"><path d="M4.5 11.5L11.5 4.5M5.5 4.5h6v6"/></symbol>
+  <symbol id="i-clock" viewBox="0 0 16 16"><circle cx="8" cy="8" r="5.5"/><path d="M8 4.75V8l2.25 1.5"/></symbol>
+  <symbol id="i-alert" viewBox="0 0 16 16"><path d="M8 2.5l5.5 10h-11L8 2.5zM8 6.25v3.25M8 11.4v.1"/></symbol>
+  <symbol id="i-laptop" viewBox="0 0 16 16"><rect x="3" y="3.5" width="10" height="7" rx="1.2"/><path d="M1.5 12.5h13"/></symbol>
+  <symbol id="i-server" viewBox="0 0 16 16"><rect x="3" y="2.5" width="10" height="4.5" rx="1"/><rect x="3" y="9" width="10" height="4.5" rx="1"/><path d="M5.5 4.75h.01M5.5 11.25h.01"/></symbol>
+  <symbol id="i-more" viewBox="0 0 16 16"><circle class="solid" cx="3.5" cy="8" r=".9"/><circle class="solid" cx="8" cy="8" r=".9"/><circle class="solid" cx="12.5" cy="8" r=".9"/></symbol>
+  <symbol id="i-x" viewBox="0 0 16 16"><path d="M4 4l8 8M12 4l-8 8"/></symbol>
+  <symbol id="i-check" viewBox="0 0 16 16"><path d="M3 8.5l3.25 3L13 4.75"/></symbol>
+  <symbol id="i-external" viewBox="0 0 16 16"><path d="M6 3.5h6.5V10M12.5 3.5L4 12"/></symbol>
+  <symbol id="i-filter" viewBox="0 0 16 16"><path d="M2.5 3.5h11l-4.25 5v4l-2.5-1.25v-2.75l-4.25-5z"/></symbol>
+  <symbol id="i-spark" viewBox="0 0 16 16"><path d="M8 2l1.1 3.9L13 7l-3.9 1.1L8 12l-1.1-3.9L3 7l3.9-1.1L8 2z"/></symbol>
+  <symbol id="i-calendar" viewBox="0 0 16 16"><rect x="2.5" y="3.5" width="11" height="10" rx="1.4"/><path d="M2.5 6.5h11M5.5 2.25v2.5M10.5 2.25v2.5"/></symbol>
+  <symbol id="i-wifi-off" viewBox="0 0 16 16"><path d="M2 2l12 12M5.2 7.4a7.5 7.5 0 0 1 4-1.2M2.8 4.9a10 10 0 0 1 3.1-1.5M9.2 6.2a10 10 0 0 1 4 1.6M7.5 11.1a2.6 2.6 0 0 1 1.8.4M8 13.25h.01"/></symbol>
+  <symbol id="i-zap" viewBox="0 0 16 16"><path d="M9 2L3.5 9h4L7 14l5.5-7h-4L9 2z"/></symbol>
+</svg>
+
+<div class="page">
+  <div class="topline">
+    <div class="crumb"><span>设置</span><span class="slash">/</span><b>AI 用量</b></div>
+    <div class="top-actions">
+      <div class="sync"><span class="dot" style="width:5px;height:5px"></span>3 台机器在线 · 刚刚同步</div>
+      <button class="btn icon-only ghost" aria-label="刷新"><svg><use href="#i-refresh"/></svg></button>
+      <button class="btn"><svg><use href="#i-download"/></svg>导出</button>
+    </div>
+  </div>
+
+  <div class="page-head">
+    <div>
+      <h1>AI 用量</h1>
+      <div class="page-sub">
+        <span>3 个 Provider</span><span class="sep"></span>
+        <span>3 台机器</span><span class="sep"></span>
+        <span>12 个活跃会话</span><span class="sep"></span>
+        <span>最近 7 天</span>
+      </div>
+    </div>
+    <div class="page-actions">
+      <div class="tabs" role="tablist">
+        <div class="tab active">概览</div>
+        <div class="tab">配额</div>
+        <div class="tab">等待队列 <span class="count">3</span></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="toolbar">
+    <div class="filters">
+      <div class="filter"><svg><use href="#i-laptop"/></svg>全部机器<svg><use href="#i-chev"/></svg></div>
+      <div class="filter"><svg><use href="#i-spark"/></svg>全部 Provider<svg><use href="#i-chev"/></svg></div>
+      <div class="filter"><svg><use href="#i-filter"/></svg>全部成员<svg><use href="#i-chev"/></svg></div>
+    </div>
+    <div class="toolbar-spacer"></div>
+    <span class="mono" style="letter-spacing:.04em;color:#5f6669">成本为估算值</span>
+    <div class="seg" style="margin-left:4px">
+      <button class="active">7 天</button><button>24 小时</button><button>30 天</button><button>全部</button>
+    </div>
+  </div>
+
+  <div class="alert">
+    <div class="alert-icon"><svg><use href="#i-clock"/></svg></div>
+    <div class="alert-copy">
+      <strong>3 个会话将在配额恢复后自动继续</strong>
+      <span>最早 18 分钟后重试 · 1 个需要你处理 · 重启或离线都不会丢失</span>
+    </div>
+    <button class="btn" style="border-color:rgba(245,180,92,.25);background:rgba(245,180,92,.09);box-shadow:none;color:#f3c78e">查看队列<svg><use href="#i-arrow"/></svg></button>
+  </div>
+
+  <section class="section">
+    <div class="section-head">
+      <div>
+        <div class="mono">Live quota</div>
+        <h2>现在还能跑吗</h2>
+        <div class="section-sub">Provider 账号的剩余窗口，不是用量趋势；只显示真正上报的配额。</div>
+      </div>
+      <button class="btn small ghost"><svg><use href="#i-refresh"/></svg>刷新全部</button>
+    </div>
+    <div class="grid-3 overview-quota">
+      <article class="quota-card card">
+        <div class="quota-head">
+          <span class="brand claude"><img src="icons/claude.svg" alt=""></span>
+          <div class="quota-title">
+            <div class="quota-name">Claude Code <span class="plan">Pro</span></div>
+            <div class="quota-sub">Work account · MacBook Pro + Mac mini</div>
+          </div>
+          <span class="chip ok"><span class="dot"></span>正常</span>
+        </div>
+        <div class="quota-windows">
+          <div class="qwindow">
+            <div class="qwindow-top"><span class="mono">5 小时</span><span class="qwindow-pct num">62%<em>剩余</em></span></div>
+            <div class="meter"><i style="width:62%"></i></div>
+            <div class="qwindow-foot"><span>2 小时 14 分后重置</span><span class="mono-value">16:42</span></div>
+          </div>
+          <div class="qwindow">
+            <div class="qwindow-top"><span class="mono">7 天</span><span class="qwindow-pct num">44%<em>剩余</em></span></div>
+            <div class="meter"><i style="width:44%"></i></div>
+            <div class="qwindow-foot"><span>周二 09:00 重置</span><span class="mono-value">1d 18h</span></div>
+          </div>
+        </div>
+        <div class="quota-foot">最后同步 2 分钟前<span class="sep"></span>来自 2 台机器<button>详情</button></div>
+      </article>
+
+      <article class="quota-card card" style="border-color:rgba(245,180,92,.18)">
+        <div class="quota-head">
+          <span class="brand codex"><img src="icons/codex.svg" alt=""></span>
+          <div class="quota-title">
+            <div class="quota-name">Codex <span class="plan">Plus</span></div>
+            <div class="quota-sub">Personal · MacBook Pro</div>
+          </div>
+          <span class="chip warn"><span class="dot warn"></span>接近上限</span>
+        </div>
+        <div class="quota-windows">
+          <div class="qwindow">
+            <div class="qwindow-top"><span class="mono">5 小时</span><span class="qwindow-pct num" style="color:var(--accent)">8%<em>剩余</em></span></div>
+            <div class="meter warn"><i style="width:8%"></i></div>
+            <div class="qwindow-foot"><span style="color:#c9a06a">18 分钟后重置</span><span class="mono-value">15:06</span></div>
+          </div>
+          <div class="qwindow">
+            <div class="qwindow-top"><span class="mono">7 天</span><span class="qwindow-pct num">71%<em>剩余</em></span></div>
+            <div class="meter"><i style="width:71%"></i></div>
+            <div class="qwindow-foot"><span>周六 08:00 重置</span><span class="mono-value">2d 16h</span></div>
+          </div>
+        </div>
+        <div class="quota-foot">重置预测 82% · 今晚 22:10<button>查看</button></div>
+      </article>
+
+      <article class="quota-card card">
+        <div class="quota-head">
+          <span class="brand deepseek"><img src="icons/deepseek.svg" alt=""></span>
+          <div class="quota-title">
+            <div class="quota-name">DeepSeek <span class="plan">API</span></div>
+            <div class="quota-sub">Personal · Mac Studio</div>
+          </div>
+          <span class="chip ok"><span class="dot"></span>正常</span>
+        </div>
+        <div class="quota-windows">
+          <div class="qwindow">
+            <div class="qwindow-top"><span class="mono">余额</span><span class="qwindow-pct num">$8.42</span></div>
+            <div class="meter" style="margin-top:2px"><i style="width:41%"></i></div>
+            <div class="qwindow-foot"><span>本月已用 $41.20</span><span class="mono-value">限额 $100</span></div>
+          </div>
+          <div class="qwindow" style="margin-top:2px">
+            <div class="qwindow-top"><span class="mono">窗口型配额</span><span class="chip" style="height:18px;padding:0 6px;font-size:8.5px">未上报</span></div>
+            <div class="qwindow-foot" style="margin-top:4px"><span>Provider 不提供 5h / 7d 窗口，不补 0</span></div>
+          </div>
+        </div>
+        <div class="quota-foot">最后同步 5 分钟前<span class="sep"></span>钱包余额<button>详情</button></div>
+      </article>
+    </div>
+  </section>
+
+  <section class="section">
+    <div class="kpi-band">
+      <div class="kpi">
+        <div class="kpi-label"><span class="mono">Tokens</span><span class="delta up">↑ 12.4%</span></div>
+        <div class="kpi-value num">64.6<span class="unit">M</span></div>
+        <div class="kpi-foot">较前 7 天 · 3 个 Provider</div>
+        <div class="spark" data-spark="claude"></div>
+      </div>
+      <div class="kpi">
+        <div class="kpi-label"><span class="mono">Est. cost</span><span class="delta up">↑ 8.1%</span></div>
+        <div class="kpi-value num">$186.40</div>
+        <div class="kpi-foot">按 Provider 计价估算，不是账单</div>
+        <div class="spark" data-spark="cost"></div>
+      </div>
+      <div class="kpi">
+        <div class="kpi-label"><span class="mono">Turns</span><span class="delta down">↓ 3.2%</span></div>
+        <div class="kpi-value num">1,284</div>
+        <div class="kpi-foot">12 个活跃会话 · 4 个成员</div>
+        <div class="spark" data-spark="turns"></div>
+      </div>
+      <div class="kpi">
+        <div class="kpi-label"><span class="mono">Quota hits</span><span class="delta down">↑ 2</span></div>
+        <div class="kpi-value num">7<span class="unit">次</span></div>
+        <div class="kpi-foot">3 个等待重试 · 1 个需要处理</div>
+        <div class="spark" data-spark="hits"></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section">
+    <article class="card" style="padding:16px 16px 12px">
+      <div class="card-head">
+        <div>
+          <div class="mono">Trend · 7 days</div>
+          <h3 style="margin-top:4px">用量趋势</h3>
+          <p>按 Provider 堆叠 · 3 小时粒度 · 标记为配额中断</p>
+        </div>
+        <div class="controls">
+          <div class="seg"><button class="active">Tokens</button><button>成本</button></div>
+          <div class="seg"><button class="active">Provider</button><button>机器</button><button>模型</button></div>
+        </div>
+      </div>
+      <div class="legend">
+        <span class="legend-item"><i style="background:#d97757"></i>Claude <b>34.7M</b></span>
+        <span class="legend-item"><i style="background:#d8dee4"></i>Codex <b>21.3M</b></span>
+        <span class="legend-item"><i style="background:#6a86ff"></i>DeepSeek <b>5.5M</b></span>
+        <span class="legend-item"><i style="background:#b49cff"></i>Kimi <b>3.1M</b></span>
+        <span style="flex:1"></span>
+        <span class="legend-item" style="color:var(--accent)"><i style="background:var(--accent);border-radius:50%;width:5px;height:5px"></i>配额中断</span>
+      </div>
+      <div class="chart-wrap">
+        <svg class="chart-svg" id="trend" viewBox="0 0 1160 252" aria-label="用量趋势图"></svg>
+
+      </div>
+    </article>
+  </section>
+
+  <section class="section">
+    <div class="breakdown-grid">
+      <article class="card card-pad">
+        <div class="card-head">
+          <div><div class="mono">Attribution</div><h3 style="margin-top:4px">Provider 用量</h3><p>按估算成本排序 · 同一 Provider 可跨机器</p></div>
+          <button class="btn small ghost"><svg><use href="#i-arrow-up"/></svg>全部</button>
+        </div>
+        <div class="rank-list">
+          <div class="rank-row">
+            <span class="brand sm claude"><img src="icons/claude.svg" alt=""></span>
+            <div><div class="rank-name">Claude Code <span class="plan">Pro</span></div><div class="rank-sub">MacBook Pro · Mac mini</div></div>
+            <div class="rank-bar"><i style="width:100%;background:#d97757"></i></div>
+            <div class="rank-val">34.7M<small>$128.40</small></div>
+            <div class="rank-val">54%<small>成本占比</small></div>
+            <span class="chip ok rank-status">62% 剩余</span>
+          </div>
+          <div class="rank-row">
+            <span class="brand sm codex"><img src="icons/codex.svg" alt=""></span>
+            <div><div class="rank-name">Codex <span class="plan">Plus</span></div><div class="rank-sub">MacBook Pro</div></div>
+            <div class="rank-bar"><i style="width:61%;background:#d8dee4"></i></div>
+            <div class="rank-val">21.3M<small>$42.60</small></div>
+            <div class="rank-val">33%<small>成本占比</small></div>
+            <span class="chip warn rank-status">8% 剩余</span>
+          </div>
+          <div class="rank-row">
+            <span class="brand sm deepseek"><img src="icons/deepseek.svg" alt=""></span>
+            <div><div class="rank-name">DeepSeek <span class="plan">API</span></div><div class="rank-sub">Mac Studio</div></div>
+            <div class="rank-bar"><i style="width:16%;background:#6a86ff"></i></div>
+            <div class="rank-val">5.5M<small>$9.80</small></div>
+            <div class="rank-val">8.5%<small>成本占比</small></div>
+            <span class="chip blue rank-status">余额 $8.42</span>
+          </div>
+          <div class="rank-row">
+            <span class="brand sm kimi"><img src="icons/kimi.svg" alt=""></span>
+            <div><div class="rank-name">Kimi Code</div><div class="rank-sub">Mac mini</div></div>
+            <div class="rank-bar"><i style="width:9%;background:#b49cff"></i></div>
+            <div class="rank-val">3.1M<small>$5.60</small></div>
+            <div class="rank-val">4.8%<small>成本占比</small></div>
+            <span class="chip rank-status">未上报</span>
+          </div>
+        </div>
+        <div class="cost-band">
+          <div class="cost-head"><span class="mono">Cost mix · 7 days</span><span>$186.40 total</span></div>
+          <div class="cost-bar">
+            <i style="width:68.9%;background:#d97757"></i>
+            <i style="width:22.9%;background:#d8dee4"></i>
+            <i style="width:5.3%;background:#6a86ff"></i>
+            <i style="width:3.0%;background:#b49cff"></i>
+          </div>
+          <div class="cost-legend">
+            <span><i style="background:#d97757"></i>Claude 68.9%</span>
+            <span><i style="background:#d8dee4"></i>Codex 22.9%</span>
+            <span><i style="background:#6a86ff"></i>DeepSeek 5.3%</span>
+            <span><i style="background:#b49cff"></i>Kimi 3.0%</span>
+          </div>
+        </div>
+      </article>
+
+      <article class="card card-pad">
+        <div class="card-head">
+          <div><div class="mono">Machine × Provider</div><h3 style="margin-top:4px">机器归因</h3><p>点按单元格筛选趋势 · 离线机器保留上次数据</p></div>
+          <span class="chip">7 天</span>
+        </div>
+        <div class="matrix">
+          <div class="mhead"></div>
+          <div class="mhead"><img src="icons/claude.svg" alt="">Claude</div>
+          <div class="mhead"><img src="icons/codex.svg" alt="">Codex</div>
+          <div class="mhead"><img src="icons/deepseek.svg" alt="">DeepSeek</div>
+          <div class="mhead"><img src="icons/kimi.svg" alt="">Kimi</div>
+
+          <div class="mrow-label"><svg><use href="#i-laptop"/></svg>MacBook Pro</div>
+          <div class="mcell" style="background:rgba(217,119,87,.34);border-color:rgba(217,119,87,.32)">18.4M</div>
+          <div class="mcell" style="background:rgba(216,222,228,.27);border-color:rgba(216,222,228,.26)">21.3M</div>
+          <div class="mcell empty">—</div>
+          <div class="mcell empty">—</div>
+
+          <div class="mrow-label"><svg><use href="#i-server"/></svg>Mac mini</div>
+          <div class="mcell" style="background:rgba(217,119,87,.22);border-color:rgba(217,119,87,.24)">16.3M</div>
+          <div class="mcell empty">—</div>
+          <div class="mcell empty">—</div>
+          <div class="mcell" style="background:rgba(180,156,255,.18);border-color:rgba(180,156,255,.22)">3.1M</div>
+
+          <div class="mrow-label"><svg><use href="#i-server"/></svg><span class="off">Mac Studio</span><span style="font-family:var(--mono);font-size:8.5px;color:#5f6669">离线 3h</span></div>
+          <div class="mcell empty offline">—</div>
+          <div class="mcell empty offline">—</div>
+          <div class="mcell offline" style="background:rgba(106,134,255,.2);border-color:rgba(106,134,255,.22)">5.5M</div>
+          <div class="mcell empty offline">—</div>
+        </div>
+        <div style="display:flex;align-items:center;gap:6px;margin-top:12px;padding-top:10px;border-top:1px solid var(--line);font-size:9.5px;color:#5f6669">
+          <svg style="width:11px;height:11px;color:var(--faint)"><use href="#i-wifi-off"/></svg>
+          Mac Studio 上次同步 3 小时前；不计入“实时配额”的在线刷新。
+        </div>
+      </article>
+    </div>
+  </section>
+
+  <section class="section">
+    <div class="bottom-grid">
+      <article class="card card-pad">
+        <div class="card-head">
+          <div><div class="mono">Limit events</div><h3 style="margin-top:4px">最近配额中断</h3><p>来自结构化错误，不解析错误文案</p></div>
+          <button class="btn small ghost">全部<svg><use href="#i-arrow"/></svg></button>
+        </div>
+        <div class="mini-list">
+          <div class="mini-row">
+            <span class="mini-icon" style="color:var(--accent);border-color:rgba(245,180,92,.22);background:rgba(245,180,92,.07)"><svg><use href="#i-clock"/></svg></span>
+            <div class="mini-main"><div class="mini-title">修复 auth token 刷新</div><div class="mini-sub">Claude Opus 4.5 · 5 小时窗口 · MacBook Pro</div></div>
+            <span class="chip warn">已排队</span>
+            <span class="mini-time">14:10</span>
+          </div>
+          <div class="mini-row">
+            <span class="mini-icon" style="color:var(--accent);border-color:rgba(245,180,92,.22);background:rgba(245,180,92,.07)"><svg><use href="#i-clock"/></svg></span>
+            <div class="mini-main"><div class="mini-title">重构 usage 聚合缓存</div><div class="mini-sub">Codex GPT-5.6 · 5 小时窗口 · MacBook Pro</div></div>
+            <span class="chip warn">已排队</span>
+            <span class="mini-time">13:42</span>
+          </div>
+          <div class="mini-row">
+            <span class="mini-icon" style="color:var(--lime);border-color:rgba(178,224,113,.2);background:rgba(178,224,113,.06)"><svg><use href="#i-check"/></svg></span>
+            <div class="mini-main"><div class="mini-title">生成 v0.9 release notes</div><div class="mini-sub">Claude Sonnet 4.5 · 7 天窗口 · Mac mini</div></div>
+            <span class="chip ok">已手动重试</span>
+            <span class="mini-time">11:08</span>
+          </div>
+          <div class="mini-row">
+            <span class="mini-icon" style="color:var(--red);border-color:rgba(240,122,106,.2);background:rgba(240,122,106,.06)"><svg><use href="#i-alert"/></svg></span>
+            <div class="mini-main"><div class="mini-title">迁移本地项目索引</div><div class="mini-sub">DeepSeek V4 · 余额不足 · Mac Studio</div></div>
+            <span class="chip bad">未排队</span>
+            <span class="mini-time">09:31</span>
+          </div>
+        </div>
+      </article>
+
+      <article class="card card-pad">
+        <div class="card-head">
+          <div><div class="mono">Resume queue</div><h3 style="margin-top:4px">等待恢复</h3><p>这些会话会在配额重置后自动继续</p></div>
+          <span class="chip warn">3 个</span>
+        </div>
+        <div class="queue-preview">
+          <div class="queue-row">
+            <span class="mini-icon" style="color:var(--accent);border-color:rgba(245,180,92,.22);background:rgba(245,180,92,.07)"><svg><use href="#i-clock"/></svg></span>
+            <div class="queue-main"><div class="queue-title">修复 auth token 刷新</div><div class="queue-sub">Claude Opus 4.5 · MacBook Pro · 14:32 重试</div></div>
+            <span class="queue-when">18 分钟后</span>
+          </div>
+          <div class="queue-row">
+            <span class="mini-icon" style="color:var(--blue);border-color:rgba(122,162,247,.2);background:rgba(122,162,247,.06)"><svg><use href="#i-server"/></svg></span>
+            <div class="queue-main"><div class="queue-title">重构 usage 聚合缓存</div><div class="queue-sub">Codex GPT-5.6 · Mac mini · 等待机器上线</div></div>
+            <span class="queue-when">已到重置时间</span>
+          </div>
+          <div class="queue-row">
+            <span class="mini-icon" style="color:var(--red);border-color:rgba(240,122,106,.2);background:rgba(240,122,106,.06)"><svg><use href="#i-alert"/></svg></span>
+            <div class="queue-main"><div class="queue-title">生成 v0.9 release notes</div><div class="queue-sub">Claude Sonnet 4.5 · MacBook Pro · 投递结果不确定</div></div>
+            <span class="queue-when bad">需要处理</span>
+          </div>
+        </div>
+        <div class="link-row">打开完整队列<svg><use href="#i-arrow"/></svg></div>
+      </article>
+    </div>
+  </section>
+
+  <div class="footer">
+    <span>数据来自本机会话记录与机器上报 · 配额值为 Provider 最近一次快照</span>
+    <span><b>成本为估算值，不是账单</b> · 未知计价的轮次不计入总额</span>
+  </div>
+</div>
+
+<script src="./charts.js"></script>
+<script>
+  renderTrend();
+  renderSparks();
+</script>
+</body>
+</html>

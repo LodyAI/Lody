@@ -1,15 +1,23 @@
 import type { Meta, StoryObj } from '@storybook/react';
+import { useState } from 'react';
+import { useTranslation } from 'react-i18next';
+import { fn } from 'storybook/test';
+import { getRateLimitEntryKey, type AgentConfigMeta, type MachineViewMeta } from '@lody/shared';
+import { Button } from '@lody/ui/button';
+import { MachineProvidersSection } from '@/components/settings/machine-detail-pane';
+import { AgentsProviderQuotaView } from '@/components/settings/agents-provider-quota-view';
+import { SettingsLineTabs } from '@/components/settings/settings-line-tabs';
 import { settingContainerClass } from '@/components/settings';
 import {
   AiUsageSettingsView,
-  type AiUsageHistoryPanel,
   type AiUsageWaitingRow,
 } from '@/components/settings/ai-usage-setting-view';
 import type { AiUsageProviderRow, AiUsageQuotaRow } from '@/components/settings/ai-usage-model';
 import type { StackedAreaBucket } from '@/components/settings/usage-stacked-area-chart';
 import { StatsSettingsFixture } from './StatsSettings.stories';
+import { AgentsViewToggle, type AgentsView } from '@/components/settings/agents-view-toggle';
 
-const now = 1_800_000_000;
+const now = Math.floor(Date.now() / 1000);
 
 const quotaRows: AiUsageQuotaRow[] = [
   {
@@ -18,7 +26,8 @@ const quotaRows: AiUsageQuotaRow[] = [
     machineId: 'm1' as AiUsageQuotaRow['machineId'],
     providerKey: 'claude',
     providerName: 'Claude Code',
-    machineName: 'MacBook Pro, Mac mini',
+    planName: 'Pro',
+    machineName: 'MacBook Pro',
     machineOnline: true,
     windows: [
       {
@@ -38,11 +47,38 @@ const quotaRows: AiUsageQuotaRow[] = [
     supportsQuery: true,
   },
   {
+    id: 'm2:claude',
+    configId: 'claude-work-m2' as AiUsageQuotaRow['configId'],
+    machineId: 'm2' as AiUsageQuotaRow['machineId'],
+    providerKey: 'claude',
+    providerName: 'Claude Code',
+    planName: 'Pro',
+    machineName: 'Mac mini',
+    machineOnline: true,
+    windows: [
+      {
+        usedPercent: 40,
+        remainingPercent: 60,
+        windowDurationSeconds: 5 * 60 * 60,
+        resetsAtEpochSeconds: now + 2 * 60 * 60,
+      },
+      {
+        usedPercent: 58,
+        remainingPercent: 42,
+        windowDurationSeconds: 7 * 24 * 60 * 60,
+        resetsAtEpochSeconds: now + 30 * 60 * 60,
+      },
+    ],
+    wallet: null,
+    supportsQuery: true,
+  },
+  {
     id: 'm1:codex',
     configId: 'codex-personal' as AiUsageQuotaRow['configId'],
     machineId: 'm1' as AiUsageQuotaRow['machineId'],
     providerKey: 'codex',
     providerName: 'Codex',
+    planName: 'Plus',
     machineName: 'MacBook Pro',
     machineOnline: true,
     windows: [
@@ -63,9 +99,9 @@ const quotaRows: AiUsageQuotaRow[] = [
     supportsQuery: true,
   },
   {
-    id: 'm2:deepseek',
+    id: 'm3:deepseek',
     configId: 'deepseek-api' as AiUsageQuotaRow['configId'],
-    machineId: 'm2' as AiUsageQuotaRow['machineId'],
+    machineId: 'm3' as AiUsageQuotaRow['machineId'],
     providerKey: 'deepseek',
     providerName: 'DeepSeek',
     machineName: 'Mac Studio',
@@ -167,59 +203,6 @@ const providerRows: AiUsageProviderRow[] = [
   },
 ];
 
-function sawtooth(count: number, start: number, end: number, period: number) {
-  return Array.from({ length: count }, (_, index) => {
-    const position = index % period;
-    const base = start - ((start - end) / (period - 1)) * position;
-    return { x: index / (count - 1), y: index === count - 1 ? end : base };
-  });
-}
-
-const historyPanels: AiUsageHistoryPanel[] = [
-  {
-    id: '5h',
-    title: '5-hour window',
-    rangeLabel: 'Last 24 hours',
-    labels: ['00:00', '06:00', '12:00', '18:00', '24:00'],
-    series: [
-      { id: 'claude', label: 'Claude', color: '#2563eb', points: sawtooth(25, 88, 62, 5) },
-      { id: 'codex', label: 'Codex', color: '#0ea5e9', points: sawtooth(25, 62, 8, 5) },
-    ],
-  },
-  {
-    id: '7d',
-    title: '7-day window',
-    rangeLabel: 'Last 7 days',
-    labels: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'],
-    series: [
-      {
-        id: 'claude',
-        label: 'Claude',
-        color: '#2563eb',
-        points: [
-          { x: 0, y: 82 },
-          { x: 0.3, y: 62 },
-          { x: 0.6, y: 35 },
-          { x: 0.61, y: 90 },
-          { x: 1, y: 44 },
-        ],
-      },
-      {
-        id: 'codex',
-        label: 'Codex',
-        color: '#0ea5e9',
-        points: [
-          { x: 0, y: 90 },
-          { x: 0.3, y: 74 },
-          { x: 0.6, y: 45 },
-          { x: 0.61, y: 95 },
-          { x: 1, y: 71 },
-        ],
-      },
-    ],
-  },
-];
-
 const waitingRows: AiUsageWaitingRow[] = [
   {
     id: 'session-1',
@@ -251,9 +234,10 @@ const waitingRows: AiUsageWaitingRow[] = [
   },
 ];
 
-function NewSections() {
+function NewSections({ surface = 'all' }: { surface?: 'all' | 'usage' | 'quota' }) {
   return (
     <AiUsageSettingsView
+      surface={surface}
       quotaRows={quotaRows}
       quotaLoading={false}
       onRefreshQuota={() => undefined}
@@ -261,7 +245,6 @@ function NewSections() {
       byMemberBuckets={byMemberBuckets}
       usageLoading={false}
       providerRows={providerRows}
-      historyPanels={historyPanels}
       waitingRows={waitingRows}
     />
   );
@@ -295,12 +278,144 @@ type Story = StoryObj<typeof Harness>;
 
 export const Default: Story = {};
 
-/** The composed Settings page: the existing usage page on top, new sections below. */
-export const Composed: Story = {
-  render: () => (
+function ConsumptionPreview() {
+  return (
     <StoryFrame>
-      <StatsSettingsFixture inline shareCard showBreakdown={false} initialRange="week" />
-      <NewSections />
+      <StatsSettingsFixture
+        inline
+        shareCard
+        showBreakdown={false}
+        initialRange="week"
+        renderBreakdown={(buckets) => (
+          <AiUsageSettingsView
+            surface="usage"
+            quotaRows={[]}
+            quotaLoading={false}
+            usageLoading={false}
+            providerRows={[]}
+            {...buckets}
+          />
+        )}
+      />
     </StoryFrame>
-  ),
-};
+  );
+}
+
+export const Composed: Story = { render: () => <AgentsPagePreview /> };
+export const Consumption: Story = { render: () => <ConsumptionPreview /> };
+export const LocalQuota: Story = { render: () => <AgentsPagePreview initialView="quota" /> };
+
+const addProvider = fn();
+const editProvider = fn();
+const refreshProvider = fn(async () => undefined);
+const deleteProvider = fn(async () => undefined);
+
+function AgentsPagePreview({ initialView = 'configuration' }: { initialView?: AgentsView }) {
+  const { t } = useTranslation();
+  const [machineId, setMachineId] = useState('m1');
+  const [view, setView] = useState<AgentsView>(initialView);
+  const machines = [
+    { id: 'm1', name: 'MacBook Pro', raceLimits: {}, acpCapabilities: {} },
+    { id: 'm2', name: 'Mac mini', raceLimits: {}, acpCapabilities: {} },
+    { id: 'm3', name: 'Mac Studio', raceLimits: {}, acpCapabilities: {} },
+  ] as unknown as MachineViewMeta[];
+  const machine = machines.find((item) => item.id === machineId)!;
+  for (const sourceMachine of machines) {
+    sourceMachine.acpCapabilities = Object.fromEntries(
+      quotaRows
+        .filter((row) => row.machineId === sourceMachine.id)
+        .map((row) => [
+          row.configId,
+          {
+            cliType: 'builtin',
+            agentType: row.providerKey,
+            modes: [],
+            models: [],
+            fetchedAt: now * 1000,
+            rateLimits: { version: 1 },
+          },
+        ])
+    );
+    sourceMachine.raceLimits = Object.fromEntries(
+      quotaRows
+        .filter((row) => row.machineId === sourceMachine.id)
+        .map((row) => [
+          getRateLimitEntryKey(row.providerKey, row.providerKey, row.configId),
+          {
+            limitId: row.providerKey,
+            scope: { providerId: row.providerKey },
+            planName: row.planName,
+            wallet: row.wallet
+              ? {
+                  ...row.wallet,
+                  totalCents: row.wallet.balanceCents,
+                  monthlyChargeLimitEnabled: true,
+                }
+              : null,
+            windows: row.windows,
+          },
+        ])
+    );
+  }
+  const configs = quotaRows.map(
+    (row) =>
+      ({
+        id: row.configId,
+        machineId: row.machineId,
+        name: row.providerName,
+        cliType: 'builtin',
+        agentType: row.providerKey,
+        env: {},
+      }) as AgentConfigMeta
+  );
+  return (
+    <StoryFrame>
+      <div
+        style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}
+      >
+        <h1 style={{ fontSize: 18, margin: 0 }}>{t('settings.tabs.agents', 'Agents')}</h1>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <AgentsViewToggle view={view} onChange={setView} />
+          <Button variant="secondary" size="small" onClick={addProvider}>
+            {t('settings.agent.provider.addProvider', 'Add provider')}
+          </Button>
+        </div>
+      </div>
+      {view === 'configuration' ? (
+        <SettingsLineTabs
+          ruled
+          label={t('settings.agent.machineTabs.machine', 'Machine')}
+          current={machineId}
+          onChange={setMachineId}
+          tabs={machines.map((item) => ({ id: item.id as string, label: item.name || item.id }))}
+        />
+      ) : null}
+      {view === 'quota' ? (
+        <AgentsProviderQuotaView
+          machines={new Map(machines.map((item) => [item.id, item]))}
+          configs={configs}
+          onlineMachineIds={
+            new Set(quotaRows.filter((row) => row.machineOnline).map((row) => row.machineId))
+          }
+          onEdit={(_, config) => editProvider(config)}
+          onRefresh={refreshProvider}
+          onDelete={deleteProvider}
+        />
+      ) : (
+        <MachineProvidersSection
+          bare
+          flush
+          machine={machine}
+          configs={configs.filter((config) => config.machineId === machineId)}
+          onAddConfig={addProvider}
+          onEditConfig={editProvider}
+          onRefreshConfig={refreshProvider}
+          onDeleteConfig={deleteProvider}
+        />
+      )}
+    </StoryFrame>
+  );
+}
+
+export const AgentsPage: Story = { render: () => <AgentsPagePreview /> };
+export const AgentsQuota: Story = { render: () => <AgentsPagePreview initialView="quota" /> };

@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from '@storybook/react';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { StatsSettingsView } from '@/components/settings/stats-setting-pure';
 import {
   createUsageTimelineFormatter,
@@ -43,52 +43,6 @@ function wave(i: number, n: number, phase: number): number {
   return 0.15 + 0.85 * (0.5 + 0.5 * Math.sin(t * Math.PI * 2.2 + phase));
 }
 
-function labelFor(range: SettingsUsageRange, i: number, n: number): string {
-  if (range === 'day') {
-    const hour = ((i * 2 + 2) % 24).toString().padStart(2, '0');
-    return `${hour}:00`;
-  }
-  // day-of relative labels for week/month/total
-  const daysAgo = n - 1 - i;
-  if (daysAgo === 0) return 'Today';
-  return `-${daysAgo}d`;
-}
-
-function buildTimeline(range: SettingsUsageRange) {
-  const n = RANGE_BUCKETS[range];
-  const byModelBuckets: StackedAreaBucket[] = [];
-  const byMemberBuckets: StackedAreaBucket[] = [];
-  let totalTokens = 0;
-
-  for (let i = 0; i < n; i += 1) {
-    const label = labelFor(range, i, n);
-    const scale = 40_000 * wave(i, n, 0.6);
-
-    byModelBuckets.push({
-      label,
-      values: MODELS.map((m, mi) => {
-        const value = Math.round(scale * m.weight * wave(i, n, mi * 1.3) * 0.05);
-        totalTokens += value;
-        return { id: m.id, label: m.label, value };
-      }),
-    });
-
-    byMemberBuckets.push({
-      label,
-      values: MEMBERS.map((u, ui) => {
-        const value = Math.round(scale * u.weight * wave(i, n, ui * 1.7 + 0.4) * 0.05);
-        return { id: u.id, label: u.name, value };
-      }),
-    });
-  }
-
-  return {
-    byModelBuckets,
-    byMemberBuckets,
-    totals: { tokens: totalTokens, costUSD: totalTokens * 0.000012 },
-  };
-}
-
 const DAY_MS = 24 * 60 * 60 * 1000;
 const CALENDAR_START_MS = Date.UTC(2025, 8, 22);
 
@@ -129,7 +83,13 @@ function buildTimelineData(
     : activeDays.slice(-RANGE_BUCKETS[range]);
   const buckets = days.flatMap((day) =>
     (hourly ? Array.from({ length: 24 }, (_, hour) => hour) : [null]).map((hour) => {
-      const tokens = empty ? 0 : Math.round(day.tokens * (hour === null ? 1 : wave(hour, 24, 0.9)));
+      const hourlyWeight = Array.from({ length: 24 }, (_, index) => wave(index, 24, 0.9)).reduce(
+        (sum, value) => sum + value,
+        0
+      );
+      const tokens = empty
+        ? 0
+        : Math.round(day.tokens * (hour === null ? 1 : wave(hour, 24, 0.9) / hourlyWeight));
       const bucketStartMs = day.dayStartMs + (hour ?? 0) * 60 * 60 * 1000;
       return {
         bucketStartMs,
@@ -138,7 +98,9 @@ function buildTimelineData(
         costUSD: tokens * 0.000012,
         byModel: MODELS.map((model) => ({
           modelId: model.id,
-          tokens: Math.round((tokens * model.weight) / 20),
+          tokens: Math.round(
+            (tokens * model.weight) / MODELS.reduce((sum, item) => sum + item.weight, 0)
+          ),
           costUSD: 0,
         })),
         byUser: MEMBERS.map((member) => ({
@@ -154,7 +116,7 @@ function buildTimelineData(
     workspaceId: calendar.workspaceId,
     range,
     startMs: days[0]?.dayStartMs ?? calendar.startMs,
-    endMs: calendar.endMs,
+    endMs: (days.at(-1)?.dayStartMs ?? calendar.startMs) + DAY_MS,
     bucketSizeMs: hourly ? 60 * 60 * 1000 : DAY_MS,
     totals: {
       tokens,
@@ -187,6 +149,7 @@ export function StatsSettingsFixture({
   inline = false,
   shareCard = false,
   showBreakdown = true,
+  renderBreakdown,
 }: {
   empty?: boolean;
   loading?: boolean;
@@ -198,6 +161,10 @@ export function StatsSettingsFixture({
   inline?: boolean;
   shareCard?: boolean;
   showBreakdown?: boolean;
+  renderBreakdown?: (buckets: {
+    byModelBuckets: StackedAreaBucket[];
+    byMemberBuckets: StackedAreaBucket[];
+  }) => ReactNode;
 }) {
   const [range, setRange] = useState<SettingsUsageRange>(initialRange);
   const [settled, setSettled] = useState(latencyMs === 0);
@@ -207,37 +174,60 @@ export function StatsSettingsFixture({
     return () => clearTimeout(timer);
   }, [latencyMs]);
 
-  const data = useMemo(() => buildTimeline(range), [range]);
   const calendar = useMemo(() => buildCalendar(empty), [empty]);
   const timeline = useMemo(
     () => buildTimelineData(calendar, range, empty),
     [calendar, empty, range]
   );
 
+  const data = useMemo(() => {
+    const formatter = createUsageTimelineFormatter('en');
+    return {
+      totals: timeline.totals,
+      byModelBuckets: timeline.buckets.map((bucket) => ({
+        label: formatUsageTimelineBucketLabel(timeline, bucket, formatter),
+        values: bucket.byModel.map((model) => ({
+          id: model.modelId,
+          label: model.modelId,
+          value: model.tokens,
+        })),
+      })),
+      byMemberBuckets: timeline.buckets.map((bucket) => ({
+        label: formatUsageTimelineBucketLabel(timeline, bucket, formatter),
+        values: bucket.byUser.map((user) => ({
+          id: user.userId,
+          label: timeline.users?.[user.userId]?.name ?? user.userId,
+          value: user.tokens,
+        })),
+      })),
+    };
+  }, [timeline]);
+
   const loadingNow = loading || !settled;
   const resolved = !loadingNow && !noWorkspace;
 
   const view = (
-    <StatsSettingsView
-      workspaceName="Acme Robotics"
-      range={range}
-      onRangeChange={setRange}
-      ready={resolved}
-      totals={resolved ? (empty ? { tokens: 0, costUSD: 0 } : data.totals) : null}
-      byModelBuckets={resolved && !empty ? data.byModelBuckets : []}
-      byMemberBuckets={resolved && !empty ? data.byMemberBuckets : []}
-      usageCalendar={resolved ? calendar : undefined}
-      usageTimeline={resolved ? timeline : undefined}
-      workspaceId={noWorkspace ? null : 'ws_1'}
-      loading={loadingNow}
-      shareCard={shareCard}
-      showBreakdown={showBreakdown}
-    />
+    <>
+      <StatsSettingsView
+        workspaceName="Acme Robotics"
+        range={range}
+        onRangeChange={setRange}
+        ready={resolved}
+        totals={resolved ? (empty ? { tokens: 0, costUSD: 0 } : data.totals) : null}
+        byModelBuckets={resolved && !empty ? data.byModelBuckets : []}
+        byMemberBuckets={resolved && !empty ? data.byMemberBuckets : []}
+        usageCalendar={resolved ? calendar : undefined}
+        usageTimeline={resolved ? timeline : undefined}
+        workspaceId={noWorkspace ? null : 'ws_1'}
+        loading={loadingNow}
+        shareCard={shareCard}
+        showBreakdown={showBreakdown}
+      />
+      {renderBreakdown?.(resolved && !empty ? data : { byModelBuckets: [], byMemberBuckets: [] })}
+    </>
   );
   return inline ? view : <div className="mx-auto max-w-4xl">{view}</div>;
 }
-
-const Harness = StatsSettingsFixture;
 
 const meta: Meta<typeof StatsSettingsFixture> = {
   title: 'Settings/StatsSettings',

@@ -1,4 +1,4 @@
-# AI 用量：一页设置页，管配额、花费和等待恢复
+# AI 用量与 Provider 配额：保留区块设计，调整设置页归属
 
 Status: proposed
 Type: feature
@@ -8,22 +8,16 @@ Translation: current
 
 ## 摘要
 
-现在的 AI 用量是一个云端工作区的 token/成本报表。它回答不了哪个 Provider 账号现在能跑、哪台机器花掉了这些 token、哪些会话在等配额重置。rate limit 只出现在 Provider 行和 composer 弹层里；#361 的 deferred turn 没有界面。
+Lody 同时需要当前 Provider 额度与历史消耗报表，并保留用户原有的记录行和图表设计。用户现在要求将配置和账号额度放在 Agents 内，通过图标按钮切换，共用同一批记录行。AI Usage 回到消耗分析。[UX 层级决策](2026-10-26-agent-usage-ux-research.zh.md)维护当前归属。配额历史与采样已移除；准确账号归因和 #361 等待数据仍未实现。本文保留区块参考与后续数据契约，视觉结果仍处于提案评审状态。
 
-本文提出在 Settings > AI 用量 里做一页，而不是独立的全宽看板或一组标签页。它沿用 Lody 设置页的材质：扁平页面、记录列表放在一张有分隔线的卡里、字号 12/14/18、边框 0.5px，不用装饰性色条和发光。同时提出本地优先的用量聚合，让没有 `usageAnalytics` 的开源本地组合也能渲染；并增加 durable 的 rate limit 采样，让页面能画出每个窗口的消耗和重置。
+## 实现状态（2026-10-27）
 
-第一版 UI 已经落地；下文的 rate limit 采样和 #361 数据层还没有接。
-
-## 实现状态（2026-10-25）
-
-- 桌面 Settings > AI 用量 保留原有 `StatsSettingsView`（工作区标题、24h/7d/30d/全部、Token/费用大数字、3D 天际线、按模型/按成员、分享），在它下面追加实时配额、Provider/机器、配额历史和等待恢复。旧用量页面没有删。移动端仍用 `MobileStatsSettings`。
-- 实时配额来自可见机器、它们的 agent config 和机器 Flock 的 `raceLimits`。页面会为每个在线且支持查询的 Provider 请求一次刷新，并提供手动刷新。
-- 新的 Provider/机器 表沿用现有云端工作区 timeline，按 model id 归到 Provider。没有 `usageAnalytics` 的本地组合只显示实时配额和 Provider/机器 表，不伪造用量。
-- `AiUsageSettingsView` 承载新增的配额、配额历史、Provider/机器 和等待恢复区块；`AiUsageSettings.stories.tsx` 用 fixture 覆盖它们。原有用量页仍是组合页面的上半部分。
-- 第一版 Provider/机器 表去掉了占比条，给机器名留出可读宽度；Tokens、成本和配额保留。
-- 原有用量视图保留：24h/7d/30d/全部 范围、Token/费用大数字、3D 天际线、当天明细和分享入口都留在原页面。原来的 by-model 和 by-member 两张图合并成下方的 Breakdown，用 Model/Member 切换。
-- **还没接：** 机器侧 `rateLimitSample` 存储和 #361 deferred-turn 记录。历史和等待区块在有记录前保持隐藏；页面不伪造这两类数据。
-- 验证：`@lody/components` typecheck 通过；`tests/ai-usage-model.test.ts` 和 `tests/ai-usage-view.test.tsx` 共 7 个测试通过。当前环境 Node 26.11.1 低于仓库下限，安装用了 `--ignore-scripts`，并手动构建了两个 ACP submodule。
+- `AgentsViewToggle` 通过重叠的淡入淡出和模糊图标切换配置与额度。配置按机器展示，额度跨可见机器按 Provider 分组，两者共用 `ProviderRow`、配置操作与行级刷新。
+- `ProviderQuotaWindows` 在 Agents 和参考视图间共用完整窗口、重置时间和钱包呈现。全部上报窗口直接可见，不提供下拉、历史、余量分布或配置跳转。缺少账号身份时不合并配置。
+- Agents 配置保留机器标签；额度改为 Provider 区块，记录行标明机器，编辑指向所属机器。切回配置保留选中机器。
+- AI Usage 保留 `usageAnalytics` 门控、工作区标题、周期、总量、活动、每日详情、分享和模型/成员明细。按模型家族推导的 Provider/机器混合表仅作参考，因为来源归因尚未得到验证。
+- **未接入：**#361 延迟轮次记录。移除配额历史、采样方案和历史样例，不增加调度器或等待权威。
+- 默认故事保留剩余区块参考。Composed 与 AgentsPage 预览视图切换，AgentsQuota 与 LocalQuota 初始选中额度，Consumption 预览 AI Usage。验证和限制记录在[层级说明](2026-10-26-agent-usage-ux-research.zh.md#验证与限制)中。
 
 ## 场景
 
@@ -31,21 +25,20 @@ Translation: current
 2. **钱花在哪？** 哪个 Provider、机器、模型产生了 token 和估算成本？
 3. **什么被挡住了？** 哪些会话因为结构化配额限制失败、已经等了多久、什么时候重试？
 
-页面按这个顺序回答。顶部只留一行提示指向被挡住的会话，完整列表放在页面底部。
+这些问题定义不同的信息范围。完整原稿保留为参考故事，当前归属由关联的层级说明维护。
 
 ## 提案
 
-一页，五个区块：
+下列四个剩余区块保留为视觉与数据参考，生产归属由关联的层级说明维护：
 
-| 区块 | 内容 |
-| --- | --- |
-| 实时配额 | 每个 Provider 账号一行：身份、机器、5h/7d 窗口、重置时间、余额或未上报 |
-| 配额历史 | 5 小时窗口最近 24 小时；7 天窗口最近 7 天，来自采样 |
-| 用量 | Tokens、成本、轮次、配额中断；一条按 Provider 堆叠的趋势 |
-| Provider 与机器 | 每个 Provider/机器 一行：Tokens、成本、占比、配额 |
-| 等待恢复 | #361 的会话，已等待时间、下一次动作、取消、打开会话 |
+| 区块            | 内容                                                                   |
+| --------------- | ---------------------------------------------------------------------- |
+| 实时配额        | 每个 Provider 账号一行：身份、机器、5h/7d 窗口、重置时间、余额或未上报 |
+| 用量            | Tokens、成本、轮次、配额中断；一条按 Provider 堆叠的趋势               |
+| Provider 与机器 | 每个 Provider/机器 一行：Tokens、成本、占比、配额                      |
+| 等待恢复        | #361 的会话，已等待时间、下一次动作、取消、打开会话                    |
 
-配额、归因、等待各是一张有行的卡。KPI 带和两组图表直接落在页面上。没有嵌套卡片、没有热力矩阵、没有标签页。
+配额、归因和等待原先按单张分隔行卡片设计。当前层级复用这些视觉资产，移除配额历史，完整等待操作仍属于后续会话功能。
 
 ### 等待行为
 
@@ -60,7 +53,7 @@ Translation: current
 
 这些是 owner 的 taste review 定下的：
 
-- 一页，放在设置页里，不新增独立路由。
+- 沿用已有设置页并保留原有区块布局；用户要求的层级预览在 Agents 内切换两个视图，见关联 UX 说明。
 - 不写“正常 / 接近上限”这类健康状态文案；百分比、颜色和重置时间已经说明状态。
 - Provider 图标保留品牌色，不做单色处理。
 - 字号只用 12、14、18，最小 12px。
@@ -75,19 +68,14 @@ Translation: current
 
 ## 数据与归属
 
-| 信息 | 现有来源 | 需要补什么 |
-| --- | --- | --- |
-| Provider / 机器身份 | Agent configs、`MachineMeta`、会话的 `machineId` / `agentConfigId` / `modelId` | 按 Provider 配置聚合 |
-| Rate limit 窗口 | 机器 Flock 的 `raceLimits`，键为 `agentConfigId + limitId`；Provider RPC 刷新 | 解析 scope；离线机器保留上次快照 |
-| Rate limit 历史 | 目前没有 | 新的 `rateLimitSample`：按 machine、config、limit、window 记录 sampledAt、usedPercent、resetsAt；15 分钟一次，保留 14 天，离线断开 |
-| Tokens / 成本 | 会话历史里的 per-turn `tokenUsage` | 本地增量 rollup；打开页面时不要扫描全部历史 |
-| Deferred turns | 尚未实现 | #361 durable `deferredTurn`：会话、轮次、机器、scope、deadline、状态、generation |
+| 信息                | 现有来源                                                                       | 需要补什么                                                                       |
+| ------------------- | ------------------------------------------------------------------------------ | -------------------------------------------------------------------------------- |
+| Provider / 机器身份 | Agent configs、`MachineMeta`、会话的 `machineId` / `agentConfigId` / `modelId` | 按 Provider 配置聚合                                                             |
+| Rate limit 窗口     | 机器 Flock 的 `raceLimits`，键为 `agentConfigId + limitId`；Provider RPC 刷新  | 解析 scope；离线机器保留上次快照                                                 |
+| Tokens / 成本       | 会话历史里的 per-turn `tokenUsage`                                             | 本地增量 rollup；打开页面时不要扫描全部历史                                      |
+| Deferred turns      | 尚未实现                                                                       | #361 durable `deferredTurn`：会话、轮次、机器、scope、deadline、状态、generation |
 
 成本是估算值，不是账单。未知计价保持未知。用量桶和重置时间必须标明时区。
-
-### 配额采样（尚未实现）
-
-每台在线机器每 15 分钟读取一次 Provider 的 `rateLimits`，记录按 machine、agentConfig、limitId、window 归档。页面按选定范围读取；机器离线或 Provider 不再支持查询时，曲线断开，不插值、不延长最后一段。5 小时窗口画在 24 小时视图里，避免几次重置被压成噪音；7 天窗口画在 7 天视图里。
 
 ### 权限
 
@@ -95,22 +83,21 @@ Provider 账号身份和配额是账号级信息。只展示查看者本来就�
 
 ## #361 的 UI 契约
 
-| 状态 | 显示 | 动作 |
-| --- | --- | --- |
-| `scheduled` | “18 分钟后重试”，已等待时间 | 取消、打开会话 |
-| `waiting_for_machine` | “等待机器上线”，已等待时间 | 取消、打开会话 |
-| `dispatching` / `retrying` | “正在重试”，倒计时停止 | 只读 |
-| `needs_attention` | “需要处理”，投递结果不确定，未重放 | 放弃、打开会话 |
-| `canceled` / `succeeded` | 从等待列表消失 | — |
+| 状态                       | 显示                               | 动作           |
+| -------------------------- | ---------------------------------- | -------------- |
+| `scheduled`                | “18 分钟后重试”，已等待时间        | 取消、打开会话 |
+| `waiting_for_machine`      | “等待机器上线”，已等待时间         | 取消、打开会话 |
+| `dispatching` / `retrying` | “正在重试”，倒计时停止             | 只读           |
+| `needs_attention`          | “需要处理”，投递结果不确定，未重放 | 放弃、打开会话 |
+| `canceled` / `succeeded`   | 从等待列表消失                     | —              |
 
 机器、配置、模型或模式缺失是可见的终态，绝不 fallback。新的 reset 会把 deadline 后移，显示“已推迟到 …”，不新增一条。
 
 ## 非目标
 
-- 多个标签页或独立的全宽仪表盘路由。
+- 独立的全宽仪表盘路由。
 - “正常 / 接近上限”文案，或重复 meter 已经表达的绿/黄徽标。
 - 配额或等待恢复的假进度。
-- 机器离线或 Provider 不支持时补采样点。
 - 解析 Provider 错误文案；只认结构化 reason。
 - 有 ACP 输出或工具活动之后自动重放。
 - 把钱包余额画成窗口百分比，或伪造未上报的配额。
@@ -118,18 +105,17 @@ Provider 账号身份和配额是账号级信息。只展示查看者本来就�
 
 ## 未决问题
 
-1. 顺序按 配额 → 配额历史 → 用量 → 归因 → 等待，还是把等待提前？
-2. 15 分钟采样、保留 14 天可以吗？
-3. Provider × 机器 的记录表够不够，还是仍然想要矩阵？
-4. 3D 日历从这一页移除，还是保留在底部？现有日历是 `usage-calendar-visualization.tsx` 里用 three.js 画的立体日历，每天一格或一根柱，按 token 高低起伏，点开看当天明细。它需要懒加载，占空间。
-5. 只给取消 + 打开，还是也做经过重新校验的“立即重试”？
+1. #361 提供延迟轮次数据后，如何关联回相应会话？
+2. 哪些已记录身份能支持模型/成员之外的准确消耗归因？
+3. 现有 3D 日历继续保留在 AI 用量页，保留懒加载与每日详情。进一步改变设计需要单独决定。
+4. 只给取消 + 打开，还是也做经过重新校验的“立即重试”？
 
 ## 证据
 
 - 设计稿：`../../assets/ai-usage-dashboard/page.png`。
 - 已实现页面：`packages/components/src/components/settings/ai-usage-setting.tsx`、`ai-usage-setting-view.tsx`、`ai-usage-model.ts`。
-- 完整历史和等待 fixture 的 story：`packages/components/src/stories/AiUsageSettings.stories.tsx`。
-- 组合页面 story（旧用量页 + 新区块）：`settings-aiusagesettings--composed`。
+- 配额和等待 fixture 的 story：`packages/components/src/stories/AiUsageSettings.stories.tsx`。
+- 原有区块参考：`settings-aiusagesettings--default`；AI 用量页：`settings-aiusagesettings--consumption`；Agents 配置/额度切换：`settings-aiusagesettings--agents-page`；初始选中额度：`settings-aiusagesettings--agents-quota`。
 - 测试：`packages/components/tests/ai-usage-model.test.ts`、`tests/ai-usage-view.test.tsx`。
 - 现有用量页面：`packages/components/src/components/settings/stats-setting.tsx`、`stats-setting-pure.tsx`、`settings-data-cache.tsx`。
 - 配额读取：`packages/components/src/lib/session-usage.ts`、`packages/shared/src/schema.ts`、`packages/shared/src/machine-flock.ts`。

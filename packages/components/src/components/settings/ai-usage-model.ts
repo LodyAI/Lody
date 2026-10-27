@@ -1,4 +1,4 @@
-import type { AgentBrandId, AgentConfigMeta, MachineId, MachineViewMeta } from '@lody/shared';
+import type { AgentConfigMeta, MachineId, MachineViewMeta } from '@lody/shared';
 import {
   canShowSubscriptionRateLimits,
   getAgentRateLimitEntries,
@@ -14,6 +14,8 @@ export type AiUsageQuotaRow = {
   machineId: MachineId;
   providerKey: AiUsageProviderKey;
   providerName: string;
+  /** Provider-reported plan/tier label, when the account reports one. */
+  planName?: string | null;
   machineName: string;
   machineOnline: boolean;
   windows: AgentRateLimitWindow[];
@@ -144,6 +146,10 @@ export function buildQuotaRows({
       machineId: config.machineId,
       providerKey: providerKeyForConfig(config),
       providerName: config.name.trim() || config.agentType,
+      planName:
+        typeof entry?.limits.planName === 'string' && entry.limits.planName.trim()
+          ? entry.limits.planName.trim()
+          : null,
       machineName: machine.name?.trim() || config.machineId,
       machineOnline: onlineMachineIds.has(config.machineId),
       windows: entry ? getAgentRateLimitWindows(entry.limits) : [],

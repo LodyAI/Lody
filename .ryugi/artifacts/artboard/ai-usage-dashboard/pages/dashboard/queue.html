@@ -1,0 +1,240 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=1280">
+<title>AI 用量 · 等待队列</title>
+<link rel="stylesheet" href="./base.css">
+<style>
+  .queue-summary { display: grid; grid-template-columns: repeat(3, 1fr); overflow: hidden; border: 1px solid var(--line); border-radius: 18px; background: var(--panel); }
+  .qs-cell { padding: 14px 16px; }
+  .qs-cell + .qs-cell { border-left: 1px solid var(--line); }
+  .qs-label { display: flex; align-items: center; gap: 7px; font-family: var(--mono); font-size: 9px; letter-spacing: .08em; text-transform: uppercase; color: var(--faint); }
+  .qs-value { margin-top: 9px; font-size: 24px; font-weight: 560; letter-spacing: -.04em; font-variant-numeric: tabular-nums; }
+  .qs-value small { margin-left: 5px; font-size: 10px; font-weight: 500; letter-spacing: 0; color: var(--faint); }
+  .qs-sub { margin-top: 5px; font-size: 10.5px; color: var(--faint); }
+  .queue-layout { display: grid; grid-template-columns: minmax(0, 1.85fr) minmax(0, 1fr); gap: 12px; }
+  .queue-card { padding: 16px; }
+  .queue-list { margin-top: 8px; }
+  .queue-item { display: flex; gap: 13px; padding: 15px 0; border-top: 1px solid var(--line); }
+  .queue-item:first-child { border-top: 0; padding-top: 6px; }
+  .q-status { position: relative; display: grid; place-items: center; width: 46px; height: 46px; flex: none; border-radius: 50%; background: conic-gradient(var(--ring-color, var(--accent)) calc(var(--pct, 12) * 1%), #171b1d 0); box-shadow: inset 0 0 0 1px rgba(255,255,255,.05); }
+  .q-status::before { content: ""; position: absolute; inset: 4px; border-radius: 50%; background: var(--panel); box-shadow: inset 0 1px 3px rgba(0,0,0,.55); }
+  .q-status span { position: relative; z-index: 1; font-family: var(--mono); font-size: 10px; font-weight: 500; letter-spacing: -.03em; color: var(--accent); }
+  .q-status.blue { --ring-color: var(--blue); }
+  .q-status.blue span { color: var(--blue); }
+  .q-status.bad { --ring-color: var(--red); }
+  .q-status.bad span { color: var(--red); }
+  .q-status.neutral { --ring-color: #555c60; }
+  .q-status.neutral span { color: var(--muted); }
+  .q-body { min-width: 0; flex: 1; }
+  .q-title-row { display: flex; align-items: center; gap: 8px; min-width: 0; }
+  .q-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; font-weight: 550; letter-spacing: -.01em; }
+  .q-meta { margin-top: 4px; font-size: 10.5px; color: var(--faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .q-timeline { display: flex; align-items: center; gap: 7px; margin-top: 9px; font-size: 10.5px; color: #8b9295; }
+  .q-timeline .node { width: 5px; height: 5px; border-radius: 50%; background: #555c60; flex: none; }
+  .q-timeline .node.warn { background: var(--accent); }
+  .q-timeline .node.bad { background: var(--red); }
+  .q-timeline .line { width: 12px; height: 1px; background: #353b3e; flex: none; }
+  .q-timeline b { font-weight: 500; color: #c9cecb; }
+  .q-config { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 8px; }
+  .q-config span { display: inline-flex; align-items: center; height: 19px; padding: 0 6px; border: 1px solid var(--line); border-radius: 4px; background: rgba(255,255,255,.02); font-family: var(--mono); font-size: 8.5px; color: #6f767a; }
+  .q-actions { display: flex; align-items: flex-start; gap: 6px; flex: none; padding-top: 1px; }
+  .q-actions .btn { height: 28px; font-size: 10.5px; }
+  .q-actions .danger { color: var(--red); border-color: rgba(240,122,106,.22); }
+  .q-note { margin-top: 9px; padding: 7px 8px; border: 1px solid rgba(240,122,106,.16); border-radius: 7px; background: rgba(240,122,106,.045); font-size: 10px; line-height: 1.45; color: #b58a83; }
+  .rules-card { padding: 16px; }
+  .rules-list { margin-top: 12px; display: flex; flex-direction: column; gap: 9px; }
+  .rule { display: flex; gap: 8px; font-size: 10.5px; line-height: 1.5; color: var(--muted); }
+  .rule svg { width: 12px; height: 12px; flex: none; margin-top: 1px; color: var(--lime); }
+  .rule.no svg { color: var(--red); }
+  .rule b { color: #d6dad8; font-weight: 500; }
+  .rules-divider { height: 1px; margin: 14px 0 12px; background: var(--line); }
+  .data-card { margin-top: 12px; padding: 12px; border: 1px solid var(--line); border-radius: 11px; background: rgba(255,255,255,.018); }
+  .data-card .mono { font-size: 8.5px; }
+  .data-card p { margin: 6px 0 0; font-size: 10.5px; line-height: 1.55; color: var(--faint); }
+  .data-card code { font-family: var(--mono); font-size: 8.5px; color: #a9b0b3; }
+  .legend-note { display: flex; align-items: center; gap: 6px; margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--line); font-size: 10px; color: #5f6669; }
+  .legend-note svg { width: 12px; height: 12px; }
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute">
+  <symbol id="i-chev" viewBox="0 0 16 16"><path d="M4 6l4 4 4-4"/></symbol>
+  <symbol id="i-refresh" viewBox="0 0 16 16"><path d="M13.5 8a5.5 5.5 0 1 1-1.61-3.89M13.5 2.5V6h-3.5"/></symbol>
+  <symbol id="i-download" viewBox="0 0 16 16"><path d="M8 2.5v7M5.25 6.75L8 9.5l2.75-2.75M3 12.5h10"/></symbol>
+  <symbol id="i-arrow" viewBox="0 0 16 16"><path d="M3 8h9.5M9 4.5L12.5 8 9 11.5"/></symbol>
+  <symbol id="i-clock" viewBox="0 0 16 16"><circle cx="8" cy="8" r="5.5"/><path d="M8 4.75V8l2.25 1.5"/></symbol>
+  <symbol id="i-laptop" viewBox="0 0 16 16"><rect x="3" y="3.5" width="10" height="7" rx="1.2"/><path d="M1.5 12.5h13"/></symbol>
+  <symbol id="i-server" viewBox="0 0 16 16"><rect x="3" y="2.5" width="10" height="4.5" rx="1"/><rect x="3" y="9" width="10" height="4.5" rx="1"/><path d="M5.5 4.75h.01M5.5 11.25h.01"/></symbol>
+  <symbol id="i-spark" viewBox="0 0 16 16"><path d="M8 2l1.1 3.9L13 7l-3.9 1.1L8 12l-1.1-3.9L3 7l3.9-1.1L8 2z"/></symbol>
+  <symbol id="i-filter" viewBox="0 0 16 16"><path d="M2.5 3.5h11l-4.25 5v4l-2.5-1.25v-2.75l-4.25-5z"/></symbol>
+  <symbol id="i-alert" viewBox="0 0 16 16"><path d="M8 2.5l5.5 10h-11L8 2.5zM8 6.25v3.25M8 11.4v.1"/></symbol>
+  <symbol id="i-check" viewBox="0 0 16 16"><path d="M3 8.5l3.25 3L13 4.75"/></symbol>
+  <symbol id="i-x" viewBox="0 0 16 16"><path d="M4 4l8 8M12 4l-8 8"/></symbol>
+  <symbol id="i-shield" viewBox="0 0 16 16"><path d="M8 2l5 2v4.2c0 3-2 5-5 5.8-3-.8-5-2.8-5-5.8V4l5-2z"/></symbol>
+  <symbol id="i-wifi-off" viewBox="0 0 16 16"><path d="M2 2l12 12M5.2 7.4a7.5 7.5 0 0 1 4-1.2M2.8 4.9a10 10 0 0 1 3.1-1.5M9.2 6.2a10 10 0 0 1 4 1.6M7.5 11.1a2.6 2.6 0 0 1 1.8.4M8 13.25h.01"/></symbol>
+</svg>
+
+<div class="page">
+  <div class="topline">
+    <div class="crumb"><span>设置</span><span class="slash">/</span><b>AI 用量</b><span class="slash">/</span><b>等待队列</b></div>
+    <div class="top-actions">
+      <div class="sync"><span class="dot warn" style="width:5px;height:5px"></span>3 个等待 · 1 个需要处理</div>
+      <button class="btn icon-only ghost" aria-label="刷新"><svg><use href="#i-refresh"/></svg></button>
+      <button class="btn"><svg><use href="#i-download"/></svg>导出</button>
+    </div>
+  </div>
+
+  <div class="page-head">
+    <div>
+      <h1>等待队列</h1>
+      <div class="page-sub">
+        <span>被 Provider 配额挡住的会话</span><span class="sep"></span>
+        <span>只在安全条件满足时自动继续</span><span class="sep"></span>
+        <span>重启和离线都不会丢</span>
+      </div>
+    </div>
+    <div class="page-actions">
+      <div class="tabs" role="tablist">
+        <div class="tab">概览</div>
+        <div class="tab">配额</div>
+        <div class="tab active">等待队列 <span class="count">3</span></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="toolbar">
+    <div class="filters">
+      <div class="filter"><svg><use href="#i-laptop"/></svg>全部机器<svg><use href="#i-chev"/></svg></div>
+      <div class="filter"><svg><use href="#i-spark"/></svg>全部 Provider<svg><use href="#i-chev"/></svg></div>
+      <div class="filter"><svg><use href="#i-clock"/></svg>全部状态<svg><use href="#i-chev"/></svg></div>
+    </div>
+    <div class="toolbar-spacer"></div>
+    <span class="mono" style="letter-spacing:.04em;color:#5f6669">队列由 daemon 持有，页面只读</span>
+    <button class="btn small" style="margin-left:4px"><svg><use href="#i-refresh"/></svg>刷新</button>
+  </div>
+
+  <section class="section" style="margin-top:16px">
+    <div class="queue-summary">
+      <div class="qs-cell">
+        <div class="qs-label"><span class="dot warn" style="width:5px;height:5px"></span>Scheduled</div>
+        <div class="qs-value">2<small>个已排期</small></div>
+        <div class="qs-sub">配额重置后自动继续</div>
+      </div>
+      <div class="qs-cell">
+        <div class="qs-label"><span class="dot" style="width:5px;height:5px;background:var(--blue);box-shadow:0 0 0 3px rgba(122,162,247,.12)"></span>Next retry</div>
+        <div class="qs-value">18<small>分钟</small></div>
+        <div class="qs-sub">最早的一个 · Claude Opus 4.5</div>
+      </div>
+      <div class="qs-cell">
+        <div class="qs-label"><span class="dot bad" style="width:5px;height:5px"></span>Needs attention</div>
+        <div class="qs-value" style="color:var(--red)">1<small>个需要处理</small></div>
+        <div class="qs-sub">投递结果不确定，不会自动重放</div>
+      </div>
+    </div>
+  </section>
+
+  <div class="alert" style="margin-top:12px;border-color:rgba(178,224,113,.16);background:linear-gradient(90deg,rgba(178,224,113,.055),rgba(178,224,113,.015) 55%,transparent),#0d0f10">
+    <div class="alert-icon" style="border-color:rgba(178,224,113,.2);background:rgba(178,224,113,.07);color:var(--lime)"><svg><use href="#i-shield"/></svg></div>
+    <div class="alert-copy">
+      <strong style="color:#e6efdc">自动继续只发生在“确定没有产生副作用”的失败上</strong>
+      <span style="color:#8f9a87">结构化 usage-limit + 可信 reset + 原目标仍可用；任何输出或工具活动之后都不重放。</span>
+    </div>
+    <span class="chip ok" style="height:24px">#361 contract</span>
+  </div>
+
+  <section class="section">
+    <div class="queue-layout">
+      <article class="card queue-card">
+        <div class="card-head">
+          <div><div class="mono">Pending turns</div><h3 style="margin-top:4px">等待中的轮次</h3><p>每一项都指向原始 durable user turn，不复制 prompt。</p></div>
+          <span class="chip warn">3 个</span>
+        </div>
+        <div class="queue-list">
+          <div class="queue-item">
+            <div class="q-status" style="--pct:12"><span>18m</span></div>
+            <div class="q-body">
+              <div class="q-title-row">
+                <div class="q-title">修复 auth token 刷新</div>
+                <span class="chip warn">计划中</span>
+              </div>
+              <div class="q-meta">Claude Opus 4.5 · Claude Code / Work account · MacBook Pro</div>
+              <div class="q-timeline"><span class="node warn"></span><span>14:10 因 5 小时配额中断</span><span class="line"></span><b>14:32 自动继续</b><span style="color:#5f6669">（还剩 18 分钟）</span></div>
+              <div class="q-config"><span>原模型 Opus 4.5</span><span>原模式 build</span><span>原 Role</span><span>原 MCP 选择</span></div>
+            </div>
+            <div class="q-actions">
+              <button class="btn small ghost">取消</button>
+              <button class="btn small">打开会话<svg><use href="#i-arrow"/></svg></button>
+            </div>
+          </div>
+
+          <div class="queue-item">
+            <div class="q-status neutral" style="--pct:100"><span style="font-size:8px;letter-spacing:.04em;color:#8b9295">OFF</span></div>
+            <div class="q-body">
+              <div class="q-title-row">
+                <div class="q-title">重构 usage 聚合缓存</div>
+                <span class="chip blue">等待机器上线</span>
+              </div>
+              <div class="q-meta">Codex GPT-5.6 · Personal · Mac mini</div>
+              <div class="q-timeline"><span class="node"></span><span>15:06 已到重置时间</span><span class="line"></span><b style="color:#9db8ef">Mac mini 离线 2 小时</b><span style="color:#5f6669">· 上线后自动继续</span></div>
+              <div class="q-config"><span>不会换机器</span><span>不会换 Provider</span><span>保留原配置</span></div>
+            </div>
+            <div class="q-actions">
+              <button class="btn small ghost">取消</button>
+              <button class="btn small">打开会话<svg><use href="#i-arrow"/></svg></button>
+            </div>
+          </div>
+
+          <div class="queue-item">
+            <div class="q-status bad" style="--pct:100"><span style="font-size:9px">!</span></div>
+            <div class="q-body">
+              <div class="q-title-row">
+                <div class="q-title">生成 v0.9 release notes</div>
+                <span class="chip bad">需要处理</span>
+              </div>
+              <div class="q-meta">Claude Sonnet 4.5 · Work account · MacBook Pro</div>
+              <div class="q-timeline"><span class="node bad"></span><span>14:20 已提交，随后 daemon 退出</span><span class="line"></span><b style="color:#d99a91">无法确认 Provider 是否已开始处理</b></div>
+              <div class="q-note">这次不会自动重试：本地没有输出证据，不等于 Provider 一定没做事。请打开会话确认后手动继续。</div>
+            </div>
+            <div class="q-actions">
+              <button class="btn small ghost danger">放弃重试</button>
+              <button class="btn small">打开会话<svg><use href="#i-arrow"/></svg></button>
+            </div>
+          </div>
+        </div>
+        <div class="legend-note"><svg><use href="#i-clock"/></svg>倒计时按同步时钟计算；页面关闭后队列仍在 daemon 里。</div>
+      </article>
+
+      <aside class="card rules-card">
+        <div class="card-head">
+          <div><div class="mono">Safety rules</div><h3 style="margin-top:4px">什么会自动继续</h3><p>不是“所有失败都重试”。</p></div>
+        </div>
+        <div class="rules-list">
+          <div class="rule"><svg><use href="#i-check"/></svg><div><b>结构化配额错误</b><br>Claude 的 <code style="font-family:var(--mono);font-size:8.5px">errorKind: rate_limit</code> 或 Codex 的 <code style="font-family:var(--mono);font-size:8.5px">usageLimitExceeded</code>，不解析文案。</div></div>
+          <div class="rule"><svg><use href="#i-check"/></svg><div><b>还没产生任何输出或工具调用</b><br>一旦有 ACP 输出或工具活动，就不进入自动重放。</div></div>
+          <div class="rule"><svg><use href="#i-check"/></svg><div><b>有可信 reset</b><br>匹配机器、账号和模型；多个窗口都耗尽时等到最晚的那个。</div></div>
+          <div class="rule"><svg><use href="#i-check"/></svg><div><b>原目标仍可用</b><br>机器、Provider、模型、模式、Role、MCP 选择都保留；缺任何一个就停下。</div></div>
+          <div class="rule"><svg><use href="#i-check"/></svg><div><b>到点后重新校验</b><br>仍被限制就顺延 deadline，不形成紧凑重试循环。</div></div>
+        </div>
+        <div class="rules-divider"></div>
+        <div class="rules-list">
+          <div class="rule no"><svg><use href="#i-x"/></svg><div><b>不会</b>在已有输出后重放</div></div>
+          <div class="rule no"><svg><use href="#i-x"/></svg><div><b>不会</b>猜 reset 或切换 Provider / 机器 / 模型</div></div>
+          <div class="rule no"><svg><use href="#i-x"/></svg><div><b>不会</b>把“没有本地输出”当成“Provider 没做事”</div></div>
+        </div>
+        <div class="data-card">
+          <div class="mono">Durable record</div>
+          <p><code>deferredTurn</code> 保存 session、user turn、machine、provider scope、deadline、generation。没有第二套 prompt 投递路径。</p>
+        </div>
+      </aside>
+    </div>
+  </section>
+
+  <div class="footer">
+    <span>队列是 #361 的投影，不是页面状态 · 页面不拥有 timer 或调度权</span>
+    <span><b>不确定就停下</b> · 可取消、可打开，不自动猜测</span>
+  </div>
+</div>
+</body>
+</html>

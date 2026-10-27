@@ -42,11 +42,13 @@ import { Tooltip } from '@lody/ui/tooltip';
 import { colors } from '@lody/ui/tokens/colors.stylex';
 import { corner, radius, space } from '@lody/ui/tokens/scales.stylex';
 import { useIsMobile } from '@/hooks/use-mobile';
-import { useMachineOnlineStatus } from '@/hooks/use-machine-online-status';
+import { useOnlineMachineIds, useMachineOnlineStatus } from '@/hooks/use-machine-online-status';
 import { useMachineActionState } from '@/hooks/use-machine-action-state';
 import { MobileSettingsDetailHeader } from '@/components/mobile/mobile-settings-layout';
 import { MobileSettingsSection } from '@/components/mobile/mobile-settings-row';
 import { ProviderRow } from './provider-row';
+import { buildQuotaRows } from './ai-usage-model';
+import type { AgentsView } from './agents-view-toggle';
 import { ProviderSetupRow } from './provider-setup-row';
 import { DeviceResourceMonitor } from './device-resource-monitor';
 import { CompactSection, SettingsEmptyList, settingsRecordsCard } from './compact-layout';
@@ -225,7 +227,11 @@ const styles = stylex.create({
   bodyInAccordion: { overflowY: 'visible' },
 });
 
+type ProviderUsage = { conversations: number; lastUsedAt: number | null };
+const EMPTY_USAGE: ProviderUsage = { conversations: 0, lastUsedAt: null };
+
 export type MachineProvidersSectionProps = {
+  view?: AgentsView;
   machine: MachineViewMeta;
   configs: AgentConfigMeta[];
   setups?: ProviderSetupTask[];
@@ -262,10 +268,23 @@ export function MachineProvidersSection({
   flush = false,
   variant = 'default',
   bare = false,
+  view = 'configuration',
   onAddProvider,
 }: MachineProvidersSectionProps) {
   const { t } = useTranslation();
   const usageByConfig = useProviderUsage(machine.id, bare);
+  const onlineMachineIds = useOnlineMachineIds();
+  const quotaByConfig = useMemo(
+    () =>
+      new Map(
+        buildQuotaRows({
+          machines: new Map([[machine.id, machine]]),
+          configs,
+          onlineMachineIds,
+        }).map((row) => [row.configId, row])
+      ),
+    [machine, configs, onlineMachineIds]
+  );
   const addButton = (
     <Tooltip.Root>
       <Tooltip.Trigger
@@ -304,6 +323,8 @@ export function MachineProvidersSection({
         onDelete={onDeleteConfig}
         onRefresh={onRefreshConfig}
         variant={bare ? 'card' : 'list'}
+        view={view}
+        quota={quotaByConfig.get(config.id)}
         usage={bare ? (usageByConfig.get(config.id) ?? EMPTY_USAGE) : undefined}
       />
     )),
@@ -1076,9 +1097,6 @@ function EmptyProviders({ onAdd }: { onAdd: () => void }) {
     </div>
   );
 }
-
-type ProviderUsage = { conversations: number; lastUsedAt: number | null };
-const EMPTY_USAGE: ProviderUsage = { conversations: 0, lastUsedAt: null };
 
 /**
  * How much each provider on a machine is used, from the session index already

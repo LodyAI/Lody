@@ -7,6 +7,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AgentConfigId, AgentConfigMeta, MachineId, MachineViewMeta } from '@lody/shared';
 
 import { ProviderRow } from '../src/components/settings/provider-row';
+import { AgentsViewToggle, type AgentsView } from '../src/components/settings/agents-view-toggle';
+import { buildQuotaRows } from '../src/components/settings/ai-usage-model';
+import { AgentsProviderQuotaView } from '../src/components/settings/agents-provider-quota-view';
+import { Tooltip } from '@lody/ui/tooltip';
 import { initI18n } from '../src/i18n';
 import {
   createCodexResetForecastStore,
@@ -137,6 +141,149 @@ describe('ProviderRow reauthentication', () => {
     });
 
     expect(container.textContent).toContain('Opened detail for claude');
+  });
+
+  it('switches the same provider row between configuration and quota while keeping its detail action', async () => {
+    const config = {
+      ...makeConfig({ cliType: 'builtin', agentType: 'claude' }),
+      name: 'Work Claude',
+    };
+    const target: MachineViewMeta = {
+      ...machine,
+      acpCapabilities: {
+        [config.id]: {
+          cliType: 'builtin',
+          agentType: 'claude',
+          modes: [],
+          models: [],
+          fetchedAt: 1,
+          rateLimits: { version: 1 },
+        },
+      },
+      raceLimits: {
+        [getRateLimitEntryKey('claude', 'claude', config.id)]: {
+          limitId: 'claude',
+          scope: { providerId: 'claude' },
+          planName: 'Pro',
+          windows: [{ usedPercent: 38, windowDurationSeconds: 18000, resetsAtEpochSeconds: null }],
+        },
+      },
+    };
+    const quota = buildQuotaRows({
+      machines: new Map([[machineId, target]]),
+      configs: [config],
+      onlineMachineIds: new Set([machineId]),
+    })[0]!;
+    function ViewHarness() {
+      const [view, setView] = useState<AgentsView>('configuration');
+      const [selected, setSelected] = useState<AgentConfigMeta | null>(null);
+      return (
+        <Tooltip.Provider>
+          <AgentsViewToggle view={view} onChange={setView} />
+          <ProviderRow
+            config={config}
+            machine={target}
+            quota={quota}
+            view={view}
+            onEdit={setSelected}
+            onRefresh={async () => {}}
+          />
+          {selected ? <p>Opened {selected.name}</p> : null}
+        </Tooltip.Provider>
+      );
+    }
+    await act(async () => root.render(<ViewHarness />));
+    const toggle = container.querySelector<HTMLButtonElement>(
+      '[aria-label="Switch configuration and quota views"]'
+    )!;
+    const identity = container.querySelector<HTMLButtonElement>('[aria-label="Edit Config"]')!;
+    expect(toggle.getAttribute('aria-pressed')).toBe('false');
+    expect(container.textContent).toContain('62%');
+    expect(container.textContent).not.toContain('Reset time unknown');
+    await act(async () => toggle.click());
+    expect(toggle.getAttribute('aria-pressed')).toBe('true');
+    expect(container.querySelector('[aria-label="Edit Config"]')).toBe(identity);
+    expect(container.textContent).toContain('Reset time unknown');
+    expect(container.textContent).toContain('Pro');
+    expect(container.querySelector('[role="region"]')).toBeNull();
+    await act(async () => toggle.click());
+    expect(container.textContent).not.toContain('Reset time unknown');
+    await act(async () => identity.click());
+    expect(container.textContent).toContain('Opened Work Claude');
+  });
+
+  it('groups visible sources across machines by provider and edits the source on its owning machine', async () => {
+    const remote = { ...machine, id: 'remote' as MachineId, name: 'Remote workstation' };
+    const claude = {
+      ...makeConfig({ cliType: 'builtin', agentType: 'claude' }),
+      name: 'Personal Claude',
+    };
+    const remoteClaude = {
+      ...claude,
+      id: 'remote-claude' as AgentConfigId,
+      machineId: remote.id,
+      name: 'Work Claude',
+    };
+    const hiddenClaude = {
+      ...claude,
+      id: 'hidden-claude' as AgentConfigId,
+      machineId: 'hidden' as MachineId,
+      name: 'Hidden Claude',
+    };
+    const codex = makeConfig({ cliType: 'builtin', agentType: 'codex' });
+    const glm = {
+      ...claude,
+      id: 'glm' as AgentConfigId,
+      brandId: 'glm' as const,
+      name: 'GLM config',
+    };
+    const minimax = {
+      ...claude,
+      id: 'minimax' as AgentConfigId,
+      brandId: 'minimax' as const,
+      name: 'MiniMax config',
+    };
+    function QuotaHarness() {
+      const [opened, setOpened] = useState('');
+      return (
+        <Tooltip.Provider>
+          <AgentsProviderQuotaView
+            machines={
+              new Map([
+                [machine.id, machine],
+                [remote.id, remote],
+              ])
+            }
+            configs={[claude, remoteClaude, hiddenClaude, codex, glm, minimax]}
+            onlineMachineIds={new Set([machine.id])}
+            onEdit={(target, config) => setOpened(`${config.name} on ${target.name}`)}
+          />
+          <output>{opened}</output>
+        </Tooltip.Provider>
+      );
+    }
+    await act(async () => root.render(<QuotaHarness />));
+    const groups = [...container.querySelectorAll('section')];
+    expect(groups.map((group) => group.querySelector('header')?.textContent)).toEqual([
+      'Claude Code',
+      'Codex',
+      'GLM',
+      'MiniMax',
+    ]);
+    const claudeGroup = groups[0]!;
+    expect(claudeGroup.textContent).toContain('Personal Claude');
+    expect(claudeGroup.textContent).toContain('Work Claude');
+    expect(claudeGroup.textContent).toContain('Workstation');
+    expect(claudeGroup.textContent).toContain('Remote workstation');
+    expect(container.textContent).not.toContain('Hidden Claude');
+    expect(container.querySelector('[role="tablist"]')).toBeNull();
+    const remoteIdentity = [
+      ...claudeGroup.querySelectorAll<HTMLButtonElement>('[aria-label="Edit Config"]'),
+    ].find((button) => button.textContent?.includes('Work Claude'))!;
+    await act(async () => remoteIdentity.click());
+    expect(container.querySelector('output')?.textContent).toBe(
+      'Work Claude on Remote workstation'
+    );
   });
 
   it('loads the forecast only after its direct action is selected', async () => {

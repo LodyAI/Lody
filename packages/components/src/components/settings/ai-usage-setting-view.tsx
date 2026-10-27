@@ -1,35 +1,19 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import type { TFunction } from 'i18next';
-import { formatDistance, type Locale } from 'date-fns';
-import { enUS } from 'date-fns/locale/en-US';
-import { zhCN } from 'date-fns/locale/zh-CN';
-import { AlertTriangle, Clock, RefreshCw, WifiOff } from 'lucide-react';
+import { AlertTriangle, Clock, Laptop, RefreshCw, Server, WifiOff } from 'lucide-react';
 import * as stylex from '@stylexjs/stylex';
-import { getServerNow } from '@lody/shared';
 import { Button } from '@lody/ui/button';
+import { Input } from '@lody/ui/input';
+import { Select } from '@lody/ui/select';
 import { colors, shadow } from '@lody/ui/tokens/colors.stylex';
 import { corner, radius, space, text } from '@lody/ui/tokens/scales.stylex';
+import { ProviderQuotaWindows } from './provider-quota-windows';
 import { ModelBrandIcon } from '@/components/icons/model-brand-icon';
 import { UsageStackedAreaChart, type StackedAreaBucket } from './usage-stacked-area-chart';
 import { formatCompactNumber, formatUsdAmount } from '@/lib/format-compact-number';
 import { toIntlLocaleOrEn } from '@/lib/intl-locale';
-import { useStableNow } from '@/hooks/use-stable-now';
 import type { AiUsageProviderKey, AiUsageProviderRow, AiUsageQuotaRow } from './ai-usage-model';
-import { formatQuotaPercent, formatWalletBalance } from './ai-usage-model';
-
-export type AiUsageHistoryPanel = {
-  id: string;
-  title: string;
-  rangeLabel: string;
-  labels: string[];
-  series: Array<{
-    id: string;
-    label: string;
-    color: string;
-    points: Array<{ x: number; y: number }>;
-  }>;
-};
+import { formatQuotaPercent, providerLabel } from './ai-usage-model';
 
 export type AiUsageWaitingState =
   | 'scheduled'
@@ -49,14 +33,14 @@ export type AiUsageWaitingRow = {
 };
 
 export type AiUsageSettingsViewProps = {
+  surface?: 'all' | 'usage' | 'quota';
   quotaRows: AiUsageQuotaRow[];
   quotaLoading: boolean;
-  onRefreshQuota: () => void;
+  onRefreshQuota?: () => void;
   byModelBuckets?: StackedAreaBucket[];
   byMemberBuckets?: StackedAreaBucket[];
   usageLoading: boolean;
   providerRows: AiUsageProviderRow[];
-  historyPanels?: AiUsageHistoryPanel[];
   waitingRows?: AiUsageWaitingRow[];
   onCancelWaiting?: (id: string) => void;
   onOpenWaitingSession?: (id: string) => void;
@@ -71,6 +55,8 @@ const PROVIDER_COLORS: Record<AiUsageProviderKey, string> = {
   gemini: '#8ab4f8',
   other: colors.secondaryLabel,
 };
+
+const ROOMY_QUOTA = '@container (min-width: 32rem)';
 
 const styles = stylex.create({
   page: {
@@ -142,15 +128,132 @@ const styles = stylex.create({
     fontWeight: 500,
     color: colors.label,
   },
+  quotaControls: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    gap: space[2],
+    marginBottom: space[2],
+  },
+  groupToggle: {
+    display: 'inline-flex',
+    gap: '1px',
+    padding: '2px',
+    borderRadius: radius.small,
+    backgroundColor: colors.trayBackground,
+  },
+  groupToggleButton: {
+    boxSizing: 'border-box',
+    height: '24px',
+    margin: 0,
+    paddingInline: space[2],
+    borderWidth: 0,
+    borderRadius: radius.mini,
+    backgroundColor: 'transparent',
+    color: colors.secondaryLabel,
+    fontFamily: 'inherit',
+    fontSize: text.footnoteSize,
+    cursor: 'pointer',
+  },
+  groupToggleSelected: {
+    backgroundColor: colors.trayRaised,
+    boxShadow: shadow.raised,
+    color: colors.label,
+  },
+  filterButton: {
+    boxSizing: 'border-box',
+    height: '24px',
+    margin: 0,
+    paddingInline: space[2],
+    borderWidth: 0,
+    borderRadius: radius.mini,
+    backgroundColor: 'transparent',
+    color: colors.secondaryLabel,
+    fontFamily: 'inherit',
+    fontSize: text.footnoteSize,
+    cursor: 'pointer',
+    boxShadow: `inset 0 0 0 0.5px ${colors.separator}`,
+  },
+  filterButtonSelected: {
+    backgroundColor: colors.trayRaised,
+    boxShadow: shadow.raised,
+    color: colors.label,
+  },
+  select: {
+    minWidth: '116px',
+  },
+  searchBox: {
+    width: '160px',
+  },
+  groupHead: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: space[2],
+    paddingInline: space[4],
+    paddingBlock: space[2],
+  },
+  groupIcon: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: '16px',
+    height: '16px',
+    flexShrink: 0,
+  },
+  groupTitle: {
+    fontSize: text.bodySize,
+    fontWeight: 500,
+    color: colors.label,
+  },
+  groupCount: {
+    fontSize: text.footnoteSize,
+    color: colors.tertiaryLabel,
+  },
   quotaRow: {
     display: 'grid',
-    gridTemplateColumns: '240px minmax(0, 1fr) minmax(0, 1fr)',
+    gridTemplateColumns: {
+      default: 'minmax(0, 1fr)',
+      [ROOMY_QUOTA]: 'minmax(0, 1.35fr) minmax(0, 2fr)',
+    },
     alignItems: 'center',
     gap: space[4],
+    minHeight: '56px',
     paddingInline: space[4],
-    paddingBlock: space[3],
+    paddingBlock: space[2],
+  },
+  plan: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    height: '17px',
+    marginInlineStart: space[1],
+    paddingInline: '5px',
+    borderRadius: '4px',
+    backgroundColor: `color-mix(in oklab, transparent, ${colors.label} 5%)`,
+    color: colors.tertiaryLabel,
+    fontFamily: 'inherit',
+    fontSize: text.captionSize,
+    fontWeight: 400,
+  },
+  machineChip: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: space[1],
+    height: '18px',
+    paddingInline: '6px',
+    borderRadius: '4px',
+    backgroundColor: `color-mix(in oklab, transparent, ${colors.label} 5%)`,
+    color: colors.secondaryLabel,
+    fontSize: text.captionSize,
+  },
+  machineChipIcon: {
+    display: 'flex',
+    width: '10px',
+    height: '10px',
+    flexShrink: 0,
   },
   providerIdentity: {
+    gridColumn: 1,
+    gridRow: 1,
     display: 'flex',
     alignItems: 'center',
     gap: space[2],
@@ -188,59 +291,10 @@ const styles = stylex.create({
     overflow: 'hidden',
     textOverflow: 'ellipsis',
   },
-  window: {
+  quotaWindows: {
     minWidth: 0,
-  },
-  windowHead: {
-    display: 'flex',
-    alignItems: 'baseline',
-    justifyContent: 'space-between',
-    gap: space[2],
-    fontSize: text.footnoteSize,
-    color: colors.tertiaryLabel,
-  },
-  windowValue: {
-    fontSize: text.bodySize,
-    fontWeight: 500,
-    fontVariantNumeric: 'tabular-nums',
-    color: colors.label,
-  },
-  windowValueWarning: {
-    color: colors.warning,
-  },
-  meter: {
-    height: '4px',
-    marginTop: space[1],
-    overflow: 'hidden',
-    borderRadius: radius.full,
-    backgroundColor: colors.gray5,
-  },
-  meterFill: {
-    display: 'block',
-    height: '100%',
-    borderRadius: radius.full,
-    backgroundColor: colors.success,
-  },
-  meterWarning: {
-    backgroundColor: colors.warning,
-  },
-  meterDestructive: {
-    backgroundColor: colors.destructive,
-  },
-  windowFoot: {
-    marginTop: space[1],
-    fontSize: text.footnoteSize,
-    color: colors.tertiaryLabel,
-  },
-  windowEmpty: {
-    fontSize: text.footnoteSize,
-    color: colors.tertiaryLabel,
-  },
-  walletValue: {
-    fontSize: text.bodySize,
-    fontWeight: 500,
-    fontVariantNumeric: 'tabular-nums',
-    color: colors.label,
+    gridColumn: { default: '1', [ROOMY_QUOTA]: '2' },
+    gridRow: { default: '2', [ROOMY_QUOTA]: '1' },
   },
   emptyNote: {
     margin: 0,
@@ -281,49 +335,7 @@ const styles = stylex.create({
     fontSize: text.footnoteSize,
     color: colors.tertiaryLabel,
   },
-  historyGrid: {
-    display: 'grid',
-    gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)',
-    gap: space[3],
-  },
-  historyCard: {
-    padding: space[3],
-  },
-  historyHead: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: space[2],
-  },
-  historyTitle: {
-    fontSize: text.bodySize,
-    fontWeight: 500,
-    color: colors.label,
-  },
-  historyChart: {
-    display: 'block',
-    width: '100%',
-    height: 'auto',
-    marginTop: space[2],
-  },
-  legend: {
-    display: 'flex',
-    flexWrap: 'wrap',
-    alignItems: 'center',
-    gap: space[3],
-    fontSize: text.footnoteSize,
-    color: colors.secondaryLabel,
-  },
-  legendItem: {
-    display: 'inline-flex',
-    alignItems: 'center',
-    gap: space[1],
-  },
-  swatch: {
-    width: '8px',
-    height: '8px',
-    borderRadius: '2px',
-  },
+  quotaCard: { containerType: 'inline-size' },
   chartNote: {
     fontSize: text.footnoteSize,
     color: colors.tertiaryLabel,
@@ -516,172 +528,330 @@ const dimensionStyles = stylex.create({
   },
 });
 
-function useDateLocale(): Locale {
-  const { i18n } = useTranslation();
-  return i18n.language?.startsWith('zh') ? zhCN : enUS;
-}
-
-function formatReset(epochSeconds: number | null, locale: Locale, t: TFunction): string {
-  if (!epochSeconds) return t('machines.rateLimits.resetUnknown', 'Reset unknown');
-  const distance = formatDistance(new Date(epochSeconds * 1000), new Date(getServerNow()), {
-    addSuffix: true,
-    locale,
-  });
-  return t('machines.rateLimits.resetsAt', 'Resets {{time}}', { time: distance });
-}
-
-function windowLabel(windowSeconds: number | null, t: TFunction): string {
-  if (windowSeconds === 5 * 60 * 60) return t('sessions.usage.fiveHour', '5 hours');
-  if (windowSeconds === 7 * 24 * 60 * 60) return t('sessions.usage.weekly', 'Weekly');
-  if (windowSeconds === null) return t('sessions.usage.limit', 'Usage');
-  if (windowSeconds % (24 * 60 * 60) === 0) return `${windowSeconds / (24 * 60 * 60)}d`;
-  if (windowSeconds % (60 * 60) === 0) return `${windowSeconds / (60 * 60)}h`;
-  return `${Math.round(windowSeconds / 60)}m`;
-}
-
 function providerColor(key: AiUsageProviderKey): string {
   return PROVIDER_COLORS[key];
 }
 
-function QuotaWindow({
-  window,
-  locale,
+type QuotaGroup = {
+  id: string;
+  label: string;
+  rows: AiUsageQuotaRow[];
+  kind: 'provider' | 'machine';
+  providerKey?: AiUsageProviderKey;
+  machineName?: string;
+  online?: boolean;
+};
+
+function rowRemaining(row: AiUsageQuotaRow): number | null {
+  const windows = row.windows.filter((window) => Number.isFinite(window.remainingPercent));
+  if (windows.length === 0) return null;
+  return Math.min(...windows.map((window) => window.remainingPercent));
+}
+
+function machineIcon(machineName: string) {
+  return /book/i.test(machineName) ? Laptop : Server;
+}
+
+function LiveQuotaSection({
+  rows,
+  loading,
+  onRefresh,
 }: {
-  window: AiUsageQuotaRow['windows'][number];
-  locale: Locale;
+  rows: AiUsageQuotaRow[];
+  loading: boolean;
+  onRefresh?: () => void;
 }) {
   const { t } = useTranslation();
-  const remaining = Math.max(0, Math.min(100, window.remainingPercent));
-  const warning = remaining <= 30;
-  const destructive = remaining <= 5;
-  return (
-    <div {...stylex.props(styles.window)}>
-      <div {...stylex.props(styles.windowHead)}>
-        <span>{windowLabel(window.windowDurationSeconds, t)}</span>
-        <span {...stylex.props(styles.windowValue, warning && styles.windowValueWarning)}>
-          {Math.round(remaining)}%
-        </span>
-      </div>
-      <div {...stylex.props(styles.meter)}>
-        <span
-          {...stylex.props(
-            styles.meterFill,
-            warning && styles.meterWarning,
-            destructive && styles.meterDestructive
-          )}
-          style={{ width: `${remaining}%` }}
-        />
-      </div>
-      <div {...stylex.props(styles.windowFoot)}>
-        {formatReset(window.resetsAtEpochSeconds, locale, t)}
-      </div>
-    </div>
-  );
-}
+  const [groupBy, setGroupBy] = useState<'provider' | 'machine'>('provider');
+  const [machineFilter, setMachineFilter] = useState('all');
+  const [providerFilter, setProviderFilter] = useState('all');
+  const [belowTwenty, setBelowTwenty] = useState(false);
+  const [query, setQuery] = useState('');
 
-function WalletWindow({ row, locale }: { row: AiUsageQuotaRow; locale: string }) {
-  const { t } = useTranslation();
-  const balance = formatWalletBalance(row.wallet, locale);
-  if (!balance) return <div {...stylex.props(styles.windowEmpty)}>—</div>;
-  const wallet = row.wallet;
-  const ratio =
-    wallet && wallet.monthlyChargeLimitCents > 0
-      ? Math.max(0, Math.min(100, (wallet.monthlyUsedCents / wallet.monthlyChargeLimitCents) * 100))
-      : 0;
-  return (
-    <div {...stylex.props(styles.window)}>
-      <div {...stylex.props(styles.windowHead)}>
-        <span>{t('sessions.usage.balance', 'Balance')}</span>
-        <span {...stylex.props(styles.walletValue)}>{balance}</span>
-      </div>
-      <div {...stylex.props(styles.meter)}>
-        <span {...stylex.props(styles.meterFill)} style={{ width: `${ratio}%` }} />
-      </div>
-      <div {...stylex.props(styles.windowFoot)}>
-        {t('sessions.usage.monthlyUsed', 'Used this month')}
-      </div>
-    </div>
-  );
-}
+  const machineItems = useMemo(() => {
+    const byId = new Map<string, string>();
+    for (const row of rows) byId.set(row.machineId, row.machineName);
+    return [
+      { value: 'all', label: t('settings.aiUsage.quota.allMachines', 'All machines') },
+      ...[...byId.entries()]
+        .sort((left, right) => left[1].localeCompare(right[1]))
+        .map(([value, label]) => ({ value, label })),
+    ];
+  }, [rows, t]);
 
-function HistoryChart({ panel }: { panel: AiUsageHistoryPanel }) {
-  const width = 400;
-  const height = 140;
-  const left = 34;
-  const right = 2;
-  const top = 8;
-  const bottom = 20;
-  const innerW = width - left - right;
-  const innerH = height - top - bottom;
-  const yAt = (value: number) => top + innerH - (value / 100) * innerH;
+  const providerItems = useMemo(() => {
+    const keys = [...new Set(rows.map((row) => row.providerKey))].sort((left, right) =>
+      providerLabel(left).localeCompare(providerLabel(right))
+    );
+    return [
+      { value: 'all', label: t('settings.aiUsage.quota.allProviders', 'All providers') },
+      ...keys.map((key) => ({ value: key, label: providerLabel(key) })),
+    ];
+  }, [rows, t]);
+
+  const filtered = useMemo(() => {
+    const normalizedQuery = query.trim().toLowerCase();
+    return rows
+      .filter((row) => {
+        if (machineFilter !== 'all' && row.machineId !== machineFilter) return false;
+        if (providerFilter !== 'all' && row.providerKey !== providerFilter) return false;
+        const remaining = rowRemaining(row);
+        if (belowTwenty && (remaining === null || remaining > 20)) return false;
+        if (!normalizedQuery) return true;
+        return [row.providerName, row.machineName, row.planName ?? '']
+          .join(' ')
+          .toLowerCase()
+          .includes(normalizedQuery);
+      })
+      .sort((left, right) => {
+        const leftRemaining = rowRemaining(left);
+        const rightRemaining = rowRemaining(right);
+        if (leftRemaining === null && rightRemaining === null) {
+          return left.providerName.localeCompare(right.providerName);
+        }
+        if (leftRemaining === null) return 1;
+        if (rightRemaining === null) return -1;
+        if (leftRemaining !== rightRemaining) return leftRemaining - rightRemaining;
+        return left.providerName.localeCompare(right.providerName);
+      });
+  }, [belowTwenty, machineFilter, providerFilter, query, rows]);
+
+  const groups = useMemo<QuotaGroup[]>(() => {
+    if (groupBy === 'provider') {
+      const byProvider = new Map<AiUsageProviderKey, AiUsageQuotaRow[]>();
+      for (const row of filtered) {
+        const bucket = byProvider.get(row.providerKey) ?? [];
+        bucket.push(row);
+        byProvider.set(row.providerKey, bucket);
+      }
+      return [...byProvider.entries()]
+        .sort((left, right) => providerLabel(left[0]).localeCompare(providerLabel(right[0])))
+        .map(([key, groupRows]) => ({
+          id: `provider:${key}`,
+          label: providerLabel(key),
+          rows: groupRows,
+          kind: 'provider',
+          providerKey: key,
+        }));
+    }
+
+    const byMachine = new Map<string, AiUsageQuotaRow[]>();
+    for (const row of filtered) {
+      const bucket = byMachine.get(row.machineId) ?? [];
+      bucket.push(row);
+      byMachine.set(row.machineId, bucket);
+    }
+    return [...byMachine.entries()]
+      .sort((left, right) => left[1][0]!.machineName.localeCompare(right[1][0]!.machineName))
+      .map(([machineId, groupRows]) => ({
+        id: `machine:${machineId}`,
+        label: groupRows[0]!.machineName,
+        rows: groupRows,
+        kind: 'machine',
+        machineName: groupRows[0]!.machineName,
+        online: groupRows.some((row) => row.machineOnline),
+      }));
+  }, [filtered, groupBy]);
+
   return (
-    <svg
-      viewBox={`0 0 ${width} ${height}`}
-      role="img"
-      aria-label={panel.title}
-      {...stylex.props(styles.historyChart)}
-    >
-      {[0, 50, 100].map((value) => (
-        <g key={value}>
-          <line
-            x1={left}
-            x2={width - right}
-            y1={yAt(value)}
-            y2={yAt(value)}
-            stroke={colors.separator}
-            strokeWidth="0.5"
+    <section {...stylex.props(styles.section)}>
+      <div {...stylex.props(styles.sectionHead)}>
+        <h2 {...stylex.props(styles.sectionTitle)}>
+          {t('settings.aiUsage.quota.title', 'Live quota')}
+        </h2>
+        {onRefresh ? (
+          <Button variant="ghost" size="mini" onClick={onRefresh}>
+            <RefreshCw aria-hidden="true" size={14} />
+            {t('settings.aiUsage.quota.refresh', 'Refresh')}
+          </Button>
+        ) : null}
+      </div>
+
+      <div {...stylex.props(styles.quotaControls)}>
+        <div
+          role="tablist"
+          aria-label={t('settings.aiUsage.quota.groupBy', 'Group quota by')}
+          {...stylex.props(styles.groupToggle)}
+        >
+          {(['provider', 'machine'] as const).map((value) => (
+            <button
+              key={value}
+              type="button"
+              role="tab"
+              aria-selected={groupBy === value}
+              onClick={() => setGroupBy(value)}
+              {...stylex.props(
+                styles.groupToggleButton,
+                groupBy === value && styles.groupToggleSelected
+              )}
+            >
+              {value === 'provider'
+                ? t('settings.aiUsage.quota.byProvider', 'Provider')
+                : t('settings.aiUsage.quota.byMachine', 'Machine')}
+            </button>
+          ))}
+        </div>
+
+        <Select.Root
+          items={providerItems}
+          value={providerFilter}
+          onValueChange={(value) => setProviderFilter(value ?? 'all')}
+        >
+          <div {...stylex.props(styles.select)}>
+            <Select.Trigger>
+              <Select.Value />
+            </Select.Trigger>
+          </div>
+          <Select.Content>
+            {providerItems.map((item) => (
+              <Select.Item key={item.value} value={item.value}>
+                {item.label}
+              </Select.Item>
+            ))}
+          </Select.Content>
+        </Select.Root>
+
+        <Select.Root
+          items={machineItems}
+          value={machineFilter}
+          onValueChange={(value) => setMachineFilter(value ?? 'all')}
+        >
+          <div {...stylex.props(styles.select)}>
+            <Select.Trigger>
+              <Select.Value />
+            </Select.Trigger>
+          </div>
+          <Select.Content>
+            {machineItems.map((item) => (
+              <Select.Item key={item.value} value={item.value}>
+                {item.label}
+              </Select.Item>
+            ))}
+          </Select.Content>
+        </Select.Root>
+
+        <button
+          type="button"
+          aria-pressed={belowTwenty}
+          onClick={() => setBelowTwenty((value) => !value)}
+          {...stylex.props(styles.filterButton, belowTwenty && styles.filterButtonSelected)}
+        >
+          {t('settings.aiUsage.quota.belowTwenty', 'Below 20%')}
+        </button>
+
+        <div {...stylex.props(styles.searchBox)}>
+          <Input
+            size="small"
+            value={query}
+            aria-label={t('settings.aiUsage.quota.search', 'Search quota')}
+            placeholder={t('settings.aiUsage.quota.searchPlaceholder', 'Search')}
+            onChange={(event) => setQuery(event.target.value)}
           />
-          <text
-            x={left - 6}
-            y={yAt(value) + 3}
-            textAnchor="end"
-            fill={colors.tertiaryLabel}
-            fontFamily="var(--font-sans)"
-            fontSize="12"
-          >
-            {value}%
-          </text>
-        </g>
-      ))}
-      {panel.labels.map((label, index) => {
-        const x = left + (index * innerW) / Math.max(1, panel.labels.length - 1);
-        return (
-          <text
-            key={`${label}-${index}`}
-            x={x}
-            y={height - 5}
-            textAnchor={
-              index === 0 ? 'start' : index === panel.labels.length - 1 ? 'end' : 'middle'
-            }
-            fill={colors.tertiaryLabel}
-            fontFamily="var(--font-sans)"
-            fontSize="12"
-          >
-            {label}
-          </text>
-        );
-      })}
-      {panel.series.map((series) => (
-        <path
-          key={series.id}
-          d={series.points
-            .map((point, index) => {
-              const x = left + point.x * innerW;
-              const y = yAt(point.y);
-              return `${index === 0 ? 'M' : 'L'} ${x.toFixed(2)} ${y.toFixed(2)}`;
-            })
-            .join(' ')}
-          fill="none"
-          stroke={series.color}
-          strokeWidth="2"
-          strokeLinejoin="round"
-        />
-      ))}
-    </svg>
+        </div>
+      </div>
+
+      {rows.length === 0 ? (
+        <div {...stylex.props(styles.card)}>
+          <p {...stylex.props(styles.emptyNote)}>
+            {loading
+              ? t('settings.aiUsage.quota.loading', 'Loading Providers...')
+              : t('settings.aiUsage.quota.empty', 'No visible Providers.')}
+          </p>
+        </div>
+      ) : filtered.length === 0 ? (
+        <div {...stylex.props(styles.card)}>
+          <p {...stylex.props(styles.emptyNote)}>
+            {t('settings.aiUsage.quota.noMatch', 'No Providers match these filters.')}
+          </p>
+        </div>
+      ) : (
+        groups.map((group) => {
+          const GroupIcon = group.kind === 'provider' ? null : machineIcon(group.label);
+          return (
+            <div key={group.id} {...stylex.props(styles.section)}>
+              <div {...stylex.props(styles.groupHead)}>
+                {group.kind === 'provider' && group.providerKey ? (
+                  <span
+                    {...stylex.props(styles.groupIcon)}
+                    style={{ color: providerColor(group.providerKey) }}
+                  >
+                    <ModelBrandIcon modelId={group.providerKey} className="h-4 w-4" />
+                  </span>
+                ) : GroupIcon ? (
+                  <span {...stylex.props(styles.groupIcon)}>
+                    <GroupIcon aria-hidden="true" size={16} />
+                  </span>
+                ) : null}
+                <span {...stylex.props(styles.groupTitle)}>{group.label}</span>
+                <span {...stylex.props(styles.groupCount)}>
+                  {group.kind === 'machine' && group.online === false
+                    ? t('settings.aiUsage.quota.offline', 'Offline')
+                    : null}
+                  {group.kind === 'machine' && group.online === false ? ' · ' : null}
+                  {t('settings.aiUsage.quota.configCount', '{{count}} configs', {
+                    count: group.rows.length,
+                  })}
+                </span>
+              </div>
+
+              <div {...stylex.props(styles.card, styles.quotaCard)}>
+                {group.rows.map((row, index) => {
+                  return (
+                    <div key={row.id} {...stylex.props(styles.quotaRow, index > 0 && styles.ruled)}>
+                      <div {...stylex.props(styles.providerIdentity)}>
+                        <span
+                          {...stylex.props(styles.providerIcon)}
+                          style={{ color: providerColor(row.providerKey) }}
+                        >
+                          <ModelBrandIcon modelId={row.providerKey} className="h-[18px] w-[18px]" />
+                        </span>
+                        <div {...stylex.props(styles.providerCopy)}>
+                          <div {...stylex.props(styles.providerName)}>
+                            {row.providerName}
+                            {row.planName ? (
+                              <span {...stylex.props(styles.plan)}>{row.planName}</span>
+                            ) : null}
+                          </div>
+                          <div {...stylex.props(styles.providerMeta)}>
+                            {groupBy === 'provider' ? (
+                              <span {...stylex.props(styles.machineChip)}>
+                                <span {...stylex.props(styles.machineChipIcon)}>
+                                  {(() => {
+                                    const MachineIcon = machineIcon(row.machineName);
+                                    return <MachineIcon aria-hidden="true" size={10} />;
+                                  })()}
+                                </span>
+                                <span {...stylex.props(styles.providerMetaText)}>
+                                  {row.machineName}
+                                </span>
+                              </span>
+                            ) : null}
+                            {!row.machineOnline ? (
+                              <span {...stylex.props(styles.providerMetaText)}>
+                                {t('settings.aiUsage.quota.offline', 'Offline')}
+                              </span>
+                            ) : null}
+                          </div>
+                        </div>
+                      </div>
+
+                      <div {...stylex.props(styles.quotaWindows)}>
+                        <ProviderQuotaWindows row={row} />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          );
+        })
+      )}
+    </section>
   );
 }
 
 export function AiUsageSettingsView({
+  surface = 'all',
   quotaRows,
   quotaLoading,
   onRefreshQuota,
@@ -689,16 +859,13 @@ export function AiUsageSettingsView({
   byMemberBuckets = [],
   usageLoading,
   providerRows,
-  historyPanels = [],
   waitingRows = [],
   onCancelWaiting,
   onOpenWaitingSession,
   onViewQueue,
 }: AiUsageSettingsViewProps) {
   const { t, i18n } = useTranslation();
-  const locale = useDateLocale();
   const intlLocale = toIntlLocaleOrEn(i18n.resolvedLanguage ?? i18n.language);
-  useStableNow();
   const [dimension, setDimension] = useState<'model' | 'member'>('model');
   const activeBuckets = dimension === 'member' ? byMemberBuckets : byModelBuckets;
   const activeTitle =
@@ -708,7 +875,7 @@ export function AiUsageSettingsView({
 
   return (
     <div {...stylex.props(styles.page)}>
-      {byModelBuckets.length > 0 || byMemberBuckets.length > 0 ? (
+      {surface !== 'quota' && (byModelBuckets.length > 0 || byMemberBuckets.length > 0) ? (
         <section {...stylex.props(styles.section)}>
           <div {...stylex.props(styles.sectionHead)}>
             <h2 {...stylex.props(styles.sectionTitle)}>
@@ -750,7 +917,7 @@ export function AiUsageSettingsView({
         </section>
       ) : null}
 
-      {waitingRows.length > 0 ? (
+      {surface === 'all' && waitingRows.length > 0 ? (
         <div {...stylex.props(styles.notice)}>
           <span {...stylex.props(styles.noticeIcon)}>
             <Clock aria-hidden="true" size={16} />
@@ -768,107 +935,35 @@ export function AiUsageSettingsView({
         </div>
       ) : null}
 
-      <section {...stylex.props(styles.section)}>
-        <div {...stylex.props(styles.sectionHead)}>
-          <h2 {...stylex.props(styles.sectionTitle)}>
-            {t('settings.aiUsage.quota.title', 'Live quota')}
-          </h2>
-          <Button variant="ghost" size="mini" onClick={onRefreshQuota}>
-            <RefreshCw aria-hidden="true" size={14} />
-            {t('settings.aiUsage.quota.refresh', 'Refresh')}
-          </Button>
-        </div>
-        <div {...stylex.props(styles.card)}>
-          {quotaRows.length === 0 ? (
-            <p {...stylex.props(styles.emptyNote)}>
-              {quotaLoading
-                ? t('settings.aiUsage.quota.loading', 'Loading Providers...')
-                : t('settings.aiUsage.quota.empty', 'No visible Providers.')}
-            </p>
-          ) : (
-            quotaRows.map((row, index) => {
-              const firstWindow = row.windows[0];
-              const secondWindow = row.windows[1];
-              return (
-                <div key={row.id} {...stylex.props(styles.quotaRow, index > 0 && styles.ruled)}>
-                  <div {...stylex.props(styles.providerIdentity)}>
-                    <span
-                      {...stylex.props(styles.providerIcon)}
-                      style={{ color: providerColor(row.providerKey) }}
-                    >
-                      <ModelBrandIcon modelId={row.providerKey} className="h-[18px] w-[18px]" />
-                    </span>
-                    <div {...stylex.props(styles.providerCopy)}>
-                      <div {...stylex.props(styles.providerName)}>{row.providerName}</div>
-                      <div {...stylex.props(styles.providerMeta)}>
-                        <span {...stylex.props(styles.providerMetaText)}>{row.machineName}</span>
-                        {!row.machineOnline ? (
-                          <span {...stylex.props(styles.providerMetaText)}>
-                            {t('settings.aiUsage.quota.offline', 'Offline')}
-                          </span>
-                        ) : null}
-                      </div>
-                    </div>
-                  </div>
-                  {firstWindow ? (
-                    <QuotaWindow window={firstWindow} locale={locale} />
-                  ) : row.wallet ? (
-                    <WalletWindow row={row} locale={intlLocale} />
-                  ) : (
-                    <div {...stylex.props(styles.windowEmpty)}>
-                      {t('settings.aiUsage.quota.unreported', 'Not reported')}
-                    </div>
-                  )}
-                  {secondWindow ? (
-                    <QuotaWindow window={secondWindow} locale={locale} />
-                  ) : (
-                    <div {...stylex.props(styles.windowEmpty)}>
-                      {t('settings.aiUsage.quota.window', 'Window')} —
-                    </div>
-                  )}
-                </div>
-              );
-            })
-          )}
-        </div>
-      </section>
-
-      {historyPanels.length > 0 ? (
-        <section {...stylex.props(styles.section)}>
-          <div {...stylex.props(styles.sectionHead)}>
-            <h2 {...stylex.props(styles.sectionTitle)}>
-              {t('settings.aiUsage.history.title', 'Quota history')}
-            </h2>
-            <span {...stylex.props(styles.sectionMeta)}>
-              {t('settings.aiUsage.history.sampling', 'Sampled every 15 minutes')}
-            </span>
-          </div>
-          <div {...stylex.props(styles.historyGrid)}>
-            {historyPanels.map((panel) => (
-              <div key={panel.id} {...stylex.props(styles.card, styles.historyCard)}>
-                <div {...stylex.props(styles.historyHead)}>
-                  <span {...stylex.props(styles.historyTitle)}>{panel.title}</span>
-                  <span {...stylex.props(styles.sectionMeta)}>{panel.rangeLabel}</span>
-                </div>
-                <HistoryChart panel={panel} />
-                <div {...stylex.props(styles.legend)}>
-                  {panel.series.map((series) => (
-                    <span key={series.id} {...stylex.props(styles.legendItem)}>
-                      <span
-                        {...stylex.props(styles.swatch)}
-                        style={{ backgroundColor: series.color }}
-                      />
-                      {series.label}
-                    </span>
-                  ))}
-                </div>
-              </div>
-            ))}
-          </div>
-        </section>
+      {surface !== 'usage' ? (
+        <>
+          {quotaRows.some(
+            (row) => row.machineOnline && row.windows.some((window) => window.remainingPercent <= 0)
+          ) ? (
+            <div {...stylex.props(styles.notice)}>
+              <span {...stylex.props(styles.noticeIcon)}>
+                <AlertTriangle aria-hidden="true" size={16} />
+              </span>
+              <span {...stylex.props(styles.noticeText)}>
+                {t(
+                  'settings.aiUsage.overview.exhausted',
+                  '{{count}} configurations have an exhausted quota window. Check their reset times.',
+                  {
+                    count: quotaRows.filter(
+                      (row) =>
+                        row.machineOnline &&
+                        row.windows.some((window) => window.remainingPercent <= 0)
+                    ).length,
+                  }
+                )}
+              </span>
+            </div>
+          ) : null}
+          <LiveQuotaSection rows={quotaRows} loading={quotaLoading} onRefresh={onRefreshQuota} />
+        </>
       ) : null}
 
-      {providerRows.length > 0 ? (
+      {surface === 'all' && providerRows.length > 0 ? (
         <section {...stylex.props(styles.section)}>
           <div {...stylex.props(styles.sectionHead)}>
             <h2 {...stylex.props(styles.sectionTitle)}>
@@ -930,7 +1025,7 @@ export function AiUsageSettingsView({
         </section>
       ) : null}
 
-      {waitingRows.length > 0 ? (
+      {surface === 'all' && waitingRows.length > 0 ? (
         <section {...stylex.props(styles.section)}>
           <div {...stylex.props(styles.sectionHead)}>
             <h2 {...stylex.props(styles.sectionTitle)}>

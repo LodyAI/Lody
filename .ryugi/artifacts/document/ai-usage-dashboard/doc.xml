@@ -1,0 +1,237 @@
+<doc>
+  <h1 id="title">AI 用量 — 单页设计 v3</h1>
+  <p id="how">改掉任何不对的建议，或直接评论；没动的我当作同意。看完在终端说一声。</p>
+  <alert id="artboard-link" type="tip">
+    <p>UI 只有一张单页：<a href="http://localhost:52752/artboard/29f23012708d221e040e58ccd3438e41">打开 artboard</a></p>
+  </alert>
+  <h2 id="playback">我理解到的</h2>
+  <p id="playback-p1">你要的是一页 Lody 设置页，不是三页全宽仪表盘。Provider、机器、rate limit、趋势和等待恢复的会话都在同一页里，按信息优先级排。</p>
+  <p id="playback-p2">这一版把“正常 / 接近上限”这类判断标签删掉了：百分比、颜色和重置时间已经足够，不需要再写一句状态。Provider 图标改成品牌色，不再做单色处理。rate limit 历史要做采样，所以加了 5 小时窗口的 24 小时曲线和 7 天窗口的 7 天曲线。</p>
+  <p id="playback-p3">等待仍然按你给的文章处理：显示已经等了多久和什么时候重试，不画假进度；取消是本地立即生效的控制；已经拿到的结果不因为等待而清空。</p>
+  <h2 id="settled">已经定下的</h2>
+  <ul id="settled-list">
+    <li>✓ 一页，不分标签页。<i>（你的）</i></li>
+    <li>✓ 留在 Settings &gt; AI 用量，用设置页现有的导航和密度。<i>（你的，按单页理解）</i></li>
+    <li>✓ 删掉“正常 / 接近上限”这类状态文案。<i>（你的）</i></li>
+    <li>✓ Provider 图标使用品牌色，不做单色。<i>（你的）</i></li>
+    <li>✓ rate limit 历史做采样。<i>（你的）</i></li>
+    <li>✓ 字号只用 12 / 14 / 18，最小 12px。<i>（你的 taste）</i></li>
+    <li>✓ 边框统一 0.5px，不使用中点分隔。<i>（你的 taste）</i></li>
+    <li>✓ 不加冗余解释；不用色条、发光、装饰阴影。<i>（你的 taste）</i></li>
+  </ul>
+  <h2 id="design">这页怎么排</h2>
+  <table id="layout-table">
+    <tr>
+      <th>
+        <p>区块</p>
+      </th>
+      <th>
+        <p>内容</p>
+      </th>
+      <th>
+        <p>为什么在这里</p>
+      </th>
+    </tr>
+    <tr>
+      <td>
+        <p>实时配额</p>
+      </td>
+      <td>
+        <p>每个 Provider 一行：账号、机器、5h / 7d 窗口、重置时间、余额或未上报</p>
+      </td>
+      <td>
+        <p>先回答“现在还能不能跑”</p>
+      </td>
+    </tr>
+    <tr>
+      <td>
+        <p>配额历史</p>
+      </td>
+      <td>
+        <p>5 小时窗口最近 24 小时；7 天窗口最近 7 天</p>
+      </td>
+      <td>
+        <p>看配额是怎么被消耗和重置的</p>
+      </td>
+    </tr>
+    <tr>
+      <td>
+        <p>用量</p>
+      </td>
+      <td>
+        <p>Tokens、成本、轮次、配额中断；按 Provider 堆叠的趋势</p>
+      </td>
+      <td>
+        <p>看花费和趋势</p>
+      </td>
+    </tr>
+    <tr>
+      <td>
+        <p>Provider 与机器</p>
+      </td>
+      <td>
+        <p>Provider × 机器 一行，Tokens、成本、占比、当前配额</p>
+      </td>
+      <td>
+        <p>回答“是哪台机器上的哪个 Provider”</p>
+      </td>
+    </tr>
+    <tr>
+      <td>
+        <p>等待恢复</p>
+      </td>
+      <td>
+        <p>#361 的会话，已等待时间、下次重试、取消、打开会话</p>
+      </td>
+      <td>
+        <p>最后处理需要行动的部分</p>
+      </td>
+    </tr>
+  </table>
+  <h2 id="sampling">配额采样</h2>
+  <p id="sampling-p">每台在线机器每 15 分钟读取一次 Provider 的 <code>rateLimits</code>，按 machine、agentConfig、limitId、window 记录 usedPercent、reset 和采样时间。页面按范围读取，机器离线或 Provider 不支持时曲线断开，不补点，也不把最后一段拉平。</p>
+  <p id="sampling-p2">5 小时曲线放在 24 小时视图里，能看清几次重置；7 天曲线放在 7 天视图里，避免把同一条锯齿压成噪音。DeepSeek 与 Kimi 没有窗口型配额，所以不画线。</p>
+  <h2 id="waiting">等待恢复</h2>
+  <p id="waiting-p">每一行先说会话和机器，再说已经等了多久、下一次动作是什么。计划中的行显示“18 分钟后重试”，机器离线的行显示“等待机器上线”，无法确认投递结果的行显示“需要处理”，并写明没有自动重试。</p>
+  <table id="waiting-table">
+    <tr>
+      <th>
+        <p>状态</p>
+      </th>
+      <th>
+        <p>显示</p>
+      </th>
+      <th>
+        <p>动作</p>
+      </th>
+    </tr>
+    <tr>
+      <td>
+        <p>计划中</p>
+      </td>
+      <td>
+        <p>已等待 6 分钟，18 分钟后重试</p>
+      </td>
+      <td>
+        <p>取消 / 打开会话</p>
+      </td>
+    </tr>
+    <tr>
+      <td>
+        <p>等待机器</p>
+      </td>
+      <td>
+        <p>已等待 34 分钟，等待机器上线</p>
+      </td>
+      <td>
+        <p>取消 / 打开会话</p>
+      </td>
+    </tr>
+    <tr>
+      <td>
+        <p>需要处理</p>
+      </td>
+      <td>
+        <p>已等待 2 小时，投递结果不确定，未自动重试</p>
+      </td>
+      <td>
+        <p>放弃 / 打开会话</p>
+      </td>
+    </tr>
+  </table>
+  <p id="waiting-note">取消在本地立即生效，不等待服务端确认。页面不拥有 timer，也不自己调度；它只读 daemon 的 durable 记录。</p>
+  <h2 id="data">数据</h2>
+  <table id="data-table">
+    <tr>
+      <th>
+        <p>信息</p>
+      </th>
+      <th>
+        <p>来源</p>
+      </th>
+      <th>
+        <p>要补什么</p>
+      </th>
+    </tr>
+    <tr>
+      <td>
+        <p>Provider 和机器</p>
+      </td>
+      <td>
+        <p>Agent configs、MachineMeta、会话的 machineId / agentConfigId / modelId</p>
+      </td>
+      <td>
+        <p>按 Provider 配置聚合</p>
+      </td>
+    </tr>
+    <tr>
+      <td>
+        <p>实时配额</p>
+      </td>
+      <td>
+        <p>机器 Flock 的 raceLimits；Provider RPC 刷新</p>
+      </td>
+      <td>
+        <p>解析 agentConfigId + limitId，离线保留快照</p>
+      </td>
+    </tr>
+    <tr>
+      <td>
+        <p>配额历史</p>
+      </td>
+      <td>
+        <p>目前没有</p>
+      </td>
+      <td>
+        <p>新的 rateLimitSample：每 15 分钟采样，保留 14 天；离线断开</p>
+      </td>
+    </tr>
+    <tr>
+      <td>
+        <p>Tokens 和成本</p>
+      </td>
+      <td>
+        <p>会话历史的 per-turn tokenUsage</p>
+      </td>
+      <td>
+        <p>本地增量 rollup，不在打开页面时扫全部历史</p>
+      </td>
+    </tr>
+    <tr>
+      <td>
+        <p>等待恢复</p>
+      </td>
+      <td>
+        <p>#361 尚未实现</p>
+      </td>
+      <td>
+        <p>durable deferredTurn：会话、轮次、机器、scope、deadline、状态、generation</p>
+      </td>
+    </tr>
+  </table>
+  <h2 id="non-goals">不做什么</h2>
+  <ul id="non-goals-list">
+    <li>不做多个标签页或独立的全宽仪表盘路由。</li>
+    <li>不写“正常 / 接近上限”这类状态文案。</li>
+    <li>不画假的配额进度，也不在离线时补采样点。</li>
+    <li>不解析 Provider 错误文案，只认结构化 reason。</li>
+    <li>不在有输出或工具活动之后自动重放。</li>
+    <li>不在等待队列里加第二套“立即重试”投递路径。</li>
+  </ul>
+  <h2 id="round1">Round 1</h2>
+  <h3 id="q1">1. 信息顺序</h3>
+  <p id="q1-rec"><b>建议：</b>实时配额 → 配额历史 → 用量 → Provider 与机器 → 等待恢复。等待恢复在顶部只留一行提示。</p>
+  <p id="q1-why">为什么：先回答能不能跑，再看历史花费和归因；等待需要行动，但不该压过每天都要看的内容。如果你希望等待更靠前，我可以把它放到配额历史后面。</p>
+  <h3 id="q2">2. 采样间隔和保留时间</h3>
+  <p id="q2-rec"><b>建议：</b>每 15 分钟采样，保留 14 天；离线或 Provider 不支持时断开。</p>
+  <p id="q2-why">为什么：15 分钟足够画出 5 小时窗口的几次重置，也不至于把本地存储撑得太大。你可以改成 5 分钟或 30 分钟。</p>
+  <h3 id="q3">3. 归因形式</h3>
+  <p id="q3-rec"><b>建议：</b>用 Provider × 机器 的记录表，不用热力矩阵。</p>
+  <p id="q3-why">为什么：表格在设置页里更像 Lody，也更容易读具体的 Tokens、成本、占比和当前配额。</p>
+  <h3 id="q4">4. 3D 日历</h3>
+  <p id="q4-rec"><b>建议：</b>这一页先不放 3D 日历，保留原来的 AI 用量入口作为历史视图，或者以后单独做一个 Activity 页。</p>
+  <p id="q4-why">为什么：现有 3D 日历是 <code>usage-calendar-visualization</code> 里用 three.js 画的立体日历，每天一格或一根柱，按 token 高低起伏，点开看当天明细。它需要懒加载、占空间，和“现在能不能跑”不是同一优先级。</p>
+  <h3 id="q5">5. 等待队列的动作</h3>
+  <p id="q5-rec"><b>建议：</b>只给“取消”和“打开会话”，不提供“立即重试”。</p>
+  <p id="q5-why">为什么：#361 要求复用现有 dispatch 并在派发前重新校验；页面再加一个 retry 入口容易绕过校验。</p>
+</doc>

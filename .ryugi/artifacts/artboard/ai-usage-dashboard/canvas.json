@@ -1,0 +1,89 @@
+{
+  "version": 1,
+  "title": "AI usage page v3",
+  "activePage": "quota",
+  "focus": {
+    "target": "quota-density",
+    "at": "2026-10-25T12:20:00Z"
+  },
+  "pages": [
+    {
+      "id": "usage",
+      "name": "单页"
+    },
+    {
+      "id": "quota",
+      "name": "多账号配额"
+    }
+  ],
+  "boards": {
+    "page": {
+      "file": "pages/dashboard/page.html",
+      "page": "usage",
+      "x": 0,
+      "y": 0,
+      "w": 1100,
+      "h": 1710,
+      "title": "AI 用量 — 单页设置页 v3"
+    },
+    "quota-density": {
+      "file": "pages/dashboard/quota-density.html",
+      "page": "quota",
+      "x": 0,
+      "y": 0,
+      "w": 1100,
+      "h": 980,
+      "title": "Live quota — 多账号"
+    }
+  },
+  "groups": {
+    "page": {
+      "title": "AI 用量",
+      "boards": [
+        "page"
+      ]
+    },
+    "quota-density": {
+      "title": "Live quota",
+      "boards": [
+        "quota-density"
+      ]
+    }
+  },
+  "notes": {
+    "title": {
+      "page": "usage",
+      "kind": "title",
+      "x": 0,
+      "y": -300,
+      "size": 48,
+      "w": 1000,
+      "text": "AI 用量 — 单页 v3"
+    },
+    "quota-title": {
+      "page": "quota",
+      "kind": "title",
+      "x": 0,
+      "y": -240,
+      "size": 40,
+      "w": 1000,
+      "text": "Live quota — 多账号"
+    },
+    "quota-note": {
+      "page": "quota",
+      "kind": "sticky",
+      "x": 1230,
+      "y": 40,
+      "w": 300,
+      "text": "每行是一台机器上的一份 Provider 配置。\\n\\n同名配置不代表同一账号，不合并；只有能确认账号身份时才可能合并。"
+    },
+    "quota-note-2": {
+      "page": "quota",
+      "kind": "sticky",
+      "x": 1230,
+      "y": 260,
+      "w": 300,
+      "text": "“按 Provider”看同一类配额，“按机器”排查某台机器。\\n\\n低余量优先，健康配置收起。"
+    }
+  }
+}

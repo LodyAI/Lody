@@ -194,6 +194,7 @@ export const SETTINGS_TAB_CONFIGS: SettingsTabConfig[] = [
   },
   {
     id: 'ai-usage',
+    capability: 'usageAnalytics',
     section: 'workspace',
     labelKey: 'settings.tabs.aiUsage',
     descriptionKey: 'settings.categories.aiUsage.description',

@@ -1,0 +1,1500 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=1100">
+<title>AI 用量</title>
+<style>
+:root {
+  --bg: #161616;
+  --nav: #121212;
+  --card: #1e1e1e;
+  --card-raised: #232323;
+  --text: #ffffff;
+  --secondary: #a0a0a0;
+  --tertiary: #737373;
+  --separator: #2b2b2b;
+  --separator-strong: #343434;
+  --accent: #ffb26b;
+  --success: #5ee0a0;
+  --warning: #f7d04d;
+  --destructive: #ff8f8f;
+  --series-1: #2563eb;
+  --series-2: #0ea5e9;
+  --series-3: #06b6d4;
+  --series-4: #10b981;
+  --sans: "Inter Variable", "Inter", "PingFang SC", -apple-system, BlinkMacSystemFont,
+    "Hiragino Sans GB", sans-serif;
+  --mono: "JetBrains Mono", "SF Mono", ui-monospace, monospace;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  background: #0e0e0e;
+  color: var(--text);
+  font-family: var(--sans);
+  font-size: 14px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+body {
+  width: 1100px;
+  overflow: hidden;
+}
+
+svg:not(.chart-svg) {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+svg .solid {
+  fill: currentColor;
+  stroke: none;
+}
+
+.app {
+  display: flex;
+  width: 1100px;
+  min-height: 100%;
+  overflow: hidden;
+  border-radius: 14px;
+  background: var(--bg);
+  box-shadow: 0 0 0 0.5px var(--separator-strong);
+}
+
+/* Navigation */
+
+.nav {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  width: 220px;
+  padding: 14px 10px 16px;
+  background: var(--nav);
+  box-shadow: inset -0.5px 0 0 var(--separator);
+}
+
+.workspace {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px 16px;
+}
+
+.workspace-mark {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 7px;
+  background: var(--card-raised);
+  box-shadow: 0 0 0 0.5px var(--separator-strong);
+  color: var(--secondary);
+}
+
+.workspace-mark svg {
+  width: 13px;
+  height: 13px;
+}
+
+.workspace-copy {
+  min-width: 0;
+}
+
+.workspace-name {
+  overflow: hidden;
+  font-size: 14px;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspace-kind {
+  margin-top: 1px;
+  font-size: 12px;
+  color: var(--tertiary);
+}
+
+.nav-group + .nav-group {
+  margin-top: 16px;
+}
+
+.nav-label {
+  padding: 0 8px 6px;
+  font-size: 12px;
+  color: var(--tertiary);
+}
+
+.nav-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 30px;
+  padding: 0 8px;
+  border-radius: 8px;
+  color: var(--secondary);
+}
+
+.nav-item + .nav-item {
+  margin-top: 1px;
+}
+
+.nav-item svg {
+  width: 16px;
+  height: 16px;
+  flex: none;
+  color: var(--tertiary);
+}
+
+.nav-item.active {
+  background: var(--card-raised);
+  box-shadow: 0 0 0 0.5px var(--separator-strong);
+  color: var(--text);
+}
+
+.nav-item.active svg {
+  color: var(--text);
+}
+
+.nav-item span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Pane */
+
+.pane {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  background: var(--bg);
+}
+
+.pane-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 20px;
+  box-shadow: inset 0 -0.5px 0 var(--separator);
+}
+
+.page-title {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+
+.head-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.content {
+  padding: 16px 20px 20px;
+}
+
+/* Controls */
+
+.seg {
+  display: inline-flex;
+  gap: 1px;
+  padding: 2px;
+  border-radius: 8px;
+  background: var(--nav);
+  box-shadow: inset 0 0 0 0.5px var(--separator);
+}
+
+.seg button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 24px;
+  padding: 0 9px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--tertiary);
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 400;
+}
+
+.seg button.active {
+  background: var(--card-raised);
+  box-shadow: 0 0 0 0.5px var(--separator-strong);
+  color: var(--text);
+}
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  height: 28px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 8px;
+  background: var(--card-raised);
+  box-shadow: 0 0 0 0.5px var(--separator-strong);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.btn svg {
+  width: 14px;
+  height: 14px;
+}
+
+.btn.icon-only {
+  width: 28px;
+  padding: 0;
+}
+
+.btn.ghost {
+  background: transparent;
+  box-shadow: none;
+  color: var(--secondary);
+}
+
+.text-button {
+  border: 0;
+  background: transparent;
+  padding: 0;
+  color: var(--accent);
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 400;
+}
+
+.text-button.secondary {
+  color: var(--secondary);
+}
+
+.text-button.destructive {
+  color: var(--destructive);
+}
+
+/* Notice */
+
+.notice {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-bottom: 12px;
+  box-shadow: inset 0 -0.5px 0 var(--separator);
+}
+
+.notice-text {
+  min-width: 0;
+  flex: 1;
+  font-size: 12px;
+  color: var(--secondary);
+}
+
+.notice-text strong {
+  font-weight: 500;
+  color: var(--text);
+}
+
+/* Sections */
+
+.section {
+  margin-top: 20px;
+}
+
+.section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 22px;
+  margin-bottom: 8px;
+}
+
+.section-title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.section-meta {
+  font-size: 12px;
+  color: var(--tertiary);
+}
+
+/* Card */
+
+.card {
+  overflow: hidden;
+  border-radius: 14px;
+  background: var(--card);
+  box-shadow: 0 0 0 0.5px var(--separator);
+}
+
+.card-row + .card-row {
+  box-shadow: inset 0 0.5px 0 var(--separator);
+}
+
+/* Quota */
+
+.quota-row {
+  display: grid;
+  min-height: 58px;
+  grid-template-columns: 300px minmax(0, 1fr) minmax(0, 1fr);
+  align-items: center;
+  gap: 14px;
+  padding: 10px 14px;
+}
+
+.provider {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+}
+
+.provider-icon {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  color: var(--secondary);
+}
+
+.provider-icon img {
+  width: 18px;
+  height: 18px;
+}
+
+.provider-copy {
+  min-width: 0;
+}
+
+.provider-name {
+  overflow: hidden;
+  font-size: 14px;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.provider-meta {
+  display: flex;
+  gap: 8px;
+  margin-top: 1px;
+  overflow: hidden;
+  font-size: 12px;
+  color: var(--tertiary);
+  white-space: nowrap;
+}
+
+.provider-meta span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.window-label {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--tertiary);
+}
+
+.window-value {
+  font-size: 14px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+}
+
+.window-value.quiet {
+  font-weight: 400;
+  color: var(--secondary);
+}
+
+.meter {
+  height: 4px;
+  overflow: hidden;
+  border-radius: 2px;
+  background: #2a2a2a;
+}
+
+.meter > i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--secondary);
+}
+
+.meter > i.ok {
+  background: var(--success);
+}
+
+.meter > i.warn {
+  background: var(--warning);
+}
+
+.meter > i.bad {
+  background: var(--destructive);
+}
+
+.window-reset {
+  margin-top: 5px;
+  font-size: 12px;
+  color: var(--tertiary);
+}
+
+.status {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--secondary);
+  white-space: nowrap;
+}
+
+.status .dot {
+  width: 5px;
+  height: 5px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--success);
+}
+
+.status.warn {
+  color: var(--warning);
+}
+
+.status.warn .dot {
+  background: var(--warning);
+}
+
+.status.bad {
+  color: var(--destructive);
+}
+
+.status.bad .dot {
+  background: var(--destructive);
+}
+
+.status.muted {
+  color: var(--tertiary);
+}
+
+.status.muted .dot {
+  background: var(--tertiary);
+}
+
+/* KPIs */
+
+.kpis {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  padding: 4px 0 12px;
+}
+
+.kpi {
+  min-width: 0;
+  padding: 0 14px;
+}
+
+.kpi:first-child {
+  padding-left: 0;
+}
+
+.kpi + .kpi {
+  box-shadow: inset 0.5px 0 0 var(--separator);
+}
+
+.kpi-label {
+  font-size: 12px;
+  color: var(--tertiary);
+}
+
+.kpi-value {
+  margin-top: 4px;
+  font-size: 18px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+}
+
+.kpi-foot {
+  margin-top: 2px;
+  font-size: 12px;
+  color: var(--tertiary);
+}
+
+.kpi-foot.accent {
+  color: var(--accent);
+}
+
+/* Chart */
+
+.chart-card {
+  padding: 12px 14px 10px;
+}
+
+.quota-chart-card {
+  padding: 10px 14px 8px;
+}
+
+.history-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 12px;
+}
+
+.history-grid .chart-card {
+  padding: 10px 12px 8px;
+}
+
+.history-grid .chart-wrap {
+  margin-top: 6px;
+}
+
+.chart-note {
+  padding-top: 6px;
+  font-size: 12px;
+  color: var(--tertiary);
+}
+
+.chart-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.chart-title {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.chart-wrap {
+  margin-top: 8px;
+}
+
+.chart-svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding-top: 8px;
+  font-size: 12px;
+  color: var(--secondary);
+}
+
+.legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.legend-swatch {
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+}
+
+/* Attribution */
+
+.table-head,
+.table-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1.5fr) 132px 76px 76px 108px 76px;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 14px;
+}
+
+.table-head {
+  font-size: 12px;
+  color: var(--tertiary);
+  box-shadow: inset 0 -0.5px 0 var(--separator);
+}
+
+.table-row {
+  font-size: 14px;
+}
+
+.table-row .provider-icon {
+  width: 16px;
+  height: 16px;
+}
+
+.table-row .provider-icon img {
+  width: 16px;
+  height: 16px;
+}
+
+.machine {
+  overflow: hidden;
+  font-size: 12px;
+  color: var(--secondary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.machine.offline {
+  color: var(--tertiary);
+}
+
+.number {
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.number.quiet {
+  color: var(--secondary);
+}
+
+.share {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.share-track {
+  flex: 1;
+  height: 3px;
+  overflow: hidden;
+  border-radius: 2px;
+  background: #2a2a2a;
+}
+
+.share-track i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+}
+
+.share-value {
+  width: 34px;
+  flex: none;
+  font-size: 12px;
+  color: var(--tertiary);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Waiting */
+
+.waiting-row {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr) 140px 130px;
+  align-items: center;
+  gap: 12px;
+  padding: 11px 14px;
+}
+
+.waiting-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  align-self: start;
+  margin-top: 2px;
+  color: var(--secondary);
+}
+
+.waiting-icon svg {
+  width: 16px;
+  height: 16px;
+}
+
+.waiting-icon.warn {
+  color: var(--warning);
+}
+
+.waiting-icon.bad {
+  color: var(--destructive);
+}
+
+.waiting-main {
+  min-width: 0;
+}
+
+.waiting-title {
+  overflow: hidden;
+  font-size: 14px;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.waiting-meta {
+  display: flex;
+  gap: 8px;
+  margin-top: 2px;
+  overflow: hidden;
+  font-size: 12px;
+  color: var(--tertiary);
+  white-space: nowrap;
+}
+
+.waiting-meta span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.waiting-note {
+  margin-top: 2px;
+  font-size: 12px;
+  color: var(--tertiary);
+}
+
+.wait-time {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.wait-time-value {
+  font-size: 18px;
+  font-weight: 600;
+  line-height: 1.2;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+  color: var(--accent);
+}
+
+.wait-time-value.small {
+  font-size: 14px;
+  font-weight: 500;
+  letter-spacing: 0;
+}
+
+.wait-time-unit {
+  margin-left: 2px;
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--secondary);
+}
+
+.wait-time-elapsed {
+  font-size: 12px;
+  color: var(--tertiary);
+}
+
+.waiting-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+}
+
+.notice-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  flex: none;
+  color: var(--warning);
+}
+
+.notice-icon svg {
+  width: 16px;
+  height: 16px;
+}
+
+.waiting-foot {
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--tertiary);
+}
+
+/* Page footer */
+
+.footer {
+  margin-top: 20px;
+  padding-top: 10px;
+  box-shadow: inset 0 0.5px 0 var(--separator);
+  font-size: 12px;
+  color: var(--tertiary);
+}
+
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute">
+  <symbol id="i-sliders" viewBox="0 0 16 16"><path d="M3 4h10M3 8h10M3 12h10"/><circle class="solid" cx="6" cy="4" r="1.5"/><circle class="solid" cx="10" cy="8" r="1.5"/><circle class="solid" cx="7" cy="12" r="1.5"/></symbol>
+  <symbol id="i-palette" viewBox="0 0 16 16"><path d="M8 2.5a5.5 5.5 0 1 0 0 11c1.4 0 2.2-.7 2.2-1.8 0-1-.7-1.4-.7-2.2 0-.8.6-1.3 1.7-1.3h.9c.7 0 1.2-.6 1.2-1.4A5.6 5.6 0 0 0 8 2.5Z"/><circle class="solid" cx="5.6" cy="6.3" r=".8"/><circle class="solid" cx="8.1" cy="5.1" r=".8"/><circle class="solid" cx="10.4" cy="6.4" r=".8"/></symbol>
+  <symbol id="i-agent" viewBox="0 0 16 16"><rect x="3.5" y="5" width="9" height="7" rx="2"/><path d="M8 3v2M6 8.2v.1M10 8.2v.1M6.5 10.5h3"/></symbol>
+  <symbol id="i-chart" viewBox="0 0 16 16"><path d="M3 13V9M6.3 13V6M9.6 13V7.5M12.9 13V4"/></symbol>
+  <symbol id="i-folder" viewBox="0 0 16 16"><path d="M2.5 5.2c0-.7.6-1.2 1.2-1.2h2.2l1.3 1.5h4.9c.7 0 1.2.6 1.2 1.2v4.6c0 .7-.6 1.2-1.2 1.2H3.7c-.7 0-1.2-.6-1.2-1.2V5.2Z"/></symbol>
+  <symbol id="i-user" viewBox="0 0 16 16"><circle cx="8" cy="5.8" r="2.3"/><path d="M3.6 13c.5-2.4 2.1-3.7 4.4-3.7s3.9 1.3 4.4 3.7"/></symbol>
+  <symbol id="i-info" viewBox="0 0 16 16"><circle cx="8" cy="8" r="5.5"/><path d="M8 7.3v3.5M8 5.3v.1"/></symbol>
+  <symbol id="i-refresh" viewBox="0 0 16 16"><path d="M13 8a5 5 0 1 1-1.5-3.6M13 3v3h-3"/></symbol>
+  <symbol id="i-download" viewBox="0 0 16 16"><path d="M8 3v7M5.5 7.5 8 10l2.5-2.5M3 12.5h10"/></symbol>
+  <symbol id="i-logo" viewBox="0 0 16 16"><path d="M8 2.5 13 5v6L8 13.5 3 11V5l5-2.5Z"/></symbol>
+  <symbol id="i-arrow" viewBox="0 0 16 16"><path d="M3.5 8h8M8.5 4.5 12 8l-3.5 3.5"/></symbol>
+  <symbol id="i-clock" viewBox="0 0 16 16"><circle cx="8" cy="8" r="5.5"/><path d="M8 4.75V8l2.25 1.5"/></symbol>
+  <symbol id="i-wifi-off" viewBox="0 0 16 16"><path d="M2 2l12 12M5.2 7.4a7.5 7.5 0 0 1 4-1.2M2.8 4.9a10 10 0 0 1 3.1-1.5M9.2 6.2a10 10 0 0 1 4 1.6M7.5 11.1a2.6 2.6 0 0 1 1.8.4M8 13.25h.01"/></symbol>
+  <symbol id="i-alert" viewBox="0 0 16 16"><path d="M8 2.5l5.5 10h-11L8 2.5zM8 6.25v3.25M8 11.4v.1"/></symbol>
+</svg>
+
+<div class="app">
+  <aside class="nav">
+    <div class="workspace">
+      <span class="workspace-mark"><svg><use href="#i-logo"/></svg></span>
+      <div class="workspace-copy">
+        <div class="workspace-name">Lody</div>
+        <div class="workspace-kind">工作区</div>
+      </div>
+    </div>
+
+    <div class="nav-group">
+      <div class="nav-label">工作区</div>
+      <div class="nav-item"><svg><use href="#i-sliders"/></svg><span>通用</span></div>
+      <div class="nav-item"><svg><use href="#i-palette"/></svg><span>外观</span></div>
+      <div class="nav-item"><svg><use href="#i-agent"/></svg><span>Agents</span></div>
+      <div class="nav-item active"><svg><use href="#i-chart"/></svg><span>AI 用量</span></div>
+      <div class="nav-item"><svg><use href="#i-folder"/></svg><span>项目</span></div>
+    </div>
+
+    <div class="nav-group">
+      <div class="nav-label">其他</div>
+      <div class="nav-item"><svg><use href="#i-user"/></svg><span>账户</span></div>
+      <div class="nav-item"><svg><use href="#i-info"/></svg><span>关于</span></div>
+    </div>
+  </aside>
+
+  <main class="pane">
+    <header class="pane-head">
+      <h1 class="page-title">AI 用量</h1>
+      <div class="head-actions">
+        <div class="seg">
+          <button>24 小时</button>
+          <button class="active">7 天</button>
+          <button>30 天</button>
+          <button>全部</button>
+        </div>
+        <button class="btn icon-only ghost" aria-label="刷新"><svg><use href="#i-refresh"/></svg></button>
+        <button class="btn"><svg><use href="#i-download"/></svg>导出</button>
+      </div>
+    </header>
+
+    <div class="content">
+      <div class="notice">
+        <span class="notice-icon"><svg><use href="#i-clock"/></svg></span>
+        <div class="notice-text"><strong>3 个会话等待配额恢复</strong>，最早 18 分钟后重试</div>
+        <button class="text-button">查看</button>
+      </div>
+
+      <section class="section" style="margin-top:16px">
+        <div class="section-head">
+          <h2 class="section-title">实时配额</h2>
+          <div style="display:flex;align-items:center;gap:10px">
+            <span class="section-meta">2 分钟前更新</span>
+            <button class="text-button secondary">刷新</button>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-row quota-row">
+            <div class="provider">
+              <span class="provider-icon"><img src="icons/claude.svg" alt=""></span>
+              <div class="provider-copy">
+                <div class="provider-name">Claude Code</div>
+                <div class="provider-meta"><span>Pro</span><span>MacBook Pro，Mac mini</span></div>
+              </div>
+            </div>
+            <div>
+              <div class="window-label"><span>5 小时</span><span class="window-value">62%</span></div>
+              <div class="meter" style="margin-top:5px"><i class="ok" style="width:62%"></i></div>
+              <div class="window-reset">16:42 重置</div>
+            </div>
+            <div>
+              <div class="window-label"><span>7 天</span><span class="window-value">44%</span></div>
+              <div class="meter" style="margin-top:5px"><i class="ok" style="width:44%"></i></div>
+              <div class="window-reset">周二 09:00 重置</div>
+            </div>
+          </div>
+
+          <div class="card-row quota-row">
+            <div class="provider">
+              <span class="provider-icon"><img src="icons/codex.svg" alt=""></span>
+              <div class="provider-copy">
+                <div class="provider-name">Codex</div>
+                <div class="provider-meta"><span>Plus</span><span>MacBook Pro</span></div>
+              </div>
+            </div>
+            <div>
+              <div class="window-label"><span>5 小时</span><span class="window-value" style="color:var(--warning)">8%</span></div>
+              <div class="meter" style="margin-top:5px"><i class="warn" style="width:8%"></i></div>
+              <div class="window-reset">18 分钟后重置</div>
+            </div>
+            <div>
+              <div class="window-label"><span>7 天</span><span class="window-value">71%</span></div>
+              <div class="meter" style="margin-top:5px"><i class="ok" style="width:71%"></i></div>
+              <div class="window-reset">周六 08:00 重置</div>
+            </div>
+          </div>
+
+          <div class="card-row quota-row">
+            <div class="provider">
+              <span class="provider-icon"><img src="icons/deepseek.svg" alt=""></span>
+              <div class="provider-copy">
+                <div class="provider-name">DeepSeek</div>
+                <div class="provider-meta"><span>API</span><span>Mac Studio</span></div>
+              </div>
+            </div>
+            <div>
+              <div class="window-label"><span>余额</span><span class="window-value">$8.42</span></div>
+              <div class="meter" style="margin-top:5px"><i style="width:41%"></i></div>
+              <div class="window-reset">本月已用 $41.20</div>
+            </div>
+            <div>
+              <div class="window-label"><span>窗口</span><span class="window-value quiet">—</span></div>
+              <div class="window-reset" style="margin-top:0">无窗口型配额</div>
+            </div>
+          </div>
+
+          <div class="card-row quota-row">
+            <div class="provider">
+              <span class="provider-icon"><img src="icons/kimi.svg" alt=""></span>
+              <div class="provider-copy">
+                <div class="provider-name">Kimi Code</div>
+                <div class="provider-meta"><span>Personal</span><span>Mac mini</span></div>
+              </div>
+            </div>
+            <div>
+              <div class="window-label"><span>5 小时</span><span class="window-value quiet">—</span></div>
+            </div>
+            <div>
+              <div class="window-label"><span>7 天</span><span class="window-value quiet">—</span></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="section-head">
+          <h2 class="section-title">配额历史</h2>
+          <span class="section-meta">每 15 分钟采样</span>
+        </div>
+        <div class="history-grid">
+          <div class="card chart-card">
+            <div class="chart-head">
+              <div class="chart-title">5 小时窗口</div>
+              <span class="section-meta">最近 24 小时</span>
+            </div>
+            <div class="chart-wrap">
+              <svg class="chart-svg" id="quota-5h-chart" viewBox="0 0 420 140"></svg>
+            </div>
+          </div>
+          <div class="card chart-card">
+            <div class="chart-head">
+              <div class="chart-title">7 天窗口</div>
+              <span class="section-meta">最近 7 天</span>
+            </div>
+            <div class="chart-wrap">
+              <svg class="chart-svg" id="quota-7d-chart" viewBox="0 0 420 140"></svg>
+            </div>
+          </div>
+        </div>
+        <div class="legend" style="padding-top:8px">
+          <span class="legend-item"><i class="legend-swatch" style="background:#2563eb"></i>Claude</span>
+          <span class="legend-item"><i class="legend-swatch" style="background:#0ea5e9"></i>Codex</span>
+          <span class="chart-note" style="padding-top:0">DeepSeek 与 Kimi 没有窗口型配额。机器离线时曲线断开。</span>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="section-head">
+          <h2 class="section-title">用量</h2>
+          <span class="section-meta">较前 7 天</span>
+        </div>
+
+        <div class="kpis">
+          <div class="kpi">
+            <div class="kpi-label">Tokens</div>
+            <div class="kpi-value">64.6M</div>
+            <div class="kpi-foot">+12.4%</div>
+          </div>
+          <div class="kpi">
+            <div class="kpi-label">成本</div>
+            <div class="kpi-value">$186.40</div>
+            <div class="kpi-foot">+8.1%</div>
+          </div>
+          <div class="kpi">
+            <div class="kpi-label">轮次</div>
+            <div class="kpi-value">1,284</div>
+            <div class="kpi-foot">−3.2%</div>
+          </div>
+          <div class="kpi">
+            <div class="kpi-label">配额中断</div>
+            <div class="kpi-value">7</div>
+            <div class="kpi-foot accent">3 个等待重试</div>
+          </div>
+        </div>
+
+        <div class="card chart-card">
+          <div class="chart-head">
+            <div class="chart-title">用量趋势</div>
+            <div class="seg">
+              <button class="active">Tokens</button>
+              <button>成本</button>
+            </div>
+          </div>
+          <div class="chart-wrap">
+            <svg class="chart-svg" id="usage-chart" viewBox="0 0 1000 224"></svg>
+          </div>
+          <div class="legend">
+            <span class="legend-item"><i class="legend-swatch" style="background:#2563eb"></i>Claude 34.7M</span>
+            <span class="legend-item"><i class="legend-swatch" style="background:#0ea5e9"></i>Codex 21.3M</span>
+            <span class="legend-item"><i class="legend-swatch" style="background:#8b5cf6"></i>DeepSeek 5.5M</span>
+            <span class="legend-item"><i class="legend-swatch" style="background:#10b981"></i>Kimi 3.1M</span>
+          </div>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="section-head">
+          <h2 class="section-title">Provider 与机器</h2>
+        </div>
+
+        <div class="card">
+          <div class="table-head">
+            <span>Provider</span>
+            <span>机器</span>
+            <span style="text-align:right">Tokens</span>
+            <span style="text-align:right">成本</span>
+            <span>占比</span>
+            <span style="text-align:right">配额</span>
+          </div>
+
+          <div class="card-row table-row">
+            <div class="provider">
+              <span class="provider-icon"><img src="icons/claude.svg" alt=""></span>
+              <div class="provider-name">Claude Code</div>
+            </div>
+            <div class="machine">MacBook Pro</div>
+            <div class="number">18.4M</div>
+            <div class="number quiet">$68.20</div>
+            <div class="share">
+              <div class="share-track"><i style="width:28%;background:#2563eb"></i></div>
+              <span class="share-value">28%</span>
+            </div>
+            <div class="status" style="justify-content:flex-end">62%</div>
+          </div>
+
+          <div class="card-row table-row">
+            <div class="provider">
+              <span class="provider-icon"><img src="icons/claude.svg" alt=""></span>
+              <div class="provider-name">Claude Code</div>
+            </div>
+            <div class="machine">Mac mini</div>
+            <div class="number">16.3M</div>
+            <div class="number quiet">$60.20</div>
+            <div class="share">
+              <div class="share-track"><i style="width:25%;background:#2563eb"></i></div>
+              <span class="share-value">25%</span>
+            </div>
+            <div class="status" style="justify-content:flex-end">62%</div>
+          </div>
+
+          <div class="card-row table-row">
+            <div class="provider">
+              <span class="provider-icon"><img src="icons/codex.svg" alt=""></span>
+              <div class="provider-name">Codex</div>
+            </div>
+            <div class="machine">MacBook Pro</div>
+            <div class="number">21.3M</div>
+            <div class="number quiet">$42.60</div>
+            <div class="share">
+              <div class="share-track"><i style="width:33%;background:#0ea5e9"></i></div>
+              <span class="share-value">33%</span>
+            </div>
+            <div class="status warn" style="justify-content:flex-end">8%</div>
+          </div>
+
+          <div class="card-row table-row">
+            <div class="provider">
+              <span class="provider-icon"><img src="icons/deepseek.svg" alt=""></span>
+              <div class="provider-name">DeepSeek</div>
+            </div>
+            <div class="machine offline">Mac Studio 离线</div>
+            <div class="number">5.5M</div>
+            <div class="number quiet">$9.80</div>
+            <div class="share">
+              <div class="share-track"><i style="width:8.5%;background:#8b5cf6"></i></div>
+              <span class="share-value">8.5%</span>
+            </div>
+            <div class="status muted" style="justify-content:flex-end">余额</div>
+          </div>
+
+          <div class="card-row table-row">
+            <div class="provider">
+              <span class="provider-icon"><img src="icons/kimi.svg" alt=""></span>
+              <div class="provider-name">Kimi Code</div>
+            </div>
+            <div class="machine">Mac mini</div>
+            <div class="number">3.1M</div>
+            <div class="number quiet">$5.60</div>
+            <div class="share">
+              <div class="share-track"><i style="width:4.8%;background:#10b981"></i></div>
+              <span class="share-value">4.8%</span>
+            </div>
+            <div class="status muted" style="justify-content:flex-end">未上报</div>
+          </div>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="section-head">
+          <h2 class="section-title">等待恢复</h2>
+          <span class="section-meta">3 个</span>
+        </div>
+
+        <div class="card">
+          <div class="card-row waiting-row">
+            <span class="waiting-icon warn"><svg><use href="#i-clock"/></svg></span>
+            <div class="waiting-main">
+              <div class="waiting-title">修复 auth token 刷新</div>
+              <div class="waiting-meta"><span>Claude Opus 4.5</span><span>MacBook Pro</span></div>
+            </div>
+            <div class="wait-time">
+              <div><span class="wait-time-value">18</span><span class="wait-time-unit">分钟后重试</span></div>
+              <div class="wait-time-elapsed">已等待 6 分钟</div>
+            </div>
+            <div class="waiting-actions">
+              <button class="text-button secondary">取消</button>
+              <button class="text-button">打开会话</button>
+            </div>
+          </div>
+
+          <div class="card-row waiting-row">
+            <span class="waiting-icon"><svg><use href="#i-wifi-off"/></svg></span>
+            <div class="waiting-main">
+              <div class="waiting-title">重构 usage 聚合缓存</div>
+              <div class="waiting-meta"><span>Codex GPT-5.6</span><span>Mac mini</span></div>
+            </div>
+            <div class="wait-time">
+              <div class="wait-time-value small" style="color:var(--secondary)">等待机器上线</div>
+              <div class="wait-time-elapsed">已等待 34 分钟</div>
+            </div>
+            <div class="waiting-actions">
+              <button class="text-button secondary">取消</button>
+              <button class="text-button">打开会话</button>
+            </div>
+          </div>
+
+          <div class="card-row waiting-row">
+            <span class="waiting-icon bad"><svg><use href="#i-alert"/></svg></span>
+            <div class="waiting-main">
+              <div class="waiting-title">生成 v0.9 release notes</div>
+              <div class="waiting-meta"><span>Claude Sonnet 4.5</span><span>MacBook Pro</span></div>
+              <div class="waiting-note">投递结果不确定，未自动重试</div>
+            </div>
+            <div class="wait-time">
+              <div class="wait-time-value small" style="color:var(--destructive)">需要处理</div>
+              <div class="wait-time-elapsed">已等待 2 小时</div>
+            </div>
+            <div class="waiting-actions">
+              <button class="text-button destructive">放弃</button>
+              <button class="text-button">打开会话</button>
+            </div>
+          </div>
+        </div>
+        <div class="waiting-foot">仅在配额重置后自动继续。有输出或工具活动后不会重放。</div>
+      </section>
+
+      <div class="footer">成本为估算值。未知计价的轮次不计入总额。</div>
+    </div>
+  </main>
+</div>
+
+<script>
+// Deterministic mock data for the single-page AI usage design.
+// Token totals are in millions and sum to the headline numbers on the page.
+
+const USAGE_DAYS = ['周一', '周二', '周三', '周四', '周五', '周六', '周日'];
+const USAGE_BUCKETS_PER_DAY = 8;
+
+const USAGE_SERIES = [
+  {
+    id: 'claude',
+    label: 'Claude',
+    color: '#2563eb',
+    daily: [4.2, 4.8, 5.6, 6.4, 5.9, 4.4, 3.4],
+    pattern: [0.055, 0.085, 0.12, 0.15, 0.17, 0.155, 0.135, 0.125],
+  },
+  {
+    id: 'codex',
+    label: 'Codex',
+    color: '#0ea5e9',
+    daily: [2.6, 3.0, 3.4, 3.9, 3.6, 2.7, 2.1],
+    pattern: [0.05, 0.08, 0.115, 0.155, 0.18, 0.165, 0.14, 0.115],
+  },
+  {
+    id: 'deepseek',
+    label: 'DeepSeek',
+    color: '#8b5cf6',
+    daily: [0.7, 0.8, 0.9, 1.0, 0.9, 0.7, 0.5],
+    pattern: [0.06, 0.09, 0.13, 0.16, 0.17, 0.15, 0.13, 0.11],
+  },
+  {
+    id: 'kimi',
+    label: 'Kimi',
+    color: '#10b981',
+    daily: [0.4, 0.4, 0.5, 0.6, 0.5, 0.4, 0.3],
+    pattern: [0.05, 0.08, 0.12, 0.16, 0.18, 0.16, 0.14, 0.11],
+  },
+];
+
+function smoothPath(points) {
+  if (points.length < 2) return '';
+  let d = `M ${points[0].x.toFixed(2)} ${points[0].y.toFixed(2)}`;
+  for (let i = 0; i < points.length - 1; i++) {
+    const p0 = points[i - 1] || points[i];
+    const p1 = points[i];
+    const p2 = points[i + 1];
+    const p3 = points[i + 2] || p2;
+    const cp1x = p1.x + (p2.x - p0.x) / 6;
+    const cp1y = p1.y + (p2.y - p0.y) / 6;
+    const cp2x = p2.x - (p3.x - p1.x) / 6;
+    const cp2y = p2.y - (p3.y - p1.y) / 6;
+    d += ` C ${cp1x.toFixed(2)} ${cp1y.toFixed(2)}, ${cp2x.toFixed(2)} ${cp2y.toFixed(2)}, ${p2.x.toFixed(2)} ${p2.y.toFixed(2)}`;
+  }
+  return d;
+}
+
+function areaPath(upper, lower) {
+  const reversed = [...lower].reverse();
+  const reversedPath = smoothPath(reversed).replace(/^M\s*[-\d.]+\s+[-\d.]+/, '');
+  return `${smoothPath(upper)} L ${reversed[0].x.toFixed(2)} ${reversed[0].y.toFixed(2)} ${reversedPath.trim()} Z`;
+}
+
+function formatMillions(value) {
+  if (value === 0) return '0';
+  if (value < 1) return `${Math.round(value * 1000)}K`;
+  return `${value.toFixed(1)}M`;
+}
+
+function renderUsageChart() {
+  const svg = document.getElementById('usage-chart');
+  if (!svg) return;
+
+  const W = 1000;
+  const H = 224;
+  const left = 42;
+  const right = 2;
+  const top = 10;
+  const bottom = 24;
+  const innerW = W - left - right;
+  const innerH = H - top - bottom;
+
+  const values = USAGE_SERIES.map((series) =>
+    series.daily.flatMap((total) => series.pattern.map((fraction) => total * fraction))
+  );
+
+  const count = values[0].length;
+  const totals = Array.from({ length: count }, (_, i) =>
+    values.reduce((sum, series) => sum + series[i], 0)
+  );
+  const maxTotal = Math.max(...totals);
+  const yMax = Math.ceil(maxTotal * 2) / 2;
+
+  const xAt = (i) => left + (i * innerW) / (count - 1);
+  const yAt = (v) => top + innerH - (v / yMax) * innerH;
+
+  const parts = [`<defs>`];
+  for (const series of USAGE_SERIES) {
+    parts.push(
+      `<linearGradient id="fill-${series.id}" x1="0" y1="0" x2="0" y2="1">` +
+        `<stop offset="0%" stop-color="${series.color}" stop-opacity="0.24"/>` +
+        `<stop offset="100%" stop-color="${series.color}" stop-opacity="0.04"/>` +
+        `</linearGradient>`
+    );
+  }
+  parts.push(`</defs>`);
+
+  const ticks = [];
+  for (let v = 0; v <= yMax + 0.001; v += 1) ticks.push(Number(v.toFixed(2)));
+
+  for (const v of ticks) {
+    const y = yAt(v);
+    parts.push(
+      `<line x1="${left}" y1="${y.toFixed(2)}" x2="${W - right}" y2="${y.toFixed(2)}" stroke="#2b2b2b" stroke-width="0.5"/>`
+    );
+    parts.push(
+      `<text x="${left - 9}" y="${(y + 4).toFixed(2)}" text-anchor="end" fill="#737373" font-family="Inter, PingFang SC, sans-serif" font-size="12">${formatMillions(v)}</text>`
+    );
+  }
+
+  for (let day = 0; day < 7; day++) {
+    const idx = day * USAGE_BUCKETS_PER_DAY;
+    const x = xAt(idx);
+    if (day > 0) {
+      parts.push(
+        `<line x1="${x.toFixed(2)}" y1="${top}" x2="${x.toFixed(2)}" y2="${top + innerH}" stroke="#232323" stroke-width="0.5"/>`
+      );
+    }
+    parts.push(
+      `<text x="${(x + 4).toFixed(2)}" y="${H - 6}" fill="#737373" font-family="Inter, PingFang SC, sans-serif" font-size="12">${USAGE_DAYS[day]}</text>`
+    );
+  }
+
+  const lower = new Array(count).fill(0);
+  for (let si = 0; si < USAGE_SERIES.length; si++) {
+    const series = USAGE_SERIES[si];
+    const upperPoints = values[si].map((v, i) => ({ x: xAt(i), y: yAt(lower[i] + v) }));
+    const lowerPoints = lower.map((v, i) => ({ x: xAt(i), y: yAt(v) }));
+    parts.push(`<path d="${areaPath(upperPoints, lowerPoints)}" fill="url(#fill-${series.id})"/>`);
+    parts.push(
+      `<path d="${smoothPath(upperPoints)}" fill="none" stroke="${series.color}" stroke-width="1" stroke-opacity="0.85"/>`
+    );
+    for (let i = 0; i < count; i++) lower[i] += values[si][i];
+  }
+
+  svg.innerHTML = parts.join('');
+}
+
+
+function linePath(points) {
+  return points
+    .map((point, i) => `${i === 0 ? 'M' : 'L'} ${point.x.toFixed(2)} ${point.y.toFixed(2)}`)
+    .join(' ');
+}
+
+function renderQuotaCharts() {
+  drawQuotaChart('quota-5h-chart', {
+    hours: 24,
+    labels: ['00:00', '06:00', '12:00', '18:00', '24:00'],
+    series: [
+      { color: '#2563eb', start: 88, end: 62 },
+      { color: '#0ea5e9', start: 62, end: 8 },
+    ],
+    sawtooth: 5,
+  });
+
+  drawQuotaChart('quota-7d-chart', {
+    hours: 7 * 24,
+    labels: USAGE_DAYS,
+    series: [
+      { color: '#2563eb', start: 82, preResetEnd: 35, postResetStart: 90, end: 44 },
+      { color: '#0ea5e9', start: 90, preResetEnd: 45, postResetStart: 95, end: 71 },
+    ],
+    sawtooth: null,
+  });
+}
+
+function drawQuotaChart(id, options) {
+  const svg = document.getElementById(id);
+  if (!svg) return;
+
+  const W = 420;
+  const H = 140;
+  const left = 36;
+  const right = 2;
+  const top = 8;
+  const bottom = 20;
+  const innerW = W - left - right;
+  const innerH = H - top - bottom;
+  const count = options.hours + 1;
+  const yMax = 100;
+
+  const xAt = (i) => left + (i * innerW) / (count - 1);
+  const yAt = (v) => top + innerH - (v / yMax) * innerH;
+
+  const values = options.series.map((entry) =>
+    Array.from({ length: count }, (_, i) => {
+      if (!options.sawtooth) {
+        const t = i / (count - 1);
+        const resetAt = 0.6;
+        if (t < resetAt) {
+          return entry.start - (entry.start - entry.preResetEnd) * (t / resetAt);
+        }
+        const after = (t - resetAt) / (1 - resetAt);
+        return entry.postResetStart - (entry.postResetStart - entry.end) * after;
+      }
+      const position = i % options.sawtooth;
+      const base =
+        entry.start - ((entry.start - entry.end) / (options.sawtooth - 1)) * position;
+      const noise = Math.sin(i * 0.9) * 0.6;
+      return i === count - 1 ? entry.end : Math.max(0, Math.min(100, base + noise));
+    })
+  );
+
+  const parts = [];
+
+  for (const v of [0, 50, 100]) {
+    const y = yAt(v);
+    parts.push(
+      `<line x1="${left}" y1="${y.toFixed(2)}" x2="${W - right}" y2="${y.toFixed(2)}" stroke="#2b2b2b" stroke-width="0.5"/>`
+    );
+    parts.push(
+      `<text x="${left - 7}" y="${(y + 3).toFixed(2)}" text-anchor="end" fill="#737373" font-family="Inter, PingFang SC, sans-serif" font-size="12">${v}%</text>`
+    );
+  }
+
+  const labelCount = options.labels.length;
+  for (let i = 0; i < labelCount; i++) {
+    const x = left + (i * innerW) / (labelCount - 1);
+    if (i > 0 && options.sawtooth) {
+      parts.push(
+        `<line x1="${x.toFixed(2)}" y1="${top}" x2="${x.toFixed(2)}" y2="${top + innerH}" stroke="#232323" stroke-width="0.5"/>`
+      );
+    }
+    parts.push(
+      `<text x="${x.toFixed(2)}" y="${H - 5}" text-anchor="${i === 0 ? 'start' : i === labelCount - 1 ? 'end' : 'middle'}" fill="#737373" font-family="Inter, PingFang SC, sans-serif" font-size="12">${options.labels[i]}</text>`
+    );
+  }
+
+  for (let si = 0; si < options.series.length; si++) {
+    const entry = options.series[si];
+    const points = values[si].map((value, i) => ({ x: xAt(i), y: yAt(value) }));
+    parts.push(
+      `<path d="${linePath(points)}" fill="none" stroke="${entry.color}" stroke-width="2" stroke-opacity="0.95" stroke-linejoin="round"/>`
+    );
+    const last = points[points.length - 1];
+    parts.push(
+      `<circle cx="${last.x.toFixed(2)}" cy="${last.y.toFixed(2)}" r="2.5" fill="${entry.color}"/>`
+    );
+  }
+
+  svg.innerHTML = parts.join('');
+}
+
+</script>
+<script>
+  renderUsageChart();
+  renderQuotaCharts();
+</script>
+</body>
+</html>

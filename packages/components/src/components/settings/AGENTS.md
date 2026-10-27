@@ -4,9 +4,7 @@
 Parent `AGENTS.md` files also apply.
 
 Settings owns the workspace catalog surfaces (Providers, MCP servers, Agent
-Roles). The catalog's durability rule — a local Flock write is durable, and the
-upload that follows it is not something a settings surface waits on, reports, or
-rolls back — is in the root [AGENTS.md](../../../../../AGENTS.md).
+Roles). Catalog durability (local writes, background uploads) follows the root [AGENTS.md](../../../../../AGENTS.md).
 
 ## Layout and components
 
@@ -62,8 +60,10 @@ rolls back — is in the root [AGENTS.md](../../../../../AGENTS.md).
   names stay on the default interface font. Five tiers write `--ui-font-size`;
   sizes use `@lody/ui` text tokens. Font ligatures in the Text group writes
   `--lody-font-ligatures` for conversation, code, and tool output.
-- Quota UI requires Core `rateLimits`; refresh also requires `query: true`.
-  Keep cached values while the shared Provider RPC refreshes.
+- Agents: machine config / cross-machine Provider quota share rows. AI Usage needs
+  `usageAnalytics`. No quota history, disclosure or distribution. Reset view on
+  workspace change. Quota needs Core `rateLimits`, refresh `query: true`; keep
+  cached values and direct forecast actions.
 - Provider rows show identity, read-only remaining quota, a direct flat forecast
   action, and a persistent Provider `…` menu. The forecast action opens its dialog
   in one step; no quota-details interstitial or forecast probability belongs in

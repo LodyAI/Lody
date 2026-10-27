@@ -97,6 +97,8 @@ import {
 } from './workspace-machine-accordion';
 import { SettingsPageActions, useInSettingsPane } from './settings-page-header';
 import { SettingsLineTabs } from './settings-line-tabs';
+import { AgentsViewToggle, type AgentsView } from './agents-view-toggle';
+import { AgentsProviderQuotaView } from './agents-provider-quota-view';
 import { settingsSurface as surface } from './surface';
 import { settingsType as type } from './type.stylex';
 
@@ -417,6 +419,12 @@ export function MachineAgentSettings({
   const setSettingsDialogOpen = useSetAtom(settingsDialogOpenAtom);
   const sessionMetaCache = useAtomValue(sessionMetaCacheAtom);
   const workspaceId = useAtomValue(currentWorkspaceIdAtom);
+  const [viewSelection, setViewSelection] = useState<{
+    workspaceId: typeof workspaceId;
+    view: AgentsView;
+  }>({ workspaceId, view: 'configuration' });
+  const agentsView =
+    viewSelection.workspaceId === workspaceId ? viewSelection.view : 'configuration';
   const workspaceSlug = useAtomValue(currentWorkspaceSlugAtom);
   const getConvexErrorMessage = useConvexErrorMessage();
   // Remote daemon restart/upgrade is brokered through the cloud control plane
@@ -1752,6 +1760,10 @@ export function MachineAgentSettings({
 
       {inSettingsPane ? (
         <SettingsPageActions>
+          <AgentsViewToggle
+            view={agentsView}
+            onChange={(view) => setViewSelection({ workspaceId, view })}
+          />
           {resolvedSelectedMachine ? (
             <Button
               variant="secondary"
@@ -1770,9 +1782,18 @@ export function MachineAgentSettings({
           onSelect={(id) => onSelectedMachineChange(id as MachineId)}
         />
       )}
-      {inSettingsPane ? machineTabs : null}
+      {inSettingsPane && agentsView === 'configuration' ? machineTabs : null}
 
-      {resolvedSelectedMachine ? (
+      {inSettingsPane && agentsView === 'quota' ? (
+        <AgentsProviderQuotaView
+          machines={machines}
+          configs={allConfigs}
+          onlineMachineIds={onlineMachineIds}
+          onEdit={openEditDialog}
+          onDelete={handleDeleteConfig}
+          onRefresh={handleRefreshConfig}
+        />
+      ) : resolvedSelectedMachine ? (
         <MachineProvidersSection
           key={resolvedSelectedMachine.id}
           bare={inSettingsPane}
