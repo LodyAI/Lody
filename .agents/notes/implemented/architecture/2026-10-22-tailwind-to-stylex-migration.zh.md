@@ -579,7 +579,7 @@ Backdrop 因对应公开边界保留四个。搜索 13 个、会话面板 23 个
 hooks/atoms 和合成 command port；侧栏已有 no-op 回调及调度预览 slot 不能证明 daemon
 写入、完整 router 或调度器端到端行为。
 
-`main2-combined-acceptance.html` 汇集 638 对：234 primary、370 native、34 个调用方/
+`main2-locked-acceptance.html` 汇集 638 对：234 primary、370 native、34 个调用方/
 变量作用域 supplemental 控制。627 对 PNG 字节一致；11 对保留 60,911 个原始差异
 像素，其中五帧的 38,282 个像素超过既定阈值，保持 **OPEN**。最新 main 子集为 330 对/
 325 字节一致/155 raw/一个阈值像素，共 72,132 节点；另保留 1,104 个侧栏私有 writer
@@ -600,6 +600,8 @@ rAF、DOM anchor 回算及小数截位，尚未证明栅格原因。通用完整
 当前组件测试 620 文件／6,207 用例通过；类型、归属测试、格式和独立边界通过。根检查
 仍失败于既有 CLI Git 身份用例（4,868 通过／一个失败）。最新 CLI 与实际 Electron
 已重建，隔离四图 smoke 通过，属于 after-only，历史应用差异未关闭。集成审查未发现 P0/P1。
+最终桌面环境逐项核对 SDK peer 与锁文件，包含 Zod 4.3.6；被替代的 combined 报告保留
+较早的 peer 版本不匹配。组件截图证据不变，最终报告另以锁定环境重跑 CLI／桌面验证。
 
 ## 后续工作
 

@@ -820,7 +820,7 @@ those final builds. The real mobile fixture uses actual hooks/atoms and syntheti
 command ports; existing sidebar no-op callbacks and scheduler preview slots do
 not establish daemon mutations, a full router or scheduler end-to-end behavior.
 
-`main2-combined-acceptance.html` combines 638 observed pairs: 234 primary,
+`main2-locked-acceptance.html` combines 638 observed pairs: 234 primary,
 370 native and 34 supplemental caller/theme-scope controls. Only 627 PNGs are
 byte-exact. Eleven pairs retain 60,911 raw pixels, including 38,282 above the
 unchanged threshold in five frames; they remain **OPEN**. The latest-main subset
@@ -851,6 +851,10 @@ and independent boundaries pass. Root check still fails the existing CLI
 Git-identity test (4,868 pass / one fail). The latest CLI and actual Electron are
 rebuilt and the four-view isolated smoke passes as after-only evidence; historical
 application differences remain open. No P0/P1 is found in the integration review.
+The final desktop environment verifies resolved SDK peers against the lock,
+including Zod 4.3.6. The superseded combined report retains an earlier peer-version
+mismatch; component screenshot evidence is unchanged, and locked CLI/desktop
+validation is repeated for the final report.
 
 ## Remaining work
 

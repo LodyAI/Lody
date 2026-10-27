@@ -368,7 +368,10 @@ pnpm --dir e2e exec tsx --tsconfig ../apps/cli/tsconfig.json \
 ```
 
 If the bundled CLI is already built and synced, `build:app` rebuilds the desktop
-without repeating that work. The runner mounts the production main/preload/
+without repeating that work. Reused dependency trees need resolved SDK peer
+versions checked against `pnpm-lock.yaml`; the SDK version alone is insufficient.
+Rebuild and sync the CLI after correcting a verification environment before
+accepting its desktop screenshots. The runner mounts the production main/preload/
 renderer/IPC/CLI graph through the existing E2E harness. It owns temporary data,
 user-data and endpoint bindings and verifies shutdown cleanup. Each immutable
 round contains application PNGs, trace, console/runtime logs, assertions and
