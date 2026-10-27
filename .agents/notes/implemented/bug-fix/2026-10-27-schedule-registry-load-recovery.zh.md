@@ -5,6 +5,8 @@ Translation: current
 
 [English](2026-10-27-schedule-registry-load-recovery.md)
 
+PR: https://github.com/LodyAI/Lody/pull/1963
+
 ## 摘要
 
 定时任务列表此前把本地文档读取失败和远端首次同步失败都显示为同一句加载错误，清空可读任务且没有重试入口。工作区 hook 现在保留可读列表并提示同步异常，在 1、3、10 秒后最多自动重试三次。网络恢复事件和手动重试也可重新获取订阅。空的本地扫描等待首次同步确认；底层网络故障原因和安装包恢复行为仍未验证。

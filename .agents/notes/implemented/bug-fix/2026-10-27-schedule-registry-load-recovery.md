@@ -5,6 +5,8 @@ Translation: current
 
 [中文](2026-10-27-schedule-registry-load-recovery.zh.md)
 
+PR: https://github.com/LodyAI/Lody/pull/1963
+
 ## Abstract
 
 The schedule list used to collapse local document failures and remote first-sync failures into one load error, clearing already readable tasks without offering retry. The workspace hook now preserves readable rows with a warning and retries acquisition three times, after 1, 3 and 10 seconds. Network restoration and an explicit Retry action can also restart acquisition. Empty local scans wait for first-sync confirmation; the underlying network cause and packaged recovery remain unverified.
