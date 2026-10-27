@@ -4,7 +4,7 @@ import { mkdtemp, rm, readdir, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { DatabaseSync } from 'node:sqlite';
 import { join } from 'node:path';
-import { Effect, Fiber, Result } from 'effect';
+import { Context, Effect, Fiber, Layer, Result } from 'effect';
 import { LoroDoc } from 'loro-crdt';
 import {
   StreamsCrdt,
@@ -55,7 +55,8 @@ import {
 } from '../src/lib/e2ee/workspace-legacy';
 import type { CloudE2eePort } from '@lody/platform';
 import type { EpochStagedGroup } from '@lody/e2ee-core';
-import type { KeyMailbox } from '@lody/e2ee-core/services';
+import { KeyMailbox } from '@lody/e2ee-core/services';
+import { makeSqliteKeyMailbox, referenceKeyMailbox } from '@lody/e2ee-core/adapters/node-sqlite';
 import type { E2eeWorkspaceHistoryPage, E2eeMailboxRequests } from '@lody/cloud-api';
 import { getLodyDataDir } from '@lody/shared/node/installation-profile';
 
@@ -128,6 +129,7 @@ const setup = (
       signer: machine,
       encryptionPublicKey: machine.enc,
       kind: 'machine',
+      machineId: 'machine',
     });
     const record = yield* signLedgerRecord(
       Result.getOrThrow(prepareLedgerCommand(view, owner.publicKey, admission)),
@@ -651,7 +653,7 @@ describe('machine E2EE local runtime', () => {
           createHash('sha256').update(accountId).digest('hex'),
           'workspace'
         );
-        let records = [...fixture.records];
+        let records = [fixture.genesisRecord];
         let frame: Uint8Array | undefined;
         let report = false;
         const prepare = (session: string) =>
@@ -689,6 +691,15 @@ describe('machine E2EE local runtime', () => {
                   prepareLedgerCommand(view, owner.publicKey, {
                     _tag: 'AdmitDevice',
                     kind: 'machine',
+                    machineId: 'machine',
+                    replaces: (() => {
+                      const previous = [...view.inspectState().devices].find(
+                        ([, device]) => device.kind === 'machine' && device.machineId === 'machine'
+                      )?.[0];
+                      return previous
+                        ? Result.getOrThrow(Bytes.signingPublicKey(Buffer.from(previous, 'hex')))
+                        : null;
+                    })(),
                     signingPublicKey: recipient,
                     encryptionPublicKey: Result.getOrThrow(
                       Bytes.encryptionPublicKey(Buffer.from(material.encryptionPublicKey, 'hex'))
@@ -2000,6 +2011,7 @@ describe('machine E2EE local runtime', () => {
               prepareLedgerCommand(view, owner.publicKey, {
                 _tag: 'AdmitDevice',
                 kind: 'machine',
+                machineId: 'machine',
                 signingPublicKey: Result.getOrThrow(
                   Bytes.signingPublicKey(Buffer.from(material.signingPublicKey, 'hex'))
                 ),
@@ -2164,6 +2176,7 @@ describe('machine E2EE local runtime', () => {
           yield* append({
             _tag: 'AdmitDevice',
             kind: 'machine',
+            machineId: 'machine',
             signingPublicKey: Result.getOrThrow(
               Bytes.signingPublicKey(Buffer.from(original.signingPublicKey, 'hex'))
             ),
@@ -2607,6 +2620,122 @@ describe('machine E2EE local runtime', () => {
       await rm(directory, { recursive: true, force: true });
     }
   });
+
+  it.each(['not-a-staging-recipient', 'temporary-io'])(
+    'installs a late-admitted machine key from the real mailbox despite %s',
+    async (reason) => {
+      const directory = await mkdtemp(join(tmpdir(), 'cli-staging-mailbox-'));
+      try {
+        const fixture = await execute(setup(directory, 2, join(directory, 'machine'), true, true));
+        await execute(
+          Effect.gen(function* () {
+            const custody = yield* makeCliE2eeCustody({
+              directory: join(directory, 'late-machine'),
+              keyring: noKeyring,
+            });
+            const device = yield* custody.createDevice(fixture.genesis);
+            const ownerCustody = yield* makeNodeE2eeCustody({
+              directory: join(directory, 'owner'),
+              wrapper,
+            });
+            const owner = yield* ownerCustody.openDevice(fixture.genesis);
+            const records = [...fixture.records, ...fixture.rotationSuffix];
+            let view = Result.getOrThrow(
+              verifyLedger({
+                anchor: fixture.genesis,
+                records,
+                checkpoint: { length: records.length, head: hashRecordBytes(records.at(-1)!) },
+              })
+            );
+            const admission = yield* prepareDeviceAdmission({
+              genesis: fixture.genesis,
+              membershipId: Result.getOrThrow(Bytes.membershipId(new Uint8Array(16).fill(10))),
+              signer: device,
+              encryptionPublicKey: device.enc,
+              kind: 'machine',
+              machineId: 'late-machine',
+            });
+            const record = yield* signLedgerRecord(
+              Result.getOrThrow(prepareLedgerCommand(view, owner.publicKey, admission)),
+              owner
+            );
+            records.push(record);
+            view = Result.getOrThrow(
+              extendLedger(view, [record], {
+                length: records.length,
+                head: hashRecordBytes(record),
+              })
+            );
+            expect(
+              fixture.stagedGroup!.envelopes.some(
+                (row) => row.recipient === hex(device.publicKey.toBytes())
+              )
+            ).toBe(false);
+            const mailboxHost = yield* makeSqliteKeyMailbox({
+              path: join(directory, 'mailbox.sqlite'),
+              mode: 'create',
+              genesis: fixture.genesis,
+              ledger: () => Effect.succeed(view),
+            });
+            const mailbox = Context.get(
+              yield* Layer.build(referenceKeyMailbox(mailboxHost, device.publicKey)),
+              KeyMailbox
+            );
+            const runtime = yield* makeCliE2eeRuntime({
+              directory: join(directory, 'runtime'),
+              workspaceId: 'workspace',
+              custody,
+              device,
+              genesisRecord: fixture.genesisRecord,
+              mailbox,
+              staging: { readGroup: () => Effect.fail(new Error(reason)) },
+            });
+            yield* runtime.ingest(page(records));
+            // A permanently denied source must neither stop mailbox polling nor invent a key.
+            for (let attempt = 0; attempt < 2; attempt++) {
+              yield* runtime.receiveKeys();
+              expect((yield* runtime.status()).hasCurrentKey).toBe(false);
+              expect((yield* runtime.status()).writeEpoch).toBeNull();
+            }
+            const frame = yield* prepareEpochEnvelope({
+              context: {
+                genesis: fixture.genesis,
+                epoch: Result.getOrThrow(Bytes.epochNumber(1)),
+                sender: owner.publicKey,
+                recipient: device.publicKey,
+              },
+              key: Result.getOrThrow(Bytes.epochKey(new Uint8Array(32).fill(72))),
+              signer: owner,
+              ledger: () => Effect.succeed(view),
+            });
+            const senderMailbox = Context.get(
+              yield* Layer.build(referenceKeyMailbox(mailboxHost, owner.publicKey)),
+              KeyMailbox
+            );
+            yield* senderMailbox.put('01'.repeat(16), frame);
+            yield* runtime.receiveKeys();
+            expect((yield* runtime.status()).hasCurrentKey).toBe(true);
+            const binding = yield* runtime.binding('doc:late-machine', 'loro', 1);
+            const input = {
+              context: {
+                protocol: 'loro-streams-crdt-payload-protection' as const,
+                version: 2 as const,
+                kind: 'update_batch' as const,
+              },
+              plaintext: new Uint8Array([4, 5]),
+              additionalData: () => new Uint8Array([3]),
+            };
+            const sealed = yield* binding.seal(input);
+            expect(
+              yield* binding.open({ ...input, ...sealed, additionalData: new Uint8Array([3]) })
+            ).toEqual(input.plaintext);
+          })
+        );
+      } finally {
+        await rm(directory, { recursive: true, force: true });
+      }
+    }
+  );
 
   it('installs a committed staged epoch on a machine after the publisher scope is gone', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'cli-staged-epoch-'));

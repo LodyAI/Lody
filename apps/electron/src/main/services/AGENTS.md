@@ -114,5 +114,5 @@ Archive terminal/foreign attempts, including pin-only+relay; fence same-request
 unknown/admitting. Retain installed origins, other sessions and primary/cleanup causes.
 Retirement needs exact superseded socket receipt and atomic all-null local match;
 fresh sessions need consent. Unsigned staged material stays pending across windows/retries
-until verified admission/history settlement (including later revocation); see [rationale](../../../../../.agents/notes/implemented/bug-fix/2026-10-27-e2ee-local-pairing-recovery.md). Verify pinned endorsement/self-admission before snapshot binding/pin/cursor; allow sparse positions. Old keys use
-mailbox/verified history; current committed epochs may use staging. Show file protection; socket timeout stays pending. Await CLI current-key install.
+until verified admission/history settlement (including later revocation); see [rationale](../../../../../.agents/notes/implemented/bug-fix/2026-10-27-e2ee-local-pairing-recovery.md). Verify pinned endorsement/self-admission before snapshot binding/pin/cursor; allow sparse positions. Keys use verified mailbox/history; committed epochs may use staging. Staging read
+denial/I/O failure cannot gate mailbox receipt. Show file protection; socket timeout stays pending. Await CLI current-key install.

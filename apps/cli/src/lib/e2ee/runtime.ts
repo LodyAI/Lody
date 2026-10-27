@@ -513,7 +513,11 @@ export const makeCliE2eeRuntime = Effect.fn('CliE2eeRuntime.open')(function* (op
               if (checked.failure.reason !== 'missing-key') return yield* checked.failure;
               const located = getCommittedEpochStagingKey(view, epoch);
               if (Result.isSuccess(located)) {
-                const group = yield* options.staging.readGroup(located.success);
+                // Staging access is optional (late recipients are denied). Mailbox
+                // reception independently authenticates and installs its own envelopes.
+                const group = yield* options.staging
+                  .readGroup(located.success)
+                  .pipe(Effect.catch(() => Effect.succeed(null)));
                 if (
                   group?.envelopes.some(
                     (row) => row.recipient === hex(options.device.publicKey.toBytes())

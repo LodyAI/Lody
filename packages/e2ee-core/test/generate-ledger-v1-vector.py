@@ -61,6 +61,8 @@ def signed(body, signer):
 
 
 owner, bob, carol, phone = Device(1), Device(2), Device(3), Device(4)
+old_machine, replacement_machine = Device(5), Device(8)
+machine_id = "machine/é".encode("utf-8")
 membership = {name: filled(n, 16) for name, n in (('owner', 10), ('bob', 11), ('carol', 12))}
 genesis = signed([1, owner.pk, filled(10), membership['owner'], owner.enc, filled(20)], owner)
 anchor = record_hash(genesis)
@@ -80,6 +82,12 @@ append(owner, [1, membership['bob'], join(bob, 2)])
 append(owner, [3, membership['bob'], 1])
 possession = phone.sign(domain('possess/v2') + cbor([anchor, membership['owner'], phone.pk, phone.enc, 0]))
 append(owner, [4, 0, phone.pk, phone.enc, possession])
+# Owner-approved pre-production-freeze tag4 extension. No capability declaration.
+for target, replaces in ((old_machine, None), (replacement_machine, old_machine.pk)):
+    possession = target.sign(domain('possess/v2') + cbor([
+        anchor, membership['owner'], target.pk, target.enc, 1, machine_id,
+    ]))
+    append(owner, [4, 1, target.pk, target.enc, possession, machine_id, replaces])
 append(bob, [7, 1, filled(21), filled(0x31, 72)])
 append(owner, [5, phone.pk])
 append(owner, [8, membership['bob'], 2, filled(22), filled(0x32, 72)])
@@ -92,8 +100,8 @@ print(json.dumps({
     'anchor': anchor.hex(),
     'records': [{'hex': record.hex(), 'hash': record_hash(record).hex()} for record in records],
     'expected': {
-        'verifiedLength': 9,
-        'failure': {'code': 'upgrade-required', 'position': 9},
+        'verifiedLength': 11,
+        'failure': {'code': 'upgrade-required', 'position': 11},
         'owner': membership['carol'].hex(),
         'members': {
             membership['owner'].hex(): {'userId': filled(10).hex(), 'role': 'admin'},
@@ -102,7 +110,9 @@ print(json.dumps({
         'devices': {
             owner.pk.hex(): {'membershipId': membership['owner'].hex(), 'kind': 'personal'},
             carol.pk.hex(): {'membershipId': membership['carol'].hex(), 'kind': 'personal'},
+            replacement_machine.pk.hex(): {'membershipId': membership['owner'].hex(), 'kind': 'machine'},
         },
+        'machineBindings': {replacement_machine.pk.hex(): machine_id.decode('utf-8')},
         'epoch': {'number': 2, 'keyCommitment': filled(22).hex(), 'rotationRequired': False},
     },
 }, indent=2))

@@ -8,7 +8,7 @@ import { ledgerOverview } from '../src/lib/e2ee-ledger-overview';
 const vector = JSON.parse(
   readFileSync(join(import.meta.dirname, '../../e2ee-core/test/ledger-v1-vector.json'), 'utf8')
 ) as { anchor: string; records: { hex: string }[] };
-const head = '678d8a5fc4bb2ab0ef21032aa8d060056057958f15729fc53569158d07f5c0ce';
+const head = 'f678de325f3a87488d3b6b40ad7da5aa8d8e7ef531e3f912a806ca1087887cc7';
 
 function history() {
   return appendLedgerHistory(
@@ -16,7 +16,7 @@ function history() {
     {
       workspaceId: 'w',
       genesisHash: vector.anchor,
-      checkpoint: { headHash: head, length: 10 },
+      checkpoint: { headHash: head, length: 12 },
       startIndex: 0,
       nextCursor: null,
       recordsHex: vector.records.map((record) => record.hex),
@@ -34,16 +34,18 @@ describe('readable ledger overview', () => {
       'admitMember',
       'setRole',
       'admitDevice',
+      'admitDevice',
+      'admitDevice',
       'publishEpoch',
       'revokeDevice',
       'removeMemberAndPublishEpoch',
       'admitMember',
       'transferOwner',
     ]);
-    expect(overview.events[4]).toEqual({ type: 'publishEpoch', actor: member(2, '0b'), epoch: 1 });
+    expect(overview.events[6]).toEqual({ type: 'publishEpoch', actor: member(2, '0b'), epoch: 1 });
     // The revoked device was admitted by member 1, so it is shown as theirs.
-    expect(overview.events[5]).toMatchObject({ actor: member(1, '0a'), owner: member(1, '0a') });
-    expect(overview.events[8]).toEqual({
+    expect(overview.events[7]).toMatchObject({ actor: member(1, '0a'), owner: member(1, '0a') });
+    expect(overview.events[10]).toEqual({
       type: 'transferOwner',
       actor: member(1, '0a'),
       member: member(3, '0c'),
@@ -54,9 +56,13 @@ describe('readable ledger overview', () => {
     const overview = ledgerOverview(history());
     expect(overview.members).toEqual([
       expect.objectContaining({ ...member(3, '0c'), role: 'owner', devices: [expect.anything()] }),
-      expect.objectContaining({ ...member(1, '0a'), role: 'admin', devices: [expect.anything()] }),
+      expect.objectContaining({
+        ...member(1, '0a'),
+        role: 'admin',
+        devices: [expect.anything(), expect.anything()],
+      }),
     ]);
-    expect(overview.deviceCount).toBe(2);
+    expect(overview.deviceCount).toBe(3);
     expect(overview.epoch).toEqual({ number: 2, rotationRequired: false });
   });
 });

@@ -87,11 +87,20 @@ function org() {
     ] as const;
   };
   const device = (target: Keys, kind: number, membership = id(10), proofAnchor = anchor) => {
+    const machineId = new TextEncoder().encode(`machine:${Buffer.from(target.pk).toString('hex')}`);
+    const extra = kind === 1 ? [machineId] : [];
     const message = domain(
       'possess/v2',
-      ok(encodeCbor([proofAnchor.toBytes(), membership, target.pk, target.enc, kind]))
+      ok(encodeCbor([proofAnchor.toBytes(), membership, target.pk, target.enc, kind, ...extra]))
     );
-    return [4, kind, target.pk, target.enc, target.sign(message)] as const;
+    return [
+      4,
+      kind,
+      target.pk,
+      target.enc,
+      target.sign(message),
+      ...(kind === 1 ? [machineId, null] : []),
+    ] as const;
   };
   return { anchor, records, verify, append, join, device };
 }
@@ -313,7 +322,7 @@ describe('strict records and caller-pinned chain', () => {
       if (attack === 'possession-kind') {
         const d = [...p.device(phone, 0)];
         d[1] = 1;
-        p.append(owner, d);
+        p.append(owner, [...d, new TextEncoder().encode('machine'), null]);
       }
       if (attack === 'join-key') {
         const j = p.join(bob, 11);
@@ -1117,7 +1126,7 @@ function editedSnapshot(view: Ledger.LedgerView, signer: Keys, edit: (body: Cbor
 }
 // The authorization state's fixed-width tables (memberships, devices, joins,
 // commitments, packets) as editable rows, for tampering tests.
-const STATE_ROWS = [49, 69, 20, 32, 72] as const;
+const STATE_ROWS = [49, 70, 20, 32, 72] as const;
 function stateRows(state: CborValue[]): Uint8Array[][] {
   return STATE_ROWS.map((width, field) => {
     const bytes = state[field] as Uint8Array;
@@ -1154,7 +1163,7 @@ describe('authenticated snapshot migration reproduction', () => {
     const forged = editedSnapshot(view, bob, (body) => {
       const state = body[5] as CborValue[];
       const rows = stateRows(state);
-      deviceRow(rows, owner)[68] = 0; // the Owner's only device, retired
+      deviceRow(rows, owner)[69] = 0; // the Owner's only device, retired
       setStateRows(state, rows);
     });
     expect(code(Snapshots.verifyLedgerSnapshot(forged))).toBe('unauthorized');
@@ -1256,8 +1265,8 @@ describe('authenticated snapshot migration reproduction', () => {
       code(Snapshots.verifyLedgerSnapshot({ ...data, snapshot: ok(encodeSnapshotCbor(root)) }))
     ).toBe('bad-signature');
     // Validly signed bodies of another version (1 was the pre-compact layout) are rejected.
-    expect((ok(decodeSnapshotCbor(data.proposal.bodyBytes)) as CborValue[])[0]).toBe(2);
-    for (const version of [1, 3])
+    expect((ok(decodeSnapshotCbor(data.proposal.bodyBytes)) as CborValue[])[0]).toBe(3);
+    for (const version of [1, 2, 4])
       expect(
         code(
           Snapshots.verifyLedgerSnapshot(
@@ -1939,7 +1948,7 @@ describe('public admission consent and ordinary intent', () => {
       Commands.signLedgerRecord(ok(prepare(command)), signerFor(owner))
     );
     expect(record).toEqual(signed([view.head.toBytes(), owner.pk, o.device(phone, 0)], owner));
-    expect(code(prepare({ ...command, kind: 'machine' }))).toBe('bad-proof');
+    expect(code(prepare({ ...command, kind: 'machine', machineId: 'machine' }))).toBe('bad-proof');
     const wrong = await Effect.runPromise(
       Admission.prepareDeviceAdmission({
         genesis: o.anchor,
@@ -2091,6 +2100,9 @@ describe('public admission consent and ordinary intent', () => {
           membershipId: ok(Bytes.membershipId(id(10))),
           encryptionPublicKey: ok(Bytes.encryptionPublicKey(target.enc)),
           kind,
+          ...(kind === 'machine'
+            ? { machineId: `machine:${Buffer.from(target.pk).toString('hex')}` }
+            : {}),
           signer: signerFor(target),
         })
       );
@@ -2265,9 +2277,9 @@ describe('retained verified state', () => {
       code(Ledger.restoreVerifiedState({ ...saved, bytes: saved.bytes.subarray(0, 40) }))
     ).not.toBe('accepted');
     // Current-only: a row written before version 2 (or by a newer client) is rebuilt by full replay.
-    for (const version of [1, 3]) {
+    for (const version of [1, 2, 4]) {
       const stale = new Uint8Array(saved.bytes);
-      expect(stale[1]).toBe(2);
+      expect(stale[1]).toBe(3);
       stale[1] = version;
       expect(code(Ledger.restoreVerifiedState({ ...saved, bytes: stale }))).toBe('unknown-version');
     }
@@ -2343,6 +2355,13 @@ describe('frozen ledger v1 compatibility', () => {
         state.devices.map(([key, membershipId, kind]) => [key, { membershipId, kind }])
       )
     ).toEqual(expected.devices);
+    expect(
+      Object.fromEntries(
+        [...view.inspectState().devices]
+          .filter(([, device]) => device.kind === 'machine')
+          .map(([key, device]) => [key, device.machineId])
+      )
+    ).toEqual(expected.machineBindings);
   });
 
   it('stops at a genuine capability declaration as an upgrade, with its position', () => {
@@ -2449,7 +2468,7 @@ describe('compact authorization state', () => {
     // 4 memberships, 8 devices, 3 joins, epochs 0..4.
     expect((state.slice(0, 5) as Uint8Array[]).map((table) => table.length)).toEqual([
       4 * 49,
-      8 * 69,
+      8 * 70,
       3 * 20,
       5 * 32,
       4 * 72,

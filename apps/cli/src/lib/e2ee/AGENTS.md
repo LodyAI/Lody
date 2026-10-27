@@ -35,12 +35,16 @@
   evidence. No floor reset, deadline extension or new time source/recovery generation.
   See [integration proposal](../../../../../.agents/notes/proposed/architecture/2026-10-26-e2ee-realtime-journal.md).
 - `prepareCliE2eeMachineLegacy` binds the retained credential hash to the exact
-  desktop-generated 16-byte pairing session using core's fixed v1 helper.
+  desktop-generated 16-byte pairing session using core's fixed v1 helper. Machine
+  possession additionally binds the strict UTF-8 machineId; activation compares it
+  with both the verified current device and the retained signed admission. Session
+  IDs stay outside possession and ledger records; old developer formats need recreation.
   Pairing preparation and activation run only on the OS-user control socket;
   Fleet checks its own account and discovered encrypted workspace/genesis first.
   Activation refreshes the verified ledger and mailbox and acknowledges only an
   installed current key; temporary failure leaves the same pairing retryable.
 
+- Staging read denial/I/O failure cannot block independently verified mailbox reception.
 - Retain old-epoch sends; select confirmed keys per operation. Rotation hints never pause.
   [M3 selection](../../../../../.agents/notes/proposed/architecture/2026-10-27-e2ee-epoch-receive-barrier.md).
 - Prepared bindings cannot start content replicas. Activate only the native ledger/key

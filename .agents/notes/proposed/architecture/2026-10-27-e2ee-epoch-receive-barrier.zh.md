@@ -12,7 +12,7 @@ Owner 的可用性优先 MVP 决定覆盖原强制停发屏障。rotationRequire
 
 ## 权限与选择
 
-原生工作区拥有已验证账本、安装密钥和接收日志。Staging locator 来自真实 publication 原件，KeyReceiver 复查签名、publication、recipient、HPKE 和 commitment，历史 mailbox／history 恢复保留。即使使用较早的已发布 epoch，每次 seal 仍在加密前和签名后检查当前成员与设备权限；撤销、移除、Guest 和 Recovery 写者仍被拒绝。签名期间出现真实后续账本不再使合法的旧 epoch 密文失败。Namespace、线格式、签名域、commitment 和原件不变。
+原生工作区拥有已验证账本、安装密钥和接收日志。Staging locator 来自真实 publication 原件，KeyReceiver 复查签名、publication、recipient、HPKE 和 commitment，Staging 读取是可选来源：固定的收件人拒绝和临时 I/O 失败均继续走独立验证的 mailbox／history 路径。返回的 staging 组仍完整验证；读取失败不算安装成功。历史 mailbox／history 恢复保留。即使使用较早的已发布 epoch，每次 seal 仍在加密前和签名后检查当前成员与设备权限；撤销、移除、Guest 和 Recovery 写者仍被拒绝。签名期间出现真实后续账本不再使合法的旧 epoch 密文失败。Namespace、线格式、签名域、commitment 和原件不变。
 
 每次操作只捕获一个 epoch。接收与真实读回确认之后，同步更新选择，无须 I/O、关闭 transport、重建 Repo 或清空队列。在途旧操作可完成合法的旧 epoch 密文。重启时原生 status 返回确认可用的 writeEpoch，因此新钥缺失不再丢弃可用的本地副本；身份丢失或没有任何可用密钥不能绕过。
 
@@ -30,6 +30,6 @@ Owner 的可用性优先 MVP 决定覆盖原强制停发屏障。rotationRequire
 
 ## 证据与边界
 
-确定性回归覆盖同一 provider 持续发送、失败、超时／迟到结果、缺钥与过时代次、另一个工作区发送、旧钥冷启动，以及真实 SQLite／加密重启和 committed staging 接收。改变的行为均撤回修复先 RED，再 GREEN。本地边界验证不等于安装产品验收；真实网关撤销／长连接、系统钥匙串、双设备安装包、跨平台和完整十五分钟访问上限仍未验证。真实 SDK 队列回归注入 SQLite busy 并阻塞 history／接钥，验证失败保存立即结束，下一次上传及解密保留数据成功。Legacy token 关闭开始后重复 invalidate 幂等；关闭失败仍保留原始 owner 和 Cause，必须完成清理重试。完整仓库测试交给 CI。
+确定性回归覆盖同一 provider 持续发送、失败、超时／迟到结果、缺钥与过时代次、另一个工作区发送、旧钥冷启动，以及真实 SQLite／加密重启和 committed staging 接收。真实 SQLite mailbox 回归覆盖 staging 持续拒绝／I/O 失败、延后送达、发布后才加入且没有旧钥的机器，以及安装后封装／解密成功。改变的行为均撤回修复先 RED，再 GREEN。本地边界验证不等于安装产品验收；真实网关撤销／长连接、系统钥匙串、双设备安装包、跨平台和完整十五分钟访问上限仍未验证。真实 SDK 队列回归注入 SQLite busy 并阻塞 history／接钥，验证失败保存立即结束，下一次上传及解密保留数据成功。Legacy token 关闭开始后重复 invalidate 幂等；关闭失败仍保留原始 owner 和 Cause，必须完成清理重试。完整仓库测试交给 CI。
 
 core 的 advisory 权限独立在 [#1956](https://github.com/LodyAI/Lody/pull/1956) 审查；文档旧 epoch 兼容属于本 PR，两者无分支堆栈依赖。此 owner 指令覆盖 [M2](2026-10-22-e2ee-m2-product-integration.md) 的停发解释。原生 Effect consumer 迁移仍由 [路线图](2026-09-27-effect-lifecycle-migration-roadmap.md#unit-ledger) 单独负责。

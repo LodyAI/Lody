@@ -169,6 +169,7 @@ export function applyAuthorizedOrdinary(
         signingPublicKey: op.signingPublicKey,
         encryptionPublicKey: op.encryptionPublicKey,
         kind: op.kind,
+        machineId: op.machineId,
       });
       yield* Result.mapError(
         verifySignature(op.signingPublicKey.toBytes(), message, op.possessionSignature.toBytes()),

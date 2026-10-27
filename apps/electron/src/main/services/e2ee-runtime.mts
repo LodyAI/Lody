@@ -671,7 +671,10 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
                     const located = getCommittedEpochStagingKey(view, epoch)
                     // A snapshot-joined device without this publication original uses mailbox/history.
                     if (Result.isSuccess(located)) {
-                      const group = yield* staging(networkAbort.signal).readGroup(located.success)
+                      // Staging denial or I/O failure must not gate verified mailbox receipt.
+                      const group = yield* staging(networkAbort.signal)
+                        .readGroup(located.success)
+                        .pipe(Effect.catch(() => Effect.succeed(null)))
                       if (
                         group?.envelopes.some(
                           (row) => row.recipient === hex(device.publicKey.toBytes())

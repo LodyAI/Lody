@@ -34,7 +34,7 @@ Follow the package [boundary](../../../AGENTS.md) and [record/replay contract](R
   historical replay and rollback protection remain mandatory.
 
 - I/O owners use cooperative fixed-native verification; the same pure replay owns
-  authority. Persisted suffix bytes are reverified on open; a caller-owned retained v2 origin restores without replay. SQL is not authority;
+  authority. Persisted suffix bytes are reverified on open; a caller-owned retained v3 origin restores without replay. SQL is not authority;
   compare the verified head/count pin and current metadata point without scanning
   old rows or SQLite schema/write counters on every operation. Local OS/database
   tampering is outside the whitepaper threat model. Shared SQLite helpers own file
@@ -58,3 +58,10 @@ Retained origins include their source locator. A pin ahead of the restored view
 must be proved by the suffix; a cache ahead of the pin is rebuildable. Equal
 positions require equal heads. Rebase CAS compares the full tail and removes
 covered records atomically. Verification provenance is never upgraded.
+
+- Owner-approved pre-freeze machine tag4 binds strict UTF-8 machineId (1..256 bytes,
+  no normalization) in both record and possession. No session ID/capability is added.
+  Only a same-member personal device can atomically replace its exact active machine;
+  retain old keys/history. rotationRequired advises key updates; it must not block sends.
+  Current-only, no legacy
+  machine record reader. Snapshot/retained/digest v3 preserve every historical binding.
