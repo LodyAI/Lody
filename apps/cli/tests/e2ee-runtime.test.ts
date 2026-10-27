@@ -3216,6 +3216,79 @@ describe('machine E2EE local runtime', () => {
     }
   );
 
+  it('does not reject a good mailbox envelope after a temporary installed-key write failure', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'cli-e2ee-mailbox-io-'));
+    try {
+      const fixture = await execute(setup(directory));
+      await execute(
+        Effect.gen(function* () {
+          const view = Result.getOrThrow(
+            verifyLedger({
+              anchor: fixture.genesis,
+              records: fixture.records,
+              checkpoint: {
+                head: hashRecordBytes(fixture.records.at(-1)!),
+                length: fixture.records.length,
+              },
+            })
+          );
+          const custody = yield* makeCliE2eeCustody({
+            directory: join(directory, 'machine'),
+            keyring: noKeyring,
+          });
+          const device = yield* custody.openDevice(fixture.genesis);
+          const mailboxPath = join(directory, 'mailbox.sqlite');
+          const backend = yield* makeSqliteKeyMailbox({
+            path: mailboxPath,
+            mode: 'create',
+            genesis: fixture.genesis,
+            ledger: () => Effect.succeed(view),
+          });
+          const sender = Result.getOrThrow(
+            Bytes.signingPublicKey(Buffer.from(fixture.sender, 'hex'))
+          );
+          const outgoing = Context.get(
+            yield* Layer.build(referenceKeyMailbox(backend, sender)),
+            KeyMailbox
+          );
+          const mailbox = Context.get(
+            yield* Layer.build(referenceKeyMailbox(backend, device.publicKey)),
+            KeyMailbox
+          );
+          yield* outgoing.put('ad'.repeat(16), fixture.frame);
+          const runtime = yield* makeCliE2eeRuntime({
+            directory: join(directory, 'runtime'),
+            workspaceId: 'workspace',
+            custody,
+            device,
+            genesisRecord: fixture.genesisRecord,
+            mailbox,
+          });
+          yield* runtime.ingest(page(fixture.records));
+          const local = new DatabaseSync(join(directory, 'runtime', 'installed-keys.sqlite'));
+          const remote = new DatabaseSync(mailboxPath);
+          try {
+            local.exec(
+              "CREATE TRIGGER block_install BEFORE INSERT ON installed_epoch_keys BEGIN SELECT RAISE(ABORT,'synthetic storage unavailable'); END"
+            );
+            const failed = yield* Effect.result(runtime.receiveKeys());
+            expect(Result.isFailure(failed)).toBe(true);
+            expect(remote.prepare('SELECT count(*) AS n FROM mailbox_rejected').get()!.n).toBe(0);
+            expect(remote.prepare('SELECT revision FROM mailbox_slots').get()!.revision).toBe(0);
+            local.exec('DROP TRIGGER block_install');
+            yield* runtime.receiveKeys();
+            expect((yield* runtime.status()).hasCurrentKey).toBe(true);
+          } finally {
+            remote.close();
+            local.close();
+          }
+        })
+      );
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
   it('installs a committed staged epoch on a machine after the publisher scope is gone', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'cli-staged-epoch-'));
     try {

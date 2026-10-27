@@ -104,7 +104,11 @@ results() / acknowledge(id)   ended tasks until acknowledged
 
 - A report is a signed claim of installation, not proof of custody.
 - `fetchAndInstall` copies and validates the whole page before writing
-  anything, and returns no `next` cursor if any install failed.
+  anything. Unreadable routing and sender/workspace/epoch/recipient hint mismatches
+  are skipped for this fetch, without journaling or rejecting their frame digests;
+  they remain retryable after the server returns honest metadata. Later rows still
+  run every normal verification. `processed` counts scanned rows, not installed keys.
+  An actual install failure returns no `next` cursor.
   `MailboxInstallError` names the failing frame (sender, `frameDigest`) so the
   application can decide on a repair.
 - Only a genuine ledger change ends a task as `Obsolete` or `Revoked`.
@@ -267,3 +271,5 @@ genesis; a valid signature neither admits a device nor replaces possession proof
 Verification uses the existing strict Ed25519 policy. The first creator device
 does not need this proof. `test/foundation.test.ts` retains a fixed signing vector
 and checks substitution of every context field.
+
+Desktop error classification, independent paging and terminal acknowledgement are described in [key maintenance availability](../../../.agents/notes/implemented/bug-fix/2026-10-27-e2ee-key-maintenance-availability.md). `MailboxInstallError.cryptographicRejection` marks only a deterministic rejection at envelope verification; local writes, report signing and unknown native errors never authorize rejecting an envelope.

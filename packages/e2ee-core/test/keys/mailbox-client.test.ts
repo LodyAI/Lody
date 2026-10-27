@@ -8,7 +8,7 @@ import { makeSqliteRecipientMailbox, type RecipientMailboxRemote } from './harne
 import { makeSqliteKeyMailbox } from '@lody/e2ee-core/adapters/node-sqlite';
 import { envelopeFixture, recipientPair } from './fixture';
 import { synthetic } from './protection-fixture';
-import { prepareEpochEnvelope } from '@lody/e2ee-core/protocol';
+import { ContentError, prepareEpochEnvelope } from '@lody/e2ee-core/protocol';
 import { mailboxDigest } from '@lody/e2ee-core/protocol';
 const ok = Result.getOrThrow,
   hex = (bytes: Uint8Array) => Buffer.from(bytes).toString('hex');
@@ -96,6 +96,57 @@ describe('real recipient receive/repair/fetch composition', () => {
       )
     );
   });
+  it('does not authorize rejecting an envelope when local report signing fails', async () => {
+    const f = envelopeFixture(),
+      dir = directory(),
+      pair = await recipientPair();
+    const frame = await Effect.runPromise(f.prepare());
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const host = yield* makeSqliteKeyMailbox({
+            path: path.join(dir, 'host.sqlite'),
+            mode: 'create',
+            genesis: f.context.genesis,
+            ledger: f.ledger,
+          });
+          const sender = ok(host.bind(f.owner.publicKey)),
+            remote = ok(host.bind(f.phone.publicKey));
+          yield* sender.put('ac'.repeat(16), frame);
+          const client = yield* makeSqliteRecipientMailbox({
+            path: path.join(dir, 'receive.sqlite'),
+            mode: 'create',
+            genesis: f.context.genesis,
+            signer: {
+              ...f.phone.signer,
+              sign: () => Effect.fail(new ContentError({ code: 'bad-signature' })),
+            },
+            pair,
+            ledger: f.ledger,
+            remote,
+            repairStore: { path: path.join(dir, 'repair.sqlite'), mode: 'create' },
+            keyStore: {
+              path: path.join(dir, 'keys.sqlite'),
+              mode: 'create',
+              protector: synthetic().protector,
+            },
+          });
+          const result = yield* Effect.result(client.fetchAndInstall());
+          expect(Result.isFailure(result)).toBe(true);
+          if (Result.isSuccess(result)) throw new Error('expected report signing failure');
+          expect(result.failure).toMatchObject({
+            cryptographicRejection: false,
+            cause: { code: 'bad-signature' },
+          });
+          expect((yield* remote.fetch(0, null, 100)).items).toHaveLength(1);
+          expect(inspect(path.join(dir, 'receive.sqlite'))).toMatchObject([
+            { phase: 'Install', report: null },
+          ]);
+        })
+      )
+    );
+  });
+
   it('identifies a signed unopenable first envelope for durable targeted repair without skipping the page', async () => {
     const f = envelopeFixture(),
       dir = directory(),
@@ -158,6 +209,7 @@ describe('real recipient receive/repair/fetch composition', () => {
             recipient: hex(f.phone.raw),
             sender: hex(f.owner.raw),
             frameDigest: mailboxDigest(bad),
+            cryptographicRejection: true,
           });
           expect(failed.failure).not.toHaveProperty('next');
           expect(inspect(config.path)).toEqual([{ phase: 'Install', report: null }]);
