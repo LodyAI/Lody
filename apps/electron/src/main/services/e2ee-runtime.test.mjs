@@ -2338,7 +2338,7 @@ for (const damaged of [false, true, 'header'])
       )
   })
 
-void test('revocation bypasses an unstaged candidate but preserves an unknown publication CAS across reopen', async (t) => {
+async function managementFailureFixture(t, commandType) {
   for (const failure of ['stage', 'cas']) {
     const directory = await fixture(t)
     await execute(
@@ -2348,17 +2348,28 @@ void test('revocation bypasses an unstaged candidate but preserves an unknown pu
         const genesis = Result.getOrThrow(
           Bytes.genesisHash(Buffer.from(prepared.genesisHashHex, 'hex'))
         )
-        let records = [Buffer.from(prepared.genesisRecordHex, 'hex')]
+        let records =
+          commandType === 'removeMember'
+            ? yield* makeRecords(owner.custody, prepared, 2)
+            : [Buffer.from(prepared.genesisRecordHex, 'hex')]
         let view = Result.getOrThrow(
           verifyLedger({
             anchor: genesis,
             records,
-            checkpoint: { head: hashRecordBytes(records[0]), length: 1 }
+            checkpoint: { head: hashRecordBytes(records.at(-1)), length: records.length }
           })
         )
         const signer = yield* owner.custody.openDevice(genesis)
         const targets = []
         for (let index = 0; index < 2; index++) {
+          if (commandType === 'removeMember' && index === 1) {
+            targets.push(
+              [...view.inspectState().devices].find(
+                ([, device]) => hex(device.membershipId.toBytes()) === '11'.repeat(16)
+              )[0]
+            )
+            continue
+          }
           const machine = yield* owner.custody.prepareDevice()
           const admission = yield* prepareDeviceAdmission({
             genesis,
@@ -2374,11 +2385,36 @@ void test('revocation bypasses an unstaged candidate but preserves an unknown pu
           )
           records.push(record)
           view = Result.getOrThrow(
-            extendLedger(view, [record], { head: hashRecordBytes(record), length: records.length })
+            extendLedger(view, [record], {
+              head: hashRecordBytes(record),
+              length: records.length
+            })
           )
           targets.push(hex(machine.publicKey.toBytes()))
           yield* owner.custody.discardDevice(machine)
         }
+        if (commandType === 'removeMember') {
+          const capability = yield* signLedgerRecord(
+            Result.getOrThrow(
+              prepareLedgerCommand(view, signer.publicKey, {
+                _tag: 'DeclareCapabilities',
+                capabilities: [1]
+              })
+            ),
+            signer
+          )
+          records.push(capability)
+          view = Result.getOrThrow(
+            extendLedger(view, [capability], {
+              head: hashRecordBytes(capability),
+              length: records.length
+            })
+          )
+        }
+        const independentCommand =
+          commandType === 'revoke'
+            ? { type: 'revoke', target: targets[1] }
+            : { type: 'removeMember', membershipId: '11'.repeat(16) }
         yield* owner.host.open(workspaceId)
         yield* owner.host.ingestLedgerRecords(
           workspaceId,
@@ -2468,12 +2504,14 @@ void test('revocation bypasses an unstaged candidate but preserves an unknown pu
           ownKey
         )
         const revoke = yield* Effect.result(
-          owner.host.manage(workspaceId, { type: 'revoke', target: targets[1] }, remote)
+          owner.host.manage(workspaceId, independentCommand, remote)
         )
         if (failure === 'stage') {
           assert.equal(Result.isSuccess(revoke), true)
           assert.equal(revoke.success, 'Committed')
           assert.equal(view.inspectState().devices.has(targets[1]), false)
+          if (commandType === 'removeMember')
+            assert.equal(view.inspectState().members.has('11'.repeat(16)), false)
           assert.equal(view.inspectState().epoch.number, 0)
           assert.equal(view.inspectState().epoch.rotationRequired, true)
           assert.equal(attempts.length, 1)
@@ -2524,7 +2562,7 @@ void test('revocation bypasses an unstaged candidate but preserves an unknown pu
           )
           blocked = false
           assert.equal(
-            yield* owner.host.manage(workspaceId, { type: 'revoke', target: targets[1] }, remote),
+            yield* owner.host.manage(workspaceId, independentCommand, remote),
             'Committed'
           )
           assert.equal(Buffer.from(records.at(-2)).equals(original), true)
@@ -2537,7 +2575,11 @@ void test('revocation bypasses an unstaged candidate but preserves an unknown pu
       })
     )
   }
-})
+}
+for (const commandType of ['revoke', 'removeMember']) {
+  void test(`${commandType} bypasses an unstaged candidate but preserves an unknown publication CAS across reopen`, (t) =>
+    managementFailureFixture(t, commandType))
+}
 
 void test('closing during a manual management ledger read aborts outside account locks and releases the host', async (t) => {
   const directory = await fixture(t)
@@ -2997,6 +3039,14 @@ void test('member controls use ordinary durable records and keep the old epoch a
       yield* owner.host.open(workspaceId)
       yield* owner.host.ingestLedgerRecords(workspaceId, page(records, prepared.genesisHashHex, 0))
       const remote = () => ({
+        staging: () => ({
+          stageGroup: () => Effect.die('member commands must not stage a candidate'),
+          readGroup: () => Effect.die('member commands must not read a candidate'),
+          deleteGroup: () => Effect.die('member commands must not delete a candidate')
+        }),
+        mailbox: () => {
+          throw new Error('member commands must not receive a candidate')
+        },
         log: {
           read: () =>
             Effect.sync(() => ({
@@ -3016,24 +3066,24 @@ void test('member controls use ordinary durable records and keep the old epoch a
       })
       const membershipId = '11'.repeat(16)
       assert.equal(
-        yield* owner.host.manageMember(
+        yield* owner.host.manage(
           workspaceId,
-          { type: 'setMemberRole', membershipId, role: 'admin' },
+          { type: 'setRole', membershipId, role: 'admin' },
           remote
         ),
         'Committed'
       )
       assert.equal((yield* owner.host.status(workspaceId)).epoch, 0)
       assert.equal(
-        yield* owner.host.manageMember(
+        yield* owner.host.manage(
           workspaceId,
-          { type: 'setMemberRole', membershipId, role: 'member' },
+          { type: 'setRole', membershipId, role: 'member' },
           remote
         ),
         'Committed'
       )
       assert.equal(
-        yield* owner.host.manageMember(workspaceId, { type: 'removeMember', membershipId }, remote),
+        yield* owner.host.manage(workspaceId, { type: 'removeMember', membershipId }, remote),
         'Committed'
       )
       const status = yield* owner.host.status(workspaceId)
@@ -3047,7 +3097,7 @@ void test('member controls use ordinary durable records and keep the old epoch a
       assert.equal(management.updatePending, false)
       const count = records.length
       assert.equal(
-        yield* owner.host.manageMember(workspaceId, { type: 'removeMember', membershipId }, remote),
+        yield* owner.host.manage(workspaceId, { type: 'removeMember', membershipId }, remote),
         'Committed'
       )
       assert.equal(records.length, count)
@@ -3069,6 +3119,14 @@ void test('member removal reopens its uncertain original and never signs a repla
     blocked = false
   const membershipId = '11'.repeat(16)
   const remote = () => ({
+    staging: () => ({
+      stageGroup: () => Effect.die('member commands must not stage a candidate'),
+      readGroup: () => Effect.die('member commands must not read a candidate'),
+      deleteGroup: () => Effect.die('member commands must not delete a candidate')
+    }),
+    mailbox: () => {
+      throw new Error('member commands must not receive a candidate')
+    },
     log: {
       read: () =>
         blocked
@@ -3102,7 +3160,7 @@ void test('member removal reopens its uncertain original and never signs a repla
       yield* owner.host.ingestLedgerRecords(workspaceId, page(records, prepared.genesisHashHex, 0))
       assert.equal(
         (yield* Effect.result(
-          owner.host.manageMember(workspaceId, { type: 'removeMember', membershipId }, remote)
+          owner.host.manage(workspaceId, { type: 'removeMember', membershipId }, remote)
         ))._tag,
         'Failure'
       )
@@ -3115,7 +3173,7 @@ void test('member removal reopens its uncertain original and never signs a repla
       const owner = yield* ownerWithHost(directory)
       yield* owner.host.open(workspaceId)
       assert.equal(
-        yield* owner.host.manageMember(workspaceId, { type: 'removeMember', membershipId }, remote),
+        yield* owner.host.manage(workspaceId, { type: 'removeMember', membershipId }, remote),
         'Committed'
       )
       assert.equal(records.length, count)
@@ -3125,6 +3183,134 @@ void test('member removal reopens its uncertain original and never signs a repla
     })
   )
 })
+
+// A successful recovery settles the old request, not an unrelated new click.
+for (const difference of ['role', 'type', 'membershipId']) {
+  void test(`ordinary management recovery compares the full ${difference} intent`, async (t) => {
+    const directory = await fixture(t)
+    let records,
+      prepared,
+      original,
+      blocked = false
+    const firstId = '11'.repeat(16),
+      secondId = '22'.repeat(16)
+    const before =
+      difference === 'membershipId'
+        ? { type: 'removeMember', membershipId: firstId }
+        : { type: 'setRole', membershipId: firstId, role: 'admin' }
+    const after =
+      difference === 'role'
+        ? { type: 'setRole', membershipId: firstId, role: 'member' }
+        : { type: 'removeMember', membershipId: difference === 'membershipId' ? secondId : firstId }
+    const remote = () => ({
+      staging: () => ({
+        stageGroup: () => Effect.die('ordinary commands cannot stage'),
+        readGroup: () => Effect.die('ordinary commands cannot read staging'),
+        deleteGroup: () => Effect.die('ordinary commands cannot delete staging')
+      }),
+      mailbox: () => {
+        throw new Error('ordinary commands cannot receive')
+      },
+      history: () =>
+        blocked
+          ? Effect.fail(new Error('synthetic history unavailable'))
+          : Effect.succeed(page(records, prepared.genesisHashHex, 0)),
+      log: {
+        read: () =>
+          blocked
+            ? Effect.fail(new Error('synthetic readback unavailable'))
+            : Effect.succeed({
+                records,
+                checkpoint: { head: hashRecordBytes(records.at(-1)), length: records.length }
+              }),
+        appendCas: (_genesis, point, record) =>
+          Effect.suspend(() => {
+            assert.equal(point.head.equals(hashRecordBytes(records.at(-1))), true)
+            records.push(new Uint8Array(record))
+            if (
+              !original &&
+              Result.getOrThrow(decodeRecord(record)).body.operation.type !== 'declareCapabilities'
+            ) {
+              original = new Uint8Array(record)
+              blocked = true
+              return Effect.fail(new Error('synthetic lost ACK'))
+            }
+            return Effect.void
+          })
+      }
+    })
+    await execute(
+      Effect.gen(function* () {
+        const owner = yield* ownerWithHost(directory)
+        prepared = yield* bind(owner)
+        records = yield* makeRecords(owner.custody, prepared, 2)
+        if (difference === 'membershipId') {
+          const genesis = Result.getOrThrow(
+            Bytes.genesisHash(Buffer.from(prepared.genesisHashHex, 'hex'))
+          )
+          const signer = yield* owner.custody.openDevice(genesis),
+            joining = yield* owner.custody.prepareDevice()
+          const request = yield* prepareJoinRequest({
+            genesis,
+            requestId: Result.getOrThrow(Bytes.requestId(Buffer.alloc(16, 34))),
+            userId: Result.getOrThrow(Bytes.userId(Buffer.alloc(32, 35))),
+            encryptionPublicKey: joining.enc,
+            expiresAt: null,
+            signer: joining
+          })
+          const view = Result.getOrThrow(
+            verifyLedger({
+              anchor: genesis,
+              records,
+              checkpoint: { head: hashRecordBytes(records.at(-1)), length: records.length }
+            })
+          )
+          records.push(
+            yield* signLedgerRecord(
+              Result.getOrThrow(
+                prepareLedgerCommand(view, signer.publicKey, {
+                  _tag: 'AdmitMember',
+                  membershipId: Result.getOrThrow(Bytes.membershipId(Buffer.from(secondId, 'hex'))),
+                  request
+                })
+              ),
+              signer
+            )
+          )
+          yield* owner.custody.discardDevice(joining)
+        }
+        yield* owner.host.open(workspaceId)
+        yield* owner.host.ingestLedgerRecords(
+          workspaceId,
+          page(records, prepared.genesisHashHex, 0)
+        )
+        assert.equal(
+          Result.isFailure(yield* Effect.result(owner.host.manage(workspaceId, before, remote))),
+          true
+        )
+      })
+    )
+    const uncertainLength = records.length
+    blocked = false
+    await execute(
+      Effect.gen(function* () {
+        const owner = yield* ownerWithHost(directory)
+        yield* owner.host.open(workspaceId)
+        assert.equal(yield* owner.host.manage(workspaceId, after, remote), 'Committed')
+        assert.ok(records.length > uncertainLength, 'the new intent must commit after old recovery')
+        assert.equal(
+          records.filter((record) => Buffer.from(record).equals(Buffer.from(original))).length,
+          1
+        )
+        const op = Result.getOrThrow(decodeRecord(records.at(-1))).body.operation
+        assert.equal(op.type, after.type)
+        assert.equal(hex(op.membershipId.toBytes()), after.membershipId)
+        if (after.type === 'setRole') assert.equal(op.role, after.role)
+        assert.equal((yield* owner.host.status(workspaceId)).epoch, 0)
+      })
+    )
+  })
+}
 
 void test('member operation history releases on workspace close without reentering the account coordinator', async (t) => {
   const directory = await fixture(t)
@@ -3139,7 +3325,7 @@ void test('member operation history releases on workspace close without reenteri
         release = Deferred.makeUnsafe(),
         stopped = Deferred.makeUnsafe()
       const work = yield* Effect.forkChild(
-        owner.host.manageMember(
+        owner.host.manage(
           workspaceId,
           { type: 'removeMember', membershipId: '11'.repeat(16) },
           (signal) => {
@@ -3147,6 +3333,14 @@ void test('member operation history releases on workspace close without reenteri
               once: true
             })
             return {
+              staging: () => ({
+                stageGroup: () => Effect.die('member commands must not stage a candidate'),
+                readGroup: () => Effect.die('member commands must not read a candidate'),
+                deleteGroup: () => Effect.die('member commands must not delete a candidate')
+              }),
+              mailbox: () => {
+                throw new Error('member commands must not receive a candidate')
+              },
               log: {
                 read: () => Effect.die('not reached'),
                 appendCas: () => Effect.die('not reached')

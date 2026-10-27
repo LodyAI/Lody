@@ -96,4 +96,4 @@ genesis 固定值、历史检查点和模式证据保留。不导入旧共享开
 
 ## 成员管理与本地终结清理
 
-原生成员管理通过独立持久提交日志签署普通 SetRole 和 capability 1 的 RemoveMember。角色调整仅 Owner 可用；Owner/Admin 移除保持 epoch，复用设置里的密钥更新入口，rotationRequired 不阻塞发送。仅设备凭据确认的整成员移除触发自动清理：核对原生账号/设备/凭据，保留终结标记，停止并等待该工作区运行结束，再由账号协调器取得独占身份租约后删除原生数据。Renderer 仅清理已停止的账号/工作区/窗口副本、游标、高水位和待发送输入。CLI 同样先停止执行并等待结束，保留用户项目目录。租约繁忙或清理中断在下次打开相关工作区时重试；普通网络错误和单设备撤销保留数据。见[决定与限制](../notes/proposed/architecture/2026-10-28-e2ee-member-controls-and-local-removal.zh.md)。
+原生成员管理通过既有 `host.manage` 和持久提交日志签署普通 SetRole 和 capability 1 的 RemoveMember。只有 `rotate` 恢复未提交的 candidate；独立命令先按原件核实结果未知的 CAS，再完整比较操作意图后报告成功。角色调整仅 Owner 可用；Owner/Admin 移除保持 epoch，复用设置里的密钥更新入口，rotationRequired 不阻塞发送。仅设备凭据确认的整成员移除触发自动清理：核对原生账号/设备/凭据，保留终结标记，停止并等待该工作区运行结束，再由账号协调器取得独占身份租约后删除原生数据。Renderer 仅清理已停止的账号/工作区/窗口副本、游标、高水位和待发送输入。CLI 同样先停止执行并等待结束，保留用户项目目录。租约繁忙或清理中断在下次打开相关工作区时重试；普通网络错误和单设备撤销保留数据。见[决定与限制](../notes/proposed/architecture/2026-10-28-e2ee-member-controls-and-local-removal.zh.md)。

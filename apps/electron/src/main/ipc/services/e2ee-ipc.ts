@@ -814,58 +814,21 @@ export class E2eeIpc extends IpcService {
     // A newer local incarnation superseded the old credential's late response.
     throw new Error('e2ee_account_mismatch')
   }
-  private async manageMember(
-    workspaceId: string,
-    command: import('../../services/e2ee-member-management.mjs').MemberCommand
-  ) {
-    const id = sender()
-    if (
-      !/^[0-9a-f]{32}$/.test(command.membershipId) ||
-      (command.type === 'setMemberRole' && command.role !== 'admin' && command.role !== 'member')
-    )
-      throw new Error('e2ee_invalid-input')
-    const cloud = await desktopE2eeCloudClient()
-    const access = await withDesktopE2eeAccount(
-      (owner) =>
-        Effect.gen(function* () {
-          if (owner.accountId !== cloud.accountId || !owner.readers.get(workspaceId)?.has(id))
-            return yield* Effect.fail(new Error('e2ee_not_open'))
-          return {
-            accountId: owner.accountId,
-            credential: yield* owner.bootstrap.deviceCredential(workspaceId),
-            status: yield* owner.host.status(workspaceId),
-            work: owner.host.manageMember(workspaceId, command, (signal) => ({
-              log: cloud.client.ledgerLog(workspaceId, signal),
-              history: (request) => cloud.client.history(request, signal)
-            }))
-          }
-        }),
-      workspaceId,
-      false
-    )
-    const result = await runDesktopE2eeOperation(cloud.accountId, access.work).catch(
-      async (error) => {
-        // The admitted native owner has settled; only now may a credential diagnosis
-        // re-enter the account coordinator and schedule terminal cleanup.
-        try {
-          await Effect.runPromise(
-            cloud.client.contentStreamsToken({ workspaceId, credential: access.credential })
-          )
-        } catch (checked) {
-          if (checked instanceof E2eeMemberRemovedError) return this.removeLocalWorkspace(access)
-        }
-        throw error
-      }
-    )
-    if (result === 'Conflict') throw new Error('e2ee_member_management_conflict')
-  }
   @IpcMethod()
   async removeMember(workspaceId: string, membershipId: string) {
-    await this.manageMember(workspaceId, { type: 'removeMember', membershipId })
+    if (typeof membershipId !== 'string' || !/^[0-9a-f]{32}$/.test(membershipId))
+      throw new Error('e2ee_invalid-input')
+    await this.manage(workspaceId, { type: 'removeMember', membershipId })
   }
   @IpcMethod()
   async setMemberRole(workspaceId: string, membershipId: string, role: 'admin' | 'member') {
-    await this.manageMember(workspaceId, { type: 'setMemberRole', membershipId, role })
+    if (
+      typeof membershipId !== 'string' ||
+      !/^[0-9a-f]{32}$/.test(membershipId) ||
+      (role !== 'admin' && role !== 'member')
+    )
+      throw new Error('e2ee_invalid-input')
+    await this.manage(workspaceId, { type: 'setRole', membershipId, role })
   }
   @IpcMethod()
   async contentStreamsToken(
@@ -1089,64 +1052,64 @@ export class E2eeIpc extends IpcService {
       false
     )
   }
-  private async manageKeys(
+  private async manage(
     workspaceId: string,
-    command: { type: 'rotate' } | { type: 'revoke'; target: string }
+    command: import('../../services/e2ee-management.mjs').DesktopE2eeManagementCommand
   ) {
     const id = sender()
+    const cloud = await desktopE2eeCloudClient()
     const access = await withDesktopE2eeAccount(
       (owner) =>
         Effect.gen(function* () {
-          if (!owner.readers.get(workspaceId)?.has(id))
+          if (owner.accountId !== cloud.accountId || !owner.readers.get(workspaceId)?.has(id))
             return yield* Effect.fail(new Error('e2ee_not_open'))
+          const credential = yield* owner.bootstrap.deviceCredential(workspaceId)
           return {
             accountId: owner.accountId,
-            credential: yield* owner.bootstrap.deviceCredential(workspaceId)
+            credential,
+            status: yield* owner.host.status(workspaceId),
+            work: owner.host.manage(workspaceId, command, (signal) => ({
+              log: cloud.client.ledgerLog(workspaceId, signal),
+              staging: (round) => cloud.client.staging({ workspaceId, credential }, signal, round),
+              history: (request) => cloud.client.history(request, signal),
+              mailbox: () => cloud.client.mailbox({ workspaceId, credential }, signal)
+            }))
           }
         }),
       workspaceId,
       false
     )
-    const cloud = await desktopE2eeCloudClient()
-    if (cloud.accountId !== access.accountId) throw new Error('e2ee_account_mismatch')
-    const work = await withDesktopE2eeAccount(
-      (owner) =>
-        owner.accountId === access.accountId && owner.readers.get(workspaceId)?.has(id)
-          ? Effect.succeed(
-              owner.host.manage(workspaceId, command, (signal) => ({
-                log: cloud.client.ledgerLog(workspaceId, signal),
-                staging: (round) =>
-                  cloud.client.staging(
-                    { workspaceId, credential: access.credential },
-                    signal,
-                    round
-                  ),
-                history: (request) => cloud.client.history(request, signal),
-                mailbox: () =>
-                  cloud.client.mailbox({ workspaceId, credential: access.credential }, signal)
-              }))
-            )
-          : Effect.fail(new Error('e2ee_not_open')),
-      workspaceId,
-      false
+    const result = await runDesktopE2eeOperation(access.accountId, access.work).catch(
+      async (error) => {
+        this.pairingFailure = error
+        // Native work has settled. Credential diagnosis and terminal cleanup may
+        // now re-enter the account coordinator without waiting on their own owner.
+        try {
+          await Effect.runPromise(
+            cloud.client.contentStreamsToken({ workspaceId, credential: access.credential })
+          )
+        } catch (checked) {
+          if (checked instanceof E2eeMemberRemovedError) return this.removeLocalWorkspace(access)
+        }
+        throw error
+      }
     )
-    try {
-      const outcome = await runDesktopE2eeOperation(access.accountId, work)
-      if (outcome === 'Conflict') throw new Error('e2ee_management_conflict')
-    } catch (error) {
-      this.pairingFailure = error
-      throw error
-    }
+    if (result === 'Conflict')
+      throw new Error(
+        command.type === 'removeMember' || command.type === 'setRole'
+          ? 'e2ee_member_management_conflict'
+          : 'e2ee_management_conflict'
+      )
   }
   @IpcMethod()
   async updateKeys(workspaceId: string) {
-    await this.manageKeys(workspaceId, { type: 'rotate' })
+    await this.manage(workspaceId, { type: 'rotate' })
   }
   @IpcMethod()
   async revokeDevice(workspaceId: string, signingPublicKey: string) {
     if (typeof signingPublicKey !== 'string' || !/^[0-9a-f]{64}$/.test(signingPublicKey))
       throw new Error('e2ee_invalid-input')
-    await this.manageKeys(workspaceId, { type: 'revoke', target: signingPublicKey })
+    await this.manage(workspaceId, { type: 'revoke', target: signingPublicKey })
   }
   @IpcMethod()
   async status(workspaceId: string) {

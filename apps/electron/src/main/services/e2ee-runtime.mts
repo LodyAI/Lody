@@ -2,14 +2,10 @@ import { EpochCandidateStore, SubmissionJournal } from '@lody/e2ee-core/services
 import {
   desktopManagementStores,
   makeDesktopE2eeManagement,
+  type DesktopE2eeManagementCommand,
   type DesktopE2eeManagementRemote
 } from './e2ee-management.mjs'
 import { makeDesktopKeyMaintenance } from './e2ee-key-maintenance.mjs'
-import {
-  makeDesktopMemberManager,
-  type MemberCommand,
-  type MemberRemote
-} from './e2ee-member-management.mjs'
 import { rememberDesktopE2eeFailure } from './e2ee-diagnostics.mjs'
 import { randomUUID } from 'node:crypto'
 import { makeDesktopPersonalPairing } from './e2ee-personal-pairing.mjs'
@@ -44,7 +40,6 @@ import {
   type RetainedLedgerState
 } from '@lody/e2ee-core/protocol'
 import {
-  DeviceIdentity,
   EpochPublicationSource,
   EpochStagingStore,
   KeyMailbox,
@@ -57,7 +52,6 @@ import {
   WorkspaceScope
 } from '@lody/e2ee-core/services'
 import {
-  sqliteSubmissionJournal,
   sqliteDeliveryOutbox,
   sqliteDistributionJournal,
   sqliteReceiveJournal,
@@ -195,17 +189,13 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
       string,
       {
         manage: (
-          command: { type: 'rotate' } | { type: 'revoke'; target: string },
+          command: DesktopE2eeManagementCommand,
           ports: (signal: AbortSignal) => DesktopE2eeManagementRemote
         ) => Effect.Effect<unknown, unknown>
         managementState: () => Effect.Effect<import('@lody/platform').E2eeManagementState, unknown>
         scope: Scope.Closeable
         pairing: ReturnType<typeof makeDesktopLocalPairing>
         personalPairing: ReturnType<typeof makeDesktopPersonalPairing>
-        manageMember: (
-          command: MemberCommand,
-          remote: (signal: AbortSignal) => MemberRemote
-        ) => Effect.Effect<'Committed' | 'Conflict', unknown>
         status: () => Effect.Effect<E2eeRuntimeStatus, unknown>
         ledgerView: () => Effect.Effect<E2eeRuntimeLedgerView, unknown>
         observe: (checkpoint: ObservedCheckpoint) => Effect.Effect<void, unknown>
@@ -652,8 +642,6 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
         }
         let closeFailed = false
         let closeDone: Deferred.Deferred<void, DesktopE2eeRuntimeError> | undefined
-        let memberManager: Effect.Success<ReturnType<typeof makeDesktopMemberManager>> | undefined
-        let memberManaging: Deferred.Deferred<void, unknown> | undefined
         const closeEntry = Effect.suspend(() => {
           if (closeDone) return Deferred.await(closeDone)
           closeDone = Deferred.makeUnsafe<void, DesktopE2eeRuntimeError>()
@@ -663,7 +651,6 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
             Effect.gen(function* () {
               if (round) yield* Effect.exit(Deferred.await(round))
               if (managing) yield* Effect.exit(Deferred.await(managing))
-              if (memberManaging) yield* Effect.exit(Deferred.await(memberManaging))
               const result = yield* Effect.exit(Scope.close(scope, Exit.void))
               if (Exit.isFailure(result)) {
                 closeFailed = true
@@ -1112,7 +1099,7 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
             return yield* fail('invalid-ledger')
           })
         const manage = Effect.fnUntraced(function* (
-          command: { type: 'rotate' } | { type: 'revoke'; target: string },
+          command: DesktopE2eeManagementCommand,
           remote: (signal: AbortSignal) => DesktopE2eeManagementRemote
         ) {
           if (closing) return yield* fail('closed')
@@ -1167,59 +1154,10 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
           )
           return yield* result
         })
-        const manageMember = Effect.fnUntraced(function* (
-          command: MemberCommand,
-          remote: (signal: AbortSignal) => MemberRemote
-        ) {
-          if (closing) return yield* fail('closed')
-          if (memberManaging) return yield* Effect.fail(new Error('e2ee_member_management_pending'))
-          const done = Deferred.makeUnsafe<void, unknown>()
-          memberManaging = done
-          const result = yield* Effect.exit(
-            Effect.uninterruptible(
-              Effect.gen(function* () {
-                if (!memberManager) {
-                  const journalContext = yield* Layer.buildWithScope(
-                    sqliteSubmissionJournal({
-                      path: join(
-                        directory,
-                        `member-submission-${hex(device.publicKey.toBytes())}.sqlite`
-                      )
-                    }).pipe(Layer.provideMerge(base)),
-                    scope
-                  )
-                  memberManager = yield* makeDesktopMemberManager({
-                    identity: Context.get(storeContext, DeviceIdentity),
-                    genesis,
-                    journal: Context.get(journalContext, SubmissionJournal),
-                    verified,
-                    current: () => feed.current(),
-                    ports: (() => {
-                      const upstream = remote(networkAbort.signal)
-                      return {
-                        ...upstream,
-                        refresh: () =>
-                          refreshManagementHistory((request) => upstream.history(request))
-                      }
-                    })()
-                  }).pipe(Scope.provide(scope))
-                }
-                return yield* memberManager(command)
-              })
-            )
-          )
-          memberManaging = undefined
-          yield* Deferred.done(
-            done,
-            Exit.isSuccess(result) ? Exit.succeed(undefined) : Exit.failCause(result.cause)
-          )
-          return yield* result
-        })
         return {
           manage,
           managementState,
           scope,
-          manageMember,
           pairing,
           personalPairing,
           status,
@@ -1313,7 +1251,7 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
         run(Effect.flatMap(openWorkspace(workspaceId), (entry) => entry.managementState())),
       manage: (
         workspaceId: string,
-        command: { type: 'rotate' } | { type: 'revoke'; target: string },
+        command: DesktopE2eeManagementCommand,
         ports: (signal: AbortSignal) => DesktopE2eeManagementRemote
       ) =>
         Effect.flatMap(run(openWorkspace(workspaceId)), (entry) =>
@@ -1340,22 +1278,6 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
                   : 'management_retry'
             )
           })
-        ),
-      manageMember: (
-        workspaceId: string,
-        command: MemberCommand,
-        remote: (signal: AbortSignal) => MemberRemote
-      ) =>
-        Effect.flatMap(
-          run(
-            Effect.suspend(() => {
-              const entry = entries.get(workspaceId)
-              return entry && !entry.isClosing()
-                ? Effect.succeed(entry)
-                : Effect.fail(fail('closed'))
-            })
-          ),
-          (entry) => entry.manageMember(command, remote)
         ),
       personalPairingOffer: (workspaceId: string) =>
         run(Effect.flatMap(openWorkspace(workspaceId), (entry) => entry.personalPairing.offer())),
