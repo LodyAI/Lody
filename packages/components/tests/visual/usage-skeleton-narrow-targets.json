@@ -1,0 +1,38 @@
+{
+  "viewports": [
+    {
+      "name": "narrow",
+      "width": 320,
+      "height": 1100
+    }
+  ],
+  "themes": ["light", "dark"],
+  "reducedMotion": "reduce",
+  "locale": "en",
+  "ids": [
+    "settings-ownedusageskeletonmigration--day",
+    "settings-ownedusageskeletonmigration--year"
+  ],
+  "ready": {
+    "settings-ownedusageskeletonmigration--day": [
+      {
+        "action": "visible",
+        "selector": "[data-usage-skeleton-ready=\"true\"] [role=\"status\"]"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => { const host=document.querySelector('[data-usage-skeleton-ready=\"true\"]'); const card=host?.querySelector('[role=status][aria-busy=true]'); if (!card) return false; const scope=host.dataset.usageSkeletonScope; if (scope!=='default' && getComputedStyle(card).getPropertyValue('--spacing').trim()!=='7px') return false; const maximum=Number(host.dataset.usageSkeletonMaxWidth); if (maximum) { const container=[...card.querySelectorAll('*')].find(el=>getComputedStyle(el).containerType==='inline-size'); if (!container || Math.abs(container.getBoundingClientRect().width-(Math.min(innerWidth,maximum)-34))>0.01) return false; } return true; }"
+      }
+    ],
+    "settings-ownedusageskeletonmigration--year": [
+      {
+        "action": "visible",
+        "selector": "[data-usage-skeleton-ready=\"true\"] [role=\"status\"]"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => { const host=document.querySelector('[data-usage-skeleton-ready=\"true\"]'); const card=host?.querySelector('[role=status][aria-busy=true]'); if (!card) return false; const scope=host.dataset.usageSkeletonScope; if (scope!=='default' && getComputedStyle(card).getPropertyValue('--spacing').trim()!=='7px') return false; const maximum=Number(host.dataset.usageSkeletonMaxWidth); if (maximum) { const container=[...card.querySelectorAll('*')].find(el=>getComputedStyle(el).containerType==='inline-size'); if (!container || Math.abs(container.getBoundingClientRect().width-(Math.min(innerWidth,maximum)-34))>0.01) return false; } return true; }"
+      }
+    ]
+  }
+}

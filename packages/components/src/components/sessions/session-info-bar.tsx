@@ -145,6 +145,9 @@ export type SessionInfoBarProps = {
  * persistent visibility and direct manipulation next to the composer.
  */
 
+const DARK =
+  ':where(.dark, .dark *, .dark-scope, .dark-scope *):not(:where(.light-scope, .light-scope *))';
+
 const styles = stylex.create({
   machineOnly: {
     display: 'flex',
@@ -190,9 +193,15 @@ const styles = stylex.create({
     gap: themeSpace[1.5],
     borderWidth: '0.5px',
     borderStyle: 'solid',
-    borderColor: 'hsl(var(--foreground) / 0.1)',
+    borderColor: {
+      default: 'hsl(var(--foreground) / 0.1)',
+      [DARK]: 'color-mix(in oklab, hsl(var(--input-border) / 1) 45%, transparent)',
+    },
     borderRadius: themeRadius.lg,
-    backgroundColor: 'hsl(var(--composer))',
+    backgroundColor: {
+      default: 'hsl(var(--composer))',
+      [DARK]: 'color-mix(in oklab, hsl(var(--input) / 1) 70%, transparent)',
+    },
     paddingInline: themeSpace[2],
   },
   /** The machine button carries its own 8px padding (chips carry 4px): trim
@@ -209,7 +218,10 @@ const styles = stylex.create({
     gap: themeSpace[1],
     borderRadius: themeRadius.md,
     paddingInline: themeSpace[1],
-    color: 'oklch(55.5% 0.163 48.998)',
+    color: {
+      default: 'oklch(55.5% 0.163 48.998)',
+      [DARK]: 'var(--color-amber-300, oklch(87.9% 0.169 91.605))',
+    },
     backgroundColor: {
       default: 'transparent',
       '@media (hover: hover)': { ':hover': 'hsl(var(--muted-foreground) / 0.1)' },
@@ -218,6 +230,12 @@ const styles = stylex.create({
       'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke, --tw-gradient-from, --tw-gradient-via, --tw-gradient-to',
     transitionDuration: themeDuration[150],
     transitionTimingFunction: themeEasing['in-out'],
+  },
+  previewActionInk: {
+    color: {
+      default: 'var(--color-emerald-600, oklch(59.6% 0.145 163.225))',
+      [DARK]: 'var(--color-emerald-400, oklch(76.5% 0.177 163.223))',
+    },
   },
   privateAccessGlyph: {
     width: themeSpace[3.5],
@@ -471,14 +489,7 @@ export function SessionInfoBar({
   const surfaceProps = hasSurfaceContent
     ? {
         ...surfaceStyleProps,
-        className: clsx(
-          surfaceStyleProps.className,
-          // The dark variants of the border and the fill are the only Tailwind
-          // left on this surface: StyleX cannot select a `.dark` ancestor.
-          'dark:border-input-border/45 dark:bg-input/70',
-          INFO_BAR_TEXT_CLASS,
-          INFO_BAR_ELEVATION_CLASS
-        ),
+        className: clsx(surfaceStyleProps.className, INFO_BAR_TEXT_CLASS, INFO_BAR_ELEVATION_CLASS),
       }
     : stylex.props(styles.machineOnly);
 
@@ -505,12 +516,6 @@ export function SessionInfoBar({
             <button
               type="button"
               {...privateAccessButtonProps}
-              className={clsx(
-                privateAccessButtonProps.className,
-                // The dark variant of a hard-coded colour stays in Tailwind:
-                // StyleX cannot select a `.dark` ancestor.
-                'dark:text-amber-300'
-              )}
               title={privateAccessStatus.description}
               aria-label={privateAccessStatus.description}
               onClick={privateAccessStatus.onAction}
@@ -546,7 +551,7 @@ export function SessionInfoBar({
             <ActionChip
               icon={MonitorPlay}
               label={t('sessions.browser.openPreview', 'Open preview')}
-              textClassName="text-emerald-600 dark:text-emerald-400"
+              textClassName={stylex.props(styles.previewActionInk).className}
               onAction={onOpenBrowser}
             />
           ) : null}
@@ -554,7 +559,7 @@ export function SessionInfoBar({
             <ActionChip
               icon={Smartphone}
               label={t('sessions.detailTabs.iosSimulator', 'iOS Simulator')}
-              textClassName="text-emerald-600 dark:text-emerald-400"
+              textClassName={stylex.props(styles.previewActionInk).className}
               onAction={onOpenIosSimulator}
             />
           ) : null}

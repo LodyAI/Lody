@@ -151,6 +151,19 @@ ring，但阴影仍然存在。自有 marker 条件保持悬停与焦点作用�
 Tailwind utility 消失后变量声明被移除。Swipe 键盘检查保留原透明焦点 ring，验证焦点与
 Enter 行为，不宣称存在可见的焦点指示器。
 
+归属叶组件续迁实际移除 13 个工具类：`usage-calendar-skeleton.tsx` 11→7、
+`session-info-bar.tsx` 7→0、`conversation-outline-rail.tsx` 7→5。Skeleton 只迁移
+四处调用方布局，包括准确的局部 `calc(var(--spacing) * 1.5)`；primitive display、
+圆角及已记录的环形材质继续保留。InfoBar 保留完整应用 dark/light-scope 选择器、
+局部 input/border alpha mix 和调色板覆盖。amber/emerald 变量附带锁定调色板的精确
+fallback，因为最后一个 utility 消失后编译器可能裁掉变量声明。即使自有静态工具类为零，
+导入的 composer elevation 类和未解析类名组合仍是依赖。
+
+Outline Rail 保留三个祖先状态颜色 group、`@[928px]:flex` 边界及预览卡片 `p-3`。
+真实公开调用方会把静止刻度改为紫色，但原 hover/focus 选择器仍覆盖它；若把这些规则
+移到更早的 StyleX 层，调用方反而开始获胜。本次只迁移两个滚动条工具类，保留原合同，
+不提高 specificity，也不修改控件 API、DOM、事件、几何引擎或生命周期。
+
 ## 可复现证据
 
 [视觉工具](../../../../packages/components/tests/visual/visual-regression.mjs)在 Chromium
@@ -343,11 +356,11 @@ utility 的修正源码参考，两种控制都不是完整历史 HEAD UI。源�
 属性行、安装指引与信息 Chip 批次再迁移 73 处 utility，保留原 DOM、事件和控件 API。
 此前未被消费的 `PropertyRowWide` 现有真实组件夹具，包含调用方子元素宽度冲突。
 
-| 界面 | Utility 前 → 后 | 保留约束 |
-| --- | --- | --- |
-| 日程属性行与字段标记 | 37 → 10 | 两个未知子元素宽度选择器及八个既有卡片/ghost 兼容项。 |
-| Bub 安装指引 | 29 → 8 | Button 外观与尺寸覆盖。 |
-| 信息 Chip 与 CI 弹层 | 33 → 8 | 原语最大宽度、内边距和阴影覆盖；宽度与边框色单独迁移。 |
+| 界面                 | Utility 前 → 后 | 保留约束                                               |
+| -------------------- | --------------- | ------------------------------------------------------ |
+| 日程属性行与字段标记 | 37 → 10         | 两个未知子元素宽度选择器及八个既有卡片/ghost 兼容项。  |
+| Bub 安装指引         | 29 → 8          | Button 外观与尺寸覆盖。                                |
+| 信息 Chip 与 CI 弹层 | 33 → 8          | 原语最大宽度、内边距和阴影覆盖；宽度与边框色单独迁移。 |
 
 子树变量检查发现真实回归：`stylex.defineVars` 在定义作用域解析依赖，继承的别名
 已在根节点解析 `--spacing`、圆角及颜色，而原 utility 在元素自身读取这些变量。
@@ -603,6 +616,43 @@ rAF、DOM anchor 回算及小数截位，尚未证明栅格原因。通用完整
 最终桌面环境逐项核对 SDK peer 与锁文件，包含 Zod 4.3.6；被替代的 combined 报告保留
 较早的 peer 版本不匹配。组件截图证据不变，最终报告另以锁定环境重跑 CLI／桌面验证。
 
+### 自有布局与主题叶组件
+
+`leaves3-acceptance.html` 的证据由 316 对真实浏览器执行截图组装：172 对 primary 和
+144 对独立 native 执行，其中 InfoBar 48 对、Outline Rail 96 对。计数区分实际采集来源，
+UI 状态可以重合。316 对完整 PNG 全部逐字节一致，42,970 个报告配对节点的记录字段
+相同，既定阈值像素差异为零。独立组装检查逐值保留 native 每行准确的 13 个比较器字段
+以及原始 PNG 字节/SHA；完整 native 快照和全字段证明仍保留。144 对原始 native 执行
+的全部记录字段也一致。另 14 组重合的 Skeleton CSS 观测比较 5,592 个节点和
+8,753,714 项 CSS 属性，不另计截图对数或报告节点。覆盖准确根/子树间距、局部调色板输入、
+嵌套主题作用域及真实 671/672/673px 容器。独立直接文件 HTML 审查核实全部 401 个
+唯一 PNG、632 个正式截图来源及八个补充原图；搜索/过滤、原图指针与键盘操作、关闭清理
+及 1280/390px 布局通过，页面错误和外部请求为零。被拒的指标标签与旧 HTTP 页面运行
+保留为独立证据，只签收最终文件。
+
+另两对仅迁移后的调色板裁剪控制在真实生产控件上移除全部三个 palette 变量，等待有限
+动画结束及四帧完整 CSS 稳定后，明暗 PNG 与同源普通状态逐字节一致。原始计算颜色
+从 Oklch 变为编译器实际输出的 Lab fallback polyfill；这些字段保留，不称字符串完全
+相同。三个颜色在 Chromium 的 sRGB／Display-P3 × unorm8／float16 采样中通道差为零，
+不推断 float32、任意未来背景或过渡中间态。初始计算字符串相等断言的失败仍保留为
+诊断证据。这两对运行时控制不计入 316 对正式迁移截图，也不属于其零字段差异声明。
+
+Skeleton 被接受的 CSS 观测两侧各保留相同的 5,948 条已知控制台 warning。共享 primitive
+仅传宽度的动态 size 调用被编译为 undefined height atom，由 StyleQ 报告；四处布局迁移
+没有修复这个既有错误。最初严格控制台运行及非零退出保留为诊断证据，最终 observer
+只对该精确消息分类，保留零额外错误、外部请求及采集失败。primitive 的真实 reduced-motion
+CSS 停止呼吸动画，实际观察到零动画；正常动效下的呼吸未对比。窄屏 footer 原裁切不变，
+没有隐藏绘制来获得相同截图。历史全部 OPEN，包括 638 对最新 main 报告的差异，均未
+因此关闭或重新分类。
+
+当前组件检查 620 文件／6,207 测试通过；类型、typed lint、Effect lint、脚本、格式及
+独立边界检查通过。初始根 `pnpm check` 有 15 个 CLI 测试失败，其中 14 个遇到主机
+commit signing 环境问题，另一个是既有 Git 身份断言。仅以命令局部
+`commit.gpgsign=false` 重跑 CLI 后，4,868 个测试通过，身份断言仍失败；Git 配置与
+产品行为未改，两次均不能称根检查通过。重新构建的实际 Electron 于
+`2026-10-27T12:22:33.898Z` 通过四个界面并保留真实 after-only 截图；它只证明应用
+冒烟，不构成配对回归，也不关闭历史应用差异。
+
 ## 后续工作
 
 基于编译器的[用量统计](../../../../packages/components/scripts/tailwind-usage.mjs)
@@ -640,8 +690,11 @@ Markdown 基础类，并解析了一个旧表达式：修正后的基线为 2,13
 （components 1,624、`src/ui` 487、routes 5），仍为 186 文件及 764 个未解析表达式。
 与旧快照 2,107 相比的增加来自盘点修正，没有新增 Tailwind 样式；这些数值都不是完成率。
 
-同步 main 后，同口径当前快照为 2,102 处（components 1,610、`src/ui` 487、routes 5），
-186 个文件及 760 个未解析表达式；额外变化包含上游新增和退役 UI，不另计作迁移移除。
+同步 main 后，同口径快照为 2,102 处（components 1,610、`src/ui` 487、routes 5），
+186 个文件及 760 个未解析表达式；该变化包含上游新增和退役 UI，不另计作迁移移除。
+Skeleton／InfoBar／Outline Rail 批次随后以同一方法实际减少 13 处，留下 **2,089 处**
+（components 1,597、`src/ui` 487、routes 5），185 个文件及 759 个未解析表达式。
+这些数值是实测下界，不是迁移完成百分比。
 
 WebWorkspaceLayout 仍延期，等待真实 sidebar/runtime/router 组合的
 适度生产组件夹具，避免以替身 UI 声称验收。

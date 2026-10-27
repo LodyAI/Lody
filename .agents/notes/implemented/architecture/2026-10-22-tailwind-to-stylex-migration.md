@@ -204,6 +204,24 @@ may be removed when Tailwind no longer sees a consuming utility. Swipe keyboard
 checks preserve the original transparent focus ring; they establish focus and
 Enter behavior without claiming a visible focus indicator.
 
+The owned-leaf continuation removes 13 utilities: `usage-calendar-skeleton.tsx`
+11→7, `session-info-bar.tsx` 7→0 and `conversation-outline-rail.tsx` 7→5.
+Skeleton moves only four caller-layout declarations, including the exact local
+`calc(var(--spacing) * 1.5)`; primitive display, corners and the documented ring
+material remain. InfoBar preserves the complete app dark/light-scope selector,
+local input/border alpha mixes and palette overrides. Its amber/emerald variable
+references have exact locked-palette fallbacks: compiler pruning can remove the
+last declaration when no utility consumes it. The imported composer elevation
+class and unresolved class composition remain dependencies even with zero owned
+static utilities.
+
+Outline Rail retains three ancestor-state color groups, its `@[928px]:flex`
+boundary and the preview card's `p-3`. A real public caller makes resting ticks
+purple, but the original hover/focus selectors override it. Moving those
+selectors to the earlier StyleX layer would let that caller win instead. The two
+migrated scrollbar utilities preserve that existing contract; no extra specificity,
+control API, DOM, event, geometry engine or lifecycle change is introduced.
+
 ## Reproducible evidence
 
 The [visual harness](../../../../packages/components/tests/visual/visual-regression.mjs)
@@ -477,11 +495,11 @@ utility occurrences into local StyleX while preserving the existing DOM, events
 and control APIs. Real fixtures now cover the formerly unconsumed `PropertyRowWide`
 export, including caller child-width conflicts.
 
-| Surface | Utilities before → after | Retained contract |
-| --- | --- | --- |
-| Schedule property rows and field marks | 37 → 10 | Two unknown-child width selectors plus eight existing card/ghost compatibility utilities. |
-| Bub installation guide | 29 → 8 | Button appearance and sizing overrides. |
-| Information chips and CI popovers | 33 → 8 | Primitive maximum width, padding and shadow overrides; width and border color are independently migrated. |
+| Surface                                | Utilities before → after | Retained contract                                                                                         |
+| -------------------------------------- | ------------------------ | --------------------------------------------------------------------------------------------------------- |
+| Schedule property rows and field marks | 37 → 10                  | Two unknown-child width selectors plus eight existing card/ghost compatibility utilities.                 |
+| Bub installation guide                 | 29 → 8                   | Button appearance and sizing overrides.                                                                   |
+| Information chips and CI popovers      | 33 → 8                   | Primitive maximum width, padding and shadow overrides; width and border color are independently migrated. |
 
 Subtree variable probes exposed a real migration bug: `stylex.defineVars`
 references resolve at their definition scope. An inherited alias had already
@@ -856,6 +874,59 @@ including Zod 4.3.6. The superseded combined report retains an earlier peer-vers
 mismatch; component screenshot evidence is unchanged, and locked CLI/desktop
 validation is repeated for the final report.
 
+### Owned layout and theme leaves
+
+The `leaves3-acceptance.html` evidence is assembled from 316 paired real-browser
+executions: 172 primary and 144 additional native executions, comprising 48
+InfoBar and 96 Outline Rail frames. These counts identify separate capture
+origins; UI states can overlap. All 316 whole PNGs are byte-identical, all 42,970
+paired report nodes have equal recorded fields, and the unchanged threshold has
+zero differing pixels. Independent assembly checks preserve every native row's
+exact 13 comparator fields and source PNG bytes/SHA; complete original native
+snapshots and full-field proofs remain available. All recorded fields in the 144
+raw native executions also match. Fourteen overlapping Skeleton CSS observations
+compare another 5,592 nodes and 8,753,714 CSS properties without adding screenshot
+pairs or report nodes. Exact root/subtree spacing, local palette inputs, nested
+theme scopes and real 671/672/673px containers are covered. Independent direct-file
+HTML review verifies all 401 unique PNG payloads, 632 formal image origins and
+eight supplemental source images. Search/filter, original-image pointer and
+keyboard actions, close cleanup and 1280/390px layouts pass with zero page errors
+or external requests. The rejected metrics label and stale HTTP-page run remain
+separate evidence; only the final file is signed as reviewed.
+
+Two additional after-only palette-pruning controls render the actual production
+controls with all three palette variables removed. After finite animations and
+four stable full-CSS frames, light/dark PNGs are byte-identical to their ordinary
+same-source counterparts. Raw computed inks change from Oklch to the compiler's
+Lab fallback polyfill; those fields are retained rather than called exact string
+matches. Three-color Chromium samples in sRGB and Display-P3, each using unorm8
+and float16, have zero measured channel delta. This does not prove float32,
+arbitrary future backgrounds or intermediate transitions. Initial computed-string
+equality failures remain diagnostic evidence. These two runtime controls are
+outside the 316 formal migration pairs and their zero-field-difference claim.
+
+Skeleton's accepted CSS observations retain 5,948 identical known console
+warnings on each side. The shared primitive's width-only dynamic size call
+compiles an undefined height atom, which StyleQ reports; this pre-existing bug
+is not repaired by the four layout migrations. The initial strict-console run
+and its nonzero exit remain diagnostic evidence. The accepted observer classifies
+only that exact warning and records zero unexpected errors, external requests or
+capture failures. The primitive's actual reduced-motion CSS disables breathing,
+with zero animations observed; normal-motion breathing is not compared. Original
+narrow footer clipping remains unchanged. No paint is hidden to make the captures
+match, and none of the historical OPEN pairs, including the 638-pair latest-main
+report, is closed or reclassified by this batch.
+
+Current component checks pass 620 files / 6,207 tests. Types, typed lint, Effect
+lint, scripts, formatting and independent boundary checks pass. The initial root
+`pnpm check` fails 15 CLI tests: 14 encounter the host's commit-signing environment,
+and one is the existing Git-identity assertion. A CLI rerun with command-local
+`commit.gpgsign=false` passes 4,868 tests but retains that identity failure; Git
+configuration and product behavior stay unchanged. Neither run is a root-check
+pass. The rebuilt actual Electron smoke at `2026-10-27T12:22:33.898Z` passes four
+views with real after-only screenshots. It supplies application smoke evidence,
+not paired regression coverage or closure of historical application differences.
+
 ## Remaining work
 
 Compiler-backed [usage inventory](../../../../packages/components/scripts/tailwind-usage.mjs)
@@ -908,10 +979,13 @@ across 186 files and 764 unresolved expressions. The increase from the earlier
 2,107 snapshot is a scanner correction, not added Tailwind styling. Neither count
 is a completion percentage.
 
-After reconciling main, the current same-method snapshot is 2,102 occurrences
+After reconciling main, the same-method snapshot was 2,102 occurrences
 (components 1,610, `src/ui` 487, routes 5) across 186 files with 760 unresolved
-expressions. The additional change includes upstream additions and retired UI;
-it is not another claimed migration removal.
+expressions. That change includes upstream additions and retired UI rather than
+another claimed migration removal. The owned Skeleton/InfoBar/Outline Rail batch
+then removes 13 on the same method, leaving **2,089 occurrences** (components
+1,597, `src/ui` 487, routes 5) across 185 files and 759 unresolved expressions.
+These are measured lower bounds, not a completion percentage.
 
 WebWorkspaceLayout remains deferred until its actual sidebar/runtime/router
 graph has a bounded production-component fixture.

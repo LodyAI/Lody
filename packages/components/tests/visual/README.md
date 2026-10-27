@@ -108,42 +108,45 @@ It applies the same predicate after view changes on both immutable builds.
 
 ## Target profiles and interaction coverage
 
-| Profile                                                         | Coverage                                                                                                            |
-| --------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
-| `continuation-targets.json`                                     | Auth/workspace pages, mentions, mobile files and annotation stories at 390/768/1280px in both themes.               |
-| `files-targets.json`                                            | Real desktop file browser, folder/text/binary/error states and 767/768px boundaries.                                |
-| `draft-targets.json`                                            | Empty, ready and submitting drafts, typing, hover, keyboard focus and disabled controls.                            |
-| `interaction-targets.json`                                      | Mobile drill/Markdown/HTML, annotation collapse/hover/independent keyboard peek, textarea focus and disabled state. |
-| `session-leaf-targets.json`                                     | Usage variants, relation trees/confirmation and the delayed notification prompt.                                    |
-| `usage-portal-targets.json`                                     | Actually opened usage portals across seven variants.                                                                |
-| `regression-targets.json`                                       | Additional information-bar and onboarding checks; historical missing baselines remain explicit.                     |
-| `status-targets.json`                                           | Working grids, unread/collapse states and spinner callers in both themes, including reduced motion.                 |
-| `project-edit-targets.json`                                     | Actual project-editor entry, translations, truncation, keyboard/pointer activation and responsive boundaries.       |
-| `rename-targets.json`                                           | Actual rename dialog, title wrapping, disabled/pending save, failure/retry, focus and 639/640/641px boundaries.     |
-| `schedule-style-targets.json` | Wide schedule rows, child-width precedence, issue tooltips, caller overrides and 639/640px boundaries. |
-| `bub-style-targets.json` | Install guide copy success/failure, long translation, code overflow and keyboard/pointer states. |
-| `info-chip-style-targets.json` | Production action/cluster/stage chips, context actions, CI portals and 419/420/421px container boundaries. |
-| `legacy-task-targets.json` | Actual legacy TaskList rows, caller/root/subtree variable overrides, loading/empty/overflow and desktop pointer states. |
-| `legacy-updated-task-targets.json` | Actual legacy flat Updated list, status/anchor rows, rename, archive, show all/less and scoped variables. |
-| `owned-session-list-targets.json` | Active SessionList project groups, selection, caller/root/subtree overrides, menus, folding and empty/loading states. |
-| `owned-updated-session-targets.json` | Active Updated list trees, precise openers, project groups, caller overrides, read-only/overflow and archive/rename states. |
-| `owned-login-targets.json` | Login providers, email/handoff pending states, scoped spacing and actual 860/861px layout boundary. |
-| `mobile-project-settings-targets.json` | Production project settings with multiple machines, long labels, local editors, loading and read-only states. |
-| `mobile-account-settings-targets.json` | Production account/workspace settings, editable names, deferred token/invitation actions and scoped variables. |
-| `mobile-workspace-sheets-targets.json` | Actual create/delete drawers, validation, pending deletion, long translations and 320/390/768px layouts. |
-| `file-image-targets.json` | Actual fitted raster/SVG previews, null-source cases, constrained hosts, modal focus and close. |
-| `markdown-links-targets.json` | Actual prose/table file links, GitHub references, clipboard outcomes, caller overrides and read-only safety. |
-| `workspace-shell-targets.json` | Actual sidebar empty states, menus, tooltips, keyboard focus, resize and root/subtree variables. |
-| `sidebar-targets.json`                                          | Sidebar layouts, row parts, loading/empty/overflow and archive/menu states; narrow widths use a desktop UA.         |
-| `sidebar-mobile-targets.json`                                   | iPhone/Android descriptors, known-logo readiness and real touch menu/archive actions in both themes.                |
-| `sidebar-updated-interaction-targets.json`                      | Show all/less, selection, collapse/expand and focus/hover on the production Updated list.                           |
-| `sidebar-archive-long-targets.json`                             | Long-title clipping and slot geometry during archive confirmation and commit.                                       |
-| `sidebar-send-motion-targets.json`                              | Normal-motion send rings at SMIL times 0 and 0.6 seconds.                                                           |
-| `chat-targets.json`                                             | Composer/landing, selector menus, disabled-context hover/keyboard actions and connection-state transitions.         |
-| `chat-mobile-targets.json`                                      | Real iPhone/Android descriptors, touch actions, keyboard tooltip control and pasted-text layouts.                   |
-| `chat-mobile-home-targets.json`                                 | Mobile home headers, workspace logos, onboarding, crowded status and reconnect/offline states.                      |
-| `chat-boundary-targets.json`                                    | 311/312, 639/640 and 671/672px widths for compact composer and disabled-context styling.                            |
-| `chat-context-targets.json`, `chat-mobile-context-targets.json` | Independent corrected context-action/tooltip captures; retain invalid initial selector diagnostics.                 |
+| Profile                                                             | Coverage                                                                                                                    |
+| ------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| `continuation-targets.json`                                         | Auth/workspace pages, mentions, mobile files and annotation stories at 390/768/1280px in both themes.                       |
+| `files-targets.json`                                                | Real desktop file browser, folder/text/binary/error states and 767/768px boundaries.                                        |
+| `draft-targets.json`                                                | Empty, ready and submitting drafts, typing, hover, keyboard focus and disabled controls.                                    |
+| `interaction-targets.json`                                          | Mobile drill/Markdown/HTML, annotation collapse/hover/independent keyboard peek, textarea focus and disabled state.         |
+| `session-leaf-targets.json`                                         | Usage variants, relation trees/confirmation and the delayed notification prompt.                                            |
+| `usage-portal-targets.json`                                         | Actually opened usage portals across seven variants.                                                                        |
+| `regression-targets.json`                                           | Additional information-bar and onboarding checks; historical missing baselines remain explicit.                             |
+| `status-targets.json`                                               | Working grids, unread/collapse states and spinner callers in both themes, including reduced motion.                         |
+| `project-edit-targets.json`                                         | Actual project-editor entry, translations, truncation, keyboard/pointer activation and responsive boundaries.               |
+| `rename-targets.json`                                               | Actual rename dialog, title wrapping, disabled/pending save, failure/retry, focus and 639/640/641px boundaries.             |
+| `schedule-style-targets.json`                                       | Wide schedule rows, child-width precedence, issue tooltips, caller overrides and 639/640px boundaries.                      |
+| `bub-style-targets.json`                                            | Install guide copy success/failure, long translation, code overflow and keyboard/pointer states.                            |
+| `info-chip-style-targets.json`                                      | Production action/cluster/stage chips, context actions, CI portals and 419/420/421px container boundaries.                  |
+| `usage-skeleton-targets.json`, `usage-skeleton-narrow-targets.json` | Actual day/week/year placeholders, root/subtree spacing, 671/672/673px heatmap containers and 320px layouts.                |
+| `leaves3-info-bar-targets.json`                                     | Actual privacy/preview actions, compact and empty states, palette scopes and nested light/dark exclusions.                  |
+| `outline-rail-targets.json`                                         | Actual rail, overflow, portal and caller precedence at 927/928/929px container widths.                                      |
+| `legacy-task-targets.json`                                          | Actual legacy TaskList rows, caller/root/subtree variable overrides, loading/empty/overflow and desktop pointer states.     |
+| `legacy-updated-task-targets.json`                                  | Actual legacy flat Updated list, status/anchor rows, rename, archive, show all/less and scoped variables.                   |
+| `owned-session-list-targets.json`                                   | Active SessionList project groups, selection, caller/root/subtree overrides, menus, folding and empty/loading states.       |
+| `owned-updated-session-targets.json`                                | Active Updated list trees, precise openers, project groups, caller overrides, read-only/overflow and archive/rename states. |
+| `owned-login-targets.json`                                          | Login providers, email/handoff pending states, scoped spacing and actual 860/861px layout boundary.                         |
+| `mobile-project-settings-targets.json`                              | Production project settings with multiple machines, long labels, local editors, loading and read-only states.               |
+| `mobile-account-settings-targets.json`                              | Production account/workspace settings, editable names, deferred token/invitation actions and scoped variables.              |
+| `mobile-workspace-sheets-targets.json`                              | Actual create/delete drawers, validation, pending deletion, long translations and 320/390/768px layouts.                    |
+| `file-image-targets.json`                                           | Actual fitted raster/SVG previews, null-source cases, constrained hosts, modal focus and close.                             |
+| `markdown-links-targets.json`                                       | Actual prose/table file links, GitHub references, clipboard outcomes, caller overrides and read-only safety.                |
+| `workspace-shell-targets.json`                                      | Actual sidebar empty states, menus, tooltips, keyboard focus, resize and root/subtree variables.                            |
+| `sidebar-targets.json`                                              | Sidebar layouts, row parts, loading/empty/overflow and archive/menu states; narrow widths use a desktop UA.                 |
+| `sidebar-mobile-targets.json`                                       | iPhone/Android descriptors, known-logo readiness and real touch menu/archive actions in both themes.                        |
+| `sidebar-updated-interaction-targets.json`                          | Show all/less, selection, collapse/expand and focus/hover on the production Updated list.                                   |
+| `sidebar-archive-long-targets.json`                                 | Long-title clipping and slot geometry during archive confirmation and commit.                                               |
+| `sidebar-send-motion-targets.json`                                  | Normal-motion send rings at SMIL times 0 and 0.6 seconds.                                                                   |
+| `chat-targets.json`                                                 | Composer/landing, selector menus, disabled-context hover/keyboard actions and connection-state transitions.                 |
+| `chat-mobile-targets.json`                                          | Real iPhone/Android descriptors, touch actions, keyboard tooltip control and pasted-text layouts.                           |
+| `chat-mobile-home-targets.json`                                     | Mobile home headers, workspace logos, onboarding, crowded status and reconnect/offline states.                              |
+| `chat-boundary-targets.json`                                        | 311/312, 639/640 and 671/672px widths for compact composer and disabled-context styling.                                    |
+| `chat-context-targets.json`, `chat-mobile-context-targets.json`     | Independent corrected context-action/tooltip captures; retain invalid initial selector diagnostics.                         |
 
 `schedule-style-native.mjs`, `bub-style-native.mjs` and `info-chip-style-native.mjs`
 take `--phase <name> --storybook <immutable-url>`. They supplement screenshots
@@ -153,6 +156,14 @@ chip runner adds `--scope-only true` for its separate local-variable matrix. The
 install-guide fixture intercepts its existing browser clipboard and external-open
 boundaries; it never runs the displayed command or opens the live guide. Scope
 probes verify selector matching, not theme-provider persistence or native OS UI.
+
+`outline-rail-native.mjs` takes the same phase and immutable URL arguments. It
+records actual keyboard navigation, pointer preview/jump, touch, overflow scrolling
+and unrelated outer-marker states, including raw scrollbar pseudo styles. Caller
+descendant ink must retain its original priority relative to named hover/focus
+variants. Native frames are separate executions; overlapping states do not imply
+additional distinct UI coverage. Full-field observations supplement the report's
+smaller layout view without replacing the original screenshots.
 
 `legacy-task-native.mjs` and `legacy-updated-task-native.mjs` take the same phase
 and immutable URL arguments. TaskList writes `proof.json`: matching primary

@@ -1,0 +1,120 @@
+{
+  "viewports": [
+    {
+      "name": "compact",
+      "width": 640,
+      "height": 1100
+    },
+    {
+      "name": "desktop",
+      "width": 1024,
+      "height": 1100
+    }
+  ],
+  "themes": ["light", "dark"],
+  "reducedMotion": "reduce",
+  "locale": "en",
+  "ids": [
+    "settings-ownedusageskeletonmigration--day",
+    "settings-ownedusageskeletonmigration--week",
+    "settings-ownedusageskeletonmigration--month",
+    "settings-ownedusageskeletonmigration--year",
+    "settings-ownedusageskeletonmigration--root-spacing",
+    "settings-ownedusageskeletonmigration--subtree-spacing",
+    "settings-ownedusageskeletonmigration--container-below",
+    "settings-ownedusageskeletonmigration--container-boundary",
+    "settings-ownedusageskeletonmigration--container-above"
+  ],
+  "ready": {
+    "settings-ownedusageskeletonmigration--day": [
+      {
+        "action": "visible",
+        "selector": "[data-usage-skeleton-ready=\"true\"] [role=\"status\"]"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => { const host=document.querySelector('[data-usage-skeleton-ready=\"true\"]'); const card=host?.querySelector('[role=status][aria-busy=true]'); if (!card) return false; const scope=host.dataset.usageSkeletonScope; if (scope!=='default' && getComputedStyle(card).getPropertyValue('--spacing').trim()!=='7px') return false; const maximum=Number(host.dataset.usageSkeletonMaxWidth); if (maximum) { const container=[...card.querySelectorAll('*')].find(el=>getComputedStyle(el).containerType==='inline-size'); if (!container || Math.abs(container.getBoundingClientRect().width-(Math.min(innerWidth,maximum)-34))>0.01) return false; } return true; }"
+      }
+    ],
+    "settings-ownedusageskeletonmigration--week": [
+      {
+        "action": "visible",
+        "selector": "[data-usage-skeleton-ready=\"true\"] [role=\"status\"]"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => { const host=document.querySelector('[data-usage-skeleton-ready=\"true\"]'); const card=host?.querySelector('[role=status][aria-busy=true]'); if (!card) return false; const scope=host.dataset.usageSkeletonScope; if (scope!=='default' && getComputedStyle(card).getPropertyValue('--spacing').trim()!=='7px') return false; const maximum=Number(host.dataset.usageSkeletonMaxWidth); if (maximum) { const container=[...card.querySelectorAll('*')].find(el=>getComputedStyle(el).containerType==='inline-size'); if (!container || Math.abs(container.getBoundingClientRect().width-(Math.min(innerWidth,maximum)-34))>0.01) return false; } return true; }"
+      }
+    ],
+    "settings-ownedusageskeletonmigration--month": [
+      {
+        "action": "visible",
+        "selector": "[data-usage-skeleton-ready=\"true\"] [role=\"status\"]"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => { const host=document.querySelector('[data-usage-skeleton-ready=\"true\"]'); const card=host?.querySelector('[role=status][aria-busy=true]'); if (!card) return false; const scope=host.dataset.usageSkeletonScope; if (scope!=='default' && getComputedStyle(card).getPropertyValue('--spacing').trim()!=='7px') return false; const maximum=Number(host.dataset.usageSkeletonMaxWidth); if (maximum) { const container=[...card.querySelectorAll('*')].find(el=>getComputedStyle(el).containerType==='inline-size'); if (!container || Math.abs(container.getBoundingClientRect().width-(Math.min(innerWidth,maximum)-34))>0.01) return false; } return true; }"
+      }
+    ],
+    "settings-ownedusageskeletonmigration--year": [
+      {
+        "action": "visible",
+        "selector": "[data-usage-skeleton-ready=\"true\"] [role=\"status\"]"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => { const host=document.querySelector('[data-usage-skeleton-ready=\"true\"]'); const card=host?.querySelector('[role=status][aria-busy=true]'); if (!card) return false; const scope=host.dataset.usageSkeletonScope; if (scope!=='default' && getComputedStyle(card).getPropertyValue('--spacing').trim()!=='7px') return false; const maximum=Number(host.dataset.usageSkeletonMaxWidth); if (maximum) { const container=[...card.querySelectorAll('*')].find(el=>getComputedStyle(el).containerType==='inline-size'); if (!container || Math.abs(container.getBoundingClientRect().width-(Math.min(innerWidth,maximum)-34))>0.01) return false; } return true; }"
+      }
+    ],
+    "settings-ownedusageskeletonmigration--root-spacing": [
+      {
+        "action": "visible",
+        "selector": "[data-usage-skeleton-ready=\"true\"] [role=\"status\"]"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => { const host=document.querySelector('[data-usage-skeleton-ready=\"true\"]'); const card=host?.querySelector('[role=status][aria-busy=true]'); if (!card) return false; const scope=host.dataset.usageSkeletonScope; if (scope!=='default' && getComputedStyle(card).getPropertyValue('--spacing').trim()!=='7px') return false; const maximum=Number(host.dataset.usageSkeletonMaxWidth); if (maximum) { const container=[...card.querySelectorAll('*')].find(el=>getComputedStyle(el).containerType==='inline-size'); if (!container || Math.abs(container.getBoundingClientRect().width-(Math.min(innerWidth,maximum)-34))>0.01) return false; } return true; }"
+      }
+    ],
+    "settings-ownedusageskeletonmigration--subtree-spacing": [
+      {
+        "action": "visible",
+        "selector": "[data-usage-skeleton-ready=\"true\"] [role=\"status\"]"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => { const host=document.querySelector('[data-usage-skeleton-ready=\"true\"]'); const card=host?.querySelector('[role=status][aria-busy=true]'); if (!card) return false; const scope=host.dataset.usageSkeletonScope; if (scope!=='default' && getComputedStyle(card).getPropertyValue('--spacing').trim()!=='7px') return false; const maximum=Number(host.dataset.usageSkeletonMaxWidth); if (maximum) { const container=[...card.querySelectorAll('*')].find(el=>getComputedStyle(el).containerType==='inline-size'); if (!container || Math.abs(container.getBoundingClientRect().width-(Math.min(innerWidth,maximum)-34))>0.01) return false; } return true; }"
+      }
+    ],
+    "settings-ownedusageskeletonmigration--container-below": [
+      {
+        "action": "visible",
+        "selector": "[data-usage-skeleton-ready=\"true\"] [role=\"status\"]"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => { const host=document.querySelector('[data-usage-skeleton-ready=\"true\"]'); const card=host?.querySelector('[role=status][aria-busy=true]'); if (!card) return false; const scope=host.dataset.usageSkeletonScope; if (scope!=='default' && getComputedStyle(card).getPropertyValue('--spacing').trim()!=='7px') return false; const maximum=Number(host.dataset.usageSkeletonMaxWidth); if (maximum) { const container=[...card.querySelectorAll('*')].find(el=>getComputedStyle(el).containerType==='inline-size'); if (!container || Math.abs(container.getBoundingClientRect().width-(Math.min(innerWidth,maximum)-34))>0.01) return false; } return true; }"
+      }
+    ],
+    "settings-ownedusageskeletonmigration--container-boundary": [
+      {
+        "action": "visible",
+        "selector": "[data-usage-skeleton-ready=\"true\"] [role=\"status\"]"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => { const host=document.querySelector('[data-usage-skeleton-ready=\"true\"]'); const card=host?.querySelector('[role=status][aria-busy=true]'); if (!card) return false; const scope=host.dataset.usageSkeletonScope; if (scope!=='default' && getComputedStyle(card).getPropertyValue('--spacing').trim()!=='7px') return false; const maximum=Number(host.dataset.usageSkeletonMaxWidth); if (maximum) { const container=[...card.querySelectorAll('*')].find(el=>getComputedStyle(el).containerType==='inline-size'); if (!container || Math.abs(container.getBoundingClientRect().width-(Math.min(innerWidth,maximum)-34))>0.01) return false; } return true; }"
+      }
+    ],
+    "settings-ownedusageskeletonmigration--container-above": [
+      {
+        "action": "visible",
+        "selector": "[data-usage-skeleton-ready=\"true\"] [role=\"status\"]"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => { const host=document.querySelector('[data-usage-skeleton-ready=\"true\"]'); const card=host?.querySelector('[role=status][aria-busy=true]'); if (!card) return false; const scope=host.dataset.usageSkeletonScope; if (scope!=='default' && getComputedStyle(card).getPropertyValue('--spacing').trim()!=='7px') return false; const maximum=Number(host.dataset.usageSkeletonMaxWidth); if (maximum) { const container=[...card.querySelectorAll('*')].find(el=>getComputedStyle(el).containerType==='inline-size'); if (!container || Math.abs(container.getBoundingClientRect().width-(Math.min(innerWidth,maximum)-34))>0.01) return false; } return true; }"
+      }
+    ]
+  }
+}

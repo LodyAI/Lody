@@ -164,9 +164,8 @@ const styles = stylex.create({
   },
   /**
    * The tick line itself. The colour it lifts to when the RAIL is hovered, the
-   * tick under the pointer and the tick the keyboard is on stay Tailwind group
-   * variants: StyleX has no descendant selector, so a group cannot be named
-   * from the child that watches it.
+   * tick under the pointer and the tick the keyboard is on retain their
+   * utilities-layer priority over a caller's lower-specificity descendant ink.
    */
   tickLine: {
     height: '2px',
@@ -189,6 +188,8 @@ const styles = stylex.create({
   strip: {
     pointerEvents: 'auto',
     overflowY: 'auto',
+    scrollbarWidth: 'none',
+    '::-webkit-scrollbar': { display: 'none' },
   },
   track: { position: 'relative' },
   list: {
@@ -724,11 +725,7 @@ export function ConversationOutlineRail({
       <div
         ref={scrollRef}
         onScroll={syncEdgeFade}
-        className={clsx(
-          '[scrollbar-width:none]',
-          '[&::-webkit-scrollbar]:hidden',
-          stylex.props(styles.strip).className
-        )}
+        {...stylex.props(styles.strip)}
         style={{
           // Capped rather than full-height: a long session otherwise runs the
           // ticks edge to edge and the rail reads as page chrome instead of a
@@ -810,9 +807,7 @@ export function ConversationOutlineRail({
         >
           {hoveredEntry === null ? null : (
             <>
-              <div {...stylex.props(styles.cardTitle)}>
-                {jumpLabel(hoveredEntry)}
-              </div>
+              <div {...stylex.props(styles.cardTitle)}>{jumpLabel(hoveredEntry)}</div>
               <div {...stylex.props(styles.cardPreview)}>
                 {hoveredEntry.preview ||
                   (hoveredEntry.startsWithAgent

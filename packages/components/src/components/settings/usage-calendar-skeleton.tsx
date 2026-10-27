@@ -1,6 +1,7 @@
 import { useTranslation } from 'react-i18next';
 import * as stylex from '@stylexjs/stylex';
 import { Skeleton } from '@lody/ui/skeleton';
+import { withClassName } from '@/lib/stylex';
 import type { SettingsUsageRange } from './settings-data-cache';
 import {
   CELL_GAP_PX,
@@ -14,6 +15,10 @@ import {
 const COLOR_MIX = '@supports (color: color-mix(in lab, red, red))';
 
 const styles = stylex.create({
+  linePillAlignment: { verticalAlign: 'middle' },
+  compositionBar: { marginTop: 'calc(var(--spacing) * 1.5)' },
+  legendTrailingValue: { marginLeft: 'auto' },
+  calendarCellShape: { aspectRatio: '1 / 1' },
   screenReaderOnly: {
     position: 'absolute',
     width: '1px',
@@ -304,7 +309,11 @@ function LinePill({
     variant === 'value' ? styles.lineValue : variant === 'ring' ? styles.lineRing : null;
   return (
     <div aria-hidden="true" {...stylex.props(styles.line, lineStyle, variantStyle)}>
-      <Skeleton height="0.75em" width={width} className="inline-block align-middle" />
+      <Skeleton
+        height="0.75em"
+        width={width}
+        {...withClassName(stylex.props(styles.linePillAlignment), 'inline-block')}
+      />
     </div>
   );
 }
@@ -329,7 +338,12 @@ function CompositionSkeleton() {
       {columns.map((label) => (
         <div key={label} {...stylex.props(styles.compositionColumn)}>
           <p {...stylex.props(styles.compositionTitle)}>{label}</p>
-          <Skeleton shape="circle" height={6} width="100%" className="mt-1.5" />
+          <Skeleton
+            shape="circle"
+            height={6}
+            width="100%"
+            {...stylex.props(styles.compositionBar)}
+          />
           {/* The real legend wraps to two `text-[10px]` rows at this width. */}
           <div {...stylex.props(styles.compositionLegend)}>
             {[
@@ -433,7 +447,7 @@ function RingSkeleton() {
           <div key={index} {...stylex.props(styles.ringLegendItem)}>
             <Skeleton shape="circle" width={6} height={6} />
             <Skeleton height="0.75em" width={48} />
-            <Skeleton className="ml-auto" height="0.75em" width={20} />
+            <Skeleton {...stylex.props(styles.legendTrailingValue)} height="0.75em" width={20} />
           </div>
         ))}
       </div>
@@ -547,7 +561,7 @@ function YearSkeleton() {
                   key={index}
                   shape="block"
                   width="100%"
-                  className="aspect-square rounded-[20%]"
+                  {...withClassName(stylex.props(styles.calendarCellShape), 'rounded-[20%]')}
                 />
               ))}
             </div>
