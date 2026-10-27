@@ -46,7 +46,7 @@ explanation and the recovery share one card.
 
 ## Evidence and limits
 
-Synthetic behavioral coverage verifies the banner mount, one durable full-message
+Synthetic behavioral coverage verifies the banner mount (including a notice folded onto the preceding assistant row), one durable full-message
 reservation, frozen configuration, repeated clicks, uncertain-save retry, unchanged source
 history, missing/expired reset, weekly/foreign/stale quota, first-full-minute rounding,
 recovered conversations, and ownership/capability gates. Storybook fixtures cover desktop,

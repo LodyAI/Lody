@@ -308,6 +308,16 @@ describe('Claude quota continuation', () => {
     expect(quotaContinueSendAt(RESET + 59_999)).toBe(RESET + 60_000);
     expect(quotaContinueSendAt(RESET + 60_000)).toBe(RESET + 120_000);
   });
+  it('uses the assistant host row when the notice is folded onto it', async () => {
+    state.turns = [
+      user(),
+      entry('assistant', 'assistant', [{ type: 'text', text: 'Partial answer' }]),
+      failed(),
+    ];
+    expect(findClaudeSessionLimit(state.turns)?.noticeId).toBe('assistant');
+    await render('assistant');
+    expect(container.textContent).toContain('Schedule one “continue” message for 2:31 PM UTC');
+  });
   it('does not render the shortcut on a different failure entry', async () => {
     await render('an-older-failure');
     expect(container.textContent).toBe('');

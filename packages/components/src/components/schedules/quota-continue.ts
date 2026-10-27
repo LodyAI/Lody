@@ -22,7 +22,9 @@ export function isClaudeSessionLimitMessage(message: unknown): message is string
 /**
  * Finds a terminal Claude session-limit failure after the latest user turn.
  * A later assistant turn means the conversation recovered, so a historical
- * failure must not offer a new scheduled message.
+ * failure must not offer a new scheduled message. `noticeId` is the row the
+ * stream actually renders the notice in, which can be the preceding assistant
+ * row when the notice is folded onto it.
  */
 export function findClaudeSessionLimit(turns: readonly SessionHistory[]) {
   const userIndex = turns.findLastIndex((turn) => turn.role === 'user');
@@ -40,7 +42,17 @@ export function findClaudeSessionLimit(turns: readonly SessionHistory[]) {
     // JSON-RPC errors can wrap the provider message. Never interpret the clock text.
     if (!isClaudeSessionLimitMessage(message)) return null;
     const failedAt = Date.parse(turn.timestamp);
-    return Number.isFinite(failedAt) ? { user, failedAt, noticeId: turn.id } : null;
+    if (!Number.isFinite(failedAt)) return null;
+    // The stream folds a notice-only system row onto the assistant row directly
+    // before it. Name that rendered host row so the banner can prove the action
+    // belongs to this failure instead of a historical one.
+    const items = turn.items ?? [];
+    const previous = index > userIndex + 1 ? turns[index - 1] : undefined;
+    const mergedIntoPrevious =
+      previous?.role === 'assistant' &&
+      items.length > 0 &&
+      items.every((item) => item.type === 'system_notice');
+    return { user, failedAt, noticeId: mergedIntoPrevious ? previous.id : turn.id };
   }
   return null;
 }
