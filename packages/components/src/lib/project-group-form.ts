@@ -57,7 +57,10 @@ export const EMPTY_PROJECT_GROUP_FORM_VALUE: ProjectGroupFormValue = {
   members: [],
 };
 
-export type ProjectGroupFormError = 'name_required' | 'members_required';
+export type ProjectGroupFormError = 'name_required' | 'name_taken' | 'members_required';
+
+/** How two project names are compared: one project per name, ignoring case and edges. */
+export const normalizeProjectGroupName = (name: string): string => name.trim().toLocaleLowerCase();
 
 export type ProjectGroupMemberError =
   | 'dir_invalid'
@@ -308,12 +311,18 @@ export function bindProjectGroupToMachine(
 /** A name for a new project from its first member, unless one was typed. */
 export function suggestProjectGroupName(
   value: ProjectGroupFormValue,
-  labelOf: (member: ProjectGroupMemberDraft) => string
+  labelOf: (member: ProjectGroupMemberDraft) => string,
+  takenNames: ReadonlySet<string> = new Set()
 ): string {
   if (value.name.trim()) return value.name;
   const first = value.members[0];
   if (!first) return value.name;
-  return labelOf(first).split('/').filter(Boolean).pop() ?? value.name;
+  const base = labelOf(first).split('/').filter(Boolean).pop() ?? value.name;
+  if (!takenNames.has(normalizeProjectGroupName(base))) return base;
+  for (let index = 2; ; index++) {
+    const candidate = `${base} ${index}`;
+    if (!takenNames.has(normalizeProjectGroupName(candidate))) return candidate;
+  }
 }
 
 /**
@@ -446,10 +455,13 @@ const toProjectMember = (member: ProjectGroupMemberDraft): ProjectMember => ({
 
 export function validateProjectGroupForm(
   value: ProjectGroupFormValue,
-  resolveLocal?: ResolveLocalMemberRepository
+  resolveLocal?: ResolveLocalMemberRepository,
+  /** Other projects' names, normalized; this one's own name is not among them. */
+  takenNames?: ReadonlySet<string>
 ): ProjectGroupFormValidation {
   const errors: ProjectGroupFormError[] = [];
   if (!value.name.trim()) errors.push('name_required');
+  else if (takenNames?.has(normalizeProjectGroupName(value.name))) errors.push('name_taken');
   if (value.members.length === 0) errors.push('members_required');
 
   const memberErrors = new Map<ProjectMemberId, ProjectGroupMemberError>();

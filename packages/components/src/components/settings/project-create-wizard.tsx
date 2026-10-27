@@ -67,6 +67,13 @@ export type ProjectCreateWizardProps = {
   /** Editing marks the project's current answers and saves rather than creates. */
   mode?: 'create' | 'edit';
   onSubmit: () => void;
+  /**
+   * A new project of one folder or repository is not a project of several:
+   * the dialog makes that one an ordinary project instead, with no name step.
+   */
+  onFinishSingle?: (value: ProjectGroupFormValue) => void;
+  /** Other projects' names, normalized; a project's name must be its own. */
+  takenNames?: ReadonlySet<string>;
   onCancel: () => void;
 };
 
@@ -291,6 +298,8 @@ export function ProjectCreateWizard({
   initialStep,
   mode = 'create',
   onSubmit,
+  onFinishSingle,
+  takenNames,
   onCancel,
 }: ProjectCreateWizardProps) {
   const { t } = useTranslation();
@@ -356,9 +365,12 @@ export function ProjectCreateWizard({
     else if (step === 'sources') go(scope?.kind === 'machine' ? 'machine' : 'kind');
     else if (step === 'details') go('sources');
   };
+  // Creating with one item finishes here: it stays an ordinary project.
+  const single = mode === 'create' && value.members.length === 1 && onFinishSingle !== undefined;
+  const finishSingle = () => onFinishSingle?.(scope ? fitScope(value, scope) : value);
   const next = () => {
     let draft = scope ? fitScope(value, scope) : value;
-    const named = suggestProjectGroupName(draft, labelOf);
+    const named = suggestProjectGroupName(draft, labelOf, takenNames);
     if (named !== draft.name) draft = { ...draft, name: named };
     if (draft !== value) onChange(draft);
     go('details');
@@ -507,7 +519,9 @@ export function ProjectCreateWizard({
       <Dialog.Footer>
         {step === 'sources' ? (
           <span {...stylex.props(styles.footerCount)} aria-live="polite">
-            {t('settings.projectGroups.wizard.selectedCount', { count: value.members.length })}
+            {single
+              ? t('settings.projectGroups.wizard.singleHint')
+              : t('settings.projectGroups.wizard.selectedCount', { count: value.members.length })}
           </span>
         ) : null}
         {/* Keys keep each button its own element. A reused one turns from
@@ -530,7 +544,12 @@ export function ProjectCreateWizard({
             {t('settings.projectGroups.wizard.back')}
           </Button>
         )}
-        {step === 'sources' ? (
+        {step === 'sources' && single ? (
+          <Button key="finish" type="button" disabled={submitting} onClick={finishSingle}>
+            {submitting ? <Spinner size="small" aria-hidden="true" /> : null}
+            {t('settings.projectGroups.wizard.finish')}
+          </Button>
+        ) : step === 'sources' ? (
           <Button key="next" type="button" disabled={value.members.length === 0} onClick={next}>
             {t('settings.projectGroups.wizard.next')}
           </Button>
@@ -1060,10 +1079,19 @@ function DetailsStep({
           autoComplete="off"
           aria-label={t('settings.projectGroups.form.name')}
           placeholder={t('settings.projectGroups.wizard.details.namePlaceholder')}
-          aria-invalid={validation.errors.includes('name_required') || undefined}
+          aria-invalid={
+            validation.errors.includes('name_required') ||
+            validation.errors.includes('name_taken') ||
+            undefined
+          }
           value={value.name}
           onChange={(event) => onChange({ ...value, name: event.target.value })}
         />
+        {validation.errors.includes('name_taken') ? (
+          <FormMessage tone="error">
+            {t('settings.projectGroups.wizard.details.nameTaken')}
+          </FormMessage>
+        ) : null}
       </Section>
 
       <Section

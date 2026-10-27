@@ -53,6 +53,12 @@ picker to offer creation beside Settings and the sidebar menu.
   ticked in both tabs still lets GitHub win. No contract change was needed, so
   released daemons and clients behave the same; projects saved earlier stay
   portable until edited.
+- One item is not a project of several. Creating with a single selection shows
+  "Done" instead of "Next": a picked folder is registered and listed, a folder used
+  only by projects is listed again, and a GitHub repository needs nothing. Editing
+  keeps the name step even with one member, since the project already exists.
+- Project names are unique (`name_taken`), compared trimmed and case-insensitively
+  against every other project; the suggested name skips taken ones (`web 2`).
 - The GitHub tab lists only repositories the workspace's GitHub integration lists
   (`ProjectMemberSourceOption.onGithub`). A repository known only from a local
   folder's remote is offered as that folder; ticking it as a clone would need

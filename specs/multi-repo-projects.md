@@ -68,7 +68,11 @@ looks only at that branch.
   GitHub only, the repositories; finally the name, the selected Members and the
   instructions. A repository ticked both as a folder and on GitHub is noted, not
   blocked; the Project keeps one Member, cloned from GitHub.
-  Changing an earlier answer drops Members the new answer cannot hold. Editing a
+  Changing an earlier answer drops Members the new answer cannot hold. Choosing a
+  single folder or repository creates no Project and asks for no name: the folder
+  is added (or listed again) as an ordinary project, and a GitHub repository is
+  already one. Project names are unique in the workspace, ignoring case and
+  surrounding spaces. Editing a
   Project walks the same questions, marking its current answers and Members as
   previously selected; someone who may not change it sees it read-only.
 

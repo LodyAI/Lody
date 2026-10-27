@@ -20,7 +20,8 @@ import {
   useProjectSubmoduleDetection,
   type ProjectSubmoduleProbe,
 } from '@/hooks/use-project-submodule-detection';
-import { useWorkspaceProjectActions } from '@/hooks/use-workspace-projects';
+import { useWorkspaceProjectActions, useWorkspaceProjects } from '@/hooks/use-workspace-projects';
+import { toast } from '@/lib/toast';
 import {
   addProjectGroupDirectory,
   addProjectGroupMember,
@@ -29,6 +30,7 @@ import {
   buildWorkspaceProjectFromForm,
   EMPTY_PROJECT_GROUP_FORM_VALUE,
   getProjectMemberSourceKey,
+  normalizeProjectGroupName,
   validateProjectGroupForm,
   type ProjectGroupFormValue,
   type ProjectGroupMemberDraft,
@@ -36,6 +38,8 @@ import {
 import { Dialog } from '@/ui/dialog';
 import {
   pickProjectGroupFolder,
+  prepareAndWriteLocalProject,
+  setLocalProjectStandaloneVisibility,
   registerProjectGroupDirectories,
 } from '@/lib/local-project-import';
 import {
@@ -95,6 +99,7 @@ export function ProjectGroupEditorDialog({
   const currentUserId = useAtomValue(userAtom)?.id ?? null;
   const settingsPane = useSettingsPane();
   const { upsert } = useWorkspaceProjectActions();
+  const { projects: workspaceProjects } = useWorkspaceProjects();
   const { options, byKey } = useProjectMemberSources();
   const { shown: editor, onOpenChangeComplete } = useDialogExitSnapshot(openEditor);
   const [submitting, setSubmitting] = useState(false);
@@ -322,19 +327,34 @@ export function ProjectGroupEditorDialog({
     if (next !== openEditor.value) onChange({ ...openEditor, value: next });
   }, [detection.detected, labelOf, onChange, openEditor, readOnly, repositoryOf]);
 
+  // One project per name: every other project's, normalized.
+  const editingId = editor ? (editor.mode === 'add' ? editor.projectId : editor.project.id) : null;
+  const takenNames = useMemo(
+    () =>
+      new Set(
+        workspaceProjects
+          .filter((project) => project.id !== editingId)
+          .map((project) => normalizeProjectGroupName(project.name))
+      ),
+    [editingId, workspaceProjects]
+  );
   const validation = useMemo(
     () =>
-      validateProjectGroupForm(value, (source) => {
-        const member = value.members.find(
-          (candidate) =>
-            candidate.source.kind === 'local' &&
-            candidate.source.machineId === source.machineId &&
-            candidate.source.localProjectId === source.localProjectId
-        );
-        const repoFullName = member ? detection.repositories.get(member.id) : undefined;
-        return repoFullName ? { repoFullName } : undefined;
-      }),
-    [detection.repositories, value]
+      validateProjectGroupForm(
+        value,
+        (source) => {
+          const member = value.members.find(
+            (candidate) =>
+              candidate.source.kind === 'local' &&
+              candidate.source.machineId === source.machineId &&
+              candidate.source.localProjectId === source.localProjectId
+          );
+          const repoFullName = member ? detection.repositories.get(member.id) : undefined;
+          return repoFullName ? { repoFullName } : undefined;
+        },
+        takenNames
+      ),
+    [detection.repositories, takenNames, value]
   );
   const statusOf = useCallback(
     (memberId: ProjectMemberId): ProjectGroupMemberStatus =>
@@ -375,6 +395,46 @@ export function ProjectGroupEditorDialog({
       // Durable locally is done; the upload is not something to wait on.
       await upsert(project);
       onSaved?.(project, { created: editor.mode === 'add' });
+      setSelectingFolder(false);
+      onClose();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      saving.current = false;
+      setSubmitting(false);
+    }
+  };
+
+  // A single folder or repository stays an ordinary project: a picked folder
+  // is registered and listed, a folder used only by projects is listed again,
+  // and a GitHub repository needs nothing at all.
+  const finishSingle = async (draft: ProjectGroupFormValue) => {
+    const member = draft.members[0];
+    if (!member || !runtime || saving.current) return;
+    saving.current = true;
+    setSubmitting(true);
+    setError(undefined);
+    try {
+      if (member.directory) {
+        await prepareAndWriteLocalProject({
+          runtime,
+          machineId: member.directory.machineId,
+          rootPath: member.directory.rootPath,
+          timeoutMessage: t('localProjects.add.timeout'),
+        });
+      } else if (member.source.kind === 'local') {
+        await setLocalProjectStandaloneVisibility({
+          runtime,
+          machineId: member.source.machineId,
+          localProjectId: member.source.localProjectId,
+          visible: true,
+        });
+      }
+      toast.success(
+        member.source.kind === 'github' && !member.directory
+          ? t('settings.projectGroups.wizard.single.repository', { name: labelOf(member) })
+          : t('settings.projectGroups.wizard.single.folder', { name: labelOf(member) })
+      );
       setSelectingFolder(false);
       onClose();
     } catch (cause) {
@@ -426,6 +486,8 @@ export function ProjectGroupEditorDialog({
               submitting={submitting}
               error={error}
               onSubmit={() => void save()}
+              onFinishSingle={(draft) => void finishSingle(draft)}
+              takenNames={takenNames}
               onCancel={close}
             />
           ) : null}

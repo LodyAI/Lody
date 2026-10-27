@@ -18,6 +18,7 @@ import {
   EMPTY_PROJECT_GROUP_FORM_VALUE,
   removeProjectGroupMember,
   retainProjectGroupScope,
+  normalizeProjectGroupName,
   suggestProjectGroupName,
   suggestProjectMemberDir,
   updateProjectGroupMemberPlacement,
@@ -344,6 +345,19 @@ describe('direct folder drafts', () => {
     // GitHub only clones for each conversation rather than using a machine's copy.
     expect(githubOnly.members[0]?.source).toEqual({ kind: 'github', repoFullName: 'acme/web' });
     expect(validateProjectGroupForm({ ...githubOnly, name: 'Web' }).valid).toBe(true);
+  });
+  it('rejects a name another project has, ignoring case and spaces, and suggests a free one', () => {
+    const value = addProjectGroupMember(
+      { ...EMPTY_PROJECT_GROUP_FORM_VALUE, name: ' Shop ' },
+      github('acme/web'),
+      'web'
+    );
+    const taken = new Set([normalizeProjectGroupName('shop'), normalizeProjectGroupName('web')]);
+    expect(validateProjectGroupForm(value, undefined, taken).errors).toEqual(['name_taken']);
+    expect(validateProjectGroupForm({ ...value, name: 'Shop 2' }, undefined, taken).valid).toBe(
+      true
+    );
+    expect(suggestProjectGroupName({ ...value, name: '' }, labelOf, taken)).toBe('web 2');
   });
   it('names a new project after its first member unless a name was typed', () => {
     const value = addProjectGroupMember(EMPTY_PROJECT_GROUP_FORM_VALUE, github('acme/web'), 'web');

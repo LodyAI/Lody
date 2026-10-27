@@ -5581,5 +5581,10 @@
   "settings.projectGroups.wizard.sources.bothSelected": "{{names}} is selected both as a folder and as a GitHub repository. The project keeps one copy and uses the GitHub repository.",
   "settings.projectGroups.wizard.sources.bothSelected_one": "{{names}} is selected both as a folder and as a GitHub repository. The project keeps one copy and uses the GitHub repository.",
   "settings.projectGroups.wizard.sources.bothSelected_other": "{{names}} are selected both as folders and as GitHub repositories. The project keeps one copy of each and uses the GitHub repositories.",
-  "settings.projectGroups.wizard.previous": "Previously selected"
+  "settings.projectGroups.wizard.previous": "Previously selected",
+  "settings.projectGroups.wizard.singleHint": "Only one selected: it is added as an ordinary project.",
+  "settings.projectGroups.wizard.finish": "Done",
+  "settings.projectGroups.wizard.single.folder": "“{{name}}” is in your projects",
+  "settings.projectGroups.wizard.single.repository": "“{{name}}” is already available as a project",
+  "settings.projectGroups.wizard.details.nameTaken": "Another project already has this name."
 }

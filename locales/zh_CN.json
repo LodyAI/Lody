@@ -5571,5 +5571,10 @@
   "chat.projectPicker.createProject": "创建项目",
   "settings.projectGroups.wizard.sources.bothSelected": "{{names}} 同时选中了本地文件夹和 GitHub 仓库。项目只保留一份，优先使用 GitHub 仓库。",
   "settings.projectGroups.wizard.sources.bothSelected_other": "{{names}} 同时选中了本地文件夹和 GitHub 仓库。项目只保留一份，优先使用 GitHub 仓库。",
-  "settings.projectGroups.wizard.previous": "上次选择"
+  "settings.projectGroups.wizard.previous": "上次选择",
+  "settings.projectGroups.wizard.singleHint": "只选了一项：它会作为普通项目添加，不创建多仓库项目。",
+  "settings.projectGroups.wizard.finish": "完成",
+  "settings.projectGroups.wizard.single.folder": "「{{name}}」已添加到项目",
+  "settings.projectGroups.wizard.single.repository": "「{{name}}」已经可以直接作为项目使用",
+  "settings.projectGroups.wizard.details.nameTaken": "已有同名项目，请换一个名称。"
 }

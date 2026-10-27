@@ -21,7 +21,9 @@ test('a local project is built one question at a time and keeps only its machine
   // Changing the machine drops the folder bound to the previous one.
   await page.getByRole('button', { name: 'Back', exact: true }).click();
   await page.getByRole('button', { name: /wibusdeMacBook-Air-M2\.local/ }).click();
-  await expect(page.getByText('1 selected')).toBeVisible();
+  await expect(
+    page.getByText('Only one selected: it is added as an ordinary project.')
+  ).toBeVisible();
   await page.getByRole('checkbox', { name: 'ios', exact: true }).click();
   await next.click();
 
@@ -115,4 +117,31 @@ test('a long GitHub-only list scrolls instead of being clipped', async ({ page }
   await last.click();
   await expect(last).toBeChecked();
   await expect(page.getByText('3 selected')).toBeVisible();
+});
+
+test('one repository finishes as an ordinary project, without a name step', async ({ page }) => {
+  await story(page, 'choose-kind');
+  await page.getByRole('button', { name: /GitHub repositories only/ }).click();
+  await page.getByRole('checkbox', { name: 'acme/docs', exact: true }).click();
+  await expect(
+    page.getByText('Only one selected: it is added as an ordinary project.')
+  ).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Next', exact: true })).toHaveCount(0);
+  await page.getByRole('button', { name: 'Done', exact: true }).click();
+  await expect(page.getByText('Added as an ordinary project: acme/docs')).toBeVisible();
+  await expect(page.getByText('Submitted')).toHaveCount(0);
+
+  // A second item makes it a project of several again.
+  await page.getByRole('checkbox', { name: 'acme/infra', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Next', exact: true })).toBeVisible();
+});
+
+test("a project name must not repeat another project's", async ({ page }) => {
+  await story(page, 'name-taken');
+  await expect(page.getByText('Another project already has this name.')).toBeVisible();
+  const create = page.getByRole('button', { name: 'Create', exact: true });
+  await expect(create).toBeDisabled();
+  await page.getByRole('textbox', { name: 'Project name' }).fill('Shop 2');
+  await expect(page.getByText('Another project already has this name.')).toHaveCount(0);
+  await expect(create).toBeEnabled();
 });

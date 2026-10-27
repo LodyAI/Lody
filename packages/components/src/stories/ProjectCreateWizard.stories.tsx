@@ -124,18 +124,27 @@ function WizardInDialog({
   value: initial,
   initialStep,
   mode,
+  takenNames = [],
 }: {
   value: ProjectGroupFormValue;
   initialStep?: ProjectCreateWizardStep;
   mode?: 'create' | 'edit';
+  /** Other projects' names, as the dialog normalizes them. */
+  takenNames?: string[];
 }) {
   const [value, setValue] = useState(initial);
   const [created, setCreated] = useState(false);
-  const validation = useMemo(() => validateProjectGroupForm(value), [value]);
+  const [single, setSingle] = useState<string | null>(null);
+  const taken = useMemo(() => new Set(takenNames), [takenNames]);
+  const validation = useMemo(
+    () => validateProjectGroupForm(value, undefined, taken),
+    [taken, value]
+  );
   return (
     <>
       {/* The product saves here; the story records that it was asked to. */}
       {created ? <p role="status">Submitted</p> : null}
+      {single ? <p role="status">Added as an ordinary project: {single}</p> : null}
       <Dialog.Root open modal={false}>
         <Dialog.Content
           width={SETTINGS_EDITOR_DIALOG_WIDTH}
@@ -155,6 +164,8 @@ function WizardInDialog({
             initialStep={initialStep}
             mode={mode}
             onSubmit={() => setCreated(true)}
+            onFinishSingle={(draft) => setSingle(draft.members.map(labelOf).join(', '))}
+            takenNames={taken}
             onCancel={() => setValue(EMPTY_PROJECT_GROUP_FORM_VALUE)}
           />
         </Dialog.Content>
@@ -194,4 +205,9 @@ export const GithubDetails: Story = {
 /** Editing walks the same questions; the project's current answers are marked. */
 export const EditProject: Story = {
   args: { value: { ...localDraft, name: 'Shop' }, mode: 'edit' },
+};
+
+/** Another project already has this name. */
+export const NameTaken: Story = {
+  args: { value: { ...githubDraft, name: 'Shop' }, initialStep: 'details', takenNames: ['shop'] },
 };
