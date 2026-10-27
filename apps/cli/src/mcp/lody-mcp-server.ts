@@ -107,6 +107,7 @@ import {
   cancelSessionTurn,
   createSessionResult,
   MachineFlockReadUnavailableError,
+  MachineOfflineError,
   readLocalProjectGitStateOnMachine,
   readSessionLiveStatusesMany,
   readSessionMachineAccess,
@@ -122,6 +123,7 @@ import {
   type SessionLiveStatusBatchItem,
   type DelegatedSessionRequester,
 } from '@/commands/session';
+import { classifyMachinePresence, type MachinePresence } from '@/commands/session-machine-presence';
 import type {
   SessionTurnOutputEvent,
   StructuredSessionOutputMode,
@@ -1074,7 +1076,8 @@ const normalizeMcpError = (error: unknown) => {
   }
   if (
     error instanceof WorkspaceSyncUnavailableError ||
-    error instanceof MachineFlockReadUnavailableError
+    error instanceof MachineFlockReadUnavailableError ||
+    error instanceof MachineOfflineError
   ) {
     return error.toLodyError();
   }
@@ -1866,6 +1869,7 @@ const buildSessionList = async (input: SessionListToolInput): Promise<unknown> =
         auth,
         workspaceId: workspace.id as WorkspaceId,
         sessions: chunk,
+        manager,
       });
       const entries = await mapWithConcurrency(chunk, 5, async (session) => {
         const live = resolveSessionLiveWorkingFromSignals(session, {
@@ -1940,6 +1944,7 @@ const buildSessionStatusMany = async (input: SessionStatusManyToolInput): Promis
     const liveStatuses = await readSessionLiveStatusesMany({
       auth,
       workspaceId: workspace.id as WorkspaceId,
+      manager,
       sessions: targets
         .map(({ session }) => session)
         .filter((session): session is SessionMeta => session !== undefined),
@@ -2313,23 +2318,17 @@ const resolveInvokingTurnContext = async (
  * reconnect backoff is enough. Only a positive absence from a joined presence room
  * may block work; `commands/agent-config.ts` takes the same position.
  */
-type McpMachineLiveness = 'online' | 'offline' | 'unknown';
-
 const makeMachineLivenessLookupForMcp = (
   manager: LoroDocumentManager,
   ctx: ReturnType<typeof getSessionContext>
-): ((machineId: MachineId) => Promise<McpMachineLiveness>) => {
+): ((machineId: MachineId) => Promise<MachinePresence>) => {
   let onlineMachineIds: ReturnType<LoroDocumentManager['getOnlineMachineIds']> | undefined;
   return async (machineId) => {
     if (machineId === (ctx.machineId as MachineId)) {
       return 'online';
     }
     onlineMachineIds ??= manager.getOnlineMachineIds();
-    const resolved = await onlineMachineIds;
-    if (resolved === null) {
-      return 'unknown';
-    }
-    return resolved.has(machineId) ? 'online' : 'offline';
+    return classifyMachinePresence(await onlineMachineIds, machineId);
   };
 };
 
@@ -2344,11 +2343,7 @@ const assertMachineNotOfflineForSingleCommand = async (
   ctx: ReturnType<typeof getSessionContext>
 ): Promise<void> => {
   if ((await makeMachineLivenessLookupForMcp(manager, ctx)(machineId)) === 'offline') {
-    throw new LodyOperationStoreError(
-      'MACHINE_OFFLINE',
-      `Target Machine is offline: ${machineId}`,
-      true
-    );
+    throw new MachineOfflineError({ machineId });
   }
 };
 
@@ -2562,7 +2557,7 @@ const buildSessionCreateOptions = async (
     // Machine; see makeMachineLivenessLookupForMcp. Treating that as offline used to
     // drop healthy Machines out of the candidate list with no warning at all.
     const onlineMachineIds = await manager.getOnlineMachineIds();
-    const machineLivenessOf = (machineId: MachineId): McpMachineLiveness => {
+    const machineLivenessOf = (machineId: MachineId): MachinePresence => {
       if (machineId === auth.machineId) return 'online';
       if (onlineMachineIds === null) return 'unknown';
       return onlineMachineIds.has(machineId) ? 'online' : 'offline';
@@ -2961,7 +2956,6 @@ const startSessionChatOperation = async (args: SessionChatToolInput): Promise<un
       );
     }
     assertDifferentMcpSession(currentSession, targetSession);
-    await assertMachineNotOfflineForSingleCommand(manager, targetSession.machineId, ctx);
     try {
       await validateSessionChatTarget({
         auth,
@@ -2971,7 +2965,7 @@ const startSessionChatOperation = async (args: SessionChatToolInput): Promise<un
         delegatedRequester: toDelegatedSessionRequester(invoking.identity),
       });
     } catch (error) {
-      if (error instanceof WorkspaceSyncUnavailableError) {
+      if (error instanceof WorkspaceSyncUnavailableError || error instanceof MachineOfflineError) {
         throw error;
       }
       const machineAccessError = toMachineAccessMcpError(error);
@@ -3061,22 +3055,33 @@ const startSessionChatOperation = async (args: SessionChatToolInput): Promise<un
       throw new Error('Single chat Operation is missing its active target item.');
     }
     if (!pendingItem.inputDurable && accepted.claimedItemIndexes.includes(0)) {
-      const result = await sendSessionChatResult(
-        auth,
-        workspace,
-        manager,
-        pendingItem.target.sessionId,
-        args.prompt,
-        targetDispatchConfig,
-        undefined,
-        undefined,
-        {
-          userTurnId: pendingItem.target.userTurnId,
-          chainDepth: invoking.chainDepth + 1,
-        },
-        toDelegatedSessionRequester(invoking.identity),
-        { attachments: accepted.operation.targetInputAttachments?.[0] }
-      );
+      let result;
+      try {
+        result = await sendSessionChatResult(
+          auth,
+          workspace,
+          manager,
+          pendingItem.target.sessionId,
+          args.prompt,
+          targetDispatchConfig,
+          undefined,
+          undefined,
+          {
+            userTurnId: pendingItem.target.userTurnId,
+            chainDepth: invoking.chainDepth + 1,
+          },
+          toDelegatedSessionRequester(invoking.identity),
+          { attachments: accepted.operation.targetInputAttachments?.[0] }
+        );
+      } catch (error) {
+        if (!(error instanceof MachineOfflineError)) throw error;
+        // Like create: the accepted Operation owns the fixed target, so a
+        // Machine that went offline after acceptance is left for daemon replay.
+        getLogger('mcp').warn(
+          `[mcp] Chat ${args.operationId} left active for replay: ${error.message}`
+        );
+        return snapshotOperation(ctx.sessionId as SessionId, args.operationId!);
+      }
       if (result.userTurnId !== pendingItem.target.userTurnId) {
         throw new Error('Chat result did not preserve the preallocated target turn id.');
       }
@@ -3370,13 +3375,9 @@ const startSessionCreateManyOperation = async (
         }
         const targetMachineId = (resolved.input.machineId ?? requester.machineId) as MachineId;
         if ((await machineLiveness(targetMachineId)) === 'offline') {
+          const offline = new MachineOfflineError({ machineId: targetMachineId }).toLodyError();
           return {
-            operationItem: batchFailure(
-              'MACHINE_OFFLINE',
-              `Target Machine is offline: ${targetMachineId}`,
-              true,
-              label
-            ),
+            operationItem: batchFailure(offline.code, offline.message, offline.retryable, label),
             dispatchConfig: null,
           };
         }
@@ -3590,7 +3591,6 @@ const startSessionChatManyOperation = async (args: SessionChatManyToolInput): Pr
     if (senderSessionId && expanded.every((item) => item.sessionId === senderSessionId)) {
       throw reverseChatError();
     }
-    const machineLiveness = makeMachineLivenessLookupForMcp(manager, ctx);
     const initialItems = await mapWithConcurrency(
       expanded,
       5,
@@ -3624,14 +3624,6 @@ const startSessionChatManyOperation = async (args: SessionChatManyToolInput): Pr
             item.label
           );
         }
-        if ((await machineLiveness(target.machineId)) === 'offline') {
-          return batchFailure(
-            'MACHINE_OFFLINE',
-            `Target Machine is offline: ${target.machineId}`,
-            true,
-            item.label
-          );
-        }
         try {
           await validateSessionChatTarget({
             auth,
@@ -3643,6 +3635,10 @@ const startSessionChatManyOperation = async (args: SessionChatManyToolInput): Pr
         } catch (error) {
           if (error instanceof WorkspaceSyncUnavailableError) {
             throw error;
+          }
+          if (error instanceof MachineOfflineError) {
+            const offline = error.toLodyError();
+            return batchFailure(offline.code, offline.message, offline.retryable, item.label);
           }
           const machineAccessError = toMachineAccessMcpError(error);
           if (machineAccessError) {

@@ -18,6 +18,10 @@ CLI 仅允许新的显式会话替换 device 原件丢失的已发布身份。�
 
 桌面 main 持有待批准 material 和精确签名请求原件。尚未入账的 unsigned material 在双窗口、重试和重启后保持待批准。未签请求的 staged 材料可由当前精确设备状态或已验证原始账本中的精确 admission 结算，即使设备随后被撤销。结算先校验 credential binding，以及绑定到当前 member、genesis、设备类型和密钥的 possession proof，再匹配当前设备或 admission 的原始 key、encryption key 和 proof；仅有 used key 或其他 member 的 admission 不算结算。已入账设备无需新签名即可结算；签名结果未知的请求仍必须由已验证原件或竞争父节点证明结算。原有 all-null superseded 回执和退休约束不变。限定用途的 possession 输入同时携带现有 schema 已校验的 machineId，让结算保留 PR19 所要求的机器绑定证明；密码学字段仍逐个构造，不展开原始材料，也不加入解码回退。工作区串行和原生 Scope 释放仍负责生命周期，不增加网络调用或取消规则。
 
+## 规则归属
+
+CLI 指令文件保留约束，解释由对应 Note 承载。Fleet PR poller 有独立于工作区 cloud port 的托管 GitHub 端口，仅关闭后者不能阻止仓库和分支信息外泄。catalog sidecar 避免旧 v1 schema 丢弃 `contentMode`；缓存未知 mode 可能导致离线时按明文重开。SQLite 可在应用校验前回滚 journal 或 checkpoint WAL，即使应用最终拒绝该格式。文件级 clock floor 在时钟错误前跳后，可能跨工作区和重启持续使新请求过期，直到时间追上；[journal 提案](../../proposed/architecture/2026-10-26-e2ee-realtime-journal.zh.md) 保留这项已接受的限制。此次调整不改变产品行为或批准状态。
+
 ## 证据与限制
 
 与 PR19 的独立组合检查覆盖待批准与重开会话、首次激活中断及随后撤销；缺少或篡改 machineId 的证明仍被拒绝。精确机器入账测试原件使用批准材料中的同一 machineId。真实 crypto、SQLite 和文件测试覆盖只删 device → pairing-required → 显式准备 → 入账 → 邮箱密钥安装 → 激活，保留旧凭证字节和 runtime 证据。保管测试覆盖只读文件名兼容、不同公钥隔离及新文件损坏时禁止回退。桌面测试覆盖批准前反复准备/暂存、重启后精确请求重试、真实结算与 superseded 退休。普通工作区不进入这些模块。完整 CI 和桌面 smoke 仍是必要门禁；合成保护测试不代表真实 keychain、打包 app 或远程配对验收。

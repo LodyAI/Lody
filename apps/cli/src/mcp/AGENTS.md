@@ -87,8 +87,9 @@ Parent instructions apply. Background: [README.md](README.md).
   local project, no GitHub fetch), expanding only through explicit query inputs.
   Explicit permissions may exceed the parent; follow the caller's user authorization.
 - Machine presence is online/offline/unknown. `getOnlineMachineIds() === null` means
-  unknown; block dispatch/report `MACHINE_OFFLINE` only for definite offline. Unknown
-  proceeds under its own deadline. Expose three-state liveness, never a boolean.
+  unknown; block dispatch/report `MACHINE_OFFLINE` only for definite offline, never on
+  an RPC timeout. Unknown proceeds under its own deadline. Expose three-state liveness,
+  never a boolean.
   Contract: `specs/loro-ephemeral-presence-channel.md`;
   [cold-start rationale](README.md#machine-presence).
 - `session_list` defaults to 20 (maximum 100) and `session_history` to 10 (maximum 50 and 128 KiB);

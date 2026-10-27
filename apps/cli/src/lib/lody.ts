@@ -29,6 +29,7 @@ import { traceAsync } from '@/utils/trace-span';
 import type { MemoryPressureSnapshotSource } from '@/monitor/memory-pressure-sampler';
 import type { WorkspaceWatchCoordinatorApi } from '@/lib/code-collab/workspace-watch-coordinator';
 import type { CloudPort } from '@lody/platform';
+import type { DaemonWorkspaceAccess } from '@/lib/session-command-environment';
 
 const BUILTIN_AGENT_CONFIG_INITIAL_RETRY_DELAY_MS = 10_000;
 const BUILTIN_AGENT_CONFIG_MAX_RETRY_DELAY_MS = 5 * 60_000;
@@ -56,6 +57,7 @@ interface LodyOptions {
   onStorageWriteFailure?: (error: Error) => void;
   onProcessLifecycleAction?: (action: MachineProcessLifecycleAction) => void;
   workspaceWatchCoordinator?: WorkspaceWatchCoordinatorApi;
+  readWorkspaceAccess?: () => DaemonWorkspaceAccess;
   cloudPort: CloudPort;
 }
 export class Lody {
@@ -208,6 +210,7 @@ export class Lody {
         onFatalAuthFailure: options.onFatalAuthFailure,
         onProcessLifecycleAction: options.onProcessLifecycleAction,
         workspaceWatchCoordinator: options.workspaceWatchCoordinator,
+        readWorkspaceAccess: options.readWorkspaceAccess,
         cloudPort: options.cloudPort,
       },
       logger: this.logger,

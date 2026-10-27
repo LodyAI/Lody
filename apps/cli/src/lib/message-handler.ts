@@ -326,6 +326,7 @@ import {
   getSessionCommandEnvironment,
   runWithDaemonWorkspace,
   runWithSessionCommandEnvironment,
+  type DaemonWorkspaceAccess,
 } from './session-command-environment';
 import { getLodyOperationStorePath, LodyOperationStore } from '@/orchestration/operation-store';
 import {
@@ -629,6 +630,8 @@ export interface MessageHandlerConfig {
    */
   onProcessLifecycleAction?: (action: MachineProcessLifecycleAction) => void;
   workspaceWatchCoordinator?: WorkspaceWatchCoordinatorApi;
+  /** The fleet's access verdict for this workspace; cloud daemon commands resolve from it. */
+  readWorkspaceAccess?: () => DaemonWorkspaceAccess;
   cloudPort: CloudPort;
 }
 
@@ -712,6 +715,7 @@ export class MessageHandler {
   ) => Promise<void>;
   private onFatalAuthFailure?: (error: Error) => void;
   private onProcessLifecycleAction?: (action: MachineProcessLifecycleAction) => void;
+  private readonly readWorkspaceAccess?: () => DaemonWorkspaceAccess;
   private readonly machineLifecycleCapability: MachineLifecycleCapability;
   private pendingProcessLifecycleAction: MachineProcessLifecycleAction | null = null;
   private readonly store = new SessionTransientStore();
@@ -2845,6 +2849,7 @@ export class MessageHandler {
     this.onFatalAuthFailure = config.onFatalAuthFailure;
     this.localWorkspaceCatalog = config.localWorkspaceCatalog ?? makeLocalWorkspaceCatalog();
     this.onProcessLifecycleAction = config.onProcessLifecycleAction;
+    this.readWorkspaceAccess = config.readWorkspaceAccess;
     this.machineLifecycleCapability = config.machineLifecycleCapability ?? {
       launchMode: 'foreground',
       canRemoteRestart: false,
@@ -6691,6 +6696,7 @@ export class MessageHandler {
           machineId: this.machineId,
           manager: this.workspaceDocument,
           readInvocation: (sessionId) => this.readActiveInvocation(sessionId),
+          ...(this.readWorkspaceAccess ? { readAccess: this.readWorkspaceAccess } : {}),
         },
         run
       );
@@ -10443,7 +10449,8 @@ export class MessageHandler {
     void this.sessionDispatchWatcher.enqueueSessionCheck(sessionId);
   }
 
-  // =====================================================================  // GC-related public methods
+  // =====================================================================
+  // GC-related public methods
   // =====================================================================
   /**
    * Check if a session has pending ACP updates that haven't been flushed yet.

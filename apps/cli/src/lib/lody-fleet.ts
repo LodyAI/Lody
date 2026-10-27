@@ -10,6 +10,7 @@ import { ensureImplicitLocalWorkspace } from '@/lib/cli-platform';
 import { CliRuntimeStateReporter } from '@/lib/cli-runtime-state';
 import { WorkspaceWatchCoordinator } from '@/lib/code-collab/workspace-watch-coordinator';
 import { listAliveSessionMetas } from '@/lib/command-runtime';
+import type { DaemonWorkspaceAccess } from '@/lib/session-command-environment';
 import {
   startLocalIpcSocketServers,
   stopLocalIpcSocketServers,
@@ -747,6 +748,22 @@ export class LodyFleet {
     this.refreshRuntimeState();
   }
 
+  /**
+   * Synchronous access verdict for one running workspace. The latest remote
+   * snapshot wins as soon as it arrives; before the first one, the cached entry
+   * the runtime was bootstrapped from stands. A subscription error keeps the
+   * last authorized snapshot: only a confirmed revocation or token rejection denies.
+   */
+  readWorkspaceAccess(workspaceId: string): DaemonWorkspaceAccess {
+    if (this.invalidTokenReported) return { status: 'unauthorized' };
+    const remote = this.lastValidWorkspaceListResult;
+    const workspace = remote
+      ? remote.workspaces.find((candidate) => candidate.id === workspaceId)
+      : this.desiredWorkspaces.get(workspaceId);
+    if (workspace) return { status: 'authorized', workspace };
+    return remote ? { status: 'revoked' } : { status: 'unknown' };
+  }
+
   private async applyRemoteWorkspaceList(result: AuthorizedWorkspaceList): Promise<void> {
     const remoteBridge = this.remoteBridge;
     if (!remoteBridge) {
@@ -893,6 +910,7 @@ export class LodyFleet {
           contentMode: workspace.contentMode,
           genesisHash: workspace.genesisHash,
           workspaceSlug: workspace.slug ?? undefined,
+          readWorkspaceAccess: () => this.readWorkspaceAccess(workspace.id),
           token: this.cliToken,
           userId: this.userId,
           machineId: this.machineId,
