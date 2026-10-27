@@ -1890,29 +1890,67 @@ void test('remote commands use workspace custody and never create an account con
     }
   )
   const ipc = new E2eeIpc()
+  const { ipcBridge } = await load('../../preload/ipc-bridge.ts', {
+    electron: {
+      ipcRenderer: {
+        on: () => {},
+        invoke: (channel, ...args) => ipc[channel.split('.')[1]](...args)
+      }
+    },
+    './ipc-invoke-policy': { isIpcInvokeChannel },
+    '@lody/shared/electron-ipc': electronIpc
+  })
   for (const [workspaceId, expected] of [
     ['first', first],
     ['second', second]
   ]) {
-    await ipc.open(workspaceId)
-    const started = await ipc.beginRemoteMachinePairing(workspaceId)
+    await ipcBridge.invoke('e2ee.open', workspaceId)
+    const started = await ipcBridge.invoke('e2ee.beginRemoteMachinePairing', workspaceId)
     const offer = JSON.parse(
       Buffer.from(started.command.split(' --offer ')[1], 'base64url').toString()
     )
     assert.equal(offer.frontendSigningPublicKey, expected.signingPublicKey)
     assert.equal(offer.genesisHash, expected.creation.genesisHashHex)
+    await assert.rejects(
+      ipcBridge.invoke(
+        'e2ee.approveRemoteMachinePairing',
+        workspaceId,
+        offer.pairingSessionId,
+        Array(8).fill('00000000').join(' ')
+      ),
+      /e2ee_conflict/
+    )
     assert.equal(
-      (await ipc.inspectRemoteMachinePairing(workspaceId, offer.pairingSessionId)).status,
+      (await ipcBridge.invoke('e2ee.beginRemoteMachinePairing', workspaceId)).command,
+      started.command
+    )
+    assert.equal(
+      (
+        await ipcBridge.invoke(
+          'e2ee.inspectRemoteMachinePairing',
+          workspaceId,
+          offer.pairingSessionId
+        )
+      ).status,
       'pending'
     )
     assert.equal(
-      (await ipc.cancelRemoteMachinePairing(workspaceId, offer.pairingSessionId)).status,
+      (
+        await ipcBridge.invoke(
+          'e2ee.cancelRemoteMachinePairing',
+          workspaceId,
+          offer.pairingSessionId
+        )
+      ).status,
       'cancelled'
     )
-    const next = await ipc.beginRemoteMachinePairing(workspaceId)
+    const next = await ipcBridge.invoke('e2ee.beginRemoteMachinePairing', workspaceId)
     assert.notEqual(next.pairingSessionId, offer.pairingSessionId)
-    assert.equal((await ipc.status(workspaceId)).genesisHash, expected.creation.genesisHashHex)
-    await ipc.close(workspaceId)
+    assert.equal(
+      (await ipcBridge.invoke('e2ee.status', workspaceId)).genesisHash,
+      expected.creation.genesisHashHex
+    )
+    await ipcBridge.invoke('e2ee.close', workspaceId)
   }
   assert.notEqual(first.signingPublicKey, second.signingPublicKey)
   const roots = await readdir(join(directory, 'e2ee-bootstrap'))
