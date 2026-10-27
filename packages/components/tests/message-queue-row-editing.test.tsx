@@ -75,6 +75,43 @@ describe('queued message editing commits', () => {
     container = undefined;
   });
 
+  it('keeps scheduled messages after ordinary rows, re-sorts time edits, and excludes them from dragging', async () => {
+    const items = ['late', 'ordinary-a', 'early', 'ordinary-b'].map((id) => ({
+      ...makeItem(),
+      $cid: id,
+      task: id,
+    }));
+    const render = async (lateAt: number) => {
+      await act(async () => {
+        root?.render(
+          createElement(MessageQueueDisplay, {
+            sessionId: 'session-test' as SessionId,
+            items,
+            getItemScheduledAt: (item) =>
+              item.$cid === 'late' ? lateAt : item.$cid === 'early' ? 10 : null,
+            onRemove: () => {},
+            onReorder: () => {},
+            onEditStart: () => {},
+            onEditCancel: () => {},
+            onEditSave: () => {},
+            onSteer: () => {},
+          })
+        );
+      });
+    };
+    const rows = () => [...(container?.querySelectorAll('.group\\/row') ?? [])];
+    const order = () =>
+      rows().map((row) => items.find((item) => row.textContent?.includes(item.task))?.$cid);
+    await render(20);
+    expect(order()).toEqual(['ordinary-a', 'ordinary-b', 'early', 'late']);
+    for (const row of rows().slice(2))
+      expect(row.querySelector('[aria-label="Drag to reorder"]')).toBeNull();
+    for (const row of rows().slice(0, 2))
+      expect(row.querySelector('[aria-label="Drag to reorder"]')).not.toBeNull();
+    await render(5);
+    expect(order()).toEqual(['ordinary-a', 'ordinary-b', 'late', 'early']);
+  });
+
   // The save promise stays pending until the test releases it, so the row is
   // observable in its mid-write state instead of racing a microtask.
   const renderQueue = async (options?: { holdSave?: boolean; failSaveOnce?: boolean }) => {

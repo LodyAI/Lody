@@ -79,6 +79,8 @@ export type SessionInfoBarProps = {
    *  cluster action with its own popover; never staged. Pass it only when a
    *  relation exists, so an otherwise empty bar still hides. */
   relations?: ReactNode;
+  /** Scheduled composer draft: icon-only action, never staged. */
+  scheduledMessage?: ReactNode;
   /** Repositories of a multi-repository conversation: a plain cluster action
    *  with its own popover, placed before Related sessions; never staged. */
   projectMembers?: ReactNode;
@@ -177,6 +179,7 @@ export function SessionInfoBar({
   contextActions,
   onOpenAllChanges,
   relations,
+  scheduledMessage,
   projectMembers,
   onOpenBrowser,
   onOpenIosSimulator,
@@ -269,6 +272,7 @@ export function SessionInfoBar({
   const hasMachine = !!machine?.name.trim();
   const hasSurfaceContent = !!(
     defaultKey ||
+    scheduledMessage ||
     projectMembers ||
     relations ||
     onOpenBrowser ||
@@ -355,6 +359,7 @@ export function SessionInfoBar({
   const clusterNonEmpty =
     hasMachine ||
     clusterKeys.length > 0 ||
+    !!scheduledMessage ||
     !!projectMembers ||
     !!relations ||
     !!onOpenBrowser ||
@@ -420,6 +425,7 @@ export function SessionInfoBar({
           ) : null}
           {privateAccessStatus &&
           (clusterKeys.length > 0 ||
+            scheduledMessage ||
             projectMembers ||
             relations ||
             onOpenBrowser ||
@@ -429,6 +435,7 @@ export function SessionInfoBar({
           ) : null}
           {clusterKeys.map((key) => renderItem(key, 'cluster'))}
           {/* Repositories, Relations and Browser are plain actions with no stage form. */}
+          {scheduledMessage}
           {projectMembers}
           {relations}
           {onOpenBrowser ? (

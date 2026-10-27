@@ -1,3 +1,6 @@
+import { LoroDoc } from 'loro-crdt';
+import { ScheduleRepository, type ScheduleRepositoryPort } from '@lody/shared';
+import { isScheduledMessageFile } from './scheduled-message-files';
 import { mkdtempSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -324,4 +327,228 @@ it('recovers the committed ledger after closing a real SQLite file without repea
     store.close();
     rmSync(directory, { recursive: true, force: true });
   }
+});
+
+describe('One-time complete messages', () => {
+  function message() {
+    const d = document();
+    d.definition = {
+      ...d.definition,
+      messageVersion: 1,
+      project: undefined,
+      destination: { kind: 'existing_session', sessionId: 'chat' },
+      trigger: { kind: 'once', at: '1970-01-01T00:01:00Z' },
+      misfirePolicy: { kind: 'run_once' },
+    };
+    d.prompt = 'Frozen message';
+    d.message = { inputBlocks: [{ type: 'text', text: 'Frozen message' }], mcpServerIds: [] };
+    return d;
+  }
+  it.each([
+    ['message', 'message'],
+    ['task', 'message'],
+    ['message', 'task'],
+  ] as const)(
+    'does not couple a running %s to an unrelated %s on the same agent',
+    async (firstKind, nextKind) => {
+      const first = firstKind === 'message' ? message() : document();
+      const next = nextKind === 'message' ? message() : document();
+      next.definition.scheduleId = 'other-schedule';
+      next.definition.destination = { kind: 'existing_session', sessionId: 'other-chat' };
+      const documents = [first];
+      const h = harness(first);
+      h.ports.list = async () => documents.map(buildScheduleRegistryRow);
+      h.ports.read = async (id) =>
+        documents.find((entry) => entry.definition.scheduleId === id) ?? null;
+      h.ports.prepare = async (run) => ({ prompt: run.scheduleId });
+      const sent: string[] = [];
+      h.ports.dispatch = async (prepared) => {
+        sent.push(prepared.prompt);
+      };
+      h.ports.isDispatched = async (prepared) => sent.includes(prepared.prompt);
+      await h.engine.evaluate();
+      expect(sent).toEqual(['schedule']);
+      expect(h.store.history('workspace', 'schedule')[0]?.state).toBe('dispatched');
+      // Restart while the first conversation is still running. Its delivery must
+      // neither repeat nor occupy another conversation's message admission.
+      h.ports.slots = new AgentExecutionSlots();
+      const restarted = new ScheduleEngine(h.ports);
+      restarted.restoreOccupancy();
+      expect(h.ports.slots.isBusy('agent')).toBe(firstKind === 'task');
+      documents.push(next);
+      h.time(60_001);
+      await restarted.evaluate();
+      expect(sent).toEqual(['schedule', 'other-schedule']);
+      expect(h.store.history('workspace', 'other-schedule')[0]?.state).toBe('dispatched');
+      expect(h.store.history('workspace', 'schedule')[0]?.state).toBe('dispatched');
+      await restarted.evaluate();
+      expect(sent).toEqual(['schedule', 'other-schedule']);
+    }
+  );
+
+  it('waits for its own busy chat and sends once after it becomes idle, regardless of another agent slot', async () => {
+    const h = harness(message());
+    h.slots.reserve('agent', 'unrelated-task');
+    let busy = true;
+    const sent: string[] = [];
+    h.ports.validateTarget = async () => {
+      if (busy) throw new ScheduleConfigurationError('SESSION_BUSY');
+    };
+    h.ports.dispatch = async (prepared) => {
+      sent.push(prepared.prompt);
+      h.accepted();
+    };
+    await h.engine.evaluate();
+    expect(sent).toEqual([]);
+    expect(h.store.history('workspace', 'schedule')[0]).toMatchObject({
+      state: 'retry_wait',
+      errorCode: 'SESSION_BUSY',
+      attempts: 0,
+    });
+    busy = false;
+    h.time(90_000);
+    await h.engine.evaluate();
+    await h.engine.evaluate();
+    expect(sent).toEqual(['Frozen message']);
+    expect(h.store.history('workspace', 'schedule')[0]?.state).toBe('dispatched');
+    expect(h.slots.isBusy('agent')).toBe(true);
+  });
+
+  it('retains frozen blocks in the ledger and restores sent status without sending again', async () => {
+    const h = harness(message());
+    h.time(600_000); // Offline at the due time: one catch-up.
+    await h.engine.evaluate();
+    const [run] = h.store.history('workspace', 'schedule');
+    expect(run?.message).toEqual(h.d.message);
+    expect(run?.sessionId).toBe('chat');
+    expect(run?.state).toBe('dispatched');
+    const restarted = new ScheduleEngine(h.ports);
+    await restarted.evaluate();
+    expect(h.store.history('workspace', 'schedule')).toHaveLength(1);
+    expect(h.store.history('workspace', 'schedule')[0]?.state).toBe('dispatched');
+    expect(h.ports.publish).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        messageState: 'sent',
+        lastDispatch: expect.objectContaining({ sessionId: 'chat' }),
+      })
+    );
+  });
+  it('never sends a consumed message again after a stale edit, even after restart', async () => {
+    const h = harness(message());
+    const delivered: string[] = [];
+    h.ports.dispatch = async (prepared) => {
+      delivered.push(prepared.prompt);
+      h.accepted();
+    };
+    await h.engine.evaluate();
+    h.finished();
+    await h.engine.evaluate();
+    h.d.prompt = 'edited after delivery';
+    h.d.message = { inputBlocks: [{ type: 'text', text: h.d.prompt }] };
+    h.d.definition.activationId = 'stale-client-edit';
+    h.d.definition.trigger = { kind: 'once', at: new Date(120_000).toISOString() };
+    h.ports.list = async () => [buildScheduleRegistryRow(h.d)];
+    h.time(120_000);
+    const restarted = new ScheduleEngine(h.ports);
+    await restarted.evaluate();
+    expect(delivered).toEqual(['Frozen message']);
+    expect(h.store.history('workspace', 'schedule')).toHaveLength(1);
+    expect(h.ports.publish).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        activationId: 'stale-client-edit',
+        messageState: 'sent',
+        lastDispatch: expect.objectContaining({ sessionId: 'chat' }),
+      })
+    );
+  });
+
+  it('acknowledges cancellation before a future message has a run', async () => {
+    const h = harness(message());
+    h.time(1);
+    h.pause();
+    await h.engine.evaluate();
+    expect(h.store.history('workspace', 'schedule')).toEqual([]);
+    expect(h.ports.publish).toHaveBeenLastCalledWith(
+      expect.objectContaining({ messageState: 'cancelled' })
+    );
+  });
+  it('reports sent if a cancellation races a committed dispatch receipt', async () => {
+    const h = harness(message());
+    h.ports.dispatch = async () => {
+      h.accepted();
+      h.pause();
+      throw new Error('lost receipt');
+    };
+    await h.engine.evaluate();
+    expect(h.store.history('workspace', 'schedule')[0]?.state).toBe('dispatched');
+    expect(h.ports.publish).toHaveBeenLastCalledWith(
+      expect.objectContaining({ messageState: 'sent' })
+    );
+  });
+});
+
+it('retains scheduled local bytes without history and releases the reservation after deletion', async () => {
+  const docs = new Map<string, LoroDoc>();
+  const rows = new Map<string, unknown>();
+  const port: ScheduleRepositoryPort = {
+    openPersistedDoc: async (id) => {
+      if (!docs.has(id)) docs.set(id, new LoroDoc());
+      return { doc: docs.get(id)! };
+    },
+    openFlockDoc: async () => ({
+      flock: {
+        scan: () => [...rows].map(([key, value]) => ({ key: JSON.parse(key), value })),
+        get: (key) => rows.get(JSON.stringify(key)),
+        set: (key, value) => rows.set(JSON.stringify(key), value),
+      },
+    }),
+    flush: async () => {},
+  };
+  const repository = new ScheduleRepository(port, 'workspace' as never);
+  const d = document().definition;
+  await repository.save({
+    scheduleId: 'message-file',
+    actorId: 'owner',
+    now: 1,
+    activationId: 'a',
+    activityId: 'create',
+    create: true,
+    draft: {
+      title: d.title,
+      machineId: d.machineId,
+      agent: d.agent,
+      retryPolicy: d.retryPolicy,
+      misfirePolicy: d.misfirePolicy,
+      overlapPolicy: d.overlapPolicy,
+      prompt: '',
+      destination: { kind: 'existing_session', sessionId: 'chat' },
+      trigger: { kind: 'once', at: '2099-01-01T00:00:00Z' },
+      message: {
+        inputBlocks: [
+          {
+            type: 'file',
+            fileId: 'blob',
+            fileName: 'notes.txt',
+            mimeType: 'text/plain',
+            sizeBytes: 5,
+            sha256: 'a'.repeat(64),
+            textPreview: true,
+            uploadedAt: 1,
+            transport: 'local',
+            machineId: 'machine',
+          },
+        ],
+      },
+    },
+  });
+  const args = {
+    repo: port,
+    workspaceId: 'workspace' as never,
+    sessionId: 'chat' as never,
+    fileId: 'blob',
+  };
+  expect(await isScheduledMessageFile(args)).toBe(true);
+  expect(await isScheduledMessageFile({ ...args, sessionId: 'other' as never })).toBe(false);
+  await repository.delete('message-file', 'owner', 2);
+  expect(await isScheduledMessageFile(args)).toBe(false);
 });

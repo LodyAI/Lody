@@ -203,8 +203,22 @@ export type ScheduleStatus = { label: string; tone: ScheduleStatusTone };
 export function describeStatus(
   t: TFunction,
   enabled: boolean,
-  queueState?: 'due' | 'waiting_for_agent' | 'retrying' | 'blocked'
+  queueState?: 'due' | 'waiting_for_agent' | 'retrying' | 'blocked',
+  messageState?: 'pending' | 'sent' | 'cancelled' | 'failed'
 ): ScheduleStatus {
+  if (messageState) {
+    if (messageState === 'sent') return { label: t('scheduledMessage.sent'), tone: 'muted' };
+    if (messageState === 'cancelled')
+      return { label: t('scheduledMessage.cancelled'), tone: 'muted' };
+    if (messageState === 'failed')
+      return { label: t('scheduledMessage.failed'), tone: 'attention' };
+    return {
+      label: enabled
+        ? t('scheduledMessage.pending', { count: 1 })
+        : t('scheduledMessage.cancelPending'),
+      tone: 'progress',
+    };
+  }
   if (!enabled) return { label: t('schedules.paused', 'Paused'), tone: 'muted' };
   if (queueState === 'blocked')
     return { label: t('schedules.state.blocked', 'Needs attention'), tone: 'attention' };

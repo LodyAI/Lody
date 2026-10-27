@@ -1,5 +1,13 @@
 import * as stylex from '@stylexjs/stylex';
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from 'react';
 import {
   closestCenter,
   DndContext,
@@ -46,11 +54,17 @@ export type MessageQueueDisplayProps = {
   showSteerAction?: boolean;
   /** Native acknowledged steer: lets every queued row steer, not just the first. */
   nativeSteerAvailable?: boolean;
+  getItemScheduledAt?: (item: MessageQueueItem) => number | null;
+  renderItemFooter?: (item: MessageQueueItem) => ReactNode;
+  footerPosition?: 'below' | 'start' | 'end' | 'inline';
+  roomy?: boolean | 'airy';
+  title?: string;
   className?: string;
 };
 
 const FADE_PX = 20;
 const styles = stylex.create({
+  joinedSheet: { paddingBottom: space[4], marginBottom: `calc(-1 * ${space[4]})` },
   header: {
     display: 'flex',
     alignItems: 'center',
@@ -65,6 +79,11 @@ const styles = stylex.create({
     textAlign: 'start',
     cursor: 'pointer',
     boxShadow: { default: 'none', ':focus-visible': `inset 0 0 0 2px ${colors.accent}` },
+  },
+  roomyHeader: {
+    minHeight: 36,
+    paddingInline: { default: space[4], '@media (max-width: 600px)': space[2] },
+    fontSize: text.footnoteSize,
   },
   title: { fontWeight: 500 },
   count: { marginInlineStart: space[1.5] },
@@ -82,7 +101,7 @@ const styles = stylex.create({
 
 export function MessageQueueDisplay({
   sessionId,
-  items,
+  items: sourceItems,
   onRemove,
   onReorder,
   onEditStart,
@@ -91,12 +110,35 @@ export function MessageQueueDisplay({
   onSteer,
   showSteerAction = false,
   nativeSteerAvailable = false,
+  renderItemFooter,
+  getItemScheduledAt,
+  footerPosition = 'below',
+  roomy = false,
+  title,
   className,
 }: MessageQueueDisplayProps) {
   const { t } = useTranslation();
   const scrollRef = useRef<HTMLDivElement>(null);
   const [expanded, setExpanded] = useState(true);
   const [overflow, setOverflow] = useState(NO_SCROLL_EDGE_OVERFLOW);
+
+  const { items, ordinaryItems, scheduledItems, scheduledIds } = useMemo(() => {
+    const ordinary: MessageQueueItem[] = [];
+    const scheduled: Array<{ item: MessageQueueItem; at: number }> = [];
+    for (const item of sourceItems) {
+      const at = getItemScheduledAt?.(item);
+      if (at == null) ordinary.push(item);
+      else scheduled.push({ item, at });
+    }
+    scheduled.sort((a, b) => a.at - b.at);
+    const timed = scheduled.map(({ item }) => item);
+    return {
+      items: [...ordinary, ...timed],
+      ordinaryItems: ordinary,
+      scheduledItems: timed,
+      scheduledIds: new Set(timed.map((item) => item.$cid)),
+    };
+  }, [sourceItems, getItemScheduledAt]);
 
   const editing = useMessageQueueEditing(items, { onEditStart, onEditCancel, onEditSave });
   const pending = usePendingQueueRecords(sessionId, items);
@@ -105,8 +147,8 @@ export function MessageQueueDisplay({
   const failedCount = pending.filter((record) => Boolean(record.error)).length;
   const preparingCount = pending.length - failedCount;
 
-  const itemIds = useMemo(() => items.map((item) => item.$cid), [items]);
-  const canReorder = items.length > 1;
+  const itemIds = useMemo(() => ordinaryItems.map((item) => item.$cid), [ordinaryItems]);
+  const canReorder = ordinaryItems.length > 1;
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
@@ -142,15 +184,53 @@ export function MessageQueueDisplay({
       if (!overId) return;
       const activeCid = String(event.active.id);
       const overCid = String(overId);
-      if (activeCid === overCid) return;
+      if (activeCid === overCid || !itemIds.includes(activeCid) || !itemIds.includes(overCid))
+        return;
       void onReorder(activeCid, overCid);
     },
-    [onReorder]
+    [onReorder, itemIds]
   );
 
   if (rowCount === 0) {
     return null;
   }
+
+  const renderRow = (item: MessageQueueItem, index: number) => {
+    const isEditing = editing.editingCid === item.$cid;
+    return (
+      <MessageQueueRow
+        key={item.$cid}
+        sessionId={sessionId}
+        item={item}
+        footer={renderItemFooter?.(item)}
+        footerPosition={footerPosition}
+        roomy={roomy}
+        onMoveToTop={
+          !scheduledIds.has(item.$cid) ? () => onReorder(item.$cid, items[0]!.$cid) : undefined
+        }
+        index={index}
+        isFirst={index === 0}
+        showSteerAction={showSteerAction && !scheduledIds.has(item.$cid)}
+        nativeSteerAvailable={nativeSteerAvailable}
+        canReorder={canReorder && !scheduledIds.has(item.$cid)}
+        isEditing={isEditing}
+        editValue={isEditing ? editing.editValue : ''}
+        isPending={editing.pendingCid === item.$cid}
+        onEditValueChange={editing.setEditValue}
+        onStartEdit={(nextItem) => {
+          void editing.startEdit(nextItem);
+        }}
+        onCancelEdit={(nextItem) => {
+          void editing.cancelEdit(nextItem);
+        }}
+        onSaveEdit={(nextItem) => {
+          void editing.saveEdit(nextItem);
+        }}
+        onRemove={onRemove}
+        onSteer={onSteer}
+      />
+    );
+  };
 
   const fadeMask = buildScrollEdgeFadeMask(overflow, FADE_PX);
 
@@ -166,11 +246,12 @@ export function MessageQueueDisplay({
         className={cn(
           'overflow-hidden rounded-t-lg rounded-b-none border-[0.5px] border-b-0',
           'border-foreground/[0.10] bg-[hsl(var(--composer))] dark:border-input-border/45 dark:bg-input/70',
+          roomy && stylex.props(styles.joinedSheet).className,
           className
         )}
       >
         <Collapsible.Trigger
-          {...stylex.props(styles.header)}
+          {...stylex.props(styles.header, roomy && styles.roomyHeader)}
           data-message-queue-toggle=""
           onPointerDown={(event) => {
             if (event.button === 0) event.currentTarget.focus();
@@ -183,13 +264,15 @@ export function MessageQueueDisplay({
             <ChevronRight size={12} aria-hidden="true" />
           )}
           <span {...stylex.props(styles.title)}>
-            {t('sessions.messageQueue.upNext', 'Up next')}
-            <span {...stylex.props(styles.count)}>
-              {t('sessions.messageQueue.queuedCount', {
-                count: rowCount,
-                defaultValue: '{{count}} queued',
-              })}
-            </span>
+            {title ?? t('sessions.messageQueue.upNext', 'Up next')}
+            {!title && (
+              <span {...stylex.props(styles.count)}>
+                {t('sessions.messageQueue.queuedCount', {
+                  count: rowCount,
+                  defaultValue: '{{count}} queued',
+                })}
+              </span>
+            )}
           </span>
         </Collapsible.Trigger>
         {!expanded && pending.length > 0 ? (
@@ -221,51 +304,25 @@ export function MessageQueueDisplay({
               onDragEnd={handleDragEnd}
             >
               <SortableContext items={itemIds} strategy={verticalListSortingStrategy}>
-                {items.map((item, index) => {
-                  const isEditing = editing.editingCid === item.$cid;
-                  return (
-                    <MessageQueueRow
-                      key={item.$cid}
-                      sessionId={sessionId}
-                      item={item}
-                      index={index}
-                      isFirst={index === 0}
-                      showSteerAction={showSteerAction}
-                      nativeSteerAvailable={nativeSteerAvailable}
-                      canReorder={canReorder}
-                      isEditing={isEditing}
-                      editValue={isEditing ? editing.editValue : ''}
-                      isPending={editing.pendingCid === item.$cid}
-                      onEditValueChange={editing.setEditValue}
-                      onStartEdit={(nextItem) => {
-                        void editing.startEdit(nextItem);
-                      }}
-                      onCancelEdit={(nextItem) => {
-                        void editing.cancelEdit(nextItem);
-                      }}
-                      onSaveEdit={(nextItem) => {
-                        void editing.saveEdit(nextItem);
-                      }}
-                      onRemove={onRemove}
-                      onSteer={onSteer}
-                    />
-                  );
-                })}
+                {ordinaryItems.map(renderRow)}
               </SortableContext>
-            </DndContext>
-            {/* Local rows stay outside the sortable list: they are not queue items
+              {/* Local rows stay outside the sortable list: they are not queue items
               yet, and the real item is appended at exactly this position. */}
-            {pending.map((record, index) => (
-              <PendingQueueRow
-                key={record.id}
-                record={record}
-                index={items.length + index}
-                divided={items.length + index > 0}
-                busy={pendingActions.busyId === record.id}
-                onRetry={() => void pendingActions.run(record, 'retry')}
-                onCancel={() => void pendingActions.run(record, 'cancel')}
-              />
-            ))}
+              {pending.map((record, index) => (
+                <PendingQueueRow
+                  key={record.id}
+                  record={record}
+                  index={ordinaryItems.length + index}
+                  divided={ordinaryItems.length + index > 0}
+                  busy={pendingActions.busyId === record.id}
+                  onRetry={() => void pendingActions.run(record, 'retry')}
+                  onCancel={() => void pendingActions.run(record, 'cancel')}
+                />
+              ))}
+              {scheduledItems.map((item, index) =>
+                renderRow(item, ordinaryItems.length + pending.length + index)
+              )}
+            </DndContext>
           </div>
         </Collapsible.Panel>
       </Collapsible.Root>

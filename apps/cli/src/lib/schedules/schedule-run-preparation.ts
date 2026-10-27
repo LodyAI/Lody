@@ -1,3 +1,5 @@
+import { inputBlocksToHistoryItems, type ScheduledMessage } from '@lody/shared';
+import type { PreparedSessionInput } from '../prepared-session-input';
 import {
   scheduleOwnSessionId,
   normalizeLegacyScheduleAgent,
@@ -130,4 +132,21 @@ export async function resolveScheduleAgentRunConfig(
     localOnly: true,
   });
   return normalizeLegacyScheduleAgent(agent, capability?.configOptions);
+}
+
+/** Keep display content and frozen execution input identical before the ledger takes custody. */
+export function withScheduledMessageInput(
+  prepared: PreparedSessionInput,
+  message: ScheduledMessage
+): PreparedSessionInput {
+  if (!prepared.userTurn.inputConfig)
+    throw new Error('Scheduled message has no execution configuration');
+  return {
+    ...prepared,
+    userTurn: {
+      ...prepared.userTurn,
+      items: inputBlocksToHistoryItems(message.inputBlocks),
+      inputConfig: { ...prepared.userTurn.inputConfig, inputBlocks: message.inputBlocks },
+    },
+  };
 }

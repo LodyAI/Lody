@@ -1,3 +1,4 @@
+import { withScheduledMessageInput } from './schedule-run-preparation';
 import { projectTurnAttention } from '@lody/shared/notifications';
 import { turnNotificationAudience } from '../notifications/turn-notification-audience';
 import { describe, expect, it } from 'vitest';
@@ -85,6 +86,35 @@ describe('Session preparation for a scheduled run', () => {
     expect(prepared.meta.machineId).toBe('machine');
     expect(prepared.meta.agentConfigId).toBe('agent');
     expect(prepared.userTurn.inputConfig?.mcpServerIds).toEqual([]);
+  });
+
+  it('hands complete message blocks to both history and frozen execution input', async () => {
+    const base = await prepare();
+    const blocks = [
+      {
+        type: 'file' as const,
+        fileId: 'frozen-file',
+        fileName: 'notes.txt',
+        mimeType: 'text/plain',
+        sizeBytes: 5,
+        sha256: 'a'.repeat(64),
+        textPreview: true,
+        transport: 'local' as const,
+        machineId: 'machine',
+        uploadedAt: 1,
+      },
+      { type: 'text' as const, text: 'Say good morning.' },
+    ];
+    const prepared = withScheduledMessageInput(base, { inputBlocks: blocks });
+    expect(prepared.userTurn.items).toContainEqual(
+      expect.objectContaining({ type: 'file', fileId: 'frozen-file', transport: 'local' })
+    );
+    expect(prepared.userTurn.items).toContainEqual({ type: 'text', text: 'Say good morning.' });
+    expect(prepared.userTurn.inputConfig?.inputBlocks).toEqual(blocks);
+    expect(prepared.userTurn.inputConfig?.mcpServerIds).toEqual([]);
+    expect(prepared.userTurn.status).toBe('prepared');
+    expect(prepared.userTurn.id).toBe('turn-1');
+    expect(base.userTurn.items).not.toContainEqual(expect.objectContaining({ type: 'file' }));
   });
 
   it('carries the identifiers the engine froze, so a retry reuses one Session', async () => {
