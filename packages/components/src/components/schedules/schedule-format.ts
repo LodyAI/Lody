@@ -163,6 +163,22 @@ export function formatInstant(at: number, timeZone: string, locale?: string): st
   }).format(new Date(at));
 }
 
+/** A clock time with its zone, for a compact "send at 2:31 PM UTC" action. */
+export function formatClockWithZone(at: number, timeZone: string, locale?: string): string {
+  const time = new Intl.DateTimeFormat(intl(locale), {
+    hour: 'numeric',
+    minute: '2-digit',
+    timeZone,
+  }).format(new Date(at));
+  const zone = new Intl.DateTimeFormat(intl(locale), {
+    timeZone,
+    timeZoneName: 'short',
+  })
+    .formatToParts(new Date(at))
+    .find((part) => part.type === 'timeZoneName')?.value;
+  return zone ? `${time} ${zone}` : time;
+}
+
 /** Short calendar-relative form for a next run: "Today 09:00", "Tue 09:00". */
 export function formatUpcoming(at: number, timeZone: string, now: number, locale?: string): string {
   const language = intl(locale);

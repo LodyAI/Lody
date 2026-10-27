@@ -8,6 +8,7 @@ import { initReactI18next } from 'react-i18next';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   getRateLimitEntryKey,
+  getSessionRoomId,
   ScheduleRepository,
   type SessionHistory,
   type SessionMeta,
@@ -15,16 +16,19 @@ import {
 } from '@lody/shared';
 import en from '../../../locales/en.json';
 import { userAtom } from '../src/atoms';
+import { sessionMetaCacheAtom } from '../src/atoms/doc-meta';
 import { runtimeAtom } from '../src/atoms/runtime';
-import { QuotaContinueAction } from '../src/components/schedules/quota-continue-action';
+import { SessionLimitContinueAction } from '../src/components/schedules/quota-continue-action';
+import { MessageRowView } from '../src/components/ai-gui/view';
 import {
   findClaudeSessionLimit,
   quotaContinueIdentity,
   quotaContinueReset,
+  quotaContinueSendAt,
 } from '../src/components/schedules/quota-continue';
 
-const NOW = Date.parse('2026-10-27T01:00:00Z');
-const RESET = NOW + 60 * 60 * 1000;
+const NOW = Date.parse('2026-10-27T14:00:00Z');
+const RESET = Date.parse('2026-10-27T14:30:00Z');
 const state = vi.hoisted(() => ({
   turns: [] as SessionHistory[],
   machine: null as any,
@@ -87,7 +91,7 @@ const user = () => ({
     mcpServerIds: ['mcp-test'],
   },
 });
-const failed = (message = "You've hit your session limit · resets 10am (Asia/Shanghai)") =>
+const failed = (message = "You've hit your session limit · resets 2:30pm (UTC)") =>
   entry('failure', 'system', [
     { type: 'system_notice', name: 'chat_failed', meta: { reason: 'acp_internal_error', message } },
   ]);
@@ -116,7 +120,7 @@ describe('Claude quota continuation', () => {
     state.machine = {
       id: 'machine',
       ownerUserId: 'owner',
-      timeZone: 'Asia/Shanghai',
+      timeZone: 'UTC',
       protocolCapabilities: { schedules: 3 },
       raceLimits: limits(),
     };
@@ -156,8 +160,10 @@ describe('Claude quota continuation', () => {
     vi.restoreAllMocks();
     getDefaultStore().set(runtimeAtom, null);
   });
-  const render = async () => {
-    await act(async () => root.render(<QuotaContinueAction session={session} visible />));
+  const render = async (entryId = 'failure') => {
+    await act(async () =>
+      root.render(<SessionLimitContinueAction session={session} entryId={entryId} />)
+    );
   };
   const click = async () => {
     await act(async () => container.querySelector<HTMLButtonElement>('button')!.click());
@@ -165,7 +171,8 @@ describe('Claude quota continuation', () => {
 
   it('creates one full-message reservation after reset without consuming history or draft content', async () => {
     await render();
-    expect(container.textContent).toBe('Send continue after reset');
+    expect(container.textContent).toContain('Schedule one “continue” message for 2:31 PM UTC');
+    expect(container.textContent).toContain('Schedule');
     await act(async () => {
       container.querySelector<HTMLButtonElement>('button')!.click();
       container.querySelector<HTMLButtonElement>('button')!.click();
@@ -178,15 +185,17 @@ describe('Claude quota continuation', () => {
       mcpServerIds: ['mcp-test'],
     });
     expect(document?.definition).toMatchObject({
-      trigger: { kind: 'once', at: new Date(RESET + 1000).toISOString() },
+      trigger: { kind: 'once', at: new Date(RESET + 60_000).toISOString() },
       destination: { kind: 'existing_session', sessionId: 'session' },
       agent: { modelId: 'claude-test', modeId: 'safe', configOptionValues: { plan_mode: false } },
     });
     expect(state.turns[0]?.items).toEqual([{ type: 'text', text: 'Original task' }]);
-    expect(container.textContent).toContain('View scheduled continue');
+    expect(container.textContent).toContain('Continue scheduled for 2:31 PM UTC');
+    expect(container.textContent).toContain('View');
     expect(document?.timeline).toHaveLength(1);
     await render();
-    expect(container.textContent).toContain('View scheduled continue');
+    expect(container.textContent).toContain('Continue scheduled for 2:31 PM UTC');
+    expect(container.textContent).toContain('View');
   });
 
   it('reuses the durable reservation after the shortcut remounts', async () => {
@@ -200,7 +209,8 @@ describe('Claude quota continuation', () => {
       quotaContinueIdentity('workspace', 'session', RESET).scheduleId
     );
     expect(document?.timeline).toHaveLength(1);
-    expect(container.textContent).toContain('View scheduled continue');
+    expect(container.textContent).toContain('Continue scheduled for 2:31 PM UTC');
+    expect(container.textContent).toContain('View');
   });
 
   it('rechecks expiry at click time and never sends immediately', async () => {
@@ -216,10 +226,11 @@ describe('Claude quota continuation', () => {
     failFlush = true;
     await render();
     await click();
-    expect(container.textContent).toContain('Send continue after reset');
+    expect(container.textContent).toContain('Schedule one “continue” message for 2:31 PM UTC');
     failFlush = false;
     await click();
-    expect(container.textContent).toContain('View scheduled continue');
+    expect(container.textContent).toContain('Continue scheduled for 2:31 PM UTC');
+    expect(container.textContent).toContain('View');
     expect(
       (await repository.read(quotaContinueIdentity('workspace', 'session', RESET).scheduleId))
         ?.timeline
@@ -274,6 +285,42 @@ describe('Claude quota continuation', () => {
       resetsAtEpochSeconds: RESET / 1000 + 86400,
     });
     expect(quotaContinueReset({ failure, session, rateLimits, now: NOW })).toBeNull();
+  });
+  it('mounts the shortcut inside the failed message banner', async () => {
+    getDefaultStore().set(sessionMetaCacheAtom, {
+      [getSessionRoomId(session.id)]: session,
+    });
+    await act(async () =>
+      root.render(<MessageRowView message={failed()} sessionId={session.id as never} />)
+    );
+    const alert = container.querySelector('[role="alert"]');
+    expect(alert?.textContent).toContain('Agent internal error');
+    expect(alert?.textContent).toContain('Schedule one “continue” message for 2:31 PM UTC');
+    expect(
+      [...(alert?.querySelectorAll('button') ?? [])].some((button) =>
+        button.textContent?.includes('Schedule')
+      )
+    ).toBe(true);
+  });
+  it('rounds the trigger to the first full minute after reset', () => {
+    expect(quotaContinueSendAt(RESET)).toBe(RESET + 60_000);
+    expect(quotaContinueSendAt(RESET + 30_000)).toBe(RESET + 60_000);
+    expect(quotaContinueSendAt(RESET + 59_999)).toBe(RESET + 60_000);
+    expect(quotaContinueSendAt(RESET + 60_000)).toBe(RESET + 120_000);
+  });
+  it('does not render the shortcut on a different failure entry', async () => {
+    await render('an-older-failure');
+    expect(container.textContent).toBe('');
+  });
+  it('does not show the shortcut after the conversation recovered', async () => {
+    state.turns = [
+      user(),
+      failed(),
+      entry('recovered', 'assistant', [{ type: 'text', text: 'Done' }]),
+    ];
+    expect(findClaudeSessionLimit(state.turns)).toBeNull();
+    await render();
+    expect(container.textContent).toBe('');
   });
   it('hides the action for old machines and another owner', async () => {
     state.machine.protocolCapabilities.schedules = 2;

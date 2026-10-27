@@ -280,6 +280,8 @@ import { toast } from '@/lib/toast';
 import { SessionPlanBar } from '@/components/sessions/session-plan-bar';
 import { ContainerQueryProvider } from './container-query-provider';
 import { ScheduleProposalNotice } from '@/components/schedules/schedule-proposal-notice';
+import { SessionLimitContinueAction } from '@/components/schedules/quota-continue-action';
+import { isClaudeSessionLimitMessage } from '@/components/schedules/quota-continue';
 import { isOperationSurfaceItem, shouldRenderSystemRowItem } from './message-content-guards';
 import {
   getOperationCompletionItems,
@@ -2900,6 +2902,7 @@ const SystemMessageRowView = ({
           <SystemNoticeView
             key={`${item.name}-${itemIndex}`}
             notice={item}
+            entryId={message.id}
             sessionId={sessionId}
             onNavigateSession={onNavigateSession}
             capacityRetry={capacityRetry}
@@ -3163,6 +3166,11 @@ const noticeStyles = stylex.create({
     width: 'auto',
     maxWidth: '100%',
   },
+  afterDetail: {
+    order: 6,
+    width: '100%',
+    minWidth: 0,
+  },
 });
 
 /**
@@ -3183,18 +3191,21 @@ const noticeStyles = stylex.create({
  * Tone is carried by the glyph and the leading sentence: amber is warning and
  * red is failure, by convention, over a ~6% fill that stays out of the way.
  */
-const AgentNoticeBanner = ({
+export const AgentNoticeBanner = ({
   tone,
   label,
   detail,
   action,
   footer,
+  afterDetail,
 }: {
   tone: 'error' | 'warning' | 'muted';
   label: string;
   detail?: string;
   action?: ReactNode;
   footer?: ReactNode;
+  /** A full-width row under the detail, for a follow-up action the detail explains. */
+  afterDetail?: ReactNode;
 }) => {
   // Error is a cross, warning a triangle, muted an info circle — an octagon
   // with an exclamation inside still read as "notice" at 14px.
@@ -3256,6 +3267,7 @@ const AgentNoticeBanner = ({
             {footer}
           </div>
         ) : null}
+        {afterDetail ? <div {...stylex.props(noticeStyles.afterDetail)}>{afterDetail}</div> : null}
       </div>
     </div>
   );
@@ -3263,12 +3275,14 @@ const AgentNoticeBanner = ({
 
 const SystemNoticeView = ({
   notice,
+  entryId,
   sessionId,
   onNavigateSession,
   capacityRetry,
   inTurn = false,
 }: {
   notice: Extract<MessageContent, { type: 'system_notice' }>;
+  entryId: string;
   sessionId: SessionId;
   onNavigateSession?: (target: SessionNavigationTarget) => void;
   capacityRetry?: CapacityRetryControl;
@@ -3286,6 +3300,7 @@ const SystemNoticeView = ({
       return (
         <ChatFailedNoticeView
           notice={notice}
+          entryId={entryId}
           sessionId={sessionId}
           capacityRetry={capacityRetry}
           inTurn={inTurn}
@@ -3372,11 +3387,13 @@ const SystemNoticeView = ({
  */
 const ChatFailedNoticeView = ({
   notice,
+  entryId,
   sessionId,
   capacityRetry,
   inTurn = false,
 }: {
   notice: Extract<MessageContent, { type: 'system_notice' }>;
+  entryId: string;
   sessionId: SessionId;
   capacityRetry?: CapacityRetryControl;
   inTurn?: boolean;
@@ -3520,6 +3537,14 @@ const ChatFailedNoticeView = ({
     : undefined;
   const rawMessage = meta?.message?.trim() ? meta.message : undefined;
   const isProviderOverloaded = meta?.reason === 'acp_provider_overloaded';
+  // Mount the quota leaf only for a message that can carry the shortcut. The
+  // leaf still proves the terminal failure and exhausted 5h reset from history
+  // and provider quota before rendering; this gate only avoids a subscription
+  // for every unrelated chat_failed banner.
+  const quotaContinue =
+    sessionMeta && isClaudeSessionLimitMessage(rawMessage) ? (
+      <SessionLimitContinueAction session={sessionMeta} entryId={entryId} />
+    ) : null;
 
   const retryInSeconds = capacityRetry?.retryInSeconds ?? null;
   const isRetryCountdown = retryInSeconds !== null;
@@ -3603,6 +3628,7 @@ const ChatFailedNoticeView = ({
         message: rawMessage,
       })}
       action={retryAction}
+      afterDetail={quotaContinue}
       footer={
         <>
           {installUrl ? (
@@ -6343,7 +6369,7 @@ const renderAssistantContent = (
     // agent's own notices arrive here; `buildChatStreamItems` leaves every other
     // kind on its own system row, where `SystemMessageItems` renders it.
     case 'system_notice':
-      return <SystemNoticeView notice={content} sessionId={sessionId} inTurn />;
+      return <SystemNoticeView notice={content} entryId={messageId} sessionId={sessionId} inTurn />;
     default:
       return null;
   }
