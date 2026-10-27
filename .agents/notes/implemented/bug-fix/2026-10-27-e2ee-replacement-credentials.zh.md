@@ -2,6 +2,7 @@
 
 Status: implemented
 Translation: current
+PR: https://github.com/LodyAI/Lody/pull/1949
 
 [English](2026-10-27-e2ee-replacement-credentials.md)
 
