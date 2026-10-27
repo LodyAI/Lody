@@ -24,12 +24,12 @@ Owner 的可用性优先 MVP 决定覆盖原强制停发屏障。rotationRequire
 - Owner：现有 renderer／CLI 工作区及原生 scope 中的单次接收／选择；没有全局网络锁或新重试 daemon。
 - 取消：十秒等待期限不代表原生任务结束；最多保留一个未完成安装 owner。超时、过时和迟到读回不得更新选择。Close 使选择回调失效并等待原生／加密工作收束。
 - 交接：先安装并确认，再同步更新选择；没有需要破坏后回滚的步骤，原 provider 和 transport 继续可用。
-- 失败：接收错误、缺钥和超时可见且可重试，同时用已验证旧 epoch 发送；其他工作区独立。本地存储／账本验证失败仍保留既有安全检查。
+- 失败：接收错误、缺钥和超时可见且可重试，同时用已验证旧 epoch 发送；其他工作区独立。本地存储／账本验证失败仍保留既有安全检查。Seal 只请求合并的存储恢复并返回可重试失败，不在 SDK 保存队列内等待刷新；已验证 ingest 完成后，即使接钥仍未完成，下一次 SDK 保存也可使用保留 epoch。
 
 此方案接受 owner 的 MVP 取舍：持有旧密钥的被撤销设备能解开它获取的密文，访问边界由服务端凭据／token 权限和绝对过期承担。不允许明文 fallback 或恢复撤销写权。
 
 ## 证据与边界
 
-确定性回归覆盖同一 provider 持续发送、失败、超时／迟到结果、缺钥与过时代次、另一个工作区发送、旧钥冷启动，以及真实 SQLite／加密重启和 committed staging 接收。改变的行为均撤回修复先 RED，再 GREEN。本地边界验证不等于安装产品验收；真实网关撤销／长连接、系统钥匙串、双设备安装包、跨平台和完整十五分钟访问上限仍未验证。完整仓库测试交给 CI。
+确定性回归覆盖同一 provider 持续发送、失败、超时／迟到结果、缺钥与过时代次、另一个工作区发送、旧钥冷启动，以及真实 SQLite／加密重启和 committed staging 接收。改变的行为均撤回修复先 RED，再 GREEN。本地边界验证不等于安装产品验收；真实网关撤销／长连接、系统钥匙串、双设备安装包、跨平台和完整十五分钟访问上限仍未验证。真实 SDK 队列回归注入 SQLite busy 并阻塞 history／接钥，验证失败保存立即结束，下一次上传及解密保留数据成功。Legacy token 关闭开始后重复 invalidate 幂等；关闭失败仍保留原始 owner 和 Cause，必须完成清理重试。完整仓库测试交给 CI。
 
 core 的 advisory 权限独立在 [#1956](https://github.com/LodyAI/Lody/pull/1956) 审查；文档旧 epoch 兼容属于本 PR，两者无分支堆栈依赖。此 owner 指令覆盖 [M2](2026-10-22-e2ee-m2-product-integration.md) 的停发解释。原生 Effect consumer 迁移仍由 [路线图](2026-09-27-effect-lifecycle-migration-roadmap.md#unit-ledger) 单独负责。

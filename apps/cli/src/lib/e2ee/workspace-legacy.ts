@@ -462,10 +462,12 @@ async function openWorkspace(
       return {
         ...protectedProvider,
         seal: async (input) => {
-          // Retry transient local-ledger storage before seal admission. Network
-          // key reception stays separate from the selected retained write key.
-          if (ledgerBlocked && retryLedgerOnSeal) await refreshInBackground();
-          if (ledgerBlocked) throw new Error('e2ee_invalid_ledger');
+          // A seal runs inside the SDK save queue. Request recovery without
+          // awaiting it here: the queue must exit before any refresh can finish.
+          if (ledgerBlocked) {
+            if (retryLedgerOnSeal) void refreshInBackground();
+            throw new Error('e2ee_invalid_ledger');
+          }
           return protectedProvider.seal(input);
         },
       };

@@ -5,6 +5,13 @@ import { tmpdir } from 'node:os';
 import { DatabaseSync } from 'node:sqlite';
 import { join } from 'node:path';
 import { Effect, Fiber, Result } from 'effect';
+import { LoroDoc } from 'loro-crdt';
+import {
+  StreamsCrdt,
+  createLoroDocAdapter,
+  createInitialRemoteCursor,
+  type JsonObject,
+} from '@loro-dev/streams-crdt/loro';
 import { fileURLToPath } from 'node:url';
 import {
   makeLoroStreamsTokenProvider,
@@ -290,13 +297,21 @@ const page = (records: Uint8Array[], start = 0, end = records.length) => ({
 });
 
 describe('machine E2EE local runtime', () => {
-  it.each([false, true, 'published'] as const)(
-    'recovers storage before seal admission without self-wait when rotation=%s',
+  it.each([false, true, 'published', 'epoch'] as const)(
+    'releases the real SDK save queue before storage recovery when rotation=%s',
     async (rotation) => {
       const directory = await mkdtemp(join(tmpdir(), 'cli-e2ee-storage-retry-'));
       vi.stubEnv('LODY_DATA_DIR', join(directory, 'profile'));
       let host: Awaited<ReturnType<typeof openCliE2eeWorkspaceLegacy>> | undefined;
       let prepare: ReturnType<typeof vi.spyOn> | undefined;
+      let stream: StreamsCrdt<JsonObject> | undefined;
+      let doc: LoroDoc | undefined;
+      let firstWrite: Promise<unknown> | undefined;
+      const historyEntered = Promise.withResolvers<void>();
+      const releaseHistory = Promise.withResolvers<void>();
+      const receiveEntered = Promise.withResolvers<void>();
+      const releaseReceive = Promise.withResolvers<void>();
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
       try {
         const accountId = 'storage-retry-account';
         const root = join(
@@ -306,7 +321,13 @@ describe('machine E2EE local runtime', () => {
           'workspace'
         );
         const fixture = await execute(
-          setup(directory, 2, join(root, 'custody'), Boolean(rotation), rotation === 'published')
+          setup(
+            directory,
+            2,
+            join(root, 'custody'),
+            Boolean(rotation),
+            rotation === 'published' || rotation === 'epoch'
+          )
         );
         await retainCliE2eeWorkspaceBinding(accountId, {
           workspaceId: 'workspace',
@@ -330,10 +351,23 @@ describe('machine E2EE local runtime', () => {
         );
         let history = page(fixture.records);
         let issuedToken = 'epoch-token-old';
+        let holdHistory = false;
+        let holdReceive = false;
         const cloud = {
-          getHistory: async () => history,
-          readEpochGroup: async () =>
-            fixture.stagedGroup ? encodeEpochStagedGroup(fixture.stagedGroup) : null,
+          getHistory: async () => {
+            if (holdHistory) {
+              historyEntered.resolve();
+              await releaseHistory.promise;
+            }
+            return history;
+          },
+          readEpochGroup: async () => {
+            if (holdReceive) {
+              receiveEntered.resolve();
+              await releaseReceive.promise;
+            }
+            return fixture.stagedGroup ? encodeEpochStagedGroup(fixture.stagedGroup) : null;
+          },
           createContentTokenProvider: () =>
             Effect.gen(function* () {
               const provider = yield* makeLoroStreamsTokenProvider({
@@ -360,7 +394,11 @@ describe('machine E2EE local runtime', () => {
             method: keyof E2eeMailboxRequests,
             input: E2eeMailboxRequests[keyof E2eeMailboxRequests]
           ) => {
-            if (method === 'fetch')
+            if (method === 'fetch') {
+              if (holdReceive) {
+                receiveEntered.resolve();
+                await releaseReceive.promise;
+              }
               return {
                 items:
                   (input as E2eeMailboxRequests['fetch']).epoch === 0
@@ -368,6 +406,7 @@ describe('machine E2EE local runtime', () => {
                     : [],
                 next: null,
               };
+            }
             if (method === 'status')
               return {
                 ...(input as E2eeMailboxRequests['status']).slot,
@@ -408,8 +447,99 @@ describe('machine E2EE local runtime', () => {
           plaintext: new TextEncoder().encode('retained local edit'),
           additionalData: (header: Uint8Array) => new Uint8Array([...header, 9]),
         };
-        await expect(protection.config.provider.seal(input)).rejects.toThrow('e2ee_invalid_ledger');
         unavailable = false;
+        // Read the real revocation inside the repair, while its old SDK save is queued.
+        if (rotation)
+          history = page([
+            ...fixture.records,
+            ...(rotation === 'epoch' ? fixture.rotationSuffix : fixture.rotationSuffix.slice(0, 2)),
+          ]);
+        holdHistory = true;
+        holdReceive = true;
+        const frames: Uint8Array[] = [];
+        const url = 'https://cycle.synthetic.invalid/ds/content/room';
+        doc = new LoroDoc();
+        stream = new StreamsCrdt({
+          streamUrl: url,
+          adapter: createLoroDocAdapter(doc),
+          e2ee: protection.config,
+          remoteCursorStore: {
+            load: async () =>
+              createInitialRemoteCursor({
+                streamUrl: url,
+                nextOffset: '00000000000000000000',
+                serverLowerBoundVersion: {},
+              }),
+            save: async () => {},
+          },
+          fetch: async (_url, init) => {
+            if (init?.method === 'POST')
+              frames.push(new Uint8Array(await new Response(init.body).arrayBuffer()));
+            const headers = new Headers(init?.headers);
+            return new Response(null, {
+              status: 200,
+              headers: {
+                'Content-Type': 'application/octet-stream',
+                'Stream-Next-Offset': '00000000000000000100',
+                'Stream-Up-To-Date': 'true',
+                'Producer-Epoch': headers.get('Producer-Epoch') ?? '0',
+                'Producer-Seq': headers.get('Producer-Seq') ?? '0',
+              },
+            });
+          },
+        });
+        doc.getText('draft').insert(0, 'retained local edit');
+        doc.commit();
+        let ended: Awaited<ReturnType<StreamsCrdt<JsonObject>['appendWriteOnly']>> | undefined;
+        firstWrite = stream.appendWriteOnly().then((result) => {
+          ended = result;
+          return result;
+        });
+        await historyEntered.promise;
+        // After entry into the held history read, only Promise work remains in the
+        // failed SDK save. Drain it deterministically without advancing a deadline.
+        await vi.advanceTimersByTimeAsync(0);
+        expect(ended?.ok).toBe(false);
+        releaseHistory.resolve();
+        const recovery = host.refresh(); // Queue-external receipt; never awaited by seal.
+        await receiveEntered.promise;
+        expect((await stream.appendWriteOnly()).ok).toBe(true);
+        expect(doc.getText('draft').toString()).toBe('retained local edit');
+        const receivedDoc = new LoroDoc();
+        const reader = new StreamsCrdt({
+          streamUrl: url,
+          adapter: createLoroDocAdapter(receivedDoc),
+          e2ee: protection.config,
+          remoteCursorStore: {
+            load: async () =>
+              createInitialRemoteCursor({
+                streamUrl: url,
+                nextOffset: '00000000000000000000',
+                serverLowerBoundVersion: {},
+              }),
+            save: async () => {},
+          },
+          fetch: async () =>
+            new Response(Buffer.concat(frames), {
+              status: 200,
+              headers: {
+                'Content-Type': 'application/octet-stream',
+                'Stream-Next-Offset': '00000000000000000100',
+                'Stream-Up-To-Date': 'true',
+              },
+            }),
+        });
+        try {
+          expect((await reader.catchup()).ok).toBe(true);
+          expect(receivedDoc.getText('draft').toString()).toBe('retained local edit');
+        } finally {
+          await reader.close();
+          receivedDoc.free();
+        }
+        releaseReceive.resolve();
+        await recovery;
+        holdHistory = false;
+        holdReceive = false;
         if (rotation === 'published') {
           const active = host;
           await execute(
@@ -472,8 +602,14 @@ describe('machine E2EE local runtime', () => {
         await host.refresh();
         await expect(protection.config.provider.seal(input)).resolves.toHaveProperty('sealed');
       } finally {
+        releaseHistory.resolve();
+        releaseReceive.resolve();
+        await firstWrite;
+        await stream?.close();
+        doc?.free();
         prepare?.mockRestore();
         await host?.close();
+        vi.useRealTimers();
         vi.unstubAllEnvs();
         await rm(directory, { recursive: true, force: true });
       }
