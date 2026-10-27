@@ -122,6 +122,10 @@ export class ScheduleEngine<Prepared> {
     }
     for (const row of rows) {
       if (!this.owned(row) || !row.enabled) continue;
+      if (row.scheduledMessage && p.store.messageDispatch(p.workspaceId, row.scheduleId)) {
+        await this.project(row, { nextScheduledAt: undefined });
+        continue;
+      }
       try {
         const last = p.store.history(p.workspaceId, row.scheduleId, 1)[0];
         if (last?.activationId === row.activationId && last.state === 'failed')
@@ -158,6 +162,10 @@ export class ScheduleEngine<Prepared> {
     }
     for (const run of p.store.unfinished(p.workspaceId)) {
       if (run.state === 'dispatched') continue;
+      if (run.message && p.store.messageDispatch(p.workspaceId, run.scheduleId)) {
+        this.skip(run, 'MESSAGE_ALREADY_SENT');
+        continue;
+      }
       // Never hold the last known enabled value across awaits in the create
       // path. Re-read the local authoritative gate at each handoff attempt.
       const row = (await p.list()).find((entry) => entry.scheduleId === run.scheduleId);
@@ -309,13 +317,17 @@ export class ScheduleEngine<Prepared> {
     projection: Partial<ScheduleRuntimeRow>
   ): Promise<void> {
     const last = this.ports.store.history(this.ports.workspaceId, row.scheduleId, 1)[0];
+    const dispatched = row.scheduledMessage
+      ? this.ports.store.messageDispatch(this.ports.workspaceId, row.scheduleId)
+      : last;
     const lastDispatch =
-      last?.activationId === row.activationId &&
-      (last.state === 'dispatched' || last.state === 'finished')
+      dispatched &&
+      (row.scheduledMessage || dispatched.activationId === row.activationId) &&
+      (dispatched.state === 'dispatched' || dispatched.state === 'finished')
         ? {
-            scheduledFor: last.scheduledFor,
-            dispatchedAt: last.dispatchedAt ?? last.plannedAt,
-            sessionId: last.sessionId,
+            scheduledFor: dispatched.scheduledFor,
+            dispatchedAt: dispatched.dispatchedAt ?? dispatched.plannedAt,
+            sessionId: dispatched.sessionId,
           }
         : undefined;
     this.projections.set(row.scheduleId, {

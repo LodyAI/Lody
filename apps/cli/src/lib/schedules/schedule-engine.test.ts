@@ -363,6 +363,35 @@ describe('One-time complete messages', () => {
       })
     );
   });
+  it('never sends a consumed message again after a stale edit, even after restart', async () => {
+    const h = harness(message());
+    const delivered: string[] = [];
+    h.ports.dispatch = async (prepared) => {
+      delivered.push(prepared.prompt);
+      h.accepted();
+    };
+    await h.engine.evaluate();
+    h.finished();
+    await h.engine.evaluate();
+    h.d.prompt = 'edited after delivery';
+    h.d.message = { inputBlocks: [{ type: 'text', text: h.d.prompt }] };
+    h.d.definition.activationId = 'stale-client-edit';
+    h.d.definition.trigger = { kind: 'once', at: new Date(120_000).toISOString() };
+    h.ports.list = async () => [buildScheduleRegistryRow(h.d)];
+    h.time(120_000);
+    const restarted = new ScheduleEngine(h.ports);
+    await restarted.evaluate();
+    expect(delivered).toEqual(['Frozen message']);
+    expect(h.store.history('workspace', 'schedule')).toHaveLength(1);
+    expect(h.ports.publish).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        activationId: 'stale-client-edit',
+        messageState: 'sent',
+        lastDispatch: expect.objectContaining({ sessionId: 'chat' }),
+      })
+    );
+  });
+
   it('acknowledges cancellation before a future message has a run', async () => {
     const h = harness(message());
     h.time(1);

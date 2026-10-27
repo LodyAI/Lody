@@ -113,6 +113,18 @@ export class ScheduleStore<Prepared = unknown> {
         .all(workspaceId, scheduleId, Math.max(1, Math.min(100, limit))) as { payload: string }[]
     ).map((row) => JSON.parse(row.payload));
   }
+  /** A complete message is consumed once, across edits/activations and restarts. */
+  messageDispatch(workspaceId: string, scheduleId: string): ScheduleRun<Prepared> | undefined {
+    const rows = this.db
+      .prepare(
+        "SELECT payload FROM schedule_runs WHERE workspace_id = ? AND schedule_id = ? AND state IN ('dispatched', 'finished') ORDER BY planned_at DESC,run_key"
+      )
+      .all(workspaceId, scheduleId) as { payload: string }[];
+    return rows
+      .map((row) => JSON.parse(row.payload) as ScheduleRun<Prepared>)
+      .find((run) => run.message !== undefined);
+  }
+
   private put(run: ScheduleRun<Prepared>): void {
     this.db
       .prepare(

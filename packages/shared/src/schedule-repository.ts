@@ -79,11 +79,26 @@ export function scheduleDocumentFromMirrorState(
       : ScheduledMessageSchema.safeParse(withoutContainerIds(state.message.payload));
   if ((message && !message.success) || (parsed.data.messageVersion === 1 && !message?.success))
     return null;
+  const timeline = withoutContainerIds(state.timeline) as ScheduleDocument['timeline'];
+  const activities = new Set<string>();
   return {
     definition: parsed.data,
-    prompt: state.prompt,
+    // Complete messages are an atomic payload, not collaboratively appended text.
+    // Concurrent creation can concatenate the legacy LoroText projection.
+    prompt: message?.success
+      ? message.data.inputBlocks
+          .filter((block) => block.type === 'text')
+          .map((block) => block.text)
+          .join('\n')
+      : state.prompt,
     ...(message?.success ? { message: message.data } : {}),
-    timeline: withoutContainerIds(state.timeline) as ScheduleDocument['timeline'],
+    timeline: message?.success
+      ? timeline.filter((entry) => {
+          if (activities.has(entry.id)) return false;
+          activities.add(entry.id);
+          return true;
+        })
+      : timeline,
   };
 }
 
@@ -248,7 +263,10 @@ export class ScheduleRepository {
       ownerId: args.actorId,
       enabled: previous?.definition.enabled ?? true,
       activationId: args.activationId,
-      activeFrom: args.now,
+      // The one-time slot is also its deterministic activation floor. Devices
+      // creating the same reservation must not fingerprint their local clocks.
+      activeFrom:
+        message && draft.trigger.kind === 'once' ? Date.parse(draft.trigger.at) : args.now,
       createdAt: previous?.definition.createdAt ?? args.now,
       createdBy: previous?.definition.createdBy ?? args.actorId,
       updatedAt: args.now,

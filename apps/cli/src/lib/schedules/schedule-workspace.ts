@@ -264,7 +264,11 @@ export async function createScheduleWorkspace(args: {
       // Keep the last accepted Session while updating queue/next-fire fields.
       const next = {
         ...runtime,
-        lastDispatch: runtime.lastDispatch ?? (prior.success ? prior.data.lastDispatch : undefined),
+        lastDispatch:
+          runtime.lastDispatch ??
+          (prior.success && prior.data.activationId === runtime.activationId
+            ? prior.data.lastDispatch
+            : undefined),
       };
       if (
         prior.success &&

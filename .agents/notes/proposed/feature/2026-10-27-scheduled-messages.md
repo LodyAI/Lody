@@ -165,3 +165,29 @@ Existing ordinary send, Schedule form/list and persisted Session handoff suites 
 the regression boundary. Storybook checks render actual components at desktop/mobile
 widths and in dark mode. No production cloud reservation, live provider execution or
 packaged Electron acceptance is claimed.
+
+## Delivery identity and concurrent creation
+
+A complete message consumes its Schedule ID on durable dispatch, across all later
+activations. The owning machine checks the SQLite dispatch history both before
+planning and before processing pending work; after a stale-client edit it projects
+the consumed message as sent rather than scheduling another delivery. Runtime
+publication may inherit a prior dispatch only within the same activation; the
+message's cross-activation sent result comes from the ledger, not a stale Flock row.
+This does not implement owner-acknowledged edits: a locally saved edit can still
+be superseded by the owner's already-sent receipt. Machine transfer and destructive
+ledger loss are outside this guarantee.
+
+For complete messages, atomic input blocks are the canonical prompt source. The
+legacy LoroText prompt remains a compatibility projection, so concurrent creation
+cannot concatenate the executed text. The once trigger instant supplies the
+activation floor, independent of each writer's clock; cosmetic creation/update
+timestamps remain local. Duplicate activity IDs are collapsed on read for complete
+messages only. Ordinary prompt-only Schedule semantics remain unchanged.
+
+Real two-peer tests cover different creation clocks, matching publication
+fingerprints and uncertain-save replay. SQLite engine tests cover a sent message
+followed by a stale activation edit and an engine restart. The info-bar test fixes
+the device time zone explicitly and runs under UTC and Asia/Shanghai. No lifecycle
+or transport ownership changes are needed; a native Effect migration is deferred
+because the fixes stay within the existing ledger and pure read normalization.

@@ -82,3 +82,8 @@
   prompt-only projection. Published reservations retain staged local attachment
   bytes. Cancellation is acknowledged only after durable dispatch reconciliation;
   a committed dispatch wins. Busy destination chats defer handoff without interruption.
+- A complete-message Schedule ID is consumed by durable dispatch across all later
+  activations. Consult the persistent ledger before planning/processing another run;
+  derive cross-activation sent state from that ledger, never a cached runtime row.
+  Complete-message prompt reads derive from atomic input blocks, and their activation
+  floor is the once instant so concurrent same-reservation creates share a fingerprint.

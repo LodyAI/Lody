@@ -725,6 +725,11 @@ describe('SessionChatInputArea submission feedback', () => {
   };
 
   it('edits the info-bar schedule and sends using the shared updated time', async () => {
+    const options = new Intl.DateTimeFormat().resolvedOptions();
+    vi.spyOn(Intl.DateTimeFormat.prototype, 'resolvedOptions').mockReturnValue({
+      ...options,
+      timeZone: 'Asia/Shanghai',
+    });
     const h = await scheduledComposer(false);
     expect(
       container!.querySelector('[data-info-bar-surface] button[aria-label="Scheduled message"]')

@@ -404,6 +404,55 @@ describe('Chat-mode schedules carry no project', () => {
     expect(await replica.read('test')).toBeNull();
   });
 
+  it('converges concurrent complete-message creation despite different device clocks', async () => {
+    const ports = [memoryPort(), memoryPort()];
+    const repositories = ports.map((port) => new ScheduleRepository(port, 'workspace' as never));
+    const draft = {
+      ...chatDraft(),
+      prompt: 'continue',
+      message: { inputBlocks: [{ type: 'text' as const, text: 'continue' }] },
+      trigger: { kind: 'once' as const, at: '2026-10-27T09:00:00Z' },
+      destination: { kind: 'existing_session' as const, sessionId: 'chat' },
+    };
+    for (const [index, repository] of repositories.entries())
+      await repository.save({
+        scheduleId: 'quota',
+        draft,
+        actorId: 'owner',
+        now: 1000 + index * 5000,
+        activationId: 'activation',
+        activityId: 'create',
+        create: true,
+      });
+    const docs = await Promise.all(
+      ports.map(async (port) => (await port.openPersistedDoc('schedule-quota')).doc)
+    );
+    const snapshots = docs.map((doc) => doc.export({ mode: 'snapshot' }));
+    docs[0]!.import(snapshots[1]!);
+    docs[1]!.import(snapshots[0]!);
+    const rows = await Promise.all(
+      repositories.map(async (repository) => (await repository.list())[0]!)
+    );
+    expect(rows[0]!.definitionFingerprint).toBe(rows[1]!.definitionFingerprint);
+    for (const repository of repositories) {
+      const merged = (await repository.read('quota'))!;
+      expect(merged.prompt).toBe('continue');
+      expect(merged.timeline).toHaveLength(1);
+      expect(merged.message?.inputBlocks).toEqual(draft.message.inputBlocks);
+      expect(scheduleDefinitionFingerprint(merged)).toBe(rows[0]!.definitionFingerprint);
+      await repository.save({
+        scheduleId: 'quota',
+        draft,
+        actorId: 'owner',
+        now: 9999,
+        activationId: 'activation',
+        activityId: 'create',
+        create: true,
+      });
+      expect((await repository.read('quota'))?.prompt).toBe('continue');
+    }
+  });
+
   it('supports attachment-only messages and rejects missing, empty or non-once payloads', async () => {
     const repo = new ScheduleRepository(memoryPort(), 'workspace' as never);
     const draft = {
