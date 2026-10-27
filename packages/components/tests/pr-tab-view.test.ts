@@ -3,7 +3,7 @@
 import { createElement } from 'react';
 import { flushSync } from 'react-dom';
 import { createRoot, type Root } from 'react-dom/client';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, describe, expect, it, vi } from 'vitest';
 import type {
   GitHubCheckRunsSummary,
   GitHubPullRequestDetails,
@@ -24,6 +24,13 @@ vi.mock('react-i18next', () => ({
       (fallback ?? _key).replace(/\{\{(\w+)\}\}/g, (_m, name: string) => String(opts?.[name])),
   }),
 }));
+
+// Markdown mounts start browser-only lazy imports (including KaTeX copy-tex).
+// Keep this suite's document alive until those imports finish, even when a
+// synchronous layout assertion immediately unmounts the rendered PR view.
+afterAll(async () => {
+  await vi.dynamicImportSettled();
+});
 
 const pullRequest: GitHubPullRequestDetails = {
   number: 42,

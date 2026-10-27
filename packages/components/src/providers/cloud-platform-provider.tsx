@@ -208,15 +208,18 @@ export function CloudPlatformProvider({ children }: { children: ReactNode }) {
               prepareLocalAgent: (workspaceId) => native.prepareLocalAgent(workspaceId),
               admitLocalAgent: (workspaceId, pairingSessionId) =>
                 native.admitLocalAgent(workspaceId, pairingSessionId),
-              refresh: (workspaceId) => native.refresh(workspaceId),
+              refresh: (workspaceId, options) => native.refresh(workspaceId, options),
               contentStreamsToken: (workspaceId, rejectedToken) =>
                 native.contentStreamsToken(workspaceId, rejectedToken),
               seal: (workspaceId, input) => native.seal(workspaceId, input),
               openContent: (workspaceId, input) => native.openContent(workspaceId, input),
               account: (options) => native.account(options),
+              resetIdentity: (request) => native.resetIdentity(request),
+              resetLocalAgent: (request) => native.resetLocalAgent(request),
               recordCreated: (request) => native.recordCreated(request),
               open: (workspaceId, observed) => native.open(workspaceId, observed),
               close: (workspaceId) => native.close(workspaceId),
+              readIdentity: (input) => native.readIdentity(input),
               status: (workspaceId) => native.status(workspaceId),
               ingestLedgerRecords: (workspaceId, page) =>
                 native.ingestLedgerRecords(workspaceId, page),

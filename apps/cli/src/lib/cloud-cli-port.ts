@@ -229,6 +229,11 @@ export function createCloudE2eePort(
         })
       ),
     getContentToken: (input) => getContentToken(input, AbortSignal.timeout(30_000)),
+    readEpochGroup: (input) =>
+      client(AbortSignal.timeout(30_000)).query(api.e2eeEpochStaging.readGroup, {
+        ...input,
+        ...(options.token === undefined ? {} : { cliToken: options.token }),
+      }),
     mailboxCall: async (method, input) => {
       const connection = client(AbortSignal.timeout(30_000));
       const common = z.object({ workspaceId: z.string(), credential: z.string() });
@@ -557,6 +562,8 @@ export function createCloudE2eeMachinePort(options: {
     }),
   ]);
   const e2ee = createCloudE2eePort({ authBaseUrl: options.authBaseUrl, logger: options.logger });
+  const readEpochGroup = e2ee.readEpochGroup;
+  const completeMachinePairing = e2ee.completeMachinePairing;
   const bound = (value: { workspaceId: string; credential: string }) => {
     if (value.workspaceId !== options.workspaceId || value.credential !== options.credential)
       throw new Error('e2ee_binding_conflict');
@@ -575,6 +582,22 @@ export function createCloudE2eeMachinePort(options: {
         bound(input);
         return e2ee.getContentToken(input);
       },
+      ...(readEpochGroup
+        ? {
+            readEpochGroup: (input) => {
+              bound(input);
+              return readEpochGroup(input);
+            },
+          }
+        : {}),
+      ...(completeMachinePairing
+        ? {
+            completeMachinePairing: async (input) => {
+              bound(input);
+              await completeMachinePairing(input);
+            },
+          }
+        : {}),
       mailboxCall: (method, input) => {
         bound(input);
         return e2ee.mailboxCall(method, input);
@@ -590,7 +613,7 @@ export function createCloudE2eeMachinePort(options: {
             if (parsed.success) listener(parsed.data);
             else onError(new Error('e2ee_machine_service_invalid_response'));
           },
-          () => onError(new Error('e2ee_machine_service_unavailable_or_revoked_repair_pairing'))
+          () => onError(new Error('e2ee_machine_service_unavailable_retry'))
         ),
       verifyMachineAccess: async () => ({ allowed: false, reason: 'not_visible' }),
       registerMachineAccess: async (input) => {

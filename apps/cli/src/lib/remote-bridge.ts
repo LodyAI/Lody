@@ -71,6 +71,7 @@ export class RemoteBridge {
       ? undefined
       : await fileLocksLegacy.runPromise(
           this.args.catalog.cacheRemoteWorkspaces({
+            authenticatedOnline: true,
             identity: { userId: this.args.userId },
             machine: {
               machineId: this.args.machineId,

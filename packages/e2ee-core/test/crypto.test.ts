@@ -725,7 +725,7 @@ describe('ledger-bound signed document workflows', () => {
     expect(code(admitStreamsUpdateBatch({ ...options, view: f.view() }))).toBe('unauthorized');
   });
   it.each(['tag7', 'tag8', 'rotation-required'] as const)(
-    'admits original sealed updates and snapshots after %s while retaining the new-seal gate',
+    'admits original sealed updates and snapshots after %s while retaining active writer access',
     async (transition) => {
       const f = ledgerFixture(true);
       f.addPhone();
@@ -851,21 +851,22 @@ describe('ledger-bound signed document workflows', () => {
             const next = yield* Effect.result(
               binding.seal({ ...updateInput, additionalData: () => aadFor(false) })
             );
-            if (transition === 'rotation-required') expect(code(next)).toBe('unauthorized');
-            else {
+            expect(Result.isSuccess(next)).toBe(true);
+            if (Result.isSuccess(next)) {
               const mixed = { ...input, body: batch([old.sealed, read(next).sealed]) };
               expect(read(admitStreamsUpdateBatch(mixed))).toEqual(mixed.body);
               expect(yield* admitStreamsUpdateBatchEffect(mixed)).toEqual(mixed.body);
-              // The same genuinely signed epoch1 bytes were unknown to the old endpoint.
-              expect(
-                code(
-                  admitStreamsUpdateBatch({
-                    ...input,
-                    view: oldView,
-                    body: batch([read(next).sealed]),
-                  })
-                )
-              ).toBe('unauthorized');
+              // Only an actual epoch advance is unknown to the old endpoint.
+              if (transition !== 'rotation-required')
+                expect(
+                  code(
+                    admitStreamsUpdateBatch({
+                      ...input,
+                      view: oldView,
+                      body: batch([read(next).sealed]),
+                    })
+                  )
+                ).toBe('unauthorized');
             }
             // A real signature cannot manufacture an unpublished/future epoch.
             const futureScope = { ...f.scope, epoch: 9 };
@@ -1105,13 +1106,18 @@ describe('ledger-bound signed document workflows', () => {
             f.addPhone();
             f.append([5, f.phone.raw]);
             expect(read(admitStreamsSnapshot({ ...input, view: f.view() }))).toEqual(body);
+            const pendingSeal = yield* binding.seal({
+              ...updateInput,
+              context,
+              additionalData: aadFor,
+            });
             expect(
-              code(
-                yield* Effect.result(
-                  binding.seal({ ...updateInput, context, additionalData: aadFor })
-                )
-              )
-            ).toBe('unauthorized');
+              yield* binding.open({
+                ...pendingSeal,
+                context,
+                additionalData: aadFor(pendingSeal.header),
+              })
+            ).toEqual(updateInput.plaintext);
             expect(yield* authenticateStreamsSnapshotEffect({ ...input, view: f.view() })).toEqual(
               body
             );
@@ -1173,7 +1179,14 @@ describe('ledger-bound signed document workflows', () => {
                 additionalData: new Uint8Array([1, 2]),
               })
             ).toEqual(updateInput.plaintext);
-          expect(code(yield* Effect.result(pinned.seal(updateInput)))).toBe('unauthorized');
+          const retained = yield* pinned.seal(updateInput);
+          expect(
+            yield* pinned.open({
+              ...retained,
+              context: updateContext,
+              additionalData: new Uint8Array([1, 2]),
+            })
+          ).toEqual(updateInput.plaintext);
           const missing = yield* makeStreamsUpdateBinding({
             ...bindingOptions(f),
             writeEpoch: 'current',
@@ -1196,7 +1209,7 @@ describe('ledger-bound signed document workflows', () => {
       )
     );
   });
-  it('blocks current-epoch seals during required rotation and after writer revocation without losing old reads', async () => {
+  it('keeps active seals available during manual rotation while refusing revoked writers', async () => {
     const f = ledgerFixture(true);
     f.addPhone();
     const nextSecret = new Uint8Array(32).fill(8);
@@ -1213,7 +1226,15 @@ describe('ledger-bound signed document workflows', () => {
           const phone = yield* makeStreamsUpdateBinding({ ...options, signer: f.phone.signer });
           const old = yield* phone.seal(updateInput);
           f.append([5, f.phone.raw]);
-          expect(code(yield* Effect.result(owner.seal(updateInput)))).toBe('unauthorized');
+          const pending = yield* owner.seal(updateInput);
+          expect(
+            yield* owner.open({
+              ...pending,
+              context: updateContext,
+              additionalData: new Uint8Array([1, 2]),
+            })
+          ).toEqual(updateInput.plaintext);
+          expect(code(yield* Effect.result(phone.seal(updateInput)))).toBe('unauthorized');
           f.publishEpoch(nextSecret);
           yield* owner.seal(updateInput);
           expect(code(yield* Effect.result(phone.seal(updateInput)))).toBe('unauthorized');
@@ -1228,63 +1249,215 @@ describe('ledger-bound signed document workflows', () => {
       )
     );
   });
-  it('refuses an epoch change during native signing and clears the operation-owned key before retry', async () => {
+  it.each(['before-open', 'during-key-read'] as const)(
+    'accepts a historically admitted snapshot signer revoked %s and retains incremental reads',
+    async (revocation) => {
+      const f = ledgerFixture(true);
+      f.addPhone();
+      await Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            let revokeDuringRead = false;
+            const reader = yield* makeStreamsUpdateBinding({
+              ...bindingOptions(f),
+              readEpochKey: () =>
+                Effect.sync(() => {
+                  if (revokeDuringRead) {
+                    f.append([5, f.phone.raw]);
+                    revokeDuringRead = false;
+                  }
+                  return read(Bytes.epochKey(source));
+                }),
+            });
+            const writer = yield* makeStreamsUpdateBinding({
+              ...bindingOptions(f),
+              signer: f.phone.signer,
+            });
+            const context = {
+              ...updateContext,
+              kind: 'snapshot' as const,
+              continuationOffset: '0_123',
+            };
+            const snapshot = yield* writer.seal({ ...updateInput, context });
+            const update = yield* writer.seal(updateInput);
+            const request = { ...snapshot, context, additionalData: new Uint8Array([1, 2]) };
+            expect(yield* reader.open(request)).toEqual(updateInput.plaintext);
+            if (revocation === 'before-open') f.append([5, f.phone.raw]);
+            else revokeDuringRead = true;
+            expect(yield* reader.open(request)).toEqual(updateInput.plaintext);
+            expect(
+              yield* reader.open({
+                ...update,
+                context: updateContext,
+                additionalData: new Uint8Array([1, 2]),
+              })
+            ).toEqual(updateInput.plaintext);
+          })
+        )
+      );
+    }
+  );
+  it('rejects a never-admitted snapshot signer and cross-workspace/document replay', async () => {
     const f = ledgerFixture(true);
-    const nextSecret = new Uint8Array(32).fill(8);
-    const owned: Bytes.EpochKey[] = [];
-    let hold = true;
     await Effect.runPromise(
       Effect.scoped(
         Effect.gen(function* () {
-          const entered = yield* Deferred.make<void>();
-          const release = yield* Deferred.make<void>();
-          yield* Effect.addFinalizer(() => Deferred.succeed(release, undefined));
-          const binding = yield* makeStreamsUpdateBinding({
-            ...bindingOptions(f),
-            writeEpoch: 'current',
-            readEpochKey: (epoch) =>
-              Effect.sync(() => {
-                const key = read(Bytes.epochKey(epoch === 0 ? source : nextSecret));
-                owned.push(key);
-                return key;
-              }),
-            signer: {
-              publicKey: f.owner.publicKey,
-              sign: (message) =>
-                Effect.uninterruptible(
-                  Effect.gen(function* () {
-                    if (hold) {
-                      yield* Deferred.succeed(entered, undefined);
-                      yield* Deferred.await(release);
-                    }
-                    return read(Bytes.signature(f.owner.signBytes(message)));
-                  })
-                ),
-            },
-          });
-          const sealing = yield* Effect.forkChild(Effect.result(binding.seal(updateInput)));
-          yield* Deferred.await(entered);
-          f.publishEpoch(nextSecret);
-          yield* Deferred.succeed(release, undefined);
-          expect(code(yield* Fiber.join(sealing))).toBe('unauthorized');
-          expect(code(deriveContentKey(owned[0]!, header))).toBe('invalid-content-key');
-          hold = false;
-          const sealed = yield* binding.seal(updateInput);
+          const binding = yield* makeStreamsUpdateBinding(bindingOptions(f));
+          const context = {
+            ...updateContext,
+            kind: 'snapshot' as const,
+            continuationOffset: '0_123',
+          };
+          const sealed = yield* binding.seal({ ...updateInput, context });
+          const scope = { ...f.scope, purpose: 'doc-snapshot' as const };
+          const rogueHeader: ContentHeader = {
+            ...scope,
+            docEpoch: 0,
+            device: hex(f.attacker.raw),
+            continuationOffset: context.continuationOffset,
+          };
+          const leaf = keyFor(scope);
+          const encrypted = read(
+            sealContentAead(leaf, rogueHeader, updateInput.plaintext, new Uint8Array([1, 2]))
+          );
+          disposeContentKey(leaf);
+          const unsigned = new Uint8Array(
+            Buffer.concat([
+              read(encodeContentHeader(rogueHeader)),
+              encrypted.nonce,
+              encrypted.ciphertext,
+            ])
+          );
+          const changed = new Uint8Array(
+            Buffer.concat([
+              unsigned,
+              f.attacker.signBytes(
+                read(contentSigningBytes(scope, unsigned, new Uint8Array([1, 2])))
+              ),
+            ])
+          );
           expect(
-            read(
-              verifyContentSignature(
-                sealed.sealed,
-                { ...f.scope, epoch: 1 },
-                f.owner.publicKey,
-                new Uint8Array([1, 2])
+            code(
+              yield* Effect.result(
+                binding.open({
+                  ...sealed,
+                  sealed: changed,
+                  context,
+                  additionalData: new Uint8Array([1, 2]),
+                })
               )
-            ).epoch
-          ).toBe(1);
-          expect(code(deriveContentKey(owned[1]!, header))).toBe('invalid-content-key');
+            )
+          ).toBe('unauthorized');
+          for (const changedScope of [
+            { resource: 'different-document' },
+            { genesis: read(Bytes.genesisHash(new Uint8Array(32).fill(123))) },
+          ]) {
+            const other = yield* makeStreamsUpdateBinding({
+              ...bindingOptions(f),
+              ...changedScope,
+            });
+            expect(
+              Result.isFailure(
+                yield* Effect.result(
+                  other.open({ ...sealed, context, additionalData: new Uint8Array([1, 2]) })
+                )
+              )
+            ).toBe(true);
+          }
         })
       )
     );
   });
+  it.each(['update_batch', 'snapshot'] as const)(
+    'finishes the selected published epoch during %s signing and clears its operation-owned key',
+    async (kind) => {
+      const f = ledgerFixture(true);
+      const sealInput = {
+        ...updateInput,
+        context:
+          kind === 'snapshot'
+            ? { ...updateContext, kind, continuationOffset: '0_123' }
+            : updateContext,
+      };
+      const verifiedScope: ContentScope = {
+        ...f.scope,
+        purpose: kind === 'snapshot' ? 'doc-snapshot' : 'doc-update',
+      };
+      const nextSecret = new Uint8Array(32).fill(8);
+      const owned: Bytes.EpochKey[] = [];
+      let hold = true;
+      await Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const entered = yield* Deferred.make<void>();
+            const release = yield* Deferred.make<void>();
+            yield* Effect.addFinalizer(() => Deferred.succeed(release, undefined));
+            const binding = yield* makeStreamsUpdateBinding({
+              ...bindingOptions(f),
+              writeEpoch: 'current',
+              readEpochKey: (epoch) =>
+                Effect.sync(() => {
+                  const key = read(Bytes.epochKey(epoch === 0 ? source : nextSecret));
+                  owned.push(key);
+                  return key;
+                }),
+              signer: {
+                publicKey: f.owner.publicKey,
+                sign: (message) =>
+                  Effect.uninterruptible(
+                    Effect.gen(function* () {
+                      if (hold) {
+                        yield* Deferred.succeed(entered, undefined);
+                        yield* Deferred.await(release);
+                      }
+                      return read(Bytes.signature(f.owner.signBytes(message)));
+                    })
+                  ),
+              },
+            });
+            const sealing = yield* Effect.forkChild(Effect.result(binding.seal(sealInput)));
+            yield* Deferred.await(entered);
+            f.publishEpoch(nextSecret);
+            yield* Deferred.succeed(release, undefined);
+            const retained = read(yield* Fiber.join(sealing));
+            expect(
+              read(
+                verifyContentSignature(
+                  retained.sealed,
+                  verifiedScope,
+                  f.owner.publicKey,
+                  new Uint8Array([1, 2])
+                )
+              ).epoch
+            ).toBe(0);
+            const fixed = yield* makeStreamsUpdateBinding({ ...bindingOptions(f), writeEpoch: 0 });
+            const offline = yield* fixed.seal(sealInput);
+            expect(
+              yield* fixed.open({
+                ...offline,
+                context: sealInput.context,
+                additionalData: new Uint8Array([1, 2]),
+              })
+            ).toEqual(updateInput.plaintext);
+            expect(code(deriveContentKey(owned[0]!, header))).toBe('invalid-content-key');
+            hold = false;
+            const sealed = yield* binding.seal(sealInput);
+            expect(
+              read(
+                verifyContentSignature(
+                  sealed.sealed,
+                  { ...verifiedScope, epoch: 1 },
+                  f.owner.publicKey,
+                  new Uint8Array([1, 2])
+                )
+              ).epoch
+            ).toBe(1);
+            expect(code(deriveContentKey(owned[1]!, header))).toBe('invalid-content-key');
+          })
+        )
+      );
+    }
+  );
   it('waits for an owned in-flight key read before releasing its caller scope, rejects late output and clears the key', async () => {
     const f = ledgerFixture(true);
     let owned: Bytes.EpochKey | undefined;

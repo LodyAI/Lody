@@ -27,7 +27,7 @@ A polite live region announces status changes. The panel may cover nearby conten
 only after the user opens it.
 
 [`AuthRecoveryEntryProvider`](../../../../packages/components/src/components/auth-recovery-entry.tsx)
-projects a 24px icon into `AuthRecoveryEntrySlot` beside the existing workspace
+projects a 28px control with a 16px icon into `AuthRecoveryEntrySlot` beside the existing workspace
 control in `LoroSidebar`: the desktop footer or mobile header. The composer and
 footer keep their existing height, and healthy state has no icon. The entry follows
 sidebar visibility. A stable ref context carries only slot registration, leaving
@@ -36,6 +36,10 @@ persistent entry keeps recovery actions discoverable; a transient toast would lo
 them. Fixed viewport corners were rejected because nearby controls and sidebar
 contents vary. This follows contextual status with details on demand, without
 claiming to reproduce Linear's current implementation.
+
+The entry uses the sidebar action geometry and a 4px gap when present. Offline,
+reconnecting and warning glyphs crossfade with blur in one fixed icon slot;
+reduced-motion preferences retain only the opacity transition.
 
 Without a mounted sidebar slot, including pre-workspace surfaces,
 a small floating entry remains above the bottom safe area. This fallback

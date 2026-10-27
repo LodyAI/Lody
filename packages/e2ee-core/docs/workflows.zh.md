@@ -6,7 +6,7 @@
 
 ## VerifiedLedger
 
-*需要 `WorkspaceScope`、`LedgerViewSource`、`LedgerPinStore`。*
+_需要 `WorkspaceScope`、`LedgerViewSource`、`LedgerPinStore`。_
 
 唯一的回滚与分叉守卫。`current()` 获取视图后，只有同时满足以下条件才接受：
 
@@ -19,13 +19,13 @@
 
 ## LedgerFeed
 
-*需要 `WorkspaceScope`、`LedgerFeedStore`。选项：起点、期望检查点、预算。*
+_需要 `WorkspaceScope`、`LedgerFeedStore`。选项：起点、期望检查点、预算。_
 
 本地已验证的账本副本。起点是创世记录，或经过背书的快照（每次打开都要重新提供 `trust`）。打开时重新验证所有已存字节，直到独立提供的 `expected` 检查点。`accept(page, checkpoint)` 验证一页 `LedgerFeedSource` 数据（拒绝重复、过旧或回退的页面）并原子追加；内存中的视图只在写入提交后才改变。预算超限时失败关闭，从不删除已提交历史。`LedgerFeed.viewSource` 把 feed 转为 `LedgerViewSource`。
 
 ## LedgerSubmission
 
-*需要 `WorkspaceScope`、`SubmissionJournal`、`LedgerLog`。*
+_需要 `WorkspaceScope`、`SubmissionJournal`、`LedgerLog`。_
 
 每个工作区一次只提交一条签名记录，且恰好一次：
 
@@ -41,7 +41,7 @@ acknowledge(r):  释放已完成的结果
 
 ## InstalledEpochKeys 与 InstalledEpochHistory
 
-*需要 `WorkspaceScope`、`DeviceIdentity`、`VerifiedLedger`、`KeyProtector`、`InstalledKeyStore`。*
+_需要 `WorkspaceScope`、`DeviceIdentity`、`VerifiedLedger`、`KeyProtector`、`InstalledKeyStore`。_
 
 本地密钥材料的唯一所有者。`saveAndReload(epoch, key)` 按以下顺序执行：
 
@@ -56,7 +56,7 @@ acknowledge(r):  释放已完成的结果
 
 ## KeyReceiver
 
-*需要 `WorkspaceScope`、`DeviceIdentity`、`VerifiedLedger`、`InstalledEpochKeys`、`KeyMailbox`、`ReceiveJournal`。*
+_需要 `WorkspaceScope`、`DeviceIdentity`、`VerifiedLedger`、`InstalledEpochKeys`、`KeyMailbox`、`ReceiveJournal`。_
 
 安装本设备收到的密钥并报告安装结果。
 
@@ -80,13 +80,13 @@ results() / acknowledge(id)   已结束任务保留到确认为止
 
 ## KeyRepair
 
-*需要 `WorkspaceScope`、`DeviceIdentity`、`VerifiedLedger`、`KeyMailbox`、`RepairJournal`。*
+_需要 `WorkspaceScope`、`DeviceIdentity`、`VerifiedLedger`、`KeyMailbox`、`RepairJournal`。_
 
 当本设备无法安装当前密钥时，请求发送者重新投递。`enqueue(id, rejectedDigest?)` 在发送任何内容之前，把调用方选定的稳定 ID 与当前纪元及可选的被拒帧持久绑定；以不同字段复用同一 ID 会以 `replay` 失败。`flush` 发送待处理请求（邮箱按 ID 去重），并以 `Repaired`、`Obsolete` 或 `Revoked` 结束。`Repaired` 只记录请求成功，绝不表示已安装。
 
 ## KeyDistributor
 
-*需要接收者的全部端口，外加 `KeyReceiver`、`DeliveryOutbox`、`DistributionJournal`、`EpochPublicationSource`。*
+_需要接收者的全部端口，外加 `KeyReceiver`、`DeliveryOutbox`、`DistributionJournal`、`EpochPublicationSource`。_
 
 确保每台当前设备都能拿到当前密钥。
 
@@ -102,7 +102,7 @@ results() / acknowledge()   已完成任务保留到确认为止
 
 ## EpochPublisher
 
-*需要 `WorkspaceScope`、`DeviceIdentity`、`VerifiedLedger`、`InstalledEpochKeys`、`CandidateProtector`、`EpochStagingStore`、`LedgerSubmission`、`EpochCandidateStore`。*
+_需要 `WorkspaceScope`、`DeviceIdentity`、`VerifiedLedger`、`InstalledEpochKeys`、`CandidateProtector`、`EpochStagingStore`、`LedgerSubmission`、`EpochCandidateStore`。_
 
 换代纪元密钥（`publish`），或在一条签名记录中移除成员并换代（`publishRemoving`，仅 owner）。
 
@@ -118,9 +118,9 @@ results() / acknowledge()   已完成任务保留到确认为止
 
 ## WorkspaceControl 与密钥轮次
 
-`WorkspaceControl`（*需要 `DeviceIdentity`、`LedgerSubmission`、`LedgerSync`*）在刚刷新的视图上签名普通命令（接纳成员或设备、设置角色、吊销、转移 owner），每条只提交一次。存在待处理或未确认的提交时禁止新的签名；只有本地 feed 已包含提交时观察到的检查点，结果才会被确认。
+`WorkspaceControl`（_需要 `DeviceIdentity`、`LedgerSubmission`、`LedgerSync`_）在刚刷新的视图上签名普通命令（接纳成员或设备、设置角色、吊销、转移 owner），每条只提交一次。存在待处理或未确认的提交时禁止新的签名；只有本地 feed 已包含提交时观察到的检查点，结果才会被确认。
 
-`runWorkspaceKeyRound(limit, cursors)`（*需要 `KeyRepair`、`KeyReceiver`、`KeyDistributor`*）是一轮有限的维护：发送修复、恢复安装、获取一页邮箱、发送报告、协调并投递、再次发送报告、列出结果。每个队列各自保留游标提示。
+`runWorkspaceKeyRound(limit, cursors)`（_需要 `KeyRepair`、`KeyReceiver`、`KeyDistributor`_）是一轮有限的维护：发送修复、恢复安装、获取一页邮箱、发送报告、协调并投递、再次发送报告、列出结果。每个队列各自保留游标提示。
 
 ## E2eeWorkspace
 
@@ -130,15 +130,15 @@ results() / acknowledge()   已完成任务保留到确认为止
 
 ## 恢复
 
-`RecoveryVaults`（*需要 `RecoveryVaultStore`、`RecoveryVaultLocalStore`*）创建并解锁 vault-v1：离线保存的恢复文件，或 passkey PRF。`makeWorkspaceRecovery` 维护某个工作区的恢复条目（设置、测试、替换、跳过）并执行恢复：恢复设备接纳新的个人设备，再由该设备安装所有纪元密钥。方案见白皮书的备份与恢复一节及[恢复 vault](../../../specs/e2ee/recovery-vault.zh.md)。
+`RecoveryVaults`（_需要 `RecoveryVaultStore`、`RecoveryVaultLocalStore`_）创建并解锁 vault-v1：离线保存的恢复文件，或 passkey PRF。`makeWorkspaceRecovery` 维护某个工作区的恢复条目（设置、测试、替换、跳过）并执行恢复：恢复设备接纳新的个人设备，再由该设备安装所有纪元密钥。方案见白皮书的备份与恢复一节及[恢复 vault](../../../specs/e2ee/recovery-vault.zh.md)。
 
 ## 文档
 
 文档内容使用 content v0：签名头部，以由纪元密钥派生的文档密钥做 XChaCha20-Poly1305 加密，AAD 绑定用途。
 
 - **Loro / streams-crdt**：`streamsDocumentBinding({ resource, model, writeEpoch })`（`@lody/e2ee-core/adapters/loro-streams`）是 `@loro-dev/streams-crdt` 文档的载荷保护绑定。它封装更新（头部 3）与快照（头部 4，续读 offset 位于签名头部内），并打开读到的内容。签名器、账本视图与密钥分别取自 `DeviceIdentity`、`VerifiedLedger` 与 `InstalledEpochHistory`。
-- **其他传输**：`sealDocument`、`openDocument` 与 `authenticateDocument`（`/protocol`）接收文档密钥、签名器和已验证视图的查询函数。新的封装要求在确切的当前纪元具有当前写权限，加密前与签名后各检查一次；每次执行都重新加密，因此重试必须重发返回的字节。
-- 读取时先认证历史作者再解密：被吊销作者的旧内容仍可打开并归属到原成员（快照之后同样如此），但这不授予当前写权限。
+- **其他传输**：`sealDocument`、`openDocument` 与 `authenticateDocument`（`/protocol`）接收文档密钥、签名器和已验证视图的查询函数。新的封装要求当前写权限及不晚于当前的已验证发布纪元，加密前与签名后各检查一次；待手动换代时仍可使用保留密钥发送；每次执行都重新加密，因此重试必须重发返回的字节。
+- 读取时先认证历史作者再解密：被吊销作者的旧内容仍可打开并归属到原成员（账本快照之后同样如此），但这不授予当前写权限。Streams 快照和增量都要求历史账本准入、有效签名、可解 epoch 与 AEAD；读取不要求作者当前仍有效。
 
 ## 投递（分发器内部）
 

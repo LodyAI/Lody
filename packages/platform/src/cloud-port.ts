@@ -72,6 +72,10 @@ export interface CloudE2eePort {
     input: Omit<E2eeWorkspaceHistoryRequest, 'cliToken'> & { credential: string }
   ): Promise<E2eeWorkspaceHistoryPage>;
   getContentToken(input: Omit<E2eeContentTokenRequest, 'cliToken'>): Promise<E2eeContentToken>;
+  /** Untrusted current publication originals; the native host verifies ledger binding and HPKE. */
+  readEpochGroup?(
+    input: Omit<import('@lody/cloud-api').ReadEpochGroupRequest, 'cliToken'>
+  ): Promise<import('@lody/cloud-api').EpochStagedGroupDto | null>;
   mailboxCall<K extends keyof E2eeMailboxRequests>(
     method: K,
     input: Omit<E2eeMailboxRequests[K], 'cliToken'>

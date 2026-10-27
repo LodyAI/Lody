@@ -490,6 +490,32 @@ it('runs the paired machine port with only one encrypted workspace and a revocab
         args: [expect.objectContaining({ workspaceId, credential })],
       }),
     ]);
+    await port.e2ee!.readEpochGroup!({
+      workspaceId,
+      credential,
+      key: {
+        genesis: 'ab'.repeat(32),
+        epoch: 1,
+        publisher: 'cd'.repeat(32),
+        commitment: 'ef'.repeat(32),
+      },
+    });
+    expect(packets.at(-1)).toMatchObject({
+      path: 'e2eeEpochStaging:readGroup',
+      args: [expect.objectContaining({ workspaceId, credential })],
+    });
+    expect(() =>
+      port.e2ee!.readEpochGroup!({
+        workspaceId: 'other',
+        credential,
+        key: {
+          genesis: 'ab'.repeat(32),
+          epoch: 1,
+          publisher: 'cd'.repeat(32),
+          commitment: 'ef'.repeat(32),
+        },
+      })
+    ).toThrow('e2ee_binding_conflict');
     expect(JSON.stringify(packets)).not.toContain('cliToken');
     expect(() => port.e2ee!.getHistory({ workspaceId: 'other', credential })).toThrow(
       'e2ee_binding_conflict'

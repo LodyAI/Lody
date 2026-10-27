@@ -1,4 +1,5 @@
 import { E2eeRemoteMachinePairing } from '@/components/pages/e2ee-remote-machine-pairing';
+import { E2eeIdentityRecovery } from '@/components/pages/e2ee-identity-recovery';
 import { createFileRoute, useNavigate } from '@tanstack/react-router';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useSetAtom } from 'jotai';
@@ -20,6 +21,8 @@ import {
 } from '@/lib/e2ee-ledger-history';
 import {
   readE2eeGenesisPin,
+  readWorkspaceModeEvidence,
+  recoverE2eeWorkspaceIdentity,
   repairUnreadableE2eeCaches,
   resetObservedLedgerProgress,
   retainEncryptedWorkspaceMode,
@@ -66,11 +69,13 @@ function WorkspaceControlRoute() {
     history: VerifiedLedgerHistory | null;
     loading: boolean;
     failure: E2eeControlFailure | null;
+    custodyFailure?: string;
     offline?: boolean;
   }>({ scope, identity, descriptor: null, history: null, loading: true, failure: null });
   useEffect(() => {
     let disposed = false;
     let hostOpened = false;
+    let nativeFailure: E2eeControlFailure | null = null;
     const closeHost = () => {
       if (hostOpened && port?.runtime) {
         hostOpened = false;
@@ -96,6 +101,17 @@ function WorkspaceControlRoute() {
       try {
         if (port.runtime) {
           const runtime = port.runtime;
+          try {
+            readWorkspaceModeEvidence(localStorage, accountId, workspaceId);
+          } catch {
+            await recoverE2eeWorkspaceIdentity({
+              storage: localStorage,
+              accountId,
+              workspaceId,
+              runtime,
+              isCurrent: () => !disposed && scopeRef.current === scope,
+            });
+          }
           const pin = readE2eeGenesisPin(localStorage, accountId, workspaceId);
           let status;
           try {
@@ -114,6 +130,7 @@ function WorkspaceControlRoute() {
               )
             )
               throw error;
+            nativeFailure = classifyE2eeControlFailure(error);
           }
           if (status) {
             hostOpened = true;
@@ -201,7 +218,15 @@ function WorkspaceControlRoute() {
           workspaceId,
           history
         );
-        setState({ scope, identity, descriptor, history, loading: false, failure: null });
+        setState({
+          scope,
+          identity,
+          descriptor,
+          history,
+          loading: false,
+          failure: null,
+          custodyFailure: nativeFailure?.kind === 'local-identity' ? nativeFailure.code : undefined,
+        });
       } catch (error) {
         if (!disposed)
           setState((previous) =>
@@ -318,6 +343,15 @@ function WorkspaceControlRoute() {
         <p role="status" className="px-4 py-2 text-sm text-muted-foreground">
           {t('sessions.offline')}
         </p>
+      )}
+      {port?.runtime && (current?.custodyFailure || current?.failure) && (
+        <E2eeIdentityRecovery
+          key={scope}
+          workspaceId={workspaceId}
+          runtime={port.runtime}
+          error={current.custodyFailure ?? current.failure?.code ?? ''}
+          onReset={refresh}
+        />
       )}
       <E2eeWorkspaceControlPage
         workspaceId={workspaceId}

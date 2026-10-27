@@ -84,12 +84,27 @@ async function retryIdentityFileCloses(directory: string) {
   }
 }
 
+function storageFailure(cause: unknown) {
+  const primary = cause instanceof IdentityReadFailure ? cause.primary : cause
+  if (primary instanceof DesktopE2eeBootstrapError) return primary
+  const error = primary as { code?: string; errcode?: number } | null
+  const sqliteCode = typeof error?.errcode === 'number' ? error.errcode & 0xff : undefined
+  return fail(
+    sqliteCode === 11 ||
+      sqliteCode === 26 ||
+      error?.code === 'SQLITE_CORRUPT' ||
+      error?.code === 'SQLITE_NOTADB'
+      ? 'corrupt'
+      : 'storage'
+  )
+}
+
 function sql<A>(work: () => A) {
   return Effect.try({
     try: work,
     catch: (cause) => {
       rememberDesktopE2eeFailure('bootstrap-storage', cause)
-      return cause instanceof DesktopE2eeBootstrapError ? cause : fail('storage')
+      return storageFailure(cause)
     }
   })
 }
@@ -98,8 +113,7 @@ function io<A>(work: () => Promise<A>) {
     try: work,
     catch: (cause) => {
       rememberDesktopE2eeFailure('bootstrap-storage', cause)
-      const primary = cause instanceof IdentityReadFailure ? cause.primary : cause
-      return primary instanceof DesktopE2eeBootstrapError ? primary : fail('storage')
+      return storageFailure(cause)
     }
   })
 }

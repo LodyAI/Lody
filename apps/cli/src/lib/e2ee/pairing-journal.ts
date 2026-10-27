@@ -25,6 +25,8 @@ import type { NodeE2eeCustody } from '@lody/e2ee-core/adapters/node-custody';
 
 export class MachinePairingJournalError extends Data.TaggedError('MachinePairingJournalError')<{
   code:
+    | 'identity-lost'
+    | 'permissions'
     | 'busy'
     | 'conflict'
     | 'corrupt'
@@ -52,13 +54,27 @@ const sql = <A>(work: () => A) =>
   Effect.try({
     try: work,
     catch: (cause) =>
-      cause instanceof MachinePairingJournalError ? cause : failure('storage', cause),
+      cause instanceof MachinePairingJournalError
+        ? cause
+        : cause instanceof SyntaxError ||
+            cause instanceof z.ZodError ||
+            [11, 26].includes((cause as { errcode?: number })?.errcode ?? -1)
+          ? failure('corrupt', cause)
+          : failure('storage', cause),
   });
 const io = <A>(work: () => Promise<A>) =>
   Effect.tryPromise({
     try: work,
     catch: (cause) =>
-      cause instanceof MachinePairingJournalError ? cause : failure('storage', cause),
+      cause instanceof MachinePairingJournalError
+        ? cause
+        : (cause as NodeJS.ErrnoException)?.code === 'ENOENT'
+          ? failure('identity-lost', cause)
+          : ['EACCES', 'EPERM'].includes((cause as NodeJS.ErrnoException)?.code ?? '')
+            ? failure('permissions', cause)
+            : [11, 26].includes((cause as { errcode?: number })?.errcode ?? -1)
+              ? failure('corrupt', cause)
+              : failure('storage', cause),
   });
 type Row = {
   context: string;
@@ -77,8 +93,8 @@ async function openOwned(path: string) {
   const file = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
   try {
     const info = await file.stat();
-    if (!info.isFile() || (process.platform !== 'win32' && (info.mode & 0o077) !== 0))
-      throw failure('corrupt');
+    if (process.platform !== 'win32' && (info.mode & 0o077) !== 0) throw failure('permissions');
+    if (!info.isFile()) throw failure('corrupt');
   } finally {
     await file.close();
   }
@@ -173,6 +189,7 @@ export const openMachinePairingJournal = Effect.fnUntraced(function* (directory:
           Bytes.encryptionPublicKey(raw(material.encryptionPublicKey))
         ),
         kind: 'machine',
+        machineId: expected.machineId,
       })
     );
     if (
@@ -392,6 +409,7 @@ export const openMachinePairingJournal = Effect.fnUntraced(function* (directory:
           membershipId: Result.getOrThrow(Bytes.membershipId(raw(expected.membershipId))),
           encryptionPublicKey: device.enc,
           kind: 'machine',
+          machineId: expected.machineId,
           signer: device,
         });
         const binding = yield* signDeviceCredentialBinding({
@@ -504,6 +522,7 @@ export const openMachinePairingJournal = Effect.fnUntraced(function* (directory:
         if (
           !own ||
           own.kind !== 'machine' ||
+          own.machineId !== expected.machineId ||
           hex(own.membershipId.toBytes()) !== expected.membershipId ||
           hex(own.encryptionPublicKey.toBytes()) !== material.encryptionPublicKey ||
           !state.members.has(expected.membershipId)
@@ -524,6 +543,7 @@ export const openMachinePairingJournal = Effect.fnUntraced(function* (directory:
             body.type === 'ordinary' &&
             body.operation.type === 'admitDevice' &&
             body.operation.kind === 'machine' &&
+            body.operation.machineId === expected.machineId &&
             hex(body.operation.signingPublicKey.toBytes()) === material.signingPublicKey &&
             hex(body.operation.encryptionPublicKey.toBytes()) === material.encryptionPublicKey &&
             hex(body.operation.possessionSignature.toBytes()) === material.possessionSignature &&

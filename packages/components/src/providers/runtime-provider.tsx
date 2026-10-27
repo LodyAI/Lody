@@ -57,6 +57,8 @@ import { workspaceContentModeAtom } from '@/atoms/workspace-content-mode';
 import type { WorkspaceAdmissionDescriptor } from '@lody/cloud-api';
 import { isListedEncryptedWorkspace } from '@/components/e2ee/encrypted-workspace-mark';
 import {
+  E2eeLocalEvidenceCorruptError,
+  E2eeLocalEvidenceConflictError,
   hasEncryptedEvidenceForAnyAccount,
   hasPendingE2eeCreationForSlug,
   isWorkspaceModeStorageKey,
@@ -117,7 +119,9 @@ const resolveRuntimeEagerSyncSurface = (): EagerSyncSurface => {
 export function RuntimeProvider({ children }: { children: ReactNode }) {
   const platform = usePlatform();
   const { t } = useTranslation();
+  const [snapshotRecoveryWorkspace, setSnapshotRecoveryWorkspace] = useState<string | null>(null);
   const [keyUpdateWorkspace, setKeyUpdateWorkspace] = useState<string | null>(null);
+  const retryKeyUpdateRef = useRef<() => void>(() => {});
   // Use workspaceSlug for runtime initialization (available immediately from URL)
   // Use workspaceId for WebSocket connections (requires server response)
   const routeWorkspaceSlug = useAtomValue(currentWorkspaceSlugAtom);
@@ -344,6 +348,9 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
   // (new encrypted evidence, unreadable evidence, retry) change effect keys.
   const savedModeRef = useRef(savedMode);
   savedModeRef.current = savedMode;
+  // Recovery lookup only; native independently verifies this cached/listed ID.
+  const recoveryWorkspaceIdRef = useRef(workspaceId ?? cachedId);
+  recoveryWorkspaceIdRef.current = workspaceId ?? cachedId;
   const knownEncryptedRef = useRef(knownEncrypted);
   knownEncryptedRef.current = knownEncrypted;
   const savedModeErrorType = savedMode.error ? describeErrorType(savedMode.error) : null;
@@ -448,7 +455,15 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
     const modeAdmissionFailure = (error: unknown) => ({
       workspaceSlug: workspaceSlug!,
       errorType: describeErrorType(error),
-      modeAdmission: { knownEncrypted: knownEncryptedRef.current },
+      modeAdmission: {
+        knownEncrypted: knownEncryptedRef.current ||
+          (error instanceof E2eeLocalEvidenceCorruptError &&
+            ['Invalid genesis pin', 'Invalid encrypted evidence'].includes(error.message)) ||
+          (error instanceof E2eeLocalEvidenceConflictError &&
+            error.message === 'Workspace mode conflicts with encrypted evidence'),
+        ...((effectiveWorkspaceId ?? recoveryWorkspaceIdRef.current)
+          ? { workspaceId: (effectiveWorkspaceId ?? recoveryWorkspaceIdRef.current)! } : {}),
+      },
     });
     // A restart of the same account/workspace (local-agent toggle, retry) keeps
     // the last verified mode so the workspace tree does not unmount and flash.
@@ -531,6 +546,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
     }
 
     setKeyUpdateWorkspace(null);
+    setSnapshotRecoveryWorkspace(null);
     let disposed = false;
     // Set when background verification closes a provisionally opened runtime.
     let retired = false;
@@ -540,36 +556,58 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
     let nativeLease: string | null = null;
     let nativeHasKey = false;
     let nativeRefresh: Promise<void> | null = null;
+    let nativeRefreshAgain = false;
     const refreshNative = (): void => {
-      if (disposed || nativeRefresh || !nativeLease) return;
+      if (disposed || !nativeLease) return;
+      if (nativeRefresh) {
+        nativeRefreshAgain = true;
+        return;
+      }
       const native = platform.e2eeWorkspaces?.runtime;
       if (!native) return;
       const leased = nativeLease;
-      const acceptStatus = (status: Awaited<ReturnType<typeof native.status>>) => {
+      const acceptStatus = async (status: Awaited<ReturnType<typeof native.status>>) => {
         if (disposed || retired) return;
         encryptedAccess?.updateStatus(status);
-        if (!nativeHasKey && status.hasCurrentKey) retryAdmission((value) => value + 1);
-      };
-      const pending = native.refresh(leased).then(acceptStatus, async () => {
-        // A key round may fail after the verified ledger advanced. Its local
-        // rotation signal must still stop sends; offline work retains the repo.
-        if (disposed || retired) return;
-        try {
-          acceptStatus(await native.status(leased));
-        } catch {
-          /* Retry on the next normal refresh. */
+        if (encryptedAccess && workspaceRuntime && encryptedAccess.needsUpdate()) {
+          await encryptedAccess.transition({
+            install: () => native.refresh(leased),
+          });
+          if (disposed || retired) return;
+          if (encryptedAccess.phase() === 'ready') setKeyUpdateWorkspace(null);
         }
-      });
+        if (!nativeHasKey && workspaceRuntime === null && status.hasCurrentKey)
+          retryAdmission((value) => value + 1);
+      };
+      const pending = native
+        .refresh(leased, { installKeys: !nativeHasKey && workspaceRuntime === null })
+        .then(acceptStatus)
+        .catch(async () => {
+          if (disposed || retired) return;
+          // Reception failure stays visible and retryable. The retained epoch
+          // remains writable; a status read never confirms key installation.
+          try {
+            encryptedAccess?.updateStatus(await native.status(leased));
+          } catch {
+            /* The next explicit/reconnect refresh can retry. */
+          }
+        });
       nativeRefresh = pending;
       void pending.finally(() => {
         if (nativeRefresh === pending) nativeRefresh = null;
+        if (nativeRefreshAgain && !disposed) {
+          nativeRefreshAgain = false;
+          refreshNative();
+        }
       });
     };
+    retryKeyUpdateRef.current = refreshNative;
     window.addEventListener('online', refreshNative);
     let encryptedAccess: ReturnType<typeof createDesktopE2eeContent> | null = null;
     const disposeRuntime = () =>
       (disposal ??= (async () => {
         try {
+          await encryptedAccess?.close();
           if (workspaceRuntime) await workspaceRuntime.dispose();
         } finally {
           if (nativeLease) {
@@ -707,23 +745,27 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
             refreshNative();
             if (status.genesisHash !== descriptor.genesisHash)
               throw new WorkspaceModeMismatchError();
-            if (!status.hasCurrentKey) {
+            if (!status.hasCurrentKey && status.writeEpoch == null) {
               setRuntime(null);
               setRuntimeInitializing(false);
               clearDocMetaCache();
               clearPresenceStates();
               return;
             }
-            if (status.rotationRequired) setKeyUpdateWorkspace(effectiveWorkspaceId);
             encryptedAccess = createDesktopE2eeContent({
               runtime: native,
               workspaceId: effectiveWorkspaceId,
               genesisHash: descriptor.genesisHash,
-              epoch: status.epoch,
+              epoch: status.writeEpoch ?? status.epoch,
               rotationRequired: status.rotationRequired,
               onKeyUpdateRequired: () => setKeyUpdateWorkspace(effectiveWorkspaceId),
+              onSnapshotRecoveryChange: (pending) => {
+                if (!disposed && !retired)
+                  setSnapshotRecoveryWorkspace(pending ? effectiveWorkspaceId : null);
+              },
               authToken: () => tokenRef.current,
             });
+            encryptedAccess.updateStatus(status);
           }
         } else if (modeCloud && storedDescriptor) {
           admitting = true;
@@ -805,6 +847,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
             setPresenceSyncState(state);
           },
         });
+        if (encryptedAccess) refreshNative();
         if (disposed || retired) {
           // The owner's cleanup or the retirement chain disposes it once.
           return;
@@ -931,8 +974,18 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
   return (
     <>
       {keyUpdateWorkspace === runtime?.workspaceId && (
-        <div role="status">{t('e2ee.content.keyUpdateRequired')}</div>
+        <div role="status">
+          {t('e2ee.content.keyUpdateRequired')}{' '}
+          <button type="button" onClick={() => retryKeyUpdateRef.current()}>
+            {t('e2ee.content.retryKeyUpdate')}
+          </button>
+        </div>
       )}
+      {snapshotRecoveryWorkspace !== null &&
+        (snapshotRecoveryWorkspace === runtime?.workspaceId ||
+          snapshotRecoveryWorkspace === workspaceId) && (
+          <div role="status">{t('e2ee.content.snapshotRecoveryPending')}</div>
+        )}
       {children}
       <SessionPendingSendsHost runtime={runtime} />
     </>

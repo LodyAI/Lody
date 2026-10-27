@@ -9,19 +9,17 @@ before touching gestures.
 
 ## Swipe-back and drawer layering
 
-- Full-screen Vaul right drawers (see README) must gate Vaul's drag to a
-  left-edge zone through `VaulDrawerBody`, which marks content no-drag and
-  mounts the only drag-start zone. Drill pages instead mount
-  `MobileEdgeBackSwipeZone` in a body-only `position: relative` region.
-- Neither zone may overlap a header back button: pass `topInset` = chrome above
-  the body (drawer header inset; `SESSION_DRAWER_BODY_TOP_INSET` for the
-  session). Zones are native-only; web mounts none, content still no-drag.
-- Browser must be a NESTED Vaul drawer, never a sibling
-  `createPortal(document.body)` panel; its managed preview iframes survive
-  remount through `managed-preview-frame-cache.ts`. While the session drawer
-  closes, sticky-mount SessionDetail for the exit animation but clear nested
-  `urlPr` / `urlBrowser`, and close by replacing to the remembered `/chat` base
-  — never `history.back()`.
+- Full-screen Vaul right drawers gate drag to a left-edge zone through
+  `VaulDrawerBody` (content no-drag; the only drag-start zone). Drill pages
+  mount `MobileEdgeBackSwipeZone` in a body-only `position: relative` region.
+- Zones must not overlap a header back button: pass `topInset` = chrome above
+  the body (`SESSION_DRAWER_BODY_TOP_INSET` for the session). Native-only; web
+  mounts none, content still no-drag.
+- Browser is a NESTED Vaul drawer, never a sibling body portal; preview
+  iframes survive remount via `managed-preview-frame-cache.ts`. Closing the
+  session sticky-mounts SessionDetail for the exit animation but clears nested
+  `urlPr`/`urlBrowser` and replaces to the remembered `/chat` base — never
+  `history.back()`.
 - `MobileProjectFileBrowser`'s in-folder zone (z-60) pops one directory level;
   only the root swipe reaches Vaul's z-30 strip. Keep those apart if either
   moves. Interactive overlays inside a drawer use the nearest
@@ -78,16 +76,14 @@ before touching gestures.
   outranking the spinner; the header tab badge stays two-state; `Files` leads
   the Viewers card unconditionally. The menu sheet stays flat, and its Owner row
   (multi-member only, writes `SessionMeta.userId`) is a DISCLOSURE, not a list.
-- The file viewer drawer header shows only the file-type icon and basename; its
-  `…` sheet exposes the complete wrapping path plus tap-to-copy and explicit
-  path/content copy (content copy Markdown-only). Keep viewer contents mounted
-  across drawer closes. Both Markdown modes keep native long-press selection;
-  source mode must not expose Monaco's context menu.
-- The frosted session header is an absolute overlay: session-detail sets
-  `--conversation-top-inset` on the mobile root, the ai-gui `VList` adds it to
-  paddingTop, and viewer-tab wrappers pad by it. Header buttons are
-  `GlassIconButton` — canvas drawn, no CSS filters or SVG, press interaction
-  pure CSS state.
+- The file viewer header shows only the file-type icon and basename; `…`
+  exposes the full path + tap-to-copy and path/content copy (content copy
+  Markdown-only). Keep contents mounted across closes. Both Markdown modes keep
+  native long-press selection; source mode must not expose Monaco's menu.
+- The frosted header is an absolute overlay: session-detail sets
+  `--conversation-top-inset`, the ai-gui `VList` adds it to paddingTop, and
+  viewer tabs pad by it. Header buttons are `GlassIconButton` (canvas, no CSS
+  filters/SVG; CSS-only press).
 
 ## Run config, pickers, and sheets
 
@@ -102,8 +98,13 @@ before touching gestures.
   `None` (EMPTY glyph, unlike the trigger) reports `null`, clearing only the
   NAME. Mobile has no Role detail pane or editing.
 - New-chat scopes agents via `allowedMachineIds` from the selected machine and
-  leaves agent unlocked; in-session locks agent once the conversation has turns.
-  `mobile-fast-plan-toggles.tsx` is not mounted on new-chat.
+  leaves agent unlocked; in-session locks it after turns. No fast/plan toggles
+  on new-chat.
+- New chat is a blank compose page: the header target opens the project sheet —
+  machine + one search over local folders and GitHub repos. Branch/worktree and
+  the machine chip live in the footer rail; no form rows; attachment/send stay
+  outside it.
+  [Why](../../../../../.agents/notes/implemented/feature/2026-10-27-mobile-new-chat-compose-sheet.md).
 - `mobile-inline-picker.tsx` stays keyboard-operable (↑/↓/Enter/Esc, desktop
   search autofocus on `pointer: fine`) and virtualizes lists >40 options. Its
   search filters fuzzily through `lib/fuzzy-option-filter.ts`, shared with the

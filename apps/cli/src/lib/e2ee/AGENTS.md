@@ -20,6 +20,7 @@
 - Resume first Windows ACL setup only in an empty custody directory; otherwise validate only.
 - `runtime.ts` composes Feed/VerifiedLedger, installed keys and optional receiver.
   Open/status are offline; cloud requests stay in cloud-cli-port.
+  Report damaged history/pins distinctly; never reset trusted pins from remote hints.
 - Journal originals before feed/pin advancement. Rebase after 64 more records, core pin
   first. Retired cache cleanup cannot fail local open.
 - No plaintext RPC, presence, attachments or scheduled automation on encrypted workspaces
@@ -35,15 +36,18 @@
   evidence. No floor reset, deadline extension or new time source/recovery generation.
   See [integration proposal](../../../../../.agents/notes/proposed/architecture/2026-10-26-e2ee-realtime-journal.md).
 - `prepareCliE2eeMachineLegacy` binds the retained credential hash to the exact
-  desktop-generated 16-byte pairing session using core's fixed v1 helper.
-  Local preparation/activation uses the OS-user control socket. Explicit remote pairing
-  uses the signed, expiring offer and scoped machine service port; Fleet checks its
-  account and encrypted workspace/genesis before activation.
+  desktop-generated 16-byte pairing session using core's fixed v1 helper. Machine
+  possession additionally binds the strict UTF-8 machineId; activation compares it
+  with both the verified current device and the retained signed admission. Session
+  IDs stay outside possession and ledger records; old developer formats need recreation.
+  Local preparation/activation uses the OS-user socket; remote pairing uses the
+  signed offer and scoped service port. Fleet checks account/workspace/genesis first.
   Activation refreshes the verified ledger and mailbox and acknowledges only an
   installed current key; temporary failure leaves the same pairing retryable.
 
-- Pin M2 write epoch; epoch change/rotation-required latches sends off, retaining local
-  state. M3 owns resumption.
+- Staging read denial/I/O failure cannot block independently verified mailbox reception.
+- Retain old-epoch sends; select confirmed keys per operation. Rotation hints never pause.
+  [M3 selection](../../../../../.agents/notes/proposed/architecture/2026-10-27-e2ee-epoch-receive-barrier.md).
 - Prepared bindings cannot start content replicas. Activate only the native ledger/key
   receiver: verify current installed key, close temporary owner, THEN write `activation.json`
   before Fleet attaches rooms. The marker grants no authority; match genesis/device.
@@ -64,9 +68,10 @@
 - Only activation/binding/device-original ENOENT means pairing wait. Check the
   original before custody init; stale hints cannot trigger keyring probes. Preserve
   other file errors/Fleet retry; never cache transient storage as missing pairing.
-- Ingest storage failure fences writes until verified refresh. Next seal coalesces one
-  storage-error refresh without reconnecting healthy readers. Validation/conflict needs
-  explicit normal refresh; seal cannot auto-recover it.
+- Ingest failure fences new seals until verified refresh; keep the last verified view
+  and healthy readers. Retry at most three times per failure episode; explicit refresh
+  restarts that budget. Seal may request retry but never await it in the SDK save queue.
+  Never skip rejected records or reset pins. Close cancels pending retry timers.
 
 ## Local machine pairing
 
@@ -82,11 +87,8 @@
   signing-key-scoped credentials. Ledger-only owners cannot receive keys. Same-identity
   retries keep healthy owners; only identical intents share flights. Cancellation never
   guesses remote settlement. See [recovery rationale](../../../../../.agents/notes/implemented/bug-fix/2026-10-27-e2ee-local-pairing-recovery.md).
-- Local pairing remains OS-user socket only; partial upgrades fail closed. Remote pairing
-  uses separate consent/session state and a device-bound service credential, never an
-  account API key. Persist routing metadata signed by the original device key; reject
-  tampering before releasing credentials. See the [pairing note](../../../../../.agents/notes/proposed/architecture/2026-10-26-e2ee-machine-pairing-journal.md)
-  and [remote flow](../../../../../.agents/notes/proposed/feature/2026-10-27-e2ee-remote-machine-pairing.md).
+- Remote commands use workspace custody and scoped grants; see the
+  [remote contract](../../../../../.agents/notes/proposed/feature/2026-10-27-e2ee-remote-machine-pairing.md).
 
 ## Catalog and Fleet containment
 
@@ -94,7 +96,9 @@
   `workspace-catalog.json.e2ee`, ordinary rows only in v1 `workspaces`; lock both writes.
   Ordinary-only mutations never rewrite encrypted rows. Old v1 writers cannot erase
   the sidecar or account/machine-bound `.e2ee-invalid` marker.
-- Never overwrite unreadable sidecars; retain errors in memory and usable ordinary rows.
+- Offline/ordinary writes never replace unreadable sidecars. Only authenticated online-list
+  reconciliation may archive a corrupt `.e2ee` file before rebuilding; permission and marker
+  errors stay errors. Retain originals, failure receipts and usable ordinary rows.
   Persist ordinary remote-list results; return degraded receipts with current auth/revocation
   checks. Atomically publish `.e2ee-invalid` BEFORE encrypted updates; retain through failed
   writes/cleanup until healthy publication. Derive unavailable from the marker, never unknown
@@ -106,3 +110,6 @@
 - Never cache an unimplemented content mode; `export` refuses and `sync` skips schedules
   for encrypted workspaces
   ([note](../../../../../.agents/notes/implemented/bug-fix/2026-10-27-e2ee-cli-review-fixes.md)).
+
+- Reset: same-user socket; drain, exclusive sibling lease, archive whole dir;
+  fresh approval/KEK. OS/unknown stays OS.

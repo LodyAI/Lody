@@ -1,3 +1,4 @@
+import { requireWorkspaceFeature, WorkspaceFeatureUnavailableError } from '@/lib/workspace-feature';
 import {
   requirePlaintextWorkspaceStreamsContent,
   type WorkspaceStreamsContent,
@@ -1753,7 +1754,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     provider: LoroStreamsTokenProviderLegacy,
     streamsBaseUrl: string
   ): LoroStreamsJsonStreamClient => {
-    if (protectedContent) throw new Error('e2ee_rpc_unavailable');
+    requireWorkspaceFeature({ mode: protectedContent ? 'protected' : 'plaintext' }, 'rpc');
     if (!jsonStreamClient) {
       jsonStreamClient = createLoroStreamsJsonStreamClient({
         bucketId: LORO_STREAMS_BUCKET_ID,
@@ -1820,7 +1821,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
   const getMachineRpcClient = async (
     machineId: MachineId
   ): Promise<LoroStreamsMachineRpcClient> => {
-    if (protectedContent) throw new Error('e2ee_rpc_unavailable');
+    requireWorkspaceFeature({ mode: protectedContent ? 'protected' : 'plaintext' }, 'rpc');
     const streamClient = await waitForMachineRpcTransportReady();
     const responseDispatcher = getMachineRpcResponseDispatcher(streamClient);
 
@@ -4741,7 +4742,10 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
   const createPreviewVisualCommentStore = async (
     sessionId: SessionId
   ): Promise<PreviewVisualCommentDocStore> => {
-    if (protectedContent) throw new Error('e2ee_feature_unavailable');
+    requireWorkspaceFeature(
+      { mode: protectedContent ? 'protected' : 'plaintext' },
+      'preview-comments'
+    );
     const roomId = getPreviewCommentRoomId(sessionId);
     const persistedDoc = await repo.openPersistedDoc(roomId);
 
@@ -4835,7 +4839,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     releaseDelayMs: STORE_RELEASE_DELAY_MS,
     unload: (id) => repo.unloadDoc(getScheduleRoomId(id)),
     create: async (id) => {
-      if (protectedContent) throw new Error('e2ee_feature_unavailable');
+      requireWorkspaceFeature({ mode: protectedContent ? 'protected' : 'plaintext' }, 'schedules');
       const roomId = getScheduleRoomId(id);
       const handle = await repo.openPersistedDoc(roomId);
       const mirror = new Mirror({
@@ -5386,7 +5390,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
   const codeCollabFileIndexCache = protectedContent
     ? {
         acquire: async () => {
-          throw new Error('e2ee_feature_unavailable');
+          throw new WorkspaceFeatureUnavailableError('code-collab-index');
         },
         dispose: async () => {},
       }

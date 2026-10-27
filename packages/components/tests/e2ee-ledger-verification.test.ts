@@ -24,16 +24,16 @@ import {
 const vector = JSON.parse(
   readFileSync(join(import.meta.dirname, '../../e2ee-core/test/ledger-v1-vector.json'), 'utf8')
 ) as { anchor: string; records: { hex: string }[] };
-const head = 'e7fe1ef3dfaa4e1001fd1a4df3a1af79f6c5d6cbc72b11502372b6030b813668';
+const head = '2d479a23a222cdb7c843845aa83ee36c9a6a773638db6db7bb0b57ac182628a3';
 const history = appendLedgerHistory(
   null,
   {
     workspaceId: 'w',
     genesisHash: vector.anchor,
-    checkpoint: { headHash: head, length: 9 },
+    checkpoint: { headHash: head, length: 11 },
     startIndex: 0,
     nextCursor: null,
-    recordsHex: vector.records.slice(0, 9).map((record) => record.hex),
+    recordsHex: vector.records.slice(0, 11).map((record) => record.hex),
   },
   { workspaceId: 'w', genesisHash: vector.anchor, localPin: vector.anchor }
 );
@@ -42,13 +42,13 @@ const code = ledgerVerificationCode(history);
 
 describe('ledger verification code', () => {
   it('is the core comparison digest at the verified head and round-trips through its QR', () => {
-    expect(code.version).toBe(9);
+    expect(code.version).toBe(11);
     expect(code.headHash).toBe(head);
     expect(code.stateDigest).toMatch(/^[0-9a-f]{64}$/);
     expect(code.stateDigest).not.toBe(head);
-    expect(code.payload).toBe(`lody-ledger:1:9:${head}:${code.stateDigest}`);
+    expect(code.payload).toBe(`lody-ledger:1:11:${head}:${code.stateDigest}`);
     expect(parseVerificationCode(code.payload)).toEqual({
-      version: 9,
+      version: 11,
       headHash: head,
       stateDigest: code.stateDigest,
     });
@@ -61,8 +61,8 @@ describe('ledger verification code', () => {
       version: 1234,
       stateDigest: code.stateDigest,
     });
-    expect(parseVerificationCode(`Ledger code (version 9)\n${grouped}`)).toEqual({
-      version: 9,
+    expect(parseVerificationCode(`Ledger code (version 11)\n${grouped}`)).toEqual({
+      version: 11,
       stateDigest: code.stateDigest,
     });
     expect(parseVerificationCode('e7fe 1ef3')).toBeNull();
@@ -71,14 +71,20 @@ describe('ledger verification code', () => {
   it('matches only the same digest at the same version', () => {
     expect(compareVerificationCode(history, { stateDigest: code.stateDigest })).toEqual({
       kind: 'match',
-      version: 9,
+      version: 11,
     });
-    expect(compareVerificationCode(history, { version: 9, stateDigest: 'ab'.repeat(32) })).toEqual({
-      kind: 'mismatch',
-    });
+    expect(compareVerificationCode(history, { version: 11, stateDigest: 'ab'.repeat(32) })).toEqual(
+      {
+        kind: 'mismatch',
+      }
+    );
     // The right head with a different state is still a mismatch.
     expect(
-      compareVerificationCode(history, { version: 9, headHash: head, stateDigest: 'ab'.repeat(32) })
+      compareVerificationCode(history, {
+        version: 11,
+        headHash: head,
+        stateDigest: 'ab'.repeat(32),
+      })
     ).toEqual({ kind: 'mismatch' });
     expect(compareVerificationCode(history, { stateDigest: 'ab'.repeat(32) })).toEqual({
       kind: 'unknown',

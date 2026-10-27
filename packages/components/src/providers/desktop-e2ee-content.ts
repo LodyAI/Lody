@@ -4,6 +4,8 @@ import { createLoroStreamsTokenProviderLegacy, LoroStreamsTokenRequestSchema } f
 import {
   encryptedWorkspaceNamespace,
   encryptedWorkspaceResolver,
+  createWorkspaceEpochTransitionLegacy,
+  type WorkspaceEpochPhase,
   type WorkspaceStreamsContent,
 } from '@lody/shared/workspace-streams-content';
 
@@ -16,50 +18,102 @@ export function createDesktopE2eeContent(input: {
   authToken: () => string | null | undefined;
   rotationRequired?: boolean;
   onKeyUpdateRequired?: () => void;
+  onSnapshotRecoveryChange?: (pending: boolean) => void;
+  onPhase?: (phase: WorkspaceEpochPhase) => void;
 }) {
   if (!/^[0-9a-f]{64}$/.test(input.genesisHash)) throw new Error('e2ee_invalid_genesis');
   let bucketId: string | null = null;
-  let keyUpdateRequired = input.rotationRequired === true;
-  const updateStatus = (status: { epoch: number; rotationRequired: boolean }) => {
-    if (keyUpdateRequired || (status.epoch === input.epoch && !status.rotationRequired)) return;
-    keyUpdateRequired = true;
-    input.onKeyUpdateRequired?.();
+  const recovering = new Set<string>();
+  const requested = new Map<string, number>();
+  const recovery = (stream: string, pending: boolean) => {
+    if (pending) recovering.add(stream);
+    else recovering.delete(stream);
+    try {
+      input.onSnapshotRecoveryChange?.(recovering.size > 0);
+    } catch {
+      /* Observational only. */
+    }
+  };
+  const snapshotRecovery = (stream: string, pending: boolean) => {
+    recovery(stream, pending);
+    if (!pending) return;
+    const now = Date.now();
+    if (now - (requested.get(stream) ?? -Infinity) < 30_000) return;
+    requested.set(stream, now);
+    // The existing host action relays fixed hints for read-only devices too.
+    void input.runtime.contentStreamsToken(input.workspaceId, undefined, stream).catch(() => {
+      console.warn('[e2ee] snapshot repair request failed; will retry');
+    });
+  };
+  const tokens = new Set<ReturnType<typeof createLoroStreamsTokenProviderLegacy>>();
+  const transition = createWorkspaceEpochTransitionLegacy({
+    epoch: input.epoch,
+    rotationRequired: input.rotationRequired,
+    onPhase: (phase) => {
+      if (phase === 'ready') for (const token of tokens) token.invalidate();
+      input.onPhase?.(phase);
+      if (phase !== 'ready' && phase !== 'closed') input.onKeyUpdateRequired?.();
+    },
+  });
+  const updateStatus = (status: {
+    epoch: number;
+    rotationRequired: boolean;
+    hasCurrentKey?: boolean;
+  }) => {
+    transition.observe({ ...status, hasCurrentKey: status.hasCurrentKey ?? false });
+    if (transition.needsUpdate()) input.onKeyUpdateRequired?.();
   };
   const content: WorkspaceStreamsContent = {
     mode: 'protected',
     namespace: encryptedWorkspaceNamespace(input.genesisHash),
-    snapshotUpload: { canUpload: async () => false },
-    resolve: encryptedWorkspaceResolver(
-      input.workspaceId,
-      (room) =>
-        ({
-          maxSealOverheadBytes: 4096,
-          seal: (request) => {
-            if (keyUpdateRequired) return Promise.reject(new Error('e2ee_key_update_required'));
-            const header = new Uint8Array([request.context.kind === 'snapshot' ? 4 : 3]);
-            const additionalData = request.additionalData(header);
-            return input.runtime.seal(input.workspaceId, {
-              epoch: input.epoch,
-              room,
-              context: request.context,
-              plaintext: request.plaintext,
-              additionalData,
-            });
-          },
-          open: (request) => input.runtime.openContent(input.workspaceId, { room, ...request }),
-        }) satisfies PayloadProtectionProvider
+    snapshotUpload: {
+      // SDK rejection also covers absent/malformed envelopes before provider.open.
+      onSnapshotRecovery: (streamUrl, pending) =>
+        snapshotRecovery(
+          decodeURIComponent(new URL(streamUrl).pathname.split('/').at(-1)!),
+          pending
+        ),
+      // SDK schedules only after local writes, suppresses a competing writer,
+      // and checks the remote snapshot before exporting a new one.
+      canUpload: () => transition.phase() !== 'closed',
+      debounceMs: 30_000,
+      minBytesSinceRemoteSnapshot: 1024 * 1024,
+    },
+    resolve: encryptedWorkspaceResolver(input.workspaceId, (room) =>
+      transition.provider(
+        (epoch) =>
+          ({
+            maxSealOverheadBytes: 4096,
+            seal: (request) => {
+              const header = new Uint8Array([request.context.kind === 'snapshot' ? 4 : 3]);
+              const additionalData = request.additionalData(header);
+              return input.runtime.seal(input.workspaceId, {
+                epoch,
+                room,
+                context: request.context,
+                plaintext: request.plaintext,
+                additionalData,
+              });
+            },
+            open: (request) => input.runtime.openContent(input.workspaceId, { room, ...request }),
+          }) satisfies PayloadProtectionProvider
+      )
     ),
   };
   return {
     content,
     updateStatus,
+    transition: transition.transition,
+    phase: transition.phase,
+    needsUpdate: transition.needsUpdate,
+    close: transition.close,
     e2ee: {
       bucketId: () => bucketId,
-      createTokenProvider: (signal: AbortSignal) =>
-        createLoroStreamsTokenProviderLegacy({
+      createTokenProvider: (signal: AbortSignal) => {
+        const token = createLoroStreamsTokenProviderLegacy({
           // All requests terminate in the native capability below. This URL is
           // just the existing token kernel's local route identity.
-          endpoint: 'https://e2ee.invalid/content-token',
+          endpoint: `https://e2ee.invalid/content-token/${transition.epoch()}`,
           workspaceId: input.workspaceId,
           authToken: input.authToken,
           fetchImpl: async (_url, init) => {
@@ -88,7 +142,16 @@ export function createDesktopE2eeContent(input: {
               headers: { 'content-type': 'application/json' },
             });
           },
-        }),
+        });
+        tokens.add(token);
+        return {
+          ...token,
+          close: async () => {
+            await token.close();
+            tokens.delete(token);
+          },
+        };
+      },
     },
   };
 }

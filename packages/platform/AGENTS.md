@@ -71,3 +71,6 @@ telemetry, or managed-runtime downloads, as routed by the root instructions.
   It has no ordinary Streams/account capabilities or account catalog bootstrap.
   Fleet admits only that encrypted workspace and pinned genesis; device-auth discovery
   and the encrypted runtime own access and protected Streams tokens respectively.
+- Optional `runtime.readIdentity` returns only workspace ID/genesis from the expected
+  account's retained verified ledger, releasing its temporary read before replying.
+  Missing capability fails closed; never fall back to unleased `status`.

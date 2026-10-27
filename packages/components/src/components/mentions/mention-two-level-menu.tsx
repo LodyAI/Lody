@@ -1112,6 +1112,7 @@ export function MentionTwoLevelMenu({
   menuSide = 'bottom',
   anchor = 'caret',
   mobileDocked = true,
+  mobilePanelPlacement = 'above-composer',
 }: {
   categories: MentionCategory[];
   surface?: MentionSurface;
@@ -1124,6 +1125,8 @@ export function MentionTwoLevelMenu({
    *  for an editor mid-conversation where "dock above the composer" has no
    *  bottom-anchored composer to sit over. */
   mobileDocked?: boolean;
+  /** Full-height composers dock the mobile panel above their footer. */
+  mobilePanelPlacement?: 'above-composer' | 'bottom';
 }) {
   const context = useMentionContext('MentionTwoLevelMenu');
   const isMobileViewport = useIsMentionMobile();
@@ -1247,6 +1250,7 @@ export function MentionTwoLevelMenu({
       dockedOnMobile={mobileDocked}
       fitViewport={anchor === 'caret'}
       style={anchor === 'caret' ? { overflowY: 'auto', overscrollBehavior: 'contain' } : undefined}
+      mobilePanelPlacement={mobilePanelPlacement}
       className={stylex.props(width.menu, detail && width.menuWithDetail).className}
     >
       <MentionTwoLevelMenuBody

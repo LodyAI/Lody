@@ -15,6 +15,19 @@ and durable state/cursor retention. This [P10 preparation](../notes/implemented/
 does not supply historical-author authorization, a production signer, host snapshot
 admission or client recovery from an unusable remote snapshot.
 
+## Unavailable encrypted-workspace features
+
+`workspaceSupports` owns capability verdicts. UI reads the existing admission-mode
+atom through `useWorkspaceFeature` and gets localized reasons from
+`useWorkspaceFeatureReason`; operations still check their explicit content/runtime.
+Unsupported composer and conversation actions, remote-machine controls and schedule
+deep links explain the restriction before users begin editing or transfer. Presence
+uses a neutral status-slot message; Code Collab reports unavailable rather than
+waiting for an intentionally disabled index. Confirmed local desktop file preview
+and prepared local file receipts keep their IPC paths. Refused attachment admission
+preserves the draft; local failure cannot enable an unprotected upload. See the
+[availability decision](../notes/implemented/bug-fix/2026-10-27-e2ee-feature-availability.md).
+
 ## Startup frame and handoff
 
 The [startup intent](../../specs/app-startup-landing.md) keeps destination selection
@@ -317,7 +330,6 @@ The parser also normalizes `scheduled_reset` independently of `active_watch`. Bo
 points and the dialog prioritize an announced schedule over the forecast probability.
 The local scheduled time is optional; crossing it shows pending execution confirmation.
 See the [API compatibility decision](../notes/implemented/bug-fix/2026-10-02-codex-scheduled-reset.md).
-
 
 ## Direct folder project creation
 
